@@ -244,12 +244,13 @@ LEAN_EXPORT lean_obj_res lean_gzip_decompress(b_lean_obj_arg data, lean_obj_arg 
         if (strm.avail_in == 0) break;
 
         /* More input remains: this is a concatenated gzip stream.
-         * Reset inflate to process the next member. */
-        ret = inflateReset2(&strm, MAX_WBITS + 32);
+         * Reset inflate to process the next member (preserves window bits
+         * from the original inflateInit2). */
+        ret = inflateReset(&strm);
         if (ret != Z_OK) {
             free(buf);
             inflateEnd(&strm);
-            return mk_zlib_error("gzip decompress: inflateReset2", ret, strm.msg);
+            return mk_zlib_error("gzip decompress: inflateReset", ret, strm.msg);
         }
     }
 
