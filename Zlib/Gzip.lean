@@ -20,13 +20,12 @@ instance : Nonempty DeflateState := DeflateState.nonemptyType.property
 @[extern "lean_gzip_deflate_new"]
 opaque DeflateState.new (level : UInt8 := 6) : IO DeflateState
 
-/-- Push a chunk of data through the compressor. Returns compressed output.
-    `flush`: 0 = accumulate (default), 4 = finish stream. -/
+/-- Push a chunk of uncompressed data through the compressor. Returns compressed output. -/
 @[extern "lean_gzip_deflate_push"]
-opaque DeflateState.push (state : @& DeflateState) (chunk : @& ByteArray)
-    (flush : UInt8 := 0) : IO ByteArray
+opaque DeflateState.push (state : @& DeflateState) (chunk : @& ByteArray) : IO ByteArray
 
-/-- Finish the compression stream. Returns any remaining compressed data. -/
+/-- Finish the compression stream. Returns any remaining compressed data
+    (gzip trailer, etc.). Must be called exactly once after all data has been pushed. -/
 @[extern "lean_gzip_deflate_finish"]
 opaque DeflateState.finish (state : @& DeflateState) : IO ByteArray
 

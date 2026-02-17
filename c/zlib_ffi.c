@@ -265,18 +265,21 @@ LEAN_EXPORT lean_obj_res lean_gzip_decompress(b_lean_obj_arg data, lean_obj_arg 
  * Streaming compression/decompression via external objects
  * ======================================================================== */
 
+#include <pthread.h>
+
 typedef struct {
     z_stream strm;
-    int      finished;  /* 1 after deflate returned Z_STREAM_END */
+    int      finished;  /* 1 after deflateEnd/inflateEnd has been called */
 } deflate_state;
 
 typedef struct {
     z_stream strm;
-    int      finished;  /* 1 after inflate completed with no remaining input */
+    int      finished;
 } inflate_state;
 
 static lean_external_class *g_deflate_class = NULL;
 static lean_external_class *g_inflate_class = NULL;
+static pthread_once_t g_classes_once = PTHREAD_ONCE_INIT;
 
 static void noop_foreach(void *p, b_lean_obj_arg f) { (void)p; (void)f; }
 
@@ -292,11 +295,13 @@ static void inflate_finalizer(void *p) {
     free(s);
 }
 
+static void register_classes(void) {
+    g_deflate_class = lean_register_external_class(deflate_finalizer, noop_foreach);
+    g_inflate_class = lean_register_external_class(inflate_finalizer, noop_foreach);
+}
+
 static void ensure_classes(void) {
-    if (!g_deflate_class) {
-        g_deflate_class = lean_register_external_class(deflate_finalizer, noop_foreach);
-        g_inflate_class = lean_register_external_class(inflate_finalizer, noop_foreach);
-    }
+    pthread_once(&g_classes_once, register_classes);
 }
 
 /*
@@ -320,15 +325,14 @@ LEAN_EXPORT lean_obj_res lean_gzip_deflate_new(uint8_t level, lean_obj_arg _w) {
 }
 
 /*
- * Push a chunk of data through the deflate stream.
- * flush: 0 = Z_NO_FLUSH, 4 = Z_FINISH
+ * Push a chunk of data through the deflate stream (Z_NO_FLUSH).
+ * Loops until all input is consumed.
  * Returns compressed output produced so far.
  *
- * lean_gzip_deflate_push : @& DeflateState → @& ByteArray → UInt8 → IO ByteArray
+ * lean_gzip_deflate_push : @& DeflateState → @& ByteArray → IO ByteArray
  */
 LEAN_EXPORT lean_obj_res lean_gzip_deflate_push(b_lean_obj_arg state_obj,
                                                  b_lean_obj_arg chunk,
-                                                 uint8_t flush,
                                                  lean_obj_arg _w) {
     deflate_state *s = (deflate_state *)lean_get_external_data(state_obj);
     if (s->finished) return mk_io_error("gzip deflate push: stream already finished");
@@ -341,25 +345,21 @@ LEAN_EXPORT lean_obj_res lean_gzip_deflate_push(b_lean_obj_arg state_obj,
     if (!buf) return mk_io_error("gzip deflate push: out of memory");
     size_t total = 0;
 
+    /* Loop until all input is consumed */
     int ret;
-    do {
+    while (s->strm.avail_in > 0) {
         if (total >= buf_size) {
             buf = grow_buffer(buf, &buf_size);
             if (!buf) return mk_io_error("gzip deflate push: out of memory");
         }
         s->strm.next_out = buf + total;
         s->strm.avail_out = buf_size - total;
-        ret = deflate(&s->strm, (int)flush);
-        if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) {
+        ret = deflate(&s->strm, Z_NO_FLUSH);
+        if (ret != Z_OK && ret != Z_BUF_ERROR) {
             free(buf);
             return mk_zlib_error("gzip deflate push", ret, s->strm.msg);
         }
         total = buf_size - s->strm.avail_out;
-    } while (s->strm.avail_out == 0);
-
-    if (ret == Z_STREAM_END) {
-        deflateEnd(&s->strm);
-        s->finished = 1;
     }
 
     lean_obj_res result = mk_byte_array(buf, total);
@@ -368,7 +368,8 @@ LEAN_EXPORT lean_obj_res lean_gzip_deflate_push(b_lean_obj_arg state_obj,
 }
 
 /*
- * Finish the deflate stream: flush remaining data and clean up.
+ * Finish the deflate stream: flush remaining data with Z_FINISH and clean up.
+ * Loops until Z_STREAM_END.
  *
  * lean_gzip_deflate_finish : @& DeflateState → IO ByteArray
  */
@@ -453,7 +454,10 @@ LEAN_EXPORT lean_obj_res lean_gzip_inflate_push(b_lean_obj_arg state_obj,
     size_t total = 0;
 
     while (s->strm.avail_in > 0) {
+        size_t prev_avail_in = s->strm.avail_in;
+        size_t prev_total = total;
         int ret;
+
         do {
             if (total >= buf_size) {
                 buf = grow_buffer(buf, &buf_size);
@@ -467,11 +471,15 @@ LEAN_EXPORT lean_obj_res lean_gzip_inflate_push(b_lean_obj_arg state_obj,
                 return mk_zlib_error("gzip inflate push", ret, s->strm.msg);
             }
             total = buf_size - s->strm.avail_out;
-            if (ret == Z_BUF_ERROR && s->strm.avail_in == 0) break;
-        } while (ret != Z_STREAM_END && s->strm.avail_out == 0);
+        } while (ret != Z_STREAM_END && s->strm.avail_in > 0 && s->strm.avail_out == 0);
 
         if (ret == Z_STREAM_END) {
-            if (s->strm.avail_in == 0) break;
+            if (s->strm.avail_in == 0) {
+                /* Clean end of stream — mark finished */
+                inflateEnd(&s->strm);
+                s->finished = 1;
+                break;
+            }
             /* Concatenated gzip: reset for next member */
             ret = inflateReset(&s->strm);
             if (ret != Z_OK) {
@@ -479,7 +487,13 @@ LEAN_EXPORT lean_obj_res lean_gzip_inflate_push(b_lean_obj_arg state_obj,
                 return mk_zlib_error("gzip inflate push: inflateReset", ret, s->strm.msg);
             }
         } else {
-            break;  /* Need more input */
+            /* No progress guard: detect stalls to prevent infinite loops */
+            if (s->strm.avail_in == prev_avail_in && total == prev_total) {
+                break;  /* No progress made — need more input or output */
+            }
+            if (s->strm.avail_in > 0 && s->strm.avail_out > 0) {
+                break;  /* inflate didn't consume input and has output space — needs more data */
+            }
         }
     }
 
