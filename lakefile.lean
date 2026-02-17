@@ -7,7 +7,15 @@ def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
   if out.exitCode != 0 then return #[]
   return out.stdout.trim.splitOn " " |>.toArray
 
+/-- Get zlib include flags, respecting `ZLIB_CFLAGS` env var override. -/
+def zlibCFlags : IO (Array String) := do
+  if let some flags := (← IO.getEnv "ZLIB_CFLAGS") then
+    return flags.trim.splitOn " " |>.toArray
+  pkgConfig "zlib" "--cflags"
+
 package «lean-zlib» where
+  -- On Windows with MSVC, users should set ZLIB_LDFLAGS or use vcpkg.
+  -- -lz works on Linux, macOS, MSYS2/MinGW.
   moreLinkArgs := #["-lz"]
 
 lean_lib Zlib
@@ -19,9 +27,9 @@ input_file zlib_ffi.c where
 target zlib_ffi.o pkg : FilePath := do
   let srcJob ← zlib_ffi.c.fetch
   let oFile := pkg.buildDir / "c" / "zlib_ffi.o"
-  let cflags ← pkgConfig "zlib" "--cflags"
-  let weakArgs := #["-I", (← getLeanIncludeDir).toString] ++ cflags
-  buildO oFile srcJob weakArgs #["-fPIC"] "cc"
+  let weakArgs := #["-I", (← getLeanIncludeDir).toString] ++ (← zlibCFlags)
+  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  buildO oFile srcJob weakArgs hardArgs "cc"
 
 extern_lib libzlib_ffi pkg := do
   let ffiO ← zlib_ffi.o.fetch

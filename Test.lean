@@ -45,4 +45,14 @@ def main : IO Unit := do
   assert! gde.beq empty
   IO.println "Empty input roundtrip: OK"
 
+  -- Test concatenated gzip streams
+  let part1 := "First gzip member. ".toUTF8
+  let part2 := "Second gzip member. ".toUTF8
+  let gz1 ← Gzip.compress part1
+  let gz2 ← Gzip.compress part2
+  let concatenated := gz1 ++ gz2
+  let decoded ← Gzip.decompress concatenated
+  assert! decoded.beq (part1 ++ part2)
+  IO.println "Concatenated gzip roundtrip: OK"
+
   IO.println "All tests passed!"
