@@ -5,3 +5,4 @@ import Zlib.RawDeflate
 import Zlib.Binary
 import Zlib.Tar
 import Zlib.Zip
+import Zlib.Zstd

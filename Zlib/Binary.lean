@@ -20,6 +20,14 @@ def writeUInt16LE (val : UInt16) : ByteArray :=
 def writeUInt32LE (val : UInt32) : ByteArray :=
   .mk #[val.toUInt8, (val >>> 8).toUInt8, (val >>> 16).toUInt8, (val >>> 24).toUInt8]
 
+def readUInt64LE (data : ByteArray) (offset : Nat) : UInt64 :=
+  let lo := (readUInt32LE data offset).toUInt64
+  let hi := (readUInt32LE data (offset + 4)).toUInt64
+  lo ||| (hi <<< 32)
+
+def writeUInt64LE (val : UInt64) : ByteArray :=
+  writeUInt32LE val.toUInt32 ++ writeUInt32LE (val >>> 32).toUInt32
+
 -- Octal ASCII read/write (used by Tar)
 
 /-- Write a number as NUL-terminated octal ASCII, right-aligned in a field of `width` bytes.

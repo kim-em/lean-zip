@@ -21,6 +21,14 @@ structure Entry where
 def typeRegular : UInt8 := 0x30  -- '0'
 /-- Typeflag for directory. -/
 def typeDirectory : UInt8 := 0x35  -- '5'
+/-- GNU typeflag for long name. -/
+def typeGnuLongName : UInt8 := 0x4C  -- 'L'
+/-- GNU typeflag for long link. -/
+def typeGnuLongLink : UInt8 := 0x4B  -- 'K'
+/-- PAX typeflag for per-file extended header. -/
+def typePaxExtended : UInt8 := 0x78  -- 'x'
+/-- PAX typeflag for global extended header. -/
+def typePaxGlobal : UInt8 := 0x67  -- 'g'
 
 -- UStar header field offsets and sizes
 private def hdrName     := (0, 100)
@@ -37,6 +45,117 @@ private def hdrVersion  := (263, 2)
 private def hdrUname    := (265, 32)
 private def hdrGname    := (297, 32)
 private def hdrPrefix   := (345, 155)
+
+/-- Read a numeric field from a tar header. Handles both octal ASCII (standard)
+    and GNU base-256 encoding (high bit set in first byte). -/
+@[noinline] def readNumeric (data : ByteArray) (offset : Nat) (len : Nat) : UInt64 := Id.run do
+  if len == 0 then return 0
+  let firstByte := data[offset]!
+  -- GNU base-256: if high bit is set, remaining bytes are big-endian binary
+  if firstByte &&& 0x80 != 0 then
+    let mut result : UInt64 := (firstByte &&& 0x7F).toUInt64
+    for i in [1:len] do
+      result := (result <<< 8) ||| data[offset + i]!.toUInt64
+    return result
+  -- Standard octal ASCII
+  return Binary.readOctal data offset len
+
+/-- Parse PAX extended header records from data.
+    Format: `<length> <key>=<value>\n` where length includes itself.
+    Returns an array of (key, value) pairs. -/
+@[noinline] def parsePaxRecords (data : ByteArray) : Array (String × String) := Id.run do
+  let mut records : Array (String × String) := #[]
+  let mut pos := 0
+  while pos < data.size do
+    -- Read the decimal length field
+    let mut lenVal := 0
+    let mut lenEnd := pos
+    while lenEnd < data.size do
+      let b := data[lenEnd]!
+      if b == ' '.toNat.toUInt8 then
+        lenEnd := lenEnd + 1
+        break
+      if b >= '0'.toNat.toUInt8 && b <= '9'.toNat.toUInt8 then
+        lenVal := lenVal * 10 + (b - '0'.toNat.toUInt8).toNat
+      lenEnd := lenEnd + 1
+    if lenVal == 0 then break
+    -- The record is lenVal bytes total from pos
+    let recordEnd := pos + lenVal
+    if recordEnd > data.size then break
+    -- Find '=' separator
+    let mut eqPos := lenEnd
+    while eqPos < recordEnd do
+      if data[eqPos]! == '='.toNat.toUInt8 then break
+      eqPos := eqPos + 1
+    if eqPos < recordEnd then
+      let key := String.fromUTF8! (data.extract lenEnd eqPos)
+      -- Value runs from after '=' to before trailing newline
+      let valueEnd := if recordEnd > 0 && data[recordEnd - 1]! == '\n'.toNat.toUInt8
+                       then recordEnd - 1 else recordEnd
+      let value := String.fromUTF8! (data.extract (eqPos + 1) valueEnd)
+      records := records.push (key, value)
+    pos := recordEnd
+  return records
+
+/-- Apply PAX extended header overrides to an entry. -/
+def applyPaxOverrides (entry : Entry) (records : Array (String × String)) : Entry := Id.run do
+  let mut e := entry
+  for (key, value) in records do
+    match key with
+    | "path" => e := { e with path := value }
+    | "linkpath" => e := { e with linkname := value }
+    | "size" =>
+      let mut n : UInt64 := 0
+      for c in value.toList do
+        if c >= '0' && c <= '9' then
+          n := n * 10 + (c.toNat - '0'.toNat).toUInt64
+      e := { e with size := n }
+    | "mtime" =>
+      -- PAX mtime can be decimal (e.g. "1234567890.123456789"), take integer part
+      let intPart := (value.splitOn ".").head!
+      let mut n : UInt64 := 0
+      for c in intPart.toList do
+        if c >= '0' && c <= '9' then
+          n := n * 10 + (c.toNat - '0'.toNat).toUInt64
+      e := { e with mtime := n }
+    | "uid" =>
+      let mut n : UInt32 := 0
+      for c in value.toList do
+        if c >= '0' && c <= '9' then
+          n := n * 10 + (c.toNat - '0'.toNat).toUInt32
+      e := { e with uid := n }
+    | "gid" =>
+      let mut n : UInt32 := 0
+      for c in value.toList do
+        if c >= '0' && c <= '9' then
+          n := n * 10 + (c.toNat - '0'.toNat).toUInt32
+      e := { e with gid := n }
+    | "uname" => e := { e with uname := value }
+    | "gname" => e := { e with gname := value }
+    | _ => pure ()  -- ignore unknown keys
+  return e
+
+/-- Compute padding needed to reach next 512-byte boundary. -/
+def paddingFor (size : UInt64) : Nat :=
+  let rem := size.toNat % 512
+  if rem == 0 then 0 else 512 - rem
+
+/-- Read entry data from a stream (for GNU long name / PAX headers). -/
+private partial def readEntryData (input : IO.FS.Stream) (size : Nat) : IO ByteArray := do
+  let mut result := ByteArray.empty
+  let mut remaining := size
+  while remaining > 0 do
+    let toRead := min remaining 65536
+    let chunk ← input.read toRead.toUSize
+    if chunk.isEmpty then
+      throw (IO.userError "tar: unexpected end of archive reading entry data")
+    result := result ++ chunk
+    remaining := remaining - chunk.size
+  -- Skip padding
+  let pad := paddingFor size.toUInt64
+  if pad > 0 then
+    let _ ← input.read pad.toUSize
+  return result
 
 /-- Split a path into (prefix, name) for UStar format.
     Returns `none` if the path is too long to encode. -/
@@ -69,18 +188,27 @@ def splitPath (path : String) : Option (String × String) := Id.run do
       sum := sum + (header[i]!).toUInt32
   return sum
 
-/-- Build a 512-byte UStar header. -/
-def buildHeader (entry : Entry) : IO ByteArray := do
-  let some (pfx, name) := splitPath entry.path
-    | throw (IO.userError s!"tar: path too long: {entry.path}")
+-- Helper to write fields into a header at a given offset
+private def writeField (hdr : ByteArray) (offset : Nat) (field : ByteArray) : ByteArray := Id.run do
+  let mut h := hdr
+  for i in [:field.size] do
+    h := h.set! (offset + i) field[i]!
+  return h
+
+-- Maximum value representable in an 11-digit octal field (used by size/mtime)
+private def maxOctalValue : UInt64 := 0o77777777777  -- 8589934591
+
+/-- Build a 512-byte UStar header. If `pathOverride` is provided, it is used instead of
+    `entry.path` (which may exceed UStar limits if a PAX header precedes this). -/
+def buildHeader (entry : Entry) (pathOverride : Option (String × String) := none) : IO ByteArray := do
+  let (pfx, name) ← match pathOverride with
+    | some pn => pure pn
+    | none =>
+      match splitPath entry.path with
+      | some pn => pure pn
+      | none => throw (IO.userError s!"tar: path too long: {entry.path}")
   -- Start with 512 zero bytes
   let mut hdr := Binary.zeros 512
-  -- Helper to write into the header at a given offset
-  let writeField (hdr : ByteArray) (offset : Nat) (field : ByteArray) : ByteArray := Id.run do
-    let mut h := hdr
-    for i in [:field.size] do
-      h := h.set! (offset + i) field[i]!
-    return h
   -- Write fields
   hdr := writeField hdr hdrName.1 (Binary.writeString name hdrName.2)
   hdr := writeField hdr hdrMode.1 (Binary.writeOctal entry.mode.toUInt64 hdrMode.2)
@@ -108,6 +236,63 @@ def buildHeader (entry : Entry) : IO ByteArray := do
   let chksumBytes := Binary.writeOctal chksum.toUInt64 7 ++ ByteArray.mk #[' '.toNat.toUInt8]
   hdr := writeField hdr hdrChksum.1 chksumBytes
   return hdr
+
+/-- Build a single PAX record: `<length> <key>=<value>\n`.
+    The length field includes itself, requiring iterative computation. -/
+@[noinline] def buildPaxRecord (key : String) (value : String) : ByteArray := Id.run do
+  let content := s!"{key}={value}\n".toUTF8
+  -- Length field includes itself + space + content
+  -- Start with estimate, iterate until stable
+  let mut lenStr := s!"{content.size + 2}"  -- estimate: "N "
+  for _ in [:5] do  -- converges in ≤3 iterations
+    let total := lenStr.toUTF8.size + 1 + content.size  -- lenStr + " " + content
+    let newLenStr := s!"{total}"
+    if newLenStr == lenStr then break
+    lenStr := newLenStr
+  return s!"{lenStr} ".toUTF8 ++ content
+
+/-- Determine if a PAX extended header is needed for an entry, and if so,
+    return the PAX data and a suitable truncated path for the UStar header. -/
+def needsPaxHeader (entry : Entry) : Option ByteArray := Id.run do
+  let mut records := ByteArray.empty
+  let mut needed := false
+  -- Path too long for UStar?
+  if splitPath entry.path |>.isNone then
+    records := records ++ buildPaxRecord "path" entry.path
+    needed := true
+  -- Linkname too long?
+  if entry.linkname.utf8ByteSize > 100 then
+    records := records ++ buildPaxRecord "linkpath" entry.linkname
+    needed := true
+  -- Size exceeds octal range?
+  if entry.size > maxOctalValue then
+    records := records ++ buildPaxRecord "size" s!"{entry.size.toNat}"
+    needed := true
+  -- Mtime exceeds octal range?
+  if entry.mtime > maxOctalValue then
+    records := records ++ buildPaxRecord "mtime" s!"{entry.mtime.toNat}"
+    needed := true
+  if needed then return some records else return none
+
+/-- Build a PAX extended header entry (typeflag 'x') for the given PAX data. -/
+def buildPaxEntry (paxData : ByteArray) (entryPath : String) : IO ByteArray := do
+  -- Truncate the entry path to fit in UStar name field
+  let paxName :=
+    let truncated := if entryPath.utf8ByteSize > 80 then
+      -- Take first 80 bytes worth of the path
+      String.fromUTF8! (entryPath.toUTF8.extract 0 80)
+    else entryPath
+    s!"PaxHeader/{truncated}"
+  let paxEntry : Entry := {
+    path := (if paxName.utf8ByteSize > 100 then
+      String.fromUTF8! (paxName.toUTF8.extract 0 100) else paxName)
+    size := paxData.size.toUInt64
+    mode := 0o644
+    typeflag := typePaxExtended
+  }
+  let paxHdr ← buildHeader paxEntry
+  let pad := paddingFor paxData.size.toUInt64
+  return paxHdr ++ paxData ++ Binary.zeros pad
 
 /-- Verify the tar header checksum. Returns true if valid. -/
 @[noinline] def verifyChecksum (block : ByteArray) : Bool := Id.run do
@@ -139,9 +324,9 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
   let fullPath := if pfx.isEmpty then name else pfx ++ "/" ++ name
   return some {
     path := fullPath
-    size := Binary.readOctal block hdrSize.1 hdrSize.2
+    size := readNumeric block hdrSize.1 hdrSize.2
     mode := (Binary.readOctal block hdrMode.1 hdrMode.2).toUInt32
-    mtime := Binary.readOctal block hdrMtime.1 hdrMtime.2
+    mtime := readNumeric block hdrMtime.1 hdrMtime.2
     uid := (Binary.readOctal block hdrUid.1 hdrUid.2).toUInt32
     gid := (Binary.readOctal block hdrGid.1 hdrGid.2).toUInt32
     typeflag := block[hdrTypeflag.1]!
@@ -149,11 +334,6 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
     uname := Binary.readString block hdrUname.1 hdrUname.2
     gname := Binary.readString block hdrGname.1 hdrGname.2
   }
-
-/-- Compute padding needed to reach next 512-byte boundary. -/
-def paddingFor (size : UInt64) : Nat :=
-  let rem := size.toNat % 512
-  if rem == 0 then 0 else 512 - rem
 
 /-- Check if a path is safe for extraction (no `..` segments, not absolute). -/
 private def isPathSafe (path : String) : Bool := Id.run do
@@ -187,7 +367,17 @@ partial def create (output : IO.FS.Stream) (basePath : System.FilePath)
       mode := if isDir then 0o755 else 0o644
       typeflag := if isDir then typeDirectory else typeRegular
     }
-    let header ← buildHeader entry
+    -- Emit PAX extended header if needed (long path, large size, etc.)
+    if let some paxData := needsPaxHeader entry then
+      let paxBlock ← buildPaxEntry paxData entry.path
+      output.write paxBlock
+    -- Build UStar header, with truncated path if PAX is handling it
+    let pathOvr : Option (String × String) :=
+      if splitPath entry.path |>.isNone then
+        -- PAX has the real path; use a truncated placeholder in UStar header
+        some ("", String.fromUTF8! (entry.path.toUTF8.extract 0 (min entry.path.utf8ByteSize 100)))
+      else none
+    let header ← buildHeader entry pathOvr
     output.write header
     if !isDir then
       IO.FS.withFile file .read fun h => do
@@ -213,54 +403,138 @@ partial def createFromDir (output : IO.FS.Stream) (dir : System.FilePath) : IO U
   let sorted := files.insertionSort (·.toString < ·.toString)
   create output dir sorted
 
-/-- Extract a tar archive from input stream to output directory. -/
+/-- Extract a tar archive from input stream to output directory.
+    Handles UStar, GNU long name/link, and PAX extended headers. -/
 partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit := do
+  let mut gnuLongName : Option String := none
+  let mut gnuLongLink : Option String := none
+  let mut paxOverrides : Option (Array (String × String)) := none
   repeat do
     let block ← input.read 512
     if block.size < 512 then break
     match ← parseHeader block with
     | none => break
     | some entry =>
+      -- GNU long name: read data as the name for the next entry
+      if entry.typeflag == typeGnuLongName then
+        let nameData ← readEntryData input entry.size.toNat
+        let name := String.fromUTF8! (nameData.extract 0 (Id.run do
+          let mut n := nameData.size
+          while n > 0 && nameData[n - 1]! == 0 do n := n - 1
+          return n))
+        gnuLongName := some name
+        continue
+      -- GNU long link: read data as the linkname for the next entry
+      if entry.typeflag == typeGnuLongLink then
+        let linkData ← readEntryData input entry.size.toNat
+        let link := String.fromUTF8! (linkData.extract 0 (Id.run do
+          let mut n := linkData.size
+          while n > 0 && linkData[n - 1]! == 0 do n := n - 1
+          return n))
+        gnuLongLink := some link
+        continue
+      -- PAX extended header: parse records for the next entry
+      if entry.typeflag == typePaxExtended then
+        let paxData ← readEntryData input entry.size.toNat
+        paxOverrides := some (parsePaxRecords paxData)
+        continue
+      -- PAX global header: skip (we don't track global state)
+      if entry.typeflag == typePaxGlobal then
+        let _ ← readEntryData input entry.size.toNat
+        continue
+      -- Apply GNU/PAX overrides
+      let mut e := entry
+      if let some name := gnuLongName then
+        e := { e with path := name }
+        gnuLongName := none
+      if let some link := gnuLongLink then
+        e := { e with linkname := link }
+        gnuLongLink := none
+      if let some records := paxOverrides then
+        e := applyPaxOverrides e records
+        paxOverrides := none
       -- Path safety: reject absolute paths and .. segments
-      unless isPathSafe entry.path do
-        throw (IO.userError s!"tar: unsafe path: {entry.path}")
-      let outPath := outDir / entry.path
-      if entry.typeflag == typeDirectory then
+      unless isPathSafe e.path do
+        throw (IO.userError s!"tar: unsafe path: {e.path}")
+      let outPath := outDir / e.path
+      if e.typeflag == typeDirectory then
         IO.FS.createDirAll outPath
       else
         if let some parent := outPath.parent then
           IO.FS.createDirAll parent
         IO.FS.withFile outPath .write fun h => do
-          let mut remaining := entry.size.toNat
+          let mut remaining := e.size.toNat
           while remaining > 0 do
             let toRead := min remaining 65536
             let chunk ← input.read toRead.toUSize
             if chunk.isEmpty then
-              throw (IO.userError s!"tar: unexpected end of archive reading {entry.path} ({remaining} bytes remaining)")
+              throw (IO.userError s!"tar: unexpected end of archive reading {e.path} ({remaining} bytes remaining)")
             h.write chunk
             remaining := remaining - chunk.size
-        let pad := paddingFor entry.size
+        let pad := paddingFor e.size
         if pad > 0 then
           let _ ← input.read pad.toUSize
 
-/-- List entries in a tar archive without extracting. -/
+/-- List entries in a tar archive without extracting.
+    Handles UStar, GNU long name/link, and PAX extended headers. -/
 partial def list (input : IO.FS.Stream) : IO (Array Entry) := do
   let mut entries := #[]
+  let mut gnuLongName : Option String := none
+  let mut gnuLongLink : Option String := none
+  let mut paxOverrides : Option (Array (String × String)) := none
   repeat do
     let block ← input.read 512
     if block.size < 512 then break
     match ← parseHeader block with
     | none => break
     | some entry =>
-      entries := entries.push entry
+      -- GNU long name
+      if entry.typeflag == typeGnuLongName then
+        let nameData ← readEntryData input entry.size.toNat
+        let name := String.fromUTF8! (nameData.extract 0 (Id.run do
+          let mut n := nameData.size
+          while n > 0 && nameData[n - 1]! == 0 do n := n - 1
+          return n))
+        gnuLongName := some name
+        continue
+      -- GNU long link
+      if entry.typeflag == typeGnuLongLink then
+        let linkData ← readEntryData input entry.size.toNat
+        let link := String.fromUTF8! (linkData.extract 0 (Id.run do
+          let mut n := linkData.size
+          while n > 0 && linkData[n - 1]! == 0 do n := n - 1
+          return n))
+        gnuLongLink := some link
+        continue
+      -- PAX extended header
+      if entry.typeflag == typePaxExtended then
+        let paxData ← readEntryData input entry.size.toNat
+        paxOverrides := some (parsePaxRecords paxData)
+        continue
+      -- PAX global header: skip
+      if entry.typeflag == typePaxGlobal then
+        let _ ← readEntryData input entry.size.toNat
+        continue
+      -- Apply GNU/PAX overrides
+      let mut e := entry
+      if let some name := gnuLongName then
+        e := { e with path := name }
+        gnuLongName := none
+      if let some link := gnuLongLink then
+        e := { e with linkname := link }
+        gnuLongLink := none
+      if let some records := paxOverrides then
+        e := applyPaxOverrides e records
+        paxOverrides := none
+      entries := entries.push e
       -- Skip past file data + padding
-      let dataSize := entry.size.toNat + paddingFor entry.size
+      let dataSize := e.size.toNat + paddingFor e.size
       let mut skipped := 0
       while skipped < dataSize do
         let toRead := min (dataSize - skipped) 65536
         let chunk ← input.read toRead.toUSize
         if chunk.isEmpty then
-          throw (IO.userError s!"tar: unexpected end of archive skipping {entry.path}")
+          throw (IO.userError s!"tar: unexpected end of archive skipping {e.path}")
         skipped := skipped + chunk.size
   return entries
 
