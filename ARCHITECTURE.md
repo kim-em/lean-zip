@@ -107,7 +107,9 @@ Pure Lean, no new C code. Implements UStar format (512-byte headers with octal f
 
 **Stream composition for .tar.gz**: `createTarGz` constructs a custom `IO.FS.Stream` whose `write` pushes through `Gzip.DeflateState`, and passes it to `createFromDir`. `extractTarGz` constructs a custom stream whose `read` pulls compressed data and decompresses through `Gzip.InflateState` with an internal buffer. Both achieve true streaming with bounded memory.
 
-**Path safety**: on extract, the resolved output path is verified to stay within the target directory to prevent traversal attacks.
+**Validation**: `parseHeader` verifies the UStar magic and header checksum before accepting a block. Malformed or non-UStar headers are rejected with an error. Truncated archives (short reads during create, extract, or list) raise explicit errors rather than silently producing incomplete results.
+
+**Path safety**: on extract, paths are rejected if they contain `..` segments or are absolute, preventing zip-slip/tar-slip directory traversal attacks.
 
 ## Layer 7: ZIP archives (`Zlib/Zip.lean`)
 
@@ -122,6 +124,10 @@ Pure Lean, no new C code. Built on Binary, Checksum, and RawDeflate.
 **Method selection**: on creation, raw-deflates each file; if the result is smaller, uses method 8 (deflated), otherwise method 0 (stored).
 
 **CRC32 verification**: always verified on extraction.
+
+**Path safety**: paths are rejected if they contain `..` segments or are absolute, preventing zip-slip directory traversal attacks.
+
+**Bounds checking**: central directory offsets and local header offsets are validated against file size before indexing, preventing crashes on malformed ZIPs.
 
 **Limitations**: no ZIP64 (<4GB per file, <65535 entries), no encryption, no spanning.
 
