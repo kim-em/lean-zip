@@ -74,7 +74,7 @@ typedef struct { ZSTD_CStream *cstream; int finished; } zstd_compress_state;
 typedef struct { ZSTD_DStream *dstream; int finished; } zstd_decompress_state;
 ```
 
-Same external class pattern with finalizers and `pthread_once` registration.
+Same external class pattern with `pthread_once` registration. Finalizers check the stream pointer for null (not the `finished` flag) to handle the case where `push` detects frame completion and frees the stream before `finish` is called.
 
 - `lean_zstd_compress_new(level)` / `lean_zstd_decompress_new()` — create and init stream
 - `lean_zstd_compress_push` / `lean_zstd_decompress_push` — feed chunks via `ZSTD_compressStream` / `ZSTD_decompressStream`
