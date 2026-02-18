@@ -97,7 +97,7 @@ def decompressFile (path : System.FilePath) (outPath : Option System.FilePath :=
     | some p => p
     | none =>
       let s := path.toString
-      if s.endsWith ".gz" then ⟨s.dropRight 3⟩ else ⟨s ++ ".ungz"⟩
+      if s.endsWith ".gz" then ⟨(s.dropEnd 3).toString⟩ else ⟨s ++ ".ungz"⟩
   IO.FS.withFile path .read fun inH =>
     IO.FS.withFile out .write fun outH =>
       decompressStream (IO.FS.Stream.ofHandle inH) (IO.FS.Stream.ofHandle outH)
