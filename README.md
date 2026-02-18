@@ -6,7 +6,7 @@ Provides both whole-buffer and streaming APIs for zlib (raw deflate) and gzip fo
 
 ## Requirements
 
-- Lean 4 (v4.20.0+)
+- Lean 4 (tested with v4.20.0)
 - zlib development headers (`zlib-dev`, `zlib1g-dev`, or equivalent)
 - `pkg-config` (for header discovery on NixOS and similar)
 
