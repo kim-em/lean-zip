@@ -5,12 +5,12 @@ open System Lake DSL
 def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
   let out ← IO.Process.output { cmd := "pkg-config", args := #[flag, pkg] }
   if out.exitCode != 0 then return #[]
-  return out.stdout.trim.splitOn " " |>.toArray
+  return out.stdout.trimAscii.toString.splitOn " " |>.toArray
 
 /-- Get zlib include flags, respecting `ZLIB_CFLAGS` env var override. -/
 def zlibCFlags : IO (Array String) := do
   if let some flags := (← IO.getEnv "ZLIB_CFLAGS") then
-    return flags.trim.splitOn " " |>.toArray
+    return flags.trimAscii.toString.splitOn " " |>.toArray
   pkgConfig "zlib" "--cflags"
 
 package «lean-zlib» where
