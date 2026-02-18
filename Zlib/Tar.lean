@@ -67,9 +67,10 @@ private def hdrPrefix   := (345, 155)
   let mut records : Array (String × String) := #[]
   let mut pos := 0
   while pos < data.size do
-    -- Read the decimal length field
+    -- Read the decimal length field (digits only, terminated by space)
     let mut lenVal := 0
     let mut lenEnd := pos
+    let mut validLen := true
     while lenEnd < data.size do
       let b := data[lenEnd]!
       if b == ' '.toNat.toUInt8 then
@@ -77,8 +78,10 @@ private def hdrPrefix   := (345, 155)
         break
       if b >= '0'.toNat.toUInt8 && b <= '9'.toNat.toUInt8 then
         lenVal := lenVal * 10 + (b - '0'.toNat.toUInt8).toNat
+      else
+        validLen := false
       lenEnd := lenEnd + 1
-    if lenVal == 0 then break
+    if !validLen || lenVal == 0 then break
     -- The record is lenVal bytes total from pos
     let recordEnd := pos + lenVal
     if recordEnd > data.size then break
@@ -154,7 +157,9 @@ private partial def readEntryData (input : IO.FS.Stream) (size : Nat) : IO ByteA
   -- Skip padding
   let pad := paddingFor size.toUInt64
   if pad > 0 then
-    let _ ← input.read pad.toUSize
+    let padData ← input.read pad.toUSize
+    if padData.size < pad then
+      throw (IO.userError "tar: unexpected end of archive reading padding")
   return result
 
 /-- Split a path into (prefix, name) for UStar format.

@@ -43,13 +43,20 @@ private def needsZip64 (entry : Entry) : Bool :=
 private def defaultDosTime : UInt16 := 0
 private def defaultDosDate : UInt16 := 0x0021  -- 1980-01-01
 
-/-- Build a ZIP64 extra field for an entry. -/
-private def writeZip64Extra (entry : Entry) : ByteArray := Id.run do
+/-- Build a ZIP64 extra field for a local file header (sizes only, no offset). -/
+private def writeZip64ExtraLocal (entry : Entry) : ByteArray := Id.run do
   let mut buf := ByteArray.empty
-  -- Header ID
   buf := buf ++ Binary.writeUInt16LE 0x0001
-  -- Data size: 3 × 8 = 24 bytes (uncompressed, compressed, offset)
-  buf := buf ++ Binary.writeUInt16LE 24
+  buf := buf ++ Binary.writeUInt16LE 16  -- 2 × 8 bytes
+  buf := buf ++ Binary.writeUInt64LE entry.uncompressedSize
+  buf := buf ++ Binary.writeUInt64LE entry.compressedSize
+  return buf
+
+/-- Build a ZIP64 extra field for a central directory header (sizes + offset). -/
+private def writeZip64ExtraCentral (entry : Entry) : ByteArray := Id.run do
+  let mut buf := ByteArray.empty
+  buf := buf ++ Binary.writeUInt16LE 0x0001
+  buf := buf ++ Binary.writeUInt16LE 24  -- 3 × 8 bytes
   buf := buf ++ Binary.writeUInt64LE entry.uncompressedSize
   buf := buf ++ Binary.writeUInt64LE entry.compressedSize
   buf := buf ++ Binary.writeUInt64LE entry.localOffset
@@ -59,7 +66,7 @@ private def writeZip64Extra (entry : Entry) : ByteArray := Id.run do
 private def writeLocalHeader (entry : Entry) : ByteArray := Id.run do
   let nameBytes := entry.path.toUTF8
   let z64 := needsZip64 entry
-  let extraField := if z64 then writeZip64Extra entry else ByteArray.empty
+  let extraField := if z64 then writeZip64ExtraLocal entry else ByteArray.empty
   let mut buf := ByteArray.empty
   buf := buf ++ Binary.writeUInt32LE sigLocal
   -- Version needed: 4.5 (45) for ZIP64, 2.0 (20) otherwise
@@ -86,7 +93,7 @@ private def writeLocalHeader (entry : Entry) : ByteArray := Id.run do
 private def writeCentralHeader (entry : Entry) : ByteArray := Id.run do
   let nameBytes := entry.path.toUTF8
   let z64 := needsZip64 entry
-  let extraField := if z64 then writeZip64Extra entry else ByteArray.empty
+  let extraField := if z64 then writeZip64ExtraCentral entry else ByteArray.empty
   let mut buf := ByteArray.empty
   buf := buf ++ Binary.writeUInt32LE sigCentral
   -- Version made by: 4.5 (45) for ZIP64, Unix (3)
@@ -236,33 +243,43 @@ private def findEndOfCentralDir (data : ByteArray) : Option (Nat × Nat × Nat) 
   return some (pos, cdOffset, cdSize)
 
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
-    Only reads fields whose standard values are 0xFFFFFFFF. -/
+    Only reads fields whose standard values are 0xFFFFFFFF. Returns `none` if a required field
+    is missing from the ZIP64 extra data. -/
 private def parseZip64Extra (extraData : ByteArray) (stdUncomp stdComp stdOffset : UInt32)
-    : (UInt64 × UInt64 × UInt64) := Id.run do
+    : Option (UInt64 × UInt64 × UInt64) := Id.run do
   let mut uncompSize := stdUncomp.toUInt64
   let mut compSize := stdComp.toUInt64
   let mut localOff := stdOffset.toUInt64
   -- Search for ZIP64 extra field (ID 0x0001)
   let mut epos := 0
+  let mut found := false
   while epos + 4 <= extraData.size do
     let headerId := Binary.readUInt16LE extraData epos
     let dataSize := (Binary.readUInt16LE extraData (epos + 2)).toNat
     if headerId == 0x0001 then
+      found := true
       let mut fpos := epos + 4
-      if stdUncomp == val32Max && fpos + 8 <= epos + 4 + dataSize then
+      let fieldEnd := epos + 4 + dataSize
+      if stdUncomp == val32Max then
+        if fpos + 8 > fieldEnd then return none
         uncompSize := Binary.readUInt64LE extraData fpos
         fpos := fpos + 8
-      if stdComp == val32Max && fpos + 8 <= epos + 4 + dataSize then
+      if stdComp == val32Max then
+        if fpos + 8 > fieldEnd then return none
         compSize := Binary.readUInt64LE extraData fpos
         fpos := fpos + 8
-      if stdOffset == val32Max && fpos + 8 <= epos + 4 + dataSize then
+      if stdOffset == val32Max then
+        if fpos + 8 > fieldEnd then return none
         localOff := Binary.readUInt64LE extraData fpos
       break
     epos := epos + 4 + dataSize
-  return (uncompSize, compSize, localOff)
+  -- If any field needs ZIP64 but the extra field wasn't found, fail
+  if !found && (stdUncomp == val32Max || stdComp == val32Max || stdOffset == val32Max) then
+    return none
+  return some (uncompSize, compSize, localOff)
 
 /-- Parse central directory entries from a ZIP file. -/
-private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : Array Entry := Id.run do
+private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Array Entry) := do
   let mut entries : Array Entry := #[]
   let mut pos := cdOffset
   let cdEnd := cdOffset + cdSize
@@ -281,11 +298,13 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : Array E
     let name := String.fromUTF8! nameBytes
     -- Parse ZIP64 extra field if any standard field is 0xFFFFFFFF
     let extraData := data.extract (pos + 46 + nameLen) (pos + 46 + nameLen + extraLen)
-    let (uncompSize, compSize, localOff) :=
+    let (uncompSize, compSize, localOff) ←
       if stdCompSize == val32Max || stdUncompSize == val32Max || stdOffset == val32Max then
-        parseZip64Extra extraData stdUncompSize stdCompSize stdOffset
+        match parseZip64Extra extraData stdUncompSize stdCompSize stdOffset with
+        | some v => pure v
+        | none => throw (IO.userError s!"zip: truncated ZIP64 extra field for {name}")
       else
-        (stdUncompSize.toUInt64, stdCompSize.toUInt64, stdOffset.toUInt64)
+        pure (stdUncompSize.toUInt64, stdCompSize.toUInt64, stdOffset.toUInt64)
     entries := entries.push {
       path := name
       compressedSize := compSize
@@ -304,7 +323,7 @@ def list (inputPath : System.FilePath) : IO (Array Entry) := do
     | throw (IO.userError "zip: cannot find end of central directory")
   unless cdOffset + cdSize <= data.size do
     throw (IO.userError "zip: central directory extends beyond file")
-  return parseCentralDir data cdOffset cdSize
+  parseCentralDir data cdOffset cdSize
 
 /-- Extract a ZIP archive to an output directory. -/
 def extract (inputPath : System.FilePath) (outDir : System.FilePath) : IO Unit := do
@@ -313,7 +332,7 @@ def extract (inputPath : System.FilePath) (outDir : System.FilePath) : IO Unit :
     | throw (IO.userError "zip: cannot find end of central directory")
   unless cdOffset + cdSize <= data.size do
     throw (IO.userError "zip: central directory extends beyond file")
-  let entries := parseCentralDir data cdOffset cdSize
+  let entries ← parseCentralDir data cdOffset cdSize
   for entry in entries do
     if entry.path.endsWith "/" then
       if isPathSafe entry.path then
@@ -351,7 +370,7 @@ def extractFile (inputPath : System.FilePath) (filename : String) : IO ByteArray
     | throw (IO.userError "zip: cannot find end of central directory")
   unless cdOffset + cdSize <= data.size do
     throw (IO.userError "zip: central directory extends beyond file")
-  let entries := parseCentralDir data cdOffset cdSize
+  let entries ← parseCentralDir data cdOffset cdSize
   let some entry := entries.find? (·.path == filename)
     | throw (IO.userError s!"zip: file not found: {filename}")
   let localPos := entry.localOffset.toNat

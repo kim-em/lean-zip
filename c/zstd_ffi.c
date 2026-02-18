@@ -165,13 +165,13 @@ static void noop_foreach(void *mod, b_lean_obj_arg fn) {
 
 static void zstd_compress_finalizer(void *p) {
     zstd_compress_state *s = (zstd_compress_state *)p;
-    if (!s->finished && s->cstream) ZSTD_freeCStream(s->cstream);
+    if (s->cstream) ZSTD_freeCStream(s->cstream);
     free(s);
 }
 
 static void zstd_decompress_finalizer(void *p) {
     zstd_decompress_state *s = (zstd_decompress_state *)p;
-    if (!s->finished && s->dstream) ZSTD_freeDStream(s->dstream);
+    if (s->dstream) ZSTD_freeDStream(s->dstream);
     free(s);
 }
 
@@ -384,6 +384,8 @@ LEAN_EXPORT lean_obj_res lean_zstd_decompress_push(b_lean_obj_arg state_obj,
         total += output.pos;
         /* ret == 0 means frame is complete */
         if (ret == 0) {
+            ZSTD_freeDStream(s->dstream);
+            s->dstream = NULL;
             s->finished = 1;
             break;
         }
