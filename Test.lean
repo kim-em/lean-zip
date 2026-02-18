@@ -1,5 +1,7 @@
 import Zlib
 
+set_option maxRecDepth 2048
+
 /-- Check that two byte arrays are equal. -/
 def ByteArray.beq (a b : ByteArray) : Bool :=
   a.data == b.data
@@ -122,5 +124,94 @@ def main : IO Unit := do
   let largeRoundtripped ← IO.FS.readBinFile largeOut
   assert! largeRoundtripped.beq large
   IO.println "Large file roundtrip: OK"
+
+  -- === Checksum tests ===
+
+  -- CRC32 of known data (precomputed: CRC32 of "Hello, world!" = 0xebe6c6e6)
+  let helloBytes := "Hello, world!".toUTF8
+  let crc ← Checksum.crc32 0 helloBytes
+  IO.println s!"CRC32 of 'Hello, world!': {crc}"
+  -- Incremental CRC32 matches whole-buffer
+  let crc1 ← Checksum.crc32 0 (big.extract 0 3000)
+  let crc2 ← Checksum.crc32 crc1 (big.extract 3000 big.size)
+  let crcWhole ← Checksum.crc32 0 big
+  assert! crc2 == crcWhole
+  IO.println "CRC32 incremental: OK"
+
+  -- Adler32
+  let adler ← Checksum.adler32 1 helloBytes
+  IO.println s!"Adler32 of 'Hello, world!': {adler}"
+  -- Incremental Adler32 matches whole-buffer
+  let adler1 ← Checksum.adler32 1 (big.extract 0 3000)
+  let adler2 ← Checksum.adler32 adler1 (big.extract 3000 big.size)
+  let adlerWhole ← Checksum.adler32 1 big
+  assert! adler2 == adlerWhole
+  IO.println "Adler32 incremental: OK"
+
+  -- Empty input checksums
+  let crcEmpty ← Checksum.crc32 0 ByteArray.empty
+  assert! crcEmpty == 0
+  let adlerEmpty ← Checksum.adler32 1 ByteArray.empty
+  assert! adlerEmpty == 1
+  IO.println "Checksum empty input: OK"
+
+  -- === Raw deflate tests ===
+
+  -- Whole-buffer roundtrip
+  let rawCompressed ← RawDeflate.compress big
+  let rawDecompressed ← RawDeflate.decompress rawCompressed
+  assert! rawDecompressed.beq big
+  IO.println s!"Raw deflate roundtrip: OK (compressed {big.size} → {rawCompressed.size})"
+
+  -- Streaming roundtrip
+  let rawState ← RawDeflate.DeflateState.new
+  let mut rawChunks := ByteArray.empty
+  offset := 0
+  while offset < big.size do
+    let end_ := min (offset + 500) big.size
+    let out ← rawState.push (big.extract offset end_)
+    rawChunks := rawChunks ++ out
+    offset := offset + 500
+  let rawFinal ← rawState.finish
+  rawChunks := rawChunks ++ rawFinal
+  let rawStreamDecomp ← RawDeflate.decompress rawChunks
+  assert! rawStreamDecomp.beq big
+  IO.println "Raw deflate streaming roundtrip: OK"
+
+  -- Empty raw deflate
+  let rawCE ← RawDeflate.compress ByteArray.empty
+  let rawDE ← RawDeflate.decompress rawCE
+  assert! rawDE.beq ByteArray.empty
+  IO.println "Raw deflate empty input: OK"
+
+  -- === Binary helper tests ===
+
+  -- Octal roundtrip (use variables to prevent compile-time reduction)
+  let testOctalVal : UInt64 := 1234
+  let octalBytes := Binary.writeOctal testOctalVal 12
+  unless octalBytes.size == 12 do throw (IO.userError s!"octal size: {octalBytes.size}")
+  let octalVal := Binary.readOctal octalBytes 0 12
+  unless octalVal == testOctalVal do throw (IO.userError s!"octal val: {octalVal}")
+  let octalZero : UInt64 := 0
+  let zeroOctal := Binary.writeOctal octalZero 8
+  unless Binary.readOctal zeroOctal 0 8 == 0 do throw (IO.userError "octal zero")
+  IO.println "Binary octal roundtrip: OK"
+
+  -- Little-endian roundtrip
+  let testVal16 : UInt16 := 0xABCD
+  let le16 := Binary.writeUInt16LE testVal16
+  unless le16.size == 2 do throw (IO.userError "le16 size")
+  unless Binary.readUInt16LE le16 0 == testVal16 do throw (IO.userError "le16 val")
+  let testVal32 : UInt32 := 0xDEADBEEF
+  let le32 := Binary.writeUInt32LE testVal32
+  unless le32.size == 4 do throw (IO.userError "le32 size")
+  unless Binary.readUInt32LE le32 0 == testVal32 do throw (IO.userError "le32 val")
+  IO.println "Binary LE roundtrip: OK"
+
+  -- String roundtrip
+  let strBytes := Binary.writeString "hello" 10
+  unless strBytes.size == 10 do throw (IO.userError "str size")
+  unless Binary.readString strBytes 0 10 == "hello" do throw (IO.userError "str val")
+  IO.println "Binary string roundtrip: OK"
 
   IO.println "All tests passed!"
