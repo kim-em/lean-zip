@@ -214,4 +214,91 @@ def main : IO Unit := do
   unless Binary.readString strBytes 0 10 == "hello" do throw (IO.userError "str val")
   IO.println "Binary string roundtrip: OK"
 
+  -- === Tar tests ===
+
+  -- Create a temp directory with test files
+  let tarTestDir : System.FilePath := "/tmp/lean-zlib-tar-test"
+  -- Clean up from previous runs
+  if ← tarTestDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", tarTestDir.toString] }
+  IO.FS.createDirAll (tarTestDir / "subdir")
+  IO.FS.writeFile (tarTestDir / "hello.txt") "Hello from tar!"
+  IO.FS.writeFile (tarTestDir / "subdir" / "nested.txt") "Nested file content here."
+  IO.FS.writeFile (tarTestDir / "empty.txt") ""
+
+  -- Create tar archive to ByteArray via stream
+  let tarPath : System.FilePath := "/tmp/lean-zlib-test.tar"
+  IO.FS.withFile tarPath .write fun h => do
+    let stream := IO.FS.Stream.ofHandle h
+    Tar.createFromDir stream tarTestDir
+  IO.println "Tar create: OK"
+
+  -- List entries
+  let entries ← IO.FS.withFile tarPath .read fun h => do
+    let stream := IO.FS.Stream.ofHandle h
+    Tar.list stream
+  IO.println s!"Tar entries: {entries.size}"
+  -- Should have 3 files + 1 subdirectory = 4 entries
+  unless entries.size == 4 do throw (IO.userError s!"tar list: expected 4 entries, got {entries.size}")
+  -- Check that we can find our files
+  let paths := entries.map (·.path)
+  let strContains (haystack needle : String) : Bool :=
+    (haystack.splitOn needle).length > 1
+  let hasHello := paths.any (strContains · "hello.txt")
+  let hasNested := paths.any (strContains · "nested.txt")
+  let hasEmpty := paths.any (strContains · "empty.txt")
+  let hasSubdir := paths.any (strContains · "subdir")
+  unless hasHello && hasNested && hasEmpty && hasSubdir do
+    throw (IO.userError s!"tar list: missing expected entries, got: {paths}")
+  IO.println "Tar list: OK"
+
+  -- Extract and verify roundtrip
+  let extractDir : System.FilePath := "/tmp/lean-zlib-tar-extract"
+  if ← extractDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", extractDir.toString] }
+  IO.FS.createDirAll extractDir
+  IO.FS.withFile tarPath .read fun h => do
+    let stream := IO.FS.Stream.ofHandle h
+    Tar.extract stream extractDir
+  -- Verify extracted files
+  let hello ← IO.FS.readFile (extractDir / "hello.txt")
+  unless hello == "Hello from tar!" do throw (IO.userError s!"tar extract hello: {hello}")
+  let nested ← IO.FS.readFile (extractDir / "subdir" / "nested.txt")
+  unless nested == "Nested file content here." do throw (IO.userError s!"tar extract nested: {nested}")
+  let emptyContent ← IO.FS.readFile (extractDir / "empty.txt")
+  unless emptyContent == "" do throw (IO.userError "tar extract empty")
+  IO.println "Tar extract roundtrip: OK"
+
+  -- Test .tar.gz roundtrip
+  let tarGzPath : System.FilePath := "/tmp/lean-zlib-test.tar.gz"
+  Tar.createTarGz tarGzPath tarTestDir
+  let tarGzMeta ← tarGzPath.metadata
+  let tarGzSize := tarGzMeta.byteSize
+  IO.println s!"Tar.gz size: {tarGzSize}"
+  let extractGzDir : System.FilePath := "/tmp/lean-zlib-targz-extract"
+  if ← extractGzDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", extractGzDir.toString] }
+  IO.FS.createDirAll extractGzDir
+  Tar.extractTarGz tarGzPath extractGzDir
+  let helloGz ← IO.FS.readFile (extractGzDir / "hello.txt")
+  unless helloGz == "Hello from tar!" do throw (IO.userError s!"tar.gz extract hello: {helloGz}")
+  let nestedGz ← IO.FS.readFile (extractGzDir / "subdir" / "nested.txt")
+  unless nestedGz == "Nested file content here." do throw (IO.userError s!"tar.gz extract nested: {nestedGz}")
+  IO.println "Tar.gz roundtrip: OK"
+
+  -- Test splitPath
+  let some (pfx1, name1) := Tar.splitPath "short.txt" | throw (IO.userError "splitPath short")
+  unless pfx1 == "" && name1 == "short.txt" do throw (IO.userError "splitPath short values")
+  let longPath := "a/very/long/path/that/exceeds/one/hundred/characters/in/the/name/field/so/we/need/prefix/splitting/file.txt"
+  let some (pfx2, _) := Tar.splitPath longPath | throw (IO.userError "splitPath long")
+  unless !pfx2.isEmpty do throw (IO.userError "splitPath long should have prefix")
+  IO.println "Tar splitPath: OK"
+
+  -- Clean up
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", tarTestDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", extractDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", extractGzDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", tarPath.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", tarGzPath.toString] }
+
   IO.println "All tests passed!"
