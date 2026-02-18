@@ -294,11 +294,100 @@ def main : IO Unit := do
   unless !pfx2.isEmpty do throw (IO.userError "splitPath long should have prefix")
   IO.println "Tar splitPath: OK"
 
-  -- Clean up
+  -- Clean up tar temps
   let _ ← IO.Process.run { cmd := "rm", args := #["-rf", tarTestDir.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-rf", extractDir.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-rf", extractGzDir.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", tarPath.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", tarGzPath.toString] }
+
+  -- === ZIP tests ===
+
+  -- Create test files
+  let zipTestDir : System.FilePath := "/tmp/lean-zlib-zip-test"
+  if ← zipTestDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipTestDir.toString] }
+  IO.FS.createDirAll (zipTestDir / "sub")
+  IO.FS.writeFile (zipTestDir / "hello.txt") "Hello from ZIP!"
+  IO.FS.writeFile (zipTestDir / "sub" / "data.txt") "Some nested data for compression testing."
+  -- Compressible data (should use deflate method 8)
+  let mut compressible := ByteArray.empty
+  for _ in List.range 100 do
+    compressible := compressible ++ "Repeated text for compression. ".toUTF8
+  IO.FS.writeBinFile (zipTestDir / "big.bin") compressible
+  -- Empty file
+  IO.FS.writeFile (zipTestDir / "empty.txt") ""
+
+  -- Create ZIP from explicit file list
+  let zipPath : System.FilePath := "/tmp/lean-zlib-test.zip"
+  Zip.create zipPath #[
+    ("hello.txt", zipTestDir / "hello.txt"),
+    ("sub/data.txt", zipTestDir / "sub" / "data.txt"),
+    ("big.bin", zipTestDir / "big.bin"),
+    ("empty.txt", zipTestDir / "empty.txt")
+  ]
+  IO.println "ZIP create: OK"
+
+  -- List entries
+  let zipEntries ← Zip.list zipPath
+  IO.println s!"ZIP entries: {zipEntries.size}"
+  unless zipEntries.size == 4 do throw (IO.userError s!"zip list: expected 4, got {zipEntries.size}")
+  -- Check method selection: big.bin should be deflated (method 8)
+  let bigEntry := zipEntries.find? (·.path == "big.bin")
+  match bigEntry with
+  | some e =>
+    unless e.method == 8 do throw (IO.userError s!"zip: big.bin should be deflated, got method {e.method}")
+    unless e.compressedSize < e.uncompressedSize do
+      throw (IO.userError "zip: big.bin compressed should be smaller")
+    IO.println s!"ZIP method selection: big.bin deflated {e.uncompressedSize} → {e.compressedSize}"
+  | none => throw (IO.userError "zip: big.bin not found in listing")
+  IO.println "ZIP list: OK"
+
+  -- Extract and verify roundtrip
+  let zipExtractDir : System.FilePath := "/tmp/lean-zlib-zip-extract"
+  if ← zipExtractDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipExtractDir.toString] }
+  IO.FS.createDirAll zipExtractDir
+  Zip.extract zipPath zipExtractDir
+  let zHello ← IO.FS.readFile (zipExtractDir / "hello.txt")
+  unless zHello == "Hello from ZIP!" do throw (IO.userError s!"zip extract hello: {zHello}")
+  let zData ← IO.FS.readFile (zipExtractDir / "sub" / "data.txt")
+  unless zData == "Some nested data for compression testing." do
+    throw (IO.userError s!"zip extract data: {zData}")
+  let zBig ← IO.FS.readBinFile (zipExtractDir / "big.bin")
+  unless zBig.size == compressible.size do
+    throw (IO.userError s!"zip extract big: size {zBig.size} != {compressible.size}")
+  let zEmpty ← IO.FS.readFile (zipExtractDir / "empty.txt")
+  unless zEmpty == "" do throw (IO.userError "zip extract empty")
+  IO.println "ZIP extract roundtrip: OK"
+
+  -- extractFile by name
+  let singleFile ← Zip.extractFile zipPath "hello.txt"
+  unless String.fromUTF8! singleFile == "Hello from ZIP!" do
+    throw (IO.userError "zip extractFile")
+  IO.println "ZIP extractFile: OK"
+
+  -- createFromDir roundtrip
+  let zipFromDirPath : System.FilePath := "/tmp/lean-zlib-test-fromdir.zip"
+  Zip.createFromDir zipFromDirPath zipTestDir
+  let dirEntries ← Zip.list zipFromDirPath
+  IO.println s!"ZIP createFromDir entries: {dirEntries.size}"
+  unless dirEntries.size == 4 do
+    throw (IO.userError s!"zip createFromDir: expected 4, got {dirEntries.size}")
+  let zipFromDirExtract : System.FilePath := "/tmp/lean-zlib-zip-fromdir-extract"
+  if ← zipFromDirExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipFromDirExtract.toString] }
+  IO.FS.createDirAll zipFromDirExtract
+  Zip.extract zipFromDirPath zipFromDirExtract
+  let zHello2 ← IO.FS.readFile (zipFromDirExtract / "hello.txt")
+  unless zHello2 == "Hello from ZIP!" do throw (IO.userError "zip fromDir hello")
+  IO.println "ZIP createFromDir roundtrip: OK"
+
+  -- Clean up zip temps
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipTestDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipExtractDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipFromDirExtract.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", zipPath.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", zipFromDirPath.toString] }
 
   IO.println "All tests passed!"
