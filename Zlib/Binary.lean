@@ -35,6 +35,10 @@ def writeUInt32LE (val : UInt32) : ByteArray :=
     while v > 0 do
       buf := buf.push (('0'.toNat + v % 8).toUInt8)
       v := v / 8
+  -- Truncate to fit field: if more digits than available, keep only the
+  -- least significant `digits` octal digits (this prevents buffer overrun)
+  if buf.size > digits then
+    buf := buf.extract 0 digits
   -- Build result: leading '0's + digits in reverse + NUL
   let mut result := ByteArray.empty
   for _ in [:digits - buf.size] do

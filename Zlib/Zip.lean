@@ -19,6 +19,14 @@ structure Entry where
   localOffset      : UInt32 := 0
   deriving Repr, Inhabited
 
+/-- Check if a path is safe for extraction (no `..` segments, not absolute). -/
+private def isPathSafe (path : String) : Bool := Id.run do
+  if path.startsWith "/" then return false
+  let components := path.splitOn "/"
+  for c in components do
+    if c == ".." then return false
+  return true
+
 -- DOS date/time encoding (minimal: default to 1980-01-01 00:00:00)
 private def defaultDosTime : UInt16 := 0
 private def defaultDosDate : UInt16 := 0x0021  -- 1980-01-01
@@ -153,15 +161,16 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
   let allFiles ← dir.walkDir
   let sorted := allFiles.insertionSort (·.toString < ·.toString)
   let dirStr := dir.toString
+  let dirPfx := if dirStr.endsWith "/" then dirStr else dirStr ++ "/"
   let mut pairs : Array (String × System.FilePath) := #[]
   for file in sorted do
     let fmeta ← file.metadata
     if fmeta.type == .dir then continue  -- ZIP doesn't need directory entries for extraction
     let fileStr := file.toString
+    if fileStr == dirStr then continue
     let relPath :=
-      if fileStr.startsWith dirStr then
-        let stripped := (fileStr.drop dirStr.length).toString
-        if stripped.startsWith "/" then (stripped.drop 1).toString else stripped
+      if fileStr.startsWith dirPfx then
+        (fileStr.drop dirPfx.length).toString
       else fileStr
     if relPath.isEmpty then continue
     pairs := pairs.push (relPath, file)
@@ -217,6 +226,8 @@ def list (inputPath : System.FilePath) : IO (Array Entry) := do
     | throw (IO.userError "zip: cannot find end of central directory")
   let cdSize := (Binary.readUInt32LE data (eocdPos + 12)).toNat
   let cdOffset := (Binary.readUInt32LE data (eocdPos + 16)).toNat
+  unless cdOffset + cdSize <= data.size do
+    throw (IO.userError "zip: central directory extends beyond file")
   return parseCentralDir data cdOffset cdSize
 
 /-- Extract a ZIP archive to an output directory. -/
@@ -226,25 +237,30 @@ def extract (inputPath : System.FilePath) (outDir : System.FilePath) : IO Unit :
     | throw (IO.userError "zip: cannot find end of central directory")
   let cdSize := (Binary.readUInt32LE data (eocdPos + 12)).toNat
   let cdOffset := (Binary.readUInt32LE data (eocdPos + 16)).toNat
+  unless cdOffset + cdSize <= data.size do
+    throw (IO.userError "zip: central directory extends beyond file")
   let entries := parseCentralDir data cdOffset cdSize
-  let outDirStr := outDir.toString
   for entry in entries do
     -- Skip directory entries
     if entry.path.endsWith "/" then
-      IO.FS.createDirAll (outDir / entry.path)
+      if isPathSafe entry.path then
+        IO.FS.createDirAll (outDir / entry.path)
       continue
+    -- Path safety: reject absolute paths and .. segments
+    unless isPathSafe entry.path do
+      throw (IO.userError s!"zip: unsafe path: {entry.path}")
     let outPath := outDir / entry.path
-    -- Path safety
-    let resolved := outPath.toString
-    unless resolved.startsWith outDirStr do
-      throw (IO.userError s!"zip: path escapes output directory: {entry.path}")
     if let some parent := outPath.parent then
       IO.FS.createDirAll parent
     -- Read local file header to find data start
     let localPos := entry.localOffset.toNat
+    unless localPos + 30 <= data.size do
+      throw (IO.userError s!"zip: local header out of bounds for {entry.path}")
     let nameLen := (Binary.readUInt16LE data (localPos + 26)).toNat
     let extraLen := (Binary.readUInt16LE data (localPos + 28)).toNat
     let dataStart := localPos + 30 + nameLen + extraLen
+    unless dataStart + entry.compressedSize.toNat <= data.size do
+      throw (IO.userError s!"zip: file data out of bounds for {entry.path}")
     let compData := data.extract dataStart (dataStart + entry.compressedSize.toNat)
     -- Decompress
     let fileData ←
@@ -270,13 +286,19 @@ def extractFile (inputPath : System.FilePath) (filename : String) : IO ByteArray
     | throw (IO.userError "zip: cannot find end of central directory")
   let cdSize := (Binary.readUInt32LE data (eocdPos + 12)).toNat
   let cdOffset := (Binary.readUInt32LE data (eocdPos + 16)).toNat
+  unless cdOffset + cdSize <= data.size do
+    throw (IO.userError "zip: central directory extends beyond file")
   let entries := parseCentralDir data cdOffset cdSize
   let some entry := entries.find? (·.path == filename)
     | throw (IO.userError s!"zip: file not found: {filename}")
   let localPos := entry.localOffset.toNat
+  unless localPos + 30 <= data.size do
+    throw (IO.userError s!"zip: local header out of bounds for {filename}")
   let nameLen := (Binary.readUInt16LE data (localPos + 26)).toNat
   let extraLen := (Binary.readUInt16LE data (localPos + 28)).toNat
   let dataStart := localPos + 30 + nameLen + extraLen
+  unless dataStart + entry.compressedSize.toNat <= data.size do
+    throw (IO.userError s!"zip: file data out of bounds for {filename}")
   let compData := data.extract dataStart (dataStart + entry.compressedSize.toNat)
   let fileData ←
     if entry.method == 0 then pure compData

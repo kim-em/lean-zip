@@ -139,18 +139,28 @@ def paddingFor (size : UInt64) : Nat :=
   let rem := size.toNat % 512
   if rem == 0 then 0 else 512 - rem
 
+/-- Check if a path is safe for extraction (no `..` segments, not absolute). -/
+private def isPathSafe (path : String) : Bool := Id.run do
+  if path.startsWith "/" then return false
+  let components := path.splitOn "/"
+  for c in components do
+    if c == ".." then return false
+  return true
+
 /-- Create a tar archive from files, writing to output stream.
     `basePath` is stripped from file paths in the archive. -/
 partial def create (output : IO.FS.Stream) (basePath : System.FilePath)
     (files : Array System.FilePath) : IO Unit := do
   let baseStr := basePath.toString
+  -- Ensure baseStr ends with / to avoid matching /tmp/dir2 when base is /tmp/dir
+  let basePfx := if baseStr.endsWith "/" then baseStr else baseStr ++ "/"
   for file in files do
     let fmeta ← file.metadata
     let fileStr := file.toString
+    if fileStr == baseStr then continue
     let relPath :=
-      if fileStr.startsWith baseStr then
-        let stripped := (fileStr.drop baseStr.length).toString
-        if stripped.startsWith "/" then (stripped.drop 1).toString else stripped
+      if fileStr.startsWith basePfx then
+        (fileStr.drop basePfx.length).toString
       else fileStr
     if relPath.isEmpty then continue
     let isDir := fmeta.type == .dir
@@ -188,18 +198,16 @@ partial def createFromDir (output : IO.FS.Stream) (dir : System.FilePath) : IO U
 
 /-- Extract a tar archive from input stream to output directory. -/
 partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit := do
-  let outDirStr := outDir.toString
   repeat do
     let block ← input.read 512
     if block.size < 512 then break
     match parseHeader block with
     | none => break
     | some entry =>
+      -- Path safety: reject absolute paths and .. segments
+      unless isPathSafe entry.path do
+        throw (IO.userError s!"tar: unsafe path: {entry.path}")
       let outPath := outDir / entry.path
-      -- Path safety: check for directory traversal
-      let resolved := outPath.toString
-      unless resolved.startsWith outDirStr do
-        throw (IO.userError s!"tar: path escapes output directory: {entry.path}")
       if entry.typeflag == typeDirectory then
         IO.FS.createDirAll outPath
       else
