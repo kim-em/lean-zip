@@ -1,4 +1,4 @@
-import Zlib.Gzip
+import Zip.Gzip
 
 namespace RawDeflate
 

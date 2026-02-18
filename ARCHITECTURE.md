@@ -1,23 +1,23 @@
 # Architecture
 
-lean-zlib is a Lean 4 FFI library wrapping zlib and Zstandard, with pure-Lean tar and ZIP archive support built on top.
+lean-zip is a Lean 4 FFI library wrapping zlib and Zstandard, with pure-Lean tar and ZIP archive support built on top.
 
 ## File layout
 
 ```
 c/zlib_ffi.c          -- zlib C FFI code (~640 lines)
 c/zstd_ffi.c          -- Zstd C FFI code (~350 lines)
-Zlib/Basic.lean        -- Raw zlib compress/decompress declarations
-Zlib/Gzip.lean         -- Gzip declarations + streaming + file helpers
-Zlib/Checksum.lean     -- CRC32 and Adler32 checksum declarations
-Zlib/RawDeflate.lean   -- Raw deflate (no header/trailer) declarations
-Zlib/Zstd.lean         -- Zstandard declarations + streaming + file helpers
-Zlib/Binary.lean       -- Byte packing helpers (LE integers, octal, strings)
-Zlib/Tar.lean          -- Tar archive create/extract/list + .tar.gz composition
-Zlib/Zip.lean          -- ZIP archive create/extract/list (with ZIP64)
-Zlib.lean              -- Re-exports all modules
-lakefile.lean          -- Build config (pkg-config, static libs, extern link)
-Test.lean              -- Roundtrip tests for all API layers
+Zip/Basic.lean        -- Raw zlib compress/decompress declarations
+Zip/Gzip.lean         -- Gzip declarations + streaming + file helpers
+Zip/Checksum.lean     -- CRC32 and Adler32 checksum declarations
+Zip/RawDeflate.lean   -- Raw deflate (no header/trailer) declarations
+Zip/Zstd.lean         -- Zstandard declarations + streaming + file helpers
+Zip/Binary.lean       -- Byte packing helpers (LE integers, octal, strings)
+Zip/Tar.lean          -- Tar archive create/extract/list + .tar.gz composition
+Zip/Archive.lean      -- ZIP archive create/extract/list (with ZIP64)
+Zip.lean              -- Re-exports all modules
+lakefile.lean         -- Build config (pkg-config, static libs, extern link)
+Test.lean             -- Roundtrip tests for all API layers
 ```
 
 ## Layer 1: Whole-buffer C functions
@@ -109,7 +109,7 @@ Pure Lean code built on Layer 3:
 
 Available for Gzip, RawDeflate, and Zstd. These are `partial` because `repeat` with `break` can't be shown terminating.
 
-## Layer 5: Binary helpers (`Zlib/Binary.lean`)
+## Layer 5: Binary helpers (`Zip/Binary.lean`)
 
 Pure Lean byte-packing utilities shared by Tar and ZIP:
 
@@ -120,7 +120,7 @@ Pure Lean byte-packing utilities shared by Tar and ZIP:
 
 All loop-based functions use `@[noinline]` to prevent compile-time reduction issues.
 
-## Layer 6: Tar archives (`Zlib/Tar.lean`)
+## Layer 6: Tar archives (`Zip/Tar.lean`)
 
 Pure Lean, no new C code. Implements UStar format with PAX and GNU extension support.
 
@@ -148,7 +148,7 @@ Pure Lean, no new C code. Implements UStar format with PAX and GNU extension sup
 
 **Path safety**: on extract, paths are rejected if they contain `..` segments or are absolute, preventing zip-slip/tar-slip directory traversal attacks.
 
-## Layer 7: ZIP archives (`Zlib/Zip.lean`)
+## Layer 7: ZIP archives (`Zip/Archive.lean`)
 
 Pure Lean, no new C code. Built on Binary, Checksum, and RawDeflate.
 

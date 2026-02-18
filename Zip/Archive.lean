@@ -1,8 +1,8 @@
-import Zlib.Binary
-import Zlib.Checksum
-import Zlib.RawDeflate
+import Zip.Binary
+import Zip.Checksum
+import Zip.RawDeflate
 
-namespace Zip
+namespace Archive
 
 -- ZIP signatures
 private def sigLocal    : UInt32 := 0x04034b50
@@ -391,4 +391,4 @@ def extractFile (inputPath : System.FilePath) (filename : String) : IO ByteArray
     throw (IO.userError s!"zip: CRC32 mismatch for {filename}")
   return fileData
 
-end Zip
+end Archive

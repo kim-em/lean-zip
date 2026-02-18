@@ -40,10 +40,10 @@ def linkFlags : IO (Array String) := do
     flags := flags.pop |>.pop |>.pop |>.push "-lzstd"
   return flags
 
-package «lean-zlib» where
+package «lean-zip» where
   moreLinkArgs := run_io linkFlags
 
-lean_lib Zlib
+lean_lib Zip
 
 -- zlib FFI
 input_file zlib_ffi.c where

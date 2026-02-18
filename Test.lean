@@ -1,4 +1,4 @@
-import Zlib
+import Zip
 
 set_option maxRecDepth 2048
 
@@ -320,7 +320,7 @@ def main : IO Unit := do
 
   -- Create ZIP from explicit file list
   let zipPath : System.FilePath := "/tmp/lean-zlib-test.zip"
-  Zip.create zipPath #[
+  Archive.create zipPath #[
     ("hello.txt", zipTestDir / "hello.txt"),
     ("sub/data.txt", zipTestDir / "sub" / "data.txt"),
     ("big.bin", zipTestDir / "big.bin"),
@@ -329,7 +329,7 @@ def main : IO Unit := do
   IO.println "ZIP create: OK"
 
   -- List entries
-  let zipEntries ← Zip.list zipPath
+  let zipEntries ← Archive.list zipPath
   IO.println s!"ZIP entries: {zipEntries.size}"
   unless zipEntries.size == 4 do throw (IO.userError s!"zip list: expected 4, got {zipEntries.size}")
   -- Check method selection: big.bin should be deflated (method 8)
@@ -348,7 +348,7 @@ def main : IO Unit := do
   if ← zipExtractDir.pathExists then
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipExtractDir.toString] }
   IO.FS.createDirAll zipExtractDir
-  Zip.extract zipPath zipExtractDir
+  Archive.extract zipPath zipExtractDir
   let zHello ← IO.FS.readFile (zipExtractDir / "hello.txt")
   unless zHello == "Hello from ZIP!" do throw (IO.userError s!"zip extract hello: {zHello}")
   let zData ← IO.FS.readFile (zipExtractDir / "sub" / "data.txt")
@@ -362,15 +362,15 @@ def main : IO Unit := do
   IO.println "ZIP extract roundtrip: OK"
 
   -- extractFile by name
-  let singleFile ← Zip.extractFile zipPath "hello.txt"
+  let singleFile ← Archive.extractFile zipPath "hello.txt"
   unless String.fromUTF8! singleFile == "Hello from ZIP!" do
     throw (IO.userError "zip extractFile")
   IO.println "ZIP extractFile: OK"
 
   -- createFromDir roundtrip
   let zipFromDirPath : System.FilePath := "/tmp/lean-zlib-test-fromdir.zip"
-  Zip.createFromDir zipFromDirPath zipTestDir
-  let dirEntries ← Zip.list zipFromDirPath
+  Archive.createFromDir zipFromDirPath zipTestDir
+  let dirEntries ← Archive.list zipFromDirPath
   IO.println s!"ZIP createFromDir entries: {dirEntries.size}"
   unless dirEntries.size == 4 do
     throw (IO.userError s!"zip createFromDir: expected 4, got {dirEntries.size}")
@@ -378,7 +378,7 @@ def main : IO Unit := do
   if ← zipFromDirExtract.pathExists then
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", zipFromDirExtract.toString] }
   IO.FS.createDirAll zipFromDirExtract
-  Zip.extract zipFromDirPath zipFromDirExtract
+  Archive.extract zipFromDirPath zipFromDirExtract
   let zHello2 ← IO.FS.readFile (zipFromDirExtract / "hello.txt")
   unless zHello2 == "Hello from ZIP!" do throw (IO.userError "zip fromDir hello")
   IO.println "ZIP createFromDir roundtrip: OK"

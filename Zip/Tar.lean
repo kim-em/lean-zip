@@ -1,5 +1,5 @@
-import Zlib.Binary
-import Zlib.Gzip
+import Zip.Binary
+import Zip.Gzip
 
 namespace Tar
 

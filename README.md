@@ -1,4 +1,4 @@
-# lean-zlib
+# lean-zip
 
 Lean 4 bindings for [zlib](https://zlib.net/) and [Zstandard](https://facebook.github.io/zstd/) compression, plus tar and ZIP archive support.
 
@@ -23,13 +23,13 @@ Or set `ZLIB_CFLAGS` and `ZSTD_CFLAGS` manually.
 Add to your `lakefile.lean`:
 
 ```lean
-require "kim-em" / "lean-zlib"
+require "kim-em" / "lean-zip"
 ```
 
 ### Compression
 
 ```lean
-import Zlib
+import Zip
 
 -- Zlib format
 let compressed ← Zlib.compress data
@@ -114,22 +114,22 @@ Tar supports UStar, PAX extended headers (for long paths, large files, UTF-8), a
 
 ```lean
 -- Create from explicit file list
-Zip.create "/tmp/archive.zip" #[
+Archive.create "/tmp/archive.zip" #[
   ("name-in-zip.txt", "/path/on/disk.txt"),
   ("subdir/file.bin", "/other/file.bin")
 ]
 
 -- Create from directory
-Zip.createFromDir "/tmp/archive.zip" "/path/to/dir"
+Archive.createFromDir "/tmp/archive.zip" "/path/to/dir"
 
 -- Extract all files
-Zip.extract "/tmp/archive.zip" "/tmp/output"
+Archive.extract "/tmp/archive.zip" "/tmp/output"
 
 -- Extract a single file by name
-let data ← Zip.extractFile "/tmp/archive.zip" "name-in-zip.txt"
+let data ← Archive.extractFile "/tmp/archive.zip" "name-in-zip.txt"
 
 -- List entries
-let entries ← Zip.list "/tmp/archive.zip"
+let entries ← Archive.list "/tmp/archive.zip"
 ```
 
 ZIP supports stored (method 0) and deflated (method 8) entries with automatic method selection, CRC32 verification, and ZIP64 extensions for archives exceeding 4GB or 65535 entries.
