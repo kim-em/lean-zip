@@ -109,19 +109,35 @@ def buildHeader (entry : Entry) : IO ByteArray := do
   hdr := writeField hdr hdrChksum.1 chksumBytes
   return hdr
 
-/-- Parse a 512-byte header block into an Entry. Returns `none` for zero blocks. -/
-def parseHeader (block : ByteArray) : Option Entry := Id.run do
+/-- Verify the tar header checksum. Returns true if valid. -/
+@[noinline] def verifyChecksum (block : ByteArray) : Bool := Id.run do
+  let storedChksum := Binary.readOctal block hdrChksum.1 hdrChksum.2
+  let computed := computeChecksum block
+  return storedChksum == computed.toUInt64
+
+/-- Parse a 512-byte header block into an Entry. Returns `none` for zero blocks.
+    Validates magic and checksum; throws on malformed headers. -/
+def parseHeader (block : ByteArray) : IO (Option Entry) := do
   -- Check for zero block (end of archive)
-  let mut allZero := true
-  for i in [:512] do
-    if block[i]! != 0 then
-      allZero := false
-      break
+  let allZero := Id.run do
+    let mut z := true
+    for i in [:512] do
+      if block[i]! != 0 then
+        z := false
+        break
+    return z
   if allZero then return none
+  -- Validate checksum
+  unless verifyChecksum block do
+    throw (IO.userError "tar: header checksum mismatch")
+  -- Validate UStar magic (accept both "ustar\0" and "ustar " for compatibility)
+  let magic := Binary.readString block hdrMagic.1 hdrMagic.2
+  unless magic == "ustar" do
+    throw (IO.userError s!"tar: unsupported format (magic: {magic})")
   let name := Binary.readString block hdrName.1 hdrName.2
   let pfx := Binary.readString block hdrPrefix.1 hdrPrefix.2
   let fullPath := if pfx.isEmpty then name else pfx ++ "/" ++ name
-  some {
+  return some {
     path := fullPath
     size := Binary.readOctal block hdrSize.1 hdrSize.2
     mode := (Binary.readOctal block hdrMode.1 hdrMode.2).toUInt32
@@ -179,7 +195,8 @@ partial def create (output : IO.FS.Stream) (basePath : System.FilePath)
         while remaining > 0 do
           let toRead := min remaining 65536
           let chunk ← h.read toRead.toUSize
-          if chunk.isEmpty then break
+          if chunk.isEmpty then
+            throw (IO.userError s!"tar: file {relPath} shorter than expected ({remaining} bytes remaining)")
           output.write chunk
           remaining := remaining - chunk.size
       let pad := paddingFor entry.size
@@ -201,7 +218,7 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit 
   repeat do
     let block ← input.read 512
     if block.size < 512 then break
-    match parseHeader block with
+    match ← parseHeader block with
     | none => break
     | some entry =>
       -- Path safety: reject absolute paths and .. segments
@@ -218,7 +235,8 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit 
           while remaining > 0 do
             let toRead := min remaining 65536
             let chunk ← input.read toRead.toUSize
-            if chunk.isEmpty then break
+            if chunk.isEmpty then
+              throw (IO.userError s!"tar: unexpected end of archive reading {entry.path} ({remaining} bytes remaining)")
             h.write chunk
             remaining := remaining - chunk.size
         let pad := paddingFor entry.size
@@ -231,7 +249,7 @@ partial def list (input : IO.FS.Stream) : IO (Array Entry) := do
   repeat do
     let block ← input.read 512
     if block.size < 512 then break
-    match parseHeader block with
+    match ← parseHeader block with
     | none => break
     | some entry =>
       entries := entries.push entry
@@ -241,7 +259,8 @@ partial def list (input : IO.FS.Stream) : IO (Array Entry) := do
       while skipped < dataSize do
         let toRead := min (dataSize - skipped) 65536
         let chunk ← input.read toRead.toUSize
-        if chunk.isEmpty then break
+        if chunk.isEmpty then
+          throw (IO.userError s!"tar: unexpected end of archive skipping {entry.path}")
         skipped := skipped + chunk.size
   return entries
 
