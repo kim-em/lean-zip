@@ -5,9 +5,10 @@ namespace Gzip
 @[extern "lean_gzip_compress"]
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
-/-- Decompress gzip data. Also handles concatenated gzip streams and raw zlib data. -/
+/-- Decompress gzip data. Also handles concatenated gzip streams and raw zlib data.
+    `maxDecompressedSize` limits output size (0 = no limit). -/
 @[extern "lean_gzip_decompress"]
-opaque decompress (data : @& ByteArray) : IO ByteArray
+opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
 -- Streaming compression
 

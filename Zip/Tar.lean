@@ -1,5 +1,6 @@
 import Zip.Binary
 import Zip.Gzip
+import Zip.Handle
 
 namespace Tar
 
@@ -21,6 +22,8 @@ structure Entry where
 def typeRegular : UInt8 := 0x30  -- '0'
 /-- Typeflag for directory. -/
 def typeDirectory : UInt8 := 0x35  -- '5'
+/-- Typeflag for symbolic link. -/
+def typeSymlink : UInt8 := 0x32  -- '2'
 /-- GNU typeflag for long name. -/
 def typeGnuLongName : UInt8 := 0x4C  -- 'L'
 /-- GNU typeflag for long link. -/
@@ -71,12 +74,17 @@ private def hdrPrefix   := (345, 155)
     let mut lenVal := 0
     let mut lenEnd := pos
     let mut validLen := true
+    let mut digitCount := 0
     while lenEnd < data.size do
       let b := data[lenEnd]!
       if b == ' '.toNat.toUInt8 then
         lenEnd := lenEnd + 1
         break
       if b >= '0'.toNat.toUInt8 && b <= '9'.toNat.toUInt8 then
+        digitCount := digitCount + 1
+        if digitCount > 20 then  -- no legitimate PAX length exceeds 20 digits
+          validLen := false
+          break
         lenVal := lenVal * 10 + (b - '0'.toNat.toUInt8).toNat
       else
         validLen := false
@@ -91,12 +99,14 @@ private def hdrPrefix   := (345, 155)
       if data[eqPos]! == '='.toNat.toUInt8 then break
       eqPos := eqPos + 1
     if eqPos < recordEnd then
-      let key := String.fromUTF8! (data.extract lenEnd eqPos)
+      let keyBytes := data.extract lenEnd eqPos
       -- Value runs from after '=' to before trailing newline
       let valueEnd := if recordEnd > 0 && data[recordEnd - 1]! == '\n'.toNat.toUInt8
                        then recordEnd - 1 else recordEnd
-      let value := String.fromUTF8! (data.extract (eqPos + 1) valueEnd)
-      records := records.push (key, value)
+      let valueBytes := data.extract (eqPos + 1) valueEnd
+      -- Skip records with invalid UTF-8 rather than panicking
+      if let (some key, some value) := (String.fromUTF8? keyBytes, String.fromUTF8? valueBytes) then
+        records := records.push (key, value)
     pos := recordEnd
   return records
 
@@ -143,6 +153,17 @@ def paddingFor (size : UInt64) : Nat :=
   let rem := size.toNat % 512
   if rem == 0 then 0 else 512 - rem
 
+/-- Read exactly `n` bytes from a stream, looping on short reads.
+    Returns fewer bytes only at true EOF. -/
+private partial def readExact (input : IO.FS.Stream) (n : Nat) : IO ByteArray := do
+  let mut buf := ByteArray.empty
+  while buf.size < n do
+    let remaining := n - buf.size
+    let chunk ← input.read remaining.toUSize
+    if chunk.isEmpty then return buf
+    buf := buf ++ chunk
+  return buf
+
 /-- Read entry data from a stream (for GNU long name / PAX headers). -/
 private partial def readEntryData (input : IO.FS.Stream) (size : Nat) : IO ByteArray := do
   let mut result := ByteArray.empty
@@ -154,12 +175,15 @@ private partial def readEntryData (input : IO.FS.Stream) (size : Nat) : IO ByteA
       throw (IO.userError "tar: unexpected end of archive reading entry data")
     result := result ++ chunk
     remaining := remaining - chunk.size
-  -- Skip padding
+  -- Skip padding (loop to handle short reads from pipes/fragmenting streams)
   let pad := paddingFor size.toUInt64
   if pad > 0 then
-    let padData ← input.read pad.toUSize
-    if padData.size < pad then
-      throw (IO.userError "tar: unexpected end of archive reading padding")
+    let mut padRemaining := pad
+    while padRemaining > 0 do
+      let chunk ← input.read (min padRemaining 512).toUSize
+      if chunk.isEmpty then
+        throw (IO.userError "tar: unexpected end of archive reading padding")
+      padRemaining := padRemaining - chunk.size
   return result
 
 /-- Split a path into (prefix, name) for UStar format.
@@ -194,11 +218,7 @@ def splitPath (path : String) : Option (String × String) := Id.run do
   return sum
 
 -- Helper to write fields into a header at a given offset
-private def writeField (hdr : ByteArray) (offset : Nat) (field : ByteArray) : ByteArray := Id.run do
-  let mut h := hdr
-  for i in [:field.size] do
-    h := h.set! (offset + i) field[i]!
-  return h
+private def writeField := Binary.writeField
 
 -- Maximum value representable in an 11-digit octal field (used by size/mtime)
 private def maxOctalValue : UInt64 := 0o77777777777  -- 8589934591
@@ -322,7 +342,7 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
     throw (IO.userError "tar: header checksum mismatch")
   -- Validate UStar magic (accept both "ustar\0" and "ustar " for compatibility)
   let magic := Binary.readString block hdrMagic.1 hdrMagic.2
-  unless magic == "ustar" do
+  unless magic == "ustar" || magic == "ustar " do
     throw (IO.userError s!"tar: unsupported format (magic: {magic})")
   let name := Binary.readString block hdrName.1 hdrName.2
   let pfx := Binary.readString block hdrPrefix.1 hdrPrefix.2
@@ -339,14 +359,6 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
     uname := Binary.readString block hdrUname.1 hdrUname.2
     gname := Binary.readString block hdrGname.1 hdrGname.2
   }
-
-/-- Check if a path is safe for extraction (no `..` segments, not absolute). -/
-private def isPathSafe (path : String) : Bool := Id.run do
-  if path.startsWith "/" then return false
-  let components := path.splitOn "/"
-  for c in components do
-    if c == ".." then return false
-  return true
 
 /-- Create a tar archive from files, writing to output stream.
     `basePath` is stripped from file paths in the archive. -/
@@ -405,17 +417,38 @@ partial def create (output : IO.FS.Stream) (basePath : System.FilePath)
 partial def createFromDir (output : IO.FS.Stream) (dir : System.FilePath) : IO Unit := do
   let files ← dir.walkDir
   -- Sort for deterministic order
-  let sorted := files.insertionSort (·.toString < ·.toString)
+  let sorted := files.qsort (·.toString < ·.toString)
   create output dir sorted
 
-/-- Extract a tar archive from input stream to output directory.
-    Handles UStar, GNU long name/link, and PAX extended headers. -/
-partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit := do
+/-- Strip trailing NUL bytes from a byte array. -/
+private def stripTrailingNuls (data : ByteArray) : ByteArray :=
+  let n := Id.run do
+    let mut n := data.size
+    while n > 0 && data[n - 1]! == 0 do n := n - 1
+    return n
+  data.extract 0 n
+
+/-- Skip past entry data and padding in the input stream. -/
+private partial def skipEntryData (input : IO.FS.Stream) (size : UInt64) : IO Unit := do
+  let dataSize := size.toNat + paddingFor size
+  let mut skipped := 0
+  while skipped < dataSize do
+    let toRead := min (dataSize - skipped) 65536
+    let chunk ← input.read toRead.toUSize
+    if chunk.isEmpty then break
+    skipped := skipped + chunk.size
+
+/-- Iterate over entries in a tar archive stream, resolving GNU long name/link
+    and PAX extended/global headers. Calls `f` for each resolved entry.
+    The callback must consume `entry.size` bytes of data plus padding from
+    the input stream (use `skipEntryData` to discard unwanted data). -/
+private partial def forEntries (input : IO.FS.Stream)
+    (f : Entry → IO Unit) : IO Unit := do
   let mut gnuLongName : Option String := none
   let mut gnuLongLink : Option String := none
   let mut paxOverrides : Option (Array (String × String)) := none
   repeat do
-    let block ← input.read 512
+    let block ← readExact input 512
     if block.size < 512 then break
     match ← parseHeader block with
     | none => break
@@ -423,19 +456,19 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit 
       -- GNU long name: read data as the name for the next entry
       if entry.typeflag == typeGnuLongName then
         let nameData ← readEntryData input entry.size.toNat
-        let name := String.fromUTF8! (nameData.extract 0 (Id.run do
-          let mut n := nameData.size
-          while n > 0 && nameData[n - 1]! == 0 do n := n - 1
-          return n))
+        let nameBytes := stripTrailingNuls nameData
+        let name := match String.fromUTF8? nameBytes with
+          | some s => s
+          | none => Binary.fromLatin1 nameBytes
         gnuLongName := some name
         continue
       -- GNU long link: read data as the linkname for the next entry
       if entry.typeflag == typeGnuLongLink then
         let linkData ← readEntryData input entry.size.toNat
-        let link := String.fromUTF8! (linkData.extract 0 (Id.run do
-          let mut n := linkData.size
-          while n > 0 && linkData[n - 1]! == 0 do n := n - 1
-          return n))
+        let linkBytes := stripTrailingNuls linkData
+        let link := match String.fromUTF8? linkBytes with
+          | some s => s
+          | none => Binary.fromLatin1 linkBytes
         gnuLongLink := some link
         continue
       -- PAX extended header: parse records for the next entry
@@ -458,90 +491,71 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath) : IO Unit 
       if let some records := paxOverrides then
         e := applyPaxOverrides e records
         paxOverrides := none
-      -- Path safety: reject absolute paths and .. segments
-      unless isPathSafe e.path do
-        throw (IO.userError s!"tar: unsafe path: {e.path}")
-      let outPath := outDir / e.path
-      if e.typeflag == typeDirectory then
-        IO.FS.createDirAll outPath
-      else
-        if let some parent := outPath.parent then
-          IO.FS.createDirAll parent
-        IO.FS.withFile outPath .write fun h => do
-          let mut remaining := e.size.toNat
-          while remaining > 0 do
-            let toRead := min remaining 65536
-            let chunk ← input.read toRead.toUSize
-            if chunk.isEmpty then
-              throw (IO.userError s!"tar: unexpected end of archive reading {e.path} ({remaining} bytes remaining)")
-            h.write chunk
-            remaining := remaining - chunk.size
-        let pad := paddingFor e.size
-        if pad > 0 then
-          let _ ← input.read pad.toUSize
+      f e
+
+/-- Extract a tar archive from input stream to output directory.
+    Handles UStar, GNU long name/link, and PAX extended headers.
+    Skips unsupported entry types (symlinks, hardlinks, devices). -/
+partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
+    (maxEntrySize : UInt64 := 0) : IO Unit := do
+  forEntries input fun e => do
+    -- Strip trailing slash for path safety check (directories end with "/")
+    let checkPath := if e.path.endsWith "/" then e.path.dropEnd 1 |>.toString else e.path
+    unless Binary.isPathSafe checkPath do
+      throw (IO.userError s!"tar: unsafe path: {e.path}")
+    if maxEntrySize > 0 && e.size > maxEntrySize then
+      throw (IO.userError s!"tar: entry '{e.path}' size ({e.size}) exceeds limit ({maxEntrySize})")
+    let outPath := outDir / e.path
+    -- Strip setuid/setgid/sticky, keep only rwxrwxrwx
+    let mode := e.mode &&& 0o777
+    if e.typeflag == typeDirectory then
+      IO.FS.createDirAll outPath
+      if mode != 0 then
+        IO.Prim.setAccessRights outPath mode
+      skipEntryData input e.size
+    else if e.typeflag == typeRegular then
+      if let some parent := outPath.parent then
+        IO.FS.createDirAll parent
+      IO.FS.withFile outPath .write fun h => do
+        let mut remaining := e.size.toNat
+        while remaining > 0 do
+          let toRead := min remaining 65536
+          let chunk ← input.read toRead.toUSize
+          if chunk.isEmpty then
+            throw (IO.userError s!"tar: unexpected end of archive reading {e.path} ({remaining} bytes remaining)")
+          h.write chunk
+          remaining := remaining - chunk.size
+      if mode != 0 then
+        IO.Prim.setAccessRights outPath mode
+      let pad := paddingFor e.size
+      if pad > 0 then
+        let mut padRemaining := pad
+        while padRemaining > 0 do
+          let chunk ← input.read (min padRemaining 512).toUSize
+          if chunk.isEmpty then break
+          padRemaining := padRemaining - chunk.size
+    else if e.typeflag == typeSymlink then
+      -- Component-level validation: reject absolute, backslash, and `..` traversal
+      if e.linkname.startsWith "/" || e.linkname.any (· == '\\') then
+        throw (IO.userError s!"tar: unsafe symlink target: {e.linkname}")
+      if e.linkname.splitOn "/" |>.any (· == "..") then
+        throw (IO.userError s!"tar: unsafe symlink target: {e.linkname}")
+      if let some parent := outPath.parent then
+        IO.FS.createDirAll parent
+      Handle.createSymlink e.linkname outPath.toString
+      skipEntryData input e.size
+    else
+      -- Skip unsupported entry types (hardlinks, devices, etc.)
+      skipEntryData input e.size
 
 /-- List entries in a tar archive without extracting.
     Handles UStar, GNU long name/link, and PAX extended headers. -/
 partial def list (input : IO.FS.Stream) : IO (Array Entry) := do
-  let mut entries := #[]
-  let mut gnuLongName : Option String := none
-  let mut gnuLongLink : Option String := none
-  let mut paxOverrides : Option (Array (String × String)) := none
-  repeat do
-    let block ← input.read 512
-    if block.size < 512 then break
-    match ← parseHeader block with
-    | none => break
-    | some entry =>
-      -- GNU long name
-      if entry.typeflag == typeGnuLongName then
-        let nameData ← readEntryData input entry.size.toNat
-        let name := String.fromUTF8! (nameData.extract 0 (Id.run do
-          let mut n := nameData.size
-          while n > 0 && nameData[n - 1]! == 0 do n := n - 1
-          return n))
-        gnuLongName := some name
-        continue
-      -- GNU long link
-      if entry.typeflag == typeGnuLongLink then
-        let linkData ← readEntryData input entry.size.toNat
-        let link := String.fromUTF8! (linkData.extract 0 (Id.run do
-          let mut n := linkData.size
-          while n > 0 && linkData[n - 1]! == 0 do n := n - 1
-          return n))
-        gnuLongLink := some link
-        continue
-      -- PAX extended header
-      if entry.typeflag == typePaxExtended then
-        let paxData ← readEntryData input entry.size.toNat
-        paxOverrides := some (parsePaxRecords paxData)
-        continue
-      -- PAX global header: skip
-      if entry.typeflag == typePaxGlobal then
-        let _ ← readEntryData input entry.size.toNat
-        continue
-      -- Apply GNU/PAX overrides
-      let mut e := entry
-      if let some name := gnuLongName then
-        e := { e with path := name }
-        gnuLongName := none
-      if let some link := gnuLongLink then
-        e := { e with linkname := link }
-        gnuLongLink := none
-      if let some records := paxOverrides then
-        e := applyPaxOverrides e records
-        paxOverrides := none
-      entries := entries.push e
-      -- Skip past file data + padding
-      let dataSize := e.size.toNat + paddingFor e.size
-      let mut skipped := 0
-      while skipped < dataSize do
-        let toRead := min (dataSize - skipped) 65536
-        let chunk ← input.read toRead.toUSize
-        if chunk.isEmpty then
-          throw (IO.userError s!"tar: unexpected end of archive skipping {e.path}")
-        skipped := skipped + chunk.size
-  return entries
+  let entriesRef ← IO.mkRef (#[] : Array Entry)
+  forEntries input fun e => do
+    entriesRef.modify (·.push e)
+    skipEntryData input e.size
+  entriesRef.get
 
 -- .tar.gz composition
 
@@ -570,7 +584,8 @@ partial def createTarGz (outputPath : System.FilePath) (dir : System.FilePath)
 
 /-- Extract a .tar.gz archive.
     True streaming — bounded memory regardless of archive size. -/
-partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath) : IO Unit := do
+partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath)
+    (maxEntrySize : UInt64 := 0) : IO Unit := do
   IO.FS.withFile inputPath .read fun inH => do
     let inStream := IO.FS.Stream.ofHandle inH
     let inflate ← Gzip.InflateState.new
@@ -598,6 +613,6 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
       putStr := fun _ => pure ()
       isTty := pure false
     }
-    extract tarStream outDir
+    extract tarStream outDir maxEntrySize
 
 end Tar

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <limits.h>
 
 /*
  * Helper: create a Lean ByteArray from a buffer.
@@ -61,8 +62,152 @@ static size_t initial_decompress_buf(size_t src_len) {
     return src_len; /* src_len is already huge, don't multiply */
 }
 
+/* ========================================================================
+ * Shared compression/decompression helpers
+ * ======================================================================== */
+
 /*
- * Raw deflate compression (zlib format, no gzip header).
+ * Shared whole-buffer compression using deflateInit2/deflate/Z_FINISH.
+ * Used by gzip and raw deflate; zlib uses the simpler compress2 API.
+ */
+static lean_obj_res compress_deflate(const char *label, int windowBits,
+                                      const uint8_t *src, size_t src_len, int level) {
+    char errbuf[256];
+
+    /* Guard against silent truncation: zlib's avail_in is uInt (32-bit) */
+    if (src_len > UINT_MAX) {
+        snprintf(errbuf, sizeof(errbuf),
+                 "%s: input too large for whole-buffer API (%zu bytes > 4GB); use streaming instead",
+                 label, src_len);
+        return mk_io_error(errbuf);
+    }
+
+    z_stream strm;
+    memset(&strm, 0, sizeof(strm));
+    int ret = deflateInit2(&strm, level, Z_DEFLATED, windowBits, 8, Z_DEFAULT_STRATEGY);
+    if (ret != Z_OK) {
+        snprintf(errbuf, sizeof(errbuf), "%s: deflateInit2", label);
+        return mk_zlib_error(errbuf, ret, strm.msg);
+    }
+
+    size_t buf_size = deflateBound(&strm, src_len);
+    /* Allocate Lean ByteArray directly — no intermediate copy */
+    lean_obj_res arr = lean_alloc_sarray(1, 0, buf_size);
+    uint8_t *buf = lean_sarray_cptr(arr);
+
+    strm.next_in = (Bytef *)src;
+    strm.avail_in = (uInt)src_len;
+    strm.next_out = buf;
+    strm.avail_out = (buf_size <= UINT_MAX) ? (uInt)buf_size : UINT_MAX;
+
+    ret = deflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END) {
+        lean_dec_ref(arr);
+        deflateEnd(&strm);
+        snprintf(errbuf, sizeof(errbuf), "%s: deflate", label);
+        return mk_zlib_error(errbuf, ret, strm.msg);
+    }
+
+    size_t out_len = buf_size - strm.avail_out;
+    deflateEnd(&strm);
+
+    lean_sarray_set_size(arr, out_len);
+    return lean_io_result_mk_ok(arr);
+}
+
+/*
+ * Shared whole-buffer decompression using inflateInit2/inflate.
+ * When handle_concat is true, handles concatenated streams (gzip members)
+ * by resetting inflate after each Z_STREAM_END while input remains.
+ */
+static lean_obj_res decompress_inflate(const char *label, int windowBits,
+                                        const uint8_t *src, size_t src_len,
+                                        int handle_concat, uint64_t max_output) {
+    char errbuf[256];
+
+    /* Guard against silent truncation: zlib's avail_in is uInt (32-bit) */
+    if (src_len > UINT_MAX) {
+        snprintf(errbuf, sizeof(errbuf),
+                 "%s: input too large for whole-buffer API (%zu bytes > 4GB); use streaming instead",
+                 label, src_len);
+        return mk_io_error(errbuf);
+    }
+
+    z_stream strm;
+    memset(&strm, 0, sizeof(strm));
+    int ret = inflateInit2(&strm, windowBits);
+    if (ret != Z_OK) {
+        snprintf(errbuf, sizeof(errbuf), "%s: inflateInit2", label);
+        return mk_zlib_error(errbuf, ret, strm.msg);
+    }
+
+    strm.next_in = (Bytef *)src;
+    strm.avail_in = (uInt)src_len;
+
+    size_t buf_size = initial_decompress_buf(src_len);
+    uint8_t *buf = (uint8_t *)malloc(buf_size);
+    if (!buf) {
+        inflateEnd(&strm);
+        snprintf(errbuf, sizeof(errbuf), "%s: out of memory", label);
+        return mk_io_error(errbuf);
+    }
+    size_t total = 0;
+
+    for (;;) {
+        do {
+            if (total >= buf_size) {
+                buf = grow_buffer(buf, &buf_size);
+                if (!buf) {
+                    inflateEnd(&strm);
+                    snprintf(errbuf, sizeof(errbuf), "%s: out of memory", label);
+                    return mk_io_error(errbuf);
+                }
+            }
+            strm.next_out = buf + total;
+            size_t avail = buf_size - total;
+            uInt avail_out_initial = (avail <= UINT_MAX) ? (uInt)avail : UINT_MAX;
+            strm.avail_out = avail_out_initial;
+            ret = inflate(&strm, Z_NO_FLUSH);
+            if (ret != Z_OK && ret != Z_STREAM_END) {
+                free(buf);
+                inflateEnd(&strm);
+                return mk_zlib_error(label, ret, strm.msg);
+            }
+            total += (avail_out_initial - strm.avail_out);
+            if (max_output > 0 && total > max_output) {
+                free(buf);
+                inflateEnd(&strm);
+                snprintf(errbuf, sizeof(errbuf),
+                         "%s: decompressed size exceeds limit (%llu bytes)",
+                         label, (unsigned long long)max_output);
+                return mk_io_error(errbuf);
+            }
+        } while (ret != Z_STREAM_END);
+
+        if (!handle_concat || strm.avail_in == 0) break;
+
+        ret = inflateReset(&strm);
+        if (ret != Z_OK) {
+            free(buf);
+            inflateEnd(&strm);
+            snprintf(errbuf, sizeof(errbuf), "%s: inflateReset", label);
+            return mk_zlib_error(errbuf, ret, strm.msg);
+        }
+    }
+
+    inflateEnd(&strm);
+
+    lean_obj_res result = mk_byte_array(buf, total);
+    free(buf);
+    return lean_io_result_mk_ok(result);
+}
+
+/* ========================================================================
+ * Whole-buffer compression/decompression
+ * ======================================================================== */
+
+/*
+ * Zlib compression (uses the simpler compress2 API).
  *
  * lean_zlib_compress : @& ByteArray → UInt8 → IO ByteArray
  */
@@ -70,195 +215,42 @@ LEAN_EXPORT lean_obj_res lean_zlib_compress(b_lean_obj_arg data, uint8_t level, 
     const uint8_t *src = lean_sarray_cptr(data);
     size_t src_len = lean_sarray_size(data);
 
-    uLongf dest_len = compressBound(src_len);
-    uint8_t *dest = (uint8_t *)malloc(dest_len);
-    if (!dest) {
-        return mk_io_error("zlib compress: out of memory");
+    /* Guard: compress2 internally uses uInt for avail_in */
+    if (src_len > UINT_MAX) {
+        return mk_io_error("zlib compress: input too large for whole-buffer API (> 4GB); use streaming instead");
     }
+
+    uLongf dest_len = compressBound(src_len);
+    /* Allocate Lean ByteArray directly — no intermediate copy */
+    lean_obj_res arr = lean_alloc_sarray(1, 0, dest_len);
+    uint8_t *dest = lean_sarray_cptr(arr);
 
     int ret = compress2(dest, &dest_len, src, src_len, (int)level);
     if (ret != Z_OK) {
-        free(dest);
+        lean_dec_ref(arr);
         return mk_zlib_error("zlib compress", ret, NULL);
     }
 
-    lean_obj_res result = mk_byte_array(dest, dest_len);
-    free(dest);
-    return lean_io_result_mk_ok(result);
+    lean_sarray_set_size(arr, dest_len);
+    return lean_io_result_mk_ok(arr);
 }
 
-/*
- * Raw deflate decompression (zlib format).
- *
- * We don't know the uncompressed size ahead of time, so we grow the buffer.
- *
- * lean_zlib_decompress : @& ByteArray → IO ByteArray
- */
-LEAN_EXPORT lean_obj_res lean_zlib_decompress(b_lean_obj_arg data, lean_obj_arg _w) {
-    const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    int ret = inflateInit(&strm);
-    if (ret != Z_OK) {
-        return mk_zlib_error("zlib decompress: inflateInit", ret, strm.msg);
-    }
-
-    strm.next_in = (Bytef *)src;
-    strm.avail_in = src_len;
-
-    size_t buf_size = initial_decompress_buf(src_len);
-    uint8_t *buf = (uint8_t *)malloc(buf_size);
-    if (!buf) {
-        inflateEnd(&strm);
-        return mk_io_error("zlib decompress: out of memory");
-    }
-    size_t total = 0;
-
-    do {
-        if (total >= buf_size) {
-            buf = grow_buffer(buf, &buf_size);
-            if (!buf) {
-                inflateEnd(&strm);
-                return mk_io_error("zlib decompress: out of memory");
-            }
-        }
-        strm.next_out = buf + total;
-        strm.avail_out = buf_size - total;
-        ret = inflate(&strm, Z_NO_FLUSH);
-        if (ret != Z_OK && ret != Z_STREAM_END) {
-            free(buf);
-            inflateEnd(&strm);
-            return mk_zlib_error("zlib decompress", ret, strm.msg);
-        }
-        total = buf_size - strm.avail_out;
-    } while (ret != Z_STREAM_END);
-
-    inflateEnd(&strm);
-
-    lean_obj_res result = mk_byte_array(buf, total);
-    free(buf);
-    return lean_io_result_mk_ok(result);
+/* lean_zlib_decompress : @& ByteArray → UInt64 → IO ByteArray */
+LEAN_EXPORT lean_obj_res lean_zlib_decompress(b_lean_obj_arg data, uint64_t max_output, lean_obj_arg _w) {
+    return decompress_inflate("zlib decompress", MAX_WBITS,
+                               lean_sarray_cptr(data), lean_sarray_size(data), 0, max_output);
 }
 
-/*
- * Gzip compression (with gzip header/trailer).
- *
- * Uses deflateInit2 with MAX_WBITS + 16 to produce gzip format.
- *
- * lean_gzip_compress : @& ByteArray → UInt8 → IO ByteArray
- */
+/* lean_gzip_compress : @& ByteArray → UInt8 → IO ByteArray */
 LEAN_EXPORT lean_obj_res lean_gzip_compress(b_lean_obj_arg data, uint8_t level, lean_obj_arg _w) {
-    const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    int ret = deflateInit2(&strm, (int)level, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY);
-    if (ret != Z_OK) {
-        return mk_zlib_error("gzip compress: deflateInit2", ret, strm.msg);
-    }
-
-    size_t buf_size = deflateBound(&strm, src_len);
-    uint8_t *buf = (uint8_t *)malloc(buf_size);
-    if (!buf) {
-        deflateEnd(&strm);
-        return mk_io_error("gzip compress: out of memory");
-    }
-
-    strm.next_in = (Bytef *)src;
-    strm.avail_in = src_len;
-    strm.next_out = buf;
-    strm.avail_out = buf_size;
-
-    ret = deflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END) {
-        free(buf);
-        deflateEnd(&strm);
-        return mk_zlib_error("gzip compress: deflate", ret, strm.msg);
-    }
-
-    size_t out_len = buf_size - strm.avail_out;
-    deflateEnd(&strm);
-
-    lean_obj_res result = mk_byte_array(buf, out_len);
-    free(buf);
-    return lean_io_result_mk_ok(result);
+    return compress_deflate("gzip compress", MAX_WBITS + 16,
+                             lean_sarray_cptr(data), lean_sarray_size(data), (int)level);
 }
 
-/*
- * Gzip decompression (handles gzip header/trailer).
- *
- * Uses inflateInit2 with MAX_WBITS + 32 to auto-detect zlib or gzip format.
- * Handles concatenated gzip streams by resetting inflate after each Z_STREAM_END
- * while input remains.
- *
- * lean_gzip_decompress : @& ByteArray → IO ByteArray
- */
-LEAN_EXPORT lean_obj_res lean_gzip_decompress(b_lean_obj_arg data, lean_obj_arg _w) {
-    const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    /* MAX_WBITS + 32 = auto-detect gzip or zlib */
-    int ret = inflateInit2(&strm, MAX_WBITS + 32);
-    if (ret != Z_OK) {
-        return mk_zlib_error("gzip decompress: inflateInit2", ret, strm.msg);
-    }
-
-    strm.next_in = (Bytef *)src;
-    strm.avail_in = src_len;
-
-    size_t buf_size = initial_decompress_buf(src_len);
-    uint8_t *buf = (uint8_t *)malloc(buf_size);
-    if (!buf) {
-        inflateEnd(&strm);
-        return mk_io_error("gzip decompress: out of memory");
-    }
-    size_t total = 0;
-
-    for (;;) {
-        /* Inflate current stream until Z_STREAM_END */
-        do {
-            if (total >= buf_size) {
-                buf = grow_buffer(buf, &buf_size);
-                if (!buf) {
-                    inflateEnd(&strm);
-                    return mk_io_error("gzip decompress: out of memory");
-                }
-            }
-            strm.next_out = buf + total;
-            strm.avail_out = buf_size - total;
-            ret = inflate(&strm, Z_NO_FLUSH);
-            if (ret != Z_OK && ret != Z_STREAM_END) {
-                free(buf);
-                inflateEnd(&strm);
-                return mk_zlib_error("gzip decompress", ret, strm.msg);
-            }
-            total = buf_size - strm.avail_out;
-        } while (ret != Z_STREAM_END);
-
-        /* If no more input, we're done */
-        if (strm.avail_in == 0) break;
-
-        /* More input remains: this is a concatenated gzip stream.
-         * Reset inflate to process the next member (preserves window bits
-         * from the original inflateInit2). */
-        ret = inflateReset(&strm);
-        if (ret != Z_OK) {
-            free(buf);
-            inflateEnd(&strm);
-            return mk_zlib_error("gzip decompress: inflateReset", ret, strm.msg);
-        }
-    }
-
-    inflateEnd(&strm);
-
-    lean_obj_res result = mk_byte_array(buf, total);
-    free(buf);
-    return lean_io_result_mk_ok(result);
+/* lean_gzip_decompress : @& ByteArray → UInt64 → IO ByteArray (handles concatenated members) */
+LEAN_EXPORT lean_obj_res lean_gzip_decompress(b_lean_obj_arg data, uint64_t max_output, lean_obj_arg _w) {
+    return decompress_inflate("gzip decompress", MAX_WBITS + 32,
+                               lean_sarray_cptr(data), lean_sarray_size(data), 1, max_output);
 }
 
 /* ========================================================================
@@ -337,8 +329,11 @@ LEAN_EXPORT lean_obj_res lean_gzip_deflate_push(b_lean_obj_arg state_obj,
     deflate_state *s = (deflate_state *)lean_get_external_data(state_obj);
     if (s->finished) return mk_io_error("gzip deflate push: stream already finished");
 
+    size_t chunk_len = lean_sarray_size(chunk);
+    if (chunk_len > UINT_MAX)
+        return mk_io_error("gzip deflate push: chunk too large (> 4GB)");
     s->strm.next_in = (Bytef *)lean_sarray_cptr(chunk);
-    s->strm.avail_in = lean_sarray_size(chunk);
+    s->strm.avail_in = (uInt)chunk_len;
 
     size_t buf_size = 65536;
     uint8_t *buf = (uint8_t *)malloc(buf_size);
@@ -353,13 +348,15 @@ LEAN_EXPORT lean_obj_res lean_gzip_deflate_push(b_lean_obj_arg state_obj,
             if (!buf) return mk_io_error("gzip deflate push: out of memory");
         }
         s->strm.next_out = buf + total;
-        s->strm.avail_out = buf_size - total;
+        size_t avail = buf_size - total;
+        uInt avail_out_initial = (avail <= UINT_MAX) ? (uInt)avail : UINT_MAX;
+        s->strm.avail_out = avail_out_initial;
         ret = deflate(&s->strm, Z_NO_FLUSH);
         if (ret != Z_OK && ret != Z_BUF_ERROR) {
             free(buf);
             return mk_zlib_error("gzip deflate push", ret, s->strm.msg);
         }
-        total = buf_size - s->strm.avail_out;
+        total += (avail_out_initial - s->strm.avail_out);
     }
 
     lean_obj_res result = mk_byte_array(buf, total);
@@ -394,13 +391,15 @@ LEAN_EXPORT lean_obj_res lean_gzip_deflate_finish(b_lean_obj_arg state_obj, lean
             if (!buf) return mk_io_error("gzip deflate finish: out of memory");
         }
         s->strm.next_out = buf + total;
-        s->strm.avail_out = buf_size - total;
+        size_t avail = buf_size - total;
+        uInt avail_out_initial = (avail <= UINT_MAX) ? (uInt)avail : UINT_MAX;
+        s->strm.avail_out = avail_out_initial;
         ret = deflate(&s->strm, Z_FINISH);
         if (ret != Z_OK && ret != Z_STREAM_END) {
             free(buf);
             return mk_zlib_error("gzip deflate finish", ret, s->strm.msg);
         }
-        total = buf_size - s->strm.avail_out;
+        total += (avail_out_initial - s->strm.avail_out);
     } while (ret != Z_STREAM_END);
 
     deflateEnd(&s->strm);
@@ -445,8 +444,11 @@ LEAN_EXPORT lean_obj_res lean_gzip_inflate_push(b_lean_obj_arg state_obj,
     inflate_state *s = (inflate_state *)lean_get_external_data(state_obj);
     if (s->finished) return mk_io_error("gzip inflate push: stream already finished");
 
+    size_t chunk_len = lean_sarray_size(chunk);
+    if (chunk_len > UINT_MAX)
+        return mk_io_error("gzip inflate push: chunk too large (> 4GB)");
     s->strm.next_in = (Bytef *)lean_sarray_cptr(chunk);
-    s->strm.avail_in = lean_sarray_size(chunk);
+    s->strm.avail_in = (uInt)chunk_len;
 
     size_t buf_size = 65536;
     uint8_t *buf = (uint8_t *)malloc(buf_size);
@@ -464,13 +466,15 @@ LEAN_EXPORT lean_obj_res lean_gzip_inflate_push(b_lean_obj_arg state_obj,
                 if (!buf) return mk_io_error("gzip inflate push: out of memory");
             }
             s->strm.next_out = buf + total;
-            s->strm.avail_out = buf_size - total;
+            size_t avail = buf_size - total;
+            uInt avail_out_initial = (avail <= UINT_MAX) ? (uInt)avail : UINT_MAX;
+            s->strm.avail_out = avail_out_initial;
             ret = inflate(&s->strm, Z_NO_FLUSH);
             if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) {
                 free(buf);
                 return mk_zlib_error("gzip inflate push", ret, s->strm.msg);
             }
-            total = buf_size - s->strm.avail_out;
+            total += (avail_out_initial - s->strm.avail_out);
         } while (ret != Z_STREAM_END && s->strm.avail_in > 0 && s->strm.avail_out == 0);
 
         if (ret == Z_STREAM_END) {
@@ -525,126 +529,57 @@ LEAN_EXPORT lean_obj_res lean_gzip_inflate_finish(b_lean_obj_arg state_obj, lean
 
 /*
  * CRC32 checksum (incremental). Initial value should be 0.
+ * Pure function — no IO.
  *
- * lean_zlib_crc32 : UInt32 → @& ByteArray → IO UInt32
+ * lean_zlib_crc32 : UInt32 → @& ByteArray → UInt32
  */
-LEAN_EXPORT lean_obj_res lean_zlib_crc32(uint32_t init, b_lean_obj_arg data, lean_obj_arg _w) {
+LEAN_EXPORT uint32_t lean_zlib_crc32(uint32_t init, b_lean_obj_arg data) {
     const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-    uint32_t result = crc32(init, src, src_len);
-    return lean_io_result_mk_ok(lean_box_uint32(result));
+    size_t remaining = lean_sarray_size(data);
+    uint32_t crc = init;
+    /* Loop over UINT_MAX-sized chunks: zlib's crc32 takes uInt length */
+    while (remaining > 0) {
+        uInt chunk = (remaining > UINT_MAX) ? UINT_MAX : (uInt)remaining;
+        crc = crc32(crc, src, chunk);
+        src += chunk;
+        remaining -= chunk;
+    }
+    return crc;
 }
 
 /*
  * Adler32 checksum (incremental). Initial value should be 1.
+ * Pure function — no IO.
  *
- * lean_zlib_adler32 : UInt32 → @& ByteArray → IO UInt32
+ * lean_zlib_adler32 : UInt32 → @& ByteArray → UInt32
  */
-LEAN_EXPORT lean_obj_res lean_zlib_adler32(uint32_t init, b_lean_obj_arg data, lean_obj_arg _w) {
+LEAN_EXPORT uint32_t lean_zlib_adler32(uint32_t init, b_lean_obj_arg data) {
     const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-    uint32_t result = adler32(init, src, src_len);
-    return lean_io_result_mk_ok(lean_box_uint32(result));
+    size_t remaining = lean_sarray_size(data);
+    uint32_t a = init;
+    while (remaining > 0) {
+        uInt chunk = (remaining > UINT_MAX) ? UINT_MAX : (uInt)remaining;
+        a = adler32(a, src, chunk);
+        src += chunk;
+        remaining -= chunk;
+    }
+    return a;
 }
 
 /* ========================================================================
  * Raw deflate (no header/trailer, used by ZIP format)
  * ======================================================================== */
 
-/*
- * Raw deflate compression.
- *
- * lean_raw_deflate_compress : @& ByteArray → UInt8 → IO ByteArray
- */
+/* lean_raw_deflate_compress : @& ByteArray → UInt8 → IO ByteArray */
 LEAN_EXPORT lean_obj_res lean_raw_deflate_compress(b_lean_obj_arg data, uint8_t level, lean_obj_arg _w) {
-    const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    int ret = deflateInit2(&strm, (int)level, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
-    if (ret != Z_OK) {
-        return mk_zlib_error("raw deflate compress: deflateInit2", ret, strm.msg);
-    }
-
-    size_t buf_size = deflateBound(&strm, src_len);
-    uint8_t *buf = (uint8_t *)malloc(buf_size);
-    if (!buf) {
-        deflateEnd(&strm);
-        return mk_io_error("raw deflate compress: out of memory");
-    }
-
-    strm.next_in = (Bytef *)src;
-    strm.avail_in = src_len;
-    strm.next_out = buf;
-    strm.avail_out = buf_size;
-
-    ret = deflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END) {
-        free(buf);
-        deflateEnd(&strm);
-        return mk_zlib_error("raw deflate compress: deflate", ret, strm.msg);
-    }
-
-    size_t out_len = buf_size - strm.avail_out;
-    deflateEnd(&strm);
-
-    lean_obj_res result = mk_byte_array(buf, out_len);
-    free(buf);
-    return lean_io_result_mk_ok(result);
+    return compress_deflate("raw deflate compress", -MAX_WBITS,
+                             lean_sarray_cptr(data), lean_sarray_size(data), (int)level);
 }
 
-/*
- * Raw deflate decompression.
- *
- * lean_raw_deflate_decompress : @& ByteArray → IO ByteArray
- */
-LEAN_EXPORT lean_obj_res lean_raw_deflate_decompress(b_lean_obj_arg data, lean_obj_arg _w) {
-    const uint8_t *src = lean_sarray_cptr(data);
-    size_t src_len = lean_sarray_size(data);
-
-    z_stream strm;
-    memset(&strm, 0, sizeof(strm));
-    int ret = inflateInit2(&strm, -MAX_WBITS);
-    if (ret != Z_OK) {
-        return mk_zlib_error("raw deflate decompress: inflateInit2", ret, strm.msg);
-    }
-
-    strm.next_in = (Bytef *)src;
-    strm.avail_in = src_len;
-
-    size_t buf_size = initial_decompress_buf(src_len);
-    uint8_t *buf = (uint8_t *)malloc(buf_size);
-    if (!buf) {
-        inflateEnd(&strm);
-        return mk_io_error("raw deflate decompress: out of memory");
-    }
-    size_t total = 0;
-
-    do {
-        if (total >= buf_size) {
-            buf = grow_buffer(buf, &buf_size);
-            if (!buf) {
-                inflateEnd(&strm);
-                return mk_io_error("raw deflate decompress: out of memory");
-            }
-        }
-        strm.next_out = buf + total;
-        strm.avail_out = buf_size - total;
-        ret = inflate(&strm, Z_NO_FLUSH);
-        if (ret != Z_OK && ret != Z_STREAM_END) {
-            free(buf);
-            inflateEnd(&strm);
-            return mk_zlib_error("raw deflate decompress", ret, strm.msg);
-        }
-        total = buf_size - strm.avail_out;
-    } while (ret != Z_STREAM_END);
-
-    inflateEnd(&strm);
-
-    lean_obj_res result = mk_byte_array(buf, total);
-    free(buf);
-    return lean_io_result_mk_ok(result);
+/* lean_raw_deflate_decompress : @& ByteArray → UInt64 → IO ByteArray */
+LEAN_EXPORT lean_obj_res lean_raw_deflate_decompress(b_lean_obj_arg data, uint64_t max_output, lean_obj_arg _w) {
+    return decompress_inflate("raw deflate decompress", -MAX_WBITS,
+                               lean_sarray_cptr(data), lean_sarray_size(data), 0, max_output);
 }
 
 /*

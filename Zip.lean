@@ -3,6 +3,7 @@ import Zip.Gzip
 import Zip.Checksum
 import Zip.RawDeflate
 import Zip.Binary
+import Zip.Handle
 import Zip.Tar
 import Zip.Archive
 import Zip.Zstd

@@ -5,19 +5,22 @@ lean-zip is a Lean 4 FFI library wrapping zlib and Zstandard, with pure-Lean tar
 ## File layout
 
 ```
-c/zlib_ffi.c          -- zlib C FFI code (~640 lines)
-c/zstd_ffi.c          -- Zstd C FFI code (~350 lines)
+c/zlib_ffi.c          -- zlib C FFI code (~625 lines)
+c/zstd_ffi.c          -- Zstd C FFI code (~430 lines)
+c/io_ffi.c            -- Handle seek/fileSize/symlink shims (~80 lines)
 Zip/Basic.lean        -- Raw zlib compress/decompress declarations
 Zip/Gzip.lean         -- Gzip declarations + streaming + file helpers
 Zip/Checksum.lean     -- CRC32 and Adler32 checksum declarations
 Zip/RawDeflate.lean   -- Raw deflate (no header/trailer) declarations
 Zip/Zstd.lean         -- Zstandard declarations + streaming + file helpers
 Zip/Binary.lean       -- Byte packing helpers (LE integers, octal, strings)
+Zip/Handle.lean       -- IO.FS.Handle seek/fileSize + symlink declarations
 Zip/Tar.lean          -- Tar archive create/extract/list + .tar.gz composition
 Zip/Archive.lean      -- ZIP archive create/extract/list (with ZIP64)
 Zip.lean              -- Re-exports all modules
 lakefile.lean         -- Build config (pkg-config, static libs, extern link)
-Test.lean             -- Roundtrip tests for all API layers
+ZipTest.lean          -- Test runner (imports all test modules)
+ZipTest/              -- 13 test modules (Helpers, unit tests, fixture tests)
 ```
 
 ## Layer 1: Whole-buffer C functions
@@ -146,6 +149,8 @@ Pure Lean, no new C code. Implements UStar format with PAX and GNU extension sup
 
 **Validation**: `parseHeader` verifies the UStar magic and header checksum before accepting a block. Malformed or non-UStar headers are rejected with an error. Truncated archives (short reads during create, extract, or list) raise explicit errors rather than silently producing incomplete results.
 
+**Robust I/O**: all stream reads (headers, entry data, padding) use a looping `readExact` helper that handles short reads from pipes and network streams.
+
 **Path safety**: on extract, paths are rejected if they contain `..` segments or are absolute, preventing zip-slip/tar-slip directory traversal attacks.
 
 ## Layer 7: ZIP archives (`Zip/Archive.lean`)
@@ -154,7 +159,7 @@ Pure Lean, no new C code. Built on Binary, Checksum, and RawDeflate.
 
 **Structure**: local file headers + data (sequential), central directory, end of central directory record. All integers little-endian.
 
-**Creation**: writes sequentially, tracks byte offset as `UInt64`, accumulates central directory entries in memory (small — just metadata), writes CD + EOCD at end. No seeking needed.
+**Creation**: writes sequentially, tracks byte offset as `UInt64`, streams central directory headers directly to output (no accumulation), writes EOCD at end. No seeking needed.
 
 **ZIP64 support**: Entry sizes, compressed sizes, and offsets are stored as `UInt64`. When any value exceeds `0xFFFFFFFF`, ZIP64 extra fields (ID `0x0001`) are emitted in both local and central headers, with 32-bit fields set to the `0xFFFFFFFF` sentinel. If entry count exceeds 65535 or CD offset/size exceeds 4GB, a ZIP64 EOCD record (sig `0x06064b50`) and locator (sig `0x07064b50`) are written before the standard EOCD. Small archives produce identical output to pre-ZIP64 code.
 
@@ -164,18 +169,21 @@ Pure Lean, no new C code. Built on Binary, Checksum, and RawDeflate.
 
 **CRC32 verification**: always verified on extraction.
 
-**Path safety**: paths are rejected if they contain `..` segments or are absolute, preventing zip-slip directory traversal attacks.
+**Path safety**: paths are rejected if they contain `..` segments or are absolute, preventing zip-slip/directory traversal attacks. This applies to both file entries and directory entries.
 
-**Bounds checking**: central directory offsets and local header offsets are validated against file size before indexing, preventing crashes on malformed ZIPs.
+**Bounds checking**: central directory offsets and local header offsets are validated against file size before indexing, preventing crashes on malformed ZIPs. Central directory size is bounded by `maxCentralDirSize` (default 64MB).
+
+**Robust I/O**: `readExact` and `readExactStream` loop on short reads, handling streams that return fewer bytes than requested (pipes, network, etc.).
 
 **Limitations**: no encryption, no spanning.
 
 ## Build system
 
-`lakefile.lean` compiles two C FFI files into static libraries:
+`lakefile.lean` compiles three C FFI files into static libraries:
 
 1. `c/zlib_ffi.c` → `libzlib_ffi.a` (compiled with `pkg-config --cflags zlib`)
 2. `c/zstd_ffi.c` → `libzstd_ffi.a` (compiled with `pkg-config --cflags libzstd`)
+3. `c/io_ffi.c` → `libio_ffi.a` (no external library deps — uses POSIX `fseeko`/`fstat`/`symlink`)
 
 Link flags are obtained from `pkg-config --libs`. Zstd is linked statically (`-Wl,-Bstatic -lzstd -Wl,-Bdynamic`) to avoid glibc version mismatches with Lean's bundled toolchain.
 

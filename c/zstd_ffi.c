@@ -40,18 +40,18 @@ LEAN_EXPORT lean_obj_res lean_zstd_compress(b_lean_obj_arg data, uint8_t level, 
     size_t src_len = lean_sarray_size(data);
 
     size_t dest_cap = ZSTD_compressBound(src_len);
-    uint8_t *dest = (uint8_t *)malloc(dest_cap);
-    if (!dest) return mk_io_error("zstd compress: out of memory");
+    /* Allocate Lean ByteArray directly — no intermediate copy */
+    lean_obj_res arr = lean_alloc_sarray(1, 0, dest_cap);
+    uint8_t *dest = lean_sarray_cptr(arr);
 
     size_t result = ZSTD_compress(dest, dest_cap, src, src_len, (int)level);
     if (ZSTD_isError(result)) {
         lean_obj_res err = mk_zstd_error("zstd compress", result);
-        free(dest);
+        lean_dec_ref(arr);
         return err;
     }
 
-    lean_obj_res arr = mk_byte_array(dest, result);
-    free(dest);
+    lean_sarray_set_size(arr, result);
     return lean_io_result_mk_ok(arr);
 }
 
@@ -60,15 +60,24 @@ LEAN_EXPORT lean_obj_res lean_zstd_compress(b_lean_obj_arg data, uint8_t level, 
  *
  * lean_zstd_decompress : @& ByteArray → IO ByteArray
  */
-LEAN_EXPORT lean_obj_res lean_zstd_decompress(b_lean_obj_arg data, lean_obj_arg _w) {
+LEAN_EXPORT lean_obj_res lean_zstd_decompress(b_lean_obj_arg data, uint64_t max_output, lean_obj_arg _w) {
     const uint8_t *src = lean_sarray_cptr(data);
     size_t src_len = lean_sarray_size(data);
+    char errbuf[256];
 
     /* Try to get frame content size for optimal allocation */
     unsigned long long frame_size = ZSTD_getFrameContentSize(src, src_len);
 
     if (frame_size == ZSTD_CONTENTSIZE_ERROR) {
         return mk_io_error("zstd decompress: not a valid zstd frame");
+    }
+
+    /* Early reject if known size exceeds limit */
+    if (max_output > 0 && frame_size != ZSTD_CONTENTSIZE_UNKNOWN && frame_size > max_output) {
+        snprintf(errbuf, sizeof(errbuf),
+                 "zstd decompress: decompressed size exceeds limit (%llu bytes)",
+                 (unsigned long long)max_output);
+        return mk_io_error(errbuf);
     }
 
     if (frame_size != ZSTD_CONTENTSIZE_UNKNOWN && frame_size <= (1ULL << 31)) {
@@ -100,8 +109,13 @@ LEAN_EXPORT lean_obj_res lean_zstd_decompress(b_lean_obj_arg data, lean_obj_arg 
         return err;
     }
 
-    size_t buf_size = src_len * 4;
-    if (buf_size < 65536) buf_size = 65536;
+    size_t buf_size;
+    if (src_len <= SIZE_MAX / 4) {
+        buf_size = src_len * 4;
+        if (buf_size < 65536) buf_size = 65536;
+    } else {
+        buf_size = src_len;  /* already huge, don't multiply */
+    }
     uint8_t *buf = (uint8_t *)malloc(buf_size);
     if (!buf) {
         ZSTD_freeDStream(dstream);
@@ -120,6 +134,14 @@ LEAN_EXPORT lean_obj_res lean_zstd_decompress(b_lean_obj_arg data, lean_obj_arg 
             return err;
         }
         total += output.pos;
+        if (max_output > 0 && total > max_output) {
+            free(buf);
+            ZSTD_freeDStream(dstream);
+            snprintf(errbuf, sizeof(errbuf),
+                     "zstd decompress: decompressed size exceeds limit (%llu bytes)",
+                     (unsigned long long)max_output);
+            return mk_io_error(errbuf);
+        }
         if (total >= buf_size) {
             if (buf_size > SIZE_MAX / 2) {
                 free(buf);

@@ -28,6 +28,25 @@ def readUInt64LE (data : ByteArray) (offset : Nat) : UInt64 :=
 def writeUInt64LE (val : UInt64) : ByteArray :=
   writeUInt32LE val.toUInt32 ++ writeUInt32LE (val >>> 32).toUInt32
 
+-- In-place writers (O(1) per field, no allocation)
+
+@[inline] def writeUInt16LEAt (buf : ByteArray) (offset : Nat) (val : UInt16) : ByteArray :=
+  (buf.set! offset val.toUInt8).set! (offset + 1) (val >>> 8).toUInt8
+
+@[inline] def writeUInt32LEAt (buf : ByteArray) (offset : Nat) (val : UInt32) : ByteArray :=
+  ((buf.set! offset val.toUInt8).set! (offset + 1) (val >>> 8).toUInt8).set!
+    (offset + 2) (val >>> 16).toUInt8 |>.set! (offset + 3) (val >>> 24).toUInt8
+
+@[inline] def writeUInt64LEAt (buf : ByteArray) (offset : Nat) (val : UInt64) : ByteArray :=
+  writeUInt32LEAt (writeUInt32LEAt buf offset val.toUInt32) (offset + 4) (val >>> 32).toUInt32
+
+/-- Copy `src` into `buf` starting at `offset`. -/
+@[noinline] def writeField (buf : ByteArray) (offset : Nat) (src : ByteArray) : ByteArray := Id.run do
+  let mut b := buf
+  for i in [:src.size] do
+    b := b.set! (offset + i) src[i]!
+  return b
+
 -- Octal ASCII read/write (used by Tar)
 
 /-- Write a number as NUL-terminated octal ASCII, right-aligned in a field of `width` bytes.
@@ -79,20 +98,40 @@ def writeUInt64LE (val : UInt64) : ByteArray :=
     result := result.push 0
   return result
 
-/-- Read a NUL-terminated string from a byte array field. -/
+/-- Decode a ByteArray as Latin-1 (ISO 8859-1).
+    Every byte maps to the Unicode codepoint with the same value. -/
+def fromLatin1 (data : ByteArray) : String :=
+  .ofList (data.toList.map fun b => Char.ofNat b.toNat)
+
+/-- Read a NUL-terminated string from a byte array field.
+    Falls back to Latin-1 decoding if bytes are not valid UTF-8. -/
 @[noinline] def readString (data : ByteArray) (offset : Nat) (len : Nat) : String := Id.run do
   let mut bytes := ByteArray.empty
   for i in [:len] do
     let b := data[offset + i]!
     if b == 0 then break
     bytes := bytes.push b
-  return String.fromUTF8! bytes
+  match String.fromUTF8? bytes with
+  | some s => return s
+  | none => return fromLatin1 bytes
+
+/-- Check if a path is safe for extraction.
+    Rejects absolute paths, `..` traversal, `.` components, empty components (from `//`),
+    backslash characters, and Windows drive letters. -/
+def isPathSafe (path : String) : Bool := Id.run do
+  if path.startsWith "/" then return false
+  if path.any (· == '\\') then return false
+  let components := path.splitOn "/"
+  for c in components do
+    if c == ".." then return false
+    if c == "." then return false
+    if c.isEmpty then return false
+    -- Reject Windows drive letters (e.g. "C:", "D:")
+    if c.length == 2 && c.endsWith ":" then return false
+  return true
 
 /-- Create a ByteArray of `n` zero bytes. -/
-@[noinline] def zeros (n : Nat) : ByteArray := Id.run do
-  let mut result := ByteArray.empty
-  for _ in [:n] do
-    result := result.push 0
-  return result
+@[noinline] def zeros (n : Nat) : ByteArray :=
+  ByteArray.mk (Array.replicate n (0 : UInt8))
 
 end Binary

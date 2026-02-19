@@ -8,9 +8,10 @@ namespace RawDeflate
 @[extern "lean_raw_deflate_compress"]
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
-/-- Decompress raw deflate data. -/
+/-- Decompress raw deflate data.
+    `maxDecompressedSize` limits output size (0 = no limit). -/
 @[extern "lean_raw_deflate_decompress"]
-opaque decompress (data : @& ByteArray) : IO ByteArray
+opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
 -- Streaming raw deflate. Reuses Gzip.DeflateState/InflateState types
 -- since the underlying z_stream state is format-agnostic after init.

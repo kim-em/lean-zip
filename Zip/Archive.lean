@@ -1,5 +1,6 @@
 import Zip.Binary
 import Zip.Checksum
+import Zip.Handle
 import Zip.RawDeflate
 
 namespace Archive
@@ -25,14 +26,6 @@ structure Entry where
   localOffset      : UInt64 := 0
   deriving Repr, Inhabited
 
-/-- Check if a path is safe for extraction (no `..` segments, not absolute). -/
-private def isPathSafe (path : String) : Bool := Id.run do
-  if path.startsWith "/" then return false
-  let components := path.splitOn "/"
-  for c in components do
-    if c == ".." then return false
-  return true
-
 /-- Check if an entry needs ZIP64 extra fields. -/
 private def needsZip64 (entry : Entry) : Bool :=
   entry.compressedSize >= val32Max.toUInt64 ||
@@ -44,49 +37,46 @@ private def defaultDosTime : UInt16 := 0
 private def defaultDosDate : UInt16 := 0x0021  -- 1980-01-01
 
 /-- Build a ZIP64 extra field for a local file header (sizes only, no offset). -/
-private def writeZip64ExtraLocal (entry : Entry) : ByteArray := Id.run do
-  let mut buf := ByteArray.empty
-  buf := buf ++ Binary.writeUInt16LE 0x0001
-  buf := buf ++ Binary.writeUInt16LE 16  -- 2 × 8 bytes
-  buf := buf ++ Binary.writeUInt64LE entry.uncompressedSize
-  buf := buf ++ Binary.writeUInt64LE entry.compressedSize
-  return buf
+private def writeZip64ExtraLocal (entry : Entry) : ByteArray :=
+  Binary.zeros 20
+  |> (Binary.writeUInt16LEAt · 0 0x0001)
+  |> (Binary.writeUInt16LEAt · 2 16)
+  |> (Binary.writeUInt64LEAt · 4 entry.uncompressedSize)
+  |> (Binary.writeUInt64LEAt · 12 entry.compressedSize)
 
 /-- Build a ZIP64 extra field for a central directory header (sizes + offset). -/
-private def writeZip64ExtraCentral (entry : Entry) : ByteArray := Id.run do
-  let mut buf := ByteArray.empty
-  buf := buf ++ Binary.writeUInt16LE 0x0001
-  buf := buf ++ Binary.writeUInt16LE 24  -- 3 × 8 bytes
-  buf := buf ++ Binary.writeUInt64LE entry.uncompressedSize
-  buf := buf ++ Binary.writeUInt64LE entry.compressedSize
-  buf := buf ++ Binary.writeUInt64LE entry.localOffset
-  return buf
+private def writeZip64ExtraCentral (entry : Entry) : ByteArray :=
+  Binary.zeros 28
+  |> (Binary.writeUInt16LEAt · 0 0x0001)
+  |> (Binary.writeUInt16LEAt · 2 24)
+  |> (Binary.writeUInt64LEAt · 4 entry.uncompressedSize)
+  |> (Binary.writeUInt64LEAt · 12 entry.compressedSize)
+  |> (Binary.writeUInt64LEAt · 20 entry.localOffset)
 
 /-- Write a local file header. Returns the header bytes. -/
 private def writeLocalHeader (entry : Entry) : ByteArray := Id.run do
   let nameBytes := entry.path.toUTF8
   let z64 := needsZip64 entry
   let extraField := if z64 then writeZip64ExtraLocal entry else ByteArray.empty
-  let mut buf := ByteArray.empty
-  buf := buf ++ Binary.writeUInt32LE sigLocal
-  -- Version needed: 4.5 (45) for ZIP64, 2.0 (20) otherwise
-  buf := buf ++ Binary.writeUInt16LE (if z64 then 45 else 20)
-  buf := buf ++ Binary.writeUInt16LE 0  -- flags
-  buf := buf ++ Binary.writeUInt16LE entry.method
-  buf := buf ++ Binary.writeUInt16LE defaultDosTime
-  buf := buf ++ Binary.writeUInt16LE defaultDosDate
-  buf := buf ++ Binary.writeUInt32LE entry.crc32
-  -- Sizes: use 0xFFFFFFFF sentinel when ZIP64
+  let totalSize := 30 + nameBytes.size + extraField.size
+  let mut buf := Binary.zeros totalSize
+  buf := Binary.writeUInt32LEAt buf 0 sigLocal
+  buf := Binary.writeUInt16LEAt buf 4 (if z64 then 45 else 20)
+  buf := Binary.writeUInt16LEAt buf 6 0x0800  -- flags: bit 11 = UTF-8 names
+  buf := Binary.writeUInt16LEAt buf 8 entry.method
+  buf := Binary.writeUInt16LEAt buf 10 defaultDosTime
+  buf := Binary.writeUInt16LEAt buf 12 defaultDosDate
+  buf := Binary.writeUInt32LEAt buf 14 entry.crc32
   if z64 then
-    buf := buf ++ Binary.writeUInt32LE val32Max
-    buf := buf ++ Binary.writeUInt32LE val32Max
+    buf := Binary.writeUInt32LEAt buf 18 val32Max
+    buf := Binary.writeUInt32LEAt buf 22 val32Max
   else
-    buf := buf ++ Binary.writeUInt32LE entry.compressedSize.toUInt32
-    buf := buf ++ Binary.writeUInt32LE entry.uncompressedSize.toUInt32
-  buf := buf ++ Binary.writeUInt16LE nameBytes.size.toUInt16
-  buf := buf ++ Binary.writeUInt16LE extraField.size.toUInt16
-  buf := buf ++ nameBytes
-  buf := buf ++ extraField
+    buf := Binary.writeUInt32LEAt buf 18 entry.compressedSize.toUInt32
+    buf := Binary.writeUInt32LEAt buf 22 entry.uncompressedSize.toUInt32
+  buf := Binary.writeUInt16LEAt buf 26 nameBytes.size.toUInt16
+  buf := Binary.writeUInt16LEAt buf 28 extraField.size.toUInt16
+  buf := Binary.writeField buf 30 nameBytes
+  buf := Binary.writeField buf (30 + nameBytes.size) extraField
   return buf
 
 /-- Write a central directory header. Returns the header bytes. -/
@@ -94,109 +84,114 @@ private def writeCentralHeader (entry : Entry) : ByteArray := Id.run do
   let nameBytes := entry.path.toUTF8
   let z64 := needsZip64 entry
   let extraField := if z64 then writeZip64ExtraCentral entry else ByteArray.empty
-  let mut buf := ByteArray.empty
-  buf := buf ++ Binary.writeUInt32LE sigCentral
-  -- Version made by: 4.5 (45) for ZIP64, Unix (3)
-  buf := buf ++ Binary.writeUInt16LE (3 * 256 + (if z64 then 45 else 20))
-  -- Version needed
-  buf := buf ++ Binary.writeUInt16LE (if z64 then 45 else 20)
-  buf := buf ++ Binary.writeUInt16LE 0  -- flags
-  buf := buf ++ Binary.writeUInt16LE entry.method
-  buf := buf ++ Binary.writeUInt16LE defaultDosTime
-  buf := buf ++ Binary.writeUInt16LE defaultDosDate
-  buf := buf ++ Binary.writeUInt32LE entry.crc32
+  let totalSize := 46 + nameBytes.size + extraField.size
+  let mut buf := Binary.zeros totalSize
+  buf := Binary.writeUInt32LEAt buf 0 sigCentral
+  buf := Binary.writeUInt16LEAt buf 4 (3 * 256 + (if z64 then 45 else 20))
+  buf := Binary.writeUInt16LEAt buf 6 (if z64 then 45 else 20)
+  buf := Binary.writeUInt16LEAt buf 8 0x0800  -- flags: bit 11 = UTF-8 names
+  buf := Binary.writeUInt16LEAt buf 10 entry.method
+  buf := Binary.writeUInt16LEAt buf 12 defaultDosTime
+  buf := Binary.writeUInt16LEAt buf 14 defaultDosDate
+  buf := Binary.writeUInt32LEAt buf 16 entry.crc32
   if z64 then
-    buf := buf ++ Binary.writeUInt32LE val32Max
-    buf := buf ++ Binary.writeUInt32LE val32Max
+    buf := Binary.writeUInt32LEAt buf 20 val32Max
+    buf := Binary.writeUInt32LEAt buf 24 val32Max
   else
-    buf := buf ++ Binary.writeUInt32LE entry.compressedSize.toUInt32
-    buf := buf ++ Binary.writeUInt32LE entry.uncompressedSize.toUInt32
-  buf := buf ++ Binary.writeUInt16LE nameBytes.size.toUInt16
-  buf := buf ++ Binary.writeUInt16LE extraField.size.toUInt16
-  buf := buf ++ Binary.writeUInt16LE 0  -- comment length
-  buf := buf ++ Binary.writeUInt16LE 0  -- disk number start
-  buf := buf ++ Binary.writeUInt16LE 0  -- internal attrs
-  buf := buf ++ Binary.writeUInt32LE 0  -- external attrs
+    buf := Binary.writeUInt32LEAt buf 20 entry.compressedSize.toUInt32
+    buf := Binary.writeUInt32LEAt buf 24 entry.uncompressedSize.toUInt32
+  buf := Binary.writeUInt16LEAt buf 28 nameBytes.size.toUInt16
+  buf := Binary.writeUInt16LEAt buf 30 extraField.size.toUInt16
+  -- comment length (32), disk number start (34), internal attrs (36): all 0 from zeros
+  -- external attrs (38): 0 from zeros
   if z64 then
-    buf := buf ++ Binary.writeUInt32LE val32Max
+    buf := Binary.writeUInt32LEAt buf 42 val32Max
   else
-    buf := buf ++ Binary.writeUInt32LE entry.localOffset.toUInt32
-  buf := buf ++ nameBytes
-  buf := buf ++ extraField
+    buf := Binary.writeUInt32LEAt buf 42 entry.localOffset.toUInt32
+  buf := Binary.writeField buf 46 nameBytes
+  buf := Binary.writeField buf (46 + nameBytes.size) extraField
   return buf
 
 /-- Write end of central directory records. Includes ZIP64 EOCD + locator when needed. -/
 private def writeEndRecords (numEntries : Nat) (cdSize cdOffset : UInt64) : ByteArray := Id.run do
   let need64 := numEntries > 65535 || cdSize >= val32Max.toUInt64 || cdOffset >= val32Max.toUInt64
-  let mut buf := ByteArray.empty
+  -- ZIP64 EOCD (56) + ZIP64 Locator (20) + Standard EOCD (22)
+  let z64Size := if need64 then 76 else 0
+  let totalSize := z64Size + 22
+  let mut buf := Binary.zeros totalSize
   if need64 then
-    -- ZIP64 End of Central Directory Record
-    let eocd64Offset := cdOffset + cdSize  -- offset of this record
-    buf := buf ++ Binary.writeUInt32LE sigEOCD64
-    buf := buf ++ Binary.writeUInt64LE 44  -- size of remaining EOCD64 (56 - 12)
-    buf := buf ++ Binary.writeUInt16LE (3 * 256 + 45)  -- version made by
-    buf := buf ++ Binary.writeUInt16LE 45  -- version needed
-    buf := buf ++ Binary.writeUInt32LE 0  -- disk number
-    buf := buf ++ Binary.writeUInt32LE 0  -- disk with CD
-    buf := buf ++ Binary.writeUInt64LE numEntries.toUInt64  -- entries on disk
-    buf := buf ++ Binary.writeUInt64LE numEntries.toUInt64  -- total entries
-    buf := buf ++ Binary.writeUInt64LE cdSize  -- CD size
-    buf := buf ++ Binary.writeUInt64LE cdOffset  -- CD offset
-    -- ZIP64 End of Central Directory Locator
-    buf := buf ++ Binary.writeUInt32LE sigLocator64
-    buf := buf ++ Binary.writeUInt32LE 0  -- disk with EOCD64
-    buf := buf ++ Binary.writeUInt64LE eocd64Offset  -- offset of EOCD64
-    buf := buf ++ Binary.writeUInt32LE 1  -- total disks
-  -- Standard EOCD (always written)
-  buf := buf ++ Binary.writeUInt32LE sigEOCD
-  buf := buf ++ Binary.writeUInt16LE 0  -- disk number
-  buf := buf ++ Binary.writeUInt16LE 0  -- disk with CD
+    let eocd64Offset := cdOffset + cdSize
+    -- ZIP64 End of Central Directory Record (56 bytes)
+    buf := Binary.writeUInt32LEAt buf 0 sigEOCD64
+    buf := Binary.writeUInt64LEAt buf 4 44  -- size of remaining EOCD64
+    buf := Binary.writeUInt16LEAt buf 12 (3 * 256 + 45)  -- version made by
+    buf := Binary.writeUInt16LEAt buf 14 45  -- version needed
+    -- disk number (16) and disk with CD (20): 0 from zeros
+    buf := Binary.writeUInt64LEAt buf 24 numEntries.toUInt64  -- entries on disk
+    buf := Binary.writeUInt64LEAt buf 32 numEntries.toUInt64  -- total entries
+    buf := Binary.writeUInt64LEAt buf 40 cdSize
+    buf := Binary.writeUInt64LEAt buf 48 cdOffset
+    -- ZIP64 End of Central Directory Locator (20 bytes)
+    buf := Binary.writeUInt32LEAt buf 56 sigLocator64
+    -- disk with EOCD64 (60): 0 from zeros
+    buf := Binary.writeUInt64LEAt buf 64 eocd64Offset
+    buf := Binary.writeUInt32LEAt buf 72 1  -- total disks
+  -- Standard EOCD (22 bytes)
+  let eocdOff := z64Size
+  buf := Binary.writeUInt32LEAt buf eocdOff sigEOCD
+  -- disk number (eocdOff+4), disk with CD (eocdOff+6): 0 from zeros
   let numEntries16 := if numEntries > 65535 then val16Max else numEntries.toUInt16
-  buf := buf ++ Binary.writeUInt16LE numEntries16
-  buf := buf ++ Binary.writeUInt16LE numEntries16
+  buf := Binary.writeUInt16LEAt buf (eocdOff + 8) numEntries16
+  buf := Binary.writeUInt16LEAt buf (eocdOff + 10) numEntries16
   let cdSize32 := if cdSize >= val32Max.toUInt64 then val32Max else cdSize.toUInt32
-  buf := buf ++ Binary.writeUInt32LE cdSize32
+  buf := Binary.writeUInt32LEAt buf (eocdOff + 12) cdSize32
   let cdOffset32 := if cdOffset >= val32Max.toUInt64 then val32Max else cdOffset.toUInt32
-  buf := buf ++ Binary.writeUInt32LE cdOffset32
-  buf := buf ++ Binary.writeUInt16LE 0  -- comment length
+  buf := Binary.writeUInt32LEAt buf (eocdOff + 16) cdOffset32
+  -- comment length (eocdOff + 20): 0 from zeros
   return buf
 
-/-- Create a ZIP archive from (archivePath, diskPath) pairs. -/
+/-- Create a ZIP archive from (archivePath, diskPath) pairs.
+    Streams local file entries directly to disk to avoid O(archive_size) memory. -/
 def create (outputPath : System.FilePath)
     (files : Array (String × System.FilePath)) : IO Unit := do
-  let mut entries : Array Entry := #[]
-  let mut offset : UInt64 := 0
-  let mut body := ByteArray.empty
-  for (archiveName, diskPath) in files do
-    let fileData ← IO.FS.readBinFile diskPath
-    let crc ← Checksum.crc32 0 fileData
-    let deflated ← RawDeflate.compress fileData
-    let useDeflate := deflated.size < fileData.size
-    let method : UInt16 := if useDeflate then 8 else 0
-    let compData := if useDeflate then deflated else fileData
-    let entry : Entry := {
-      path := archiveName
-      compressedSize := compData.size.toUInt64
-      uncompressedSize := fileData.size.toUInt64
-      crc32 := crc
-      method := method
-      localOffset := offset
-    }
-    entries := entries.push entry
-    let localHdr := writeLocalHeader entry
-    body := body ++ localHdr ++ compData
-    offset := offset + localHdr.size.toUInt64 + compData.size.toUInt64
-  let cdOffset := offset
-  let mut cd := ByteArray.empty
-  for entry in entries do
-    cd := cd ++ writeCentralHeader entry
-  let endRecs := writeEndRecords entries.size cd.size.toUInt64 cdOffset
-  IO.FS.writeBinFile outputPath (body ++ cd ++ endRecs)
+  IO.FS.withFile outputPath .write fun outH => do
+    let outStream := IO.FS.Stream.ofHandle outH
+    let mut entries : Array Entry := #[]
+    let mut offset : UInt64 := 0
+    for (archiveName, diskPath) in files do
+      let fileData ← IO.FS.readBinFile diskPath
+      let crc := Checksum.crc32 0 fileData
+      let deflated ← RawDeflate.compress fileData
+      let useDeflate := deflated.size < fileData.size
+      let method : UInt16 := if useDeflate then 8 else 0
+      let compData := if useDeflate then deflated else fileData
+      let entry : Entry := {
+        path := archiveName
+        compressedSize := compData.size.toUInt64
+        uncompressedSize := fileData.size.toUInt64
+        crc32 := crc
+        method := method
+        localOffset := offset
+      }
+      entries := entries.push entry
+      let localHdr := writeLocalHeader entry
+      outStream.write localHdr
+      outStream.write compData
+      offset := offset + localHdr.size.toUInt64 + compData.size.toUInt64
+    -- Stream each central directory header directly (avoids quadratic concatenation)
+    let cdOffset := offset
+    let mut cdSize : Nat := 0
+    for entry in entries do
+      let hdr := writeCentralHeader entry
+      outStream.write hdr
+      cdSize := cdSize + hdr.size
+    let endRecs := writeEndRecords entries.size cdSize.toUInt64 cdOffset
+    outStream.write endRecs
 
 /-- Create a ZIP archive from all files under a directory. -/
 partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath) : IO Unit := do
   let allFiles ← dir.walkDir
-  let sorted := allFiles.insertionSort (·.toString < ·.toString)
+  let sorted := allFiles.qsort (·.toString < ·.toString)
   let dirStr := dir.toString
   let dirPfx := if dirStr.endsWith "/" then dirStr else dirStr ++ "/"
   let mut pairs : Array (String × System.FilePath) := #[]
@@ -213,9 +208,11 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
     pairs := pairs.push (relPath, file)
   create outputPath pairs
 
-/-- Find the EOCD record in a ZIP file. Returns (eocdPos, cdOffset, cdSize, numEntries).
-    Handles both standard and ZIP64 EOCD. -/
-private def findEndOfCentralDir (data : ByteArray) : Option (Nat × Nat × Nat) := Id.run do
+/-- Find the EOCD record in a (possibly tail-) buffer.
+    `baseOffset` is the file-absolute byte offset where `data` starts (0 for full file).
+    Returns `(eocdPos, cdOffset, cdSize)` where cdOffset/cdSize are file-absolute. -/
+private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
+    : Option (Nat × Nat × Nat) := Id.run do
   -- Find standard EOCD
   if data.size < 22 then return none
   let mut eocdPos : Option Nat := none
@@ -228,18 +225,20 @@ private def findEndOfCentralDir (data : ByteArray) : Option (Nat × Nat × Nat) 
     if i == 0 then break
     i := i - 1
   let some pos := eocdPos | return none
-  -- Read standard EOCD values
+  -- Read standard EOCD values (file-absolute)
   let mut cdSize := (Binary.readUInt32LE data (pos + 12)).toNat
   let mut cdOffset := (Binary.readUInt32LE data (pos + 16)).toNat
   -- Check for ZIP64 EOCD Locator (20 bytes before standard EOCD)
   if pos >= 20 then
     if Binary.readUInt32LE data (pos - 20) == sigLocator64 then
       let eocd64Offset := (Binary.readUInt64LE data (pos - 12)).toNat
-      -- Read ZIP64 EOCD
-      if eocd64Offset + 56 <= data.size then
-        if Binary.readUInt32LE data eocd64Offset == sigEOCD64 then
-          cdSize := (Binary.readUInt64LE data (eocd64Offset + 40)).toNat
-          cdOffset := (Binary.readUInt64LE data (eocd64Offset + 48)).toNat
+      -- Convert file-absolute offset to buffer-relative
+      if eocd64Offset >= baseOffset then
+        let bufPos := eocd64Offset - baseOffset
+        if bufPos + 56 <= data.size then
+          if Binary.readUInt32LE data bufPos == sigEOCD64 then
+            cdSize := (Binary.readUInt64LE data (bufPos + 40)).toNat
+            cdOffset := (Binary.readUInt64LE data (bufPos + 48)).toNat
   return some (pos, cdOffset, cdSize)
 
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
@@ -256,6 +255,8 @@ private def parseZip64Extra (extraData : ByteArray) (stdUncomp stdComp stdOffset
   while epos + 4 <= extraData.size do
     let headerId := Binary.readUInt16LE extraData epos
     let dataSize := (Binary.readUInt16LE extraData (epos + 2)).toNat
+    -- Guard against malformed extra field length extending past buffer
+    if epos + 4 + dataSize > extraData.size then break
     if headerId == 0x0001 then
       found := true
       let mut fpos := epos + 4
@@ -286,6 +287,7 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
   while pos + 46 <= cdEnd do
     let sig := Binary.readUInt32LE data pos
     if sig != sigCentral then break
+    let flags := Binary.readUInt16LE data (pos + 8)
     let method := Binary.readUInt16LE data (pos + 10)
     let crc := Binary.readUInt32LE data (pos + 16)
     let stdCompSize := Binary.readUInt32LE data (pos + 20)
@@ -293,9 +295,22 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
     let nameLen := (Binary.readUInt16LE data (pos + 28)).toNat
     let extraLen := (Binary.readUInt16LE data (pos + 30)).toNat
     let commentLen := (Binary.readUInt16LE data (pos + 32)).toNat
+    let entryEnd := pos + 46 + nameLen + extraLen + commentLen
+    if entryEnd > cdEnd then
+      throw (IO.userError "zip: central directory entry extends past end of central directory")
     let stdOffset := Binary.readUInt32LE data (pos + 42)
     let nameBytes := data.extract (pos + 46) (pos + 46 + nameLen)
-    let name := String.fromUTF8! nameBytes
+    let name ←
+      if flags &&& 0x0800 != 0 then
+        -- UTF-8 flag set: validate UTF-8 strictly
+        match String.fromUTF8? nameBytes with
+        | some s => pure s
+        | none => throw (IO.userError "zip: invalid UTF-8 in entry name (UTF-8 flag set)")
+      else
+        -- No UTF-8 flag: try UTF-8 first, fall back to Latin-1
+        pure (match String.fromUTF8? nameBytes with
+          | some s => s
+          | none => Binary.fromLatin1 nameBytes)
     -- Parse ZIP64 extra field if any standard field is 0xFFFFFFFF
     let extraData := data.extract (pos + 46 + nameLen) (pos + 46 + nameLen + extraLen)
     let (uncompSize, compSize, localOff) ←
@@ -316,79 +331,115 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
     pos := pos + 46 + nameLen + extraLen + commentLen
   return entries
 
-/-- List entries in a ZIP archive. -/
-def list (inputPath : System.FilePath) : IO (Array Entry) := do
-  let data ← IO.FS.readBinFile inputPath
-  let some (_, cdOffset, cdSize) := findEndOfCentralDir data
-    | throw (IO.userError "zip: cannot find end of central directory")
-  unless cdOffset + cdSize <= data.size do
-    throw (IO.userError "zip: central directory extends beyond file")
-  parseCentralDir data cdOffset cdSize
+/-- Read exactly `n` bytes from a handle, throwing on short read.
+    Loops to handle short reads from pipes/network streams. -/
+private partial def readExact (h : IO.FS.Handle) (n : Nat) (what : String) : IO ByteArray := do
+  unless n.toUSize.toNat == n do
+    throw (IO.userError s!"zip: {what} size {n} exceeds addressable range")
+  let mut buf := ByteArray.empty
+  while buf.size < n do
+    let remaining := n - buf.size
+    let chunk ← h.read remaining.toUSize
+    if chunk.isEmpty then
+      throw (IO.userError s!"zip: short read for {what}: expected {n}, got {buf.size}")
+    buf := buf ++ chunk
+  return buf
 
-/-- Extract a ZIP archive to an output directory. -/
-def extract (inputPath : System.FilePath) (outDir : System.FilePath) : IO Unit := do
-  let data ← IO.FS.readBinFile inputPath
-  let some (_, cdOffset, cdSize) := findEndOfCentralDir data
-    | throw (IO.userError "zip: cannot find end of central directory")
-  unless cdOffset + cdSize <= data.size do
-    throw (IO.userError "zip: central directory extends beyond file")
-  let entries ← parseCentralDir data cdOffset cdSize
-  for entry in entries do
-    if entry.path.endsWith "/" then
-      if isPathSafe entry.path then
-        IO.FS.createDirAll (outDir / entry.path)
-      continue
-    unless isPathSafe entry.path do
-      throw (IO.userError s!"zip: unsafe path: {entry.path}")
-    let outPath := outDir / entry.path
-    if let some parent := outPath.parent then
-      IO.FS.createDirAll parent
-    let localPos := entry.localOffset.toNat
-    unless localPos + 30 <= data.size do
-      throw (IO.userError s!"zip: local header out of bounds for {entry.path}")
-    let nameLen := (Binary.readUInt16LE data (localPos + 26)).toNat
-    let extraLen := (Binary.readUInt16LE data (localPos + 28)).toNat
-    let dataStart := localPos + 30 + nameLen + extraLen
-    unless dataStart + entry.compressedSize.toNat <= data.size do
-      throw (IO.userError s!"zip: file data out of bounds for {entry.path}")
-    let compData := data.extract dataStart (dataStart + entry.compressedSize.toNat)
-    let fileData ←
-      if entry.method == 0 then pure compData
-      else if entry.method == 8 then RawDeflate.decompress compData
-      else throw (IO.userError s!"zip: unsupported method {entry.method} for {entry.path}")
-    let actualCrc ← Checksum.crc32 0 fileData
-    unless actualCrc == entry.crc32 do
-      throw (IO.userError s!"zip: CRC32 mismatch for {entry.path}: expected {entry.crc32}, got {actualCrc}")
-    unless fileData.size.toUInt64 == entry.uncompressedSize do
-      throw (IO.userError s!"zip: size mismatch for {entry.path}")
-    IO.FS.writeBinFile outPath fileData
+/-- Read exactly `n` bytes from a stream, throwing on premature EOF.
+    Loops to handle short reads from pipes/network streams. -/
+partial def readExactStream (s : IO.FS.Stream) (n : Nat) (what : String) : IO ByteArray := do
+  unless n.toUSize.toNat == n do
+    throw (IO.userError s!"zip: {what} size {n} exceeds addressable range")
+  let mut buf := ByteArray.empty
+  while buf.size < n do
+    let remaining := n - buf.size
+    let chunk ← s.read remaining.toUSize
+    if chunk.isEmpty then
+      throw (IO.userError s!"zip: short read for {what}: expected {n}, got {buf.size}")
+    buf := buf ++ chunk
+  return buf
 
-/-- Extract a single file from a ZIP archive by name. -/
-def extractFile (inputPath : System.FilePath) (filename : String) : IO ByteArray := do
-  let data ← IO.FS.readBinFile inputPath
-  let some (_, cdOffset, cdSize) := findEndOfCentralDir data
+/-- Read entries from a file handle by seeking to the tail, EOCD, and central directory.
+    Memory usage: O(65KB + central directory size). -/
+private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 67108864) : IO (Array Entry) := do
+  let fileSize := (← Handle.fileSize h).toNat
+  -- Read tail (last 65558 bytes) to find EOCD
+  -- 65558 = 22 (min EOCD) + 65535 (max comment) + 1
+  let tailSize := min fileSize 65558
+  let tailStart := fileSize - tailSize
+  Handle.seek h tailStart.toUInt64
+  let tail ← readExact h tailSize "EOCD tail"
+  let some (_, cdOffset, cdSize) := findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
-  unless cdOffset + cdSize <= data.size do
+  unless cdOffset + cdSize <= fileSize do
     throw (IO.userError "zip: central directory extends beyond file")
-  let entries ← parseCentralDir data cdOffset cdSize
-  let some entry := entries.find? (·.path == filename)
-    | throw (IO.userError s!"zip: file not found: {filename}")
-  let localPos := entry.localOffset.toNat
-  unless localPos + 30 <= data.size do
-    throw (IO.userError s!"zip: local header out of bounds for {filename}")
-  let nameLen := (Binary.readUInt16LE data (localPos + 26)).toNat
-  let extraLen := (Binary.readUInt16LE data (localPos + 28)).toNat
-  let dataStart := localPos + 30 + nameLen + extraLen
-  unless dataStart + entry.compressedSize.toNat <= data.size do
-    throw (IO.userError s!"zip: file data out of bounds for {filename}")
-  let compData := data.extract dataStart (dataStart + entry.compressedSize.toNat)
+  if maxCentralDirSize > 0 && cdSize > maxCentralDirSize then
+    throw (IO.userError s!"zip: central directory too large ({cdSize} bytes, limit {maxCentralDirSize})")
+  -- Read just the central directory
+  Handle.seek h cdOffset.toUInt64
+  let cdBuf ← readExact h cdSize "central directory"
+  parseCentralDir cdBuf 0 cdSize
+
+/-- Read an entry's decompressed data from a file handle by seeking to its local header.
+    `maxEntrySize` limits decompressed entry size (0 = no limit). -/
+private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
+    (maxEntrySize : UInt64 := 0) : IO ByteArray := do
+  if maxEntrySize > 0 && entry.uncompressedSize > maxEntrySize then
+    throw (IO.userError s!"zip: entry '{label}' uncompressed size ({entry.uncompressedSize}) exceeds limit ({maxEntrySize})")
+  Handle.seek h entry.localOffset
+  let localHdr ← readExact h 30 s!"local header for {label}"
+  unless Binary.readUInt32LE localHdr 0 == sigLocal do
+    throw (IO.userError s!"zip: bad local header signature for {label}")
+  let nameLen := (Binary.readUInt16LE localHdr 26).toNat
+  let extraLen := (Binary.readUInt16LE localHdr 28).toNat
+  let _ ← readExact h (nameLen + extraLen) s!"local name+extra for {label}"
+  let compData ← readExact h entry.compressedSize.toNat s!"compressed data for {label}"
   let fileData ←
     if entry.method == 0 then pure compData
-    else if entry.method == 8 then RawDeflate.decompress compData
-    else throw (IO.userError s!"zip: unsupported method {entry.method}")
-  let actualCrc ← Checksum.crc32 0 fileData
+    else if entry.method == 8 then RawDeflate.decompress compData maxEntrySize
+    else throw (IO.userError s!"zip: unsupported method {entry.method} for {label}")
+  let actualCrc := Checksum.crc32 0 fileData
   unless actualCrc == entry.crc32 do
-    throw (IO.userError s!"zip: CRC32 mismatch for {filename}")
+    throw (IO.userError s!"zip: CRC32 mismatch for {label}: expected {entry.crc32}, got {actualCrc}")
+  unless fileData.size.toUInt64 == entry.uncompressedSize do
+    throw (IO.userError s!"zip: size mismatch for {label}")
   return fileData
+
+/-- List entries in a ZIP archive. Memory: O(65KB + central directory metadata).
+    `maxCentralDirSize` limits the central directory allocation (default 64MB, 0 = no limit). -/
+def list (inputPath : System.FilePath) (maxCentralDirSize : Nat := 67108864) : IO (Array Entry) :=
+  IO.FS.withFile inputPath .read (listFromHandle · maxCentralDirSize)
+
+/-- Extract a ZIP archive to an output directory.
+    Memory: O(65KB + central directory + largest single file). -/
+def extract (inputPath : System.FilePath) (outDir : System.FilePath)
+    (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 0) : IO Unit := do
+  IO.FS.withFile inputPath .read fun h => do
+    let entries ← listFromHandle h maxCentralDirSize
+    for entry in entries do
+      -- Strip trailing slash for path safety check (directories end with "/")
+      let checkPath := if entry.path.endsWith "/" then entry.path.dropEnd 1 |>.toString else entry.path
+      if entry.path.endsWith "/" then
+        unless Binary.isPathSafe checkPath do
+          throw (IO.userError s!"zip: unsafe path: {entry.path}")
+        IO.FS.createDirAll (outDir / entry.path)
+        continue
+      unless Binary.isPathSafe checkPath do
+        throw (IO.userError s!"zip: unsafe path: {entry.path}")
+      let outPath := outDir / entry.path
+      if let some parent := outPath.parent then
+        IO.FS.createDirAll parent
+      let fileData ← readEntryData h entry entry.path maxEntrySize
+      IO.FS.writeBinFile outPath fileData
+
+/-- Extract a single file from a ZIP archive by name.
+    Memory: O(65KB + central directory + target file). -/
+def extractFile (inputPath : System.FilePath) (filename : String)
+    (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 0) : IO ByteArray := do
+  IO.FS.withFile inputPath .read fun h => do
+    let entries ← listFromHandle h maxCentralDirSize
+    let some entry := entries.find? (·.path == filename)
+      | throw (IO.userError s!"zip: file not found: {filename}")
+    readEntryData h entry filename maxEntrySize
 
 end Archive

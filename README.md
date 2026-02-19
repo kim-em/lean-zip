@@ -146,6 +146,11 @@ lake build
 lake build test && .lake/build/bin/test
 ```
 
+## Known Limitations
+
+- **TOCTOU in extraction**: archive extraction creates parent directories then writes files; a local attacker could replace a directory with a symlink between these steps. Fixing this requires `openat()`/`O_NOFOLLOW`, which Lean's stdlib doesn't expose.
+- **No streaming output limit**: whole-buffer decompression accepts a `max_output` cap, but the streaming API (`push`/`finish`) has no built-in limit — callers processing untrusted data should track total output themselves.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

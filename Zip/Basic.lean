@@ -5,8 +5,9 @@ namespace Zlib
 @[extern "lean_zlib_compress"]
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
-/-- Decompress zlib-compressed data. -/
+/-- Decompress zlib-compressed data.
+    `maxDecompressedSize` limits output size (0 = no limit). -/
 @[extern "lean_zlib_decompress"]
-opaque decompress (data : @& ByteArray) : IO ByteArray
+opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
 end Zlib

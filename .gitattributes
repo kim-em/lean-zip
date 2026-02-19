@@ -1,0 +1,5 @@
+testdata/**/*.zip binary
+testdata/**/*.tar binary
+testdata/**/*.gz binary
+testdata/**/*.zst binary
+testdata/**/*.bin binary

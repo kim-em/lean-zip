@@ -5,9 +5,10 @@ namespace Zstd
 @[extern "lean_zstd_compress"]
 opaque compress (data : @& ByteArray) (level : UInt8 := 3) : IO ByteArray
 
-/-- Decompress Zstandard data. -/
+/-- Decompress Zstandard data.
+    `maxDecompressedSize` limits output size (0 = no limit). -/
 @[extern "lean_zstd_decompress"]
-opaque decompress (data : @& ByteArray) : IO ByteArray
+opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
 -- Streaming compression
 
