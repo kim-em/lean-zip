@@ -3,9 +3,9 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: In progress
+## Status: Completed
 
-## Session type: implementation
+## Session type: implementation + review
 
 ## Objective
 
@@ -14,30 +14,23 @@ Phase 1 (Checksums). Then review and clean up.
 
 ## Deliverables
 
-- [ ] Prove `crcByteTable_eq_crcByte` — table lookup equals bit-by-bit spec
-- [ ] Review and clean up Phase 1 code
+- [x] Prove `crcByteTable_eq_crcByte` — table lookup equals bit-by-bit spec
+- [x] Review and clean up Phase 1 code
+- [x] Update ARCHITECTURE.md
 
-## Proof Strategy
+## Proof Strategy (for reference)
 
-The goal: `Spec.crcByteTable table crc byte = Spec.crcByte crc byte`
+The proof of `crcByteTable_eq_crcByte` decomposes into:
 
-After unfolding, this reduces to:
-```
-(crc >>> 8) ^^^ crcBits8(UInt32.ofNat ((crc ^^^ byte) &&& 0xFF).toNat)
-  = crcBits8(crc ^^^ byte)
-```
+1. `crcBits8_split`: `crcBit^8(v) = (v >>> 8) ^^^ crcBit^8(v &&& 0xFF)`
+   — proved directly by `bv_decide` after unfolding `crcBit` and `POLY`
 
-Approach:
-1. Introduce `crcBits8` abbreviation for the 8-fold `crcBit` application
-2. Prove iterated linearity via `bv_decide`:
-   `a &&& 0xFF = 0 → crcBits8(a ^^^ b) = (a >>> 8) ^^^ crcBits8(b)`
-3. Prove bitvector helpers:
-   - `UInt32.ofNat (x &&& 0xFF).toNat = x &&& 0xFF`
-   - `x = (x &&& 0xFFFFFF00) ^^^ (x &&& 0xFF)` (high/low split)
-   - `(x ^^^ y) >>> 8 = x >>> 8` when `y &&& 0xFFFFFF00 = 0`
-4. Combine: split `crc ^^^ byte`, apply linearity, simplify
+2. `xor_byte_shr8`: `(crc ^^^ byte) >>> 8 = crc >>> 8`
+   — byte only affects low 8 bits; proved by rewriting to `BitVec.setWidth`
+   then `bv_decide`
 
-## Failed Approaches (from previous session)
+3. `table_getElem` + `UInt32.ofNat_toNat`: table lookup reduces to
+   `crcBit^8((crc ^^^ byte) &&& 0xFF)`
 
-- `bv_decide` directly on `crcByteTable_eq_crcByte`: `UInt32.ofNat byte.toNat` opaque
-- `simp` on table lookup: hits max steps
+4. Main proof: unfold `crcByteTable`, resolve bounds, apply (3), then
+   rewrite with (1) and (2).

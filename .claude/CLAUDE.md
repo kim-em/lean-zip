@@ -247,15 +247,25 @@ Update it during review and reflect sessions.
   as if they belonged there. Don't use workarounds like going through
   `.data.data.foldl` when the right fix is a proper API lemma.
 - **bv_decide for UInt32/BitVec**: Effective for bitvector reasoning.
-  Proved CRC linearity (`crcBit_xor_high`) in one line. Caveat: fails
-  when expressions contain `UInt32.ofNat x.toNat` (abstracted as opaque).
+  Proved CRC linearity (`crcBit_xor_high`) and the 8-fold split
+  (`crcBits8_split`) each in one line. Caveat: fails when expressions
+  contain `UInt32.ofNat x.toNat` (abstracted as opaque).
+- **UInt8→UInt32 conversion for bv_decide**: When `bv_decide` fails on
+  `UInt32.ofNat byte.toNat`, rewrite it to `⟨byte.toBitVec.setWidth 32⟩`
+  using `BitVec.ofNat_toNat`. Then use `show` + `congr 1` to expose the
+  inner `BitVec` for `bv_decide`. Pattern:
+  ```lean
+  rw [UInt32_ofNat_UInt8_toNat]  -- rewrites via BitVec.ofNat_toNat
+  show UInt32.ofBitVec (... bitvec expr ...) = UInt32.ofBitVec (...)
+  congr 1; bv_decide
+  ```
 
 ## Current State Summary
 
 Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Phase**: Phase 1 (Checksums) — implementations done, 1 sorry remaining
-- **Sorry count**: 1 (`Zip/Native/Crc32.lean:45`)
-- **Last session**: 2026-02-19 (implementation)
-- **Last review**: None yet
+- **Phase**: Phase 1 (Checksums) — COMPLETE (0 sorries)
+- **Sorry count**: 0
+- **Last session**: 2026-02-19 (implementation + review)
+- **Last review**: 2026-02-19 (partial, during implementation session)

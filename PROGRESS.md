@@ -2,6 +2,35 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-19: Phase 1 complete — CRC-32 table equivalence proved
+
+**Type**: implementation + review
+**Phase**: Phase 1 (Checksums) — COMPLETE
+**Sorry count**: 1 → 0
+
+**Accomplished**:
+- Proved `crcByteTable_eq_crcByte`: table-driven CRC-32 byte update equals
+  bit-by-bit specification. This was the last sorry in Phase 1.
+- Key technique: `crcBits8_split` lemma (8-fold `crcBit` linearity over
+  high/low byte split) proved directly by `bv_decide`, avoiding the need
+  to iterate the single-step `crcBit_xor_high` lemma manually
+- Helper lemmas for UInt8→UInt32 conversion: rewrite via
+  `BitVec.ofNat_toNat` to `BitVec.setWidth`, enabling `bv_decide`
+- Updated ARCHITECTURE.md with native implementation and spec sections
+- Reviewed all Phase 1 code: clean, no issues found
+
+**Decisions**:
+- Proved `crcBits8_split` directly by `bv_decide` instead of iterating
+  `crcBit_xor_high` 8 times. The direct approach is simpler and avoids
+  intermediate goal management
+- Pattern for `UInt32.ofNat byte.toNat` opacity: rewrite to
+  `⟨byte.toBitVec.setWidth 32⟩` via `BitVec.ofNat_toNat`, then use
+  `show` + `congr 1` to expose `BitVec` for `bv_decide`
+
+**Next**:
+- Review session (no reviews done yet)
+- Begin Phase 2 (DEFLATE decompressor) per VERIFICATION.md
+
 ## 2026-02-19: Phase 1 kickoff — native checksums
 
 **Type**: implementation
