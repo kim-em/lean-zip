@@ -5,22 +5,41 @@
 
 ## Status: Complete
 
-## Session type: implementation
+## Session type: review
 
 ## Objective
 
-Integrate the native pure-Lean decompressor as an alternative backend for
-ZIP and tar.gz code paths. This completes the last Phase 2 deliverable.
+Full review of code added since last review (2026-02-19 Phase 2 review).
+That review covered BitReader.lean and Inflate.lean. Since then:
+- `Zip/Native/Gzip.lean` (gzip/zlib framing) — NEW, not yet reviewed
+- `Zip/Archive.lean` integration changes — not yet reviewed
+- `Zip/Tar.lean` integration changes — not yet reviewed
+- `ZipTest/NativeGzip.lean` — not yet reviewed
+- `ZipTest/NativeIntegration.lean` — not yet reviewed
 
-## Deliverables
+## Review checklist
 
-- [x] **Archive.lean integration**: `useNative` parameter on `extract`,
-      `extractFile`, `readEntryData`. Uses `Zip.Native.Inflate.inflate`
-      and `Crc32.Native.crc32` when true.
-- [x] **Tar.lean integration**: `extractTarGzNative` reads entire gzip
-      file, decompresses with `Zip.Native.GzipDecode.decompress`, then
-      parses tar from a ByteArray-backed stream. O(file_size) memory.
-- [x] **Conformance tests**: `ZipTest/NativeIntegration.lean` — creates
-      ZIP and tar.gz with FFI, extracts with native, verifies identical.
-- [x] **Wire up imports**: Updated `Zip.lean` (already had imports) and
-      `ZipTest.lean`.
+- [x] **Gzip.lean deep review**: RFC 1952/1950 compliance, error handling,
+      edge cases, security (max output enforcement, header parsing bounds)
+- [x] **Archive.lean integration**: correct native decompression path,
+      error handling, CRC verification
+- [x] **Tar.lean integration**: correct native gzip path, memory handling
+- [x] **Test coverage review**: gaps in NativeGzip and NativeIntegration tests
+- [x] **Slop detection**: dead code, verbose comments, unused imports across
+      all recent additions
+- [x] **Security audit**: input validation, zip bomb protection, integer
+      handling in new code
+- [x] **Lean idioms**: newer APIs, style consistency
+- [x] **Toolchain check**: is there a newer stable Lean release?
+- [x] **Prompting/skills check**: is .claude/CLAUDE.md still accurate?
+
+## Fixes applied
+
+- **Security**: Capped per-member inflate budget to remaining output allowance
+  in `GzipDecode.decompress`, preventing ~2x maxOutputSize peak memory with
+  crafted concatenated gzip streams
+- **Dead code**: Removed unused `BitReader.ofByteArray`, `remaining`, `isEof`
+- **Test refactor**: Extracted `mkRandomData` helper to `Helpers.lean`,
+  deduplicated from NativeInflate and NativeGzip tests
+- **Test output**: Fixed NativeIntegration test to use consistent formatting
+- **Documentation**: Updated CLAUDE.md source layout to list all Native/ files

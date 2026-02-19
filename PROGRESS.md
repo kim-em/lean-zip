@@ -2,6 +2,55 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-19: Review — Gzip/integration code, slop detection
+
+**Type**: review
+**Phase**: Phase 2 (DEFLATE decompressor) — COMPLETE
+**Sorry count**: 0 → 0
+
+**Reviewed**:
+- `Zip/Native/Gzip.lean`: RFC 1952/1950 compliance verified. Header
+  parsing correct (FEXTRA, FNAME, FCOMMENT, FHCRC). Checksums (CRC-32,
+  Adler-32) verified correctly. Concatenated gzip member handling correct.
+  FHCRC not validated (acceptable, most implementations skip this).
+- `Zip/Archive.lean` integration: Clean native/FFI dispatch. CRC path
+  selection correct. `maxEntrySize = 0` handling documented.
+- `Zip/Tar.lean` integration: `extractTarGzNative` correctly documented
+  as O(file_size) memory. ByteArray-backed stream is correct.
+- `ZipTest/NativeGzip.lean`: Good coverage — conformance at multiple
+  compression levels, empty/single/large data, concatenated streams,
+  auto-detect, all error cases.
+- `ZipTest/NativeIntegration.lean`: Covers stored + deflated + empty +
+  nested for both ZIP and tar.gz native extraction.
+- Full slop detection across all Native/ and NativeTest* files.
+- Toolchain check: v4.29.0-rc1 is latest (v4.28.0 latest stable).
+
+**Fixes applied**:
+- **Security**: Capped per-member inflate budget in `GzipDecode.decompress`
+  to `maxOutputSize - result.size`. Previously each concatenated member
+  got the full `maxOutputSize` independently, allowing peak memory of
+  ~2x the limit with crafted concatenated streams.
+- **Dead code**: Removed unused `BitReader.ofByteArray`, `remaining`,
+  `isEof` (never called anywhere in the codebase).
+- **Test refactor**: Extracted `mkRandomData` to `Helpers.lean`, replacing
+  duplicated pseudo-random generation in NativeInflate and NativeGzip.
+- **Test output**: Fixed NativeIntegration to use consistent `"  "` prefix
+  and `"passed."` suffix matching other native test modules.
+- **Documentation**: Updated CLAUDE.md source layout to enumerate all
+  `Zip/Native/` files explicitly instead of "...".
+
+**Not changed** (acceptable as-is):
+- Gzip FHCRC (header CRC16) not validated — standard practice
+- `detectFormat` false-positive on raw DEFLATE that looks like zlib —
+  documented known limitation
+- Test code duplication (compression level loops, corruption patterns) —
+  keeping tests self-contained is preferred over over-factoring
+
+**Next**:
+- Phase 3: DEFLATE spec formalization
+- Adler32 bounds proofs (warm-up for proof work)
+- Self-improvement session
+
 ## 2026-02-19: Implementation — native backend integration (Phase 2 complete)
 
 **Type**: implementation
