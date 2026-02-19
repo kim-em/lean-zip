@@ -63,9 +63,7 @@ def ZipTest.NativeInflate.tests : IO Unit := do
   | .error e => throw (IO.userError s!"native inflate (large) failed: {e}")
 
   -- Incompressible data (random-ish bytes)
-  let mut random := ByteArray.empty
-  for i in [:1000] do
-    random := random.push ((i * 73 + 137) % 256).toUInt8
+  let random := mkRandomData
   let compressedRandom ← RawDeflate.compress random
   match Zip.Native.Inflate.inflate compressedRandom with
   | .ok result => assert! result == random

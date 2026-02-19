@@ -139,7 +139,11 @@ End every session by running `/reflect`. If it suggests improvements to
     Zip/Tar.lean         — Tar create/extract/list, .tar.gz streaming
     Zip/Archive.lean     — ZIP create/extract/list (with ZIP64)
     Zip/Handle.lean      — IO.FS.Handle shims (seek, fileSize, symlink)
-    Zip/Native/          — Pure Lean implementations (CRC32, Adler32, DEFLATE, ...)
+    Zip/Native/Adler32.lean  — Native Adler-32
+    Zip/Native/Crc32.lean    — Native CRC-32 (table-driven)
+    Zip/Native/BitReader.lean — LSB-first bit-level reader for DEFLATE
+    Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
+    Zip/Native/Gzip.lean     — Native gzip/zlib decompression (RFC 1952/1950)
     Zip/Spec/            — Formal specifications to prove against
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)

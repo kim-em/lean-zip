@@ -1,6 +1,7 @@
 import ZipTest.Helpers
 
 def ZipTest.NativeIntegration.tests : IO Unit := do
+  IO.println "  NativeIntegration tests..."
   -- === ZIP native extraction ===
 
   -- Create test files with FFI compression
@@ -87,4 +88,4 @@ def ZipTest.NativeIntegration.tests : IO Unit := do
   let _ ← IO.Process.run { cmd := "rm", args := #["-rf", tarNativeDir.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", zipPath.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", tarGzPath.toString] }
-  IO.println "NativeIntegration tests: OK"
+  IO.println "  NativeIntegration tests passed."

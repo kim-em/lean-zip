@@ -76,3 +76,10 @@ def mkLargeData : IO ByteArray := do
   for _ in [:2000] do
     large := large ++ original
   return large
+
+/-- Create pseudo-random (incompressible) test data of `n` bytes. -/
+def mkRandomData (n : Nat := 1000) : ByteArray := Id.run do
+  let mut result := ByteArray.empty
+  for i in [:n] do
+    result := result.push ((i * 73 + 137) % 256).toUInt8
+  return result

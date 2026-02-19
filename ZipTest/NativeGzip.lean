@@ -101,9 +101,7 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   | .error e => throw (IO.userError s!"decompressAuto (raw) failed: {e}")
 
   -- Incompressible data
-  let mut random := ByteArray.empty
-  for i in [:1000] do
-    random := random.push ((i * 73 + 137) % 256).toUInt8
+  let random := mkRandomData
   let gzippedRandom ← Gzip.compress random
   match Zip.Native.GzipDecode.decompress gzippedRandom with
   | .ok result => assert! result == random
