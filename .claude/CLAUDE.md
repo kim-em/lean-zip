@@ -178,14 +178,6 @@ End every session by running `/reflect`. If it suggests improvements to
 1. Type signature with `:= sorry`
 2. Specification theorems with `:= by sorry`
 3. Implementation
-
-**Avoid tautological specs.** A specification that merely restates the
-implementation (e.g. `crc32 x = crc32Impl x`) proves nothing useful.
-Aim for logical characterisations that pin down the *meaning* of the
-function independently of how it is computed — algebraic properties
-(e.g. `crc32 (a ++ b) = combine (crc32 a) (crc32 b)`), equivalence
-with a reference definition, or key invariants. When a full
-characterisation is hard, state useful properties instead.
 4. Auto-solve pass: run `try?` on each `sorry`. If `try?` succeeds, it
    generates info messages with replacement tactics — prefer the suggested
    replacement, but if it looks brittle (e.g. depends on nonlocal simp
@@ -194,19 +186,26 @@ characterisation is hard, state useful properties instead.
 5. Conformance tests (native vs FFI)
 6. Manual proofs for goals that resist automation
 
-Same pattern for optimized versions: specs are equivalence with the
-simple version.
-
 ### Native implementations
 - Place in `Zip/Native/` (e.g. `Zip/Native/Crc32.lean`)
 - Formal specs in `Zip/Spec/` (e.g. `Zip/Spec/Crc32.lean`)
 - Keep FFI implementations intact as the fast path
 - Start simple, optimize later with equivalence proofs
 
-### Proofs
+### Specifications
+- **Avoid tautological specs.** A specification that merely restates the
+  implementation (e.g. `crc32 x = crc32Impl x`) proves nothing useful.
+  Aim for logical characterisations that pin down the *meaning* of a
+  function independently of how it is computed — algebraic properties
+  (e.g. `crc32 (a ++ b) = combine (crc32 a) (crc32 b)`), equivalence
+  with a reference definition, or key invariants. When a full
+  characterisation is hard, state useful properties instead.
+- For optimized versions, specs are equivalence with the simple version.
 - Do NOT modify theorem statements just to make proofs easier. If a spec
   is genuinely wrong or too strong, it can be changed — but document the
   rationale in PLAN.md
+
+### Proofs
 - Do NOT remove a working proof — refactoring a proof (same statement,
   better proof) is fine and encouraged; deleting a theorem is not
 - Do NOT write multi-line tactic blocks without checking intermediate state
