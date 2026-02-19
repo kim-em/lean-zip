@@ -2,6 +2,58 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-19: Implementation — Adler32 bounds proofs + Phase 3 start
+
+**Type**: implementation
+**Phase**: Phase 3 (verified decompressor) — started
+**Sorry count**: 0 → 2
+
+**Accomplished**:
+- Proved Adler32 bounds: `updateByte` output components are unconditionally
+  < MOD_ADLER (no precondition on input state needed, since `% MOD_ADLER`
+  is explicit). `updateList_valid` follows by induction. `updateBytes_valid`
+  lifts to the ByteArray-based native implementation.
+- Created `Zip/Spec/Huffman.lean`: Canonical Huffman code construction from
+  RFC 1951 §3.2.2. Defines `codeFor`, `allCodes`, `decode`, `isPrefixOf`.
+  Proved `isPrefixOf_iff`, `decode_deterministic`, `natToBits_length`.
+  Added `ValidLengths` predicate (bounds + Kraft inequality) as precondition
+  for the two sorry'd theorems.
+- Created `Zip/Spec/Deflate.lean`: Complete DEFLATE bitstream spec.
+  `bytesToBits` (LSB-first per byte), `readBitsLSB`/`readBitsMSB`,
+  `LZ77Symbol` type with `resolveLZ77`, all RFC 1951 tables, full block
+  decode pipeline (stored, fixed Huffman, dynamic Huffman), stream-level
+  `decode` function. Proved `fixedLitLengths_length`, `fixedDistLengths_length`.
+
+**Issues found and fixed (from Codex review)**:
+- Simplified `alignToByte` to derive padding from `bits.length % 8` instead
+  of threading a `bitsConsumed` counter — correct because `bytesToBits`
+  always produces a multiple-of-8 list
+- Fixed `decodeStored`: replaced `for` loop that returned `some` on failure
+  with recursive `readNBytes` that properly returns `none`
+- Added overshoot guards in `decodeDynamicTables` for repeat codes
+- Guarded `codeFor` against `len > maxBits`
+- Added `ValidLengths` preconditions to sorry'd theorem statements
+
+**Codex false positive**: flagged Huffman bit ordering as wrong. Actually
+correct: DEFLATE packs code MSB-first into byte LSB positions, `bytesToBits`
+reads LSB-first, so first bit in list = MSB of code = matches `natToBits`.
+
+**Decisions**:
+- Spec functions use `List Bool` for bitstreams, `List UInt8` for output —
+  clean for reasoning, independent of implementation's `ByteArray`/`BitReader`
+- Used fuel for termination in `decodeSymbols`, `decode`, and
+  `decodeCLSymbols` — consistent and simple
+- `readBitsMSB` included but unused — kept for potential future proof needs
+
+**Sorry locations**:
+- `Zip/Spec/Huffman.lean:145` — `codeFor_injective`
+- `Zip/Spec/Huffman.lean:155` — `canonical_prefix_free`
+
+**Next**:
+- Prove the Huffman theory sorries
+- Conformance test: spec decode vs native inflate
+- State the main correctness theorem
+
 ## 2026-02-19: Review — Gzip/integration code, slop detection
 
 **Type**: review

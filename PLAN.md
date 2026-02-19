@@ -5,41 +5,41 @@
 
 ## Status: Complete
 
-## Session type: review
+## Session type: implementation
 
 ## Objective
 
-Full review of code added since last review (2026-02-19 Phase 2 review).
-That review covered BitReader.lean and Inflate.lean. Since then:
-- `Zip/Native/Gzip.lean` (gzip/zlib framing) — NEW, not yet reviewed
-- `Zip/Archive.lean` integration changes — not yet reviewed
-- `Zip/Tar.lean` integration changes — not yet reviewed
-- `ZipTest/NativeGzip.lean` — not yet reviewed
-- `ZipTest/NativeIntegration.lean` — not yet reviewed
+Two deliverables for this session:
 
-## Review checklist
+1. **Adler32 bounds proofs** — prove that `updateByte` and `updateList`
+   preserve the invariant that both state components are < MOD_ADLER.
 
-- [x] **Gzip.lean deep review**: RFC 1952/1950 compliance, error handling,
-      edge cases, security (max output enforcement, header parsing bounds)
-- [x] **Archive.lean integration**: correct native decompression path,
-      error handling, CRC verification
-- [x] **Tar.lean integration**: correct native gzip path, memory handling
-- [x] **Test coverage review**: gaps in NativeGzip and NativeIntegration tests
-- [x] **Slop detection**: dead code, verbose comments, unused imports across
-      all recent additions
-- [x] **Security audit**: input validation, zip bomb protection, integer
-      handling in new code
-- [x] **Lean idioms**: newer APIs, style consistency
-- [x] **Toolchain check**: is there a newer stable Lean release?
-- [x] **Prompting/skills check**: is .claude/CLAUDE.md still accurate?
+2. **Begin Phase 3: DEFLATE spec formalization** — create Huffman code
+   specification and DEFLATE bitstream specification.
 
-## Fixes applied
+## Checklist
 
-- **Security**: Capped per-member inflate budget to remaining output allowance
-  in `GzipDecode.decompress`, preventing ~2x maxOutputSize peak memory with
-  crafted concatenated gzip streams
-- **Dead code**: Removed unused `BitReader.ofByteArray`, `remaining`, `isEof`
-- **Test refactor**: Extracted `mkRandomData` helper to `Helpers.lean`,
-  deduplicated from NativeInflate and NativeGzip tests
-- **Test output**: Fixed NativeIntegration test to use consistent formatting
-- **Documentation**: Updated CLAUDE.md source layout to list all Native/ files
+- [x] Adler32 bounds: `updateByte_fst_lt` — first component < MOD_ADLER
+- [x] Adler32 bounds: `updateByte_snd_lt` — second component < MOD_ADLER
+- [x] Adler32 bounds: `updateList_valid` — both components < MOD_ADLER for
+      any input starting from a valid state
+- [x] Adler32 bounds: `init_valid` — initial state satisfies the invariant
+- [x] Adler32 bounds: `updateBytes_valid` — lifted to native ByteArray impl
+- [x] Build and test after Adler32 proofs
+- [x] Huffman spec: codeword type, canonical construction from code lengths
+- [x] Huffman spec: `isPrefixOf`, `decode`, prefix-free property
+- [x] Huffman spec: `ValidLengths` predicate, theorem statements
+- [x] DEFLATE spec: bitstream conversion (`bytesToBits`, `readBitsLSB`)
+- [x] DEFLATE spec: LZ77 symbol type and resolution
+- [x] DEFLATE spec: all three block types (stored, fixed, dynamic)
+- [x] DEFLATE spec: stream-level decode function
+- [x] Fix issues from Codex review (alignment, error handling, overshoot)
+- [x] Build and test after DEFLATE spec
+
+## Remaining sorry locations
+
+- `Zip/Spec/Huffman.lean:145` — `codeFor_injective`
+- `Zip/Spec/Huffman.lean:155` — `canonical_prefix_free`
+
+These are the core Huffman theory proofs, requiring reasoning about the
+canonical code assignment. Both now have proper `ValidLengths` preconditions.

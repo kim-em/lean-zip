@@ -286,7 +286,7 @@ Update it during review and reflect sessions.
 Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Phase**: Phase 2 (DEFLATE decompressor) — COMPLETE
-- **Sorry count**: 0
-- **Last session**: 2026-02-19 (implementation: native backend integration)
+- **Phase**: Phase 3 (verified decompressor) — in progress
+- **Sorry count**: 2 (Huffman theory: `codeFor_injective`, `canonical_prefix_free`)
+- **Last session**: 2026-02-19 (implementation: Adler32 bounds + Phase 3 start)
 - **Last review**: 2026-02-19 (full Phase 2 review)
