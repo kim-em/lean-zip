@@ -25,9 +25,12 @@ the repo is dirty with someone else's uncommitted work, document it in
 `PROGRESS.md` and work carefully to avoid mixing changes.
 
 Read these files to understand current state:
+- `SESSION.md` — current working state (sorry locations, failed approaches)
 - `PROGRESS.md` — what previous sessions accomplished and found
 - `PLAN.md` — any unfinished plan from last session
 - `VERIFICATION.md` — the phased roadmap and development cycle
+
+Record the current `sorry` count: `grep -rc sorry Zip/ || true`
 
 Decide whether this should be an **implementation session**, a **review
 session**, or a **self-improvement session** based on the balance.
@@ -82,12 +85,19 @@ reviewing everything.
 
 After implementation:
 - Run `lake build && lake exe test` one final time
+- Check `sorry` count: `grep -rc sorry Zip/ || true`. If it increased vs
+  session start, investigate — this may indicate a proof regression
 - Review changes: `git diff <starting-commit>..HEAD`
 - Use `/second-opinion` to get Codex review of the changes (if unavailable,
   skip and note in PROGRESS.md)
 - Small issues: fix immediately. Substantial issues: add to `PLAN.md`
 
 ### Step 5: Document
+
+Update `SESSION.md` with current working state:
+- `sorry` count and locations (file:line)
+- For incomplete proofs: approaches tried, what failed, what to try next
+- Any in-progress proof goal states
 
 Append a session entry to `PROGRESS.md` (most recent first) with:
 date, session type, what was accomplished, decisions made, what remains.
@@ -124,6 +134,7 @@ End every session by running `/reflect`. If it suggests improvements to
     VERIFICATION.md      — Phased roadmap and development cycle (do not modify)
     PROGRESS.md          — Session-by-session progress log
     PLAN.md              — Current session working plan
+    SESSION.md           — Current working state (overwritten each session)
 
 ## Quality Standards
 
@@ -131,8 +142,12 @@ End every session by running `/reflect`. If it suggests improvements to
 1. Type signature with `:= sorry`
 2. Specification theorems with `:= by sorry`
 3. Implementation
-4. Conformance tests (native vs FFI)
-5. Proofs of specification theorems
+4. Auto-solve pass: run `try?` on each `sorry`. If `try?` succeeds, it
+   generates info messages with replacement tactics — **always use the
+   suggested replacement**, never leave `try?` in committed code. Use
+   `bv_decide` when the goal involves `BitVec`.
+5. Conformance tests (native vs FFI)
+6. Manual proofs for goals that resist automation
 
 Same pattern for optimized versions: specs are equivalence with the
 simple version.
@@ -144,6 +159,11 @@ simple version.
 - Start simple, optimize later with equivalence proofs
 
 ### Proofs
+- Do NOT modify theorem statements to make proofs easier
+- Do NOT remove a working proof to replace it without good reason
+- Do NOT write multi-line tactic blocks without checking intermediate state
+- Do NOT try the same approach more than 3 times — each retry must be
+  fundamentally different (different tactic family, decomposition, or lemma)
 - Prefer `omega`, `decide`, `simp`, `grind` over manual arithmetic
 - After getting a proof to work, refactor it immediately:
   combine steps, find minimal proof, extract reusable lemmas
@@ -168,13 +188,23 @@ simple version.
 - Match style in existing `c/*.c` files
 - Check allocation failures, use overflow guards
 
+## Proof Strategies
+
+This section accumulates proof patterns discovered during development.
+Update it during review and reflect sessions.
+
+(No strategies recorded yet — this section will grow as proofs are written.)
+
 ## Failure Handling
 
 - If `lake build` or `lake exe test` fails on a pre-existing issue (not
   your changes), log the failure in `PROGRESS.md` and work around it or
   end the session. Do not loop retrying the same failure.
-- If a proof is stuck, leave it as `sorry`, document what was tried in
-  `PLAN.md`, and move on. Do not sink the entire session into one proof.
+- If a proof is stuck after 3 fundamentally different attempts, leave it
+  as `sorry`, document what was tried in PLAN.md (so future sessions
+  don't repeat failed approaches), and move on.
+- 3 consecutive iterations with no commits → end the session and document
+  blockers in PLAN.md and SESSION.md.
 - If `/second-opinion` or `/reflect` is unavailable, skip and note in
   `PROGRESS.md`.
 

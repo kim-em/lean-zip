@@ -13,7 +13,16 @@
 
 ## Deliverables
 
+<!-- Use timestamped checkboxes: - [x] (2026-02-19 14:00Z) Description -->
 - [ ] (To be filled)
+
+## Decision Log
+
+<!-- Record proof strategy choices and rationale here. -->
+
+## Failed Approaches
+
+<!-- Record what was tried and didn't work, so future sessions don't repeat. -->
 
 ## Notes
 
