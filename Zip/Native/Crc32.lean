@@ -1,9 +1,11 @@
 import Zip.Spec.Crc32
+import Std.Tactic.BVDecide
 
 /-!
 # Native Lean CRC-32 Implementation
 
-Pure Lean CRC-32 using a precomputed lookup table.
+Pure Lean CRC-32 using a precomputed lookup table, with the key
+linearity lemma proved and the full table equivalence pending.
 -/
 
 namespace Crc32.Native
@@ -22,15 +24,22 @@ def crc32 (init : UInt32 := 0) (data : ByteArray) : UInt32 :=
   let result := updateBytes raw data
   result ^^^ 0xFFFFFFFF
 
-/-! ## Equivalence to spec -/
+/-! ## Proof infrastructure
+
+The table-driven CRC uses the linearity of `crcBit` over XOR: when
+the low bit of `a` is zero, `crcBit(a ^^^ b) = (a >>> 1) ^^^ crcBit(b)`.
+Iterating 8 times gives the table identity. -/
+
+/-- CRC linearity: `crcBit` distributes over XOR when the extra term has bit 0 = 0. -/
+theorem crcBit_xor_high (a b : UInt32) (ha : a &&& 1 = 0) :
+    Spec.crcBit (a ^^^ b) = (a >>> 1) ^^^ Spec.crcBit b := by
+  simp only [Spec.crcBit, Spec.POLY]; bv_decide
 
 theorem table_size : table.size = 256 := by native_decide
 
 /-- Table-driven byte update equals bit-by-bit `Spec.crcByte`.
-    The proof requires showing the CRC linearity property:
-    iterating `crcBit` 8 times on `crc ^^^ byte` equals
-    `(crc >>> 8) ^^^ table[(crc ^^^ byte) &&& 0xFF]`.
-    This is a consequence of XOR distributivity over the CRC recurrence. -/
+    Proof requires iterating `crcBit_xor_high` 8 times and connecting
+    the table lookup to the bit-by-bit computation. -/
 theorem crcByteTable_eq_crcByte (crc : UInt32) (byte : UInt8) :
     Spec.crcByteTable table crc byte = Spec.crcByte crc byte := by
   sorry
