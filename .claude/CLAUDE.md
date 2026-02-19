@@ -197,13 +197,6 @@ simple version.
 - Match style in existing `c/*.c` files
 - Check allocation failures, use overflow guards
 
-## Proof Strategies
-
-This section accumulates proof patterns discovered during development.
-Update it during review and reflect sessions.
-
-(No strategies recorded yet — this section will grow as proofs are written.)
-
 ## Failure Handling
 
 - If `lake build` or `lake exe test` fails on a pre-existing issue (not
@@ -219,11 +212,25 @@ Update it during review and reflect sessions.
 - If `/second-opinion` or `/reflect` is unavailable, skip and note in
   `PROGRESS.md`.
 
+## Proof Strategies
+
+This section accumulates proof patterns discovered during development.
+Update it during review and reflect sessions.
+
+- **Array.foldl for ByteArray proofs**: Use `data.data.foldl` instead of
+  `ByteArray.foldl`, and `data.data.toList` instead of `data.toList`.
+  `Array.foldl_toList` connects `Array.foldl` to `List.foldl`;
+  `ByteArray.foldl` and `ByteArray.toList` lack equivalent lemmas.
+- **bv_decide for UInt32/BitVec**: Effective for bitvector reasoning.
+  Proved CRC linearity (`crcBit_xor_high`) in one line. Caveat: fails
+  when expressions contain `UInt32.ofNat x.toNat` (abstracted as opaque).
+
 ## Current State Summary
 
 Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Phase**: Pre-Phase 1 (FFI-only, no native implementations yet)
-- **Last session**: None yet
+- **Phase**: Phase 1 (Checksums) — implementations done, 1 sorry remaining
+- **Sorry count**: 1 (`Zip/Native/Crc32.lean:45`)
+- **Last session**: 2026-02-19 (implementation)
 - **Last review**: None yet

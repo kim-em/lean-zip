@@ -2,21 +2,34 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
-<!-- Format for each entry:
+## 2026-02-19: Phase 1 kickoff — native checksums
 
-## YYYY-MM-DD: Brief title
+**Type**: implementation
+**Phase**: Phase 1 (Checksums)
+**Sorry count**: 0 → 1
 
-**Type**: implementation / review / self-improvement
-**Phase**: (from VERIFICATION.md)
 **Accomplished**:
-- What was done
+- Created `Zip/Spec/Adler32.lean`: formal Adler-32 spec using `List.foldl`
+  with compositionality theorem (`updateList_append`)
+- Created `Zip/Native/Adler32.lean`: pure Lean implementation using
+  `Array.foldl`, with proved equivalence to spec via `Array.foldl_toList`
+- Created `Zip/Spec/Crc32.lean`: formal CRC-32 spec with bit-by-bit
+  polynomial definition, lookup table construction, and compositionality
+- Created `Zip/Native/Crc32.lean`: table-driven CRC-32, with the key
+  linearity lemma proved (`crcBit_xor_high`) via `bv_decide`
+- Created `ZipTest/NativeChecksum.lean`: comprehensive conformance tests
+  for both native checksums against FFI (known values, large data,
+  incremental, empty, single byte)
 
 **Decisions**:
-- Design decisions and rationale
-
-**Review findings** (if review session):
-- Issues found and whether they were fixed or deferred
+- Use `Array.foldl` on `data.data` instead of `ByteArray.foldl` because
+  `Array.foldl_toList` exists in the standard library
+- Use `data.data.toList` in theorem statements instead of `data.toList`
+  because `ByteArray.toList` has an unrelated loop implementation
+- `bv_decide` is effective for UInt32/BitVec reasoning (proved CRC
+  linearity in one line)
 
 **Next**:
-- What the next session should pick up
--->
+- Complete `crcByteTable_eq_crcByte` proof (see PLAN.md for strategy)
+- Consider Adler32 bounds proofs (state components < MOD_ADLER)
+- Continue Phase 1 or do a review session
