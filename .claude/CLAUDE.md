@@ -37,7 +37,8 @@ session**, or a **self-improvement session** based on the balance.
 
 ### Step 2: Plan
 
-Write a concrete plan to `PLAN.md` with deliverables scoped to one session.
+Write a concrete plan to `PLAN.md` with deliverables scoped to one session
+(aim for a few hundred lines of changes — small enough to review and verify).
 If `PLAN.md` has unfinished items, continue from there.
 
 For implementation sessions, priority order:
@@ -51,7 +52,9 @@ conformance tests → proofs.
 ### Step 3: Execute
 
 **Implementation sessions:**
-- Execute the plan, running `lake build` after each coherent chunk of changes
+- Execute the plan, running `lake build` after each coherent chunk of changes.
+  Use targeted builds when possible (e.g. `lake build Zip.Native.Crc32`)
+  for faster iteration; do a full `lake build` before committing
 - Run `lake exe test` periodically to verify tests pass
 - Commit with conventional prefixes (`feat:`, `fix:`, `refactor:`, `test:`, `doc:`)
 
@@ -98,8 +101,10 @@ Update `SESSION.md` with current working state:
 - `sorry` count and locations (file:line)
 - For incomplete proofs: approaches tried, what failed, what to try next
 - Any in-progress proof goal states
+- Known good commit (last commit where `lake build && lake exe test` passed)
+- Next action: what the next session should do first
 
-Append a session entry to `PROGRESS.md` (most recent first) with:
+Add a session entry to the top of `PROGRESS.md` with:
 date, session type, what was accomplished, decisions made, what remains.
 
 ### Step 6: Reflect
@@ -143,9 +148,10 @@ End every session by running `/reflect`. If it suggests improvements to
 2. Specification theorems with `:= by sorry`
 3. Implementation
 4. Auto-solve pass: run `try?` on each `sorry`. If `try?` succeeds, it
-   generates info messages with replacement tactics — **always use the
-   suggested replacement**, never leave `try?` in committed code. Use
-   `bv_decide` when the goal involves `BitVec`.
+   generates info messages with replacement tactics — prefer the suggested
+   replacement, but if it looks brittle (e.g. depends on nonlocal simp
+   lemmas), use a simpler alternative and note why. Never leave `try?` in
+   committed code. Use `bv_decide` when the goal involves `BitVec`.
 5. Conformance tests (native vs FFI)
 6. Manual proofs for goals that resist automation
 
@@ -159,8 +165,11 @@ simple version.
 - Start simple, optimize later with equivalence proofs
 
 ### Proofs
-- Do NOT modify theorem statements to make proofs easier
-- Do NOT remove a working proof to replace it without good reason
+- Do NOT modify theorem statements just to make proofs easier. If a spec
+  is genuinely wrong or too strong, it can be changed — but document the
+  rationale in PLAN.md
+- Do NOT remove a working proof — refactoring a proof (same statement,
+  better proof) is fine and encouraged; deleting a theorem is not
 - Do NOT write multi-line tactic blocks without checking intermediate state
 - Do NOT try the same approach more than 3 times — each retry must be
   fundamentally different (different tactic family, decomposition, or lemma)
@@ -203,8 +212,10 @@ Update it during review and reflect sessions.
 - If a proof is stuck after 3 fundamentally different attempts, leave it
   as `sorry`, document what was tried in PLAN.md (so future sessions
   don't repeat failed approaches), and move on.
-- 3 consecutive iterations with no commits → end the session and document
-  blockers in PLAN.md and SESSION.md.
+- Implementation sessions: 3 consecutive iterations with no commits → end
+  the session and document blockers in PLAN.md and SESSION.md. (This rule
+  does not apply to review or self-improvement sessions, which may not
+  produce commits.)
 - If `/second-opinion` or `/reflect` is unavailable, skip and note in
   `PROGRESS.md`.
 

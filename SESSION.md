@@ -13,6 +13,14 @@
 
 (None yet.)
 
-## Notes for next session
+## Known good commit
+
+(None yet — no implementation sessions completed.)
+
+## Next action
 
 First session should begin Phase 1 (native checksums) from VERIFICATION.md.
+
+## Notes
+
+(None yet.)
