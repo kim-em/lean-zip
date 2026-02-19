@@ -65,7 +65,7 @@ def fragmentingStream (inner : IO.FS.Stream) (maxChunk : Nat) : IO.FS.Stream := 
 def mkTestData : IO ByteArray := do
   let original := "Hello, world! This is a test of zlib compression from Lean 4. ".toUTF8
   let mut big := ByteArray.empty
-  for _ in List.range 100 do
+  for _ in [:100] do
     big := big ++ original
   return big
 
@@ -73,6 +73,6 @@ def mkTestData : IO ByteArray := do
 def mkLargeData : IO ByteArray := do
   let original := "Hello, world! This is a test of zlib compression from Lean 4. ".toUTF8
   let mut large := ByteArray.empty
-  for _ in List.range 2000 do
+  for _ in [:2000] do
     large := large ++ original
   return large

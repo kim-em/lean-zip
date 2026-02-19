@@ -10,7 +10,7 @@ def ZipTest.Archive.tests : IO Unit := do
   IO.FS.writeFile (zipTestDir / "sub" / "data.txt") "Some nested data for compression testing."
   -- Compressible data (should use deflate method 8)
   let mut compressible := ByteArray.empty
-  for _ in List.range 100 do
+  for _ in [:100] do
     compressible := compressible ++ "Repeated text for compression. ".toUTF8
   IO.FS.writeBinFile (zipTestDir / "big.bin") compressible
   IO.FS.writeFile (zipTestDir / "empty.txt") ""
