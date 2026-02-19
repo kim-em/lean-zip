@@ -1,6 +1,7 @@
 import Zip.Binary
 import Zip.Gzip
 import Zip.Handle
+import Zip.Native.Gzip
 
 namespace Tar
 
@@ -614,5 +615,34 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
       isTty := pure false
     }
     extract tarStream outDir maxEntrySize
+
+/-- Extract a .tar.gz archive using pure Lean decompression (no C FFI).
+    Unlike `extractTarGz`, this reads the entire file into memory before
+    decompressing, so memory usage is O(file_size). Use this when C
+    libraries are unavailable. -/
+partial def extractTarGzNative (inputPath : System.FilePath) (outDir : System.FilePath)
+    (maxEntrySize : UInt64 := 0) (maxOutputSize : Nat := 256 * 1024 * 1024) : IO Unit := do
+  let gzData ← IO.FS.readBinFile inputPath
+  let tarData ← match Zip.Native.GzipDecode.decompress gzData maxOutputSize with
+    | .ok data => pure data
+    | .error msg => throw (IO.userError s!"tar.gz: native gzip decompression failed: {msg}")
+  -- Create a ByteArray-backed read stream
+  let posRef ← IO.mkRef (0 : Nat)
+  let tarStream : IO.FS.Stream := {
+    flush := pure ()
+    read := fun n => do
+      let pos ← posRef.get
+      let avail := tarData.size - pos
+      if avail == 0 then return .empty
+      let toRead := min avail n.toNat
+      let result := tarData.extract pos (pos + toRead)
+      posRef.set (pos + toRead)
+      return result
+    write := fun _ => pure ()
+    getLine := pure ""
+    putStr := fun _ => pure ()
+    isTty := pure false
+  }
+  extract tarStream outDir maxEntrySize
 
 end Tar
