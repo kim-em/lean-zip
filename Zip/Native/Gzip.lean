@@ -52,8 +52,9 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
     -- FHCRC (2-byte header CRC)
     if flg &&& 0x02 != 0 then pos := pos + 2
     if pos > data.size then throw "Gzip: header extends past end of input"
-    -- Inflate
-    let (decompressed, endPos) ← Inflate.inflateRaw data pos maxOutputSize
+    -- Inflate (cap each member to remaining budget so total stays within maxOutputSize)
+    let memberMax := maxOutputSize - result.size
+    let (decompressed, endPos) ← Inflate.inflateRaw data pos memberMax
     pos := endPos
     -- Parse trailer: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
     if pos + 8 > data.size then throw "Gzip: truncated trailer"

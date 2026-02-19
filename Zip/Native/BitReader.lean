@@ -13,18 +13,6 @@ structure BitReader where
   bitOff : Nat    -- bit offset within current byte (0 = LSB)
 namespace BitReader
 
-def ofByteArray (data : ByteArray) : BitReader :=
-  { data, pos := 0, bitOff := 0 }
-
-def remaining (br : BitReader) : Nat :=
-  if br.pos < br.data.size then
-    (br.data.size - br.pos) * 8 - br.bitOff
-  else
-    0
-
-def isEof (br : BitReader) : Bool :=
-  br.pos ≥ br.data.size
-
 /-- Read a single bit. Returns (bit, updatedReader). -/
 def readBit (br : BitReader) : Except String (UInt32 × BitReader) :=
   if br.pos ≥ br.data.size then
