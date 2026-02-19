@@ -37,7 +37,19 @@ Session-by-session log for lean-zip development. Most recent first.
 Both require the nextCodes recurrence invariant: nc[b] + count[b] ≤ 2^b.
 Proof strategy documented in PLAN.md.
 
-**Next**: Prove nextCodes recurrence analysis (steps 1-6 in PLAN.md).
+**Additional progress (continuation session)**:
+- Decomposed `code_value_bound` into `nextCodes_plus_count_le` (sorry'd,
+  minimal core) + offset bound (proved via `offset_of_lt`).
+- Assembly: `nc + offset < nc + totalCount ≤ 2^len` via omega.
+- Documented proof strategy for `nextCodes_plus_count_le` in PLAN.md:
+  telescoping invariant `S(b)*2^(maxBits-b) + kraftTail(b+1) ≤ 2^maxBits`.
+- Discovered: `by_contra`, `push_neg`, `set` are Mathlib-only.
+
+**Sorry locations** (final):
+- `Zip/Spec/Huffman.lean:230` — `nextCodes_plus_count_le`
+- `Zip/Spec/Huffman.lean:419` — `canonical_prefix_free` different-length case
+
+**Next**: Prove nextCodes_plus_count_le (see PLAN.md for detailed steps).
 
 ## 2026-02-19: Implementation — Adler32 bounds proofs + Phase 3 start
 

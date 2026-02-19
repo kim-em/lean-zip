@@ -9,56 +9,34 @@
 
 ## Objective
 
-Prove the remaining `sorry`s in the Huffman specification. Both reduce to
-the `nextCodes` recurrence invariant: `nc[b] + count[b] ≤ 2^b`.
+Prove `nextCodes_plus_count_le` — the last sorry blocking `codeFor_injective`.
 
-## Completed this session
+## Proof strategy for nextCodes_plus_count_le
 
-- [x] Fix `count_foldl_mono` build error (simp made no progress after cases)
-- [x] Fix `offset_of_lt` build errors (hs₂ needed simp, ih argument ordering)
-- [x] `codeFor_injective` structurally complete (modulo `code_value_bound`)
-- [x] `canonical_prefix_free` same-length case proved
-- [x] Build and test pass, sorry count unchanged at 2
+The key insight: the recurrence `S(b) = 2*S(b-1) + blCount[b]` with
+`S(b) = nc(b) + blCount[b]` telescopes when multiplied by `2^(maxBits-b)`:
 
-## Remaining: nextCodes recurrence analysis
+```
+S(b) * 2^(maxBits-b) + kraftTail(b+1) = S(b-1) * 2^(maxBits-b+1) + kraftTail(b)
+```
 
-### Step 1: Simple recursive model
+So by induction: `S(b) * 2^(maxBits-b) + kraftTail(b+1) ≤ 2^maxBits`.
 
-Define `ncRec : Array Nat → Nat → Nat` matching the `nextCodes.go` recurrence
-but with simple structural recursion on the bit-length parameter.
+### Implementation steps
 
-### Step 2: Equivalence with nextCodes
-
-Prove `(nextCodes blCount maxBits)[b]! = ncRec blCount b` for `1 ≤ b ≤ maxBits`
-by induction on the `go` loop, carrying a loop invariant that tracks which
-array entries have been written.
-
-### Step 3: Closed-form / sum characterization
-
-Prove `ncRec blCount b = ∑_{i=0}^{b-1} blCount[i]! * 2^(b-i)` by induction.
-Then `ncRec blCount b + blCount[b]! = ∑_{i=0}^{b} blCount[i]! * 2^(b-i)`.
-
-### Step 4: Kraft inequality bound
-
-Show `(∑_{i=0}^{b} blCount[i]! * 2^(b-i)) * 2^(maxBits-b) ≤ 2^maxBits`
-by relating the partial sum to the Kraft sum in `ValidLengths`.
-
-### Step 5: Offset bound
-
-Show offset (foldl count over take) < countLengths[len] since sym itself
-contributes. This gives `nc[len] + offset < nc[len] + count ≤ 2^len`.
-
-### Step 6: Different-length prefix-free case
-
-Show `ncRec blCount b ≥ (ncRec blCount a + blCount[a]) * 2^(b-a)` for a < b.
-This means no code at length a can be a prefix of a code at length b.
+- [ ] Define `kraftTail blCount maxBits b` = remaining Kraft sum from b
+- [ ] Prove telescoping: `S * 2^k + tail = prev_S * 2^(k+1) + prev_tail`
+- [ ] Prove base case: `kraftTail 1 ≤ 2^maxBits` (connect to ValidLengths)
+- [ ] Connect filter-based Kraft sum to blCount-based sum
+- [ ] Prove `countLengths[b]!` = foldl count for valid b
+- [ ] Prove `nextCodes[b]!` satisfies the recurrence
+- [ ] Assemble `nextCodes_plus_count_le`
+- [ ] Prove `canonical_prefix_free` different-length case (may need nc spacing)
 
 ## Failed approaches (for future reference)
 
-- `apply ih n (s₂ - 1)` with bullet goals: Lean doesn't assign goals in
-  argument order when using `apply`. Use `exact ih ... (by omega) ... _` instead.
-- `simp only [hx, ite_false]` after `cases hx : (x == len)` with false branch:
-  `cases` already reduces the ite, so simp makes no progress. Just use the
-  result directly.
-- `simp only [List.length_cons] at hs₁` without also simplifying `hs₂`:
-  omega can't relate `(x :: xs).length` to `xs.length` without the simp.
+- Simple induction on `S(b) ≤ 2^b` fails: IH too weak, doesn't leave room
+  for blCount[b+1] in the step case
+- `by_contra`, `push_neg`, `set` are Mathlib-only — use `by_cases`/`omega`
+- `le_refl` not in scope — use `(by omega)` or `Nat.le.refl`
+- `apply ih` with bullets: goal ordering is unpredictable — use `exact ih ... (by ...) ...`

@@ -7,48 +7,56 @@
 
 ## Incomplete proofs
 
-- `Zip/Spec/Huffman.lean:222` — `code_value_bound`: code value assigned by
-  canonical construction fits in `len` bits. This is the key helper for
-  `codeFor_injective`. Requires proving `nc[b] + count[b] ≤ 2^b` from
-  the nextCodes recurrence and Kraft inequality.
-- `Zip/Spec/Huffman.lean:390` — `canonical_prefix_free` different-length case:
+- `Zip/Spec/Huffman.lean:230` — `nextCodes_plus_count_le`: For valid lengths,
+  `nextCodes[b]! + foldl_count_b ≤ 2^b`. This is the Kraft-based invariant
+  of the canonical code construction.
+- `Zip/Spec/Huffman.lean:419` — `canonical_prefix_free` different-length case:
   when `len₁ < len₂`, the shorter code can't be a prefix of the longer one.
-  Requires `nc[len₂] ≥ (nc[len₁] + count[len₁]) * 2^(len₂ - len₁)`.
 
-Both require analyzing the `nextCodes.go` loop invariant.
+Both reduce to analyzing the `nextCodes.go` loop.
 
 ## Structurally complete proofs
 
-- `codeFor_injective` — fully structured, compiles with 0 errors. Depends on
-  `code_value_bound` (sorry'd helper). Proof chain: codeFor_spec extracts
-  components → natToBits_length shows lengths equal → natToBits_injective
-  shows code values equal → offset_of_lt gives contradiction if s₁ ≠ s₂.
-- `canonical_prefix_free` same-length case — proved. Different-length case sorry'd.
+- `code_value_bound` — proved using `nextCodes_plus_count_le` (sorry'd) +
+  `offset_of_lt` (proved) + omega
+- `codeFor_injective` — proved using `code_value_bound`, `codeFor_spec`,
+  `natToBits_injective`, `offset_of_lt`
+- `canonical_prefix_free` same-length case — proved using `codeFor_injective`
 
 ## Known good commit
 
-`5b64cb2` — `lake build && lake exe test` passes
+`7947885` — `lake build && lake exe test` passes
 
 ## Next action
 
-The remaining sorry's all reduce to the same problem: proving an invariant
-about `nextCodes.go`. The proof strategy:
+Prove `nextCodes_plus_count_le`. Proof plan:
 
-1. Define `ncRec blCount b = (ncRec blCount (b-1) + blCount[b-1]!) * 2` (simple recursion)
-2. Show `(nextCodes blCount maxBits)[b]! = ncRec blCount b`
-3. Show `ncRec blCount b + blCount[b]! = ∑_{i=0}^{b} blCount[i]! * 2^(b-i)`
-4. Multiply by `2^(maxBits-b)` to get partial Kraft sum ≤ 2^maxBits
-5. Divide to get `ncRec blCount b + blCount[b]! ≤ 2^b`
+1. Define `ncSimple blCount b = (ncSimple blCount (b-1) + blCount[b-1]!) * 2`
+   (simple structural recursion matching `nextCodes.go`)
+2. Define `kraftTail blCount maxBits b = ∑_{i=b}^{maxBits} blCount[i]! * 2^(maxBits-i)`
+3. Prove invariant by induction:
+   `(ncSimple b + blCount[b]!) * 2^(maxBits-b) + kraftTail(b+1) ≤ 2^maxBits`
+   - Base (b=0): reduces to `kraftTail(1) ≤ 2^maxBits` (Kraft inequality)
+   - Step: `(ncSimple(b+1) + blCount[b+1]!) * 2^(maxBits-b-1) + kraftTail(b+2)`
+     = `(ncSimple(b) + blCount[b]!) * 2^(maxBits-b) + kraftTail(b+1)` ≤ 2^maxBits (by IH)
+4. Conclude: `ncSimple b + blCount[b]! ≤ 2^b`
+5. Show `nextCodes[b]! = ncSimple b` for `1 ≤ b ≤ maxBits`
+6. Relate foldl count to `countLengths[b]!` (countLengths_eq_foldl_count)
 
-For the different-length case of `canonical_prefix_free`, also need:
-6. Show `ncRec blCount b ≥ (ncRec blCount a + blCount[a]!) * 2^(b-a)` for `a < b`
+The step in (3) is an equality, making it clean. The tricky parts are:
+- (5) analyzing `nextCodes.go` (Array operations, termination)
+- (6) relating `countLengths` Array foldl to scalar foldl
+- Connecting the blCount-based Kraft sum to the ValidLengths filter-based sum
+
+Alternative: prove `nextCodes.go` invariant directly (same math, avoids ncSimple).
+
+For `canonical_prefix_free` different-length case, additionally need:
+- `ncSimple b ≥ (ncSimple a + blCount[a]!) * 2^(b-a)` for `a < b`
+  (follows from the recurrence by induction)
 
 ## Notes
 
-- `natToBits` was rewritten from accumulator-based to simple recursion for
-  easier inductive proofs
-- `codeFor_spec` helper avoids fighting with `split at h` inside complex
-  dite/ite nesting — extracts the three key facts in one lemma
-- `offset_of_lt` needed `simp only [List.length_cons] at hs₁ hs₂` (not just
-  `hs₁`) to give omega visibility into both bounds
+- `by_contra` and `push_neg` are NOT available without Mathlib
+- `set` tactic is NOT available without Mathlib — use `let` or work inline
+- `le_refl` is not in scope — use `(by omega)` or `Nat.le.refl`
 - Toolchain v4.29.0-rc1 is current
