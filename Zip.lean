@@ -9,3 +9,5 @@ import Zip.Archive
 import Zip.Zstd
 import Zip.Spec.Adler32
 import Zip.Native.Adler32
+import Zip.Spec.Crc32
+import Zip.Native.Crc32
