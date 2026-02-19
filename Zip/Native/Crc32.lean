@@ -83,7 +83,7 @@ theorem updateBytes_eq_updateList (crc : UInt32) (data : ByteArray) :
     updateBytes crc data = Spec.updateList crc data.data.toList := by
   simp only [updateBytes, Spec.updateList, Array.foldl_toList]
   have : Spec.crcByteTable table = Spec.crcByte :=
-    funext fun crc => funext fun byte => crcByteTable_eq_crcByte crc byte
+    funext fun _ => funext fun _ => crcByteTable_eq_crcByte ..
   rw [this]
 
 end Crc32.Native
