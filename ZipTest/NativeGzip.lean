@@ -114,4 +114,61 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   | .ok result => assert! result == random
   | .error e => throw (IO.userError s!"native zlib decompress (random) failed: {e}")
 
+  -- Error cases
+  -- Error cases: gzip
+  match Zip.Native.GzipDecode.decompress ByteArray.empty with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "gzip: expected error on empty input")
+
+  match Zip.Native.GzipDecode.decompress (ByteArray.mk #[0x1f, 0x8b]) with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "gzip: expected error on short input")
+
+  match Zip.Native.GzipDecode.decompress (ByteArray.mk #[0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]) with
+  | .error e => assert! e.contains "magic"
+  | .ok _ => throw (IO.userError "gzip: expected error on bad magic")
+
+  let gzippedHello ← Gzip.compress helloBytes
+  let truncated := gzippedHello.extract 0 (gzippedHello.size - 4)
+  match Zip.Native.GzipDecode.decompress truncated with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "gzip: expected error on truncated trailer")
+
+  let mut corruptCrc := gzippedHello
+  let crcPos := corruptCrc.size - 8
+  corruptCrc := corruptCrc.set! crcPos (corruptCrc[crcPos]! ^^^ 0xFF)
+  match Zip.Native.GzipDecode.decompress corruptCrc with
+  | .error e => assert! e.contains "CRC32"
+  | .ok _ => throw (IO.userError "gzip: expected CRC mismatch error")
+
+  -- Error cases: zlib
+  match Zip.Native.ZlibDecode.decompress ByteArray.empty with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "zlib: expected error on empty input")
+
+  match Zip.Native.ZlibDecode.decompress (ByteArray.mk #[0x78, 0x00, 0, 0, 0, 0]) with
+  | .error e => assert! e.contains "header check"
+  | .ok _ => throw (IO.userError "zlib: expected error on bad header")
+
+  match Zip.Native.ZlibDecode.decompress (ByteArray.mk #[0x09, 0x15, 0, 0, 0, 0]) with
+  | .error e => assert! e.contains "compression method"
+  | .ok _ => throw (IO.userError "zlib: expected error on wrong method")
+
+  let zlibbedHello ← Zlib.compress helloBytes
+  let mut corruptAdler := zlibbedHello
+  let adlerPos := corruptAdler.size - 1
+  corruptAdler := corruptAdler.set! adlerPos (corruptAdler[adlerPos]! ^^^ 0xFF)
+  match Zip.Native.ZlibDecode.decompress corruptAdler with
+  | .error e => assert! e.contains "Adler32"
+  | .ok _ => throw (IO.userError "zlib: expected Adler32 mismatch error")
+
+  -- Error cases: raw deflate
+  match Zip.Native.Inflate.inflate (ByteArray.mk #[0x07]) with
+  | .error e => assert! e.contains "reserved"
+  | .ok _ => throw (IO.userError "inflate: expected error on reserved block type")
+
+  match Zip.Native.Inflate.inflate (ByteArray.mk #[0x01, 0x05, 0x00]) with
+  | .error _ => pure ()
+  | .ok _ => throw (IO.userError "inflate: expected error on truncated stored block")
+
   IO.println "  NativeGzip tests passed."

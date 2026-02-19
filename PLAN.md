@@ -3,27 +3,29 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: Completed
+## Status: In progress
 
-## Session type: review
+## Session type: implementation
 
 ## Objective
 
-Review the Phase 2 DEFLATE decompressor code (BitReader + Inflate) for
-correctness, security, style, and Lean idioms. This is the first review
-of Phase 2 code.
+Implement native gzip (RFC 1952) and zlib (RFC 1950) framing layers on top
+of the existing pure Lean DEFLATE decompressor. This enables integration
+with existing ZIP/tar code paths and completes Phase 2 deliverables.
 
-## Focus Areas
+## Deliverables
 
-- [x] **Correctness & RFC conformance**: All code paths verified against RFC 1951.
-      Huffman tree construction, canonical codes, stored/fixed/dynamic blocks,
-      LZ77 back-references with overlapping copies — all correct.
-- [x] **Security**: Added maxOutputSize parameter (default 256 MiB) to guard
-      against zip bombs. Back-reference distance validation was already present.
-- [x] **Refactoring & code quality**: Converted while loop to bounded for loop.
-      No dead code or duplication found.
-- [x] **Lean idioms**: Replaced List.range with [:n] range notation.
-- [x] **Slop detection**: No issues — code is minimal and well-structured.
-- [x] **Toolchain check**: v4.29.0-rc1 is current. No upgrade needed.
-- [x] **Test coverage**: Good for conformance testing. Future: add error-case
-      tests (malformed input, truncated streams, invalid Huffman codes).
+- [ ] **Expose inflate ending position**: Add `Inflate.inflateRaw` that returns
+      `(ByteArray × Nat)` where `Nat` is the byte position after the DEFLATE
+      stream. Needed so the framing layer can read the trailer.
+- [ ] **Gzip decompression** (`Zip/Native/Gzip.lean`): Parse gzip header
+      (magic, method, flags, skip optional fields), inflate, parse trailer
+      (CRC32 + ISIZE), verify checksums. Support concatenated gzip streams.
+- [ ] **Zlib decompression** (`Zip/Native/Gzip.lean`): Parse zlib header
+      (CMF + FLG, check bits), inflate, parse trailer (Adler32 big-endian),
+      verify checksum.
+- [ ] **Auto-detect function**: Detect gzip vs zlib vs raw deflate from
+      the first bytes.
+- [ ] **Conformance tests** (`ZipTest/NativeGzip.lean`): Compare native
+      gzip/zlib decompress with FFI for various inputs.
+- [ ] **Wire up**: Add imports to `Zip.lean` and `ZipTest.lean`.
