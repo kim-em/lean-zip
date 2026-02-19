@@ -7,3 +7,5 @@ import Zip.Handle
 import Zip.Tar
 import Zip.Archive
 import Zip.Zstd
+import Zip.Spec.Adler32
+import Zip.Native.Adler32
