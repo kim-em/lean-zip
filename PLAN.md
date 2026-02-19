@@ -5,30 +5,25 @@
 
 ## Status: Completed
 
-## Session type: implementation
+## Session type: review
 
 ## Objective
 
-Begin Phase 2 (DEFLATE decompressor) — implement the BitReader and core
-DEFLATE infrastructure: stored blocks and fixed Huffman decoding.
+Review the Phase 2 DEFLATE decompressor code (BitReader + Inflate) for
+correctness, security, style, and Lean idioms. This is the first review
+of Phase 2 code.
 
-## Deliverables
+## Focus Areas
 
-- [x] `Zip/Native/BitReader.lean` — bit-level reader (LSB-first) for ByteArray
-- [x] `Zip/Native/Inflate.lean` — DEFLATE decompressor: block parsing,
-      stored blocks, fixed Huffman tables, LZ77 back-references
-- [x] `ZipTest/NativeInflate.lean` — conformance tests (FFI compress → native decompress)
-- [x] Wire up in `Zip.lean`, `ZipTest.lean`, `lakefile.lean`
-
-## Design Notes
-
-DEFLATE (RFC 1951) operates on a bit stream (LSB-first within each byte).
-Three block types:
-- Type 0: Stored (uncompressed, byte-aligned)
-- Type 1: Fixed Huffman codes
-- Type 2: Dynamic Huffman codes
-
-BitReader: mutable state tracking byte position + bit offset within byte.
-Huffman tree: simple binary tree; decode by reading one bit at a time.
-
-All three block types implemented and tested in this session.
+- [x] **Correctness & RFC conformance**: All code paths verified against RFC 1951.
+      Huffman tree construction, canonical codes, stored/fixed/dynamic blocks,
+      LZ77 back-references with overlapping copies — all correct.
+- [x] **Security**: Added maxOutputSize parameter (default 256 MiB) to guard
+      against zip bombs. Back-reference distance validation was already present.
+- [x] **Refactoring & code quality**: Converted while loop to bounded for loop.
+      No dead code or duplication found.
+- [x] **Lean idioms**: Replaced List.range with [:n] range notation.
+- [x] **Slop detection**: No issues — code is minimal and well-structured.
+- [x] **Toolchain check**: v4.29.0-rc1 is current. No upgrade needed.
+- [x] **Test coverage**: Good for conformance testing. Future: add error-case
+      tests (malformed input, truncated streams, invalid Huffman codes).

@@ -7,31 +7,29 @@
 
 ## Incomplete proofs
 
-None — no proofs attempted this session (implementation only).
+None.
 
 ## Known good commit
 
-`abea9ce` — `lake build && lake exe test` passes
+`753eb3b` — `lake build && lake exe test` passes
 
 ## Next action
 
-Phase 2 (DEFLATE decompressor) is functionally complete. Next session options:
-1. **Review session**: Review Phase 2 inflate code for correctness, edge cases,
-   and RFC conformance
-2. **Implementation session**: Add gzip/zlib framing on top of native inflate
+Phase 2 (DEFLATE decompressor) is functionally complete and reviewed. Next session options:
+1. **Implementation session**: Add gzip/zlib framing on top of native inflate
    (header/trailer parsing, checksum verification) — needed for integration
    with existing ZIP/tar code paths
-3. **Implementation session**: Begin DEFLATE spec formalization (`Zip/Spec/Deflate.lean`)
+2. **Implementation session**: Begin DEFLATE spec formalization (`Zip/Spec/Deflate.lean`)
+3. **Implementation session**: Add error-case tests for inflate (malformed
+   input, truncated streams, invalid Huffman codes)
 
 ## Notes
 
-- The native inflate implementation supports all 3 DEFLATE block types
-  (stored, fixed Huffman, dynamic Huffman) and passes conformance tests
-  against zlib across all compression levels (0–9)
-- Fixed an off-by-one in `HuffTree.insert`: was calling `go tree (len - 1)`
-  instead of `go tree len`, causing the MSB of each Huffman code to be
-  dropped
-- `Array.mkArray` doesn't exist in Lean 4.29; use `Array.replicate` instead
-- `return .error` inside `Except` do blocks gets confused with product types;
-  use `throw` instead
-- Fuel parameter (10M) used for Huffman block decoding termination
+- Phase 2 review completed: code is correct against RFC 1951
+- Added maxOutputSize parameter (default 256 MiB) to guard against zip bombs
+- Converted while loop to bounded for loop in inflate (removes mutable variables)
+- Replaced List.range with idiomatic [:n] ranges across codebase
+- Toolchain v4.29.0-rc1 is current (latest stable: v4.28.0)
+- No issues found in BitReader.lean — minimal and correct
+- HuffTree.insert handles MSB-first ordering correctly for DEFLATE
+- Overlapping LZ77 copy reads from growing buffer (correct per RFC)
