@@ -7,47 +7,48 @@
 
 ## Incomplete proofs
 
-- `Zip/Spec/Huffman.lean:145` — `codeFor_injective`: canonical code assigns
-  distinct codewords to distinct symbols. Needs proof that the canonical
-  construction never assigns the same code to different symbols.
-- `Zip/Spec/Huffman.lean:155` — `canonical_prefix_free`: canonical code is
-  prefix-free. Needs proof that codes of different lengths can't be prefixes
-  (shorter codes are numerically smaller in the canonical tree structure).
+- `Zip/Spec/Huffman.lean:222` — `code_value_bound`: code value assigned by
+  canonical construction fits in `len` bits. This is the key helper for
+  `codeFor_injective`. Requires proving `nc[b] + count[b] ≤ 2^b` from
+  the nextCodes recurrence and Kraft inequality.
+- `Zip/Spec/Huffman.lean:390` — `canonical_prefix_free` different-length case:
+  when `len₁ < len₂`, the shorter code can't be a prefix of the longer one.
+  Requires `nc[len₂] ≥ (nc[len₁] + count[len₁]) * 2^(len₂ - len₁)`.
 
-Both have `ValidLengths` preconditions (all lengths ≤ maxBits, Kraft inequality).
+Both require analyzing the `nextCodes.go` loop invariant.
+
+## Structurally complete proofs
+
+- `codeFor_injective` — fully structured, compiles with 0 errors. Depends on
+  `code_value_bound` (sorry'd helper). Proof chain: codeFor_spec extracts
+  components → natToBits_length shows lengths equal → natToBits_injective
+  shows code values equal → offset_of_lt gives contradiction if s₁ ≠ s₂.
+- `canonical_prefix_free` same-length case — proved. Different-length case sorry'd.
 
 ## Known good commit
 
-`c909972` — `lake build && lake exe test` passes
+`5b64cb2` — `lake build && lake exe test` passes
 
 ## Next action
 
-Phase 3 is now in progress. Next session options:
+The remaining sorry's all reduce to the same problem: proving an invariant
+about `nextCodes.go`. The proof strategy:
 
-1. **Implementation session**: Prove `codeFor_injective` and
-   `canonical_prefix_free` — these are the foundational Huffman theory
-   proofs. Approach: show that codes of the same length get consecutive
-   code values (hence different codewords), and codes of different lengths
-   have the shorter one's range disjoint from the longer one's bit patterns.
+1. Define `ncRec blCount b = (ncRec blCount (b-1) + blCount[b-1]!) * 2` (simple recursion)
+2. Show `(nextCodes blCount maxBits)[b]! = ncRec blCount b`
+3. Show `ncRec blCount b + blCount[b]! = ∑_{i=0}^{b} blCount[i]! * 2^(b-i)`
+4. Multiply by `2^(maxBits-b)` to get partial Kraft sum ≤ 2^maxBits
+5. Divide to get `ncRec blCount b + blCount[b]! ≤ 2^b`
 
-2. **Implementation session**: Write a conformance test that checks the
-   spec decode function against the native inflate implementation on
-   actual compressed data. This validates the spec independently of proofs.
-
-3. **Review session**: Review the new spec files for completeness and
-   correctness. Check spec vs RFC 1951 more carefully.
-
-4. **Implementation session**: Begin the correctness theorem statement:
-   `inflate data = ok output ↔ Deflate.Spec.decodeBytes data = some output.toList`.
-   This doesn't require proving it yet — just getting the type right.
+For the different-length case of `canonical_prefix_free`, also need:
+6. Show `ncRec blCount b ≥ (ncRec blCount a + blCount[a]!) * 2^(b-a)` for `a < b`
 
 ## Notes
 
-- Codex review found and we fixed: alignment tracking (simplified to use
-  `bits.length % 8`), `decodeStored` error handling, dynamic table overshoot,
-  theorem preconditions
-- Codex incorrectly flagged Huffman bit ordering as wrong — the double
-  reversal (MSB-first packing into LSB-first bytes, then LSB-first reading)
-  means the spec's MSB-first codewords correctly match the bit stream
-- `readBitsMSB` is currently unused but may be needed for future proofs
+- `natToBits` was rewritten from accumulator-based to simple recursion for
+  easier inductive proofs
+- `codeFor_spec` helper avoids fighting with `split at h` inside complex
+  dite/ite nesting — extracts the three key facts in one lemma
+- `offset_of_lt` needed `simp only [List.length_cons] at hs₁ hs₂` (not just
+  `hs₁`) to give omega visibility into both bounds
 - Toolchain v4.29.0-rc1 is current

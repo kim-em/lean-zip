@@ -2,6 +2,43 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-19: Implementation — Huffman codeFor_injective + canonical_prefix_free
+
+**Type**: implementation
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 2 → 2 (same count, but sorry's are now in smaller helpers)
+
+**Accomplished**:
+- `codeFor_injective` structurally complete. Proof chain: `codeFor_spec`
+  extracts structural info → `natToBits_length` shows lengths equal →
+  `natToBits_injective` shows code values equal → `offset_of_lt` gives
+  contradiction if s₁ ≠ s₂. Depends on sorry'd `code_value_bound`.
+- `canonical_prefix_free` same-length case proved: same-length prefix implies
+  equality → `codeFor_injective` gives s₁ = s₂ → contradicts s₁ ≠ s₂.
+- Rewrote `natToBits` from accumulator-based to simple recursion for easier
+  inductive reasoning. Proved `natToBits_length`, `natToBits_eq_iff`,
+  `natToBits_injective`.
+- Proved Kraft inequality helpers: `kraft_ge_count`, `filter_ne_zero_filter_eq`,
+  `foldl_add_init`, `count_le_pow_of_validLengths`.
+- Proved `count_foldl_mono`, `offset_of_lt`, `codeFor_spec`.
+
+**Issues fixed**:
+- `cases` on `(x == len)` already reduces `ite` — subsequent `simp` makes
+  no progress. Solution: use the result directly.
+- `apply ih n (s₂-1)` with bullets: Lean assigns goals in non-obvious order.
+  Solution: use `exact ih ... (by omega) hlen₁' (by omega) (by omega) _`.
+- omega fails when `hs₂ : s₂ ≤ (x :: xs).length` not simplified to involve
+  `xs.length`. Solution: `simp only [List.length_cons] at hs₁ hs₂`.
+
+**Remaining sorry's**:
+- `Zip/Spec/Huffman.lean:222` — `code_value_bound` (nc[len] + offset < 2^len)
+- `Zip/Spec/Huffman.lean:390` — `canonical_prefix_free` different-length case
+
+Both require the nextCodes recurrence invariant: nc[b] + count[b] ≤ 2^b.
+Proof strategy documented in PLAN.md.
+
+**Next**: Prove nextCodes recurrence analysis (steps 1-6 in PLAN.md).
+
 ## 2026-02-19: Implementation — Adler32 bounds proofs + Phase 3 start
 
 **Type**: implementation

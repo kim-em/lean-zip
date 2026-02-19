@@ -3,43 +3,62 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: Complete
+## Status: In progress
 
 ## Session type: implementation
 
 ## Objective
 
-Two deliverables for this session:
+Prove the remaining `sorry`s in the Huffman specification. Both reduce to
+the `nextCodes` recurrence invariant: `nc[b] + count[b] ≤ 2^b`.
 
-1. **Adler32 bounds proofs** — prove that `updateByte` and `updateList`
-   preserve the invariant that both state components are < MOD_ADLER.
+## Completed this session
 
-2. **Begin Phase 3: DEFLATE spec formalization** — create Huffman code
-   specification and DEFLATE bitstream specification.
+- [x] Fix `count_foldl_mono` build error (simp made no progress after cases)
+- [x] Fix `offset_of_lt` build errors (hs₂ needed simp, ih argument ordering)
+- [x] `codeFor_injective` structurally complete (modulo `code_value_bound`)
+- [x] `canonical_prefix_free` same-length case proved
+- [x] Build and test pass, sorry count unchanged at 2
 
-## Checklist
+## Remaining: nextCodes recurrence analysis
 
-- [x] Adler32 bounds: `updateByte_fst_lt` — first component < MOD_ADLER
-- [x] Adler32 bounds: `updateByte_snd_lt` — second component < MOD_ADLER
-- [x] Adler32 bounds: `updateList_valid` — both components < MOD_ADLER for
-      any input starting from a valid state
-- [x] Adler32 bounds: `init_valid` — initial state satisfies the invariant
-- [x] Adler32 bounds: `updateBytes_valid` — lifted to native ByteArray impl
-- [x] Build and test after Adler32 proofs
-- [x] Huffman spec: codeword type, canonical construction from code lengths
-- [x] Huffman spec: `isPrefixOf`, `decode`, prefix-free property
-- [x] Huffman spec: `ValidLengths` predicate, theorem statements
-- [x] DEFLATE spec: bitstream conversion (`bytesToBits`, `readBitsLSB`)
-- [x] DEFLATE spec: LZ77 symbol type and resolution
-- [x] DEFLATE spec: all three block types (stored, fixed, dynamic)
-- [x] DEFLATE spec: stream-level decode function
-- [x] Fix issues from Codex review (alignment, error handling, overshoot)
-- [x] Build and test after DEFLATE spec
+### Step 1: Simple recursive model
 
-## Remaining sorry locations
+Define `ncRec : Array Nat → Nat → Nat` matching the `nextCodes.go` recurrence
+but with simple structural recursion on the bit-length parameter.
 
-- `Zip/Spec/Huffman.lean:145` — `codeFor_injective`
-- `Zip/Spec/Huffman.lean:155` — `canonical_prefix_free`
+### Step 2: Equivalence with nextCodes
 
-These are the core Huffman theory proofs, requiring reasoning about the
-canonical code assignment. Both now have proper `ValidLengths` preconditions.
+Prove `(nextCodes blCount maxBits)[b]! = ncRec blCount b` for `1 ≤ b ≤ maxBits`
+by induction on the `go` loop, carrying a loop invariant that tracks which
+array entries have been written.
+
+### Step 3: Closed-form / sum characterization
+
+Prove `ncRec blCount b = ∑_{i=0}^{b-1} blCount[i]! * 2^(b-i)` by induction.
+Then `ncRec blCount b + blCount[b]! = ∑_{i=0}^{b} blCount[i]! * 2^(b-i)`.
+
+### Step 4: Kraft inequality bound
+
+Show `(∑_{i=0}^{b} blCount[i]! * 2^(b-i)) * 2^(maxBits-b) ≤ 2^maxBits`
+by relating the partial sum to the Kraft sum in `ValidLengths`.
+
+### Step 5: Offset bound
+
+Show offset (foldl count over take) < countLengths[len] since sym itself
+contributes. This gives `nc[len] + offset < nc[len] + count ≤ 2^len`.
+
+### Step 6: Different-length prefix-free case
+
+Show `ncRec blCount b ≥ (ncRec blCount a + blCount[a]) * 2^(b-a)` for a < b.
+This means no code at length a can be a prefix of a code at length b.
+
+## Failed approaches (for future reference)
+
+- `apply ih n (s₂ - 1)` with bullet goals: Lean doesn't assign goals in
+  argument order when using `apply`. Use `exact ih ... (by omega) ... _` instead.
+- `simp only [hx, ite_false]` after `cases hx : (x == len)` with false branch:
+  `cases` already reduces the ite, so simp makes no progress. Just use the
+  result directly.
+- `simp only [List.length_cons] at hs₁` without also simplifying `hs₂`:
+  omega can't relate `(x :: xs).length` to `xs.length` without the simp.
