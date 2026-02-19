@@ -216,17 +216,17 @@ theorem count_le_pow_of_validLengths (lengths : List Nat) (maxBits len : Nat)
 
 /-! ## Helper lemmas for codeFor proofs -/
 
-/-- The code value assigned by the canonical construction fits in `len` bits.
-    This follows from the Kraft inequality: the nextCodes construction ensures
-    nc[len] + count_at_len ≤ 2^len, and offset < count_at_len. -/
-private theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
+/-- The nextCodes construction ensures nc[b] + count[b] ≤ 2^b.
+    This is the Kraft-based invariant of the canonical code construction:
+    at each bit length b, the starting code plus the number of codes
+    at that length doesn't exceed the code space.
+    Proof requires analyzing the nextCodes.go recurrence and connecting
+    it to the Kraft inequality in ValidLengths. -/
+private theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
     (hv : ValidLengths lengths maxBits)
-    (hs : sym < lengths.length)
-    (hlen : ¬(lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true) :
-    (nextCodes (countLengths lengths maxBits) maxBits)[lengths[sym]]! +
-      List.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc)
-        0 (List.take sym lengths) <
-    2 ^ lengths[sym] := by
+    (hb : b ≠ 0) (hb' : b ≤ maxBits) :
+    (nextCodes (countLengths lengths maxBits) maxBits)[b]! +
+      lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 ≤ 2 ^ b := by
   sorry
 
 /-- The counting foldl is monotone: the result is always ≥ the initial value. -/
@@ -279,6 +279,34 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
       have hlen₁' : xs[n] = len := by
         simp only [List.getElem_cons_succ] at hlen₁; exact hlen₁
       exact ih n (s₂ - 1) (by omega) hlen₁' (by omega) (by omega) _
+
+/-- The code value assigned by the canonical construction fits in `len` bits.
+    This follows from the Kraft inequality: the nextCodes construction ensures
+    nc[len] + count_at_len ≤ 2^len, and offset < count_at_len. -/
+private theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
+    (hv : ValidLengths lengths maxBits)
+    (hs : sym < lengths.length)
+    (hlen : ¬(lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true) :
+    (nextCodes (countLengths lengths maxBits) maxBits)[lengths[sym]]! +
+      List.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc)
+        0 (List.take sym lengths) <
+    2 ^ lengths[sym] := by
+  have hlen0 : lengths[sym] ≠ 0 := by
+    intro h; have : (lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true := by simp [h]
+    exact hlen this
+  have hlenM : lengths[sym] ≤ maxBits := by
+    by_cases h : lengths[sym] > maxBits
+    · exfalso; exact hlen (by simp [h])
+    · omega
+  -- Key bound: nc[len] + totalCount ≤ 2^len
+  have hncBound := nextCodes_plus_count_le lengths maxBits lengths[sym] hv hlen0 hlenM
+  -- Offset < totalCount: reuse offset_of_lt with s₂ = lengths.length
+  have hOffsetLt : List.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc)
+      0 (List.take sym lengths) <
+    lengths.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc) 0 := by
+    have h := offset_of_lt lengths sym lengths.length lengths[sym] hs rfl hs (by omega)
+    rwa [List.take_length] at h
+  omega
 
 /-- Extract structural information from `codeFor` returning `some`. -/
 private theorem codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Codeword}
