@@ -383,7 +383,8 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   parseCentralDir cdBuf 0 cdSize
 
 /-- Read an entry's decompressed data from a file handle by seeking to its local header.
-    `maxEntrySize` limits decompressed entry size (0 = no limit).
+    `maxEntrySize` limits decompressed entry size (0 = no limit for FFI; the native
+    backend caps at 256 MiB when `maxEntrySize = 0` as a zip-bomb guard).
     When `useNative` is true, uses the pure Lean DEFLATE decompressor and CRC-32. -/
 private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     (maxEntrySize : UInt64 := 0) (useNative : Bool := false) : IO ByteArray := do

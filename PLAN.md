@@ -3,29 +3,24 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: In progress
+## Status: Complete
 
 ## Session type: implementation
 
 ## Objective
 
-Implement native gzip (RFC 1952) and zlib (RFC 1950) framing layers on top
-of the existing pure Lean DEFLATE decompressor. This enables integration
-with existing ZIP/tar code paths and completes Phase 2 deliverables.
+Integrate the native pure-Lean decompressor as an alternative backend for
+ZIP and tar.gz code paths. This completes the last Phase 2 deliverable.
 
 ## Deliverables
 
-- [ ] **Expose inflate ending position**: Add `Inflate.inflateRaw` that returns
-      `(ByteArray × Nat)` where `Nat` is the byte position after the DEFLATE
-      stream. Needed so the framing layer can read the trailer.
-- [ ] **Gzip decompression** (`Zip/Native/Gzip.lean`): Parse gzip header
-      (magic, method, flags, skip optional fields), inflate, parse trailer
-      (CRC32 + ISIZE), verify checksums. Support concatenated gzip streams.
-- [ ] **Zlib decompression** (`Zip/Native/Gzip.lean`): Parse zlib header
-      (CMF + FLG, check bits), inflate, parse trailer (Adler32 big-endian),
-      verify checksum.
-- [ ] **Auto-detect function**: Detect gzip vs zlib vs raw deflate from
-      the first bytes.
-- [ ] **Conformance tests** (`ZipTest/NativeGzip.lean`): Compare native
-      gzip/zlib decompress with FFI for various inputs.
-- [ ] **Wire up**: Add imports to `Zip.lean` and `ZipTest.lean`.
+- [x] **Archive.lean integration**: `useNative` parameter on `extract`,
+      `extractFile`, `readEntryData`. Uses `Zip.Native.Inflate.inflate`
+      and `Crc32.Native.crc32` when true.
+- [x] **Tar.lean integration**: `extractTarGzNative` reads entire gzip
+      file, decompresses with `Zip.Native.GzipDecode.decompress`, then
+      parses tar from a ByteArray-backed stream. O(file_size) memory.
+- [x] **Conformance tests**: `ZipTest/NativeIntegration.lean` — creates
+      ZIP and tar.gz with FFI, extracts with native, verifies identical.
+- [x] **Wire up imports**: Updated `Zip.lean` (already had imports) and
+      `ZipTest.lean`.
