@@ -53,7 +53,7 @@ def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
   -- Compute first code for each length
   let mut nextCode : Array UInt32 := .replicate (maxBits + 1) 0
   let mut code : UInt32 := 0
-  for bits in List.range maxBits do
+  for bits in [:maxBits] do
     let b := bits + 1
     code := (code + blCount[bits]!.toUInt32) <<< 1
     nextCode := nextCode.set! b code
@@ -186,27 +186,31 @@ private def decodeDynamicTrees (br : BitReader) :
   return (litTree, distTree, br)
 
 /-- Decode a stored (uncompressed) block. -/
-private def decodeStored (br : BitReader) (output : ByteArray) :
-    Except String (ByteArray × BitReader) := do
+private def decodeStored (br : BitReader) (output : ByteArray)
+    (maxOutputSize : Nat) : Except String (ByteArray × BitReader) := do
   let (len, br) ← br.readUInt16LE
   let (nlen, br) ← br.readUInt16LE
   if len ^^^ nlen != 0xFFFF then
     throw "Inflate: stored block length check failed"
+  if output.size + len.toNat > maxOutputSize then
+    throw "Inflate: output exceeds maximum size"
   let (bytes, br) ← br.readBytes len.toNat
   return (output ++ bytes, br)
 
 /-- Decode a Huffman-coded block (fixed or dynamic).
     Uses a fuel parameter to guarantee termination. -/
 private def decodeHuffman (br : BitReader) (output : ByteArray)
-    (litTree distTree : HuffTree) (fuel : Nat := 10000000) :
-    Except String (ByteArray × BitReader) :=
+    (litTree distTree : HuffTree) (maxOutputSize : Nat)
+    (fuel : Nat := 10000000) : Except String (ByteArray × BitReader) :=
   go br output fuel
 where
   go (br : BitReader) (output : ByteArray) : Nat → Except String (ByteArray × BitReader)
-    | 0 => .error "Inflate: decompression exceeded size limit"
+    | 0 => .error "Inflate: decompression exceeded fuel limit"
     | fuel + 1 => do
       let (sym, br) ← litTree.decode br
       if sym < 256 then
+        if output.size ≥ maxOutputSize then
+          throw "Inflate: output exceeds maximum size"
         go br (output.push sym.toUInt8) fuel
       else if sym == 256 then
         .ok (output, br)
@@ -231,6 +235,8 @@ where
         -- Copy from output buffer (LZ77 back-reference)
         if distance > output.size then
           throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+        if output.size + length > maxOutputSize then
+          throw "Inflate: output exceeds maximum size"
         let start := output.size - distance
         let mut out := output
         for i in [:length] do
@@ -238,35 +244,34 @@ where
           out := out.push out[start + (i % distance)]!
         go br out fuel
 
-/-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen. -/
-def inflate (data : ByteArray) : Except String ByteArray := do
+/-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
+    `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
+    zip bombs. -/
+def inflate (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
+    Except String ByteArray := do
   let mut br := BitReader.ofByteArray data
   let mut output : ByteArray := .empty
-  let mut isFinal := false
   -- Build fixed trees once
   let fixedLit ← HuffTree.fromLengths fixedLitLengths
   let fixedDist ← HuffTree.fromLengths fixedDistLengths
-  let mut blockCount := 0
-  while !isFinal do
-    if blockCount > 10000 then throw "Inflate: too many blocks"
-    blockCount := blockCount + 1
+  for _ in [:10001] do
     let (bfinal, br') ← br.readBits 1
     let (btype, br') ← br'.readBits 2
     br := br'
-    isFinal := bfinal == 1
     match btype with
     | 0 => -- Stored
-      let (out, br') ← decodeStored br output
+      let (out, br') ← decodeStored br output maxOutputSize
       output := out; br := br'
     | 1 => -- Fixed Huffman
-      let (out, br') ← decodeHuffman br output fixedLit fixedDist
+      let (out, br') ← decodeHuffman br output fixedLit fixedDist maxOutputSize
       output := out; br := br'
     | 2 => -- Dynamic Huffman
       let (litTree, distTree, br') ← decodeDynamicTrees br
-      let (out, br'') ← decodeHuffman br' output litTree distTree
+      let (out, br'') ← decodeHuffman br' output litTree distTree maxOutputSize
       output := out; br := br''
     | _ => throw s!"Inflate: reserved block type {btype}"
-  return output
+    if bfinal == 1 then return output
+  throw "Inflate: too many blocks"
 
 end Inflate
 end Zip.Native
