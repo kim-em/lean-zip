@@ -56,12 +56,12 @@ where
   decreasing_by omega
 
 /-- Compute the canonical codeword for a given symbol.
-    Returns `none` if the symbol's code length is 0 (no code assigned). -/
+    Returns `none` if the symbol's code length is 0 or exceeds `maxBits`. -/
 def codeFor (lengths : List Nat) (maxBits : Nat := 15) (sym : Nat) :
     Option Codeword :=
   if h : sym < lengths.length then
     let len := lengths[sym]
-    if len == 0 then none
+    if len == 0 || len > maxBits then none
     else
       let blCount := countLengths lengths maxBits
       let nc := nextCodes blCount maxBits
@@ -106,6 +106,18 @@ def IsPrefixFree (words : List Codeword) : Prop :=
   ∀ (i j : Nat), (hi : i < words.length) → (hj : j < words.length) →
     i ≠ j → ¬words[i].IsPrefix words[j]
 
+/-! ## Well-formedness -/
+
+/-- A code length assignment is valid when:
+    1. All lengths are ≤ maxBits
+    2. The Kraft inequality is satisfied (not oversubscribed):
+       `∑ 2^(maxBits - len) ≤ 2^maxBits` for non-zero lengths.
+    This ensures the canonical construction produces a valid prefix code. -/
+def ValidLengths (lengths : List Nat) (maxBits : Nat) : Prop :=
+  (∀ l ∈ lengths, l ≤ maxBits) ∧
+  (lengths.filter (· != 0)).foldl
+    (fun acc l => acc + 2^(maxBits - l)) 0 ≤ 2^maxBits
+
 /-! ## Specification theorems -/
 
 /-- `isPrefixOf` agrees with the `List.IsPrefix` proposition. -/
@@ -128,18 +140,20 @@ theorem decode_deterministic {α : Type} (table : List (Codeword × α))
     a = b ∧ r₁ = r₂ := by
   intro h₁ h₂; simp_all
 
-/-- The canonical code assigns distinct codewords to distinct symbols.
-    (Stated for later proving — the core uniqueness property.) -/
+/-- The canonical code assigns distinct codewords to distinct symbols,
+    provided the lengths are valid. -/
 theorem codeFor_injective (lengths : List Nat) (maxBits : Nat)
+    (hv : ValidLengths lengths maxBits)
     (s₁ s₂ : Nat) (cw : Codeword) :
     codeFor lengths maxBits s₁ = some cw →
     codeFor lengths maxBits s₂ = some cw →
     s₁ = s₂ := by
   sorry
 
-/-- The canonical code is prefix-free: no assigned codeword is a prefix
-    of another. This is the key property ensuring unambiguous decoding. -/
+/-- The canonical code is prefix-free when lengths are valid. This is
+    the key property ensuring unambiguous decoding. -/
 theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
+    (hv : ValidLengths lengths maxBits)
     (s₁ s₂ : Nat) (cw₁ cw₂ : Codeword) :
     codeFor lengths maxBits s₁ = some cw₁ →
     codeFor lengths maxBits s₂ = some cw₂ →

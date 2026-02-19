@@ -47,11 +47,11 @@ def readBitsMSB : Nat → List Bool → Option (Nat × List Bool)
     let (val, remaining) ← readBitsMSB n rest
     return (val + (if b then 1 else 0) * 2^n, remaining)
 
-/-- Skip to the next byte boundary (discard bits until position is
-    a multiple of 8). -/
-def alignToByte (bitsConsumed : Nat) (bits : List Bool) : List Bool :=
-  let padding := (8 - bitsConsumed % 8) % 8
-  bits.drop padding
+/-- Skip to the next byte boundary (discard remaining bits in the
+    current byte). Works because `bytesToBits` always produces a
+    multiple-of-8 list, so `bits.length % 8` gives the padding needed. -/
+def alignToByte (bits : List Bool) : List Bool :=
+  bits.drop (bits.length % 8)
 
 /-! ## LZ77 symbol alphabet -/
 
@@ -170,26 +170,34 @@ def decodeSymbols (litLengths distLengths : List Nat) (bits : List Bool)
 /-- Decode a stored (uncompressed) block.
     Reads LEN and NLEN, verifies the complement check,
     and returns the raw bytes. -/
-def decodeStored (bits : List Bool) (bitsConsumed : Nat) :
+def decodeStored (bits : List Bool) :
     Option (List UInt8 × List Bool) := do
   -- Align to byte boundary
-  let bits := alignToByte bitsConsumed bits
+  let bits := alignToByte bits
   -- Read LEN (16 bits, little-endian) and NLEN (16 bits, little-endian)
   let (len, bits) ← readBitsLSB 16 bits
   let (nlen, bits) ← readBitsLSB 16 bits
   -- Verify complement
   guard (len ^^^ nlen == 0xFFFF)
   -- Read `len` bytes (each is 8 bits)
-  let mut bytes : List UInt8 := []
-  let mut bits := bits
-  for _ in [:len] do
-    match readBitsLSB 8 bits with
-    | some (val, rest) =>
-      bytes := bytes ++ [val.toUInt8]
-      bits := rest
-    | none => return ([], [])  -- will fail below
-  guard (bytes.length == len)
-  return (bytes, bits)
+  readNBytes len bits []
+where
+  readNBytes : Nat → List Bool → List UInt8 →
+      Option (List UInt8 × List Bool)
+    | 0, bits, acc => some (acc, bits)
+    | n + 1, bits, acc => do
+      let (val, bits) ← readBitsLSB 8 bits
+      readNBytes n bits (acc ++ [val.toUInt8])
+
+/-- Read code length code lengths from the bitstream. -/
+private def readCLLengths : Nat → Nat → List Nat → List Bool →
+    Option (List Nat × List Bool)
+  | 0, _, acc, bits => some (acc, bits)
+  | n + 1, idx, acc, bits => do
+    let (val, bits) ← readBitsLSB 3 bits
+    let pos := codeLengthOrder[idx]!
+    let acc := acc.set pos val
+    readCLLengths n (idx + 1) acc bits
 
 /-- Decode dynamic Huffman code lengths from the bitstream
     (RFC 1951 §3.2.7). Returns literal/length and distance code lengths. -/
@@ -202,50 +210,45 @@ def decodeDynamicTables (bits : List Bool) :
   let numDist := hdist + 1
   let numCodeLen := hclen + 4
   -- Read code length code lengths
-  let mut clLengths := List.replicate 19 0
-  let mut bits := bits
-  for i in [:numCodeLen] do
-    match readBitsLSB 3 bits with
-    | some (val, rest) =>
-      bits := rest
-      clLengths := clLengths.set (codeLengthOrder[i]!) val
-    | none => return ([], [], [])
+  let (clLengths, bits) ← readCLLengths numCodeLen 0
+    (List.replicate 19 0) bits
   -- Decode the literal/length + distance lengths using the CL Huffman code
   let totalCodes := numLitLen + numDist
   let clCodes := Huffman.Spec.allCodes clLengths 7
   let clTable := clCodes.map fun (sym, cw) => (cw, sym)
-  let mut codeLengths : List Nat := []
-  while codeLengths.length < totalCodes do
-    match Huffman.Spec.decode clTable bits with
-    | some (sym, rest) =>
-      bits := rest
-      if sym < 16 then
-        codeLengths := codeLengths ++ [sym]
-      else if sym == 16 then
-        guard (codeLengths.length > 0)
-        match readBitsLSB 2 bits with
-        | some (rep, rest) =>
-          bits := rest
-          let prev := codeLengths.getLast!
-          codeLengths := codeLengths ++ List.replicate (rep + 3) prev
-        | none => return ([], [], [])
-      else if sym == 17 then
-        match readBitsLSB 3 bits with
-        | some (rep, rest) =>
-          bits := rest
-          codeLengths := codeLengths ++ List.replicate (rep + 3) 0
-        | none => return ([], [], [])
-      else if sym == 18 then
-        match readBitsLSB 7 bits with
-        | some (rep, rest) =>
-          bits := rest
-          codeLengths := codeLengths ++ List.replicate (rep + 11) 0
-        | none => return ([], [], [])
-      else return ([], [], [])  -- invalid CL symbol
-    | none => return ([], [], [])
+  let (codeLengths, bits) ← decodeCLSymbols clTable totalCodes [] bits totalCodes
+  guard (codeLengths.length == totalCodes)
   let litLenLengths := codeLengths.take numLitLen
   let distLengths := codeLengths.drop numLitLen
   return (litLenLengths, distLengths, bits)
+where
+  decodeCLSymbols (clTable : List (Huffman.Spec.Codeword × Nat))
+      (totalCodes : Nat) (acc : List Nat) (bits : List Bool) :
+      Nat → Option (List Nat × List Bool)
+    | 0 => none
+    | fuel + 1 => do
+      if acc.length ≥ totalCodes then return (acc, bits)
+      let (sym, bits) ← Huffman.Spec.decode clTable bits
+      if sym < 16 then
+        decodeCLSymbols clTable totalCodes (acc ++ [sym]) bits fuel
+      else if sym == 16 then
+        guard (acc.length > 0)
+        let (rep, bits) ← readBitsLSB 2 bits
+        let prev := acc.getLast!
+        let acc := acc ++ List.replicate (rep + 3) prev
+        guard (acc.length ≤ totalCodes)
+        decodeCLSymbols clTable totalCodes acc bits fuel
+      else if sym == 17 then
+        let (rep, bits) ← readBitsLSB 3 bits
+        let acc := acc ++ List.replicate (rep + 3) 0
+        guard (acc.length ≤ totalCodes)
+        decodeCLSymbols clTable totalCodes acc bits fuel
+      else if sym == 18 then
+        let (rep, bits) ← readBitsLSB 7 bits
+        let acc := acc ++ List.replicate (rep + 11) 0
+        guard (acc.length ≤ totalCodes)
+        decodeCLSymbols clTable totalCodes acc bits fuel
+      else none
 
 /-! ## Stream decode -/
 
@@ -256,25 +259,23 @@ structure DecodedBlock where
 
 /-- Decode one DEFLATE block from the bitstream.
     Returns the decoded block and remaining bits. -/
-def decodeBlock (bits : List Bool) (bitsConsumed : Nat) :
-    Option (DecodedBlock × List Bool × Nat) := do
+def decodeBlock (bits : List Bool) :
+    Option (DecodedBlock × List Bool) := do
   let (bfinal, bits) ← readBitsLSB 1 bits
   let (btype, bits) ← readBitsLSB 2 bits
-  let consumed := bitsConsumed + 3
   match btype with
   | 0 => -- Stored block
-    let (bytes, bits) ← decodeStored bits consumed
-    -- After stored block, position is byte-aligned + 4 + len bytes
-    return (⟨bfinal == 1, bytes⟩, bits, 0)  -- byte-aligned after stored
+    let (bytes, bits) ← decodeStored bits
+    return (⟨bfinal == 1, bytes⟩, bits)
   | 1 => -- Fixed Huffman
     let (syms, bits) ← decodeSymbols fixedLitLengths fixedDistLengths bits
     let output ← resolveLZ77 syms []
-    return (⟨bfinal == 1, output⟩, bits, 0)
+    return (⟨bfinal == 1, output⟩, bits)
   | 2 => -- Dynamic Huffman
     let (litLens, distLens, bits) ← decodeDynamicTables bits
     let (syms, bits) ← decodeSymbols litLens distLens bits
     let output ← resolveLZ77 syms []
-    return (⟨bfinal == 1, output⟩, bits, 0)
+    return (⟨bfinal == 1, output⟩, bits)
   | _ => none  -- reserved block type (3)
 
 /-- Decode a complete DEFLATE stream: a sequence of blocks ending
@@ -282,16 +283,16 @@ def decodeBlock (bits : List Bool) (bitsConsumed : Nat) :
     Uses fuel to ensure termination. -/
 def decode (bits : List Bool) (fuel : Nat := 10001) :
     Option (List UInt8) :=
-  go bits 0 [] fuel
+  go bits [] fuel
 where
-  go (bits : List Bool) (consumed : Nat) (acc : List UInt8) :
+  go (bits : List Bool) (acc : List UInt8) :
       Nat → Option (List UInt8)
     | 0 => none
     | fuel + 1 => do
-      let (block, bits, consumed) ← decodeBlock bits consumed
+      let (block, bits) ← decodeBlock bits
       let acc := acc ++ block.bytes
       if block.isFinal then return acc
-      else go bits consumed acc fuel
+      else go bits acc fuel
 
 /-- Decode a DEFLATE stream from a `ByteArray` starting at a given byte
     offset. This is the top-level spec function. -/
