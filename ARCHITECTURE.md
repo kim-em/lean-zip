@@ -17,7 +17,12 @@ Zip/Binary.lean       -- Byte packing helpers (LE integers, octal, strings)
 Zip/Handle.lean       -- IO.FS.Handle seek/fileSize + symlink declarations
 Zip/Tar.lean          -- Tar archive create/extract/list + .tar.gz composition
 Zip/Archive.lean      -- ZIP archive create/extract/list (with ZIP64)
+Zip/Spec/Adler32.lean -- Adler-32 formal spec (list-based)
+Zip/Spec/Crc32.lean   -- CRC-32 formal spec (bit-by-bit polynomial)
+Zip/Native/Adler32.lean -- Pure Lean Adler-32 (proved equivalent to spec)
+Zip/Native/Crc32.lean -- Pure Lean CRC-32 table-driven (proved equivalent to spec)
 Zip.lean              -- Re-exports all modules
+ZipForStd.lean        -- Missing std library lemmas (upstreaming candidates)
 lakefile.lean         -- Build config (pkg-config, static libs, extern link)
 ZipTest.lean          -- Test runner (imports all test modules)
 ZipTest/              -- 13 test modules (Helpers, unit tests, fixture tests)
@@ -176,6 +181,28 @@ Pure Lean, no new C code. Built on Binary, Checksum, and RawDeflate.
 **Robust I/O**: `readExact` and `readExactStream` loop on short reads, handling streams that return fewer bytes than requested (pipes, network, etc.).
 
 **Limitations**: no encryption, no spanning.
+
+## Native implementations and formal specs
+
+Parallel to the FFI wrappers, lean-zip has pure Lean implementations of checksums with formal proofs of correctness. These serve as verified reference implementations and can be used when C libraries are unavailable.
+
+### Specifications (`Zip/Spec/`)
+
+Formal mathematical specifications of algorithms, independent of any particular implementation strategy:
+
+- **Adler-32** (`Spec/Adler32.lean`): Two Nat-valued sums modulo 65521, defined as a `List.foldl`. Key theorem: `updateList_append` (compositionality).
+- **CRC-32** (`Spec/Crc32.lean`): Bit-by-bit polynomial division with polynomial `0xEDB88320`. Defines both the naive bit-by-bit `crcByte` and the table-driven `crcByteTable`. Key theorems: `updateList_append` (compositionality), `updateList_nil`.
+
+### Native implementations (`Zip/Native/`)
+
+Pure Lean implementations operating on `ByteArray` (via `Array.foldl` on `.data`):
+
+- **Adler-32** (`Native/Adler32.lean`): Direct implementation of the spec using `Array.foldl`. Proof: `updateBytes_eq_updateList` via `Array.foldl_toList`.
+- **CRC-32** (`Native/Crc32.lean`): Table-driven implementation using a 256-entry lookup table. Proof chain: `crcBits8_split` (8-fold `crcBit` linearity, via `bv_decide`) → `crcByteTable_eq_crcByte` (table lookup = bit-by-bit) → `updateBytes_eq_updateList` (byte array = list spec).
+
+### Conformance testing
+
+`ZipTest/NativeChecksum.lean` tests native implementations against FFI on: known values, large data, incremental computation, empty input, and single bytes.
 
 ## Build system
 
