@@ -35,7 +35,7 @@ theorem crcBit_xor_high (a b : UInt32) (ha : a &&& 1 = 0) :
     Spec.crcBit (a ^^^ b) = (a >>> 1) ^^^ Spec.crcBit b := by
   simp only [Spec.crcBit, Spec.POLY]; bv_decide
 
-theorem table_size : table.size = 256 := by native_decide
+theorem table_size : table.size = 256 := Array.size_ofFn ..
 
 /-- Table-driven byte update equals bit-by-bit `Spec.crcByte`.
     Proof requires iterating `crcBit_xor_high` 8 times and connecting

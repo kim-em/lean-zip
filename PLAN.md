@@ -57,4 +57,4 @@ The proof strategy is clear:
 
 Challenge: step 2 requires unfolding `crcBit8` (an abbreviation) in a way that
 lets `rw [crcBit_xor_high]` match. Step 5 requires reducing `Array.ofFn`
-lookups. Consider using `native_decide` for step 5 (256 finite cases).
+lookups. Consider using `decide` or `cbv` for step 5 (256 finite cases).

@@ -61,6 +61,9 @@ package «lean-zip» where
   moreLinkArgs := run_io linkFlags
   testDriver := "test"
 
+lean_lib ZipForStd where
+  globs := #[.submodules `ZipForStd]
+
 lean_lib Zip
 
 -- zlib FFI

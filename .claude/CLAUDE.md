@@ -10,6 +10,21 @@ Toolchain: see `lean-toolchain`. Build system: Lake.
 
 Run from the project root. Tests require `testdata/` directory.
 
+### NixOS / nix-shell
+
+On NixOS (or any system where zlib/zstd aren't in the default library
+path), wrap build commands in the nix-shell from the README:
+
+    nix-shell -p pkg-config zlib 'zstd.override { enableStatic = true; }' --run "lake build && lake exe test"
+
+**Important:** Lake caches `run_io` results (like `moreLinkArgs`) in
+`.lake/`. If you switch between nix-shell and bare shell, or the nix
+environment changes, you may need `rm -rf .lake` before building — a
+plain `lake clean` is not sufficient to clear the cached link flags.
+
+On systems where zlib and zstd are available system-wide (e.g. Ubuntu
+with `libz-dev` and `libzstd-dev`), the nix-shell wrapper is not needed.
+
 ## Autonomous Work Cycle
 
 When told to "start work" (or `/start`), follow this cycle. The cycle
@@ -127,6 +142,8 @@ End every session by running `/reflect`. If it suggests improvements to
     Zip/Native/          — Pure Lean implementations (CRC32, Adler32, DEFLATE, ...)
     Zip/Spec/            — Formal specifications to prove against
     Zip.lean             — Re-exports all modules
+    ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
+    ZipForStd.lean       — Root import for ZipForStd
 
 ### Test layout
     ZipTest.lean         — Test runner entry point
@@ -173,6 +190,10 @@ simple version.
 - Do NOT write multi-line tactic blocks without checking intermediate state
 - Do NOT try the same approach more than 3 times — each retry must be
   fundamentally different (different tactic family, decomposition, or lemma)
+- Do NOT use `native_decide` — it is forbidden in this codebase. When
+  tempted to use it (e.g. for decidable propositions over large finite
+  types), try `decide_cbv` instead, which uses kernel-level evaluation
+  without native code generation
 - Prefer `omega`, `decide`, `simp`, `grind` over manual arithmetic
 - After getting a proof to work, refactor it immediately:
   combine steps, find minimal proof, extract reusable lemmas
@@ -217,10 +238,14 @@ simple version.
 This section accumulates proof patterns discovered during development.
 Update it during review and reflect sessions.
 
-- **Array.foldl for ByteArray proofs**: Use `data.data.foldl` instead of
-  `ByteArray.foldl`, and `data.data.toList` instead of `data.toList`.
-  `Array.foldl_toList` connects `Array.foldl` to `List.foldl`;
-  `ByteArray.foldl` and `ByteArray.toList` lack equivalent lemmas.
+- **Build missing API, don't work around it**: If a proof is blocked by
+  missing lemmas for standard types (ByteArray, Array, List, UInt32, etc.),
+  add the missing lemma to `ZipForStd/` in the appropriate namespace.
+  For example, if `ByteArray.foldl_toList` is missing, add it in
+  `ZipForStd/ByteArray.lean` in the `ByteArray` namespace. These lemmas
+  are candidates for upstreaming to Lean's standard library — write them
+  as if they belonged there. Don't use workarounds like going through
+  `.data.data.foldl` when the right fix is a proper API lemma.
 - **bv_decide for UInt32/BitVec**: Effective for bitvector reasoning.
   Proved CRC linearity (`crcBit_xor_high`) in one line. Caveat: fails
   when expressions contain `UInt32.ofNat x.toNat` (abstracted as opaque).
