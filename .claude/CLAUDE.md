@@ -73,7 +73,10 @@ conformance tests → proofs.
 - Run `lake exe test` periodically to verify tests pass
 - Commit with conventional prefixes (`feat:`, `fix:`, `refactor:`, `test:`, `doc:`)
 
-**Review sessions** (cycle through these focus areas):
+**Review sessions** — each session should pick **one or two** focus
+areas and go deep, rather than superficially covering everything.
+Rotate through the areas across sessions so they all get attention
+over time. Focus areas:
 - **Refactoring and proof improvement**: This is the top review priority.
   Are proofs minimal? Can steps be combined? Would extracting a lemma
   improve readability or enable reuse? Are there generally useful lemmas
@@ -91,8 +94,8 @@ conformance tests → proofs.
   add missing guidance. Consider writing new skills for recurring
   patterns (profiling, proof techniques, etc.)
 
-As the project grows, focus reviews on particular modules rather than
-reviewing everything.
+As the project grows, also focus reviews on particular modules rather
+than reviewing everything at once.
 
 **Self-improvement sessions** (require at least one tangible output):
 - Write new skills in `.claude/skills/` for recurring patterns
