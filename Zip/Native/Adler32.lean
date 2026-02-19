@@ -26,4 +26,10 @@ theorem updateBytes_eq_updateList (s : Spec.State) (data : ByteArray) :
     updateBytes s data = Spec.updateList s data.data.toList := by
   simp [updateBytes, Spec.updateList, Array.foldl_toList]
 
+/-- `updateBytes` preserves validity. -/
+theorem updateBytes_valid (s : Spec.State) (hs : Spec.Valid s) (data : ByteArray) :
+    Spec.Valid (updateBytes s data) := by
+  rw [updateBytes_eq_updateList]
+  exact Spec.updateList_valid s hs _
+
 end Adler32.Native

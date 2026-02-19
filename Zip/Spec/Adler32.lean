@@ -57,4 +57,37 @@ theorem updateList_nil (s : State) : updateList s [] = s := rfl
 theorem updateList_cons (s : State) (b : UInt8) (bs : List UInt8) :
     updateList s (b :: bs) = updateList (updateByte s b) bs := rfl
 
+/-! ## Bounds theorems -/
+
+/-- A state is valid when both components are less than MOD_ADLER. -/
+def Valid (s : State) : Prop := s.1 < MOD_ADLER ∧ s.2 < MOD_ADLER
+
+/-- The first component of `updateByte` is less than MOD_ADLER. -/
+theorem updateByte_fst_lt (s : State) (b : UInt8) :
+    (updateByte s b).1 < MOD_ADLER := by
+  simp [updateByte, MOD_ADLER]
+  omega
+
+/-- The second component of `updateByte` is less than MOD_ADLER. -/
+theorem updateByte_snd_lt (s : State) (b : UInt8) :
+    (updateByte s b).2 < MOD_ADLER := by
+  simp [updateByte, MOD_ADLER]
+  omega
+
+/-- `updateByte` preserves validity. -/
+theorem updateByte_valid (s : State) (b : UInt8) :
+    Valid (updateByte s b) :=
+  ⟨updateByte_fst_lt s b, updateByte_snd_lt s b⟩
+
+/-- The initial state is valid. -/
+theorem init_valid : Valid init := by
+  simp [Valid, init, MOD_ADLER]
+
+/-- `updateList` preserves validity. -/
+theorem updateList_valid (s : State) (hs : Valid s) (data : List UInt8) :
+    Valid (updateList s data) := by
+  induction data generalizing s with
+  | nil => exact hs
+  | cons b bs ih => exact ih (updateByte s b) (updateByte_valid s b)
+
 end Adler32.Spec
