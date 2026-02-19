@@ -85,7 +85,14 @@ over time. Focus areas:
 - **Slop detection**: dead code, duplicated logic, verbose comments,
   unused imports, other signs of AI-generated bloat
 - **Security**: check for new issues in recent code, verify past fixes
-- **Lean idioms**: newer APIs, `grind`, `omega`, `mvcgen`, idiomatic style
+- **Lean idioms**: newer APIs, `grind`, `omega`, `mvcgen`, idiomatic style.
+  Also look for opportunities to replace `partial` or fuel-based
+  implementations with definitions that have proper termination proofs —
+  this pays off later with easier verification. Look for `xs[i]!`
+  runtime bounds checks that could be replaced with proven-bounds access
+  `xs[i]` when the information to prove the bound is already in scope.
+  Remember that in `if` and `for` you need `h :` syntax to capture the
+  relevant hypothesis (e.g. `if h : i < xs.size then xs[i] ...`).
 - **Toolchain**: check if a newer stable Lean release is available; if so,
   upgrade `lean-toolchain`, fix breakage, and revert if tests can't be
   made to pass. Only attempt toolchain upgrades when all tests pass first
