@@ -265,7 +265,7 @@ Update it during review and reflect sessions.
 Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Phase**: Phase 1 (Checksums) — COMPLETE (0 sorries)
+- **Phase**: Phase 2 (DEFLATE decompressor) — in progress
 - **Sorry count**: 0
-- **Last session**: 2026-02-19 (implementation + review)
+- **Last session**: 2026-02-19 (implementation)
 - **Last review**: 2026-02-19 (partial, during implementation session)

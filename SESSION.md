@@ -7,26 +7,31 @@
 
 ## Incomplete proofs
 
-None. All Phase 1 proofs are complete.
+None — no proofs attempted this session (implementation only).
 
 ## Known good commit
 
-`53e79bc` — `lake build && lake exe test` passes
+`abea9ce` — `lake build && lake exe test` passes
 
 ## Next action
 
-Phase 1 (Checksums) is complete. Next session options:
-1. **Review session**: First review of all Phase 1 code (no reviews done yet)
-2. **Implementation session**: Begin Phase 2 (DEFLATE decompressor) per VERIFICATION.md
-3. **Self-improvement session**: Update skills, research DEFLATE format
+Phase 2 (DEFLATE decompressor) is functionally complete. Next session options:
+1. **Review session**: Review Phase 2 inflate code for correctness, edge cases,
+   and RFC conformance
+2. **Implementation session**: Add gzip/zlib framing on top of native inflate
+   (header/trailer parsing, checksum verification) — needed for integration
+   with existing ZIP/tar code paths
+3. **Implementation session**: Begin DEFLATE spec formalization (`Zip/Spec/Deflate.lean`)
 
 ## Notes
 
-- Phase 1 proof chain is complete:
-  - Adler-32: `updateBytes_eq_updateList` (native ByteArray = spec List)
-  - CRC-32: `crcByteTable_eq_crcByte` (table lookup = bit-by-bit) →
-    `updateBytes_eq_updateList` (native ByteArray = spec List)
-- The `crcBits8_split` lemma (8-fold crcBit linearity) was proved directly
-  by `bv_decide` — more effective than iterating the single-step lemma
-- Key pattern for UInt8→UInt32 conversion in proofs: rewrite via
-  `BitVec.ofNat_toNat` to get `BitVec.setWidth`, then `bv_decide`
+- The native inflate implementation supports all 3 DEFLATE block types
+  (stored, fixed Huffman, dynamic Huffman) and passes conformance tests
+  against zlib across all compression levels (0–9)
+- Fixed an off-by-one in `HuffTree.insert`: was calling `go tree (len - 1)`
+  instead of `go tree len`, causing the MSB of each Huffman code to be
+  dropped
+- `Array.mkArray` doesn't exist in Lean 4.29; use `Array.replicate` instead
+- `return .error` inside `Except` do blocks gets confused with product types;
+  use `throw` instead
+- Fuel parameter (10M) used for Huffman block decoding termination

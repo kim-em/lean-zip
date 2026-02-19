@@ -21,6 +21,8 @@ Zip/Spec/Adler32.lean -- Adler-32 formal spec (list-based)
 Zip/Spec/Crc32.lean   -- CRC-32 formal spec (bit-by-bit polynomial)
 Zip/Native/Adler32.lean -- Pure Lean Adler-32 (proved equivalent to spec)
 Zip/Native/Crc32.lean -- Pure Lean CRC-32 table-driven (proved equivalent to spec)
+Zip/Native/BitReader.lean -- LSB-first bit-level reader for DEFLATE streams
+Zip/Native/Inflate.lean -- Pure Lean DEFLATE decompressor (all 3 block types)
 Zip.lean              -- Re-exports all modules
 ZipForStd.lean        -- Missing std library lemmas (upstreaming candidates)
 lakefile.lean         -- Build config (pkg-config, static libs, extern link)
@@ -184,7 +186,7 @@ Pure Lean, no new C code. Built on Binary, Checksum, and RawDeflate.
 
 ## Native implementations and formal specs
 
-Parallel to the FFI wrappers, lean-zip has pure Lean implementations of checksums with formal proofs of correctness. These serve as verified reference implementations and can be used when C libraries are unavailable.
+Parallel to the FFI wrappers, lean-zip has pure Lean implementations with formal proofs of correctness. These serve as verified reference implementations and can be used when C libraries are unavailable.
 
 ### Specifications (`Zip/Spec/`)
 
@@ -199,10 +201,13 @@ Pure Lean implementations operating on `ByteArray` (via `Array.foldl` on `.data`
 
 - **Adler-32** (`Native/Adler32.lean`): Direct implementation of the spec using `Array.foldl`. Proof: `updateBytes_eq_updateList` via `Array.foldl_toList`.
 - **CRC-32** (`Native/Crc32.lean`): Table-driven implementation using a 256-entry lookup table. Proof chain: `crcBits8_split` (8-fold `crcBit` linearity, via `bv_decide`) → `crcByteTable_eq_crcByte` (table lookup = bit-by-bit) → `updateBytes_eq_updateList` (byte array = list spec).
+- **BitReader** (`Native/BitReader.lean`): LSB-first bit-level reader for `ByteArray`. Tracks byte position and bit offset within the current byte. Supports reading individual bits, multi-bit values (up to 25 bits), byte-aligned UInt16 LE reads, and bulk byte reads.
+- **DEFLATE inflate** (`Native/Inflate.lean`): Complete DEFLATE (RFC 1951) decompressor supporting all three block types: stored (type 0), fixed Huffman (type 1), and dynamic Huffman (type 2). Uses a binary `HuffTree` type with canonical Huffman code construction from code lengths. LZ77 back-references are resolved against the output buffer with correct handling of overlapping copies. Uses a fuel parameter for termination.
 
 ### Conformance testing
 
-`ZipTest/NativeChecksum.lean` tests native implementations against FFI on: known values, large data, incremental computation, empty input, and single bytes.
+- `ZipTest/NativeChecksum.lean` tests native checksum implementations against FFI on: known values, large data, incremental computation, empty input, and single bytes.
+- `ZipTest/NativeInflate.lean` tests native DEFLATE decompressor against FFI zlib across compression levels 0–9, empty data, single bytes, large repetitive data (124KB), and pseudo-random data.
 
 ## Build system
 
