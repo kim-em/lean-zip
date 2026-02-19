@@ -244,12 +244,14 @@ where
           out := out.push out[start + (i % distance)]!
         go br out fuel
 
-/-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
+/-- Inflate a raw DEFLATE stream starting at byte offset `startPos`. Returns the
+    decompressed data and the byte-aligned position after the last DEFLATE block.
     `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
     zip bombs. -/
-def inflate (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
-    Except String ByteArray := do
-  let mut br := BitReader.ofByteArray data
+def inflateRaw (data : ByteArray) (startPos : Nat := 0)
+    (maxOutputSize : Nat := 256 * 1024 * 1024) :
+    Except String (ByteArray × Nat) := do
+  let mut br : BitReader := { data, pos := startPos, bitOff := 0 }
   let mut output : ByteArray := .empty
   -- Build fixed trees once
   let fixedLit ← HuffTree.fromLengths fixedLitLengths
@@ -270,8 +272,18 @@ def inflate (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
       let (out, br'') ← decodeHuffman br' output litTree distTree maxOutputSize
       output := out; br := br''
     | _ => throw s!"Inflate: reserved block type {btype}"
-    if bfinal == 1 then return output
+    if bfinal == 1 then
+      let aligned := br.alignToByte
+      return (output, aligned.pos)
   throw "Inflate: too many blocks"
+
+/-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
+    `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
+    zip bombs. -/
+def inflate (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
+    Except String ByteArray := do
+  let (output, _) ← inflateRaw data 0 maxOutputSize
+  return output
 
 end Inflate
 end Zip.Native
