@@ -280,6 +280,10 @@ Update it during review and reflect sessions.
   show UInt32.ofBitVec (... bitvec expr ...) = UInt32.ofBitVec (...)
   congr 1; bv_decide
   ```
+- **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
+  `return` inside a `for` loop exits the loop (producing `some`), not the
+  function. Use explicit recursive helper functions instead — they're also
+  easier to reason about in proofs. Reserve `for`/`while` for `IO` code.
 
 ## Current State Summary
 
