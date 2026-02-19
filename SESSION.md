@@ -11,28 +11,27 @@ None.
 
 ## Known good commit
 
-`71f169f` — `lake build && lake exe test` passes
+`bddde44` — `lake build && lake exe test` passes
 
 ## Next action
 
-Phase 2 (DEFLATE decompressor) is feature-complete. All deliverables done:
-checksums, inflate, gzip/zlib framing, conformance tests, error tests.
+Phase 2 is now fully complete, including integration. All deliverables done:
+checksums, inflate, gzip/zlib framing, conformance tests, error tests,
+and native backend integration for ZIP/tar code paths.
 
 Next session options:
-1. **Implementation session**: Integration — make `Archive.lean` and `Tar.lean`
-   optionally use native decompression (the last Phase 2 deliverable from
-   VERIFICATION.md: "Integration as an alternative backend for existing ZIP/tar
-   code paths")
+1. **Review session**: Full review of all Native/ code as a cohesive unit
+   (Gzip.lean was added since last review)
 2. **Implementation session**: Begin Phase 3 — DEFLATE spec formalization
    (`Zip/Spec/Deflate.lean`)
-3. **Review session**: Full review of all Native/ code as a cohesive unit
+3. **Self-improvement session**: Write skills, improve harness, research
+   proof techniques for Phase 3
 
 ## Notes
 
-- Added `Inflate.inflateRaw` returning `(ByteArray × Nat)` for ending position
-- `Inflate.inflate` is now a thin wrapper over `inflateRaw`
-- Gzip decompress supports concatenated members with total output size check
-- Zlib decompress verifies Adler32 (big-endian) trailer
-- Auto-detect function distinguishes gzip/zlib/raw-deflate from first bytes
-- Error tests cover: empty input, truncated data, bad magic, CRC/Adler mismatch,
-  wrong compression method, invalid block types
+- `Archive.extract`/`extractFile` accept `useNative := true`
+- `Tar.extractTarGzNative` provides non-streaming native gzip decompression
+- Native ZIP path caps decompressed output at 256 MiB when `maxEntrySize = 0`
+  (documented trade-off vs FFI which has no limit)
+- Codex review flagged the 256 MiB cap; docstring updated to document it
+- All existing tests continue to pass unchanged
