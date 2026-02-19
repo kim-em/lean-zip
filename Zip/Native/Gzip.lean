@@ -69,6 +69,8 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
     unless actualSize == expectedSize do
       throw s!"Gzip: size mismatch: expected {expectedSize}, got {actualSize}"
     result := result ++ decompressed
+    if result.size > maxOutputSize then
+      throw "Gzip: total output exceeds maximum size"
   throw "Gzip: too many concatenated members"
 
 end GzipDecode
