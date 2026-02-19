@@ -178,6 +178,14 @@ End every session by running `/reflect`. If it suggests improvements to
 1. Type signature with `:= sorry`
 2. Specification theorems with `:= by sorry`
 3. Implementation
+
+**Avoid tautological specs.** A specification that merely restates the
+implementation (e.g. `crc32 x = crc32Impl x`) proves nothing useful.
+Aim for logical characterisations that pin down the *meaning* of the
+function independently of how it is computed — algebraic properties
+(e.g. `crc32 (a ++ b) = combine (crc32 a) (crc32 b)`), equivalence
+with a reference definition, or key invariants. When a full
+characterisation is hard, state useful properties instead.
 4. Auto-solve pass: run `try?` on each `sorry`. If `try?` succeeds, it
    generates info messages with replacement tactics — prefer the suggested
    replacement, but if it looks brittle (e.g. depends on nonlocal simp
