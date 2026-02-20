@@ -298,52 +298,25 @@ private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
 /-- `Array.set!` at a nonzero index doesn't affect index 0. -/
 private theorem array_set_ne_zero (arr : Array Nat) (i v : Nat) (hi : i ≠ 0) :
     (arr.set! i v)[0]! = arr[0]! := by
-  show (arr.setIfInBounds i v).get!Internal 0 = arr.get!Internal 0
-  simp only [Array.get!Internal, Array.getD, Array.setIfInBounds]
-  split
-  · rename_i h
-    simp only [Array.size_set]
-    split
-    · rename_i h₀
-      have h₁ : 0 < (arr.set i v h).size := by rw [Array.size_set]; exact h₀
-      exact show (arr.set i v h)[0]'h₁ = arr[0]'h₀ by rw [Array.getElem_set]; simp [hi]
-    · rfl
-  · rfl
+  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hi]
 
 /-- `Array.set!` at a different index doesn't affect the target index. -/
 private theorem array_set_ne (arr : Array Nat) (i j v : Nat) (hij : i ≠ j) :
     (arr.set! i v)[j]! = arr[j]! := by
-  show (arr.setIfInBounds i v).get!Internal j = arr.get!Internal j
-  simp only [Array.get!Internal, Array.getD, Array.setIfInBounds]
-  split
-  · rename_i h
-    simp only [Array.size_set]
-    split
-    · rename_i hj
-      have hj' : j < (arr.set i v h).size := by rw [Array.size_set]; exact hj
-      exact show (arr.set i v h)[j]'hj' = arr[j]'hj by rw [Array.getElem_set]; simp [hij]
-    · rfl
-  · rfl
+  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hij]
 
 /-- `Array.set!` at the same index replaces the value. -/
 private theorem array_set_self (arr : Array Nat) (i v : Nat) (hi : i < arr.size) :
     (arr.set! i v)[i]! = v := by
-  show (arr.setIfInBounds i v).get!Internal i = v
-  unfold Array.setIfInBounds
-  simp only [hi, dite_true]
-  unfold Array.get!Internal Array.getD
-  simp only [Array.size_set, hi, dite_true]
-  have hi' : i < (arr.set i v hi).size := by rw [Array.size_set]; exact hi
-  show (arr.set i v hi)[i]'hi' = v
-  rw [Array.getElem_set, if_pos rfl]
+  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_self_of_lt hi]
 
 /-- `Array.set!` preserves the size. -/
 private theorem array_set_size (arr : Array Nat) (i v : Nat) :
     (arr.set! i v).size = arr.size := by
-  simp only [Array.set!, Array.setIfInBounds]
-  split
-  · exact Array.size_set ..
-  · rfl
+  simp [Array.set!_eq_setIfInBounds]
 
 /-- `countLengths` never modifies index 0. -/
 private theorem countLengths_zero (lengths : List Nat) (maxBits : Nat) :
@@ -353,12 +326,7 @@ private theorem countLengths_zero (lengths : List Nat) (maxBits : Nat) :
       (lengths.foldl (fun acc len =>
         if len == 0 || len > maxBits then acc
         else acc.set! len (acc[len]! + 1)) acc)[0]! = 0 from
-    this _ (by
-      show (Array.replicate (maxBits + 1) 0).get!Internal 0 = 0
-      simp only [Array.get!Internal, Array.getD, Array.size_replicate]
-      split
-      · exact Array.getElem_replicate _
-      · rfl)
+    this _ (by simp)
   intro acc hacc
   induction lengths generalizing acc with
   | nil => exact hacc
@@ -383,11 +351,9 @@ private theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
         else acc.set! len (acc[len]! + 1)) acc)[b]! =
       acc[b]! + lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 by
     rw [this _ (Array.size_replicate ..)]
-    show (Array.replicate (maxBits + 1) 0).get!Internal b + _ = _
-    simp only [Array.get!Internal, Array.getD, Array.size_replicate]
-    split
-    · simp [Array.getInternal]
-    · simp
+    suffices h : (Array.replicate (maxBits + 1) 0)[b]! = 0 by omega
+    simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+               Array.getElem?_replicate]; split <;> rfl
   intro acc hsize
   induction lengths generalizing acc with
   | nil => simp
@@ -506,11 +472,7 @@ private theorem kraftSumFrom_replicate (maxBits b : Nat) :
   else
     rw [kraftSumFrom_unfold _ _ _ (by omega)]
     have : (Array.replicate (maxBits + 1) 0)[b]! = 0 := by
-      show (Array.replicate (maxBits + 1) 0).get!Internal b = 0
-      simp only [Array.get!Internal, Array.getD, Array.size_replicate]
-      split
-      · exact Array.getElem_replicate _
-      · rfl
+      simp [show b < maxBits + 1 from by omega]
     rw [this, Nat.zero_mul, Nat.zero_add]
     exact kraftSumFrom_replicate maxBits (b + 1)
 termination_by maxBits + 1 - b
