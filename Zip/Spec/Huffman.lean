@@ -64,6 +64,36 @@ theorem natToBits_injective (v₁ v₂ w : Nat) (h₁ : v₁ < 2 ^ w) (h₂ : v�
     have p₂ : v₂ < 2 ^ i := Nat.lt_of_lt_of_le h₂ (Nat.pow_le_pow_right (by omega) hiw)
     rw [Nat.testBit_lt_two_pow p₁, Nat.testBit_lt_two_pow p₂]
 
+/-- `natToBits val (w₁ + w₂)` splits into the high `w₁` bits
+    (of `val / 2^w₂`) followed by the low `w₂` bits. -/
+private theorem natToBits_append (val w₁ w₂ : Nat) :
+    natToBits val (w₁ + w₂) = natToBits (val / 2 ^ w₂) w₁ ++ natToBits val w₂ := by
+  induction w₁ with
+  | zero => simp [natToBits]
+  | succ n ih =>
+    rw [show (n + 1) + w₂ = (n + w₂) + 1 from by omega]
+    simp only [natToBits]
+    rw [ih, List.cons_append, ← Nat.testBit_div_two_pow]
+
+/-- If `natToBits a n` is a prefix of `natToBits b m` (`n ≤ m`, both values
+    in range), then `b < (a + 1) * 2^(m - n)`.  This is the numerical
+    consequence of one codeword being a prefix of another. -/
+private theorem natToBits_prefix_lt (a b n m : Nat)
+    (hnm : n ≤ m) (ha : a < 2 ^ n) (hb : b < 2 ^ m)
+    (hpre : (natToBits a n).IsPrefix (natToBits b m)) :
+    b < (a + 1) * 2 ^ (m - n) := by
+  let d := m - n
+  have hd_pos : 0 < 2 ^ d := Nat.two_pow_pos d
+  have hm : m = n + d := by omega
+  rw [hm, natToBits_append b n d] at hpre
+  obtain ⟨t, ht⟩ := hpre
+  have ⟨heq, _⟩ := List.append_inj ht (by simp [natToBits_length])
+  have hdiv_bound : b / 2 ^ d < 2 ^ n := by
+    rw [Nat.div_lt_iff_lt_mul hd_pos, ← Nat.pow_add]; rw [hm] at hb; exact hb
+  have ha_eq : a = b / 2 ^ d := natToBits_injective a (b / 2 ^ d) n ha hdiv_bound heq
+  have := Nat.lt_mul_div_succ b hd_pos
+  rw [ha_eq, Nat.mul_comm]; exact this
+
 /-! ## Canonical Huffman code construction (RFC 1951 §3.2.2) -/
 
 /-- Count the number of codes of each length, producing an array indexed
@@ -547,6 +577,27 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
         exact if_pos (bne_iff_ne.mpr hl_ne)
       rw [hfilt, List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← foldl_add_init]
 
+/-- The ncRec recurrence at higher bit lengths bounds from below by
+    scaling the value at a lower length:
+    `ncRec b₂ ≥ (ncRec b₁ + count[b₁]) * 2^(b₂ - b₁)`. -/
+private theorem ncRec_shift (blCount : Array Nat) (b₁ b₂ : Nat) (h : b₁ < b₂) :
+    (ncRec blCount b₁ + blCount[b₁]!) * 2 ^ (b₂ - b₁) ≤ ncRec blCount b₂ := by
+  induction b₂ with
+  | zero => omega
+  | succ k ih =>
+    simp only [ncRec]
+    cases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp h) with
+    | inl hlt =>
+      calc (ncRec blCount b₁ + blCount[b₁]!) * 2 ^ (k + 1 - b₁)
+          = (ncRec blCount b₁ + blCount[b₁]!) * (2 ^ (k - b₁) * 2) := by
+            rw [show k + 1 - b₁ = (k - b₁) + 1 from by omega, Nat.pow_succ]
+        _ = ((ncRec blCount b₁ + blCount[b₁]!) * 2 ^ (k - b₁)) * 2 := by rw [Nat.mul_assoc]
+        _ ≤ ncRec blCount k * 2 := Nat.mul_le_mul_right 2 (ih hlt)
+        _ ≤ (ncRec blCount k + blCount[k]!) * 2 :=
+            Nat.mul_le_mul_right 2 (Nat.le_add_right _ _)
+    | inr heq =>
+      subst heq; simp
+
 /-- The core ncRec bound: `ncRec blCount b + blCount[b]! ≤ 2^b` when the Kraft
     inequality holds for the full sum from 0. -/
 private theorem ncRec_bound (blCount : Array Nat) (maxBits b : Nat)
@@ -780,8 +831,57 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     subst this; simp at ht; subst ht
     exact hne (codeFor_injective lengths maxBits hv s₁ s₂ cw₁ h₁ h₂)
   · -- Different lengths: canonical codes at different lengths aren't prefixes.
-    -- This requires showing nc[len₂] ≥ (nc[len₁] + count[len₁]) * 2^(len₂-len₁),
-    -- i.e., the nextCodes recurrence leaves no room for prefix overlap.
-    sorry
+    -- lengths[s₁] < lengths[s₂] since prefix is proper (shorter, not equal)
+    have hlt_len : lengths[s₁] < lengths[s₂] := by omega
+    -- Re-extract codeFor conditions with names
+    have ⟨hs₁, hlen₁_cond, _⟩ := codeFor_spec h₁
+    have ⟨hs₂, hlen₂_cond, _⟩ := codeFor_spec h₂
+    have hlen₁_ne : lengths[s₁] ≠ 0 := by
+      intro h; exact hlen₁_cond (by simp [h])
+    have hlen₁_le : lengths[s₁] ≤ maxBits := by
+      by_cases h : lengths[s₁] > maxBits
+      · exfalso; exact hlen₁_cond (by simp [h])
+      · omega
+    have hlen₂_le : lengths[s₂] ≤ maxBits := by
+      by_cases h : lengths[s₂] > maxBits
+      · exfalso; exact hlen₂_cond (by simp [h])
+      · omega
+    -- Code values fit in their bit lengths
+    have hb₁ := code_value_bound lengths maxBits s₁ hv hs₁ hlen₁_cond
+    have hb₂ := code_value_bound lengths maxBits s₂ hv hs₂ hlen₂_cond
+    -- Prefix in natToBits form gives numerical upper bound
+    have hpre_cw : cw₁.IsPrefix cw₂ := ⟨t, ht⟩
+    rw [hcw₁, hcw₂] at hpre_cw
+    have hupper := natToBits_prefix_lt _ _ _ _ (by omega) hb₁ hb₂ hpre_cw
+    -- Connect nextCodes array values to ncRec
+    let blCount := countLengths lengths maxBits
+    have hnc₁ : (nextCodes blCount maxBits)[lengths[s₁]]! = ncRec blCount lengths[s₁] := by
+      simp only [nextCodes]
+      exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
+        (Array.size_replicate ..) (by omega) (by omega) (by simp [ncRec])
+        (fun b' hb' hlt => by omega) _ (by omega) hlen₁_le
+    have hnc₂ : (nextCodes blCount maxBits)[lengths[s₂]]! = ncRec blCount lengths[s₂] := by
+      simp only [nextCodes]
+      exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
+        (Array.size_replicate ..) (by omega) (by omega) (by simp [ncRec])
+        (fun b' hb' hlt => by omega) _ (by omega) hlen₂_le
+    -- offset₁ < total count at length len₁
+    have hoff_lt : List.foldl (fun acc l => if (l == lengths[s₁]) = true then acc + 1 else acc)
+        0 (List.take s₁ lengths) < blCount[lengths[s₁]]! := by
+      have h := offset_of_lt lengths s₁ lengths.length lengths[s₁] hs₁ rfl hs₁ (by omega)
+      rw [List.take_length] at h
+      rw [countLengths_eq lengths maxBits lengths[s₁] hlen₁_ne hlen₁_le]; exact h
+    -- Chain: code₂ < (code₁+1)*2^d ≤ (ncRec₁+count₁)*2^d ≤ ncRec₂ ≤ code₂
+    exfalso
+    rw [hnc₁, hnc₂] at hupper
+    have hmul : (ncRec blCount lengths[s₁] +
+        List.foldl (fun acc l => if (l == lengths[s₁]) = true then acc + 1 else acc) 0
+          (List.take s₁ lengths) + 1) *
+        2 ^ (lengths[s₂] - lengths[s₁]) ≤
+        (ncRec blCount lengths[s₁] + blCount[lengths[s₁]]!) *
+          2 ^ (lengths[s₂] - lengths[s₁]) :=
+      Nat.mul_le_mul_right _ (by omega)
+    have hshift := ncRec_shift blCount lengths[s₁] lengths[s₂] hlt_len
+    omega
 
 end Huffman.Spec
