@@ -270,7 +270,91 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
   rw [← hval] at hspec
   exact ⟨rest, hspec, hrest⟩
 
-/-! ## Huffman decode correspondence -/
+/-! ## Huffman decode correspondence
+
+The proof is decomposed into two steps:
+1. **BitReader→bits**: `decode_go_decodeBits` — the tree-based decode via
+   `BitReader` corresponds to a pure decode on the bit list (`decodeBits`).
+2. **Tree→table**: `decodeBits_eq_spec_decode` — the pure tree decode
+   agrees with the spec's linear-search decode on the code table.
+
+Step 1 uses `readBit_toBits` at each tree node. Step 2 connects the tree
+structure (built by `fromLengths`) to the code table (from `allCodes`). -/
+
+/-- Pure tree decode on a bit list. Follows the same logic as
+    `HuffTree.decode.go` but operates on `List Bool` instead of `BitReader`. -/
+def decodeBits : Zip.Native.HuffTree → List Bool → Option (UInt16 × List Bool)
+  | .leaf s, bits => some (s, bits)
+  | .empty, _ => none
+  | .node _ _, [] => none
+  | .node _ o, true :: bits => decodeBits o bits
+  | .node z _, false :: bits => decodeBits z bits
+
+/-- Step 1: `decode.go` via BitReader corresponds to `decodeBits` on the
+    spec bit list. By induction on the tree structure. -/
+private theorem decode_go_decodeBits (tree : Zip.Native.HuffTree)
+    (br : Zip.Native.BitReader) (n : Nat)
+    (sym : UInt16) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (h : Zip.Native.HuffTree.decode.go tree br n = .ok (sym, br')) :
+    decodeBits tree br.toBits = some (sym, br'.toBits) ∧
+    br'.bitOff < 8 := by
+  induction tree generalizing br n with
+  | leaf s =>
+    simp only [Zip.Native.HuffTree.decode.go] at h
+    obtain ⟨rfl, rfl⟩ := Except.ok.inj h
+    exact ⟨rfl, hwf⟩
+  | empty =>
+    simp [Zip.Native.HuffTree.decode.go] at h
+  | node z o ihz iho =>
+    simp only [Zip.Native.HuffTree.decode.go] at h
+    split at h
+    · simp at h
+    · -- n ≤ 20: readBit + recurse
+      cases hrd : br.readBit with
+      | error e =>
+        simp [hrd, bind, Except.bind] at h
+      | ok p =>
+        obtain ⟨bit, br₁⟩ := p
+        simp only [hrd, bind, Except.bind] at h
+        -- Get bit correspondence
+        obtain ⟨b, rest₁, hbr_bits, hbr1_bits, hbit_val⟩ :=
+          readBit_toBits br bit br₁ hwf hrd
+        have hwf₁ := readBit_wf br bit br₁ hwf hrd
+        -- Case split on the bit value
+        split at h
+        · -- bit == 0: go left (b = false)
+          rename_i hbit
+          have hb : b = false := by
+            have : bit = 0 := by rwa [beq_iff_eq] at hbit
+            cases b <;> simp_all
+          obtain ⟨hspec, hwf'⟩ := ihz br₁ (n + 1) hwf₁ h
+          refine ⟨?_, hwf'⟩
+          rw [hbr_bits, hb]; simp only [decodeBits]
+          rw [← hbr1_bits]; exact hspec
+        · -- bit != 0: go right (b = true)
+          rename_i hbit
+          have hb : b = true := by
+            cases b with
+            | true => rfl
+            | false => exfalso; exact hbit (by simp_all)
+          obtain ⟨hspec, hwf'⟩ := iho br₁ (n + 1) hwf₁ h
+          refine ⟨?_, hwf'⟩
+          rw [hbr_bits, hb]; simp only [decodeBits]
+          rw [← hbr1_bits]; exact hspec
+
+/-- Step 2: For a tree built from code lengths, `decodeBits` agrees with
+    the spec's table-based decode. Requires the tree to be well-formed
+    (built via `fromLengths`). -/
+private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
+    (tree : Zip.Native.HuffTree) (bits : List Bool)
+    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree) :
+    let specLengths := lengths.toList.map UInt8.toNat
+    let specCodes := Huffman.Spec.allCodes specLengths
+    let specTable := specCodes.map fun (s, cw) => (cw, s)
+    (decodeBits tree bits).map (fun (s, rest) => (s.toNat, rest)) =
+      Huffman.Spec.decode specTable bits := by
+  sorry
 
 /-- A `HuffTree` built from code lengths decodes the same symbol as the
     spec's `Huffman.Spec.decode` on the corresponding code table.
@@ -288,7 +372,15 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
     ∃ rest,
       Huffman.Spec.decode specTable br.toBits = some (sym.toNat, rest) ∧
       br'.toBits = rest := by
-  sorry
+  -- Step 1: BitReader decode → pure decodeBits
+  have hdecode_go : Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
+    simp only [Zip.Native.HuffTree.decode] at hdecode; exact hdecode
+  obtain ⟨hdb, _⟩ := decode_go_decodeBits tree br 0 sym br' hwf hdecode_go
+  -- Step 2: decodeBits → spec decode via tree-table correspondence
+  have hspec := decodeBits_eq_spec_decode lengths tree br.toBits htree
+  -- Connect the two
+  rw [hdb] at hspec; simp at hspec
+  exact ⟨br'.toBits, hspec.symm, rfl⟩
 
 /-! ## Main correctness theorem -/
 
