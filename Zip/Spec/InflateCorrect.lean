@@ -59,17 +59,9 @@ private theorem flatMap_cons_drop {α β : Type} (a : α) (rest : List α)
 private theorem ofFn_drop_head {n : Nat} {f : Fin n → β} {off : Nat}
     (hoff : off < n) :
     ∃ rest, (List.ofFn f).drop off = f ⟨off, hoff⟩ :: rest := by
-  induction n generalizing off with
-  | zero => omega
-  | succ m ih =>
-    simp only [List.ofFn_succ]
-    cases off with
-    | zero =>
-      simp only [List.drop_zero]
-      exact ⟨_, rfl⟩
-    | succ k =>
-      simp only [List.drop_succ_cons]
-      exact ih (by omega)
+  have hlen : off < (List.ofFn f).length := by simp; exact hoff
+  rw [List.drop_eq_getElem_cons hlen, List.getElem_ofFn]
+  exact ⟨_, rfl⟩
 
 /-- `byteToBits` dropped by `off < 8` starts with `testBit off`. -/
 private theorem byteToBits_drop_head (b : UInt8) (off : Nat) (hoff : off < 8) :
@@ -79,10 +71,6 @@ private theorem byteToBits_drop_head (b : UInt8) (off : Nat) (hoff : off < 8) :
 
 /-- The key structural lemma: `bytesToBits data` dropped by `pos * 8 + off`
     starts with `data[pos].toNat.testBit off`. -/
-private theorem byteToBits_length' (b : UInt8) :
-    (Deflate.Spec.bytesToBits.byteToBits b).length = 8 := by
-  simp [Deflate.Spec.bytesToBits.byteToBits]
-
 private theorem bytesToBits_drop_testBit (data : ByteArray) (pos off : Nat)
     (hpos : pos < data.size) (hoff : off < 8) :
     ∃ rest, (Deflate.Spec.bytesToBits data).drop (pos * 8 + off) =
@@ -92,13 +80,14 @@ private theorem bytesToBits_drop_testBit (data : ByteArray) (pos off : Nat)
   rw [← List.drop_drop]
   -- Step 2: drop (pos * 8) skips pos complete 8-bit segments
   rw [flatMap_drop_mul data.data.toList _ 8 pos
-    (fun b _ => byteToBits_length' b)]
+    (fun b _ => Deflate.Spec.bytesToBits.byteToBits_length b)]
   -- Step 3: data.data.toList.drop pos = data[pos] :: tail
   have hlen : pos < data.data.toList.length := by
     rw [Array.length_toList]; exact hpos
   rw [List.drop_eq_getElem_cons hlen]
   -- Step 4: drop off within first segment
-  rw [flatMap_cons_drop _ _ _ off (by rw [byteToBits_length']; omega)]
+  rw [flatMap_cons_drop _ _ _ off
+    (by rw [Deflate.Spec.bytesToBits.byteToBits_length]; omega)]
   -- Step 5: head of (byteToBits data[pos]).drop off is testBit off
   have heq : data.data.toList[pos] = data[pos] := by
     simp [Array.getElem_toList]; rfl
@@ -172,17 +161,19 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
         simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1; omega
       · obtain ⟨_, rfl⟩ := h
         simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1
-    · -- bit = if testBit then 1 else 0
+    · -- bit = if testBit then 1 else 0 (same in both bitOff cases)
       split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      · obtain ⟨rfl, _⟩ := h
-        rw [hget]; exact uint32_bit_eq_testBit br.data[br.pos] br.bitOff hwf
-      · obtain ⟨rfl, _⟩ := h
-        rw [hget]; exact uint32_bit_eq_testBit br.data[br.pos] br.bitOff hwf
+      all_goals (obtain ⟨rfl, _⟩ := h; rw [hget];
+                 exact uint32_bit_eq_testBit br.data[br.pos] br.bitOff hwf)
 
 /-- Reading `n` bits via `BitReader.readBits` corresponds to
-    `readBitsLSB n` on the spec bit list. -/
+    `readBitsLSB n` on the spec bit list.
+    Requires `bitOff < 8` (well-formedness) and `n ≤ 32` (UInt32 shift
+    correctness — native `readBits.go` uses `bit <<< shift.toUInt32`
+    where `UInt32.shiftLeft` reduces shift mod 32). -/
 theorem readBits_toBits (br : Zip.Native.BitReader)
     (n : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8) (hn : n ≤ 32)
     (h : br.readBits n = .ok (val, br')) :
     ∃ rest,
       Deflate.Spec.readBitsLSB n br.toBits = some (val.toNat, rest) ∧
@@ -192,10 +183,13 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
 /-! ## Huffman decode correspondence -/
 
 /-- A `HuffTree` built from code lengths decodes the same symbol as the
-    spec's `Huffman.Spec.decode` on the corresponding code table. -/
+    spec's `Huffman.Spec.decode` on the corresponding code table.
+    Requires `bitOff < 8` because the proof traces through individual
+    `readBit` calls via `readBit_toBits`. -/
 theorem huffTree_decode_correct (lengths : Array UInt8)
     (tree : Zip.Native.HuffTree) (br : Zip.Native.BitReader)
     (sym : UInt16) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
     (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
     (hdecode : tree.decode br = .ok (sym, br')) :
     let specLengths := lengths.toList.map UInt8.toNat

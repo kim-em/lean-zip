@@ -59,7 +59,7 @@ def alignToByte (bits : List Bool) : List Bool :=
 /-! ## Bitstream theorems -/
 
 /-- Each byte converts to exactly 8 bits. -/
-private theorem byteToBits_length (b : UInt8) :
+protected theorem bytesToBits.byteToBits_length (b : UInt8) :
     (bytesToBits.byteToBits b).length = 8 := by
   simp [bytesToBits.byteToBits]
 
@@ -74,7 +74,7 @@ theorem bytesToBits_length (data : ByteArray) :
   | nil => simp
   | cons b bs ih =>
     simp only [List.flatMap_cons, List.length_append, List.length_cons,
-               byteToBits_length, ih]; omega
+               bytesToBits.byteToBits_length, ih]; omega
 
 /-- `readBitsLSB` consumes exactly `n` bits when it succeeds. -/
 theorem readBitsLSB_some_length {n : Nat} {bits : List Bool}
