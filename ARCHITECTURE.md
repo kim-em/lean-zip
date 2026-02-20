@@ -197,7 +197,7 @@ Formal mathematical specifications of algorithms, independent of any particular 
 
 - **Adler-32** (`Spec/Adler32.lean`): Two Nat-valued sums modulo 65521, defined as a `List.foldl`. Key theorem: `updateList_append` (compositionality).
 - **CRC-32** (`Spec/Crc32.lean`): Bit-by-bit polynomial division with polynomial `0xEDB88320`. Defines both the naive bit-by-bit `crcByte` and the table-driven `crcByteTable`. Key theorems: `updateList_append` (compositionality), `updateList_nil`.
-- **Huffman** (`Spec/Huffman.lean`): Canonical Huffman code construction from RFC 1951 §3.2.2. Defines `codeFor` (code assignment), `allCodes`, `decode`. Key theorems: `codeFor_injective` (distinct codewords), `canonical_prefix_free` (prefix-free property, same-length case proved, different-length case WIP).
+- **Huffman** (`Spec/Huffman.lean`): Canonical Huffman code construction from RFC 1951 §3.2.2. Defines `codeFor` (code assignment), `allCodes`, `decode`. Key theorems: `codeFor_injective` (distinct codewords for distinct symbols), `canonical_prefix_free` (prefix-free property — both same-length and different-length cases proved via Kraft inequality).
 - **DEFLATE** (`Spec/Deflate.lean`): Complete DEFLATE bitstream spec. Defines `bytesToBits` (LSB-first), `readBitsLSB`/`readBitsMSB`, `LZ77Symbol` with `resolveLZ77`, all RFC 1951 tables, block decode pipeline (stored, fixed Huffman, dynamic Huffman), and stream-level `decode`.
 
 ### Native implementations (`Zip/Native/`)
