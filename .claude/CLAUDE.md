@@ -339,6 +339,17 @@ Update it during review and reflect sessions.
   discriminator lemmas. Use `simp at h` (without `only`) which includes
   them, or explicitly `exact absurd h (by simp)`. Don't try `nofun h`
   or `exact Except.noConfusion h` — neither works directly.
+- **Nested `cases` parsing**: Nested `cases ... with | ... | ...`
+  blocks cause Lean to misparse the inner `| some =>` as belonging to
+  the outer `cases`. Use `match` for the inner case split instead:
+  ```lean
+  cases hdb : f x with
+  | none =>
+    match hdec : g y with   -- NOT `cases hdec : g y with`
+    | none => ...
+    | some p => ...
+  | some p => ...
+  ```
 - **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
   `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
   To define in a different namespace, either close the current namespace
