@@ -102,15 +102,34 @@ private theorem shift_and_one_eq_testBit (n i : Nat) :
   simp only [Nat.testBit, Nat.and_comm (n >>> i) 1, Nat.one_and_eq_mod_two, bne_iff_ne]
   split <;> omega
 
+/-- The bit extracted at position `n` from a UInt32 corresponds to `testBit`. -/
+private theorem uint32_testBit (code : UInt32) (n : Nat) (hn : n < 32) :
+    ((code >>> n.toUInt32) &&& 1) =
+      if code.toNat.testBit n then 1 else 0 := by
+  apply UInt32.toNat_inj.mp
+  rw [UInt32.toNat_and, UInt32.toNat_shiftRight]
+  have hn_eq : n.toUInt32.toNat % 32 = n := by simp [Nat.toUInt32]; omega
+  rw [hn_eq, UInt32.toNat_one, shift_and_one_eq_testBit]
+  split <;> simp
+
+/-- `uint32_testBit` specialized to UInt8 input. -/
 private theorem uint32_bit_eq_testBit (byte : UInt8) (off : Nat) (hoff : off < 8) :
     ((byte.toUInt32 >>> off.toUInt32) &&& 1) =
       if byte.toNat.testBit off then 1 else 0 := by
-  apply UInt32.toNat_inj.mp
-  rw [UInt32.toNat_and, UInt32.toNat_shiftRight, UInt8.toNat_toUInt32]
-  have hoff_eq : off.toUInt32.toNat % 32 = off := by simp [Nat.toUInt32]; omega
-  rw [hoff_eq]
-  rw [UInt32.toNat_one, shift_and_one_eq_testBit]
-  split <;> simp
+  have := uint32_testBit byte.toUInt32 off (by omega)
+  rwa [UInt8.toNat_toUInt32] at this
+
+/-- When `testBit n = false`, insert's bit comparison yields `true` (bit == 0). -/
+private theorem insert_bit_zero (code : UInt32) (n : Nat) (hn : n < 32)
+    (h : code.toNat.testBit n = false) :
+    ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = true := by
+  have := uint32_testBit code n hn; rw [h] at this; simp [this]
+
+/-- When `testBit n = true`, insert's bit comparison yields `false` (bit != 0). -/
+private theorem insert_bit_one (code : UInt32) (n : Nat) (hn : n < 32)
+    (h : code.toNat.testBit n = true) :
+    ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = false := by
+  have := uint32_testBit code n hn; rw [h] at this; simp [this]
 
 private theorem list_drop_cons_tail {l : List α} {a : α} {rest : List α} {n : Nat}
     (h : l.drop n = a :: rest) : rest = l.drop (n + 1) := by
@@ -360,10 +379,7 @@ inductive TreeHasLeaf : Zip.Native.HuffTree → List Bool → UInt16 → Prop
 private theorem decodeBits_of_hasLeaf (tree : Zip.Native.HuffTree) (cw : List Bool)
     (sym : UInt16) (rest : List Bool) (h : TreeHasLeaf tree cw sym) :
     decodeBits tree (cw ++ rest) = some (sym, rest) := by
-  induction h with
-  | leaf => simp [decodeBits]
-  | left _ ih => simp [decodeBits, ih]
-  | right _ ih => simp [decodeBits, ih]
+  induction h <;> simp_all [decodeBits]
 
 /-- If `decodeBits` returns `(sym, rest)`, then the tree has a leaf at some
     path `cw` with `bits = cw ++ rest`. -/
@@ -389,30 +405,6 @@ private theorem hasLeaf_of_decodeBits (tree : Zip.Native.HuffTree) (bits : List 
         simp only [decodeBits] at h
         obtain ⟨cw, hleaf, hrst⟩ := iho rest' h
         exact ⟨true :: cw, .right hleaf, by rw [hrst]; rfl⟩
-
-/-! ### UInt32 bit correspondence for insert -/
-
-/-- The bit extracted by `insert.go` at position `n` corresponds to `testBit`. -/
-private theorem uint32_testBit (code : UInt32) (n : Nat) (hn : n < 32) :
-    ((code >>> n.toUInt32) &&& 1) =
-      if code.toNat.testBit n then 1 else 0 := by
-  apply UInt32.toNat_inj.mp
-  rw [UInt32.toNat_and, UInt32.toNat_shiftRight]
-  have hn_eq : n.toUInt32.toNat % 32 = n := by simp [Nat.toUInt32]; omega
-  rw [hn_eq, UInt32.toNat_one, shift_and_one_eq_testBit]
-  split <;> simp
-
-/-- When `testBit n = false`, insert's bit comparison yields `true` (bit == 0). -/
-private theorem insert_bit_zero (code : UInt32) (n : Nat) (hn : n < 32)
-    (h : code.toNat.testBit n = false) :
-    ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = true := by
-  have := uint32_testBit code n hn; rw [h] at this; simp [this]
-
-/-- When `testBit n = true`, insert's bit comparison yields `false` (bit != 0). -/
-private theorem insert_bit_one (code : UInt32) (n : Nat) (hn : n < 32)
-    (h : code.toNat.testBit n = true) :
-    ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = false := by
-  have := uint32_testBit code n hn; rw [h] at this; simp [this]
 
 /-! ### insert.go creates the correct leaf path -/
 
@@ -451,11 +443,10 @@ private theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
         show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp [hbit]
-        have hnl' : NoLeafOnPath z (Huffman.Spec.natToBits code.toNat n) := by
-          simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl; exact hnl
-        exact .left (ih z (by omega) hnl')
+        simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
+        exact .left (ih z (by omega) hnl)
       | leaf s =>
-        exfalso; simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
+        simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
     | true =>
       have hbit : ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = false :=
         insert_bit_one code n (by omega) htb
@@ -469,11 +460,10 @@ private theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
         show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp [hbit]
-        have hnl' : NoLeafOnPath o (Huffman.Spec.natToBits code.toNat n) := by
-          simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl; exact hnl
-        exact .right (ih o (by omega) hnl')
+        simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
+        exact .right (ih o (by omega) hnl)
       | leaf s =>
-        exfalso; simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
+        simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
 
 /-! ### insert.go preserves existing leaves -/
 
@@ -506,9 +496,8 @@ private theorem insert_go_preserves (code : UInt32) (sym : UInt16)
         show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp [hbit]
-        exact .left (ih _ (by omega) _ h' fun hpre => by
-          apply hne; obtain ⟨t, ht⟩ := hpre
-          exact ⟨t, by simp [Huffman.Spec.natToBits, htb, List.cons_append, ht]⟩)
+        exact .left (ih _ (by omega) _ h' fun hpre =>
+          hne (by simp [Huffman.Spec.natToBits, htb, hpre]))
       | true =>
         -- Different direction: insertion goes right; z is untouched
         have hbit := insert_bit_one code n (by omega) htb
@@ -532,9 +521,8 @@ private theorem insert_go_preserves (code : UInt32) (sym : UInt16)
         show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp [hbit]
-        exact .right (ih _ (by omega) _ h' fun hpre => by
-          apply hne; obtain ⟨t, ht⟩ := hpre
-          exact ⟨t, by simp [Huffman.Spec.natToBits, htb, List.cons_append, ht]⟩)
+        exact .right (ih _ (by omega) _ h' fun hpre =>
+          hne (by simp [Huffman.Spec.natToBits, htb, hpre]))
 
 /-! ### Connecting fromLengths to allCodes -/
 
