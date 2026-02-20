@@ -3,73 +3,50 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 2
+## Sorry count: 0
 
-## Incomplete proofs
-
-- `Zip/Spec/Huffman.lean:212` — `nextCodes_plus_count_le`: For valid lengths,
-  `nextCodes[b]! + foldl_count_b ≤ 2^b`. This is the Kraft-based invariant
-  of the canonical code construction.
-- `Zip/Spec/Huffman.lean:380` — `canonical_prefix_free` different-length case:
-  when `len₁ < len₂`, the shorter code can't be a prefix of the longer one.
-
-Both reduce to analyzing the `nextCodes.go` loop.
-
-## Structurally complete proofs
-
-- `code_value_bound` — proved using `nextCodes_plus_count_le` (sorry'd) +
-  `offset_of_lt` (proved) + omega
-- `codeFor_injective` — proved using `code_value_bound`, `codeFor_spec`,
-  `natToBits_injective`, `offset_of_lt`
-- `canonical_prefix_free` same-length case — proved using `codeFor_injective`
+All proofs in the codebase are complete. No remaining sorry's.
 
 ## Known good commit
 
-`d30f9b3` — `lake build && lake exe test` passes
+`b59cbca` — `lake build && lake exe test` passes
+
+## Completed proofs (this session)
+
+- `nextCodes_plus_count_le` (commit 6d24829): Kraft invariant for canonical
+  Huffman codes. Proved via `ncRec` recursive formulation + `kraftSumFrom`
+  conservation law + connecting the imperative `nextCodes.go` loop to `ncRec`.
+
+- `canonical_prefix_free` different-length case (commit b59cbca): If cw₁
+  (length l₁) is a prefix of cw₂ (length l₂ > l₁), derive contradiction via:
+  1. `natToBits_prefix_lt`: prefix gives `code₂ < (code₁+1)*2^d`
+  2. `ncRec_shift`: `(ncRec l₁ + count₁)*2^d ≤ ncRec l₂`
+  3. `code₁+1 ≤ ncRec l₁ + count₁` (from `offset < count`)
+  4. `ncRec l₂ ≤ code₂` (code₂ = ncRec + offset ≥ ncRec)
+  Chain gives `code₂ < code₂`, contradiction.
+
+## Key lemmas added
+
+- `natToBits_append`: `natToBits val (w₁+w₂) = natToBits (val/2^w₂) w₁ ++ natToBits val w₂`
+- `natToBits_prefix_lt`: prefix → numerical upper bound `b < (a+1)*2^(m-n)`
+- `ncRec_shift`: `(ncRec b₁ + count[b₁])*2^(b₂-b₁) ≤ ncRec b₂`
+- `foldl_count_init`: init-shift for the counting foldl (distinct from `foldl_add_init`)
 
 ## Next action
 
-Prove `nextCodes_plus_count_le`. Proof plan:
-
-1. Define `ncSimple blCount b = (ncSimple blCount (b-1) + blCount[b-1]!) * 2`
-   (simple structural recursion matching `nextCodes.go`)
-2. Define `kraftTail blCount maxBits b = ∑_{i=b}^{maxBits} blCount[i]! * 2^(maxBits-i)`
-3. Prove invariant by induction:
-   `(ncSimple b + blCount[b]!) * 2^(maxBits-b) + kraftTail(b+1) ≤ 2^maxBits`
-   - Base (b=0): reduces to `kraftTail(1) ≤ 2^maxBits` (Kraft inequality)
-   - Step: `(ncSimple(b+1) + blCount[b+1]!) * 2^(maxBits-b-1) + kraftTail(b+2)`
-     = `(ncSimple(b) + blCount[b]!) * 2^(maxBits-b) + kraftTail(b+1)` ≤ 2^maxBits (by IH)
-4. Conclude: `ncSimple b + blCount[b]! ≤ 2^b`
-5. Show `nextCodes[b]! = ncSimple b` for `1 ≤ b ≤ maxBits`
-6. Relate foldl count to `countLengths[b]!` (countLengths_eq_foldl_count)
-
-The step in (3) is an equality, making it clean. The tricky parts are:
-- (5) analyzing `nextCodes.go` (Array operations, termination)
-- (6) relating `countLengths` Array foldl to scalar foldl
-- Connecting the blCount-based Kraft sum to the ValidLengths filter-based sum
-
-Alternative: prove `nextCodes.go` invariant directly (same math, avoids ncSimple).
-
-For `canonical_prefix_free` different-length case, additionally need:
-- `ncSimple b ≥ (ncSimple a + blCount[a]!) * 2^(b-a)` for `a < b`
-  (follows from the recurrence by induction)
-
-## Dead code inventory (review finding)
-
-Unused but justified definitions (all needed for future Phase 3 proofs):
-- `IsPrefixFree` (Huffman.lean:133) — aspirational, for stating code table prefix-freeness
-- `readBitsMSB` (Deflate.lean:43) — deliberately kept per PROGRESS.md
-- `decode_deterministic` (Huffman.lean:333, Deflate.lean:310) — spec theorems
-- `finalize` (Crc32.lean:44) — needed for `checksum` equivalence proof
-- `decodeBytes` (Deflate.lean:299) — entry point for inflate correctness theorem
+Phase 3 continues. Possible next steps:
+- Review session: clean up the new Huffman proofs (combine steps, extract reusable lemmas)
+- Continue Phase 3: DEFLATE spec proofs (decode correctness, block structure)
+- Review IsPrefixFree: now that canonical_prefix_free is proved, connect it to the
+  `IsPrefixFree` definition for the full code table property
 
 ## Notes
 
-- `by_contra` and `push_neg` are NOT available without Mathlib
-- `set` tactic is NOT available without Mathlib — use `let` or work inline
-- `le_refl` is not in scope — use `(by omega)` or `Nat.le.refl`
-- `List.filter_filter` is available and simplifies nested filter proofs
-- `List.eq_nil_of_length_eq_zero` is available for `l.length = 0 → l = []`
-- `Nat.pow_pos` is available for `0 < b → 0 < b ^ n`
-- `Nat.le_of_mul_le_mul_right` avoids mul_comm rewrites vs `_left` variant
+- `rw [hnc₁, hnc₂] at hupper` works through `let` bindings — Lean 4's `rw` matches
+  let-bound fvars against their definitions during pattern matching
+- `omega` handles the final contradiction chain by treating multiplication expressions
+  as opaque: `A + x < B, B ≤ C, C ≤ A → x < 0 → False`
+- `Nat.mul_le_mul_right` is needed for the multiplication step (omega can't multiply)
+- `Nat.lt_mul_div_succ` gives `b < 2^d * (b/2^d + 1)` — the key numerical consequence
+  of prefix in `natToBits_prefix_lt`
 - Toolchain v4.29.0-rc1 is current

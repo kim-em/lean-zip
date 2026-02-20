@@ -309,6 +309,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 2 (Huffman: `nextCodes_plus_count_le`, `canonical_prefix_free` different-length case)
-- **Last session**: 2026-02-20 (review: Huffman proof refactoring + documentation)
+- **Sorry count**: 0
+- **Last session**: 2026-02-20 (implementation: proved all Huffman sorries)
 - **Last review**: 2026-02-20 (Huffman proofs, Deflate spec, slop detection)

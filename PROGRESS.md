@@ -2,6 +2,38 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Implementation — Prove all Huffman sorries (sorry count → 0)
+
+**Type**: implementation (continuation from two prior sessions that ran out of context)
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 2 → 0
+
+**Accomplished**:
+- **`nextCodes_plus_count_le`** (commit 6d24829): Proved the Kraft invariant
+  `nc[b] + count[b] ≤ 2^b` for canonical Huffman codes. Required ~15 helper
+  lemmas connecting the imperative `nextCodes.go` Array loop to the recursive
+  `ncRec` formulation, through `kraftSumFrom` conservation law. Key challenges:
+  foldl matching (needed dedicated `foldl_count_init`), omega limitations with
+  exponentials, and List.filter rewriting with `bne_iff_ne`.
+
+- **`canonical_prefix_free`** different-length case (commit b59cbca): Proved
+  canonical Huffman codes are prefix-free when code lengths differ. Three new
+  lemmas: `natToBits_append` (splitting bit representations), `natToBits_prefix_lt`
+  (prefix → numerical bound), `ncRec_shift` (recurrence monotonicity). Final
+  proof derives contradiction: `code₂ < (code₁+1)*2^d ≤ ncRec(l₂) ≤ code₂`.
+
+**Key technique discoveries**:
+- `rw [hnc₁, hnc₂] at hupper` works through `let` bindings in Lean 4
+- `Nat.mul_le_mul_right` + `omega` pattern for the multiplication step
+  (omega can't multiply, but handles the linear chain after manual mul step)
+- `Nat.lt_mul_div_succ` and `Nat.testBit_div_two_pow` for natToBits reasoning
+- `List.append_inj` for deconstructing prefix relationships
+
+**Codex review**: not yet performed (will do in next session)
+
+**Next**: Review session — clean up new proofs, connect to `IsPrefixFree`
+definition, or continue Phase 3 DEFLATE spec work.
+
 ## 2026-02-20: Review — Huffman proof refactoring + documentation
 
 **Type**: review
