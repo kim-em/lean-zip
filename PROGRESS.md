@@ -2,6 +2,54 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Review — proof simplification using stdlib lemmas
+
+**Type**: review
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 3 → 3 (unchanged)
+**Commit**: `4b4209e`
+
+**Focus areas**: Refactoring and proof improvement (InflateCorrect.lean, deep),
+ZipForStd/Nat.lean review, Lean idioms scan across Spec/ files.
+
+**Proof improvements** (net -33 lines):
+
+- **ZipForStd/Nat.lean**: Replaced 20-line induction proof of `or_two_pow_eq_add`
+  with 3-line proof using `Nat.two_pow_add_eq_or_of_lt` from stdlib. The stdlib
+  lemma gives `2^i * a + b = 2^i * a ||| b` when `b < 2^i`; instantiate with
+  `a=1`, apply `Nat.or_comm` and `Nat.add_comm`.
+
+- **InflateCorrect.lean `uint32_bit_eq_testBit`**: Replaced
+  `have : UInt32.toNat 1 = 1 := by decide` with `rw [UInt32.toNat_one]`.
+  The stdlib lemma exists (proof by `rfl`) but is not `@[simp]`.
+
+- **InflateCorrect.lean `decode_go_decodeBits`**: Simplified both `hb : b = false`
+  and `hb : b = true` derivations from multi-line case analysis to
+  `cases b <;> simp_all`. Works because `simp_all` can resolve the contradiction
+  between `hbit : bit == 0 = true/false` and `hbit_val : bit = if b then 1 else 0`
+  via `beq_iff_eq` (which is `@[simp]`).
+
+**Stdlib discoveries**:
+- `Nat.two_pow_add_eq_or_of_lt`: `b < 2^i → 2^i * a + b = 2^i * a ||| b`
+- `Nat.shiftLeft_add_eq_or_of_lt`: `b < 2^i → a <<< i + b = a <<< i ||| b`
+- `Nat.testBit_two_pow`: `testBit (2^n) m = decide (n = m)`
+- `UInt32.toNat_one`: `(1 : UInt32).toNat = 1` (NOT `@[simp]`)
+
+**Review findings (no action needed)**:
+- Adler32.lean, Crc32.lean: already clean from multiple prior reviews
+- Huffman.lean: no new simplification opportunities found
+- Deflate.lean: spec functions and theorems clean, no dead code
+- No `grind` opportunities in InflateCorrect.lean proofs (all require
+  case splits, destructuring, and rewrites — not equational reasoning)
+- `!` indexing conversions deferred to Phase 3 proof work as before
+
+**Codex review**: No issues found. One observation: `cases b <;> simp_all`
+is slightly more fragile than the old explicit derivation (depends on
+`beq_iff_eq` being `@[simp]`), but this is standard and stable.
+
+**Next**: Implementation session — prove `decodeBits_eq_spec_decode`
+(tree-table correspondence), the hardest remaining sorry.
+
 ## 2026-02-20: Implementation — prove readBits_toBits + decompose huffTree_decode_correct
 
 **Type**: implementation

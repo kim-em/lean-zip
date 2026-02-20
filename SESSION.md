@@ -6,45 +6,32 @@
 ## Sorry count: 3
 
 All in `Zip/Spec/InflateCorrect.lean`:
-- `decodeBits_eq_spec_decode` (line 357): tree-table correspondence
+- `decodeBits_eq_spec_decode` (line 353): tree-table correspondence
   (pure tree decode ≡ spec's linear-search decode)
-- `inflate_correct` (line 409): main correctness theorem
-- `inflate_correct'` (line 419): corollary for position-0 inflate
+- `inflate_correct` (line 405): main correctness theorem
+- `inflate_correct'` (line 415): corollary for position-0 inflate
 
 ## Known good commit
 
-`2a1af3f` — `lake build && lake exe test` passes
+`4b4209e` — `lake build && lake exe test` passes
 
-## Completed this session (implementation)
+## Completed this session (review)
 
-### Proved readBits_toBits (sorry 4 → 3)
+### Proof simplifications (-33 lines)
 
-Key new lemma: `Nat.or_two_pow_eq_add` in `ZipForStd/Nat.lean` —
-when `a < 2^n`, bitwise OR with `2^n` equals addition (no overlapping
-bits). Proof by induction on n using `Nat.eq_of_testBit_eq`.
+- `ZipForStd/Nat.lean`: 20-line induction → 3-line proof via
+  `Nat.two_pow_add_eq_or_of_lt` (stdlib)
+- `InflateCorrect.lean`: used `UInt32.toNat_one` (stdlib) instead of
+  `by decide`
+- `InflateCorrect.lean`: simplified `decode_go_decodeBits` bit-case
+  derivations to `cases b <;> simp_all`
 
-Proof structure for readBits:
-- `readBits_go_spec`: generalized loop invariant for `readBits.go`
-  (induction on k, the number of bits remaining). Connects the native
-  accumulator `acc ||| (bit <<< shift)` to the spec's `readBitsLSB`.
-- `readBits_toBits`: derived from `readBits_go_spec` with acc=0, shift=0.
+### Stdlib discoveries
 
-Helper lemmas:
-- `shift_toUInt32_mod32`: shift < 32 → shift.toUInt32.toNat % 32 = shift
-- `acc_or_shift_toNat`: OR accumulation = addition (using `or_two_pow_eq_add`)
-- `acc_or_shift_bound`: accumulator stays < 2^(shift+1)
-
-### Decomposed huffTree_decode_correct
-
-Split into two steps:
-1. `decode_go_decodeBits` (PROVED): BitReader-based tree decode
-   corresponds to pure `decodeBits` on bit lists. By induction on
-   tree structure, using `readBit_toBits` at each node.
-2. `decodeBits_eq_spec_decode` (SORRY): pure tree decode agrees with
-   spec's linear-search `Huffman.Spec.decode`. Requires connecting
-   `fromLengths` (tree building) to `allCodes` (code generation).
-
-The main `huffTree_decode_correct` is proved assuming (2).
+- `Nat.two_pow_add_eq_or_of_lt`: relates addition to OR for disjoint bits
+- `Nat.shiftLeft_add_eq_or_of_lt`: shift variant of the above
+- `Nat.testBit_two_pow`: `testBit (2^n) m = decide (n = m)`
+- `UInt32.toNat_one` exists but is NOT `@[simp]`
 
 ## Next action
 
@@ -70,3 +57,4 @@ Priority order for next implementation session:
   - `readBits_toBits` (multi-bit correspondence, n ≤ 32)
   - `decode_go_decodeBits` (tree decode BitReader→bits)
   - `Nat.or_two_pow_eq_add` (non-overlapping OR = ADD)
+  - `Nat.two_pow_add_eq_or_of_lt` (stdlib: disjoint bits OR = ADD)

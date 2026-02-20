@@ -353,4 +353,4 @@ Updated by agent at the end of each session.
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 3 (all in InflateCorrect.lean — decodeBits_eq_spec_decode, inflate_correct, inflate_correct')
 - **Last session**: 2026-02-20 (implementation: proved readBits_toBits + decomposed huffTree_decode_correct)
-- **Last review**: 2026-02-20 (InflateCorrect.lean: fixed unprovable statements, proof cleanup)
+- **Last review**: 2026-02-20 (proof simplification: ZipForStd/Nat.lean, InflateCorrect.lean)
