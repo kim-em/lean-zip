@@ -801,4 +801,74 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     have hshift := ncRec_shift blCount lengths[s₁] lengths[s₂] hlt_len
     omega
 
+/-! ## Connecting canonical_prefix_free to allCodes -/
+
+/-- Membership in `allCodes` is characterized by `codeFor`. -/
+theorem allCodes_mem_iff (lengths : List Nat) (maxBits : Nat) (s : Nat) (cw : Codeword) :
+    (s, cw) ∈ allCodes lengths maxBits ↔
+      s < lengths.length ∧ codeFor lengths maxBits s = some cw := by
+  simp only [allCodes, List.mem_filterMap, List.mem_range]
+  constructor
+  · rintro ⟨sym, hsym, h⟩
+    cases hcf : codeFor lengths maxBits sym with
+    | none => simp [hcf] at h
+    | some cw' =>
+      simp [hcf] at h
+      exact ⟨h.1 ▸ hsym, h.1 ▸ h.2 ▸ hcf⟩
+  · rintro ⟨hs, hcode⟩
+    exact ⟨s, hs, by simp [hcode]⟩
+
+/-- `allCodes` has no duplicate entries (each symbol appears at most once). -/
+theorem allCodes_nodup (lengths : List Nat) (maxBits : Nat) :
+    (allCodes lengths maxBits).Nodup := by
+  simp only [allCodes, List.Nodup]
+  apply List.Pairwise.filterMap (R := (· ≠ ·))
+  · intro sym₁ sym₂ hne p₁ hp₁ p₂ hp₂
+    cases hc₁ : codeFor lengths maxBits sym₁ with
+    | none => simp [hc₁] at hp₁
+    | some cw₁ =>
+      cases hc₂ : codeFor lengths maxBits sym₂ with
+      | none => simp [hc₂] at hp₂
+      | some cw₂ =>
+        simp [hc₁] at hp₁; simp [hc₂] at hp₂
+        subst hp₁; subst hp₂
+        exact fun h => hne (Prod.mk.inj h).1
+  · exact List.nodup_range
+
+/-- Codewords assigned to distinct symbols are not prefixes of each other.
+    This is the membership-based version of `canonical_prefix_free`. -/
+theorem allCodes_prefix_free_of_ne (lengths : List Nat) (maxBits : Nat)
+    (hv : ValidLengths lengths maxBits)
+    (s₁ s₂ : Nat) (cw₁ cw₂ : Codeword)
+    (h₁ : (s₁, cw₁) ∈ allCodes lengths maxBits)
+    (h₂ : (s₂, cw₂) ∈ allCodes lengths maxBits)
+    (hne : s₁ ≠ s₂) :
+    ¬cw₁.IsPrefix cw₂ := by
+  rw [allCodes_mem_iff] at h₁ h₂
+  exact canonical_prefix_free lengths maxBits hv s₁ s₂ cw₁ cw₂ h₁.2 h₂.2 hne
+
+/-- The list of codewords produced by `allCodes` is prefix-free. -/
+theorem allCodeWords_prefix_free (lengths : List Nat) (maxBits : Nat)
+    (hv : ValidLengths lengths maxBits) :
+    IsPrefixFree ((allCodes lengths maxBits).map Prod.snd) := by
+  intro i j hi hj hij hpre
+  simp only [List.length_map] at hi hj
+  rw [List.getElem_map, List.getElem_map] at hpre
+  -- Extract codeFor info from membership in allCodes
+  have hmi := (allCodes_mem_iff ..).mp (List.getElem_mem (h := hi))
+  have hmj := (allCodes_mem_iff ..).mp (List.getElem_mem (h := hj))
+  -- Show the symbols at positions i and j are distinct
+  have hne : (allCodes lengths maxBits)[i].1 ≠ (allCodes lengths maxBits)[j].1 := by
+    intro heq
+    -- Same symbol → same codeword → same entry → same index (by nodup)
+    have hcw_eq : (allCodes lengths maxBits)[i].2 = (allCodes lengths maxBits)[j].2 := by
+      have := hmi.2.symm.trans (heq ▸ hmj.2); exact Option.some.inj this
+    have hentry_eq : (allCodes lengths maxBits)[i] = (allCodes lengths maxBits)[j] :=
+      Prod.ext heq hcw_eq
+    have hpw := List.pairwise_iff_getElem.mp (allCodes_nodup lengths maxBits)
+    have : ¬(i < j) := fun h => hpw i j hi hj h hentry_eq
+    have : ¬(j < i) := fun h => hpw j i hj hi h hentry_eq.symm
+    omega
+  exact canonical_prefix_free lengths maxBits hv _ _ _ _ hmi.2 hmj.2 hne hpre
+
 end Huffman.Spec

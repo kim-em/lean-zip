@@ -3,24 +3,32 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: Complete
+## Status: In progress
 
-## Session type: review
+## Session type: implementation
 
-## Goal: Deep review of Huffman.lean proofs + dead code removal — DONE
+## Goal: Connect Huffman proofs to IsPrefixFree + ValidLengths for fixed codes
 
 ### Deliverables
 
-- [x] Simplify array helper lemma proofs using Lean 4.29 stdlib simp lemmas
-- [x] Extract `nextCodes_eq_ncRec` helper (3 call sites)
-- [x] Extract `codeFor_len_bounds` helper (2 call sites)
-- [x] Deduplicate codeFor_spec destructuring in canonical_prefix_free
-- [x] Fix ARCHITECTURE.md Huffman description (no longer WIP)
-- [x] Slop detection (no issues found in Spec/ files)
-- [x] Codex review (3 suggestions, all applied)
-- [x] Remove dead code: countLengths_zero, array_set_ne_zero
+- [ ] `allCodes_prefix_free`: Prove the codewords from `allCodes` form a
+  prefix-free list when `ValidLengths` holds. Bridges `canonical_prefix_free`
+  (pairwise on symbols) to `IsPrefixFree` (on the `allCodes` output list).
+- [ ] `allCodes_nodup`: Distinct positions in `allCodes` correspond to distinct
+  symbols (needed by `allCodes_prefix_free`).
+- [ ] `fixedLitLengths_valid`: Prove `ValidLengths fixedLitLengths 15` (concrete
+  computation — the fixed literal/length Kraft sum = 2^15 exactly).
+- [ ] `fixedDistLengths_valid`: Prove `ValidLengths fixedDistLengths 5` (concrete
+  computation — 32 codes of length 5).
 
-### Result
+### Approach
 
-Net -88 lines in Huffman.lean (804 lines, was ~890).
-All proofs verified, 0 sorries, all tests pass.
+`allCodes_prefix_free` needs a helper showing that `allCodes` maps distinct
+list positions to distinct symbols. Since `filterMap` preserves order and
+`codeFor` produces at most one codeword per symbol, different positions in
+the output correspond to different symbols. Then `canonical_prefix_free`
+gives the prefix-free property.
+
+For `fixedLitLengths_valid` and `fixedDistLengths_valid`: these are decidable
+propositions on concrete data. Try `decide` first, fall back to `decide_cbv`
+or manual unfolding if `decide` is too slow.
