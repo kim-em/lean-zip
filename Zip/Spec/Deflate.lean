@@ -125,6 +125,80 @@ def resolveLZ77 : List LZ77Symbol → List UInt8 → Option (List UInt8)
         acc[start + (i.val % dist)]!
       resolveLZ77 rest (acc ++ copied)
 
+/-! ## resolveLZ77 properties -/
+
+/-- Empty symbol list returns the accumulator unchanged. -/
+@[simp] theorem resolveLZ77_nil (acc : List UInt8) :
+    resolveLZ77 [] acc = some acc := rfl
+
+/-- End-of-block marker returns the accumulator, ignoring remaining symbols. -/
+@[simp] theorem resolveLZ77_endOfBlock (rest : List LZ77Symbol) (acc : List UInt8) :
+    resolveLZ77 (.endOfBlock :: rest) acc = some acc := rfl
+
+/-- A literal symbol appends the byte and continues resolving. -/
+@[simp] theorem resolveLZ77_literal (b : UInt8) (rest : List LZ77Symbol) (acc : List UInt8) :
+    resolveLZ77 (.literal b :: rest) acc = resolveLZ77 rest (acc ++ [b]) := rfl
+
+/-- A reference with distance 0 fails. -/
+theorem resolveLZ77_reference_dist_zero (len : Nat) (rest : List LZ77Symbol)
+    (acc : List UInt8) :
+    resolveLZ77 (.reference len 0 :: rest) acc = none := by
+  simp [resolveLZ77]
+
+/-- A reference with distance exceeding the accumulator length fails. -/
+theorem resolveLZ77_reference_dist_too_large (len dist : Nat)
+    (rest : List LZ77Symbol) (acc : List UInt8)
+    (h : dist > acc.length) :
+    resolveLZ77 (.reference len dist :: rest) acc = none := by
+  simp [resolveLZ77]
+  intro hd
+  omega
+
+/-- A sequence of literal symbols resolves to the accumulator followed
+    by those bytes. -/
+theorem resolveLZ77_literals (bytes : List UInt8) (acc : List UInt8) :
+    resolveLZ77 (bytes.map .literal ++ [.endOfBlock]) acc =
+      some (acc ++ bytes) := by
+  induction bytes generalizing acc with
+  | nil => simp
+  | cons b bs ih =>
+    simp only [List.map_cons, List.cons_append, resolveLZ77_literal]
+    rw [ih]; congr 1; simp [List.append_assoc]
+
+/-- `resolveLZ77` with only literals (no endOfBlock) continues processing.
+    If the remaining symbols resolve, so does the whole list. -/
+theorem resolveLZ77_literal_cons (b : UInt8) (rest : List LZ77Symbol)
+    (acc output : List UInt8) :
+    resolveLZ77 (.literal b :: rest) acc = some output ↔
+    resolveLZ77 rest (acc ++ [b]) = some output := by
+  simp [resolveLZ77]
+
+/-- `resolveLZ77` starting from empty accumulator with just an endOfBlock
+    returns the empty list. -/
+theorem resolveLZ77_endOfBlock_empty :
+    resolveLZ77 [.endOfBlock] [] = some [] := rfl
+
+/-- If `resolveLZ77` succeeds, the output extends the initial accumulator. -/
+theorem resolveLZ77_extends (syms : List LZ77Symbol) (acc output : List UInt8)
+    (h : resolveLZ77 syms acc = some output) :
+    acc <+: output := by
+  induction syms generalizing acc with
+  | nil => simp [resolveLZ77] at h; exact h ▸ List.prefix_refl _
+  | cons sym rest ih =>
+    cases sym with
+    | literal b =>
+      simp [resolveLZ77] at h
+      have := ih _ h
+      exact List.IsPrefix.trans (List.prefix_append _ _) this
+    | endOfBlock =>
+      simp [resolveLZ77] at h; exact h ▸ List.prefix_refl _
+    | reference len dist =>
+      simp only [resolveLZ77] at h
+      split at h
+      · contradiction
+      · have := ih _ h
+        exact List.IsPrefix.trans (List.prefix_append _ _) this
+
 /-! ## DEFLATE tables (RFC 1951 §3.2.5) -/
 
 /-- Length base values for literal/length codes 257–285. -/
