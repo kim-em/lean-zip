@@ -22,9 +22,11 @@ namespace Deflate.Spec
 /-! ## Bitstream conversion -/
 
 /-- Convert a `ByteArray` to a list of bits, LSB first per byte.
-    This matches the DEFLATE bit packing order (RFC 1951 §3.1.1). -/
+    This matches the DEFLATE bit packing order (RFC 1951 §3.1.1).
+    Uses `data.data.toList` (not `data.toList`) because the latter uses
+    an `@[irreducible]` loop that's hard to reason about. -/
 def bytesToBits (data : ByteArray) : List Bool :=
-  data.toList.flatMap byteToBits
+  data.data.toList.flatMap byteToBits
 where
   byteToBits (b : UInt8) : List Bool :=
     List.ofFn fun (i : Fin 8) => b.toNat.testBit i.val
@@ -52,6 +54,47 @@ def readBitsMSB : Nat → List Bool → Option (Nat × List Bool)
     multiple-of-8 list, so `bits.length % 8` gives the padding needed. -/
 def alignToByte (bits : List Bool) : List Bool :=
   bits.drop (bits.length % 8)
+
+/-! ## Bitstream theorems -/
+
+/-- Each byte converts to exactly 8 bits. -/
+private theorem byteToBits_length (b : UInt8) :
+    (bytesToBits.byteToBits b).length = 8 := by
+  simp [bytesToBits.byteToBits]
+
+/-- `bytesToBits` produces exactly `data.size * 8` bits. -/
+theorem bytesToBits_length (data : ByteArray) :
+    (bytesToBits data).length = data.size * 8 := by
+  simp only [bytesToBits, ByteArray.size]
+  suffices ∀ l : List UInt8,
+      (l.flatMap bytesToBits.byteToBits).length = l.length * 8 by
+    rw [this, Array.length_toList]
+  intro l; induction l with
+  | nil => simp
+  | cons b bs ih =>
+    simp only [List.flatMap_cons, List.length_append, List.length_cons,
+               byteToBits_length, ih]; omega
+
+/-- `readBitsLSB` consumes exactly `n` bits when it succeeds. -/
+theorem readBitsLSB_some_length {n : Nat} {bits : List Bool}
+    {val : Nat} {rest : List Bool}
+    (h : readBitsLSB n bits = some (val, rest)) :
+    rest.length + n = bits.length := by
+  induction n generalizing bits val with
+  | zero =>
+    unfold readBitsLSB at h; simp at h; obtain ⟨-, rfl⟩ := h; simp
+  | succ k ih =>
+    cases bits with
+    | nil => simp [readBitsLSB] at h
+    | cons b bs =>
+      simp only [readBitsLSB] at h
+      cases hk : readBitsLSB k bs with
+      | none => simp [hk] at h
+      | some p =>
+        obtain ⟨v, rem⟩ := p
+        simp [hk] at h
+        obtain ⟨-, rfl⟩ := h
+        have := ih hk; simp only [List.length_cons]; omega
 
 /-! ## LZ77 symbol alphabet -/
 
