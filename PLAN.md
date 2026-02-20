@@ -5,22 +5,46 @@
 
 ## Status: In progress
 
-## Session type: review
+## Session type: implementation
 
-## Focus areas
-
-Deep review of `Zip/Spec/Huffman.lean` (refactoring + proof improvement)
-and secondary review of `Zip/Spec/Deflate.lean` (lean idioms + slop).
+## Goal: Prove the two remaining sorry's in Huffman.lean
 
 ### Deliverables
 
-- [ ] Try simplifying `kraft_ge_count` calc block with omega
-- [ ] Look for cleaner `hpow_pos` proof in `count_le_pow_of_validLengths`
-- [ ] Check for other proof simplifications across Huffman.lean
-- [ ] Slop detection: unused code, verbose comments, dead imports
-- [ ] Check the uncommitted VERIFICATION.md change
-- [ ] Review Deflate.Spec for idiom/style issues
-- [ ] Update CLAUDE.md if needed
+- [ ] Define `ncRec` — simple recursive nextCodes recurrence
+- [ ] Define `kraftSumFrom` — partial Kraft sum from position b
+- [ ] Prove conservation law: `ncRec b * 2^(maxBits-b) + kraftSumFrom b = kraftSumFrom 0`
+- [ ] Prove `kraftSumFrom_mono` (non-negative terms → monotone)
+- [ ] Connect `kraftSumFrom 0` to ValidLengths Kraft inequality
+- [ ] Prove `nextCodes.go` returns `ncRec` values (Array loop invariant)
+- [ ] Prove `countLengths[b]! = foldl count` for valid b
+- [ ] Assemble `nextCodes_plus_count_le`
+- [ ] Prove `canonical_prefix_free` different-length case (if time)
+
+### Proof strategy for nextCodes_plus_count_le
+
+The bound `nc[b] + count[b] ≤ 2^b` follows from a conservation law:
+
+```
+ncRec b * 2^(maxBits-b) + kraftSumFrom b = kraftSumFrom 0
+```
+
+Where `kraftSumFrom b = ∑_{i=b}^{maxBits} blCount[i]! * 2^(maxBits-i)`.
+
+Since all terms are non-negative:
+- `(ncRec b + blCount[b]!) * 2^(maxBits-b) = ncRec b * 2^(maxBits-b) + blCount[b]! * 2^(maxBits-b)`
+- `= kraftSumFrom 0 - kraftSumFrom b + blCount[b]! * 2^(maxBits-b)`
+- `= kraftSumFrom 0 - kraftSumFrom (b+1)`
+- `≤ kraftSumFrom 0`
+- `≤ 2^maxBits` (Kraft inequality)
+
+Then divide both sides by `2^(maxBits-b)`.
+
+### Proof strategy for canonical_prefix_free (different lengths)
+
+Need: `ncRec b ≥ (ncRec a + blCount[a]!) * 2^(b-a)` for `a < b`.
+Then code₂ ≥ nc[len₂] ≥ (code₁ + 1) * 2^(len₂-len₁), contradicting prefix.
+Plus a natToBits prefix → numerical range lemma.
 
 ## Failed approaches (for future reference)
 
