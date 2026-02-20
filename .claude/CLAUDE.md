@@ -270,13 +270,15 @@ Update it during review and reflect sessions.
 
 - **No Mathlib — unavailable tactics and names**: This project uses only
   Lean 4 core + std. The following are NOT available:
-  - Tactics: `set`, `push_neg`, `by_contra`, `field_simp`, `positivity`,
+  - Tactics: `ring`, `set`, `push_neg`, `by_contra`, `field_simp`, `positivity`,
     `polyrith`, `norm_num` (the Mathlib version), `rcases`/`obtain`
   - Names: `le_refl` (use `Nat.le.refl` or `by omega`),
     `Nat.gt_of_not_le` (use `by omega`), `congr_arg` (use `congrArg`)
   - For contradiction proofs, use `by_cases` + `exfalso` instead of `by_contra`
-  When in doubt, prefer `omega`, `simp`, `by_cases`, `exact` over
-  anything that might be Mathlib-only.
+  For algebraic goals (commutativity, associativity, distributivity),
+  use `grind` — it fully subsumes Mathlib's `ring` tactic.
+  When in doubt, prefer `omega`, `simp`, `grind`, `by_cases`, `exact`
+  over anything that might be Mathlib-only.
 - **Build missing API, don't work around it**: If a proof is blocked by
   missing lemmas for standard types (ByteArray, Array, List, UInt32, etc.),
   add the missing lemma to `ZipForStd/` in the appropriate namespace.
