@@ -434,6 +434,15 @@ private theorem nextCodes_go_eq_ncRec (blCount : Array Nat) (maxBits : Nat)
     exact nextCodes_go_eq_ncRec blCount maxBits arr' (bits + 1) code'
       hsize' (by omega) (by omega) hcode' hprev' b hb hbM
 
+/-- The nextCodes array stores ncRec values at each position. -/
+private theorem nextCodes_eq_ncRec (blCount : Array Nat) (maxBits b : Nat)
+    (hb : b ≠ 0) (hbM : b ≤ maxBits) :
+    (nextCodes blCount maxBits)[b]! = ncRec blCount b := by
+  simp only [nextCodes]
+  exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
+    (Array.size_replicate ..) (by omega) (by omega) (by simp [ncRec])
+    (fun b' hb' hlt => by omega) b (by omega) hbM
+
 /-- Incrementing one count at index `l` adds `2^(maxBits-l)` to the Kraft sum
     from positions ≤ l, and doesn't affect positions > l. -/
 private theorem kraftSumFrom_incr (acc : Array Nat) (maxBits l b : Nat)
@@ -592,11 +601,7 @@ private theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 ≤ 2 ^ b := by
   let blCount := countLengths lengths maxBits
   -- Step 1: (nextCodes blCount maxBits)[b]! = ncRec blCount b
-  have hNC : (nextCodes blCount maxBits)[b]! = ncRec blCount b := by
-    simp only [nextCodes]
-    exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
-      (Array.size_replicate ..) (by omega) (by omega) (by simp [ncRec])
-      (fun b' hb' hlt => by omega) b (by omega) hb'
+  have hNC := nextCodes_eq_ncRec blCount maxBits b hb hb'
   -- Step 2: blCount[b]! = count of b in lengths
   have hCL : blCount[b]! =
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 :=
@@ -660,6 +665,11 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
         simp only [List.getElem_cons_succ] at hlen₁; exact hlen₁
       exact ih n (s₂ - 1) (by omega) hlen₁' (by omega) (by omega) _
 
+/-- Extract `len ≠ 0 ∧ len ≤ maxBits` from the codeFor condition. -/
+private theorem codeFor_len_bounds {len maxBits : Nat}
+    (h : ¬(len == 0 || decide (len > maxBits)) = true) : len ≠ 0 ∧ len ≤ maxBits := by
+  simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h; omega
+
 /-- The code value assigned by the canonical construction fits in `len` bits.
     This follows from the Kraft inequality: the nextCodes construction ensures
     nc[len] + count_at_len ≤ 2^len, and offset < count_at_len. -/
@@ -671,13 +681,7 @@ private theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
       List.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc)
         0 (List.take sym lengths) <
     2 ^ lengths[sym] := by
-  have hlen0 : lengths[sym] ≠ 0 := by
-    intro h; have : (lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true := by simp [h]
-    exact hlen this
-  have hlenM : lengths[sym] ≤ maxBits := by
-    by_cases h : lengths[sym] > maxBits
-    · exfalso; exact hlen (by simp [h])
-    · omega
+  have ⟨hlen0, hlenM⟩ := codeFor_len_bounds hlen
   -- Key bound: nc[len] + totalCount ≤ 2^len
   have hncBound := nextCodes_plus_count_le lengths maxBits lengths[sym] hv hlen0 hlenM
   -- Offset < totalCount: reuse offset_of_lt with s₂ = lengths.length
@@ -778,9 +782,11 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     s₁ ≠ s₂ →
     ¬cw₁.IsPrefix cw₂ := by
   intro h₁ h₂ hne hpre
-  -- Extract structural info
-  have ⟨_, _, hcw₁⟩ := codeFor_spec h₁
-  have ⟨_, _, hcw₂⟩ := codeFor_spec h₂
+  -- Extract structural info (all fields at once)
+  have ⟨hs₁, hlen₁_cond, hcw₁⟩ := codeFor_spec h₁
+  have ⟨hs₂, hlen₂_cond, hcw₂⟩ := codeFor_spec h₂
+  have ⟨hlen₁_ne, hlen₁_le⟩ := codeFor_len_bounds hlen₁_cond
+  have ⟨_, hlen₂_le⟩ := codeFor_len_bounds hlen₂_cond
   have hlen₁ : cw₁.length = lengths[s₁] := by rw [hcw₁, natToBits_length]
   have hlen₂ : cw₂.length = lengths[s₂] := by rw [hcw₂, natToBits_length]
   -- Prefix implies cw₁.length ≤ cw₂.length
@@ -793,21 +799,7 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     subst this; simp at ht; subst ht
     exact hne (codeFor_injective lengths maxBits hv s₁ s₂ cw₁ h₁ h₂)
   · -- Different lengths: canonical codes at different lengths aren't prefixes.
-    -- lengths[s₁] < lengths[s₂] since prefix is proper (shorter, not equal)
     have hlt_len : lengths[s₁] < lengths[s₂] := by omega
-    -- Re-extract codeFor conditions with names
-    have ⟨hs₁, hlen₁_cond, _⟩ := codeFor_spec h₁
-    have ⟨hs₂, hlen₂_cond, _⟩ := codeFor_spec h₂
-    have hlen₁_ne : lengths[s₁] ≠ 0 := by
-      intro h; exact hlen₁_cond (by simp [h])
-    have hlen₁_le : lengths[s₁] ≤ maxBits := by
-      by_cases h : lengths[s₁] > maxBits
-      · exfalso; exact hlen₁_cond (by simp [h])
-      · omega
-    have hlen₂_le : lengths[s₂] ≤ maxBits := by
-      by_cases h : lengths[s₂] > maxBits
-      · exfalso; exact hlen₂_cond (by simp [h])
-      · omega
     -- Code values fit in their bit lengths
     have hb₁ := code_value_bound lengths maxBits s₁ hv hs₁ hlen₁_cond
     have hb₂ := code_value_bound lengths maxBits s₂ hv hs₂ hlen₂_cond
@@ -817,16 +809,8 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     have hupper := natToBits_prefix_lt _ _ _ _ (by omega) hb₁ hb₂ hpre_cw
     -- Connect nextCodes array values to ncRec
     let blCount := countLengths lengths maxBits
-    have hnc₁ : (nextCodes blCount maxBits)[lengths[s₁]]! = ncRec blCount lengths[s₁] := by
-      simp only [nextCodes]
-      exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
-        (Array.size_replicate ..) (by omega) (by omega) (by simp [ncRec])
-        (fun b' hb' hlt => by omega) _ (by omega) hlen₁_le
-    have hnc₂ : (nextCodes blCount maxBits)[lengths[s₂]]! = ncRec blCount lengths[s₂] := by
-      simp only [nextCodes]
-      exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
-        (Array.size_replicate ..) (by omega) (by omega) (by simp [ncRec])
-        (fun b' hb' hlt => by omega) _ (by omega) hlen₂_le
+    have hnc₁ := nextCodes_eq_ncRec blCount maxBits _ hlen₁_ne hlen₁_le
+    have hnc₂ := nextCodes_eq_ncRec blCount maxBits _ (by omega) hlen₂_le
     -- offset₁ < total count at length len₁
     have hoff_lt : List.foldl (fun acc l => if (l == lengths[s₁]) = true then acc + 1 else acc)
         0 (List.take s₁ lengths) < blCount[lengths[s₁]]! := by
