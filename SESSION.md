@@ -7,10 +7,10 @@
 
 ## Incomplete proofs
 
-- `Zip/Spec/Huffman.lean:230` — `nextCodes_plus_count_le`: For valid lengths,
+- `Zip/Spec/Huffman.lean:212` — `nextCodes_plus_count_le`: For valid lengths,
   `nextCodes[b]! + foldl_count_b ≤ 2^b`. This is the Kraft-based invariant
   of the canonical code construction.
-- `Zip/Spec/Huffman.lean:419` — `canonical_prefix_free` different-length case:
+- `Zip/Spec/Huffman.lean:380` — `canonical_prefix_free` different-length case:
   when `len₁ < len₂`, the shorter code can't be a prefix of the longer one.
 
 Both reduce to analyzing the `nextCodes.go` loop.
@@ -25,7 +25,7 @@ Both reduce to analyzing the `nextCodes.go` loop.
 
 ## Known good commit
 
-`7947885` — `lake build && lake exe test` passes
+`d30f9b3` — `lake build && lake exe test` passes
 
 ## Next action
 
@@ -54,9 +54,22 @@ For `canonical_prefix_free` different-length case, additionally need:
 - `ncSimple b ≥ (ncSimple a + blCount[a]!) * 2^(b-a)` for `a < b`
   (follows from the recurrence by induction)
 
+## Dead code inventory (review finding)
+
+Unused but justified definitions (all needed for future Phase 3 proofs):
+- `IsPrefixFree` (Huffman.lean:133) — aspirational, for stating code table prefix-freeness
+- `readBitsMSB` (Deflate.lean:43) — deliberately kept per PROGRESS.md
+- `decode_deterministic` (Huffman.lean:333, Deflate.lean:310) — spec theorems
+- `finalize` (Crc32.lean:44) — needed for `checksum` equivalence proof
+- `decodeBytes` (Deflate.lean:299) — entry point for inflate correctness theorem
+
 ## Notes
 
 - `by_contra` and `push_neg` are NOT available without Mathlib
 - `set` tactic is NOT available without Mathlib — use `let` or work inline
 - `le_refl` is not in scope — use `(by omega)` or `Nat.le.refl`
+- `List.filter_filter` is available and simplifies nested filter proofs
+- `List.eq_nil_of_length_eq_zero` is available for `l.length = 0 → l = []`
+- `Nat.pow_pos` is available for `0 < b → 0 < b ^ n`
+- `Nat.le_of_mul_le_mul_right` avoids mul_comm rewrites vs `_left` variant
 - Toolchain v4.29.0-rc1 is current

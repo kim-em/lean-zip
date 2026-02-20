@@ -5,33 +5,22 @@
 
 ## Status: In progress
 
-## Session type: implementation
+## Session type: review
 
-## Objective
+## Focus areas
 
-Prove `nextCodes_plus_count_le` — the last sorry blocking `codeFor_injective`.
+Deep review of `Zip/Spec/Huffman.lean` (refactoring + proof improvement)
+and secondary review of `Zip/Spec/Deflate.lean` (lean idioms + slop).
 
-## Proof strategy for nextCodes_plus_count_le
+### Deliverables
 
-The key insight: the recurrence `S(b) = 2*S(b-1) + blCount[b]` with
-`S(b) = nc(b) + blCount[b]` telescopes when multiplied by `2^(maxBits-b)`:
-
-```
-S(b) * 2^(maxBits-b) + kraftTail(b+1) = S(b-1) * 2^(maxBits-b+1) + kraftTail(b)
-```
-
-So by induction: `S(b) * 2^(maxBits-b) + kraftTail(b+1) ≤ 2^maxBits`.
-
-### Implementation steps
-
-- [ ] Define `kraftTail blCount maxBits b` = remaining Kraft sum from b
-- [ ] Prove telescoping: `S * 2^k + tail = prev_S * 2^(k+1) + prev_tail`
-- [ ] Prove base case: `kraftTail 1 ≤ 2^maxBits` (connect to ValidLengths)
-- [ ] Connect filter-based Kraft sum to blCount-based sum
-- [ ] Prove `countLengths[b]!` = foldl count for valid b
-- [ ] Prove `nextCodes[b]!` satisfies the recurrence
-- [ ] Assemble `nextCodes_plus_count_le`
-- [ ] Prove `canonical_prefix_free` different-length case (may need nc spacing)
+- [ ] Try simplifying `kraft_ge_count` calc block with omega
+- [ ] Look for cleaner `hpow_pos` proof in `count_le_pow_of_validLengths`
+- [ ] Check for other proof simplifications across Huffman.lean
+- [ ] Slop detection: unused code, verbose comments, dead imports
+- [ ] Check the uncommitted VERIFICATION.md change
+- [ ] Review Deflate.Spec for idiom/style issues
+- [ ] Update CLAUDE.md if needed
 
 ## Failed approaches (for future reference)
 

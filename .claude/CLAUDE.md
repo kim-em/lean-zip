@@ -309,6 +309,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 2 (Huffman: `code_value_bound`, `canonical_prefix_free` different-length case)
-- **Last session**: 2026-02-19 (implementation: codeFor_injective + canonical_prefix_free)
-- **Last review**: 2026-02-19 (full Phase 2 review)
+- **Sorry count**: 2 (Huffman: `nextCodes_plus_count_le`, `canonical_prefix_free` different-length case)
+- **Last session**: 2026-02-20 (review: Huffman proof refactoring + documentation)
+- **Last review**: 2026-02-20 (Huffman proofs, Deflate spec, slop detection)
