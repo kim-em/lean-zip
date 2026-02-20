@@ -162,6 +162,36 @@ def decode (table : List (Codeword × α)) (bits : Codeword) :
     if isPrefixOf cw bits then some (sym, bits.drop cw.length)
     else decode rest bits
 
+/-! ## Prefix comparison lemmas -/
+
+/-- Two prefixes of the same list are comparable: one is a prefix of the other. -/
+private theorem IsPrefix_dichotomy {a b c : List Bool}
+    (ha : a <+: b ++ c) : a <+: b ∨ b <+: a := by
+  induction a generalizing b with
+  | nil => left; exact List.nil_prefix
+  | cons x xs ih =>
+    cases b with
+    | nil => right; exact List.nil_prefix
+    | cons y ys =>
+      obtain ⟨t, ht⟩ := ha
+      have hxy : x = y := by simp [List.cons_append] at ht; exact ht.1
+      have hrest : xs <+: ys ++ c :=
+        ⟨t, by simp [List.cons_append] at ht; exact ht.2⟩
+      cases ih hrest with
+      | inl h =>
+        left; obtain ⟨t', ht'⟩ := h
+        exact ⟨t', by rw [hxy, List.cons_append, ht']⟩
+      | inr h =>
+        right; obtain ⟨t', ht'⟩ := h
+        exact ⟨t', by rw [← hxy, List.cons_append, ht']⟩
+
+/-- `isPrefixOf` returns true for a list prepended to any suffix. -/
+private theorem isPrefixOf_self_append (cw rest : List Bool) :
+    isPrefixOf cw (cw ++ rest) = true := by
+  induction cw with
+  | nil => simp [isPrefixOf]
+  | cons x xs ih => simp [isPrefixOf, ih]
+
 /-! ## Prefix-free property -/
 
 /-- A list of codewords is prefix-free: no codeword is a prefix of
@@ -800,6 +830,46 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
       Nat.mul_le_mul_right _ (by omega)
     have hshift := ncRec_shift blCount lengths[s₁] lengths[s₂] hlt_len
     omega
+
+/-! ## Decode correctness -/
+
+/-- `decode` on a prefix-free code table correctly finds the matching entry.
+    If `(cw, sym)` is in the table and the codewords are pairwise
+    non-prefix, then decoding `cw ++ rest` returns `(sym, rest)`. -/
+theorem decode_prefix_free {α : Type} (table : List (Codeword × α))
+    (cw : Codeword) (sym : α) (rest : Codeword)
+    (hmem : (cw, sym) ∈ table)
+    (hpf : ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ table → (cw₂, s₂) ∈ table →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂) :
+    decode table (cw ++ rest) = some (sym, rest) := by
+  induction table with
+  | nil => simp at hmem
+  | cons entry entries ih =>
+    obtain ⟨cw', sym'⟩ := entry
+    simp only [decode]
+    cases hmem with
+    | head =>
+      simp [isPrefixOf_self_append, List.drop_append_of_le_length (Nat.le_refl _)]
+    | tail _ htail =>
+      by_cases heq : (cw', sym') = (cw, sym)
+      · obtain ⟨rfl, rfl⟩ := Prod.mk.inj heq
+        simp [isPrefixOf_self_append, List.drop_append_of_le_length (Nat.le_refl _)]
+      · have hno : isPrefixOf cw' (cw ++ rest) = false := by
+          cases hp : isPrefixOf cw' (cw ++ rest) with
+          | false => rfl
+          | true =>
+            exfalso; rw [isPrefixOf_iff] at hp
+            cases IsPrefix_dichotomy hp with
+            | inl h =>
+              exact hpf cw' sym' cw sym (List.mem_cons_self ..)
+                (List.mem_cons_of_mem _ htail) heq h
+            | inr h =>
+              exact hpf cw sym cw' sym' (List.mem_cons_of_mem _ htail)
+                (List.mem_cons_self ..) (Ne.symm heq) h
+        rw [if_neg (by simp [hno])]
+        exact ih htail (fun cw₁ s₁ cw₂ s₂ h₁ h₂ hne =>
+          hpf cw₁ s₁ cw₂ s₂ (List.mem_cons_of_mem _ h₁)
+            (List.mem_cons_of_mem _ h₂) hne)
 
 /-! ## Connecting canonical_prefix_free to allCodes -/
 
