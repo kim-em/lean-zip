@@ -3,58 +3,77 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 3
+## Sorry count: 4
 
 All in `Zip/Spec/InflateCorrect.lean`:
-- `decodeBits_eq_spec_decode` (line 353): tree-table correspondence
-  (pure tree decode ≡ spec's linear-search decode)
-- `inflate_correct` (line 405): main correctness theorem
-- `inflate_correct'` (line 415): corollary for position-0 inflate
+- `fromLengths_hasLeaf` (line 565): tree has leaf for every allCodes entry
+- `fromLengths_leaf_spec` (line 576): every tree leaf is in allCodes
+- `inflate_correct` (line 682): main correctness theorem
+- `inflate_correct'` (line 694): corollary for position-0 inflate
 
 ## Known good commit
 
-`4b4209e` — `lake build && lake exe test` passes
+`153cb27` — `lake build && lake exe test` passes
 
-## Completed this session (review)
+## Completed this session (implementation)
 
-### Proof simplifications (-33 lines)
+### decodeBits_eq_spec_decode proved (+295 lines)
 
-- `ZipForStd/Nat.lean`: 20-line induction → 3-line proof via
-  `Nat.two_pow_add_eq_or_of_lt` (stdlib)
-- `InflateCorrect.lean`: used `UInt32.toNat_one` (stdlib) instead of
-  `by decide`
-- `InflateCorrect.lean`: simplified `decode_go_decodeBits` bit-case
-  derivations to `cases b <;> simp_all`
+Decomposed the tree-table correspondence theorem into layers using
+`TreeHasLeaf` inductive predicate:
 
-### Stdlib discoveries
+**Layer 1: Structural correspondence (decodeBits ↔ TreeHasLeaf)**
+- `TreeHasLeaf` predicate: tree has leaf with symbol at path
+- `decodeBits_of_hasLeaf`: TreeHasLeaf → decodeBits works
+- `hasLeaf_of_decodeBits`: decodeBits works → TreeHasLeaf exists
 
-- `Nat.two_pow_add_eq_or_of_lt`: relates addition to OR for disjoint bits
-- `Nat.shiftLeft_add_eq_or_of_lt`: shift variant of the above
-- `Nat.testBit_two_pow`: `testBit (2^n) m = decide (n = m)`
-- `UInt32.toNat_one` exists but is NOT `@[simp]`
+**Layer 2: insert creates correct tree structure**
+- `uint32_testBit`: UInt32 bit extraction matches Nat.testBit
+- `insert_bit_zero` / `insert_bit_one`: bridge to insert's comparison
+- `NoLeafOnPath`: no leaf collision predicate
+- `insert_go_hasLeaf`: insert.go places leaf at natToBits path
+- `insert_go_preserves`: insert.go preserves existing non-prefix leaves
+
+**Layer 3: Wiring**
+- `decode_some_mem`: spec decode result → table membership
+- `to_codes` / `to_table`: specTable ↔ specCodes membership
+- Prefix-free property of specTable derived from allCodes_prefix_free_of_ne
+- `decodeBits_eq_spec_decode` proved from all components
+
+**Theorem signature changes:**
+- Added `ValidLengths` precondition to `decodeBits_eq_spec_decode`
+  and `huffTree_decode_correct` (required for prefix-freeness)
+
+### Remaining sorry's (fromLengths loop analysis)
+
+The two remaining sorry's (`fromLengths_hasLeaf`, `fromLengths_leaf_spec`)
+require reasoning about the `for` loop in `fromLengths`:
+- Track that `nextCode[len]!` at symbol `i` equals `nc[len] + offset_i`
+- Show that `insert` calls create/only-create the right leaves
+- May need a loop invariant relating mutable state to functional `codeFor`
 
 ## Next action
 
 Priority order for next implementation session:
-1. Prove `decodeBits_eq_spec_decode` — the tree-table correspondence.
-   This requires showing that `fromLengths` builds a tree where each
-   leaf's path matches its canonical codeword from `allCodes`.
-   Approach: define a "tree contains codeword→symbol mapping" predicate,
-   prove `insert` maintains it, prove `fromLengths` establishes it,
-   then connect to `Huffman.Spec.decode`.
-2. Prove `inflate_correct'` from `inflate_correct` (should be straightforward)
-3. Make progress on `inflate_correct` (the main theorem)
+1. Prove `fromLengths_hasLeaf` — show the for loop builds correct leaves.
+   Approach: define a functional version of the loop, prove equivalence
+   with `fromLengths`, then show the functional version establishes
+   `TreeHasLeaf` for each `codeFor` entry.
+2. Prove `fromLengths_leaf_spec` — show all tree leaves are from allCodes.
+3. Prove `inflate_correct'` from `inflate_correct` (straightforward)
+4. Make progress on `inflate_correct` (the main theorem)
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- `decodeBits_eq_spec_decode` is the hardest remaining sorry — it
-  requires connecting the imperative `fromLengths` (with mutable arrays)
-  to the functional `allCodes` (with `codeFor`). Both implement RFC 1951
-  §3.2.2 canonical Huffman construction but in very different styles.
-- Key available lemmas for future proofs:
-  - `readBit_toBits`, `readBit_wf` (single bit correspondence)
-  - `readBits_toBits` (multi-bit correspondence, n ≤ 32)
-  - `decode_go_decodeBits` (tree decode BitReader→bits)
-  - `Nat.or_two_pow_eq_add` (non-overlapping OR = ADD)
-  - `Nat.two_pow_add_eq_or_of_lt` (stdlib: disjoint bits OR = ADD)
+- Sorry count increased 3 → 4 because `decodeBits_eq_spec_decode` was
+  decomposed into two focused helper sorry's. The theorem itself is proved.
+- `fromLengths_hasLeaf` needs `ValidLengths` to ensure no collisions
+  during insertion (when a `.leaf` already exists at an intermediate
+  position, `insert.go` skips the insertion)
+- Key available lemmas for future `fromLengths` proofs:
+  - `insert_go_hasLeaf`: insert places leaf at natToBits path
+  - `insert_go_preserves`: insert preserves leaves at non-prefix paths
+  - `nextCodes_eq_ncRec`: nextCodes array matches ncRec recurrence
+  - `countLengths_eq`: countLengths matches counting foldl
+  - `ncRec_bound`: ncRec b + blCount[b]! ≤ 2^b (Kraft)

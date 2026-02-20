@@ -2,6 +2,36 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Implementation — prove decodeBits_eq_spec_decode
+
+**Type**: implementation
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 3 → 4 (decomposed 1 sorry into 2 focused sorry's)
+**Commit**: `153cb27`
+
+Proved `decodeBits_eq_spec_decode` — the tree-table correspondence theorem
+showing that pure tree-based Huffman decode agrees with the spec's
+linear-search table decode. The proof is decomposed into layers via a
+`TreeHasLeaf` inductive predicate.
+
+**New definitions and lemmas** (+295 lines):
+- `TreeHasLeaf`: inductive predicate relating tree paths to symbols
+- `decodeBits_of_hasLeaf` / `hasLeaf_of_decodeBits`: structural correspondence
+- `NoLeafOnPath`: no-collision predicate for insertion paths
+- `insert_go_hasLeaf`: insert places leaf at correct natToBits path
+- `insert_go_preserves`: insert preserves existing non-prefix leaves
+- `decode_some_mem`: spec decode result implies table membership
+- `decodeBits_eq_spec_decode`: fully proved from components
+
+**Theorem signature changes**:
+- Added `ValidLengths` precondition to `decodeBits_eq_spec_decode`
+  and `huffTree_decode_correct` (required for prefix-freeness)
+
+**Remaining sorry's** (2 new, 2 pre-existing):
+- `fromLengths_hasLeaf`: tree has leaf for every allCodes entry (needs loop analysis)
+- `fromLengths_leaf_spec`: every tree leaf corresponds to allCodes entry
+- `inflate_correct`, `inflate_correct'`: main theorem and corollary
+
 ## 2026-02-20: Review — proof simplification using stdlib lemmas
 
 **Type**: review
