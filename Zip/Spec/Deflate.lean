@@ -336,4 +336,16 @@ theorem fixedDistLengths_valid : Huffman.Spec.ValidLengths fixedDistLengths 15 :
     omega
   · decide
 
+/-- The fixed literal/length Huffman codes are prefix-free. -/
+theorem fixedLitCodes_prefix_free :
+    Huffman.Spec.IsPrefixFree
+      ((Huffman.Spec.allCodes fixedLitLengths 15).map Prod.snd) :=
+  Huffman.Spec.allCodeWords_prefix_free fixedLitLengths 15 fixedLitLengths_valid
+
+/-- The fixed distance Huffman codes are prefix-free. -/
+theorem fixedDistCodes_prefix_free :
+    Huffman.Spec.IsPrefixFree
+      ((Huffman.Spec.allCodes fixedDistLengths 15).map Prod.snd) :=
+  Huffman.Spec.allCodeWords_prefix_free fixedDistLengths 15 fixedDistLengths_valid
+
 end Deflate.Spec
