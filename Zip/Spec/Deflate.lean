@@ -178,6 +178,18 @@ theorem resolveLZ77_literal_cons (b : UInt8) (rest : List LZ77Symbol)
 theorem resolveLZ77_endOfBlock_empty :
     resolveLZ77 [.endOfBlock] [] = some [] := rfl
 
+/-- A valid back-reference unfolds to copying and continuing resolution. -/
+theorem resolveLZ77_reference_valid (len dist : Nat) (rest : List LZ77Symbol)
+    (acc : List UInt8) (hd : dist ≠ 0) (hdist : dist ≤ acc.length) :
+    resolveLZ77 (.reference len dist :: rest) acc =
+      let start := acc.length - dist
+      let copied := List.ofFn fun (i : Fin len) =>
+        acc[start + (i.val % dist)]!
+      resolveLZ77 rest (acc ++ copied) := by
+  have h1 : ¬(dist = 0) := hd
+  have h2 : ¬(acc.length < dist) := by omega
+  simp [resolveLZ77, h1, h2]
+
 /-- If `resolveLZ77` succeeds, the output extends the initial accumulator. -/
 theorem resolveLZ77_extends (syms : List LZ77Symbol) (acc output : List UInt8)
     (h : resolveLZ77 syms acc = some output) :
