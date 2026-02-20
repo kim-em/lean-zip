@@ -295,12 +295,6 @@ private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
 
 /-! ## Connecting kraftSumFrom to ValidLengths -/
 
-/-- `Array.set!` at a nonzero index doesn't affect index 0. -/
-private theorem array_set_ne_zero (arr : Array Nat) (i v : Nat) (hi : i ≠ 0) :
-    (arr.set! i v)[0]! = arr[0]! := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hi]
-
 /-- `Array.set!` at a different index doesn't affect the target index. -/
 private theorem array_set_ne (arr : Array Nat) (i j v : Nat) (hij : i ≠ j) :
     (arr.set! i v)[j]! = arr[j]! := by
@@ -317,27 +311,6 @@ private theorem array_set_self (arr : Array Nat) (i v : Nat) (hi : i < arr.size)
 private theorem array_set_size (arr : Array Nat) (i v : Nat) :
     (arr.set! i v).size = arr.size := by
   simp [Array.set!_eq_setIfInBounds]
-
-/-- `countLengths` never modifies index 0. -/
-private theorem countLengths_zero (lengths : List Nat) (maxBits : Nat) :
-    (countLengths lengths maxBits)[0]! = 0 := by
-  simp only [countLengths]
-  suffices ∀ (acc : Array Nat), acc[0]! = 0 →
-      (lengths.foldl (fun acc len =>
-        if len == 0 || len > maxBits then acc
-        else acc.set! len (acc[len]! + 1)) acc)[0]! = 0 from
-    this _ (by simp)
-  intro acc hacc
-  induction lengths generalizing acc with
-  | nil => exact hacc
-  | cons l ls ih =>
-    simp only [List.foldl_cons]
-    split
-    · exact ih acc hacc
-    · rename_i h
-      apply ih
-      have hl : l ≠ 0 := by simp only [Bool.or_eq_true, beq_iff_eq] at h; omega
-      rw [array_set_ne_zero acc l _ hl]; exact hacc
 
 /-- `countLengths[b]!` counts elements of `lengths` equal to `b`, for valid `b`. -/
 private theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
@@ -786,7 +759,7 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
   have ⟨hs₁, hlen₁_cond, hcw₁⟩ := codeFor_spec h₁
   have ⟨hs₂, hlen₂_cond, hcw₂⟩ := codeFor_spec h₂
   have ⟨hlen₁_ne, hlen₁_le⟩ := codeFor_len_bounds hlen₁_cond
-  have ⟨_, hlen₂_le⟩ := codeFor_len_bounds hlen₂_cond
+  have ⟨hlen₂_ne, hlen₂_le⟩ := codeFor_len_bounds hlen₂_cond
   have hlen₁ : cw₁.length = lengths[s₁] := by rw [hcw₁, natToBits_length]
   have hlen₂ : cw₂.length = lengths[s₂] := by rw [hcw₂, natToBits_length]
   -- Prefix implies cw₁.length ≤ cw₂.length
@@ -804,13 +777,11 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     have hb₁ := code_value_bound lengths maxBits s₁ hv hs₁ hlen₁_cond
     have hb₂ := code_value_bound lengths maxBits s₂ hv hs₂ hlen₂_cond
     -- Prefix in natToBits form gives numerical upper bound
-    have hpre_cw : cw₁.IsPrefix cw₂ := ⟨t, ht⟩
-    rw [hcw₁, hcw₂] at hpre_cw
-    have hupper := natToBits_prefix_lt _ _ _ _ (by omega) hb₁ hb₂ hpre_cw
+    have hupper := natToBits_prefix_lt _ _ _ _ (by omega) hb₁ hb₂ (hcw₁ ▸ hcw₂ ▸ ⟨t, ht⟩)
     -- Connect nextCodes array values to ncRec
     let blCount := countLengths lengths maxBits
     have hnc₁ := nextCodes_eq_ncRec blCount maxBits _ hlen₁_ne hlen₁_le
-    have hnc₂ := nextCodes_eq_ncRec blCount maxBits _ (by omega) hlen₂_le
+    have hnc₂ := nextCodes_eq_ncRec blCount maxBits _ hlen₂_ne hlen₂_le
     -- offset₁ < total count at length len₁
     have hoff_lt : List.foldl (fun acc l => if (l == lengths[s₁]) = true then acc + 1 else acc)
         0 (List.take s₁ lengths) < blCount[lengths[s₁]]! := by
