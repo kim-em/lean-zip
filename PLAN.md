@@ -3,28 +3,52 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: Completed
+## Status: In progress
 
-## Session type: review
+## Session type: implementation
 
-## Goal: Deep review of recent proofs (InflateCorrect.lean, ZipForStd/Nat.lean)
+## Goal: Prove `decodeBits_eq_spec_decode` — tree-table correspondence
 
-### Steps
+The theorem says: for a tree built by `fromLengths`, the pure tree decode
+`decodeBits` agrees with the spec's linear-search `Huffman.Spec.decode`.
 
-- [x] Deep review InflateCorrect.lean proofs — simplified decode_go_decodeBits branches, used UInt32.toNat_one
-- [x] Review ZipForStd/Nat.lean — replaced induction with Nat.two_pow_add_eq_or_of_lt
-- [x] Quick idioms scan across Spec/ files — no opportunities found
-- [x] Build + test — passes
-- [x] /second-opinion on changes — no issues
-- [x] Document in PROGRESS.md and SESSION.md
+### Proof strategy
 
-### Next session priorities
+Decompose via an inductive predicate `TreeHasLeaf`:
 
-1. **Prove `decodeBits_eq_spec_decode`** — show that the pure tree decode
-   agrees with the spec's linear-search decode. Approach:
-   - Define "tree maps codeword to symbol" predicate
-   - Prove `insert` maintains it
-   - Prove `fromLengths` establishes it for all canonical codes
-   - Connect to `Huffman.Spec.decode`'s linear search
-2. Prove `inflate_correct'` from `inflate_correct`
-3. Work on `inflate_correct` (the main theorem)
+```
+inductive TreeHasLeaf : HuffTree → List Bool → UInt16 → Prop
+  | leaf : TreeHasLeaf (.leaf s) [] s
+  | left : TreeHasLeaf z cw s → TreeHasLeaf (.node z o) (false :: cw) s
+  | right : TreeHasLeaf o cw s → TreeHasLeaf (.node z o) (true :: cw) s
+```
+
+#### Layer 1: Structural correspondence (decodeBits ↔ TreeHasLeaf)
+
+- [x] `decodeBits_of_hasLeaf`: TreeHasLeaf tree cw sym → decodeBits tree (cw ++ rest) = some (sym, rest)
+- [x] `hasLeaf_of_decodeBits`: decodeBits tree bits = some (sym, rest) → ∃ cw, TreeHasLeaf tree cw sym ∧ bits = cw ++ rest
+
+#### Layer 2: insert creates the right tree structure
+
+- [ ] `insertBits` definition + `insertBits_eq_natToBits` bridge
+- [ ] `insert_go_hasLeaf`: insert.go creates a leaf at `insertBits code len`
+- [ ] `insert_go_preserves`: insert.go preserves existing leaves at different paths
+
+#### Layer 3: fromLengths loop → TreeHasLeaf for all canonical codes
+
+- [ ] fromLengths loop invariant: tree has leaves for all inserted symbols
+- [ ] Connect nextCode tracking to codeFor's offset computation
+
+#### Layer 4: Wire up final theorem
+
+- [ ] Forward: decodeBits some → decode specTable some (via TreeHasLeaf + decode_prefix_free)
+- [ ] Backward: decode specTable some → decodeBits some (via fromLengths_hasLeaf)
+- [ ] None case: decodeBits none ↔ decode specTable none
+
+### Notes
+
+- Layer 1 is clean structural induction
+- Layer 2 requires handling the `.leaf` collision case (precondition: no collision)
+- Layer 3 is the hardest part — connecting imperative `nextCode` to functional `codeFor`
+- `insertBits code len` and `natToBits code.toNat len` differ only in UInt32 vs Nat
+  operations; bridge lemma needed

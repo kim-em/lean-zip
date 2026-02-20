@@ -337,18 +337,304 @@ private theorem decode_go_decodeBits (tree : Zip.Native.HuffTree)
           rw [hbr_bits, hb]; simp only [decodeBits]
           rw [← hbr1_bits]; exact hspec
 
+/-! ### Tree-table correspondence via TreeHasLeaf
+
+The proof that `decodeBits` agrees with `Huffman.Spec.decode` is structured
+in layers:
+1. **TreeHasLeaf**: inductive predicate relating tree paths to symbols
+2. **decodeBits ↔ TreeHasLeaf**: structural correspondence
+3. **insert creates correct paths**: `insert.go` places leaves correctly
+4. **fromLengths establishes all paths**: the construction loop builds
+   leaves for all canonical codes
+5. **Final connection**: via `decode_prefix_free` from Huffman.Spec -/
+
+/-- Predicate: tree `t` has a leaf with symbol `sym` at path `cw`,
+    where `false` means "go left (zero)" and `true` means "go right (one)". -/
+inductive TreeHasLeaf : Zip.Native.HuffTree → List Bool → UInt16 → Prop
+  | leaf : TreeHasLeaf (.leaf s) [] s
+  | left : TreeHasLeaf z cw s → TreeHasLeaf (.node z o) (false :: cw) s
+  | right : TreeHasLeaf o cw s → TreeHasLeaf (.node z o) (true :: cw) s
+
+/-- If the tree has a leaf at path `cw`, then `decodeBits` on `cw ++ rest`
+    returns `(sym, rest)`. -/
+private theorem decodeBits_of_hasLeaf (tree : Zip.Native.HuffTree) (cw : List Bool)
+    (sym : UInt16) (rest : List Bool) (h : TreeHasLeaf tree cw sym) :
+    decodeBits tree (cw ++ rest) = some (sym, rest) := by
+  induction h with
+  | leaf => simp [decodeBits]
+  | left _ ih => simp [decodeBits, ih]
+  | right _ ih => simp [decodeBits, ih]
+
+/-- If `decodeBits` returns `(sym, rest)`, then the tree has a leaf at some
+    path `cw` with `bits = cw ++ rest`. -/
+private theorem hasLeaf_of_decodeBits (tree : Zip.Native.HuffTree) (bits : List Bool)
+    (sym : UInt16) (rest : List Bool)
+    (h : decodeBits tree bits = some (sym, rest)) :
+    ∃ cw, TreeHasLeaf tree cw sym ∧ bits = cw ++ rest := by
+  induction tree generalizing bits with
+  | leaf s =>
+    simp [decodeBits] at h; obtain ⟨rfl, rfl⟩ := h
+    exact ⟨[], .leaf, by simp⟩
+  | empty => simp [decodeBits] at h
+  | node z o ihz iho =>
+    cases bits with
+    | nil => simp [decodeBits] at h
+    | cons b rest' =>
+      cases b with
+      | false =>
+        simp only [decodeBits] at h
+        obtain ⟨cw, hleaf, hrst⟩ := ihz rest' h
+        exact ⟨false :: cw, .left hleaf, by rw [hrst]; rfl⟩
+      | true =>
+        simp only [decodeBits] at h
+        obtain ⟨cw, hleaf, hrst⟩ := iho rest' h
+        exact ⟨true :: cw, .right hleaf, by rw [hrst]; rfl⟩
+
+/-! ### UInt32 bit correspondence for insert -/
+
+/-- The bit extracted by `insert.go` at position `n` corresponds to `testBit`. -/
+private theorem uint32_testBit (code : UInt32) (n : Nat) (hn : n < 32) :
+    ((code >>> n.toUInt32) &&& 1) =
+      if code.toNat.testBit n then 1 else 0 := by
+  apply UInt32.toNat_inj.mp
+  rw [UInt32.toNat_and, UInt32.toNat_shiftRight]
+  have hn_eq : n.toUInt32.toNat % 32 = n := by simp [Nat.toUInt32]; omega
+  rw [hn_eq, UInt32.toNat_one, shift_and_one_eq_testBit]
+  split <;> simp
+
+/-- When `testBit n = false`, insert's bit comparison yields `true` (bit == 0). -/
+private theorem insert_bit_zero (code : UInt32) (n : Nat) (hn : n < 32)
+    (h : code.toNat.testBit n = false) :
+    ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = true := by
+  have := uint32_testBit code n hn; rw [h] at this; simp [this]
+
+/-- When `testBit n = true`, insert's bit comparison yields `false` (bit != 0). -/
+private theorem insert_bit_one (code : UInt32) (n : Nat) (hn : n < 32)
+    (h : code.toNat.testBit n = true) :
+    ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = false := by
+  have := uint32_testBit code n hn; rw [h] at this; simp [this]
+
+/-! ### insert.go creates the correct leaf path -/
+
+/-- Predicate: tree `t` has no leaf at an intermediate position along `path`.
+    This ensures `insert.go` can traverse the path without hitting a collision. -/
+private def NoLeafOnPath : Zip.Native.HuffTree → List Bool → Prop
+  | .leaf _, _ :: _ => False
+  | .node z _, false :: rest => NoLeafOnPath z rest
+  | .node _ o, true :: rest => NoLeafOnPath o rest
+  | _, _ => True
+
+/-- `insert.go` places a leaf at the path `natToBits code.toNat len` in the tree,
+    provided no existing leaf blocks the path. -/
+private theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
+    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len ≤ 15)
+    (hnl : NoLeafOnPath tree (Huffman.Spec.natToBits code.toNat len)) :
+    TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym tree len)
+      (Huffman.Spec.natToBits code.toNat len) sym := by
+  induction len generalizing tree with
+  | zero =>
+    simp only [Zip.Native.HuffTree.insert.go, Huffman.Spec.natToBits]
+    exact .leaf
+  | succ n ih =>
+    simp only [Huffman.Spec.natToBits]
+    cases htb : code.toNat.testBit n with
+    | false =>
+      have hbit : ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = true :=
+        insert_bit_zero code n (by omega) htb
+      cases tree with
+      | empty =>
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym .empty (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        exact .left (ih .empty (by omega) trivial)
+      | node z o =>
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        have hnl' : NoLeafOnPath z (Huffman.Spec.natToBits code.toNat n) := by
+          simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl; exact hnl
+        exact .left (ih z (by omega) hnl')
+      | leaf s =>
+        exfalso; simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
+    | true =>
+      have hbit : ((code >>> n.toUInt32) &&& 1 == (0 : UInt32)) = false :=
+        insert_bit_one code n (by omega) htb
+      cases tree with
+      | empty =>
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym .empty (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        exact .right (ih .empty (by omega) trivial)
+      | node z o =>
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        have hnl' : NoLeafOnPath o (Huffman.Spec.natToBits code.toNat n) := by
+          simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl; exact hnl
+        exact .right (ih o (by omega) hnl')
+      | leaf s =>
+        exfalso; simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
+
+/-! ### insert.go preserves existing leaves -/
+
+/-- `insert.go` preserves existing leaves at paths that the insertion path is not
+    a prefix of. This is the key preservation property: inserting a new code doesn't
+    disrupt decoding of existing codes, provided they are prefix-free. -/
+private theorem insert_go_preserves (code : UInt32) (sym : UInt16)
+    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len ≤ 15)
+    (cw : List Bool) (s : UInt16)
+    (h : TreeHasLeaf tree cw s)
+    (hne : ¬(Huffman.Spec.natToBits code.toNat len).IsPrefix cw) :
+    TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym tree len) cw s := by
+  induction len generalizing tree cw with
+  | zero =>
+    exact absurd List.nil_prefix hne
+  | succ n ih =>
+    cases h with
+    | leaf =>
+      -- tree = .leaf s, cw = []. Collision: insert.go returns .leaf s unchanged.
+      show TreeHasLeaf
+        (Zip.Native.HuffTree.insert.go code sym (.leaf _) (n + 1)) [] _
+      unfold Zip.Native.HuffTree.insert.go
+      exact .leaf
+    | left h' =>
+      -- tree = .node z o, cw = false :: cw', leaf is in z
+      cases htb : code.toNat.testBit n with
+      | false =>
+        -- Same direction: insertion goes left too; recurse into z
+        have hbit := insert_bit_zero code n (by omega) htb
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        exact .left (ih _ (by omega) _ h' fun hpre => by
+          apply hne; obtain ⟨t, ht⟩ := hpre
+          exact ⟨t, by simp [Huffman.Spec.natToBits, htb, List.cons_append, ht]⟩)
+      | true =>
+        -- Different direction: insertion goes right; z is untouched
+        have hbit := insert_bit_one code n (by omega) htb
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        exact .left h'
+    | right h' =>
+      -- tree = .node z o, cw = true :: cw', leaf is in o
+      cases htb : code.toNat.testBit n with
+      | false =>
+        -- Different direction: insertion goes left; o is untouched
+        have hbit := insert_bit_zero code n (by omega) htb
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        exact .right h'
+      | true =>
+        -- Same direction: insertion goes right too; recurse into o
+        have hbit := insert_bit_one code n (by omega) htb
+        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
+        unfold Zip.Native.HuffTree.insert.go
+        simp [hbit]
+        exact .right (ih _ (by omega) _ h' fun hpre => by
+          apply hne; obtain ⟨t, ht⟩ := hpre
+          exact ⟨t, by simp [Huffman.Spec.natToBits, htb, List.cons_append, ht]⟩)
+
+/-! ### Connecting fromLengths to allCodes -/
+
+/-- If `decode table bits = some (sym, rest)`, then there exists a matching
+    codeword entry in the table with `bits = cw ++ rest`. -/
+private theorem decode_some_mem {α : Type} (table : List (Huffman.Spec.Codeword × α))
+    (bits : List Bool) (sym : α) (rest : List Bool)
+    (h : Huffman.Spec.decode table bits = some (sym, rest)) :
+    ∃ cw, (cw, sym) ∈ table ∧ bits = cw ++ rest := by
+  induction table with
+  | nil => simp [Huffman.Spec.decode] at h
+  | cons entry entries ih =>
+    obtain ⟨cw', sym'⟩ := entry
+    simp only [Huffman.Spec.decode] at h
+    split at h
+    · -- isPrefixOf true: match found
+      rename_i hpre
+      obtain ⟨rfl, rfl⟩ := Option.some.inj h
+      rw [Huffman.Spec.isPrefixOf_iff] at hpre
+      obtain ⟨t, rfl⟩ := hpre
+      exact ⟨cw', List.mem_cons_self .., by simp⟩
+    · -- isPrefixOf false: recurse
+      obtain ⟨cw, hmem, hbits⟩ := ih h
+      exact ⟨cw, List.mem_cons_of_mem _ hmem, hbits⟩
+
+/-- The tree built by `fromLengths` has a leaf for every canonical codeword.
+    Requires `ValidLengths` to ensure no collisions during insertion. -/
+private theorem fromLengths_hasLeaf (lengths : Array UInt8)
+    (tree : Zip.Native.HuffTree)
+    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (s : Nat) (cw : Huffman.Spec.Codeword)
+    (hmem : (s, cw) ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat)) :
+    TreeHasLeaf tree cw s.toUInt16 := by
+  sorry
+
+/-- Every leaf in the tree built by `fromLengths` corresponds to an entry
+    in `allCodes`. -/
+private theorem fromLengths_leaf_spec (lengths : Array UInt8)
+    (tree : Zip.Native.HuffTree)
+    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (cw : List Bool) (sym : UInt16)
+    (h : TreeHasLeaf tree cw sym) :
+    (sym.toNat, cw) ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) := by
+  sorry
+
 /-- Step 2: For a tree built from code lengths, `decodeBits` agrees with
     the spec's table-based decode. Requires the tree to be well-formed
-    (built via `fromLengths`). -/
+    (built via `fromLengths`) and the lengths to satisfy the Kraft inequality. -/
 private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
     (tree : Zip.Native.HuffTree) (bits : List Bool)
-    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree) :
+    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15) :
     let specLengths := lengths.toList.map UInt8.toNat
     let specCodes := Huffman.Spec.allCodes specLengths
     let specTable := specCodes.map fun (s, cw) => (cw, s)
     (decodeBits tree bits).map (fun (s, rest) => (s.toNat, rest)) =
       Huffman.Spec.decode specTable bits := by
-  sorry
+  intro specLengths specCodes specTable
+  -- Helper: specTable membership ↔ specCodes membership
+  have to_codes : ∀ {cw : List Bool} {s : Nat},
+      (cw, s) ∈ specTable → (s, cw) ∈ specCodes := by
+    intro cw s h
+    obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp h
+    simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+  have to_table : ∀ {s : Nat} {cw : List Bool},
+      (s, cw) ∈ specCodes → (cw, s) ∈ specTable := by
+    intro s cw h; exact List.mem_map.mpr ⟨(s, cw), h, rfl⟩
+  -- Prefix-free property of specTable (needed for decode_prefix_free)
+  have hpf : ∀ cw₁ (s₁ : Nat) cw₂ (s₂ : Nat),
+      (cw₁, s₁) ∈ specTable → (cw₂, s₂) ∈ specTable →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ := by
+    intro cw₁ s₁ cw₂ s₂ h₁ h₂ hne hpre
+    have hm₁ := to_codes h₁; have hm₂ := to_codes h₂
+    by_cases heq : s₁ = s₂
+    · subst heq
+      rw [Huffman.Spec.allCodes_mem_iff] at hm₁ hm₂
+      have : cw₁ = cw₂ := Option.some.inj (hm₁.2.symm.trans hm₂.2)
+      subst this; exact absurd rfl hne
+    · exact absurd hpre (Huffman.Spec.allCodes_prefix_free_of_ne
+        _ _ hv _ _ _ _ hm₁ hm₂ heq)
+  match hdb : decodeBits tree bits with
+  | none =>
+    simp only [Option.map]
+    match hdec : Huffman.Spec.decode specTable bits with
+    | none => rfl
+    | some (v, rest) =>
+      exfalso
+      obtain ⟨cw, hmem_table, hbits⟩ := decode_some_mem specTable bits v rest hdec
+      have hleaf := fromLengths_hasLeaf lengths tree htree hv v cw (to_codes hmem_table)
+      have hdb' := decodeBits_of_hasLeaf tree cw v.toUInt16 rest hleaf
+      rw [hbits] at hdb; rw [hdb'] at hdb; simp at hdb
+  | some (sym, rest) =>
+    simp only [Option.map]
+    obtain ⟨cw, hleaf, hbits⟩ := hasLeaf_of_decodeBits tree bits sym rest hdb
+    have hmem_codes := fromLengths_leaf_spec lengths tree htree hv cw sym hleaf
+    have hdec := Huffman.Spec.decode_prefix_free specTable cw sym.toNat rest
+      (to_table hmem_codes) hpf
+    rw [hbits]; exact hdec.symm
 
 /-- A `HuffTree` built from code lengths decodes the same symbol as the
     spec's `Huffman.Spec.decode` on the corresponding code table.
@@ -359,6 +645,7 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
     (sym : UInt16) (br' : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
     (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
     (hdecode : tree.decode br = .ok (sym, br')) :
     let specLengths := lengths.toList.map UInt8.toNat
     let specCodes := Huffman.Spec.allCodes specLengths
@@ -371,7 +658,7 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
     simp only [Zip.Native.HuffTree.decode] at hdecode; exact hdecode
   obtain ⟨hdb, _⟩ := decode_go_decodeBits tree br 0 sym br' hwf hdecode_go
   -- Step 2: decodeBits → spec decode via tree-table correspondence
-  have hspec := decodeBits_eq_spec_decode lengths tree br.toBits htree
+  have hspec := decodeBits_eq_spec_decode lengths tree br.toBits htree hv
   -- Connect the two
   rw [hdb] at hspec; simp at hspec
   exact ⟨br'.toBits, hspec.symm, rfl⟩
