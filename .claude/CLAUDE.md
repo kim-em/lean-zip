@@ -334,6 +334,16 @@ Update it during review and reflect sessions.
   `simp only [..., hrd, bind, Except.bind] at h` substitutes the
   known result. This is cleaner than `simp [...] at h; split at h;
   rename_i ...` which produces fragile unnamed hypotheses.
+- **Closing `Except.error = Except.ok` contradictions**: `simp only`
+  does NOT know that `Except.error ≠ Except.ok` — it lacks the
+  discriminator lemmas. Use `simp at h` (without `only`) which includes
+  them, or explicitly `exact absurd h (by simp)`. Don't try `nofun h`
+  or `exact Except.noConfusion h` — neither works directly.
+- **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
+  `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
+  To define in a different namespace, either close the current namespace
+  first, or use a local name (e.g. `def decodeBits` instead of
+  `def Zip.Native.HuffTree.decodeBits`).
 
 ## Current State Summary
 
