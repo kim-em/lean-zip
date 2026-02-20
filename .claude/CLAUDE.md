@@ -319,6 +319,11 @@ Update it during review and reflect sessions.
   one Spec file is needed by another (e.g. `byteToBits_length` used in
   both Deflate.lean and InflateCorrect.lean), use `protected` visibility.
   `private` makes it inaccessible from other files.
+- **Avoid `▸` with UInt32/BitVec goals**: The `▸` (subst rewrite) tactic
+  triggers full `whnf` reduction, which can deterministic-timeout on goals
+  involving UInt32 or BitVec operations. Use `obtain ⟨rfl, _⟩ := h` +
+  `rw [...]` + `exact ...` instead. The `rw` tactic is much more targeted
+  and avoids the expensive reduction.
 - **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
   `return` inside a `for` loop exits the loop (producing `some`), not the
   function. Use explicit recursive helper functions instead — they're also
