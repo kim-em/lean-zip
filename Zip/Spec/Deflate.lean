@@ -124,7 +124,7 @@ def codeLengthOrder : Array Nat := #[
 /-! ## Block decoding -/
 
 /-- Decode one literal/length symbol from the bitstream.
-    Returns the LZ77 symbol, remaining bits, and bits consumed. -/
+    Returns the LZ77 symbol and remaining bits. -/
 def decodeLitLen (litLengths : List Nat) (distLengths : List Nat)
     (bits : List Bool) : Option (LZ77Symbol × List Bool) := do
   -- Decode literal/length symbol using Huffman code

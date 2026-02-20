@@ -19,15 +19,18 @@ Zip/Tar.lean          -- Tar archive create/extract/list + .tar.gz composition
 Zip/Archive.lean      -- ZIP archive create/extract/list (with ZIP64)
 Zip/Spec/Adler32.lean -- Adler-32 formal spec (list-based)
 Zip/Spec/Crc32.lean   -- CRC-32 formal spec (bit-by-bit polynomial)
+Zip/Spec/Huffman.lean -- Canonical Huffman code construction and prefix-free proofs
+Zip/Spec/Deflate.lean -- DEFLATE bitstream spec (RFC 1951)
 Zip/Native/Adler32.lean -- Pure Lean Adler-32 (proved equivalent to spec)
 Zip/Native/Crc32.lean -- Pure Lean CRC-32 table-driven (proved equivalent to spec)
 Zip/Native/BitReader.lean -- LSB-first bit-level reader for DEFLATE streams
 Zip/Native/Inflate.lean -- Pure Lean DEFLATE decompressor (all 3 block types)
+Zip/Native/Gzip.lean  -- Pure Lean gzip/zlib decompression + format auto-detection
 Zip.lean              -- Re-exports all modules
 ZipForStd.lean        -- Missing std library lemmas (upstreaming candidates)
 lakefile.lean         -- Build config (pkg-config, static libs, extern link)
 ZipTest.lean          -- Test runner (imports all test modules)
-ZipTest/              -- 13 test modules (Helpers, unit tests, fixture tests)
+ZipTest/              -- 17 test modules (Helpers, unit tests, fixture tests, native tests)
 ```
 
 ## Layer 1: Whole-buffer C functions
@@ -194,6 +197,8 @@ Formal mathematical specifications of algorithms, independent of any particular 
 
 - **Adler-32** (`Spec/Adler32.lean`): Two Nat-valued sums modulo 65521, defined as a `List.foldl`. Key theorem: `updateList_append` (compositionality).
 - **CRC-32** (`Spec/Crc32.lean`): Bit-by-bit polynomial division with polynomial `0xEDB88320`. Defines both the naive bit-by-bit `crcByte` and the table-driven `crcByteTable`. Key theorems: `updateList_append` (compositionality), `updateList_nil`.
+- **Huffman** (`Spec/Huffman.lean`): Canonical Huffman code construction from RFC 1951 §3.2.2. Defines `codeFor` (code assignment), `allCodes`, `decode`. Key theorems: `codeFor_injective` (distinct codewords), `canonical_prefix_free` (prefix-free property, same-length case proved, different-length case WIP).
+- **DEFLATE** (`Spec/Deflate.lean`): Complete DEFLATE bitstream spec. Defines `bytesToBits` (LSB-first), `readBitsLSB`/`readBitsMSB`, `LZ77Symbol` with `resolveLZ77`, all RFC 1951 tables, block decode pipeline (stored, fixed Huffman, dynamic Huffman), and stream-level `decode`.
 
 ### Native implementations (`Zip/Native/`)
 
@@ -202,12 +207,15 @@ Pure Lean implementations operating on `ByteArray` (via `Array.foldl` on `.data`
 - **Adler-32** (`Native/Adler32.lean`): Direct implementation of the spec using `Array.foldl`. Proof: `updateBytes_eq_updateList` via `Array.foldl_toList`.
 - **CRC-32** (`Native/Crc32.lean`): Table-driven implementation using a 256-entry lookup table. Proof chain: `crcBits8_split` (8-fold `crcBit` linearity, via `bv_decide`) → `crcByteTable_eq_crcByte` (table lookup = bit-by-bit) → `updateBytes_eq_updateList` (byte array = list spec).
 - **BitReader** (`Native/BitReader.lean`): LSB-first bit-level reader for `ByteArray`. Tracks byte position and bit offset within the current byte. Supports reading individual bits, multi-bit values (up to 25 bits), byte-aligned UInt16 LE reads, and bulk byte reads.
-- **DEFLATE inflate** (`Native/Inflate.lean`): Complete DEFLATE (RFC 1951) decompressor supporting all three block types: stored (type 0), fixed Huffman (type 1), and dynamic Huffman (type 2). Uses a binary `HuffTree` type with canonical Huffman code construction from code lengths. LZ77 back-references are resolved against the output buffer with correct handling of overlapping copies. Uses a fuel parameter for termination.
+- **DEFLATE inflate** (`Native/Inflate.lean`): Complete DEFLATE (RFC 1951) decompressor supporting all three block types: stored (type 0), fixed Huffman (type 1), and dynamic Huffman (type 2). Uses a binary `HuffTree` type with canonical Huffman code construction from code lengths. LZ77 back-references are resolved against the output buffer with correct handling of overlapping copies. Uses a fuel parameter for termination. `maxOutputSize` parameter guards against zip bombs.
+- **Gzip/Zlib framing** (`Native/Gzip.lean`): RFC 1952 gzip and RFC 1950 zlib header/trailer parsing with checksum verification (CRC-32 for gzip, Adler-32 for zlib). Supports concatenated gzip members. Auto-detection of gzip, zlib, and raw DEFLATE formats.
 
 ### Conformance testing
 
 - `ZipTest/NativeChecksum.lean` tests native checksum implementations against FFI on: known values, large data, incremental computation, empty input, and single bytes.
 - `ZipTest/NativeInflate.lean` tests native DEFLATE decompressor against FFI zlib across compression levels 0–9, empty data, single bytes, large repetitive data (124KB), and pseudo-random data.
+- `ZipTest/NativeGzip.lean` tests gzip and zlib decompression at multiple levels, concatenated streams, auto-detect, and error cases (truncated, corrupt, bad checksums).
+- `ZipTest/NativeIntegration.lean` tests native backend integration for ZIP and tar.gz extraction (stored, deflated, empty, nested).
 
 ## Build system
 
