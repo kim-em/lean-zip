@@ -34,6 +34,14 @@ Check `PROGRESS.md` to dynamically adjust the balance — if reviews are
 consistently finding nothing, do fewer; if they're finding problems, do more.
 Default to alternating: implementation session, then review session.
 
+**Anti-rationalization check**: A common failure mode is to identify the
+correct session type from the balance, then override it by framing
+implementation work as "blocking" or "urgent." Sorries, incomplete
+proofs, and unfinished features are almost never true blockers — other
+session types can proceed with sorries in place. If you find yourself
+writing "should do X, but Y is more important" — do X. The only genuine
+exception is a broken build that prevents all other work.
+
 ### Step 1: Orient
 
 Record the starting commit: `git rev-parse HEAD`. Check `git status` — if
