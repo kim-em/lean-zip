@@ -174,28 +174,18 @@ private theorem kraft_ge_count (ls : List Nat) (maxBits len : Nat) :
     · exact Nat.le_trans ih (Nat.le_add_left _ _)
     · simp only [ite_true, List.length_cons, Nat.succ_mul]
       have hxeq : x = len := beq_iff_eq.mp hxl
-      rw [hxeq]
-      calc (xs.filter (· == len)).length * 2 ^ (maxBits - len) + 2 ^ (maxBits - len)
-          _ ≤ xs.foldl (fun acc l => acc + 2 ^ (maxBits - l)) 0 + 2 ^ (maxBits - len) :=
-              Nat.add_le_add_right ih _
-          _ = 2 ^ (maxBits - len) + xs.foldl (fun acc l => acc + 2 ^ (maxBits - l)) 0 :=
-              Nat.add_comm _ _
+      rw [hxeq]; omega
 
 /-- Double filter: `(· != 0)` then `(· == len)` is the same as `(· == len)` when `len > 0`. -/
 private theorem filter_ne_zero_filter_eq (ls : List Nat) (len : Nat) (hlen : len ≠ 0) :
     (ls.filter (· != 0)).filter (· == len) = ls.filter (· == len) := by
-  induction ls with
-  | nil => rfl
-  | cons x xs ih =>
-    simp only [List.filter_cons]
-    cases hxl : x == len
-    · cases hx0 : (x != 0)
-      · exact ih
-      · simp only [ite_true, List.filter_cons, hxl]; exact ih
-    · have hx0 : (x != 0) = true := by
-        have := beq_iff_eq.mp hxl; subst this; exact bne_iff_ne.mpr hlen
-      simp only [hx0, ite_true, List.filter_cons, hxl]
-      exact congrArg _ ih
+  rw [List.filter_filter]
+  congr 1; ext x
+  match h : x == len with
+  | true =>
+    have : x = len := beq_iff_eq.mp h
+    subst this; simp [bne_iff_ne, hlen]
+  | false => simp
 
 /-- In a valid length assignment, the count of codes with a given non-zero length
     is at most `2^len`. -/
@@ -209,10 +199,7 @@ theorem count_le_pow_of_validLengths (lengths : List Nat) (maxBits len : Nat)
   have hpow_eq : 2 ^ maxBits = 2 ^ len * 2 ^ (maxBits - len) := by
     rw [← Nat.pow_add]; congr 1; omega
   rw [hpow_eq] at hle
-  have hpow_pos : 0 < 2 ^ (maxBits - len) := Nat.pos_of_ne_zero fun h => by
-    simp [Nat.pow_eq_zero] at h
-  rw [Nat.mul_comm, Nat.mul_comm (2 ^ len)] at hle
-  exact Nat.le_of_mul_le_mul_left hle hpow_pos
+  exact Nat.le_of_mul_le_mul_right hle (Nat.pow_pos (by omega))
 
 /-! ## Helper lemmas for codeFor proofs -/
 
@@ -409,9 +396,8 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     have := congrArg List.length ht; simp at this; omega
   by_cases heq : lengths[s₁] = lengths[s₂]
   · -- Same length: prefix of same-length list means equal
-    have htl : t.length = 0 := by omega
-    have : t = [] := by cases t with | nil => rfl | cons _ _ => simp at htl
-    subst this; rw [List.append_nil] at ht; subst ht
+    have : t = [] := List.eq_nil_of_length_eq_zero (by omega)
+    subst this; simp at ht; subst ht
     exact hne (codeFor_injective lengths maxBits hv s₁ s₂ cw₁ h₁ h₂)
   · -- Different lengths: canonical codes at different lengths aren't prefixes.
     -- This requires showing nc[len₂] ≥ (nc[len₁] + count[len₁]) * 2^(len₂-len₁),
