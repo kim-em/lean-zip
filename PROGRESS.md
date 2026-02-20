@@ -2,6 +2,51 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Implementation — prove readBits_toBits + decompose huffTree_decode_correct
+
+**Type**: implementation
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 4 → 3
+**Commits**: `b2be716`, `2a1af3f`
+
+### Accomplished
+
+1. **Proved `readBits_toBits`** (sorry count 4 → 3)
+   - Created `ZipForStd/Nat.lean` with `Nat.or_two_pow_eq_add`: when `a < 2^n`,
+     `a ||| 2^n = a + 2^n`. Proof by induction on n with `Nat.eq_of_testBit_eq`.
+   - Proved `readBits_go_spec`: generalized loop invariant connecting the native
+     UInt32 accumulator (`acc ||| bit <<< shift`) to spec `readBitsLSB`.
+   - Derived `readBits_toBits` from `readBits_go_spec` with acc=0, shift=0.
+
+2. **Decomposed `huffTree_decode_correct`** into two steps:
+   - `decode_go_decodeBits` (PROVED): BitReader tree decode ≡ pure `decodeBits`
+     on bit lists. Induction on tree structure using `readBit_toBits`.
+   - `decodeBits_eq_spec_decode` (SORRY): pure tree decode ≡ spec linear search.
+     Requires connecting `fromLengths` to `allCodes`.
+   - Main theorem wired up using both helper lemmas.
+
+### Key techniques
+
+- `cases hrd : br.readBit` approach for do-notation unfolding (cleaner than
+  `simp only [...] at h; split at h` for Except.bind patterns)
+- `Nat.eq_of_testBit_eq` for extensional equality of naturals
+- Nat arithmetic for `2^(shift+1) = 2 * 2^shift`: use `Nat.pow_succ` +
+  `Nat.add_mul` + `Nat.mul_assoc` + `Nat.mul_comm` (no `ring` available)
+
+### Decisions
+
+- Put `Nat.or_two_pow_eq_add` in `ZipForStd/Nat.lean` (candidate for upstream)
+- Used specific `or_two_pow_eq_add` rather than general `or_eq_add_of_and_eq_zero`
+  because the general form is harder to prove without `ring`
+- Defined `decodeBits` as a standalone function (not dot notation on HuffTree)
+  because definition is in `Deflate.Correctness` namespace
+
+### Remaining
+
+- `decodeBits_eq_spec_decode` — hardest remaining sorry (tree-table correspondence)
+- `inflate_correct` — main correctness theorem
+- `inflate_correct'` — corollary (straightforward from `inflate_correct`)
+
 ## 2026-02-20: Review — InflateCorrect.lean deep review + theorem statement fixes
 
 **Type**: review

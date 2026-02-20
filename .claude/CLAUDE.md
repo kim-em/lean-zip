@@ -328,6 +328,12 @@ Update it during review and reflect sessions.
   `return` inside a `for` loop exits the loop (producing `some`), not the
   function. Use explicit recursive helper functions instead — they're also
   easier to reason about in proofs. Reserve `for`/`while` for `IO` code.
+- **Unfolding do-notation with `Except.bind`**: When a hypothesis `h`
+  contains a `do` block (`let x ← f; g x`), use `cases hrd : f` to
+  split on the result BEFORE simplifying `h`. Then
+  `simp only [..., hrd, bind, Except.bind] at h` substitutes the
+  known result. This is cleaner than `simp [...] at h; split at h;
+  rename_i ...` which produces fragile unnamed hypotheses.
 
 ## Current State Summary
 
@@ -335,6 +341,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 4 (all in InflateCorrect.lean — staged theorem statements)
-- **Last session**: 2026-02-20 (review: InflateCorrect.lean deep review + theorem fixes)
+- **Sorry count**: 3 (all in InflateCorrect.lean — decodeBits_eq_spec_decode, inflate_correct, inflate_correct')
+- **Last session**: 2026-02-20 (implementation: proved readBits_toBits + decomposed huffTree_decode_correct)
 - **Last review**: 2026-02-20 (InflateCorrect.lean: fixed unprovable statements, proof cleanup)

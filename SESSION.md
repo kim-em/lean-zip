@@ -3,70 +3,70 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 4
+## Sorry count: 3
 
-All in `Zip/Spec/InflateCorrect.lean` — staged theorem statements for
-future sessions:
-- `readBits_toBits` (line 174): multi-bit read correspondence
-- `huffTree_decode_correct` (line 189): Huffman decode correspondence
-- `inflate_correct` (line 219): main correctness theorem
-- `inflate_correct'` (line 231): corollary for position-0 inflate
+All in `Zip/Spec/InflateCorrect.lean`:
+- `decodeBits_eq_spec_decode` (line 357): tree-table correspondence
+  (pure tree decode ≡ spec's linear-search decode)
+- `inflate_correct` (line 409): main correctness theorem
+- `inflate_correct'` (line 419): corollary for position-0 inflate
 
 ## Known good commit
 
-`bcf4af4` — `lake build && lake exe test` passes
+`2a1af3f` — `lake build && lake exe test` passes
 
-## Completed this session (review)
+## Completed this session (implementation)
 
-### Critical: Fixed unprovable theorem statements
+### Proved readBits_toBits (sorry 4 → 3)
 
-- **`readBits_toBits`**: Added `hwf : br.bitOff < 8` (bitstream
-  correspondence requires well-formed BitReader) and `hn : n ≤ 32`
-  (UInt32.shiftLeft reduces shift mod 32, so for shift ≥ 32, bits are
-  placed at wrong position). Without these, the theorem was false.
-- **`huffTree_decode_correct`**: Added `hwf : br.bitOff < 8` for the
-  same reason — proof traces through `readBit_toBits` at each tree step.
+Key new lemma: `Nat.or_two_pow_eq_add` in `ZipForStd/Nat.lean` —
+when `a < 2^n`, bitwise OR with `2^n` equals addition (no overlapping
+bits). Proof by induction on n using `Nat.eq_of_testBit_eq`.
 
-### Proof improvements
+Proof structure for readBits:
+- `readBits_go_spec`: generalized loop invariant for `readBits.go`
+  (induction on k, the number of bits remaining). Connects the native
+  accumulator `acc ||| (bit <<< shift)` to the spec's `readBitsLSB`.
+- `readBits_toBits`: derived from `readBits_go_spec` with acc=0, shift=0.
 
-- **Removed `byteToBits_length'` duplication**: Made `byteToBits_length`
-  in Deflate.lean `protected` instead of `private`, reused from
-  InflateCorrect.lean as `Deflate.Spec.bytesToBits.byteToBits_length`.
-- **Simplified `ofFn_drop_head`**: Replaced 12-line induction with 3-line
-  proof using `List.drop_eq_getElem_cons` + `List.getElem_ofFn`.
-- **Combined duplicate branches in `readBit_toBits`**: Used `all_goals`
-  for the bit-value goal (identical in both bitOff cases).
+Helper lemmas:
+- `shift_toUInt32_mod32`: shift < 32 → shift.toUInt32.toNat % 32 = shift
+- `acc_or_shift_toNat`: OR accumulation = addition (using `or_two_pow_eq_add`)
+- `acc_or_shift_bound`: accumulator stays < 2^(shift+1)
 
-### Review findings (no action needed)
+### Decomposed huffTree_decode_correct
 
-- `inflate_correct` and `inflate_correct'` statements are correctly
-  stated. `inflate_correct'` follows from `inflate_correct` with
-  `startPos = 0`. The `bitOff < 8` invariant is maintained internally
-  (starting from 0), so no explicit hypothesis needed.
-- resolveLZ77 properties (8 theorems): all clean, no simplification found.
-- Huffman.lean: no dead code, no stdlib duplicates, no improvements found.
-- General-purpose lemmas (`flatMap_drop_mul`, `shift_and_one_eq_testBit`,
-  `list_drop_cons_tail`) could move to ZipForStd in a future session.
+Split into two steps:
+1. `decode_go_decodeBits` (PROVED): BitReader-based tree decode
+   corresponds to pure `decodeBits` on bit lists. By induction on
+   tree structure, using `readBit_toBits` at each node.
+2. `decodeBits_eq_spec_decode` (SORRY): pure tree decode agrees with
+   spec's linear-search `Huffman.Spec.decode`. Requires connecting
+   `fromLengths` (tree building) to `allCodes` (code generation).
 
-### Codex review
-
-No issues found. Hypotheses match native BitReader semantics, lemma reuse
-is sound, proof simplifications mechanically safe.
+The main `huffTree_decode_correct` is proved assuming (2).
 
 ## Next action
 
 Priority order for next implementation session:
-1. Prove `readBits_toBits` using `readBit_toBits` + induction on n
-2. Start on `huffTree_decode_correct` (most complex layer)
-3. If time: prove `inflate_correct'` from `inflate_correct`
+1. Prove `decodeBits_eq_spec_decode` — the tree-table correspondence.
+   This requires showing that `fromLengths` builds a tree where each
+   leaf's path matches its canonical codeword from `allCodes`.
+   Approach: define a "tree contains codeword→symbol mapping" predicate,
+   prove `insert` maintains it, prove `fromLengths` establishes it,
+   then connect to `Huffman.Spec.decode`.
+2. Prove `inflate_correct'` from `inflate_correct` (should be straightforward)
+3. Make progress on `inflate_correct` (the main theorem)
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- `bitOff < 8` well-formedness invariant is needed for all bitstream
-  correspondence theorems. Initial BitReader at `{ bitOff := 0 }` satisfies
-  it, and `readBit_wf` shows it's preserved.
-- `n ≤ 32` needed for `readBits_toBits` because `UInt32.shiftLeft`
-  reduces shift mod 32. All DEFLATE callers use n ≤ 25.
-- `protected` (not `private`) is the right visibility for lemmas needed
-  across files within the same namespace hierarchy.
+- `decodeBits_eq_spec_decode` is the hardest remaining sorry — it
+  requires connecting the imperative `fromLengths` (with mutable arrays)
+  to the functional `allCodes` (with `codeFor`). Both implement RFC 1951
+  §3.2.2 canonical Huffman construction but in very different styles.
+- Key available lemmas for future proofs:
+  - `readBit_toBits`, `readBit_wf` (single bit correspondence)
+  - `readBits_toBits` (multi-bit correspondence, n ≤ 32)
+  - `decode_go_decodeBits` (tree decode BitReader→bits)
+  - `Nat.or_two_pow_eq_add` (non-overlapping OR = ADD)
