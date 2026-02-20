@@ -1,5 +1,6 @@
 import Zip.Spec.Deflate
 import Zip.Native.Inflate
+import ZipForStd.Nat
 
 /-!
 # DEFLATE Decompressor Correctness
@@ -166,6 +167,88 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
       all_goals (obtain ⟨rfl, _⟩ := h; rw [hget];
                  exact uint32_bit_eq_testBit br.data[br.pos] br.bitOff hwf)
 
+/-! ### UInt32 accumulator arithmetic
+
+Helper lemmas for the `readBits.go` loop invariant. The loop accumulates
+bits via `acc ||| (bit <<< shift.toUInt32)`. When the bits don't overlap
+(ensured by `acc.toNat < 2^shift`), this OR equals addition. -/
+
+private theorem shift_toUInt32_mod32 {shift : Nat} (hshift : shift < 32) :
+    shift.toUInt32.toNat % 32 = shift := by
+  simp [Nat.toUInt32]; omega
+
+private theorem acc_or_shift_toNat (acc bit : UInt32) (shift : Nat)
+    (hacc : acc.toNat < 2 ^ shift) (hbit : bit = 0 ∨ bit = 1) (hshift : shift < 32) :
+    (acc ||| (bit <<< shift.toUInt32)).toNat = acc.toNat + bit.toNat * 2 ^ shift := by
+  rcases hbit with rfl | rfl
+  · simp [UInt32.toNat_zero]
+  · rw [UInt32.toNat_or, UInt32.toNat_shiftLeft, shift_toUInt32_mod32 hshift,
+        UInt32.toNat_one, Nat.shiftLeft_eq, Nat.one_mul,
+        Nat.mod_eq_of_lt (Nat.pow_lt_pow_right (by omega) hshift),
+        Nat.or_two_pow_eq_add hacc]
+
+private theorem acc_or_shift_bound (acc bit : UInt32) (shift : Nat)
+    (hacc : acc.toNat < 2 ^ shift) (hbit : bit = 0 ∨ bit = 1) (hshift : shift < 32) :
+    (acc ||| (bit <<< shift.toUInt32)).toNat < 2 ^ (shift + 1) := by
+  rw [acc_or_shift_toNat acc bit shift hacc hbit hshift, Nat.pow_succ]
+  rcases hbit with rfl | rfl <;> simp <;> omega
+
+/-! ### Generalized readBits.go invariant -/
+
+/-- Generalized loop invariant for `readBits.go`: the spec-level
+    `readBitsLSB k` on the corresponding bit list produces a value `specVal`
+    such that `val.toNat = acc.toNat + specVal * 2^shift`. -/
+private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
+    (shift k : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8) (hsk : shift + k ≤ 32) (hacc : acc.toNat < 2 ^ shift)
+    (h : Zip.Native.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    ∃ specVal rest,
+      Deflate.Spec.readBitsLSB k br.toBits = some (specVal, rest) ∧
+      br'.toBits = rest ∧
+      val.toNat = acc.toNat + specVal * 2 ^ shift ∧
+      br'.bitOff < 8 := by
+  induction k generalizing br acc shift with
+  | zero =>
+    simp only [Zip.Native.BitReader.readBits.go] at h
+    obtain ⟨rfl, rfl⟩ := Except.ok.inj h
+    exact ⟨0, br'.toBits, by simp [Deflate.Spec.readBitsLSB], rfl, by simp, hwf⟩
+  | succ k ih =>
+    -- Case split on whether readBit succeeds
+    cases hrd : br.readBit with
+    | error e =>
+      -- readBit failed → readBits.go (k+1) fails, contradicting h
+      simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind, hrd] at h
+      simp at h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      -- readBit succeeded, unfold readBits.go using hrd
+      simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind, hrd] at h
+      -- h : readBits.go br₁ (acc ||| (bit <<< shift.toUInt32)) (shift + 1) k = .ok (val, br')
+      -- Extract bit correspondence from readBit_toBits
+      obtain ⟨b, rest₁, hbr_bits, hbr1_bits, hbit_val⟩ :=
+        readBit_toBits br bit br₁ hwf hrd
+      have hwf₁ := readBit_wf br bit br₁ hwf hrd
+      -- bit is 0 or 1
+      have hbit01 : bit = 0 ∨ bit = 1 := by
+        cases b <;> simp_all
+      -- New accumulator bounds
+      have hshift : shift < 32 := by omega
+      have hacc' := acc_or_shift_bound acc bit shift hacc hbit01 hshift
+      -- Apply IH to the recursive call (val, br' not generalized — don't pass them)
+      obtain ⟨specVal', rest', hspec', hbr', hval', hwf'⟩ :=
+        ih br₁ (acc ||| (bit <<< shift.toUInt32)) (shift + 1)
+          hwf₁ (by omega) hacc' h
+      -- Connect readBitsLSB (k+1) to the IH result
+      rw [hbr1_bits] at hspec'
+      refine ⟨(if b then 1 else 0) + specVal' * 2, rest', ?_, hbr', ?_, hwf'⟩
+      · -- readBitsLSB (k+1) br.toBits = some (...)
+        simp [Deflate.Spec.readBitsLSB, hbr_bits, hspec']
+      · -- val.toNat = acc.toNat + ((if b then 1 else 0) + specVal' * 2) * 2^shift
+        rw [hval', acc_or_shift_toNat acc bit shift hacc hbit01 hshift, Nat.pow_succ]
+        cases b <;> simp_all [Nat.add_mul, Nat.mul_assoc, Nat.mul_comm] <;> omega
+
+/-! ### readBits correspondence -/
+
 /-- Reading `n` bits via `BitReader.readBits` corresponds to
     `readBitsLSB n` on the spec bit list.
     Requires `bitOff < 8` (well-formedness) and `n ≤ 32` (UInt32 shift
@@ -178,7 +261,14 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
     ∃ rest,
       Deflate.Spec.readBitsLSB n br.toBits = some (val.toNat, rest) ∧
       br'.toBits = rest := by
-  sorry
+  -- readBits = readBits.go br 0 0 n
+  simp only [Zip.Native.BitReader.readBits] at h
+  obtain ⟨specVal, rest, hspec, hrest, hval, _⟩ :=
+    readBits_go_spec br 0 0 n val br' hwf (by omega) (by simp) h
+  simp at hval
+  -- hval : val.toNat = specVal, need to rewrite specVal → val.toNat in hspec
+  rw [← hval] at hspec
+  exact ⟨rest, hspec, hrest⟩
 
 /-! ## Huffman decode correspondence -/
 
