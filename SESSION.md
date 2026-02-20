@@ -3,73 +3,75 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 0
+## Sorry count: 4
 
-All proofs in the codebase are complete. No remaining sorry's.
+All in `Zip/Spec/InflateCorrect.lean` — staged theorem statements for
+future sessions:
+- `readBits_toBits` (line 184): multi-bit read correspondence
+- `huffTree_decode_correct` (line 196): Huffman decode correspondence
+- `inflate_correct` (line 225): main correctness theorem
+- `inflate_correct'` (line 237): corollary for position-0 inflate
 
 ## Known good commit
 
-`e1cf048` — `lake build && lake exe test` passes
+`f010cd2` — `lake build && lake exe test` passes
 
-## Completed this session (review)
+## Completed this session (implementation)
 
-Deep review of `Zip/Spec/Deflate.lean` + Lean idioms scan across codebase.
+### resolveLZ77 properties (Deflate.lean)
 
-### RFC 1951 verification
+Proved 8 theorems about `resolveLZ77`:
+- `resolveLZ77_nil`, `resolveLZ77_endOfBlock`, `resolveLZ77_literal` (@[simp])
+- `resolveLZ77_reference_dist_zero`, `resolveLZ77_reference_dist_too_large`
+- `resolveLZ77_literals`: compositionality for literal sequences
+- `resolveLZ77_literal_cons`, `resolveLZ77_endOfBlock_empty`
+- `resolveLZ77_reference_valid`: valid back-reference unfolds correctly
+- `resolveLZ77_extends`: successful resolution extends accumulator
 
-Manually verified all DEFLATE table values against RFC 1951:
-- `lengthBase`, `lengthExtra` (§3.2.5 Table 1) — all 29 entries correct
-- `distBase`, `distExtra` (§3.2.5 Table 2) — all 30 entries correct
-- `codeLengthOrder` (§3.2.7) — all 19 entries correct
-- `fixedLitLengths` (§3.2.6) — 288 entries: 8×144, 9×112, 7×24, 8×8 correct
-- `fixedDistLengths` (§3.2.6) — 32 entries: all 5 correct
-- Block type dispatch, stored block handling, dynamic Huffman decoding logic
+### Main correctness theorem structure (InflateCorrect.lean — new file)
 
-### New theorems
+Created `Zip/Spec/InflateCorrect.lean` with layered theorem decomposition:
+- `Zip.Native.BitReader.toBits`: bridge definition
+- `readBit_toBits`: **fully proved** — single bit correspondence
+- `readBit_wf`: **fully proved** — readBit preserves bitOff < 8
+- `readBits_toBits`: stated (sorry'd) — multi-bit correspondence
+- `huffTree_decode_correct`: stated (sorry'd) — Huffman layer
+- `inflate_correct`: stated (sorry'd) — main theorem
+- `inflate_correct'`: stated (sorry'd) — corollary
 
-- `byteToBits_length`: Each byte converts to exactly 8 bits
-- `bytesToBits_length`: `data.size * 8` total bits
-- `readBitsLSB_some_length`: `rest.length + n = bits.length` on success
+### Proved infrastructure lemmas (InflateCorrect.lean)
 
-### Refactoring
+- `flatMap_drop_mul`: drop n*k from uniform-length flatMap
+- `flatMap_cons_drop`: drop within first segment
+- `ofFn_drop_head`: List.ofFn element access via drop
+- `byteToBits_drop_head`, `bytesToBits_drop_testBit`: bit extraction
+- `shift_and_one_eq_testBit`: Nat bit operation correspondence
+- `uint32_bit_eq_testBit`: UInt32 → Nat.testBit bridge
+- `list_drop_cons_tail`: drop-cons-tail structural lemma
 
-- `bytesToBits` now uses `data.data.toList` instead of `data.toList` for
-  proof tractability (`ByteArray.toList` uses `@[irreducible]` loop)
-- Fixed inaccurate `readBitsMSB` docstring
+### Key proof techniques discovered
 
-### Idioms tested
-
-- `decide_cbv`: doesn't exist in v4.29.0-rc1
-- `grind`: tested on Deflate proofs, only useful for equational reasoning
-  (consistent with Huffman.lean findings)
-- `!` access in Huffman.lean: invasive to convert, not worthwhile now
-- `partial def`: only in IO streaming code, appropriate
-
-## Codex review summary
-
-Two findings, neither actionable:
-1. "Proof hole in nil branch" — false positive; `simp ... at h` with
-   `h : False` closes the goal automatically in Lean 4
-2. "Brittle proof structure" — fair style note, but proof is correct and clear
-
-Suggestions for future work:
-- `data.data.toList`/`data.toList` interop lemma
-- `flatMap_length_const` helper if more length proofs arise
+- `UInt32.toNat_inj.mp`: convert UInt32 equality to Nat equality
+- `UInt32.toNat_and`, `UInt32.toNat_shiftRight`, `UInt8.toNat_toUInt32`:
+  standard decomposition for UInt32 bit operations
+- `Nat.testBit` unfolds to `1 &&& m >>> n != 0`; use `Nat.and_comm` +
+  `Nat.one_and_eq_mod_two` + `split <;> omega` for the bridge
+- `split at h` for case analysis on if-then-else in hypotheses
+- `simp only [Zip.Native.BitReader.readBit] at h` then `split at h`
+  for unfolding native function definitions
 
 ## Next action
 
-Phase 3 continues. Possible next steps:
-- Implementation session: state main correctness theorem, prove resolveLZ77
-  properties, or connect spec bytesToBits to native BitReader
-- Review session: rotate to a different focus area (e.g. Binary.lean,
-  Tar.lean, or Archive.lean)
-- Self-improvement session: new skills or harness improvements
+Priority order for next implementation session:
+1. Prove `readBits_toBits` using `readBit_toBits` + induction on n
+2. Start on `huffTree_decode_correct` (most complex layer)
+3. If time: prove `inflate_correct'` from `inflate_correct`
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- `decide` with `maxRecDepth 2048` remains the best available approach for
-  `fixedLitLengths_valid` (no `decide_cbv` alternative)
-- Dead code candidates (readBitsMSB, decodeBytes, finalize) all previously
-  reviewed and justified as spec infrastructure
-- ZipForStd.lean is empty and never imported — potential cleanup target
+- `bitOff < 8` well-formedness invariant is needed for bitstream proofs;
+  initial BitReader at `{ bitOff := 0 }` satisfies it, and `readBit_wf`
+  shows it's preserved
+- `data[pos]!` vs `data[pos]` resolved by `simp [hpos']`
+- `data.data[pos] = data[pos]` is `rfl` for ByteArray

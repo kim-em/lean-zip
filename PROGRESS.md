@@ -2,6 +2,41 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Implementation — resolveLZ77 properties + readBit_toBits proof
+
+**Type**: implementation
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 0 → 4 (all expected — staged theorem statements in new file)
+**Commits**: `d135c2f`, `61a106b`, `04a5aba`, `f010cd2`
+
+**Accomplished** (4 commits, +300 lines):
+
+- **resolveLZ77 properties** (Deflate.lean, +80 lines): 8 theorems covering
+  basic operations (nil, endOfBlock, literal as @[simp] rewrites), error
+  cases (dist=0, dist>acc.length), compositionality (literals sequence =
+  append), valid back-reference unfolding, and accumulator extension.
+
+- **InflateCorrect.lean** (new file, +240 lines): Created the main
+  correctness theorem file with layered decomposition matching the DEFLATE
+  decode pipeline. Proved `readBit_toBits` and `readBit_wf` fully; stated
+  `readBits_toBits`, `huffTree_decode_correct`, `inflate_correct`,
+  `inflate_correct'` with sorry.
+
+- **Bitstream infrastructure**: Proved key structural lemmas connecting
+  `ByteArray` byte-level access to spec-level bit lists — `flatMap_drop_mul`,
+  `bytesToBits_drop_testBit`, `uint32_bit_eq_testBit` (UInt32 shift-and-mask
+  to `Nat.testBit` bridge via `UInt32.toNat_inj`).
+
+**Decisions**:
+- Added `bitOff < 8` well-formedness hypothesis to `readBit_toBits` —
+  needed because spec `bytesToBits` produces exactly 8 bits per byte.
+  `readBit_wf` shows it's preserved by `readBit`.
+- Made helper lemmas `private` since they're specific to the bitstream
+  correspondence proof.
+
+**Next**: Prove `readBits_toBits` (induction on n using `readBit_toBits`),
+then tackle `huffTree_decode_correct`.
+
 ## 2026-02-20: Review — Deflate.Spec deep review + Lean idioms scan
 
 **Type**: review
