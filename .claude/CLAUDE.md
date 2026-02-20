@@ -300,6 +300,17 @@ Update it during review and reflect sessions.
   show UInt32.ofBitVec (... bitvec expr ...) = UInt32.ofBitVec (...)
   congr 1; bv_decide
   ```
+- **ByteArray/Array/List indexing**: `data.data[pos] = data[pos]` (where
+  `data : ByteArray`) is `rfl`. But `data.data.toList[pos] = data[pos]`
+  needs `simp [Array.getElem_toList]; rfl` — the `simp` handles the
+  `List.getElem → Array.getElem` step, and the `rfl` handles the
+  definitional `Array.getElem data.data pos = ByteArray.getElem data pos`.
+- **UInt32 bit operations → Nat.testBit**: To prove
+  `(byte.toUInt32 >>> off.toUInt32) &&& 1 = if byte.toNat.testBit off then 1 else 0`,
+  use `UInt32.toNat_inj.mp` to reduce to Nat, then
+  `UInt32.toNat_and`/`UInt32.toNat_shiftRight`/`UInt8.toNat_toUInt32`,
+  then `Nat.testBit` unfolds to `1 &&& m >>> n != 0` — use `Nat.and_comm`
+  + `Nat.one_and_eq_mod_two` + `split <;> omega`.
 - **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
   `return` inside a `for` loop exits the loop (producing `some`), not the
   function. Use explicit recursive helper functions instead — they're also
