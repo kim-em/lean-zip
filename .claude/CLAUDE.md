@@ -12,10 +12,11 @@ Run from the project root. Tests require `testdata/` directory.
 
 ### NixOS / nix-shell
 
-On NixOS (or any system where zlib/zstd aren't in the default library
-path), wrap build commands in the nix-shell from the README:
+On NixOS, the project's `shell.nix` provides zlib/zstd/pkg-config.
+If direnv is set up, the environment activates automatically on `cd`.
+Otherwise, prefix commands with `nix-shell --run`:
 
-    nix-shell -p pkg-config zlib 'zstd.override { enableStatic = true; }' --run "lake build && lake exe test"
+    nix-shell --run "lake build && lake exe test"
 
 **Important:** Lake caches `run_io` results (like `moreLinkArgs`) in
 `.lake/`. If you switch between nix-shell and bare shell, or the nix
@@ -23,7 +24,7 @@ environment changes, you may need `rm -rf .lake` before building — a
 plain `lake clean` is not sufficient to clear the cached link flags.
 
 On systems where zlib and zstd are available system-wide (e.g. Ubuntu
-with `libz-dev` and `libzstd-dev`), the nix-shell wrapper is not needed.
+with `libz-dev` and `libzstd-dev`), no nix-shell wrapper is needed.
 
 ## Autonomous Work Cycle
 

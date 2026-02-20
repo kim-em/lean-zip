@@ -11,12 +11,20 @@ Provides whole-buffer and streaming APIs for zlib, gzip, raw deflate, and Zstand
 - libzstd development headers (`libzstd-dev` or equivalent)
 - `pkg-config` (for header discovery on NixOS and similar)
 
-On NixOS:
+On NixOS (or any system where zlib/zstd aren't in the default library path),
+the project includes a `shell.nix` that provides all C dependencies:
+
 ```bash
-nix-shell -p pkg-config zlib 'zstd.override { enableStatic = true; }'
+nix-shell    # then run lake build, lake exe test, etc. inside the shell
 ```
 
-Or set `ZLIB_CFLAGS` and `ZSTD_CFLAGS` manually.
+Or use [direnv](https://direnv.net/) for automatic environment activation:
+```bash
+direnv allow   # one-time setup; environment then activates on cd
+```
+
+You can also set `ZLIB_CFLAGS` and `ZSTD_CFLAGS` manually to point at the
+headers if you prefer.
 
 ## Usage
 
