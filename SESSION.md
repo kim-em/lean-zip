@@ -9,44 +9,54 @@ All proofs in the codebase are complete. No remaining sorry's.
 
 ## Known good commit
 
-`b59cbca` — `lake build && lake exe test` passes
+`734b112` — `lake build && lake exe test` passes
 
-## Completed proofs (this session)
+## Completed this session (review)
 
-- `nextCodes_plus_count_le` (commit 6d24829): Kraft invariant for canonical
-  Huffman codes. Proved via `ncRec` recursive formulation + `kraftSumFrom`
-  conservation law + connecting the imperative `nextCodes.go` loop to `ncRec`.
+Huffman.lean deep review with -88 lines net reduction:
 
-- `canonical_prefix_free` different-length case (commit b59cbca): If cw₁
-  (length l₁) is a prefix of cw₂ (length l₂ > l₁), derive contradiction via:
-  1. `natToBits_prefix_lt`: prefix gives `code₂ < (code₁+1)*2^d`
-  2. `ncRec_shift`: `(ncRec l₁ + count₁)*2^d ≤ ncRec l₂`
-  3. `code₁+1 ≤ ncRec l₁ + count₁` (from `offset < count`)
-  4. `ncRec l₂ ≤ code₂` (code₂ = ncRec + offset ≥ ncRec)
-  Chain gives `code₂ < code₂`, contradiction.
+- **Array helper simplification**: Replaced 4 custom `array_set_*` proofs
+  (40+ lines of manual `get!Internal`/`getD`/`setIfInBounds` unfolding)
+  with 1-2 line proofs using Lean 4.29 stdlib simp lemmas
+  (`getElem?_setIfInBounds_ne`, `getElem?_setIfInBounds_self_of_lt`,
+  `size_setIfInBounds`). Also simplified `replicate` access proofs.
 
-## Key lemmas added
+- **Helper extraction**: Added `nextCodes_eq_ncRec` (wraps
+  `nextCodes_go_eq_ncRec` with default args, used 3 places) and
+  `codeFor_len_bounds` (extracts `≠ 0 ∧ ≤ maxBits`, used 2 places).
 
-- `natToBits_append`: `natToBits val (w₁+w₂) = natToBits (val/2^w₂) w₁ ++ natToBits val w₂`
-- `natToBits_prefix_lt`: prefix → numerical upper bound `b < (a+1)*2^(m-n)`
-- `ncRec_shift`: `(ncRec b₁ + count[b₁])*2^(b₂-b₁) ≤ ncRec b₂`
-- `foldl_count_init`: init-shift for the counting foldl (distinct from `foldl_add_init`)
+- **Dead code removal**: Removed `countLengths_zero` (unused lemma) and
+  its dependency `array_set_ne_zero` (only used by `countLengths_zero`).
+  Found by Codex review.
+
+- **canonical_prefix_free cleanup**: Deduplicated `codeFor_spec`
+  destructuring (was destructuring twice with different fields), inlined
+  prefix proof construction, used named `hlen₂_ne` instead of `by omega`.
+
+- **Doc fix**: Updated ARCHITECTURE.md Huffman description (no longer WIP).
+
+## Codex review summary
+
+No correctness issues found. Three actionable suggestions all applied:
+1. Remove dead `countLengths_zero` + `array_set_ne_zero`
+2. Use named `hlen₂_ne` for `hnc₂` instead of implicit `by omega`
+3. Inline prefix proof reassembly in `canonical_prefix_free`
+
+## Key Lean 4.29 stdlib discoveries
+
+For `[i]!` (get!) on `set!` arrays, the chain is:
+- `getElem!_eq_getD` → `getD_eq_getD_getElem?` → `getElem?_setIfInBounds_ne`/`_self_of_lt`
+- All marked `@[simp]`, so `simp [...]` with the right lemma names closes goals
+- `getElem?_replicate` is `@[grind =]` (not `@[simp]`), so needs explicit bounds for simp
 
 ## Next action
 
 Phase 3 continues. Possible next steps:
-- Review session: clean up the new Huffman proofs (combine steps, extract reusable lemmas)
-- Continue Phase 3: DEFLATE spec proofs (decode correctness, block structure)
-- Review IsPrefixFree: now that canonical_prefix_free is proved, connect it to the
-  `IsPrefixFree` definition for the full code table property
+- Implementation session: connect `canonical_prefix_free` to `IsPrefixFree` definition
+- Implementation session: state main correctness theorem (inflate agrees with spec)
+- Review session: rotate to a different focus area (Native/ code, Lean idioms)
+- Toolchain: v4.29.0-rc1 is current
 
 ## Notes
 
-- `rw [hnc₁, hnc₂] at hupper` works through `let` bindings — Lean 4's `rw` matches
-  let-bound fvars against their definitions during pattern matching
-- `omega` handles the final contradiction chain by treating multiplication expressions
-  as opaque: `A + x < B, B ≤ C, C ≤ A → x < 0 → False`
-- `Nat.mul_le_mul_right` is needed for the multiplication step (omega can't multiply)
-- `Nat.lt_mul_div_succ` gives `b < 2^d * (b/2^d + 1)` — the key numerical consequence
-  of prefix in `natToBits_prefix_lt`
 - Toolchain v4.29.0-rc1 is current

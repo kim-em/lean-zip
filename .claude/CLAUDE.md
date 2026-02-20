@@ -312,5 +312,5 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 0
-- **Last session**: 2026-02-20 (implementation: proved all Huffman sorries)
-- **Last review**: 2026-02-20 (Huffman proofs, Deflate spec, slop detection)
+- **Last session**: 2026-02-20 (review: Huffman proof minimization, -88 lines)
+- **Last review**: 2026-02-20 (Huffman proofs deep, dead code removal, Codex review)

@@ -2,6 +2,46 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Review — Huffman proof minimization + dead code removal
+
+**Type**: review
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 0 → 0
+
+**Focus areas**: Refactoring and proof improvement (Huffman.lean, deep),
+documentation accuracy, slop detection, Codex review.
+
+**Proof improvements** (Huffman.lean, net -88 lines):
+- Replaced 4 custom `array_set_*` proofs with 1-2 line `simp` proofs
+  using Lean 4.29 stdlib lemmas (`getElem?_setIfInBounds_ne`,
+  `getElem?_setIfInBounds_self_of_lt`, `size_setIfInBounds`). Also
+  simplified `replicate` access proofs across 3 locations.
+- Extracted `nextCodes_eq_ncRec` (wraps `nextCodes_go_eq_ncRec` with
+  default args, eliminates 3× repeated 4-line pattern).
+- Extracted `codeFor_len_bounds` (derives `len ≠ 0 ∧ len ≤ maxBits` from
+  condition, eliminates 2× repeated 6-line pattern).
+- Deduplicated `codeFor_spec` destructuring in `canonical_prefix_free`
+  (was destructuring twice for different fields).
+- Inlined prefix proof in `canonical_prefix_free`.
+
+**Dead code removed** (found by Codex):
+- `countLengths_zero`: unused lemma (never referenced after definition)
+- `array_set_ne_zero`: only used by `countLengths_zero`
+
+**Documentation**:
+- ARCHITECTURE.md: Fixed Huffman description (was still "WIP")
+
+**Codex review**: no correctness issues. Three actionable suggestions
+all applied (dead code, named variable, inlined proof).
+
+**Lean 4.29 stdlib discoveries**:
+- `getElem!_eq_getD` + `getD_eq_getD_getElem?` + `getElem?_setIfInBounds_*`
+  chain handles `[i]!` on `set!` arrays via `simp`
+- `getElem?_replicate` is `@[grind =]` not `@[simp]` — needs explicit bounds
+
+**Next**: Implementation session — connect to IsPrefixFree or state main
+correctness theorem, or review session on a different focus area.
+
 ## 2026-02-20: Implementation — Prove all Huffman sorries (sorry count → 0)
 
 **Type**: implementation (continuation from two prior sessions that ran out of context)
