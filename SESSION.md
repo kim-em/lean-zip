@@ -7,58 +7,51 @@
 
 All in `Zip/Spec/InflateCorrect.lean` — staged theorem statements for
 future sessions:
-- `readBits_toBits` (line 184): multi-bit read correspondence
-- `huffTree_decode_correct` (line 196): Huffman decode correspondence
-- `inflate_correct` (line 225): main correctness theorem
-- `inflate_correct'` (line 237): corollary for position-0 inflate
+- `readBits_toBits` (line 174): multi-bit read correspondence
+- `huffTree_decode_correct` (line 189): Huffman decode correspondence
+- `inflate_correct` (line 219): main correctness theorem
+- `inflate_correct'` (line 231): corollary for position-0 inflate
 
 ## Known good commit
 
-`f010cd2` — `lake build && lake exe test` passes
+`bcf4af4` — `lake build && lake exe test` passes
 
-## Completed this session (implementation)
+## Completed this session (review)
 
-### resolveLZ77 properties (Deflate.lean)
+### Critical: Fixed unprovable theorem statements
 
-Proved 8 theorems about `resolveLZ77`:
-- `resolveLZ77_nil`, `resolveLZ77_endOfBlock`, `resolveLZ77_literal` (@[simp])
-- `resolveLZ77_reference_dist_zero`, `resolveLZ77_reference_dist_too_large`
-- `resolveLZ77_literals`: compositionality for literal sequences
-- `resolveLZ77_literal_cons`, `resolveLZ77_endOfBlock_empty`
-- `resolveLZ77_reference_valid`: valid back-reference unfolds correctly
-- `resolveLZ77_extends`: successful resolution extends accumulator
+- **`readBits_toBits`**: Added `hwf : br.bitOff < 8` (bitstream
+  correspondence requires well-formed BitReader) and `hn : n ≤ 32`
+  (UInt32.shiftLeft reduces shift mod 32, so for shift ≥ 32, bits are
+  placed at wrong position). Without these, the theorem was false.
+- **`huffTree_decode_correct`**: Added `hwf : br.bitOff < 8` for the
+  same reason — proof traces through `readBit_toBits` at each tree step.
 
-### Main correctness theorem structure (InflateCorrect.lean — new file)
+### Proof improvements
 
-Created `Zip/Spec/InflateCorrect.lean` with layered theorem decomposition:
-- `Zip.Native.BitReader.toBits`: bridge definition
-- `readBit_toBits`: **fully proved** — single bit correspondence
-- `readBit_wf`: **fully proved** — readBit preserves bitOff < 8
-- `readBits_toBits`: stated (sorry'd) — multi-bit correspondence
-- `huffTree_decode_correct`: stated (sorry'd) — Huffman layer
-- `inflate_correct`: stated (sorry'd) — main theorem
-- `inflate_correct'`: stated (sorry'd) — corollary
+- **Removed `byteToBits_length'` duplication**: Made `byteToBits_length`
+  in Deflate.lean `protected` instead of `private`, reused from
+  InflateCorrect.lean as `Deflate.Spec.bytesToBits.byteToBits_length`.
+- **Simplified `ofFn_drop_head`**: Replaced 12-line induction with 3-line
+  proof using `List.drop_eq_getElem_cons` + `List.getElem_ofFn`.
+- **Combined duplicate branches in `readBit_toBits`**: Used `all_goals`
+  for the bit-value goal (identical in both bitOff cases).
 
-### Proved infrastructure lemmas (InflateCorrect.lean)
+### Review findings (no action needed)
 
-- `flatMap_drop_mul`: drop n*k from uniform-length flatMap
-- `flatMap_cons_drop`: drop within first segment
-- `ofFn_drop_head`: List.ofFn element access via drop
-- `byteToBits_drop_head`, `bytesToBits_drop_testBit`: bit extraction
-- `shift_and_one_eq_testBit`: Nat bit operation correspondence
-- `uint32_bit_eq_testBit`: UInt32 → Nat.testBit bridge
-- `list_drop_cons_tail`: drop-cons-tail structural lemma
+- `inflate_correct` and `inflate_correct'` statements are correctly
+  stated. `inflate_correct'` follows from `inflate_correct` with
+  `startPos = 0`. The `bitOff < 8` invariant is maintained internally
+  (starting from 0), so no explicit hypothesis needed.
+- resolveLZ77 properties (8 theorems): all clean, no simplification found.
+- Huffman.lean: no dead code, no stdlib duplicates, no improvements found.
+- General-purpose lemmas (`flatMap_drop_mul`, `shift_and_one_eq_testBit`,
+  `list_drop_cons_tail`) could move to ZipForStd in a future session.
 
-### Key proof techniques discovered
+### Codex review
 
-- `UInt32.toNat_inj.mp`: convert UInt32 equality to Nat equality
-- `UInt32.toNat_and`, `UInt32.toNat_shiftRight`, `UInt8.toNat_toUInt32`:
-  standard decomposition for UInt32 bit operations
-- `Nat.testBit` unfolds to `1 &&& m >>> n != 0`; use `Nat.and_comm` +
-  `Nat.one_and_eq_mod_two` + `split <;> omega` for the bridge
-- `split at h` for case analysis on if-then-else in hypotheses
-- `simp only [Zip.Native.BitReader.readBit] at h` then `split at h`
-  for unfolding native function definitions
+No issues found. Hypotheses match native BitReader semantics, lemma reuse
+is sound, proof simplifications mechanically safe.
 
 ## Next action
 
@@ -70,8 +63,10 @@ Priority order for next implementation session:
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- `bitOff < 8` well-formedness invariant is needed for bitstream proofs;
-  initial BitReader at `{ bitOff := 0 }` satisfies it, and `readBit_wf`
-  shows it's preserved
-- `data[pos]!` vs `data[pos]` resolved by `simp [hpos']`
-- `data.data[pos] = data[pos]` is `rfl` for ByteArray
+- `bitOff < 8` well-formedness invariant is needed for all bitstream
+  correspondence theorems. Initial BitReader at `{ bitOff := 0 }` satisfies
+  it, and `readBit_wf` shows it's preserved.
+- `n ≤ 32` needed for `readBits_toBits` because `UInt32.shiftLeft`
+  reduces shift mod 32. All DEFLATE callers use n ≤ 25.
+- `protected` (not `private`) is the right visibility for lemmas needed
+  across files within the same namespace hierarchy.

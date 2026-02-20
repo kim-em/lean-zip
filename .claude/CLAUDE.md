@@ -311,6 +311,14 @@ Update it during review and reflect sessions.
   `UInt32.toNat_and`/`UInt32.toNat_shiftRight`/`UInt8.toNat_toUInt32`,
   then `Nat.testBit` unfolds to `1 &&& m >>> n != 0` — use `Nat.and_comm`
   + `Nat.one_and_eq_mod_two` + `split <;> omega`.
+- **UInt32 shift mod 32**: `UInt32.shiftLeft` reduces the shift amount
+  mod 32 — for `bit <<< shift.toUInt32` with `shift ≥ 32`, the bit is
+  placed at position `shift % 32`, not `shift`. Any theorem about
+  `readBits` (which accumulates via `bit <<< shift`) needs `n ≤ 32`.
+- **`protected` not `private` for cross-file lemmas**: When a lemma in
+  one Spec file is needed by another (e.g. `byteToBits_length` used in
+  both Deflate.lean and InflateCorrect.lean), use `protected` visibility.
+  `private` makes it inaccessible from other files.
 - **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
   `return` inside a `for` loop exits the loop (producing `some`), not the
   function. Use explicit recursive helper functions instead — they're also
@@ -323,5 +331,5 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 4 (all in InflateCorrect.lean — staged theorem statements)
-- **Last session**: 2026-02-20 (impl: resolveLZ77 properties + readBit_toBits proof)
-- **Last review**: 2026-02-20 (Huffman proofs deep, dead code removal, Codex review)
+- **Last session**: 2026-02-20 (review: InflateCorrect.lean deep review + theorem fixes)
+- **Last review**: 2026-02-20 (InflateCorrect.lean: fixed unprovable statements, proof cleanup)

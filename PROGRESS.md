@@ -2,6 +2,39 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Review — InflateCorrect.lean deep review + theorem statement fixes
+
+**Type**: review
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 4 → 4 (unchanged)
+**Commit**: `bcf4af4`
+
+**Critical finding**: `readBits_toBits` and `huffTree_decode_correct` were
+unprovable as stated — missing hypotheses added:
+- `hwf : br.bitOff < 8` on both (bitstream correspondence requires
+  well-formed BitReader; without it, `toBits` indexes into wrong byte)
+- `hn : n ≤ 32` on `readBits_toBits` (UInt32.shiftLeft reduces shift
+  mod 32; for shift ≥ 32, bit placement is wrong)
+
+**Proof improvements**:
+- Removed duplicate `byteToBits_length'` — made Deflate.lean version
+  `protected` instead of `private`, reused across files
+- Simplified `ofFn_drop_head` from 12-line induction to 3 lines using
+  `List.drop_eq_getElem_cons` + `List.getElem_ofFn`
+- Combined duplicate branches in `readBit_toBits` via `all_goals`
+
+**Review findings (no action needed)**:
+- `inflate_correct` / `inflate_correct'` statements correct as-is
+- resolveLZ77 properties (8 theorems): clean, no improvements
+- Huffman.lean (full scan): no dead code, no stdlib duplicates
+- General-purpose lemmas identified for future ZipForStd extraction:
+  `flatMap_drop_mul`, `shift_and_one_eq_testBit`, `list_drop_cons_tail`
+
+**Codex review**: no issues found.
+
+**Next**: Implementation session — prove `readBits_toBits` (now provable
+with corrected hypotheses), then `huffTree_decode_correct`.
+
 ## 2026-02-20: Implementation — resolveLZ77 properties + readBit_toBits proof
 
 **Type**: implementation
