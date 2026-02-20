@@ -2,6 +2,53 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-20: Review — Deflate.Spec deep review + Lean idioms scan
+
+**Type**: review
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 0 → 0
+
+**Focus areas**: Refactoring and proof improvement (Deflate.lean, deep),
+Lean idioms (`grind`, `decide_cbv`, proven bounds), slop detection.
+
+**RFC 1951 verification**: Manually verified all DEFLATE table values
+against the RFC: `lengthBase`/`lengthExtra` (29 entries), `distBase`/
+`distExtra` (30 entries), `codeLengthOrder` (19 entries), `fixedLitLengths`
+(288 entries), `fixedDistLengths` (32 entries), block type dispatch, stored
+block handling, dynamic Huffman decoding logic. All correct.
+
+**New theorems** (Deflate.lean, +47 lines):
+- `byteToBits_length`: Each byte → 8 bits
+- `bytesToBits_length`: `data.size * 8` total bits (required refactoring
+  `bytesToBits` to use `data.data.toList` for proof tractability)
+- `readBitsLSB_some_length`: Remaining bits after successful read satisfy
+  `rest.length + n = bits.length`
+
+**Refactoring**:
+- `bytesToBits`: Changed from `data.toList.flatMap` to `data.data.toList.flatMap`
+  because `ByteArray.toList` uses an `@[irreducible]` loop that can't be
+  unfolded in proofs. This follows the established project convention
+  (`data.data.toList` in Crc32, Adler32).
+- Fixed inaccurate `readBitsMSB` docstring
+
+**Idioms tested (no actionable improvements)**:
+- `decide_cbv`: Not available in v4.29.0-rc1
+- `grind`: Tested on Deflate proofs; only useful for equational reasoning
+  (consistent with Huffman.lean findings from previous review)
+- `!` accesses in Huffman.lean: Invasive to convert to proven bounds
+- `partial def`: Only in IO streaming code — appropriate
+
+**Dead code scan**: 4 candidates found (readBitsMSB, decodeBytes, finalize,
+ZipForStd.lean empty), all previously reviewed and justified as spec
+infrastructure except ZipForStd.lean which is a cleanup target.
+
+**Codex review**: Two findings, neither actionable (false positive on nil
+branch proof, fair style note on proof brittleness). Suggested future work:
+`data.data.toList`/`data.toList` interop lemma, `flatMap_length_const` helper.
+
+**Next**: Implementation session — state main correctness theorem, prove
+resolveLZ77 properties, or connect spec to native BitReader.
+
 ## 2026-02-20: Implementation — IsPrefixFree bridge + ValidLengths + decode correctness
 
 **Type**: implementation

@@ -5,25 +5,29 @@
 
 ## Status: Complete
 
-## Session type: implementation
+## Session type: review
 
-## Goal: Connect Huffman proofs to IsPrefixFree + ValidLengths + decode correctness
+## Goal: Deep review of Spec/Deflate.lean + Lean idioms across codebase
+
+### Focus areas
+
+1. **Refactoring and proof improvement** — deep review of `Zip/Spec/Deflate.lean`
+2. **Lean idioms** — `grind` opportunities, proven bounds, newer APIs
 
 ### Deliverables
 
-- [x] `allCodes_prefix_free`: Prove the codewords from `allCodes` form a
-  prefix-free list when `ValidLengths` holds. Bridges `canonical_prefix_free`
-  (pairwise on symbols) to `IsPrefixFree` (on the `allCodes` output list).
-- [x] `allCodes_nodup`: Distinct positions in `allCodes` correspond to distinct
-  symbols (needed by `allCodes_prefix_free`).
-- [x] `fixedLitLengths_valid`: Prove `ValidLengths fixedLitLengths 15` (concrete
-  computation — the fixed literal/length Kraft sum = 2^15 exactly).
-- [x] `fixedDistLengths_valid`: Prove `ValidLengths fixedDistLengths 15` (concrete
-  computation — 32 codes of length 5).
-- [x] `decode_prefix_free`: Prove decode correctness for prefix-free tables.
-- [x] Prefix-free corollaries for fixed DEFLATE codes.
+- [x] Verify Deflate spec correctness against RFC 1951 (all block types,
+  table values, bit orderings, dynamic Huffman decoding)
+- [x] Add `bytesToBits_length` theorem (foundation for Phase 3 proofs)
+- [x] Add `readBitsLSB_some_length` theorem (remaining bits get shorter)
+- [x] Test `decide_cbv` as alternative to `decide` with `maxRecDepth 2048`
+  for `fixedLitLengths_valid` — does not exist in v4.29.0-rc1
+- [x] Test `grind` on existing proofs — no improvements over existing tactics
+- [x] Scan for `!` accesses in spec code — invasive to convert in Huffman.lean
+- [x] Slop detection: dead code, unused imports, verbose patterns — docstring fix
+- [x] Documentation: docstring accuracy verified and fixed
 
-### Result
+### Future work (from Codex review)
 
-4 commits, +193 lines (140 in Huffman.lean, 29 in Deflate.lean, 24 in PLAN.md).
-All proofs verified, 0 sorries, all tests pass.
+- Consider `data.data.toList`/`data.toList` interop lemma in ZipForStd
+- Consider `flatMap_length_const` helper if more length proofs arise
