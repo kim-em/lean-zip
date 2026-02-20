@@ -312,5 +312,5 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 0
-- **Last session**: 2026-02-20 (review: Huffman proof minimization, -88 lines)
+- **Last session**: 2026-02-20 (impl: IsPrefixFree bridge + ValidLengths + decode correctness)
 - **Last review**: 2026-02-20 (Huffman proofs deep, dead code removal, Codex review)

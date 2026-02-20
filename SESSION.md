@@ -9,54 +9,56 @@ All proofs in the codebase are complete. No remaining sorry's.
 
 ## Known good commit
 
-`734b112` — `lake build && lake exe test` passes
+`41d0176` — `lake build && lake exe test` passes
 
-## Completed this session (review)
+## Completed this session (implementation)
 
-Huffman.lean deep review with -88 lines net reduction:
+Connected Huffman proofs to IsPrefixFree, proved ValidLengths for fixed
+codes, and proved decode correctness for prefix-free tables.
 
-- **Array helper simplification**: Replaced 4 custom `array_set_*` proofs
-  (40+ lines of manual `get!Internal`/`getD`/`setIfInBounds` unfolding)
-  with 1-2 line proofs using Lean 4.29 stdlib simp lemmas
-  (`getElem?_setIfInBounds_ne`, `getElem?_setIfInBounds_self_of_lt`,
-  `size_setIfInBounds`). Also simplified `replicate` access proofs.
+### New theorems in Huffman.lean (+140 lines)
 
-- **Helper extraction**: Added `nextCodes_eq_ncRec` (wraps
-  `nextCodes_go_eq_ncRec` with default args, used 3 places) and
-  `codeFor_len_bounds` (extracts `≠ 0 ∧ ≤ maxBits`, used 2 places).
+- `allCodes_mem_iff`: Membership in `allCodes` ↔ `codeFor` returns `some`
+- `allCodes_nodup`: No duplicate entries (via `Pairwise.filterMap` +
+  `nodup_range`)
+- `allCodes_prefix_free_of_ne`: Membership-based prefix-free (convenient
+  API for downstream use)
+- `allCodeWords_prefix_free`: `IsPrefixFree` on the codeword list (the
+  main theorem connecting Huffman construction to the prefix-free property)
+- `IsPrefix_dichotomy`: Two prefixes of the same list are comparable
+- `isPrefixOf_self_append`: `isPrefixOf cw (cw ++ rest) = true`
+- `decode_prefix_free`: Decode correctness — in a prefix-free table,
+  `decode (cw ++ rest) = some (sym, rest)` for matching entry `(cw, sym)`
 
-- **Dead code removal**: Removed `countLengths_zero` (unused lemma) and
-  its dependency `array_set_ne_zero` (only used by `countLengths_zero`).
-  Found by Codex review.
+### New theorems in Deflate.lean (+29 lines)
 
-- **canonical_prefix_free cleanup**: Deduplicated `codeFor_spec`
-  destructuring (was destructuring twice with different fields), inlined
-  prefix proof construction, used named `hlen₂_ne` instead of `by omega`.
-
-- **Doc fix**: Updated ARCHITECTURE.md Huffman description (no longer WIP).
+- `fixedLitLengths_valid`: `ValidLengths fixedLitLengths 15` (Kraft sum
+  = 2^15 exactly, proved by `decide` with `maxRecDepth 2048`)
+- `fixedDistLengths_valid`: `ValidLengths fixedDistLengths 15`
+- `fixedLitCodes_prefix_free`: One-liner from the above
+- `fixedDistCodes_prefix_free`: One-liner from the above
 
 ## Codex review summary
 
-No correctness issues found. Three actionable suggestions all applied:
-1. Remove dead `countLengths_zero` + `array_set_ne_zero`
-2. Use named `hlen₂_ne` for `hnc₂` instead of implicit `by omega`
-3. Inline prefix proof reassembly in `canonical_prefix_free`
-
-## Key Lean 4.29 stdlib discoveries
-
-For `[i]!` (get!) on `set!` arrays, the chain is:
-- `getElem!_eq_getD` → `getD_eq_getD_getElem?` → `getElem?_setIfInBounds_ne`/`_self_of_lt`
-- All marked `@[simp]`, so `simp [...]` with the right lemma names closes goals
-- `getElem?_replicate` is `@[grind =]` (not `@[simp]`), so needs explicit bounds for simp
+Two issues flagged:
+1. **maxBits = 15 for distance codes** — Codex suggested using 5, but 15
+   matches the actual usage in `codeFor`/`allCodes` (both default to 15).
+   Added clarifying comment. Not a bug.
+2. **Nodup/Pairwise fragility** — Codex worried that `allCodes_nodup`
+   (a Nodup proof) used with `pairwise_iff_getElem` might break. But
+   `Nodup = Pairwise (· ≠ ·)` by definition in Lean 4, so no conversion
+   needed. Not fragile.
 
 ## Next action
 
 Phase 3 continues. Possible next steps:
-- Implementation session: connect `canonical_prefix_free` to `IsPrefixFree` definition
-- Implementation session: state main correctness theorem (inflate agrees with spec)
-- Review session: rotate to a different focus area (Native/ code, Lean idioms)
-- Toolchain: v4.29.0-rc1 is current
+- State main correctness theorem (inflate agrees with spec)
+- Prove properties of resolveLZ77 (LZ77 back-reference resolution)
+- Connect spec bytesToBits to native BitReader
+- Review session: rotate to Native/ code or Lean idioms
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
+- `decide` works for ValidLengths on 32-element lists (fast) but needs
+  `maxRecDepth 2048` for 288-element lists (~900ms)

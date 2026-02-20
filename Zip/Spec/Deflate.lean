@@ -328,7 +328,8 @@ theorem fixedLitLengths_valid : Huffman.Spec.ValidLengths fixedLitLengths 15 := 
     omega
   · decide
 
-/-- Fixed distance code lengths form a valid Huffman code. -/
+/-- Fixed distance code lengths form a valid Huffman code.
+    Uses maxBits = 15 to match the default in `codeFor`/`allCodes`. -/
 theorem fixedDistLengths_valid : Huffman.Spec.ValidLengths fixedDistLengths 15 := by
   constructor
   · intro l hl
