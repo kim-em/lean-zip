@@ -105,8 +105,9 @@ Estimated at 3-5x the work of DEFLATE.
   fast path; the native implementations serve as verified reference
   implementations that can also be used when the C libraries are
   unavailable
-- **Specification gap**: RFC 1951 is informal English. Formalizing the
-  spec is a research contribution in itself, and is a prerequisite for
+- **Specification gap**: RFC 1951 is informal English. Senjak & Hofmann
+  (2016) formalized it in Coq (see References below), but no Lean 4
+  formalization exists. Formalizing the spec is a prerequisite for
   proving anything about an implementation
 - **Compression level fidelity**: Matching zlib's exact output
   byte-for-byte at each compression level is probably not worth pursuing.
@@ -220,6 +221,24 @@ algorithm is well-understood, and a verified decompressor has clear
 practical value: you trust decompression more than compression in
 adversarial contexts (processing untrusted archives).
 
+**Prior art**: Senjak & Hofmann's Coq formalization (see References)
+contains directly relevant proof techniques:
+- Their Definition 1 gives a 4-axiom characterization of canonical
+  prefix-free codings (prefix-free, shorter-precedes-longer,
+  same-length-ordered-by-symbol, no-gaps). Compare against our
+  `Huffman.Spec` axiomatization for completeness.
+- Theorem 1 (uniqueness from code lengths): proved by contradiction —
+  take the lex-smallest differing code and derive a contradiction via
+  the no-gaps axiom. Relevant to `codeFor_injective` and the
+  different-length case of `canonical_prefix_free`.
+- Theorem 3 (constructive existence via Kraft inequality): validates
+  the `ValidLengths` / Kraft-based approach.
+- Section 5 (strong decidability / strong uniqueness): a relational
+  framework for specifying encoding relations and extracting verified
+  parsers. Their bind-like combinator for composing relations preserves
+  both properties, enabling modular parser construction. Worth studying
+  as an approach for the overall decompressor correctness proof.
+
 ### Phase 4: DEFLATE Compressor
 
 Pure Lean DEFLATE compressor, starting with simple strategies (level 0
@@ -233,6 +252,14 @@ stored, level 1 greedy matching). Prove roundtrip correctness.
 - Higher levels as desired (lazy matching, dynamic Huffman codes)
 - Proof: `inflate (deflate data level) = data` for implemented levels
 - Conformance tests: verify zlib can decompress our output and vice versa
+
+**Prior art**: Senjak & Hofmann (2016) proved `decompress(compress(d)) = d`
+in Coq using a relational specification with monadic combinators
+(Sections 5-6). Their approach defines encoding as a relation
+`OutputType → InputType → Prop`, proves strong decidability (which
+extracts a parser), then proves a compression function produces output
+satisfying the relation. This is one viable approach; a more direct
+functional proof may also work in Lean 4.
 
 ### Phase 5: Zstd (Aspirational)
 
@@ -261,6 +288,21 @@ Worth building regardless of proofs. The approach:
 
 Having two independent implementations tested against each other catches
 bugs that neither catches alone.
+
+## References
+
+- **Senjak & Hofmann (2016)**, "An implementation of Deflate in Coq",
+  arXiv:1609.01220. A complete Coq formalization of DEFLATE (RFC 1951)
+  with a verified compression/decompression roundtrip. Includes a fully
+  verified canonical prefix-free coding library (uniqueness, existence
+  via Kraft inequality), a backreference resolver using exponential
+  lists, and a relational specification framework ("strong decidability"
+  / "strong uniqueness") for composing and extracting verified parsers.
+  The extracted Haskell implementation handles multi-megabyte inputs.
+  This is the closest prior work to lean-zip's verification effort; the
+  main differences are the proof assistant (Coq vs Lean 4), the
+  extraction approach (Coq extraction to Haskell vs native Lean), and
+  performance characteristics.
 
 ## Bottom Line
 
