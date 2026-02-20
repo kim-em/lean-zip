@@ -3,40 +3,35 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: Completed
+## Status: In progress
 
-## Session type: implementation
+## Session type: review
 
-## Goal: Prove readBits_toBits, reduce sorry count from 4 to 3 (or fewer)
+## Goal: Deep review of recent proofs (InflateCorrect.lean, ZipForStd/Nat.lean)
+
+### Focus areas
+
+1. **Refactoring and proof improvement** (InflateCorrect.lean, deep)
+   - Can `decode_go_decodeBits` branches be consolidated?
+   - Can `readBits_go_spec` inductive step be simplified?
+   - Are helper lemmas minimal? Can any be replaced by stdlib?
+   - Check for dead code or unused hypotheses
+
+2. **ZipForStd/Nat.lean review**
+   - Is `or_two_pow_eq_add` proof minimal?
+   - Are there simpler approaches using newer stdlib lemmas?
+   - Any other Nat lemmas that should be added for upcoming proofs?
+
+3. **Lean idioms scan** (Spec/ files, quick)
+   - Check for `grind` opportunities in new proofs
+   - Check for redundant imports
+   - Any `!` indexing that could use proven bounds?
 
 ### Steps
 
-- [x] Search for available UInt32/Nat/BitVec lemmas in Lean 4.29.0-rc1
-- [x] Add `Nat.or_two_pow_eq_add` to ZipForStd/Nat.lean
-- [x] Prove `readBits_go_spec` loop invariant (induction on k)
-- [x] Derive `readBits_toBits` from `readBits_go_spec` with acc=0, shift=0
-- [x] Decompose `huffTree_decode_correct` into two steps
-- [x] Prove `decode_go_decodeBits` (BitReader→bits step)
-- [x] Wire up `huffTree_decode_correct` using both helper lemmas
-
-### Next session priorities
-
-1. **Prove `decodeBits_eq_spec_decode`** — show that the pure tree decode
-   agrees with the spec's linear-search decode. Approach:
-   - Define "tree maps codeword to symbol" predicate
-   - Prove `insert` maintains it
-   - Prove `fromLengths` establishes it for all canonical codes
-   - Connect to `Huffman.Spec.decode`'s linear search
-2. Prove `inflate_correct'` from `inflate_correct`
-3. Work on `inflate_correct` (the main theorem)
-
-### Proof approach notes for decodeBits_eq_spec_decode
-
-The challenge is connecting two implementations of RFC 1951 §3.2.2:
-- `fromLengths` (native): imperative with mutable arrays, builds tree
-- `allCodes` → `codeFor` (spec): functional, computes each code independently
-
-Both compute `nextCode[len] = (nextCode[len-1] + count[len-1]) << 1`.
-An intermediate representation (e.g., a mapping from codewords to symbols)
-could bridge the gap. Alternatively, prove both produce the same code for
-each symbol, then connect tree insertion to table membership.
+- [ ] Deep review InflateCorrect.lean proofs — attempt simplifications
+- [ ] Review ZipForStd/Nat.lean — check for simpler proof
+- [ ] Quick idioms scan across Spec/ files
+- [ ] Build + test
+- [ ] /second-opinion on changes
+- [ ] Document in PROGRESS.md and SESSION.md

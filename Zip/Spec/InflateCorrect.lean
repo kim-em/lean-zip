@@ -109,8 +109,7 @@ private theorem uint32_bit_eq_testBit (byte : UInt8) (off : Nat) (hoff : off < 8
   rw [UInt32.toNat_and, UInt32.toNat_shiftRight, UInt8.toNat_toUInt32]
   have hoff_eq : off.toUInt32.toNat % 32 = off := by simp [Nat.toUInt32]; omega
   rw [hoff_eq]
-  have : UInt32.toNat 1 = 1 := by decide
-  rw [this, shift_and_one_eq_testBit]
+  rw [UInt32.toNat_one, shift_and_one_eq_testBit]
   split <;> simp
 
 private theorem list_drop_cons_tail {l : List α} {a : α} {rest : List α} {n : Nat}
@@ -325,19 +324,14 @@ private theorem decode_go_decodeBits (tree : Zip.Native.HuffTree)
         split at h
         · -- bit == 0: go left (b = false)
           rename_i hbit
-          have hb : b = false := by
-            have : bit = 0 := by rwa [beq_iff_eq] at hbit
-            cases b <;> simp_all
+          have hb : b = false := by cases b <;> simp_all
           obtain ⟨hspec, hwf'⟩ := ihz br₁ (n + 1) hwf₁ h
           refine ⟨?_, hwf'⟩
           rw [hbr_bits, hb]; simp only [decodeBits]
           rw [← hbr1_bits]; exact hspec
         · -- bit != 0: go right (b = true)
           rename_i hbit
-          have hb : b = true := by
-            cases b with
-            | true => rfl
-            | false => exfalso; exact hbit (by simp_all)
+          have hb : b = true := by cases b <;> simp_all
           obtain ⟨hspec, hwf'⟩ := iho br₁ (n + 1) hwf₁ h
           refine ⟨?_, hwf'⟩
           rw [hbr_bits, hb]; simp only [decodeBits]
