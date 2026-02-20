@@ -41,7 +41,8 @@ def readBitsLSB : Nat → List Bool → Option (Nat × List Bool)
     return ((if b then 1 else 0) + val * 2, remaining)
 
 /-- Read `n` bits from a bit stream as a natural number (MSB first).
-    Used for Huffman code matching. -/
+    Not currently used; kept as spec infrastructure for potential
+    future proof needs (e.g. connecting MSB Huffman codes to bitstreams). -/
 def readBitsMSB : Nat → List Bool → Option (Nat × List Bool)
   | 0, bits => some (0, bits)
   | _ + 1, [] => none
