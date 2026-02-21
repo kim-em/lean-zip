@@ -6,5 +6,8 @@
         "repo": "leanprover/skills"
       }
     }
+  },
+  "enabledPlugins": {
+    "lean@leanprover": true
   }
 }
