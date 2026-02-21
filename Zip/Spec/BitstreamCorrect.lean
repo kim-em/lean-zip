@@ -505,4 +505,85 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
       simp only [Zip.Native.BitReader.toBits, hoff]
       done
 
+/-! ### readBytes correspondence -/
+
+/-- Spec-level `readNBytes` on byte-aligned bits reads the expected bytes.
+    Generalized over accumulator for the inductive proof. -/
+private theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
+    (hle : pos + n ≤ data.size) (acc : List UInt8) :
+    Deflate.Spec.decodeStored.readNBytes n
+      ((Deflate.Spec.bytesToBits data).drop (pos * 8)) acc =
+      some (acc ++ (data.data.toList.extract pos (pos + n)),
+            (Deflate.Spec.bytesToBits data).drop ((pos + n) * 8)) := by
+  induction n generalizing pos acc with
+  | zero =>
+    simp [Deflate.Spec.decodeStored.readNBytes]
+    done
+  | succ k ih =>
+    -- Unfold one step of readNBytes
+    simp only [Deflate.Spec.decodeStored.readNBytes]
+    -- Evaluate readBitsLSB 8 at byte-aligned position pos
+    have hpos : pos < data.size := by omega
+    rw [bytesToBits_getElem data pos hpos, readBitsLSB_byteToBits]
+    simp only [bind, Option.bind, UInt8.ofNat_toNat]
+    -- Apply IH with pos+1
+    rw [ih (pos + 1) (by omega) (acc ++ [data[pos]])]
+    -- Goal: some (acc ++ [data[pos]] ++ extract(pos+1, pos+1+k), ...) =
+    --       some (acc ++ extract(pos, pos+k+1), ...)
+    congr 1; ext1
+    · -- List equality
+      rw [List.append_assoc]
+      congr 1
+      -- [data[pos]] ++ extract(pos+1, pos+1+k) = extract(pos, pos+k+1)
+      simp only [List.extract, show pos + (k + 1) - pos = k + 1 from by omega,
+        show pos + 1 + k - (pos + 1) = k from by omega]
+      have hlen : pos < data.data.toList.length := by simp [Array.length_toList]; exact hpos
+      rw [List.drop_eq_getElem_cons hlen, List.take_succ_cons]
+      congr 1
+      congr 1; omega
+    · -- bits equality: (pos+1+k)*8 = (pos+k+1)*8
+      show List.drop ((pos + 1 + k) * 8) _ = List.drop ((pos + (k + 1)) * 8) _
+      congr 1; omega
+
+/-- Native `readBytes` corresponds to spec `readNBytes` after alignment.
+    The native reader aligns to a byte boundary and reads `n` contiguous bytes.
+    The spec reads `n` bytes one at a time via `readBitsLSB 8`. -/
+theorem readBytes_toBits (br : Zip.Native.BitReader)
+    (n : Nat) (bytes : ByteArray) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (h : br.readBytes n = .ok (bytes, br')) :
+    ∃ rest,
+      Deflate.Spec.decodeStored.readNBytes n (Deflate.Spec.alignToByte br.toBits) [] =
+        some (bytes.data.toList, rest) ∧
+      br'.toBits = rest := by
+  -- Unfold readBytes: aligns, bounds check, extracts slice
+  simp only [Zip.Native.BitReader.readBytes] at h
+  split at h
+  · simp at h
+  · rename_i hbound
+    -- Extract bytes and reader from h
+    have hbytes : bytes = br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) := by
+      cases h; rfl
+    have hbr' : br' = { br.alignToByte with pos := br.alignToByte.pos + n } := by
+      cases h; rfl
+    -- Alignment properties
+    have hoff : br.alignToByte.bitOff = 0 := alignToByte_wf br
+    have halign : br.alignToByte.toBits = Deflate.Spec.alignToByte br.toBits :=
+      alignToByte_toBits br hwf hpos
+    have hle : br.alignToByte.pos + n ≤ br.alignToByte.data.size := by omega
+    -- Use readNBytes_aligned
+    rw [← halign]
+    simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
+    rw [readNBytes_aligned br.alignToByte.data br.alignToByte.pos n hle []]
+    simp only [List.nil_append]
+    -- bytes and remaining bits
+    constructor; constructor
+    · -- bytes equality
+      congr 1
+      rw [hbytes, ByteArray.data_extract, Array.toList_extract]
+    · -- remaining bits equality
+      rw [hbr']
+      simp only [hoff, Nat.add_zero]
+
 end Deflate.Correctness
