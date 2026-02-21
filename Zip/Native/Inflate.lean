@@ -38,6 +38,23 @@ where
         else .node z (go o n)
       | .leaf s => .leaf s  -- shouldn't happen in valid data
 
+/-- Build a Huffman tree by sequentially inserting symbols from an array of
+    code lengths, starting from index `start`. Returns the tree and updated
+    nextCode array. Used by `fromLengths` for the final insertion pass. -/
+def insertLoop (lengths : Array UInt8) (nextCode : Array UInt32)
+    (start : Nat) (tree : HuffTree) : HuffTree × Array UInt32 :=
+  if h : start < lengths.size then
+    let len := lengths[start]
+    if len > 0 then
+      let c := nextCode[len.toNat]!
+      let tree' := tree.insert c len.toNat start.toUInt16
+      let nextCode' := nextCode.set! len.toNat (c + 1)
+      insertLoop lengths nextCode' (start + 1) tree'
+    else
+      insertLoop lengths nextCode (start + 1) tree
+  else (tree, nextCode)
+termination_by lengths.size - start
+
 /-- Build a Huffman tree from an array of code lengths (indexed by symbol).
     Symbols with length 0 have no code. Uses the canonical Huffman algorithm
     from RFC 1951 §3.2.2. -/
@@ -58,14 +75,7 @@ def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     code := (code + blCount[bits]!.toUInt32) <<< 1
     nextCode := nextCode.set! b code
   -- Build tree by inserting each symbol
-  let mut tree : HuffTree := .empty
-  for h : i in [:lengths.size] do
-    let len := lengths[i]
-    if len > 0 then
-      let c := nextCode[len.toNat]!
-      nextCode := nextCode.set! len.toNat (c + 1)
-      tree := tree.insert c len.toNat i.toUInt16
-  return tree
+  return (insertLoop lengths nextCode 0 .empty).1
 
 /-- Decode one symbol from the bit reader using this Huffman tree. -/
 def decode (tree : HuffTree) (br : BitReader) :
