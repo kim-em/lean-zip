@@ -2,6 +2,43 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-21: Implementation — bitstream lemmas + decodeStored_correct
+
+**Type**: implementation
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 2 → 1 (proved `inflate_correct'`)
+**Starting commit**: `15c241e`
+**Commits**: `f80b5b8`..`350666b`
+
+**Key results**:
+
+- **`inflate_correct'`**: Proved the corollary (startPos=0 specialization
+  of `inflate_correct`). Straightforward unfolding + case split.
+
+- **Bitstream correspondence lemmas** (BitstreamCorrect.lean):
+  - `readBitsLSB_testBit`, `readBitsLSB_byteToBits`, `readBitsLSB_split`
+  - `alignToByte_toBits` — native ↔ spec alignment
+  - `readUInt16LE_toBits` — native LE 16-bit read ↔ spec `readBitsLSB 16`
+  - `readNBytes_aligned` — inductive byte-reading core
+  - `readBytes_toBits` — native `readBytes` ↔ spec `readNBytes`
+  - Helpers: `readUInt16LE_wf`, `readUInt16LE_data`, `readBytes_wf`,
+    `alignToByte_id_of_aligned`
+
+- **`decodeStored_correct`**: Full stored-block correspondence theorem.
+  Chains `readUInt16LE_toBits` (×2) + `readBytes_toBits`, with XOR
+  complement check and byte-alignment invariant propagation.
+
+- Changed `Inflate.decodeStored` from `private` to `protected` for
+  cross-file access.
+
+**Proof pattern for `decodeStored_correct`**:
+Unfold native `decodeStored` → case-split each `Except` operation → use
+correspondence lemmas to build spec-level hypotheses → prepare unified
+intermediate results → close with single `simp only` on spec `decodeStored`.
+
+**Build status**: `lake build Zip` clean (1 expected sorry). Test exe link
+error is pre-existing (zstd `-Bstatic` flag on macOS).
+
 ## 2026-02-21: Review — split InflateCorrect.lean + dead code removal
 
 **Type**: review (file size + slop detection)

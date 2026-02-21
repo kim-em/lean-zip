@@ -3,3 +3,5 @@
 /.lake
 /lake-manifest.json
 /.direnv
+/sessions
+.go.lock

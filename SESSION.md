@@ -3,64 +3,65 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 2
+## Sorry count: 1
 
-All in `Zip/Spec/InflateCorrect.lean`:
-- `inflate_correct` (line 126): main correctness theorem
-- `inflate_correct'` (line 138): corollary for position-0 inflate
+In `Zip/Spec/InflateCorrect.lean`:
+- `inflate_correct` (line 209): main correctness theorem
 
 ## Known good commit
 
-`c8201d0` — `lake build && lake exe test` passes
+`350666b` — `lake build Zip` succeeds, no warnings except expected sorry.
 (Note: test exe linker error on macOS with v4.29.0-rc1 is pre-existing,
 Lean compilation succeeds.)
 
-## Completed this session (review)
+## Completed this session (implementation)
 
-### Split InflateCorrect.lean (1282 → 268+833+146)
+### Proved `inflate_correct'` from `inflate_correct`
+Straightforward corollary: unfold `inflate`, case-split on `inflateRaw`,
+apply `inflate_correct` with `startPos = 0`. Committed as `f80b5b8`.
 
-Split the over-limit file into three files along natural boundaries:
+### Bitstream correspondence lemmas (BitstreamCorrect.lean)
+- `readBitsLSB_testBit`, `readBitsLSB_byteToBits`, `readBitsLSB_split`
+- `alignToByte_toBits` — native `alignToByte` ↔ spec `Deflate.Spec.alignToByte`
+- `readUInt16LE_toBits` — native LE 16-bit read ↔ spec `readBitsLSB 16`
+- `readNBytes_aligned` — inductive core for byte-level reading
+- `readBytes_toBits` — native `readBytes` ↔ spec `readNBytes`
+- Helper lemmas: `readUInt16LE_wf`, `readUInt16LE_data`, `readBytes_wf`,
+  `alignToByte_id_of_aligned`
 
-- **`Zip/Spec/BitstreamCorrect.lean`** (268 lines): BitReader ↔ bytesToBits
-  correspondence. Contains `toBits`, flatMap helpers, `readBit_toBits`,
-  `readBits_toBits`, accumulator arithmetic.
+### Proved `decodeStored_correct` (InflateCorrect.lean)
+Full stored-block correspondence: native `Inflate.decodeStored` ↔ spec
+`Deflate.Spec.decodeStored`. Chains `readUInt16LE_toBits` (×2) and
+`readBytes_toBits`, with XOR complement check and byte-alignment invariants.
 
-- **`Zip/Spec/HuffmanCorrect.lean`** (833 lines): HuffTree ↔ Huffman.Spec
-  correspondence. Contains `decodeBits`, `TreeHasLeaf`, insert proofs,
-  `fromLengths_hasLeaf`, `fromLengths_leaf_spec`, `decode_some_mem`.
-
-- **`Zip/Spec/InflateCorrect.lean`** (146 lines): Final connection theorems.
-  Contains `decodeBits_eq_spec_decode`, `huffTree_decode_correct`,
-  `inflate_correct`, `inflate_correct'`.
-
-### Dead code removal
-
-- Removed `insert_go_complete` (58 lines) — superseded by `insert_go_complete'`
-- Fixed unused simp argument `beq_iff_eq` (linter warning)
-
-### Visibility changes
-
-- `private` → `protected` for cross-file access: `decode_go_decodeBits`,
-  `decodeBits_of_hasLeaf`, `hasLeaf_of_decodeBits`, `decode_some_mem`,
-  `fromLengths_hasLeaf`, `fromLengths_leaf_spec`
-- `private` → unqualified: `uint32_testBit` (used by both BitstreamCorrect
-  and HuffmanCorrect)
-- `insert_bit_zero`/`insert_bit_one` moved from bitstream section to
-  HuffmanCorrect (private)
+### Visibility change
+- `private` → `protected` for `Inflate.decodeStored` (cross-file access)
 
 ## Next action
 
 Priority order for next implementation session:
-1. Prove `inflate_correct'` from `inflate_correct` (straightforward corollary)
-2. Make progress on `inflate_correct` — this is the top-level theorem
-   connecting `inflateRaw` to `Deflate.Spec.decode`. Requires:
-   - Block-level correspondence (stored, fixed, dynamic blocks)
-   - Stream-level loop correspondence (multiple blocks → fuel)
-   - LZ77 back-reference resolution correspondence
+1. **Huffman block correspondence** — `decodeHuffman_correct`:
+   - Symbol decode loop: iterate `huffTree_decode_correct` for lit/len/dist
+   - LZ77 back-reference resolution: native copy loop ↔ spec `resolveLZ77`
+   - Dynamic tree header parsing correspondence
+2. **Loop correspondence** — native `for` block loop ↔ spec fuel-based recursion
+3. **Close `inflate_correct`** — combine block + loop correspondence
+
+## Architecture of remaining decomposition
+
+```
+inflate_correct (sorry)
+  ├── decodeStored_correct (DONE)
+  ├── decodeHuffman_correct (NEXT)
+  │   ├── huffTree_decode_correct (DONE)
+  │   ├── symbol decode loop correspondence
+  │   └── LZ77 resolve correspondence
+  └── loop correspondence (for → fuel)
+```
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- Sorry count unchanged at 2
+- Sorry count decreased from 2 → 1 (proved inflate_correct')
 - Pre-existing linker error for test:exe on macOS with v4.29.0-rc1
   (zstd -Bstatic/-Bdynamic flags not recognized by lld on macOS)

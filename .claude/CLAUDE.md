@@ -34,6 +34,13 @@ Check `PROGRESS.md` to dynamically adjust the balance — if reviews are
 consistently finding nothing, do fewer; if they're finding problems, do more.
 Default to alternating: implementation session, then review session.
 
+**Non-interactive sessions**: These sessions run via `./go` with
+`claude -p` — there is no human to answer questions. Never ask for
+confirmation, approval, or "should I apply this?" — just do it. If you
+propose a CLAUDE.md change, apply it. If you find dead code, remove it.
+If a refactor improves the codebase, commit it. The reflect step at the
+end is for recording what you did, not for asking permission.
+
 **Anti-rationalization check**: A common failure mode is to identify the
 correct session type from the balance, then override it by framing
 implementation work as "blocking" or "urgent." Sorries, incomplete
@@ -362,6 +369,17 @@ Update it during review and reflect sessions.
     | some p => ...
   | some p => ...
   ```
+- **Block-level correspondence proof pattern**: For theorems like
+  `decodeStored_correct` that connect native imperative decoders (using
+  `Except` monad with `do`-notation) to spec decoders (using `Option`
+  monad with `bind`):
+  1. `simp only [NativeFunc, bind, Except.bind] at h` to unfold the native
+  2. `cases hx : operation` + `simp [hx] at h` for each `Except` operation
+  3. Build spec-level hypotheses by chaining correspondence lemmas
+  4. Close with `simp only [SpecFunc, bind, Option.bind, hyp₁, hyp₂, ...]`
+     + `rfl` to evaluate the spec function
+  Key: prepare all intermediate spec hypotheses in unified form
+  (substituting `← hrest` to align bit positions) before the final `simp`.
 - **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
   `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
   To define in a different namespace, either close the current namespace
@@ -374,6 +392,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 2 (all in InflateCorrect.lean — inflate_correct, inflate_correct')
-- **Last session**: 2026-02-21 (review: split InflateCorrect into 3 files, dead code removal)
+- **Sorry count**: 1 (InflateCorrect.lean — inflate_correct)
+- **Last session**: 2026-02-21 (impl: bitstream lemmas + decodeStored_correct, proved inflate_correct')
 - **Last review**: 2026-02-21 (split InflateCorrect.lean 1282→268+833+146, removed insert_go_complete)

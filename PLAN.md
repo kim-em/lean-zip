@@ -5,38 +5,43 @@
 
 ## Status: Complete
 
-## Session type: review
+## Session type: implementation
 
-## Goal: Split InflateCorrect.lean + dead code removal
-
-InflateCorrect.lean was at 1282 lines (over 1000-line limit).
+## Goal: Prove inflate_correct' + decompose inflate_correct
 
 ### Steps
 
-1. [x] Remove dead `insert_go_complete` (superseded by `insert_go_complete'`)
-2. [x] Fix unused simp argument `beq_iff_eq`
-3. [x] Build and test to verify dead code removal
-4. [x] Split into 3 files:
-   - `Zip/Spec/BitstreamCorrect.lean` — bitstream layer (268 lines)
-   - `Zip/Spec/HuffmanCorrect.lean` — TreeHasLeaf, insert, fromLengths (833 lines)
-   - `Zip/Spec/InflateCorrect.lean` — final connection + main theorem (146 lines)
-5. [x] Update imports in Zip.lean
-6. [x] Build and test after split
-7. [x] Update CLAUDE.md source layout table
-8. [x] Update SESSION.md and PROGRESS.md
+1. [x] Prove `inflate_correct'` from `inflate_correct` (corollary: startPos=0)
+2. [x] Add `readUInt16LE_toBits` correspondence lemma (BitstreamCorrect)
+3. [x] Add `readBytes_toBits` correspondence lemma (BitstreamCorrect)
+4. [x] Add `alignToByte_toBits` correspondence lemma (BitstreamCorrect)
+5. [x] State `decodeStored_correct` — stored block correspondence
+6. [x] Prove `decodeStored_correct` using bitstream lemmas
+7. [x] Build and test
 
-### Review findings
+### Next session priorities
 
-- **Dead code**: `insert_go_complete` (58 lines) — superseded by `insert_go_complete'`,
-  never referenced
-- **Dead variables**: `hlen_pos_nat` in both `insertLoop_forward` and
-  `insertLoop_backward` — attempted removal but omega needs them (bridges
-  UInt8 ordering to Nat). NOT dead — kept.
-- **Duplicated proof**: NC invariant proof in `insertLoop_forward` and
-  `insertLoop_backward` (~40 lines each, nearly identical). Not extracting
-  because the helper would need ~20 parameters, making it longer than the
-  duplication.
-- **Duplicated proof**: Initial NC proof in `fromLengths_hasLeaf` and
-  `fromLengths_leaf_spec` (~22 lines each). Same reason for not extracting.
-- **Huffman.lean at 959 lines**: candidate for splitting but under 1000.
-  Defer to future review.
+1. **Huffman block correspondence** (`decodeHuffman_correct`):
+   - Symbol decode loop: iterate `huffTree_decode_correct` for lit/len/dist
+   - LZ77 back-reference resolution: native copy loop ↔ spec `resolveLZ77`
+   - Dynamic tree header parsing correspondence
+2. **Loop correspondence**: native `for` block loop ↔ spec fuel-based recursion
+3. **Close `inflate_correct`**: combine block + loop correspondence
+
+### Architecture of remaining decomposition
+
+```
+inflate_correct (1 sorry remaining)
+  ├── decodeStored_correct (DONE)
+  ├── decodeHuffman_correct (NEXT — largest remaining piece)
+  │   ├── huffTree_decode_correct (DONE)
+  │   ├── symbol decode loop correspondence
+  │   └── LZ77 resolve correspondence
+  └── loop correspondence (for → fuel)
+```
+
+### Potential upstreaming candidates (ZipForStd)
+
+- `UInt8.ofNat_toNat` (round-trip for UInt8)
+- `ByteArray.data_extract` / `Array.toList_extract`
+- `List.drop_eq_getElem_cons` variant
