@@ -110,6 +110,14 @@ over time. Focus areas:
   add missing guidance. Consider writing new skills for recurring
   patterns (profiling, proof techniques, etc.)
 
+- **File size and organization**: Files over 500 lines are candidates
+  for splitting; never let a file grow past 1000 lines. Check with
+  `wc -l Zip/**/*.lean`. Split along natural boundaries (e.g. separate
+  types/definitions from proofs, or split by sub-topic). Don't hesitate
+  to restructure existing files if definitions feel out of place — move
+  them to where they logically belong, even if that means creating new
+  files. Update the source layout table in this file when splitting.
+
 As the project grows, also focus reviews on particular modules rather
 than reviewing everything at once.
 
