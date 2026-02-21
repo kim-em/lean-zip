@@ -65,14 +65,18 @@ def fromLengthsTree (lengths : Array UInt8) (maxBits : Nat := 15) : HuffTree :=
   let nextCode : Array UInt32 := ncNat.map fun n => n.toUInt32
   (insertLoop lengths nextCode 0 .empty).1
 
+/-- Validate that all code lengths are ≤ maxBits. -/
+protected def validateLengths (lengths : Array UInt8) (maxBits : Nat) :
+    Except String Unit := do
+  for len in lengths do
+    if len.toNat > maxBits then throw "Inflate: code length exceeds maximum"
+
 /-- Build a Huffman tree from an array of code lengths (indexed by symbol).
     Symbols with length 0 have no code. Uses the canonical Huffman algorithm
     from RFC 1951 §3.2.2. -/
 def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     Except String HuffTree := do
-  -- Validate: all lengths ≤ maxBits
-  for len in lengths do
-    if len.toNat > maxBits then throw "Inflate: code length exceeds maximum"
+  HuffTree.validateLengths lengths maxBits
   return fromLengthsTree lengths maxBits
 
 /-- Decode one symbol from the bit reader using this Huffman tree. -/

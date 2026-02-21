@@ -358,7 +358,7 @@ private theorem array_set_size (arr : Array Nat) (i v : Nat) :
   simp [Array.set!_eq_setIfInBounds]
 
 /-- `countLengths[b]!` counts elements of `lengths` equal to `b`, for valid `b`. -/
-protected theorem Huffman.Spec.countLengths_eq (lengths : List Nat) (maxBits b : Nat)
+protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
     (hb : b ≠ 0) (hb' : b ≤ maxBits) :
     (countLengths lengths maxBits)[b]! =
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 := by
@@ -612,7 +612,7 @@ private theorem ncRec_bound (blCount : Array Nat) (maxBits b : Nat)
     at that length doesn't exceed the code space.
     Proof requires analyzing the nextCodes.go recurrence and connecting
     it to the Kraft inequality in ValidLengths. -/
-protected theorem Huffman.Spec.nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
+protected theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
     (hv : ValidLengths lengths maxBits)
     (hb : b ≠ 0) (hb' : b ≤ maxBits) :
     (nextCodes (countLengths lengths maxBits) maxBits)[b]! +
@@ -633,7 +633,7 @@ protected theorem Huffman.Spec.nextCodes_plus_count_le (lengths : List Nat) (max
   exact hBound
 
 /-- The counting foldl is monotone: the result is always ≥ the initial value. -/
-protected theorem Huffman.Spec.count_foldl_mono (len : Nat) (l : List Nat) (init : Nat) :
+protected theorem count_foldl_mono (len : Nat) (l : List Nat) (init : Nat) :
     init ≤ l.foldl (fun acc x => if (x == len) = true then acc + 1 else acc) init := by
   induction l generalizing init with
   | nil => simp
@@ -684,14 +684,14 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
       exact ih n (s₂ - 1) (by omega) hlen₁' (by omega) (by omega) _
 
 /-- Extract `len ≠ 0 ∧ len ≤ maxBits` from the codeFor condition. -/
-protected theorem Huffman.Spec.codeFor_len_bounds {len maxBits : Nat}
+protected theorem codeFor_len_bounds {len maxBits : Nat}
     (h : ¬(len == 0 || decide (len > maxBits)) = true) : len ≠ 0 ∧ len ≤ maxBits := by
   simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h; omega
 
 /-- The code value assigned by the canonical construction fits in `len` bits.
     This follows from the Kraft inequality: the nextCodes construction ensures
     nc[len] + count_at_len ≤ 2^len, and offset < count_at_len. -/
-protected theorem Huffman.Spec.code_value_bound (lengths : List Nat) (maxBits sym : Nat)
+protected theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
     (hv : ValidLengths lengths maxBits)
     (hs : sym < lengths.length)
     (hlen : ¬(lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true) :
@@ -711,7 +711,7 @@ protected theorem Huffman.Spec.code_value_bound (lengths : List Nat) (maxBits sy
   omega
 
 /-- Extract structural information from `codeFor` returning `some`. -/
-protected theorem Huffman.Spec.codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Codeword}
+protected theorem codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Codeword}
     (h : codeFor lengths maxBits sym = some cw) :
     ∃ (hs : sym < lengths.length)
       (hlen : ¬(lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true),
