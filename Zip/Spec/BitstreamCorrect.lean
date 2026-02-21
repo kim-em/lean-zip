@@ -378,6 +378,57 @@ private theorem readBitsLSB_byteToBits (b : UInt8) (rest : List Bool) :
       some (b.toNat, rest) := by
   exact readBitsLSB_testBit b.toNat 8 b.toBitVec.isLt rest
 
+/-! ### Byte indexing into bytesToBits -/
+
+/-- Helper: dropping past a prefix of known length. -/
+private theorem drop_append_left' {l₁ l₂ : List α} {k : Nat}
+    (h : l₁.length = k) (n : Nat) :
+    (l₁ ++ l₂).drop (k + n) = l₂.drop n := by
+  rw [← List.drop_drop, List.drop_left' h]
+
+/-- Dropping `i * k` elements from a flatMap with uniform-length output
+    gives the `i`-th element's image followed by the rest. -/
+private theorem flatMap_uniform_drop {f : α → List β} (hf : ∀ a, (f a).length = k)
+    (l : List α) (i : Nat) (hi : i < l.length) :
+    (l.flatMap f).drop (i * k) = f l[i] ++ (l.flatMap f).drop ((i + 1) * k) := by
+  induction l generalizing i with
+  | nil => simp at hi
+  | cons b rest ih =>
+    cases i with
+    | zero =>
+      simp only [List.flatMap_cons, Nat.zero_mul, List.drop_zero, List.getElem_cons_zero,
+        Nat.zero_add, Nat.one_mul]
+      rw [List.drop_left' (hf b)]
+    | succ j =>
+      simp only [List.flatMap_cons, List.getElem_cons_succ]
+      rw [show (j + 1) * k = k + j * k from by rw [Nat.succ_mul, Nat.add_comm],
+          drop_append_left' (hf b),
+          show (j + 2) * k = k + (j + 1) * k from by rw [show j + 2 = (j + 1) + 1 from rfl,
+            Nat.succ_mul, Nat.add_comm],
+          drop_append_left' (hf b)]
+      exact ih j (by simpa using hi)
+
+/-- At byte position `pos`, `bytesToBits` gives `byteToBits data[pos]` followed by the rest. -/
+private theorem bytesToBits_getElem (data : ByteArray) (pos : Nat) (hpos : pos < data.size) :
+    (Deflate.Spec.bytesToBits data).drop (pos * 8) =
+      Deflate.Spec.bytesToBits.byteToBits data[pos] ++
+        (Deflate.Spec.bytesToBits data).drop ((pos + 1) * 8) := by
+  simp only [Deflate.Spec.bytesToBits, ByteArray.size] at *
+  have hlen := Deflate.Spec.bytesToBits.byteToBits_length
+  rw [flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simpa using hpos)]
+  simp only [Array.getElem_toList]; rfl
+
+/-- From a byte-aligned reader, `readBitsLSB 8` produces the next byte value. -/
+theorem toBits_readBitsLSB_byte (br : Zip.Native.BitReader)
+    (hoff : br.bitOff = 0) (hpos : br.pos < br.data.size) :
+    Deflate.Spec.readBitsLSB 8 br.toBits =
+      some (br.data[br.pos].toNat,
+            { br with pos := br.pos + 1, bitOff := 0 : Zip.Native.BitReader }.toBits) := by
+  simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
+  rw [bytesToBits_getElem br.data br.pos hpos]
+  rw [readBitsLSB_byteToBits]
+  done
+
 /-- `alignToByte` produces a byte-aligned BitReader. -/
 theorem alignToByte_wf (br : Zip.Native.BitReader) :
     br.alignToByte.bitOff = 0 := by
@@ -389,5 +440,69 @@ theorem alignToByte_data (br : Zip.Native.BitReader) :
     br.alignToByte.data = br.data := by
   simp [Zip.Native.BitReader.alignToByte]
   split <;> simp_all
+
+/-! ### readUInt16LE correspondence -/
+
+/-- Native `readUInt16LE` corresponds to spec `readBitsLSB 16` after alignment.
+    The native reader aligns to a byte boundary, reads two bytes as LE uint16.
+    The spec aligns and reads 16 bits LSB-first, giving the same value. -/
+theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
+    (val : UInt16) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (h : br.readUInt16LE = .ok (val, br')) :
+    ∃ rest,
+      Deflate.Spec.readBitsLSB 16 (Deflate.Spec.alignToByte br.toBits) =
+        some (val.toNat, rest) ∧
+      br'.toBits = rest := by
+  -- Unfold readUInt16LE: aligns, bounds check, reads two bytes
+  simp only [Zip.Native.BitReader.readUInt16LE] at h
+  split at h
+  · simp at h -- bounds check failed → contradiction with h : error = ok
+  · -- bounds check passed
+    rename_i hbound
+    -- h : .ok (lo ||| (hi <<< 8), { ... pos + 2 ... }) = .ok (val, br')
+    -- hbound : ¬(br.alignToByte.pos + 2 > br.alignToByte.data.size)
+    have hle : br.alignToByte.pos + 2 ≤ br.alignToByte.data.size := by omega
+    -- Extract value and reader from h
+    have hval : val = br.alignToByte.data[br.alignToByte.pos]!.toUInt16 |||
+        (br.alignToByte.data[br.alignToByte.pos + 1]!.toUInt16 <<< 8) := by
+      cases h; rfl
+    have hbr' : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by
+      cases h; rfl
+    -- Alignment properties
+    have hoff : br.alignToByte.bitOff = 0 := alignToByte_wf br
+    have halign : br.alignToByte.toBits = Deflate.Spec.alignToByte br.toBits :=
+      alignToByte_toBits br hwf hpos
+    -- Split 16-bit read into two 8-bit reads
+    rw [← halign, show (16 : Nat) = 8 + 8 from rfl, readBitsLSB_split]
+    -- First byte
+    have hpos0 : br.alignToByte.pos < br.alignToByte.data.size := by omega
+    rw [toBits_readBitsLSB_byte br.alignToByte hoff hpos0]
+    simp only [Option.bind]
+    -- Second byte
+    have hpos1 : br.alignToByte.pos + 1 < br.alignToByte.data.size := by omega
+    rw [toBits_readBitsLSB_byte ⟨br.alignToByte.data, br.alignToByte.pos + 1, 0⟩ rfl hpos1]
+    -- Goal: ∃ rest, some (lo + hi * 256, bits') = some (val.toNat, rest) ∧ br'.toBits = rest
+    constructor
+    constructor
+    · -- some equality: values match
+      simp only [Option.some.injEq, Prod.mk.injEq]
+      constructor
+      · -- Arithmetic: data[pos].toNat + data[pos+1].toNat * 256 = val.toNat
+        rw [hval]; simp [hpos0, hpos1]
+        -- Goal: lo.toNat + hi.toNat * 256 = lo.toNat ||| (hi.toNat <<< 8 % 65536)
+        have hlo : br.alignToByte.data[br.alignToByte.pos].toNat < 2 ^ 8 :=
+          br.alignToByte.data[br.alignToByte.pos].toBitVec.isLt
+        have hhi : br.alignToByte.data[br.alignToByte.pos + 1].toNat < 2 ^ 8 :=
+          br.alignToByte.data[br.alignToByte.pos + 1].toBitVec.isLt
+        rw [Nat.shiftLeft_eq, Nat.mod_eq_of_lt (by omega),
+            show (256 : Nat) = 2 ^ 8 from rfl, ← Nat.shiftLeft_eq,
+            Nat.add_comm, Nat.shiftLeft_add_eq_or_of_lt hlo, Nat.or_comm]
+      · rfl
+    · -- br'.toBits = bits'
+      rw [hbr']
+      simp only [Zip.Native.BitReader.toBits, hoff]
+      done
 
 end Deflate.Correctness
