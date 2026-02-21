@@ -141,6 +141,14 @@ theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
     ∃ fuel,
       Deflate.Spec.decode (Deflate.Spec.bytesToBits data) fuel =
         some result.data.toList := by
-  sorry
+  -- Unfold inflate: it calls inflateRaw data 0 maxOutputSize and discards endPos
+  simp only [Zip.Native.Inflate.inflate, bind, Except.bind] at h
+  cases hinf : Zip.Native.Inflate.inflateRaw data 0 maxOutputSize with
+  | error e => simp [hinf] at h
+  | ok p =>
+    simp [hinf, pure, Except.pure] at h
+    have := inflate_correct data 0 maxOutputSize p.1 p.2 (by rw [hinf])
+    simp at this
+    rw [← h]; exact this
 
 end Deflate.Correctness
