@@ -119,6 +119,21 @@ where
   termination_by maxBits + 1 - bits
   decreasing_by omega
 
+private theorem nextCodes_go_size (blCount : Array Nat) (maxBits : Nat)
+    (arr : Array Nat) (bits code : Nat) (hsize : arr.size = maxBits + 1) :
+    (nextCodes.go blCount maxBits arr bits code).size = maxBits + 1 := by
+  unfold nextCodes.go
+  split
+  · exact hsize
+  · exact nextCodes_go_size blCount maxBits _ _ _
+      (by simp [Array.set!_eq_setIfInBounds]; exact hsize)
+  termination_by maxBits + 1 - bits
+
+/-- `nextCodes` returns an array of size `maxBits + 1`. -/
+protected theorem nextCodes_size (blCount : Array Nat) (maxBits : Nat) :
+    (nextCodes blCount maxBits).size = maxBits + 1 :=
+  nextCodes_go_size blCount maxBits _ 1 0 (Array.size_replicate ..)
+
 /-- Compute the canonical codeword for a given symbol.
     Returns `none` if the symbol's code length is 0 or exceeds `maxBits`. -/
 def codeFor (lengths : List Nat) (maxBits : Nat := 15) (sym : Nat) :
@@ -343,7 +358,7 @@ private theorem array_set_size (arr : Array Nat) (i v : Nat) :
   simp [Array.set!_eq_setIfInBounds]
 
 /-- `countLengths[b]!` counts elements of `lengths` equal to `b`, for valid `b`. -/
-private theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
+protected theorem Huffman.Spec.countLengths_eq (lengths : List Nat) (maxBits b : Nat)
     (hb : b ≠ 0) (hb' : b ≤ maxBits) :
     (countLengths lengths maxBits)[b]! =
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 := by
@@ -597,7 +612,7 @@ private theorem ncRec_bound (blCount : Array Nat) (maxBits b : Nat)
     at that length doesn't exceed the code space.
     Proof requires analyzing the nextCodes.go recurrence and connecting
     it to the Kraft inequality in ValidLengths. -/
-private theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
+protected theorem Huffman.Spec.nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
     (hv : ValidLengths lengths maxBits)
     (hb : b ≠ 0) (hb' : b ≤ maxBits) :
     (nextCodes (countLengths lengths maxBits) maxBits)[b]! +
@@ -608,7 +623,7 @@ private theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
   -- Step 2: blCount[b]! = count of b in lengths
   have hCL : blCount[b]! =
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 :=
-    countLengths_eq lengths maxBits b hb hb'
+    Huffman.Spec.countLengths_eq lengths maxBits b hb hb'
   -- Step 3: kraftSumFrom ≤ 2^maxBits (from ValidLengths)
   have hKraft := kraftSumFrom_eq_kraft_foldl lengths maxBits hv
   -- Step 4: ncRec bound
@@ -618,7 +633,7 @@ private theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
   exact hBound
 
 /-- The counting foldl is monotone: the result is always ≥ the initial value. -/
-private theorem count_foldl_mono (len : Nat) (l : List Nat) (init : Nat) :
+protected theorem Huffman.Spec.count_foldl_mono (len : Nat) (l : List Nat) (init : Nat) :
     init ≤ l.foldl (fun acc x => if (x == len) = true then acc + 1 else acc) init := by
   induction l generalizing init with
   | nil => simp
@@ -658,7 +673,7 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
       have hs₂' : 0 < s₂ := by omega
       rw [List.take_cons hs₂']
       simp only [List.foldl_cons, show (x == len) = true from beq_iff_eq.mpr hlen₁, ite_true]
-      exact Nat.lt_of_lt_of_le (by omega) (count_foldl_mono len _ _)
+      exact Nat.lt_of_lt_of_le (by omega) (Huffman.Spec.count_foldl_mono len _ _)
     | succ n =>
       simp only [List.length_cons] at hs₁ hs₂
       have hs₂' : 0 < s₂ := by omega
@@ -669,14 +684,14 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
       exact ih n (s₂ - 1) (by omega) hlen₁' (by omega) (by omega) _
 
 /-- Extract `len ≠ 0 ∧ len ≤ maxBits` from the codeFor condition. -/
-private theorem codeFor_len_bounds {len maxBits : Nat}
+protected theorem Huffman.Spec.codeFor_len_bounds {len maxBits : Nat}
     (h : ¬(len == 0 || decide (len > maxBits)) = true) : len ≠ 0 ∧ len ≤ maxBits := by
   simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h; omega
 
 /-- The code value assigned by the canonical construction fits in `len` bits.
     This follows from the Kraft inequality: the nextCodes construction ensures
     nc[len] + count_at_len ≤ 2^len, and offset < count_at_len. -/
-private theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
+protected theorem Huffman.Spec.code_value_bound (lengths : List Nat) (maxBits sym : Nat)
     (hv : ValidLengths lengths maxBits)
     (hs : sym < lengths.length)
     (hlen : ¬(lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true) :
@@ -684,9 +699,9 @@ private theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
       List.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc)
         0 (List.take sym lengths) <
     2 ^ lengths[sym] := by
-  have ⟨hlen0, hlenM⟩ := codeFor_len_bounds hlen
+  have ⟨hlen0, hlenM⟩ := Huffman.Spec.codeFor_len_bounds hlen
   -- Key bound: nc[len] + totalCount ≤ 2^len
-  have hncBound := nextCodes_plus_count_le lengths maxBits lengths[sym] hv hlen0 hlenM
+  have hncBound := Huffman.Spec.nextCodes_plus_count_le lengths maxBits lengths[sym] hv hlen0 hlenM
   -- Offset < totalCount: reuse offset_of_lt with s₂ = lengths.length
   have hOffsetLt : List.foldl (fun acc l => if (l == lengths[sym]) = true then acc + 1 else acc)
       0 (List.take sym lengths) <
@@ -696,7 +711,7 @@ private theorem code_value_bound (lengths : List Nat) (maxBits sym : Nat)
   omega
 
 /-- Extract structural information from `codeFor` returning `some`. -/
-private theorem codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Codeword}
+protected theorem Huffman.Spec.codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Codeword}
     (h : codeFor lengths maxBits sym = some cw) :
     ∃ (hs : sym < lengths.length)
       (hlen : ¬(lengths[sym] == 0 || decide (lengths[sym] > maxBits)) = true),
@@ -747,8 +762,8 @@ theorem codeFor_injective (lengths : List Nat) (maxBits : Nat)
     s₁ = s₂ := by
   intro h₁ h₂
   -- Extract structural info from both codeFor calls
-  have ⟨hs₁, hlen₁, h₁⟩ := codeFor_spec h₁
-  have ⟨hs₂, hlen₂, h₂⟩ := codeFor_spec h₂
+  have ⟨hs₁, hlen₁, h₁⟩ := Huffman.Spec.codeFor_spec h₁
+  have ⟨hs₂, hlen₂, h₂⟩ := Huffman.Spec.codeFor_spec h₂
   -- h₁ : cw = natToBits code₁ lengths[s₁]
   -- h₂ : cw = natToBits code₂ lengths[s₂]
   -- Step 1: lengths must be equal
@@ -757,9 +772,9 @@ theorem codeFor_injective (lengths : List Nat) (maxBits : Nat)
     have := congrArg List.length heq
     rwa [natToBits_length, natToBits_length] at this
   -- Step 2: code values must be equal (by natToBits_injective)
-  have hb₁ := code_value_bound lengths maxBits s₁ hv hs₁ hlen₁
+  have hb₁ := Huffman.Spec.code_value_bound lengths maxBits s₁ hv hs₁ hlen₁
   rw [hlen_eq] at heq hb₁
-  have hb₂ := code_value_bound lengths maxBits s₂ hv hs₂ hlen₂
+  have hb₂ := Huffman.Spec.code_value_bound lengths maxBits s₂ hv hs₂ hlen₂
   have hcode := natToBits_injective _ _ _ hb₁ hb₂ heq
   -- hcode : nc[len] + offset₁ = nc[len] + offset₂, so offset₁ = offset₂
   -- Step 3: if s₁ ≠ s₂, offsets differ — contradiction
@@ -786,10 +801,10 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     ¬cw₁.IsPrefix cw₂ := by
   intro h₁ h₂ hne hpre
   -- Extract structural info (all fields at once)
-  have ⟨hs₁, hlen₁_cond, hcw₁⟩ := codeFor_spec h₁
-  have ⟨hs₂, hlen₂_cond, hcw₂⟩ := codeFor_spec h₂
-  have ⟨hlen₁_ne, hlen₁_le⟩ := codeFor_len_bounds hlen₁_cond
-  have ⟨hlen₂_ne, hlen₂_le⟩ := codeFor_len_bounds hlen₂_cond
+  have ⟨hs₁, hlen₁_cond, hcw₁⟩ := Huffman.Spec.codeFor_spec h₁
+  have ⟨hs₂, hlen₂_cond, hcw₂⟩ := Huffman.Spec.codeFor_spec h₂
+  have ⟨hlen₁_ne, hlen₁_le⟩ := Huffman.Spec.codeFor_len_bounds hlen₁_cond
+  have ⟨hlen₂_ne, hlen₂_le⟩ := Huffman.Spec.codeFor_len_bounds hlen₂_cond
   have hlen₁ : cw₁.length = lengths[s₁] := by rw [hcw₁, natToBits_length]
   have hlen₂ : cw₂.length = lengths[s₂] := by rw [hcw₂, natToBits_length]
   -- Prefix implies cw₁.length ≤ cw₂.length
@@ -804,8 +819,8 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
   · -- Different lengths: canonical codes at different lengths aren't prefixes.
     have hlt_len : lengths[s₁] < lengths[s₂] := by omega
     -- Code values fit in their bit lengths
-    have hb₁ := code_value_bound lengths maxBits s₁ hv hs₁ hlen₁_cond
-    have hb₂ := code_value_bound lengths maxBits s₂ hv hs₂ hlen₂_cond
+    have hb₁ := Huffman.Spec.code_value_bound lengths maxBits s₁ hv hs₁ hlen₁_cond
+    have hb₂ := Huffman.Spec.code_value_bound lengths maxBits s₂ hv hs₂ hlen₂_cond
     -- Prefix in natToBits form gives numerical upper bound
     have hupper := natToBits_prefix_lt _ _ _ _ (by omega) hb₁ hb₂ (hcw₁ ▸ hcw₂ ▸ ⟨t, ht⟩)
     -- Connect nextCodes array values to ncRec
@@ -817,7 +832,7 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
         0 (List.take s₁ lengths) < blCount[lengths[s₁]]! := by
       have h := offset_of_lt lengths s₁ lengths.length lengths[s₁] hs₁ rfl hs₁ (by omega)
       rw [List.take_length] at h
-      rw [countLengths_eq lengths maxBits lengths[s₁] hlen₁_ne hlen₁_le]; exact h
+      rw [Huffman.Spec.countLengths_eq lengths maxBits lengths[s₁] hlen₁_ne hlen₁_le]; exact h
     -- Chain: code₂ < (code₁+1)*2^d ≤ (ncRec₁+count₁)*2^d ≤ ncRec₂ ≤ code₂
     exfalso
     rw [hnc₁, hnc₂] at hupper

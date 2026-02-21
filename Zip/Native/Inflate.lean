@@ -56,6 +56,15 @@ def insertLoop (lengths : Array UInt8) (nextCode : Array UInt32)
   else (tree, nextCode)
 termination_by lengths.size - start
 
+/-- The Huffman tree built by the canonical construction (RFC 1951 §3.2.2),
+    without input validation. -/
+def fromLengthsTree (lengths : Array UInt8) (maxBits : Nat := 15) : HuffTree :=
+  let lsList := lengths.toList.map UInt8.toNat
+  let blCount := Huffman.Spec.countLengths lsList maxBits
+  let ncNat := Huffman.Spec.nextCodes blCount maxBits
+  let nextCode : Array UInt32 := ncNat.map fun n => n.toUInt32
+  (insertLoop lengths nextCode 0 .empty).1
+
 /-- Build a Huffman tree from an array of code lengths (indexed by symbol).
     Symbols with length 0 have no code. Uses the canonical Huffman algorithm
     from RFC 1951 §3.2.2. -/
@@ -64,13 +73,7 @@ def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
   -- Validate: all lengths ≤ maxBits
   for len in lengths do
     if len.toNat > maxBits then throw "Inflate: code length exceeds maximum"
-  -- Compute nextCode using the canonical Huffman construction (RFC 1951 §3.2.2)
-  let lsList := lengths.toList.map UInt8.toNat
-  let blCount := Huffman.Spec.countLengths lsList maxBits
-  let ncNat := Huffman.Spec.nextCodes blCount maxBits
-  let nextCode : Array UInt32 := ncNat.map fun n => n.toUInt32
-  -- Build tree by inserting each symbol
-  return (insertLoop lengths nextCode 0 .empty).1
+  return fromLengthsTree lengths maxBits
 
 /-- Decode one symbol from the bit reader using this Huffman tree. -/
 def decode (tree : HuffTree) (br : BitReader) :
