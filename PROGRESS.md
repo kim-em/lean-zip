@@ -2,6 +2,61 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-21: Review — InflateCorrect TreeHasLeaf + insert proofs
+
+**Type**: review
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 4 → 4 (unchanged)
+**Commit**: `6dbbded`
+
+**Focus areas**: Refactoring and proof improvement (InflateCorrect.lean, deep),
+Lean idioms scan, dead code scan.
+
+**Proof improvements** (net -28 lines):
+
+- **UInt32 bit lemma reorganization**: Moved `uint32_testBit`,
+  `insert_bit_zero`, `insert_bit_one` to the "Bit-value correspondence"
+  section. Simplified `uint32_bit_eq_testBit` from 5-line direct proof
+  to 2-line delegation: `have := uint32_testBit ...; rwa [...] at this`.
+  Eliminated the separate "UInt32 bit correspondence for insert" section.
+
+- **`decodeBits_of_hasLeaf`**: Replaced 4-line structured induction
+  (`induction h with | leaf => ... | left => ... | right => ...`) with
+  `induction h <;> simp_all [decodeBits]`. Works because `simp_all` uses
+  the IH from context in the recursive cases.
+
+- **`insert_go_hasLeaf`**: Simplified NoLeafOnPath in-place
+  (`simp only [...] at hnl; exact .left (ih z ...)`) instead of
+  intermediate `have hnl'` variable (×2). Removed redundant `exfalso;`
+  before `simp ... at hnl` in leaf cases (×2) — Lean 4 auto-closes the
+  goal when a hypothesis becomes `False`.
+
+- **`insert_go_preserves`**: Simplified prefix negation arguments from
+  3-line explicit witness construction to 1-line `simp` using
+  `List.cons_prefix_cons` (`@[simp]`).
+
+**Review findings (no action needed)**:
+- `decodeBits_eq_spec_decode` wiring: clean, no improvements found
+- `decode_go_decodeBits` branch deduplication: not worthwhile (different
+  IHs and constructors prevent meaningful combination)
+- `insert_go_hasLeaf`/`insert_go_preserves` are unreferenced but needed
+  for the sorry'd `fromLengths_hasLeaf`/`fromLengths_leaf_spec`
+- `flatMap_drop_mul` is a candidate for ZipForStd/List.lean extraction
+  (deferred, low priority)
+- No `grind` opportunities (proofs are structural, not equational)
+- Toolchain v4.29.0-rc1 is still latest
+
+**Stdlib discovery**:
+- `List.cons_prefix_cons`: `a :: l₁ <+: b :: l₂ ↔ a = b ∧ l₁ <+: l₂`
+  (`@[simp]`) — enables simpler prefix reasoning in proofs about
+  `natToBits` paths
+
+**Codex review**: One false positive (thought leaf-case `simp at hnl`
+was incomplete). Fair note on `List.cons_prefix_cons` dependency
+stability — confirmed stable (`@[simp]`).
+
+**Next**: Implementation session — prove `fromLengths_hasLeaf`
+
 ## 2026-02-20: Implementation — prove decodeBits_eq_spec_decode
 
 **Type**: implementation

@@ -6,51 +6,57 @@
 ## Sorry count: 4
 
 All in `Zip/Spec/InflateCorrect.lean`:
-- `fromLengths_hasLeaf` (line 565): tree has leaf for every allCodes entry
-- `fromLengths_leaf_spec` (line 576): every tree leaf is in allCodes
-- `inflate_correct` (line 682): main correctness theorem
-- `inflate_correct'` (line 694): corollary for position-0 inflate
+- `fromLengths_hasLeaf` (line 560): tree has leaf for every allCodes entry
+- `fromLengths_leaf_spec` (line 571): every tree leaf is in allCodes
+- `inflate_correct` (line 678): main correctness theorem
+- `inflate_correct'` (line 688): corollary for position-0 inflate
 
 ## Known good commit
 
-`153cb27` — `lake build && lake exe test` passes
+`6dbbded` — `lake build && lake exe test` passes
 
-## Completed this session (implementation)
+## Completed this session (review)
 
-### decodeBits_eq_spec_decode proved (+295 lines)
+### InflateCorrect.lean proof simplification (net -28 lines)
 
-Decomposed the tree-table correspondence theorem into layers using
-`TreeHasLeaf` inductive predicate:
+**Reorganized UInt32 bit lemmas** into a contiguous section:
+- Moved `uint32_testBit`, `insert_bit_zero`, `insert_bit_one` to the
+  "Bit-value correspondence" section alongside `shift_and_one_eq_testBit`
+- Simplified `uint32_bit_eq_testBit` from 5-line direct proof to 2-line
+  delegation via `rwa [UInt8.toNat_toUInt32]` using `uint32_testBit`
+- Eliminated the separate "UInt32 bit correspondence for insert" section
 
-**Layer 1: Structural correspondence (decodeBits ↔ TreeHasLeaf)**
-- `TreeHasLeaf` predicate: tree has leaf with symbol at path
-- `decodeBits_of_hasLeaf`: TreeHasLeaf → decodeBits works
-- `hasLeaf_of_decodeBits`: decodeBits works → TreeHasLeaf exists
+**Proof improvements**:
+- `decodeBits_of_hasLeaf`: 4-line structured induction → 1-line
+  `induction h <;> simp_all [decodeBits]`
+- `insert_go_hasLeaf`: eliminated intermediate `hnl'` variables (×2),
+  removed redundant `exfalso` before `simp ... at hnl` (×2).
+  Note: `simp ... at hnl` automatically closes the goal when hnl
+  becomes `False` — no explicit `exfalso` needed.
+- `insert_go_preserves`: simplified prefix negation arguments from
+  3-line explicit witness construction to 1-line `simp` using
+  `List.cons_prefix_cons` (`@[simp]`)
 
-**Layer 2: insert creates correct tree structure**
-- `uint32_testBit`: UInt32 bit extraction matches Nat.testBit
-- `insert_bit_zero` / `insert_bit_one`: bridge to insert's comparison
-- `NoLeafOnPath`: no leaf collision predicate
-- `insert_go_hasLeaf`: insert.go places leaf at natToBits path
-- `insert_go_preserves`: insert.go preserves existing non-prefix leaves
+**Review findings (no action needed)**:
+- `decodeBits_eq_spec_decode` wiring is clean; no simplifications found
+- `decode_go_decodeBits` two branches differ in IH (ihz/iho) and
+  constructor (left/right); combining them would hurt readability
+- `insert_go_hasLeaf`/`insert_go_preserves` `show ... unfold ... simp`
+  pattern appears 7× but each instance is only 3 lines; abstracting
+  isn't worthwhile
+- `flatMap_drop_mul` could be extracted to ZipForStd/List.lean as
+  a general lemma; deferred as low priority
 
-**Layer 3: Wiring**
-- `decode_some_mem`: spec decode result → table membership
-- `to_codes` / `to_table`: specTable ↔ specCodes membership
-- Prefix-free property of specTable derived from allCodes_prefix_free_of_ne
-- `decodeBits_eq_spec_decode` proved from all components
+**Dead code scan**: `insert_go_hasLeaf` and `insert_go_preserves`
+  are unreferenced in current proofs — they're infrastructure for
+  the sorry'd `fromLengths_hasLeaf`/`fromLengths_leaf_spec`. Not dead.
 
-**Theorem signature changes:**
-- Added `ValidLengths` precondition to `decodeBits_eq_spec_decode`
-  and `huffTree_decode_correct` (required for prefix-freeness)
+**Codex review**: One false positive (thought `simp ... at hnl` in
+  leaf cases was incomplete — Lean 4 auto-closes on `False` hypotheses).
+  Fair note on `List.cons_prefix_cons` dependency in prefix arguments,
+  but it's `@[simp]` and stable.
 
-### Remaining sorry's (fromLengths loop analysis)
-
-The two remaining sorry's (`fromLengths_hasLeaf`, `fromLengths_leaf_spec`)
-require reasoning about the `for` loop in `fromLengths`:
-- Track that `nextCode[len]!` at symbol `i` equals `nc[len] + offset_i`
-- Show that `insert` calls create/only-create the right leaves
-- May need a loop invariant relating mutable state to functional `codeFor`
+**Toolchain**: v4.29.0-rc1 is still latest (no upgrade needed)
 
 ## Next action
 
@@ -66,11 +72,7 @@ Priority order for next implementation session:
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- Sorry count increased 3 → 4 because `decodeBits_eq_spec_decode` was
-  decomposed into two focused helper sorry's. The theorem itself is proved.
-- `fromLengths_hasLeaf` needs `ValidLengths` to ensure no collisions
-  during insertion (when a `.leaf` already exists at an intermediate
-  position, `insert.go` skips the insertion)
+- Sorry count 4 → 4 (unchanged)
 - Key available lemmas for future `fromLengths` proofs:
   - `insert_go_hasLeaf`: insert places leaf at natToBits path
   - `insert_go_preserves`: insert preserves leaves at non-prefix paths

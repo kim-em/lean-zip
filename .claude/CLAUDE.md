@@ -363,5 +363,5 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 4 (all in InflateCorrect.lean — fromLengths_hasLeaf, fromLengths_leaf_spec, inflate_correct, inflate_correct')
-- **Last session**: 2026-02-20 (implementation: proved decodeBits_eq_spec_decode via TreeHasLeaf)
-- **Last review**: 2026-02-20 (proof simplification: ZipForStd/Nat.lean, InflateCorrect.lean)
+- **Last session**: 2026-02-21 (review: InflateCorrect TreeHasLeaf/insert proof cleanup, -28 lines)
+- **Last review**: 2026-02-21 (InflateCorrect.lean: bit lemma reorg, simp_all, cons_prefix_cons)
