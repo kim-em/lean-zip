@@ -265,4 +265,129 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
   rw [← hval] at hspec
   exact ⟨rest, hspec, hrest⟩
 
+/-! ### alignToByte correspondence -/
+
+/-- `toBits` length is a multiple of 8 minus `bitOff`. -/
+private theorem toBits_length (br : Zip.Native.BitReader) :
+    br.toBits.length = br.data.size * 8 - (br.pos * 8 + br.bitOff) := by
+  simp [Zip.Native.BitReader.toBits, List.length_drop, Deflate.Spec.bytesToBits_length]
+
+/-- When `bitOff = 0`, `toBits` has length divisible by 8. -/
+private theorem toBits_length_mod8_zero (br : Zip.Native.BitReader) (h : br.bitOff = 0) :
+    br.toBits.length % 8 = 0 := by
+  rw [toBits_length, h, Nat.add_zero]
+  omega
+
+/-- When `0 < bitOff < 8` and the BitReader is within bounds, `toBits.length % 8 = 8 - bitOff`. -/
+private theorem toBits_length_mod8_pos (br : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8) (hoff : br.bitOff ≠ 0) (hpos : br.pos < br.data.size) :
+    br.toBits.length % 8 = 8 - br.bitOff := by
+  rw [toBits_length]
+  have : br.pos * 8 + br.bitOff < br.data.size * 8 := by omega
+  omega
+
+/-- Native `alignToByte` corresponds to spec `alignToByte` on the bit list.
+    Requires `bitOff < 8` and that the BitReader is within bounds when `bitOff > 0`. -/
+theorem alignToByte_toBits (br : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size) :
+    br.alignToByte.toBits = Deflate.Spec.alignToByte br.toBits := by
+  simp only [Zip.Native.BitReader.alignToByte, Deflate.Spec.alignToByte]
+  by_cases hoff : br.bitOff = 0
+  · -- bitOff = 0: native is identity, spec drops 0
+    simp [hoff, toBits_length_mod8_zero br hoff]
+  · -- bitOff > 0: native advances to next byte, spec drops (8 - bitOff) bits
+    have hpos' : br.pos < br.data.size := hpos.resolve_left hoff
+    have hoff_ne : (br.bitOff == 0) = false := by simp [hoff]
+    simp only [hoff_ne, Bool.false_eq_true, ↓reduceIte]
+    rw [toBits_length_mod8_pos br hwf hoff hpos']
+    simp only [Zip.Native.BitReader.toBits, Nat.add_zero]
+    rw [List.drop_drop]
+    have hle : br.bitOff ≤ 8 := by omega
+    congr 1
+    rw [Nat.add_assoc, Nat.add_sub_cancel' hle]
+    omega
+
+/-! ### Byte-level read correspondence -/
+
+/-- Reading `n` bits from `testBit` values (LSB first) reconstructs the
+    original value. Key building block for byte-level read correspondence. -/
+private theorem readBitsLSB_testBit (m n : Nat) (hm : m < 2 ^ n) (rest : List Bool) :
+    Deflate.Spec.readBitsLSB n
+      ((List.ofFn (n := n) fun (i : Fin n) => m.testBit i.val) ++ rest) =
+      some (m, rest) := by
+  induction n generalizing m with
+  | zero => simp [Deflate.Spec.readBitsLSB]; omega
+  | succ k ih =>
+    simp only [List.ofFn_succ, List.cons_append]
+    simp only [Deflate.Spec.readBitsLSB]
+    -- Rewrite tail: m.testBit (i+1) = (m/2).testBit i
+    have htb : (fun (i : Fin k) => m.testBit (Fin.succ i).val) =
+               (fun (i : Fin k) => (m / 2).testBit i.val) := by
+      ext i; simp [Fin.val_succ, ← Nat.testBit_div_two]
+    rw [htb]
+    -- Apply IH with m/2
+    rw [ih (m / 2) (by omega)]
+    simp
+    -- (if m % 2 = 1 then 1 else 0) + m / 2 * 2 = m
+    have := Nat.mod_add_div m 2; split <;> omega
+
+/-- Splitting `readBitsLSB`: reading `m + n` bits is reading `m` then `n` bits,
+    with the second value shifted left by `m`. -/
+private theorem readBitsLSB_split (m n : Nat) (bits : List Bool) :
+    Deflate.Spec.readBitsLSB (m + n) bits =
+      (Deflate.Spec.readBitsLSB m bits).bind fun (v1, bits') =>
+        (Deflate.Spec.readBitsLSB n bits').bind fun (v2, bits'') =>
+          some (v1 + v2 * 2 ^ m, bits'') := by
+  induction m generalizing bits with
+  | zero =>
+    simp only [Deflate.Spec.readBitsLSB, Nat.zero_add, Option.bind]
+    cases Deflate.Spec.readBitsLSB n bits with
+    | none => rfl
+    | some p => simp
+  | succ k ih =>
+    -- Rewrite (k + 1) + n = (k + n) + 1 so readBitsLSB can unfold
+    rw [show k + 1 + n = (k + n) + 1 from by omega]
+    cases bits with
+    | nil => simp [Deflate.Spec.readBitsLSB]
+    | cons b rest =>
+      -- Unfold one step of readBitsLSB on LHS
+      simp only [Deflate.Spec.readBitsLSB]
+      -- Apply IH to readBitsLSB (k + n) rest in the LHS
+      rw [ih rest]
+      -- Both sides now match on readBitsLSB k rest
+      cases hk : Deflate.Spec.readBitsLSB k rest with
+      | none => simp [bind, Option.bind]
+      | some p =>
+        obtain ⟨v1, rest'⟩ := p
+        simp only [bind, Option.bind]
+        cases hn : Deflate.Spec.readBitsLSB n rest' with
+        | none => simp
+        | some q =>
+          obtain ⟨v2, rest''⟩ := q
+          simp only []
+          -- Goal: some (ib + (v1 + v2 * 2^k) * 2, rest'') =
+          --       some ((ib + v1 * 2) + v2 * 2^(k+1), rest'')
+          congr 1; ext1
+          · rw [Nat.pow_succ, ← Nat.mul_assoc, Nat.add_mul]; split <;> omega
+          · rfl
+
+/-- Reading 8 bits from a byte's bit representation recovers the byte value. -/
+private theorem readBitsLSB_byteToBits (b : UInt8) (rest : List Bool) :
+    Deflate.Spec.readBitsLSB 8 (Deflate.Spec.bytesToBits.byteToBits b ++ rest) =
+      some (b.toNat, rest) := by
+  exact readBitsLSB_testBit b.toNat 8 b.toBitVec.isLt rest
+
+/-- `alignToByte` produces a byte-aligned BitReader. -/
+theorem alignToByte_wf (br : Zip.Native.BitReader) :
+    br.alignToByte.bitOff = 0 := by
+  simp [Zip.Native.BitReader.alignToByte]
+  split <;> simp_all
+
+/-- `alignToByte` preserves the data field. -/
+theorem alignToByte_data (br : Zip.Native.BitReader) :
+    br.alignToByte.data = br.data := by
+  simp [Zip.Native.BitReader.alignToByte]
+  split <;> simp_all
+
 end Deflate.Correctness
