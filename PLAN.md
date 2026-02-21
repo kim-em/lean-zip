@@ -3,36 +3,29 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: In progress
+## Status: Complete
 
-## Session type: review
+## Session type: implementation
 
-## Goal: Deep review of InflateCorrect.lean — TreeHasLeaf + insert proofs
+## Goal: Prove `fromLengths_hasLeaf` and `fromLengths_leaf_spec`
 
-Focus areas: **refactoring/proof improvement** and **Lean idioms**.
+All steps completed. Sorry count reduced from 4 to 2.
 
-### Review targets
+### Steps
 
-1. [x] Reorganize UInt32 bit lemmas into a contiguous section:
-   - Move `shift_toUInt32_mod32`, `uint32_testBit`, `insert_bit_zero`,
-     `insert_bit_one` together, before `uint32_bit_eq_testBit`
-   - Simplify `uint32_bit_eq_testBit` to delegate to `uint32_testBit`
-     (2 lines via `rwa` instead of 5-line direct proof)
-   - Use `shift_toUInt32_mod32` in `uint32_testBit` instead of inline proof
+1. [x] Add `HuffTree.insertLoop` to `Inflate.lean` (recursive model of loop 3)
+2. [x] Refactor `fromLengths` to call `insertLoop` instead of `for` loop
+3. [x] Build and test to verify refactoring is correct
+4. [x] Prove `insert_go_noLeafOnPath`: inserting preserves `NoLeafOnPath`
+5. [x] Prove `insert_go_complete`: every leaf in `insert.go` output is
+   either from the original tree or at the inserted path
+6. [x] Prove `insertLoop_forward` with NC + NoLeafOnPath + previous-symbol invariants
+7. [x] Prove `insert_go_complete'` (without NoLeafOnPath requirement)
+8. [x] Prove `insertLoop_backward` with NC invariant
+9. [x] Derive `fromLengths_hasLeaf` from `insertLoop_forward`
+10. [x] Derive `fromLengths_leaf_spec` from `insertLoop_backward`
 
-2. [x] Simplify `decodeBits_of_hasLeaf`:
-   - Replace 4-line structured induction with `induction h <;> simp_all [decodeBits]`
+### Remaining sorry's
 
-3. [ ] Scan `insert_go_hasLeaf` and `insert_go_preserves` for simplifications
-
-4. [ ] Check `decode_go_decodeBits` for branch deduplication
-
-5. [ ] Full slop/dead code scan of new TreeHasLeaf infrastructure
-
-6. [ ] Toolchain check (v4.29.0-rc1 is latest, no upgrade needed)
-
-### Unfinished plan items from last session
-
-- `fromLengths_hasLeaf` — needs loop invariant (implementation work, deferred)
-- `fromLengths_leaf_spec` — depends on above
-- `inflate_correct` / `inflate_correct'` — main theorem (deferred)
+- `inflate_correct` — main stream correctness (requires block-level + LZ77 + loop)
+- `inflate_correct'` — corollary (trivial from `inflate_correct`)
