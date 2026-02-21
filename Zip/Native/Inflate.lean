@@ -198,7 +198,7 @@ private def decodeDynamicTrees (br : BitReader) :
   return (litTree, distTree, br)
 
 /-- Decode a stored (uncompressed) block. -/
-private def decodeStored (br : BitReader) (output : ByteArray)
+protected def decodeStored (br : BitReader) (output : ByteArray)
     (maxOutputSize : Nat) : Except String (ByteArray × BitReader) := do
   let (len, br) ← br.readUInt16LE
   let (nlen, br) ← br.readUInt16LE
@@ -274,7 +274,7 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
     br := br'
     match btype with
     | 0 => -- Stored
-      let (out, br') ← decodeStored br output maxOutputSize
+      let (out, br') ← Inflate.decodeStored br output maxOutputSize
       output := out; br := br'
     | 1 => -- Fixed Huffman
       let (out, br') ← decodeHuffman br output fixedLit fixedDist maxOutputSize

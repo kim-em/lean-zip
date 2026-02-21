@@ -545,6 +545,44 @@ private theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
       show List.drop ((pos + 1 + k) * 8) _ = List.drop ((pos + (k + 1)) * 8) _
       congr 1; omega
 
+/-- `readUInt16LE` preserves well-formedness: output reader has `bitOff = 0`. -/
+theorem readUInt16LE_wf (br : Zip.Native.BitReader)
+    (val : UInt16) (br' : Zip.Native.BitReader)
+    (h : br.readUInt16LE = .ok (val, br')) : br'.bitOff = 0 := by
+  simp only [Zip.Native.BitReader.readUInt16LE] at h
+  split at h
+  · simp at h
+  · have : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by cases h; rfl
+    rw [this]; exact alignToByte_wf br
+
+/-- `readUInt16LE` preserves the data field. -/
+theorem readUInt16LE_data (br : Zip.Native.BitReader)
+    (val : UInt16) (br' : Zip.Native.BitReader)
+    (h : br.readUInt16LE = .ok (val, br')) : br'.data = br.data := by
+  simp only [Zip.Native.BitReader.readUInt16LE] at h
+  split at h
+  · simp at h
+  · have : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by cases h; rfl
+    rw [this]; exact alignToByte_data br
+
+/-- `readBytes` preserves well-formedness: output reader has `bitOff = 0`. -/
+theorem readBytes_wf (br : Zip.Native.BitReader)
+    (n : Nat) (bytes : ByteArray) (br' : Zip.Native.BitReader)
+    (h : br.readBytes n = .ok (bytes, br')) : br'.bitOff = 0 := by
+  simp only [Zip.Native.BitReader.readBytes] at h
+  split at h
+  · simp at h
+  · have : br' = { br.alignToByte with pos := br.alignToByte.pos + n } := by cases h; rfl
+    rw [this]; exact alignToByte_wf br
+
+/-- For byte-aligned reader, `alignToByte` on the spec side is identity. -/
+theorem alignToByte_id_of_aligned (br : Zip.Native.BitReader)
+    (hoff : br.bitOff = 0) :
+    Deflate.Spec.alignToByte br.toBits = br.toBits := by
+  have : br.alignToByte = br := by
+    simp [Zip.Native.BitReader.alignToByte, hoff]
+  rw [← alignToByte_toBits br (by omega) (Or.inl hoff), this]
+
 /-- Native `readBytes` corresponds to spec `readNBytes` after alignment.
     The native reader aligns to a byte boundary and reads `n` contiguous bytes.
     The spec reads `n` bytes one at a time via `readBitsLSB 8`. -/

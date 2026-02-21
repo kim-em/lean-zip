@@ -107,6 +107,89 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
   rw [hdb] at hspec; simp at hspec
   exact ⟨br'.toBits, hspec.symm, rfl⟩
 
+/-! ## Stored block correctness -/
+
+/-- If the native stored-block decoder succeeds, the spec's `decodeStored`
+    also succeeds and produces the same bytes and remaining bit position.
+    The `output` parameter is pass-through (native prepends to output). -/
+theorem decodeStored_correct (br : Zip.Native.BitReader)
+    (output : ByteArray) (maxOutputSize : Nat)
+    (output' : ByteArray) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (h : Zip.Native.Inflate.decodeStored br output maxOutputSize = .ok (output', br')) :
+    ∃ storedBytes rest,
+      Deflate.Spec.decodeStored br.toBits = some (storedBytes, rest) ∧
+      output'.data.toList = output.data.toList ++ storedBytes ∧
+      br'.toBits = rest := by
+  -- Unfold native decodeStored
+  simp only [Zip.Native.Inflate.decodeStored, bind, Except.bind] at h
+  -- First readUInt16LE (reads LEN)
+  cases hlen_r : br.readUInt16LE with
+  | error e => simp [hlen_r] at h
+  | ok p1 =>
+    obtain ⟨len, br1⟩ := p1
+    simp only [hlen_r] at h
+    -- Second readUInt16LE (reads NLEN)
+    cases hnlen_r : br1.readUInt16LE with
+    | error e => simp [hnlen_r] at h
+    | ok p2 =>
+      obtain ⟨nlen, br2⟩ := p2
+      simp only [hnlen_r] at h
+      -- Complement check (if len ^^^ nlen != 0xFFFF then throw else ...)
+      split at h
+      · simp at h
+      · rename_i hcomp
+        -- Size check (if output.size + len.toNat > maxOutputSize then throw else ...)
+        simp only [pure, Except.pure] at h
+        split at h
+        · simp at h
+        · -- readBytes
+          cases hbytes_r : br2.readBytes len.toNat with
+          | error e => simp [hbytes_r] at h
+          | ok p3 =>
+            obtain ⟨bytes, br3⟩ := p3
+            simp only [hbytes_r, Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl⟩ := h
+            -- output' = output ++ bytes, br' = br3
+            -- Now chain spec correspondence
+            -- First readUInt16LE → spec readBitsLSB 16 (alignToByte br.toBits)
+            obtain ⟨rest1, hspec_len, hrest1⟩ :=
+              readUInt16LE_toBits br len br1 hwf hpos hlen_r
+            -- br1 is byte-aligned
+            have hwf1 : br1.bitOff = 0 := readUInt16LE_wf br len br1 hlen_r
+            -- Second readUInt16LE → spec readBitsLSB 16 (alignToByte br1.toBits)
+            obtain ⟨rest2, hspec_nlen, hrest2⟩ :=
+              readUInt16LE_toBits br1 nlen br2 (by omega) (Or.inl hwf1) hnlen_r
+            -- alignToByte br1.toBits = br1.toBits (already byte-aligned)
+            rw [alignToByte_id_of_aligned br1 hwf1] at hspec_nlen
+            -- br2 is byte-aligned
+            have hwf2 : br2.bitOff = 0 := readUInt16LE_wf br1 nlen br2 hnlen_r
+            -- readBytes → spec readNBytes (br3 was substituted for br')
+            obtain ⟨rest3, hspec_bytes, hrest3⟩ :=
+              readBytes_toBits br2 len.toNat bytes br3 (by omega) (Or.inl hwf2) hbytes_r
+            -- alignToByte br2.toBits = br2.toBits
+            rw [alignToByte_id_of_aligned br2 hwf2] at hspec_bytes
+            -- Complement check: native ¬(len ^^^ nlen != 0xFFFF) → spec guard
+            have hcomp_eq : len ^^^ nlen = 0xFFFF := by
+              simp [bne_iff_ne] at hcomp; exact hcomp
+            have hcomp_nat : len.toNat ^^^ nlen.toNat = 0xFFFF := by
+              rw [← UInt16.toNat_xor, hcomp_eq]; rfl
+            -- Prepare spec-level hypotheses in unified form
+            have h_nlen : Deflate.Spec.readBitsLSB 16 rest1 = some (nlen.toNat, rest2) := by
+              rw [← hrest1]; exact hspec_nlen
+            have h_bytes : Deflate.Spec.decodeStored.readNBytes len.toNat rest2 [] =
+                some (bytes.data.toList, rest3) := by
+              rw [← hrest2]; exact hspec_bytes
+            -- Construct the spec result
+            refine ⟨bytes.data.toList, rest3, ?_, ?_, hrest3⟩
+            · -- Spec.decodeStored br.toBits = some (bytes.data.toList, rest3)
+              simp only [Deflate.Spec.decodeStored, bind, Option.bind,
+                hspec_len, h_nlen, hcomp_nat, h_bytes]
+              rfl
+            · -- (output ++ bytes).data.toList = output.data.toList ++ bytes.data.toList
+              simp
+
 /-! ## Main correctness theorem -/
 
 /-- **Main theorem**: If the native DEFLATE decompressor succeeds, then
