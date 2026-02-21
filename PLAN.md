@@ -5,27 +5,38 @@
 
 ## Status: Complete
 
-## Session type: implementation
+## Session type: review
 
-## Goal: Prove `fromLengths_hasLeaf` and `fromLengths_leaf_spec`
+## Goal: Split InflateCorrect.lean + dead code removal
 
-All steps completed. Sorry count reduced from 4 to 2.
+InflateCorrect.lean was at 1282 lines (over 1000-line limit).
 
 ### Steps
 
-1. [x] Add `HuffTree.insertLoop` to `Inflate.lean` (recursive model of loop 3)
-2. [x] Refactor `fromLengths` to call `insertLoop` instead of `for` loop
-3. [x] Build and test to verify refactoring is correct
-4. [x] Prove `insert_go_noLeafOnPath`: inserting preserves `NoLeafOnPath`
-5. [x] Prove `insert_go_complete`: every leaf in `insert.go` output is
-   either from the original tree or at the inserted path
-6. [x] Prove `insertLoop_forward` with NC + NoLeafOnPath + previous-symbol invariants
-7. [x] Prove `insert_go_complete'` (without NoLeafOnPath requirement)
-8. [x] Prove `insertLoop_backward` with NC invariant
-9. [x] Derive `fromLengths_hasLeaf` from `insertLoop_forward`
-10. [x] Derive `fromLengths_leaf_spec` from `insertLoop_backward`
+1. [x] Remove dead `insert_go_complete` (superseded by `insert_go_complete'`)
+2. [x] Fix unused simp argument `beq_iff_eq`
+3. [x] Build and test to verify dead code removal
+4. [x] Split into 3 files:
+   - `Zip/Spec/BitstreamCorrect.lean` — bitstream layer (268 lines)
+   - `Zip/Spec/HuffmanCorrect.lean` — TreeHasLeaf, insert, fromLengths (833 lines)
+   - `Zip/Spec/InflateCorrect.lean` — final connection + main theorem (146 lines)
+5. [x] Update imports in Zip.lean
+6. [x] Build and test after split
+7. [x] Update CLAUDE.md source layout table
+8. [x] Update SESSION.md and PROGRESS.md
 
-### Remaining sorry's
+### Review findings
 
-- `inflate_correct` — main stream correctness (requires block-level + LZ77 + loop)
-- `inflate_correct'` — corollary (trivial from `inflate_correct`)
+- **Dead code**: `insert_go_complete` (58 lines) — superseded by `insert_go_complete'`,
+  never referenced
+- **Dead variables**: `hlen_pos_nat` in both `insertLoop_forward` and
+  `insertLoop_backward` — attempted removal but omega needs them (bridges
+  UInt8 ordering to Nat). NOT dead — kept.
+- **Duplicated proof**: NC invariant proof in `insertLoop_forward` and
+  `insertLoop_backward` (~40 lines each, nearly identical). Not extracting
+  because the helper would need ~20 parameters, making it longer than the
+  duplication.
+- **Duplicated proof**: Initial NC proof in `fromLengths_hasLeaf` and
+  `fromLengths_leaf_spec` (~22 lines each). Same reason for not extracting.
+- **Huffman.lean at 959 lines**: candidate for splitting but under 1000.
+  Defer to future review.

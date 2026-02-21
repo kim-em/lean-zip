@@ -171,7 +171,11 @@ End every session by running `/reflect`. If it suggests improvements to
     Zip/Native/BitReader.lean — LSB-first bit-level reader for DEFLATE
     Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
     Zip/Native/Gzip.lean     — Native gzip/zlib decompression (RFC 1952/1950)
-    Zip/Spec/            — Formal specifications to prove against
+    Zip/Spec/Huffman.lean    — Canonical Huffman code spec (allCodes, prefix-free)
+    Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
+    Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence
+    Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
+    Zip/Spec/InflateCorrect.lean   — Main inflate correctness theorem
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
@@ -371,5 +375,5 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 2 (all in InflateCorrect.lean — inflate_correct, inflate_correct')
-- **Last session**: 2026-02-21 (implementation: proved fromLengths_hasLeaf + fromLengths_leaf_spec, -2 sorries)
-- **Last review**: 2026-02-21 (InflateCorrect.lean: bit lemma reorg, simp_all, cons_prefix_cons)
+- **Last session**: 2026-02-21 (review: split InflateCorrect into 3 files, dead code removal)
+- **Last review**: 2026-02-21 (split InflateCorrect.lean 1282→268+833+146, removed insert_go_complete)

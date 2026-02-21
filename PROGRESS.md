@@ -2,6 +2,37 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-21: Review — split InflateCorrect.lean + dead code removal
+
+**Type**: review (file size + slop detection)
+**Phase**: Phase 3 (verified decompressor) — in progress
+**Sorry count**: 2 → 2 (unchanged)
+**Starting commit**: `aa32f08`
+
+**Key results**: Split `InflateCorrect.lean` (1282 lines, over 1000-line limit)
+into three files:
+
+- `BitstreamCorrect.lean` (268 lines) — BitReader ↔ bytesToBits correspondence
+- `HuffmanCorrect.lean` (833 lines) — HuffTree ↔ Huffman.Spec correspondence
+- `InflateCorrect.lean` (146 lines) — final connection + main theorem
+
+**Dead code removed**:
+- `insert_go_complete` (58 lines) — superseded by `insert_go_complete'`, never referenced
+- Fixed unused simp argument `beq_iff_eq` (linter warning)
+
+**Visibility changes for cross-file access**:
+- `private` → `protected`: `decode_go_decodeBits`, `decodeBits_of_hasLeaf`,
+  `hasLeaf_of_decodeBits`, `decode_some_mem`, `fromLengths_hasLeaf`, `fromLengths_leaf_spec`
+- `private` → public: `uint32_testBit`
+
+**Not extracted** (documented but deferred):
+- Duplicated NC invariant proof (~40 lines each in insertLoop_forward/backward) —
+  helper would need ~20 parameters, making it longer than the duplication
+- Huffman.lean at 959 lines — approaching limit but under 1000
+
+**Lines**: net -1136 in InflateCorrect, +268 BitstreamCorrect, +833 HuffmanCorrect
+(~-35 net from dead code removal)
+
 ## 2026-02-21: Implementation — prove fromLengths_hasLeaf + fromLengths_leaf_spec
 
 **Type**: implementation
