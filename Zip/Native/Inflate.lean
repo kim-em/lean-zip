@@ -9,6 +9,7 @@
   This is a reference implementation prioritizing correctness over speed.
 -/
 import Zip.Native.BitReader
+import Zip.Spec.Huffman
 
 namespace Zip.Native
 
@@ -60,20 +61,14 @@ termination_by lengths.size - start
     from RFC 1951 §3.2.2. -/
 def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     Except String HuffTree := do
-  -- Count codes of each length
-  let mut blCount : Array Nat := .replicate (maxBits + 1) 0
+  -- Validate: all lengths ≤ maxBits
   for len in lengths do
-    let l := len.toNat
-    if l > maxBits then throw "Inflate: code length exceeds maximum"
-    blCount := blCount.set! l (blCount[l]! + 1)
-  blCount := blCount.set! 0 0
-  -- Compute first code for each length
-  let mut nextCode : Array UInt32 := .replicate (maxBits + 1) 0
-  let mut code : UInt32 := 0
-  for bits in [:maxBits] do
-    let b := bits + 1
-    code := (code + blCount[bits]!.toUInt32) <<< 1
-    nextCode := nextCode.set! b code
+    if len.toNat > maxBits then throw "Inflate: code length exceeds maximum"
+  -- Compute nextCode using the canonical Huffman construction (RFC 1951 §3.2.2)
+  let lsList := lengths.toList.map UInt8.toNat
+  let blCount := Huffman.Spec.countLengths lsList maxBits
+  let ncNat := Huffman.Spec.nextCodes blCount maxBits
+  let nextCode : Array UInt32 := ncNat.map fun n => n.toUInt32
   -- Build tree by inserting each symbol
   return (insertLoop lengths nextCode 0 .empty).1
 
