@@ -5,13 +5,14 @@
 # live monitoring, structured logging, and process tracking.
 #
 # Usage:
-#   ./go [--force] [--single] [--sleep N] [--resume UUID] [--verbose]
+#   ./go [--force] [--single] [--sleep N] [--resume UUID] [--prompt TEXT] [--verbose]
 #
 # Flags:
 #   --force, -f       Skip quota check
 #   --single          Run one session then exit (default: loop forever)
 #   --sleep N         Sleep N seconds between sessions (default: 0)
 #   --resume UUID     Resume an existing session
+#   --prompt TEXT     Override default prompt (default: /start)
 #   --verbose, -v     Verbose quota check output
 
 set -euo pipefail
@@ -28,6 +29,7 @@ FORCE=""
 SINGLE=""
 SLEEP_SECS=0
 RESUME_UUID=""
+PROMPT="/start"
 VERBOSE=""
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
         --single)     SINGLE=1 ;;
         --sleep)      SLEEP_SECS="$2"; shift ;;
         --resume)     RESUME_UUID="$2"; shift ;;
+        --prompt)     PROMPT="$2"; shift ;;
         --verbose|-v) VERBOSE=1 ;;
         *) echo "Unknown flag: $1" >&2; exit 1 ;;
     esac
@@ -76,8 +79,8 @@ FILTER_PID=""
 CLAUDE_PID=""
 
 cleanup() {
-    # Kill the streaming filter if running
-    if [[ -n "$FILTER_PID" ]] && kill -0 "$FILTER_PID" 2>/dev/null; then
+    # Kill the streaming filter subshell (its EXIT trap kills tail + python3)
+    if [[ -n "$FILTER_PID" ]]; then
         kill "$FILTER_PID" 2>/dev/null || true
         wait "$FILTER_PID" 2>/dev/null || true
     fi
@@ -219,7 +222,12 @@ start_filter() {
         return 1
     fi
 
-    tail -f "$jsonl_path" 2>/dev/null | python3 -c "
+    # Run in a subshell so we can kill the entire process group (tail + python3).
+    # Without this, killing python3 alone leaves tail -f orphaned since nobody
+    # writes to the JSONL file to trigger SIGPIPE.
+    (
+        trap 'kill 0' EXIT
+        tail -f "$jsonl_path" 2>/dev/null | python3 -c "
 import json, sys
 
 state_file = sys.argv[1]
@@ -270,7 +278,8 @@ for line in sys.stdin:
                 json.dump({'ts': ts, 'text': last_text}, f)
     except:
         pass
-" "$state_file" &
+" "$state_file"
+    ) &
     FILTER_PID=$!
     return 0
 }
@@ -341,7 +350,7 @@ while true; do
     else
         claude_args+=(--session-id "$uuid")
     fi
-    claude_args+=(-p "/start")
+    claude_args+=(-p "$PROMPT")
 
     say "Session #$SESSION_NUM starting: $uuid"
     log "Claude args: ${claude_args[*]}"
@@ -388,13 +397,13 @@ while true; do
         sleep 2
     done
 
-    # Claude exited
-    wait "$CLAUDE_PID" 2>/dev/null
-    EXIT_CODE=$?
+    # Claude exited — wait may return 127 if already reaped, so don't let set -e kill us
+    EXIT_CODE=0
+    wait "$CLAUDE_PID" 2>/dev/null || EXIT_CODE=$?
     ELAPSED=$(( $(date +%s) - SESSION_START ))
 
-    # Kill filter
-    if [[ -n "$FILTER_PID" ]] && kill -0 "$FILTER_PID" 2>/dev/null; then
+    # Kill filter subshell (its EXIT trap kills tail + python3)
+    if [[ -n "$FILTER_PID" ]]; then
         kill "$FILTER_PID" 2>/dev/null || true
         wait "$FILTER_PID" 2>/dev/null || true
     fi
