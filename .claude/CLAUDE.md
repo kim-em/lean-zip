@@ -405,6 +405,24 @@ Update it during review and reflect sessions.
   To define in a different namespace, either close the current namespace
   first, or use a local name (e.g. `def decodeBits` instead of
   `def Zip.Native.HuffTree.decodeBits`).
+- **`getElem?_pos`/`getElem!_pos` for Array lookups**: To prove
+  `arr[i]? = some arr[i]!`, use the two-step pattern:
+  `rw [getElem!_pos arr i h]; exact getElem?_pos arr i h`. The first
+  rewrites `arr[i]!` to `arr[i]` (bounds-checked), the second proves
+  `arr[i]? = some arr[i]`. `getElem?_pos` needs the explicit container
+  argument (not `_`) to avoid `GetElem?` type class synthesis failures.
+- **Fin coercion mismatch in omega**: When a lemma over `Fin n`
+  is applied as `lemma ⟨k, hk⟩`, omega treats
+  `arr[(⟨k, hk⟩ : Fin n).val]!` and `arr[k]!` as different variables.
+  Fix by annotating the result type:
+  `have : arr[k]! ≥ 1 := lemma ⟨k, hk⟩`.
+- **Nat beq false**: To prove `(n == m) = false` for Nat with `n ≠ m`,
+  use `cases heq : n == m <;> simp_all [beq_iff_eq]`. Direct `omega`
+  and `rw [beq_iff_eq]` don't work because `omega` doesn't understand
+  `BEq` and `beq_iff_eq` is about `= true`, not `= false`.
+- **List/Array/ByteArray length conversions**: `Array.length_toList`
+  gives `arr.toList.length = arr.size`. `ByteArray.size_data` gives
+  `ba.data.size = ba.size`. Chain them for `ba.data.toList.length`.
 
 ## Current State Summary
 
@@ -412,6 +430,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 2 (InflateCorrect.lean — decodeHuffman_correct length/distance case, inflate_correct)
-- **Last session**: 2026-02-22 (impl: spec bug fix + decodeHuffman_correct 2/3 cases)
+- **Sorry count**: 2 (InflateCorrect.lean — copyLoop_eq_ofFn, inflate_correct)
+- **Last session**: 2026-02-22 (impl: decodeHuffman_correct length/distance case complete)
 - **Last review**: 2026-02-22 (BitstreamCorrect deep review, Huffman size scan)
