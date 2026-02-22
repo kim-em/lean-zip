@@ -380,6 +380,13 @@ Update it during review and reflect sessions.
   `simp only [..., hrd, bind, Except.bind] at h` substitutes the
   known result. This is cleaner than `simp [...] at h; split at h;
   rename_i ...` which produces fragile unnamed hypotheses.
+- **do-notation guards (`if ... then throw`)**: Guards like
+  `if cond then throw err` in `Except` do-notation expand to
+  `match (if cond then Except.error err else pure PUnit.unit) with
+  | Except.error e => ... | Except.ok _ => ...`. After splitting the
+  outer condition with `split at h`, the `pure` branch leaves a stuck
+  `match`. Use `simp only [pure, Except.pure] at h` to reduce it, then
+  continue with the next `cases`/`split`.
 - **Closing `Except.error = Except.ok` contradictions**: `simp only`
   does NOT know that `Except.error ≠ Except.ok` — it lacks the
   discriminator lemmas. Use `simp at h` (without `only`) which includes
@@ -464,6 +471,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 2 (InflateCorrect.lean — decodeDynamicTrees_correct)
-- **Last session**: 2026-02-23 (impl: inflateLoop_correct, inflate_correct)
+- **Sorry count**: 3 (InflateCorrect.lean — readCLCodeLengths_correct, decodeCLSymbols_correct, decodeDynamicTrees_correct)
+- **Last session**: 2026-02-23 (impl: decodeDynamicTrees infrastructure)
 - **Last review**: 2026-02-23 (split InflateCorrect, proof dedup)
