@@ -46,8 +46,16 @@ def linkFlags : IO (Array String) := do
   if (← hasStaticZstd allLibPaths) then
     let zstdLibPaths := zstdFlags.filter (·.startsWith "-L")
     let zlibEffective := if zlibFlags.isEmpty then libPaths ++ #["-lz"] else zlibFlags
-    return zlibEffective ++ zstdLibPaths ++
-      #["-Wl,-Bstatic", "-lzstd", "-Wl,-Bdynamic"]
+    -- On macOS (lld), -Bstatic/-Bdynamic aren't supported; link dynamically instead.
+    -- Also need SDK library path since Lean's sysroot hides system libs.
+    if System.Platform.isOSX then
+      let sdkPath := (← IO.Process.output {
+        cmd := "xcrun", args := #["--show-sdk-path"] }).stdout.trimAscii.toString
+      return zlibEffective ++ zstdLibPaths ++
+        #["-lzstd", s!"-L{sdkPath}/usr/lib"]
+    else
+      return zlibEffective ++ zstdLibPaths ++
+        #["-Wl,-Bstatic", "-lzstd", "-Wl,-Bdynamic"]
   if !zlibFlags.isEmpty && !zstdFlags.isEmpty then
     -- Dynamic zstd may reference newer glibc symbols than Lean's sysroot provides.
     -- Allow unresolved shlib symbols; the system libc provides them at runtime.
@@ -123,3 +131,6 @@ lean_lib ZipTest where
 @[default_target]
 lean_exe test where
   root := `ZipTest
+
+lean_exe bench where
+  root := `ZipBench
