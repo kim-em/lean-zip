@@ -463,6 +463,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 1 (InflateCorrect.lean — inflate_correct)
-- **Last session**: 2026-02-22 (review: InflateCorrect proof refactoring)
+- **Sorry count**: 2 (InflateCorrect.lean — decodeDynamicTrees_correct)
+- **Last session**: 2026-02-23 (impl: inflateLoop_correct, inflate_correct)
 - **Last review**: 2026-02-22 (InflateCorrect getElem? helper, comprehensive scan)
