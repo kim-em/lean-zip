@@ -262,6 +262,12 @@ set_option maxRecDepth 1024 in
 private theorem spec_distBase_pos : ∀ i : Fin 30,
     (Deflate.Spec.distBase[i.val]!) ≥ 1 := by decide
 
+/-- `arr[i]? = some arr[i]!` when `i` is in bounds.
+    Combines `getElem!_pos` and `getElem?_pos` into a single step. -/
+private theorem getElem?_eq_some_getElem! [Inhabited α] (arr : Array α) (i : Nat)
+    (h : i < arr.size) : arr[i]? = some arr[i]! := by
+  rw [getElem!_pos arr i h]; exact getElem?_pos arr i h
+
 /-- `ba[j]!` equals `ba.data.toList[j]!` when `j` is in bounds. -/
 private theorem ba_getElem!_eq_toList (ba : ByteArray) (j : Nat) (hj : j < ba.size) :
     ba[j]! = ba.data.toList[j]! := by
@@ -553,22 +559,10 @@ theorem decodeHuffman_correct
                           have hne256 : (sym.toNat == 256) = false := by
                             cases heq : sym.toNat == 256 <;> simp_all [beq_iff_eq]
                           simp only [hne256, Bool.false_eq_true, ↓reduceIte]
-                          have h1 : Deflate.Spec.lengthBase[sym.toNat - 257]? =
-                              some Deflate.Spec.lengthBase[sym.toNat - 257]! := by
-                            rw [getElem!_pos Deflate.Spec.lengthBase _ hidx]
-                            exact getElem?_pos Deflate.Spec.lengthBase _ hidx
-                          have h2 : Deflate.Spec.lengthExtra[sym.toNat - 257]? =
-                              some Deflate.Spec.lengthExtra[sym.toNat - 257]! := by
-                            rw [getElem!_pos Deflate.Spec.lengthExtra _ hidx]
-                            exact getElem?_pos Deflate.Spec.lengthExtra _ hidx
-                          have h3 : Deflate.Spec.distBase[distSym.toNat]? =
-                              some Deflate.Spec.distBase[distSym.toNat]! := by
-                            rw [getElem!_pos Deflate.Spec.distBase _ hdidx]
-                            exact getElem?_pos Deflate.Spec.distBase _ hdidx
-                          have h4 : Deflate.Spec.distExtra[distSym.toNat]? =
-                              some Deflate.Spec.distExtra[distSym.toNat]! := by
-                            rw [getElem!_pos Deflate.Spec.distExtra _ hdidx]
-                            exact getElem?_pos Deflate.Spec.distExtra _ hdidx
+                          have h1 := getElem?_eq_some_getElem! Deflate.Spec.lengthBase _ hidx
+                          have h2 := getElem?_eq_some_getElem! Deflate.Spec.lengthExtra _ hidx
+                          have h3 := getElem?_eq_some_getElem! Deflate.Spec.distBase _ hdidx
+                          have h4 := getElem?_eq_some_getElem! Deflate.Spec.distExtra _ hdidx
                           simp only [h1, h2, h_extra, h3, h4, h_dist,
                             h_dextra, pure]
                         -- Build decodeSymbols result
@@ -608,13 +602,11 @@ theorem decodeHuffman_correct
                                 spec_distBase_pos ⟨distSym.toNat, hdidx⟩
                               rw [hdist_val_eq]; omega)
                           (by rw [Nat.not_lt] at hdist_ok; exact hdist_ok)
-                        -- Substitute copyLoop result into IH before changing table names
-                        rw [hcopy] at hlz
-                        -- Now rewrite native table values to spec values in hlz and goal
-                        rw [hlen_eq, hdist_val_eq] at hlz
-                        -- Align output.size vs output.data.toList.length
-                        conv at hlz => rw [show output.size = output.data.toList.length from by
-                          simp [Array.length_toList, ByteArray.size_data]]
+                        -- Rewrite copyLoop result, native→spec table values,
+                        -- and output.size→output.data.toList.length
+                        have hsize : output.size = output.data.toList.length := by
+                          simp [Array.length_toList, ByteArray.size_data]
+                        rw [hcopy, hlen_eq, hdist_val_eq, hsize] at hlz
                         exact hlz
 
 /-! ## Main correctness theorem -/
