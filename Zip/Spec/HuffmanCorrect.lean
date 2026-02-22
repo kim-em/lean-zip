@@ -151,7 +151,7 @@ private def NoLeafOnPath : Zip.Native.HuffTree → List Bool → Prop
 /-- `insert.go` places a leaf at the path `natToBits code.toNat len` in the tree,
     provided no existing leaf blocks the path. -/
 private theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
-    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len ≤ 15)
+    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len < 32)
     (hnl : NoLeafOnPath tree (Huffman.Spec.natToBits code.toNat len)) :
     TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym tree len)
       (Huffman.Spec.natToBits code.toNat len) sym := by
@@ -203,7 +203,7 @@ private theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
     a prefix of. This is the key preservation property: inserting a new code doesn't
     disrupt decoding of existing codes, provided they are prefix-free. -/
 private theorem insert_go_preserves (code : UInt32) (sym : UInt16)
-    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len ≤ 15)
+    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len < 32)
     (cw : List Bool) (s : UInt16)
     (h : TreeHasLeaf tree cw s)
     (hne : ¬(Huffman.Spec.natToBits code.toNat len).IsPrefix cw) :
@@ -267,7 +267,7 @@ private theorem noLeafOnPath_nil (tree : Zip.Native.HuffTree) :
     is not a prefix of. This is needed to maintain the NoLeafOnPath invariant
     through sequential insertions of prefix-free codes. -/
 private theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
-    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len ≤ 15)
+    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len < 32)
     (path : List Bool)
     (hno : NoLeafOnPath tree path)
     (hnp : ¬(Huffman.Spec.natToBits code.toNat len).IsPrefix path) :
@@ -335,7 +335,7 @@ private theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
     this handles the `.leaf` case (where `insert.go` returns the tree unchanged) by
     returning `.inl h`. -/
 private theorem insert_go_complete' (code : UInt32) (sym : UInt16)
-    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len ≤ 15)
+    (tree : Zip.Native.HuffTree) (len : Nat) (hlen : len < 32)
     (cw : List Bool) (s : UInt16)
     (h : TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym tree len) cw s) :
     TreeHasLeaf tree cw s ∨ (cw = Huffman.Spec.natToBits code.toNat len ∧ s = sym) := by
@@ -394,9 +394,10 @@ private theorem insert_go_complete' (code : UInt32) (sym : UInt16)
 /-! ### Connecting fromLengths to allCodes -/
 
 /-- When `fromLengths` succeeds, the tree is `fromLengthsTree`. -/
-private theorem fromLengths_ok_eq (lengths : Array UInt8) (tree : Zip.Native.HuffTree)
-    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree) :
-    tree = Zip.Native.HuffTree.fromLengthsTree lengths := by
+private theorem fromLengths_ok_eq (lengths : Array UInt8) (maxBits : Nat)
+    (tree : Zip.Native.HuffTree)
+    (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree) :
+    tree = Zip.Native.HuffTree.fromLengthsTree lengths maxBits := by
   simp only [Zip.Native.HuffTree.fromLengths] at htree
   split at htree
   · simp at htree
@@ -417,11 +418,11 @@ private theorem array_set_self_u32 (arr : Array UInt32) (i : Nat) (v : UInt32) (
         Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_self_of_lt hi]
 
 /-- `codeFor` returns `some` for symbols with valid nonzero length. -/
-private theorem codeFor_some (lsList : List Nat) (s : Nat)
-    (hs : s < lsList.length) (hlen : lsList[s] ≠ 0) (hle : lsList[s] ≤ 15) :
-    ∃ cw, Huffman.Spec.codeFor lsList 15 s = some cw := by
+private theorem codeFor_some (lsList : List Nat) (maxBits : Nat) (s : Nat)
+    (hs : s < lsList.length) (hlen : lsList[s] ≠ 0) (hle : lsList[s] ≤ maxBits) :
+    ∃ cw, Huffman.Spec.codeFor lsList maxBits s = some cw := by
   simp only [Huffman.Spec.codeFor, show s < lsList.length from hs, ↓reduceDIte]
-  simp only [show (lsList[s] == 0 || decide (lsList[s] > 15)) = false from by
+  simp only [show (lsList[s] == 0 || decide (lsList[s] > maxBits)) = false from by
     simp [hlen]; omega]
   exact ⟨_, rfl⟩
 
@@ -432,25 +433,26 @@ private theorem insertLoop_forward
     (lengths : Array UInt8) (nextCode : Array UInt32)
     (start : Nat) (tree : Zip.Native.HuffTree)
     (lsList : List Nat) (hlsList : lsList = lengths.toList.map UInt8.toNat)
-    (blCount : Array Nat) (hblCount : blCount = Huffman.Spec.countLengths lsList 15)
-    (ncSpec : Array Nat) (hncSpec : ncSpec = Huffman.Spec.nextCodes blCount 15)
-    (hv : Huffman.Spec.ValidLengths lsList 15)
-    (hncSize : nextCode.size ≥ 16)
+    (maxBits : Nat) (hmb : maxBits < 32)
+    (blCount : Array Nat) (hblCount : blCount = Huffman.Spec.countLengths lsList maxBits)
+    (ncSpec : Array Nat) (hncSpec : ncSpec = Huffman.Spec.nextCodes blCount maxBits)
+    (hv : Huffman.Spec.ValidLengths lsList maxBits)
+    (hncSize : nextCode.size ≥ maxBits + 1)
     -- NC invariant: nextCode tracks ncSpec + partial offset
-    (hnc : ∀ b, 1 ≤ b → b ≤ 15 →
+    (hnc : ∀ b, 1 ≤ b → b ≤ maxBits →
       nextCode[b]!.toNat = ncSpec[b]! +
         (lsList.take start).foldl (fun acc l => if l == b then acc + 1 else acc) 0)
     -- Forward: tree has leaves for all k < start
     (hprev : ∀ k, k < start → (hk : k < lengths.size) → lengths[k] > 0 →
-      ∀ cw, Huffman.Spec.codeFor lsList 15 k = some cw →
+      ∀ cw, Huffman.Spec.codeFor lsList maxBits k = some cw →
         TreeHasLeaf tree cw k.toUInt16)
     -- NoLeafOnPath for all future codes
     (hnlop : ∀ k, start ≤ k → (hk : k < lengths.size) → lengths[k] > 0 →
-      ∀ cw, Huffman.Spec.codeFor lsList 15 k = some cw →
+      ∀ cw, Huffman.Spec.codeFor lsList maxBits k = some cw →
         NoLeafOnPath tree cw)
     -- Target symbol
     (j : Nat) (hjs : j < lengths.size) (hjlen : lengths[j] > 0)
-    (cw : Huffman.Spec.Codeword) (hcf : Huffman.Spec.codeFor lsList 15 j = some cw) :
+    (cw : Huffman.Spec.Codeword) (hcf : Huffman.Spec.codeFor lsList maxBits j = some cw) :
     TreeHasLeaf (Zip.Native.HuffTree.insertLoop lengths nextCode start tree).1 cw j.toUInt16 := by
   unfold Zip.Native.HuffTree.insertLoop
   split
@@ -464,11 +466,11 @@ private theorem insertLoop_forward
       have hls_len : start < lsList.length := by simp [hlsList, hstart]
       have hls_start : lsList[start] = lengths[start].toNat := by
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
-      have hlen_le : lengths[start].toNat ≤ 15 := by
+      have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
       -- The codeword for symbol `start` matches the insert path
-      obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList start hls_len
+      obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
         (by rw [hls_start]; omega) (by rw [hls_start]; omega)
       have hcw_s : cw_s = Huffman.Spec.natToBits
           (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat := by
@@ -477,18 +479,18 @@ private theorem insertLoop_forward
         rw [← hblCount, ← hncSpec]
         exact (hnc lengths[start].toNat (by omega) hlen_le).symm
       -- Prefix-freeness: insert path is not prefix of any other codeword
-      have hpf : ∀ k, k ≠ start → ∀ cw', Huffman.Spec.codeFor lsList 15 k = some cw' →
+      have hpf : ∀ k, k ≠ start → ∀ cw', Huffman.Spec.codeFor lsList maxBits k = some cw' →
           ¬(Huffman.Spec.natToBits (nextCode[lengths[start].toNat]!).toNat
             lengths[start].toNat).IsPrefix cw' := by
         intro k hne cw' hcf_k
         have hcf_s' := hcw_s ▸ hcf_s
-        exact Huffman.Spec.canonical_prefix_free lsList 15 hv start k _ cw'
+        exact Huffman.Spec.canonical_prefix_free lsList maxBits hv start k _ cw'
           hcf_s' hcf_k (by omega)
       exact insertLoop_forward lengths
         (nextCode.set! lengths[start].toNat (nextCode[lengths[start].toNat]! + 1))
         (start + 1)
         (tree.insert (nextCode[lengths[start].toNat]!) lengths[start].toNat start.toUInt16)
-        lsList hlsList blCount hblCount ncSpec hncSpec hv
+        lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
         (by -- hncSize': set! preserves array size
           simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
           split <;> simp_all)
@@ -516,10 +518,10 @@ private theorem insertLoop_forward
                     (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc) 0)
                 from by rw [← List.foldl_append, List.take_append_drop]]
               exact Huffman.Spec.count_foldl_mono _ _ _
-            have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList 15
+            have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
               lengths[start].toNat hv (by omega) hlen_le
             rw [← hblCount, ← hncSpec] at h_npc
-            have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) hlen_le
+            have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show lengths[start].toNat ≤ 31 from by omega)
             rw [UInt32.toNat_add, show (1 : UInt32).toNat = 1 from rfl,
                 Nat.mod_eq_of_lt (by omega), h_nc_val]
             omega
@@ -533,21 +535,21 @@ private theorem insertLoop_forward
           intro k hk hks hklen cw' hcf'
           by_cases hk_eq : k = start
           · -- k = start: newly inserted leaf
-            have hcf_start : Huffman.Spec.codeFor lsList 15 start = some cw' := by
+            have hcf_start : Huffman.Spec.codeFor lsList maxBits start = some cw' := by
               rw [← hk_eq]; exact hcf'
             have hcw_eq : cw_s = cw' := Option.some.inj (hcf_s.symm.trans hcf_start)
             subst hcw_eq; rw [hcw_s, hk_eq]
             have h_nlop : NoLeafOnPath tree cw_s :=
               hnlop start Nat.le.refl hstart hlen_pos cw_s hcf_s
             rw [hcw_s] at h_nlop
-            exact insert_go_hasLeaf _ _ _ _ hlen_le h_nlop
+            exact insert_go_hasLeaf _ _ _ _ (by omega) h_nlop
           · -- k < start: leaf preserved by insert
-            exact insert_go_preserves _ _ _ _ hlen_le cw' k.toUInt16
+            exact insert_go_preserves _ _ _ _ (by omega) cw' k.toUInt16
               (hprev k (by omega) hks hklen cw' hcf')
               (hpf k hk_eq cw' hcf'))
         (by -- hnlop': NoLeafOnPath preserved after insert
           intro k hk hks hklen cw' hcf'
-          exact insert_go_noLeafOnPath _ _ _ _ hlen_le cw'
+          exact insert_go_noLeafOnPath _ _ _ _ (by omega) cw'
             (hnlop k (by omega) hks hklen cw' hcf')
             (hpf k (by omega) cw' hcf'))
         j hjs hjlen cw hcf
@@ -561,7 +563,7 @@ private theorem insertLoop_forward
           omega
         simp [hlsList]; exact h0
       exact insertLoop_forward lengths nextCode (start + 1) tree
-        lsList hlsList blCount hblCount ncSpec hncSpec hv hncSize
+        lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv hncSize
         (by -- NC: lsList[start] = 0 doesn't change count for any b ≥ 1
           intro b hb1 hb15
           rw [hnc b hb1 hb15]; congr 1
@@ -590,18 +592,19 @@ private theorem insertLoop_backward
     (lengths : Array UInt8) (nextCode : Array UInt32)
     (start : Nat) (tree : Zip.Native.HuffTree)
     (lsList : List Nat) (hlsList : lsList = lengths.toList.map UInt8.toNat)
-    (blCount : Array Nat) (hblCount : blCount = Huffman.Spec.countLengths lsList 15)
-    (ncSpec : Array Nat) (hncSpec : ncSpec = Huffman.Spec.nextCodes blCount 15)
-    (hv : Huffman.Spec.ValidLengths lsList 15)
-    (hncSize : nextCode.size ≥ 16)
-    (hnc : ∀ b, 1 ≤ b → b ≤ 15 →
+    (maxBits : Nat) (hmb : maxBits < 32)
+    (blCount : Array Nat) (hblCount : blCount = Huffman.Spec.countLengths lsList maxBits)
+    (ncSpec : Array Nat) (hncSpec : ncSpec = Huffman.Spec.nextCodes blCount maxBits)
+    (hv : Huffman.Spec.ValidLengths lsList maxBits)
+    (hncSize : nextCode.size ≥ maxBits + 1)
+    (hnc : ∀ b, 1 ≤ b → b ≤ maxBits →
       nextCode[b]!.toNat = ncSpec[b]! +
         (lsList.take start).foldl (fun acc l => if l == b then acc + 1 else acc) 0)
     (cw : List Bool) (sym : UInt16)
     (h : TreeHasLeaf (Zip.Native.HuffTree.insertLoop lengths nextCode start tree).1 cw sym) :
     TreeHasLeaf tree cw sym ∨
     ∃ k, start ≤ k ∧ k < lsList.length ∧
-      sym = k.toUInt16 ∧ Huffman.Spec.codeFor lsList 15 k = some cw := by
+      sym = k.toUInt16 ∧ Huffman.Spec.codeFor lsList maxBits k = some cw := by
   unfold Zip.Native.HuffTree.insertLoop at h
   split at h
   · -- start < lengths.size
@@ -613,11 +616,11 @@ private theorem insertLoop_backward
       have hls_len : start < lsList.length := by simp [hlsList, hstart]
       have hls_start : lsList[start] = lengths[start].toNat := by
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
-      have hlen_le : lengths[start].toNat ≤ 15 := by
+      have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
       -- The codeword for symbol `start`
-      obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList start hls_len
+      obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
         (by rw [hls_start]; omega) (by rw [hls_start]; omega)
       have hcw_s : cw_s = Huffman.Spec.natToBits
           (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat := by
@@ -630,7 +633,7 @@ private theorem insertLoop_backward
         (nextCode.set! lengths[start].toNat (nextCode[lengths[start].toNat]! + 1))
         (start + 1)
         (tree.insert (nextCode[lengths[start].toNat]!) lengths[start].toNat start.toUInt16)
-        lsList hlsList blCount hblCount ncSpec hncSpec hv
+        lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
         (by simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds]; split <;> simp_all)
         (by -- hnc': NC invariant after increment (same as insertLoop_forward)
           intro b hb1 hb15
@@ -654,10 +657,10 @@ private theorem insertLoop_backward
                     (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc) 0)
                 from by rw [← List.foldl_append, List.take_append_drop]]
               exact Huffman.Spec.count_foldl_mono _ _ _
-            have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList 15
+            have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
               lengths[start].toNat hv (by omega) hlen_le
             rw [← hblCount, ← hncSpec] at h_npc
-            have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) hlen_le
+            have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show lengths[start].toNat ≤ 31 from by omega)
             rw [UInt32.toNat_add, show (1 : UInt32).toNat = 1 from rfl,
                 Nat.mod_eq_of_lt (by omega), h_nc_val]
             omega
@@ -670,7 +673,7 @@ private theorem insertLoop_backward
       cases ih with
       | inl h_in_insert =>
         -- Leaf was in tree.insert: apply insert_go_complete'
-        have ih2 := insert_go_complete' _ _ tree _ hlen_le cw sym h_in_insert
+        have ih2 := insert_go_complete' _ _ tree _ (by omega) cw sym h_in_insert
         cases ih2 with
         | inl h_in_tree => exact .inl h_in_tree
         | inr h_eq =>
@@ -689,7 +692,7 @@ private theorem insertLoop_backward
           omega
         simp [hlsList]; exact h0
       have ih := insertLoop_backward lengths nextCode (start + 1) tree
-        lsList hlsList blCount hblCount ncSpec hncSpec hv hncSize
+        lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv hncSize
         (by intro b hb1 hb15; rw [hnc b hb1 hb15]; congr 1
             rw [List.take_add_one]
             simp [List.getElem?_eq_getElem hls_len, hls_val, List.foldl_append]; omega)
@@ -728,11 +731,12 @@ protected theorem decode_some_mem {α : Type} (table : List (Huffman.Spec.Codewo
 /-- The tree built by `fromLengths` has a leaf for every canonical codeword.
     Requires `ValidLengths` to ensure no collisions during insertion. -/
 protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
+    (maxBits : Nat) (hmb : maxBits < 32)
     (tree : Zip.Native.HuffTree)
-    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
-    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
     (s : Nat) (cw : Huffman.Spec.Codeword)
-    (hmem : (s, cw) ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat)) :
+    (hmem : (s, cw) ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits) :
     TreeHasLeaf tree cw s.toUInt16 := by
   -- Extract facts from allCodes membership
   rw [Huffman.Spec.allCodes_mem_iff] at hmem
@@ -748,14 +752,14 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
     simp [List.getElem_map, Array.getElem_toList] at this
     exact Nat.pos_of_ne_zero this
   -- Rewrite tree to fromLengthsTree = (insertLoop ...).1
-  rw [fromLengths_ok_eq lengths tree htree]
+  rw [fromLengths_ok_eq lengths maxBits tree htree]
   -- fromLengthsTree unfolds to insertLoop with spec-derived nextCode
-  show TreeHasLeaf (Zip.Native.HuffTree.fromLengthsTree lengths) cw s.toUInt16
+  show TreeHasLeaf (Zip.Native.HuffTree.fromLengthsTree lengths maxBits) cw s.toUInt16
   unfold Zip.Native.HuffTree.fromLengthsTree
   dsimp only []
   -- Apply insertLoop_forward with start = 0
-  exact insertLoop_forward lengths _ 0 .empty _ rfl _ rfl _ rfl hv
-    (by -- hncSize: nextCode.size ≥ 16
+  exact insertLoop_forward lengths _ 0 .empty _ rfl maxBits hmb _ rfl _ rfl hv
+    (by -- hncSize: nextCode.size ≥ maxBits + 1
       simp [Array.size_map, Huffman.Spec.nextCodes_size])
     (by -- hnc: initial NC invariant (take 0 = [], so foldl = 0)
       intro b hb1 hb15
@@ -765,19 +769,19 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
       simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
                  Array.getElem?_map]
       have hbs : b < (Huffman.Spec.nextCodes (Huffman.Spec.countLengths
-          (List.map UInt8.toNat lengths.toList) 15) 15).size := by
+          (List.map UInt8.toNat lengths.toList) maxBits) maxBits).size := by
         rw [Huffman.Spec.nextCodes_size]; omega
       simp only [Array.getElem?_eq_getElem hbs, Option.map_some, Option.getD_some]
       -- Goal: ncSpec[b].toUInt32.toNat = ncSpec[b]
       -- toUInt32.toNat = n % 2^32 (by rfl), and n < 2^32 from Huffman bounds
       have h_npc := Huffman.Spec.nextCodes_plus_count_le
-        (List.map UInt8.toNat lengths.toList) 15 b hv (by omega) hb15
+        (List.map UInt8.toNat lengths.toList) maxBits b hv (by omega) hb15
       -- Rewrite h_npc to use [b] instead of [b]!
       simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
                  Array.getElem?_eq_getElem hbs, Option.getD_some] at h_npc
-      have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) hb15
-      show (Huffman.Spec.nextCodes _ 15)[b].toUInt32.toNat =
-           (Huffman.Spec.nextCodes _ 15)[b]
+      have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show b ≤ 31 from by omega)
+      show (Huffman.Spec.nextCodes _ maxBits)[b].toUInt32.toNat =
+           (Huffman.Spec.nextCodes _ maxBits)[b]
       rw [show ∀ n : Nat, n.toUInt32.toNat = n % 2 ^ 32 from fun _ => rfl,
           Nat.mod_eq_of_lt (by omega)])
     (by intro k hk; omega) -- hprev: vacuously true (start = 0)
@@ -787,17 +791,18 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
 /-- Every leaf in the tree built by `fromLengths` corresponds to an entry
     in `allCodes`. -/
 protected theorem fromLengths_leaf_spec (lengths : Array UInt8)
+    (maxBits : Nat) (hmb : maxBits < 32)
     (tree : Zip.Native.HuffTree)
-    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
-    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
     (hlen_bound : lengths.size ≤ UInt16.size)
     (cw : List Bool) (sym : UInt16)
     (h : TreeHasLeaf tree cw sym) :
-    (sym.toNat, cw) ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) := by
-  rw [fromLengths_ok_eq lengths tree htree] at h
+    (sym.toNat, cw) ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits := by
+  rw [fromLengths_ok_eq lengths maxBits tree htree] at h
   unfold Zip.Native.HuffTree.fromLengthsTree at h
   dsimp only [] at h
-  have ih := insertLoop_backward lengths _ 0 .empty _ rfl _ rfl _ rfl hv
+  have ih := insertLoop_backward lengths _ 0 .empty _ rfl maxBits hmb _ rfl _ rfl hv
     (by simp [Array.size_map, Huffman.Spec.nextCodes_size])
     (by -- hnc: initial NC invariant (same as fromLengths_hasLeaf)
       intro b hb1 hb15
@@ -805,16 +810,16 @@ protected theorem fromLengths_leaf_spec (lengths : Array UInt8)
       simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
                  Array.getElem?_map]
       have hbs : b < (Huffman.Spec.nextCodes (Huffman.Spec.countLengths
-          (List.map UInt8.toNat lengths.toList) 15) 15).size := by
+          (List.map UInt8.toNat lengths.toList) maxBits) maxBits).size := by
         rw [Huffman.Spec.nextCodes_size]; omega
       simp only [Array.getElem?_eq_getElem hbs, Option.map_some, Option.getD_some]
       have h_npc := Huffman.Spec.nextCodes_plus_count_le
-        (List.map UInt8.toNat lengths.toList) 15 b hv (by omega) hb15
+        (List.map UInt8.toNat lengths.toList) maxBits b hv (by omega) hb15
       simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
                  Array.getElem?_eq_getElem hbs, Option.getD_some] at h_npc
-      have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) hb15
-      show (Huffman.Spec.nextCodes _ 15)[b].toUInt32.toNat =
-           (Huffman.Spec.nextCodes _ 15)[b]
+      have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show b ≤ 31 from by omega)
+      show (Huffman.Spec.nextCodes _ maxBits)[b].toUInt32.toNat =
+           (Huffman.Spec.nextCodes _ maxBits)[b]
       rw [show ∀ n : Nat, n.toUInt32.toNat = n % 2 ^ 32 from fun _ => rfl,
           Nat.mod_eq_of_lt (by omega)])
     cw sym h

@@ -22,12 +22,13 @@ namespace Deflate.Correctness
     the spec's table-based decode. Requires the tree to be well-formed
     (built via `fromLengths`) and the lengths to satisfy the Kraft inequality. -/
 private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
+    (maxBits : Nat) (hmb : maxBits < 32)
     (tree : Zip.Native.HuffTree) (bits : List Bool)
-    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
-    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
     (hlen_bound : lengths.size ≤ UInt16.size) :
     let specLengths := lengths.toList.map UInt8.toNat
-    let specCodes := Huffman.Spec.allCodes specLengths
+    let specCodes := Huffman.Spec.allCodes specLengths maxBits
     let specTable := specCodes.map fun (s, cw) => (cw, s)
     (decodeBits tree bits).map (fun (s, rest) => (s.toNat, rest)) =
       Huffman.Spec.decode specTable bits := by
@@ -64,7 +65,7 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
       obtain ⟨cw, hmem_table, hbits⟩ :=
         Deflate.Correctness.decode_some_mem specTable bits v rest hdec
       have hleaf :=
-        Deflate.Correctness.fromLengths_hasLeaf lengths tree htree hv v cw (to_codes hmem_table)
+        Deflate.Correctness.fromLengths_hasLeaf lengths maxBits hmb tree htree hv v cw (to_codes hmem_table)
       have hdb' := Deflate.Correctness.decodeBits_of_hasLeaf tree cw v.toUInt16 rest hleaf
       rw [hbits] at hdb; rw [hdb'] at hdb; simp at hdb
   | some (sym, rest) =>
@@ -72,7 +73,7 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
     obtain ⟨cw, hleaf, hbits⟩ :=
       Deflate.Correctness.hasLeaf_of_decodeBits tree bits sym rest hdb
     have hmem_codes :=
-      Deflate.Correctness.fromLengths_leaf_spec lengths tree htree hv hlen_bound cw sym hleaf
+      Deflate.Correctness.fromLengths_leaf_spec lengths maxBits hmb tree htree hv hlen_bound cw sym hleaf
     have hdec := Huffman.Spec.decode_prefix_free specTable cw sym.toNat rest
       (to_table hmem_codes) hpf
     rw [hbits]; exact hdec.symm
@@ -82,15 +83,16 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
     Requires `bitOff < 8` because the proof traces through individual
     `readBit` calls via `readBit_toBits`. -/
 theorem huffTree_decode_correct (lengths : Array UInt8)
+    (maxBits : Nat) (hmb : maxBits < 32)
     (tree : Zip.Native.HuffTree) (br : Zip.Native.BitReader)
     (sym : UInt16) (br' : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
-    (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree)
-    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
     (hlen_bound : lengths.size ≤ UInt16.size)
     (hdecode : tree.decode br = .ok (sym, br')) :
     let specLengths := lengths.toList.map UInt8.toNat
-    let specCodes := Huffman.Spec.allCodes specLengths
+    let specCodes := Huffman.Spec.allCodes specLengths maxBits
     let specTable := specCodes.map fun (s, cw) => (cw, s)
     ∃ rest,
       Huffman.Spec.decode specTable br.toBits = some (sym.toNat, rest) ∧
@@ -101,7 +103,7 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
   obtain ⟨hdb, _⟩ :=
     Deflate.Correctness.decode_go_decodeBits tree br 0 sym br' hwf hdecode_go
   -- Step 2: decodeBits → spec decode via tree-table correspondence
-  have hspec := decodeBits_eq_spec_decode lengths tree br.toBits htree hv hlen_bound
+  have hspec := decodeBits_eq_spec_decode lengths maxBits hmb tree br.toBits htree hv hlen_bound
   -- Connect the two
   rw [hdb] at hspec; simp only [Option.map] at hspec
   exact ⟨br'.toBits, hspec.symm, rfl⟩
@@ -479,7 +481,7 @@ theorem decodeHuffman_correct
       -- Get spec-level Huffman decode correspondence
       have hwf₁ := decode_wf litTree br sym br₁ hwf hdec
       obtain ⟨rest₁, hspec_sym, hrest₁⟩ :=
-        huffTree_decode_correct litLengths litTree br sym br₁ hwf hlit hvlit hlen_lit hdec
+        huffTree_decode_correct litLengths 15 (by omega) litTree br sym br₁ hwf hlit hvlit hlen_lit hdec
       -- Case split on symbol value
       split at h
       · -- sym < 256: literal byte
@@ -607,7 +609,7 @@ theorem decodeHuffman_correct
                             hextra_r
                         -- Spec-level distance tree decode
                         obtain ⟨rest₃, hspec_dist_sym, hrest₃⟩ :=
-                          huffTree_decode_correct distLengths distTree br₂
+                          huffTree_decode_correct distLengths 15 (by omega) distTree br₂
                             distSym br₃ hwf₂ hdist hvdist hlen_dist hdist_dec
                         -- Spec-level readBits for distance extra
                         obtain ⟨rest₄, hspec_dextra, hrest₄⟩ :=
