@@ -182,7 +182,8 @@ End every session by running `/reflect`. If it suggests improvements to
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
     Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
-    Zip/Spec/InflateCorrect.lean   — Main inflate correctness theorem
+    Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
+    Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
@@ -465,4 +466,4 @@ Updated by agent at the end of each session.
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 2 (InflateCorrect.lean — decodeDynamicTrees_correct)
 - **Last session**: 2026-02-23 (impl: inflateLoop_correct, inflate_correct)
-- **Last review**: 2026-02-22 (InflateCorrect getElem? helper, comprehensive scan)
+- **Last review**: 2026-02-23 (split InflateCorrect, proof dedup)

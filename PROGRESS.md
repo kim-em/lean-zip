@@ -2,6 +2,48 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-23: Review — split InflateCorrect.lean + proof improvements
+
+**Session type**: Review
+**Starting commit**: `d4817b6` | **Sorry count**: 2 → 2 (unchanged)
+**Commits**: `1274d43`
+
+### File split (committed `1274d43`)
+
+Split `InflateCorrect.lean` (1050 lines, over 1000-line limit) into:
+- `DecodeCorrect.lean` (705 lines): block-level decode correctness
+  (`huffTree_decode_correct`, `decodeStored_correct`, `decodeHuffman_correct`,
+  invariant preservation, table correspondence, copy loop helpers)
+- `InflateCorrect.lean` (333 lines): stream-level correctness
+  (`inflateLoop_correct`, `inflate_correct`, `inflate_correct'`,
+  `decodeDynamicTrees_correct` sorry)
+
+### Proof improvements (same commit, net -11 lines)
+
+- Combined `decodeStored_wf` + `decodeStored_pos_inv` into single
+  `decodeStored_invariants` theorem
+- Extracted `bfinal_beq_nat_true`/`bfinal_beq_nat_false` helpers
+  (3x dedup each in `inflateLoop_correct`)
+- Removed unused `↓reduceIte` from final-block simp calls
+
+### Visibility changes for cross-file access
+
+- `readBits_wf`: private → public (used by `inflateLoop_correct`)
+- `readBits_pos_inv`: private → public (used by `inflateLoop_correct`)
+
+### Comprehensive scan findings (no action needed)
+
+- All `simp` calls use `simp only` (bare simps only for contradiction closing)
+- No unused imports across Spec/ files
+- No new dead code
+- `array_set_ne`/`array_set_self` duplication unchanged (not worth extracting)
+- Toolchain v4.29.0-rc1 is latest; v4.29.0 stable not yet released
+- All files under 1000 lines (largest: Huffman.lean at 959)
+
+### Remaining
+
+- `decodeDynamicTrees_correct` (2 sorries): dynamic Huffman tree correspondence
+
 ## 2026-02-23: Implementation — prove inflateLoop_correct and inflate_correct
 
 **Session type**: Implementation
