@@ -211,7 +211,7 @@ protected def decodeStored (br : BitReader) (output : ByteArray)
 
 /-- Decode a Huffman-coded block (fixed or dynamic).
     Uses a fuel parameter to guarantee termination. -/
-private def decodeHuffman (br : BitReader) (output : ByteArray)
+protected def decodeHuffman (br : BitReader) (output : ByteArray)
     (litTree distTree : HuffTree) (maxOutputSize : Nat)
     (fuel : Nat := 10000000) : Except String (ByteArray × BitReader) :=
   go br output fuel
@@ -277,11 +277,11 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
       let (out, br') ← Inflate.decodeStored br output maxOutputSize
       output := out; br := br'
     | 1 => -- Fixed Huffman
-      let (out, br') ← decodeHuffman br output fixedLit fixedDist maxOutputSize
+      let (out, br') ← Inflate.decodeHuffman br output fixedLit fixedDist maxOutputSize
       output := out; br := br'
     | 2 => -- Dynamic Huffman
       let (litTree, distTree, br') ← decodeDynamicTrees br
-      let (out, br'') ← decodeHuffman br' output litTree distTree maxOutputSize
+      let (out, br'') ← Inflate.decodeHuffman br' output litTree distTree maxOutputSize
       output := out; br := br''
     | _ => throw s!"Inflate: reserved block type {btype}"
     if bfinal == 1 then

@@ -190,6 +190,157 @@ theorem decodeStored_correct (br : Zip.Native.BitReader)
             · -- (output ++ bytes).data.toList = output.data.toList ++ bytes.data.toList
               simp
 
+/-! ## Huffman block correctness -/
+
+/-- `HuffTree.decode` preserves the well-formedness invariant `bitOff < 8`. -/
+private theorem decode_wf (tree : Zip.Native.HuffTree)
+    (br : Zip.Native.BitReader) (sym : UInt16) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (h : tree.decode br = .ok (sym, br')) : br'.bitOff < 8 := by
+  have hgo : Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
+    simp only [Zip.Native.HuffTree.decode] at h; exact h
+  exact (Deflate.Correctness.decode_go_decodeBits tree br 0 sym br' hwf hgo).2
+
+/-- `readBits.go` preserves the well-formedness invariant `bitOff < 8`. -/
+private theorem readBits_go_wf (br : Zip.Native.BitReader)
+    (acc : UInt32) (shift k : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (h : Zip.Native.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    br'.bitOff < 8 := by
+  induction k generalizing br acc shift with
+  | zero =>
+    simp only [Zip.Native.BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hwf
+  | succ k ih =>
+    simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind] at h
+    cases hrd : br.readBit with
+    | error e => simp [hrd] at h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrd] at h
+      exact ih br₁ _ _ (readBit_wf br bit br₁ hwf hrd) h
+
+/-- `readBits` preserves the well-formedness invariant `bitOff < 8`. -/
+private theorem readBits_wf (br : Zip.Native.BitReader)
+    (n : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (h : br.readBits n = .ok (val, br')) : br'.bitOff < 8 := by
+  simp only [Zip.Native.BitReader.readBits] at h
+  exact readBits_go_wf br 0 0 n val br' hwf h
+
+set_option maxRecDepth 4096 in
+/-- If the native Huffman block decoder succeeds, the spec's `decodeSymbols`
+    produces a corresponding list of LZ77 symbols, and resolving those symbols
+    with the current accumulator produces the same output.
+
+    This connects the native's inline symbol decoding + LZ77 resolution
+    (which interleaves decode and copy) to the spec's two-phase approach
+    (collect all symbols, then resolve). -/
+theorem decodeHuffman_correct
+    (litLengths distLengths : Array UInt8)
+    (litTree distTree : Zip.Native.HuffTree)
+    (maxOutputSize fuel : Nat)
+    (br : Zip.Native.BitReader) (output : ByteArray)
+    (output' : ByteArray) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hlit : Zip.Native.HuffTree.fromLengths litLengths = .ok litTree)
+    (hdist : Zip.Native.HuffTree.fromLengths distLengths = .ok distTree)
+    (hvlit : Huffman.Spec.ValidLengths (litLengths.toList.map UInt8.toNat) 15)
+    (hvdist : Huffman.Spec.ValidLengths (distLengths.toList.map UInt8.toNat) 15)
+    (hlen_lit : litLengths.size ≤ UInt16.size)
+    (hlen_dist : distLengths.size ≤ UInt16.size)
+    (h : Zip.Native.Inflate.decodeHuffman.go litTree distTree maxOutputSize
+          br output fuel = .ok (output', br')) :
+    ∃ specFuel syms rest,
+      Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
+        (distLengths.toList.map UInt8.toNat) br.toBits specFuel =
+        some (syms, rest) ∧
+      Deflate.Spec.resolveLZ77 syms output.data.toList =
+        some output'.data.toList ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 := by
+  induction fuel generalizing br output with
+
+  | zero =>
+    unfold Zip.Native.Inflate.decodeHuffman.go at h; simp at h
+  | succ n ih =>
+    -- Unfold one step of decodeHuffman.go — split on litTree.decode
+    unfold Zip.Native.Inflate.decodeHuffman.go at h
+    cases hdec : litTree.decode br with
+    | error e => simp [hdec, bind, Except.bind] at h
+    | ok p =>
+      obtain ⟨sym, br₁⟩ := p
+      simp only [hdec, bind, Except.bind] at h
+      -- Get spec-level Huffman decode correspondence
+      have hwf₁ := decode_wf litTree br sym br₁ hwf hdec
+      obtain ⟨rest₁, hspec_sym, hrest₁⟩ :=
+        huffTree_decode_correct litLengths litTree br sym br₁ hwf hlit hvlit hlen_lit hdec
+      -- Case split on symbol value
+      split at h
+      · -- sym < 256: literal byte
+        rename_i hsym
+        -- h has: if output.size ≥ maxOutputSize then error else go br₁ (output.push sym.toUInt8) n
+        split at h
+        · simp at h -- maxOutputSize check failed → contradiction
+        · -- Simplify the pure PUnit.unit match
+          simp only [pure, Except.pure] at h
+          -- Apply IH
+          obtain ⟨sf, syms, rest, hds, hlz, hbr, hwf'⟩ := ih br₁ (output.push sym.toUInt8) hwf₁ h
+          have hsym_nat : sym.toNat < 256 := hsym
+          -- decodeLitLen returns .literal
+          have hlit_dec : Deflate.Spec.decodeLitLen
+              (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
+              br.toBits = some (.literal sym.toNat.toUInt8, rest₁) := by
+            unfold Deflate.Spec.decodeLitLen
+            simp only [bind, Option.bind, hspec_sym, hsym_nat, ↓reduceIte, pure]
+          -- decodeSymbols (sf + 1) gives .literal :: syms
+          have hds' : Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
+              (distLengths.toList.map UInt8.toNat) br.toBits (sf + 1) =
+              some (.literal sym.toNat.toUInt8 :: syms, rest) := by
+            simp only [Deflate.Spec.decodeSymbols, bind, Option.bind, hlit_dec,
+              ← hrest₁, hds, pure]
+          -- resolveLZ77 (.literal :: syms) output = some output'
+          have hlz' : Deflate.Spec.resolveLZ77
+              (.literal sym.toNat.toUInt8 :: syms) output.data.toList =
+              some output'.data.toList := by
+            simp only [Deflate.Spec.resolveLZ77_literal]
+            have : (output.push sym.toUInt8).data.toList =
+                output.data.toList ++ [sym.toUInt8] := by simp
+            rw [this] at hlz; rw [show sym.toUInt8 = sym.toNat.toUInt8 from rfl] at hlz
+            exact hlz
+          exact ⟨sf + 1, .literal sym.toNat.toUInt8 :: syms, rest, hds', hlz', hbr, hwf'⟩
+      · -- sym ≥ 256
+        split at h
+        · -- sym == 256: end of block
+          rename_i hge hsym256
+          obtain ⟨rfl, rfl⟩ := Except.ok.inj h
+          -- sym.toNat = 256
+          have hsym_nat : sym.toNat = 256 := by
+            simp [beq_iff_eq] at hsym256; simp [hsym256]
+          -- decodeLitLen returns endOfBlock
+          have hlit_dec : Deflate.Spec.decodeLitLen
+              (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
+              br.toBits = some (.endOfBlock, rest₁) := by
+            unfold Deflate.Spec.decodeLitLen
+            simp only [bind, Option.bind, hspec_sym, hsym_nat,
+              show ¬((256 : Nat) < 256) from by omega,
+              show ((256 : Nat) == 256) = true from rfl, ↓reduceIte, pure]
+          refine ⟨1, [.endOfBlock], rest₁, ?_, rfl, hrest₁, hwf₁⟩
+          simp only [Deflate.Spec.decodeSymbols, bind, Option.bind, hlit_dec, pure]
+        · -- sym > 256: length/distance code
+          rename_i hge hne256
+          -- sym.toNat > 256, sym.toNat ≠ 256
+          have hsym_ge : sym.toNat ≥ 257 := by
+            have h1 : sym.toNat ≥ 256 := Nat.le_of_not_lt hge
+            have h2 : sym.toNat ≠ 256 := by
+              intro heq; apply hne256; simp [beq_iff_eq]
+              exact UInt16.toNat_inj.mp (by simp; exact heq)
+            omega
+          -- The length/distance case involves many monadic operations.
+          -- Leave as sorry for now — the literal and end-of-block cases
+          -- demonstrate the proof pattern. See PLAN.md for the approach.
+          sorry
+
 /-! ## Main correctness theorem -/
 
 /-- **Main theorem**: If the native DEFLATE decompressor succeeds, then
