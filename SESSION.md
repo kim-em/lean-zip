@@ -6,67 +6,64 @@
 ## Sorry count: 2
 
 In `Zip/Spec/InflateCorrect.lean`:
-- `decodeHuffman_correct` (line 341): length/distance case
-- `inflate_correct` (line 367): main correctness theorem
+- `copyLoop_eq_ofFn` (line 282): copy loop ↔ List.ofFn correspondence
+- `inflate_correct` (line 590): main correctness theorem
 
 ## Known good commit
 
-`f54ca51` — `lake build Zip` succeeds, no warnings except expected sorries.
+`28b8ebb` — `lake build Zip` succeeds, no warnings except expected sorries.
 (Note: test exe linker error on macOS with v4.29.0-rc1 is pre-existing.)
 
-## Review findings (this session)
+## What was accomplished this session
 
-### InflateCorrect.lean proof quality
-- Replaced bare `simp` with `simp only [Option.map]` in `huffTree_decode_correct`
-- Simplified literal case: combined two separate rewrite steps by folding
-  `sym.toUInt8 = sym.toNat.toUInt8` (which is `rfl`) into the `have`
-- Overall proof quality rated 8/10: well-structured, minimal, clear decomposition
-- Potential future improvements: extract `decodeLitLen_literal`/`decodeLitLen_endOfBlock`
-  helper lemmas once length/distance case is complete
+### decodeHuffman_correct: length/distance case COMPLETE
 
-### Deflate.lean spec ↔ native correspondence
-- **All tables match**: lengthBase, lengthExtra, distBase, distExtra values identical
-  (accounting for Nat vs UInt16/UInt8 type differences)
-- **Cross-block references**: Both spec and native correctly pass accumulator
-  through blocks — fix from previous session verified correct
-- **decodeStored**: Perfect correspondence (alignment, LEN/NLEN, complement, bytes)
-- **decodeDynamicTables**: Repeat codes 16/17/18 all match
-- **fixedLitLengths/fixedDistLengths**: Equivalent
+The third and final case of `decodeHuffman_correct` is now proved,
+modulo the `copyLoop_eq_ofFn` helper. This means all three symbol
+types (literal, end-of-block, length/distance) are handled.
 
-### Dead code / slop scan
-- No dead code found
-- No unused imports
-- Unused spec theorems (resolveLZ77_*, fixedLengths_*) are intentional
-  specification infrastructure
-- All private helper theorems used internally
+Key work:
+- Table correspondence lemmas: `lengthBase_eq`, `lengthExtra_eq`,
+  `distBase_eq`, `distExtra_eq` — all proved by `decide` over `Fin`
+- Helper lemmas: `lengthExtra_le_32`, `distExtra_le_32` (for readBits
+  bounds), `spec_distBase_pos` (for distance > 0 guard)
+- Full 8-operation monadic case splitting for the length/distance path
+- `decodeLitLen` evaluation proof using `getElem?_pos`/`getElem!_pos`
+- `resolveLZ77` guard condition proofs (dist > 0, dist ≤ output.length)
+- Clean factoring: the copy loop is isolated in `copyLoop_eq_ofFn`
 
-### Visibility changes
-- Made native DEFLATE tables (lengthBase, lengthExtra, distBase, distExtra)
-  public for cross-file proof access (needed for length/distance case)
-- Note: `protected` doesn't work here because it requires fully-qualified
-  names even within the same namespace
+### Proof patterns discovered
+
+- `getElem?_pos` needs explicit container argument (not `_`) to avoid
+  type class synthesis failures
+- `getElem?_pos` gives `c[i]? = some c[i]` while we need `c[i]!`;
+  use `getElem!_pos` to bridge: `rw [getElem!_pos ...]; exact getElem?_pos ...`
+- `spec_distBase_pos ⟨n, h⟩` creates `Fin.val ⟨n, h⟩` vs `n` mismatch
+  in omega; fix with `have : ... := spec_distBase_pos ⟨n, h⟩` to normalize
+- `(n == m) = false` for Nat: use `cases heq : n == m <;> simp_all [beq_iff_eq]`
 
 ## Next action
 
 Priority for next session (implementation):
 
-1. **Prove table correspondence**: Native UInt16 arrays ↔ spec Nat lists
-   (tables are now accessible from InflateCorrect.lean)
-2. **Prove copy loop ↔ List.ofFn**: Factor out as a standalone lemma
-3. **Complete length/distance case**: Chain all correspondence lemmas
-4. **Loop correspondence**: Native `for` block loop ↔ spec fuel-based recursion
-5. **Close `inflate_correct`**: Combine block + loop correspondence
+1. **Prove `copyLoop_eq_ofFn`**: The forIn copy loop produces the same
+   result as `List.ofFn`. Key insight: all reads are within the original
+   buffer range, so the growing buffer doesn't affect values. Provable
+   by induction on the range length with a loop invariant.
+2. **Loop correspondence**: Native `for` block loop ↔ spec fuel-based recursion
+3. **Close `inflate_correct`**: Combine block + loop correspondence
 
 ## Architecture of remaining decomposition
 
 ```
 inflate_correct (sorry)
   ├── decodeStored_correct (DONE)
-  ├── decodeHuffman_correct (2/3 cases DONE)
+  ├── decodeHuffman_correct (DONE, modulo copyLoop_eq_ofFn)
   │   ├── huffTree_decode_correct (DONE)
   │   ├── literal case (DONE)
   │   ├── end-of-block case (DONE)
-  │   └── length/distance case (sorry)
+  │   └── length/distance case (DONE)
+  │       └── copyLoop_eq_ofFn (sorry — standalone lemma)
   └── loop correspondence (for → fuel)
 ```
 

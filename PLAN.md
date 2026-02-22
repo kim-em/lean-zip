@@ -7,7 +7,7 @@
 
 ## Session type: implementation (next)
 
-## Goal: Complete decodeHuffman_correct length/distance case
+## Goal: Prove copyLoop_eq_ofFn and work toward inflate_correct
 
 ### Steps
 
@@ -16,21 +16,12 @@
 3. [x] Prove literal case (sym < 256)
 4. [x] Prove end-of-block case (sym == 256)
 5. [x] Make native tables accessible (lengthBase, etc. now public)
-6. [ ] Prove table correspondence lemmas
-7. [ ] Prove copy loop ↔ List.ofFn
-8. [ ] Complete length/distance case (sym > 256)
+6. [x] Prove table correspondence lemmas
+7. [ ] Prove copy loop ↔ List.ofFn (`copyLoop_eq_ofFn`)
+8. [x] Complete length/distance case (sym > 256)
 9. [ ] Work on inflate_correct loop correspondence
 
-### Table correspondence lemmas needed
-
-Now that native tables are public, prove:
-- `Inflate.lengthBase[idx]!.toNat = Deflate.Spec.lengthBase[idx]!`
-  for valid `idx < 29`
-- Same for `lengthExtra`, `distBase`, `distExtra`
-
-These should be provable by `decide` since the tables are finite constants.
-
-### Copy loop ↔ List.ofFn
+### copyLoop_eq_ofFn
 
 The native `for i in [:length] do out := out.push out[start + (i % distance)]!`
 must equal the spec's `List.ofFn fun i => acc[start + (i.val % dist)]!`.
@@ -39,29 +30,30 @@ Key insight: all reads are within the original buffer range
 (`start + (i % distance) < output.size`), so the growing buffer
 doesn't affect read values.
 
+Approach: induction on `length` with loop invariant:
+- After `k` iterations, `out = output ++ List.ofFn (fun i : Fin k => ...)`
+- At each step, the read `out[start + (k % distance)]!` equals
+  `output[start + (k % distance)]!` because `start + (k % distance) < output.size`
+
 ### Architecture of remaining decomposition
 
 ```
 inflate_correct (sorry)
   ├── decodeStored_correct (DONE)
-  ├── decodeHuffman_correct (2/3 cases DONE)
+  ├── decodeHuffman_correct (DONE, modulo copyLoop_eq_ofFn)
   │   ├── huffTree_decode_correct (DONE)
   │   ├── literal case (DONE)
   │   ├── end-of-block case (DONE)
-  │   └── length/distance case (sorry — steps 6-8 above)
+  │   └── length/distance case (DONE)
+  │       └── copyLoop_eq_ofFn (sorry — standalone lemma)
   └── loop correspondence (for → fuel)
 ```
 
-### Review improvements applied (from review session)
+### Proof patterns for getElem?/getElem!
 
-- `simp` → `simp only [Option.map]` in `huffTree_decode_correct` (line 107)
-- Simplified literal case rewrite chain (combined two `rw` into one)
-- Native DEFLATE tables made public for cross-file access
-- Verified spec ↔ native correspondence (all tables, all block types)
-- No dead code or slop found
-
-### CLAUDE.md observation
-
-`protected` doesn't work for definitions that need unqualified access
-within the same namespace. Use public (no modifier) instead. The
-CLAUDE.md guidance "protected not private" should note this caveat.
+- `getElem?_pos` needs explicit container (not `_`) for type class synthesis
+- `getElem?_pos` gives `c[i]? = some c[i]`; need `getElem!_pos` for `c[i]!`
+- Pattern: `rw [getElem!_pos c i h]; exact getElem?_pos c i h`
+- `spec_distBase_pos ⟨n, h⟩` creates Fin coercion mismatch in omega;
+  normalize with explicit `have` annotation
+- `(n == m) = false`: use `cases heq : n == m <;> simp_all [beq_iff_eq]`
