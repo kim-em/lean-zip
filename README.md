@@ -154,6 +154,28 @@ lake build
 lake build test && .lake/build/bin/test
 ```
 
+## Benchmarking
+
+A benchmark driver is included for use with [hyperfine](https://github.com/sharkdp/hyperfine):
+
+```bash
+lake build bench
+
+# Single benchmark
+hyperfine 'lake exe bench inflate 1048576 prng 6'
+
+# Compare patterns
+hyperfine 'lake exe bench inflate 1048576 constant 6' \
+          'lake exe bench inflate 1048576 prng 6'
+
+# Sweep sizes
+hyperfine --parameter-list size 1024,65536,1048576 \
+          'lake exe bench inflate {size} prng 6'
+```
+
+Operations: `inflate`, `gzip`, `zlib`, `crc32`, `adler32`, `crc32-ffi`, `adler32-ffi`.
+Patterns: `constant`, `cyclic`, `prng`. Level: 0-9 (default 6).
+
 ## Known Limitations
 
 - **TOCTOU in extraction**: archive extraction creates parent directories then writes files; a local attacker could replace a directory with a symlink between these steps. Fixing this requires `openat()`/`O_NOFOLLOW`, which Lean's stdlib doesn't expose.
