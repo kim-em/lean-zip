@@ -97,6 +97,26 @@ theorem readBitsLSB_some_length {n : Nat} {bits : List Bool}
         obtain ⟨-, rfl⟩ := h
         have := ih hk; simp only [List.length_cons]; omega
 
+/-- `readBitsLSB n` produces values strictly less than `2^n`. -/
+theorem readBitsLSB_bound {n : Nat} {bits : List Bool}
+    {val : Nat} {rest : List Bool}
+    (h : readBitsLSB n bits = some (val, rest)) :
+    val < 2 ^ n := by
+  induction n generalizing bits val with
+  | zero => simp [readBitsLSB] at h; omega
+  | succ k ih =>
+    cases bits with
+    | nil => simp [readBitsLSB] at h
+    | cons b bs =>
+      simp only [readBitsLSB] at h
+      cases hk : readBitsLSB k bs with
+      | none => simp [hk] at h
+      | some p =>
+        obtain ⟨v, rem⟩ := p
+        simp [hk] at h
+        obtain ⟨rfl, rfl⟩ := h
+        have := ih hk; split <;> omega
+
 /-! ## LZ77 symbol alphabet -/
 
 /-- The symbols produced by DEFLATE Huffman decoding, before LZ77

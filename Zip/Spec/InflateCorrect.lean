@@ -291,7 +291,54 @@ private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
         (clLengths.toList.map UInt8.toNat) br.toBits =
         some (clLengths'.toList.map UInt8.toNat, rest) ∧
       br'.toBits = rest := by
-  sorry
+  induction hd : numCodeLen - i generalizing br clLengths i with
+  | zero =>
+    -- i ≥ numCodeLen, so native returns immediately
+    have hge : ¬(i < numCodeLen) := by omega
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    simp only [if_neg hge, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨br.toBits, by rfl, rfl⟩
+  | succ n ih =>
+    -- i < numCodeLen
+    have hi : i < numCodeLen := by omega
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    simp only [if_pos hi, bind, Except.bind] at h
+    cases hrb : br.readBits 3 with
+    | error e => simp [hrb] at h
+    | ok p =>
+      obtain ⟨v, br₁⟩ := p
+      simp only [hrb] at h
+      -- Get spec correspondence for readBits 3
+      have ⟨rest₁, hspec_rb, hrest₁⟩ := readBits_toBits br 3 v br₁ hwf (by omega) hrb
+      -- Apply IH to the recursive call
+      have hwf₁ := readBits_wf br 3 v br₁ hwf hrb
+      have hsize₁ : (clLengths.set! Zip.Native.Inflate.codeLengthOrder[i]! v.toUInt8).size = 19 := by
+        simp [Array.size_setIfInBounds, hsize]
+      have hd₁ : numCodeLen - (i + 1) = n := by omega
+      have ⟨rest₂, hspec_rec, hrest₂⟩ := ih br₁ _ (i + 1) hwf₁ hsize₁ h hd₁
+      refine ⟨rest₂, ?_, hrest₂⟩
+      -- Unfold spec readCLLengths one step (not simp — it loops on recursion)
+      show Deflate.Spec.readCLLengths (n + 1) i
+        (List.map UInt8.toNat clLengths.toList) br.toBits =
+        some (List.map UInt8.toNat clLengths'.toList, rest₂)
+      rw [Deflate.Spec.readCLLengths]
+      simp only [bind, Option.bind, hspec_rb]
+      -- Goal: readCLLengths n (i+1) (acc.set clo[i]! v.toNat) rest₁ = some (...)
+      -- hspec_rec: readCLLengths n (i+1) ((set! arr).toList.map ...) br₁.toBits = some (...)
+      -- 1. Show list equality
+      have h_acc :
+        (List.map UInt8.toNat clLengths.toList).set (Deflate.Spec.codeLengthOrder[i]!) v.toNat =
+        List.map UInt8.toNat
+          (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) v.toUInt8).toList := by
+        rw [Array.set!, Array.toList_setIfInBounds, List.map_set]
+        congr 1
+        -- v.toNat = v.toUInt8.toNat ≡ v.toNat = v.toNat % 256
+        -- readBitsLSB 3 produces val < 2^3 = 8 < 256
+        have hbound := Deflate.Spec.readBitsLSB_bound hspec_rb
+        show v.toNat = v.toNat % 256; omega
+      rw [h_acc, ← hrest₁]
+      exact hspec_rec
 
 /-- `decodeCLSymbols` corresponds to the spec's `decodeDynamicTables.decodeCLSymbols`:
     native Array-based decoding matches spec List-based decoding. -/
