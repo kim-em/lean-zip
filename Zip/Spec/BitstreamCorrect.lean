@@ -23,7 +23,7 @@ namespace Deflate.Correctness
 /-- Dropping `n * k` elements from a flatMap with uniform-length-`k` outputs
     skips exactly `n` segments. -/
 private theorem flatMap_drop_mul {α β : Type} (l : List α) (f : α → List β)
-    (k n : Nat) (hk : ∀ a ∈ l, (f a).length = k) :
+    (k n : Nat) (hk : ∀ a, (f a).length = k) :
     (l.flatMap f).drop (n * k) = (l.drop n).flatMap f := by
   induction n generalizing l with
   | zero => simp
@@ -32,11 +32,10 @@ private theorem flatMap_drop_mul {α β : Type} (l : List α) (f : α → List �
     | nil => simp
     | cons a rest =>
       simp only [List.flatMap_cons, List.drop_succ_cons]
-      have hlen := hk a (List.mem_cons_self ..)
       have hk_eq : (m + 1) * k = (f a).length + m * k := by
-        rw [Nat.succ_mul, hlen, Nat.add_comm]
+        rw [Nat.succ_mul, hk a, Nat.add_comm]
       rw [hk_eq, ← List.drop_drop, List.drop_left]
-      exact ih rest (fun b hb => hk b (List.mem_cons_of_mem _ hb))
+      exact ih rest
 
 /-- Dropping within the first segment of a flatMap. -/
 private theorem flatMap_cons_drop {α β : Type} (a : α) (rest : List α)
@@ -70,7 +69,7 @@ private theorem bytesToBits_drop_testBit (data : ByteArray) (pos off : Nat)
   rw [← List.drop_drop]
   -- Step 2: drop (pos * 8) skips pos complete 8-bit segments
   rw [flatMap_drop_mul data.data.toList _ 8 pos
-    (fun b _ => Deflate.Spec.bytesToBits.byteToBits_length b)]
+    Deflate.Spec.bytesToBits.byteToBits_length]
   -- Step 3: data.data.toList.drop pos = data[pos] :: tail
   have hlen : pos < data.data.toList.length := by
     rw [Array.length_toList]; exact hpos
@@ -366,8 +365,6 @@ private theorem readBitsLSB_split (m n : Nat) (bits : List Bool) :
         | some q =>
           obtain ⟨v2, rest''⟩ := q
           simp only []
-          -- Goal: some (ib + (v1 + v2 * 2^k) * 2, rest'') =
-          --       some ((ib + v1 * 2) + v2 * 2^(k+1), rest'')
           congr 1; ext1
           · rw [Nat.pow_succ, ← Nat.mul_assoc, Nat.add_mul]; split <;> omega
           · rfl
