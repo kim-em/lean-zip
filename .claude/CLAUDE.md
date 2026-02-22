@@ -334,10 +334,14 @@ Update it during review and reflect sessions.
   mod 32 — for `bit <<< shift.toUInt32` with `shift ≥ 32`, the bit is
   placed at position `shift % 32`, not `shift`. Any theorem about
   `readBits` (which accumulates via `bit <<< shift`) needs `n ≤ 32`.
-- **`protected` not `private` for cross-file lemmas**: When a lemma in
-  one Spec file is needed by another (e.g. `byteToBits_length` used in
-  both Deflate.lean and InflateCorrect.lean), use `protected` visibility.
-  `private` makes it inaccessible from other files.
+- **`protected` not `private` for cross-file access**: When a definition
+  or lemma in one file is needed by another, use `protected` visibility.
+  `private` makes it inaccessible from other files. This applies to both
+  lemmas (e.g. `byteToBits_length` used in BitstreamCorrect and
+  InflateCorrect) AND definitions referenced in proof hypotheses (e.g.
+  native table constants like `lengthBase`, `distExtra` in Inflate.lean
+  that appear in `decodeHuffman.go` — if they're `private`, proofs in
+  InflateCorrect.lean can't name them in `cases` or `simp` arguments).
 - **Avoid `▸` with UInt32/BitVec goals**: The `▸` (subst rewrite) tactic
   triggers full `whnf` reduction, which can deterministic-timeout on goals
   involving UInt32 or BitVec operations. Use `obtain ⟨rfl, _⟩ := h` +
