@@ -382,35 +382,13 @@ where
 
 /-! ## Stream decode -/
 
-/-- A decoded DEFLATE block: its type and the output bytes it produces. -/
-structure DecodedBlock where
-  isFinal : Bool
-  bytes : List UInt8
-
-/-- Decode one DEFLATE block from the bitstream.
-    Returns the decoded block and remaining bits. -/
-def decodeBlock (bits : List Bool) :
-    Option (DecodedBlock × List Bool) := do
-  let (bfinal, bits) ← readBitsLSB 1 bits
-  let (btype, bits) ← readBitsLSB 2 bits
-  match btype with
-  | 0 => -- Stored block
-    let (bytes, bits) ← decodeStored bits
-    return (⟨bfinal == 1, bytes⟩, bits)
-  | 1 => -- Fixed Huffman
-    let (syms, bits) ← decodeSymbols fixedLitLengths fixedDistLengths bits
-    let output ← resolveLZ77 syms []
-    return (⟨bfinal == 1, output⟩, bits)
-  | 2 => -- Dynamic Huffman
-    let (litLens, distLens, bits) ← decodeDynamicTables bits
-    let (syms, bits) ← decodeSymbols litLens distLens bits
-    let output ← resolveLZ77 syms []
-    return (⟨bfinal == 1, output⟩, bits)
-  | _ => none  -- reserved block type (3)
-
 /-- Decode a complete DEFLATE stream: a sequence of blocks ending
     with a final block. Returns the concatenated output.
-    Uses fuel to ensure termination. -/
+    Uses fuel to ensure termination.
+
+    Note: LZ77 back-references can span block boundaries (RFC 1951 §3.2),
+    so the accumulated output `acc` is passed to `resolveLZ77` for each
+    Huffman block, not a fresh `[]`. -/
 def decode (bits : List Bool) (fuel : Nat := 10001) :
     Option (List UInt8) :=
   go bits [] fuel
@@ -419,10 +397,23 @@ where
       Nat → Option (List UInt8)
     | 0 => none
     | fuel + 1 => do
-      let (block, bits) ← decodeBlock bits
-      let acc := acc ++ block.bytes
-      if block.isFinal then return acc
-      else go bits acc fuel
+      let (bfinal, bits) ← readBitsLSB 1 bits
+      let (btype, bits) ← readBitsLSB 2 bits
+      match btype with
+      | 0 => -- Stored block
+        let (bytes, bits) ← decodeStored bits
+        let acc := acc ++ bytes
+        if bfinal == 1 then return acc else go bits acc fuel
+      | 1 => -- Fixed Huffman
+        let (syms, bits) ← decodeSymbols fixedLitLengths fixedDistLengths bits
+        let acc ← resolveLZ77 syms acc
+        if bfinal == 1 then return acc else go bits acc fuel
+      | 2 => -- Dynamic Huffman
+        let (litLens, distLens, bits) ← decodeDynamicTables bits
+        let (syms, bits) ← decodeSymbols litLens distLens bits
+        let acc ← resolveLZ77 syms acc
+        if bfinal == 1 then return acc else go bits acc fuel
+      | _ => none  -- reserved block type (3)
 
 /-- Decode a DEFLATE stream from a `ByteArray` starting at a given byte
     offset. This is the top-level spec function. -/
