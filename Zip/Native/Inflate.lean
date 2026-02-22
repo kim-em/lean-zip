@@ -134,6 +134,16 @@ def distExtra : Array UInt8 := #[
   7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
 ]
 
+/-- Copy `length` bytes from `buf` starting at `start`, repeating every
+    `distance` bytes (LZ77 back-reference copy with wrap-around).
+    Defined as explicit recursion for proof tractability. -/
+def copyLoop (buf : ByteArray) (start distance : Nat)
+    (k length : Nat) : ByteArray :=
+  if k < length then
+    copyLoop (buf.push buf[start + (k % distance)]!) start distance (k + 1) length
+  else buf
+termination_by length - k
+
 -- Code length alphabet order for dynamic Huffman (RFC 1951 §3.2.7)
 private def codeLengthOrder : Array Nat := #[
   16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
@@ -250,10 +260,7 @@ where
         if output.size + length > maxOutputSize then
           throw "Inflate: output exceeds maximum size"
         let start := output.size - distance
-        let mut out := output
-        for i in [:length] do
-          -- Must read from `out` (not `output`) for overlapping copies
-          out := out.push out[start + (i % distance)]!
+        let out := copyLoop output start distance 0 length
         go br out fuel
 
 /-- Inflate a raw DEFLATE stream starting at byte offset `startPos`. Returns the
