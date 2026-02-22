@@ -398,10 +398,11 @@ private theorem fromLengths_ok_eq (lengths : Array UInt8) (tree : Zip.Native.Huf
     (htree : Zip.Native.HuffTree.fromLengths lengths = .ok tree) :
     tree = Zip.Native.HuffTree.fromLengthsTree lengths := by
   simp only [Zip.Native.HuffTree.fromLengths] at htree
-  cases hval : Zip.Native.HuffTree.validateLengths lengths 15 with
-  | ok _ =>
-    simp [hval, bind, Except.bind, pure, Except.pure] at htree; exact htree.symm
-  | error _ => simp [hval, bind, Except.bind] at htree
+  split at htree
+  · simp at htree
+  · split at htree
+    · simp at htree
+    · exact (Except.ok.inj htree).symm
 
 /-- `Array.set!` at a different index doesn't affect the target (UInt32 version). -/
 private theorem array_set_ne_u32 (arr : Array UInt32) (i j : Nat) (v : UInt32) (hij : i ≠ j) :
