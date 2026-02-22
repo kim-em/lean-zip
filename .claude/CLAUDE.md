@@ -342,6 +342,10 @@ Update it during review and reflect sessions.
   native table constants like `lengthBase`, `distExtra` in Inflate.lean
   that appear in `decodeHuffman.go` — if they're `private`, proofs in
   InflateCorrect.lean can't name them in `cases` or `simp` arguments).
+  **Caveat**: `protected` requires fully-qualified names even within the
+  same namespace (`Inflate.lengthBase` instead of `lengthBase`). For
+  definitions used unqualified within their own namespace AND needed
+  cross-file, use public (no modifier) instead.
 - **Avoid `▸` with UInt32/BitVec goals**: The `▸` (subst rewrite) tactic
   triggers full `whnf` reduction, which can deterministic-timeout on goals
   involving UInt32 or BitVec operations. Use `obtain ⟨rfl, _⟩ := h` +

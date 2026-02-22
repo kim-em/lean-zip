@@ -2,6 +2,42 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-22: Review — InflateCorrect proof quality + spec correspondence
+
+**Starting commit**: `4c28a9f` | **Sorry count**: 2 → 2 (unchanged)
+
+**Focus**: Deep review of InflateCorrect.lean proof quality, Deflate.lean
+spec ↔ native correspondence verification, dead code scan.
+
+### Proof improvements (committed `42f20ad`)
+- `huffTree_decode_correct`: replaced bare `simp` with `simp only [Option.map]`
+- `decodeHuffman_correct` literal case: combined two `rw` steps by folding
+  `sym.toUInt8 = sym.toNat.toUInt8` (which is `rfl`) into the intermediate `have`
+
+### Visibility changes (committed `f54ca51`)
+- Made DEFLATE tables (lengthBase, lengthExtra, distBase, distExtra) public
+  (was `private`) — needed for length/distance case of `decodeHuffman_correct`
+- Note: `protected` doesn't work here because it requires fully-qualified
+  names even within the same namespace
+
+### Spec ↔ native correspondence (verified)
+- All table values match (lengthBase, lengthExtra, distBase, distExtra,
+  codeLengthOrder, fixedLitLengths, fixedDistLengths)
+- Cross-block reference handling correct in both (acc passed through)
+- decodeStored, decodeDynamicTables, decodeLitLen all match
+- No discrepancies found
+
+### Dead code / slop scan
+- No dead code across Spec/ and ZipForStd/
+- No unused imports
+- Unused spec theorems are intentional infrastructure
+- All private helpers used internally
+
+### Decisions
+- Used public (no modifier) instead of `protected` for tables — `protected`
+  requires fully-qualified names even within the namespace
+- Toolchain v4.29.0-rc1 still latest
+
 ## 2026-02-22: Impl — spec bug fix + decodeHuffman_correct (2/3 cases)
 
 **Starting commit**: `d7604b8` | **Sorry count**: 1 → 2

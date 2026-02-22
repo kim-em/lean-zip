@@ -6,49 +6,56 @@
 ## Sorry count: 2
 
 In `Zip/Spec/InflateCorrect.lean`:
-- `decodeHuffman_correct` (line 342): length/distance case
-- `inflate_correct` (line 368): main correctness theorem
+- `decodeHuffman_correct` (line 341): length/distance case
+- `inflate_correct` (line 367): main correctness theorem
 
 ## Known good commit
 
-`f6541c7` — `lake build Zip` succeeds, no warnings except expected sorries.
+`f54ca51` — `lake build Zip` succeeds, no warnings except expected sorries.
 (Note: test exe linker error on macOS with v4.29.0-rc1 is pre-existing.)
 
-## Completed this session (implementation)
+## Review findings (this session)
 
-### Spec bug fix
-- Removed `DecodedBlock` and `decodeBlock` from Deflate.lean
-- Inlined block dispatch into `decode.go`, passing `acc` to `resolveLZ77`
-- This correctly models RFC 1951's cross-block sliding window
-- Committed as `19ae92e`
+### InflateCorrect.lean proof quality
+- Replaced bare `simp` with `simp only [Option.map]` in `huffTree_decode_correct`
+- Simplified literal case: combined two separate rewrite steps by folding
+  `sym.toUInt8 = sym.toNat.toUInt8` (which is `rfl`) into the `have`
+- Overall proof quality rated 8/10: well-structured, minimal, clear decomposition
+- Potential future improvements: extract `decodeLitLen_literal`/`decodeLitLen_endOfBlock`
+  helper lemmas once length/distance case is complete
 
-### decodeHuffman_correct — 2 of 3 cases proved
-- **Literal case** (sym < 256): decodeLitLen → .literal, resolveLZ77_literal, IH
-- **End-of-block case** (sym == 256): decodeLitLen → .endOfBlock, decodeSymbols with fuel 1
-- **Length/distance case**: sorry — see PLAN.md for detailed blockers
+### Deflate.lean spec ↔ native correspondence
+- **All tables match**: lengthBase, lengthExtra, distBase, distExtra values identical
+  (accounting for Nat vs UInt16/UInt8 type differences)
+- **Cross-block references**: Both spec and native correctly pass accumulator
+  through blocks — fix from previous session verified correct
+- **decodeStored**: Perfect correspondence (alignment, LEN/NLEN, complement, bytes)
+- **decodeDynamicTables**: Repeat codes 16/17/18 all match
+- **fixedLitLengths/fixedDistLengths**: Equivalent
 
-### Helper lemmas added
-- `decode_wf`: HuffTree.decode preserves bitOff < 8
-- `readBits_go_wf`, `readBits_wf`: readBits preserves bitOff < 8
-- Changed `decodeHuffman` from `private` to `protected` for cross-file access
+### Dead code / slop scan
+- No dead code found
+- No unused imports
+- Unused spec theorems (resolveLZ77_*, fixedLengths_*) are intentional
+  specification infrastructure
+- All private helper theorems used internally
 
-### UInt16 proof patterns discovered
-- `sym < 256` (UInt16 lt) directly proves `sym.toNat < 256` via `exact hsym`
-- `¬(sym < 256)` → `sym.toNat ≥ 256` via `Nat.le_of_not_lt`
-- `sym.toUInt8 = sym.toNat.toUInt8` is `rfl` (UInt16.toUInt8 = fun a => a.toNat.toUInt8)
-- UInt16 is now BitVec-based (not Fin-based) in v4.29.0-rc1
+### Visibility changes
+- Made native DEFLATE tables (lengthBase, lengthExtra, distBase, distExtra)
+  public for cross-file proof access (needed for length/distance case)
+- Note: `protected` doesn't work here because it requires fully-qualified
+  names even within the same namespace
 
 ## Next action
 
-Priority for next session:
+Priority for next session (implementation):
 
-1. **Make native tables protected**: Change `lengthBase`, `lengthExtra`,
-   `distBase`, `distExtra` from `private` to `protected` in Inflate.lean
-2. **Prove table correspondence**: Native UInt16 arrays ↔ spec Nat lists
-3. **Prove copy loop ↔ List.ofFn**: Factor out as a standalone lemma
-4. **Complete length/distance case**: Chain all correspondence lemmas
-5. **Loop correspondence**: Native `for` block loop ↔ spec fuel-based recursion
-6. **Close `inflate_correct`**: Combine block + loop correspondence
+1. **Prove table correspondence**: Native UInt16 arrays ↔ spec Nat lists
+   (tables are now accessible from InflateCorrect.lean)
+2. **Prove copy loop ↔ List.ofFn**: Factor out as a standalone lemma
+3. **Complete length/distance case**: Chain all correspondence lemmas
+4. **Loop correspondence**: Native `for` block loop ↔ spec fuel-based recursion
+5. **Close `inflate_correct`**: Combine block + loop correspondence
 
 ## Architecture of remaining decomposition
 
@@ -65,7 +72,6 @@ inflate_correct (sorry)
 
 ## Notes
 
-- Toolchain v4.29.0-rc1 is current
-- Sorry count: 2 (up from 1, but decodeHuffman_correct is a new theorem
-  decomposing inflate_correct — the extra sorry represents progress)
+- Toolchain v4.29.0-rc1 is current (still latest)
+- Sorry count: 2 (unchanged from previous session)
 - Pre-existing linker error for test:exe on macOS with v4.29.0-rc1
