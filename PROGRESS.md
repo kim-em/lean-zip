@@ -2,6 +2,38 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-22: Review — BitstreamCorrect + Huffman size scan
+
+**Focus**: Deep review of BitstreamCorrect.lean proofs; file size and
+simplification scan of Huffman.lean (959 lines).
+
+### Findings
+
+- **BitstreamCorrect.lean**: Proofs are clean and near-minimal. The
+  `simp only []` in `readBitsLSB_split` appears removable but is
+  structurally required — it normalizes the goal for `congr 1` to
+  produce correct subgoals. `omega` cannot handle the resulting
+  `2^k` multiplication without it.
+- **`flatMap_drop_mul` simplified**: Changed hypothesis from
+  `∀ a ∈ l, (f a).length = k` to `∀ a, (f a).length = k`. Eliminates
+  membership threading through induction, nets -3 lines. Committed
+  as `fc91055`.
+- **Huffman.lean (959 lines)**: Approaching 1000-line limit. Natural
+  split point exists (definitions vs Kraft machinery) but the file is
+  unlikely to grow further — not urgent to split now.
+- **HuffmanCorrect.lean NC invariant duplication**: ~35 lines duplicated
+  between `insertLoop_forward` and `insertLoop_backward`. Extraction
+  evaluated: would need ~17 parameters, not worth the complexity.
+- **No dead code found** across BitstreamCorrect, HuffmanCorrect,
+  InflateCorrect (comprehensive search of private/protected definitions).
+- **Toolchain**: v4.29.0-rc1 is latest; v4.29.0 stable not yet released.
+- **Sorry count**: 1 (unchanged — `inflate_correct` in InflateCorrect.lean)
+
+### Decisions
+
+- Deferred Huffman.lean split (not urgent, file near-stable)
+- Deferred NC invariant extraction (complexity vs savings tradeoff)
+
 ## 2026-02-21: Implementation — bitstream lemmas + decodeStored_correct
 
 **Type**: implementation

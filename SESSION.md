@@ -10,32 +10,30 @@ In `Zip/Spec/InflateCorrect.lean`:
 
 ## Known good commit
 
-`350666b` — `lake build Zip` succeeds, no warnings except expected sorry.
+`fc91055` — `lake build Zip` succeeds, no warnings except expected sorry.
 (Note: test exe linker error on macOS with v4.29.0-rc1 is pre-existing,
 Lean compilation succeeds.)
 
-## Completed this session (implementation)
+## Completed this session (review)
 
-### Proved `inflate_correct'` from `inflate_correct`
-Straightforward corollary: unfold `inflate`, case-split on `inflateRaw`,
-apply `inflate_correct` with `startPos = 0`. Committed as `f80b5b8`.
+### BitstreamCorrect.lean deep review
+- Proofs are clean, near-minimal
+- `simp only []` in `readBitsLSB_split` confirmed structurally needed
+  (normalizes goal for `congr 1`; `omega` can't handle `2^k` without it)
+- Simplified `flatMap_drop_mul`: universal quantifier replaces membership-
+  restricted hypothesis, eliminating membership threading (-3 lines)
 
-### Bitstream correspondence lemmas (BitstreamCorrect.lean)
-- `readBitsLSB_testBit`, `readBitsLSB_byteToBits`, `readBitsLSB_split`
-- `alignToByte_toBits` — native `alignToByte` ↔ spec `Deflate.Spec.alignToByte`
-- `readUInt16LE_toBits` — native LE 16-bit read ↔ spec `readBitsLSB 16`
-- `readNBytes_aligned` — inductive core for byte-level reading
-- `readBytes_toBits` — native `readBytes` ↔ spec `readNBytes`
-- Helper lemmas: `readUInt16LE_wf`, `readUInt16LE_data`, `readBytes_wf`,
-  `alignToByte_id_of_aligned`
+### Huffman.lean size scan
+- 959 lines — approaching 1000 limit but file is near-stable
+- Split deferred (definitions vs Kraft machinery is natural boundary)
 
-### Proved `decodeStored_correct` (InflateCorrect.lean)
-Full stored-block correspondence: native `Inflate.decodeStored` ↔ spec
-`Deflate.Spec.decodeStored`. Chains `readUInt16LE_toBits` (×2) and
-`readBytes_toBits`, with XOR complement check and byte-alignment invariants.
+### HuffmanCorrect.lean NC invariant
+- ~35 lines duplicated between insertLoop_forward/backward
+- Extraction evaluated: ~17 parameters needed, not worth complexity
 
-### Visibility change
-- `private` → `protected` for `Inflate.decodeStored` (cross-file access)
+### Dead code / toolchain checks
+- No unused private/protected definitions found
+- v4.29.0-rc1 is latest toolchain (stable v4.29.0 not yet released)
 
 ## Next action
 
@@ -62,6 +60,6 @@ inflate_correct (sorry)
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- Sorry count decreased from 2 → 1 (proved inflate_correct')
+- Sorry count: 1 (stable since last session)
 - Pre-existing linker error for test:exe on macOS with v4.29.0-rc1
   (zstd -Bstatic/-Bdynamic flags not recognized by lld on macOS)

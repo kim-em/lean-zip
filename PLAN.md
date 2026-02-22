@@ -5,19 +5,18 @@
 
 ## Status: Complete
 
-## Session type: implementation
+## Session type: review
 
-## Goal: Prove inflate_correct' + decompose inflate_correct
+## Goal: Deep review of BitstreamCorrect + file size scan
 
 ### Steps
 
-1. [x] Prove `inflate_correct'` from `inflate_correct` (corollary: startPos=0)
-2. [x] Add `readUInt16LE_toBits` correspondence lemma (BitstreamCorrect)
-3. [x] Add `readBytes_toBits` correspondence lemma (BitstreamCorrect)
-4. [x] Add `alignToByte_toBits` correspondence lemma (BitstreamCorrect)
-5. [x] State `decodeStored_correct` — stored block correspondence
-6. [x] Prove `decodeStored_correct` using bitstream lemmas
-7. [x] Build and test
+1. [x] Deep review BitstreamCorrect.lean proofs (simplification opportunities)
+2. [x] Simplify `flatMap_drop_mul` hypothesis (universal quantifier)
+3. [x] Scan Huffman.lean (959 lines) for split/simplification
+4. [x] Check for dead code across Spec files
+5. [x] Check toolchain updates
+6. [x] Verify build, commit, document
 
 ### Next session priorities
 
