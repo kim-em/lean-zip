@@ -3,44 +3,74 @@
 <!-- Rewritten at the start of each work session. -->
 <!-- If a session ends with unchecked items, the next session continues here. -->
 
-## Status: Complete
+## Status: In progress
 
-## Session type: review
+## Session type: implementation
 
-## Goal: Deep review of BitstreamCorrect + file size scan
+## Goal: Complete decodeHuffman_correct
 
 ### Steps
 
-1. [x] Deep review BitstreamCorrect.lean proofs (simplification opportunities)
-2. [x] Simplify `flatMap_drop_mul` hypothesis (universal quantifier)
-3. [x] Scan Huffman.lean (959 lines) for split/simplification
-4. [x] Check for dead code across Spec files
-5. [x] Check toolchain updates
-6. [x] Verify build, commit, document
+1. [x] Fix spec bug: pass `acc` to `resolveLZ77` for cross-block back-references
+2. [x] State `decodeHuffman_correct`
+3. [x] Prove literal case (sym < 256)
+4. [x] Prove end-of-block case (sym == 256)
+5. [ ] Prove length/distance case (sym > 256)
+6. [ ] Work on inflate_correct loop correspondence
 
-### Next session priorities
+### Length/distance case blockers
 
-1. **Huffman block correspondence** (`decodeHuffman_correct`):
-   - Symbol decode loop: iterate `huffTree_decode_correct` for lit/len/dist
-   - LZ77 back-reference resolution: native copy loop ↔ spec `resolveLZ77`
-   - Dynamic tree header parsing correspondence
-2. **Loop correspondence**: native `for` block loop ↔ spec fuel-based recursion
-3. **Close `inflate_correct`**: combine block + loop correspondence
+The length/distance case needs:
+
+1. **Make native tables accessible**: `lengthBase`, `lengthExtra`, `distBase`,
+   `distExtra` are `private` in Inflate.lean. Change to `protected` so
+   InflateCorrect.lean can reference them in proofs.
+
+2. **Table correspondence lemmas**: Show that for valid indices:
+   - `Zip.Native.Inflate.lengthBase[idx]!.toNat = Deflate.Spec.lengthBase[idx]!`
+   - Same for `lengthExtra`, `distBase`, `distExtra`
+   These might be provable by `decide` since the tables are finite constants.
+
+3. **Copy loop ↔ List.ofFn**: The native `for i in [:length] do out := out.push
+   out[start + (i % distance)]!` must equal the spec's `List.ofFn fun i =>
+   acc[start + (i.val % dist)]!`. Key insight: all reads are within the
+   original buffer range (`start + (i % distance) < output.size`), so the
+   growing buffer doesn't affect read values.
+
+4. **readBits ↔ readBitsLSB** for extra bits (already proven as `readBits_toBits`)
+
+5. **distTree.decode ↔ Huffman.Spec.decode** for distance symbol (use
+   `huffTree_decode_correct` with `distLengths`)
+
+### Approach for length/distance case
+
+After making tables `protected`, the proof follows the same pattern as the
+literal case but with more intermediate steps:
+1. Split `h` on each bounds check and monadic operation (~10 case splits)
+2. Chain correspondence lemmas for each sub-operation
+3. Show `decodeLitLen` returns `.reference length distance`
+4. Show `resolveLZ77` on `.reference` produces the copy loop result
+5. Apply IH for the recursive call
 
 ### Architecture of remaining decomposition
 
 ```
-inflate_correct (1 sorry remaining)
+inflate_correct (sorry)
   ├── decodeStored_correct (DONE)
-  ├── decodeHuffman_correct (NEXT — largest remaining piece)
+  ├── decodeHuffman_correct (2/3 cases DONE)
   │   ├── huffTree_decode_correct (DONE)
-  │   ├── symbol decode loop correspondence
-  │   └── LZ77 resolve correspondence
+  │   ├── literal case (DONE)
+  │   ├── end-of-block case (DONE)
+  │   └── length/distance case (sorry — see blockers above)
   └── loop correspondence (for → fuel)
 ```
 
-### Potential upstreaming candidates (ZipForStd)
+### UInt16 proof patterns discovered
 
-- `UInt8.ofNat_toNat` (round-trip for UInt8)
-- `ByteArray.data_extract` / `Array.toList_extract`
-- `List.drop_eq_getElem_cons` variant
+- `sym < 256` (UInt16) proves `sym.toNat < 256` (Nat) via `exact hsym`
+- `¬(sym < 256)` → `sym.toNat ≥ 256` via `Nat.le_of_not_lt hge`
+- `sym.toNat = 256` → `sym = 256` via `UInt16.toNat_inj.mp (by simp; exact heq)`
+- `sym.toUInt8 = sym.toNat.toUInt8` is `rfl` (UInt16.toUInt8 defined as `a.toNat.toUInt8`)
+- `pure (...) = some (...)` for Option needs `simp only [..., pure]`
+- `if (256 : Nat) < 256` reduces with `show ¬((256 : Nat) < 256) from by omega` + `↓reduceIte`
+- `(256 : Nat) == 256 = true` is `rfl`

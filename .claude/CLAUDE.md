@@ -380,6 +380,18 @@ Update it during review and reflect sessions.
      + `rfl` to evaluate the spec function
   Key: prepare all intermediate spec hypotheses in unified form
   (substituting `← hrest` to align bit positions) before the final `simp`.
+- **UInt16 comparison and conversion**: In v4.29.0-rc1, UInt16 is
+  BitVec-based. `sym < 256` (UInt16 lt) directly proves
+  `sym.toNat < 256` via `exact hsym`. Negation `¬(sym < 256)` gives
+  `sym.toNat ≥ 256` via `Nat.le_of_not_lt hge`. For equality,
+  `sym.toNat = 256` proves `sym = 256` via
+  `UInt16.toNat_inj.mp (by simp; exact heq)`. `sym.toUInt8` equals
+  `sym.toNat.toUInt8` by `rfl` (UInt16.toUInt8 is defined as
+  `fun a => a.toNat.toUInt8`). `omega` CANNOT directly bridge
+  UInt16 comparisons to Nat — extract hypotheses first.
+- **Option `pure` vs `some`**: After `simp only` with `↓reduceIte` on
+  spec functions, goals may have `pure (...) = some (...)`. Add `pure`
+  to the simp arguments to unfold it.
 - **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
   `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
   To define in a different namespace, either close the current namespace
@@ -392,6 +404,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 1 (InflateCorrect.lean — inflate_correct)
-- **Last session**: 2026-02-21 (impl: bitstream lemmas + decodeStored_correct, proved inflate_correct')
-- **Last review**: 2026-02-21 (split InflateCorrect.lean 1282→268+833+146, removed insert_go_complete)
+- **Sorry count**: 2 (InflateCorrect.lean — decodeHuffman_correct length/distance case, inflate_correct)
+- **Last session**: 2026-02-22 (impl: spec bug fix + decodeHuffman_correct 2/3 cases)
+- **Last review**: 2026-02-22 (BitstreamCorrect deep review, Huffman size scan)

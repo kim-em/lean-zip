@@ -2,6 +2,41 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-22: Impl — spec bug fix + decodeHuffman_correct (2/3 cases)
+
+**Starting commit**: `d7604b8` | **Sorry count**: 1 → 2
+
+### Spec bug fix (committed `19ae92e`)
+- **Problem**: `decodeBlock` passed `[]` to `resolveLZ77`, breaking cross-block
+  LZ77 back-references (RFC 1951 §3.2 requires sliding window across blocks)
+- **Fix**: Removed `DecodedBlock` and `decodeBlock`; inlined block dispatch into
+  `decode.go` with `acc` passed directly to `resolveLZ77`
+
+### decodeHuffman_correct (committed `f6541c7`)
+- Stated and partially proved the theorem connecting native `decodeHuffman.go`
+  to spec `decodeSymbols` + `resolveLZ77`
+- **Literal case**: Proved — chains huffTree_decode_correct → decodeLitLen
+  returns `.literal` → resolveLZ77_literal → IH
+- **End-of-block case**: Proved — chains huffTree_decode_correct → decodeLitLen
+  returns `.endOfBlock` → decodeSymbols terminates with fuel 1
+- **Length/distance case**: Sorry — blocked on:
+  - Native DEFLATE tables are `private` (can't reference in proof file)
+  - Need table correspondence lemmas (native UInt16 arrays ↔ spec Nat lists)
+  - Need copy loop ↔ List.ofFn correspondence
+- Added helper lemmas: `decode_wf`, `readBits_go_wf`, `readBits_wf`
+- Changed `decodeHuffman` from `private` to `protected`
+
+### UInt16 proof patterns (for CLAUDE.md)
+- UInt16 is now BitVec-based in v4.29.0-rc1 (not Fin-based)
+- `sym < 256` (UInt16) proves `sym.toNat < 256` via `exact hsym`
+- `sym.toUInt8 = sym.toNat.toUInt8` is `rfl`
+- `pure (...) = some (...)` for Option needs `simp only [..., pure]`
+
+### Decisions
+- Sorry count increased from 1 to 2 because `decodeHuffman_correct` is a new
+  theorem decomposing `inflate_correct` — the extra sorry represents progress
+  toward the goal, not regression
+
 ## 2026-02-22: Review — BitstreamCorrect + Huffman size scan
 
 **Focus**: Deep review of BitstreamCorrect.lean proofs; file size and
