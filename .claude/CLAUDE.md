@@ -221,13 +221,31 @@ End every session by running `/reflect`. If it suggests improvements to
 - Start simple, optimize later with equivalence proofs
 
 ### Specifications
-- **Avoid tautological specs.** A specification that merely restates the
-  implementation (e.g. `crc32 x = crc32Impl x`) proves nothing useful.
-  Aim for logical characterisations that pin down the *meaning* of a
-  function independently of how it is computed — algebraic properties
-  (e.g. `crc32 (a ++ b) = combine (crc32 a) (crc32 b)`), equivalence
-  with a reference definition, or key invariants. When a full
-  characterisation is hard, state useful properties instead.
+
+There are three levels of specification quality. Know which you're
+writing and be honest about it:
+
+1. **Tautological**: restates the implementation (`f x = fImpl x`).
+   Proves nothing useful. Avoid.
+2. **Characterizing properties**: mathematical properties independent
+   of how the function is computed — algebraic identities
+   (e.g. `crc32 (a ++ b) = combine (crc32 a) (crc32 b)`), structural
+   invariants (prefix-freeness, Kraft inequality), or invertibility
+   theorems (e.g. `decode (encode x) = x`). This is the gold standard.
+3. **Algorithmic correspondence**: two implementations of the same
+   algorithm agree (e.g. native decoder = reference decoder). Useful
+   when the algorithm IS the spec (e.g. RFC pseudocode), but be
+   explicit that this is translation validation — it catches bugs in
+   the translation between data structures, not logical errors shared
+   by both implementations.
+
+When a function's "specification" is an algorithm (RFC pseudocode),
+transcribing it into proof-friendly style and proving correspondence
+IS the right approach. But characterize the mathematical building
+blocks independently where possible. Don't pretend algorithmic
+correspondence is characterization. See VERIFICATION.md Phases 3–4
+for how this applies to DEFLATE.
+
 - For optimized versions, specs are equivalence with the simple version.
 - Do NOT modify theorem statements just to make proofs easier. If a spec
   is genuinely wrong or too strong, it can be changed — but document the

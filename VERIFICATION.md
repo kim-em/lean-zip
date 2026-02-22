@@ -203,63 +203,172 @@ Pure Lean DEFLATE decompressor (inflate only). No proofs yet.
 - Conformance tests against zlib on a corpus of compressed data
 - Integration as an alternative backend for existing ZIP/tar code paths
 
+### Phases 3–4: Verified DEFLATE Roundtrip
+
+The overarching goal:
+
+```
+∀ (data : ByteArray) (level : Fin 10), inflate (deflate data level) = data
+```
+
+The roundtrip decomposes into five building blocks. The decompressor
+(Phase 3) contributes the "right half" of each invertibility theorem;
+the compressor (Phase 4) contributes the "left half." Each building
+block is independently meaningful.
+
+#### The roundtrip pipeline
+
+```
+data → matchLZ77 → symbols → huffEncode → bits → pack → compressed
+                                                           │
+compressed → unpack → bits → huffDecode → symbols → resolveLZ77 → data
+```
+
+The full proof chains three invertibility steps:
+
+```
+  inflate (deflate data level)
+= resolveLZ77 (huffDecode (unpack (pack (huffEncode (matchLZ77 data)))))
+= resolveLZ77 (huffDecode (huffEncode (matchLZ77 data)))  -- bitstream
+= resolveLZ77 (matchLZ77 data)                            -- Huffman
+= data                                                    -- LZ77
+```
+
+(Simplified — actual proof routes through block framing.)
+
+#### Building block 1: LZ77 fundamental theorem
+
+```lean
+resolveLZ77 (matchLZ77 data level) [] = some data.toList
+```
+
+The LZ77 matcher produces a symbol stream; resolving it reconstructs
+the original data. This holds for all compression levels because every
+valid match (greedy, lazy, or literal) describes the same data.
+
+**Level 0 (stored blocks, no LZ77):** Emits stored blocks with literal
+bytes. Roundtrip is literal copy-through. Trivial.
+
+**Level 1 (greedy matching, fixed Huffman):** At position `p`, the
+matcher either emits `Literal data[p]` or finds the longest match at
+distance `d` and emits `BackRef len d`. Proof by induction on `p` with
+invariant `resolveLZ77 remaining acc = some data.toList` where
+`acc = data[0..p]`:
+- Literal: extends `acc` by one byte, direct.
+- BackRef: matcher verified `data[p..p+len] = data[p-d..p-d+len]`.
+  By `copyLoop_eq_ofFn`, the copy produces `data[p..p+len]`, extending
+  `acc` to `data[0..p+len]`.
+
+**Levels 2–4 (lazy matching):** At position `p`, finds match M1, then
+checks `p+1` for a longer M2. If M2 is longer, emits
+`Literal data[p]; BackRef M2`; otherwise `BackRef M1`. Same invariant
+— proof branches on matcher's decision but `data[p..]` is produced
+either way.
+
+**Levels 5–9 (dynamic Huffman, more search):** LZ77 validity is
+identical to levels 2–4; only which matches are found differs, not
+their correctness. Dynamic Huffman affects the encoding layer (BB2),
+not the LZ77 layer.
+
+#### Building block 2: Huffman encode/decode invertibility
+
+```lean
+decodeSymbols litLens distLens (encodeSymbols litLens distLens syms ++ rest)
+  = some (syms, rest)
+```
+
+For prefix-free code tables. The single-symbol case is already proved:
+`decode_prefix_free` (Huffman.lean) says that for `(cw, sym)` in a
+prefix-free table, `decode table (cw ++ rest) = some (sym, rest)`.
+Extension to symbol sequences is induction on the symbol list.
+
+For length/distance sub-encoding (codes 257–285 + extra bits), the
+encode side reverses the table lookup. Invertibility follows because
+the tables are monotone and extra bits fill the gaps exactly.
+
+#### Building block 3: Bitstream packing invertibility
+
+```lean
+bytesToBits (bitsToBytes bits) = bits    -- for length divisible by 8
+```
+
+BitstreamCorrect already proves the unpack direction (`readBit_toBits`,
+`readBits_toBits`). The pack direction is new but mechanical.
+
+#### Building block 4: Block framing
+
+- **Stored:** LEN/NLEN header + literal copy. Trivially invertible.
+- **Fixed Huffman:** Shared constant tables. Reduces to BB2.
+- **Dynamic Huffman:** Tree description (code lengths via RLE +
+  code-length Huffman) must round-trip. Tedious but not deep.
+- **Block sequence:** BFINAL (1 bit) + BTYPE (2 bits) are fixed-width.
+  Symbol 256 terminates compressed blocks. BFINAL=1 marks last block.
+- **Cross-block back-references:** LZ77 references can span block
+  boundaries (RFC 1951 §2). The decompressor passes accumulated output
+  across blocks. Invariant: after block k, output = `data[0..pₖ]`.
+
+#### Building block 5: Composition
+
+Chain BB1–BB4 to obtain the full roundtrip theorem.
+
+#### What exists vs. what's needed
+
+| Building block | Decompressor half (Phase 3) | Compressor half (Phase 4) |
+|---|---|---|
+| BB1: LZ77 | `resolveLZ77` correctness ✓, `copyLoop_eq_ofFn` ✓ | `matchLZ77` + fundamental theorem |
+| BB2: Huffman | `decode_prefix_free` ✓, tree correspondence ✓ | `huffEncode` + sequence roundtrip |
+| BB3: Bitstream | `readBit_toBits`, `readBits_toBits` ✓ | `bitsToBytes` + pack roundtrip |
+| BB4: Framing | `decodeStored_correct` ✓, `decodeHuffman_correct` ✓, `inflateLoop_correct` (2 minor sorries), `decodeDynamicTrees_correct` (sorry) | Block framing encoder, dynamic tree encoding |
+| BB5: Composition | — | Full roundtrip theorem |
+
 ### Phase 3: Verified Decompressor
 
-Prove DEFLATE decompression correct against a formalized RFC 1951 subset.
-This is the research-grade contribution.
+The decompressor contributes the "right half" of each building block.
+The verification has two layers, reflecting the structure of DEFLATE:
 
-**Estimated effort**: Months.
+**Characterizing properties** — mathematical content independent of any
+particular implementation:
 
-**Deliverables**:
-- Formal specification of valid DEFLATE bitstreams in Lean
-- Proof that `inflate` produces the unique correct output for any valid
-  bitstream
-- Proof that `inflate` rejects invalid bitstreams
+- Huffman codes are prefix-free and canonical (Huffman.Spec) ✓
+- Kraft inequality bounds symbol counts ✓
+- Prefix-free codes decode deterministically (`decode_prefix_free`) ✓
+- Bitstream operations correspond to LSB-first bit lists ✓
+- LZ77 overlap semantics: `copyLoop_eq_ofFn` ✓
+- RFC 1951 tables verified by `decide` ✓
+- TODO: Fuel independence of spec decode
+- TODO: `fromLengths` success implies `ValidLengths`
 
-This is the sweet spot of the project. Decompression is deterministic, the
-algorithm is well-understood, and a verified decompressor has clear
-practical value: you trust decompression more than compression in
-adversarial contexts (processing untrusted archives).
+**Algorithmic correspondence** — the native implementation agrees with
+a reference decoder that transcribes RFC 1951 §3.2.3 pseudocode into
+proof-friendly style (`List Bool`, `Option` monad, fuel):
 
-**Prior art**: Senjak & Hofmann's Coq formalization (see References)
-contains directly relevant proof techniques:
-- Their Definition 1 gives a 4-axiom characterization of canonical
-  prefix-free codings (prefix-free, shorter-precedes-longer,
-  same-length-ordered-by-symbol, no-gaps). Compare against our
-  `Huffman.Spec` axiomatization for completeness.
-- Theorem 1 (uniqueness from code lengths): proved by contradiction —
-  take the lex-smallest differing code and derive a contradiction via
-  the no-gaps axiom. Relevant to `codeFor_injective` and the
-  different-length case of `canonical_prefix_free`.
-- Theorem 3 (constructive existence via Kraft inequality): validates
-  the `ValidLengths` / Kraft-based approach.
-- Section 5 (strong decidability / strong uniqueness): a relational
-  framework for specifying encoding relations and extracting verified
-  parsers. Their bind-like combinator for composing relations preserves
-  both properties, enabling modular parser construction. Worth studying
-  as an approach for the overall decompressor correctness proof.
+- Stored blocks ✓
+- Huffman blocks (literal, end-of-block, length/distance cases) ✓
+- Block loop (2 minor position-invariant sorries)
+- Dynamic Huffman tree decode (sorry — hardest remaining piece)
+
+The reference decoder (`Deflate.Spec.decode`) is not a mathematical
+specification — it is the RFC algorithm in proof-friendly dress. At
+the block-dispatch level, the RFC IS pseudocode; correspondence with
+a faithful transcription is the appropriate verification tool. The
+mathematical content lives in the building blocks (Huffman, bitstream,
+LZ77), not in the top-level algorithm.
 
 ### Phase 4: DEFLATE Compressor
 
-Pure Lean DEFLATE compressor, starting with simple strategies (level 0
-stored, level 1 greedy matching). Prove roundtrip correctness.
+The compressor contributes the "left half" of each building block plus
+the composition into the full roundtrip theorem.
 
-**Estimated effort**: Months.
+**Deliverables** (progressive, each level adds to the previous):
 
-**Deliverables**:
-- Level 0 (stored blocks, no compression)
-- Level 1 (greedy LZ77 matching, fixed Huffman codes)
-- Higher levels as desired (lazy matching, dynamic Huffman codes)
-- Proof: `inflate (deflate data level) = data` for implemented levels
-- Conformance tests: verify zlib can decompress our output and vice versa
-
-**Prior art**: Senjak & Hofmann (2016) proved `decompress(compress(d)) = d`
-in Coq using a relational specification with monadic combinators
-(Sections 5-6). Their approach defines encoding as a relation
-`OutputType → InputType → Prop`, proves strong decidability (which
-extracts a parser), then proves a compression function produces output
-satisfying the relation. This is one viable approach; a more direct
-functional proof may also work in Lean 4.
+- Level 0: stored blocks, literal copy. Roundtrip trivial.
+- Level 1: greedy LZ77 matching, fixed Huffman codes.
+  First non-trivial roundtrip — proves BB1 for greedy matching.
+- Levels 2–4: lazy matching. Same BB1 invariant with branching.
+- Levels 5–9: dynamic Huffman codes. Adds dynamic tree encoding
+  roundtrip (BB4) on top of BB1.
+- Conformance tests: zlib can decompress our output and vice versa.
+- Full roundtrip theorem: `inflate (deflate data level) = data`.
 
 ### Phase 5: Zstd (Aspirational)
 
@@ -291,18 +400,31 @@ bugs that neither catches alone.
 
 ## References
 
+- **RFC 1951** (Deutsch, 1996), "DEFLATE Compressed Data Format
+  Specification version 1.3". The primary specification. Available in
+  `references/rfc1951.txt`. Section 3.2.3 contains the decoding
+  algorithm pseudocode; Section 3.2.2 defines canonical Huffman codes;
+  Section 3.2.5 defines the length/distance tables.
+
+- **RFC 1950** (Deutsch & Gailly, 1996), "ZLIB Compressed Data Format
+  Specification version 3.3". Zlib framing around DEFLATE. Available
+  in `references/rfc1950.txt`.
+
+- **RFC 1952** (Deutsch, 1996), "GZIP file format specification version
+  4.3". Gzip framing around DEFLATE. Available in `references/rfc1952.txt`.
+
 - **Senjak & Hofmann (2016)**, "An implementation of Deflate in Coq",
-  arXiv:1609.01220. A complete Coq formalization of DEFLATE (RFC 1951)
-  with a verified compression/decompression roundtrip. Includes a fully
-  verified canonical prefix-free coding library (uniqueness, existence
-  via Kraft inequality), a backreference resolver using exponential
-  lists, and a relational specification framework ("strong decidability"
-  / "strong uniqueness") for composing and extracting verified parsers.
-  The extracted Haskell implementation handles multi-megabyte inputs.
-  This is the closest prior work to lean-zip's verification effort; the
-  main differences are the proof assistant (Coq vs Lean 4), the
-  extraction approach (Coq extraction to Haskell vs native Lean), and
-  performance characteristics.
+  arXiv:1609.01220. Available in `references/senjak-hofmann-2016.pdf`
+  (LaTeX source in `references/codings.tex`). A complete Coq
+  formalization of DEFLATE with a verified roundtrip. The most relevant
+  prior art is their canonical prefix-free coding library (Sections
+  1–4): uniqueness from code lengths, constructive existence via Kraft
+  inequality, 4-axiom characterization. Their relational specification
+  framework (Section 5: "strong decidability" / "strong uniqueness")
+  is designed for Coq's extraction mechanism and is not adopted here —
+  Lean 4 is code-first, so we write the implementation and prove
+  characterizing properties about it rather than extracting code from
+  relational specifications.
 
 ## Bottom Line
 

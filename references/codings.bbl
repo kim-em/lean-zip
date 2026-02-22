@@ -1,0 +1,120 @@
+\begin{thebibliography}{10}
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\urlprefix}{URL }
+
+\bibitem{canterbury}
+The canterbury corpus, \url{http://corpus.canterbury.ac.nz/}
+
+\bibitem{diffarray}
+The diffarray package, \url{https://hackage.haskell.org/package/diffarray}
+
+\bibitem{darpa}
+High assurance cyber military systems proposers' day presentation (February
+  2012), \url{http://www.darpa.mil/WorkArea/DownloadAsset.aspx?id=2147484882}
+
+\bibitem{affeldt2015formalization}
+Affeldt, R., Garrigue, J.: Formalization of error-correcting codes: From
+  hamming to modern coding theory. In: International Conference on Interactive
+  Theorem Proving. pp. 17--33. Springer (2015)
+
+\bibitem{Affeldt2014}
+Affeldt, R., Hagiwara, M., S{\'e}nizergues, J.: Formalization of shannon's
+  theorems. Journal of Automated Reasoning  53(1),  63--103 (2014),
+  \url{http://dx.doi.org/10.1007/s10817-013-9298-1}
+
+\bibitem{programlogics}
+Appel, A.W.: Program Logics for Certified Compilers. Cambridge University Press
+  (April 2014)
+
+\bibitem{berger2015program}
+Berger, U., Jones, A., Seisenberger, M.: Program extraction applied to monadic
+  parsing. Journal of Logic and Computation p. exv078 (2015)
+
+\bibitem{mitls}
+Bhargavan, K., Fournet, C., Kohlweiss, M., Pironti, A., Strub, P.Y.:
+  Implementing tls with verified cryptographic security (2013),
+  \url{http://www.mitls.org/downloads/miTLS-report.pdf}
+
+\bibitem{Blanchette:2009:PPM:1541694.1541701}
+Blanchette, J.C.: Proof pearl: Mechanizing the textbook proof of {H}uffman's
+  algorithm. J. Autom. Reason.  43(1),  1--18 (Jun 2009),
+  \url{http://dx.doi.org/10.1007/s10817-009-9116-y}
+
+\bibitem{danielsson2010total}
+Danielsson, N.A.: Total parser combinators. In: ACM Sigplan Notices. vol.~45,
+  pp. 285--296. ACM (2010)
+
+\bibitem{rfc1951}
+Deutsch, P.: {DEFLATE Compressed Data Format Specification version 1.3}. RFC
+  1951 (Informational) (May 1996), \url{http://www.ietf.org/rfc/rfc1951.txt}
+
+\bibitem{rfc1952}
+Deutsch, P.: {GZIP file format specification version 4.3}. RFC 1952
+  (Informational) (May 1996), \url{http://www.ietf.org/rfc/rfc1952.txt}
+
+\bibitem{rfc2616}
+Fielding, R., Gettys, J., Mogul, J., Frystyk, H., Masinter, L., Leach, P.,
+  Berners-Lee, T.: {Hypertext Transfer Protocol -- HTTP/1.1}. RFC 2616 (Draft
+  Standard) (Jun 1999), \url{http://www.ietf.org/rfc/rfc2616.txt}, obsoleted by
+  RFCs 7230, 7231, 7232, 7233, 7234, 7235, updated by RFCs 2817, 5785, 6266,
+  6585
+
+\bibitem{zopfli}
+{Google Inc.}: Zopfli compression algorithm,
+  \url{https://github.com/google/zopfli}
+
+\bibitem{rfc3749}
+Hollenbeck, S.: {Transport Layer Security Protocol Compression Methods}. RFC
+  3749 (Proposed Standard) (May 2004),
+  \url{http://www.ietf.org/rfc/rfc3749.txt}
+
+\bibitem{huffman}
+Huffman, D.: A method for the construction of minimum-redundancy codes.
+  Proceedings of the IRE  40(9),  1098--1101 (Sept 1952)
+
+\bibitem{jang2012establishing}
+Jang, D., Tatlock, Z., Lerner, S.: Establishing browser security guarantees
+  through formal shim verification. In: Proceedings of the 21st USENIX
+  conference on Security symposium. pp. 8--8. USENIX Association (2012)
+
+\bibitem{breach}
+Kelsey, J.: Compression and information leakage of plaintext. In: Fast Software
+  Encryption, 9th International Workshop, FSE 2002, Leuven, Belgium, February
+  4-6, 2002, Revised Papers. Lecture Notes in Computer Science, vol. 2365, pp.
+  263--276. Springer (2002),
+  \url{http://www.iacr.org/cryptodb/archive/2002/FSE/3091/3091.pdf}
+
+\bibitem{Klein_AEMSKH_14}
+Klein, G., Andronick, J., Elphinstone, K., Murray, T., Sewell, T., Kolanski,
+  R., Heiser, G.: Comprehensive formal verification of an {OS} microkernel. ACM
+  Transactions on Computer Systems  32(1),  2:1--2:70 (feb 2014)
+
+\bibitem{Leroy-Compcert-CACM}
+Leroy, X.: Formal verification of a realistic compiler. Communications of the
+  ACM  52(7),  107--115 (2009),
+  \url{http://gallium.inria.fr/~xleroy/publi/compcert-CACM.pdf}
+
+\bibitem{1056818}
+McMillan, B.: Two inequalities implied by unique decipherability. Information
+  Theory, IRE Transactions on  2(4),  115--116 (December 1956)
+
+\bibitem{Nogin_writingconstructive}
+Nogin, A.: Writing constructive proofs yielding efficient extracted programs
+
+\bibitem{zipspec633}
+PKWARE Inc.: .ZIP File Format Specification (September 2012),
+  \url{https://www.pkware.com/documents/APPNOTE/APPNOTE-6.3.3.TXT}
+
+\bibitem{Schwichtenberg2013-SCHMFC}
+Schwichtenberg, H., Senjak, C.: Minimal from classical proofs. Annals of Pure
+  and Applied Logic  164(6),  740--748 (2013)
+
+\bibitem{thery2004formalising}
+Thery, L.: Formalising huffman’s algorithm. Tech. rep., Tech. report TRCS
+  034, Dept. of Informatics, Univ. of L’Aquila (2004)
+
+\bibitem{vafeiadis2013adjustable}
+Vafeiadis, V.: Adjustable references. In: International Conference on
+  Interactive Theorem Proving. pp. 328--337. Springer (2013)
+
+\end{thebibliography}
