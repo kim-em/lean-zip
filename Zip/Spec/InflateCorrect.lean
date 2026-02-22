@@ -65,8 +65,217 @@ private theorem fixedLitLengths_size :
 private theorem fixedDistLengths_size :
     Zip.Native.Inflate.fixedDistLengths.size ≤ UInt16.size := by decide
 
-/-! ## Dynamic trees correspondence (sorry — requires proving
-    decodeDynamicTrees ↔ decodeDynamicTables byte-by-byte) -/
+/-! ## fromLengths validity -/
+
+/-- If `fromLengths` succeeds, the code lengths satisfy `ValidLengths`. -/
+theorem fromLengths_valid (lengths : Array UInt8) (maxBits : Nat)
+    (tree : Zip.Native.HuffTree)
+    (h : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree) :
+    Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits := by
+  simp only [Zip.Native.HuffTree.fromLengths] at h
+  split at h
+  · simp at h
+  · rename_i hany
+    split at h
+    · simp at h
+    · rename_i hkraft
+      simp only [Huffman.Spec.ValidLengths]
+      constructor
+      · intro l hl
+        simp only [List.mem_map] at hl
+        obtain ⟨u, hu, rfl⟩ := hl
+        rw [Array.mem_toList_iff] at hu
+        rw [Array.mem_iff_getElem] at hu
+        obtain ⟨i, hi, rfl⟩ := hu
+        rw [Bool.not_eq_true] at hany
+        rw [Array.any_eq_false] at hany
+        have := hany i hi
+        simp at this
+        exact this
+      · exact Nat.le_of_not_lt hkraft
+
+/-! ## Dynamic trees correspondence -/
+
+/-- `readCLCodeLengths` preserves well-formedness. -/
+private theorem readCLCodeLengths_wf (br : Zip.Native.BitReader)
+    (clLengths : Array UInt8) (i numCodeLen : Nat)
+    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
+      .ok (clLengths', br')) :
+    br'.bitOff < 8 := by
+  induction hd : numCodeLen - i generalizing br clLengths i with
+  | zero =>
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    have : ¬(i < numCodeLen) := by omega
+    simp [this] at h; obtain ⟨_, rfl⟩ := h; exact hwf
+  | succ n ih =>
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    split at h
+    · rename_i hi
+      simp only [bind, Except.bind] at h
+      cases hrb : br.readBits 3 with
+      | error e => simp [hrb] at h
+      | ok p =>
+        obtain ⟨v, br₁⟩ := p
+        simp only [hrb] at h
+        exact ih br₁ _ (i + 1) (readBits_wf br 3 v br₁ hwf hrb) h (by omega)
+    · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hwf
+
+/-- `readCLCodeLengths` preserves the position invariant. -/
+private theorem readCLCodeLengths_pos_inv (br : Zip.Native.BitReader)
+    (clLengths : Array UInt8) (i numCodeLen : Nat)
+    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
+      .ok (clLengths', br')) :
+    br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
+  induction hd : numCodeLen - i generalizing br clLengths i with
+  | zero =>
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    have : ¬(i < numCodeLen) := by omega
+    simp [this] at h; obtain ⟨_, rfl⟩ := h; exact hpos
+  | succ n ih =>
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    split at h
+    · rename_i hi
+      simp only [bind, Except.bind] at h
+      cases hrb : br.readBits 3 with
+      | error e => simp [hrb] at h
+      | ok p =>
+        obtain ⟨v, br₁⟩ := p
+        simp only [hrb] at h
+        exact ih br₁ _ (i + 1) (readBits_wf br 3 v br₁ hwf hrb)
+          (readBits_pos_inv br 3 v br₁ hwf hpos hrb) h (by omega)
+    · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hpos
+
+/-- `decodeCLSymbols` preserves well-formedness. -/
+private theorem decodeCLSymbols_wf (clTree : Zip.Native.HuffTree)
+    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (idx totalCodes fuel : Nat)
+    (codeLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (h : Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+      .ok (codeLengths', br')) :
+    br'.bitOff < 8 := by
+  induction fuel generalizing br codeLengths idx with
+  | zero => simp [Zip.Native.Inflate.decodeCLSymbols] at h
+  | succ n ih =>
+    unfold Zip.Native.Inflate.decodeCLSymbols at h
+    split at h
+    · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hwf
+    · simp only [bind, Except.bind] at h
+      cases hdec : clTree.decode br with
+      | error e => simp [hdec] at h
+      | ok p =>
+        obtain ⟨sym, br₁⟩ := p
+        simp only [hdec] at h
+        have hwf₁ := decode_wf clTree br sym br₁ hwf hdec
+        split at h
+        · exact ih br₁ _ _ hwf₁ h
+        · split at h
+          · -- sym == 16
+            split at h
+            · simp at h
+            · simp only [pure, Except.pure] at h
+              cases hrb : br₁.readBits 2 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · simp at h
+                · exact ih br₂ _ _ (readBits_wf br₁ 2 rep br₂ hwf₁ hrb) h
+          · split at h
+            · -- sym == 17
+              cases hrb : br₁.readBits 3 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · simp at h
+                · simp only [pure, Except.pure] at h
+                  exact ih br₂ _ _ (readBits_wf br₁ 3 rep br₂ hwf₁ hrb) h
+            · split at h
+              · -- sym == 18
+                cases hrb : br₁.readBits 7 with
+                | error e => simp [hrb] at h
+                | ok p =>
+                  obtain ⟨rep, br₂⟩ := p
+                  simp only [hrb] at h
+                  split at h
+                  · simp at h
+                  · simp only [pure, Except.pure] at h
+                    exact ih br₂ _ _ (readBits_wf br₁ 7 rep br₂ hwf₁ hrb) h
+              · simp at h
+
+/-- `decodeCLSymbols` preserves the position invariant. -/
+private theorem decodeCLSymbols_pos_inv (clTree : Zip.Native.HuffTree)
+    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (idx totalCodes fuel : Nat)
+    (codeLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (h : Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+      .ok (codeLengths', br')) :
+    br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
+  induction fuel generalizing br codeLengths idx with
+  | zero => simp [Zip.Native.Inflate.decodeCLSymbols] at h
+  | succ n ih =>
+    unfold Zip.Native.Inflate.decodeCLSymbols at h
+    split at h
+    · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hpos
+    · simp only [bind, Except.bind] at h
+      cases hdec : clTree.decode br with
+      | error e => simp [hdec] at h
+      | ok p =>
+        obtain ⟨sym, br₁⟩ := p
+        simp only [hdec] at h
+        have hwf₁ := decode_wf clTree br sym br₁ hwf hdec
+        have hpos₁ := decode_pos_inv clTree br sym br₁ hwf hpos hdec
+        split at h
+        · exact ih br₁ _ _ hwf₁ hpos₁ h
+        · split at h
+          · -- sym == 16
+            split at h
+            · simp at h
+            · simp only [pure, Except.pure] at h
+              cases hrb : br₁.readBits 2 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · simp at h
+                · exact ih br₂ _ _ (readBits_wf br₁ 2 rep br₂ hwf₁ hrb)
+                    (readBits_pos_inv br₁ 2 rep br₂ hwf₁ hpos₁ hrb) h
+          · split at h
+            · -- sym == 17
+              cases hrb : br₁.readBits 3 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · simp at h
+                · simp only [pure, Except.pure] at h
+                  exact ih br₂ _ _ (readBits_wf br₁ 3 rep br₂ hwf₁ hrb)
+                    (readBits_pos_inv br₁ 3 rep br₂ hwf₁ hpos₁ hrb) h
+            · split at h
+              · -- sym == 18
+                cases hrb : br₁.readBits 7 with
+                | error e => simp [hrb] at h
+                | ok p =>
+                  obtain ⟨rep, br₂⟩ := p
+                  simp only [hrb] at h
+                  split at h
+                  · simp at h
+                  · simp only [pure, Except.pure] at h
+                    exact ih br₂ _ _ (readBits_wf br₁ 7 rep br₂ hwf₁ hrb)
+                      (readBits_pos_inv br₁ 7 rep br₂ hwf₁ hpos₁ hrb) h
+              · simp at h
 
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/

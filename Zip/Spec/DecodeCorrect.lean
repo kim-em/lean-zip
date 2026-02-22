@@ -192,7 +192,7 @@ theorem decodeStored_correct (br : Zip.Native.BitReader)
 /-! ## Huffman block correctness -/
 
 /-- `HuffTree.decode` preserves the well-formedness invariant `bitOff < 8`. -/
-private theorem decode_wf (tree : Zip.Native.HuffTree)
+theorem decode_wf (tree : Zip.Native.HuffTree)
     (br : Zip.Native.BitReader) (sym : UInt16) (br' : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
     (h : tree.decode br = .ok (sym, br')) : br'.bitOff < 8 := by
@@ -275,7 +275,7 @@ private theorem decode_go_pos_inv (tree : Zip.Native.HuffTree)
         · exact iho br₁ _ hwf₁ hpos₁ h
 
 /-- `HuffTree.decode` preserves the position invariant. -/
-private theorem decode_pos_inv (tree : Zip.Native.HuffTree)
+theorem decode_pos_inv (tree : Zip.Native.HuffTree)
     (br : Zip.Native.BitReader) (sym : UInt16) (br' : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
