@@ -6,36 +6,34 @@
 ## Sorry count: 1
 
 In `Zip/Spec/InflateCorrect.lean`:
-- `inflate_correct` (line 636): main correctness theorem
+- `inflate_correct` (line 628): main correctness theorem
 
 ## Known good commit
 
-`17076a0` — `lake build Zip` succeeds, no warnings except expected sorry.
+`1de6016` — `lake build Zip` succeeds, no warnings except expected sorry.
 (Note: test exe linker error on macOS with v4.29.0-rc1 is pre-existing.)
 
 ## What was accomplished this session
 
-### copyLoop_spec: PROVED
+### Review: InflateCorrect.lean proof refactoring
 
-Replaced the `for i in [:length]` loop in `decodeHuffman.go` with an
-explicit recursive `copyLoop` function. The `forIn` on `Range` uses
-`Std.Legacy.Range.forIn'` whose inner `loop✝` cannot be unfolded by
-name, making proofs intractable. The explicit recursion is straightforward
-to reason about by well-founded induction on `length - k`.
+Extracted `getElem?_eq_some_getElem!` helper combining `getElem!_pos` and
+`getElem?_pos` into a single step. Applied to 4 instances in the
+`decodeLitLen` evaluation block of `decodeHuffman_correct`, reducing each
+3-line `have` to a 1-liner. Also replaced a 2-line `conv` block with a
+direct `rw` chain for the `output.size` ↔ `output.data.toList.length`
+alignment. Net: -8 lines.
 
-Key theorems proved:
-- `ba_getElem!_eq_toList`: bridge between ByteArray and List getElem!
-- `push_getElem_lt`: push preserves earlier elements
-- `push_data_toList`: push appends to toList
-- `copyLoop_spec`: generalized loop invariant — the copy loop produces
-  `output ++ List.ofFn (fun i => output[start + i%distance]!)`
-- `copyLoop_eq_ofFn`: specialization for the LZ77 case (start = size - distance)
+### Review: comprehensive scan (no action needed)
 
-### decodeHuffman_correct: FULLY COMPLETE
-
-With `copyLoop_spec` proved, `decodeHuffman_correct` has no remaining
-sorries. All three symbol types are handled: literal, end-of-block,
-length/distance (with copy loop correspondence).
+- **File sizes**: All under 1000 lines (largest: Huffman.lean at 959)
+- **Dead code**: None found across Spec/ files
+- **Unused imports**: None
+- **Toolchain**: v4.29.0-rc1 is still latest
+- **Duplicate helpers**: `array_set_ne`/`array_set_self` exist in both
+  Huffman.lean (Nat) and HuffmanCorrect.lean (UInt32) — identical proofs
+  but different types. Not worth extracting since each is private to its
+  file and used in only one place.
 
 ## Next action
 
@@ -64,5 +62,5 @@ inflate_correct (sorry)
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current (still latest)
-- Sorry count: 2 → 1 (proved copyLoop_spec)
+- Sorry count: 1 (unchanged)
 - Pre-existing linker error for test:exe on macOS with v4.29.0-rc1

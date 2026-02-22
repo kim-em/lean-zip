@@ -2,6 +2,35 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-22: Review — InflateCorrect proof refactoring + comprehensive scan
+
+**Session type**: Review
+**Starting commit**: `f1a6802` | **Sorry count**: 1 → 1 (unchanged)
+
+### Proof improvements (committed `1de6016`, net -8 lines)
+
+- Extracted `getElem?_eq_some_getElem!` helper combining `getElem!_pos`
+  and `getElem?_pos`. Applied to 4 instances in `decodeLitLen` evaluation
+  within `decodeHuffman_correct`.
+- Replaced `conv at hlz => rw [show ...]` with direct `rw` chain for the
+  `output.size` ↔ `output.data.toList.length` alignment.
+
+### Comprehensive scan findings (no action needed)
+
+- **File sizes**: All under 1000 lines (largest: Huffman.lean at 959)
+- **Dead code**: None across Spec/ files
+- **Unused imports**: None
+- **Toolchain**: v4.29.0-rc1 is latest
+- **Duplicate helpers**: `array_set_ne`/`array_set_self` exist in both
+  Huffman.lean (Nat) and HuffmanCorrect.lean (UInt32) with identical
+  proofs. Not worth extracting — each is private and used in one file.
+- **omega usage**: Proportional to proof complexity (67 in Huffman, 65 in
+  HuffmanCorrect, 36 in BitstreamCorrect, 16 in InflateCorrect)
+
+### Remaining
+
+- `inflate_correct` (sorry): main theorem (block loop correspondence)
+
 ## 2026-02-22: Implementation — prove copyLoop_spec, complete decodeHuffman_correct
 
 **Session type**: Implementation
