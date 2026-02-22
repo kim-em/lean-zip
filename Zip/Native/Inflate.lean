@@ -98,16 +98,12 @@ end HuffTree
 namespace Inflate
 
 -- RFC 1951 §3.2.5: Fixed Huffman code lengths for lit/length (0–287)
-private def fixedLitLengths : Array UInt8 := Id.run do
-  let mut arr := .replicate 288 (0 : UInt8)
-  for i in [:144] do arr := arr.set! i 8
-  for i in [144:256] do arr := arr.set! i 9
-  for i in [256:280] do arr := arr.set! i 7
-  for i in [280:288] do arr := arr.set! i 8
-  return arr
+def fixedLitLengths : Array UInt8 :=
+  .replicate 144 8 ++ .replicate 112 9 ++
+  .replicate 24 7 ++ .replicate 8 8
 
 -- RFC 1951 §3.2.5: Fixed Huffman code lengths for distance (0–31)
-private def fixedDistLengths : Array UInt8 := .replicate 32 (5 : UInt8)
+def fixedDistLengths : Array UInt8 := .replicate 32 (5 : UInt8)
 
 -- Length base values for codes 257–285 (RFC 1951 §3.2.5)
 def lengthBase : Array UInt16 := #[
@@ -150,7 +146,7 @@ private def codeLengthOrder : Array Nat := #[
 ]
 
 /-- Decode dynamic Huffman trees from the bitstream (RFC 1951 §3.2.7). -/
-private def decodeDynamicTrees (br : BitReader) :
+def decodeDynamicTrees (br : BitReader) :
     Except String (HuffTree × HuffTree × BitReader) := do
   let (hlit, br) ← br.readBits 5
   let (hdist, br) ← br.readBits 5
@@ -263,6 +259,29 @@ where
         let out := copyLoop output start distance 0 length
         go br out fuel
 
+/-- Block loop for DEFLATE decompression. Decodes blocks until a final block
+    is seen or fuel is exhausted. Defined as explicit recursion for proof
+    tractability (`forIn` on `Range` cannot be unfolded). -/
+def inflateLoop (br : BitReader) (output : ByteArray)
+    (fixedLit fixedDist : HuffTree) (maxOutputSize : Nat) :
+    Nat → Except String (ByteArray × Nat)
+  | 0 => .error "Inflate: too many blocks"
+  | fuel + 1 => do
+    let (bfinal, br₁) ← br.readBits 1
+    let (btype, br₂) ← br₁.readBits 2
+    let (output', br') ← match btype with
+      | 0 => Inflate.decodeStored br₂ output maxOutputSize
+      | 1 => Inflate.decodeHuffman br₂ output fixedLit fixedDist maxOutputSize
+      | 2 => do
+        let (litTree, distTree, br₃) ← decodeDynamicTrees br₂
+        Inflate.decodeHuffman br₃ output litTree distTree maxOutputSize
+      | _ => throw s!"Inflate: reserved block type {btype}"
+    if bfinal == 1 then
+      let aligned := br'.alignToByte
+      return (output', aligned.pos)
+    else
+      inflateLoop br' output' fixedLit fixedDist maxOutputSize fuel
+
 /-- Inflate a raw DEFLATE stream starting at byte offset `startPos`. Returns the
     decompressed data and the byte-aligned position after the last DEFLATE block.
     `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
@@ -270,31 +289,10 @@ where
 def inflateRaw (data : ByteArray) (startPos : Nat := 0)
     (maxOutputSize : Nat := 256 * 1024 * 1024) :
     Except String (ByteArray × Nat) := do
-  let mut br : BitReader := { data, pos := startPos, bitOff := 0 }
-  let mut output : ByteArray := .empty
-  -- Build fixed trees once
+  let br : BitReader := { data, pos := startPos, bitOff := 0 }
   let fixedLit ← HuffTree.fromLengths fixedLitLengths
   let fixedDist ← HuffTree.fromLengths fixedDistLengths
-  for _ in [:10001] do
-    let (bfinal, br') ← br.readBits 1
-    let (btype, br') ← br'.readBits 2
-    br := br'
-    match btype with
-    | 0 => -- Stored
-      let (out, br') ← Inflate.decodeStored br output maxOutputSize
-      output := out; br := br'
-    | 1 => -- Fixed Huffman
-      let (out, br') ← Inflate.decodeHuffman br output fixedLit fixedDist maxOutputSize
-      output := out; br := br'
-    | 2 => -- Dynamic Huffman
-      let (litTree, distTree, br') ← decodeDynamicTrees br
-      let (out, br'') ← Inflate.decodeHuffman br' output litTree distTree maxOutputSize
-      output := out; br := br''
-    | _ => throw s!"Inflate: reserved block type {btype}"
-    if bfinal == 1 then
-      let aligned := br.alignToByte
-      return (output, aligned.pos)
-  throw "Inflate: too many blocks"
+  inflateLoop br .empty fixedLit fixedDist maxOutputSize 10001
 
 /-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
     `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
