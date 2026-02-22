@@ -2,6 +2,56 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-23: Implementation — decodeDynamicTrees infrastructure
+
+**Session type**: Implementation
+**Starting commit**: `e64b158` | **Sorry count**: 2 → 3 (net +1, decomposed)
+**Commits**: `967ca36`, `8d97b94`, `770fe1b`
+
+### Accomplished
+
+Built the proof infrastructure for `decodeDynamicTrees_correct`, the last
+remaining sorry in the DEFLATE correctness chain. Decomposed the monolithic
+sorry into three tractable pieces with proven invariants.
+
+**Refactored native code for proof tractability** (commit `967ca36`):
+- Added Kraft inequality check to `fromLengths` (was missing; needed to
+  derive `ValidLengths` from successful construction)
+- Replaced `validateLengths` (unproof-friendly `for` loop)
+- Extracted `readCLCodeLengths`: explicit recursion replacing `for` loop
+- Extracted `decodeCLSymbols`: explicit fuel-based recursion replacing `while`
+- Added `fillEntries` helper for repeat codes (16/17/18)
+- Added overshoot checks to align native with spec rejection behavior
+
+**Proved helper lemmas** (commit `8d97b94`):
+- `fromLengths_valid`: derives `ValidLengths` from `fromLengths` success
+- `readCLCodeLengths_wf` / `readCLCodeLengths_pos_inv`: well-formedness
+  and position invariant preservation through CL reading loop
+- `decodeCLSymbols_wf` / `decodeCLSymbols_pos_inv`: same for CL decoding
+- Made `decode_wf`/`decode_pos_inv` public in DecodeCorrect.lean
+- Made `readCLLengths` protected in Deflate.lean
+
+**Added correspondence lemma stubs** (commit `770fe1b`):
+- `readCLCodeLengths_correct`: native Array-based ↔ spec List-based CL reading
+- `decodeCLSymbols_correct`: native Array-based ↔ spec List-based CL decoding
+- Both sorry'd with well-defined interfaces for `decodeDynamicTrees_correct`
+
+### Key proof patterns discovered
+
+- `induction hd : numCodeLen - i generalizing ...` needed (not bare
+  `induction numCodeLen - i`) to capture `hd` hypothesis for omega
+- `simp only [pure, Except.pure] at h` reduces `match pure PUnit.unit
+  with | Except.error ... | Except.ok ...` from do-notation guards
+- `Array.toList_setIfInBounds` + `List.map_set` for Array/List correspondence
+- `Array.mem_toList_iff` + `Array.mem_iff_getElem` for membership proofs
+
+### Remaining
+
+3 sorries in InflateCorrect.lean:
+- `readCLCodeLengths_correct` (~294): CL reading correspondence
+- `decodeCLSymbols_correct` (~317): CL symbol decode correspondence
+- `decodeDynamicTrees_correct` (~339): main dynamic tree theorem
+
 ## 2026-02-23: Review — split InflateCorrect.lean + proof improvements
 
 **Session type**: Review

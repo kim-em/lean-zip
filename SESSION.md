@@ -3,63 +3,77 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 2
+## Sorry count: 3
 
-Both in `Zip/Spec/InflateCorrect.lean`:
-- `decodeDynamicTrees_correct` (line ~91): dynamic Huffman tree correspondence
+All in `Zip/Spec/InflateCorrect.lean`:
+- `readCLCodeLengths_correct` (line ~294): CL reading correspondence
+- `decodeCLSymbols_correct` (line ~317): CL symbol decode correspondence
+- `decodeDynamicTrees_correct` (line ~339): main dynamic tree theorem
 
 ## Known good commit
 
-`1274d43` — `lake build && lake exe test` succeeds, all tests pass.
+`770fe1b` — `lake build && lake exe test` succeeds, all tests pass.
 
 ## What was accomplished this session
 
-### Review: file split + proof improvements
+### Implementation: decodeDynamicTrees infrastructure
 
-Split `InflateCorrect.lean` (1050 lines, over 1000-line limit) into two files:
+Refactored native code for proof tractability and proved helper lemmas:
 
-- **`DecodeCorrect.lean`** (705 lines): block-level decode correctness
-  - `huffTree_decode_correct`, `decodeStored_correct`, `decodeHuffman_correct`
-  - Invariant preservation lemmas (readBits_wf, readBits_pos_inv, etc.)
-  - Table correspondence lemmas
-  - Copy loop helpers (copyLoop_spec, copyLoop_eq_ofFn)
+1. **`fromLengths` refactored** (Inflate.lean):
+   - Added Kraft inequality check (was missing; needed to derive `ValidLengths`)
+   - Replaced `validateLengths` (which used unproof-friendly `for` loop)
+   - `fromLengths_valid` theorem: derives `ValidLengths` from `fromLengths` success
 
-- **`InflateCorrect.lean`** (333 lines): stream-level correctness
-  - `inflateLoop_correct`, `inflate_correct`, `inflate_correct'`
-  - `decodeDynamicTrees_correct` (sorry)
-  - Fixed/dynamic code correspondence helpers
+2. **Loop extraction** (Inflate.lean):
+   - `readCLCodeLengths`: explicit recursion replacing `for` loop
+   - `decodeCLSymbols`: explicit fuel-based recursion replacing `while` loop
+   - `fillEntries`: helper for repeat codes (16/17/18)
+   - Added overshoot checks to align native with spec rejection behavior
 
-Proof improvements:
-1. Combined `decodeStored_wf` + `decodeStored_pos_inv` into single
-   `decodeStored_invariants` theorem (~25 lines saved)
-2. Extracted `bfinal_beq_nat_true`/`bfinal_beq_nat_false` helpers
-   (3x dedup each in `inflateLoop_correct`)
-3. Removed unused `↓reduceIte` from final-block cases
-4. Changed `readBits_wf` and `readBits_pos_inv` from `private` to
-   public for cross-file access
+3. **Well-formedness/position invariant lemmas** (InflateCorrect.lean):
+   - `readCLCodeLengths_wf` / `readCLCodeLengths_pos_inv`
+   - `decodeCLSymbols_wf` / `decodeCLSymbols_pos_inv`
+   - These required `decode_wf`/`decode_pos_inv` to be made public in DecodeCorrect.lean
 
-### Comprehensive scan findings (no action needed)
+4. **Correspondence lemma stubs** (InflateCorrect.lean):
+   - `readCLCodeLengths_correct`: native Array-based ↔ spec List-based CL reading
+   - `decodeCLSymbols_correct`: native Array-based ↔ spec List-based CL decoding
+   - Both are sorry'd; define the right interfaces for `decodeDynamicTrees_correct`
 
-- All `simp` calls use `simp only` (bare simps only for contradiction closing)
-- No unused imports
-- No dead code beyond previously documented `readBitsMSB`
-- `array_set_ne`/`array_set_self` duplication (Nat vs UInt32) previously
-  evaluated, not worth extracting
-- Toolchain v4.29.0-rc1 is latest; v4.29.0 stable not yet released
-- All files under 1000 lines (largest: Huffman.lean at 959)
+5. **Visibility changes** (Deflate.lean, DecodeCorrect.lean):
+   - `readCLLengths`: private → protected (needed for cross-file proofs)
+   - `decode_wf`/`decode_pos_inv`: private → public
+
+### Key proof patterns discovered
+
+- `induction hd : numCodeLen - i generalizing ...` needed (not bare `induction
+  numCodeLen - i`) to capture the `hd` hypothesis for omega in the zero case
+- `simp only [pure, Except.pure] at h` needed to reduce `match pure PUnit.unit with
+  | Except.error ... | Except.ok ...` patterns from do-notation guards
+- `Array.toList_setIfInBounds` + `List.map_set` for Array.set!/List.set correspondence
 
 ## Next action
 
 Priority for next session:
 
-1. **Prove `decodeDynamicTrees_correct`**: The only remaining sorry. This
-   connects the native dynamic Huffman tree decoder to the spec. Involves:
-   - Code length alphabet decoding
-   - Repeat codes (16, 17, 18)
-   - Two-pass tree construction
-   This is substantial but purely mechanical — no new proof techniques needed.
+1. **Prove `readCLCodeLengths_correct`**: correspondence between native and spec
+   CL code length reading. Needs:
+   - `readBits_toBits` for each 3-bit read
+   - `Array.toList_setIfInBounds` + `List.map_set` for Array/List correspondence
+   - `v.toUInt8.toNat = v.toNat % 256` (which is `rfl`)
+   - Bound that readBits 3 produces value < 8 (so % 256 = identity)
+   - Show `Inflate.codeLengthOrder = Deflate.Spec.codeLengthOrder`
 
-2. **Alternative**: Implementation session for Phase 4 (compressor).
+2. **Prove `decodeCLSymbols_correct`**: correspondence between native and spec
+   CL symbol decoding. Needs:
+   - `huffTree_decode_correct` (but with maxBits=7 for CL tree, existing
+     theorem uses maxBits=15)
+   - `fillEntries` ↔ `List.replicate` correspondence
+   - Careful tracking of Array idx vs List acc.length
+
+3. **Wire into `decodeDynamicTrees_correct`**: use the two correspondence lemmas
+   plus header reads to complete the main theorem.
 
 ## Architecture
 
@@ -73,11 +87,19 @@ inflate_correct (DONE — depends on decodeDynamicTrees_correct sorry)
   │   └── length/distance case (DONE)
   │       └── copyLoop_eq_ofFn (DONE)
   ├── decodeDynamicTrees_correct (sorry — REMAINING WORK)
+  │   ├── readCLCodeLengths_correct (sorry)
+  │   ├── decodeCLSymbols_correct (sorry)
+  │   ├── fromLengths_valid (DONE)
+  │   ├── readCLCodeLengths_wf/pos_inv (DONE)
+  │   └── decodeCLSymbols_wf/pos_inv (DONE)
   └── inflateLoop_correct (DONE, in InflateCorrect.lean)
 ```
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current
-- Sorry count unchanged at 2 (both decodeDynamicTrees_correct)
+- Sorry count increased from 2 to 3 (added 2 intermediate sorries,
+  but these decompose the problem into manageable pieces)
 - All tests pass
+- `huffTree_decode_correct` currently hardcoded for maxBits=15;
+  will need a version for maxBits=7 for the CL tree
