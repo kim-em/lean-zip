@@ -3,72 +3,66 @@
 <!-- Overwritten at the end of each work session. -->
 <!-- Records current working state for the next session to pick up. -->
 
-## Sorry count: 2
+## Sorry count: 1
 
 In `Zip/Spec/InflateCorrect.lean`:
-- `copyLoop_eq_ofFn` (line 282): copy loop ↔ List.ofFn correspondence
-- `inflate_correct` (line 590): main correctness theorem
+- `inflate_correct` (line 636): main correctness theorem
 
 ## Known good commit
 
-`28b8ebb` — `lake build Zip` succeeds, no warnings except expected sorries.
+`17076a0` — `lake build Zip` succeeds, no warnings except expected sorry.
 (Note: test exe linker error on macOS with v4.29.0-rc1 is pre-existing.)
 
 ## What was accomplished this session
 
-### decodeHuffman_correct: length/distance case COMPLETE
+### copyLoop_spec: PROVED
 
-The third and final case of `decodeHuffman_correct` is now proved,
-modulo the `copyLoop_eq_ofFn` helper. This means all three symbol
-types (literal, end-of-block, length/distance) are handled.
+Replaced the `for i in [:length]` loop in `decodeHuffman.go` with an
+explicit recursive `copyLoop` function. The `forIn` on `Range` uses
+`Std.Legacy.Range.forIn'` whose inner `loop✝` cannot be unfolded by
+name, making proofs intractable. The explicit recursion is straightforward
+to reason about by well-founded induction on `length - k`.
 
-Key work:
-- Table correspondence lemmas: `lengthBase_eq`, `lengthExtra_eq`,
-  `distBase_eq`, `distExtra_eq` — all proved by `decide` over `Fin`
-- Helper lemmas: `lengthExtra_le_32`, `distExtra_le_32` (for readBits
-  bounds), `spec_distBase_pos` (for distance > 0 guard)
-- Full 8-operation monadic case splitting for the length/distance path
-- `decodeLitLen` evaluation proof using `getElem?_pos`/`getElem!_pos`
-- `resolveLZ77` guard condition proofs (dist > 0, dist ≤ output.length)
-- Clean factoring: the copy loop is isolated in `copyLoop_eq_ofFn`
+Key theorems proved:
+- `ba_getElem!_eq_toList`: bridge between ByteArray and List getElem!
+- `push_getElem_lt`: push preserves earlier elements
+- `push_data_toList`: push appends to toList
+- `copyLoop_spec`: generalized loop invariant — the copy loop produces
+  `output ++ List.ofFn (fun i => output[start + i%distance]!)`
+- `copyLoop_eq_ofFn`: specialization for the LZ77 case (start = size - distance)
 
-### Proof patterns discovered
+### decodeHuffman_correct: FULLY COMPLETE
 
-- `getElem?_pos` needs explicit container argument (not `_`) to avoid
-  type class synthesis failures
-- `getElem?_pos` gives `c[i]? = some c[i]` while we need `c[i]!`;
-  use `getElem!_pos` to bridge: `rw [getElem!_pos ...]; exact getElem?_pos ...`
-- `spec_distBase_pos ⟨n, h⟩` creates `Fin.val ⟨n, h⟩` vs `n` mismatch
-  in omega; fix with `have : ... := spec_distBase_pos ⟨n, h⟩` to normalize
-- `(n == m) = false` for Nat: use `cases heq : n == m <;> simp_all [beq_iff_eq]`
+With `copyLoop_spec` proved, `decodeHuffman_correct` has no remaining
+sorries. All three symbol types are handled: literal, end-of-block,
+length/distance (with copy loop correspondence).
 
 ## Next action
 
 Priority for next session (implementation):
 
-1. **Prove `copyLoop_eq_ofFn`**: The forIn copy loop produces the same
-   result as `List.ofFn`. Key insight: all reads are within the original
-   buffer range, so the growing buffer doesn't affect values. Provable
-   by induction on the range length with a loop invariant.
-2. **Loop correspondence**: Native `for` block loop ↔ spec fuel-based recursion
-3. **Close `inflate_correct`**: Combine block + loop correspondence
+1. **Prove `inflate_correct`**: The main theorem connecting the native
+   block-level loop to the spec's fuel-based recursion. Needs:
+   - Loop correspondence: native `for` block loop ↔ spec fuel-based decode
+   - Block type dispatch: stored/dynamic Huffman cases already proved
+   - Final block flag handling
 
 ## Architecture of remaining decomposition
 
 ```
 inflate_correct (sorry)
   ├── decodeStored_correct (DONE)
-  ├── decodeHuffman_correct (DONE, modulo copyLoop_eq_ofFn)
+  ├── decodeHuffman_correct (DONE)
   │   ├── huffTree_decode_correct (DONE)
   │   ├── literal case (DONE)
   │   ├── end-of-block case (DONE)
   │   └── length/distance case (DONE)
-  │       └── copyLoop_eq_ofFn (sorry — standalone lemma)
-  └── loop correspondence (for → fuel)
+  │       └── copyLoop_eq_ofFn (DONE)
+  └── loop correspondence (for → fuel) — REMAINING WORK
 ```
 
 ## Notes
 
 - Toolchain v4.29.0-rc1 is current (still latest)
-- Sorry count: 2 (unchanged from previous session)
+- Sorry count: 2 → 1 (proved copyLoop_spec)
 - Pre-existing linker error for test:exe on macOS with v4.29.0-rc1

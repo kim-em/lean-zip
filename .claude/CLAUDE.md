@@ -423,6 +423,21 @@ Update it during review and reflect sessions.
 - **List/Array/ByteArray length conversions**: `Array.length_toList`
   gives `arr.toList.length = arr.size`. `ByteArray.size_data` gives
   `ba.data.size = ba.size`. Chain them for `ba.data.toList.length`.
+- **Avoid `forIn` on `Range` in proofs**: `forIn [:n]` uses
+  `Std.Legacy.Range.forIn'` with a well-founded recursion `loop✝` that
+  CANNOT be unfolded by name. `with_unfolding_all rfl` only works for
+  concrete values (`:= [:0]`, `[:1]`) not symbolic `n`. If you need to
+  prove properties of a `for i in [:n]` loop, replace it with explicit
+  recursion (see `copyLoop` in `Inflate.lean`).
+- **Loop invariant proof pattern**: For recursive functions like
+  `copyLoop buf start distance k length`, prove a generalized invariant
+  by well-founded induction carrying the full buffer state:
+  1. State the invariant relating `buf` to the original `output`
+  2. Base case: `k = length`, `copyLoop` returns `buf`, use hypothesis
+  3. Inductive step: show `buf.push x` satisfies the invariant for `k+1`
+  4. Key lemmas: `push_getElem_lt` (push preserves earlier elements),
+     `push_data_toList` (`(buf.push b).data.toList = buf.data.toList ++ [b]`),
+     `List.ofFn_succ_last` (snoc decomposition of `List.ofFn`)
 
 ## Current State Summary
 
@@ -430,6 +445,6 @@ Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 2 (InflateCorrect.lean — copyLoop_eq_ofFn, inflate_correct)
-- **Last session**: 2026-02-22 (impl: decodeHuffman_correct length/distance case complete)
+- **Sorry count**: 1 (InflateCorrect.lean — inflate_correct)
+- **Last session**: 2026-02-22 (impl: copyLoop_spec proved, decodeHuffman_correct complete)
 - **Last review**: 2026-02-22 (BitstreamCorrect deep review, Huffman size scan)
