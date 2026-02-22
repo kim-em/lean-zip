@@ -320,14 +320,14 @@ where
       readNBytes n bits (acc ++ [val.toUInt8])
 
 /-- Read code length code lengths from the bitstream. -/
-private def readCLLengths : Nat → Nat → List Nat → List Bool →
+protected def readCLLengths : Nat → Nat → List Nat → List Bool →
     Option (List Nat × List Bool)
   | 0, _, acc, bits => some (acc, bits)
   | n + 1, idx, acc, bits => do
     let (val, bits) ← readBitsLSB 3 bits
     let pos := codeLengthOrder[idx]!
     let acc := acc.set pos val
-    readCLLengths n (idx + 1) acc bits
+    Deflate.Spec.readCLLengths n (idx + 1) acc bits
 
 /-- Decode dynamic Huffman code lengths from the bitstream
     (RFC 1951 §3.2.7). Returns literal/length and distance code lengths. -/
@@ -340,7 +340,7 @@ def decodeDynamicTables (bits : List Bool) :
   let numDist := hdist + 1
   let numCodeLen := hclen + 4
   -- Read code length code lengths
-  let (clLengths, bits) ← readCLLengths numCodeLen 0
+  let (clLengths, bits) ← Deflate.Spec.readCLLengths numCodeLen 0
     (List.replicate 19 0) bits
   -- Decode the literal/length + distance lengths using the CL Huffman code
   let totalCodes := numLitLen + numDist

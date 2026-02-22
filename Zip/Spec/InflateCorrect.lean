@@ -277,6 +277,45 @@ private theorem decodeCLSymbols_pos_inv (clTree : Zip.Native.HuffTree)
                       (readBits_pos_inv br₁ 7 rep br₂ hwf₁ hpos₁ hrb) h
               · simp at h
 
+/-- `readCLCodeLengths` corresponds to the spec's `readCLLengths`:
+    native Array-based reading matches spec List-based reading. -/
+private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
+    (clLengths : Array UInt8) (i numCodeLen : Nat)
+    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hsize : clLengths.size = 19)
+    (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
+      .ok (clLengths', br')) :
+    ∃ rest,
+      Deflate.Spec.readCLLengths (numCodeLen - i) i
+        (clLengths.toList.map UInt8.toNat) br.toBits =
+        some (clLengths'.toList.map UInt8.toNat, rest) ∧
+      br'.toBits = rest := by
+  sorry
+
+/-- `decodeCLSymbols` corresponds to the spec's `decodeDynamicTables.decodeCLSymbols`:
+    native Array-based decoding matches spec List-based decoding. -/
+private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
+    (clLengths : Array UInt8)
+    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (idx totalCodes fuel : Nat)
+    (codeLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8)
+    (hcl : Zip.Native.HuffTree.fromLengths clLengths 7 = .ok clTree)
+    (hsize_cl : clLengths.size ≤ UInt16.size)
+    (h : Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+      .ok (codeLengths', br')) :
+    let specLengths := clLengths.toList.map UInt8.toNat
+    let specCodes := Huffman.Spec.allCodes specLengths 7
+    let specTable := specCodes.map fun (sym, cw) => (cw, sym)
+    let acc := (codeLengths.extract 0 idx).toList.map UInt8.toNat
+    ∃ rest,
+      Deflate.Spec.decodeDynamicTables.decodeCLSymbols specTable totalCodes
+        acc br.toBits fuel =
+        some ((codeLengths'.extract 0 totalCodes).toList.map UInt8.toNat, rest) ∧
+      br'.toBits = rest := by
+  sorry
+
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/
 private theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
