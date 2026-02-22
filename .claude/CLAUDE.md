@@ -446,5 +446,5 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — in progress
 - **Sorry count**: 1 (InflateCorrect.lean — inflate_correct)
-- **Last session**: 2026-02-22 (impl: copyLoop_spec proved, decodeHuffman_correct complete)
-- **Last review**: 2026-02-22 (BitstreamCorrect deep review, Huffman size scan)
+- **Last session**: 2026-02-22 (review: InflateCorrect proof refactoring)
+- **Last review**: 2026-02-22 (InflateCorrect getElem? helper, comprehensive scan)
