@@ -208,8 +208,12 @@ Pure Lean DEFLATE decompressor (inflate only). No proofs yet.
 The overarching goal:
 
 ```
-∀ (data : ByteArray) (level : Fin 10), inflate (deflate data level) = data
+∀ (data : ByteArray) (level : Fin 10), inflate (deflate data level) = .ok data
 ```
+
+(Both `inflate` and `deflate` return `Except String ByteArray`; the
+theorem says compression always succeeds and decompression of
+well-formed output never fails.)
 
 The roundtrip decomposes into five building blocks. The decompressor
 (Phase 3) contributes the "right half" of each invertibility theorem;
@@ -218,13 +222,19 @@ block is independently meaningful.
 
 #### The roundtrip pipeline
 
+For levels 1–9 (compressed blocks), the data flows through three
+invertible layers:
+
 ```
 data → matchLZ77 → symbols → huffEncode → bits → pack → compressed
                                                            │
 compressed → unpack → bits → huffDecode → symbols → resolveLZ77 → data
 ```
 
-The full proof chains three invertibility steps:
+Level 0 (stored blocks) bypasses LZ77 and Huffman entirely — the
+roundtrip reduces to stored-block framing (BB4) alone.
+
+For levels 1–9, the full proof chains three invertibility steps:
 
 ```
   inflate (deflate data level)
@@ -234,7 +244,7 @@ The full proof chains three invertibility steps:
 = data                                                    -- LZ77
 ```
 
-(Simplified — actual proof routes through block framing.)
+(Simplified — actual proof routes through block framing via BB4.)
 
 #### Building block 1: LZ77 fundamental theorem
 
@@ -273,11 +283,17 @@ not the LZ77 layer.
 #### Building block 2: Huffman encode/decode invertibility
 
 ```lean
+-- Given valid canonical code lengths producing prefix-free tables:
 decodeSymbols litLens distLens (encodeSymbols litLens distLens syms ++ rest)
   = some (syms, rest)
 ```
 
-For prefix-free code tables. The single-symbol case is already proved:
+Requires that `litLens` and `distLens` produce valid prefix-free codes
+(established by `fromLengths` success + `ValidLengths`), and that the
+symbol list is well-formed (literals < 256, lengths in 3–258, distances
+in 1–32768, terminated by end-of-block).
+
+The single-symbol case is already proved:
 `decode_prefix_free` (Huffman.lean) says that for `(cw, sym)` in a
 prefix-free table, `decode table (cw ++ rest) = some (sym, rest)`.
 Extension to symbol sequences is induction on the symbol list.
@@ -289,8 +305,13 @@ the tables are monotone and extra bits fill the gaps exactly.
 #### Building block 3: Bitstream packing invertibility
 
 ```lean
-bytesToBits (bitsToBytes bits) = bits    -- for length divisible by 8
+bytesToBits (bitsToBytes bits) = bits
 ```
+
+Holds when `bits.length` is a multiple of 8 (byte-aligned). In
+practice, DEFLATE block encoding pads the final byte, so the theorem
+applies to the padded bit sequence; the padding itself is handled at
+the block framing level (BB4).
 
 BitstreamCorrect already proves the unpack direction (`readBit_toBits`,
 `readBits_toBits`). The pack direction is new but mechanical.
@@ -300,7 +321,8 @@ BitstreamCorrect already proves the unpack direction (`readBit_toBits`,
 - **Stored:** LEN/NLEN header + literal copy. Trivially invertible.
 - **Fixed Huffman:** Shared constant tables. Reduces to BB2.
 - **Dynamic Huffman:** Tree description (code lengths via RLE +
-  code-length Huffman) must round-trip. Tedious but not deep.
+  code-length Huffman) must round-trip. Mechanically detailed and
+  the hardest framing sub-proof (currently the largest remaining sorry).
 - **Block sequence:** BFINAL (1 bit) + BTYPE (2 bits) are fixed-width.
   Symbol 256 terminates compressed blocks. BFINAL=1 marks last block.
 - **Cross-block back-references:** LZ77 references can span block
@@ -363,12 +385,13 @@ the composition into the full roundtrip theorem.
 
 - Level 0: stored blocks, literal copy. Roundtrip trivial.
 - Level 1: greedy LZ77 matching, fixed Huffman codes.
-  First non-trivial roundtrip — proves BB1 for greedy matching.
+  Establishes BB1 for greedy matching; combines with BB2–BB4 for the
+  first non-trivial end-to-end roundtrip.
 - Levels 2–4: lazy matching. Same BB1 invariant with branching.
 - Levels 5–9: dynamic Huffman codes. Adds dynamic tree encoding
   roundtrip (BB4) on top of BB1.
 - Conformance tests: zlib can decompress our output and vice versa.
-- Full roundtrip theorem: `inflate (deflate data level) = data`.
+- Full roundtrip theorem: `inflate (deflate data level) = .ok data`.
 
 ### Phase 5: Zstd (Aspirational)
 
