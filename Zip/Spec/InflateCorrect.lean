@@ -104,7 +104,7 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
   -- Step 2: decodeBits → spec decode via tree-table correspondence
   have hspec := decodeBits_eq_spec_decode lengths tree br.toBits htree hv hlen_bound
   -- Connect the two
-  rw [hdb] at hspec; simp at hspec
+  rw [hdb] at hspec; simp only [Option.map] at hspec
   exact ⟨br'.toBits, hspec.symm, rfl⟩
 
 /-! ## Stored block correctness -/
@@ -305,9 +305,8 @@ theorem decodeHuffman_correct
               some output'.data.toList := by
             simp only [Deflate.Spec.resolveLZ77_literal]
             have : (output.push sym.toUInt8).data.toList =
-                output.data.toList ++ [sym.toUInt8] := by simp
-            rw [this] at hlz; rw [show sym.toUInt8 = sym.toNat.toUInt8 from rfl] at hlz
-            exact hlz
+                output.data.toList ++ [sym.toNat.toUInt8] := by simp
+            rw [this] at hlz; exact hlz
           exact ⟨sf + 1, .literal sym.toNat.toUInt8 :: syms, rest, hds', hlz', hbr, hwf'⟩
       · -- sym ≥ 256
         split at h
