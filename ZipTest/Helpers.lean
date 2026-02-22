@@ -83,3 +83,44 @@ def mkRandomData (n : Nat := 1000) : ByteArray := Id.run do
   for i in [:n] do
     result := result.push ((i * 73 + 137) % 256).toUInt8
   return result
+
+/-- All bytes are 0x42. Maximally compressible. -/
+def mkConstantData (size : Nat) : ByteArray := Id.run do
+  let mut result := ByteArray.empty
+  for _ in [:size] do
+    result := result.push 0x42
+  return result
+
+/-- Cycle through 16 distinct bytes. Highly compressible but exercises Huffman coding. -/
+def mkCyclicData (size : Nat) : ByteArray := Id.run do
+  let pattern : Array UInt8 := #[0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                                   0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]
+  let mut result := ByteArray.empty
+  for i in [:size] do
+    result := result.push pattern[i % 16]!
+  return result
+
+/-- Deterministic pseudo-random bytes via xorshift32. Much less compressible than cyclic. -/
+def mkPrngData (size : Nat) (seed : UInt32 := 2463534242) : ByteArray := Id.run do
+  let mut state := seed
+  let mut result := ByteArray.empty
+  for _ in [:size] do
+    state := state ^^^ (state <<< 13)
+    state := state ^^^ (state >>> 17)
+    state := state ^^^ (state <<< 5)
+    result := result.push (state &&& 0xFF).toUInt8
+  return result
+
+/-- Time an IO action, returning (result, elapsed_ms). -/
+def timeIO (action : IO α) : IO (α × Float) := do
+  let start ← IO.monoNanosNow
+  let result ← action
+  let stop ← IO.monoNanosNow
+  let elapsedMs := (stop - start).toFloat / 1_000_000.0
+  return (result, elapsedMs)
+
+/-- Human-readable size name: 1024 → "1KB", 1048576 → "1MB". -/
+def sizeName (n : Nat) : String :=
+  if n ≥ 1048576 then s!"{n / 1048576}MB"
+  else if n ≥ 1024 then s!"{n / 1024}KB"
+  else s!"{n}B"

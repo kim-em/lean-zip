@@ -14,6 +14,7 @@ import ZipTest.NativeChecksum
 import ZipTest.NativeInflate
 import ZipTest.NativeGzip
 import ZipTest.NativeIntegration
+import ZipTest.NativeScale
 
 def main : IO Unit := do
   unless ← System.FilePath.pathExists "testdata" do
@@ -34,4 +35,5 @@ def main : IO Unit := do
   ZipTest.NativeInflate.tests
   ZipTest.NativeGzip.tests
   ZipTest.NativeIntegration.tests
+  ZipTest.NativeScale.tests
   IO.println "\nAll tests passed!"
