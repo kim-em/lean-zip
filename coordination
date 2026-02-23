@@ -51,16 +51,17 @@ cmd_orient() {
     echo "=== Open pull requests ==="
     gh pr list --repo "$REPO" --state open --limit 20 \
         --json number,title,headRefName,statusCheckRollup,labels \
-        --template '{{range .}}#{{.number}} [{{.headRefName}}] {{.title}}{{range .labels}} ({{.name}}){{end}}{{range .statusCheckRollup}}{{if eq .status "FAILURE"}} ✗CI{{end}}{{end}}{{"\n"}}{{end}}'
+        --template '{{range .}}#{{.number}} [{{.headRefName}}] {{.title}}{{range .labels}} ({{.name}}){{end}}{{range .statusCheckRollup}}{{if eq .conclusion "FAILURE"}} ✗CI{{end}}{{end}}{{"\n"}}{{end}}'
 
     echo ""
-    echo "=== PRs needing attention (failing CI or merge-conflict) ==="
+    echo "=== PRs needing attention (failing CI, merge-conflict, or dirty) ==="
     gh pr list --repo "$REPO" --state open --limit 20 \
-        --json number,title,labels,statusCheckRollup \
+        --json number,title,labels,mergeable,statusCheckRollup \
         --jq '[.[] | select(
             (.labels | any(.name == "merge-conflict")) or
-            (.statusCheckRollup | any(.status == "FAILURE"))
-        )] | .[] | "#\(.number) \(.title)"'
+            (.mergeable == "CONFLICTING") or
+            (.statusCheckRollup | any(.conclusion == "FAILURE"))
+        )] | .[] | "#\(.number) \(.title)\(if .mergeable == "CONFLICTING" then " [CONFLICTS]" else "" end)\(if (.statusCheckRollup | any(.conclusion == "FAILURE")) then " [CI FAILED]" else "" end)"'
 }
 
 # --- close-stale ---

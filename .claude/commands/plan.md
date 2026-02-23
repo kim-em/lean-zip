@@ -30,7 +30,8 @@ self-improvement). Choose the type that restores balance. Default to alternating
 implementation, then review. Self-improvement every 5th session or when needed.
 
 Priority order for implementation work:
-1. Failing PRs that need fixing
+1. PRs needing attention (merge conflicts, failing CI) — create a work item
+   to rebase, resolve conflicts, and get the PR green again
 2. Next deliverable from the current VERIFICATION.md phase
 
 ## Step 4: Write the plan

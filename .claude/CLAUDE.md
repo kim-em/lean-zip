@@ -105,7 +105,8 @@ fewer; if they're finding problems, do more. Default to alternating:
 implementation session, then review session.
 
 **Implementation sessions** — priority order:
-1. Failing PRs that need fixing
+1. PRs needing attention (merge conflicts, failing CI) — rebase, resolve
+   conflicts, and get the PR green again
 2. Next deliverable from the current VERIFICATION.md phase
 
 For new native implementations, follow the development cycle in
