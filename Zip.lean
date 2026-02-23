@@ -20,6 +20,7 @@ import Zip.Spec.BitstreamCorrect
 import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.HuffmanCorrect
+import Zip.Spec.HuffmanEncodeCorrect
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DynamicTreesCorrect
 import Zip.Spec.InflateCorrect
