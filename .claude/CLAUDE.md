@@ -535,6 +535,16 @@ Update it during review and reflect sessions.
   `omega` cannot reason about `%` directly.
 - **`set` is Mathlib-only**: The `set` tactic is not available in this
   project. Use `have` or `let` instead.
+- **`set_option` before docstrings**: `set_option maxRecDepth 4096 in`
+  must come BEFORE the docstring, not after. Wrong:
+  `/-- doc -/ set_option maxRecDepth 4096 in theorem ...` (parse error).
+  Right: `set_option maxRecDepth 4096 in /-- doc -/ theorem ...`.
+  Needed when unfolding deeply-nested do-notation (e.g. `decodeLitLen`).
+- **UInt8 roundtrip lemmas**: `UInt8.toNat_lt b` gives `b.toNat < 256`
+  (omega can't derive this). `UInt8.ofNat_toNat` gives
+  `b.toNat.toUInt8 = b` (the roundtrip). There is no
+  `UInt8.eq_of_toNat_eq` — to prove `b = c` from `b.toNat = c.toNat`,
+  use `UInt8.ofNat_toNat` on both sides.
 
 ## Current State
 
