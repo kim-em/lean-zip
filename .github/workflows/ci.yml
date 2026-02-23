@@ -21,11 +21,20 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Cache Lake build
+        id: cache
         uses: actions/cache@v4
         with:
           path: .lake
           key: lake-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean') }}
           restore-keys: lake-
+
+      - name: Clean stale run_io cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          # Lake caches run_io results (like moreLinkArgs). When the cache is
+          # from a fallback key, lakefile.lean may have changed but the cached
+          # run_io results are stale. Remove them to force re-evaluation.
+          rm -rf .lake/packages .lake/lakefile.olean .lake/lakefile.olean.trace
 
       - name: Build
         run: lake build
