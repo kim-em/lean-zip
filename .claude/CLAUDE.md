@@ -238,6 +238,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/LZ77NativeCorrect.lean — Native lz77Greedy correctness (BB1 for compressor)
     Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
     Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
+    Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
@@ -591,6 +592,23 @@ Update it during review and reflect sessions.
   `Nat.testBit` (which uses `1 &&& (m >>> n)`) to `% 2`:
   `Nat.one_and_eq_mod_two : 1 &&& n = n % 2` (matches testBit order),
   `Nat.and_one_is_mod : x &&& 1 = x % 2` (matches code order).
+- **`generalize` before `bv_decide` for shared subexpressions**: When
+  `bv_decide` fails with "spurious counterexample" because it abstracts
+  the same expression (e.g., `data[pos]`) as multiple opaque variables,
+  use `generalize data[pos].toUInt32 = x` first to unify them into a
+  single variable.
+- **`Bool.false_eq_true` for stuck `if false = true`**: After
+  substituting `(x == y) = false` via simp, `↓reduceIte` can't reduce
+  `if false = true then ... else ...` because `false = true` is a
+  `Prop`. Add `Bool.false_eq_true` to rewrite it to `False`, then
+  `↓reduceIte` can reduce the `if`.
+- **`Bool` vs `Prop` in `if` conditions**: When proving an `if` takes a
+  specific branch, check whether the condition is `Bool` or `Prop`:
+  - `Bool`: prove `show (cond) = false from by decide` then use
+    `Bool.false_eq_true, ↓reduceIte`
+  - `Prop`: prove `show ¬P from by omega` then use `↓reduceIte`
+  Don't use `show P = false from by omega` for `Prop` conditions — `>`
+  on `Nat` creates a `Prop`, not a `Bool`.
 
 ## Current State
 
