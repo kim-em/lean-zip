@@ -51,7 +51,8 @@ def deflateStored (data : ByteArray) : ByteArray := Id.run do
   return result
 
 /-- Compute canonical Huffman codewords from code lengths (RFC 1951 §3.2.2).
-    Returns array indexed by symbol of (codeword, code_length). -/
+    Returns array indexed by symbol of (codeword, code_length).
+    Assumes all non-zero lengths are ≤ `maxBits` (15 for DEFLATE). -/
 def canonicalCodes (lengths : Array UInt8) (maxBits : Nat := 15) :
     Array (UInt16 × UInt8) :=
   let lsList := lengths.toList.map UInt8.toNat
@@ -80,48 +81,39 @@ def fixedLitCodes : Array (UInt16 × UInt8) :=
 def fixedDistCodes : Array (UInt16 × UInt8) :=
   canonicalCodes Inflate.fixedDistLengths
 
-/-- Find length code for length 3–258.
-    Returns (code_index 0–28, extra_bits_count, extra_bits_value). -/
-def findLengthCode (length : Nat) : Option (Nat × Nat × UInt32) :=
+/-- Search a base/extra table pair for the code covering `value`.
+    Returns (code_index, extra_bits_count, extra_bits_value).
+    Used for both length codes (RFC 1951 §3.2.5) and distance codes. -/
+private def findTableCode (baseTable : Array UInt16) (extraTable : Array UInt8)
+    (value : Nat) : Option (Nat × Nat × UInt32) :=
   go 0
 where
   go (i : Nat) : Option (Nat × Nat × UInt32) :=
-    if i + 1 < Inflate.lengthBase.size then
-      if Inflate.lengthBase[i + 1]!.toNat > length then
-        let extra := Inflate.lengthExtra[i]!.toNat
-        let extraVal := (length - Inflate.lengthBase[i]!.toNat).toUInt32
+    if i + 1 < baseTable.size then
+      if baseTable[i + 1]!.toNat > value then
+        -- i < extraTable.size follows from baseTable/extraTable having equal size
+        let extra := extraTable[i]!.toNat
+        let extraVal := (value - baseTable[i]!.toNat).toUInt32
         some (i, extra, extraVal)
       else
         go (i + 1)
-    else if i < Inflate.lengthBase.size then
-      -- Last entry (code 28, length 258)
-      let extra := Inflate.lengthExtra[i]!.toNat
-      let extraVal := (length - Inflate.lengthBase[i]!.toNat).toUInt32
+    else if i < baseTable.size then
+      let extra := extraTable[i]!.toNat
+      let extraVal := (value - baseTable[i]!.toNat).toUInt32
       some (i, extra, extraVal)
     else
       none
-  termination_by Inflate.lengthBase.size - i
+  termination_by baseTable.size - i
+
+/-- Find length code for length 3–258.
+    Returns (code_index 0–28, extra_bits_count, extra_bits_value). -/
+def findLengthCode (length : Nat) : Option (Nat × Nat × UInt32) :=
+  findTableCode Inflate.lengthBase Inflate.lengthExtra length
 
 /-- Find distance code for distance 1–32768.
     Returns (code 0–29, extra_bits_count, extra_bits_value). -/
 def findDistCode (dist : Nat) : Option (Nat × Nat × UInt32) :=
-  go 0
-where
-  go (i : Nat) : Option (Nat × Nat × UInt32) :=
-    if i + 1 < Inflate.distBase.size then
-      if Inflate.distBase[i + 1]!.toNat > dist then
-        let extra := Inflate.distExtra[i]!.toNat
-        let extraVal := (dist - Inflate.distBase[i]!.toNat).toUInt32
-        some (i, extra, extraVal)
-      else
-        go (i + 1)
-    else if i < Inflate.distBase.size then
-      let extra := Inflate.distExtra[i]!.toNat
-      let extraVal := (dist - Inflate.distBase[i]!.toNat).toUInt32
-      some (i, extra, extraVal)
-    else
-      none
-  termination_by Inflate.distBase.size - i
+  findTableCode Inflate.distBase Inflate.distExtra dist
 
 inductive LZ77Token where
   | literal : UInt8 → LZ77Token
@@ -225,8 +217,10 @@ where
             let (dCode, dLen) := fixedDistCodes[dIdx]!
             let bw := bw.writeHuffCode dCode dLen
             emitTokens (bw.writeBits dExtraCount dExtraVal) tokens (i + 1)
-          | none => emitTokens bw tokens (i + 1)  -- skip invalid
-        | none => emitTokens bw tokens (i + 1)  -- skip invalid
+          -- lz77Greedy guarantees distance 1–32768, so this branch is unreachable
+          | none => emitTokens bw tokens (i + 1)
+        -- lz77Greedy guarantees length 3–258, so this branch is unreachable
+        | none => emitTokens bw tokens (i + 1)
     else bw
   termination_by tokens.size - i
 
