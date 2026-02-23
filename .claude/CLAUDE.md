@@ -228,6 +228,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
     Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence (read direction)
     Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
+    Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
@@ -553,6 +554,19 @@ Update it during review and reflect sessions.
   different after `unfold`. Use `if ... then some (...) else do { rest }`
   instead. This applies to spec functions where proofs need to unfold
   both sides simultaneously.
+
+- **UInt8 comparison ↔ Nat comparison**: When native code uses UInt8
+  comparisons (e.g. `bw.bitCount + 1 >= 8`) but proofs work in Nat
+  (e.g. `bw.bitCount.toNat + 1 >= 8`), bridge with
+  `UInt8.le_iff_toNat_le`, `UInt8.toNat_add`, `UInt8.toNat_ofNat` +
+  `omega`. This arises when functional induction on UInt8-condition
+  code gives UInt8 hypotheses that don't match Nat-condition lemmas.
+  Prefer plain induction + `by_cases` on the Nat condition, then
+  convert to UInt8 for goal's `if` using an iff bridging lemma.
+- **`Nat.and_one_is_mod` and `Nat.one_and_eq_mod_two`**: For bridging
+  `Nat.testBit` (which uses `1 &&& (m >>> n)`) to `% 2`:
+  `Nat.one_and_eq_mod_two : 1 &&& n = n % 2` (matches testBit order),
+  `Nat.and_one_is_mod : x &&& 1 = x % 2` (matches code order).
 
 ## Current State
 
