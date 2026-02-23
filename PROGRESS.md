@@ -7,7 +7,7 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Sorries**: 8 (in 3 compressor verification files)
+- **Sorries**: 9 (in 3 compressor verification files)
 - **Sessions**: 69 completed (Feb 19–24)
 
 ## Milestones
@@ -55,15 +55,16 @@ Native compression + roundtrip verification. ~36 sessions so far.
 - Huffman code length computation with Kraft equality for binary trees
 - Huffman symbol encoding functions with `encodeSymbols_decodeSymbols`
 
-**Remaining sorries (8):**
+**Remaining sorries (9):**
 
-`DeflateFixedCorrect.lean` (4):
+`DeflateFixedCorrect.lean` (5):
 - `emitTokens_spec` — native emitTokens ↔ spec encodeSymbols; blocked on
   `canonicalCodes ↔ allCodes` correspondence
 - `deflateFixed_spec` — depends on emitTokens_spec
 - `inflate_complete` — reverse direction (spec success → native success);
   identified as very hard
 - `inflate_deflateFixed` — main native roundtrip, depends on above
+- `inflate_deflateLazy` — lazy variant roundtrip, same proof strategy
 
 `DeflateStoredCorrect.lean` (3):
 - `fromLengths_fixedLit_ok` — Array.any is kernel-opaque
@@ -71,10 +72,8 @@ Native compression + roundtrip verification. ~36 sessions so far.
 - `inflate_deflateStoredPure` — needs fromLengths proofs + multi-block
   induction
 
-`HuffmanEncode.lean` (1):
-- `computeCodeLengths_valid` — **discovered to be false**: naive depth
-  capping oversubscribes Kraft inequality. Needs algorithm fix
-  (package-merge) or precondition.
+`DeflateEncodeDynamic.lean` (1):
+- `encodeDynamicTrees_decodeDynamicTables` — dynamic tree header roundtrip
 
 **Key remaining gap**: `canonicalCodes ↔ allCodes` correspondence is the
 critical bridge between native and spec Huffman encoding. Both use the
