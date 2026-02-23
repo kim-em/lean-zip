@@ -11,6 +11,7 @@ import Zip.Spec.Adler32
 import Zip.Spec.Crc32
 import Zip.Spec.Huffman
 import Zip.Spec.HuffmanTheorems
+import Zip.Spec.HuffmanEncode
 import Zip.Spec.LZ77
 import Zip.Spec.Deflate
 import Zip.Spec.DeflateEncode
