@@ -504,6 +504,109 @@ theorem flipped_allCodes_prefix_free (lengths : List Nat) (maxBits : Nat)
     exact absurd rfl hne
   · exact Huffman.Spec.allCodes_prefix_free_of_ne lengths maxBits hv a₁ a₂ b₁ b₂ hm₁ hm₂ hse
 
+/-- Reading back bits written by `writeBitsLSB` recovers the original value. -/
+private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
+    (h : val < 2 ^ n) :
+    readBitsLSB n (writeBitsLSB n val ++ rest) = some (val, rest) := by
+  induction n generalizing val with
+  | zero => simp [readBitsLSB, writeBitsLSB]; omega
+  | succ k ih =>
+    simp only [writeBitsLSB, List.cons_append, readBitsLSB]
+    have hlt : val / 2 < 2 ^ k := by
+      rw [Nat.div_lt_iff_lt_mul (by omega : 0 < 2)]; rw [Nat.pow_succ] at h; omega
+    rw [ih (val / 2) hlt]
+    simp only [bind, Option.bind]
+    congr 1; ext1
+    · have := Nat.div_add_mod val 2
+      split <;> simp_all [beq_iff_eq] <;> omega
+    · rfl
+
+/-- Properties of `findLengthCode.go`: the returned index is valid,
+    extra bits count and value are consistent with the tables. -/
+private theorem findLengthCode_go_spec (len i idx extraN extraV : Nat)
+    (h : findLengthCode.go len i = some (idx, extraN, extraV)) :
+    idx < lengthBase.size ∧
+    extraN = lengthExtra[idx]! ∧
+    lengthBase[idx]! + extraV = len ∧
+    len < (lengthBase[idx + 1]?.getD 259) := by
+  unfold findLengthCode.go at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i hi
+    simp only [letFun] at h
+    split at h
+    · rename_i hcond
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl, rfl⟩ := h
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+      refine ⟨by omega, rfl, ?_, hcond.2⟩
+      rw [getElem!_pos lengthBase i (by omega)]; omega
+    · exact findLengthCode_go_spec len (i + 1) idx extraN extraV h
+termination_by lengthBase.size - i
+
+/-- The length table gaps are bounded by 2^extra: for each valid index i,
+    the range of lengths mapping to that index fits in `lengthExtra[i]` bits. -/
+private theorem lengthTable_gap :
+    ∀ i : Fin 29, (lengthBase[i.val + 1]?.getD 259) - lengthBase[i.val]! ≤
+      2 ^ lengthExtra[i.val]! := by decide
+
+/-- `findLengthCode` returns a valid index with consistent extra bits. -/
+theorem findLengthCode_spec (len idx extraN extraV : Nat)
+    (h : findLengthCode len = some (idx, extraN, extraV)) :
+    idx < 29 ∧
+    lengthBase[idx]! + extraV = len ∧
+    extraN = lengthExtra[idx]! ∧
+    extraV < 2 ^ extraN := by
+  have hgo := findLengthCode_go_spec len 0 idx extraN extraV h
+  have hidx : idx < 29 := by simp [lengthBase] at hgo; exact hgo.1
+  refine ⟨hidx, hgo.2.2.1, hgo.2.1, ?_⟩
+  have hgap := lengthTable_gap ⟨idx, hidx⟩
+  simp only [Fin.val_mk] at hgap
+  rw [hgo.2.1]  -- extraN → lengthExtra[idx]!
+  omega
+
+/-- Properties of `findDistCode.go`: analogous to `findLengthCode_go_spec`. -/
+private theorem findDistCode_go_spec (dist i idx extraN extraV : Nat)
+    (h : findDistCode.go dist i = some (idx, extraN, extraV)) :
+    idx < distBase.size ∧
+    extraN = distExtra[idx]! ∧
+    distBase[idx]! + extraV = dist ∧
+    dist < (distBase[idx + 1]?.getD 32769) := by
+  unfold findDistCode.go at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i hi
+    simp only [letFun] at h
+    split at h
+    · rename_i hcond
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl, rfl⟩ := h
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+      refine ⟨by omega, rfl, ?_, hcond.2⟩
+      rw [getElem!_pos distBase i (by omega)]; omega
+    · exact findDistCode_go_spec dist (i + 1) idx extraN extraV h
+termination_by distBase.size - i
+
+/-- The distance table gaps are bounded by 2^extra. -/
+private theorem distTable_gap :
+    ∀ i : Fin 30, (distBase[i.val + 1]?.getD 32769) - distBase[i.val]! ≤
+      2 ^ distExtra[i.val]! := by decide
+
+/-- `findDistCode` returns a valid index with consistent extra bits. -/
+theorem findDistCode_spec (dist idx extraN extraV : Nat)
+    (h : findDistCode dist = some (idx, extraN, extraV)) :
+    idx < 30 ∧
+    distBase[idx]! + extraV = dist ∧
+    extraN = distExtra[idx]! ∧
+    extraV < 2 ^ extraN := by
+  have hgo := findDistCode_go_spec dist 0 idx extraN extraV h
+  have hidx : idx < 30 := by simp [distBase] at hgo; exact hgo.1
+  refine ⟨hidx, hgo.2.2.1, hgo.2.1, ?_⟩
+  have hgap := distTable_gap ⟨idx, hidx⟩
+  simp only [Fin.val_mk] at hgap
+  rw [hgo.2.1]  -- extraN → distExtra[idx]!
+  omega
+
 set_option maxRecDepth 4096 in
 /-- If Huffman decode gives a symbol < 256, `decodeLitLen` returns a literal. -/
 theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
@@ -528,6 +631,7 @@ theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
   simp only [hdec, bind, Option.bind, show ¬(256 : Nat) < 256 from by omega,
     if_false, show (256 : Nat) == 256 from rfl, if_true, pure, Pure.pure]
 
+set_option maxRecDepth 4096 in
 /-- Encoding then decoding one LZ77 symbol recovers it. -/
 theorem encodeLitLen_decodeLitLen
     (litLengths distLengths : List Nat) (sym : LZ77Symbol)
@@ -549,12 +653,104 @@ theorem encodeLitLen_decodeLitLen
     have hdec := encodeSymbol_decode _ 256 bits rest henc hpf_lit
     exact decodeLitLen_of_endOfBlock litLengths distLengths (bits ++ rest) rest hdec
   | reference len dist =>
-    -- The reference case requires proving consistency between
-    -- findLengthCode/findDistCode and the decoder's table lookups,
-    -- plus chaining four decode steps (lenCW, lenExtra, distCW, distExtra).
-    -- Left as sorry — needs helper lemmas for findLengthCode_spec and
-    -- findDistCode_spec connecting encoder table lookups to decoder lookups.
-    sorry
+    -- Extract encoder intermediate results
+    simp only [encodeLitLen, bind, Option.bind] at henc
+    -- Split on findLengthCode
+    cases hfl : findLengthCode len with
+    | none => simp [hfl] at henc
+    | some lenResult =>
+      obtain ⟨idx, extraN, extraV⟩ := lenResult
+      simp only [hfl] at henc
+      -- Split on encodeSymbol for length code
+      cases hels : encodeSymbol
+          ((Huffman.Spec.allCodes litLengths).map fun x => (x.2, x.1))
+          (257 + idx) with
+      | none => simp [hels] at henc
+      | some lenBits =>
+        simp only [hels] at henc
+        -- Split on findDistCode
+        cases hfd : findDistCode dist with
+        | none => simp [hfd] at henc
+        | some distResult =>
+          obtain ⟨dCode, dExtraN, dExtraV⟩ := distResult
+          simp only [hfd] at henc
+          -- Split on encodeSymbol for distance code
+          cases heds : encodeSymbol
+              ((Huffman.Spec.allCodes distLengths).map fun x => (x.2, x.1))
+              dCode with
+          | none => simp [heds] at henc
+          | some distBits =>
+            simp only [heds, pure, Pure.pure, Option.some.injEq] at henc
+            -- henc : bits = lenBits ++ writeBitsLSB extraN extraV ++
+            --               distBits ++ writeBitsLSB dExtraN dExtraV
+            subst henc
+            -- Get spec properties from helper lemmas
+            have hlspec := findLengthCode_spec len idx extraN extraV hfl
+            have hdspec := findDistCode_spec dist dCode dExtraN dExtraV hfd
+            -- hlspec: idx < 29, lengthBase[idx]! + extraV = len,
+            --         extraN = lengthExtra[idx]!, extraV < 2^extraN
+            -- hdspec: dCode < 30, distBase[dCode]! + dExtraV = dist,
+            --         dExtraN = distExtra[dCode]!, dExtraV < 2^dExtraN
+            have hpf_dist := flipped_allCodes_prefix_free distLengths 15 hvalid_dist
+            -- Bounds for table indices
+            have hidx : idx < lengthBase.size := by simp [lengthBase]; omega
+            have hidxE : idx < lengthExtra.size := by simp [lengthExtra]; omega
+            have hdCode : dCode < distBase.size := by simp [distBase]; omega
+            have hdCodeE : dCode < distExtra.size := by simp [distExtra]; omega
+            -- Normalize getElem! to getElem in spec hypotheses
+            rw [getElem!_pos lengthBase idx hidx] at hlspec
+            rw [getElem!_pos lengthExtra idx hidxE] at hlspec
+            rw [getElem!_pos distBase dCode hdCode] at hdspec
+            rw [getElem!_pos distExtra dCode hdCodeE] at hdspec
+            -- Destructure spec results, substituting extraN/dExtraN
+            obtain ⟨_, hlenSum, rfl, hextraV⟩ := hlspec
+            obtain ⟨_, hdistSum, rfl, hdExtraV⟩ := hdspec
+            -- Unfold decodeLitLen and fully reassociate appends
+            unfold decodeLitLen
+            simp only [List.append_assoc]
+            -- Step 1: Huffman decode for length symbol (257 + idx)
+            rw [encodeSymbol_decode _ (257 + idx) lenBits
+              (writeBitsLSB lengthExtra[idx] extraV ++
+               (distBits ++ (writeBitsLSB distExtra[dCode] dExtraV ++ rest)))
+              hels hpf_lit]
+            simp only [bind, Option.bind]
+            -- sym = 257 + idx ≥ 257, so not < 256 and not == 256
+            rw [if_neg (by omega : ¬(257 + idx < 256))]
+            rw [if_neg (show ¬((257 + idx == 256) = true) by
+              simp [beq_iff_eq]; omega)]
+            -- idx = (257 + idx) - 257
+            simp only [show 257 + idx - 257 = idx from by omega]
+            -- The do-notation expanded as nested match expressions.
+            -- Use have + dsimp to resolve each step.
+            -- Step 2: Read extra length bits
+            have hrd2 : readBitsLSB lengthExtra[idx]
+              (writeBitsLSB lengthExtra[idx] extraV ++
+               (distBits ++ (writeBitsLSB distExtra[dCode] dExtraV ++ rest))) =
+              some (extraV, distBits ++
+               (writeBitsLSB distExtra[dCode] dExtraV ++ rest)) :=
+              readBitsLSB_writeBitsLSB _ _ _ hextraV
+            -- Table lookups
+            have hlb : lengthBase[idx]? = some lengthBase[idx] :=
+              getElem?_pos lengthBase idx hidx
+            have hle : lengthExtra[idx]? = some lengthExtra[idx] :=
+              getElem?_pos lengthExtra idx hidxE
+            -- Step 3: Huffman decode for distance
+            have hrd3 : Huffman.Spec.decode
+              ((Huffman.Spec.allCodes distLengths).map fun (s, cw) => (cw, s))
+              (distBits ++ (writeBitsLSB distExtra[dCode] dExtraV ++ rest)) =
+              some (dCode, writeBitsLSB distExtra[dCode] dExtraV ++ rest) :=
+              encodeSymbol_decode _ dCode distBits _ heds hpf_dist
+            have hdb : distBase[dCode]? = some distBase[dCode] :=
+              getElem?_pos distBase dCode hdCode
+            have hde : distExtra[dCode]? = some distExtra[dCode] :=
+              getElem?_pos distExtra dCode hdCodeE
+            -- Step 4: Read extra distance bits
+            have hrd4 : readBitsLSB distExtra[dCode]
+              (writeBitsLSB distExtra[dCode] dExtraV ++ rest) =
+              some (dExtraV, rest) :=
+              readBitsLSB_writeBitsLSB _ _ _ hdExtraV
+            simp [hlb, hle, hrd2, hrd3, hdb, hde, hrd4, pure, Pure.pure]
+            exact ⟨hlenSum, hdistSum⟩
 
 /-- A symbol list is valid for decoding: ends with `.endOfBlock` and
     no `.endOfBlock` appears earlier. -/
