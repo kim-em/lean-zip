@@ -405,6 +405,16 @@ private theorem fromLengths_ok_eq (lengths : Array UInt8) (maxBits : Nat)
     · simp at htree
     · exact (Except.ok.inj htree).symm
 
+/-- The count of elements equal to `b` in a prefix is at most the count in the full list. -/
+private theorem count_foldl_take_le (ls : List Nat) (b : Nat) (k : Nat) :
+    (ls.take k).foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 ≤
+    ls.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 := by
+  rw [show ls.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 =
+    (ls.drop k).foldl (fun acc l => if (l == b) = true then acc + 1 else acc)
+      ((ls.take k).foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0)
+    from by rw [← List.foldl_append, List.take_append_drop]]
+  exact Huffman.Spec.count_foldl_mono _ _ _
+
 /-- `Array.set!` at a different index doesn't affect the target (UInt32 version). -/
 private theorem array_set_ne_u32 (arr : Array UInt32) (i j : Nat) (v : UInt32) (hij : i ≠ j) :
     (arr.set! i v)[j]! = arr[j]! := by
@@ -506,19 +516,7 @@ private theorem insertLoop_forward
             simp only [if_pos (beq_self_eq_true lengths[start].toNat)]
             rw [array_set_self_u32 _ _ _ (by omega : lengths[start].toNat < nextCode.size)]
             have h_nc_val := hnc lengths[start].toNat (by omega) hlen_le
-            -- Bound: partial ≤ full (for UInt32 overflow)
-            have h_partial_le : (lsList.take start).foldl
-                (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc) 0 ≤
-                lsList.foldl
-                (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc) 0 := by
-              rw [show lsList.foldl
-                (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc) 0 =
-                (lsList.drop start).foldl
-                  (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc)
-                  ((lsList.take start).foldl
-                    (fun acc l => if (l == lengths[start].toNat) = true then acc + 1 else acc) 0)
-                from by rw [← List.foldl_append, List.take_append_drop]]
-              exact Huffman.Spec.count_foldl_mono _ _ _
+            have h_partial_le := count_foldl_take_le lsList lengths[start].toNat start
             have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
               lengths[start].toNat hv (by omega) hlen_le
             rw [← hblCount, ← hncSpec] at h_npc
