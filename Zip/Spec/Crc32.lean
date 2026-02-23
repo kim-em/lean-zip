@@ -40,9 +40,6 @@ def updateList (crc : UInt32) (data : List UInt8) : UInt32 :=
 def checksum (data : List UInt8) : UInt32 :=
   (updateList 0xFFFFFFFF data) ^^^ 0xFFFFFFFF
 
-/-- Finalize a running CRC to produce the checksum. -/
-def finalize (crc : UInt32) : UInt32 := crc ^^^ 0xFFFFFFFF
-
 /-! ## Specification theorems -/
 
 /-- `updateList` over a concatenation equals sequential application. -/
