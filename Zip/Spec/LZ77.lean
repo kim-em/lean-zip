@@ -439,4 +439,138 @@ theorem resolveLZ77_matchLZ77 (data : List UInt8)
   show resolveLZ77 (matchLZ77.go data 0 windowSize) (data.take 0) = some data
   exact matchLZ77.go_correct data 0 windowSize hw (by omega)
 
+/-! ## Helper lemmas for back-reference resolution -/
+
+/-- When `findLongestMatch` succeeds, the match doesn't extend past the data. -/
+theorem findLongestMatch_end_le (data : List UInt8)
+    (pos windowSize len dist : Nat)
+    (hfind : findLongestMatch data pos windowSize = some (len, dist)) :
+    pos + len ≤ data.length := by
+  have hlen_ge := findLongestMatch_len_ge _ _ _ _ _ hfind
+  have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
+  have hlen_in := matchLength_in_bounds data pos dist 258 len hml
+  have := hlen_in ⟨len - 1, by omega⟩; simp at this; omega
+
+/-- Resolving a back-reference from a `findLongestMatch` result advances
+    the accumulator from `data.take pos` to `data.take (pos + len)`. -/
+private theorem resolveLZ77_findMatch_step (data : List UInt8)
+    (pos windowSize len dist : Nat)
+    (hpos : pos ≤ data.length)
+    (hfind : findLongestMatch data pos windowSize = some (len, dist))
+    (rest : List LZ77Symbol)
+    (ih : resolveLZ77 rest (data.take (pos + len)) = some data) :
+    resolveLZ77 (.reference len dist :: rest) (data.take pos) = some data := by
+  simp only [resolveLZ77]
+  have ⟨hdist_pos, hdist_le⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind
+  have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
+  have hlen_le := findLongestMatch_end_le _ _ _ _ _ hfind
+  have hdneq : dist ≠ 0 := by omega
+  rw [show (dist == 0 || decide (List.length (List.take pos data) < dist)) = false
+    from by simp [hdneq, Nat.min_eq_left hpos]; omega]
+  simp only [Bool.false_eq_true, ↓reduceIte]
+  have hcopy := take_append_copied_eq_take data pos dist len
+    hdist_pos hdist_le hml hpos hlen_le
+  conv => lhs; rw [show (List.take pos data).length = pos
+    from by simp [Nat.min_eq_left hpos]]
+  rw [hcopy]
+  exact ih
+
+/-! ## Lazy LZ77 matching (Level 2) -/
+
+/-- Lazy LZ77 matching (Level 2): at each position, find the longest match,
+    then check if a longer match exists at the next position. If so,
+    emit a literal and use the longer match instead. -/
+def matchLZ77Lazy (data : List UInt8) (windowSize : Nat := 32768) :
+    List LZ77Symbol :=
+  go data 0 windowSize
+where
+  go (data : List UInt8) (pos windowSize : Nat) : List LZ77Symbol :=
+    if pos ≥ data.length then [.endOfBlock]
+    else
+      match findLongestMatch data pos windowSize with
+      | some (len1, dist1) =>
+        if len1 < 3 then
+          .literal data[pos]! :: go data (pos + 1) windowSize
+        else if pos + 1 < data.length then
+          match findLongestMatch data (pos + 1) windowSize with
+          | some (len2, dist2) =>
+            if len2 > len1 then
+              .literal data[pos]! ::
+                .reference len2 dist2 :: go data (pos + 1 + len2) windowSize
+            else
+              .reference len1 dist1 :: go data (pos + len1) windowSize
+          | none =>
+            .reference len1 dist1 :: go data (pos + len1) windowSize
+        else
+          .reference len1 dist1 :: go data (pos + len1) windowSize
+      | none =>
+        .literal data[pos]! :: go data (pos + 1) windowSize
+  termination_by data.length - pos
+  decreasing_by all_goals omega
+
+/-- Inner correctness lemma for `matchLZ77Lazy.go`. -/
+private theorem matchLZ77Lazy.go_correct (data : List UInt8) (pos windowSize : Nat)
+    (hw : windowSize > 0) (hpos : pos ≤ data.length) :
+    resolveLZ77 (matchLZ77Lazy.go data pos windowSize) (data.take pos) =
+      some data := by
+  unfold matchLZ77Lazy.go
+  split
+  · -- pos ≥ data.length
+    rename_i hge
+    have heq : pos = data.length := by omega
+    subst heq; simp [List.take_length, resolveLZ77]
+  · -- pos < data.length
+    rename_i hlt; simp at hlt
+    have lit_step : data.take pos ++ [data[pos]!] = data.take (pos + 1) := by
+      rw [getElem!_pos data pos hlt]
+      exact (List.take_succ_eq_append_getElem hlt).symm
+    split
+    · -- findLongestMatch = some (len1, dist1)
+      rename_i len1 dist1 hfind1
+      split
+      · -- len1 < 3 → literal
+        simp only [resolveLZ77]; rw [lit_step]
+        exact matchLZ77Lazy.go_correct data (pos + 1) windowSize hw (by omega)
+      · -- len1 ≥ 3
+        split
+        · -- pos + 1 < data.length
+          rename_i hpos1
+          split
+          · -- findLongestMatch (pos + 1) = some (len2, dist2)
+            rename_i len2 dist2 hfind2
+            split
+            · -- len2 > len1 → lazy: literal + reference M2
+              simp only [resolveLZ77]; rw [lit_step]
+              exact resolveLZ77_findMatch_step data (pos + 1) windowSize len2 dist2
+                (by omega) hfind2 _
+                (matchLZ77Lazy.go_correct data (pos + 1 + len2) windowSize hw
+                  (findLongestMatch_end_le _ _ _ _ _ hfind2))
+            · -- len2 ≤ len1 → greedy: reference M1
+              exact resolveLZ77_findMatch_step data pos windowSize len1 dist1
+                hpos hfind1 _
+                (matchLZ77Lazy.go_correct data (pos + len1) windowSize hw
+                  (findLongestMatch_end_le _ _ _ _ _ hfind1))
+          · -- findLongestMatch (pos + 1) = none → greedy: reference M1
+            exact resolveLZ77_findMatch_step data pos windowSize len1 dist1
+              hpos hfind1 _
+              (matchLZ77Lazy.go_correct data (pos + len1) windowSize hw
+                (findLongestMatch_end_le _ _ _ _ _ hfind1))
+        · -- ¬(pos + 1 < data.length) → greedy: reference M1
+          exact resolveLZ77_findMatch_step data pos windowSize len1 dist1
+            hpos hfind1 _
+            (matchLZ77Lazy.go_correct data (pos + len1) windowSize hw
+              (findLongestMatch_end_le _ _ _ _ _ hfind1))
+    · -- findLongestMatch = none → literal
+      simp only [resolveLZ77]; rw [lit_step]
+      exact matchLZ77Lazy.go_correct data (pos + 1) windowSize hw (by omega)
+termination_by data.length - pos
+
+/-- The lazy LZ77 matcher is correct: resolving the produced symbols
+    reconstructs the original data. -/
+theorem resolveLZ77_matchLZ77Lazy (data : List UInt8)
+    (windowSize : Nat) (hw : windowSize > 0) :
+    resolveLZ77 (matchLZ77Lazy data windowSize) [] = some data := by
+  show resolveLZ77 (matchLZ77Lazy.go data 0 windowSize) (data.take 0) = some data
+  exact matchLZ77Lazy.go_correct data 0 windowSize hw (by omega)
+
 end Deflate.Spec
