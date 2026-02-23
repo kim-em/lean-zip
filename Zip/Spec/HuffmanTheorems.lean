@@ -112,13 +112,8 @@ private theorem kraft_ge_count (ls : List Nat) (maxBits len : Nat) :
 /-- Double filter: `(· != 0)` then `(· == len)` is the same as `(· == len)` when `len > 0`. -/
 private theorem filter_ne_zero_filter_eq (ls : List Nat) (len : Nat) (hlen : len ≠ 0) :
     (ls.filter (· != 0)).filter (· == len) = ls.filter (· == len) := by
-  rw [List.filter_filter]
-  congr 1; ext x
-  match h : x == len with
-  | true =>
-    have : x = len := beq_iff_eq.mp h
-    subst this; simp [bne_iff_ne, hlen]
-  | false => simp
+  rw [List.filter_filter]; congr 1; ext x
+  by_cases h : x = len <;> simp [bne_iff_ne, beq_iff_eq, h, hlen]
 
 /-- In a valid length assignment, the count of codes with a given non-zero length
     is at most `2^len`. -/
