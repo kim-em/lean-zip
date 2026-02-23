@@ -4,6 +4,10 @@
 # "I'm in danger!" - runs autonomous Claude sessions in a loop with
 # live monitoring, structured logging, and process tracking.
 #
+# Sessions are auto-dispatched as planner or worker based on the issue
+# queue depth (threshold: QUEUE_MIN=3). Planners create work items;
+# workers execute them. Override with --prompt /plan or --prompt /work.
+#
 # Usage:
 #   ./go [--help] [--force] [--single] [--sleep N] [--resume UUID] [--prompt TEXT] [--verbose]
 #
@@ -13,7 +17,7 @@
 #   --single          Run one session then exit (default: loop forever)
 #   --sleep N         Sleep N seconds between sessions (default: 0)
 #   --resume UUID     Resume an existing session
-#   --prompt TEXT     Override default prompt (default: /start)
+#   --prompt TEXT     Override default prompt (default: auto-dispatch)
 #   --verbose, -v     Verbose quota check output
 
 set -euo pipefail
@@ -22,6 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_AVAILABLE_MODEL="$HOME/.claude/skills/claude-usage/claude-available-model"
 LOGFILE="$SCRIPT_DIR/agent-loop.log"
 WORKTREE_BASE="$SCRIPT_DIR/worktrees"
+QUEUE_MIN=3   # Below this many unclaimed issues, sessions become planners
 
 # --- Parse flags ---
 
@@ -29,7 +34,7 @@ FORCE=""
 SINGLE=""
 SLEEP_SECS=0
 RESUME_UUID=""
-PROMPT="/start"
+PROMPT=""      # Empty = auto-dispatch based on queue depth
 VERBOSE=""
 
 while [[ $# -gt 0 ]]; do
@@ -121,7 +126,7 @@ cleanup() {
         local resume_cmd="./go --resume $CURRENT_UUID"
         [[ -n "$FORCE" ]] && resume_cmd="$resume_cmd --force"
         [[ -n "$SINGLE" ]] && resume_cmd="$resume_cmd --single"
-        [[ "$PROMPT" != "/start" ]] && resume_cmd="$resume_cmd --prompt '$PROMPT'"
+        [[ -n "$PROMPT" ]] && resume_cmd="$resume_cmd --prompt '$PROMPT'"
         (( SLEEP_SECS > 0 )) && resume_cmd="$resume_cmd --sleep $SLEEP_SECS"
         [[ -n "$VERBOSE" ]] && resume_cmd="$resume_cmd --verbose"
         echo "To resume: $resume_cmd"
@@ -414,6 +419,26 @@ while true; do
         continue
     fi
 
+    # Auto-dispatch: determine session mode based on queue depth
+    SESSION_MODE=""
+    EFFECTIVE_PROMPT="$PROMPT"
+    if [[ -z "$EFFECTIVE_PROMPT" ]]; then
+        queue_depth=$(cd "$SCRIPT_DIR" && ./coordination queue-depth 2>/dev/null || echo 0)
+        if (( queue_depth < QUEUE_MIN )); then
+            SESSION_MODE="planner"
+            EFFECTIVE_PROMPT="/plan"
+            say "Queue depth: $queue_depth (< $QUEUE_MIN) → planner session"
+        else
+            SESSION_MODE="worker"
+            EFFECTIVE_PROMPT="/work"
+            say "Queue depth: $queue_depth (≥ $QUEUE_MIN) → worker session"
+        fi
+    elif [[ "$EFFECTIVE_PROMPT" == "/plan" ]]; then
+        SESSION_MODE="planner"
+    elif [[ "$EFFECTIVE_PROMPT" == "/work" ]]; then
+        SESSION_MODE="worker"
+    fi
+
     # Generate or use resume UUID
     if [[ -n "$RESUME_UUID" ]]; then
         uuid="$RESUME_UUID"
@@ -441,8 +466,8 @@ while true; do
     git branch -D "$wt_branch" 2>/dev/null || true
     git -C "$SCRIPT_DIR" worktree add -b "$wt_branch" "$wt_dir" origin/master --quiet
 
-    # Copy .lake/ build cache for fast iteration (ignore errors if no cache)
-    if [[ -d "$SCRIPT_DIR/.lake" ]]; then
+    # Copy .lake/ build cache for fast iteration (skip for planner sessions)
+    if [[ "$SESSION_MODE" != "planner" && -d "$SCRIPT_DIR/.lake" ]]; then
         rsync -a --quiet "$SCRIPT_DIR/.lake/" "$wt_dir/.lake/" 2>/dev/null || true
     fi
 
@@ -469,12 +494,14 @@ while true; do
     else
         claude_args+=(--session-id "$uuid")
     fi
-    claude_args+=(-p "$PROMPT")
+    claude_args+=(-p "$EFFECTIVE_PROMPT")
 
     # Record git state at session start
     git_start=$(git -C "$wt_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-    say "Session #$SESSION_NUM starting: $uuid worktree=$short_id (git:$git_start)"
+    mode_label=""
+    [[ -n "$SESSION_MODE" ]] && mode_label=" mode=$SESSION_MODE"
+    say "Session #$SESSION_NUM starting: $uuid worktree=$short_id$mode_label (git:$git_start)"
     log "Claude args: ${claude_args[*]} cwd=$wt_dir"
 
     # Launch claude in the worktree directory (exec replaces subshell so $! is claude's PID)

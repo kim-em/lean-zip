@@ -5,12 +5,16 @@
 # (exported by ./go). Reads branch from git.
 #
 # Usage:
-#   coordination orient         — list open plans, PRs, issues needing attention
-#   coordination close-stale    — close agent-plan issues open >24 hours
-#   coordination plan "title"   — create GitHub issue with agent-plan label (body from stdin)
-#   coordination create-pr N    — push branch, create PR closing issue #N, enable auto-merge
-#   coordination claim-fix N    — comment on failing PR #N claiming fix (30min cooldown)
+#   coordination orient           — list open plans (claimed/unclaimed), PRs, issues needing attention
+#   coordination close-stale      — close agent-plan/skip issues open >24 hours
+#   coordination plan "title"     — create GitHub issue with agent-plan label (body from stdin)
+#   coordination create-pr N      — push branch, create PR closing issue #N, enable auto-merge
+#   coordination claim-fix N      — comment on failing PR #N claiming fix (30min cooldown)
 #   coordination close-pr N "reason" — comment reason and close PR #N
+#   coordination list-unclaimed   — list unclaimed agent-plan issues (FIFO order)
+#   coordination queue-depth      — count of unclaimed agent-plan issues
+#   coordination claim N          — claim an issue for this session (label + comment)
+#   coordination skip N "reason"  — mark a claimed issue as skipped (stale/blocked)
 
 set -euo pipefail
 
@@ -24,10 +28,22 @@ die() { echo "error: $*" >&2; exit 1; }
 gh auth status --hostname github.com >/dev/null 2>&1 || \
     die "gh CLI not authenticated — run 'gh auth login' first"
 
+# Helper: get unclaimed issues as JSON array
+_unclaimed_issues() {
+    gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
+        --json number,title,labels,createdAt \
+        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip"))] |
+              sort_by(.createdAt)'
+}
+
 # --- orient ---
 cmd_orient() {
-    echo "=== Open agent-plan issues ==="
-    gh issue list --repo "$REPO" --label agent-plan --state open --limit 20 \
+    echo "=== Unclaimed work items ==="
+    _unclaimed_issues | jq -r '.[] | "#\(.number) \(.title) (\(.createdAt[:16]))"'
+
+    echo ""
+    echo "=== Claimed work items ==="
+    gh issue list --repo "$REPO" --label agent-plan --label claimed --state open --limit 20 \
         --json number,title,createdAt \
         --template '{{range .}}#{{.number}} {{.title}} ({{timeago .createdAt}}){{"\n"}}{{end}}'
 
@@ -53,6 +69,7 @@ cmd_close_stale() {
     cutoff="$(date -u -v-24H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
               date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
 
+    # Close stale agent-plan issues (both unclaimed and claimed)
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,createdAt \
         --jq ".[] | select(.createdAt < \"$cutoff\") | .number" | \
@@ -61,20 +78,59 @@ cmd_close_stale() {
         gh issue close "$num" --repo "$REPO" \
             --comment "Presumed abandoned (open >24 hours). Session: $SESSION_ID"
     done
+
+    # Also close skipped issues >24h old
+    gh issue list --repo "$REPO" --label skip --state open --limit 50 \
+        --json number,title,createdAt \
+        --jq ".[] | select(.createdAt < \"$cutoff\") | .number" | \
+    while read -r num; do
+        echo "Closing stale skipped issue #$num"
+        gh issue close "$num" --repo "$REPO" \
+            --comment "Closing stale skipped issue. Session: $SESSION_ID"
+    done
 }
 
 # --- plan ---
 cmd_plan() {
     local title="${1:?usage: coordination plan \"title\"}"
 
-    # Check for similar open issues
-    local existing
-    existing="$(gh issue list --repo "$REPO" --label agent-plan --state open \
-        --json number,title --jq '.[].title')"
-    if echo "$existing" | grep -qi "$(echo "$title" | cut -c1-30)"; then
-        echo "warning: similar open issue exists:"
-        echo "$existing" | grep -i "$(echo "$title" | cut -c1-30)"
-        echo "Proceeding anyway..."
+    # Fetch all open agent-plan issues with full bodies for overlap detection
+    local existing_json
+    existing_json="$(gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
+        --json number,title,body)"
+
+    # Warn if any existing issue title shares significant keywords with the new title
+    local existing_titles
+    existing_titles="$(echo "$existing_json" | jq -r '.[].title')"
+    if [[ -n "$existing_titles" ]]; then
+        # Extract key words (>4 chars) from the new title and check overlap
+        local keywords
+        keywords="$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alpha:]' '\n' | \
+            awk 'length > 4' | sort -u)"
+        local overlap_found=false
+        while IFS= read -r existing_title; do
+            local existing_lower
+            existing_lower="$(echo "$existing_title" | tr '[:upper:]' '[:lower:]')"
+            local match_count=0
+            local total_keywords=0
+            while IFS= read -r kw; do
+                [[ -z "$kw" ]] && continue
+                total_keywords=$((total_keywords + 1))
+                if echo "$existing_lower" | grep -qi "$kw"; then
+                    match_count=$((match_count + 1))
+                fi
+            done <<< "$keywords"
+            if [[ "$total_keywords" -gt 0 && "$match_count" -ge 2 ]]; then
+                if [[ "$overlap_found" == false ]]; then
+                    echo "warning: potentially overlapping open issues found:"
+                    overlap_found=true
+                fi
+                echo "  - $existing_title"
+            fi
+        done <<< "$existing_titles"
+        if [[ "$overlap_found" == true ]]; then
+            echo "Proceeding anyway..."
+        fi
     fi
 
     local body
@@ -89,6 +145,8 @@ cmd_plan() {
     # Extract issue number from the URL returned by gh issue create
     local issue_num
     issue_num="${issue_url##*/}"
+
+    echo "Created issue #$issue_num: $title"
 
     if [[ -n "$issue_num" ]]; then
         gh issue comment "$issue_num" --repo "$REPO" \
@@ -175,14 +233,91 @@ cmd_close_pr() {
         --comment "$reason (Session: \`$SESSION_ID\`)"
 }
 
+# --- list-unclaimed ---
+cmd_list_unclaimed() {
+    _unclaimed_issues | jq -r '.[] | "#\(.number) \(.title) (\(.createdAt[:16]))"'
+}
+
+# --- queue-depth ---
+cmd_queue_depth() {
+    _unclaimed_issues | jq 'length'
+}
+
+# --- claim ---
+# Claim an issue for this session. Uses label + comment.
+# Returns 0 on success, 1 if already claimed or race detected.
+cmd_claim() {
+    local issue_num="${1:?usage: coordination claim N}"
+
+    # Check if already claimed
+    local labels
+    labels="$(gh issue view "$issue_num" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
+    if echo "$labels" | grep -q 'claimed'; then
+        echo "Issue #$issue_num is already claimed. Skipping."
+        return 1
+    fi
+    if echo "$labels" | grep -q 'skip'; then
+        echo "Issue #$issue_num was skipped. Skipping."
+        return 1
+    fi
+
+    # Claim: add label + comment
+    gh issue edit "$issue_num" --repo "$REPO" --add-label claimed
+    gh issue comment "$issue_num" --repo "$REPO" \
+        --body "Claimed by session \`$SESSION_ID\` on branch \`$BRANCH\`"
+
+    # Race detection: wait briefly, then check for multiple recent claims
+    sleep 2
+    local recent_claims
+    recent_claims="$(gh api "repos/$REPO/issues/$issue_num/comments" \
+        --jq '[.[] | select(.body | test("Claimed by session")) |
+               select(.created_at > (now - 60 | strftime("%Y-%m-%dT%H:%M:%SZ")))] |
+               length')"
+
+    if [[ "$recent_claims" -gt 1 ]]; then
+        # Race detected — lowest UUID wins
+        local winner
+        winner="$(gh api "repos/$REPO/issues/$issue_num/comments" \
+            --jq '[.[] | select(.body | test("Claimed by session")) |
+                   select(.created_at > (now - 60 | strftime("%Y-%m-%dT%H:%M:%SZ")))] |
+                   sort_by(.body) | .[0].body |
+                   match("session `([^`]+)`") | .captures[0].string')"
+
+        if [[ "$winner" != "$SESSION_ID" ]]; then
+            echo "Race detected on #$issue_num — session $winner won. Backing off."
+            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
+            return 1
+        fi
+        echo "Race detected on #$issue_num — this session won."
+    fi
+
+    echo "Claimed issue #$issue_num"
+}
+
+# --- skip ---
+# Mark a claimed issue as skipped (stale or blocked).
+cmd_skip() {
+    local issue_num="${1:?usage: coordination skip N \"reason\"}"
+    local reason="${2:?usage: coordination skip N \"reason\"}"
+
+    gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label skip
+    gh issue comment "$issue_num" --repo "$REPO" \
+        --body "Skipped by session \`$SESSION_ID\`: $reason"
+    echo "Skipped issue #$issue_num: $reason"
+}
+
 # --- dispatch ---
 case "${1:-}" in
-    orient)      cmd_orient ;;
-    close-stale) cmd_close_stale ;;
-    plan)        shift; cmd_plan "$@" ;;
-    create-pr)   shift; cmd_create_pr "$@" ;;
-    claim-fix)   shift; cmd_claim_fix "$@" ;;
-    close-pr)    shift; cmd_close_pr "$@" ;;
-    *)           die "unknown command: ${1:-}
-Usage: coordination {orient|close-stale|plan|create-pr|claim-fix|close-pr}" ;;
+    orient)          cmd_orient ;;
+    close-stale)     cmd_close_stale ;;
+    plan)            shift; cmd_plan "$@" ;;
+    create-pr)       shift; cmd_create_pr "$@" ;;
+    claim-fix)       shift; cmd_claim_fix "$@" ;;
+    close-pr)        shift; cmd_close_pr "$@" ;;
+    list-unclaimed)  cmd_list_unclaimed ;;
+    queue-depth)     cmd_queue_depth ;;
+    claim)           shift; cmd_claim "$@" ;;
+    skip)            shift; cmd_skip "$@" ;;
+    *)               die "unknown command: ${1:-}
+Usage: coordination {orient|close-stale|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip}" ;;
 esac

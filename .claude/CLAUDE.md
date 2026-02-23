@@ -28,22 +28,31 @@ with `libz-dev` and `libzstd-dev`), no nix-shell wrapper is needed.
 
 ## Autonomous Work Cycle
 
-When told to "start work" (or `/start`), follow this cycle. Each agent
-runs in its own git worktree on its own branch, coordinating with other
-agents via GitHub issues and PRs.
+Agents are launched by `./go`, which assigns each session a mode:
+**planner** (`/plan`) or **worker** (`/work`). The mode is determined
+by queue depth — if fewer than 3 unclaimed work items exist, the session
+is a planner; otherwise a worker. (We may later move this decision into
+the Claude session itself if more context-aware dispatch proves valuable.)
 
-The cycle balances three activities: **new work**, **review**, and
-**self-improvement**. Read recent `progress/` entries to dynamically
-adjust the balance — if reviews are consistently finding nothing, do
-fewer; if they're finding problems, do more. Default to alternating:
-implementation session, then review session.
+**Planners** create one well-scoped work item as a GitHub issue, then
+exit. They do the expensive orientation work (reading progress history,
+understanding project state) and distill it into a self-contained issue
+body so workers don't have to repeat it.
+
+**Workers** claim an issue from the queue and execute it. They read the
+issue body as their plan and do codebase orientation (reading the actual
+files they'll modify) but skip historical orientation.
+
+Each agent runs in its own git worktree on its own branch, coordinating
+via GitHub issues, labels, and PRs.
 
 **Non-interactive sessions**: These sessions run via `./go` with
 `claude -p` — there is no human to answer questions. Never ask for
 confirmation, approval, or "should I apply this?" — just do it. If you
-propose a CLAUDE.md change, apply it. If you find dead code, remove it.
-If a refactor improves the codebase, commit it. The reflect step at the
-end is for recording what you did, not for asking permission.
+propose a `./.claude/CLAUDE.md` change for the current project, apply it.
+If you find dead code, remove it. If a refactor improves the codebase,
+commit it. The reflect step at the end is for recording what you did,
+not for asking permission.
 
 **Anti-rationalization check**: A common failure mode is to identify the
 correct session type from the balance, then override it by framing
@@ -53,53 +62,49 @@ session types can proceed with sorries in place. If you find yourself
 writing "should do X, but Y is more important" — do X. The only genuine
 exception is a broken build that prevents all other work.
 
-### Step 1: Orient
+### Planner sessions (`/plan`)
 
-Record the starting commit: `git rev-parse HEAD`.
-Fetch latest: `git fetch origin master`.
+See `.claude/commands/plan.md` for the full prompt. Summary:
 
-Run `coordination orient` to see:
-- Open `agent-plan` issues (what other agents are working on)
-- Open PRs and their CI status
-- PRs needing attention (failing CI or merge conflicts)
+1. **Orient**: fetch, `coordination orient`, `coordination close-stale`,
+   read last 5 progress entries, VERIFICATION.md, sorry count
+2. **Read all open issues**: full bodies, not just titles — understand
+   what's already planned at the deliverable level
+3. **Decide session type**: implementation / review / self-improvement,
+   based on balance of recent sessions
+4. **Write a self-contained plan** as a GitHub issue. Must include:
+   current state, specific files, deliverables, "done" criteria,
+   verification steps. The plan must NOT overlap with any existing issue.
+5. **Overlap guard**: re-fetch issues before posting to catch races
+6. **Exit** — do not execute any code changes
 
-Run `coordination close-stale` to close issues open >24 hours.
+### Worker sessions (`/work`)
 
-Read these to understand current state:
-- `PROGRESS.md` — global milestones and current phase
-- The **last 5** files in `progress/` — recent session details.
-  Use `ls progress/ | tail -5` to get the filenames (they sort chronologically).
-- `VERIFICATION.md` — the phased roadmap and development cycle
+See `.claude/commands/work.md` for the full prompt. Summary:
 
-Do NOT read all progress files. The 5 most recent plus PROGRESS.md
-give sufficient context.
+1. **Claim**: `coordination list-unclaimed`, pick oldest,
+   `coordination claim N`
+2. **Set up**: create branch, record starting commit + sorry count
+3. **Codebase orientation**: read the specific files in the plan,
+   understand current code state
+4. **Verify assumptions**: sorry count, files exist, plan not stale.
+   If stale: `coordination skip N "reason"`, try next issue
+5. **Execute**: follow the plan's deliverables (see session types below)
+6. **Verify**: `lake build && lake exe test`, sorry count delta,
+   `git diff`, `/second-opinion`
+7. **Publish**: progress entry, push, `coordination create-pr N`
+   (auto-merge handles the rest)
+8. **Reflect**: `/reflect`, update `.claude/` if needed
 
-Record the current `sorry` count: `grep -rc sorry Zip/ || true`
+### Session types (for both planners and workers)
 
-If there are failing PRs, consider claiming one with
-`coordination claim-fix N` instead of starting new work.
+The cycle balances three activities: **new work**, **review**, and
+**self-improvement**. Read recent `progress/` entries to dynamically
+adjust the balance — if reviews are consistently finding nothing, do
+fewer; if they're finding problems, do more. Default to alternating:
+implementation session, then review session.
 
-Decide whether this should be an **implementation session**, a **review
-session**, or a **self-improvement session** based on the balance.
-
-### Step 2: Plan
-
-Create a branch: `git checkout -b agent/<first-8-chars-of-session-UUID>`
-(if not already on an agent branch — the human may have set this up).
-
-Write a concrete plan to `plans/<UUID-prefix>.md` with:
-- Session UUID and UTC start time
-- Deliverables scoped to one session (aim for a few hundred lines of
-  changes — small enough to review and verify)
-
-Pick work that doesn't overlap with open `agent-plan` issues.
-
-Create a GitHub issue for coordination:
-```
-coordination plan "title" < plans/<UUID-prefix>.md
-```
-
-For implementation sessions, priority order:
+**Implementation sessions** — priority order:
 1. Failing PRs that need fixing
 2. Next deliverable from the current VERIFICATION.md phase
 
@@ -107,14 +112,11 @@ For new native implementations, follow the development cycle in
 VERIFICATION.md: type signature → spec theorems → implementation →
 conformance tests → proofs.
 
-### Step 3: Execute
-
-**Implementation sessions:**
-- Execute the plan, running `lake build` after each coherent chunk of changes.
-  Use targeted builds when possible (e.g. `lake build Zip.Native.Crc32`)
-  for faster iteration; do a full `lake build` before committing
-- Run `lake exe test` periodically to verify tests pass
-- Commit with conventional prefixes (`feat:`, `fix:`, `refactor:`, `test:`, `doc:`)
+Execute by running `lake build` after each coherent chunk of changes.
+Use targeted builds when possible (e.g. `lake build Zip.Native.Crc32`)
+for faster iteration; do a full `lake build` before committing.
+Run `lake exe test` periodically.
+Commit with conventional prefixes (`feat:`, `fix:`, `refactor:`, `test:`, `doc:`).
 
 **Review sessions** — each session should pick **one or two** focus
 areas and go deep, rather than superficially covering everything.
@@ -143,7 +145,6 @@ over time. Focus areas:
   commands and skills in `.claude/` still useful? Trim stale guidance,
   add missing guidance. Consider writing new skills for recurring
   patterns (profiling, proof techniques, etc.)
-
 - **File size and organization**: Files over 500 lines are candidates
   for splitting; never let a file grow past 1000 lines. Check with
   `wc -l Zip/**/*.lean`. Split along natural boundaries (e.g. separate
@@ -160,44 +161,6 @@ than reviewing everything at once.
 - Research best practices (Lean proof style, performance tuning, etc.)
 - Improve the harness based on accumulated experience
 
-### Step 4: Verify
-
-After implementation:
-- Run `lake build && lake exe test` one final time
-- Check `sorry` count: `grep -rc sorry Zip/ || true`. If it increased vs
-  session start, investigate — this may indicate a proof regression
-- Review changes: `git diff <starting-commit>..HEAD`
-- Use `/second-opinion` to get Codex review of the changes (if unavailable,
-  skip and note in progress entry)
-- Small issues: fix immediately. Substantial issues: note in plan file
-
-### Step 5: Publish
-
-Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md`
-(e.g. `progress/2026-02-23T14-30-00Z_abc12345.md`) with:
-- Date/time (UTC), session type, what was accomplished
-- Decisions made, key proof patterns discovered
-- What remains, sorry count delta
-
-Update `PROGRESS.md` ONLY if this session changed a milestone:
-- Phase transition (e.g. Phase 3 complete → Phase 4 starting)
-- Sorry count reached zero for a phase
-- Major architectural decision affecting future sessions
-- Toolchain upgrade
-
-Most sessions should NOT touch PROGRESS.md.
-
-Commit everything and push the branch, then create a PR:
-```
-coordination create-pr N
-```
-This creates the PR referencing issue #N and enables auto-merge.
-
-### Step 6: Reflect
-
-End every session by running `/reflect`. If it suggests improvements to
-`.claude/CLAUDE.md`, commands, or skills, make those changes and commit.
-
 ## Coordination Reference
 
 The `coordination` script handles all GitHub-based multi-agent coordination.
@@ -205,12 +168,21 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 
 | Command | What it does |
 |---------|-------------|
-| `coordination orient` | List open agent-plan issues, open PRs, PRs needing attention |
-| `coordination close-stale` | Close agent-plan issues open >24 hours |
+| `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
+| `coordination close-stale` | Close agent-plan and skip issues open >24 hours |
 | `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
 | `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge |
-| `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown, best-effort advisory) |
+| `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
+| `coordination list-unclaimed` | List unclaimed agent-plan issues (FIFO order) |
+| `coordination queue-depth` | Count of unclaimed issues (used by `./go` for dispatch) |
+| `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
+| `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
+
+**Issue lifecycle**: planner creates issue (label: `agent-plan`) →
+worker claims it (adds label: `claimed`) → worker creates PR closing it →
+auto-merge squash-merges. Stale issues (>24h) are auto-closed.
+Skipped issues (label: `skip`) can be revised by the next planner.
 
 **Branch naming**: `agent/<first-8-chars-of-UUID>`
 **Plan files**: `plans/<UUID-prefix>.md`
