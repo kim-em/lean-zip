@@ -210,6 +210,7 @@ Skipped issues (label: `skip`) can be revised by the next planner.
     Zip/Native/Crc32.lean    — Native CRC-32 (table-driven)
     Zip/Native/BitReader.lean — LSB-first bit-level reader for DEFLATE
     Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
+    Zip/Native/Deflate.lean  — Native DEFLATE compressor (stored blocks)
     Zip/Native/Gzip.lean     — Native gzip/zlib decompression (RFC 1952/1950)
     Zip/Spec/Huffman.lean    — Canonical Huffman code spec (allCodes, prefix-free)
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
