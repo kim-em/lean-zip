@@ -173,7 +173,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 |---------|-------------|
 | `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
 | `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
-| `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge |
+| `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge, swap `claimed` → `has-pr` |
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
 | `coordination list-unclaimed` | List unclaimed agent-plan issues (FIFO order) |
@@ -185,9 +185,11 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 | `coordination unlock-planner` | Release planner lock early |
 
 **Issue lifecycle**: planner creates issue (label: `agent-plan`) →
-worker claims it (adds label: `claimed`) → worker creates PR closing it →
-auto-merge squash-merges.
+worker claims it (adds label: `claimed`) → worker creates PR closing it
+(label swaps to `has-pr`) → auto-merge squash-merges.
 Skipped issues (label: `skip`) can be revised by the next planner.
+Issues with `has-pr` appear in orient under "Issues with open PRs" and
+are excluded from `list-unclaimed` and `queue-depth`.
 
 **Dependencies**: Issues can declare `depends-on: #N` in their body.
 `coordination plan` auto-adds the `blocked` label if any dependency is

@@ -36,7 +36,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || \
 _unclaimed_issues() {
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,labels,createdAt \
-        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked"))] |
+        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked") and all(.name != "has-pr"))] |
               sort_by(.createdAt)'
 }
 
@@ -48,6 +48,12 @@ cmd_orient() {
     echo ""
     echo "=== Claimed work items ==="
     gh issue list --repo "$REPO" --label agent-plan --label claimed --state open --limit 20 \
+        --json number,title,createdAt \
+        --template '{{range .}}#{{.number}} {{.title}} ({{timeago .createdAt}}){{"\n"}}{{end}}'
+
+    echo ""
+    echo "=== Issues with open PRs ==="
+    gh issue list --repo "$REPO" --label agent-plan --label has-pr --state open --limit 20 \
         --json number,title,createdAt \
         --template '{{range .}}#{{.number}} {{.title}} ({{timeago .createdAt}}){{"\n"}}{{end}}'
 
@@ -175,6 +181,7 @@ cmd_create_pr() {
         echo "PR #$existing_pr already exists for branch $BRANCH. Enabling auto-merge."
         gh pr merge "$existing_pr" --repo "$REPO" --auto --squash || \
             echo "warning: auto-merge not available (branch protection may not be set up)"
+        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
         return 0
     fi
 
@@ -200,6 +207,9 @@ EOF
         gh pr merge "$pr_num" --repo "$REPO" --auto --squash || \
             echo "warning: auto-merge not available (branch protection may not be set up)"
     fi
+
+    # Update issue labels: claimed → has-pr
+    gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
 }
 
 # --- claim-fix ---
@@ -233,6 +243,14 @@ cmd_close_pr() {
 
     gh pr close "$pr_num" --repo "$REPO" \
         --comment "$reason (Session: \`$SESSION_ID\`)"
+
+    # Remove has-pr from any linked issue so it becomes claimable again
+    local linked_issue
+    linked_issue="$(gh pr view "$pr_num" --repo "$REPO" --json body --jq '.body' | \
+        grep -oE 'Closes #[0-9]+' | grep -oE '[0-9]+' | head -1)"
+    if [[ -n "$linked_issue" ]]; then
+        gh issue edit "$linked_issue" --repo "$REPO" --remove-label has-pr 2>/dev/null || true
+    fi
 }
 
 # --- list-unclaimed ---
@@ -264,6 +282,10 @@ cmd_claim() {
     fi
     if echo "$labels" | grep -qw 'blocked'; then
         echo "Issue #$issue_num is blocked by dependencies. Skipping."
+        return 1
+    fi
+    if echo "$labels" | grep -qw 'has-pr'; then
+        echo "Issue #$issue_num already has an open PR. Skipping."
         return 1
     fi
 
