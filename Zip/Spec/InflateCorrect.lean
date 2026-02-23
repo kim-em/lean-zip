@@ -289,7 +289,7 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
         simp only [Deflate.Spec.decode]; exact hgo⟩
 
 /-- Corollary: `inflate` (which starts at position 0) agrees with
-    `decodeBytes` (which also starts at position 0). -/
+    the spec `decode` applied to the full bitstream. -/
 theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
     (result : ByteArray)
     (h : Zip.Native.Inflate.inflate data maxOutputSize = .ok result) :
