@@ -477,6 +477,13 @@ Update it during review and reflect sessions.
 - **Option `pure` vs `some`**: After `simp only` with `↓reduceIte` on
   spec functions, goals may have `pure (...) = some (...)`. Add `pure`
   to the simp arguments to unfold it.
+- **`cases` + `bind` in Option do-notation goals**: After
+  `cases h : f x with | some p =>`, the `cases` substitutes the
+  constructor in the goal, making `h` unnecessary for `simp`. But the
+  bind wrapper `Option.bind (some p) (fun ... => ...)` still needs
+  reducing. Use `simp only [bind, Option.bind]` (NOT `simp only [h]`).
+  When cleaning up unused simp argument warnings in this pattern,
+  remove the hypothesis name, keep `bind, Option.bind`.
 - **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
   `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
   To define in a different namespace, either close the current namespace
