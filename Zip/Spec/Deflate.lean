@@ -813,6 +813,249 @@ where
         if bfinal == 1 then return acc else go bits acc fuel
       | _ => none  -- reserved block type (3)
 
+/-! ## Huffman encoding (inverse of decoding) -/
+
+/-- Find the length code index for a given length (3–258).
+    Returns `(index, extraBitsCount, extraBitsValue)` where
+    the length code symbol is `257 + index`. -/
+def findLengthCode (length : Nat) : Option (Nat × Nat × Nat) :=
+  go 0
+where
+  go (i : Nat) : Option (Nat × Nat × Nat) :=
+    if h : i ≥ lengthBase.size then none
+    else
+      let base := lengthBase[i]
+      let nextBase := lengthBase[i + 1]?.getD 259
+      if base ≤ length && length < nextBase then
+        some (i, lengthExtra[i]!, length - base)
+      else go (i + 1)
+  termination_by lengthBase.size - i
+
+/-- Find the distance code for a given distance (1–32768).
+    Returns `(code, extraBitsCount, extraBitsValue)`. -/
+def findDistCode (distance : Nat) : Option (Nat × Nat × Nat) :=
+  go 0
+where
+  go (i : Nat) : Option (Nat × Nat × Nat) :=
+    if h : i ≥ distBase.size then none
+    else
+      let base := distBase[i]
+      let nextBase := distBase[i + 1]?.getD 32769
+      if base ≤ distance && distance < nextBase then
+        some (i, distExtra[i]!, distance - base)
+      else go (i + 1)
+  termination_by distBase.size - i
+
+/-- Look up the Huffman codeword for a symbol in the code table.
+    Returns the codeword or `none` if the symbol is not in the table. -/
+def encodeSymbol (table : List (Huffman.Spec.Codeword × Nat))
+    (sym : Nat) : Option (List Bool) :=
+  match table with
+  | [] => none
+  | (cw, s) :: rest => if s == sym then some cw else encodeSymbol rest sym
+
+/-- Encode one LZ77 symbol as Huffman-coded bits.
+    Inverse of `decodeLitLen`. -/
+def encodeLitLen (litLengths distLengths : List Nat)
+    (sym : LZ77Symbol) : Option (List Bool) := do
+  let litCodes := Huffman.Spec.allCodes litLengths
+  let litTable := litCodes.map fun (s, cw) => (cw, s)
+  match sym with
+  | .literal b => encodeSymbol litTable b.toNat
+  | .endOfBlock => encodeSymbol litTable 256
+  | .reference len dist => do
+    let (idx, extraN, extraV) ← findLengthCode len
+    let lenBits ← encodeSymbol litTable (257 + idx)
+    let distCodes := Huffman.Spec.allCodes distLengths
+    let distTable := distCodes.map fun (s, cw) => (cw, s)
+    let (dCode, dExtraN, dExtraV) ← findDistCode dist
+    let distBits ← encodeSymbol distTable dCode
+    return lenBits ++ writeBitsLSB extraN extraV ++
+           distBits ++ writeBitsLSB dExtraN dExtraV
+
+/-- Encode a list of LZ77 symbols as Huffman-coded bits. -/
+def encodeSymbols (litLengths distLengths : List Nat)
+    (syms : List LZ77Symbol) : Option (List Bool) :=
+  match syms with
+  | [] => some []
+  | s :: rest => do
+    let bits ← encodeLitLen litLengths distLengths s
+    let restBits ← encodeSymbols litLengths distLengths rest
+    return bits ++ restBits
+
+/-! ## Encoding roundtrip theorems -/
+
+/-- If `encodeSymbol` succeeds, the entry is in the table. -/
+theorem encodeSymbol_mem (table : List (Huffman.Spec.Codeword × Nat))
+    (sym : Nat) (cw : List Bool)
+    (h : encodeSymbol table sym = some cw) :
+    (cw, sym) ∈ table := by
+  induction table with
+  | nil => simp [encodeSymbol] at h
+  | cons entry rest ih =>
+    obtain ⟨cw', s'⟩ := entry
+    simp only [encodeSymbol] at h
+    split at h
+    · rename_i heq
+      have := beq_iff_eq.mp heq
+      subst this; simp at h; subst h
+      exact List.mem_cons_self ..
+    · exact List.mem_cons_of_mem _ (ih h)
+
+/-- Encoding then decoding a single Huffman symbol recovers it. -/
+theorem encodeSymbol_decode
+    (table : List (Huffman.Spec.Codeword × Nat))
+    (sym : Nat) (cw : List Bool) (rest : List Bool)
+    (henc : encodeSymbol table sym = some cw)
+    (hpf : ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ table → (cw₂, s₂) ∈ table →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂) :
+    Huffman.Spec.decode table (cw ++ rest) = some (sym, rest) :=
+  Huffman.Spec.decode_prefix_free table cw sym rest (encodeSymbol_mem table sym cw henc) hpf
+
+/-- The flipped allCodes table is prefix-free when lengths are valid. -/
+theorem flipped_allCodes_prefix_free (lengths : List Nat) (maxBits : Nat)
+    (hv : Huffman.Spec.ValidLengths lengths maxBits) :
+    let table := (Huffman.Spec.allCodes lengths maxBits).map fun (s, cw) => (cw, s)
+    ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ table → (cw₂, s₂) ∈ table →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ := by
+  intro table cw₁ s₁ cw₂ s₂ h₁ h₂ hne
+  -- (cw, s) ∈ table means (s, cw) ∈ allCodes
+  simp only [table, List.mem_map] at h₁ h₂
+  obtain ⟨⟨a₁, b₁⟩, hm₁, heq₁⟩ := h₁
+  obtain ⟨⟨a₂, b₂⟩, hm₂, heq₂⟩ := h₂
+  simp at heq₁ heq₂
+  obtain ⟨rfl, rfl⟩ := heq₁
+  obtain ⟨rfl, rfl⟩ := heq₂
+  -- Now: (b₁, a₁) ∈ allCodes, (b₂, a₂) ∈ allCodes, (b₁, a₁) ≠ (b₂, a₂)
+  by_cases hse : a₁ = a₂
+  · -- Same symbol → same codeword (codeFor is a function)
+    subst hse
+    rw [Huffman.Spec.allCodes_mem_iff] at hm₁ hm₂
+    have := hm₁.2.symm.trans hm₂.2
+    simp at this; subst this
+    exact absurd rfl hne
+  · exact Huffman.Spec.allCodes_prefix_free_of_ne lengths maxBits hv a₁ a₂ b₁ b₂ hm₁ hm₂ hse
+
+set_option maxRecDepth 4096 in
+/-- If Huffman decode gives a symbol < 256, `decodeLitLen` returns a literal. -/
+theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
+    (bits rest : List Bool) (sym : Nat)
+    (hdec : Huffman.Spec.decode
+      ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+      bits = some (sym, rest))
+    (hlt : sym < 256) :
+    decodeLitLen litLengths distLengths bits = some (.literal sym.toUInt8, rest) := by
+  unfold decodeLitLen
+  simp only [hdec, bind, Option.bind, if_pos hlt, pure, Pure.pure]
+
+set_option maxRecDepth 4096 in
+/-- If Huffman decode gives symbol 256, `decodeLitLen` returns endOfBlock. -/
+theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
+    (bits rest : List Bool)
+    (hdec : Huffman.Spec.decode
+      ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+      bits = some (256, rest)) :
+    decodeLitLen litLengths distLengths bits = some (.endOfBlock, rest) := by
+  unfold decodeLitLen
+  simp only [hdec, bind, Option.bind, show ¬(256 : Nat) < 256 from by omega,
+    if_false, show (256 : Nat) == 256 from rfl, if_true, pure, Pure.pure]
+
+/-- Encoding then decoding one LZ77 symbol recovers it. -/
+theorem encodeLitLen_decodeLitLen
+    (litLengths distLengths : List Nat) (sym : LZ77Symbol)
+    (bits rest : List Bool)
+    (henc : encodeLitLen litLengths distLengths sym = some bits)
+    (hvalid_lit : Huffman.Spec.ValidLengths litLengths 15)
+    (hvalid_dist : Huffman.Spec.ValidLengths distLengths 15) :
+    decodeLitLen litLengths distLengths (bits ++ rest) = some (sym, rest) := by
+  have hpf_lit := flipped_allCodes_prefix_free litLengths 15 hvalid_lit
+  cases sym with
+  | literal b =>
+    simp only [encodeLitLen] at henc
+    have hdec := encodeSymbol_decode _ b.toNat bits rest henc hpf_lit
+    have hlt : b.toNat < 256 := UInt8.toNat_lt b
+    rw [decodeLitLen_of_literal litLengths distLengths (bits ++ rest) rest b.toNat hdec hlt]
+    simp [UInt8.ofNat_toNat]
+  | endOfBlock =>
+    simp only [encodeLitLen] at henc
+    have hdec := encodeSymbol_decode _ 256 bits rest henc hpf_lit
+    exact decodeLitLen_of_endOfBlock litLengths distLengths (bits ++ rest) rest hdec
+  | reference len dist =>
+    -- The reference case requires proving consistency between
+    -- findLengthCode/findDistCode and the decoder's table lookups,
+    -- plus chaining four decode steps (lenCW, lenExtra, distCW, distExtra).
+    -- Left as sorry — needs helper lemmas for findLengthCode_spec and
+    -- findDistCode_spec connecting encoder table lookups to decoder lookups.
+    sorry
+
+/-- A symbol list is valid for decoding: ends with `.endOfBlock` and
+    no `.endOfBlock` appears earlier. -/
+def ValidSymbolList : List LZ77Symbol → Prop
+  | [] => False
+  | [.endOfBlock] => True
+  | .endOfBlock :: _ => False
+  | _ :: rest => ValidSymbolList rest
+
+/-- Encoding then decoding a valid symbol sequence recovers it. -/
+theorem encodeSymbols_decodeSymbols
+    (litLengths distLengths : List Nat) (syms : List LZ77Symbol)
+    (bits rest : List Bool) (fuel : Nat)
+    (henc : encodeSymbols litLengths distLengths syms = some bits)
+    (hvalid_lit : Huffman.Spec.ValidLengths litLengths 15)
+    (hvalid_dist : Huffman.Spec.ValidLengths distLengths 15)
+    (hfuel : fuel ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
+    decodeSymbols litLengths distLengths (bits ++ rest) fuel = some (syms, rest) := by
+  induction syms generalizing bits fuel with
+  | nil => exact absurd hvalid id
+  | cons sym syms ih =>
+    -- Extract encoding of head symbol and rest
+    simp only [encodeSymbols] at henc
+    cases hes : encodeLitLen litLengths distLengths sym with
+    | none => simp [hes] at henc
+    | some symBits =>
+      simp only [hes, bind, Option.bind] at henc
+      cases her : encodeSymbols litLengths distLengths syms with
+      | none => simp [her] at henc
+      | some restBits =>
+        simp [her] at henc
+        -- henc : bits = symBits ++ restBits
+        subst henc
+        -- fuel ≥ 1
+        cases fuel with
+        | zero => simp [List.length] at hfuel
+        | succ f =>
+          simp only [decodeSymbols]
+          -- Reassociate: (symBits ++ restBits) ++ rest = symBits ++ (restBits ++ rest)
+          rw [List.append_assoc]
+          -- decodeLitLen recovers sym
+          rw [encodeLitLen_decodeLitLen litLengths distLengths sym symBits
+            (restBits ++ rest) hes hvalid_lit hvalid_dist]
+          simp only [bind, Option.bind]
+          -- Split on whether sym is endOfBlock
+          cases sym with
+          | endOfBlock =>
+            -- Must be the last symbol
+            cases syms with
+            | nil =>
+              simp [encodeSymbols] at her; subst her
+              simp [pure, Pure.pure]
+            | cons _ _ => exact absurd hvalid id
+          | literal b =>
+            have hvalid' : ValidSymbolList syms := by
+              cases syms with
+              | nil => exact absurd hvalid id
+              | cons _ _ => exact hvalid
+            rw [ih restBits f her (by simp [List.length] at hfuel ⊢; omega) hvalid']
+            simp [pure, Pure.pure]
+          | reference len dist =>
+            have hvalid' : ValidSymbolList syms := by
+              cases syms with
+              | nil => exact absurd hvalid id
+              | cons _ _ => exact hvalid
+            rw [ih restBits f her (by simp [List.length] at hfuel ⊢; omega) hvalid']
+            simp [pure, Pure.pure]
+
 /-! ## Fuel independence -/
 
 /-- `decodeSymbols` is fuel-independent: if it succeeds with some fuel,
