@@ -150,6 +150,30 @@ private theorem readCLCodeLengths_pos_inv (br : Zip.Native.BitReader)
           (readBits_pos_inv br 3 v br₁ hwf hpos hrb) h (by omega)
     · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hpos
 
+/-- `readCLCodeLengths` preserves array size. -/
+private theorem readCLCodeLengths_size (br : Zip.Native.BitReader)
+    (clLengths : Array UInt8) (i numCodeLen : Nat)
+    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
+      .ok (clLengths', br')) :
+    clLengths'.size = clLengths.size := by
+  induction hd : numCodeLen - i generalizing br clLengths i with
+  | zero =>
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    have : ¬(i < numCodeLen) := by omega
+    simp [this] at h; obtain ⟨rfl, _⟩ := h; rfl
+  | succ n ih =>
+    have hi : i < numCodeLen := by omega
+    unfold Zip.Native.Inflate.readCLCodeLengths at h
+    simp only [if_pos hi, bind, Except.bind] at h
+    cases hrb : br.readBits 3 with
+    | error e => simp [hrb] at h
+    | ok p =>
+      obtain ⟨v, br₁⟩ := p
+      simp only [hrb] at h
+      have := ih br₁ _ (i + 1) h (by omega)
+      simp [Array.size_setIfInBounds] at this ⊢; exact this
+
 /-- `decodeCLSymbols` preserves well-formedness. -/
 private theorem decodeCLSymbols_wf (clTree : Zip.Native.HuffTree)
     (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
@@ -275,6 +299,70 @@ private theorem decodeCLSymbols_pos_inv (clTree : Zip.Native.HuffTree)
                   · simp only [pure, Except.pure] at h
                     exact ih br₂ _ _ (readBits_wf br₁ 7 rep br₂ hwf₁ hrb)
                       (readBits_pos_inv br₁ 7 rep br₂ hwf₁ hpos₁ hrb) h
+              · simp at h
+
+/-- `decodeCLSymbols` preserves array size. -/
+private theorem decodeCLSymbols_size (clTree : Zip.Native.HuffTree)
+    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (idx totalCodes fuel : Nat)
+    (codeLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (h : Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+      .ok (codeLengths', br')) :
+    codeLengths'.size = codeLengths.size := by
+  induction fuel generalizing br codeLengths idx with
+  | zero => simp [Zip.Native.Inflate.decodeCLSymbols] at h
+  | succ n ih =>
+    unfold Zip.Native.Inflate.decodeCLSymbols at h
+    split at h
+    · obtain ⟨rfl, _⟩ := Except.ok.inj h; rfl
+    · simp only [bind, Except.bind] at h
+      cases hdec : clTree.decode br with
+      | error e => simp [hdec] at h
+      | ok p =>
+        obtain ⟨sym, br₁⟩ := p
+        simp only [hdec] at h
+        split at h
+        · -- sym < 16: set! preserves size
+          have := ih br₁ _ _ h
+          simp [Array.size_setIfInBounds] at this ⊢; exact this
+        · split at h
+          · -- sym == 16
+            split at h
+            · simp at h
+            · simp only [pure, Except.pure] at h
+              cases hrb : br₁.readBits 2 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · simp at h
+                · have := ih br₂ _ _ h
+                  rw [this, fillEntries_size]
+          · split at h
+            · -- sym == 17
+              cases hrb : br₁.readBits 3 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · simp at h
+                · simp only [pure, Except.pure] at h
+                  have := ih br₂ _ _ h
+                  rw [this, fillEntries_size]
+            · split at h
+              · -- sym == 18
+                cases hrb : br₁.readBits 7 with
+                | error e => simp [hrb] at h
+                | ok p =>
+                  obtain ⟨rep, br₂⟩ := p
+                  simp only [hrb] at h
+                  split at h
+                  · simp at h
+                  · simp only [pure, Except.pure] at h
+                    have := ih br₂ _ _ h
+                    rw [this, fillEntries_size]
               · simp at h
 
 /-- `readCLCodeLengths` corresponds to the spec's `readCLLengths`:
