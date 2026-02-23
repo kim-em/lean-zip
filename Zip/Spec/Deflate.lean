@@ -335,11 +335,10 @@ where
 private def byteToBitsSpec (b : UInt8) : List Bool :=
   List.ofFn fun (i : Fin 8) => b.toNat.testBit i.val
 
-/-- Encode a 16-bit value as 16 bits in LSB-first order. -/
+/-- Encode a natural number as 16 bits in LSB-first order.
+    Uses `testBit` directly for easier proofs with `readBitsLSB_ofFn_testBit`. -/
 private def encodeLEU16 (v : Nat) : List Bool :=
-  let lo := v % 256
-  let hi := v / 256
-  byteToBitsSpec lo.toUInt8 ++ byteToBitsSpec hi.toUInt8
+  List.ofFn fun (i : Fin 16) => v.testBit i.val
 
 /-- Encode one stored block (data must be at most 65535 bytes).
     Does NOT include BFINAL/BTYPE bits (those are emitted by the caller). -/
@@ -353,13 +352,14 @@ private def encodeStoredBlock (data : List UInt8) : List Bool :=
     for each block. Splits data into blocks of at most 65535 bytes. -/
 def encodeStored (data : List UInt8) : List Bool :=
   if data.length ≤ 65535 then
-    -- Single final block
-    [true, false, false] ++ encodeStoredBlock data
+    -- Single final block: BFINAL=1, BTYPE=00, 5 padding bits to byte-align
+    [true, false, false] ++ List.replicate 5 false ++ encodeStoredBlock data
   else
     -- Non-final block with 65535 bytes, then recurse
     let block := data.take 65535
     let rest := data.drop 65535
-    [false, false, false] ++ encodeStoredBlock block ++ encodeStored rest
+    [false, false, false] ++ List.replicate 5 false ++
+      encodeStoredBlock block ++ encodeStored rest
 termination_by data.length
 decreasing_by
   simp only [List.length_drop]
@@ -490,11 +490,201 @@ theorem decode_fuel_independent
     ∀ k, decode bits (fuel + k) = some result := by
   sorry
 
+/-! ## Stored block roundtrip helpers -/
+
+private theorem mod_two_mul (v m : Nat) (hm : m > 0) :
+    v % (2 * m) = v % 2 + 2 * ((v / 2) % m) := by
+  have key : v = (2 * m) * (v / 2 / m) + (2 * ((v / 2) % m) + v % 2) := by
+    have h1 : 2 * (v / 2) + v % 2 = v := Nat.div_add_mod v 2
+    have h2 : m * (v / 2 / m) + (v / 2) % m = v / 2 := Nat.div_add_mod (v / 2) m
+    rw [← h2] at h1; rw [Nat.mul_add, ← Nat.mul_assoc] at h1; omega
+  calc v % (2 * m)
+      = ((2 * m) * (v / 2 / m) + (2 * ((v / 2) % m) + v % 2)) % (2 * m) := by rw [← key]
+    _ = ((v / 2 / m) * (2 * m) + (2 * ((v / 2) % m) + v % 2)) % (2 * m) := by
+        rw [Nat.mul_comm]
+    _ = 2 * ((v / 2) % m) + v % 2 := Nat.mul_add_mod_of_lt (by
+        have := Nat.mod_lt (v / 2) hm
+        have := Nat.mod_lt v (show 0 < 2 by omega)
+        omega)
+    _ = v % 2 + 2 * ((v / 2) % m) := by omega
+
+private theorem testBit_zero_eq_mod_two (v : Nat) :
+    (if v.testBit 0 then 1 else 0) = v % 2 := by
+  rw [Nat.testBit_zero]; split <;> rename_i h <;> simp_all <;> omega
+
+/-- Reading `n` bits from the `testBit` encoding of `v` yields `v % 2^n`. -/
+private theorem readBitsLSB_ofFn_testBit (v n : Nat) (rest : List Bool) :
+    readBitsLSB n ((List.ofFn fun (i : Fin n) => v.testBit i.val) ++ rest) =
+    some (v % 2^n, rest) := by
+  induction n generalizing v with
+  | zero => simp [readBitsLSB]; omega
+  | succ k ih =>
+    simp only [List.ofFn_succ, List.cons_append]
+    have htail : (List.ofFn fun i : Fin k => Nat.testBit v (Fin.succ i).val) =
+                 (List.ofFn fun i : Fin k => Nat.testBit (v / 2) i.val) := by
+      congr 1; ext i; exact Nat.testBit_add_one v i.val
+    rw [htail]
+    show (readBitsLSB k _ |>.bind _) = _
+    rw [ih (v / 2)]
+    simp only [Option.bind, pure, Pure.pure]
+    congr 1; congr 1
+    simp only [show (0 : Fin (k + 1)).val = 0 from rfl]
+    rw [testBit_zero_eq_mod_two,
+        show (2:Nat)^(k+1) = 2 * 2^k from by rw [Nat.pow_succ, Nat.mul_comm],
+        mod_two_mul v (2^k) Nat.one_le_two_pow]
+    omega
+
+/-- Reading 8 bits from `byteToBitsSpec b` recovers `b.toNat`. -/
+private theorem readBitsLSB_byteToBitsSpec (b : UInt8) (rest : List Bool) :
+    readBitsLSB 8 (byteToBitsSpec b ++ rest) = some (b.toNat, rest) := by
+  have h := readBitsLSB_ofFn_testBit b.toNat 8 rest
+  simp only [byteToBitsSpec] at h ⊢
+  rw [h]; congr 1; congr 1
+  exact Nat.mod_eq_of_lt (UInt8.toNat_lt b)
+
+/-- `readNBytes` on `data.flatMap byteToBitsSpec` recovers `data`. -/
+private theorem readNBytes_byteToBitsSpec (data : List UInt8) (rest : List Bool) :
+    decodeStored.readNBytes data.length (data.flatMap byteToBitsSpec ++ rest) [] =
+    some (data, rest) := by
+  suffices ∀ (acc : List UInt8),
+    decodeStored.readNBytes data.length (data.flatMap byteToBitsSpec ++ rest) acc =
+    some (acc ++ data, rest) by simpa using this []
+  induction data with
+  | nil => intro acc; simp [decodeStored.readNBytes]
+  | cons b bs ih =>
+    intro acc
+    simp only [List.flatMap_cons, List.length_cons, List.append_assoc]
+    unfold decodeStored.readNBytes
+    show (readBitsLSB 8 _ |>.bind _) = _
+    rw [readBitsLSB_byteToBitsSpec]
+    simp only [Option.bind]
+    have : b.toNat.toUInt8 = b := by simp
+    rw [this, ih (acc ++ [b])]
+    simp [List.append_assoc]
+
+/-- `data.flatMap byteToBitsSpec` has length `8 * data.length`. -/
+private theorem flatMap_byteToBitsSpec_length (data : List UInt8) :
+    (data.flatMap byteToBitsSpec).length = 8 * data.length := by
+  induction data with
+  | nil => simp
+  | cons b bs ih =>
+    simp only [List.flatMap_cons, List.length_append, byteToBitsSpec,
+               List.length_ofFn, List.length_cons, ih]; omega
+
+/-- `encodeStored` output length is always a multiple of 8. -/
+private theorem encodeStored_length_mod8 (data : List UInt8) :
+    (encodeStored data).length % 8 = 0 := by
+  unfold encodeStored
+  split
+  · simp only [List.length_append, List.length_cons, List.length_nil,
+               List.length_replicate, encodeStoredBlock, encodeLEU16,
+               List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+  · have ih := encodeStored_length_mod8 (data.drop 65535)
+    simp only [List.length_append, List.length_cons, List.length_nil,
+               List.length_replicate, List.length_take,
+               encodeStoredBlock, encodeLEU16,
+               List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+
+/-- `decodeStored` on `[pad₅] ++ encodeStoredBlock data ++ rest` recovers `data`. -/
+private theorem decodeStored_encodeStoredBlock (data : List UInt8) (rest : List Bool)
+    (hlen : data.length ≤ 65535)
+    (halign : (List.replicate 5 false ++ encodeStoredBlock data ++ rest).length % 8 = 5) :
+    decodeStored (List.replicate 5 false ++ encodeStoredBlock data ++ rest) =
+    some (data, rest) := by
+  unfold decodeStored
+  -- alignToByte drops 5 padding bits
+  simp only [alignToByte]
+  rw [halign]
+  -- drop 5 from [false, false, false, false, false] ++ ...
+  simp only [show List.replicate 5 false = [false, false, false, false, false] from rfl,
+    List.cons_append, List.nil_append]
+  simp only [List.drop_succ_cons, List.drop_zero]
+  -- Now: readBitsLSB 16 (encodeLEU16 len ++ encodeLEU16 nlen ++ data.flatMap byteToBitsSpec ++ rest)
+  simp only [encodeStoredBlock, encodeLEU16, List.append_assoc]
+  show (readBitsLSB 16 _ |>.bind _) = _
+  rw [readBitsLSB_ofFn_testBit data.length 16,
+      show data.length % 2 ^ 16 = data.length from Nat.mod_eq_of_lt (by omega)]
+  simp only [Option.bind]
+  show (readBitsLSB 16 _ |>.bind _) = _
+  rw [readBitsLSB_ofFn_testBit (data.length ^^^ 0xFFFF) 16,
+      show (data.length ^^^ 0xFFFF) % 2 ^ 16 = data.length ^^^ 0xFFFF from
+        Nat.mod_eq_of_lt (Nat.xor_lt_two_pow (by omega) (by omega))]
+  simp only [Option.bind]
+  rw [show (data.length ^^^ (data.length ^^^ 0xFFFF) == 0xFFFF) = true from by
+    rw [← Nat.xor_assoc, Nat.xor_self, Nat.zero_xor]; decide]
+  exact readNBytes_byteToBitsSpec data rest
+
 /-! ## Correctness theorems -/
 
-/-- Encoding stored blocks then decoding produces the original data. -/
+/-- Generalized roundtrip: `decode.go` on `encodeStored data` with
+    accumulator `acc` and sufficient fuel produces `acc ++ data`. -/
+private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) (fuel : Nat)
+    (hfuel : fuel ≥ data.length / 65535 + 1) :
+    decode.go (encodeStored data) acc fuel = some (acc ++ data) := by
+  induction data using encodeStored.induct generalizing acc fuel with
+  | case1 data hle =>
+    -- Single block: data.length ≤ 65535, BFINAL=1
+    unfold encodeStored
+    simp only [hle, ↓reduceIte]
+    match fuel, hfuel with
+    | fuel + 1, _ =>
+    unfold decode.go
+    -- Reduce BFINAL=1, BTYPE=00 header, match on btype=0, then bfinal==1 → return
+    simp [readBitsLSB]
+    -- Goal (cons-ified): (decodeStored (false::...::encodeStoredBlock data)).bind ... = ...
+    have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
+      simp only [List.append_nil, List.length_append, List.length_replicate,
+        encodeStoredBlock, encodeLEU16,
+        List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+    -- decodeStored_encodeStoredBlock with rest=[], then strip ++ []
+    have hdec : decodeStored (List.replicate 5 false ++ encodeStoredBlock data) =
+        some (data, []) := by
+      have h := decodeStored_encodeStoredBlock data [] hle halign
+      simp only [List.append_nil] at h; exact h
+    -- Convert cons form back to replicate form for rewriting
+    show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
+      fun x => some (acc ++ x.fst)) = some (acc ++ data)
+    rw [hdec]; simp
+  | case2 data hgt rest ih =>
+    -- Multi-block: data.length > 65535, BFINAL=0
+    unfold encodeStored
+    simp only [show ¬(data.length ≤ 65535) from by omega, ↓reduceIte]
+    match fuel, hfuel with
+    | fuel + 1, hfuel =>
+    have htake_len : (data.take 65535).length = 65535 := by
+      rw [List.length_take]; omega
+    have hrest_len : rest.length = data.length - 65535 := by
+      simp [show rest = data.drop 65535 from rfl]
+    unfold decode.go
+    -- Reduce BFINAL=0, BTYPE=00 header, match on btype=0
+    simp [readBitsLSB]
+    -- simp cons-ifies List.replicate and replaces rest with data.drop 65535;
+    -- use change to convert back to the form expected by decodeStored_encodeStoredBlock
+    change (decodeStored (List.replicate 5 false ++
+        encodeStoredBlock (data.take 65535) ++ encodeStored rest) |>.bind
+      fun x => decode.go x.snd (acc ++ x.fst) fuel) = some (acc ++ data)
+    have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
+        encodeStored rest).length % 8 = 5 := by
+      simp only [List.length_append, List.length_replicate,
+        encodeStoredBlock, encodeLEU16,
+        List.length_ofFn, flatMap_byteToBitsSpec_length, htake_len]
+      have := encodeStored_length_mod8 rest
+      omega
+    rw [decodeStored_encodeStoredBlock (data.take 65535) (encodeStored rest)
+        (by omega) halign]
+    simp only [Option.bind]
+    rw [ih (acc ++ data.take 65535) fuel (by rw [hrest_len]; omega)]
+    rw [List.append_assoc, show rest = data.drop 65535 from rfl, List.take_append_drop]
+
+/-- Encoding stored blocks then decoding produces the original data.
+    Uses explicit fuel `data.length / 65535 + 1` (≥ number of blocks).
+    The default fuel (10001) suffices for data up to ~655MB;
+    the theorem is stated with exact fuel to hold for all list lengths. -/
 theorem encodeStored_decode (data : List UInt8) :
-    decode (encodeStored data) = some data := by sorry
+    decode (encodeStored data) (data.length / 65535 + 1) = some data := by
+  unfold decode
+  rw [encodeStored_go data [] (data.length / 65535 + 1) (by omega)]
+  simp only [List.nil_append]
 
 /-- The spec decode function is deterministic: given the same input,
     it always produces the same output. (This is trivially true for a
