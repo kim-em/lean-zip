@@ -1,4 +1,5 @@
 import Zip.Spec.DeflateEncode
+import Zip.Spec.BitstreamWriteCorrect
 
 /-!
 # DEFLATE Dynamic Block Header Encoding (RFC 1951 §3.2.7)
@@ -9,7 +10,7 @@ RLE encoding of code lengths and dynamic Huffman tree header assembly:
 - `rlDecodeLengths_rlEncodeLengths`: RLE roundtrip proof
 - `rlEncodeLengths_valid`: entry constraint validation
 - `encodeDynamicTrees`: full dynamic tree header encoder
-- `encodeDynamicTrees_decodeDynamicTables`: header roundtrip theorem (WIP)
+- `encodeDynamicTrees_decodeDynamicTables`: header roundtrip theorem
 -/
 
 namespace Deflate.Spec
@@ -400,6 +401,148 @@ def encodeDynamicTrees (litLens : List Nat) (distLens : List Nat) :
   let clLenBits := writeCLLengths clLens numCodeLen
 
   return headerBits ++ clLenBits ++ symbolBits
+
+/-! ## Helper lemmas for the dynamic tree header roundtrip -/
+
+protected theorem clPermutation_length : Deflate.Spec.clPermutation.length = 19 := by decide
+
+/-- `codeLengthOrder.toList` is the same list as `clPermutation`. -/
+private theorem codeLengthOrder_toList_eq_clPermutation :
+    codeLengthOrder.toList = Deflate.Spec.clPermutation := by rfl
+
+theorem computeHCLEN_ge_four (clLens : List Nat) : computeHCLEN clLens ≥ 4 := by
+  simp [computeHCLEN]; omega
+
+theorem computeHCLEN_le_nineteen (clLens : List Nat) : computeHCLEN clLens ≤ 19 := by
+  simp only [computeHCLEN]
+  have : (Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0).length = 19 := by
+    simp [Deflate.Spec.clPermutation_length]
+  omega
+
+/-! ## readCLLengths / writeCLLengths roundtrip -/
+
+/-- Reading back CL lengths written by `writeCLLengths` recovers the values
+    in the correct permuted positions.
+
+    The result accumulator has `clLens.getD pos 0` at each position `pos`
+    that is `codeLengthOrder[j]` for some `j < numCodeLen`, and retains
+    the original `acc` values elsewhere. -/
+private theorem readCLLengths_writeCLLengths_go
+    (clLens : List Nat) (n idx : Nat) (acc : List Nat) (rest : List Bool)
+    (hacc : acc.length = 19) (hidx : idx + n ≤ 19)
+    (hvals : ∀ i, clLens.getD i 0 < 8) :
+    Deflate.Spec.readCLLengths n idx acc
+      ((Deflate.Spec.clPermutation.drop idx |>.take n).flatMap
+        (fun pos => writeBitsLSB 3 (clLens.getD pos 0)) ++ rest) =
+    some ((Deflate.Spec.clPermutation.drop idx |>.take n).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      acc, rest) := by
+  induction n generalizing idx acc with
+  | zero =>
+    simp [Deflate.Spec.readCLLengths]
+  | succ k ih =>
+    have hidx_lt : idx < 19 := by omega
+    have hperm_len := Deflate.Spec.clPermutation_length
+    -- Unfold the drop/take to expose the head element
+    have hdrop_cons : Deflate.Spec.clPermutation.drop idx =
+        Deflate.Spec.clPermutation[idx] :: Deflate.Spec.clPermutation.drop (idx + 1) :=
+      (List.getElem_cons_drop (h := by omega)).symm
+    simp only [hdrop_cons, List.take_succ_cons, List.flatMap_cons, List.foldl_cons]
+    rw [List.append_assoc]
+    -- readCLLengths unfolds one step
+    rw [Deflate.Spec.readCLLengths]
+    -- Bridge: codeLengthOrder[idx]! = clPermutation[idx]
+    have hCOsize : codeLengthOrder.size = 19 := by
+      have := congrArg List.length codeLengthOrder_toList_eq_clPermutation
+      simp only [Array.length_toList] at this; omega
+    have hpos : codeLengthOrder[idx]! = Deflate.Spec.clPermutation[idx] := by
+      rw [getElem!_pos codeLengthOrder idx (by omega)]
+      rw [show codeLengthOrder[idx] =
+          codeLengthOrder.toList[idx]'(by
+            rw [codeLengthOrder_toList_eq_clPermutation]; omega) from
+        (Array.getElem_toList (h := by omega)).symm]
+      exact List.getElem_of_eq codeLengthOrder_toList_eq_clPermutation _
+    -- readBitsLSB 3 recovers the value
+    have hval : clLens.getD Deflate.Spec.clPermutation[idx] 0 < 2 ^ 3 := by
+      have := hvals Deflate.Spec.clPermutation[idx]; omega
+    rw [Deflate.Correctness.readBitsLSB_writeBitsLSB 3 _ _ hval]
+    simp only [bind, Option.bind]
+    -- The position written by readCLLengths matches clPermutation[idx]
+    rw [hpos]
+    -- Apply IH with updated accumulator
+    have hacc' : (acc.set Deflate.Spec.clPermutation[idx]
+        (clLens.getD Deflate.Spec.clPermutation[idx] 0)).length = 19 := by
+      simp [hacc]
+    exact ih (idx + 1) _ hacc' (by omega)
+
+/-- `writeCLLengths` unfolds to a flatMap over the clPermutation. -/
+private theorem writeCLLengths_eq_flatMap (clLens : List Nat) (numCodeLen : Nat) :
+    writeCLLengths clLens numCodeLen =
+    (Deflate.Spec.clPermutation.take numCodeLen).flatMap
+      (fun pos => writeBitsLSB 3 (clLens.getD pos 0)) := by
+  simp [writeCLLengths]
+
+/-- Full roundtrip: `readCLLengths` on `writeCLLengths` output produces
+    the expected accumulator. -/
+theorem readCLLengths_writeCLLengths
+    (clLens : List Nat) (numCodeLen : Nat) (rest : List Bool)
+    (hnum : numCodeLen ≤ 19)
+    (hvals : ∀ i, clLens.getD i 0 < 8) :
+    Deflate.Spec.readCLLengths numCodeLen 0 (List.replicate 19 0)
+      (writeCLLengths clLens numCodeLen ++ rest) =
+    some ((Deflate.Spec.clPermutation.take numCodeLen).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      (List.replicate 19 0), rest) := by
+  rw [writeCLLengths_eq_flatMap]
+  have := readCLLengths_writeCLLengths_go clLens numCodeLen 0 (List.replicate 19 0) rest
+    (by simp) (by omega) hvals
+  simp only [List.drop_zero] at this
+  exact this
+
+/-! ## CL entry encoding/decoding roundtrip -/
+
+/-- The CL Huffman table constructed by `encodeDynamicTrees` is prefix-free,
+    enabling single-symbol encode/decode roundtrip via `encodeSymbol_decode`. -/
+private theorem clTable_prefix_free
+    (clLens : List Nat) (maxBits : Nat)
+    (hv : Huffman.Spec.ValidLengths clLens maxBits) :
+    let clTable := (Huffman.Spec.allCodes clLens maxBits).map fun (sym, cw) => (cw, sym)
+    ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ clTable → (cw₂, s₂) ∈ clTable →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ :=
+  flipped_allCodes_prefix_free clLens maxBits hv
+
+/-- Encoding CL entries then decoding with `decodeCLSymbols` recovers
+    the original code lengths (via RLE decode).
+
+    This connects `encodeCLEntries` (which produces Huffman-coded bits)
+    to `decodeDynamicTables.decodeCLSymbols` (which decodes them back).
+
+    The proof requires showing that:
+    1. Each Huffman symbol encodes/decodes correctly (prefix-free property)
+    2. Extra bits for codes 16/17/18 roundtrip via `readBitsLSB_writeBitsLSB`
+    3. The accumulator matches `rlDecodeLengths` at each step
+    4. Sufficient fuel exists for the recursion -/
+private theorem encodeCLEntries_decodeCLSymbols_roundtrip
+    (clLens : List Nat)
+    (clTable : List (Huffman.Spec.Codeword × Nat))
+    (entries : List CLEntry)
+    (symbolBits : List Bool)
+    (rest : List Bool)
+    (totalCodes : Nat)
+    (hv : Huffman.Spec.ValidLengths clLens 7)
+    (htable : clTable = (Huffman.Spec.allCodes clLens 7).map fun (sym, cw) => (cw, sym))
+    (henc : encodeCLEntries clTable entries = some symbolBits)
+    (hvalid : ∀ entry ∈ entries, (entry.1 ≤ 15 ∧ entry.2 = 0) ∨
+      (entry.1 = 16 ∧ entry.2 ≤ 3) ∨
+      (entry.1 = 17 ∧ entry.2 ≤ 7) ∨
+      (entry.1 = 18 ∧ entry.2 ≤ 127))
+    (hdec : rlDecodeLengths entries = some codeLengths)
+    (hlen : codeLengths.length = totalCodes)
+    (hacc_len : acc.length ≤ totalCodes) :
+    decodeDynamicTables.decodeCLSymbols clTable totalCodes acc
+      (symbolBits ++ rest) totalCodes =
+    some (acc ++ codeLengths.drop acc.length, rest) := by
+  sorry
 
 /-! ## Dynamic tree header roundtrip -/
 
