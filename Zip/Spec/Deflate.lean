@@ -1,4 +1,4 @@
-import Zip.Spec.Huffman
+import Zip.Spec.HuffmanTheorems
 import Zip.Spec.LZ77
 
 /-!
