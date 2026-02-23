@@ -234,6 +234,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
     Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
+    Zip/Spec/HuffmanEncodeCorrect.lean — canonicalCodes ↔ codeFor correspondence
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
     Zip/Spec/LZ77NativeCorrect.lean — Native lz77Greedy correctness (BB1 for compressor)
@@ -630,6 +631,31 @@ Update it during review and reflect sessions.
   Similarly, `List.set_cons_zero` and `List.set_cons_succ` are not
   `@[simp]` — unfold them with `simp only` first, then use `simp` for
   the filter/boolean parts.
+
+- **`by_cases` instead of `split` for nested `if` after `unfold`**: After
+  `unfold f` + `dsimp only []`, the goal may contain multiple `if`
+  expressions (e.g. one from the conclusion, one from the function body).
+  `split` captures the OUTERMOST `if`, which may be from the conclusion
+  rather than the function body you're trying to reduce. Use
+  `by_cases hcond : <exact-condition>` to explicitly target the correct
+  `if`, then `simp only [hcond, ↓reduceIte]` to reduce it.
+- **`simp only [hk_eq]` for dependent type rewriting in arrays**: When
+  `hk_eq : k = i` and you need to rewrite `lengths[k]` where the access
+  depends on `hks : k < lengths.size`, `rw [hk_eq]` fails with "motive
+  is not type correct" because it can't abstract over the dependent
+  bound proof. Use `simp only [hk_eq]` instead — it handles dependent
+  types via congr lemmas.
+- **UInt32→UInt16 faithfulness bound**: When proving
+  `(x : UInt32).toUInt16.toNat = x.toNat` (i.e., no truncation), you
+  need `x.toNat < 65536`. For canonical Huffman codes, `maxBits < 16`
+  ensures `ncSpec + count ≤ 2^len ≤ 2^15 = 32768 < 65536`. Pattern:
+  ```lean
+  change (nextCode[len]!).toUInt16.toNat = _
+  rw [show ∀ (x : UInt32), x.toUInt16.toNat = x.toNat % 65536 from fun _ => rfl,
+      hcode_val, Nat.mod_eq_of_lt]
+  have : 2 ^ len ≤ 32768 := Nat.pow_le_pow_right (by omega) (by omega)
+  omega
+  ```
 
 ## Current State
 
