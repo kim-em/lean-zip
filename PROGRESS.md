@@ -2,6 +2,49 @@
 
 Session-by-session log for lean-zip development. Most recent first.
 
+## 2026-02-23: Implementation — ZERO SORRIES MILESTONE
+
+**Session type**: Implementation
+**Starting commit**: `f6521c6` | **Sorry count**: 3 → 0
+**Commits**: `4a5dcb6`
+
+### Accomplished
+
+Eliminated all remaining sorry placeholders in the codebase. The entire
+DEFLATE decompressor correctness chain is now fully proven.
+
+**Fixed decodeCLSymbols_correct build errors** (previously masked by caching):
+- `simp only` with `↓reduceIte` can't evaluate `Nat.beq` — used inline `rfl`
+  facts: `show ((16 : Nat) == 16) = true from rfl`
+- Full `simp [hsym*_val]` was too powerful — replaced with targeted `simp only`
+- Removed unused `bind, Option.bind` from guard simp calls
+
+**Completed decodeDynamicTrees_correct proof**:
+- Replaced `convert` (Mathlib-only) with manual `rw`/`exact` proofs
+- `congr 1; congr 1` → `congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))`
+  to avoid max recursion on Prod types
+- `← List.map_drop` + `List.drop_take` for take/drop ↔ extract correspondence
+- `readBitsLSB_bound` for bounding UInt16.size in omega
+- `omega` can't evaluate `UInt16.size` — need `simp [UInt16.size]` first
+
+**Cleaned up all simp warnings** (15 warnings → 0).
+
+### Key proof patterns discovered
+
+- `congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))` avoids `congr` max
+  recursion depth on nested `Prod` types inside `Option`
+- `← List.map_drop` pushes `List.drop` inside `List.map`; combined with
+  `List.drop_take`, bridges `take`/`drop` and `Array.extract`
+- `readBitsLSB_bound` provides `val < 2^n` from `readBitsLSB n`, essential
+  for bounding `UInt16.size` in omega proofs
+- `Pure.pure` not `Option.pure` for unfolding monadic `return` in specs
+- Inline `rfl` facts (`show ((16 : Nat) == 16) = true from rfl`) let
+  `simp only` evaluate `Nat.beq` without full `simp` power
+
+### Remaining
+
+Zero sorries. Next: review session for proof quality, then Phase 4.
+
 ## 2026-02-23: Implementation — decodeDynamicTrees infrastructure
 
 **Session type**: Implementation

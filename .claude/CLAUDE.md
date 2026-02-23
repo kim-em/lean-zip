@@ -464,13 +464,27 @@ Update it during review and reflect sessions.
   4. Key lemmas: `push_getElem_lt` (push preserves earlier elements),
      `push_data_toList` (`(buf.push b).data.toList = buf.data.toList ++ [b]`),
      `List.ofFn_succ_last` (snoc decomposition of `List.ofFn`)
+- **`congr` max recursion on nested Prod in Option**: `congr 1; congr 1`
+  on `some (a, b, c) = some (x, y, z)` hits max recursion depth. Use
+  `congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))` instead — gives clean
+  sub-goals without recursion issues. Note: `congrArg` not `congr_arg`.
+- **take/drop ↔ Array.extract**: To bridge `List.take`/`List.drop` (from
+  spec) with `Array.extract` (from native), use:
+  `simp only [Array.toList_extract, List.extract, Nat.sub_zero, List.drop_zero]`
+  then `← List.map_drop` + `List.drop_take` for drop-inside-map-take.
+- **`readBitsLSB_bound` for omega**: `readBitsLSB n bits = some (val, rest)`
+  implies `val < 2^n`. Essential for bounding UInt values (e.g.,
+  `hlit_v.toNat < 32`) before omega can prove `≤ UInt16.size`.
+- **`Pure.pure` not `Option.pure`**: The constant `Option.pure` doesn't
+  exist. Use `pure, Pure.pure` in simp arguments to unfold monadic
+  `return` in Option specs.
 
 ## Current State Summary
 
 Updated by agent at the end of each session.
 
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Phase**: Phase 3 (verified decompressor) — in progress
-- **Sorry count**: 3 (InflateCorrect.lean — readCLCodeLengths_correct, decodeCLSymbols_correct, decodeDynamicTrees_correct)
-- **Last session**: 2026-02-23 (impl: decodeDynamicTrees infrastructure)
+- **Phase**: Phase 3 (verified decompressor) — COMPLETE (zero sorries)
+- **Sorry count**: 0
+- **Last session**: 2026-02-23 (impl: decodeDynamicTrees_correct — zero sorries milestone)
 - **Last review**: 2026-02-23 (split InflateCorrect, proof dedup)
