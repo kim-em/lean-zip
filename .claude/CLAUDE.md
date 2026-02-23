@@ -552,6 +552,16 @@ Update it during review and reflect sessions.
   `omega` cannot reason about `%` directly.
 - **`set` is Mathlib-only**: The `set` tactic is not available in this
   project. Use `have` or `let` instead.
+- **`exact` vs `have :=` for wildcard resolution**: `exact f _ _ _` does
+  goal-directed elaboration — wildcards are resolved from the expected
+  goal type. `have := f _ _ _` elaborates independently and fails when
+  wildcards can't be inferred from the function signature alone (e.g.,
+  complex expressions like hash table states from `updateHashes`).
+  When applying a recursive lemma whose arguments include complex
+  intermediate state, prefer `exact` (possibly via a helper lemma) over
+  `have :=`. For arithmetic wrappers around recursive calls, extract a
+  helper like `length_cons_le_of_advance` and use
+  `exact helper (recursive_lemma _ _ _ _ _) (by omega) hle`.
 - **Fuel independence proof pattern**: For fuel-based recursive functions
   `f x (fuel + 1) = some result → ∀ k, f x (fuel + k) = some result`,
   use induction on fuel with: (1) `conv => lhs; rw [show n+1+k = (n+k)+1
