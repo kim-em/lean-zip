@@ -28,13 +28,14 @@ jobs:
           key: lake-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean') }}
           restore-keys: lake-
 
-      - name: Clean stale run_io cache
+      - name: Clean stale Lake cache on fallback restore
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          # Lake caches run_io results (like moreLinkArgs). When the cache is
-          # from a fallback key, lakefile.lean may have changed but the cached
-          # run_io results are stale. Remove them to force re-evaluation.
-          rm -rf .lake/packages .lake/lakefile.olean .lake/lakefile.olean.trace
+          # Lake caches run_io results (like moreLinkArgs) deeply in .lake/.
+          # When restored from a fallback key, lakefile.lean may have changed
+          # but cached run_io results are stale. Nuclear clean is the only
+          # reliable way to force re-evaluation.
+          rm -rf .lake
 
       - name: Build
         run: lake build
