@@ -511,24 +511,81 @@ private theorem clTable_prefix_free
       (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ :=
   flipped_allCodes_prefix_free clLens maxBits hv
 
+/-- `rlDecodeLengths.go` only appends to the accumulator, so the result
+    is at least as long as the input accumulator. -/
+private theorem rlDecodeLengths_go_mono (entries : List CLEntry) (acc result : List Nat)
+    (h : rlDecodeLengths.go entries acc = some result) :
+    acc.length ≤ result.length := by
+  induction entries generalizing acc with
+  | nil => simp [rlDecodeLengths.go] at h; subst h; omega
+  | cons entry rest ih =>
+    obtain ⟨code, extra⟩ := entry
+    by_cases hle : code ≤ 15
+    · rw [rlDecode_go_literal code extra rest acc hle] at h
+      have := ih _ h; simp at this; omega
+    · by_cases h16 : code = 16
+      · subst h16
+        by_cases hg : 0 < acc.length
+        · rw [rlDecode_go_code16 extra rest acc hg] at h
+          have := ih _ h; simp at this; omega
+        · exfalso; simp [rlDecodeLengths.go, hg, guard, bind, failure] at h
+      · by_cases h17 : code = 17
+        · subst h17; rw [rlDecode_go_code17 extra rest acc] at h
+          have := ih _ h; simp at this; omega
+        · by_cases h18 : code = 18
+          · subst h18; rw [rlDecode_go_code18 extra rest acc] at h
+            have := ih _ h; simp at this; omega
+          · exfalso; simp only [rlDecodeLengths.go] at h
+            split at h; · omega
+            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
+            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
+            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
+            exact absurd h (by simp)
+
+/-- When `rlDecodeLengths.go` succeeds on a non-empty list, the result is
+    strictly longer than the input accumulator. -/
+private theorem rlDecodeLengths_go_strict_mono
+    (entry : CLEntry) (rest : List CLEntry) (acc result : List Nat)
+    (h : rlDecodeLengths.go (entry :: rest) acc = some result) :
+    acc.length < result.length := by
+  obtain ⟨code, extra⟩ := entry
+  by_cases hle : code ≤ 15
+  · rw [rlDecode_go_literal code extra rest acc hle] at h
+    have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+  · by_cases h16 : code = 16
+    · subst h16
+      by_cases hg : 0 < acc.length
+      · rw [rlDecode_go_code16 extra rest acc hg] at h
+        have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+      · exfalso; simp [rlDecodeLengths.go, hg, guard, bind, failure] at h
+    · by_cases h17 : code = 17
+      · subst h17; rw [rlDecode_go_code17 extra rest acc] at h
+        have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+      · by_cases h18 : code = 18
+        · subst h18; rw [rlDecode_go_code18 extra rest acc] at h
+          have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+        · exfalso; simp only [rlDecodeLengths.go] at h
+          split at h; · omega
+          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
+          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
+          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
+          exact absurd h (by simp)
+
 /-- Encoding CL entries then decoding with `decodeCLSymbols` recovers
     the original code lengths (via RLE decode).
 
-    This connects `encodeCLEntries` (which produces Huffman-coded bits)
-    to `decodeDynamicTables.decodeCLSymbols` (which decodes them back).
-
-    The proof requires showing that:
-    1. Each Huffman symbol encodes/decodes correctly (prefix-free property)
-    2. Extra bits for codes 16/17/18 roundtrip via `readBitsLSB_writeBitsLSB`
-    3. The accumulator matches `rlDecodeLengths` at each step
-    4. Sufficient fuel exists for the recursion -/
-private theorem encodeCLEntries_decodeCLSymbols_roundtrip
+    Uses `rlDecodeLengths.go` with a general accumulator for induction.
+    The fuel parameter must be ≥ entries.length + 1 (one per entry plus
+    one for the final base-case check). -/
+private theorem encodeCLEntries_decodeCLSymbols_go
     (clLens : List Nat)
     (clTable : List (Huffman.Spec.Codeword × Nat))
     (entries : List CLEntry)
     (symbolBits : List Bool)
     (rest : List Bool)
     (totalCodes : Nat)
+    (acc : List Nat)
+    (fuel : Nat)
     (hv : Huffman.Spec.ValidLengths clLens 7)
     (htable : clTable = (Huffman.Spec.allCodes clLens 7).map fun (sym, cw) => (cw, sym))
     (henc : encodeCLEntries clTable entries = some symbolBits)
@@ -536,12 +593,13 @@ private theorem encodeCLEntries_decodeCLSymbols_roundtrip
       (entry.1 = 16 ∧ entry.2 ≤ 3) ∨
       (entry.1 = 17 ∧ entry.2 ≤ 7) ∨
       (entry.1 = 18 ∧ entry.2 ≤ 127))
-    (hdec : rlDecodeLengths entries = some codeLengths)
-    (hlen : codeLengths.length = totalCodes)
-    (hacc_len : acc.length ≤ totalCodes) :
+    (hdec : rlDecodeLengths.go entries acc = some result)
+    (hlen : result.length = totalCodes)
+    (hacc_le : acc.length ≤ totalCodes)
+    (hfuel : fuel ≥ entries.length + 1) :
     decodeDynamicTables.decodeCLSymbols clTable totalCodes acc
-      (symbolBits ++ rest) totalCodes =
-    some (acc ++ codeLengths.drop acc.length, rest) := by
+      (symbolBits ++ rest) fuel =
+    some (result, rest) := by
   sorry
 
 /-! ## Dynamic tree header roundtrip -/
