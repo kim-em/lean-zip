@@ -122,48 +122,13 @@ inductive LZ77Token where
 /-- Simple hash-based greedy LZ77 matcher.
     Scans input left-to-right, emitting literals or back-references. -/
 def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
-    Array LZ77Token := Id.run do
+    Array LZ77Token :=
   if data.size < 3 then
-    let mut tokens : Array LZ77Token := #[]
-    for i in [:data.size] do
-      tokens := tokens.push (.literal data[i]!)
-    return tokens
-  let hashSize := 65536
-  let mut hashTable : Array Nat := .replicate hashSize 0
-  let mut hashValid : Array Bool := .replicate hashSize false
-  let mut tokens : Array LZ77Token := #[]
-  let mut pos := 0
-  while pos + 2 < data.size do
-    let h := hash3 data pos hashSize
-    let matchPos := hashTable[h]!
-    let isValid := hashValid[h]!
-    -- Update hash table before emitting
-    hashTable := hashTable.set! h pos
-    hashValid := hashValid.set! h true
-    if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
-      -- Try to extend the match
-      let maxLen := min 258 (data.size - pos)
-      let matchLen := countMatch data matchPos pos maxLen
-      if matchLen ≥ 3 then
-        tokens := tokens.push (.reference matchLen (pos - matchPos))
-        -- Advance pos, updating hash table for skipped positions
-        for j in [1:matchLen] do
-          if pos + j + 2 < data.size then
-            let h' := hash3 data (pos + j) hashSize
-            hashTable := hashTable.set! h' (pos + j)
-            hashValid := hashValid.set! h' true
-        pos := pos + matchLen
-      else
-        tokens := tokens.push (.literal data[pos]!)
-        pos := pos + 1
-    else
-      tokens := tokens.push (.literal data[pos]!)
-      pos := pos + 1
-  -- Emit remaining bytes as literals
-  while pos < data.size do
-    tokens := tokens.push (.literal data[pos]!)
-    pos := pos + 1
-  return tokens
+    (trailing data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize hashSize
+      (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
 where
   hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
     let a := data[pos]!.toNat
@@ -179,6 +144,56 @@ where
       else i
     else i
   termination_by maxLen - i
+  trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
+    if pos < data.size then
+      .literal data[pos]! :: trailing data (pos + 1)
+    else []
+  termination_by data.size - pos
+  updateHashes (data : ByteArray) (hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool)
+      (pos j matchLen : Nat) : Array Nat × Array Bool :=
+    if j < matchLen then
+      if pos + j + 2 < data.size then
+        let h := hash3 data (pos + j) hashSize
+        updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
+          pos (j + 1) matchLen
+      else
+        updateHashes data hashSize hashTable hashValid pos (j + 1) matchLen
+    else
+      (hashTable, hashValid)
+  termination_by matchLen - j
+  mainLoop (data : ByteArray) (windowSize hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat) :
+      List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := hash3 data pos hashSize
+      let matchPos := hashTable[h]!
+      let isValid := hashValid[h]!
+      let hashTable := hashTable.set! h pos
+      let hashValid := hashValid.set! h true
+      if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
+        let maxLen := min 258 (data.size - pos)
+        let matchLen := countMatch data matchPos pos maxLen
+        if hge : matchLen ≥ 3 then
+          if hle : pos + matchLen ≤ data.size then
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let (hashTable, hashValid) :=
+              updateHashes data hashSize hashTable hashValid pos 1 matchLen
+            .reference matchLen (pos - matchPos) ::
+              mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
+          else
+            .literal data[pos]! ::
+              mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+        else
+          .literal data[pos]! ::
+            mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+      else
+        .literal data[pos]! ::
+          mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+    else
+      trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
 
 /-- Compress data using fixed Huffman codes and greedy LZ77 (Level 1).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
