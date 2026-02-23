@@ -419,6 +419,9 @@ while true; do
         continue
     fi
 
+    # Housekeeping: close stale issues before checking queue depth
+    cd "$SCRIPT_DIR" && ./coordination close-stale 2>/dev/null || true
+
     # Auto-dispatch: determine session mode based on queue depth
     SESSION_MODE=""
     EFFECTIVE_PROMPT="$PROMPT"

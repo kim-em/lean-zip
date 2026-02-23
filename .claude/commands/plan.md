@@ -7,10 +7,11 @@ as a GitHub issue, then exit. You do NOT execute any code changes.
 
 1. `git fetch origin master`
 2. `coordination orient` — see open issues (claimed and unclaimed), PRs, attention items
-3. `coordination close-stale` — clean up abandoned issues
-4. Read the last 5 files in `progress/` (sorted by filename) to understand recent work
-5. Read `VERIFICATION.md` to understand the current phase and roadmap
-6. Record sorry count: `grep -rc sorry Zip/ || true`
+3. Read the last 5 files in `progress/` (sorted by filename) to understand recent work
+4. Read `VERIFICATION.md` to understand the current phase and roadmap
+5. Record sorry count: `grep -rc sorry Zip/ || true`
+
+Note: `close-stale` runs automatically in `./go` before dispatch.
 
 ## Step 2: Understand existing plans
 

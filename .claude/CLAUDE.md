@@ -66,7 +66,7 @@ exception is a broken build that prevents all other work.
 
 See `.claude/commands/plan.md` for the full prompt. Summary:
 
-1. **Orient**: fetch, `coordination orient`, `coordination close-stale`,
+1. **Orient**: fetch, `coordination orient`,
    read last 5 progress entries, VERIFICATION.md, sorry count
 2. **Read all open issues**: full bodies, not just titles — understand
    what's already planned at the deliverable level
