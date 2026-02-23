@@ -12,6 +12,7 @@ import Zip.Spec.Crc32
 import Zip.Spec.Huffman
 import Zip.Spec.Deflate
 import Zip.Spec.BitstreamCorrect
+import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.HuffmanCorrect
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DynamicTreesCorrect
