@@ -145,7 +145,7 @@ theorem emitTokens_spec (bw : BitWriter) (tokens : Array LZ77Token)
     (henc : Deflate.Spec.encodeSymbols
         Deflate.Spec.fixedLitLengths Deflate.Spec.fixedDistLengths
         (tokens.toList.map LZ77Token.toLZ77Symbol) = some bits) :
-    (deflateFixed.emitTokens bw tokens 0).toBits =
+    (emitTokens bw tokens 0).toBits =
     bw.toBits ++ bits := by
   sorry
 
@@ -189,6 +189,15 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
 theorem inflate_deflateFixed (data : ByteArray)
     (hsize : data.size ≤ 256 * 1024 * 1024) :
     Zip.Native.Inflate.inflate (deflateFixed data) = .ok data := by
+  sorry
+
+/-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
+    then decompressing recovers the original data.
+    **Sorry**: same proof strategy as `inflate_deflateFixed`, substituting
+    `lz77Lazy` for `lz77Greedy`. -/
+theorem inflate_deflateLazy (data : ByteArray)
+    (hsize : data.size ≤ 256 * 1024 * 1024) :
+    Zip.Native.Inflate.inflate (deflateLazy data) = .ok data := by
   sorry
 
 end Zip.Native.Deflate

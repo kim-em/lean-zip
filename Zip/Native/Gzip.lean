@@ -80,12 +80,14 @@ end GzipDecode
 namespace GzipEncode
 
 /-- Compress data to gzip format (RFC 1952).
-    Uses DEFLATE level 0 (stored) or level 1 (fixed Huffman). -/
+    Uses DEFLATE level 0 (stored), 1 (greedy LZ77), or 2+ (lazy LZ77). -/
 def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
   let deflated := if level == 0 then
     Deflate.deflateStored data
-  else
+  else if level == 1 then
     Deflate.deflateFixed data
+  else
+    Deflate.deflateLazy data
   -- Gzip header: ID1=0x1f, ID2=0x8b, CM=8, FLG=0, MTIME=0, XFL, OS=255
   let xfl : UInt8 := if level == 0 then 0x02 else 0x04
   let header := ByteArray.mk #[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, xfl, 0xFF]
@@ -146,12 +148,14 @@ end ZlibDecode
 namespace ZlibEncode
 
 /-- Compress data to zlib format (RFC 1950).
-    Uses DEFLATE level 0 (stored) or level 1 (fixed Huffman). -/
+    Uses DEFLATE level 0 (stored), 1 (greedy LZ77), or 2+ (lazy LZ77). -/
 def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
   let deflated := if level == 0 then
     Deflate.deflateStored data
-  else
+  else if level == 1 then
     Deflate.deflateFixed data
+  else
+    Deflate.deflateLazy data
   -- CMF: CM=8 (deflate), CINFO=7 (32K window)
   let cmf : UInt8 := 0x78
   -- FLG: FLEVEL (bits 6-7) + FCHECK (bits 0-4) such that (CMF*256 + FLG) % 31 == 0
@@ -209,6 +213,7 @@ def compressAuto (data : ByteArray)
   | .zlib => ZlibEncode.compress data level
   | .rawDeflate =>
     if level == 0 then Deflate.deflateStored data
-    else Deflate.deflateFixed data
+    else if level == 1 then Deflate.deflateFixed data
+    else Deflate.deflateLazy data
 
 end Zip.Native

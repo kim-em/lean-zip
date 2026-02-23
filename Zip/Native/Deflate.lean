@@ -3,6 +3,7 @@
 
   Level 0: stored blocks (uncompressed).
   Level 1: greedy LZ77 matching with fixed Huffman codes.
+  Level 2: lazy LZ77 matching with fixed Huffman codes.
 -/
 import Zip.Native.BitWriter
 import Zip.Native.Inflate
@@ -195,48 +196,164 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
-/-- Compress data using fixed Huffman codes and greedy LZ77 (Level 1).
-    Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
-def deflateFixed (data : ByteArray) : ByteArray :=
+/-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
+def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    match tokens[i] with
+    | .literal b =>
+      let (code, len) := fixedLitCodes[b.toNat]!
+      emitTokens (bw.writeHuffCode code len) tokens (i + 1)
+    | .reference length distance =>
+      match findLengthCode length with
+      | some (idx, extraCount, extraVal) =>
+        let (code, len) := fixedLitCodes[idx + 257]!
+        let bw := bw.writeHuffCode code len
+        let bw := bw.writeBits extraCount extraVal
+        match findDistCode distance with
+        | some (dIdx, dExtraCount, dExtraVal) =>
+          let (dCode, dLen) := fixedDistCodes[dIdx]!
+          let bw := bw.writeHuffCode dCode dLen
+          emitTokens (bw.writeBits dExtraCount dExtraVal) tokens (i + 1)
+        | none => emitTokens bw tokens (i + 1)
+      | none => emitTokens bw tokens (i + 1)
+  else bw
+termination_by tokens.size - i
+
+/-- Write a fixed Huffman DEFLATE block from LZ77 tokens. -/
+private def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
   let bw := BitWriter.empty
-  -- BFINAL=1, BTYPE=01 (fixed Huffman)
   let bw := bw.writeBits 1 1  -- BFINAL
   let bw := bw.writeBits 2 1  -- BTYPE = 01
   if data.size == 0 then
-    -- Just end-of-block symbol (256)
     let (code, len) := fixedLitCodes[256]!
     let bw := bw.writeHuffCode code len
     bw.flush
   else
-    let tokens := lz77Greedy data
     let bw := emitTokens bw tokens 0
-    -- End-of-block symbol (256)
     let (code, len) := fixedLitCodes[256]!
     let bw := bw.writeHuffCode code len
     bw.flush
+
+/-- Compress data using fixed Huffman codes and greedy LZ77 (Level 1).
+    Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
+def deflateFixed (data : ByteArray) : ByteArray :=
+  deflateFixedBlock data (lz77Greedy data)
+
+/-- Simple hash-based lazy LZ77 matcher.
+    Like `lz77Greedy`, but checks if position pos+1 has a longer match
+    before committing. If so, emits a literal for pos and the longer
+    match at pos+1. -/
+def lz77Lazy (data : ByteArray) (windowSize : Nat := 32768) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    (trailing data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize hashSize
+      (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
 where
-  emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
-    if h : i < tokens.size then
-      match tokens[i] with
-      | .literal b =>
-        let (code, len) := fixedLitCodes[b.toNat]!
-        emitTokens (bw.writeHuffCode code len) tokens (i + 1)
-      | .reference length distance =>
-        match findLengthCode length with
-        | some (idx, extraCount, extraVal) =>
-          let (code, len) := fixedLitCodes[idx + 257]!
-          let bw := bw.writeHuffCode code len
-          let bw := bw.writeBits extraCount extraVal
-          match findDistCode distance with
-          | some (dIdx, dExtraCount, dExtraVal) =>
-            let (dCode, dLen) := fixedDistCodes[dIdx]!
-            let bw := bw.writeHuffCode dCode dLen
-            emitTokens (bw.writeBits dExtraCount dExtraVal) tokens (i + 1)
-          -- lz77Greedy guarantees distance 1–32768, so this branch is unreachable
-          | none => emitTokens bw tokens (i + 1)
-        -- lz77Greedy guarantees length 3–258, so this branch is unreachable
-        | none => emitTokens bw tokens (i + 1)
-    else bw
-  termination_by tokens.size - i
+  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
+    let a := data[pos]!.toNat
+    let b := data[pos + 1]!.toNat
+    let c := data[pos + 2]!.toNat
+    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+  countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
+    go data p1 p2 0 maxLen
+  go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
+    if i < maxLen then
+      if data[p1 + i]! == data[p2 + i]! then
+        go data p1 p2 (i + 1) maxLen
+      else i
+    else i
+  termination_by maxLen - i
+  trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
+    if pos < data.size then
+      .literal data[pos]! :: trailing data (pos + 1)
+    else []
+  termination_by data.size - pos
+  updateHashes (data : ByteArray) (hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool)
+      (pos j matchLen : Nat) : Array Nat × Array Bool :=
+    if j < matchLen then
+      if pos + j + 2 < data.size then
+        let h := hash3 data (pos + j) hashSize
+        updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
+          pos (j + 1) matchLen
+      else
+        updateHashes data hashSize hashTable hashValid pos (j + 1) matchLen
+    else
+      (hashTable, hashValid)
+  termination_by matchLen - j
+  mainLoop (data : ByteArray) (windowSize hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat) :
+      List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := hash3 data pos hashSize
+      let matchPos := hashTable[h]!
+      let isValid := hashValid[h]!
+      let hashTable := hashTable.set! h pos
+      let hashValid := hashValid.set! h true
+      if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
+        let maxLen := min 258 (data.size - pos)
+        let matchLen := countMatch data matchPos pos maxLen
+        if hge : matchLen ≥ 3 then
+          if hle : pos + matchLen ≤ data.size then
+            -- Lazy: check pos + 1 for a longer match
+            if pos + 3 < data.size then
+              let h2 := hash3 data (pos + 1) hashSize
+              let matchPos2 := hashTable[h2]!
+              let isValid2 := hashValid[h2]!
+              if isValid2 && matchPos2 < pos + 1 && pos + 1 - matchPos2 ≤ windowSize then
+                let maxLen2 := min 258 (data.size - (pos + 1))
+                let matchLen2 := countMatch data matchPos2 (pos + 1) maxLen2
+                if matchLen2 > matchLen then
+                  if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                    -- Better match at pos+1: emit literal + reference
+                    have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                    let (ht, hv) := updateHashes data hashSize hashTable hashValid pos 1 matchLen2
+                    .literal data[pos]! ::
+                      .reference matchLen2 (pos + 1 - matchPos2) ::
+                      mainLoop data windowSize hashSize ht hv (pos + 1 + matchLen2)
+                  else
+                    -- matchLen2 exceeds data: fall back to match at pos
+                    have : data.size - (pos + matchLen) < data.size - pos := by omega
+                    let (ht, hv) := updateHashes data hashSize hashTable hashValid pos 1 matchLen
+                    .reference matchLen (pos - matchPos) ::
+                      mainLoop data windowSize hashSize ht hv (pos + matchLen)
+                else
+                  -- Keep match at pos (no better match at pos+1)
+                  have : data.size - (pos + matchLen) < data.size - pos := by omega
+                  let (ht, hv) := updateHashes data hashSize hashTable hashValid pos 1 matchLen
+                  .reference matchLen (pos - matchPos) ::
+                    mainLoop data windowSize hashSize ht hv (pos + matchLen)
+              else
+                -- No valid match at pos+1: keep match at pos
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (ht, hv) := updateHashes data hashSize hashTable hashValid pos 1 matchLen
+                .reference matchLen (pos - matchPos) ::
+                  mainLoop data windowSize hashSize ht hv (pos + matchLen)
+            else
+              -- Near end of data: keep match at pos
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              .reference matchLen (pos - matchPos) ::
+                mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
+          else
+            .literal data[pos]! ::
+              mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+        else
+          .literal data[pos]! ::
+            mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+      else
+        .literal data[pos]! ::
+          mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+    else
+      trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- Compress data using fixed Huffman codes and lazy LZ77 (Level 2).
+    Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
+def deflateLazy (data : ByteArray) : ByteArray :=
+  deflateFixedBlock data (lz77Lazy data)
 
 end Zip.Native.Deflate
