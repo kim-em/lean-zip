@@ -11,7 +11,7 @@ The algorithm:
 1. Create leaf nodes for symbols with frequency > 0
 2. Repeatedly merge the two lightest nodes (standard Huffman construction)
 3. Extract code depths from the resulting tree
-4. Limit depths to `maxBits` (15 for DEFLATE)
+4. Limit depths to `maxBits` (15 for DEFLATE), with a Kraft inequality fixup
 
 The key correctness property is that the computed lengths satisfy
 `Huffman.Spec.ValidLengths`, ensuring the canonical construction produces
@@ -85,14 +85,27 @@ def assignLengths (depths : List (Nat × Nat)) (numSymbols : Nat) : List Nat :=
   depths.foldl (fun acc (sym, len) =>
     if sym < acc.length then acc.set sym len else acc) init
 
+/-- Kraft sum of a list of depths, relative to normalization constant `D`:
+    `∑ 2^(D - dᵢ)` where dᵢ are the depths. -/
+def kraftSum (depths : List Nat) (D : Nat) : Nat :=
+  depths.foldl (fun acc d => acc + 2 ^ (D - d)) 0
+
+/-- Fix code lengths to satisfy the Kraft inequality. If the Kraft sum
+    exceeds `2^maxBits`, set all non-zero lengths to `maxBits`.
+    This produces valid (though potentially suboptimal) codes. -/
+def fixKraftList (lengths : List Nat) (maxBits : Nat) : List Nat :=
+  if kraftSum (lengths.filter (· != 0)) maxBits ≤ 2 ^ maxBits then lengths
+  else lengths.map fun l => if l == 0 then 0 else maxBits
+
 /-- Compute Huffman code lengths from symbol frequencies.
     `freqs` is a list of (symbol, frequency) pairs.
     Returns a list of length `numSymbols` where index `i` is the code length
     for symbol `i` (0 means the symbol has no codeword).
 
-    Code lengths are capped at `maxBits`. For typical DEFLATE inputs
-    (≤ 286 symbols), the optimal tree depth is well under 15, so the cap
-    rarely activates. -/
+    Code lengths are capped at `maxBits`, and if the resulting Kraft sum
+    exceeds `2^maxBits`, all non-zero codes are set to `maxBits` as a
+    fallback. For typical DEFLATE inputs (≤ 286 symbols, maxBits=15),
+    the optimal tree depth is well under 15, so the fallback never activates. -/
 def computeCodeLengths (freqs : List (Nat × Nat)) (numSymbols : Nat)
     (maxBits : Nat := 15) : List Nat :=
   let nonzero := freqs.filter (fun (_, f) => f > 0)
@@ -105,9 +118,9 @@ def computeCodeLengths (freqs : List (Nat × Nat)) (numSymbols : Nat)
       |>.mergeSort (fun a b => a.weight ≤ b.weight)
     let tree := buildHuffmanTree leaves
     let depths := tree.depths
-    -- Cap at maxBits
+    -- Cap at maxBits, then fix Kraft inequality if needed
     let capped := depths.map fun (s, d) => (s, min d maxBits)
-    assignLengths capped numSymbols
+    fixKraftList (assignLengths capped numSymbols) maxBits
 
 /-! ## Properties -/
 
@@ -138,7 +151,8 @@ theorem computeCodeLengths_length (freqs : List (Nat × Nat)) (n : Nat) (maxBits
   · exact List.length_replicate ..
   · split
     · exact assignLengths_length ..
-    · simp only [assignLengths_length]
+    · simp only [fixKraftList]
+      split <;> simp [assignLengths_length]
 
 /-! ## Tree structure properties -/
 
@@ -247,11 +261,6 @@ private theorem validLengths_single (sym n maxBits : Nat) (hmb : maxBits > 0) :
     · simp only [h, ↓reduceIte, filter_ne_zero_replicate, List.foldl_nil]
       exact Nat.zero_le _
 
-/-- Kraft sum of a list of depths, relative to normalization constant `D`:
-    `∑ 2^(D - dᵢ)` where dᵢ are the depths. -/
-def kraftSum (depths : List Nat) (D : Nat) : Nat :=
-  depths.foldl (fun acc d => acc + 2 ^ (D - d)) 0
-
 /-- `kraftSum` with a non-zero initial accumulator. -/
 private theorem kraftSum_init (depths : List Nat) (D init : Nat) :
     depths.foldl (fun acc d => acc + 2 ^ (D - d)) init =
@@ -293,9 +302,69 @@ theorem BuildTree.kraft_eq (t : BuildTree) (d D : Nat)
     rw [show D - d = (D - (d + 1)) + 1 from by omega, Nat.pow_succ]
     omega
 
+/-! ## Kraft fixup properties -/
+
+/-- `fixKraftList` preserves list length. -/
+theorem fixKraftList_length (lengths : List Nat) (maxBits : Nat) :
+    (fixKraftList lengths maxBits).length = lengths.length := by
+  simp only [fixKraftList]
+  split <;> simp [List.length_map]
+
+/-- When all entries of a list equal `D`, `kraftSum l D = l.length`. -/
+private theorem kraftSum_self (l : List Nat) (D : Nat) (h : ∀ x ∈ l, x = D) :
+    kraftSum l D = l.length := by
+  induction l with
+  | nil => simp [kraftSum]
+  | cons x xs ih =>
+    simp only [kraftSum, List.foldl_cons]
+    rw [kraftSum_init]
+    have hx : x = D := h x (List.mem_cons_self ..)
+    subst hx
+    simp only [Nat.sub_self, Nat.pow_zero, Nat.zero_add, List.length_cons]
+    rw [ih (fun y hy => h y (List.mem_cons_of_mem _ hy))]
+    omega
+
+/-- All non-zero entries produced by the fallback map are `maxBits`. -/
+private theorem filter_map_eq_maxBits (l : List Nat) (maxBits : Nat) :
+    ∀ x ∈ (l.map fun a => if a == 0 then 0 else maxBits).filter (· != 0),
+    x = maxBits := by
+  intro x hx
+  simp only [List.mem_filter, List.mem_map] at hx
+  obtain ⟨⟨a, _, rfl⟩, hne⟩ := hx
+  cases ha : (a == 0) <;> simp_all
+
+/-- `fixKraftList` satisfies the Kraft inequality when the list length
+    is at most `2^maxBits`. -/
+theorem fixKraftList_kraft (lengths : List Nat) (maxBits : Nat)
+    (hlen : lengths.length ≤ 2 ^ maxBits) :
+    kraftSum ((fixKraftList lengths maxBits).filter (· != 0)) maxBits ≤ 2 ^ maxBits := by
+  simp only [fixKraftList]
+  split
+  · assumption
+  · rw [kraftSum_self _ _ (filter_map_eq_maxBits lengths maxBits)]
+    have h1 := List.length_filter_le (fun (x : Nat) => x != 0)
+      (lengths.map fun a => if a == 0 then 0 else maxBits)
+    simp only [List.length_map] at h1
+    omega
+
+/-- All values in `fixKraftList` are bounded by `maxBits`. -/
+theorem fixKraftList_bounded (lengths : List Nat) (maxBits : Nat)
+    (h : ∀ l ∈ lengths, l ≤ maxBits) :
+    ∀ l ∈ fixKraftList lengths maxBits, l ≤ maxBits := by
+  simp only [fixKraftList]
+  split
+  · exact h
+  · intro l hl
+    simp only [List.mem_map] at hl
+    obtain ⟨a, _, rfl⟩ := hl
+    cases ha : (a == 0) <;> simp_all <;> omega
+
+/-! ## computeCodeLengths properties -/
+
 /-- All computed code lengths are ≤ maxBits. This holds because
     single-symbol codes use length 1 ≤ maxBits, and multi-symbol depths
-    are capped with `min d maxBits` before assignment. -/
+    are capped with `min d maxBits` before assignment, then fixed by
+    `fixKraftList` (which only replaces non-zero values with `maxBits`). -/
 theorem computeCodeLengths_bounded (freqs : List (Nat × Nat)) (n maxBits : Nat)
     (hmb : maxBits > 0) :
     ∀ l ∈ computeCodeLengths freqs n maxBits, l ≤ maxBits := by
@@ -308,7 +377,8 @@ theorem computeCodeLengths_bounded (freqs : List (Nat × Nat)) (n maxBits : Nat)
       cases hp with
       | head => omega
       | tail _ h => contradiction
-    · apply assignLengths_bounded
+    · apply fixKraftList_bounded
+      apply assignLengths_bounded
       intro p hp
       simp only [List.mem_map] at hp
       obtain ⟨⟨s', d'⟩, _, rfl⟩ := hp
@@ -316,24 +386,12 @@ theorem computeCodeLengths_bounded (freqs : List (Nat × Nat)) (n maxBits : Nat)
 
 /-- The computed code lengths satisfy `ValidLengths`.
 
-    **STATUS: FALSE as stated.** The theorem has a verified counterexample:
-    `computeCodeLengths [(0,100),(1,10),(2,1),(3,1)] 4 2` produces `[1,2,2,2]`
-    with Kraft sum 5 > 4 = 2^2. The naive depth capping (`min d maxBits`)
-    can produce oversubscribed code lengths when the Huffman tree has depths
-    exceeding `maxBits`.
-
-    The zero-symbol and single-symbol cases are proved. The multi-symbol case
-    needs one of:
-    1. A precondition: all tree depths ≤ maxBits (holds for DEFLATE with
-       maxBits=15 and ≤ 286 symbols, since optimal tree depth ≤ 9)
-    2. Fixing `computeCodeLengths` to use proper depth limiting
-       (package-merge or iterative shortening) instead of naive capping
-
-    For DEFLATE usage, the Kraft inequality holds in practice since
-    15-bit codes can represent 2^15 = 32768 symbols, far exceeding the
-    maximum of 286 lit/len or 30 distance symbols. -/
+    The precondition `n ≤ 2^maxBits` ensures there are enough code points
+    to represent all symbols. For DEFLATE (maxBits=15, n ≤ 286), this holds
+    since 2^15 = 32768 >> 286. The `fixKraftList` fallback guarantees the
+    Kraft inequality even when naive depth capping would oversubscribe. -/
 theorem computeCodeLengths_valid (freqs : List (Nat × Nat)) (n : Nat)
-    (maxBits : Nat) (hmb : maxBits > 0) :
+    (maxBits : Nat) (hmb : maxBits > 0) (hn : n ≤ 2 ^ maxBits) :
     ValidLengths (computeCodeLengths freqs n maxBits) maxBits := by
   constructor
   · exact computeCodeLengths_bounded freqs n maxBits hmb
@@ -348,6 +406,9 @@ theorem computeCodeLengths_valid (freqs : List (Nat × Nat)) (n : Nat)
           exact Nat.pow_le_pow_right (by omega) (by omega)
         · simp only [h, ↓reduceIte, filter_ne_zero_replicate, List.foldl_nil]
           exact Nat.zero_le _
-      · sorry
+      · -- Multi-symbol case: fixKraftList handles the Kraft inequality
+        apply fixKraftList_kraft
+        rw [assignLengths_length]
+        exact hn
 
 end Huffman.Spec
