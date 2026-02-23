@@ -59,9 +59,8 @@ theorem natToBits_injective (v₁ v₂ w : Nat) (h₁ : v₁ < 2 ^ w) (h₂ : v�
   apply Nat.eq_of_testBit_eq; intro i
   by_cases hi : i < w
   · exact (natToBits_eq_iff v₁ v₂ w).mp heq i hi
-  · have hiw : w ≤ i := Nat.le_of_not_lt hi
-    have p₁ : v₁ < 2 ^ i := Nat.lt_of_lt_of_le h₁ (Nat.pow_le_pow_right (by omega) hiw)
-    have p₂ : v₂ < 2 ^ i := Nat.lt_of_lt_of_le h₂ (Nat.pow_le_pow_right (by omega) hiw)
+  · have p₁ : v₁ < 2 ^ i := Nat.lt_of_lt_of_le h₁ (Nat.pow_le_pow_right (by omega) (by omega))
+    have p₂ : v₂ < 2 ^ i := Nat.lt_of_lt_of_le h₂ (Nat.pow_le_pow_right (by omega) (by omega))
     rw [Nat.testBit_lt_two_pow p₁, Nat.testBit_lt_two_pow p₂]
 
 /-- `natToBits val (w₁ + w₂)` splits into the high `w₁` bits
@@ -71,7 +70,7 @@ private theorem natToBits_append (val w₁ w₂ : Nat) :
   induction w₁ with
   | zero => simp [natToBits]
   | succ n ih =>
-    rw [show (n + 1) + w₂ = (n + w₂) + 1 from by omega]
+    rw [Nat.add_right_comm]
     simp only [natToBits]
     rw [ih, List.cons_append, ← Nat.testBit_div_two_pow]
 
@@ -126,7 +125,7 @@ private theorem nextCodes_go_size (blCount : Array Nat) (maxBits : Nat)
   split
   · exact hsize
   · exact nextCodes_go_size blCount maxBits _ _ _
-      (by simp [Array.set!_eq_setIfInBounds]; exact hsize)
+      (by simp [Array.set!_eq_setIfInBounds, hsize])
   termination_by maxBits + 1 - bits
 
 /-- `nextCodes` returns an array of size `maxBits + 1`. -/
@@ -258,9 +257,9 @@ private theorem kraft_ge_count (ls : List Nat) (maxBits len : Nat) :
     simp only [List.filter_cons]
     cases hxl : x == len
     · exact Nat.le_trans ih (Nat.le_add_left _ _)
-    · simp only [ite_true, List.length_cons, Nat.succ_mul]
-      have hxeq : x = len := beq_iff_eq.mp hxl
-      rw [hxeq]; omega
+    · have hxeq : x = len := beq_iff_eq.mp hxl
+      subst hxeq
+      simp only [ite_true, List.length_cons, Nat.succ_mul]; omega
 
 /-- Double filter: `(· != 0)` then `(· == len)` is the same as `(· == len)` when `len > 0`. -/
 private theorem filter_ne_zero_filter_eq (ls : List Nat) (len : Nat) (hlen : len ≠ 0) :
@@ -327,15 +326,11 @@ private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
   | succ n ih =>
     have ih' := ih (by omega)
     rw [kraftSumFrom_unfold blCount maxBits n (by omega)] at ih'
-    -- ih': ncRec n * 2^(maxBits-n) + (blCount[n]! * 2^(maxBits-n) + kraftSumFrom (n+1)) = kraftSumFrom 0
-    -- Unfold ncRec (n+1) = (ncRec n + blCount[n]!) * 2, targeted
     show (ncRec blCount n + blCount[n]!) * 2 * 2 ^ (maxBits - (n + 1)) +
       kraftSumFrom blCount maxBits (n + 1) = kraftSumFrom blCount maxBits 0
-    rw [Nat.mul_assoc,
-        show 2 * 2 ^ (maxBits - (n + 1)) = 2 ^ (maxBits - n) from by
-          rw [show maxBits - n = maxBits - (n + 1) + 1 from by omega, Nat.pow_succ,
-              Nat.mul_comm],
-        Nat.add_mul]
+    have : 2 * 2 ^ (maxBits - (n + 1)) = 2 ^ (maxBits - n) := by
+      rw [show maxBits - n = (maxBits - (n + 1)) + 1 from by omega, Nat.pow_succ, Nat.mul_comm]
+    rw [Nat.mul_assoc, this, Nat.add_mul]
     omega
 
 /-! ## Connecting kraftSumFrom to ValidLengths -/
@@ -379,15 +374,13 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
     simp only [List.foldl_cons]
     split
     · rename_i hskip
-      -- l == 0 || l > maxBits: skip, foldl for count also skips if l ≠ b
-      rw [ih acc hsize]
-      congr 1
-      -- need: (l == b) = false when l = 0 or l > maxBits and b ≠ 0 and b ≤ maxBits
-      simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
-      cases hskip with
-      | inl h => simp [show (l == b) = false from beq_eq_false_iff_ne.mpr (h ▸ Ne.symm hb)]
-      | inr h => simp [show (l == b) = false from
-          beq_eq_false_iff_ne.mpr (fun heq => by rw [heq] at h; omega)]
+      rw [ih acc hsize]; congr 1
+      have hlb : (l == b) = false := by
+        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
+        cases hskip with
+        | inl h => exact beq_eq_false_iff_ne.mpr (h ▸ Ne.symm hb)
+        | inr h => exact beq_eq_false_iff_ne.mpr (fun heq => by rw [heq] at h; omega)
+      simp [hlb]
     · rename_i hset
       -- l ≠ 0 and l ≤ maxBits: set acc[l] += 1
       simp only [Bool.or_eq_true, beq_iff_eq, not_or, decide_eq_true_eq] at hset
@@ -398,16 +391,13 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
       rw [ih _ hsize']
       cases Nat.decEq l b with
       | isTrue heq =>
-        -- l = b: the set increments acc[b], and foldl counts this element
         subst heq
         rw [array_set_self acc l _ (by omega)]
         simp only [beq_self_eq_true, ite_true, Nat.zero_add]
         rw [foldl_count_init l 1]; omega
       | isFalse hne =>
-        -- l ≠ b: the set doesn't affect acc[b], and foldl doesn't count this element
         rw [array_set_ne acc l b _ hne]
-        have hlb : (l == b) = false := beq_eq_false_iff_ne.mpr hne
-        simp only [hlb, ite_false, Bool.false_eq_true, ite_false]
+        simp only [beq_eq_false_iff_ne.mpr hne, ite_false, Bool.false_eq_true]
 
 /-- `nextCodes.go` produces `ncRec` values: the `code` parameter at entry with
     `bits = b` becomes `ncRec blCount b` after the body executes. -/
@@ -421,11 +411,8 @@ private theorem nextCodes_go_eq_ncRec (blCount : Array Nat) (maxBits : Nat)
     (nextCodes.go blCount maxBits arr bits code)[b]! = ncRec blCount b := by
   unfold nextCodes.go
   split
-  · -- bits > maxBits: function returns arr; b < bits so hprev applies
-    rename_i hgt
-    exact hprev b hb (by omega)
-  · -- bits ≤ maxBits: recursive call
-    rename_i hle
+  · exact hprev b hb (by omega)
+  · rename_i hle
     have hle' : bits ≤ maxBits := by omega
     let code' := (code + blCount[bits - 1]!) * 2
     let arr' := arr.set! bits code'
@@ -440,12 +427,10 @@ private theorem nextCodes_go_eq_ncRec (blCount : Array Nat) (maxBits : Nat)
       intro b' hb' hb'lt
       cases Nat.eq_or_lt_of_le (Nat.lt_succ_iff.mp hb'lt) with
       | inl heq =>
-        -- b' = bits: was just set
         rw [heq]; simp only [arr']
         rw [array_set_self arr bits code' (by omega)]
         exact hcode'
       | inr hlt =>
-        -- b' < bits: set at different index doesn't affect
         simp only [arr']
         rw [array_set_ne arr bits b' code' (by omega)]
         exact hprev b' hb' hlt
@@ -484,11 +469,9 @@ private theorem kraftSumFrom_incr (acc : Array Nat) (maxBits l b : Nat)
       have ih := kraftSumFrom_incr acc maxBits l (b + 1) hl hsize
       rw [ih]
       if hbl' : b ≤ l then
-        have : b + 1 ≤ l := by omega
-        simp only [hbl', this, ite_true]; omega
+        simp only [hbl', show b + 1 ≤ l from by omega, ite_true]; omega
       else
-        have : ¬(b + 1 ≤ l) := by omega
-        simp only [hbl', this, ite_false, Nat.add_zero]
+        simp only [hbl', show ¬(b + 1 ≤ l) from by omega, ite_false, Nat.add_zero]
 termination_by maxBits + 1 - b
 
 /-- `kraftSumFrom` over an all-zeros array is 0. -/
@@ -540,7 +523,6 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
     simp only [List.foldl_cons]
     split
     · rename_i hskip
-      -- l = 0 or l > maxBits: skip, and filter also skips or l > maxBits is impossible
       rw [ih hv_ls acc hsize]
       congr 1
       simp only [List.filter_cons]
@@ -551,7 +533,6 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       | inr h =>
         exfalso; exact Nat.not_lt.mpr (hv.1 l List.mem_cons_self) h
     · rename_i hset
-      -- l ≠ 0 and l ≤ maxBits: increment count
       simp only [Bool.or_eq_true, beq_iff_eq, not_or, decide_eq_true_eq] at hset
       have hl_ne : l ≠ 0 := hset.1
       have hl_le : l ≤ maxBits := by omega
@@ -560,7 +541,6 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       rw [ih hv_ls (acc.set! l (acc[l]! + 1)) hsize']
       rw [kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
       simp only [Nat.zero_le, ite_true]
-      -- Unfold filter on (l :: ls): l passes since l ≠ 0
       have hfilt : (l :: ls).filter (· != 0) = l :: ls.filter (· != 0) := by
         simp only [List.filter_cons]
         exact if_pos (bne_iff_ne.mpr hl_ne)
@@ -578,9 +558,8 @@ private theorem ncRec_shift (blCount : Array Nat) (b₁ b₂ : Nat) (h : b₁ < 
     cases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp h) with
     | inl hlt =>
       calc (ncRec blCount b₁ + blCount[b₁]!) * 2 ^ (k + 1 - b₁)
-          = (ncRec blCount b₁ + blCount[b₁]!) * (2 ^ (k - b₁) * 2) := by
-            rw [show k + 1 - b₁ = (k - b₁) + 1 from by omega, Nat.pow_succ]
-        _ = ((ncRec blCount b₁ + blCount[b₁]!) * 2 ^ (k - b₁)) * 2 := by rw [Nat.mul_assoc]
+          = ((ncRec blCount b₁ + blCount[b₁]!) * 2 ^ (k - b₁)) * 2 := by
+            rw [show k + 1 - b₁ = (k - b₁) + 1 from by omega, Nat.pow_succ, Nat.mul_assoc]
         _ ≤ ncRec blCount k * 2 := Nat.mul_le_mul_right 2 (ih hlt)
         _ ≤ (ncRec blCount k + blCount[k]!) * 2 :=
             Nat.mul_le_mul_right 2 (Nat.le_add_right _ _)
@@ -595,7 +574,6 @@ private theorem ncRec_bound (blCount : Array Nat) (maxBits b : Nat)
     ncRec blCount b + blCount[b]! ≤ 2 ^ b := by
   have hcons := ncRec_kraft_conservation blCount maxBits b hb
   rw [kraftSumFrom_unfold blCount maxBits b hb] at hcons
-  -- (ncRec b + blCount[b]!) * 2^(maxBits-b) ≤ kraftSumFrom 0 ≤ 2^maxBits
   have h1 : (ncRec blCount b + blCount[b]!) * 2 ^ (maxBits - b) ≤ 2 ^ maxBits := by
     have : (ncRec blCount b + blCount[b]!) * 2 ^ (maxBits - b) ≤
            kraftSumFrom blCount maxBits 0 := by rw [Nat.add_mul]; omega
@@ -618,19 +596,13 @@ protected theorem nextCodes_plus_count_le (lengths : List Nat) (maxBits b : Nat)
     (nextCodes (countLengths lengths maxBits) maxBits)[b]! +
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 ≤ 2 ^ b := by
   let blCount := countLengths lengths maxBits
-  -- Step 1: (nextCodes blCount maxBits)[b]! = ncRec blCount b
   have hNC := nextCodes_eq_ncRec blCount maxBits b hb hb'
-  -- Step 2: blCount[b]! = count of b in lengths
   have hCL : blCount[b]! =
       lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 :=
     Huffman.Spec.countLengths_eq lengths maxBits b hb hb'
-  -- Step 3: kraftSumFrom ≤ 2^maxBits (from ValidLengths)
   have hKraft := kraftSumFrom_eq_kraft_foldl lengths maxBits hv
-  -- Step 4: ncRec bound
-  have hBound := ncRec_bound blCount maxBits b hb' hKraft
-  -- Combine: nc[b] + count = ncRec b + blCount[b]! ≤ 2^b
   rw [hNC, ← hCL]
-  exact hBound
+  exact ncRec_bound blCount maxBits b hb' hKraft
 
 /-- The counting foldl is monotone: the result is always ≥ the initial value. -/
 protected theorem count_foldl_mono (len : Nat) (l : List Nat) (init : Nat) :
@@ -665,19 +637,13 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
     intro init
     cases s₁ with
     | zero =>
-      -- s₁ = 0: take 0 = [], foldl = init
-      simp only [List.take_zero, List.foldl_nil]
-      -- s₂ ≥ 1: take s₂ (x :: xs) = x :: take (s₂ - 1) xs
-      -- Since x = lengths[0] = len, the first step of foldl adds 1
-      simp only [List.getElem_cons_zero] at hlen₁
-      have hs₂' : 0 < s₂ := by omega
-      rw [List.take_cons hs₂']
+      simp only [List.take_zero, List.foldl_nil, List.getElem_cons_zero] at hlen₁ ⊢
+      rw [List.take_cons (by omega : 0 < s₂)]
       simp only [List.foldl_cons, show (x == len) = true from beq_iff_eq.mpr hlen₁, ite_true]
       exact Nat.lt_of_lt_of_le (by omega) (Huffman.Spec.count_foldl_mono len _ _)
     | succ n =>
       simp only [List.length_cons] at hs₁ hs₂
-      have hs₂' : 0 < s₂ := by omega
-      rw [List.take_cons (by omega : 0 < n + 1), List.take_cons hs₂']
+      rw [List.take_cons (by omega : 0 < n + 1), List.take_cons (by omega : 0 < s₂)]
       simp only [List.foldl_cons]
       have hlen₁' : xs[n] = len := by
         simp only [List.getElem_cons_succ] at hlen₁; exact hlen₁
@@ -761,23 +727,16 @@ theorem codeFor_injective (lengths : List Nat) (maxBits : Nat)
     codeFor lengths maxBits s₂ = some cw →
     s₁ = s₂ := by
   intro h₁ h₂
-  -- Extract structural info from both codeFor calls
   have ⟨hs₁, hlen₁, h₁⟩ := Huffman.Spec.codeFor_spec h₁
   have ⟨hs₂, hlen₂, h₂⟩ := Huffman.Spec.codeFor_spec h₂
-  -- h₁ : cw = natToBits code₁ lengths[s₁]
-  -- h₂ : cw = natToBits code₂ lengths[s₂]
-  -- Step 1: lengths must be equal
   have heq := h₁.symm.trans h₂
   have hlen_eq : lengths[s₁] = lengths[s₂] := by
     have := congrArg List.length heq
     rwa [natToBits_length, natToBits_length] at this
-  -- Step 2: code values must be equal (by natToBits_injective)
   have hb₁ := Huffman.Spec.code_value_bound lengths maxBits s₁ hv hs₁ hlen₁
   rw [hlen_eq] at heq hb₁
   have hb₂ := Huffman.Spec.code_value_bound lengths maxBits s₂ hv hs₂ hlen₂
   have hcode := natToBits_injective _ _ _ hb₁ hb₂ heq
-  -- hcode : nc[len] + offset₁ = nc[len] + offset₂, so offset₁ = offset₂
-  -- Step 3: if s₁ ≠ s₂, offsets differ — contradiction
   by_cases heqs : s₁ = s₂
   · exact heqs
   · exfalso
@@ -810,7 +769,7 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
   -- Prefix implies cw₁.length ≤ cw₂.length
   obtain ⟨t, ht⟩ := hpre
   have htlen : cw₁.length + t.length = cw₂.length := by
-    have := congrArg List.length ht; simp at this; omega
+    rw [← ht, List.length_append]
   by_cases heq : lengths[s₁] = lengths[s₂]
   · -- Same length: prefix of same-length list means equal
     have : t = [] := List.eq_nil_of_length_eq_zero (by omega)
@@ -881,7 +840,7 @@ theorem decode_prefix_free {α : Type} (table : List (Codeword × α))
             | inr h =>
               exact hpf cw sym cw' sym' (List.mem_cons_of_mem _ htail)
                 (List.mem_cons_self ..) (Ne.symm heq) h
-        rw [if_neg (by simp [hno])]
+        simp only [hno]
         exact ih htail (fun cw₁ s₁ cw₂ s₂ h₁ h₂ hne =>
           hpf cw₁ s₁ cw₂ s₂ (List.mem_cons_of_mem _ h₁)
             (List.mem_cons_of_mem _ h₂) hne)
@@ -939,15 +898,11 @@ theorem allCodeWords_prefix_free (lengths : List Nat) (maxBits : Nat)
   intro i j hi hj hij hpre
   simp only [List.length_map] at hi hj
   rw [List.getElem_map, List.getElem_map] at hpre
-  -- Extract codeFor info from membership in allCodes
   have hmi := (allCodes_mem_iff ..).mp (List.getElem_mem (h := hi))
   have hmj := (allCodes_mem_iff ..).mp (List.getElem_mem (h := hj))
-  -- Show the symbols at positions i and j are distinct
   have hne : (allCodes lengths maxBits)[i].1 ≠ (allCodes lengths maxBits)[j].1 := by
     intro heq
-    -- Same symbol → same codeword → same entry → same index (by nodup)
-    have hcw_eq : (allCodes lengths maxBits)[i].2 = (allCodes lengths maxBits)[j].2 := by
-      have := hmi.2.symm.trans (heq ▸ hmj.2); exact Option.some.inj this
+    have hcw_eq := Option.some.inj (hmi.2.symm.trans (heq ▸ hmj.2))
     have hentry_eq : (allCodes lengths maxBits)[i] = (allCodes lengths maxBits)[j] :=
       Prod.ext heq hcw_eq
     have hpw := List.pairwise_iff_getElem.mp (allCodes_nodup lengths maxBits)
