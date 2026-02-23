@@ -432,9 +432,16 @@ while true; do
             queue_depth=0
         fi
         if (( queue_depth < QUEUE_MIN )); then
-            SESSION_MODE="planner"
-            EFFECTIVE_PROMPT="/plan"
-            say "Queue depth: $queue_depth (< $QUEUE_MIN) → planner session"
+            # Try to acquire planner lock (prevents concurrent planners)
+            if cd "$SCRIPT_DIR" && ./coordination lock-planner 2>/dev/null; then
+                SESSION_MODE="planner"
+                EFFECTIVE_PROMPT="/plan"
+                say "Queue depth: $queue_depth (< $QUEUE_MIN) → planner session (lock acquired)"
+            else
+                say "Queue depth: $queue_depth (< $QUEUE_MIN) but planner lock held. Waiting 60s..."
+                sleep 60
+                continue
+            fi
         else
             SESSION_MODE="worker"
             EFFECTIVE_PROMPT="/work"
@@ -627,6 +634,11 @@ except:
         git_summary="$git_summary(${git_commits} commits)"
     fi
     say "Session #$SESSION_NUM finished: exit=$EXIT_CODE duration=$(human_duration $ELAPSED) jsonl=$(human_size "$final_size")$token_summary$git_summary uuid=$uuid"
+
+    # Release planner lock if this was a planner session
+    if [[ "$SESSION_MODE" == "planner" ]]; then
+        cd "$SCRIPT_DIR" && ./coordination unlock-planner 2>/dev/null || true
+    fi
 
     # Clean up worktree
     if [[ -d "$wt_dir" ]]; then

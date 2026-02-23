@@ -179,6 +179,8 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 | `coordination queue-depth` | Count of unclaimed issues (used by `./go` for dispatch) |
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
 | `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
+| `coordination lock-planner` | Acquire advisory planner lock (10min TTL, issue #8) |
+| `coordination unlock-planner` | Release planner lock early |
 
 **Issue lifecycle**: planner creates issue (label: `agent-plan`) →
 worker claims it (adds label: `claimed`) → worker creates PR closing it →
