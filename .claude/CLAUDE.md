@@ -225,6 +225,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Native/Gzip.lean     — Native gzip/zlib compression + decompression (RFC 1952/1950)
     Zip/Spec/Huffman.lean    — Canonical Huffman code definitions (types, construction, decode)
     Zip/Spec/HuffmanTheorems.lean — Huffman property theorems (Kraft, prefix-free, injectivity)
+    Zip/Spec/HuffmanEncode.lean  — Huffman code length computation from symbol frequencies
     Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
     Zip/Spec/DeflateEncode.lean — Spec-level fixed Huffman encoder + Level 1 roundtrip
