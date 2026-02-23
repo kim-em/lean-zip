@@ -71,7 +71,7 @@ def linkFlags : IO (Array String) := do
     if System.Platform.isOSX then
       let sdkPath := (← IO.Process.output {
         cmd := "xcrun", args := #["--show-sdk-path"] }).stdout.trimAscii.toString
-      return zlibEffective ++
+      return zlibEffective ++ allLibPaths ++
         #["-lzstd", s!"-L{sdkPath}/usr/lib"]
     else
       -- Pass the full path to libzstd.a directly instead of -L + -lzstd.
