@@ -621,4 +621,34 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
       rw [hbr']
       simp only [hoff, Nat.add_zero]
 
+/-! ### writeBitsLSB properties -/
+
+/-- `writeBitsLSB` produces exactly `n` bits. -/
+theorem writeBitsLSB_length (n val : Nat) :
+    (Deflate.Spec.writeBitsLSB n val).length = n := by
+  induction n generalizing val with
+  | zero => simp [Deflate.Spec.writeBitsLSB]
+  | succ k ih => simp [Deflate.Spec.writeBitsLSB, ih]
+
+/-- Reading back a written value recovers the original. -/
+theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
+    (h : val < 2 ^ n) :
+    Deflate.Spec.readBitsLSB n (Deflate.Spec.writeBitsLSB n val ++ rest) =
+      some (val, rest) := by
+  induction n generalizing val with
+  | zero => simp [Deflate.Spec.readBitsLSB, Deflate.Spec.writeBitsLSB]; omega
+  | succ k ih =>
+    simp only [Deflate.Spec.writeBitsLSB, List.cons_append, Deflate.Spec.readBitsLSB]
+    have hlt : val / 2 < 2 ^ k := by
+      rw [Nat.div_lt_iff_lt_mul (by omega : 0 < 2)]
+      calc val < 2 ^ (k + 1) := h
+           _ = 2 ^ k * 2 := by rw [Nat.pow_succ, Nat.mul_comm]
+    rw [ih (val / 2) hlt]
+    simp only [bind, Option.bind]
+    congr 1; ext1
+    · -- (if val % 2 == 1 then 1 else 0) + val / 2 * 2 = val
+      have := Nat.div_add_mod val 2
+      split <;> simp_all [beq_iff_eq] <;> omega
+    · rfl
+
 end Deflate.Correctness
