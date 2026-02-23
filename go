@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_AVAILABLE_MODEL="$HOME/.claude/skills/claude-usage/claude-available-model"
 LOGFILE="$SCRIPT_DIR/agent-loop.log"
-WORKTREE_BASE="$SCRIPT_DIR/.worktrees"
+WORKTREE_BASE="$SCRIPT_DIR/worktrees"
 
 # --- Parse flags ---
 
