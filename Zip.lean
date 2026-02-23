@@ -24,3 +24,4 @@ import Zip.Native.Inflate
 import Zip.Native.Gzip
 import Zip.Native.BitWriter
 import Zip.Native.Deflate
+import Zip.Spec.LZ77NativeCorrect
