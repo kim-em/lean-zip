@@ -309,6 +309,49 @@ theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
   · exact trailing_encodable data pos
 termination_by data.size - pos
 
+/-! ## Length bounds -/
+
+/-- `trailing` emits at most `data.size - pos` tokens. -/
+theorem trailing_length (data : ByteArray) (pos : Nat) :
+    (lz77Greedy.trailing data pos).length ≤ data.size - pos := by
+  unfold lz77Greedy.trailing
+  split
+  · simp only [List.length_cons]
+    have ih := trailing_length data (pos + 1)
+    omega
+  · simp
+termination_by data.size - pos
+
+/-- `mainLoop` emits at most `data.size - pos` tokens. -/
+private theorem length_cons_le_of_advance {n k s pos : Nat}
+    (ih : n ≤ s - (pos + k)) (hk : k ≥ 1) (hle : pos + k ≤ s) :
+    n + 1 ≤ s - pos := by omega
+
+theorem mainLoop_length (data : ByteArray) (windowSize hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat) :
+    (lz77Greedy.mainLoop data windowSize hashSize hashTable hashValid pos).length
+      ≤ data.size - pos := by
+  unfold lz77Greedy.mainLoop
+  split
+  · rename_i hlt
+    dsimp only
+    split
+    · rename_i hcond
+      split
+      · rename_i hge
+        split
+        · rename_i hle
+          simp only [List.length_cons]
+          exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) hle
+        · simp only [List.length_cons]
+          exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) (by omega)
+      · simp only [List.length_cons]
+        exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) (by omega)
+    · simp only [List.length_cons]
+      exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) (by omega)
+  · exact trailing_length data pos
+termination_by data.size - pos
+
 /-- All tokens from `lz77Greedy` have valid ranges for fixed Huffman encoding:
     lengths in 3–258 and distances in 1–32768 (so `findLengthCode`/`findDistCode`
     always succeed). -/

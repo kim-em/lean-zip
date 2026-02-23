@@ -52,7 +52,7 @@ theorem tokensToSymbols_validSymbolList (tokens : Array LZ77Token) :
 
 open Deflate.Spec in
 /-- Each symbol in `tokensToSymbols (lz77Greedy data)` can be encoded with
-    the fixed Huffman tables. Uses `lz77Greedy_encodable` (which has sorry). -/
+    the fixed Huffman tables. -/
 theorem tokensToSymbols_encodable (data : ByteArray)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ s ∈ tokensToSymbols (lz77Greedy data windowSize),
@@ -92,11 +92,16 @@ theorem tokensToSymbols_length (tokens : Array LZ77Token) :
   simp [tokensToSymbols, List.length_append, List.length_map]
 
 /-- The token count from `lz77Greedy` is at most `data.size`. In the worst
-    case every byte is a literal.
-    **Sorry**: requires reasoning about imperative `while` loops in `Id.run do`. -/
+    case every byte is a literal. -/
 theorem lz77Greedy_size_le (data : ByteArray) (windowSize : Nat) :
     (lz77Greedy data windowSize).size ≤ data.size := by
-  sorry
+  simp only [lz77Greedy]
+  split
+  · simp only [List.size_toArray]
+    exact trailing_length data 0
+  · simp only [List.size_toArray]
+    exact mainLoop_length data windowSize 65536
+      (Array.replicate 65536 0) (Array.replicate 65536 false) 0
 
 /-! ## Spec-level roundtrip for native tokens -/
 
