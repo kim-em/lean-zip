@@ -13,6 +13,7 @@ import Zip.Spec.Huffman
 import Zip.Spec.HuffmanTheorems
 import Zip.Spec.LZ77
 import Zip.Spec.Deflate
+import Zip.Spec.DeflateEncode
 import Zip.Spec.BitstreamCorrect
 import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.HuffmanCorrect
