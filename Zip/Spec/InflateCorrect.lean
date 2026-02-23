@@ -1,3 +1,4 @@
+import Zip.Spec.DecodeCorrect
 import Zip.Spec.DynamicTreesCorrect
 
 /-!
