@@ -5,6 +5,7 @@
   checksums using the native CRC-32 and Adler-32 implementations.
 -/
 import Zip.Native.Inflate
+import Zip.Native.Deflate
 import Zip.Native.Crc32
 import Zip.Native.Adler32
 import Zip.Binary
@@ -76,6 +77,32 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
 
 end GzipDecode
 
+namespace GzipEncode
+
+/-- Compress data to gzip format (RFC 1952).
+    Uses DEFLATE level 0 (stored) or level 1 (fixed Huffman). -/
+def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
+  let deflated := if level == 0 then
+    Deflate.deflateStored data
+  else
+    Deflate.deflateFixed data
+  -- Gzip header: ID1=0x1f, ID2=0x8b, CM=8, FLG=0, MTIME=0, XFL, OS=255
+  let xfl : UInt8 := if level == 0 then 0x02 else 0x04
+  let header := ByteArray.mk #[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, xfl, 0xFF]
+  -- CRC32 of uncompressed data (4 bytes LE)
+  let crc := Crc32.Native.crc32 0 data
+  -- ISIZE: original size mod 2^32 (4 bytes LE)
+  let isize := data.size.toUInt32
+  let trailer := ByteArray.mk #[
+    (crc &&& 0xFF).toUInt8, ((crc >>> 8) &&& 0xFF).toUInt8,
+    ((crc >>> 16) &&& 0xFF).toUInt8, ((crc >>> 24) &&& 0xFF).toUInt8,
+    (isize &&& 0xFF).toUInt8, ((isize >>> 8) &&& 0xFF).toUInt8,
+    ((isize >>> 16) &&& 0xFF).toUInt8, ((isize >>> 24) &&& 0xFF).toUInt8
+  ]
+  header ++ deflated ++ trailer
+
+end GzipEncode
+
 namespace ZlibDecode
 
 /-- Decompress a zlib stream (RFC 1950).
@@ -116,6 +143,32 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
 
 end ZlibDecode
 
+namespace ZlibEncode
+
+/-- Compress data to zlib format (RFC 1950).
+    Uses DEFLATE level 0 (stored) or level 1 (fixed Huffman). -/
+def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
+  let deflated := if level == 0 then
+    Deflate.deflateStored data
+  else
+    Deflate.deflateFixed data
+  -- CMF: CM=8 (deflate), CINFO=7 (32K window)
+  let cmf : UInt8 := 0x78
+  -- FLG: FLEVEL (bits 6-7) + FCHECK (bits 0-4) such that (CMF*256 + FLG) % 31 == 0
+  let flevel : UInt8 := if level == 0 then 0x00 else 0x40
+  let fcheck := (31 - ((cmf.toNat * 256 + flevel.toNat) % 31)) % 31
+  let flg := flevel ||| fcheck.toUInt8
+  let header := ByteArray.mk #[cmf, flg]
+  -- Adler32 of uncompressed data (4 bytes big-endian)
+  let adler := Adler32.Native.adler32 1 data
+  let trailer := ByteArray.mk #[
+    ((adler >>> 24) &&& 0xFF).toUInt8, ((adler >>> 16) &&& 0xFF).toUInt8,
+    ((adler >>> 8) &&& 0xFF).toUInt8, (adler &&& 0xFF).toUInt8
+  ]
+  header ++ deflated ++ trailer
+
+end ZlibEncode
+
 /-- Format detected from the first bytes of a compressed stream. -/
 inductive CompressFormat where
   | gzip
@@ -145,5 +198,17 @@ def decompressAuto (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024)
   | .gzip => GzipDecode.decompress data maxOutputSize
   | .zlib => ZlibDecode.decompress data maxOutputSize
   | .rawDeflate => Inflate.inflate data maxOutputSize
+
+/-- Compress data with format selection.
+    Default: gzip format, level 1 (fixed Huffman). -/
+def compressAuto (data : ByteArray)
+    (format : CompressFormat := .gzip) (level : UInt8 := 1) :
+    ByteArray :=
+  match format with
+  | .gzip => GzipEncode.compress data level
+  | .zlib => ZlibEncode.compress data level
+  | .rawDeflate =>
+    if level == 0 then Deflate.deflateStored data
+    else Deflate.deflateFixed data
 
 end Zip.Native
