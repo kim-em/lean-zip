@@ -219,8 +219,9 @@ statements (via `sorry`) before proofs are ready.
     Zip/Native/Adler32.lean  — Native Adler-32
     Zip/Native/Crc32.lean    — Native CRC-32 (table-driven)
     Zip/Native/BitReader.lean — LSB-first bit-level reader for DEFLATE
+    Zip/Native/BitWriter.lean — LSB-first bit-level writer for DEFLATE
     Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
-    Zip/Native/Deflate.lean  — Native DEFLATE compressor (stored blocks)
+    Zip/Native/Deflate.lean  — Native DEFLATE compressor (stored + fixed Huffman)
     Zip/Native/Gzip.lean     — Native gzip/zlib decompression (RFC 1952/1950)
     Zip/Spec/Huffman.lean    — Canonical Huffman code spec (allCodes, prefix-free)
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)

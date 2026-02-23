@@ -57,4 +57,59 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   | .ok result => assert! result == helloBytes
   | .error e => throw (IO.userError s!"FFI level 0→native inflate failed: {e}")
 
+  -- Level 1 (fixed Huffman) tests
+
+  -- deflateFixed → native inflate: small data
+  let fixedHello := Zip.Native.Deflate.deflateFixed helloBytes
+  match Zip.Native.Inflate.inflate fixedHello with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"deflateFixed→inflate failed on hello: {e}")
+
+  -- deflateFixed → native inflate: empty data
+  let fixedEmpty := Zip.Native.Deflate.deflateFixed ByteArray.empty
+  match Zip.Native.Inflate.inflate fixedEmpty with
+  | .ok result => assert! result == ByteArray.empty
+  | .error e => throw (IO.userError s!"deflateFixed→inflate failed on empty: {e}")
+
+  -- deflateFixed → native inflate: single byte
+  let fixedSingle := Zip.Native.Deflate.deflateFixed singleByte
+  match Zip.Native.Inflate.inflate fixedSingle with
+  | .ok result => assert! result == singleByte
+  | .error e => throw (IO.userError s!"deflateFixed→inflate failed on single byte: {e}")
+
+  -- deflateFixed → native inflate: repetitive data
+  let fixedBig := Zip.Native.Deflate.deflateFixed big
+  match Zip.Native.Inflate.inflate fixedBig with
+  | .ok result => assert! result == big
+  | .error e => throw (IO.userError s!"deflateFixed→inflate failed on big: {e}")
+
+  -- deflateFixed → FFI inflate (cross-implementation)
+  let fixedCross := Zip.Native.Deflate.deflateFixed helloBytes
+  let decompFixedCross ← RawDeflate.decompress fixedCross
+  assert! decompFixedCross == helloBytes
+
+  -- deflateFixed → FFI inflate: larger data (cross-implementation)
+  let fixedCrossBig := Zip.Native.Deflate.deflateFixed big
+  let decompFixedCrossBig ← RawDeflate.decompress fixedCrossBig
+  assert! decompFixedCrossBig == big
+
+  -- deflateFixed achieves compression on repetitive data
+  let storedSize := (Zip.Native.Deflate.deflateStored big).size
+  let fixedSize := fixedBig.size
+  assert! fixedSize < storedSize
+
+  -- deflateFixed → native inflate: all-same-byte data
+  let allSame := mkConstantData 1000
+  let fixedSame := Zip.Native.Deflate.deflateFixed allSame
+  match Zip.Native.Inflate.inflate fixedSame with
+  | .ok result => assert! result == allSame
+  | .error e => throw (IO.userError s!"deflateFixed→inflate failed on all-same: {e}")
+
+  -- deflateFixed → native inflate: pseudo-random data
+  let random := mkPrngData 1000
+  let fixedRandom := Zip.Native.Deflate.deflateFixed random
+  match Zip.Native.Inflate.inflate fixedRandom with
+  | .ok result => assert! result == random
+  | .error e => throw (IO.userError s!"deflateFixed→inflate failed on random: {e}")
+
   IO.println "  NativeDeflate tests passed."
