@@ -119,66 +119,112 @@ inductive LZ77Token where
   | literal : UInt8 → LZ77Token
   | reference : (length : Nat) → (distance : Nat) → LZ77Token
 
-/-- Simple hash-based greedy LZ77 matcher.
-    Scans input left-to-right, emitting literals or back-references. -/
-def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
-    Array LZ77Token := Id.run do
-  if data.size < 3 then
-    let mut tokens : Array LZ77Token := #[]
-    for i in [:data.size] do
-      tokens := tokens.push (.literal data[i]!)
-    return tokens
-  let hashSize := 65536
-  let mut hashTable : Array Nat := .replicate hashSize 0
-  let mut hashValid : Array Bool := .replicate hashSize false
-  let mut tokens : Array LZ77Token := #[]
-  let mut pos := 0
-  while pos + 2 < data.size do
-    let h := hash3 data pos hashSize
-    let matchPos := hashTable[h]!
-    let isValid := hashValid[h]!
-    -- Update hash table before emitting
-    hashTable := hashTable.set! h pos
-    hashValid := hashValid.set! h true
-    if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
-      -- Try to extend the match
-      let maxLen := min 258 (data.size - pos)
-      let matchLen := countMatch data matchPos pos maxLen
-      if matchLen ≥ 3 then
-        tokens := tokens.push (.reference matchLen (pos - matchPos))
-        -- Advance pos, updating hash table for skipped positions
-        for j in [1:matchLen] do
-          if pos + j + 2 < data.size then
-            let h' := hash3 data (pos + j) hashSize
-            hashTable := hashTable.set! h' (pos + j)
-            hashValid := hashValid.set! h' true
-        pos := pos + matchLen
-      else
-        tokens := tokens.push (.literal data[pos]!)
-        pos := pos + 1
-    else
-      tokens := tokens.push (.literal data[pos]!)
-      pos := pos + 1
-  -- Emit remaining bytes as literals
-  while pos < data.size do
-    tokens := tokens.push (.literal data[pos]!)
-    pos := pos + 1
-  return tokens
-where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
-    let a := data[pos]!.toNat
-    let b := data[pos + 1]!.toNat
-    let c := data[pos + 2]!.toNat
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
-  countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
-    go data p1 p2 0 maxLen
-  go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
-    if i < maxLen then
-      if data[p1 + i]! == data[p2 + i]! then
-        go data p1 p2 (i + 1) maxLen
-      else i
+/-! ## LZ77 matching helpers (top-level for proof access) -/
+
+/-- 3-byte hash for LZ77 position lookup. -/
+def lz77Hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
+  let a := data[pos]!.toNat
+  let b := data[pos + 1]!.toNat
+  let c := data[pos + 2]!.toNat
+  ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+
+/-- Inner loop of countMatch: counts consecutive matching bytes from position i. -/
+def lz77Go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
+  if i < maxLen then
+    if data[p1 + i]! == data[p2 + i]! then
+      lz77Go data p1 p2 (i + 1) maxLen
     else i
-  termination_by maxLen - i
+  else i
+termination_by maxLen - i
+
+/-- `lz77Go` always returns a value between `i` and `maxLen`. -/
+theorem lz77Go_bounds (data : ByteArray) (p1 p2 i maxLen : Nat) (h : i ≤ maxLen) :
+    i ≤ lz77Go data p1 p2 i maxLen ∧ lz77Go data p1 p2 i maxLen ≤ maxLen := by
+  unfold lz77Go
+  split
+  · split
+    · exact ⟨Nat.le_trans (by omega) (lz77Go_bounds data p1 p2 (i+1) maxLen (by omega)).1,
+             (lz77Go_bounds data p1 p2 (i+1) maxLen (by omega)).2⟩
+    · exact ⟨Nat.le_refl i, by omega⟩
+  · exact ⟨Nat.le_refl i, h⟩
+termination_by maxLen - i
+
+/-- Count consecutive matching bytes between p1 and p2, up to maxLen. -/
+def lz77CountMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
+  lz77Go data p1 p2 0 maxLen
+
+theorem lz77CountMatch_le (data : ByteArray) (p1 p2 maxLen : Nat) :
+    lz77CountMatch data p1 p2 maxLen ≤ maxLen :=
+  (lz77Go_bounds data p1 p2 0 maxLen (by omega)).2
+
+/-- Simple hash-based greedy LZ77 matcher.
+    Scans input left-to-right, emitting literals or back-references.
+    Uses explicit recursion (not `Id.run do` / `while`) for proof access. -/
+def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    (smallData data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize hashSize
+      (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
+where
+  hash3 := lz77Hash3
+  go := lz77Go
+  countMatch := lz77CountMatch
+  smallData (data : ByteArray) (pos : Nat) : List LZ77Token :=
+    if pos < data.size then
+      .literal data[pos]! :: smallData data (pos + 1)
+    else []
+  termination_by data.size - pos
+  updateHashes (data : ByteArray) (hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool)
+      (pos j matchLen : Nat) : Array Nat × Array Bool :=
+    if j < matchLen then
+      if pos + j + 2 < data.size then
+        let h := lz77Hash3 data (pos + j) hashSize
+        updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
+          pos (j + 1) matchLen
+      else
+        updateHashes data hashSize hashTable hashValid pos (j + 1) matchLen
+    else (hashTable, hashValid)
+  termination_by matchLen - j
+  mainLoop (data : ByteArray) (windowSize hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat) : List LZ77Token :=
+    if pos + 2 < data.size then
+      let h := lz77Hash3 data pos hashSize
+      let matchPos := hashTable[h]!
+      let isValid := hashValid[h]!
+      let hashTable := hashTable.set! h pos
+      let hashValid := hashValid.set! h true
+      if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
+        let maxLen := min 258 (data.size - pos)
+        let matchLen := lz77CountMatch data matchPos pos maxLen
+        if matchLen ≥ 3 then
+          have _h : matchLen ≤ data.size - pos :=
+            Nat.le_trans (lz77CountMatch_le data matchPos pos maxLen) (Nat.min_le_right 258 _)
+          let (hashTable, hashValid) :=
+            updateHashes data hashSize hashTable hashValid pos 1 matchLen
+          .reference matchLen (pos - matchPos) ::
+            mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
+        else
+          .literal data[pos]! ::
+            mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+      else
+        .literal data[pos]! ::
+          mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+    else
+      trailing data pos
+  termination_by data.size - pos
+  decreasing_by
+    · simp_wf; change data.size - (pos + matchLen) < data.size - pos; omega
+    · simp_wf; omega
+    · simp_wf; omega
+  trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
+    if pos < data.size then
+      .literal data[pos]! :: trailing data (pos + 1)
+    else []
+  termination_by data.size - pos
 
 /-- Compress data using fixed Huffman codes and greedy LZ77 (Level 1).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/

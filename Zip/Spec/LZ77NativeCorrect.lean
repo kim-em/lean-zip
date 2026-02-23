@@ -18,17 +18,17 @@ def tokensToSymbols (tokens : Array LZ77Token) : List Deflate.Spec.LZ77Symbol :=
     between positions `p1+i..` and `p2+i..` in `data`. Returns a count `n`
     such that `i ≤ n ≤ maxLen` and all positions in `[i, n)` have matching
     bytes. -/
-theorem lz77Greedy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
+theorem lz77Go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
     (hle : i ≤ maxLen) :
-    let n := lz77Greedy.go data p1 p2 i maxLen
+    let n := lz77Go data p1 p2 i maxLen
     (∀ j, i ≤ j → j < n → data[p1 + j]! = data[p2 + j]!) ∧
     i ≤ n ∧ n ≤ maxLen := by
-  unfold lz77Greedy.go
+  unfold lz77Go
   split
   · rename_i hlt
     split
     · rename_i heq
-      have ih := lz77Greedy.go_matches data p1 p2 (i + 1) maxLen (by omega)
+      have ih := lz77Go_matches data p1 p2 (i + 1) maxLen (by omega)
       refine ⟨fun j hj hjn => ?_, by omega, ih.2.2⟩
       by_cases hji : j = i
       · subst hji; exact beq_iff_eq.mp heq
@@ -39,12 +39,27 @@ termination_by maxLen - i
 
 /-- `countMatch` returns a count of consecutive matching bytes starting from
     position 0, with all counted positions verified equal. -/
+theorem lz77CountMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat) :
+    let n := lz77CountMatch data p1 p2 maxLen
+    (∀ j, j < n → data[p1 + j]! = data[p2 + j]!) ∧ n ≤ maxLen := by
+  simp only [lz77CountMatch]
+  have h := lz77Go_matches data p1 p2 0 maxLen (by omega)
+  exact ⟨fun j hj => h.1 j (by omega) hj, h.2.2⟩
+
+/-- Backward-compatible aliases for existing proofs. -/
+theorem lz77Greedy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
+    (hle : i ≤ maxLen) :
+    let n := lz77Greedy.go data p1 p2 i maxLen
+    (∀ j, i ≤ j → j < n → data[p1 + j]! = data[p2 + j]!) ∧
+    i ≤ n ∧ n ≤ maxLen := by
+  simp only [lz77Greedy.go]
+  exact lz77Go_matches data p1 p2 i maxLen hle
+
 theorem lz77Greedy.countMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat) :
     let n := lz77Greedy.countMatch data p1 p2 maxLen
     (∀ j, j < n → data[p1 + j]! = data[p2 + j]!) ∧ n ≤ maxLen := by
   simp only [lz77Greedy.countMatch]
-  have h := lz77Greedy.go_matches data p1 p2 0 maxLen (by omega)
-  exact ⟨fun j hj => h.1 j (by omega) hj, h.2.2⟩
+  exact lz77CountMatch_matches data p1 p2 maxLen
 
 /-! ## ValidDecomp predicate -/
 
@@ -175,18 +190,81 @@ theorem validDecomp_resolves (data : ByteArray) (tokens : List LZ77Token)
   have := validDecomp_resolves_aux data 0 tokens hv
   simp at this; exact this
 
+/-! ## lz77Greedy validity: trailing -/
+
+/-- `trailing` produces a valid decomposition of trailing bytes. -/
+theorem trailing_valid (data : ByteArray) (pos : Nat) :
+    ValidDecomp data pos (lz77Greedy.trailing data pos) := by
+  unfold lz77Greedy.trailing
+  split
+  · rename_i hlt
+    exact .literal hlt rfl (trailing_valid data (pos + 1))
+  · exact .done (by omega)
+termination_by data.size - pos
+
+/-! ## lz77Greedy validity: smallData -/
+
+/-- `smallData` produces a valid decomposition. -/
+theorem smallData_valid (data : ByteArray) (pos : Nat) :
+    ValidDecomp data pos (lz77Greedy.smallData data pos) := by
+  unfold lz77Greedy.smallData
+  split
+  · rename_i hlt
+    exact .literal hlt rfl (smallData_valid data (pos + 1))
+  · exact .done (by omega)
+termination_by data.size - pos
+
+/-! ## lz77Greedy validity: mainLoop -/
+
+/-- `mainLoop` produces a valid decomposition of the input data from position `pos`.
+    The proof works for ANY hash table state since correctness depends on
+    `countMatch` (which reads data directly), not the hash table. -/
+theorem mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
+    (hw : windowSize > 0) :
+    ValidDecomp data pos
+      (lz77Greedy.mainLoop data windowSize hashSize hashTable hashValid pos) := by
+  unfold lz77Greedy.mainLoop; dsimp only []
+  split
+  · rename_i hcond
+    split
+    · rename_i hmatch
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hmatch
+      obtain ⟨⟨hvalid, hlt⟩, hdist⟩ := hmatch
+      split
+      · rename_i hlen
+        -- matchLen ≥ 3: emit reference
+        have hcm := lz77CountMatch_matches data (hashTable[lz77Hash3 data pos hashSize]!)
+          pos (min 258 (data.size - pos))
+        have hml := lz77CountMatch_le data (hashTable[lz77Hash3 data pos hashSize]!)
+          pos (min 258 (data.size - pos))
+        refine .reference (by omega) (by omega) (by omega) ?_ ?_
+          (mainLoop_valid data windowSize hashSize _ _ _ hw)
+        · -- hlen_le: pos + matchLen ≤ data.size
+          have := Nat.min_le_right 258 (data.size - pos); omega
+        · -- hmatch: data[pos + i]! = data[pos - dist + i]!
+          intro i hi
+          rw [Nat.sub_sub_self (show hashTable[lz77Hash3 data pos hashSize]! ≤ pos by omega)]
+          exact (hcm.1 i hi).symm
+      · exact .literal (by omega) rfl (mainLoop_valid data windowSize hashSize _ _ _ hw)
+    · exact .literal (by omega) rfl (mainLoop_valid data windowSize hashSize _ _ _ hw)
+  · exact trailing_valid data pos
+termination_by data.size - pos
+decreasing_by
+  all_goals simp_wf
+  all_goals first
+    | omega
+    | (have := Nat.min_le_right 258 (data.size - pos); omega)
+
 /-! ## lz77Greedy validity -/
 
-/-- `lz77Greedy` produces a valid decomposition of the input data.
-    **Sorry**: requires reasoning about `Id.run do` with mutable state and while
-    loops, which is currently intractable in Lean 4. The correctness argument is:
-    - Every `.literal b` at position `pos` reads `data[pos]!` directly
-    - Every `.reference len dist` has `countMatch` verify matching bytes
-    - Tokens cover `data[0..data.size]` contiguously via `pos` advancement
-    - The trailing loop emits remaining bytes as literals -/
+/-- `lz77Greedy` produces a valid decomposition of the input data. -/
 theorem lz77Greedy_valid (data : ByteArray) (windowSize : Nat) (hw : windowSize > 0) :
     ValidDecomp data 0 (lz77Greedy data windowSize).toList := by
-  sorry
+  simp only [lz77Greedy]
+  split
+  · exact smallData_valid data 0
+  · exact mainLoop_valid data windowSize 65536 _ _ 0 hw
 
 /-- Resolving the LZ77 tokens produced by `lz77Greedy` recovers the original data.
     This is the BB1 analog for the native compressor. -/
@@ -197,21 +275,101 @@ theorem lz77Greedy_resolves (data : ByteArray)
       some data.data.toList :=
   validDecomp_resolves data _ (lz77Greedy_valid data windowSize hw)
 
+/-! ## lz77Greedy encodability: trailing -/
+
+/-- All tokens from `trailing` are literals (trivially encodable). -/
+theorem trailing_encodable (data : ByteArray) (pos : Nat) :
+    ∀ t ∈ lz77Greedy.trailing data pos,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold lz77Greedy.trailing
+  split
+  · rename_i hlt
+    intro t ht
+    simp only [List.mem_cons] at ht
+    cases ht with
+    | inl h => subst h; trivial
+    | inr h => exact trailing_encodable data (pos + 1) t h
+  · intro t ht; simp at ht
+termination_by data.size - pos
+
+/-- All tokens from `smallData` are literals. -/
+theorem smallData_encodable (data : ByteArray) (pos : Nat) :
+    ∀ t ∈ lz77Greedy.smallData data pos,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold lz77Greedy.smallData
+  split
+  · rename_i hlt
+    intro t ht
+    simp only [List.mem_cons] at ht
+    cases ht with
+    | inl h => subst h; trivial
+    | inr h => exact smallData_encodable data (pos + 1) t h
+  · intro t ht; simp at ht
+termination_by data.size - pos
+
+/-! ## lz77Greedy encodability: mainLoop -/
+
+/-- All tokens from `mainLoop` have valid encoding ranges. -/
+theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
+    (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    ∀ t ∈ lz77Greedy.mainLoop data windowSize hashSize hashTable hashValid pos,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold lz77Greedy.mainLoop; dsimp only []
+  split
+  · rename_i hcond
+    split
+    · rename_i hmatch
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hmatch
+      obtain ⟨⟨_, hlt⟩, hdist⟩ := hmatch
+      split
+      · rename_i hlen
+        intro t ht
+        simp only [List.mem_cons] at ht
+        cases ht with
+        | inl h =>
+          subst h; simp only
+          have hml := lz77CountMatch_le data (hashTable[lz77Hash3 data pos hashSize]!)
+            pos (min 258 (data.size - pos))
+          exact ⟨by omega, by omega, by omega, by omega⟩
+        | inr h => exact mainLoop_encodable data windowSize hashSize _ _ _ hw hws t h
+      · intro t ht
+        simp only [List.mem_cons] at ht
+        cases ht with
+        | inl h => subst h; trivial
+        | inr h => exact mainLoop_encodable data windowSize hashSize _ _ _ hw hws t h
+    · intro t ht
+      simp only [List.mem_cons] at ht
+      cases ht with
+      | inl h => subst h; trivial
+      | inr h => exact mainLoop_encodable data windowSize hashSize _ _ _ hw hws t h
+  · exact trailing_encodable data pos
+termination_by data.size - pos
+decreasing_by
+  all_goals simp_wf
+  all_goals first
+    | omega
+    | (have := Nat.min_le_right 258 (data.size - pos); omega)
+
 /-! ## lz77Greedy encodability -/
 
 /-- All tokens from `lz77Greedy` have valid ranges for fixed Huffman encoding:
-    lengths in 3–258 and distances in 1–32768 (so `findLengthCode`/`findDistCode`
-    always succeed).
-    **Sorry**: requires reasoning about `Id.run do` imperative loops.
-    The bounds follow from `lz77Greedy`'s guards: `matchLen ≥ 3`,
-    `maxLen = min 258 ...`, `pos - matchPos ≤ windowSize ≤ 32768`,
-    and `matchPos < pos` (so dist ≥ 1). -/
+    lengths in 3–258 and distances in 1–32768. -/
 theorem lz77Greedy_encodable (data : ByteArray)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ (lz77Greedy data windowSize).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
-  sorry
+  simp only [lz77Greedy]
+  split
+  · exact smallData_encodable data 0
+  · exact mainLoop_encodable data windowSize 65536 _ _ 0 hw hws
 
 end Zip.Native.Deflate
