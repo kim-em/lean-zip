@@ -67,12 +67,12 @@ Run `coordination close-stale` to close issues open >24 hours.
 
 Read these to understand current state:
 - `PROGRESS.md` — global milestones and current phase
-- The **last 5** files in `progress/` (by filename sort) — recent session details
+- The **last 5** files in `progress/` — recent session details.
+  Use `ls progress/ | tail -5` to get the filenames (they sort chronologically).
 - `VERIFICATION.md` — the phased roadmap and development cycle
 
 Do NOT read all progress files. The 5 most recent plus PROGRESS.md
-give sufficient context. Older history is available if needed for
-specific investigation.
+give sufficient context.
 
 Record the current `sorry` count: `grep -rc sorry Zip/ || true`
 
@@ -183,7 +183,7 @@ Update `PROGRESS.md` ONLY if this session changed a milestone:
 - Phase transition (e.g. Phase 3 complete → Phase 4 starting)
 - Sorry count reached zero for a phase
 - Major architectural decision affecting future sessions
-- New module or capability added
+- Toolchain upgrade
 
 Most sessions should NOT touch PROGRESS.md.
 
@@ -346,17 +346,17 @@ for how this applies to DEFLATE.
 ## Failure Handling
 
 - If `lake build` or `lake exe test` fails on a pre-existing issue (not
-  your changes), log the failure in `PROGRESS.md` and work around it or
-  end the session. Do not loop retrying the same failure.
+  your changes), log the failure in your progress entry and work around
+  it or end the session. Do not loop retrying the same failure.
 - If a proof is stuck after 3 fundamentally different attempts, leave it
-  as `sorry`, document what was tried in PLAN.md (so future sessions
-  don't repeat failed approaches), and move on.
+  as `sorry`, document what was tried in your plan file (so future
+  sessions don't repeat failed approaches), and move on.
 - Implementation sessions: 3 consecutive iterations with no commits → end
-  the session and document blockers in PLAN.md and SESSION.md. (This rule
+  the session and document blockers in your progress entry. (This rule
   does not apply to review or self-improvement sessions, which may not
   produce commits.)
 - If `/second-opinion` or `/reflect` is unavailable, skip and note in
-  `PROGRESS.md`.
+  your progress entry.
 
 ## Proof Strategies
 
@@ -536,11 +536,6 @@ Update it during review and reflect sessions.
   exist. Use `pure, Pure.pure` in simp arguments to unfold monadic
   `return` in Option specs.
 
-## Current State Summary
+## Current State
 
-Updated by agent at the end of each session.
-
-- **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Phase**: Phase 3 (verified decompressor) — COMPLETE (zero sorries)
-- **Sorry count**: 0
-- **Next**: Phase 4 (compressor) — no native compressor exists yet
+See `PROGRESS.md` for global milestones and current phase.
