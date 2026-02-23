@@ -202,7 +202,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 **Branch naming**: `agent/<first-8-chars-of-UUID>`
 **Plan files**: `plans/<UUID-prefix>.md`
 **Progress files**: `progress/<UTC-timestamp>_<UUID-prefix>.md`
-(Historical files migrated from PROGRESS.md use `YYYY-MM-DD_NNN.md` naming.)
+(Pre-JSONL sessions use `no-session-NN` as the UUID prefix.)
 
 ## Code Organization
 
