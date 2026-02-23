@@ -222,7 +222,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Native/BitWriter.lean — LSB-first bit-level writer for DEFLATE
     Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
     Zip/Native/Deflate.lean  — Native DEFLATE compressor (stored + fixed Huffman)
-    Zip/Native/Gzip.lean     — Native gzip/zlib decompression (RFC 1952/1950)
+    Zip/Native/Gzip.lean     — Native gzip/zlib compression + decompression (RFC 1952/1950)
     Zip/Spec/Huffman.lean    — Canonical Huffman code definitions (types, construction, decode)
     Zip/Spec/HuffmanTheorems.lean — Huffman property theorems (Kraft, prefix-free, injectivity)
     Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
