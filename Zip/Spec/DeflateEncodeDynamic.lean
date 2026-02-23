@@ -743,6 +743,41 @@ private theorem encodeCLEntries_decodeCLSymbols_go
                     hrestBits hvalid_rest hdec hacc'
                     (by simp only [List.length_cons] at hfuel'; omega)
 
+/-! ## CL lengths recovery -/
+
+/-- `clPermutation` contains no duplicates. -/
+private theorem clPermutation_nodup : Deflate.Spec.clPermutation.Nodup := by decide
+
+/-- Every position in `clPermutation` is less than 19. -/
+private theorem clPermutation_lt_nineteen :
+    ∀ p ∈ Deflate.Spec.clPermutation, p < 19 := by decide
+
+/-- After `computeHCLEN`, the trailing positions in permuted order have value 0. -/
+private theorem computeHCLEN_trailing_zero (clLens : List Nat) (j : Nat)
+    (hj : j ≥ computeHCLEN clLens) (hjlt : j < 19) :
+    clLens.getD (Deflate.Spec.clPermutation.getD j 0) 0 = 0 := by
+  simp only [computeHCLEN] at hj
+  have hperm_len := Deflate.Spec.clPermutation_length
+  -- permutedLens[j] = clLens.getD clPermutation[j] 0 by definition
+  -- and all elements from lastNonZero onward are 0
+  have hmap := Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0
+  -- We need: takeWhile from the back captures j
+  -- lastNonZero = 19 - (reverse.takeWhile (· == 0)).length
+  -- j ≥ max 4 lastNonZero → j ≥ lastNonZero → permutedLens[j] is in the zero tail
+  sorry
+
+/-- The foldl-set over clPermutation.take n on replicate 19 0 recovers
+    the original list when trailing positions have value 0. -/
+private theorem readCLLengths_recovers_clLens
+    (clLens : List Nat) (numCodeLen : Nat)
+    (hlen : clLens.length = 19) (hnum : numCodeLen ≤ 19)
+    (htrailing : ∀ j, j ≥ numCodeLen → j < 19 →
+      clLens.getD (Deflate.Spec.clPermutation.getD j 0) 0 = 0) :
+    (Deflate.Spec.clPermutation.take numCodeLen).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      (List.replicate 19 0) = clLens := by
+  sorry
+
 /-! ## Dynamic tree header roundtrip -/
 
 /-- The dynamic tree header roundtrip: encoding then decoding recovers
