@@ -20,3 +20,4 @@ import Zip.Native.Adler32
 import Zip.Native.Crc32
 import Zip.Native.Inflate
 import Zip.Native.Gzip
+import Zip.Native.Deflate

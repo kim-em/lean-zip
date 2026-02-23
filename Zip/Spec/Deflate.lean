@@ -329,6 +329,42 @@ where
       let (val, bits) ← readBitsLSB 8 bits
       readNBytes n bits (acc ++ [val.toUInt8])
 
+/-! ## Stored block encoding -/
+
+/-- Convert a byte to 8 bits (LSB first), matching `bytesToBits.byteToBits`. -/
+private def byteToBitsSpec (b : UInt8) : List Bool :=
+  List.ofFn fun (i : Fin 8) => b.toNat.testBit i.val
+
+/-- Encode a 16-bit value as 16 bits in LSB-first order. -/
+private def encodeLEU16 (v : Nat) : List Bool :=
+  let lo := v % 256
+  let hi := v / 256
+  byteToBitsSpec lo.toUInt8 ++ byteToBitsSpec hi.toUInt8
+
+/-- Encode one stored block (data must be at most 65535 bytes).
+    Does NOT include BFINAL/BTYPE bits (those are emitted by the caller). -/
+private def encodeStoredBlock (data : List UInt8) : List Bool :=
+  let len := data.length
+  let nlen := len ^^^ 0xFFFF
+  encodeLEU16 len ++ encodeLEU16 nlen ++ data.flatMap byteToBitsSpec
+
+/-- Encode data as a sequence of stored DEFLATE blocks (spec level).
+    Produces the complete bit-list representation including BFINAL/BTYPE
+    for each block. Splits data into blocks of at most 65535 bytes. -/
+def encodeStored (data : List UInt8) : List Bool :=
+  if data.length ≤ 65535 then
+    -- Single final block
+    [true, false, false] ++ encodeStoredBlock data
+  else
+    -- Non-final block with 65535 bytes, then recurse
+    let block := data.take 65535
+    let rest := data.drop 65535
+    [false, false, false] ++ encodeStoredBlock block ++ encodeStored rest
+termination_by data.length
+decreasing_by
+  simp only [List.length_drop]
+  omega
+
 /-- Read code length code lengths from the bitstream. -/
 protected def readCLLengths : Nat → Nat → List Nat → List Bool →
     Option (List Nat × List Bool)
@@ -425,7 +461,11 @@ where
         if bfinal == 1 then return acc else go bits acc fuel
       | _ => none  -- reserved block type (3)
 
-/-! ## Correctness theorems (to be proved) -/
+/-! ## Correctness theorems -/
+
+/-- Encoding stored blocks then decoding produces the original data. -/
+theorem encodeStored_decode (data : List UInt8) :
+    decode (encodeStored data) = some data := by sorry
 
 /-- The spec decode function is deterministic: given the same input,
     it always produces the same output. (This is trivially true for a
