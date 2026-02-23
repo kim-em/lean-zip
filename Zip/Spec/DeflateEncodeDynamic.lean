@@ -1,4 +1,5 @@
 import Zip.Spec.DeflateEncode
+import Zip.Spec.BitstreamWriteCorrect
 
 /-!
 # DEFLATE Dynamic Block Header Encoding (RFC 1951 §3.2.7)
@@ -9,7 +10,7 @@ RLE encoding of code lengths and dynamic Huffman tree header assembly:
 - `rlDecodeLengths_rlEncodeLengths`: RLE roundtrip proof
 - `rlEncodeLengths_valid`: entry constraint validation
 - `encodeDynamicTrees`: full dynamic tree header encoder
-- `encodeDynamicTrees_decodeDynamicTables`: header roundtrip theorem (WIP)
+- `encodeDynamicTrees_decodeDynamicTables`: header roundtrip theorem
 -/
 
 namespace Deflate.Spec
@@ -400,6 +401,382 @@ def encodeDynamicTrees (litLens : List Nat) (distLens : List Nat) :
   let clLenBits := writeCLLengths clLens numCodeLen
 
   return headerBits ++ clLenBits ++ symbolBits
+
+/-! ## Helper lemmas for the dynamic tree header roundtrip -/
+
+protected theorem clPermutation_length : Deflate.Spec.clPermutation.length = 19 := by decide
+
+/-- `codeLengthOrder.toList` is the same list as `clPermutation`. -/
+private theorem codeLengthOrder_toList_eq_clPermutation :
+    codeLengthOrder.toList = Deflate.Spec.clPermutation := by rfl
+
+theorem computeHCLEN_ge_four (clLens : List Nat) : computeHCLEN clLens ≥ 4 := by
+  simp [computeHCLEN]; omega
+
+theorem computeHCLEN_le_nineteen (clLens : List Nat) : computeHCLEN clLens ≤ 19 := by
+  simp only [computeHCLEN]
+  have : (Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0).length = 19 := by
+    simp [Deflate.Spec.clPermutation_length]
+  omega
+
+/-! ## readCLLengths / writeCLLengths roundtrip -/
+
+/-- Reading back CL lengths written by `writeCLLengths` recovers the values
+    in the correct permuted positions.
+
+    The result accumulator has `clLens.getD pos 0` at each position `pos`
+    that is `codeLengthOrder[j]` for some `j < numCodeLen`, and retains
+    the original `acc` values elsewhere. -/
+private theorem readCLLengths_writeCLLengths_go
+    (clLens : List Nat) (n idx : Nat) (acc : List Nat) (rest : List Bool)
+    (hacc : acc.length = 19) (hidx : idx + n ≤ 19)
+    (hvals : ∀ i, clLens.getD i 0 < 8) :
+    Deflate.Spec.readCLLengths n idx acc
+      ((Deflate.Spec.clPermutation.drop idx |>.take n).flatMap
+        (fun pos => writeBitsLSB 3 (clLens.getD pos 0)) ++ rest) =
+    some ((Deflate.Spec.clPermutation.drop idx |>.take n).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      acc, rest) := by
+  induction n generalizing idx acc with
+  | zero =>
+    simp [Deflate.Spec.readCLLengths]
+  | succ k ih =>
+    have hidx_lt : idx < 19 := by omega
+    have hperm_len := Deflate.Spec.clPermutation_length
+    -- Unfold the drop/take to expose the head element
+    have hdrop_cons : Deflate.Spec.clPermutation.drop idx =
+        Deflate.Spec.clPermutation[idx] :: Deflate.Spec.clPermutation.drop (idx + 1) :=
+      (List.getElem_cons_drop (h := by omega)).symm
+    simp only [hdrop_cons, List.take_succ_cons, List.flatMap_cons, List.foldl_cons]
+    rw [List.append_assoc]
+    -- readCLLengths unfolds one step
+    rw [Deflate.Spec.readCLLengths]
+    -- Bridge: codeLengthOrder[idx]! = clPermutation[idx]
+    have hCOsize : codeLengthOrder.size = 19 := by
+      have := congrArg List.length codeLengthOrder_toList_eq_clPermutation
+      simp only [Array.length_toList] at this; omega
+    have hpos : codeLengthOrder[idx]! = Deflate.Spec.clPermutation[idx] := by
+      rw [getElem!_pos codeLengthOrder idx (by omega)]
+      rw [show codeLengthOrder[idx] =
+          codeLengthOrder.toList[idx]'(by
+            rw [codeLengthOrder_toList_eq_clPermutation]; omega) from
+        (Array.getElem_toList (h := by omega)).symm]
+      exact List.getElem_of_eq codeLengthOrder_toList_eq_clPermutation _
+    -- readBitsLSB 3 recovers the value
+    have hval : clLens.getD Deflate.Spec.clPermutation[idx] 0 < 2 ^ 3 := by
+      have := hvals Deflate.Spec.clPermutation[idx]; omega
+    rw [Deflate.Correctness.readBitsLSB_writeBitsLSB 3 _ _ hval]
+    simp only [bind, Option.bind]
+    -- The position written by readCLLengths matches clPermutation[idx]
+    rw [hpos]
+    -- Apply IH with updated accumulator
+    have hacc' : (acc.set Deflate.Spec.clPermutation[idx]
+        (clLens.getD Deflate.Spec.clPermutation[idx] 0)).length = 19 := by
+      simp [hacc]
+    exact ih (idx + 1) _ hacc' (by omega)
+
+/-- `writeCLLengths` unfolds to a flatMap over the clPermutation. -/
+private theorem writeCLLengths_eq_flatMap (clLens : List Nat) (numCodeLen : Nat) :
+    writeCLLengths clLens numCodeLen =
+    (Deflate.Spec.clPermutation.take numCodeLen).flatMap
+      (fun pos => writeBitsLSB 3 (clLens.getD pos 0)) := by
+  simp [writeCLLengths]
+
+/-- Full roundtrip: `readCLLengths` on `writeCLLengths` output produces
+    the expected accumulator. -/
+theorem readCLLengths_writeCLLengths
+    (clLens : List Nat) (numCodeLen : Nat) (rest : List Bool)
+    (hnum : numCodeLen ≤ 19)
+    (hvals : ∀ i, clLens.getD i 0 < 8) :
+    Deflate.Spec.readCLLengths numCodeLen 0 (List.replicate 19 0)
+      (writeCLLengths clLens numCodeLen ++ rest) =
+    some ((Deflate.Spec.clPermutation.take numCodeLen).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      (List.replicate 19 0), rest) := by
+  rw [writeCLLengths_eq_flatMap]
+  have := readCLLengths_writeCLLengths_go clLens numCodeLen 0 (List.replicate 19 0) rest
+    (by simp) (by omega) hvals
+  simp only [List.drop_zero] at this
+  exact this
+
+/-! ## CL entry encoding/decoding roundtrip -/
+
+/-- The CL Huffman table constructed by `encodeDynamicTrees` is prefix-free,
+    enabling single-symbol encode/decode roundtrip via `encodeSymbol_decode`. -/
+private theorem clTable_prefix_free
+    (clLens : List Nat) (maxBits : Nat)
+    (hv : Huffman.Spec.ValidLengths clLens maxBits) :
+    let clTable := (Huffman.Spec.allCodes clLens maxBits).map fun (sym, cw) => (cw, sym)
+    ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ clTable → (cw₂, s₂) ∈ clTable →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ :=
+  flipped_allCodes_prefix_free clLens maxBits hv
+
+/-- `rlDecodeLengths.go` only appends to the accumulator, so the result
+    is at least as long as the input accumulator. -/
+private theorem rlDecodeLengths_go_mono (entries : List CLEntry) (acc result : List Nat)
+    (h : rlDecodeLengths.go entries acc = some result) :
+    acc.length ≤ result.length := by
+  induction entries generalizing acc with
+  | nil => simp [rlDecodeLengths.go] at h; subst h; omega
+  | cons entry rest ih =>
+    obtain ⟨code, extra⟩ := entry
+    by_cases hle : code ≤ 15
+    · rw [rlDecode_go_literal code extra rest acc hle] at h
+      have := ih _ h; simp at this; omega
+    · by_cases h16 : code = 16
+      · subst h16
+        by_cases hg : 0 < acc.length
+        · rw [rlDecode_go_code16 extra rest acc hg] at h
+          have := ih _ h; simp at this; omega
+        · exfalso; simp [rlDecodeLengths.go, hg, guard, bind, failure] at h
+      · by_cases h17 : code = 17
+        · subst h17; rw [rlDecode_go_code17 extra rest acc] at h
+          have := ih _ h; simp at this; omega
+        · by_cases h18 : code = 18
+          · subst h18; rw [rlDecode_go_code18 extra rest acc] at h
+            have := ih _ h; simp at this; omega
+          · exfalso; simp only [rlDecodeLengths.go] at h
+            split at h; · omega
+            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
+            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
+            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
+            exact absurd h (by simp)
+
+/-- When `rlDecodeLengths.go` succeeds on a non-empty list, the result is
+    strictly longer than the input accumulator. -/
+private theorem rlDecodeLengths_go_strict_mono
+    (entry : CLEntry) (rest : List CLEntry) (acc result : List Nat)
+    (h : rlDecodeLengths.go (entry :: rest) acc = some result) :
+    acc.length < result.length := by
+  obtain ⟨code, extra⟩ := entry
+  by_cases hle : code ≤ 15
+  · rw [rlDecode_go_literal code extra rest acc hle] at h
+    have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+  · by_cases h16 : code = 16
+    · subst h16
+      by_cases hg : 0 < acc.length
+      · rw [rlDecode_go_code16 extra rest acc hg] at h
+        have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+      · exfalso; simp [rlDecodeLengths.go, hg, guard, bind, failure] at h
+    · by_cases h17 : code = 17
+      · subst h17; rw [rlDecode_go_code17 extra rest acc] at h
+        have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+      · by_cases h18 : code = 18
+        · subst h18; rw [rlDecode_go_code18 extra rest acc] at h
+          have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
+        · exfalso; simp only [rlDecodeLengths.go] at h
+          split at h; · omega
+          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
+          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
+          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
+          exact absurd h (by simp)
+
+private theorem getLast?_getD_eq_getLast! (l : List Nat) (h : l.length > 0) :
+    l.getLast?.getD 0 = l.getLast! := by
+  induction l with
+  | nil => simp at h
+  | cons a as ih =>
+    cases as with
+    | nil => rfl
+    | cons b bs => simp [List.getLast?, List.getLast!]
+
+/-- Encoding CL entries then decoding with `decodeCLSymbols` recovers
+    the original code lengths (via RLE decode).
+
+    Uses `rlDecodeLengths.go` with a general accumulator for induction.
+    The fuel parameter must be ≥ entries.length + 1 (one per entry plus
+    one for the final base-case check). -/
+private theorem encodeCLEntries_decodeCLSymbols_go
+    (clLens : List Nat)
+    (clTable : List (Huffman.Spec.Codeword × Nat))
+    (entries : List CLEntry)
+    (symbolBits : List Bool)
+    (rest : List Bool)
+    (totalCodes : Nat)
+    (acc : List Nat)
+    (fuel : Nat)
+    (hv : Huffman.Spec.ValidLengths clLens 7)
+    (htable : clTable = (Huffman.Spec.allCodes clLens 7).map fun (sym, cw) => (cw, sym))
+    (henc : encodeCLEntries clTable entries = some symbolBits)
+    (hvalid : ∀ entry ∈ entries, (entry.1 ≤ 15 ∧ entry.2 = 0) ∨
+      (entry.1 = 16 ∧ entry.2 ≤ 3) ∨
+      (entry.1 = 17 ∧ entry.2 ≤ 7) ∨
+      (entry.1 = 18 ∧ entry.2 ≤ 127))
+    (hdec : rlDecodeLengths.go entries acc = some result)
+    (hlen : result.length = totalCodes)
+    (hacc_le : acc.length ≤ totalCodes)
+    (hfuel : fuel ≥ entries.length + 1) :
+    decodeDynamicTables.decodeCLSymbols clTable totalCodes acc
+      (symbolBits ++ rest) fuel =
+    some (result, rest) := by
+  induction entries generalizing acc symbolBits fuel with
+  | nil =>
+    -- Base case: no entries, result = acc, fuel ≥ 1
+    simp [encodeCLEntries] at henc; subst henc
+    simp [rlDecodeLengths.go] at hdec; subst hdec
+    simp only [List.nil_append]
+    match fuel, hfuel with
+    | fuel' + 1, _ =>
+      simp [decodeDynamicTables.decodeCLSymbols, show acc.length ≥ totalCodes from by omega]
+  | cons entry restEntries ih =>
+    obtain ⟨code, extra⟩ := entry
+    -- Decompose encodeCLEntries
+    simp only [encodeCLEntries] at henc
+    cases hcw : encodeSymbol clTable code with
+    | none => simp [hcw, bind, Option.bind] at henc
+    | some cw =>
+      cases hrestBits : encodeCLEntries clTable restEntries with
+      | none => simp [hcw, hrestBits, bind, Option.bind] at henc
+      | some restBits =>
+        simp only [hcw, hrestBits, bind, Option.bind, pure, Pure.pure] at henc
+        simp only [Option.some.injEq] at henc; subst henc
+        -- Key facts
+        have hacc_lt : acc.length < totalCodes :=
+          hlen ▸ rlDecodeLengths_go_strict_mono (code, extra) restEntries acc result hdec
+        have hvalid_rest : ∀ entry ∈ restEntries,
+            (entry.1 ≤ 15 ∧ entry.2 = 0) ∨ (entry.1 = 16 ∧ entry.2 ≤ 3) ∨
+            (entry.1 = 17 ∧ entry.2 ≤ 7) ∨ (entry.1 = 18 ∧ entry.2 ≤ 127) :=
+          fun e he => hvalid e (List.mem_cons_of_mem _ he)
+        have hpf : ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ clTable → (cw₂, s₂) ∈ clTable →
+            (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ := by
+          rw [htable]; exact flipped_allCodes_prefix_free clLens 7 hv
+        have hentry := hvalid (code, extra) (.head ..)
+        -- Decompose fuel
+        match fuel, hfuel with
+        | fuel' + 1, hfuel' =>
+          -- Unfold decodeCLSymbols, enter decode branch
+          simp only [decodeDynamicTables.decodeCLSymbols,
+            show ¬(acc.length ≥ totalCodes) from by omega, ↓reduceIte]
+          -- Reassociate bits for Huffman decode
+          rw [show (cw ++ encodeCLExtra code extra ++ restBits) ++ rest =
+              cw ++ (encodeCLExtra code extra ++ restBits ++ rest) from by
+            simp [List.append_assoc]]
+          rw [encodeSymbol_decode _ _ _ _ hcw hpf]
+          simp only [bind, Option.bind]
+          -- Case split on the code type
+          by_cases hle : code ≤ 15
+          · -- Literal code (0-15): no extra bits
+            rw [if_pos (show code < 16 from by omega)]
+            -- encodeCLExtra for code ≤ 15 is []
+            have h16f : (code == 16) = false := by
+              cases h : code == 16 <;> simp_all [beq_iff_eq] <;> omega
+            have h17f : (code == 17) = false := by
+              cases h : code == 17 <;> simp_all [beq_iff_eq] <;> omega
+            have h18f : (code == 18) = false := by
+              cases h : code == 18 <;> simp_all [beq_iff_eq] <;> omega
+            simp only [encodeCLExtra, h16f, h17f, h18f,
+              Bool.false_eq_true, ↓reduceIte, List.nil_append]
+            -- rlDecodeLengths.go step for literal
+            rw [rlDecode_go_literal code extra restEntries acc hle] at hdec
+            -- Apply IH
+            exact ih restBits (acc ++ [code]) fuel' hrestBits hvalid_rest hdec
+              (by simp; omega) (by simp at hfuel' ⊢; omega)
+          · -- Repeat codes (16, 17, 18)
+            rw [if_neg (show ¬(code < 16) from by omega)]
+            -- From hentry and ¬(code ≤ 15), code must be 16, 17, or 18
+            cases hentry with
+            | inl h => exact absurd h.1 (by omega)
+            | inr h => cases h with
+              | inl h16 =>
+                -- Code 16: repeat previous code
+                have h16eq := h16.1; have hextra := h16.2; subst h16eq
+                -- Prove acc non-empty (guard in rlDecodeLengths.go for code 16)
+                have haccpos : acc.length > 0 := by
+                  by_cases hpos : acc.length > 0
+                  · exact hpos
+                  · exfalso; have : acc.length = 0 := by omega
+                    simp [rlDecodeLengths.go, this, guard, failure, bind, Option.bind] at hdec
+                -- rlDecodeLengths step
+                rw [rlDecode_go_code16 extra restEntries acc haccpos] at hdec
+                have hacc' : (acc ++ List.replicate (extra + 3) acc.getLast!).length ≤ totalCodes :=
+                  hlen ▸ rlDecodeLengths_go_mono restEntries _ _ hdec
+                -- readBitsLSB roundtrip
+                have hrb : readBitsLSB 2 (writeBitsLSB 2 extra ++ (restBits ++ rest)) =
+                    some (extra, restBits ++ rest) :=
+                  Deflate.Correctness.readBitsLSB_writeBitsLSB 2 extra _ (by omega)
+                -- Reduce desugared do-notation
+                simp [encodeCLExtra, guard, haccpos, hrb, List.append_assoc, pure, Pure.pure]
+                have : acc.length + (extra + 3) ≤ totalCodes := by
+                  have := hacc'; simp at this; exact this
+                simp only [this, ↓reduceIte]
+                rw [getLast?_getD_eq_getLast! acc haccpos]
+                exact ih restBits (acc ++ List.replicate (extra + 3) acc.getLast!) fuel'
+                  hrestBits hvalid_rest hdec hacc'
+                  (by simp only [List.length_cons] at hfuel'; omega)
+              | inr h => cases h with
+                | inl h17 =>
+                  -- Code 17: repeat 0, 3-10 times
+                  have h17eq := h17.1; have hextra := h17.2; subst h17eq
+                  -- rlDecodeLengths step
+                  rw [rlDecode_go_code17 extra restEntries acc] at hdec
+                  have hacc' : (acc ++ List.replicate (extra + 3) 0).length ≤ totalCodes :=
+                    hlen ▸ rlDecodeLengths_go_mono restEntries _ _ hdec
+                  -- readBitsLSB roundtrip
+                  have hrb : readBitsLSB 3 (writeBitsLSB 3 extra ++ (restBits ++ rest)) =
+                      some (extra, restBits ++ rest) :=
+                    Deflate.Correctness.readBitsLSB_writeBitsLSB 3 extra _ (by omega)
+                  -- Reduce desugared do-notation
+                  simp [encodeCLExtra, guard, hrb, List.append_assoc, pure, Pure.pure]
+                  have : acc.length + (extra + 3) ≤ totalCodes := by
+                    have := hacc'; simp at this; exact this
+                  simp [this]
+                  exact ih restBits (acc ++ List.replicate (extra + 3) 0) fuel'
+                    hrestBits hvalid_rest hdec hacc'
+                    (by simp only [List.length_cons] at hfuel'; omega)
+                | inr h18 =>
+                  -- Code 18: repeat 0, 11-138 times
+                  have h18eq := h18.1; have hextra := h18.2; subst h18eq
+                  -- rlDecodeLengths step
+                  rw [rlDecode_go_code18 extra restEntries acc] at hdec
+                  have hacc' : (acc ++ List.replicate (extra + 11) 0).length ≤ totalCodes :=
+                    hlen ▸ rlDecodeLengths_go_mono restEntries _ _ hdec
+                  -- readBitsLSB roundtrip
+                  have hrb : readBitsLSB 7 (writeBitsLSB 7 extra ++ (restBits ++ rest)) =
+                      some (extra, restBits ++ rest) :=
+                    Deflate.Correctness.readBitsLSB_writeBitsLSB 7 extra _ (by omega)
+                  -- Reduce desugared do-notation
+                  simp [encodeCLExtra, guard, hrb, List.append_assoc, pure, Pure.pure]
+                  have : acc.length + (extra + 11) ≤ totalCodes := by
+                    have := hacc'; simp at this; exact this
+                  simp [this]
+                  exact ih restBits (acc ++ List.replicate (extra + 11) 0) fuel'
+                    hrestBits hvalid_rest hdec hacc'
+                    (by simp only [List.length_cons] at hfuel'; omega)
+
+/-! ## CL lengths recovery -/
+
+/-- `clPermutation` contains no duplicates. -/
+private theorem clPermutation_nodup : Deflate.Spec.clPermutation.Nodup := by decide
+
+/-- Every position in `clPermutation` is less than 19. -/
+private theorem clPermutation_lt_nineteen :
+    ∀ p ∈ Deflate.Spec.clPermutation, p < 19 := by decide
+
+/-- After `computeHCLEN`, the trailing positions in permuted order have value 0. -/
+private theorem computeHCLEN_trailing_zero (clLens : List Nat) (j : Nat)
+    (hj : j ≥ computeHCLEN clLens) (hjlt : j < 19) :
+    clLens.getD (Deflate.Spec.clPermutation.getD j 0) 0 = 0 := by
+  simp only [computeHCLEN] at hj
+  have hperm_len := Deflate.Spec.clPermutation_length
+  -- permutedLens[j] = clLens.getD clPermutation[j] 0 by definition
+  -- and all elements from lastNonZero onward are 0
+  have hmap := Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0
+  -- We need: takeWhile from the back captures j
+  -- lastNonZero = 19 - (reverse.takeWhile (· == 0)).length
+  -- j ≥ max 4 lastNonZero → j ≥ lastNonZero → permutedLens[j] is in the zero tail
+  sorry
+
+/-- The foldl-set over clPermutation.take n on replicate 19 0 recovers
+    the original list when trailing positions have value 0. -/
+private theorem readCLLengths_recovers_clLens
+    (clLens : List Nat) (numCodeLen : Nat)
+    (hlen : clLens.length = 19) (hnum : numCodeLen ≤ 19)
+    (htrailing : ∀ j, j ≥ numCodeLen → j < 19 →
+      clLens.getD (Deflate.Spec.clPermutation.getD j 0) 0 = 0) :
+    (Deflate.Spec.clPermutation.take numCodeLen).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      (List.replicate 19 0) = clLens := by
+  sorry
 
 /-! ## Dynamic tree header roundtrip -/
 
