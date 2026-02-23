@@ -226,6 +226,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
     Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
+    Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
     Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
