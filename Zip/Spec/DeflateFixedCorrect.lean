@@ -3,6 +3,7 @@ import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.InflateCorrect
 import Zip.Spec.HuffmanEncodeCorrect
+import Zip.Native.DeflateDynamic
 
 /-!
 # Native DEFLATE Fixed Huffman Correctness
@@ -521,6 +522,17 @@ theorem inflate_deflateFixed (data : ByteArray)
 theorem inflate_deflateLazy (data : ByteArray)
     (hsize : data.size ≤ 256 * 1024 * 1024) :
     Zip.Native.Inflate.inflate (deflateLazy data) = .ok data := by
+  sorry
+
+/-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
+    codes then decompressing recovers the original data.
+    **Sorry**: requires proving the dynamic block header written by
+    `writeDynamicHeader` is correctly decodable by `inflate`, plus
+    `emitTokensWithCodes` correspondence with spec `encodeSymbols` for
+    dynamic code tables. -/
+theorem inflate_deflateDynamic (data : ByteArray)
+    (hsize : data.size ≤ 256 * 1024 * 1024) :
+    Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
   sorry
 
 end Zip.Native.Deflate
