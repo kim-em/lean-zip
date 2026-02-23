@@ -32,15 +32,23 @@ def pkgConfigLibDir (pkg : String) : IO (Option String) := do
   if dir.isEmpty then return none
   return some dir
 
-/-- Find `libzstd.a` in the given `-L` directories or via pkg-config libdir.
-    Returns the full path if found. -/
+/-- Find `libzstd.a` in the given `-L` directories, via pkg-config libdir,
+    or via common system library directories. Returns the full path if found. -/
 def findStaticZstd (libPaths : Array String) : IO (Option System.FilePath) := do
+  -- Check -L directories from flags
   for p in libPaths do
     let dir : System.FilePath := ⟨(p.drop 2).toString⟩  -- strip "-L"
     let path := dir / "libzstd.a"
     if (← path.pathExists) then return some path
-  -- Also check the pkg-config reported libdir (may not be in -L flags)
+  -- Check pkg-config reported libdir
   if let some dir := (← pkgConfigLibDir "libzstd") then
+    let path := (⟨dir⟩ : System.FilePath) / "libzstd.a"
+    if (← path.pathExists) then return some path
+  -- Check common system library directories (pkg-config libdir may not match
+  -- the actual multiarch path, e.g. returns /usr/lib but lib is in
+  -- /usr/lib/x86_64-linux-gnu on Ubuntu)
+  for dir in #["/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
+               "/usr/lib64", "/usr/local/lib"] do
     let path := (⟨dir⟩ : System.FilePath) / "libzstd.a"
     if (← path.pathExists) then return some path
   return none

@@ -37,21 +37,6 @@ jobs:
           # reliable way to force re-evaluation.
           rm -rf .lake
 
-      - name: Debug link flags
-        run: |
-          echo "=== pkg-config --libs zlib ==="
-          pkg-config --libs zlib || echo "(failed)"
-          echo "=== pkg-config --libs libzstd ==="
-          pkg-config --libs libzstd || echo "(failed)"
-          echo "=== pkg-config --variable=libdir zlib ==="
-          pkg-config --variable=libdir zlib || echo "(failed)"
-          echo "=== pkg-config --variable=libdir libzstd ==="
-          pkg-config --variable=libdir libzstd || echo "(failed)"
-          echo "=== find libzstd.a ==="
-          find /usr -name 'libzstd.a' 2>/dev/null || echo "(not found)"
-          echo "=== find libzstd.so ==="
-          find /usr -name 'libzstd.so' 2>/dev/null || echo "(not found)"
-
       - name: Build
         run: lake build
 
