@@ -1,0 +1,418 @@
+import Zip.Spec.DeflateEncode
+
+/-!
+# DEFLATE Dynamic Block Header Encoding (RFC 1951 §3.2.7)
+
+RLE encoding of code lengths and dynamic Huffman tree header assembly:
+- `CLEntry`, `countRun`, `rlEncodeLengths`: RLE encoding of code lengths
+- `rlDecodeLengths`: RLE decoding (inverse)
+- `rlDecodeLengths_rlEncodeLengths`: RLE roundtrip proof
+- `rlEncodeLengths_valid`: entry constraint validation
+- `encodeDynamicTrees`: full dynamic tree header encoder
+- `encodeDynamicTrees_decodeDynamicTables`: header roundtrip theorem (WIP)
+-/
+
+namespace Deflate.Spec
+
+/-! ## RLE encoding of DEFLATE code lengths (RFC 1951 §3.2.7) -/
+
+/-- A code-length entry for DEFLATE dynamic blocks (RFC 1951 §3.2.7).
+    Each entry is `(clCode, extraValue)` where:
+    - clCode 0–15: literal code length, extraValue = 0
+    - clCode 16: repeat previous, extraValue = count − 3 (0–3, 2 bits)
+    - clCode 17: repeat zero, extraValue = count − 3 (0–7, 3 bits)
+    - clCode 18: repeat zero long, extraValue = count − 11 (0–127, 7 bits) -/
+abbrev CLEntry := Nat × Nat
+
+/-- Count consecutive occurrences of `val` at the front of `xs`. -/
+def countRun (val : Nat) : List Nat → Nat
+  | x :: xs => if x == val then 1 + countRun val xs else 0
+  | [] => 0
+
+theorem countRun_le_length (val : Nat) (xs : List Nat) :
+    countRun val xs ≤ xs.length := by
+  induction xs with
+  | nil => simp [countRun]
+  | cons x xs ih =>
+    simp only [countRun]
+    split <;> simp <;> omega
+
+/-- RLE-encode a list of code lengths into CL entries.
+    Greedy strategy: use the longest possible run at each position.
+    For runs of zeros: use codes 17 or 18.
+    For runs of the same non-zero value: emit literal then code 16. -/
+def rlEncodeLengths (lengths : List Nat) : List CLEntry :=
+  go lengths
+where
+  go : List Nat → List CLEntry
+    | [] => []
+    | x :: xs =>
+      if x == 0 then
+        let runLen := 1 + countRun 0 xs
+        if runLen >= 11 then
+          let take := min runLen 138
+          (18, take - 11) :: go (xs.drop (take - 1))
+        else if runLen >= 3 then
+          (17, runLen - 3) :: go (xs.drop (runLen - 1))
+        else
+          -- 1 or 2 zeros: emit as literals
+          (0, 0) :: go xs
+      else
+        let runLen := countRun x xs
+        if runLen >= 3 then
+          let take := min runLen 6
+          (x, 0) :: (16, take - 3) :: go (xs.drop take)
+        else
+          (x, 0) :: go xs
+  termination_by xs => xs.length
+  decreasing_by
+    all_goals simp_all [List.length_drop]
+    all_goals have := countRun_le_length 0 xs; omega
+
+/-- Decode a list of CL entries back into code lengths.
+    This is the pure (non-Huffman) inverse of `rlEncodeLengths`.
+    Code 16 requires a previous value, so we use an accumulator. -/
+def rlDecodeLengths (entries : List CLEntry) : Option (List Nat) :=
+  go entries []
+where
+  go : List CLEntry → List Nat → Option (List Nat)
+    | [], acc => some acc
+    | (code, extra) :: rest, acc =>
+      if code ≤ 15 then
+        go rest (acc ++ [code])
+      else if code == 16 then do
+        guard (acc.length > 0)
+        let prev := acc.getLast!
+        go rest (acc ++ List.replicate (extra + 3) prev)
+      else if code == 17 then
+        go rest (acc ++ List.replicate (extra + 3) 0)
+      else if code == 18 then
+        go rest (acc ++ List.replicate (extra + 11) 0)
+      else none
+
+theorem countRun_take (val : Nat) (xs : List Nat) :
+    xs.take (countRun val xs) = List.replicate (countRun val xs) val := by
+  induction xs with
+  | nil => simp [countRun]
+  | cons x xs ih =>
+    simp only [countRun]
+    split
+    · rename_i heq; simp only [beq_iff_eq] at heq; subst heq
+      show (x :: xs).take (1 + countRun x xs) = List.replicate (1 + countRun x xs) x
+      rw [show 1 + countRun x xs = (countRun x xs) + 1 from by omega]
+      rw [List.take_succ_cons, List.replicate_succ]
+      exact congrArg (x :: ·) ih
+    · show (x :: xs).take 0 = List.replicate 0 val
+      simp
+
+/-- Taking at most `countRun val xs` elements from `xs` gives all `val`s. -/
+theorem take_countRun_eq_replicate (val : Nat) (xs : List Nat) (n : Nat) (hn : n ≤ countRun val xs) :
+    xs.take n = List.replicate n val := by
+  induction xs generalizing n with
+  | nil => simp [countRun] at hn; simp [hn]
+  | cons x xs ih =>
+    simp only [countRun] at hn
+    split at hn
+    · rename_i heq; simp only [beq_iff_eq] at heq; subst heq
+      cases n with
+      | zero => simp
+      | succ n =>
+        simp only [List.take_succ_cons, List.replicate_succ]
+        exact congrArg (x :: ·) (ih n (by omega))
+    · have : n = 0 := by omega
+      subst this; simp
+
+private theorem drop_subset_valid {xs : List Nat} {n : Nat}
+    (hvalid : ∀ y ∈ xs, y ≤ 15) : ∀ y ∈ xs.drop n, y ≤ 15 :=
+  fun y hy => hvalid y (List.drop_subset n xs hy)
+
+-- Step lemmas for rlDecodeLengths.go on each code type
+private theorem rlDecode_go_literal (code : Nat) (extra : Nat)
+    (rest : List CLEntry) (acc : List Nat) (hle : code ≤ 15) :
+    rlDecodeLengths.go ((code, extra) :: rest) acc =
+      rlDecodeLengths.go rest (acc ++ [code]) := by
+  simp only [rlDecodeLengths.go, hle, ↓reduceIte]
+
+private theorem rlDecode_go_code17 (extra : Nat)
+    (rest : List CLEntry) (acc : List Nat) :
+    rlDecodeLengths.go ((17, extra) :: rest) acc =
+      rlDecodeLengths.go rest (acc ++ List.replicate (extra + 3) 0) := by
+  simp [rlDecodeLengths.go]
+
+private theorem rlDecode_go_code18 (extra : Nat)
+    (rest : List CLEntry) (acc : List Nat) :
+    rlDecodeLengths.go ((18, extra) :: rest) acc =
+      rlDecodeLengths.go rest (acc ++ List.replicate (extra + 11) 0) := by
+  simp [rlDecodeLengths.go]
+
+private theorem rlDecode_go_code16 (extra : Nat)
+    (rest : List CLEntry) (acc : List Nat) (hne : acc.length > 0) :
+    rlDecodeLengths.go ((16, extra) :: rest) acc =
+      rlDecodeLengths.go rest (acc ++ List.replicate (extra + 3) acc.getLast!) := by
+  simp [rlDecodeLengths.go, hne, guard, pure, bind]
+
+/-- Replicate zeros plus the rest of the list equals the original cons-zero list. -/
+private theorem replicate_drop_eq_cons_zero (xs : List Nat) (n : Nat)
+    (hn1 : n ≥ 1) (hn : n ≤ 1 + countRun 0 xs) :
+    List.replicate n 0 ++ xs.drop (n - 1) = 0 :: xs := by
+  rw [← take_countRun_eq_replicate 0 (0 :: xs) n (by simp [countRun]; omega)]
+  have hdrop : xs.drop (n - 1) = (0 :: xs).drop n := by
+    cases n with
+    | zero => omega
+    | succ k => simp [List.drop_succ_cons]
+  rw [hdrop, List.take_append_drop]
+
+/-- Singleton plus replicate plus drop equals the original cons list. -/
+private theorem singleton_replicate_drop_eq_cons (x : Nat) (xs : List Nat) (m : Nat)
+    (hm : m ≤ countRun x xs) :
+    [x] ++ List.replicate m x ++ xs.drop m = x :: xs := by
+  rw [← take_countRun_eq_replicate x xs m hm]
+  simp [List.take_append_drop]
+
+/-- Generalized roundtrip: decoding an encoded list recovers the accumulator plus the list. -/
+theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List Nat)
+    (hvalid : ∀ x ∈ lengths, x ≤ 15) :
+    rlDecodeLengths.go (rlEncodeLengths.go lengths) acc = some (acc ++ lengths) := by
+  match lengths with
+  | [] => simp [rlEncodeLengths.go, rlDecodeLengths.go]
+  | x :: xs =>
+    have hx_valid : x ≤ 15 := hvalid x (.head ..)
+    have hxs_valid : ∀ y ∈ xs, y ≤ 15 := fun y hy => hvalid y (List.mem_cons_of_mem x hy)
+    have hcr0 := countRun_le_length 0 xs
+    have hcrx := countRun_le_length x xs
+    rw [rlEncodeLengths.go]
+    by_cases hx0 : x = 0
+    · subst hx0
+      simp only [beq_self_eq_true, ↓reduceIte]
+      by_cases hge11 : 1 + countRun 0 xs >= 11
+      · -- code 18: repeat zero 11-138
+        rw [if_pos (by omega : 1 + countRun 0 xs ≥ 11), rlDecode_go_code18]
+        rw [show min (1 + countRun 0 xs) 138 - 11 + 11 = min (1 + countRun 0 xs) 138 from by omega]
+        rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
+        simp only [List.append_assoc]
+        exact congrArg (fun z => some (acc ++ z))
+          (replicate_drop_eq_cons_zero xs _ (by omega) (by omega))
+      · rw [if_neg (by omega)]
+        by_cases hge3 : 1 + countRun 0 xs >= 3
+        · -- code 17: repeat zero 3-10
+          rw [if_pos (by omega : 1 + countRun 0 xs ≥ 3), rlDecode_go_code17]
+          rw [show 1 + countRun 0 xs - 3 + 3 = 1 + countRun 0 xs from by omega]
+          rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
+          simp only [List.append_assoc]
+          exact congrArg (fun z => some (acc ++ z))
+            (replicate_drop_eq_cons_zero xs _ (by omega) (by omega))
+        · -- literal 0
+          rw [if_neg (by omega), rlDecode_go_literal 0 0 _ _ (by omega)]
+          rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [0]) hxs_valid]
+          simp [List.append_assoc]
+    · simp only [show (x == 0) = false from by cases h : x == 0 <;> simp_all [beq_iff_eq],
+                  Bool.false_eq_true, ↓reduceIte]
+      by_cases hge3 : countRun x xs >= 3
+      · -- literal + code 16: repeat previous 3-6
+        rw [if_pos (by omega : countRun x xs ≥ 3)]
+        rw [rlDecode_go_literal x 0 _ _ hx_valid, rlDecode_go_code16 _ _ _ (by simp)]
+        rw [show (acc ++ [x]).getLast! = x from by simp]
+        rw [show min (countRun x xs) 6 - 3 + 3 = min (countRun x xs) 6 from by omega]
+        rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
+        simp only [List.append_assoc]
+        exact congrArg (fun z => some (acc ++ z))
+          (singleton_replicate_drop_eq_cons x xs _ (Nat.min_le_left _ _))
+      · -- literal (no repeat)
+        rw [if_neg (by omega), rlDecode_go_literal x 0 _ _ hx_valid]
+        rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [x]) hxs_valid]
+        simp [List.append_assoc]
+termination_by lengths.length
+decreasing_by all_goals simp_all [List.length_drop] <;> omega
+
+/-- Encoding then decoding code lengths recovers the original list. -/
+theorem rlDecodeLengths_rlEncodeLengths (lengths : List Nat)
+    (hvalid : ∀ x ∈ lengths, x ≤ 15) :
+    rlDecodeLengths (rlEncodeLengths lengths) = some lengths := by
+  simp only [rlDecodeLengths, rlEncodeLengths]
+  have := rlDecodeLengths_go_rlEncodeLengths_go lengths [] hvalid
+  simp at this
+  exact this
+
+/-- Every entry produced by `rlEncodeLengths.go` satisfies the CL code constraints. -/
+theorem rlEncodeLengths_go_valid (lengths : List Nat)
+    (hvalid : ∀ x ∈ lengths, x ≤ 15) :
+    ∀ entry ∈ rlEncodeLengths.go lengths,
+      (entry.1 ≤ 15 ∧ entry.2 = 0) ∨
+      (entry.1 = 16 ∧ entry.2 ≤ 3) ∨
+      (entry.1 = 17 ∧ entry.2 ≤ 7) ∨
+      (entry.1 = 18 ∧ entry.2 ≤ 127) := by
+  match lengths with
+  | [] => simp [rlEncodeLengths.go]
+  | x :: xs =>
+    have hx_valid : x ≤ 15 := hvalid x (.head ..)
+    have hxs_valid : ∀ y ∈ xs, y ≤ 15 := fun y hy => hvalid y (List.mem_cons_of_mem x hy)
+    rw [rlEncodeLengths.go]
+    by_cases hx0 : x = 0
+    · subst hx0
+      simp only [beq_self_eq_true, ↓reduceIte]
+      by_cases hge11 : 1 + countRun 0 xs ≥ 11
+      · rw [if_pos (by omega : 1 + countRun 0 xs ≥ 11)]
+        intro entry hmem
+        simp only [List.mem_cons] at hmem
+        cases hmem with
+        | inl h => subst h; right; right; right; constructor <;> omega
+        | inr h =>
+          exact rlEncodeLengths_go_valid _ (drop_subset_valid hxs_valid) entry h
+      · rw [if_neg (by omega)]
+        by_cases hge3 : 1 + countRun 0 xs ≥ 3
+        · rw [if_pos (by omega : 1 + countRun 0 xs ≥ 3)]
+          intro entry hmem
+          simp only [List.mem_cons] at hmem
+          cases hmem with
+          | inl h => subst h; right; right; left; constructor <;> omega
+          | inr h =>
+            exact rlEncodeLengths_go_valid _ (drop_subset_valid hxs_valid) entry h
+        · rw [if_neg (by omega)]
+          intro entry hmem
+          simp only [List.mem_cons] at hmem
+          cases hmem with
+          | inl h => subst h; left; exact ⟨by omega, rfl⟩
+          | inr h =>
+            exact rlEncodeLengths_go_valid _ hxs_valid entry h
+    · simp only [show (x == 0) = false from by cases h : x == 0 <;> simp_all [beq_iff_eq],
+                  Bool.false_eq_true, ↓reduceIte]
+      by_cases hge3 : countRun x xs ≥ 3
+      · rw [if_pos (by omega : countRun x xs ≥ 3)]
+        intro entry hmem
+        simp only [List.mem_cons] at hmem
+        cases hmem with
+        | inl h => subst h; left; exact ⟨hx_valid, rfl⟩
+        | inr h =>
+          cases h with
+          | inl h => subst h; right; left; constructor <;> omega
+          | inr h =>
+            exact rlEncodeLengths_go_valid _ (drop_subset_valid hxs_valid) entry h
+      · rw [if_neg (by omega)]
+        intro entry hmem
+        simp only [List.mem_cons] at hmem
+        cases hmem with
+        | inl h => subst h; left; exact ⟨hx_valid, rfl⟩
+        | inr h =>
+          exact rlEncodeLengths_go_valid _ hxs_valid entry h
+termination_by lengths.length
+decreasing_by all_goals simp_all [List.length_drop] <;> omega
+
+/-- Every entry produced by `rlEncodeLengths` satisfies the CL code constraints:
+    codes 0-15 have extra = 0, code 16 has extra ≤ 3, code 17 has extra ≤ 7,
+    code 18 has extra ≤ 127. -/
+theorem rlEncodeLengths_valid (lengths : List Nat)
+    (hvalid : ∀ x ∈ lengths, x ≤ 15) :
+    ∀ entry ∈ rlEncodeLengths lengths,
+      (entry.1 ≤ 15 ∧ entry.2 = 0) ∨
+      (entry.1 = 16 ∧ entry.2 ≤ 3) ∨
+      (entry.1 = 17 ∧ entry.2 ≤ 7) ∨
+      (entry.1 = 18 ∧ entry.2 ≤ 127) := by
+  exact rlEncodeLengths_go_valid lengths hvalid
+
+/-! ## Dynamic block header encoding (RFC 1951 §3.2.7) -/
+
+/-- CL code length alphabet order for DEFLATE dynamic block headers
+    (RFC 1951 §3.2.7). This is the same permutation as `codeLengthOrder`
+    on the decode side. -/
+protected def clPermutation : List Nat :=
+  [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+
+/-- Count frequencies of CL symbols (0–18) in a list of `CLEntry` pairs.
+    Returns a list of 19 frequency counts indexed by symbol. -/
+def clSymbolFreqs (entries : List CLEntry) : List Nat :=
+  entries.foldl (fun acc (code, _) =>
+    if code < acc.length then acc.set code (acc.getD code 0 + 1) else acc)
+    (List.replicate 19 0)
+
+/-- Encode the extra bits for a CL entry.
+    - Code 16: 2 extra bits (repeat count − 3)
+    - Code 17: 3 extra bits (repeat count − 3)
+    - Code 18: 7 extra bits (repeat count − 11)
+    - Codes 0–15: no extra bits -/
+def encodeCLExtra (code extra : Nat) : List Bool :=
+  if code == 16 then writeBitsLSB 2 extra
+  else if code == 17 then writeBitsLSB 3 extra
+  else if code == 18 then writeBitsLSB 7 extra
+  else []
+
+/-- Write the CL code lengths in permuted order as 3-bit values.
+    This is the inverse of `readCLLengths`. -/
+def writeCLLengths (clLens : List Nat) (numCodeLen : Nat) : List Bool :=
+  (Deflate.Spec.clPermutation.take numCodeLen).flatMap fun pos =>
+    writeBitsLSB 3 (clLens.getD pos 0)
+
+/-- Encode CL entries using the CL Huffman table.
+    Each entry is encoded as: Huffman codeword + extra bits.
+    This is the inverse of `decodeCLSymbols`. -/
+def encodeCLEntries (clTable : List (Huffman.Spec.Codeword × Nat))
+    (entries : List CLEntry) : Option (List Bool) :=
+  match entries with
+  | [] => some []
+  | (code, extra) :: rest => do
+    let cw ← encodeSymbol clTable code
+    let restBits ← encodeCLEntries clTable rest
+    return cw ++ encodeCLExtra code extra ++ restBits
+
+/-- Determine the number of CL code lengths to transmit (HCLEN + 4).
+    We need at least 4 and find the last non-zero entry in permuted order. -/
+def computeHCLEN (clLens : List Nat) : Nat :=
+  let permutedLens := Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0
+  let lastNonZero := permutedLens.length -
+    (permutedLens.reverse.takeWhile (· == 0)).length
+  max 4 lastNonZero
+
+/-- Encode the dynamic Huffman tree header for a DEFLATE dynamic block.
+    Takes lit/len code lengths and distance code lengths, returns the
+    header bit sequence that `decodeDynamicTables` can decode.
+    Returns `none` if the code lengths cannot be validly encoded. -/
+def encodeDynamicTrees (litLens : List Nat) (distLens : List Nat) :
+    Option (List Bool) := do
+  -- Validate input sizes
+  guard (litLens.length ≥ 257 ∧ litLens.length ≤ 288)
+  guard (distLens.length ≥ 1 ∧ distLens.length ≤ 32)
+  let hlit := litLens.length - 257
+  let hdist := distLens.length - 1
+
+  -- Step 1: RLE-encode the concatenated code lengths
+  let allLens := litLens ++ distLens
+  let clEntries := rlEncodeLengths allLens
+
+  -- Step 2: Compute CL code lengths from symbol frequencies
+  let clFreqs := clSymbolFreqs clEntries
+  let clFreqPairs := (List.range clFreqs.length).map fun i => (i, clFreqs.getD i 0)
+  let clLens := Huffman.Spec.computeCodeLengths clFreqPairs 19 7
+
+  -- Step 3: Build CL Huffman codes
+  let clCodes := Huffman.Spec.allCodes clLens 7
+  let clTable := clCodes.map fun (sym, cw) => (cw, sym)
+
+  -- Step 4: Determine HCLEN
+  let numCodeLen := computeHCLEN clLens
+  let hclen := numCodeLen - 4
+
+  -- Step 5: Encode CL entries using the CL Huffman table
+  let symbolBits ← encodeCLEntries clTable clEntries
+
+  -- Step 6: Assemble header bits
+  let headerBits := writeBitsLSB 5 hlit ++
+    writeBitsLSB 5 hdist ++
+    writeBitsLSB 4 hclen
+  let clLenBits := writeCLLengths clLens numCodeLen
+
+  return headerBits ++ clLenBits ++ symbolBits
+
+/-! ## Dynamic tree header roundtrip -/
+
+/-- The dynamic tree header roundtrip: encoding then decoding recovers
+    the original code lengths. -/
+theorem encodeDynamicTrees_decodeDynamicTables
+    (litLens distLens : List Nat)
+    (headerBits rest : List Bool)
+    (hlit : ∀ x ∈ litLens, x ≤ 15) (hdist : ∀ x ∈ distLens, x ≤ 15)
+    (hlitLen : litLens.length ≥ 257 ∧ litLens.length ≤ 288)
+    (hdistLen : distLens.length ≥ 1 ∧ distLens.length ≤ 32)
+    (henc : encodeDynamicTrees litLens distLens = some headerBits) :
+    decodeDynamicTables (headerBits ++ rest) = some (litLens, distLens, rest) := by
+  sorry
+
+end Deflate.Spec

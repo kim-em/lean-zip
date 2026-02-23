@@ -229,6 +229,8 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec: types, decode (RFC 1951)
     Zip/Spec/DeflateEncode.lean — DEFLATE encode spec: symbol encoding + roundtrip
+    Zip/Spec/DeflateEncodeProps.lean — DEFLATE encoding success properties
+    Zip/Spec/DeflateEncodeDynamic.lean — RLE encoding + dynamic block header encoder
     Zip/Spec/LZ77Lazy.lean      — LZ77→encode bridge proofs + lazy matcher properties
     Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence (read direction)
     Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)

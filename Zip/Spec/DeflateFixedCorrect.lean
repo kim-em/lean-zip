@@ -1,4 +1,4 @@
-import Zip.Spec.DeflateEncode
+import Zip.Spec.DeflateEncodeProps
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.InflateCorrect

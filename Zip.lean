@@ -15,6 +15,8 @@ import Zip.Spec.HuffmanEncode
 import Zip.Spec.LZ77
 import Zip.Spec.Deflate
 import Zip.Spec.DeflateEncode
+import Zip.Spec.DeflateEncodeProps
+import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.LZ77Lazy
 import Zip.Spec.BitstreamCorrect
 import Zip.Spec.BitstreamWriteCorrect
