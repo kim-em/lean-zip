@@ -78,6 +78,11 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
       (to_table hmem_codes) hpf
     rw [hbits]; exact hdec.symm
 
+/-- If `sym == n` is true for UInt16, then `sym.toNat = n.toNat`. -/
+protected theorem symVal_of_beq {sym : UInt16} {n : UInt16}
+    (h : (sym == n) = true) : sym.toNat = n.toNat := by
+  rw [beq_iff_eq] at h; exact congrArg UInt16.toNat h
+
 /-- A `HuffTree` built from code lengths decodes the same symbol as the
     spec's `Huffman.Spec.decode` on the corresponding code table.
     Requires `bitOff < 8` because the proof traces through individual
@@ -172,10 +177,9 @@ theorem decodeStored_correct (br : Zip.Native.BitReader)
             -- alignToByte br2.toBits = br2.toBits
             rw [alignToByte_id_of_aligned br2 hwf2] at hspec_bytes
             -- Complement check: native ¬(len ^^^ nlen != 0xFFFF) → spec guard
-            have hcomp_eq : len ^^^ nlen = 0xFFFF := by
-              simp [bne_iff_ne] at hcomp; exact hcomp
             have hcomp_nat : len.toNat ^^^ nlen.toNat = 0xFFFF := by
-              rw [← UInt16.toNat_xor, hcomp_eq]; rfl
+              have : len ^^^ nlen = 0xFFFF := by simp [bne_iff_ne] at hcomp; exact hcomp
+              rw [← UInt16.toNat_xor, this]; rfl
             -- Prepare spec-level hypotheses in unified form
             have h_nlen : Deflate.Spec.readBitsLSB 16 rest1 = some (nlen.toNat, rest2) := by
               rw [← hrest1]; exact hspec_nlen
@@ -522,9 +526,7 @@ theorem decodeHuffman_correct
         · -- sym == 256: end of block
           rename_i hge hsym256
           obtain ⟨rfl, rfl⟩ := Except.ok.inj h
-          -- sym.toNat = 256
-          have hsym_nat : sym.toNat = 256 := by
-            simp [beq_iff_eq] at hsym256; simp [hsym256]
+          have hsym_nat : sym.toNat = 256 := Deflate.Correctness.symVal_of_beq hsym256
           -- decodeLitLen returns endOfBlock
           have hlit_dec : Deflate.Spec.decodeLitLen
               (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)

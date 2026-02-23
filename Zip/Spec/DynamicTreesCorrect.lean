@@ -446,6 +446,12 @@ private theorem decodeCLSymbols_size (clTree : Zip.Native.HuffTree)
                     rw [this, fillEntries_size]
               · simp at h
 
+/-- The length of the accumulated code lengths list equals `min idx codeLengths.size`. -/
+private theorem accLen_eq_min (codeLengths : Array UInt8) (idx : Nat) :
+    (List.map UInt8.toNat (codeLengths.extract 0 idx).toList).length =
+    min idx codeLengths.size := by
+  simp [List.length_map, Array.length_toList]
+
 /-- `decodeCLSymbols` corresponds to the spec's `decodeDynamicTables.decodeCLSymbols`:
     native Array-based decoding matches spec List-based decoding. -/
 private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
@@ -485,7 +491,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
       simp only [Deflate.Spec.decodeDynamicTables.decodeCLSymbols, bind, Option.bind,
         if_pos (show totalCodes ≤
           (List.map UInt8.toNat (codeLengths.extract 0 totalCodes).toList).length from by
-          simp [List.length_map, Array.length_toList]; omega), pure]
+          simp [List.length_map, Array.length_toList]; omega)]
     · -- idx < totalCodes: decode a symbol
       rename_i hlt
       have hidx_lt : idx < totalCodes := by omega
@@ -528,8 +534,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
           split at h
           · -- sym == 16
             rename_i hsym16
-            have hsym16_val : sym.toNat = 16 := by
-              rw [beq_iff_eq] at hsym16; exact congrArg UInt16.toNat hsym16
+            have hsym16_val : sym.toNat = 16 := Deflate.Correctness.symVal_of_beq hsym16
             simp only [hsym16_val, show ((16 : Nat) == 16) = true from rfl, ↓reduceIte]
             split at h
             · simp at h
@@ -563,10 +568,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   have h_rd : Deflate.Spec.readBitsLSB 2 rest₁ = some (rep.toNat, rest₂) := by
                     rw [← hrest₁]; exact hspec_rd
                   have hprev_eq := extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
-                  have hacc_len : (List.map UInt8.toNat
-                      (codeLengths.extract 0 idx).toList).length =
-                      min idx codeLengths.size := by
-                    simp [List.length_map, Array.length_toList]
+                  have hacc_len := accLen_eq_min codeLengths idx
                   have hguard1 : 0 < min idx codeLengths.size := by
                     simp [Nat.min_eq_left hle]; omega
                   have hguard2 : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
@@ -581,8 +583,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
             split at h
             · -- sym == 17
               rename_i hsym17
-              have hsym17_val : sym.toNat = 17 := by
-                rw [beq_iff_eq] at hsym17; exact congrArg UInt16.toNat hsym17
+              have hsym17_val : sym.toNat = 17 := Deflate.Correctness.symVal_of_beq hsym17
               simp only [hsym17_val, show ((17 : Nat) == 16) = false from rfl,
                 show ((17 : Nat) == 17) = true from rfl, ↓reduceIte]
               cases hrd : br₁.readBits 3 with
@@ -609,10 +610,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   rw [hfill_snd, hfill_ext, hrest₂] at hspec_rec
                   have h_rd : Deflate.Spec.readBitsLSB 3 rest₁ = some (rep.toNat, rest₂) := by
                     rw [← hrest₁]; exact hspec_rd
-                  have hacc_len : (List.map UInt8.toNat
-                      (codeLengths.extract 0 idx).toList).length =
-                      min idx codeLengths.size := by
-                    simp [List.length_map, Array.length_toList]
+                  have hacc_len := accLen_eq_min codeLengths idx
                   have hguard : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
                     simp [Nat.min_eq_left hle]; omega
                   simp only [guard, h_rd, hguard, hacc_len,
@@ -625,8 +623,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
               split at h
               · -- sym == 18
                 rename_i hsym18
-                have hsym18_val : sym.toNat = 18 := by
-                  rw [beq_iff_eq] at hsym18; exact congrArg UInt16.toNat hsym18
+                have hsym18_val : sym.toNat = 18 := Deflate.Correctness.symVal_of_beq hsym18
                 simp only [hsym18_val, show ((18 : Nat) == 16) = false from rfl,
                   show ((18 : Nat) == 17) = false from rfl]
                 cases hrd : br₁.readBits 7 with
@@ -655,10 +652,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     rw [hfill_snd, hfill_ext, hrest₂] at hspec_rec
                     have h_rd : Deflate.Spec.readBitsLSB 7 rest₁ = some (rep.toNat, rest₂) := by
                       rw [← hrest₁]; exact hspec_rd
-                    have hacc_len : (List.map UInt8.toNat
-                        (codeLengths.extract 0 idx).toList).length =
-                        min idx codeLengths.size := by
-                      simp [List.length_map, Array.length_toList]
+                    have hacc_len := accLen_eq_min codeLengths idx
                     have hguard : min idx codeLengths.size + (rep.toNat + 11) ≤ totalCodes := by
                       simp [Nat.min_eq_left hle]; omega
                     simp only [guard, h_rd, hguard, hacc_len,
@@ -806,9 +800,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                     simp only [hlen_eq, beq_self_eq_true, guard, ite_true,
                       pure, Pure.pure]
                     refine congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))
-                    · simp only [Array.toList_extract, List.extract,
-                        Nat.sub_zero, List.drop_zero, List.map_take, List.take_take]
-                      simp
+                    · simp [Array.toList_extract, List.extract, List.map_take,
+                        List.take_take]
                     · simp only [Array.toList_extract, List.extract,
                         Nat.sub_zero, List.drop_zero]
                       rw [← List.map_drop, List.drop_take]
