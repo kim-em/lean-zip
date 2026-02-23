@@ -1,8 +1,9 @@
 /-
-  Pure Lean gzip (RFC 1952) and zlib (RFC 1950) decompression.
+  Pure Lean gzip (RFC 1952) and zlib (RFC 1950) compression and decompression.
 
-  Parses framing headers/trailers around raw DEFLATE streams and verifies
-  checksums using the native CRC-32 and Adler-32 implementations.
+  Compression wraps native DEFLATE output with gzip/zlib framing headers,
+  trailers, and checksums. Decompression parses the framing, inflates the
+  DEFLATE stream, and verifies checksums.
 -/
 import Zip.Native.Inflate
 import Zip.Native.Deflate
@@ -89,7 +90,7 @@ def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
   else
     Deflate.deflateLazy data
   -- Gzip header: ID1=0x1f, ID2=0x8b, CM=8, FLG=0, MTIME=0, XFL, OS=255
-  let xfl : UInt8 := if level == 0 then 0x02 else 0x04
+  let xfl : UInt8 := if level == 0 then 0x00 else 0x04
   let header := ByteArray.mk #[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, xfl, 0xFF]
   -- CRC32 of uncompressed data (4 bytes LE)
   let crc := Crc32.Native.crc32 0 data
