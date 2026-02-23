@@ -340,6 +340,104 @@ private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
       rw [h_acc, ← hrest₁]
       exact hspec_rec
 
+/-! ### Array extract/set helpers -/
+
+private theorem take_set_succ (l : List UInt8) (idx : Nat) (val : UInt8)
+    (hidx : idx < l.length) :
+    (l.set idx val).take (idx + 1) = l.take idx ++ [val] := by
+  rw [List.take_set, List.take_add_one]
+  simp only [List.getElem?_eq_getElem (by omega)]
+  rw [List.set_append]
+  have h_take_len : (l.take idx).length = idx := List.length_take_of_le (by omega)
+  simp only [h_take_len, Nat.lt_irrefl, ↓reduceIte, Nat.sub_self,
+             Option.toList, List.set_cons_zero]
+
+private theorem extract_set_map_append (arr : Array UInt8) (idx : Nat) (val : UInt8)
+    (hidx : idx < arr.size) :
+    ((arr.set! idx val).extract 0 (idx + 1)).toList.map UInt8.toNat =
+    (arr.extract 0 idx).toList.map UInt8.toNat ++ [val.toNat] := by
+  rw [Array.set!, Array.toList_extract, Array.toList_setIfInBounds, Array.toList_extract]
+  simp only [List.extract, Nat.sub_zero, List.drop_zero]
+  rw [take_set_succ _ _ _ (by rw [Array.length_toList]; exact hidx)]
+  simp [List.map_append]
+
+/-! ### getLast! helper -/
+
+private theorem extract_map_getLast_eq (arr : Array UInt8) (idx : Nat)
+    (hidx : 0 < idx) (hle : idx ≤ arr.size) :
+    ((arr.extract 0 idx).toList.map UInt8.toNat).getLast! = arr[idx - 1]!.toNat := by
+  rw [Array.toList_extract]
+  simp only [List.extract, Nat.sub_zero, List.drop_zero, List.map_take]
+  -- goal: ((arr.toList.map UInt8.toNat).take idx).getLast! = arr[idx - 1]!.toNat
+  -- Convert RHS to list access
+  rw [getElem!_pos arr (idx - 1) (by omega)]
+  simp only [Array.getElem_toList]
+  -- arr.toList[idx - 1] = (arr.toList.map UInt8.toNat) uses List.getElem_map
+  -- goal: ((arr.toList.map UInt8.toNat).take idx).getLast! = arr.toList[idx - 1].toNat
+  -- Chain: getLast! (l.take n) = l[n-1] when 0 < n ≤ l.length
+  have hlen : idx ≤ (arr.toList.map UInt8.toNat).length := by
+    simp [List.length_map, Array.length_toList]
+  -- Induction on the list to prove getLast! (l.take n) = l[n-1]
+  suffices ∀ (l : List Nat) (n : Nat), 0 < n → n ≤ l.length →
+      (l.take n).getLast! = l[n - 1]! by
+    rw [this _ _ hidx hlen]
+    rw [getElem!_pos _ _ (by simp [List.length_map, Array.length_toList]; omega)]
+    simp [List.getElem_map]
+  intro l n hn hle'
+  induction l generalizing n with
+  | nil => simp at hle'
+  | cons a t ih =>
+    match n, hn with
+    | 1, _ =>
+      simp [List.take_cons_succ, List.take_zero, List.getLast!_singleton]
+    | n + 2, _ =>
+      simp only [List.take_cons_succ, List.getLast!_cons_cons]
+      rw [ih (n + 1) (by omega) (by simp at hle'; omega)]
+
+/-! ### fillEntries helpers -/
+
+private theorem fillEntries_size (arr : Array UInt8) (idx count bound : Nat) (val : UInt8) :
+    (Zip.Native.Inflate.fillEntries arr idx count bound val).fst.size = arr.size := by
+  induction count generalizing arr idx with
+  | zero => simp [Zip.Native.Inflate.fillEntries]
+  | succ n ih =>
+    unfold Zip.Native.Inflate.fillEntries
+    simp only [Nat.succ_ne_zero, false_or]
+    split
+    · rfl
+    · simp only [Nat.add_sub_cancel]; rw [ih]; simp [Array.size_setIfInBounds]
+
+private theorem fillEntries_snd (arr : Array UInt8) (idx count bound : Nat) (val : UInt8)
+    (h : idx + count ≤ bound) :
+    (Zip.Native.Inflate.fillEntries arr idx count bound val).snd = idx + count := by
+  induction count generalizing arr idx with
+  | zero => simp [Zip.Native.Inflate.fillEntries]
+  | succ n ih =>
+    unfold Zip.Native.Inflate.fillEntries
+    simp only [Nat.succ_ne_zero, false_or, show ¬(idx ≥ bound) from by omega,
+               ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih (arr.set! idx val) (idx + 1) (by omega)]; omega
+
+private theorem fillEntries_extract (arr : Array UInt8) (idx count bound : Nat) (val : UInt8)
+    (hcb : idx + count ≤ bound) (hba : bound ≤ arr.size) :
+    let result := Zip.Native.Inflate.fillEntries arr idx count bound val
+    (result.fst.extract 0 (idx + count)).toList.map UInt8.toNat =
+    (arr.extract 0 idx).toList.map UInt8.toNat ++ List.replicate count val.toNat := by
+  induction count generalizing arr idx with
+  | zero => simp [Zip.Native.Inflate.fillEntries, List.replicate]
+  | succ n ih =>
+    unfold Zip.Native.Inflate.fillEntries
+    simp only [Nat.succ_ne_zero, false_or, show ¬(idx ≥ bound) from by omega, ↓reduceIte,
+               Nat.add_sub_cancel]
+    have h_ih := ih (arr.set! idx val) (idx + 1) (by omega)
+      (by simp [Array.size_setIfInBounds]; omega)
+    simp only [show idx + 1 + n = idx + (n + 1) from by omega] at h_ih
+    rw [h_ih]
+    rw [Array.set!, Array.toList_extract, Array.toList_setIfInBounds, Array.toList_extract]
+    simp only [List.extract, Nat.sub_zero, List.drop_zero]
+    rw [take_set_succ _ _ _ (by rw [Array.length_toList]; omega)]
+    simp [List.map_append, List.replicate_succ, List.append_assoc]
+
 /-- `decodeCLSymbols` corresponds to the spec's `decodeDynamicTables.decodeCLSymbols`:
     native Array-based decoding matches spec List-based decoding. -/
 private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
@@ -350,6 +448,8 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
     (hwf : br.bitOff < 8)
     (hcl : Zip.Native.HuffTree.fromLengths clLengths 7 = .ok clTree)
     (hsize_cl : clLengths.size ≤ UInt16.size)
+    (hidx : idx ≤ totalCodes)
+    (hsize : totalCodes ≤ codeLengths.size)
     (h : Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
       .ok (codeLengths', br')) :
     let specLengths := clLengths.toList.map UInt8.toNat
@@ -361,7 +461,235 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
         acc br.toBits fuel =
         some ((codeLengths'.extract 0 totalCodes).toList.map UInt8.toNat, rest) ∧
       br'.toBits = rest := by
-  sorry
+  induction fuel generalizing br codeLengths idx with
+  | zero => simp [Zip.Native.Inflate.decodeCLSymbols] at h
+  | succ fuel ih =>
+    unfold Zip.Native.Inflate.decodeCLSymbols at h
+    simp only [bind, Except.bind] at h
+    split at h
+    · -- idx ≥ totalCodes: return immediately (idx = totalCodes by hidx + hge)
+      rename_i hge
+      simp [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      refine ⟨br.toBits, ?_, rfl⟩
+      -- idx = totalCodes (from hidx + hge)
+      -- Spec: acc.length ≥ totalCodes, so returns immediately
+      simp only [Deflate.Spec.decodeDynamicTables.decodeCLSymbols, bind, Option.bind]
+      have h_acc_len : (List.map UInt8.toNat (codeLengths.extract 0 idx).toList).length
+          ≥ totalCodes := by
+        simp only [List.length_map, Array.length_toList, Array.size_extract]; omega
+      have heq : idx = totalCodes := by omega
+      rw [heq]
+      have h_len : totalCodes ≤
+          (List.map UInt8.toNat (codeLengths.extract 0 totalCodes).toList).length := by
+        simp only [List.length_map, Array.length_toList, Array.size_extract]; omega
+      simp only [if_pos h_len, pure]
+    · -- idx < totalCodes: decode a symbol
+      rename_i hlt
+      have hidx_lt : idx < totalCodes := by omega
+      cases hdec : clTree.decode br with
+      | error e => simp [hdec] at h
+      | ok p =>
+        obtain ⟨sym, br₁⟩ := p
+        simp only [hdec] at h
+        -- Use huffTree_decode_correct (maxBits=7) to get spec correspondence
+        have hv := fromLengths_valid clLengths 7 clTree hcl
+        have hwf₁ := decode_wf clTree br sym br₁ hwf hdec
+        have ⟨rest₁, hspec_dec, hrest₁⟩ :=
+          huffTree_decode_correct clLengths 7 (by omega) clTree br sym br₁
+            hwf hcl hv hsize_cl hdec
+        -- Unfold spec decodeCLSymbols one step
+        simp only [Deflate.Spec.decodeDynamicTables.decodeCLSymbols, bind, Option.bind]
+        -- acc.length < totalCodes (since idx < totalCodes)
+        have h_acc_len : ¬(totalCodes ≤
+            (List.map UInt8.toNat (codeLengths.extract 0 idx).toList).length) := by
+          simp only [List.length_map, Array.length_toList, Array.size_extract]; omega
+        simp only [h_acc_len, ↓reduceIte, hspec_dec]
+        -- Now split on sym value
+        split at h
+        · -- sym < 16: literal
+          rename_i hsym_lt
+          -- Native: decodeCLSymbols clTree br₁ (codeLengths.set! idx sym.toUInt8) (idx+1) totalCodes fuel
+          -- Spec: decodeCLSymbols specTable totalCodes (acc ++ [sym.toNat]) rest₁ fuel
+          -- Need: spec sym.toNat < 16 check
+          have hsym_nat : sym.toNat < 16 := hsym_lt
+          simp only [hsym_nat, ↓reduceIte]
+          -- Apply IH
+          have hsize₁ : totalCodes ≤ (codeLengths.set! idx sym.toUInt8).size := by
+            simp [Array.size_setIfInBounds]; omega
+          have hidx₁ : idx + 1 ≤ totalCodes := by omega
+          have ⟨rest₂, hspec_rec, hrest₂⟩ :=
+            ih br₁ (codeLengths.set! idx sym.toUInt8) (idx + 1) hwf₁ hidx₁ hsize₁ h
+          refine ⟨rest₂, ?_, hrest₂⟩
+          -- Bridge: convert hspec_rec accumulator and bitstream to match goal
+          rw [hrest₁] at hspec_rec
+          rw [extract_set_map_append codeLengths idx sym.toUInt8 (by omega)] at hspec_rec
+          -- sym.toUInt8.toNat = sym.toNat since sym < 16 < 256
+          have hsym_conv : sym.toUInt8.toNat = sym.toNat := by
+            show sym.toNat % 256 = sym.toNat; omega
+          rw [hsym_conv] at hspec_rec
+          exact hspec_rec
+        · -- sym ≥ 16 cases
+          rename_i hsym_ge
+          have hsym_nat_ge : ¬(sym.toNat < 16) := hsym_ge
+          simp only [hsym_nat_ge, ↓reduceIte]
+          -- Split on native sym == 16
+          split at h
+          · -- sym == 16
+            rename_i hsym16
+            have hsym16_val : sym.toNat = 16 := by
+              rw [beq_iff_eq] at hsym16; exact congrArg UInt16.toNat hsym16
+            simp only [hsym16_val]
+            -- Native: idx == 0 guard
+            split at h
+            · simp at h
+            · rename_i hidx_ne
+              have hidx_pos : 0 < idx := by
+                cases heq : (idx == 0) <;> simp_all [beq_iff_eq]
+              -- Native: readBits 2
+              cases hrd : br₁.readBits 2 with
+              | error e => simp [hrd] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrd] at h
+                -- Native: bounds check
+                split at h
+                · simp at h
+                · rename_i hbound
+                  -- Spec correspondences
+                  have hwf₂ := readBits_wf br₁ 2 rep br₂ hwf₁ hrd
+                  have ⟨rest₂, hspec_rd, hrest₂⟩ :=
+                    readBits_toBits br₁ 2 rep br₂ hwf₁ (by omega) hrd
+                  -- fillEntries helpers
+                  have hfill_snd := fillEntries_snd codeLengths idx (rep.toNat + 3) totalCodes
+                    codeLengths[idx - 1]! (by omega)
+                  have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 3) totalCodes
+                    codeLengths[idx - 1]! (by omega) (by omega)
+                  -- Apply IH
+                  have ⟨rest₃, hspec_rec, hrest₃⟩ := ih br₂
+                    (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 3) totalCodes
+                      codeLengths[idx - 1]!).fst
+                    (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 3) totalCodes
+                      codeLengths[idx - 1]!).snd
+                    hwf₂ (by rw [hfill_snd]; omega) (by rw [fillEntries_size]; omega) h
+                  refine ⟨rest₃, ?_, hrest₃⟩
+                  -- Rewrite IH accumulator to match spec
+                  rw [hfill_snd] at hspec_rec
+                  rw [hfill_ext] at hspec_rec
+                  rw [hrest₂] at hspec_rec
+                  -- Bridge spec goal
+                  have h_rd : Deflate.Spec.readBitsLSB 2 rest₁ = some (rep.toNat, rest₂) := by
+                    rw [← hrest₁]; exact hspec_rd
+                  have h_prev := extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
+                  have h_guard1 :
+                      (List.map UInt8.toNat (codeLengths.extract 0 idx).toList).length > 0 := by
+                    simp [List.length_map, Array.length_toList]; omega
+                  have h_guard2 :
+                      ((List.map UInt8.toNat (codeLengths.extract 0 idx).toList) ++
+                        List.replicate (rep.toNat + 3) codeLengths[idx - 1]!.toNat).length
+                        ≤ totalCodes := by
+                    simp [List.length_append, List.length_replicate, List.length_map,
+                          Array.length_toList]; omega
+                  simp [guard, h_rd] at hspec_rec ⊢
+                  exact hspec_rec
+          · -- sym ≠ 16
+            rename_i hsym_ne16
+            split at h
+            · -- sym == 17
+              rename_i hsym17
+              have hsym17_val : sym.toNat = 17 := by
+                rw [beq_iff_eq] at hsym17; exact congrArg UInt16.toNat hsym17
+              simp only [hsym17_val]
+              -- Native: readBits 3
+              cases hrd : br₁.readBits 3 with
+              | error e => simp [hrd] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrd] at h
+                -- Native: bounds check
+                split at h
+                · simp at h
+                · rename_i hbound
+                  simp only [pure, Except.pure] at h
+                  -- Spec correspondences
+                  have hwf₂ := readBits_wf br₁ 3 rep br₂ hwf₁ hrd
+                  have ⟨rest₂, hspec_rd, hrest₂⟩ :=
+                    readBits_toBits br₁ 3 rep br₂ hwf₁ (by omega) hrd
+                  -- fillEntries helpers
+                  have hfill_snd := fillEntries_snd codeLengths idx (rep.toNat + 3) totalCodes
+                    (0 : UInt8) (by omega)
+                  have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 3) totalCodes
+                    (0 : UInt8) (by omega) (by omega)
+                  -- Apply IH
+                  have ⟨rest₃, hspec_rec, hrest₃⟩ := ih br₂
+                    (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 3) totalCodes 0).fst
+                    (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 3) totalCodes 0).snd
+                    hwf₂ (by rw [hfill_snd]; omega) (by rw [fillEntries_size]; omega) h
+                  refine ⟨rest₃, ?_, hrest₃⟩
+                  rw [hfill_snd] at hspec_rec
+                  rw [hfill_ext] at hspec_rec
+                  rw [hrest₂] at hspec_rec
+                  have h_rd : Deflate.Spec.readBitsLSB 3 rest₁ = some (rep.toNat, rest₂) := by
+                    rw [← hrest₁]; exact hspec_rd
+                  have h_guard :
+                      ((List.map UInt8.toNat (codeLengths.extract 0 idx).toList) ++
+                        List.replicate (rep.toNat + 3) 0).length ≤ totalCodes := by
+                    simp [List.length_append, List.length_replicate, List.length_map,
+                          Array.length_toList]; omega
+                  simp [guard, h_rd, show (0 : UInt8).toNat = 0 from rfl]
+                    at hspec_rec ⊢
+                  exact hspec_rec
+            · -- sym ≠ 17
+              rename_i hsym_ne17
+              split at h
+              · -- sym == 18
+                rename_i hsym18
+                have hsym18_val : sym.toNat = 18 := by
+                  rw [beq_iff_eq] at hsym18; exact congrArg UInt16.toNat hsym18
+                simp only [hsym18_val]
+                -- Native: readBits 7
+                cases hrd : br₁.readBits 7 with
+                | error e => simp [hrd] at h
+                | ok p =>
+                  obtain ⟨rep, br₂⟩ := p
+                  simp only [hrd] at h
+                  -- Native: bounds check
+                  split at h
+                  · simp at h
+                  · rename_i hbound
+                    simp only [pure, Except.pure] at h
+                    -- Spec correspondences
+                    have hwf₂ := readBits_wf br₁ 7 rep br₂ hwf₁ hrd
+                    have ⟨rest₂, hspec_rd, hrest₂⟩ :=
+                      readBits_toBits br₁ 7 rep br₂ hwf₁ (by omega) hrd
+                    -- fillEntries helpers
+                    have hfill_snd := fillEntries_snd codeLengths idx (rep.toNat + 11) totalCodes
+                      (0 : UInt8) (by omega)
+                    have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 11) totalCodes
+                      (0 : UInt8) (by omega) (by omega)
+                    -- Apply IH
+                    have ⟨rest₃, hspec_rec, hrest₃⟩ := ih br₂
+                      (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 11) totalCodes
+                        0).fst
+                      (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 11) totalCodes
+                        0).snd
+                      hwf₂ (by rw [hfill_snd]; omega) (by rw [fillEntries_size]; omega) h
+                    refine ⟨rest₃, ?_, hrest₃⟩
+                    rw [hfill_snd] at hspec_rec
+                    rw [hfill_ext] at hspec_rec
+                    rw [hrest₂] at hspec_rec
+                    have h_rd : Deflate.Spec.readBitsLSB 7 rest₁ = some (rep.toNat, rest₂) := by
+                      rw [← hrest₁]; exact hspec_rd
+                    have h_guard :
+                        ((List.map UInt8.toNat (codeLengths.extract 0 idx).toList) ++
+                          List.replicate (rep.toNat + 11) 0).length ≤ totalCodes := by
+                      simp [List.length_append, List.length_replicate, List.length_map,
+                            Array.length_toList]; omega
+                    simp [guard, h_rd, show (0 : UInt8).toNat = 0 from rfl]
+                      at hspec_rec ⊢
+                    exact hspec_rec
+              · -- sym ∉ {16,17,18}: throw, contradicts .ok
+                simp at h
 
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/
