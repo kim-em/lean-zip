@@ -437,8 +437,12 @@ while true; do
                 SESSION_MODE="planner"
                 EFFECTIVE_PROMPT="/plan"
                 say "Queue depth: $queue_depth (< $QUEUE_MIN) → planner session (lock acquired)"
+            elif (( queue_depth > 0 )); then
+                SESSION_MODE="worker"
+                EFFECTIVE_PROMPT="/work"
+                say "Queue depth: $queue_depth (< $QUEUE_MIN) but planner lock held → worker session"
             else
-                say "Queue depth: $queue_depth (< $QUEUE_MIN) but planner lock held. Waiting 60s..."
+                say "Queue depth: 0 and planner lock held. Waiting 60s..."
                 sleep 60
                 continue
             fi
