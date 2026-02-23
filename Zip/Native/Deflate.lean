@@ -82,29 +82,30 @@ def fixedLitCodes : Array (UInt16 × UInt8) :=
 def fixedDistCodes : Array (UInt16 × UInt8) :=
   canonicalCodes Inflate.fixedDistLengths
 
-/-- Search a base/extra table pair for the code covering `value`.
-    Returns (code_index, extra_bits_count, extra_bits_value).
-    Used for both length codes (RFC 1951 §3.2.5) and distance codes. -/
-private def findTableCode (baseTable : Array UInt16) (extraTable : Array UInt8)
-    (value : Nat) : Option (Nat × Nat × UInt32) :=
-  go 0
-where
-  go (i : Nat) : Option (Nat × Nat × UInt32) :=
-    if i + 1 < baseTable.size then
-      if baseTable[i + 1]!.toNat > value then
-        -- i < extraTable.size follows from baseTable/extraTable having equal size
-        let extra := extraTable[i]!.toNat
-        let extraVal := (value - baseTable[i]!.toNat).toUInt32
-        some (i, extra, extraVal)
-      else
-        go (i + 1)
-    else if i < baseTable.size then
+/-- Inner loop for `findTableCode`: linear search through base/extra tables. -/
+def findTableCode.go (baseTable : Array UInt16) (extraTable : Array UInt8)
+    (value : Nat) (i : Nat) : Option (Nat × Nat × UInt32) :=
+  if i + 1 < baseTable.size then
+    if baseTable[i + 1]!.toNat > value then
       let extra := extraTable[i]!.toNat
       let extraVal := (value - baseTable[i]!.toNat).toUInt32
       some (i, extra, extraVal)
     else
-      none
-  termination_by baseTable.size - i
+      findTableCode.go baseTable extraTable value (i + 1)
+  else if i < baseTable.size then
+    let extra := extraTable[i]!.toNat
+    let extraVal := (value - baseTable[i]!.toNat).toUInt32
+    some (i, extra, extraVal)
+  else
+    none
+termination_by baseTable.size - i
+
+/-- Search a base/extra table pair for the code covering `value`.
+    Returns (code_index, extra_bits_count, extra_bits_value).
+    Used for both length codes (RFC 1951 §3.2.5) and distance codes. -/
+def findTableCode (baseTable : Array UInt16) (extraTable : Array UInt8)
+    (value : Nat) : Option (Nat × Nat × UInt32) :=
+  findTableCode.go baseTable extraTable value 0
 
 /-- Find length code for length 3–258.
     Returns (code_index 0–28, extra_bits_count, extra_bits_value). -/

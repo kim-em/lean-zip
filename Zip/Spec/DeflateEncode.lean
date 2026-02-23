@@ -244,6 +244,34 @@ theorem findDistCode_spec (dist idx extraN extraV : Nat)
   rw [hgo.2.1]  -- extraN → distExtra[idx]!
   omega
 
+/-- Upper bound from `findLengthCode`: `len < lengthBase[idx + 1]!` when
+    `idx` is not the last entry. -/
+theorem findLengthCode_upper (len idx extraN extraV : Nat)
+    (h : findLengthCode len = some (idx, extraN, extraV))
+    (hidx : idx + 1 < 29) :
+    len < lengthBase[idx + 1]! := by
+  have hgo := findLengthCode_go_spec len 0 idx extraN extraV h
+  have hsize : idx + 1 < lengthBase.size := by simp [lengthBase]; omega
+  have := hgo.2.2.2
+  rw [getElem?_pos lengthBase (idx + 1) hsize] at this
+  simp only [Option.getD] at this
+  rw [getElem!_pos lengthBase (idx + 1) hsize]
+  exact this
+
+/-- Upper bound from `findDistCode`: `dist < distBase[idx + 1]!` when
+    `idx` is not the last entry. -/
+theorem findDistCode_upper (dist idx extraN extraV : Nat)
+    (h : findDistCode dist = some (idx, extraN, extraV))
+    (hidx : idx + 1 < 30) :
+    dist < distBase[idx + 1]! := by
+  have hgo := findDistCode_go_spec dist 0 idx extraN extraV h
+  have hsize : idx + 1 < distBase.size := by simp [distBase]; omega
+  have := hgo.2.2.2
+  rw [getElem?_pos distBase (idx + 1) hsize] at this
+  simp only [Option.getD] at this
+  rw [getElem!_pos distBase (idx + 1) hsize]
+  exact this
+
 set_option maxRecDepth 4096 in
 /-- If Huffman decode gives a symbol < 256, `decodeLitLen` returns a literal. -/
 theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)

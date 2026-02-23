@@ -239,26 +239,161 @@ private theorem fixedDistCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
   have : fixedDistCodes[s]!.snd.toNat = (canonicalCodes Inflate.fixedDistLengths)[s]!.snd.toNat := rfl
   exact ⟨hcw', by omega⟩
 
+/-! ## findTableCode correctness -/
+
+-- Table element-wise correspondence (native UInt16/UInt8 ↔ spec Nat)
+set_option maxRecDepth 1024 in
+private theorem nativeLengthBase_eq : ∀ i : Fin 29,
+    Inflate.lengthBase[i.val]!.toNat = Deflate.Spec.lengthBase[i.val]! := by decide
+
+set_option maxRecDepth 1024 in
+private theorem nativeLengthExtra_eq : ∀ i : Fin 29,
+    Inflate.lengthExtra[i.val]!.toNat = Deflate.Spec.lengthExtra[i.val]! := by decide
+
+set_option maxRecDepth 1024 in
+private theorem nativeDistBase_eq : ∀ i : Fin 30,
+    Inflate.distBase[i.val]!.toNat = Deflate.Spec.distBase[i.val]! := by decide
+
+set_option maxRecDepth 1024 in
+private theorem nativeDistExtra_eq : ∀ i : Fin 30,
+    Inflate.distExtra[i.val]!.toNat = Deflate.Spec.distExtra[i.val]! := by decide
+
+-- Table monotonicity (step-wise)
+set_option maxRecDepth 1024 in
+private theorem specLengthBase_step : ∀ i : Fin 28,
+    Deflate.Spec.lengthBase[i.val]! ≤ Deflate.Spec.lengthBase[i.val + 1]! := by decide
+
+set_option maxRecDepth 1024 in
+private theorem specDistBase_step : ∀ i : Fin 29,
+    Deflate.Spec.distBase[i.val]! ≤ Deflate.Spec.distBase[i.val + 1]! := by decide
+
+-- Sizes
+private theorem nativeLengthBase_size : Inflate.lengthBase.size = 29 := by rfl
+private theorem nativeDistBase_size : Inflate.distBase.size = 30 := by rfl
+
+/-- Monotonicity of the spec length base table (full transitive closure). -/
+private theorem specLengthBase_monotone (j k : Nat) (hjk : j ≤ k) (hk : k < 29) :
+    Deflate.Spec.lengthBase[j]! ≤ Deflate.Spec.lengthBase[k]! := by
+  induction k with
+  | zero => simp_all
+  | succ k ih =>
+    by_cases hjk' : j ≤ k
+    · exact Nat.le_trans (ih hjk' (by omega))
+        (specLengthBase_step ⟨k, by omega⟩)
+    · have : j = k + 1 := by omega
+      subst this; exact Nat.le_refl _
+
+/-- Monotonicity of the spec distance base table (full transitive closure). -/
+private theorem specDistBase_monotone (j k : Nat) (hjk : j ≤ k) (hk : k < 30) :
+    Deflate.Spec.distBase[j]! ≤ Deflate.Spec.distBase[k]! := by
+  induction k with
+  | zero => simp_all
+  | succ k ih =>
+    by_cases hjk' : j ≤ k
+    · exact Nat.le_trans (ih hjk' (by omega))
+        (specDistBase_step ⟨k, by omega⟩)
+    · have : j = k + 1 := by omega
+      subst this; exact Nat.le_refl _
+
+/-- If `idx` is the first matching index starting from `i`, then
+    `findTableCode.go` returns the expected result. -/
+private theorem findTableCode_go_of_first_match
+    (baseTable : Array UInt16) (extraTable : Array UInt8)
+    (value i idx : Nat)
+    (hi : i ≤ idx)
+    (hidx : idx < baseTable.size)
+    (hmatch : idx + 1 < baseTable.size → baseTable[idx + 1]!.toNat > value)
+    (hskip : ∀ j, j < idx → j + 1 < baseTable.size ∧
+        baseTable[j + 1]!.toNat ≤ value) :
+    findTableCode.go baseTable extraTable value i =
+    some (idx, extraTable[idx]!.toNat,
+          (value - baseTable[idx]!.toNat).toUInt32) := by
+  suffices ∀ k, k = baseTable.size - i →
+      findTableCode.go baseTable extraTable value i =
+      some (idx, extraTable[idx]!.toNat,
+            (value - baseTable[idx]!.toNat).toUInt32) by
+    exact this _ rfl
+  intro k
+  induction k generalizing i with
+  | zero => intro hk; omega
+  | succ n ih =>
+    intro hk
+    unfold findTableCode.go
+    by_cases heq : idx = i
+    · -- Match at this index
+      subst heq
+      by_cases h_next : idx + 1 < baseTable.size
+      · -- Has next entry: check upper bound
+        have hgt := hmatch h_next
+        simp only [show idx + 1 < baseTable.size from h_next, ↓reduceIte,
+          show baseTable[idx + 1]!.toNat > value from hgt, ↓reduceIte]
+      · -- Last entry
+        simp only [show ¬(idx + 1 < baseTable.size) from h_next, ↓reduceIte,
+          show idx < baseTable.size from hidx, ↓reduceIte]
+    · -- Skip: search passes through this index
+      have hlt_idx : i < idx := by omega  -- from ¬(idx = i) and i ≤ idx
+      obtain ⟨h_next_i, h_le_i⟩ := hskip i hlt_idx
+      simp only [show i + 1 < baseTable.size from h_next_i, ↓reduceIte,
+        show ¬(baseTable[i + 1]!.toNat > value) from by omega, ↓reduceIte]
+      exact ih (i + 1) (by omega : i + 1 ≤ idx) (by omega)
+
 /-! ## findLengthCode / findDistCode agreement -/
 
 /-- If spec `findLengthCode` succeeds, native `findLengthCode` succeeds with
-    the same result (up to UInt32 conversion for the extra value).
-    **Sorry**: requires proving the native `findTableCode` linear search agrees
-    with the spec linear search when given tables with equal entries. The tables
-    (`lengthBase`, `lengthExtra`) are identical between native and spec (just
-    `Array UInt16`/`UInt8` vs `Array Nat`), and both do the same linear scan. -/
+    the same result (up to UInt32 conversion for the extra value). -/
 private theorem findLengthCode_agree (length idx extraN extraV : Nat)
     (hspec : Deflate.Spec.findLengthCode length = some (idx, extraN, extraV)) :
     findLengthCode length = some (idx, extraN, extraV.toUInt32) := by
-  sorry
+  have hgo := Deflate.Spec.findLengthCode_spec length idx extraN extraV hspec
+  have hidx := hgo.1
+  have hbase := hgo.2.1
+  have hextraN := hgo.2.2.1
+  show findTableCode.go Inflate.lengthBase Inflate.lengthExtra length 0 =
+    some (idx, extraN, extraV.toUInt32)
+  have result := findTableCode_go_of_first_match Inflate.lengthBase Inflate.lengthExtra
+    length 0 idx (by omega) (by rw [nativeLengthBase_size]; omega)
+    (fun h_next => by
+      rw [nativeLengthBase_size] at h_next
+      have h1 := nativeLengthBase_eq ⟨idx + 1, h_next⟩
+      rw [h1]
+      exact Deflate.Spec.findLengthCode_upper length idx extraN extraV hspec h_next)
+    (fun j hj => by
+      have hj_bound : j + 1 < 29 := by omega
+      refine ⟨by rw [nativeLengthBase_size]; omega, ?_⟩
+      have h1 := nativeLengthBase_eq ⟨j + 1, hj_bound⟩
+      rw [h1]
+      exact Nat.le_trans (specLengthBase_monotone (j + 1) idx (by omega) hidx) (by omega))
+  have h1 := nativeLengthExtra_eq ⟨idx, hidx⟩
+  have h2 := nativeLengthBase_eq ⟨idx, hidx⟩
+  rw [result, h1, hextraN, h2, show length - Deflate.Spec.lengthBase[idx]! = extraV from by omega]
 
 /-- If spec `findDistCode` succeeds, native `findDistCode` succeeds with
-    the same result.
-    **Sorry**: same approach as `findLengthCode_agree`. -/
+    the same result. -/
 private theorem findDistCode_agree (dist idx extraN extraV : Nat)
     (hspec : Deflate.Spec.findDistCode dist = some (idx, extraN, extraV)) :
     findDistCode dist = some (idx, extraN, extraV.toUInt32) := by
-  sorry
+  have hgo := Deflate.Spec.findDistCode_spec dist idx extraN extraV hspec
+  have hidx := hgo.1
+  have hbase := hgo.2.1
+  have hextraN := hgo.2.2.1
+  show findTableCode.go Inflate.distBase Inflate.distExtra dist 0 =
+    some (idx, extraN, extraV.toUInt32)
+  have result := findTableCode_go_of_first_match Inflate.distBase Inflate.distExtra
+    dist 0 idx (by omega) (by rw [nativeDistBase_size]; omega)
+    (fun h_next => by
+      rw [nativeDistBase_size] at h_next
+      have h1 := nativeDistBase_eq ⟨idx + 1, h_next⟩
+      rw [h1]
+      exact Deflate.Spec.findDistCode_upper dist idx extraN extraV hspec h_next)
+    (fun j hj => by
+      have hj_bound : j + 1 < 30 := by omega
+      refine ⟨by rw [nativeDistBase_size]; omega, ?_⟩
+      have h1 := nativeDistBase_eq ⟨j + 1, hj_bound⟩
+      rw [h1]
+      exact Nat.le_trans (specDistBase_monotone (j + 1) idx (by omega) hidx) (by omega))
+  have h1 := nativeDistExtra_eq ⟨idx, hidx⟩
+  have h2 := nativeDistBase_eq ⟨idx, hidx⟩
+  rw [result, h1, hextraN, h2, show dist - Deflate.Spec.distBase[idx]! = extraV from by omega]
 
 /-! ## encodeSymbol ↔ writeHuffCode bridge -/
 
