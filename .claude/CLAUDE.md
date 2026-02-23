@@ -563,6 +563,18 @@ Update it during review and reflect sessions.
   different after `unfold`. Use `if ... then some (...) else do { rest }`
   instead. This applies to spec functions where proofs need to unfold
   both sides simultaneously.
+- **`simp` (not `simp only`) for Option do-notation match chains**: When
+  `unfold` expands a do-block in `Option`, the result is nested
+  `match opt?, fun val => ... with | none, _ => none | some a, f => f a`.
+  `simp only` CANNOT enter these match expressions to rewrite inner
+  terms. Use full `simp` (without `only`) with the relevant hypotheses
+  to resolve all match steps at once. This differs from `Except` monad
+  do-blocks where `simp only [bind, Option.bind]` suffices.
+- **`letFun` linter false positive**: When `unfold f at h` leaves
+  `have x := e; body` bindings, `simp only [letFun] at h` is needed
+  to reduce them before `split at h` can see inner `if` expressions.
+  The linter may report `letFun` as unused — this is a false positive.
+  Do NOT remove it; doing so breaks the proof.
 
 ## Current State
 
