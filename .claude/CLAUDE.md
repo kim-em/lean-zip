@@ -66,8 +66,13 @@ Run `coordination orient` to see:
 Run `coordination close-stale` to close issues open >24 hours.
 
 Read these to understand current state:
-- Recent files in `progress/` — what previous sessions accomplished
+- `PROGRESS.md` — global milestones and current phase
+- The **last 5** files in `progress/` (by filename sort) — recent session details
 - `VERIFICATION.md` — the phased roadmap and development cycle
+
+Do NOT read all progress files. The 5 most recent plus PROGRESS.md
+give sufficient context. Older history is available if needed for
+specific investigation.
 
 Record the current `sorry` count: `grep -rc sorry Zip/ || true`
 
@@ -174,6 +179,14 @@ Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md`
 - Decisions made, key proof patterns discovered
 - What remains, sorry count delta
 
+Update `PROGRESS.md` ONLY if this session changed a milestone:
+- Phase transition (e.g. Phase 3 complete → Phase 4 starting)
+- Sorry count reached zero for a phase
+- Major architectural decision affecting future sessions
+- New module or capability added
+
+Most sessions should NOT touch PROGRESS.md.
+
 Commit everything and push the branch, then create a PR:
 ```
 coordination create-pr N
@@ -240,6 +253,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 ### Key documents
     ARCHITECTURE.md      — Technical architecture
     VERIFICATION.md      — Phased roadmap and development cycle (do not modify)
+    PROGRESS.md          — Global milestones (updated rarely)
     progress/            — Per-session progress entries (one file per session)
     plans/               — Per-session plan files (one file per active session)
     coordination         — Multi-agent coordination script (uses gh CLI)
