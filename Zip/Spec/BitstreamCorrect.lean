@@ -760,4 +760,169 @@ theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
       split <;> simp_all [beq_iff_eq] <;> omega
     · rfl
 
+/-! ### bitsToBytes / bytesToBits roundtrip -/
+
+/-- `bytesToBits.byteToBits` on length-8 bits recovers the original list. -/
+private theorem byteToBits_bitsToByte_eq (bits : List Bool) (h : bits.length = 8) :
+    Deflate.Spec.bytesToBits.byteToBits (Deflate.Spec.bitsToByte bits) = bits := by
+  have := byteToBits_bitsToByte_take8 bits
+  rw [this]
+  apply List.ext_getElem
+  · simp; omega
+  · intro i h1 h2
+    simp only [List.getElem_ofFn]
+    simp [show i < bits.length from by omega]
+
+/-- `bitsToBytes.go` with accumulator appends to the accumulator. -/
+private theorem bitsToBytes_go_eq (bits : List Bool) (acc : ByteArray) :
+    (Deflate.Spec.bitsToBytes.go bits acc).data.toList =
+      acc.data.toList ++ (Deflate.Spec.bitsToBytes.go bits ByteArray.empty).data.toList := by
+  have : ∀ (bits : List Bool) (acc : ByteArray),
+      (Deflate.Spec.bitsToBytes.go bits acc).data.toList =
+        acc.data.toList ++ (Deflate.Spec.bitsToBytes.go bits ByteArray.empty).data.toList := by
+    intro bits
+    induction h : bits.length using Nat.strongRecOn generalizing bits with
+    | _ n ih =>
+      intro acc
+      cases bits with
+      | nil => simp [Deflate.Spec.bitsToBytes.go]
+      | cons b rest =>
+        unfold Deflate.Spec.bitsToBytes.go
+        have hlen : ((b :: rest).drop 8).length < (b :: rest).length := by
+          simp [List.length_drop]; omega
+        subst h
+        rw [ih _ hlen _ rfl (acc.push (Deflate.Spec.bitsToByte (b :: rest)))]
+        rw [ih _ hlen _ rfl (ByteArray.empty.push (Deflate.Spec.bitsToByte (b :: rest)))]
+        simp [ByteArray.push, Array.toList_push, List.append_assoc]
+  exact this bits acc
+
+/-- `bitsToBytes` of empty is empty. -/
+private theorem bitsToBytes_nil :
+    Deflate.Spec.bitsToBytes [] = ByteArray.empty := by
+  simp [Deflate.Spec.bitsToBytes, Deflate.Spec.bitsToBytes.go]
+
+/-- `bitsToBytes` of non-empty list prepends one byte then recurses. -/
+private theorem bitsToBytes_cons (b : Bool) (rest : List Bool) :
+    (Deflate.Spec.bitsToBytes (b :: rest)).data.toList =
+      [Deflate.Spec.bitsToByte (b :: rest)] ++
+        (Deflate.Spec.bitsToBytes ((b :: rest).drop 8)).data.toList := by
+  simp only [Deflate.Spec.bitsToBytes, Deflate.Spec.bitsToBytes.go]
+  rw [bitsToBytes_go_eq]
+  simp [ByteArray.push]
+
+/-- `byteToBits_bitsToByte_take8` specialized: when `bits.length ≥ 8`,
+    the output equals `bits.take 8`. -/
+private theorem byteToBits_bitsToByte_take (bits : List Bool) (h : bits.length ≥ 8) :
+    Deflate.Spec.bytesToBits.byteToBits (Deflate.Spec.bitsToByte bits) = bits.take 8 := by
+  rw [byteToBits_bitsToByte_take8]
+  apply List.ext_getElem
+  · simp [List.length_take]; omega
+  · intro i h1 h2
+    simp only [List.length_ofFn] at h1
+    simp only [List.length_take] at h2
+    simp only [List.getElem_ofFn, show i < bits.length from by omega, ↓reduceDIte,
+      List.getElem_take]
+
+/-- `bytesToBits` unfolds through the byte list via flatMap. -/
+private theorem bytesToBits_data (ba : ByteArray) :
+    Deflate.Spec.bytesToBits ba = ba.data.toList.flatMap Deflate.Spec.bytesToBits.byteToBits := by
+  rfl
+
+/-- Packing then unpacking recovers the original bits (byte-aligned). -/
+theorem bytesToBits_bitsToBytes_aligned (bits : List Bool)
+    (h : bits.length % 8 = 0) :
+    Deflate.Spec.bytesToBits (Deflate.Spec.bitsToBytes bits) = bits := by
+  induction h' : bits.length using Nat.strongRecOn generalizing bits with
+  | _ n ih =>
+    cases bits with
+    | nil => simp [bitsToBytes_nil, Deflate.Spec.bytesToBits]
+    | cons b rest =>
+      -- (b :: rest).length % 8 = 0 and > 0 implies length ≥ 8
+      have hlen : (b :: rest).length ≥ 8 := by
+        simp [List.length_cons] at h ⊢; omega
+      rw [bytesToBits_data, bitsToBytes_cons]
+      simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
+      rw [byteToBits_bitsToByte_take _ hlen]
+      -- IH: bytesToBits (bitsToBytes ((b :: rest).drop 8)) = (b :: rest).drop 8
+      have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
+        simp [List.length_drop]; omega
+      have hdrop_mod : ((b :: rest).drop 8).length % 8 = 0 := by
+        have hmod := h
+        simp only [List.length_cons] at hmod
+        simp only [List.length_drop, List.length_cons]
+        have hge : rest.length + 1 ≥ 8 := hlen
+        have := Nat.mod_eq_sub_mod hge
+        omega
+      rw [← bytesToBits_data, ih _ (by omega) _ hdrop_mod rfl]
+      exact List.take_append_drop 8 (b :: rest)
+
+/-- The output of `bytesToBits ∘ bitsToBytes` is at least as long as the input. -/
+private theorem bytesToBits_bitsToBytes_length_ge (bits : List Bool) :
+    (Deflate.Spec.bytesToBits (Deflate.Spec.bitsToBytes bits)).length ≥ bits.length := by
+  induction h' : bits.length using Nat.strongRecOn generalizing bits with
+  | _ n ih =>
+    subst h'
+    cases bits with
+    | nil => simp [bitsToBytes_nil, Deflate.Spec.bytesToBits]
+    | cons b rest =>
+      rw [bytesToBits_data, bitsToBytes_cons]
+      simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil,
+        List.length_append, Deflate.Spec.bytesToBits.byteToBits_length]
+      have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
+        simp [List.length_drop]; omega
+      have hih := ih _ hdrop_len ((b :: rest).drop 8) rfl
+      -- hih : (bytesToBits (bitsToBytes (drop 8 ...))).length ≥ (drop 8 ...).length
+      -- Goal is about flatMap form; convert hih
+      rw [bytesToBits_data] at hih
+      simp only [List.length_flatMap, Deflate.Spec.bytesToBits.byteToBits_length,
+        List.length_drop] at hih ⊢
+      omega
+
+/-- Packing then unpacking recovers the original bits up to padding. -/
+theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
+    (Deflate.Spec.bytesToBits (Deflate.Spec.bitsToBytes bits)).take bits.length = bits := by
+  induction h' : bits.length using Nat.strongRecOn generalizing bits with
+  | _ n ih =>
+    subst h'
+    cases bits with
+    | nil => simp [bitsToBytes_nil, Deflate.Spec.bytesToBits]
+    | cons b rest =>
+      rw [bytesToBits_data, bitsToBytes_cons]
+      simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
+      rw [byteToBits_bitsToByte_take8]
+      -- Goal: (ofFn (...) ++ rest_bits).take (rest.length + 1) = b :: rest
+      have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
+        simp [List.length_drop]; omega
+      have hlen_ge := bytesToBits_bitsToBytes_length_ge ((b :: rest).drop 8)
+      rw [bytesToBits_data] at hlen_ge
+      apply List.ext_getElem
+      · simp only [List.length_take, List.length_append, List.length_ofFn, List.length_cons,
+          List.length_drop] at hlen_ge ⊢
+        omega
+      · intro i h1 h2
+        simp only [List.length_cons] at h2
+        simp only [List.length_take, List.length_append, List.length_ofFn] at h1
+        simp only [List.getElem_take]
+        by_cases hi8 : i < 8
+        · rw [List.getElem_append_left (by simp; exact hi8)]
+          simp only [List.getElem_ofFn, show i < (b :: rest).length from by omega, ↓reduceDIte]
+          rfl
+        · have hi8' : i ≥ 8 := by omega
+          rw [List.getElem_append_right (by simp; omega)]
+          simp only [List.length_ofFn]
+          have hih := ih _ hdrop_len ((b :: rest).drop 8) rfl
+          rw [bytesToBits_data] at hih
+          have hidx : i - 8 < ((b :: rest).drop 8).length := by
+            simp [List.length_drop]; omega
+          -- Extract element from equality via List.getElem_of_eq
+          have hbound : i - 8 < (List.take ((b :: rest).drop 8).length
+            (List.flatMap Deflate.Spec.bytesToBits.byteToBits
+              (Deflate.Spec.bitsToBytes ((b :: rest).drop 8)).data.toList)).length := by
+            rw [congrArg List.length hih]; exact hidx
+          have helem := List.getElem_of_eq hih hbound
+          simp only [List.getElem_take] at helem
+          rw [helem]
+          simp only [List.getElem_drop]
+          congr 1; omega
+
 end Deflate.Correctness
