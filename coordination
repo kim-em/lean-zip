@@ -314,49 +314,41 @@ cmd_skip() {
 
 # --- lock-planner ---
 # Advisory lock to prevent concurrent planner sessions.
-# Uses 'eyes' reactions on a pinned sentinel issue with a TTL.
+# Uses 'planner-lock' label on a pinned sentinel issue with a TTL.
 # Returns 0 if lock acquired, 1 if another planner is active.
 cmd_lock_planner() {
-    local cutoff
-    cutoff="$(date -u -v-${PLANNER_LOCK_TTL}S '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
-              date -u -d "$PLANNER_LOCK_TTL seconds ago" '+%Y-%m-%dT%H:%M:%SZ')"
+    # Check if lock label is present
+    local labels
+    labels="$(gh issue view "$PLANNER_LOCK_ISSUE" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
 
-    # Get all 'eyes' reactions on the sentinel issue
-    local reactions
-    reactions="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions" \
-        --jq "[.[] | select(.content == \"eyes\")]")"
+    if echo "$labels" | grep -qw 'planner-lock'; then
+        # Label exists — check TTL via issue events timeline
+        local cutoff
+        cutoff="$(date -u -v-${PLANNER_LOCK_TTL}S '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                  date -u -d "$PLANNER_LOCK_TTL seconds ago" '+%Y-%m-%dT%H:%M:%SZ')"
 
-    # Check for unexpired reactions (within TTL)
-    local active
-    active="$(echo "$reactions" | jq "[.[] | select(.created_at > \"$cutoff\")] | length")"
+        local label_time
+        label_time="$(gh api --paginate "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/events" \
+            --jq '[.[] | select(.event == "labeled" and .label.name == "planner-lock")] | sort_by(.created_at) | last | .created_at // ""')"
 
-    # Clean up expired reactions
-    echo "$reactions" | jq -r ".[] | select(.created_at <= \"$cutoff\") | .id" | \
-    while read -r reaction_id; do
-        [[ -z "$reaction_id" ]] && continue
-        gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions/$reaction_id" -X DELETE 2>/dev/null || true
-    done
+        if [[ -n "$label_time" && "$label_time" > "$cutoff" ]]; then
+            echo "Another planner is active (lock held). Skipping."
+            return 1
+        fi
 
-    if [[ "$active" -gt 0 ]]; then
-        echo "Another planner is active (lock held). Skipping."
-        return 1
+        # Lock expired — remove stale label before re-acquiring
+        gh issue edit "$PLANNER_LOCK_ISSUE" --repo "$REPO" --remove-label planner-lock 2>/dev/null || true
     fi
 
-    # Acquire lock: add eyes reaction
-    gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions" -f content=eyes --silent
+    # Acquire lock: add label
+    gh issue edit "$PLANNER_LOCK_ISSUE" --repo "$REPO" --add-label planner-lock
     echo "Planner lock acquired"
 }
 
 # --- unlock-planner ---
-# Release the planner lock by removing our eyes reaction.
+# Release the planner lock by removing the label.
 cmd_unlock_planner() {
-    # Find and delete all eyes reactions (there should be at most one from us)
-    gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions" \
-        --jq '.[] | select(.content == "eyes") | .id' | \
-    while read -r reaction_id; do
-        [[ -z "$reaction_id" ]] && continue
-        gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions/$reaction_id" -X DELETE 2>/dev/null || true
-    done
+    gh issue edit "$PLANNER_LOCK_ISSUE" --repo "$REPO" --remove-label planner-lock 2>/dev/null || true
     echo "Planner lock released"
 }
 

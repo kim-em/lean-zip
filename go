@@ -71,6 +71,7 @@ CURRENT_UUID=""
 FILTER_PID=""
 CLAUDE_PID=""
 CURRENT_WORKTREE=""
+PLANNER_LOCK_HELD=""  # Set to 1 only when we successfully acquire the lock
 
 fmt_tokens() {
     local n=$1
@@ -84,6 +85,12 @@ fmt_tokens() {
 }
 
 cleanup() {
+    # Release planner lock only if we actually acquired it
+    if [[ -n "$PLANNER_LOCK_HELD" ]]; then
+        cd "$SCRIPT_DIR" && ./coordination unlock-planner 2>/dev/null || true
+        PLANNER_LOCK_HELD=""
+    fi
+
     # Kill Claude if still running (prevent orphan against removed worktree)
     if [[ -n "$CLAUDE_PID" ]] && kill -0 "$CLAUDE_PID" 2>/dev/null; then
         kill "$CLAUDE_PID" 2>/dev/null || true
@@ -435,6 +442,7 @@ while true; do
             # Try to acquire planner lock (prevents concurrent planners)
             if cd "$SCRIPT_DIR" && ./coordination lock-planner 2>/dev/null; then
                 SESSION_MODE="planner"
+                PLANNER_LOCK_HELD=1
                 EFFECTIVE_PROMPT="/plan"
                 say "Queue depth: $queue_depth (< $QUEUE_MIN) → planner session (lock acquired)"
             elif (( queue_depth > 0 )); then
@@ -639,9 +647,10 @@ except:
     fi
     say "Session #$SESSION_NUM finished: exit=$EXIT_CODE duration=$(human_duration $ELAPSED) jsonl=$(human_size "$final_size")$token_summary$git_summary uuid=$uuid"
 
-    # Release planner lock if this was a planner session
-    if [[ "$SESSION_MODE" == "planner" ]]; then
+    # Release planner lock only if we acquired it
+    if [[ -n "$PLANNER_LOCK_HELD" ]]; then
         cd "$SCRIPT_DIR" && ./coordination unlock-planner 2>/dev/null || true
+        PLANNER_LOCK_HELD=""
     fi
 
     # Clean up worktree
