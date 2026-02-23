@@ -328,6 +328,15 @@ theorem findLongestMatch_dist_bounds (data : List UInt8) (pos windowSize : Nat)
     (by simp) (by omega) len dist h
   exact ⟨inv.2.1, by omega⟩
 
+/-- If `findLongestMatch` returns `some (len, dist)`, then `dist ≤ windowSize`. -/
+theorem findLongestMatch_dist_le_windowSize (data : List UInt8) (pos windowSize : Nat)
+    (len dist : Nat)
+    (h : findLongestMatch data pos windowSize = some (len, dist)) :
+    dist ≤ windowSize := by
+  have inv := findLongestMatch.go_inv data pos 1 (min pos windowSize) none
+    (by simp) (by omega) len dist h
+  omega
+
 /-- If `findLongestMatch` returns `some (len, dist)`, then
     `matchLength data pos dist = len`. -/
 theorem findLongestMatch_matchLength (data : List UInt8) (pos windowSize : Nat)
