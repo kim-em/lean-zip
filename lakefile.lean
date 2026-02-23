@@ -24,12 +24,24 @@ def nixLdLibPaths : IO (Array String) := do
   let some val := (← IO.getEnv "NIX_LDFLAGS") | return #[]
   return val.splitOn " " |>.filter (·.startsWith "-L") |>.toArray
 
-/-- Check whether `libzstd.a` exists in any of the given `-L` directories. -/
+/-- Get the library directory for a pkg-config package (e.g. `/usr/lib/x86_64-linux-gnu`). -/
+def pkgConfigLibDir (pkg : String) : IO (Option String) := do
+  let out ← IO.Process.output { cmd := "pkg-config", args := #["--variable=libdir", pkg] }
+  if out.exitCode != 0 then return none
+  let dir := out.stdout.trimAscii.toString
+  if dir.isEmpty then return none
+  return some dir
+
+/-- Check whether `libzstd.a` exists in any of the given `-L` directories
+    or in the pkg-config reported libdir. -/
 def hasStaticZstd (libPaths : Array String) : IO Bool := do
   for p in libPaths do
     let dir : System.FilePath := ⟨(p.drop 2).toString⟩  -- strip "-L"
     let path := dir / "libzstd.a"
     if (← path.pathExists) then return true
+  -- Also check the pkg-config reported libdir (may not be in -L flags)
+  if let some dir := (← pkgConfigLibDir "libzstd") then
+    if (← (⟨dir⟩ : System.FilePath) / "libzstd.a" |>.pathExists) then return true
   return false
 
 /-- Get combined link flags for zlib and zstd.
@@ -40,11 +52,21 @@ def linkFlags : IO (Array String) := do
   let libPaths ← nixLdLibPaths
   let zlibFlags ← pkgConfig "zlib" "--libs"
   let zstdFlags ← pkgConfig "libzstd" "--libs"
+  -- Lean's bundled sysroot overrides the system library search path, so
+  -- pkg-config may omit -L for "standard" dirs that the sysroot shadows.
+  -- Query pkg-config for actual lib directories and add explicit -L flags.
+  let mut extraLibPaths : Array String := #[]
+  if let some dir := (← pkgConfigLibDir "zlib") then
+    if !zlibFlags.any (·.startsWith "-L") then
+      extraLibPaths := extraLibPaths.push s!"-L{dir}"
+  if let some dir := (← pkgConfigLibDir "libzstd") then
+    if !zstdFlags.any (·.startsWith "-L") then
+      extraLibPaths := extraLibPaths.push s!"-L{dir}"
   -- Prefer static zstd to avoid glibc version mismatches with Lean's sysroot.
-  let allLibPaths := libPaths ++
+  let allLibPaths := libPaths ++ extraLibPaths ++
     (zlibFlags ++ zstdFlags).filter (·.startsWith "-L")
   if (← hasStaticZstd allLibPaths) then
-    let zstdLibPaths := zstdFlags.filter (·.startsWith "-L")
+    let zstdLibPaths := zstdFlags.filter (·.startsWith "-L") ++ extraLibPaths
     let zlibEffective := if zlibFlags.isEmpty then libPaths ++ #["-lz"] else zlibFlags
     -- On macOS (lld), -Bstatic/-Bdynamic aren't supported; link dynamically instead.
     -- Also need SDK library path since Lean's sysroot hides system libs.
@@ -59,7 +81,7 @@ def linkFlags : IO (Array String) := do
   if !zlibFlags.isEmpty && !zstdFlags.isEmpty then
     -- Dynamic zstd may reference newer glibc symbols than Lean's sysroot provides.
     -- Allow unresolved shlib symbols; the system libc provides them at runtime.
-    return zlibFlags ++ zstdFlags ++ #["-Wl,--allow-shlib-undefined"]
+    return extraLibPaths ++ zlibFlags ++ zstdFlags ++ #["-Wl,--allow-shlib-undefined"]
   -- pkg-config unavailable — try NIX_LDFLAGS for -L paths
   let mut flags := libPaths ++ #["-lz", "-lzstd"]
   flags := flags ++ #["-Wl,--allow-shlib-undefined"]
