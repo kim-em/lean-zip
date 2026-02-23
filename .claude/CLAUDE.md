@@ -226,7 +226,8 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/Huffman.lean    — Canonical Huffman code spec (allCodes, prefix-free)
     Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
-    Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence
+    Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence (read direction)
+    Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
