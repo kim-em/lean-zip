@@ -423,7 +423,11 @@ while true; do
     SESSION_MODE=""
     EFFECTIVE_PROMPT="$PROMPT"
     if [[ -z "$EFFECTIVE_PROMPT" ]]; then
-        queue_depth=$(cd "$SCRIPT_DIR" && ./coordination queue-depth 2>/dev/null || echo 0)
+        if ! queue_depth=$(cd "$SCRIPT_DIR" && ./coordination queue-depth 2>&1); then
+            say "warning: coordination queue-depth failed: $queue_depth"
+            say "Defaulting to planner mode"
+            queue_depth=0
+        fi
         if (( queue_depth < QUEUE_MIN )); then
             SESSION_MODE="planner"
             EFFECTIVE_PROMPT="/plan"

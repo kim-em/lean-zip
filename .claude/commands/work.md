@@ -94,14 +94,17 @@ Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md` with:
 - Decisions made, key proof patterns discovered
 - What remains, sorry count delta
 
-Commit and push:
+**If you made code changes**, commit, push, and create a PR:
 ```
 git push -u origin <branch>
+coordination create-pr <issue-number>
 ```
 
-Create a PR:
+**If you only closed a bad PR** (no code changes), close the associated
+issue instead of creating a PR:
 ```
-coordination create-pr <issue-number>
+gh issue close <issue-number> --repo kim-em/lean-zip \
+    --comment "Closed PR #N as not worth salvaging. See progress entry."
 ```
 
 ## Step 8: Reflect

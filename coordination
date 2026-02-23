@@ -71,19 +71,20 @@ cmd_close_stale() {
               date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
 
     # Close stale agent-plan issues (both unclaimed and claimed)
+    # Uses updatedAt so actively-worked issues aren't closed prematurely
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
-        --json number,title,createdAt \
-        --jq ".[] | select(.createdAt < \"$cutoff\") | .number" | \
+        --json number,title,updatedAt \
+        --jq ".[] | select(.updatedAt < \"$cutoff\") | .number" | \
     while read -r num; do
         echo "Closing stale issue #$num"
         gh issue close "$num" --repo "$REPO" \
-            --comment "Presumed abandoned (open >24 hours). Session: $SESSION_ID"
+            --comment "Presumed abandoned (no activity >24 hours). Session: $SESSION_ID"
     done
 
     # Also close skipped issues >24h old
     gh issue list --repo "$REPO" --label skip --state open --limit 50 \
-        --json number,title,createdAt \
-        --jq ".[] | select(.createdAt < \"$cutoff\") | .number" | \
+        --json number,title,updatedAt \
+        --jq ".[] | select(.updatedAt < \"$cutoff\") | .number" | \
     while read -r num; do
         echo "Closing stale skipped issue #$num"
         gh issue close "$num" --repo "$REPO" \
@@ -211,7 +212,7 @@ cmd_claim_fix() {
 
     # Check for recent claims (last 30 minutes)
     local recent_claim
-    recent_claim="$(gh api "repos/$REPO/issues/$pr_num/comments" \
+    recent_claim="$(gh api --paginate "repos/$REPO/issues/$pr_num/comments" \
         --jq '[.[] | select(.body | test("Session .* attempting fix")) |
                select(.created_at > (now - 1800 | strftime("%Y-%m-%dT%H:%M:%SZ")))] |
                length')"
@@ -253,11 +254,11 @@ cmd_claim() {
     # Check if already claimed
     local labels
     labels="$(gh issue view "$issue_num" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
-    if echo "$labels" | grep -q 'claimed'; then
+    if echo "$labels" | grep -qw 'claimed'; then
         echo "Issue #$issue_num is already claimed. Skipping."
         return 1
     fi
-    if echo "$labels" | grep -q 'skip'; then
+    if echo "$labels" | grep -qw 'skip'; then
         echo "Issue #$issue_num was skipped. Skipping."
         return 1
     fi
@@ -270,7 +271,7 @@ cmd_claim() {
     # Race detection: wait briefly, then check for multiple recent claims
     sleep 2
     local recent_claims
-    recent_claims="$(gh api "repos/$REPO/issues/$issue_num/comments" \
+    recent_claims="$(gh api --paginate "repos/$REPO/issues/$issue_num/comments" \
         --jq '[.[] | select(.body | test("Claimed by session")) |
                select(.created_at > (now - 60 | strftime("%Y-%m-%dT%H:%M:%SZ")))] |
                length')"
@@ -278,7 +279,7 @@ cmd_claim() {
     if [[ "$recent_claims" -gt 1 ]]; then
         # Race detected — lowest UUID wins
         local winner
-        winner="$(gh api "repos/$REPO/issues/$issue_num/comments" \
+        winner="$(gh api --paginate "repos/$REPO/issues/$issue_num/comments" \
             --jq '[.[] | select(.body | test("Claimed by session")) |
                    select(.created_at > (now - 60 | strftime("%Y-%m-%dT%H:%M:%SZ")))] |
                    sort_by(.body) | .[0].body |
@@ -286,7 +287,7 @@ cmd_claim() {
 
         if [[ "$winner" != "$SESSION_ID" ]]; then
             echo "Race detected on #$issue_num — session $winner won. Backing off."
-            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
+            # Do NOT remove the 'claimed' label — the winner needs it
             return 1
         fi
         echo "Race detected on #$issue_num — this session won."
