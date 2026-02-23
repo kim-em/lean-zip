@@ -1,0 +1,14 @@
+name: Label merge conflicts
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: eps1lon/actions-label-merge-conflict@v3
+        with:
+          dirtyLabel: merge-conflict
+          repoToken: ${{ secrets.GITHUB_TOKEN }}

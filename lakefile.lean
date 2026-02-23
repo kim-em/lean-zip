@@ -5,18 +5,18 @@ open System Lake DSL
 def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
   let out ← IO.Process.output { cmd := "pkg-config", args := #[flag, pkg] }
   if out.exitCode != 0 then return #[]
-  return out.stdout.trimAscii.toString.splitOn " " |>.toArray
+  return out.stdout.trimAscii.toString.splitOn " " |>.filter (· ≠ "") |>.toArray
 
 /-- Get zlib include flags, respecting `ZLIB_CFLAGS` env var override. -/
 def zlibCFlags : IO (Array String) := do
   if let some flags := (← IO.getEnv "ZLIB_CFLAGS") then
-    return flags.trimAscii.toString.splitOn " " |>.toArray
+    return flags.trimAscii.toString.splitOn " " |>.filter (· ≠ "") |>.toArray
   pkgConfig "zlib" "--cflags"
 
 /-- Get zstd include flags, respecting `ZSTD_CFLAGS` env var override. -/
 def zstdCFlags : IO (Array String) := do
   if let some flags := (← IO.getEnv "ZSTD_CFLAGS") then
-    return flags.trimAscii.toString.splitOn " " |>.toArray
+    return flags.trimAscii.toString.splitOn " " |>.filter (· ≠ "") |>.toArray
   pkgConfig "libzstd" "--cflags"
 
 /-- Extract `-L` library paths from `NIX_LDFLAGS` (set by nix-shell). -/

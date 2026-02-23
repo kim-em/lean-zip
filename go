@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_AVAILABLE_MODEL="$HOME/.claude/skills/claude-usage/claude-available-model"
 LOCKFILE="$SCRIPT_DIR/.go.lock"
 LOGFILE="$SCRIPT_DIR/agent-loop.log"
-JSONL_DIR="$HOME/.claude/projects/-Users-kim-projects-lean-lean-zip"
+JSONL_DIR="$HOME/.claude/projects/$(pwd | tr '/' '-')"
 
 # --- Parse flags ---
 
@@ -92,7 +92,7 @@ fmt_tokens() {
 }
 
 cleanup() {
-    # Kill the streaming filter subshell (its EXIT trap kills tail + python3)
+    # Kill the filter python3 process (direct PID, no subshell indirection)
     if [[ -n "$FILTER_PID" ]]; then
         kill "$FILTER_PID" 2>/dev/null || true
         wait "$FILTER_PID" 2>/dev/null || true
@@ -213,7 +213,7 @@ try:
     cc = d.get('cache_create', 0)
     line = ''
     if text:
-        line = text.strip().split('\n')[-1][:80]
+        line = text.strip().split('\n')[-1]
     tok = ''
     total_in = ti + cr + cc
     if total_in or to:
@@ -248,7 +248,7 @@ except:
     if [[ -n "$last_text" ]]; then
         # Truncate to fit terminal width (leave room for status prefix)
         local prefix_len=${#status}
-        local max_text=$(( ${COLUMNS:-120} - prefix_len - 6 ))
+        local max_text=$(( ${COLUMNS:-200} - prefix_len - 6 ))
         if (( max_text > 10 )) && (( ${#last_text} > max_text )); then
             last_text="${last_text:0:$max_text}..."
         fi
@@ -259,89 +259,108 @@ except:
     printf '\r\033[K%s' "$status"
 }
 
-# --- JSONL streaming filter ---
+# --- JSONL file watcher ---
+# A standalone python3 process polls the JSONL file, extracts the latest
+# assistant text/tool info and accumulates token usage. Reads from byte 0
+# for accurate lifetime totals. Direct PID tracking (no subshell) means
+# kill -0 reliably detects filter death.
 
 start_filter() {
     local uuid=$1
     local jsonl_path="$JSONL_DIR/$uuid.jsonl"
     local state_file="/tmp/agent-${uuid}-state.json"
 
-    if [[ ! -f "$jsonl_path" ]]; then
-        # Not ready yet — caller should retry later
-        return 1
-    fi
-
-    # Run in a subshell so we can kill the entire process group (tail + python3).
-    # Without this, killing python3 alone leaves tail -f orphaned since nobody
-    # writes to the JSONL file to trigger SIGPIPE.
-    (
-        trap 'kill 0' EXIT
-        tail -f "$jsonl_path" 2>/dev/null | python3 -c "
-import json, sys
+    # Single python3 process that watches the file directly. No tail -f pipe
+    # means no SIGPIPE issues, no orphaned tail processes, and the PID we
+    # track IS python3 itself (so kill -0 accurately detects filter death).
+    # Reads from byte 0 for accurate lifetime totals. Handles file-not-yet-
+    # existing by polling internally.
+    python3 -c "
+import json, sys, time, os, signal
 
 state_file = sys.argv[1]
+jsonl_path = sys.argv[2]
+
+signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+
 last_text = ''
 total_in = 0
 total_out = 0
 total_cache_read = 0
 total_cache_create = 0
+pos = 0
 
-for line in sys.stdin:
+def write_state(ts=''):
+    with open(state_file, 'w') as f:
+        json.dump({'ts': ts, 'text': last_text,
+                   'tokens_in': total_in, 'tokens_out': total_out,
+                   'cache_read': total_cache_read,
+                   'cache_create': total_cache_create}, f)
+
+while True:
     try:
-        d = json.loads(line)
-        ts = d.get('timestamp', '')
-        typ = d.get('type', '')
-        if typ == 'assistant':
-            # Accumulate token usage
-            usage = d.get('message', {}).get('usage', {})
-            total_in += usage.get('input_tokens', 0)
-            total_cache_create += usage.get('cache_creation_input_tokens', 0)
-            total_cache_read += usage.get('cache_read_input_tokens', 0)
-            total_out += usage.get('output_tokens', 0)
-            for b in d.get('message', {}).get('content', []):
-                if b.get('type') == 'text' and b.get('text', '').strip():
-                    last_text = b['text'].strip()
-                elif b.get('type') == 'tool_use':
-                    name = b.get('name', '')
-                    inp = b.get('input', {})
-                    # Extract the interesting part of each tool
-                    detail = ''
-                    if name == 'Bash':
-                        desc = inp.get('description', '')
-                        cmd = inp.get('command', '')
-                        if desc and cmd:
-                            detail = desc + ': ' + cmd
-                        else:
-                            detail = desc or cmd
-                    elif name == 'Edit':
-                        p = inp.get('file_path', '')
-                        detail = p.split('/')[-1] if p else ''
-                    elif name in ('Read', 'Write'):
-                        p = inp.get('file_path', '')
-                        detail = p.split('/')[-1] if p else ''
-                    elif name in ('Grep', 'Glob'):
-                        detail = inp.get('pattern', '')
-                    elif name == 'TodoWrite':
-                        todos = inp.get('todos', [])
-                        active = [t for t in todos if t.get('status') == 'in_progress']
-                        detail = active[0].get('activeForm', '') if active else ''
-                    elif name == 'Task':
-                        detail = inp.get('description', '')
-                    else:
-                        detail = name
-                    if detail:
-                        last_text = '[' + name + '] ' + detail
-                    else:
-                        last_text = '[' + name + ']'
-            with open(state_file, 'w') as f:
-                json.dump({'ts': ts, 'text': last_text,
-                           'tokens_in': total_in, 'tokens_out': total_out,
-                           'cache_read': total_cache_read,
-                           'cache_create': total_cache_create}, f)
+        if not os.path.exists(jsonl_path):
+            time.sleep(1)
+            continue
+        with open(jsonl_path, 'rb') as f:
+            f.seek(pos)
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                if not line.endswith(b'\n'):
+                    break  # Partial line — retry next poll
+                pos += len(line)
+                try:
+                    d = json.loads(line)
+                    ts = d.get('timestamp', '')
+                    if d.get('type') == 'assistant':
+                        usage = d.get('message', {}).get('usage', {})
+                        total_in += usage.get('input_tokens', 0)
+                        total_cache_create += usage.get('cache_creation_input_tokens', 0)
+                        total_cache_read += usage.get('cache_read_input_tokens', 0)
+                        total_out += usage.get('output_tokens', 0)
+                        for b in d.get('message', {}).get('content', []):
+                            if b.get('type') == 'text' and b.get('text', '').strip():
+                                last_text = b['text'].strip()
+                            elif b.get('type') == 'tool_use':
+                                name = b.get('name', '')
+                                inp = b.get('input', {})
+                                detail = ''
+                                if name == 'Bash':
+                                    desc = inp.get('description', '')
+                                    cmd = inp.get('command', '')
+                                    if desc and cmd:
+                                        detail = desc + ': ' + cmd
+                                    else:
+                                        detail = desc or cmd
+                                elif name == 'Edit':
+                                    p = inp.get('file_path', '')
+                                    detail = p.split('/')[-1] if p else ''
+                                elif name in ('Read', 'Write'):
+                                    p = inp.get('file_path', '')
+                                    detail = p.split('/')[-1] if p else ''
+                                elif name in ('Grep', 'Glob'):
+                                    detail = inp.get('pattern', '')
+                                elif name == 'TodoWrite':
+                                    todos = inp.get('todos', [])
+                                    active = [t for t in todos if t.get('status') == 'in_progress']
+                                    detail = active[0].get('activeForm', '') if active else ''
+                                elif name == 'Task':
+                                    detail = inp.get('description', '')
+                                else:
+                                    detail = name
+                                if detail:
+                                    last_text = '[' + name + '] ' + detail
+                                else:
+                                    last_text = '[' + name + ']'
+                        write_state(ts)
+                except:
+                    pass
     except:
         pass
-" "$state_file"
-    ) &
+    time.sleep(1)
+" "$state_file" "$jsonl_path" &
     FILTER_PID=$!
     return 0
 }
@@ -404,6 +423,7 @@ while true; do
         uuid=$(uuidgen | tr 'A-Z' 'a-z')
     fi
     CURRENT_UUID="$uuid"
+    export LEAN_ZIP_SESSION_ID="$uuid"
     SESSION_START=$(date +%s)
 
     local_jsonl="$JSONL_DIR/$uuid.jsonl"
@@ -431,18 +451,19 @@ while true; do
     CLAUDE_PID=$!
     log "PID: $CLAUDE_PID"
 
-    # Start the JSONL streaming filter (retried in monitor loop if JSONL not yet created)
+    # Start the JSONL file watcher (restarts automatically in monitor loop if it dies)
     FILTER_PID=""
-    start_filter "$uuid" || true
+    start_filter "$uuid"
 
     # Monitor loop
     PREV_STALE=0
     JSONL_WARNED=""
     while kill -0 "$CLAUDE_PID" 2>/dev/null; do
-        # Try to start filter if not yet running
-        if [[ -z "$FILTER_PID" ]] || ! kill -0 "$FILTER_PID" 2>/dev/null; then
+        # Restart filter if it died (direct PID check — no subshell indirection)
+        if ! kill -0 "$FILTER_PID" 2>/dev/null; then
+            log "Filter died (PID $FILTER_PID), restarting"
             FILTER_PID=""
-            start_filter "$uuid" 2>/dev/null || true
+            start_filter "$uuid"
         fi
 
         update_status "$SESSION_NUM" "$CLAUDE_PID" "$uuid"
@@ -479,7 +500,7 @@ while true; do
     wait "$CLAUDE_PID" 2>/dev/null || EXIT_CODE=$?
     ELAPSED=$(( $(date +%s) - SESSION_START ))
 
-    # Kill filter subshell (its EXIT trap kills tail + python3)
+    # Kill filter python3 process
     if [[ -n "$FILTER_PID" ]]; then
         kill "$FILTER_PID" 2>/dev/null || true
         wait "$FILTER_PID" 2>/dev/null || true

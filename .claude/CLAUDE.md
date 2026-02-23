@@ -28,11 +28,15 @@ with `libz-dev` and `libzstd-dev`), no nix-shell wrapper is needed.
 
 ## Autonomous Work Cycle
 
-When told to "start work" (or `/start`), follow this cycle. The cycle
-balances three activities: **new work**, **review**, and **self-improvement**.
-Check `PROGRESS.md` to dynamically adjust the balance — if reviews are
-consistently finding nothing, do fewer; if they're finding problems, do more.
-Default to alternating: implementation session, then review session.
+When told to "start work" (or `/start`), follow this cycle. Each agent
+runs in its own git worktree on its own branch, coordinating with other
+agents via GitHub issues and PRs.
+
+The cycle balances three activities: **new work**, **review**, and
+**self-improvement**. Read recent `progress/` entries to dynamically
+adjust the balance — if reviews are consistently finding nothing, do
+fewer; if they're finding problems, do more. Default to alternating:
+implementation session, then review session.
 
 **Non-interactive sessions**: These sessions run via `./go` with
 `claude -p` — there is no human to answer questions. Never ask for
@@ -51,29 +55,47 @@ exception is a broken build that prevents all other work.
 
 ### Step 1: Orient
 
-Record the starting commit: `git rev-parse HEAD`. Check `git status` — if
-the repo is dirty with someone else's uncommitted work, document it in
-`PROGRESS.md` and work carefully to avoid mixing changes.
+Record the starting commit: `git rev-parse HEAD`.
+Fetch latest: `git fetch origin master`.
 
-Read these files to understand current state:
-- `SESSION.md` — current working state (sorry locations, failed approaches)
-- `PROGRESS.md` — what previous sessions accomplished and found
-- `PLAN.md` — any unfinished plan from last session
+Run `coordination orient` to see:
+- Open `agent-plan` issues (what other agents are working on)
+- Open PRs and their CI status
+- PRs needing attention (failing CI or merge conflicts)
+
+Run `coordination close-stale` to close issues open >6 hours.
+
+Read these to understand current state:
+- Recent files in `progress/` — what previous sessions accomplished
 - `VERIFICATION.md` — the phased roadmap and development cycle
 
 Record the current `sorry` count: `grep -rc sorry Zip/ || true`
+
+If there are failing PRs, consider claiming one with
+`coordination claim-fix N` instead of starting new work.
 
 Decide whether this should be an **implementation session**, a **review
 session**, or a **self-improvement session** based on the balance.
 
 ### Step 2: Plan
 
-Write a concrete plan to `PLAN.md` with deliverables scoped to one session
-(aim for a few hundred lines of changes — small enough to review and verify).
-If `PLAN.md` has unfinished items, continue from there.
+Create a branch: `git checkout -b agent/<first-8-chars-of-session-UUID>`
+(if not already on an agent branch — the human may have set this up).
+
+Write a concrete plan to `plans/<UUID-prefix>.md` with:
+- Session UUID and UTC start time
+- Deliverables scoped to one session (aim for a few hundred lines of
+  changes — small enough to review and verify)
+
+Pick work that doesn't overlap with open `agent-plan` issues.
+
+Create a GitHub issue for coordination:
+```
+coordination plan "title" < plans/<UUID-prefix>.md
+```
 
 For implementation sessions, priority order:
-1. Unfinished items in `PLAN.md`
+1. Failing PRs that need fixing
 2. Next deliverable from the current VERIFICATION.md phase
 
 For new native implementations, follow the development cycle in
@@ -97,7 +119,7 @@ over time. Focus areas:
   Are proofs minimal? Can steps be combined? Would extracting a lemma
   improve readability or enable reuse? Are there generally useful lemmas
   that should be factored out? Record lemmas that might be worth
-  upstreaming to Lean's standard library in PLAN.md.
+  upstreaming to Lean's standard library in the plan file.
 - **Slop detection**: dead code, duplicated logic, verbose comments,
   unused imports, other signs of AI-generated bloat
 - **Security**: check for new issues in recent code, verify past fixes
@@ -141,25 +163,45 @@ After implementation:
   session start, investigate — this may indicate a proof regression
 - Review changes: `git diff <starting-commit>..HEAD`
 - Use `/second-opinion` to get Codex review of the changes (if unavailable,
-  skip and note in PROGRESS.md)
-- Small issues: fix immediately. Substantial issues: add to `PLAN.md`
+  skip and note in progress entry)
+- Small issues: fix immediately. Substantial issues: note in plan file
 
-### Step 5: Document
+### Step 5: Publish
 
-Update `SESSION.md` with current working state:
-- `sorry` count and locations (file:line)
-- For incomplete proofs: approaches tried, what failed, what to try next
-- Any in-progress proof goal states
-- Known good commit (last commit where `lake build && lake exe test` passed)
-- Next action: what the next session should do first
+Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md`
+(e.g. `progress/2026-02-23T14-30-00Z_abc12345.md`) with:
+- Date/time (UTC), session type, what was accomplished
+- Decisions made, key proof patterns discovered
+- What remains, sorry count delta
 
-Add a session entry to the top of `PROGRESS.md` with:
-date, session type, what was accomplished, decisions made, what remains.
+Commit everything and push the branch, then create a PR:
+```
+coordination create-pr N
+```
+This creates the PR referencing issue #N and enables auto-merge.
 
 ### Step 6: Reflect
 
 End every session by running `/reflect`. If it suggests improvements to
 `.claude/CLAUDE.md`, commands, or skills, make those changes and commit.
+
+## Coordination Reference
+
+The `coordination` script handles all GitHub-based multi-agent coordination.
+Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
+
+| Command | What it does |
+|---------|-------------|
+| `coordination orient` | List open agent-plan issues, open PRs, PRs needing attention |
+| `coordination close-stale` | Close agent-plan issues open >6 hours |
+| `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
+| `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge |
+| `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
+| `coordination close-pr N "reason"` | Comment reason and close PR #N |
+
+**Branch naming**: `agent/<first-8-chars-of-UUID>`
+**Plan files**: `plans/<UUID-prefix>.md`
+**Progress files**: `progress/<UTC-timestamp>_<UUID-prefix>.md`
 
 ## Code Organization
 
@@ -197,9 +239,9 @@ End every session by running `/reflect`. If it suggests improvements to
 ### Key documents
     ARCHITECTURE.md      — Technical architecture
     VERIFICATION.md      — Phased roadmap and development cycle (do not modify)
-    PROGRESS.md          — Session-by-session progress log
-    PLAN.md              — Current session working plan
-    SESSION.md           — Current working state (overwritten each session)
+    progress/            — Per-session progress entries (one file per session)
+    plans/               — Per-session plan files (one file per active session)
+    coordination         — Multi-agent coordination script (uses gh CLI)
 
 ## Quality Standards
 
@@ -486,5 +528,4 @@ Updated by agent at the end of each session.
 - **Toolchain**: leanprover/lean4:v4.29.0-rc1
 - **Phase**: Phase 3 (verified decompressor) — COMPLETE (zero sorries)
 - **Sorry count**: 0
-- **Last session**: 2026-02-23 (impl: decodeDynamicTrees_correct — zero sorries milestone)
-- **Last review**: 2026-02-23 (split InflateCorrect, proof dedup)
+- **Next**: Phase 4 (compressor) — no native compressor exists yet
