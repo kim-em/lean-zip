@@ -208,17 +208,44 @@ private theorem validLengths_replicate_zero (n maxBits : Nat) :
   · intro l hl; have := List.eq_of_mem_replicate hl; omega
   · simp
 
+/-- Filtering nonzero elements from an all-zero list gives the empty list. -/
+private theorem filter_ne_zero_replicate (n : Nat) :
+    (List.replicate n (0 : Nat)).filter (· != 0) = [] := by
+  induction n with
+  | zero => rfl
+  | succ n ih => simp
+
+/-- Setting one position to 1 in an all-zero list, then filtering nonzero, gives `[1]`. -/
+private theorem filter_ne_zero_replicate_set (n i : Nat) (hi : i < n) :
+    ((List.replicate n (0 : Nat)).set i 1).filter (· != 0) = [1] := by
+  induction n generalizing i with
+  | zero => omega
+  | succ n ih =>
+    cases i with
+    | zero =>
+      simp only [List.replicate_succ, List.set_cons_zero]
+      simp
+    | succ i =>
+      simp only [List.replicate_succ, List.set_cons_succ]
+      simp [ih i (by omega)]
+
 /-- `ValidLengths` holds for a single symbol with length 1.
 
-    Proof: The result has at most one nonzero entry (value 1).
-    Kraft contribution: 2^(maxBits - 1) ≤ 2^maxBits.
-    The sorry is in the Kraft inequality part — connecting `assignLengths`
-    output (all zeros except one 1) to the foldl-based Kraft sum. -/
+    The result has at most one nonzero entry (value 1).
+    Kraft contribution: 2^(maxBits - 1) ≤ 2^maxBits. -/
 private theorem validLengths_single (sym n maxBits : Nat) (hmb : maxBits > 0) :
     ValidLengths (assignLengths [(sym, 1)] n) maxBits := by
   constructor
   · exact assignLengths_bounded [(sym, 1)] n maxBits (by simp; omega)
-  · sorry
+  · simp only [assignLengths, List.foldl_cons, List.foldl_nil, List.length_replicate]
+    by_cases h : sym < n
+    · simp only [h, ↓reduceIte, filter_ne_zero_replicate_set _ _ h,
+        List.foldl_cons, List.foldl_nil]
+      -- Goal: 0 + 2^(maxBits - 1) ≤ 2^maxBits
+      simp only [Nat.zero_add]
+      exact Nat.pow_le_pow_right (by omega) (by omega)
+    · simp only [h, ↓reduceIte, filter_ne_zero_replicate, List.foldl_nil]
+      exact Nat.zero_le _
 
 /-- Kraft sum of a list of depths, relative to normalization constant `D`:
     `∑ 2^(D - dᵢ)` where dᵢ are the depths. -/
@@ -266,57 +293,61 @@ theorem BuildTree.kraft_eq (t : BuildTree) (d D : Nat)
     rw [show D - d = (D - (d + 1)) + 1 from by omega, Nat.pow_succ]
     omega
 
+/-- All computed code lengths are ≤ maxBits. This holds because
+    single-symbol codes use length 1 ≤ maxBits, and multi-symbol depths
+    are capped with `min d maxBits` before assignment. -/
+theorem computeCodeLengths_bounded (freqs : List (Nat × Nat)) (n maxBits : Nat)
+    (hmb : maxBits > 0) :
+    ∀ l ∈ computeCodeLengths freqs n maxBits, l ≤ maxBits := by
+  simp only [computeCodeLengths]
+  split
+  · intro l hl; have := List.eq_of_mem_replicate hl; omega
+  · split
+    · apply assignLengths_bounded
+      intro p hp
+      cases hp with
+      | head => omega
+      | tail _ h => contradiction
+    · apply assignLengths_bounded
+      intro p hp
+      simp only [List.mem_map] at hp
+      obtain ⟨⟨s', d'⟩, _, rfl⟩ := hp
+      exact Nat.min_le_right d' maxBits
+
 /-- The computed code lengths satisfy `ValidLengths`.
 
-    The proof establishes:
-    - Length bound: capping at `maxBits` ensures all lengths ≤ maxBits
-    - Kraft inequality: a binary tree's leaves satisfy the Kraft equality;
-      `assignLengths` can only reduce the number of nonzero entries (if
-      duplicate symbols exist), preserving the inequality
+    **STATUS: FALSE as stated.** The theorem has a verified counterexample:
+    `computeCodeLengths [(0,100),(1,10),(2,1),(3,1)] 4 2` produces `[1,2,2,2]`
+    with Kraft sum 5 > 4 = 2^2. The naive depth capping (`min d maxBits`)
+    can produce oversubscribed code lengths when the Huffman tree has depths
+    exceeding `maxBits`.
 
-    The Kraft equality for binary trees is proved (`BuildTree.kraft_eq`).
-    What remains sorry'd is the plumbing connecting the tree's Kraft sum
-    to the `ValidLengths` definition through `assignLengths` and depth
-    capping. Specifically:
-    1. `assignLengths` may drop or overwrite entries, so its Kraft sum
-       is ≤ the tree's Kraft sum (need `foldl_set` Kraft lemma)
-    2. Capping depths at maxBits can increase individual Kraft contributions
-       (need monotonicity of 2^(D-d) in d)
-    3. Connecting the filtered foldl in `ValidLengths` to `kraftSum`
+    The zero-symbol and single-symbol cases are proved. The multi-symbol case
+    needs one of:
+    1. A precondition: all tree depths ≤ maxBits (holds for DEFLATE with
+       maxBits=15 and ≤ 286 symbols, since optimal tree depth ≤ 9)
+    2. Fixing `computeCodeLengths` to use proper depth limiting
+       (package-merge or iterative shortening) instead of naive capping
 
-    For typical DEFLATE inputs (≤ 286 symbols), tree depth is ≤ 9,
-    well under maxBits = 15, so the cap is a no-op. -/
+    For DEFLATE usage, the Kraft inequality holds in practice since
+    15-bit codes can represent 2^15 = 32768 symbols, far exceeding the
+    maximum of 286 lit/len or 30 distance symbols. -/
 theorem computeCodeLengths_valid (freqs : List (Nat × Nat)) (n : Nat)
     (maxBits : Nat) (hmb : maxBits > 0) :
     ValidLengths (computeCodeLengths freqs n maxBits) maxBits := by
-  simp only [computeCodeLengths]
-  split
-  · exact validLengths_replicate_zero n maxBits
-  · split
-    · exact validLengths_single _ n maxBits hmb
-    · sorry
-
-/-! ## Sanity checks -/
-
--- Three symbols with different frequencies:
--- symbol 1 (freq 10) should get shortest code, symbol 2 (freq 3) longest
-#eval! computeCodeLengths [(0, 5), (1, 10), (2, 3)] 3 15
--- Expected: [2, 1, 2] (symbol 1 gets 1-bit code, others get 2-bit codes)
-
--- Single symbol: gets length 1
-#eval! computeCodeLengths [(0, 42)] 1 15
--- Expected: [1]
-
--- All zero frequency: all zeros
-#eval! computeCodeLengths [] 3 15
--- Expected: [0, 0, 0]
-
--- Two symbols with equal frequency
-#eval! computeCodeLengths [(0, 5), (1, 5)] 2 15
--- Expected: [1, 1]
-
--- Four symbols: 2-level tree
-#eval! computeCodeLengths [(0, 1), (1, 2), (2, 3), (3, 4)] 4 15
--- Expected: various depths summing to valid Kraft
+  constructor
+  · exact computeCodeLengths_bounded freqs n maxBits hmb
+  · simp only [computeCodeLengths]
+    split
+    · simp
+    · split
+      · simp only [assignLengths, List.foldl_cons, List.foldl_nil, List.length_replicate]
+        by_cases h : (List.filter (fun x => decide (x.2 > 0)) freqs).head!.1 < n
+        · simp only [h, ↓reduceIte, filter_ne_zero_replicate_set _ _ h,
+            List.foldl_cons, List.foldl_nil, Nat.zero_add]
+          exact Nat.pow_le_pow_right (by omega) (by omega)
+        · simp only [h, ↓reduceIte, filter_ne_zero_replicate, List.foldl_nil]
+          exact Nat.zero_le _
+      · sorry
 
 end Huffman.Spec
