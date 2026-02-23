@@ -591,6 +591,32 @@ Update it during review and reflect sessions.
   `Nat.one_and_eq_mod_two : 1 &&& n = n % 2` (matches testBit order),
   `Nat.and_one_is_mod : x &&& 1 = x % 2` (matches code order).
 
+- **`dsimp only []` before `split` on unfolded recursive functions**:
+  After `unfold f` where `f` has nested `let` bindings (e.g.
+  `let h := hash ...; let matchPos := table[h]!; if ... then ...`),
+  `split` cannot find `if` expressions inside the let bindings. Use
+  `dsimp only []` to zeta-reduce all let bindings first, then `split`
+  works freely. Pattern: `unfold f; dsimp only []; split`.
+- **`all_goals` pattern for mixed-difficulty `decreasing_by`**: When
+  some decreasing goals need auxiliary lemmas and others are trivial:
+  ```lean
+  decreasing_by
+    all_goals simp_wf
+    all_goals first
+      | omega
+      | (have := some_bound_lemma ...; omega)
+  ```
+  This avoids counting bullets and handles goal reordering gracefully.
+- **`Nat.sub_sub_self` for back-reference distances**: When proving
+  `data[pos - dist + i]! = data[matchPos + i]!` where `dist = pos - matchPos`
+  and `matchPos ≤ pos`, use `rw [Nat.sub_sub_self (by omega)]` to
+  simplify `pos - (pos - matchPos)` to `matchPos`.
+- **Explicit arguments when `_` fails for complex array indexing**:
+  When the first argument to a function like `lz77CountMatch` is a
+  complex expression (e.g. `hashTable[lz77Hash3 data pos hashSize]!`),
+  the `_` placeholder cannot be inferred from context. Always spell out
+  the full expression explicitly in `have` statements.
+
 ## Current State
 
 See `PROGRESS.md` for global milestones and current phase.
