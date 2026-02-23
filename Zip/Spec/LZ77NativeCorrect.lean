@@ -201,10 +201,8 @@ theorem mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
       · rename_i hge
         split
         · rename_i hle
-          have hmp_lt : hashTable[lz77Greedy.hash3 data pos hashSize]! < pos := by
-            by_cases h : hashTable[lz77Greedy.hash3 data pos hashSize]! < pos
-            · exact h
-            · exfalso; simp [decide_eq_false (by omega : ¬(_ < _))] at hcond
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+          have hmp_lt := hcond.1.2
           have hcm := lz77Greedy.countMatch_matches data
             hashTable[lz77Greedy.hash3 data pos hashSize]! pos (min 258 (data.size - pos))
           apply ValidDecomp.reference hge
@@ -278,20 +276,14 @@ theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
         split
         · rename_i hle
           -- Reference case
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+          obtain ⟨⟨_, hmp_lt⟩, hmp_ws⟩ := hcond
           intro t ht
           cases ht with
           | head =>
             show 3 ≤ _ ∧ _ ≤ 258 ∧ 1 ≤ _ ∧ _ ≤ 32768
             have hcm := lz77Greedy.countMatch_matches data
               hashTable[lz77Greedy.hash3 data pos hashSize]! pos (min 258 (data.size - pos))
-            have hmp_lt : hashTable[lz77Greedy.hash3 data pos hashSize]! < pos := by
-              by_cases h : hashTable[lz77Greedy.hash3 data pos hashSize]! < pos
-              · exact h
-              · exfalso; simp [decide_eq_false (by omega : ¬(_ < _))] at hcond
-            have hmp_ws : pos - hashTable[lz77Greedy.hash3 data pos hashSize]! ≤ windowSize := by
-              by_cases h : pos - hashTable[lz77Greedy.hash3 data pos hashSize]! ≤ windowSize
-              · exact h
-              · exfalso; simp at hcond; omega
             exact ⟨hge, by omega, by omega, by omega⟩
           | tail _ h => exact mainLoop_encodable _ _ _ _ _ _ hw hws t h
         · intro t ht

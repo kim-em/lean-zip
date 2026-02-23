@@ -630,6 +630,14 @@ Update it during review and reflect sessions.
   Similarly, `List.set_cons_zero` and `List.set_cons_succ` are not
   `@[simp]` — unfold them with `simp only` first, then use `simp` for
   the filter/boolean parts.
+- **Extracting conditions from `&&` boolean hypotheses**: When a proof
+  has `hcond : (a && decide P && decide Q) = true` from an `if` guard,
+  use `simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond` to
+  decompose into `hcond : (a = true ∧ P) ∧ Q`. Note: `&&` is
+  left-associative, so the result is left-nested `(... ∧ ...) ∧ ...`,
+  NOT right-nested. Use `obtain ⟨⟨ha, hp⟩, hq⟩ := hcond` or
+  `hcond.1.2` / `hcond.2` to access components. This replaces verbose
+  `by_cases` + `exfalso` patterns for extracting individual conditions.
 
 ## Current State
 

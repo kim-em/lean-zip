@@ -98,9 +98,7 @@ theorem resolveLZ77_reference_valid (len dist : Nat) (rest : List LZ77Symbol)
       let copied := List.ofFn fun (i : Fin len) =>
         acc[start + (i.val % dist)]!
       resolveLZ77 rest (acc ++ copied) := by
-  have h1 : ¬(dist = 0) := hd
-  have h2 : ¬(acc.length < dist) := by omega
-  simp [resolveLZ77, h1, h2]
+  simp [resolveLZ77, hd, show ¬(acc.length < dist) by omega]
 
 /-- If `resolveLZ77` succeeds, the output extends the initial accumulator. -/
 theorem resolveLZ77_extends (syms : List LZ77Symbol) (acc output : List UInt8)
@@ -532,9 +530,14 @@ private theorem matchLZ77Lazy.go_correct (data : List UInt8) (pos windowSize : N
         simp only [resolveLZ77]; rw [lit_step]
         exact matchLZ77Lazy.go_correct data (pos + 1) windowSize hw (by omega)
       · -- len1 ≥ 3
+        have greedy_m1 : ∀ rest,
+            resolveLZ77 rest (data.take (pos + len1)) = some data →
+            resolveLZ77 (.reference len1 dist1 :: rest) (data.take pos) = some data :=
+          fun rest ih => resolveLZ77_findMatch_step data pos windowSize len1 dist1
+            hpos hfind1 rest ih
+        have hend1 := findLongestMatch_end_le _ _ _ _ _ hfind1
         split
         · -- pos + 1 < data.length
-          rename_i hpos1
           split
           · -- findLongestMatch (pos + 1) = some (len2, dist2)
             rename_i len2 dist2 hfind2
@@ -546,20 +549,11 @@ private theorem matchLZ77Lazy.go_correct (data : List UInt8) (pos windowSize : N
                 (matchLZ77Lazy.go_correct data (pos + 1 + len2) windowSize hw
                   (findLongestMatch_end_le _ _ _ _ _ hfind2))
             · -- len2 ≤ len1 → greedy: reference M1
-              exact resolveLZ77_findMatch_step data pos windowSize len1 dist1
-                hpos hfind1 _
-                (matchLZ77Lazy.go_correct data (pos + len1) windowSize hw
-                  (findLongestMatch_end_le _ _ _ _ _ hfind1))
+              exact greedy_m1 _ (matchLZ77Lazy.go_correct _ _ _ hw hend1)
           · -- findLongestMatch (pos + 1) = none → greedy: reference M1
-            exact resolveLZ77_findMatch_step data pos windowSize len1 dist1
-              hpos hfind1 _
-              (matchLZ77Lazy.go_correct data (pos + len1) windowSize hw
-                (findLongestMatch_end_le _ _ _ _ _ hfind1))
+            exact greedy_m1 _ (matchLZ77Lazy.go_correct _ _ _ hw hend1)
         · -- ¬(pos + 1 < data.length) → greedy: reference M1
-          exact resolveLZ77_findMatch_step data pos windowSize len1 dist1
-            hpos hfind1 _
-            (matchLZ77Lazy.go_correct data (pos + len1) windowSize hw
-              (findLongestMatch_end_le _ _ _ _ _ hfind1))
+          exact greedy_m1 _ (matchLZ77Lazy.go_correct _ _ _ hw hend1)
     · -- findLongestMatch = none → literal
       simp only [resolveLZ77]; rw [lit_step]
       exact matchLZ77Lazy.go_correct data (pos + 1) windowSize hw (by omega)
