@@ -1,5 +1,6 @@
 import ZipTest.Helpers
 import Zip.Native.Deflate
+import Zip.Native.DeflateDynamic
 import Zip.Native.Inflate
 
 def ZipTest.NativeDeflate.tests : IO Unit := do
@@ -164,5 +165,53 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   match Zip.Native.Inflate.inflate lazyRandom with
   | .ok result => assert! result == random
   | .error e => throw (IO.userError s!"deflateLazy→inflate failed on random: {e}")
+
+  -- Level 5 (dynamic Huffman) tests
+
+  -- deflateDynamic → native inflate: small data
+  let dynHello := Zip.Native.Deflate.deflateDynamic helloBytes
+  match Zip.Native.Inflate.inflate dynHello with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"deflateDynamic→inflate failed on hello: {e}")
+
+  -- deflateDynamic → native inflate: empty data
+  let dynEmpty := Zip.Native.Deflate.deflateDynamic ByteArray.empty
+  match Zip.Native.Inflate.inflate dynEmpty with
+  | .ok result => assert! result == ByteArray.empty
+  | .error e => throw (IO.userError s!"deflateDynamic→inflate failed on empty: {e}")
+
+  -- deflateDynamic → native inflate: single byte
+  let dynSingle := Zip.Native.Deflate.deflateDynamic singleByte
+  match Zip.Native.Inflate.inflate dynSingle with
+  | .ok result => assert! result == singleByte
+  | .error e => throw (IO.userError s!"deflateDynamic→inflate failed on single byte: {e}")
+
+  -- deflateDynamic → native inflate: repetitive data
+  let dynBig := Zip.Native.Deflate.deflateDynamic big
+  match Zip.Native.Inflate.inflate dynBig with
+  | .ok result => assert! result == big
+  | .error e => throw (IO.userError s!"deflateDynamic→inflate failed on big: {e}")
+
+  -- deflateDynamic → native inflate: all-same-byte data
+  let dynSame := Zip.Native.Deflate.deflateDynamic allSame
+  match Zip.Native.Inflate.inflate dynSame with
+  | .ok result => assert! result == allSame
+  | .error e => throw (IO.userError s!"deflateDynamic→inflate failed on all-same: {e}")
+
+  -- deflateDynamic → native inflate: pseudo-random data
+  let dynRandom := Zip.Native.Deflate.deflateDynamic random
+  match Zip.Native.Inflate.inflate dynRandom with
+  | .ok result => assert! result == random
+  | .error e => throw (IO.userError s!"deflateDynamic→inflate failed on random: {e}")
+
+  -- deflateDynamic → FFI inflate (cross-implementation)
+  let dynCross := Zip.Native.Deflate.deflateDynamic helloBytes
+  let decompDynCross ← RawDeflate.decompress dynCross
+  assert! decompDynCross == helloBytes
+
+  -- deflateDynamic → FFI inflate: larger data (cross-implementation)
+  let dynCrossBig := Zip.Native.Deflate.deflateDynamic big
+  let decompDynCrossBig ← RawDeflate.decompress dynCrossBig
+  assert! decompDynCrossBig == big
 
   IO.println "  NativeDeflate tests passed."
