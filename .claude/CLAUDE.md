@@ -563,6 +563,19 @@ Update it during review and reflect sessions.
   different after `unfold`. Use `if ... then some (...) else do { rest }`
   instead. This applies to spec functions where proofs need to unfold
   both sides simultaneously.
+- **`where` clauses create dependent matches**: A `where` helper that
+  takes `(ht : t ∈ someList)` and returns `match t with | .foo => ...`
+  will have Lean elaborate the return type as `match t, ht with ...`
+  (dependent match on both `t` and `ht`). This makes `Encodable t`
+  (defined as `match t with ...`) incompatible with the goal. Fix: avoid
+  `where` clauses for such proofs — use `intro t ht` in the main proof
+  and bridge via an intermediate `have` with the simpler match type.
+- **Bool `&&` conjunction decomposition**: To extract one conjunct from
+  `hcond : (a && b && c) = true`, use `by_cases h : <conjunct>` then
+  `· exact h` / `· exfalso; simp at hcond; omega`. Plain `simp at hcond`
+  decomposes the Bool `&&` into `∧` with `decide` resolved, then `omega`
+  closes the contradiction. The `decide_eq_false` trick is unnecessary
+  when `simp` already handles the decomposition.
 
 ## Current State
 
