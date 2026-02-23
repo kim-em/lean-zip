@@ -461,6 +461,35 @@ where
         if bfinal == 1 then return acc else go bits acc fuel
       | _ => none  -- reserved block type (3)
 
+/-! ## Fuel independence -/
+
+/-- `decodeSymbols` is fuel-independent: if it succeeds with some fuel,
+    it returns the same result with any additional fuel. -/
+theorem decodeSymbols_fuel_independent
+    (litLengths distLengths : List Nat) (bits : List Bool)
+    (fuel : Nat) (result : List LZ77Symbol × List Bool) :
+    decodeSymbols litLengths distLengths bits fuel = some result →
+    ∀ k, decodeSymbols litLengths distLengths bits (fuel + k) = some result := by
+  sorry
+
+/-- `decodeCLSymbols` is fuel-independent: if it succeeds with some fuel,
+    it returns the same result with any additional fuel. -/
+theorem decodeCLSymbols_fuel_independent
+    (clTable : List (Huffman.Spec.Codeword × Nat))
+    (totalCodes : Nat) (acc : List Nat) (bits : List Bool)
+    (fuel : Nat) (result : List Nat × List Bool) :
+    decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits fuel = some result →
+    ∀ k, decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits (fuel + k) = some result := by
+  sorry
+
+/-- `decode` is fuel-independent: if it succeeds with some fuel,
+    it returns the same result with any additional fuel. -/
+theorem decode_fuel_independent
+    (bits : List Bool) (fuel : Nat) (result : List UInt8) :
+    decode bits fuel = some result →
+    ∀ k, decode bits (fuel + k) = some result := by
+  sorry
+
 /-! ## Correctness theorems -/
 
 /-- Encoding stored blocks then decoding produces the original data. -/
