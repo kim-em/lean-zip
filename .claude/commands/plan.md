@@ -46,6 +46,25 @@ touch the same area of the codebase.
 Litmus test: "Could a worker skip deliverable X and still meaningfully complete
 the issue?" If yes, X belongs in a separate issue.
 
+**Statement/proof split**: When proofs are substantial and other agents
+could use the lemma statements for downstream work, split into two issues:
+1. First issue: write theorem statements proved with `sorry`
+2. Second issue: prove the theorems (replace `sorry` with real proofs)
+
+The second issue's body must include `depends-on: #N` (where N is the first
+issue's number). The coordination script auto-adds a `blocked` label, and
+workers won't see it until the first issue closes. This lets other planners
+create downstream work that uses the statements before proofs are ready
+(Lean treats `sorry` as an axiom). For quick/straightforward proofs, a
+single issue covering both statements and proofs is fine.
+
+**Speculative planning on sorried lemmas**: If you're confident that
+sorried lemmas from a recent issue are true and just need proofs, you can
+create issues for later theorems that depend on those lemma *statements*
+— especially if those later theorems are important and aligned with the
+project's major goals. This is how agents build on each other's work
+without waiting for every proof to complete.
+
 Common bundling mistakes:
 - Mixing mechanical cleanup (dead code removal) with exploratory work (proof audit)
 - Combining review of unrelated modules into one issue

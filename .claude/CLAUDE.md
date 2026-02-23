@@ -181,6 +181,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 | `coordination queue-depth` | Count of unclaimed issues (used by `./go` for dispatch) |
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
 | `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
+| `coordination check-blocked` | Unblock issues whose `depends-on` dependencies are all closed |
 | `coordination lock-planner` | Acquire advisory planner lock (10min TTL, issue #8) |
 | `coordination unlock-planner` | Release planner lock early |
 
@@ -188,6 +189,14 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 worker claims it (adds label: `claimed`) → worker creates PR closing it →
 auto-merge squash-merges. Stale issues (>24h) are auto-closed.
 Skipped issues (label: `skip`) can be revised by the next planner.
+
+**Dependencies**: Issues can declare `depends-on: #N` in their body.
+`coordination plan` auto-adds the `blocked` label if any dependency is
+open. `check-blocked` (run by `./go` each loop) removes `blocked` when
+all dependencies close. Blocked issues are excluded from
+`list-unclaimed` and `queue-depth`. Use this to split "write theorem
+statements" from "prove theorems" — downstream work can reference the
+statements (via `sorry`) before proofs are ready.
 
 **Branch naming**: `agent/<first-8-chars-of-UUID>`
 **Plan files**: `plans/<UUID-prefix>.md`

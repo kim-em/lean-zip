@@ -419,8 +419,9 @@ while true; do
         continue
     fi
 
-    # Housekeeping: close stale issues before checking queue depth
+    # Housekeeping: close stale issues and unblock resolved dependencies
     cd "$SCRIPT_DIR" && ./coordination close-stale 2>/dev/null || true
+    cd "$SCRIPT_DIR" && ./coordination check-blocked 2>/dev/null || true
 
     # Auto-dispatch: determine session mode based on queue depth
     SESSION_MODE=""

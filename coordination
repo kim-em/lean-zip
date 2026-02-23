@@ -15,6 +15,7 @@
 #   coordination queue-depth      — count of unclaimed agent-plan issues
 #   coordination claim N          — claim an issue for this session (label + comment)
 #   coordination skip N "reason"  — mark a claimed issue as skipped (stale/blocked)
+#   coordination check-blocked    — unblock issues whose dependencies are all closed
 #   coordination lock-planner    — acquire advisory planner lock (10min TTL)
 #   coordination unlock-planner  — release planner lock early
 
@@ -36,7 +37,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || \
 _unclaimed_issues() {
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,labels,createdAt \
-        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip"))] |
+        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked"))] |
               sort_by(.createdAt)'
 }
 
@@ -157,6 +158,26 @@ cmd_plan() {
     if [[ -n "$issue_num" ]]; then
         gh issue comment "$issue_num" --repo "$REPO" \
             --body "Session: \`$SESSION_ID\` Branch: \`$BRANCH\`"
+    fi
+
+    # Check for depends-on lines and add blocked label if dependencies are open
+    local deps
+    deps="$(echo "$body" | grep -oE 'depends-on: #[0-9]+' | grep -oE '[0-9]+' || true)"
+    if [[ -n "$deps" ]]; then
+        local has_open_dep=false
+        while read -r dep_num; do
+            [[ -z "$dep_num" ]] && continue
+            local dep_state
+            dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state)"
+            if [[ "$dep_state" != "CLOSED" ]]; then
+                has_open_dep=true
+                break
+            fi
+        done <<< "$deps"
+        if [[ "$has_open_dep" == true ]]; then
+            gh issue edit "$issue_num" --repo "$REPO" --add-label blocked
+            echo "Issue #$issue_num blocked (depends on open issue(s))"
+        fi
     fi
 }
 
@@ -360,6 +381,41 @@ cmd_unlock_planner() {
     echo "Planner lock released"
 }
 
+# --- check-blocked ---
+# Scan blocked issues and unblock those whose dependencies are all closed.
+cmd_check_blocked() {
+    local issues
+    issues="$(gh issue list --repo "$REPO" --label blocked --state open --limit 50 \
+        --json number,body)"
+
+    echo "$issues" | jq -c '.[]' | \
+    while read -r issue_json; do
+        local num body
+        num="$(echo "$issue_json" | jq -r '.number')"
+        body="$(echo "$issue_json" | jq -r '.body')"
+
+        local deps
+        deps="$(echo "$body" | grep -oE 'depends-on: #[0-9]+' | grep -oE '[0-9]+' || true)"
+        [[ -z "$deps" ]] && continue
+
+        local all_closed=true
+        while read -r dep_num; do
+            [[ -z "$dep_num" ]] && continue
+            local dep_state
+            dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state)"
+            if [[ "$dep_state" != "CLOSED" ]]; then
+                all_closed=false
+                break
+            fi
+        done <<< "$deps"
+
+        if [[ "$all_closed" == true ]]; then
+            gh issue edit "$num" --repo "$REPO" --remove-label blocked
+            echo "Unblocked issue #$num (all dependencies resolved)"
+        fi
+    done
+}
+
 # --- dispatch ---
 case "${1:-}" in
     orient)          cmd_orient ;;
@@ -372,8 +428,9 @@ case "${1:-}" in
     queue-depth)     cmd_queue_depth ;;
     claim)           shift; cmd_claim "$@" ;;
     skip)            shift; cmd_skip "$@" ;;
+    check-blocked)   cmd_check_blocked ;;
     lock-planner)    cmd_lock_planner ;;
     unlock-planner)  cmd_unlock_planner ;;
     *)               die "unknown command: ${1:-}
-Usage: coordination {orient|close-stale|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|lock-planner|unlock-planner}" ;;
+Usage: coordination {orient|close-stale|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|check-blocked|lock-planner|unlock-planner}" ;;
 esac
