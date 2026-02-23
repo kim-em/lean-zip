@@ -10,8 +10,15 @@ import Zip.Zstd
 import Zip.Spec.Adler32
 import Zip.Spec.Crc32
 import Zip.Spec.Huffman
+import Zip.Spec.HuffmanTheorems
+import Zip.Spec.HuffmanEncode
+import Zip.Spec.LZ77
 import Zip.Spec.Deflate
+import Zip.Spec.DeflateEncode
+import Zip.Spec.LZ77Lazy
 import Zip.Spec.BitstreamCorrect
+import Zip.Spec.BitstreamWriteCorrect
+import Zip.Spec.BitWriterCorrect
 import Zip.Spec.HuffmanCorrect
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DynamicTreesCorrect
@@ -20,4 +27,8 @@ import Zip.Native.Adler32
 import Zip.Native.Crc32
 import Zip.Native.Inflate
 import Zip.Native.Gzip
+import Zip.Native.BitWriter
 import Zip.Native.Deflate
+import Zip.Spec.LZ77NativeCorrect
+import Zip.Spec.DeflateFixedCorrect
+import Zip.Spec.DeflateStoredCorrect

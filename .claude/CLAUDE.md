@@ -219,16 +219,27 @@ statements (via `sorry`) before proofs are ready.
     Zip/Native/Adler32.lean  — Native Adler-32
     Zip/Native/Crc32.lean    — Native CRC-32 (table-driven)
     Zip/Native/BitReader.lean — LSB-first bit-level reader for DEFLATE
+    Zip/Native/BitWriter.lean — LSB-first bit-level writer for DEFLATE
     Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
     Zip/Native/Deflate.lean  — Native DEFLATE compressor (stored + fixed Huffman)
     Zip/Native/Gzip.lean     — Native gzip/zlib compression + decompression (RFC 1952/1950)
-    Zip/Spec/Huffman.lean    — Canonical Huffman code spec (allCodes, prefix-free)
-    Zip/Spec/Deflate.lean    — DEFLATE bitstream spec (RFC 1951)
-    Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence
+    Zip/Spec/Huffman.lean    — Canonical Huffman code definitions (types, construction, decode)
+    Zip/Spec/HuffmanTheorems.lean — Huffman property theorems (Kraft, prefix-free, injectivity)
+    Zip/Spec/HuffmanEncode.lean  — Huffman code length computation from symbol frequencies
+    Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
+    Zip/Spec/Deflate.lean    — DEFLATE bitstream spec: types, decode (RFC 1951)
+    Zip/Spec/DeflateEncode.lean — DEFLATE encode spec: symbol encoding + roundtrip
+    Zip/Spec/LZ77Lazy.lean      — LZ77→encode bridge proofs + lazy matcher properties
+    Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence (read direction)
+    Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
+    Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
+    Zip/Spec/LZ77NativeCorrect.lean — Native lz77Greedy correctness (BB1 for compressor)
+    Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
     Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
+    Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
@@ -472,6 +483,13 @@ Update it during review and reflect sessions.
 - **Option `pure` vs `some`**: After `simp only` with `↓reduceIte` on
   spec functions, goals may have `pure (...) = some (...)`. Add `pure`
   to the simp arguments to unfold it.
+- **`cases` + `bind` in Option do-notation goals**: After
+  `cases h : f x with | some p =>`, the `cases` substitutes the
+  constructor in the goal, making `h` unnecessary for `simp`. But the
+  bind wrapper `Option.bind (some p) (fun ... => ...)` still needs
+  reducing. Use `simp only [bind, Option.bind]` (NOT `simp only [h]`).
+  When cleaning up unused simp argument warnings in this pattern,
+  remove the hypothesis name, keep `bind, Option.bind`.
 - **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
   `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
   To define in a different namespace, either close the current namespace
@@ -535,6 +553,83 @@ Update it during review and reflect sessions.
   `omega` cannot reason about `%` directly.
 - **`set` is Mathlib-only**: The `set` tactic is not available in this
   project. Use `have` or `let` instead.
+- **`exact` vs `have :=` for wildcard resolution**: `exact f _ _ _` does
+  goal-directed elaboration — wildcards are resolved from the expected
+  goal type. `have := f _ _ _` elaborates independently and fails when
+  wildcards can't be inferred from the function signature alone (e.g.,
+  complex expressions like hash table states from `updateHashes`).
+  When applying a recursive lemma whose arguments include complex
+  intermediate state, prefer `exact` (possibly via a helper lemma) over
+  `have :=`. For arithmetic wrappers around recursive calls, extract a
+  helper like `length_cons_le_of_advance` and use
+  `exact helper (recursive_lemma _ _ _ _ _) (by omega) hle`.
+- **Fuel independence proof pattern**: For fuel-based recursive functions
+  `f x (fuel + 1) = some result → ∀ k, f x (fuel + k) = some result`,
+  use induction on fuel with: (1) `conv => lhs; rw [show n+1+k = (n+k)+1
+  from by omega]` before `unfold f at h ⊢` so both sides unfold at the
+  same successor level; (2) `cases` on each non-recursive operation;
+  (3) `ih` for recursive calls. For `if` reduction in `h`, use
+  `rw [if_pos/if_neg]` NOT `simp [cond]` — simp over-simplifies
+  (strips `some`/`pure` wrappers). For `guard` in do-blocks, use
+  `by_cases` on the condition then `simp only [guard, hcond, ↓reduceIte]`
+  — the guard uses `Alternative.guard`, NOT `Option.guard`.
+- **Avoid `do { if ... then return ...; rest }`**: Creates `have __do_jp`
+  join points in desugared form, making `h` and `⊢` syntactically
+  different after `unfold`. Use `if ... then some (...) else do { rest }`
+  instead. This applies to spec functions where proofs need to unfold
+  both sides simultaneously.
+- **`simp` (not `simp only`) for Option do-notation match chains**: When
+  `unfold` expands a do-block in `Option`, the result is nested
+  `match opt?, fun val => ... with | none, _ => none | some a, f => f a`.
+  `simp only` CANNOT enter these match expressions to rewrite inner
+  terms. Use full `simp` (without `only`) with the relevant hypotheses
+  to resolve all match steps at once. This differs from `Except` monad
+  do-blocks where `simp only [bind, Option.bind]` suffices.
+- **`letFun` linter false positive**: When `unfold f at h` leaves
+  `have x := e; body` bindings, `simp only [letFun] at h` is needed
+  to reduce them before `split at h` can see inner `if` expressions.
+  The linter may report `letFun` as unused — this is a false positive.
+  Do NOT remove it; doing so breaks the proof.
+
+- **UInt8 comparison ↔ Nat comparison**: When native code uses UInt8
+  comparisons (e.g. `bw.bitCount + 1 >= 8`) but proofs work in Nat
+  (e.g. `bw.bitCount.toNat + 1 >= 8`), bridge with
+  `UInt8.le_iff_toNat_le`, `UInt8.toNat_add`, `UInt8.toNat_ofNat` +
+  `omega`. This arises when functional induction on UInt8-condition
+  code gives UInt8 hypotheses that don't match Nat-condition lemmas.
+  Prefer plain induction + `by_cases` on the Nat condition, then
+  convert to UInt8 for goal's `if` using an iff bridging lemma.
+- **`Nat.and_one_is_mod` and `Nat.one_and_eq_mod_two`**: For bridging
+  `Nat.testBit` (which uses `1 &&& (m >>> n)`) to `% 2`:
+  `Nat.one_and_eq_mod_two : 1 &&& n = n % 2` (matches testBit order),
+  `Nat.and_one_is_mod : x &&& 1 = x % 2` (matches code order).
+- **`generalize` before `bv_decide` for shared subexpressions**: When
+  `bv_decide` fails with "spurious counterexample" because it abstracts
+  the same expression (e.g., `data[pos]`) as multiple opaque variables,
+  use `generalize data[pos].toUInt32 = x` first to unify them into a
+  single variable.
+- **`Bool.false_eq_true` for stuck `if false = true`**: After
+  substituting `(x == y) = false` via simp, `↓reduceIte` can't reduce
+  `if false = true then ... else ...` because `false = true` is a
+  `Prop`. Add `Bool.false_eq_true` to rewrite it to `False`, then
+  `↓reduceIte` can reduce the `if`.
+- **`Bool` vs `Prop` in `if` conditions**: When proving an `if` takes a
+  specific branch, check whether the condition is `Bool` or `Prop`:
+  - `Bool`: prove `show (cond) = false from by decide` then use
+    `Bool.false_eq_true, ↓reduceIte`
+  - `Prop`: prove `show ¬P from by omega` then use `↓reduceIte`
+  Don't use `show P = false from by omega` for `Prop` conditions — `>`
+  on `Nat` creates a `Prop`, not a `Bool`.
+
+- **`simp only` fails with `List.filter` + anonymous lambdas**: When
+  `List.filter_cons` unfolds `(a :: l).filter p` to
+  `if p a = true then ...`, and `p` is an anonymous lambda like
+  `(· != 0)`, the `p a` application remains unreduced. `simp only`
+  cannot beta-reduce this or evaluate the boolean. Use full `simp`
+  (without `only`) which includes beta-reduction and boolean evaluation.
+  Similarly, `List.set_cons_zero` and `List.set_cons_succ` are not
+  `@[simp]` — unfold them with `simp only` first, then use `simp` for
+  the filter/boolean parts.
 
 ## Current State
 

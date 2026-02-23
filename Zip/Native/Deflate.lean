@@ -1,9 +1,11 @@
 /-
   Pure Lean DEFLATE compressor.
 
-  Currently implements only Level 0 (stored blocks), which emits
-  uncompressed data in DEFLATE-valid stored blocks (RFC 1951 §3.2.4).
+  Level 0: stored blocks (uncompressed).
+  Level 1: greedy LZ77 matching with fixed Huffman codes.
 -/
+import Zip.Native.BitWriter
+import Zip.Native.Inflate
 
 namespace Zip.Native.Deflate
 
@@ -47,5 +49,194 @@ def deflateStored (data : ByteArray) : ByteArray := Id.run do
     result := result ++ data.extract pos (pos + blockSize)
     pos := pos + blockSize
   return result
+
+/-- Compute canonical Huffman codewords from code lengths (RFC 1951 §3.2.2).
+    Returns array indexed by symbol of (codeword, code_length).
+    Assumes all non-zero lengths are ≤ `maxBits` (15 for DEFLATE). -/
+def canonicalCodes (lengths : Array UInt8) (maxBits : Nat := 15) :
+    Array (UInt16 × UInt8) :=
+  let lsList := lengths.toList.map UInt8.toNat
+  let blCount := Huffman.Spec.countLengths lsList maxBits
+  let ncNat := Huffman.Spec.nextCodes blCount maxBits
+  let nextCode : Array UInt32 := ncNat.map fun n => n.toUInt32
+  go lengths nextCode 0 (Array.replicate lengths.size (0, 0))
+where
+  go (lengths : Array UInt8) (nextCode : Array UInt32) (i : Nat)
+      (result : Array (UInt16 × UInt8)) : Array (UInt16 × UInt8) :=
+    if h : i < lengths.size then
+      let len := lengths[i]
+      if len > 0 then
+        let code := nextCode[len.toNat]!
+        let result' := result.set! i (code.toUInt16, len)
+        let nextCode' := nextCode.set! len.toNat (code + 1)
+        go lengths nextCode' (i + 1) result'
+      else
+        go lengths nextCode (i + 1) result
+    else result
+  termination_by lengths.size - i
+
+def fixedLitCodes : Array (UInt16 × UInt8) :=
+  canonicalCodes Inflate.fixedLitLengths
+
+def fixedDistCodes : Array (UInt16 × UInt8) :=
+  canonicalCodes Inflate.fixedDistLengths
+
+/-- Search a base/extra table pair for the code covering `value`.
+    Returns (code_index, extra_bits_count, extra_bits_value).
+    Used for both length codes (RFC 1951 §3.2.5) and distance codes. -/
+private def findTableCode (baseTable : Array UInt16) (extraTable : Array UInt8)
+    (value : Nat) : Option (Nat × Nat × UInt32) :=
+  go 0
+where
+  go (i : Nat) : Option (Nat × Nat × UInt32) :=
+    if i + 1 < baseTable.size then
+      if baseTable[i + 1]!.toNat > value then
+        -- i < extraTable.size follows from baseTable/extraTable having equal size
+        let extra := extraTable[i]!.toNat
+        let extraVal := (value - baseTable[i]!.toNat).toUInt32
+        some (i, extra, extraVal)
+      else
+        go (i + 1)
+    else if i < baseTable.size then
+      let extra := extraTable[i]!.toNat
+      let extraVal := (value - baseTable[i]!.toNat).toUInt32
+      some (i, extra, extraVal)
+    else
+      none
+  termination_by baseTable.size - i
+
+/-- Find length code for length 3–258.
+    Returns (code_index 0–28, extra_bits_count, extra_bits_value). -/
+def findLengthCode (length : Nat) : Option (Nat × Nat × UInt32) :=
+  findTableCode Inflate.lengthBase Inflate.lengthExtra length
+
+/-- Find distance code for distance 1–32768.
+    Returns (code 0–29, extra_bits_count, extra_bits_value). -/
+def findDistCode (dist : Nat) : Option (Nat × Nat × UInt32) :=
+  findTableCode Inflate.distBase Inflate.distExtra dist
+
+inductive LZ77Token where
+  | literal : UInt8 → LZ77Token
+  | reference : (length : Nat) → (distance : Nat) → LZ77Token
+
+/-- Simple hash-based greedy LZ77 matcher.
+    Scans input left-to-right, emitting literals or back-references. -/
+def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    (trailing data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize hashSize
+      (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
+where
+  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
+    let a := data[pos]!.toNat
+    let b := data[pos + 1]!.toNat
+    let c := data[pos + 2]!.toNat
+    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+  countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
+    go data p1 p2 0 maxLen
+  go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
+    if i < maxLen then
+      if data[p1 + i]! == data[p2 + i]! then
+        go data p1 p2 (i + 1) maxLen
+      else i
+    else i
+  termination_by maxLen - i
+  trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
+    if pos < data.size then
+      .literal data[pos]! :: trailing data (pos + 1)
+    else []
+  termination_by data.size - pos
+  updateHashes (data : ByteArray) (hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool)
+      (pos j matchLen : Nat) : Array Nat × Array Bool :=
+    if j < matchLen then
+      if pos + j + 2 < data.size then
+        let h := hash3 data (pos + j) hashSize
+        updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
+          pos (j + 1) matchLen
+      else
+        updateHashes data hashSize hashTable hashValid pos (j + 1) matchLen
+    else
+      (hashTable, hashValid)
+  termination_by matchLen - j
+  mainLoop (data : ByteArray) (windowSize hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat) :
+      List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := hash3 data pos hashSize
+      let matchPos := hashTable[h]!
+      let isValid := hashValid[h]!
+      let hashTable := hashTable.set! h pos
+      let hashValid := hashValid.set! h true
+      if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
+        let maxLen := min 258 (data.size - pos)
+        let matchLen := countMatch data matchPos pos maxLen
+        if hge : matchLen ≥ 3 then
+          if hle : pos + matchLen ≤ data.size then
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let (hashTable, hashValid) :=
+              updateHashes data hashSize hashTable hashValid pos 1 matchLen
+            .reference matchLen (pos - matchPos) ::
+              mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
+          else
+            .literal data[pos]! ::
+              mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+        else
+          .literal data[pos]! ::
+            mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+      else
+        .literal data[pos]! ::
+          mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+    else
+      trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- Compress data using fixed Huffman codes and greedy LZ77 (Level 1).
+    Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
+def deflateFixed (data : ByteArray) : ByteArray :=
+  let bw := BitWriter.empty
+  -- BFINAL=1, BTYPE=01 (fixed Huffman)
+  let bw := bw.writeBits 1 1  -- BFINAL
+  let bw := bw.writeBits 2 1  -- BTYPE = 01
+  if data.size == 0 then
+    -- Just end-of-block symbol (256)
+    let (code, len) := fixedLitCodes[256]!
+    let bw := bw.writeHuffCode code len
+    bw.flush
+  else
+    let tokens := lz77Greedy data
+    let bw := emitTokens bw tokens 0
+    -- End-of-block symbol (256)
+    let (code, len) := fixedLitCodes[256]!
+    let bw := bw.writeHuffCode code len
+    bw.flush
+where
+  emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
+    if h : i < tokens.size then
+      match tokens[i] with
+      | .literal b =>
+        let (code, len) := fixedLitCodes[b.toNat]!
+        emitTokens (bw.writeHuffCode code len) tokens (i + 1)
+      | .reference length distance =>
+        match findLengthCode length with
+        | some (idx, extraCount, extraVal) =>
+          let (code, len) := fixedLitCodes[idx + 257]!
+          let bw := bw.writeHuffCode code len
+          let bw := bw.writeBits extraCount extraVal
+          match findDistCode distance with
+          | some (dIdx, dExtraCount, dExtraVal) =>
+            let (dCode, dLen) := fixedDistCodes[dIdx]!
+            let bw := bw.writeHuffCode dCode dLen
+            emitTokens (bw.writeBits dExtraCount dExtraVal) tokens (i + 1)
+          -- lz77Greedy guarantees distance 1–32768, so this branch is unreachable
+          | none => emitTokens bw tokens (i + 1)
+        -- lz77Greedy guarantees length 3–258, so this branch is unreachable
+        | none => emitTokens bw tokens (i + 1)
+    else bw
+  termination_by tokens.size - i
 
 end Zip.Native.Deflate

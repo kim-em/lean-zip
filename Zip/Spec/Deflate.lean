@@ -1,4 +1,5 @@
-import Zip.Spec.Huffman
+import Zip.Spec.HuffmanTheorems
+import Zip.Spec.LZ77
 
 /-!
 # DEFLATE Bitstream Specification (RFC 1951)
@@ -9,7 +10,7 @@ independently of any particular decompressor implementation.
 
 The specification is structured in layers:
 1. **Bitstream**: bytes to bits conversion (LSB-first per byte)
-2. **LZ77 symbols**: the decoded symbol alphabet (literals, references, end)
+2. **LZ77 symbols**: see `Zip.Spec.LZ77`
 3. **Block structure**: stored, fixed Huffman, and dynamic Huffman blocks
 4. **Stream decode**: sequence of blocks terminated by a final block
 
@@ -106,440 +107,6 @@ theorem readBitsLSB_bound {n : Nat} {bits : List Bool}
         simp [hk] at h
         obtain ⟨rfl, rfl⟩ := h
         have := ih hk; split <;> omega
-
-/-! ## LZ77 symbol alphabet -/
-
-/-- The symbols produced by DEFLATE Huffman decoding, before LZ77
-    back-reference resolution. -/
-inductive LZ77Symbol where
-  /-- A literal byte (codes 0–255). -/
-  | literal (byte : UInt8)
-  /-- A length-distance back-reference (length codes 257–285 + distance). -/
-  | reference (length : Nat) (distance : Nat)
-  /-- End of block marker (code 256). -/
-  | endOfBlock
-  deriving Repr, BEq
-
-/-- Resolve a sequence of LZ77 symbols to produce output bytes.
-    Returns `none` if any back-reference is invalid (distance exceeds
-    current output size). -/
-def resolveLZ77 : List LZ77Symbol → List UInt8 → Option (List UInt8)
-  | [], acc => some acc
-  | .literal b :: rest, acc => resolveLZ77 rest (acc ++ [b])
-  | .endOfBlock :: _, acc => some acc
-  | .reference len dist :: rest, acc =>
-    if dist == 0 || dist > acc.length then none
-    else
-      let start := acc.length - dist
-      let copied := List.ofFn fun (i : Fin len) =>
-        acc[start + (i.val % dist)]!
-      resolveLZ77 rest (acc ++ copied)
-
-/-! ## resolveLZ77 properties -/
-
-/-- Empty symbol list returns the accumulator unchanged. -/
-@[simp] theorem resolveLZ77_nil (acc : List UInt8) :
-    resolveLZ77 [] acc = some acc := rfl
-
-/-- End-of-block marker returns the accumulator, ignoring remaining symbols. -/
-@[simp] theorem resolveLZ77_endOfBlock (rest : List LZ77Symbol) (acc : List UInt8) :
-    resolveLZ77 (.endOfBlock :: rest) acc = some acc := rfl
-
-/-- A literal symbol appends the byte and continues resolving. -/
-@[simp] theorem resolveLZ77_literal (b : UInt8) (rest : List LZ77Symbol) (acc : List UInt8) :
-    resolveLZ77 (.literal b :: rest) acc = resolveLZ77 rest (acc ++ [b]) := rfl
-
-/-- A reference with distance 0 fails. -/
-theorem resolveLZ77_reference_dist_zero (len : Nat) (rest : List LZ77Symbol)
-    (acc : List UInt8) :
-    resolveLZ77 (.reference len 0 :: rest) acc = none := by
-  simp [resolveLZ77]
-
-/-- A reference with distance exceeding the accumulator length fails. -/
-theorem resolveLZ77_reference_dist_too_large (len dist : Nat)
-    (rest : List LZ77Symbol) (acc : List UInt8)
-    (h : dist > acc.length) :
-    resolveLZ77 (.reference len dist :: rest) acc = none := by
-  simp [resolveLZ77]
-  intro hd
-  omega
-
-/-- A sequence of literal symbols resolves to the accumulator followed
-    by those bytes. -/
-theorem resolveLZ77_literals (bytes : List UInt8) (acc : List UInt8) :
-    resolveLZ77 (bytes.map .literal ++ [.endOfBlock]) acc =
-      some (acc ++ bytes) := by
-  induction bytes generalizing acc with
-  | nil => simp
-  | cons b bs ih =>
-    simp only [List.map_cons, List.cons_append, resolveLZ77_literal]
-    rw [ih]; congr 1; simp [List.append_assoc]
-
-/-- `resolveLZ77` with only literals (no endOfBlock) continues processing.
-    If the remaining symbols resolve, so does the whole list. -/
-theorem resolveLZ77_literal_cons (b : UInt8) (rest : List LZ77Symbol)
-    (acc output : List UInt8) :
-    resolveLZ77 (.literal b :: rest) acc = some output ↔
-    resolveLZ77 rest (acc ++ [b]) = some output := by
-  simp [resolveLZ77]
-
-/-- `resolveLZ77` starting from empty accumulator with just an endOfBlock
-    returns the empty list. -/
-theorem resolveLZ77_endOfBlock_empty :
-    resolveLZ77 [.endOfBlock] [] = some [] := rfl
-
-/-- A valid back-reference unfolds to copying and continuing resolution. -/
-theorem resolveLZ77_reference_valid (len dist : Nat) (rest : List LZ77Symbol)
-    (acc : List UInt8) (hd : dist ≠ 0) (hdist : dist ≤ acc.length) :
-    resolveLZ77 (.reference len dist :: rest) acc =
-      let start := acc.length - dist
-      let copied := List.ofFn fun (i : Fin len) =>
-        acc[start + (i.val % dist)]!
-      resolveLZ77 rest (acc ++ copied) := by
-  have h1 : ¬(dist = 0) := hd
-  have h2 : ¬(acc.length < dist) := by omega
-  simp [resolveLZ77, h1, h2]
-
-/-- If `resolveLZ77` succeeds, the output extends the initial accumulator. -/
-theorem resolveLZ77_extends (syms : List LZ77Symbol) (acc output : List UInt8)
-    (h : resolveLZ77 syms acc = some output) :
-    acc <+: output := by
-  induction syms generalizing acc with
-  | nil => simp [resolveLZ77] at h; exact h ▸ List.prefix_refl _
-  | cons sym rest ih =>
-    cases sym with
-    | literal b =>
-      simp [resolveLZ77] at h
-      have := ih _ h
-      exact List.IsPrefix.trans (List.prefix_append _ _) this
-    | endOfBlock =>
-      simp [resolveLZ77] at h; exact h ▸ List.prefix_refl _
-    | reference len dist =>
-      simp only [resolveLZ77] at h
-      split at h
-      · contradiction
-      · have := ih _ h
-        exact List.IsPrefix.trans (List.prefix_append _ _) this
-
-/-! ## LZ77 matching (greedy encoder) -/
-
-/-- Count consecutive matching bytes at position `pos` with source at
-    distance `dist` back, using DEFLATE's overlapping-copy semantics.
-    Returns 0 if `dist > pos` or `dist = 0`. -/
-def matchLength (data : List UInt8) (pos dist : Nat)
-    (maxLen : Nat := 258) : Nat :=
-  if dist == 0 || dist > pos then 0
-  else matchLength.go data pos dist 0 maxLen
-where
-  go (data : List UInt8) (pos dist count maxLen : Nat) : Nat :=
-    if count ≥ maxLen then count
-    else
-      match data[pos + count]?, data[pos - dist + (count % dist)]? with
-      | some a, some b =>
-        if a == b then go data pos dist (count + 1) maxLen else count
-      | _, _ => count
-  termination_by maxLen - count
-
-/-- Find the longest match at position `pos`, scanning distances
-    1 to `min pos windowSize`. Returns `(length, distance)` if a
-    match of length ≥ 3 is found. -/
-def findLongestMatch (data : List UInt8) (pos : Nat)
-    (windowSize : Nat := 32768) : Option (Nat × Nat) :=
-  go data pos 1 (min pos windowSize) none
-where
-  go (data : List UInt8) (pos d maxDist : Nat)
-      (best : Option (Nat × Nat)) : Option (Nat × Nat) :=
-    if d > maxDist then best
-    else
-      let len := matchLength data pos d
-      let best' := match best with
-        | some (bestLen, _) => if len > bestLen then some (len, d) else best
-        | none => if len ≥ 3 then some (len, d) else none
-      go data pos (d + 1) maxDist best'
-  termination_by maxDist + 1 - d
-
-/-- Greedy LZ77 matching: at each position, emit the longest match
-    or a literal. Terminates with endOfBlock. -/
-def matchLZ77 (data : List UInt8) (windowSize : Nat := 32768) :
-    List LZ77Symbol :=
-  go data 0 windowSize
-where
-  go (data : List UInt8) (pos windowSize : Nat) : List LZ77Symbol :=
-    if pos ≥ data.length then [.endOfBlock]
-    else
-      match findLongestMatch data pos windowSize with
-      | some (len, dist) =>
-        if len ≥ 3 then
-          .reference len dist :: go data (pos + len) windowSize
-        else
-          .literal data[pos]! :: go data (pos + 1) windowSize
-      | none =>
-        .literal data[pos]! :: go data (pos + 1) windowSize
-  termination_by data.length - pos
-  decreasing_by all_goals omega
-
-/-! ## LZ77 matching properties -/
-
-/-- `matchLength.go` returns a value between `count` and `maxLen`. -/
-theorem matchLength.go_bounds (data : List UInt8) (pos dist count maxLen : Nat)
-    (hle : count ≤ maxLen) :
-    count ≤ matchLength.go data pos dist count maxLen ∧
-    matchLength.go data pos dist count maxLen ≤ maxLen := by
-  unfold matchLength.go
-  split
-  · constructor <;> omega
-  · rename_i hlt
-    simp at hlt
-    split
-    · split
-      · have := matchLength.go_bounds data pos dist (count + 1) maxLen (by omega)
-        constructor <;> omega
-      · constructor <;> omega
-    · constructor <;> omega
-termination_by maxLen - count
-
-/-- `matchLength.go` only counts positions where bytes match. -/
-theorem matchLength.go_correct (data : List UInt8) (pos dist count maxLen : Nat)
-    (_ : count ≤ maxLen)
-    (n : Nat) (hgo : matchLength.go data pos dist count maxLen = n) :
-    ∀ i, count ≤ i → i < n →
-      data[pos + i]? = data[pos - dist + (i % dist)]? := by
-  unfold matchLength.go at hgo
-  split at hgo
-  · omega
-  · rename_i hlt; simp at hlt
-    cases hpa : data[pos + count]? with
-    | none => simp [hpa] at hgo; subst hgo; intro i hi hlt; omega
-    | some a =>
-      cases hpb : data[pos - dist + (count % dist)]? with
-      | none => simp [hpa, hpb] at hgo; subst hgo; intro i hi hlt; omega
-      | some b =>
-        simp [hpa, hpb] at hgo
-        split at hgo
-        · rename_i hab
-          have ih := matchLength.go_correct data pos dist (count + 1) maxLen
-            (by omega) n hgo
-          intro i hi hilt
-          by_cases heq : i = count
-          · rw [heq, hpa, hpb]; simp_all
-          · exact ih i (by omega) hilt
-        · subst hgo; intro i hi hilt; omega
-termination_by maxLen - count
-
-/-- `matchLength.go` ensures all counted positions are in bounds. -/
-theorem matchLength.go_in_bounds (data : List UInt8) (pos dist count maxLen : Nat)
-    (_ : count ≤ maxLen)
-    (n : Nat) (hgo : matchLength.go data pos dist count maxLen = n) :
-    ∀ i, count ≤ i → i < n → pos + i < data.length := by
-  unfold matchLength.go at hgo
-  split at hgo
-  · omega
-  · rename_i hlt; simp at hlt
-    cases hpa : data[pos + count]? with
-    | none =>
-      simp [hpa] at hgo; subst hgo; intro i hi hlt; omega
-    | some a =>
-      cases hpb : data[pos - dist + (count % dist)]? with
-      | none => simp [hpa, hpb] at hgo; subst hgo; intro i hi hlt; omega
-      | some b =>
-        simp [hpa, hpb] at hgo
-        split at hgo
-        · have ih := matchLength.go_in_bounds data pos dist (count + 1) maxLen
-            (by omega) n hgo
-          intro i hi hilt
-          by_cases heq : i = count
-          · rw [heq]
-            have ⟨h, _⟩ := List.getElem?_eq_some_iff.mp hpa
-            exact h
-          · exact ih i (by omega) hilt
-        · subst hgo; intro i hi hilt; omega
-termination_by maxLen - count
-
-/-- `matchLength` only counts verified matching positions. -/
-theorem matchLength_correct (data : List UInt8) (pos dist : Nat)
-    (maxLen n : Nat) (h : matchLength data pos dist maxLen = n) :
-    ∀ i : Fin n, data[pos + i.val]? =
-      data[pos - dist + (i.val % dist)]? := by
-  intro ⟨i, hi⟩
-  unfold matchLength at h
-  split at h
-  · omega
-  · exact matchLength.go_correct data pos dist 0 maxLen (by omega) n h i (by omega) hi
-
-/-- All positions counted by `matchLength` are in bounds. -/
-theorem matchLength_in_bounds (data : List UInt8) (pos dist : Nat)
-    (maxLen n : Nat) (h : matchLength data pos dist maxLen = n) :
-    ∀ i : Fin n, pos + i.val < data.length := by
-  intro ⟨i, hi⟩
-  unfold matchLength at h
-  split at h
-  · omega
-  · exact matchLength.go_in_bounds data pos dist 0 maxLen (by omega) n h i (by omega) hi
-
-/-- Invariant for `findLongestMatch.go`: if it returns `some (len, dist)`,
-    then `len ≥ 3`, `1 ≤ dist ≤ maxDist`, and `matchLength data pos dist = len`. -/
-private theorem findLongestMatch.go_inv (data : List UInt8) (pos d maxDist : Nat)
-    (best : Option (Nat × Nat))
-    (hbest : ∀ l d', best = some (l, d') →
-       l ≥ 3 ∧ 1 ≤ d' ∧ d' ≤ maxDist ∧ matchLength data pos d' = l)
-    (hd : d ≥ 1)
-    (len dist : Nat)
-    (hgo : findLongestMatch.go data pos d maxDist best = some (len, dist)) :
-    len ≥ 3 ∧ 1 ≤ dist ∧ dist ≤ maxDist ∧ matchLength data pos dist = len := by
-  unfold findLongestMatch.go at hgo
-  split at hgo
-  · exact hbest len dist hgo
-  · rename_i hdgt; simp at hdgt
-    apply findLongestMatch.go_inv data pos (d + 1) maxDist _ _ (by omega)
-      _ _ hgo
-    intro l d' hbd'
-    simp only at hbd'
-    cases hm : best with
-    | none =>
-      simp [hm] at hbd'
-      obtain ⟨hge, heql, heqd⟩ := hbd'
-      exact ⟨by omega, by omega, by omega, by rw [← heqd]; exact heql⟩
-    | some p =>
-      obtain ⟨bestLen, bestDist⟩ := p
-      simp [hm] at hbd'
-      split at hbd'
-      · simp at hbd'; obtain ⟨rfl, rfl⟩ := hbd'
-        have hbl := hbest bestLen bestDist hm
-        exact ⟨by omega, by omega, by omega, rfl⟩
-      · exact hbest l d' (hm ▸ hbd')
-termination_by maxDist + 1 - d
-
-/-- If `findLongestMatch` returns `some (len, dist)`, then `len ≥ 3`. -/
-theorem findLongestMatch_len_ge (data : List UInt8) (pos windowSize : Nat)
-    (len dist : Nat)
-    (h : findLongestMatch data pos windowSize = some (len, dist)) :
-    len ≥ 3 :=
-  (findLongestMatch.go_inv data pos 1 (min pos windowSize) none
-    (by simp) (by omega) len dist h).1
-
-/-- If `findLongestMatch` returns `some (len, dist)`, then `1 ≤ dist ≤ pos`. -/
-theorem findLongestMatch_dist_bounds (data : List UInt8) (pos windowSize : Nat)
-    (len dist : Nat)
-    (h : findLongestMatch data pos windowSize = some (len, dist)) :
-    1 ≤ dist ∧ dist ≤ pos := by
-  have inv := findLongestMatch.go_inv data pos 1 (min pos windowSize) none
-    (by simp) (by omega) len dist h
-  exact ⟨inv.2.1, by omega⟩
-
-/-- If `findLongestMatch` returns `some (len, dist)`, then
-    `matchLength data pos dist = len`. -/
-theorem findLongestMatch_matchLength (data : List UInt8) (pos windowSize : Nat)
-    (len dist : Nat)
-    (h : findLongestMatch data pos windowSize = some (len, dist)) :
-    matchLength data pos dist = len :=
-  (findLongestMatch.go_inv data pos 1 (min pos windowSize) none
-    (by simp) (by omega) len dist h).2.2.2
-
-/-- Key lemma: the accumulator after resolving a back-reference produced
-    by `matchLength` equals `data.take (pos + len)`. This connects the
-    modular-copy semantics in `resolveLZ77` with the matching check in
-    `matchLength`. -/
-private theorem take_append_copied_eq_take
-    (data : List UInt8) (pos dist len : Nat)
-    (hdist_pos : dist ≥ 1) (hdist_le : dist ≤ pos)
-    (hlen_eq : matchLength data pos dist = len)
-    (hpos_le : pos ≤ data.length)
-    (hlen_le : pos + len ≤ data.length) :
-    data.take pos ++ (List.ofFn fun (i : Fin len) =>
-      (data.take pos)[pos - dist + (i.val % dist)]!) =
-    data.take (pos + len) := by
-  -- Rewrite RHS using take_add: data.take (pos + len) = data.take pos ++ (data.drop pos).take len
-  rw [List.take_add]
-  congr 1
-  -- Now show: List.ofFn ... = (data.drop pos).take len
-  apply List.ext_getElem
-  · simp only [List.length_ofFn, List.length_take, List.length_drop]
-    omega
-  · intro i h1 h2
-    simp only [List.length_ofFn] at h1
-    simp only [List.length_take, List.length_drop,
-               Nat.min_eq_left (by omega : len ≤ data.length - pos)] at h2
-    -- LHS: (List.ofFn f)[i] = f ⟨i, h1⟩
-    rw [List.getElem_ofFn]
-    -- RHS: ((data.drop pos).take len)[i] = data[pos + i]
-    rw [List.getElem_take, List.getElem_drop]
-    -- Now: (data.take pos)[pos - dist + (i % dist)]! = data[pos + i]
-    have hidx_lt : pos - dist + (i % dist) < pos := by
-      have : i % dist < dist := Nat.mod_lt _ (by omega)
-      omega
-    rw [getElem!_pos (data.take pos) _ (by
-      simp [Nat.min_eq_left hpos_le]; exact hidx_lt)]
-    rw [List.getElem_take]
-    -- Now: data[pos - dist + (i % dist)] = data[pos + i]
-    have hmatch := matchLength_correct data pos dist 258 len hlen_eq ⟨i, h1⟩
-    simp only at hmatch
-    rw [List.getElem?_eq_getElem (h := by omega)] at hmatch
-    rw [List.getElem?_eq_getElem (h := by
-      have : i % dist < dist := Nat.mod_lt _ (by omega); omega)] at hmatch
-    simp at hmatch
-    exact hmatch.symm
-
-/-- Inner correctness lemma for `matchLZ77.go`: resolving the symbols
-    produced from position `pos` with accumulator `data.take pos` gives
-    back the original data. -/
-private theorem matchLZ77.go_correct (data : List UInt8) (pos windowSize : Nat)
-    (hw : windowSize > 0) (hpos : pos ≤ data.length) :
-    resolveLZ77 (matchLZ77.go data pos windowSize) (data.take pos) =
-      some data := by
-  unfold matchLZ77.go
-  split
-  · -- pos ≥ data.length, so pos = data.length
-    rename_i hge
-    have heq : pos = data.length := by omega
-    subst heq; simp [List.take_length, resolveLZ77]
-  · -- pos < data.length
-    rename_i hlt
-    simp at hlt
-    -- Helper: literal emission advances take by 1
-    have lit_step : data.take pos ++ [data[pos]!] = data.take (pos + 1) := by
-      rw [getElem!_pos data pos hlt]
-      exact (List.take_succ_eq_append_getElem hlt).symm
-    split
-    · -- findLongestMatch = some (len, dist)
-      rename_i len dist hfind
-      split
-      · -- len ≥ 3
-        rename_i hlen3
-        simp only [resolveLZ77]
-        have ⟨hdist_pos, hdist_le⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind
-        have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
-        have hlen_in := matchLength_in_bounds data pos dist 258 len hml
-        have hlen_le : pos + len ≤ data.length := by
-          by_cases hlen0 : len = 0
-          · omega
-          · have := hlen_in ⟨len - 1, by omega⟩; simp at this; omega
-        have hdneq : dist ≠ 0 := by omega
-        rw [show (dist == 0 || decide (List.length (List.take pos data) < dist)) = false
-          from by simp [hdneq, Nat.min_eq_left hpos]; omega]
-        simp only [Bool.false_eq_true, ↓reduceIte]
-        have hcopy := take_append_copied_eq_take data pos dist len
-          hdist_pos hdist_le hml hpos hlen_le
-        conv => lhs; rw [show (List.take pos data).length = pos
-          from by simp [Nat.min_eq_left hpos]]
-        rw [hcopy]
-        exact matchLZ77.go_correct data (pos + len) windowSize hw hlen_le
-      · -- ¬(len ≥ 3), emit literal
-        simp only [resolveLZ77]
-        rw [lit_step]
-        exact matchLZ77.go_correct data (pos + 1) windowSize hw (by omega)
-    · -- findLongestMatch = none, emit literal
-      simp only [resolveLZ77]
-      rw [lit_step]
-      exact matchLZ77.go_correct data (pos + 1) windowSize hw (by omega)
-termination_by data.length - pos
-
-/-- The greedy LZ77 matcher is correct: resolving the produced symbols
-    reconstructs the original data. -/
-theorem resolveLZ77_matchLZ77 (data : List UInt8)
-    (windowSize : Nat) (hw : windowSize > 0) :
-    resolveLZ77 (matchLZ77 data windowSize) [] = some data := by
-  show resolveLZ77 (matchLZ77.go data 0 windowSize) (data.take 0) = some data
-  exact matchLZ77.go_correct data 0 windowSize hw (by omega)
 
 /-! ## DEFLATE tables (RFC 1951 §3.2.5) -/
 
@@ -687,11 +254,10 @@ def writeBitsLSB : Nat → Nat → List Bool
 private def byteToBitsSpec (b : UInt8) : List Bool :=
   List.ofFn fun (i : Fin 8) => b.toNat.testBit i.val
 
-/-- Encode a 16-bit value as 16 bits in LSB-first order. -/
+/-- Encode a natural number as 16 bits in LSB-first order.
+    Uses `testBit` directly for easier proofs with `readBitsLSB_ofFn_testBit`. -/
 private def encodeLEU16 (v : Nat) : List Bool :=
-  let lo := v % 256
-  let hi := v / 256
-  byteToBitsSpec lo.toUInt8 ++ byteToBitsSpec hi.toUInt8
+  List.ofFn fun (i : Fin 16) => v.testBit i.val
 
 /-- Encode one stored block (data must be at most 65535 bytes).
     Does NOT include BFINAL/BTYPE bits (those are emitted by the caller). -/
@@ -705,13 +271,14 @@ private def encodeStoredBlock (data : List UInt8) : List Bool :=
     for each block. Splits data into blocks of at most 65535 bytes. -/
 def encodeStored (data : List UInt8) : List Bool :=
   if data.length ≤ 65535 then
-    -- Single final block
-    [true, false, false] ++ encodeStoredBlock data
+    -- Single final block: BFINAL=1, BTYPE=00, 5 padding bits to byte-align
+    [true, false, false] ++ List.replicate 5 false ++ encodeStoredBlock data
   else
     -- Non-final block with 65535 bytes, then recurse
     let block := data.take 65535
     let rest := data.drop 65535
-    [false, false, false] ++ encodeStoredBlock block ++ encodeStored rest
+    [false, false, false] ++ List.replicate 5 false ++
+      encodeStoredBlock block ++ encodeStored rest
 termination_by data.length
 decreasing_by
   simp only [List.length_drop]
@@ -754,29 +321,30 @@ where
       (totalCodes : Nat) (acc : List Nat) (bits : List Bool) :
       Nat → Option (List Nat × List Bool)
     | 0 => none
-    | fuel + 1 => do
-      if acc.length ≥ totalCodes then return (acc, bits)
-      let (sym, bits) ← Huffman.Spec.decode clTable bits
-      if sym < 16 then
-        decodeCLSymbols clTable totalCodes (acc ++ [sym]) bits fuel
-      else if sym == 16 then
-        guard (acc.length > 0)
-        let (rep, bits) ← readBitsLSB 2 bits
-        let prev := acc.getLast!
-        let acc := acc ++ List.replicate (rep + 3) prev
-        guard (acc.length ≤ totalCodes)
-        decodeCLSymbols clTable totalCodes acc bits fuel
-      else if sym == 17 then
-        let (rep, bits) ← readBitsLSB 3 bits
-        let acc := acc ++ List.replicate (rep + 3) 0
-        guard (acc.length ≤ totalCodes)
-        decodeCLSymbols clTable totalCodes acc bits fuel
-      else if sym == 18 then
-        let (rep, bits) ← readBitsLSB 7 bits
-        let acc := acc ++ List.replicate (rep + 11) 0
-        guard (acc.length ≤ totalCodes)
-        decodeCLSymbols clTable totalCodes acc bits fuel
-      else none
+    | fuel + 1 =>
+      if acc.length ≥ totalCodes then some (acc, bits)
+      else do
+        let (sym, bits) ← Huffman.Spec.decode clTable bits
+        if sym < 16 then
+          decodeCLSymbols clTable totalCodes (acc ++ [sym]) bits fuel
+        else if sym == 16 then
+          guard (acc.length > 0)
+          let (rep, bits) ← readBitsLSB 2 bits
+          let prev := acc.getLast!
+          let acc := acc ++ List.replicate (rep + 3) prev
+          guard (acc.length ≤ totalCodes)
+          decodeCLSymbols clTable totalCodes acc bits fuel
+        else if sym == 17 then
+          let (rep, bits) ← readBitsLSB 3 bits
+          let acc := acc ++ List.replicate (rep + 3) 0
+          guard (acc.length ≤ totalCodes)
+          decodeCLSymbols clTable totalCodes acc bits fuel
+        else if sym == 18 then
+          let (rep, bits) ← readBitsLSB 7 bits
+          let acc := acc ++ List.replicate (rep + 11) 0
+          guard (acc.length ≤ totalCodes)
+          decodeCLSymbols clTable totalCodes acc bits fuel
+        else none
 
 /-! ## Stream decode -/
 
@@ -822,7 +390,28 @@ theorem decodeSymbols_fuel_independent
     (fuel : Nat) (result : List LZ77Symbol × List Bool) :
     decodeSymbols litLengths distLengths bits fuel = some result →
     ∀ k, decodeSymbols litLengths distLengths bits (fuel + k) = some result := by
-  sorry
+  intro h k
+  induction fuel generalizing bits result with
+  | zero => simp [decodeSymbols] at h
+  | succ n ih =>
+    -- Rewrite fuel arithmetic: (n + 1) + k = (n + k) + 1
+    conv => lhs; rw [show n + 1 + k = (n + k) + 1 from by omega]
+    unfold decodeSymbols at h ⊢
+    cases hlit : decodeLitLen litLengths distLengths bits with
+    | none => simp [hlit] at h
+    | some p =>
+      obtain ⟨sym, bits'⟩ := p
+      simp only [hlit, bind, Option.bind] at h ⊢
+      match sym with
+      | .endOfBlock => exact h
+      | .literal _ | .reference .. =>
+        cases hrec : decodeSymbols litLengths distLengths bits' n with
+        | none => simp [hrec] at h
+        | some q =>
+          obtain ⟨rest, bits''⟩ := q
+          simp only [hrec] at h
+          simp only [ih bits' (rest, bits'') hrec]
+          exact h
 
 /-- `decodeCLSymbols` is fuel-independent: if it succeeds with some fuel,
     it returns the same result with any additional fuel. -/
@@ -832,21 +421,348 @@ theorem decodeCLSymbols_fuel_independent
     (fuel : Nat) (result : List Nat × List Bool) :
     decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits fuel = some result →
     ∀ k, decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits (fuel + k) = some result := by
-  sorry
+  intro h k
+  induction fuel generalizing acc bits result with
+  | zero => simp [decodeDynamicTables.decodeCLSymbols] at h
+  | succ n ih =>
+    conv => lhs; rw [show n + 1 + k = (n + k) + 1 from by omega]
+    unfold decodeDynamicTables.decodeCLSymbols at h ⊢
+    split
+    · next hge =>
+      -- h : if hge then some (acc, bits) else ... = some result
+      rw [if_pos hge] at h
+      exact h
+    · next hlt =>
+      rw [if_neg hlt] at h
+      cases hdec : Huffman.Spec.decode clTable bits with
+      | none => simp [hdec] at h
+      | some p =>
+        obtain ⟨sym, bits'⟩ := p
+        simp only [hdec, bind, Option.bind] at h ⊢
+        split
+        · next hsym =>
+          rw [if_pos hsym] at h
+          exact ih _ _ _ h
+        · next hsym =>
+          rw [if_neg hsym] at h
+          split
+          · next hsym16 =>
+            rw [if_pos hsym16] at h
+            -- guard (acc.length > 0), readBitsLSB 2, guard (acc'.length ≤ totalCodes), rec
+            by_cases hg : (0 : Nat) < acc.length
+            · simp only [guard, hg, ↓reduceIte] at h ⊢
+              cases hrb : readBitsLSB 2 bits' with
+              | none => simp [hrb] at h
+              | some q =>
+                obtain ⟨rep, bits''⟩ := q
+                simp only [hrb] at h ⊢
+                by_cases hg2 : (acc ++ List.replicate (rep + 3) acc.getLast!).length ≤ totalCodes
+                · simp only [hg2, ↓reduceIte] at h ⊢
+                  exact ih _ _ _ h
+                · simp only [hg2, ↓reduceIte] at h; simp at h
+            · simp only [guard, hg, ↓reduceIte] at h; simp at h
+          · next hsym16 =>
+            rw [if_neg hsym16] at h
+            split
+            · next hsym17 =>
+              rw [if_pos hsym17] at h
+              -- readBitsLSB 3, guard (acc'.length ≤ totalCodes), rec
+              cases hrb : readBitsLSB 3 bits' with
+              | none => simp [hrb] at h
+              | some q =>
+                obtain ⟨rep, bits''⟩ := q
+                simp only [hrb] at h ⊢
+                by_cases hg : (acc ++ List.replicate (rep + 3) 0).length ≤ totalCodes
+                · simp only [guard, hg, ↓reduceIte] at h ⊢
+                  exact ih _ _ _ h
+                · simp only [guard, hg, ↓reduceIte] at h; simp at h
+            · next hsym17 =>
+              rw [if_neg hsym17] at h
+              split
+              · next hsym18 =>
+                rw [if_pos hsym18] at h
+                -- readBitsLSB 7, guard (acc'.length ≤ totalCodes), rec
+                cases hrb : readBitsLSB 7 bits' with
+                | none => simp [hrb] at h
+                | some q =>
+                  obtain ⟨rep, bits''⟩ := q
+                  simp only [hrb] at h ⊢
+                  by_cases hg : (acc ++ List.replicate (rep + 11) 0).length ≤ totalCodes
+                  · simp only [guard, hg, ↓reduceIte] at h ⊢
+                    exact ih _ _ _ h
+                  · simp only [guard, hg, ↓reduceIte] at h; simp at h
+              · next hsym18 =>
+                rw [if_neg hsym18] at h
+                simp at h
 
+set_option maxRecDepth 4096 in
 /-- `decode` is fuel-independent: if it succeeds with some fuel,
     it returns the same result with any additional fuel. -/
+private theorem decode_go_fuel_independent
+    (bits : List Bool) (acc : List UInt8) (fuel : Nat) (result : List UInt8) :
+    decode.go bits acc fuel = some result →
+    ∀ k, decode.go bits acc (fuel + k) = some result := by
+  intro h k
+  induction fuel generalizing bits acc result with
+  | zero => simp [decode.go] at h
+  | succ n ih =>
+    conv => lhs; rw [show n + 1 + k = (n + k) + 1 from by omega]
+    unfold decode.go at h ⊢
+    cases hbf : readBitsLSB 1 bits with
+    | none => simp [hbf] at h
+    | some p =>
+      obtain ⟨bfinal, bits₁⟩ := p
+      simp only [hbf, bind, Option.bind] at h ⊢
+      cases hbt : readBitsLSB 2 bits₁ with
+      | none => simp [hbt] at h
+      | some q =>
+        obtain ⟨btype, bits₂⟩ := q
+        simp only [hbt] at h ⊢
+        match hm : btype with
+        | 0 =>
+          cases hds : decodeStored bits₂ with
+          | none => simp [hds] at h
+          | some r =>
+            obtain ⟨bytes, bits₃⟩ := r
+            simp only [hds] at h ⊢
+            split
+            · next hbf1 => rw [if_pos hbf1] at h; exact h
+            · next hbf1 => rw [if_neg hbf1] at h; exact ih _ _ _ h
+        | 1 =>
+          cases hsyms : decodeSymbols fixedLitLengths fixedDistLengths bits₂ with
+          | none => simp [hsyms] at h
+          | some r =>
+            obtain ⟨syms, bits₃⟩ := r
+            simp only [hsyms] at h ⊢
+            cases hres : resolveLZ77 syms acc with
+            | none => simp [hres] at h
+            | some acc' =>
+              simp only [hres] at h ⊢
+              split
+              · next hbf1 => rw [if_pos hbf1] at h; exact h
+              · next hbf1 => rw [if_neg hbf1] at h; exact ih _ _ _ h
+        | 2 =>
+          cases hdt : decodeDynamicTables bits₂ with
+          | none => simp [hdt] at h
+          | some r =>
+            obtain ⟨litLens, distLens, bits₃⟩ := r
+            simp only [hdt] at h ⊢
+            cases hsyms : decodeSymbols litLens distLens bits₃ with
+            | none => simp [hsyms] at h
+            | some s =>
+              obtain ⟨syms, bits₄⟩ := s
+              simp only [hsyms] at h ⊢
+              cases hres : resolveLZ77 syms acc with
+              | none => simp [hres] at h
+              | some acc' =>
+                simp only [hres] at h ⊢
+                split
+                · next hbf1 => rw [if_pos hbf1] at h; exact h
+                · next hbf1 => rw [if_neg hbf1] at h; exact ih _ _ _ h
+        | _ + 3 => simp at h
+
 theorem decode_fuel_independent
     (bits : List Bool) (fuel : Nat) (result : List UInt8) :
     decode bits fuel = some result →
     ∀ k, decode bits (fuel + k) = some result := by
-  sorry
+  intro h k
+  exact decode_go_fuel_independent bits [] fuel result h k
+
+/-! ## Stored block roundtrip helpers -/
+
+private theorem mod_two_mul (v m : Nat) (hm : m > 0) :
+    v % (2 * m) = v % 2 + 2 * ((v / 2) % m) := by
+  have key : v = (2 * m) * (v / 2 / m) + (2 * ((v / 2) % m) + v % 2) := by
+    have h1 : 2 * (v / 2) + v % 2 = v := Nat.div_add_mod v 2
+    have h2 : m * (v / 2 / m) + (v / 2) % m = v / 2 := Nat.div_add_mod (v / 2) m
+    rw [← h2] at h1; rw [Nat.mul_add, ← Nat.mul_assoc] at h1; omega
+  calc v % (2 * m)
+      = ((2 * m) * (v / 2 / m) + (2 * ((v / 2) % m) + v % 2)) % (2 * m) := by rw [← key]
+    _ = ((v / 2 / m) * (2 * m) + (2 * ((v / 2) % m) + v % 2)) % (2 * m) := by
+        rw [Nat.mul_comm]
+    _ = 2 * ((v / 2) % m) + v % 2 := Nat.mul_add_mod_of_lt (by
+        have := Nat.mod_lt (v / 2) hm
+        have := Nat.mod_lt v (show 0 < 2 by omega)
+        omega)
+    _ = v % 2 + 2 * ((v / 2) % m) := by omega
+
+private theorem testBit_zero_eq_mod_two (v : Nat) :
+    (if v.testBit 0 then 1 else 0) = v % 2 := by
+  rw [Nat.testBit_zero]; split <;> rename_i h <;> simp_all <;> omega
+
+/-- Reading `n` bits from the `testBit` encoding of `v` yields `v % 2^n`. -/
+private theorem readBitsLSB_ofFn_testBit (v n : Nat) (rest : List Bool) :
+    readBitsLSB n ((List.ofFn fun (i : Fin n) => v.testBit i.val) ++ rest) =
+    some (v % 2^n, rest) := by
+  induction n generalizing v with
+  | zero => simp [readBitsLSB]; omega
+  | succ k ih =>
+    simp only [List.ofFn_succ, List.cons_append]
+    have htail : (List.ofFn fun i : Fin k => Nat.testBit v (Fin.succ i).val) =
+                 (List.ofFn fun i : Fin k => Nat.testBit (v / 2) i.val) := by
+      congr 1; ext i; exact Nat.testBit_add_one v i.val
+    rw [htail]
+    show (readBitsLSB k _ |>.bind _) = _
+    rw [ih (v / 2)]
+    simp only [Option.bind, pure, Pure.pure]
+    congr 1; congr 1
+    simp only [show (0 : Fin (k + 1)).val = 0 from rfl]
+    rw [testBit_zero_eq_mod_two,
+        show (2:Nat)^(k+1) = 2 * 2^k from by rw [Nat.pow_succ, Nat.mul_comm],
+        mod_two_mul v (2^k) Nat.one_le_two_pow]
+    omega
+
+/-- Reading 8 bits from `byteToBitsSpec b` recovers `b.toNat`. -/
+private theorem readBitsLSB_byteToBitsSpec (b : UInt8) (rest : List Bool) :
+    readBitsLSB 8 (byteToBitsSpec b ++ rest) = some (b.toNat, rest) := by
+  have h := readBitsLSB_ofFn_testBit b.toNat 8 rest
+  simp only [byteToBitsSpec] at h ⊢
+  rw [h]; congr 1; congr 1
+  exact Nat.mod_eq_of_lt (UInt8.toNat_lt b)
+
+/-- `readNBytes` on `data.flatMap byteToBitsSpec` recovers `data`. -/
+private theorem readNBytes_byteToBitsSpec (data : List UInt8) (rest : List Bool) :
+    decodeStored.readNBytes data.length (data.flatMap byteToBitsSpec ++ rest) [] =
+    some (data, rest) := by
+  suffices ∀ (acc : List UInt8),
+    decodeStored.readNBytes data.length (data.flatMap byteToBitsSpec ++ rest) acc =
+    some (acc ++ data, rest) by simpa using this []
+  induction data with
+  | nil => intro acc; simp [decodeStored.readNBytes]
+  | cons b bs ih =>
+    intro acc
+    simp only [List.flatMap_cons, List.length_cons, List.append_assoc]
+    unfold decodeStored.readNBytes
+    show (readBitsLSB 8 _ |>.bind _) = _
+    rw [readBitsLSB_byteToBitsSpec]
+    simp only [Option.bind]
+    have : b.toNat.toUInt8 = b := by simp
+    rw [this, ih (acc ++ [b])]
+    simp [List.append_assoc]
+
+/-- `data.flatMap byteToBitsSpec` has length `8 * data.length`. -/
+private theorem flatMap_byteToBitsSpec_length (data : List UInt8) :
+    (data.flatMap byteToBitsSpec).length = 8 * data.length := by
+  induction data with
+  | nil => simp
+  | cons b bs ih =>
+    simp only [List.flatMap_cons, List.length_append, byteToBitsSpec,
+               List.length_ofFn, List.length_cons, ih]; omega
+
+/-- `encodeStored` output length is always a multiple of 8. -/
+private theorem encodeStored_length_mod8 (data : List UInt8) :
+    (encodeStored data).length % 8 = 0 := by
+  unfold encodeStored
+  split
+  · simp only [List.length_append, List.length_cons, List.length_nil,
+               List.length_replicate, encodeStoredBlock, encodeLEU16,
+               List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+  · have ih := encodeStored_length_mod8 (data.drop 65535)
+    simp only [List.length_append, List.length_cons, List.length_nil,
+               List.length_replicate, List.length_take,
+               encodeStoredBlock, encodeLEU16,
+               List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+
+/-- `decodeStored` on `[pad₅] ++ encodeStoredBlock data ++ rest` recovers `data`. -/
+private theorem decodeStored_encodeStoredBlock (data : List UInt8) (rest : List Bool)
+    (hlen : data.length ≤ 65535)
+    (halign : (List.replicate 5 false ++ encodeStoredBlock data ++ rest).length % 8 = 5) :
+    decodeStored (List.replicate 5 false ++ encodeStoredBlock data ++ rest) =
+    some (data, rest) := by
+  unfold decodeStored
+  -- alignToByte drops 5 padding bits
+  simp only [alignToByte]
+  rw [halign]
+  -- drop 5 from [false, false, false, false, false] ++ ...
+  simp only [show List.replicate 5 false = [false, false, false, false, false] from rfl,
+    List.cons_append, List.nil_append]
+  simp only [List.drop_succ_cons, List.drop_zero]
+  -- Now: readBitsLSB 16 (encodeLEU16 len ++ encodeLEU16 nlen ++ data.flatMap byteToBitsSpec ++ rest)
+  simp only [encodeStoredBlock, encodeLEU16, List.append_assoc]
+  show (readBitsLSB 16 _ |>.bind _) = _
+  rw [readBitsLSB_ofFn_testBit data.length 16,
+      show data.length % 2 ^ 16 = data.length from Nat.mod_eq_of_lt (by omega)]
+  simp only [Option.bind]
+  show (readBitsLSB 16 _ |>.bind _) = _
+  rw [readBitsLSB_ofFn_testBit (data.length ^^^ 0xFFFF) 16,
+      show (data.length ^^^ 0xFFFF) % 2 ^ 16 = data.length ^^^ 0xFFFF from
+        Nat.mod_eq_of_lt (Nat.xor_lt_two_pow (by omega) (by omega))]
+  simp only [Option.bind]
+  rw [show (data.length ^^^ (data.length ^^^ 0xFFFF) == 0xFFFF) = true from by
+    rw [← Nat.xor_assoc, Nat.xor_self, Nat.zero_xor]; decide]
+  exact readNBytes_byteToBitsSpec data rest
 
 /-! ## Correctness theorems -/
 
-/-- Encoding stored blocks then decoding produces the original data. -/
+/-- Generalized roundtrip: `decode.go` on `encodeStored data` with
+    accumulator `acc` and sufficient fuel produces `acc ++ data`. -/
+private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) (fuel : Nat)
+    (hfuel : fuel ≥ data.length / 65535 + 1) :
+    decode.go (encodeStored data) acc fuel = some (acc ++ data) := by
+  induction data using encodeStored.induct generalizing acc fuel with
+  | case1 data hle =>
+    -- Single block: data.length ≤ 65535, BFINAL=1
+    unfold encodeStored
+    simp only [hle, ↓reduceIte]
+    match fuel, hfuel with
+    | fuel + 1, _ =>
+    unfold decode.go
+    -- Reduce BFINAL=1, BTYPE=00 header, match on btype=0, then bfinal==1 → return
+    simp [readBitsLSB]
+    -- Goal (cons-ified): (decodeStored (false::...::encodeStoredBlock data)).bind ... = ...
+    have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
+      simp only [List.append_nil, List.length_append, List.length_replicate,
+        encodeStoredBlock, encodeLEU16,
+        List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+    -- decodeStored_encodeStoredBlock with rest=[], then strip ++ []
+    have hdec : decodeStored (List.replicate 5 false ++ encodeStoredBlock data) =
+        some (data, []) := by
+      have h := decodeStored_encodeStoredBlock data [] hle halign
+      simp only [List.append_nil] at h; exact h
+    -- Convert cons form back to replicate form for rewriting
+    show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
+      fun x => some (acc ++ x.fst)) = some (acc ++ data)
+    rw [hdec]; simp
+  | case2 data hgt rest ih =>
+    -- Multi-block: data.length > 65535, BFINAL=0
+    unfold encodeStored
+    simp only [show ¬(data.length ≤ 65535) from by omega, ↓reduceIte]
+    match fuel, hfuel with
+    | fuel + 1, hfuel =>
+    have htake_len : (data.take 65535).length = 65535 := by
+      rw [List.length_take]; omega
+    have hrest_len : rest.length = data.length - 65535 := by
+      simp [show rest = data.drop 65535 from rfl]
+    unfold decode.go
+    -- Reduce BFINAL=0, BTYPE=00 header, match on btype=0
+    simp [readBitsLSB]
+    -- simp cons-ifies List.replicate and replaces rest with data.drop 65535;
+    -- use change to convert back to the form expected by decodeStored_encodeStoredBlock
+    change (decodeStored (List.replicate 5 false ++
+        encodeStoredBlock (data.take 65535) ++ encodeStored rest) |>.bind
+      fun x => decode.go x.snd (acc ++ x.fst) fuel) = some (acc ++ data)
+    have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
+        encodeStored rest).length % 8 = 5 := by
+      simp only [List.length_append, List.length_replicate,
+        encodeStoredBlock, encodeLEU16,
+        List.length_ofFn, flatMap_byteToBitsSpec_length, htake_len]
+      have := encodeStored_length_mod8 rest
+      omega
+    rw [decodeStored_encodeStoredBlock (data.take 65535) (encodeStored rest)
+        (by omega) halign]
+    simp only [Option.bind]
+    rw [ih (acc ++ data.take 65535) fuel (by rw [hrest_len]; omega)]
+    rw [List.append_assoc, show rest = data.drop 65535 from rfl, List.take_append_drop]
+
+/-- Encoding stored blocks then decoding produces the original data.
+    Uses explicit fuel `data.length / 65535 + 1` (≥ number of blocks).
+    The default fuel (10001) suffices for data up to ~655MB;
+    the theorem is stated with exact fuel to hold for all list lengths. -/
 theorem encodeStored_decode (data : List UInt8) :
-    decode (encodeStored data) = some data := by sorry
+    decode (encodeStored data) (data.length / 65535 + 1) = some data := by
+  unfold decode
+  rw [encodeStored_go data [] (data.length / 65535 + 1) (by omega)]
+  simp only [List.nil_append]
 
 /-- The spec decode function is deterministic: given the same input,
     it always produces the same output. (This is trivially true for a
