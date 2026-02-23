@@ -329,6 +329,37 @@ where
       let (val, bits) ← readBitsLSB 8 bits
       readNBytes n bits (acc ++ [val.toUInt8])
 
+/-! ## Bitstream packing (inverse of `bytesToBits`) -/
+
+/-- Convert up to 8 bits (LSB first) to a byte value.
+    Pads with `false` (0) if fewer than 8 bits are provided. -/
+def bitsToByte (bits : List Bool) : UInt8 :=
+  go bits 0 0
+where
+  go : List Bool → Nat → UInt8 → UInt8
+    | [], _, acc => acc
+    | _ :: _, 8, acc => acc
+    | b :: rest, i, acc =>
+      go rest (i + 1) (acc ||| ((if b then 1 else 0) <<< i.toUInt8))
+
+/-- Pack a list of bits into a ByteArray, LSB first per byte.
+    Pads the last byte with zero bits if needed. -/
+def bitsToBytes (bits : List Bool) : ByteArray :=
+  go bits ByteArray.empty
+where
+  go : List Bool → ByteArray → ByteArray
+    | [], acc => acc
+    | b :: rest, acc =>
+      let byte := bitsToByte (b :: rest)
+      go ((b :: rest).drop 8) (acc.push byte)
+  termination_by bits => bits.length
+  decreasing_by simp [List.length_drop]; omega
+
+/-- Write a natural number as `n` bits LSB-first. -/
+def writeBitsLSB : Nat → Nat → List Bool
+  | 0, _ => []
+  | n + 1, val => (val % 2 == 1) :: writeBitsLSB n (val / 2)
+
 /-! ## Stored block encoding -/
 
 /-- Convert a byte to 8 bits (LSB first), matching `bytesToBits.byteToBits`. -/
