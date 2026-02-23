@@ -93,11 +93,37 @@ Approach tried: converting to List via toList + mem_replicate, which works
 for the first guard (all lengths ≤ 15) but the Kraft inequality computation
 also involves List.foldl on a large list which doesn't reduce. -/
 
-theorem fromLengths_fixedLit_ok :
-    ∃ t, HuffTree.fromLengths Inflate.fixedLitLengths = .ok t := by sorry
-
 theorem fromLengths_fixedDist_ok :
-    ∃ t, HuffTree.fromLengths Inflate.fixedDistLengths = .ok t := by sorry
+    ∃ t, HuffTree.fromLengths Inflate.fixedDistLengths = .ok t := by
+  unfold HuffTree.fromLengths Inflate.fixedDistLengths
+  -- Guard 1: no code length > 15 (convert Array.any to List.any for kernel evaluation)
+  rw [show ((Array.replicate 32 (5 : UInt8)).any fun l => decide (l.toNat > 15)) = false from by
+    rw [← Array.any_toList]; decide]
+  simp only [Bool.false_eq_true, ↓reduceIte]
+  -- Guard 2: Kraft inequality (List.foldl is kernel-reducible)
+  have h2 : ¬(List.foldl (fun acc l => acc + 2 ^ (15 - l)) 0
+    (List.filter (fun x => x != 0)
+      (List.map UInt8.toNat (Array.replicate 32 (5 : UInt8)).toList)) > 2 ^ 15) := by decide
+  simp only [h2, ↓reduceIte]
+  exact ⟨_, rfl⟩
+
+set_option maxRecDepth 4096 in
+set_option maxHeartbeats 1600000 in
+theorem fromLengths_fixedLit_ok :
+    ∃ t, HuffTree.fromLengths Inflate.fixedLitLengths = .ok t := by
+  unfold HuffTree.fromLengths Inflate.fixedLitLengths
+  -- Guard 1: no code length > 15
+  rw [show ((Array.replicate 144 (8 : UInt8) ++ .replicate 112 9 ++
+    .replicate 24 7 ++ .replicate 8 8).any fun l => decide (l.toNat > 15)) = false from by
+    rw [← Array.any_toList]; decide]
+  simp only [Bool.false_eq_true, ↓reduceIte]
+  -- Guard 2: Kraft inequality
+  have h2 : ¬(List.foldl (fun acc l => acc + 2 ^ (15 - l)) 0
+    (List.filter (fun x => x != 0)
+      (List.map UInt8.toNat (Array.replicate 144 (8 : UInt8) ++ .replicate 112 9 ++
+        .replicate 24 7 ++ .replicate 8 8).toList)) > 2 ^ 15) := by decide
+  simp only [h2, ↓reduceIte]
+  exact ⟨_, rfl⟩
 
 /-! ## BitReader operation lemmas for stored block format -/
 
