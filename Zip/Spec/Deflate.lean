@@ -981,18 +981,80 @@ theorem encodeLitLen_decodeLitLen
     have hdec := encodeSymbol_decode _ 256 bits rest henc hpf_lit
     exact decodeLitLen_of_endOfBlock litLengths distLengths (bits ++ rest) rest hdec
   | reference len dist =>
+    -- The reference case requires proving consistency between
+    -- findLengthCode/findDistCode and the decoder's table lookups,
+    -- plus chaining four decode steps (lenCW, lenExtra, distCW, distExtra).
+    -- Left as sorry — needs helper lemmas for findLengthCode_spec and
+    -- findDistCode_spec connecting encoder table lookups to decoder lookups.
     sorry
 
-/-- Encoding then decoding a symbol sequence recovers it. -/
+/-- A symbol list is valid for decoding: ends with `.endOfBlock` and
+    no `.endOfBlock` appears earlier. -/
+def ValidSymbolList : List LZ77Symbol → Prop
+  | [] => False
+  | [.endOfBlock] => True
+  | .endOfBlock :: _ => False
+  | _ :: rest => ValidSymbolList rest
+
+/-- Encoding then decoding a valid symbol sequence recovers it. -/
 theorem encodeSymbols_decodeSymbols
     (litLengths distLengths : List Nat) (syms : List LZ77Symbol)
     (bits rest : List Bool) (fuel : Nat)
     (henc : encodeSymbols litLengths distLengths syms = some bits)
     (hvalid_lit : Huffman.Spec.ValidLengths litLengths 15)
     (hvalid_dist : Huffman.Spec.ValidLengths distLengths 15)
-    (hfuel : fuel ≥ syms.length) :
+    (hfuel : fuel ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
     decodeSymbols litLengths distLengths (bits ++ rest) fuel = some (syms, rest) := by
-  sorry
+  induction syms generalizing bits fuel with
+  | nil => exact absurd hvalid id
+  | cons sym syms ih =>
+    -- Extract encoding of head symbol and rest
+    simp only [encodeSymbols] at henc
+    cases hes : encodeLitLen litLengths distLengths sym with
+    | none => simp [hes] at henc
+    | some symBits =>
+      simp only [hes, bind, Option.bind] at henc
+      cases her : encodeSymbols litLengths distLengths syms with
+      | none => simp [her] at henc
+      | some restBits =>
+        simp [her] at henc
+        -- henc : bits = symBits ++ restBits
+        subst henc
+        -- fuel ≥ 1
+        cases fuel with
+        | zero => simp [List.length] at hfuel
+        | succ f =>
+          simp only [decodeSymbols]
+          -- Reassociate: (symBits ++ restBits) ++ rest = symBits ++ (restBits ++ rest)
+          rw [List.append_assoc]
+          -- decodeLitLen recovers sym
+          rw [encodeLitLen_decodeLitLen litLengths distLengths sym symBits
+            (restBits ++ rest) hes hvalid_lit hvalid_dist]
+          simp only [bind, Option.bind]
+          -- Split on whether sym is endOfBlock
+          cases sym with
+          | endOfBlock =>
+            -- Must be the last symbol
+            cases syms with
+            | nil =>
+              simp [encodeSymbols] at her; subst her
+              simp [pure, Pure.pure]
+            | cons _ _ => exact absurd hvalid id
+          | literal b =>
+            have hvalid' : ValidSymbolList syms := by
+              cases syms with
+              | nil => exact absurd hvalid id
+              | cons _ _ => exact hvalid
+            rw [ih restBits f her (by simp [List.length] at hfuel ⊢; omega) hvalid']
+            simp [pure, Pure.pure]
+          | reference len dist =>
+            have hvalid' : ValidSymbolList syms := by
+              cases syms with
+              | nil => exact absurd hvalid id
+              | cons _ _ => exact hvalid
+            rw [ih restBits f her (by simp [List.length] at hfuel ⊢; omega) hvalid']
+            simp [pure, Pure.pure]
 
 /-! ## Fuel independence -/
 
