@@ -72,9 +72,11 @@ See `.claude/commands/plan.md` for the full prompt. Summary:
    what's already planned at the deliverable level
 3. **Decide session type**: implementation / review / self-improvement,
    based on balance of recent sessions
-4. **Write a self-contained plan** as a GitHub issue. Must include:
-   current state, specific files, deliverables, "done" criteria,
-   verification steps. The plan must NOT overlap with any existing issue.
+4. **Write self-contained plans** as GitHub issues — one per atomic
+   concern. Each must include: current state, specific files,
+   deliverables, "done" criteria, verification steps. If orientation
+   reveals multiple orthogonal pieces, create multiple issues rather
+   than bundling them. Plans must NOT overlap with existing issues.
 5. **Overlap guard**: re-fetch issues before posting to catch races
 6. **Exit** — do not execute any code changes
 

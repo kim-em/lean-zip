@@ -314,33 +314,49 @@ cmd_skip() {
 
 # --- lock-planner ---
 # Advisory lock to prevent concurrent planner sessions.
-# Uses comments on a pinned sentinel issue with a TTL.
+# Uses 'eyes' reactions on a pinned sentinel issue with a TTL.
 # Returns 0 if lock acquired, 1 if another planner is active.
 cmd_lock_planner() {
-    # Check the most recent lock-related comment within TTL.
-    # Lock is held if the latest comment is "Planner active" (not "Planner finished").
-    local latest_type
-    latest_type="$(gh api --paginate "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
-        --jq "[.[] | select(.body | test(\"Planner (active|finished)\")) |
-               select(.created_at > (now - $PLANNER_LOCK_TTL | strftime(\"%Y-%m-%dT%H:%M:%SZ\")))] |
-               sort_by(.created_at) | last |
-               if .body | test(\"Planner active\") then \"active\" else \"finished\" end" 2>/dev/null || echo "")"
+    local cutoff
+    cutoff="$(date -u -v-${PLANNER_LOCK_TTL}S '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+              date -u -d "$PLANNER_LOCK_TTL seconds ago" '+%Y-%m-%dT%H:%M:%SZ')"
 
-    if [[ "$latest_type" == "active" ]]; then
+    # Get all 'eyes' reactions on the sentinel issue
+    local reactions
+    reactions="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions" \
+        --jq "[.[] | select(.content == \"eyes\")]")"
+
+    # Check for unexpired reactions (within TTL)
+    local active
+    active="$(echo "$reactions" | jq "[.[] | select(.created_at > \"$cutoff\")] | length")"
+
+    # Clean up expired reactions
+    echo "$reactions" | jq -r ".[] | select(.created_at <= \"$cutoff\") | .id" | \
+    while read -r reaction_id; do
+        [[ -z "$reaction_id" ]] && continue
+        gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions/$reaction_id" -X DELETE 2>/dev/null || true
+    done
+
+    if [[ "$active" -gt 0 ]]; then
         echo "Another planner is active (lock held). Skipping."
         return 1
     fi
 
-    gh issue comment "$PLANNER_LOCK_ISSUE" --repo "$REPO" \
-        --body "Planner active: session \`$SESSION_ID\` at $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    # Acquire lock: add eyes reaction
+    gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions" -f content=eyes --silent
     echo "Planner lock acquired"
 }
 
 # --- unlock-planner ---
-# Release the planner lock early (courtesy — lock self-expires after TTL).
+# Release the planner lock by removing our eyes reaction.
 cmd_unlock_planner() {
-    gh issue comment "$PLANNER_LOCK_ISSUE" --repo "$REPO" \
-        --body "Planner finished: session \`$SESSION_ID\` at $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    # Find and delete all eyes reactions (there should be at most one from us)
+    gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions" \
+        --jq '.[] | select(.content == "eyes") | .id' | \
+    while read -r reaction_id; do
+        [[ -z "$reaction_id" ]] && continue
+        gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/reactions/$reaction_id" -X DELETE 2>/dev/null || true
+    done
     echo "Planner lock released"
 }
 

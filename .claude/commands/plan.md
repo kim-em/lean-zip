@@ -1,7 +1,7 @@
 # Plan a Work Item
 
-You are a **planner** session. Your job is to create ONE well-scoped work item
-as a GitHub issue, then exit. You do NOT execute any code changes.
+You are a **planner** session. Your job is to create well-scoped, atomic work
+items as GitHub issues, then exit. You do NOT execute any code changes.
 
 ## Step 1: Orient
 
@@ -37,9 +37,25 @@ Priority order for implementation work:
 
 ## Step 4: Write the plan
 
-Design one work item scoped to a single session (~few hundred lines of changes).
+Design work items, each scoped to a single session (~few hundred lines of changes).
 
-The issue body MUST be **self-contained** — a worker will use it without reading
+**Atomicity rule**: each issue must have a single logical concern. All its
+deliverables should be tightly related — not independent tasks that happen to
+touch the same area of the codebase.
+
+Litmus test: "Could a worker skip deliverable X and still meaningfully complete
+the issue?" If yes, X belongs in a separate issue.
+
+Common bundling mistakes:
+- Mixing mechanical cleanup (dead code removal) with exploratory work (proof audit)
+- Combining review of unrelated modules into one issue
+- Pairing a GitHub-level task (close a PR) with code changes
+
+If your orientation reveals multiple orthogonal pieces of work, create
+**multiple issues** — one per concern. This is better than one large issue
+because workers can claim and execute them in parallel.
+
+Each issue body MUST be **self-contained** — a worker will use it without reading
 progress history. Include:
 
 - **Session type**: implementation / review / self-improvement
@@ -49,22 +65,27 @@ progress history. Include:
 - **Verification**: how the worker should verify success (e.g., `lake build`,
   specific tests, sorry count check)
 
-## Step 5: Check for overlap (again)
+## Step 5: Atomicity and overlap check
 
-Before posting, re-fetch open issues to catch any created during your planning:
+**Atomicity**: re-read each issue's deliverables. Could any deliverable be
+removed while the rest still forms a complete, meaningful work item? If so,
+that deliverable belongs in its own issue. Split until each issue is atomic.
+
+**Overlap**: re-fetch open issues to catch any created during your planning:
 ```
 gh issue list --repo kim-em/lean-zip --label agent-plan --state open --limit 20 \
     --json number,title --jq '.[].title'
 ```
 
-If a new issue appeared that overlaps with your plan, adjust your plan or
-create a different work item instead.
+If a new issue appeared that overlaps with your plan, adjust or drop the
+overlapping issue.
 
 ## Step 6: Post and exit
 
-Write the plan to `plans/<UUID-prefix>.md`, then:
+For each issue, write the plan body to `plans/<UUID-prefix>-N.md` (where N
+is 1, 2, ... for multiple issues, or omitted for a single issue), then post:
 ```
-coordination plan "title" < plans/<UUID-prefix>.md
+coordination plan "title" < plans/<UUID-prefix>-N.md
 ```
 
 Then exit. Do NOT execute any code changes.
