@@ -912,6 +912,88 @@ theorem encodeSymbol_decode
     Huffman.Spec.decode table (cw ++ rest) = some (sym, rest) :=
   Huffman.Spec.decode_prefix_free table cw sym rest (encodeSymbol_mem table sym cw henc) hpf
 
+/-- The flipped allCodes table is prefix-free when lengths are valid. -/
+theorem flipped_allCodes_prefix_free (lengths : List Nat) (maxBits : Nat)
+    (hv : Huffman.Spec.ValidLengths lengths maxBits) :
+    let table := (Huffman.Spec.allCodes lengths maxBits).map fun (s, cw) => (cw, s)
+    ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ table → (cw₂, s₂) ∈ table →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ := by
+  intro table cw₁ s₁ cw₂ s₂ h₁ h₂ hne
+  -- (cw, s) ∈ table means (s, cw) ∈ allCodes
+  simp only [table, List.mem_map] at h₁ h₂
+  obtain ⟨⟨a₁, b₁⟩, hm₁, heq₁⟩ := h₁
+  obtain ⟨⟨a₂, b₂⟩, hm₂, heq₂⟩ := h₂
+  simp at heq₁ heq₂
+  obtain ⟨rfl, rfl⟩ := heq₁
+  obtain ⟨rfl, rfl⟩ := heq₂
+  -- Now: (b₁, a₁) ∈ allCodes, (b₂, a₂) ∈ allCodes, (b₁, a₁) ≠ (b₂, a₂)
+  by_cases hse : a₁ = a₂
+  · -- Same symbol → same codeword (codeFor is a function)
+    subst hse
+    rw [Huffman.Spec.allCodes_mem_iff] at hm₁ hm₂
+    have := hm₁.2.symm.trans hm₂.2
+    simp at this; subst this
+    exact absurd rfl hne
+  · exact Huffman.Spec.allCodes_prefix_free_of_ne lengths maxBits hv a₁ a₂ b₁ b₂ hm₁ hm₂ hse
+
+set_option maxRecDepth 4096 in
+/-- If Huffman decode gives a symbol < 256, `decodeLitLen` returns a literal. -/
+theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
+    (bits rest : List Bool) (sym : Nat)
+    (hdec : Huffman.Spec.decode
+      ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+      bits = some (sym, rest))
+    (hlt : sym < 256) :
+    decodeLitLen litLengths distLengths bits = some (.literal sym.toUInt8, rest) := by
+  unfold decodeLitLen
+  simp only [hdec, bind, Option.bind, if_pos hlt, pure, Pure.pure]
+
+set_option maxRecDepth 4096 in
+/-- If Huffman decode gives symbol 256, `decodeLitLen` returns endOfBlock. -/
+theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
+    (bits rest : List Bool)
+    (hdec : Huffman.Spec.decode
+      ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+      bits = some (256, rest)) :
+    decodeLitLen litLengths distLengths bits = some (.endOfBlock, rest) := by
+  unfold decodeLitLen
+  simp only [hdec, bind, Option.bind, show ¬(256 : Nat) < 256 from by omega,
+    if_false, show (256 : Nat) == 256 from rfl, if_true, pure, Pure.pure]
+
+/-- Encoding then decoding one LZ77 symbol recovers it. -/
+theorem encodeLitLen_decodeLitLen
+    (litLengths distLengths : List Nat) (sym : LZ77Symbol)
+    (bits rest : List Bool)
+    (henc : encodeLitLen litLengths distLengths sym = some bits)
+    (hvalid_lit : Huffman.Spec.ValidLengths litLengths 15)
+    (hvalid_dist : Huffman.Spec.ValidLengths distLengths 15) :
+    decodeLitLen litLengths distLengths (bits ++ rest) = some (sym, rest) := by
+  have hpf_lit := flipped_allCodes_prefix_free litLengths 15 hvalid_lit
+  cases sym with
+  | literal b =>
+    simp only [encodeLitLen] at henc
+    have hdec := encodeSymbol_decode _ b.toNat bits rest henc hpf_lit
+    have hlt : b.toNat < 256 := UInt8.toNat_lt b
+    rw [decodeLitLen_of_literal litLengths distLengths (bits ++ rest) rest b.toNat hdec hlt]
+    simp [UInt8.ofNat_toNat]
+  | endOfBlock =>
+    simp only [encodeLitLen] at henc
+    have hdec := encodeSymbol_decode _ 256 bits rest henc hpf_lit
+    exact decodeLitLen_of_endOfBlock litLengths distLengths (bits ++ rest) rest hdec
+  | reference len dist =>
+    sorry
+
+/-- Encoding then decoding a symbol sequence recovers it. -/
+theorem encodeSymbols_decodeSymbols
+    (litLengths distLengths : List Nat) (syms : List LZ77Symbol)
+    (bits rest : List Bool) (fuel : Nat)
+    (henc : encodeSymbols litLengths distLengths syms = some bits)
+    (hvalid_lit : Huffman.Spec.ValidLengths litLengths 15)
+    (hvalid_dist : Huffman.Spec.ValidLengths distLengths 15)
+    (hfuel : fuel ≥ syms.length) :
+    decodeSymbols litLengths distLengths (bits ++ rest) fuel = some (syms, rest) := by
+  sorry
+
 /-! ## Fuel independence -/
 
 /-- `decodeSymbols` is fuel-independent: if it succeeds with some fuel,
