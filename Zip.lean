@@ -29,3 +29,4 @@ import Zip.Native.BitWriter
 import Zip.Native.Deflate
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.DeflateFixedCorrect
+import Zip.Spec.DeflateStoredCorrect
