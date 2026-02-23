@@ -2,6 +2,7 @@ import Zip.Spec.DeflateEncodeProps
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.InflateCorrect
+import Zip.Spec.HuffmanEncodeCorrect
 
 /-!
 # Native DEFLATE Fixed Huffman Correctness
@@ -132,14 +133,336 @@ theorem lz77Greedy_spec_decode (data : ByteArray)
           omega)
         (tokensToSymbols_validSymbolList _)
 
-/-! ## Native ↔ spec correspondence (WIP) -/
+/-! ## Bridge lemmas for fixed Huffman tables -/
 
-/-- `emitTokens` produces the same bit sequence as spec `encodeSymbols`.
-    **Sorry**: requires proving `canonicalCodes` ↔ `Huffman.Spec.allCodes`
-    correspondence, which is the bridge between array-indexed native codes
-    and list-based spec codes. Both implement RFC 1951 §3.2.2 using the same
-    building blocks (`countLengths`, `nextCodes`), so the correspondence
-    should hold but requires a loop invariant proof for `canonicalCodes.go`. -/
+set_option maxRecDepth 4096 in
+set_option maxHeartbeats 4000000 in
+private theorem fixedLitLengths_eq :
+    Inflate.fixedLitLengths.toList.map UInt8.toNat =
+    Deflate.Spec.fixedLitLengths := by rfl
+
+set_option maxRecDepth 2048 in
+private theorem fixedDistLengths_eq :
+    Inflate.fixedDistLengths.toList.map UInt8.toNat =
+    Deflate.Spec.fixedDistLengths := by decide
+
+private theorem fixedLitLengths_validLengths :
+    Huffman.Spec.ValidLengths
+      (Inflate.fixedLitLengths.toList.map UInt8.toNat) 15 :=
+  fixedLitLengths_eq ▸ Deflate.Spec.fixedLitLengths_valid
+
+private theorem fixedDistLengths_validLengths :
+    Huffman.Spec.ValidLengths
+      (Inflate.fixedDistLengths.toList.map UInt8.toNat) 15 :=
+  fixedDistLengths_eq ▸ Deflate.Spec.fixedDistLengths_valid
+
+set_option maxRecDepth 2048 in
+/-- The codeword from `codeFor` on the fixed literal table matches
+    the `natToBits` of the corresponding `fixedLitCodes` entry. -/
+private theorem fixedLitCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
+    (hcf : Huffman.Spec.codeFor Deflate.Spec.fixedLitLengths 15 s = some cw) :
+    cw = Huffman.Spec.natToBits fixedLitCodes[s]!.1.toNat fixedLitCodes[s]!.2.toNat ∧
+    fixedLitCodes[s]!.2.toNat ≤ 15 := by
+  have ⟨hs, hlen, _⟩ := Huffman.Spec.codeFor_spec hcf
+  have ⟨hne0, hle15⟩ := Huffman.Spec.codeFor_len_bounds hlen
+  -- Size bridge
+  have hsize_eq : Inflate.fixedLitLengths.size = Deflate.Spec.fixedLitLengths.length := by
+    have := congrArg List.length fixedLitLengths_eq
+    simp only [List.length_map, Array.length_toList] at this; exact this
+  have hsize : s < Inflate.fixedLitLengths.size := by omega
+  -- Element-wise bridge
+  have hmap_len : s < (Inflate.fixedLitLengths.toList.map UInt8.toNat).length := by
+    simp only [List.length_map, Array.length_toList]; exact hsize
+  have helem := List.getElem_of_eq fixedLitLengths_eq hmap_len
+  simp only [List.getElem_map, Array.getElem_toList] at helem
+  -- Get canonical code entry (bridge UInt8 > 0 to Nat > 0 for omega)
+  have hpos : 0 < Inflate.fixedLitLengths[s].toNat := by omega
+  obtain ⟨cw', hcf', hcw', hlen'⟩ :=
+    Deflate.Correctness.canonicalCodes_correct_pos
+      Inflate.fixedLitLengths 15 fixedLitLengths_validLengths (by omega) s hsize hpos
+  -- Bridge: codeFor on native lengths = codeFor on spec lengths
+  have hcf_bridge :
+      Huffman.Spec.codeFor (Inflate.fixedLitLengths.toList.map UInt8.toNat) 15 s =
+      Huffman.Spec.codeFor Deflate.Spec.fixedLitLengths 15 s :=
+    congrArg (Huffman.Spec.codeFor · 15 s) fixedLitLengths_eq
+  rw [hcf_bridge] at hcf'
+  -- Match codewords
+  have hcw_eq : cw = cw' := Option.some.inj (hcf.symm.trans hcf')
+  subst hcw_eq
+  -- Bridge second component: lengths[s] → fixedLitCodes[s]!.snd
+  rw [← hlen'] at hcw'
+  -- Bridge from canonicalCodes entry to Inflate.fixedLitLengths element (for omega)
+  have hlen'_nat := congrArg UInt8.toNat hlen'
+  -- omega sees canonicalCodes and fixedLitCodes as distinct; bridge explicitly
+  have : fixedLitCodes[s]!.snd.toNat = (canonicalCodes Inflate.fixedLitLengths)[s]!.snd.toNat := rfl
+  exact ⟨hcw', by omega⟩
+
+set_option maxRecDepth 2048 in
+/-- The codeword from `codeFor` on the fixed distance table matches
+    the `natToBits` of the corresponding `fixedDistCodes` entry. -/
+private theorem fixedDistCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
+    (hcf : Huffman.Spec.codeFor Deflate.Spec.fixedDistLengths 15 s = some cw) :
+    cw = Huffman.Spec.natToBits fixedDistCodes[s]!.1.toNat fixedDistCodes[s]!.2.toNat ∧
+    fixedDistCodes[s]!.2.toNat ≤ 15 := by
+  have ⟨hs, hlen, _⟩ := Huffman.Spec.codeFor_spec hcf
+  have ⟨hne0, hle15⟩ := Huffman.Spec.codeFor_len_bounds hlen
+  -- Size bridge
+  have hsize_eq : Inflate.fixedDistLengths.size = Deflate.Spec.fixedDistLengths.length := by
+    have := congrArg List.length fixedDistLengths_eq
+    simp only [List.length_map, Array.length_toList] at this; exact this
+  have hsize : s < Inflate.fixedDistLengths.size := by omega
+  -- Element-wise bridge
+  have hmap_len : s < (Inflate.fixedDistLengths.toList.map UInt8.toNat).length := by
+    simp only [List.length_map, Array.length_toList]; exact hsize
+  have helem := List.getElem_of_eq fixedDistLengths_eq hmap_len
+  simp only [List.getElem_map, Array.getElem_toList] at helem
+  -- Get canonical code entry (bridge UInt8 > 0 to Nat > 0 for omega)
+  have hpos : 0 < Inflate.fixedDistLengths[s].toNat := by omega
+  obtain ⟨cw', hcf', hcw', hlen'⟩ :=
+    Deflate.Correctness.canonicalCodes_correct_pos
+      Inflate.fixedDistLengths 15 fixedDistLengths_validLengths (by omega) s hsize hpos
+  -- Bridge: codeFor on native lengths = codeFor on spec lengths
+  have hcf_bridge :
+      Huffman.Spec.codeFor (Inflate.fixedDistLengths.toList.map UInt8.toNat) 15 s =
+      Huffman.Spec.codeFor Deflate.Spec.fixedDistLengths 15 s :=
+    congrArg (Huffman.Spec.codeFor · 15 s) fixedDistLengths_eq
+  rw [hcf_bridge] at hcf'
+  -- Match codewords
+  have hcw_eq : cw = cw' := Option.some.inj (hcf.symm.trans hcf')
+  subst hcw_eq
+  -- Bridge second component: lengths[s] → fixedDistCodes[s]!.snd
+  rw [← hlen'] at hcw'
+  -- Bridge from canonicalCodes entry to Inflate.fixedDistLengths element (for omega)
+  have hlen'_nat := congrArg UInt8.toNat hlen'
+  -- omega sees canonicalCodes and fixedDistCodes as distinct; bridge explicitly
+  have : fixedDistCodes[s]!.snd.toNat = (canonicalCodes Inflate.fixedDistLengths)[s]!.snd.toNat := rfl
+  exact ⟨hcw', by omega⟩
+
+/-! ## findLengthCode / findDistCode agreement -/
+
+/-- If spec `findLengthCode` succeeds, native `findLengthCode` succeeds with
+    the same result (up to UInt32 conversion for the extra value).
+    **Sorry**: requires proving the native `findTableCode` linear search agrees
+    with the spec linear search when given tables with equal entries. The tables
+    (`lengthBase`, `lengthExtra`) are identical between native and spec (just
+    `Array UInt16`/`UInt8` vs `Array Nat`), and both do the same linear scan. -/
+private theorem findLengthCode_agree (length idx extraN extraV : Nat)
+    (hspec : Deflate.Spec.findLengthCode length = some (idx, extraN, extraV)) :
+    findLengthCode length = some (idx, extraN, extraV.toUInt32) := by
+  sorry
+
+/-- If spec `findDistCode` succeeds, native `findDistCode` succeeds with
+    the same result.
+    **Sorry**: same approach as `findLengthCode_agree`. -/
+private theorem findDistCode_agree (dist idx extraN extraV : Nat)
+    (hspec : Deflate.Spec.findDistCode dist = some (idx, extraN, extraV)) :
+    findDistCode dist = some (idx, extraN, extraV.toUInt32) := by
+  sorry
+
+/-! ## encodeSymbol ↔ writeHuffCode bridge -/
+
+/-- If `encodeSymbol` on the flipped `allCodes` table returns `cw` for symbol `s`,
+    then `cw` equals `natToBits` of the `canonicalCodes` entry. -/
+private theorem encodeSymbol_litTable_eq (s : Nat) (cw : List Bool)
+    (henc : Deflate.Spec.encodeSymbol
+      ((Huffman.Spec.allCodes Deflate.Spec.fixedLitLengths).map fun p => (p.2, p.1))
+      s = some cw) :
+    cw = Huffman.Spec.natToBits fixedLitCodes[s]!.1.toNat fixedLitCodes[s]!.2.toNat ∧
+    fixedLitCodes[s]!.2.toNat ≤ 15 := by
+  -- encodeSymbol_mem → (cw, s) ∈ table → (s, cw) ∈ allCodes
+  have hmem := Deflate.Spec.encodeSymbol_mem _ s cw henc
+  have hmem' : (s, cw) ∈ Huffman.Spec.allCodes Deflate.Spec.fixedLitLengths := by
+    simp only [List.mem_map] at hmem
+    obtain ⟨⟨s', cw'⟩, hmem, heq⟩ := hmem
+    simp only [Prod.mk.injEq] at heq
+    exact heq.1 ▸ heq.2 ▸ hmem
+  -- allCodes_mem_iff → codeFor succeeds
+  rw [Huffman.Spec.allCodes_mem_iff] at hmem'
+  exact fixedLitCodes_agree s cw hmem'.2
+
+/-- Same as `encodeSymbol_litTable_eq` but for the distance table. -/
+private theorem encodeSymbol_distTable_eq (s : Nat) (cw : List Bool)
+    (henc : Deflate.Spec.encodeSymbol
+      ((Huffman.Spec.allCodes Deflate.Spec.fixedDistLengths).map fun p => (p.2, p.1))
+      s = some cw) :
+    cw = Huffman.Spec.natToBits fixedDistCodes[s]!.1.toNat fixedDistCodes[s]!.2.toNat ∧
+    fixedDistCodes[s]!.2.toNat ≤ 15 := by
+  have hmem := Deflate.Spec.encodeSymbol_mem _ s cw henc
+  have hmem' : (s, cw) ∈ Huffman.Spec.allCodes Deflate.Spec.fixedDistLengths := by
+    simp only [List.mem_map] at hmem
+    obtain ⟨⟨s', cw'⟩, hmem, heq⟩ := hmem
+    simp only [Prod.mk.injEq] at heq
+    exact heq.1 ▸ heq.2 ▸ hmem
+  rw [Huffman.Spec.allCodes_mem_iff] at hmem'
+  exact fixedDistCodes_agree s cw hmem'.2
+
+/-! ## Main emitTokens ↔ encodeSymbols correspondence -/
+
+/-- Decompose `encodeSymbols` on a cons list into head and tail encoding. -/
+private theorem encodeSymbols_cons_some
+    (litLengths distLengths : List Nat) (s : Deflate.Spec.LZ77Symbol)
+    (rest : List Deflate.Spec.LZ77Symbol) (bits : List Bool)
+    (h : Deflate.Spec.encodeSymbols litLengths distLengths (s :: rest) = some bits) :
+    ∃ symBits restBits,
+      Deflate.Spec.encodeLitLen litLengths distLengths s = some symBits ∧
+      Deflate.Spec.encodeSymbols litLengths distLengths rest = some restBits ∧
+      bits = symBits ++ restBits := by
+  simp only [Deflate.Spec.encodeSymbols] at h
+  cases hencsym : Deflate.Spec.encodeLitLen litLengths distLengths s with
+  | none => simp [hencsym] at h
+  | some symBits =>
+    cases hencrest : Deflate.Spec.encodeSymbols litLengths distLengths rest with
+    | none => simp [hencsym, hencrest] at h
+    | some restBits =>
+      simp [hencsym, hencrest] at h
+      exact ⟨symBits, restBits, rfl, rfl, h.symm⟩
+
+/-- Extra bits count for length codes is bounded: `lengthExtra[i]! ≤ 5` for `i < 29`. -/
+private theorem lengthExtra_le_5 (idx : Nat) (h : idx < 29) :
+    Deflate.Spec.lengthExtra[idx]! ≤ 5 := by
+  have : ∀ i : Fin 29, Deflate.Spec.lengthExtra[i.val]! ≤ 5 := by decide
+  exact this ⟨idx, h⟩
+
+/-- Extra bits count for distance codes is bounded: `distExtra[i]! ≤ 13` for `i < 30`. -/
+private theorem distExtra_le_13 (idx : Nat) (h : idx < 30) :
+    Deflate.Spec.distExtra[idx]! ≤ 13 := by
+  have : ∀ i : Fin 30, Deflate.Spec.distExtra[i.val]! ≤ 13 := by decide
+  exact this ⟨idx, h⟩
+
+private theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
+    a.get!Internal i = a[i]! := rfl
+
+set_option maxRecDepth 2048 in
+/-- Generalized `emitTokens_spec` with arbitrary start index. -/
+private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
+    (i : Nat) (bits : List Bool) (hwf : bw.wf)
+    (henc : Deflate.Spec.encodeSymbols
+        Deflate.Spec.fixedLitLengths Deflate.Spec.fixedDistLengths
+        ((tokens.toList.drop i).map LZ77Token.toLZ77Symbol) = some bits) :
+    (emitTokens bw tokens i).toBits = bw.toBits ++ bits := by
+  -- Induction on tokens.size - i
+  suffices ∀ k, k = tokens.size - i →
+      (emitTokens bw tokens i).toBits = bw.toBits ++ bits by
+    exact this _ rfl
+  intro k
+  induction k generalizing bw i bits with
+  | zero =>
+    intro heq
+    have hge : i ≥ tokens.size := by omega
+    have hdrop : tokens.toList.drop i = [] := by
+      simp [List.drop_eq_nil_iff, Array.length_toList]; omega
+    rw [hdrop, List.map_nil] at henc
+    simp only [Deflate.Spec.encodeSymbols] at henc
+    cases henc
+    simp only [emitTokens, show ¬(i < tokens.size) from by omega, ↓reduceDIte,
+      List.append_nil]
+  | succ n ih =>
+    intro heq
+    have hlt : i < tokens.size := by omega
+    have hlt_list : i < tokens.toList.length := by simp; exact hlt
+    rw [List.drop_eq_getElem_cons hlt_list, List.map_cons] at henc
+    obtain ⟨symBits, restBits, hencsym, hencrest, hbits_eq⟩ :=
+      encodeSymbols_cons_some _ _ _ _ _ henc
+    subst hbits_eq
+    -- Bridge array ↔ list indexing
+    have htoList : tokens[i] = tokens.toList[i] := by simp [Array.getElem_toList]
+    -- Unfold emitTokens one step and take the positive branch
+    unfold emitTokens
+    simp only [dif_pos hlt]
+    -- Case split on token type, then reduce let-match pattern
+    cases htok : tokens[i] with
+    | literal b =>
+      simp only [array_get!Internal_eq]  -- normalize get!Internal → [·]!
+      -- Spec side
+      have htok_list : tokens.toList[i] = .literal b := by rw [← htoList]; exact htok
+      simp only [LZ77Token.toLZ77Symbol, htok_list] at hencsym
+      simp only [Deflate.Spec.encodeLitLen] at hencsym
+      have ⟨hcw, hlen⟩ := encodeSymbol_litTable_eq b.toNat symBits hencsym
+      -- BitWriter correspondence + IH
+      have hwf' := BitWriter.writeHuffCode_wf bw
+        fixedLitCodes[b.toNat]!.1 fixedLitCodes[b.toNat]!.2 hwf hlen
+      have hbits := BitWriter.writeHuffCode_toBits bw
+        fixedLitCodes[b.toNat]!.1 fixedLitCodes[b.toNat]!.2 hwf hlen
+      rw [ih _ (i + 1) restBits hwf' hencrest (by omega)]
+      rw [hbits, hcw, List.append_assoc]
+    | reference len dist =>
+      simp only [array_get!Internal_eq]  -- normalize get!Internal → [·]!
+      -- Spec side: decompose encodeLitLen for reference
+      have htok_list : tokens.toList[i] = .reference len dist := by
+        rw [← htoList]; exact htok
+      simp only [LZ77Token.toLZ77Symbol, htok_list] at hencsym
+      simp only [Deflate.Spec.encodeLitLen] at hencsym
+      cases hflc : Deflate.Spec.findLengthCode len with
+      | none => simp [hflc] at hencsym
+      | some lc =>
+        obtain ⟨lidx, lextraN, lextraV⟩ := lc
+        cases henclen : Deflate.Spec.encodeSymbol
+            ((Huffman.Spec.allCodes Deflate.Spec.fixedLitLengths).map fun p => (p.2, p.1))
+            (257 + lidx) with
+        | none => simp [hflc, henclen] at hencsym
+        | some lenBits =>
+          cases hfdc : Deflate.Spec.findDistCode dist with
+          | none => simp [hflc, hfdc] at hencsym
+          | some dc =>
+            obtain ⟨didx, dextraN, dextraV⟩ := dc
+            cases hencdist : Deflate.Spec.encodeSymbol
+                ((Huffman.Spec.allCodes Deflate.Spec.fixedDistLengths).map fun p => (p.2, p.1))
+                didx with
+            | none => simp [hflc, hfdc, hencdist] at hencsym
+            | some distBits =>
+              simp [hflc, henclen, hfdc, hencdist] at hencsym
+              subst hencsym
+              -- Bridge lemmas
+              have hnflc := findLengthCode_agree len lidx lextraN lextraV hflc
+              have hnfdc := findDistCode_agree dist didx dextraN dextraV hfdc
+              have ⟨hlcw, hllen⟩ := encodeSymbol_litTable_eq (257 + lidx) lenBits henclen
+              have ⟨hdcw, hdlen⟩ := encodeSymbol_distTable_eq didx distBits hencdist
+              have hflc_spec := Deflate.Spec.findLengthCode_spec len lidx lextraN lextraV hflc
+              have hfdc_spec := Deflate.Spec.findDistCode_spec dist didx dextraN dextraV hfdc
+              -- Extra bits bounds
+              have lextraN_le : lextraN ≤ 25 := by
+                rw [hflc_spec.2.2.1]
+                exact Nat.le_trans (lengthExtra_le_5 lidx hflc_spec.1) (by omega)
+              have dextraN_le : dextraN ≤ 25 := by
+                rw [hfdc_spec.2.2.1]
+                exact Nat.le_trans (distExtra_le_13 didx hfdc_spec.1) (by omega)
+              -- Reduce native findLengthCode/findDistCode matches
+              simp only [hnflc, hnfdc]
+              -- Normalize lidx + 257 → 257 + lidx to match spec convention
+              have h257 : lidx + 257 = 257 + lidx := by omega
+              rw [h257]
+              -- Chain BitWriter correspondence (explicit args to avoid inference failure)
+              let lcode := fixedLitCodes[257 + lidx]!.fst
+              let llen := fixedLitCodes[257 + lidx]!.snd
+              let dcode := fixedDistCodes[didx]!.fst
+              let dlen := fixedDistCodes[didx]!.snd
+              have hwf1 := BitWriter.writeHuffCode_wf bw lcode llen hwf hllen
+              have hbits1 := BitWriter.writeHuffCode_toBits bw lcode llen hwf hllen
+              let bw1 := bw.writeHuffCode lcode llen
+              have hwf2 := BitWriter.writeBits_wf bw1 lextraN lextraV.toUInt32 hwf1 lextraN_le
+              have hbits2 := BitWriter.writeBits_toBits bw1 lextraN lextraV.toUInt32 hwf1 lextraN_le
+              let bw2 := bw1.writeBits lextraN lextraV.toUInt32
+              have hwf3 := BitWriter.writeHuffCode_wf bw2 dcode dlen hwf2 hdlen
+              have hbits3 := BitWriter.writeHuffCode_toBits bw2 dcode dlen hwf2 hdlen
+              let bw3 := bw2.writeHuffCode dcode dlen
+              have hwf4 := BitWriter.writeBits_wf bw3 dextraN dextraV.toUInt32 hwf3 dextraN_le
+              have hbits4 := BitWriter.writeBits_toBits bw3 dextraN dextraV.toUInt32 hwf3 dextraN_le
+              -- Apply IH for remaining tokens
+              rw [ih _ (i + 1) restBits hwf4 hencrest (by omega)]
+              rw [hbits4, hbits3, hbits2, hbits1]
+              rw [hlcw, hdcw]
+              -- UInt32 faithfulness for extra values
+              have hlextraV_small : lextraV < 2 ^ 32 := Nat.lt_of_lt_of_le
+                hflc_spec.2.2.2 (Nat.pow_le_pow_right (by omega) (by omega))
+              have hdextraV_small : dextraV < 2 ^ 32 := Nat.lt_of_lt_of_le
+                hfdc_spec.2.2.2 (Nat.pow_le_pow_right (by omega) (by omega))
+              simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+                show lextraV % 2 ^ 32 = lextraV from Nat.mod_eq_of_lt hlextraV_small,
+                show dextraV % 2 ^ 32 = dextraV from Nat.mod_eq_of_lt hdextraV_small]
+              simp only [List.append_assoc]
+              rfl
+
+/-- `emitTokens` produces the same bit sequence as spec `encodeSymbols`. -/
 theorem emitTokens_spec (bw : BitWriter) (tokens : Array LZ77Token)
     (bits : List Bool) (hwf : bw.wf)
     (henc : Deflate.Spec.encodeSymbols
@@ -147,11 +470,11 @@ theorem emitTokens_spec (bw : BitWriter) (tokens : Array LZ77Token)
         (tokens.toList.map LZ77Token.toLZ77Symbol) = some bits) :
     (emitTokens bw tokens 0).toBits =
     bw.toBits ++ bits := by
-  sorry
+  exact emitTokens_spec_go bw tokens 0 bits hwf (by rwa [List.drop_zero])
 
 /-- `deflateFixed` produces a bytestream whose bits are the spec-level
     fixed Huffman encoding of the LZ77 tokens.
-    **Sorry**: depends on `emitTokens_spec`. -/
+    **Sorry**: depends on `emitTokens_spec` + `flush_toBits` + byte alignment. -/
 theorem deflateFixed_spec (data : ByteArray) :
     ∃ bits,
       Deflate.Spec.encodeFixed
