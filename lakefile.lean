@@ -78,7 +78,11 @@ def linkFlags : IO (Array String) := do
       -- Using -L would add the system lib dir to the search path, causing
       -- the linker to find system glibc CRT objects instead of the ones in
       -- Lean's sysroot (leading to __libc_csu_init undefined errors).
-      return zlibEffective ++ #[zstdStaticPath.toString]
+      -- Preserve any transitive flags from zstd (e.g. -pthread) but drop
+      -- -L and -lzstd since we're linking the static lib directly.
+      let zstdExtra := zstdFlags.filter (fun f =>
+        !f.startsWith "-L" && !f.startsWith "-lzstd" && f != "-lzstd")
+      return zlibEffective ++ #[zstdStaticPath.toString] ++ zstdExtra
   if !zlibFlags.isEmpty && !zstdFlags.isEmpty then
     -- Dynamic zstd may reference newer glibc symbols than Lean's sysroot provides.
     -- Allow unresolved shlib symbols; the system libc provides them at runtime.

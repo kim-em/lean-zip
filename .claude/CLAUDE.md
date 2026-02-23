@@ -63,7 +63,7 @@ Run `coordination orient` to see:
 - Open PRs and their CI status
 - PRs needing attention (failing CI or merge conflicts)
 
-Run `coordination close-stale` to close issues open >6 hours.
+Run `coordination close-stale` to close issues open >24 hours.
 
 Read these to understand current state:
 - Recent files in `progress/` — what previous sessions accomplished
@@ -193,15 +193,16 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 | Command | What it does |
 |---------|-------------|
 | `coordination orient` | List open agent-plan issues, open PRs, PRs needing attention |
-| `coordination close-stale` | Close agent-plan issues open >6 hours |
+| `coordination close-stale` | Close agent-plan issues open >24 hours |
 | `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
 | `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge |
-| `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
+| `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown, best-effort advisory) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
 
 **Branch naming**: `agent/<first-8-chars-of-UUID>`
 **Plan files**: `plans/<UUID-prefix>.md`
 **Progress files**: `progress/<UTC-timestamp>_<UUID-prefix>.md`
+(Historical files migrated from PROGRESS.md use `YYYY-MM-DD_NNN.md` naming.)
 
 ## Code Organization
 

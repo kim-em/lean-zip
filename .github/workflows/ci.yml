@@ -25,7 +25,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .lake
-          key: lake-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean') }}
+          key: lake-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean', 'c/**') }}
           restore-keys: lake-
 
       - name: Clean stale Lake cache on fallback restore

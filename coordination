@@ -6,7 +6,7 @@
 #
 # Usage:
 #   coordination orient         — list open plans, PRs, issues needing attention
-#   coordination close-stale    — close agent-plan issues open >6 hours
+#   coordination close-stale    — close agent-plan issues open >24 hours
 #   coordination plan "title"   — create GitHub issue with agent-plan label (body from stdin)
 #   coordination create-pr N    — push branch, create PR closing issue #N, enable auto-merge
 #   coordination claim-fix N    — comment on failing PR #N claiming fix (30min cooldown)
@@ -19,6 +19,10 @@ SESSION_ID="${LEAN_ZIP_SESSION_ID:-unknown}"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)"
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# Verify gh CLI is authenticated
+gh auth status --hostname github.com >/dev/null 2>&1 || \
+    die "gh CLI not authenticated — run 'gh auth login' first"
 
 # --- orient ---
 cmd_orient() {
@@ -46,8 +50,8 @@ cmd_orient() {
 # --- close-stale ---
 cmd_close_stale() {
     local cutoff
-    cutoff="$(date -u -v-6H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
-              date -u -d '6 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
+    cutoff="$(date -u -v-24H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+              date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
 
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,createdAt \
@@ -55,7 +59,7 @@ cmd_close_stale() {
     while read -r num; do
         echo "Closing stale issue #$num"
         gh issue close "$num" --repo "$REPO" \
-            --comment "Presumed abandoned (open >6 hours). Session: $SESSION_ID"
+            --comment "Presumed abandoned (open >24 hours). Session: $SESSION_ID"
     done
 }
 
@@ -76,15 +80,16 @@ cmd_plan() {
     local body
     body="$(cat)"
 
-    gh issue create --repo "$REPO" \
+    local issue_url
+    issue_url="$(gh issue create --repo "$REPO" \
         --title "$title" \
         --label agent-plan \
-        --body "$body"
+        --body "$body")"
 
-    # Comment with session UUID on the newly created issue
+    # Extract issue number from the URL returned by gh issue create
     local issue_num
-    issue_num="$(gh issue list --repo "$REPO" --label agent-plan --state open \
-        --json number,title --jq ".[0].number")"
+    issue_num="${issue_url##*/}"
+
     if [[ -n "$issue_num" ]]; then
         gh issue comment "$issue_num" --repo "$REPO" \
             --body "Session: \`$SESSION_ID\` Branch: \`$BRANCH\`"
@@ -95,8 +100,23 @@ cmd_plan() {
 cmd_create_pr() {
     local issue_num="${1:?usage: coordination create-pr N}"
 
+    # Guard: refuse to create PR from master or detached HEAD
+    if [[ "$BRANCH" == "master" || "$BRANCH" == "main" || "$BRANCH" == "detached" ]]; then
+        die "cannot create PR from branch '$BRANCH' — use an agent/* branch"
+    fi
+
     # Push branch
     git push -u origin "$BRANCH"
+
+    # Check if PR already exists for this branch
+    local existing_pr
+    existing_pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number // empty')"
+    if [[ -n "$existing_pr" ]]; then
+        echo "PR #$existing_pr already exists for branch $BRANCH. Enabling auto-merge."
+        gh pr merge "$existing_pr" --repo "$REPO" --auto --squash || \
+            echo "warning: auto-merge not available (branch protection may not be set up)"
+        return 0
+    fi
 
     # Create PR
     gh pr create --repo "$REPO" \
@@ -123,6 +143,10 @@ EOF
 }
 
 # --- claim-fix ---
+# NOTE: claim-fix is best-effort advisory, not strict mutual exclusion.
+# Two agents may both claim the same PR in a narrow race window.
+# Branch protection serializes the actual merges, so worst case is
+# duplicate work, not corruption.
 cmd_claim_fix() {
     local pr_num="${1:?usage: coordination claim-fix N}"
 
