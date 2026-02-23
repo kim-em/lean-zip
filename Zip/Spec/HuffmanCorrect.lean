@@ -468,6 +468,7 @@ private theorem insertLoop_forward
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
+      -- Bridge UInt8 > 0 to Nat for omega
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
       -- The codeword for symbol `start` matches the insert path
       obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
@@ -618,6 +619,7 @@ private theorem insertLoop_backward
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
+      -- Bridge UInt8 > 0 to Nat for omega
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
       -- The codeword for symbol `start`
       obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
@@ -728,6 +730,34 @@ protected theorem decode_some_mem {α : Type} (table : List (Huffman.Spec.Codewo
       obtain ⟨cw, hmem, hbits⟩ := ih h
       exact ⟨cw, List.mem_cons_of_mem _ hmem, hbits⟩
 
+/-- The initial `nextCode` array (`ncSpec.map (·.toUInt32)`) satisfies the NC
+    invariant at `start = 0`: each entry's `toNat` equals the spec value.
+    Shared by `fromLengths_hasLeaf` and `fromLengths_leaf_spec`. -/
+private theorem initial_nc_invariant (lengths : Array UInt8)
+    (maxBits : Nat) (hmb : maxBits < 32)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (b : Nat) (hb1 : 1 ≤ b) (hb15 : b ≤ maxBits) :
+    ((Huffman.Spec.nextCodes (Huffman.Spec.countLengths
+        (lengths.toList.map UInt8.toNat) maxBits) maxBits).map
+      Nat.toUInt32)[b]!.toNat =
+    (Huffman.Spec.nextCodes (Huffman.Spec.countLengths
+        (lengths.toList.map UInt8.toNat) maxBits) maxBits)[b]! := by
+  simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+             Array.getElem?_map]
+  have hbs : b < (Huffman.Spec.nextCodes (Huffman.Spec.countLengths
+      (List.map UInt8.toNat lengths.toList) maxBits) maxBits).size := by
+    rw [Huffman.Spec.nextCodes_size]; omega
+  simp only [Array.getElem?_eq_getElem hbs, Option.map_some, Option.getD_some]
+  have h_npc := Huffman.Spec.nextCodes_plus_count_le
+    (List.map UInt8.toNat lengths.toList) maxBits b hv (by omega) hb15
+  simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
+             Array.getElem?_eq_getElem hbs, Option.getD_some] at h_npc
+  have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show b ≤ 31 from by omega)
+  show (Huffman.Spec.nextCodes _ maxBits)[b].toUInt32.toNat =
+       (Huffman.Spec.nextCodes _ maxBits)[b]
+  rw [show ∀ n : Nat, n.toUInt32.toNat = n % 2 ^ 32 from fun _ => rfl,
+      Nat.mod_eq_of_lt (by omega)]
+
 /-- The tree built by `fromLengths` has a leaf for every canonical codeword.
     Requires `ValidLengths` to ensure no collisions during insertion. -/
 protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
@@ -761,29 +791,10 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
   exact insertLoop_forward lengths _ 0 .empty _ rfl maxBits hmb _ rfl _ rfl hv
     (by -- hncSize: nextCode.size ≥ maxBits + 1
       simp [Array.size_map, Huffman.Spec.nextCodes_size])
-    (by -- hnc: initial NC invariant (take 0 = [], so foldl = 0)
+    (by -- hnc: initial NC invariant
       intro b hb1 hb15
       simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
-      -- (ncSpec.map (·.toUInt32))[b]!.toNat = ncSpec[b]!
-      -- Unfold [b]! to getD/getElem? chain
-      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-                 Array.getElem?_map]
-      have hbs : b < (Huffman.Spec.nextCodes (Huffman.Spec.countLengths
-          (List.map UInt8.toNat lengths.toList) maxBits) maxBits).size := by
-        rw [Huffman.Spec.nextCodes_size]; omega
-      simp only [Array.getElem?_eq_getElem hbs, Option.map_some, Option.getD_some]
-      -- Goal: ncSpec[b].toUInt32.toNat = ncSpec[b]
-      -- toUInt32.toNat = n % 2^32 (by rfl), and n < 2^32 from Huffman bounds
-      have h_npc := Huffman.Spec.nextCodes_plus_count_le
-        (List.map UInt8.toNat lengths.toList) maxBits b hv (by omega) hb15
-      -- Rewrite h_npc to use [b] instead of [b]!
-      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-                 Array.getElem?_eq_getElem hbs, Option.getD_some] at h_npc
-      have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show b ≤ 31 from by omega)
-      show (Huffman.Spec.nextCodes _ maxBits)[b].toUInt32.toNat =
-           (Huffman.Spec.nextCodes _ maxBits)[b]
-      rw [show ∀ n : Nat, n.toUInt32.toNat = n % 2 ^ 32 from fun _ => rfl,
-          Nat.mod_eq_of_lt (by omega)])
+      exact initial_nc_invariant lengths maxBits hmb hv b hb1 hb15)
     (by intro k hk; omega) -- hprev: vacuously true (start = 0)
     (by intro k _ _ _ cw' _; cases cw' <;> trivial) -- hnlop: empty tree
     s hs hjlen cw hcf
@@ -804,24 +815,10 @@ protected theorem fromLengths_leaf_spec (lengths : Array UInt8)
   dsimp only [] at h
   have ih := insertLoop_backward lengths _ 0 .empty _ rfl maxBits hmb _ rfl _ rfl hv
     (by simp [Array.size_map, Huffman.Spec.nextCodes_size])
-    (by -- hnc: initial NC invariant (same as fromLengths_hasLeaf)
+    (by -- hnc: initial NC invariant
       intro b hb1 hb15
       simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
-      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-                 Array.getElem?_map]
-      have hbs : b < (Huffman.Spec.nextCodes (Huffman.Spec.countLengths
-          (List.map UInt8.toNat lengths.toList) maxBits) maxBits).size := by
-        rw [Huffman.Spec.nextCodes_size]; omega
-      simp only [Array.getElem?_eq_getElem hbs, Option.map_some, Option.getD_some]
-      have h_npc := Huffman.Spec.nextCodes_plus_count_le
-        (List.map UInt8.toNat lengths.toList) maxBits b hv (by omega) hb15
-      simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-                 Array.getElem?_eq_getElem hbs, Option.getD_some] at h_npc
-      have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show b ≤ 31 from by omega)
-      show (Huffman.Spec.nextCodes _ maxBits)[b].toUInt32.toNat =
-           (Huffman.Spec.nextCodes _ maxBits)[b]
-      rw [show ∀ n : Nat, n.toUInt32.toNat = n % 2 ^ 32 from fun _ => rfl,
-          Nat.mod_eq_of_lt (by omega)])
+      exact initial_nc_invariant lengths maxBits hmb hv b hb1 hb15)
     cw sym h
   cases ih with
   | inl h_empty => cases h_empty
