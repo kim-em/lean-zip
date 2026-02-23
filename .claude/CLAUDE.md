@@ -538,6 +538,21 @@ Update it during review and reflect sessions.
   `omega` cannot reason about `%` directly.
 - **`set` is Mathlib-only**: The `set` tactic is not available in this
   project. Use `have` or `let` instead.
+- **Fuel independence proof pattern**: For fuel-based recursive functions
+  `f x (fuel + 1) = some result → ∀ k, f x (fuel + k) = some result`,
+  use induction on fuel with: (1) `conv => lhs; rw [show n+1+k = (n+k)+1
+  from by omega]` before `unfold f at h ⊢` so both sides unfold at the
+  same successor level; (2) `cases` on each non-recursive operation;
+  (3) `ih` for recursive calls. For `if` reduction in `h`, use
+  `rw [if_pos/if_neg]` NOT `simp [cond]` — simp over-simplifies
+  (strips `some`/`pure` wrappers). For `guard` in do-blocks, use
+  `by_cases` on the condition then `simp only [guard, hcond, ↓reduceIte]`
+  — the guard uses `Alternative.guard`, NOT `Option.guard`.
+- **Avoid `do { if ... then return ...; rest }`**: Creates `have __do_jp`
+  join points in desugared form, making `h` and `⊢` syntactically
+  different after `unfold`. Use `if ... then some (...) else do { rest }`
+  instead. This applies to spec functions where proofs need to unfold
+  both sides simultaneously.
 
 ## Current State
 
