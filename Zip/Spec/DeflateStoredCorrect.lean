@@ -329,18 +329,88 @@ theorem inflateLoop_final_stored (compressed : ByteArray) (brPos : Nat)
   simp only [h_beq, ↓reduceIte, BitReader.alignToByte,
     show ((0 : Nat) == 0) = true from rfl, pure, Except.pure]
 
+/-- inflateLoop correctly processes a single non-final stored block.
+    The block starts at brPos with header byte 0x00 (BFINAL=0, BTYPE=00).
+    After processing, inflateLoop recurses with the output extended and
+    the BitReader advanced past the block data, with fuel decremented by 1. -/
+theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
+    (blockLen : Nat) (hlen : blockLen ≤ 65535)
+    (output : ByteArray) (maxOutputSize : Nat)
+    (fixedLit fixedDist : HuffTree) (fuel : Nat)
+    (hfit : output.size + blockLen ≤ maxOutputSize)
+    (hpos : brPos < compressed.size)
+    (hhdr : compressed[brPos] = 0x00)
+    (hdata_size : brPos + 5 + blockLen ≤ compressed.size)
+    (hlen_lo : compressed[brPos + 1]'(by omega) =
+      (blockLen.toUInt16 &&& 0xFF).toUInt8)
+    (hlen_hi : compressed[brPos + 2]'(by omega) =
+      ((blockLen.toUInt16 >>> 8) &&& 0xFF).toUInt8)
+    (hnlen_lo : compressed[brPos + 3]'(by omega) =
+      ((blockLen.toUInt16 ^^^ 0xFFFF) &&& 0xFF).toUInt8)
+    (hnlen_hi : compressed[brPos + 4]'(by omega) =
+      (((blockLen.toUInt16 ^^^ 0xFFFF) >>> 8) &&& 0xFF).toUInt8) :
+    Inflate.inflateLoop
+      { data := compressed, pos := brPos, bitOff := 0 } output
+      fixedLit fixedDist maxOutputSize (fuel + 1) =
+    Inflate.inflateLoop
+      { data := compressed, pos := brPos + 5 + blockLen, bitOff := 0 }
+      (output ++ compressed.extract (brPos + 5) (brPos + 5 + blockLen))
+      fixedLit fixedDist maxOutputSize fuel := by
+  -- Unfold inflateLoop only on the LHS (fuel + 1 → body with fuel)
+  conv => lhs; unfold Inflate.inflateLoop
+  simp only [bind, Except.bind]
+  -- Step 1: readBits 1 (BFINAL)
+  rw [readBits_1_at_0 compressed brPos hpos]
+  simp only [bind, Except.bind]
+  -- Step 2: readBits 2 (BTYPE)
+  rw [readBits_2_at_1 compressed brPos hpos]
+  simp only [bind, Except.bind]
+  -- Step 3: From hhdr, compute bfinal and btype
+  rw [hhdr]
+  simp only [show (0x00 : UInt8).toUInt32 &&& 1 = 0 from by decide,
+    show ((0x00 : UInt8).toUInt32 >>> 1) &&& 3 = 0 from by decide]
+  -- decodeStored with bitOff = 3 aligns to brPos + 1
+  rw [decodeStored_align compressed brPos 3 (by omega)]
+  -- Apply decodeStored_on_block at position brPos + 1
+  rw [decodeStored_on_block compressed (brPos + 1) blockLen hlen output maxOutputSize
+    hfit (by omega) hlen_lo hlen_hi hnlen_lo hnlen_hi]
+  -- bfinal == 1 is false (bfinal = 0), so inflateLoop recurses
+  have h_beq : ((0 : UInt32) == 1) = false := by decide
+  simp only [h_beq, Bool.false_eq_true, ↓reduceIte]
+
+/-! ## Helper lemmas for ByteArray indexing into pfx ++ (hdr ++ rest) -/
+
+/-- Accessing byte at position pfx.size + k in pfx ++ (hdr ++ rest)
+    gives hdr[k] when k < hdr.size. -/
+private theorem getElem_pfx_hdr (pfx hdr rest : ByteArray) (k : Nat)
+    (hk : k < hdr.size) (h : pfx.size + k < (pfx ++ (hdr ++ rest)).size) :
+    (pfx ++ (hdr ++ rest))[pfx.size + k] = hdr[k] := by
+  rw [ByteArray.getElem_append_right (by omega)]
+  simp only [show pfx.size + k - pfx.size = k from by omega]
+  exact ByteArray.getElem_append_left hk
+
 /-! ## Main roundtrip theorem -/
+
+/-- inflateLoop correctly processes all stored blocks produced by
+    deflateStoredPure, with an arbitrary prefix prepended to the compressed data.
+    The prefix parameterization handles relocation: after processing each block,
+    the prefix grows by one block, and the IH naturally applies. -/
+private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
+    (hpos : pos ≤ data.size) (h_size : data.size ≤ 256 * 1024 * 1024)
+    (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
+    (fuel maxOutputSize : Nat)
+    (h_fuel : fuel ≥ (data.size - pos + 65534) / 65535)
+    (h_fit : output.size + (data.size - pos) ≤ maxOutputSize) :
+    ∃ endPos, Inflate.inflateLoop
+      { data := pfx ++ deflateStoredPure data pos, pos := pfx.size, bitOff := 0 }
+      output fixedLit fixedDist maxOutputSize fuel =
+    .ok (output ++ data.extract pos data.size, endPos) := by
+  sorry
 
 /-- Native Level 0 roundtrip: compressing with stored blocks then
     decompressing with the native inflate recovers the original data.
     The size constraint ensures the default maxOutputSize (256 MiB) suffices
-    and the default fuel (10001 blocks) covers the input.
-
-    Proof by induction on block count:
-    - Base: data.size ≤ 65535, single final block
-    - Step: first 65535-byte block processed, then IH for remainder
-    Requires: fromLengths_*_ok, inflateLoop_final_stored,
-    and an inflateLoop_nonfinal_stored lemma (not yet stated). -/
+    and the default fuel (10001 blocks) covers the input. -/
 theorem inflate_deflateStoredPure (data : ByteArray)
     (h : data.size ≤ 256 * 1024 * 1024) :
     Inflate.inflate (deflateStoredPure data) = .ok data := by
