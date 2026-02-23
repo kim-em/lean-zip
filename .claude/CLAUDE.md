@@ -522,6 +522,17 @@ Update it during review and reflect sessions.
 - **`Pure.pure` not `Option.pure`**: The constant `Option.pure` doesn't
   exist. Use `pure, Pure.pure` in simp arguments to unfold monadic
   `return` in Option specs.
+- **`List.getElem_of_eq` for extracting from list equality**: When
+  `hih : l1 = l2` and you need `l1[i] = l2[i]`, use
+  `List.getElem_of_eq hih hbound` where `hbound : i < l1.length`.
+  This avoids dependent-type rewriting issues that arise when trying
+  `rw [hih]` directly on getElem expressions.
+- **`Nat.mod_eq_sub_mod` for inductive mod proofs**: When proving
+  `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`, use
+  `← Nat.mod_eq_sub_mod hge` to rewrite `(n - k) % k` to `n % k`.
+  `omega` cannot reason about `%` directly.
+- **`set` is Mathlib-only**: The `set` tactic is not available in this
+  project. Use `have` or `let` instead.
 
 ## Current State
 
