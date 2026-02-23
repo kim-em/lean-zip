@@ -6,7 +6,6 @@
 #
 # Usage:
 #   coordination orient           — list open plans (claimed/unclaimed), PRs, issues needing attention
-#   coordination close-stale      — close agent-plan/skip issues open >24 hours
 #   coordination plan "title"     — create GitHub issue with agent-plan label (body from stdin)
 #   coordination create-pr N      — push branch, create PR closing issue #N, enable auto-merge
 #   coordination claim-fix N      — comment on failing PR #N claiming fix (30min cooldown)
@@ -69,34 +68,6 @@ cmd_orient() {
         )] | .[] | "#\(.number) \(.title)\(if .mergeable == "CONFLICTING" then " [CONFLICTS]" else "" end)\(if (.statusCheckRollup | any(.conclusion == "FAILURE")) then " [CI FAILED]" else "" end)"'
 }
 
-# --- close-stale ---
-cmd_close_stale() {
-    local cutoff
-    cutoff="$(date -u -v-24H '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
-              date -u -d '24 hours ago' '+%Y-%m-%dT%H:%M:%SZ')"
-
-    # Close stale agent-plan issues (both unclaimed and claimed)
-    # Uses updatedAt so actively-worked issues aren't closed prematurely
-    gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
-        --json number,title,updatedAt \
-        --jq ".[] | select(.updatedAt < \"$cutoff\") | .number" | \
-    while read -r num; do
-        echo "Closing stale issue #$num"
-        gh issue close "$num" --repo "$REPO" \
-            --comment "Presumed abandoned (no activity >24 hours). Session: $SESSION_ID"
-    done
-
-    # Also close skipped issues >24h old
-    gh issue list --repo "$REPO" --label skip --state open --limit 50 \
-        --json number,title,updatedAt \
-        --jq ".[] | select(.updatedAt < \"$cutoff\") | .number" | \
-    while read -r num; do
-        echo "Closing stale skipped issue #$num"
-        gh issue close "$num" --repo "$REPO" \
-            --comment "Closing stale skipped issue. Session: $SESSION_ID"
-    done
-}
-
 # --- plan ---
 cmd_plan() {
     local title="${1:?usage: coordination plan \"title\"}"
@@ -143,24 +114,8 @@ cmd_plan() {
     local body
     body="$(cat)"
 
-    local issue_url
-    issue_url="$(gh issue create --repo "$REPO" \
-        --title "$title" \
-        --label agent-plan \
-        --body "$body")"
-
-    # Extract issue number from the URL returned by gh issue create
-    local issue_num
-    issue_num="${issue_url##*/}"
-
-    echo "Created issue #$issue_num: $title"
-
-    if [[ -n "$issue_num" ]]; then
-        gh issue comment "$issue_num" --repo "$REPO" \
-            --body "Session: \`$SESSION_ID\` Branch: \`$BRANCH\`"
-    fi
-
-    # Check for depends-on lines and add blocked label if dependencies are open
+    # Check for depends-on lines before creating the issue
+    local create_labels="agent-plan"
     local deps
     deps="$(echo "$body" | grep -oE 'depends-on: #[0-9]+' | grep -oE '[0-9]+' || true)"
     if [[ -n "$deps" ]]; then
@@ -168,16 +123,36 @@ cmd_plan() {
         while read -r dep_num; do
             [[ -z "$dep_num" ]] && continue
             local dep_state
-            dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state)"
+            dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
             if [[ "$dep_state" != "CLOSED" ]]; then
                 has_open_dep=true
                 break
             fi
         done <<< "$deps"
         if [[ "$has_open_dep" == true ]]; then
-            gh issue edit "$issue_num" --repo "$REPO" --add-label blocked
-            echo "Issue #$issue_num blocked (depends on open issue(s))"
+            create_labels="agent-plan,blocked"
         fi
+    fi
+
+    local issue_url
+    issue_url="$(gh issue create --repo "$REPO" \
+        --title "$title" \
+        --label "$create_labels" \
+        --body "$body")"
+
+    # Extract issue number from the URL returned by gh issue create
+    local issue_num
+    issue_num="${issue_url##*/}"
+
+    if [[ "$create_labels" == *"blocked"* ]]; then
+        echo "Created issue #$issue_num: $title (blocked — depends on open issue(s))"
+    else
+        echo "Created issue #$issue_num: $title"
+    fi
+
+    if [[ -n "$issue_num" ]]; then
+        gh issue comment "$issue_num" --repo "$REPO" \
+            --body "Session: \`$SESSION_ID\` Branch: \`$BRANCH\`"
     fi
 }
 
@@ -285,6 +260,10 @@ cmd_claim() {
     fi
     if echo "$labels" | grep -qw 'skip'; then
         echo "Issue #$issue_num was skipped. Skipping."
+        return 1
+    fi
+    if echo "$labels" | grep -qw 'blocked'; then
+        echo "Issue #$issue_num is blocked by dependencies. Skipping."
         return 1
     fi
 
@@ -402,7 +381,7 @@ cmd_check_blocked() {
         while read -r dep_num; do
             [[ -z "$dep_num" ]] && continue
             local dep_state
-            dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state)"
+            dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
             if [[ "$dep_state" != "CLOSED" ]]; then
                 all_closed=false
                 break
@@ -419,7 +398,6 @@ cmd_check_blocked() {
 # --- dispatch ---
 case "${1:-}" in
     orient)          cmd_orient ;;
-    close-stale)     cmd_close_stale ;;
     plan)            shift; cmd_plan "$@" ;;
     create-pr)       shift; cmd_create_pr "$@" ;;
     claim-fix)       shift; cmd_claim_fix "$@" ;;
@@ -432,5 +410,5 @@ case "${1:-}" in
     lock-planner)    cmd_lock_planner ;;
     unlock-planner)  cmd_unlock_planner ;;
     *)               die "unknown command: ${1:-}
-Usage: coordination {orient|close-stale|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|check-blocked|lock-planner|unlock-planner}" ;;
+Usage: coordination {orient|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|check-blocked|lock-planner|unlock-planner}" ;;
 esac

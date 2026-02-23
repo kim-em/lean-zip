@@ -172,7 +172,6 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 | Command | What it does |
 |---------|-------------|
 | `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
-| `coordination close-stale` | Close agent-plan and skip issues open >24 hours |
 | `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
 | `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge |
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
@@ -187,7 +186,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 
 **Issue lifecycle**: planner creates issue (label: `agent-plan`) →
 worker claims it (adds label: `claimed`) → worker creates PR closing it →
-auto-merge squash-merges. Stale issues (>24h) are auto-closed.
+auto-merge squash-merges.
 Skipped issues (label: `skip`) can be revised by the next planner.
 
 **Dependencies**: Issues can declare `depends-on: #N` in their body.

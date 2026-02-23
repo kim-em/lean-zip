@@ -11,8 +11,6 @@ items as GitHub issues, then exit. You do NOT execute any code changes.
 4. Read `VERIFICATION.md` to understand the current phase and roadmap
 5. Record sorry count: `grep -rc sorry Zip/ || true`
 
-Note: `close-stale` runs automatically in `./go` before dispatch.
-
 ## Step 2: Understand existing plans
 
 Read the **full body** of every open `agent-plan` issue:
