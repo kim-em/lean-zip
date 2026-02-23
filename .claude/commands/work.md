@@ -57,6 +57,14 @@ coordination skip <issue-number> "reason: <what changed>"
 ```
 Then go back to Step 1 and try the next issue.
 
+**PR fix plans**: If the plan asks you to fix a broken PR (merge conflicts,
+failing CI), use your judgement. If the PR's changes are low quality, stale,
+or not worth salvaging, you can close it instead of fixing it:
+```
+coordination close-pr <pr-number> "reason: <why it's not worth fixing>"
+```
+Document the decision in your progress entry.
+
 ## Step 5: Execute
 
 Follow the plan's deliverables. After each coherent chunk of changes:
