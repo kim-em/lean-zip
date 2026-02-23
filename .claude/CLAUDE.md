@@ -611,6 +611,16 @@ Update it during review and reflect sessions.
   Don't use `show P = false from by omega` for `Prop` conditions — `>`
   on `Nat` creates a `Prop`, not a `Bool`.
 
+- **`simp only` fails with `List.filter` + anonymous lambdas**: When
+  `List.filter_cons` unfolds `(a :: l).filter p` to
+  `if p a = true then ...`, and `p` is an anonymous lambda like
+  `(· != 0)`, the `p a` application remains unreduced. `simp only`
+  cannot beta-reduce this or evaluate the boolean. Use full `simp`
+  (without `only`) which includes beta-reduction and boolean evaluation.
+  Similarly, `List.set_cons_zero` and `List.set_cons_succ` are not
+  `@[simp]` — unfold them with `simp only` first, then use `simp` for
+  the filter/boolean parts.
+
 ## Current State
 
 See `PROGRESS.md` for global milestones and current phase.
