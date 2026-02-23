@@ -750,6 +750,7 @@ private theorem initial_nc_invariant (lengths : Array UInt8)
     (List.map UInt8.toNat lengths.toList) maxBits b hv (by omega) hb15
   simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
              Array.getElem?_eq_getElem hbs, Option.getD_some] at h_npc
+  -- Bound 2^b ≤ 2^31 needed by omega to prove value fits in UInt32
   have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show b ≤ 31 from by omega)
   show (Huffman.Spec.nextCodes _ maxBits)[b].toUInt32.toNat =
        (Huffman.Spec.nextCodes _ maxBits)[b]
