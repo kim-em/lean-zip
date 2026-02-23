@@ -331,16 +331,17 @@ where
 
 /-! ## Bitstream packing (inverse of `bytesToBits`) -/
 
+/-- Convert a list of bits (LSB first) to a Nat value.
+    Takes at most `n` bits. -/
+def bitsToNat : Nat → List Bool → Nat
+  | 0, _ => 0
+  | _, [] => 0
+  | n + 1, b :: rest => (if b then 1 else 0) + 2 * bitsToNat n rest
+
 /-- Convert up to 8 bits (LSB first) to a byte value.
     Pads with `false` (0) if fewer than 8 bits are provided. -/
 def bitsToByte (bits : List Bool) : UInt8 :=
-  go bits 0 0
-where
-  go : List Bool → Nat → UInt8 → UInt8
-    | [], _, acc => acc
-    | _ :: _, 8, acc => acc
-    | b :: rest, i, acc =>
-      go rest (i + 1) (acc ||| ((if b then 1 else 0) <<< i.toUInt8))
+  (bitsToNat 8 bits).toUInt8
 
 /-- Pack a list of bits into a ByteArray, LSB first per byte.
     Pads the last byte with zero bits if needed. -/

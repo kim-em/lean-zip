@@ -621,6 +621,116 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
       rw [hbr']
       simp only [hoff, Nat.add_zero]
 
+/-! ### bitsToNat / bitsToByte properties -/
+
+/-- `bitsToNat n` on `testBit` values recovers the original number. -/
+private theorem bitsToNat_testBit (m n : Nat) (hm : m < 2 ^ n) :
+    Deflate.Spec.bitsToNat n (List.ofFn (n := n) fun (i : Fin n) => m.testBit i.val) = m := by
+  induction n generalizing m with
+  | zero => simp at hm; simp [Deflate.Spec.bitsToNat]; omega
+  | succ k ih =>
+    simp only [List.ofFn_succ, Deflate.Spec.bitsToNat]
+    have htb : (fun (i : Fin k) => m.testBit (Fin.succ i).val) =
+               (fun (i : Fin k) => (m / 2).testBit i.val) := by
+      ext i; simp [Fin.val_succ, ← Nat.testBit_div_two]
+    have hdiv : m / 2 < 2 ^ k := by
+      have : 2 ^ (k + 1) = 2 ^ k * 2 := Nat.pow_succ 2 k
+      rw [Nat.div_lt_iff_lt_mul (by omega : 0 < 2)]; omega
+    rw [htb, ih (m / 2) hdiv]
+    -- Goal: (if m.testBit 0 then 1 else 0) + 2 * (m / 2) = m
+    simp only [Nat.testBit, Nat.one_and_eq_mod_two]
+    have := Nat.div_add_mod m 2
+    by_cases hmod : m % 2 = 0 <;> simp_all <;> omega
+
+/-- `bitsToNat n` produces values less than `2^n`. -/
+private theorem bitsToNat_bound (n : Nat) (bits : List Bool) :
+    Deflate.Spec.bitsToNat n bits < 2 ^ n := by
+  induction n generalizing bits with
+  | zero => simp [Deflate.Spec.bitsToNat]
+  | succ k ih =>
+    have hpow : 2 ^ (k + 1) = 2 ^ k * 2 := Nat.pow_succ 2 k
+    cases bits with
+    | nil =>
+      simp [Deflate.Spec.bitsToNat]
+      exact Nat.pos_of_ne_zero (by intro h; simp [Nat.pow_eq_zero] at h)
+    | cons b rest =>
+      simp only [Deflate.Spec.bitsToNat]
+      have := ih rest; split <;> omega
+
+/-- `testBit i` on `bitsToNat n bits` recovers `bits[i]` for `i < n` and `i < bits.length`. -/
+private theorem testBit_bitsToNat (bits : List Bool) (n i : Nat)
+    (hi : i < n) (hlen : i < bits.length) :
+    (Deflate.Spec.bitsToNat n bits).testBit i = bits[i] := by
+  induction n generalizing bits i with
+  | zero => omega
+  | succ k ih =>
+    cases bits with
+    | nil => simp [List.length] at hlen
+    | cons b rest =>
+      simp only [Deflate.Spec.bitsToNat]
+      cases i with
+      | zero =>
+        simp only [List.getElem_cons_zero, Nat.testBit_zero]
+        -- Goal: ((if b then 1 else 0) + 2 * bitsToNat k rest) % 2 != 0 = b
+        cases b <;> simp <;> omega
+      | succ j =>
+        simp only [List.getElem_cons_succ]
+        -- Use testBit_div_two: (n/2).testBit j = n.testBit (j+1)
+        rw [← Nat.testBit_div_two]
+        -- Need: ((if b then 1 else 0) + 2 * bitsToNat k rest) / 2 = bitsToNat k rest
+        have hdiv : ((if b then 1 else 0) + 2 * Deflate.Spec.bitsToNat k rest) / 2 =
+            Deflate.Spec.bitsToNat k rest := by
+          split <;> omega
+        rw [hdiv]
+        exact ih rest j (by omega) (by simp [List.length_cons] at hlen; omega)
+
+/-- `testBit i` on `bitsToNat n bits` is `false` for `i ≥ n`. -/
+private theorem testBit_bitsToNat_ge (bits : List Bool) (n i : Nat)
+    (hi : i ≥ n) :
+    (Deflate.Spec.bitsToNat n bits).testBit i = false := by
+  have hlt := bitsToNat_bound n bits
+  have hle : 2 ^ n ≤ 2 ^ i := Nat.pow_le_pow_right (by omega) hi
+  exact Nat.testBit_lt_two_pow (by omega)
+
+/-- `testBit i` on `bitsToNat n bits` is `false` for `i ≥ bits.length` (within `n`). -/
+private theorem testBit_bitsToNat_ge_length (bits : List Bool) (n i : Nat)
+    (hi : i < n) (hlen : i ≥ bits.length) :
+    (Deflate.Spec.bitsToNat n bits).testBit i = false := by
+  induction n generalizing bits i with
+  | zero => omega
+  | succ k ih =>
+    cases bits with
+    | nil =>
+      simp [Deflate.Spec.bitsToNat]
+    | cons b rest =>
+      simp only [Deflate.Spec.bitsToNat]
+      cases i with
+      | zero => simp [List.length_cons] at hlen
+      | succ j =>
+        rw [← Nat.testBit_div_two]
+        have hdiv : ((if b then 1 else 0) + 2 * Deflate.Spec.bitsToNat k rest) / 2 =
+            Deflate.Spec.bitsToNat k rest := by split <;> omega
+        rw [hdiv]
+        exact ih rest j (by omega) (by simp [List.length_cons] at hlen; omega)
+
+/-- `byteToBits (bitsToByte bits) = bits.take 8 ++ List.replicate (8 - min 8 bits.length) false`
+    when `bits.length ≤ 8`. In particular, for length-8 lists this is the identity. -/
+private theorem byteToBits_bitsToByte_take8 (bits : List Bool) :
+    Deflate.Spec.bytesToBits.byteToBits (Deflate.Spec.bitsToByte bits) =
+      List.ofFn fun (i : Fin 8) =>
+        if h : i.val < bits.length then bits[i.val] else false := by
+  simp only [Deflate.Spec.bitsToByte, Deflate.Spec.bytesToBits.byteToBits]
+  congr 1; ext ⟨i, hi⟩
+  have hbound := bitsToNat_bound 8 bits
+  show (Deflate.Spec.bitsToNat 8 bits).toUInt8.toNat.testBit i =
+    if h : i < bits.length then bits[i] else false
+  rw [show (Deflate.Spec.bitsToNat 8 bits).toUInt8 =
+    ⟨BitVec.ofNat 8 (Deflate.Spec.bitsToNat 8 bits)⟩ from rfl]
+  simp only [UInt8.toNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hbound]
+  by_cases hlen : i < bits.length
+  · rw [testBit_bitsToNat bits 8 i (by omega) hlen]; simp [hlen]
+  · rw [testBit_bitsToNat_ge_length bits 8 i (by omega) (by omega)]; simp [hlen]
+
 /-! ### writeBitsLSB properties -/
 
 /-- `writeBitsLSB` produces exactly `n` bits. -/
@@ -640,9 +750,8 @@ theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
   | succ k ih =>
     simp only [Deflate.Spec.writeBitsLSB, List.cons_append, Deflate.Spec.readBitsLSB]
     have hlt : val / 2 < 2 ^ k := by
-      rw [Nat.div_lt_iff_lt_mul (by omega : 0 < 2)]
-      calc val < 2 ^ (k + 1) := h
-           _ = 2 ^ k * 2 := by rw [Nat.pow_succ, Nat.mul_comm]
+      have : 2 ^ (k + 1) = 2 ^ k * 2 := Nat.pow_succ 2 k
+      rw [Nat.div_lt_iff_lt_mul (by omega : 0 < 2)]; omega
     rw [ih (val / 2) hlt]
     simp only [bind, Option.bind]
     congr 1; ext1
