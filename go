@@ -169,9 +169,8 @@ human_duration() {
 }
 
 update_status() {
-    local session_num=$1
-    local pid=$2
-    local uuid=$3
+    local pid=$1
+    local uuid=$2
     local jsonl_path="$JSONL_DIR/$uuid.jsonl"
     local state_file="/tmp/agent-${uuid}-state.json"
     local now
@@ -210,9 +209,9 @@ update_status() {
     fi
 
     # Latest agent activity + token usage from streaming filter
-    local last_text="" tokens_str=""
+    local last_text="" tokens_str="" claimed_issue="" pr_number=""
     if [[ -f "$state_file" ]]; then
-        IFS=$'\t' read -r last_text tokens_str < <(python3 -c "
+        IFS=$'\t' read -r last_text tokens_str claimed_issue pr_number < <(python3 -c "
 import json, sys
 try:
     with open(sys.argv[1]) as f:
@@ -235,9 +234,13 @@ try:
         # Opus 4.6: \$5/M input, \$25/M output, \$0.50/M cache read, \$6.25/M cache create
         cost = ti * 5 / 1e6 + cc * 6.25 / 1e6 + cr * 0.50 / 1e6 + to * 25 / 1e6
         tok = f'{fmt(total_in)}/{fmt(to)}~\${cost:.2f}'
-    print(line + '\t' + tok)
+    ci = d.get('claimed_issue', 0)
+    pr = d.get('pr_number', 0)
+    # Replace tabs in line to avoid breaking TSV parsing
+    line = line.replace('\t', ' ')
+    print(f'{line}\t{tok}\t{ci}\t{pr}')
 except:
-    print('\t')
+    print('\t\t0\t0')
 " "$state_file" 2>/dev/null) || true
     fi
 
@@ -247,10 +250,20 @@ except:
         elapsed=" $(human_duration $(( now - SESSION_START )))"
     fi
 
+    # Build mode label: planner, worker, worker #42, worker #42->PR
+    local mode_label="${SESSION_MODE:-session}"
+    if [[ "$SESSION_MODE" == "worker" && -n "$claimed_issue" && "$claimed_issue" != "0" ]]; then
+        if [[ -n "$pr_number" && "$pr_number" != "0" ]]; then
+            mode_label="worker #${claimed_issue}->PR"
+        else
+            mode_label="worker #${claimed_issue}"
+        fi
+    fi
+
     # Build status line
     local status
-    status=$(printf '[%s] #%d PID:%d%s | %s%s | %s' \
-        "$(date '+%H:%M:%S')" "$session_num" "$pid" "$elapsed" \
+    status=$(printf '[%s] %s%s | %s%s | %s' \
+        "$(date '+%H:%M:%S')" "$mode_label" "$elapsed" \
         "$size_str" "$age_str" "$api_status")
     if [[ -n "$tokens_str" ]]; then
         status="$status | tok:$tokens_str"
@@ -287,7 +300,7 @@ start_filter() {
     # Reads from byte 0 for accurate lifetime totals. Handles file-not-yet-
     # existing by polling internally.
     python3 -c "
-import json, sys, time, os, signal
+import json, sys, time, os, signal, re
 
 state_file = sys.argv[1]
 jsonl_path = sys.argv[2]
@@ -299,6 +312,8 @@ total_in = 0
 total_out = 0
 total_cache_read = 0
 total_cache_create = 0
+claimed_issue = 0
+pr_number = 0
 pos = 0
 
 def write_state(ts=''):
@@ -306,7 +321,9 @@ def write_state(ts=''):
         json.dump({'ts': ts, 'text': last_text,
                    'tokens_in': total_in, 'tokens_out': total_out,
                    'cache_read': total_cache_read,
-                   'cache_create': total_cache_create}, f)
+                   'cache_create': total_cache_create,
+                   'claimed_issue': claimed_issue,
+                   'pr_number': pr_number}, f)
 
 while True:
     try:
@@ -341,6 +358,13 @@ while True:
                                 if name == 'Bash':
                                     desc = inp.get('description', '')
                                     cmd = inp.get('command', '')
+                                    # Detect coordination claim/create-pr (anchored to avoid false positives)
+                                    m = re.search(r'(?:^|&&\s*|;\s*)(?:\./)?coordination\s+claim\s+(\d+)', cmd)
+                                    if m:
+                                        claimed_issue = int(m.group(1))
+                                    m = re.search(r'(?:^|&&\s*|;\s*)(?:\./)?coordination\s+create-pr\s+(\d+)', cmd)
+                                    if m:
+                                        pr_number = int(m.group(1))
                                     if desc and cmd:
                                         detail = desc + ': ' + cmd
                                     else:
@@ -525,9 +549,7 @@ while true; do
     # Record git state at session start
     git_start=$(git -C "$wt_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-    mode_label=""
-    [[ -n "$SESSION_MODE" ]] && mode_label=" mode=$SESSION_MODE"
-    say "Session #$SESSION_NUM starting: $uuid worktree=$short_id$mode_label (git:$git_start)"
+    say "Session starting: ${SESSION_MODE:-unknown} $uuid worktree=$short_id (git:$git_start)"
     log "Claude args: ${claude_args[*]} cwd=$wt_dir"
 
     # Launch claude in the worktree directory (exec replaces subshell so $! is claude's PID)
@@ -551,7 +573,7 @@ while true; do
             start_filter "$uuid"
         fi
 
-        update_status "$SESSION_NUM" "$CLAUDE_PID" "$uuid"
+        update_status "$CLAUDE_PID" "$uuid"
 
         # Warn if JSONL never appeared
         if [[ ! -f "$local_jsonl" && -z "$JSONL_WARNED" ]]; then
@@ -645,7 +667,7 @@ except:
     if (( git_commits > 0 )); then
         git_summary="$git_summary(${git_commits} commits)"
     fi
-    say "Session #$SESSION_NUM finished: exit=$EXIT_CODE duration=$(human_duration $ELAPSED) jsonl=$(human_size "$final_size")$token_summary$git_summary uuid=$uuid"
+    say "Session finished: ${SESSION_MODE:-unknown} exit=$EXIT_CODE duration=$(human_duration $ELAPSED) jsonl=$(human_size "$final_size")$token_summary$git_summary uuid=$uuid"
 
     # Release planner lock only if we acquired it
     if [[ -n "$PLANNER_LOCK_HELD" ]]; then
