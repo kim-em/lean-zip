@@ -18,9 +18,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import curses
 import dataclasses
 import datetime
+import fcntl
 import json
 import os
 import re
@@ -155,7 +157,20 @@ def say(msg: str):
 # Claim history — persists which issues our local sessions have claimed
 # ---------------------------------------------------------------------------
 
-_claim_history_lock = threading.Lock()
+CLAIM_HISTORY_LOCK_PATH = POD_DIR / "claim-history.lock"
+
+
+@contextlib.contextmanager
+def _claim_history_filelock():
+    """Cross-process exclusive lock for claim-history.json via fcntl.flock."""
+    CLAIM_HISTORY_LOCK_PATH.touch()
+    fd = open(CLAIM_HISTORY_LOCK_PATH)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
 
 
 def load_claim_history() -> dict:
@@ -178,7 +193,7 @@ def _save_claim_history(history: dict):
 
 def record_claim(issue: int, session_uuid: str, short_id: str):
     """Record that our session claimed this issue. Preserves restart_count."""
-    with _claim_history_lock:
+    with _claim_history_filelock():
         history = load_claim_history()
         key = str(issue)
         history[key] = {
@@ -191,7 +206,7 @@ def record_claim(issue: int, session_uuid: str, short_id: str):
 
 def clear_claim(issue: int):
     """Remove issue from claim history (called when PR is created)."""
-    with _claim_history_lock:
+    with _claim_history_filelock():
         history = load_claim_history()
         history.pop(str(issue), None)
         _save_claim_history(history)
@@ -704,28 +719,41 @@ def dispatch(config: dict, state: AgentState | None = None) -> str | None:
 # Dead claim recovery
 # ---------------------------------------------------------------------------
 
-def _release_claim(issue_str: str, session_uuid: str, restart_count: int):
-    """Remove the 'claimed' label from an issue and leave an explanatory comment."""
+def _release_claim(issue_str: str, session_uuid: str, restart_count: int) -> bool:
+    """Remove the 'claimed' label from an issue and leave an explanatory comment.
+    Returns True on success, False on failure (caller may revert history deletion)."""
     repo = "kim-em/lean-zip"
     try:
-        subprocess.run(
+        r1 = subprocess.run(
             ["gh", "issue", "edit", issue_str, "--repo", repo, "--remove-label", "claimed"],
             capture_output=True, timeout=30, cwd=str(PROJECT_DIR),
         )
+        if r1.returncode != 0:
+            log(f"Failed to remove claimed label on #{issue_str}: {r1.stderr.decode().strip()}")
+            return False
         msg = (f"Claim released — worker session `{session_uuid}` died after "
                f"{restart_count} restart attempt(s). Available for reclaim.")
-        subprocess.run(
+        r2 = subprocess.run(
             ["gh", "issue", "comment", issue_str, "--repo", repo, "--body", msg],
             capture_output=True, timeout=30, cwd=str(PROJECT_DIR),
         )
+        if r2.returncode != 0:
+            log(f"Failed to comment on #{issue_str}: {r2.stderr.decode().strip()}")
+            return False
         log(f"Released claim on #{issue_str}")
+        return True
     except Exception as e:
         log(f"Failed to release claim on #{issue_str}: {e}")
+        return False
 
 
 def check_dead_claimed_issues(config: dict):
     """Detect locally-known sessions that claimed issues but are now dead.
-    Restart them up to max_claim_restarts times, then release the claim."""
+    Restart them up to max_claim_restarts times, then release the claim.
+
+    Collects actions under the file lock, then executes them outside to avoid
+    fork-under-lock (spawn_agent forks) and subprocess-under-lock (_release_claim).
+    """
     history = load_claim_history()
     if not history:
         return
@@ -734,30 +762,55 @@ def check_dead_claimed_issues(config: dict):
     live_uuids = {a.uuid for a in agents if a.status not in ("dead", "stopped")}
     max_restarts = cfg_get(config, "monitor", "max_claim_restarts", default=1)
 
-    changed = False
-    with _claim_history_lock:
+    to_restart: list[tuple[str, str, str, int]] = []   # (short_id, session_uuid, issue_str, new_count)
+    to_release: list[tuple[str, str, int]] = []         # (issue_str, session_uuid, restart_count)
+
+    with _claim_history_filelock():
         history = load_claim_history()  # Re-read under lock
+        changed = False
         for issue_str, info in list(history.items()):
-            if info["session_uuid"] in live_uuids:
-                continue  # Still running
+            session_uuid = info.get("session_uuid", "")
+            if not session_uuid or session_uuid in live_uuids:
+                continue  # Still running or malformed entry
 
             restart_count = info.get("restart_count", 0)
             short_id = info.get("short_id", "")
-            session_uuid = info["session_uuid"]
 
             if restart_count < max_restarts:
-                log(f"Dead session {session_uuid} claimed #{issue_str}, "
-                    f"restarting (attempt {restart_count + 1}/{max_restarts})")
-                spawn_agent(config, agent_id=short_id, resume_uuid=session_uuid)
+                to_restart.append((short_id, session_uuid, issue_str, restart_count + 1))
                 info["restart_count"] = restart_count + 1
                 changed = True
             else:
-                log(f"Max restarts reached for #{issue_str}, releasing claim")
-                _release_claim(issue_str, session_uuid, restart_count)
+                to_release.append((issue_str, session_uuid, restart_count))
                 del history[issue_str]
                 changed = True
 
         if changed:
+            _save_claim_history(history)
+    # Lock released before any fork or subprocess call
+
+    for short_id, session_uuid, issue_str, new_count in to_restart:
+        log(f"Dead session {session_uuid} claimed #{issue_str}, "
+            f"restarting (attempt {new_count}/{max_restarts})")
+        spawn_agent(config, agent_id=short_id, resume_uuid=session_uuid)
+
+    failed_releases: list[tuple[str, str, int]] = []
+    for issue_str, session_uuid, restart_count in to_release:
+        log(f"Max restarts reached for #{issue_str}, releasing claim")
+        if not _release_claim(issue_str, session_uuid, restart_count):
+            failed_releases.append((issue_str, session_uuid, restart_count))
+
+    # Re-add any failed releases so we retry next housekeeping cycle
+    if failed_releases:
+        with _claim_history_filelock():
+            history = load_claim_history()
+            for issue_str, session_uuid, restart_count in failed_releases:
+                if issue_str not in history:
+                    history[issue_str] = {
+                        "session_uuid": session_uuid,
+                        "short_id": "",
+                        "restart_count": restart_count,
+                    }
             _save_claim_history(history)
 
 
@@ -909,6 +962,7 @@ def _sigterm_handler(signum, frame):
                     f"Agent killed by operator (session {state.uuid})",
                     env_extra={"LEAN_ZIP_SESSION_ID": state.uuid},
                 )
+                clear_claim(state.claimed_issue)
                 log(f"Unclaimed issue #{state.claimed_issue}")
             except Exception:
                 pass
@@ -1014,6 +1068,7 @@ def agent_process_main(config: dict, agent_id: str | None = None,
             chosen_type = "work"
             prompt = "You were interrupted mid-task. Review your conversation history and continue where you left off."
             lock_name = ""
+            wt_config = {}
             state.worker_type = chosen_type
             state.write()
             log(f"Agent {short_id}: resuming session {_resume_uuid}")
