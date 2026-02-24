@@ -388,6 +388,9 @@ theorem decodeHuffman_complete
       obtain ⟨br₁, hdec_lit, hrest₁, hwf₁, hpos₁⟩ :=
         huffTree_decode_complete litLengths 15 (by omega) litTree br
           sym_nat rest₁ hwf hpos hlit hvlit hlen_lit hsym_bound hspec_sym
+      -- UInt16 roundtrip — shared across all cases
+      have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat :=
+        Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hsym_bound hlen_lit)
       -- Case split on sym_val (the LZ77Symbol from decodeLitLen)
       cases sym_val with
       | literal b =>
@@ -402,12 +405,9 @@ theorem decodeHuffman_complete
         | none => simp [hds_rec] at hds
         | some p₂ =>
           obtain ⟨syms', rest'⟩ := p₂
-          simp only [hds_rec] at hds
-          have heq := Option.some.inj hds
-          have hsyms : syms = .literal b :: syms' := by
-            have := congrArg Prod.fst heq; simp at this; exact this.symm
-          have hrest_eq : rest = rest' := by
-            have := congrArg Prod.snd heq; simp at this; exact this.symm
+          simp [hds_rec] at hds
+          obtain ⟨hsyms, hrest_eq⟩ : syms = .literal b :: syms' ∧ rest = rest' :=
+            ⟨hds.1.symm, hds.2.symm⟩
           -- resolveLZ77: .literal b :: syms' resolves
           rw [hsyms] at hlz
           simp only [Deflate.Spec.resolveLZ77_literal] at hlz
@@ -429,8 +429,6 @@ theorem decodeHuffman_complete
           rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
           dsimp only [bind, Except.bind]
           -- sym < 256 branch
-          have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat := by
-            simp [Nat.mod_eq_of_lt (by omega : sym_nat < UInt16.size)]
           have hsym_lt_u16 : sym_nat.toUInt16 < 256 := by
             rw [UInt16.lt_iff_toNat_lt, hsym_toNat]; exact hsym_lt
           simp only [hsym_lt_u16, ↓reduceIte, hout_ok, pure, Except.pure]
@@ -442,16 +440,11 @@ theorem decodeHuffman_complete
       | endOfBlock =>
         -- From decodeLitLen_endOfBlock_inv: sym_nat = 256, bits₁ = rest₁
         obtain ⟨hsym_eq, hbits_eq⟩ := decodeLitLen_endOfBlock_inv hdll hspec_sym
-        -- Reduce the match on .endOfBlock in hds
-        dsimp only [] at hds
-        -- hds : pure ([.endOfBlock], bits₁) = some (syms, rest)
-        simp only [pure, Pure.pure] at hds
-        -- hds : some (...) = some (syms, rest)
-        have heq := Option.some.inj hds
-        have hsyms : syms = [.endOfBlock] := by
-          have := congrArg Prod.fst heq; simp at this; exact this.symm
-        have hrest_eq : rest = bits₁ := by
-          have := congrArg Prod.snd heq; simp at this; exact this.symm
+        -- Reduce the match on .endOfBlock in hds → syms = [.endOfBlock], rest = bits₁
+        dsimp only [] at hds; simp only [pure, Pure.pure] at hds
+        have heq := (Option.some.inj hds).symm
+        have hsyms : syms = [.endOfBlock] := congrArg Prod.fst heq
+        have hrest_eq : rest = bits₁ := congrArg Prod.snd heq
         -- resolveLZ77 [.endOfBlock] output = some output
         rw [hsyms] at hlz
         simp [Deflate.Spec.resolveLZ77_endOfBlock] at hlz
@@ -461,10 +454,6 @@ theorem decodeHuffman_complete
         rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
         dsimp only [bind, Except.bind]
         -- sym ≥ 256 (sym_nat = 256)
-        have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat := by
-          have hsym_lt_u16 : sym_nat < UInt16.size :=
-            Nat.lt_of_lt_of_le hsym_bound hlen_lit
-          simp [Nat.mod_eq_of_lt hsym_lt_u16]
         have hsym_ge : ¬(sym_nat.toUInt16 < 256) := by
           rw [UInt16.lt_iff_toNat_lt, hsym_toNat, hsym_eq]
           exact Nat.not_lt.mpr (Nat.le.refl)
@@ -495,12 +484,9 @@ theorem decodeHuffman_complete
         | none => simp [hds_rec] at hds
         | some p₂ =>
           obtain ⟨syms', rest'⟩ := p₂
-          simp only [hds_rec] at hds
-          have heq := Option.some.inj hds
-          have hsyms : syms = .reference len dist :: syms' := by
-            have := congrArg Prod.fst heq; simp at this; exact this.symm
-          have hrest_eq : rest = rest' := by
-            have := congrArg Prod.snd heq; simp at this; exact this.symm
+          simp [hds_rec] at hds
+          obtain ⟨hsyms, hrest_eq⟩ : syms = .reference len dist :: syms' ∧ rest = rest' :=
+            ⟨hds.1.symm, hds.2.symm⟩
           -- resolveLZ77: .reference len dist :: syms' resolves
           rw [hsyms] at hlz
           -- dist > 0 and dist ≤ output length (from resolveLZ77 succeeding)
@@ -596,16 +582,10 @@ theorem decodeHuffman_complete
           -- Native↔spec table value bridges
           have hnative_extra_eq :
               (Zip.Native.Inflate.lengthExtra[sym_nat - 257]!).toNat = extra := by
-            have : (Zip.Native.Inflate.lengthExtra[sym_nat - 257]!).toNat =
-                Deflate.Spec.lengthExtra[sym_nat - 257]! :=
-              lengthExtra_eq ⟨sym_nat - 257, hidx⟩
-            rw [hextra_eq]; omega
+            rw [hextra_eq]; exact lengthExtra_eq ⟨sym_nat - 257, hidx⟩
           have hnative_dextra_eq :
               (Zip.Native.Inflate.distExtra[dSym]!).toNat = dExtra := by
-            have : (Zip.Native.Inflate.distExtra[dSym]!).toNat =
-                Deflate.Spec.distExtra[dSym]! :=
-              distExtra_eq ⟨dSym, hdidx⟩
-            rw [hdextra_eq]; omega
+            rw [hdextra_eq]; exact distExtra_eq ⟨dSym, hdidx⟩
           have hnative_len : (Zip.Native.Inflate.lengthBase[sym_nat - 257]!).toNat +
               extraVal.toUInt32.toNat = len := by
             have : (Zip.Native.Inflate.lengthBase[sym_nat - 257]!).toNat =
@@ -623,8 +603,6 @@ theorem decodeHuffman_complete
           rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
           dsimp only [bind, Except.bind]
           -- sym ≥ 256
-          have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat :=
-            Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hsym_bound hlen_lit)
           have hsym_ge_u16 : ¬(sym_nat.toUInt16 < 256) := by
             simp only [UInt16.lt_iff_toNat_lt, hsym_toNat]
             show ¬(sym_nat < 256); omega
