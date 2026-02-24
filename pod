@@ -500,6 +500,28 @@ def fetch_issues_and_prs() -> list[GHItem]:
     return items
 
 
+def fetch_blocked_deps() -> dict[int, list[int]]:
+    """Fetch depends-on dependencies for blocked issues (bodies only, not all issues)."""
+    import re as _re
+    cwd = str(PROJECT_DIR)
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--label", "agent-plan", "--label", "blocked",
+             "--state", "open", "--limit", "20", "--json", "number,body"],
+            capture_output=True, text=True, timeout=30, cwd=cwd,
+        )
+        if r.returncode != 0:
+            return {}
+        result: dict[int, list[int]] = {}
+        for iss in json.loads(r.stdout):
+            deps = [int(d) for d in _re.findall(r"depends-on: #(\d+)", iss.get("body", ""))]
+            if deps:
+                result[iss["number"]] = deps
+        return result
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # JSONL Monitor (runs as a thread inside agent process)
 # ---------------------------------------------------------------------------
@@ -1275,6 +1297,8 @@ def _tui_main(stdscr, config: dict):
     queue_fetch_time = 0.0
     cached_items: list[GHItem] = []
     items_fetch_time = 0.0
+    cached_blocked_deps: dict[int, list[int]] = {}
+    blocked_deps_fetch_time = 0.0
     CACHE_SECS = 30  # Refresh interval for GitHub API data
 
     pricing = cfg_get(config, "pricing", default={})
@@ -1306,6 +1330,12 @@ def _tui_main(stdscr, config: dict):
             try:
                 cached_items = fetch_issues_and_prs()
                 items_fetch_time = now
+            except Exception:
+                pass
+        if now - blocked_deps_fetch_time > CACHE_SECS:
+            try:
+                cached_blocked_deps = fetch_blocked_deps()
+                blocked_deps_fetch_time = now
             except Exception:
                 pass
 
@@ -1444,6 +1474,9 @@ def _tui_main(stdscr, config: dict):
                 state_display = f"{kind_prefix} {state_str}"
 
                 title = item.title
+                if "blocked" in item.labels and item.number in cached_blocked_deps:
+                    deps = cached_blocked_deps[item.number]
+                    title = f"[Blocked on {', '.join(f'#{d}' for d in deps)}] {title}"
                 # Truncate title to fit
                 prefix_len = 31
                 max_title = width - prefix_len - 1
