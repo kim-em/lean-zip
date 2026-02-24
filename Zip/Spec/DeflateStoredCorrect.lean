@@ -5,31 +5,12 @@
   encoded as stored (uncompressed) blocks. This is the simplest possible
   native roundtrip — no Huffman encoding, no LZ77 matching.
 
-  ## Status
-  - `deflateStoredPure` definition: complete
-  - `readBits_1_at_0`: proved
-  - `readBits_2_at_1`: proved (bv_decide for bitvector identity)
-  - `readUInt16LE_at_aligned`: proved
-  - `uint16_le_roundtrip`: proved (bv_decide)
-  - `uint16_xor_complement`: proved (bv_decide)
-  - `readBytes_at_aligned`: proved
-  - `decodeStored_on_block`: proved (composing the above)
-  - `readUInt16LE_align`: proved
-  - `decodeStored_align`: proved
-  - `inflateLoop_final_stored`: proved (composing all the above)
-  - `fromLengths_*_ok`: proved (Array.any rewritten to List.any for kernel evaluation)
-  - `inflate_deflateStoredPure`: proved (fromLengths + multi-block strong induction)
-
-  ## Proof approach
-  The roundtrip proof requires tracing through the native inflate pipeline
+  The roundtrip proof traces through the native inflate pipeline
   on the specific byte sequence produced by deflateStoredPure:
   1. inflate → inflateRaw → fromLengths (builds Huffman trees, unused for stored blocks)
   2. inflateLoop reads BFINAL (1 bit), BTYPE (2 bits), dispatches to decodeStored
   3. decodeStored: alignToByte → readUInt16LE (LEN) → readUInt16LE (NLEN) → readBytes
-  4. If multi-block, inflateLoop recurses
-
-  Key difficulty: ByteArray indexing through concatenation boundaries,
-  and converting between `getElem!` (runtime) and `getElem` (proof-friendly).
+  4. If multi-block, inflateLoop recurses with strong induction on remaining data
 -/
 import Zip.Native.Inflate
 import Zip.Native.Deflate
@@ -45,7 +26,7 @@ open Zip.Native
     When `pos ≥ data.size`, produces a single final empty block. -/
 def deflateStoredPure (data : ByteArray) (pos : Nat := 0) : ByteArray :=
   let blockSize := min (data.size - pos) 65535
-  if h : pos + blockSize ≥ data.size then
+  if _ : pos + blockSize ≥ data.size then
     let len := blockSize.toUInt16
     let nlen := len ^^^ 0xFFFF
     ByteArray.mk #[0x01, (len &&& 0xFF).toUInt8,
@@ -62,36 +43,10 @@ def deflateStoredPure (data : ByteArray) (pos : Nat := 0) : ByteArray :=
 termination_by data.size - pos
 decreasing_by omega
 
--- Sanity checks: round-trip through native inflate
-#eval do
-  let data := ByteArray.mk #[1, 2, 3, 4, 5]
-  let compressed := deflateStoredPure data
-  match Inflate.inflate compressed with
-  | .ok result => return result == data
-  | .error _ => return false
-
-#eval do
-  let data := ByteArray.empty
-  let compressed := deflateStoredPure data
-  match Inflate.inflate compressed with
-  | .ok result => return result == data
-  | .error _ => return false
-
--- Sanity check: multi-block round-trip (data > 65535 bytes)
-#eval do
-  let data := ByteArray.mk (.replicate 100000 42)
-  let compressed := deflateStoredPure data
-  match Inflate.inflate compressed with
-  | .ok result => return result == data
-  | .error _ => return false
-
 /-! ## fromLengths succeeds on fixed codes
 
-These are computationally verified by the #eval checks above.
-Array.any is opaque to the kernel evaluator, making direct proof difficult.
-Approach tried: converting to List via toList + mem_replicate, which works
-for the first guard (all lengths ≤ 15) but the Kraft inequality computation
-also involves List.foldl on a large list which doesn't reduce. -/
+Array.any is opaque to the kernel evaluator, so we rewrite through List.any
+for the first guard and List.foldl for the Kraft inequality guard. -/
 
 theorem fromLengths_fixedDist_ok :
     ∃ t, HuffTree.fromLengths Inflate.fixedDistLengths = .ok t := by
@@ -145,10 +100,7 @@ theorem readBits_1_at_0 (data : ByteArray) (pos : Nat)
   · simp
 
 /-- Reading 2 bits starting at bitOff 1 within the same byte.
-    Returns bits 1-2 of the byte as a 2-bit value.
-    Approach tried: unfolding readBits.go twice, reducing readBit at each step.
-    Remaining: bitvector arithmetic identity
-    (0 ||| (((x >>> 1) &&& 1) <<< 0)) ||| (((x >>> 2) &&& 1) <<< 1) = (x >>> 1) &&& 3 -/
+    Returns bits 1-2 of the byte as a 2-bit value. -/
 theorem readBits_2_at_1 (data : ByteArray) (pos : Nat)
     (hpos : pos < data.size) :
     BitReader.readBits { data, pos, bitOff := 1 } 2 =
@@ -277,11 +229,10 @@ theorem decodeStored_align (compressed : ByteArray) (brPos bitOff : Nat)
 
 /-! ## inflateLoop processes stored blocks -/
 
+set_option linter.unusedSimpArgs false in
 /-- inflateLoop correctly processes a single final stored block.
     The block starts at brPos with header byte 0x01 (BFINAL=1, BTYPE=00),
-    followed by LEN/NLEN/data starting at brPos+1.
-    This combines readBits_1_at_0 (BFINAL), readBits_2_at_1 (BTYPE),
-    and decodeStored_on_block. -/
+    followed by LEN/NLEN/data starting at brPos+1. -/
 theorem inflateLoop_final_stored (compressed : ByteArray) (brPos : Nat)
     (blockLen : Nat) (hlen : blockLen ≤ 65535)
     (output : ByteArray) (maxOutputSize : Nat)
@@ -329,6 +280,7 @@ theorem inflateLoop_final_stored (compressed : ByteArray) (brPos : Nat)
   simp only [h_beq, ↓reduceIte, BitReader.alignToByte,
     show ((0 : Nat) == 0) = true from rfl, pure, Except.pure]
 
+set_option linter.unusedSimpArgs false in
 /-- inflateLoop correctly processes a single non-final stored block.
     The block starts at brPos with header byte 0x00 (BFINAL=0, BTYPE=00).
     After processing, inflateLoop recurses with the output extended and
@@ -364,7 +316,6 @@ theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
   simp only [bind, Except.bind]
   -- Step 2: readBits 2 (BTYPE)
   rw [readBits_2_at_1 compressed brPos hpos]
-  simp only [bind, Except.bind]
   -- Step 3: From hhdr, compute bfinal and btype
   rw [hhdr]
   simp only [show (0x00 : UInt8).toUInt32 &&& 1 = 0 from by decide,
@@ -459,7 +410,7 @@ private theorem deflateStoredPure_eq_nonfinal (data : ByteArray) (pos : Nat)
 set_option maxHeartbeats 800000 in
 /-- Final block case of inflateLoop_deflateStored. -/
 private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
-    (hpos : pos ≤ data.size) (h_size : data.size ≤ 256 * 1024 * 1024)
+    (hpos : pos ≤ data.size)
     (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
     (fuel maxOutputSize : Nat)
     (h_fuel : fuel ≥ (data.size - pos + 65535) / 65535)
@@ -498,11 +449,11 @@ private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
 set_option maxHeartbeats 800000 in
 /-- Step through one non-final stored block via inflateLoop_nonfinal_stored. -/
 private theorem inflateLoop_nonfinal_step (data : ByteArray) (pos : Nat)
-    (hpos : pos ≤ data.size) (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
+    (_ : pos ≤ data.size) (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
     (fuel' maxOutputSize : Nat)
     (h_fit : output.size + (data.size - pos) ≤ maxOutputSize)
-    (h_final : ¬(data.size - pos ≤ 65535))
-    (h_pos65535 : pos + 65535 ≤ data.size)
+    (_ : ¬(data.size - pos ≤ 65535))
+    (_ : pos + 65535 ≤ data.size)
     (h_block_sz : (data.extract pos (pos + 65535)).size = 65535) :
     Inflate.inflateLoop
       { data := pfx ++ (storedBlockHdr 65535 false ++
@@ -561,7 +512,7 @@ private theorem nonfinal_reassoc (pfx block rest : ByteArray) :
 private theorem inflateLoop_nonfinal_after_step (data : ByteArray) (pos : Nat)
     (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
     (fuel' maxOutputSize : Nat)
-    (h_block_sz : (data.extract pos (pos + 65535)).size = 65535)
+    (_ : (data.extract pos (pos + 65535)).size = 65535)
     (h_pos65535 : pos + 65535 ≤ data.size)
     (h_pfx'_sz : (pfx ++ (storedBlockHdr 65535 false ++
         data.extract pos (pos + 65535))).size = pfx.size + 5 + 65535)
@@ -664,7 +615,7 @@ private theorem inflateLoop_deflateStored_apply_ih (data : ByteArray) (pos : Nat
     (h_block_sz : (data.extract pos (pos + 65535)).size = 65535)
     (h_fuel : fuel' + 1 ≥ (data.size - pos + 65535) / 65535)
     (h_fit : output.size + (data.size - pos) ≤ maxOutputSize)
-    (h_final : ¬(data.size - pos ≤ 65535))
+    (_ : ¬(data.size - pos ≤ 65535))
     (ih : ∀ (pos' : Nat), pos' ≤ data.size →
       ∀ (pfx' output' : ByteArray) (fuel' : Nat),
       fuel' ≥ (data.size - pos' + 65535) / 65535 →
@@ -689,38 +640,6 @@ private theorem inflateLoop_deflateStored_apply_ih (data : ByteArray) (pos : Nat
     (pfx ++ (storedBlockHdr 65535 false ++ data.extract pos (pos + 65535)))
     (output ++ data.extract pos (pos + 65535)) fuel' h_fuel'
     (by simp only [ByteArray.size_append, h_block_sz]; omega) (by omega)
-
-set_option maxHeartbeats 800000 in
-/-- Non-final block case: assembles the two halves of the chain.
-    All intermediate values are parameters to minimize proof term depth. -/
-private theorem inflateLoop_deflateStored_nonfinal (data : ByteArray) (pos : Nat)
-    (hpos : pos ≤ data.size)
-    (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
-    (fuel' maxOutputSize : Nat)
-    (h_fit : output.size + (data.size - pos) ≤ maxOutputSize)
-    (h_final : ¬(data.size - pos ≤ 65535))
-    (h_pos65535 : pos + 65535 ≤ data.size)
-    (h_block_sz : (data.extract pos (pos + 65535)).size = 65535)
-    (h_pfx'_sz : (pfx ++ (storedBlockHdr 65535 false ++
-        data.extract pos (pos + 65535))).size = pfx.size + 5 + 65535)
-    (endPos : Nat)
-    (h_ih : Inflate.inflateLoop
-      { data := pfx ++ (storedBlockHdr 65535 false ++ data.extract pos (pos + 65535)) ++
-          deflateStoredPure data (pos + 65535),
-        pos := (pfx ++ (storedBlockHdr 65535 false ++ data.extract pos (pos + 65535))).size,
-        bitOff := 0 }
-      (output ++ data.extract pos (pos + 65535)) fixedLit fixedDist maxOutputSize fuel' =
-    .ok (output ++ data.extract pos (pos + 65535) ++ data.extract (pos + 65535) data.size,
-      endPos)) :
-    ∃ endPos, Inflate.inflateLoop
-      { data := pfx ++ deflateStoredPure data pos, pos := pfx.size, bitOff := 0 }
-      output fixedLit fixedDist maxOutputSize (fuel' + 1) =
-    .ok (output ++ data.extract pos data.size, endPos) :=
-  ⟨endPos,
-    (nonfinal_chain_first_half data pos hpos pfx output fixedLit fixedDist
-      fuel' maxOutputSize h_fit h_final h_pos65535 h_block_sz).trans
-    (inflateLoop_nonfinal_after_step data pos pfx output fixedLit fixedDist
-      fuel' maxOutputSize h_block_sz h_pos65535 h_pfx'_sz endPos h_ih)⟩
 
 set_option maxHeartbeats 800000 in
 /-- Non-final case: takes IH result as bundle. Destructures and applies chain in term mode.
@@ -786,7 +705,7 @@ private theorem inflateLoop_deflateStored_nonfinal_fuel (data : ByteArray) (pos 
     (fuel - 1) maxOutputSize h_fit h_final h_pos65535 h_block_sz h_pfx'_sz h_ih_bundle
 
 private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
-    (hpos : pos ≤ data.size) (h_size : data.size ≤ 256 * 1024 * 1024)
+    (hpos : pos ≤ data.size)
     (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
     (fuel maxOutputSize : Nat)
     (h_fuel : fuel ≥ (data.size - pos + 65535) / 65535)
@@ -811,7 +730,7 @@ private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
   intro pos hpos pfx output fuel h_eq h_fuel h_fit
   rw [← h_eq] at h_fuel h_fit
   by_cases h_final : data.size - pos ≤ 65535
-  · exact inflateLoop_deflateStored_final data pos hpos h_size pfx output fixedLit fixedDist
+  · exact inflateLoop_deflateStored_final data pos hpos pfx output fixedLit fixedDist
       fuel maxOutputSize h_fuel h_fit h_final
   · exact inflateLoop_deflateStored_nonfinal_fuel data pos hpos pfx output fixedLit fixedDist
       fuel maxOutputSize (by omega) h_fit h_final
@@ -837,9 +756,9 @@ theorem inflate_deflateStoredPure (data : ByteArray)
   -- Handle fromLengths calls
   have ⟨fixedLit, hfl⟩ := fromLengths_fixedLit_ok
   have ⟨fixedDist, hfd⟩ := fromLengths_fixedDist_ok
-  rw [hfl, hfd]; simp only [bind, Except.bind]
+  simp only [hfl, hfd]
   -- Apply the main loop theorem
-  have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega) h
+  have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega)
     ByteArray.empty ByteArray.empty fixedLit fixedDist 10001 (256 * 1024 * 1024)
     (by omega) (by simp [ByteArray.size_empty]; omega)
   simp only [ByteArray.empty_append, ByteArray.size_empty] at hloop
