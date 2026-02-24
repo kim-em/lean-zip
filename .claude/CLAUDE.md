@@ -485,11 +485,13 @@ Update it during review and reflect sessions.
   same namespace (`Inflate.lengthBase` instead of `lengthBase`). For
   definitions used unqualified within their own namespace AND needed
   cross-file, use public (no modifier) instead.
-- **Avoid `▸` with UInt32/BitVec goals**: The `▸` (subst rewrite) tactic
-  triggers full `whnf` reduction, which can deterministic-timeout on goals
-  involving UInt32 or BitVec operations. Use `obtain ⟨rfl, _⟩ := h` +
-  `rw [...]` + `exact ...` instead. The `rw` tactic is much more targeted
-  and avoids the expensive reduction.
+- **Avoid `▸` and `congr` with UInt32/BitVec goals**: The `▸` (subst
+  rewrite) and `congr` tactics trigger full `whnf` reduction, which can
+  deterministic-timeout on goals involving UInt32 or BitVec operations.
+  Use `obtain ⟨rfl, _⟩ := h` + `rw [...]` + `exact ...` instead.
+  The `rw` tactic is much more targeted and avoids the expensive
+  reduction. For goals like `f (a ++ b)[i]! ... = f a[i]! ...`, use
+  explicit `rw [lemma_for_each_index]` instead of `congr 1`.
 - **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
   `return` inside a `for` loop exits the loop (producing `some`), not the
   function. Use explicit recursive helper functions instead — they're also
