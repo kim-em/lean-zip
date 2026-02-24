@@ -1,4 +1,5 @@
 import Zip.Spec.HuffmanCorrect
+import Zip.Spec.BitstreamComplete
 
 /-!
 # Block-Level Decode Correctness
