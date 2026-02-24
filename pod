@@ -108,6 +108,11 @@ def ensure_config() -> dict:
     """Load config, creating default file if it doesn't exist."""
     POD_DIR.mkdir(parents=True, exist_ok=True)
     AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+    gitignore = POD_DIR / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("agents/\npod.log\nclaim-history.*\n")
+    elif "claim-history" not in gitignore.read_text():
+        gitignore.write_text(gitignore.read_text().rstrip("\n") + "\nclaim-history.*\n")
     if not CONFIG_PATH.exists():
         CONFIG_PATH.write_text(DEFAULT_CONFIG)
         log(f"Created default config at {CONFIG_PATH}")
