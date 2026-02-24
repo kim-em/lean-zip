@@ -197,19 +197,218 @@ private theorem alignToByte_pos_le (br : BitReader)
     | inr h => simp only; omega
 
 
+/-! ### BitReader invariant preservation
+
+All BitReader operations preserve `data` and the position invariant
+`bitOff = 0 ∨ pos < data.size`. We bundle these into combined lemmas
+for each function to minimize code. -/
+
+/-- Combined: readBit preserves data, hpos, and gives pos ≤ data.size. -/
+private theorem readBit_inv (br br' : BitReader) (bit : UInt32)
+    (h : br.readBit = .ok (bit, br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  simp only [BitReader.readBit] at h
+  split at h
+  · simp at h
+  · rename_i hlt
+    split at h <;> simp [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+
+/-- Combined: readBits.go preserves data, hpos, and pos ≤ data.size. -/
+private theorem readBits_go_inv (br br' : BitReader) (acc : UInt32)
+    (shift n : Nat) (val : UInt32)
+    (h : BitReader.readBits.go br acc shift n = .ok (val, br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  induction n generalizing br acc shift with
+  | zero =>
+    simp [BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
+  | succ n ih =>
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => simp [hrb] at h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrb] at h
+      have ⟨hd₁, hpos₁, hple₁⟩ := readBit_inv br br₁ bit hrb hpos
+      have ⟨hd', hpos', hple'⟩ := ih br₁ _ _ h hpos₁ hple₁
+      exact ⟨hd'.trans hd₁, hpos', hple'⟩
+
+/-- Combined: readBits preserves data, hpos, and pos ≤ data.size. -/
+private theorem readBits_inv (br br' : BitReader) (n : Nat)
+    (val : UInt32) (h : br.readBits n = .ok (val, br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size :=
+  readBits_go_inv br br' 0 0 n val h hpos hple
+
+/-- Combined: HuffTree.decode.go preserves data, hpos, and pos ≤ data.size. -/
+private theorem decode_go_inv (tree : HuffTree) (br br' : BitReader) (n : Nat)
+    (sym : UInt16) (h : HuffTree.decode.go tree br n = .ok (sym, br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  induction tree generalizing br n with
+  | leaf s =>
+    simp [HuffTree.decode.go] at h
+    obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
+  | empty => simp [HuffTree.decode.go] at h
+  | node z o ihz iho =>
+    simp only [HuffTree.decode.go] at h
+    split at h
+    · simp at h
+    · simp only [bind, Except.bind] at h
+      cases hrb : br.readBit with
+      | error e => simp [hrb] at h
+      | ok p =>
+        obtain ⟨bit, br₁⟩ := p
+        simp only [hrb] at h
+        have ⟨hd₁, hpos₁, hple₁⟩ := readBit_inv br br₁ bit hrb hpos
+        split at h
+        · have ⟨hd', hp', hl'⟩ := ihz br₁ _ h hpos₁ hple₁
+          exact ⟨hd'.trans hd₁, hp', hl'⟩
+        · have ⟨hd', hp', hl'⟩ := iho br₁ _ h hpos₁ hple₁
+          exact ⟨hd'.trans hd₁, hp', hl'⟩
+
+/-- Combined: HuffTree.decode preserves data, hpos, and pos ≤ data.size. -/
+private theorem decode_inv (tree : HuffTree) (br br' : BitReader)
+    (sym : UInt16) (h : tree.decode br = .ok (sym, br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size :=
+  decode_go_inv tree br br' 0 sym h hpos hple
+
+/-- Combined: decodeStored preserves data, and gives hpos + pos_le. -/
+private theorem decodeStored_inv (br br' : BitReader)
+    (output output' : ByteArray) (maxOut : Nat)
+    (h : Inflate.decodeStored br output maxOut = .ok (output', br')) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  sorry
+
+/-- Combined: decodeHuffman.go preserves data, hpos, and pos ≤ data.size. -/
+private theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
+    (br br' : BitReader) (output output' : ByteArray)
+    (maxOut fuel : Nat)
+    (h : Inflate.decodeHuffman.go litTree distTree maxOut br output fuel =
+      .ok (output', br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  sorry
+
+/-- Combined: readCLCodeLengths preserves data, hpos, and pos ≤ data.size. -/
+private theorem readCLCodeLengths_inv (br br' : BitReader)
+    (clLengths clLengths' : Array UInt8) (i numCodeLen : Nat)
+    (h : Inflate.readCLCodeLengths br clLengths i numCodeLen = .ok (clLengths', br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  -- Use strong induction on numCodeLen - i
+  suffices ∀ (m : Nat) br (clLengths : Array UInt8) (i numCodeLen : Nat),
+      m = numCodeLen - i →
+      Inflate.readCLCodeLengths br clLengths i numCodeLen = .ok (clLengths', br') →
+      (br.bitOff = 0 ∨ br.pos < br.data.size) → br.pos ≤ br.data.size →
+      br'.data = br.data ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+      br'.pos ≤ br'.data.size from this _ _ _ _ _ rfl h hpos hple
+  intro m
+  induction m with
+  | zero =>
+    intro br cl i ncl heq h hpos hple
+    unfold Inflate.readCLCodeLengths at h
+    split at h
+    · rename_i hlt; omega
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
+  | succ k ih =>
+    intro br cl i ncl heq h hpos hple
+    unfold Inflate.readCLCodeLengths at h
+    split at h
+    · simp only [bind, Except.bind] at h
+      cases hrb : br.readBits 3 with
+      | error e => simp [hrb] at h
+      | ok p =>
+        obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
+        have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 3 v hrb hpos hple
+        have ⟨hd', hp', hl'⟩ := ih br₁ _ (i + 1) ncl (by omega) h hpos₁ hple₁
+        exact ⟨hd'.trans hd₁, hp', hl'⟩
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
+
+/-- Combined: decodeCLSymbols preserves data, hpos, and pos ≤ data.size. -/
+private theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
+    (codeLengths codeLengths' : Array UInt8) (idx totalCodes fuel : Nat)
+    (h : Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+      .ok (codeLengths', br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  sorry
+
+/-- Combined: decodeDynamicTrees preserves data, hpos, and pos ≤ data.size. -/
+private theorem decodeDynamicTrees_inv (br br' : BitReader)
+    (litTree distTree : HuffTree)
+    (h : Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size := by
+  sorry
+
+/-! ### inflateLoop endPos bound -/
+
 /-- After a successful `inflateLoop`, the returned endPos ≤ br.data.size.
 
-    The proof tracks the hpos invariant (bitOff = 0 ∨ pos < data.size) through
-    each BitReader operation. In the terminal case (BFINAL), alignToByte gives
-    endPos ≤ data.size. In the recursive case, the invariant passes to the IH. -/
+    The proof tracks three invariants through each operation:
+    data preservation, hpos (bitOff=0 ∨ pos<data.size), and pos ≤ data.size.
+    Terminal case: alignToByte gives endPos ≤ data.size.
+    Recursive case: chain data_eq back to the original data. -/
 theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
     (fixedLit fixedDist : HuffTree) (maxOut fuel : Nat)
     (result : ByteArray) (endPos : Nat)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size)
     (h : Inflate.inflateLoop br output fixedLit fixedDist maxOut fuel =
       .ok (result, endPos)) :
     endPos ≤ br.data.size := by
-  sorry
+  induction fuel generalizing br output with
+  | zero => simp [Inflate.inflateLoop] at h
+  | succ n ih =>
+    simp only [Inflate.inflateLoop, bind, Except.bind] at h
+    cases hbf : br.readBits 1 with
+    | error e => simp [hbf] at h
+    | ok p =>
+      obtain ⟨bfinal, br₁⟩ := p; simp only [hbf] at h
+      have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 1 bfinal hbf hpos hple
+      cases hbt : br₁.readBits 2 with
+      | error e => simp [hbt] at h
+      | ok p =>
+        obtain ⟨btype, br₂⟩ := p; simp only [hbt] at h
+        have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 btype hbt hpos₁ hple₁
+        -- Use sorry for this complex block - will fill in after structure is validated
+        sorry
 
 /-- After a successful `inflateRaw`, the returned endPos ≤ data.size. -/
 theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
@@ -225,8 +424,10 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
     | error e => simp [hfdist] at h
     | ok fixedDist =>
       simp only [hfdist] at h
+      have hple : startPos ≤ data.size := by
+        sorry
       exact inflateLoop_endPos_le ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
-        maxOut 10001 result endPos (Or.inl rfl) h
+        maxOut 10001 result endPos (Or.inl rfl) hple h
 
 /-! ## inflateRaw completeness for non-zero startPos -/
 
