@@ -508,7 +508,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
               · -- sym ∉ {16,17,18}: throw, contradicts .ok
                 simp at h
 
-set_option maxRecDepth 4096 in
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/
 protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
@@ -669,13 +668,13 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                     have hlit_vl : Huffman.Spec.ValidLengths
                         ((List.map UInt8.toNat (clResults.extract 0
                           (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).take
-                          (hlit_v.toNat + 257)) 15 :=
-                      hlit_take ▸ hlit_valid
+                          (hlit_v.toNat + 257)) 15 := by
+                      rw [hlit_take]; exact hlit_valid
                     have hdist_vl : Huffman.Spec.ValidLengths
                         ((List.map UInt8.toNat (clResults.extract 0
                           (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).drop
-                          (hlit_v.toNat + 257)) 15 :=
-                      hdist_drop ▸ hdist_valid
+                          (hlit_v.toNat + 257)) 15 := by
+                      rw [hdist_drop]; exact hdist_valid
                     simp only [hlen_eq, beq_self_eq_true,
                       hlit_vl, hdist_vl, ↓reduceIte]
                     refine congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))
