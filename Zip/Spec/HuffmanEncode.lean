@@ -216,13 +216,6 @@ theorem assignLengths_bounded (depths : List (Nat × Nat)) (n maxBits : Nat)
   exact foldl_set_bounded depths _ maxBits
     (fun l hl => by have := List.eq_of_mem_replicate hl; omega) h
 
-/-- `ValidLengths` holds for all-zero lengths. -/
-private theorem validLengths_replicate_zero (n maxBits : Nat) :
-    ValidLengths (List.replicate n 0) maxBits := by
-  constructor
-  · intro l hl; have := List.eq_of_mem_replicate hl; omega
-  · simp
-
 /-- Filtering nonzero elements from an all-zero list gives the empty list. -/
 private theorem filter_ne_zero_replicate (n : Nat) :
     (List.replicate n (0 : Nat)).filter (· != 0) = [] := by
@@ -444,40 +437,28 @@ private theorem foldl_set_pos_or_exists (depths : List (Nat × Nat)) (acc : List
     | inr h => simp at h
   | cons d ds ih =>
     simp only [List.foldl_cons]
+    have hs' : s < (if d.1 < acc.length then acc.set d.1 d.2 else acc).length := by
+      split <;> simp_all [List.length_set]
+    apply ih _ hs' (fun p hp => hpos p (List.mem_cons_of_mem _ hp))
     by_cases hds : d.1 = s
-    · -- d assigns to position s
-      apply ih
-      · split
-        · simp [List.length_set]; exact hs
-        · exact hs
-      · exact fun p hp => hpos p (List.mem_cons_of_mem _ hp)
-      · left
-        split
-        · rw [hds, getElem!_pos _ s (by simp [List.length_set]; exact hs)]
-          simp [List.getElem_set_self]
-          exact hpos d (List.mem_cons_self ..) hds
-        · rename_i hge; simp at hge; omega
-    · -- d doesn't assign to position s
-      apply ih
-      · split
-        · simp [List.length_set]; exact hs
-        · exact hs
-      · exact fun p hp => hpos p (List.mem_cons_of_mem _ hp)
-      · cases hor with
-        | inl h =>
-          left; split
-          · have hs' : s < (acc.set d.1 d.2).length := by simp [List.length_set]; exact hs
-            rw [getElem!_pos _ s hs']
-            have hne : d.1 ≠ s := fun h => hds h
-            have : (acc.set d.1 d.2)[s] = acc[s]'(by omega) :=
-              List.getElem_set_ne hne hs'
-            rw [this, ← getElem!_pos acc s hs]; exact h
-          · exact h
-        | inr h =>
-          obtain ⟨p, hp, hps⟩ := h
-          cases hp with
-          | head => exact absurd hps hds
-          | tail _ hmem => exact Or.inr ⟨p, hmem, hps⟩
+    · left; split
+      · rw [hds, getElem!_pos _ s (by simp [List.length_set]; exact hs)]
+        simp [List.getElem_set_self]
+        exact hpos d (List.mem_cons_self ..) hds
+      · omega
+    ·
+      cases hor with
+      | inl h =>
+        left; split
+        · have hs_set : s < (acc.set d.1 d.2).length := by simp [List.length_set]; exact hs
+          rw [getElem!_pos _ s hs_set, List.getElem_set_ne hds hs_set,
+              ← getElem!_pos acc s hs]; exact h
+        · exact h
+      | inr h =>
+        obtain ⟨p, hp, hps⟩ := h
+        cases hp with
+        | head => exact absurd hps hds
+        | tail _ hmem => exact Or.inr ⟨p, hmem, hps⟩
 
 /-- If `(s, d)` appears in a list of depths, `d > 0`, and `s < n`, and all
     entries for `s` are positive, then `(assignLengths depths n)[s]! > 0`. -/
@@ -501,32 +482,9 @@ private theorem insertByWeight_mem (t : BuildTree) (xs : List BuildTree) :
   | cons y ys ih =>
     simp only [insertByWeight]
     split
-    · -- t :: y :: ys ↔ x = t ∨ x ∈ y :: ys — trivially true
-      simp [List.mem_cons]
-    · -- result is y :: insertByWeight t ys
-      -- goal: x ∈ y :: insertByWeight t ys ↔ x = t ∨ x ∈ y :: ys
-      constructor
-      · simp only [List.mem_cons]
-        intro h; cases h with
-        | inl h => exact Or.inr (Or.inl h)  -- x = y
-        | inr h =>  -- x ∈ insertByWeight t ys
-          cases ih.mp h with
-          | inl h => exact Or.inl h  -- x = t
-          | inr h => exact Or.inr (Or.inr h)  -- x ∈ ys
-      · simp only [List.mem_cons]
-        intro h; cases h with
-        | inl h => exact Or.inr (ih.mpr (Or.inl h))  -- x = t
-        | inr h => cases h with
-          | inl h => exact Or.inl h  -- x = y
-          | inr h => exact Or.inr (ih.mpr (Or.inr h))  -- x ∈ ys
-
-/-- A leaf's depths at depth `d` contain exactly its symbol at depth `d`. -/
-private theorem BuildTree.depths_leaf (w s d : Nat) :
-    (BuildTree.leaf w s).depths d = [(s, d)] := rfl
-
-/-- A node's depths are the union of left and right subtree depths. -/
-private theorem BuildTree.depths_node (w : Nat) (l r : BuildTree) (d : Nat) :
-    (BuildTree.node w l r).depths d = l.depths (d + 1) ++ r.depths (d + 1) := rfl
+    · simp [List.mem_cons]
+    · simp only [List.mem_cons, ih]
+      constructor <;> (intro h; obtain h | h | h := h <;> simp_all)
 
 /-- Symbol `s` is a leaf symbol in tree `t`. -/
 private inductive BuildTree.HasSym : BuildTree → Nat → Prop where
@@ -570,8 +528,7 @@ private theorem buildHuffmanTree_HasSym (ts : List BuildTree) (s : Nat)
   | [] => obtain ⟨_, hmem, _⟩ := h; simp at hmem
   | [t] =>
     obtain ⟨t', hmem, hsym⟩ := h
-    simp [buildHuffmanTree]
-    simp at hmem
+    simp only [buildHuffmanTree, List.mem_cons, List.mem_nil_iff, or_false] at hmem ⊢
     exact hmem ▸ hsym
   | t1 :: t2 :: rest =>
     simp only [buildHuffmanTree]
@@ -582,14 +539,11 @@ private theorem buildHuffmanTree_HasSym (ts : List BuildTree) (s : Nat)
     simp only [List.mem_cons] at hmem
     cases hmem with
     | inl h =>
-      -- t' = t1, which is the left child of merged
       exact ⟨_, (insertByWeight_mem _ _ _).mpr (Or.inl rfl), .nodeLeft _ _ _ _ (h ▸ hsym)⟩
     | inr h => cases h with
       | inl h =>
-        -- t' = t2, which is the right child of merged
         exact ⟨_, (insertByWeight_mem _ _ _).mpr (Or.inl rfl), .nodeRight _ _ _ _ (h ▸ hsym)⟩
       | inr hmem =>
-        -- t' ∈ rest, which is in insertByWeight result
         exact ⟨t', (insertByWeight_mem _ _ _).mpr (Or.inr hmem), hsym⟩
 termination_by ts.length
 
@@ -611,10 +565,9 @@ private theorem buildHuffmanTree_isNode (ts : List BuildTree) (h : ts.length ≥
       exact ⟨_, _, _, rfl⟩
     · -- rest non-empty, insertByWeight has ≥ 2 elements, recurse
       have hge2 : (insertByWeight merged rest).length ≥ 2 := by
-        have : rest.length > 0 := by
-          cases rest with | nil => simp at hrest | cons _ _ => simp
-        omega
-      have hlt : (insertByWeight merged rest).length < (t1 :: t2 :: rest).length := by
+        rw [insertByWeight_length]
+        cases rest with | nil => contradiction | cons _ _ => simp
+      have : (insertByWeight merged rest).length < (t1 :: t2 :: rest).length := by
         simp [insertByWeight_length]
       exact buildHuffmanTree_isNode _ hge2
 termination_by ts.length
