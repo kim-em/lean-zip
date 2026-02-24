@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import curses
 import dataclasses
+import datetime
 import json
 import os
 import re
@@ -282,6 +283,27 @@ def human_duration(secs: int | float) -> str:
     return f"{secs}s"
 
 
+def timeago(iso_ts: str) -> str:
+    """Convert ISO 8601 timestamp to relative time string like '2h ago'."""
+    if not iso_ts:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        delta = datetime.datetime.now(datetime.timezone.utc) - dt
+        secs = int(delta.total_seconds())
+        if secs < 0:
+            return ""
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+    except (ValueError, TypeError):
+        return ""
+
+
 def fmt_tokens(n: int) -> str:
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
@@ -351,6 +373,7 @@ class GHItem:
     labels: list[str]
     ci_status: str      # "" (unknown/none), "pass", "fail"
     state: str          # "open", "closed", "merged"
+    timestamp: str      # ISO 8601 timestamp for the current state
 
 
 def fetch_issues_and_prs() -> list[GHItem]:
@@ -362,15 +385,17 @@ def fetch_issues_and_prs() -> list[GHItem]:
     try:
         r = subprocess.run(
             ["gh", "issue", "list", "--label", "agent-plan", "--state", "all",
-             "--limit", "20", "--json", "number,title,labels,state"],
+             "--limit", "20", "--json", "number,title,labels,state,createdAt,closedAt"],
             capture_output=True, text=True, timeout=30, cwd=cwd,
         )
         if r.returncode == 0:
             for iss in json.loads(r.stdout):
                 labels = [l["name"] for l in iss.get("labels", [])]
+                state = iss.get("state", "OPEN").lower()
+                ts = iss.get("closedAt") or "" if state == "closed" else iss.get("createdAt", "")
                 items.append(GHItem(
                     kind="issue", number=iss["number"], title=iss["title"],
-                    labels=labels, ci_status="", state=iss.get("state", "OPEN").lower(),
+                    labels=labels, ci_status="", state=state, timestamp=ts,
                 ))
     except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
         pass
@@ -379,7 +404,7 @@ def fetch_issues_and_prs() -> list[GHItem]:
     try:
         r = subprocess.run(
             ["gh", "pr", "list", "--state", "all", "--limit", "15",
-             "--json", "number,title,labels,statusCheckRollup,state"],
+             "--json", "number,title,labels,statusCheckRollup,state,createdAt,closedAt,mergedAt"],
             capture_output=True, text=True, timeout=30, cwd=cwd,
         )
         if r.returncode == 0:
@@ -394,9 +419,11 @@ def fetch_issues_and_prs() -> list[GHItem]:
                     elif (any(c.get("conclusion") == "SUCCESS" for c in checks) and
                           all(c.get("conclusion") == "SUCCESS" for c in checks if c.get("conclusion"))):
                         ci = "pass"
+                pr_state = pr.get("state", "OPEN").lower()
+                ts = pr.get("mergedAt") or pr.get("closedAt") or "" if pr_state in ("merged", "closed") else pr.get("createdAt", "")
                 items.append(GHItem(
                     kind="pr", number=pr["number"], title=pr["title"],
-                    labels=labels, ci_status=ci, state=pr.get("state", "OPEN").lower(),
+                    labels=labels, ci_status=ci, state=pr_state, timestamp=ts,
                 ))
     except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
         pass
@@ -1185,7 +1212,7 @@ def _tui_main(stdscr, config: dict):
 
             items_start_row = agents_end + 1  # skip 1 blank line
             _addstr(stdscr, items_start_row, 0, "─" * min(width, 80), curses.color_pair(4))
-            item_hdr = "   #      Kind  State  CI  Title"
+            item_hdr = "   #      Kind  State  CI  When      Title"
             _addstr(stdscr, items_start_row + 1, 0, item_hdr[:width], curses.A_DIM)
 
             for j, item in enumerate(items_to_show):
@@ -1212,14 +1239,16 @@ def _tui_main(stdscr, config: dict):
 
                 title = item.title
                 # Truncate title to fit
-                prefix_len = 28 + len(label_tags)  # approximate
+                prefix_len = 38 + len(label_tags)  # approximate
                 max_title = width - prefix_len - 1
                 if max_title > 10 and len(title) > max_title:
                     title = title[:max_title - 3] + "..."
 
+                age = timeago(item.timestamp)
+
                 is_item_sel = not is_agent_selected and j == selected_idx
                 marker = ">" if is_item_sel else " "
-                line = f"{marker}  #{item.number:<5} {kind_str:4}  {state_str:<6} {ci_str:2}  {title}{label_tags}"
+                line = f"{marker}  #{item.number:<5} {kind_str:4}  {state_str:<6} {ci_str:2}  {age:<8}  {title}{label_tags}"
 
                 attr = curses.A_NORMAL
                 if is_item_sel:
