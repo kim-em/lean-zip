@@ -192,9 +192,9 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
             -- Bridge native extract to spec take/drop
             have hcl_res_sz : codeLengths'.size =
                 hlit_v + 257 + (hdist_v + 1) := by
-              have := Correctness.decodeCLSymbols_size clTree br₄ _ 0 _
-                _ codeLengths' br₅ hdcl_nat
-              simpa using this
+              have ⟨_, _, hsz⟩ := Correctness.decodeCLSymbols_inv clTree br₄ _ 0 _
+                _ codeLengths' br₅ hwf₄ hpos₄ hdcl_nat
+              simpa using hsz
             have hlit_bridge :
                 (codeLengths'.extract 0 (hlit_v + 257)).toList.map UInt8.toNat = litLens := by
               rw [← hlit_eq, ← hcl_res_map]

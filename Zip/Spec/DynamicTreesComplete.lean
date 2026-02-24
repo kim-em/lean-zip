@@ -169,7 +169,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
           have ⟨cl', br', hrec, heq, hrest', hwf', hpos'⟩ :=
             ih br₁ (codeLengths.set! idx sym.toUInt16.toUInt8) (idx + 1) hwf₁ hpos₁
               (by omega) hsize₁ (by
-                rw [extract_set_map_append codeLengths idx sym.toUInt16.toUInt8 (by omega),
+                rw [Array.extract_set_map_append codeLengths idx sym.toUInt16.toUInt8 (by omega),
                     hsym_conv, hrest₁]; exact hspec)
           refine ⟨cl', br', ?_, heq, hrest', hwf', hpos'⟩
           unfold Zip.Native.Inflate.decodeCLSymbols
@@ -216,7 +216,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                     codeLengths[idx - 1]! hbound_ok
                   have hfill_ext := fillEntries_extract codeLengths idx (rep + 3) totalCodes
                     codeLengths[idx - 1]! hbound_ok (by omega)
-                  have hprev_eq := extract_map_getLast_eq codeLengths idx hidx0 (by omega)
+                  have hprev_eq := Array.extract_map_getLast_eq codeLengths idx hidx0 (by omega)
                   have ⟨cl', br', hrec, heq, hrest', hwf', hpos'⟩ := ih br₂
                     (Zip.Native.Inflate.fillEntries codeLengths idx (rep + 3) totalCodes
                       codeLengths[idx - 1]!).fst
