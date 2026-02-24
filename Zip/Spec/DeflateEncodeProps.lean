@@ -62,13 +62,7 @@ theorem fixedLitLengths_entry_bounds :
     ∀ x ∈ fixedLitLengths, 1 ≤ x ∧ x ≤ 15 := by
   simp only [fixedLitLengths, List.mem_append, List.mem_replicate]
   intro x hx
-  cases hx with
-  | inl h => cases h with
-    | inl h => cases h with
-      | inl h => exact ⟨by omega, by omega⟩
-      | inr h => exact ⟨by omega, by omega⟩
-    | inr h => exact ⟨by omega, by omega⟩
-  | inr h => exact ⟨by omega, by omega⟩
+  obtain ((h | h) | h) | h := hx <;> omega
 
 /-- All entries in `fixedDistLengths` are between 1 and 15. -/
 theorem fixedDistLengths_entry_bounds :
@@ -80,29 +74,25 @@ theorem fixedDistLengths_entry_bounds :
 theorem fixedLitLengths_getElem_pos (i : Nat) (h : i < fixedLitLengths.length) :
     fixedLitLengths[i]! ≥ 1 := by
   rw [getElem!_pos fixedLitLengths i h]
-  have := fixedLitLengths_entry_bounds (fixedLitLengths[i]) (List.getElem_mem h)
-  exact this.1
+  exact (fixedLitLengths_entry_bounds _ (List.getElem_mem h)).1
 
 /-- For any valid index into fixedLitLengths, the entry is ≤ 15. -/
 theorem fixedLitLengths_getElem_le (i : Nat) (h : i < fixedLitLengths.length) :
     fixedLitLengths[i]! ≤ 15 := by
   rw [getElem!_pos fixedLitLengths i h]
-  have := fixedLitLengths_entry_bounds (fixedLitLengths[i]) (List.getElem_mem h)
-  exact this.2
+  exact (fixedLitLengths_entry_bounds _ (List.getElem_mem h)).2
 
 /-- For any valid index into fixedDistLengths, the entry is non-zero. -/
 theorem fixedDistLengths_getElem_pos (i : Nat) (h : i < fixedDistLengths.length) :
     fixedDistLengths[i]! ≥ 1 := by
   rw [getElem!_pos fixedDistLengths i h]
-  have := fixedDistLengths_entry_bounds (fixedDistLengths[i]) (List.getElem_mem h)
-  exact this.1
+  exact (fixedDistLengths_entry_bounds _ (List.getElem_mem h)).1
 
 /-- For any valid index into fixedDistLengths, the entry is ≤ 15. -/
 theorem fixedDistLengths_getElem_le (i : Nat) (h : i < fixedDistLengths.length) :
     fixedDistLengths[i]! ≤ 15 := by
   rw [getElem!_pos fixedDistLengths i h]
-  have := fixedDistLengths_entry_bounds (fixedDistLengths[i]) (List.getElem_mem h)
-  exact this.2
+  exact (fixedDistLengths_entry_bounds _ (List.getElem_mem h)).2
 
 /-! ## encodeLitLen succeeds for matchLZ77 symbols -/
 
@@ -256,6 +246,7 @@ theorem findDistCode_code_bound (dist dCode dExtraN dExtraV : Nat)
   simp [distBase] at this
   exact this
 
+set_option linter.unusedSimpArgs false in
 /-- `encodeLitLen` succeeds for references with appropriate bounds. -/
 theorem encodeLitLen_reference_isSome (len dist : Nat)
     (hlen_ge : len ≥ 3) (hlen_le : len ≤ 258)
@@ -289,7 +280,7 @@ theorem encodeLitLen_reference_isSome (len dist : Nat)
       | some q =>
         obtain ⟨dCode, dExtraN, dExtraV⟩ := q
         have hdcode := findDistCode_code_bound dist dCode dExtraN dExtraV hdc
-        simp only [bind, Option.bind]
+        simp only [bind]
         -- encodeSymbol distTable dCode succeeds
         have hdsym : dCode < fixedDistLengths.length := by
           rw [fixedDistLengths_length]; omega

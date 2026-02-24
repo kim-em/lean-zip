@@ -158,6 +158,7 @@ private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
       split <;> simp_all [beq_iff_eq] <;> omega
     · rfl
 
+set_option linter.unusedSimpArgs false in
 /-- Properties of `findLengthCode.go`: the returned index is valid,
     extra bits count and value are consistent with the tables. -/
 private theorem findLengthCode_go_spec (len i idx extraN extraV : Nat)
@@ -187,6 +188,7 @@ private theorem lengthTable_gap :
     ∀ i : Fin 29, (lengthBase[i.val + 1]?.getD 259) - lengthBase[i.val]! ≤
       2 ^ lengthExtra[i.val]! := by decide
 
+set_option linter.unusedSimpArgs false in
 /-- `findLengthCode` returns a valid index with consistent extra bits. -/
 theorem findLengthCode_spec (len idx extraN extraV : Nat)
     (h : findLengthCode len = some (idx, extraN, extraV)) :
@@ -202,6 +204,7 @@ theorem findLengthCode_spec (len idx extraN extraV : Nat)
   rw [hgo.2.1]  -- extraN → lengthExtra[idx]!
   omega
 
+set_option linter.unusedSimpArgs false in
 /-- Properties of `findDistCode.go`: analogous to `findLengthCode_go_spec`. -/
 private theorem findDistCode_go_spec (dist i idx extraN extraV : Nat)
     (h : findDistCode.go dist i = some (idx, extraN, extraV)) :
@@ -229,6 +232,7 @@ private theorem distTable_gap :
     ∀ i : Fin 30, (distBase[i.val + 1]?.getD 32769) - distBase[i.val]! ≤
       2 ^ distExtra[i.val]! := by decide
 
+set_option linter.unusedSimpArgs false in
 /-- `findDistCode` returns a valid index with consistent extra bits. -/
 theorem findDistCode_spec (dist idx extraN extraV : Nat)
     (h : findDistCode dist = some (idx, extraN, extraV)) :
@@ -470,14 +474,7 @@ theorem encodeSymbols_decodeSymbols
               simp [encodeSymbols] at her; subst her
               simp [pure, Pure.pure]
             | cons _ _ => exact absurd hvalid id
-          | literal b =>
-            have hvalid' : ValidSymbolList syms := by
-              cases syms with
-              | nil => exact absurd hvalid id
-              | cons _ _ => exact hvalid
-            rw [ih restBits f her (by simp [List.length] at hfuel ⊢; omega) hvalid']
-            simp [pure, Pure.pure]
-          | reference len dist =>
+          | literal _ | reference _ _ =>
             have hvalid' : ValidSymbolList syms := by
               cases syms with
               | nil => exact absurd hvalid id
