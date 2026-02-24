@@ -1,5 +1,4 @@
 import Zip.Spec.Deflate
-import Zip.Spec.BitstreamCorrect
 import Zip.Spec.HuffmanEncode
 
 /-!
