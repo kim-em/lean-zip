@@ -9,14 +9,27 @@ to answer questions. Never ask for confirmation or approval. Just do the work.
 
 ## Step 1: Claim a work item
 
-List unclaimed issues and pick the oldest:
+First, get the full picture:
 ```
-coordination list-unclaimed
+coordination orient
 ```
 
-If the queue is empty, write a brief progress note and exit.
+**Priority order for claiming work:**
 
-Pick the first (oldest) issue. Claim it:
+1. **PRs needing attention (highest priority)**: If orient shows PRs with merge
+   conflicts or failing CI, check whether any unclaimed issue references that PR
+   number (e.g. a title containing "rebase PR #147" or "fix PR #147"). If so,
+   claim that issue first — unblocking broken PRs beats starting new work.
+
+2. **Oldest unclaimed issue (default)**: If no PR-fix issues exist (or no PRs
+   need attention), pick the first issue from:
+   ```
+   coordination list-unclaimed
+   ```
+
+If the queue is empty and no PRs need attention, write a brief progress note and exit.
+
+Claim your chosen issue:
 ```
 coordination claim <issue-number>
 ```

@@ -25,7 +25,8 @@ REPO="kim-em/lean-zip"
 SESSION_ID="${LEAN_ZIP_SESSION_ID:-unknown}"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)"
 PLANNER_LOCK_ISSUE=8    # pinned sentinel issue for planner lock
-PLANNER_LOCK_TTL=600    # lock expires after 10 minutes (seconds)
+PLANNER_LOCK_TTL=1200   # lock expires after 20 minutes (seconds)
+PLANNER_LOCK_COMMENT_FILE="/tmp/lean-zip-planner-lock-${SESSION_ID}.id"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -384,52 +385,61 @@ cmd_skip() {
 # --- lock-planner ---
 # Advisory lock to prevent concurrent planner sessions.
 # Uses comments on the sentinel issue as tickets: each agent posts a comment
-# with its session ID + Unix timestamp, then checks whether its comment has
-# the lowest ID among all active (within-TTL) lock-attempt comments.
+# with its session ID, then checks whether its comment has the lowest ID
+# among all active (within-TTL) lock-attempt comments.
 # Lowest ID = posted first = lock winner. All agents share one GitHub account
 # so reactions/labels can't distinguish them; comment IDs are unique.
+# TTL is measured using server-side created_at, not agent clocks.
+# The winning comment ID is persisted to a temp file for use by unlock.
 # Returns 0 if lock acquired, 1 if another planner is active.
 cmd_lock_planner() {
     local now
     now="$(date -u +%s)"
+    local cutoff=$(( now - PLANNER_LOCK_TTL ))
 
     # 1. Post a lock-attempt comment (gets a unique, monotonically increasing ID)
     local my_id
     my_id="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
-        -X POST -f body="planner-lock-attempt: $SESSION_ID $now" \
+        -X POST -f body="planner-lock-attempt: $SESSION_ID" \
         --jq '.id')"
 
     # 2. Brief pause so concurrent attempts land before we read
     sleep 3
 
-    # 3. Find the lowest comment ID among all active lock-attempt comments
-    local cutoff=$(( now - PLANNER_LOCK_TTL ))
+    # 3. Find the lowest comment ID among all active lock-attempt comments.
+    #    Use server-side created_at for TTL (avoids agent clock skew).
     local earliest_id
-    earliest_id="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
+    earliest_id="$(gh api --paginate "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
         --jq "[.[] | select(.body | startswith(\"planner-lock-attempt:\")) |
-               select((.body | split(\" \") | last | tonumber) > $cutoff) |
-               .id] | min")"
+               select((.created_at | fromdateiso8601) > $cutoff) |
+               .id] | min // empty")"
 
-    if [[ "$my_id" -eq "$earliest_id" ]]; then
+    if [[ -n "$earliest_id" && "$my_id" -eq "$earliest_id" ]]; then
+        # Persist comment ID so unlock can delete it directly
+        echo "$my_id" > "$PLANNER_LOCK_COMMENT_FILE"
         echo "Planner lock acquired (comment #$my_id)"
         return 0
     else
-        # Lost the race — clean up our comment and bail
+        # Lost the race (or no active attempts found) — clean up and bail
         gh api "repos/$REPO/issues/comments/$my_id" -X DELETE 2>/dev/null || true
-        echo "Another planner is active (lock held by comment #$earliest_id). Skipping."
+        echo "Another planner is active (lock held by comment #${earliest_id:-unknown}). Skipping."
         return 1
     fi
 }
 
 # --- unlock-planner ---
-# Release the planner lock by deleting our lock-attempt comment.
+# Release the planner lock by deleting the exact comment created at lock time.
 cmd_unlock_planner() {
-    local my_comment
-    my_comment="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
-        --jq "[.[] | select(.body | test(\"planner-lock-attempt: $SESSION_ID \"))] | .[0].id // empty")"
-    if [[ -n "$my_comment" ]]; then
-        gh api "repos/$REPO/issues/comments/$my_comment" -X DELETE 2>/dev/null || true
-        echo "Planner lock released"
+    local my_id=""
+    if [[ -f "$PLANNER_LOCK_COMMENT_FILE" ]]; then
+        my_id="$(cat "$PLANNER_LOCK_COMMENT_FILE")"
+        rm -f "$PLANNER_LOCK_COMMENT_FILE"
+    fi
+    if [[ -n "$my_id" ]]; then
+        gh api "repos/$REPO/issues/comments/$my_id" -X DELETE 2>/dev/null || true
+        echo "Planner lock released (deleted comment #$my_id)"
+    else
+        echo "No lock comment ID found; nothing to release"
     fi
 }
 
