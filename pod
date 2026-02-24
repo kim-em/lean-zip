@@ -1479,12 +1479,12 @@ def _tui_main(stdscr, config: dict):
                 if item.kind == "issue":
                     if item.state == "closed":
                         state_str, state_color = "closed", curses.color_pair(4)
-                    elif "blocked" in item.labels:
-                        state_str, state_color = "blocked", curses.color_pair(2)
-                    elif "has-pr" in item.labels:
-                        state_str, state_color = "has-pr", curses.color_pair(6)
                     elif "claimed" in item.labels:
                         state_str, state_color = "claimed", curses.color_pair(1)
+                    elif "has-pr" in item.labels:
+                        state_str, state_color = "has-pr", curses.color_pair(6)
+                    elif "blocked" in item.labels:
+                        state_str, state_color = "blocked", curses.color_pair(2)
                     else:
                         state_str, state_color = "open", curses.A_NORMAL
                 else:  # pr
