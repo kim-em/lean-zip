@@ -22,20 +22,44 @@ gh issue list --repo kim-em/lean-zip --label agent-plan --state open --limit 20 
 Understand what's already planned at the **deliverable level**, not just the title.
 Your work item MUST NOT overlap with any existing issue's deliverables.
 
-## Step 3: Decide session type
+## Step 3: Decide issue type and write the plan
 
-Read the last 5 progress entries and count session types (implementation, review,
-self-improvement). Choose the type that restores balance. Default to alternating:
-implementation, then review. Self-improvement every 5th session or when needed.
+The issue queue has four work types, each with its own label. Create issues with
+the right label based on the balance of recent sessions:
 
-Also check **open unclaimed queue composition**, not just session history.
-If the queue is dominated by one work type (especially blocked proofs),
-choose a different unblocked type.
+- **`feature`** — implementation work; claimed by `/feature` agents
+- **`review`** — review/proof quality; claimed by `/review` agents
+- **`summarize`** — PROGRESS.md analysis; claimed by `/summarize` agents
+- **`meditate`** — self-improvement; claimed by `/meditate` agents
 
-Priority order for implementation work:
+**Balance guidance**: target roughly 2:1 feature:review during active implementation
+phases; shift toward 1:1 during verification/cleanup phases. Also check the
+**open unclaimed queue composition** — if it's dominated by one type, choose a
+different type.
+
+Priority order for **feature** work:
 1. PRs needing attention (merge conflicts, failing CI) — create a work item
    to rebase, resolve conflicts, and get the PR green again
 2. Next deliverable from the current VERIFICATION.md phase
+
+**Summarize trigger**: Before creating other issues, check whether a summarize
+issue is needed:
+```bash
+# Find when the last summarize issue was closed
+gh issue list --repo kim-em/lean-zip --label summarize --state closed --limit 1 \
+    --json closedAt --jq '.[0].closedAt'
+# Count PRs merged since then
+gh pr list --repo kim-em/lean-zip --state merged --limit 100 \
+    --json mergedAt,number --jq '[.[] | select(.mergedAt > "<date>")] | length'
+```
+Create a summarize issue (if none is already open) when:
+- 10 or more PRs have merged since the last summarize issue closed, OR
+- Any recent PR title contains keywords suggesting a milestone theorem
+  (e.g. "roundtrip", "capstone", "complete", "Phase N")
+
+**Meditate trigger**: Create a meditate issue (if none is already open) when:
+- 15 or more PRs have merged since the last meditate issue closed, OR
+- Multiple recent progress entries mention the same kind of struggle or blocker
 
 ## Step 4: Write the plan
 
@@ -166,7 +190,6 @@ because workers can claim and execute them in parallel.
 Each issue body MUST be **self-contained** — a worker will use it without reading
 progress history. Include:
 
-- **Session type**: implementation / review / self-improvement
 - **Current state**: phase, sorry count, relevant recent changes
 - **Deliverables**: specific files to create/modify, what "done" looks like
 - **Context**: why this work matters, any dependencies or constraints
@@ -191,9 +214,10 @@ overlapping issue.
 ## Step 6: Post and exit
 
 For each issue, write the plan body to `plans/<UUID-prefix>-N.md` (where N
-is 1, 2, ... for multiple issues, or omitted for a single issue), then post:
+is 1, 2, ... for multiple issues, or omitted for a single issue), then post with
+the appropriate label:
 ```
-coordination plan "title" < plans/<UUID-prefix>-N.md
+coordination plan --label <feature|review|summarize|meditate> "title" < plans/<UUID-prefix>-N.md
 ```
 
 Then exit. Do NOT execute any code changes.

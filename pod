@@ -643,6 +643,31 @@ def _tool_detail(name: str, inp: dict, state: AgentState) -> str:
 # Dispatch Strategies
 # ---------------------------------------------------------------------------
 
+def _choose_draining(config: dict, draining: dict) -> str | None:
+    """Pick a draining worker type that has available work.
+
+    For types with issue_label, check per-label queue depth via
+    `coordination queue-depth <label>`. Config order = priority order
+    (feature > review > summarize > meditate by default).
+    For types without issue_label, always consider them available.
+    Returns None if no draining type has work.
+    """
+    for name, wt in draining.items():
+        issue_label = wt.get("issue_label", "")
+        if issue_label:
+            try:
+                r = coordination(config, "queue-depth", issue_label)
+                depth = int(r.stdout.strip())
+            except (ValueError, subprocess.TimeoutExpired):
+                depth = 0
+            if depth > 0:
+                return name
+        else:
+            # No label filter — treat as always having work
+            return name
+    return None
+
+
 def dispatch_queue_balance(config: dict, queue_depth: int,
                            worker_types: dict,
                            state: AgentState | None = None) -> str | None:
@@ -665,11 +690,11 @@ def dispatch_queue_balance(config: dict, queue_depth: int,
                 return name
         # Lock held — fall back to draining if queue > 0
         if queue_depth > 0 and draining:
-            return next(iter(draining))
+            return _choose_draining(config, draining)
         # Queue empty and lock held — wait
         return None
     elif draining:
-        return next(iter(draining))
+        return _choose_draining(config, draining)
     elif filling:
         # Only filling types exist — try them
         for name, wt in filling.items():

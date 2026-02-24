@@ -5,20 +5,20 @@
 # (exported by pod). Reads branch from git.
 #
 # Usage:
-#   coordination orient           — list open plans (claimed/unclaimed), PRs, issues needing attention
-#   coordination plan "title"     — create GitHub issue with agent-plan label (body from stdin)
-#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge
-#   coordination claim-fix N      — comment on failing PR #N claiming fix (30min cooldown)
-#   coordination close-pr N "reason" — comment reason and close PR #N
-#   coordination list-unclaimed   — list unclaimed agent-plan issues (FIFO order)
-#   coordination queue-depth      — count of unclaimed agent-plan issues
-#   coordination claim N          — claim an issue for this session (label + comment)
-#   coordination skip N "reason"  — mark a claimed issue as replan (stale/wrong assumptions)
-#   coordination add-dep N M      — add depends-on: #M to issue #N's body; add blocked label if #M is open
-#   coordination check-blocked    — unblock issues whose dependencies are all closed
-#   coordination release-stale-claims [SECS] — release claimed issues with no activity for SECS seconds (default 14400 = 4h)
-#   coordination lock-planner    — acquire advisory planner lock (10min TTL)
-#   coordination unlock-planner  — release planner lock early
+#   coordination orient                       — list open plans (claimed/unclaimed), PRs, issues needing attention
+#   coordination plan [--label L] "title"     — create GitHub issue with agent-plan label (body from stdin); optional extra label L (feature|review|summarize|meditate)
+#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge; rejects PRs touching .claude/CLAUDE.md or VERIFICATION.md
+#   coordination claim-fix N                  — comment on failing PR #N claiming fix (30min cooldown)
+#   coordination close-pr N "reason"          — comment reason and close PR #N
+#   coordination list-unclaimed [--label L]   — list unclaimed agent-plan issues (FIFO order); optional label filter
+#   coordination queue-depth [L]              — count of unclaimed agent-plan issues; optional label filter
+#   coordination claim N                      — claim an issue for this session (label + comment)
+#   coordination skip N "reason"              — mark a claimed issue as replan (stale/wrong assumptions)
+#   coordination add-dep N M                  — add depends-on: #M to issue #N's body; add blocked label if #M is open
+#   coordination check-blocked                — unblock issues whose dependencies are all closed
+#   coordination release-stale-claims [SECS]  — release claimed issues with no activity for SECS seconds (default 14400 = 4h)
+#   coordination lock-planner                 — acquire advisory planner lock (10min TTL)
+#   coordination unlock-planner               — release planner lock early
 
 set -euo pipefail
 
@@ -36,8 +36,12 @@ gh auth status --hostname github.com >/dev/null 2>&1 || \
     die "gh CLI not authenticated — run 'gh auth login' first"
 
 # Helper: get unclaimed issues as JSON array
+# Optional arg: extra label to filter by (e.g. "feature", "review")
 _unclaimed_issues() {
-    gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
+    local extra_label="${1:-}"
+    local -a label_args=("--label" "agent-plan")
+    [[ -n "$extra_label" ]] && label_args+=("--label" "$extra_label")
+    gh issue list --repo "$REPO" "${label_args[@]}" --state open --limit 50 \
         --json number,title,labels,createdAt \
         --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "blocked") and all(.name != "has-pr") and all(.name != "replan"))] |
               sort_by(.createdAt)'
@@ -88,7 +92,14 @@ cmd_orient() {
 
 # --- plan ---
 cmd_plan() {
-    local title="${1:?usage: coordination plan \"title\"}"
+    local extra_label=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --label) extra_label="${2:?--label requires a value}"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+    local title="${1:?usage: coordination plan [--label L] \"title\"}"
 
     # Fetch all open agent-plan issues with full bodies for overlap detection
     local existing_json
@@ -134,6 +145,7 @@ cmd_plan() {
 
     # Check for depends-on lines before creating the issue
     local create_labels="agent-plan"
+    [[ -n "$extra_label" ]] && create_labels="$create_labels,$extra_label"
     local deps
     deps="$(echo "$body" | grep -oE 'depends-on: #[0-9]+' | grep -oE '[0-9]+' || true)"
     if [[ -n "$deps" ]]; then
@@ -148,7 +160,7 @@ cmd_plan() {
             fi
         done <<< "$deps"
         if [[ "$has_open_dep" == true ]]; then
-            create_labels="agent-plan,blocked"
+            create_labels="$create_labels,blocked"
         fi
     fi
 
@@ -207,6 +219,13 @@ cmd_create_pr() {
         issue_ref="Partial progress on #$issue_num"
     else
         issue_ref="Closes #$issue_num"
+    fi
+
+    # Protect immutable files — reject PRs that touch CLAUDE.md or VERIFICATION.md
+    local protected_diff
+    protected_diff="$(git diff origin/master -- .claude/CLAUDE.md VERIFICATION.md 2>/dev/null || true)"
+    if [[ -n "$protected_diff" ]]; then
+        die "This PR touches protected files (.claude/CLAUDE.md or VERIFICATION.md). These files are off-limits to agents. Aborting PR creation."
     fi
 
     # Push branch
@@ -310,12 +329,20 @@ cmd_close_pr() {
 
 # --- list-unclaimed ---
 cmd_list_unclaimed() {
-    _unclaimed_issues | jq -r '.[] | "#\(.number) \(.title) (\(.createdAt[:16]))"'
+    local extra_label=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --label) extra_label="${2:?--label requires a value}"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+    _unclaimed_issues "$extra_label" | jq -r '.[] | "#\(.number) \(.title) (\(.createdAt[:16]))"'
 }
 
 # --- queue-depth ---
 cmd_queue_depth() {
-    _unclaimed_issues | jq 'length'
+    local extra_label="${1:-}"
+    _unclaimed_issues "$extra_label" | jq 'length'
 }
 
 # --- claim ---
@@ -563,8 +590,8 @@ case "${1:-}" in
     create-pr)       shift; cmd_create_pr "$@" ;;
     claim-fix)       shift; cmd_claim_fix "$@" ;;
     close-pr)        shift; cmd_close_pr "$@" ;;
-    list-unclaimed)  cmd_list_unclaimed ;;
-    queue-depth)     cmd_queue_depth ;;
+    list-unclaimed)  shift; cmd_list_unclaimed "$@" ;;
+    queue-depth)     shift; cmd_queue_depth "$@" ;;
     claim)           shift; cmd_claim "$@" ;;
     skip)            shift; cmd_skip "$@" ;;
     add-dep)                shift; cmd_add_dep "$@" ;;
@@ -573,5 +600,5 @@ case "${1:-}" in
     lock-planner)           cmd_lock_planner ;;
     unlock-planner)         cmd_unlock_planner ;;
     *)               die "unknown command: ${1:-}
-Usage: coordination {orient|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|add-dep|check-blocked|release-stale-claims|lock-planner|unlock-planner}" ;;
+Usage: coordination {orient|plan [--label L]|create-pr|claim-fix|close-pr|list-unclaimed [--label L]|queue-depth [L]|claim|skip|add-dep|check-blocked|release-stale-claims|lock-planner|unlock-planner}" ;;
 esac

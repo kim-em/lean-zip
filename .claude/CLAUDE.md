@@ -31,8 +31,9 @@ with `libz-dev` and `libzstd-dev`), no nix-shell wrapper is needed.
 Agents are launched by `pod` (a Python TUI/CLI in the repo root), which
 manages multiple concurrent agents. Each agent is an independent background
 process. The dispatch strategy (configurable in `.pod/config.toml`)
-assigns each session a worker type — by default **planner** (`/plan`)
-or **worker** (`/work`), determined by queue depth.
+assigns each session a worker type — **planner** (`/plan`) or one of the
+worker types (`/feature`, `/review`, `/summarize`, `/meditate`), determined
+by queue depth and label-aware dispatch.
 
 **Planners** create one well-scoped work item as a GitHub issue, then
 exit. They do the expensive orientation work (reading progress history,
@@ -48,19 +49,15 @@ via GitHub issues, labels, and PRs.
 
 **Non-interactive sessions**: These sessions run via `pod` with
 `claude -p` — there is no human to answer questions. Never ask for
-confirmation, approval, or "should I apply this?" — just do it. If you
-propose a `./.claude/CLAUDE.md` change for the current project, apply it.
+confirmation, approval, or "should I apply this?" — just do it.
 If you find dead code, remove it. If a refactor improves the codebase,
 commit it. The reflect step at the end is for recording what you did,
 not for asking permission.
 
-**Anti-rationalization check**: A common failure mode is to identify the
-correct session type from the balance, then override it by framing
-implementation work as "blocking" or "urgent." Sorries, incomplete
-proofs, and unfinished features are almost never true blockers — other
-session types can proceed with sorries in place. If you find yourself
-writing "should do X, but Y is more important" — do X. The only genuine
-exception is a broken build that prevents all other work.
+**Off-limits files**: Agents must not modify `.claude/CLAUDE.md` or
+`VERIFICATION.md`. Enforcement is at the `coordination create-pr` level —
+PRs touching these files are rejected. Update skills in `.claude/skills/`
+and commands in `.claude/commands/` instead.
 
 ### Planner sessions (`/plan`)
 
@@ -70,122 +67,25 @@ See `.claude/commands/plan.md` for the full prompt. Summary:
    read last 5 progress entries, VERIFICATION.md, sorry count
 2. **Read all open issues**: full bodies, not just titles — understand
    what's already planned at the deliverable level
-3. **Decide session type**: implementation / review / self-improvement,
-   based on balance of recent sessions
-4. **Write self-contained plans** as GitHub issues — one per atomic
-   concern. Each must include: current state, specific files,
-   deliverables, "done" criteria, verification steps. If orientation
-   reveals multiple orthogonal pieces, create multiple issues rather
-   than bundling them. Plans must NOT overlap with existing issues.
-   Issues must be small enough to complete without context compaction.
-   Target: max 3 deliverables, max 2 substantive files, ~200 lines of
-   new code. See plan.md for full sizing rules.
-   When a new issue is a prerequisite for an existing open issue,
-   update the existing issue's body with `depends-on` and add the
-   `blocked` label. See `plan.md` for details.
+3. **Decide issue type**: `feature` / `review` / `summarize` / `meditate`,
+   based on balance of recent sessions and summarize/meditate triggers
+4. **Write self-contained plans** as GitHub issues with the appropriate label.
+   Plans must NOT overlap with existing issues. Issues must be small enough
+   to complete without context compaction. Target: max 3 deliverables,
+   max 2 substantive files, ~200 lines of new code. See plan.md for sizing.
 5. **Overlap guard**: re-fetch issues before posting to catch races
 6. **Exit** — do not execute any code changes
 
-### Worker sessions (`/work`)
+### Worker sessions
 
-See `.claude/commands/work.md` for the full prompt. Summary:
+Workers claim issues filtered by their type:
+- `/feature` — implementation; reads `.claude/commands/feature.md`
+- `/review` — proof quality; reads `.claude/commands/review.md`
+- `/summarize` — PROGRESS.md analysis; reads `.claude/commands/summarize.md`
+- `/meditate` — self-improvement; reads `.claude/commands/meditate.md`
 
-1. **Claim**: `coordination list-unclaimed`, pick oldest,
-   `coordination claim N`
-2. **Set up**: create branch, record starting commit + sorry count
-3. **Codebase orientation**: read the specific files in the plan,
-   understand current code state
-4. **Verify assumptions**: sorry count, files exist, plan not stale.
-   If stale: `coordination skip N "reason"`, try next issue
-5. **Execute**: follow the plan's deliverables (see session types below)
-6. **Verify**: `lake build && lake exe test`, sorry count delta,
-   `git diff`, `/second-opinion`
-7. **Publish**: progress entry, push, `coordination create-pr N`
-   (auto-merge handles the rest). **Partial completion**: if not all
-   deliverables were finished, the PR title must reflect what was
-   actually done (not the issue title), and the progress entry must
-   clearly list unfinished deliverables so planners can reschedule them.
-   See `work.md` for details.
-   **Context health**: If conversation compaction fires, stop starting new
-   deliverables. Commit current work, verify, and publish with `--partial`.
-   A clean partial result from a fresh context beats degraded work from a
-   compressed one.
-8. **Reflect**: `/reflect`, update `.claude/` if needed
-
-### Session types (for both planners and workers)
-
-The cycle balances three activities: **new work**, **review**, and
-**self-improvement**. Read recent `progress/` entries to dynamically
-adjust the balance — if reviews are consistently finding nothing, do
-fewer; if they're finding problems, do more. Default to alternating:
-implementation session, then review session.
-
-**Implementation sessions** — priority order:
-1. PRs needing attention (merge conflicts, failing CI) — rebase, resolve
-   conflicts, and get the PR green again
-2. Next deliverable from the current VERIFICATION.md phase
-
-For new native implementations, follow the development cycle in
-VERIFICATION.md: type signature → spec theorems → implementation →
-conformance tests → proofs.
-
-Execute by running `lake build` after each coherent chunk of changes.
-Use targeted builds when possible (e.g. `lake build Zip.Native.Crc32`)
-for faster iteration; do a full `lake build` before committing.
-Run `lake exe test` periodically.
-Commit with conventional prefixes (`feat:`, `fix:`, `refactor:`, `test:`, `doc:`).
-
-**Review sessions** — each session should pick **one or two** focus
-areas and go deep, rather than superficially covering everything.
-Rotate through the areas across sessions so they all get attention
-over time. Focus areas:
-- **Refactoring and proof improvement**: This is the top review priority.
-  Are proofs minimal? Can steps be combined? Would extracting a lemma
-  improve readability or enable reuse? Are there generally useful lemmas
-  that should be factored out? Record lemmas that might be worth
-  upstreaming to Lean's standard library in the plan file.
-- **Slop detection**: dead code, duplicated logic, verbose comments,
-  unused imports, other signs of AI-generated bloat
-- **Security**: check for new issues in recent code, verify past fixes
-- **Lean idioms**: newer APIs, `grind`, `omega`, `mvcgen`, idiomatic style.
-  Also look for opportunities to replace `partial` or fuel-based
-  implementations with definitions that have proper termination proofs —
-  this pays off later with easier verification. Look for `xs[i]!`
-  runtime bounds checks that could be replaced with proven-bounds access
-  `xs[i]` when the information to prove the bound is already in scope.
-  Remember that in `if` and `for` you need `h :` syntax to capture the
-  relevant hypothesis (e.g. `if h : i < xs.size then xs[i] ...`).
-  **Constraints on `[i]!` → `[i]` conversion**:
-  (a) `do` block guards (`if cond then throw`) do NOT produce hypotheses
-  for the continuation — `omega` can't see that the guard was passed.
-  Only pure `if h : ...` / `else` outside do-notation captures bounds.
-  (b) Functions that proofs `unfold` are load-bearing — changing `[i]!`
-  to `[i]` changes the desugared term and breaks downstream proofs.
-  Only convert in functions with NO proof references in Spec/.
-  (c) `List.enum` does not exist in this toolchain. `List.zipIdx`
-  exists but produces `(value, index)` not `(index, value)`.
-- **Toolchain**: check if a newer stable Lean release is available; if so,
-  upgrade `lean-toolchain`, fix breakage, and revert if tests can't be
-  made to pass. Only attempt toolchain upgrades when all tests pass first
-- **Prompting and skills**: is `.claude/CLAUDE.md` still accurate? Are
-  commands and skills in `.claude/` still useful? Trim stale guidance,
-  add missing guidance. Consider writing new skills for recurring
-  patterns (profiling, proof techniques, etc.)
-- **File size and organization**: Files over 500 lines are candidates
-  for splitting; never let a file grow past 1000 lines. Check with
-  `wc -l Zip/**/*.lean`. Split along natural boundaries (e.g. separate
-  types/definitions from proofs, or split by sub-topic). Don't hesitate
-  to restructure existing files if definitions feel out of place — move
-  them to where they logically belong, even if that means creating new
-  files. Update the source layout table in this file when splitting.
-
-As the project grows, also focus reviews on particular modules rather
-than reviewing everything at once.
-
-**Self-improvement sessions** (require at least one tangible output):
-- Write new skills in `.claude/skills/` for recurring patterns
-- Research best practices (Lean proof style, performance tuning, etc.)
-- Improve the harness based on accumulated experience
+Each worker reads `.claude/skills/agent-worker-flow/SKILL.md` for the standard
+claim → branch → execute → verify → publish cycle.
 
 ## Coordination Reference
 
@@ -195,12 +95,12 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 | Command | What it does |
 |---------|-------------|
 | `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
-| `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
-| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `replan` label |
+| `coordination plan [--label L] "title"` | Create GitHub issue with agent-plan + optional label; body from stdin |
+| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `replan` label. Rejects PRs touching `.claude/CLAUDE.md` or `VERIFICATION.md`. |
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
-| `coordination list-unclaimed` | List unclaimed agent-plan issues (FIFO order) |
-| `coordination queue-depth` | Count of unclaimed issues (used by `pod` for dispatch) |
+| `coordination list-unclaimed [--label L]` | List unclaimed agent-plan issues (FIFO order); optional label filter |
+| `coordination queue-depth [L]` | Count of unclaimed issues; optional label for per-type count |
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
 | `coordination skip N "reason"` | Mark claimed issue as needing replan — removes `claimed`, adds `replan` label |
 | `coordination add-dep N M` | Add `depends-on: #M` to issue #N's body; adds `blocked` label if #M is open. Use this (not raw `gh issue edit`) whenever a new dependency is discovered on an existing issue |
@@ -236,81 +136,24 @@ statements (via `sorry`) before proofs are ready.
 ## Code Organization
 
 ### Source layout
-    Zip/Basic.lean       — Zlib compress/decompress (@[extern])
-    Zip/Gzip.lean        — Gzip + streaming + file helpers
-    Zip/Checksum.lean    — CRC32, Adler32 (@[extern])
-    Zip/RawDeflate.lean  — Raw deflate + streaming
-    Zip/Zstd.lean        — Zstandard + streaming + file helpers
-    Zip/Binary.lean      — Byte packing: LE integers, octal, strings
-    Zip/Tar.lean         — Tar create/extract/list, .tar.gz streaming
-    Zip/Archive.lean     — ZIP create/extract/list (with ZIP64)
-    Zip/Handle.lean      — IO.FS.Handle shims (seek, fileSize, symlink)
-    Zip/Native/Adler32.lean  — Native Adler-32
-    Zip/Native/Crc32.lean    — Native CRC-32 (table-driven)
-    Zip/Native/BitReader.lean — LSB-first bit-level reader for DEFLATE
-    Zip/Native/BitWriter.lean — LSB-first bit-level writer for DEFLATE
-    Zip/Native/Inflate.lean  — Native DEFLATE decompressor (RFC 1951)
-    Zip/Native/Deflate.lean  — Native DEFLATE compressor (stored + fixed Huffman)
-    Zip/Native/DeflateDynamic.lean — Native DEFLATE compressor (dynamic Huffman, Level 5) + deflateRaw dispatch
-    Zip/Native/Gzip.lean     — Native gzip/zlib compression + decompression (RFC 1952/1950)
-    Zip/Spec/Adler32.lean    — Adler-32 specification (RFC 1950)
-    Zip/Spec/Crc32.lean      — CRC-32 specification (ISO 3309)
-    Zip/Spec/Huffman.lean    — Canonical Huffman code definitions (types, construction, decode)
-    Zip/Spec/HuffmanKraft.lean    — Kraft inequality analysis (ncRec, kraftSumFrom, conservation)
-    Zip/Spec/HuffmanTheorems.lean — Huffman property theorems (prefix-free, injectivity, decode)
-    Zip/Spec/HuffmanEncode.lean  — Huffman code length computation from symbol frequencies
-    Zip/Spec/HuffmanEncodeCorrect.lean — Canonical codes encode correctness (native ↔ spec bridge)
-    Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
-    Zip/Spec/Deflate.lean    — DEFLATE bitstream spec: types, decode (RFC 1951)
-    Zip/Spec/DeflateFuelIndep.lean — DEFLATE fuel independence + accumulator prefix theorems
-    Zip/Spec/DeflateSuffix.lean — DEFLATE suffix invariance theorems (decode ignores trailing bits)
-    Zip/Spec/DeflateEncode.lean — DEFLATE encode spec: symbol encoding + roundtrip
-    Zip/Spec/DeflateEncodeProps.lean — DEFLATE encoding success properties
-    Zip/Spec/DeflateEncodeDynamic.lean — RLE encoding + dynamic block header encoder
-    Zip/Spec/DeflateEncodeDynamicProps.lean — Dynamic block header correspondence proofs
-    Zip/Spec/LZ77Lazy.lean      — LZ77→encode bridge proofs + lazy matcher properties
-    Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence (read direction)
-    Zip/Spec/BitstreamComplete.lean — BitReader ↔ bytesToBits completeness (reverse direction)
-    Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
-    Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
-    Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence (tree primitives)
-    Zip/Spec/HuffmanCorrectLoop.lean — HuffTree ↔ Huffman.Spec correspondence (loop invariants)
-    Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness (forward direction)
-    Zip/Spec/DecodeComplete.lean   — Block-level decode completeness (reverse direction)
-    Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
-    Zip/Spec/DynamicTreesComplete.lean — Dynamic Huffman tree decode completeness
-    Zip/Spec/LZ77NativeCorrect.lean — Native lz77Greedy correctness (BB1 for compressor)
-    Zip/Spec/DeflateFixedTables.lean — Fixed Huffman table bridge proofs (native ↔ spec tables)
-    Zip/Spec/EmitTokensCorrect.lean — emitTokens ↔ encodeSymbols correspondence + helpers
-    Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
-    Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
-    Zip/Spec/InflateComplete.lean  — Stream-level inflate completeness theorem
-    Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
-    Zip/Spec/DeflateDynamicEmit.lean — emitTokensWithCodes ↔ encodeSymbols correspondence
-    Zip/Spec/DeflateDynamicHeader.lean — writeDynamicHeader ↔ encodeDynamicTrees correspondence
-    Zip/Spec/DeflateDynamicFreqs.lean — tokenFreqs frequency-counting properties (internal helpers)
-    Zip/Spec/DeflateDynamicCorrect.lean — deflateDynamic_spec + roundtrip
-    Zip/Spec/DeflateRoundtrip.lean — Unified DEFLATE roundtrip (Phase 4 capstone)
-    Zip/Spec/BinaryCorrect.lean — Binary LE read/write roundtrip proofs
-    Zip/Spec/GzipCorrect.lean  — Gzip framing: pure decoder + format lemma + roundtrip statement
-    Zip/Spec/ZlibCorrect.lean  — Zlib framing: pure decoder + format lemmas + roundtrip statement
-    Zip.lean             — Re-exports all modules
-    ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
-    ZipForStd.lean       — Root import for ZipForStd
 
-### Test layout
-    ZipTest.lean         — Test runner entry point
-    ZipTest/Helpers.lean — Shared test utilities
-    ZipTest/*.lean       — Per-module tests
-    testdata/            — Binary fixtures
+Survey `Zip/`, `ZipTest/`, and `ZipForStd/` directly. Every source file has a
+module-level `/-! ... -/` docstring describing its purpose. Run `ls Zip/**/*.lean`
+to orient. Key directories:
+- `Zip/` — FFI wrappers and pure-Lean implementations
+- `Zip/Native/` — Native Lean implementations (no FFI)
+- `Zip/Spec/` — Formal specifications and correctness proofs
+- `ZipForStd/` — Missing standard library lemmas (candidates for upstreaming)
+- `ZipTest/` — Per-module tests
 
 ### Key documents
     ARCHITECTURE.md      — Technical architecture
     VERIFICATION.md      — Phased roadmap and development cycle (do not modify)
-    PROGRESS.md          — Global milestones (updated rarely)
+    PROGRESS.md          — Global milestones (updated by summarize agents)
     progress/            — Per-session progress entries (one file per session)
     plans/               — Per-session plan files (one file per active session)
     coordination         — Multi-agent coordination script (uses gh CLI)
+    .claude/skills/      — Project-local skill files (proof patterns, workflow)
 
 ## Quality Standards
 
@@ -372,10 +215,7 @@ for how this applies to DEFLATE.
 - Do NOT use `native_decide` — it is forbidden in this codebase. When
   tempted to use it (e.g. for decidable propositions over large finite
   types), try `decide_cbv` instead, which uses kernel-level evaluation
-  without native code generation. **Caveat**: `decide_cbv` uses `simp`
-  internally and fails with "maximum number of steps exceeded" on very
-  large arrays (e.g. 288-element fixed Huffman tables). For those cases,
-  stick with `decide` + `maxHeartbeats`.
+  without native code generation
 - Prefer `omega`, `decide`, `simp`, `grind` over manual arithmetic
 - After getting a proof to work, refactor it immediately:
   combine steps, find minimal proof, extract reusable lemmas
@@ -421,445 +261,16 @@ for how this applies to DEFLATE.
 
 ## Proof Strategies
 
-This section accumulates proof patterns discovered during development.
-Update it during review and reflect sessions.
+Proof patterns are in `.claude/skills/`. The skills auto-trigger when relevant:
+- `lean-monad-proofs` — Option/Except monad, do-notation, guard patterns
+- `lean-uint-bitvec` — UInt8/16/32/BitVec conversions, bv_decide
+- `lean-array-list` — ByteArray/Array/List indexing, length, take/drop
+- `lean-dependent-types` — "motive not type correct", List.ofFn, visibility
+- `lean-fuel-induction` — fuel independence, loop invariants, forIn avoidance
+- `lean-simp-tactics` — simp only failures, Bool vs Prop, let bindings
+- `lean-no-mathlib` — Mathlib tactic unavailable? Use grind/omega instead
 
-- **No Mathlib — unavailable tactics and names**: This project uses only
-  Lean 4 core + std. The following are NOT available:
-  - Tactics: `ring`, `set`, `push_neg`, `by_contra`, `field_simp`, `positivity`,
-    `polyrith`, `norm_num` (the Mathlib version), `rcases`/`obtain`,
-    `interval_cases`
-  - Names: `le_refl` (use `Nat.le.refl` or `by omega`),
-    `Nat.gt_of_not_le` (use `by omega`), `congr_arg` (use `congrArg`)
-  - For contradiction proofs, use `by_cases` + `exfalso` instead of `by_contra`
-  For algebraic goals (commutativity, associativity, distributivity),
-  use `grind` — it fully subsumes Mathlib's `ring` tactic.
-  When in doubt, prefer `omega`, `simp`, `grind`, `by_cases`, `exact`
-  over anything that might be Mathlib-only.
-- **Build missing API, don't work around it**: If a proof is blocked by
-  missing lemmas for standard types (ByteArray, Array, List, UInt32, etc.),
-  add the missing lemma to `ZipForStd/` in the appropriate namespace.
-  For example, if `ByteArray.foldl_toList` is missing, add it in
-  `ZipForStd/ByteArray.lean` in the `ByteArray` namespace. These lemmas
-  are candidates for upstreaming to Lean's standard library — write them
-  as if they belonged there. Don't use workarounds like going through
-  `.data.data.foldl` when the right fix is a proper API lemma.
-- **bv_decide for UInt32/BitVec**: Effective for bitvector reasoning.
-  Proved CRC linearity (`crcBit_xor_high`) and the 8-fold split
-  (`crcBits8_split`) each in one line. Caveat: fails when expressions
-  contain `UInt32.ofNat x.toNat` (abstracted as opaque).
-- **UInt8→UInt32 conversion for bv_decide**: When `bv_decide` fails on
-  `UInt32.ofNat byte.toNat`, rewrite it to `⟨byte.toBitVec.setWidth 32⟩`
-  using `BitVec.ofNat_toNat`. Then use `show` + `congr 1` to expose the
-  inner `BitVec` for `bv_decide`. Pattern:
-  ```lean
-  rw [UInt32_ofNat_UInt8_toNat]  -- rewrites via BitVec.ofNat_toNat
-  show UInt32.ofBitVec (... bitvec expr ...) = UInt32.ofBitVec (...)
-  congr 1; bv_decide
-  ```
-- **ByteArray/Array/List indexing**: `data.data[pos] = data[pos]` (where
-  `data : ByteArray`) is `rfl`. For `data.data.toList[pos] = data[pos]`,
-  `simp only [Array.getElem_toList]` suffices (as of v4.29.0-rc2; on rc1
-  a trailing `; rfl` was also needed). When `List.getElem_map` is also
-  involved (e.g. `(arr.toList.map f)[i] = f arr[i]`),
-  `simp only [List.getElem_map, Array.getElem_toList]` closes the goal.
-- **UInt32 bit operations → Nat.testBit**: To prove
-  `(byte.toUInt32 >>> off.toUInt32) &&& 1 = if byte.toNat.testBit off then 1 else 0`,
-  use `UInt32.toNat_inj.mp` to reduce to Nat, then
-  `UInt32.toNat_and`/`UInt32.toNat_shiftRight`/`UInt8.toNat_toUInt32`,
-  then `Nat.testBit` unfolds to `1 &&& m >>> n != 0` — use `Nat.and_comm`
-  + `Nat.one_and_eq_mod_two` + `split <;> omega`.
-- **`n + 0` normalization breaks `rw` patterns**: As of v4.29.0-rc2,
-  Lean normalizes `n + 0` to `n` earlier. If a lemma's conclusion
-  contains `arr[pfx.size + k]` and you instantiate `k = 0`, the
-  rewrite target `arr[pfx.size + 0]` won't match the goal's
-  `arr[pfx.size]`. Fix: add a specialized `_zero` variant of the
-  lemma that states the result with `arr[pfx.size]` directly.
-- **UInt32 shift mod 32**: `UInt32.shiftLeft` reduces the shift amount
-  mod 32 — for `bit <<< shift.toUInt32` with `shift ≥ 32`, the bit is
-  placed at position `shift % 32`, not `shift`. Any theorem about
-  `readBits` (which accumulates via `bit <<< shift`) needs `n ≤ 32`.
-- **`protected` not `private` for cross-file access**: When a definition
-  or lemma in one file is needed by another, use `protected` visibility.
-  `private` makes it inaccessible from other files. This applies to both
-  lemmas (e.g. `byteToBits_length` used in BitstreamCorrect and
-  InflateCorrect) AND definitions referenced in proof hypotheses (e.g.
-  native table constants like `lengthBase`, `distExtra` in Inflate.lean
-  that appear in `decodeHuffman.go` — if they're `private`, proofs in
-  InflateCorrect.lean can't name them in `cases` or `simp` arguments).
-  **Caveat**: `protected` requires fully-qualified names even within the
-  same namespace (`Inflate.lengthBase` instead of `lengthBase`). For
-  definitions used unqualified within their own namespace AND needed
-  cross-file, use public (no modifier) instead.
-- **Avoid `▸` and `congr` with UInt32/BitVec goals**: The `▸` (subst
-  rewrite) and `congr` tactics trigger full `whnf` reduction, which can
-  deterministic-timeout on goals involving UInt32 or BitVec operations.
-  Use `obtain ⟨rfl, _⟩ := h` + `rw [...]` + `exact ...` instead.
-  The `rw` tactic is much more targeted and avoids the expensive
-  reduction. For goals like `f (a ++ b)[i]! ... = f a[i]! ...`, use
-  explicit `rw [lemma_for_each_index]` instead of `congr 1`.
-  **Also for chaining transitive equalities**: When proving
-  `br'.data = br.data` by chaining `br'.data = br₁.data` and
-  `br₁.data = br.data`, do NOT use `hd' ▸ hd₁ ▸ rfl` — `▸` rewrites
-  in the wrong direction, changing dependent types in the goal (e.g.
-  `br'.data.size` becomes `br.data.size` when you need the reverse).
-  Use `exact hd'.trans hd₁` or `exact ⟨hd'.trans hd₁, ...⟩` instead.
-- **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
-  `return` inside a `for` loop exits the loop (producing `some`), not the
-  function. Use explicit recursive helper functions instead — they're also
-  easier to reason about in proofs. Reserve `for`/`while` for `IO` code.
-- **Unfolding do-notation with `Except.bind`**: When a hypothesis `h`
-  contains a `do` block (`let x ← f; g x`), use `cases hrd : f` to
-  split on the result BEFORE simplifying `h`. Then
-  `simp only [..., hrd, bind, Except.bind] at h` substitutes the
-  known result. This is cleaner than `simp [...] at h; split at h;
-  rename_i ...` which produces fragile unnamed hypotheses.
-- **do-notation guards (`if ... then throw`)**: Guards like
-  `if cond then throw err` in `Except` do-notation expand to
-  `match (if cond then Except.error err else pure PUnit.unit) with
-  | Except.error e => ... | Except.ok _ => ...`. After splitting the
-  outer condition with `split at h`, the `pure` branch leaves a stuck
-  `match`. Use `simp only [pure, Except.pure] at h` to reduce it, then
-  continue with the next `cases`/`split`.
-- **Closing `Except.error = Except.ok` contradictions**: `simp only`
-  does NOT know that `Except.error ≠ Except.ok` — it lacks the
-  discriminator lemmas. Use `simp at h` (without `only`) which includes
-  them, or explicitly `exact absurd h (by simp)`. Don't try `nofun h`
-  or `exact Except.noConfusion h` — neither works directly.
-- **Nested `cases` parsing**: Nested `cases ... with | ... | ...`
-  blocks cause Lean to misparse the inner `| some =>` as belonging to
-  the outer `cases`. Use `match` for the inner case split instead:
-  ```lean
-  cases hdb : f x with
-  | none =>
-    match hdec : g y with   -- NOT `cases hdec : g y with`
-    | none => ...
-    | some p => ...
-  | some p => ...
-  ```
-- **Block-level correspondence proof pattern**: For theorems like
-  `decodeStored_correct` that connect native imperative decoders (using
-  `Except` monad with `do`-notation) to spec decoders (using `Option`
-  monad with `bind`):
-  1. `simp only [NativeFunc, bind, Except.bind] at h` to unfold the native
-  2. `cases hx : operation` + `simp [hx] at h` for each `Except` operation
-  3. Build spec-level hypotheses by chaining correspondence lemmas
-  4. Close with `simp only [SpecFunc, bind, Option.bind, hyp₁, hyp₂, ...]`
-     + `rfl` to evaluate the spec function
-  Key: prepare all intermediate spec hypotheses in unified form
-  (substituting `← hrest` to align bit positions) before the final `simp`.
-- **UInt16 comparison and conversion**: In v4.29.0-rc1, UInt16 is
-  BitVec-based. `sym < 256` (UInt16 lt) directly proves
-  `sym.toNat < 256` via `exact hsym`. Negation `¬(sym < 256)` gives
-  `sym.toNat ≥ 256` via `Nat.le_of_not_lt hge`. For equality,
-  `sym.toNat = 256` proves `sym = 256` via
-  `UInt16.toNat_inj.mp (by simp; exact heq)`. `sym.toUInt8` equals
-  `sym.toNat.toUInt8` by `rfl` (UInt16.toUInt8 is defined as
-  `fun a => a.toNat.toUInt8`). `omega` CANNOT directly bridge
-  UInt16 comparisons to Nat — extract hypotheses first.
-- **Option `pure` vs `some`**: After `simp only` with `↓reduceIte` on
-  spec functions, goals may have `pure (...) = some (...)`. Add `pure`
-  to the simp arguments to unfold it.
-- **`cases` + `bind` in Option do-notation goals**: After
-  `cases h : f x with | some p =>`, the `cases` substitutes the
-  constructor in the goal, making `h` unnecessary for `simp`. But the
-  bind wrapper `Option.bind (some p) (fun ... => ...)` still needs
-  reducing. Use `simp only [bind, Option.bind]` (NOT `simp only [h]`).
-  When cleaning up unused simp argument warnings in this pattern,
-  remove the hypothesis name, keep `bind, Option.bind`.
-- **Namespace scoping for new definitions**: `def Foo.Bar.baz` inside
-  `namespace Quux` creates `Quux.Foo.Bar.baz`, NOT `Foo.Bar.baz`.
-  To define in a different namespace, either close the current namespace
-  first, or use a local name (e.g. `def decodeBits` instead of
-  `def Zip.Native.HuffTree.decodeBits`).
-- **`getElem?_pos`/`getElem!_pos` for Array lookups**: To prove
-  `arr[i]? = some arr[i]!`, use the two-step pattern:
-  `rw [getElem!_pos arr i h]; exact getElem?_pos arr i h`. The first
-  rewrites `arr[i]!` to `arr[i]` (bounds-checked), the second proves
-  `arr[i]? = some arr[i]`. `getElem?_pos` needs the explicit container
-  argument (not `_`) to avoid `GetElem?` type class synthesis failures.
-- **Fin coercion mismatch in omega**: When a lemma over `Fin n`
-  is applied as `lemma ⟨k, hk⟩`, omega treats
-  `arr[(⟨k, hk⟩ : Fin n).val]!` and `arr[k]!` as different variables.
-  Fix by annotating the result type:
-  `have : arr[k]! ≥ 1 := lemma ⟨k, hk⟩`.
-  **Critical**: `have := lemma ⟨k, hk⟩` (without type annotation) does
-  NOT work — the anonymous hypothesis retains the Fin.val form and
-  omega still sees two distinct variables. Always use the annotated form.
-- **Nat beq false**: To prove `(n == m) = false` for Nat with `n ≠ m`,
-  use `cases heq : n == m <;> simp_all [beq_iff_eq]`. Direct `omega`
-  and `rw [beq_iff_eq]` don't work because `omega` doesn't understand
-  `BEq` and `beq_iff_eq` is about `= true`, not `= false`.
-- **List/Array/ByteArray length conversions**: `Array.length_toList`
-  gives `arr.toList.length = arr.size`. `ByteArray.size_data` gives
-  `ba.data.size = ba.size`. Chain them for `ba.data.toList.length`.
-- **Avoid `forIn` on `Range` in proofs**: `forIn [:n]` uses
-  `Std.Legacy.Range.forIn'` with a well-founded recursion `loop✝` that
-  CANNOT be unfolded by name. `with_unfolding_all rfl` only works for
-  concrete values (`:= [:0]`, `[:1]`) not symbolic `n`. If you need to
-  prove properties of a `for i in [:n]` loop, replace it with explicit
-  recursion (see `copyLoop` in `Inflate.lean`).
-- **Loop invariant proof pattern**: For recursive functions like
-  `copyLoop buf start distance k length`, prove a generalized invariant
-  by well-founded induction carrying the full buffer state:
-  1. State the invariant relating `buf` to the original `output`
-  2. Base case: `k = length`, `copyLoop` returns `buf`, use hypothesis
-  3. Inductive step: show `buf.push x` satisfies the invariant for `k+1`
-  4. Key lemmas: `push_getElem_lt` (push preserves earlier elements),
-     `push_data_toList` (`(buf.push b).data.toList = buf.data.toList ++ [b]`),
-     `List.ofFn_succ_last` (snoc decomposition of `List.ofFn`)
-- **`congr` max recursion on nested Prod in Option**: `congr 1; congr 1`
-  on `some (a, b, c) = some (x, y, z)` hits max recursion depth. Use
-  `congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))` instead — gives clean
-  sub-goals without recursion issues. Note: `congrArg` not `congr_arg`.
-- **take/drop ↔ Array.extract**: To bridge `List.take`/`List.drop` (from
-  spec) with `Array.extract` (from native), use:
-  `simp only [Array.toList_extract, List.extract, Nat.sub_zero, List.drop_zero]`
-  then `← List.map_drop` + `List.drop_take` for drop-inside-map-take.
-- **`readBitsLSB_bound` for omega**: `readBitsLSB n bits = some (val, rest)`
-  implies `val < 2^n`. Essential for bounding UInt values (e.g.,
-  `hlit_v.toNat < 32`) before omega can prove `≤ UInt16.size`.
-- **`Pure.pure` not `Option.pure`**: The constant `Option.pure` doesn't
-  exist. Use `pure, Pure.pure` in simp arguments to unfold monadic
-  `return` in Option specs.
-- **`List.getElem_of_eq` for extracting from list equality**: When
-  `hih : l1 = l2` and you need `l1[i] = l2[i]`, use
-  `List.getElem_of_eq hih hbound` where `hbound : i < l1.length`.
-  This avoids dependent-type rewriting issues that arise when trying
-  `rw [hih]` directly on getElem expressions.
-- **`Nat.mod_eq_sub_mod` for inductive mod proofs**: When proving
-  `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`, use
-  `← Nat.mod_eq_sub_mod hge` to rewrite `(n - k) % k` to `n % k`.
-  `omega` cannot reason about `%` directly.
-- **`set` is Mathlib-only**: The `set` tactic is not available in this
-  project. Use `have` or `let` instead.
-- **`exact` vs `have :=` for wildcard resolution**: `exact f _ _ _` does
-  goal-directed elaboration — wildcards are resolved from the expected
-  goal type. `have := f _ _ _` elaborates independently and fails when
-  wildcards can't be inferred from the function signature alone (e.g.,
-  complex expressions like hash table states from `updateHashes`).
-  When applying a recursive lemma whose arguments include complex
-  intermediate state, prefer `exact` (possibly via a helper lemma) over
-  `have :=`. For arithmetic wrappers around recursive calls, extract a
-  helper like `length_cons_le_of_advance` and use
-  `exact helper (recursive_lemma _ _ _ _ _) (by omega) hle`.
-- **Fuel independence proof pattern**: For fuel-based recursive functions
-  `f x (fuel + 1) = some result → ∀ k, f x (fuel + k) = some result`,
-  use induction on fuel with: (1) `conv => lhs; rw [show n+1+k = (n+k)+1
-  from by omega]` before `unfold f at h ⊢` so both sides unfold at the
-  same successor level; (2) `cases` on each non-recursive operation;
-  (3) `ih` for recursive calls. For `if` reduction in `h`, use
-  `rw [if_pos/if_neg]` NOT `simp [cond]` — simp over-simplifies
-  (strips `some`/`pure` wrappers). For `guard` in do-blocks, use
-  `by_cases` on the condition then `simp only [guard, hcond, ↓reduceIte]`
-  — the guard uses `Alternative.guard`, NOT `Option.guard`.
-- **Guard contradiction in `by_cases` neg branch**: When `by_cases` splits
-  on `(x == y) = true`, the neg branch gives `¬(x == y) = true`, NOT
-  `(x == y) = false`. To reduce a `guard` (or `if ... then pure () else
-  failure`) stuck in a hypothesis, first derive the `= false` form:
-  ```lean
-  have hfalse : (x == y) = false := by cases h : (x == y) <;> simp_all
-  rw [hfalse] at hspec
-  simp [guard, Bool.false_eq_true] at hspec  -- reduces to none = some, contradiction
-  ```
-  Don't try `simp [hguard]` alone — it reduces the `if` but leaves
-  `guard False` or `match guard False, ...` unreduced.
-- **Avoid `do { if ... then return ...; rest }`**: Creates `have __do_jp`
-  join points in desugared form, making `h` and `⊢` syntactically
-  different after `unfold`. Use `if ... then some (...) else do { rest }`
-  instead. This applies to spec functions where proofs need to unfold
-  both sides simultaneously.
-- **`simp` (not `simp only`) for Option do-notation match chains**: When
-  `unfold` expands a do-block in `Option`, the result is nested
-  `match opt?, fun val => ... with | none, _ => none | some a, f => f a`.
-  `simp only` CANNOT enter these match expressions to rewrite inner
-  terms. Use full `simp` (without `only`) with the relevant hypotheses
-  to resolve all match steps at once. This differs from `Except` monad
-  do-blocks where `simp only [bind, Option.bind]` suffices.
-- **`letFun` linter false positive**: When `unfold f at h` leaves
-  `have x := e; body` bindings, `simp only [letFun] at h` is needed
-  to reduce them before `split at h` can see inner `if` expressions.
-  The linter may report `letFun` as unused — this is a false positive.
-  Do NOT remove it; doing so breaks the proof. Same applies to `guard`,
-  `pure`, `Pure.pure` in `simp only [guard, ...]` — the linter reports
-  them as unused but removing them leaves `match guard (...)` unreduced.
-  Use `set_option linter.unusedSimpArgs false in` to suppress.
-- **`toUInt32.toNat` for small Nat**: `rep.toUInt32.toNat = rep` when
-  `rep < 2^n` for small `n` (e.g., from `readBitsLSB_bound`). Don't
-  use `show rep % UInt32.size = rep; omega` — omega can't reason about
-  `%`. Use `Nat.mod_eq_of_lt (by omega)` directly.
-- **Nat↔UInt16 beq bridging**: When `hsym_ne : ¬(sym == N) = true`
-  (Nat beq) but you have `h : sym.toUInt16 = N` (UInt16 equality from
-  `rw [beq_iff_eq] at h`), bridge via:
-  ```lean
-  have := congrArg UInt16.toNat h  -- sym.toUInt16.toNat = N.toNat
-  rw [hsym_toNat] at this          -- sym = N.toNat (= N by simp)
-  exact absurd (beq_iff_eq.mpr (by simpa using this)) hsym_ne
-  ```
-  Don't try `exact absurd h hsym_ne` — types differ (UInt16 vs Nat beq).
+The following apply everywhere and are worth keeping here:
 
-- **UInt8 comparison ↔ Nat comparison**: When native code uses UInt8
-  comparisons (e.g. `bw.bitCount + 1 >= 8`) but proofs work in Nat
-  (e.g. `bw.bitCount.toNat + 1 >= 8`), bridge with
-  `UInt8.le_iff_toNat_le`, `UInt8.toNat_add`, `UInt8.toNat_ofNat` +
-  `omega`. This arises when functional induction on UInt8-condition
-  code gives UInt8 hypotheses that don't match Nat-condition lemmas.
-  Prefer plain induction + `by_cases` on the Nat condition, then
-  convert to UInt8 for goal's `if` using an iff bridging lemma.
-- **`Nat.and_one_is_mod` and `Nat.one_and_eq_mod_two`**: For bridging
-  `Nat.testBit` (which uses `1 &&& (m >>> n)`) to `% 2`:
-  `Nat.one_and_eq_mod_two : 1 &&& n = n % 2` (matches testBit order),
-  `Nat.and_one_is_mod : x &&& 1 = x % 2` (matches code order).
-- **`generalize` before `bv_decide` for shared subexpressions**: When
-  `bv_decide` fails with "spurious counterexample" because it abstracts
-  the same expression (e.g., `data[pos]`) as multiple opaque variables,
-  use `generalize data[pos].toUInt32 = x` first to unify them into a
-  single variable.
-- **`Bool.false_eq_true` for stuck `if false = true`**: After
-  substituting `(x == y) = false` via simp, `↓reduceIte` can't reduce
-  `if false = true then ... else ...` because `false = true` is a
-  `Prop`. Add `Bool.false_eq_true` to rewrite it to `False`, then
-  `↓reduceIte` can reduce the `if`.
-- **`Bool` vs `Prop` in `if` conditions**: When proving an `if` takes a
-  specific branch, check whether the condition is `Bool` or `Prop`:
-  - `Bool`: prove `show (cond) = false from by decide` then use
-    `Bool.false_eq_true, ↓reduceIte`
-  - `Prop`: prove `show ¬P from by omega` then use `↓reduceIte`
-  Don't use `show P = false from by omega` for `Prop` conditions — `>`
-  on `Nat` creates a `Prop`, not a `Bool`.
-
-- **`split` not `by_cases` for UInt8 `if` branches**: When a function
-  uses `if level == 0 then ... else if level < 5 then ...` with UInt8
-  comparisons, use `split` (not `by_cases`) to case-split. `by_cases`
-  on `(level < 5) = true` creates `¬(level < 5) = true` (not
-  `(level < 5) = false`) in the negative branch, which simp can't
-  reduce. `split` naturally decomposes `if` expressions and produces
-  clean sub-goals. After `split`, use `decide` if the goal is fully
-  concrete (e.g., format lemma with known byte values).
-- **`simp only` fails with `List.filter` + anonymous lambdas**: When
-  `List.filter_cons` unfolds `(a :: l).filter p` to
-  `if p a = true then ...`, and `p` is an anonymous lambda like
-  `(· != 0)`, the `p a` application remains unreduced. `simp only`
-  cannot beta-reduce this or evaluate the boolean. Use full `simp`
-  (without `only`) which includes beta-reduction and boolean evaluation.
-  Similarly, `List.set_cons_zero` and `List.set_cons_succ` are not
-  `@[simp]` — unfold them with `simp only` first, then use `simp` for
-  the filter/boolean parts.
-- **Extracting conditions from `&&` boolean hypotheses**: When a proof
-  has `hcond : (a && decide P && decide Q) = true` from an `if` guard,
-  use `simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond` to
-  decompose into `hcond : (a = true ∧ P) ∧ Q`. Note: `&&` is
-  left-associative, so the result is left-nested `(... ∧ ...) ∧ ...`,
-  NOT right-nested. Use `obtain ⟨⟨ha, hp⟩, hq⟩ := hcond` or
-  `hcond.1.2` / `hcond.2` to access components. This replaces verbose
-  `by_cases` + `exfalso` patterns for extracting individual conditions.
-- **`let` bindings are opaque to `omega`**: When a hypothesis `hj`
-  contains an expanded expression (e.g. `(List.map f xs).length`) and
-  you define `let pl := List.map f xs`, omega treats `pl.length` and
-  `(List.map f xs).length` as distinct variables. Fix with
-  `change j ≥ max 4 (pl.length - tw.length) at hj` — `change` does
-  definitional unfolding, making the terms syntactically identical for
-  omega. Don't try `simp` or `rfl` equations — they add complexity
-  without helping omega.
-
-- **UInt8 positivity from Nat membership**: When you have
-  `hne0 : (lengths.toList.map UInt8.toNat)[s] ≠ 0` and need
-  `lengths[s] > 0` (UInt8 comparison), first bridge the list indexing:
-  `have hs_i : (...)[s] = lengths[s].toNat := by simp only [...]; rfl`,
-  then `have hne0_nat : lengths[s].toNat ≠ 0 := hs_i ▸ hne0`, then
-  `simp only [GT.gt, UInt8.lt_iff_toNat_lt, UInt8.toNat_ofNat]; omega`.
-  Plain `omega` can't bridge UInt8 `>` to Nat directly.
-- **List Nat ↔ Array UInt8 roundtrip**: To prove
-  `l = (l.toArray.map Nat.toUInt8).toList.map UInt8.toNat` when all
-  elements are ≤ 15 (from `ValidLengths`):
-  ```lean
-  simp only [Array.toList_map, List.map_map]; symm
-  rw [List.map_congr_left (fun n hn => by
-    show UInt8.toNat (Nat.toUInt8 n) = n
-    simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
-    exact Nat.mod_eq_of_lt (by have := hv.1 n hn; omega))]
-  simp  -- closes `List.map (fun n => n) l = l` (not `List.map id l`)
-  ```
-  Note: `List.map_congr_left` produces `fun n => n` not `id`, so
-  `List.map_id` won't match — use `simp` instead.
-- **UInt8→Nat→UInt8 roundtrip**: To prove
-  `Nat.toUInt8 (UInt8.toNat u) = u`, use:
-  ```lean
-  unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
-  rw [BitVec.ofNat_toNat, BitVec.setWidth_eq]
-  ```
-  Do NOT use `simp [Nat.toUInt8, UInt8.toNat, ...]` — it loops via
-  `UInt8.toNat.eq_1` / `UInt8.toNat_toBitVec`. Do NOT try `congr 1`
-  (max recursion) or `UInt8.ext` / `UInt8.eq_of_toNat_eq` (don't exist).
-  For lists: `l.map (Nat.toUInt8 ∘ UInt8.toNat) = l` via
-  `List.map_congr_left` with the above per-element proof, then `simp`.
-- **`Array.toArray_toList`**: `a.toList.toArray = a` for any Array.
-  NOT `Array.toList_toArray` or `List.toArray_toList` — those don't exist.
-- **simp hypothesis must match post-rewrite form**: When using
-  `simp only [rewrite_eq, neg_hyp, ↓reduceIte]`, if `rewrite_eq`
-  transforms the goal's condition (e.g. `sym.toUInt16.toNat` → `sym`),
-  then `neg_hyp` must be stated in the post-rewrite form (e.g.
-  `¬(sym - 257 ≥ ...)`, not `¬(sym.toUInt16.toNat - 257 ≥ ...)`).
-  simp applies all rules together, so the hypothesis must match the
-  normalized goal, not the pre-rewrite form.
-- **`rw`/`▸` max recursion on `List.ofFn`**: Rewriting a term
-  containing `List.ofFn (fun (i : Fin n) => complex_expr)` can hit
-  max recursion depth because the motive involves dependent types.
-  Fix: use `set_option maxRecDepth 2048 in` before the `have`/tactic
-  that performs the rewrite. `▸` is even worse than `rw` here since
-  it triggers full `whnf`.
-- **Suffix/append proofs vs fuel-independence proofs**: In
-  fuel-independence proofs, `simp only [hds] at h ⊢` processes both
-  hypothesis and goal simultaneously (same function call in both). In
-  suffix/append proofs, `h` has `f bits` while `⊢` has
-  `f (bits ++ suffix)` — `simp only [hds]` won't match the goal.
-  Pattern: (1) `simp only [hds, bind, Option.bind] at h` to process
-  the hypothesis, (2) `rw [f_append ...] at ⊢` to transform the goal,
-  (3) `simp only [bind, Option.bind]` to reduce the resulting
-  `Option.bind (some (...)) (fun ...)` in the goal. For `if` branches
-  appearing in both sides, use `by_cases hcond : condition` then
-  `rw [if_pos/if_neg hcond] at h ⊢`. Note: `split at h ⊢` (multiple
-  targets) is NOT supported — use `by_cases` instead.
-
-- **`simp only` max recursion on Except do-blocks with many guards**:
-  When a function has many `unless ... do throw` guards in `Except`
-  do-notation, `simp only [FuncName, bind, Except.bind]` causes
-  looping via `FuncName.eq_1`. And `unfold FuncName` followed by
-  `simp only [pure, Except.pure, bind, Except.bind]` hits max
-  recursion on the deeply nested expanded term. Fix: use
-  `set_option maxRecDepth 8192 in simp only [FuncName,
-  - FuncName.eq_1, bind, Except.bind, ...]` — exclude the looping
-  equation and provide all guard-discharge hypotheses (format lemmas,
-  inflateRaw result, endPos bound, etc.) in one pass. The simp
-  processes all guards simultaneously, avoiding the need to step
-  through each `unless` individually.
-- **Spec decoder fuel limits roundtrip size bounds**: The spec `decode`
-  function uses `decodeSymbols` with hardcoded default fuel 10,000,000.
-  This means roundtrip theorems (`inflate_deflateX`) can only handle
-  data where `tokensToSymbols(tokens).length ≤ 10,000,000`. Since
-  `tokensToSymbols` length = `tokens.size + 1`:
-  - Greedy LZ77: `tokens.size ≤ data.size` → `data.size < 10,000,000`
-  - Lazy LZ77: `tokens.size ≤ 2 * data.size` → `data.size < 5,000,000`
-  Don't try to use `decodeSymbols_fuel_independent` to extend past the
-  default fuel — it only adds fuel, so it can't prove behavior at a
-  LOWER fuel than where the result was established. The constraint is
-  fundamental to the spec decoder definition.
-- **Combined invariant lemma pattern for BitReader**: When proving that
-  a chain of BitReader operations preserves properties (data equality,
-  hpos, pos ≤ data.size), bundle all three into a single `∧` return:
-  ```lean
-  private theorem op_inv (br br' : BitReader) ...
-      (h : op br = .ok (result, br'))
-      (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
-      (hple : br.pos ≤ br.data.size) :
-      br'.data = br.data ∧
-      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
-      br'.pos ≤ br'.data.size
-  ```
-  Chain with: `have ⟨hd₁, hpos₁, hple₁⟩ := op_inv ...` then
-  `exact ⟨hd'.trans hd₁, hpos', hple'⟩`. This avoids 3× boilerplate.
-  See `GzipCorrect.lean` for examples (readBit_inv through decode_inv).
-
-## Current State
-
-See `PROGRESS.md` for global milestones and current phase.
+- **No Mathlib**: Use `grind` for algebraic goals (subsumes `ring`). Use
+  `by_cases + exfalso` for contradiction (no `by_contra`). See skill for full list.

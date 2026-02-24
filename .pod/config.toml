@@ -38,11 +38,22 @@ prompt = "/plan"
 lock = "planner"                   # Acquire this lock before running
 copy_lake_cache = false
 
-[worker_types.work]
-prompt = "/work"
+[worker_types.feature]
+prompt = "/feature"
+issue_label = "feature"            # Only claims issues with this label
 copy_lake_cache = true
 
-# Example additional worker type:
-# [worker_types.review]
-# prompt = "/review"
-# copy_lake_cache = true
+[worker_types.review]
+prompt = "/review"
+issue_label = "review"
+copy_lake_cache = true
+
+[worker_types.summarize]
+prompt = "/summarize"
+issue_label = "summarize"
+copy_lake_cache = false
+
+[worker_types.meditate]
+prompt = "/meditate"
+issue_label = "meditate"
+copy_lake_cache = false
