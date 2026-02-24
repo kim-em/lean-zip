@@ -14,6 +14,7 @@
 -/
 import Zip.Native.Inflate
 import Zip.Native.Deflate
+import ZipForStd.ByteArray
 import Std.Tactic.BVDecide
 
 namespace Zip.Spec.DeflateStoredCorrect
@@ -331,25 +332,6 @@ theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
 
 /-! ## Helper lemmas for ByteArray operations on concatenated arrays -/
 
-/-- Extract from a ++ b starting at or past a.size gives an extract of b. -/
-private theorem extract_append_ge (a b : ByteArray) (i j : Nat) (h : i ≥ a.size) :
-    (a ++ b).extract i j = b.extract (i - a.size) (j - a.size) := by
-  apply ByteArray.ext
-  simp [ByteArray.data_extract, ByteArray.data_append, Array.extract_append]
-  omega
-
-/-- Extracting the full array is the identity. -/
-private theorem extract_zero_size (ba : ByteArray) :
-    ba.extract 0 ba.size = ba := by
-  apply ByteArray.ext; simp
-
-/-- Concatenation of adjacent extracts. -/
-private theorem extract_append_extract (ba : ByteArray) (i j k : Nat)
-    (hij : i ≤ j) (hjk : j ≤ k) :
-    ba.extract i j ++ ba.extract j k = ba.extract i k := by
-  apply ByteArray.ext
-  simp [Nat.min_eq_left hij, Nat.max_eq_right hjk]
-
 /-- Accessing byte at position pfx.size + k in pfx ++ (hdr ++ rest)
     gives hdr[k] when k < hdr.size. -/
 private theorem getElem_pfx_hdr (pfx hdr rest : ByteArray) (k : Nat)
@@ -364,11 +346,6 @@ private theorem getElem_pfx_hdr_zero (pfx hdr rest : ByteArray)
     (pfx ++ (hdr ++ rest))[pfx.size] = hdr[0] := by
   have := getElem_pfx_hdr pfx hdr rest 0 hk (by omega)
   simp at this; exact this
-
-/-- Extracting from 0 to a.size in a ++ b gives a. -/
-private theorem extract_append_left (a b : ByteArray) :
-    (a ++ b).extract 0 a.size = a := by
-  apply ByteArray.ext; simp
 
 /-! ## Stored block header abstraction -/
 
@@ -433,17 +410,17 @@ private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
     (by rw [getElem_pfx_hdr _ _ _ 3 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
     (by rw [getElem_pfx_hdr _ _ _ 4 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
   rw [h_loop]; congr 1; congr 1
-  rw [extract_append_ge _ _ _ _ (by omega)]
+  rw [ByteArray.extract_append_ge _ _ _ _ (by omega)]
   simp only [show pfx.size + 5 - pfx.size = 5 from by omega,
     show pfx.size + 5 + (data.size - pos) - pfx.size = 5 + (data.size - pos) from by omega]
-  rw [extract_append_ge _ _ _ _ (by simp : (5 : Nat) ≥ (storedBlockHdr (data.size - pos) true).size)]
+  rw [ByteArray.extract_append_ge _ _ _ _ (by simp : (5 : Nat) ≥ (storedBlockHdr (data.size - pos) true).size)]
   simp only [show (5 : Nat) - (storedBlockHdr (data.size - pos) true).size = 0 from by simp,
     show 5 + (data.size - pos) - (storedBlockHdr (data.size - pos) true).size =
       data.size - pos from by simp]
   congr 1
   rw [show data.size - pos = (data.extract pos data.size).size from by
     simp [ByteArray.size_extract]]
-  exact extract_zero_size _
+  exact ByteArray.extract_zero_size
 
 /-- Step through one non-final stored block via inflateLoop_nonfinal_stored. -/
 private theorem inflateLoop_nonfinal_step (data : ByteArray) (pos : Nat)
@@ -483,29 +460,6 @@ private theorem inflateLoop_nonfinal_step (data : ByteArray) (pos : Nat)
     (by rw [getElem_pfx_hdr _ _ _ 3 (by simp) (by omega)]; rfl)
     (by rw [getElem_pfx_hdr _ _ _ 4 (by simp) (by omega)]; rfl)
 
-/-- Extract the block data from the compressed stream after stepping. -/
-private theorem nonfinal_extract_block (pfx block rest : ByteArray)
-    (h_block_sz : block.size = 65535) :
-    (pfx ++ (storedBlockHdr 65535 false ++ (block ++ rest))).extract
-      (pfx.size + 5) (pfx.size + 5 + 65535) = block := by
-  rw [extract_append_ge _ _ _ _ (by omega)]
-  simp only [show pfx.size + 5 - pfx.size = 5 from by omega,
-    show pfx.size + 5 + 65535 - pfx.size = 65540 from by omega]
-  rw [extract_append_ge _ _ _ _ (by simp : (5 : Nat) ≥ (storedBlockHdr 65535 false).size)]
-  simp only [show (5 : Nat) - (storedBlockHdr 65535 false).size = 0 from by simp,
-    show (65540 : Nat) - (storedBlockHdr 65535 false).size = 65535 from by simp]
-  have h := extract_append_left block rest
-  rw [h_block_sz] at h
-  exact h
-
-/-- Restructure pfx ++ (hdr ++ (block ++ rest)) into (pfx ++ (hdr ++ block)) ++ rest. -/
-private theorem nonfinal_reassoc (pfx block rest : ByteArray) :
-    pfx ++ (storedBlockHdr 65535 false ++ (block ++ rest)) =
-    (pfx ++ (storedBlockHdr 65535 false ++ block)) ++ rest := by
-  have : storedBlockHdr 65535 false ++ (block ++ rest) =
-      (storedBlockHdr 65535 false ++ block) ++ rest := ByteArray.append_assoc.symm
-  rw [this, ← ByteArray.append_assoc]
-
 /-- After stepping one block, simplify the extracted block and restructure for IH. -/
 private theorem inflateLoop_nonfinal_after_step (data : ByteArray) (pos : Nat)
     (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
@@ -532,23 +486,9 @@ private theorem inflateLoop_nonfinal_after_step (data : ByteArray) (pos : Nat)
       fixedLit fixedDist maxOutputSize fuel' =
     .ok (output ++ data.extract pos data.size, endPos) := by
   rw [← h_pfx'_sz, h_ih, ByteArray.append_assoc,
-      extract_append_extract data pos (pos + 65535) data.size
-        (Nat.le_add_right pos 65535) h_pos65535]
-
-/-- Unfold deflateStoredPure in the inflateLoop goal for nonfinal case. -/
-private theorem nonfinal_unfold_goal (data : ByteArray) (pos : Nat)
-    (pfx output : ByteArray) (hpos : pos ≤ data.size)
-    (h_nonfinal : ¬(data.size - pos ≤ 65535))
-    (fixedLit fixedDist : HuffTree) (fuel' maxOutputSize : Nat) :
-    Inflate.inflateLoop
-      { data := pfx ++ deflateStoredPure data pos, pos := pfx.size, bitOff := 0 }
-      output fixedLit fixedDist maxOutputSize (fuel' + 1) =
-    Inflate.inflateLoop
-      { data := pfx ++ (storedBlockHdr 65535 false ++
-          (data.extract pos (pos + 65535) ++ deflateStoredPure data (pos + 65535))),
-        pos := pfx.size, bitOff := 0 }
-      output fixedLit fixedDist maxOutputSize (fuel' + 1) := by
-  rw [deflateStoredPure_eq_nonfinal data pos hpos h_nonfinal, ByteArray.append_assoc]
+      ByteArray.extract_append_extract]
+  simp [Nat.min_eq_left (Nat.le_add_right pos 65535),
+        Nat.max_eq_right h_pos65535]
 
 /-- Restructure data and output after stepping one block.
     Combines extract_block + reassoc so _nonfinal_proof has fewer rw steps. -/
@@ -571,9 +511,25 @@ private theorem nonfinal_step_restructure (data : ByteArray) (pos : Nat)
         bitOff := 0 }
       (output ++ data.extract pos (pos + 65535))
       fixedLit fixedDist maxOutputSize fuel' := by
-  generalize hrest_eq : deflateStoredPure data (pos + 65535) = rest
-  rw [nonfinal_extract_block pfx (data.extract pos (pos + 65535)) rest h_block_sz,
-      nonfinal_reassoc pfx (data.extract pos (pos + 65535)) rest]
+  generalize deflateStoredPure data (pos + 65535) = rest
+  -- Inline nonfinal_extract_block: extract block data from compressed stream
+  have h_extract : (pfx ++ (storedBlockHdr 65535 false ++
+      ((data.extract pos (pos + 65535)) ++ rest))).extract
+      (pfx.size + 5) (pfx.size + 5 + 65535) = data.extract pos (pos + 65535) := by
+    rw [ByteArray.extract_append_ge _ _ _ _ (by omega)]
+    simp only [show pfx.size + 5 - pfx.size = 5 from by omega,
+      show pfx.size + 5 + 65535 - pfx.size = 65540 from by omega]
+    rw [ByteArray.extract_append_ge _ _ _ _ (by simp : (5 : Nat) ≥ (storedBlockHdr 65535 false).size)]
+    simp only [show (5 : Nat) - (storedBlockHdr 65535 false).size = 0 from by simp,
+      show (65540 : Nat) - (storedBlockHdr 65535 false).size = 65535 from by simp]
+    have h := ByteArray.extract_append_left (data.extract pos (pos + 65535)) rest
+    rw [h_block_sz] at h; exact h
+  rw [h_extract]
+  -- Inline nonfinal_reassoc: restructure concatenation
+  have : storedBlockHdr 65535 false ++ ((data.extract pos (pos + 65535)) ++ rest) =
+      (storedBlockHdr 65535 false ++ data.extract pos (pos + 65535)) ++ rest :=
+    ByteArray.append_assoc.symm
+  rw [this, ← ByteArray.append_assoc]
 
 /-- First half of the nonfinal chain: unfold deflateStoredPure + step one block +
     restructure data. Goes from the original inflateLoop goal to the restructured
@@ -595,13 +551,14 @@ private theorem nonfinal_chain_first_half (data : ByteArray) (pos : Nat)
         pos := pfx.size + 5 + 65535,
         bitOff := 0 }
       (output ++ data.extract pos (pos + 65535))
-      fixedLit fixedDist maxOutputSize fuel' :=
-  (nonfinal_unfold_goal data pos pfx output hpos h_final fixedLit fixedDist
-    fuel' maxOutputSize).trans
-  ((inflateLoop_nonfinal_step data pos hpos pfx output fixedLit fixedDist
+      fixedLit fixedDist maxOutputSize fuel' := by
+  -- Unfold deflateStoredPure (was nonfinal_unfold_goal)
+  rw [deflateStoredPure_eq_nonfinal data pos hpos h_final, ByteArray.append_assoc]
+  -- Step one block + restructure (was inflateLoop_nonfinal_step.trans nonfinal_step_restructure)
+  exact (inflateLoop_nonfinal_step data pos hpos pfx output fixedLit fixedDist
     fuel' maxOutputSize h_fit h_final h_pos65535 h_block_sz).trans
-  (nonfinal_step_restructure data pos pfx output fixedLit fixedDist
-    fuel' maxOutputSize h_block_sz))
+    (nonfinal_step_restructure data pos pfx output fixedLit fixedDist
+      fuel' maxOutputSize h_block_sz)
 
 /-- Apply the induction hypothesis for the non-final case. -/
 private theorem inflateLoop_deflateStored_apply_ih (data : ByteArray) (pos : Nat)
@@ -669,35 +626,6 @@ private theorem inflateLoop_deflateStored_nonfinal_all (data : ByteArray) (pos :
       (inflateLoop_nonfinal_after_step data pos pfx output fixedLit fixedDist
         fuel' maxOutputSize h_block_sz h_pos65535 h_pfx'_sz endPos h_ih)⟩
 
-/-- Fuel conversion wrapper: converts from fuel to (fuel-1)+1 form
-    for the nonfinal case. Isolated to keep the Eq.mpr wrapper minimal. -/
-private theorem inflateLoop_deflateStored_nonfinal_fuel (data : ByteArray) (pos : Nat)
-    (hpos : pos ≤ data.size)
-    (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
-    (fuel maxOutputSize : Nat)
-    (h_fuel_pos : fuel ≥ 1)
-    (h_fit : output.size + (data.size - pos) ≤ maxOutputSize)
-    (h_final : ¬(data.size - pos ≤ 65535))
-    (h_pos65535 : pos + 65535 ≤ data.size)
-    (h_block_sz : (data.extract pos (pos + 65535)).size = 65535)
-    (h_pfx'_sz : (pfx ++ (storedBlockHdr 65535 false ++
-        data.extract pos (pos + 65535))).size = pfx.size + 5 + 65535)
-    (h_ih_bundle : ∃ endPos, Inflate.inflateLoop
-      { data := pfx ++ (storedBlockHdr 65535 false ++ data.extract pos (pos + 65535)) ++
-          deflateStoredPure data (pos + 65535),
-        pos := (pfx ++ (storedBlockHdr 65535 false ++ data.extract pos (pos + 65535))).size,
-        bitOff := 0 }
-      (output ++ data.extract pos (pos + 65535)) fixedLit fixedDist maxOutputSize (fuel - 1) =
-    .ok (output ++ data.extract pos (pos + 65535) ++ data.extract (pos + 65535) data.size,
-      endPos)) :
-    ∃ endPos, Inflate.inflateLoop
-      { data := pfx ++ deflateStoredPure data pos, pos := pfx.size, bitOff := 0 }
-      output fixedLit fixedDist maxOutputSize fuel =
-    .ok (output ++ data.extract pos data.size, endPos) := by
-  rw [show fuel = (fuel - 1) + 1 from by omega]
-  exact inflateLoop_deflateStored_nonfinal_all data pos hpos pfx output fixedLit fixedDist
-    (fuel - 1) maxOutputSize h_fit h_final h_pos65535 h_block_sz h_pfx'_sz h_ih_bundle
-
 private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
     (hpos : pos ≤ data.size)
     (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
@@ -726,8 +654,9 @@ private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
   by_cases h_final : data.size - pos ≤ 65535
   · exact inflateLoop_deflateStored_final data pos hpos pfx output fixedLit fixedDist
       fuel maxOutputSize h_fuel h_fit h_final
-  · exact inflateLoop_deflateStored_nonfinal_fuel data pos hpos pfx output fixedLit fixedDist
-      fuel maxOutputSize (by omega) h_fit h_final
+  · rw [show fuel = (fuel - 1) + 1 from by omega]
+    exact inflateLoop_deflateStored_nonfinal_all data pos hpos pfx output fixedLit fixedDist
+      (fuel - 1) maxOutputSize h_fit h_final
       (by omega)
       (by rw [ByteArray.size_extract, Nat.min_eq_left (by omega : pos + 65535 ≤ data.size)]; omega)
       (by simp only [ByteArray.size_append, storedBlockHdr_size,
