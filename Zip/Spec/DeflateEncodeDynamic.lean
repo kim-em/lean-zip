@@ -310,6 +310,49 @@ theorem rlEncodeLengths_valid (lengths : List Nat)
       (entry.1 = 18 ∧ entry.2 ≤ 127) := by
   exact rlEncodeLengths_go_valid lengths hvalid
 
+/-- RLE encoding never produces more entries than the input length. -/
+private theorem rlEncodeLengths_go_length_le (lengths : List Nat) :
+    (rlEncodeLengths.go lengths).length ≤ lengths.length := by
+  match lengths with
+  | [] => simp [rlEncodeLengths.go]
+  | x :: xs =>
+    unfold rlEncodeLengths.go
+    simp only [letFun]
+    have hcr0 := countRun_le_length 0 xs
+    have hcrx := countRun_le_length x xs
+    split
+    · -- x == 0
+      split
+      · -- runLen ≥ 11
+        simp only [letFun, List.length_cons]
+        have ih := rlEncodeLengths_go_length_le (xs.drop (min (1 + countRun 0 xs) 138 - 1))
+        simp [List.length_drop] at ih ⊢; omega
+      · split
+        · -- 3 ≤ runLen < 11
+          simp only [List.length_cons]
+          have ih := rlEncodeLengths_go_length_le (xs.drop (1 + countRun 0 xs - 1))
+          simp [List.length_drop] at ih ⊢; omega
+        · -- runLen < 3
+          simp only [List.length_cons]
+          have ih := rlEncodeLengths_go_length_le xs; omega
+    · -- x ≠ 0
+      split
+      · -- runLen ≥ 3
+        simp only [List.length_cons]
+        have ih := rlEncodeLengths_go_length_le (xs.drop (min (countRun x xs) 6))
+        simp [List.length_drop] at ih ⊢; omega
+      · -- runLen < 3
+        simp only [List.length_cons]
+        have ih := rlEncodeLengths_go_length_le xs; omega
+termination_by lengths.length
+decreasing_by
+  all_goals simp_all [List.length_drop]
+  all_goals have := countRun_le_length 0 xs; omega
+
+theorem rlEncodeLengths_length_le (lengths : List Nat) :
+    (rlEncodeLengths lengths).length ≤ lengths.length :=
+  rlEncodeLengths_go_length_le lengths
+
 /-! ## Dynamic block header encoding (RFC 1951 §3.2.7) -/
 
 /-- CL code length alphabet order for DEFLATE dynamic block headers
@@ -909,6 +952,36 @@ private theorem readCLLengths_recovers_clLens
 
 /-- The dynamic tree header roundtrip: encoding then decoding recovers
     the original code lengths. -/
+-- Helper: extract symbolBits from encodeDynamicTrees success
+private theorem encodeDynamicTrees_extract
+    (litLens distLens : List Nat) (headerBits : List Bool)
+    (hlitLen : litLens.length ≥ 257 ∧ litLens.length ≤ 288)
+    (hdistLen : distLens.length ≥ 1 ∧ distLens.length ≤ 32)
+    (henc : encodeDynamicTrees litLens distLens = some headerBits) :
+    let allLens := litLens ++ distLens
+    let clEntries := rlEncodeLengths allLens
+    let clFreqs := clSymbolFreqs clEntries
+    let clFreqPairs := (List.range clFreqs.length).map fun i => (i, clFreqs.getD i 0)
+    let clLens := Huffman.Spec.computeCodeLengths clFreqPairs 19 7
+    let clCodes := Huffman.Spec.allCodes clLens 7
+    let clTable := clCodes.map fun (sym, cw) => (cw, sym)
+    let numCodeLen := computeHCLEN clLens
+    ∃ symbolBits, encodeCLEntries clTable clEntries = some symbolBits ∧
+      headerBits = writeBitsLSB 5 (litLens.length - 257) ++
+        writeBitsLSB 5 (distLens.length - 1) ++
+        writeBitsLSB 4 (numCodeLen - 4) ++
+        writeCLLengths clLens numCodeLen ++ symbolBits := by
+  simp only [encodeDynamicTrees, bind, Option.bind, guard, pure, Pure.pure,
+    hlitLen, hdistLen, and_self, ↓reduceIte] at henc
+  -- After guards, the remaining do-block has one ← (encodeCLEntries)
+  -- followed by a return of the concatenated bits
+  generalize hcle : encodeCLEntries _ _ = result at henc
+  cases result with
+  | none => simp at henc
+  | some symbolBits =>
+    simp only [Option.some.injEq] at henc
+    exact ⟨symbolBits, hcle, henc.symm⟩
+
 theorem encodeDynamicTrees_decodeDynamicTables
     (litLens distLens : List Nat)
     (headerBits rest : List Bool)
@@ -917,6 +990,83 @@ theorem encodeDynamicTrees_decodeDynamicTables
     (hdistLen : distLens.length ≥ 1 ∧ distLens.length ≤ 32)
     (henc : encodeDynamicTrees litLens distLens = some headerBits) :
     decodeDynamicTables (headerBits ++ rest) = some (litLens, distLens, rest) := by
-  sorry
+  -- Extract intermediate encoder values
+  let allLens := litLens ++ distLens
+  let clEntries := rlEncodeLengths allLens
+  let clFreqs := clSymbolFreqs clEntries
+  let clFreqPairs := (List.range clFreqs.length).map fun i => (i, clFreqs.getD i 0)
+  let clLens := Huffman.Spec.computeCodeLengths clFreqPairs 19 7
+  let clCodes := Huffman.Spec.allCodes clLens 7
+  let clTable := clCodes.map fun (sym, cw) => (cw, sym)
+  let numCodeLen := computeHCLEN clLens
+  let hclen_v := numCodeLen - 4
+  let hlit_v := litLens.length - 257
+  let hdist_v := distLens.length - 1
+  -- Extract symbolBits
+  obtain ⟨symbolBits, hSymBits, hHeaderEq⟩ :=
+    encodeDynamicTrees_extract litLens distLens headerBits hlitLen hdistLen henc
+  subst hHeaderEq
+  -- Key properties of clLens
+  have hclLens_len : clLens.length = 19 :=
+    Huffman.Spec.computeCodeLengths_length clFreqPairs 19 7
+  have hclLens_valid : Huffman.Spec.ValidLengths clLens 7 :=
+    Huffman.Spec.computeCodeLengths_valid clFreqPairs 19 7 (by omega) (by omega)
+  have hclLens_bounded : ∀ l ∈ clLens, l ≤ 7 :=
+    Huffman.Spec.computeCodeLengths_bounded clFreqPairs 19 7 (by omega)
+  have hclLens_getD_lt : ∀ i, clLens.getD i 0 < 8 := by
+    intro i
+    by_cases hi : i < clLens.length
+    · rw [getD_eq_getElem clLens i hi]
+      exact Nat.lt_of_le_of_lt (hclLens_bounded _ (List.getElem_mem ..)) (by omega)
+    · have : clLens[i]? = none := List.getElem?_eq_none (by omega)
+      simp [List.getD, this]
+  -- Bounds
+  have hlit_bound : hlit_v < 2 ^ 5 := by simp [hlit_v]; omega
+  have hdist_bound : hdist_v < 2 ^ 5 := by simp [hdist_v]; omega
+  have hclen_bound : hclen_v < 2 ^ 4 := by
+    simp [hclen_v]; have := computeHCLEN_le_nineteen clLens; omega
+  have hnum_le : numCodeLen ≤ 19 := computeHCLEN_le_nineteen clLens
+  -- Unfold decodeDynamicTables and step through readBitsLSB
+  simp only [decodeDynamicTables, bind, Option.bind, List.append_assoc]
+  rw [Deflate.Correctness.readBitsLSB_writeBitsLSB 5 hlit_v _ hlit_bound]
+  simp only []
+  rw [Deflate.Correctness.readBitsLSB_writeBitsLSB 5 hdist_v _ hdist_bound]
+  simp only []
+  rw [Deflate.Correctness.readBitsLSB_writeBitsLSB 4 hclen_v _ hclen_bound]
+  simp only []
+  -- Step 4: readCLLengths recovers clLens
+  have hnum_ge : numCodeLen ≥ 4 := computeHCLEN_ge_four clLens
+  rw [show hclen_v + 4 = numCodeLen from by simp [hclen_v]; omega]
+  rw [readCLLengths_writeCLLengths clLens numCodeLen _ hnum_le hclLens_getD_lt]
+  simp only []
+  -- readCLLengths result = clLens
+  rw [readCLLengths_recovers_clLens clLens numCodeLen hclLens_len hnum_le
+    (fun j hj hjlt => computeHCLEN_trailing_zero clLens j (by omega) hjlt)]
+  -- Step 5: decodeCLSymbols recovers allLens
+  have hall_valid : ∀ x ∈ allLens, x ≤ 15 := by
+    simp only [allLens, List.mem_append]
+    intro x hx; cases hx with
+    | inl h => exact hlit x h
+    | inr h => exact hdist x h
+  have hrl : rlDecodeLengths.go clEntries [] = some allLens := by
+    have := rlDecodeLengths_go_rlEncodeLengths_go allLens [] hall_valid
+    simp at this; exact this
+  have hall_len : allLens.length = hlit_v + 257 + (hdist_v + 1) := by
+    simp [allLens, hlit_v, hdist_v]; omega
+  have hrl_le : clEntries.length ≤ allLens.length :=
+    rlEncodeLengths_length_le allLens
+  rw [encodeCLEntries_decodeCLSymbols_go clLens clTable
+    clEntries symbolBits rest (hlit_v + 257 + (hdist_v + 1)) []
+    (hlit_v + 257 + (hdist_v + 1) + 1) hclLens_valid rfl hSymBits
+    (rlEncodeLengths_valid allLens hall_valid) hrl hall_len (by simp)
+    (by simp [clEntries, allLens, hlit_v, hdist_v] at hrl_le ⊢; omega)]
+  simp only []
+  -- guard (allLens.length == totalCodes)
+  rw [show (allLens.length == hlit_v + 257 + (hdist_v + 1)) = true from by
+    simp [hall_len]]
+  simp only [↓reduceIte, guard, pure, Pure.pure]
+  -- take and drop recover litLens and distLens
+  rw [show hlit_v + 257 = litLens.length from by simp [hlit_v]; omega]
+  simp [allLens]
 
 end Deflate.Spec

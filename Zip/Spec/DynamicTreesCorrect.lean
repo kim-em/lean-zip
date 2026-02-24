@@ -775,7 +775,7 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                       rw [this]
                       exact hspec_rcl
                     simp only [hrcl_spec]
-                    have hdcl_spec : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
+                    have hdcl_spec_base : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
                         ((Huffman.Spec.allCodes
                           (clArr.toList.map UInt8.toNat) 7).map
                           fun (sym, cw) => (cw, sym))
@@ -791,6 +791,17 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                         simp
                       rw [this]
                       exact hspec_dcl
+                    -- The spec now uses fuel = totalCodes + 1; bridge via fuel_independent
+                    have hdcl_spec : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
+                        ((Huffman.Spec.allCodes
+                          (clArr.toList.map UInt8.toNat) 7).map
+                          fun (sym, cw) => (cw, sym))
+                        (hlit_v.toNat + 257 + (hdist_v.toNat + 1))
+                        [] rest₄ (hlit_v.toNat + 257 + (hdist_v.toNat + 1) + 1) =
+                        some ((clResults.extract 0
+                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList.map
+                          UInt8.toNat, rest₅) :=
+                      Deflate.Spec.decodeCLSymbols_fuel_independent _ _ _ _ _ _ hdcl_spec_base 1
                     simp only [hdcl_spec]
                     have hlen_eq : ((clResults.extract 0
                         (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList.map
