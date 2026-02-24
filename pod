@@ -354,7 +354,7 @@ class GHItem:
 
 
 def fetch_issues_and_prs() -> list[GHItem]:
-    """Fetch open issues (agent-plan) and recent PRs from GitHub."""
+    """Fetch issues (agent-plan label, all states) and recent PRs from GitHub."""
     items: list[GHItem] = []
     cwd = str(PROJECT_DIR)
 
@@ -391,7 +391,8 @@ def fetch_issues_and_prs() -> list[GHItem]:
                 if checks:
                     if any(c.get("conclusion") == "FAILURE" for c in checks):
                         ci = "fail"
-                    elif all(c.get("conclusion") == "SUCCESS" for c in checks if c.get("conclusion")):
+                    elif (any(c.get("conclusion") == "SUCCESS" for c in checks) and
+                          all(c.get("conclusion") == "SUCCESS" for c in checks if c.get("conclusion"))):
                         ci = "pass"
                 items.append(GHItem(
                     kind="pr", number=pr["number"], title=pr["title"],
@@ -1099,30 +1100,22 @@ def _tui_main(stdscr, config: dict):
         hdr = " " + col_fmt.format("#", "ID", "Type", "Time", "Tokens", "Activity")
         _addstr(stdscr, 2, 0, hdr[:width], curses.A_DIM)
 
-        # --- Clamp selection ---
+        # --- Clamp agent selection (items clamped after panel renders) ---
         if selected_section == "agents":
             if not agents:
-                if cached_items:
-                    selected_section = "items"
-                    selected_idx = 0
-                else:
-                    selected_idx = 0
+                selected_idx = 0
             else:
                 selected_idx = min(selected_idx, len(agents) - 1)
-        if selected_section == "items":
-            if not cached_items:
-                selected_section = "agents"
-                selected_idx = max(0, len(agents) - 1)
-            else:
-                selected_idx = min(selected_idx, len(cached_items) - 1)
 
         is_agent_selected = selected_section == "agents"
 
         # --- Agent rows ---
+        agents_rendered = 0
         for i, agent in enumerate(agents):
             row = 3 + i
             if row >= height - 3:
                 break
+            agents_rendered = i + 1
 
             # Mode label
             mode = agent.worker_type or "???"
@@ -1178,8 +1171,8 @@ def _tui_main(stdscr, config: dict):
             _addstr(stdscr, row, 0, line[:width], attr)
 
         # --- Issues/PRs panel ---
-        # Row budget: 3 top (header+sep+colhdr) + agents + 3 bottom (sep+help+msg)
-        agents_end = 3 + len(agents)
+        # Row budget: 3 top (header+sep+colhdr) + rendered agents + 3 bottom (sep+help+msg)
+        agents_end = 3 + agents_rendered
         footer_fixed = 3  # separator + help + message
         avail_for_items = height - agents_end - footer_fixed
         # Need: 1 blank + 1 separator + 1 header + at least 1 item row = 4
@@ -1234,13 +1227,22 @@ def _tui_main(stdscr, config: dict):
                 elif item.state == "merged":
                     attr = curses.color_pair(1)  # green
                 elif item.state == "closed":
-                    attr = curses.color_pair(3)  # red
+                    attr = curses.color_pair(4)  # cyan
                 elif item.kind == "pr" and item.ci_status == "fail":
                     attr = curses.color_pair(3)  # red
                 elif item.kind == "pr" and item.ci_status == "pass":
                     attr = curses.color_pair(1)  # green
 
                 _addstr(stdscr, irow, 0, line[:width], attr)
+
+        # --- Clamp items selection (now that items_shown is known) ---
+        if selected_section == "items":
+            if items_shown == 0:
+                selected_section = "agents"
+                selected_idx = max(0, agents_rendered - 1)
+                is_agent_selected = True
+            else:
+                selected_idx = min(selected_idx, items_shown - 1)
 
         # --- Footer separator ---
         footer_row = max(agents_end, height - footer_fixed)
@@ -1344,7 +1346,8 @@ def _tui_main(stdscr, config: dict):
                         try:
                             subprocess.Popen(
                                 ["gh", "issue", "view", str(issue), "--web"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                cwd=str(PROJECT_DIR),
                             )
                             message = f"Opening issue #{issue}"
                         except OSError as e:
@@ -1360,7 +1363,8 @@ def _tui_main(stdscr, config: dict):
                     try:
                         subprocess.Popen(
                             ["gh", gh_cmd, "view", str(item.number), "--web"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            cwd=str(PROJECT_DIR),
                         )
                         message = f"Opening {item.kind} #{item.number}"
                     except OSError as e:
