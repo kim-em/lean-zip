@@ -416,7 +416,6 @@ The proof follows the lazy mainLoop case structure. Helper for the recurring
 /-- Common proof step: reference from a valid countMatch at pos. -/
 private theorem lazyRef_at_pos (data : ByteArray) (windowSize hashSize : Nat)
     (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
-    (_hw : windowSize > 0)
     (hlt : pos + 2 < data.size)
     (hcond : (hashValid[lz77Lazy.hash3 data pos hashSize]! &&
         decide (hashTable[lz77Lazy.hash3 data pos hashSize]! < pos) &&
@@ -487,16 +486,16 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
                         exact (hcm2.1 i hi).symm)
                       (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw))
                 · -- pos + 1 + matchLen2 > data.size → fall back to match at pos
-                  exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+                  exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
                     hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
               · -- matchLen2 ≤ matchLen → keep match at pos
-                exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+                exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
                   hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
             · -- ¬(isValid2 && ...) → keep match at pos
-              exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+              exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
                 hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
           · -- ¬(pos + 3 < data.size) → keep match at pos (near end)
-            exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+            exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
               hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
         · -- ¬(pos + matchLen ≤ data.size) → literal
           exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
