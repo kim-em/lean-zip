@@ -88,13 +88,8 @@ protected theorem nat_beq_to_uint32_true (v : Nat) (hv : v < 2) (h : (v == 1) = 
     `(v.toUInt32 == 1) = false` (UInt32). -/
 protected theorem nat_beq_to_uint32_false (v : Nat) (hv : v < 2) (h : ¬((v == 1) = true)) :
     ¬((v.toUInt32 == 1) = true) := by
-  intro h'; apply h; rw [beq_iff_eq] at h' ⊢
-  have hv1 : v ≠ 1 := by intro heq; exact h (beq_iff_eq.mpr heq)
-  have hv0 : v = 0 := by omega
-  subst hv0
-  -- h' : (0 : Nat).toUInt32 = 1
-  -- 0.toUInt32 = 0, so this is 0 = 1 contradiction
-  simp [Nat.toUInt32] at h'
+  have hv0 : v = 0 := by simp only [beq_iff_eq] at h; omega
+  subst hv0; simp [Nat.toUInt32]
 
 set_option maxRecDepth 4096 in
 /-- Block loop correspondence: the native `inflateLoop` agrees with

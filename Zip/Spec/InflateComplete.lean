@@ -13,6 +13,19 @@ This is the reverse direction of `InflateCorrect`. The main theorems are
 
 namespace Deflate.Correctness
 
+/-! ## Helpers -/
+
+/-- Nat→UInt8→Nat roundtrip for lists with elements bounded by `maxBits ≤ 15`. -/
+private theorem validLengths_toUInt8_roundtrip (lens : List Nat)
+    (hv : Huffman.Spec.ValidLengths lens maxBits) (hmb : maxBits ≤ 15) :
+    (lens.map Nat.toUInt8).toArray.toList.map UInt8.toNat = lens := by
+  simp only [List.map_map]
+  rw [List.map_congr_left (fun n hn => by
+    show (Nat.toUInt8 n).toNat = n
+    simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
+    exact Nat.mod_eq_of_lt (by have := hv.1 n hn; omega))]
+  simp
+
 /-! ## Dynamic tree decode completeness -/
 
 /-- **Completeness for dynamic tree decode**: if the spec `decodeDynamicTables`
@@ -455,23 +468,9 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                       hsize_dist⟩ :=
                       decodeDynamicTrees_complete br₂ litLens distLens bits₃
                         hwf₂ hpos₂ (by rw [hrest₂]; exact hspec_dt)
-                    -- Bridge litLens/distLens through UInt8 roundtrip for decodeHuffman_complete
-                    have hlit_rt : (litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat =
-                        litLens := by
-                      simp only [List.map_map]
-                      rw [List.map_congr_left (fun n hn => by
-                        show (Nat.toUInt8 n).toNat = n
-                        simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
-                        exact Nat.mod_eq_of_lt (by have := hvlit_dyn.1 n hn; omega))]
-                      simp
-                    have hdist_rt : (distLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat =
-                        distLens := by
-                      simp only [List.map_map]
-                      rw [List.map_congr_left (fun n hn => by
-                        show (Nat.toUInt8 n).toNat = n
-                        simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
-                        exact Nat.mod_eq_of_lt (by have := hvdist_dyn.1 n hn; omega))]
-                      simp
+                    -- Bridge litLens/distLens through UInt8 roundtrip
+                    have hlit_rt := validLengths_toUInt8_roundtrip litLens hvlit_dyn (by omega)
+                    have hdist_rt := validLengths_toUInt8_roundtrip distLens hvdist_dyn (by omega)
                     have hds_bridge : Deflate.Spec.decodeSymbols
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
                         ((distLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
@@ -524,12 +523,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                       rw [hil, if_neg (Correctness.nat_beq_to_uint32_false _ (by omega) hbf1)]
                       exact ⟨endPos, hloop⟩
             · -- btype_val ≥ 3: reserved (spec returns none)
-              exfalso
-              have : btype_val ≥ 3 := by omega
-              match btype_val, this with
-              | 0, h => omega
-              | 1, h => omega
-              | 2, h => omega
-              | n + 3, _ => simp at hspec
+              have hbt3 : btype_val = 3 := by omega
+              subst hbt3; simp at hspec
 
 end Deflate.Correctness
