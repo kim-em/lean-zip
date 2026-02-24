@@ -699,6 +699,39 @@ private theorem encodeSymbols_append_singleton
         have ih' := ih restBits hrest
         simp [hx, ih', bind, Option.bind, ← h₁, List.append_assoc]
 
+open Deflate.Spec in
+/-- Inverse of `encodeSymbols_append_singleton`: if the whole succeeds,
+    both parts succeed and the bits concatenate. -/
+private theorem encodeSymbols_append_singleton_inv
+    (ll dl : List Nat) (xs : List LZ77Symbol) (s : LZ77Symbol)
+    (bits : List Bool)
+    (h : encodeSymbols ll dl (xs ++ [s]) = some bits) :
+    ∃ bits₁ bits₂,
+      encodeSymbols ll dl xs = some bits₁ ∧
+      encodeLitLen ll dl s = some bits₂ ∧
+      bits = bits₁ ++ bits₂ := by
+  induction xs generalizing bits with
+  | nil =>
+    simp only [List.nil_append, encodeSymbols] at h
+    cases henc : encodeLitLen ll dl s with
+    | none => simp [henc] at h
+    | some sBits =>
+      simp [henc] at h
+      exact ⟨[], sBits, rfl, rfl, by simp [← h]⟩
+  | cons x rest ih =>
+    simp only [List.cons_append, encodeSymbols] at h
+    cases hx : encodeLitLen ll dl x with
+    | none => simp [hx] at h
+    | some xBits =>
+      cases hrest_all : encodeSymbols ll dl (rest ++ [s]) with
+      | none => simp [hx, hrest_all] at h
+      | some restAllBits =>
+        simp [hx, hrest_all] at h
+        obtain ⟨bits₁, bits₂, hrest, henc_s, hrba⟩ := ih restAllBits hrest_all
+        refine ⟨xBits ++ bits₁, bits₂, ?_, henc_s, ?_⟩
+        · simp only [encodeSymbols, hx, hrest, bind, Option.bind, pure, Pure.pure]
+        · rw [← h, hrba, List.append_assoc]
+
 /-! ## emitTokens preserves wf -/
 
 /-- `encodeSymbol_litTable_eq` for the literal case directly gives the length bound. -/
@@ -837,7 +870,43 @@ theorem deflateFixed_spec (data : ByteArray) :
         bits ++ List.replicate
           ((8 - (Deflate.Spec.bytesToBits (deflateFixed data)).length % 8) % 8)
           false := by
-  sorry
+  -- Step 1: encodeSymbols succeeds on tokensToSymbols
+  have henc_some := encodeSymbols_tokensToSymbols_isSome data 32768 (by omega) (by omega)
+  -- Step 2: split into tokenBits and eobBits
+  -- tokensToSymbols = tokens.map toLZ77Symbol ++ [.endOfBlock]
+  have htoks : tokensToSymbols (lz77Greedy data) =
+      (lz77Greedy data).toList.map LZ77Token.toLZ77Symbol ++ [.endOfBlock] := rfl
+  -- Get the full encoding
+  cases hfull : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
+      Deflate.Spec.fixedDistLengths (tokensToSymbols (lz77Greedy data)) with
+  | none => simp [hfull] at henc_some
+  | some fullBits =>
+    -- encodeFixed succeeds
+    have hencFixed : Deflate.Spec.encodeFixed (tokensToSymbols (lz77Greedy data)) =
+        some ([true, true, false] ++ fullBits) := by
+      simp [Deflate.Spec.encodeFixed, hfull]
+    refine ⟨[true, true, false] ++ fullBits, hencFixed, ?_⟩
+    -- Now prove bytesToBits (deflateFixed data) = [true, true, false] ++ fullBits ++ replicate 0 false
+    -- Since bytesToBits always gives length divisible by 8, replicate 0 = []
+    have hpad : List.replicate ((8 - (Deflate.Spec.bytesToBits (deflateFixed data)).length % 8) % 8) false = [] := by
+      rw [Deflate.Spec.bytesToBits_length]
+      simp [Nat.mul_mod_right]
+    rw [hpad, List.append_nil]
+    -- Now prove: bytesToBits (deflateFixed data) = [true, true, false] ++ fullBits
+    -- Split fullBits via tokensToSymbols = map toLZ77Symbol ++ [.endOfBlock]
+    rw [htoks] at hfull
+    -- Decompose: encodeSymbols on (map toLZ77Symbol ++ [endOfBlock]) = tokenBits ++ eobBits
+    obtain ⟨tokenBits, eobBits, henc_toks, henc_eob, hfull_eq⟩ :=
+      encodeSymbols_append_singleton_inv _ _ _ _ _ hfull
+    rw [hfull_eq]
+    -- Remaining: bytesToBits (deflateFixed data) = [true, true, false] ++ tokenBits ++ eobBits
+    -- This requires chaining BitWriter lemmas:
+    -- 1. flush_toBits on the final bw.flush
+    -- 2. writeHuffCode_toBits for endOfBlock (code 256)
+    -- 3. emitTokens_spec for the tokens
+    -- 4. writeBits_toBits for the header (BFINAL=1, BTYPE=01)
+    -- 5. Show writeBitsLSB 1 1 ++ writeBitsLSB 2 1 = [true, true, false]
+    sorry
 
 /-! ## Inflate completeness (restricted) -/
 
