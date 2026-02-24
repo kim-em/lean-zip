@@ -179,6 +179,51 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   | .ok result => assert! result == helloBytes
   | .error e => throw (IO.userError s!"compressAuto raw roundtrip failed: {e}")
 
+  -- Native gzip compress level 5 (dynamic Huffman) → native decompress
+  match Zip.Native.GzipDecode.decompress (Zip.Native.GzipEncode.compress helloBytes 5) with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"native gzip compress/decompress L5 failed: {e}")
+
+  -- Native gzip compress level 5 → FFI decompress (cross-implementation)
+  let nativeGzL5 := Zip.Native.GzipEncode.compress helloBytes 5
+  let ffiDecompL5 ← Gzip.decompress nativeGzL5
+  assert! ffiDecompL5 == helloBytes
+
+  -- Native gzip level 5: empty data
+  match Zip.Native.GzipDecode.decompress (Zip.Native.GzipEncode.compress ByteArray.empty 5) with
+  | .ok result => assert! result == ByteArray.empty
+  | .error e => throw (IO.userError s!"native gzip L5 (empty) failed: {e}")
+
+  -- Native gzip level 5: large data
+  match Zip.Native.GzipDecode.decompress (Zip.Native.GzipEncode.compress large 5) with
+  | .ok result => assert! result == large
+  | .error e => throw (IO.userError s!"native gzip L5 (large) failed: {e}")
+
+  -- Native zlib compress level 5 → native decompress
+  match Zip.Native.ZlibDecode.decompress (Zip.Native.ZlibEncode.compress helloBytes 5) with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"native zlib compress/decompress L5 failed: {e}")
+
+  -- Native zlib compress level 5 → FFI decompress (cross-implementation)
+  let nativeZlibL5 := Zip.Native.ZlibEncode.compress helloBytes 5
+  let ffiZlibDecompL5 ← Zlib.decompress nativeZlibL5
+  assert! ffiZlibDecompL5 == helloBytes
+
+  -- compressAuto level 5 roundtrip: gzip
+  match Zip.Native.decompressAuto (Zip.Native.compressAuto helloBytes .gzip 5) with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"compressAuto gzip L5 roundtrip failed: {e}")
+
+  -- compressAuto level 5 roundtrip: zlib
+  match Zip.Native.decompressAuto (Zip.Native.compressAuto helloBytes .zlib 5) with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"compressAuto zlib L5 roundtrip failed: {e}")
+
+  -- compressAuto level 5 roundtrip: raw deflate
+  match Zip.Native.decompressAuto (Zip.Native.compressAuto helloBytes .rawDeflate 5) with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"compressAuto raw L5 roundtrip failed: {e}")
+
   -- Error cases
   -- Error cases: gzip
   match Zip.Native.GzipDecode.decompress ByteArray.empty with

@@ -214,4 +214,9 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   let decompDynCrossBig ← RawDeflate.decompress dynCrossBig
   assert! decompDynCrossBig == big
 
+  -- deflateDynamic achieves equal or better compression than deflateLazy on repetitive data
+  let dynSize := dynBig.size
+  let lazySize := lazyBig.size
+  assert! dynSize ≤ lazySize
+
   IO.println "  NativeDeflate tests passed."
