@@ -46,3 +46,4 @@ import Zip.Spec.EmitTokensCorrect
 import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.DeflateDynamicCorrect
+import Zip.Spec.DeflateRoundtrip
