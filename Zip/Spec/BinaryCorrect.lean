@@ -19,16 +19,16 @@ private theorem ba2_getElem!_0 (a b : UInt8) :
 private theorem ba2_getElem!_1 (a b : UInt8) :
     (ByteArray.mk #[a, b])[0 + 1]! = b := rfl
 
-private theorem ba4_getElem!_0 (a b c d : UInt8) :
+theorem ba4_getElem!_0 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0]! = a := rfl
 
-private theorem ba4_getElem!_1 (a b c d : UInt8) :
+theorem ba4_getElem!_1 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0 + 1]! = b := rfl
 
-private theorem ba4_getElem!_2 (a b c d : UInt8) :
+theorem ba4_getElem!_2 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0 + 2]! = c := rfl
 
-private theorem ba4_getElem!_3 (a b c d : UInt8) :
+theorem ba4_getElem!_3 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0 + 3]! = d := rfl
 
 /-! ## UInt16 roundtrip -/
@@ -58,14 +58,14 @@ theorem readUInt32LE_bytes (v : UInt32) :
 /-! ## Concatenation-aware variants -/
 
 /-- `getElem!` on a concatenated ByteArray reads from the left part when in bounds. -/
-private theorem getElem!_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
+theorem getElem!_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b)[i]! = a[i]! := by
   rw [getElem!_pos (a ++ b) i (by simp [ByteArray.size_append]; omega),
       getElem!_pos a i h]
   exact ByteArray.getElem_append_left h
 
 /-- `getElem!` on a concatenated ByteArray reads from the right part at offset `a.size`. -/
-private theorem getElem!_append_right (a b : ByteArray) (i : Nat) (h : i < b.size) :
+theorem getElem!_append_right (a b : ByteArray) (i : Nat) (h : i < b.size) :
     (a ++ b)[a.size + i]! = b[i]! := by
   rw [getElem!_pos (a ++ b) (a.size + i) (by simp [ByteArray.size_append]; omega),
       getElem!_pos b i h]
@@ -109,5 +109,38 @@ theorem readUInt16LE_append_right (a b : ByteArray) (offset : Nat)
   rw [show a.size + offset + 1 = a.size + (offset + 1) from by omega,
       getElem!_append_right a b offset (by omega),
       getElem!_append_right a b (offset + 1) (by omega)]
+
+/-! ## Big-endian UInt32 roundtrip (for zlib Adler32 trailer) -/
+
+/-- Inline big-endian byte roundtrip matching the zlib encoder Adler32 pattern. -/
+theorem readUInt32BE_bytes (v : UInt32) :
+    let b := ByteArray.mk #[
+      ((v >>> 24) &&& 0xFF).toUInt8, ((v >>> 16) &&& 0xFF).toUInt8,
+      ((v >>> 8) &&& 0xFF).toUInt8, (v &&& 0xFF).toUInt8]
+    (b[0]!.toUInt32 <<< 24) ||| (b[1]!.toUInt32 <<< 16) |||
+    (b[2]!.toUInt32 <<< 8) ||| b[3]!.toUInt32 = v := by
+  simp only [ba4_getElem!_0, ba4_getElem!_1, ba4_getElem!_2, ba4_getElem!_3]
+  bv_decide
+
+/-- Big-endian read from a concatenated ByteArray at an offset into the right part. -/
+theorem readUInt32BE_append_right (a b : ByteArray) (offset : Nat)
+    (h : offset + 4 ≤ b.size) :
+    let c := a ++ b
+    (c[a.size + offset]!.toUInt32 <<< 24) |||
+    (c[a.size + offset + 1]!.toUInt32 <<< 16) |||
+    (c[a.size + offset + 2]!.toUInt32 <<< 8) |||
+    c[a.size + offset + 3]!.toUInt32 =
+    (b[offset]!.toUInt32 <<< 24) |||
+    (b[offset + 1]!.toUInt32 <<< 16) |||
+    (b[offset + 2]!.toUInt32 <<< 8) |||
+    b[offset + 3]!.toUInt32 := by
+  simp only
+  rw [show a.size + offset + 1 = a.size + (offset + 1) from by omega,
+      show a.size + offset + 2 = a.size + (offset + 2) from by omega,
+      show a.size + offset + 3 = a.size + (offset + 3) from by omega,
+      getElem!_append_right a b offset (by omega),
+      getElem!_append_right a b (offset + 1) (by omega),
+      getElem!_append_right a b (offset + 2) (by omega),
+      getElem!_append_right a b (offset + 3) (by omega)]
 
 end Binary
