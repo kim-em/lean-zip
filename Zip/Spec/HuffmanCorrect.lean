@@ -426,6 +426,48 @@ theorem codeFor_some (lsList : List Nat) (maxBits : Nat) (s : Nat)
     simp [hlen]; omega]
   exact ⟨_, rfl⟩
 
+/-- NC invariant update: after incrementing `nextCode[len]`, the NC invariant
+    holds at `start + 1`. Shared by `insertLoop_forward` and `insertLoop_backward`. -/
+private theorem nc_invariant_step
+    (lengths : Array UInt8) (nextCode : Array UInt32) (start : Nat)
+    (lsList : List Nat) (maxBits : Nat)
+    (blCount : Array Nat) (hblCount : blCount = Huffman.Spec.countLengths lsList maxBits)
+    (ncSpec : Array Nat) (hncSpec : ncSpec = Huffman.Spec.nextCodes blCount maxBits)
+    (hv : Huffman.Spec.ValidLengths lsList maxBits) (hmb : maxBits < 32)
+    (hncSize : nextCode.size ≥ maxBits + 1)
+    (hstart : start < lengths.size)
+    (hls_len : start < lsList.length)
+    (hls_start : lsList[start] = lengths[start].toNat)
+    (hlen_le : lengths[start].toNat ≤ maxBits)
+    (hlen_pos_nat : 0 < lengths[start].toNat)
+    (hnc : ∀ b, 1 ≤ b → b ≤ maxBits →
+      nextCode[b]!.toNat = ncSpec[b]! +
+        (lsList.take start).foldl (fun acc l => if l == b then acc + 1 else acc) 0)
+    (b : Nat) (hb1 : 1 ≤ b) (hb15 : b ≤ maxBits) :
+    (nextCode.set! lengths[start].toNat (nextCode[lengths[start].toNat]! + 1))[b]!.toNat =
+      ncSpec[b]! +
+        (lsList.take (start + 1)).foldl (fun acc l => if l == b then acc + 1 else acc) 0 := by
+  rw [List.take_add_one]
+  simp only [List.getElem?_eq_getElem hls_len, Option.toList,
+             List.foldl_append, List.foldl_cons, List.foldl_nil, hls_start]
+  by_cases hbeq : lengths[start].toNat = b
+  · subst hbeq
+    simp only [if_pos (beq_self_eq_true lengths[start].toNat)]
+    rw [Array.getElem!_set!_self _ _ _ (by omega : lengths[start].toNat < nextCode.size)]
+    have h_nc_val := hnc lengths[start].toNat (by omega) hlen_le
+    have h_partial_le := count_foldl_take_le lsList lengths[start].toNat start
+    have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
+      lengths[start].toNat hv (by omega) hlen_le
+    rw [← hblCount, ← hncSpec] at h_npc
+    have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show lengths[start].toNat ≤ 31 from by omega)
+    rw [UInt32.toNat_add, show (1 : UInt32).toNat = 1 from rfl,
+        Nat.mod_eq_of_lt (by omega), h_nc_val]
+    omega
+  · have hf : ¬((lengths[start].toNat == b) = true) := by rw [beq_iff_eq]; exact hbeq
+    simp only [if_neg hf]
+    rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
+    exact hnc b hb1 hb15
+
 /-- The tree produced by `insertLoop` has a leaf for every symbol with nonzero length,
     at the codeword given by `codeFor`. Proved by well-founded induction on `lengths.size - start`,
     maintaining the NC invariant, forward invariant, and NoLeafOnPath invariant. -/
@@ -494,31 +536,8 @@ private theorem insertLoop_forward
         (by -- hncSize': set! preserves array size
           simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
           split <;> simp_all)
-        (by -- hnc': NC invariant after increment
-          intro b hb1 hb15
-          rw [List.take_add_one]
-          simp only [List.getElem?_eq_getElem hls_len, Option.toList,
-                     List.foldl_append, List.foldl_cons, List.foldl_nil, hls_start]
-          by_cases hbeq : lengths[start].toNat = b
-          · -- b = len: both sides incremented
-            subst hbeq
-            simp only [if_pos (beq_self_eq_true lengths[start].toNat)]
-            rw [Array.getElem!_set!_self _ _ _ (by omega : lengths[start].toNat < nextCode.size)]
-            have h_nc_val := hnc lengths[start].toNat (by omega) hlen_le
-            have h_partial_le := count_foldl_take_le lsList lengths[start].toNat start
-            have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
-              lengths[start].toNat hv (by omega) hlen_le
-            rw [← hblCount, ← hncSpec] at h_npc
-            have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show lengths[start].toNat ≤ 31 from by omega)
-            rw [UInt32.toNat_add, show (1 : UInt32).toNat = 1 from rfl,
-                Nat.mod_eq_of_lt (by omega), h_nc_val]
-            omega
-          · -- b ≠ len: unchanged
-            have hf : ¬((lengths[start].toNat == b) = true) := by
-              rw [beq_iff_eq]; exact hbeq
-            simp only [if_neg hf]
-            rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
-            exact hnc b hb1 hb15)
+        (nc_invariant_step lengths nextCode start lsList maxBits blCount hblCount
+          ncSpec hncSpec hv hmb hncSize hstart hls_len hls_start hlen_le hlen_pos_nat hnc)
         (by -- hprev': forward invariant after insertion
           intro k hk hks hklen cw' hcf'
           by_cases hk_eq : k = start
@@ -616,29 +635,8 @@ private theorem insertLoop_backward
         (tree.insert (nextCode[lengths[start].toNat]!) lengths[start].toNat start.toUInt16)
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
         (by simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds]; split <;> simp_all)
-        (by -- hnc': NC invariant after increment (same as insertLoop_forward)
-          intro b hb1 hb15
-          rw [List.take_add_one]
-          simp only [List.getElem?_eq_getElem hls_len, Option.toList,
-                     List.foldl_append, List.foldl_cons, List.foldl_nil, hls_start]
-          by_cases hbeq : lengths[start].toNat = b
-          · subst hbeq
-            simp only [if_pos (beq_self_eq_true lengths[start].toNat)]
-            rw [Array.getElem!_set!_self _ _ _ (by omega : lengths[start].toNat < nextCode.size)]
-            have h_nc_val := hnc lengths[start].toNat (by omega) hlen_le
-            have h_partial_le := count_foldl_take_le lsList lengths[start].toNat start
-            have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
-              lengths[start].toNat hv (by omega) hlen_le
-            rw [← hblCount, ← hncSpec] at h_npc
-            have h_pow := Nat.pow_le_pow_right (by omega : 0 < 2) (show lengths[start].toNat ≤ 31 from by omega)
-            rw [UInt32.toNat_add, show (1 : UInt32).toNat = 1 from rfl,
-                Nat.mod_eq_of_lt (by omega), h_nc_val]
-            omega
-          · have hf : ¬((lengths[start].toNat == b) = true) := by
-              rw [beq_iff_eq]; exact hbeq
-            simp only [if_neg hf]
-            rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
-            exact hnc b hb1 hb15)
+        (nc_invariant_step lengths nextCode start lsList maxBits blCount hblCount
+          ncSpec hncSpec hv hmb hncSize hstart hls_len hls_start hlen_le hlen_pos_nat hnc)
         cw sym h
       cases ih with
       | inl h_in_insert =>
@@ -741,9 +739,7 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
   -- Get lengths[s] > 0 from codeFor returning some
   obtain ⟨_, hlen_cond, _⟩ := Huffman.Spec.codeFor_spec hcf
   have ⟨hlen_ne, _⟩ := Huffman.Spec.codeFor_len_bounds hlen_cond
-  have hs : s < lengths.size := by
-    have : (lengths.toList.map UInt8.toNat).length = lengths.size := by simp
-    omega
+  have hs : s < lengths.size := by simp at hs_len; omega
   have hjlen : lengths[s] > 0 := by
     have : (lengths.toList.map UInt8.toNat)[s] ≠ 0 := hlen_ne
     simp [List.getElem_map, Array.getElem_toList] at this
@@ -791,10 +787,7 @@ protected theorem fromLengths_leaf_spec (lengths : Array UInt8)
   | inl h_empty => cases h_empty
   | inr h_exists =>
     obtain ⟨k, _, hk_len, rfl, hcf⟩ := h_exists
-    have hk_small : k < UInt16.size := by
-      have : (List.map UInt8.toNat lengths.toList).length = lengths.size := by
-        simp [List.length_map]
-      omega
+    have hk_small : k < UInt16.size := by simp at hk_len; omega
     have hk_toNat : k.toUInt16.toNat = k :=
       Nat.mod_eq_of_lt hk_small
     rw [Huffman.Spec.allCodes_mem_iff]
