@@ -185,15 +185,6 @@ private theorem rlDecodeLengths_go_strict_mono
           have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
         · exact absurd h (rlDecodeLengths_go_invalid_code code extra rest acc hle h16 h17 h18 ▸ nofun)
 
-private theorem getLast?_getD_eq_getLast! (l : List Nat) (h : l.length > 0) :
-    l.getLast?.getD 0 = l.getLast! := by
-  induction l with
-  | nil => simp at h
-  | cons a as ih =>
-    cases as with
-    | nil => rfl
-    | cons b bs => simp [List.getLast?, List.getLast!]
-
 /-- Encoding CL entries then decoding with `decodeCLSymbols` recovers
     the original code lengths (via RLE decode).
 
@@ -306,7 +297,8 @@ private theorem encodeCLEntries_decodeCLSymbols_go
                 simp [encodeCLExtra, guard, haccpos, hrb, List.append_assoc]
                 simp only [show acc.length + (extra + 3) ≤ totalCodes from by
                   have := hacc'; simp at this; exact this, ↓reduceIte]
-                rw [getLast?_getD_eq_getLast! acc haccpos]
+                rw [show acc.getLast?.getD 0 = acc.getLast! from
+                  List.getLast?_getD_eq_getLast! acc haccpos]
                 exact ih restBits _ fuel' hrestBits hvalid_rest hdec hacc'
                   (by simp only [List.length_cons] at hfuel'; omega)
               | inr h => cases h with

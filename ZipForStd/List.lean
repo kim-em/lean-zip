@@ -28,6 +28,18 @@ theorem foldl_count_init (b : Nat) (init : Nat) (ls : List Nat) :
     · rw [ih, ih 1]; omega
     · exact ih init
 
+/-! ## getLast -/
+
+/-- `getLast?.getD default` equals `getLast!` for non-empty lists. -/
+theorem getLast?_getD_eq_getLast! [Inhabited α] (l : List α) (h : l.length > 0) :
+    l.getLast?.getD default = l.getLast! := by
+  induction l with
+  | nil => simp at h
+  | cons a as ih =>
+    cases as with
+    | nil => rfl
+    | cons b bs => simp [List.getLast?, List.getLast!]
+
 /-! ## foldl-set lemmas -/
 
 /-- `foldl set` preserves list length. -/
