@@ -1236,7 +1236,7 @@ def _tui_main(stdscr, config: dict):
                         state_str, state_color = "open", curses.A_NORMAL
                 else:  # pr
                     if item.state == "merged":
-                        state_str, state_color = "merged", curses.color_pair(1)
+                        state_str, state_color = "merged", curses.color_pair(4)
                     elif item.state == "closed":
                         state_str, state_color = "closed", curses.color_pair(4)
                     elif item.ci_status == "fail":
