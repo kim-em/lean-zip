@@ -122,6 +122,18 @@ private theorem clTable_prefix_free
       (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ :=
   flipped_allCodes_prefix_free clLens maxBits hv
 
+/-- Code values outside {0..15, 16, 17, 18} make `rlDecodeLengths.go` return `none`. -/
+private theorem rlDecodeLengths_go_invalid_code
+    (code : Nat) (extra : Nat) (rest : List CLEntry) (acc : List Nat)
+    (hle : ¬(code ≤ 15)) (h16 : code ≠ 16) (h17 : code ≠ 17) (h18 : code ≠ 18) :
+    rlDecodeLengths.go ((code, extra) :: rest) acc = none := by
+  simp only [rlDecodeLengths.go]
+  split; · omega
+  split; · exact absurd (beq_iff_eq.mp ‹_›) h16
+  split; · exact absurd (beq_iff_eq.mp ‹_›) h17
+  split; · exact absurd (beq_iff_eq.mp ‹_›) h18
+  simp
+
 /-- `rlDecodeLengths.go` only appends to the accumulator, so the result
     is at least as long as the input accumulator. -/
 private theorem rlDecodeLengths_go_mono (entries : List CLEntry) (acc result : List Nat)
@@ -146,12 +158,7 @@ private theorem rlDecodeLengths_go_mono (entries : List CLEntry) (acc result : L
         · by_cases h18 : code = 18
           · subst h18; rw [Deflate.Spec.rlDecode_go_code18 extra rest acc] at h
             have := ih _ h; simp at this; omega
-          · exfalso; simp only [rlDecodeLengths.go] at h
-            split at h; · omega
-            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
-            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
-            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
-            exact absurd h (by simp)
+          · exact absurd h (rlDecodeLengths_go_invalid_code code extra rest acc hle h16 h17 h18 ▸ nofun)
 
 /-- When `rlDecodeLengths.go` succeeds on a non-empty list, the result is
     strictly longer than the input accumulator. -/
@@ -175,12 +182,7 @@ private theorem rlDecodeLengths_go_strict_mono
       · by_cases h18 : code = 18
         · subst h18; rw [Deflate.Spec.rlDecode_go_code18 extra rest acc] at h
           have := rlDecodeLengths_go_mono rest _ _ h; simp at this; omega
-        · exfalso; simp only [rlDecodeLengths.go] at h
-          split at h; · omega
-          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
-          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
-          split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
-          exact absurd h (by simp)
+        · exact absurd h (rlDecodeLengths_go_invalid_code code extra rest acc hle h16 h17 h18 ▸ nofun)
 
 private theorem getLast?_getD_eq_getLast! (l : List Nat) (h : l.length > 0) :
     l.getLast?.getD 0 = l.getLast! := by
@@ -389,8 +391,6 @@ private theorem computeHCLEN_trailing_zero (clLens : List Nat) (j : Nat)
   change j ≥ max 4 (pl.length - tw.length) at hj
   rw [hpl_len] at hj
   have hidx : 18 - j < tw.length := by omega
-  -- tw is a prefix of pl.reverse
-  have htw_prefix : tw <+: pl.reverse := List.takeWhile_prefix (· == 0)
   have htw_eq := List.prefix_iff_eq_take.mp htw_prefix
   -- tw[18-j] = pl.reverse[18-j] = pl[j]
   have helem : tw[18 - j] = pl[j]'(by rw [hpl_len]; exact hjlt) := by
@@ -415,51 +415,6 @@ private theorem computeHCLEN_trailing_zero (clLens : List Nat) (j : Nat)
       Deflate.Spec.clPermutation[j]'(by rw [hperm_len]; exact hjlt) from
     (List.getElem_eq_getD 0).symm]
 
-/-- `foldl set` preserves list length. -/
-private theorem foldl_set_length (positions : List Nat) (f : Nat → α) (init : List α) :
-    (positions.foldl (fun a pos => a.set pos (f pos)) init).length = init.length := by
-  induction positions generalizing init with
-  | nil => simp
-  | cons p ps ih => simp [ih, List.length_set]
-
-/-- At a position not in the fold list, the value is unchanged from init. -/
-private theorem foldl_set_getElem_not_mem {α : Type} (positions : List Nat) (f : Nat → α)
-    (init : List α) (p : Nat) (hp : p ∉ positions) (hlt : p < init.length) :
-    (positions.foldl (fun a pos => a.set pos (f pos)) init)[p]'(by
-      rw [foldl_set_length]; exact hlt) = init[p] := by
-  induction positions generalizing init with
-  | nil => simp
-  | cons q qs ih =>
-    simp only [List.mem_cons, not_or] at hp
-    simp only [List.foldl_cons]
-    have hlt' : p < (init.set q (f q)).length := by simp [List.length_set]; exact hlt
-    rw [ih (init.set q (f q)) hp.2 hlt']
-    exact List.getElem_set_ne (Ne.symm hp.1) _
-
-/-- At a position in the fold list (with nodup), the value is `f p`. -/
-private theorem foldl_set_getElem_mem {α : Type} (positions : List Nat) (f : Nat → α)
-    (init : List α) (p : Nat) (hp : p ∈ positions) (hnodup : positions.Nodup)
-    (hlt : p < init.length) (hbounds : ∀ q ∈ positions, q < init.length) :
-    (positions.foldl (fun a pos => a.set pos (f pos)) init)[p]'(by
-      rw [foldl_set_length]; exact hlt) = f p := by
-  induction positions generalizing init with
-  | nil => simp at hp
-  | cons q qs ih =>
-    simp only [List.mem_cons] at hp
-    simp only [List.foldl_cons]
-    rw [List.nodup_cons] at hnodup
-    have hlt' : p < (init.set q (f q)).length := by simp [List.length_set]; exact hlt
-    have hbounds' : ∀ r ∈ qs, r < (init.set q (f q)).length := by
-      intro r hr; simp [List.length_set]; exact hbounds r (List.mem_cons_of_mem _ hr)
-    cases hp with
-    | inl heq =>
-      subst heq
-      -- p is the head; it's not in qs (by nodup), so foldl doesn't overwrite it
-      rw [foldl_set_getElem_not_mem qs f _ p hnodup.1 hlt']
-      exact List.getElem_set_self _
-    | inr hmem =>
-      exact ih (init.set q (f q)) hmem hnodup.2 hlt' hbounds'
-
 /-- The foldl-set over clPermutation.take n on replicate 19 0 recovers
     the original list when trailing positions have value 0. -/
 private theorem readCLLengths_recovers_clLens
@@ -479,18 +434,18 @@ private theorem readCLLengths_recovers_clLens
   -- Prove by extensionality
   apply List.ext_getElem
   · -- Length
-    rw [foldl_set_length, List.length_replicate]; exact hlen.symm
+    rw [List.foldl_set_length, List.length_replicate]; exact hlen.symm
   · intro p h1 h2
-    have hp19 : p < 19 := by rw [foldl_set_length, List.length_replicate] at h1; exact h1
+    have hp19 : p < 19 := by rw [List.foldl_set_length, List.length_replicate] at h1; exact h1
     by_cases hmem : p ∈ positions
     · -- p was set by the foldl
-      rw [foldl_set_getElem_mem positions _ _ p hmem hpos_nodup
+      rw [List.foldl_set_getElem_mem positions _ _ p hmem hpos_nodup
           (by simp; omega)
           (fun q hq => by simp; exact hpos_bounds q hq)]
       -- Goal: clLens.getD p 0 = clLens[p]
       exact (List.getElem_eq_getD 0).symm
     · -- p was NOT set; value is 0 from replicate
-      rw [foldl_set_getElem_not_mem positions _ _ p hmem
+      rw [List.foldl_set_getElem_not_mem positions _ _ p hmem
           (by simp; omega)]
       simp only [List.getElem_replicate]
       -- Need: clLens[p] = 0
@@ -552,12 +507,7 @@ private theorem rlDecodeLengths_go_entries_le_result
           · subst h18; rw [Deflate.Spec.rlDecode_go_code18 extra rest acc] at h
             have := ih _ h
             simp only [List.length_append, List.length_replicate, List.length_cons] at this ⊢; omega
-          · exfalso; simp only [rlDecodeLengths.go] at h
-            split at h; · omega
-            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h16
-            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h17
-            split at h; · exact absurd (beq_iff_eq.mp ‹_›) h18
-            exact absurd h (by simp)
+          · exact absurd h (rlDecodeLengths_go_invalid_code code extra rest acc hle h16 h17 h18 ▸ nofun)
 
 /-! ## Dynamic tree header roundtrip -/
 
@@ -659,7 +609,7 @@ theorem encodeDynamicTrees_decodeDynamicTables
     have hv : Huffman.Spec.ValidLengths clLens 7 :=
       Huffman.Spec.computeCodeLengths_valid clFreqPairs 19 7 (by omega) (by omega)
     -- Discharge the CL ValidLengths guard
-    simp only [guard, hv, ↓reduceIte, pure, Pure.pure, bind, Option.bind]
+    simp only [guard, hv, ↓reduceIte, pure, Pure.pure]
     -- The table matches
     have htable : clTable = (Huffman.Spec.allCodes clLens 7).map fun (sym, cw) => (cw, sym) := by rfl
     -- RLE roundtrip
@@ -690,12 +640,11 @@ theorem encodeDynamicTrees_decodeDynamicTables
     rw [hdecCL]
     -- Guard and take/drop
     have hlen_eq : allLens.length = litLens.length + distLens.length := htotalLen
-    simp only [hlen_eq, guard, pure, Pure.pure, bind, Option.bind,
-      beq_self_eq_true, ite_true]
+    simp only [hlen_eq, beq_self_eq_true, ite_true]
     -- Discharge lit/dist ValidLengths guards
     have hlit_take : (litLens ++ distLens).take litLens.length = litLens := List.take_left
     have hdist_drop : (litLens ++ distLens).drop litLens.length = distLens := List.drop_left
     rw [hlit_take, hdist_drop]
-    simp only [guard, hlit_valid, hdist_valid, ↓reduceIte, pure, Pure.pure]
+    simp only [hlit_valid, hdist_valid, ↓reduceIte]
 
 end Deflate.Spec
