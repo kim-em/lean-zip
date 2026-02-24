@@ -506,32 +506,6 @@ private theorem readBitsLSB_2_true_false (rest : List Bool) :
 
 /-! ## Encoding roundtrip theorems -/
 
-/-- Encoding with fixed Huffman then decoding recovers the original data. -/
-theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
-    (bits : List Bool)
-    (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
-    (hresolve : resolveLZ77 syms [] = some data)
-    (hfuel : 10000000 ≥ syms.length)
-    (hvalid : ValidSymbolList syms) :
-    decode ([true, true, false] ++ bits) = some data := by
-  -- Unfold one step of decode.go
-  show decode.go ([true, true, false] ++ bits) [] 10001 = some data
-  unfold decode.go
-  -- readBitsLSB 1 ([true, true, false] ++ bits) = some (1, [true, false] ++ bits)
-  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
-  -- readBitsLSB 2 ([true, false] ++ bits) = some (1, bits)
-  simp only [readBitsLSB_2_true_false]
-  -- Now in btype = 1 (fixed Huffman) branch
-  have hdec : decodeSymbols fixedLitLengths fixedDistLengths bits
-      10000000 = some (syms, []) := by
-    have := encodeSymbols_decodeSymbols fixedLitLengths fixedDistLengths syms bits []
-      10000000 henc fixedLitLengths_valid fixedDistLengths_valid hfuel hvalid
-    rwa [List.append_nil] at this
-  simp only [List.nil_append]
-  rw [hdec]
-  simp only [hresolve]
-  simp [pure, Pure.pure]
-
 /-- Encoding with fixed Huffman then decoding recovers the original data,
     even when trailing bits are appended. -/
 theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
@@ -553,6 +527,17 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   rw [hdec]
   simp only [hresolve]
   simp [pure, Pure.pure]
+
+/-- Encoding with fixed Huffman then decoding recovers the original data. -/
+theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
+    (bits : List Bool)
+    (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
+    (hresolve : resolveLZ77 syms [] = some data)
+    (hfuel : 10000000 ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
+    decode ([true, true, false] ++ bits) = some data := by
+  have := encodeFixed_decode_append syms data bits [] henc hresolve hfuel hvalid
+  rwa [List.append_nil] at this
 
 private theorem readBitsLSB_2_false_true (rest : List Bool) :
     readBitsLSB 2 (false :: true :: rest) = some (2, rest) := by
