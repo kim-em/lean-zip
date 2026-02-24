@@ -158,6 +158,7 @@ class AgentState:
     short_id: str = ""
     uuid: str = ""
     pid: int = 0
+    pid_start_time: float = 0.0    # /proc start time — detects PID reuse
     worker_type: str = ""          # e.g. "work", "plan"
     status: str = "starting"       # starting, running, waiting_quota, finishing, stopped
     session_start: float = 0.0
@@ -223,12 +224,9 @@ def read_all_agents() -> list[AgentState]:
         try:
             d = json.loads(p.read_text())
             agent = AgentState.from_dict(d)
-            # Check if process is still alive
+            # Check if process is still alive (and not a reused PID)
             if agent.pid > 0:
-                try:
-                    os.kill(agent.pid, 0)
-                except ProcessLookupError:
-                    # Process is dead — mark as stopped and clean up
+                if not _pid_is_valid(agent.pid, agent.pid_start_time):
                     agent.status = "dead"
             agents.append(agent)
         except (json.JSONDecodeError, OSError):
@@ -239,6 +237,32 @@ def read_all_agents() -> list[AgentState]:
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+def _get_pid_start_time(pid: int) -> float:
+    """Get process start time from /proc (Linux). Returns 0 if unavailable."""
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            # Field 22 (1-indexed) is starttime; split past last ')' for comm
+            parts = f.read().split(")")[-1].split()
+            return float(parts[19])  # starttime = field 22 - 2 (pid,comm) = index 19
+    except (OSError, IndexError, ValueError):
+        return 0.0
+
+
+def _pid_is_valid(pid: int, expected_start: float) -> bool:
+    """Check if PID is alive AND belongs to the expected process."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # Exists but we can't signal it — still valid
+    if expected_start > 0:
+        actual = _get_pid_start_time(pid)
+        if actual > 0 and actual != expected_start:
+            return False  # PID reused by a different process
+    return True
+
 
 def human_size(n: int) -> str:
     if n >= 1048576:
@@ -409,7 +433,8 @@ def _tool_detail(name: str, inp: dict, state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 def dispatch_queue_balance(config: dict, queue_depth: int,
-                           worker_types: dict) -> str | None:
+                           worker_types: dict,
+                           state: AgentState | None = None) -> str | None:
     """Current ./go logic: low queue → locked types, high queue → unlocked types."""
     min_queue = cfg_get(config, "dispatch", "min_queue", default=3)
 
@@ -423,6 +448,9 @@ def dispatch_queue_balance(config: dict, queue_depth: int,
             lock_name = wt["lock"]
             r = coordination(config, f"lock-{lock_name}")
             if r.returncode == 0:
+                if state:
+                    state.lock_held = lock_name
+                    state.write()
                 return name
         # Lock held — fall back to draining if queue > 0
         if queue_depth > 0 and draining:
@@ -434,8 +462,12 @@ def dispatch_queue_balance(config: dict, queue_depth: int,
     elif filling:
         # Only filling types exist — try them
         for name, wt in filling.items():
-            r = coordination(config, f"lock-{wt['lock']}")
+            lock_name = wt["lock"]
+            r = coordination(config, f"lock-{lock_name}")
             if r.returncode == 0:
+                if state:
+                    state.lock_held = lock_name
+                    state.write()
                 return name
         return None
     return None
@@ -445,7 +477,8 @@ _round_robin_idx = 0
 
 
 def dispatch_round_robin(config: dict, queue_depth: int,
-                          worker_types: dict) -> str | None:
+                          worker_types: dict,
+                          state: AgentState | None = None) -> str | None:
     """Cycle through worker types, skipping locked ones."""
     global _round_robin_idx
     names = list(worker_types.keys())
@@ -460,12 +493,16 @@ def dispatch_round_robin(config: dict, queue_depth: int,
             r = coordination(config, f"lock-{lock_name}")
             if r.returncode != 0:
                 continue
+            if state:
+                state.lock_held = lock_name
+                state.write()
         return name
     return None
 
 
 def dispatch_custom(config: dict, queue_depth: int,
-                     worker_types: dict) -> str | None:
+                     worker_types: dict,
+                     state: AgentState | None = None) -> str | None:
     """Run a custom dispatch script."""
     strategy = cfg_get(config, "dispatch", "strategy", default="")
     script = os.path.expanduser(strategy)
@@ -488,14 +525,18 @@ def dispatch_custom(config: dict, queue_depth: int,
                 lr = coordination(config, f"lock-{lock_name}")
                 if lr.returncode != 0:
                     return None
+                if state:
+                    state.lock_held = lock_name
+                    state.write()
             return name
         return None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None
 
 
-def dispatch(config: dict) -> str | None:
-    """Choose a worker type to run. Returns type name or None (wait)."""
+def dispatch(config: dict, state: AgentState | None = None) -> str | None:
+    """Choose a worker type to run. Returns type name or None (wait).
+    If state is provided, sets state.lock_held immediately upon lock acquisition."""
     strategy = cfg_get(config, "dispatch", "strategy", default="queue_balance")
     worker_types = cfg_get(config, "worker_types", default={})
     if not worker_types:
@@ -505,14 +546,14 @@ def dispatch(config: dict) -> str | None:
     queue_depth = get_queue_depth(config)
 
     if strategy == "queue_balance":
-        return dispatch_queue_balance(config, queue_depth, worker_types)
+        return dispatch_queue_balance(config, queue_depth, worker_types, state)
     elif strategy == "round_robin":
-        return dispatch_round_robin(config, queue_depth, worker_types)
+        return dispatch_round_robin(config, queue_depth, worker_types, state)
     elif os.path.exists(os.path.expanduser(strategy)):
-        return dispatch_custom(config, queue_depth, worker_types)
+        return dispatch_custom(config, queue_depth, worker_types, state)
     else:
         say(f"Unknown dispatch strategy: {strategy}, falling back to queue_balance")
-        return dispatch_queue_balance(config, queue_depth, worker_types)
+        return dispatch_queue_balance(config, queue_depth, worker_types, state)
 
 
 # ---------------------------------------------------------------------------
@@ -701,9 +742,11 @@ def agent_process_main(config: dict, agent_id: str | None = None):
 
     short_id = agent_id or uuid.uuid4().hex[:8]
 
+    my_pid = os.getpid()
     state = AgentState(
         short_id=short_id,
-        pid=os.getpid(),
+        pid=my_pid,
+        pid_start_time=_get_pid_start_time(my_pid),
         status="starting",
     )
     _agent_state = state
@@ -742,10 +785,10 @@ def agent_process_main(config: dict, agent_id: str | None = None):
         except Exception:
             pass
 
-        # --- Dispatch ---
+        # --- Dispatch (sets state.lock_held atomically if lock acquired) ---
         state.status = "dispatching"
         state.write()
-        chosen_type = dispatch(config)
+        chosen_type = dispatch(config, state)
         if chosen_type is None:
             log(f"Agent {short_id}: dispatch returned None (waiting)")
             state.status = "waiting_dispatch"
@@ -758,8 +801,6 @@ def agent_process_main(config: dict, agent_id: str | None = None):
         lock_name = wt_config.get("lock", "")
 
         state.worker_type = chosen_type
-        if lock_name:
-            state.lock_held = lock_name
         state.write()
 
         log(f"Agent {short_id}: dispatched as {chosen_type}")
@@ -879,9 +920,12 @@ def _git_rev(wt_dir: str) -> str:
 
 def spawn_agent(config: dict, agent_id: str | None = None) -> int:
     """Fork a new agent process. Returns PID of the child."""
+    # Auto-reap children so they don't become zombies
+    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
     pid = os.fork()
     if pid == 0:
-        # Child process
+        # Child process — restore SIGCHLD so subprocess.Popen.wait() works
+        signal.signal(signal.SIGCHLD, signal.SIG_DFL)
         try:
             # Detach from terminal
             os.setsid()
@@ -1102,7 +1146,7 @@ def _tui_main(stdscr, config: dict):
         elif ch == ord("Q"):
             # Quit all: finish all agents, then wait
             for a in agents:
-                if a.pid > 0 and a.status not in ("stopped", "dead"):
+                if a.pid > 0 and a.status not in ("stopped", "dead") and _pid_is_valid(a.pid, a.pid_start_time):
                     try:
                         os.kill(a.pid, signal.SIGUSR1)
                     except (ProcessLookupError, OSError):
@@ -1124,13 +1168,15 @@ def _tui_main(stdscr, config: dict):
         elif ch == ord("f") or ch == ord("F"):
             if agents and 0 <= selected < len(agents):
                 agent = agents[selected]
-                if agent.pid > 0:
+                if agent.pid > 0 and _pid_is_valid(agent.pid, agent.pid_start_time):
                     try:
                         os.kill(agent.pid, signal.SIGUSR1)
                         message = f"Finish signal sent to {agent.short_id}"
                     except (ProcessLookupError, OSError):
                         message = f"Agent {agent.short_id} not running"
-                    message_time = time.time()
+                else:
+                    message = f"Agent {agent.short_id} not running"
+                message_time = time.time()
         elif ch == ord("k") or ch == ord("K"):
             if agents and 0 <= selected < len(agents):
                 input_mode = "kill_confirm"
@@ -1154,7 +1200,7 @@ def _addstr(win, y: int, x: int, s: str, attr: int = 0):
 
 def _kill_agent(config: dict, agent: AgentState):
     """Send SIGTERM to an agent process."""
-    if agent.pid > 0:
+    if agent.pid > 0 and _pid_is_valid(agent.pid, agent.pid_start_time):
         try:
             os.kill(agent.pid, signal.SIGTERM)
         except (ProcessLookupError, OSError):
@@ -1245,6 +1291,9 @@ def cmd_finish(config: dict, args):
             return
 
     for a in targets:
+        if not _pid_is_valid(a.pid, a.pid_start_time):
+            print(f"Agent {a.short_id} not running (PID {a.pid})")
+            continue
         try:
             os.kill(a.pid, signal.SIGUSR1)
             print(f"Finish signal sent to {a.short_id} (PID {a.pid})")
