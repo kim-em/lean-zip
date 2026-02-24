@@ -5,3 +5,4 @@
 /.direnv
 /sessions
 /worktrees
+/agent-loop.log

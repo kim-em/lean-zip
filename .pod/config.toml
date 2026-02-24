@@ -1,0 +1,48 @@
+# pod configuration — all values have sensible defaults.
+# Edit this file to customise agent behaviour.
+
+[project]
+coordination = "./coordination"    # Path to coordination script
+worktree_base = "worktrees"        # Where git worktrees are created
+session_dir = "sessions"           # Session stdout capture directory
+
+[claude]
+model = "opus"                     # Claude model to use
+quota_check = "~/.claude/skills/claude-usage/claude-available-model"
+quota_retry_seconds = 60           # Sleep duration when quota unavailable
+
+[pricing]
+# Dollars per million tokens
+input = 5.00
+output = 25.00
+cache_read = 0.50
+cache_create = 6.25
+
+[dispatch]
+# Built-in strategies: "queue_balance", "round_robin"
+# Or a path to a custom script (receives env vars, prints worker type name)
+strategy = "queue_balance"
+min_queue = 3                      # queue_balance: below this → planner-type
+
+[monitor]
+poll_interval = 2                  # Seconds between status updates
+jsonl_stale_warning = 300          # Warn if JSONL unchanged for this many seconds
+jsonl_missing_warning = 60         # Warn if JSONL not created after this many seconds
+
+# --- Worker Types ---
+# Each [worker_types.<name>] defines a type of agent session.
+# The dispatch strategy chooses among these.
+
+[worker_types.plan]
+prompt = "/plan"
+lock = "planner"                   # Acquire this lock before running
+copy_lake_cache = false
+
+[worker_types.work]
+prompt = "/work"
+copy_lake_cache = true
+
+# Example additional worker type:
+# [worker_types.review]
+# prompt = "/review"
+# copy_lake_cache = true

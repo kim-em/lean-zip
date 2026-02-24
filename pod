@@ -1,0 +1,1394 @@
+#!/usr/bin/env python3
+"""pod — Multi-agent manager for lean-zip.
+
+Manages concurrent autonomous Claude sessions with a TUI and CLI interface.
+Each agent runs as an independent background process; the TUI is just a viewer.
+
+Usage:
+    pod                  # Interactive TUI
+    pod list             # Show running agents
+    pod add [N]          # Launch N new agents (default 1)
+    pod finish [ID|all]  # Signal agent(s) to finish after current work
+    pod kill [ID|all]    # Kill agent(s) immediately (unclaims issues)
+    pod status           # Queue depth, agent count, total cost
+    pod log [ID]         # Tail agent's session stdout
+    pod config           # Print current config
+"""
+
+from __future__ import annotations
+
+import argparse
+import curses
+import dataclasses
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+import tomllib
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+PROJECT_DIR = Path(__file__).resolve().parent
+POD_DIR = PROJECT_DIR / ".pod"
+AGENTS_DIR = POD_DIR / "agents"
+CONFIG_PATH = POD_DIR / "config.toml"
+LOG_PATH = POD_DIR / "pod.log"
+
+# ---------------------------------------------------------------------------
+# Default configuration (written on first run)
+# ---------------------------------------------------------------------------
+
+DEFAULT_CONFIG = """\
+# pod configuration — all values have sensible defaults.
+# Edit this file to customise agent behaviour.
+
+[project]
+coordination = "./coordination"    # Path to coordination script
+worktree_base = "worktrees"        # Where git worktrees are created
+session_dir = "sessions"           # Session stdout capture directory
+
+[claude]
+model = "opus"                     # Claude model to use
+quota_check = "~/.claude/skills/claude-usage/claude-available-model"
+quota_retry_seconds = 60           # Sleep duration when quota unavailable
+
+[pricing]
+# Dollars per million tokens
+input = 5.00
+output = 25.00
+cache_read = 0.50
+cache_create = 6.25
+
+[dispatch]
+# Built-in strategies: "queue_balance", "round_robin"
+# Or a path to a custom script (receives env vars, prints worker type name)
+strategy = "queue_balance"
+min_queue = 3                      # queue_balance: below this → planner-type
+
+[monitor]
+poll_interval = 2                  # Seconds between status updates
+jsonl_stale_warning = 300          # Warn if JSONL unchanged for this many seconds
+jsonl_missing_warning = 60         # Warn if JSONL not created after this many seconds
+
+# --- Worker Types ---
+# Each [worker_types.<name>] defines a type of agent session.
+# The dispatch strategy chooses among these.
+
+[worker_types.plan]
+prompt = "/plan"
+lock = "planner"                   # Acquire this lock before running
+copy_lake_cache = false
+
+[worker_types.work]
+prompt = "/work"
+copy_lake_cache = true
+
+# Example additional worker type:
+# [worker_types.review]
+# prompt = "/review"
+# copy_lake_cache = true
+"""
+
+
+def ensure_config() -> dict:
+    """Load config, creating default file if it doesn't exist."""
+    POD_DIR.mkdir(parents=True, exist_ok=True)
+    AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+    if not CONFIG_PATH.exists():
+        CONFIG_PATH.write_text(DEFAULT_CONFIG)
+        log(f"Created default config at {CONFIG_PATH}")
+    with open(CONFIG_PATH, "rb") as f:
+        return tomllib.load(f)
+
+
+def cfg_get(config: dict, *keys, default=None):
+    """Nested dict lookup with default."""
+    d = config
+    for k in keys:
+        if isinstance(d, dict):
+            d = d.get(k, default)
+        else:
+            return default
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+_log_lock = threading.Lock()
+
+
+def log(msg: str):
+    """Append timestamped message to pod.log."""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}\n"
+    with _log_lock:
+        try:
+            with open(LOG_PATH, "a") as f:
+                f.write(line)
+        except OSError:
+            pass
+
+
+def say(msg: str):
+    """Print to stderr and log."""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, file=sys.stderr)
+    log(msg)
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentState:
+    """Mutable state for one agent, serialised to .pod/agents/<id>.json."""
+    short_id: str = ""
+    uuid: str = ""
+    pid: int = 0
+    worker_type: str = ""          # e.g. "work", "plan"
+    status: str = "starting"       # starting, running, waiting_quota, finishing, stopped
+    session_start: float = 0.0
+    claimed_issue: int = 0
+    pr_number: int = 0
+    git_start: str = ""
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cache_read: int = 0
+    cache_create: int = 0
+    last_text: str = ""
+    last_activity: float = 0.0
+    finishing: bool = False
+    lock_held: str = ""            # Name of lock held (e.g. "planner"), or ""
+    loop_iteration: int = 0
+    worktree: str = ""
+    branch: str = ""
+
+    def cost(self, pricing: dict) -> float:
+        """Calculate cost in dollars."""
+        return (
+            self.tokens_in * pricing.get("input", 5.0) / 1e6
+            + self.cache_create * pricing.get("cache_create", 6.25) / 1e6
+            + self.cache_read * pricing.get("cache_read", 0.50) / 1e6
+            + self.tokens_out * pricing.get("output", 25.0) / 1e6
+        )
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> AgentState:
+        known = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
+
+    def write(self):
+        """Atomically write state to .pod/agents/<id>.json."""
+        path = AGENTS_DIR / f"{self.short_id}.json"
+        tmp = path.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(self.to_dict(), indent=2) + "\n")
+            tmp.rename(path)
+        except OSError as e:
+            log(f"Failed to write state for {self.short_id}: {e}")
+
+    def remove_file(self):
+        """Remove the state file."""
+        path = AGENTS_DIR / f"{self.short_id}.json"
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def read_all_agents() -> list[AgentState]:
+    """Read all agent state files, filtering out stale (dead process) ones."""
+    agents = []
+    if not AGENTS_DIR.exists():
+        return agents
+    for p in sorted(AGENTS_DIR.glob("*.json")):
+        if p.suffix != ".json" or p.name.endswith(".tmp"):
+            continue
+        try:
+            d = json.loads(p.read_text())
+            agent = AgentState.from_dict(d)
+            # Check if process is still alive
+            if agent.pid > 0:
+                try:
+                    os.kill(agent.pid, 0)
+                except ProcessLookupError:
+                    # Process is dead — mark as stopped and clean up
+                    agent.status = "dead"
+            agents.append(agent)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return agents
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+def human_size(n: int) -> str:
+    if n >= 1048576:
+        return f"{n / 1048576:.1f}MB"
+    if n >= 1024:
+        return f"{n / 1024:.1f}KB"
+    return f"{n}B"
+
+
+def human_duration(secs: int | float) -> str:
+    secs = int(secs)
+    if secs >= 3600:
+        return f"{secs // 3600}h{secs % 3600 // 60:02d}m"
+    if secs >= 60:
+        return f"{secs // 60}m{secs % 60:02d}s"
+    return f"{secs}s"
+
+
+def fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return f"{n / 1000:.0f}k"
+    return str(n)
+
+
+def token_summary(state: AgentState, pricing: dict) -> str:
+    total_in = state.tokens_in + state.cache_read + state.cache_create
+    if total_in == 0 and state.tokens_out == 0:
+        return ""
+    cost = state.cost(pricing)
+    return f"{fmt_tokens(total_in)}/{fmt_tokens(state.tokens_out)}~${cost:.2f}"
+
+
+def check_quota(config: dict, force: bool = False) -> bool:
+    """Check if Claude quota is available. Returns True if OK."""
+    if force:
+        return True
+    cmd = os.path.expanduser(cfg_get(config, "claude", "quota_check", default=""))
+    if not cmd:
+        return True
+    try:
+        result = subprocess.run(
+            [cmd], capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return False
+        model = result.stdout.strip()
+        required = cfg_get(config, "claude", "model", default="opus")
+        return model == required
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def coordination(config: dict, *args, env_extra: dict | None = None,
+                 stdin_data: str | None = None) -> subprocess.CompletedProcess:
+    """Run a coordination subcommand."""
+    script = cfg_get(config, "project", "coordination", default="./coordination")
+    env = dict(os.environ)
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        [script, *args],
+        capture_output=True, text=True, timeout=60,
+        cwd=str(PROJECT_DIR), env=env,
+        input=stdin_data,
+    )
+
+
+def get_queue_depth(config: dict) -> int:
+    """Get number of unclaimed issues."""
+    try:
+        r = coordination(config, "queue-depth")
+        return int(r.stdout.strip())
+    except (ValueError, subprocess.TimeoutExpired):
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# JSONL Monitor (runs as a thread inside agent process)
+# ---------------------------------------------------------------------------
+
+def jsonl_monitor(jsonl_path: str, state: AgentState, stop: threading.Event):
+    """Poll JSONL file and update agent state. Runs in a daemon thread."""
+    pos = 0
+    while not stop.is_set():
+        try:
+            if not os.path.exists(jsonl_path):
+                stop.wait(1)
+                continue
+            with open(jsonl_path, "rb") as f:
+                f.seek(pos)
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break
+                    if not line.endswith(b"\n"):
+                        break  # Partial line — retry next poll
+                    pos += len(line)
+                    _parse_jsonl_line(line, state)
+        except OSError:
+            pass
+        stop.wait(1)
+
+
+def _parse_jsonl_line(line: bytes, state: AgentState):
+    """Parse one JSONL line and update state."""
+    try:
+        d = json.loads(line)
+    except json.JSONDecodeError:
+        return
+
+    if d.get("type") != "assistant":
+        return
+
+    usage = d.get("message", {}).get("usage", {})
+    state.tokens_in += usage.get("input_tokens", 0)
+    state.cache_create += usage.get("cache_creation_input_tokens", 0)
+    state.cache_read += usage.get("cache_read_input_tokens", 0)
+    state.tokens_out += usage.get("output_tokens", 0)
+    state.last_activity = time.time()
+
+    for block in d.get("message", {}).get("content", []):
+        btype = block.get("type")
+        if btype == "text" and block.get("text", "").strip():
+            state.last_text = block["text"].strip()
+        elif btype == "tool_use":
+            name = block.get("name", "")
+            inp = block.get("input", {})
+            detail = _tool_detail(name, inp, state)
+            state.last_text = f"[{name}] {detail}" if detail else f"[{name}]"
+
+
+def _tool_detail(name: str, inp: dict, state: AgentState) -> str:
+    """Extract a display-friendly detail string from a tool invocation."""
+    if name == "Bash":
+        desc = inp.get("description", "")
+        cmd = inp.get("command", "")
+        # Detect coordination claim/create-pr
+        m = re.search(r"(?:^|&&\s*|;\s*)(?:\./)?coordination\s+claim\s+(\d+)", cmd)
+        if m:
+            state.claimed_issue = int(m.group(1))
+        m = re.search(r"(?:^|&&\s*|;\s*)(?:\./)?coordination\s+create-pr\s+(\d+)", cmd)
+        if m:
+            state.pr_number = int(m.group(1))
+        if desc and cmd:
+            return f"{desc}: {cmd}"
+        return desc or cmd
+    elif name == "Edit":
+        p = inp.get("file_path", "")
+        return p.split("/")[-1] if p else ""
+    elif name in ("Read", "Write"):
+        p = inp.get("file_path", "")
+        return p.split("/")[-1] if p else ""
+    elif name in ("Grep", "Glob"):
+        return inp.get("pattern", "")
+    elif name == "TodoWrite":
+        todos = inp.get("todos", [])
+        active = [t for t in todos if t.get("status") == "in_progress"]
+        return active[0].get("activeForm", "") if active else ""
+    elif name == "Task":
+        return inp.get("description", "")
+    return name
+
+
+# ---------------------------------------------------------------------------
+# Dispatch Strategies
+# ---------------------------------------------------------------------------
+
+def dispatch_queue_balance(config: dict, queue_depth: int,
+                           worker_types: dict) -> str | None:
+    """Current ./go logic: low queue → locked types, high queue → unlocked types."""
+    min_queue = cfg_get(config, "dispatch", "min_queue", default=3)
+
+    # Separate types into queue-filling (have locks) and queue-draining (no locks)
+    filling = {k: v for k, v in worker_types.items() if v.get("lock")}
+    draining = {k: v for k, v in worker_types.items() if not v.get("lock")}
+
+    if queue_depth < min_queue and filling:
+        # Try to acquire lock for a filling type
+        for name, wt in filling.items():
+            lock_name = wt["lock"]
+            r = coordination(config, f"lock-{lock_name}")
+            if r.returncode == 0:
+                return name
+        # Lock held — fall back to draining if queue > 0
+        if queue_depth > 0 and draining:
+            return next(iter(draining))
+        # Queue empty and lock held — wait
+        return None
+    elif draining:
+        return next(iter(draining))
+    elif filling:
+        # Only filling types exist — try them
+        for name, wt in filling.items():
+            r = coordination(config, f"lock-{wt['lock']}")
+            if r.returncode == 0:
+                return name
+        return None
+    return None
+
+
+_round_robin_idx = 0
+
+
+def dispatch_round_robin(config: dict, queue_depth: int,
+                          worker_types: dict) -> str | None:
+    """Cycle through worker types, skipping locked ones."""
+    global _round_robin_idx
+    names = list(worker_types.keys())
+    if not names:
+        return None
+    for _ in range(len(names)):
+        name = names[_round_robin_idx % len(names)]
+        _round_robin_idx += 1
+        wt = worker_types[name]
+        lock_name = wt.get("lock")
+        if lock_name:
+            r = coordination(config, f"lock-{lock_name}")
+            if r.returncode != 0:
+                continue
+        return name
+    return None
+
+
+def dispatch_custom(config: dict, queue_depth: int,
+                     worker_types: dict) -> str | None:
+    """Run a custom dispatch script."""
+    strategy = cfg_get(config, "dispatch", "strategy", default="")
+    script = os.path.expanduser(strategy)
+    env = dict(os.environ)
+    env["POD_QUEUE_DEPTH"] = str(queue_depth)
+    env["POD_AGENT_COUNT"] = str(len(read_all_agents()))
+    env["POD_WORKER_TYPES"] = ",".join(worker_types.keys())
+    try:
+        r = subprocess.run(
+            [script], capture_output=True, text=True, timeout=30, env=env,
+            cwd=str(PROJECT_DIR),
+        )
+        if r.returncode != 0:
+            return None
+        name = r.stdout.strip()
+        if name in worker_types:
+            # If the chosen type has a lock, try to acquire it
+            lock_name = worker_types[name].get("lock")
+            if lock_name:
+                lr = coordination(config, f"lock-{lock_name}")
+                if lr.returncode != 0:
+                    return None
+            return name
+        return None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def dispatch(config: dict) -> str | None:
+    """Choose a worker type to run. Returns type name or None (wait)."""
+    strategy = cfg_get(config, "dispatch", "strategy", default="queue_balance")
+    worker_types = cfg_get(config, "worker_types", default={})
+    if not worker_types:
+        say("No worker types configured")
+        return None
+
+    queue_depth = get_queue_depth(config)
+
+    if strategy == "queue_balance":
+        return dispatch_queue_balance(config, queue_depth, worker_types)
+    elif strategy == "round_robin":
+        return dispatch_round_robin(config, queue_depth, worker_types)
+    elif os.path.exists(os.path.expanduser(strategy)):
+        return dispatch_custom(config, queue_depth, worker_types)
+    else:
+        say(f"Unknown dispatch strategy: {strategy}, falling back to queue_balance")
+        return dispatch_queue_balance(config, queue_depth, worker_types)
+
+
+# ---------------------------------------------------------------------------
+# Agent Lifecycle
+# ---------------------------------------------------------------------------
+
+def setup_worktree(config: dict, short_id: str) -> tuple[str, str]:
+    """Create a fresh git worktree. Returns (worktree_path, branch_name)."""
+    base = PROJECT_DIR / cfg_get(config, "project", "worktree_base", default="worktrees")
+    base.mkdir(parents=True, exist_ok=True)
+    wt_dir = base / short_id
+    branch = f"agent/{short_id}"
+
+    # Fetch latest master
+    subprocess.run(
+        ["git", "-C", str(PROJECT_DIR), "fetch", "origin", "master", "--quiet"],
+        capture_output=True, timeout=60,
+    )
+
+    # Clean up any leftover worktree/branch from a crash
+    if wt_dir.exists():
+        subprocess.run(
+            ["git", "-C", str(PROJECT_DIR), "worktree", "remove", "--force", str(wt_dir)],
+            capture_output=True, timeout=30,
+        )
+    subprocess.run(
+        ["git", "branch", "-D", branch],
+        capture_output=True, timeout=10, cwd=str(PROJECT_DIR),
+    )
+
+    # Create worktree
+    subprocess.run(
+        ["git", "-C", str(PROJECT_DIR), "worktree", "add", "-b", branch,
+         str(wt_dir), "origin/master", "--quiet"],
+        capture_output=True, timeout=60, check=True,
+    )
+
+    return str(wt_dir), branch
+
+
+def copy_lake_cache(wt_dir: str):
+    """rsync .lake/ into worktree for faster builds."""
+    lake_src = PROJECT_DIR / ".lake"
+    if lake_src.is_dir():
+        subprocess.run(
+            ["rsync", "-a", "--quiet", f"{lake_src}/", f"{wt_dir}/.lake/"],
+            capture_output=True, timeout=120,
+        )
+
+
+def cleanup_worktree(wt_dir: str, branch: str):
+    """Remove worktree and delete branch."""
+    if os.path.isdir(wt_dir):
+        subprocess.run(
+            ["git", "-C", str(PROJECT_DIR), "worktree", "remove", "--force", wt_dir],
+            capture_output=True, timeout=30,
+        )
+    subprocess.run(
+        ["git", "branch", "-D", branch],
+        capture_output=True, timeout=10, cwd=str(PROJECT_DIR),
+    )
+
+
+def launch_claude(config: dict, session_uuid: str, prompt: str,
+                   wt_dir: str) -> subprocess.Popen:
+    """Launch claude in the worktree directory."""
+    model = cfg_get(config, "claude", "model", default="opus")
+    session_dir = PROJECT_DIR / cfg_get(config, "project", "session_dir", default="sessions")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = session_dir / f"{session_uuid}.stdout"
+
+    # Determine JSONL dir for this worktree
+    jsonl_dir = Path.home() / ".claude" / "projects" / wt_dir.replace("/", "-")
+
+    # Check if we can resume an existing session
+    local_jsonl = jsonl_dir / f"{session_uuid}.jsonl"
+    claude_args = ["claude", "--model", model]
+    if local_jsonl.exists():
+        claude_args += ["--resume", session_uuid]
+    else:
+        claude_args += ["--session-id", session_uuid]
+    claude_args += ["-p", prompt]
+
+    env = dict(os.environ)
+    env["ANTHROPIC_API_KEY"] = ""  # Force subscription auth
+    env["LEAN_ZIP_SESSION_ID"] = session_uuid
+
+    stdout_fd = os.open(str(stdout_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    proc = subprocess.Popen(
+        claude_args,
+        stdout=stdout_fd,
+        stderr=subprocess.STDOUT,
+        cwd=wt_dir,
+        env=env,
+        start_new_session=True,  # Create process group for clean killing
+    )
+    os.close(stdout_fd)  # Child inherited it; parent no longer needs it
+    return proc
+
+
+def get_jsonl_path(wt_dir: str, session_uuid: str) -> str:
+    """Compute JSONL file path for a session."""
+    jsonl_dir = Path.home() / ".claude" / "projects" / wt_dir.replace("/", "-")
+    return str(jsonl_dir / f"{session_uuid}.jsonl")
+
+
+# ---------------------------------------------------------------------------
+# Agent Process (forked background process)
+# ---------------------------------------------------------------------------
+
+# Globals for signal handlers
+_agent_state: AgentState | None = None
+_claude_proc: subprocess.Popen | None = None
+_agent_config: dict = {}
+
+
+def _sigterm_handler(signum, frame):
+    """Handle SIGTERM: kill claude, unclaim, cleanup, exit."""
+    global _agent_state, _claude_proc, _agent_config
+    state = _agent_state
+    config = _agent_config
+
+    if state:
+        log(f"Agent {state.short_id} received SIGTERM")
+        state.status = "killed"
+        state.write()
+
+    # Kill claude subprocess
+    if _claude_proc and _claude_proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(_claude_proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            _claude_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(_claude_proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
+    if state and config:
+        # Unclaim issue if claimed and no PR yet
+        if state.claimed_issue > 0 and state.pr_number == 0:
+            try:
+                coordination(
+                    config, "skip", str(state.claimed_issue),
+                    f"Agent killed by operator (session {state.uuid})",
+                    env_extra={"LEAN_ZIP_SESSION_ID": state.uuid},
+                )
+                log(f"Unclaimed issue #{state.claimed_issue}")
+            except Exception:
+                pass
+
+        # Release lock if held
+        if state.lock_held:
+            try:
+                coordination(config, f"unlock-{state.lock_held}")
+                log(f"Released {state.lock_held} lock")
+            except Exception:
+                pass
+
+        # Cleanup worktree
+        if state.worktree and state.branch:
+            cleanup_worktree(state.worktree, state.branch)
+
+        state.remove_file()
+
+    os._exit(0)
+
+
+def _sigusr1_handler(signum, frame):
+    """Handle SIGUSR1: set finishing flag."""
+    global _agent_state
+    if _agent_state:
+        _agent_state.finishing = True
+        _agent_state.status = "finishing"
+        _agent_state.write()
+        log(f"Agent {_agent_state.short_id} marked as finishing")
+
+
+def agent_process_main(config: dict, agent_id: str | None = None):
+    """Entry point for a forked agent process. Runs the agent loop."""
+    global _agent_state, _claude_proc, _agent_config
+    _agent_config = config
+
+    short_id = agent_id or uuid.uuid4().hex[:8]
+
+    state = AgentState(
+        short_id=short_id,
+        pid=os.getpid(),
+        status="starting",
+    )
+    _agent_state = state
+    state.write()
+
+    # Install signal handlers
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+    signal.signal(signal.SIGUSR1, _sigusr1_handler)
+
+    poll_interval = cfg_get(config, "monitor", "poll_interval", default=2)
+    quota_retry = cfg_get(config, "claude", "quota_retry_seconds", default=60)
+    worker_types = cfg_get(config, "worker_types", default={})
+    pricing = cfg_get(config, "pricing", default={})
+
+    log(f"Agent {short_id} started (PID {os.getpid()})")
+
+    iteration = 0
+    while not state.finishing:
+        iteration += 1
+        state.loop_iteration = iteration
+
+        # --- Quota check ---
+        state.status = "waiting_quota"
+        state.write()
+        while not check_quota(config):
+            if state.finishing:
+                break
+            log(f"Agent {short_id}: no quota, sleeping {quota_retry}s")
+            time.sleep(quota_retry)
+        if state.finishing:
+            break
+
+        # --- Housekeeping ---
+        try:
+            coordination(config, "check-blocked")
+        except Exception:
+            pass
+
+        # --- Dispatch ---
+        state.status = "dispatching"
+        state.write()
+        chosen_type = dispatch(config)
+        if chosen_type is None:
+            log(f"Agent {short_id}: dispatch returned None (waiting)")
+            state.status = "waiting_dispatch"
+            state.write()
+            time.sleep(quota_retry)
+            continue
+
+        wt_config = worker_types.get(chosen_type, {})
+        prompt = wt_config.get("prompt", f"/{chosen_type}")
+        lock_name = wt_config.get("lock", "")
+
+        state.worker_type = chosen_type
+        if lock_name:
+            state.lock_held = lock_name
+        state.write()
+
+        log(f"Agent {short_id}: dispatched as {chosen_type}")
+
+        # --- Session setup ---
+        session_uuid = str(uuid.uuid4())
+        state.uuid = session_uuid
+        state.session_start = time.time()
+        state.claimed_issue = 0
+        state.pr_number = 0
+        state.tokens_in = 0
+        state.tokens_out = 0
+        state.cache_read = 0
+        state.cache_create = 0
+        state.last_text = ""
+        state.last_activity = 0.0
+
+        try:
+            wt_dir, branch = setup_worktree(config, short_id)
+        except subprocess.CalledProcessError as e:
+            log(f"Agent {short_id}: worktree setup failed: {e}")
+            if lock_name:
+                coordination(config, f"unlock-{lock_name}")
+                state.lock_held = ""
+            state.status = "error"
+            state.write()
+            time.sleep(10)
+            continue
+
+        state.worktree = wt_dir
+        state.branch = branch
+        state.git_start = _git_rev(wt_dir)
+
+        if wt_config.get("copy_lake_cache", False):
+            copy_lake_cache(wt_dir)
+
+        # --- Start JSONL monitor ---
+        jsonl_path = get_jsonl_path(wt_dir, session_uuid)
+        stop_monitor = threading.Event()
+        monitor_thread = threading.Thread(
+            target=jsonl_monitor, args=(jsonl_path, state, stop_monitor),
+            daemon=True,
+        )
+        monitor_thread.start()
+
+        # --- Launch claude ---
+        state.status = "running"
+        state.write()
+        log(f"Agent {short_id}: launching claude session {session_uuid} in {wt_dir}")
+
+        try:
+            _claude_proc = launch_claude(config, session_uuid, prompt, wt_dir)
+        except (OSError, FileNotFoundError) as e:
+            log(f"Agent {short_id}: failed to launch claude: {e}")
+            stop_monitor.set()
+            cleanup_worktree(wt_dir, branch)
+            if lock_name:
+                coordination(config, f"unlock-{lock_name}")
+                state.lock_held = ""
+            state.status = "error"
+            state.write()
+            time.sleep(10)
+            continue
+
+        # --- Monitor until claude exits ---
+        while _claude_proc.poll() is None:
+            state.write()
+            time.sleep(poll_interval)
+
+        exit_code = _claude_proc.returncode
+        _claude_proc = None
+
+        # --- Session ended ---
+        stop_monitor.set()
+        monitor_thread.join(timeout=5)
+
+        elapsed = time.time() - state.session_start
+        git_end = _git_rev(wt_dir)
+        tok = token_summary(state, pricing)
+        log(f"Agent {short_id}: session finished exit={exit_code} "
+            f"duration={human_duration(elapsed)} {tok} "
+            f"git:{state.git_start}..{git_end}")
+
+        # --- Cleanup ---
+        cleanup_worktree(wt_dir, branch)
+        state.worktree = ""
+        state.branch = ""
+
+        if lock_name:
+            try:
+                coordination(config, f"unlock-{lock_name}")
+            except Exception:
+                pass
+            state.lock_held = ""
+
+        state.write()
+
+    # --- Agent loop exited ---
+    log(f"Agent {short_id} exiting (finishing={state.finishing})")
+    state.status = "stopped"
+    state.write()
+    # Leave state file briefly so TUI can see "stopped", then remove
+    time.sleep(2)
+    state.remove_file()
+
+
+def _git_rev(wt_dir: str) -> str:
+    try:
+        r = subprocess.run(
+            ["git", "-C", wt_dir, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def spawn_agent(config: dict, agent_id: str | None = None) -> int:
+    """Fork a new agent process. Returns PID of the child."""
+    pid = os.fork()
+    if pid == 0:
+        # Child process
+        try:
+            # Detach from terminal
+            os.setsid()
+            # Redirect stdin/stdout/stderr to /dev/null so we don't
+            # interfere with the parent's TUI or terminal
+            devnull_r = os.open(os.devnull, os.O_RDONLY)
+            devnull_w = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull_r, 0)
+            os.dup2(devnull_w, 1)
+            os.dup2(devnull_w, 2)
+            os.close(devnull_r)
+            os.close(devnull_w)
+            agent_process_main(config, agent_id)
+        except Exception as e:
+            log(f"Agent process crashed: {e}")
+        finally:
+            os._exit(0)
+    return pid
+
+
+# ---------------------------------------------------------------------------
+# TUI
+# ---------------------------------------------------------------------------
+
+def run_tui(config: dict):
+    """Run the interactive curses TUI."""
+    curses.wrapper(_tui_main, config)
+
+
+def _tui_main(stdscr, config: dict):
+    curses.curs_set(0)
+    stdscr.timeout(1000)  # 1 second refresh
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_GREEN, -1)    # Running
+    curses.init_pair(2, curses.COLOR_YELLOW, -1)    # Finishing
+    curses.init_pair(3, curses.COLOR_RED, -1)        # Dead/error
+    curses.init_pair(4, curses.COLOR_CYAN, -1)       # Header
+    curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE)  # Selected
+
+    selected = 0
+    message = ""
+    message_time = 0.0
+    input_mode = ""  # "", "add", "kill_confirm"
+    input_buf = ""
+    cached_queue: int | None = None
+    queue_fetch_time = 0.0
+    QUEUE_CACHE_SECS = 30  # Only fetch queue depth every 30 seconds
+
+    pricing = cfg_get(config, "pricing", default={})
+
+    while True:
+        agents = read_all_agents()
+        # Clean up dead agent state files
+        for a in agents:
+            if a.status == "dead":
+                a.remove_file()
+        agents = [a for a in agents if a.status != "dead"]
+
+        height, width = stdscr.getmaxyx()
+        stdscr.erase()
+
+        # --- Header ---
+        total_cost = sum(a.cost(pricing) for a in agents)
+        running = sum(1 for a in agents if a.status not in ("stopped", "dead"))
+
+        # Cache queue depth to avoid gh API call every second
+        now = time.time()
+        if cached_queue is None or now - queue_fetch_time > QUEUE_CACHE_SECS:
+            try:
+                cached_queue = get_queue_depth(config)
+                queue_fetch_time = now
+            except Exception:
+                pass
+
+        if cached_queue is not None:
+            header = f" pod -- {running} agent{'s' if running != 1 else ''} running | queue: {cached_queue} | ${total_cost:.2f} total"
+        else:
+            header = f" pod -- {running} agent{'s' if running != 1 else ''} running | ${total_cost:.2f} total"
+
+        _addstr(stdscr, 0, 0, header[:width], curses.color_pair(4) | curses.A_BOLD)
+        _addstr(stdscr, 1, 0, "─" * min(width, 80), curses.color_pair(4))
+
+        # --- Agent table header ---
+        col_fmt = "  {:>2} {:8} {:12} {:>6} {:>15} {}"
+        hdr = col_fmt.format("#", "ID", "Type", "Time", "Tokens", "Activity")
+        _addstr(stdscr, 2, 0, hdr[:width], curses.A_DIM)
+
+        # --- Agent rows ---
+        if selected >= len(agents):
+            selected = max(0, len(agents) - 1)
+
+        for i, agent in enumerate(agents):
+            row = 3 + i
+            if row >= height - 3:
+                break
+
+            # Mode label
+            mode = agent.worker_type or "???"
+            if agent.claimed_issue > 0:
+                if agent.pr_number > 0:
+                    mode = f"{mode} #{agent.claimed_issue}->PR"
+                else:
+                    mode = f"{mode} #{agent.claimed_issue}"
+            if agent.finishing:
+                mode += " (fin)"
+
+            # Elapsed
+            elapsed = ""
+            if agent.session_start > 0:
+                elapsed = human_duration(time.time() - agent.session_start)
+
+            # Tokens
+            tok = token_summary(agent, pricing)
+
+            # Activity text
+            activity = agent.last_text or agent.status
+            # Thinking detection: if JSONL is stale but process is alive
+            if (agent.last_activity > 0 and
+                    time.time() - agent.last_activity > 10 and
+                    agent.status == "running"):
+                stale = int(time.time() - agent.last_activity)
+                activity = f"thinking {human_duration(stale)}"
+
+            # Truncate activity to fit
+            prefix = col_fmt.format(i + 1, agent.short_id, mode[:12], elapsed, tok, "")
+            max_act = width - len(prefix) - 2
+            if max_act > 10 and len(activity) > max_act:
+                activity = activity[:max_act - 3] + "..."
+
+            marker = ">" if i == selected else " "
+            line = f"{marker}" + col_fmt.format(i + 1, agent.short_id, mode[:12], elapsed, tok, activity)
+
+            attr = curses.A_NORMAL
+            if i == selected:
+                attr = curses.color_pair(5) | curses.A_BOLD
+            elif agent.status == "finishing" or agent.finishing:
+                attr = curses.color_pair(2)
+            elif agent.status in ("dead", "error", "killed"):
+                attr = curses.color_pair(3)
+            elif agent.status == "running":
+                attr = curses.color_pair(1)
+
+            _addstr(stdscr, row, 0, line[:width], attr)
+
+        # --- Footer separator ---
+        footer_row = max(3 + len(agents), height - 3)
+        if footer_row < height - 1:
+            _addstr(stdscr, footer_row, 0, "─" * min(width, 80), curses.color_pair(4))
+
+        # --- Footer ---
+        footer_row2 = footer_row + 1
+        if input_mode == "add":
+            footer_text = f" Add how many agents? {input_buf}_  (Enter to confirm, Esc to cancel)"
+        elif input_mode == "kill_confirm":
+            if agents and 0 <= selected < len(agents):
+                footer_text = f" Kill agent {agents[selected].short_id}? (y/n)"
+            else:
+                footer_text = " No agent selected"
+                input_mode = ""
+        else:
+            footer_text = " [a]dd  [f]inish  [k]ill  [q]uit  [Q]uit all       ↑↓/1-9 select"
+
+        if footer_row2 < height:
+            _addstr(stdscr, footer_row2, 0, footer_text[:width], curses.A_DIM)
+
+        # --- Message line ---
+        if message and time.time() - message_time < 3:
+            msg_row = footer_row2 + 1
+            if msg_row < height:
+                _addstr(stdscr, msg_row, 0, f" {message}"[:width], curses.A_BOLD)
+
+        stdscr.refresh()
+
+        # --- Input ---
+        try:
+            ch = stdscr.getch()
+        except curses.error:
+            continue
+
+        if ch == -1:
+            continue
+
+        if input_mode == "add":
+            if ch == 27:  # Escape
+                input_mode = ""
+                input_buf = ""
+            elif ch in (10, 13):  # Enter
+                n = int(input_buf) if input_buf.isdigit() and int(input_buf) > 0 else 1
+                for _ in range(n):
+                    spawn_agent(config)
+                message = f"Launched {n} agent{'s' if n != 1 else ''}"
+                message_time = time.time()
+                input_mode = ""
+                input_buf = ""
+            elif ch == curses.KEY_BACKSPACE or ch == 127:
+                input_buf = input_buf[:-1]
+            elif 48 <= ch <= 57:  # 0-9
+                input_buf += chr(ch)
+            continue
+
+        if input_mode == "kill_confirm":
+            if ch in (ord("y"), ord("Y")):
+                if agents and 0 <= selected < len(agents):
+                    agent = agents[selected]
+                    _kill_agent(config, agent)
+                    message = f"Killed agent {agent.short_id}"
+                    message_time = time.time()
+            else:
+                message = "Kill cancelled"
+                message_time = time.time()
+            input_mode = ""
+            continue
+
+        # Normal mode
+        if ch == ord("q"):
+            break
+        elif ch == ord("Q"):
+            # Quit all: finish all agents, then wait
+            for a in agents:
+                if a.pid > 0 and a.status not in ("stopped", "dead"):
+                    try:
+                        os.kill(a.pid, signal.SIGUSR1)
+                    except (ProcessLookupError, OSError):
+                        pass
+            message = "Sent finish signal to all agents. Waiting..."
+            message_time = time.time()
+            stdscr.refresh()
+            # Wait for all to stop (with timeout display)
+            deadline = time.time() + 600  # 10 min max
+            while time.time() < deadline:
+                live = [a for a in read_all_agents() if a.status not in ("stopped", "dead")]
+                if not live:
+                    break
+                time.sleep(2)
+            break
+        elif ch == ord("a") or ch == ord("A"):
+            input_mode = "add"
+            input_buf = ""
+        elif ch == ord("f") or ch == ord("F"):
+            if agents and 0 <= selected < len(agents):
+                agent = agents[selected]
+                if agent.pid > 0:
+                    try:
+                        os.kill(agent.pid, signal.SIGUSR1)
+                        message = f"Finish signal sent to {agent.short_id}"
+                    except (ProcessLookupError, OSError):
+                        message = f"Agent {agent.short_id} not running"
+                    message_time = time.time()
+        elif ch == ord("k") or ch == ord("K"):
+            if agents and 0 <= selected < len(agents):
+                input_mode = "kill_confirm"
+        elif ch == curses.KEY_UP:
+            selected = max(0, selected - 1)
+        elif ch == curses.KEY_DOWN:
+            selected = min(len(agents) - 1, selected + 1) if agents else 0
+        elif 49 <= ch <= 57:  # 1-9
+            idx = ch - 49
+            if idx < len(agents):
+                selected = idx
+
+
+def _addstr(win, y: int, x: int, s: str, attr: int = 0):
+    """Safe addstr that doesn't crash on edge writes."""
+    try:
+        win.addstr(y, x, s, attr)
+    except curses.error:
+        pass
+
+
+def _kill_agent(config: dict, agent: AgentState):
+    """Send SIGTERM to an agent process."""
+    if agent.pid > 0:
+        try:
+            os.kill(agent.pid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            # Process already dead — clean up manually
+            if agent.claimed_issue > 0 and agent.pr_number == 0:
+                try:
+                    coordination(
+                        config, "skip", str(agent.claimed_issue),
+                        f"Agent killed by operator (session {agent.uuid})",
+                        env_extra={"LEAN_ZIP_SESSION_ID": agent.uuid},
+                    )
+                except Exception:
+                    pass
+            if agent.lock_held:
+                try:
+                    coordination(config, f"unlock-{agent.lock_held}")
+                except Exception:
+                    pass
+            if agent.worktree and agent.branch:
+                cleanup_worktree(agent.worktree, agent.branch)
+            agent.remove_file()
+
+
+# ---------------------------------------------------------------------------
+# CLI Commands
+# ---------------------------------------------------------------------------
+
+def cmd_list(config: dict, args):
+    """Show running agents."""
+    agents = read_all_agents()
+    pricing = cfg_get(config, "pricing", default={})
+
+    if not agents:
+        print("No agents running.")
+        return
+
+    alive = [a for a in agents if a.status != "dead"]
+    dead = [a for a in agents if a.status == "dead"]
+
+    # Clean up dead state files
+    for a in dead:
+        a.remove_file()
+
+    if not alive:
+        print("No agents running.")
+        return
+
+    fmt = "{:>2}  {:8}  {:12}  {:>6}  {:>15}  {}"
+    print(fmt.format("#", "ID", "Type", "Time", "Tokens", "Status"))
+    print("─" * 70)
+    for i, a in enumerate(alive):
+        mode = a.worker_type or "???"
+        if a.claimed_issue > 0:
+            if a.pr_number > 0:
+                mode = f"{mode} #{a.claimed_issue}->PR"
+            else:
+                mode = f"{mode} #{a.claimed_issue}"
+        if a.finishing:
+            mode += " (fin)"
+
+        elapsed = human_duration(time.time() - a.session_start) if a.session_start > 0 else ""
+        tok = token_summary(a, pricing)
+        activity = a.last_text or a.status
+
+        print(fmt.format(i + 1, a.short_id, mode[:12], elapsed, tok, activity[:40]))
+
+
+def cmd_add(config: dict, args):
+    """Launch new agents."""
+    n = args.count if args.count else 1
+    for _ in range(n):
+        pid = spawn_agent(config)
+        say(f"Launched agent (PID {pid})")
+    print(f"Launched {n} agent{'s' if n != 1 else ''}.")
+
+
+def cmd_finish(config: dict, args):
+    """Signal agent(s) to finish after current work."""
+    agents = read_all_agents()
+    alive = [a for a in agents if a.status not in ("stopped", "dead")]
+
+    if args.target == "all":
+        targets = alive
+    else:
+        targets = [a for a in alive if a.short_id.startswith(args.target)]
+        if not targets:
+            print(f"No running agent matching '{args.target}'")
+            return
+
+    for a in targets:
+        try:
+            os.kill(a.pid, signal.SIGUSR1)
+            print(f"Finish signal sent to {a.short_id} (PID {a.pid})")
+        except (ProcessLookupError, OSError):
+            print(f"Agent {a.short_id} not running (PID {a.pid})")
+
+
+def cmd_kill(config: dict, args):
+    """Kill agent(s) immediately."""
+    agents = read_all_agents()
+    alive = [a for a in agents if a.status not in ("stopped", "dead")]
+
+    if args.target == "all":
+        targets = alive
+    else:
+        targets = [a for a in alive if a.short_id.startswith(args.target)]
+        if not targets:
+            print(f"No running agent matching '{args.target}'")
+            return
+
+    for a in targets:
+        _kill_agent(config, a)
+        print(f"Killed {a.short_id} (PID {a.pid})")
+
+
+def cmd_status(config: dict, args):
+    """Show aggregate status."""
+    agents = read_all_agents()
+    alive = [a for a in agents if a.status not in ("stopped", "dead")]
+    pricing = cfg_get(config, "pricing", default={})
+
+    total_cost = sum(a.cost(pricing) for a in alive)
+    total_in = sum(a.tokens_in + a.cache_read + a.cache_create for a in alive)
+    total_out = sum(a.tokens_out for a in alive)
+
+    try:
+        queue = get_queue_depth(config)
+        print(f"Queue depth:    {queue}")
+    except Exception:
+        print("Queue depth:    (unavailable)")
+
+    print(f"Running agents: {len(alive)}")
+
+    types = {}
+    for a in alive:
+        t = a.worker_type or "unknown"
+        types[t] = types.get(t, 0) + 1
+    if types:
+        parts = [f"{v} {k}" for k, v in types.items()]
+        print(f"  Breakdown:    {', '.join(parts)}")
+
+    print(f"Total tokens:   {fmt_tokens(total_in)} in / {fmt_tokens(total_out)} out")
+    print(f"Total cost:     ${total_cost:.2f}")
+
+
+def cmd_log(config: dict, args):
+    """Tail agent's session stdout."""
+    agents = read_all_agents()
+    if args.target:
+        matches = [a for a in agents if a.short_id.startswith(args.target)]
+    else:
+        # Default to most recent agent
+        matches = sorted(agents, key=lambda a: a.session_start, reverse=True)[:1]
+
+    if not matches:
+        print("No matching agent found.")
+        return
+
+    agent = matches[0]
+    session_dir = PROJECT_DIR / cfg_get(config, "project", "session_dir", default="sessions")
+    stdout_path = session_dir / f"{agent.uuid}.stdout"
+    if not stdout_path.exists():
+        print(f"No log file for agent {agent.short_id}")
+        return
+
+    # Print last 50 lines
+    lines = stdout_path.read_text().splitlines()
+    for line in lines[-50:]:
+        print(line)
+
+
+def cmd_config(config: dict, args):
+    """Print current configuration."""
+    if args.edit:
+        editor = os.environ.get("EDITOR", "vi")
+        os.execlp(editor, editor, str(CONFIG_PATH))
+    else:
+        print(CONFIG_PATH.read_text(), end="")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="pod",
+        description="Multi-agent manager for lean-zip",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("list", help="Show running agents")
+
+    p_add = sub.add_parser("add", help="Launch new agents")
+    p_add.add_argument("count", type=int, nargs="?", default=1,
+                        help="Number of agents to launch (default: 1)")
+
+    p_finish = sub.add_parser("finish", help="Signal agent to finish current work")
+    p_finish.add_argument("target", help="Agent ID prefix or 'all'")
+
+    p_kill = sub.add_parser("kill", help="Kill agent immediately")
+    p_kill.add_argument("target", help="Agent ID prefix or 'all'")
+
+    sub.add_parser("status", help="Show aggregate status")
+
+    p_log = sub.add_parser("log", help="Tail agent session output")
+    p_log.add_argument("target", nargs="?", default=None,
+                        help="Agent ID prefix (default: most recent)")
+
+    p_config = sub.add_parser("config", help="Show configuration")
+    p_config.add_argument("--edit", action="store_true",
+                           help="Open config in $EDITOR")
+
+    args = parser.parse_args()
+    config = ensure_config()
+
+    if args.command is None:
+        # No subcommand → TUI
+        run_tui(config)
+    elif args.command == "list":
+        cmd_list(config, args)
+    elif args.command == "add":
+        cmd_add(config, args)
+    elif args.command == "finish":
+        cmd_finish(config, args)
+    elif args.command == "kill":
+        cmd_kill(config, args)
+    elif args.command == "status":
+        cmd_status(config, args)
+    elif args.command == "log":
+        cmd_log(config, args)
+    elif args.command == "config":
+        cmd_config(config, args)
+
+
+if __name__ == "__main__":
+    main()
