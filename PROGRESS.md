@@ -6,9 +6,9 @@ Per-session details are in `progress/`.
 ## Current State
 
 - **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
-- **Toolchain**: leanprover/lean4:v4.29.0-rc1
-- **Sorries**: 9 (in 3 compressor verification files)
-- **Sessions**: 69 completed (Feb 19–24)
+- **Toolchain**: leanprover/lean4:v4.29.0-rc2
+- **Sorries**: 11 (in 4 verification files — see Phase 4 details)
+- **Sessions**: ~90 completed (Feb 19–24)
 
 ## Milestones
 
@@ -35,11 +35,11 @@ DEFLATE bitstream specification), `decodeStored_correct`,
 `decodeHuffman_correct`, `decodeDynamicTrees_correct`.
 
 ### Phase 4: DEFLATE Compressor (in progress, started Feb 23)
-Native compression + roundtrip verification. ~36 sessions so far.
+Native compression + roundtrip verification. ~60 sessions so far.
 
 **Completed:**
-- Native Level 0 (stored) and Level 1 (fixed Huffman) compressors, all
-  conformance tests passing
+- Native Level 0 (stored), Level 1 (fixed Huffman), and Level 5 (dynamic
+  Huffman) compressors, all conformance tests passing
 - Native gzip/zlib compression wrappers (GzipEncode, ZlibEncode)
 - BitWriter with formal correctness proofs (writeBits, writeHuffCode)
 - Spec-level LZ77 greedy matcher with fundamental roundtrip theorem
@@ -49,40 +49,50 @@ Native compression + roundtrip verification. ~36 sessions so far.
 - Spec-level fixed Huffman encoder with Level 1 roundtrip
   (`deflateLevel1_spec_roundtrip`)
 - Stored-block encode/decode roundtrip (`encodeStored_decode`)
+- Native stored-block roundtrip (`inflate_deflateStoredPure`)
 - Native LZ77 correctness: `lz77Greedy_valid`, `lz77Greedy_encodable`,
   `lz77Greedy_size_le`
+- Native lazy LZ77 correctness: `lz77Lazy_valid`, `lz77Lazy_encodable`,
+  `lz77Lazy_resolvable`
 - Fuel independence for all spec decode functions
 - Huffman code length computation with Kraft equality for binary trees
 - Huffman symbol encoding functions with `encodeSymbols_decodeSymbols`
+- Canonical codes correctness: `canonicalCodes_correct_pos`
+- Dynamic tree header roundtrip: `encodeDynamicTrees_decodeDynamicTables`
+- Native `emitTokens` ↔ spec `encodeSymbols` correspondence:
+  `emitTokens_spec`, `emitTokensWithCodes_spec`
+- `inflate_complete` (spec decode success → native inflate success)
+- `readBits_complete` (BitReader completeness, spec → native direction)
 
-**Remaining sorries (9):**
+**Remaining sorries (11):**
 
-`DeflateFixedCorrect.lean` (5):
-- `emitTokens_spec` — native emitTokens ↔ spec encodeSymbols; blocked on
-  `canonicalCodes ↔ allCodes` correspondence
-- `deflateFixed_spec` — depends on emitTokens_spec
-- `inflate_complete` — reverse direction (spec success → native success);
-  identified as very hard
-- `inflate_deflateFixed` — main native roundtrip, depends on above
-- `inflate_deflateLazy` — lazy variant roundtrip, same proof strategy
+`BitstreamCorrect.lean` (2) — completeness direction (spec → native):
+- `readUInt16LE_complete` — spec readBitsLSB 16 → native readUInt16LE
+- `readBytes_complete` — spec readNBytes → native readBytes
 
-`DeflateStoredCorrect.lean` (3):
-- `fromLengths_fixedLit_ok` — Array.any is kernel-opaque
-- `fromLengths_fixedDist_ok` — same issue
-- `inflate_deflateStoredPure` — needs fromLengths proofs + multi-block
-  induction
+`DecodeCorrect.lean` (3) — completeness direction (spec → native):
+- `decodeStored_complete` — spec decodeStored → native decodeStored
+- `huffTree_decode_complete` — spec Huffman decode → native tree decode
+- `decodeHuffman_complete` — spec decodeSymbols → native decodeHuffman.go
 
-`DeflateEncodeDynamic.lean` (1):
-- `encodeDynamicTrees_decodeDynamicTables` — dynamic tree header roundtrip
+`InflateCorrect.lean` (2) — completeness direction (spec → native):
+- `decodeDynamicTrees_complete` — spec decodeDynamicTables → native
+- `inflateLoop_complete` — spec decode.go → native inflateLoop
 
-**Key remaining gap**: `canonicalCodes ↔ allCodes` correspondence is the
-critical bridge between native and spec Huffman encoding. Both use the
-same `countLengths`/`nextCodes` building blocks but different iteration
-patterns.
+`DeflateFixedCorrect.lean` (4) — compressor roundtrips:
+- `deflateFixed_spec` — native fixed compressor ↔ spec encodeFixed
+- `inflate_deflateFixed` — Level 1 roundtrip, depends on completeness lemmas
+- `inflate_deflateLazy` — Level 2 roundtrip, same strategy
+- `inflate_deflateDynamic` — Level 5 roundtrip, needs dynamic header + completeness
+
+**Key remaining gap**: The 7 completeness sorries (BitstreamCorrect,
+DecodeCorrect, InflateCorrect) form the reverse direction of existing
+soundness proofs. Once these are proved, the 4 compressor roundtrip
+theorems in DeflateFixedCorrect follow by composition.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- 69 sessions: ~40 implementation, ~22 review, ~1 self-improvement,
-  ~6 PR maintenance
+- ~90 sessions: majority implementation, ~25 review, ~1 self-improvement,
+  remainder PR maintenance
