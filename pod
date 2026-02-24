@@ -1339,31 +1339,38 @@ def _git_rev(wt_dir: str) -> str:
 
 def spawn_agent(config: dict, agent_id: str | None = None,
                 resume_uuid: str | None = None) -> int:
-    """Fork a new agent process. Returns PID of the child."""
-    # Auto-reap children so they don't become zombies
-    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    """Fork a new agent process. Returns PID of the intermediate child.
+
+    Uses double-fork so the agent is orphaned (adopted by init) and never
+    becomes a zombie — without touching SIGCHLD in the calling process.
+    Corrupting SIGCHLD in an agent process that calls spawn_agent (via
+    check_dead_claimed_issues) would break git's internal waitpid and cause
+    silent failures in git worktree add.
+    """
     pid = os.fork()
-    if pid == 0:
-        # Child process — restore SIGCHLD so subprocess.Popen.wait() works
-        signal.signal(signal.SIGCHLD, signal.SIG_DFL)
-        try:
-            # Detach from terminal
-            os.setsid()
-            # Redirect stdin/stdout/stderr to /dev/null so we don't
-            # interfere with the parent's TUI or terminal
-            devnull_r = os.open(os.devnull, os.O_RDONLY)
-            devnull_w = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull_r, 0)
-            os.dup2(devnull_w, 1)
-            os.dup2(devnull_w, 2)
-            os.close(devnull_r)
-            os.close(devnull_w)
-            agent_process_main(config, agent_id, resume_uuid)
-        except Exception as e:
-            log(f"Agent process crashed: {e}")
-        finally:
-            os._exit(0)
-    return pid
+    if pid > 0:
+        # Parent: wait for the short-lived intermediate child (exits immediately)
+        os.waitpid(pid, 0)
+        return pid
+    # Intermediate child: fork the actual agent, then exit immediately so
+    # the agent is adopted by init (no zombie, no SIGCHLD games needed).
+    if os.fork() > 0:
+        os._exit(0)
+    # Grandchild: the actual agent process, adopted by init upon exit.
+    try:
+        os.setsid()
+        devnull_r = os.open(os.devnull, os.O_RDONLY)
+        devnull_w = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_r, 0)
+        os.dup2(devnull_w, 1)
+        os.dup2(devnull_w, 2)
+        os.close(devnull_r)
+        os.close(devnull_w)
+        agent_process_main(config, agent_id, resume_uuid)
+    except Exception as e:
+        log(f"Agent process crashed: {e}")
+    finally:
+        os._exit(0)
 
 
 # ---------------------------------------------------------------------------
