@@ -258,6 +258,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/DeflateEncodeDynamicProps.lean — Dynamic block header correspondence proofs
     Zip/Spec/LZ77Lazy.lean      — LZ77→encode bridge proofs + lazy matcher properties
     Zip/Spec/BitstreamCorrect.lean — BitReader ↔ bytesToBits correspondence (read direction)
+    Zip/Spec/BitstreamComplete.lean — BitReader ↔ bytesToBits completeness (reverse direction)
     Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
     Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence

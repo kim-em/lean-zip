@@ -20,6 +20,7 @@ import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.DeflateEncodeDynamicProps
 import Zip.Spec.LZ77Lazy
 import Zip.Spec.BitstreamCorrect
+import Zip.Spec.BitstreamComplete
 import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.HuffmanCorrect
