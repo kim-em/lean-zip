@@ -382,6 +382,16 @@ private theorem take_append_copied_eq_take
     simp at hmatch
     exact hmatch.symm
 
+/-- When `findLongestMatch` succeeds, the match doesn't extend past the data. -/
+theorem findLongestMatch_end_le (data : List UInt8)
+    (pos windowSize len dist : Nat)
+    (hfind : findLongestMatch data pos windowSize = some (len, dist)) :
+    pos + len ≤ data.length := by
+  have hlen_ge := findLongestMatch_len_ge _ _ _ _ _ hfind
+  have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
+  have hlen_in := matchLength_in_bounds data pos dist 258 len hml
+  have := hlen_in ⟨len - 1, by omega⟩; simp at this; omega
+
 /-- Inner correctness lemma for `matchLZ77.go`: resolving the symbols
     produced from position `pos` with accumulator `data.take pos` gives
     back the original data. -/
@@ -399,6 +409,11 @@ private theorem matchLZ77.go_correct (data : List UInt8) (pos windowSize : Nat)
     have lit_step : data.take pos ++ [data[pos]!] = data.take (pos + 1) := by
       rw [getElem!_pos data pos hlt]
       exact (List.take_succ_eq_append_getElem hlt).symm
+    -- Literal fallback: shared by `none` and `some (len, dist)` with `len < 3`
+    have lit_ih : resolveLZ77 (.literal data[pos]! :: matchLZ77.go data (pos + 1) windowSize)
+        (data.take pos) = some data := by
+      simp only [resolveLZ77]; rw [lit_step]
+      exact matchLZ77.go_correct data (pos + 1) windowSize hw (by omega)
     split
     · rename_i len dist hfind
       split
@@ -406,11 +421,7 @@ private theorem matchLZ77.go_correct (data : List UInt8) (pos windowSize : Nat)
         simp only [resolveLZ77]
         have ⟨hdist_pos, hdist_le⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind
         have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
-        have hlen_in := matchLength_in_bounds data pos dist 258 len hml
-        have hlen_le : pos + len ≤ data.length := by
-          by_cases hlen0 : len = 0
-          · omega
-          · have := hlen_in ⟨len - 1, by omega⟩; simp at this; omega
+        have hlen_le := findLongestMatch_end_le _ _ _ _ _ hfind
         have hdneq : dist ≠ 0 := by omega
         rw [show (dist == 0 || decide (List.length (List.take pos data) < dist)) = false
           from by simp [hdneq, Nat.min_eq_left hpos]; omega]
@@ -421,12 +432,8 @@ private theorem matchLZ77.go_correct (data : List UInt8) (pos windowSize : Nat)
           from by simp [Nat.min_eq_left hpos]]
         rw [hcopy]
         exact matchLZ77.go_correct data (pos + len) windowSize hw hlen_le
-      · simp only [resolveLZ77]
-        rw [lit_step]
-        exact matchLZ77.go_correct data (pos + 1) windowSize hw (by omega)
-    · simp only [resolveLZ77]
-      rw [lit_step]
-      exact matchLZ77.go_correct data (pos + 1) windowSize hw (by omega)
+      · exact lit_ih
+    · exact lit_ih
 termination_by data.length - pos
 
 /-- The greedy LZ77 matcher is correct: resolving the produced symbols
@@ -438,16 +445,6 @@ theorem resolveLZ77_matchLZ77 (data : List UInt8)
   exact matchLZ77.go_correct data 0 windowSize hw (by omega)
 
 /-! ## Helper lemmas for back-reference resolution -/
-
-/-- When `findLongestMatch` succeeds, the match doesn't extend past the data. -/
-theorem findLongestMatch_end_le (data : List UInt8)
-    (pos windowSize len dist : Nat)
-    (hfind : findLongestMatch data pos windowSize = some (len, dist)) :
-    pos + len ≤ data.length := by
-  have hlen_ge := findLongestMatch_len_ge _ _ _ _ _ hfind
-  have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
-  have hlen_in := matchLength_in_bounds data pos dist 258 len hml
-  have := hlen_in ⟨len - 1, by omega⟩; simp at this; omega
 
 /-- Resolving a back-reference from a `findLongestMatch` result advances
     the accumulator from `data.take pos` to `data.take (pos + len)`. -/

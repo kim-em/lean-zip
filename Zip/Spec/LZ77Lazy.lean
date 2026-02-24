@@ -2,9 +2,9 @@ import Zip.Spec.DeflateEncodeProps
 import Zip.Spec.LZ77
 
 /-!
-# LZ77→Encode Bridge and Lazy LZ77 Matcher
+# LZ77→Encode Bridge Proofs
 
-Proofs connecting LZ77 matchers to DEFLATE encoding:
+Proofs connecting LZ77 matchers (defined in `LZ77.lean`) to DEFLATE encoding:
 - `matchLZ77_encodable`: greedy matcher symbols are encodable with fixed Huffman
 - `matchLZ77_validSymbolList`, `matchLZ77_length_le`: structural properties
 - `deflateLevel1_spec_roundtrip`: Level 1 (greedy) encode/decode roundtrip
@@ -13,6 +13,21 @@ Proofs connecting LZ77 matchers to DEFLATE encoding:
 -/
 
 namespace Deflate.Spec
+
+/-- Any `findLongestMatch` result is encodable with fixed Huffman tables,
+    provided `windowSize ≤ 32768`. -/
+private theorem findLongestMatch_reference_encodable (data : List UInt8)
+    (pos windowSize len dist : Nat) (hws : windowSize ≤ 32768)
+    (hfind : findLongestMatch data pos windowSize = some (len, dist)) :
+    (encodeLitLen fixedLitLengths fixedDistLengths
+      (.reference len dist)).isSome = true := by
+  have ⟨hdist_pos, _⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind
+  have hdist_ws := findLongestMatch_dist_le_windowSize _ _ _ _ _ hfind
+  have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
+  exact encodeLitLen_reference_isSome len dist
+    (findLongestMatch_len_ge _ _ _ _ _ hfind)
+    (by rw [← hml]; exact matchLength_le_258 data _ _)
+    (by omega) (by omega)
 
 /-! ## matchLZ77 encodability -/
 
@@ -35,19 +50,12 @@ private theorem matchLZ77.go_encodable (data : List UInt8) (pos windowSize : Nat
       rename_i len dist hfind
       split
       · -- len ≥ 3 → .reference :: go ...
-        rename_i hlen3
         intro s hs
         simp only [List.mem_cons] at hs
         cases hs with
         | inl heq =>
           subst heq
-          have ⟨hdist_pos, _⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind
-          have hdist_ws := findLongestMatch_dist_le_windowSize _ _ _ _ _ hfind
-          have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
-          have hlen_le := matchLength_le_258 data pos dist
-          have hlen_ge := findLongestMatch_len_ge _ _ _ _ _ hfind
-          exact encodeLitLen_reference_isSome len dist
-            (by omega) (by rw [← hml]; exact hlen_le) (by omega) (by omega)
+          exact findLongestMatch_reference_encodable data pos windowSize len dist hws hfind
         | inr hmem =>
           exact matchLZ77.go_encodable data _ windowSize hws s hmem
       · -- ¬(len ≥ 3) → literal
@@ -266,16 +274,8 @@ private theorem matchLZ77Lazy.go_encodable (data : List UInt8) (pos windowSize :
         | inl heq => subst heq; exact encodeLitLen_literal_isSome _
         | inr hmem => exact matchLZ77Lazy.go_encodable data _ windowSize hws s hmem
       · -- len1 ≥ 3
-        -- Factor out: reference M1 is always encodable
-        have henc_m1 : (encodeLitLen fixedLitLengths fixedDistLengths
-            (.reference len1 dist1)).isSome = true := by
-          have ⟨hdist1_pos, _⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind1
-          have hdist1_ws := findLongestMatch_dist_le_windowSize _ _ _ _ _ hfind1
-          have hml1 := findLongestMatch_matchLength _ _ _ _ _ hfind1
-          exact encodeLitLen_reference_isSome len1 dist1
-            (findLongestMatch_len_ge _ _ _ _ _ hfind1)
-            (by rw [← hml1]; exact matchLength_le_258 data _ _)
-            (by omega) (by omega)
+        have henc_m1 := findLongestMatch_reference_encodable data pos windowSize
+          len1 dist1 hws hfind1
         split
         · -- pos + 1 < data.length
           split
@@ -290,13 +290,8 @@ private theorem matchLZ77Lazy.go_encodable (data : List UInt8) (pos windowSize :
                 cases hmem with
                 | inl heq =>
                   subst heq
-                  have ⟨hdist2_pos, _⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind2
-                  have hdist2_ws := findLongestMatch_dist_le_windowSize _ _ _ _ _ hfind2
-                  have hml2 := findLongestMatch_matchLength _ _ _ _ _ hfind2
-                  exact encodeLitLen_reference_isSome len2 dist2
-                    (findLongestMatch_len_ge _ _ _ _ _ hfind2)
-                    (by rw [← hml2]; exact matchLength_le_258 data _ _)
-                    (by omega) (by omega)
+                  exact findLongestMatch_reference_encodable data (pos + 1) windowSize
+                    len2 dist2 hws hfind2
                 | inr hmem => exact matchLZ77Lazy.go_encodable data _ windowSize hws s hmem
             · -- len2 ≤ len1 → reference :: go ...
               intro s hs; simp only [List.mem_cons] at hs
