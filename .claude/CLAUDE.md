@@ -246,7 +246,8 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/Adler32.lean    — Adler-32 specification (RFC 1950)
     Zip/Spec/Crc32.lean      — CRC-32 specification (ISO 3309)
     Zip/Spec/Huffman.lean    — Canonical Huffman code definitions (types, construction, decode)
-    Zip/Spec/HuffmanTheorems.lean — Huffman property theorems (Kraft, prefix-free, injectivity)
+    Zip/Spec/HuffmanKraft.lean    — Kraft inequality analysis (ncRec, kraftSumFrom, conservation)
+    Zip/Spec/HuffmanTheorems.lean — Huffman property theorems (prefix-free, injectivity, decode)
     Zip/Spec/HuffmanEncode.lean  — Huffman code length computation from symbol frequencies
     Zip/Spec/HuffmanEncodeCorrect.lean — Canonical codes encode correctness (native ↔ spec bridge)
     Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof

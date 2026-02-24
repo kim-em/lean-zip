@@ -18,7 +18,8 @@ The key correctness property is that the computed lengths satisfy
 a valid prefix-free code.
 
 Definitions and types for the canonical code construction (from given lengths)
-are in `Zip.Spec.Huffman`. Property theorems are in `Zip.Spec.HuffmanTheorems`.
+are in `Zip.Spec.Huffman`. Kraft inequality analysis is in `Zip.Spec.HuffmanKraft`.
+Property theorems are in `Zip.Spec.HuffmanTheorems`.
 -/
 
 namespace Huffman.Spec
