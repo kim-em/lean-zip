@@ -445,21 +445,38 @@ def fetch_issues_and_prs() -> list[GHItem]:
     items: list[GHItem] = []
     cwd = str(PROJECT_DIR)
 
-    # Open issues with agent-plan label
+    issue_json = "--json=number,title,labels,state,createdAt,updatedAt,closedAt"
+    # All open issues (there should never be thousands of open ones)
     try:
         r = subprocess.run(
-            ["gh", "issue", "list", "--label", "agent-plan", "--state", "all",
-             "--limit", "200", "--json", "number,title,labels,state,createdAt,updatedAt,closedAt"],
+            ["gh", "issue", "list", "--label", "agent-plan", "--state", "open",
+             "--limit", "500", issue_json],
             capture_output=True, text=True, timeout=30, cwd=cwd,
         )
         if r.returncode == 0:
             for iss in json.loads(r.stdout):
                 labels = [l["name"] for l in iss.get("labels", [])]
-                state = iss.get("state", "OPEN").lower()
-                ts = iss.get("closedAt") or "" if state == "closed" else iss.get("updatedAt") or iss.get("createdAt", "")
+                ts = iss.get("updatedAt") or iss.get("createdAt", "")
                 items.append(GHItem(
                     kind="issue", number=iss["number"], title=iss["title"],
-                    labels=labels, ci_status="", state=state, timestamp=ts,
+                    labels=labels, ci_status="", state="open", timestamp=ts,
+                ))
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        pass
+    # Recent closed issues (just enough for context; display logic drops these first anyway)
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--label", "agent-plan", "--state", "closed",
+             "--limit", "30", issue_json],
+            capture_output=True, text=True, timeout=30, cwd=cwd,
+        )
+        if r.returncode == 0:
+            for iss in json.loads(r.stdout):
+                labels = [l["name"] for l in iss.get("labels", [])]
+                ts = iss.get("closedAt") or iss.get("updatedAt") or iss.get("createdAt", "")
+                items.append(GHItem(
+                    kind="issue", number=iss["number"], title=iss["title"],
+                    labels=labels, ci_status="", state="closed", timestamp=ts,
                 ))
     except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
         pass
