@@ -5,4 +5,4 @@
 /.direnv
 /sessions
 /worktrees
-/agent-loop.log
+__pycache__/

@@ -81,7 +81,7 @@ same `countLengths`/`nextCodes` building blocks but different iteration
 patterns.
 
 ### Infrastructure
-- Multi-agent coordination via `./go` with worktree-per-session isolation
+- Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
 - 69 sessions: ~40 implementation, ~22 review, ~1 self-improvement,

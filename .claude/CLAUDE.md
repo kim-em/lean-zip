@@ -28,11 +28,11 @@ with `libz-dev` and `libzstd-dev`), no nix-shell wrapper is needed.
 
 ## Autonomous Work Cycle
 
-Agents are launched by `./go`, which assigns each session a mode:
-**planner** (`/plan`) or **worker** (`/work`). The mode is determined
-by queue depth — if fewer than 3 unclaimed work items exist, the session
-is a planner; otherwise a worker. (We may later move this decision into
-the Claude session itself if more context-aware dispatch proves valuable.)
+Agents are launched by `pod` (a Python TUI/CLI in the repo root), which
+manages multiple concurrent agents. Each agent is an independent background
+process. The dispatch strategy (configurable in `.pod/config.toml`)
+assigns each session a worker type — by default **planner** (`/plan`)
+or **worker** (`/work`), determined by queue depth.
 
 **Planners** create one well-scoped work item as a GitHub issue, then
 exit. They do the expensive orientation work (reading progress history,
@@ -46,7 +46,7 @@ files they'll modify) but skip historical orientation.
 Each agent runs in its own git worktree on its own branch, coordinating
 via GitHub issues, labels, and PRs.
 
-**Non-interactive sessions**: These sessions run via `./go` with
+**Non-interactive sessions**: These sessions run via `pod` with
 `claude -p` — there is no human to answer questions. Never ask for
 confirmation, approval, or "should I apply this?" — just do it. If you
 propose a `./.claude/CLAUDE.md` change for the current project, apply it.
@@ -174,7 +174,7 @@ than reviewing everything at once.
 ## Coordination Reference
 
 The `coordination` script handles all GitHub-based multi-agent coordination.
-Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
+Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 
 | Command | What it does |
 |---------|-------------|
@@ -184,7 +184,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
 | `coordination list-unclaimed` | List unclaimed agent-plan issues (FIFO order) |
-| `coordination queue-depth` | Count of unclaimed issues (used by `./go` for dispatch) |
+| `coordination queue-depth` | Count of unclaimed issues (used by `pod` for dispatch) |
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
 | `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
 | `coordination check-blocked` | Unblock issues whose `depends-on` dependencies are all closed |
@@ -204,7 +204,7 @@ a link to the new one. This preserves full history.
 
 **Dependencies**: Issues can declare `depends-on: #N` in their body.
 `coordination plan` auto-adds the `blocked` label if any dependency is
-open. `check-blocked` (run by `./go` each loop) removes `blocked` when
+open. `check-blocked` (run by `pod` each loop) removes `blocked` when
 all dependencies close. Blocked issues are excluded from
 `list-unclaimed` and `queue-depth`. Use this to split "write theorem
 statements" from "prove theorems" — downstream work can reference the

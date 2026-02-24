@@ -435,7 +435,7 @@ def _tool_detail(name: str, inp: dict, state: AgentState) -> str:
 def dispatch_queue_balance(config: dict, queue_depth: int,
                            worker_types: dict,
                            state: AgentState | None = None) -> str | None:
-    """Current ./go logic: low queue → locked types, high queue → unlocked types."""
+    """Low queue → locked types (queue-filling), high queue → unlocked types (queue-draining)."""
     min_queue = cfg_get(config, "dispatch", "min_queue", default=3)
 
     # Separate types into queue-filling (have locks) and queue-draining (no locks)

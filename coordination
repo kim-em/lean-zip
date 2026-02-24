@@ -2,7 +2,7 @@
 # coordination — multi-agent coordination for lean-zip
 #
 # All subcommands use `gh` CLI. Reads session UUID from $LEAN_ZIP_SESSION_ID
-# (exported by ./go). Reads branch from git.
+# (exported by pod). Reads branch from git.
 #
 # Usage:
 #   coordination orient           — list open plans (claimed/unclaimed), PRs, issues needing attention

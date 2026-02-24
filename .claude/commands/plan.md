@@ -158,5 +158,5 @@ coordination plan "title" < plans/<UUID-prefix>-N.md
 
 Then exit. Do NOT execute any code changes.
 
-**Note**: The planner lock is managed by `./go` — do NOT call
+**Note**: The planner lock is managed by `pod` — do NOT call
 `coordination lock-planner` or `coordination unlock-planner` yourself.
