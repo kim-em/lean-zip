@@ -250,10 +250,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
             have h16_false : (sym.toUInt16 == 16) = false := by
               cases h : sym.toUInt16 == 16
               · rfl
-              · exfalso; rw [beq_iff_eq] at h
-                have := congrArg UInt16.toNat h
-                rw [hsym_toNat] at this
-                exact absurd (beq_iff_eq.mpr (by simpa using this)) hsym_ne16
+              · exact absurd (beq_iff_eq.mpr (by rw [beq_iff_eq] at h; simpa [hsym_toNat] using congrArg UInt16.toNat h)) hsym_ne16
             split at hspec
             · -- sym == 17: zero fill short
               rename_i hsym17
@@ -308,10 +305,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
               have h17_false : (sym.toUInt16 == 17) = false := by
                 cases h : sym.toUInt16 == 17
                 · rfl
-                · exfalso; rw [beq_iff_eq] at h
-                  have := congrArg UInt16.toNat h
-                  rw [hsym_toNat] at this
-                  exact absurd (beq_iff_eq.mpr (by simpa using this)) hsym_ne17
+                · exact absurd (beq_iff_eq.mpr (by rw [beq_iff_eq] at h; simpa [hsym_toNat] using congrArg UInt16.toNat h)) hsym_ne17
               split at hspec
               · -- sym == 18: zero fill long
                 rename_i hsym18
