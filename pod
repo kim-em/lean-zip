@@ -385,14 +385,14 @@ def fetch_issues_and_prs() -> list[GHItem]:
     try:
         r = subprocess.run(
             ["gh", "issue", "list", "--label", "agent-plan", "--state", "all",
-             "--limit", "20", "--json", "number,title,labels,state,createdAt,closedAt"],
+             "--limit", "20", "--json", "number,title,labels,state,createdAt,updatedAt,closedAt"],
             capture_output=True, text=True, timeout=30, cwd=cwd,
         )
         if r.returncode == 0:
             for iss in json.loads(r.stdout):
                 labels = [l["name"] for l in iss.get("labels", [])]
                 state = iss.get("state", "OPEN").lower()
-                ts = iss.get("closedAt") or "" if state == "closed" else iss.get("createdAt", "")
+                ts = iss.get("closedAt") or "" if state == "closed" else iss.get("updatedAt") or iss.get("createdAt", "")
                 items.append(GHItem(
                     kind="issue", number=iss["number"], title=iss["title"],
                     labels=labels, ci_status="", state=state, timestamp=ts,
@@ -404,7 +404,7 @@ def fetch_issues_and_prs() -> list[GHItem]:
     try:
         r = subprocess.run(
             ["gh", "pr", "list", "--state", "all", "--limit", "15",
-             "--json", "number,title,labels,statusCheckRollup,state,createdAt,closedAt,mergedAt"],
+             "--json", "number,title,labels,statusCheckRollup,state,createdAt,updatedAt,closedAt,mergedAt"],
             capture_output=True, text=True, timeout=30, cwd=cwd,
         )
         if r.returncode == 0:
@@ -420,7 +420,7 @@ def fetch_issues_and_prs() -> list[GHItem]:
                           all(c.get("conclusion") == "SUCCESS" for c in checks if c.get("conclusion"))):
                         ci = "pass"
                 pr_state = pr.get("state", "OPEN").lower()
-                ts = pr.get("mergedAt") or pr.get("closedAt") or "" if pr_state in ("merged", "closed") else pr.get("createdAt", "")
+                ts = pr.get("mergedAt") or pr.get("closedAt") or "" if pr_state in ("merged", "closed") else pr.get("updatedAt") or pr.get("createdAt", "")
                 items.append(GHItem(
                     kind="pr", number=pr["number"], title=pr["title"],
                     labels=labels, ci_status=ci, state=pr_state, timestamp=ts,
@@ -1213,7 +1213,8 @@ def _tui_main(stdscr, config: dict):
 
             items_start_row = agents_end + 1  # skip 1 blank line
             _addstr(stdscr, items_start_row, 0, "─" * min(width, 80), curses.color_pair(4))
-            item_hdr = "   #      State     When      Title"
+            item_fmt = "  {:<6} {:<10} {:<8}  {}"
+            item_hdr = " " + item_fmt.format("#", "State", "When", "Title")
             _addstr(stdscr, items_start_row + 1, 0, item_hdr[:width], curses.A_DIM)
 
             for j, item in enumerate(items_to_show):
@@ -1250,14 +1251,15 @@ def _tui_main(stdscr, config: dict):
 
                 title = item.title
                 # Truncate title to fit
-                prefix_len = 32
+                prefix_len = 31
                 max_title = width - prefix_len - 1
                 if max_title > 10 and len(title) > max_title:
                     title = title[:max_title - 3] + "..."
 
                 is_item_sel = not is_agent_selected and j == selected_idx
                 marker = ">" if is_item_sel else " "
-                line = f"{marker}  #{item.number:<5} {state_display:<10} {age:<8}  {title}"
+                num_str = f"#{item.number}"
+                line = marker + item_fmt.format(num_str, state_display, age, title)
 
                 attr = state_color
                 if is_item_sel:
