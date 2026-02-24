@@ -841,4 +841,89 @@ theorem readBitsLSB_append (n : Nat) (bits suffix : List Bool)
         rw [ih bs v rem hk]
         simp
 
+/-- Prefix-free condition for a swapped `allCodes` table. -/
+private theorem allCodes_swapped_prefix_free (lengths : List Nat) (maxBits : Nat)
+    (hv : Huffman.Spec.ValidLengths lengths maxBits) :
+    ∀ cw₁ s₁ cw₂ s₂,
+      (cw₁, s₁) ∈ (Huffman.Spec.allCodes lengths maxBits).map (fun (sym, cw) => (cw, sym)) →
+      (cw₂, s₂) ∈ (Huffman.Spec.allCodes lengths maxBits).map (fun (sym, cw) => (cw, sym)) →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂ := by
+  intro cw₁ s₁ cw₂ s₂ h₁ h₂ hne
+  simp only [List.mem_map, Prod.mk.injEq] at h₁ h₂
+  obtain ⟨⟨sym₁, cw₁'⟩, hmem₁, rfl, rfl⟩ := h₁
+  obtain ⟨⟨sym₂, cw₂'⟩, hmem₂, rfl, rfl⟩ := h₂
+  have hne_sym : sym₁ ≠ sym₂ := by
+    intro heq; subst heq
+    have hnd := Huffman.Spec.allCodes_nodup lengths maxBits
+    have h₁' := hmem₁; have h₂' := hmem₂
+    rw [Huffman.Spec.allCodes_mem_iff] at h₁' h₂'
+    have := Option.some.inj (h₁'.2.symm.trans h₂'.2)
+    exact hne (by subst this; rfl)
+  exact Huffman.Spec.allCodes_prefix_free_of_ne lengths maxBits hv sym₁ sym₂ _ _ hmem₁ hmem₂ hne_sym
+
+set_option maxRecDepth 2048 in
+set_option linter.unusedSimpArgs false in
+/-- `decodeLitLen` is suffix-invariant. -/
+theorem decodeLitLen_append (litLengths distLengths : List Nat)
+    (bits suffix : List Bool) (sym : LZ77Symbol) (rest : List Bool)
+    (hvl : Huffman.Spec.ValidLengths litLengths 15)
+    (hvd : Huffman.Spec.ValidLengths distLengths 15)
+    (h : decodeLitLen litLengths distLengths bits = some (sym, rest)) :
+    decodeLitLen litLengths distLengths (bits ++ suffix) = some (sym, rest ++ suffix) := by
+  simp only [decodeLitLen] at h ⊢
+  -- Thread through the Huffman lit decode
+  cases hld : Huffman.Spec.decode ((Huffman.Spec.allCodes litLengths).map fun (sym, cw) => (cw, sym)) bits with
+  | none => simp [hld] at h
+  | some p =>
+    obtain ⟨litSym, bits₁⟩ := p
+    simp only [hld, bind, Option.bind] at h ⊢
+    rw [Huffman.Spec.decode_suffix _ bits suffix litSym bits₁ hld
+        (allCodes_swapped_prefix_free litLengths 15 hvl)]
+    simp only [Option.bind] at h ⊢  -- needed: linter false positive
+    by_cases hlit : litSym < 256
+    · rw [if_pos hlit] at h ⊢
+      obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+    · rw [if_neg hlit] at h ⊢
+      by_cases heob : (litSym == 256) = true
+      · rw [if_pos heob] at h ⊢
+        obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+      · rw [if_neg heob] at h ⊢
+        -- length/distance code — thread through do-notation
+        cases hlb : lengthBase[litSym - 257]? with
+        | none => simp [hlb] at h
+        | some base =>
+          simp only [hlb] at h ⊢
+          cases hle : lengthExtra[litSym - 257]? with
+          | none => simp [hle] at h
+          | some extra =>
+            simp only [hle] at h ⊢
+            cases hrb : readBitsLSB extra bits₁ with
+            | none => simp [hrb] at h
+            | some q =>
+              obtain ⟨extraVal, bits₂⟩ := q
+              simp only [hrb] at h ⊢
+              rw [readBitsLSB_append extra bits₁ suffix extraVal bits₂ hrb]
+              cases hdd : Huffman.Spec.decode ((Huffman.Spec.allCodes distLengths).map fun (s, cw) => (cw, s)) bits₂ with
+              | none => simp [hdd] at h
+              | some r =>
+                obtain ⟨dSym, bits₃⟩ := r
+                simp only [hdd] at h ⊢
+                rw [Huffman.Spec.decode_suffix _ bits₂ suffix dSym bits₃ hdd
+                    (allCodes_swapped_prefix_free distLengths 15 hvd)]
+                cases hdb : distBase[dSym]? with
+                | none => simp [hdb] at h
+                | some dBase =>
+                  simp only [hdb] at h ⊢
+                  cases hde : distExtra[dSym]? with
+                  | none => simp [hde] at h
+                  | some dExtra =>
+                    simp only [hde] at h ⊢
+                    cases hrbd : readBitsLSB dExtra bits₃ with
+                    | none => simp [hrbd] at h
+                    | some s =>
+                      obtain ⟨dExtraVal, bits₄⟩ := s
+                      simp only [hrbd] at h ⊢
+                      rw [readBitsLSB_append dExtra bits₃ suffix dExtraVal bits₄ hrbd]
+                      obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+
 end Deflate.Spec
