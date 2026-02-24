@@ -155,6 +155,15 @@ over time. Focus areas:
   `xs[i]` when the information to prove the bound is already in scope.
   Remember that in `if` and `for` you need `h :` syntax to capture the
   relevant hypothesis (e.g. `if h : i < xs.size then xs[i] ...`).
+  **Constraints on `[i]!` → `[i]` conversion**:
+  (a) `do` block guards (`if cond then throw`) do NOT produce hypotheses
+  for the continuation — `omega` can't see that the guard was passed.
+  Only pure `if h : ...` / `else` outside do-notation captures bounds.
+  (b) Functions that proofs `unfold` are load-bearing — changing `[i]!`
+  to `[i]` changes the desugared term and breaks downstream proofs.
+  Only convert in functions with NO proof references in Spec/.
+  (c) `List.enum` does not exist in this toolchain. `List.zipIdx`
+  exists but produces `(value, index)` not `(index, value)`.
 - **Toolchain**: check if a newer stable Lean release is available; if so,
   upgrade `lean-toolchain`, fix breakage, and revert if tests can't be
   made to pass. Only attempt toolchain upgrades when all tests pass first
