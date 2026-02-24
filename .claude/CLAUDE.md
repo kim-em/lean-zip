@@ -293,6 +293,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/DeflateRoundtrip.lean — Unified DEFLATE roundtrip (Phase 4 capstone)
     Zip/Spec/BinaryCorrect.lean — Binary LE read/write roundtrip proofs
     Zip/Spec/GzipCorrect.lean  — Gzip framing: pure decoder + format lemma + roundtrip statement
+    Zip/Spec/ZlibCorrect.lean  — Zlib framing: pure decoder + format lemmas + roundtrip statement
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
