@@ -663,6 +663,110 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
               · -- sym ∉ {16,17,18}: throw, contradicts .ok
                 simp at h
 
+/-! ## Completeness helpers -/
+
+/-- `readCLCodeLengths` completeness: if the spec's `readCLLengths` succeeds,
+    then the native `readCLCodeLengths` also succeeds with corresponding results. -/
+private theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
+    (clLengths : Array UInt8) (i numCodeLen : Nat)
+    (clLengths' : List Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hsize : clLengths.size = 19)
+    (hspec : Deflate.Spec.readCLLengths (numCodeLen - i) i
+        (clLengths.toList.map UInt8.toNat) br.toBits =
+        some (clLengths', rest)) :
+    ∃ br' clArr,
+      Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
+        .ok (clArr, br') ∧
+      clArr.toList.map UInt8.toNat = clLengths' ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  induction hd : numCodeLen - i generalizing br clLengths i with
+  | zero =>
+    -- i ≥ numCodeLen, both sides return immediately
+    unfold Deflate.Spec.readCLLengths at hspec
+    unfold Deflate.Spec.readCLLengths at hspec
+    have hge : ¬(i < numCodeLen) := by omega
+    have : numCodeLen - i = 0 := by omega
+    rw [this] at hspec
+    simp only at hspec
+    obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hspec)
+    refine ⟨br, clLengths, ?_, rfl, rfl, hwf, hpos⟩
+    unfold Zip.Native.Inflate.readCLCodeLengths
+    simp [hge]
+  | succ n ih =>
+    have hi : i < numCodeLen := by omega
+    -- Unfold spec
+    have hd_succ : numCodeLen - i = n + 1 := hd
+    conv at hspec => rw [hd_succ]; unfold Deflate.Spec.readCLLengths
+    simp only [bind, Option.bind] at hspec
+    -- Spec reads 3 bits
+    cases hrb_spec : Deflate.Spec.readBitsLSB 3 br.toBits with
+    | none => simp [hrb_spec] at hspec
+    | some p =>
+      obtain ⟨val, bits₁⟩ := p
+      simp only [hrb_spec] at hspec
+      -- Apply readBits_complete to get native readBits success
+      have hval_bound := Deflate.Spec.readBitsLSB_bound hrb_spec
+      have ⟨br₁, hrb_nat, hrest₁, hwf₁, hpos₁⟩ :=
+        readBits_complete br 3 val bits₁ hwf hpos (by omega) hval_bound hrb_spec
+      -- The spec updates via List.set, native updates via Array.set!
+      -- Need to show the accumulator correspondence is preserved
+      have h_acc :
+          (List.map UInt8.toNat clLengths.toList).set (Deflate.Spec.codeLengthOrder[i]!) val =
+          List.map UInt8.toNat
+            (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) val.toUInt32.toUInt8).toList := by
+        rw [Array.set!, Array.toList_setIfInBounds, List.map_set]
+        congr 1
+        simp only [UInt32.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat,
+          UInt32.toNat, UInt32.ofNat, BitVec.toNat_ofNat]
+        omega
+      rw [h_acc] at hspec
+      have hsize₁ : (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) val.toUInt32.toUInt8).size = 19 := by
+        simp [Array.size_setIfInBounds, hsize]
+      have hd₁ : numCodeLen - (i + 1) = n := by omega
+      rw [← hrest₁, show n = numCodeLen - (i + 1) from by omega] at hspec
+      have ⟨br', clArr, hrec, heq, hrest', hwf', hpos'⟩ :=
+        ih br₁ _ (i + 1) hwf₁ hpos₁ hsize₁ hspec hd₁
+      refine ⟨br', clArr, ?_, heq, hrest', hwf', hpos'⟩
+      -- Unfold native
+      unfold Zip.Native.Inflate.readCLCodeLengths
+      simp only [if_pos hi, bind, Except.bind]
+      -- readBits 3 succeeds
+      rw [hrb_nat]
+      exact hrec
+
+/-- `decodeCLSymbols` completeness: if the spec's `decodeCLSymbols` succeeds,
+    then the native `decodeCLSymbols` also succeeds with corresponding results. -/
+private theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
+    (clLengths : Array UInt8)
+    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (idx totalCodes fuel : Nat)
+    (resultLens : List Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hcl : Zip.Native.HuffTree.fromLengths clLengths 7 = .ok clTree)
+    (hsize_cl : clLengths.size ≤ UInt16.size)
+    (hidx : idx ≤ totalCodes)
+    (hsize : totalCodes ≤ codeLengths.size)
+    (hspec : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
+        ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
+          fun (sym, cw) => (cw, sym))
+        totalCodes
+        ((codeLengths.extract 0 idx).toList.map UInt8.toNat)
+        br.toBits fuel =
+        some (resultLens, rest)) :
+    ∃ codeLengths' br',
+      Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+        .ok (codeLengths', br') ∧
+      (codeLengths'.extract 0 totalCodes).toList.map UInt8.toNat = resultLens ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/
 protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
