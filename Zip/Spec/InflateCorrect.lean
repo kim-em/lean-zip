@@ -352,7 +352,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
         some result) :
     ∃ endPos,
       Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist
-        maxOutputSize (specFuel + 1) = .ok (⟨⟨result⟩⟩, endPos) := by
+        maxOutputSize specFuel = .ok (⟨⟨result⟩⟩, endPos) := by
   sorry
 
 end Deflate.Correctness
