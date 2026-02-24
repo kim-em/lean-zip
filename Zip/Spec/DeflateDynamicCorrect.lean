@@ -246,4 +246,65 @@ theorem emitTokensWithCodes_spec (bw : BitWriter) (tokens : Array LZ77Token)
     litCodes distCodes 0 bits hwf hlc hdc hv_lit' hv_dist'
     (by rwa [List.drop_zero])
 
+/-! ## writeDynamicHeader ↔ encodeDynamicTrees correspondence -/
+
+/-- `writeCLLengths` loop produces the same bits as spec `writeCLLengths`.
+    Note: starts from position `i`, so produces the suffix from `i`. -/
+private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
+    (numCodeLen i : Nat) (hwf : bw.wf) (hn : numCodeLen ≤ 19)
+    (hcl_bound : ∀ x ∈ clLens, x ≤ 7) :
+    (writeDynamicHeader.writeCLLengths bw clLens numCodeLen i).toBits =
+    bw.toBits ++ ((Deflate.Spec.clPermutation.take numCodeLen).drop i).flatMap
+      (fun pos => Deflate.Spec.writeBitsLSB 3 (clLens.getD pos 0)) := by
+  suffices ∀ k, k = numCodeLen - i →
+      (writeDynamicHeader.writeCLLengths bw clLens numCodeLen i).toBits =
+      bw.toBits ++ ((Deflate.Spec.clPermutation.take numCodeLen).drop i).flatMap
+        (fun pos => Deflate.Spec.writeBitsLSB 3 (clLens.getD pos 0)) by
+    exact this _ rfl
+  intro k
+  induction k generalizing bw i with
+  | zero =>
+    intro heq
+    have hge : i ≥ numCodeLen := by omega
+    have hdrop : (Deflate.Spec.clPermutation.take numCodeLen).drop i = [] := by
+      simp [List.drop_eq_nil_iff, List.length_take]; omega
+    unfold writeDynamicHeader.writeCLLengths
+    simp [show ¬(i < numCodeLen) from by omega, hdrop]
+  | succ n ih =>
+    intro heq
+    have hlt : i < numCodeLen := by omega
+    unfold writeDynamicHeader.writeCLLengths
+    rw [if_pos hlt]
+    have hwf' := BitWriter.writeBits_wf bw 3 (clLens.getD (Deflate.Spec.clPermutation.getD i 0) 0).toUInt32 hwf (by omega)
+    have hbits := BitWriter.writeBits_toBits bw 3 (clLens.getD (Deflate.Spec.clPermutation.getD i 0) 0).toUInt32 hwf (by omega)
+    rw [ih _ (i + 1) hwf' (by omega)]
+    rw [hbits]
+    have hperm_len : Deflate.Spec.clPermutation.length = 19 := by
+      simp [Deflate.Spec.clPermutation]
+    have hi_bound : i < (Deflate.Spec.clPermutation.take numCodeLen).length := by
+      simp [List.length_take]; omega
+    rw [List.drop_eq_getElem_cons hi_bound]
+    simp only [List.flatMap_cons, List.append_assoc]
+    congr 1
+    · -- Show the element matches
+      have hi_perm : i < Deflate.Spec.clPermutation.length := by
+        simp [Deflate.Spec.clPermutation]; omega
+      have hgetD : Deflate.Spec.clPermutation.getD i 0 =
+          (Deflate.Spec.clPermutation.take numCodeLen)[i] := by
+        rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hi_perm, Option.getD_some]
+        simp [List.getElem_take' hi_perm]
+      rw [hgetD]
+      simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat]
+      have hmod : clLens.getD (Deflate.Spec.clPermutation.take numCodeLen)[i] 0 % 2 ^ 32 =
+          clLens.getD (Deflate.Spec.clPermutation.take numCodeLen)[i] 0 := by
+        apply Nat.mod_eq_of_lt
+        have : clLens.getD (Deflate.Spec.clPermutation.take numCodeLen)[i] 0 ≤ 7 := by
+          rw [List.getD_eq_getElem?_getD]
+          by_cases hb : (Deflate.Spec.clPermutation.take numCodeLen)[i] < clLens.length
+          · rw [List.getElem?_eq_getElem hb, Option.getD_some]
+            exact hcl_bound _ (List.getElem_mem ..)
+          · rw [List.getElem?_eq_none (by omega)]; simp
+        omega
+      rw [hmod]
+
 end Zip.Native.Deflate
