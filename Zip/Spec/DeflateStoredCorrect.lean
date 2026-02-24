@@ -314,7 +314,7 @@ theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
   simp only [bind, Except.bind]
   -- Step 1: readBits 1 (BFINAL)
   rw [readBits_1_at_0 compressed brPos hpos]
-  simp only [bind, Except.bind]
+  simp only [bind, Except.bind] -- needed to reduce readBits result before readBits_2_at_1
   -- Step 2: readBits 2 (BTYPE)
   rw [readBits_2_at_1 compressed brPos hpos]
   -- Step 3: From hhdr, compute bfinal and btype
