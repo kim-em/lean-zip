@@ -694,7 +694,22 @@ def dispatch_queue_balance(config: dict, queue_depth: int,
         # Queue empty and lock held — wait
         return None
     elif draining:
-        return _choose_draining(config, draining)
+        chosen = _choose_draining(config, draining)
+        if chosen is not None:
+            return chosen
+        # No labeled work available despite nonzero global queue (e.g. unlabeled issues
+        # from before the typed-worker migration). Fall back to planner to create
+        # properly-typed issues rather than stalling indefinitely.
+        if filling:
+            for name, wt in filling.items():
+                lock_name = wt["lock"]
+                r = coordination(config, f"lock-{lock_name}")
+                if r.returncode == 0:
+                    if state:
+                        state.lock_held = lock_name
+                        state.write()
+                    return name
+        return None
     elif filling:
         # Only filling types exist — try them
         for name, wt in filling.items():

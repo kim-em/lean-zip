@@ -221,11 +221,15 @@ cmd_create_pr() {
         issue_ref="Closes #$issue_num"
     fi
 
-    # Protect immutable files — reject PRs that touch CLAUDE.md or VERIFICATION.md
-    local protected_diff
-    protected_diff="$(git diff origin/master -- .claude/CLAUDE.md VERIFICATION.md 2>/dev/null || true)"
-    if [[ -n "$protected_diff" ]]; then
-        die "This PR touches protected files (.claude/CLAUDE.md or VERIFICATION.md). These files are off-limits to agents. Aborting PR creation."
+    # Protect immutable files — reject PRs that introduce changes to CLAUDE.md or VERIFICATION.md
+    # Use merge-base (three-dot) diff so we only see what THIS BRANCH added, not upstream changes.
+    local merge_base protected_files
+    merge_base="$(git merge-base origin/master HEAD 2>/dev/null || true)"
+    if [[ -n "$merge_base" ]]; then
+        protected_files="$(git diff --name-only "$merge_base" HEAD -- .claude/CLAUDE.md VERIFICATION.md 2>/dev/null || true)"
+        if [[ -n "$protected_files" ]]; then
+            die "This PR touches protected files ($protected_files). These files are off-limits to agents. Aborting PR creation."
+        fi
     fi
 
     # Push branch
@@ -340,8 +344,15 @@ cmd_list_unclaimed() {
 }
 
 # --- queue-depth ---
+# Accepts either positional label (used internally by pod) or --label L (consistent with list-unclaimed)
 cmd_queue_depth() {
-    local extra_label="${1:-}"
+    local extra_label=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --label) extra_label="${2:?--label requires a value}"; shift 2 ;;
+            *) extra_label="$1"; shift ;;   # positional label for backward compat
+        esac
+    done
     _unclaimed_issues "$extra_label" | jq 'length'
 }
 
