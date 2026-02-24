@@ -50,9 +50,12 @@ cmd_orient() {
 
     echo ""
     echo "=== Blocked issues ==="
+    local open_nums
+    open_nums="$(gh issue list --repo "$REPO" --state open --limit 100 --json number --jq '[.[].number]')"
     gh issue list --repo "$REPO" --label agent-plan --label blocked --state open --limit 50 \
         --json number,title,body \
-        --jq '.[] | "#\(.number) [Blocked on \([.body | match("depends-on: #([0-9]+)"; "g") | "#\(.captures[0].string)"] | join(", "))] \(.title)"'
+    | jq -r --argjson open "$open_nums" \
+        '.[] | "#\(.number) [Blocked on \([.body | match("depends-on: #([0-9]+)"; "g") | .captures[0].string | tonumber | . as $d | if ($open | index($d) != null) then "#\($d)" else empty end] | join(", "))] \(.title)"'
 
     echo ""
     echo "=== Claimed work items ==="

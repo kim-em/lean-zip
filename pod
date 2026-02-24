@@ -501,7 +501,7 @@ def fetch_issues_and_prs() -> list[GHItem]:
 
 
 def fetch_blocked_deps() -> dict[int, list[int]]:
-    """Fetch depends-on dependencies for blocked issues (bodies only, not all issues)."""
+    """Fetch open depends-on dependencies for blocked issues (closed deps filtered out)."""
     import re as _re
     cwd = str(PROJECT_DIR)
     try:
@@ -512,12 +512,24 @@ def fetch_blocked_deps() -> dict[int, list[int]]:
         )
         if r.returncode != 0:
             return {}
-        result: dict[int, list[int]] = {}
+
+        raw: dict[int, list[int]] = {}
         for iss in json.loads(r.stdout):
             deps = [int(d) for d in _re.findall(r"depends-on: #(\d+)", iss.get("body", ""))]
             if deps:
-                result[iss["number"]] = deps
-        return result
+                raw[iss["number"]] = deps
+        if not raw:
+            return {}
+
+        # Fetch open issue numbers to filter out closed deps
+        r2 = subprocess.run(
+            ["gh", "issue", "list", "--state", "open", "--limit", "100",
+             "--json", "number", "--jq", "[.[].number]"],
+            capture_output=True, text=True, timeout=30, cwd=cwd,
+        )
+        open_nums: set[int] = set(json.loads(r2.stdout)) if r2.returncode == 0 else set()
+
+        return {num: [d for d in deps if d in open_nums] for num, deps in raw.items()}
     except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
         return {}
 
