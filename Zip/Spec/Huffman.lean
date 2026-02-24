@@ -170,4 +170,7 @@ def ValidLengths (lengths : List Nat) (maxBits : Nat) : Prop :=
   (lengths.filter (· != 0)).foldl
     (fun acc l => acc + 2^(maxBits - l)) 0 ≤ 2^maxBits
 
+instance : Decidable (ValidLengths lengths maxBits) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
 end Huffman.Spec

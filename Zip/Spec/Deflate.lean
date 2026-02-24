@@ -307,6 +307,8 @@ def decodeDynamicTables (bits : List Bool) :
   -- Read code length code lengths
   let (clLengths, bits) ← Deflate.Spec.readCLLengths numCodeLen 0
     (List.replicate 19 0) bits
+  -- Validate CL code lengths (reject oversubscribed codes, RFC 1951)
+  guard (Huffman.Spec.ValidLengths clLengths 7)
   -- Decode the literal/length + distance lengths using the CL Huffman code
   let totalCodes := numLitLen + numDist
   let clCodes := Huffman.Spec.allCodes clLengths 7
@@ -315,6 +317,9 @@ def decodeDynamicTables (bits : List Bool) :
   guard (codeLengths.length == totalCodes)
   let litLenLengths := codeLengths.take numLitLen
   let distLengths := codeLengths.drop numLitLen
+  -- Validate lit/dist code lengths (reject oversubscribed codes)
+  guard (Huffman.Spec.ValidLengths litLenLengths 15)
+  guard (Huffman.Spec.ValidLengths distLengths 15)
   return (litLenLengths, distLengths, bits)
 where
   decodeCLSymbols (clTable : List (Huffman.Spec.Codeword × Nat))

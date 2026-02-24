@@ -663,6 +663,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
               · -- sym ∉ {16,17,18}: throw, contradicts .ok
                 simp at h
 
+set_option maxRecDepth 4096 in
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/
 protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
@@ -775,6 +776,9 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                       rw [this]
                       exact hspec_rcl
                     simp only [hrcl_spec]
+                    -- Discharge the CL ValidLengths guard
+                    have hcl_valid := fromLengths_valid clArr 7 clTree₀ hft
+                    simp only [guard, hcl_valid, ↓reduceIte, pure, Pure.pure]
                     have hdcl_spec : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
                         ((Huffman.Spec.allCodes
                           (clArr.toList.map UInt8.toNat) 7).map
@@ -799,8 +803,40 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                         UInt8.toNat).length =
                         hlit_v.toNat + 257 + (hdist_v.toNat + 1) := by
                       simp [List.length_map, Array.length_toList, hcl_res_sz]
+                    -- Discharge lit/dist ValidLengths guards
+                    have hlit_valid := fromLengths_valid
+                      (clResults.extract 0 (hlit_v.toNat + 257)) 15 litTree₀ hflit
+                    have hdist_valid := fromLengths_valid
+                      (clResults.extract (hlit_v.toNat + 257)
+                        (hlit_v.toNat + 257 + (hdist_v.toNat + 1))) 15 distTree₀ hfdist
+                    -- Bridge: List.take/drop of mapped extract = mapped sub-extract
+                    have hlit_take :
+                        (List.map UInt8.toNat (clResults.extract 0
+                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).take
+                          (hlit_v.toNat + 257) =
+                        (clResults.extract 0 (hlit_v.toNat + 257)).toList.map UInt8.toNat := by
+                      simp [Array.toList_extract, List.extract, List.map_take, List.take_take]
+                    have hdist_drop :
+                        (List.map UInt8.toNat (clResults.extract 0
+                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).drop
+                          (hlit_v.toNat + 257) =
+                        (clResults.extract (hlit_v.toNat + 257)
+                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList.map UInt8.toNat := by
+                      simp only [Array.toList_extract, List.extract,
+                        Nat.sub_zero, List.drop_zero]
+                      rw [← List.map_drop, List.drop_take]
+                    have hlit_vl : Huffman.Spec.ValidLengths
+                        ((List.map UInt8.toNat (clResults.extract 0
+                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).take
+                          (hlit_v.toNat + 257)) 15 :=
+                      hlit_take ▸ hlit_valid
+                    have hdist_vl : Huffman.Spec.ValidLengths
+                        ((List.map UInt8.toNat (clResults.extract 0
+                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).drop
+                          (hlit_v.toNat + 257)) 15 :=
+                      hdist_drop ▸ hdist_valid
                     simp only [hlen_eq, beq_self_eq_true, guard, ite_true,
-                      pure, Pure.pure]
+                      hlit_vl, hdist_vl, ↓reduceIte]
                     refine congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))
                     · simp [Array.toList_extract, List.extract, List.map_take,
                         List.take_take]
