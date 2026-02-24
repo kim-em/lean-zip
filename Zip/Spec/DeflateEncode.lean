@@ -554,4 +554,40 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   simp only [hresolve]
   simp [pure, Pure.pure]
 
+private theorem readBitsLSB_2_false_true (rest : List Bool) :
+    readBitsLSB 2 (false :: true :: rest) = some (2, rest) := by
+  simp [readBitsLSB]
+
+/-- Encoding with dynamic Huffman then decoding recovers the original data,
+    even when trailing bits are appended. The header must have been previously
+    decoded via `decodeDynamicTables`. -/
+theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
+    (litLens distLens : List Nat)
+    (headerBits symBits rest : List Bool)
+    (hv_lit : Huffman.Spec.ValidLengths litLens 15)
+    (hv_dist : Huffman.Spec.ValidLengths distLens 15)
+    (hheader : decodeDynamicTables (headerBits ++ symBits ++ rest) =
+        some (litLens, distLens, symBits ++ rest))
+    (henc : encodeSymbols litLens distLens syms = some symBits)
+    (hresolve : resolveLZ77 syms [] = some data)
+    (hfuel : 10000000 ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
+    decode ([true, false, true] ++ headerBits ++ symBits ++ rest) = some data := by
+  show decode.go ([true, false, true] ++ headerBits ++ symBits ++ rest) [] 10001 = some data
+  unfold decode.go
+  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
+  simp only [readBitsLSB_2_false_true]
+  -- Now in btype = 2 (dynamic Huffman) branch
+  simp only [List.nil_append]
+  rw [hheader]
+  set_option linter.unusedSimpArgs false in
+  simp only [bind, Option.bind]
+  have hdec : decodeSymbols litLens distLens (symBits ++ rest)
+      10000000 = some (syms, rest) :=
+    encodeSymbols_decodeSymbols litLens distLens syms symBits rest
+      10000000 henc hv_lit hv_dist hfuel hvalid
+  rw [hdec]
+  simp only [hresolve]
+  simp [pure, Pure.pure]
+
 end Deflate.Spec
