@@ -424,7 +424,6 @@ theorem toBits_readBitsLSB_byte (br : Zip.Native.BitReader)
   simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
   rw [bytesToBits_getElem br.data br.pos hpos]
   rw [readBitsLSB_byteToBits]
-  done
 
 /-- `alignToByte` produces a byte-aligned BitReader. -/
 theorem alignToByte_wf (br : Zip.Native.BitReader) :
@@ -500,7 +499,6 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
     · -- br'.toBits = bits'
       rw [hbr']
       simp only [Zip.Native.BitReader.toBits, hoff]
-      done
 
 /-! ### readBytes correspondence -/
 
@@ -515,7 +513,6 @@ protected theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
   induction n generalizing pos acc with
   | zero =>
     simp [Deflate.Spec.decodeStored.readNBytes]
-    done
   | succ k ih =>
     -- Unfold one step of readNBytes
     simp only [Deflate.Spec.decodeStored.readNBytes]

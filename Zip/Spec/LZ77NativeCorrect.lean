@@ -1,5 +1,6 @@
 import Zip.Native.Deflate
 import Zip.Spec.LZ77
+import ZipForStd.ByteArray
 
 namespace Zip.Native.Deflate
 
@@ -88,23 +89,6 @@ theorem direct_match_implies_modular (data : ByteArray) (pos dist len : Nat)
 
 /-! ## validDecomp_resolves -/
 
-/-- `ByteArray` indexing agrees with `Array.toList` indexing. -/
-private theorem ByteArray.getElem_toList (data : ByteArray) (i : Nat) (h : i < data.size)
-    (h' : i < data.data.toList.length := by simp [Array.length_toList]; exact h) :
-    (data[i]'h : UInt8) = data.data.toList[i] := by
-  show data.data[i] = data.data.toList[i]
-  rw [← Array.getElem_toList]
-
-/-- `ByteArray.getElem!` agrees with `Array.toList` indexing when in bounds. -/
-private theorem ByteArray.getElem!_toList (data : ByteArray) (i : Nat) (h : i < data.size) :
-    data[i]! = data.data.toList[i]'(by simp [Array.length_toList]; exact h) := by
-  rw [getElem!_pos data i h]
-  exact ByteArray.getElem_toList data i h
-
-private theorem toList_length (data : ByteArray) :
-    data.data.toList.length = data.size :=
-  Array.length_toList
-
 /-- Generalized `validDecomp_resolves`: at position `pos` with accumulator
     `data.data.toList.take pos`, resolving the tokens recovers the full data. -/
 theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List LZ77Token)
@@ -114,14 +98,14 @@ theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List L
   induction hv with
   | done h =>
     simp only [List.map_nil, List.nil_append, Deflate.Spec.resolveLZ77_endOfBlock]
-    exact congrArg some (List.take_of_length_le (by rw [toList_length]; omega))
+    exact congrArg some (List.take_of_length_le (by rw [ByteArray.data_toList_length]; omega))
   | @literal pos b tokens hpos hb rest ih =>
     simp only [List.map_cons, List.cons_append, LZ77Token.toLZ77Symbol,
                Deflate.Spec.resolveLZ77_literal]
     suffices h : data.data.toList.take pos ++ [b] =
         data.data.toList.take (pos + 1) by rw [h]; exact ih
     rw [← hb, ByteArray.getElem!_toList data pos hpos]
-    exact (List.take_succ_eq_append_getElem (by rw [toList_length]; exact hpos)).symm
+    exact (List.take_succ_eq_append_getElem (by rw [ByteArray.data_toList_length]; exact hpos)).symm
   | @reference pos len dist tokens hlen hdist_pos hdist_le hlen_le hmatch rest ih =>
     simp only [List.map_cons, List.cons_append, LZ77Token.toLZ77Symbol]
     have hmod := direct_match_implies_modular data pos dist len hdist_pos hdist_le hmatch
@@ -136,7 +120,7 @@ theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List L
         (List.ofFn fun (i : Fin len) =>
           (data.data.toList.take pos)[pos - dist + (↑i % dist)]!) =
         data.data.toList.take (pos + len) by rw [h]; exact ih
-    have hdllen : data.data.toList.length = data.size := toList_length data
+    have hdllen : data.data.toList.length = data.size := ByteArray.data_toList_length data
     apply List.ext_getElem
     · simp [List.length_append, List.length_ofFn, List.length_take, hdllen]; omega
     · intro i h1 h2
@@ -432,7 +416,6 @@ The proof follows the lazy mainLoop case structure. Helper for the recurring
 /-- Common proof step: reference from a valid countMatch at pos. -/
 private theorem lazyRef_at_pos (data : ByteArray) (windowSize hashSize : Nat)
     (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
-    (_hw : windowSize > 0)
     (hlt : pos + 2 < data.size)
     (hcond : (hashValid[lz77Lazy.hash3 data pos hashSize]! &&
         decide (hashTable[lz77Lazy.hash3 data pos hashSize]! < pos) &&
@@ -503,16 +486,16 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
                         exact (hcm2.1 i hi).symm)
                       (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw))
                 · -- pos + 1 + matchLen2 > data.size → fall back to match at pos
-                  exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+                  exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
                     hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
               · -- matchLen2 ≤ matchLen → keep match at pos
-                exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+                exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
                   hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
             · -- ¬(isValid2 && ...) → keep match at pos
-              exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+              exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
                 hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
           · -- ¬(pos + 3 < data.size) → keep match at pos (near end)
-            exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos hw
+            exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
               hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
         · -- ¬(pos + matchLen ≤ data.size) → literal
           exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
