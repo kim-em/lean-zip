@@ -948,11 +948,16 @@ def setup_worktree(config: dict, short_id: str) -> tuple[str, str]:
     )
 
     # Create worktree
-    subprocess.run(
+    r = subprocess.run(
         ["git", "-C", str(PROJECT_DIR), "worktree", "add", "-b", branch,
          str(wt_dir), "origin/master", "--quiet"],
         capture_output=True, timeout=60, check=True,
     )
+    if not wt_dir.exists():
+        raise subprocess.CalledProcessError(
+            0, "git worktree add",
+            output=r.stdout, stderr=(r.stderr + b" [dir not created]"),
+        )
 
     return str(wt_dir), branch
 
@@ -1219,6 +1224,13 @@ def agent_process_main(config: dict, agent_id: str | None = None,
             if lock_name:
                 coordination(config, f"unlock-{lock_name}")
                 state.lock_held = ""
+            state.status = "error"
+            state.write()
+            time.sleep(10)
+            continue
+
+        if not os.path.isdir(wt_dir):
+            log(f"Agent {short_id}: worktree dir missing after setup_worktree returned: {wt_dir}")
             state.status = "error"
             state.write()
             time.sleep(10)
