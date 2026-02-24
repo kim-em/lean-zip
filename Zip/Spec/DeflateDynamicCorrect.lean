@@ -18,34 +18,6 @@ namespace Zip.Native.Deflate
 
 /-! ## tokenFreqs properties -/
 
-private theorem findTableCode_go_idx_bound (baseTable : Array UInt16)
-    (extraTable : Array UInt8) (value i idx : Nat) (extraN : Nat) (extraV : UInt32)
-    (h : findTableCode.go baseTable extraTable value i = some (idx, extraN, extraV)) :
-    idx < baseTable.size := by
-  unfold findTableCode.go at h
-  split at h
-  · split at h
-    · simp at h; omega
-    · exact findTableCode_go_idx_bound baseTable extraTable value (i + 1) idx extraN extraV h
-  · split at h
-    · simp at h; omega
-    · simp at h
-termination_by baseTable.size - i
-
-private theorem native_findLengthCode_idx_bound (len idx : Nat) (extraN : Nat) (extraV : UInt32)
-    (h : findLengthCode len = some (idx, extraN, extraV)) :
-    idx < 29 := by
-  have := findTableCode_go_idx_bound Inflate.lengthBase Inflate.lengthExtra len 0 idx extraN extraV h
-  simp [Inflate.lengthBase] at this
-  exact this
-
-private theorem native_findDistCode_code_bound (dist dCode : Nat) (dExtraN : Nat) (dExtraV : UInt32)
-    (h : findDistCode dist = some (dCode, dExtraN, dExtraV)) :
-    dCode < 30 := by
-  have := findTableCode_go_idx_bound Inflate.distBase Inflate.distExtra dist 0 dCode dExtraN dExtraV h
-  simp [Inflate.distBase] at this
-  exact this
-
 /-- `tokenFreqs.go` preserves array sizes. -/
 private theorem tokenFreqs_go_sizes (tokens : Array LZ77Token)
     (litFreqs distFreqs : Array Nat) (i : Nat)
@@ -125,11 +97,11 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1)) distFreqs (i + 1) idx
               (by simp; omega) hdist
-            have hlIdx := native_findLengthCode_idx_bound _ lIdx lN lV hflc
+            have hlIdx := nativeFindLengthCode_idx_bound _ lIdx lN lV hflc
             exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
           | some q =>
             obtain ⟨dIdx, dN, dV⟩ := q
-            have hlIdx := native_findLengthCode_idx_bound _ lIdx lN lV hflc
+            have hlIdx := nativeFindLengthCode_idx_bound _ lIdx lN lV hflc
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
@@ -144,7 +116,7 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
             exact ih.2 hidx
           | some p =>
             obtain ⟨dIdx, dN, dV⟩ := p
-            have hdIdx := native_findDistCode_code_bound _ dIdx dN dV hfdc
+            have hdIdx := nativeFindDistCode_idx_bound _ dIdx dN dV hfdc
             have ih := tokenFreqs_go_mono tokens litFreqs
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
               hlit (by simp; omega)
@@ -159,7 +131,7 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
             exact ih.2 hidx
           | some q =>
             obtain ⟨dIdx, dN, dV⟩ := q
-            have hdIdx := native_findDistCode_code_bound _ dIdx dN dV hfdc
+            have hdIdx := nativeFindDistCode_idx_bound _ dIdx dN dV hfdc
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
@@ -264,7 +236,7 @@ private theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
         have hdist_eq : dist' = dist := (LZ77Token.reference.inj heq).2
         -- The goal talks about findLengthCode len' and findDistCode dist' (from the match)
         simp only [hlen_eq, hdist_eq, hflc]
-        have hidx := native_findLengthCode_idx_bound _ idx extraN extraV hflc
+        have hidx := nativeFindLengthCode_idx_bound _ idx extraN extraV hflc
         -- After set, litFreqs[257+idx]! ≥ 1
         have hle := (tokenFreqs_go_mono tokens
           (litFreqs.set! (idx + 257) (litFreqs[idx + 257]! + 1))
@@ -335,7 +307,7 @@ private theorem tokenFreqs_go_distCode_pos (tokens : Array LZ77Token)
         have hlen_eq : len' = len := (LZ77Token.reference.inj heq).1
         have hdist_eq : dist' = dist := (LZ77Token.reference.inj heq).2
         simp only [hlen_eq, hdist_eq, hfdc]
-        have hdcode := native_findDistCode_code_bound _ dCode dExtraN dExtraV hfdc
+        have hdcode := nativeFindDistCode_idx_bound _ dCode dExtraN dExtraV hfdc
         -- After set, distFreqs[dCode]! ≥ 1
         have hle := (tokenFreqs_go_mono tokens
           (match findLengthCode len with

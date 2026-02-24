@@ -65,9 +65,6 @@ theorem encodeSymbol_canonicalCodes_eq (lengths : Array UInt8) (maxBits : Nat)
     congrArg UInt8.toNat hlen'
   exact ⟨by rw [hlen'_nat]; exact hcw', by omega⟩
 
-private theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
-    a.get!Internal i = a[i]! := rfl
-
 /-! ## Main emitTokensWithCodes ↔ encodeSymbols correspondence -/
 
 set_option maxRecDepth 2048 in

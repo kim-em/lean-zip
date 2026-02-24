@@ -14,9 +14,6 @@ as the spec-level `encodeDynamicTrees`.
 
 namespace Zip.Native.Deflate
 
-private theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
-    a.get!Internal i = a[i]! := rfl
-
 /-! ## writeDynamicHeader ↔ encodeDynamicTrees correspondence -/
 
 /-- `writeCLLengths` loop produces the same bits as spec `writeCLLengths`.
@@ -342,7 +339,7 @@ theorem writeDynamicHeader_wf (bw : BitWriter) (litLens distLens : List Nat)
   let clCodes := canonicalCodes clLengthsArr 7
   have hcl_bound : ∀ x ∈ clLens, x ≤ 7 :=
     Huffman.Spec.computeCodeLengths_bounded clFreqPairs 19 7 (by omega)
-  have hcl_codes_size : clCodes.size = clLengthsArr.size := canonicalCodes_size' clLengthsArr 7
+  have hcl_codes_size : clCodes.size = clLengthsArr.size := canonicalCodes_size clLengthsArr 7
   have hcl_arr_size : clLengthsArr.size = clLens.length := by
     simp [clLengthsArr, Array.size_map, List.size_toArray]
   have hcl_len : clLens.length = 19 := Huffman.Spec.computeCodeLengths_length clFreqPairs 19 7
