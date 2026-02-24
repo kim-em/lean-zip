@@ -48,7 +48,7 @@ theorem encodeSymbol_canonicalCodes_eq (lengths : Array UInt8) (maxBits : Nat)
   have hs_arr : s < lengths.size := by
     simp only [List.length_map, Array.length_toList] at hs_len; exact hs_len
   have hs_i : (lengths.toList.map UInt8.toNat)[s] = lengths[s].toNat := by
-    simp only [List.getElem_map, Array.getElem_toList]; rfl
+    simp only [List.getElem_map, Array.getElem_toList]
   have ⟨hne0, hle_mb⟩ := Huffman.Spec.codeFor_len_bounds
     (Huffman.Spec.codeFor_spec hcf).2.1
   have hne0_nat : lengths[s].toNat ≠ 0 := hs_i ▸ hne0

@@ -475,7 +475,7 @@ private theorem insertLoop_forward
       -- Common facts for insert case
       have hls_len : start < lsList.length := by simp [hlsList, hstart]
       have hls_start : lsList[start] = lengths[start].toNat := by
-        simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
+        simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       -- Bridge UInt8 > 0 to Nat for omega
@@ -614,7 +614,7 @@ private theorem insertLoop_backward
       rename_i hlen_pos
       have hls_len : start < lsList.length := by simp [hlsList, hstart]
       have hls_start : lsList[start] = lengths[start].toNat := by
-        simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
+        simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       -- Bridge UInt8 > 0 to Nat for omega
