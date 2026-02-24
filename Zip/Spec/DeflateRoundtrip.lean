@@ -4,10 +4,12 @@ import Zip.Spec.DeflateDynamicCorrect
 /-!
 # Unified DEFLATE Roundtrip (Phase 4 Capstone)
 
-Defines `deflateRaw`, a unified dispatch function that selects the
+Proves the unified roundtrip theorem for `deflateRaw`:
+`inflate (deflateRaw data level) = .ok data`.
+
+`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean` and selects the
 compression strategy based on level (0 = stored, 1 = fixed Huffman,
-2-4 = lazy LZ77 + fixed, 5+ = dynamic Huffman), and proves the
-unified roundtrip theorem: `inflate (deflateRaw data level) = .ok data`.
+2-4 = lazy LZ77 + fixed, 5+ = dynamic Huffman).
 
 This composes the per-level roundtrip theorems:
 - `inflate_deflateStoredPure` (Level 0)
@@ -18,15 +20,7 @@ This composes the per-level roundtrip theorems:
 
 namespace Zip.Native.Deflate
 
-open Zip.Spec.DeflateStoredCorrect (deflateStoredPure inflate_deflateStoredPure)
-
-/-- Unified raw DEFLATE compression dispatch.
-    Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman. -/
-def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
-  if level == 0 then deflateStoredPure data
-  else if level == 1 then deflateFixed data
-  else if level < 5 then deflateLazy data
-  else deflateDynamic data
+open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
     This is the Phase 4 capstone theorem from VERIFICATION.md.
