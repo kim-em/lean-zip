@@ -7,8 +7,8 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 1 (in DeflateFixedCorrect.lean — see Phase 4 details)
-- **Sessions**: ~100 completed (Feb 19–24)
+- **Sorries**: 2 (in DeflateDynamicCorrect.lean — see Phase 4 details)
+- **Sessions**: ~120 completed (Feb 19–24)
 
 ## Milestones
 
@@ -76,14 +76,20 @@ Native compression + roundtrip verification. ~70 sessions so far.
   (DeflateDynamicCorrect)
 - DecodeCorrect.lean split into DecodeCorrect + DecodeComplete
 
-**Remaining sorries (1):**
+**Remaining sorries (2):**
 
-`DeflateFixedCorrect.lean` (1):
-- `inflate_deflateDynamic` — Level 5 roundtrip (dynamic Huffman compressor)
+`DeflateDynamicCorrect.lean` (2):
+- `encodeDynamic_decode_append` — dynamic block decode after encode
+- `deflateDynamic_spec` — native dynamic compressor ↔ spec correspondence
+
+These block the final theorem `inflate_deflateDynamic` (Level 5 roundtrip).
+Key remaining sub-goals: `writeDynamicHeader_spec` (BitWriter chain for
+the dynamic header) and `computeCodeLengths_nonzero` (Huffman tree
+property needed for symbol encoding).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~95 sessions: majority implementation, ~25 review, ~1 self-improvement,
+- ~120 sessions: majority implementation, ~30 review, ~3 self-improvement,
   remainder PR maintenance
