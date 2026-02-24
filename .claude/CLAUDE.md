@@ -665,6 +665,27 @@ Update it during review and reflect sessions.
   `hcond.1.2` / `hcond.2` to access components. This replaces verbose
   `by_cases` + `exfalso` patterns for extracting individual conditions.
 
+- **UInt8 positivity from Nat membership**: When you have
+  `hne0 : (lengths.toList.map UInt8.toNat)[s] ≠ 0` and need
+  `lengths[s] > 0` (UInt8 comparison), first bridge the list indexing:
+  `have hs_i : (...)[s] = lengths[s].toNat := by simp only [...]; rfl`,
+  then `have hne0_nat : lengths[s].toNat ≠ 0 := hs_i ▸ hne0`, then
+  `simp only [GT.gt, UInt8.lt_iff_toNat_lt, UInt8.toNat_ofNat]; omega`.
+  Plain `omega` can't bridge UInt8 `>` to Nat directly.
+- **List Nat ↔ Array UInt8 roundtrip**: To prove
+  `l = (l.toArray.map Nat.toUInt8).toList.map UInt8.toNat` when all
+  elements are ≤ 15 (from `ValidLengths`):
+  ```lean
+  simp only [Array.toList_map, List.map_map]; symm
+  rw [List.map_congr_left (fun n hn => by
+    show UInt8.toNat (Nat.toUInt8 n) = n
+    simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
+    exact Nat.mod_eq_of_lt (by have := hv.1 n hn; omega))]
+  simp  -- closes `List.map (fun n => n) l = l` (not `List.map id l`)
+  ```
+  Note: `List.map_congr_left` produces `fun n => n` not `id`, so
+  `List.map_id` won't match — use `simp` instead.
+
 ## Current State
 
 See `PROGRESS.md` for global milestones and current phase.
