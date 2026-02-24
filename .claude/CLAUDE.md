@@ -277,6 +277,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/DynamicTreesComplete.lean — Dynamic Huffman tree decode completeness
     Zip/Spec/LZ77NativeCorrect.lean — Native lz77Greedy correctness (BB1 for compressor)
     Zip/Spec/DeflateFixedTables.lean — Fixed Huffman table bridge proofs (native ↔ spec tables)
+    Zip/Spec/EmitTokensCorrect.lean — emitTokens ↔ encodeSymbols correspondence + helpers
     Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
     Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
     Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
