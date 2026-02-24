@@ -61,8 +61,8 @@ cmd_orient() {
     echo ""
     echo "=== Open pull requests ==="
     gh pr list --repo "$REPO" --state open --limit 20 \
-        --json number,title,headRefName,statusCheckRollup,labels \
-        --template '{{range .}}#{{.number}} [{{.headRefName}}] {{.title}}{{range .labels}} ({{.name}}){{end}}{{range .statusCheckRollup}}{{if eq .conclusion "FAILURE"}} ✗CI{{end}}{{end}}{{"\n"}}{{end}}'
+        --json number,title,headRefName,statusCheckRollup,labels,mergeable \
+        --jq '.[] | "#\(.number) [\(.headRefName)] \(.title)\(.labels | map(" (\(.name))") | join(""))\(if ((.labels | any(.name == "merge-conflict")) or .mergeable == "CONFLICTING") then " \u001b[31m[CONFLICTS]\u001b[0m" else "" end)\(if (.statusCheckRollup | any(.conclusion == "FAILURE")) then " ✗CI" else "" end)"'
 
     echo ""
     echo "=== PRs needing attention (failing CI, merge-conflict, or dirty) ==="
@@ -72,7 +72,7 @@ cmd_orient() {
             (.labels | any(.name == "merge-conflict")) or
             (.mergeable == "CONFLICTING") or
             (.statusCheckRollup | any(.conclusion == "FAILURE"))
-        )] | .[] | "#\(.number) \(.title)\(if .mergeable == "CONFLICTING" then " [CONFLICTS]" else "" end)\(if (.statusCheckRollup | any(.conclusion == "FAILURE")) then " [CI FAILED]" else "" end)"'
+        )] | .[] | "#\(.number) \(.title)\(if ((.labels | any(.name == "merge-conflict")) or .mergeable == "CONFLICTING") then " \u001b[31m[CONFLICTS]\u001b[0m" else "" end)\(if (.statusCheckRollup | any(.conclusion == "FAILURE")) then " [CI FAILED]" else "" end)"'
 }
 
 # --- plan ---
@@ -383,42 +383,54 @@ cmd_skip() {
 
 # --- lock-planner ---
 # Advisory lock to prevent concurrent planner sessions.
-# Uses 'planner-lock' label on a pinned sentinel issue with a TTL.
+# Uses comments on the sentinel issue as tickets: each agent posts a comment
+# with its session ID + Unix timestamp, then checks whether its comment has
+# the lowest ID among all active (within-TTL) lock-attempt comments.
+# Lowest ID = posted first = lock winner. All agents share one GitHub account
+# so reactions/labels can't distinguish them; comment IDs are unique.
 # Returns 0 if lock acquired, 1 if another planner is active.
 cmd_lock_planner() {
-    # Check if lock label is present
-    local labels
-    labels="$(gh issue view "$PLANNER_LOCK_ISSUE" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
+    local now
+    now="$(date -u +%s)"
 
-    if echo "$labels" | grep -qw 'planner-lock'; then
-        # Label exists — check TTL via issue events timeline
-        local cutoff
-        cutoff="$(date -u -v-${PLANNER_LOCK_TTL}S '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
-                  date -u -d "$PLANNER_LOCK_TTL seconds ago" '+%Y-%m-%dT%H:%M:%SZ')"
+    # 1. Post a lock-attempt comment (gets a unique, monotonically increasing ID)
+    local my_id
+    my_id="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
+        -X POST -f body="planner-lock-attempt: $SESSION_ID $now" \
+        --jq '.id')"
 
-        local label_time
-        label_time="$(gh api --paginate "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/events" \
-            --jq '[.[] | select(.event == "labeled" and .label.name == "planner-lock")] | sort_by(.created_at) | last | .created_at // ""')"
+    # 2. Brief pause so concurrent attempts land before we read
+    sleep 3
 
-        if [[ -n "$label_time" && "$label_time" > "$cutoff" ]]; then
-            echo "Another planner is active (lock held). Skipping."
-            return 1
-        fi
+    # 3. Find the lowest comment ID among all active lock-attempt comments
+    local cutoff=$(( now - PLANNER_LOCK_TTL ))
+    local earliest_id
+    earliest_id="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
+        --jq "[.[] | select(.body | startswith(\"planner-lock-attempt:\")) |
+               select((.body | split(\" \") | last | tonumber) > $cutoff) |
+               .id] | min")"
 
-        # Lock expired — remove stale label before re-acquiring
-        gh issue edit "$PLANNER_LOCK_ISSUE" --repo "$REPO" --remove-label planner-lock 2>/dev/null || true
+    if [[ "$my_id" -eq "$earliest_id" ]]; then
+        echo "Planner lock acquired (comment #$my_id)"
+        return 0
+    else
+        # Lost the race — clean up our comment and bail
+        gh api "repos/$REPO/issues/comments/$my_id" -X DELETE 2>/dev/null || true
+        echo "Another planner is active (lock held by comment #$earliest_id). Skipping."
+        return 1
     fi
-
-    # Acquire lock: add label
-    gh issue edit "$PLANNER_LOCK_ISSUE" --repo "$REPO" --add-label planner-lock
-    echo "Planner lock acquired"
 }
 
 # --- unlock-planner ---
-# Release the planner lock by removing the label.
+# Release the planner lock by deleting our lock-attempt comment.
 cmd_unlock_planner() {
-    gh issue edit "$PLANNER_LOCK_ISSUE" --repo "$REPO" --remove-label planner-lock 2>/dev/null || true
-    echo "Planner lock released"
+    local my_comment
+    my_comment="$(gh api "repos/$REPO/issues/$PLANNER_LOCK_ISSUE/comments" \
+        --jq "[.[] | select(.body | test(\"planner-lock-attempt: $SESSION_ID \"))] | .[0].id // empty")"
+    if [[ -n "$my_comment" ]]; then
+        gh api "repos/$REPO/issues/comments/$my_comment" -X DELETE 2>/dev/null || true
+        echo "Planner lock released"
+    fi
 }
 
 # --- check-blocked ---
