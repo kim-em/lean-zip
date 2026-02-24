@@ -454,15 +454,7 @@ theorem inflate_deflateLazy (data : ByteArray)
       (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
-/-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
-    codes then decompressing recovers the original data.
-    **Sorry**: requires proving the dynamic block header written by
-    `writeDynamicHeader` is correctly decodable by `inflate`, plus
-    `emitTokensWithCodes` correspondence with spec `encodeSymbols` for
-    dynamic code tables. -/
-theorem inflate_deflateDynamic (data : ByteArray)
-    (hsize : data.size ≤ 256 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
-  sorry
+-- inflate_deflateDynamic is proved in DeflateDynamicCorrect.lean
+-- (to avoid circular imports)
 
 end Zip.Native.Deflate

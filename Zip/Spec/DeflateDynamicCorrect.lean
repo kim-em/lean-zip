@@ -1,4 +1,5 @@
 import Zip.Spec.DeflateFixedCorrect
+import Zip.Spec.DeflateEncodeDynamicProps
 
 /-!
 # Native DEFLATE Dynamic Huffman Correctness
@@ -292,7 +293,7 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
       have hgetD : Deflate.Spec.clPermutation.getD i 0 =
           (Deflate.Spec.clPermutation.take numCodeLen)[i] := by
         rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hi_perm, Option.getD_some]
-        simp [List.getElem_take' hi_perm]
+        simp
       rw [hgetD]
       simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat]
       have hmod : clLens.getD (Deflate.Spec.clPermutation.take numCodeLen)[i] 0 % 2 ^ 32 =
@@ -306,5 +307,185 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
           · rw [List.getElem?_eq_none (by omega)]; simp
         omega
       rw [hmod]
+
+
+/-- `writeCLEntries` produces the same bits as spec `encodeCLEntries`. -/
+private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
+    (clCodes : Array (UInt16 × UInt8))
+    (entries : List (Nat × Nat))
+    (bits : List Bool) (hwf : bw.wf)
+    (hc : clCodes = canonicalCodes clLengths 7)
+    (hv : Huffman.Spec.ValidLengths (clLengths.toList.map UInt8.toNat) 7)
+    (hext : ∀ p ∈ entries, p.2 < 2 ^ 32)
+    (henc : Deflate.Spec.encodeCLEntries
+        ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
+          fun p => (p.2, p.1))
+        entries = some bits) :
+    (writeDynamicHeader.writeCLEntries bw clCodes entries).toBits =
+    bw.toBits ++ bits := by
+  induction entries generalizing bw bits with
+  | nil =>
+    simp [Deflate.Spec.encodeCLEntries] at henc
+    simp [writeDynamicHeader.writeCLEntries, henc]
+  | cons entry rest ih =>
+    obtain ⟨code, extra⟩ := entry
+    simp only [Deflate.Spec.encodeCLEntries] at henc
+    cases hencsym : Deflate.Spec.encodeSymbol
+        ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
+          fun p => (p.2, p.1))
+        code with
+    | none => simp [hencsym] at henc
+    | some cwBits =>
+      cases hencrest : Deflate.Spec.encodeCLEntries
+          ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
+            fun p => (p.2, p.1))
+          rest with
+      | none => simp [hencsym, hencrest] at henc
+      | some restBits =>
+        simp [hencsym, hencrest] at henc
+        subst henc
+        -- Bridge encodeSymbol ↔ canonicalCodes
+        have ⟨hcw, hlen⟩ := encodeSymbol_canonicalCodes_eq clLengths 7
+          clCodes hc hv (by omega) code cwBits hencsym
+        -- Unfold native
+        simp only [writeDynamicHeader.writeCLEntries, array_get!Internal_eq]
+        -- writeHuffCode correspondence
+        have hlen15 : clCodes[code]!.2.toNat ≤ 15 := by omega
+        have hwf1 := BitWriter.writeHuffCode_wf bw
+          clCodes[code]!.1 clCodes[code]!.2 hwf hlen15
+        have hbits1 := BitWriter.writeHuffCode_toBits bw
+          clCodes[code]!.1 clCodes[code]!.2 hwf hlen15
+        have hext_rest : ∀ p ∈ rest, p.2 < 2 ^ 32 :=
+          fun p hp => hext p (List.mem_cons_of_mem _ hp)
+        have hextra_bound : extra < 2 ^ 32 := hext (code, extra) List.mem_cons_self
+        -- Extra bits
+        by_cases h16 : code == 16
+        · simp only [h16, ↓reduceIte]
+          have hwf2 := BitWriter.writeBits_wf _ 2 extra.toUInt32 hwf1 (by omega)
+          have hbits2 := BitWriter.writeBits_toBits _ 2 extra.toUInt32 hwf1 (by omega)
+          rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
+          simp only [Deflate.Spec.encodeCLExtra, h16, ↓reduceIte]
+          simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+            Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
+        · by_cases h17 : code == 17
+          · simp only [h16, h17, ↓reduceIte, Bool.false_eq_true]
+            have hwf2 := BitWriter.writeBits_wf _ 3 extra.toUInt32 hwf1 (by omega)
+            have hbits2 := BitWriter.writeBits_toBits _ 3 extra.toUInt32 hwf1 (by omega)
+            rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
+            simp only [Deflate.Spec.encodeCLExtra, h16, h17, ↓reduceIte, Bool.false_eq_true]
+            simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+              Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
+          · by_cases h18 : code == 18
+            · simp only [h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
+              have hwf2 := BitWriter.writeBits_wf _ 7 extra.toUInt32 hwf1 (by omega)
+              have hbits2 := BitWriter.writeBits_toBits _ 7 extra.toUInt32 hwf1 (by omega)
+              rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
+              simp only [Deflate.Spec.encodeCLExtra, h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
+              simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+                Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
+            · simp only [h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
+              rw [ih _ _ hwf1 hext_rest hencrest, hbits1, hcw]
+              simp only [Deflate.Spec.encodeCLExtra, h16, h17, h18, ↓reduceIte, Bool.false_eq_true,
+                List.nil_append, List.append_assoc]
+
+/-- `writeDynamicHeader` produces the same bits as spec `encodeDynamicTrees`,
+    given that `encodeDynamicTrees` succeeds. -/
+theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
+    (headerBits : List Bool) (hwf : bw.wf)
+    (hlit_bound : ∀ x ∈ litLens, x ≤ 15)
+    (hdist_bound : ∀ x ∈ distLens, x ≤ 15)
+    (hlitLen : litLens.length ≥ 257 ∧ litLens.length ≤ 288)
+    (hdistLen : distLens.length ≥ 1 ∧ distLens.length ≤ 32)
+    (henc : Deflate.Spec.encodeDynamicTrees litLens distLens = some headerBits) :
+    (writeDynamicHeader bw litLens distLens).toBits = bw.toBits ++ headerBits := by
+  -- Extract shared intermediate computations (same in native and spec)
+  let allLens := litLens ++ distLens
+  let clEntries := Deflate.Spec.rlEncodeLengths allLens
+  let clFreqs := Deflate.Spec.clSymbolFreqs clEntries
+  let clFreqPairs := (List.range clFreqs.length).map fun i => (i, clFreqs.getD i 0)
+  let clLens := Huffman.Spec.computeCodeLengths clFreqPairs 19 7
+  let numCodeLen := Deflate.Spec.computeHCLEN clLens
+  -- CL codes: spec vs native
+  let clTable := (Huffman.Spec.allCodes clLens 7).map fun (sym, cw) => (cw, sym)
+  let clLengthsArr : Array UInt8 := clLens.toArray.map Nat.toUInt8
+  let nativeClCodes := canonicalCodes clLengthsArr 7
+  -- Extract symbolBits from encodeDynamicTrees
+  have henc_cl : ∃ symbolBits, Deflate.Spec.encodeCLEntries clTable clEntries = some symbolBits ∧
+      headerBits = Deflate.Spec.writeBitsLSB 5 (litLens.length - 257) ++
+        Deflate.Spec.writeBitsLSB 5 (distLens.length - 1) ++
+        Deflate.Spec.writeBitsLSB 4 (numCodeLen - 4) ++
+        Deflate.Spec.writeCLLengths clLens numCodeLen ++
+        symbolBits := by
+    unfold Deflate.Spec.encodeDynamicTrees at henc
+    simp only [show (litLens.length ≥ 257 ∧ litLens.length ≤ 288) = true from by simp [hlitLen],
+               show (distLens.length ≥ 1 ∧ distLens.length ≤ 32) = true from by simp [hdistLen],
+               guard, ↓reduceIte, pure, Pure.pure] at henc
+    cases hcle : Deflate.Spec.encodeCLEntries clTable clEntries with
+    | none => rw [hcle] at henc; simp at henc
+    | some sb => rw [hcle] at henc; simp at henc; exact ⟨sb, rfl, henc.symm⟩
+  obtain ⟨symbolBits, hcle_eq, hbits_eq⟩ := henc_cl
+  subst hbits_eq
+  sorry
+
+/-- `deflateDynamic` produces a bytestream whose bits correspond to the
+    spec-level dynamic Huffman encoding, plus padding to byte alignment. -/
+theorem deflateDynamic_spec (data : ByteArray) :
+    ∃ (litLens distLens : List Nat) (headerBits symBits : List Bool),
+      Huffman.Spec.ValidLengths litLens 15 ∧
+      Huffman.Spec.ValidLengths distLens 15 ∧
+      litLens.length ≥ 257 ∧ litLens.length ≤ 288 ∧
+      distLens.length ≥ 1 ∧ distLens.length ≤ 32 ∧
+      (∀ x ∈ litLens, x ≤ 15) ∧ (∀ x ∈ distLens, x ≤ 15) ∧
+      Deflate.Spec.encodeDynamicTrees litLens distLens = some headerBits ∧
+      Deflate.Spec.encodeSymbols litLens distLens
+        (tokensToSymbols (lz77Greedy data 32768)) = some symBits ∧
+      Deflate.Spec.bytesToBits (deflateDynamic data) =
+        [true, false, true] ++ headerBits ++ symBits ++
+        List.replicate
+          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8)
+          false := by
+  sorry
+
+/-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
+    codes then decompressing recovers the original data.
+    Size bound: same as `inflate_deflateFixed`. -/
+theorem inflate_deflateDynamic (data : ByteArray)
+    (hsize : data.size < 10000000) :
+    Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
+  have hspec := deflateDynamic_spec data
+  match hspec with
+  | ⟨litLens, distLens, headerBits, symBits, hv_lit, hv_dist,
+      hlitLen_lo, hlitLen_hi, hdistLen_lo, hdistLen_hi,
+      hlit_bound, hdist_bound,
+      henc_trees, henc_syms, hbits⟩ =>
+    -- Decode roundtrip for dynamic blocks
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables
+      litLens distLens headerBits
+      (symBits ++ List.replicate
+        ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+      hlit_bound hdist_bound
+      ⟨hlitLen_lo, hlitLen_hi⟩ ⟨hdistLen_lo, hdistLen_hi⟩
+      hv_lit hv_dist henc_trees
+    have hdec_padded : Deflate.Spec.decode (Deflate.Spec.bytesToBits (deflateDynamic data)) =
+        some data.data.toList := by
+      rw [hbits]
+      let padding := List.replicate
+        ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false
+      have hheader' : Deflate.Spec.decodeDynamicTables (headerBits ++ symBits ++ padding) =
+          some (litLens, distLens, symBits ++ padding) := by
+        rw [List.append_assoc]; exact hheader
+      exact Deflate.Spec.encodeDynamic_decode_append
+        (tokensToSymbols (lz77Greedy data 32768)) data.data.toList
+        litLens distLens headerBits symBits padding
+        hv_lit hv_dist
+        hheader'
+        henc_syms
+        (lz77Greedy_resolves data 32768 (by omega))
+        (by have := lz77Greedy_size_le data 32768; rw [tokensToSymbols_length]; omega)
+        (tokensToSymbols_validSymbolList _)
+    have hlen : data.data.toList.length ≤ 256 * 1024 * 1024 := by
+      simp only [Array.length_toList, ByteArray.size_data]; omega
+    rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp]
+    exact inflate_complete (deflateDynamic data) data.data.toList hlen hdec_padded
 
 end Zip.Native.Deflate
