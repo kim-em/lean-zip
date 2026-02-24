@@ -195,7 +195,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
 | `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
 | `coordination check-blocked` | Unblock issues whose `depends-on` dependencies are all closed |
-| `coordination release-stale-claims [SECS]` | Release claimed issues with no PR after SECS seconds (default 4h); called automatically by `pod` each loop |
+| `coordination release-stale-claims [SECS]` | Release claimed issues with no PR after SECS seconds (default 4h); **manual use only** — for claims from sessions on other machines that `pod` can't detect locally |
 | `coordination lock-planner` | Acquire advisory planner lock (10min TTL, issue #8) |
 | `coordination unlock-planner` | Release planner lock early |
 

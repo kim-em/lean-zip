@@ -43,6 +43,7 @@ POD_DIR = PROJECT_DIR / ".pod"
 AGENTS_DIR = POD_DIR / "agents"
 CONFIG_PATH = POD_DIR / "config.toml"
 LOG_PATH = POD_DIR / "pod.log"
+CLAIM_HISTORY_PATH = POD_DIR / "claim-history.json"
 
 # ---------------------------------------------------------------------------
 # Default configuration (written on first run)
@@ -79,7 +80,7 @@ min_queue = 3                      # queue_balance: below this → planner-type
 poll_interval = 2                  # Seconds between status updates
 jsonl_stale_warning = 300          # Warn if JSONL unchanged for this many seconds
 jsonl_missing_warning = 60         # Warn if JSONL not created after this many seconds
-stale_claim_ttl = 14400            # Release claimed issues with no PR after this many seconds (4h)
+max_claim_restarts = 1             # Max times to auto-restart a dead session before releasing claim
 
 # --- Worker Types ---
 # Each [worker_types.<name>] defines a type of agent session.
@@ -151,6 +152,52 @@ def say(msg: str):
 
 
 # ---------------------------------------------------------------------------
+# Claim history — persists which issues our local sessions have claimed
+# ---------------------------------------------------------------------------
+
+_claim_history_lock = threading.Lock()
+
+
+def load_claim_history() -> dict:
+    """Load {issue_num_str -> {session_uuid, short_id, restart_count}}."""
+    try:
+        return json.loads(CLAIM_HISTORY_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_claim_history(history: dict):
+    """Atomically write claim history."""
+    tmp = CLAIM_HISTORY_PATH.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(history, indent=2) + "\n")
+        tmp.rename(CLAIM_HISTORY_PATH)
+    except OSError as e:
+        log(f"Failed to save claim history: {e}")
+
+
+def record_claim(issue: int, session_uuid: str, short_id: str):
+    """Record that our session claimed this issue. Preserves restart_count."""
+    with _claim_history_lock:
+        history = load_claim_history()
+        key = str(issue)
+        history[key] = {
+            "session_uuid": session_uuid,
+            "short_id": short_id,
+            "restart_count": history.get(key, {}).get("restart_count", 0),
+        }
+        _save_claim_history(history)
+
+
+def clear_claim(issue: int):
+    """Remove issue from claim history (called when PR is created)."""
+    with _claim_history_lock:
+        history = load_claim_history()
+        history.pop(str(issue), None)
+        _save_claim_history(history)
+
+
+# ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
 
@@ -179,6 +226,7 @@ class AgentState:
     loop_iteration: int = 0
     worktree: str = ""
     branch: str = ""
+    resume_session_uuid: str = ""  # If set, first iteration uses this UUID (to resume conversation)
 
     def cost(self, pricing: dict) -> float:
         """Calculate cost in dollars."""
@@ -653,6 +701,67 @@ def dispatch(config: dict, state: AgentState | None = None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Dead claim recovery
+# ---------------------------------------------------------------------------
+
+def _release_claim(issue_str: str, session_uuid: str, restart_count: int):
+    """Remove the 'claimed' label from an issue and leave an explanatory comment."""
+    repo = "kim-em/lean-zip"
+    try:
+        subprocess.run(
+            ["gh", "issue", "edit", issue_str, "--repo", repo, "--remove-label", "claimed"],
+            capture_output=True, timeout=30, cwd=str(PROJECT_DIR),
+        )
+        msg = (f"Claim released — worker session `{session_uuid}` died after "
+               f"{restart_count} restart attempt(s). Available for reclaim.")
+        subprocess.run(
+            ["gh", "issue", "comment", issue_str, "--repo", repo, "--body", msg],
+            capture_output=True, timeout=30, cwd=str(PROJECT_DIR),
+        )
+        log(f"Released claim on #{issue_str}")
+    except Exception as e:
+        log(f"Failed to release claim on #{issue_str}: {e}")
+
+
+def check_dead_claimed_issues(config: dict):
+    """Detect locally-known sessions that claimed issues but are now dead.
+    Restart them up to max_claim_restarts times, then release the claim."""
+    history = load_claim_history()
+    if not history:
+        return
+
+    agents = read_all_agents()
+    live_uuids = {a.uuid for a in agents if a.status not in ("dead", "stopped")}
+    max_restarts = cfg_get(config, "monitor", "max_claim_restarts", default=1)
+
+    changed = False
+    with _claim_history_lock:
+        history = load_claim_history()  # Re-read under lock
+        for issue_str, info in list(history.items()):
+            if info["session_uuid"] in live_uuids:
+                continue  # Still running
+
+            restart_count = info.get("restart_count", 0)
+            short_id = info.get("short_id", "")
+            session_uuid = info["session_uuid"]
+
+            if restart_count < max_restarts:
+                log(f"Dead session {session_uuid} claimed #{issue_str}, "
+                    f"restarting (attempt {restart_count + 1}/{max_restarts})")
+                spawn_agent(config, agent_id=short_id, resume_uuid=session_uuid)
+                info["restart_count"] = restart_count + 1
+                changed = True
+            else:
+                log(f"Max restarts reached for #{issue_str}, releasing claim")
+                _release_claim(issue_str, session_uuid, restart_count)
+                del history[issue_str]
+                changed = True
+
+        if changed:
+            _save_claim_history(history)
+
+
+# ---------------------------------------------------------------------------
 # Agent Lifecycle
 # ---------------------------------------------------------------------------
 
@@ -831,7 +940,8 @@ def _sigusr1_handler(signum, frame):
         log(f"Agent {_agent_state.short_id} marked as finishing")
 
 
-def agent_process_main(config: dict, agent_id: str | None = None):
+def agent_process_main(config: dict, agent_id: str | None = None,
+                        resume_uuid: str | None = None):
     """Entry point for a forked agent process. Runs the agent loop."""
     global _agent_state, _claude_proc, _agent_config
     _agent_config = config
@@ -844,6 +954,7 @@ def agent_process_main(config: dict, agent_id: str | None = None):
         pid=my_pid,
         pid_start_time=_get_pid_start_time(my_pid),
         status="starting",
+        resume_session_uuid=resume_uuid or "",
     )
     _agent_state = state
     state.write()
@@ -891,33 +1002,44 @@ def agent_process_main(config: dict, agent_id: str | None = None):
         except Exception:
             pass
         try:
-            stale_ttl = str(cfg_get(config, "monitor", "stale_claim_ttl", default=14400))
-            coordination(config, "release-stale-claims", stale_ttl)
+            check_dead_claimed_issues(config)
         except Exception:
             pass
 
         # --- Dispatch (sets state.lock_held atomically if lock acquired) ---
-        state.status = "dispatching"
-        state.write()
-        chosen_type = dispatch(config, state)
-        if chosen_type is None:
-            log(f"Agent {short_id}: dispatch returned None (waiting)")
-            state.status = "waiting_dispatch"
+        # If this agent was spawned to resume a specific session, skip dispatch.
+        _resume_uuid = state.resume_session_uuid
+        if _resume_uuid:
+            state.resume_session_uuid = ""
+            chosen_type = "work"
+            prompt = "You were interrupted mid-task. Review your conversation history and continue where you left off."
+            lock_name = ""
+            state.worker_type = chosen_type
             state.write()
-            time.sleep(quota_retry)
-            continue
+            log(f"Agent {short_id}: resuming session {_resume_uuid}")
+        else:
+            _resume_uuid = None
+            state.status = "dispatching"
+            state.write()
+            chosen_type = dispatch(config, state)
+            if chosen_type is None:
+                log(f"Agent {short_id}: dispatch returned None (waiting)")
+                state.status = "waiting_dispatch"
+                state.write()
+                time.sleep(quota_retry)
+                continue
 
-        wt_config = worker_types.get(chosen_type, {})
-        prompt = wt_config.get("prompt", f"/{chosen_type}")
-        lock_name = wt_config.get("lock", "")
+            wt_config = worker_types.get(chosen_type, {})
+            prompt = wt_config.get("prompt", f"/{chosen_type}")
+            lock_name = wt_config.get("lock", "")
 
-        state.worker_type = chosen_type
-        state.write()
+            state.worker_type = chosen_type
+            state.write()
 
-        log(f"Agent {short_id}: dispatched as {chosen_type}")
+            log(f"Agent {short_id}: dispatched as {chosen_type}")
 
         # --- Session setup ---
-        session_uuid = str(uuid.uuid4())
+        session_uuid = _resume_uuid if _resume_uuid else str(uuid.uuid4())
         state.uuid = session_uuid
         state.session_start = time.time()
         state.claimed_issue = 0
@@ -977,8 +1099,17 @@ def agent_process_main(config: dict, agent_id: str | None = None):
             continue
 
         # --- Monitor until claude exits ---
+        _last_tracked_issue = 0
         while _claude_proc.poll() is None:
             state.write()
+            # Track claim changes: write to history when claimed, clear when PR created
+            if state.claimed_issue > 0 and state.pr_number == 0:
+                if state.claimed_issue != _last_tracked_issue:
+                    record_claim(state.claimed_issue, state.uuid, state.short_id)
+                    _last_tracked_issue = state.claimed_issue
+            elif state.pr_number > 0 and state.claimed_issue > 0:
+                clear_claim(state.claimed_issue)
+                _last_tracked_issue = 0
             time.sleep(poll_interval)
 
         exit_code = _claude_proc.returncode
@@ -1029,7 +1160,8 @@ def _git_rev(wt_dir: str) -> str:
         return "unknown"
 
 
-def spawn_agent(config: dict, agent_id: str | None = None) -> int:
+def spawn_agent(config: dict, agent_id: str | None = None,
+                resume_uuid: str | None = None) -> int:
     """Fork a new agent process. Returns PID of the child."""
     # Auto-reap children so they don't become zombies
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
@@ -1049,7 +1181,7 @@ def spawn_agent(config: dict, agent_id: str | None = None) -> int:
             os.dup2(devnull_w, 2)
             os.close(devnull_r)
             os.close(devnull_w)
-            agent_process_main(config, agent_id)
+            agent_process_main(config, agent_id, resume_uuid)
         except Exception as e:
             log(f"Agent process crashed: {e}")
         finally:
