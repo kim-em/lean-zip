@@ -7,8 +7,8 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 6 (in 3 verification files — see Phase 4 details)
-- **Sessions**: ~95 completed (Feb 19–24)
+- **Sorries**: 1 (in DeflateFixedCorrect.lean — see Phase 4 details)
+- **Sessions**: ~100 completed (Feb 19–24)
 
 ## Milestones
 
@@ -26,7 +26,7 @@ Correctness proofs for the DEFLATE decompressor, completed over 25 sessions
 (Feb 19–23). Zero sorries. The proof chain covers:
 - BitReader ↔ bytesToBits correspondence (BitstreamCorrect)
 - Canonical Huffman tree ↔ spec table correspondence (HuffmanCorrect)
-- Block-level decode correctness for all 3 block types (DecodeCorrect)
+- Block-level decode correctness for all 3 block types (DecodeCorrect, DecodeComplete)
 - Dynamic Huffman tree decode correctness (DynamicTreesCorrect)
 - Stream-level inflate theorem (InflateCorrect)
 
@@ -65,29 +65,21 @@ Native compression + roundtrip verification. ~70 sessions so far.
 - `readBits_complete` (BitReader completeness, spec → native direction)
 - `readUInt16LE_complete`, `readBytes_complete` (BitstreamComplete)
 - `deflateFixed_spec` (native fixed compressor ↔ spec encodeFixed)
-- `huffTree_decode_complete`, `decode_go_complete` (DecodeCorrect)
+- `huffTree_decode_complete`, `decode_go_complete` (DecodeComplete)
+- `decodeHuffman_complete`, `decodeStored_complete` (DecodeComplete)
 - `decodeCLSymbols_complete` (DynamicTreesComplete)
 - Dynamic tree decode completeness chain (DynamicTreesComplete)
+- `inflateLoop_complete` (InflateCorrect)
+- `inflate_deflateFixed` — Level 1 roundtrip (DeflateFixedCorrect)
+- `inflate_deflateLazy` — Level 2 roundtrip (DeflateFixedCorrect)
+- `inflate_deflateDynamic` roundtrip partial — `encodeDynamic_decode_append`
+  (DeflateDynamicCorrect)
+- DecodeCorrect.lean split into DecodeCorrect + DecodeComplete
 
-**Remaining sorries (6):**
+**Remaining sorries (1):**
 
-`DecodeCorrect.lean` (1) — completeness direction (spec → native):
-- `decodeHuffman_complete` — spec decodeSymbols → native decodeHuffman.go
-
-`InflateCorrect.lean` (2) — completeness direction (spec → native):
-- `decodeDynamicTrees_complete` — spec decodeDynamicTables → native
-- `inflateLoop_complete` — spec decode.go → native inflateLoop
-
-`DeflateFixedCorrect.lean` (3) — compressor roundtrips:
-- `inflate_deflateFixed` — Level 1 roundtrip, depends on completeness lemmas
-- `inflate_deflateLazy` — Level 2 roundtrip, same strategy
-- `inflate_deflateDynamic` — Level 5 roundtrip, needs dynamic header + completeness
-
-**Key remaining gap**: The 3 completeness sorries (DecodeCorrect,
-InflateCorrect) form the reverse direction of existing soundness proofs.
-Once `decodeHuffman_complete` is proved, `inflateLoop_complete` follows,
-and the 3 compressor roundtrip theorems in DeflateFixedCorrect follow
-by composition.
+`DeflateFixedCorrect.lean` (1):
+- `inflate_deflateDynamic` — Level 5 roundtrip (dynamic Huffman compressor)
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
