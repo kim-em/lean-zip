@@ -412,4 +412,317 @@ theorem computeCodeLengths_valid (freqs : List (Nat × Nat)) (n : Nat)
         rw [assignLengths_length]
         exact hn
 
+/-! ## computeCodeLengths nonzero property -/
+
+/-- `fixKraftList` preserves nonzero entries: if `l[i]! ≠ 0` then
+    `(fixKraftList l maxBits)[i]! ≠ 0` (assuming `maxBits > 0`). -/
+theorem fixKraftList_nonzero (l : List Nat) (maxBits : Nat) (hmb : maxBits > 0)
+    (i : Nat) (hi : i < l.length) (hne : l[i]! ≠ 0) :
+    (fixKraftList l maxBits)[i]! ≠ 0 := by
+  simp only [fixKraftList]
+  split
+  · exact hne
+  · rw [getElem!_pos (l.map _) i (by simp; exact hi)]
+    simp only [List.getElem_map]
+    rw [show l[i] = l[i]! from by rw [getElem!_pos l i hi]]
+    cases heq : (l[i]! == 0) <;> simp_all [beq_iff_eq] <;> omega
+
+
+/-- Generalized: foldl set over an accumulator yields positive at position `s`
+    when either the accumulator already has a positive value at `s`, or some entry
+    for `s` exists with positive value. All entries for `s` must be positive. -/
+private theorem foldl_set_pos_or_exists (depths : List (Nat × Nat)) (acc : List Nat)
+    (s : Nat) (hs : s < acc.length)
+    (hpos : ∀ p ∈ depths, p.1 = s → p.2 > 0)
+    (hor : acc[s]! > 0 ∨ ∃ p ∈ depths, p.1 = s) :
+    (depths.foldl (fun acc (p : Nat × Nat) =>
+      if p.1 < acc.length then acc.set p.1 p.2 else acc) acc)[s]! > 0 := by
+  induction depths generalizing acc with
+  | nil =>
+    cases hor with
+    | inl h => exact h
+    | inr h => simp at h
+  | cons d ds ih =>
+    simp only [List.foldl_cons]
+    by_cases hds : d.1 = s
+    · -- d assigns to position s
+      apply ih
+      · split
+        · simp [List.length_set]; exact hs
+        · exact hs
+      · exact fun p hp => hpos p (List.mem_cons_of_mem _ hp)
+      · left
+        split
+        · rw [hds, getElem!_pos _ s (by simp [List.length_set]; exact hs)]
+          simp [List.getElem_set_self]
+          exact hpos d (List.mem_cons_self ..) hds
+        · rename_i hge; simp at hge; omega
+    · -- d doesn't assign to position s
+      apply ih
+      · split
+        · simp [List.length_set]; exact hs
+        · exact hs
+      · exact fun p hp => hpos p (List.mem_cons_of_mem _ hp)
+      · cases hor with
+        | inl h =>
+          left; split
+          · have hs' : s < (acc.set d.1 d.2).length := by simp [List.length_set]; exact hs
+            rw [getElem!_pos _ s hs']
+            have hne : d.1 ≠ s := fun h => hds h
+            have : (acc.set d.1 d.2)[s] = acc[s]'(by omega) :=
+              List.getElem_set_ne hne hs'
+            rw [this, ← getElem!_pos acc s hs]; exact h
+          · exact h
+        | inr h =>
+          obtain ⟨p, hp, hps⟩ := h
+          cases hp with
+          | head => exact absurd hps hds
+          | tail _ hmem => exact Or.inr ⟨p, hmem, hps⟩
+
+/-- If `(s, d)` appears in a list of depths, `d > 0`, and `s < n`, and all
+    entries for `s` are positive, then `(assignLengths depths n)[s]! > 0`. -/
+theorem assignLengths_pos (depths : List (Nat × Nat)) (n : Nat)
+    (s : Nat) (hs : s < n)
+    (hpos : ∀ p ∈ depths, p.1 = s → p.2 > 0) (hexists : ∃ p ∈ depths, p.1 = s) :
+    (assignLengths depths n)[s]! > 0 := by
+  simp only [assignLengths]
+  apply foldl_set_pos_or_exists
+  · simp [List.length_replicate]; exact hs
+  · exact hpos
+  · exact Or.inr hexists
+
+/-- `insertByWeight` preserves membership: elements of `xs` and the inserted `t`
+    are all in the result. -/
+private theorem insertByWeight_mem (t : BuildTree) (xs : List BuildTree) :
+    ∀ x, x ∈ insertByWeight t xs ↔ x = t ∨ x ∈ xs := by
+  intro x
+  induction xs with
+  | nil => simp [insertByWeight]
+  | cons y ys ih =>
+    simp only [insertByWeight]
+    split
+    · -- t :: y :: ys ↔ x = t ∨ x ∈ y :: ys — trivially true
+      simp [List.mem_cons]
+    · -- result is y :: insertByWeight t ys
+      -- goal: x ∈ y :: insertByWeight t ys ↔ x = t ∨ x ∈ y :: ys
+      constructor
+      · simp only [List.mem_cons]
+        intro h; cases h with
+        | inl h => exact Or.inr (Or.inl h)  -- x = y
+        | inr h =>  -- x ∈ insertByWeight t ys
+          cases ih.mp h with
+          | inl h => exact Or.inl h  -- x = t
+          | inr h => exact Or.inr (Or.inr h)  -- x ∈ ys
+      · simp only [List.mem_cons]
+        intro h; cases h with
+        | inl h => exact Or.inr (ih.mpr (Or.inl h))  -- x = t
+        | inr h => cases h with
+          | inl h => exact Or.inl h  -- x = y
+          | inr h => exact Or.inr (ih.mpr (Or.inr h))  -- x ∈ ys
+
+/-- A leaf's depths at depth `d` contain exactly its symbol at depth `d`. -/
+private theorem BuildTree.depths_leaf (w s d : Nat) :
+    (BuildTree.leaf w s).depths d = [(s, d)] := rfl
+
+/-- A node's depths are the union of left and right subtree depths. -/
+private theorem BuildTree.depths_node (w : Nat) (l r : BuildTree) (d : Nat) :
+    (BuildTree.node w l r).depths d = l.depths (d + 1) ++ r.depths (d + 1) := rfl
+
+/-- Symbol `s` is a leaf symbol in tree `t`. -/
+private inductive BuildTree.HasSym : BuildTree → Nat → Prop where
+  | leaf (w s : Nat) : HasSym (.leaf w s) s
+  | nodeLeft (w : Nat) (l r : BuildTree) (s : Nat) : l.HasSym s → (BuildTree.node w l r).HasSym s
+  | nodeRight (w : Nat) (l r : BuildTree) (s : Nat) : r.HasSym s → (BuildTree.node w l r).HasSym s
+
+/-- If `t.HasSym s`, then `s` appears in `t.depths d` for any `d`. -/
+private theorem BuildTree.HasSym.in_depths {t : BuildTree} {s : Nat} (h : t.HasSym s) :
+    ∀ d, ∃ d', (s, d') ∈ t.depths d := by
+  induction h with
+  | leaf w s =>
+    intro d; exact ⟨d, by simp [depths]⟩
+  | nodeLeft w l r s _ ih =>
+    intro d
+    obtain ⟨d', hd'⟩ := ih (d + 1)
+    exact ⟨d', List.mem_append_left _ hd'⟩
+  | nodeRight w l r s _ ih =>
+    intro d
+    obtain ⟨d', hd'⟩ := ih (d + 1)
+    exact ⟨d', List.mem_append_right _ hd'⟩
+
+/-- `insertByWeight` on a node preserves all symbols from that node. -/
+private theorem buildHuffmanTree_HasSym_insertByWeight
+    (merged : BuildTree) (rest : List BuildTree) (s : Nat)
+    (h : ∃ t ∈ insertByWeight merged rest, t.HasSym s) :
+    ∃ t ∈ merged :: rest, t.HasSym s := by
+  obtain ⟨t, ht_mem, ht_sym⟩ := h
+  rw [insertByWeight_mem] at ht_mem
+  cases ht_mem with
+  | inl heq =>
+    refine ⟨merged, ?_, heq ▸ ht_sym⟩
+    exact List.Mem.head _
+  | inr hmem => exact ⟨t, List.Mem.tail _ hmem, ht_sym⟩
+
+/-- `buildHuffmanTree` preserves all symbols from the input list:
+    if some input tree has symbol `s`, then the output tree has symbol `s`. -/
+private theorem buildHuffmanTree_HasSym (ts : List BuildTree) (s : Nat)
+    (h : ∃ t ∈ ts, t.HasSym s) : (buildHuffmanTree ts).HasSym s := by
+  match ts with
+  | [] => obtain ⟨_, hmem, _⟩ := h; simp at hmem
+  | [t] =>
+    obtain ⟨t', hmem, hsym⟩ := h
+    simp [buildHuffmanTree]
+    simp at hmem
+    exact hmem ▸ hsym
+  | t1 :: t2 :: rest =>
+    simp only [buildHuffmanTree]
+    have : (insertByWeight (BuildTree.node (t1.weight + t2.weight) t1 t2) rest).length < (t1 :: t2 :: rest).length := by
+      simp [insertByWeight_length]
+    apply buildHuffmanTree_HasSym _ s
+    obtain ⟨t', hmem, hsym⟩ := h
+    simp only [List.mem_cons] at hmem
+    cases hmem with
+    | inl h =>
+      -- t' = t1, which is the left child of merged
+      exact ⟨_, (insertByWeight_mem _ _ _).mpr (Or.inl rfl), .nodeLeft _ _ _ _ (h ▸ hsym)⟩
+    | inr h => cases h with
+      | inl h =>
+        -- t' = t2, which is the right child of merged
+        exact ⟨_, (insertByWeight_mem _ _ _).mpr (Or.inl rfl), .nodeRight _ _ _ _ (h ▸ hsym)⟩
+      | inr hmem =>
+        -- t' ∈ rest, which is in insertByWeight result
+        exact ⟨t', (insertByWeight_mem _ _ _).mpr (Or.inr hmem), hsym⟩
+termination_by ts.length
+
+/-- `buildHuffmanTree` returns a node (not a leaf) when given ≥ 2 trees. -/
+private theorem buildHuffmanTree_isNode (ts : List BuildTree) (h : ts.length ≥ 2) :
+    ∃ w l r, buildHuffmanTree ts = BuildTree.node w l r := by
+  match ts with
+  | [] => simp at h
+  | [_] => simp at h
+  | t1 :: t2 :: rest =>
+    simp only [buildHuffmanTree]
+    let merged := BuildTree.node (t1.weight + t2.weight) t1 t2
+    have hlen : (insertByWeight merged rest).length =
+        rest.length + 1 := insertByWeight_length _ _
+    by_cases hrest : rest = []
+    · -- rest = [], so insertByWeight merged [] = [merged]
+      subst hrest
+      simp only [insertByWeight, buildHuffmanTree]
+      exact ⟨_, _, _, rfl⟩
+    · -- rest non-empty, insertByWeight has ≥ 2 elements, recurse
+      have hge2 : (insertByWeight merged rest).length ≥ 2 := by
+        have : rest.length > 0 := by
+          cases rest with | nil => simp at hrest | cons _ _ => simp
+        omega
+      have hlt : (insertByWeight merged rest).length < (t1 :: t2 :: rest).length := by
+        simp [insertByWeight_length]
+      exact buildHuffmanTree_isNode _ hge2
+termination_by ts.length
+
+/-- All depths from `buildHuffmanTree` with ≥ 2 input trees are ≥ 1. -/
+private theorem buildHuffmanTree_depths_ge_one (ts : List BuildTree) (h : ts.length ≥ 2)
+    (p : Nat × Nat) (hp : p ∈ (buildHuffmanTree ts).depths 0) : p.2 ≥ 1 := by
+  obtain ⟨w, l, r, htree⟩ := buildHuffmanTree_isNode ts h
+  rw [htree, BuildTree.depths] at hp
+  simp only [List.mem_append] at hp
+  cases hp with
+  | inl h => exact l.depths_ge 1 p h
+  | inr h => exact r.depths_ge 1 p h
+
+/-- If symbol `sym` appears as a leaf in any tree in `ts`, then `(sym, d)` appears
+    in `(buildHuffmanTree ts).depths 0` for some `d`. -/
+private theorem buildHuffmanTree_leaf_in_depths (ts : List BuildTree) (sym : Nat)
+    (hmem : ∃ t ∈ ts, ∃ w, t = BuildTree.leaf w sym) :
+    ∃ d, (sym, d) ∈ (buildHuffmanTree ts).depths 0 := by
+  obtain ⟨t, ht_mem, w, ht_eq⟩ := hmem
+  have hsym : t.HasSym sym := ht_eq ▸ .leaf w sym
+  exact (buildHuffmanTree_HasSym ts sym ⟨t, ht_mem, hsym⟩).in_depths 0
+
+/-- If symbol `s` appears with nonzero frequency in `freqs` and `s < numSymbols`,
+    then `(computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0`.
+    Requires `maxBits > 0`. -/
+theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBits : Nat)
+    (hmb : maxBits > 0) (s : Nat) (hs : s < numSymbols)
+    (hfreq : ∃ p ∈ freqs, p.1 = s ∧ p.2 > 0) :
+    (computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0 := by
+  simp only [computeCodeLengths]
+  obtain ⟨p, hp, hps, hpf⟩ := hfreq
+  -- p has nonzero freq, so it passes the filter
+  have hs_nz : p ∈ freqs.filter (fun x => decide (x.2 > 0)) := by
+    simp only [List.mem_filter, decide_eq_true_eq]; exact ⟨hp, hpf⟩
+  -- Nonzero list is non-empty
+  have hne : ¬(freqs.filter (fun x => decide (x.2 > 0))).isEmpty := by
+    intro h; rw [List.isEmpty_iff_length_eq_zero] at h
+    exact absurd (List.length_pos_of_mem hs_nz) (by omega)
+  rw [if_neg hne]
+  -- Abbreviate the nonzero list
+  let nz := freqs.filter (fun x => decide (x.2 > 0))
+  split
+  · -- Single nonzero freq: must be symbol s
+    rename_i hlen1
+    -- Create nz-based copies of hypotheses
+    have hs_nz' : p ∈ nz := hs_nz
+    have hlen1' : nz.length = 1 := by rw [beq_iff_eq] at hlen1; exact hlen1
+    have hhead : nz.head! = p := by
+      have ⟨hd, tl, htl⟩ : ∃ hd tl, nz = hd :: tl := by
+        cases hc : nz with
+        | nil => exact absurd (hc ▸ hs_nz') (by simp)
+        | cons x xs => exact ⟨x, xs, rfl⟩
+      have htl_nil : tl = [] := by rw [htl] at hlen1'; simp at hlen1'; exact hlen1'
+      rw [htl, htl_nil] at hs_nz'
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hs_nz'
+      rw [htl, htl_nil]; simp only [List.head!]; exact hs_nz'.symm
+    have hhead_fst : nz.head!.fst = s := by rw [hhead, hps]
+    rw [show (nz.head!.fst, 1) = (s, 1) from by rw [hhead_fst]]
+    have := assignLengths_pos [(s, 1)] numSymbols s hs
+      (fun q hq _ => by simp only [List.mem_cons, List.mem_nil_iff, or_false] at hq; subst hq; omega)
+      ⟨(s, 1), List.Mem.head _, rfl⟩
+    omega
+  · -- Multiple nonzero frequencies
+    rename_i hlen_ne1
+    -- Abbreviate the computation
+    let sorted := (nz.map fun (sym, freq) => BuildTree.leaf freq sym)
+      |>.mergeSort (fun a b => a.weight ≤ b.weight)
+    let tree := buildHuffmanTree sorted
+    -- sorted has ≥ 2 elements
+    have hnz_ge2 : nz.length ≥ 2 := by
+      have hs_nz' : p ∈ nz := hs_nz
+      have hne_empty : nz.length > 0 := List.length_pos_of_mem hs_nz'
+      have hne1 : nz.length ≠ 1 := by
+        intro h1; exact hlen_ne1 (by rw [h1]; decide)
+      omega
+    have hsorted_ge2 : sorted.length ≥ 2 := by
+      simp only [sorted, List.length_mergeSort, List.length_map]; exact hnz_ge2
+    -- fixKraftList preserves nonzero
+    apply fixKraftList_nonzero _ _ hmb s
+    · rw [assignLengths_length]; exact hs
+    · -- s appears as a leaf in sorted
+      have hs_in_mapped : BuildTree.leaf p.2 s ∈
+          nz.map (fun (sym, freq) => BuildTree.leaf freq sym) := by
+        simp only [List.mem_map]
+        exact ⟨p, hs_nz, by rw [← hps]⟩
+      have hs_in_sorted : BuildTree.leaf p.2 s ∈ sorted := by
+        exact List.mem_mergeSort.mpr hs_in_mapped
+      -- s appears in tree's depths
+      have hs_leaf : ∃ t ∈ sorted, ∃ w, t = BuildTree.leaf w s :=
+        ⟨_, hs_in_sorted, p.2, rfl⟩
+      obtain ⟨d, hd_mem⟩ := buildHuffmanTree_leaf_in_depths sorted s hs_leaf
+      -- d ≥ 1 (because sorted has ≥ 2 elements)
+      have hd_ge : d ≥ 1 := buildHuffmanTree_depths_ge_one sorted hsorted_ge2 (s, d) hd_mem
+      -- (s, min d maxBits) ∈ capped, with min d maxBits > 0
+      have hs_capped : (s, min d maxBits) ∈
+          tree.depths.map (fun (s, d) => (s, min d maxBits)) := by
+        simp only [List.mem_map]; exact ⟨(s, d), hd_mem, rfl⟩
+      have := assignLengths_pos
+        (tree.depths.map (fun (s, d) => (s, min d maxBits)))
+        numSymbols s hs
+        (fun q hq heqs => by
+          simp only [List.mem_map] at hq
+          obtain ⟨⟨s', d'⟩, hq_mem, rfl⟩ := hq
+          have hd'_ge : d' ≥ 1 := buildHuffmanTree_depths_ge_one sorted hsorted_ge2 (s', d') hq_mem
+          show min d' maxBits > 0
+          omega)
+        ⟨(s, min d maxBits), hs_capped, rfl⟩
+      exact Nat.pos_iff_ne_zero.mp this
+
 end Huffman.Spec

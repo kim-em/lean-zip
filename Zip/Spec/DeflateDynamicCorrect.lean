@@ -538,7 +538,97 @@ theorem deflateDynamic_spec (data : ByteArray) :
         List.replicate
           ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8)
           false := by
-  sorry
+  -- Extract the intermediate values from deflateDynamic
+  let tokens := lz77Greedy data 32768
+  let litFreqs := (tokenFreqs tokens).1
+  let distFreqs := (tokenFreqs tokens).2
+  let litFreqPairs := (List.range litFreqs.size).map fun i => (i, litFreqs[i]!)
+  let distFreqPairs := (List.range distFreqs.size).map fun i => (i, distFreqs[i]!)
+  let litLens := Huffman.Spec.computeCodeLengths litFreqPairs 286 15
+  let distLens₀ := Huffman.Spec.computeCodeLengths distFreqPairs 30 15
+  let distLens := if distLens₀.all (fun x => x == 0) then distLens₀.set 0 1 else distLens₀
+  -- Properties of computeCodeLengths
+  have hlit_len : litLens.length = 286 :=
+    Huffman.Spec.computeCodeLengths_length litFreqPairs 286 15
+  have hdist₀_len : distLens₀.length = 30 :=
+    Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
+  have hlit_valid : Huffman.Spec.ValidLengths litLens 15 :=
+    Huffman.Spec.computeCodeLengths_valid litFreqPairs 286 15 (by omega) (by omega)
+  have hlit_bound : ∀ x ∈ litLens, x ≤ 15 :=
+    Huffman.Spec.computeCodeLengths_bounded litFreqPairs 286 15 (by omega)
+  have hdist₀_valid : Huffman.Spec.ValidLengths distLens₀ 15 :=
+    Huffman.Spec.computeCodeLengths_valid distFreqPairs 30 15 (by omega) (by omega)
+  have hdist₀_bound : ∀ x ∈ distLens₀, x ≤ 15 :=
+    Huffman.Spec.computeCodeLengths_bounded distFreqPairs 30 15 (by omega)
+  -- distLens properties (with the fixup)
+  have hdist_len : distLens.length = 30 := by
+    simp only [distLens]; split
+    · rw [List.length_set]; exact hdist₀_len
+    · exact hdist₀_len
+  have hdist_bound : ∀ x ∈ distLens, x ≤ 15 := by
+    intro x hx
+    simp only [distLens] at hx; split at hx
+    · -- distLens₀.set 0 1
+      rw [List.mem_iff_getElem] at hx
+      obtain ⟨i, hi, hxi⟩ := hx
+      rw [List.length_set] at hi
+      by_cases h0 : i = 0
+      · subst h0; simp at hxi; omega
+      · have hne : ¬(0 = i) := fun h => h0 (h.symm)
+        simp [hne] at hxi
+        exact hxi ▸ hdist₀_bound _ (List.getElem_mem ..)
+    · exact hdist₀_bound x hx
+  have hdist_valid : Huffman.Spec.ValidLengths distLens 15 := by
+    by_cases hall0 : (distLens₀.all (fun x => x == 0)) = true
+    · -- When all entries are 0, setting index 0 to 1 gives ValidLengths
+      have hdl : distLens = distLens₀.set 0 1 := by
+        simp only [distLens, hall0, ↓reduceIte]
+      have hall : ∀ x ∈ distLens₀, x = 0 := by
+        intro x hx
+        have := List.all_eq_true.mp hall0 x hx
+        simp [beq_iff_eq] at this; exact this
+      have hrepl : distLens₀ = List.replicate 30 0 := by
+        rw [← hdist₀_len]; exact List.eq_replicate_iff.mpr ⟨rfl, hall⟩
+      rw [hdl, hrepl]
+      constructor
+      · intro l hl
+        rw [List.mem_iff_getElem] at hl
+        obtain ⟨i, hi, hli⟩ := hl
+        rw [List.length_set, List.length_replicate] at hi
+        by_cases h0 : i = 0
+        · subst h0; simp at hli; omega
+        · have hne : ¬(0 = i) := fun h => h0 h.symm
+          rw [List.getElem_set] at hli
+          simp only [hne, ↓reduceIte, List.getElem_replicate] at hli
+          omega
+      · -- Kraft sum for [1, 0, 0, ..., 0] with 30 entries
+        -- filter gives [1], fold gives 2^14 ≤ 2^15
+        decide
+    · have hdl : distLens = distLens₀ := by
+        simp only [distLens, hall0, Bool.false_eq_true, ↓reduceIte]
+      rw [hdl]; exact hdist₀_valid
+  -- encodeDynamicTrees succeeds
+  have henc_trees_some : (Deflate.Spec.encodeDynamicTrees litLens distLens).isSome = true := by
+    sorry
+  -- encodeSymbols succeeds
+  have henc_syms_some : (Deflate.Spec.encodeSymbols litLens distLens
+      (tokensToSymbols tokens)).isSome = true := by
+    sorry
+  -- Extract the actual values
+  cases henc_trees : Deflate.Spec.encodeDynamicTrees litLens distLens with
+  | none => simp [henc_trees] at henc_trees_some
+  | some headerBits =>
+    cases henc_syms : Deflate.Spec.encodeSymbols litLens distLens
+        (tokensToSymbols tokens) with
+    | none => simp [henc_syms] at henc_syms_some
+    | some symBits =>
+      refine ⟨litLens, distLens, headerBits, symBits,
+        hlit_valid, hdist_valid,
+        by omega, by omega, by omega, by omega,
+        hlit_bound, hdist_bound,
+        henc_trees, henc_syms, ?_⟩
+      -- bytesToBits decomposition
+      sorry
 
 /-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
     codes then decompressing recovers the original data.
