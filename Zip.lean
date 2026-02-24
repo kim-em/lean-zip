@@ -48,6 +48,7 @@ import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.DeflateDynamicEmit
 import Zip.Spec.DeflateDynamicHeader
+import Zip.Spec.DeflateDynamicFreqs
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.DeflateRoundtrip
 import Zip.Spec.BinaryCorrect
