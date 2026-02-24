@@ -967,4 +967,65 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
           simp only [ih bits' restSyms bits'' hrec]
           obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
 
+set_option linter.unusedSimpArgs false in
+/-- `readNBytes` is suffix-invariant. -/
+private theorem readNBytes_append (n : Nat) (bits suffix : List Bool)
+    (acc bytes : List UInt8) (rest : List Bool)
+    (h : decodeStored.readNBytes n bits acc = some (bytes, rest)) :
+    decodeStored.readNBytes n (bits ++ suffix) acc = some (bytes, rest ++ suffix) := by
+  induction n generalizing bits acc bytes rest with
+  | zero =>
+    simp [decodeStored.readNBytes] at h ⊢
+    obtain ⟨rfl, rfl⟩ := h; exact ⟨rfl, rfl⟩
+  | succ k ih =>
+    unfold decodeStored.readNBytes at h ⊢
+    cases hrb : readBitsLSB 8 bits with
+    | none => simp [hrb] at h
+    | some p =>
+      obtain ⟨v, bits'⟩ := p
+      simp only [hrb, bind, Option.bind] at h ⊢
+      rw [readBitsLSB_append 8 bits suffix v bits' hrb]
+      simp only [bind, Option.bind]
+      exact ih bits' (acc ++ [v.toUInt8]) bytes rest h
+
+/-- `alignToByte (bits ++ suffix) = alignToByte bits ++ suffix`
+    when `suffix.length % 8 = 0`. -/
+private theorem alignToByte_append (bits suffix : List Bool)
+    (hsuf : suffix.length % 8 = 0) :
+    alignToByte (bits ++ suffix) = alignToByte bits ++ suffix := by
+  simp only [alignToByte, List.length_append]
+  rw [show (bits.length + suffix.length) % 8 = bits.length % 8 by omega]
+  exact List.drop_append_of_le_length (Nat.mod_le _ _)
+
+set_option linter.unusedSimpArgs false in
+/-- `decodeStored` is suffix-invariant when suffix is byte-aligned. -/
+theorem decodeStored_append (bits suffix : List Bool)
+    (bytes : List UInt8) (rest : List Bool)
+    (hsuf : suffix.length % 8 = 0)
+    (h : decodeStored bits = some (bytes, rest)) :
+    decodeStored (bits ++ suffix) = some (bytes, rest ++ suffix) := by
+  simp only [decodeStored] at h ⊢
+  rw [alignToByte_append bits suffix hsuf]
+  -- Thread readBitsLSB 16 for LEN
+  cases hrl : readBitsLSB 16 (alignToByte bits) with
+  | none => simp [hrl] at h
+  | some p =>
+    obtain ⟨len, bits₁⟩ := p
+    simp only [hrl, bind, Option.bind] at h ⊢
+    rw [readBitsLSB_append 16 (alignToByte bits) suffix len bits₁ hrl]
+    simp only [bind, Option.bind]
+    -- Thread readBitsLSB 16 for NLEN
+    cases hrn : readBitsLSB 16 bits₁ with
+    | none => simp [hrn] at h
+    | some q =>
+      obtain ⟨nlen, bits₂⟩ := q
+      simp only [hrn, bind, Option.bind] at h ⊢
+      rw [readBitsLSB_append 16 bits₁ suffix nlen bits₂ hrn]
+      simp only [bind, Option.bind]
+      -- Guard passes identically
+      by_cases hg : (len ^^^ nlen == 0xFFFF) = true
+      · simp only [guard, hg, ↓reduceIte] at h ⊢
+        exact readNBytes_append len bits₂ suffix [] bytes rest h
+      · simp only [guard, hg, ↓reduceIte] at h; simp at h
+
 end Deflate.Spec
