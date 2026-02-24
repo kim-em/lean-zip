@@ -221,7 +221,7 @@ def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter
 termination_by tokens.size - i
 
 /-- Write a fixed Huffman DEFLATE block from LZ77 tokens. -/
-protected def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
+def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
   let bw := BitWriter.empty
   let bw := bw.writeBits 1 1  -- BFINAL
   let bw := bw.writeBits 2 1  -- BTYPE = 01
