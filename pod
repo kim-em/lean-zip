@@ -1349,12 +1349,24 @@ def spawn_agent(config: dict, agent_id: str | None = None,
     """
     pid = os.fork()
     if pid > 0:
-        # Parent: wait for the short-lived intermediate child (exits immediately)
-        os.waitpid(pid, 0)
+        # Parent: wait for the short-lived intermediate child (exits immediately).
+        # Retry on EINTR so a signal doesn't cause a spurious launch failure.
+        while True:
+            try:
+                os.waitpid(pid, 0)
+                break
+            except ChildProcessError:
+                break
+            except InterruptedError:
+                continue
         return pid
     # Intermediate child: fork the actual agent, then exit immediately so
     # the agent is adopted by init (no zombie, no SIGCHLD games needed).
-    if os.fork() > 0:
+    try:
+        gc_pid = os.fork()
+    except Exception:
+        os._exit(1)
+    if gc_pid > 0:
         os._exit(0)
     # Grandchild: the actual agent process, adopted by init upon exit.
     try:
