@@ -218,7 +218,7 @@ def decodeDynamicTrees (br : BitReader) :
   let clTree ← HuffTree.fromLengths clLengths 7
   let totalCodes := numLitLen + numDist
   let (codeLengths, br) ← decodeCLSymbols clTree br (.replicate totalCodes 0)
-    0 totalCodes totalCodes
+    0 totalCodes (totalCodes + 1)
   let litLenLengths := codeLengths.extract 0 numLitLen
   let distLengths := codeLengths.extract numLitLen totalCodes
   let litTree ← HuffTree.fromLengths litLenLengths

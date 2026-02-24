@@ -14,7 +14,7 @@ namespace Deflate.Correctness
 
 /-- `readCLCodeLengths` completeness: if the spec's `readCLLengths` succeeds,
     then the native `readCLCodeLengths` also succeeds with corresponding results. -/
-private theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
+protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
     (clLengths : Array UInt8) (i numCodeLen : Nat)
     (clLengths' : List Nat) (rest : List Bool)
     (hwf : br.bitOff < 8)
@@ -89,7 +89,7 @@ private theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
 set_option linter.unusedSimpArgs false in
 /-- `decodeCLSymbols` completeness: if the spec's `decodeCLSymbols` succeeds,
     then the native `decodeCLSymbols` also succeeds with corresponding results. -/
-private theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
+protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
     (clLengths : Array UInt8)
     (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
     (idx totalCodes fuel : Nat)

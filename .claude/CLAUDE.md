@@ -748,6 +748,19 @@ Update it during review and reflect sessions.
   ```
   Note: `List.map_congr_left` produces `fun n => n` not `id`, so
   `List.map_id` won't match — use `simp` instead.
+- **UInt8→Nat→UInt8 roundtrip**: To prove
+  `Nat.toUInt8 (UInt8.toNat u) = u`, use:
+  ```lean
+  unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
+  rw [BitVec.ofNat_toNat, BitVec.setWidth_eq]
+  ```
+  Do NOT use `simp [Nat.toUInt8, UInt8.toNat, ...]` — it loops via
+  `UInt8.toNat.eq_1` / `UInt8.toNat_toBitVec`. Do NOT try `congr 1`
+  (max recursion) or `UInt8.ext` / `UInt8.eq_of_toNat_eq` (don't exist).
+  For lists: `l.map (Nat.toUInt8 ∘ UInt8.toNat) = l` via
+  `List.map_congr_left` with the above per-element proof, then `simp`.
+- **`Array.toArray_toList`**: `a.toList.toArray = a` for any Array.
+  NOT `Array.toList_toArray` or `List.toArray_toList` — those don't exist.
 
 ## Current State
 
