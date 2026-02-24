@@ -261,6 +261,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
     Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
     Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
+    Zip/Spec/DeflateDynamicCorrect.lean — Native dynamic Huffman compressor correctness
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
