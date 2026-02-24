@@ -791,6 +791,18 @@ Update it during review and reflect sessions.
   `rw [if_pos/if_neg hcond] at h ⊢`. Note: `split at h ⊢` (multiple
   targets) is NOT supported — use `by_cases` instead.
 
+- **Spec decoder fuel limits roundtrip size bounds**: The spec `decode`
+  function uses `decodeSymbols` with hardcoded default fuel 10,000,000.
+  This means roundtrip theorems (`inflate_deflateX`) can only handle
+  data where `tokensToSymbols(tokens).length ≤ 10,000,000`. Since
+  `tokensToSymbols` length = `tokens.size + 1`:
+  - Greedy LZ77: `tokens.size ≤ data.size` → `data.size < 10,000,000`
+  - Lazy LZ77: `tokens.size ≤ 2 * data.size` → `data.size < 5,000,000`
+  Don't try to use `decodeSymbols_fuel_independent` to extend past the
+  default fuel — it only adds fuel, so it can't prove behavior at a
+  LOWER fuel than where the result was established. The constraint is
+  fundamental to the spec decoder definition.
+
 ## Current State
 
 See `PROGRESS.md` for global milestones and current phase.

@@ -532,4 +532,26 @@ theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
   simp only [hresolve]
   simp [pure, Pure.pure]
 
+/-- Encoding with fixed Huffman then decoding recovers the original data,
+    even when trailing bits are appended. -/
+theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
+    (bits rest : List Bool)
+    (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
+    (hresolve : resolveLZ77 syms [] = some data)
+    (hfuel : 10000000 ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
+    decode ([true, true, false] ++ bits ++ rest) = some data := by
+  show decode.go ([true, true, false] ++ bits ++ rest) [] 10001 = some data
+  unfold decode.go
+  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
+  simp only [readBitsLSB_2_true_false]
+  have hdec : decodeSymbols fixedLitLengths fixedDistLengths (bits ++ rest)
+      10000000 = some (syms, rest) :=
+    encodeSymbols_decodeSymbols fixedLitLengths fixedDistLengths syms bits rest
+      10000000 henc fixedLitLengths_valid fixedDistLengths_valid hfuel hvalid
+  simp only [List.nil_append]
+  rw [hdec]
+  simp only [hresolve]
+  simp [pure, Pure.pure]
+
 end Deflate.Spec

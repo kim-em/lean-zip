@@ -196,34 +196,32 @@ theorem lz77Lazy_spec_decode (data : ByteArray)
           omega)
         (tokensToSymbols_validSymbolList _)
 
-/-- `deflateFixed` produces a bytestream whose bits are the spec-level
-    fixed Huffman encoding of the LZ77 tokens. -/
-theorem deflateFixed_spec (data : ByteArray) :
+/-- `deflateFixedBlock` produces a bytestream whose bits are the spec-level
+    fixed Huffman encoding of the LZ77 tokens. Generalized over token array. -/
+theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
+    (henc_some : (Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
+        Deflate.Spec.fixedDistLengths
+        (tokensToSymbols tokens)).isSome = true)
+    (hempty : data.size = 0 → tokens = #[]) :
     ∃ bits,
       Deflate.Spec.encodeFixed
-        (tokensToSymbols (lz77Greedy data)) = some bits ∧
-      Deflate.Spec.bytesToBits (deflateFixed data) =
+        (tokensToSymbols tokens) = some bits ∧
+      Deflate.Spec.bytesToBits (deflateFixedBlock data tokens) =
         bits ++ List.replicate
           ((8 - bits.length % 8) % 8)
           false := by
-  -- Step 1: Show encodeSymbols succeeds on tokensToSymbols
-  have henc_some := encodeSymbols_tokensToSymbols_isSome data 32768 (by omega) (by omega)
-  -- tokensToSymbols = tokens.map toLZ77Symbol ++ [.endOfBlock]
-  have htoks_eq : tokensToSymbols (lz77Greedy data) =
-      (lz77Greedy data).toList.map LZ77Token.toLZ77Symbol ++ [.endOfBlock] := rfl
-  -- Extract allBits
+  have htoks_eq : tokensToSymbols tokens =
+      tokens.toList.map LZ77Token.toLZ77Symbol ++ [.endOfBlock] := rfl
   cases henc_all : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
       Deflate.Spec.fixedDistLengths
-      (tokensToSymbols (lz77Greedy data)) with
+      (tokensToSymbols tokens) with
   | none => simp [henc_all] at henc_some
   | some allBits =>
-    -- Decompose into token bits and endOfBlock bits
     rw [htoks_eq] at henc_all
     obtain ⟨tokBits, eobBits, henc_tok, henc_eob_syms, hallBits_eq⟩ :=
       Deflate.encodeSymbols_append_inv _ _
-        ((lz77Greedy data).toList.map LZ77Token.toLZ77Symbol)
+        (tokens.toList.map LZ77Token.toLZ77Symbol)
         [.endOfBlock] allBits henc_all
-    -- Extract the single endOfBlock encoding
     simp only [Deflate.Spec.encodeSymbols] at henc_eob_syms
     cases henc_eob : Deflate.Spec.encodeLitLen Deflate.Spec.fixedLitLengths
         Deflate.Spec.fixedDistLengths .endOfBlock with
@@ -231,20 +229,17 @@ theorem deflateFixed_spec (data : ByteArray) :
     | some eobBits' =>
       simp [henc_eob] at henc_eob_syms
       have heob_eq : eobBits = eobBits' := by rw [henc_eob_syms]
-      -- Step 2: Compute encodeFixed
       have henc_combined := Deflate.encodeSymbols_append _ _
-        ((lz77Greedy data).toList.map LZ77Token.toLZ77Symbol)
+        (tokens.toList.map LZ77Token.toLZ77Symbol)
         [.endOfBlock] tokBits eobBits henc_tok
         (by simp [Deflate.Spec.encodeSymbols, henc_eob, henc_eob_syms])
       have hencFixed : Deflate.Spec.encodeFixed
-          (tokensToSymbols (lz77Greedy data)) =
+          (tokensToSymbols tokens) =
           some ([true, true, false] ++ allBits) := by
         simp only [Deflate.Spec.encodeFixed, htoks_eq, henc_combined, bind,
           Option.bind, pure, Pure.pure]
         rw [hallBits_eq]
       refine ⟨[true, true, false] ++ allBits, hencFixed, ?_⟩
-      -- Step 3: Show bytesToBits (deflateFixed data) = header ++ allBits ++ padding
-      -- BitWriter header chain
       have hwf0 := BitWriter.empty_wf
       have hwf1 := BitWriter.writeBits_wf _ 1 1 hwf0 (by omega)
       have hwf2 := BitWriter.writeBits_wf _ 2 1 hwf1 (by omega)
@@ -255,67 +250,57 @@ theorem deflateFixed_spec (data : ByteArray) :
         rw [BitWriter.empty_toBits] at h1
         simp only [List.nil_append] at h1
         rw [h1] at h2; exact h2
-      -- endOfBlock correspondence
       have ⟨heob_cw, heob_len⟩ := Deflate.encodeSymbol_litTable_eq 256 eobBits' henc_eob
-      -- Non-zero case: emitTokens bw2 tokens 0 |>.writeHuffCode eob |>.flush
       have hemit := emitTokens_spec
         (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-        (lz77Greedy data) tokBits hwf2 henc_tok
+        tokens tokBits hwf2 henc_tok
       have hwf3 := emitTokens_wf
         (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-        (lz77Greedy data) hwf2
+        tokens hwf2
       have hwf4 := BitWriter.writeHuffCode_wf
-        (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) (lz77Greedy data) 0)
+        (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) tokens 0)
         fixedLitCodes[256]!.1 fixedLitCodes[256]!.2 hwf3 heob_len
       have hbits4 := BitWriter.writeHuffCode_toBits
-        (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) (lz77Greedy data) 0)
+        (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) tokens 0)
         fixedLitCodes[256]!.1 fixedLitCodes[256]!.2 hwf3 heob_len
       rw [hemit, hbw2_bits] at hbits4
-      -- Show deflateFixed data equals the BitWriter chain
-      have hdef : deflateFixed data =
+      have hdef : deflateFixedBlock data tokens =
           (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-            (lz77Greedy data) 0
+            tokens 0
             |>.writeHuffCode fixedLitCodes[256]!.1 fixedLitCodes[256]!.2).flush := by
-        simp only [deflateFixed]
         unfold deflateFixedBlock
         split
-        · -- data.size == 0: emitTokens on empty tokens is identity
-          rename_i hzero
+        · rename_i hzero
           have hzero' : data.size = 0 := by
             simp only [beq_iff_eq] at hzero; exact hzero
-          have htokens : lz77Greedy data = #[] := by
-            simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
-            have : lz77Greedy.trailing data 0 = [] := by
-              unfold lz77Greedy.trailing; simp [show ¬(0 < data.size) from by omega]
-            simp [this]
-          have hempty : emitTokens
+          have htokens : tokens = #[] := hempty hzero'
+          have hempty_emit : emitTokens
               (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) #[] 0 =
               (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) := by
             simp [emitTokens]
-          rw [htokens, hempty]; rfl
+          rw [htokens, hempty_emit]; rfl
         · rfl
       rw [hdef]
-      -- Apply flush_toBits
       have hflush := BitWriter.flush_toBits _ hwf4
       have hbits_eq : (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          (lz77Greedy data) 0 |>.writeHuffCode fixedLitCodes[256]!.1
+          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
           fixedLitCodes[256]!.2).toBits =
           [true, true, false] ++ allBits := by
         rw [hbits4, hallBits_eq, heob_eq, heob_cw, List.append_assoc]
       rw [hflush, hbits_eq]
       suffices hmod : (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          (lz77Greedy data) 0 |>.writeHuffCode fixedLitCodes[256]!.1
+          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
           fixedLitCodes[256]!.2).bitCount.toNat % 8 =
           ([true, true, false] ++ allBits).length % 8 by
         simp only [hmod]
       have htoBits_len : (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          (lz77Greedy data) 0 |>.writeHuffCode fixedLitCodes[256]!.1
+          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
           fixedLitCodes[256]!.2).toBits.length =
           (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          (lz77Greedy data) 0 |>.writeHuffCode fixedLitCodes[256]!.1
+          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
           fixedLitCodes[256]!.2).data.data.toList.length * 8 +
           (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          (lz77Greedy data) 0 |>.writeHuffCode fixedLitCodes[256]!.1
+          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
           fixedLitCodes[256]!.2).bitCount.toNat := by
         simp only [BitWriter.toBits, List.length_append, List.length_flatMap,
           Deflate.Spec.bytesToBits.byteToBits_length, List.length_map, List.length_range]
@@ -327,6 +312,25 @@ theorem deflateFixed_spec (data : ByteArray) :
         rw [hsum]
       rw [hbits_eq] at htoBits_len
       omega
+
+/-- `deflateFixed` produces a bytestream whose bits are the spec-level
+    fixed Huffman encoding of the LZ77 tokens. -/
+theorem deflateFixed_spec (data : ByteArray) :
+    ∃ bits,
+      Deflate.Spec.encodeFixed
+        (tokensToSymbols (lz77Greedy data)) = some bits ∧
+      Deflate.Spec.bytesToBits (deflateFixed data) =
+        bits ++ List.replicate
+          ((8 - bits.length % 8) % 8)
+          false := by
+  simp only [deflateFixed]
+  exact deflateFixedBlock_spec data (lz77Greedy data)
+    (encodeSymbols_tokensToSymbols_isSome data 32768 (by omega) (by omega))
+    (fun hzero => by
+      simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
+      have : lz77Greedy.trailing data 0 = [] := by
+        unfold lz77Greedy.trailing; simp [show ¬(0 < data.size) from by omega]
+      simp [this])
 
 /-! ## Inflate completeness (restricted) -/
 
@@ -365,23 +369,90 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
 /-! ## Main roundtrip theorem -/
 
 /-- Native Level 1 roundtrip: compressing with fixed Huffman codes then
-    decompressing recovers the original data.
-    **Sorry**: depends on `inflate_complete` (the reverse direction of
-    `inflate_correct'`). Once `inflate_complete` is proved, this theorem
-    follows from `lz77Greedy_spec_decode` + `deflateFixed_spec`. -/
+    decompressing recovers the original data. The size bound comes from the
+    spec decoder's per-block fuel limit (10M symbols, one per byte worst case). -/
 theorem inflate_deflateFixed (data : ByteArray)
-    (hsize : data.size ≤ 256 * 1024 * 1024) :
+    (hsize : data.size < 10000000) :
     Zip.Native.Inflate.inflate (deflateFixed data) = .ok data := by
-  sorry
+  -- Step 1: deflateFixed_spec gives bits and bytesToBits relationship
+  obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateFixed_spec data
+  -- Step 2: Extract allBits from encodeFixed
+  simp only [Deflate.Spec.encodeFixed] at henc_fixed
+  cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
+      Deflate.Spec.fixedDistLengths
+      (tokensToSymbols (lz77Greedy data)) with
+  | none => simp [henc_syms] at henc_fixed
+  | some allBits =>
+    simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
+    -- bits_enc = [true, true, false] ++ allBits
+    have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
+      (Option.some.inj henc_fixed).symm
+    subst hbits_eq
+    -- Step 3: decode succeeds on bytesToBits (deflateFixed data)
+    have hdec : Deflate.Spec.decode
+        (Deflate.Spec.bytesToBits (deflateFixed data)) =
+        some data.data.toList := by
+      rw [hbytes]
+      exact Deflate.Spec.encodeFixed_decode_append
+        (tokensToSymbols (lz77Greedy data))
+        data.data.toList allBits _ henc_syms
+        (lz77Greedy_resolves data 32768 (by omega))
+        (by rw [tokensToSymbols_length]; have := lz77Greedy_size_le data 32768; omega)
+        (tokensToSymbols_validSymbolList _)
+    -- Step 4: inflate_complete bridges spec decode to native inflate
+    have hinf := inflate_complete (deflateFixed data) data.data.toList
+      (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
+    simp only at hinf ⊢; exact hinf
+
+/-- `deflateLazy` produces a bytestream whose bits are the spec-level
+    fixed Huffman encoding of the lazy LZ77 tokens. -/
+theorem deflateLazy_spec (data : ByteArray) :
+    ∃ bits,
+      Deflate.Spec.encodeFixed
+        (tokensToSymbols (lz77Lazy data)) = some bits ∧
+      Deflate.Spec.bytesToBits (deflateLazy data) =
+        bits ++ List.replicate
+          ((8 - bits.length % 8) % 8)
+          false := by
+  simp only [deflateLazy]
+  exact deflateFixedBlock_spec data (lz77Lazy data)
+    (encodeSymbols_tokensToSymbols_lazy_isSome data 32768 (by omega) (by omega))
+    (fun hzero => by
+      simp only [lz77Lazy, show data.size < 3 from by omega, ↓reduceIte]
+      have : lz77Lazy.trailing data 0 = [] := by
+        unfold lz77Lazy.trailing; simp [show ¬(0 < data.size) from by omega]
+      simp [this])
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
-    then decompressing recovers the original data.
-    **Sorry**: same proof strategy as `inflate_deflateFixed`, substituting
-    `lz77Lazy` for `lz77Greedy`. -/
+    then decompressing recovers the original data. The size bound comes from the
+    spec decoder's fuel limit (10M symbols, up to 2 per byte for lazy). -/
 theorem inflate_deflateLazy (data : ByteArray)
-    (hsize : data.size ≤ 256 * 1024 * 1024) :
+    (hsize : data.size < 5000000) :
     Zip.Native.Inflate.inflate (deflateLazy data) = .ok data := by
-  sorry
+  obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateLazy_spec data
+  simp only [Deflate.Spec.encodeFixed] at henc_fixed
+  cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
+      Deflate.Spec.fixedDistLengths
+      (tokensToSymbols (lz77Lazy data)) with
+  | none => simp [henc_syms] at henc_fixed
+  | some allBits =>
+    simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
+    have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
+      (Option.some.inj henc_fixed).symm
+    subst hbits_eq
+    have hdec : Deflate.Spec.decode
+        (Deflate.Spec.bytesToBits (deflateLazy data)) =
+        some data.data.toList := by
+      rw [hbytes]
+      exact Deflate.Spec.encodeFixed_decode_append
+        (tokensToSymbols (lz77Lazy data))
+        data.data.toList allBits _ henc_syms
+        (lz77Lazy_resolves data 32768 (by omega))
+        (by rw [tokensToSymbols_length]; have := lz77Lazy_size_le data 32768; omega)
+        (tokensToSymbols_validSymbolList _)
+    have hinf := inflate_complete (deflateLazy data) data.data.toList
+      (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
+    simp only at hinf ⊢; exact hinf
 
 /-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
     codes then decompressing recovers the original data.
