@@ -798,6 +798,60 @@ def _release_claim(issue_str: str, session_uuid: str, restart_count: int) -> boo
         return False
 
 
+def sync_claims_from_github():
+    """On pod startup, rebuild claim-history.json from GitHub for any claimed
+    issues we have no local record of. This lets pod reattach to sessions
+    that were running before a pod restart."""
+    import re as _re
+    repo = "kim-em/lean-zip"
+    cwd = str(PROJECT_DIR)
+
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--label", "agent-plan", "--label", "claimed",
+             "--state", "open", "--limit", "20", "--json", "number"],
+            capture_output=True, text=True, timeout=30, cwd=cwd,
+        )
+        if r.returncode != 0:
+            return
+        issues = [iss["number"] for iss in json.loads(r.stdout)]
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return
+
+    if not issues:
+        return
+
+    with _claim_history_filelock():
+        history = load_claim_history()
+        changed = False
+        for issue_num in issues:
+            key = str(issue_num)
+            if key in history:
+                continue  # Already tracked locally
+            # Fetch comments to find the most recent claim comment
+            try:
+                r = subprocess.run(
+                    ["gh", "api", f"repos/{repo}/issues/{issue_num}/comments",
+                     "--jq", '[.[] | select(.body | startswith("Claimed by session")) | .body] | last'],
+                    capture_output=True, text=True, timeout=30, cwd=cwd,
+                )
+                if r.returncode != 0:
+                    continue
+                comment_body = r.stdout.strip().strip('"')
+            except (subprocess.TimeoutExpired, OSError):
+                continue
+            # Parse: "Claimed by session `UUID` on branch `agent/SHORT_ID`"
+            m = _re.search(r'Claimed by session `([^`]+)` on branch `agent/([^`]+)`', comment_body)
+            if not m:
+                continue
+            session_uuid, short_id = m.group(1), m.group(2)
+            history[key] = {"session_uuid": session_uuid, "short_id": short_id, "restart_count": 0}
+            changed = True
+            log(f"Recovered claim: issue #{issue_num} → session {session_uuid[:8]} (short: {short_id})")
+        if changed:
+            _save_claim_history(history)
+
+
 def check_dead_claimed_issues(config: dict):
     """Detect locally-known sessions that claimed issues but are now dead.
     Restart them up to max_claim_restarts times, then release the claim.
@@ -1306,6 +1360,13 @@ def run_tui(config: dict):
 
 
 def _tui_main(stdscr, config: dict):
+    # Rebuild claim history from GitHub before starting, so pod can reattach
+    # to sessions that were running before a pod restart.
+    try:
+        sync_claims_from_github()
+    except Exception:
+        pass
+
     curses.curs_set(0)
     stdscr.timeout(1000)  # 1 second refresh
     curses.start_color()
