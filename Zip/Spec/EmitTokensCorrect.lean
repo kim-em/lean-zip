@@ -255,7 +255,7 @@ private theorem findTableCode_go_extraN (baseTable : Array UInt16)
 termination_by baseTable.size - i
 
 /-- Native `findLengthCode` returns idx < 29. -/
-private theorem nativeFindLengthCode_idx_bound (len idx extraN : Nat) (extraV : UInt32)
+theorem nativeFindLengthCode_idx_bound (len idx extraN : Nat) (extraV : UInt32)
     (h : findLengthCode len = some (idx, extraN, extraV)) :
     idx < 29 := by
   have := findTableCode_go_idx_bound _ _ _ _ _ _ _ h
@@ -263,7 +263,7 @@ private theorem nativeFindLengthCode_idx_bound (len idx extraN : Nat) (extraV : 
   omega
 
 /-- Native `findLengthCode` returns extraN ≤ 5. -/
-private theorem nativeFindLengthCode_extraN_bound (len idx extraN : Nat) (extraV : UInt32)
+theorem nativeFindLengthCode_extraN_bound (len idx extraN : Nat) (extraV : UInt32)
     (h : findLengthCode len = some (idx, extraN, extraV)) :
     extraN ≤ 5 := by
   have hidx := nativeFindLengthCode_idx_bound len idx extraN extraV h
@@ -273,7 +273,7 @@ private theorem nativeFindLengthCode_extraN_bound (len idx extraN : Nat) (extraV
   exact this ⟨idx, hidx⟩
 
 /-- Native `findDistCode` returns dIdx < 30. -/
-private theorem nativeFindDistCode_idx_bound (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
+theorem nativeFindDistCode_idx_bound (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
     dIdx < 30 := by
   have := findTableCode_go_idx_bound _ _ _ _ _ _ _ h
@@ -281,7 +281,7 @@ private theorem nativeFindDistCode_idx_bound (dist dIdx dExtraN : Nat) (dExtraV 
   omega
 
 /-- Native `findDistCode` returns dExtraN ≤ 13. -/
-private theorem nativeFindDistCode_extraN_bound (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
+theorem nativeFindDistCode_extraN_bound (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
     dExtraN ≤ 13 := by
   have hidx := nativeFindDistCode_idx_bound dist dIdx dExtraN dExtraV h
@@ -291,8 +291,15 @@ private theorem nativeFindDistCode_extraN_bound (dist dIdx dExtraN : Nat) (dExtr
   exact this ⟨dIdx, hidx⟩
 
 /-- `canonicalCodes` preserves the array size. -/
-private theorem canonicalCodes_size (lengths : Array UInt8) :
+theorem canonicalCodes_size (lengths : Array UInt8) :
     (canonicalCodes lengths).size = lengths.size := by
+  simp only [canonicalCodes]
+  rw [Deflate.Correctness.canonicalCodes_go_size]
+  simp [Array.size_replicate]
+
+/-- `canonicalCodes` preserves the array size (explicit maxBits version). -/
+theorem canonicalCodes_size' (lengths : Array UInt8) (maxBits : Nat) :
+    (canonicalCodes lengths maxBits).size = lengths.size := by
   simp only [canonicalCodes]
   rw [Deflate.Correctness.canonicalCodes_go_size]
   simp [Array.size_replicate]
@@ -355,10 +362,25 @@ termination_by lengths.size - i
 
 /-- `canonicalCodes` entries have `.snd.toNat ≤ bound` when all input lengths
     have `.toNat ≤ bound`. -/
-private theorem canonicalCodes_snd_le (lengths : Array UInt8) (bound : Nat)
+theorem canonicalCodes_snd_le (lengths : Array UInt8) (bound : Nat)
     (hlengths : ∀ j, j < lengths.size → lengths[j]!.toNat ≤ bound) (i : Nat)
     (hi : i < (canonicalCodes lengths).size) :
     (canonicalCodes lengths)[i]!.2.toNat ≤ bound := by
+  simp only [canonicalCodes] at hi ⊢
+  apply canonicalCodes_go_snd_le lengths _ 0 _ bound
+  · simp [Array.size_replicate]
+  · intro j hj
+    simp only [Array.size_replicate] at hj
+    rw [getElem!_pos _ _ (by simp [Array.size_replicate]; omega)]
+    simp [Array.getElem_replicate]
+  · exact hlengths
+  · exact hi
+
+/-- `canonicalCodes` entries have `.snd.toNat ≤ bound` (explicit maxBits version). -/
+theorem canonicalCodes_snd_le' (lengths : Array UInt8) (maxBits : Nat) (bound : Nat)
+    (hlengths : ∀ j, j < lengths.size → lengths[j]!.toNat ≤ bound) (i : Nat)
+    (hi : i < (canonicalCodes lengths maxBits).size) :
+    (canonicalCodes lengths maxBits)[i]!.2.toNat ≤ bound := by
   simp only [canonicalCodes] at hi ⊢
   apply canonicalCodes_go_snd_le lengths _ 0 _ bound
   · simp [Array.size_replicate]

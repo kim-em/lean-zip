@@ -1,4 +1,5 @@
 import Zip.Spec.DeflateEncodeDynamic
+import Zip.Spec.DeflateEncodeProps
 
 /-!
 # Dynamic Block Header Correspondence Proofs (RFC 1951 §3.2.7)
@@ -646,5 +647,107 @@ theorem encodeDynamicTrees_decodeDynamicTables
     have hdist_drop : (litLens ++ distLens).drop litLens.length = distLens := List.drop_left
     rw [hlit_take, hdist_drop]
     simp only [hlit_valid, hdist_valid, ↓reduceIte]
+
+/-! ## encodeCLEntries success -/
+
+private abbrev clFreqFoldl := fun (acc : List Nat) (p : CLEntry) =>
+  if p.1 < acc.length then acc.set p.1 (acc.getD p.1 0 + 1) else acc
+
+/-- The foldl preserves `acc.length`. -/
+private theorem clFreqFoldl_length (entries : List CLEntry)
+    (acc : List Nat) (hacc : acc.length = n) :
+    (entries.foldl clFreqFoldl acc).length = n := by
+  induction entries generalizing acc with
+  | nil => exact hacc
+  | cons entry rest ih =>
+    simp only [List.foldl_cons, clFreqFoldl]
+    split
+    · exact ih _ (by rw [List.length_set]; exact hacc)
+    · exact ih _ hacc
+
+/-- The foldl monotonically increases each entry: if `acc.getD code 0 > 0`,
+    the result also has `getD code 0 > 0`. -/
+private theorem clFreqFoldl_mono (entries : List CLEntry) (code : Nat)
+    (acc : List Nat) (hacc : acc.length = 19) (hpos : acc.getD code 0 > 0) :
+    (entries.foldl clFreqFoldl acc).getD code 0 > 0 := by
+  induction entries generalizing acc with
+  | nil => exact hpos
+  | cons entry rest ih =>
+    simp only [List.foldl_cons, clFreqFoldl]
+    obtain ⟨c', _⟩ := entry
+    by_cases hc'lt : c' < acc.length
+    · rw [if_pos hc'lt]
+      apply ih
+      · rw [List.length_set]; exact hacc
+      · rw [List.getD_eq_getElem?_getD, List.getElem?_set]
+        by_cases hc'code : c' = code
+        · subst hc'code
+          rw [if_pos rfl, if_pos hc'lt]; simp only [Option.getD_some]; omega
+        · rw [if_neg hc'code, ← List.getD_eq_getElem?_getD]; exact hpos
+    · rw [if_neg hc'lt]; exact ih acc hacc hpos
+
+/-- The foldl produces a positive entry at `code` if `(code, _)` appears
+    in the entries and `code < acc.length`. Generalized over accumulator. -/
+private theorem clFreqFoldl_pos (entries : List CLEntry) (code extra : Nat)
+    (acc : List Nat) (hacc : acc.length = 19) (hcode : code < 19)
+    (hmem : (code, extra) ∈ entries) :
+    (entries.foldl clFreqFoldl acc).getD code 0 > 0 := by
+  induction entries generalizing acc with
+  | nil => simp at hmem
+  | cons entry rest ih =>
+    simp only [List.foldl_cons, clFreqFoldl]
+    obtain ⟨c, e⟩ := entry
+    simp only [List.mem_cons, Prod.mk.injEq] at hmem
+    cases hmem with
+    | inl heq =>
+      have hc_eq : c = code := heq.1.symm
+      have hclt_acc : c < acc.length := by omega
+      rw [if_pos hclt_acc]; subst hc_eq
+      apply clFreqFoldl_mono
+      · rw [List.length_set]; exact hacc
+      · rw [List.getD_eq_getElem?_getD, List.getElem?_set]
+        rw [if_pos rfl, if_pos hclt_acc]; simp only [Option.getD_some]; omega
+    | inr hmem_rest =>
+      by_cases hclt : c < acc.length
+      · rw [if_pos hclt]
+        exact ih _ (by rw [List.length_set]; exact hacc) hmem_rest
+      · rw [if_neg hclt]
+        exact ih acc hacc hmem_rest
+
+/-- `clSymbolFreqs` always returns a list of length 19. -/
+theorem clSymbolFreqs_length (entries : List CLEntry) :
+    (clSymbolFreqs entries).length = 19 :=
+  clFreqFoldl_length entries _ (List.length_replicate ..)
+
+/-- If `(code, _)` appears in `entries` and `code < 19`, then
+    `(clSymbolFreqs entries).getD code 0 > 0`. -/
+theorem clSymbolFreqs_pos (entries : List CLEntry) (code extra : Nat)
+    (hmem : (code, extra) ∈ entries) (hcode : code < 19) :
+    (clSymbolFreqs entries).getD code 0 > 0 :=
+  clFreqFoldl_pos entries code extra _ (List.length_replicate ..) hcode hmem
+
+/-- `encodeCLEntries` succeeds when all entry codes have nonzero CL code lengths. -/
+theorem encodeCLEntries_isSome (clLens : List Nat) (maxBits : Nat)
+    (entries : List CLEntry)
+    (hall : ∀ p ∈ entries, p.1 < clLens.length ∧ clLens[p.1]! ≠ 0 ∧ clLens[p.1]! ≤ maxBits) :
+    (encodeCLEntries ((Huffman.Spec.allCodes clLens maxBits).map
+      fun p => (p.2, p.1)) entries).isSome = true := by
+  induction entries with
+  | nil => simp [encodeCLEntries]
+  | cons entry rest ih =>
+    obtain ⟨code, extra⟩ := entry
+    simp only [encodeCLEntries]
+    have ⟨hlt, hne, hle⟩ := hall (code, extra) (List.mem_cons_self ..)
+    have hsym := encodeSymbol_fixed_isSome clLens maxBits code hlt hne hle
+    cases hes : encodeSymbol ((Huffman.Spec.allCodes clLens maxBits).map
+        fun p => (p.2, p.1)) code with
+    | none => simp [hes] at hsym
+    | some cwBits =>
+      simp only [bind, Option.bind]
+      have hrest := ih (fun p hp => hall p (List.mem_cons_of_mem _ hp))
+      cases her : encodeCLEntries ((Huffman.Spec.allCodes clLens maxBits).map
+          fun p => (p.2, p.1)) rest with
+      | none => simp [her] at hrest
+      | some restBits => simp [pure, Pure.pure]
 
 end Deflate.Spec
