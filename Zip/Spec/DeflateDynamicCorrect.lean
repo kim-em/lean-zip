@@ -59,17 +59,17 @@ private theorem tokenFreqs_go_sizes (tokens : Array LZ77Token)
     | .literal b =>
       simp only [htok]
       apply tokenFreqs_go_sizes
-      · simp [Array.size_set]; omega
+      · simp; omega
       · exact hdist
     | .reference len dist =>
       simp only [htok]
       apply tokenFreqs_go_sizes
       · cases findLengthCode len with
         | none => exact hlit
-        | some p => obtain ⟨idx, _, _⟩ := p; simp [Array.size_set]; omega
+        | some p => obtain ⟨idx, _, _⟩ := p; simp; omega
       · cases findDistCode dist with
         | none => exact hdist
-        | some p => obtain ⟨dIdx, _, _⟩ := p; simp [Array.size_set]; omega
+        | some p => obtain ⟨dIdx, _, _⟩ := p; simp; omega
   · exact ⟨hlit, hdist⟩
 termination_by tokens.size - i
 
@@ -78,7 +78,7 @@ private theorem tokenFreqs_sizes (tokens : Array LZ77Token) :
     (tokenFreqs tokens).1.size = 286 ∧ (tokenFreqs tokens).2.size = 30 := by
   simp only [tokenFreqs]
   apply tokenFreqs_go_sizes
-  · simp [Array.size_set]
+  · simp
   · simp
 
 /-- `tokenFreqs.go` only increases frequency values. -/
@@ -95,14 +95,11 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
       simp only [htok]
       have ih := tokenFreqs_go_mono tokens
         (litFreqs.set! b.toNat (litFreqs[b.toNat]! + 1)) distFreqs (i + 1) idx
-        (by simp [Array.size_set]; omega) hdist
+        (by simp; omega) hdist
       constructor
       · intro hidx
-        have hle : litFreqs[idx]! ≤ (litFreqs.set! b.toNat (litFreqs[b.toNat]! + 1))[idx]! := by
-          by_cases heq : b.toNat = idx
-          · subst heq; rw [Array.getElem!_set!_self litFreqs _ _ (by omega)]; omega
-          · rw [Array.getElem!_set!_ne litFreqs _ _ _ heq]; omega
-        exact Nat.le_trans hle (ih.1 hidx)
+        exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs b.toNat idx
+          (by have := UInt8.toNat_lt b; omega)) (ih.1 hidx)
       · exact ih.2
     | .reference length distance =>
       simp only [htok]
@@ -119,7 +116,7 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
             obtain ⟨dIdx, dN, dV⟩ := p
             have ih := tokenFreqs_go_mono tokens litFreqs
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
-              hlit (by simp [Array.size_set]; omega)
+              hlit (by simp; omega)
             exact ih.1 hidx
         | some p =>
           obtain ⟨lIdx, lN, lV⟩ := p
@@ -127,23 +124,17 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
           | none =>
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1)) distFreqs (i + 1) idx
-              (by simp [Array.size_set]; omega) hdist
-            have hle : litFreqs[idx]! ≤ (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))[idx]! := by
-              by_cases heq : lIdx + 257 = idx
-              · subst heq; rw [Array.getElem!_set!_self litFreqs _ _ (by omega)]; omega
-              · rw [Array.getElem!_set!_ne litFreqs _ _ _ heq]; omega
-            exact Nat.le_trans hle (ih.1 hidx)
+              (by simp; omega) hdist
+            have hlIdx := native_findLengthCode_idx_bound _ lIdx lN lV hflc
+            exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
           | some q =>
             obtain ⟨dIdx, dN, dV⟩ := q
+            have hlIdx := native_findLengthCode_idx_bound _ lIdx lN lV hflc
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
-              (by simp [Array.size_set]; omega) (by simp [Array.size_set]; omega)
-            have hle : litFreqs[idx]! ≤ (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))[idx]! := by
-              by_cases heq : lIdx + 257 = idx
-              · subst heq; rw [Array.getElem!_set!_self litFreqs _ _ (by omega)]; omega
-              · rw [Array.getElem!_set!_ne litFreqs _ _ _ heq]; omega
-            exact Nat.le_trans hle (ih.1 hidx)
+              (by simp; omega) (by simp; omega)
+            exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
       · intro hidx
         cases hflc : findLengthCode length with
         | none =>
@@ -153,37 +144,30 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
             exact ih.2 hidx
           | some p =>
             obtain ⟨dIdx, dN, dV⟩ := p
+            have hdIdx := native_findDistCode_code_bound _ dIdx dN dV hfdc
             have ih := tokenFreqs_go_mono tokens litFreqs
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
-              hlit (by simp [Array.size_set]; omega)
-            have hle : distFreqs[idx]! ≤ (distFreqs.set! dIdx (distFreqs[dIdx]! + 1))[idx]! := by
-              by_cases heq : dIdx = idx
-              · subst heq; rw [Array.getElem!_set!_self distFreqs _ _ (by omega)]; omega
-              · rw [Array.getElem!_set!_ne distFreqs _ _ _ heq]; omega
-            exact Nat.le_trans hle (ih.2 hidx)
+              hlit (by simp; omega)
+            exact Nat.le_trans (Array.getElem!_le_set!_incr distFreqs dIdx idx (by omega)) (ih.2 hidx)
         | some p =>
           obtain ⟨lIdx, lN, lV⟩ := p
           cases hfdc : findDistCode distance with
           | none =>
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1)) distFreqs (i + 1) idx
-              (by simp [Array.size_set]; omega) hdist
+              (by simp; omega) hdist
             exact ih.2 hidx
           | some q =>
             obtain ⟨dIdx, dN, dV⟩ := q
+            have hdIdx := native_findDistCode_code_bound _ dIdx dN dV hfdc
             have ih := tokenFreqs_go_mono tokens
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
-              (by simp [Array.size_set]; omega) (by simp [Array.size_set]; omega)
-            have hle : distFreqs[idx]! ≤ (distFreqs.set! dIdx (distFreqs[dIdx]! + 1))[idx]! := by
-              by_cases heq : dIdx = idx
-              · subst heq; rw [Array.getElem!_set!_self distFreqs _ _ (by omega)]; omega
-              · rw [Array.getElem!_set!_ne distFreqs _ _ _ heq]; omega
-            exact Nat.le_trans hle (ih.2 hidx)
+              (by simp; omega) (by simp; omega)
+            exact Nat.le_trans (Array.getElem!_le_set!_incr distFreqs dIdx idx (by omega)) (ih.2 hidx)
   · exact ⟨fun _ => Nat.le.refl, fun _ => Nat.le.refl⟩
 termination_by tokens.size - i
 
-set_option maxRecDepth 1024 in
 /-- `tokenFreqs` counts end-of-block (symbol 256) with frequency ≥ 1. -/
 private theorem tokenFreqs_eob_pos (tokens : Array LZ77Token) :
     (tokenFreqs tokens).1[256]! ≥ 1 := by
@@ -191,7 +175,7 @@ private theorem tokenFreqs_eob_pos (tokens : Array LZ77Token) :
   -- Initial lit array has [256]! = 1, so result has [256]! ≥ 1
   have hmono : ((Array.replicate 286 (0 : Nat)).set! 256 1)[256]! ≤
       (tokenFreqs tokens).1[256]! :=
-    (tokenFreqs_go_mono tokens _ _ 0 256 (by simp [Array.size_set]) (by simp)).1 (by omega)
+    (tokenFreqs_go_mono tokens _ _ 0 256 (by simp) (by simp)).1 (by omega)
   have h256 : ((Array.replicate 286 (0 : Nat)).set! 256 1)[256]! = 1 :=
     Array.getElem!_set!_self _ _ _ (by simp)
   omega
@@ -216,7 +200,7 @@ private theorem tokenFreqs_go_literal_pos (tokens : Array LZ77Token) (b : UInt8)
         -- After set, litFreqs[b.toNat]! ≥ 1
         have hle := (tokenFreqs_go_mono tokens
           (litFreqs.set! b.toNat (litFreqs[b.toNat]! + 1)) distFreqs (i + 1) b.toNat
-          (by simp [Array.size_set]; omega) hdist).1 (by have := UInt8.toNat_lt b; omega)
+          (by simp; omega) hdist).1 (by have := UInt8.toNat_lt b; omega)
         have hblt := UInt8.toNat_lt b
         have hset : (litFreqs.set! b.toNat (litFreqs[b.toNat]! + 1))[b.toNat]! ≥ 1 := by
           rw [Array.getElem!_set!_self litFreqs _ _ (by omega)]; omega
@@ -224,17 +208,17 @@ private theorem tokenFreqs_go_literal_pos (tokens : Array LZ77Token) (b : UInt8)
       · -- Not this token yet, recurse
         exact tokenFreqs_go_literal_pos tokens b
           (litFreqs.set! b'.toNat (litFreqs[b'.toNat]! + 1)) distFreqs (i + 1) j
-          (by simp [Array.size_set]; omega) hdist (by omega) hjlt htok
+          (by simp; omega) hdist (by omega) hjlt htok
     | .reference len' dist' =>
       simp only [htoki]
       have hij : i ≠ j := by intro heq; subst heq; rw [htoki] at htok; simp at htok
       exact tokenFreqs_go_literal_pos tokens b _ _ (i + 1) j
         (by cases findLengthCode len' with
           | none => exact hlit
-          | some p => obtain ⟨idx, _, _⟩ := p; simp [Array.size_set]; omega)
+          | some p => obtain ⟨idx, _, _⟩ := p; simp; omega)
         (by cases findDistCode dist' with
           | none => exact hdist
-          | some p => obtain ⟨dIdx, _, _⟩ := p; simp [Array.size_set]; omega)
+          | some p => obtain ⟨dIdx, _, _⟩ := p; simp; omega)
         (by omega) hjlt htok
   · omega
 termination_by tokens.size - i
@@ -248,7 +232,7 @@ private theorem tokenFreqs_literal_pos (tokens : Array LZ77Token) (b : UInt8)
   have htok' : tokens[j] = .literal b := by
     simp only [Array.getElem_toList] at htok; exact htok
   exact tokenFreqs_go_literal_pos tokens b _ _ 0 j
-    (by simp [Array.size_set]) (by simp) (by omega) hjlt htok'
+    (by simp) (by simp) (by omega) hjlt htok'
 
 /-- `tokenFreqs.go` produces positive lit frequency for length code from ref at position `j ≥ i`. -/
 private theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
@@ -268,7 +252,7 @@ private theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
       have hij : i ≠ j := by intro heq; subst heq; rw [htoki] at htok; simp at htok
       exact tokenFreqs_go_lengthCode_pos tokens len dist idx extraN extraV
         (litFreqs.set! b'.toNat (litFreqs[b'.toNat]! + 1)) distFreqs (i + 1) j
-        (by simp [Array.size_set]; omega) hdist (by omega) hjlt htok hflc
+        (by simp; omega) hdist (by omega) hjlt htok hflc
     | .reference len' dist' =>
       simp only [htoki]
       by_cases hij : i = j
@@ -287,10 +271,10 @@ private theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
           (match findDistCode dist with
            | some (dIdx, _, _) => distFreqs.set! dIdx (distFreqs[dIdx]! + 1)
            | none => distFreqs) (i + 1) (257 + idx)
-          (by simp [Array.size_set]; omega)
+          (by simp; omega)
           (by cases findDistCode dist with
             | none => exact hdist
-            | some p => obtain ⟨dIdx, _, _⟩ := p; simp [Array.size_set]; omega)).1
+            | some p => obtain ⟨dIdx, _, _⟩ := p; simp; omega)).1
           (by omega)
         have hset : (litFreqs.set! (idx + 257) (litFreqs[idx + 257]! + 1))[257 + idx]! ≥ 1 := by
           rw [show idx + 257 = 257 + idx from by omega]
@@ -300,10 +284,10 @@ private theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
         exact tokenFreqs_go_lengthCode_pos tokens len dist idx extraN extraV _ _ (i + 1) j
           (by cases findLengthCode len' with
             | none => exact hlit
-            | some p => obtain ⟨lIdx, _, _⟩ := p; simp [Array.size_set]; omega)
+            | some p => obtain ⟨lIdx, _, _⟩ := p; simp; omega)
           (by cases findDistCode dist' with
             | none => exact hdist
-            | some p => obtain ⟨dIdx, _, _⟩ := p; simp [Array.size_set]; omega)
+            | some p => obtain ⟨dIdx, _, _⟩ := p; simp; omega)
           (by omega) hjlt htok hflc
   · omega
 termination_by tokens.size - i
@@ -320,7 +304,7 @@ private theorem tokenFreqs_lengthCode_pos (tokens : Array LZ77Token)
   have htok' : tokens[j] = .reference len dist := by
     simp only [Array.getElem_toList] at htok; exact htok
   exact tokenFreqs_go_lengthCode_pos tokens len dist idx extraN extraV _ _ 0 j
-    (by simp [Array.size_set]) (by simp) (by omega) hjlt htok' hflc
+    (by simp) (by simp) (by omega) hjlt htok' hflc
 
 /-- `tokenFreqs.go` produces positive dist frequency for dist code from ref at position `j ≥ i`. -/
 private theorem tokenFreqs_go_distCode_pos (tokens : Array LZ77Token)
@@ -340,7 +324,7 @@ private theorem tokenFreqs_go_distCode_pos (tokens : Array LZ77Token)
       have hij : i ≠ j := by intro heq; subst heq; rw [htoki] at htok; simp at htok
       exact tokenFreqs_go_distCode_pos tokens len dist dCode dExtraN dExtraV
         (litFreqs.set! b'.toNat (litFreqs[b'.toNat]! + 1)) distFreqs (i + 1) j
-        (by simp [Array.size_set]; omega) hdist (by omega) hjlt htok hfdc
+        (by simp; omega) hdist (by omega) hjlt htok hfdc
     | .reference len' dist' =>
       simp only [htoki]
       by_cases hij : i = j
@@ -360,8 +344,8 @@ private theorem tokenFreqs_go_distCode_pos (tokens : Array LZ77Token)
           (distFreqs.set! dCode (distFreqs[dCode]! + 1)) (i + 1) dCode
           (by cases findLengthCode len with
             | none => exact hlit
-            | some p => obtain ⟨lIdx, _, _⟩ := p; simp [Array.size_set]; omega)
-          (by simp [Array.size_set]; omega)).2
+            | some p => obtain ⟨lIdx, _, _⟩ := p; simp; omega)
+          (by simp; omega)).2
           (by omega)
         have hset : (distFreqs.set! dCode (distFreqs[dCode]! + 1))[dCode]! ≥ 1 := by
           rw [Array.getElem!_set!_self distFreqs _ _ (by omega)]; omega
@@ -370,10 +354,10 @@ private theorem tokenFreqs_go_distCode_pos (tokens : Array LZ77Token)
         exact tokenFreqs_go_distCode_pos tokens len dist dCode dExtraN dExtraV _ _ (i + 1) j
           (by cases findLengthCode len' with
             | none => exact hlit
-            | some p => obtain ⟨lIdx, _, _⟩ := p; simp [Array.size_set]; omega)
+            | some p => obtain ⟨lIdx, _, _⟩ := p; simp; omega)
           (by cases findDistCode dist' with
             | none => exact hdist
-            | some p => obtain ⟨dIdx, _, _⟩ := p; simp [Array.size_set]; omega)
+            | some p => obtain ⟨dIdx, _, _⟩ := p; simp; omega)
           (by omega) hjlt htok hfdc
   · omega
 termination_by tokens.size - i
@@ -390,7 +374,27 @@ private theorem tokenFreqs_distCode_pos (tokens : Array LZ77Token)
   have htok' : tokens[j] = .reference len dist := by
     simp only [Array.getElem_toList] at htok; exact htok
   exact tokenFreqs_go_distCode_pos tokens len dist dCode dExtraN dExtraV _ _ 0 j
-    (by simp [Array.size_set]) (by simp) (by omega) hjlt htok' hfdc
+    (by simp) (by simp) (by omega) hjlt htok' hfdc
+
+/-- Converting a List Nat with elements ≤ 15 to Array UInt8 preserves bounds. -/
+private theorem toUInt8Array_le (lens : List Nat) (hbound : ∀ x ∈ lens, x ≤ 15) :
+    ∀ j, j < (lens.toArray.map Nat.toUInt8).size →
+      (lens.toArray.map Nat.toUInt8)[j]!.toNat ≤ 15 := by
+  intro k hk
+  rw [getElem!_pos _ k hk]
+  simp only [Array.getElem_map, Array.size_map, List.size_toArray] at hk ⊢
+  simp only [UInt8.toNat, Nat.toUInt8, UInt8.ofNat, BitVec.toNat_ofNat]
+  exact Nat.le_trans (Nat.mod_le _ _) (hbound _ (List.getElem_mem hk))
+
+/-- If `freqs[sym]! ≥ 1` and `sym < freqs.size`, the frequency pairs list
+    contains a witness with matching symbol and positive frequency. -/
+private theorem freqPairs_witness (freqs : Array Nat) (sym : Nat)
+    (hsym : sym < freqs.size) (hfreq : freqs[sym]! ≥ 1) :
+    ∃ p ∈ (List.range freqs.size).map fun i => (i, freqs[i]!),
+      p.1 = sym ∧ p.2 > 0 :=
+  ⟨(sym, freqs[sym]!), by
+    simp only [List.mem_map, List.mem_range]
+    exact ⟨sym, hsym, rfl⟩, rfl, hfreq⟩
 
 /-- `deflateDynamic` produces a bytestream whose bits correspond to the
     spec-level dynamic Huffman encoding, plus padding to byte alignment. -/
@@ -439,14 +443,12 @@ theorem deflateDynamic_spec (data : ByteArray) :
   have hdist_bound : ∀ x ∈ distLens, x ≤ 15 := by
     intro x hx
     simp only [distLens] at hx; split at hx
-    · -- distLens₀.set 0 1
-      rw [List.mem_iff_getElem] at hx
+    · rw [List.mem_iff_getElem] at hx
       obtain ⟨i, hi, hxi⟩ := hx
       rw [List.length_set] at hi
       by_cases h0 : i = 0
       · subst h0; simp at hxi; omega
-      · have hne : ¬(0 = i) := fun h => h0 (h.symm)
-        simp [hne] at hxi
+      · simp [show ¬(0 = i) from Ne.symm h0] at hxi
         exact hxi ▸ hdist₀_bound _ (List.getElem_mem ..)
     · exact hdist₀_bound x hx
   have hdist_valid : Huffman.Spec.ValidLengths distLens 15 := by
@@ -468,9 +470,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
         rw [List.length_set, List.length_replicate] at hi
         by_cases h0 : i = 0
         · subst h0; simp at hli; omega
-        · have hne : ¬(0 = i) := fun h => h0 h.symm
-          rw [List.getElem_set] at hli
-          simp only [hne, ↓reduceIte, List.getElem_replicate] at hli
+        · rw [List.getElem_set] at hli
+          simp only [show ¬(0 = i) from Ne.symm h0, ↓reduceIte, List.getElem_replicate] at hli
           omega
       · -- Kraft sum for [1, 0, 0, ..., 0] with 30 entries
         -- filter gives [1], fold gives 2^14 ≤ 2^15
@@ -550,13 +551,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
         simp only [Deflate.Spec.encodeLitLen]
         have hb_lt : b.toNat < litLens.length := by rw [hlit_len]; have := UInt8.toNat_lt b; omega
         have hfreq := tokenFreqs_literal_pos tokens b ht_mem
-        have hfreq_pair : ∃ p ∈ litFreqPairs, p.1 = b.toNat ∧ p.2 > 0 :=
-          ⟨(b.toNat, litFreqs[b.toNat]!), by
-            simp only [litFreqPairs, List.mem_map, List.mem_range]
-            exact ⟨b.toNat, by have := UInt8.toNat_lt b; omega, rfl⟩,
-            rfl, hfreq⟩
         have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-          (by omega) b.toNat (by have := UInt8.toNat_lt b; omega) hfreq_pair
+          (by omega) b.toNat (by have := UInt8.toNat_lt b; omega)
+          (freqPairs_witness litFreqs b.toNat (by have := UInt8.toNat_lt b; omega) hfreq)
         have hlen_le : litLens[b.toNat]! ≤ 15 := by
           rw [getElem!_pos litLens b.toNat hb_lt]
           exact hlit_bound _ (List.getElem_mem hb_lt)
@@ -578,13 +575,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
           have hsym : 257 + idx < litLens.length := by rw [hlit_len]; omega
           have hfreq := tokenFreqs_lengthCode_pos tokens len dist idx extraN
             extraV.toUInt32 ht_mem hflc_native
-          have hfreq_pair : ∃ p ∈ litFreqPairs, p.1 = (257 + idx) ∧ p.2 > 0 :=
-            ⟨(257 + idx, litFreqs[257 + idx]!), by
-              simp only [litFreqPairs, List.mem_map, List.mem_range]
-              exact ⟨257 + idx, by omega, rfl⟩,
-              rfl, hfreq⟩
           have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-            (by omega) (257 + idx) (by omega) hfreq_pair
+            (by omega) (257 + idx) (by omega)
+            (freqPairs_witness litFreqs (257 + idx) (by omega) hfreq)
           have hlen_le' : litLens[257 + idx]! ≤ 15 := by
             rw [getElem!_pos litLens (257 + idx) hsym]
             exact hlit_bound _ (List.getElem_mem hsym)
@@ -609,14 +602,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
                 -- There's a reference, so distFreqs has a positive entry
                 have hdfreq := tokenFreqs_distCode_pos tokens len dist dCode dExtraN
                   dExtraV.toUInt32 ht_mem hfdc_native
-                -- computeCodeLengths gives nonzero for positive freq
-                have hdfreq_pair : ∃ p ∈ distFreqPairs, p.1 = dCode ∧ p.2 > 0 :=
-                  ⟨(dCode, distFreqs[dCode]!), by
-                    simp only [distFreqPairs, List.mem_map, List.mem_range]
-                    exact ⟨dCode, by omega, rfl⟩,
-                    rfl, hdfreq⟩
                 have hdlen_nz := Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
-                  (by omega) dCode (by omega) hdfreq_pair
+                  (by omega) dCode (by omega)
+                  (freqPairs_witness distFreqs dCode (by omega) hdfreq)
                 -- If all were zero, distLens₀[dCode]! would be 0, contradiction
                 intro hall
                 have hdc_lt : dCode < distLens₀.length := by omega
@@ -633,15 +621,11 @@ theorem deflateDynamic_spec (data : ByteArray) :
               have hdsym : dCode < distLens.length := by rw [hdist_len]; omega
               have hdfreq := tokenFreqs_distCode_pos tokens len dist dCode dExtraN
                 dExtraV.toUInt32 ht_mem hfdc_native
-              have hdfreq_pair : ∃ p ∈ distFreqPairs, p.1 = dCode ∧ p.2 > 0 :=
-                ⟨(dCode, distFreqs[dCode]!), by
-                  simp only [distFreqPairs, List.mem_map, List.mem_range]
-                  exact ⟨dCode, by omega, rfl⟩,
-                  rfl, hdfreq⟩
               have hdlen_nz : distLens[dCode]! ≠ 0 := by
                 rw [hdl_eq]
                 exact Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
-                  (by omega) dCode (by omega) hdfreq_pair
+                  (by omega) dCode (by omega)
+                  (freqPairs_witness distFreqs dCode (by omega) hdfreq)
               have hdlen_le' : distLens[dCode]! ≤ 15 := by
                 rw [getElem!_pos distLens dCode hdsym]
                 exact hdist_bound _ (List.getElem_mem hdsym)
@@ -659,13 +643,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
       simp only [Deflate.Spec.encodeLitLen]
       have hsym : 256 < litLens.length := by rw [hlit_len]; omega
       have hfreq := tokenFreqs_eob_pos tokens
-      have hfreq_pair : ∃ p ∈ litFreqPairs, p.1 = 256 ∧ p.2 > 0 :=
-        ⟨(256, litFreqs[256]!), by
-          simp only [litFreqPairs, List.mem_map, List.mem_range]
-          exact ⟨256, by omega, rfl⟩,
-          rfl, hfreq⟩
       have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-        (by omega) 256 (by omega) hfreq_pair
+        (by omega) 256 (by omega)
+        (freqPairs_witness litFreqs 256 (by omega) hfreq)
       have hlen_le : litLens[256]! ≤ 15 := by
         rw [getElem!_pos litLens 256 hsym]
         exact hlit_bound _ (List.getElem_mem hsym)
@@ -699,36 +679,17 @@ theorem deflateDynamic_spec (data : ByteArray) :
       | some eobBits' =>
         simp [henc_eob] at henc_eob_syms
         have heob_eq : eobBits = eobBits' := by rw [henc_eob_syms]
-        -- Build the combined encodeSymbols result
-        have henc_combined := Deflate.encodeSymbols_append litLens distLens
-          (tokens.toList.map LZ77Token.toLZ77Symbol)
-          [.endOfBlock] tokBits eobBits henc_tok
-          (by simp [Deflate.Spec.encodeSymbols, henc_eob, henc_eob_syms])
         -- Build canonical codes (same as in deflateDynamic)
         let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
         let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
         -- Size properties
         have hlit_codes_size : litCodes.size = litLens.length := by
-          simp [litCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
+          simp [litCodes, canonicalCodes_size, List.size_toArray]
         have hdist_codes_size : distCodes.size = distLens.length := by
-          simp [distCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
+          simp [distCodes, canonicalCodes_size, List.size_toArray]
         -- Code length bounds
-        have hlit_lengths_arr_le : ∀ j, j < (litLens.toArray.map Nat.toUInt8).size →
-            (litLens.toArray.map Nat.toUInt8)[j]!.toNat ≤ 15 := by
-          intro k hk
-          rw [getElem!_pos _ k hk]
-          simp only [Array.getElem_map, Array.size_map, List.size_toArray] at hk ⊢
-          simp only [UInt8.toNat, Nat.toUInt8, UInt8.ofNat, BitVec.toNat_ofNat]
-          have hle := hlit_bound _ (List.getElem_mem hk)
-          exact Nat.le_trans (Nat.mod_le _ _) hle
-        have hdist_lengths_arr_le : ∀ j, j < (distLens.toArray.map Nat.toUInt8).size →
-            (distLens.toArray.map Nat.toUInt8)[j]!.toNat ≤ 15 := by
-          intro k hk
-          rw [getElem!_pos _ k hk]
-          simp only [Array.getElem_map, Array.size_map, List.size_toArray] at hk ⊢
-          simp only [UInt8.toNat, Nat.toUInt8, UInt8.ofNat, BitVec.toNat_ofNat]
-          have hle := hdist_bound _ (List.getElem_mem hk)
-          exact Nat.le_trans (Nat.mod_le _ _) hle
+        have hlit_lengths_arr_le := toUInt8Array_le litLens hlit_bound
+        have hdist_lengths_arr_le := toUInt8Array_le distLens hdist_bound
         have hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15 := by
           intro j hj
           exact canonicalCodes_snd_le _ 15 hlit_lengths_arr_le j hj
@@ -736,24 +697,19 @@ theorem deflateDynamic_spec (data : ByteArray) :
           intro j hj
           exact canonicalCodes_snd_le _ 15 hdist_lengths_arr_le j hj
         -- EOB codeword
+        have hlit_roundtrip :
+            (litLens.toArray.map Nat.toUInt8).toList.map UInt8.toNat = litLens := by
+          simp only [Array.toList_map, List.map_map]; symm
+          rw [List.map_congr_left (fun n hn => by
+            show UInt8.toNat (Nat.toUInt8 n) = n
+            simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
+            exact Nat.mod_eq_of_lt (by have := hlit_valid.1 n hn; omega))]
+          simp
         have ⟨heob_cw, heob_len⟩ := encodeSymbol_canonicalCodes_eq
           (litLens.toArray.map Nat.toUInt8) 15 litCodes rfl
-          (by rwa [show (litLens.toArray.map Nat.toUInt8).toList.map UInt8.toNat = litLens from by
-            simp only [Array.toList_map, List.map_map]; symm
-            rw [List.map_congr_left (fun n hn => by
-              show UInt8.toNat (Nat.toUInt8 n) = n
-              simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
-              exact Nat.mod_eq_of_lt (by have := hlit_valid.1 n hn; omega))]
-            simp])
+          (by rwa [hlit_roundtrip])
           (by omega) 256 eobBits'
-          (by simp only [Deflate.Spec.encodeLitLen] at henc_eob
-              rwa [show (litLens.toArray.map Nat.toUInt8).toList.map UInt8.toNat = litLens from by
-                simp only [Array.toList_map, List.map_map]; symm
-                rw [List.map_congr_left (fun n hn => by
-                  show UInt8.toNat (Nat.toUInt8 n) = n
-                  simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
-                  exact Nat.mod_eq_of_lt (by have := hlit_valid.1 n hn; omega))]
-                simp])
+          (by simp only [Deflate.Spec.encodeLitLen] at henc_eob; rwa [hlit_roundtrip])
         -- BitWriter chain
         have hwf0 := BitWriter.empty_wf
         have hwf1 := BitWriter.writeBits_wf _ 1 1 hwf0 (by omega)
