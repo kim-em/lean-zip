@@ -219,4 +219,54 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   let lazySize := lazyBig.size
   assert! dynSize ≤ lazySize
 
+  -- Unified deflateRaw dispatch tests
+
+  -- deflateRaw level 0 (stored) → native inflate
+  let rawStored := Zip.Native.Deflate.deflateRaw helloBytes 0
+  match Zip.Native.Inflate.inflate rawStored with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"deflateRaw(0)→inflate failed on hello: {e}")
+
+  -- deflateRaw level 1 (fixed) → native inflate
+  let rawFixed := Zip.Native.Deflate.deflateRaw helloBytes 1
+  match Zip.Native.Inflate.inflate rawFixed with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"deflateRaw(1)→inflate failed on hello: {e}")
+
+  -- deflateRaw level 3 (lazy) → native inflate
+  let rawLazy := Zip.Native.Deflate.deflateRaw big 3
+  match Zip.Native.Inflate.inflate rawLazy with
+  | .ok result => assert! result == big
+  | .error e => throw (IO.userError s!"deflateRaw(3)→inflate failed on big: {e}")
+
+  -- deflateRaw level 6 (dynamic) → native inflate
+  let rawDyn := Zip.Native.Deflate.deflateRaw big 6
+  match Zip.Native.Inflate.inflate rawDyn with
+  | .ok result => assert! result == big
+  | .error e => throw (IO.userError s!"deflateRaw(6)→inflate failed on big: {e}")
+
+  -- deflateRaw level 6 → FFI inflate (cross-implementation)
+  let rawDynCross := Zip.Native.Deflate.deflateRaw helloBytes 6
+  let decompRawCross ← RawDeflate.decompress rawDynCross
+  assert! decompRawCross == helloBytes
+
+  -- deflateRaw level 6 → FFI inflate: larger data
+  let rawDynCrossBig := Zip.Native.Deflate.deflateRaw big 6
+  let decompRawCrossBig ← RawDeflate.decompress rawDynCrossBig
+  assert! decompRawCrossBig == big
+
+  -- deflateRaw on empty data (all levels)
+  for level in [0, 1, 3, 6] do
+    let rawEmpty := Zip.Native.Deflate.deflateRaw ByteArray.empty level.toUInt8
+    match Zip.Native.Inflate.inflate rawEmpty with
+    | .ok result => assert! result == ByteArray.empty
+    | .error e => throw (IO.userError s!"deflateRaw({level})→inflate failed on empty: {e}")
+
+  -- deflateRaw on single byte (all levels)
+  for level in [0, 1, 3, 6] do
+    let rawSingle := Zip.Native.Deflate.deflateRaw singleByte level.toUInt8
+    match Zip.Native.Inflate.inflate rawSingle with
+    | .ok result => assert! result == singleByte
+    | .error e => throw (IO.userError s!"deflateRaw({level})→inflate failed on single byte: {e}")
+
   IO.println "  NativeDeflate tests passed."
