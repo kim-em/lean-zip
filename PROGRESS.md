@@ -5,10 +5,10 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
+- **Phase**: Phase 4 complete (native compressor + roundtrip verification)
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
 - **Sorries**: 0 (zero-sorry milestone achieved Feb 24)
-- **Sessions**: ~120 completed (Feb 19–24)
+- **Sessions**: ~130 completed (Feb 19–24)
 
 ## Milestones
 
@@ -34,8 +34,8 @@ Key theorems: `inflate_correct` (native decompressor agrees with formal
 DEFLATE bitstream specification), `decodeStored_correct`,
 `decodeHuffman_correct`, `decodeDynamicTrees_correct`.
 
-### Phase 4: DEFLATE Compressor (in progress, started Feb 23)
-Native compression + roundtrip verification. ~70 sessions so far.
+### Phase 4: DEFLATE Compressor (complete, Feb 23–24)
+Native compression + roundtrip verification. ~80 sessions.
 
 **Completed:**
 - Native Level 0 (stored), Level 1 (fixed Huffman), and Level 5 (dynamic
@@ -74,18 +74,26 @@ Native compression + roundtrip verification. ~70 sessions so far.
 - `inflate_deflateLazy` — Level 2 roundtrip (DeflateFixedCorrect)
 - `inflate_deflateDynamic` — Level 5 roundtrip (DeflateDynamicCorrect)
 - `deflateRoundtrip` — unified roundtrip for all levels (DeflateRoundtrip)
-- DecodeCorrect.lean split into DecodeCorrect + DecodeComplete
+- `deflateDynamic_spec` — native dynamic compressor ↔ spec correspondence
+- `writeDynamicHeader_spec` — BitWriter chain for dynamic header
+- `computeCodeLengths_nonzero` — Huffman tree nonzero frequency property
+- File splits for review/maintainability:
+  - DecodeCorrect → DecodeCorrect + DecodeComplete
+  - InflateCorrect → InflateCorrect + InflateComplete
+  - Deflate → Deflate + DeflateFuelIndep + DeflateSuffix
+  - HuffmanCorrect → HuffmanCorrect + HuffmanCorrectLoop
+  - DeflateDynamicCorrect → DeflateDynamicCorrect + DeflateDynamicEmit + DeflateDynamicHeader
+- Proof quality reviews across DeflateEncode, DeflateEncodeProps,
+  HuffmanEncode, LZ77, DynamicTrees, DeflateEncodeDynamicProps,
+  DeflateStoredCorrect, LZ77NativeCorrect, BitstreamCorrect
 
-**Remaining sorries: 0**
-
-All sorries have been resolved, including `deflateDynamic_spec` and
-`inflate_deflateDynamic` (Level 5 roundtrip). The unified roundtrip
-theorem `deflateRoundtrip` in `DeflateRoundtrip.lean` covers all
-compression levels (stored, fixed, lazy, dynamic).
+**Zero sorries.** The unified roundtrip theorem `deflateRoundtrip`
+in `DeflateRoundtrip.lean` covers all compression levels
+(stored, fixed, lazy, dynamic).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~120 sessions: majority implementation, ~30 review, ~3 self-improvement,
+- ~130 sessions: majority implementation, ~35 review, ~3 self-improvement,
   remainder PR maintenance
