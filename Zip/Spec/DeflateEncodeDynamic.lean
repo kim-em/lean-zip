@@ -752,19 +752,114 @@ private theorem clPermutation_nodup : Deflate.Spec.clPermutation.Nodup := by dec
 private theorem clPermutation_lt_nineteen :
     ∀ p ∈ Deflate.Spec.clPermutation, p < 19 := by decide
 
+/-- If `x ∈ l.takeWhile p`, then `p x = true`. -/
+private theorem mem_takeWhile_imp {α : Type} {p : α → Bool} {l : List α} {x : α}
+    (h : x ∈ l.takeWhile p) : p x = true := by
+  induction l with
+  | nil => simp [List.takeWhile] at h
+  | cons a as ih =>
+    simp only [List.takeWhile_cons] at h
+    split at h
+    · simp only [List.mem_cons] at h
+      cases h with
+      | inl heq => subst heq; assumption
+      | inr hmem => exact ih hmem
+    · simp at h
+
+/-- Elements in the suffix captured by `reverse.takeWhile` satisfy the predicate. -/
+private theorem reverse_takeWhile_getElem {α : Type} (l : List α) (p : α → Bool)
+    (i : Nat) (hi : i < l.length)
+    (hge : i ≥ l.length - (l.reverse.takeWhile p).length) :
+    p l[i] = true := by
+  have hri : l.length - 1 - i < (l.reverse.takeWhile p).length := by omega
+  have htw_sat : p ((l.reverse.takeWhile p)[l.length - 1 - i]'hri) = true :=
+    mem_takeWhile_imp (List.getElem_mem ..)
+  have htw_eq_rev : (l.reverse.takeWhile p)[l.length - 1 - i]'hri =
+      l.reverse[l.length - 1 - i]'(by simp; omega) :=
+    List.IsPrefix.getElem ⟨l.reverse.dropWhile p, List.takeWhile_append_dropWhile⟩ hri
+  rw [htw_eq_rev, List.getElem_reverse] at htw_sat
+  simp only [show l.length - 1 - (l.length - 1 - i) = i from by omega] at htw_sat
+  exact htw_sat
+
 /-- After `computeHCLEN`, the trailing positions in permuted order have value 0. -/
 private theorem computeHCLEN_trailing_zero (clLens : List Nat) (j : Nat)
     (hj : j ≥ computeHCLEN clLens) (hjlt : j < 19) :
     clLens.getD (Deflate.Spec.clPermutation.getD j 0) 0 = 0 := by
   simp only [computeHCLEN] at hj
   have hperm_len := Deflate.Spec.clPermutation_length
-  -- permutedLens[j] = clLens.getD clPermutation[j] 0 by definition
-  -- and all elements from lastNonZero onward are 0
-  have hmap := Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0
-  -- We need: takeWhile from the back captures j
-  -- lastNonZero = 19 - (reverse.takeWhile (· == 0)).length
-  -- j ≥ max 4 lastNonZero → j ≥ lastNonZero → permutedLens[j] is in the zero tail
-  sorry
+  -- permutedLens = clPermutation.map (fun pos => clLens.getD pos 0)
+  -- j ≥ max 4 lastNonZero → j ≥ lastNonZero → permutedLens[j] is 0
+  have hmap_len : (Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0).length = 19 := by
+    simp [hperm_len]
+  -- j ≥ lastNonZero
+  have hj_ge : j ≥ (Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0).length -
+      ((Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0).reverse.takeWhile (· == 0)).length := by
+    omega
+  -- permutedLens[j] is in the zero tail
+  have hpzero : (· == 0) ((Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0)[j]'(by omega)) = true :=
+    reverse_takeWhile_getElem _ (· == 0) j (by omega) hj_ge
+  simp only [beq_iff_eq] at hpzero
+  -- permutedLens[j] = clLens.getD (clPermutation[j]) 0
+  rw [List.getElem_map] at hpzero
+  -- Convert getD to getElem
+  have hgetD : Deflate.Spec.clPermutation.getD j 0 = Deflate.Spec.clPermutation[j]'(by omega) := by
+    simp [List.getD, List.getElem?_eq_getElem (by omega : j < Deflate.Spec.clPermutation.length)]
+  rw [hgetD]
+  exact hpzero
+
+/-- `foldl` with `List.set` preserves list length. -/
+private theorem foldl_set_length (positions : List Nat) (f : Nat → Nat) (init : List Nat) :
+    (positions.foldl (fun a pos => a.set pos (f pos)) init).length = init.length := by
+  induction positions generalizing init with
+  | nil => simp
+  | cons p ps ih => simp only [List.foldl_cons]; rw [ih]; simp
+
+/-- `foldl` with `List.set` preserves value at positions not in the list. -/
+private theorem foldl_set_getD_nmem (positions : List Nat) (f : Nat → Nat) (init : List Nat)
+    (i : Nat) (hi : i ∉ positions) :
+    (positions.foldl (fun a pos => a.set pos (f pos)) init).getD i 0 = init.getD i 0 := by
+  induction positions generalizing init with
+  | nil => simp
+  | cons p ps ih =>
+    simp only [List.foldl_cons, List.mem_cons, not_or] at hi ⊢
+    rw [ih _ hi.2]; simp only [List.getD]
+    rw [List.getElem?_set_ne (Ne.symm hi.1)]
+
+/-- `foldl` with `List.set` on a NoDup list sets the value at member positions. -/
+private theorem foldl_set_getD_mem (positions : List Nat) (f : Nat → Nat) (init : List Nat)
+    (n : Nat) (hlen : init.length = n)
+    (hnodup : positions.Nodup) (hlt : ∀ p ∈ positions, p < n)
+    (i : Nat) (hi : i ∈ positions) :
+    (positions.foldl (fun a pos => a.set pos (f pos)) init).getD i 0 = f i := by
+  induction positions generalizing init with
+  | nil => simp at hi
+  | cons p ps ih =>
+    simp only [List.foldl_cons, List.mem_cons] at hi ⊢
+    simp only [List.nodup_cons] at hnodup
+    have hps_lt := fun q hq => hlt q (List.mem_cons_of_mem p hq)
+    have hlen' : (init.set p (f p)).length = n := by simp [hlen]
+    cases hi with
+    | inl heq =>
+      subst heq
+      rw [foldl_set_getD_nmem ps f _ i hnodup.1]
+      have hilt : i < init.length := hlen ▸ hlt i (List.mem_cons_self ..)
+      simp only [List.getD, List.getElem?_set, ↓reduceIte, hilt, Option.getD]
+    | inr hmem =>
+      exact ih (init.set p (f p)) hlen' hnodup.2 hps_lt hmem
+
+/-- Every value in `[0, 19)` appears in `clPermutation`. -/
+private theorem clPermutation_mem_all :
+    ∀ i, i < 19 → i ∈ Deflate.Spec.clPermutation := by decide
+
+/-- `getD` equals `getElem` when the index is in bounds. -/
+private theorem getD_eq_getElem (l : List Nat) (i : Nat) (hi : i < l.length) :
+    l.getD i 0 = l[i] := by
+  simp [List.getD, List.getElem?_eq_getElem hi]
+
+/-- `getD` on `replicate n 0` is always 0. -/
+private theorem getD_replicate_zero (n i : Nat) :
+    (List.replicate n (0 : Nat)).getD i 0 = 0 := by
+  unfold List.getD; simp only [List.getElem?_replicate]; split <;> simp
 
 /-- The foldl-set over clPermutation.take n on replicate 19 0 recovers
     the original list when trailing positions have value 0. -/
@@ -776,7 +871,39 @@ private theorem readCLLengths_recovers_clLens
     (Deflate.Spec.clPermutation.take numCodeLen).foldl
       (fun a pos => a.set pos (clLens.getD pos 0))
       (List.replicate 19 0) = clLens := by
-  sorry
+  have hflen : ((Deflate.Spec.clPermutation.take numCodeLen).foldl
+      (fun a pos => a.set pos (clLens.getD pos 0))
+      (List.replicate 19 0)).length = 19 := by
+    rw [foldl_set_length]; simp
+  have hperm_len := Deflate.Spec.clPermutation_length
+  apply List.ext_getElem (by omega)
+  intro i h1 h2
+  have h19 : i < 19 := by omega
+  rw [← getD_eq_getElem _ _ h1, ← getD_eq_getElem _ _ h2]
+  by_cases hmem : i ∈ (Deflate.Spec.clPermutation.take numCodeLen)
+  · exact foldl_set_getD_mem _ _ _ 19 (by simp)
+      (List.Nodup.sublist (List.take_sublist ..) clPermutation_nodup)
+      (fun p hp => clPermutation_lt_nineteen p (List.take_subset numCodeLen _ hp))
+      i hmem
+  · rw [foldl_set_getD_nmem _ _ _ _ hmem, getD_replicate_zero]
+    have hi_in_perm : i ∈ Deflate.Spec.clPermutation := clPermutation_mem_all i h19
+    have hi_in_drop : i ∈ Deflate.Spec.clPermutation.drop numCodeLen := by
+      have := List.take_append_drop numCodeLen Deflate.Spec.clPermutation
+      rw [← this] at hi_in_perm
+      exact (List.mem_append.mp hi_in_perm).elim (fun h => absurd h hmem) id
+    rw [List.mem_iff_getElem] at hi_in_drop
+    obtain ⟨k, hk, hval⟩ := hi_in_drop
+    have hj_lt : numCodeLen + k < 19 := by
+      simp [List.length_drop, hperm_len] at hk; omega
+    have hgetD_eq : Deflate.Spec.clPermutation.getD (numCodeLen + k) 0 = i := by
+      rw [getD_eq_getElem _ _ (by omega)]
+      rw [show Deflate.Spec.clPermutation[numCodeLen + k]'(by omega) =
+          (Deflate.Spec.clPermutation.drop numCodeLen)[k]'(by
+            simp [List.length_drop, hperm_len]; omega) from by
+        rw [List.getElem_drop]]
+      exact hval
+    have := htrailing (numCodeLen + k) (by omega) hj_lt
+    rw [hgetD_eq] at this; exact this.symm
 
 /-! ## Dynamic tree header roundtrip -/
 
