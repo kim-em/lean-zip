@@ -1,4 +1,5 @@
 import Zip.Spec.DynamicTreesCorrect
+import Zip.Spec.DecodeComplete
 
 /-!
 # Dynamic Huffman Tree Decode Completeness
