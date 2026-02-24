@@ -134,6 +134,68 @@ theorem lz77Greedy_spec_decode (data : ByteArray)
           omega)
         (tokensToSymbols_validSymbolList _)
 
+/-! ## Lazy LZ77 bridge lemmas -/
+
+open Deflate.Spec in
+/-- Each symbol in `tokensToSymbols (lz77Lazy data)` can be encoded with
+    the fixed Huffman tables. -/
+theorem tokensToSymbols_lazy_encodable (data : ByteArray)
+    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    ∀ s ∈ tokensToSymbols (lz77Lazy data windowSize),
+      (encodeLitLen fixedLitLengths fixedDistLengths s).isSome = true := by
+  intro s hs
+  simp only [tokensToSymbols, List.mem_append, List.mem_map, List.mem_cons,
+    List.mem_nil_iff, or_false] at hs
+  cases hs with
+  | inl hmapped =>
+    obtain ⟨t, ht_mem, ht_eq⟩ := hmapped
+    have hbounds := lz77Lazy_encodable data windowSize hw hws t ht_mem
+    subst ht_eq
+    cases t with
+    | literal b => exact encodeLitLen_literal_isSome b
+    | reference len dist =>
+      simp at hbounds
+      exact encodeLitLen_reference_isSome len dist
+        hbounds.1 hbounds.2.1 hbounds.2.2.1 hbounds.2.2.2
+  | inr heob =>
+    subst heob
+    exact encodeLitLen_endOfBlock_isSome
+
+open Deflate.Spec in
+/-- `encodeSymbols` succeeds on `tokensToSymbols (lz77Lazy data)`. -/
+theorem encodeSymbols_tokensToSymbols_lazy_isSome (data : ByteArray)
+    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    (encodeSymbols fixedLitLengths fixedDistLengths
+      (tokensToSymbols (lz77Lazy data windowSize))).isSome = true :=
+  encodeSymbols_isSome_of_all _ _ _
+    (tokensToSymbols_lazy_encodable data windowSize hw hws)
+
+open Deflate.Spec in
+/-- Encoding the native lazy LZ77 tokens with fixed Huffman then decoding
+    recovers the original data. -/
+theorem lz77Lazy_spec_decode (data : ByteArray)
+    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
+    (hsize : data.size < 5000000) :
+    ∃ bits, encodeFixed (tokensToSymbols (lz77Lazy data windowSize)) =
+              some bits ∧
+            decode bits = some data.data.toList := by
+  have henc_some := encodeSymbols_tokensToSymbols_lazy_isSome data windowSize hw hws
+  cases henc : encodeSymbols fixedLitLengths fixedDistLengths
+      (tokensToSymbols (lz77Lazy data windowSize)) with
+  | none => simp [henc] at henc_some
+  | some bits =>
+    refine ⟨[true, true, false] ++ bits, ?_, ?_⟩
+    · simp [encodeFixed, henc]
+    · exact encodeFixed_decode
+        (tokensToSymbols (lz77Lazy data windowSize))
+        data.data.toList bits henc
+        (lz77Lazy_resolves data windowSize hw)
+        (by
+          have := lz77Lazy_size_le data windowSize
+          rw [tokensToSymbols_length]
+          omega)
+        (tokensToSymbols_validSymbolList _)
+
 /-! ## Bridge lemmas for fixed Huffman tables -/
 
 set_option maxRecDepth 4096 in
