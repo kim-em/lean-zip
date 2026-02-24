@@ -209,11 +209,13 @@ cmd_create_pr() {
         gh pr merge "$existing_pr" --repo "$REPO" --auto --squash || \
             echo "warning: auto-merge not available (branch protection may not be set up)"
         if [[ "$partial" == true ]]; then
-            # Partial: needs-replan so planner can re-scope before another worker claims
-            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label needs-replan 2>/dev/null || true
+            # Partial: add needs-replan BEFORE removing claimed to prevent race window
+            gh issue edit "$issue_num" --repo "$REPO" --add-label needs-replan 2>/dev/null || true
+            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
             echo "Issue #$issue_num marked needs-replan (partial completion)"
         else
-            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
+            gh issue edit "$issue_num" --repo "$REPO" --add-label has-pr 2>/dev/null || true
+            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
         fi
         return 0
     fi
@@ -241,14 +243,16 @@ EOF
             echo "warning: auto-merge not available (branch protection may not be set up)"
     fi
 
-    # Update issue labels
+    # Update issue labels — add new label BEFORE removing claimed to prevent race window
     if [[ "$partial" == true ]]; then
         # Partial: needs-replan so planner can re-scope before another worker claims
-        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label needs-replan 2>/dev/null || true
+        gh issue edit "$issue_num" --repo "$REPO" --add-label needs-replan 2>/dev/null || true
+        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
         echo "Issue #$issue_num marked needs-replan (partial completion)"
     else
         # Full: claimed → has-pr
-        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
+        gh issue edit "$issue_num" --repo "$REPO" --add-label has-pr 2>/dev/null || true
+        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
     fi
 }
 
@@ -330,9 +334,12 @@ cmd_claim() {
     fi
 
     # Claim: add label + comment
+    local is_resume="${LEAN_ZIP_IS_RESUME:-0}"
+    local claim_note=""
+    [[ "$is_resume" == "1" ]] && claim_note=" (resumed conversation)"
     gh issue edit "$issue_num" --repo "$REPO" --add-label claimed
     gh issue comment "$issue_num" --repo "$REPO" \
-        --body "Claimed by session \`$SESSION_ID\` on branch \`$BRANCH\`"
+        --body "Claimed by session \`$SESSION_ID\` on branch \`$BRANCH\`${claim_note}"
 
     # Race detection: wait briefly, then check for multiple recent claims
     sleep 2

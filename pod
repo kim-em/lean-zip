@@ -898,6 +898,7 @@ def launch_claude(config: dict, session_uuid: str, prompt: str,
     env = dict(os.environ)
     env["ANTHROPIC_API_KEY"] = ""  # Force subscription auth
     env["LEAN_ZIP_SESSION_ID"] = session_uuid
+    env["LEAN_ZIP_IS_RESUME"] = "1" if local_jsonl.exists() else "0"
 
     stdout_fd = os.open(str(stdout_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     proc = subprocess.Popen(
