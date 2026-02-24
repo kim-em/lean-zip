@@ -25,6 +25,7 @@ import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.HuffmanCorrect
 import Zip.Spec.HuffmanEncodeCorrect
+import Zip.Spec.DecodeHelpers
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DynamicTreesCorrect
 import Zip.Spec.DynamicTreesComplete
