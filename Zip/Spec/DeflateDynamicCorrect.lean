@@ -64,36 +64,6 @@ theorem encodeSymbol_canonicalCodes_eq (lengths : Array UInt8) (maxBits : Nat)
     congrArg UInt8.toNat hlen'
   exact ⟨by rw [hlen'_nat]; exact hcw', by omega⟩
 
-/-! ## Helpers for emitTokensWithCodes_spec -/
-
-private theorem encodeSymbols_cons_some
-    (litLengths distLengths : List Nat) (s : Deflate.Spec.LZ77Symbol)
-    (rest : List Deflate.Spec.LZ77Symbol) (bits : List Bool)
-    (h : Deflate.Spec.encodeSymbols litLengths distLengths (s :: rest) = some bits) :
-    ∃ symBits restBits,
-      Deflate.Spec.encodeLitLen litLengths distLengths s = some symBits ∧
-      Deflate.Spec.encodeSymbols litLengths distLengths rest = some restBits ∧
-      bits = symBits ++ restBits := by
-  simp only [Deflate.Spec.encodeSymbols] at h
-  cases hencsym : Deflate.Spec.encodeLitLen litLengths distLengths s with
-  | none => simp [hencsym] at h
-  | some symBits =>
-    cases hencrest : Deflate.Spec.encodeSymbols litLengths distLengths rest with
-    | none => simp [hencsym, hencrest] at h
-    | some restBits =>
-      simp [hencsym, hencrest] at h
-      exact ⟨symBits, restBits, rfl, rfl, h.symm⟩
-
-private theorem lengthExtra_le_5 (idx : Nat) (h : idx < 29) :
-    Deflate.Spec.lengthExtra[idx]! ≤ 5 := by
-  have : ∀ i : Fin 29, Deflate.Spec.lengthExtra[i.val]! ≤ 5 := by decide
-  exact this ⟨idx, h⟩
-
-private theorem distExtra_le_13 (idx : Nat) (h : idx < 30) :
-    Deflate.Spec.distExtra[idx]! ≤ 13 := by
-  have : ∀ i : Fin 30, Deflate.Spec.distExtra[i.val]! ≤ 13 := by decide
-  exact this ⟨idx, h⟩
-
 private theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
     a.get!Internal i = a[i]! := rfl
 
@@ -135,7 +105,7 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
     have hlt_list : i < tokens.toList.length := by simp; exact hlt
     rw [List.drop_eq_getElem_cons hlt_list, List.map_cons] at henc
     obtain ⟨symBits, restBits, hencsym, hencrest, hbits_eq⟩ :=
-      encodeSymbols_cons_some _ _ _ _ _ henc
+      Deflate.encodeSymbols_cons_some _ _ _ _ _ henc
     subst hbits_eq
     have htoList : tokens[i] = tokens.toList[i] := by simp [Array.getElem_toList]
     -- Unfold emitTokensWithCodes one step
@@ -198,10 +168,10 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
               -- Extra bits bounds
               have lextraN_le : lextraN ≤ 25 := by
                 rw [hflc_spec.2.2.1]
-                exact Nat.le_trans (lengthExtra_le_5 lidx hflc_spec.1) (by omega)
+                exact Nat.le_trans (Deflate.lengthExtra_le_5 lidx hflc_spec.1) (by omega)
               have dextraN_le : dextraN ≤ 25 := by
                 rw [hfdc_spec.2.2.1]
-                exact Nat.le_trans (distExtra_le_13 didx hfdc_spec.1) (by omega)
+                exact Nat.le_trans (Deflate.distExtra_le_13 didx hfdc_spec.1) (by omega)
               -- Reduce native findLengthCode/findDistCode matches
               simp only [hnflc, hnfdc]
               -- Normalize lidx + 257 → 257 + lidx

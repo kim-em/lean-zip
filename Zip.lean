@@ -35,6 +35,7 @@ import Zip.Native.BitWriter
 import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Spec.LZ77NativeCorrect
+import Zip.Spec.DeflateFixedTables
 import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.DeflateDynamicCorrect
