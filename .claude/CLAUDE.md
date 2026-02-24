@@ -272,6 +272,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
     Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
+    Zip/Spec/DecodeHelpers.lean     — Decode infrastructure (invariants, table correspondence, copy loop)
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
     Zip/Spec/DynamicTreesComplete.lean — Dynamic Huffman tree decode completeness
