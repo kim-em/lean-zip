@@ -27,6 +27,7 @@ import Zip.Spec.HuffmanCorrect
 import Zip.Spec.HuffmanEncodeCorrect
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DynamicTreesCorrect
+import Zip.Spec.DynamicTreesComplete
 import Zip.Spec.InflateCorrect
 import Zip.Native.Adler32
 import Zip.Native.Crc32

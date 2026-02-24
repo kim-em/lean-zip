@@ -265,6 +265,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
+    Zip/Spec/DynamicTreesComplete.lean — Dynamic Huffman tree decode completeness
     Zip/Spec/LZ77NativeCorrect.lean — Native lz77Greedy correctness (BB1 for compressor)
     Zip/Spec/DeflateFixedTables.lean — Fixed Huffman table bridge proofs (native ↔ spec tables)
     Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
@@ -643,7 +644,23 @@ Update it during review and reflect sessions.
   `have x := e; body` bindings, `simp only [letFun] at h` is needed
   to reduce them before `split at h` can see inner `if` expressions.
   The linter may report `letFun` as unused — this is a false positive.
-  Do NOT remove it; doing so breaks the proof.
+  Do NOT remove it; doing so breaks the proof. Same applies to `guard`,
+  `pure`, `Pure.pure` in `simp only [guard, ...]` — the linter reports
+  them as unused but removing them leaves `match guard (...)` unreduced.
+  Use `set_option linter.unusedSimpArgs false in` to suppress.
+- **`toUInt32.toNat` for small Nat**: `rep.toUInt32.toNat = rep` when
+  `rep < 2^n` for small `n` (e.g., from `readBitsLSB_bound`). Don't
+  use `show rep % UInt32.size = rep; omega` — omega can't reason about
+  `%`. Use `Nat.mod_eq_of_lt (by omega)` directly.
+- **Nat↔UInt16 beq bridging**: When `hsym_ne : ¬(sym == N) = true`
+  (Nat beq) but you have `h : sym.toUInt16 = N` (UInt16 equality from
+  `rw [beq_iff_eq] at h`), bridge via:
+  ```lean
+  have := congrArg UInt16.toNat h  -- sym.toUInt16.toNat = N.toNat
+  rw [hsym_toNat] at this          -- sym = N.toNat (= N by simp)
+  exact absurd (beq_iff_eq.mpr (by simpa using this)) hsym_ne
+  ```
+  Don't try `exact absurd h hsym_ne` — types differ (UInt16 vs Nat beq).
 
 - **UInt8 comparison ↔ Nat comparison**: When native code uses UInt8
   comparisons (e.g. `bw.bitCount + 1 >= 8`) but proofs work in Nat
