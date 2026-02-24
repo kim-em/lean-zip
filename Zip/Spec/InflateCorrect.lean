@@ -306,4 +306,53 @@ theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
     simp at this
     rw [← h]; exact this
 
+/-! ## Completeness (reverse direction): spec success → native success -/
+
+/-- **Completeness for dynamic tree decode**: if the spec `decodeDynamicTables`
+    succeeds on the bit list, the native `decodeDynamicTrees` also succeeds.
+
+    This is the reverse of `decodeDynamicTrees_correct`. -/
+theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
+    (litLens distLens : List Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hspec : Deflate.Spec.decodeDynamicTables br.toBits =
+        some (litLens, distLens, rest)) :
+    ∃ litTree distTree br',
+      Zip.Native.Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+      Zip.Native.HuffTree.fromLengths (litLens.map Nat.toUInt8).toArray = .ok litTree ∧
+      Zip.Native.HuffTree.fromLengths (distLens.map Nat.toUInt8).toArray = .ok distTree ∧
+      Huffman.Spec.ValidLengths litLens 15 ∧
+      Huffman.Spec.ValidLengths distLens 15 ∧
+      litLens.length ≤ UInt16.size ∧
+      distLens.length ≤ UInt16.size := by
+  sorry
+
+/-- **Completeness for block loop**: if the spec `decode.go` succeeds,
+    the native `inflateLoop` also succeeds with the same result.
+
+    This is the reverse of `inflateLoop_correct`. -/
+theorem inflateLoop_complete (br : Zip.Native.BitReader)
+    (output : ByteArray)
+    (fixedLit fixedDist : Zip.Native.HuffTree)
+    (maxOutputSize : Nat)
+    (result : List UInt8)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hflit : Zip.Native.HuffTree.fromLengths
+      Zip.Native.Inflate.fixedLitLengths = .ok fixedLit)
+    (hfdist : Zip.Native.HuffTree.fromLengths
+      Zip.Native.Inflate.fixedDistLengths = .ok fixedDist)
+    (hmax : result.length ≤ maxOutputSize)
+    (specFuel : Nat)
+    (hspec : Deflate.Spec.decode.go br.toBits output.data.toList specFuel =
+        some result) :
+    ∃ endPos,
+      Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist
+        maxOutputSize (specFuel + 1) = .ok (⟨⟨result⟩⟩, endPos) := by
+  sorry
+
 end Deflate.Correctness
