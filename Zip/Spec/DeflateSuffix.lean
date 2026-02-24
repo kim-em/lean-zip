@@ -228,7 +228,6 @@ private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
       obtain ⟨v, bits'⟩ := p
       simp only [hrb, bind, Option.bind] at h ⊢
       rw [readBitsLSB_append 3 bits suffix v bits' hrb]
-      simp only [bind, Option.bind]
       exact ih (idx + 1) (acc.set (codeLengthOrder[idx]!) v) bits' result rest h
 
 set_option linter.unusedSimpArgs false in
@@ -313,7 +312,6 @@ private theorem replicate_19_zero :
     List.replicate 19 0 =
     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] := by decide
 
-set_option maxRecDepth 4096 in
 set_option linter.unusedSimpArgs false in
 /-- `decodeDynamicTables` is suffix-invariant. -/
 theorem decodeDynamicTables_append (bits suffix : List Bool)
@@ -321,7 +319,6 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
     (h : decodeDynamicTables bits = some (litLens, distLens, rest)) :
     decodeDynamicTables (bits ++ suffix) = some (litLens, distLens, rest ++ suffix) := by
   unfold decodeDynamicTables at h ⊢
-  -- Process h through the first 3 readBitsLSB calls
   cases h5 : readBitsLSB 5 bits with
   | none => simp [h5] at h
   | some p₁ =>
@@ -334,12 +331,6 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
       | none => simp [h5, h5d, h4] at h
       | some p₃ =>
         obtain ⟨hclen, bits₃⟩ := p₃
-        -- Process h: unfold expanded List.replicate to match hcl form
-        -- h has a do-block, operations are inside nested match chains.
-        -- We case on each operation and use one big simp to process h.
-        -- Key: h has [0,...,0] literal, hcl has List.replicate 19 0.
-        -- They are definitionally equal, so `have : literal_form = hcl_form := hcl`
-        -- lets simp find the match in h.
         cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
             (List.replicate 19 0) bits₃ with
         | none =>
@@ -392,7 +383,6 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
           · simp [h5, h5d, h4, hcl', hvCL,
                   guard, pure, Pure.pure, failure, Alternative.failure] at h
 
-set_option maxRecDepth 4096 in
 set_option linter.unusedSimpArgs false in
 /-- If `decodeDynamicTables` succeeds, both returned length lists are valid. -/
 private theorem decodeDynamicTables_valid_both (bits : List Bool)
