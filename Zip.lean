@@ -26,6 +26,7 @@ import Zip.Spec.BitstreamComplete
 import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.HuffmanCorrect
+import Zip.Spec.HuffmanCorrectLoop
 import Zip.Spec.HuffmanEncodeCorrect
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DecodeComplete
