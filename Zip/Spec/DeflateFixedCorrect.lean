@@ -403,7 +403,7 @@ private theorem findTableCode_go_of_first_match
 
 /-- If spec `findLengthCode` succeeds, native `findLengthCode` succeeds with
     the same result (up to UInt32 conversion for the extra value). -/
-private theorem findLengthCode_agree (length idx extraN extraV : Nat)
+protected theorem findLengthCode_agree (length idx extraN extraV : Nat)
     (hspec : Deflate.Spec.findLengthCode length = some (idx, extraN, extraV)) :
     findLengthCode length = some (idx, extraN, extraV.toUInt32) := by
   have hgo := Deflate.Spec.findLengthCode_spec length idx extraN extraV hspec
@@ -431,7 +431,7 @@ private theorem findLengthCode_agree (length idx extraN extraV : Nat)
 
 /-- If spec `findDistCode` succeeds, native `findDistCode` succeeds with
     the same result. -/
-private theorem findDistCode_agree (dist idx extraN extraV : Nat)
+protected theorem findDistCode_agree (dist idx extraN extraV : Nat)
     (hspec : Deflate.Spec.findDistCode dist = some (idx, extraN, extraV)) :
     findDistCode dist = some (idx, extraN, extraV.toUInt32) := by
   have hgo := Deflate.Spec.findDistCode_spec dist idx extraN extraV hspec
@@ -611,8 +611,8 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
               simp [hflc, henclen, hfdc, hencdist] at hencsym
               subst hencsym
               -- Bridge lemmas
-              have hnflc := findLengthCode_agree len lidx lextraN lextraV hflc
-              have hnfdc := findDistCode_agree dist didx dextraN dextraV hfdc
+              have hnflc := Deflate.findLengthCode_agree len lidx lextraN lextraV hflc
+              have hnfdc := Deflate.findDistCode_agree dist didx dextraN dextraV hfdc
               have ⟨hlcw, hllen⟩ := encodeSymbol_litTable_eq (257 + lidx) lenBits henclen
               have ⟨hdcw, hdlen⟩ := encodeSymbol_distTable_eq didx distBits hencdist
               have hflc_spec := Deflate.Spec.findLengthCode_spec len lidx lextraN lextraV hflc
