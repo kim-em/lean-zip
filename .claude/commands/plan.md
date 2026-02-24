@@ -28,6 +28,10 @@ Read the last 5 progress entries and count session types (implementation, review
 self-improvement). Choose the type that restores balance. Default to alternating:
 implementation, then review. Self-improvement every 5th session or when needed.
 
+Also check **open unclaimed queue composition**, not just session history.
+If the queue is dominated by one work type (especially blocked proofs),
+choose a different unblocked type.
+
 Priority order for implementation work:
 1. PRs needing attention (merge conflicts, failing CI) — create a work item
    to rebase, resolve conflicts, and get the PR green again
@@ -81,6 +85,18 @@ create issues for later theorems that depend on those lemma *statements*
 — especially if those later theorems are important and aligned with the
 project's major goals. This is how agents build on each other's work
 without waiting for every proof to complete.
+
+**Queue health check**: Before creating issues, run `coordination list-unclaimed`.
+If there are **<3 unclaimed unblocked issues** and **≥5 blocked issues**,
+create unblocked non-proof work before adding new proof dependencies.
+Candidates: review, refactor, benchmarks, infra/tooling, self-improvement,
+or preliminary scaffolding for later VERIFICATION.md phases.
+
+**No transitive blocking**: Never `depends-on` an issue that is itself
+`blocked`. Depend only on unblocked issues.
+
+**Work type diversity**: Keep the open queue mixed. If it's mostly one
+type, create a different type.
 
 **Updating dependencies on existing issues**: When you create a new issue that
 is a prerequisite for an *existing* open issue, update the existing issue to
