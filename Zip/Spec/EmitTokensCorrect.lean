@@ -225,7 +225,7 @@ protected theorem encodeSymbols_append_inv
 /-! ## Helper lemmas for deflateFixed_spec -/
 
 /-- `findTableCode.go` returns an index < baseTable.size. -/
-private theorem findTableCode_go_idx_bound (baseTable : Array UInt16)
+theorem findTableCode_go_idx_bound (baseTable : Array UInt16)
     (extraTable : Array UInt8) (value i idx extraN : Nat) (extraV : UInt32)
     (h : findTableCode.go baseTable extraTable value i = some (idx, extraN, extraV)) :
     idx < baseTable.size := by
@@ -240,7 +240,7 @@ private theorem findTableCode_go_idx_bound (baseTable : Array UInt16)
 termination_by baseTable.size - i
 
 /-- `findTableCode.go` returns extraN = extraTable[idx]!.toNat. -/
-private theorem findTableCode_go_extraN (baseTable : Array UInt16)
+theorem findTableCode_go_extraN (baseTable : Array UInt16)
     (extraTable : Array UInt8) (value i idx extraN : Nat) (extraV : UInt32)
     (h : findTableCode.go baseTable extraTable value i = some (idx, extraN, extraV)) :
     extraN = extraTable[idx]!.toNat := by
