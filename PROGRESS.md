@@ -7,7 +7,7 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 12 (in 4 verification files — see Phase 4 details)
+- **Sorries**: 11 (in 4 verification files — see Phase 4 details)
 - **Sessions**: ~90 completed (Feb 19–24)
 
 ## Milestones
@@ -62,11 +62,11 @@ Native compression + roundtrip verification. ~60 sessions so far.
 - Native `emitTokens` ↔ spec `encodeSymbols` correspondence:
   `emitTokens_spec`, `emitTokensWithCodes_spec`
 - `inflate_complete` (spec decode success → native inflate success)
+- `readBits_complete` (BitReader completeness, spec → native direction)
 
-**Remaining sorries (12):**
+**Remaining sorries (11):**
 
-`BitstreamCorrect.lean` (3) — completeness direction (spec → native):
-- `readBits_complete` — spec readBitsLSB → native readBits
+`BitstreamCorrect.lean` (2) — completeness direction (spec → native):
 - `readUInt16LE_complete` — spec readBitsLSB 16 → native readUInt16LE
 - `readBytes_complete` — spec readNBytes → native readBytes
 
@@ -85,7 +85,7 @@ Native compression + roundtrip verification. ~60 sessions so far.
 - `inflate_deflateLazy` — Level 2 roundtrip, same strategy
 - `inflate_deflateDynamic` — Level 5 roundtrip, needs dynamic header + completeness
 
-**Key remaining gap**: The 8 completeness sorries (BitstreamCorrect,
+**Key remaining gap**: The 7 completeness sorries (BitstreamCorrect,
 DecodeCorrect, InflateCorrect) form the reverse direction of existing
 soundness proofs. Once these are proved, the 4 compressor roundtrip
 theorems in DeflateFixedCorrect follow by composition.
