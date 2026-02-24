@@ -1,7 +1,7 @@
 import Zip.Spec.EmitTokensCorrect
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.LZ77NativeCorrect
-import Zip.Spec.InflateCorrect
+import Zip.Spec.InflateComplete
 import Zip.Native.DeflateDynamic
 
 /-!
