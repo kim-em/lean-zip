@@ -1219,4 +1219,211 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
             simp [h5, h5d, h4, hcl', hvCL,
                   guard, pure, Pure.pure, failure, Alternative.failure] at h
 
+set_option maxRecDepth 4096 in
+set_option linter.unusedSimpArgs false in
+/-- If `decodeDynamicTables` succeeds, the returned litLen lengths are valid. -/
+theorem decodeDynamicTables_valid_lit (bits : List Bool)
+    (litLens distLens : List Nat) (rest : List Bool)
+    (h : decodeDynamicTables bits = some (litLens, distLens, rest)) :
+    Huffman.Spec.ValidLengths litLens 15 := by
+  unfold decodeDynamicTables at h
+  cases h5 : readBitsLSB 5 bits with
+  | none => simp [h5] at h
+  | some p₁ =>
+    obtain ⟨hlit, bits₁⟩ := p₁
+    cases h5d : readBitsLSB 5 bits₁ with
+    | none => simp [h5, h5d] at h
+    | some p₂ =>
+      obtain ⟨hdist, bits₂⟩ := p₂
+      cases h4 : readBitsLSB 4 bits₂ with
+      | none => simp [h5, h5d, h4] at h
+      | some p₃ =>
+        obtain ⟨hclen, bits₃⟩ := p₃
+        cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
+            (List.replicate 19 0) bits₃ with
+        | none =>
+          have hcl' : Spec.readCLLengths (hclen + 4) 0
+              [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              bits₃ = none := hcl
+          simp [h5, h5d, h4, hcl'] at h
+        | some p₄ =>
+          obtain ⟨clLengths, bits₄⟩ := p₄
+          have hcl' : Spec.readCLLengths (hclen + 4) 0
+              [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              bits₃ = some (clLengths, bits₄) := hcl
+          by_cases hvCL : Huffman.Spec.ValidLengths clLengths 7
+          · cases hcls : decodeDynamicTables.decodeCLSymbols
+                ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
+                (hlit + 257 + (hdist + 1)) [] bits₄
+                (hlit + 257 + (hdist + 1) + 1) with
+            | none =>
+              simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
+            | some p₅ =>
+              obtain ⟨codeLengths, bits₅⟩ := p₅
+              by_cases hlen : codeLengths.length = hlit + 257 + (hdist + 1)
+              · have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = true :=
+                  beq_iff_eq.mpr hlen
+                by_cases hvLL : Huffman.Spec.ValidLengths
+                    (codeLengths.take (hlit + 257)) 15
+                · by_cases hvDL : Huffman.Spec.ValidLengths
+                      (codeLengths.drop (hlit + 257)) 15
+                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure] at h
+                    exact h.1 ▸ hvLL
+                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure, failure, Alternative.failure] at h
+                · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL,
+                        guard, pure, Pure.pure, failure, Alternative.failure] at h
+              · have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = false := by
+                  cases h_eq : (codeLengths.length == hlit + 257 + (hdist + 1)) <;> simp_all [beq_iff_eq]
+                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq,
+                      guard, pure, Pure.pure, failure, Alternative.failure] at h
+          · simp [h5, h5d, h4, hcl', hvCL,
+                  guard, pure, Pure.pure, failure, Alternative.failure] at h
+
+set_option maxRecDepth 4096 in
+set_option linter.unusedSimpArgs false in
+/-- If `decodeDynamicTables` succeeds, the returned distance lengths are valid. -/
+theorem decodeDynamicTables_valid_dist (bits : List Bool)
+    (litLens distLens : List Nat) (rest : List Bool)
+    (h : decodeDynamicTables bits = some (litLens, distLens, rest)) :
+    Huffman.Spec.ValidLengths distLens 15 := by
+  unfold decodeDynamicTables at h
+  cases h5 : readBitsLSB 5 bits with
+  | none => simp [h5] at h
+  | some p₁ =>
+    obtain ⟨hlit, bits₁⟩ := p₁
+    cases h5d : readBitsLSB 5 bits₁ with
+    | none => simp [h5, h5d] at h
+    | some p₂ =>
+      obtain ⟨hdist, bits₂⟩ := p₂
+      cases h4 : readBitsLSB 4 bits₂ with
+      | none => simp [h5, h5d, h4] at h
+      | some p₃ =>
+        obtain ⟨hclen, bits₃⟩ := p₃
+        cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
+            (List.replicate 19 0) bits₃ with
+        | none =>
+          have hcl' : Spec.readCLLengths (hclen + 4) 0
+              [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              bits₃ = none := hcl
+          simp [h5, h5d, h4, hcl'] at h
+        | some p₄ =>
+          obtain ⟨clLengths, bits₄⟩ := p₄
+          have hcl' : Spec.readCLLengths (hclen + 4) 0
+              [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              bits₃ = some (clLengths, bits₄) := hcl
+          by_cases hvCL : Huffman.Spec.ValidLengths clLengths 7
+          · cases hcls : decodeDynamicTables.decodeCLSymbols
+                ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
+                (hlit + 257 + (hdist + 1)) [] bits₄
+                (hlit + 257 + (hdist + 1) + 1) with
+            | none =>
+              simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
+            | some p₅ =>
+              obtain ⟨codeLengths, bits₅⟩ := p₅
+              by_cases hlen : codeLengths.length = hlit + 257 + (hdist + 1)
+              · have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = true :=
+                  beq_iff_eq.mpr hlen
+                by_cases hvLL : Huffman.Spec.ValidLengths
+                    (codeLengths.take (hlit + 257)) 15
+                · by_cases hvDL : Huffman.Spec.ValidLengths
+                      (codeLengths.drop (hlit + 257)) 15
+                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure] at h
+                    exact h.2.1 ▸ hvDL
+                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure, failure, Alternative.failure] at h
+                · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL,
+                        guard, pure, Pure.pure, failure, Alternative.failure] at h
+              · have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = false := by
+                  cases h_eq : (codeLengths.length == hlit + 257 + (hdist + 1)) <;> simp_all [beq_iff_eq]
+                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq,
+                      guard, pure, Pure.pure, failure, Alternative.failure] at h
+          · simp [h5, h5d, h4, hcl', hvCL,
+                  guard, pure, Pure.pure, failure, Alternative.failure] at h
+
+set_option maxRecDepth 4096 in
+set_option linter.unusedSimpArgs false in
+/-- `decode.go` is suffix-invariant: appending bits after a valid stream
+    yields the same decoded result with the extra bits ignored.
+    Requires `suffix.length % 8 = 0` for stored blocks (btype = 0). -/
+theorem decode_go_suffix
+    (bits suffix : List Bool) (acc : List UInt8) (fuel : Nat) (result : List UInt8)
+    (hsuf : suffix.length % 8 = 0)
+    (h : decode.go bits acc fuel = some result) :
+    decode.go (bits ++ suffix) acc fuel = some result := by
+  induction fuel generalizing bits acc result with
+  | zero => simp [decode.go] at h
+  | succ n ih =>
+    unfold decode.go at h ⊢
+    cases hbf : readBitsLSB 1 bits with
+    | none => simp [hbf] at h
+    | some p =>
+      obtain ⟨bfinal, bits₁⟩ := p
+      simp only [hbf, bind, Option.bind] at h ⊢
+      rw [readBitsLSB_append 1 bits suffix bfinal bits₁ hbf]
+      simp only [bind, Option.bind]
+      cases hbt : readBitsLSB 2 bits₁ with
+      | none => simp [hbt] at h
+      | some q =>
+        obtain ⟨btype, bits₂⟩ := q
+        simp only [hbt, bind, Option.bind] at h
+        rw [readBitsLSB_append 2 bits₁ suffix btype bits₂ hbt]
+        simp only [bind, Option.bind]
+        match hm : btype with
+        | 0 => -- Stored block
+          cases hds : decodeStored bits₂ with
+          | none => simp [hds] at h
+          | some r =>
+            obtain ⟨bytes, bits₃⟩ := r
+            simp only [hds, bind, Option.bind] at h
+            rw [decodeStored_append bits₂ suffix bytes bits₃ hsuf hds]
+            simp only [bind, Option.bind]
+            by_cases hbf1 : (bfinal == 1) = true
+            · rw [if_pos hbf1] at h ⊢; exact h
+            · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
+        | 1 => -- Fixed Huffman
+          cases hsyms : decodeSymbols fixedLitLengths fixedDistLengths bits₂ with
+          | none => simp [hsyms] at h
+          | some r =>
+            obtain ⟨syms, bits₃⟩ := r
+            simp only [hsyms, bind, Option.bind] at h
+            rw [decodeSymbols_append fixedLitLengths fixedDistLengths bits₂ suffix _
+                syms bits₃ fixedLitLengths_valid fixedDistLengths_valid hsyms]
+            simp only [bind, Option.bind]
+            cases hres : resolveLZ77 syms acc with
+            | none => simp [hres] at h
+            | some acc' =>
+              simp only [hres, bind, Option.bind] at h ⊢
+              by_cases hbf1 : (bfinal == 1) = true
+              · rw [if_pos hbf1] at h ⊢; exact h
+              · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
+        | 2 => -- Dynamic Huffman
+          cases hdt : decodeDynamicTables bits₂ with
+          | none => simp [hdt] at h
+          | some r =>
+            obtain ⟨litLens, distLens, bits₃⟩ := r
+            simp only [hdt, bind, Option.bind] at h
+            rw [decodeDynamicTables_append bits₂ suffix litLens distLens bits₃ hdt]
+            simp only [bind, Option.bind]
+            cases hsyms : decodeSymbols litLens distLens bits₃ with
+            | none => simp [hsyms] at h
+            | some s =>
+              obtain ⟨syms, bits₄⟩ := s
+              simp only [hsyms, bind, Option.bind] at h
+              rw [decodeSymbols_append litLens distLens bits₃ suffix _
+                  syms bits₄
+                  (decodeDynamicTables_valid_lit bits₂ litLens distLens bits₃ hdt)
+                  (decodeDynamicTables_valid_dist bits₂ litLens distLens bits₃ hdt) hsyms]
+              simp only [bind, Option.bind]
+              cases hres : resolveLZ77 syms acc with
+              | none => simp [hres] at h
+              | some acc' =>
+                simp only [hres, bind, Option.bind] at h ⊢
+                by_cases hbf1 : (bfinal == 1) = true
+                · rw [if_pos hbf1] at h ⊢; exact h
+                · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
+        | _ + 3 => simp at h
+
 end Deflate.Spec
