@@ -238,42 +238,6 @@ private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
       rw [h_acc, ← hrest₁]
       exact hspec_rec
 
-/-! ### Array extract/set helpers -/
-
-private theorem take_set_succ (l : List UInt8) (idx : Nat) (val : UInt8)
-    (hidx : idx < l.length) :
-    (l.set idx val).take (idx + 1) = l.take idx ++ [val] := by
-  rw [List.take_set, List.take_add_one]
-  simp only [List.getElem?_eq_getElem (by omega)]
-  rw [List.set_append]
-  have h_take_len : (l.take idx).length = idx := List.length_take_of_le (by omega)
-  simp only [h_take_len, Nat.lt_irrefl, ↓reduceIte, Nat.sub_self,
-             Option.toList, List.set_cons_zero]
-
-theorem extract_set_map_append (arr : Array UInt8) (idx : Nat) (val : UInt8)
-    (hidx : idx < arr.size) :
-    ((arr.set! idx val).extract 0 (idx + 1)).toList.map UInt8.toNat =
-    (arr.extract 0 idx).toList.map UInt8.toNat ++ [val.toNat] := by
-  rw [Array.set!, Array.toList_extract, Array.toList_setIfInBounds, Array.toList_extract]
-  simp only [List.extract, Nat.sub_zero, List.drop_zero]
-  rw [take_set_succ _ _ _ (by rw [Array.length_toList]; exact hidx)]
-  simp [List.map_append]
-
-/-! ### getLast! helper -/
-
-theorem extract_map_getLast_eq (arr : Array UInt8) (idx : Nat)
-    (hidx : 0 < idx) (hle : idx ≤ arr.size) :
-    ((arr.extract 0 idx).toList.map UInt8.toNat).getLast! = arr[idx - 1]!.toNat := by
-  simp only [Array.toList_extract, List.extract, Nat.sub_zero, List.drop_zero, List.map_take]
-  have hlen : (List.take idx (List.map UInt8.toNat arr.toList)).length = idx := by
-    simp [List.length_take, List.length_map, Array.length_toList, Nat.min_eq_left hle]
-  rw [List.getLast!_eq_getLast?_getD, List.getLast?_eq_getElem?, hlen,
-    List.getElem?_eq_getElem (by omega)]
-  simp only [Option.getD_some]
-  rw [getElem!_pos arr _ (by omega),
-    @List.getElem_take _ (arr.toList.map UInt8.toNat) idx (idx - 1) (by rw [hlen]; omega)]
-  simp [List.getElem_map]
-
 /-! ### fillEntries helpers -/
 
 theorem fillEntries_size (arr : Array UInt8) (idx count bound : Nat) (val : UInt8) :
@@ -315,7 +279,7 @@ theorem fillEntries_extract (arr : Array UInt8) (idx count bound : Nat) (val : U
     rw [h_ih]
     rw [Array.set!, Array.toList_extract, Array.toList_setIfInBounds, Array.toList_extract]
     simp only [List.extract, Nat.sub_zero, List.drop_zero]
-    rw [take_set_succ _ _ _ (by rw [Array.length_toList]; omega)]
+    rw [List.take_set_succ _ _ _ (by rw [Array.length_toList]; omega)]
     simp [List.map_append, List.replicate_succ, List.append_assoc]
 
 /-- `decodeCLSymbols` preserves array size. -/
@@ -460,7 +424,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
           refine ⟨rest₂, ?_, hrest₂⟩
           have hsym_conv : sym.toUInt8.toNat = sym.toNat := by
             show sym.toNat % 256 = sym.toNat; omega
-          rw [hrest₁, extract_set_map_append codeLengths idx sym.toUInt8 (by omega),
+          rw [hrest₁, Array.extract_set_map_append codeLengths idx sym.toUInt8 (by omega),
             hsym_conv] at hspec_rec
           exact hspec_rec
         · -- sym ≥ 16
@@ -503,7 +467,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   rw [hfill_snd, hfill_ext, hrest₂] at hspec_rec
                   have h_rd : Deflate.Spec.readBitsLSB 2 rest₁ = some (rep.toNat, rest₂) := by
                     rw [← hrest₁]; exact hspec_rd
-                  have hprev_eq := extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
+                  have hprev_eq := Array.extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
                   have hacc_len := accLen_eq_min codeLengths idx
                   have hguard1 : 0 < min idx codeLengths.size := by
                     simp [Nat.min_eq_left hle]; omega

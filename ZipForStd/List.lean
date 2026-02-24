@@ -74,4 +74,17 @@ theorem foldl_set_getElem_mem (positions : List Nat) (f : Nat → α)
     | inr hmem =>
       exact ih (init.set q (f q)) hmem hnodup.2 hlt' hbounds'
 
+/-! ## take-set lemma -/
+
+/-- Setting index `idx` and taking `idx + 1` gives the original prefix plus the new value. -/
+theorem take_set_succ (l : List α) (idx : Nat) (val : α)
+    (hidx : idx < l.length) :
+    (l.set idx val).take (idx + 1) = l.take idx ++ [val] := by
+  rw [List.take_set, List.take_add_one]
+  simp only [List.getElem?_eq_getElem (by omega)]
+  rw [List.set_append]
+  have h_take_len : (l.take idx).length = idx := List.length_take_of_le (by omega)
+  simp only [h_take_len, Nat.lt_irrefl, ↓reduceIte, Nat.sub_self,
+             Option.toList, List.set_cons_zero]
+
 end List
