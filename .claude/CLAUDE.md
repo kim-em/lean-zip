@@ -282,6 +282,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/EmitTokensCorrect.lean — emitTokens ↔ encodeSymbols correspondence + helpers
     Zip/Spec/DeflateFixedCorrect.lean — Native deflateFixed ↔ spec correspondence + roundtrip
     Zip/Spec/InflateCorrect.lean   — Stream-level inflate correctness theorem
+    Zip/Spec/InflateComplete.lean  — Stream-level inflate completeness theorem
     Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
     Zip/Spec/DeflateDynamicCorrect.lean — Native dynamic Huffman compressor correctness
     Zip.lean             — Re-exports all modules
