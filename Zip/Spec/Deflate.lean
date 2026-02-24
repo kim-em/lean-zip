@@ -814,4 +814,31 @@ theorem fixedDistCodes_prefix_free :
       ((Huffman.Spec.allCodes fixedDistLengths 15).map Prod.snd) :=
   Huffman.Spec.allCodeWords_prefix_free fixedDistLengths 15 fixedDistLengths_valid
 
+/-! ## Suffix invariance -/
+
+/-- `readBitsLSB` is suffix-invariant: appending bits to the input
+    appends them to the remainder. -/
+theorem readBitsLSB_append (n : Nat) (bits suffix : List Bool)
+    (val : Nat) (rest : List Bool)
+    (h : readBitsLSB n bits = some (val, rest)) :
+    readBitsLSB n (bits ++ suffix) = some (val, rest ++ suffix) := by
+  induction n generalizing bits val rest with
+  | zero =>
+    simp [readBitsLSB] at h ⊢
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨rfl, rfl⟩
+  | succ k ih =>
+    cases bits with
+    | nil => simp [readBitsLSB] at h
+    | cons b bs =>
+      simp only [readBitsLSB, List.cons_append] at h ⊢
+      cases hk : readBitsLSB k bs with
+      | none => simp [hk] at h
+      | some p =>
+        obtain ⟨v, rem⟩ := p
+        simp [hk] at h
+        obtain ⟨rfl, rfl⟩ := h
+        rw [ih bs v rem hk]
+        simp
+
 end Deflate.Spec
