@@ -262,6 +262,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/HuffmanEncodeCorrect.lean — Canonical codes encode correctness (native ↔ spec bridge)
     Zip/Spec/LZ77.lean       — LZ77 symbol algebra, greedy matcher, correctness proof
     Zip/Spec/Deflate.lean    — DEFLATE bitstream spec: types, decode (RFC 1951)
+    Zip/Spec/DeflateSuffix.lean — DEFLATE suffix invariance theorems (decode ignores trailing bits)
     Zip/Spec/DeflateEncode.lean — DEFLATE encode spec: symbol encoding + roundtrip
     Zip/Spec/DeflateEncodeProps.lean — DEFLATE encoding success properties
     Zip/Spec/DeflateEncodeDynamic.lean — RLE encoding + dynamic block header encoder
