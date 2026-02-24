@@ -35,7 +35,26 @@ Priority order for implementation work:
 
 ## Step 4: Write the plan
 
-Design work items, each scoped to a single session (~few hundred lines of changes).
+Design work items, each scoped to complete well within a single context window.
+
+**Sizing rules:**
+- **Max 3 deliverables** per issue. If you have 4+, split into multiple issues.
+- **Typically 2 files modified** (excluding progress/plan files). 3-4 is
+  fine if they're tightly coupled (e.g. implementation + spec + test for
+  one feature). 5+ is almost certainly too big.
+- **One theorem per issue** for non-trivial proofs. A theorem and its direct
+  helper lemmas (in the same file) are one unit. Two independent theorems
+  are two issues — even if they're in the same file.
+- **~200 lines of new code** is the target. Over 300 is a yellow flag.
+  Over 500 means the issue should almost certainly have been split.
+
+**Estimation heuristic:** count the deliverables, multiply by the hardest
+one's estimated difficulty (1=mechanical, 2=moderate, 3=requires exploration).
+If the product exceeds 5, split the issue.
+
+**When in doubt, split.** Two small issues that finish cleanly are always
+better than one large issue that triggers compaction and produces sloppy
+partial work. Workers can always claim the next issue immediately.
 
 **Atomicity rule**: each issue must have a single logical concern. All its
 deliverables should be tightly related — not independent tasks that happen to

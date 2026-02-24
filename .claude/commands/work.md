@@ -79,6 +79,27 @@ Failure handling:
 - If a proof is stuck after 3 fundamentally different attempts: leave as `sorry`,
   document what was tried
 - 3 consecutive iterations with no commits: end the session and document blockers
+- If conversation compaction has occurred: wrap up immediately (see Step 5b)
+
+## Step 5b: Monitor context health
+
+**Compaction is your signal to wrap up.** If you see a system message about
+conversation compaction, or notice that earlier context has been summarized:
+
+1. **Finish your current sub-task** (get to a compiling state)
+2. **Commit what you have** — a clean partial commit is valuable
+3. **Skip remaining deliverables** — do NOT start new work after compaction
+4. **Go directly to Step 6 (Verify)** then Step 7 (Publish) with `--partial`
+
+Compaction means you've used most of your context window. Quality degrades
+from here — you're more likely to re-read files you already read, forget
+decisions you made, or produce inconsistent code. Wrapping up now and letting
+a fresh session continue is strictly better than grinding through.
+
+**Commit early, commit often.** Don't wait until all deliverables are done.
+After each deliverable (or coherent sub-unit), commit. These intermediate
+commits are checkpoints — if you hit context pressure later, you've already
+banked your progress. Each commit must compile (`lake build`).
 
 ## Step 6: Verify
 

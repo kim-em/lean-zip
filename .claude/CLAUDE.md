@@ -77,6 +77,9 @@ See `.claude/commands/plan.md` for the full prompt. Summary:
    deliverables, "done" criteria, verification steps. If orientation
    reveals multiple orthogonal pieces, create multiple issues rather
    than bundling them. Plans must NOT overlap with existing issues.
+   Issues must be small enough to complete without context compaction.
+   Target: max 3 deliverables, max 2 substantive files, ~200 lines of
+   new code. See plan.md for full sizing rules.
    When a new issue is a prerequisite for an existing open issue,
    update the existing issue's body with `depends-on` and add the
    `blocked` label. See `plan.md` for details.
@@ -103,6 +106,10 @@ See `.claude/commands/work.md` for the full prompt. Summary:
    actually done (not the issue title), and the progress entry must
    clearly list unfinished deliverables so planners can reschedule them.
    See `work.md` for details.
+   **Context health**: If conversation compaction fires, stop starting new
+   deliverables. Commit current work, verify, and publish with `--partial`.
+   A clean partial result from a fresh context beats degraded work from a
+   compressed one.
 8. **Reflect**: `/reflect`, update `.claude/` if needed
 
 ### Session types (for both planners and workers)
@@ -371,6 +378,10 @@ for how this applies to DEFLATE.
   produce commits.)
 - If `/second-opinion` or `/reflect` is unavailable, skip and note in
   your progress entry.
+- If conversation compaction has occurred: finish the current sub-task,
+  commit, and wrap up with `--partial`. Do not start new deliverables
+  after compaction — context quality degrades and the risk of introducing
+  bugs or inconsistencies increases.
 
 ## Proof Strategies
 
