@@ -372,7 +372,10 @@ for how this applies to DEFLATE.
 - Do NOT use `native_decide` — it is forbidden in this codebase. When
   tempted to use it (e.g. for decidable propositions over large finite
   types), try `decide_cbv` instead, which uses kernel-level evaluation
-  without native code generation
+  without native code generation. **Caveat**: `decide_cbv` uses `simp`
+  internally and fails with "maximum number of steps exceeded" on very
+  large arrays (e.g. 288-element fixed Huffman tables). For those cases,
+  stick with `decide` + `maxHeartbeats`.
 - Prefer `omega`, `decide`, `simp`, `grind` over manual arithmetic
 - After getting a proof to work, refactor it immediately:
   combine steps, find minimal proof, extract reusable lemmas

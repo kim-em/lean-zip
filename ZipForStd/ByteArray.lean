@@ -26,4 +26,16 @@ theorem data_toList_length (data : ByteArray) :
     data.data.toList.length = data.size :=
   Array.length_toList
 
+/-- Extract from `a ++ b` starting at or past `a.size` gives an extract of `b`. -/
+theorem extract_append_ge (a b : ByteArray) (i j : Nat) (h : i ≥ a.size) :
+    (a ++ b).extract i j = b.extract (i - a.size) (j - a.size) := by
+  apply ByteArray.ext
+  simp [ByteArray.data_extract, ByteArray.data_append, Array.extract_append]
+  omega
+
+/-- Extracting from 0 to `a.size` in `a ++ b` gives `a`. -/
+theorem extract_append_left (a b : ByteArray) :
+    (a ++ b).extract 0 a.size = a := by
+  apply ByteArray.ext; simp
+
 end ByteArray
