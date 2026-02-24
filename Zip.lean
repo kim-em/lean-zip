@@ -53,3 +53,4 @@ import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.DeflateRoundtrip
 import Zip.Spec.BinaryCorrect
 import Zip.Spec.GzipCorrect
+import Zip.Spec.ZlibCorrect

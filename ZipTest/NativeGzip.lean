@@ -1,6 +1,7 @@
 import ZipTest.Helpers
 import Zip.Native.Gzip
 import Zip.Spec.GzipCorrect
+import Zip.Spec.ZlibCorrect
 
 def ZipTest.NativeGzip.tests : IO Unit := do
   IO.println "  NativeGzip tests..."
@@ -295,5 +296,19 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   match Zip.Native.GzipDecode.decompressSingle ffiGz with
   | .ok result => assert! result == helloBytes
   | .error e => throw (IO.userError s!"decompressSingle on FFI gzip failed: {e}")
+
+  -- Zlib decompressSingle agrees with decompress on native encoder output
+  for level in ([0, 1, 5] : List UInt8) do
+    for input in [ByteArray.empty, helloBytes, singleByte, big] do
+      let compressed := Zip.Native.ZlibEncode.compress input level
+      match Zip.Native.ZlibDecode.decompressSingle compressed with
+      | .ok result => assert! result == input
+      | .error e => throw (IO.userError s!"zlib decompressSingle level {level} failed: {e}")
+
+  -- Zlib decompressSingle agrees with decompress on FFI encoder output
+  let ffiZlib ← Zlib.compress helloBytes
+  match Zip.Native.ZlibDecode.decompressSingle ffiZlib with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"zlib decompressSingle on FFI zlib failed: {e}")
 
   IO.println "  NativeGzip tests passed."

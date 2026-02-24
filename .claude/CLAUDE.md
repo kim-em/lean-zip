@@ -293,6 +293,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/DeflateRoundtrip.lean — Unified DEFLATE roundtrip (Phase 4 capstone)
     Zip/Spec/BinaryCorrect.lean — Binary LE read/write roundtrip proofs
     Zip/Spec/GzipCorrect.lean  — Gzip framing: pure decoder + format lemma + roundtrip statement
+    Zip/Spec/ZlibCorrect.lean  — Zlib framing: pure decoder + format lemmas + roundtrip statement
     Zip.lean             — Re-exports all modules
     ZipForStd/           — Missing std library lemmas (candidates for upstreaming)
     ZipForStd.lean       — Root import for ZipForStd
@@ -718,6 +719,14 @@ Update it during review and reflect sessions.
   Don't use `show P = false from by omega` for `Prop` conditions — `>`
   on `Nat` creates a `Prop`, not a `Bool`.
 
+- **`split` not `by_cases` for UInt8 `if` branches**: When a function
+  uses `if level == 0 then ... else if level < 5 then ...` with UInt8
+  comparisons, use `split` (not `by_cases`) to case-split. `by_cases`
+  on `(level < 5) = true` creates `¬(level < 5) = true` (not
+  `(level < 5) = false`) in the negative branch, which simp can't
+  reduce. `split` naturally decomposes `if` expressions and produces
+  clean sub-goals. After `split`, use `decide` if the goal is fully
+  concrete (e.g., format lemma with known byte values).
 - **`simp only` fails with `List.filter` + anonymous lambdas**: When
   `List.filter_cons` unfolds `(a :: l).filter p` to
   `if p a = true then ...`, and `p` is an anonymous lambda like
