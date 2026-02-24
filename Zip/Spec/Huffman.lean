@@ -13,8 +13,9 @@ solely on their code lengths, using a deterministic algorithm that ensures:
 1. Shorter codes are numerically smaller
 2. Codes of the same length are assigned in increasing symbol order
 
-Property theorems (Kraft inequality, prefix-free proofs, injectivity,
-decode correctness) are in `Zip.Spec.HuffmanTheorems`.
+Kraft inequality analysis is in `Zip.Spec.HuffmanKraft`.
+Property theorems (prefix-free proofs, injectivity, decode correctness)
+are in `Zip.Spec.HuffmanTheorems`.
 -/
 
 namespace Huffman.Spec
