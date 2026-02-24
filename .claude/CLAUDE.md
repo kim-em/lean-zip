@@ -611,6 +611,17 @@ Update it during review and reflect sessions.
   (strips `some`/`pure` wrappers). For `guard` in do-blocks, use
   `by_cases` on the condition then `simp only [guard, hcond, ↓reduceIte]`
   — the guard uses `Alternative.guard`, NOT `Option.guard`.
+- **Guard contradiction in `by_cases` neg branch**: When `by_cases` splits
+  on `(x == y) = true`, the neg branch gives `¬(x == y) = true`, NOT
+  `(x == y) = false`. To reduce a `guard` (or `if ... then pure () else
+  failure`) stuck in a hypothesis, first derive the `= false` form:
+  ```lean
+  have hfalse : (x == y) = false := by cases h : (x == y) <;> simp_all
+  rw [hfalse] at hspec
+  simp [guard, Bool.false_eq_true] at hspec  -- reduces to none = some, contradiction
+  ```
+  Don't try `simp [hguard]` alone — it reduces the `if` but leaves
+  `guard False` or `match guard False, ...` unreduced.
 - **Avoid `do { if ... then return ...; rest }`**: Creates `have __do_jp`
   join points in desugared form, making `h` and `⊢` syntactically
   different after `unfold`. Use `if ... then some (...) else do { rest }`
