@@ -77,6 +77,9 @@ See `.claude/commands/plan.md` for the full prompt. Summary:
    deliverables, "done" criteria, verification steps. If orientation
    reveals multiple orthogonal pieces, create multiple issues rather
    than bundling them. Plans must NOT overlap with existing issues.
+   When a new issue is a prerequisite for an existing open issue,
+   update the existing issue's body with `depends-on` and add the
+   `blocked` label. See `plan.md` for details.
 5. **Overlap guard**: re-fetch issues before posting to catch races
 6. **Exit** — do not execute any code changes
 
@@ -95,7 +98,11 @@ See `.claude/commands/work.md` for the full prompt. Summary:
 6. **Verify**: `lake build && lake exe test`, sorry count delta,
    `git diff`, `/second-opinion`
 7. **Publish**: progress entry, push, `coordination create-pr N`
-   (auto-merge handles the rest)
+   (auto-merge handles the rest). **Partial completion**: if not all
+   deliverables were finished, the PR title must reflect what was
+   actually done (not the issue title), and the progress entry must
+   clearly list unfinished deliverables so planners can reschedule them.
+   See `work.md` for details.
 8. **Reflect**: `/reflect`, update `.claude/` if needed
 
 ### Session types (for both planners and workers)
@@ -173,7 +180,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `./go`).
 |---------|-------------|
 | `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
 | `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
-| `coordination create-pr N` | Push branch, create PR closing issue #N, enable auto-merge, swap `claimed` → `has-pr` |
+| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `needs-replan` label |
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
 | `coordination list-unclaimed` | List unclaimed agent-plan issues (FIFO order) |
@@ -190,6 +197,10 @@ worker claims it (adds label: `claimed`) → worker creates PR closing it
 Skipped issues (label: `skip`) can be revised by the next planner.
 Issues with `has-pr` appear in orient under "Issues with open PRs" and
 are excluded from `list-unclaimed` and `queue-depth`.
+**Partial completion**: worker uses `--partial` → label swaps to
+`needs-replan` (excluded from `list-unclaimed`). A planner creates a
+new issue for remaining work, then closes the `needs-replan` issue with
+a link to the new one. This preserves full history.
 
 **Dependencies**: Issues can declare `depends-on: #N` in their body.
 `coordination plan` auto-adds the `blocked` label if any dependency is

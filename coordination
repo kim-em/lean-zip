@@ -7,7 +7,7 @@
 # Usage:
 #   coordination orient           — list open plans (claimed/unclaimed), PRs, issues needing attention
 #   coordination plan "title"     — create GitHub issue with agent-plan label (body from stdin)
-#   coordination create-pr N      — push branch, create PR closing issue #N, enable auto-merge
+#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge
 #   coordination claim-fix N      — comment on failing PR #N claiming fix (30min cooldown)
 #   coordination close-pr N "reason" — comment reason and close PR #N
 #   coordination list-unclaimed   — list unclaimed agent-plan issues (FIFO order)
@@ -36,7 +36,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || \
 _unclaimed_issues() {
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,labels,createdAt \
-        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked") and all(.name != "has-pr"))] |
+        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked") and all(.name != "has-pr") and all(.name != "needs-replan"))] |
               sort_by(.createdAt)'
 }
 
@@ -164,11 +164,37 @@ cmd_plan() {
 
 # --- create-pr ---
 cmd_create_pr() {
-    local issue_num="${1:?usage: coordination create-pr N}"
+    # Parse arguments: create-pr N [--partial] ["custom title"]
+    local issue_num="${1:?usage: coordination create-pr N [--partial] [\"custom title\"]}"
+    shift
+    local partial=false
+    local custom_title=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --partial) partial=true; shift ;;
+            *) custom_title="$1"; shift ;;
+        esac
+    done
 
     # Guard: refuse to create PR from master or detached HEAD
     if [[ "$BRANCH" == "master" || "$BRANCH" == "main" || "$BRANCH" == "detached" ]]; then
         die "cannot create PR from branch '$BRANCH' — use an agent/* branch"
+    fi
+
+    # Determine PR title: custom if provided, otherwise from issue
+    local pr_title
+    if [[ -n "$custom_title" ]]; then
+        pr_title="$custom_title"
+    else
+        pr_title="$(gh issue view "$issue_num" --repo "$REPO" --json title --jq .title)"
+    fi
+
+    # Determine issue reference line
+    local issue_ref
+    if [[ "$partial" == true ]]; then
+        issue_ref="Partial progress on #$issue_num"
+    else
+        issue_ref="Closes #$issue_num"
     fi
 
     # Push branch
@@ -181,16 +207,22 @@ cmd_create_pr() {
         echo "PR #$existing_pr already exists for branch $BRANCH. Enabling auto-merge."
         gh pr merge "$existing_pr" --repo "$REPO" --auto --squash || \
             echo "warning: auto-merge not available (branch protection may not be set up)"
-        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
+        if [[ "$partial" == true ]]; then
+            # Partial: needs-replan so planner can re-scope before another worker claims
+            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label needs-replan 2>/dev/null || true
+            echo "Issue #$issue_num marked needs-replan (partial completion)"
+        else
+            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
+        fi
         return 0
     fi
 
     # Create PR
     gh pr create --repo "$REPO" \
         --head "$BRANCH" \
-        --title "$(gh issue view "$issue_num" --repo "$REPO" --json title --jq .title)" \
+        --title "$pr_title" \
         --body "$(cat <<EOF
-Closes #$issue_num
+$issue_ref
 
 Session: \`$SESSION_ID\`
 
@@ -208,8 +240,15 @@ EOF
             echo "warning: auto-merge not available (branch protection may not be set up)"
     fi
 
-    # Update issue labels: claimed → has-pr
-    gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
+    # Update issue labels
+    if [[ "$partial" == true ]]; then
+        # Partial: needs-replan so planner can re-scope before another worker claims
+        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label needs-replan 2>/dev/null || true
+        echo "Issue #$issue_num marked needs-replan (partial completion)"
+    else
+        # Full: claimed → has-pr
+        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
+    fi
 }
 
 # --- claim-fix ---
