@@ -85,6 +85,27 @@ If the existing issue is already claimed, still add the body dependency and
 comment so the worker is aware, but don't add `blocked` (the worker can
 decide how to handle it).
 
+**Handling `needs-replan` issues**: When a worker makes partial progress, the
+issue gets a `needs-replan` label (excluded from `list-unclaimed`). During
+orientation, check for these:
+```
+gh issue list --repo kim-em/lean-zip --label needs-replan --state open --limit 10 \
+    --json number,title --jq '.[] | "#\(.number) \(.title)"'
+```
+For each `needs-replan` issue:
+1. Read the partial PR and progress entry to understand what was done
+2. Create a **new issue** for the remaining work, referencing the original:
+   - Include "Continues #N" and a link to the partial PR for context
+   - Describe only the remaining deliverables (what was NOT done)
+   - Add any new context learned from the partial attempt
+3. Close the original `needs-replan` issue with a comment linking forward:
+   ```
+   gh issue close <N> --repo kim-em/lean-zip \
+       --comment "Remaining work replanned in #<new-issue>. Partial progress in PR #<partial-pr>."
+   ```
+4. If other open issues had `depends-on: #<N>`, update them to depend on
+   the new issue instead
+
 **Filling gaps from partial completions**: When orientation reveals that a PR
 made partial progress on an issue (the issue was closed but deliverables remain
 unfinished, or a PR title doesn't match the issue scope):

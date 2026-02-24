@@ -36,7 +36,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || \
 _unclaimed_issues() {
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,labels,createdAt \
-        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked") and all(.name != "has-pr"))] |
+        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked") and all(.name != "has-pr") and all(.name != "needs-replan"))] |
               sort_by(.createdAt)'
 }
 
@@ -207,7 +207,11 @@ cmd_create_pr() {
         echo "PR #$existing_pr already exists for branch $BRANCH. Enabling auto-merge."
         gh pr merge "$existing_pr" --repo "$REPO" --auto --squash || \
             echo "warning: auto-merge not available (branch protection may not be set up)"
-        if [[ "$partial" != true ]]; then
+        if [[ "$partial" == true ]]; then
+            # Partial: needs-replan so planner can re-scope before another worker claims
+            gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label needs-replan 2>/dev/null || true
+            echo "Issue #$issue_num marked needs-replan (partial completion)"
+        else
             gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
         fi
         return 0
@@ -238,9 +242,9 @@ EOF
 
     # Update issue labels
     if [[ "$partial" == true ]]; then
-        # Partial: remove claimed so issue returns to unclaimed queue
-        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
-        echo "Issue #$issue_num returned to unclaimed queue (partial completion)"
+        # Partial: needs-replan so planner can re-scope before another worker claims
+        gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label needs-replan 2>/dev/null || true
+        echo "Issue #$issue_num marked needs-replan (partial completion)"
     else
         # Full: claimed → has-pr
         gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label has-pr 2>/dev/null || true
