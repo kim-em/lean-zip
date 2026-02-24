@@ -566,6 +566,72 @@ private theorem decode_go_fuel_independent
                 · next hbf1 => rw [if_neg hbf1] at h; exact ih _ _ _ h
         | _ + 3 => simp at h
 
+set_option maxRecDepth 4096 in
+/-- `decode.go` always extends the accumulator: if it succeeds, the
+    result is an extension of the initial accumulator. -/
+theorem decode_go_acc_prefix
+    (bits : List Bool) (acc : List UInt8) (fuel : Nat) (result : List UInt8)
+    (h : decode.go bits acc fuel = some result) :
+    acc <+: result := by
+  induction fuel generalizing bits acc result with
+  | zero => simp [decode.go] at h
+  | succ n ih =>
+    unfold decode.go at h
+    cases hbf : readBitsLSB 1 bits with
+    | none => simp [hbf] at h
+    | some p =>
+      obtain ⟨bfinal, bits₁⟩ := p
+      simp only [hbf, bind, Option.bind] at h
+      cases hbt : readBitsLSB 2 bits₁ with
+      | none => simp [hbt] at h
+      | some q =>
+        obtain ⟨btype, bits₂⟩ := q
+        simp only [hbt] at h
+        match hm : btype with
+        | 0 =>
+          cases hds : decodeStored bits₂ with
+          | none => simp [hds] at h
+          | some r =>
+            obtain ⟨bytes, bits₃⟩ := r
+            simp only [hds] at h
+            split at h
+            · simp [pure, Pure.pure] at h; exact h ▸ List.prefix_append _ _
+            · exact List.IsPrefix.trans (List.prefix_append _ _) (ih _ _ _ h)
+        | 1 =>
+          cases hsyms : decodeSymbols fixedLitLengths fixedDistLengths bits₂ with
+          | none => simp [hsyms] at h
+          | some r =>
+            obtain ⟨syms, bits₃⟩ := r
+            simp only [hsyms] at h
+            cases hres : resolveLZ77 syms acc with
+            | none => simp [hres] at h
+            | some acc' =>
+              simp only [hres] at h
+              have hacc' := resolveLZ77_extends syms acc acc' hres
+              split at h
+              · simp [pure, Pure.pure] at h; exact h ▸ hacc'
+              · exact List.IsPrefix.trans hacc' (ih _ _ _ h)
+        | 2 =>
+          cases hdt : decodeDynamicTables bits₂ with
+          | none => simp [hdt] at h
+          | some r =>
+            obtain ⟨litLens, distLens, bits₃⟩ := r
+            simp only [hdt] at h
+            cases hsyms : decodeSymbols litLens distLens bits₃ with
+            | none => simp [hsyms] at h
+            | some s =>
+              obtain ⟨syms, bits₄⟩ := s
+              simp only [hsyms] at h
+              cases hres : resolveLZ77 syms acc with
+              | none => simp [hres] at h
+              | some acc' =>
+                simp only [hres] at h
+                have hacc' := resolveLZ77_extends syms acc acc' hres
+                split at h
+                · simp [pure, Pure.pure] at h; exact h ▸ hacc'
+                · exact List.IsPrefix.trans hacc' (ih _ _ _ h)
+        | _ + 3 => simp at h
+
 theorem decode_fuel_independent
     (bits : List Bool) (fuel : Nat) (result : List UInt8) :
     decode bits fuel = some result →
