@@ -1106,7 +1106,7 @@ theorem decodeHuffman_complete
       -- Get native litTree.decode via huffTree_decode_complete
       obtain ⟨br₁, hdec_lit, hrest₁, hwf₁, hpos₁⟩ :=
         huffTree_decode_complete litLengths 15 (by omega) litTree br
-          sym_nat rest₁ hwf hpos hlit hvlit hlen_lit hsym_bound (by omega) hspec_sym
+          sym_nat rest₁ hwf hpos hlit hvlit hlen_lit hsym_bound hspec_sym
       -- Case split on sym_val (the LZ77Symbol from decodeLitLen)
       cases sym_val with
       | literal b =>
