@@ -22,10 +22,7 @@ theorem readBitsLSB_append (n : Nat) (bits suffix : List Bool)
     (h : readBitsLSB n bits = some (val, rest)) :
     readBitsLSB n (bits ++ suffix) = some (val, rest ++ suffix) := by
   induction n generalizing bits val rest with
-  | zero =>
-    simp [readBitsLSB] at h ⊢
-    obtain ⟨rfl, rfl⟩ := h
-    exact ⟨rfl, rfl⟩
+  | zero => simp_all [readBitsLSB]
   | succ k ih =>
     cases bits with
     | nil => simp [readBitsLSB] at h
@@ -35,10 +32,8 @@ theorem readBitsLSB_append (n : Nat) (bits suffix : List Bool)
       | none => simp [hk] at h
       | some p =>
         obtain ⟨v, rem⟩ := p
-        simp [hk] at h
-        obtain ⟨rfl, rfl⟩ := h
-        rw [ih bs v rem hk]
-        simp
+        simp [hk] at h; obtain ⟨rfl, rfl⟩ := h
+        simp [ih bs v rem hk]
 
 /-- Prefix-free condition for a swapped `allCodes` table. -/
 private theorem allCodes_swapped_prefix_free (lengths : List Nat) (maxBits : Nat)
@@ -149,15 +144,7 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
       match hsym : sym with
       | .endOfBlock =>
         obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-      | .literal _ =>
-        cases hrec : decodeSymbols litLengths distLengths bits' n with
-        | none => simp [hrec] at h
-        | some q =>
-          obtain ⟨restSyms, bits''⟩ := q
-          simp only [hrec] at h
-          simp only [ih bits' restSyms bits'' hrec]
-          obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-      | .reference .. =>
+      | .literal _ | .reference .. =>
         cases hrec : decodeSymbols litLengths distLengths bits' n with
         | none => simp [hrec] at h
         | some q =>
@@ -173,9 +160,7 @@ private theorem readNBytes_append (n : Nat) (bits suffix : List Bool)
     (h : decodeStored.readNBytes n bits acc = some (bytes, rest)) :
     decodeStored.readNBytes n (bits ++ suffix) acc = some (bytes, rest ++ suffix) := by
   induction n generalizing bits acc bytes rest with
-  | zero =>
-    simp [decodeStored.readNBytes] at h ⊢
-    obtain ⟨rfl, rfl⟩ := h; exact ⟨rfl, rfl⟩
+  | zero => simp_all [decodeStored.readNBytes]
   | succ k ih =>
     unfold decodeStored.readNBytes at h ⊢
     cases hrb : readBitsLSB 8 bits with
@@ -234,9 +219,7 @@ private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
     (h : Deflate.Spec.readCLLengths n idx acc bits = some (result, rest)) :
     Deflate.Spec.readCLLengths n idx acc (bits ++ suffix) = some (result, rest ++ suffix) := by
   induction n generalizing idx acc bits result rest with
-  | zero =>
-    simp [Deflate.Spec.readCLLengths] at h ⊢
-    obtain ⟨rfl, rfl⟩ := h; exact ⟨rfl, rfl⟩
+  | zero => simp_all [Deflate.Spec.readCLLengths]
   | succ k ih =>
     unfold Deflate.Spec.readCLLengths at h ⊢
     cases hrb : readBitsLSB 3 bits with
