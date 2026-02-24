@@ -560,6 +560,9 @@ Update it during review and reflect sessions.
   `arr[(⟨k, hk⟩ : Fin n).val]!` and `arr[k]!` as different variables.
   Fix by annotating the result type:
   `have : arr[k]! ≥ 1 := lemma ⟨k, hk⟩`.
+  **Critical**: `have := lemma ⟨k, hk⟩` (without type annotation) does
+  NOT work — the anonymous hypothesis retains the Fin.val form and
+  omega still sees two distinct variables. Always use the annotated form.
 - **Nat beq false**: To prove `(n == m) = false` for Nat with `n ≠ m`,
   use `cases heq : n == m <;> simp_all [beq_iff_eq]`. Direct `omega`
   and `rw [beq_iff_eq]` don't work because `omega` doesn't understand
@@ -761,6 +764,19 @@ Update it during review and reflect sessions.
   `List.map_congr_left` with the above per-element proof, then `simp`.
 - **`Array.toArray_toList`**: `a.toList.toArray = a` for any Array.
   NOT `Array.toList_toArray` or `List.toArray_toList` — those don't exist.
+- **simp hypothesis must match post-rewrite form**: When using
+  `simp only [rewrite_eq, neg_hyp, ↓reduceIte]`, if `rewrite_eq`
+  transforms the goal's condition (e.g. `sym.toUInt16.toNat` → `sym`),
+  then `neg_hyp` must be stated in the post-rewrite form (e.g.
+  `¬(sym - 257 ≥ ...)`, not `¬(sym.toUInt16.toNat - 257 ≥ ...)`).
+  simp applies all rules together, so the hypothesis must match the
+  normalized goal, not the pre-rewrite form.
+- **`rw`/`▸` max recursion on `List.ofFn`**: Rewriting a term
+  containing `List.ofFn (fun (i : Fin n) => complex_expr)` can hit
+  max recursion depth because the motive involves dependent types.
+  Fix: use `set_option maxRecDepth 2048 in` before the `have`/tactic
+  that performs the rewrite. `▸` is even worse than `rw` here since
+  it triggers full `whnf`.
 
 ## Current State
 
