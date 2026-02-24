@@ -791,7 +791,9 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                         simp
                       rw [this]
                       exact hspec_dcl
-                    simp only [hdcl_spec]
+                    have hdcl_spec' :=
+                      Deflate.Spec.decodeCLSymbols_fuel_independent _ _ _ _ _ _ hdcl_spec 1
+                    simp only [hdcl_spec']
                     have hlen_eq : ((clResults.extract 0
                         (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList.map
                         UInt8.toNat).length =

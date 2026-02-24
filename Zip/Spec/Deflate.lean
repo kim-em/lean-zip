@@ -311,7 +311,7 @@ def decodeDynamicTables (bits : List Bool) :
   let totalCodes := numLitLen + numDist
   let clCodes := Huffman.Spec.allCodes clLengths 7
   let clTable := clCodes.map fun (sym, cw) => (cw, sym)
-  let (codeLengths, bits) ← decodeCLSymbols clTable totalCodes [] bits totalCodes
+  let (codeLengths, bits) ← decodeCLSymbols clTable totalCodes [] bits (totalCodes + 1)
   guard (codeLengths.length == totalCodes)
   let litLenLengths := codeLengths.take numLitLen
   let distLengths := codeLengths.drop numLitLen
