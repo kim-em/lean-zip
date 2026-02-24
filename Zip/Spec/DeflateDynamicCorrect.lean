@@ -377,6 +377,26 @@ private theorem tokenFreqs_distCode_pos (tokens : Array LZ77Token)
   exact tokenFreqs_go_distCode_pos tokens len dist dCode dExtraN dExtraV _ _ 0 j
     (by simp) (by simp) (by omega) hjlt htok' hfdc
 
+/-- Converting a List Nat with elements ≤ 15 to Array UInt8 preserves bounds. -/
+private theorem toUInt8Array_le (lens : List Nat) (hbound : ∀ x ∈ lens, x ≤ 15) :
+    ∀ j, j < (lens.toArray.map Nat.toUInt8).size →
+      (lens.toArray.map Nat.toUInt8)[j]!.toNat ≤ 15 := by
+  intro k hk
+  rw [getElem!_pos _ k hk]
+  simp only [Array.getElem_map, Array.size_map, List.size_toArray] at hk ⊢
+  simp only [UInt8.toNat, Nat.toUInt8, UInt8.ofNat, BitVec.toNat_ofNat]
+  exact Nat.le_trans (Nat.mod_le _ _) (hbound _ (List.getElem_mem hk))
+
+/-- If `freqs[sym]! ≥ 1` and `sym < freqs.size`, the frequency pairs list
+    contains a witness with matching symbol and positive frequency. -/
+private theorem freqPairs_witness (freqs : Array Nat) (sym : Nat)
+    (hsym : sym < freqs.size) (hfreq : freqs[sym]! ≥ 1) :
+    ∃ p ∈ (List.range freqs.size).map fun i => (i, freqs[i]!),
+      p.1 = sym ∧ p.2 > 0 :=
+  ⟨(sym, freqs[sym]!), by
+    simp only [List.mem_map, List.mem_range]
+    exact ⟨sym, hsym, rfl⟩, rfl, hfreq⟩
+
 /-- `deflateDynamic` produces a bytestream whose bits correspond to the
     spec-level dynamic Huffman encoding, plus padding to byte alignment. -/
 theorem deflateDynamic_spec (data : ByteArray) :
@@ -535,13 +555,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
         simp only [Deflate.Spec.encodeLitLen]
         have hb_lt : b.toNat < litLens.length := by rw [hlit_len]; have := UInt8.toNat_lt b; omega
         have hfreq := tokenFreqs_literal_pos tokens b ht_mem
-        have hfreq_pair : ∃ p ∈ litFreqPairs, p.1 = b.toNat ∧ p.2 > 0 :=
-          ⟨(b.toNat, litFreqs[b.toNat]!), by
-            simp only [litFreqPairs, List.mem_map, List.mem_range]
-            exact ⟨b.toNat, by have := UInt8.toNat_lt b; omega, rfl⟩,
-            rfl, hfreq⟩
         have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-          (by omega) b.toNat (by have := UInt8.toNat_lt b; omega) hfreq_pair
+          (by omega) b.toNat (by have := UInt8.toNat_lt b; omega)
+          (freqPairs_witness litFreqs b.toNat (by have := UInt8.toNat_lt b; omega) hfreq)
         have hlen_le : litLens[b.toNat]! ≤ 15 := by
           rw [getElem!_pos litLens b.toNat hb_lt]
           exact hlit_bound _ (List.getElem_mem hb_lt)
@@ -563,13 +579,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
           have hsym : 257 + idx < litLens.length := by rw [hlit_len]; omega
           have hfreq := tokenFreqs_lengthCode_pos tokens len dist idx extraN
             extraV.toUInt32 ht_mem hflc_native
-          have hfreq_pair : ∃ p ∈ litFreqPairs, p.1 = (257 + idx) ∧ p.2 > 0 :=
-            ⟨(257 + idx, litFreqs[257 + idx]!), by
-              simp only [litFreqPairs, List.mem_map, List.mem_range]
-              exact ⟨257 + idx, by omega, rfl⟩,
-              rfl, hfreq⟩
           have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-            (by omega) (257 + idx) (by omega) hfreq_pair
+            (by omega) (257 + idx) (by omega)
+            (freqPairs_witness litFreqs (257 + idx) (by omega) hfreq)
           have hlen_le' : litLens[257 + idx]! ≤ 15 := by
             rw [getElem!_pos litLens (257 + idx) hsym]
             exact hlit_bound _ (List.getElem_mem hsym)
@@ -594,14 +606,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
                 -- There's a reference, so distFreqs has a positive entry
                 have hdfreq := tokenFreqs_distCode_pos tokens len dist dCode dExtraN
                   dExtraV.toUInt32 ht_mem hfdc_native
-                -- computeCodeLengths gives nonzero for positive freq
-                have hdfreq_pair : ∃ p ∈ distFreqPairs, p.1 = dCode ∧ p.2 > 0 :=
-                  ⟨(dCode, distFreqs[dCode]!), by
-                    simp only [distFreqPairs, List.mem_map, List.mem_range]
-                    exact ⟨dCode, by omega, rfl⟩,
-                    rfl, hdfreq⟩
                 have hdlen_nz := Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
-                  (by omega) dCode (by omega) hdfreq_pair
+                  (by omega) dCode (by omega)
+                  (freqPairs_witness distFreqs dCode (by omega) hdfreq)
                 -- If all were zero, distLens₀[dCode]! would be 0, contradiction
                 intro hall
                 have hdc_lt : dCode < distLens₀.length := by omega
@@ -618,15 +625,11 @@ theorem deflateDynamic_spec (data : ByteArray) :
               have hdsym : dCode < distLens.length := by rw [hdist_len]; omega
               have hdfreq := tokenFreqs_distCode_pos tokens len dist dCode dExtraN
                 dExtraV.toUInt32 ht_mem hfdc_native
-              have hdfreq_pair : ∃ p ∈ distFreqPairs, p.1 = dCode ∧ p.2 > 0 :=
-                ⟨(dCode, distFreqs[dCode]!), by
-                  simp only [distFreqPairs, List.mem_map, List.mem_range]
-                  exact ⟨dCode, by omega, rfl⟩,
-                  rfl, hdfreq⟩
               have hdlen_nz : distLens[dCode]! ≠ 0 := by
                 rw [hdl_eq]
                 exact Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
-                  (by omega) dCode (by omega) hdfreq_pair
+                  (by omega) dCode (by omega)
+                  (freqPairs_witness distFreqs dCode (by omega) hdfreq)
               have hdlen_le' : distLens[dCode]! ≤ 15 := by
                 rw [getElem!_pos distLens dCode hdsym]
                 exact hdist_bound _ (List.getElem_mem hdsym)
@@ -644,13 +647,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
       simp only [Deflate.Spec.encodeLitLen]
       have hsym : 256 < litLens.length := by rw [hlit_len]; omega
       have hfreq := tokenFreqs_eob_pos tokens
-      have hfreq_pair : ∃ p ∈ litFreqPairs, p.1 = 256 ∧ p.2 > 0 :=
-        ⟨(256, litFreqs[256]!), by
-          simp only [litFreqPairs, List.mem_map, List.mem_range]
-          exact ⟨256, by omega, rfl⟩,
-          rfl, hfreq⟩
       have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-        (by omega) 256 (by omega) hfreq_pair
+        (by omega) 256 (by omega)
+        (freqPairs_witness litFreqs 256 (by omega) hfreq)
       have hlen_le : litLens[256]! ≤ 15 := by
         rw [getElem!_pos litLens 256 hsym]
         exact hlit_bound _ (List.getElem_mem hsym)
@@ -684,11 +683,6 @@ theorem deflateDynamic_spec (data : ByteArray) :
       | some eobBits' =>
         simp [henc_eob] at henc_eob_syms
         have heob_eq : eobBits = eobBits' := by rw [henc_eob_syms]
-        -- Build the combined encodeSymbols result
-        have henc_combined := Deflate.encodeSymbols_append litLens distLens
-          (tokens.toList.map LZ77Token.toLZ77Symbol)
-          [.endOfBlock] tokBits eobBits henc_tok
-          (by simp [Deflate.Spec.encodeSymbols, henc_eob, henc_eob_syms])
         -- Build canonical codes (same as in deflateDynamic)
         let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
         let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
@@ -698,22 +692,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
         have hdist_codes_size : distCodes.size = distLens.length := by
           simp [distCodes, canonicalCodes_size, List.size_toArray]
         -- Code length bounds
-        have hlit_lengths_arr_le : ∀ j, j < (litLens.toArray.map Nat.toUInt8).size →
-            (litLens.toArray.map Nat.toUInt8)[j]!.toNat ≤ 15 := by
-          intro k hk
-          rw [getElem!_pos _ k hk]
-          simp only [Array.getElem_map, Array.size_map, List.size_toArray] at hk ⊢
-          simp only [UInt8.toNat, Nat.toUInt8, UInt8.ofNat, BitVec.toNat_ofNat]
-          have hle := hlit_bound _ (List.getElem_mem hk)
-          exact Nat.le_trans (Nat.mod_le _ _) hle
-        have hdist_lengths_arr_le : ∀ j, j < (distLens.toArray.map Nat.toUInt8).size →
-            (distLens.toArray.map Nat.toUInt8)[j]!.toNat ≤ 15 := by
-          intro k hk
-          rw [getElem!_pos _ k hk]
-          simp only [Array.getElem_map, Array.size_map, List.size_toArray] at hk ⊢
-          simp only [UInt8.toNat, Nat.toUInt8, UInt8.ofNat, BitVec.toNat_ofNat]
-          have hle := hdist_bound _ (List.getElem_mem hk)
-          exact Nat.le_trans (Nat.mod_le _ _) hle
+        have hlit_lengths_arr_le := toUInt8Array_le litLens hlit_bound
+        have hdist_lengths_arr_le := toUInt8Array_le distLens hdist_bound
         have hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15 := by
           intro j hj
           exact canonicalCodes_snd_le _ 15 hlit_lengths_arr_le j hj
