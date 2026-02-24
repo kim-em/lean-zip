@@ -621,4 +621,57 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
       rw [hbr']
       simp only [hoff, Nat.add_zero]
 
+/-! ### Reverse direction (completeness): spec success → native success -/
+
+/-- **Completeness for `readBits`**: if the spec-level `readBitsLSB n` succeeds
+    on the bit list corresponding to a `BitReader`, then the native `readBits n`
+    also succeeds, producing the same value and a reader whose bit list matches
+    the spec remainder.
+
+    This is the reverse of `readBits_toBits`.
+
+    Preconditions mirror `readBits_toBits`:
+    - `hwf`: the bit offset is well-formed (`bitOff < 8`)
+    - `hpos`: the reader is within bounds when `bitOff > 0`
+    - `hn`: `n ≤ 32` (UInt32 shift correctness) -/
+theorem readBits_complete (br : Zip.Native.BitReader) (n val : Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hn : n ≤ 32)
+    (hbound : val < 2 ^ n)
+    (hspec : Deflate.Spec.readBitsLSB n br.toBits = some (val, rest)) :
+    ∃ br', br.readBits n = .ok (val.toUInt32, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
+/-- **Completeness for `readUInt16LE`**: if the spec reads 16 bits from
+    an aligned position, the native `readUInt16LE` succeeds with the same value. -/
+theorem readUInt16LE_complete (br : Zip.Native.BitReader) (val : Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hbound : val < 2 ^ 16)
+    (hspec : Deflate.Spec.readBitsLSB 16 (Deflate.Spec.alignToByte br.toBits) =
+        some (val, rest)) :
+    ∃ br', br.readUInt16LE = .ok (val.toUInt16, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff = 0 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
+/-- **Completeness for `readBytes`**: if the spec reads `n` bytes from
+    an aligned position, the native `readBytes` succeeds with the same bytes. -/
+theorem readBytes_complete (br : Zip.Native.BitReader) (n : Nat)
+    (bytes : List UInt8) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hspec : Deflate.Spec.decodeStored.readNBytes n
+        (Deflate.Spec.alignToByte br.toBits) [] = some (bytes, rest)) :
+    ∃ br', br.readBytes n = .ok (⟨⟨bytes⟩⟩, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff = 0 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
 end Deflate.Correctness
