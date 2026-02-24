@@ -623,6 +623,121 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
 
 /-! ### Reverse direction (completeness): spec success → native success -/
 
+/-- If `br.toBits` is non-empty and `bitOff < 8`, then `pos < data.size`. -/
+private theorem toBits_nonempty_pos (br : Zip.Native.BitReader)
+    (hwf : br.bitOff < 8) (h : br.toBits.length > 0) :
+    br.pos < br.data.size := by
+  rw [toBits_length] at h; omega
+
+/-- **Completeness for `readBit`**: if `br.toBits` starts with `b :: rest`,
+    then `readBit` succeeds and the resulting reader corresponds to `rest`. -/
+private theorem readBit_complete (br : Zip.Native.BitReader) (b : Bool) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hbits : br.toBits = b :: rest) :
+    ∃ br', br.readBit = .ok ((if b then 1 else 0), br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  -- toBits non-empty → pos < data.size
+  have hpos : br.pos < br.data.size := by
+    apply toBits_nonempty_pos br hwf
+    rw [hbits]; simp
+  -- Get the structural fact about toBits from bytesToBits_drop_testBit
+  obtain ⟨rest', hrest'⟩ := bytesToBits_drop_testBit br.data br.pos br.bitOff hpos hwf
+  -- Match hbits against hrest' to extract b and rest
+  simp only [Zip.Native.BitReader.toBits] at hbits
+  rw [hrest'] at hbits
+  have hhead : b = br.data[br.pos].toNat.testBit br.bitOff :=
+    (List.cons.inj hbits).1.symm
+  have hrest_eq : rest = rest' := (List.cons.inj hbits).2.symm
+  have hrest'_eq : rest' =
+      (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff + 1) :=
+    list_drop_cons_tail hrest'
+  -- Unfold readBit — pos < data.size so the error branch is impossible
+  have hge : ¬(br.pos ≥ br.data.size) := by omega
+  simp only [Zip.Native.BitReader.readBit, hge, ↓reduceIte]
+  -- The bit value matches
+  have hbit_val : ((br.data[br.pos]!.toUInt32 >>> br.bitOff.toUInt32) &&& 1) =
+      if b then 1 else 0 := by
+    have : br.data[br.pos]! = br.data[br.pos] := by simp [hpos]
+    rw [this, hhead, uint32_bit_eq_testBit br.data[br.pos] br.bitOff hwf]
+  -- Split on bitOff + 1 ≥ 8
+  by_cases hoff : br.bitOff + 1 ≥ 8
+  · -- bitOff + 1 ≥ 8 → advance to next byte
+    have hoff' : br.bitOff + 1 ≥ 8 := hoff
+    simp only [hoff', ↓reduceIte]
+    exact ⟨⟨br.data, br.pos + 1, 0⟩, by rw [hbit_val], by
+      rw [hrest_eq, hrest'_eq]
+      simp only [Zip.Native.BitReader.toBits, Nat.add_zero]
+      congr 1; omega, by simp, Or.inl rfl⟩
+  · -- bitOff + 1 < 8 → stay in same byte
+    have hoff' : ¬(br.bitOff + 1 ≥ 8) := hoff
+    simp only [hoff', ↓reduceIte]
+    exact ⟨⟨br.data, br.pos, br.bitOff + 1⟩, by rw [hbit_val], by
+      rw [hrest_eq, hrest'_eq]; simp [Zip.Native.BitReader.toBits]; omega,
+      by show br.bitOff + 1 < 8; omega, Or.inr hpos⟩
+
+/-- Generalized loop invariant for `readBits.go` completeness (reverse direction). -/
+private theorem readBits_go_complete (br : Zip.Native.BitReader) (acc : UInt32)
+    (shift k : Nat) (specVal : Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hsk : shift + k ≤ 32) (hacc : acc.toNat < 2 ^ shift)
+    (hbound : specVal < 2 ^ k)
+    (hspec : Deflate.Spec.readBitsLSB k br.toBits = some (specVal, rest)) :
+    ∃ result br', Zip.Native.BitReader.readBits.go br acc shift k = .ok (result, br') ∧
+      result.toNat = acc.toNat + specVal * 2 ^ shift ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  induction k generalizing br acc shift specVal with
+  | zero =>
+    simp only [Deflate.Spec.readBitsLSB] at hspec
+    obtain ⟨rfl, rfl⟩ := Option.some.inj hspec
+    simp only [Zip.Native.BitReader.readBits.go]
+    exact ⟨acc, br, rfl, by simp, rfl, hwf, hpos⟩
+  | succ k ih =>
+    -- Decompose readBitsLSB (k+1) — need to case-split on br.toBits first
+    cases hbits : br.toBits with
+    | nil => simp [Deflate.Spec.readBitsLSB, hbits] at hspec
+    | cons b tail =>
+      simp only [hbits, Deflate.Spec.readBitsLSB, bind, Option.bind] at hspec
+      -- readBitsLSB k tail = some (v, rest) with specVal = (if b then 1 else 0) + v * 2
+      cases hk : Deflate.Spec.readBitsLSB k tail with
+      | none => simp [hk] at hspec
+      | some p =>
+        obtain ⟨v, rest'⟩ := p
+        rw [hk] at hspec
+        simp only [pure, Pure.pure, Option.some.injEq, Prod.mk.injEq] at hspec
+        obtain ⟨hval, hrst⟩ := hspec
+        -- Apply readBit_complete
+        obtain ⟨br₁, hrd, hbr1_bits, hwf₁, hpos₁⟩ :=
+          readBit_complete br b tail hwf hbits
+        -- bit is 0 or 1
+        have hbit : (if b then (1 : UInt32) else 0) = 0 ∨
+            (if b then (1 : UInt32) else 0) = 1 := by cases b <;> simp
+        have hshift : shift < 32 := by omega
+        have hacc' := acc_or_shift_bound acc (if b then 1 else 0) shift hacc hbit hshift
+        -- Bound on v
+        have hv_bound : v < 2 ^ k := by
+          have : (if b then 1 else 0) + v * 2 = specVal := hval
+          cases b <;> simp at this <;> omega
+        -- Apply IH
+        rw [← hbr1_bits] at hk
+        rw [hrst] at hk
+        obtain ⟨result, br', hgo, hresult, hbr'_bits, hwf', hpos'⟩ := ih br₁
+          (acc ||| ((if b then 1 else 0) <<< shift.toUInt32))
+          (shift + 1) v hwf₁ hpos₁ (by omega) hacc' hv_bound hk
+        -- Chain readBit and readBits.go
+        refine ⟨result, br', ?_, ?_, hbr'_bits, hwf', hpos'⟩
+        · -- readBits.go br acc shift (k+1) unfolds to readBit then readBits.go
+          simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind, hrd]
+          exact hgo
+        · -- result.toNat = acc.toNat + specVal * 2^shift
+          rw [hresult, acc_or_shift_toNat acc (if b then 1 else 0) shift hacc hbit hshift,
+              ← hval, Nat.pow_succ]
+          cases b <;> simp [UInt32.toNat_zero, UInt32.toNat_one] <;> grind
+
 /-- **Completeness for `readBits`**: if the spec-level `readBitsLSB n` succeeds
     on the bit list corresponding to a `BitReader`, then the native `readBits n`
     also succeeds, producing the same value and a reader whose bit list matches
@@ -644,7 +759,19 @@ theorem readBits_complete (br : Zip.Native.BitReader) (n val : Nat) (rest : List
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  sorry
+  -- readBits = readBits.go br 0 0 n
+  simp only [Zip.Native.BitReader.readBits]
+  obtain ⟨result, br', hgo, hresult, hbits, hwf', hpos'⟩ :=
+    readBits_go_complete br 0 0 n val rest hwf hpos (by omega) (by simp) hbound hspec
+  refine ⟨br', ?_, hbits, hwf', hpos'⟩
+  -- result.toNat = 0 + val * 2^0 = val, so result = val.toUInt32
+  simp at hresult
+  have hlt : val < UInt32.size :=
+    Nat.lt_of_lt_of_le hbound (Nat.pow_le_pow_right (by omega) hn)
+  have : result = val.toUInt32 :=
+    UInt32.toNat_inj.mp (by rw [hresult]; simp [Nat.toUInt32, Nat.mod_eq_of_lt hlt])
+  rw [this] at hgo
+  exact hgo
 
 /-- **Completeness for `readUInt16LE`**: if the spec reads 16 bits from
     an aligned position, the native `readUInt16LE` succeeds with the same value. -/
