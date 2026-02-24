@@ -1065,11 +1065,12 @@ def _tui_main(stdscr, config: dict):
     stdscr.timeout(1000)  # 1 second refresh
     curses.start_color()
     curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_GREEN, -1)    # Running
-    curses.init_pair(2, curses.COLOR_YELLOW, -1)    # Finishing
-    curses.init_pair(3, curses.COLOR_RED, -1)        # Dead/error
-    curses.init_pair(4, curses.COLOR_CYAN, -1)       # Header
+    curses.init_pair(1, curses.COLOR_GREEN, -1)    # Running / merged
+    curses.init_pair(2, curses.COLOR_YELLOW, -1)    # Finishing / blocked
+    curses.init_pair(3, curses.COLOR_RED, -1)        # Dead/error / failing
+    curses.init_pair(4, curses.COLOR_CYAN, -1)       # Header / closed
     curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE)  # Selected
+    curses.init_pair(6, curses.COLOR_MAGENTA, -1)    # PR open / has-pr
 
     selected_section = "agents"  # "agents" or "items"
     selected_idx = 0
@@ -1212,7 +1213,7 @@ def _tui_main(stdscr, config: dict):
 
             items_start_row = agents_end + 1  # skip 1 blank line
             _addstr(stdscr, items_start_row, 0, "─" * min(width, 80), curses.color_pair(4))
-            item_hdr = "   #      Kind  State  CI  When      Title"
+            item_hdr = "   #      State     When      Title"
             _addstr(stdscr, items_start_row + 1, 0, item_hdr[:width], curses.A_DIM)
 
             for j, item in enumerate(items_to_show):
@@ -1221,46 +1222,46 @@ def _tui_main(stdscr, config: dict):
                     items_shown = j
                     break
 
-                kind_str = "PR" if item.kind == "pr" else "I"
-                state_str = item.state[:6]
-                ci_str = ""
-                if item.kind == "pr":
-                    if item.ci_status == "pass":
-                        ci_str = "✓"
+                # Unified state: combines kind, labels, CI, and state
+                if item.kind == "issue":
+                    if item.state == "closed":
+                        state_str, state_color = "closed", curses.color_pair(4)
+                    elif "blocked" in item.labels:
+                        state_str, state_color = "blocked", curses.color_pair(2)
+                    elif "has-pr" in item.labels:
+                        state_str, state_color = "has-pr", curses.color_pair(6)
+                    elif "claimed" in item.labels:
+                        state_str, state_color = "claimed", curses.color_pair(1)
+                    else:
+                        state_str, state_color = "open", curses.A_NORMAL
+                else:  # pr
+                    if item.state == "merged":
+                        state_str, state_color = "merged", curses.color_pair(1)
+                    elif item.state == "closed":
+                        state_str, state_color = "closed", curses.color_pair(4)
                     elif item.ci_status == "fail":
-                        ci_str = "✗"
+                        state_str, state_color = "failing", curses.color_pair(3)
+                    else:
+                        state_str, state_color = "open", curses.color_pair(6)
 
-                # Show key labels compactly
-                label_tags = ""
-                key_labels = {"claimed", "blocked", "has-pr", "needs-replan", "skip"}
-                tags = [l for l in item.labels if l in key_labels]
-                if tags:
-                    label_tags = " [" + ",".join(tags) + "]"
+                age = timeago(item.timestamp)
+                kind_prefix = "PR" if item.kind == "pr" else "I"
+                state_display = f"{kind_prefix} {state_str}"
 
                 title = item.title
                 # Truncate title to fit
-                prefix_len = 38 + len(label_tags)  # approximate
+                prefix_len = 32
                 max_title = width - prefix_len - 1
                 if max_title > 10 and len(title) > max_title:
                     title = title[:max_title - 3] + "..."
 
-                age = timeago(item.timestamp)
-
                 is_item_sel = not is_agent_selected and j == selected_idx
                 marker = ">" if is_item_sel else " "
-                line = f"{marker}  #{item.number:<5} {kind_str:4}  {state_str:<6} {ci_str:2}  {age:<8}  {title}{label_tags}"
+                line = f"{marker}  #{item.number:<5} {state_display:<10} {age:<8}  {title}"
 
-                attr = curses.A_NORMAL
+                attr = state_color
                 if is_item_sel:
                     attr = curses.color_pair(5) | curses.A_BOLD
-                elif item.state == "merged":
-                    attr = curses.color_pair(1)  # green
-                elif item.state == "closed":
-                    attr = curses.color_pair(4)  # cyan
-                elif item.kind == "pr" and item.ci_status == "fail":
-                    attr = curses.color_pair(3)  # red
-                elif item.kind == "pr" and item.ci_status == "pass":
-                    attr = curses.color_pair(1)  # green
 
                 _addstr(stdscr, irow, 0, line[:width], attr)
 
