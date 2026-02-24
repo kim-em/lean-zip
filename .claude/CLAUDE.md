@@ -92,7 +92,12 @@ See `.claude/commands/work.md` for the full prompt. Summary:
 
 1. **Claim**: `coordination list-unclaimed`, pick oldest,
    `coordination claim N`
-2. **Set up**: create branch, record starting commit + sorry count
+2. **Set up**: create branch, record starting commit + sorry count.
+   **Branch hygiene**: If the worktree already has an open PR on its
+   branch, reset to `origin/master` before starting new work — otherwise
+   new commits land in the existing PR, mixing two issues. After fixing
+   a PR (rebase, conflict resolution), push it, then `git reset --hard
+   origin/master` before claiming and working on a new issue.
 3. **Codebase orientation**: read the specific files in the plan,
    understand current code state
 4. **Verify assumptions**: sorry count, files exist, plan not stale.
