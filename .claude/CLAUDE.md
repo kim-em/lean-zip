@@ -288,7 +288,8 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/DeflateStoredCorrect.lean — Native stored-block roundtrip (inflate ∘ deflateStoredPure)
     Zip/Spec/DeflateDynamicEmit.lean — emitTokensWithCodes ↔ encodeSymbols correspondence
     Zip/Spec/DeflateDynamicHeader.lean — writeDynamicHeader ↔ encodeDynamicTrees correspondence
-    Zip/Spec/DeflateDynamicCorrect.lean — tokenFreqs properties + deflateDynamic_spec + roundtrip
+    Zip/Spec/DeflateDynamicFreqs.lean — tokenFreqs frequency-counting properties (internal helpers)
+    Zip/Spec/DeflateDynamicCorrect.lean — deflateDynamic_spec + roundtrip
     Zip/Spec/DeflateRoundtrip.lean — Unified DEFLATE roundtrip (Phase 4 capstone)
     Zip/Spec/BinaryCorrect.lean — Binary LE read/write roundtrip proofs
     Zip/Spec/GzipCorrect.lean  — Gzip framing: pure decoder + format lemma + roundtrip statement
