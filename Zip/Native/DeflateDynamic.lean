@@ -96,7 +96,7 @@ def writeDynamicHeader (bw : BitWriter) (litLens distLens : List Nat) : BitWrite
   -- Step 6: Write CL code lengths in clPermutation order (3 bits each)
   let bw := writeCLLengths bw clLens numCodeLen 0
   -- Step 7: Write RLE entries using CL Huffman codes
-  writeCLEntries bw clCodes clEntries 0
+  writeCLEntries bw clCodes clEntries
 where
   writeCLLengths (bw : BitWriter) (clLens : List Nat) (numCodeLen i : Nat) : BitWriter :=
     if i < numCodeLen then
@@ -106,7 +106,7 @@ where
     else bw
   termination_by numCodeLen - i
   writeCLEntries (bw : BitWriter) (clCodes : Array (UInt16 × UInt8))
-      (entries : List (Nat × Nat)) (i : Nat) : BitWriter :=
+      (entries : List (Nat × Nat)) : BitWriter :=
     match entries with
     | [] => bw
     | (code, extra) :: rest =>
@@ -117,8 +117,7 @@ where
         else if code == 17 then bw.writeBits 3 extra.toUInt32
         else if code == 18 then bw.writeBits 7 extra.toUInt32
         else bw
-      writeCLEntries bw clCodes rest (i + 1)
-  termination_by entries.length
+      writeCLEntries bw clCodes rest
 
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. -/
@@ -144,16 +143,11 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
   let bw := bw.writeBits 2 2  -- BTYPE = 10
   -- Write dynamic tree header
   let bw := writeDynamicHeader bw litLens distLens
-  -- Write tokens
-  if data.size == 0 then
-    -- Empty: just write end-of-block
-    let (code, len) := litCodes[256]!
-    let bw := bw.writeHuffCode code len
-    bw.flush
-  else
-    let bw := emitTokensWithCodes bw tokens litCodes distCodes 0
-    let (code, len) := litCodes[256]!
-    let bw := bw.writeHuffCode code len
-    bw.flush
+  -- Write tokens + end-of-block
+  let bw := if data.size == 0 then bw
+    else emitTokensWithCodes bw tokens litCodes distCodes 0
+  let (code, len) := litCodes[256]!
+  let bw := bw.writeHuffCode code len
+  bw.flush
 
 end Zip.Native.Deflate

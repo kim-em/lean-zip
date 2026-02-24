@@ -269,6 +269,7 @@ protected theorem canonicalCodes_correct_pos (lengths : Array UInt8) (maxBits : 
         lengths[i].toNat ∧
       (Zip.Native.Deflate.canonicalCodes lengths maxBits)[i]!.2 = lengths[i] := by
   let lsList := lengths.toList.map UInt8.toNat
+  -- Bridge UInt8 to Nat for omega
   have hlen_pos_nat : 0 < lengths[i].toNat := hlen
   have hls_len : i < lsList.length := by simp [lsList, hi]
   have hls_i : lsList[i] = lengths[i].toNat := by
@@ -277,52 +278,30 @@ protected theorem canonicalCodes_correct_pos (lengths : Array UInt8) (maxBits : 
     rw [← hls_i]; exact hv.1 _ (List.getElem_mem hls_len)
   -- codeFor succeeds
   obtain ⟨cw, hcf⟩ := codeFor_some lsList maxBits i hls_len (by rw [hls_i]; omega) (by rw [hls_i]; omega)
-  refine ⟨cw, hcf, ?_, ?_⟩
-  · -- cw = natToBits of the stored code value
-    obtain ⟨_, _, hcw⟩ := Huffman.Spec.codeFor_spec hcf
-    -- Rewrite lsList[i] to lengths[i].toNat in hcw
-    rw [hls_i] at hcw
-    rw [hcw]; congr 1
-    -- Get the invariant result
-    simp only [Zip.Native.Deflate.canonicalCodes]
-    let ncSpec := Huffman.Spec.nextCodes (Huffman.Spec.countLengths lsList maxBits) maxBits
-    have hinv := canonicalCodes_go_inv lengths
-      (ncSpec.map fun (n : Nat) => n.toUInt32)
-      0 (Array.replicate lengths.size (0, 0))
-      lsList rfl maxBits hmb _ rfl ncSpec rfl hv
-      (Array.size_replicate ..)
-      (by -- hncSize
-        have : (ncSpec.map fun (n : Nat) => n.toUInt32).size = ncSpec.size := Array.size_map ..
+  -- Get the canonical codes invariant (used for both conjuncts)
+  simp only [Zip.Native.Deflate.canonicalCodes]
+  let ncSpec := Huffman.Spec.nextCodes (Huffman.Spec.countLengths lsList maxBits) maxBits
+  have hinv := canonicalCodes_go_inv lengths
+    (ncSpec.map fun (n : Nat) => n.toUInt32)
+    0 (Array.replicate lengths.size (0, 0))
+    lsList rfl maxBits hmb _ rfl ncSpec rfl hv
+    (Array.size_replicate ..)
+    (by have : (ncSpec.map fun (n : Nat) => n.toUInt32).size = ncSpec.size := Array.size_map ..
         rw [this, show ncSpec = Huffman.Spec.nextCodes _ _ from rfl,
             Huffman.Spec.nextCodes_size]; omega)
-      (by -- Initial NC
-        intro b hb1 hb15
+    (by intro b hb1 hb15
         simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
         exact initial_nc_invariant lsList maxBits (by omega) hv ncSpec rfl b hb1 hb15)
-      (by intro k hk; omega)
-      (by intro k _ hks; simp [show k < lengths.size from hks])
-      i hi
-    simp only [hlen, ↓reduceIte] at hinv
-    exact hinv.2.symm
-  · -- Length matches
-    simp only [Zip.Native.Deflate.canonicalCodes]
-    let ncSpec := Huffman.Spec.nextCodes (Huffman.Spec.countLengths lsList maxBits) maxBits
-    have hinv := canonicalCodes_go_inv lengths
-      (ncSpec.map fun (n : Nat) => n.toUInt32)
-      0 (Array.replicate lengths.size (0, 0))
-      lsList rfl maxBits hmb _ rfl ncSpec rfl hv
-      (Array.size_replicate ..)
-      (by have : (ncSpec.map fun (n : Nat) => n.toUInt32).size = ncSpec.size := Array.size_map ..
-          rw [this, show ncSpec = Huffman.Spec.nextCodes _ _ from rfl,
-              Huffman.Spec.nextCodes_size]; omega)
-      (by intro b hb1 hb15
-          simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
-          exact initial_nc_invariant lsList maxBits (by omega) hv ncSpec rfl b hb1 hb15)
-      (by intro k hk; omega)
-      (by intro k _ hks; simp [show k < lengths.size from hks])
-      i hi
-    simp only [hlen, ↓reduceIte] at hinv
-    exact hinv.1
+    (by intro k hk; omega)
+    (by intro k _ hks; simp [show k < lengths.size from hks])
+    i hi
+  simp only [hlen, ↓reduceIte] at hinv
+  refine ⟨cw, hcf, ?_, hinv.1⟩
+  -- cw = natToBits of the stored code value
+  obtain ⟨_, _, hcw⟩ := Huffman.Spec.codeFor_spec hcf
+  rw [hls_i] at hcw
+  rw [hcw]; congr 1
+  exact hinv.2.symm
 
 /-- For symbols with zero code length, `canonicalCodes` stores `(0, 0)`. -/
 protected theorem canonicalCodes_correct_zero (lengths : Array UInt8) (maxBits : Nat)
@@ -365,8 +344,6 @@ protected theorem canonicalCodes_hasLeaf (lengths : Array UInt8)
   intro codes
   let lsList := lengths.toList.map UInt8.toNat
   have hls_len : i < lsList.length := by simp [lsList, hi]
-  have hls_i : lsList[i] = lengths[i].toNat := by
-    simp only [lsList, List.getElem_map, Array.getElem_toList]; rfl
   obtain ⟨cw, hcf, hcw, hlen_eq⟩ :=
     Deflate.Correctness.canonicalCodes_correct_pos lengths maxBits hv hmb i hi hlen
   -- The tree has a leaf for this codeword
