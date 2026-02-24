@@ -126,7 +126,7 @@ theorem decodeCLSymbols_fuel_independent
                 rw [if_neg hsym18] at h
                 simp at h
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- `decode` is fuel-independent: if it succeeds with some fuel,
     it returns the same result with any additional fuel. -/
 private theorem decode_go_fuel_independent
@@ -192,7 +192,7 @@ private theorem decode_go_fuel_independent
                 · next hbf1 => rw [if_neg hbf1] at h; exact ih _ _ _ h
         | _ + 3 => simp at h
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- `decode.go` always extends the accumulator: if it succeeds, the
     result is an extension of the initial accumulator. -/
 theorem decode_go_acc_prefix
