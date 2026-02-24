@@ -365,14 +365,40 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
 /-! ## Main roundtrip theorem -/
 
 /-- Native Level 1 roundtrip: compressing with fixed Huffman codes then
-    decompressing recovers the original data.
-    **Sorry**: depends on `inflate_complete` (the reverse direction of
-    `inflate_correct'`). Once `inflate_complete` is proved, this theorem
-    follows from `lz77Greedy_spec_decode` + `deflateFixed_spec`. -/
+    decompressing recovers the original data. The size bound comes from the
+    spec decoder's per-block fuel limit (10M symbols, one per byte worst case). -/
 theorem inflate_deflateFixed (data : ByteArray)
-    (hsize : data.size ≤ 256 * 1024 * 1024) :
+    (hsize : data.size < 10000000) :
     Zip.Native.Inflate.inflate (deflateFixed data) = .ok data := by
-  sorry
+  -- Step 1: deflateFixed_spec gives bits and bytesToBits relationship
+  obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateFixed_spec data
+  -- Step 2: Extract allBits from encodeFixed
+  simp only [Deflate.Spec.encodeFixed] at henc_fixed
+  cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
+      Deflate.Spec.fixedDistLengths
+      (tokensToSymbols (lz77Greedy data)) with
+  | none => simp [henc_syms] at henc_fixed
+  | some allBits =>
+    simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
+    -- bits_enc = [true, true, false] ++ allBits
+    have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
+      (Option.some.inj henc_fixed).symm
+    subst hbits_eq
+    -- Step 3: decode succeeds on bytesToBits (deflateFixed data)
+    have hdec : Deflate.Spec.decode
+        (Deflate.Spec.bytesToBits (deflateFixed data)) =
+        some data.data.toList := by
+      rw [hbytes]
+      exact Deflate.Spec.encodeFixed_decode_append
+        (tokensToSymbols (lz77Greedy data))
+        data.data.toList allBits _ henc_syms
+        (lz77Greedy_resolves data 32768 (by omega))
+        (by rw [tokensToSymbols_length]; have := lz77Greedy_size_le data 32768; omega)
+        (tokensToSymbols_validSymbolList _)
+    -- Step 4: inflate_complete bridges spec decode to native inflate
+    have hinf := inflate_complete (deflateFixed data) data.data.toList
+      (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
+    simp only at hinf ⊢; exact hinf
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
     then decompressing recovers the original data.
