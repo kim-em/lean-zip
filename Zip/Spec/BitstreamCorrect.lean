@@ -785,7 +785,87 @@ theorem readUInt16LE_complete (br : Zip.Native.BitReader) (val : Nat) (rest : Li
       br'.toBits = rest ∧
       br'.bitOff = 0 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  sorry
+  -- Rewrite spec hypothesis to use br.alignToByte.toBits
+  have halign : br.alignToByte.toBits = Deflate.Spec.alignToByte br.toBits :=
+    alignToByte_toBits br hwf hpos
+  have hoff : br.alignToByte.bitOff = 0 := alignToByte_wf br
+  rw [← halign] at hspec
+  -- From readBitsLSB 16 success, derive that aligned reader has ≥ 16 bits = 2 bytes
+  have hlen := Deflate.Spec.readBitsLSB_some_length hspec
+  have hbits_len : br.alignToByte.toBits.length ≥ 16 := by omega
+  rw [toBits_length] at hbits_len
+  have hle : br.alignToByte.pos + 2 ≤ br.alignToByte.data.size := by omega
+  -- Split 16-bit read into two 8-bit reads
+  rw [show (16 : Nat) = 8 + 8 from rfl, readBitsLSB_split] at hspec
+  -- First byte read
+  have hpos0 : br.alignToByte.pos < br.alignToByte.data.size := by omega
+  rw [toBits_readBitsLSB_byte br.alignToByte hoff hpos0] at hspec
+  simp only [Option.bind] at hspec
+  -- Second byte read
+  have hpos1 : br.alignToByte.pos + 1 < br.alignToByte.data.size := by omega
+  rw [toBits_readBitsLSB_byte ⟨br.alignToByte.data, br.alignToByte.pos + 1, 0⟩ rfl hpos1] at hspec
+  simp only [Option.some.injEq, Prod.mk.injEq] at hspec
+  obtain ⟨hval_eq, hrest_eq⟩ := hspec
+  -- Unfold readUInt16LE: aligns, bounds check passes
+  have hbound_check : ¬(br.alignToByte.pos + 2 > br.alignToByte.data.size) := by omega
+  have hget0 : br.alignToByte.data[br.alignToByte.pos]! = br.alignToByte.data[br.alignToByte.pos] :=
+    by simp [hpos0]
+  have hget1 : br.alignToByte.data[br.alignToByte.pos + 1]! = br.alignToByte.data[br.alignToByte.pos + 1] :=
+    by simp [hpos1]
+  -- Value: lo ||| (hi <<< 8) = val.toUInt16
+  have hlo : br.alignToByte.data[br.alignToByte.pos].toNat < 2 ^ 8 :=
+    br.alignToByte.data[br.alignToByte.pos].toBitVec.isLt
+  have hhi : br.alignToByte.data[br.alignToByte.pos + 1].toNat < 2 ^ 8 :=
+    br.alignToByte.data[br.alignToByte.pos + 1].toBitVec.isLt
+  have hval_native : br.alignToByte.data[br.alignToByte.pos]!.toUInt16 |||
+      (br.alignToByte.data[br.alignToByte.pos + 1]!.toUInt16 <<< 8) = val.toUInt16 := by
+    -- Use the forward proof as witness: readUInt16LE on the aligned reader succeeds
+    -- and readUInt16LE_toBits shows it produces the same value as the spec
+    -- But we need to do it directly here. Use simp with all UInt16 lemmas.
+    rw [hget0, hget1]
+    -- Goal: lo.toUInt16 ||| hi.toUInt16 <<< 8 = val.toUInt16
+    -- Strategy: show both have the same .toNat
+    have hval_lo_hi : val = br.alignToByte.data[br.alignToByte.pos].toNat +
+        br.alignToByte.data[br.alignToByte.pos + 1].toNat * 2 ^ 8 := hval_eq.symm
+    apply UInt16.toNat_inj.mp
+    simp only [UInt16.toNat_or, UInt16.toNat_shiftLeft, UInt8.toNat_toUInt16,
+      show (8 : UInt16).toNat % 16 = 8 from rfl, Nat.shiftLeft_eq]
+    -- Goal: (lo ||| (hi * 2^8 % 65536)) % 65536 = val % 65536
+    have hhi_shift : br.alignToByte.data[br.alignToByte.pos + 1].toNat * 2 ^ 8 < 65536 := by omega
+    rw [Nat.mod_eq_of_lt hhi_shift]
+    -- val.toUInt16.toNat = val since val < 2^16
+    rw [show val.toUInt16.toNat = val from by
+      simp [Nat.toUInt16, Nat.mod_eq_of_lt hbound]]
+    -- Goal: lo ||| hi * 2^8 = val
+    -- Use Nat.or_comm then shiftLeft_add_eq_or_of_lt (reversed) to convert ||| to +
+    rw [Nat.or_comm, ← Nat.shiftLeft_eq, ← Nat.shiftLeft_add_eq_or_of_lt hlo, Nat.shiftLeft_eq]
+    omega
+  -- Construct the result
+  refine ⟨{ br.alignToByte with pos := br.alignToByte.pos + 2 }, ?_, ?_, alignToByte_wf br, Or.inl (alignToByte_wf br)⟩
+  · -- readUInt16LE succeeds with the right value
+    simp only [Zip.Native.BitReader.readUInt16LE, hbound_check, ↓reduceIte, hval_native]
+  · -- br'.toBits = rest
+    rw [← hrest_eq]
+    simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
+    done
+
+/-- `readNBytes n` success implies the bit list has at least `n * 8` bits. -/
+private theorem readNBytes_some_length {n : Nat} {bits : List Bool} {acc : List UInt8}
+    {bytes : List UInt8} {rest : List Bool}
+    (h : Deflate.Spec.decodeStored.readNBytes n bits acc = some (bytes, rest)) :
+    bits.length ≥ n * 8 := by
+  induction n generalizing bits acc with
+  | zero => omega
+  | succ k ih =>
+    simp only [Deflate.Spec.decodeStored.readNBytes] at h
+    cases hrd : Deflate.Spec.readBitsLSB 8 bits with
+    | none => simp [hrd] at h
+    | some p =>
+      obtain ⟨v, bits'⟩ := p
+      simp only [hrd, bind, Option.bind] at h
+      have hlen := Deflate.Spec.readBitsLSB_some_length hrd
+      have := ih h
+      omega
 
 /-- **Completeness for `readBytes`**: if the spec reads `n` bytes from
     an aligned position, the native `readBytes` succeeds with the same bytes. -/
@@ -793,12 +873,43 @@ theorem readBytes_complete (br : Zip.Native.BitReader) (n : Nat)
     (bytes : List UInt8) (rest : List Bool)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (halign_pos : br.alignToByte.pos ≤ br.alignToByte.data.size)
     (hspec : Deflate.Spec.decodeStored.readNBytes n
         (Deflate.Spec.alignToByte br.toBits) [] = some (bytes, rest)) :
     ∃ br', br.readBytes n = .ok (⟨⟨bytes⟩⟩, br') ∧
       br'.toBits = rest ∧
       br'.bitOff = 0 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  sorry
+  -- Rewrite spec hypothesis to use br.alignToByte.toBits
+  have halign : br.alignToByte.toBits = Deflate.Spec.alignToByte br.toBits :=
+    alignToByte_toBits br hwf hpos
+  have hoff : br.alignToByte.bitOff = 0 := alignToByte_wf br
+  rw [← halign] at hspec
+  -- From readNBytes success, derive bounds
+  have hbits_len := readNBytes_some_length hspec
+  -- Derive pos + n ≤ data.size from halign_pos and bit count
+  have hle : br.alignToByte.pos + n ≤ br.alignToByte.data.size := by
+    rw [toBits_length, hoff, Nat.add_zero] at hbits_len; omega
+  -- Use readNBytes_aligned to get the canonical form
+  have hcanon := readNBytes_aligned br.alignToByte.data br.alignToByte.pos n hle []
+  simp only [List.nil_append] at hcanon
+  -- Both hspec and hcanon use readNBytes on the same drop expression
+  simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero] at hspec
+  rw [hcanon] at hspec
+  -- Extract equalities from injectivity
+  simp only [Option.some.injEq, Prod.mk.injEq] at hspec
+  obtain ⟨hbytes_eq, hrest_eq⟩ := hspec
+  -- Unfold readBytes: aligns, bounds check passes
+  have hbound_check : ¬(br.alignToByte.pos + n > br.alignToByte.data.size) := by omega
+  -- Show bytes equality via ByteArray
+  have hbytes_ba : br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) = ⟨⟨bytes⟩⟩ := by
+    apply ByteArray.ext
+    exact Array.toList_inj.mp (by rw [ByteArray.data_extract, Array.toList_extract]; exact hbytes_eq)
+  refine ⟨{ br.alignToByte with pos := br.alignToByte.pos + n }, ?_, ?_, alignToByte_wf br, Or.inl (alignToByte_wf br)⟩
+  · -- readBytes succeeds
+    simp only [Zip.Native.BitReader.readBytes, hbound_check, ↓reduceIte, hbytes_ba]
+  · -- br'.toBits = rest
+    rw [← hrest_eq]
+    simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
 
 end Deflate.Correctness
