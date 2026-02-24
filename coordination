@@ -476,8 +476,14 @@ depends-on: #${dep_num}"
     local dep_state
     dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state)"
     if [[ "$dep_state" == "OPEN" ]]; then
-        gh issue edit "$issue_num" --repo "$REPO" --add-label blocked
-        echo "Added blocked label (dependency #$dep_num is open)"
+        local current_labels
+        current_labels="$(gh issue view "$issue_num" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
+        if echo "$current_labels" | grep -qw 'claimed'; then
+            echo "Warning: Issue #$issue_num is already claimed — not adding blocked label (too late to block)"
+        else
+            gh issue edit "$issue_num" --repo "$REPO" --add-label blocked
+            echo "Added blocked label (dependency #$dep_num is open)"
+        fi
     else
         echo "Dependency #$dep_num is already closed; blocked label not added"
     fi
