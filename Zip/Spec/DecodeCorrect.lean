@@ -859,6 +859,195 @@ theorem huffTree_decode_complete (lengths : Array UInt8)
   -- Wrap decode.go → decode
   exact ⟨br', hgo, hbr'_bits, hwf', hpos'⟩
 
+/-- If `decodeLitLen` succeeds, the underlying Huffman decode succeeded. -/
+private theorem decodeLitLen_huffDecode {litLengths distLengths : List Nat}
+    {bits : List Bool} {sym : Deflate.Spec.LZ77Symbol} {rest : List Bool}
+    (h : Deflate.Spec.decodeLitLen litLengths distLengths bits = some (sym, rest)) :
+    ∃ sym_nat rest₁,
+      Huffman.Spec.decode
+        ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+        bits = some (sym_nat, rest₁) := by
+  unfold Deflate.Spec.decodeLitLen at h
+  cases hd : Huffman.Spec.decode
+      ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s)) bits with
+  | none => simp [hd] at h
+  | some p =>
+    obtain ⟨sym_nat, rest₁⟩ := p
+    exact ⟨sym_nat, rest₁, rfl⟩
+
+/-- If `decodeLitLen` returns `.literal b` and the Huffman decode returns
+    `(sym_nat, rest₁)`, then `sym_nat < 256`, `b = sym_nat.toUInt8`, and `rest = rest₁`. -/
+private theorem decodeLitLen_literal_inv {litLengths distLengths : List Nat}
+    {bits rest : List Bool} {b : UInt8} {sym_nat : Nat} {rest₁ : List Bool}
+    (hdll : Deflate.Spec.decodeLitLen litLengths distLengths bits = some (.literal b, rest))
+    (hd : Huffman.Spec.decode
+        ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+        bits = some (sym_nat, rest₁)) :
+    sym_nat < 256 ∧ b = sym_nat.toUInt8 ∧ rest = rest₁ := by
+  unfold Deflate.Spec.decodeLitLen at hdll
+  simp [hd] at hdll
+  -- After substituting the Huffman decode result, hdll has the if/then/else body
+  by_cases h256 : sym_nat < 256
+  · simp only [if_pos h256] at hdll
+    -- hdll : some (.literal (UInt8.ofNat sym_nat), rest₁) = some (.literal b, rest)
+    have heq := Option.some.inj hdll
+    have hlz : Deflate.Spec.LZ77Symbol.literal (UInt8.ofNat sym_nat) = .literal b :=
+      congrArg Prod.fst heq
+    have hrest : rest₁ = rest := congrArg Prod.snd heq
+    have hb : UInt8.ofNat sym_nat = b := by
+      cases hlz; rfl
+    exact ⟨h256, hb.symm, hrest.symm⟩
+  · -- sym_nat ≥ 256: decodeLitLen cannot produce .literal
+    exfalso
+    by_cases h256eq : sym_nat = 256
+    · simp [h256eq] at hdll
+    · -- sym_nat ≥ 257: reference chain produces .reference, not .literal
+      have h256ne : ¬(sym_nat = 256) := h256eq
+      simp only [show ¬(sym_nat < 256) from h256, ↓reduceIte, h256ne] at hdll
+      -- hdll : lengthBase[...]?.bind ... = some (.literal b, rest)
+      -- Split each bind; none case → contradiction, some case → continue
+      cases hlb : Deflate.Spec.lengthBase[sym_nat - 257]? with
+      | none => simp [hlb] at hdll
+      | some base =>
+      cases hle : Deflate.Spec.lengthExtra[sym_nat - 257]? with
+      | none => simp [hlb, hle] at hdll
+      | some extra =>
+      cases hrb : Deflate.Spec.readBitsLSB extra rest₁ with
+      | none => simp [hlb, hle, hrb] at hdll
+      | some p =>
+      cases hdd : Huffman.Spec.decode
+          ((Huffman.Spec.allCodes distLengths).map fun x => (x.snd, x.fst))
+          p.2 with
+      | none => simp [hlb, hle, hrb, hdd] at hdll
+      | some pd =>
+      cases hdb : Deflate.Spec.distBase[pd.1]? with
+      | none => simp [hlb, hle, hrb, hdd, hdb] at hdll
+      | some dBase =>
+      cases hde : Deflate.Spec.distExtra[pd.1]? with
+      | none => simp [hlb, hle, hrb, hdd, hdb, hde] at hdll
+      | some dExtra =>
+      cases hrd : Deflate.Spec.readBitsLSB dExtra pd.2 with
+      | none => simp [hlb, hle, hrb, hdd, hdb, hde, hrd] at hdll
+      | some q => simp [hlb, hle, hrb, hdd, hdb, hde, hrd] at hdll
+
+/-- If `decodeLitLen` returns `.endOfBlock` and the Huffman decode returns
+    `(sym_nat, rest₁)`, then `sym_nat = 256` and `rest = rest₁`. -/
+private theorem decodeLitLen_endOfBlock_inv {litLengths distLengths : List Nat}
+    {bits rest : List Bool} {sym_nat : Nat} {rest₁ : List Bool}
+    (hdll : Deflate.Spec.decodeLitLen litLengths distLengths bits = some (.endOfBlock, rest))
+    (hd : Huffman.Spec.decode
+        ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+        bits = some (sym_nat, rest₁)) :
+    sym_nat = 256 ∧ rest = rest₁ := by
+  unfold Deflate.Spec.decodeLitLen at hdll
+  simp [hd] at hdll
+  -- After substituting the Huffman decode result, hdll has the if/then/else body
+  by_cases h256 : sym_nat < 256
+  · -- sym_nat < 256 → literal, not endOfBlock → contradiction
+    exfalso; simp [h256] at hdll
+  · by_cases h256eq : sym_nat = 256
+    · -- sym_nat = 256: endOfBlock case
+      simp only [↓reduceIte, h256eq] at hdll
+      have heq := Option.some.inj hdll
+      exact ⟨h256eq, (congrArg Prod.snd heq).symm⟩
+    · -- sym_nat ≥ 257 → reference, not endOfBlock → contradiction
+      exfalso
+      have h256ne : ¬(sym_nat = 256) := h256eq
+      simp only [show ¬(sym_nat < 256) from h256, ↓reduceIte, h256ne] at hdll
+      -- Split each bind; none case → contradiction, some case → continue
+      cases hlb : Deflate.Spec.lengthBase[sym_nat - 257]? with
+      | none => simp [hlb] at hdll
+      | some base =>
+      cases hle : Deflate.Spec.lengthExtra[sym_nat - 257]? with
+      | none => simp [hlb, hle] at hdll
+      | some extra =>
+      cases hrb : Deflate.Spec.readBitsLSB extra rest₁ with
+      | none => simp [hlb, hle, hrb] at hdll
+      | some p =>
+      cases hdd : Huffman.Spec.decode
+          ((Huffman.Spec.allCodes distLengths).map fun x => (x.snd, x.fst))
+          p.2 with
+      | none => simp [hlb, hle, hrb, hdd] at hdll
+      | some pd =>
+      cases hdb : Deflate.Spec.distBase[pd.1]? with
+      | none => simp [hlb, hle, hrb, hdd, hdb] at hdll
+      | some dBase =>
+      cases hde : Deflate.Spec.distExtra[pd.1]? with
+      | none => simp [hlb, hle, hrb, hdd, hdb, hde] at hdll
+      | some dExtra =>
+      cases hrd : Deflate.Spec.readBitsLSB dExtra pd.2 with
+      | none => simp [hlb, hle, hrb, hdd, hdb, hde, hrd] at hdll
+      | some q => simp [hlb, hle, hrb, hdd, hdb, hde, hrd] at hdll
+
+set_option maxRecDepth 4096 in
+/-- If `decodeLitLen` returns `.reference len dist` and the Huffman decode returns
+    `(sym_nat, rest₁)`, then `sym_nat ≥ 257` and the reference chain succeeded:
+    there exist all intermediate values (length base/extra, distance Huffman decode,
+    distance base/extra) and the final rest bits. -/
+private theorem decodeLitLen_reference_inv {litLengths distLengths : List Nat}
+    {bits rest : List Bool} {len dist sym_nat : Nat} {rest₁ : List Bool}
+    (hdll : Deflate.Spec.decodeLitLen litLengths distLengths bits = some (.reference len dist, rest))
+    (hd : Huffman.Spec.decode
+        ((Huffman.Spec.allCodes litLengths).map fun (s, cw) => (cw, s))
+        bits = some (sym_nat, rest₁)) :
+    sym_nat ≥ 257 ∧
+    ∃ (base extra extraVal : Nat) (bits₂ : List Bool)
+      (dSym : Nat) (bits₃ : List Bool)
+      (dBase dExtra dExtraVal : Nat),
+      Deflate.Spec.lengthBase[sym_nat - 257]? = some base ∧
+      Deflate.Spec.lengthExtra[sym_nat - 257]? = some extra ∧
+      Deflate.Spec.readBitsLSB extra rest₁ = some (extraVal, bits₂) ∧
+      Huffman.Spec.decode
+        ((Huffman.Spec.allCodes distLengths).map fun (s, cw) => (cw, s))
+        bits₂ = some (dSym, bits₃) ∧
+      Deflate.Spec.distBase[dSym]? = some dBase ∧
+      Deflate.Spec.distExtra[dSym]? = some dExtra ∧
+      Deflate.Spec.readBitsLSB dExtra bits₃ = some (dExtraVal, rest) ∧
+      len = base + extraVal ∧
+      dist = dBase + dExtraVal := by
+  unfold Deflate.Spec.decodeLitLen at hdll
+  simp [hd] at hdll
+  by_cases h256 : sym_nat < 256
+  · exfalso; simp [h256] at hdll
+  · by_cases h256eq : sym_nat = 256
+    · exfalso
+      simp only [↓reduceIte, h256eq] at hdll
+      exact absurd (Option.some.inj hdll) (by simp)
+    · have h_ge : sym_nat ≥ 257 := by omega
+      refine ⟨h_ge, ?_⟩
+      have h256ne : ¬(sym_nat = 256) := h256eq
+      simp only [show ¬(sym_nat < 256) from h256, ↓reduceIte, h256ne] at hdll
+      cases hlb : Deflate.Spec.lengthBase[sym_nat - 257]? with
+      | none => simp [hlb] at hdll
+      | some base =>
+      cases hle : Deflate.Spec.lengthExtra[sym_nat - 257]? with
+      | none => simp [hlb, hle] at hdll
+      | some extra =>
+      cases hrb : Deflate.Spec.readBitsLSB extra rest₁ with
+      | none => simp [hlb, hle, hrb] at hdll
+      | some p =>
+        obtain ⟨extraVal, bits₂⟩ := p
+        cases hdd : Huffman.Spec.decode
+            ((Huffman.Spec.allCodes distLengths).map fun x => (x.snd, x.fst))
+            bits₂ with
+        | none => simp [hlb, hle, hrb, hdd] at hdll
+        | some pd =>
+          obtain ⟨dSym, bits₃⟩ := pd
+          cases hdb : Deflate.Spec.distBase[dSym]? with
+          | none => simp [hlb, hle, hrb, hdd, hdb] at hdll
+          | some dBase =>
+          cases hde : Deflate.Spec.distExtra[dSym]? with
+          | none => simp [hlb, hle, hrb, hdd, hdb, hde] at hdll
+          | some dExtra =>
+          cases hrd : Deflate.Spec.readBitsLSB dExtra bits₃ with
+          | none => simp [hlb, hle, hrb, hdd, hdb, hde, hrd] at hdll
+          | some q =>
+            obtain ⟨dExtraVal, rest'⟩ := q
+            simp [hlb, hle, hrb, hdd, hdb, hde, hrd] at hdll
+            obtain ⟨⟨rfl, rfl⟩, rfl⟩ := hdll
+            exact ⟨base, extra, extraVal, bits₂, dSym, bits₃, dBase, dExtra, dExtraVal,
+              rfl, rfl, hrb, hdd, hdb, hde, hrd, rfl, rfl⟩
+
 /-- **Completeness for Huffman block decode**: if the spec `decodeSymbols`
     succeeds and `resolveLZ77` produces output, then the native
     `decodeHuffman.go` also succeeds with the same output.
@@ -890,6 +1079,136 @@ theorem decodeHuffman_complete
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  sorry
+  induction hfuel generalizing br output syms result with
+  | zero => simp [Deflate.Spec.decodeSymbols] at hds
+  | succ n ih =>
+    -- Unfold spec decodeSymbols to extract decodeLitLen
+    simp only [Deflate.Spec.decodeSymbols, bind, Option.bind] at hds
+    cases hdll : Deflate.Spec.decodeLitLen
+        (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
+        br.toBits with
+    | none => simp [hdll] at hds
+    | some p =>
+      obtain ⟨sym_val, bits₁⟩ := p
+      simp only [hdll] at hds
+      -- Extract the Huffman decode from decodeLitLen
+      obtain ⟨sym_nat, rest₁, hspec_sym⟩ := decodeLitLen_huffDecode hdll
+      -- Extract sym_nat < litLengths.size
+      obtain ⟨cw_lit, hmem_table, _⟩ :=
+        Deflate.Correctness.decode_some_mem _ _ _ _ hspec_sym
+      have hmem_codes : (sym_nat, cw_lit) ∈
+          Huffman.Spec.allCodes (litLengths.toList.map UInt8.toNat) 15 := by
+        obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_table
+        simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+      have hsym_bound : sym_nat < litLengths.size := by
+        rw [Huffman.Spec.allCodes_mem_iff] at hmem_codes
+        simp at hmem_codes; exact hmem_codes.1
+      -- Get native litTree.decode via huffTree_decode_complete
+      obtain ⟨br₁, hdec_lit, hrest₁, hwf₁, hpos₁⟩ :=
+        huffTree_decode_complete litLengths 15 (by omega) litTree br
+          sym_nat rest₁ hwf hpos hlit hvlit hlen_lit hsym_bound hspec_sym
+      -- Case split on sym_val (the LZ77Symbol from decodeLitLen)
+      cases sym_val with
+      | literal b =>
+        -- From decodeLitLen_literal_inv: sym_nat < 256, b = sym_nat.toUInt8, bits₁ = rest₁
+        obtain ⟨hsym_lt, hb_eq, hbits_eq⟩ := decodeLitLen_literal_inv hdll hspec_sym
+        -- Reduce the match on .literal in hds
+        simp at hds
+        -- hds should now be: decodeSymbols ... bits₁ n >>= ... = some (syms, rest)
+        cases hds_rec : Deflate.Spec.decodeSymbols
+            (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
+            bits₁ n with
+        | none => simp [hds_rec] at hds
+        | some p₂ =>
+          obtain ⟨syms', rest'⟩ := p₂
+          simp only [hds_rec] at hds
+          have heq := Option.some.inj hds
+          have hsyms : syms = .literal b :: syms' := by
+            have := congrArg Prod.fst heq; simp at this; exact this.symm
+          have hrest_eq : rest = rest' := by
+            have := congrArg Prod.snd heq; simp at this; exact this.symm
+          -- resolveLZ77: .literal b :: syms' resolves
+          rw [hsyms] at hlz
+          simp only [Deflate.Spec.resolveLZ77_literal] at hlz
+          -- hlz : resolveLZ77 syms' (output.data.toList ++ [b]) = some result
+          have hpush : (output.push b).data.toList = output.data.toList ++ [b] := by simp
+          -- output.size < maxOutputSize (result extends output ++ [b])
+          have hout_ok : ¬(output.size ≥ maxOutputSize) := by
+            have hpfx := Deflate.Spec.resolveLZ77_extends _ _ _ hlz
+            have := List.IsPrefix.length_le hpfx
+            simp at this; omega
+          -- Apply IH with (output.push b) and remaining symbols
+          rw [hbits_eq, ← hrest₁] at hds_rec
+          rw [← hrest_eq] at hds_rec
+          rw [← hpush] at hlz
+          obtain ⟨br', hgo, hbr', hwf', hpos'⟩ :=
+            ih br₁ (output.push b) syms' result hwf₁ hpos₁ hmax hds_rec hlz
+          -- Unfold native go to show it takes the literal branch
+          unfold Zip.Native.Inflate.decodeHuffman.go
+          rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
+          dsimp only [bind, Except.bind]
+          -- sym < 256 branch
+          have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat := by
+            simp [Nat.mod_eq_of_lt (by omega : sym_nat < UInt16.size)]
+          have hsym_lt_u16 : sym_nat.toUInt16 < 256 := by
+            rw [UInt16.lt_iff_toNat_lt, hsym_toNat]; exact hsym_lt
+          simp only [hsym_lt_u16, ↓reduceIte, hout_ok, pure, Except.pure]
+          -- sym_nat.toUInt16.toUInt8 = b
+          have hsym_u8 : sym_nat.toUInt16.toUInt8 = b := by
+            rw [hb_eq]; simp [UInt16.toUInt8, hsym_toNat]
+          rw [hsym_u8]
+          exact ⟨br', hgo, hbr', hwf', hpos'⟩
+      | endOfBlock =>
+        -- From decodeLitLen_endOfBlock_inv: sym_nat = 256, bits₁ = rest₁
+        obtain ⟨hsym_eq, hbits_eq⟩ := decodeLitLen_endOfBlock_inv hdll hspec_sym
+        -- Reduce the match on .endOfBlock in hds
+        dsimp only [] at hds
+        -- hds : pure ([.endOfBlock], bits₁) = some (syms, rest)
+        simp only [pure, Pure.pure] at hds
+        -- hds : some (...) = some (syms, rest)
+        have heq := Option.some.inj hds
+        have hsyms : syms = [.endOfBlock] := by
+          have := congrArg Prod.fst heq; simp at this; exact this.symm
+        have hrest_eq : rest = bits₁ := by
+          have := congrArg Prod.snd heq; simp at this; exact this.symm
+        -- resolveLZ77 [.endOfBlock] output = some output
+        rw [hsyms] at hlz
+        simp [Deflate.Spec.resolveLZ77_endOfBlock] at hlz
+        -- hlz : output.data.toList = result
+        -- Unfold native go
+        unfold Zip.Native.Inflate.decodeHuffman.go
+        rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
+        dsimp only [bind, Except.bind]
+        -- sym ≥ 256 (sym_nat = 256)
+        have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat := by
+          have hsym_lt_u16 : sym_nat < UInt16.size :=
+            Nat.lt_of_lt_of_le hsym_bound hlen_lit
+          simp [Nat.mod_eq_of_lt hsym_lt_u16]
+        have hsym_ge : ¬(sym_nat.toUInt16 < 256) := by
+          rw [UInt16.lt_iff_toNat_lt, hsym_toNat, hsym_eq]
+          exact Nat.not_lt.mpr (Nat.le.refl)
+        simp only [hsym_ge, ↓reduceIte]
+        -- sym == 256
+        have hsym_beq : (sym_nat.toUInt16 == 256) = true := by
+          rw [beq_iff_eq]
+          exact UInt16.toNat_inj.mp (by rw [hsym_toNat, hsym_eq]; rfl)
+        simp only [hsym_beq, ↓reduceIte]
+        -- Goal: ∃ br', .ok (output, br₁) = .ok ({data := {toList := result}}, br') ∧ ...
+        have hout_eq : output = ⟨⟨result⟩⟩ := by
+          have : output.data.toList = result := hlz
+          exact congrArg (fun x => (ByteArray.mk (Array.mk x))) this
+        refine ⟨br₁, ?_, ?_, hwf₁, hpos₁⟩
+        · rw [hout_eq]
+        · rw [hrest₁, ← hbits_eq, ← hrest_eq]
+      | reference len dist =>
+        -- The reference case requires:
+        -- 1. decodeLitLen_reference_inv to extract intermediate values
+        -- 2. readBits_complete for length and distance extra bits
+        -- 3. huffTree_decode_complete for distance tree
+        -- 4. Table correspondence (nativeLengthBase_eq etc. from DeflateFixedTables)
+        -- 5. copyLoop_eq_ofFn for back-reference copy
+        -- 6. IH for recursive call
+        -- See decodeLitLen_reference_inv above for the reference chain extraction.
+        sorry
 
 end Deflate.Correctness
