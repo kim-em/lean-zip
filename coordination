@@ -15,6 +15,7 @@
 #   coordination claim N          — claim an issue for this session (label + comment)
 #   coordination skip N "reason"  — mark a claimed issue as skipped (stale/blocked)
 #   coordination check-blocked    — unblock issues whose dependencies are all closed
+#   coordination release-stale-claims [SECS] — release claimed issues with no activity for SECS seconds (default 14400 = 4h)
 #   coordination lock-planner    — acquire advisory planner lock (10min TTL)
 #   coordination unlock-planner  — release planner lock early
 
@@ -415,6 +416,44 @@ cmd_unlock_planner() {
 
 # --- check-blocked ---
 # Scan blocked issues and unblock those whose dependencies are all closed.
+# --- release-stale-claims ---
+# Release claimed issues whose claim comment is older than a threshold.
+# Called periodically by pod. Workers that die without releasing their
+# claim (crash, OOM, SIGKILL) are detected and their issues freed.
+cmd_release_stale_claims() {
+    local stale_secs="${1:-14400}"  # default: 4 hours
+    local now
+    now="$(date -u +%s)"
+
+    gh issue list --repo "$REPO" --label claimed --state open --limit 50 \
+        --json number,title | jq -c '.[]' | \
+    while read -r issue_json; do
+        local num title
+        num="$(echo "$issue_json" | jq -r '.number')"
+        title="$(echo "$issue_json" | jq -r '.title')"
+
+        # Find timestamp of most recent "Claimed by session" comment
+        local claim_ts
+        claim_ts="$(gh issue view "$num" --repo "$REPO" --json comments \
+            --jq '[.comments[] | select(.body | startswith("Claimed by session"))] | last | .createdAt // ""')"
+
+        [[ -z "$claim_ts" ]] && continue
+
+        local claim_epoch
+        claim_epoch="$(date -d "$claim_ts" +%s 2>/dev/null || echo 0)"
+        local age=$(( now - claim_epoch ))
+
+        if [[ $age -gt $stale_secs ]]; then
+            local age_str
+            age_str="$(( age / 3600 ))h$(( (age % 3600) / 60 ))m"
+            gh issue edit "$num" --repo "$REPO" --remove-label claimed
+            gh issue comment "$num" --repo "$REPO" \
+                --body "Stale claim released — worker session appears to have died (claimed ${age_str} ago). Available for reclaim."
+            echo "Released stale claim on #$num ($title, age ${age_str})"
+        fi
+    done
+}
+
 cmd_check_blocked() {
     local issues
     issues="$(gh issue list --repo "$REPO" --label blocked --state open --limit 50 \
@@ -459,9 +498,10 @@ case "${1:-}" in
     queue-depth)     cmd_queue_depth ;;
     claim)           shift; cmd_claim "$@" ;;
     skip)            shift; cmd_skip "$@" ;;
-    check-blocked)   cmd_check_blocked ;;
-    lock-planner)    cmd_lock_planner ;;
-    unlock-planner)  cmd_unlock_planner ;;
+    check-blocked)          cmd_check_blocked ;;
+    release-stale-claims)   shift; cmd_release_stale_claims "$@" ;;
+    lock-planner)           cmd_lock_planner ;;
+    unlock-planner)         cmd_unlock_planner ;;
     *)               die "unknown command: ${1:-}
-Usage: coordination {orient|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|check-blocked|lock-planner|unlock-planner}" ;;
+Usage: coordination {orient|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|check-blocked|release-stale-claims|lock-planner|unlock-planner}" ;;
 esac

@@ -79,6 +79,7 @@ min_queue = 3                      # queue_balance: below this → planner-type
 poll_interval = 2                  # Seconds between status updates
 jsonl_stale_warning = 300          # Warn if JSONL unchanged for this many seconds
 jsonl_missing_warning = 60         # Warn if JSONL not created after this many seconds
+stale_claim_ttl = 14400            # Release claimed issues with no PR after this many seconds (4h)
 
 # --- Worker Types ---
 # Each [worker_types.<name>] defines a type of agent session.
@@ -887,6 +888,11 @@ def agent_process_main(config: dict, agent_id: str | None = None):
         # --- Housekeeping ---
         try:
             coordination(config, "check-blocked")
+        except Exception:
+            pass
+        try:
+            stale_ttl = str(cfg_get(config, "monitor", "stale_claim_ttl", default=14400))
+            coordination(config, "release-stale-claims", stale_ttl)
         except Exception:
             pass
 
