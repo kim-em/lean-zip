@@ -12,43 +12,6 @@ compressor correspond to leaves in the Huffman tree built by the decompressor.
 
 namespace Deflate.Correctness
 
-/-! ### Array helper lemmas -/
-
-/-- `Array.set!` at a different index preserves the element (pairs). -/
-private theorem array_set_ne_pair (arr : Array (UInt16 × UInt8)) (i j : Nat)
-    (v : UInt16 × UInt8) (hij : i ≠ j) :
-    (arr.set! i v)[j]! = arr[j]! := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hij]
-
-/-- `Array.set!` at the same index replaces the value (pairs). -/
-private theorem array_set_self_pair (arr : Array (UInt16 × UInt8)) (i : Nat)
-    (v : UInt16 × UInt8) (hi : i < arr.size) :
-    (arr.set! i v)[i]! = v := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_self_of_lt hi]
-
-/-- `Array.set!` at a different index preserves the element (UInt32). -/
-private theorem array_set_ne_u32 (arr : Array UInt32) (i j : Nat) (v : UInt32) (hij : i ≠ j) :
-    (arr.set! i v)[j]! = arr[j]! := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hij]
-
-/-- `Array.set!` at the same index replaces the value (UInt32). -/
-private theorem array_set_self_u32 (arr : Array UInt32) (i : Nat) (v : UInt32) (hi : i < arr.size) :
-    (arr.set! i v)[i]! = v := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_self_of_lt hi]
-
-/-- `codeFor` returns `some` for symbols with valid nonzero length. -/
-private theorem codeFor_some (lsList : List Nat) (maxBits : Nat) (s : Nat)
-    (hs : s < lsList.length) (hlen : lsList[s] ≠ 0) (hle : lsList[s] ≤ maxBits) :
-    ∃ cw, Huffman.Spec.codeFor lsList maxBits s = some cw := by
-  simp only [Huffman.Spec.codeFor, show s < lsList.length from hs, ↓reduceDIte]
-  simp only [show (lsList[s] == 0 || decide (lsList[s] > maxBits)) = false from by
-    simp [hlen]; omega]
-  exact ⟨_, rfl⟩
-
 /-! ### Size preservation -/
 
 /-- `canonicalCodes.go` preserves the result array size. -/
@@ -121,19 +84,7 @@ private theorem canonicalCodes_go_inv
         rw [← hls_i]; exact hv.1 _ (List.getElem_mem hls_len)
       -- Code value from NC invariant
       have hcode_val := hnc lengths[i].toNat (by omega) hlen_le
-      -- Partial count ≤ total count (for bounding)
-      have h_partial_le : (lsList.take i).foldl
-          (fun acc l => if (l == lengths[i].toNat) = true then acc + 1 else acc) 0 ≤
-          lsList.foldl
-          (fun acc l => if (l == lengths[i].toNat) = true then acc + 1 else acc) 0 := by
-        rw [show lsList.foldl
-          (fun acc l => if (l == lengths[i].toNat) = true then acc + 1 else acc) 0 =
-          (lsList.drop i).foldl
-            (fun acc l => if (l == lengths[i].toNat) = true then acc + 1 else acc)
-            ((lsList.take i).foldl
-              (fun acc l => if (l == lengths[i].toNat) = true then acc + 1 else acc) 0)
-          from by rw [← List.foldl_append, List.take_append_drop]]
-        exact Huffman.Spec.count_foldl_mono _ _ _
+      have h_partial_le := count_foldl_take_le lsList lengths[i].toNat i
       -- Full bound: nc + total_count ≤ 2^len
       have h_npc := Huffman.Spec.nextCodes_plus_count_le lsList maxBits
         lengths[i].toNat hv (by omega) hlen_le
@@ -163,7 +114,7 @@ private theorem canonicalCodes_go_inv
           · -- b = len: both sides incremented
             subst hbeq
             simp only [beq_self_eq_true, ↓reduceIte]
-            rw [array_set_self_u32 _ _ _ (show lengths[i].toNat < nextCode.size from by omega)]
+            rw [Array.getElem!_set!_self _ _ _ (show lengths[i].toNat < nextCode.size from by omega)]
             rw [UInt32.toNat_add, show (1 : UInt32).toNat = 1 from rfl,
                 Nat.mod_eq_of_lt (by omega), hcode_val]
             omega
@@ -171,14 +122,14 @@ private theorem canonicalCodes_go_inv
             have hf : ¬((lengths[i].toNat == b) = true) := by
               rw [beq_iff_eq]; exact hbeq
             simp only [if_neg hf]
-            rw [array_set_ne_u32 _ _ _ _ hbeq]
+            rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
             exact hnc b hb1 hb15)
         (by -- hprev': entries < i+1 are correct
           intro k hk hks
           by_cases hk_eq : k = i
           · -- k = i: newly set entry
             simp only [hk_eq]
-            rw [array_set_self_pair result i _ (show i < result.size from by omega)]
+            rw [Array.getElem!_set!_self result i _ (show i < result.size from by omega)]
             simp only [hlen_pos, ↓reduceIte]
             refine ⟨trivial, ?_⟩
             -- UInt32 → UInt16 → Nat faithfulness
@@ -190,11 +141,11 @@ private theorem canonicalCodes_go_inv
               Nat.pow_le_pow_right (by omega) (show lengths[i].toNat ≤ 15 from by omega)
             omega
           · -- k < i: preserved by set! at different index
-            rw [array_set_ne_pair result i k _ (Ne.symm hk_eq)]
+            rw [Array.getElem!_set!_ne result i k _ (Ne.symm hk_eq)]
             exact hprev k (by omega) hks)
         (by -- hfut': entries at ≥ i+1 are still (0,0)
           intro k hk hks
-          rw [array_set_ne_pair result i k _ (by omega)]
+          rw [Array.getElem!_set!_ne result i k _ (by omega)]
           exact hfut k (by omega) hks)
         j hjs
     · -- lengths[i] = 0: skip case
