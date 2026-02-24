@@ -1,4 +1,5 @@
 import Zip.Spec.DeflateEncodeProps
+import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.InflateCorrect
@@ -688,17 +689,34 @@ theorem deflateFixed_spec (data : ByteArray) :
 open Deflate.Spec in
 /-- If spec `decode` succeeds on the bits of a bytestream, native `inflate`
     also succeeds with the same result. Restricted to inputs within fuel
-    and size limits.
-    **Sorry**: this is the reverse direction of `inflate_correct'`. Proving it
-    requires constructing a successful native execution from a successful spec
-    decode, which involves showing that every native step (readBits, decodeHuffman,
-    etc.) succeeds when the spec decode succeeds. -/
+    and size limits. -/
 theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
     (hsize : result.length ≤ 256 * 1024 * 1024)
     (hdec : decode (bytesToBits bytes) = some result) :
     Zip.Native.Inflate.inflate bytes =
     .ok ⟨⟨result⟩⟩ := by
-  sorry
+  -- Unfold inflate: it calls inflateRaw then discards endPos
+  simp only [Inflate.inflate, bind, Except.bind]
+  -- Unfold inflateRaw
+  simp only [Inflate.inflateRaw, bind, Except.bind]
+  -- Build fixed Huffman trees (computationally verified to succeed)
+  obtain ⟨fixedLit, hflit⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
+  obtain ⟨fixedDist, hfdist⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
+  rw [hflit, hfdist]; simp only []
+  -- decode = decode.go bits [] 10001
+  have hgo : decode.go (bytesToBits bytes) [] 10001 = some result := by
+    simp only [decode] at hdec; exact hdec
+  -- Apply inflateLoop_complete
+  have hbr_wf : (Zip.Native.BitReader.mk bytes 0 0).bitOff < 8 := by simp
+  have hbr_pos : (Zip.Native.BitReader.mk bytes 0 0).bitOff = 0 ∨
+      (Zip.Native.BitReader.mk bytes 0 0).pos <
+      (Zip.Native.BitReader.mk bytes 0 0).data.size := by simp
+  obtain ⟨endPos, hloop⟩ :=
+    Deflate.Correctness.inflateLoop_complete
+      ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist
+      (256 * 1024 * 1024) result
+      hbr_wf hbr_pos hflit hfdist hsize 10001 hgo
+  rw [hloop]; simp [pure, Except.pure]
 
 /-! ## Main roundtrip theorem -/
 

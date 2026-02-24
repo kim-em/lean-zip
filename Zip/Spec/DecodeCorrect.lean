@@ -706,4 +706,81 @@ theorem decodeHuffman_correct
                         rw [hcopy, hlen_eq, hdist_val_eq, hsize] at hlz
                         exact hlz
 
+/-! ## Completeness (reverse direction): spec success → native success -/
+
+/-- **Completeness for stored blocks**: if the spec `decodeStored` succeeds,
+    the native `Inflate.decodeStored` also succeeds with the same output.
+
+    This is the reverse of `decodeStored_correct`. -/
+theorem decodeStored_complete (br : Zip.Native.BitReader)
+    (output : ByteArray) (maxOutputSize : Nat)
+    (storedBytes : List UInt8) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hmax : output.size + storedBytes.length ≤ maxOutputSize)
+    (hspec : Deflate.Spec.decodeStored br.toBits = some (storedBytes, rest)) :
+    ∃ br', Zip.Native.Inflate.decodeStored br output maxOutputSize =
+      .ok (output ++ ⟨⟨storedBytes⟩⟩, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff = 0 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
+/-- **Completeness for `HuffTree.decode`**: if the spec `Huffman.Spec.decode`
+    succeeds on the bit list corresponding to a `BitReader`, then the native
+    tree decode also succeeds, producing the same symbol.
+
+    This is the reverse of `huffTree_decode_correct`. -/
+theorem huffTree_decode_complete (lengths : Array UInt8)
+    (maxBits : Nat) (hmb : maxBits < 32)
+    (tree : Zip.Native.HuffTree) (br : Zip.Native.BitReader)
+    (sym : Nat) (rest : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hlen_bound : lengths.size ≤ UInt16.size)
+    (hsym_bound : sym < lengths.size)
+    (hspec : Huffman.Spec.decode
+      ((Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits).map
+        fun (s, cw) => (cw, s)) br.toBits = some (sym, rest)) :
+    ∃ br', tree.decode br = .ok (sym.toUInt16, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
+/-- **Completeness for Huffman block decode**: if the spec `decodeSymbols`
+    succeeds and `resolveLZ77` produces output, then the native
+    `decodeHuffman.go` also succeeds with the same output.
+
+    This is the reverse of `decodeHuffman_correct`. -/
+theorem decodeHuffman_complete
+    (litLengths distLengths : Array UInt8)
+    (litTree distTree : Zip.Native.HuffTree)
+    (maxOutputSize : Nat)
+    (br : Zip.Native.BitReader) (output : ByteArray)
+    (syms : List Deflate.Spec.LZ77Symbol) (rest : List Bool)
+    (result : List UInt8)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hlit : Zip.Native.HuffTree.fromLengths litLengths = .ok litTree)
+    (hdist : Zip.Native.HuffTree.fromLengths distLengths = .ok distTree)
+    (hvlit : Huffman.Spec.ValidLengths (litLengths.toList.map UInt8.toNat) 15)
+    (hvdist : Huffman.Spec.ValidLengths (distLengths.toList.map UInt8.toNat) 15)
+    (hlen_lit : litLengths.size ≤ UInt16.size)
+    (hlen_dist : distLengths.size ≤ UInt16.size)
+    (hmax : result.length ≤ maxOutputSize)
+    (hfuel : Nat)
+    (hds : Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
+        (distLengths.toList.map UInt8.toNat) br.toBits hfuel =
+        some (syms, rest))
+    (hlz : Deflate.Spec.resolveLZ77 syms output.data.toList = some result) :
+    ∃ br', Zip.Native.Inflate.decodeHuffman.go litTree distTree maxOutputSize
+        br output hfuel = .ok (⟨⟨result⟩⟩, br') ∧
+      br'.toBits = rest ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+
 end Deflate.Correctness
