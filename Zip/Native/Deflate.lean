@@ -221,7 +221,7 @@ def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter
 termination_by tokens.size - i
 
 /-- Write a fixed Huffman DEFLATE block from LZ77 tokens. -/
-private def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
+protected def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
   let bw := BitWriter.empty
   let bw := bw.writeBits 1 1  -- BFINAL
   let bw := bw.writeBits 2 1  -- BTYPE = 01
@@ -238,7 +238,7 @@ private def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : By
 /-- Compress data using fixed Huffman codes and greedy LZ77 (Level 1).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
 def deflateFixed (data : ByteArray) : ByteArray :=
-  deflateFixedBlock data (lz77Greedy data)
+  Deflate.deflateFixedBlock data (lz77Greedy data)
 
 /-- Simple hash-based lazy LZ77 matcher.
     Like `lz77Greedy`, but checks if position pos+1 has a longer match
@@ -355,6 +355,6 @@ where
 /-- Compress data using fixed Huffman codes and lazy LZ77 (Level 2).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
 def deflateLazy (data : ByteArray) : ByteArray :=
-  deflateFixedBlock data (lz77Lazy data)
+  Deflate.deflateFixedBlock data (lz77Lazy data)
 
 end Zip.Native.Deflate
