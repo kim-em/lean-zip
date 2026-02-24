@@ -7,7 +7,7 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4 in progress (native compressor + roundtrip verification)
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 2 (in DeflateDynamicCorrect.lean — see Phase 4 details)
+- **Sorries**: 0 (zero-sorry milestone achieved Feb 24)
 - **Sessions**: ~120 completed (Feb 19–24)
 
 ## Milestones
@@ -72,20 +72,16 @@ Native compression + roundtrip verification. ~70 sessions so far.
 - `inflateLoop_complete` (InflateCorrect)
 - `inflate_deflateFixed` — Level 1 roundtrip (DeflateFixedCorrect)
 - `inflate_deflateLazy` — Level 2 roundtrip (DeflateFixedCorrect)
-- `inflate_deflateDynamic` roundtrip partial — `encodeDynamic_decode_append`
-  (DeflateDynamicCorrect)
+- `inflate_deflateDynamic` — Level 5 roundtrip (DeflateDynamicCorrect)
+- `deflateRoundtrip` — unified roundtrip for all levels (DeflateRoundtrip)
 - DecodeCorrect.lean split into DecodeCorrect + DecodeComplete
 
-**Remaining sorries (2):**
+**Remaining sorries: 0**
 
-`DeflateDynamicCorrect.lean` (2):
-- `encodeDynamic_decode_append` — dynamic block decode after encode
-- `deflateDynamic_spec` — native dynamic compressor ↔ spec correspondence
-
-These block the final theorem `inflate_deflateDynamic` (Level 5 roundtrip).
-Key remaining sub-goals: `writeDynamicHeader_spec` (BitWriter chain for
-the dynamic header) and `computeCodeLengths_nonzero` (Huffman tree
-property needed for symbol encoding).
+All sorries have been resolved, including `deflateDynamic_spec` and
+`inflate_deflateDynamic` (Level 5 roundtrip). The unified roundtrip
+theorem `deflateRoundtrip` in `DeflateRoundtrip.lean` covers all
+compression levels (stored, fixed, lazy, dynamic).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
