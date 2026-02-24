@@ -546,7 +546,8 @@ def fetch_blocked_deps() -> dict[int, list[int]]:
         )
         open_nums: set[int] = set(json.loads(r2.stdout)) if r2.returncode == 0 else set()
 
-        return {num: [d for d in deps if d in open_nums] for num, deps in raw.items()}
+        return {num: filtered for num, deps in raw.items()
+                if (filtered := [d for d in deps if d in open_nums])}
     except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
         return {}
 
