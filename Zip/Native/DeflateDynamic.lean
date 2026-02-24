@@ -6,6 +6,7 @@
 -/
 import Zip.Native.Deflate
 import Zip.Spec.DeflateEncodeDynamic
+import Zip.Spec.DeflateStoredCorrect
 
 namespace Zip.Native.Deflate
 
@@ -154,5 +155,15 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
     let (code, len) := litCodes[256]!
     let bw := bw.writeHuffCode code len
     bw.flush
+
+open Zip.Spec.DeflateStoredCorrect (deflateStoredPure)
+
+/-- Unified raw DEFLATE compression dispatch.
+    Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman. -/
+def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
+  if level == 0 then deflateStoredPure data
+  else if level == 1 then deflateFixed data
+  else if level < 5 then deflateLazy data
+  else deflateDynamic data
 
 end Zip.Native.Deflate

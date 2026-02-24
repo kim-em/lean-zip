@@ -6,7 +6,6 @@
   DEFLATE stream, and verifies checksums.
 -/
 import Zip.Native.Inflate
-import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Native.Crc32
 import Zip.Native.Adler32
@@ -84,14 +83,7 @@ namespace GzipEncode
 /-- Compress data to gzip format (RFC 1952).
     Level 0 = stored, 1 = fixed Huffman, 2–4 = lazy LZ77, 5+ = dynamic Huffman. -/
 def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
-  let deflated := if level == 0 then
-    Deflate.deflateStored data
-  else if level == 1 then
-    Deflate.deflateFixed data
-  else if level < 5 then
-    Deflate.deflateLazy data
-  else
-    Deflate.deflateDynamic data
+  let deflated := Deflate.deflateRaw data level
   -- Gzip header: ID1=0x1f, ID2=0x8b, CM=8, FLG=0, MTIME=0, XFL, OS=255
   let xfl : UInt8 := if level == 0 then 0x00 else if level ≥ 5 then 0x02 else 0x04
   let header := ByteArray.mk #[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, xfl, 0xFF]
@@ -154,14 +146,7 @@ namespace ZlibEncode
 /-- Compress data to zlib format (RFC 1950).
     Level 0 = stored, 1 = fixed Huffman, 2–4 = lazy LZ77, 5+ = dynamic Huffman. -/
 def compress (data : ByteArray) (level : UInt8 := 1) : ByteArray :=
-  let deflated := if level == 0 then
-    Deflate.deflateStored data
-  else if level == 1 then
-    Deflate.deflateFixed data
-  else if level < 5 then
-    Deflate.deflateLazy data
-  else
-    Deflate.deflateDynamic data
+  let deflated := Deflate.deflateRaw data level
   -- CMF: CM=8 (deflate), CINFO=7 (32K window)
   let cmf : UInt8 := 0x78
   -- FLG: FLEVEL (bits 6-7) + FCHECK (bits 0-4) such that (CMF*256 + FLG) % 31 == 0
@@ -222,10 +207,6 @@ def compressAuto (data : ByteArray)
   match format with
   | .gzip => GzipEncode.compress data level
   | .zlib => ZlibEncode.compress data level
-  | .rawDeflate =>
-    if level == 0 then Deflate.deflateStored data
-    else if level == 1 then Deflate.deflateFixed data
-    else if level < 5 then Deflate.deflateLazy data
-    else Deflate.deflateDynamic data
+  | .rawDeflate => Deflate.deflateRaw data level
 
 end Zip.Native
