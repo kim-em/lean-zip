@@ -194,9 +194,10 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 | `coordination queue-depth` | Count of unclaimed issues (used by `pod` for dispatch) |
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
 | `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
+| `coordination add-dep N M` | Add `depends-on: #M` to issue #N's body; adds `blocked` label if #M is open. Use this (not raw `gh issue edit`) whenever a new dependency is discovered on an existing issue |
 | `coordination check-blocked` | Unblock issues whose `depends-on` dependencies are all closed |
 | `coordination release-stale-claims [SECS]` | Release claimed issues with no PR after SECS seconds (default 4h); **manual use only** — for claims from sessions on other machines that `pod` can't detect locally |
-| `coordination lock-planner` | Acquire advisory planner lock (10min TTL, issue #8) |
+| `coordination lock-planner` | Acquire advisory planner lock (20min TTL, issue #8) |
 | `coordination unlock-planner` | Release planner lock early |
 
 **Issue lifecycle**: planner creates issue (label: `agent-plan`) →

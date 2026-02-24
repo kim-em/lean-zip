@@ -104,13 +104,8 @@ add the dependency. The `depends-on` line MUST be in the issue **body** (not
 a comment), because `check-blocked` only scans bodies for automatic unblocking.
 
 ```
-# Append depends-on to the existing issue's body
-gh issue edit <existing-issue> --repo kim-em/lean-zip \
-    --body "$(gh issue view <existing-issue> --repo kim-em/lean-zip --json body --jq .body)
-
-depends-on: #<new-issue>"
-# Add blocked label if the issue isn't already claimed/in-progress
-gh issue edit <existing-issue> --repo kim-em/lean-zip --add-label blocked
+# Add depends-on to body and blocked label in one step
+coordination add-dep <existing-issue> <new-issue>
 # Add an explanatory comment
 gh issue comment <existing-issue> --repo kim-em/lean-zip \
     --body "Blocking on #<new-issue> (<brief reason>)."

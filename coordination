@@ -14,6 +14,7 @@
 #   coordination queue-depth      — count of unclaimed agent-plan issues
 #   coordination claim N          — claim an issue for this session (label + comment)
 #   coordination skip N "reason"  — mark a claimed issue as skipped (stale/blocked)
+#   coordination add-dep N M      — add depends-on: #M to issue #N's body; add blocked label if #M is open
 #   coordination check-blocked    — unblock issues whose dependencies are all closed
 #   coordination release-stale-claims [SECS] — release claimed issues with no activity for SECS seconds (default 14400 = 4h)
 #   coordination lock-planner    — acquire advisory planner lock (10min TTL)
@@ -46,6 +47,12 @@ _unclaimed_issues() {
 cmd_orient() {
     echo "=== Unclaimed work items ==="
     _unclaimed_issues | jq -r '.[] | "#\(.number) \(.title) (\(.createdAt[:16]))"'
+
+    echo ""
+    echo "=== Blocked issues ==="
+    gh issue list --repo "$REPO" --label agent-plan --label blocked --state open --limit 50 \
+        --json number,title,body \
+        --jq '.[] | "#\(.number) [Blocked on \([.body | match("depends-on: #([0-9]+)"; "g") | "#\(.captures[0].string)"] | join(", "))] \(.title)"'
 
     echo ""
     echo "=== Claimed work items ==="
@@ -443,6 +450,36 @@ cmd_unlock_planner() {
     fi
 }
 
+# --- add-dep ---
+# Add a depends-on: #M line to issue #N's body (if not already present),
+# then add the blocked label if #M is open.
+# Use this whenever a new dependency is discovered on an existing issue —
+# it keeps the body authoritative so check-blocked can unblock automatically.
+cmd_add_dep() {
+    local issue_num="${1:?usage: coordination add-dep <issue> <dep>}"
+    local dep_num="${2:?usage: coordination add-dep <issue> <dep>}"
+
+    local body
+    body="$(gh issue view "$issue_num" --repo "$REPO" --json body --jq .body)"
+
+    if echo "$body" | grep -qE "depends-on: #${dep_num}([^0-9]|$)"; then
+        echo "Issue #$issue_num already has depends-on: #$dep_num in its body"
+    else
+        gh issue edit "$issue_num" --repo "$REPO" --body "${body}
+depends-on: #${dep_num}"
+        echo "Added depends-on: #$dep_num to body of issue #$issue_num"
+    fi
+
+    local dep_state
+    dep_state="$(gh issue view "$dep_num" --repo "$REPO" --json state --jq .state)"
+    if [[ "$dep_state" == "OPEN" ]]; then
+        gh issue edit "$issue_num" --repo "$REPO" --add-label blocked
+        echo "Added blocked label (dependency #$dep_num is open)"
+    else
+        echo "Dependency #$dep_num is already closed; blocked label not added"
+    fi
+}
+
 # --- check-blocked ---
 # Scan blocked issues and unblock those whose dependencies are all closed.
 # --- release-stale-claims ---
@@ -527,10 +564,11 @@ case "${1:-}" in
     queue-depth)     cmd_queue_depth ;;
     claim)           shift; cmd_claim "$@" ;;
     skip)            shift; cmd_skip "$@" ;;
+    add-dep)                shift; cmd_add_dep "$@" ;;
     check-blocked)          cmd_check_blocked ;;
     release-stale-claims)   shift; cmd_release_stale_claims "$@" ;;
     lock-planner)           cmd_lock_planner ;;
     unlock-planner)         cmd_unlock_planner ;;
     *)               die "unknown command: ${1:-}
-Usage: coordination {orient|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|check-blocked|release-stale-claims|lock-planner|unlock-planner}" ;;
+Usage: coordination {orient|plan|create-pr|claim-fix|close-pr|list-unclaimed|queue-depth|claim|skip|add-dep|check-blocked|release-stale-claims|lock-planner|unlock-planner}" ;;
 esac
