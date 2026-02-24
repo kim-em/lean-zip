@@ -194,14 +194,15 @@ inductive CompressFormat where
     - Zlib: first byte has CM=8 (low nibble), and header check passes
     - Raw deflate: fallback -/
 def detectFormat (data : ByteArray) : CompressFormat :=
-  if data.size ≥ 2 && data[0]! == 0x1f && data[1]! == 0x8b then
-    .gzip
-  else if data.size ≥ 2 then
-    let cmf := data[0]!
-    let flg := data[1]!
-    let check := cmf.toUInt16 * 256 + flg.toUInt16
-    if cmf &&& 0x0F == 8 && check % 31 == 0 then .zlib
-    else .rawDeflate
+  if h : data.size ≥ 2 then
+    if data[0] == 0x1f && data[1] == 0x8b then
+      .gzip
+    else
+      let cmf := data[0]
+      let flg := data[1]
+      let check := cmf.toUInt16 * 256 + flg.toUInt16
+      if cmf &&& 0x0F == 8 && check % 31 == 0 then .zlib
+      else .rawDeflate
   else
     .rawDeflate
 
