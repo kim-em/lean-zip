@@ -1463,20 +1463,16 @@ def _tui_main(stdscr, config: dict):
         displayed_items = []  # reset each frame
         if cached_items and avail_for_items >= 4:
             max_item_rows = avail_for_items - 3  # blank + separator + header
-            # Keep original sort order, but when truncating prefer to drop
-            # closed/merged items from the bottom before cutting active ones.
-            if len(cached_items) <= max_item_rows:
-                items_to_show = cached_items
-            else:
-                need_to_drop = len(cached_items) - max_item_rows
-                # Collect indices of closed/merged items, from bottom up
-                removable = [
-                    i for i in range(len(cached_items) - 1, -1, -1)
-                    if cached_items[i].state in ("closed", "merged")
-                ]
-                to_remove = set(removable[:need_to_drop])
-                remaining = [it for i, it in enumerate(cached_items) if i not in to_remove]
-                items_to_show = remaining[:max_item_rows]  # truncate if still too many
+            # Open items are always shown. Closed/merged fill remaining slots
+            # (newest first), and are the first to go when space is tight.
+            active = [it for it in cached_items if it.state not in ("closed", "merged")]
+            inactive = [it for it in cached_items if it.state in ("closed", "merged")]
+            slots_for_inactive = max(0, max_item_rows - len(active))
+            # inactive is already sorted newest-first; take from the front
+            selected = active + inactive[:slots_for_inactive]
+            # Restore original sort order across the combined set
+            selected_nums = {id(it) for it in selected}
+            items_to_show = [it for it in cached_items if id(it) in selected_nums]
             displayed_items = items_to_show
             items_shown = len(items_to_show)
 
