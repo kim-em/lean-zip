@@ -407,7 +407,6 @@ private theorem deflateStoredPure_eq_nonfinal (data : ByteArray) (pos : Nat)
 
 /-! ## Main roundtrip theorem -/
 
-set_option maxHeartbeats 800000 in
 /-- Final block case of inflateLoop_deflateStored. -/
 private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
     (hpos : pos ≤ data.size)
@@ -446,7 +445,6 @@ private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
     simp [ByteArray.size_extract]]
   exact extract_zero_size _
 
-set_option maxHeartbeats 800000 in
 /-- Step through one non-final stored block via inflateLoop_nonfinal_stored. -/
 private theorem inflateLoop_nonfinal_step (data : ByteArray) (pos : Nat)
     (_ : pos ≤ data.size) (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
@@ -552,7 +550,6 @@ private theorem nonfinal_unfold_goal (data : ByteArray) (pos : Nat)
       output fixedLit fixedDist maxOutputSize (fuel' + 1) := by
   rw [deflateStoredPure_eq_nonfinal data pos hpos h_nonfinal, ByteArray.append_assoc]
 
-set_option maxHeartbeats 800000 in
 /-- Restructure data and output after stepping one block.
     Combines extract_block + reassoc so _nonfinal_proof has fewer rw steps. -/
 private theorem nonfinal_step_restructure (data : ByteArray) (pos : Nat)
@@ -606,7 +603,6 @@ private theorem nonfinal_chain_first_half (data : ByteArray) (pos : Nat)
   (nonfinal_step_restructure data pos pfx output fixedLit fixedDist
     fuel' maxOutputSize h_block_sz))
 
-set_option maxHeartbeats 800000 in
 /-- Apply the induction hypothesis for the non-final case. -/
 private theorem inflateLoop_deflateStored_apply_ih (data : ByteArray) (pos : Nat)
     (pfx output : ByteArray) (fixedLit fixedDist : HuffTree)
@@ -641,7 +637,6 @@ private theorem inflateLoop_deflateStored_apply_ih (data : ByteArray) (pos : Nat
     (output ++ data.extract pos (pos + 65535)) fuel' h_fuel'
     (by simp only [ByteArray.size_append, h_block_sz]; omega) (by omega)
 
-set_option maxHeartbeats 800000 in
 /-- Non-final case: takes IH result as bundle. Destructures and applies chain in term mode.
     The chain application (first_half.trans after_step) is inline rather than via a separate
     theorem call, avoiding the additional layer that triggers kernel deep recursion. -/
@@ -674,7 +669,6 @@ private theorem inflateLoop_deflateStored_nonfinal_all (data : ByteArray) (pos :
       (inflateLoop_nonfinal_after_step data pos pfx output fixedLit fixedDist
         fuel' maxOutputSize h_block_sz h_pos65535 h_pfx'_sz endPos h_ih)⟩
 
-set_option maxHeartbeats 800000 in
 /-- Fuel conversion wrapper: converts from fuel to (fuel-1)+1 form
     for the nonfinal case. Isolated to keep the Eq.mpr wrapper minimal. -/
 private theorem inflateLoop_deflateStored_nonfinal_fuel (data : ByteArray) (pos : Nat)
