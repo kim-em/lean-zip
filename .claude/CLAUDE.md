@@ -778,6 +778,18 @@ Update it during review and reflect sessions.
   Fix: use `set_option maxRecDepth 2048 in` before the `have`/tactic
   that performs the rewrite. `▸` is even worse than `rw` here since
   it triggers full `whnf`.
+- **Suffix/append proofs vs fuel-independence proofs**: In
+  fuel-independence proofs, `simp only [hds] at h ⊢` processes both
+  hypothesis and goal simultaneously (same function call in both). In
+  suffix/append proofs, `h` has `f bits` while `⊢` has
+  `f (bits ++ suffix)` — `simp only [hds]` won't match the goal.
+  Pattern: (1) `simp only [hds, bind, Option.bind] at h` to process
+  the hypothesis, (2) `rw [f_append ...] at ⊢` to transform the goal,
+  (3) `simp only [bind, Option.bind]` to reduce the resulting
+  `Option.bind (some (...)) (fun ...)` in the goal. For `if` branches
+  appearing in both sides, use `by_cases hcond : condition` then
+  `rw [if_pos/if_neg hcond] at h ⊢`. Note: `split at h ⊢` (multiple
+  targets) is NOT supported — use `by_cases` instead.
 
 ## Current State
 

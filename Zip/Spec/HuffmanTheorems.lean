@@ -371,4 +371,35 @@ theorem allCodeWords_prefix_free (lengths : List Nat) (maxBits : Nat)
     omega
   exact canonical_prefix_free lengths maxBits hv _ _ _ _ hmi.2 hmj.2 hne hpre
 
+/-- If `decode` succeeds, the input decomposes as `cw ++ rest` for a table entry. -/
+theorem decode_some_append {α : Type} (table : List (Codeword × α))
+    (bits : List Bool) (sym : α) (rest : List Bool)
+    (h : decode table bits = some (sym, rest)) :
+    ∃ cw, (cw, sym) ∈ table ∧ bits = cw ++ rest := by
+  induction table with
+  | nil => simp [decode] at h
+  | cons entry entries ih =>
+    obtain ⟨cw', sym'⟩ := entry
+    simp only [decode] at h
+    split at h
+    · rename_i hpre
+      obtain ⟨rfl, rfl⟩ := Option.some.inj h
+      rw [isPrefixOf_iff] at hpre
+      obtain ⟨t, rfl⟩ := hpre
+      exact ⟨cw', List.mem_cons_self .., by simp⟩
+    · obtain ⟨cw, hmem, hbits⟩ := ih h
+      exact ⟨cw, List.mem_cons_of_mem _ hmem, hbits⟩
+
+/-- Suffix invariance for Huffman decode: appending bits to the input
+    appends them to the remainder. Requires prefix-free table. -/
+theorem decode_suffix {α : Type} (table : List (Codeword × α))
+    (bits suffix : List Bool) (sym : α) (rest : List Bool)
+    (h : decode table bits = some (sym, rest))
+    (hpf : ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ table → (cw₂, s₂) ∈ table →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂) :
+    decode table (bits ++ suffix) = some (sym, rest ++ suffix) := by
+  obtain ⟨cw, hmem, rfl⟩ := decode_some_append table bits sym rest h
+  rw [List.append_assoc]
+  exact decode_prefix_free table cw sym (rest ++ suffix) hmem hpf
+
 end Huffman.Spec
