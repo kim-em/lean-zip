@@ -94,7 +94,20 @@ Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md` with:
 - Decisions made, key proof patterns discovered
 - What remains, sorry count delta
 
-**If you made code changes**, commit, push, and create a PR:
+**Partial completion**: If you did NOT complete all deliverables in the issue:
+- In your progress entry, clearly list:
+  - Which deliverables were **completed**
+  - Which deliverables were **NOT completed** and why (stuck proof, ran out of
+    iterations, missing prerequisite, etc.)
+  - Whether the unfinished work needs a new issue (so the planner can reschedule)
+- Use `--partial` with a PR title describing what was *actually done*:
+  ```
+  coordination create-pr <N> --partial "feat: prove helper lemmas for inflate_deflateFixed"
+  ```
+  This uses "Partial progress on #N" instead of "Closes #N" in the PR body,
+  and returns the issue to the unclaimed queue so a planner can reschedule it.
+
+**If you completed all deliverables**, commit, push, and create a PR normally:
 ```
 git push -u origin <branch>
 coordination create-pr <issue-number>

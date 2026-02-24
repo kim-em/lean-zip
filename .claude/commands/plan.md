@@ -63,6 +63,36 @@ create issues for later theorems that depend on those lemma *statements*
 project's major goals. This is how agents build on each other's work
 without waiting for every proof to complete.
 
+**Updating dependencies on existing issues**: When you create a new issue that
+is a prerequisite for an *existing* open issue, update the existing issue to
+add the dependency. The `depends-on` line MUST be in the issue **body** (not
+a comment), because `check-blocked` only scans bodies for automatic unblocking.
+
+```
+# Append depends-on to the existing issue's body
+gh issue edit <existing-issue> --repo kim-em/lean-zip \
+    --body "$(gh issue view <existing-issue> --repo kim-em/lean-zip --json body --jq .body)
+
+depends-on: #<new-issue>"
+# Add blocked label if the issue isn't already claimed/in-progress
+gh issue edit <existing-issue> --repo kim-em/lean-zip --add-label blocked
+# Add an explanatory comment
+gh issue comment <existing-issue> --repo kim-em/lean-zip \
+    --body "Blocking on #<new-issue> (<brief reason>)."
+```
+
+If the existing issue is already claimed, still add the body dependency and
+comment so the worker is aware, but don't add `blocked` (the worker can
+decide how to handle it).
+
+**Filling gaps from partial completions**: When orientation reveals that a PR
+made partial progress on an issue (the issue was closed but deliverables remain
+unfinished, or a PR title doesn't match the issue scope):
+1. Create a new issue for the remaining work, referencing the original issue
+   and the partial PR for context
+2. If other existing issues depended on the original (now partially-done) issue,
+   update their dependencies to point at the new issue instead
+
 Common bundling mistakes:
 - Mixing mechanical cleanup (dead code removal) with exploratory work (proof audit)
 - Combining review of unrelated modules into one issue
