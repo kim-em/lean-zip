@@ -1231,6 +1231,9 @@ def agent_process_main(config: dict, agent_id: str | None = None,
 
         if not os.path.isdir(wt_dir):
             log(f"Agent {short_id}: worktree dir missing after setup_worktree returned: {wt_dir}")
+            if lock_name:
+                coordination(config, f"unlock-{lock_name}")
+                state.lock_held = ""
             state.status = "error"
             state.write()
             time.sleep(10)
