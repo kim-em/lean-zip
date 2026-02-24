@@ -1,4 +1,5 @@
 import Zip.Spec.BitstreamCorrect
+import Zip.Spec.BitstreamComplete
 import ZipForStd.Array
 
 /-!
@@ -113,6 +114,44 @@ protected theorem decodeBits_of_hasLeaf (tree : Zip.Native.HuffTree) (cw : List 
     (sym : UInt16) (rest : List Bool) (h : TreeHasLeaf tree cw sym) :
     decodeBits tree (cw ++ rest) = some (sym, rest) := by
   induction h <;> simp_all [decodeBits]
+
+/-- **Completeness for `decode.go`**: if the tree has a leaf at path `cw` and
+    the BitReader's bits start with `cw ++ rest`, then the native `decode.go`
+    succeeds with the same symbol. This is the reverse of `decode_go_decodeBits`. -/
+protected theorem decode_go_complete (tree : Zip.Native.HuffTree)
+    (cw : List Bool) (sym : UInt16) (rest : List Bool)
+    (br : Zip.Native.BitReader) (n : Nat)
+    (hleaf : TreeHasLeaf tree cw sym)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hbits : br.toBits = cw ++ rest)
+    (hn : n + cw.length ≤ 20) :
+    ∃ br', Zip.Native.HuffTree.decode.go tree br n = .ok (sym, br') ∧
+      br'.toBits = rest ∧ br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  induction hleaf generalizing br n with
+  | leaf =>
+    -- tree = .leaf s, cw = []: decode.go returns immediately
+    simp only [List.nil_append] at hbits
+    exact ⟨br, by simp [Zip.Native.HuffTree.decode.go], hbits, hwf, hpos⟩
+  | left hleft ih =>
+    -- tree = .node z o, cw = false :: cw': read bit false, recurse into z
+    simp only [List.length_cons] at hn
+    simp only [Zip.Native.HuffTree.decode.go, show ¬(n > 20) from by omega, ↓reduceIte]
+    simp only [List.cons_append] at hbits
+    obtain ⟨br₁, hrd, hbr1_bits, hwf₁, hpos₁⟩ :=
+      Deflate.Correctness.readBit_complete br false _ hwf hbits
+    simp only [hrd, bind, Except.bind]
+    exact ih br₁ (n + 1) hwf₁ hpos₁ hbr1_bits (by omega)
+  | right hright ih =>
+    -- tree = .node z o, cw = true :: cw': read bit true, recurse into o
+    simp only [List.length_cons] at hn
+    simp only [Zip.Native.HuffTree.decode.go, show ¬(n > 20) from by omega, ↓reduceIte]
+    simp only [List.cons_append] at hbits
+    obtain ⟨br₁, hrd, hbr1_bits, hwf₁, hpos₁⟩ :=
+      Deflate.Correctness.readBit_complete br true _ hwf hbits
+    simp only [hrd, bind, Except.bind]
+    exact ih br₁ (n + 1) hwf₁ hpos₁ hbr1_bits (by omega)
 
 /-- If `decodeBits` returns `(sym, rest)`, then the tree has a leaf at some
     path `cw` with `bits = cw ++ rest`. -/

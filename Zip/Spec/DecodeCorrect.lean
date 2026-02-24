@@ -818,7 +818,7 @@ theorem decodeStored_complete (br : Zip.Native.BitReader)
 
     This is the reverse of `huffTree_decode_correct`. -/
 theorem huffTree_decode_complete (lengths : Array UInt8)
-    (maxBits : Nat) (hmb : maxBits < 32)
+    (maxBits : Nat) (hmb : maxBits ≤ 20)
     (tree : Zip.Native.HuffTree) (br : Zip.Native.BitReader)
     (sym : Nat) (rest : List Bool)
     (hwf : br.bitOff < 8)
@@ -834,7 +834,30 @@ theorem huffTree_decode_complete (lengths : Array UInt8)
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  sorry
+  -- Extract codeword from spec decode success
+  obtain ⟨cw, hmem_table, hbits_eq⟩ :=
+    Deflate.Correctness.decode_some_mem _ br.toBits sym rest hspec
+  -- Convert (cw, sym) ∈ specTable to (sym, cw) ∈ allCodes
+  have hmem_codes : (sym, cw) ∈ Huffman.Spec.allCodes
+      (lengths.toList.map UInt8.toNat) maxBits := by
+    obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_table
+    simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+  -- Get TreeHasLeaf from fromLengths_hasLeaf
+  have hleaf := Deflate.Correctness.fromLengths_hasLeaf lengths maxBits
+    (by omega) tree htree hv sym cw hmem_codes
+  -- Get codeword length bound: cw.length ≤ maxBits ≤ 20
+  rw [Huffman.Spec.allCodes_mem_iff] at hmem_codes
+  obtain ⟨_, hcf⟩ := hmem_codes
+  obtain ⟨_, hlen_cond, hcw_eq⟩ := Huffman.Spec.codeFor_spec hcf
+  have ⟨_, hcw_le⟩ := Huffman.Spec.codeFor_len_bounds hlen_cond
+  have hcw_len : cw.length ≤ 20 := by
+    rw [hcw_eq, Huffman.Spec.natToBits_length]; omega
+  -- Apply decode_go_complete with n = 0
+  obtain ⟨br', hgo, hbr'_bits, hwf', hpos'⟩ :=
+    Deflate.Correctness.decode_go_complete tree _ sym.toUInt16 rest br 0
+      hleaf hwf hpos hbits_eq (by omega)
+  -- Wrap decode.go → decode
+  exact ⟨br', hgo, hbr'_bits, hwf', hpos'⟩
 
 /-- **Completeness for Huffman block decode**: if the spec `decodeSymbols`
     succeeds and `resolveLZ77` produces output, then the native
