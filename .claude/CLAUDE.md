@@ -498,6 +498,12 @@ Update it during review and reflect sessions.
   The `rw` tactic is much more targeted and avoids the expensive
   reduction. For goals like `f (a ++ b)[i]! ... = f a[i]! ...`, use
   explicit `rw [lemma_for_each_index]` instead of `congr 1`.
+  **Also for chaining transitive equalities**: When proving
+  `br'.data = br.data` by chaining `br'.data = br₁.data` and
+  `br₁.data = br.data`, do NOT use `hd' ▸ hd₁ ▸ rfl` — `▸` rewrites
+  in the wrong direction, changing dependent types in the goal (e.g.
+  `br'.data.size` becomes `br.data.size` when you need the reverse).
+  Use `exact hd'.trans hd₁` or `exact ⟨hd'.trans hd₁, ...⟩` instead.
 - **Avoid `for`/`while` in spec functions**: In `Option`/`Except` monads,
   `return` inside a `for` loop exits the loop (producing `some`), not the
   function. Use explicit recursive helper functions instead — they're also
@@ -838,6 +844,21 @@ Update it during review and reflect sessions.
   default fuel — it only adds fuel, so it can't prove behavior at a
   LOWER fuel than where the result was established. The constraint is
   fundamental to the spec decoder definition.
+- **Combined invariant lemma pattern for BitReader**: When proving that
+  a chain of BitReader operations preserves properties (data equality,
+  hpos, pos ≤ data.size), bundle all three into a single `∧` return:
+  ```lean
+  private theorem op_inv (br br' : BitReader) ...
+      (h : op br = .ok (result, br'))
+      (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+      (hple : br.pos ≤ br.data.size) :
+      br'.data = br.data ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+      br'.pos ≤ br'.data.size
+  ```
+  Chain with: `have ⟨hd₁, hpos₁, hple₁⟩ := op_inv ...` then
+  `exact ⟨hd'.trans hd₁, hpos', hple'⟩`. This avoids 3× boilerplate.
+  See `GzipCorrect.lean` for examples (readBit_inv through decode_inv).
 
 ## Current State
 
