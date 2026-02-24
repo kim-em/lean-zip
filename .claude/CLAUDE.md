@@ -812,6 +812,18 @@ Update it during review and reflect sessions.
   `rw [if_pos/if_neg hcond] at h ⊢`. Note: `split at h ⊢` (multiple
   targets) is NOT supported — use `by_cases` instead.
 
+- **`simp only` max recursion on Except do-blocks with many guards**:
+  When a function has many `unless ... do throw` guards in `Except`
+  do-notation, `simp only [FuncName, bind, Except.bind]` causes
+  looping via `FuncName.eq_1`. And `unfold FuncName` followed by
+  `simp only [pure, Except.pure, bind, Except.bind]` hits max
+  recursion on the deeply nested expanded term. Fix: use
+  `set_option maxRecDepth 8192 in simp only [FuncName,
+  - FuncName.eq_1, bind, Except.bind, ...]` — exclude the looping
+  equation and provide all guard-discharge hypotheses (format lemmas,
+  inflateRaw result, endPos bound, etc.) in one pass. The simp
+  processes all guards simultaneously, avoiding the need to step
+  through each `unless` individually.
 - **Spec decoder fuel limits roundtrip size bounds**: The spec `decode`
   function uses `decodeSymbols` with hardcoded default fuel 10,000,000.
   This means roundtrip theorems (`inflate_deflateX`) can only handle
