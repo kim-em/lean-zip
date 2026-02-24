@@ -172,6 +172,7 @@ class AgentState:
     last_text: str = ""
     last_activity: float = 0.0
     finishing: bool = False
+    force_quota: bool = False      # Skip quota check for this agent
     lock_held: str = ""            # Name of lock held (e.g. "planner"), or ""
     loop_iteration: int = 0
     worktree: str = ""
@@ -339,6 +340,72 @@ def get_queue_depth(config: dict) -> int:
         return int(r.stdout.strip())
     except (ValueError, subprocess.TimeoutExpired):
         return 0
+
+
+@dataclasses.dataclass
+class GHItem:
+    """An issue or PR for TUI display."""
+    kind: str           # "issue" or "pr"
+    number: int
+    title: str
+    labels: list[str]
+    ci_status: str      # "" (unknown/none), "pass", "fail"
+    state: str          # "open", "closed", "merged"
+
+
+def fetch_issues_and_prs() -> list[GHItem]:
+    """Fetch open issues (agent-plan) and recent PRs from GitHub."""
+    items: list[GHItem] = []
+    cwd = str(PROJECT_DIR)
+
+    # Open issues with agent-plan label
+    try:
+        r = subprocess.run(
+            ["gh", "issue", "list", "--label", "agent-plan", "--state", "all",
+             "--limit", "20", "--json", "number,title,labels,state"],
+            capture_output=True, text=True, timeout=30, cwd=cwd,
+        )
+        if r.returncode == 0:
+            for iss in json.loads(r.stdout):
+                labels = [l["name"] for l in iss.get("labels", [])]
+                items.append(GHItem(
+                    kind="issue", number=iss["number"], title=iss["title"],
+                    labels=labels, ci_status="", state=iss.get("state", "OPEN").lower(),
+                ))
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        pass
+
+    # PRs (open + recently closed/merged)
+    try:
+        r = subprocess.run(
+            ["gh", "pr", "list", "--state", "all", "--limit", "15",
+             "--json", "number,title,labels,statusCheckRollup,state"],
+            capture_output=True, text=True, timeout=30, cwd=cwd,
+        )
+        if r.returncode == 0:
+            for pr in json.loads(r.stdout):
+                labels = [l["name"] for l in pr.get("labels", [])]
+                # CI status from statusCheckRollup
+                ci = ""
+                checks = pr.get("statusCheckRollup", []) or []
+                if checks:
+                    if any(c.get("conclusion") == "FAILURE" for c in checks):
+                        ci = "fail"
+                    elif all(c.get("conclusion") == "SUCCESS" for c in checks if c.get("conclusion")):
+                        ci = "pass"
+                items.append(GHItem(
+                    kind="pr", number=pr["number"], title=pr["title"],
+                    labels=labels, ci_status=ci, state=pr.get("state", "OPEN").lower(),
+                ))
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        pass
+
+    # Sort by number descending (newest first), issues before PRs at same number
+    items.sort(key=lambda x: (-x.number, x.kind))
+
+    # Deduplicate: if an issue and PR share the same number, keep both
+    # (they're different GitHub objects)
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -771,8 +838,18 @@ def agent_process_main(config: dict, agent_id: str | None = None):
         # --- Quota check ---
         state.status = "waiting_quota"
         state.write()
-        while not check_quota(config):
+        while not check_quota(config, force=state.force_quota):
             if state.finishing:
+                break
+            # Re-read state file to pick up force_quota toggled by TUI
+            try:
+                sf = AGENTS_DIR / f"{short_id}.json"
+                d = json.loads(sf.read_text())
+                state.force_quota = d.get("force_quota", False)
+            except (OSError, json.JSONDecodeError):
+                pass
+            if state.force_quota:
+                log(f"Agent {short_id}: force_quota enabled, skipping wait")
                 break
             log(f"Agent {short_id}: no quota, sleeping {quota_retry}s")
             time.sleep(quota_retry)
@@ -966,14 +1043,16 @@ def _tui_main(stdscr, config: dict):
     curses.init_pair(4, curses.COLOR_CYAN, -1)       # Header
     curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLUE)  # Selected
 
-    selected = 0
+    selected_section = "agents"  # "agents" or "items"
+    selected_idx = 0
     message = ""
     message_time = 0.0
-    input_mode = ""  # "", "add", "kill_confirm"
-    input_buf = ""
+    input_mode = ""  # "", "kill_confirm"
     cached_queue: int | None = None
     queue_fetch_time = 0.0
-    QUEUE_CACHE_SECS = 30  # Only fetch queue depth every 30 seconds
+    cached_items: list[GHItem] = []
+    items_fetch_time = 0.0
+    CACHE_SECS = 30  # Refresh interval for GitHub API data
 
     pricing = cfg_get(config, "pricing", default={})
 
@@ -992,12 +1071,18 @@ def _tui_main(stdscr, config: dict):
         total_cost = sum(a.cost(pricing) for a in agents)
         running = sum(1 for a in agents if a.status not in ("stopped", "dead"))
 
-        # Cache queue depth to avoid gh API call every second
+        # Cache GitHub data to avoid API calls every second
         now = time.time()
-        if cached_queue is None or now - queue_fetch_time > QUEUE_CACHE_SECS:
+        if cached_queue is None or now - queue_fetch_time > CACHE_SECS:
             try:
                 cached_queue = get_queue_depth(config)
                 queue_fetch_time = now
+            except Exception:
+                pass
+        if now - items_fetch_time > CACHE_SECS:
+            try:
+                cached_items = fetch_issues_and_prs()
+                items_fetch_time = now
             except Exception:
                 pass
 
@@ -1011,13 +1096,29 @@ def _tui_main(stdscr, config: dict):
 
         # --- Agent table header ---
         col_fmt = "  {:>2} {:8} {:12} {:>6} {:>15} {}"
-        hdr = col_fmt.format("#", "ID", "Type", "Time", "Tokens", "Activity")
+        hdr = " " + col_fmt.format("#", "ID", "Type", "Time", "Tokens", "Activity")
         _addstr(stdscr, 2, 0, hdr[:width], curses.A_DIM)
 
-        # --- Agent rows ---
-        if selected >= len(agents):
-            selected = max(0, len(agents) - 1)
+        # --- Clamp selection ---
+        if selected_section == "agents":
+            if not agents:
+                if cached_items:
+                    selected_section = "items"
+                    selected_idx = 0
+                else:
+                    selected_idx = 0
+            else:
+                selected_idx = min(selected_idx, len(agents) - 1)
+        if selected_section == "items":
+            if not cached_items:
+                selected_section = "agents"
+                selected_idx = max(0, len(agents) - 1)
+            else:
+                selected_idx = min(selected_idx, len(cached_items) - 1)
 
+        is_agent_selected = selected_section == "agents"
+
+        # --- Agent rows ---
         for i, agent in enumerate(agents):
             row = 3 + i
             if row >= height - 3:
@@ -1032,6 +1133,8 @@ def _tui_main(stdscr, config: dict):
                     mode = f"{mode} #{agent.claimed_issue}"
             if agent.finishing:
                 mode += " (fin)"
+            if agent.force_quota:
+                mode += " !"
 
             # Elapsed
             elapsed = ""
@@ -1050,17 +1153,20 @@ def _tui_main(stdscr, config: dict):
                 stale = int(time.time() - agent.last_activity)
                 activity = f"thinking {human_duration(stale)}"
 
-            # Truncate activity to fit
+            # Sanitize: collapse newlines/tabs to spaces
+            activity = " ".join(activity.split())
+
+            # Truncate activity to fit (1 extra for marker char)
             prefix = col_fmt.format(i + 1, agent.short_id, mode[:12], elapsed, tok, "")
-            max_act = width - len(prefix) - 2
+            max_act = width - len(prefix) - 1  # -1 for marker
             if max_act > 10 and len(activity) > max_act:
                 activity = activity[:max_act - 3] + "..."
 
-            marker = ">" if i == selected else " "
+            marker = ">" if is_agent_selected and i == selected_idx else " "
             line = f"{marker}" + col_fmt.format(i + 1, agent.short_id, mode[:12], elapsed, tok, activity)
 
             attr = curses.A_NORMAL
-            if i == selected:
+            if is_agent_selected and i == selected_idx:
                 attr = curses.color_pair(5) | curses.A_BOLD
             elif agent.status == "finishing" or agent.finishing:
                 attr = curses.color_pair(2)
@@ -1071,23 +1177,88 @@ def _tui_main(stdscr, config: dict):
 
             _addstr(stdscr, row, 0, line[:width], attr)
 
+        # --- Issues/PRs panel ---
+        # Row budget: 3 top (header+sep+colhdr) + agents + 3 bottom (sep+help+msg)
+        agents_end = 3 + len(agents)
+        footer_fixed = 3  # separator + help + message
+        avail_for_items = height - agents_end - footer_fixed
+        # Need: 1 blank + 1 separator + 1 header + at least 1 item row = 4
+        items_shown = 0
+        items_start_row = 0
+        if cached_items and avail_for_items >= 4:
+            max_item_rows = avail_for_items - 3  # blank + separator + header
+            items_to_show = cached_items[:max_item_rows]
+            items_shown = len(items_to_show)
+
+            items_start_row = agents_end + 1  # skip 1 blank line
+            _addstr(stdscr, items_start_row, 0, "─" * min(width, 80), curses.color_pair(4))
+            item_hdr = "   #      Kind  State  CI  Title"
+            _addstr(stdscr, items_start_row + 1, 0, item_hdr[:width], curses.A_DIM)
+
+            for j, item in enumerate(items_to_show):
+                irow = items_start_row + 2 + j
+                if irow >= height - footer_fixed:
+                    items_shown = j
+                    break
+
+                kind_str = "PR" if item.kind == "pr" else "I"
+                state_str = item.state[:6]
+                ci_str = ""
+                if item.kind == "pr":
+                    if item.ci_status == "pass":
+                        ci_str = "✓"
+                    elif item.ci_status == "fail":
+                        ci_str = "✗"
+
+                # Show key labels compactly
+                label_tags = ""
+                key_labels = {"claimed", "blocked", "has-pr", "needs-replan", "skip"}
+                tags = [l for l in item.labels if l in key_labels]
+                if tags:
+                    label_tags = " [" + ",".join(tags) + "]"
+
+                title = item.title
+                # Truncate title to fit
+                prefix_len = 28 + len(label_tags)  # approximate
+                max_title = width - prefix_len - 1
+                if max_title > 10 and len(title) > max_title:
+                    title = title[:max_title - 3] + "..."
+
+                is_item_sel = not is_agent_selected and j == selected_idx
+                marker = ">" if is_item_sel else " "
+                line = f"{marker}  #{item.number:<5} {kind_str:4}  {state_str:<6} {ci_str:2}  {title}{label_tags}"
+
+                attr = curses.A_NORMAL
+                if is_item_sel:
+                    attr = curses.color_pair(5) | curses.A_BOLD
+                elif item.state == "merged":
+                    attr = curses.color_pair(1)  # green
+                elif item.state == "closed":
+                    attr = curses.color_pair(3)  # red
+                elif item.kind == "pr" and item.ci_status == "fail":
+                    attr = curses.color_pair(3)  # red
+                elif item.kind == "pr" and item.ci_status == "pass":
+                    attr = curses.color_pair(1)  # green
+
+                _addstr(stdscr, irow, 0, line[:width], attr)
+
         # --- Footer separator ---
-        footer_row = max(3 + len(agents), height - 3)
+        footer_row = max(agents_end, height - footer_fixed)
+        if items_shown > 0:
+            footer_row = max(items_start_row + 2 + items_shown, height - footer_fixed)
         if footer_row < height - 1:
             _addstr(stdscr, footer_row, 0, "─" * min(width, 80), curses.color_pair(4))
 
         # --- Footer ---
         footer_row2 = footer_row + 1
-        if input_mode == "add":
-            footer_text = f" Add how many agents? {input_buf}_  (Enter to confirm, Esc to cancel)"
-        elif input_mode == "kill_confirm":
-            if agents and 0 <= selected < len(agents):
-                footer_text = f" Kill agent {agents[selected].short_id}? (y/n)"
+        if input_mode == "kill_confirm":
+            if agents and is_agent_selected and 0 <= selected_idx < len(agents):
+                footer_text = f" Kill agent {agents[selected_idx].short_id}? (y/n)"
             else:
                 footer_text = " No agent selected"
                 input_mode = ""
         else:
-            footer_text = " [a]dd  [f]inish  [k]ill  [q]uit  [Q]uit all       ↑↓/1-9 select"
+            footer_text = " [a]dd  [f]inish  [k]ill  [o]pen  [!]force  [q]uit  [Q]uit all  ↑↓/1-9"
 
         if footer_row2 < height:
             _addstr(stdscr, footer_row2, 0, footer_text[:width], curses.A_DIM)
@@ -1109,28 +1280,10 @@ def _tui_main(stdscr, config: dict):
         if ch == -1:
             continue
 
-        if input_mode == "add":
-            if ch == 27:  # Escape
-                input_mode = ""
-                input_buf = ""
-            elif ch in (10, 13):  # Enter
-                n = int(input_buf) if input_buf.isdigit() and int(input_buf) > 0 else 1
-                for _ in range(n):
-                    spawn_agent(config)
-                message = f"Launched {n} agent{'s' if n != 1 else ''}"
-                message_time = time.time()
-                input_mode = ""
-                input_buf = ""
-            elif ch == curses.KEY_BACKSPACE or ch == 127:
-                input_buf = input_buf[:-1]
-            elif 48 <= ch <= 57:  # 0-9
-                input_buf += chr(ch)
-            continue
-
         if input_mode == "kill_confirm":
             if ch in (ord("y"), ord("Y")):
-                if agents and 0 <= selected < len(agents):
-                    agent = agents[selected]
+                if agents and is_agent_selected and 0 <= selected_idx < len(agents):
+                    agent = agents[selected_idx]
                     _kill_agent(config, agent)
                     message = f"Killed agent {agent.short_id}"
                     message_time = time.time()
@@ -1163,11 +1316,12 @@ def _tui_main(stdscr, config: dict):
                 time.sleep(2)
             break
         elif ch == ord("a") or ch == ord("A"):
-            input_mode = "add"
-            input_buf = ""
+            spawn_agent(config)
+            message = "Launched 1 agent"
+            message_time = time.time()
         elif ch == ord("f") or ch == ord("F"):
-            if agents and 0 <= selected < len(agents):
-                agent = agents[selected]
+            if is_agent_selected and agents and 0 <= selected_idx < len(agents):
+                agent = agents[selected_idx]
                 if agent.pid > 0 and _pid_is_valid(agent.pid, agent.pid_start_time):
                     try:
                         os.kill(agent.pid, signal.SIGUSR1)
@@ -1178,16 +1332,85 @@ def _tui_main(stdscr, config: dict):
                     message = f"Agent {agent.short_id} not running"
                 message_time = time.time()
         elif ch == ord("k") or ch == ord("K"):
-            if agents and 0 <= selected < len(agents):
+            if is_agent_selected and agents and 0 <= selected_idx < len(agents):
                 input_mode = "kill_confirm"
+        elif ch == ord("o") or ch == ord("O"):
+            if is_agent_selected:
+                # Open agent's claimed issue
+                if agents and 0 <= selected_idx < len(agents):
+                    agent = agents[selected_idx]
+                    issue = agent.claimed_issue
+                    if issue > 0:
+                        try:
+                            subprocess.Popen(
+                                ["gh", "issue", "view", str(issue), "--web"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                            )
+                            message = f"Opening issue #{issue}"
+                        except OSError as e:
+                            message = f"Failed to open issue: {e}"
+                    else:
+                        message = f"Agent {agent.short_id} has no claimed issue"
+                    message_time = time.time()
+            else:
+                # Open selected issue/PR
+                if cached_items and 0 <= selected_idx < len(cached_items):
+                    item = cached_items[selected_idx]
+                    gh_cmd = "issue" if item.kind == "issue" else "pr"
+                    try:
+                        subprocess.Popen(
+                            ["gh", gh_cmd, "view", str(item.number), "--web"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        message = f"Opening {item.kind} #{item.number}"
+                    except OSError as e:
+                        message = f"Failed to open: {e}"
+                    message_time = time.time()
+        elif ch == ord("!"):
+            if is_agent_selected and agents and 0 <= selected_idx < len(agents):
+                agent = agents[selected_idx]
+                # Toggle force_quota in the agent's state file
+                try:
+                    sf = AGENTS_DIR / f"{agent.short_id}.json"
+                    d = json.loads(sf.read_text())
+                    new_val = not d.get("force_quota", False)
+                    d["force_quota"] = new_val
+                    tmp = sf.with_suffix(".tmp")
+                    tmp.write_text(json.dumps(d, indent=2) + "\n")
+                    tmp.rename(sf)
+                    label = "ON" if new_val else "OFF"
+                    message = f"Force quota {label} for {agent.short_id}"
+                except (OSError, json.JSONDecodeError) as e:
+                    message = f"Failed to toggle force: {e}"
+                message_time = time.time()
         elif ch == curses.KEY_UP:
-            selected = max(0, selected - 1)
+            if selected_section == "agents":
+                if selected_idx > 0:
+                    selected_idx -= 1
+                # At top of agents — stay (nowhere to go)
+            else:
+                if selected_idx > 0:
+                    selected_idx -= 1
+                elif agents:
+                    # Jump to last agent
+                    selected_section = "agents"
+                    selected_idx = len(agents) - 1
         elif ch == curses.KEY_DOWN:
-            selected = min(len(agents) - 1, selected + 1) if agents else 0
+            if selected_section == "agents":
+                if agents and selected_idx < len(agents) - 1:
+                    selected_idx += 1
+                elif items_shown > 0:
+                    # Jump to first item
+                    selected_section = "items"
+                    selected_idx = 0
+            else:
+                if selected_idx < items_shown - 1:
+                    selected_idx += 1
         elif 49 <= ch <= 57:  # 1-9
             idx = ch - 49
             if idx < len(agents):
-                selected = idx
+                selected_section = "agents"
+                selected_idx = idx
 
 
 def _addstr(win, y: int, x: int, s: str, attr: int = 0):
