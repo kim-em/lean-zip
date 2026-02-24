@@ -424,16 +424,23 @@ Update it during review and reflect sessions.
   congr 1; bv_decide
   ```
 - **ByteArray/Array/List indexing**: `data.data[pos] = data[pos]` (where
-  `data : ByteArray`) is `rfl`. But `data.data.toList[pos] = data[pos]`
-  needs `simp [Array.getElem_toList]; rfl` — the `simp` handles the
-  `List.getElem → Array.getElem` step, and the `rfl` handles the
-  definitional `Array.getElem data.data pos = ByteArray.getElem data pos`.
+  `data : ByteArray`) is `rfl`. For `data.data.toList[pos] = data[pos]`,
+  `simp only [Array.getElem_toList]` suffices (as of v4.29.0-rc2; on rc1
+  a trailing `; rfl` was also needed). When `List.getElem_map` is also
+  involved (e.g. `(arr.toList.map f)[i] = f arr[i]`),
+  `simp only [List.getElem_map, Array.getElem_toList]` closes the goal.
 - **UInt32 bit operations → Nat.testBit**: To prove
   `(byte.toUInt32 >>> off.toUInt32) &&& 1 = if byte.toNat.testBit off then 1 else 0`,
   use `UInt32.toNat_inj.mp` to reduce to Nat, then
   `UInt32.toNat_and`/`UInt32.toNat_shiftRight`/`UInt8.toNat_toUInt32`,
   then `Nat.testBit` unfolds to `1 &&& m >>> n != 0` — use `Nat.and_comm`
   + `Nat.one_and_eq_mod_two` + `split <;> omega`.
+- **`n + 0` normalization breaks `rw` patterns**: As of v4.29.0-rc2,
+  Lean normalizes `n + 0` to `n` earlier. If a lemma's conclusion
+  contains `arr[pfx.size + k]` and you instantiate `k = 0`, the
+  rewrite target `arr[pfx.size + 0]` won't match the goal's
+  `arr[pfx.size]`. Fix: add a specialized `_zero` variant of the
+  lemma that states the result with `arr[pfx.size]` directly.
 - **UInt32 shift mod 32**: `UInt32.shiftLeft` reduces the shift amount
   mod 32 — for `bit <<< shift.toUInt32` with `shift ≥ 32`, the bit is
   placed at position `shift % 32`, not `shift`. Any theorem about

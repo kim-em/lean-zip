@@ -116,7 +116,7 @@ private theorem canonicalCodes_go_inv
       -- Common setup
       have hls_len : i < lsList.length := by simp [hlsList, hi]
       have hls_i : lsList[i] = lengths[i].toNat := by
-        simp only [hlsList, List.getElem_map, Array.getElem_toList]; rfl
+        simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[i].toNat ≤ maxBits := by
         rw [← hls_i]; exact hv.1 _ (List.getElem_mem hls_len)
       -- Code value from NC invariant
@@ -272,7 +272,7 @@ protected theorem canonicalCodes_correct_pos (lengths : Array UInt8) (maxBits : 
   have hlen_pos_nat : 0 < lengths[i].toNat := hlen
   have hls_len : i < lsList.length := by simp [lsList, hi]
   have hls_i : lsList[i] = lengths[i].toNat := by
-    simp only [lsList, List.getElem_map, Array.getElem_toList]; rfl
+    simp only [lsList, List.getElem_map, Array.getElem_toList]
   have hlen_le : lengths[i].toNat ≤ maxBits := by
     rw [← hls_i]; exact hv.1 _ (List.getElem_mem hls_len)
   -- codeFor succeeds
@@ -366,7 +366,7 @@ protected theorem canonicalCodes_hasLeaf (lengths : Array UInt8)
   let lsList := lengths.toList.map UInt8.toNat
   have hls_len : i < lsList.length := by simp [lsList, hi]
   have hls_i : lsList[i] = lengths[i].toNat := by
-    simp only [lsList, List.getElem_map, Array.getElem_toList]; rfl
+    simp only [lsList, List.getElem_map, Array.getElem_toList]
   obtain ⟨cw, hcf, hcw, hlen_eq⟩ :=
     Deflate.Correctness.canonicalCodes_correct_pos lengths maxBits hv hmb i hi hlen
   -- The tree has a leaf for this codeword

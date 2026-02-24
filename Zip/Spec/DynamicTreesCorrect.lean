@@ -336,7 +336,7 @@ private theorem extract_map_getLast_eq (arr : Array UInt8) (idx : Nat)
   simp only [Option.getD_some]
   rw [getElem!_pos arr _ (by omega),
     @List.getElem_take _ (arr.toList.map UInt8.toNat) idx (idx - 1) (by rw [hlen]; omega)]
-  simp [List.getElem_map]; rfl
+  simp [List.getElem_map]
 
 /-! ### fillEntries helpers -/
 

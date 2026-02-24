@@ -408,6 +408,12 @@ private theorem getElem_pfx_hdr (pfx hdr rest : ByteArray) (k : Nat)
   simp only [show pfx.size + k - pfx.size = k from by omega]
   exact ByteArray.getElem_append_left hk
 
+private theorem getElem_pfx_hdr_zero (pfx hdr rest : ByteArray)
+    (hk : 0 < hdr.size) (h : pfx.size < (pfx ++ (hdr ++ rest)).size) :
+    (pfx ++ (hdr ++ rest))[pfx.size] = hdr[0] := by
+  have := getElem_pfx_hdr pfx hdr rest 0 hk (by omega)
+  simp at this; exact this
+
 /-- Extracting from 0 to a.size in a ++ b gives a. -/
 private theorem extract_append_left (a b : ByteArray) :
     (a ++ b).extract 0 a.size = a := by
@@ -470,7 +476,7 @@ private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
     pfx.size (data.size - pos) (by omega) output maxOutputSize fixedLit fixedDist fuel
     (by omega) h_fit
     (by simp [ByteArray.size_append, ByteArray.size_extract]; omega)
-    (by rw [getElem_pfx_hdr _ _ _ 0 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr_zero _ _ _ (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
     (by simp [ByteArray.size_append, ByteArray.size_extract]; omega)
     (by rw [getElem_pfx_hdr _ _ _ 1 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
     (by rw [getElem_pfx_hdr _ _ _ 2 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
@@ -521,7 +527,7 @@ private theorem inflateLoop_nonfinal_step (data : ByteArray) (pos : Nat)
     pfx.size 65535 (by omega)
     output maxOutputSize fixedLit fixedDist fuel' (by omega)
     (by omega)
-    (by rw [getElem_pfx_hdr _ _ _ 0 (by simp) (by omega)]; rfl)
+    (by rw [getElem_pfx_hdr_zero _ _ _ (by simp) (by omega)]; rfl)
     (by omega)
     (by rw [getElem_pfx_hdr _ _ _ 1 (by simp) (by omega)]; rfl)
     (by rw [getElem_pfx_hdr _ _ _ 2 (by simp) (by omega)]; rfl)
