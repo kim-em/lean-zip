@@ -1,4 +1,4 @@
-import Zip.Spec.HuffmanCorrect
+import Zip.Spec.HuffmanCorrectLoop
 import Zip.Spec.BitstreamComplete
 
 /-!
