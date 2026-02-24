@@ -14,9 +14,6 @@ as the spec-level `encodeDynamicTrees`.
 
 namespace Zip.Native.Deflate
 
-private theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
-    a.get!Internal i = a[i]! := rfl
-
 /-! ## writeDynamicHeader ↔ encodeDynamicTrees correspondence -/
 
 /-- `writeCLLengths` loop produces the same bits as spec `writeCLLengths`.

@@ -26,7 +26,7 @@ namespace Zip.Native.Deflate
 
 /-! ## emitTokens ↔ encodeSymbols correspondence -/
 
-private theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
+theorem array_get!Internal_eq [Inhabited α] (a : Array α) (i : Nat) :
     a.get!Internal i = a[i]! := rfl
 
 set_option maxRecDepth 2048 in
