@@ -168,7 +168,6 @@ private theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
   · exact ⟨fun _ => Nat.le.refl, fun _ => Nat.le.refl⟩
 termination_by tokens.size - i
 
-set_option maxRecDepth 1024 in
 /-- `tokenFreqs` counts end-of-block (symbol 256) with frequency ≥ 1. -/
 private theorem tokenFreqs_eob_pos (tokens : Array LZ77Token) :
     (tokenFreqs tokens).1[256]! ≥ 1 := by
@@ -444,14 +443,12 @@ theorem deflateDynamic_spec (data : ByteArray) :
   have hdist_bound : ∀ x ∈ distLens, x ≤ 15 := by
     intro x hx
     simp only [distLens] at hx; split at hx
-    · -- distLens₀.set 0 1
-      rw [List.mem_iff_getElem] at hx
+    · rw [List.mem_iff_getElem] at hx
       obtain ⟨i, hi, hxi⟩ := hx
       rw [List.length_set] at hi
       by_cases h0 : i = 0
       · subst h0; simp at hxi; omega
-      · have hne : ¬(0 = i) := fun h => h0 (h.symm)
-        simp [hne] at hxi
+      · simp [show ¬(0 = i) from Ne.symm h0] at hxi
         exact hxi ▸ hdist₀_bound _ (List.getElem_mem ..)
     · exact hdist₀_bound x hx
   have hdist_valid : Huffman.Spec.ValidLengths distLens 15 := by
@@ -473,9 +470,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
         rw [List.length_set, List.length_replicate] at hi
         by_cases h0 : i = 0
         · subst h0; simp at hli; omega
-        · have hne : ¬(0 = i) := fun h => h0 h.symm
-          rw [List.getElem_set] at hli
-          simp only [hne, ↓reduceIte, List.getElem_replicate] at hli
+        · rw [List.getElem_set] at hli
+          simp only [show ¬(0 = i) from Ne.symm h0, ↓reduceIte, List.getElem_replicate] at hli
           omega
       · -- Kraft sum for [1, 0, 0, ..., 0] with 30 entries
         -- filter gives [1], fold gives 2^14 ≤ 2^15
