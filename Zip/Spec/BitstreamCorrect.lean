@@ -867,6 +867,24 @@ private theorem readNBytes_some_length {n : Nat} {bits : List Bool} {acc : List 
       have := ih h
       omega
 
+/-- `readNBytes n bits acc = some (bytes, rest)` implies `bytes.length = acc.length + n`. -/
+theorem readNBytes_output_length {n : Nat} {bits : List Bool} {acc : List UInt8}
+    {bytes : List UInt8} {rest : List Bool}
+    (h : Deflate.Spec.decodeStored.readNBytes n bits acc = some (bytes, rest)) :
+    bytes.length = acc.length + n := by
+  induction n generalizing bits acc with
+  | zero =>
+    simp only [Deflate.Spec.decodeStored.readNBytes] at h
+    obtain ⟨rfl, _⟩ := Option.some.inj h; omega
+  | succ k ih =>
+    simp only [Deflate.Spec.decodeStored.readNBytes] at h
+    cases hrd : Deflate.Spec.readBitsLSB 8 bits with
+    | none => simp [hrd] at h
+    | some p =>
+      obtain ⟨v, bits'⟩ := p
+      simp only [hrd, bind, Option.bind] at h
+      have := ih h; simp at this; omega
+
 /-- **Completeness for `readBytes`**: if the spec reads `n` bytes from
     an aligned position, the native `readBytes` succeeds with the same bytes. -/
 theorem readBytes_complete (br : Zip.Native.BitReader) (n : Nat)
