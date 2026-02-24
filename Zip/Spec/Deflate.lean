@@ -1028,4 +1028,195 @@ theorem decodeStored_append (bits suffix : List Bool)
         exact readNBytes_append len bits₂ suffix [] bytes rest h
       · simp only [guard, hg, ↓reduceIte] at h; simp at h
 
+/-- `readCLLengths` is suffix-invariant. -/
+private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
+    (bits suffix : List Bool)
+    (result : List Nat) (rest : List Bool)
+    (h : Deflate.Spec.readCLLengths n idx acc bits = some (result, rest)) :
+    Deflate.Spec.readCLLengths n idx acc (bits ++ suffix) = some (result, rest ++ suffix) := by
+  induction n generalizing idx acc bits result rest with
+  | zero =>
+    simp [Deflate.Spec.readCLLengths] at h ⊢
+    obtain ⟨rfl, rfl⟩ := h; exact ⟨rfl, rfl⟩
+  | succ k ih =>
+    unfold Deflate.Spec.readCLLengths at h ⊢
+    cases hrb : readBitsLSB 3 bits with
+    | none => simp [hrb] at h
+    | some p =>
+      obtain ⟨v, bits'⟩ := p
+      simp only [hrb, bind, Option.bind] at h ⊢
+      rw [readBitsLSB_append 3 bits suffix v bits' hrb]
+      simp only [bind, Option.bind]
+      exact ih (idx + 1) (acc.set (codeLengthOrder[idx]!) v) bits' result rest h
+
+set_option linter.unusedSimpArgs false in
+/-- `decodeCLSymbols` is suffix-invariant. -/
+private theorem decodeCLSymbols_append
+    (clTable : List (Huffman.Spec.Codeword × Nat))
+    (totalCodes : Nat) (acc : List Nat) (bits suffix : List Bool)
+    (fuel : Nat) (result : List Nat) (rest : List Bool)
+    (hpf : ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ clTable → (cw₂, s₂) ∈ clTable →
+      (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂)
+    (h : decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits fuel =
+      some (result, rest)) :
+    decodeDynamicTables.decodeCLSymbols clTable totalCodes acc (bits ++ suffix) fuel =
+      some (result, rest ++ suffix) := by
+  induction fuel generalizing acc bits result rest with
+  | zero => simp [decodeDynamicTables.decodeCLSymbols] at h
+  | succ n ih =>
+    unfold decodeDynamicTables.decodeCLSymbols at h ⊢
+    by_cases hge : acc.length ≥ totalCodes
+    · rw [if_pos hge] at h ⊢
+      obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+    · rw [if_neg hge] at h ⊢
+      cases hdec : Huffman.Spec.decode clTable bits with
+      | none => simp [hdec] at h
+      | some p =>
+        obtain ⟨sym, bits'⟩ := p
+        simp only [hdec, bind, Option.bind] at h ⊢
+        rw [Huffman.Spec.decode_suffix clTable bits suffix sym bits' hdec hpf]
+        simp only [bind, Option.bind]
+        by_cases hsym16 : sym < 16
+        · rw [if_pos hsym16] at h ⊢
+          exact ih (acc ++ [sym]) bits' result rest h
+        · rw [if_neg hsym16] at h ⊢
+          by_cases hsym16eq : (sym == 16) = true
+          · rw [if_pos hsym16eq] at h ⊢
+            by_cases hg : (0 : Nat) < acc.length
+            · simp only [guard, hg, ↓reduceIte] at h ⊢
+              cases hrb : readBitsLSB 2 bits' with
+              | none => simp [hrb] at h
+              | some q =>
+                obtain ⟨rep, bits''⟩ := q
+                simp only [hrb, bind, Option.bind] at h ⊢
+                rw [readBitsLSB_append 2 bits' suffix rep bits'' hrb]
+                simp only [bind, Option.bind]
+                by_cases hg2 : (acc ++ List.replicate (rep + 3) acc.getLast!).length ≤ totalCodes
+                · simp only [guard, hg2, ↓reduceIte] at h ⊢
+                  exact ih _ bits'' result rest h
+                · simp only [guard, hg2, ↓reduceIte] at h; simp at h
+            · simp only [guard, hg, ↓reduceIte] at h; simp at h
+          · rw [if_neg hsym16eq] at h ⊢
+            by_cases hsym17 : (sym == 17) = true
+            · rw [if_pos hsym17] at h ⊢
+              cases hrb : readBitsLSB 3 bits' with
+              | none => simp [hrb] at h
+              | some q =>
+                obtain ⟨rep, bits''⟩ := q
+                simp only [hrb, bind, Option.bind] at h ⊢
+                rw [readBitsLSB_append 3 bits' suffix rep bits'' hrb]
+                simp only [bind, Option.bind]
+                by_cases hg : (acc ++ List.replicate (rep + 3) 0).length ≤ totalCodes
+                · simp only [guard, hg, ↓reduceIte] at h ⊢
+                  exact ih _ bits'' result rest h
+                · simp only [guard, hg, ↓reduceIte] at h; simp at h
+            · rw [if_neg hsym17] at h ⊢
+              by_cases hsym18 : (sym == 18) = true
+              · rw [if_pos hsym18] at h ⊢
+                cases hrb : readBitsLSB 7 bits' with
+                | none => simp [hrb] at h
+                | some q =>
+                  obtain ⟨rep, bits''⟩ := q
+                  simp only [hrb, bind, Option.bind] at h ⊢
+                  rw [readBitsLSB_append 7 bits' suffix rep bits'' hrb]
+                  simp only [bind, Option.bind]
+                  by_cases hg : (acc ++ List.replicate (rep + 11) 0).length ≤ totalCodes
+                  · simp only [guard, hg, ↓reduceIte] at h ⊢
+                    exact ih _ bits'' result rest h
+                  · simp only [guard, hg, ↓reduceIte] at h; simp at h
+              · rw [if_neg hsym18] at h ⊢
+                simp at h
+
+set_option maxRecDepth 4096 in
+set_option linter.unusedSimpArgs false in
+/-- `decodeDynamicTables` is suffix-invariant. -/
+theorem decodeDynamicTables_append (bits suffix : List Bool)
+    (litLens distLens : List Nat) (rest : List Bool)
+    (h : decodeDynamicTables bits = some (litLens, distLens, rest)) :
+    decodeDynamicTables (bits ++ suffix) = some (litLens, distLens, rest ++ suffix) := by
+  unfold decodeDynamicTables at h ⊢
+  -- Process h through the first 3 readBitsLSB calls
+  cases h5 : readBitsLSB 5 bits with
+  | none => simp [h5] at h
+  | some p₁ =>
+    obtain ⟨hlit, bits₁⟩ := p₁
+    cases h5d : readBitsLSB 5 bits₁ with
+    | none => simp [h5, h5d] at h
+    | some p₂ =>
+      obtain ⟨hdist, bits₂⟩ := p₂
+      cases h4 : readBitsLSB 4 bits₂ with
+      | none => simp [h5, h5d, h4] at h
+      | some p₃ =>
+        obtain ⟨hclen, bits₃⟩ := p₃
+        -- Process h: unfold expanded List.replicate to match hcl form
+        -- h has a do-block, operations are inside nested match chains.
+        -- We case on each operation and use one big simp to process h.
+        -- Key: h has [0,...,0] literal, hcl has List.replicate 19 0.
+        -- They are definitionally equal, so `have : literal_form = hcl_form := hcl`
+        -- lets simp find the match in h.
+        cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
+            (List.replicate 19 0) bits₃ with
+        | none =>
+          have hcl' : Spec.readCLLengths (hclen + 4) 0
+              [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              bits₃ = none := hcl
+          simp [h5, h5d, h4, hcl'] at h
+        | some p₄ =>
+          obtain ⟨clLengths, bits₄⟩ := p₄
+          have hcl' : Spec.readCLLengths (hclen + 4) 0
+              [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+              bits₃ = some (clLengths, bits₄) := hcl
+          by_cases hvCL : Huffman.Spec.ValidLengths clLengths 7
+          · cases hcls : decodeDynamicTables.decodeCLSymbols
+                ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
+                (hlit + 257 + (hdist + 1)) [] bits₄
+                (hlit + 257 + (hdist + 1) + 1) with
+            | none =>
+              simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
+            | some p₅ =>
+              obtain ⟨codeLengths, bits₅⟩ := p₅
+              by_cases hlen : codeLengths.length = hlit + 257 + (hdist + 1)
+              · by_cases hvLL : Huffman.Spec.ValidLengths
+                    (codeLengths.take (hlit + 257)) 15
+                · by_cases hvDL : Huffman.Spec.ValidLengths
+                      (codeLengths.drop (hlit + 257)) 15
+                  · -- All operations succeed: extract result and build goal
+                    have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = true :=
+                      beq_iff_eq.mpr hlen
+                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure] at h
+                    obtain ⟨rfl, rfl, rfl⟩ := h
+                    -- Build the goal for bits ++ suffix
+                    have h5' := readBitsLSB_append 5 bits suffix hlit bits₁ h5
+                    have h5d' := readBitsLSB_append 5 bits₁ suffix hdist bits₂ h5d
+                    have h4' := readBitsLSB_append 4 bits₂ suffix hclen bits₃ h4
+                    have hcl_a := readCLLengths_append _ 0 _ bits₃ suffix clLengths bits₄ hcl
+                    -- hcl_a has List.replicate, goal has literal; create literal form
+                    have hcl_a' : Spec.readCLLengths (hclen + 4) 0
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                        (bits₃ ++ suffix) = some (clLengths, bits₄ ++ suffix) := hcl_a
+                    have hcls' := decodeCLSymbols_append _ _ [] bits₄ suffix _
+                        codeLengths bits₅
+                        (allCodes_swapped_prefix_free clLengths 7 hvCL) hcls
+                    simp [h5', h5d', h4', hcl_a', hvCL, hcls', hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure]
+                  · -- ¬hvDL: guard False makes h contradictory
+                    have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = true :=
+                      beq_iff_eq.mpr hlen
+                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL, hvDL,
+                          guard, pure, Pure.pure, failure, Alternative.failure] at h
+                · -- ¬hvLL: guard False makes h contradictory
+                  have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = true :=
+                    beq_iff_eq.mpr hlen
+                  simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq, hvLL,
+                        guard, pure, Pure.pure, failure, Alternative.failure] at h
+              · -- ¬hlen: guard fails on length check
+                have hlen_beq : (codeLengths.length == hlit + 257 + (hdist + 1)) = false := by
+                  cases h_eq : (codeLengths.length == hlit + 257 + (hdist + 1)) <;> simp_all [beq_iff_eq]
+                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hlen_beq,
+                      guard, pure, Pure.pure, failure, Alternative.failure] at h
+          · -- ¬hvCL: guard fails on ValidLengths check
+            simp [h5, h5d, h4, hcl', hvCL,
+                  guard, pure, Pure.pure, failure, Alternative.failure] at h
+
 end Deflate.Spec
