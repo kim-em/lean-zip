@@ -1,5 +1,6 @@
 import ZipTest.Helpers
 import Zip.Native.Gzip
+import Zip.Spec.GzipCorrect
 
 def ZipTest.NativeGzip.tests : IO Unit := do
   IO.println "  NativeGzip tests..."
@@ -280,5 +281,19 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   match Zip.Native.Inflate.inflate (ByteArray.mk #[0x01, 0x05, 0x00]) with
   | .error _ => pure ()
   | .ok _ => throw (IO.userError "inflate: expected error on truncated stored block")
+
+  -- decompressSingle agrees with decompress on native encoder output
+  for level in ([0, 1, 5] : List UInt8) do
+    for input in [ByteArray.empty, helloBytes, singleByte, big] do
+      let compressed := Zip.Native.GzipEncode.compress input level
+      match Zip.Native.GzipDecode.decompressSingle compressed with
+      | .ok result => assert! result == input
+      | .error e => throw (IO.userError s!"decompressSingle level {level} failed: {e}")
+
+  -- decompressSingle agrees with decompress on FFI encoder output
+  let ffiGz ← Gzip.compress helloBytes
+  match Zip.Native.GzipDecode.decompressSingle ffiGz with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"decompressSingle on FFI gzip failed: {e}")
 
   IO.println "  NativeGzip tests passed."
