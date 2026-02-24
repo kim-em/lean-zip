@@ -392,7 +392,8 @@ Update it during review and reflect sessions.
 - **No Mathlib — unavailable tactics and names**: This project uses only
   Lean 4 core + std. The following are NOT available:
   - Tactics: `ring`, `set`, `push_neg`, `by_contra`, `field_simp`, `positivity`,
-    `polyrith`, `norm_num` (the Mathlib version), `rcases`/`obtain`
+    `polyrith`, `norm_num` (the Mathlib version), `rcases`/`obtain`,
+    `interval_cases`
   - Names: `le_refl` (use `Nat.le.refl` or `by omega`),
     `Nat.gt_of_not_le` (use `by omega`), `congr_arg` (use `congrArg`)
   - For contradiction proofs, use `by_cases` + `exfalso` instead of `by_contra`
@@ -664,6 +665,14 @@ Update it during review and reflect sessions.
   NOT right-nested. Use `obtain ⟨⟨ha, hp⟩, hq⟩ := hcond` or
   `hcond.1.2` / `hcond.2` to access components. This replaces verbose
   `by_cases` + `exfalso` patterns for extracting individual conditions.
+- **`let` bindings are opaque to `omega`**: When a hypothesis `hj`
+  contains an expanded expression (e.g. `(List.map f xs).length`) and
+  you define `let pl := List.map f xs`, omega treats `pl.length` and
+  `(List.map f xs).length` as distinct variables. Fix with
+  `change j ≥ max 4 (pl.length - tw.length) at hj` — `change` does
+  definitional unfolding, making the terms syntactically identical for
+  omega. Don't try `simp` or `rfl` equations — they add complexity
+  without helping omega.
 
 - **UInt8 positivity from Nat membership**: When you have
   `hne0 : (lengths.toList.map UInt8.toNat)[s] ≠ 0` and need
