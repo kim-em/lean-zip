@@ -52,16 +52,16 @@ private theorem codeFor_some (lsList : List Nat) (maxBits : Nat) (s : Nat)
 /-! ### Size preservation -/
 
 /-- `canonicalCodes.go` preserves the result array size. -/
-private theorem canonicalCodes_go_size (lengths : Array UInt8) (nextCode : Array UInt32)
+protected theorem canonicalCodes_go_size (lengths : Array UInt8) (nextCode : Array UInt32)
     (i : Nat) (result : Array (UInt16 × UInt8)) :
     (Zip.Native.Deflate.canonicalCodes.go lengths nextCode i result).size = result.size := by
   unfold Zip.Native.Deflate.canonicalCodes.go
   split
   · dsimp only []
     split
-    · rw [canonicalCodes_go_size]
+    · rw [Deflate.Correctness.canonicalCodes_go_size]
       simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds]; split <;> simp_all
-    · exact canonicalCodes_go_size lengths nextCode (i + 1) result
+    · exact Deflate.Correctness.canonicalCodes_go_size lengths nextCode (i + 1) result
   · rfl
 termination_by lengths.size - i
 
