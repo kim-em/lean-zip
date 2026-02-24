@@ -569,6 +569,8 @@ theorem encodeDynamicTrees_decodeDynamicTables
     (hlit : ∀ x ∈ litLens, x ≤ 15) (hdist : ∀ x ∈ distLens, x ≤ 15)
     (hlitLen : litLens.length ≥ 257 ∧ litLens.length ≤ 288)
     (hdistLen : distLens.length ≥ 1 ∧ distLens.length ≤ 32)
+    (hlit_valid : Huffman.Spec.ValidLengths litLens 15)
+    (hdist_valid : Huffman.Spec.ValidLengths distLens 15)
     (henc : encodeDynamicTrees litLens distLens = some headerBits) :
     decodeDynamicTables (headerBits ++ rest) = some (litLens, distLens, rest) := by
   -- Set up abbreviations for key intermediate values
@@ -656,6 +658,8 @@ theorem encodeDynamicTrees_decodeDynamicTables
     -- Need ValidLengths for clLens
     have hv : Huffman.Spec.ValidLengths clLens 7 :=
       Huffman.Spec.computeCodeLengths_valid clFreqPairs 19 7 (by omega) (by omega)
+    -- Discharge the CL ValidLengths guard
+    simp only [guard, hv, ↓reduceIte, pure, Pure.pure, bind, Option.bind]
     -- The table matches
     have htable : clTable = (Huffman.Spec.allCodes clLens 7).map fun (sym, cw) => (cw, sym) := by rfl
     -- RLE roundtrip
@@ -686,7 +690,12 @@ theorem encodeDynamicTrees_decodeDynamicTables
     rw [hdecCL]
     -- Guard and take/drop
     have hlen_eq : allLens.length = litLens.length + distLens.length := htotalLen
-    simp [hlen_eq, guard, pure, Pure.pure]
-    exact ⟨List.take_left, List.drop_left⟩
+    simp only [hlen_eq, guard, pure, Pure.pure, bind, Option.bind,
+      beq_self_eq_true, ite_true]
+    -- Discharge lit/dist ValidLengths guards
+    have hlit_take : (litLens ++ distLens).take litLens.length = litLens := List.take_left
+    have hdist_drop : (litLens ++ distLens).drop litLens.length = distLens := List.drop_left
+    rw [hlit_take, hdist_drop]
+    simp only [guard, hlit_valid, hdist_valid, ↓reduceIte, pure, Pure.pure]
 
 end Deflate.Spec
