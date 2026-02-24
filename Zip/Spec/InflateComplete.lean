@@ -1,4 +1,5 @@
 import Zip.Spec.InflateCorrect
+import Zip.Spec.DeflateFuelIndep
 
 /-!
 # DEFLATE Stream-Level Completeness

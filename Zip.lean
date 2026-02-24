@@ -14,6 +14,7 @@ import Zip.Spec.HuffmanTheorems
 import Zip.Spec.HuffmanEncode
 import Zip.Spec.LZ77
 import Zip.Spec.Deflate
+import Zip.Spec.DeflateFuelIndep
 import Zip.Spec.DeflateSuffix
 import Zip.Spec.DeflateEncode
 import Zip.Spec.DeflateEncodeProps
