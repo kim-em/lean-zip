@@ -1308,6 +1308,7 @@ def _tui_main(stdscr, config: dict):
     cached_queue: int | None = None
     queue_fetch_time = 0.0
     cached_items: list[GHItem] = []
+    displayed_items: list[GHItem] = []  # subset shown on screen (active-first order)
     items_fetch_time = 0.0
     cached_blocked_deps: dict[int, list[int]] = {}
     blocked_deps_fetch_time = 0.0
@@ -1442,9 +1443,24 @@ def _tui_main(stdscr, config: dict):
         # Need: 1 blank + 1 separator + 1 header + at least 1 item row = 4
         items_shown = 0
         items_start_row = 0
+        displayed_items = []  # reset each frame
         if cached_items and avail_for_items >= 4:
             max_item_rows = avail_for_items - 3  # blank + separator + header
-            items_to_show = cached_items[:max_item_rows]
+            # Keep original sort order, but when truncating prefer to drop
+            # closed/merged items from the bottom before cutting active ones.
+            if len(cached_items) <= max_item_rows:
+                items_to_show = cached_items
+            else:
+                need_to_drop = len(cached_items) - max_item_rows
+                # Collect indices of closed/merged items, from bottom up
+                removable = [
+                    i for i in range(len(cached_items) - 1, -1, -1)
+                    if cached_items[i].state in ("closed", "merged")
+                ]
+                to_remove = set(removable[:need_to_drop])
+                remaining = [it for i, it in enumerate(cached_items) if i not in to_remove]
+                items_to_show = remaining[:max_item_rows]  # truncate if still too many
+            displayed_items = items_to_show
             items_shown = len(items_to_show)
 
             items_start_row = agents_end + 1  # skip 1 blank line
@@ -1628,8 +1644,8 @@ def _tui_main(stdscr, config: dict):
                     message_time = time.time()
             else:
                 # Open selected issue/PR
-                if cached_items and 0 <= selected_idx < len(cached_items):
-                    item = cached_items[selected_idx]
+                if displayed_items and 0 <= selected_idx < len(displayed_items):
+                    item = displayed_items[selected_idx]
                     gh_cmd = "issue" if item.kind == "issue" else "pr"
                     try:
                         subprocess.Popen(
