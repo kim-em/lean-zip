@@ -13,7 +13,7 @@
 #   coordination list-unclaimed   — list unclaimed agent-plan issues (FIFO order)
 #   coordination queue-depth      — count of unclaimed agent-plan issues
 #   coordination claim N          — claim an issue for this session (label + comment)
-#   coordination skip N "reason"  — mark a claimed issue as skipped (stale/blocked)
+#   coordination skip N "reason"  — mark a claimed issue as replan (stale/wrong assumptions)
 #   coordination add-dep N M      — add depends-on: #M to issue #N's body; add blocked label if #M is open
 #   coordination check-blocked    — unblock issues whose dependencies are all closed
 #   coordination release-stale-claims [SECS] — release claimed issues with no activity for SECS seconds (default 14400 = 4h)
@@ -39,7 +39,7 @@ gh auth status --hostname github.com >/dev/null 2>&1 || \
 _unclaimed_issues() {
     gh issue list --repo "$REPO" --label agent-plan --state open --limit 50 \
         --json number,title,labels,createdAt \
-        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "skip") and all(.name != "blocked") and all(.name != "has-pr") and all(.name != "needs-replan"))] |
+        --jq '[.[] | select(.labels | all(.name != "claimed") and all(.name != "blocked") and all(.name != "has-pr") and all(.name != "replan"))] |
               sort_by(.createdAt)'
 }
 
@@ -220,10 +220,10 @@ cmd_create_pr() {
         gh pr merge "$existing_pr" --repo "$REPO" --auto --squash || \
             echo "warning: auto-merge not available (branch protection may not be set up)"
         if [[ "$partial" == true ]]; then
-            # Partial: add needs-replan BEFORE removing claimed to prevent race window
-            gh issue edit "$issue_num" --repo "$REPO" --add-label needs-replan 2>/dev/null || true
+            # Partial: add replan BEFORE removing claimed to prevent race window
+            gh issue edit "$issue_num" --repo "$REPO" --add-label replan 2>/dev/null || true
             gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
-            echo "Issue #$issue_num marked needs-replan (partial completion)"
+            echo "Issue #$issue_num marked replan (partial completion)"
         else
             gh issue edit "$issue_num" --repo "$REPO" --add-label has-pr 2>/dev/null || true
             gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
@@ -256,10 +256,10 @@ EOF
 
     # Update issue labels — add new label BEFORE removing claimed to prevent race window
     if [[ "$partial" == true ]]; then
-        # Partial: needs-replan so planner can re-scope before another worker claims
-        gh issue edit "$issue_num" --repo "$REPO" --add-label needs-replan 2>/dev/null || true
+        # Partial: replan so planner can re-scope before another worker claims
+        gh issue edit "$issue_num" --repo "$REPO" --add-label replan 2>/dev/null || true
         gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed 2>/dev/null || true
-        echo "Issue #$issue_num marked needs-replan (partial completion)"
+        echo "Issue #$issue_num marked replan (partial completion)"
     else
         # Full: claimed → has-pr
         gh issue edit "$issue_num" --repo "$REPO" --add-label has-pr 2>/dev/null || true
@@ -331,8 +331,8 @@ cmd_claim() {
         echo "Issue #$issue_num is already claimed. Skipping."
         return 1
     fi
-    if echo "$labels" | grep -qw 'skip'; then
-        echo "Issue #$issue_num was skipped. Skipping."
+    if echo "$labels" | grep -qw 'replan'; then
+        echo "Issue #$issue_num needs replan. Skipping."
         return 1
     fi
     if echo "$labels" | grep -qw 'blocked'; then
@@ -381,15 +381,15 @@ cmd_claim() {
 }
 
 # --- skip ---
-# Mark a claimed issue as skipped (stale or blocked).
+# Mark a claimed issue as needing replan (stale plan, wrong assumptions, etc.).
 cmd_skip() {
     local issue_num="${1:?usage: coordination skip N \"reason\"}"
     local reason="${2:?usage: coordination skip N \"reason\"}"
 
-    gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label skip
+    gh issue edit "$issue_num" --repo "$REPO" --remove-label claimed --add-label replan
     gh issue comment "$issue_num" --repo "$REPO" \
-        --body "Skipped by session \`$SESSION_ID\`: $reason"
-    echo "Skipped issue #$issue_num: $reason"
+        --body "Skipped by session \`$SESSION_ID\` (needs replan): $reason"
+    echo "Skipped issue #$issue_num (marked replan): $reason"
 }
 
 # --- lock-planner ---

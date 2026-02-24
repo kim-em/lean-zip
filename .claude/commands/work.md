@@ -139,7 +139,7 @@ Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md` with:
   coordination create-pr <N> --partial "feat: prove helper lemmas for inflate_deflateFixed"
   ```
   This uses "Partial progress on #N" instead of "Closes #N" in the PR body,
-  and adds a `needs-replan` label so the issue is held out of the unclaimed
+  and adds a `replan` label so the issue is held out of the unclaimed
   queue until a planner re-scopes the remaining work.
 
 **If you completed all deliverables**, commit, push, and create a PR normally:

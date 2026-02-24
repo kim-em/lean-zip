@@ -196,13 +196,13 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 |---------|-------------|
 | `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
 | `coordination plan "title"` | Create GitHub issue with agent-plan label; body from stdin |
-| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `needs-replan` label |
+| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `replan` label |
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
 | `coordination list-unclaimed` | List unclaimed agent-plan issues (FIFO order) |
 | `coordination queue-depth` | Count of unclaimed issues (used by `pod` for dispatch) |
 | `coordination claim N` | Claim issue #N — adds `claimed` label + comment, detects races |
-| `coordination skip N "reason"` | Mark claimed issue as skipped — removes `claimed`, adds `skip` label |
+| `coordination skip N "reason"` | Mark claimed issue as needing replan — removes `claimed`, adds `replan` label |
 | `coordination add-dep N M` | Add `depends-on: #M` to issue #N's body; adds `blocked` label if #M is open. Use this (not raw `gh issue edit`) whenever a new dependency is discovered on an existing issue |
 | `coordination check-blocked` | Unblock issues whose `depends-on` dependencies are all closed |
 | `coordination release-stale-claims [SECS]` | Release claimed issues with no PR after SECS seconds (default 4h); **manual use only** — for claims from sessions on other machines that `pod` can't detect locally |
@@ -212,12 +212,12 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 **Issue lifecycle**: planner creates issue (label: `agent-plan`) →
 worker claims it (adds label: `claimed`) → worker creates PR closing it
 (label swaps to `has-pr`) → auto-merge squash-merges.
-Skipped issues (label: `skip`) can be revised by the next planner.
+Issues marked `replan` (by skip or partial completion) are handled by the next planner.
 Issues with `has-pr` appear in orient under "Issues with open PRs" and
 are excluded from `list-unclaimed` and `queue-depth`.
 **Partial completion**: worker uses `--partial` → label swaps to
-`needs-replan` (excluded from `list-unclaimed`). A planner creates a
-new issue for remaining work, then closes the `needs-replan` issue with
+`replan` (excluded from `list-unclaimed`). A planner creates a
+new issue for remaining work, then closes the `replan` issue with
 a link to the new one. This preserves full history.
 
 **Dependencies**: Issues can declare `depends-on: #N` in their body.
@@ -272,6 +272,7 @@ statements (via `sorry`) before proofs are ready.
     Zip/Spec/BitstreamWriteCorrect.lean — bitsToNat, writeBitsLSB, bitsToBytes roundtrip (write direction)
     Zip/Spec/BitWriterCorrect.lean — BitWriter ↔ spec bitstream correspondence (write direction)
     Zip/Spec/HuffmanCorrect.lean   — HuffTree ↔ Huffman.Spec correspondence
+    Zip/Spec/DecodeHelpers.lean     — Decode infrastructure (invariants, table correspondence, copy loop)
     Zip/Spec/DecodeCorrect.lean    — Block-level decode correctness
     Zip/Spec/DynamicTreesCorrect.lean — Dynamic Huffman tree decode correctness
     Zip/Spec/DynamicTreesComplete.lean — Dynamic Huffman tree decode completeness

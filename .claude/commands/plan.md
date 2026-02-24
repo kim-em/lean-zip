@@ -115,26 +115,36 @@ If the existing issue is already claimed, still add the body dependency and
 comment so the worker is aware, but don't add `blocked` (the worker can
 decide how to handle it).
 
-**Handling `needs-replan` issues**: When a worker makes partial progress, the
-issue gets a `needs-replan` label (excluded from `list-unclaimed`). During
-orientation, check for these:
+**Handling `replan` issues**: Issues get a `replan` label when a worker
+either made partial progress (context ran out, time limit) or found the
+plan stale/wrong-assumptions and skipped it entirely. Both cases need
+planner attention before another worker can claim the issue.
+
+During orientation, check for these:
 ```
-gh issue list --repo kim-em/lean-zip --label needs-replan --state open --limit 10 \
+gh issue list --repo kim-em/lean-zip --label replan --state open --limit 10 \
     --json number,title --jq '.[] | "#\(.number) \(.title)"'
 ```
-For each `needs-replan` issue:
-1. Read the partial PR and progress entry to understand what was done
-2. Create a **new issue** for the remaining work, referencing the original:
-   - Include "Continues #N" and a link to the partial PR for context
-   - Describe only the remaining deliverables (what was NOT done)
-   - Add any new context learned from the partial attempt
-3. Close the original `needs-replan` issue with a comment linking forward:
-   ```
-   gh issue close <N> --repo kim-em/lean-zip \
-       --comment "Remaining work replanned in #<new-issue>. Partial progress in PR #<partial-pr>."
-   ```
-4. If other open issues had `depends-on: #<N>`, update them to depend on
-   the new issue instead
+For each `replan` issue, read the issue comments to understand what happened,
+then choose the right action:
+
+- **Work already done** (a subsequent PR merged it): close the issue with a
+  note explaining what rendered it complete.
+- **Plan stale / assumptions wrong**: create a corrected issue with updated
+  context, then close the original linking forward.
+- **Partial progress**: create a new issue for the remaining deliverables,
+  referencing the original and any partial PR for context. Describe only
+  what was NOT done, plus any new context from the partial attempt.
+- **Still valid, no progress made**: remove the `replan` label to re-open it
+  for workers (`gh issue edit <N> --remove-label replan`).
+
+When creating a replacement issue, close the original with:
+```
+gh issue close <N> --repo kim-em/lean-zip \
+    --comment "Replanned in #<new-issue>."
+```
+If other open issues had `depends-on: #<N>`, update them to depend on
+the new issue instead.
 
 **Filling gaps from partial completions**: When orientation reveals that a PR
 made partial progress on an issue (the issue was closed but deliverables remain

@@ -1594,10 +1594,8 @@ def _tui_main(stdscr, config: dict):
                         state_str, state_color = "has-pr", curses.color_pair(6)
                     elif "blocked" in item.labels:
                         state_str, state_color = "blocked", curses.color_pair(2)
-                    elif "skip" in item.labels:
-                        state_str, state_color = "skip", curses.color_pair(3)
-                    elif "needs-replan" in item.labels:
-                        state_str, state_color = "needs-replan", curses.color_pair(2)
+                    elif "replan" in item.labels:
+                        state_str, state_color = "replan", curses.color_pair(2)
                     else:
                         state_str, state_color = "open", curses.A_NORMAL
                 else:  # pr
