@@ -215,7 +215,7 @@ for each function to minimize code. -/
 /-- Combined: readBit preserves data, hpos, and gives pos ≤ data.size. -/
 private theorem readBit_inv (br br' : BitReader) (bit : UInt32)
     (h : br.readBit = .ok (bit, br'))
-    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size) :
+    (_hpos : br.bitOff = 0 ∨ br.pos < br.data.size) :
     br'.data = br.data ∧
     (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     br'.pos ≤ br'.data.size := by
@@ -525,7 +525,6 @@ private theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
     · -- idx < totalCodes: do block
-      rw [show (clTree.decode br) = clTree.decode br from rfl] at h
       dsimp only [Bind.bind, Except.bind] at h
       split at h
       · simp at h  -- decode error

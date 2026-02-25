@@ -411,6 +411,7 @@ private theorem fixedDistCodes_snd_le (i : Nat) (h : i < fixedDistCodes.size) :
 /-! ## emitTokens preserves wf -/
 
 set_option maxRecDepth 2048 in
+set_option linter.unusedSimpArgs false in
 /-- `emitTokens` preserves `BitWriter.wf`. -/
 private theorem emitTokens_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
     (i : Nat) (hwf : bw.wf) :

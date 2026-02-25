@@ -77,9 +77,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
       | some p3 =>
         obtain ⟨hclen_v, bits₃⟩ := p3
         set_option linter.unusedSimpArgs false in
-        simp only [hspec3, letFun] at hspec
-        set_option linter.unusedSimpArgs false in
-        simp only [bind, Option.bind] at hspec
+        simp only [hspec3, letFun, bind, Option.bind] at hspec
         have hval3 := Deflate.Spec.readBitsLSB_bound hspec3
         have ⟨br₃, hrb3, hrest₃, hwf₃, hpos₃⟩ :=
           readBits_complete br₂ 4 hclen_v bits₃ hwf₂ hpos₂ (by omega) hval3
