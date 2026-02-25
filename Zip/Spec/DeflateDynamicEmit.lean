@@ -245,6 +245,7 @@ theorem emitTokensWithCodes_spec (bw : BitWriter) (tokens : Array LZ77Token)
     (by rwa [List.drop_zero])
 
 set_option maxRecDepth 2048 in
+set_option linter.unusedSimpArgs false in
 /-- `emitTokensWithCodes` preserves `BitWriter.wf`. -/
 private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
     (litCodes distCodes : Array (UInt16 × UInt8))

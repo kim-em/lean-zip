@@ -19,6 +19,8 @@ used by the dynamic Huffman compressor. These are internal helpers for
 - `freqPairs_witness`: positive frequency implies witness in frequency pairs
 -/
 
+set_option linter.unusedSimpArgs false
+
 namespace Zip.Native.Deflate
 
 /-- `tokenFreqs.go` preserves array sizes. -/
