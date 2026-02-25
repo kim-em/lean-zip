@@ -23,7 +23,7 @@ namespace GzipDecode
 /-- Pure gzip decompressor for single-member streams (no FLG bits set).
     Proof-friendly: no for/while/mut. -/
 def decompressSingle (data : ByteArray)
-    (maxOutputSize : Nat := 256 * 1024 * 1024) :
+    (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   if data.size < 18 then throw "Gzip: input too short"
   unless data[0]! == 0x1f && data[1]! == 0x8b do throw "Gzip: invalid magic"
@@ -813,9 +813,9 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
     exact Deflate.Spec.decode_fuel_independent _ _ _ hdec _
 
 /-- Gzip roundtrip: decompressing the output of compress returns the original data.
-    The size bound (5M) is inherited from `inflate_deflateRaw`. -/
+    The size bound (500M) is inherited from `inflate_deflateRaw`. -/
 theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 5000000) :
+    (hsize : data.size < 500000000) :
     GzipDecode.decompressSingle (GzipEncode.compress data level) = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
   have hinfl : Inflate.inflate (Deflate.deflateRaw data level) = .ok data :=

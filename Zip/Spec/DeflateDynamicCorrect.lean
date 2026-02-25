@@ -417,7 +417,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
     codes then decompressing recovers the original data.
     Size bound: same as `inflate_deflateFixed`. -/
 theorem inflate_deflateDynamic (data : ByteArray)
-    (hsize : data.size < 10000000) :
+    (hsize : data.size < 1000000000) :
     Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
   have hspec := deflateDynamic_spec data
   match hspec with
@@ -450,7 +450,7 @@ theorem inflate_deflateDynamic (data : ByteArray)
         (lz77Greedy_resolves data 32768 (by omega))
         (by have := lz77Greedy_size_le data 32768; rw [tokensToSymbols_length]; omega)
         (tokensToSymbols_validSymbolList _)
-    have hlen : data.data.toList.length ≤ 256 * 1024 * 1024 := by
+    have hlen : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
       simp only [Array.length_toList, ByteArray.size_data]; omega
     rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp]
     exact inflate_complete (deflateDynamic data) data.data.toList hlen hdec_padded
