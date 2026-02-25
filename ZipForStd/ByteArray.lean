@@ -1,3 +1,5 @@
+import ZipForStd.Array
+
 /-!
 # ByteArray lemmas for the standard library
 
@@ -37,5 +39,35 @@ theorem extract_append_ge (a b : ByteArray) (i j : Nat) (h : i ≥ a.size) :
 theorem extract_append_left (a b : ByteArray) :
     (a ++ b).extract 0 a.size = a := by
   apply ByteArray.ext; simp
+
+/-! ## `set!` interaction lemmas -/
+
+/-- ByteArray.getElem! is the same as Array.getElem! on the underlying data. -/
+private theorem getElem!_eq_data_getElem! (ba : ByteArray) (i : Nat) :
+    ba[i]! = ba.data[i]! := by
+  by_cases h : i < ba.size
+  · rw [getElem!_pos ba i h, getElem!_pos ba.data i h]
+    rfl
+  · rw [getElem!_neg ba i h, getElem!_neg ba.data i h]
+
+/-- `ByteArray.set!` preserves size. -/
+theorem size_set! (data : ByteArray) (i : Nat) (v : UInt8) :
+    (data.set! i v).size = data.size := by
+  show (data.data.setIfInBounds i v).size = data.data.size
+  exact Array.size_setIfInBounds ..
+
+/-- Setting a byte and reading at the same index returns the written value. -/
+theorem getElem!_set!_self (data : ByteArray) (i : Nat) (v : UInt8) (h : i < data.size) :
+    (data.set! i v)[i]! = v := by
+  rw [getElem!_eq_data_getElem!]
+  show (data.data.set! i v)[i]! = v
+  exact Array.getElem!_set!_self data.data i v h
+
+/-- Setting a byte at index `i` doesn't affect reads at a different index `j`. -/
+theorem getElem!_set!_ne (data : ByteArray) (i j : Nat) (v : UInt8) (hij : i ≠ j) :
+    (data.set! i v)[j]! = data[j]! := by
+  rw [getElem!_eq_data_getElem!, getElem!_eq_data_getElem!]
+  show (data.data.set! i v)[j]! = data.data[j]!
+  exact Array.getElem!_set!_ne data.data i j v hij
 
 end ByteArray
