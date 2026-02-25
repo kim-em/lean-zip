@@ -1,4 +1,5 @@
 import Zip.Binary
+import ZipForStd.ByteArray
 import Std.Tactic.BVDecide
 
 /-!
@@ -208,5 +209,113 @@ theorem readUInt32BE_append_right (a b : ByteArray) (offset : Nat)
       getElem!_append_right a b (offset + 1) (by omega),
       getElem!_append_right a b (offset + 2) (by omega),
       getElem!_append_right a b (offset + 3) (by omega)]
+
+/-! ## In-place write size preservation -/
+
+theorem writeUInt16LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt16) :
+    (writeUInt16LEAt buf offset val).size = buf.size := by
+  unfold writeUInt16LEAt
+  rw [ByteArray.size_set!, ByteArray.size_set!]
+
+theorem writeUInt32LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt32) :
+    (writeUInt32LEAt buf offset val).size = buf.size := by
+  unfold writeUInt32LEAt
+  rw [ByteArray.size_set!, ByteArray.size_set!, ByteArray.size_set!, ByteArray.size_set!]
+
+theorem writeUInt64LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt64) :
+    (writeUInt64LEAt buf offset val).size = buf.size := by
+  unfold writeUInt64LEAt
+  rw [writeUInt32LEAt_size, writeUInt32LEAt_size]
+
+/-! ## In-place write roundtrips -/
+
+/-- Writing UInt16LE in-place and reading it back gives the original value. -/
+theorem readUInt16LE_writeUInt16LEAt (buf : ByteArray) (offset : Nat) (val : UInt16)
+    (h : offset + 2 ≤ buf.size) :
+    readUInt16LE (writeUInt16LEAt buf offset val) offset = val := by
+  simp only [readUInt16LE, writeUInt16LEAt]
+  have hs : (buf.set! offset val.toUInt8).size = buf.size := ByteArray.size_set! ..
+  -- b1 (offset + 1): self on outermost set!
+  rw [ByteArray.getElem!_set!_self _ _ _ (by omega)]
+  -- b0 (offset): ne on outer, self on inner
+  rw [ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_self _ _ _ (by omega)]
+  bv_decide
+
+/-- Writing UInt32LE in-place and reading it back gives the original value. -/
+theorem readUInt32LE_writeUInt32LEAt (buf : ByteArray) (offset : Nat) (val : UInt32)
+    (h : offset + 4 ≤ buf.size) :
+    readUInt32LE (writeUInt32LEAt buf offset val) offset = val := by
+  simp only [readUInt32LE, writeUInt32LEAt]
+  have hs0 : (buf.set! offset val.toUInt8).size = buf.size := ByteArray.size_set! ..
+  have hs1 : ((buf.set! offset val.toUInt8).set! (offset + 1)
+    (val >>> 8).toUInt8).size = buf.size := by rw [ByteArray.size_set!, hs0]
+  have hs2 : (((buf.set! offset val.toUInt8).set! (offset + 1)
+    (val >>> 8).toUInt8).set! (offset + 2) (val >>> 16).toUInt8).size = buf.size := by
+    rw [ByteArray.size_set!, hs1]
+  -- Resolve each getElem! through the set! chain
+  -- Each byte at offset+k must peel off the outer set! layers (ne) then hit self
+  have hb3 : ((((buf.set! offset val.toUInt8).set! (offset + 1) (val >>> 8).toUInt8).set!
+    (offset + 2) (val >>> 16).toUInt8).set! (offset + 3) (val >>> 24).toUInt8)[offset + 3]! =
+    (val >>> 24).toUInt8 :=
+    ByteArray.getElem!_set!_self _ _ _ (by omega)
+  have hb2 : ((((buf.set! offset val.toUInt8).set! (offset + 1) (val >>> 8).toUInt8).set!
+    (offset + 2) (val >>> 16).toUInt8).set! (offset + 3) (val >>> 24).toUInt8)[offset + 2]! =
+    (val >>> 16).toUInt8 := by
+    rw [ByteArray.getElem!_set!_ne _ _ _ _ (by omega)]
+    exact ByteArray.getElem!_set!_self _ _ _ (by omega)
+  have hb1 : ((((buf.set! offset val.toUInt8).set! (offset + 1) (val >>> 8).toUInt8).set!
+    (offset + 2) (val >>> 16).toUInt8).set! (offset + 3) (val >>> 24).toUInt8)[offset + 1]! =
+    (val >>> 8).toUInt8 := by
+    rw [ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+        ByteArray.getElem!_set!_ne _ _ _ _ (by omega)]
+    exact ByteArray.getElem!_set!_self _ _ _ (by omega)
+  have hb0 : ((((buf.set! offset val.toUInt8).set! (offset + 1) (val >>> 8).toUInt8).set!
+    (offset + 2) (val >>> 16).toUInt8).set! (offset + 3) (val >>> 24).toUInt8)[offset]! =
+    val.toUInt8 := by
+    rw [ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+        ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+        ByteArray.getElem!_set!_ne _ _ _ _ (by omega)]
+    exact ByteArray.getElem!_set!_self _ _ _ (by omega)
+  rw [hb0, hb1, hb2, hb3]
+  bv_decide
+
+/-- Writing UInt32LE at one offset doesn't affect reads at a non-overlapping offset. -/
+theorem readUInt32LE_writeUInt32LEAt_ne (buf : ByteArray) (i j : Nat) (val : UInt32)
+    (_hj : j + 4 ≤ buf.size) (hne : i + 4 ≤ j ∨ j + 4 ≤ i) :
+    readUInt32LE (writeUInt32LEAt buf i val) j = readUInt32LE buf j := by
+  simp only [readUInt32LE, writeUInt32LEAt]
+  have hs0 : (buf.set! i val.toUInt8).size = buf.size := ByteArray.size_set! ..
+  have hs1 : ((buf.set! i val.toUInt8).set! (i + 1)
+    (val >>> 8).toUInt8).size = buf.size := by rw [ByteArray.size_set!, hs0]
+  have hs2 : (((buf.set! i val.toUInt8).set! (i + 1)
+    (val >>> 8).toUInt8).set! (i + 2) (val >>> 16).toUInt8).size = buf.size := by
+    rw [ByteArray.size_set!, hs1]
+  rw [ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
+      ByteArray.getElem!_set!_ne _ _ _ _ (by omega)]
+
+/-- Writing UInt64LE in-place and reading it back gives the original value. -/
+theorem readUInt64LE_writeUInt64LEAt (buf : ByteArray) (offset : Nat) (val : UInt64)
+    (h : offset + 8 ≤ buf.size) :
+    readUInt64LE (writeUInt64LEAt buf offset val) offset = val := by
+  simp only [readUInt64LE, writeUInt64LEAt]
+  rw [readUInt32LE_writeUInt32LEAt_ne _ _ _ _ (by rw [writeUInt32LEAt_size]; omega) (by omega),
+      readUInt32LE_writeUInt32LEAt _ _ _ (by omega),
+      readUInt32LE_writeUInt32LEAt _ _ _ (by rw [writeUInt32LEAt_size]; omega)]
+  bv_decide
 
 end Binary
