@@ -1401,6 +1401,30 @@ def agent_process_main(config: dict, agent_id: str | None = None,
             f"duration={human_duration(elapsed)} {tok} "
             f"git:{state.git_start}..{git_end}")
 
+        # --- Circuit breaker: sessions that exit too quickly are broken ---
+        if elapsed < 15 and state.tokens_in == 0 and state.tokens_out == 0:
+            rapid_failures = getattr(state, '_rapid_failures', 0) + 1
+            state._rapid_failures = rapid_failures
+            backoff = min(60 * rapid_failures, 300)
+            log(f"Agent {short_id}: session exited in {elapsed:.0f}s with 0 tokens "
+                f"(rapid failure #{rapid_failures}), backing off {backoff}s")
+            cleanup_worktree(wt_dir, branch)
+            state.worktree = ""
+            state.branch = ""
+            if lock_name:
+                try:
+                    coordination(config, f"unlock-{lock_name}")
+                except Exception:
+                    pass
+                state.lock_held = ""
+            state.status = "backoff"
+            state.write()
+            time.sleep(backoff)
+            continue
+        else:
+            # Reset rapid failure counter on successful session
+            state._rapid_failures = 0
+
         # --- Cleanup ---
         cleanup_worktree(wt_dir, branch)
         state.worktree = ""

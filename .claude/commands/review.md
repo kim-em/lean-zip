@@ -33,11 +33,11 @@ Rotate through these areas across sessions:
 - Newer APIs, `grind`, `omega`, `mvcgen`, idiomatic style
 - Opportunities to replace `partial` or fuel-based implementations with proper
   termination proofs (pays off later during verification)
-- Look for `xs[i]!` runtime bounds checks that could be replaced with proven-bounds
+- Look for xs[i]! runtime bounds checks that could be replaced with proven-bounds
   access when the bound is already in scope (see CLAUDE.md for constraints)
 
 **Toolchain**:
-- Check if a newer stable Lean release is available; if so, upgrade `lean-toolchain`,
+- Check if a newer stable Lean release is available; if so, upgrade lean-toolchain,
   fix breakage, and revert if tests can't be made to pass
 
 **File size and organization**:
