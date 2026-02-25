@@ -121,6 +121,7 @@ def findDistCode (dist : Nat) : Option (Nat × Nat × UInt32) :=
 inductive LZ77Token where
   | literal : UInt8 → LZ77Token
   | reference : (length : Nat) → (distance : Nat) → LZ77Token
+  deriving BEq, Inhabited
 
 /-- Simple hash-based greedy LZ77 matcher.
     Scans input left-to-right, emitting literals or back-references. -/

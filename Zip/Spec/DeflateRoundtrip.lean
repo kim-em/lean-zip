@@ -33,7 +33,7 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
   split
   · exact inflate_deflateStoredPure data (by omega)
   · split
-    · exact inflate_deflateFixed data (by omega)
+    · exact inflate_deflateFixedIter data (by omega)
     · split
       · exact inflate_deflateLazy data hsize
       · exact inflate_deflateDynamic data (by omega)
