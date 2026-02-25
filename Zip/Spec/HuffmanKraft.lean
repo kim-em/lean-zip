@@ -113,9 +113,7 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
         else acc.set! len (acc[len]! + 1)) acc)[b]! =
       acc[b]! + lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 by
     rw [this _ (Array.size_replicate ..)]
-    suffices h : (Array.replicate (maxBits + 1) 0)[b]! = 0 by omega
-    simp only [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-               Array.getElem?_replicate]; split <;> rfl
+    simp [show b < maxBits + 1 from by omega]
   intro acc hsize
   induction lengths generalizing acc with
   | nil => simp
@@ -123,13 +121,10 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
     simp only [List.foldl_cons]
     split
     · rename_i hskip
+      simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
       rw [ih acc hsize]; congr 1
-      have hlb : (l == b) = false := by
-        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
-        cases hskip with
-        | inl h => exact beq_eq_false_iff_ne.mpr (h ▸ Ne.symm hb)
-        | inr h => exact beq_eq_false_iff_ne.mpr (fun heq => by rw [heq] at h; omega)
-      simp [hlb]
+      have hlb : l ≠ b := by cases hskip with | inl h => exact h ▸ Ne.symm hb | inr h => omega
+      simp [beq_eq_false_iff_ne.mpr hlb]
     · rename_i hset
       simp only [Bool.or_eq_true, beq_iff_eq, not_or, decide_eq_true_eq] at hset
       have hl_ne : l ≠ 0 := hset.1
@@ -281,10 +276,9 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       rw [ih hv_ls (acc.set! l (acc[l]! + 1)) hsize']
       rw [kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
       simp only [Nat.zero_le, ite_true]
-      have hfilt : (l :: ls).filter (· != 0) = l :: ls.filter (· != 0) := by
-        simp only [List.filter_cons]
-        exact if_pos (bne_iff_ne.mpr hl_ne)
-      rw [hfilt, List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← List.foldl_add_init]
+      rw [show (l :: ls).filter (· != 0) = l :: ls.filter (· != 0) from by
+        simp [bne_iff_ne, hl_ne]]
+      rw [List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← List.foldl_add_init]
 
 /-- The ncRec recurrence at higher bit lengths bounds from below by
     scaling the value at a lower length:
