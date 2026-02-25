@@ -2,7 +2,8 @@
 
 This document outlines a plan to add parallel native Lean implementations
 alongside the existing FFI wrappers, add conformance tests between the
-two, and formally prove properties of the native implementations.
+two, formally prove properties of the native implementations, and then
+iteratively optimize the native implementations with verified correctness.
 
 ## Current Architecture
 
@@ -82,65 +83,28 @@ Significantly harder than DEFLATE. The Zstd format involves:
 
 Estimated at 3-5x the work of DEFLATE.
 
-## Evaluation
-
-### Strengths
-
-- Lean 4 is well-suited: `ByteArray`, `UInt8`, bitwise operations are
-  all available
-- The conformance testing approach (run both implementations, compare
-  outputs) is valuable engineering regardless of proofs
-- CRC32/Adler32 are low-hanging fruit with real proof value
-- A verified DEFLATE decompressor would be a genuinely novel contribution
-  -- there is no runnable verified DEFLATE implementation in any proof
-  assistant that I am aware of
-- The archive format code (tar, ZIP) is already pure Lean, so adding
-  native compression would yield a fully verified archive pipeline
-
-### Challenges
-
-- **Performance**: A naive Lean DEFLATE implementation will be orders of
-  magnitude slower than zlib. Zlib is hand-tuned C with SIMD
-  specializations. The FFI implementations should remain available as the
-  fast path; the native implementations serve as verified reference
-  implementations that can also be used when the C libraries are
-  unavailable
-- **Specification gap**: RFC 1951 is informal English. Senjak & Hofmann
-  (2016) formalized it in Coq (see References below), but no Lean 4
-  formalization exists. Formalizing the spec is a prerequisite for
-  proving anything about an implementation
-- **Compression level fidelity**: Matching zlib's exact output
-  byte-for-byte at each compression level is probably not worth pursuing.
-  The correct goal is roundtrip correctness, not output equivalence
-- **Sliding window management**: Mutable arrays in Lean require careful
-  handling of linearity/borrowing for performance
-- **Huffman tree construction proofs**: Code length limits, canonical
-  ordering -- tedious but not deep
-- **LZ77 match-finding**: Inherently heuristic. Proving it produces
-  *valid* output is tractable; proving it produces *good* output is a
-  research problem
-- **Zstd is a moving target**: The format is complex and has evolved; the
-  RFC (3.1) is 100+ pages
-
 ## Optimization Strategy
 
-The plan is to start with naive, easy-to-reason-about Lean
-implementations and prove correctness properties about these first. These
-initial versions prioritize clarity over performance: simple loops instead
-of table lookups for CRC32, straightforward linear scans instead of hash
-chains for LZ77 matching, direct bit-by-bit Huffman decoding instead of
-table-based multi-bit lookups.
+### Initial approach: clarity first
+
+Start with naive, easy-to-reason-about Lean implementations and prove
+correctness properties about these first. These initial versions prioritize
+clarity over performance: simple loops instead of table lookups for CRC32,
+straightforward linear scans instead of hash chains for LZ77 matching,
+direct bit-by-bit Huffman decoding instead of table-based multi-bit lookups.
 
 Once the core proofs are established against these simple implementations,
 we add progressively more efficient versions and prove they produce
-identical output to the unoptimized versions. The roundtrip proofs then transfer automatically: if `inflate_fast` is
-proven equivalent to `inflate_simple`, and we have proven
+identical output to the unoptimized versions. The roundtrip proofs then
+transfer automatically: if `inflate_fast` is proven equivalent to
+`inflate_simple`, and we have proven
 `inflate_simple (deflate data level) = data`, then
 `inflate_fast (deflate data level) = data` follows immediately.
 
-This layered approach applies to compression levels as well. Rather than
-implementing all nine DEFLATE compression levels at once, we work through
-them progressively:
+### Compression levels
+
+Rather than implementing all nine DEFLATE compression levels at once, we
+work through them progressively:
 
 - **Level 0** (stored blocks, no compression): trivial to implement and
   prove correct
@@ -155,6 +119,59 @@ them progressively:
 Each level produces a valid DEFLATE bitstream, so the decompressor proof
 covers all of them. The per-level work is proving that each compression
 strategy produces a valid bitstream, not re-proving decompression.
+
+### Generational refinement
+
+After the initial roundtrip theorem is established, optimization follows
+a generational approach. The key insight is that optimizing verified code
+is fundamentally different from optimizing unverified code: you cannot
+simply swap in a faster algorithm and check if tests pass — you must
+prove the new version agrees with the old one.
+
+There are two approaches, chosen based on the scope of the change:
+
+**Approach 1: In-place modification.** For small, local changes (e.g.
+replacing a linear scan with a hash lookup in one function), modify the
+implementation directly and update the proofs that it still satisfies its
+specification. This works well when the proof structure survives the change
+with modest adjustments.
+
+**Approach 2: Generational refinement.** For larger changes (restructuring
+data flow, changing representations, rewriting a pipeline stage), build a
+new implementation alongside the existing one:
+
+1. Write the faster implementation (Gen N+1) as a new definition
+2. Prove `genN_plus_1 = genN` (or the relevant component equivalence)
+3. Transfer the roundtrip theorem across the equivalence
+4. The old implementation (Gen N) remains in the codebase — theorems
+   reference it
+
+This naturally produces a chain: Gen 0 (spec) → Gen 1 (first native) →
+Gen 2 (optimized) → ... Each generation exists in the codebase because
+theorems reference it. The chain is the proof trail.
+
+**Identifying what to optimize.** Benchmarking means profiling, not just
+timing. Use Lean's profiling tools to identify where time is actually
+spent — allocation patterns, ByteArray copying, List-to-Array conversions,
+unnecessary intermediate structures. These are all algorithmic choices
+that can be improved in the next generation. A List-to-Array conversion
+that dominates runtime is as much a target for generational refinement as
+a change from linear to binary search.
+
+**Chain compression.** Over time, the chain of generations may become long.
+Periodically, it is worth "compressing the chain" — proving that Gen N+2
+directly equals Gen N, eliminating Gen N+1 as an intermediate. This
+simplifies the codebase and the proof dependencies. But don't do this
+reflexively: if an intermediate generation captures a genuinely different
+algorithmic idea, keep it — it serves as documentation of the design
+evolution. Compress when the intermediate's only purpose is as a proof
+stepping stone and the direct proof is clearly shorter. Sometimes it may
+also be possible to *permute* changes in the chain, bringing related
+improvements together and enabling further compressions.
+
+**When to stop.** Optimization is open-ended. A reasonable stopping point:
+when the native Lean implementation is competitive with or faster than the
+FFI-wrapped C libraries on representative workloads!
 
 ## Development Cycle
 
@@ -176,12 +193,39 @@ of the formalization.
 
 ## Phased Plan
 
-### Phase 1: Checksums
+### Overview
+
+The work is organized into a linear **A-track** (DEFLATE verification
+pipeline) followed by parallel tracks **B**, **C**, and **D** that can
+be worked on concurrently. Two cross-cutting concerns run throughout.
+
+**Dependency graph:**
+
+```
+A1 → A2 → A3 → A4
+      │    │
+      ↓    ↓
+      C    B
+D (independent)
+```
+
+- **A1–A4** are sequential: each depends on the previous.
+- **B** (size limit elimination) depends on A3: fuel-based proofs must
+  exist before they can be replaced with well-founded recursion.
+- **C** (benchmarking and optimization) depends on A2: native
+  implementations must exist before they can be profiled.
+- **D** (Zstd) is independent: it follows the same A1–A4 methodology
+  for a different compression format and can start at any time.
+- **Cross-cutting concerns** (characterizing properties, ZipForStd)
+  apply from A1 onwards and are not gated on any particular phase.
+
+Planning agents should spread work across tracks wherever dependencies
+allow, rather than finishing one track before starting another.
+
+### A1: Checksums
 
 Pure Lean CRC32 and Adler32 with proofs of equivalence to a formal
 specification. Conformance tests against the FFI implementations.
-
-**Estimated effort**: Days to weeks.
 
 **Deliverables**:
 - Native Lean CRC32 (table-driven)
@@ -190,11 +234,9 @@ specification. Conformance tests against the FFI implementations.
 - Proof: incremental computation composes correctly
 - Conformance test harness comparing native vs FFI on random inputs
 
-### Phase 2: DEFLATE Decompressor
+### A2: DEFLATE Decompressor
 
 Pure Lean DEFLATE decompressor (inflate only). No proofs yet.
-
-**Estimated effort**: 2-4 weeks of implementation.
 
 **Deliverables**:
 - Huffman decoder (fixed and dynamic trees)
@@ -203,7 +245,7 @@ Pure Lean DEFLATE decompressor (inflate only). No proofs yet.
 - Conformance tests against zlib on a corpus of compressed data
 - Integration as an alternative backend for existing ZIP/tar code paths
 
-### Phases 3–4: Verified DEFLATE Roundtrip
+### A3–A4: Verified DEFLATE Roundtrip
 
 The overarching goal:
 
@@ -216,8 +258,8 @@ theorem says compression always succeeds and decompression of
 well-formed output never fails.)
 
 The roundtrip decomposes into five building blocks. The decompressor
-(Phase 3) contributes the "right half" of each invertibility theorem;
-the compressor (Phase 4) contributes the "left half." Each building
+(A3) contributes the "right half" of each invertibility theorem;
+the compressor (A4) contributes the "left half." Each building
 block is independently meaningful.
 
 #### The roundtrip pipeline
@@ -227,7 +269,7 @@ invertible layers:
 
 ```
 data → matchLZ77 → symbols → huffEncode → bits → pack → compressed
-                                                           │
+                                                          │
 compressed → unpack → bits → huffDecode → symbols → resolveLZ77 → data
 ```
 
@@ -293,10 +335,10 @@ Requires that `litLens` and `distLens` produce valid prefix-free codes
 symbol list is well-formed (literals < 256, lengths in 3–258, distances
 in 1–32768, terminated by end-of-block).
 
-The single-symbol case is already proved:
-`decode_prefix_free` (Huffman.lean) says that for `(cw, sym)` in a
-prefix-free table, `decode table (cw ++ rest) = some (sym, rest)`.
-Extension to symbol sequences is induction on the symbol list.
+The single-symbol case is the core lemma:
+`decode_prefix_free` says that for `(cw, sym)` in a prefix-free table,
+`decode table (cw ++ rest) = some (sym, rest)`. Extension to symbol
+sequences is induction on the symbol list.
 
 For length/distance sub-encoding (codes 257–285 + extra bits), the
 encode side reverses the table lookup. Invertibility follows because
@@ -313,16 +355,13 @@ practice, DEFLATE block encoding pads the final byte, so the theorem
 applies to the padded bit sequence; the padding itself is handled at
 the block framing level (BB4).
 
-BitstreamCorrect already proves the unpack direction (`readBit_toBits`,
-`readBits_toBits`). The pack direction is new but mechanical.
-
 #### Building block 4: Block framing
 
 - **Stored:** LEN/NLEN header + literal copy. Trivially invertible.
 - **Fixed Huffman:** Shared constant tables. Reduces to BB2.
 - **Dynamic Huffman:** Tree description (code lengths via RLE +
   code-length Huffman) must round-trip. Mechanically detailed and
-  the hardest framing sub-proof (currently the largest remaining sorry).
+  the hardest framing sub-proof.
 - **Block sequence:** BFINAL (1 bit) + BTYPE (2 bits) are fixed-width.
   Symbol 256 terminates compressed blocks. BFINAL=1 marks last block.
 - **Cross-block back-references:** LZ77 references can span block
@@ -333,17 +372,17 @@ BitstreamCorrect already proves the unpack direction (`readBit_toBits`,
 
 Chain BB1–BB4 to obtain the full roundtrip theorem.
 
-#### What exists vs. what's needed
+#### Proof architecture by phase
 
-| Building block | Decompressor half (Phase 3) | Compressor half (Phase 4) |
+| Building block | Decompressor half (A3) | Compressor half (A4) |
 |---|---|---|
-| BB1: LZ77 | `resolveLZ77` correctness ✓, `copyLoop_eq_ofFn` ✓ | `matchLZ77` + fundamental theorem |
-| BB2: Huffman | `decode_prefix_free` ✓, tree correspondence ✓ | `huffEncode` + sequence roundtrip |
-| BB3: Bitstream | `readBit_toBits`, `readBits_toBits` ✓ | `bitsToBytes` + pack roundtrip |
-| BB4: Framing | `decodeStored_correct` ✓, `decodeHuffman_correct` ✓, `inflateLoop_correct` (2 minor sorries), `decodeDynamicTrees_correct` (sorry) | Block framing encoder, dynamic tree encoding |
+| BB1: LZ77 | `resolveLZ77` correctness, `copyLoop_eq_ofFn` | `matchLZ77` + fundamental theorem |
+| BB2: Huffman | `decode_prefix_free`, tree correspondence | `huffEncode` + sequence roundtrip |
+| BB3: Bitstream | `readBit_toBits`, `readBits_toBits` | `bitsToBytes` + pack roundtrip |
+| BB4: Framing | `decodeStored_correct`, `decodeHuffman_correct`, `inflateLoop_correct`, `decodeDynamicTrees_correct` | Block framing encoder, dynamic tree encoding |
 | BB5: Composition | — | Full roundtrip theorem |
 
-### Phase 3: Verified Decompressor
+#### A3: Verified Decompressor
 
 The decompressor contributes the "right half" of each building block.
 The verification has two layers, reflecting the structure of DEFLATE:
@@ -351,23 +390,23 @@ The verification has two layers, reflecting the structure of DEFLATE:
 **Characterizing properties** — mathematical content independent of any
 particular implementation:
 
-- Huffman codes are prefix-free and canonical (Huffman.Spec) ✓
-- Kraft inequality bounds symbol counts ✓
-- Prefix-free codes decode deterministically (`decode_prefix_free`) ✓
-- Bitstream operations correspond to LSB-first bit lists ✓
-- LZ77 overlap semantics: `copyLoop_eq_ofFn` ✓
-- RFC 1951 tables verified by `decide` ✓
-- TODO: Fuel independence of spec decode
-- TODO: `fromLengths` success implies `ValidLengths`
+- Huffman codes are prefix-free and canonical
+- Kraft inequality bounds symbol counts
+- Prefix-free codes decode deterministically (`decode_prefix_free`)
+- Bitstream operations correspond to LSB-first bit lists
+- LZ77 overlap semantics: `copyLoop_eq_ofFn`
+- RFC 1951 tables verified by `decide`
+- Fuel independence of spec decode
+- `fromLengths` success implies `ValidLengths`
 
 **Algorithmic correspondence** — the native implementation agrees with
 a reference decoder that transcribes RFC 1951 §3.2.3 pseudocode into
 proof-friendly style (`List Bool`, `Option` monad, fuel):
 
-- Stored blocks ✓
-- Huffman blocks (literal, end-of-block, length/distance cases) ✓
-- Block loop (2 minor position-invariant sorries)
-- Dynamic Huffman tree decode (sorry — hardest remaining piece)
+- Stored blocks
+- Huffman blocks (literal, end-of-block, length/distance cases)
+- Block loop with position invariants
+- Dynamic Huffman tree decode
 
 The reference decoder (`Deflate.Spec.decode`) is not a mathematical
 specification — it is the RFC algorithm in proof-friendly dress. At
@@ -376,7 +415,7 @@ a faithful transcription is the appropriate verification tool. The
 mathematical content lives in the building blocks (Huffman, bitstream,
 LZ77), not in the top-level algorithm.
 
-### Phase 4: DEFLATE Compressor
+#### A4: DEFLATE Compressor
 
 The compressor contributes the "left half" of each building block plus
 the composition into the full roundtrip theorem.
@@ -393,18 +432,160 @@ the composition into the full roundtrip theorem.
 - Conformance tests: zlib can decompress our output and vice versa.
 - Full roundtrip theorem: `inflate (deflate data level) = .ok data`.
 
-### Phase 5: Zstd (Aspirational)
+### B: Size Limit Elimination
 
-Native Lean Zstd implementation. This is a separate multi-month to
-multi-year project.
+**Depends on: A3**
 
-**Estimated effort**: PhD thesis scale.
+The initial roundtrip theorem uses fuel parameters (explicit recursion
+bounds) to ensure termination. This imposes a data size limit on the
+theorem — e.g. `data.size < N` for some concrete `N`. The limit is an
+artifact of the proof technique, not a fundamental constraint: DEFLATE
+decompression always terminates (each iteration consumes at least one
+bit), and compression always terminates (each step advances at least one
+byte in the input).
+
+This track has two stages:
+
+**B1: Raise bounds to huge.** If the fuel is computed from `data.size`,
+the bound may already be large. If it is a fixed constant, raise it to
+an astronomically large value (exabyte scale). This should require only
+modest proof adjustments and eliminates the bound as a practical concern.
+
+**B2: Eliminate fuel entirely.** Replace fuel-based recursion with
+well-founded recursion on a decreasing measure (remaining input length
+for decompression, remaining unprocessed bytes for compression). This
+requires restructuring the recursive functions so that Lean's termination
+checker can verify progress. The result is a roundtrip theorem with no
+size restriction at all:
+
+```
+∀ (data : ByteArray) (level : Fin 10), inflate (deflate data level) = .ok data
+```
+
+B2 is a significant redesign of the proof-friendly spec functions.
+The native implementations will likely use structural patterns that
+terminate naturally — the main work is in the spec layer and the proofs.
+
+### C: Benchmarking and Verified Optimization
+
+**Depends on: A2**
+
+This track is open-ended. It has two dimensions: **runtime performance**
+(how fast the code runs) and **compression quality** (how small the
+output is). Both matter, and both follow the same generational
+refinement methodology.
+
+**Comparison targets.** The native implementations should be compared
+against multiple reference compressors, not just zlib:
+
+- **zlib** — the ubiquitous baseline
+- **miniz_oxide** — Rust reimplementation of miniz, widely used
+- **libdeflate** — optimized DEFLATE library, often faster than zlib
+- **zopfli** — Google's maximum-compression DEFLATE encoder (very slow,
+  very small output — the upper bound on DEFLATE quality)
+
+Different targets illuminate different things: zlib and miniz_oxide
+are the "match this" bar for general use; libdeflate shows what's
+possible with careful optimization; zopfli shows the theoretical
+compression quality ceiling within the DEFLATE format.
+
+**Reporting tools.** Build and maintain dashboards that make it easy to
+see where we stand:
+
+- **Runtime comparison**: native vs each reference library, across data
+  patterns (constant, cyclic, text, incompressible), sizes (1KB to
+  100MB), and compression levels (0–9). Report throughput in MB/s for
+  both compression and decompression.
+- **Compression quality comparison**: output sizes for the same inputs
+  across native levels and each reference library's levels. Report both
+  absolute sizes and ratios relative to the best-known result (zopfli).
+- **Regression tracking**: store benchmark results so that optimization
+  work can be validated against a baseline and regressions caught.
+
+These tools are first-class deliverables, not afterthoughts.
+
+**Methodology:**
+
+1. **Benchmark** runtime and compression quality against reference
+   implementations on representative workloads.
+2. **Profile** using Lean's profiling tools to identify where time is
+   spent — not just which functions are slow, but why: allocation
+   patterns, ByteArray copying, intermediate List/Array conversions,
+   redundant traversals. For compression quality, analyze where the
+   native compressor makes worse choices than the reference (shorter
+   matches found, suboptimal block boundaries, less efficient Huffman
+   trees).
+3. **Identify** the highest-impact improvement target across both
+   dimensions.
+4. **Implement** the optimization using generational refinement
+   (Approach 1 or 2 from the Optimization Strategy section).
+5. **Prove** correctness of the optimized version.
+6. **Re-benchmark** to measure the improvement.
+7. **Repeat** from step 2.
+
+This cycle continues until the native implementations are competitive
+with or faster than the C libraries on both runtime and compression
+quality. At that point, the FFI wrappers become optional — the native
+path is verified, performant, and compresses well.
+
+### D: Zstd
+
+**Independent — can start at any time.**
+
+Native Lean Zstd implementation following the same A1–A4 methodology.
+This is a separate multi-month to multi-year project.
 
 **Deliverables**:
 - FSE (Finite State Entropy) decoder and encoder
 - Zstd frame/block parsing
-- Decompressor with proofs (following the Phase 2-3 pattern)
-- Compressor with roundtrip proof
+- Decompressor with proofs (following the A2–A3 pattern)
+- Compressor with roundtrip proof (following the A4 pattern)
+
+The same B and C tracks apply to Zstd once its A-track is sufficiently
+advanced.
+
+## Cross-Cutting Concerns
+
+These are not phases — they apply throughout all work from A1 onwards.
+
+### Characterizing Properties
+
+Beyond roundtrip correctness, prove mathematical properties that are
+independent of any particular implementation. These deepen the
+verification and catch classes of bugs that roundtrip alone cannot.
+
+Examples, to be pursued as the relevant algorithms are implemented:
+
+- **Prefix-freeness and Kraft inequality** for Huffman codes
+- **Compression ratio bounds**: stored blocks have at most ~0.05%
+  overhead; fixed Huffman has known worst-case expansion; dynamic
+  Huffman is bounded by the entropy of the symbol distribution
+- **Determinism of decompression**: any correct DEFLATE decompressor
+  must produce the same output for the same input (follows from
+  prefix-freeness + deterministic LZ77 resolution)
+- **CRC32 as polynomial division** in GF(2)[x], beyond just
+  table-implementation equivalence
+
+These properties are not gated on optimization or size limit work.
+They can and should be pursued as soon as the relevant algorithms
+exist, starting from A1.
+
+### ZipForStd / Standard Library Pipeline
+
+During proof work, lemmas about `ByteArray`, `Array`, `List`, `Nat`,
+and `BitVec` are routinely developed that have nothing to do with
+compression — they are general-purpose facts missing from Lean's
+standard library.
+
+These should be:
+
+1. Collected in `ZipForStd/` as they are developed
+2. Kept general (no compression-specific assumptions)
+3. In a form where collaborators could upstreamt them to Lean's standard library via PRs
+
+This is part of every phase, not a separate effort. A healthy ZipForStd
+pipeline demonstrates that the verification methodology scales and
+contributes back to the ecosystem.
 
 ## Conformance Testing Infrastructure
 
@@ -420,6 +601,32 @@ Worth building regardless of proofs. The approach:
 
 Having two independent implementations tested against each other catches
 bugs that neither catches alone.
+
+## Design Considerations
+
+- **Performance**: An initial naive Lean DEFLATE implementation will be
+  slower than zlib (which is hand-tuned C with SIMD specializations).
+  The FFI implementations serve as the fast path until Track C closes
+  the gap through iterative profiling and verified optimization.
+- **Specification gap**: RFC 1951 is informal English. Senjak & Hofmann
+  (2016) formalized it in Coq (see References below), but no Lean 4
+  formalization exists. Formalizing the spec is a prerequisite for
+  proving anything about an implementation.
+- **Compression level fidelity**: Different DEFLATE compressors (zlib,
+  miniz_oxide, libdeflate, etc.) all produce different byte streams —
+  the format only specifies decompression, not compression choices.
+  Byte-for-byte output matching is a non-goal. Compression *quality*
+  (output sizes), however, is a goal — Track C targets competitive
+  ratios across all levels.
+- **Sliding window management**: Mutable arrays in Lean require careful
+  handling of linearity/borrowing for performance.
+- **Huffman tree construction proofs**: Code length limits, canonical
+  ordering — tedious but not deep.
+- **LZ77 match-finding**: Inherently heuristic. Proving it produces
+  *valid* output is tractable; proving it produces *good* output
+  (compression ratio bounds) is a characterizing property target.
+- **Zstd is a moving target**: The format is complex and has evolved; the
+  RFC (3.1) is 100+ pages.
 
 ## References
 
@@ -448,12 +655,3 @@ bugs that neither catches alone.
   Lean 4 is code-first, so we write the implementation and prove
   characterizing properties about it rather than extracting code from
   relational specifications.
-
-## Bottom Line
-
-| Target | Feasibility | Value |
-|--------|------------|-------|
-| CRC32/Adler32 with proofs | Do it | Easy and valuable |
-| DEFLATE decompressor | Ambitious but tractable | Novel contribution to verified software |
-| DEFLATE roundtrip with proofs | Research project (6-12 person-months) | High, if completed |
-| Zstd | PhD thesis scale | Very high, but enormous effort |
