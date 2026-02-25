@@ -16,6 +16,15 @@ namespace Deflate.Correctness
 
 /-! ## Helpers -/
 
+/-- UInt8→Nat→UInt8 roundtrip: `Nat.toUInt8 ∘ UInt8.toNat = id` pointwise. -/
+private theorem uint8_nat_roundtrip (l : List UInt8) :
+    l.map (Nat.toUInt8 ∘ UInt8.toNat) = l := by
+  rw [List.map_congr_left (fun u _ => by
+    show Nat.toUInt8 (UInt8.toNat u) = u
+    unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
+    rw [BitVec.ofNat_toNat, BitVec.setWidth_eq])]
+  simp
+
 /-- Nat→UInt8→Nat roundtrip for lists with elements bounded by `maxBits ≤ 15`. -/
 private theorem validLengths_toUInt8_roundtrip (lens : List Nat)
     (hv : Huffman.Spec.ValidLengths lens maxBits) (hmb : maxBits ≤ 15) :
@@ -83,16 +92,14 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
           readBits_complete br₂ 4 hclen_v bits₃ hwf₂ hpos₂ (by omega) hval3
             (by rw [hrest₂]; exact hspec3)
         -- readCLLengths
+        have hrep19 : (List.replicate 19 0 : List Nat) =
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] := rfl
         cases hspec_rcl : Deflate.Spec.readCLLengths (hclen_v + 4) 0
             (List.replicate 19 0) bits₃ with
-        | none =>
-          rw [show (List.replicate 19 0 : List Nat) =
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] from rfl] at hspec_rcl
-          simp [hspec_rcl] at hspec
+        | none => rw [hrep19] at hspec_rcl; simp [hspec_rcl] at hspec
         | some p4 =>
           obtain ⟨clLengths, bits₄⟩ := p4
-          rw [show (List.replicate 19 0 : List Nat) =
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] from rfl] at hspec_rcl
+          rw [hrep19] at hspec_rcl
           simp [hspec_rcl] at hspec
           -- Extract ValidLengths clLengths 7 from the guard
           have hcl_valid : Huffman.Spec.ValidLengths clLengths 7 := by
@@ -220,23 +227,14 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
                 (hlit_v + 257 + (hdist_v + 1))) 15 hdist_vl
             -- Bridge rest: br₅.toBits = rest
             have hrest_final : br₅.toBits = rest := by rw [hrest₅, hrest_eq]
-            -- UInt8 roundtrip for list conversion
-            have uint8_roundtrip : ∀ (l : List UInt8),
-                l.map (Nat.toUInt8 ∘ UInt8.toNat) = l := by
-              intro l
-              rw [List.map_congr_left (fun u _ => by
-                show Nat.toUInt8 (UInt8.toNat u) = u
-                unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
-                rw [BitVec.ofNat_toNat, BitVec.setWidth_eq])]
-              simp
             -- litLens/distLens back to native arrays
             have hlit_arr : (litLens.map Nat.toUInt8).toArray =
                 codeLengths'.extract 0 (hlit_v + 257) := by
-              rw [← hlit_bridge, List.map_map, uint8_roundtrip, Array.toArray_toList]
+              rw [← hlit_bridge, List.map_map, uint8_nat_roundtrip, Array.toArray_toList]
             have hdist_arr : (distLens.map Nat.toUInt8).toArray =
                 codeLengths'.extract (hlit_v + 257)
                   (hlit_v + 257 + (hdist_v + 1)) := by
-              rw [← hdist_bridge, List.map_map, uint8_roundtrip, Array.toArray_toList]
+              rw [← hdist_bridge, List.map_map, uint8_nat_roundtrip, Array.toArray_toList]
             -- Assemble the native decodeDynamicTrees
             refine ⟨litTree, distTree, br₅, ?_, hrest_final, hwf₅, hpos₅,
               ?_, ?_, ?_, ?_, ?_, ?_⟩
@@ -263,7 +261,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
 
 /-! ## Block loop completeness -/
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- **Completeness for block loop**: if the spec `decode.go` succeeds,
     the native `inflateLoop` also succeeds with the same result.
 

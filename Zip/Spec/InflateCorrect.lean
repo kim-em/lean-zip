@@ -47,8 +47,8 @@ private theorem decodeStored_invariants (br : Zip.Native.BitReader) (output : By
 
 /-! ## Fixed code length correspondence -/
 
-set_option maxRecDepth 4096 in
-set_option maxHeartbeats 4000000 in
+set_option maxRecDepth 2048 in
+set_option maxHeartbeats 2000000 in
 protected theorem fixedLitLengths_eq :
     (Zip.Native.Inflate.fixedLitLengths).toList.map UInt8.toNat =
     Deflate.Spec.fixedLitLengths := by rfl
@@ -58,7 +58,7 @@ protected theorem fixedDistLengths_eq :
     (Zip.Native.Inflate.fixedDistLengths).toList.map UInt8.toNat =
     Deflate.Spec.fixedDistLengths := by decide
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 protected theorem fixedLitLengths_size :
     Zip.Native.Inflate.fixedLitLengths.size ≤ UInt16.size := by
   show 288 ≤ 65536; omega
@@ -91,7 +91,7 @@ protected theorem nat_beq_to_uint32_false (v : Nat) (hv : v < 2) (h : ¬((v == 1
   have hv0 : v = 0 := by simp only [beq_iff_eq] at h; omega
   subst hv0; simp [Nat.toUInt32]
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- Block loop correspondence: the native `inflateLoop` agrees with
     the spec's `decode.go` on a block-by-block basis. -/
 theorem inflateLoop_correct (br : Zip.Native.BitReader)
