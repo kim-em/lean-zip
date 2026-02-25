@@ -198,6 +198,87 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- Iterative (tail-recursive, Array-accumulating) version of `lz77Greedy`.
+    Same output, but does not overflow the stack on large inputs because
+    `mainLoop` and `trailing` accumulate into an `Array` parameter instead
+    of building a `List` via cons.  The existing `lz77Greedy` is preserved
+    unchanged for proofs. -/
+def lz77GreedyIter (data : ByteArray) (windowSize : Nat := 32768) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    trailing data 0 #[]
+  else
+    let hashSize := 65536
+    mainLoop data windowSize hashSize
+      (.replicate hashSize 0) (.replicate hashSize false) 0 #[]
+where
+  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
+    let a := data[pos]!.toNat
+    let b := data[pos + 1]!.toNat
+    let c := data[pos + 2]!.toNat
+    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+  countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
+    go data p1 p2 0 maxLen
+  go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
+    if i < maxLen then
+      if data[p1 + i]! == data[p2 + i]! then
+        go data p1 p2 (i + 1) maxLen
+      else i
+    else i
+  termination_by maxLen - i
+  trailing (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
+      Array LZ77Token :=
+    if pos < data.size then
+      trailing data (pos + 1) (acc.push (.literal data[pos]!))
+    else acc
+  termination_by data.size - pos
+  updateHashes (data : ByteArray) (hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool)
+      (pos j matchLen : Nat) : Array Nat × Array Bool :=
+    if j < matchLen then
+      if pos + j + 2 < data.size then
+        let h := hash3 data (pos + j) hashSize
+        updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
+          pos (j + 1) matchLen
+      else
+        updateHashes data hashSize hashTable hashValid pos (j + 1) matchLen
+    else
+      (hashTable, hashValid)
+  termination_by matchLen - j
+  mainLoop (data : ByteArray) (windowSize hashSize : Nat)
+      (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
+      (acc : Array LZ77Token) :
+      Array LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := hash3 data pos hashSize
+      let matchPos := hashTable[h]!
+      let isValid := hashValid[h]!
+      let hashTable := hashTable.set! h pos
+      let hashValid := hashValid.set! h true
+      if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
+        let maxLen := min 258 (data.size - pos)
+        let matchLen := countMatch data matchPos pos maxLen
+        if hge : matchLen ≥ 3 then
+          if hle : pos + matchLen ≤ data.size then
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let (hashTable, hashValid) :=
+              updateHashes data hashSize hashTable hashValid pos 1 matchLen
+            mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
+              (acc.push (.reference matchLen (pos - matchPos)))
+          else
+            mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+              (acc.push (.literal data[pos]!))
+        else
+          mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+            (acc.push (.literal data[pos]!))
+      else
+        mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+          (acc.push (.literal data[pos]!))
+    else
+      trailing data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
   if h : i < tokens.size then
@@ -240,6 +321,11 @@ def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray 
     Produces a single DEFLATE block with BFINAL=1, BTYPE=01. -/
 def deflateFixed (data : ByteArray) : ByteArray :=
   Deflate.deflateFixedBlock data (lz77Greedy data)
+
+/-- Compress data using fixed Huffman codes and iterative greedy LZ77.
+    Equivalent to `deflateFixed` but does not overflow the stack on large inputs. -/
+def deflateFixedIter (data : ByteArray) : ByteArray :=
+  deflateFixedBlock data (lz77GreedyIter data)
 
 /-- Simple hash-based lazy LZ77 matcher.
     Like `lz77Greedy`, but checks if position pos+1 has a longer match

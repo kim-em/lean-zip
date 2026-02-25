@@ -163,7 +163,7 @@ open Zip.Spec.DeflateStoredCorrect (deflateStoredPure)
     Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman. -/
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
-  else if level == 1 then deflateFixed data
+  else if level == 1 then deflateFixedIter data
   else if level < 5 then deflateLazy data
   else deflateDynamic data
 
