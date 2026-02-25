@@ -291,6 +291,46 @@ private theorem decode_inv (tree : HuffTree) (br br' : BitReader)
     br'.pos ≤ br'.data.size :=
   decode_go_inv tree br br' 0 sym h hpos hple
 
+/-- readUInt16LE preserves data and sets bitOff = 0. -/
+private theorem readUInt16LE_inv (br br' : BitReader) (v : UInt16)
+    (h : br.readUInt16LE = .ok (v, br')) :
+    br'.data = br.data ∧ br'.bitOff = 0 ∧ br'.pos ≤ br'.data.size := by
+  simp only [BitReader.readUInt16LE, BitReader.alignToByte] at h
+  split at h
+  next hbo =>
+    split at h
+    · simp at h
+    · next hle =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
+      have hbo' : br.bitOff = 0 := eq_of_beq hbo
+      exact ⟨rfl, hbo', by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
+  next hbo =>
+    split at h
+    · simp at h
+    · next hle =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
+      exact ⟨rfl, rfl, by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
+
+/-- readBytes preserves data and sets bitOff = 0. -/
+private theorem readBytes_inv (br br' : BitReader) (n : Nat) (bytes : ByteArray)
+    (h : br.readBytes n = .ok (bytes, br')) :
+    br'.data = br.data ∧ br'.bitOff = 0 ∧ br'.pos ≤ br'.data.size := by
+  simp only [BitReader.readBytes, BitReader.alignToByte] at h
+  split at h
+  next hbo =>
+    split at h
+    · simp at h
+    · next hle =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
+      have hbo' : br.bitOff = 0 := eq_of_beq hbo
+      exact ⟨rfl, hbo', by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
+  next hbo =>
+    split at h
+    · simp at h
+    · next hle =>
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
+      exact ⟨rfl, rfl, by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
+
 /-- Combined: decodeStored preserves data, and gives hpos + pos_le. -/
 private theorem decodeStored_inv (br br' : BitReader)
     (output output' : ByteArray) (maxOut : Nat)
@@ -298,7 +338,46 @@ private theorem decodeStored_inv (br br' : BitReader)
     br'.data = br.data ∧
     (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     br'.pos ≤ br'.data.size := by
-  sorry
+  -- decodeStored chains: readUInt16LE → readUInt16LE → checks → readBytes
+  -- All three preserve data and produce bitOff = 0.
+  -- Extract that readBytes succeeded from the successful decodeStored call.
+  simp only [Inflate.decodeStored, bind, Except.bind] at h
+  match h1 : br.readUInt16LE with
+  | .error e => simp [h1] at h
+  | .ok (len, br₁) =>
+    rw [h1] at h; simp only [] at h
+    match h2 : br₁.readUInt16LE with
+    | .error e => simp [h2] at h
+    | .ok (nlen, br₂) =>
+      rw [h2] at h; simp only [] at h
+      -- h now has: unless (xor check) → unless (size check) → readBytes → return
+      -- We need to extract that readBytes succeeded. Use `have` with revert/intro.
+      have h_rb : ∃ bytes, br₂.readBytes len.toNat = .ok (bytes, br') := by
+        revert h; intro h
+        -- The `unless` pattern with `bne`:
+        -- unless (len ^^^ nlen != 0xFFFF) => if not cond then pure () else throw
+        -- With Except monad this is: if cond then throw else (if cond' then throw else readBytes >>= return)
+        -- We handle this by splitting on the conditions
+        -- Normalize the `unless` checks: `unless c do throw e` becomes
+        -- `if c then throw e else pure ()` and pure PUnit.unit = .ok ()
+        simp only [pure, Except.pure, Except.bind, bind] at h
+        by_cases hxor : (len ^^^ nlen != 0xFFFF) = true
+        · -- xor check fails → throws, contradicts h = .ok
+          simp [hxor] at h
+        · simp only [hxor, ite_false] at h
+          by_cases hsize : output.size + len.toNat > maxOut
+          · simp [hsize] at h
+          · simp only [hsize, ite_false] at h
+            match h3 : br₂.readBytes len.toNat with
+            | .error e => simp [h3] at h
+            | .ok (bytes, br₃) =>
+              simp [h3] at h
+              exact ⟨bytes, by rw [h.2]⟩
+      obtain ⟨bytes, h_rb⟩ := h_rb
+      have ⟨hd3, hbo3, hple3⟩ := readBytes_inv br₂ br' _ _ h_rb
+      have ⟨hd1, _, _⟩ := readUInt16LE_inv br br₁ _ h1
+      have ⟨hd2, _, _⟩ := readUInt16LE_inv br₁ br₂ _ h2
+      exact ⟨hd3.trans (hd2.trans hd1), Or.inl hbo3, hple3⟩
 
 /-- Combined: decodeHuffman.go preserves data, hpos, and pos ≤ data.size. -/
 private theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
