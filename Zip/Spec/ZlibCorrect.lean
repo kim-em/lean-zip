@@ -119,16 +119,16 @@ theorem compress_no_fdict (data : ByteArray) (level : UInt8) :
 /-- Decomposition: `compress` = header (2 bytes) ++ deflateRaw ++ trailer (4 bytes). -/
 theorem compress_eq (data : ByteArray) (level : UInt8) :
     ∃ (header trailer : ByteArray),
-      header.size = 2 ∧
+      header.size = 2 ∧ trailer.size = 4 ∧
       compress data level = header ++ Deflate.deflateRaw data level ++ trailer := by
   unfold compress
   split
-  · exact ⟨_, _, rfl, rfl⟩
+  · exact ⟨_, _, rfl, rfl, rfl⟩
   · split
-    · exact ⟨_, _, rfl, rfl⟩
+    · exact ⟨_, _, rfl, rfl, rfl⟩
     · split
-      · exact ⟨_, _, rfl, rfl⟩
-      · exact ⟨_, _, rfl, rfl⟩
+      · exact ⟨_, _, rfl, rfl, rfl⟩
+      · exact ⟨_, _, rfl, rfl, rfl⟩
 
 end ZlibEncode
 
@@ -207,7 +207,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
   have hspec_at2 : Deflate.Spec.decode.go
       ((Deflate.Spec.bytesToBits (ZlibEncode.compress data level)).drop (2 * 8))
       [] 10001 = some data.data.toList := by
-    obtain ⟨header, trailer, hhsz, hceq⟩ := ZlibEncode.compress_eq data level
+    obtain ⟨header, trailer, hhsz, _, hceq⟩ := ZlibEncode.compress_eq data level
     rw [hceq]
     exact hspec_compressed header trailer hhsz
   -- Apply inflateRaw_complete to get native inflateRaw at offset 2
@@ -217,9 +217,39 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
   have hcsz6 : ¬ (ZlibEncode.compress data level).size < 6 := by
     rw [ZlibEncode.compress_size]; omega
   -- Tight endPos bound: endPos + 4 ≤ compressed.size
-  -- Requires showing inflateRaw stops within the DEFLATE portion (endPos ≤ 2 + deflated.size).
-  -- Blocked on inflateLoop endPos tracking infrastructure (same as inflateLoop_endPos_le).
-  have hendPos_tight : endPos + 4 ≤ (ZlibEncode.compress data level).size := by sorry
+  -- Strategy: run inflateRaw on (header ++ deflated) without trailer, get endPos' ≤ its size.
+  -- Then inflateRaw_append_suffix shows the full compressed data gives the same endPos.
+  have hendPos_tight : endPos + 4 ≤ (ZlibEncode.compress data level).size := by
+    obtain ⟨header, trailer, hhsz, htsz, hceq⟩ := ZlibEncode.compress_eq data level
+    -- Spec decode on (header ++ deflated) at offset 2
+    have hspec_hd : Deflate.Spec.decode.go
+        ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (2 * 8))
+        [] 10001 = some data.data.toList := by
+      rw [show 2 * 8 = header.size * 8 from by omega]
+      rw [bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
+      exact hspec_go
+    -- Apply inflateRaw_complete on (header ++ deflated) to get endPos' and tight bound
+    obtain ⟨endPos', hinflRaw'⟩ :=
+      inflateRaw_complete (header ++ Deflate.deflateRaw data level) 2 _
+        data.data.toList hdata_le 10001 (by omega) hspec_hd
+    have hep_le : endPos' ≤ (header ++ Deflate.deflateRaw data level).size :=
+      inflateRaw_endPos_le _ _ _ _ _ hinflRaw'
+    -- By suffix invariance, inflateRaw on (header ++ deflated) ++ trailer gives same endPos'
+    have hinflRaw'' : Inflate.inflateRaw ((header ++ Deflate.deflateRaw data level) ++ trailer)
+        2 (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') :=
+      inflateRaw_append_suffix _ trailer 2 _ _ _ hinflRaw'
+    -- hinflRaw'' : inflateRaw (... ++ trailer) = .ok (..., endPos')
+    -- hinflRaw  : inflateRaw (compress data level) = .ok (..., endPos)
+    -- hceq : compress data level = (header ++ deflated) ++ trailer
+    -- So endPos = endPos' by injectivity
+    have hep_eq : endPos = endPos' := by
+      rw [hceq] at hinflRaw
+      have := hinflRaw.symm.trans hinflRaw''
+      simp only [Except.ok.injEq, Prod.mk.injEq] at this
+      exact this.2
+    rw [hep_eq, hceq]
+    simp only [ByteArray.size_append, htsz] at hep_le ⊢
+    omega
   have hendPos4 : ¬ (endPos + 4 > (ZlibEncode.compress data level).size) := by omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
   -- Adler32 trailer match: the 4 BE bytes at endPos encode adler32(1, data).
