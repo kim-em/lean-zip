@@ -24,10 +24,10 @@ open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
     This is the Phase B4 capstone theorem from PLAN.md.
-    The size bound (5M) is the tightest across all compression levels,
+    The size bound (500M) is the tightest across all compression levels,
     arising from the lazy LZ77 path (levels 2-4). -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 5000000) :
+    (hsize : data.size < 500000000) :
     Zip.Native.Inflate.inflate (deflateRaw data level) = .ok data := by
   unfold deflateRaw
   split

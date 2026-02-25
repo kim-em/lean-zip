@@ -508,7 +508,7 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
     (bits rest : List Bool)
     (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
     (hresolve : resolveLZ77 syms [] = some data)
-    (hfuel : 10000000 ≥ syms.length)
+    (hfuel : 1000000000 ≥ syms.length)
     (hvalid : ValidSymbolList syms) :
     decode ([true, true, false] ++ bits ++ rest) = some data := by
   show decode.go ([true, true, false] ++ bits ++ rest) [] 10001 = some data
@@ -516,9 +516,9 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
   simp only [readBitsLSB_2_true_false]
   have hdec : decodeSymbols fixedLitLengths fixedDistLengths (bits ++ rest)
-      10000000 = some (syms, rest) :=
+      1000000000 = some (syms, rest) :=
     encodeSymbols_decodeSymbols fixedLitLengths fixedDistLengths syms bits rest
-      10000000 henc fixedLitLengths_valid fixedDistLengths_valid hfuel hvalid
+      1000000000 henc fixedLitLengths_valid fixedDistLengths_valid hfuel hvalid
   simp only [List.nil_append]
   rw [hdec]
   simp only [hresolve]
@@ -529,7 +529,7 @@ theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
     (bits : List Bool)
     (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
     (hresolve : resolveLZ77 syms [] = some data)
-    (hfuel : 10000000 ≥ syms.length)
+    (hfuel : 1000000000 ≥ syms.length)
     (hvalid : ValidSymbolList syms) :
     decode ([true, true, false] ++ bits) = some data := by
   have := encodeFixed_decode_append syms data bits [] henc hresolve hfuel hvalid
@@ -551,7 +551,7 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
         some (litLens, distLens, symBits ++ rest))
     (henc : encodeSymbols litLens distLens syms = some symBits)
     (hresolve : resolveLZ77 syms [] = some data)
-    (hfuel : 10000000 ≥ syms.length)
+    (hfuel : 1000000000 ≥ syms.length)
     (hvalid : ValidSymbolList syms) :
     decode ([true, false, true] ++ headerBits ++ symBits ++ rest) = some data := by
   show decode.go ([true, false, true] ++ headerBits ++ symBits ++ rest) [] 10001 = some data
@@ -564,9 +564,9 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   set_option linter.unusedSimpArgs false in
   simp only [bind, Option.bind]
   have hdec : decodeSymbols litLens distLens (symBits ++ rest)
-      10000000 = some (syms, rest) :=
+      1000000000 = some (syms, rest) :=
     encodeSymbols_decodeSymbols litLens distLens syms symBits rest
-      10000000 henc hv_lit hv_dist hfuel hvalid
+      1000000000 henc hv_lit hv_dist hfuel hvalid
   rw [hdec]
   simp only [hresolve]
   simp [pure, Pure.pure]

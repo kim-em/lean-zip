@@ -183,7 +183,7 @@ def decodeLitLen (litLengths : List Nat) (distLengths : List Nat)
     Decodes until end-of-block marker (code 256) is found.
     Uses fuel to ensure termination. -/
 def decodeSymbols (litLengths distLengths : List Nat) (bits : List Bool)
-    (fuel : Nat := 10000000) : Option (List LZ77Symbol × List Bool) :=
+    (fuel : Nat := 1000000000) : Option (List LZ77Symbol × List Bool) :=
   match fuel with
   | 0 => none
   | fuel + 1 => do

@@ -183,13 +183,13 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
               obtain ⟨output', br'⟩ := p
               simp only [hhf] at h
               have hhf_go : Zip.Native.Inflate.decodeHuffman.go fixedLit fixedDist
-                  maxOutputSize br₂ output 10000000 = .ok (output', br') := by
+                  maxOutputSize br₂ output 1000000000 = .ok (output', br') := by
                 simp only [Zip.Native.Inflate.decodeHuffman] at hhf; exact hhf
               obtain ⟨syms, rest_h, hds, hlz, hbr'_eq, hwf', hpos'⟩ :=
                 decodeHuffman_correct
                   Zip.Native.Inflate.fixedLitLengths
                   Zip.Native.Inflate.fixedDistLengths
-                  fixedLit fixedDist maxOutputSize 10000000
+                  fixedLit fixedDist maxOutputSize 1000000000
                   br₂ output output' br' hwf₂ hpos₂
                   hflit hfdist
                   (Correctness.fixedLitLengths_eq ▸ Deflate.Spec.fixedLitLengths_valid)
@@ -235,11 +235,11 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
                   obtain ⟨output', br'⟩ := p
                   simp only [hhf] at h
                   have hhf_go : Zip.Native.Inflate.decodeHuffman.go litTree distTree
-                      maxOutputSize br₃ output 10000000 = .ok (output', br') := by
+                      maxOutputSize br₃ output 1000000000 = .ok (output', br') := by
                     simp only [Zip.Native.Inflate.decodeHuffman] at hhf; exact hhf
                   obtain ⟨syms, rest_h, hds, hlz, hbr'_eq, hwf', hpos'⟩ :=
                     decodeHuffman_correct litLens distLens litTree distTree
-                      maxOutputSize 10000000 br₃ output output' br' hwf₃ hpos₃
+                      maxOutputSize 1000000000 br₃ output output' br' hwf₃ hpos₃
                       hflit_dyn hfdist_dyn hvlit_dyn hvdist_dyn
                       hsize_lit hsize_dist hhf_go
                   split at h
