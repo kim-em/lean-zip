@@ -152,7 +152,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
         have hv := fromLengths_valid clLengths 7 clTree hcl
         have ⟨br₁, hdec_nat, hrest₁, hwf₁, hpos₁⟩ :=
           huffTree_decode_complete clLengths 7 (by omega) clTree br sym bits₁
-            hwf hpos hcl hv hsize_cl hsym_bound hdec_spec
+            hwf hpos hcl hv hsym_bound hdec_spec
         -- Helper: sym.toUInt16.toNat = sym
         have hsym_toNat : sym.toUInt16.toNat = sym :=
           show sym % UInt16.size = sym from Nat.mod_eq_of_lt hsym_lt_u16
