@@ -70,6 +70,52 @@ then `exact ⟨hd'.trans hd₁, hpos', hple'⟩`.
 This avoids 3× boilerplate and makes chaining across multiple operations clean.
 See `GzipCorrect.lean` for examples (`readBit_inv` through `decode_inv`).
 
+### Threading Invariants Through Long Call Chains
+
+For proofs like `inflateLoop_endPos_le` that must thread invariants through
+5+ sequential monadic operations, the pattern is:
+
+```lean
+-- Each operation produces updated state + invariants
+have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ _ _ h_readBits hpos hple
+have ⟨hd₂, hpos₂, hple₂⟩ := decode_inv tree br₁ br₂ _ h_decode hpos₁ hple₁
+have ⟨hd₃, hpos₃, hple₃⟩ := readBits_inv br₂ br₃ _ _ h_readBits₂ hpos₂ hple₂
+-- ...
+-- At the end, compose data equalities:
+exact ⟨hd_final.trans (hd₃.trans (hd₂.trans hd₁)), hpos_final, hple_final⟩
+```
+
+**Key points:**
+- Each `_inv` lemma takes the **output invariants** from the previous operation as input
+- Data equality chains compose right-to-left via `.trans`: `hd₃.trans (hd₂.trans hd₁)`
+  proves `br₃.data = br.data` from `br₃.data = br₂.data`, `br₂.data = br₁.data`,
+  `br₁.data = br.data`
+- For recursive calls (induction step), pass the final state's invariants to `ih`,
+  then `.trans` the recursive result with the accumulated chain
+
+### Deeply Nested Multi-Path Case Splits
+
+When a function branches based on a decoded symbol (e.g., literal vs end-of-block vs
+length-distance), the invariant proof must cover all paths:
+
+```lean
+split at h
+· -- Path 1 (e.g., literal byte)
+  have ⟨hd', hp', hl'⟩ := ih br₁ _ h hpos₁ hple₁
+  exact ⟨hd'.trans hd₁, hp', hl'⟩
+· split at h
+  · -- Path 2 (e.g., end of block) — state unchanged
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    exact ⟨hd₁, hpos₁, hple₁⟩
+  · -- Path 3 (e.g., length+distance) — chain through more operations
+    -- ... extract sub-operations, chain their _inv results ...
+    exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
+```
+
+The error path for each sub-operation is handled by `simp [h_op] at h` which
+derives a contradiction from `.error = .ok`.
+
 ## Suffix/Append Proofs vs Fuel-Independence Proofs
 
 In fuel-independence proofs, `simp only [hds] at h ⊢` processes both hypothesis
