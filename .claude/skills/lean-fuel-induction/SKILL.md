@@ -116,6 +116,34 @@ split at h
 The error path for each sub-operation is handled by `simp [h_op] at h` which
 derives a contradiction from `.error = .ok`.
 
+## `termination_by` Proofs vs `Nat.strongRecOn`
+
+When proving properties about a function defined with `termination_by expr`,
+prefer defining the theorem with the same `termination_by` + `decreasing_by`
+and making recursive calls directly, over using `Nat.strongRecOn`:
+
+```lean
+-- Good: matches the function's own recursion structure
+private theorem f_property (data : ByteArray) (pos : Nat) (hpos : pos ≤ data.size) :
+    P (f data pos) := by
+  by_cases h : base_case
+  · ... -- base case
+  · have h_rec := f_property data (pos + step) (by omega)  -- recursive call
+    ...
+  termination_by data.size - pos
+  decreasing_by omega
+```
+
+`Nat.strongRecOn` creates an induction variable `n` separate from the actual
+measure `data.size - pos`. This causes two problems:
+1. The induction hypothesis involves elaborating the full recursive term,
+   hitting `maxRecDepth` on complex functions
+2. The final arithmetic goals have `n` instead of `data.size - pos`, requiring
+   explicit `subst` or `have : n = data.size - pos`
+
+Direct `termination_by` avoids both issues since `data.size - pos` stays
+concrete throughout the proof.
+
 ## Suffix/Append Proofs vs Fuel-Independence Proofs
 
 In fuel-independence proofs, `simp only [hds] at h ⊢` processes both hypothesis
