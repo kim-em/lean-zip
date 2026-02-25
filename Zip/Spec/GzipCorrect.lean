@@ -81,6 +81,15 @@ theorem compress_header_bytes (data : ByteArray) (level : UInt8) :
     split <;> first | rfl | (split <;> rfl)
   }
 
+/-- Decomposition: `compress` = header (10 bytes) ++ deflateRaw ++ trailer (8 bytes). -/
+theorem compress_eq (data : ByteArray) (level : UInt8) :
+    ∃ (header trailer : ByteArray),
+      header.size = 10 ∧ trailer.size = 8 ∧
+      compress data level = header ++ Deflate.deflateRaw data level ++ trailer := by
+  unfold compress
+  -- The xfl if-then-else produces three header variants, all of size 10
+  split <;> exact ⟨_, _, rfl, rfl, rfl⟩
+
 end GzipEncode
 
 /-! ## ByteArray/bitstream composition lemmas -/
@@ -783,11 +792,97 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
 
 /-! ## Gzip roundtrip -/
 
+/-- If `inflate deflated = .ok data`, then the spec decode succeeds on
+    `bytesToBits deflated` with the default fuel (10001). -/
+private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
+    (h : Inflate.inflate deflated = .ok result) :
+    Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) =
+      some result.data.toList := by
+  simp only [Inflate.inflate, bind, Except.bind] at h
+  cases hinf : Inflate.inflateRaw deflated 0 (256 * 1024 * 1024) with
+  | error e => simp [hinf] at h
+  | ok p =>
+    simp [hinf, pure, Except.pure] at h
+    obtain ⟨fuel, hfuel_le, hdec⟩ :=
+      Deflate.Correctness.inflate_correct deflated 0 (256 * 1024 * 1024) p.1 p.2
+        (by rw [hinf])
+    simp at hdec
+    have h10001 : fuel + (10001 - fuel) = 10001 := by omega
+    rw [← h]
+    rw [show (10001 : Nat) = fuel + (10001 - fuel) from h10001.symm]
+    exact Deflate.Spec.decode_fuel_independent _ _ _ hdec _
+
 /-- Gzip roundtrip: decompressing the output of compress returns the original data.
     The size bound (5M) is inherited from `inflate_deflateRaw`. -/
 theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
     (hsize : data.size < 5000000) :
     GzipDecode.decompressSingle (GzipEncode.compress data level) = .ok data := by
-  sorry
+  -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
+  have hinfl : Inflate.inflate (Deflate.deflateRaw data level) = .ok data :=
+    Deflate.inflate_deflateRaw data level hsize
+  -- Spec decode on deflated with default fuel (10001)
+  have hspec_go : Deflate.Spec.decode.go
+      (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] 10001 =
+      some data.data.toList := by
+    have := inflate_to_spec_decode _ data hinfl
+    simp only [Deflate.Spec.decode] at this; exact this
+  -- Suffix invariance: spec decode ignores trailer bits after the DEFLATE stream
+  have hspec_compressed : ∀ (header trailer : ByteArray) (hh : header.size = 10),
+      Deflate.Spec.decode.go
+        ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level ++ trailer)).drop
+          (10 * 8)) [] 10001 = some data.data.toList := by
+    intro header trailer hh
+    rw [show 10 * 8 = header.size * 8 from by omega,
+        bytesToBits_drop_prefix_three]
+    exact Deflate.Spec.decode_go_suffix _ _ [] 10001 _
+      (by rw [Deflate.Spec.bytesToBits_length]; omega)
+      hspec_go
+  -- Use data.size bound to get result.length ≤ maxOutputSize
+  have hdata_le : data.data.toList.length ≤ 256 * 1024 * 1024 := by
+    simp [Array.length_toList, ByteArray.size_data]; omega
+  -- Spec decode on compressed bits at offset 10 (via compress_eq decomposition)
+  have hspec_at10 : Deflate.Spec.decode.go
+      ((Deflate.Spec.bytesToBits (GzipEncode.compress data level)).drop (10 * 8))
+      [] 10001 = some data.data.toList := by
+    obtain ⟨header, trailer, hhsz, _, hceq⟩ := GzipEncode.compress_eq data level
+    rw [hceq]
+    exact hspec_compressed header trailer hhsz
+  -- Apply inflateRaw_complete to get native inflateRaw at offset 10
+  obtain ⟨endPos, hinflRaw⟩ :=
+    inflateRaw_complete _ 10 _ data.data.toList hdata_le 10001 (by omega) hspec_at10
+  -- compressed size ≥ 18 (from compress = 10 + deflated + 8)
+  have hcsz18 : ¬ (GzipEncode.compress data level).size < 18 := by
+    rw [GzipEncode.compress_size]; omega
+  -- ByteArray identity: ⟨⟨data.data.toList⟩⟩ = data
+  have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
+  -- All three remaining facts require knowing the exact endPos value.
+  -- endPos = 10 + (Deflate.deflateRaw data level).size (the trailer start position).
+  -- This requires native-level suffix invariance for inflateLoop: inflateRaw on
+  -- (header ++ deflated ++ trailer) at header.size stops at header.size + deflated.size.
+  -- Not yet proved in the codebase (same blocker as ZlibCorrect.lean's 2 sorry's).
+  -- Once `inflateRaw_endPos_eq` is proved, the tight bound follows from compress_size,
+  -- and the CRC/size checks follow from readUInt32LE_append3_right + readUInt32LE_bytes.
+  have hendPos_tight : endPos + 8 ≤ (GzipEncode.compress data level).size := by sorry
+  have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by omega
+  have hcrc : (Crc32.Native.crc32 0 data ==
+    Binary.readUInt32LE (GzipEncode.compress data level) endPos) = true := by sorry
+  have hsize_match : (data.size.toUInt32 ==
+    Binary.readUInt32LE (GzipEncode.compress data level) (endPos + 4)) = true := by sorry
+  -- Assemble the full decompressSingle computation
+  -- Extract header byte equalities
+  obtain ⟨hb0, hb1, hb2, hb3⟩ := GzipEncode.compress_header_bytes data level
+  -- The `unless cond do throw` pattern becomes `if cond then pure () else throw`.
+  -- We need to show each guard condition is true.
+  have hmagic : ((GzipEncode.compress data level)[0]! == 0x1f &&
+    (GzipEncode.compress data level)[1]! == 0x8b) = true := by
+    rw [hb0, hb1]; decide
+  have hcm : ((GzipEncode.compress data level)[2]! == 8) = true := by
+    rw [hb2]; decide
+  have hflg : ((GzipEncode.compress data level)[3]! == 0) = true := by
+    rw [hb3]; decide
+  set_option maxRecDepth 8192 in
+  simp only [GzipDecode.decompressSingle, bind, Except.bind,
+    hcsz18, ↓reduceIte, pure, Except.pure,
+    hmagic, hcm, hflg, hinflRaw, hendPos8, hba_eq, hcrc, hsize_match]
 
 end Zip.Native
