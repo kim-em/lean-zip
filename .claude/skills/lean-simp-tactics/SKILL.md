@@ -72,6 +72,26 @@ reports them as unused but removing them leaves `match guard (...)` unreduced.
 
 Use `set_option linter.unusedSimpArgs false in` to suppress.
 
+## `have` Bindings That Look Unused but Feed `omega`/`simp`
+
+`omega` and `simp` scan the **entire local context** for usable hypotheses.
+A `have` binding that is never referenced by name may still be critical:
+
+```lean
+have hlen_pos_nat : 0 < lengths[i].toNat := hlen  -- "unused" but omega needs it
+have hlen_le : lengths[i].toNat ≤ maxBits := ...   -- "unused" but omega needs it
+...
+exact foo (by rw [hls_i]; omega)  -- omega closes via hlen_pos_nat + hlen_le
+```
+
+**Before removing a `have`**: Check whether any downstream `omega`, `simp`,
+or `simp_all` could be relying on it. The binding won't appear in grep results
+but `omega` uses it implicitly. Build after each removal to catch breakage.
+
+**Common pattern**: UInt8/UInt16/UInt32 → Nat bridge hypotheses
+(`hlen_pos_nat : 0 < x.toNat := hlen`) exist specifically because `omega`
+works on `Nat`, not on `UIntN`. These are NOT dead code.
+
 ## `Nat.mod_eq_sub_mod` for Inductive Mod Proofs
 
 When proving `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`:
