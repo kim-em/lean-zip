@@ -360,11 +360,11 @@ private theorem decodeStored_inv (br br' : BitReader)
         -- We handle this by splitting on the conditions
         -- Normalize the `unless` checks: `unless c do throw e` becomes
         -- `if c then throw e else pure ()` and pure PUnit.unit = .ok ()
-        simp only [pure, Except.pure, Except.bind, bind] at h
+        simp only [pure, Except.pure] at h
         by_cases hxor : (len ^^^ nlen != 0xFFFF) = true
         · -- xor check fails → throws, contradicts h = .ok
           simp [hxor] at h
-        · simp only [hxor, ite_false] at h
+        · simp only [hxor] at h
           by_cases hsize : output.size + len.toNat > maxOut
           · simp [hsize] at h
           · simp only [hsize, ite_false] at h
@@ -390,7 +390,60 @@ private theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
     br'.data = br.data ∧
     (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     br'.pos ≤ br'.data.size := by
-  sorry
+  induction fuel generalizing br output with
+  | zero => simp [Inflate.decodeHuffman.go] at h
+  | succ n ih =>
+    unfold Inflate.decodeHuffman.go at h
+    cases hlit : litTree.decode br with
+    | error e => rw [hlit] at h; simp [Bind.bind, Except.bind] at h
+    | ok p =>
+      obtain ⟨sym, br₁⟩ := p; rw [hlit] at h; dsimp only [Bind.bind, Except.bind] at h
+      -- Reduce `match pure PUnit.unit` to just the ok branch
+      simp only [pure, Except.pure] at h
+      have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv litTree br br₁ sym hlit hpos hple
+      split at h
+      · -- sym < 256: literal byte
+        split at h
+        · simp at h  -- output.size ≥ maxOut → error
+        · -- recursive call
+          have ⟨hd', hp', hl'⟩ := ih br₁ _ h hpos₁ hple₁
+          exact ⟨hd'.trans hd₁, hp', hl'⟩
+      · split at h
+        · -- sym == 256: end of block
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, rfl⟩ := h
+          exact ⟨hd₁, hpos₁, hple₁⟩
+        · -- sym ≥ 257: length+distance code
+          split at h
+          · simp at h  -- invalid length code → error
+          · -- readBits for length extra → decode dist → readBits dist extra → recursive call
+            -- h is a nested match tree; use split to decompose
+            split at h
+            · simp at h  -- readBits error
+            · rename_i v hrb1_eq
+              -- v = (extraBits, br₂); hrb1_eq : br₁.readBits ... = .ok v
+              split at h
+              · simp at h  -- decode dist error
+              · rename_i v₁ hdist_eq
+                split at h
+                · simp at h  -- invalid distance code
+                · split at h
+                  · simp at h  -- readBits dist extra error
+                  · rename_i v₂ hrb2_eq
+                    split at h
+                    · simp at h  -- distance > output.size
+                    · split at h
+                      · simp at h  -- output.size + length > maxOut
+                      · -- recursive go call remains
+                        obtain ⟨extraBits, br₂⟩ := v
+                        obtain ⟨distSym, br₃⟩ := v₁
+                        obtain ⟨dExtraBits, br₄⟩ := v₂
+                        simp only [] at hrb1_eq hdist_eq hrb2_eq h
+                        have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ _ _ hrb1_eq hpos₁ hple₁
+                        have ⟨hd₃, hpos₃, hple₃⟩ := decode_inv distTree br₂ br₃ distSym hdist_eq hpos₂ hple₂
+                        have ⟨hd₄, hpos₄, hple₄⟩ := readBits_inv br₃ br₄ _ _ hrb2_eq hpos₃ hple₃
+                        have ⟨hd', hp', hl'⟩ := ih br₄ _ h hpos₄ hple₄
+                        exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
 
 /-- Combined: readCLCodeLengths preserves data, hpos, and pos ≤ data.size. -/
 private theorem readCLCodeLengths_inv (br br' : BitReader)
