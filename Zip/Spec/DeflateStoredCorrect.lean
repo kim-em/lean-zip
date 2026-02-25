@@ -671,10 +671,11 @@ private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
 
 /-- Native Level 0 roundtrip: compressing with stored blocks then
     decompressing with the native inflate recovers the original data.
-    The size constraint ensures the default maxOutputSize (256 MiB) suffices
-    and the default fuel (10001 blocks) covers the input. -/
+    The size constraint ensures the default maxOutputSize (1 GiB) suffices
+    and the default fuel (10001 blocks × 65535 bytes/block ≈ 655 MB) covers
+    the input. -/
 theorem inflate_deflateStoredPure (data : ByteArray)
-    (h : data.size ≤ 256 * 1024 * 1024) :
+    (h : data.size ≤ 655000000) :
     Inflate.inflate (deflateStoredPure data) = .ok data := by
   simp only [Inflate.inflate, Inflate.inflateRaw, bind, Except.bind]
   -- Handle fromLengths calls
@@ -683,7 +684,7 @@ theorem inflate_deflateStoredPure (data : ByteArray)
   simp only [hfl, hfd]
   -- Apply the main loop theorem
   have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega)
-    ByteArray.empty ByteArray.empty fixedLit fixedDist 10001 (256 * 1024 * 1024)
+    ByteArray.empty ByteArray.empty fixedLit fixedDist 10001 (1024 * 1024 * 1024)
     (by omega) (by simp [ByteArray.size_empty]; omega)
   simp only [ByteArray.empty_append, ByteArray.size_empty] at hloop
   rw [ByteArray.extract_zero_size] at hloop
