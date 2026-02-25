@@ -161,3 +161,21 @@ For `if` branches appearing in both sides, use `by_cases hcond : condition`
 then `rw [if_pos/if_neg hcond] at h ⊢`.
 
 Note: `split at h ⊢` (multiple targets) is NOT supported — use `by_cases` instead.
+
+## Except Suffix Invariance: When `dsimp`/`simp` Is Unnecessary
+
+In Except monad suffix proofs (`f (brAppend br suffix) = ... brAppend br' suffix`),
+two common false patterns waste build iterations:
+
+1. **After `cases hx : pure_func args | ok val =>`**: The `cases` already
+   reduces the goal's `match` for the `.ok` branch. Do NOT `simp only [hx] at ⊢`
+   — only apply to `h`. Use `simp only [hx] at h; dsimp only [] at h ⊢` if
+   needed, or just `simp only [hx] at h`.
+
+2. **After `rw [if_neg hcond] at h ⊢`**: The `if` expression is fully reduced.
+   A subsequent `simp only [pure, Except.pure] at h ⊢` or `dsimp only [] at h ⊢`
+   often makes no progress. Only add these if the goal still contains unreduced
+   `pure`/`Except.pure` wrappers — check by building first without them.
+
+**Rule of thumb**: Start minimal (just `rw [if_neg hcond] at h ⊢` then the next
+operation), add `dsimp`/`simp` only when the build tells you the goal isn't reduced.
