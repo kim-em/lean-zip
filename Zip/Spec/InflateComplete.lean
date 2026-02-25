@@ -160,9 +160,6 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
               Nat.mod_eq_of_lt (by omega)
             have hclen_conv : hclen_v.toUInt32.toNat = hclen_v :=
               Nat.mod_eq_of_lt (by omega)
-            -- Native decodeCLSymbols
-            have hcl_sz_u16 : clArr.size ≤ UInt16.size := by
-              rw [hcl_sz]; simp [UInt16.size]
             -- Bridge spec decodeCLSymbols call to native
             have hspec_dcl_bridge : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
                 ((Huffman.Spec.allCodes (clArr.toList.map UInt8.toNat) 7).map
@@ -187,7 +184,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
                 (.replicate (hlit_v + 257 + (hdist_v + 1)) 0) 0
                 (hlit_v + 257 + (hdist_v + 1))
                 (hlit_v + 257 + (hdist_v + 1) + 1)
-                codeLengths bits₅ hwf₄ hpos₄ hft hcl_sz_u16
+                codeLengths bits₅ hwf₄ hpos₄ hft (by rw [hcl_sz]; simp [UInt16.size])
                 (by omega) (by simp) hspec_dcl_native
             -- Bridge native extract to spec take/drop
             have hcl_res_sz : codeLengths'.size =

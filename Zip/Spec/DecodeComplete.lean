@@ -14,6 +14,11 @@ The proof layers:
 
 namespace Deflate.Correctness
 
+/-- If `arr[i]? = some val` and `i < arr.size`, then `val = arr[i]!`. -/
+private theorem getElem?_some_eq_getElem! [Inhabited α] {arr : Array α} {i : Nat} {val : α}
+    (hsome : arr[i]? = some val) (h : i < arr.size) : val = arr[i]! := by
+  rw [getElem?_eq_some_getElem! arr i h] at hsome; exact (Option.some.inj hsome).symm
+
 /-- **Completeness for stored blocks**: if the spec `decodeStored` succeeds,
     the native `Inflate.decodeStored` also succeeds with the same output.
 
@@ -130,7 +135,6 @@ theorem huffTree_decode_complete (lengths : Array UInt8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
     (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
-    (hlen_bound : lengths.size ≤ UInt16.size)
     (hsym_bound : sym < lengths.size)
     (hspec : Huffman.Spec.decode
       ((Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits).map
@@ -260,7 +264,7 @@ private theorem decodeLitLen_endOfBlock_inv {litLengths distLengths : List Nat}
       obtain ⟨_, _, h⟩ := decodeLitLen_ge257_isReference hdll hd h256 h256eq
       exact absurd h (by simp)
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 1024 in
 /-- If `decodeLitLen` returns `.reference len dist` and the Huffman decode returns
     `(sym_nat, rest₁)`, then `sym_nat ≥ 257` and the reference chain succeeded:
     there exist all intermediate values (length base/extra, distance Huffman decode,
@@ -387,7 +391,7 @@ theorem decodeHuffman_complete
       -- Get native litTree.decode via huffTree_decode_complete
       obtain ⟨br₁, hdec_lit, hrest₁, hwf₁, hpos₁⟩ :=
         huffTree_decode_complete litLengths 15 (by omega) litTree br
-          sym_nat rest₁ hwf hpos hlit hvlit hlen_lit hsym_bound hspec_sym
+          sym_nat rest₁ hwf hpos hlit hvlit hsym_bound hspec_sym
       -- UInt16 roundtrip — shared across all cases
       have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat :=
         Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hsym_bound hlen_lit)
@@ -511,39 +515,21 @@ theorem decodeHuffman_complete
             rw [Array.getElem?_eq_some_iff] at hdb
             obtain ⟨h, _⟩ := hdb; simp [Deflate.Spec.distBase] at h; exact h
           -- Table value correspondence (spec getElem? → spec getElem!)
-          have hbase_eq : base = Deflate.Spec.lengthBase[sym_nat - 257]! := by
-            have h := getElem?_eq_some_getElem! Deflate.Spec.lengthBase
-              (sym_nat - 257) (by simp [Deflate.Spec.lengthBase]; omega)
-            rw [h] at hlb; exact (Option.some.inj hlb).symm
-          have hextra_eq : extra = Deflate.Spec.lengthExtra[sym_nat - 257]! := by
-            have h := getElem?_eq_some_getElem! Deflate.Spec.lengthExtra
-              (sym_nat - 257) (by simp [Deflate.Spec.lengthExtra]; omega)
-            rw [h] at hle; exact (Option.some.inj hle).symm
-          have hdbase_eq : dBase = Deflate.Spec.distBase[dSym]! := by
-            have h := getElem?_eq_some_getElem! Deflate.Spec.distBase dSym
-              (by simp [Deflate.Spec.distBase]; omega)
-            rw [h] at hdb; exact (Option.some.inj hdb).symm
-          have hdextra_eq : dExtra = Deflate.Spec.distExtra[dSym]! := by
-            have h := getElem?_eq_some_getElem! Deflate.Spec.distExtra dSym
-              (by simp [Deflate.Spec.distExtra]; omega)
-            rw [h] at hde; exact (Option.some.inj hde).symm
+          have hbase_eq : base = Deflate.Spec.lengthBase[sym_nat - 257]! :=
+            getElem?_some_eq_getElem! hlb (by simp [Deflate.Spec.lengthBase]; omega)
+          have hextra_eq : extra = Deflate.Spec.lengthExtra[sym_nat - 257]! :=
+            getElem?_some_eq_getElem! hle (by simp [Deflate.Spec.lengthExtra]; omega)
+          have hdbase_eq : dBase = Deflate.Spec.distBase[dSym]! :=
+            getElem?_some_eq_getElem! hdb (by simp [Deflate.Spec.distBase]; omega)
+          have hdextra_eq : dExtra = Deflate.Spec.distExtra[dSym]! :=
+            getElem?_some_eq_getElem! hde (by simp [Deflate.Spec.distExtra]; omega)
           -- Bounds for readBits_complete (extra ≤ 32 via native table correspondence)
-          have hextra_le : extra ≤ 32 := by
-            rw [hextra_eq]
-            have : (Zip.Native.Inflate.lengthExtra[sym_nat - 257]!).toNat ≤ 32 :=
-              lengthExtra_le_32 ⟨sym_nat - 257, hidx⟩
-            have : (Zip.Native.Inflate.lengthExtra[sym_nat - 257]!).toNat =
-                Deflate.Spec.lengthExtra[sym_nat - 257]! :=
-              lengthExtra_eq ⟨sym_nat - 257, hidx⟩
-            omega
-          have hdextra_le : dExtra ≤ 32 := by
-            rw [hdextra_eq]
-            have : (Zip.Native.Inflate.distExtra[dSym]!).toNat ≤ 32 :=
-              distExtra_le_32 ⟨dSym, hdidx⟩
-            have : (Zip.Native.Inflate.distExtra[dSym]!).toNat =
-                Deflate.Spec.distExtra[dSym]! :=
-              distExtra_eq ⟨dSym, hdidx⟩
-            omega
+          have hextra_le : extra ≤ 32 := hextra_eq ▸
+            (lengthExtra_eq ⟨sym_nat - 257, hidx⟩) ▸
+            (lengthExtra_le_32 ⟨sym_nat - 257, hidx⟩)
+          have hdextra_le : dExtra ≤ 32 := hdextra_eq ▸
+            (distExtra_eq ⟨dSym, hdidx⟩) ▸
+            (distExtra_le_32 ⟨dSym, hdidx⟩)
           have hextraVal_bound : extraVal < 2 ^ extra :=
             Deflate.Spec.readBitsLSB_bound hrb
           have hdExtraVal_bound : dExtraVal < 2 ^ dExtra :=
@@ -564,7 +550,7 @@ theorem decodeHuffman_complete
             simp at hmem_dist_codes; exact hmem_dist_codes.1
           obtain ⟨br₃, hdec_dist, hrest₃, hwf₃, hpos₃⟩ :=
             huffTree_decode_complete distLengths 15 (by omega) distTree br₂
-              dSym bits₃ hwf₂ hpos₂ hdist hvdist hlen_dist hdSym_bound
+              dSym bits₃ hwf₂ hpos₂ hdist hvdist hdSym_bound
               (by rw [hrest₂]; exact hdd)
           -- Native readBits for distance extra
           -- hrd : readBitsLSB dExtra bits₃ = some (dExtraVal, bits₁)
@@ -683,7 +669,7 @@ theorem decodeHuffman_complete
             ((Zip.Native.Inflate.distBase[dSym]!).toNat + dExtraVal.toUInt32.toNat) 0
             ((Zip.Native.Inflate.lengthBase[sym_nat - 257]!).toNat +
               extraVal.toUInt32.toNat)
-          set_option maxRecDepth 2048 in
+          set_option maxRecDepth 1024 in
           have hlz' : Deflate.Spec.resolveLZ77 syms' newOutput.data.toList =
               some result := by rw [hcopy_native]; exact hlz
           exact ih br₄ newOutput syms' result hwf₄ hpos₄ hmax hds_br₄ hlz'
