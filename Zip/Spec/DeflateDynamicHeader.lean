@@ -315,6 +315,7 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
   -- writeCLLengths is defined as exactly the flatMap expression
   simp only [Deflate.Spec.writeCLLengths, List.drop_zero, List.append_assoc]
 
+set_option linter.unusedSimpArgs false in
 /-- `writeDynamicHeader` preserves `BitWriter.wf`. -/
 theorem writeDynamicHeader_wf (bw : BitWriter) (litLens distLens : List Nat)
     (hwf : bw.wf) (hlit_bound : ∀ x ∈ litLens, x ≤ 15) (hdist_bound : ∀ x ∈ distLens, x ≤ 15) :
