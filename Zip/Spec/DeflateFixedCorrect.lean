@@ -404,6 +404,20 @@ theorem inflate_deflateFixed (data : ByteArray)
       (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
+/-- The iterative LZ77 greedy matcher produces the same tokens as the
+    recursive version. Placeholder — proof deferred to a future session. -/
+theorem lz77GreedyIter_eq_lz77Greedy (data : ByteArray) (ws : Nat) :
+    lz77GreedyIter data ws = lz77Greedy data ws := by sorry
+
+/-- Roundtrip for the iterative fixed Huffman compressor.
+    Follows from `lz77GreedyIter_eq_lz77Greedy` + `inflate_deflateFixed`. -/
+theorem inflate_deflateFixedIter (data : ByteArray)
+    (hsize : data.size < 1000000000) :
+    Zip.Native.Inflate.inflate (deflateFixedIter data) = .ok data := by
+  unfold deflateFixedIter
+  rw [lz77GreedyIter_eq_lz77Greedy]
+  exact inflate_deflateFixed data hsize
+
 /-- `deflateLazy` produces a bytestream whose bits are the spec-level
     fixed Huffman encoding of the lazy LZ77 tokens. -/
 theorem deflateLazy_spec (data : ByteArray) :

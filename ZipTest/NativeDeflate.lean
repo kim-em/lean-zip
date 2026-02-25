@@ -272,4 +272,46 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     | .ok result => assert! result == singleByte
     | .error e => throw (IO.userError s!"deflateRaw({level})→inflate failed on single byte: {e}")
 
+  -- Iterative LZ77 conformance tests
+
+  -- lz77GreedyIter matches lz77Greedy on small inputs
+  for (name, data) in [("empty", ByteArray.empty), ("single", singleByte),
+                        ("hello", helloBytes), ("big", big),
+                        ("constant1K", mkConstantData 1024),
+                        ("cyclic1K", mkCyclicData 1024),
+                        ("prng1K", mkPrngData 1024)] do
+    let iterTokens := Zip.Native.Deflate.lz77GreedyIter data
+    let recTokens := Zip.Native.Deflate.lz77Greedy data
+    unless iterTokens == recTokens do
+      throw (IO.userError s!"lz77GreedyIter vs lz77Greedy mismatch on {name}: {iterTokens.size} vs {recTokens.size} tokens")
+
+  -- lz77GreedyIter on large inputs (would stack-overflow with lz77Greedy)
+  for (name, size) in [("64KB", 65536), ("256KB", 262144)] do
+    let data := mkCyclicData size
+    let tokens := Zip.Native.Deflate.lz77GreedyIter data
+    unless tokens.size > 0 do
+      throw (IO.userError s!"lz77GreedyIter produced no tokens on {name}")
+
+  -- deflateFixedIter roundtrip on large inputs via native inflate
+  for (name, data) in [("64KB-const", mkConstantData 65536),
+                        ("256KB-cyclic", mkCyclicData 262144),
+                        ("256KB-prng", mkPrngData 262144)] do
+    let compressed := Zip.Native.Deflate.deflateFixedIter data
+    match Zip.Native.Inflate.inflate compressed with
+    | .ok result => unless result == data do
+        throw (IO.userError s!"deflateFixedIter→inflate mismatch on {name}")
+    | .error e => throw (IO.userError s!"deflateFixedIter→inflate failed on {name}: {e}")
+
+  -- deflateFixedIter → FFI inflate roundtrip on 256KB
+  let largeCyclic := mkCyclicData 262144
+  let compressedLarge := Zip.Native.Deflate.deflateFixedIter largeCyclic
+  let decompLarge ← RawDeflate.decompress compressedLarge
+  assert! decompLarge == largeCyclic
+
+  -- deflateRaw level 1 now uses iterative path — roundtrip 256KB
+  let rawLargeFixed := Zip.Native.Deflate.deflateRaw largeCyclic 1
+  match Zip.Native.Inflate.inflate rawLargeFixed with
+  | .ok result => assert! result == largeCyclic
+  | .error e => throw (IO.userError s!"deflateRaw(1) 256KB roundtrip failed: {e}")
+
   IO.println "  NativeDeflate tests passed."
