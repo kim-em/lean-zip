@@ -445,6 +445,17 @@ private theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
                         have ⟨hd', hp', hl'⟩ := ih br₄ _ h hpos₄ hple₄
                         exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
 
+/-- `decodeHuffman` preserves the BitReader invariant. Wrapper around `decodeHuffman_go_inv`. -/
+private theorem decodeHuffman_inv (litTree distTree : HuffTree)
+    (br br' : BitReader) (output output' : ByteArray) (maxOut : Nat)
+    (h : Inflate.decodeHuffman br output litTree distTree maxOut = .ok (output', br'))
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size) :
+    br'.data = br.data ∧
+    (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+    br'.pos ≤ br'.data.size :=
+  decodeHuffman_go_inv litTree distTree br br' output output' maxOut _ h hpos hple
+
 /-- Combined: readCLCodeLengths preserves data, hpos, and pos ≤ data.size. -/
 private theorem readCLCodeLengths_inv (br br' : BitReader)
     (clLengths clLengths' : Array UInt8) (i numCodeLen : Nat)
@@ -619,6 +630,7 @@ private theorem decodeDynamicTrees_inv (br br' : BitReader)
 
 /-! ### inflateLoop endPos bound -/
 
+set_option maxRecDepth 1024 in
 /-- After a successful `inflateLoop`, the returned endPos ≤ br.data.size.
 
     The proof tracks three invariants through each operation:
@@ -647,8 +659,51 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
       | ok p =>
         obtain ⟨btype, br₂⟩ := p; simp only [hbt] at h
         have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 btype hbt hpos₁ hple₁
-        -- Use sorry for this complex block - will fill in after structure is validated
-        sorry
+        -- Helper: given br' from block decode + bfinal check → endPos ≤ br.data.size
+        have bfinal_or_recurse :
+            ∀ (br' : BitReader) (output' : ByteArray),
+            br'.data = br.data →
+            (br'.bitOff = 0 ∨ br'.pos < br'.data.size) →
+            br'.pos ≤ br'.data.size →
+            (if (bfinal == 1) = true then pure (output', br'.alignToByte.pos)
+             else Inflate.inflateLoop br' output' fixedLit fixedDist maxOut n) =
+              .ok (result, endPos) →
+            endPos ≤ br.data.size := by
+          intro br' output' hd' hpos' hple' hif
+          split at hif
+          · -- bfinal = 1: endPos = br'.alignToByte.pos
+            simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at hif
+            obtain ⟨_, rfl⟩ := hif
+            have := alignToByte_pos_le br' hpos' hple'
+            rw [hd'] at this; exact this
+          · -- bfinal ≠ 1: recursive call
+            have hle := ih br' output' hpos' hple' hif
+            rw [hd'] at hle; exact hle
+        -- Dispatch by block type
+        split at h
+        · -- btype = 0: stored
+          split at h; · simp at h
+          · rename_i v hds; obtain ⟨out', br'⟩ := v; simp only [] at hds h
+            have ⟨hd, hp, hl⟩ := decodeStored_inv br₂ br' output out' maxOut hds
+            exact bfinal_or_recurse br' out' (hd.trans (hd₂.trans hd₁)) hp hl h
+        · -- btype = 1: fixed Huffman
+          split at h; · simp at h
+          · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
+            have ⟨hd, hp, hl⟩ := decodeHuffman_inv fixedLit fixedDist br₂ br' output out'
+              maxOut hdh hpos₂ hple₂
+            exact bfinal_or_recurse br' out' (hd.trans (hd₂.trans hd₁)) hp hl h
+        · -- btype = 2: dynamic Huffman
+          split at h; · simp at h
+          · rename_i v hdt; obtain ⟨litT, distT, br₃⟩ := v; simp only [] at hdt h
+            have ⟨hd₃, hpos₃, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litT distT hdt hpos₂ hple₂
+            split at h; · simp at h
+            · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
+              unfold Inflate.decodeHuffman at hdh
+              have ⟨hd, hp, hl⟩ := decodeHuffman_go_inv litT distT br₃ br' output out'
+                maxOut _ hdh hpos₃ hple₃
+              exact bfinal_or_recurse br' out' (hd.trans (hd₃.trans (hd₂.trans hd₁))) hp hl h
+        · -- btype ≥ 3: reserved → error
+          simp at h
 
 /-- After a successful `inflateRaw`, the returned endPos ≤ data.size. -/
 theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
@@ -665,7 +720,23 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
     | ok fixedDist =>
       simp only [hfdist] at h
       have hple : startPos ≤ data.size := by
-        sorry
+        -- If startPos > data.size, readBit errors, inflateLoop errors, contradicting h.
+        by_cases hle : startPos ≤ data.size
+        · exact hle
+        · exfalso
+          have hgt : startPos ≥ data.size := by omega
+          -- inflateLoop fuel+1 starts with readBits 1 → readBit → checks pos ≥ data.size
+          -- The first operation in inflateLoop is readBits 1, which calls readBit.
+          -- readBit checks pos ≥ data.size and errors if so.
+          have hfail : (BitReader.mk data startPos 0).readBit =
+              .error "BitReader: unexpected end of input" := by
+            simp only [BitReader.readBit]
+            simp [show startPos ≥ data.size from hgt]
+          -- inflateLoop fuel+1 → readBits 1 → readBit → error
+          -- This contradicts h : ... = .ok (result, endPos)
+          simp only [Inflate.inflateLoop, bind, Except.bind,
+            BitReader.readBits, BitReader.readBits.go, hfail] at h
+          simp at h
       exact inflateLoop_endPos_le ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOut 10001 result endPos (Or.inl rfl) hple h
 
