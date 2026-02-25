@@ -4,6 +4,7 @@ import Zip.Spec.BinaryCorrect
 import Zip.Spec.DeflateSuffix
 import Zip.Spec.InflateComplete
 import Zip.Spec.GzipCorrect
+import Zip.Spec.InflateSuffix
 
 /-!
 # Zlib framing roundtrip (RFC 1950)
@@ -149,6 +150,13 @@ private theorem bytesToBits_drop_prefix_three (a b c : ByteArray) :
   rw [bytesToBits_append, bytesToBits_append, List.append_assoc,
     ← Deflate.Spec.bytesToBits_length a, List.drop_left]
 
+/-- Two-component version: dropping `a.size * 8` bits from `bytesToBits (a ++ b)` gives
+    `bytesToBits b`. -/
+private theorem bytesToBits_drop_prefix (a b : ByteArray) :
+    (Deflate.Spec.bytesToBits (a ++ b)).drop (a.size * 8) =
+    Deflate.Spec.bytesToBits b := by
+  rw [bytesToBits_append, ← Deflate.Spec.bytesToBits_length a, List.drop_left]
+
 /-! ## inflateRaw at offset via correctness + completeness -/
 
 /-- If `inflate deflated = .ok data`, then the spec decode succeeds on
@@ -216,14 +224,42 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
   -- compressed size ≥ 6 (from compress = 2 + deflated + 4)
   have hcsz6 : ¬ (ZlibEncode.compress data level).size < 6 := by
     rw [ZlibEncode.compress_size]; omega
-  -- Tight endPos bound: endPos + 4 ≤ compressed.size
-  -- Requires showing inflateRaw stops within the DEFLATE portion (endPos ≤ 2 + deflated.size).
-  -- Blocked on inflateLoop endPos tracking infrastructure (same as inflateLoop_endPos_le).
-  have hendPos_tight : endPos + 4 ≤ (ZlibEncode.compress data level).size := by sorry
+  -- Tight endPos bound via suffix independence:
+  -- Run inflateRaw on header ++ deflated (no trailer) → get endPos' ≤ (header ++ deflated).size
+  -- Extend with trailer via inflateRaw_suffix → same endPos' on full compressed data
+  -- By injectivity with hinflRaw: endPos = endPos', so endPos + 4 ≤ compress.size
+  have hendPos_tight : endPos + 4 ≤ (ZlibEncode.compress data level).size := by
+    obtain ⟨header, trailer, hhsz, hceq⟩ := ZlibEncode.compress_eq data level
+    -- Spec decode on header ++ deflated (two-component, no suffix needed)
+    have hspec_hd : Deflate.Spec.decode.go
+        ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (2 * 8))
+        [] 10001 = some data.data.toList := by
+      rw [show 2 * 8 = header.size * 8 from by omega, bytesToBits_drop_prefix]
+      exact hspec_go
+    -- inflateRaw on header ++ deflated succeeds
+    obtain ⟨endPos', hinflRaw'⟩ :=
+      inflateRaw_complete _ 2 _ data.data.toList hdata_le 10001 (by omega) hspec_hd
+    -- Extend with trailer via suffix independence
+    have hinflSuffix := inflateRaw_suffix (header ++ Deflate.deflateRaw data level)
+      trailer 2 (256 * 1024 * 1024) ⟨⟨data.data.toList⟩⟩ endPos' hinflRaw'
+    -- Rewrite (header ++ deflated) ++ trailer = compress data level
+    rw [← hceq] at hinflSuffix
+    -- By injectivity: endPos = endPos'
+    have heq : endPos = endPos' := by
+      have h := hinflRaw.symm.trans hinflSuffix
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      exact h.2
+    -- endPos' ≤ (header ++ deflated).size = 2 + deflated.size
+    have hle := inflateRaw_endPos_le _ 2 _ _ _ hinflRaw'
+    rw [ByteArray.size_append, hhsz] at hle
+    rw [heq, ZlibEncode.compress_size]
+    omega
   have hendPos4 : ¬ (endPos + 4 > (ZlibEncode.compress data level).size) := by omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
   -- Adler32 trailer match: the 4 BE bytes at endPos encode adler32(1, data).
-  -- Requires endPos = 2 + deflated.size (blocked on endPos tracking infrastructure).
+  -- Needs inflateRaw_endPos_exact (endPos = 2 + deflated.size), which requires
+  -- proving inflate consumes exactly the encoded DEFLATE bytes — a new theorem.
+  -- Currently blocked: inflateRaw_endPos_le gives only ≤, not =.
   have hadler : (Adler32.Native.adler32 1 data ==
     (ZlibEncode.compress data level)[endPos]!.toUInt32 <<< 24 |||
       (ZlibEncode.compress data level)[endPos + 1]!.toUInt32 <<< 16 |||
