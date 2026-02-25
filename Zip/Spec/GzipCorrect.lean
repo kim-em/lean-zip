@@ -1038,7 +1038,69 @@ private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suf
       .ok (result, br')) :
     Inflate.decodeCLSymbols clTree (brAppend br suffix) codeLengths idx totalCodes fuel =
       .ok (result, brAppend br' suffix) := by
-  sorry
+  induction fuel generalizing br codeLengths idx with
+  | zero => unfold Inflate.decodeCLSymbols at h; simp at h
+  | succ n ih =>
+    unfold Inflate.decodeCLSymbols at h ⊢
+    by_cases hge : idx ≥ totalCodes
+    · rw [if_pos hge] at h ⊢
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
+      obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
+    · rw [if_neg hge] at h ⊢
+      simp only [bind, Except.bind] at h ⊢
+      cases hd : clTree.decode br with
+      | error e => simp [hd] at h
+      | ok p =>
+        obtain ⟨sym, br₁⟩ := p; simp only [hd] at h
+        rw [huffDecode_append clTree br suffix sym br₁ hd]; dsimp only []
+        -- sym < 16: literal code length
+        by_cases hs16 : sym < 16
+        · rw [if_pos hs16] at h ⊢; exact ih br₁ _ (idx + 1) h
+        · rw [if_neg hs16] at h ⊢
+          -- sym == 16: repeat previous
+          by_cases hs16eq : (sym == 16) = true
+          · rw [if_pos hs16eq] at h ⊢
+            by_cases hidx0 : (idx == 0) = true
+            · rw [if_pos hidx0] at h ⊢; simp at h
+            · rw [if_neg hidx0] at h ⊢
+              simp only [pure, Except.pure] at h ⊢
+              cases hrb : br₁.readBits 2 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
+                rw [readBits_append br₁ suffix 2 rep br₂ hrb]; dsimp only []
+                by_cases hgt : idx + (rep.toNat + 3) > totalCodes
+                · rw [if_pos hgt] at h ⊢; simp at h
+                · rw [if_neg hgt] at h ⊢
+                  exact ih br₂ _ _ h
+          · rw [if_neg hs16eq] at h ⊢
+            -- sym == 17: repeat 0 (short)
+            by_cases hs17 : (sym == 17) = true
+            · rw [if_pos hs17] at h ⊢
+              cases hrb : br₁.readBits 3 with
+              | error e => simp [hrb] at h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
+                rw [readBits_append br₁ suffix 3 rep br₂ hrb]; dsimp only []
+                by_cases hgt : idx + (rep.toNat + 3) > totalCodes
+                · rw [if_pos hgt] at h ⊢; simp at h
+                · rw [if_neg hgt] at h ⊢
+                  simp only [pure, Except.pure] at h ⊢
+                  exact ih br₂ _ _ h
+            · rw [if_neg hs17] at h ⊢
+              -- sym == 18: repeat 0 (long)
+              by_cases hs18 : (sym == 18) = true
+              · rw [if_pos hs18] at h ⊢
+                cases hrb : br₁.readBits 7 with
+                | error e => simp [hrb] at h
+                | ok p =>
+                  obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
+                  rw [readBits_append br₁ suffix 7 rep br₂ hrb]; dsimp only []
+                  by_cases hgt : idx + (rep.toNat + 11) > totalCodes
+                  · rw [if_pos hgt] at h ⊢; simp at h
+                  · rw [if_neg hgt] at h ⊢
+                    exact ih br₂ _ _ h
+              · rw [if_neg hs18] at h ⊢; simp at h
 
 /-- decodeDynamicTrees with appended suffix. -/
 private theorem decodeDynamicTrees_append (br : BitReader) (suffix : ByteArray)
