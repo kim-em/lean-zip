@@ -565,7 +565,57 @@ private theorem decodeDynamicTrees_inv (br br' : BitReader)
     br'.data = br.data ∧
     (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     br'.pos ≤ br'.data.size := by
-  sorry
+  -- decodeDynamicTrees is a sequential chain of readBits, readCLCodeLengths, decodeCLSymbols
+  simp only [Inflate.decodeDynamicTrees] at h
+  dsimp only [Bind.bind, Except.bind] at h
+  -- readBits 5 (hlit)
+  split at h
+  · simp at h
+  · rename_i v₁ hrb1_eq
+    obtain ⟨hlit_val, br₁⟩ := v₁; simp only [] at hrb1_eq h
+    have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 5 hlit_val hrb1_eq hpos hple
+    -- readBits 5 (hdist)
+    split at h
+    · simp at h
+    · rename_i v₂ hrb2_eq
+      obtain ⟨hdist_val, br₂⟩ := v₂; simp only [] at hrb2_eq h
+      have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 5 hdist_val hrb2_eq hpos₁ hple₁
+      -- readBits 4 (hclen)
+      split at h
+      · simp at h
+      · rename_i v₃ hrb3_eq
+        obtain ⟨hclen_val, br₃⟩ := v₃; simp only [] at hrb3_eq h
+        have ⟨hd₃, hpos₃, hple₃⟩ := readBits_inv br₂ br₃ 4 hclen_val hrb3_eq hpos₂ hple₂
+        -- readCLCodeLengths
+        split at h
+        · simp at h
+        · rename_i v₄ hrcl_eq
+          obtain ⟨clLengths, br₄⟩ := v₄; simp only [] at hrcl_eq h
+          have ⟨hd₄, hpos₄, hple₄⟩ := readCLCodeLengths_inv br₃ br₄ _ clLengths _ _ hrcl_eq hpos₃ hple₃
+          -- HuffTree.fromLengths (pure, no BitReader change)
+          split at h
+          · simp at h
+          · rename_i clTree _
+            -- decodeCLSymbols
+            split at h
+            · simp at h
+            · rename_i v₅ hdcl_eq
+              obtain ⟨codeLengths, br₅⟩ := v₅; simp only [] at hdcl_eq h
+              have ⟨hd₅, hpos₅, hple₅⟩ := decodeCLSymbols_inv clTree br₄ br₅
+                _ codeLengths _ _ _ hdcl_eq hpos₄ hple₄
+              -- HuffTree.fromLengths (litTree) — pure
+              split at h
+              · simp at h
+              · rename_i litTree' _
+                -- HuffTree.fromLengths (distTree) — pure
+                split at h
+                · simp at h
+                · rename_i distTree' _
+                  -- h : pure (litTree', distTree', br₅) = Except.ok (litTree, distTree, br')
+                  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+                  obtain ⟨_, _, rfl⟩ := h
+                  exact ⟨hd₅.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))),
+                         hpos₅, hple₅⟩
 
 /-! ### inflateLoop endPos bound -/
 
