@@ -110,6 +110,72 @@ theorem readUInt16LE_append_right (a b : ByteArray) (offset : Nat)
       getElem!_append_right a b offset (by omega),
       getElem!_append_right a b (offset + 1) (by omega)]
 
+/-! ## Size lemmas -/
+
+@[simp] theorem writeUInt32LE_size (v : UInt32) : (writeUInt32LE v).size = 4 := rfl
+
+@[simp] theorem writeUInt16LE_size (v : UInt16) : (writeUInt16LE v).size = 2 := rfl
+
+/-! ## UInt64 roundtrip -/
+
+theorem readUInt64LE_writeUInt64LE (val : UInt64) :
+    readUInt64LE (writeUInt64LE val) 0 = val := by
+  simp only [readUInt64LE, writeUInt64LE]
+  rw [readUInt32LE_append_left _ _ 0 (by simp),
+      readUInt32LE_writeUInt32LE,
+      show 0 + 4 = (writeUInt32LE val.toUInt32).size + 0 from by simp,
+      readUInt32LE_append_right _ _ 0 (by simp),
+      readUInt32LE_writeUInt32LE]
+  bv_decide
+
+/-! ## Triple-append indexing -/
+
+/-- Index into the left part of a triple concatenation. -/
+theorem getElem!_append3_left (a b c : ByteArray) (i : Nat) (h : i < a.size) :
+    (a ++ b ++ c)[i]! = a[i]! := by
+  rw [getElem!_append_left (a ++ b) c i (by simp [ByteArray.size_append]; omega),
+      getElem!_append_left a b i h]
+
+/-- Index into the middle part of a triple concatenation. -/
+theorem getElem!_append3_mid (a b c : ByteArray) (i : Nat) (h : i < b.size) :
+    (a ++ b ++ c)[a.size + i]! = b[i]! := by
+  rw [getElem!_append_left (a ++ b) c (a.size + i) (by simp [ByteArray.size_append]; omega),
+      getElem!_append_right a b i h]
+
+/-- Index into the right part of a triple concatenation. -/
+theorem getElem!_append3_right (a b c : ByteArray) (i : Nat) (h : i < c.size) :
+    (a ++ b ++ c)[a.size + b.size + i]! = c[i]! := by
+  rw [show a.size + b.size + i = (a ++ b).size + i from by simp [ByteArray.size_append],
+      getElem!_append_right (a ++ b) c i h]
+
+/-! ## Triple-append read lemmas -/
+
+/-- Read UInt32LE from the middle part of a triple concatenation. -/
+theorem readUInt32LE_append3_mid (a b c : ByteArray) (offset : Nat)
+    (h : offset + 4 ≤ b.size) :
+    readUInt32LE (a ++ b ++ c) (a.size + offset) = readUInt32LE b offset := by
+  unfold readUInt32LE
+  rw [show a.size + offset + 1 = a.size + (offset + 1) from by omega,
+      show a.size + offset + 2 = a.size + (offset + 2) from by omega,
+      show a.size + offset + 3 = a.size + (offset + 3) from by omega,
+      getElem!_append3_mid a b c offset (by omega),
+      getElem!_append3_mid a b c (offset + 1) (by omega),
+      getElem!_append3_mid a b c (offset + 2) (by omega),
+      getElem!_append3_mid a b c (offset + 3) (by omega)]
+
+/-- Read UInt32LE from the right part of a triple concatenation. -/
+theorem readUInt32LE_append3_right (a b c : ByteArray) (offset : Nat)
+    (h : offset + 4 ≤ c.size) :
+    readUInt32LE (a ++ b ++ c) (a.size + b.size + offset) = readUInt32LE c offset := by
+  unfold readUInt32LE
+  rw [show a.size + b.size + offset + 1 = a.size + b.size + (offset + 1) from by omega,
+      show a.size + b.size + offset + 2 = a.size + b.size + (offset + 2) from by omega,
+      show a.size + b.size + offset + 3 = a.size + b.size + (offset + 3) from by omega,
+      getElem!_append3_right a b c offset (by omega),
+      getElem!_append3_right a b c (offset + 1) (by omega),
+      getElem!_append3_right a b c (offset + 2) (by omega),
+      getElem!_append3_right a b c (offset + 3) (by omega)]
+
 /-! ## Big-endian UInt32 roundtrip (for zlib Adler32 trailer) -/
 
 /-- Inline big-endian byte roundtrip matching the zlib encoder Adler32 pattern. -/
