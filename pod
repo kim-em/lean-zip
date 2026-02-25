@@ -25,6 +25,7 @@ import datetime
 import fcntl
 import json
 import os
+import random
 import re
 import signal
 import subprocess
@@ -702,15 +703,17 @@ def _tool_detail(name: str, inp: dict, state: AgentState) -> str:
 # ---------------------------------------------------------------------------
 
 def _choose_draining(config: dict, draining: dict) -> str | None:
-    """Pick a draining worker type that has available work.
+    """Pick a random draining worker type that has available work.
 
     For types with issue_label, check per-label queue depth via
-    `coordination queue-depth <label>`. Config order = priority order
-    (feature > review > summarize > meditate by default).
+    `coordination queue-depth <label>`. Shuffled so no type is
+    systematically starved.
     For types without issue_label, always consider them available.
     Returns None if no draining type has work.
     """
-    for name, wt in draining.items():
+    items = list(draining.items())
+    random.shuffle(items)
+    for name, wt in items:
         issue_label = wt.get("issue_label", "")
         if issue_label:
             try:
