@@ -404,10 +404,94 @@ theorem inflate_deflateFixed (data : ByteArray)
       (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
+/-! ## Iterative LZ77 equivalence -/
+
+/-- The `go` helper is identical between `lz77GreedyIter` and `lz77Greedy`. -/
+private theorem go_eq (data : ByteArray) (p1 p2 i maxLen : Nat) :
+    lz77GreedyIter.go data p1 p2 i maxLen = lz77Greedy.go data p1 p2 i maxLen := by
+  induction h : maxLen - i using Nat.strongRecOn generalizing i with
+  | _ n ih =>
+    unfold lz77GreedyIter.go lz77Greedy.go
+    split
+    · split
+      · exact ih _ (by omega) _ rfl
+      · rfl
+    · rfl
+
+/-- The `countMatch` helper is identical between `lz77GreedyIter` and `lz77Greedy`. -/
+private theorem countMatch_eq (data : ByteArray) (p1 p2 maxLen : Nat) :
+    lz77GreedyIter.countMatch data p1 p2 maxLen =
+    lz77Greedy.countMatch data p1 p2 maxLen := by
+  simp only [lz77GreedyIter.countMatch, lz77Greedy.countMatch]
+  exact go_eq data p1 p2 0 maxLen
+
+/-- The `updateHashes` helper is identical between `lz77GreedyIter` and `lz77Greedy`. -/
+private theorem updateHashes_eq (data : ByteArray) (hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool)
+    (pos j matchLen : Nat) :
+    lz77GreedyIter.updateHashes data hashSize hashTable hashValid pos j matchLen =
+    lz77Greedy.updateHashes data hashSize hashTable hashValid pos j matchLen := by
+  induction h : matchLen - j using Nat.strongRecOn generalizing j hashTable hashValid with
+  | _ n ih =>
+    unfold lz77GreedyIter.updateHashes lz77Greedy.updateHashes
+    split
+    · split
+      · exact ih _ (by omega) _ _ _ rfl
+      · exact ih _ (by omega) _ _ _ rfl
+    · rfl
+
+/-- The iterative `trailing` is the accumulator version of recursive `trailing`. -/
+private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
+    lz77GreedyIter.trailing data pos acc =
+    acc ++ (lz77Greedy.trailing data pos).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
+  | _ n ih =>
+    unfold lz77GreedyIter.trailing lz77Greedy.trailing
+    split
+    · rw [ih _ (by omega) _ _ rfl]
+      rw [List.toArray_cons]
+      rw [← Array.append_assoc, Array.push_eq_append]
+    · simp
+
+/-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop`. -/
+private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
+    (acc : Array LZ77Token) :
+    lz77GreedyIter.mainLoop data windowSize hashSize hashTable hashValid pos acc =
+    acc ++ (lz77Greedy.mainLoop data windowSize hashSize hashTable hashValid pos).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable hashValid with
+  | _ n ih =>
+    unfold lz77GreedyIter.mainLoop lz77Greedy.mainLoop
+    simp only [show @lz77GreedyIter.hash3 = @lz77Greedy.hash3 from rfl,
+      countMatch_eq, updateHashes_eq]
+    split
+    · split
+      · split
+        · split
+          · rw [ih _ (by omega) _ _ _ _ rfl]
+            rw [List.toArray_cons]
+            rw [← Array.append_assoc, Array.push_eq_append]
+          · rw [ih _ (by omega) _ _ _ _ rfl]
+            rw [List.toArray_cons]
+            rw [← Array.append_assoc, Array.push_eq_append]
+        · rw [ih _ (by omega) _ _ _ _ rfl]
+          rw [List.toArray_cons]
+          rw [← Array.append_assoc, Array.push_eq_append]
+      · rw [ih _ (by omega) _ _ _ _ rfl]
+        rw [List.toArray_cons]
+        rw [← Array.append_assoc, Array.push_eq_append]
+    · exact trailing_eq data pos acc
+
 /-- The iterative LZ77 greedy matcher produces the same tokens as the
-    recursive version. Placeholder — proof deferred to a future session. -/
+    recursive version. -/
 theorem lz77GreedyIter_eq_lz77Greedy (data : ByteArray) (ws : Nat) :
-    lz77GreedyIter data ws = lz77Greedy data ws := by sorry
+    lz77GreedyIter data ws = lz77Greedy data ws := by
+  unfold lz77GreedyIter lz77Greedy
+  split
+  · rw [trailing_eq]
+    simp
+  · rw [mainLoop_eq]
+    simp
 
 /-- Roundtrip for the iterative fixed Huffman compressor.
     Follows from `lz77GreedyIter_eq_lz77Greedy` + `inflate_deflateFixed`. -/
