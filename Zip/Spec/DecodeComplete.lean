@@ -17,7 +17,7 @@ namespace Deflate.Correctness
 /-- If `arr[i]? = some val` and `i < arr.size`, then `val = arr[i]!`. -/
 private theorem getElem?_some_eq_getElem! [Inhabited α] {arr : Array α} {i : Nat} {val : α}
     (hsome : arr[i]? = some val) (h : i < arr.size) : val = arr[i]! := by
-  rw [getElem?_eq_some_getElem! arr i h] at hsome; exact (Option.some.inj hsome).symm
+  rw [Array.getElem?_eq_some_getElem! arr i h] at hsome; exact (Option.some.inj hsome).symm
 
 /-- **Completeness for stored blocks**: if the spec `decodeStored` succeeds,
     the native `Inflate.decodeStored` also succeeds with the same output.

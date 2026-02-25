@@ -1,5 +1,6 @@
 import Zip.Spec.HuffmanCorrectLoop
 import Zip.Spec.BitstreamComplete
+import ZipForStd.ByteArray
 
 /-!
 # Block-Level Decode Correctness
@@ -68,7 +69,7 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
       have hleaf :=
         Deflate.Correctness.fromLengths_hasLeaf lengths maxBits hmb tree htree hv v cw (to_codes hmem_table)
       have hdb' := Deflate.Correctness.decodeBits_of_hasLeaf tree cw v.toUInt16 rest hleaf
-      rw [hbits] at hdb; rw [hdb'] at hdb; simp at hdb
+      rw [hbits, hdb'] at hdb; simp at hdb
   | some (sym, rest) =>
     simp only [Option.map]
     obtain ⟨cw, hleaf, hbits⟩ :=
@@ -80,7 +81,7 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
     rw [hbits]; exact hdec.symm
 
 /-- If `sym == n` is true for UInt16, then `sym.toNat = n.toNat`. -/
-protected theorem symVal_of_beq {sym : UInt16} {n : UInt16}
+theorem symVal_of_beq {sym : UInt16} {n : UInt16}
     (h : (sym == n) = true) : sym.toNat = n.toNat := by
   rw [beq_iff_eq] at h; exact congrArg UInt16.toNat h
 
@@ -321,43 +322,37 @@ theorem readBits_wf (br : Zip.Native.BitReader)
 
 /-! ## Table correspondence lemmas -/
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 theorem lengthBase_eq : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthBase[i.val]!).toNat =
     (Deflate.Spec.lengthBase[i.val]!) := by decide
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 theorem lengthExtra_eq : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthExtra[i.val]!).toNat =
     (Deflate.Spec.lengthExtra[i.val]!) := by decide
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 theorem distBase_eq : ∀ i : Fin 30,
     (Zip.Native.Inflate.distBase[i.val]!).toNat =
     (Deflate.Spec.distBase[i.val]!) := by decide
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 theorem distExtra_eq : ∀ i : Fin 30,
     (Zip.Native.Inflate.distExtra[i.val]!).toNat =
     (Deflate.Spec.distExtra[i.val]!) := by decide
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 theorem lengthExtra_le_32 : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthExtra[i.val]!).toNat ≤ 32 := by decide
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 theorem distExtra_le_32 : ∀ i : Fin 30,
     (Zip.Native.Inflate.distExtra[i.val]!).toNat ≤ 32 := by decide
 
-set_option maxRecDepth 1024 in
+set_option maxRecDepth 512 in
 private theorem spec_distBase_pos : ∀ i : Fin 30,
     (Deflate.Spec.distBase[i.val]!) ≥ 1 := by decide
-
-/-- `arr[i]? = some arr[i]!` when `i` is in bounds.
-    Combines `getElem!_pos` and `getElem?_pos` into a single step. -/
-theorem getElem?_eq_some_getElem! [Inhabited α] (arr : Array α) (i : Nat)
-    (h : i < arr.size) : arr[i]? = some arr[i]! := by
-  rw [getElem!_pos arr i h]; exact getElem?_pos arr i h
 
 /-- `ba[j]!` equals `ba.data.toList[j]!` when `j` is in bounds. -/
 private theorem ba_getElem!_eq_toList (ba : ByteArray) (j : Nat) (hj : j < ba.size) :
@@ -366,20 +361,6 @@ private theorem ba_getElem!_eq_toList (ba : ByteArray) (j : Nat) (hj : j < ba.si
       getElem!_pos ba.data.toList j (by simp [Array.length_toList, ByteArray.size_data]; exact hj)]
   show ba.data[j] = ba.data.toList[j]
   rw [Array.getElem_toList]
-
-/-- `ByteArray.push` preserves earlier elements: for `j < buf.size`,
-    `(buf.push b)[j]! = buf[j]!`. -/
-private theorem push_getElem_lt (buf : ByteArray) (b : UInt8) (j : Nat)
-    (hj : j < buf.size) :
-    (buf.push b)[j]! = buf[j]! := by
-  have hj' : j < (buf.push b).size := by simp [ByteArray.size_push]; omega
-  rw [getElem!_pos (buf.push b) j hj', getElem!_pos buf j hj]
-  exact Array.getElem_push_lt hj
-
-/-- `ByteArray.push` appends one element to `data.toList`. -/
-private theorem push_data_toList (buf : ByteArray) (b : UInt8) :
-    (buf.push b).data.toList = buf.data.toList ++ [b] := by
-  simp [ByteArray.push, Array.toList_push]
 
 /-- Generalized loop invariant for `copyLoop`. After running from index
     `k`, the result has the original buffer contents plus `List.ofFn` of
@@ -411,9 +392,9 @@ private theorem copyLoop_spec (output : ByteArray) (start distance : Nat)
     · omega
     · simp [ByteArray.size_push]; omega
     · intro j hj
-      rw [push_getElem_lt _ _ _ (by rw [hbuf_size]; omega)]
+      rw [ByteArray.push_getElem!_lt _ _ _ (by rw [hbuf_size]; omega)]
       exact hbuf_prefix j hj
-    · rw [push_data_toList, hbuf_data, List.append_assoc]
+    · rw [ByteArray.push_data_toList, hbuf_data, List.append_assoc]
       congr 1
       rw [hnew_eq, ba_getElem!_eq_toList _ _ hidx_lt]
       symm
@@ -438,7 +419,7 @@ theorem copyLoop_eq_ofFn
   exact copyLoop_spec output (output.size - distance) distance 0 length output
     hd_pos (by omega) (Nat.zero_le _) rfl (fun _ _ => rfl) (by simp [List.ofFn])
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- If the native Huffman block decoder succeeds, the spec's `decodeSymbols`
     produces a corresponding list of LZ77 symbols, and resolving those symbols
     with the current accumulator produces the same output.
@@ -541,7 +522,6 @@ theorem decodeHuffman_correct
           simp only [Deflate.Spec.decodeSymbols, bind, Option.bind, hlit_dec, pure]
         · -- sym > 256: length/distance code
           rename_i hge hne256
-          -- sym.toNat > 256, sym.toNat ≠ 256
           have hsym_ge : sym.toNat ≥ 257 := by
             have h1 : sym.toNat ≥ 256 := Nat.le_of_not_lt hge
             have h2 : sym.toNat ≠ 256 := by
@@ -657,10 +637,10 @@ theorem decodeHuffman_correct
                           have hne256 : (sym.toNat == 256) = false := by
                             cases heq : sym.toNat == 256 <;> simp_all [beq_iff_eq]
                           simp only [hne256, Bool.false_eq_true, ↓reduceIte]
-                          have h1 := getElem?_eq_some_getElem! Deflate.Spec.lengthBase _ hidx
-                          have h2 := getElem?_eq_some_getElem! Deflate.Spec.lengthExtra _ hidx
-                          have h3 := getElem?_eq_some_getElem! Deflate.Spec.distBase _ hdidx
-                          have h4 := getElem?_eq_some_getElem! Deflate.Spec.distExtra _ hdidx
+                          have h1 := Array.getElem?_eq_some_getElem! Deflate.Spec.lengthBase _ hidx
+                          have h2 := Array.getElem?_eq_some_getElem! Deflate.Spec.lengthExtra _ hidx
+                          have h3 := Array.getElem?_eq_some_getElem! Deflate.Spec.distBase _ hdidx
+                          have h4 := Array.getElem?_eq_some_getElem! Deflate.Spec.distExtra _ hdidx
                           simp only [h1, h2, h_extra, h3, h4, h_dist,
                             h_dextra, pure]
                         -- Build decodeSymbols result
@@ -686,7 +666,7 @@ theorem decodeHuffman_correct
                           omega
                         have hdist_le' : ¬(Deflate.Spec.distBase[distSym.toNat]! +
                             dExtraBits.toNat > output.data.toList.length) := by
-                          rw [Array.length_toList, ByteArray.size_data,
+                          rw [ByteArray.data_toList_length,
                             ← hdist_val_eq]; exact hdist_ok
                         simp only [hdist_pos', hdist_le', decide_false,
                           Bool.false_or, Bool.false_eq_true, ↓reduceIte]
@@ -702,8 +682,8 @@ theorem decodeHuffman_correct
                           (by rw [Nat.not_lt] at hdist_ok; exact hdist_ok)
                         -- Rewrite copyLoop result, native→spec table values,
                         -- and output.size→output.data.toList.length
-                        have hsize : output.size = output.data.toList.length := by
-                          simp [Array.length_toList, ByteArray.size_data]
+                        have hsize : output.size = output.data.toList.length :=
+                          (ByteArray.data_toList_length output).symm
                         rw [hcopy, hlen_eq, hdist_val_eq, hsize] at hlz
                         exact hlz
 

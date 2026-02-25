@@ -40,6 +40,20 @@ theorem extract_append_left (a b : ByteArray) :
     (a ++ b).extract 0 a.size = a := by
   apply ByteArray.ext; simp
 
+/-- `ByteArray.push` appends one element to `data.toList`. -/
+theorem push_data_toList (buf : ByteArray) (b : UInt8) :
+    (buf.push b).data.toList = buf.data.toList ++ [b] := by
+  simp [ByteArray.push, Array.toList_push]
+
+/-- `ByteArray.push` preserves earlier elements: for `j < buf.size`,
+    `(buf.push b)[j]! = buf[j]!`. -/
+theorem push_getElem!_lt (buf : ByteArray) (b : UInt8) (j : Nat)
+    (hj : j < buf.size) :
+    (buf.push b)[j]! = buf[j]! := by
+  have hj' : j < (buf.push b).size := by simp [ByteArray.size_push]; omega
+  rw [getElem!_pos (buf.push b) j hj', getElem!_pos buf j hj]
+  exact Array.getElem_push_lt hj
+
 /-! ## `set!` interaction lemmas -/
 
 /-- ByteArray.getElem! is the same as Array.getElem! on the underlying data. -/
