@@ -4,6 +4,9 @@ import Zip.Native.Gzip
 import Zip.Native.Crc32
 import Zip.Native.Adler32
 
+/-! Performance and conformance tests for native inflate, gzip, zlib, and checksums
+    across varying data sizes and compression patterns. -/
+
 namespace ZipTest.NativeScale
 
 inductive Pattern where | constant | cyclic | prng

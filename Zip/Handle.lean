@@ -1,7 +1,5 @@
--- Shims for IO.FS.Handle operations missing from Lean 4 stdlib.
--- Upstream PR: https://github.com/leanprover/lean4/pull/11442
--- Remove this file when seek/tell land in the stdlib.
-
+/-! Shims for missing Lean 4 stdlib file handle operations (seek, fileSize, symlink creation).
+    Remove when upstream leanprover/lean4#11442 lands. -/
 namespace Handle
 
 /-- Seek to an absolute byte position in a file handle.

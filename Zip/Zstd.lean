@@ -1,3 +1,5 @@
+/-! FFI bindings and streaming APIs for Zstandard compression/decompression
+    with configurable compression levels. -/
 namespace Zstd
 
 /-- Compress data in Zstandard format.

@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for tar archive creation, listing, extraction, tar.gz roundtrips, and PAX record parsing. -/
+
 def ZipTest.Tar.tests : IO Unit := do
   -- Create a temp directory with test files
   let tarTestDir : System.FilePath := "/tmp/lean-zlib-tar-test"

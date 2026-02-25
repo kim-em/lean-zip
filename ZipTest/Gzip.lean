@@ -1,5 +1,8 @@
 import ZipTest.Helpers
 
+/-! Tests for gzip compression/decompression: streaming, file I/O, compression levels,
+    and concatenated streams. -/
+
 def ZipTest.Gzip.tests : IO Unit := do
   let big ← mkTestData
 

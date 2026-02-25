@@ -1,4 +1,4 @@
-/-
+/-!
   Bit-level reader for DEFLATE streams.
 
   DEFLATE (RFC 1951) packs bits LSB-first within each byte.

@@ -2,6 +2,9 @@ import Zip.Native.Deflate
 import Zip.Spec.LZ77
 import ZipForStd.ByteArray
 
+/-! Correctness of native LZ77 greedy matching: proves `ValidDecomp` and token validity
+    for the native `lz77Greedy` encoder against the spec-level LZ77 definitions. -/
+
 namespace Zip.Native.Deflate
 
 /-- Convert a native LZ77Token to a spec LZ77Symbol. -/

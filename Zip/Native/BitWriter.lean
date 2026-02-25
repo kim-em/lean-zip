@@ -1,4 +1,4 @@
-/-
+/-!
   LSB-first bit packer for DEFLATE streams.
 
   DEFLATE (RFC 1951) packs bits LSB-first within each byte.

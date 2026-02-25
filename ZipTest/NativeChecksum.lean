@@ -2,6 +2,8 @@ import ZipTest.Helpers
 import Zip.Native.Adler32
 import Zip.Native.Crc32
 
+/-! Conformance tests comparing native Adler32 and CRC32 implementations against FFI. -/
+
 def ZipTest.NativeChecksum.tests : IO Unit := do
   let big ← mkTestData
   let helloBytes := "Hello, world!".toUTF8

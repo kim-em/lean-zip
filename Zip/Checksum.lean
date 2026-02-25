@@ -1,3 +1,5 @@
+/-! CRC32 and Adler32 checksum computation via zlib FFI,
+    with support for incremental (chunk-based) checksumming. -/
 namespace Checksum
 
 /-- Compute CRC32 checksum. Supports incremental computation:

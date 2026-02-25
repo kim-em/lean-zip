@@ -5,6 +5,9 @@ import Zip.RawDeflate
 import Zip.Native.Inflate
 import Zip.Native.Crc32
 
+/-! ZIP archive construction and extraction: entry metadata, local/central headers,
+    ZIP64 support, and streaming archive creation/extraction. -/
+
 namespace Archive
 
 -- ZIP signatures

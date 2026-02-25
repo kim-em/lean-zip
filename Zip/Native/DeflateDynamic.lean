@@ -1,12 +1,13 @@
-/-
+import Zip.Native.Deflate
+import Zip.Spec.DeflateEncodeDynamic
+import Zip.Spec.DeflateStoredCorrect
+
+/-!
   Native DEFLATE compressor — dynamic Huffman blocks (Level 5).
 
   Uses dynamic Huffman codes optimized for the input data rather than
   the fixed codes defined in RFC 1951 §3.2.6.
 -/
-import Zip.Native.Deflate
-import Zip.Spec.DeflateEncodeDynamic
-import Zip.Spec.DeflateStoredCorrect
 
 namespace Zip.Native.Deflate
 

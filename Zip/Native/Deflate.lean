@@ -1,12 +1,13 @@
-/-
+import Zip.Native.BitWriter
+import Zip.Native.Inflate
+
+/-!
   Pure Lean DEFLATE compressor.
 
   Level 0: stored blocks (uncompressed).
   Level 1: greedy LZ77 matching with fixed Huffman codes.
   Level 2: lazy LZ77 matching with fixed Huffman codes.
 -/
-import Zip.Native.BitWriter
-import Zip.Native.Inflate
 
 namespace Zip.Native.Deflate
 

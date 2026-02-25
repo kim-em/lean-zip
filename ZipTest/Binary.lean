@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for binary encoding/decoding: octal, little-endian integers, strings, and path safety. -/
+
 def ZipTest.Binary.tests : IO Unit := do
   -- Octal roundtrip
   let testOctalVal : UInt64 := 1234

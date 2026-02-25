@@ -3,6 +3,9 @@ import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Native.Inflate
 
+/-! Tests for native DEFLATE: stored, fixed Huffman, dynamic Huffman, and lazy matching modes
+    with cross-implementation verification against FFI inflate. -/
+
 def ZipTest.NativeDeflate.tests : IO Unit := do
   IO.println "  NativeDeflate tests..."
   let big ← mkTestData

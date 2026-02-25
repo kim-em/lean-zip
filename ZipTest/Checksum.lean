@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for FFI-based CRC32 and Adler32 checksums, including incremental updates and edge cases. -/
+
 def ZipTest.Checksum.tests : IO Unit := do
   let big ← mkTestData
   let helloBytes := "Hello, world!".toUTF8
