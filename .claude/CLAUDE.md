@@ -147,7 +147,6 @@ to orient. Key directories:
 - `ZipTest/` — Per-module tests
 
 ### Key documents
-    ARCHITECTURE.md      — Technical architecture
     PLAN.md              — Phased roadmap and development cycle (do not modify)
     PROGRESS.md          — Global milestones (updated by summarize agents)
     progress/            — Per-session progress entries (one file per session)
