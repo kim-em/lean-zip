@@ -116,3 +116,81 @@ Creates `have __do_jp` join points in desugared form, making `h` and `⊢`
 syntactically different after `unfold`. Use `if ... then some (...) else do { rest }`
 instead. This applies to spec functions where proofs need to unfold both sides
 simultaneously.
+
+## Multi-Guard Except Unfolding (Framing Proofs)
+
+Functions like `Gzip.decompressSingle` chain ~6 sequential `unless`/`if` guards
+in the `Except` monad before calling core operations. Proving properties through
+these requires systematic unfolding.
+
+**How `unless` desugars:**
+`unless cond do throw err` becomes `if ¬cond then Except.error err else pure ()`.
+After `simp only [bind, Except.bind]`, this produces a stuck match on the guard
+result.
+
+**Tactic sequence for each guard:**
+
+```lean
+-- After: simp only [FuncName, bind, Except.bind] at h
+-- h now contains: match (if ¬cond then .error msg else pure ()) with ...
+by_cases hcond : cond
+· simp [hcond] at h    -- guard passes → reduces stuck match, continue
+· simp [hcond] at h    -- guard fails → h becomes .error = .ok, contradiction
+```
+
+**For long guard chains**, use nested `match` instead of `by_cases` to avoid
+managing too many hypotheses:
+
+```lean
+simp only [Gzip.decompressSingle, bind, Except.bind] at h
+-- Split on each monadic operation in sequence
+match h1 : operation₁ with
+| .error e => simp [h1] at h
+| .ok (val₁, state₁) =>
+  rw [h1] at h; simp only [] at h
+  -- h now has the tail of the do-block
+  match h2 : operation₂ with
+  | .error e => simp [h2] at h
+  | .ok (val₂, state₂) =>
+    rw [h2] at h; simp only [] at h
+    -- For unless/if guards between operations:
+    by_cases hguard : guardCondition
+    · simp [hguard] at h     -- contradiction
+    · simp only [hguard] at h
+      -- Continue with next operation...
+```
+
+**Key insight**: After each `match`/`cases` on a monadic result, use
+`rw [h_result] at h; simp only [] at h` (NOT `simp [h_result] at h`) to
+substitute the known result without over-simplifying. This is safer on
+recursive functions where `simp` may loop.
+
+**Extracting witnesses through guards**: When you need a specific result from
+the chain, use `have` to establish existence first, then obtain:
+
+```lean
+have h_result : ∃ bytes, operation = .ok (bytes, finalState) := by
+  revert h; intro h
+  simp only [pure, Except.pure] at h
+  by_cases hg1 : guard₁ <;> [simp [hg1] at h; simp only [hg1] at h]
+  by_cases hg2 : guard₂ <;> [simp [hg2] at h; simp only [hg2] at h]
+  match h3 : operation with
+  | .error e => simp [h3] at h
+  | .ok (val, st) => exact ⟨val, by simp [h3] at h; rw [h.2]⟩
+obtain ⟨bytes, h_result⟩ := h_result
+```
+
+## `dsimp` vs `simp` After `unfold` on Recursive Functions
+
+**CRITICAL**: After `unfold F at h` on a recursive function, do NOT use
+`simp only [F, bind, Except.bind] at h` — this may re-unfold `F` and loop.
+
+Instead use:
+```lean
+unfold F at h
+dsimp only [Bind.bind, Except.bind] at h
+```
+
+`dsimp` (definitional simp) reduces `bind`/`Except.bind` without unfolding
+named definitions, so it won't re-enter `F`. This pattern is essential for
+fuel-based recursive functions in the `Except` monad.
