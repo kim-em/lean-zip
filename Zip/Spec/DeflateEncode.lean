@@ -1,4 +1,5 @@
 import Zip.Spec.Deflate
+import Zip.Spec.DeflateSuffix
 import Zip.Spec.HuffmanEncode
 
 /-!
@@ -559,6 +560,62 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
   simp only [readBitsLSB_2_false_true]
   -- Now in btype = 2 (dynamic Huffman) branch
+  simp only [List.nil_append]
+  rw [hheader]
+  set_option linter.unusedSimpArgs false in
+  simp only [bind, Option.bind]
+  have hdec : decodeSymbols litLens distLens (symBits ++ rest)
+      1000000000 = some (syms, rest) :=
+    encodeSymbols_decodeSymbols litLens distLens syms symBits rest
+      1000000000 henc hv_lit hv_dist hfuel hvalid
+  rw [hdec]
+  simp only [hresolve]
+  simp [pure, Pure.pure]
+
+/-! ## goR roundtrip theorems
+
+These show that `decode.goR` returns exactly the trailing `rest` bits
+as its remaining, for each block type. Used by `deflateRaw_goR_pad`. -/
+
+/-- `decode.goR` variant of `encodeFixed_decode_append`: the remaining bits after
+    decoding a fixed Huffman block are exactly the trailing `rest`. -/
+theorem encodeFixed_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
+    (bits rest : List Bool)
+    (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
+    (hresolve : resolveLZ77 syms [] = some data)
+    (hfuel : 1000000000 ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
+    decode.goR ([true, true, false] ++ bits ++ rest) [] 10001 = some (data, rest) := by
+  unfold decode.goR
+  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
+  simp only [readBitsLSB_2_true_false]
+  have hdec : decodeSymbols fixedLitLengths fixedDistLengths (bits ++ rest)
+      1000000000 = some (syms, rest) :=
+    encodeSymbols_decodeSymbols fixedLitLengths fixedDistLengths syms bits rest
+      1000000000 henc fixedLitLengths_valid fixedDistLengths_valid hfuel hvalid
+  simp only [List.nil_append]
+  rw [hdec]
+  simp only [hresolve]
+  simp [pure, Pure.pure]
+
+/-- `decode.goR` variant of `encodeDynamic_decode_append`: the remaining bits after
+    decoding a dynamic Huffman block are exactly the trailing `rest`. -/
+theorem encodeDynamic_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
+    (litLens distLens : List Nat)
+    (headerBits symBits rest : List Bool)
+    (hv_lit : Huffman.Spec.ValidLengths litLens 15)
+    (hv_dist : Huffman.Spec.ValidLengths distLens 15)
+    (hheader : decodeDynamicTables (headerBits ++ symBits ++ rest) =
+        some (litLens, distLens, symBits ++ rest))
+    (henc : encodeSymbols litLens distLens syms = some symBits)
+    (hresolve : resolveLZ77 syms [] = some data)
+    (hfuel : 1000000000 ≥ syms.length)
+    (hvalid : ValidSymbolList syms) :
+    decode.goR ([true, false, true] ++ headerBits ++ symBits ++ rest) [] 10001 =
+        some (data, rest) := by
+  unfold decode.goR
+  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
+  simp only [readBitsLSB_2_false_true]
   simp only [List.nil_append]
   rw [hheader]
   set_option linter.unusedSimpArgs false in
