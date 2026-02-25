@@ -689,4 +689,60 @@ theorem inflate_deflateStoredPure (data : ByteArray)
   rw [hloop]
   simp [pure, Except.pure]
 
+/-! ## Output size theorems -/
+
+/-- Number of stored blocks: ⌈max(n,1) / 65535⌉, which equals (n-1)/65535 + 1 in Nat. -/
+private def numStoredBlocks (n : Nat) : Nat := (n - 1) / 65535 + 1
+
+/-- Exact output size of deflateStoredPure: each block adds 5 bytes of overhead.
+    Proved by well-founded induction on remaining data size. -/
+private theorem deflateStoredPure_size_aux (data : ByteArray) (pos : Nat)
+    (hpos : pos ≤ data.size) :
+    (deflateStoredPure data pos).size =
+    (data.size - pos) + 5 * numStoredBlocks (data.size - pos) := by
+  by_cases h_final : data.size - pos ≤ 65535
+  · rw [deflateStoredPure_eq_final data pos hpos h_final]
+    simp only [ByteArray.size_append, storedBlockHdr_size, ByteArray.size_extract,
+      numStoredBlocks]
+    have h1 : (data.size - pos - 1) / 65535 = 0 := by omega
+    rw [h1]; omega
+  · have h65 : pos + 65535 ≤ data.size := by omega
+    have h_rec := deflateStoredPure_size_aux data (pos + 65535) (by omega)
+    rw [deflateStoredPure_eq_nonfinal data pos hpos h_final]
+    simp only [ByteArray.size_append, storedBlockHdr_size, ByteArray.size_extract,
+      Nat.min_eq_left h65, show pos + 65535 - pos = 65535 from by omega, h_rec,
+      numStoredBlocks]
+    have h_blocks : (data.size - pos - 1) / 65535 =
+        (data.size - pos - 65535 - 1) / 65535 + 1 := by omega
+    rw [h_blocks]; omega
+termination_by data.size - pos
+decreasing_by omega
+
+/-- Exact output size of deflateStoredPure at position 0.
+    Each stored block contributes 5 bytes of overhead for up to 65535 data bytes,
+    so the total size is the data size plus 5 times the number of blocks.
+    The number of blocks is (n-1)/65535 + 1 in Nat arithmetic. -/
+theorem deflateStoredPure_size (data : ByteArray) :
+    (deflateStoredPure data 0).size =
+    data.size + 5 * numStoredBlocks data.size := by
+  have := deflateStoredPure_size_aux data 0 (by omega)
+  simp at this; exact this
+
+/-- Stored block compression adds at most ~0.008% overhead.
+    For every 65535 bytes of input, exactly 5 bytes of overhead are added.
+    This bound is equivalent to: overhead ≤ 5 + data.size / 13107. -/
+theorem deflateStoredPure_size_bound (data : ByteArray) :
+    (deflateStoredPure data 0).size ≤ data.size + 5 + data.size / 13107 := by
+  rw [deflateStoredPure_size]
+  simp only [numStoredBlocks]
+  -- Need: data.size + 5 * ((data.size - 1) / 65535 + 1) ≤ data.size + 5 + data.size / 13107
+  -- Suffices: 5 * ((data.size - 1) / 65535) ≤ data.size / 13107
+  suffices h : 5 * ((data.size - 1) / 65535) ≤ data.size / 13107 by omega
+  -- Since 65535 = 13107 * 5, rewrite (n-1)/65535 = ((n-1)/13107)/5
+  rw [show (65535 : Nat) = 13107 * 5 from by omega, ← Nat.div_div_eq_div_mul]
+  -- 5 * (((n-1)/13107)/5) ≤ (n-1)/13107 ≤ n/13107
+  calc 5 * ((data.size - 1) / 13107 / 5)
+      ≤ (data.size - 1) / 13107 := Nat.mul_div_le _ _
+    _ ≤ data.size / 13107 := Nat.div_le_div_right (by omega)
+
 end Zip.Spec.DeflateStoredCorrect
