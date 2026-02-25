@@ -103,6 +103,49 @@ or `UInt8.ext` / `UInt8.eq_of_toNat_eq` (don't exist).
 For lists: `l.map (Nat.toUInt8 ∘ UInt8.toNat) = l` via `List.map_congr_left` with
 the above per-element proof, then `simp`.
 
+## ByteArray Concatenation Indexing
+
+When proving properties about concatenated ByteArrays (e.g. `header ++ payload ++ trailer`),
+use the `getElem!_append_left`/`getElem!_append_right` chain. Key lemmas (in
+`Zip/Spec/BinaryCorrect.lean`):
+
+**Two-part concatenation:**
+```lean
+getElem!_append_left  (a b : ByteArray) (i : Nat) (h : i < a.size) :
+    (a ++ b)[i]! = a[i]!
+getElem!_append_right (a b : ByteArray) (i : Nat) (h : i < b.size) :
+    (a ++ b)[a.size + i]! = b[i]!
+```
+
+**Three-part concatenation** (`a ++ b ++ c`):
+```lean
+getElem!_append3_left  (a b c) (i) (h : i < a.size) :
+    (a ++ b ++ c)[i]! = a[i]!
+getElem!_append3_mid   (a b c) (i) (h : i < b.size) :
+    (a ++ b ++ c)[a.size + i]! = b[i]!
+getElem!_append3_right (a b c) (i) (h : i < c.size) :
+    (a ++ b ++ c)[(a ++ b).size + i]! = c[i]!
+```
+
+**Reading integers from concatenated arrays:**
+```lean
+readUInt32LE_append_left   (a b) (offset) (h : offset + 4 ≤ a.size) :
+    readUInt32LE (a ++ b) offset = readUInt32LE a offset
+readUInt32LE_append_right  (a b) (offset) (h : offset + 4 ≤ b.size) :
+    readUInt32LE (a ++ b) (a.size + offset) = readUInt32LE b offset
+readUInt32LE_append3_mid   (a b c) (offset) (h : offset + 4 ≤ b.size) :
+    readUInt32LE (a ++ b ++ c) (a.size + offset) = readUInt32LE b offset
+```
+
+**Pattern for three-part concat proofs** (common in gzip/zlib framing):
+1. Unfold the function to expose individual `getElem!` or `readUInt32LE` calls
+2. Apply `getElem!_append3_*` or `readUInt32LE_append3_*` lemma for each byte/field
+3. Resolve arithmetic offsets with `show a.size + offset + k = a.size + (offset + k) from by omega`
+4. Close size bounds with `by simp [ByteArray.size_append]; omega`
+
+**Size of concatenation:**
+`ByteArray.size_append : (a ++ b).size = a.size + b.size`
+
 ## Build Missing API, Don't Work Around It
 
 If a proof is blocked by missing lemmas for standard types (ByteArray, Array, List,
