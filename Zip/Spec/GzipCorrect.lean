@@ -1108,7 +1108,72 @@ private theorem decodeDynamicTrees_append (br : BitReader) (suffix : ByteArray)
     (h : Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br')) :
     Inflate.decodeDynamicTrees (brAppend br suffix) =
       .ok (litTree, distTree, brAppend br' suffix) := by
-  sorry
+  unfold Inflate.decodeDynamicTrees at h ⊢
+  simp only [bind, Except.bind] at h ⊢
+  -- readBits 5 (hlit)
+  cases hlit_eq : br.readBits 5 with
+  | error e => simp [hlit_eq] at h
+  | ok p =>
+    obtain ⟨hlit, br₁⟩ := p; simp only [hlit_eq] at h
+    rw [readBits_append br suffix 5 hlit br₁ hlit_eq]; dsimp only []
+    -- readBits 5 (hdist)
+    cases hdist_eq : br₁.readBits 5 with
+    | error e => simp [hdist_eq] at h
+    | ok p =>
+      obtain ⟨hdist, br₂⟩ := p; simp only [hdist_eq] at h
+      rw [readBits_append br₁ suffix 5 hdist br₂ hdist_eq]; dsimp only []
+      -- readBits 4 (hclen)
+      cases hclen_eq : br₂.readBits 4 with
+      | error e => simp [hclen_eq] at h
+      | ok p =>
+        obtain ⟨hclen, br₃⟩ := p; simp only [hclen_eq] at h
+        rw [readBits_append br₂ suffix 4 hclen br₃ hclen_eq]; dsimp only []
+        -- readCLCodeLengths
+        cases hcl_eq : Inflate.readCLCodeLengths br₃ (.replicate 19 0) 0
+            (hclen.toNat + 4) with
+        | error e => simp [hcl_eq] at h
+        | ok p =>
+          obtain ⟨clLengths, br₄⟩ := p; simp only [hcl_eq] at h
+          rw [readCLCodeLengths_append br₃ suffix (.replicate 19 0) 0
+              (hclen.toNat + 4) clLengths br₄ hcl_eq]; dsimp only []
+          -- HuffTree.fromLengths clLengths (pure, no BitReader)
+          cases hft_eq : HuffTree.fromLengths clLengths 7 with
+          | error e => simp [hft_eq] at h
+          | ok clTree =>
+            simp only [hft_eq] at h; dsimp only [] at h ⊢
+            -- decodeCLSymbols
+            have htc : hlit.toNat + 257 + (hdist.toNat + 1) =
+                hlit.toNat + 257 + (hdist.toNat + 1) := rfl
+            cases hcls_eq : Inflate.decodeCLSymbols clTree br₄
+                (.replicate (hlit.toNat + 257 + (hdist.toNat + 1)) 0) 0
+                (hlit.toNat + 257 + (hdist.toNat + 1))
+                (hlit.toNat + 257 + (hdist.toNat + 1) + 1) with
+            | error e => simp [hcls_eq] at h
+            | ok p =>
+              obtain ⟨codeLengths, br₅⟩ := p; simp only [hcls_eq] at h
+              rw [decodeCLSymbols_append clTree br₄ suffix
+                  (.replicate (hlit.toNat + 257 + (hdist.toNat + 1)) 0) 0
+                  (hlit.toNat + 257 + (hdist.toNat + 1))
+                  (hlit.toNat + 257 + (hdist.toNat + 1) + 1)
+                  codeLengths br₅ hcls_eq]; dsimp only []
+              -- fromLengths litLenLengths (pure)
+              cases hlt_eq : HuffTree.fromLengths (codeLengths.extract 0 (hlit.toNat + 257)) with
+              | error e => simp [hlt_eq] at h
+              | ok litTree' =>
+                simp only [hlt_eq] at h; dsimp only [] at h ⊢
+                -- fromLengths distLengths (pure)
+                cases hdt_eq : HuffTree.fromLengths
+                    (codeLengths.extract (hlit.toNat + 257)
+                      (hlit.toNat + 257 + (hdist.toNat + 1))) with
+                | error e => simp [hdt_eq] at h
+                | ok distTree' =>
+                  simp only [hdt_eq] at h; dsimp only [] at h ⊢
+                  -- Final: pure reduces to Except.ok
+                  simp only [pure, Except.pure] at h ⊢
+                  have hinj := Except.ok.inj h
+                  simp only [Prod.mk.injEq] at hinj
+                  obtain ⟨h1, h2, h3⟩ := hinj
+                  subst h1; subst h2; subst h3; rfl
 
 /-- decodeHuffman.go with appended suffix. -/
 private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
