@@ -23,7 +23,7 @@ namespace ZlibDecode
 /-- Pure zlib decompressor for single-stream data (no preset dictionary).
     Proof-friendly: no for/while/mut. -/
 def decompressSingle (data : ByteArray)
-    (maxOutputSize : Nat := 256 * 1024 * 1024) :
+    (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   if data.size < 6 then throw "Zlib: input too short"
   let cmf := data[0]!
@@ -159,13 +159,13 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
       some result.data.toList := by
   -- Unfold inflate → inflateRaw
   simp only [Inflate.inflate, bind, Except.bind] at h
-  cases hinf : Inflate.inflateRaw deflated 0 (256 * 1024 * 1024) with
+  cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
   | error e => simp [hinf] at h
   | ok p =>
     simp [hinf, pure, Except.pure] at h
     -- Get bounded fuel from inflate_correct
     obtain ⟨fuel, hfuel_le, hdec⟩ :=
-      Deflate.Correctness.inflate_correct deflated 0 (256 * 1024 * 1024) p.1 p.2
+      Deflate.Correctness.inflate_correct deflated 0 (1024 * 1024 * 1024) p.1 p.2
         (by rw [hinf])
     simp at hdec
     -- hdec : decode (bytesToBits deflated) fuel = some p.1.data.toList
@@ -176,9 +176,9 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
     exact Deflate.Spec.decode_fuel_independent _ _ _ hdec _
 
 /-- Zlib roundtrip: decompressing the output of compress returns the original data.
-    The size bound (5M) is inherited from `inflate_deflateRaw`. -/
+    The size bound (500M) is inherited from `inflate_deflateRaw`. -/
 theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 5000000) :
+    (hsize : data.size < 500000000) :
     ZlibDecode.decompressSingle (ZlibEncode.compress data level) = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
   have hinfl : Inflate.inflate (Deflate.deflateRaw data level) = .ok data :=
@@ -201,7 +201,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
       (by rw [Deflate.Spec.bytesToBits_length]; omega)
       hspec_go
   -- Use data.size bound to get result.length ≤ maxOutputSize
-  have hdata_le : data.data.toList.length ≤ 256 * 1024 * 1024 := by
+  have hdata_le : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
     simp [Array.length_toList, ByteArray.size_data]; omega
   -- Spec decode on compressed bits at offset 2 (via compress_eq decomposition)
   have hspec_at2 : Deflate.Spec.decode.go

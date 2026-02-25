@@ -113,7 +113,7 @@ open Deflate.Spec in
     the native greedy matcher instead of the spec-level `matchLZ77`. -/
 theorem lz77Greedy_spec_decode (data : ByteArray)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.size < 10000000) :
+    (hsize : data.size < 1000000000) :
     ∃ bits, encodeFixed (tokensToSymbols (lz77Greedy data windowSize)) =
               some bits ∧
             decode bits = some data.data.toList := by
@@ -175,7 +175,7 @@ open Deflate.Spec in
     recovers the original data. -/
 theorem lz77Lazy_spec_decode (data : ByteArray)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.size < 5000000) :
+    (hsize : data.size < 500000000) :
     ∃ bits, encodeFixed (tokensToSymbols (lz77Lazy data windowSize)) =
               some bits ∧
             decode bits = some data.data.toList := by
@@ -339,7 +339,7 @@ open Deflate.Spec in
     also succeeds with the same result. Restricted to inputs within fuel
     and size limits. -/
 theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
-    (hsize : result.length ≤ 256 * 1024 * 1024)
+    (hsize : result.length ≤ 1024 * 1024 * 1024)
     (hdec : decode (bytesToBits bytes) = some result) :
     Zip.Native.Inflate.inflate bytes =
     .ok ⟨⟨result⟩⟩ := by
@@ -362,7 +362,7 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   obtain ⟨endPos, hloop⟩ :=
     Deflate.Correctness.inflateLoop_complete
       ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist
-      (256 * 1024 * 1024) result
+      (1024 * 1024 * 1024) result
       hbr_wf hbr_pos hflit hfdist hsize 10001 hgo
   rw [hloop]; simp [pure, Except.pure]
 
@@ -370,9 +370,9 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
 
 /-- Native Level 1 roundtrip: compressing with fixed Huffman codes then
     decompressing recovers the original data. The size bound comes from the
-    spec decoder's per-block fuel limit (10M symbols, one per byte worst case). -/
+    spec decoder's per-block fuel limit (1B symbols, one per byte worst case). -/
 theorem inflate_deflateFixed (data : ByteArray)
-    (hsize : data.size < 10000000) :
+    (hsize : data.size < 1000000000) :
     Zip.Native.Inflate.inflate (deflateFixed data) = .ok data := by
   -- Step 1: deflateFixed_spec gives bits and bytesToBits relationship
   obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateFixed_spec data
@@ -425,9 +425,9 @@ theorem deflateLazy_spec (data : ByteArray) :
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
     then decompressing recovers the original data. The size bound comes from the
-    spec decoder's fuel limit (10M symbols, up to 2 per byte for lazy). -/
+    spec decoder's fuel limit (1B symbols, up to 2 per byte for lazy). -/
 theorem inflate_deflateLazy (data : ByteArray)
-    (hsize : data.size < 5000000) :
+    (hsize : data.size < 500000000) :
     Zip.Native.Inflate.inflate (deflateLazy data) = .ok data := by
   obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateLazy_spec data
   simp only [Deflate.Spec.encodeFixed] at henc_fixed

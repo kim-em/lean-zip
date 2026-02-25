@@ -242,7 +242,7 @@ protected def decodeStored (br : BitReader) (output : ByteArray)
     Uses a fuel parameter to guarantee termination. -/
 protected def decodeHuffman (br : BitReader) (output : ByteArray)
     (litTree distTree : HuffTree) (maxOutputSize : Nat)
-    (fuel : Nat := 10000000) : Except String (ByteArray × BitReader) :=
+    (fuel : Nat := 1000000000) : Except String (ByteArray × BitReader) :=
   go br output fuel
 where
   go (br : BitReader) (output : ByteArray) : Nat → Except String (ByteArray × BitReader)
@@ -307,10 +307,10 @@ def inflateLoop (br : BitReader) (output : ByteArray)
 
 /-- Inflate a raw DEFLATE stream starting at byte offset `startPos`. Returns the
     decompressed data and the byte-aligned position after the last DEFLATE block.
-    `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
+    `maxOutputSize` (default 1 GiB) limits decompressed output to guard against
     zip bombs. -/
 def inflateRaw (data : ByteArray) (startPos : Nat := 0)
-    (maxOutputSize : Nat := 256 * 1024 * 1024) :
+    (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String (ByteArray × Nat) := do
   let br : BitReader := { data, pos := startPos, bitOff := 0 }
   let fixedLit ← HuffTree.fromLengths fixedLitLengths
@@ -318,9 +318,9 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
   inflateLoop br .empty fixedLit fixedDist maxOutputSize 10001
 
 /-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
-    `maxOutputSize` (default 256 MiB) limits decompressed output to guard against
+    `maxOutputSize` (default 1 GiB) limits decompressed output to guard against
     zip bombs. -/
-def inflate (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
+def inflate (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   let (output, _) ← inflateRaw data 0 maxOutputSize
   return output

@@ -153,7 +153,7 @@ theorem deflateLevel1_spec_roundtrip (data : List UInt8)
     (bits : List Bool)
     (henc : encodeSymbols fixedLitLengths fixedDistLengths
       (matchLZ77 data windowSize) = some bits)
-    (hfuel : 10000000 ≥ (matchLZ77 data windowSize).length)
+    (hfuel : 1000000000 ≥ (matchLZ77 data windowSize).length)
     (hvalid : ValidSymbolList (matchLZ77 data windowSize)) :
     decode ([true, true, false] ++ bits) = some data :=
   encodeFixed_decode (matchLZ77 data windowSize) data bits henc
@@ -163,11 +163,11 @@ theorem deflateLevel1_spec_roundtrip (data : List UInt8)
     greedy LZ77 + fixed Huffman produces bits that decode back to the
     original data. Uses `matchLZ77_encodable` and `matchLZ77_validSymbolList`
     to eliminate all side conditions.
-    Note: the `hfuel` hypothesis requires `data.length < 10000000`
-    (about 10MB), which is easily satisfied in practice. -/
+    Note: the `hfuel` hypothesis requires `data.length < 1000000000`
+    (about 1GB), which is easily satisfied in practice. -/
 theorem deflateLevel1_spec_roundtrip' (data : List UInt8)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.length < 10000000) :
+    (hsize : data.length < 1000000000) :
     ∃ bits, encodeFixed (matchLZ77 data windowSize) = some bits ∧
             decode bits = some data := by
   have henc_some := matchLZ77_encodable data windowSize hws
@@ -331,7 +331,7 @@ theorem matchLZ77Lazy_encodable (data : List UInt8) (windowSize : Nat)
     original data. -/
 theorem deflateLevel2_spec_roundtrip (data : List UInt8)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.length < 5000000) :
+    (hsize : data.length < 500000000) :
     ∃ bits, encodeFixed (matchLZ77Lazy data windowSize) = some bits ∧
             decode bits = some data := by
   have henc_some := matchLZ77Lazy_encodable data windowSize hws
