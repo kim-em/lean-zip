@@ -1,5 +1,5 @@
 import Zip.Spec.Huffman
-import ZipForStd.List
+import ZipForStd.Array
 
 /-!
 # Kraft Inequality Analysis for Canonical Huffman Codes
@@ -101,23 +101,6 @@ private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
 
 /-! ## Connecting kraftSumFrom to ValidLengths -/
 
-/-- `Array.set!` at a different index doesn't affect the target index. -/
-private theorem array_set_ne (arr : Array Nat) (i j v : Nat) (hij : i ≠ j) :
-    (arr.set! i v)[j]! = arr[j]! := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_ne hij]
-
-/-- `Array.set!` at the same index replaces the value. -/
-private theorem array_set_self (arr : Array Nat) (i v : Nat) (hi : i < arr.size) :
-    (arr.set! i v)[i]! = v := by
-  simp [Array.getElem!_eq_getD, Array.getD_eq_getD_getElem?,
-        Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds_self_of_lt hi]
-
-/-- `Array.set!` preserves the size. -/
-private theorem array_set_size (arr : Array Nat) (i v : Nat) :
-    (arr.set! i v).size = arr.size := by
-  simp [Array.set!_eq_setIfInBounds]
-
 /-- `countLengths[b]!` counts elements of `lengths` equal to `b`, for valid `b`. -/
 protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
     (hb : b ≠ 0) (hb' : b ≤ maxBits) :
@@ -152,16 +135,16 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
       have hl_ne : l ≠ 0 := hset.1
       have hl_le : l ≤ maxBits := by omega
       have hsize' : (acc.set! l (acc[l]! + 1)).size = maxBits + 1 := by
-        rw [array_set_size]; exact hsize
+        rw [Array.size_set!]; exact hsize
       rw [ih _ hsize']
       cases Nat.decEq l b with
       | isTrue heq =>
         subst heq
-        rw [array_set_self acc l _ (by omega)]
+        rw [Array.getElem!_set!_self acc l _ (by omega)]
         simp only [beq_self_eq_true, ite_true, Nat.zero_add]
         rw [List.foldl_count_init l 1]; omega
       | isFalse hne =>
-        rw [array_set_ne acc l b _ hne]
+        rw [Array.getElem!_set!_ne acc l b _ hne]
         simp only [beq_eq_false_iff_ne.mpr hne, ite_false, Bool.false_eq_true]
 
 /-- `nextCodes.go` produces `ncRec` values: the `code` parameter at entry with
@@ -182,7 +165,7 @@ private theorem nextCodes_go_eq_ncRec (blCount : Array Nat) (maxBits : Nat)
     let code' := (code + blCount[bits - 1]!) * 2
     let arr' := arr.set! bits code'
     have hsize' : arr'.size = maxBits + 1 := by
-      simp only [arr', array_set_size]; exact hsize
+      simp only [arr', Array.size_set!]; exact hsize
     have hcode' : code' = Huffman.Spec.ncRec blCount bits := by
       simp only [code', hcode]
       cases bits with
@@ -193,11 +176,11 @@ private theorem nextCodes_go_eq_ncRec (blCount : Array Nat) (maxBits : Nat)
       cases Nat.eq_or_lt_of_le (Nat.lt_succ_iff.mp hb'lt) with
       | inl heq =>
         rw [heq]; simp only [arr']
-        rw [array_set_self arr bits code' (by omega)]
+        rw [Array.getElem!_set!_self arr bits code' (by omega)]
         exact hcode'
       | inr hlt =>
         simp only [arr']
-        rw [array_set_ne arr bits b' code' (by omega)]
+        rw [Array.getElem!_set!_ne arr bits b' code' (by omega)]
         exact hprev b' hb' hlt
     exact nextCodes_go_eq_ncRec blCount maxBits arr' (bits + 1) code'
       hsize' (by omega) (by omega) hcode' hprev' b hb hbM
@@ -224,13 +207,13 @@ private theorem kraftSumFrom_incr (acc : Array Nat) (maxBits l b : Nat)
     rw [kraftSumFrom_unfold _ _ _ hb', kraftSumFrom_unfold _ _ _ hb']
     if hbl : b = l then
       subst hbl
-      rw [array_set_self acc b _ (by omega)]
+      rw [Array.getElem!_set!_self acc b _ (by omega)]
       have ih := kraftSumFrom_incr acc maxBits b (b + 1) hl hsize
       simp only [show ¬(b + 1 ≤ b) from by omega, ite_false, Nat.add_zero] at ih
       rw [ih]; simp only [show b ≤ b from Nat.le_refl _, ite_true]
       rw [Nat.add_mul]; omega
     else
-      rw [array_set_ne acc l b _ (by exact fun h => hbl h.symm)]
+      rw [Array.getElem!_set!_ne acc l b _ (by exact fun h => hbl h.symm)]
       have ih := kraftSumFrom_incr acc maxBits l (b + 1) hl hsize
       rw [ih]
       if hbl' : b ≤ l then
@@ -242,14 +225,10 @@ termination_by maxBits + 1 - b
 /-- `kraftSumFrom` over an all-zeros array is 0. -/
 private theorem kraftSumFrom_replicate (maxBits b : Nat) :
     kraftSumFrom (Array.replicate (maxBits + 1) 0) maxBits b = 0 := by
-  if hb : b > maxBits then
-    exact kraftSumFrom_gt _ _ _ hb
+  if hb : b > maxBits then exact kraftSumFrom_gt _ _ _ hb
   else
     rw [kraftSumFrom_unfold _ _ _ (by omega)]
-    have : (Array.replicate (maxBits + 1) 0)[b]! = 0 := by
-      simp [show b < maxBits + 1 from by omega]
-    rw [this, Nat.zero_mul, Nat.zero_add]
-    exact kraftSumFrom_replicate maxBits (b + 1)
+    simp [show b < maxBits + 1 from by omega, kraftSumFrom_replicate maxBits (b + 1)]
 termination_by maxBits + 1 - b
 
 /-- `ValidLengths` is preserved when removing the head element. -/
@@ -298,7 +277,7 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       have hl_ne : l ≠ 0 := hset.1
       have hl_le : l ≤ maxBits := by omega
       have hsize' : (acc.set! l (acc[l]! + 1)).size = maxBits + 1 := by
-        rw [array_set_size]; exact hsize
+        rw [Array.size_set!]; exact hsize
       rw [ih hv_ls (acc.set! l (acc[l]! + 1)) hsize']
       rw [kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
       simp only [Nat.zero_le, ite_true]

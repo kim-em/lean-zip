@@ -9,6 +9,11 @@ Huffman module. Candidates for upstreaming to Lean's standard library.
 
 namespace Array
 
+/-- `Array.set!` preserves the size. -/
+theorem size_set! (arr : Array α) (i : Nat) (v : α) :
+    (arr.set! i v).size = arr.size := by
+  simp [set!_eq_setIfInBounds]
+
 /-- `Array.set!` at a different index preserves the element. -/
 theorem getElem!_set!_ne [Inhabited α] (arr : Array α) (i j : Nat) (v : α) (hij : i ≠ j) :
     (arr.set! i v)[j]! = arr[j]! := by
