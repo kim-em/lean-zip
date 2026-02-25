@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for tar interop: UStar, GNU, PAX formats, long paths, and malformed/security fixtures. -/
+
 def ZipTest.TarFixtures.tests : IO Unit := do
   -- go-ustar.tar: UStar format with prefix/name path splitting
   let goUstarData ← readFixture "tar/interop/go-ustar.tar"

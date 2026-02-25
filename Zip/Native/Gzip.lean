@@ -1,15 +1,16 @@
-/-
+import Zip.Native.Inflate
+import Zip.Native.DeflateDynamic
+import Zip.Native.Crc32
+import Zip.Native.Adler32
+import Zip.Binary
+
+/-!
   Pure Lean gzip (RFC 1952) and zlib (RFC 1950) compression and decompression.
 
   Compression wraps native DEFLATE output with gzip/zlib framing headers,
   trailers, and checksums. Decompression parses the framing, inflates the
   DEFLATE stream, and verifies checksums.
 -/
-import Zip.Native.Inflate
-import Zip.Native.DeflateDynamic
-import Zip.Native.Crc32
-import Zip.Native.Adler32
-import Zip.Binary
 
 namespace Zip.Native
 

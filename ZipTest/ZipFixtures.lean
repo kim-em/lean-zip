@@ -1,5 +1,8 @@
 import ZipTest.Helpers
 
+/-! Tests for ZIP interop: stored/deflated methods, ZIP64, multi-entry archives,
+    and malformed/security fixtures. -/
+
 def ZipTest.ZipFixtures.tests : IO Unit := do
   -- go-test.zip: 2 entries (test.txt deflated, gophercolor16x16.png stored)
   let goTestData ← readFixture "zip/interop/go-test.zip"

@@ -1,5 +1,8 @@
 import ZipTest.Helpers
 
+/-! Security and encoding tests: path traversal prevention, UTF-8 flag handling,
+    and Latin-1 fallback in ZIP/tar archives. -/
+
 def ZipTest.Utf8Fixtures.tests : IO Unit := do
   -- backslash-slip.zip: Windows path traversal via ..\
   let bsSlipZipData ← readFixture "zip/security/backslash-slip.zip"

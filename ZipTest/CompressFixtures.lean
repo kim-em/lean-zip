@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for gzip and zstd decompression with real-world interop fixtures and malformed data. -/
+
 def ZipTest.CompressFixtures.tests : IO Unit := do
   -- system-hello.gz: decompress gzip from system gzip tool
   let sysGzData ← readFixture "gzip/interop/system-hello.gz"

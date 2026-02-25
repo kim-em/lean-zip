@@ -1,6 +1,9 @@
 import ZipTest.Helpers
 import Zip.Native.Inflate
 
+/-! Tests for native inflate (raw DEFLATE decompression) against FFI-compressed data
+    across compression levels and block types. -/
+
 def ZipTest.NativeInflate.tests : IO Unit := do
   IO.println "  NativeInflate tests..."
   let big ← mkTestData

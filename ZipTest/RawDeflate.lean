@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for raw DEFLATE compression/decompression with streaming roundtrip verification. -/
+
 def ZipTest.RawDeflate.tests : IO Unit := do
   let big ← mkTestData
 

@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for zlib compression/decompression with decompression size limits and roundtrip verification. -/
+
 def ZipTest.Zlib.tests : IO Unit := do
   let big ← mkTestData
 

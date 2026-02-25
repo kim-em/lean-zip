@@ -1,4 +1,9 @@
-/-
+import Zip.Native.Inflate
+import Zip.Native.Deflate
+import ZipForStd.ByteArray
+import Std.Tactic.BVDecide
+
+/-!
   Native Level 0 roundtrip: inflate (deflateStoredPure data) = .ok data
 
   Proves that the native DEFLATE decompressor correctly round-trips data
@@ -12,10 +17,6 @@
   3. decodeStored: alignToByte → readUInt16LE (LEN) → readUInt16LE (NLEN) → readBytes
   4. If multi-block, inflateLoop recurses with strong induction on remaining data
 -/
-import Zip.Native.Inflate
-import Zip.Native.Deflate
-import ZipForStd.ByteArray
-import Std.Tactic.BVDecide
 
 namespace Zip.Spec.DeflateStoredCorrect
 

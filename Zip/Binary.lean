@@ -1,6 +1,6 @@
+/-! Little-endian and octal ASCII binary encoding/decoding for ZIP and tar archives,
+    with in-place ByteArray writes and path safety validation. -/
 namespace Binary
-
--- Little-endian integer read/write (used by ZIP)
 
 def readUInt16LE (data : ByteArray) (offset : Nat) : UInt16 :=
   let b0 := data[offset]!

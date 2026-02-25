@@ -1,4 +1,7 @@
-/-
+import Zip.Native.BitReader
+import Zip.Spec.Huffman
+
+/-!
   Pure Lean DEFLATE decompressor (RFC 1951).
 
   Supports all three block types:
@@ -8,8 +11,6 @@
 
   This is a reference implementation prioritizing correctness over speed.
 -/
-import Zip.Native.BitReader
-import Zip.Spec.Huffman
 
 namespace Zip.Native
 

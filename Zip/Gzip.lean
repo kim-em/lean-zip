@@ -1,3 +1,5 @@
+/-! FFI bindings for gzip compression/decompression (RFC 1952).
+    Supports concatenated streams, format auto-detection, and streaming I/O. -/
 namespace Gzip
 
 /-- Compress data in gzip format (with gzip header/trailer, compatible with `gzip`/`gunzip`).

@@ -1,3 +1,4 @@
+/-! FFI bindings to zlib compression/decompression (RFC 1950). -/
 namespace Zlib
 
 /-- Compress data using zlib (raw deflate, no gzip header).

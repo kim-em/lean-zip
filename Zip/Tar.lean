@@ -3,6 +3,9 @@ import Zip.Gzip
 import Zip.Handle
 import Zip.Native.Gzip
 
+/-! Tar archive creation, listing, and extraction with UStar, GNU, and PAX format support.
+    Includes tar.gz compression/decompression via gzip integration. -/
+
 namespace Tar
 
 /-- Tar entry metadata. -/

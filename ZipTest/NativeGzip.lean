@@ -3,6 +3,9 @@ import Zip.Native.Gzip
 import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
 
+/-! Tests for native gzip/zlib decompression and compression against FFI,
+    across compression levels and data patterns. -/
+
 def ZipTest.NativeGzip.tests : IO Unit := do
   IO.println "  NativeGzip tests..."
   let big ← mkTestData

@@ -1,5 +1,7 @@
 import Zip
 
+/-! Test utilities: byte array comparison, fixture loading, assertion helpers, and test data generation. -/
+
 set_option maxRecDepth 2048
 
 /-- Check that two byte arrays are equal. -/

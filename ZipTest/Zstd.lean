@@ -1,5 +1,8 @@
 import ZipTest.Helpers
 
+/-! Tests for zstd compression/decompression: streaming, file I/O, compression levels,
+    and large data handling. -/
+
 def ZipTest.Zstd.tests : IO Unit := do
   let big ← mkTestData
 

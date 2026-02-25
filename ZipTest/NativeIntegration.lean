@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! End-to-end integration tests for native ZIP and tar.gz extraction against FFI-created archives. -/
+
 def ZipTest.NativeIntegration.tests : IO Unit := do
   IO.println "  NativeIntegration tests..."
   -- === ZIP native extraction ===

@@ -1,5 +1,7 @@
 import ZipTest.Helpers
 
+/-! Tests for ZIP archive creation, listing, and extraction with compression method selection. -/
+
 def ZipTest.Archive.tests : IO Unit := do
   -- Create test files
   let zipTestDir : System.FilePath := "/tmp/lean-zlib-zip-test"
