@@ -36,7 +36,7 @@ private theorem bitsToNat_bound (n : Nat) (bits : List Bool) :
   | zero => simp [Deflate.Spec.bitsToNat]
   | succ k ih =>
     cases bits with
-    | nil => simp [Deflate.Spec.bitsToNat]; exact Nat.pos_of_ne_zero (by simp [Nat.pow_eq_zero])
+    | nil => simp [Deflate.Spec.bitsToNat, Nat.pos_of_ne_zero, Nat.pow_eq_zero]
     | cons b rest =>
       simp only [Deflate.Spec.bitsToNat]
       have := ih rest; rw [Nat.pow_succ]; split <;> omega
