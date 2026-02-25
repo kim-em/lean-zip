@@ -130,6 +130,39 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
       · exact ⟨_, _, rfl, rfl, rfl⟩
       · exact ⟨_, _, rfl, rfl, rfl⟩
 
+private theorem compress_trailer (data : ByteArray) (level : UInt8) :
+    ∃ (header trailer : ByteArray),
+      header.size = 2 ∧ trailer.size = 4 ∧
+      compress data level = header ++ Deflate.deflateRaw data level ++ trailer ∧
+      (trailer[0]!.toUInt32 <<< 24 ||| trailer[1]!.toUInt32 <<< 16 |||
+       trailer[2]!.toUInt32 <<< 8 ||| trailer[3]!.toUInt32) =
+      Adler32.Native.adler32 1 data := by
+  unfold compress
+  split
+  · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
+  · split
+    · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
+    · split
+      · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
+      · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
+
+/-- Adler32 trailer match: reading 4 bytes big-endian at endPos gives `adler32 1 data`. -/
+theorem compress_adler32 (data : ByteArray) (level : UInt8) :
+    let c := compress data level
+    let ep := 2 + (Deflate.deflateRaw data level).size
+    (c[ep]!.toUInt32 <<< 24 ||| c[ep + 1]!.toUInt32 <<< 16 |||
+     c[ep + 2]!.toUInt32 <<< 8 ||| c[ep + 3]!.toUInt32) =
+    Adler32.Native.adler32 1 data := by
+  obtain ⟨header, trailer, hhsz, htsz, hceq, hadler⟩ := compress_trailer data level
+  simp only
+  rw [hceq,
+    show 2 + (Deflate.deflateRaw data level).size =
+      (header ++ Deflate.deflateRaw data level).size + 0 from by
+        simp [ByteArray.size_append, hhsz],
+    Binary.readUInt32BE_append_right (header ++ Deflate.deflateRaw data level) trailer 0
+      (by omega)]
+  exact hadler
+
 end ZlibEncode
 
 /-! ## Bitstream composition lemmas -/
@@ -216,50 +249,51 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
   -- compressed size ≥ 6 (from compress = 2 + deflated + 4)
   have hcsz6 : ¬ (ZlibEncode.compress data level).size < 6 := by
     rw [ZlibEncode.compress_size]; omega
-  -- Tight endPos bound: endPos + 4 ≤ compressed.size
-  -- Strategy: run inflateRaw on (header ++ deflated) without trailer, get endPos' ≤ its size.
-  -- Then inflateRaw_append_suffix shows the full compressed data gives the same endPos.
+  -- Decompose compress and establish endPos exactness
+  obtain ⟨header, trailer, hhsz, htsz, hceq⟩ := ZlibEncode.compress_eq data level
+  -- Spec decode on (header ++ deflated) at offset 2
+  have hspec_hd : Deflate.Spec.decode.go
+      ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (2 * 8))
+      [] 10001 = some data.data.toList := by
+    rw [show 2 * 8 = header.size * 8 from by omega]
+    rw [bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
+    exact hspec_go
+  -- Apply inflateRaw_complete on (header ++ deflated) to get endPos'
+  obtain ⟨endPos', hinflRaw'⟩ :=
+    inflateRaw_complete (header ++ Deflate.deflateRaw data level) 2 _
+      data.data.toList hdata_le 10001 (by omega) hspec_hd
+  -- By suffix invariance, inflateRaw on full compressed data gives same endPos'
+  have hinflRaw'' : Inflate.inflateRaw ((header ++ Deflate.deflateRaw data level) ++ trailer)
+      2 (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') :=
+    inflateRaw_append_suffix _ trailer 2 _ _ _ hinflRaw'
+  -- endPos' = endPos by injectivity
+  have hep_eq : endPos = endPos' := by
+    rw [hceq] at hinflRaw
+    have := hinflRaw.symm.trans hinflRaw''
+    simp only [Except.ok.injEq, Prod.mk.injEq] at this
+    exact this.2
+  -- endPos exactness via inflateRaw_endPos_eq
+  have hep_exact : endPos' = (header ++ Deflate.deflateRaw data level).size := by
+    have h' : Inflate.inflateRaw (header ++ Deflate.deflateRaw data level)
+        header.size (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
+      rw [hhsz]; exact hinflRaw'
+    exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
+  have hep_val : endPos = 2 + (Deflate.deflateRaw data level).size := by
+    rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
+  -- Tight endPos bound
   have hendPos_tight : endPos + 4 ≤ (ZlibEncode.compress data level).size := by
-    obtain ⟨header, trailer, hhsz, htsz, hceq⟩ := ZlibEncode.compress_eq data level
-    -- Spec decode on (header ++ deflated) at offset 2
-    have hspec_hd : Deflate.Spec.decode.go
-        ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (2 * 8))
-        [] 10001 = some data.data.toList := by
-      rw [show 2 * 8 = header.size * 8 from by omega]
-      rw [bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
-      exact hspec_go
-    -- Apply inflateRaw_complete on (header ++ deflated) to get endPos' and tight bound
-    obtain ⟨endPos', hinflRaw'⟩ :=
-      inflateRaw_complete (header ++ Deflate.deflateRaw data level) 2 _
-        data.data.toList hdata_le 10001 (by omega) hspec_hd
-    have hep_le : endPos' ≤ (header ++ Deflate.deflateRaw data level).size :=
-      inflateRaw_endPos_le _ _ _ _ _ hinflRaw'
-    -- By suffix invariance, inflateRaw on (header ++ deflated) ++ trailer gives same endPos'
-    have hinflRaw'' : Inflate.inflateRaw ((header ++ Deflate.deflateRaw data level) ++ trailer)
-        2 (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') :=
-      inflateRaw_append_suffix _ trailer 2 _ _ _ hinflRaw'
-    -- hinflRaw'' : inflateRaw (... ++ trailer) = .ok (..., endPos')
-    -- hinflRaw  : inflateRaw (compress data level) = .ok (..., endPos)
-    -- hceq : compress data level = (header ++ deflated) ++ trailer
-    -- So endPos = endPos' by injectivity
-    have hep_eq : endPos = endPos' := by
-      rw [hceq] at hinflRaw
-      have := hinflRaw.symm.trans hinflRaw''
-      simp only [Except.ok.injEq, Prod.mk.injEq] at this
-      exact this.2
-    rw [hep_eq, hceq]
-    simp only [ByteArray.size_append, htsz] at hep_le ⊢
-    omega
+    rw [hep_val, hceq]
+    simp only [ByteArray.size_append, htsz, hhsz]; omega
   have hendPos4 : ¬ (endPos + 4 > (ZlibEncode.compress data level).size) := by omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
-  -- Adler32 trailer match: the 4 BE bytes at endPos encode adler32(1, data).
-  -- Requires endPos = 2 + deflated.size (blocked on endPos tracking infrastructure).
+  -- Adler32 trailer match: use endPos = 2 + deflated.size to read trailer bytes
   have hadler : (Adler32.Native.adler32 1 data ==
     (ZlibEncode.compress data level)[endPos]!.toUInt32 <<< 24 |||
       (ZlibEncode.compress data level)[endPos + 1]!.toUInt32 <<< 16 |||
       (ZlibEncode.compress data level)[endPos + 2]!.toUInt32 <<< 8 |||
       (ZlibEncode.compress data level)[endPos + 3]!.toUInt32) = true := by
-    sorry
+    rw [hep_val, ZlibEncode.compress_adler32]
+    simp [BEq.beq]
   set_option maxRecDepth 8192 in
   simp only [ZlibDecode.decompressSingle, - ZlibDecode.decompressSingle.eq_1,
     bind, Except.bind, hcsz6, ↓reduceIte, pure, Except.pure,

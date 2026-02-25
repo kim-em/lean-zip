@@ -93,6 +93,43 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
     · exact ⟨_, _, rfl, rfl, rfl⟩
     · exact ⟨_, _, rfl, rfl, rfl⟩
 
+/-- Decomposition with concrete trailer: `compress` = header(10) ++ deflateRaw ++ trailer
+    where `readUInt32LE trailer 0 = crc32 0 data` and `readUInt32LE trailer 4 = isize`. -/
+private theorem compress_trailer (data : ByteArray) (level : UInt8) :
+    ∃ (header trailer : ByteArray),
+      header.size = 10 ∧ trailer.size = 8 ∧
+      compress data level = header ++ Deflate.deflateRaw data level ++ trailer ∧
+      Binary.readUInt32LE trailer 0 = Crc32.Native.crc32 0 data ∧
+      Binary.readUInt32LE trailer 4 = data.size.toUInt32 := by
+  unfold compress
+  split
+  · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
+  · split
+    · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
+    · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
+
+/-- CRC32 trailer match: `readUInt32LE` at endPos reads `crc32 0 data`. -/
+theorem compress_crc32 (data : ByteArray) (level : UInt8) :
+    Binary.readUInt32LE (compress data level)
+      (10 + (Deflate.deflateRaw data level).size) =
+    Crc32.Native.crc32 0 data := by
+  obtain ⟨header, trailer, hhsz, htsz, hceq, hcrc, _⟩ := compress_trailer data level
+  rw [hceq, show 10 + (Deflate.deflateRaw data level).size =
+    header.size + (Deflate.deflateRaw data level).size + 0 from by omega,
+    Binary.readUInt32LE_append3_right _ _ _ 0 (by omega)]
+  exact hcrc
+
+/-- ISIZE trailer match: `readUInt32LE` at endPos+4 reads `data.size.toUInt32`. -/
+theorem compress_isize (data : ByteArray) (level : UInt8) :
+    Binary.readUInt32LE (compress data level)
+      (10 + (Deflate.deflateRaw data level).size + 4) =
+    data.size.toUInt32 := by
+  obtain ⟨header, trailer, hhsz, htsz, hceq, _, hisize⟩ := compress_trailer data level
+  rw [hceq, show 10 + _ + 4 = header.size + (Deflate.deflateRaw data level).size + 4
+    from by omega]
+  rw [Binary.readUInt32LE_append3_right _ _ _ 4 (by omega)]
+  exact hisize
+
 end GzipEncode
 
 /-! ## ByteArray/bitstream composition lemmas -/
@@ -775,6 +812,77 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
       exact inflateLoop_endPos_le ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOut 10001 result endPos (Or.inl rfl) hple h
 
+/-! ## alignToByte lower bound from short remaining bits -/
+
+/-- If the remaining bits `toBits` have length < 8, then `alignToByte.pos ≥ data.size`.
+    This is because < 8 remaining bits means we're in the last byte (or past it). -/
+private theorem alignToByte_pos_ge_of_toBits_short (br : BitReader)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hple : br.pos ≤ br.data.size)
+    (hshort : br.toBits.length < 8) :
+    br.alignToByte.pos ≥ br.data.size := by
+  have htl := Deflate.Correctness.toBits_length br
+  simp only [BitReader.alignToByte]
+  split
+  · -- bitOff = 0: alignToByte is no-op, endPos = pos
+    rename_i h0
+    have h0' : br.bitOff = 0 := by simp_all
+    rw [h0', Nat.add_zero] at htl
+    have hle8 : br.pos * 8 ≤ br.data.size * 8 := Nat.mul_le_mul_right 8 hple
+    have htl_add : br.toBits.length + br.pos * 8 = br.data.size * 8 := by
+      rw [htl]; exact Nat.sub_add_cancel hle8
+    omega
+  · -- bitOff ≠ 0: alignToByte advances pos by 1
+    rename_i hne
+    cases hpos with
+    | inl h => simp [h] at hne
+    | inr h =>
+      -- pos < data.size, so pos * 8 + bitOff < data.size * 8
+      have hlt8 : br.pos * 8 + br.bitOff < br.data.size * 8 := by omega
+      -- Convert: toBits.length + (pos * 8 + bitOff) = data.size * 8
+      have htl_add : br.toBits.length + (br.pos * 8 + br.bitOff) = br.data.size * 8 := by
+        rw [htl]; exact Nat.sub_add_cancel (Nat.le_of_lt hlt8)
+      -- data.size * 8 < 8 + pos * 8 + bitOff ≤ 8 + pos * 8 + 7 = (pos+1)*8 - 1
+      -- So data.size ≤ pos + 1, i.e. (pos + 1) ≥ data.size
+      show br.pos + 1 ≥ br.data.size
+      omega
+
+/-! ## endPos exactness: ≥ direction -/
+
+/-- After a successful `inflateRaw` on `prefix ++ deflated` starting at
+    `prefix.size`, the endPos ≥ `prefix.size + deflated.size` (i.e., the decoder
+    consumes all of `deflated`). Combined with `inflateRaw_endPos_le`, this gives
+    endPos = `(prefix ++ deflated).size` exactly.
+
+    The proof requires showing that the native decoder's final BitReader has
+    `toBits.length < 8` (i.e., only byte-padding remains after the DEFLATE stream).
+    This follows from:
+    1. The encoder pads to byte boundaries (`bitsToBytes` / `BitWriter.flush`)
+    2. The completeness proof tracks `br'.toBits = remaining_spec_bits`
+    3. The remaining spec bits are the byte-padding, which has length < 8
+
+    Blocked on strengthening `inflateLoop_complete` to expose the final
+    BitReader's `toBits` length, or equivalently adding `endPos ≥ data.size`
+    to its conclusion. The `alignToByte_pos_ge_of_toBits_short` lemma above
+    handles the final step once `toBits.length < 8` is established. -/
+theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
+    (maxOut : Nat) (result : ByteArray) (endPos : Nat)
+    (h : Inflate.inflateRaw (pfx ++ deflated) pfx.size maxOut =
+      .ok (result, endPos)) :
+    endPos ≥ (pfx ++ deflated).size := by
+  sorry
+
+/-- endPos exactness: combining ≤ and ≥ gives equality. -/
+theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
+    (maxOut : Nat) (result : ByteArray) (endPos : Nat)
+    (h : Inflate.inflateRaw (pfx ++ deflated) pfx.size maxOut =
+      .ok (result, endPos)) :
+    endPos = (pfx ++ deflated).size :=
+  Nat.le_antisymm
+    (inflateRaw_endPos_le _ _ _ _ _ h)
+    (inflateRaw_endPos_ge pfx deflated maxOut result endPos h)
+
 /-! ## inflateRaw completeness for non-zero startPos -/
 
 /-- Completeness for `inflateRaw` at arbitrary `startPos`: if the spec decode
@@ -1405,20 +1513,29 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
     have := hinflRaw.symm.trans hinflRaw''
     simp only [Except.ok.injEq, Prod.mk.injEq] at this
     exact this.2
+  -- endPos exactness: endPos = (header ++ deflated).size
+  have hep_exact : endPos' = (header ++ Deflate.deflateRaw data level).size := by
+    have h' : Inflate.inflateRaw (header ++ Deflate.deflateRaw data level)
+        header.size (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
+      rw [hhsz]; exact hinflRaw'
+    exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
+  have hep_val : endPos = 10 + (Deflate.deflateRaw data level).size := by
+    rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
   have hendPos_tight : endPos + 8 ≤ (GzipEncode.compress data level).size := by
-    rw [hep_eq, hceq]
-    simp only [ByteArray.size_append, htsz] at hep_le ⊢
-    omega
+    rw [hep_val, hceq]
+    simp only [ByteArray.size_append, htsz, hhsz]; omega
   have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
-  -- CRC32 trailer match
+  -- CRC32 trailer match: use endPos = 10 + deflated.size to read trailer bytes
   have hcrc : (Crc32.Native.crc32 0 data ==
     Binary.readUInt32LE (GzipEncode.compress data level) endPos) = true := by
-    sorry
+    rw [hep_val, GzipEncode.compress_crc32]
+    simp [BEq.beq]
   -- ISIZE trailer match
   have hisize : (data.size.toUInt32 ==
     Binary.readUInt32LE (GzipEncode.compress data level) (endPos + 4)) = true := by
-    sorry
+    rw [hep_val, GzipEncode.compress_isize]
+    simp [BEq.beq]
   set_option maxRecDepth 8192 in
   simp (config := { decide := true }) only [GzipDecode.decompressSingle,
     - GzipDecode.decompressSingle.eq_1,
