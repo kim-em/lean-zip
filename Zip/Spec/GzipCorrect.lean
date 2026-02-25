@@ -81,6 +81,18 @@ theorem compress_header_bytes (data : ByteArray) (level : UInt8) :
     split <;> first | rfl | (split <;> rfl)
   }
 
+/-- Decomposition: `compress` = header (10 bytes) ++ deflateRaw ++ trailer (8 bytes). -/
+theorem compress_eq (data : ByteArray) (level : UInt8) :
+    ∃ (header trailer : ByteArray),
+      header.size = 10 ∧ trailer.size = 8 ∧
+      compress data level = header ++ Deflate.deflateRaw data level ++ trailer := by
+  simp only [compress]
+  split
+  · exact ⟨_, _, rfl, rfl, rfl⟩
+  · split
+    · exact ⟨_, _, rfl, rfl, rfl⟩
+    · exact ⟨_, _, rfl, rfl, rfl⟩
+
 end GzipEncode
 
 /-! ## ByteArray/bitstream composition lemmas -/
@@ -104,6 +116,31 @@ private theorem bytesToBits_drop_prefix_three (a b c : ByteArray) :
 private theorem bytesToBits_length_mod8 (ba : ByteArray) :
     (Deflate.Spec.bytesToBits ba).length % 8 = 0 := by
   rw [Deflate.Spec.bytesToBits_length]; omega
+
+/-! ## Spec decode from inflate success -/
+
+/-- If `inflate deflated = .ok data`, then the spec decode succeeds on
+    `bytesToBits deflated` with the default fuel (10001). -/
+private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
+    (h : Inflate.inflate deflated = .ok result) :
+    Deflate.Spec.decode.go
+      (Deflate.Spec.bytesToBits deflated) [] 10001 =
+      some result.data.toList := by
+  simp only [Inflate.inflate, bind, Except.bind] at h
+  cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
+  | error e => simp [hinf] at h
+  | ok p =>
+    simp [hinf, pure, Except.pure] at h
+    obtain ⟨fuel, hfuel_le, hdec⟩ :=
+      Deflate.Correctness.inflate_correct deflated 0 (1024 * 1024 * 1024) p.1 p.2
+        (by rw [hinf])
+    simp at hdec
+    rw [← h]
+    show Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) 10001 =
+      some p.1.data.toList
+    have h10001 : fuel + (10001 - fuel) = 10001 := by omega
+    rw [show (10001 : Nat) = fuel + (10001 - fuel) from h10001.symm]
+    exact Deflate.Spec.decode_fuel_independent _ _ _ hdec _
 
 /-! ## inflateRaw endPos bound -/
 
@@ -780,6 +817,128 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
     ⟨data, startPos, 0⟩ .empty fixedLit fixedDist maxOutputSize result
     hbr_wf hbr_pos hflit hfdist hsize 10001 hgo
 
+/-! ## inflateRaw suffix invariance
+
+If inflateRaw succeeds on `data`, it also succeeds on `data ++ suffix`
+with the SAME result and endPos. This is because all BitReader operations
+read bytes at positions `pos < data.size`, and appending a suffix
+doesn't change those bytes.
+
+We prove this by first establishing suffix invariance for each basic
+BitReader operation, then composing through the inflate machinery. -/
+
+private abbrev brAppend (br : BitReader) (suffix : ByteArray) : BitReader :=
+  ⟨br.data ++ suffix, br.pos, br.bitOff⟩
+
+/-- readBit with appended suffix produces the same result. -/
+private theorem readBit_append (br : BitReader) (suffix : ByteArray)
+    (bit : UInt32) (br' : BitReader)
+    (h : br.readBit = .ok (bit, br')) :
+    (brAppend br suffix).readBit = .ok (bit, brAppend br' suffix) := by
+  simp only [brAppend, BitReader.readBit] at h ⊢
+  split at h
+  · simp at h
+  · rename_i hge
+    have hlt : br.pos < br.data.size := by omega
+    rw [if_neg (show ¬ br.pos ≥ (br.data ++ suffix).size from by
+      simp [ByteArray.size_append]; omega)]
+    -- Convert getElem! to getElem in both h and goal, then use append lemma
+    rw [getElem!_pos (br.data ++ suffix) br.pos (by simp [ByteArray.size_append]; omega)]
+    rw [getElem!_pos br.data br.pos hlt] at h
+    rw [ByteArray.getElem_append_left hlt]
+    -- Now h and goal both have br.data[br.pos], split on bitOff+1 ≥ 8
+    split at h <;> {
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨hval, hbr'⟩ := h
+      subst hbr'; subst hval
+      split <;> simp_all
+    }
+
+/-- readBits.go with appended suffix produces the same result. -/
+private theorem readBits_go_append (br : BitReader) (suffix : ByteArray)
+    (acc : UInt32) (shift n : Nat) (val : UInt32) (br' : BitReader)
+    (h : BitReader.readBits.go br acc shift n = .ok (val, br')) :
+    BitReader.readBits.go (brAppend br suffix) acc shift n =
+    .ok (val, brAppend br' suffix) := by
+  induction n generalizing br acc shift with
+  | zero =>
+    simp only [brAppend, BitReader.readBits.go] at h ⊢
+    obtain ⟨rfl, rfl⟩ := h; simp
+  | succ n ih =>
+    simp only [BitReader.readBits.go, bind, Except.bind] at h ⊢
+    cases hrb : br.readBit with
+    | error e => simp [hrb] at h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p; simp only [hrb] at h
+      rw [readBit_append br suffix bit br₁ hrb]
+      exact ih br₁ _ _ h
+
+/-- readBits with appended suffix produces the same result. -/
+private theorem readBits_append (br : BitReader) (suffix : ByteArray)
+    (n : Nat) (val : UInt32) (br' : BitReader)
+    (h : br.readBits n = .ok (val, br')) :
+    (brAppend br suffix).readBits n = .ok (val, brAppend br' suffix) :=
+  readBits_go_append br suffix 0 0 n val br' h
+
+/-- alignToByte with appended suffix. -/
+private theorem alignToByte_append (br : BitReader) (suffix : ByteArray) :
+    (brAppend br suffix).alignToByte = brAppend br.alignToByte suffix := by
+  simp only [brAppend, BitReader.alignToByte]; split <;> rfl
+
+/-- readUInt16LE with appended suffix produces the same result. -/
+private theorem readUInt16LE_append (br : BitReader) (suffix : ByteArray)
+    (val : UInt16) (br' : BitReader)
+    (h : br.readUInt16LE = .ok (val, br')) :
+    (brAppend br suffix).readUInt16LE = .ok (val, brAppend br' suffix) := by
+  -- readUInt16LE = alignToByte then read two bytes
+  simp only [BitReader.readUInt16LE] at h ⊢
+  -- Replace alignToByte on appended reader with appended alignToByte
+  rw [alignToByte_append]; simp only [brAppend]
+  -- Now goal has data ++ suffix, pos, bitOff from br.alignToByte
+  -- Split on bounds in h
+  by_cases hle : br.alignToByte.pos + 2 > br.alignToByte.data.size
+  · rw [if_pos hle] at h; simp at h
+  · rw [if_neg hle] at h
+    rw [if_neg (show ¬ br.alignToByte.pos + 2 > (br.alignToByte.data ++ suffix).size from by
+      simp [ByteArray.size_append]; omega)]
+    rw [getElem!_ba_append_left _ _ _ (by omega),
+        getElem!_ba_append_left _ _ _ (by omega)]
+    -- h: .ok (val_expr, {data:=orig, pos:=p+2, bitOff:=bo}) = .ok (val, br')
+    -- goal: .ok (val_expr, {data:=orig++suffix, pos:=p+2, bitOff:=bo}) = .ok (val, brAppend br' suffix)
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
+    obtain ⟨hval, hbr'⟩ := h
+    subst hbr'; constructor
+    · exact hval
+    · simp
+
+/-- readBytes with appended suffix produces the same result. -/
+private theorem readBytes_append (br : BitReader) (suffix : ByteArray)
+    (n : Nat) (bytes : ByteArray) (br' : BitReader)
+    (h : br.readBytes n = .ok (bytes, br')) :
+    (brAppend br suffix).readBytes n = .ok (bytes, brAppend br' suffix) := by
+  simp only [BitReader.readBytes] at h ⊢
+  rw [alignToByte_append]; simp only [brAppend]
+  by_cases hle : br.alignToByte.pos + n > br.alignToByte.data.size
+  · rw [if_pos hle] at h; simp at h
+  · rw [if_neg hle] at h
+    rw [if_neg (show ¬ br.alignToByte.pos + n > (br.alignToByte.data ++ suffix).size from by
+      simp [ByteArray.size_append]; omega)]
+    -- ByteArray.extract on (data ++ suffix) within data bounds
+    have hext : (br.alignToByte.data ++ suffix).extract br.alignToByte.pos
+        (br.alignToByte.pos + n) =
+        br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) := by
+      apply ByteArray.ext
+      simp [ByteArray.data_extract, ByteArray.data_append, Array.extract_append]
+      omega
+    rw [hext]
+    -- h: .ok (extract_result, {data:=orig, pos:=p+n, bitOff:=bo}) = .ok (bytes, br')
+    -- goal: .ok (extract_result, {data:=orig++suffix, pos:=p+n, bitOff:=bo}) = .ok (bytes, brAppend br' suffix)
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
+    obtain ⟨hval, hbr'⟩ := h
+    subst hbr'; constructor
+    · exact hval
+    · simp
+
 /-! ## Gzip roundtrip -/
 
 /-- Gzip roundtrip: decompressing the output of compress returns the original data.
@@ -787,6 +946,60 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
 theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
     (hsize : data.size < 500000000) :
     GzipDecode.decompressSingle (GzipEncode.compress data level) = .ok data := by
-  sorry
+  -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
+  have hinfl : Inflate.inflate (Deflate.deflateRaw data level) = .ok data :=
+    Deflate.inflate_deflateRaw data level hsize
+  -- Spec decode on deflated with default fuel (10001)
+  have hspec_go : Deflate.Spec.decode.go
+      (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] 10001 =
+      some data.data.toList :=
+    inflate_to_spec_decode _ data hinfl
+  -- Suffix invariance: spec decode ignores trailer bits after the DEFLATE stream
+  have hspec_compressed : ∀ (header trailer : ByteArray) (hh : header.size = 10),
+      Deflate.Spec.decode.go
+        ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level ++ trailer)).drop
+          (10 * 8)) [] 10001 = some data.data.toList := by
+    intro header trailer hh
+    rw [show 10 * 8 = header.size * 8 from by omega,
+        bytesToBits_drop_prefix_three]
+    exact Deflate.Spec.decode_go_suffix _ _ [] 10001 _
+      (by rw [Deflate.Spec.bytesToBits_length]; omega)
+      hspec_go
+  -- Use data.size bound to get result.length ≤ maxOutputSize
+  have hdata_le : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
+    simp [Array.length_toList, ByteArray.size_data]; omega
+  -- Spec decode on compressed bits at offset 10 (via compress_eq decomposition)
+  have hspec_at10 : Deflate.Spec.decode.go
+      ((Deflate.Spec.bytesToBits (GzipEncode.compress data level)).drop (10 * 8))
+      [] 10001 = some data.data.toList := by
+    obtain ⟨header, trailer, hhsz, _, hceq⟩ := GzipEncode.compress_eq data level
+    rw [hceq]
+    exact hspec_compressed header trailer hhsz
+  -- Apply inflateRaw_complete to get native inflateRaw at offset 10
+  obtain ⟨endPos, hinflRaw⟩ :=
+    inflateRaw_complete _ 10 _ data.data.toList hdata_le 10001 (by omega) hspec_at10
+  -- compressed size ≥ 18 (from compress = 10 + deflated + 8)
+  have hcsz18 : ¬ (GzipEncode.compress data level).size < 18 := by
+    rw [GzipEncode.compress_size]; omega
+  -- Tight endPos bound: endPos + 8 ≤ compressed.size
+  have hendPos_tight : endPos + 8 ≤ (GzipEncode.compress data level).size := by
+    sorry
+  have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by omega
+  have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
+  -- CRC32 trailer match
+  have hcrc : (Crc32.Native.crc32 0 data ==
+    Binary.readUInt32LE (GzipEncode.compress data level) endPos) = true := by
+    sorry
+  -- ISIZE trailer match
+  have hisize : (data.size.toUInt32 ==
+    Binary.readUInt32LE (GzipEncode.compress data level) (endPos + 4)) = true := by
+    sorry
+  set_option maxRecDepth 8192 in
+  simp (config := { decide := true }) only [GzipDecode.decompressSingle,
+    - GzipDecode.decompressSingle.eq_1,
+    bind, Except.bind, hcsz18, ↓reduceIte, pure, Except.pure,
+    GzipEncode.compress_header_bytes data level,
+    hinflRaw, hendPos8, hba_eq, hcrc, hisize,
+    beq_self_eq_true, Bool.and_self]
 
 end Zip.Native
