@@ -398,7 +398,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                 have hds_bridge : Deflate.Spec.decodeSymbols
                     (Zip.Native.Inflate.fixedLitLengths.toList.map UInt8.toNat)
                     (Zip.Native.Inflate.fixedDistLengths.toList.map UInt8.toNat)
-                    br₂.toBits 10000000 = some (syms, bits₃) := by
+                    br₂.toBits 1000000000 = some (syms, bits₃) := by
                   rw [hrest₂, Correctness.fixedLitLengths_eq, Correctness.fixedDistLengths_eq]; exact hspec_ds
                 have ⟨br', hhf_nat, hrest₃, hwf₃, hpos₃⟩ :=
                   decodeHuffman_complete
@@ -410,7 +410,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     (Correctness.fixedLitLengths_eq ▸ Deflate.Spec.fixedLitLengths_valid)
                     (Correctness.fixedDistLengths_eq ▸ Deflate.Spec.fixedDistLengths_valid)
                     Correctness.fixedLitLengths_size Correctness.fixedDistLengths_size
-                    hacc_le 10000000 hds_bridge hspec_lz
+                    hacc_le 1000000000 hds_bridge hspec_lz
                 -- Wrap decodeHuffman.go into decodeHuffman
                 have hdh : Zip.Native.Inflate.decodeHuffman br₂ output fixedLit fixedDist
                     maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
@@ -472,7 +472,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     have hds_bridge : Deflate.Spec.decodeSymbols
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
                         ((distLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
-                        br₃.toBits 10000000 = some (syms, bits₄) := by
+                        br₃.toBits 1000000000 = some (syms, bits₄) := by
                       rw [hlit_rt, hdist_rt, hrest_dt]; exact hspec_ds
                     have hvlit_bridge : Huffman.Spec.ValidLengths
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat) 15 := by
@@ -493,7 +493,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                         hwf₃ hpos₃ hflit_dyn hfdist_dyn
                         hvlit_bridge hvdist_bridge
                         hsize_lit' hsize_dist'
-                        hacc_le 10000000 hds_bridge hspec_lz
+                        hacc_le 1000000000 hds_bridge hspec_lz
                     -- Wrap into decodeHuffman
                     have hdh : Zip.Native.Inflate.decodeHuffman br₃ output litTree distTree
                         maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
