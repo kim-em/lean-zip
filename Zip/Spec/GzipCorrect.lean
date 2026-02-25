@@ -630,7 +630,6 @@ private theorem decodeDynamicTrees_inv (br br' : BitReader)
 
 /-! ### inflateLoop endPos bound -/
 
-set_option maxRecDepth 1024 in
 /-- After a successful `inflateLoop`, the returned endPos ≤ br.data.size.
 
     The proof tracks three invariants through each operation:
