@@ -14,6 +14,30 @@ Effective for bitvector reasoning. Proved CRC linearity (`crcBit_xor_high`) and 
 **Caveat**: fails when expressions contain `UInt32.ofNat x.toNat` (abstracted as opaque).
 Use `generalize` to unify shared subexpressions first (see below).
 
+### When to Reach for `bv_decide`
+
+Use `bv_decide` as the **final step** when the goal is purely about bit-level operations
+on UInt8/UInt16/UInt32/UInt64/BitVec:
+
+1. **Byte read/write roundtrips**: `readUInt32LE (writeUInt32LE val) 0 = val` —
+   first `simp only` to normalize getElem!/set! calls, then `bv_decide` to close
+   the bit reconstruction.
+
+2. **Bit extraction/reconstruction**: goals like
+   `((v &&& 0xFF).toUInt8).toUInt16 ||| (((v >>> 8) &&& 0xFF).toUInt8).toUInt16 <<< 8 = v`
+
+3. **After `generalize`**: when data comes from `ByteArray` indexing, use
+   `generalize data[pos].toUInt32 = x` to abstract concrete array access into
+   a BitVec variable, then `bv_decide` reasons about the variable.
+
+### `bv_decide` vs `decide_cbv`
+
+- `bv_decide` handles BitVec/UInt goals via SAT solving — fast for symbolic reasoning
+- `decide_cbv` uses kernel evaluation — works for concrete decidable propositions but
+  **fails on large arrays** (e.g., 288-element Huffman tables)
+- For large concrete instances, use `decide` with `set_option maxHeartbeats 1600000`
+  instead of `decide_cbv`
+
 ## UInt8→UInt32 Conversion for `bv_decide`
 
 When `bv_decide` fails on `UInt32.ofNat byte.toNat`, rewrite to `⟨byte.toBitVec.setWidth 32⟩`
