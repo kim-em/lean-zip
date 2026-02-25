@@ -389,6 +389,59 @@ def token_summary(state: AgentState, pricing: dict) -> str:
     return f"{fmt_tokens(total_in)}/{fmt_tokens(state.tokens_out)}~${cost:.2f}"
 
 
+def compute_historical_cost(pricing: dict) -> float:
+    """Scan all lean-zip JSONL files and return total estimated cost.
+
+    Uses the same counting methodology as the JSONL monitor (sum all
+    assistant records) for consistency with per-agent cost display.
+    """
+    projects_dir = Path.home() / ".claude" / "projects"
+    if not projects_dir.is_dir():
+        return 0.0
+
+    total_in = 0
+    total_out = 0
+    total_cache_read = 0
+    total_cache_create = 0
+
+    for d in projects_dir.iterdir():
+        if not d.is_dir():
+            continue
+        name = d.name
+        # Match lean-zip project dirs (main + worktrees)
+        if not (name == "-home-kim-lean-zip"
+                or name.startswith("-home-kim-lean-zip-")
+                or name == "-Users-kim-projects-lean-lean-zip"
+                or name.startswith("-Users-kim-projects-lean-lean-zip-")):
+            continue
+        for f in d.glob("*.jsonl"):
+            try:
+                with open(f) as fh:
+                    for line in fh:
+                        if '"usage"' not in line or '"assistant"' not in line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if rec.get("type") != "assistant":
+                            continue
+                        usage = rec.get("message", {}).get("usage", {})
+                        total_in += usage.get("input_tokens", 0)
+                        total_out += usage.get("output_tokens", 0)
+                        total_cache_read += usage.get("cache_read_input_tokens", 0)
+                        total_cache_create += usage.get("cache_creation_input_tokens", 0)
+            except OSError:
+                continue
+
+    return (
+        total_in * pricing.get("input", 5.0) / 1e6
+        + total_cache_create * pricing.get("cache_create", 6.25) / 1e6
+        + total_cache_read * pricing.get("cache_read", 0.50) / 1e6
+        + total_out * pricing.get("output", 25.0) / 1e6
+    )
+
+
 def check_quota(config: dict, force: bool = False) -> bool:
     """Check if Claude quota is available. Returns True if OK."""
     if force:
@@ -1474,8 +1527,28 @@ def _tui_main(stdscr, config: dict):
 
     pricing = cfg_get(config, "pricing", default={})
 
+    # Compute all-time historical cost once at startup
+    historical_cost = compute_historical_cost(pricing)
+    # Track session-accumulated costs (persists across agent deaths)
+    session_agent_costs: dict[str, float] = {}  # agent short_id -> last known cost
+    # Accumulated cost from previous iterations (when token counters reset)
+    session_cost_offsets: dict[str, float] = {}  # agent short_id -> sum of prior iterations' costs
+    # Baseline costs for agents already running when pod started (to avoid double-counting)
+    baseline_costs: dict[str, float] = {}
+    for a in read_all_agents():
+        if a.status not in ("stopped", "dead"):
+            baseline_costs[a.short_id] = a.cost(pricing)
+
     while True:
         agents = read_all_agents()
+        # Accumulate costs from all agents (including dying ones) before cleanup
+        for a in agents:
+            current = a.cost(pricing)
+            prev = session_agent_costs.get(a.short_id)
+            if prev is not None and current < prev:
+                # Token counters were reset (new loop iteration) — accumulate previous cost
+                session_cost_offsets[a.short_id] = session_cost_offsets.get(a.short_id, 0.0) + prev
+            session_agent_costs[a.short_id] = current
         # Clean up dead agent state files
         for a in agents:
             if a.status == "dead":
@@ -1486,7 +1559,12 @@ def _tui_main(stdscr, config: dict):
         stdscr.erase()
 
         # --- Header ---
-        total_cost = sum(a.cost(pricing) for a in agents)
+        # session_cost = delta from agents already running at startup + full cost of new agents
+        session_cost = sum(
+            session_cost_offsets.get(sid, 0.0) + cost - baseline_costs.get(sid, 0.0)
+            for sid, cost in session_agent_costs.items()
+        )
+        session_runs = sum(1 for sid in session_agent_costs if sid not in baseline_costs)
         running = sum(1 for a in agents if a.status not in ("stopped", "dead"))
 
         # Cache GitHub data to avoid API calls every second
@@ -1510,10 +1588,12 @@ def _tui_main(stdscr, config: dict):
             except Exception:
                 pass
 
+        all_time = historical_cost + session_cost
+        session_info = f"${session_cost:.2f} this session, {session_runs} run{'s' if session_runs != 1 else ''}"
         if cached_queue is not None:
-            header = f" pod -- {running} agent{'s' if running != 1 else ''} running | queue: {cached_queue} | ${total_cost:.2f} total"
+            header = f" pod -- {running} agent{'s' if running != 1 else ''} running | queue: {cached_queue} | ${all_time:.2f} total ({session_info})"
         else:
-            header = f" pod -- {running} agent{'s' if running != 1 else ''} running | ${total_cost:.2f} total"
+            header = f" pod -- {running} agent{'s' if running != 1 else ''} running | ${all_time:.2f} total ({session_info})"
 
         _addstr(stdscr, 0, 0, header[:width], curses.color_pair(4) | curses.A_BOLD)
         _addstr(stdscr, 1, 0, "─" * min(width, 80), curses.color_pair(4))
@@ -1995,9 +2075,10 @@ def cmd_status(config: dict, args):
     alive = [a for a in agents if a.status not in ("stopped", "dead")]
     pricing = cfg_get(config, "pricing", default={})
 
-    total_cost = sum(a.cost(pricing) for a in alive)
+    session_cost = sum(a.cost(pricing) for a in alive)
     total_in = sum(a.tokens_in + a.cache_read + a.cache_create for a in alive)
     total_out = sum(a.tokens_out for a in alive)
+    historical_cost = compute_historical_cost(pricing)
 
     try:
         queue = get_queue_depth(config)
@@ -2016,7 +2097,8 @@ def cmd_status(config: dict, args):
         print(f"  Breakdown:    {', '.join(parts)}")
 
     print(f"Total tokens:   {fmt_tokens(total_in)} in / {fmt_tokens(total_out)} out")
-    print(f"Total cost:     ${total_cost:.2f}")
+    print(f"Running cost:   ${session_cost:.2f}")
+    print(f"All-time cost:  ${historical_cost:.2f}")
 
 
 def cmd_log(config: dict, args):
