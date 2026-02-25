@@ -60,4 +60,10 @@ theorem extract_map_getLast_eq (arr : Array UInt8) (idx : Nat)
     @List.getElem_take _ (arr.toList.map UInt8.toNat) idx (idx - 1) (by rw [hlen]; omega)]
   simp [List.getElem_map]
 
+/-- `arr[i]? = some arr[i]!` when `i` is in bounds.
+    Combines `getElem!_pos` and `getElem?_pos` into a single step. -/
+theorem getElem?_eq_some_getElem! [Inhabited α] (arr : Array α) (i : Nat)
+    (h : i < arr.size) : arr[i]? = some arr[i]! := by
+  rw [getElem!_pos arr i h]; exact getElem?_pos arr i h
+
 end Array
