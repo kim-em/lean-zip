@@ -26,7 +26,7 @@ private theorem uint8_nat_roundtrip (l : List UInt8) :
   simp
 
 /-- Nat→UInt8→Nat roundtrip for lists with elements bounded by `maxBits ≤ 15`. -/
-private theorem validLengths_toUInt8_roundtrip (lens : List Nat)
+theorem validLengths_toUInt8_roundtrip (lens : List Nat)
     (hv : Huffman.Spec.ValidLengths lens maxBits) (hmb : maxBits ≤ 15) :
     (lens.map Nat.toUInt8).toArray.toList.map UInt8.toNat = lens := by
   simp only [List.map_map]
