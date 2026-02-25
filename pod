@@ -1626,7 +1626,7 @@ def _tui_main(stdscr, config: dict):
         _addstr(stdscr, 1, 0, "─" * min(width, 80), curses.color_pair(4))
 
         # --- Agent table header ---
-        col_fmt = "  {:>2} {:8} {:12} {:>6} {:>15} {}"
+        col_fmt = "  {:>2} {:8} {:16} {:>6} {:>15} {}"
         hdr = " " + col_fmt.format("#", "ID", "Type", "Time", "Tokens", "Activity")
         _addstr(stdscr, 2, 0, hdr[:width], curses.A_DIM)
 
@@ -1680,13 +1680,13 @@ def _tui_main(stdscr, config: dict):
             activity = " ".join(activity.split())
 
             # Truncate activity to fit (1 extra for marker char)
-            prefix = col_fmt.format(i + 1, agent.short_id, mode[:12], elapsed, tok, "")
+            prefix = col_fmt.format(i + 1, agent.short_id, mode[:16], elapsed, tok, "")
             max_act = width - len(prefix) - 1  # -1 for marker
             if max_act > 10 and len(activity) > max_act:
                 activity = activity[:max_act - 3] + "..."
 
             marker = ">" if is_agent_selected and i == selected_idx else " "
-            line = f"{marker}" + col_fmt.format(i + 1, agent.short_id, mode[:12], elapsed, tok, activity)
+            line = f"{marker}" + col_fmt.format(i + 1, agent.short_id, mode[:16], elapsed, tok, activity)
 
             attr = curses.A_NORMAL
             if is_agent_selected and i == selected_idx:
@@ -2025,9 +2025,9 @@ def cmd_list(config: dict, args):
         print("No agents running.")
         return
 
-    fmt = "{:>2}  {:8}  {:12}  {:>6}  {:>15}  {}"
+    fmt = "{:>2}  {:8}  {:16}  {:>6}  {:>15}  {}"
     print(fmt.format("#", "ID", "Type", "Time", "Tokens", "Status"))
-    print("─" * 70)
+    print("─" * 74)
     for i, a in enumerate(alive):
         mode = a.worker_type or "???"
         if a.claimed_issue > 0:
@@ -2042,7 +2042,7 @@ def cmd_list(config: dict, args):
         tok = token_summary(a, pricing)
         activity = a.last_text or a.status
 
-        print(fmt.format(i + 1, a.short_id, mode[:12], elapsed, tok, activity[:40]))
+        print(fmt.format(i + 1, a.short_id, mode[:16], elapsed, tok, activity[:40]))
 
 
 def cmd_add(config: dict, args):
