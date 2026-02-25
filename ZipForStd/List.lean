@@ -99,4 +99,27 @@ theorem take_set_succ (l : List α) (idx : Nat) (val : α)
   simp only [h_take_len, Nat.lt_irrefl, ↓reduceIte, Nat.sub_self,
              Option.toList, List.set_cons_zero]
 
+/-! ## Prefix comparability -/
+
+/-- Two prefixes of the same list are comparable: one is a prefix of the other. -/
+theorem IsPrefix_of_IsPrefix_append {a b : List α} {c : List α}
+    (ha : a <+: b ++ c) : a <+: b ∨ b <+: a := by
+  induction a generalizing b with
+  | nil => left; exact nil_prefix
+  | cons x xs ih =>
+    cases b with
+    | nil => right; exact nil_prefix
+    | cons y ys =>
+      obtain ⟨t, ht⟩ := ha
+      have hxy : x = y := by simp [cons_append] at ht; exact ht.1
+      have hrest : xs <+: ys ++ c :=
+        ⟨t, by simp [cons_append] at ht; exact ht.2⟩
+      cases ih hrest with
+      | inl h =>
+        left; obtain ⟨t', ht'⟩ := h
+        exact ⟨t', by rw [hxy, cons_append, ht']⟩
+      | inr h =>
+        right; obtain ⟨t', ht'⟩ := h
+        exact ⟨t', by rw [← hxy, cons_append, ht']⟩
+
 end List

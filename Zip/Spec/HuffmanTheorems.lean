@@ -46,27 +46,6 @@ private theorem natToBits_prefix_lt (a b n m : Nat)
 
 /-! ## Prefix comparison lemmas -/
 
-/-- Two prefixes of the same list are comparable: one is a prefix of the other. -/
-private theorem IsPrefix_dichotomy {a b c : List Bool}
-    (ha : a <+: b ++ c) : a <+: b ∨ b <+: a := by
-  induction a generalizing b with
-  | nil => left; exact List.nil_prefix
-  | cons x xs ih =>
-    cases b with
-    | nil => right; exact List.nil_prefix
-    | cons y ys =>
-      obtain ⟨t, ht⟩ := ha
-      have hxy : x = y := by simp [List.cons_append] at ht; exact ht.1
-      have hrest : xs <+: ys ++ c :=
-        ⟨t, by simp [List.cons_append] at ht; exact ht.2⟩
-      cases ih hrest with
-      | inl h =>
-        left; obtain ⟨t', ht'⟩ := h
-        exact ⟨t', by rw [hxy, List.cons_append, ht']⟩
-      | inr h =>
-        right; obtain ⟨t', ht'⟩ := h
-        exact ⟨t', by rw [← hxy, List.cons_append, ht']⟩
-
 /-- `isPrefixOf` returns true for a list prepended to any suffix. -/
 private theorem isPrefixOf_self_append (cw rest : List Bool) :
     isPrefixOf cw (cw ++ rest) = true := by
@@ -293,7 +272,7 @@ theorem decode_prefix_free {α : Type} (table : List (Codeword × α))
           | false => rfl
           | true =>
             exfalso; rw [isPrefixOf_iff] at hp
-            cases IsPrefix_dichotomy hp with
+            cases List.IsPrefix_of_IsPrefix_append hp with
             | inl h =>
               exact hpf cw' sym' cw sym (List.mem_cons_self ..)
                 (List.mem_cons_of_mem _ htail) heq h
