@@ -96,6 +96,19 @@ private theorem uint8_or_shiftLeft_toNat (buf bit k : UInt8)
     _ ≤ 2 ^ 7 := Nat.pow_le_pow_right (by omega) (by omega)
     _ < 2 ^ 8 := by omega
 
+/-- OR of a small value with a shifted single bit is bounded. Used by both addBit_toBits and addBit_wf. -/
+private theorem or_shiftLeft_lt_two_pow (buf bit k : Nat)
+    (hbuf : buf < 2 ^ k) (hbit : bit ≤ 1) :
+    buf ||| (bit <<< k) < 2 ^ (k + 1) := by
+  have hshift : bit <<< k < 2 ^ (k + 1) := by
+    rw [Nat.shiftLeft_eq]
+    calc bit * 2 ^ k ≤ 1 * 2 ^ k := Nat.mul_le_mul_right _ hbit
+      _ = 2 ^ k := Nat.one_mul _
+      _ < 2 ^ (k + 1) := Nat.pow_lt_pow_right (by omega) (by omega)
+  exact Nat.or_lt_two_pow
+    (Nat.lt_of_lt_of_le hbuf (Nat.pow_le_pow_right (by omega) (by omega)))
+    hshift
+
 /-! ## Core addBit lemma -/
 
 /-- Range map extension: extending range by 1 where the new element equals
@@ -109,21 +122,14 @@ private theorem range_map_extend (buf : Nat) (bit : Nat) (k : Nat)
   · intro i h1 h2
     simp only [List.length_map, List.length_range] at h1
     by_cases hik : i < k
-    · have hlhs : ((List.range (k + 1)).map (fun i => (buf ||| (bit <<< k)).testBit i))[i] =
-          (buf ||| (bit <<< k)).testBit i := by simp
-      have hrhs : ((List.range k).map (fun i => buf.testBit i) ++ [bit.testBit 0])[i] =
-          buf.testBit i := by
-        rw [List.getElem_append_left (by simp; omega)]; simp
-      rw [hlhs, hrhs]
+    · rw [List.getElem_append_left (by simp; omega)]
+      simp only [List.getElem_map, List.getElem_range]
       exact testBit_or_shiftLeft_below buf bit k i hik
     · have hieq : i = k := by omega
       subst hieq
-      have hlhs : ((List.range (i + 1)).map (fun j => (buf ||| (bit <<< i)).testBit j))[i] =
-          (buf ||| (bit <<< i)).testBit i := by simp
-      have hrhs : ((List.range i).map (fun j => buf.testBit j) ++ [bit.testBit 0])[i] =
-          bit.testBit 0 := by
-        rw [List.getElem_append_right (by simp)]; simp
-      rw [hlhs, hrhs]
+      rw [List.getElem_append_right (by simp)]
+      simp only [List.getElem_map, List.getElem_range, List.length_map,
+        List.length_range, Nat.sub_self, List.getElem_cons_zero]
       exact testBit_or_shiftLeft_at buf bit i hbuf
 
 /-- Adding one bit to a well-formed BitWriter extends toBits by that bit. -/
@@ -162,17 +168,7 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
       rw [range_map_extend bw.bitBuf.toNat bit.toNat bw.bitCount.toNat hbuf_lt hbit_le]
       congr 1; congr 1
       rw [hbit_val, testBit_zero_of_le_one bit.toNat hbit_le]
-    · -- newBuf.toNat < 2 ^ (k + 1)
-      rw [hbridge]
-      have hshift : bit.toNat <<< bw.bitCount.toNat < 2 ^ (bw.bitCount.toNat + 1) := by
-        rw [Nat.shiftLeft_eq]
-        calc bit.toNat * 2 ^ bw.bitCount.toNat
-            ≤ 1 * 2 ^ bw.bitCount.toNat := Nat.mul_le_mul_right _ hbit_le
-          _ = 2 ^ bw.bitCount.toNat := Nat.one_mul _
-          _ < 2 ^ (bw.bitCount.toNat + 1) := Nat.pow_lt_pow_right (by omega) (by omega)
-      exact Nat.or_lt_two_pow
-        (Nat.lt_of_lt_of_le hbuf_lt (Nat.pow_le_pow_right (by omega) (by omega)))
-        hshift
+    · rw [hbridge]; exact or_shiftLeft_lt_two_pow _ _ _ hbuf_lt hbit_le
   · -- Case: k + 1 < 8 (no flush)
     rw [if_neg (show ¬(bw.bitCount.toNat + 1 ≥ 8) from hflush)]
     simp only [toBits]
@@ -211,19 +207,10 @@ private theorem addBit_wf (bw : BitWriter) (bit : UInt8)
     · -- (bw.bitCount + 1).toNat < 8
       show (bw.bitCount.toNat + 1) % 256 < 8
       rw [Nat.mod_eq_of_lt (by omega)]; omega
-    · -- newBuf.toNat < 2 ^ (bw.bitCount + 1).toNat
-      show (bw.bitBuf ||| bit <<< bw.bitCount).toNat <
+    · show (bw.bitBuf ||| bit <<< bw.bitCount).toNat <
           2 ^ ((bw.bitCount.toNat + 1) % 256)
       rw [Nat.mod_eq_of_lt (by omega), hbridge]
-      have hshift : bit.toNat <<< bw.bitCount.toNat < 2 ^ (bw.bitCount.toNat + 1) := by
-        rw [Nat.shiftLeft_eq]
-        calc bit.toNat * 2 ^ bw.bitCount.toNat
-            ≤ 1 * 2 ^ bw.bitCount.toNat := Nat.mul_le_mul_right _ hbit_le
-          _ = 2 ^ bw.bitCount.toNat := Nat.one_mul _
-          _ < 2 ^ (bw.bitCount.toNat + 1) := Nat.pow_lt_pow_right (by omega) (by omega)
-      exact Nat.or_lt_two_pow
-        (Nat.lt_of_lt_of_le hbuf_lt (Nat.pow_le_pow_right (by omega) (by omega)))
-        hshift
+      exact or_shiftLeft_lt_two_pow _ _ _ hbuf_lt hbit_le
 
 /-- Extracting bit k from a UInt16 code: ((code >>> k) &&& 1).toUInt8 has toNat ≤ 1
     and equals testBit. -/
@@ -294,15 +281,9 @@ private theorem writeHuffCode_go_spec (bw : BitWriter) (n : Nat) (code : UInt16)
     obtain ⟨hbit_le, hbit_val⟩ := uint16_extract_bit code k (by omega)
     have hab := addBit_toBits bw _ (code.toNat.testBit k) hwf hbit_le hbit_val.symm
     have hawf := addBit_wf bw _ hwf hbit_le
-    -- Split on the flush condition
     simp only at hab hawf
-    by_cases hflush : bw.bitCount.toNat + 1 ≥ 8
-    · rw [if_pos hflush] at hab hawf
-      rw [if_pos hflush]
-      have hih := ih _ hawf (by omega)
-      exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩
-    · rw [if_neg hflush] at hab hawf
-      rw [if_neg hflush]
+    by_cases hflush : bw.bitCount.toNat + 1 ≥ 8 <;>
+    · first | rw [if_pos hflush] at hab hawf ⊢ | rw [if_neg hflush] at hab hawf ⊢
       have hih := ih _ hawf (by omega)
       exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩
 
@@ -357,39 +338,25 @@ private theorem writeBits_go_spec (bw : BitWriter) (i n : Nat) (val : UInt32)
     have hawf := addBit_wf bw _ hwf hbit_le
     simp only at hab hawf
     -- The goal's if uses UInt8 condition; hab/hawf use Nat condition.
-    -- Bridge via flush_iff_nat (bw'.bitCount = bw.bitCount definitionally)
+    -- Bridge via flush_iff_nat, then the two branches are identical.
     have hbc_lt := hwf.1
-    by_cases hflush_nat : bw.bitCount.toNat + 1 ≥ 8
-    · rw [if_pos hflush_nat] at hab hawf
-      rw [if_pos ((flush_iff_nat bw.bitCount hbc_lt).mpr hflush_nat)]
-      simp only [Deflate.Spec.writeBitsLSB]
-      have hhead : (val.toNat / 2 ^ i % 2 == 1) = val.toNat.testBit i := by
-        simp only [Nat.testBit, Nat.shiftRight_eq_div_pow, Nat.one_and_eq_mod_two]
-        cases h : val.toNat / 2 ^ i % 2 with
-        | zero => simp
-        | succ j =>
-          have : j = 0 := by omega
-          subst this; simp
-      have htail : val.toNat / 2 ^ i / 2 = val.toNat / 2 ^ (i + 1) := by
-        rw [Nat.pow_succ, Nat.div_div_eq_div_mul]
-      rw [hhead, htail]
+    have hhead : (val.toNat / 2 ^ i % 2 == 1) = val.toNat.testBit i := by
+      simp only [Nat.testBit, Nat.shiftRight_eq_div_pow, Nat.one_and_eq_mod_two]
+      cases h : val.toNat / 2 ^ i % 2 with
+      | zero => simp
+      | succ j =>
+        have : j = 0 := by omega
+        subst this; simp
+    have htail : val.toNat / 2 ^ i / 2 = val.toNat / 2 ^ (i + 1) := by
+      rw [Nat.pow_succ, Nat.div_div_eq_div_mul]
+    by_cases hflush_nat : bw.bitCount.toNat + 1 ≥ 8 <;> {
+      first | rw [if_pos hflush_nat] at hab hawf | rw [if_neg hflush_nat] at hab hawf
+      first
+        | rw [if_pos ((flush_iff_nat bw.bitCount hbc_lt).mpr hflush_nat)]
+        | rw [if_neg (mt (flush_iff_nat bw.bitCount hbc_lt).mp hflush_nat)]
+      simp only [Deflate.Spec.writeBitsLSB]; rw [hhead, htail]
       have hih := ihm _ (i + 1) hawf (by omega) (by omega)
-      exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩
-    · rw [if_neg hflush_nat] at hab hawf
-      rw [if_neg (mt (flush_iff_nat bw.bitCount hbc_lt).mp hflush_nat)]
-      simp only [Deflate.Spec.writeBitsLSB]
-      have hhead : (val.toNat / 2 ^ i % 2 == 1) = val.toNat.testBit i := by
-        simp only [Nat.testBit, Nat.shiftRight_eq_div_pow, Nat.one_and_eq_mod_two]
-        cases h : val.toNat / 2 ^ i % 2 with
-        | zero => simp
-        | succ j =>
-          have : j = 0 := by omega
-          subst this; simp
-      have htail : val.toNat / 2 ^ i / 2 = val.toNat / 2 ^ (i + 1) := by
-        rw [Nat.pow_succ, Nat.div_div_eq_div_mul]
-      rw [hhead, htail]
-      have hih := ihm _ (i + 1) hawf (by omega) (by omega)
-      exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩
+      exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩ }
 
 theorem writeBits_toBits (bw : BitWriter) (n : Nat) (val : UInt32)
     (hwf : bw.wf) (hn : n ≤ 25) :
