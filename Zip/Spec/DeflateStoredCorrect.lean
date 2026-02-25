@@ -180,15 +180,13 @@ theorem decodeStored_on_block (compressed : ByteArray) (brPos : Nat)
   -- Step 1: readUInt16LE for LEN
   have hru1 := readUInt16LE_at_aligned compressed brPos (by omega)
   rw [getElem!_pos compressed brPos (by omega),
-      getElem!_pos compressed (brPos + 1) (by omega)] at hru1
-  rw [hlen_lo, hlen_hi] at hru1
-  rw [uint16_le_roundtrip] at hru1
+      getElem!_pos compressed (brPos + 1) (by omega),
+      hlen_lo, hlen_hi, uint16_le_roundtrip] at hru1
   -- Step 2: readUInt16LE for NLEN
   have hru2 := readUInt16LE_at_aligned compressed (brPos + 2) (by omega)
   rw [getElem!_pos compressed (brPos + 2) (by omega),
-      getElem!_pos compressed (brPos + 2 + 1) (by omega)] at hru2
-  rw [hnlen_lo, hnlen_hi] at hru2
-  rw [uint16_le_roundtrip] at hru2
+      getElem!_pos compressed (brPos + 2 + 1) (by omega),
+      hnlen_lo, hnlen_hi, uint16_le_roundtrip] at hru2
   -- Step 3: blockLen.toUInt16.toNat = blockLen
   have hbl_toNat : blockLen.toUInt16.toNat = blockLen := by
     simp [Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)]
