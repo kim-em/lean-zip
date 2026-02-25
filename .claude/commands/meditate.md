@@ -42,28 +42,11 @@ where the gaps are.
 
 ### Step 3: Update or create skills
 
+Read `.claude/skills/acquiring-skills/SKILL.md` before writing any new skill.
+
 For each gap or recurring struggle:
 - If it fits in an existing skill, add a new section to that SKILL.md
 - If it's a new topic area, create `.claude/skills/<topic>/SKILL.md`
-
-**Skill format:**
-```yaml
----
-name: skill-name
-description: Use when [specific situation]. Trigger on [keywords/situations].
-allowed-tools: Read, Bash, Grep
----
-
-# Title
-
-## Section
-
-Content...
-```
-
-The `description` field is the trigger — make it specific enough that it fires
-when relevant but doesn't fire constantly. Test the description against the
-scenarios in recent progress entries.
 
 ### Step 4: Update commands if stale
 
