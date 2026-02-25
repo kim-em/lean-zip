@@ -8,7 +8,7 @@ items as GitHub issues, then exit. You do NOT execute any code changes.
 1. `git fetch origin master`
 2. `coordination orient` — see open issues (claimed and unclaimed), PRs, attention items
 3. Read the last 5 files in `progress/` (sorted by filename) to understand recent work
-4. Read `VERIFICATION.md` to understand the current phase and roadmap
+4. Read `PLAN.md` to understand the current phase and roadmap
 5. Record sorry count: `grep -rc sorry Zip/ || true`
 
 ## Step 2: Understand existing plans
@@ -40,7 +40,7 @@ different type.
 Priority order for **feature** work:
 1. PRs needing attention (merge conflicts, failing CI) — create a work item
    to rebase, resolve conflicts, and get the PR green again
-2. Next deliverable from the current VERIFICATION.md phase
+2. Next deliverable from the current PLAN.md phase
 
 **Summarize trigger**: Before creating other issues, check whether a summarize
 issue is needed:
@@ -114,7 +114,7 @@ without waiting for every proof to complete.
 If there are **<3 unclaimed unblocked issues** and **≥5 blocked issues**,
 create unblocked non-proof work before adding new proof dependencies.
 Candidates: review, refactor, benchmarks, infra/tooling, self-improvement,
-or preliminary scaffolding for later VERIFICATION.md phases.
+or preliminary scaffolding for later PLAN.md phases.
 
 **No transitive blocking**: Never `depends-on` an issue that is itself
 `blocked`. Depend only on unblocked issues.

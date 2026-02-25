@@ -18,7 +18,7 @@ The priority order in the worker skill still applies — check for PR-fix issues
 ## Executing Implementation Work
 
 Follow the plan's deliverables. For new native implementations, follow the development
-cycle in VERIFICATION.md: type signature → spec theorems → implementation →
+cycle in PLAN.md: type signature → spec theorems → implementation →
 conformance tests → proofs.
 
 After each coherent chunk of changes:
@@ -38,4 +38,4 @@ Failure handling:
 
 Run `/reflect`. If it suggests improvements to skills in `.claude/skills/` or
 command files in `.claude/commands/`, make those changes and commit before finishing.
-Do NOT modify `.claude/CLAUDE.md` or `VERIFICATION.md` — those are off-limits.
+Do NOT modify `.claude/CLAUDE.md` or `PLAN.md` — those are off-limits.

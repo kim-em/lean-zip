@@ -1,37 +1,9 @@
-# Verification Plan for lean-zip
+# Plan for lean-zip
 
-This document outlines a plan to add parallel native Lean implementations
-alongside the existing FFI wrappers, add conformance tests between the
-two, formally prove properties of the native implementations, and then
-iteratively optimize the native implementations with verified correctness.
-
-## Current Architecture
-
-lean-zip currently wraps system libraries (zlib, Zstandard) via C FFI for
-compression, decompression, and checksums. Archive formats (tar, ZIP) are
-already implemented in pure Lean.
-
-| Component | Implementation | Lines (approx) |
-|-----------|---------------|----------------|
-| CRC32, Adler32 | C FFI (zlib) | ~40 C |
-| DEFLATE compress/decompress | C FFI (zlib) | ~600 C |
-| Gzip/Zlib framing | C FFI (zlib) | included above |
-| Zstd compress/decompress | C FFI (libzstd) | ~350 C |
-| Tar archives | Pure Lean | ~600 |
-| ZIP archives | Pure Lean | ~420 |
-| Binary packing | Pure Lean | ~140 |
-
-## What Adding Native Implementations Would Involve
-
-| Component | Algorithmic complexity | Estimated effort |
-|-----------|----------------------|------------------|
-| CRC32 | Table-driven, ~50 lines of logic | Easy (days) |
-| Adler32 | Trivial arithmetic | Easy (hours) |
-| DEFLATE decompression (inflate) | Huffman decoding + LZ77 sliding window | Hard (weeks) |
-| DEFLATE compression (deflate) | Huffman coding + LZ77 matching + lazy matching + levels 0-9 | Very hard (months) |
-| Gzip/Zlib framing | Header/trailer parsing, CRC/size checks | Easy (days) |
-| Zstd decompression | FSE + Huffman + sequence decoding + window management | Very hard (months) |
-| Zstd compression | All of the above plus match finding, optimal parsing | Extremely hard (many months) |
+A verified compression library in Lean 4, covering zlib/zstd via C FFI,
+pure-Lean native implementations, and formal proofs of correctness.
+Starting from an empty repository, this plan builds the entire library
+from project scaffolding through verified, optimized compression.
 
 ## What Is Realistic to Prove
 
@@ -195,34 +167,88 @@ of the formalization.
 
 ### Overview
 
-The work is organized into a linear **A-track** (DEFLATE verification
-pipeline) followed by parallel tracks **B**, **C**, and **D** that can
-be worked on concurrently. Two cross-cutting concerns run throughout.
+The work is organized into five tracks: a bootstrapping **A-track**, a
+linear **B-track** (DEFLATE verification pipeline), and three tracks
+**C**, **D**, and **E** that can be worked on concurrently once their
+dependencies are met. Two cross-cutting concerns run throughout.
 
 **Dependency graph:**
 
 ```
-A1 → A2 → A3 → A4
-      │    │
-      ↓    ↓
-      C    B
-D (independent)
+A1 → A2 → A3
+            ↓
+     B1 → B2 → B3 → B4
+           │    │
+           ↓    ↓
+           D    C
+E (independent, needs A2)
 ```
 
-- **A1–A4** are sequential: each depends on the previous.
-- **B** (size limit elimination) depends on A3: fuel-based proofs must
+- **A1–A3** are sequential: project setup, FFI wrappers, archive formats.
+- **B1–B4** are sequential: native implementations and verified roundtrip.
+  B1 depends on A3 (needs FFI wrappers and test infrastructure).
+- **C** (size limit elimination) depends on B3: fuel-based proofs must
   exist before they can be replaced with well-founded recursion.
-- **C** (benchmarking and optimization) depends on A2: native
+- **D** (benchmarking and optimization) depends on B2: native
   implementations must exist before they can be profiled.
-- **D** (Zstd) is independent: it follows the same A1–A4 methodology
-  for a different compression format and can start at any time.
+- **E** (Zstd) is independent of the B-track: it follows the same
+  methodology for a different compression format. It needs A2 (FFI
+  wrappers for Zstd) but can otherwise start at any time.
 - **Cross-cutting concerns** (characterizing properties, ZipForStd)
-  apply from A1 onwards and are not gated on any particular phase.
+  apply from B1 onwards and are not gated on any particular phase.
 
 Planning agents should spread work across tracks wherever dependencies
 allow, rather than finishing one track before starting another.
 
-### A1: Checksums
+### A1: Project Setup
+
+Lake project scaffolding, toolchain configuration, and build system.
+
+**Deliverables**:
+- `lakefile.lean` with Lake build configuration
+- `lean-toolchain` pinning the Lean version
+- `shell.nix` providing zlib, zstd, and pkg-config for NixOS
+- C FFI scaffolding: `pkg-config` detection for zlib/zstd link flags,
+  static linking support, platform detection
+- `ARCHITECTURE.md` documenting the project structure
+- `README.md` with build and usage instructions
+
+### A2: FFI Wrappers
+
+C FFI bindings to system compression libraries. These provide the fast
+path and serve as the reference implementation for conformance testing.
+
+**Deliverables**:
+- **Zlib FFI**: gzip compress/decompress (whole-buffer and streaming),
+  raw DEFLATE compress/decompress, zlib-format compress/decompress
+- **Checksum FFI**: CRC32 and Adler32 via zlib
+- **Zstd FFI**: compress/decompress (whole-buffer and streaming)
+- **File helpers**: `compressFile`, `decompressFile` for each format
+- **Streaming API**: incremental compression/decompression with bounded
+  memory, stream piping between sources and sinks
+- C implementation in `c/` with overflow guards and allocation failure
+  checks
+- Basic tests for each FFI function
+
+### A3: Archive Formats and Test Infrastructure
+
+Pure Lean archive format implementations and conformance test harness.
+
+**Deliverables**:
+- **Binary packing**: little-endian/big-endian read/write for multi-byte
+  integers
+- **Tar archives**: GNU tar format with PAX extended headers, streaming
+  decompression of `.tar.gz` via FFI
+- **ZIP archives**: local file headers, central directory, EOCD record,
+  ZIP64 support, DEFLATE and stored methods, UTF-8 filenames
+- **Security hardening**: path traversal prevention, checksum validation
+  on parse, truncation detection
+- **Conformance test infrastructure**: random input generation,
+  cross-implementation testing (native compress + FFI decompress and vice
+  versa once native implementations exist), edge cases (empty, single
+  byte, large, incompressible)
+
+### B1: Checksums
 
 Pure Lean CRC32 and Adler32 with proofs of equivalence to a formal
 specification. Conformance tests against the FFI implementations.
@@ -234,7 +260,7 @@ specification. Conformance tests against the FFI implementations.
 - Proof: incremental computation composes correctly
 - Conformance test harness comparing native vs FFI on random inputs
 
-### A2: DEFLATE Decompressor
+### B2: DEFLATE Decompressor
 
 Pure Lean DEFLATE decompressor (inflate only). No proofs yet.
 
@@ -245,7 +271,7 @@ Pure Lean DEFLATE decompressor (inflate only). No proofs yet.
 - Conformance tests against zlib on a corpus of compressed data
 - Integration as an alternative backend for existing ZIP/tar code paths
 
-### A3–A4: Verified DEFLATE Roundtrip
+### B3–B4: Verified DEFLATE Roundtrip
 
 The overarching goal:
 
@@ -258,8 +284,8 @@ theorem says compression always succeeds and decompression of
 well-formed output never fails.)
 
 The roundtrip decomposes into five building blocks. The decompressor
-(A3) contributes the "right half" of each invertibility theorem;
-the compressor (A4) contributes the "left half." Each building
+(B3) contributes the "right half" of each invertibility theorem;
+the compressor (B4) contributes the "left half." Each building
 block is independently meaningful.
 
 #### The roundtrip pipeline
@@ -374,7 +400,7 @@ Chain BB1–BB4 to obtain the full roundtrip theorem.
 
 #### Proof architecture by phase
 
-| Building block | Decompressor half (A3) | Compressor half (A4) |
+| Building block | Decompressor half (B3) | Compressor half (B4) |
 |---|---|---|
 | BB1: LZ77 | `resolveLZ77` correctness, `copyLoop_eq_ofFn` | `matchLZ77` + fundamental theorem |
 | BB2: Huffman | `decode_prefix_free`, tree correspondence | `huffEncode` + sequence roundtrip |
@@ -382,7 +408,7 @@ Chain BB1–BB4 to obtain the full roundtrip theorem.
 | BB4: Framing | `decodeStored_correct`, `decodeHuffman_correct`, `inflateLoop_correct`, `decodeDynamicTrees_correct` | Block framing encoder, dynamic tree encoding |
 | BB5: Composition | — | Full roundtrip theorem |
 
-#### A3: Verified Decompressor
+#### B3: Verified Decompressor
 
 The decompressor contributes the "right half" of each building block.
 The verification has two layers, reflecting the structure of DEFLATE:
@@ -415,7 +441,7 @@ a faithful transcription is the appropriate verification tool. The
 mathematical content lives in the building blocks (Huffman, bitstream,
 LZ77), not in the top-level algorithm.
 
-#### A4: DEFLATE Compressor
+#### B4: DEFLATE Compressor
 
 The compressor contributes the "left half" of each building block plus
 the composition into the full roundtrip theorem.
@@ -432,9 +458,9 @@ the composition into the full roundtrip theorem.
 - Conformance tests: zlib can decompress our output and vice versa.
 - Full roundtrip theorem: `inflate (deflate data level) = .ok data`.
 
-### B: Size Limit Elimination
+### C: Size Limit Elimination
 
-**Depends on: A3**
+**Depends on: B3**
 
 The initial roundtrip theorem uses fuel parameters (explicit recursion
 bounds) to ensure termination. This imposes a data size limit on the
@@ -446,12 +472,12 @@ byte in the input).
 
 This track has two stages:
 
-**B1: Raise bounds to huge.** If the fuel is computed from `data.size`,
+**C1: Raise bounds to huge.** If the fuel is computed from `data.size`,
 the bound may already be large. If it is a fixed constant, raise it to
 an astronomically large value (exabyte scale). This should require only
 modest proof adjustments and eliminates the bound as a practical concern.
 
-**B2: Eliminate fuel entirely.** Replace fuel-based recursion with
+**C2: Eliminate fuel entirely.** Replace fuel-based recursion with
 well-founded recursion on a decreasing measure (remaining input length
 for decompression, remaining unprocessed bytes for compression). This
 requires restructuring the recursive functions so that Lean's termination
@@ -462,13 +488,13 @@ size restriction at all:
 ∀ (data : ByteArray) (level : Fin 10), inflate (deflate data level) = .ok data
 ```
 
-B2 is a significant redesign of the proof-friendly spec functions.
+C2 is a significant redesign of the proof-friendly spec functions.
 The native implementations will likely use structural patterns that
 terminate naturally — the main work is in the spec layer and the proofs.
 
-### C: Benchmarking and Verified Optimization
+### D: Benchmarking and Verified Optimization
 
-**Depends on: A2**
+**Depends on: B2**
 
 This track is open-ended. It has two dimensions: **runtime performance**
 (how fast the code runs) and **compression quality** (how small the
@@ -528,25 +554,26 @@ with or faster than the C libraries on both runtime and compression
 quality. At that point, the FFI wrappers become optional — the native
 path is verified, performant, and compresses well.
 
-### D: Zstd
+### E: Zstd
 
-**Independent — can start at any time.**
+**Independent — needs A2 for FFI wrappers, but can otherwise start at
+any time.**
 
-Native Lean Zstd implementation following the same A1–A4 methodology.
+Native Lean Zstd implementation following the same B1–B4 methodology.
 This is a separate multi-month to multi-year project.
 
 **Deliverables**:
 - FSE (Finite State Entropy) decoder and encoder
 - Zstd frame/block parsing
-- Decompressor with proofs (following the A2–A3 pattern)
-- Compressor with roundtrip proof (following the A4 pattern)
+- Decompressor with proofs (following the B2–B3 pattern)
+- Compressor with roundtrip proof (following the B4 pattern)
 
-The same B and C tracks apply to Zstd once its A-track is sufficiently
-advanced.
+The same C and D tracks apply to Zstd once its B-track equivalent is
+sufficiently advanced.
 
 ## Cross-Cutting Concerns
 
-These are not phases — they apply throughout all work from A1 onwards.
+These are not phases — they apply throughout all work from B1 onwards.
 
 ### Characterizing Properties
 
@@ -568,7 +595,7 @@ Examples, to be pursued as the relevant algorithms are implemented:
 
 These properties are not gated on optimization or size limit work.
 They can and should be pursued as soon as the relevant algorithms
-exist, starting from A1.
+exist, starting from B1.
 
 ### ZipForStd / Standard Library Pipeline
 
@@ -581,32 +608,17 @@ These should be:
 
 1. Collected in `ZipForStd/` as they are developed
 2. Kept general (no compression-specific assumptions)
-3. In a form where collaborators could upstreamt them to Lean's standard library via PRs
+3. In a form where collaborators could upstream them to Lean's standard library via PRs
 
 This is part of every phase, not a separate effort. A healthy ZipForStd
 pipeline demonstrates that the verification methodology scales and
 contributes back to the ecosystem.
 
-## Conformance Testing Infrastructure
-
-Worth building regardless of proofs. The approach:
-
-1. Generate random `ByteArray` inputs of varying sizes
-2. Compress/decompress with both FFI and native implementations
-3. Assert byte-for-byte equality of decompressed output
-4. For compression, assert cross-compatibility: native compress + FFI
-   decompress = original, and FFI compress + native decompress = original
-5. Test edge cases: empty input, single byte, large inputs, incompressible
-   data, maximum compression ratios
-
-Having two independent implementations tested against each other catches
-bugs that neither catches alone.
-
 ## Design Considerations
 
 - **Performance**: An initial naive Lean DEFLATE implementation will be
   slower than zlib (which is hand-tuned C with SIMD specializations).
-  The FFI implementations serve as the fast path until Track C closes
+  The FFI implementations serve as the fast path until Track D closes
   the gap through iterative profiling and verified optimization.
 - **Specification gap**: RFC 1951 is informal English. Senjak & Hofmann
   (2016) formalized it in Coq (see References below), but no Lean 4
@@ -616,7 +628,7 @@ bugs that neither catches alone.
   miniz_oxide, libdeflate, etc.) all produce different byte streams —
   the format only specifies decompression, not compression choices.
   Byte-for-byte output matching is a non-goal. Compression *quality*
-  (output sizes), however, is a goal — Track C targets competitive
+  (output sizes), however, is a goal — Track D targets competitive
   ratios across all levels.
 - **Sliding window management**: Mutable arrays in Lean require careful
   handling of linearity/borrowing for performance.

@@ -63,4 +63,4 @@ one. Do NOT modify `.claude/CLAUDE.md` — that file is off-limits to agents.
 
 Run `/reflect`. If it suggests improvements to skills in `.claude/skills/` or
 command files in `.claude/commands/`, make those changes and commit before finishing.
-Do NOT modify `.claude/CLAUDE.md` or `VERIFICATION.md` — those are off-limits.
+Do NOT modify `.claude/CLAUDE.md` or `PLAN.md` — those are off-limits.

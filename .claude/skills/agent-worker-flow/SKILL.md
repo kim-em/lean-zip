@@ -133,4 +133,4 @@ gh issue close <N> --repo kim-em/lean-zip \
 
 Run `/reflect`. If it suggests improvements to skills or commands, make those
 changes and commit before finishing. Do NOT modify `.claude/CLAUDE.md` or
-`VERIFICATION.md` — those are off-limits to agents.
+`PLAN.md` — those are off-limits to agents.

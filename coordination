@@ -7,7 +7,7 @@
 # Usage:
 #   coordination orient                       — list open plans (claimed/unclaimed), PRs, issues needing attention
 #   coordination plan [--label L] "title"     — create GitHub issue with agent-plan label (body from stdin); optional extra label L (feature|review|summarize|meditate)
-#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge; rejects PRs touching .claude/CLAUDE.md or VERIFICATION.md
+#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge; rejects PRs touching .claude/CLAUDE.md or PLAN.md
 #   coordination claim-fix N                  — comment on failing PR #N claiming fix (30min cooldown)
 #   coordination close-pr N "reason"          — comment reason and close PR #N
 #   coordination list-unclaimed [--label L]   — list unclaimed agent-plan issues (FIFO order); optional label filter
@@ -221,12 +221,12 @@ cmd_create_pr() {
         issue_ref="Closes #$issue_num"
     fi
 
-    # Protect immutable files — reject PRs that introduce changes to CLAUDE.md or VERIFICATION.md
+    # Protect immutable files — reject PRs that introduce changes to CLAUDE.md or PLAN.md
     # Use merge-base (three-dot) diff so we only see what THIS BRANCH added, not upstream changes.
     local merge_base protected_files
     merge_base="$(git merge-base origin/master HEAD 2>/dev/null || true)"
     if [[ -n "$merge_base" ]]; then
-        protected_files="$(git diff --name-only "$merge_base" HEAD -- .claude/CLAUDE.md VERIFICATION.md 2>/dev/null || true)"
+        protected_files="$(git diff --name-only "$merge_base" HEAD -- .claude/CLAUDE.md PLAN.md 2>/dev/null || true)"
         if [[ -n "$protected_files" ]]; then
             die "This PR touches protected files ($protected_files). These files are off-limits to agents. Aborting PR creation."
         fi

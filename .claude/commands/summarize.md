@@ -18,8 +18,8 @@ Use `coordination list-unclaimed --label summarize` to find work for this sessio
 
 ### Step 1: Read the project specification
 
-Find and read the top-level specification document (typically `VERIFICATION.md` or
-equivalent) to understand the project's intended goals. This is the ground truth
+Find and read the top-level specification document (`PLAN.md`)
+to understand the project's intended goals. This is the ground truth
 against which you measure progress.
 
 ### Step 2: Read the current PROGRESS.md
@@ -79,4 +79,4 @@ Write an updated `PROGRESS.md` that:
 
 Run `/reflect`. If it suggests improvements to skills in `.claude/skills/` or
 command files in `.claude/commands/`, make those changes and commit before finishing.
-Do NOT modify `.claude/CLAUDE.md` or `VERIFICATION.md` — those are off-limits.
+Do NOT modify `.claude/CLAUDE.md` or `PLAN.md` — those are off-limits.

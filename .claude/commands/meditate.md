@@ -62,7 +62,7 @@ Write a clear progress entry documenting what changed and why.
 ## Constraints
 
 - Do NOT modify `.claude/CLAUDE.md` — agents update skills and commands, not CLAUDE.md
-- Do NOT modify `VERIFICATION.md`
+- Do NOT modify `PLAN.md`
 - Only commit `.claude/skills/` and `.claude/commands/` changes (plus progress entry)
 - No code changes — this is workflow, not implementation
 

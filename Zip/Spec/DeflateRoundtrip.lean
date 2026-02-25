@@ -2,7 +2,7 @@ import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateDynamicCorrect
 
 /-!
-# Unified DEFLATE Roundtrip (Phase 4 Capstone)
+# Unified DEFLATE Roundtrip (Phase B4 Capstone)
 
 Proves the unified roundtrip theorem for `deflateRaw`:
 `inflate (deflateRaw data level) = .ok data`.
@@ -23,7 +23,7 @@ namespace Zip.Native.Deflate
 open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
-    This is the Phase 4 capstone theorem from VERIFICATION.md.
+    This is the Phase B4 capstone theorem from PLAN.md.
     The size bound (5M) is the tightest across all compression levels,
     arising from the lazy LZ77 path (levels 2-4). -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)

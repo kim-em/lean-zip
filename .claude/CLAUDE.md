@@ -55,7 +55,7 @@ commit it. The reflect step at the end is for recording what you did,
 not for asking permission.
 
 **Off-limits files**: Agents must not modify `.claude/CLAUDE.md` or
-`VERIFICATION.md`. Enforcement is at the `coordination create-pr` level —
+`PLAN.md`. Enforcement is at the `coordination create-pr` level —
 PRs touching these files are rejected. Update skills in `.claude/skills/`
 and commands in `.claude/commands/` instead.
 
@@ -64,7 +64,7 @@ and commands in `.claude/commands/` instead.
 See `.claude/commands/plan.md` for the full prompt. Summary:
 
 1. **Orient**: fetch, `coordination orient`,
-   read last 5 progress entries, VERIFICATION.md, sorry count
+   read last 5 progress entries, PLAN.md, sorry count
 2. **Read all open issues**: full bodies, not just titles — understand
    what's already planned at the deliverable level
 3. **Decide issue type**: `feature` / `review` / `summarize` / `meditate`,
@@ -96,7 +96,7 @@ Session UUID is available as `$LEAN_ZIP_SESSION_ID` (exported by `pod`).
 |---------|-------------|
 | `coordination orient` | List unclaimed/claimed issues, open PRs, PRs needing attention |
 | `coordination plan [--label L] "title"` | Create GitHub issue with agent-plan + optional label; body from stdin |
-| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `replan` label. Rejects PRs touching `.claude/CLAUDE.md` or `VERIFICATION.md`. |
+| `coordination create-pr N [--partial] ["title"]` | Push branch, create PR closing issue #N (custom title optional), enable auto-merge, swap `claimed` → `has-pr`. With `--partial`: uses "Partial progress on #N", adds `replan` label. Rejects PRs touching `.claude/CLAUDE.md` or `PLAN.md`. |
 | `coordination claim-fix N` | Comment on failing PR #N claiming fix (30min cooldown) |
 | `coordination close-pr N "reason"` | Comment reason and close PR #N |
 | `coordination list-unclaimed [--label L]` | List unclaimed agent-plan issues (FIFO order); optional label filter |
@@ -148,7 +148,7 @@ to orient. Key directories:
 
 ### Key documents
     ARCHITECTURE.md      — Technical architecture
-    VERIFICATION.md      — Phased roadmap and development cycle (do not modify)
+    PLAN.md              — Phased roadmap and development cycle (do not modify)
     PROGRESS.md          — Global milestones (updated by summarize agents)
     progress/            — Per-session progress entries (one file per session)
     plans/               — Per-session plan files (one file per active session)
@@ -157,7 +157,7 @@ to orient. Key directories:
 
 ## Quality Standards
 
-### Development cycle (from VERIFICATION.md)
+### Development cycle (from PLAN.md)
 1. Type signature with `:= sorry`
 2. Specification theorems with `:= by sorry`
 3. Implementation
@@ -198,7 +198,7 @@ When a function's "specification" is an algorithm (RFC pseudocode),
 transcribing it into proof-friendly style and proving correspondence
 IS the right approach. But characterize the mathematical building
 blocks independently where possible. Don't pretend algorithmic
-correspondence is characterization. See VERIFICATION.md Phases 3–4
+correspondence is characterization. See PLAN.md Phases B3–B4
 for how this applies to DEFLATE.
 
 - For optimized versions, specs are equivalence with the simple version.
