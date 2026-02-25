@@ -43,7 +43,7 @@ def checksum (data : List UInt8) : UInt32 :=
 /-! ## Specification theorems -/
 
 /-- `updateList` over a concatenation equals sequential application. -/
-theorem updateList_append (crc : UInt32) (xs ys : List UInt8) :
+@[simp] theorem updateList_append (crc : UInt32) (xs ys : List UInt8) :
     updateList crc (xs ++ ys) = updateList (updateList crc xs) ys := by
   simp [updateList, List.foldl_append]
 

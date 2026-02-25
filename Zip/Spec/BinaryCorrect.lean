@@ -212,17 +212,17 @@ theorem readUInt32BE_append_right (a b : ByteArray) (offset : Nat)
 
 /-! ## In-place write size preservation -/
 
-theorem writeUInt16LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt16) :
+@[simp] theorem writeUInt16LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt16) :
     (writeUInt16LEAt buf offset val).size = buf.size := by
   unfold writeUInt16LEAt
   rw [ByteArray.size_set!, ByteArray.size_set!]
 
-theorem writeUInt32LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt32) :
+@[simp] theorem writeUInt32LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt32) :
     (writeUInt32LEAt buf offset val).size = buf.size := by
   unfold writeUInt32LEAt
   rw [ByteArray.size_set!, ByteArray.size_set!, ByteArray.size_set!, ByteArray.size_set!]
 
-theorem writeUInt64LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt64) :
+@[simp] theorem writeUInt64LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt64) :
     (writeUInt64LEAt buf offset val).size = buf.size := by
   unfold writeUInt64LEAt
   rw [writeUInt32LEAt_size, writeUInt32LEAt_size]
@@ -285,12 +285,6 @@ theorem readUInt32LE_writeUInt32LEAt_ne (buf : ByteArray) (i j : Nat) (val : UIn
     (_hj : j + 4 ≤ buf.size) (hne : i + 4 ≤ j ∨ j + 4 ≤ i) :
     readUInt32LE (writeUInt32LEAt buf i val) j = readUInt32LE buf j := by
   simp only [readUInt32LE, writeUInt32LEAt]
-  have hs0 : (buf.set! i val.toUInt8).size = buf.size := ByteArray.size_set! ..
-  have hs1 : ((buf.set! i val.toUInt8).set! (i + 1)
-    (val >>> 8).toUInt8).size = buf.size := by rw [ByteArray.size_set!, hs0]
-  have hs2 : (((buf.set! i val.toUInt8).set! (i + 1)
-    (val >>> 8).toUInt8).set! (i + 2) (val >>> 16).toUInt8).size = buf.size := by
-    rw [ByteArray.size_set!, hs1]
   rw [ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
       ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
       ByteArray.getElem!_set!_ne _ _ _ _ (by omega),
@@ -313,9 +307,9 @@ theorem readUInt64LE_writeUInt64LEAt (buf : ByteArray) (offset : Nat) (val : UIn
     (h : offset + 8 ≤ buf.size) :
     readUInt64LE (writeUInt64LEAt buf offset val) offset = val := by
   simp only [readUInt64LE, writeUInt64LEAt]
-  rw [readUInt32LE_writeUInt32LEAt_ne _ _ _ _ (by rw [writeUInt32LEAt_size]; omega) (by omega),
+  rw [readUInt32LE_writeUInt32LEAt_ne _ _ _ _ (by simp; omega) (by omega),
       readUInt32LE_writeUInt32LEAt _ _ _ (by omega),
-      readUInt32LE_writeUInt32LEAt _ _ _ (by rw [writeUInt32LEAt_size]; omega)]
+      readUInt32LE_writeUInt32LEAt _ _ _ (by simp; omega)]
   bv_decide
 
 end Binary

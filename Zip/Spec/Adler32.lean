@@ -46,7 +46,7 @@ def unpack (v : UInt32) : State :=
 /-! ## Specification theorems -/
 
 /-- `updateList` over a concatenation equals sequential application. -/
-theorem updateList_append (s : State) (xs ys : List UInt8) :
+@[simp] theorem updateList_append (s : State) (xs ys : List UInt8) :
     updateList s (xs ++ ys) = updateList (updateList s xs) ys := by
   simp [updateList, List.foldl_append]
 
