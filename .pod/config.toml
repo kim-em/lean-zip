@@ -2,7 +2,6 @@
 # Edit this file to customise agent behaviour.
 
 [project]
-coordination = "./coordination"    # Path to coordination script
 worktree_base = "worktrees"        # Where git worktrees are created
 session_dir = "sessions"           # Session stdout capture directory
 build_cache_dir = ".lake"          # Build cache to rsync into worktrees
