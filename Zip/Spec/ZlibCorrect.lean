@@ -278,7 +278,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
         header.size (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
       rw [hhsz]; exact hinflRaw'
     exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
-      hspec_go (Deflate.deflateRaw_pad data level) hdata_le
+      hspec_go (Deflate.deflateRaw_goR_pad data level hsize) hdata_le
   have hep_val : endPos = 2 + (Deflate.deflateRaw data level).size := by
     rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
   -- Tight endPos bound

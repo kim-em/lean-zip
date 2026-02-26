@@ -812,7 +812,9 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
       br_final.bitOff < 8 ∧
       (br_final.bitOff = 0 ∨ br_final.pos < br_final.data.size) ∧
       br_final.pos ≤ br_final.data.size ∧
-      br_final.toBits = remaining := by
+      br_final.toBits = remaining ∧
+      Deflate.Spec.decode.goR br.toBits output.data.toList specFuel =
+        some (result, remaining) := by
   -- Use the existing inflateLoop_complete to get that inflateLoop succeeds,
   -- then extract br_final info via _inv lemmas.
   -- We proceed by induction (same structure as inflateLoop_complete).
@@ -884,8 +886,13 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                 apply ByteArray.ext; simp [ByteArray.data_append, heq]
               rw [hil, if_pos (Deflate.Correctness.nat_beq_to_uint32_true _ (by omega) hbf1),
                   hba_eq]
+              have hgoR : Deflate.Spec.decode.goR br.toBits output.data.toList (n + 1) =
+                  some (result, bits₃) := by
+                unfold Deflate.Spec.decode.goR
+                simp only [hspec_bf, bind, Option.bind, hspec_bt, hspec_st]
+                rw [if_pos hbf1]; simp only [pure, Pure.pure, ← heq]
               exact ⟨br', _, bits₃, rfl, rfl, hd₃.trans (hd₂.trans hd₁),
-                by rw [hoff₃]; omega, Or.inl hoff₃, hple₃, hrest₃⟩
+                by rw [hoff₃]; omega, Or.inl hoff₃, hple₃, hrest₃, hgoR⟩
             · -- bfinal ≠ 1: continue
               rename_i hbf1
               have hspec' : Deflate.Spec.decode.go br'.toBits
@@ -894,13 +901,22 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                     output.data.toList ++ storedBytes := by
                   simp [ByteArray.data_append, Array.toList_append]
                 rw [this, hrest₃]; exact hspec
-              obtain ⟨br_final, endPos, remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf⟩ :=
+              obtain ⟨br_final, endPos, remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf, hgoR_ih⟩ :=
                 ih br' (output ++ ⟨⟨storedBytes⟩⟩) (by rw [hoff₃]; omega)
                   (Or.inl hoff₃) hple₃ hspec'
               have hbf_neg := Deflate.Correctness.nat_beq_to_uint32_false _ (by omega) hbf1
               rw [hil, if_neg hbf_neg]
+              have hgoR : Deflate.Spec.decode.goR br.toBits output.data.toList (n + 1) =
+                  some (result, remaining) := by
+                unfold Deflate.Spec.decode.goR
+                simp only [hspec_bf, bind, Option.bind, hspec_bt, hspec_st]
+                rw [if_neg hbf1]
+                have hconv : (output ++ ⟨⟨storedBytes⟩⟩).data.toList =
+                    output.data.toList ++ storedBytes := by
+                  simp [ByteArray.data_append, Array.toList_append]
+                rw [hrest₃] at hgoR_ih; rw [hconv] at hgoR_ih; exact hgoR_ih
               exact ⟨br_final, endPos, remaining, hloop, hep,
-                hdf.trans (hd₃.trans (hd₂.trans hd₁)), hwff, hposf, hplef, hrestf⟩
+                hdf.trans (hd₃.trans (hd₂.trans hd₁)), hwff, hposf, hplef, hrestf, hgoR⟩
         · by_cases hbt1 : btype_val = 1
           · -- btype_val = 1: fixed Huffman
             subst hbt1
@@ -957,17 +973,31 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                   simp [pure, Pure.pure] at hspec; subst hspec
                   rw [hil, if_pos (Deflate.Correctness.nat_beq_to_uint32_true _
                     (by omega) hbf1)]
-                  exact ⟨br', _, bits₃, rfl, rfl, hd₃.trans (hd₂.trans hd₁), hwf₃, hpos₃, hple₃, hrest₃⟩
+                  have hgoR : Deflate.Spec.decode.goR br.toBits output.data.toList (n + 1) =
+                      some (acc', bits₃) := by
+                    unfold Deflate.Spec.decode.goR
+                    simp only [hspec_bf, bind, Option.bind, hspec_bt,
+                      hspec_ds, hspec_lz]
+                    rw [if_pos hbf1]; rfl
+                  exact ⟨br', _, bits₃, rfl, rfl, hd₃.trans (hd₂.trans hd₁), hwf₃, hpos₃, hple₃, hrest₃, hgoR⟩
                 · -- bfinal ≠ 1: continue
                   rename_i hbf1
                   have hspec' : Deflate.Spec.decode.go br'.toBits acc' n =
                       some result := by rw [hrest₃]; exact hspec
-                  obtain ⟨br_final, endPos, remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf⟩ :=
+                  obtain ⟨br_final, endPos, remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf, hgoR_ih⟩ :=
                     ih br' ⟨⟨acc'⟩⟩ hwf₃ hpos₃ hple₃ hspec'
                   rw [hil, if_neg (Deflate.Correctness.nat_beq_to_uint32_false _
                     (by omega) hbf1)]
+                  have hgoR : Deflate.Spec.decode.goR br.toBits output.data.toList (n + 1) =
+                      some (result, remaining) := by
+                    unfold Deflate.Spec.decode.goR
+                    simp only [hspec_bf, bind, Option.bind, hspec_bt,
+                      hspec_ds, hspec_lz]
+                    rw [if_neg hbf1]
+                    rw [hrest₃] at hgoR_ih
+                    simp at hgoR_ih; exact hgoR_ih
                   exact ⟨br_final, endPos, remaining, hloop, hep,
-                    hdf.trans (hd₃.trans (hd₂.trans hd₁)), hwff, hposf, hplef, hrestf⟩
+                    hdf.trans (hd₃.trans (hd₂.trans hd₁)), hwff, hposf, hplef, hrestf, hgoR⟩
           · by_cases hbt2 : btype_val = 2
             · -- btype_val = 2: dynamic Huffman
               subst hbt2
@@ -1046,19 +1076,33 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                       simp [pure, Pure.pure] at hspec; subst hspec
                       rw [hil, if_pos (Deflate.Correctness.nat_beq_to_uint32_true _
                         (by omega) hbf1)]
+                      have hgoR : Deflate.Spec.decode.goR br.toBits output.data.toList (n + 1) =
+                          some (acc', bits₄) := by
+                        unfold Deflate.Spec.decode.goR
+                        simp only [hspec_bf, bind, Option.bind, hspec_bt,
+                          hspec_dt, hspec_ds, hspec_lz]
+                        rw [if_pos hbf1]; rfl
                       exact ⟨br', _, bits₄, rfl, rfl,
-                        hd₄.trans (hd_dt.trans (hd₂.trans hd₁)), hwf₄, hpos₄, hple₄, hrest₄⟩
+                        hd₄.trans (hd_dt.trans (hd₂.trans hd₁)), hwf₄, hpos₄, hple₄, hrest₄, hgoR⟩
                     · -- bfinal ≠ 1: continue
                       rename_i hbf1
                       have hspec' : Deflate.Spec.decode.go br'.toBits acc' n =
                           some result := by rw [hrest₄]; exact hspec
-                      obtain ⟨br_final, endPos, remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf⟩ :=
+                      obtain ⟨br_final, endPos, remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf, hgoR_ih⟩ :=
                         ih br' ⟨⟨acc'⟩⟩ hwf₄ hpos₄ hple₄ hspec'
                       rw [hil, if_neg (Deflate.Correctness.nat_beq_to_uint32_false _
                         (by omega) hbf1)]
+                      have hgoR : Deflate.Spec.decode.goR br.toBits output.data.toList (n + 1) =
+                          some (result, remaining) := by
+                        unfold Deflate.Spec.decode.goR
+                        simp only [hspec_bf, bind, Option.bind, hspec_bt,
+                          hspec_dt, hspec_ds, hspec_lz]
+                        rw [if_neg hbf1]
+                        rw [hrest₄] at hgoR_ih
+                        simp at hgoR_ih; exact hgoR_ih
                       exact ⟨br_final, endPos, remaining, hloop, hep,
                         hdf.trans (hd₄.trans (hd_dt.trans (hd₂.trans hd₁))),
-                        hwff, hposf, hplef, hrestf⟩
+                        hwff, hposf, hplef, hrestf, hgoR⟩
             · -- btype_val ≥ 3: reserved (spec returns none)
               have hbt3 : btype_val = 3 := by omega
               subst hbt3; simp at hspec
@@ -1156,12 +1200,13 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
     (hspec : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits deflated) [] 10001 =
       some result.data.toList)
-    (hpad : ∃ (contentBits padding : List Bool),
-      Deflate.Spec.bytesToBits deflated = contentBits ++ padding ∧
-      padding.length < 8)
+    (hpad : ∃ remaining,
+      Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) [] 10001 =
+        some (result.data.toList, remaining) ∧
+      remaining.length < 8)
     (hmax : result.data.toList.length ≤ maxOut) :
     endPos ≥ (pfx ++ deflated).size := by
-  obtain ⟨contentBits, padding, hdecomp, hpadlen⟩ := hpad
+  obtain ⟨pad_remaining, hgoR_pad, hpadlen⟩ := hpad
   simp only [Inflate.inflateRaw, bind, Except.bind] at h
   cases hflit : HuffTree.fromLengths Inflate.fixedLitLengths with
   | error e => simp [hflit] at h
@@ -1184,7 +1229,7 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
       have hspec' : Deflate.Spec.decode.go
           (BitReader.mk (pfx ++ deflated) pfx.size 0).toBits [] 10001 =
           some result.data.toList := by rw [hbr_toBits]; exact hspec
-      obtain ⟨br_final, endPos', remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf⟩ :=
+      obtain ⟨br_final, endPos', remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf, hgoR⟩ :=
         inflateLoop_complete_ext
           ⟨pfx ++ deflated, pfx.size, 0⟩ .empty fixedLit fixedDist
           maxOut result.data.toList (by simp) (by simp)
@@ -1202,32 +1247,24 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
         simp only [Except.ok.injEq, Prod.mk.injEq] at this
         exact this.2
       rw [hep_eq, hep]
-      -- Need: br_final.alignToByte.pos ≥ (pfx ++ deflated).size
-      -- br_final.data = br.data = pfx ++ deflated, so data.size matches
       rw [show (pfx ++ deflated).size = br_final.data.size from by
         simp [hdf]]
-      -- Use counting argument: remaining.length < 8 because the spec decoder
-      -- consumed all of contentBits and remaining ⊆ padding
-      -- remaining = br_final.toBits, and the total bits = data.size * 8
-      -- consumed bits = data.size * 8 - remaining.length
-      -- The spec consumed at least contentBits.length bits from the total deflated.size * 8
-      -- Since deflated.size * 8 = contentBits.length + padding.length and padding.length < 8,
-      -- remaining.length ≤ padding.length < 8
-      -- But we need to formally connect remaining to padding.
-      -- For now, use the endPos_le bound and arithmetic.
       apply alignToByte_pos_ge_of_toBits_short br_final hwff hposf hplef
-      -- Goal: br_final.toBits.length < 8
       rw [hrestf]
-      -- Goal: remaining.length < 8
-      -- remaining comes from inflateLoop_complete_ext, which tracks the spec decoder's
-      -- remaining bits. The spec processes contentBits ++ padding and leaves bits
-      -- after the final block. Since decode_go_suffix shows the decoder succeeds on
-      -- contentBits ++ padding iff it succeeds on contentBits (with byte-aligned suffix),
-      -- the remaining bits after processing must be a suffix of padding.
-      -- This requires connecting spec remaining to native remaining, which is tracked
-      -- by inflateLoop_complete_ext. The remaining IS the suffix bits after the
-      -- spec decoder's last operation on the final block.
-      sorry
+      -- remaining.length < 8 by determinism of decode.goR:
+      -- hgoR gives goR on br.toBits = bytesToBits deflated → some (result, remaining)
+      -- hgoR_pad gives goR on bytesToBits deflated → some (result, pad_remaining)
+      -- with pad_remaining.length < 8
+      -- By injectivity: remaining = pad_remaining
+      have hgoR' : Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) []
+          10001 = some (result.data.toList, remaining) := by
+        rw [← hbr_toBits]; exact hgoR
+      have : some (result.data.toList, remaining) =
+          some (result.data.toList, pad_remaining) :=
+        hgoR'.symm.trans hgoR_pad
+      have heq := (Option.some.inj this)
+      have : remaining = pad_remaining := (Prod.mk.inj heq).2
+      rw [this]; exact hpadlen
 
 /-- endPos exactness: combining ≤ and ≥ gives equality. -/
 theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
@@ -1237,9 +1274,10 @@ theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
     (hspec : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits deflated) [] 10001 =
       some result.data.toList)
-    (hpad : ∃ (contentBits padding : List Bool),
-      Deflate.Spec.bytesToBits deflated = contentBits ++ padding ∧
-      padding.length < 8)
+    (hpad : ∃ remaining,
+      Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) [] 10001 =
+        some (result.data.toList, remaining) ∧
+      remaining.length < 8)
     (hmax : result.data.toList.length ≤ maxOut) :
     endPos = (pfx ++ deflated).size :=
   Nat.le_antisymm
@@ -1882,7 +1920,7 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
         header.size (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
       rw [hhsz]; exact hinflRaw'
     exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
-      hspec_go (Deflate.deflateRaw_pad data level) hdata_le
+      hspec_go (Deflate.deflateRaw_goR_pad data level hsize) hdata_le
   have hep_val : endPos = 10 + (Deflate.deflateRaw data level).size := by
     rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
   have hendPos_tight : endPos + 8 ≤ (GzipEncode.compress data level).size := by
