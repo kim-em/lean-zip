@@ -537,4 +537,168 @@ theorem decode_go_suffix
                 · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
         | _ + 3 => simp at h
 
+/-! ## decode.go with remaining bits
+
+`decode.goR` is a variant of `decode.go` that also returns the remaining
+(unprocessed) bits after decoding. This allows tracking how many bits
+the decoder consumed, which is needed for endPos exactness proofs. -/
+
+/-- Like `decode.go` but returns both the decoded result and the remaining bits. -/
+def decode.goR (bits : List Bool) (acc : List UInt8) :
+    Nat → Option (List UInt8 × List Bool)
+  | 0 => none
+  | fuel + 1 => do
+    let (bfinal, bits) ← readBitsLSB 1 bits
+    let (btype, bits) ← readBitsLSB 2 bits
+    match btype with
+    | 0 =>
+      let (bytes, bits) ← decodeStored bits
+      let acc := acc ++ bytes
+      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
+    | 1 =>
+      let (syms, bits) ← decodeSymbols fixedLitLengths fixedDistLengths bits
+      let acc ← resolveLZ77 syms acc
+      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
+    | 2 =>
+      let (litLens, distLens, bits) ← decodeDynamicTables bits
+      let (syms, bits) ← decodeSymbols litLens distLens bits
+      let acc ← resolveLZ77 syms acc
+      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
+    | _ => none
+
+set_option maxRecDepth 2048 in
+/-- `decode.goR` agrees with `decode.go` on the result: if `decode.goR` returns
+    `(result, rest)`, then `decode.go` returns `result`. -/
+theorem decode_goR_fst (bits : List Bool) (acc : List UInt8) (fuel : Nat)
+    (result : List UInt8) (rest : List Bool)
+    (h : decode.goR bits acc fuel = some (result, rest)) :
+    decode.go bits acc fuel = some result := by
+  induction fuel generalizing bits acc result rest with
+  | zero => simp [decode.goR, decode.go] at h
+  | succ n ih =>
+    unfold decode.goR at h; unfold decode.go
+    cases hbf : readBitsLSB 1 bits with
+    | none => simp [hbf] at h
+    | some p =>
+      obtain ⟨bfinal, bits₁⟩ := p
+      simp only [hbf, bind, Option.bind] at h ⊢
+      cases hbt : readBitsLSB 2 bits₁ with
+      | none => simp [hbt] at h
+      | some q =>
+        obtain ⟨btype, bits₂⟩ := q
+        simp only [hbt, bind, Option.bind] at h ⊢
+        match hm : btype with
+        | 0 =>
+          cases hds : decodeStored bits₂ with
+          | none => simp [hds] at h
+          | some r =>
+            obtain ⟨bytes, bits₃⟩ := r
+            simp only [hds, bind, Option.bind] at h ⊢
+            by_cases hbf1 : (bfinal == 1) = true
+            · rw [if_pos hbf1] at h ⊢
+              simp [pure, Pure.pure] at h ⊢; exact h.1
+            · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ _ h
+        | 1 =>
+          cases hsyms : decodeSymbols fixedLitLengths fixedDistLengths bits₂ with
+          | none => simp [hsyms] at h
+          | some r =>
+            obtain ⟨syms, bits₃⟩ := r
+            simp only [hsyms, bind, Option.bind] at h ⊢
+            cases hres : resolveLZ77 syms acc with
+            | none => simp [hres] at h
+            | some acc' =>
+              simp only [hres, bind, Option.bind] at h ⊢
+              by_cases hbf1 : (bfinal == 1) = true
+              · rw [if_pos hbf1] at h ⊢
+                simp [pure, Pure.pure] at h ⊢; exact h.1
+              · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ _ h
+        | 2 =>
+          cases hdt : decodeDynamicTables bits₂ with
+          | none => simp [hdt] at h
+          | some r =>
+            obtain ⟨litLens, distLens, bits₃⟩ := r
+            simp only [hdt, bind, Option.bind] at h ⊢
+            cases hsyms : decodeSymbols litLens distLens bits₃ with
+            | none => simp [hsyms] at h
+            | some s =>
+              obtain ⟨syms, bits₄⟩ := s
+              simp only [hsyms, bind, Option.bind] at h ⊢
+              cases hres : resolveLZ77 syms acc with
+              | none => simp [hres] at h
+              | some acc' =>
+                simp only [hres, bind, Option.bind] at h ⊢
+                by_cases hbf1 : (bfinal == 1) = true
+                · rw [if_pos hbf1] at h ⊢
+                  simp [pure, Pure.pure] at h ⊢; exact h.1
+                · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ _ h
+        | _ + 3 => simp at h
+
+set_option maxRecDepth 2048 in
+/-- If `decode.go` succeeds, `decode.goR` also succeeds with some remaining bits. -/
+theorem decode_goR_exists (bits : List Bool) (acc : List UInt8) (fuel : Nat)
+    (result : List UInt8) (h : decode.go bits acc fuel = some result) :
+    ∃ rest, decode.goR bits acc fuel = some (result, rest) := by
+  induction fuel generalizing bits acc result with
+  | zero => simp [decode.go] at h
+  | succ n ih =>
+    unfold decode.go at h; unfold decode.goR
+    cases hbf : readBitsLSB 1 bits with
+    | none => simp [hbf] at h
+    | some p =>
+      obtain ⟨bfinal, bits₁⟩ := p
+      simp only [hbf, bind, Option.bind] at h ⊢
+      cases hbt : readBitsLSB 2 bits₁ with
+      | none => simp [hbt] at h
+      | some q =>
+        obtain ⟨btype, bits₂⟩ := q
+        simp only [hbt, bind, Option.bind] at h ⊢
+        match hm : btype with
+        | 0 =>
+          cases hds : decodeStored bits₂ with
+          | none => simp [hds] at h
+          | some r =>
+            obtain ⟨bytes, bits₃⟩ := r
+            simp only [hds, bind, Option.bind] at h ⊢
+            by_cases hbf1 : (bfinal == 1) = true
+            · rw [if_pos hbf1] at h ⊢
+              have heq := (Option.some.inj h.symm).symm; subst heq
+              exact ⟨bits₃, rfl⟩
+            · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
+        | 1 =>
+          cases hsyms : decodeSymbols fixedLitLengths fixedDistLengths bits₂ with
+          | none => simp [hsyms] at h
+          | some r =>
+            obtain ⟨syms, bits₃⟩ := r
+            simp only [hsyms, bind, Option.bind] at h ⊢
+            cases hres : resolveLZ77 syms acc with
+            | none => simp [hres] at h
+            | some acc' =>
+              simp only [hres, bind, Option.bind] at h ⊢
+              by_cases hbf1 : (bfinal == 1) = true
+              · rw [if_pos hbf1] at h ⊢
+                have heq := (Option.some.inj h.symm).symm; subst heq
+                exact ⟨bits₃, rfl⟩
+              · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
+        | 2 =>
+          cases hdt : decodeDynamicTables bits₂ with
+          | none => simp [hdt] at h
+          | some r =>
+            obtain ⟨litLens, distLens, bits₃⟩ := r
+            simp only [hdt, bind, Option.bind] at h ⊢
+            cases hsyms : decodeSymbols litLens distLens bits₃ with
+            | none => simp [hsyms] at h
+            | some s =>
+              obtain ⟨syms, bits₄⟩ := s
+              simp only [hsyms, bind, Option.bind] at h ⊢
+              cases hres : resolveLZ77 syms acc with
+              | none => simp [hres] at h
+              | some acc' =>
+                simp only [hres, bind, Option.bind] at h ⊢
+                by_cases hbf1 : (bfinal == 1) = true
+                · rw [if_pos hbf1] at h ⊢
+                  have heq := (Option.some.inj h.symm).symm; subst heq
+                  exact ⟨bits₄, rfl⟩
+                · rw [if_neg hbf1] at h ⊢; exact ih _ _ _ h
+        | _ + 3 => simp at h
+
 end Deflate.Spec
