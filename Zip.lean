@@ -52,5 +52,8 @@ import Zip.Spec.DeflateDynamicFreqs
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.DeflateRoundtrip
 import Zip.Spec.BinaryCorrect
+import Zip.Spec.BitReaderInvariant
+import Zip.Spec.InflateLoopBounds
+import Zip.Spec.InflateRawSuffix
 import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect

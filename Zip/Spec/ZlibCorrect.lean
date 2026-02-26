@@ -174,14 +174,6 @@ private theorem bytesToBits_append (a b : ByteArray) :
   simp only [Deflate.Spec.bytesToBits, ByteArray.data_append, Array.toList_append,
     List.flatMap_append]
 
-/-- Dropping `a.size * 8` bits from `bytesToBits (a ++ b ++ c)` gives
-    `bytesToBits b ++ bytesToBits c`. -/
-private theorem bytesToBits_drop_prefix_three (a b c : ByteArray) :
-    (Deflate.Spec.bytesToBits (a ++ b ++ c)).drop (a.size * 8) =
-    Deflate.Spec.bytesToBits b ++ Deflate.Spec.bytesToBits c := by
-  rw [bytesToBits_append, bytesToBits_append, List.append_assoc,
-    ← Deflate.Spec.bytesToBits_length a, List.drop_left]
-
 /-! ## inflateRaw at offset via correctness + completeness -/
 
 /-- If `inflate deflated = .ok data`, then the spec decode succeeds on
