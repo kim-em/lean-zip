@@ -5,6 +5,8 @@
 coordination = "./coordination"    # Path to coordination script
 worktree_base = "worktrees"        # Where git worktrees are created
 session_dir = "sessions"           # Session stdout capture directory
+build_cache_dir = ".lake"          # Build cache to rsync into worktrees
+protected_files = ["PLAN.md"]      # Files agents may not modify in PRs
 
 [claude]
 model = "opus"                     # Claude model to use
@@ -36,24 +38,24 @@ jsonl_missing_warning = 60         # Warn if JSONL not created after this many s
 [worker_types.plan]
 prompt = "/plan"
 lock = "planner"                   # Acquire this lock before running
-copy_lake_cache = false
+copy_build_cache = false
 
 [worker_types.feature]
 prompt = "/feature"
 issue_label = "feature"            # Only claims issues with this label
-copy_lake_cache = true
+copy_build_cache = true
 
 [worker_types.review]
 prompt = "/review"
 issue_label = "review"
-copy_lake_cache = true
+copy_build_cache = true
 
 [worker_types.summarize]
 prompt = "/summarize"
 issue_label = "summarize"
-copy_lake_cache = false
+copy_build_cache = false
 
 [worker_types.meditate]
 prompt = "/meditate"
 issue_label = "meditate"
-copy_lake_cache = false
+copy_build_cache = false

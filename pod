@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pod — Multi-agent manager for lean-zip.
+"""pod — Multi-agent manager.
 
 Manages concurrent autonomous Claude sessions with a TUI and CLI interface.
 Each agent runs as an independent background process; the TUI is just a viewer.
@@ -61,6 +61,8 @@ DEFAULT_CONFIG = """\
 coordination = "./coordination"    # Path to coordination script
 worktree_base = "worktrees"        # Where git worktrees are created
 session_dir = "sessions"           # Session stdout capture directory
+build_cache_dir = ".lake"          # Build cache to rsync into worktrees
+protected_files = ["PLAN.md"]      # Files agents may not modify in PRs
 
 [claude]
 model = "opus"                     # Claude model to use
@@ -94,16 +96,16 @@ max_claim_restarts = 1             # Max times to auto-restart a dead session be
 [worker_types.plan]
 prompt = "/plan"
 lock = "planner"                   # Acquire this lock before running
-copy_lake_cache = false
+copy_build_cache = false
 
 [worker_types.work]
 prompt = "/work"
-copy_lake_cache = true
+copy_build_cache = true
 
 # Example additional worker type:
 # [worker_types.review]
 # prompt = "/review"
-# copy_lake_cache = true
+# copy_build_cache = true
 """
 
 
@@ -448,11 +450,20 @@ def token_summary(state: AgentState, pricing: dict) -> str:
 
 def compute_historical_cost(pricing: dict,
                             claude_config_dir: Path | None = None) -> float:
-    """Scan all lean-zip JSONL files and return total estimated cost.
+    """Scan JSONL files for this project and return total estimated cost.
 
     Uses the same counting methodology as the JSONL monitor (sum all
     assistant records) for consistency with per-agent cost display.
     """
+    # Compute the Claude projects-dir prefix for this project.
+    # Claude Code munges paths: replace / with -, strip leading dots from components.
+    def _claude_dir_name(p: Path) -> str:
+        parts = str(p).split("/")
+        cleaned = [part.lstrip(".") for part in parts]
+        return "-".join(cleaned)
+
+    project_prefix = _claude_dir_name(PROJECT_DIR)
+
     # Scan both ~/.claude/projects (historical) and isolated config (new sessions)
     projects_dirs = []
     real_projects = Path.home() / ".claude" / "projects"
@@ -473,11 +484,8 @@ def compute_historical_cost(pricing: dict,
             if not d.is_dir():
                 continue
             name = d.name
-            # Match lean-zip project dirs (main + worktrees)
-            if not (name == "-home-kim-lean-zip"
-                    or name.startswith("-home-kim-lean-zip-")
-                    or name == "-Users-kim-projects-lean-lean-zip"
-                    or name.startswith("-Users-kim-projects-lean-lean-zip-")):
+            # Match this project's dirs (main + worktrees)
+            if not (name == project_prefix or name.startswith(project_prefix + "-")):
                 continue
             for f in d.glob("*.jsonl"):
                 try:
@@ -532,6 +540,11 @@ def coordination(config: dict, *args, env_extra: dict | None = None,
     """Run a coordination subcommand."""
     script = cfg_get(config, "project", "coordination", default="./coordination")
     env = dict(os.environ)
+    # Pass protected-files list so coordination can enforce it.
+    pf = cfg_get(config, "project", "protected_files", default=["PLAN.md"])
+    if isinstance(pf, list):
+        pf = ":".join(pf)
+    env["POD_PROTECTED_FILES"] = pf
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -936,10 +949,53 @@ def dispatch(config: dict, state: AgentState | None = None) -> str | None:
 # Dead claim recovery
 # ---------------------------------------------------------------------------
 
+def _get_base_branch() -> str:
+    """Auto-detect the default branch (e.g. 'main' or 'master')."""
+    try:
+        r = subprocess.run(
+            ["gh", "repo", "view", "--json", "defaultBranchRef", "-q",
+             ".defaultBranchRef.name"],
+            capture_output=True, text=True, timeout=15, cwd=str(PROJECT_DIR),
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "master"
+
+
+def _get_repo() -> str:
+    """Auto-detect GitHub repo (owner/name) from the current git remote."""
+    try:
+        r = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            capture_output=True, text=True, timeout=15, cwd=str(PROJECT_DIR),
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    # Fallback: parse git remote
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=10, cwd=str(PROJECT_DIR),
+        )
+        url = r.stdout.strip()
+        # Handle SSH (git@github.com:owner/repo.git) and HTTPS
+        import re as _re
+        m = _re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "unknown/unknown"
+
+
 def _release_claim(issue_str: str, session_uuid: str, restart_count: int) -> bool:
     """Remove the 'claimed' label from an issue and leave an explanatory comment.
     Returns True on success, False on failure (caller may revert history deletion)."""
-    repo = "kim-em/lean-zip"
+    repo = _get_repo()
     try:
         r1 = subprocess.run(
             ["gh", "issue", "edit", issue_str, "--repo", repo, "--remove-label", "claimed"],
@@ -969,7 +1025,7 @@ def sync_claims_from_github():
     issues we have no local record of. This lets pod reattach to sessions
     that were running before a pod restart."""
     import re as _re
-    repo = "kim-em/lean-zip"
+    repo = _get_repo()
     cwd = str(PROJECT_DIR)
 
     try:
@@ -1096,9 +1152,10 @@ def setup_worktree(config: dict, short_id: str) -> tuple[str, str]:
     wt_dir = base / short_id
     branch = f"agent/{short_id}"
 
-    # Fetch latest master
+    # Fetch latest default branch
+    base_branch = _get_base_branch()
     subprocess.run(
-        ["git", "-C", str(PROJECT_DIR), "fetch", "origin", "master", "--quiet"],
+        ["git", "-C", str(PROJECT_DIR), "fetch", "origin", base_branch, "--quiet"],
         capture_output=True, timeout=60,
     )
 
@@ -1116,7 +1173,7 @@ def setup_worktree(config: dict, short_id: str) -> tuple[str, str]:
     # Create worktree
     r = subprocess.run(
         ["git", "-C", str(PROJECT_DIR), "worktree", "add", "-b", branch,
-         str(wt_dir), "origin/master", "--quiet"],
+         str(wt_dir), f"origin/{base_branch}", "--quiet"],
         capture_output=True, timeout=60, check=True,
     )
     if not wt_dir.exists():
@@ -1128,12 +1185,13 @@ def setup_worktree(config: dict, short_id: str) -> tuple[str, str]:
     return str(wt_dir), branch
 
 
-def copy_lake_cache(wt_dir: str):
-    """rsync .lake/ into worktree for faster builds."""
-    lake_src = PROJECT_DIR / ".lake"
-    if lake_src.is_dir():
+def copy_build_cache(wt_dir: str, config: dict):
+    """rsync build cache directory into worktree for faster builds."""
+    cache_dir = cfg_get(config, "project", "build_cache_dir", default=".lake")
+    cache_src = PROJECT_DIR / cache_dir
+    if cache_src.is_dir():
         subprocess.run(
-            ["rsync", "-a", "--quiet", f"{lake_src}/", f"{wt_dir}/.lake/"],
+            ["rsync", "-a", "--quiet", f"{cache_src}/", f"{wt_dir}/{cache_dir}/"],
             capture_output=True, timeout=120,
         )
 
@@ -1419,8 +1477,8 @@ def agent_process_main(config: dict, agent_id: str | None = None,
         state.branch = branch
         state.git_start = _git_rev(wt_dir)
 
-        if wt_config.get("copy_lake_cache", False):
-            copy_lake_cache(wt_dir)
+        if wt_config.get("copy_build_cache", wt_config.get("copy_lake_cache", False)):
+            copy_build_cache(wt_dir, config)
 
         # --- Start JSONL monitor ---
         jsonl_path = get_jsonl_path(wt_dir, session_uuid, claude_config_dir)
@@ -2247,7 +2305,7 @@ def cmd_config(config: dict, args):
 def main():
     parser = argparse.ArgumentParser(
         prog="pod",
-        description="Multi-agent manager for lean-zip",
+        description="pod — multi-agent manager",
     )
     sub = parser.add_subparsers(dest="command")
 

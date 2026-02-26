@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# coordination — multi-agent coordination for lean-zip
+# coordination — multi-agent coordination script (used by pod)
 #
 # All subcommands use `gh` CLI. Reads session UUID from $POD_SESSION_ID
 # (exported by pod). Reads branch from git.
@@ -7,7 +7,7 @@
 # Usage:
 #   coordination orient                       — list open plans (claimed/unclaimed), PRs, issues needing attention
 #   coordination plan [--label L] "title"     — create GitHub issue with agent-plan label (body from stdin); optional extra label L (feature|review|summarize|meditate)
-#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge; rejects PRs touching .claude/CLAUDE.md or PLAN.md
+#   coordination create-pr N [--partial] ["title"] — push branch, create PR closing issue #N, enable auto-merge; rejects PRs touching protected files
 #   coordination claim-fix N                  — comment on failing PR #N claiming fix (30min cooldown)
 #   coordination close-pr N "reason"          — comment reason and close PR #N
 #   coordination list-unclaimed [--label L]   — list unclaimed agent-plan issues (FIFO order); optional label filter
@@ -17,17 +17,59 @@
 #   coordination add-dep N M                  — add depends-on: #M to issue #N's body; add blocked label if #M is open
 #   coordination check-blocked                — unblock issues whose dependencies are all closed
 #   coordination release-stale-claims [SECS]  — release claimed issues with no activity for SECS seconds (default 14400 = 4h)
-#   coordination lock-planner                 — acquire advisory planner lock (10min TTL)
+#   coordination lock-planner                 — acquire advisory planner lock (20min TTL)
 #   coordination unlock-planner               — release planner lock early
 
 set -euo pipefail
 
-REPO="kim-em/lean-zip"
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)" \
+    || { echo "error: cannot detect GitHub repo (is gh authenticated?)" >&2; exit 1; }
+REPO_SLUG="${REPO//\//-}"  # e.g. "owner-repo"
+BASE_BRANCH="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo master)"
 SESSION_ID="${POD_SESSION_ID:-unknown}"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)"
-PLANNER_LOCK_ISSUE=8    # pinned sentinel issue for planner lock
 PLANNER_LOCK_TTL=1200   # lock expires after 20 minutes (seconds)
-PLANNER_LOCK_COMMENT_FILE="/tmp/lean-zip-planner-lock-${SESSION_ID}.id"
+PLANNER_LOCK_COMMENT_FILE="/tmp/pod-planner-lock-${REPO_SLUG}-${SESSION_ID}.id"
+
+# Protected files: agents are forbidden from modifying these in PRs.
+# Reads from $POD_PROTECTED_FILES (colon-separated, set by pod from config).
+# Falls back to PLAN.md if unset.
+PROTECTED_FILES="${POD_PROTECTED_FILES:-PLAN.md}"
+
+# Planner lock sentinel issue — auto-detected or auto-created.
+# Caches the issue number in /tmp to avoid repeated API calls.
+_planner_lock_issue_cache="/tmp/pod-planner-lock-issue-${REPO_SLUG}"
+_resolve_planner_lock_issue() {
+    # Check cache first; validate the issue still exists and is open
+    if [[ -f "$_planner_lock_issue_cache" ]]; then
+        local cached
+        cached="$(cat "$_planner_lock_issue_cache")"
+        local state
+        state="$(gh issue view "$cached" --repo "$REPO" --json state --jq .state 2>/dev/null || true)"
+        if [[ "$state" == "OPEN" ]]; then
+            PLANNER_LOCK_ISSUE="$cached"
+            return
+        fi
+        # Stale cache — remove and re-resolve
+        rm -f "$_planner_lock_issue_cache"
+    fi
+    # Search for existing sentinel issue
+    local issue_num
+    issue_num="$(gh issue list --repo "$REPO" --state open --search 'pod: planner lock sentinel' \
+        --json number,title --jq '.[] | select(.title == "pod: planner lock sentinel") | .number' \
+        | head -1)"
+    if [[ -z "$issue_num" ]]; then
+        # Create the sentinel issue
+        issue_num="$(gh issue create --repo "$REPO" \
+            --title "pod: planner lock sentinel" \
+            --body "This issue is used by pod for advisory planner locking. Do not close or modify." \
+            --json number --jq '.number')"
+        # Pin it if possible (ignore failure — not all repos allow pinning)
+        gh issue pin "$issue_num" --repo "$REPO" 2>/dev/null || true
+    fi
+    echo "$issue_num" > "$_planner_lock_issue_cache"
+    PLANNER_LOCK_ISSUE="$issue_num"
+}
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -221,14 +263,17 @@ cmd_create_pr() {
         issue_ref="Closes #$issue_num"
     fi
 
-    # Protect immutable files — reject PRs that introduce changes to CLAUDE.md or PLAN.md
+    # Protect immutable files — reject PRs that introduce changes to protected files.
     # Use merge-base (three-dot) diff so we only see what THIS BRANCH added, not upstream changes.
-    local merge_base protected_files
-    merge_base="$(git merge-base origin/master HEAD 2>/dev/null || true)"
-    if [[ -n "$merge_base" ]]; then
-        protected_files="$(git diff --name-only "$merge_base" HEAD -- .claude/CLAUDE.md PLAN.md 2>/dev/null || true)"
-        if [[ -n "$protected_files" ]]; then
-            die "This PR touches protected files ($protected_files). These files are off-limits to agents. Aborting PR creation."
+    local merge_base touched_protected
+    merge_base="$(git merge-base "origin/$BASE_BRANCH" HEAD 2>/dev/null || true)"
+    if [[ -n "$merge_base" && -n "$PROTECTED_FILES" ]]; then
+        # Convert colon-separated list to arguments
+        local -a pf_args=()
+        IFS=: read -ra pf_args <<< "$PROTECTED_FILES"
+        touched_protected="$(git diff --name-only "$merge_base" HEAD -- "${pf_args[@]}" 2>/dev/null || true)"
+        if [[ -n "$touched_protected" ]]; then
+            die "This PR touches protected files ($touched_protected). These files are off-limits to agents. Aborting PR creation."
         fi
     fi
 
@@ -263,7 +308,7 @@ $issue_ref
 
 Session: \`$SESSION_ID\`
 
-$(git log origin/master..HEAD --oneline)
+$(git log "origin/$BASE_BRANCH..HEAD" --oneline)
 
 🤖 Prepared with Claude Code
 EOF
@@ -441,6 +486,7 @@ cmd_skip() {
 # The winning comment ID is persisted to a temp file for use by unlock.
 # Returns 0 if lock acquired, 1 if another planner is active.
 cmd_lock_planner() {
+    _resolve_planner_lock_issue
     local now
     now="$(date -u +%s)"
     local cutoff=$(( now - PLANNER_LOCK_TTL ))
