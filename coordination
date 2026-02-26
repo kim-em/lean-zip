@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # coordination — multi-agent coordination for lean-zip
 #
-# All subcommands use `gh` CLI. Reads session UUID from $LEAN_ZIP_SESSION_ID
+# All subcommands use `gh` CLI. Reads session UUID from $POD_SESSION_ID
 # (exported by pod). Reads branch from git.
 #
 # Usage:
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 REPO="kim-em/lean-zip"
-SESSION_ID="${LEAN_ZIP_SESSION_ID:-unknown}"
+SESSION_ID="${POD_SESSION_ID:-unknown}"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)"
 PLANNER_LOCK_ISSUE=8    # pinned sentinel issue for planner lock
 PLANNER_LOCK_TTL=1200   # lock expires after 20 minutes (seconds)
@@ -383,7 +383,7 @@ cmd_claim() {
     fi
 
     # Claim: add label + comment
-    local is_resume="${LEAN_ZIP_IS_RESUME:-0}"
+    local is_resume="${POD_IS_RESUME:-0}"
     local claim_note=""
     [[ "$is_resume" == "1" ]] && claim_note=" (resumed conversation)"
     gh issue edit "$issue_num" --repo "$REPO" --add-label claimed

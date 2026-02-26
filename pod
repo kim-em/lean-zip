@@ -47,6 +47,7 @@ AGENTS_DIR = POD_DIR / "agents"
 CONFIG_PATH = POD_DIR / "config.toml"
 LOG_PATH = POD_DIR / "pod.log"
 CLAIM_HISTORY_PATH = POD_DIR / "claim-history.json"
+ISOLATED_CONFIG_DIR = POD_DIR / "claude-config"
 
 # ---------------------------------------------------------------------------
 # Default configuration (written on first run)
@@ -65,6 +66,7 @@ session_dir = "sessions"           # Session stdout capture directory
 model = "opus"                     # Claude model to use
 quota_check = "~/.claude/skills/claude-usage/claude-available-model"
 quota_retry_seconds = 60           # Sleep duration when quota unavailable
+isolated_config = true             # Use isolated CLAUDE_CONFIG_DIR for agents
 
 [pricing]
 # Dollars per million tokens
@@ -111,14 +113,68 @@ def ensure_config() -> dict:
     AGENTS_DIR.mkdir(parents=True, exist_ok=True)
     gitignore = POD_DIR / ".gitignore"
     if not gitignore.exists():
-        gitignore.write_text("agents/\npod.log\nclaim-history.*\n")
-    elif "claim-history" not in gitignore.read_text():
-        gitignore.write_text(gitignore.read_text().rstrip("\n") + "\nclaim-history.*\n")
+        gitignore.write_text("agents/\npod.log\nclaim-history.*\nclaude-config/\n")
+    else:
+        content = gitignore.read_text()
+        additions = ""
+        if "claim-history" not in content:
+            additions += "\nclaim-history.*"
+        if "claude-config" not in content:
+            additions += "\nclaude-config/"
+        if additions:
+            gitignore.write_text(content.rstrip("\n") + additions + "\n")
     if not CONFIG_PATH.exists():
         CONFIG_PATH.write_text(DEFAULT_CONFIG)
         log(f"Created default config at {CONFIG_PATH}")
     with open(CONFIG_PATH, "rb") as f:
         return tomllib.load(f)
+
+
+def get_claude_config_dir(config: dict) -> Path | None:
+    """Return isolated CLAUDE_CONFIG_DIR path, or None if disabled. No side effects."""
+    if not cfg_get(config, "claude", "isolated_config", default=False):
+        return None
+    return ISOLATED_CONFIG_DIR
+
+
+def ensure_claude_config(config: dict) -> Path | None:
+    """Set up isolated CLAUDE_CONFIG_DIR for agents. Returns path or None if disabled."""
+    config_dir = get_claude_config_dir(config)
+    if config_dir is None:
+        return None
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    # Minimal settings — no hooks, no plugins, no global CLAUDE.md
+    settings_path = config_dir / "settings.json"
+    settings_path.write_text('{"skipDangerousModePermissionPrompt": true}\n')
+
+    # Symlink credentials from ~/.claude/ so subscription auth works.
+    # Race-safe: use try/except since multiple agents may run this concurrently.
+    real_claude = Path.home() / ".claude"
+    cred_link = config_dir / ".credentials.json"
+    cred_target = real_claude / ".credentials.json"
+    if cred_target.exists():
+        try:
+            cred_link.unlink(missing_ok=True)
+            cred_link.symlink_to(cred_target)
+        except FileExistsError:
+            pass  # Another process created it first — fine
+    else:
+        # Clean up stale symlink if source credential file is gone
+        cred_link.unlink(missing_ok=True)
+
+    # JSONL session storage
+    (config_dir / "projects").mkdir(exist_ok=True)
+
+    return config_dir
+
+
+def _claude_projects_dir(claude_config_dir: Path | None = None) -> Path:
+    """Return the directory containing JSONL project subdirs."""
+    if claude_config_dir is not None:
+        return claude_config_dir / "projects"
+    return Path.home() / ".claude" / "projects"
 
 
 def cfg_get(config: dict, *keys, default=None):
@@ -390,50 +446,58 @@ def token_summary(state: AgentState, pricing: dict) -> str:
     return f"{fmt_tokens(total_in)}/{fmt_tokens(state.tokens_out)}~${cost:.2f}"
 
 
-def compute_historical_cost(pricing: dict) -> float:
+def compute_historical_cost(pricing: dict,
+                            claude_config_dir: Path | None = None) -> float:
     """Scan all lean-zip JSONL files and return total estimated cost.
 
     Uses the same counting methodology as the JSONL monitor (sum all
     assistant records) for consistency with per-agent cost display.
     """
-    projects_dir = Path.home() / ".claude" / "projects"
-    if not projects_dir.is_dir():
-        return 0.0
+    # Scan both ~/.claude/projects (historical) and isolated config (new sessions)
+    projects_dirs = []
+    real_projects = Path.home() / ".claude" / "projects"
+    if real_projects.is_dir():
+        projects_dirs.append(real_projects)
+    if claude_config_dir is not None:
+        iso_projects = claude_config_dir / "projects"
+        if iso_projects.is_dir():
+            projects_dirs.append(iso_projects)
 
     total_in = 0
     total_out = 0
     total_cache_read = 0
     total_cache_create = 0
 
-    for d in projects_dir.iterdir():
-        if not d.is_dir():
-            continue
-        name = d.name
-        # Match lean-zip project dirs (main + worktrees)
-        if not (name == "-home-kim-lean-zip"
-                or name.startswith("-home-kim-lean-zip-")
-                or name == "-Users-kim-projects-lean-lean-zip"
-                or name.startswith("-Users-kim-projects-lean-lean-zip-")):
-            continue
-        for f in d.glob("*.jsonl"):
-            try:
-                with open(f) as fh:
-                    for line in fh:
-                        if '"usage"' not in line or '"assistant"' not in line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if rec.get("type") != "assistant":
-                            continue
-                        usage = rec.get("message", {}).get("usage", {})
-                        total_in += usage.get("input_tokens", 0)
-                        total_out += usage.get("output_tokens", 0)
-                        total_cache_read += usage.get("cache_read_input_tokens", 0)
-                        total_cache_create += usage.get("cache_creation_input_tokens", 0)
-            except OSError:
+    for projects_dir in projects_dirs:
+        for d in projects_dir.iterdir():
+            if not d.is_dir():
                 continue
+            name = d.name
+            # Match lean-zip project dirs (main + worktrees)
+            if not (name == "-home-kim-lean-zip"
+                    or name.startswith("-home-kim-lean-zip-")
+                    or name == "-Users-kim-projects-lean-lean-zip"
+                    or name.startswith("-Users-kim-projects-lean-lean-zip-")):
+                continue
+            for f in d.glob("*.jsonl"):
+                try:
+                    with open(f) as fh:
+                        for line in fh:
+                            if '"usage"' not in line or '"assistant"' not in line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if rec.get("type") != "assistant":
+                                continue
+                            usage = rec.get("message", {}).get("usage", {})
+                            total_in += usage.get("input_tokens", 0)
+                            total_out += usage.get("output_tokens", 0)
+                            total_cache_read += usage.get("cache_read_input_tokens", 0)
+                            total_cache_create += usage.get("cache_creation_input_tokens", 0)
+                except OSError:
+                    continue
 
     return (
         total_in * pricing.get("input", 5.0) / 1e6
@@ -1088,7 +1152,8 @@ def cleanup_worktree(wt_dir: str, branch: str):
 
 
 def launch_claude(config: dict, session_uuid: str, prompt: str,
-                   wt_dir: str) -> subprocess.Popen:
+                   wt_dir: str,
+                   claude_config_dir: Path | None = None) -> subprocess.Popen:
     """Launch claude in the worktree directory."""
     model = cfg_get(config, "claude", "model", default="opus")
     session_dir = PROJECT_DIR / cfg_get(config, "project", "session_dir", default="sessions")
@@ -1096,7 +1161,7 @@ def launch_claude(config: dict, session_uuid: str, prompt: str,
     stdout_path = session_dir / f"{session_uuid}.stdout"
 
     # Determine JSONL dir for this worktree
-    jsonl_dir = Path.home() / ".claude" / "projects" / wt_dir.replace("/", "-")
+    jsonl_dir = _claude_projects_dir(claude_config_dir) / wt_dir.replace("/", "-")
 
     # Check if we can resume an existing session
     local_jsonl = jsonl_dir / f"{session_uuid}.jsonl"
@@ -1105,12 +1170,16 @@ def launch_claude(config: dict, session_uuid: str, prompt: str,
         claude_args += ["--resume", session_uuid]
     else:
         claude_args += ["--session-id", session_uuid]
+    if claude_config_dir is not None:
+        claude_args += ["--dangerously-skip-permissions"]
     claude_args += ["-p", prompt]
 
     env = dict(os.environ)
     env["ANTHROPIC_API_KEY"] = ""  # Force subscription auth
-    env["LEAN_ZIP_SESSION_ID"] = session_uuid
-    env["LEAN_ZIP_IS_RESUME"] = "1" if local_jsonl.exists() else "0"
+    env["POD_SESSION_ID"] = session_uuid
+    env["POD_IS_RESUME"] = "1" if local_jsonl.exists() else "0"
+    if claude_config_dir is not None:
+        env["CLAUDE_CONFIG_DIR"] = str(claude_config_dir)
 
     stdout_fd = os.open(str(stdout_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     proc = subprocess.Popen(
@@ -1125,9 +1194,10 @@ def launch_claude(config: dict, session_uuid: str, prompt: str,
     return proc
 
 
-def get_jsonl_path(wt_dir: str, session_uuid: str) -> str:
+def get_jsonl_path(wt_dir: str, session_uuid: str,
+                   claude_config_dir: Path | None = None) -> str:
     """Compute JSONL file path for a session."""
-    jsonl_dir = Path.home() / ".claude" / "projects" / wt_dir.replace("/", "-")
+    jsonl_dir = _claude_projects_dir(claude_config_dir) / wt_dir.replace("/", "-")
     return str(jsonl_dir / f"{session_uuid}.jsonl")
 
 
@@ -1173,7 +1243,7 @@ def _sigterm_handler(signum, frame):
                 coordination(
                     config, "skip", str(state.claimed_issue),
                     f"Agent killed by operator (session {state.uuid})",
-                    env_extra={"LEAN_ZIP_SESSION_ID": state.uuid},
+                    env_extra={"POD_SESSION_ID": state.uuid},
                 )
                 clear_claim(state.claimed_issue)
                 log(f"Unclaimed issue #{state.claimed_issue}")
@@ -1234,6 +1304,10 @@ def agent_process_main(config: dict, agent_id: str | None = None,
     quota_retry = cfg_get(config, "claude", "quota_retry_seconds", default=60)
     worker_types = cfg_get(config, "worker_types", default={})
     pricing = cfg_get(config, "pricing", default={})
+
+    claude_config_dir = ensure_claude_config(config)
+    if claude_config_dir:
+        log(f"Agent {short_id}: using isolated CLAUDE_CONFIG_DIR={claude_config_dir}")
 
     log(f"Agent {short_id} started (PID {os.getpid()})")
 
@@ -1349,7 +1423,7 @@ def agent_process_main(config: dict, agent_id: str | None = None,
             copy_lake_cache(wt_dir)
 
         # --- Start JSONL monitor ---
-        jsonl_path = get_jsonl_path(wt_dir, session_uuid)
+        jsonl_path = get_jsonl_path(wt_dir, session_uuid, claude_config_dir)
         stop_monitor = threading.Event()
         monitor_thread = threading.Thread(
             target=jsonl_monitor, args=(jsonl_path, state, stop_monitor),
@@ -1363,7 +1437,8 @@ def agent_process_main(config: dict, agent_id: str | None = None,
         log(f"Agent {short_id}: launching claude session {session_uuid} in {wt_dir}")
 
         try:
-            _claude_proc = launch_claude(config, session_uuid, prompt, wt_dir)
+            _claude_proc = launch_claude(config, session_uuid, prompt, wt_dir,
+                                        claude_config_dir)
         except (OSError, FileNotFoundError) as e:
             log(f"Agent {short_id}: failed to launch claude: {e}")
             stop_monitor.set()
@@ -1555,7 +1630,8 @@ def _tui_main(stdscr, config: dict):
     pricing = cfg_get(config, "pricing", default={})
 
     # Compute all-time historical cost once at startup
-    historical_cost = compute_historical_cost(pricing)
+    claude_config_dir = get_claude_config_dir(config)
+    historical_cost = compute_historical_cost(pricing, claude_config_dir)
     # Track session-accumulated costs (persists across agent deaths)
     session_agent_costs: dict[str, float] = {}  # agent short_id -> last known cost
     # Accumulated cost from previous iterations (when token counters reset)
@@ -1987,7 +2063,7 @@ def _kill_agent(config: dict, agent: AgentState):
                     coordination(
                         config, "skip", str(agent.claimed_issue),
                         f"Agent killed by operator (session {agent.uuid})",
-                        env_extra={"LEAN_ZIP_SESSION_ID": agent.uuid},
+                        env_extra={"POD_SESSION_ID": agent.uuid},
                     )
                 except Exception:
                     pass
@@ -2105,7 +2181,8 @@ def cmd_status(config: dict, args):
     session_cost = sum(a.cost(pricing) for a in alive)
     total_in = sum(a.tokens_in + a.cache_read + a.cache_create for a in alive)
     total_out = sum(a.tokens_out for a in alive)
-    historical_cost = compute_historical_cost(pricing)
+    claude_config_dir = get_claude_config_dir(config)
+    historical_cost = compute_historical_cost(pricing, claude_config_dir)
 
     try:
         queue = get_queue_depth(config)
