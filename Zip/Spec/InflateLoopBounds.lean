@@ -253,7 +253,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                 have hds_bridge : Deflate.Spec.decodeSymbols
                     (Inflate.fixedLitLengths.toList.map UInt8.toNat)
                     (Inflate.fixedDistLengths.toList.map UInt8.toNat)
-                    br₂.toBits 1000000000 = some (syms, bits₃) := by
+                    br₂.toBits 1000000000000000000 = some (syms, bits₃) := by
                   rw [hrest₂, Deflate.Correctness.fixedLitLengths_eq,
                       Deflate.Correctness.fixedDistLengths_eq]; exact hspec_ds
                 have ⟨br', hhf_nat, hrest₃, hwf₃, hpos₃⟩ :=
@@ -267,7 +267,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                       Deflate.Spec.fixedDistLengths_valid)
                     Deflate.Correctness.fixedLitLengths_size
                     Deflate.Correctness.fixedDistLengths_size
-                    hacc_le 1000000000 hds_bridge hspec_lz
+                    hacc_le 1000000000000000000 hds_bridge hspec_lz
                 have hdh : Inflate.decodeHuffman br₂ output fixedLit fixedDist
                     maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
                   simp only [Inflate.decodeHuffman]; exact hhf_nat
@@ -349,7 +349,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                     have hds_bridge : Deflate.Spec.decodeSymbols
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
                         ((distLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
-                        br₃.toBits 1000000000 = some (syms, bits₄) := by
+                        br₃.toBits 1000000000000000000 = some (syms, bits₄) := by
                       rw [hlit_rt, hdist_rt, hrest_dt]; exact hspec_ds
                     have hvlit_bridge : Huffman.Spec.ValidLengths
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat) 15 := by
@@ -370,7 +370,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                         litTree distTree maxOutputSize br₃ output
                         syms bits₄ acc' hwf₃ hpos₃ hflit_dyn hfdist_dyn
                         hvlit_bridge hvdist_bridge hsize_lit' hsize_dist'
-                        hacc_le 1000000000 hds_bridge hspec_lz
+                        hacc_le 1000000000000000000 hds_bridge hspec_lz
                     have hdh : Inflate.decodeHuffman br₃ output litTree distTree
                         maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
                       simp only [Inflate.decodeHuffman]; exact hhf_nat
@@ -448,7 +448,7 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
             BitReader.readBits, BitReader.readBits.go, hfail] at h
           simp at h
       exact inflateLoop_endPos_le ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
-        maxOut 10001 result endPos (Or.inl rfl) hple h
+        maxOut 10000000000 result endPos (Or.inl rfl) hple h
 
 /-! ## alignToByte lower bound from short remaining bits -/
 
@@ -493,10 +493,10 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
     (h : Inflate.inflateRaw (pfx ++ deflated) pfx.size maxOut =
       .ok (result, endPos))
     (hspec : Deflate.Spec.decode.go
-      (Deflate.Spec.bytesToBits deflated) [] 10001 =
+      (Deflate.Spec.bytesToBits deflated) [] 10000000000 =
       some result.data.toList)
     (hpad : ∃ remaining,
-      Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) [] 10001 =
+      Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) [] 10000000000 =
         some (result.data.toList, remaining) ∧
       remaining.length < 8)
     (hmax : result.data.toList.length ≤ maxOut) :
@@ -521,19 +521,19 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
             List.flatMap_append]]
         rw [← Deflate.Spec.bytesToBits_length pfx, List.drop_left]
       have hspec' : Deflate.Spec.decode.go
-          (BitReader.mk (pfx ++ deflated) pfx.size 0).toBits [] 10001 =
+          (BitReader.mk (pfx ++ deflated) pfx.size 0).toBits [] 10000000000 =
           some result.data.toList := by rw [hbr_toBits]; exact hspec
       obtain ⟨br_final, endPos', remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf, hgoR⟩ :=
         inflateLoop_complete_ext
           ⟨pfx ++ deflated, pfx.size, 0⟩ .empty fixedLit fixedDist
           maxOut result.data.toList (by simp) (by simp)
           (by simp [ByteArray.size_append])
-          hflit hfdist hmax 10001 hspec'
+          hflit hfdist hmax 10000000000 hspec'
       have hloop_eq : Inflate.inflateLoop ⟨pfx ++ deflated, pfx.size, 0⟩
-          .empty fixedLit fixedDist maxOut 10001 = .ok (result, endPos) := h
+          .empty fixedLit fixedDist maxOut 10000000000 = .ok (result, endPos) := h
       have hep_eq : endPos = endPos' := by
         have : Inflate.inflateLoop ⟨pfx ++ deflated, pfx.size, 0⟩
-            .empty fixedLit fixedDist maxOut 10001 =
+            .empty fixedLit fixedDist maxOut 10000000000 =
             .ok (⟨⟨result.data.toList⟩⟩, endPos') := hloop
         rw [show (⟨⟨result.data.toList⟩⟩ : ByteArray) = result from by simp] at this
         have := hloop_eq.symm.trans this
@@ -545,7 +545,7 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
       apply alignToByte_pos_ge_of_toBits_short br_final hwff hposf hplef
       rw [hrestf]
       have hgoR' : Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) []
-          10001 = some (result.data.toList, remaining) := by
+          10000000000 = some (result.data.toList, remaining) := by
         rw [← hbr_toBits]; exact hgoR
       have : some (result.data.toList, remaining) =
           some (result.data.toList, pad_remaining) :=
@@ -560,10 +560,10 @@ theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
     (h : Inflate.inflateRaw (pfx ++ deflated) pfx.size maxOut =
       .ok (result, endPos))
     (hspec : Deflate.Spec.decode.go
-      (Deflate.Spec.bytesToBits deflated) [] 10001 =
+      (Deflate.Spec.bytesToBits deflated) [] 10000000000 =
       some result.data.toList)
     (hpad : ∃ remaining,
-      Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) [] 10001 =
+      Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) [] 10000000000 =
         some (result.data.toList, remaining) ∧
       remaining.length < 8)
     (hmax : result.data.toList.length ≤ maxOut) :
@@ -576,12 +576,12 @@ theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
 
 /-- Completeness for `inflateRaw` at arbitrary `startPos`: if the spec decode
     succeeds on the bits starting at `startPos * 8`, then the native inflate
-    also succeeds with the same result. The spec fuel must be ≤ 10001 (the
+    also succeeds with the same result. The spec fuel must be ≤ 10000000000 (the
     native inflate's block fuel). -/
 theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
     (result : List UInt8)
     (hsize : result.length ≤ maxOutputSize)
-    (specFuel : Nat) (hfuel : specFuel ≤ 10001)
+    (specFuel : Nat) (hfuel : specFuel ≤ 10000000000)
     (hspec : Deflate.Spec.decode.go
         ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) [] specFuel =
         some result) :
@@ -600,15 +600,15 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
       (Deflate.Spec.bytesToBits data).drop (startPos * 8) := by
     simp [BitReader.toBits]
   have hgo : Deflate.Spec.decode.go (BitReader.mk data startPos 0).toBits
-      ByteArray.empty.data.toList 10001 = some result := by
+      ByteArray.empty.data.toList 10000000000 = some result := by
     rw [hbr_bits]
     show Deflate.Spec.decode
-        ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) 10001 = some result
-    have h10001 : specFuel + (10001 - specFuel) = 10001 := by omega
-    rw [← h10001]
+        ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) 10000000000 = some result
+    have h10000000000 : specFuel + (10000000000 - specFuel) = 10000000000 := by omega
+    rw [← h10000000000]
     exact Deflate.Spec.decode_fuel_independent _ _ _ hspec _
   exact Deflate.Correctness.inflateLoop_complete
     ⟨data, startPos, 0⟩ .empty fixedLit fixedDist maxOutputSize result
-    hbr_wf hbr_pos hflit hfdist hsize 10001 hgo
+    hbr_wf hbr_pos hflit hfdist hsize 10000000000 hgo
 
 end Zip.Native

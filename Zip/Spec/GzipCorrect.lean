@@ -157,11 +157,11 @@ theorem bytesToBits_drop_prefix_three (a b c : ByteArray) :
 /-! ## Spec decode from inflate success -/
 
 /-- If `inflate deflated = .ok data`, then the spec decode succeeds on
-    `bytesToBits deflated` with the default fuel (10001). -/
+    `bytesToBits deflated` with the default fuel (10000000000). -/
 private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
     (h : Inflate.inflate deflated = .ok result) :
     Deflate.Spec.decode.go
-      (Deflate.Spec.bytesToBits deflated) [] 10001 =
+      (Deflate.Spec.bytesToBits deflated) [] 10000000000 =
       some result.data.toList := by
   simp only [Inflate.inflate, bind, Except.bind] at h
   cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
@@ -173,36 +173,36 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
         (by rw [hinf])
     simp at hdec
     rw [← h]
-    show Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) 10001 =
+    show Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) 10000000000 =
       some p.1.data.toList
-    have h10001 : fuel + (10001 - fuel) = 10001 := by omega
-    rw [show (10001 : Nat) = fuel + (10001 - fuel) from h10001.symm]
+    have h10000000000 : fuel + (10000000000 - fuel) = 10000000000 := by omega
+    rw [show (10000000000 : Nat) = fuel + (10000000000 - fuel) from h10000000000.symm]
     exact Deflate.Spec.decode_fuel_independent _ _ _ hdec _
 
 /-! ## Gzip roundtrip -/
 
 /-- Gzip roundtrip: decompressing the output of compress returns the original data.
-    The size bound (500M) is inherited from `inflate_deflateRaw`. -/
+    The size bound (1 GiB) is inherited from `inflate_deflateRaw`. -/
 theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 500000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     GzipDecode.decompressSingle (GzipEncode.compress data level) = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
   have hinfl : Inflate.inflate (Deflate.deflateRaw data level) = .ok data :=
     Deflate.inflate_deflateRaw data level hsize
-  -- Spec decode on deflated with default fuel (10001)
+  -- Spec decode on deflated with default fuel (10000000000)
   have hspec_go : Deflate.Spec.decode.go
-      (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] 10001 =
+      (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] 10000000000 =
       some data.data.toList :=
     inflate_to_spec_decode _ data hinfl
   -- Suffix invariance: spec decode ignores trailer bits after the DEFLATE stream
   have hspec_compressed : ∀ (header trailer : ByteArray) (hh : header.size = 10),
       Deflate.Spec.decode.go
         ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level ++ trailer)).drop
-          (10 * 8)) [] 10001 = some data.data.toList := by
+          (10 * 8)) [] 10000000000 = some data.data.toList := by
     intro header trailer hh
     rw [show 10 * 8 = header.size * 8 from by omega,
         bytesToBits_drop_prefix_three]
-    exact Deflate.Spec.decode_go_suffix _ _ [] 10001 _
+    exact Deflate.Spec.decode_go_suffix _ _ [] 10000000000 _
       (by rw [Deflate.Spec.bytesToBits_length]; omega)
       hspec_go
   -- Use data.size bound to get result.length ≤ maxOutputSize
@@ -211,13 +211,13 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
   -- Spec decode on compressed bits at offset 10 (via compress_eq decomposition)
   have hspec_at10 : Deflate.Spec.decode.go
       ((Deflate.Spec.bytesToBits (GzipEncode.compress data level)).drop (10 * 8))
-      [] 10001 = some data.data.toList := by
+      [] 10000000000 = some data.data.toList := by
     obtain ⟨header, trailer, hhsz, _, hceq⟩ := GzipEncode.compress_eq data level
     rw [hceq]
     exact hspec_compressed header trailer hhsz
   -- Apply inflateRaw_complete to get native inflateRaw at offset 10
   obtain ⟨endPos, hinflRaw⟩ :=
-    inflateRaw_complete _ 10 _ data.data.toList hdata_le 10001 (by omega) hspec_at10
+    inflateRaw_complete _ 10 _ data.data.toList hdata_le 10000000000 (by omega) hspec_at10
   -- compressed size ≥ 18 (from compress = 10 + deflated + 8)
   have hcsz18 : ¬ (GzipEncode.compress data level).size < 18 := by
     rw [GzipEncode.compress_size]; omega
@@ -228,14 +228,14 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
   -- Spec decode on (header ++ deflated) at offset 10
   have hspec_hd : Deflate.Spec.decode.go
       ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (10 * 8))
-      [] 10001 = some data.data.toList := by
+      [] 10000000000 = some data.data.toList := by
     rw [show 10 * 8 = header.size * 8 from by omega]
     rw [bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
     exact hspec_go
   -- Apply inflateRaw_complete on (header ++ deflated) to get endPos' and tight bound
   obtain ⟨endPos', hinflRaw'⟩ :=
     inflateRaw_complete (header ++ Deflate.deflateRaw data level) 10 _
-      data.data.toList hdata_le 10001 (by omega) hspec_hd
+      data.data.toList hdata_le 10000000000 (by omega) hspec_hd
   have hep_le : endPos' ≤ (header ++ Deflate.deflateRaw data level).size :=
     inflateRaw_endPos_le _ _ _ _ _ hinflRaw'
   -- By suffix invariance, inflateRaw on (header ++ deflated) ++ trailer gives same endPos'

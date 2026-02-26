@@ -183,7 +183,7 @@ def decodeLitLen (litLengths : List Nat) (distLengths : List Nat)
     Decodes until end-of-block marker (code 256) is found.
     Uses fuel to ensure termination. -/
 def decodeSymbols (litLengths distLengths : List Nat) (bits : List Bool)
-    (fuel : Nat := 1000000000) : Option (List LZ77Symbol × List Bool) :=
+    (fuel : Nat := 1000000000000000000) : Option (List LZ77Symbol × List Bool) :=
   match fuel with
   | 0 => none
   | fuel + 1 => do
@@ -360,7 +360,7 @@ where
     Note: LZ77 back-references can span block boundaries (RFC 1951 §3.2),
     so the accumulated output `acc` is passed to `resolveLZ77` for each
     Huffman block, not a fresh `[]`. -/
-def decode (bits : List Bool) (fuel : Nat := 10001) :
+def decode (bits : List Bool) (fuel : Nat := 10000000000) :
     Option (List UInt8) :=
   go bits [] fuel
 where
@@ -574,7 +574,7 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) (fuel : N
 
 /-- Encoding stored blocks then decoding produces the original data.
     Uses explicit fuel `data.length / 65535 + 1` (≥ number of blocks).
-    The default fuel (10001) suffices for data up to ~655MB;
+    The default fuel (10000000000) suffices for data up to ~655TB;
     the theorem is stated with exact fuel to hold for all list lengths. -/
 theorem encodeStored_decode (data : List UInt8) :
     decode (encodeStored data) (data.length / 65535 + 1) = some data := by
