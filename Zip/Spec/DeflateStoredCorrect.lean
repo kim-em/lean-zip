@@ -1,5 +1,4 @@
 import Zip.Native.Inflate
-import Zip.Native.Deflate
 import ZipForStd.ByteArray
 import Std.Tactic.BVDecide
 
@@ -190,17 +189,13 @@ theorem decodeStored_on_block (compressed : ByteArray) (brPos : Nat)
   -- Step 3: blockLen.toUInt16.toNat = blockLen
   have hbl_toNat : blockLen.toUInt16.toNat = blockLen := by
     simp [Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)]
-  -- Step 4: readBytes for block data
-  have hrb := readBytes_at_aligned compressed (brPos + 4) blockLen (by omega)
-  -- Step 5: Compose everything
+  -- Step 4: Compose everything
   simp only [Inflate.decodeStored, bind, Except.bind, hru1, hru2]
   -- XOR check: a ^^^ (a ^^^ 0xFFFF) = 0xFFFF
   rw [uint16_xor_complement]
-  -- 65535 != 65535 = false (Bool)
+  -- NLEN check and pure reduction
   simp only [show ((65535 : UInt16) != 65535) = false from by decide,
-    Bool.false_eq_true, ↓reduceIte]
-  -- pure PUnit.unit reduces
-  simp only [pure, Except.pure]
+    Bool.false_eq_true, ↓reduceIte, pure, Except.pure]
   -- Size check (Prop-based if)
   rw [hbl_toNat]
   simp only [show ¬(output.size + blockLen > maxOutputSize) from by omega, ↓reduceIte]
@@ -229,7 +224,6 @@ theorem decodeStored_align (compressed : ByteArray) (brPos bitOff : Nat)
 
 /-! ## inflateLoop processes stored blocks -/
 
-set_option linter.unusedSimpArgs false in
 /-- inflateLoop correctly processes a single final stored block.
     The block starts at brPos with header byte 0x01 (BFINAL=1, BTYPE=00),
     followed by LEN/NLEN/data starting at brPos+1. -/
@@ -258,16 +252,11 @@ theorem inflateLoop_final_stored (compressed : ByteArray) (brPos : Nat)
   obtain ⟨fuel', rfl⟩ : ∃ k, fuel = k + 1 := ⟨fuel - 1, by omega⟩
   -- Unfold inflateLoop at fuel' + 1
   unfold Inflate.inflateLoop
-  simp only [bind, Except.bind]
-  -- Step 1: readBits 1 (BFINAL)
+  dsimp only [bind, Except.bind]
+  -- Steps 1-3: Read BFINAL, BTYPE, compute their values from header byte
   rw [readBits_1_at_0 compressed brPos hpos]
-  simp only [bind, Except.bind]
-  -- Step 2: readBits 2 (BTYPE)
-  rw [readBits_2_at_1 compressed brPos hpos]
-  simp only [bind, Except.bind]
-  -- Step 3: From hhdr, compute bfinal and btype
-  rw [hhdr]
-  -- 0x01.toUInt32 &&& 1 = 1 (bfinal) and (0x01.toUInt32 >>> 1) &&& 3 = 0 (btype)
+  dsimp only [bind, Except.bind]
+  rw [readBits_2_at_1 compressed brPos hpos, hhdr]
   simp only [show (0x01 : UInt8).toUInt32 &&& 1 = 1 from by decide,
     show ((0x01 : UInt8).toUInt32 >>> 1) &&& 3 = 0 from by decide]
   -- decodeStored with bitOff = 3 aligns to brPos + 1
@@ -280,7 +269,6 @@ theorem inflateLoop_final_stored (compressed : ByteArray) (brPos : Nat)
   simp only [h_beq, ↓reduceIte, BitReader.alignToByte,
     show ((0 : Nat) == 0) = true from rfl, pure, Except.pure]
 
-set_option linter.unusedSimpArgs false in
 /-- inflateLoop correctly processes a single non-final stored block.
     The block starts at brPos with header byte 0x00 (BFINAL=0, BTYPE=00).
     After processing, inflateLoop recurses with the output extended and
@@ -310,14 +298,11 @@ theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
       fixedLit fixedDist maxOutputSize fuel := by
   -- Unfold inflateLoop only on the LHS (fuel + 1 → body with fuel)
   conv => lhs; unfold Inflate.inflateLoop
-  simp only [bind, Except.bind]
-  -- Step 1: readBits 1 (BFINAL)
+  dsimp only [bind, Except.bind]
+  -- Steps 1-3: Read BFINAL, BTYPE, compute their values from header byte
   rw [readBits_1_at_0 compressed brPos hpos]
-  simp only [bind, Except.bind] -- needed to reduce readBits result before readBits_2_at_1
-  -- Step 2: readBits 2 (BTYPE)
-  rw [readBits_2_at_1 compressed brPos hpos]
-  -- Step 3: From hhdr, compute bfinal and btype
-  rw [hhdr]
+  dsimp only [bind, Except.bind]
+  rw [readBits_2_at_1 compressed brPos hpos, hhdr]
   simp only [show (0x00 : UInt8).toUInt32 &&& 1 = 0 from by decide,
     show ((0x00 : UInt8).toUInt32 >>> 1) &&& 3 = 0 from by decide]
   -- decodeStored with bitOff = 3 aligns to brPos + 1
