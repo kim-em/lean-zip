@@ -24,10 +24,10 @@ open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
     This is the Phase B4 capstone theorem from PLAN.md.
-    The size bound (500M) is the tightest across all compression levels,
-    arising from the lazy LZ77 path (levels 2-4). -/
+    The size bound (1 GiB) is now determined by the native inflate's default
+    maxOutputSize, not the decoder fuel (which supports ~500 PB). -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 500000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     Zip.Native.Inflate.inflate (deflateRaw data level) = .ok data := by
   unfold deflateRaw
   split
@@ -72,10 +72,10 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     This is the key fact connecting encoder structure to decoder bit consumption,
     needed by `inflateRaw_endPos_ge` to prove the decoder consumes all of `deflated`. -/
 theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 500000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     ∃ remaining,
       Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits (deflateRaw data level)) []
-        10001 = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+        10000000000 = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateRaw
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []

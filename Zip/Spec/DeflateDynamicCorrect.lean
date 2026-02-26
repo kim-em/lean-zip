@@ -417,7 +417,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
     codes then decompressing recovers the original data.
     Size bound: same as `inflate_deflateFixed`. -/
 theorem inflate_deflateDynamic (data : ByteArray)
-    (hsize : data.size < 1000000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
   have hspec := deflateDynamic_spec data
   match hspec with

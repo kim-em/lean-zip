@@ -183,13 +183,13 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
               obtain ⟨output', br'⟩ := p
               simp only [hhf] at h
               have hhf_go : Zip.Native.Inflate.decodeHuffman.go fixedLit fixedDist
-                  maxOutputSize br₂ output 1000000000 = .ok (output', br') := by
+                  maxOutputSize br₂ output 1000000000000000000 = .ok (output', br') := by
                 simp only [Zip.Native.Inflate.decodeHuffman] at hhf; exact hhf
               obtain ⟨syms, rest_h, hds, hlz, hbr'_eq, hwf', hpos'⟩ :=
                 decodeHuffman_correct
                   Zip.Native.Inflate.fixedLitLengths
                   Zip.Native.Inflate.fixedDistLengths
-                  fixedLit fixedDist maxOutputSize 1000000000
+                  fixedLit fixedDist maxOutputSize 1000000000000000000
                   br₂ output output' br' hwf₂ hpos₂
                   hflit hfdist
                   (Correctness.fixedLitLengths_eq ▸ Deflate.Spec.fixedLitLengths_valid)
@@ -235,11 +235,11 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
                   obtain ⟨output', br'⟩ := p
                   simp only [hhf] at h
                   have hhf_go : Zip.Native.Inflate.decodeHuffman.go litTree distTree
-                      maxOutputSize br₃ output 1000000000 = .ok (output', br') := by
+                      maxOutputSize br₃ output 1000000000000000000 = .ok (output', br') := by
                     simp only [Zip.Native.Inflate.decodeHuffman] at hhf; exact hhf
                   obtain ⟨syms, rest_h, hds, hlz, hbr'_eq, hwf', hpos'⟩ :=
                     decodeHuffman_correct litLens distLens litTree distTree
-                      maxOutputSize 1000000000 br₃ output output' br' hwf₃ hpos₃
+                      maxOutputSize 1000000000000000000 br₃ output output' br' hwf₃ hpos₃
                       hflit_dyn hfdist_dyn hvlit_dyn hvdist_dyn
                       hsize_lit hsize_dist hhf_go
                   split at h
@@ -267,12 +267,12 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
 
 /-- **Main theorem**: If the native DEFLATE decompressor succeeds, then
     the formal specification also succeeds and produces the same output.
-    The spec fuel is bounded by 10001 (the native inflate's block fuel). -/
+    The spec fuel is bounded by 10000000000 (the native inflate's block fuel). -/
 theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
     (result : ByteArray) (endPos : Nat)
     (h : Zip.Native.Inflate.inflateRaw data startPos maxOutputSize =
       .ok (result, endPos)) :
-    ∃ fuel, fuel ≤ 10001 ∧
+    ∃ fuel, fuel ≤ 10000000000 ∧
       Deflate.Spec.decode
         ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) fuel =
         some result.data.toList := by
@@ -296,7 +296,7 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
           (Zip.Native.BitReader.mk data startPos 0).data.size := by simp
       obtain ⟨specFuel, hfuel_le, hgo⟩ := inflateLoop_correct
         ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
-        maxOutputSize 10001 result endPos
+        maxOutputSize 10000000000 result endPos
         hbr_wf hbr_pos hflit hfdist h
       -- decode = go bits [] fuel
       exact ⟨specFuel, hfuel_le, by
@@ -307,7 +307,7 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
 theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
     (result : ByteArray)
     (h : Zip.Native.Inflate.inflate data maxOutputSize = .ok result) :
-    ∃ fuel, fuel ≤ 10001 ∧
+    ∃ fuel, fuel ≤ 10000000000 ∧
       Deflate.Spec.decode (Deflate.Spec.bytesToBits data) fuel =
         some result.data.toList := by
   -- Unfold inflate: it calls inflateRaw data 0 maxOutputSize and discards endPos
