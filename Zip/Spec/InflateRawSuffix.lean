@@ -35,10 +35,10 @@ private theorem readBit_append (br : BitReader) (suffix : ByteArray)
   · rename_i hge
     have hlt : br.pos < br.data.size := by omega
     rw [if_neg (show ¬ br.pos ≥ (br.data ++ suffix).size from by
-      simp [ByteArray.size_append]; omega)]
-    rw [getElem!_pos (br.data ++ suffix) br.pos (by simp [ByteArray.size_append]; omega)]
+        simp [ByteArray.size_append]; omega),
+      getElem!_pos (br.data ++ suffix) br.pos (by simp [ByteArray.size_append]; omega),
+      ByteArray.getElem_append_left hlt]
     rw [getElem!_pos br.data br.pos hlt] at h
-    rw [ByteArray.getElem_append_left hlt]
     split at h <;> {
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨hval, hbr'⟩ := h
