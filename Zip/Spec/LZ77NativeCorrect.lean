@@ -324,17 +324,6 @@ theorem mainLoop_length (data : ByteArray) (windowSize hashSize : Nat)
   · exact trailing_length data pos
 termination_by data.size - pos
 
-/-- The token count from `lz77Greedy` is at most `data.size`. -/
-theorem lz77Greedy_size_le (data : ByteArray) (windowSize : Nat) :
-    (lz77Greedy data windowSize).size ≤ data.size := by
-  simp only [lz77Greedy]
-  split
-  · simp only [List.size_toArray]
-    exact trailing_length data 0
-  · simp only [List.size_toArray]
-    exact mainLoop_length data windowSize 65536
-      (Array.replicate 65536 0) (Array.replicate 65536 false) 0
-
 /-- All tokens from `lz77Greedy` have valid ranges for fixed Huffman encoding:
     lengths in 3–258 and distances in 1–32768 (so `findLengthCode`/`findDistCode`
     always succeed). -/
