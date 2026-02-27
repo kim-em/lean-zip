@@ -334,14 +334,14 @@ private theorem getElem_pfx_hdr_zero (pfx hdr rest : ByteArray)
 /-! ## Stored block header abstraction -/
 
 /-- 5-byte stored block header: BFINAL flag, LEN (LE), NLEN (LE). -/
-private def storedBlockHdr (blockLen : Nat) (isFinal : Bool) : ByteArray :=
+def storedBlockHdr (blockLen : Nat) (isFinal : Bool) : ByteArray :=
   ByteArray.mk #[if isFinal then 0x01 else 0x00,
     (blockLen.toUInt16 &&& 0xFF).toUInt8,
     ((blockLen.toUInt16 >>> 8) &&& 0xFF).toUInt8,
     ((blockLen.toUInt16 ^^^ 0xFFFF) &&& 0xFF).toUInt8,
     (((blockLen.toUInt16 ^^^ 0xFFFF) >>> 8) &&& 0xFF).toUInt8]
 
-@[simp] private theorem storedBlockHdr_size : (storedBlockHdr n b).size = 5 := rfl
+@[simp] theorem storedBlockHdr_size : (storedBlockHdr n b).size = 5 := rfl
 
 /-! ## Decomposition lemmas for deflateStoredPure -/
 

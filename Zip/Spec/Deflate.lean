@@ -1,5 +1,6 @@
 import Zip.Spec.HuffmanTheorems
 import Zip.Spec.LZ77
+import Zip.Spec.DeflateStoredCorrect
 
 /-!
 # DEFLATE Bitstream Specification (RFC 1951)
@@ -284,6 +285,17 @@ decreasing_by
   simp only [List.length_drop]
   omega
 
+/-- One-step unfolding of `encodeStored` for the non-final case (length > 65535). -/
+private theorem encodeStored_non_final (xs : List UInt8) (hxs : ¬(xs.length ≤ 65535)) :
+    encodeStored xs =
+    [false, false, false] ++ List.replicate 5 false ++
+    (encodeLEU16 (xs.take 65535).length ++
+    (encodeLEU16 ((xs.take 65535).length ^^^ 65535) ++
+    ((xs.take 65535).flatMap byteToBitsSpec ++
+    encodeStored (xs.drop 65535)))) := by
+  rw [encodeStored.eq_1]
+  simp only [hxs, ↓reduceIte, encodeStoredBlock, List.append_assoc]
+
 /-- Read code length code lengths from the bitstream. -/
 protected def readCLLengths : Nat → Nat → List Nat → List Bool →
     Option (List Nat × List Bool)
@@ -385,6 +397,29 @@ where
         let acc ← resolveLZ77 syms acc
         if bfinal == 1 then return acc else go bits acc fuel
       | _ => none  -- reserved block type (3)
+
+/-- Like `decode.go` but returns both the decoded result and the remaining bits. -/
+def decode.goR (bits : List Bool) (acc : List UInt8) :
+    Nat → Option (List UInt8 × List Bool)
+  | 0 => none
+  | fuel + 1 => do
+    let (bfinal, bits) ← readBitsLSB 1 bits
+    let (btype, bits) ← readBitsLSB 2 bits
+    match btype with
+    | 0 =>
+      let (bytes, bits) ← decodeStored bits
+      let acc := acc ++ bytes
+      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
+    | 1 =>
+      let (syms, bits) ← decodeSymbols fixedLitLengths fixedDistLengths bits
+      let acc ← resolveLZ77 syms acc
+      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
+    | 2 =>
+      let (litLens, distLens, bits) ← decodeDynamicTables bits
+      let (syms, bits) ← decodeSymbols litLens distLens bits
+      let acc ← resolveLZ77 syms acc
+      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
+    | _ => none
 
 /-! ## Stored block roundtrip helpers -/
 
@@ -581,6 +616,263 @@ theorem encodeStored_decode (data : List UInt8) :
   unfold decode
   rw [encodeStored_go data [] (data.length / 65535 + 1) (by omega)]
   simp only [List.nil_append]
+
+/-- Generalized goR roundtrip: `decode.goR` on `encodeStored data` with
+    accumulator `acc` and sufficient fuel produces `(acc ++ data, [])`.
+    The remaining bits are empty because stored blocks are byte-aligned. -/
+private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) (fuel : Nat)
+    (hfuel : fuel ≥ data.length / 65535 + 1) :
+    decode.goR (encodeStored data) acc fuel = some (acc ++ data, []) := by
+  induction data using encodeStored.induct generalizing acc fuel with
+  | case1 data hle =>
+    -- Single block: data.length ≤ 65535, BFINAL=1
+    unfold encodeStored
+    simp only [hle, ↓reduceIte]
+    match fuel, hfuel with
+    | fuel + 1, _ =>
+    unfold decode.goR
+    simp [readBitsLSB]
+    have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
+      simp only [List.append_nil, List.length_append, List.length_replicate,
+        encodeStoredBlock, encodeLEU16,
+        List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
+    have hdec : decodeStored (List.replicate 5 false ++ encodeStoredBlock data) =
+        some (data, []) := by
+      have h := decodeStored_encodeStoredBlock data [] hle halign
+      simp only [List.append_nil] at h; exact h
+    show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
+      fun x => some (acc ++ x.fst, x.snd)) = some (acc ++ data, [])
+    rw [hdec]; simp
+  | case2 data hgt rest ih =>
+    -- Multi-block: data.length > 65535, BFINAL=0
+    unfold encodeStored
+    simp only [show ¬(data.length ≤ 65535) from by omega, ↓reduceIte]
+    match fuel, hfuel with
+    | fuel + 1, hfuel =>
+    have htake_len : (data.take 65535).length = 65535 := by
+      rw [List.length_take]; omega
+    have hrest_len : rest.length = data.length - 65535 := by
+      simp [show rest = data.drop 65535 from rfl]
+    unfold decode.goR
+    simp [readBitsLSB]
+    change (decodeStored (List.replicate 5 false ++
+        encodeStoredBlock (data.take 65535) ++ encodeStored rest) |>.bind
+      fun x => decode.goR x.snd (acc ++ x.fst) fuel) = some (acc ++ data, [])
+    have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
+        encodeStored rest).length % 8 = 5 := by
+      simp only [List.length_append, List.length_replicate,
+        encodeStoredBlock, encodeLEU16,
+        List.length_ofFn, flatMap_byteToBitsSpec_length, htake_len]
+      have := encodeStored_length_mod8 rest
+      omega
+    rw [decodeStored_encodeStoredBlock (data.take 65535) (encodeStored rest)
+        (by omega) halign]
+    simp only [Option.bind]
+    rw [ih (acc ++ data.take 65535) fuel (by rw [hrest_len]; omega)]
+    rw [List.append_assoc, show rest = data.drop 65535 from rfl, List.take_append_drop]
+
+/-- Encoding stored blocks then goR-decoding with sufficient fuel produces
+    `(data, [])` — the stored encoding is consumed completely. -/
+theorem encodeStored_decode_goR (data : List UInt8) :
+    decode.goR (encodeStored data) [] (data.length / 65535 + 1) =
+      some (data, []) := by
+  rw [encodeStored_goR data [] (data.length / 65535 + 1) (by omega)]
+  simp only [List.nil_append]
+
+/-! ## Byte-bit equivalence for stored blocks
+
+The native `deflateStoredPure` (ByteArray-level) and the spec `encodeStored`
+(bit-level) produce the same bits. This connects the native roundtrip proof
+to the spec-level goR infrastructure. -/
+
+/-- `bytesToBits.byteToBits` and `byteToBitsSpec` are the same function. -/
+private theorem byteToBits_eq_byteToBitsSpec :
+    @bytesToBits.byteToBits = @byteToBitsSpec := rfl
+
+/-- `n &&& 255 = n % 256` for any natural number. -/
+private theorem and_255_eq_mod_256 (n : Nat) : n &&& 255 = n % 256 := by
+  apply Nat.eq_of_testBit_eq
+  intro i
+  rw [Nat.testBit_and, show (256 : Nat) = 2^8 from by omega,
+      Nat.testBit_mod_two_pow, show (255 : Nat) = 2^8 - 1 from by omega,
+      Nat.testBit_two_pow_sub_one, Bool.and_comm]
+
+/-- The low and high bytes of a UInt16 value, converted to bits, equal `encodeLEU16`. -/
+private theorem le_bytes_eq_encodeLEU16 (n : Nat) (hn : n < 65536) :
+    byteToBitsSpec ((n.toUInt16 &&& 255).toUInt8) ++
+    byteToBitsSpec (((n.toUInt16 >>> 8) &&& 255).toUInt8) =
+    encodeLEU16 n := by
+  have hlo : (n.toUInt16 &&& 255).toUInt8.toNat = n % 256 := by
+    unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
+  have hhi : ((n.toUInt16 >>> 8) &&& 255).toUInt8.toNat = n / 256 := by
+    unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
+  simp only [byteToBitsSpec, encodeLEU16]
+  apply List.ext_getElem
+  · simp
+  · intro i h₁ h₂
+    simp only [List.length_append, List.length_ofFn] at h₁
+    simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
+    split
+    · -- i < 8: bit from low byte
+      rename_i hi
+      rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow]
+      simp; omega
+    · -- i ≥ 8: bit from high byte
+      rename_i hi
+      rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
+      congr 1; omega
+
+/-- `bytesToBits` distributes over ByteArray append. -/
+private theorem bytesToBits_append' (a b : ByteArray) :
+    bytesToBits (a ++ b) = bytesToBits a ++ bytesToBits b := by
+  simp only [bytesToBits, ByteArray.data_append, Array.toList_append, List.flatMap_append]
+
+/-- `bytesToBits` of extracted data equals `flatMap byteToBitsSpec` of the extracted list. -/
+private theorem bytesToBits_extract_eq (data : ByteArray) (i j : Nat) :
+    bytesToBits (data.extract i j) =
+    (data.data.toList.drop i |>.take (j - i)).flatMap byteToBitsSpec := by
+  simp only [bytesToBits, ByteArray.data_extract, Array.toList_extract,
+    byteToBits_eq_byteToBitsSpec]
+
+/-- LE bytes of a UInt16 value produce `encodeLEU16 v.toNat`. -/
+private theorem le_bytes_eq_encodeLEU16' (v : UInt16) :
+    byteToBitsSpec (v &&& 0xFF).toUInt8 ++
+    byteToBitsSpec ((v >>> 8) &&& 0xFF).toUInt8 =
+    encodeLEU16 v.toNat := by
+  have hlo : (v &&& 0xFF).toUInt8.toNat = v.toNat % 256 := by
+    simp only [UInt16.toNat_toUInt8, UInt16.toNat_and, UInt16.toNat_ofNat]
+    rw [and_255_eq_mod_256]; omega
+  have hhi : ((v >>> 8) &&& 0xFF).toUInt8.toNat = v.toNat / 256 := by
+    simp only [UInt16.toNat_toUInt8, UInt16.toNat_and, UInt16.toNat_ofNat,
+      UInt16.toNat_shiftRight]
+    rw [show (8 : Nat) % 2 ^ 16 % 16 = 8 from by omega,
+        Nat.shiftRight_eq_div_pow, show (2 : Nat) ^ 8 = 256 from by omega,
+        and_255_eq_mod_256]
+    have := UInt16.toNat_lt v; omega
+  simp only [byteToBitsSpec, encodeLEU16]
+  apply List.ext_getElem
+  · simp
+  · intro i h₁ h₂
+    simp only [List.length_append, List.length_ofFn] at h₁
+    simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
+    split
+    · rename_i hi
+      rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow]
+      simp; omega
+    · rename_i hi
+      rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
+      congr 1; omega
+
+/-- `bytesToBits` of a 5-byte stored-block header produces the bfinal byte bits
+    plus the encoded LEN and NLEN fields. -/
+private theorem bytesToBits_storedHdr (bfinal : UInt8) (len nlen : UInt16) :
+    bytesToBits (ByteArray.mk #[bfinal, (len &&& 0xFF).toUInt8,
+      ((len >>> 8) &&& 0xFF).toUInt8, (nlen &&& 0xFF).toUInt8,
+      ((nlen >>> 8) &&& 0xFF).toUInt8]) =
+    byteToBitsSpec bfinal ++ encodeLEU16 len.toNat ++ encodeLEU16 nlen.toNat := by
+  simp only [bytesToBits, byteToBits_eq_byteToBitsSpec]
+  simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil]
+  -- Reassociate to group pairs for le_bytes_eq_encodeLEU16'
+  simp only [← List.append_assoc]
+  rw [show ∀ (a b c d e : List Bool),
+    a ++ b ++ c ++ d ++ e = a ++ (b ++ c) ++ (d ++ e) from by
+    intros; simp [List.append_assoc]]
+  rw [le_bytes_eq_encodeLEU16' len, le_bytes_eq_encodeLEU16' nlen]
+
+/-- `byteToBitsSpec 0x01 = [true, false, false] ++ replicate 5 false` -/
+private theorem byteToBitsSpec_0x01 :
+    byteToBitsSpec (0x01 : UInt8) =
+    [true, false, false] ++ List.replicate 5 false := by decide
+
+/-- `byteToBitsSpec 0x00 = [false, false, false] ++ replicate 5 false` -/
+private theorem byteToBitsSpec_0x00 :
+    byteToBitsSpec (0x00 : UInt8) =
+    [false, false, false] ++ List.replicate 5 false := by decide
+
+/-- `n.toUInt16.toNat = n` when `n < 65536`. -/
+private theorem toUInt16_toNat (n : Nat) (h : n < 65536) : n.toUInt16.toNat = n := by
+  simp [Nat.toUInt16, UInt16.toNat, UInt16.ofNat, BitVec.toNat_ofNat]; omega
+
+/-- The native byte-level stored encoder (`deflateStoredPure`) produces the same bits
+    as the spec-level stored encoder (`encodeStored`). -/
+private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
+    bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data pos) =
+    encodeStored (data.data.toList.drop pos) := by
+  unfold Zip.Spec.DeflateStoredCorrect.deflateStoredPure
+  simp only []
+  split
+  · -- Final block case: pos + blockSize ≥ data.size
+    rename_i h
+    have hbs : min (data.size - pos) 65535 = data.size - pos := by omega
+    simp only [hbs]
+    rw [bytesToBits_append', bytesToBits_storedHdr, byteToBitsSpec_0x01,
+        bytesToBits_extract_eq]
+    have hdata_len : data.data.toList.length = data.size := by
+      unfold ByteArray.size; rfl
+    have hlen_drop : (data.data.toList.drop pos).length = data.size - pos := by
+      rw [List.length_drop, hdata_len]
+    have hlen_list : (data.data.toList.drop pos).length ≤ 65535 := by
+      rw [hlen_drop]; omega
+    unfold encodeStored
+    simp only [hlen_list, ↓reduceIte, encodeStoredBlock, List.append_assoc]
+    -- Simplify take/drop and UInt16 conversions
+    have htake_eq : List.take (pos + (data.size - pos) - pos) (List.drop pos data.data.toList) =
+        data.data.toList.drop pos := by
+      rw [show pos + (data.size - pos) - pos = data.size - pos from by omega,
+          ← hlen_drop, List.take_length]
+    have hlen_eq : (data.size - pos).toUInt16.toNat = (data.data.toList.drop pos).length := by
+      rw [hlen_drop, toUInt16_toNat _ (by omega)]
+    have hnlen_eq : ((data.size - pos).toUInt16 ^^^ (65535 : UInt16)).toNat =
+        (data.data.toList.drop pos).length ^^^ 65535 := by
+      rw [UInt16.toNat_xor, UInt16.toNat_ofNat,
+          show (65535 : Nat) % 2 ^ 16 = 65535 from by omega,
+          toUInt16_toNat _ (by omega), hlen_drop]
+    rw [htake_eq, hlen_eq, hnlen_eq]
+  · -- Non-final block case: pos + blockSize < data.size
+    rename_i h
+    have hbs : min (data.size - pos) 65535 = 65535 := by omega
+    simp only [hbs]
+    rw [bytesToBits_append', bytesToBits_append', bytesToBits_storedHdr, byteToBitsSpec_0x00,
+        bytesToBits_extract_eq, bytesToBits_deflateStoredPure data (pos + 65535)]
+    have hdata_len : data.data.toList.length = data.size := by
+      unfold ByteArray.size; rfl
+    have hlen_drop : (data.data.toList.drop pos).length = data.size - pos := by
+      rw [List.length_drop, hdata_len]
+    have hlen_list : ¬((data.data.toList.drop pos).length ≤ 65535) := by
+      rw [hlen_drop]; omega
+    -- Simplify take/drop and UInt16 conversions on LHS
+    have htake_eq : List.take (pos + 65535 - pos) (List.drop pos data.data.toList) =
+        (data.data.toList.drop pos).take 65535 := by
+      rw [show pos + 65535 - pos = 65535 from by omega]
+    have hdrop_eq : List.drop (pos + 65535) data.data.toList =
+        (data.data.toList.drop pos).drop 65535 := by
+      rw [List.drop_drop, show pos + 65535 = 65535 + pos from by omega]
+    have htake_len : (data.data.toList.drop pos |>.take 65535).length = 65535 := by
+      rw [List.length_take, hlen_drop]; omega
+    have hlen_eq : (65535 : Nat).toUInt16.toNat =
+        (data.data.toList.drop pos |>.take 65535).length := by
+      rw [htake_len, toUInt16_toNat _ (by omega)]
+    have hnlen_eq : ((65535 : Nat).toUInt16 ^^^ (65535 : UInt16)).toNat =
+        (data.data.toList.drop pos |>.take 65535).length ^^^ 65535 := by
+      rw [htake_len, UInt16.toNat_xor, UInt16.toNat_ofNat,
+          show (65535 : Nat) % 2 ^ 16 = 65535 from by omega,
+          toUInt16_toNat _ (by omega)]
+    -- Normalize LHS take/drop/UInt16, then fold into encodeStored
+    rw [htake_eq, hdrop_eq, hlen_eq, hnlen_eq, encodeStored_non_final _ hlen_list]
+    simp only [List.append_assoc]
+termination_by data.size - pos
+decreasing_by omega
+
+/-- `decode.goR` on the bits of `deflateStoredPure data` returns
+    `(data.data.toList, [])` — stored blocks are fully consumed with no remaining bits. -/
+theorem deflateStoredPure_goR (data : ByteArray) (fuel : Nat)
+    (hfuel : fuel ≥ data.size / 65535 + 1) :
+    decode.goR (bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data)) []
+      fuel = some (data.data.toList, []) := by
+  rw [bytesToBits_deflateStoredPure data 0, List.drop_zero]
+  apply encodeStored_goR
+  rw [show data.data.toList.length = data.size from by unfold ByteArray.size; rfl]
+  omega
 
 /-- The spec decode function is deterministic: given the same input,
     it always produces the same output. (This is trivially true for a
