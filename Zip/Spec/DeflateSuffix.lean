@@ -521,30 +521,9 @@ theorem decode_go_suffix
 
 `decode.goR` is a variant of `decode.go` that also returns the remaining
 (unprocessed) bits after decoding. This allows tracking how many bits
-the decoder consumed, which is needed for endPos exactness proofs. -/
+the decoder consumed, which is needed for endPos exactness proofs.
 
-/-- Like `decode.go` but returns both the decoded result and the remaining bits. -/
-def decode.goR (bits : List Bool) (acc : List UInt8) :
-    Nat → Option (List UInt8 × List Bool)
-  | 0 => none
-  | fuel + 1 => do
-    let (bfinal, bits) ← readBitsLSB 1 bits
-    let (btype, bits) ← readBitsLSB 2 bits
-    match btype with
-    | 0 =>
-      let (bytes, bits) ← decodeStored bits
-      let acc := acc ++ bytes
-      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
-    | 1 =>
-      let (syms, bits) ← decodeSymbols fixedLitLengths fixedDistLengths bits
-      let acc ← resolveLZ77 syms acc
-      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
-    | 2 =>
-      let (litLens, distLens, bits) ← decodeDynamicTables bits
-      let (syms, bits) ← decodeSymbols litLens distLens bits
-      let acc ← resolveLZ77 syms acc
-      if bfinal == 1 then return (acc, bits) else decode.goR bits acc fuel
-    | _ => none
+Defined in `Deflate.lean` alongside `decode.go`; theorems about it live here. -/
 
 set_option maxRecDepth 2048 in
 /-- `decode.goR` agrees with `decode.go` on the result: if `decode.goR` returns

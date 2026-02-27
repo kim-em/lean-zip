@@ -79,7 +79,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8)
   unfold deflateRaw
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
-    sorry
+    exact ⟨[], Deflate.Spec.deflateStoredPure_goR data 10000000000 (by omega), by simp⟩
   · split
     · -- Level 1: fixed Huffman (iterative LZ77)
       rw [deflateFixedIter, lz77GreedyIter_eq_lz77Greedy, ← deflateFixed]
