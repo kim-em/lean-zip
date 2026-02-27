@@ -92,6 +92,35 @@ but `omega` uses it implicitly. Build after each removal to catch breakage.
 (`hlen_pos_nat : 0 < x.toNat := hlen`) exist specifically because `omega`
 works on `Nat`, not on `UIntN`. These are NOT dead code.
 
+## `simp` Destroys Type Info Needed for Recursive Call Inference
+
+When proving length bounds for recursive functions, `simp only [List.length_cons]`
+reduces `(x :: recursive_call).length` to `recursive_call.length + 1`. After this,
+`have := recursive_func _ _ _` fails because Lean can no longer infer the implicit
+arguments from the goal — the List structure connecting them is gone.
+
+**Fix**: Use a type-bridge helper lemma that takes the recursive call as an argument
+(not via `have`). This works because Lean unifies the argument's type against the
+goal before `simp` runs:
+
+```lean
+-- Helper bridges the recursive call through simp
+private theorem length_cons_le {n k s pos : Nat}
+    (ih : n ≤ s - (pos + k)) (hk : k ≥ 1) (hle : pos + k ≤ s) :
+    n + 1 ≤ s - pos := by omega
+
+-- Usage: recursive call is an argument, not a have
+simp only [List.length_cons]
+exact length_cons_le (mainLoop_length _ _ _ _ _ _) (by omega) hle
+```
+
+**Why `have` before `simp` also fails**: Even with `have ih := recursive_func _ _ _`
+before `simp`, Lean still can't infer implicit arguments if the goal doesn't
+directly mention the recursive call's result type.
+
+**Also**: `all_goals (have := f _ _; tac)` with semicolons inside parenthesized
+tactic blocks can cause parse errors. Use separate focused proofs (`·`) instead.
+
 ## `Nat.mod_eq_sub_mod` for Inductive Mod Proofs
 
 When proving `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`:
