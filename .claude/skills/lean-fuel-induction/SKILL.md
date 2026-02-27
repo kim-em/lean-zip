@@ -199,6 +199,49 @@ minimum needed. This speeds up compilation and catches unnecessary unfolding.
 Always test by removing the `set_option` entirely first — it may no longer be
 needed after proof cleanup.
 
+## Single-Step Unfolding of WF-Recursive Definitions
+
+When proving properties about a well-founded recursive function `f`, you often
+need to unfold exactly one level of `f` in the goal without recursively unfolding
+all occurrences.
+
+**Problem:** `unfold f` and `delta f` unfold ALL occurrences of `f`, including
+recursive calls in the body. For recursive functions like `encodeStored`, this
+produces enormous goals or infinite unfolding. `simp only [f, ...]` loops for
+the same reason. `conv => unfold f` is invalid inside `conv` blocks.
+
+**Solution:** Use `rw [f.eq_1]` — Lean 4 auto-generates an equation lemma
+`f.eq_1` for every definition. It rewrites exactly one application of `f`.
+
+```lean
+-- BAD: unfolds encodeStored everywhere, including recursive calls
+unfold encodeStored
+
+-- BAD: loops because encodeStored appears in its own body
+simp only [encodeStored, ...]
+
+-- GOOD: rewrites exactly one occurrence
+rw [encodeStored.eq_1]
+```
+
+**When to use a standalone lemma:** If `rw [f.eq_1]` produces a goal too large
+to work with directly (many `if`/`match` branches), prove a specialized lemma
+that unfolds `f` under specific conditions:
+
+```lean
+private theorem f_case2 (xs : List α) (h : ¬(xs.length ≤ N)) :
+    f xs = ... body for this case ... := by
+  rw [f.eq_1]
+  simp only [h, ↓reduceIte, ...]
+```
+
+Then `rw [f_case2 _ h]` in the main proof. This was essential for
+`encodeStored_non_final` where `unfold encodeStored` was unusable.
+
+**Also beware `let` bindings:** If `f` uses `let x := ...; body`, trying to
+rewrite with `← f` to fold back won't work because `rw` can't match through
+`let` bindings. Use a standalone lemma instead.
+
 ## Cross-Reference: Roundtrip Proofs
 
 For suffix invariance chains (_append lemmas), goR (decode-with-remaining),
