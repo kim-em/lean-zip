@@ -1,6 +1,6 @@
 ---
 name: lean-fuel-induction
-description: Use when Lean 4 proofs involve fuel-based recursion, proving fuel independence, loop invariants, copyLoop-style patterns, or suffix/append extension lemmas.
+description: Use when Lean 4 proofs involve fuel-based recursion, proving fuel independence, loop invariants, copyLoop-style patterns, suffix/append extension lemmas, or maxRecDepth/maxHeartbeats tuning.
 allowed-tools: Read, Bash, Grep
 ---
 
@@ -179,3 +179,27 @@ two common false patterns waste build iterations:
 
 **Rule of thumb**: Start minimal (just `rw [if_neg hcond] at h ⊢` then the next
 operation), add `dsimp`/`simp` only when the build tells you the goal isn't reduced.
+
+## `maxRecDepth` and `maxHeartbeats` Reduction
+
+After getting proofs to work, reduce `maxRecDepth` and `maxHeartbeats` to the
+minimum needed. This speeds up compilation and catches unnecessary unfolding.
+
+**Protocol:**
+1. Start with whatever value makes the proof work (e.g., 4096 / 4,000,000)
+2. Try halving: 2048 / 2,000,000
+3. Table correspondence lemmas (non-recursive `simp` chains) often work at 512
+4. Non-recursive proofs may not need any `set_option` at all
+
+**Common values by proof type:**
+- Recursive monadic chain (5+ operations): `maxRecDepth 2048` or `4096`
+- Single unfold + case split: `maxRecDepth 512` or default
+- Pure `simp` / `omega` proofs: no `set_option` needed
+
+Always test by removing the `set_option` entirely first — it may no longer be
+needed after proof cleanup.
+
+## Cross-Reference: Roundtrip Proofs
+
+For suffix invariance chains (_append lemmas), goR (decode-with-remaining),
+and accumulator equivalence patterns, see the `lean-roundtrip-proofs` skill.
