@@ -91,10 +91,36 @@ match steps at once. This differs from `Except` monad do-blocks where
 When `unfold f at h` leaves `have x := e; body` bindings,
 `simp only [letFun] at h` is needed to reduce them before `split at h` can see
 inner `if` expressions. The linter may report `letFun` as unused — this is a
-false positive. Do NOT remove it; doing so breaks the proof. Same applies to
-`guard`, `pure`, `Pure.pure` in `simp only [guard, ...]` — the linter reports
-them as unused but removing them leaves `match guard (...)` unreduced.
-Use `set_option linter.unusedSimpArgs false in` to suppress.
+false positive. Do NOT remove it; doing so breaks the proof.
+
+## Fixing `bind`/`Option.bind` Linter Warnings
+
+The linter flags `bind` and `Option.bind` as unused in
+`simp only [hX, bind, Option.bind]` because they contribute only via dsimp
+(definitional simplification), not as rewrite rules. Do NOT suppress with
+`set_option linter.unusedSimpArgs false` — use the two-step pattern instead:
+
+```lean
+-- Before (triggers linter warning):
+simp only [hX, bind, Option.bind] at h ⊢
+
+-- After (no warning):
+rw [hX] at h; dsimp only [bind, Option.bind] at h ⊢
+```
+
+**Why**: `rw [hX]` substitutes the known value (e.g. `some (v, bits')`),
+then `dsimp only [bind, Option.bind]` reduces `Option.bind (some ...) f`
+to `f ...`. Neither step alone suffices — `simp only [hX]` without `bind`
+cannot reduce the bind wrapper, and `dsimp only [bind, Option.bind]`
+without `rw [hX]` cannot reduce when the scrutinee is opaque.
+
+For standalone bind reduction (no hypothesis rewrite needed), replace
+`simp only [bind, Option.bind]` with `dsimp only [bind, Option.bind]`.
+
+The same pattern applies to `Except.bind`:
+```lean
+rw [hX] at h; dsimp only [bind, Except.bind] at h ⊢
+```
 
 ## Guard Contradiction in `by_cases` Negative Branch
 

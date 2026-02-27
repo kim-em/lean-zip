@@ -67,10 +67,17 @@ When `unfold f at h` leaves `have x := e; body` bindings, `simp only [letFun] at
 is needed to reduce them before `split at h` can see inner `if` expressions.
 
 The linter may report `letFun` as unused — this is a false positive. Do NOT remove it.
-Same applies to `guard`, `pure`, `Pure.pure` in `simp only [guard, ...]` — the linter
-reports them as unused but removing them leaves `match guard (...)` unreduced.
 
-Use `set_option linter.unusedSimpArgs false in` to suppress.
+## Fixing `bind`/`Option.bind`/`Except.bind` Linter Warnings
+
+The linter flags `bind`, `Option.bind`, and `Except.bind` as unused in
+`simp only [hX, bind, Option.bind]` because they contribute only via dsimp.
+Do NOT suppress with `set_option linter.unusedSimpArgs false` — use the
+`rw + dsimp` pattern from the `lean-monad-proofs` skill instead:
+
+```lean
+rw [hX] at h; dsimp only [bind, Option.bind] at h ⊢
+```
 
 ## `have` Bindings That Look Unused but Feed `omega`/`simp`
 
