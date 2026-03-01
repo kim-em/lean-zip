@@ -430,7 +430,7 @@ set_option maxRecDepth 2048 in
 theorem decodeHuffman_correct
     (litLengths distLengths : Array UInt8)
     (litTree distTree : Zip.Native.HuffTree)
-    (maxOutputSize fuel : Nat)
+    (maxOutputSize dataSize : Nat)
     (br : Zip.Native.BitReader) (output : ByteArray)
     (output' : ByteArray) (br' : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
@@ -442,7 +442,7 @@ theorem decodeHuffman_correct
     (hlen_lit : litLengths.size ≤ UInt16.size)
     (hlen_dist : distLengths.size ≤ UInt16.size)
     (h : Zip.Native.Inflate.decodeHuffman.go litTree distTree maxOutputSize
-          br output fuel = .ok (output', br')) :
+          dataSize br output = .ok (output', br')) :
     ∃ syms rest,
       Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
         (distLengths.toList.map UInt8.toNat) br.toBits =

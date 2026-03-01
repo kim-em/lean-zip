@@ -354,13 +354,13 @@ theorem decodeHuffman_complete
     (hlen_lit : litLengths.size ≤ UInt16.size)
     (hlen_dist : distLengths.size ≤ UInt16.size)
     (hmax : result.length ≤ maxOutputSize)
-    (hfuel : Nat)
+    (dataSize : Nat)
     (hds : Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
         (distLengths.toList.map UInt8.toNat) br.toBits =
         some (syms, rest))
     (hlz : Deflate.Spec.resolveLZ77 syms output.data.toList = some result) :
     ∃ br', Zip.Native.Inflate.decodeHuffman.go litTree distTree maxOutputSize
-        br output hfuel = .ok (⟨⟨result⟩⟩, br') ∧
+        dataSize br output = .ok (⟨⟨result⟩⟩, br') ∧
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by

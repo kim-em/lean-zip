@@ -280,65 +280,88 @@ theorem decodeStored_inv (br br' : BitReader)
 /-- Combined: decodeHuffman.go preserves data, hpos, and pos ≤ data.size. -/
 theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
     (br br' : BitReader) (output output' : ByteArray)
-    (maxOut fuel : Nat)
-    (h : Inflate.decodeHuffman.go litTree distTree maxOut br output fuel =
+    (maxOut dataSize : Nat)
+    (h : Inflate.decodeHuffman.go litTree distTree maxOut dataSize br output =
       .ok (output', br'))
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hple : br.pos ≤ br.data.size) :
     br'.data = br.data ∧
     (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     br'.pos ≤ br'.data.size := by
-  induction fuel generalizing br output with
-  | zero => simp [Inflate.decodeHuffman.go] at h
-  | succ n ih =>
-    unfold Inflate.decodeHuffman.go at h
-    cases hlit : litTree.decode br with
-    | error e => rw [hlit] at h; simp [Bind.bind, Except.bind] at h
-    | ok p =>
-      obtain ⟨sym, br₁⟩ := p; rw [hlit] at h; dsimp only [Bind.bind, Except.bind] at h
-      -- Reduce `match pure PUnit.unit` to just the ok branch
-      simp only [pure, Except.pure] at h
-      have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv litTree br br₁ sym hlit hpos hple
+  -- WF induction on the termination measure
+  have hrec : ∀ (br_i : BitReader) (out : ByteArray),
+      dataSize * 8 - br_i.bitPos < dataSize * 8 - br.bitPos →
+      Inflate.decodeHuffman.go litTree distTree maxOut dataSize br_i out =
+        .ok (output', br') →
+      (br_i.bitOff = 0 ∨ br_i.pos < br_i.data.size) →
+      br_i.pos ≤ br_i.data.size →
+      br'.data = br_i.data ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+      br'.pos ≤ br'.data.size :=
+    fun br_i out hlt h' hpos' hple' =>
+      decodeHuffman_go_inv litTree distTree br_i br' out output' maxOut dataSize h' hpos' hple'
+  unfold Inflate.decodeHuffman.go at h
+  cases hlit : litTree.decode br with
+  | error e => rw [hlit] at h; simp [Bind.bind, Except.bind] at h
+  | ok p =>
+    obtain ⟨sym, br₁⟩ := p; rw [hlit] at h; dsimp only [Bind.bind, Except.bind] at h
+    simp only [pure, Except.pure] at h
+    have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv litTree br br₁ sym hlit hpos hple
+    split at h
+    · -- sym < 256: literal byte
       split at h
-      · -- sym < 256: literal byte
+      · simp at h  -- output.size ≥ maxOut → error
+      · -- advancement guards
         split at h
-        · simp at h  -- output.size ≥ maxOut → error
-        · -- recursive call
-          have ⟨hd', hp', hl'⟩ := ih br₁ _ h hpos₁ hple₁
-          exact ⟨hd'.trans hd₁, hp', hl'⟩
-      · split at h
-        · -- sym == 256: end of block
-          simp only [Except.ok.injEq, Prod.mk.injEq] at h
-          obtain ⟨_, rfl⟩ := h
-          exact ⟨hd₁, hpos₁, hple₁⟩
-        · -- sym ≥ 257: length+distance code
-          split at h
-          · simp at h  -- invalid length code → error
-          · split at h
-            · simp at h  -- readBits error
-            · rename_i v hrb1_eq
+        · simp at h  -- bitPos ≤ guard → error
+        · split at h
+          · simp at h  -- bitPos out of range → error
+          · -- recursive call: have advancement + bound from passed guards
+            have hmeasure : dataSize * 8 - br₁.bitPos < dataSize * 8 - br.bitPos := by
+              simp only [BitReader.bitPos] at *; omega
+            have ⟨hd', hp', hl'⟩ := hrec br₁ _ hmeasure h hpos₁ hple₁
+            exact ⟨hd'.trans hd₁, hp', hl'⟩
+    · split at h
+      · -- sym == 256: end of block
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨_, rfl⟩ := h
+        exact ⟨hd₁, hpos₁, hple₁⟩
+      · -- sym ≥ 257: length+distance code
+        split at h
+        · simp at h  -- invalid length code → error
+        · split at h
+          · simp at h  -- readBits error
+          · rename_i v hrb1_eq
+            split at h
+            · simp at h  -- decode dist error
+            · rename_i v₁ hdist_eq
               split at h
-              · simp at h  -- decode dist error
-              · rename_i v₁ hdist_eq
-                split at h
-                · simp at h  -- invalid distance code
-                · split at h
-                  · simp at h  -- readBits dist extra error
-                  · rename_i v₂ hrb2_eq
-                    split at h
-                    · simp at h  -- distance > output.size
-                    · split at h
-                      · simp at h  -- output.size + length > maxOut
-                      · -- recursive go call remains
-                        obtain ⟨extraBits, br₂⟩ := v
-                        obtain ⟨distSym, br₃⟩ := v₁
-                        obtain ⟨dExtraBits, br₄⟩ := v₂
-                        simp only [] at hrb1_eq hdist_eq hrb2_eq h
-                        have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ _ _ hrb1_eq hpos₁ hple₁
-                        have ⟨hd₃, hpos₃, hple₃⟩ := decode_inv distTree br₂ br₃ distSym hdist_eq hpos₂ hple₂
-                        have ⟨hd₄, hpos₄, hple₄⟩ := readBits_inv br₃ br₄ _ _ hrb2_eq hpos₃ hple₃
-                        have ⟨hd', hp', hl'⟩ := ih br₄ _ h hpos₄ hple₄
-                        exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
+              · simp at h  -- invalid distance code
+              · split at h
+                · simp at h  -- readBits dist extra error
+                · rename_i v₂ hrb2_eq
+                  split at h
+                  · simp at h  -- distance > output.size
+                  · split at h
+                    · simp at h  -- output.size + length > maxOut
+                    · -- advancement guards before recursive call
+                      split at h
+                      · simp at h  -- bitPos ≤ guard → error
+                      · split at h
+                        · simp at h  -- bitPos out of range → error
+                        · -- recursive go call remains
+                          obtain ⟨extraBits, br₂⟩ := v
+                          obtain ⟨distSym, br₃⟩ := v₁
+                          obtain ⟨dExtraBits, br₄⟩ := v₂
+                          simp only [] at hrb1_eq hdist_eq hrb2_eq h
+                          have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ _ _ hrb1_eq hpos₁ hple₁
+                          have ⟨hd₃, hpos₃, hple₃⟩ := decode_inv distTree br₂ br₃ distSym hdist_eq hpos₂ hple₂
+                          have ⟨hd₄, hpos₄, hple₄⟩ := readBits_inv br₃ br₄ _ _ hrb2_eq hpos₃ hple₃
+                          have hmeasure : dataSize * 8 - br₄.bitPos < dataSize * 8 - br.bitPos := by
+                            simp only [BitReader.bitPos] at *; omega
+                          have ⟨hd', hp', hl'⟩ := hrec br₄ _ hmeasure h hpos₄ hple₄
+                          exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
+termination_by dataSize * 8 - br.bitPos
 
 /-- `decodeHuffman` preserves the BitReader invariant. Wrapper around `decodeHuffman_go_inv`. -/
 theorem decodeHuffman_inv (litTree distTree : HuffTree)
