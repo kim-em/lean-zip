@@ -83,7 +83,7 @@ private theorem readCLCodeLengths_inv (br : Zip.Native.BitReader)
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     split at h
     · rename_i hi
-      simp only [bind, Except.bind] at h
+      dsimp only [bind, Except.bind] at h
       cases hrb : br.readBits 3 with
       | error e => simp [hrb] at h
       | ok p =>
@@ -194,7 +194,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
           · -- sym == 16
             split at h
             · simp at h
-            · simp only [pure, Except.pure] at h
+            · dsimp only [pure, Except.pure] at h
               cases hrb : br₁.readBits 2 with
               | error e => simp [hrb] at h
               | ok p =>
@@ -215,7 +215,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
                 simp only [hrb] at h
                 split at h
                 · simp at h
-                · simp only [pure, Except.pure] at h
+                · dsimp only [pure, Except.pure] at h
                   have ⟨hwf', hpos', hsz⟩ := ih br₂ _ _
                     (readBits_wf br₁ 3 rep br₂ hwf₁ hrb)
                     (readBits_pos_inv br₁ 3 rep br₂ hwf₁ hpos₁ hrb) h
@@ -229,7 +229,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
                   simp only [hrb] at h
                   split at h
                   · simp at h
-                  · simp only [pure, Except.pure] at h
+                  · dsimp only [pure, Except.pure] at h
                     have ⟨hwf', hpos', hsz⟩ := ih br₂ _ _
                       (readBits_wf br₁ 7 rep br₂ hwf₁ hrb)
                       (readBits_pos_inv br₁ 7 rep br₂ hwf₁ hpos₁ hrb) h
@@ -324,11 +324,11 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
   | zero => simp [Zip.Native.Inflate.decodeCLSymbols] at h
   | succ fuel ih =>
     unfold Zip.Native.Inflate.decodeCLSymbols at h
-    simp only [bind, Except.bind] at h
+    dsimp only [bind, Except.bind] at h
     split at h
     · -- idx ≥ totalCodes: return immediately
       rename_i hge
-      simp [Except.ok.injEq, Prod.mk.injEq] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       refine ⟨br.toBits, ?_, rfl⟩
       have heq : idx = totalCodes := by omega
@@ -384,7 +384,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
             split at h
             · simp at h
             · rename_i hidx_ne
-              simp only [pure, Except.pure] at h
+              dsimp only [pure, Except.pure] at h
               have hidx_pos : 0 < idx := by
                 simp only [beq_iff_eq] at hidx_ne; omega
               cases hrd : br₁.readBits 2 with
@@ -418,11 +418,10 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     simp [Nat.min_eq_left hle]; omega
                   have hguard2 : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
                     simp [Nat.min_eq_left hle]; omega
-                  simp only [guard, h_rd, hprev_eq,
+                  simpa only [guard, h_rd, hprev_eq,
                     hguard1, hguard2, hacc_len,
                     List.length_append, List.length_replicate,
-                    ↓reduceIte] at hspec_rec ⊢
-                  exact hspec_rec
+                    ↓reduceIte] using hspec_rec
           · -- sym ≠ 16
             rename_i hsym_ne16
             split at h
@@ -439,7 +438,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                 split at h
                 · simp at h
                 · rename_i hbound
-                  simp only [pure, Except.pure] at h
+                  dsimp only [pure, Except.pure] at h
                   have hwf₂ := readBits_wf br₁ 3 rep br₂ hwf₁ hrd
                   have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                     readBits_toBits br₁ 3 rep br₂ hwf₁ (by omega) hrd
@@ -458,11 +457,10 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   have hacc_len := accLen_eq_min codeLengths idx
                   have hguard : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
                     simp [Nat.min_eq_left hle]; omega
-                  simp only [guard, h_rd, hguard, hacc_len,
+                  simpa only [guard, h_rd, hguard, hacc_len,
                     List.length_append, List.length_replicate,
                     ↓reduceIte,
-                    show (0 : UInt8).toNat = 0 from rfl] at hspec_rec ⊢
-                  exact hspec_rec
+                    show (0 : UInt8).toNat = 0 from rfl] using hspec_rec
             · -- sym ≠ 17
               rename_i hsym_ne17
               split at h
@@ -479,7 +477,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   split at h
                   · simp at h
                   · rename_i hbound
-                    simp only [pure, Except.pure] at h
+                    dsimp only [pure, Except.pure] at h
                     have hwf₂ := readBits_wf br₁ 7 rep br₂ hwf₁ hrd
                     have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                       readBits_toBits br₁ 7 rep br₂ hwf₁ (by omega) hrd
@@ -500,11 +498,10 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     have hacc_len := accLen_eq_min codeLengths idx
                     have hguard : min idx codeLengths.size + (rep.toNat + 11) ≤ totalCodes := by
                       simp [Nat.min_eq_left hle]; omega
-                    simp only [guard, h_rd, hguard, hacc_len,
+                    simpa only [guard, h_rd, hguard, hacc_len,
                       List.length_append, List.length_replicate,
                       ↓reduceIte,
-                      show (0 : UInt8).toNat = 0 from rfl] at hspec_rec ⊢
-                    exact hspec_rec
+                      show (0 : UInt8).toNat = 0 from rfl] using hspec_rec
               · -- sym ∉ {16,17,18}: throw, contradicts .ok
                 simp at h
 
@@ -665,16 +662,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                       simp only [Array.toList_extract, List.extract,
                         Nat.sub_zero, List.drop_zero]
                       rw [← List.map_drop, List.drop_take]
-                    have hlit_vl : Huffman.Spec.ValidLengths
-                        ((List.map UInt8.toNat (clResults.extract 0
-                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).take
-                          (hlit_v.toNat + 257)) 15 := by
-                      rw [hlit_take]; exact hlit_valid
-                    have hdist_vl : Huffman.Spec.ValidLengths
-                        ((List.map UInt8.toNat (clResults.extract 0
-                          (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).drop
-                          (hlit_v.toNat + 257)) 15 := by
-                      rw [hdist_drop]; exact hdist_valid
+                    have hlit_vl := hlit_take ▸ hlit_valid
+                    have hdist_vl := hdist_drop ▸ hdist_valid
                     simp only [hlen_eq, beq_self_eq_true,
                       hlit_vl, hdist_vl, ↓reduceIte]
                     refine congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))
@@ -683,11 +672,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                     · simp only [Array.toList_extract, List.extract,
                         Nat.sub_zero, List.drop_zero]
                       rw [← List.map_drop, List.drop_take]
-                  · -- litLengths.size ≤ UInt16.size
-                    have := Deflate.Spec.readBitsLSB_bound hspec1
-                    have := Deflate.Spec.readBitsLSB_bound hspec2
-                    simp [Array.size_extract, hcl_res_sz, UInt16.size]; omega
-                  · -- distLengths.size ≤ UInt16.size
+                  -- lit/dist lengths size ≤ UInt16.size
+                  all_goals
                     have := Deflate.Spec.readBitsLSB_bound hspec1
                     have := Deflate.Spec.readBitsLSB_bound hspec2
                     simp [Array.size_extract, hcl_res_sz, UInt16.size]; omega
