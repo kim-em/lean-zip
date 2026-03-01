@@ -368,7 +368,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
         have hdef : deflateDynamic data =
             (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).flush := by
           unfold deflateDynamic
-          -- After unfold, we have `let (litFreqs, distFreqs) := tokenFreqs tokens; ...`
+          rw [lz77GreedyIter_eq_lz77Greedy]
+          -- After unfold + rewrite, we have `let (litFreqs, distFreqs) := tokenFreqs tokens; ...`
           -- This is definitionally equal to using .1/.2, and `let (code, len) := litCodes[256]!`
           -- is definitionally equal to using .1/.2. So `split` on the `if` suffices.
           split
