@@ -361,7 +361,89 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
       .ok (result, br')) :
     Inflate.decodeHuffman.go litTree distTree maxOut dataSize' (brAppend br suffix) output =
       .ok (result, brAppend br' suffix) := by
-  sorry
+  unfold Inflate.decodeHuffman.go at h
+  simp only [bind, Except.bind] at h
+  cases hdec : litTree.decode br with
+  | error e => simp [hdec] at h
+  | ok p =>
+    obtain ⟨sym, br₁⟩ := p; simp only [hdec] at h
+    unfold Inflate.decodeHuffman.go
+    rw [huffDecode_append litTree br suffix sym br₁ hdec]
+    simp only [bind, Except.bind]
+    split at h
+    · -- sym < 256: literal byte
+      rename_i hsym; rw [if_pos hsym]
+      split at h
+      · simp at h
+      · rename_i hout; rw [if_neg hout]
+        simp only [pure, Except.pure] at h ⊢
+        split at h
+        · simp at h
+        · rename_i h₁
+          split at h
+          · simp at h
+          · rename_i h₂
+            -- bitPos guards: brAppend doesn't change bitPos (definitional)
+            have hbp₁ : (brAppend br₁ suffix).bitPos = br₁.bitPos := rfl
+            split
+            · rename_i h₁'; exact absurd h₁' h₁
+            · split
+              · rename_i h₂'; exfalso; exact h₂ (by omega)
+              · exact decodeHuffman_go_append litTree distTree br₁ suffix
+                  (output.push sym.toUInt8) maxOut dataSize dataSize' result br' hds h
+    · -- sym ≥ 256
+      split at h
+      · -- sym == 256: end of block
+        rename_i hge hsym256
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        rw [if_neg hge, if_pos hsym256]
+      · -- sym > 256: length/distance code
+        rename_i hge hne256
+        rw [if_neg hge, if_neg hne256]
+        split at h
+        · simp at h
+        · rename_i hidx; rw [if_neg hidx]
+          simp only [pure, Except.pure] at h ⊢
+          cases hextra_r : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]!).toNat with
+          | error e => simp [hextra_r] at h
+          | ok p =>
+            obtain ⟨extraBits, br₂⟩ := p; simp only [hextra_r] at h
+            rw [readBits_append br₁ suffix _ extraBits br₂ hextra_r]; dsimp only []
+            cases hdist_dec : distTree.decode br₂ with
+            | error e => simp [hdist_dec] at h
+            | ok p =>
+              obtain ⟨distSym, br₃⟩ := p; simp only [hdist_dec] at h
+              rw [huffDecode_append distTree br₂ suffix distSym br₃ hdist_dec]; dsimp only []
+              split at h
+              · simp at h
+              · rename_i hdidx; rw [if_neg hdidx]
+                cases hdextra_r : br₃.readBits (Inflate.distExtra[distSym.toNat]!).toNat with
+                | error e => simp [hdextra_r] at h
+                | ok p =>
+                  obtain ⟨dExtraBits, br₄⟩ := p; simp only [hdextra_r] at h
+                  rw [readBits_append br₃ suffix _ dExtraBits br₄ hdextra_r]; dsimp only []
+                  split at h
+                  · simp at h
+                  · rename_i hdist_ok; rw [if_neg hdist_ok]
+                    split at h
+                    · simp at h
+                    · rename_i hmax_ok; rw [if_neg hmax_ok]
+                      split at h
+                      · simp at h
+                      · rename_i h₁
+                        split at h
+                        · simp at h
+                        · rename_i h₂
+                          -- bitPos guards
+                          have hbp₄ : (brAppend br₄ suffix).bitPos = br₄.bitPos := rfl
+                          split
+                          · rename_i h₁'; exact absurd h₁' h₁
+                          · split
+                            · rename_i h₂'; exfalso; exact h₂ (by omega)
+                            · exact decodeHuffman_go_append litTree distTree br₄ suffix
+                                _ maxOut dataSize dataSize' result br' hds h
+  termination_by dataSize * 8 - br.bitPos
 
 /-- inflateLoop with appended suffix. -/
 private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)

@@ -1,4 +1,5 @@
 import Zip.Spec.DecodeCorrect
+import Zip.Spec.BitReaderInvariant
 
 /-!
 # Block-Level Decode Completeness (reverse direction)
@@ -333,11 +334,18 @@ private theorem decodeLitLen_reference_inv {litLengths distLengths : List Nat}
             exact ⟨base, extra, extraVal, bits₂, dSym, bits₃, dBase, dExtra, dExtraVal,
               rfl, rfl, hrb, hdd, hdb, hde, hrd, rfl, rfl⟩
 
+set_option maxRecDepth 2048 in
+set_option maxHeartbeats 400000 in
 /-- **Completeness for Huffman block decode**: if the spec `decodeSymbols`
     succeeds and `resolveLZ77` produces output, then the native
     `decodeHuffman.go` also succeeds with the same output.
 
-    This is the reverse of `decodeHuffman_correct`. -/
+    This is the reverse of `decodeHuffman_correct`.
+
+    `hple` and `hdata` ensure the native termination guards pass:
+    the BitReader position is within bounds and `dataSize` is large
+    enough to cover the data. Both hold when `dataSize = br.data.size`
+    (the value used by the `decodeHuffman` wrapper). -/
 theorem decodeHuffman_complete
     (litLengths distLengths : Array UInt8)
     (litTree distTree : Zip.Native.HuffTree)
@@ -355,6 +363,8 @@ theorem decodeHuffman_complete
     (hlen_dist : distLengths.size ≤ UInt16.size)
     (hmax : result.length ≤ maxOutputSize)
     (dataSize : Nat)
+    (hple : br.pos ≤ br.data.size)
+    (hdata : br.data.size ≤ dataSize)
     (hds : Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
         (distLengths.toList.map UInt8.toNat) br.toBits =
         some (syms, rest))
@@ -364,50 +374,72 @@ theorem decodeHuffman_complete
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  sorry
-/- Old fuel-based proof needs rewrite for WF decodeSymbols.
-  induction hfuel generalizing br output syms result with
-  | zero => simp [Deflate.Spec.decodeSymbols] at hds
-  | succ n ih =>
-    -- Unfold spec decodeSymbols to extract decodeLitLen
-    simp only [Deflate.Spec.decodeSymbols, bind, Option.bind] at hds
-    cases hdll : Deflate.Spec.decodeLitLen
-        (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
-        br.toBits with
-    | none => simp [hdll] at hds
-    | some p =>
-      obtain ⟨sym_val, bits₁⟩ := p
-      simp only [hdll] at hds
-      -- Extract the Huffman decode from decodeLitLen
-      obtain ⟨sym_nat, rest₁, hspec_sym⟩ := decodeLitLen_huffDecode hdll
-      -- Extract sym_nat < litLengths.size
-      obtain ⟨cw_lit, hmem_table, _⟩ :=
-        Deflate.Correctness.decode_some_mem _ _ _ _ hspec_sym
-      have hmem_codes : (sym_nat, cw_lit) ∈
-          Huffman.Spec.allCodes (litLengths.toList.map UInt8.toNat) 15 := by
-        obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_table
-        simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
-      have hsym_bound : sym_nat < litLengths.size := by
-        rw [Huffman.Spec.allCodes_mem_iff] at hmem_codes
-        simp at hmem_codes; exact hmem_codes.1
-      -- Get native litTree.decode via huffTree_decode_complete
-      obtain ⟨br₁, hdec_lit, hrest₁, hwf₁, hpos₁⟩ :=
-        huffTree_decode_complete litLengths 15 (by omega) litTree br
-          sym_nat rest₁ hwf hpos hlit hvlit hsym_bound hspec_sym
-      -- UInt16 roundtrip — shared across all cases
-      have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat :=
-        Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hsym_bound hlen_lit)
-      -- Case split on sym_val (the LZ77Symbol from decodeLitLen)
-      cases sym_val with
-      | literal b =>
+  -- Unfold spec decodeSymbols to extract decodeLitLen
+  unfold Deflate.Spec.decodeSymbols at hds
+  simp only [bind, Option.bind] at hds
+  cases hdll : Deflate.Spec.decodeLitLen
+      (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
+      br.toBits with
+  | none => simp [hdll] at hds
+  | some p =>
+    obtain ⟨sym_val, bits₁⟩ := p
+    simp only [hdll] at hds
+    -- Extract the Huffman decode from decodeLitLen
+    obtain ⟨sym_nat, rest₁, hspec_sym⟩ := decodeLitLen_huffDecode hdll
+    -- Extract sym_nat < litLengths.size
+    obtain ⟨cw_lit, hmem_table, _⟩ :=
+      Deflate.Correctness.decode_some_mem _ _ _ _ hspec_sym
+    have hmem_codes : (sym_nat, cw_lit) ∈
+        Huffman.Spec.allCodes (litLengths.toList.map UInt8.toNat) 15 := by
+      obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_table
+      simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+    have hsym_bound : sym_nat < litLengths.size := by
+      rw [Huffman.Spec.allCodes_mem_iff] at hmem_codes
+      simp at hmem_codes; exact hmem_codes.1
+    -- Get native litTree.decode via huffTree_decode_complete
+    obtain ⟨br₁, hdec_lit, hrest₁, hwf₁, hpos₁⟩ :=
+      huffTree_decode_complete litLengths 15 (by omega) litTree br
+        sym_nat rest₁ hwf hpos hlit hvlit hsym_bound hspec_sym
+    -- Data preservation and pos bound from decode
+    have ⟨hdata₁, _, hple₁⟩ :=
+      Zip.Native.decode_inv litTree br br₁ sym_nat.toUInt16 hdec_lit hpos hple
+    -- UInt16 roundtrip — shared across all cases
+    have hsym_toNat : sym_nat.toUInt16.toNat = sym_nat :=
+      Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hsym_bound hlen_lit)
+    -- Bits get shorter (for WF guard)
+    have hlen_shorter : rest₁.length < br.toBits.length :=
+      Huffman.Spec.decode_shorter _ _ _ _ hspec_sym
+        (Deflate.Correctness.specTable_cw_nonempty _ _)
+    -- bitPos advances: ¬(br₁.bitPos ≤ br.bitPos)
+    have hbp_advance : ¬(br₁.bitPos ≤ br.bitPos) := by
+      intro hle
+      have htl := Deflate.Correctness.toBits_length br
+      have htl₁ := Deflate.Correctness.toBits_length br₁
+      rw [hdata₁] at htl₁
+      rw [← hrest₁] at hlen_shorter
+      simp only [Zip.Native.BitReader.bitPos] at hle
+      omega
+    -- bitPos stays within dataSize: ¬(dataSize * 8 < br₁.bitPos)
+    have hbp_bound : ¬(dataSize * 8 < br₁.bitPos) := by
+      simp only [Zip.Native.BitReader.bitPos]
+      rw [hdata₁] at hple₁
+      rcases hpos₁ with h | h <;> simp_all <;> omega
+    -- Case split on sym_val (the LZ77Symbol from decodeLitLen)
+    cases sym_val with
+    | literal b =>
         -- From decodeLitLen_literal_inv: sym_nat < 256, b = sym_nat.toUInt8, bits₁ = rest₁
         obtain ⟨hsym_lt, hb_eq, hbits_eq⟩ := decodeLitLen_literal_inv hdll hspec_sym
         -- Reduce the match on .literal in hds
         simp at hds
-        -- hds should now be: decodeSymbols ... bits₁ n >>= ... = some (syms, rest)
+        -- hds should now be: decodeSymbols ... bits₁ >>= ... = some (syms, rest)
+        -- WF guard in decodeSymbols: bits₁.length < br.toBits.length
+        -- This is satisfied since hlen_shorter and hbits_eq : bits₁ = rest₁
+        rw [hbits_eq] at hds
+        -- WF guard: rest₁.length < br.toBits.length
+        simp only [hlen_shorter] at hds
         cases hds_rec : Deflate.Spec.decodeSymbols
             (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
-            bits₁ n with
+            rest₁ with
         | none => simp [hds_rec] at hds
         | some p₂ =>
           obtain ⟨syms', rest'⟩ := p₂
@@ -425,11 +457,16 @@ theorem decodeHuffman_complete
             have := List.IsPrefix.length_le hpfx
             simp at this; omega
           -- Apply IH with (output.push b) and remaining symbols
-          rw [hbits_eq, ← hrest₁] at hds_rec
+          rw [← hrest₁] at hds_rec
           rw [← hrest_eq] at hds_rec
           rw [← hpush] at hlz
+          -- data preservation for recursive call
+          have hdata₁' : br₁.data.size ≤ dataSize := by rw [hdata₁]; exact hdata
           obtain ⟨br', hgo, hbr', hwf', hpos'⟩ :=
-            ih br₁ (output.push b) syms' result hwf₁ hpos₁ hmax hds_rec hlz
+            decodeHuffman_complete litLengths distLengths litTree distTree
+              maxOutputSize br₁ (output.push b) syms' rest result
+              hwf₁ hpos₁ hlit hdist hvlit hvdist hlen_lit hlen_dist hmax
+              dataSize hple₁ hdata₁' hds_rec hlz
           -- Unfold native go to show it takes the literal branch
           unfold Zip.Native.Inflate.decodeHuffman.go
           rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
@@ -442,8 +479,10 @@ theorem decodeHuffman_complete
           have hsym_u8 : sym_nat.toUInt16.toUInt8 = b := by
             rw [hb_eq]; simp [UInt16.toUInt8, hsym_toNat]
           rw [hsym_u8]
+          -- bitPos guards
+          simp only [hbp_advance, ↓reduceDIte, hbp_bound]
           exact ⟨br', hgo, hbr', hwf', hpos'⟩
-      | endOfBlock =>
+    | endOfBlock =>
         -- From decodeLitLen_endOfBlock_inv: sym_nat = 256, bits₁ = rest₁
         obtain ⟨hsym_eq, hbits_eq⟩ := decodeLitLen_endOfBlock_inv hdll hspec_sym
         -- Reduce the match on .endOfBlock in hds → syms = [.endOfBlock], rest = bits₁
@@ -454,7 +493,6 @@ theorem decodeHuffman_complete
         -- resolveLZ77 [.endOfBlock] output = some output
         rw [hsyms] at hlz
         simp [Deflate.Spec.resolveLZ77_endOfBlock] at hlz
-        -- hlz : output.data.toList = result
         -- Unfold native go
         unfold Zip.Native.Inflate.decodeHuffman.go
         rw [show litTree.decode br = Except.ok (sym_nat.toUInt16, br₁) from hdec_lit]
@@ -476,7 +514,7 @@ theorem decodeHuffman_complete
         refine ⟨br₁, ?_, ?_, hwf₁, hpos₁⟩
         · rw [hout_eq]
         · rw [hrest₁, ← hbits_eq, ← hrest_eq]
-      | reference len dist =>
+    | reference len dist =>
         -- Extract intermediate values from decodeLitLen_reference_inv
         obtain ⟨hsym_ge, base, extra, extraVal, bits₂, dSym, bits₃,
           dBase, dExtra, dExtraVal,
@@ -484,9 +522,31 @@ theorem decodeHuffman_complete
           decodeLitLen_reference_inv hdll hspec_sym
         -- Reduce the match on .reference in hds
         simp at hds
+        -- WF guard for rest after decodeLitLen
+        -- bits₁ is the rest from decodeLitLen (.reference case)
+        -- From decodeLitLen_reference_inv, bits₁ is the rest from readBitsLSB dExtra bits₃
+        -- which equals the final `rest` from decodeLitLen. So bits₁ = the rest after all
+        -- the reference decoding (Huffman + length extra + dist Huffman + dist extra)
+        -- Actually, bits₁ comes from decodeLitLen, so it should equal the final bits
+        -- after the full .reference decoding chain.
+        -- The WF guard checks bits₁.length < br.toBits.length
+        -- We need to show this. From hrd, bits₁ is the rest after readBitsLSB dExtra bits₃.
+        -- We'll derive this from the chain of length reductions.
+        have hbits₁_shorter : bits₁.length < br.toBits.length := by
+          -- bits₁ is the final rest from the decodeLitLen .reference chain
+          -- The Huffman decode: rest₁.length < br.toBits.length (hlen_shorter)
+          -- readBitsLSB extra rest₁ = some (extraVal, bits₂): bits₂.length + extra = rest₁.length
+          have h1 := Deflate.Spec.readBitsLSB_some_length hrb
+          -- Huffman decode on bits₂: bits₃ shorter than bits₂
+          -- Distance Huffman decode: bits₃ shorter
+          -- readBitsLSB dExtra bits₃ = some (dExtraVal, bits₁): bits₁.length + dExtra = bits₃.length
+          have h3 := Deflate.Spec.readBitsLSB_some_length hrd
+          omega
+        rw [show bits₁ = bits₁ from rfl] at hds
+        simp only [hbits₁_shorter] at hds
         cases hds_rec : Deflate.Spec.decodeSymbols
             (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
-            bits₁ n with
+            bits₁ with
         | none => simp [hds_rec] at hds
         | some p₂ =>
           obtain ⟨syms', rest'⟩ := p₂
@@ -555,7 +615,6 @@ theorem decodeHuffman_complete
               dSym bits₃ hwf₂ hpos₂ hdist hvdist hdSym_bound
               (by rw [hrest₂]; exact hdd)
           -- Native readBits for distance extra
-          -- hrd : readBitsLSB dExtra bits₃ = some (dExtraVal, bits₁)
           obtain ⟨br₄, hrd_dextra, hrest₄, hwf₄, hpos₄⟩ :=
             readBits_complete br₃ dExtra dExtraVal bits₁ hwf₃ hpos₃
               hdextra_le hdExtraVal_bound (by rw [hrest₃]; exact hrd)
@@ -638,6 +697,26 @@ theorem decodeHuffman_complete
               Array.length_toList, ByteArray.size_data] at hpfx_len
             omega
           simp only [hmax_ok, ↓reduceIte]
+          -- bitPos guards for reference branch (br₄)
+          -- Data preservation chain
+          have ⟨hd₂, _, hple₂⟩ := Zip.Native.readBits_inv br₁ br₂ _ _ hrd_extra hpos₁ hple₁
+          have ⟨hd₃, _, hple₃⟩ := Zip.Native.decode_inv distTree br₂ br₃ _ hdec_dist hpos₂ hple₂
+          have ⟨hd₄, _, hple₄⟩ := Zip.Native.readBits_inv br₃ br₄ _ _ hrd_dextra hpos₃ hple₃
+          have hbp_advance₄ : ¬(br₄.bitPos ≤ br.bitPos) := by
+            intro hle'
+            have htl := Deflate.Correctness.toBits_length br
+            have htl₄ := Deflate.Correctness.toBits_length br₄
+            rw [hd₄, hd₃, hd₂, hdata₁] at htl₄
+            rw [← hrest₄] at hbits₁_shorter
+            simp only [Zip.Native.BitReader.bitPos] at hle'
+            omega
+          have hbp_bound₄ : ¬(dataSize * 8 < br₄.bitPos) := by
+            simp only [Zip.Native.BitReader.bitPos]
+            have : br₄.data.size ≤ dataSize := by
+              have : br₄.data.size = br.data.size := by rw [hd₄, hd₃, hd₂, hdata₁]
+              omega
+            rcases hpos₄ with h | h <;> omega
+          simp only [hbp_advance₄, ↓reduceDIte, hbp_bound₄]
           -- Apply IH with copyLoop output
           have hcopy := copyLoop_eq_ofFn output len dist
             (by omega)
@@ -656,25 +735,33 @@ theorem decodeHuffman_complete
               show output.size = output.data.toList.length from by
                 simp [Array.length_toList, ByteArray.size_data]]
             exact hcopy
-          -- IH needs: decodeSymbols br₄.toBits n = some (syms', rest)
-          -- hds_rec: decodeSymbols ... bits₁ n = some (syms', rest')
-          -- hrest₄: br₄.toBits = bits₁, hrest_eq: rest = rest'
-          have hds_br₄ : Deflate.Spec.decodeSymbols
-              (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
-              br₄.toBits n = some (syms', rest) := by
-            rw [hrest₄, hrest_eq]; exact hds_rec
-          -- hlz : resolveLZ77 syms' (output.data.toList ++ copied) = some result
-          -- The copied list uses output.data.toList.length
           let newOutput := Zip.Native.Inflate.copyLoop output
             (output.size - ((Zip.Native.Inflate.distBase[dSym]!).toNat +
               dExtraVal.toUInt32.toNat))
             ((Zip.Native.Inflate.distBase[dSym]!).toNat + dExtraVal.toUInt32.toNat) 0
             ((Zip.Native.Inflate.lengthBase[sym_nat - 257]!).toNat +
               extraVal.toUInt32.toNat)
+          -- IH needs: decodeSymbols br₄.toBits = some (syms', rest)
+          have hds_br₄ : Deflate.Spec.decodeSymbols
+              (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
+              br₄.toBits = some (syms', rest) := by
+            rw [hrest₄, hrest_eq]; exact hds_rec
+          -- hlz' for IH
           set_option maxRecDepth 1024 in
           have hlz' : Deflate.Spec.resolveLZ77 syms' newOutput.data.toList =
               some result := by rw [hcopy_native]; exact hlz
-          exact ih br₄ newOutput syms' result hwf₄ hpos₄ hmax hds_br₄ hlz'
--/
+          -- Data preservation for recursive call
+          have hdata₄ : br₄.data.size ≤ dataSize := by
+            have : br₄.data.size = br.data.size := by rw [hd₄, hd₃, hd₂, hdata₁]
+            omega
+          have hple₄' : br₄.pos ≤ br₄.data.size := hple₄
+          obtain ⟨br', hgo, hbr', hwf', hpos'⟩ :=
+            decodeHuffman_complete litLengths distLengths litTree distTree
+              maxOutputSize br₄ newOutput syms' rest result
+              hwf₄ hpos₄ hlit hdist hvlit hvdist hlen_lit hlen_dist hmax
+              dataSize hple₄' hdata₄ hds_br₄ hlz'
+          exact ⟨br', hgo, hbr', hwf', hpos'⟩
+  termination_by br.toBits.length
 
 end Deflate.Correctness
+
