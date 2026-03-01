@@ -202,8 +202,7 @@ private theorem foldl_set_bounded (depths : List (Nat × Nat)) (acc : List Nat) 
     apply ih
     · intro l hl
       split at hl
-      · rename_i hlt
-        cases List.mem_or_eq_of_mem_set hl with
+      · cases List.mem_or_eq_of_mem_set hl with
         | inl hmem => exact hacc l hmem
         | inr heq => exact heq ▸ hdepths d (List.mem_cons_self ..)
       · exact hacc l hl
@@ -393,13 +392,7 @@ theorem computeCodeLengths_valid (freqs : List (Nat × Nat)) (n : Nat)
     split
     · simp
     · split
-      · simp only [assignLengths, List.foldl_cons, List.foldl_nil, List.length_replicate]
-        by_cases h : (List.filter (fun x => decide (x.2 > 0)) freqs).head!.1 < n
-        · simp only [h, ↓reduceIte, filter_ne_zero_replicate_set _ _ h,
-            List.foldl_cons, List.foldl_nil, Nat.zero_add]
-          exact Nat.pow_le_pow_right (by omega) (by omega)
-        · simp only [h, ↓reduceIte, filter_ne_zero_replicate, List.foldl_nil]
-          exact Nat.zero_le _
+      · exact (validLengths_single _ n maxBits hmb).2
       · -- Multi-symbol case: fixKraftList handles the Kraft inequality
         apply fixKraftList_kraft
         rw [assignLengths_length]
@@ -556,8 +549,6 @@ private theorem buildHuffmanTree_isNode (ts : List BuildTree) (h : ts.length ≥
   | t1 :: t2 :: rest =>
     simp only [buildHuffmanTree]
     let merged := BuildTree.node (t1.weight + t2.weight) t1 t2
-    have hlen : (insertByWeight merged rest).length =
-        rest.length + 1 := insertByWeight_length _ _
     by_cases hrest : rest = []
     · -- rest = [], so insertByWeight merged [] = [merged]
       subst hrest
@@ -613,7 +604,6 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
   split
   · -- Single nonzero freq: must be symbol s
     rename_i hlen1
-    -- Create nz-based copies of hypotheses
     have hs_nz' : p ∈ nz := hs_nz
     have hlen1' : nz.length = 1 := by rw [beq_iff_eq] at hlen1; exact hlen1
     have hhead : nz.head! = p := by
@@ -639,10 +629,9 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
     let tree := buildHuffmanTree sorted
     -- sorted has ≥ 2 elements
     have hnz_ge2 : nz.length ≥ 2 := by
-      have hs_nz' : p ∈ nz := hs_nz
-      have hne_empty : nz.length > 0 := List.length_pos_of_mem hs_nz'
       have hne1 : nz.length ≠ 1 := by
         intro h1; exact hlen_ne1 (by rw [h1]; decide)
+      have : nz.length > 0 := List.length_pos_of_mem hs_nz
       omega
     have hsorted_ge2 : sorted.length ≥ 2 := by
       simp only [sorted, List.length_mergeSort, List.length_map]; exact hnz_ge2
@@ -654,8 +643,8 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
           nz.map (fun (sym, freq) => BuildTree.leaf freq sym) := by
         simp only [List.mem_map]
         exact ⟨p, hs_nz, by rw [← hps]⟩
-      have hs_in_sorted : BuildTree.leaf p.2 s ∈ sorted := by
-        exact List.mem_mergeSort.mpr hs_in_mapped
+      have hs_in_sorted : BuildTree.leaf p.2 s ∈ sorted :=
+        List.mem_mergeSort.mpr hs_in_mapped
       -- s appears in tree's depths
       have hs_leaf : ∃ t ∈ sorted, ∃ w, t = BuildTree.leaf w s :=
         ⟨_, hs_in_sorted, p.2, rfl⟩
