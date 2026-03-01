@@ -25,15 +25,15 @@ theorem readBitsLSB_append (n : Nat) (bits suffix : List Bool)
   | zero => simp_all [readBitsLSB]
   | succ k ih =>
     cases bits with
-    | nil => simp [readBitsLSB] at h
+    | nil => simp only [readBitsLSB] at h; contradiction
     | cons b bs =>
       simp only [readBitsLSB, List.cons_append] at h ⊢
       cases hk : readBitsLSB k bs with
-      | none => simp [hk] at h
+      | none => simp only [hk] at h; contradiction
       | some p =>
         obtain ⟨v, rem⟩ := p
-        simp [hk] at h; obtain ⟨rfl, rfl⟩ := h
-        simp [ih bs v rem hk]
+        simp only [hk] at h; obtain ⟨rfl, rfl⟩ := h
+        rw [ih bs v rem hk]; rfl
 
 /-- Prefix-free condition for a swapped `allCodes` table. -/
 private theorem allCodes_swapped_prefix_free (lengths : List Nat) (maxBits : Nat)
@@ -48,7 +48,6 @@ private theorem allCodes_swapped_prefix_free (lengths : List Nat) (maxBits : Nat
   obtain ⟨⟨sym₂, cw₂'⟩, hmem₂, rfl, rfl⟩ := h₂
   have hne_sym : sym₁ ≠ sym₂ := by
     intro heq; subst heq
-    have hnd := Huffman.Spec.allCodes_nodup lengths maxBits
     have h₁' := hmem₁; have h₂' := hmem₂
     rw [Huffman.Spec.allCodes_mem_iff] at h₁' h₂'
     have := Option.some.inj (h₁'.2.symm.trans h₂'.2)
@@ -66,7 +65,7 @@ theorem decodeLitLen_append (litLengths distLengths : List Nat)
   simp only [decodeLitLen] at h ⊢
   -- Thread through the Huffman lit decode
   cases hld : Huffman.Spec.decode ((Huffman.Spec.allCodes litLengths).map fun (sym, cw) => (cw, sym)) bits with
-  | none => simp [hld] at h
+  | none => simp only [hld] at h; contradiction
   | some p =>
     obtain ⟨litSym, bits₁⟩ := p
     rw [hld] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -83,36 +82,36 @@ theorem decodeLitLen_append (litLengths distLengths : List Nat)
       · rw [if_neg heob] at h ⊢
         -- length/distance code — thread through do-notation
         cases hlb : lengthBase[litSym - 257]? with
-        | none => simp [hlb] at h
+        | none => simp only [hlb] at h; contradiction
         | some base =>
           simp only [hlb] at h ⊢
           cases hle : lengthExtra[litSym - 257]? with
-          | none => simp [hle] at h
+          | none => simp only [hle] at h; contradiction
           | some extra =>
             simp only [hle] at h ⊢
             cases hrb : readBitsLSB extra bits₁ with
-            | none => simp [hrb] at h
+            | none => simp only [hrb] at h; contradiction
             | some q =>
               obtain ⟨extraVal, bits₂⟩ := q
               simp only [hrb] at h ⊢
               rw [readBitsLSB_append extra bits₁ suffix extraVal bits₂ hrb]
               cases hdd : Huffman.Spec.decode ((Huffman.Spec.allCodes distLengths).map fun (s, cw) => (cw, s)) bits₂ with
-              | none => simp [hdd] at h
+              | none => simp only [hdd] at h; contradiction
               | some r =>
                 obtain ⟨dSym, bits₃⟩ := r
                 simp only [hdd] at h ⊢
                 rw [Huffman.Spec.decode_suffix _ bits₂ suffix dSym bits₃ hdd
                     (allCodes_swapped_prefix_free distLengths 15 hvd)]
                 cases hdb : distBase[dSym]? with
-                | none => simp [hdb] at h
+                | none => simp only [hdb] at h; contradiction
                 | some dBase =>
                   simp only [hdb] at h ⊢
                   cases hde : distExtra[dSym]? with
-                  | none => simp [hde] at h
+                  | none => simp only [hde] at h; contradiction
                   | some dExtra =>
                     simp only [hde] at h ⊢
                     cases hrbd : readBitsLSB dExtra bits₃ with
-                    | none => simp [hrbd] at h
+                    | none => simp only [hrbd] at h; contradiction
                     | some s =>
                       obtain ⟨dExtraVal, bits₄⟩ := s
                       simp only [hrbd] at h ⊢
@@ -130,7 +129,7 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
       some (syms, rest ++ suffix) := by
   unfold decodeSymbols at h ⊢
   cases hlit : decodeLitLen litLengths distLengths bits with
-  | none => simp [hlit] at h
+  | none => simp only [hlit] at h; contradiction
   | some p =>
     obtain ⟨sym, bits'⟩ := p
     rw [hlit] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -143,10 +142,10 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
       by_cases hlt : bits'.length < bits.length
       · simp only [dif_pos hlt] at h
         have hlt' : (bits' ++ suffix).length < (bits ++ suffix).length := by
-          simp [List.length_append]; omega
+          simp only [List.length_append]; omega
         rw [dif_pos hlt']
         cases hrec : decodeSymbols litLengths distLengths bits' with
-        | none => simp [hrec] at h
+        | none => simp only [hrec] at h; contradiction
         | some q =>
           obtain ⟨restSyms, bits''⟩ := q
           rw [hrec] at h; dsimp only [bind, Option.bind] at h
@@ -155,7 +154,7 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
           rw [ih]; dsimp only [bind, Option.bind]
           obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
       · simp only [dif_neg hlt] at h
-        exact absurd h (by simp)
+        contradiction
 termination_by bits.length
 
 /-- `readNBytes` is suffix-invariant. -/
@@ -168,7 +167,7 @@ private theorem readNBytes_append (n : Nat) (bits suffix : List Bool)
   | succ k ih =>
     unfold decodeStored.readNBytes at h ⊢
     cases hrb : readBitsLSB 8 bits with
-    | none => simp [hrb] at h
+    | none => simp only [hrb] at h; contradiction
     | some p =>
       obtain ⟨v, bits'⟩ := p
       rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -195,7 +194,7 @@ theorem decodeStored_append (bits suffix : List Bool)
   rw [alignToByte_append bits suffix hsuf]
   -- Thread readBitsLSB 16 for LEN
   cases hrl : readBitsLSB 16 (alignToByte bits) with
-  | none => simp [hrl] at h
+  | none => simp only [hrl] at h; contradiction
   | some p =>
     obtain ⟨len, bits₁⟩ := p
     rw [hrl] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -203,7 +202,7 @@ theorem decodeStored_append (bits suffix : List Bool)
     dsimp only [bind, Option.bind]
     -- Thread readBitsLSB 16 for NLEN
     cases hrn : readBitsLSB 16 bits₁ with
-    | none => simp [hrn] at h
+    | none => simp only [hrn] at h; contradiction
     | some q =>
       obtain ⟨nlen, bits₂⟩ := q
       rw [hrn] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -211,9 +210,9 @@ theorem decodeStored_append (bits suffix : List Bool)
       dsimp only [bind, Option.bind]
       -- Guard passes identically
       by_cases hg : (len ^^^ nlen == 0xFFFF) = true
-      · simp only [guard, hg, ↓reduceIte] at h ⊢
+      · simp only [guard, hg] at h ⊢
         exact readNBytes_append len bits₂ suffix [] bytes rest h
-      · simp only [guard, hg] at h; simp at h
+      · simp only [guard, hg] at h; contradiction
 
 /-- `readCLLengths` is suffix-invariant. -/
 private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
@@ -226,7 +225,7 @@ private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
   | succ k ih =>
     unfold Deflate.Spec.readCLLengths at h ⊢
     cases hrb : readBitsLSB 3 bits with
-    | none => simp [hrb] at h
+    | none => simp only [hrb] at h; contradiction
     | some p =>
       obtain ⟨v, bits'⟩ := p
       rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -259,7 +258,7 @@ private theorem decodeCLSymbols_append
     obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
   · rw [if_neg hge] at h ⊢
     cases hdec : Huffman.Spec.decode clTable bits with
-    | none => simp [hdec] at h
+    | none => simp only [hdec] at h; contradiction
     | some p =>
       obtain ⟨sym, bits'⟩ := p
       rw [hdec] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -267,15 +266,15 @@ private theorem decodeCLSymbols_append
       dsimp only [bind, Option.bind]
       by_cases hsym16 : sym < 16
       · rw [if_pos hsym16] at h ⊢
-        exact hrec _ _ _ _ (by simp; omega) h
+        exact hrec _ _ _ _ (by simp only [List.length_append, List.length_cons, List.length_nil]; omega) h
       · rw [if_neg hsym16] at h ⊢
         by_cases hsym16eq : (sym == 16) = true
         · rw [if_pos hsym16eq] at h ⊢
           by_cases hg : acc.length == 0
-          · simp [hg] at h
+          · simp only [if_pos hg] at h; contradiction
           · rw [if_neg hg] at h ⊢
             cases hrb : readBitsLSB 2 bits' with
-            | none => simp [hrb] at h
+            | none => simp only [hrb] at h; contradiction
             | some q =>
               obtain ⟨rep, bits''⟩ := q
               rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -283,13 +282,13 @@ private theorem decodeCLSymbols_append
               dsimp only [bind, Option.bind]
               by_cases hg2 : (acc ++ List.replicate (rep + 3) acc.getLast!).length ≤ totalCodes
               · simp only [hg2, ↓reduceIte] at h ⊢
-                exact hrec _ _ _ _ (by simp [List.length_append, List.length_replicate]; omega) h
-              · simp only [hg2, ↓reduceIte] at h; simp at h
+                exact hrec _ _ _ _ (by simp only [List.length_append, List.length_replicate]; omega) h
+              · simp only [hg2, ↓reduceIte] at h; contradiction
         · rw [if_neg hsym16eq] at h ⊢
           by_cases hsym17 : (sym == 17) = true
           · rw [if_pos hsym17] at h ⊢
             cases hrb : readBitsLSB 3 bits' with
-            | none => simp [hrb] at h
+            | none => simp only [hrb] at h; contradiction
             | some q =>
               obtain ⟨rep, bits''⟩ := q
               rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -297,13 +296,13 @@ private theorem decodeCLSymbols_append
               dsimp only [bind, Option.bind]
               by_cases hg : (acc ++ List.replicate (rep + 3) 0).length ≤ totalCodes
               · simp only [hg, ↓reduceIte] at h ⊢
-                exact hrec _ _ _ _ (by simp [List.length_append, List.length_replicate]; omega) h
-              · simp only [hg, ↓reduceIte] at h; simp at h
+                exact hrec _ _ _ _ (by simp only [List.length_append, List.length_replicate]; omega) h
+              · simp only [hg, ↓reduceIte] at h; contradiction
           · rw [if_neg hsym17] at h ⊢
             by_cases hsym18 : (sym == 18) = true
             · rw [if_pos hsym18] at h ⊢
               cases hrb : readBitsLSB 7 bits' with
-              | none => simp [hrb] at h
+              | none => simp only [hrb] at h; contradiction
               | some q =>
                 obtain ⟨rep, bits''⟩ := q
                 rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
@@ -311,10 +310,10 @@ private theorem decodeCLSymbols_append
                 dsimp only [bind, Option.bind]
                 by_cases hg : (acc ++ List.replicate (rep + 11) 0).length ≤ totalCodes
                 · simp only [hg, ↓reduceIte] at h ⊢
-                  exact hrec _ _ _ _ (by simp [List.length_append, List.length_replicate]; omega) h
-                · simp only [hg, ↓reduceIte] at h; simp at h
+                  exact hrec _ _ _ _ (by simp only [List.length_append, List.length_replicate]; omega) h
+                · simp only [hg, ↓reduceIte] at h; contradiction
             · rw [if_neg hsym18] at h ⊢
-              simp at h
+              contradiction
 termination_by totalCodes - acc.length
 decreasing_by all_goals assumption
 
@@ -467,14 +466,14 @@ theorem decode_go_suffix
   unfold decode.go at hgo ⊢
   simp only [bind, Option.bind] at hgo ⊢
   cases h1 : readBitsLSB 1 bits with
-  | none => simp [h1] at hgo
+  | none => simp only [h1] at hgo; contradiction
   | some p1 =>
     obtain ⟨bfinal, bits1⟩ := p1
     simp only [h1] at hgo
     rw [readBitsLSB_append 1 bits suffix bfinal bits1 h1]
     simp only
     cases h2 : readBitsLSB 2 bits1 with
-    | none => simp [h2] at hgo
+    | none => simp only [h2] at hgo; contradiction
     | some p2 =>
       obtain ⟨btype, bits2⟩ := p2
       simp only [h2] at hgo
@@ -484,7 +483,7 @@ theorem decode_go_suffix
       | 0, hgo =>
         -- Stored block
         cases hs : decodeStored bits2 with
-        | none => simp [hs] at hgo
+        | none => simp only [hs] at hgo; contradiction
         | some ps =>
           obtain ⟨bytes, bits3⟩ := ps
           simp only [hs] at hgo
@@ -500,7 +499,7 @@ theorem decode_go_suffix
       | 1, hgo =>
         -- Fixed Huffman
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
-        | none => simp [hd] at hgo
+        | none => simp only [hd] at hgo; contradiction
         | some pd =>
           obtain ⟨syms, bits3⟩ := pd
           simp only [hd] at hgo
@@ -508,7 +507,7 @@ theorem decode_go_suffix
               syms bits3 fixedLitLengths_valid fixedDistLengths_valid hd]
           simp only
           cases hr : resolveLZ77 syms acc with
-          | none => simp [hr] at hgo
+          | none => simp only [hr] at hgo; contradiction
           | some acc' =>
             simp only [hr] at hgo ⊢
             by_cases hf : bfinal == 1
@@ -521,7 +520,7 @@ theorem decode_go_suffix
       | 2, hgo =>
         -- Dynamic Huffman
         cases hdt : decodeDynamicTables bits2 with
-        | none => simp [hdt] at hgo
+        | none => simp only [hdt] at hgo; contradiction
         | some pdt =>
           obtain ⟨litLens, distLens, bits3⟩ := pdt
           simp only [hdt] at hgo
@@ -530,14 +529,14 @@ theorem decode_go_suffix
           have hvl := decodeDynamicTables_valid_lit bits2 litLens distLens bits3 hdt
           have hvd := decodeDynamicTables_valid_dist bits2 litLens distLens bits3 hdt
           cases hds : decodeSymbols litLens distLens bits3 with
-          | none => simp [hds] at hgo
+          | none => simp only [hds] at hgo; contradiction
           | some pds =>
             obtain ⟨syms, bits4⟩ := pds
             simp only [hds] at hgo
             rw [decodeSymbols_append litLens distLens bits3 suffix syms bits4 hvl hvd hds]
             simp only
             cases hr : resolveLZ77 syms acc with
-            | none => simp [hr] at hgo
+            | none => simp only [hr] at hgo; contradiction
             | some acc' =>
               simp only [hr] at hgo ⊢
               by_cases hf : bfinal == 1
@@ -547,7 +546,7 @@ theorem decode_go_suffix
                 · simp [hblen] at hgo
                   exact ⟨hblen, ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo⟩
                 · simp [hblen] at hgo
-      | n + 3, hgo => simp at hgo
+      | n + 3, hgo => contradiction
 
 /-! ## decode.go with remaining bits
 
@@ -576,19 +575,19 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
   unfold decode.go
   simp only [bind, Option.bind] at hgoR ⊢
   cases h1 : readBitsLSB 1 bits with
-  | none => simp [h1] at hgoR
+  | none => simp only [h1] at hgoR; contradiction
   | some p1 =>
     obtain ⟨bfinal, bits1⟩ := p1
     simp only [h1] at hgoR ⊢
     cases h2 : readBitsLSB 2 bits1 with
-    | none => simp [h2] at hgoR
+    | none => simp only [h2] at hgoR; contradiction
     | some p2 =>
       obtain ⟨btype, bits2⟩ := p2
       simp only [h2] at hgoR ⊢
       match btype, hgoR with
       | 0, hgoR =>
         cases hs : decodeStored bits2 with
-        | none => simp [hs] at hgoR
+        | none => simp only [hs] at hgoR; contradiction
         | some ps =>
           obtain ⟨bytes, bits3⟩ := ps
           simp only [hs] at hgoR ⊢
@@ -601,12 +600,12 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
             · simp [hblen] at hgoR
       | 1, hgoR =>
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
-        | none => simp [hd] at hgoR
+        | none => simp only [hd] at hgoR; contradiction
         | some pd =>
           obtain ⟨syms, bits3⟩ := pd
           simp only [hd] at hgoR ⊢
           cases hr : resolveLZ77 syms acc with
-          | none => simp [hr] at hgoR
+          | none => simp only [hr] at hgoR; contradiction
           | some acc' =>
             simp only [hr] at hgoR ⊢
             by_cases hf : bfinal == 1
@@ -618,17 +617,17 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
               · simp [hblen] at hgoR
       | 2, hgoR =>
         cases hdt : decodeDynamicTables bits2 with
-        | none => simp [hdt] at hgoR
+        | none => simp only [hdt] at hgoR; contradiction
         | some pdt =>
           obtain ⟨litLens, distLens, bits3⟩ := pdt
           simp only [hdt] at hgoR ⊢
           cases hds : decodeSymbols litLens distLens bits3 with
-          | none => simp [hds] at hgoR
+          | none => simp only [hds] at hgoR; contradiction
           | some pds =>
             obtain ⟨syms, bits4⟩ := pds
             simp only [hds] at hgoR ⊢
             cases hr : resolveLZ77 syms acc with
-            | none => simp [hr] at hgoR
+            | none => simp only [hr] at hgoR; contradiction
             | some acc' =>
               simp only [hr] at hgoR ⊢
               by_cases hf : bfinal == 1
@@ -638,7 +637,7 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
                 · simp [hblen] at hgoR ⊢
                   exact ih bits4.length (hlen ▸ hblen) bits4 acc' result rest rfl hgoR
                 · simp [hblen] at hgoR
-      | n + 3, hgoR => simp at hgoR
+      | n + 3, hgoR => contradiction
 
 /-- If `decode.go` succeeds, `decode.goR` also succeeds with some remaining bits. -/
 theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
@@ -657,19 +656,19 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
   unfold decode.goR
   simp only [bind, Option.bind] at hgo ⊢
   cases h1 : readBitsLSB 1 bits with
-  | none => simp [h1] at hgo
+  | none => simp only [h1] at hgo; contradiction
   | some p1 =>
     obtain ⟨bfinal, bits1⟩ := p1
     simp only [h1] at hgo ⊢
     cases h2 : readBitsLSB 2 bits1 with
-    | none => simp [h2] at hgo
+    | none => simp only [h2] at hgo; contradiction
     | some p2 =>
       obtain ⟨btype, bits2⟩ := p2
       simp only [h2] at hgo ⊢
       match btype, hgo with
       | 0, hgo =>
         cases hs : decodeStored bits2 with
-        | none => simp [hs] at hgo
+        | none => simp only [hs] at hgo; contradiction
         | some ps =>
           obtain ⟨bytes, bits3⟩ := ps
           simp only [hs] at hgo ⊢
@@ -682,12 +681,12 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
             · simp [hblen] at hgo
       | 1, hgo =>
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
-        | none => simp [hd] at hgo
+        | none => simp only [hd] at hgo; contradiction
         | some pd =>
           obtain ⟨syms, bits3⟩ := pd
           simp only [hd] at hgo ⊢
           cases hr : resolveLZ77 syms acc with
-          | none => simp [hr] at hgo
+          | none => simp only [hr] at hgo; contradiction
           | some acc' =>
             simp only [hr] at hgo ⊢
             by_cases hf : bfinal == 1
@@ -699,17 +698,17 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
               · simp [hblen] at hgo
       | 2, hgo =>
         cases hdt : decodeDynamicTables bits2 with
-        | none => simp [hdt] at hgo
+        | none => simp only [hdt] at hgo; contradiction
         | some pdt =>
           obtain ⟨litLens, distLens, bits3⟩ := pdt
           simp only [hdt] at hgo ⊢
           cases hds : decodeSymbols litLens distLens bits3 with
-          | none => simp [hds] at hgo
+          | none => simp only [hds] at hgo; contradiction
           | some pds =>
             obtain ⟨syms, bits4⟩ := pds
             simp only [hds] at hgo ⊢
             cases hr : resolveLZ77 syms acc with
-            | none => simp [hr] at hgo
+            | none => simp only [hr] at hgo; contradiction
             | some acc' =>
               simp only [hr] at hgo ⊢
               by_cases hf : bfinal == 1
@@ -719,6 +718,6 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
                 · simp [hblen] at hgo ⊢
                   exact ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo
                 · simp [hblen] at hgo
-      | n + 3, hgo => simp at hgo
+      | n + 3, hgo => contradiction
 
 end Deflate.Spec

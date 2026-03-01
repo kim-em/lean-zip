@@ -146,6 +146,21 @@ simp only []  -- reduces match (LZ77Token.literal b) with ...
 This replaces patterns like `simp only [htok]` where the named hypothesis
 was unused by simp — the match reduction happens without it.
 
+**Limitation**: `simp only []` does NOT reduce `Option.bind none f` to `none`
+or other monadic chain reductions. These require the full `@[simp]` database.
+For deeply nested `do`-notation / `Option.bind` chains, bare `simp [hyps]`
+is often the only practical approach — converting to `simp only` would require
+explicitly listing every `@[simp]` lemma used in the bind reduction chain.
+
+## `simp [hf]` vs `rw [if_pos/neg hf]` in Monadic Proofs
+
+In suffix/roundtrip proofs where the goal's condition differs syntactically
+from the hypothesis (e.g., goal has `(bits ++ suffix).length` but hypothesis
+proves about `bits.length`), `simp [hf]` can bridge the gap via
+`List.length_append` + arithmetic, while `rw [if_pos/neg hf]` and
+`rw [dif_pos/neg hf]` require exact syntactic match. Don't try to replace
+`simp [hf] at hgo ⊢` with `rw` in these cases — it will fail.
+
 ## `↓reduceIte` Decision Guide
 
 | Condition Form | `↓reduceIte` Works? | Fix |
