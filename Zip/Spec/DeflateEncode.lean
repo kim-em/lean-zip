@@ -227,7 +227,6 @@ private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
       split <;> simp_all [beq_iff_eq] <;> omega
     · rfl
 
-set_option linter.unusedSimpArgs false in
 /-- Properties of `findLengthCode.go`: the returned index is valid,
     extra bits count and value are consistent with the tables. -/
 private theorem findLengthCode_go_spec (len i idx extraN extraV : Nat)
@@ -240,7 +239,7 @@ private theorem findLengthCode_go_spec (len i idx extraN extraV : Nat)
   split at h
   · exact absurd h (by simp)
   · rename_i hi
-    simp only [letFun] at h
+    dsimp only at h
     split at h
     · rename_i hcond
       simp only [Option.some.injEq, Prod.mk.injEq] at h
@@ -257,7 +256,6 @@ private theorem lengthTable_gap :
     ∀ i : Fin 29, (lengthBase[i.val + 1]?.getD 259) - lengthBase[i.val]! ≤
       2 ^ lengthExtra[i.val]! := by decide
 
-set_option linter.unusedSimpArgs false in
 /-- `findLengthCode` returns a valid index with consistent extra bits. -/
 theorem findLengthCode_spec (len idx extraN extraV : Nat)
     (h : findLengthCode len = some (idx, extraN, extraV)) :
@@ -269,11 +267,10 @@ theorem findLengthCode_spec (len idx extraN extraV : Nat)
   have hidx : idx < 29 := by simp [lengthBase] at hgo; exact hgo.1
   refine ⟨hidx, hgo.2.2.1, hgo.2.1, ?_⟩
   have hgap := lengthTable_gap ⟨idx, hidx⟩
-  simp only [Fin.val_mk] at hgap
+  dsimp only at hgap
   rw [hgo.2.1]  -- extraN → lengthExtra[idx]!
   omega
 
-set_option linter.unusedSimpArgs false in
 /-- Properties of `findDistCode.go`: analogous to `findLengthCode_go_spec`. -/
 private theorem findDistCode_go_spec (dist i idx extraN extraV : Nat)
     (h : findDistCode.go dist i = some (idx, extraN, extraV)) :
@@ -285,7 +282,7 @@ private theorem findDistCode_go_spec (dist i idx extraN extraV : Nat)
   split at h
   · exact absurd h (by simp)
   · rename_i hi
-    simp only [letFun] at h
+    dsimp only at h
     split at h
     · rename_i hcond
       simp only [Option.some.injEq, Prod.mk.injEq] at h
@@ -301,7 +298,6 @@ private theorem distTable_gap :
     ∀ i : Fin 30, (distBase[i.val + 1]?.getD 32769) - distBase[i.val]! ≤
       2 ^ distExtra[i.val]! := by decide
 
-set_option linter.unusedSimpArgs false in
 /-- `findDistCode` returns a valid index with consistent extra bits. -/
 theorem findDistCode_spec (dist idx extraN extraV : Nat)
     (h : findDistCode dist = some (idx, extraN, extraV)) :
@@ -313,7 +309,7 @@ theorem findDistCode_spec (dist idx extraN extraV : Nat)
   have hidx : idx < 30 := by simp [distBase] at hgo; exact hgo.1
   refine ⟨hidx, hgo.2.2.1, hgo.2.1, ?_⟩
   have hgap := distTable_gap ⟨idx, hidx⟩
-  simp only [Fin.val_mk] at hgap
+  dsimp only at hgap
   rw [hgo.2.1]  -- extraN → distExtra[idx]!
   omega
 
@@ -345,7 +341,7 @@ theorem findDistCode_upper (dist idx extraN extraV : Nat)
   rw [getElem!_pos distBase (idx + 1) hsize]
   exact this
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- If Huffman decode gives a symbol < 256, `decodeLitLen` returns a literal. -/
 theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
     (bits rest : List Bool) (sym : Nat)
@@ -357,7 +353,7 @@ theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
   unfold decodeLitLen
   simp only [hdec, bind, Option.bind, if_pos hlt, pure, Pure.pure]
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- If Huffman decode gives symbol 256, `decodeLitLen` returns endOfBlock. -/
 theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
     (bits rest : List Bool)
@@ -369,7 +365,7 @@ theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
   simp only [hdec, bind, Option.bind, show ¬(256 : Nat) < 256 from by omega,
     if_false, show (256 : Nat) == 256 from rfl, if_true, pure, Pure.pure]
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- Encoding then decoding one LZ77 symbol recovers it. -/
 theorem encodeLitLen_decodeLitLen
     (litLengths distLengths : List Nat) (sym : LZ77Symbol)
@@ -628,9 +624,7 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   simp only [readBitsLSB_2_false_true]
   -- Now in btype = 2 (dynamic Huffman) branch
   simp only [List.nil_append]
-  rw [hheader]
-  set_option linter.unusedSimpArgs false in
-  simp only [bind, Option.bind]
+  rw [hheader]; dsimp only
   have hdec : decodeSymbols litLens distLens (symBits ++ rest)
       = some (syms, rest) :=
     encodeSymbols_decodeSymbols litLens distLens syms symBits rest
@@ -682,9 +676,7 @@ theorem encodeDynamic_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
   simp only [readBitsLSB_2_false_true]
   simp only [List.nil_append]
-  rw [hheader]
-  set_option linter.unusedSimpArgs false in
-  simp only [bind, Option.bind]
+  rw [hheader]; dsimp only
   have hdec : decodeSymbols litLens distLens (symBits ++ rest)
       = some (syms, rest) :=
     encodeSymbols_decodeSymbols litLens distLens syms symBits rest
