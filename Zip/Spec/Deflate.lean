@@ -1014,14 +1014,14 @@ theorem fixedLitLengths_length : fixedLitLengths.length = 288 := by
 theorem fixedDistLengths_length : fixedDistLengths.length = 32 := by
   simp only [fixedDistLengths, List.length_replicate]
 
-set_option maxRecDepth 2048 in
+set_option maxRecDepth 1024 in
 /-- Fixed literal/length code lengths form a valid Huffman code. -/
 theorem fixedLitLengths_valid : Huffman.Spec.ValidLengths fixedLitLengths 15 := by
   constructor
   · intro l hl
     simp only [fixedLitLengths, List.mem_append, List.mem_replicate] at hl
     omega
-  · decide
+  · decide_cbv
 
 /-- Fixed distance code lengths form a valid Huffman code.
     Uses maxBits = 15 to match the default in `codeFor`/`allCodes`. -/
