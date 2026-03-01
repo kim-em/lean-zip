@@ -5,12 +5,12 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C2 (fuel elimination) in progress
+- **Phase**: Phase 4+ complete; Track C2 (fuel elimination) nearly complete
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 0
-- **Sessions**: ~187 completed (Feb 19 – Mar 1)
-- **Source files**: 85 (44 spec, 8 native impl, 9 FFI/archive, 4 ZipForStd, 20 test)
-- **Merged PRs**: 150
+- **Sorries**: 2 (both `inflateLoop_complete` variants — completeness direction of the block loop)
+- **Sessions**: ~204 completed (Feb 19 – Mar 1)
+- **Source files**: 84 (43 spec, 8 native impl, 9 FFI/archive, 4 ZipForStd, 20 test)
+- **Merged PRs**: 167
 
 ## Milestones
 
@@ -31,7 +31,6 @@ Correctness proofs for the DEFLATE decompressor, completed over 25 sessions
 - Block-level decode correctness for all 3 block types (DecodeCorrect, DecodeComplete)
 - Dynamic Huffman tree decode correctness (DynamicTreesCorrect)
 - Stream-level inflate theorem (InflateCorrect)
-- Fuel independence of spec decode (DeflateFuelIndep)
 - `fromLengths` success implies `ValidLengths` (DynamicTreesCorrect)
 
 **Characterizing properties** (mathematical content independent of implementation):
@@ -97,11 +96,14 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     Inflate.inflate (deflateRaw data level) = .ok data
 ```
 Covers all compression levels (stored, fixed, lazy, dynamic). The 1 GiB
-size bound arises from fuel-based termination in the spec decode functions.
+size bound arises from fuel-based termination in the native `inflateLoop`
+(the last remaining fuel-based function — see Track C2).
 
-**Proof quality reviews** (40+ sessions): systematic code review across
+**Proof quality reviews** (45+ sessions): systematic code review across
 all spec files, reducing proof size, extracting reusable lemmas to
-ZipForStd, splitting large files for maintainability.
+ZipForStd, splitting large files for maintainability. Recent reviews:
+BitstreamCorrect (#336), EmitTokensCorrect (#340), DecodeCorrect (#362),
+DeflateSuffix (#365).
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -160,25 +162,37 @@ The per-path bounds:
 The unified bound is now 1 GiB (`1024 * 1024 * 1024`), up from 500MB
 previously and 5MB at the start of Track C1.
 
-### Track C2: Fuel Elimination (in progress, Mar 1)
+### Track C2: Fuel Elimination (nearly complete, Mar 1)
 Replacing fuel-based recursion with well-founded recursion to eliminate
 the data size bound entirely.
 
-**Completed:**
-- Fuel audit (#323) identifying all 6 fuel-using functions:
-  - Spec layer: `decodeCLSymbols`, `decodeSymbols`, `decode.go`/`decode.goR`
-  - Native layer: `inflateHuffmanBlock`, `inflateLoop`
-- Conversion order established: leaf functions first, then dependents
-- `decodeCLSymbols` converted to WF recursion (#328) using
-  `termination_by totalCodes - acc.length`. This required converting
-  `do`/`guard` patterns to explicit `if` conditions and updating 6
-  downstream proof files.
+**Completed — 5 of 6 functions converted:**
+- Fuel audit (#323) identifying all 6 fuel-using functions
+- Spec `decodeCLSymbols` → WF (#328): `termination_by totalCodes - acc.length`
+- Native `decodeCLSymbols` → WF (#332): same termination measure
+- Spec `decodeSymbols` → WF (#337): `termination_by` on remaining bits
+- Native `decodeHuffman.go` → WF (#341): `termination_by dataSize * 8 - br.bitPos`
+- Spec `decode.go`/`decode.goR` → WF (#344): required deleting DeflateFuelIndep.lean
+  (fuel independence became moot once spec functions are WF) and updating 11
+  downstream proof files
+- `inflateLoop_correct` proved (#358): native→spec block loop correspondence,
+  composing block-level correctness with 7 new bit-length invariant lemmas
+- `decodeDynamicTrees_complete` proved (#361): composed from sub-completeness
+  theorems for each component
+- Proof repairs across 6 PRs (#345, #350, #351, #356, #357, #362): WF
+  conversions broke ~15 proofs; all repaired except 2 completeness sorries
+
+**Sorry count trajectory:** 0 → ~15 (during WF conversions) → 2 (after repairs).
+The rise was expected: changing function signatures cascades through proof files.
 
 **Remaining:**
-- `decodeSymbols` — Huffman symbol decode loop (fuel-based)
-- `decode.go` / `decode.goR` — block loop (fuel-based)
-- `inflateHuffmanBlock`, `inflateLoop` — native layer (fuel-based)
-- Proof updates across DeflateFuelIndep, DeflateSuffix, and roundtrip chain
+- Native `inflateLoop` — still fuel-based (block dispatch loop)
+- 2 sorries: `inflateLoop_complete` and `inflateLoop_complete_ext` in the
+  completeness direction (spec succeeds → native succeeds). The correctness
+  direction (`inflateLoop_correct`: native succeeds → spec succeeds) is proved.
+
+**New skill:** `lean-wf-recursion` (#349) capturing WF function unfolding rules,
+`f.induct` functional induction patterns, and fuel-to-WF migration checklist.
 
 ### Track D: Benchmarking (started, Feb 25)
 Initial benchmark infrastructure comparing native Lean compression vs
@@ -195,8 +209,8 @@ tests pass on inputs up to 256KB.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~187 sessions: majority implementation, ~86 review, ~3 self-improvement,
-  remainder PR maintenance and planning
-- 150 merged PRs (Feb 19 – Mar 1)
+- ~204 sessions: majority implementation, ~90 review, ~4 self-improvement,
+  remainder PR maintenance, planning, and summarization
+- 167 merged PRs (Feb 19 – Mar 1)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
