@@ -267,7 +267,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                       Deflate.Spec.fixedDistLengths_valid)
                     Deflate.Correctness.fixedLitLengths_size
                     Deflate.Correctness.fixedDistLengths_size
-                    hacc_le 1000000000000000000 hds_bridge hspec_lz
+                    hacc_le br₂.data.size hds_bridge hspec_lz
                 have hdh : Inflate.decodeHuffman br₂ output fixedLit fixedDist
                     maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
                   simp only [Inflate.decodeHuffman]; exact hhf_nat
@@ -370,7 +370,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                         litTree distTree maxOutputSize br₃ output
                         syms bits₄ acc' hwf₃ hpos₃ hflit_dyn hfdist_dyn
                         hvlit_bridge hvdist_bridge hsize_lit' hsize_dist'
-                        hacc_le 1000000000000000000 hds_bridge hspec_lz
+                        hacc_le br₃.data.size hds_bridge hspec_lz
                     have hdh : Inflate.decodeHuffman br₃ output litTree distTree
                         maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
                       simp only [Inflate.decodeHuffman]; exact hhf_nat

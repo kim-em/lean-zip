@@ -404,7 +404,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     (Correctness.fixedLitLengths_eq ▸ Deflate.Spec.fixedLitLengths_valid)
                     (Correctness.fixedDistLengths_eq ▸ Deflate.Spec.fixedDistLengths_valid)
                     Correctness.fixedLitLengths_size Correctness.fixedDistLengths_size
-                    hacc_le 1000000000000000000 hds_bridge hspec_lz
+                    hacc_le br₂.data.size hds_bridge hspec_lz
                 -- Wrap decodeHuffman.go into decodeHuffman
                 have hdh : Zip.Native.Inflate.decodeHuffman br₂ output fixedLit fixedDist
                     maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by
@@ -487,7 +487,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                         hwf₃ hpos₃ hflit_dyn hfdist_dyn
                         hvlit_bridge hvdist_bridge
                         hsize_lit' hsize_dist'
-                        hacc_le 1000000000000000000 hds_bridge hspec_lz
+                        hacc_le br₃.data.size hds_bridge hspec_lz
                     -- Wrap into decodeHuffman
                     have hdh : Zip.Native.Inflate.decodeHuffman br₃ output litTree distTree
                         maxOutputSize = .ok (⟨⟨acc'⟩⟩, br') := by

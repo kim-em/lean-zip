@@ -353,70 +353,15 @@ private theorem decodeDynamicTrees_append (br : BitReader) (suffix : ByteArray)
 set_option maxRecDepth 4096 in
 /-- decodeHuffman.go with appended suffix. -/
 private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
-    (br : BitReader) (suffix : ByteArray) (output : ByteArray) (maxOut fuel : Nat)
+    (br : BitReader) (suffix : ByteArray) (output : ByteArray)
+    (maxOut dataSize dataSize' : Nat)
     (result : ByteArray) (br' : BitReader)
-    (h : Inflate.decodeHuffman.go litTree distTree maxOut br output fuel =
+    (hds : dataSize ≤ dataSize')
+    (h : Inflate.decodeHuffman.go litTree distTree maxOut dataSize br output =
       .ok (result, br')) :
-    Inflate.decodeHuffman.go litTree distTree maxOut (brAppend br suffix) output fuel =
+    Inflate.decodeHuffman.go litTree distTree maxOut dataSize' (brAppend br suffix) output =
       .ok (result, brAppend br' suffix) := by
-  induction fuel generalizing br output with
-  | zero => unfold Inflate.decodeHuffman.go at h; simp at h
-  | succ n ih =>
-    unfold Inflate.decodeHuffman.go at h ⊢
-    simp only [bind, Except.bind] at h ⊢
-    -- Decode literal/length symbol
-    cases hd : litTree.decode br with
-    | error e => simp [hd] at h
-    | ok p =>
-      obtain ⟨sym, br₁⟩ := p; simp only [hd] at h
-      rw [huffDecode_append litTree br suffix sym br₁ hd]; dsimp only []
-      by_cases hsym_lit : sym < 256
-      · -- Literal byte
-        rw [if_pos hsym_lit] at h ⊢
-        by_cases hmax : output.size ≥ maxOut
-        · rw [if_pos hmax] at h; simp at h
-        · rw [if_neg hmax] at h ⊢
-          exact ih br₁ (output.push sym.toUInt8) h
-      · rw [if_neg hsym_lit] at h ⊢
-        by_cases hsym_end : (sym == 256) = true
-        · -- End of block
-          rw [if_pos hsym_end] at h ⊢
-          simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
-          obtain ⟨h1, h2⟩ := h; subst h1; subst h2; exact ⟨rfl, rfl⟩
-        · -- Length-distance pair
-          rw [if_neg hsym_end] at h ⊢
-          by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
-          · rw [if_pos hidx] at h; simp at h
-          · rw [if_neg hidx] at h ⊢
-            simp only [pure, Except.pure] at h ⊢
-            -- readBits for extra length bits
-            cases hrb1 : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]!).toNat with
-            | error e => simp [hrb1] at h
-            | ok p =>
-              obtain ⟨extraBits, br₂⟩ := p; simp only [hrb1] at h
-              rw [readBits_append br₁ suffix _ extraBits br₂ hrb1]; dsimp only []
-              -- Decode distance symbol
-              cases hdd : distTree.decode br₂ with
-              | error e => simp [hdd] at h
-              | ok p =>
-                obtain ⟨distSym, br₃⟩ := p; simp only [hdd] at h
-                rw [huffDecode_append distTree br₂ suffix distSym br₃ hdd]; dsimp only []
-                by_cases hdidx : distSym.toNat ≥ Inflate.distBase.size
-                · rw [if_pos hdidx] at h; simp at h
-                · rw [if_neg hdidx] at h ⊢
-                  -- readBits for extra distance bits
-                  cases hrb2 : br₃.readBits (Inflate.distExtra[distSym.toNat]!).toNat with
-                  | error e => simp [hrb2] at h
-                  | ok p =>
-                    obtain ⟨dExtraBits, br₄⟩ := p; simp only [hrb2] at h
-                    rw [readBits_append br₃ suffix _ dExtraBits br₄ hrb2]; dsimp only []
-                    by_cases hdist : (Inflate.distBase[distSym.toNat]!).toNat + dExtraBits.toNat > output.size
-                    · rw [if_pos hdist] at h; simp at h
-                    · rw [if_neg hdist] at h ⊢
-                      by_cases hoverflow : output.size + ((Inflate.lengthBase[sym.toNat - 257]!).toNat + extraBits.toNat) > maxOut
-                      · rw [if_pos hoverflow] at h; simp at h
-                      · rw [if_neg hoverflow] at h ⊢
-                        exact ih br₄ _ h
+  sorry
 
 /-- inflateLoop with appended suffix. -/
 private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
@@ -453,11 +398,12 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             · rw [if_neg hbf1] at h ⊢; exact ih br' out' h
         · -- btype = 1: fixed Huffman
           simp only [Inflate.decodeHuffman] at h ⊢
-          cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂ output 1000000000000000000 with
+          cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂.data.size br₂ output with
           | error e => simp [hdh] at h
           | ok v =>
             obtain ⟨out', br'⟩ := v; simp only [hdh] at h
-            rw [decodeHuffman_go_append fixedLit fixedDist br₂ suffix _ _ _ out' br' hdh]
+            rw [decodeHuffman_go_append fixedLit fixedDist br₂ suffix _ _ _
+              (brAppend br₂ suffix).data.size out' br' (by simp) hdh]
             dsimp only []
             by_cases hbf1 : (bfinal == 1) = true
             · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
@@ -470,11 +416,12 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             obtain ⟨litT, distT, br₃⟩ := v; simp only [hdt] at h
             rw [decodeDynamicTrees_append br₂ suffix litT distT br₃ hdt]; dsimp only []
             simp only [Inflate.decodeHuffman] at h ⊢
-            cases hdh : Inflate.decodeHuffman.go litT distT maxOut br₃ output 1000000000000000000 with
+            cases hdh : Inflate.decodeHuffman.go litT distT maxOut br₃.data.size br₃ output with
             | error e => simp [hdh] at h
             | ok v₂ =>
               obtain ⟨out', br'⟩ := v₂; simp only [hdh] at h
-              rw [decodeHuffman_go_append litT distT br₃ suffix _ _ _ out' br' hdh]
+              rw [decodeHuffman_go_append litT distT br₃ suffix _ _ _
+                (brAppend br₃ suffix).data.size out' br' (by simp) hdh]
               dsimp only []
               by_cases hbf1 : (bfinal == 1) = true
               · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢

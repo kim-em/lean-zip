@@ -99,6 +99,9 @@ where
 
 end HuffTree
 
+/-- The effective bit position of a BitReader, used as a termination measure. -/
+def BitReader.bitPos (br : BitReader) : Nat := br.pos * 8 + br.bitOff
+
 namespace Inflate
 
 -- RFC 1951 §3.2.5: Fixed Huffman code lengths for lit/length (0–287)
@@ -249,48 +252,61 @@ protected def decodeStored (br : BitReader) (output : ByteArray)
   return (output ++ bytes, br)
 
 /-- Decode a Huffman-coded block (fixed or dynamic).
-    Uses a fuel parameter to guarantee termination. -/
+    Uses well-founded recursion on the remaining bits in the stream. -/
 protected def decodeHuffman (br : BitReader) (output : ByteArray)
     (litTree distTree : HuffTree) (maxOutputSize : Nat)
-    (fuel : Nat := 1000000000000000000) : Except String (ByteArray × BitReader) :=
-  go br output fuel
+    : Except String (ByteArray × BitReader) :=
+  go br.data.size br output
 where
-  go (br : BitReader) (output : ByteArray) : Nat → Except String (ByteArray × BitReader)
-    | 0 => .error "Inflate: decompression exceeded fuel limit"
-    | fuel + 1 => do
-      let (sym, br) ← litTree.decode br
-      if sym < 256 then
-        if output.size ≥ maxOutputSize then
-          throw "Inflate: output exceeds maximum size"
-        go br (output.push sym.toUInt8) fuel
-      else if sym == 256 then
-        .ok (output, br)
+  go (dataSize : Nat) (br : BitReader) (output : ByteArray)
+      : Except String (ByteArray × BitReader) := do
+    let (sym, br₁) ← litTree.decode br
+    if sym < 256 then
+      if output.size ≥ maxOutputSize then
+        throw "Inflate: output exceeds maximum size"
+      -- Guard: bit position must advance for WF termination
+      if _h₁ : br₁.bitPos ≤ br.bitPos then
+        throw "Inflate: no progress in Huffman decode"
+      else if _h₂ : dataSize * 8 < br₁.bitPos then
+        throw "Inflate: bit position out of range"
       else
-        -- Length code 257–285
-        let idx := sym.toNat - 257
-        if idx ≥ lengthBase.size then
-          throw s!"Inflate: invalid length code {sym}"
-        let base := lengthBase[idx]!
-        let extra := lengthExtra[idx]!
-        let (extraBits, br) ← br.readBits extra.toNat
-        let length := base.toNat + extraBits.toNat
-        -- Distance code
-        let (distSym, br) ← distTree.decode br
-        let dIdx := distSym.toNat
-        if dIdx ≥ distBase.size then
-          throw s!"Inflate: invalid distance code {distSym}"
-        let dBase := distBase[dIdx]!
-        let dExtra := distExtra[dIdx]!
-        let (dExtraBits, br) ← br.readBits dExtra.toNat
-        let distance := dBase.toNat + dExtraBits.toNat
-        -- Copy from output buffer (LZ77 back-reference)
-        if distance > output.size then
-          throw s!"Inflate: distance {distance} exceeds output size {output.size}"
-        if output.size + length > maxOutputSize then
-          throw "Inflate: output exceeds maximum size"
-        let start := output.size - distance
-        let out := copyLoop output start distance 0 length
-        go br out fuel
+        go dataSize br₁ (output.push sym.toUInt8)
+    else if sym == 256 then
+      .ok (output, br₁)
+    else
+      -- Length code 257–285
+      let idx := sym.toNat - 257
+      if idx ≥ lengthBase.size then
+        throw s!"Inflate: invalid length code {sym}"
+      let base := lengthBase[idx]!
+      let extra := lengthExtra[idx]!
+      let (extraBits, br₂) ← br₁.readBits extra.toNat
+      let length := base.toNat + extraBits.toNat
+      -- Distance code
+      let (distSym, br₃) ← distTree.decode br₂
+      let dIdx := distSym.toNat
+      if dIdx ≥ distBase.size then
+        throw s!"Inflate: invalid distance code {distSym}"
+      let dBase := distBase[dIdx]!
+      let dExtra := distExtra[dIdx]!
+      let (dExtraBits, br₄) ← br₃.readBits dExtra.toNat
+      let distance := dBase.toNat + dExtraBits.toNat
+      -- Copy from output buffer (LZ77 back-reference)
+      if distance > output.size then
+        throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+      if output.size + length > maxOutputSize then
+        throw "Inflate: output exceeds maximum size"
+      let start := output.size - distance
+      let out := copyLoop output start distance 0 length
+      -- Guard: bit position must advance for WF termination
+      if _h₁ : br₄.bitPos ≤ br.bitPos then
+        throw "Inflate: no progress in Huffman decode"
+      else if _h₂ : dataSize * 8 < br₄.bitPos then
+        throw "Inflate: bit position out of range"
+      else
+        go dataSize br₄ out
+  termination_by dataSize * 8 - br.bitPos
+  decreasing_by all_goals omega
 
 /-- Block loop for DEFLATE decompression. Decodes blocks until a final block
     is seen or fuel is exhausted. Defined as explicit recursion for proof
