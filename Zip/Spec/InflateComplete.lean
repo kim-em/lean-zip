@@ -187,14 +187,13 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
               Deflate.Correctness.decodeCLSymbols_complete clTree clArr br₄
                 (.replicate (hlit_v + 257 + (hdist_v + 1)) 0) 0
                 (hlit_v + 257 + (hdist_v + 1))
-                (hlit_v + 257 + (hdist_v + 1) + 1)
                 codeLengths bits₅ hwf₄ hpos₄ hft (by rw [hcl_sz]; simp [UInt16.size])
-                (by omega) (by simp) (by omega) hspec_dcl_native
+                (by omega) (by simp) hspec_dcl_native
             -- Bridge native extract to spec take/drop
             have hcl_res_sz : codeLengths'.size =
                 hlit_v + 257 + (hdist_v + 1) := by
               have ⟨_, _, hsz⟩ := Correctness.decodeCLSymbols_inv clTree br₄ _ 0 _
-                _ codeLengths' br₅ hwf₄ hpos₄ hdcl_nat
+                codeLengths' br₅ hwf₄ hpos₄ hdcl_nat
               simpa using hsz
             have hlit_bridge :
                 (codeLengths'.extract 0 (hlit_v + 257)).toList.map UInt8.toNat = litLens := by

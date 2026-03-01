@@ -394,71 +394,80 @@ theorem readCLCodeLengths_inv (br br' : BitReader)
 
 /-- Combined: decodeCLSymbols preserves data, hpos, and pos ≤ data.size. -/
 theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
-    (codeLengths codeLengths' : Array UInt8) (idx totalCodes fuel : Nat)
-    (h : Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+    (codeLengths codeLengths' : Array UInt8) (idx totalCodes : Nat)
+    (h : Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes =
       .ok (codeLengths', br'))
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hple : br.pos ≤ br.data.size) :
     br'.data = br.data ∧
     (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     br'.pos ≤ br'.data.size := by
-  induction fuel generalizing br codeLengths idx with
-  | zero => simp [Inflate.decodeCLSymbols] at h
-  | succ n ih =>
-    unfold Inflate.decodeCLSymbols at h
+  have hrec : ∀ (idx' : Nat) (br_i : BitReader) (cl : Array UInt8),
+      totalCodes - idx' < totalCodes - idx →
+      Inflate.decodeCLSymbols clTree br_i cl idx' totalCodes = .ok (codeLengths', br') →
+      (br_i.bitOff = 0 ∨ br_i.pos < br_i.data.size) →
+      br_i.pos ≤ br_i.data.size →
+      br'.data = br_i.data ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+      br'.pos ≤ br'.data.size :=
+    fun idx' br_i cl hlt h' hpos' hple' =>
+      decodeCLSymbols_inv clTree br_i br' cl codeLengths' idx' totalCodes h' hpos' hple'
+  unfold Inflate.decodeCLSymbols at h
+  split at h
+  · -- idx ≥ totalCodes: return
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
+  · -- idx < totalCodes: do block
+    rename_i hlt
+    dsimp only [Bind.bind, Except.bind] at h
     split at h
-    · -- idx ≥ totalCodes: return
-      simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
-    · -- idx < totalCodes: do block
-      dsimp only [Bind.bind, Except.bind] at h
+    · simp at h  -- decode error
+    · rename_i v hdec_eq
+      simp only [pure, Except.pure] at h
+      obtain ⟨sym, br₁⟩ := v; simp only [] at hdec_eq h
+      have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv clTree br br₁ sym hdec_eq hpos hple
       split at h
-      · simp at h  -- decode error
-      · rename_i v hdec_eq
-        simp only [pure, Except.pure] at h
-        obtain ⟨sym, br₁⟩ := v; simp only [] at hdec_eq h
-        have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv clTree br br₁ sym hdec_eq hpos hple
-        split at h
-        · -- sym < 16: literal code length
-          have ⟨hd', hp', hl'⟩ := ih br₁ _ _ h hpos₁ hple₁
-          exact ⟨hd'.trans hd₁, hp', hl'⟩
-        · split at h
-          · -- sym == 16: repeat previous
+      · -- sym < 16: literal code length
+        have ⟨hd', hp', hl'⟩ := hrec _ br₁ _ (by omega) h hpos₁ hple₁
+        exact ⟨hd'.trans hd₁, hp', hl'⟩
+      · split at h
+        · -- sym == 16: repeat previous
+          split at h
+          · simp at h  -- idx == 0 error
+          · -- readBits 2
             split at h
-            · simp at h  -- idx == 0 error
-            · -- readBits 2
+            · simp at h  -- readBits error
+            · rename_i v₁ hrb_eq
+              obtain ⟨rep, br₂⟩ := v₁; simp only [] at hrb_eq h
+              have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 rep hrb_eq hpos₁ hple₁
               split at h
-              · simp at h  -- readBits error
-              · rename_i v₁ hrb_eq
-                obtain ⟨rep, br₂⟩ := v₁; simp only [] at hrb_eq h
-                have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 rep hrb_eq hpos₁ hple₁
-                split at h
-                · simp at h  -- repeat exceeds total
-                · have ⟨hd', hp', hl'⟩ := ih br₂ _ _ h hpos₂ hple₂
-                  exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
+              · simp at h  -- repeat exceeds total
+              · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
+                exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
+        · split at h
+          · -- sym == 17: zero-fill short
+            split at h
+            · simp at h  -- readBits error
+            · rename_i v₂ hrb_eq
+              obtain ⟨rep, br₂⟩ := v₂; simp only [] at hrb_eq h
+              have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 3 rep hrb_eq hpos₁ hple₁
+              split at h
+              · simp at h  -- repeat exceeds total
+              · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
+                exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
           · split at h
-            · -- sym == 17: zero-fill short
+            · -- sym == 18: zero-fill long
               split at h
               · simp at h  -- readBits error
-              · rename_i v₂ hrb_eq
-                obtain ⟨rep, br₂⟩ := v₂; simp only [] at hrb_eq h
-                have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 3 rep hrb_eq hpos₁ hple₁
+              · rename_i v₃ hrb_eq
+                obtain ⟨rep, br₂⟩ := v₃; simp only [] at hrb_eq h
+                have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 7 rep hrb_eq hpos₁ hple₁
                 split at h
                 · simp at h  -- repeat exceeds total
-                · have ⟨hd', hp', hl'⟩ := ih br₂ _ _ h hpos₂ hple₂
+                · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
                   exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
-            · split at h
-              · -- sym == 18: zero-fill long
-                split at h
-                · simp at h  -- readBits error
-                · rename_i v₃ hrb_eq
-                  obtain ⟨rep, br₂⟩ := v₃; simp only [] at hrb_eq h
-                  have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 7 rep hrb_eq hpos₁ hple₁
-                  split at h
-                  · simp at h  -- repeat exceeds total
-                  · have ⟨hd', hp', hl'⟩ := ih br₂ _ _ h hpos₂ hple₂
-                    exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
-              · simp at h  -- invalid symbol
+            · simp at h  -- invalid symbol
+termination_by totalCodes - idx
 
 /-- Combined: decodeDynamicTrees preserves data, hpos, and pos ≤ data.size. -/
 theorem decodeDynamicTrees_inv (br br' : BitReader)
@@ -505,7 +514,7 @@ theorem decodeDynamicTrees_inv (br br' : BitReader)
             · rename_i v₅ hdcl_eq
               obtain ⟨codeLengths, br₅⟩ := v₅; simp only [] at hdcl_eq h
               have ⟨hd₅, hpos₅, hple₅⟩ := decodeCLSymbols_inv clTree br₄ br₅
-                _ codeLengths _ _ _ hdcl_eq hpos₄ hple₄
+                _ codeLengths _ _ hdcl_eq hpos₄ hple₄
               -- HuffTree.fromLengths (litTree) — pure
               split at h
               · simp at h

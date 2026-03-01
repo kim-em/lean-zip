@@ -211,71 +211,76 @@ termination_by numCodeLen - i
 
 /-- decodeCLSymbols with appended suffix. -/
 private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suffix : ByteArray)
-    (codeLengths : Array UInt8) (idx totalCodes fuel : Nat)
+    (codeLengths : Array UInt8) (idx totalCodes : Nat)
     (result : Array UInt8) (br' : BitReader)
-    (h : Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
+    (h : Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes =
       .ok (result, br')) :
-    Inflate.decodeCLSymbols clTree (brAppend br suffix) codeLengths idx totalCodes fuel =
+    Inflate.decodeCLSymbols clTree (brAppend br suffix) codeLengths idx totalCodes =
       .ok (result, brAppend br' suffix) := by
-  induction fuel generalizing br codeLengths idx with
-  | zero => unfold Inflate.decodeCLSymbols at h; simp at h
-  | succ n ih =>
-    unfold Inflate.decodeCLSymbols at h ⊢
-    by_cases hge : idx ≥ totalCodes
-    · rw [if_pos hge] at h ⊢
-      simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
-      obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
-    · rw [if_neg hge] at h ⊢
-      simp only [bind, Except.bind] at h ⊢
-      cases hd : clTree.decode br with
-      | error e => simp [hd] at h
-      | ok p =>
-        obtain ⟨sym, br₁⟩ := p; simp only [hd] at h
-        rw [huffDecode_append clTree br suffix sym br₁ hd]; dsimp only []
-        by_cases hs16 : sym < 16
-        · rw [if_pos hs16] at h ⊢; exact ih br₁ _ (idx + 1) h
-        · rw [if_neg hs16] at h ⊢
-          by_cases hs16eq : (sym == 16) = true
-          · rw [if_pos hs16eq] at h ⊢
-            by_cases hidx0 : (idx == 0) = true
-            · rw [if_pos hidx0] at h ⊢; simp at h
-            · rw [if_neg hidx0] at h ⊢
-              simp only [pure, Except.pure] at h ⊢
-              cases hrb : br₁.readBits 2 with
+  have hrec : ∀ (idx' : Nat) (br_i : BitReader) (cl : Array UInt8),
+      totalCodes - idx' < totalCodes - idx →
+      Inflate.decodeCLSymbols clTree br_i cl idx' totalCodes = .ok (result, br') →
+      Inflate.decodeCLSymbols clTree (brAppend br_i suffix) cl idx' totalCodes =
+        .ok (result, brAppend br' suffix) :=
+    fun idx' br_i cl hlt h' =>
+      decodeCLSymbols_append clTree br_i suffix cl idx' totalCodes result br' h'
+  unfold Inflate.decodeCLSymbols at h ⊢
+  by_cases hge : idx ≥ totalCodes
+  · rw [if_pos hge] at h ⊢
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
+    obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
+  · rw [if_neg hge] at h ⊢
+    simp only [bind, Except.bind] at h ⊢
+    cases hd : clTree.decode br with
+    | error e => simp [hd] at h
+    | ok p =>
+      obtain ⟨sym, br₁⟩ := p; simp only [hd] at h
+      rw [huffDecode_append clTree br suffix sym br₁ hd]; dsimp only []
+      by_cases hs16 : sym < 16
+      · rw [if_pos hs16] at h ⊢; exact hrec _ br₁ _ (by omega) h
+      · rw [if_neg hs16] at h ⊢
+        by_cases hs16eq : (sym == 16) = true
+        · rw [if_pos hs16eq] at h ⊢
+          by_cases hidx0 : (idx == 0) = true
+          · rw [if_pos hidx0] at h ⊢; simp at h
+          · rw [if_neg hidx0] at h ⊢
+            simp only [pure, Except.pure] at h ⊢
+            cases hrb : br₁.readBits 2 with
+            | error e => simp [hrb] at h
+            | ok p =>
+              obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
+              rw [readBits_append br₁ suffix 2 rep br₂ hrb]; dsimp only []
+              by_cases hgt : idx + (rep.toNat + 3) > totalCodes
+              · rw [if_pos hgt] at h ⊢; simp at h
+              · rw [if_neg hgt] at h ⊢
+                exact hrec _ br₂ _ (by omega) h
+        · rw [if_neg hs16eq] at h ⊢
+          by_cases hs17 : (sym == 17) = true
+          · rw [if_pos hs17] at h ⊢
+            cases hrb : br₁.readBits 3 with
+            | error e => simp [hrb] at h
+            | ok p =>
+              obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
+              rw [readBits_append br₁ suffix 3 rep br₂ hrb]; dsimp only []
+              by_cases hgt : idx + (rep.toNat + 3) > totalCodes
+              · rw [if_pos hgt] at h ⊢; simp at h
+              · rw [if_neg hgt] at h ⊢
+                simp only [pure, Except.pure] at h ⊢
+                exact hrec _ br₂ _ (by omega) h
+          · rw [if_neg hs17] at h ⊢
+            by_cases hs18 : (sym == 18) = true
+            · rw [if_pos hs18] at h ⊢
+              cases hrb : br₁.readBits 7 with
               | error e => simp [hrb] at h
               | ok p =>
                 obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
-                rw [readBits_append br₁ suffix 2 rep br₂ hrb]; dsimp only []
-                by_cases hgt : idx + (rep.toNat + 3) > totalCodes
+                rw [readBits_append br₁ suffix 7 rep br₂ hrb]; dsimp only []
+                by_cases hgt : idx + (rep.toNat + 11) > totalCodes
                 · rw [if_pos hgt] at h ⊢; simp at h
                 · rw [if_neg hgt] at h ⊢
-                  exact ih br₂ _ _ h
-          · rw [if_neg hs16eq] at h ⊢
-            by_cases hs17 : (sym == 17) = true
-            · rw [if_pos hs17] at h ⊢
-              cases hrb : br₁.readBits 3 with
-              | error e => simp [hrb] at h
-              | ok p =>
-                obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
-                rw [readBits_append br₁ suffix 3 rep br₂ hrb]; dsimp only []
-                by_cases hgt : idx + (rep.toNat + 3) > totalCodes
-                · rw [if_pos hgt] at h ⊢; simp at h
-                · rw [if_neg hgt] at h ⊢
-                  simp only [pure, Except.pure] at h ⊢
-                  exact ih br₂ _ _ h
-            · rw [if_neg hs17] at h ⊢
-              by_cases hs18 : (sym == 18) = true
-              · rw [if_pos hs18] at h ⊢
-                cases hrb : br₁.readBits 7 with
-                | error e => simp [hrb] at h
-                | ok p =>
-                  obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
-                  rw [readBits_append br₁ suffix 7 rep br₂ hrb]; dsimp only []
-                  by_cases hgt : idx + (rep.toNat + 11) > totalCodes
-                  · rw [if_pos hgt] at h ⊢; simp at h
-                  · rw [if_neg hgt] at h ⊢
-                    exact ih br₂ _ _ h
-              · rw [if_neg hs18] at h ⊢; simp at h
+                  exact hrec _ br₂ _ (by omega) h
+            · rw [if_neg hs18] at h ⊢; simp at h
+termination_by totalCodes - idx
 
 /-- decodeDynamicTrees with appended suffix. -/
 private theorem decodeDynamicTrees_append (br : BitReader) (suffix : ByteArray)
@@ -319,15 +324,13 @@ private theorem decodeDynamicTrees_append (br : BitReader) (suffix : ByteArray)
             -- decodeCLSymbols
             cases hcls_eq : Inflate.decodeCLSymbols clTree br₄
                 (.replicate (hlit.toNat + 257 + (hdist.toNat + 1)) 0) 0
-                (hlit.toNat + 257 + (hdist.toNat + 1))
-                (hlit.toNat + 257 + (hdist.toNat + 1) + 1) with
+                (hlit.toNat + 257 + (hdist.toNat + 1)) with
             | error e => simp [hcls_eq] at h
             | ok p =>
               obtain ⟨codeLengths, br₅⟩ := p; simp only [hcls_eq] at h
               rw [decodeCLSymbols_append clTree br₄ suffix
                   (.replicate (hlit.toNat + 257 + (hdist.toNat + 1)) 0) 0
                   (hlit.toNat + 257 + (hdist.toNat + 1))
-                  (hlit.toNat + 257 + (hdist.toNat + 1) + 1)
                   codeLengths br₅ hcls_eq]; dsimp only []
               -- fromLengths litLenLengths (pure)
               cases hlt_eq : HuffTree.fromLengths (codeLengths.extract 0 (hlit.toNat + 257)) with

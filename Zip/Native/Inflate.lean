@@ -157,6 +157,17 @@ def fillEntries (arr : Array UInt8) (idx count bound : Nat) (val : UInt8) :
   else fillEntries (arr.set! idx val) (idx + 1) (count - 1) bound val
 termination_by count
 
+private theorem fillEntries_snd_eq (arr : Array UInt8) (idx count bound : Nat) (val : UInt8)
+    (h : idx + count ≤ bound) :
+    (fillEntries arr idx count bound val).snd = idx + count := by
+  induction count generalizing arr idx with
+  | zero => simp [fillEntries]
+  | succ n ih =>
+    unfold fillEntries
+    simp only [Nat.succ_ne_zero, false_or, show ¬(idx ≥ bound) from by omega,
+               ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih (arr.set! idx val) (idx + 1) (by omega)]; omega
+
 /-- Read code length code lengths: 3 bits each at permuted positions.
     Defined as explicit recursion for proof tractability. -/
 def readCLCodeLengths (br : BitReader) (clLengths : Array UInt8)
@@ -174,37 +185,36 @@ termination_by numCodeLen - i
     Defined as explicit recursion for proof tractability. -/
 def decodeCLSymbols (clTree : HuffTree) (br : BitReader)
     (codeLengths : Array UInt8) (idx totalCodes : Nat)
-    (fuel : Nat) : Except String (Array UInt8 × BitReader) :=
-  match fuel with
-  | 0 => .error "Inflate: dynamic tree decode exceeded fuel"
-  | fuel + 1 =>
-    if idx ≥ totalCodes then .ok (codeLengths, br)
-    else do
-      let (sym, br) ← clTree.decode br
-      if sym < 16 then
-        decodeCLSymbols clTree br (codeLengths.set! idx sym.toUInt8) (idx + 1) totalCodes fuel
-      else if sym == 16 then
-        if idx == 0 then throw "Inflate: repeat code at start"
-        let (rep, br) ← br.readBits 2
-        let prev := codeLengths[idx - 1]!
-        let count := rep.toNat + 3
-        if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
-        let (codeLengths, idx) := fillEntries codeLengths idx count totalCodes prev
-        decodeCLSymbols clTree br codeLengths idx totalCodes fuel
-      else if sym == 17 then
-        let (rep, br) ← br.readBits 3
-        let count := rep.toNat + 3
-        if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
-        let (codeLengths, idx) := fillEntries codeLengths idx count totalCodes 0
-        decodeCLSymbols clTree br codeLengths idx totalCodes fuel
-      else if sym == 18 then
-        let (rep, br) ← br.readBits 7
-        let count := rep.toNat + 11
-        if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
-        let (codeLengths, idx) := fillEntries codeLengths idx count totalCodes 0
-        decodeCLSymbols clTree br codeLengths idx totalCodes fuel
-      else
-        throw s!"Inflate: invalid code length symbol {sym}"
+    : Except String (Array UInt8 × BitReader) :=
+  if idx ≥ totalCodes then .ok (codeLengths, br)
+  else do
+    let (sym, br) ← clTree.decode br
+    if sym < 16 then
+      decodeCLSymbols clTree br (codeLengths.set! idx sym.toUInt8) (idx + 1) totalCodes
+    else if sym == 16 then
+      if idx == 0 then throw "Inflate: repeat code at start"
+      let (rep, br) ← br.readBits 2
+      let prev := codeLengths[idx - 1]!
+      let count := rep.toNat + 3
+      if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
+      decodeCLSymbols clTree br (fillEntries codeLengths idx count totalCodes prev).1
+        (idx + count) totalCodes
+    else if sym == 17 then
+      let (rep, br) ← br.readBits 3
+      let count := rep.toNat + 3
+      if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
+      decodeCLSymbols clTree br (fillEntries codeLengths idx count totalCodes 0).1
+        (idx + count) totalCodes
+    else if sym == 18 then
+      let (rep, br) ← br.readBits 7
+      let count := rep.toNat + 11
+      if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
+      decodeCLSymbols clTree br (fillEntries codeLengths idx count totalCodes 0).1
+        (idx + count) totalCodes
+    else
+      throw s!"Inflate: invalid code length symbol {sym}"
+termination_by totalCodes - idx
+decreasing_by all_goals omega
 
 /-- Decode dynamic Huffman trees from the bitstream (RFC 1951 §3.2.7). -/
 def decodeDynamicTrees (br : BitReader) :
@@ -219,7 +229,7 @@ def decodeDynamicTrees (br : BitReader) :
   let clTree ← HuffTree.fromLengths clLengths 7
   let totalCodes := numLitLen + numDist
   let (codeLengths, br) ← decodeCLSymbols clTree br (.replicate totalCodes 0)
-    0 totalCodes (totalCodes + 1)
+    0 totalCodes
   let litLenLengths := codeLengths.extract 0 numLitLen
   let distLengths := codeLengths.extract numLitLen totalCodes
   let litTree ← HuffTree.fromLengths litLenLengths
