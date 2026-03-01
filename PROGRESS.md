@@ -5,12 +5,12 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Tracks C1 and D in progress
+- **Phase**: Phase 4+ complete; Track C2 (fuel elimination) in progress
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 1 (stored block case in `deflateRaw_goR_pad`, DeflateRoundtrip.lean)
-- **Sessions**: ~173 completed (Feb 19–26)
+- **Sorries**: 0
+- **Sessions**: ~187 completed (Feb 19 – Mar 1)
 - **Source files**: 85 (44 spec, 8 native impl, 9 FFI/archive, 4 ZipForStd, 20 test)
-- **Merged PRs**: 138
+- **Merged PRs**: 150
 
 ## Milestones
 
@@ -93,12 +93,11 @@ for the core DEFLATE roundtrip.
 **Capstone theorem** (DeflateRoundtrip.lean):
 ```lean
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 500000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     Inflate.inflate (deflateRaw data level) = .ok data
 ```
-Covers all compression levels (stored, fixed, lazy, dynamic). The 500MB
-size bound is the tightest across all compression levels, arising from
-the lazy LZ77 path (levels 2–4).
+Covers all compression levels (stored, fixed, lazy, dynamic). The 1 GiB
+size bound arises from fuel-based termination in the spec decode functions.
 
 **Proof quality reviews** (40+ sessions): systematic code review across
 all spec files, reducing proof size, extracting reusable lemmas to
@@ -114,12 +113,12 @@ inverses.
 ```lean
 -- GzipCorrect.lean
 theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 500000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     GzipDecode.decompressSingle (GzipEncode.compress data level) = .ok data
 
 -- ZlibCorrect.lean
 theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 500000000) :
+    (hsize : data.size < 1024 * 1024 * 1024) :
     ZlibDecode.decompressSingle (ZlibEncode.compress data level) = .ok data
 ```
 
@@ -149,16 +148,37 @@ split into 4 focused modules: `BitReaderInvariant.lean` (522 lines),
 `InflateLoopBounds.lean` (614 lines), `InflateRawSuffix.lean` (501 lines),
 and `GzipCorrect.lean` (286 lines).
 
-### Track C1: Size Bound Improvement (complete, Feb 25)
-Raised the size bound on all roundtrip theorems from 5MB to 500MB — a
-100x improvement. The per-path bounds:
+### Track C1: Size Bound Improvement (complete, Feb 25–26)
+Raised the size bound on all roundtrip theorems from 500MB to 1 GiB.
+PR #305 raised fuel limits throughout the spec decode functions.
+The per-path bounds:
 - Stored: 655MB
-- Fixed Huffman (greedy): 1GB
-- Lazy LZ77 (levels 2–4): 500MB (most restrictive, sets the unified bound)
+- Fixed Huffman (greedy): 1GiB
+- Lazy LZ77 (levels 2–4): 500MB (most restrictive at previous bound)
 - Dynamic Huffman: 500MB
 
-Track C2 (eliminating fuel entirely via well-founded recursion) remains
-future work.
+The unified bound is now 1 GiB (`1024 * 1024 * 1024`), up from 500MB
+previously and 5MB at the start of Track C1.
+
+### Track C2: Fuel Elimination (in progress, Mar 1)
+Replacing fuel-based recursion with well-founded recursion to eliminate
+the data size bound entirely.
+
+**Completed:**
+- Fuel audit (#323) identifying all 6 fuel-using functions:
+  - Spec layer: `decodeCLSymbols`, `decodeSymbols`, `decode.go`/`decode.goR`
+  - Native layer: `inflateHuffmanBlock`, `inflateLoop`
+- Conversion order established: leaf functions first, then dependents
+- `decodeCLSymbols` converted to WF recursion (#328) using
+  `termination_by totalCodes - acc.length`. This required converting
+  `do`/`guard` patterns to explicit `if` conditions and updating 6
+  downstream proof files.
+
+**Remaining:**
+- `decodeSymbols` — Huffman symbol decode loop (fuel-based)
+- `decode.go` / `decode.goR` — block loop (fuel-based)
+- `inflateHuffmanBlock`, `inflateLoop` — native layer (fuel-based)
+- Proof updates across DeflateFuelIndep, DeflateSuffix, and roundtrip chain
 
 ### Track D: Benchmarking (started, Feb 25)
 Initial benchmark infrastructure comparing native Lean compression vs
@@ -171,25 +191,12 @@ non-tail recursion.
 with proved equivalence (`lz77GreedyIter_eq_lz77Greedy`). Conformance
 tests pass on inputs up to 256KB.
 
-### Remaining sorry (1 total)
-
-| Sorry | File | What it proves |
-|-------|------|---------------|
-| `deflateRaw_goR_pad` (stored case) | DeflateRoundtrip.lean | `decode.goR` returns short remaining for stored blocks |
-
-This sorry is in a helper theorem (`deflateRaw_goR_pad`) used by the
-`inflateRaw_endPos_eq` proof chain. It does NOT affect the core roundtrip
-theorems (`inflate_deflateRaw`, `gzip_decompressSingle_compress`,
-`zlib_decompressSingle_compress`), which are fully proved for levels 1–9.
-The stored block path (level 0) in the top-level theorems uses a separate
-proof path that does not depend on `goR`.
-
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~173 sessions: majority implementation, ~82 review, ~3 self-improvement,
+- ~187 sessions: majority implementation, ~86 review, ~3 self-improvement,
   remainder PR maintenance and planning
-- 138 merged PRs (Feb 19–26)
+- 150 merged PRs (Feb 19 – Mar 1)
 - 100% module docstring coverage across all source files
-- Full linter compliance (23 warnings eliminated)
+- Full linter compliance (all warnings eliminated)
