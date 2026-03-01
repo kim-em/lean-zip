@@ -376,4 +376,220 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
               simp at hspec
 termination_by totalCodes - idx
 
+/-- If the spec's `decodeDynamicTables` succeeds, the native
+    `decodeDynamicTrees` also succeeds with corresponding Huffman trees. -/
+protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
+    (litLens distLens : List Nat) (bits' : List Bool)
+    (hwf : br.bitOff < 8)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hspec : Deflate.Spec.decodeDynamicTables br.toBits = some (litLens, distLens, bits')) :
+    ∃ (litTree distTree : Zip.Native.HuffTree) (br' : Zip.Native.BitReader),
+      Zip.Native.Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br') ∧
+      br'.toBits = bits' ∧
+      br'.bitOff < 8 ∧
+      (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
+      Huffman.Spec.ValidLengths litLens 15 ∧
+      Huffman.Spec.ValidLengths distLens 15 ∧
+      ∃ (litLengths distLengths : Array UInt8),
+        Zip.Native.HuffTree.fromLengths litLengths = .ok litTree ∧
+        Zip.Native.HuffTree.fromLengths distLengths = .ok distTree ∧
+        litLengths.toList.map UInt8.toNat = litLens ∧
+        distLengths.toList.map UInt8.toNat = distLens ∧
+        litLengths.size ≤ UInt16.size ∧
+        distLengths.size ≤ UInt16.size := by
+  -- Unfold the spec function using `unfold` to avoid normalizing List.replicate
+  unfold Deflate.Spec.decodeDynamicTables at hspec
+  simp only [bind, Option.bind] at hspec
+  -- Step 1: Read HLIT (5 bits)
+  cases hrb1_spec : Deflate.Spec.readBitsLSB 5 br.toBits with
+  | none => rw [hrb1_spec] at hspec; simp at hspec
+  | some p1 =>
+    obtain ⟨hlit_v, bits₁⟩ := p1
+    rw [hrb1_spec] at hspec; simp only [] at hspec
+    have hval1 := Deflate.Spec.readBitsLSB_bound hrb1_spec
+    have ⟨br₁, hrb1_nat, hrest₁, hwf₁, hpos₁⟩ :=
+      readBits_complete br 5 hlit_v bits₁ hwf hpos (by omega) hval1 hrb1_spec
+    -- Step 2: Read HDIST (5 bits)
+    cases hrb2_spec : Deflate.Spec.readBitsLSB 5 bits₁ with
+    | none => rw [hrb2_spec] at hspec; simp at hspec
+    | some p2 =>
+      obtain ⟨hdist_v, bits₂⟩ := p2
+      rw [hrb2_spec] at hspec; simp only [] at hspec
+      have hval2 := Deflate.Spec.readBitsLSB_bound hrb2_spec
+      have ⟨br₂, hrb2_nat, hrest₂, hwf₂, hpos₂⟩ :=
+        readBits_complete br₁ 5 hdist_v bits₂ hwf₁ hpos₁ (by omega) hval2
+          (by rw [hrest₁]; exact hrb2_spec)
+      -- Step 3: Read HCLEN (4 bits)
+      cases hrb3_spec : Deflate.Spec.readBitsLSB 4 bits₂ with
+      | none => rw [hrb3_spec] at hspec; simp at hspec
+      | some p3 =>
+        obtain ⟨hclen_v, bits₃⟩ := p3
+        rw [hrb3_spec] at hspec; simp only [] at hspec
+        have hval3 := Deflate.Spec.readBitsLSB_bound hrb3_spec
+        have ⟨br₃, hrb3_nat, hrest₃, hwf₃, hpos₃⟩ :=
+          readBits_complete br₂ 4 hclen_v bits₃ hwf₂ hpos₂ (by omega) hval3
+            (by rw [hrest₂]; exact hrb3_spec)
+        -- Step 4: Read CL code lengths
+        cases hrcl_spec : Deflate.Spec.readCLLengths (hclen_v + 4) 0
+            (List.replicate 19 0) bits₃ with
+        | none => rw [hrcl_spec] at hspec; simp at hspec
+        | some p4 =>
+          obtain ⟨clLengths, bits₄⟩ := p4
+          rw [hrcl_spec] at hspec; simp only [] at hspec
+          -- Use readCLCodeLengths_complete
+          have hsize_repl : (Array.replicate 19 (0 : UInt8)).size = 19 := by simp
+          have hrcl_rewrite : Deflate.Spec.readCLLengths (hclen_v + 4 - 0) 0
+              ((Array.replicate 19 (0 : UInt8)).toList.map UInt8.toNat) br₃.toBits =
+              some (clLengths, bits₄) := by
+            simp only [Nat.sub_zero, Array.toList_replicate, List.map_replicate,
+              show (0 : UInt8).toNat = 0 from rfl]
+            rw [hrest₃]; exact hrcl_spec
+          have ⟨br₄, clArr, hrcl_nat, hcl_eq, hrest₄, hwf₄, hpos₄⟩ :=
+            Correctness.readCLCodeLengths_complete br₃ (.replicate 19 0) 0
+              (hclen_v + 4) clLengths bits₄ hwf₃ hpos₃ hsize_repl hrcl_rewrite
+          have hcl_sz : clArr.size = 19 := by
+            simpa using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl_nat
+          -- Step 5: ValidLengths guard for CL tree
+          have hcl_valid : Huffman.Spec.ValidLengths clLengths 7 := by
+            by_cases h : Huffman.Spec.ValidLengths clLengths 7
+            · exact h
+            · simp [guard, h] at hspec
+          simp only [guard, hcl_valid, ↓reduceIte, pure, Pure.pure] at hspec
+          -- Step 6: Build CL Huffman tree (fromLengths_complete)
+          have hcl_vl : Huffman.Spec.ValidLengths (clArr.toList.map UInt8.toNat) 7 := by
+            rw [hcl_eq]; exact hcl_valid
+          have ⟨clTree, hft⟩ := fromLengths_complete clArr 7 hcl_vl
+          -- Step 7: Decode CL symbols
+          cases hdcl_spec : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
+              ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
+              (hlit_v + 257 + (hdist_v + 1))
+              [] bits₄ with
+          | none => rw [hdcl_spec] at hspec; simp at hspec
+          | some p6 =>
+            obtain ⟨codeLengths_list, bits₅⟩ := p6
+            rw [hdcl_spec] at hspec; simp only [] at hspec
+            -- Step 8: Extract length, litVL, distVL guards
+            have hlen_eq : codeLengths_list.length = hlit_v + 257 + (hdist_v + 1) := by
+              by_cases h : codeLengths_list.length = hlit_v + 257 + (hdist_v + 1)
+              · exact h
+              · simp [beq_iff_eq, h] at hspec
+            have hlit_valid : Huffman.Spec.ValidLengths
+                (codeLengths_list.take (hlit_v + 257)) 15 := by
+              by_cases h : Huffman.Spec.ValidLengths
+                  (codeLengths_list.take (hlit_v + 257)) 15
+              · exact h
+              · simp [hlen_eq, h] at hspec
+            have hdist_valid : Huffman.Spec.ValidLengths
+                (codeLengths_list.drop (hlit_v + 257)) 15 := by
+              by_cases h : Huffman.Spec.ValidLengths
+                  (codeLengths_list.drop (hlit_v + 257)) 15
+              · exact h
+              · simp [hlen_eq, hlit_valid, h] at hspec
+            simp only [beq_iff_eq, hlen_eq, ↓reduceIte, hlit_valid,
+              hdist_valid] at hspec
+            -- Extract the final result
+            obtain ⟨rfl, rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hspec)
+            -- Use decodeCLSymbols_complete
+            have hcl_eq_spec : clLengths =
+                clArr.toList.map UInt8.toNat := hcl_eq.symm
+            -- Rewrite the spec decodeCLSymbols hypothesis
+            have hdcl_rewrite : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
+                ((Huffman.Spec.allCodes (clArr.toList.map UInt8.toNat) 7).map
+                  fun (sym, cw) => (cw, sym))
+                (hlit_v + 257 + (hdist_v + 1))
+                (((Array.replicate (hlit_v + 257 + (hdist_v + 1)) (0 : UInt8)).extract 0 0).toList.map UInt8.toNat)
+                br₄.toBits =
+                some (codeLengths_list, bits') := by
+              simp only [Array.toList_extract, List.extract, Nat.sub_self,
+                List.take_zero, List.drop_zero, List.map_nil]
+              rw [← hcl_eq_spec, hrest₄]; exact hdcl_spec
+            have hsize_cl : clArr.size ≤ UInt16.size := by
+              rw [hcl_sz]; simp [UInt16.size]
+            have ⟨clResults, br₅, hdcl_nat, hcl_res_eq, hrest₅, hwf₅, hpos₅⟩ :=
+              Correctness.decodeCLSymbols_complete clTree clArr br₄
+                (.replicate (hlit_v + 257 + (hdist_v + 1)) 0) 0
+                (hlit_v + 257 + (hdist_v + 1))
+                codeLengths_list bits' hwf₄ hpos₄ hft hsize_cl
+                (by omega) (by simp) hdcl_rewrite
+            -- Size of clResults
+            have ⟨_, _, hcl_res_sz⟩ :=
+              Correctness.decodeCLSymbols_inv clTree br₄ _
+                0 _ clResults br₅ hwf₄ hpos₄ hdcl_nat
+            simp only [Array.size_replicate] at hcl_res_sz
+            -- Extract lit and dist lengths as arrays
+            let litArr := clResults.extract 0 (hlit_v + 257)
+            let distArr := clResults.extract (hlit_v + 257)
+              (hlit_v + 257 + (hdist_v + 1))
+            -- Establish full array correspondence (extract of full size = whole array)
+            have hfull : clResults.toList.map UInt8.toNat = codeLengths_list := by
+              have h := hcl_res_eq
+              simp only [Array.toList_extract, List.extract,
+                Nat.sub_zero, List.drop_zero] at h
+              rwa [List.take_of_length_le
+                (by rw [Array.length_toList, hcl_res_sz]; omega)] at h
+            -- Relate mapped array extract to list take/drop
+            have hlit_arr_eq : litArr.toList.map UInt8.toNat =
+                codeLengths_list.take (hlit_v + 257) := by
+              show (clResults.extract 0 (hlit_v + 257)).toList.map UInt8.toNat = _
+              rw [Array.toList_extract, ← hfull]
+              simp [List.extract, List.map_take]
+            have hdist_arr_eq : distArr.toList.map UInt8.toNat =
+                codeLengths_list.drop (hlit_v + 257) := by
+              show (clResults.extract (hlit_v + 257)
+                (hlit_v + 257 + (hdist_v + 1))).toList.map UInt8.toNat = _
+              rw [Array.toList_extract, ← hfull]
+              simp only [List.extract]
+              rw [List.map_take, List.map_drop]
+              exact List.take_of_length_le
+                (by rw [List.length_drop, List.length_map, Array.length_toList,
+                    hcl_res_sz]; omega)
+            -- ValidLengths for lit and dist arrays
+            have hlit_vl : Huffman.Spec.ValidLengths
+                (litArr.toList.map UInt8.toNat) 15 := by
+              rw [hlit_arr_eq]; exact hlit_valid
+            have hdist_vl : Huffman.Spec.ValidLengths
+                (distArr.toList.map UInt8.toNat) 15 := by
+              rw [hdist_arr_eq]; exact hdist_valid
+            -- Build lit and dist trees
+            have ⟨litTree, hflit⟩ := fromLengths_complete litArr 15 hlit_vl
+            have ⟨distTree, hfdist⟩ := fromLengths_complete distArr 15 hdist_vl
+            -- Assemble the result
+            refine ⟨litTree, distTree, br₅, ?_, hrest₅, hwf₅, hpos₅,
+                    ?_, ?_, litArr, distArr, hflit, hfdist,
+                    hlit_arr_eq, hdist_arr_eq, ?_, ?_⟩
+            · -- Native decodeDynamicTrees succeeds
+              simp only [Zip.Native.Inflate.decodeDynamicTrees, bind, Except.bind]
+              have hlit_toNat : hlit_v.toUInt32.toNat = hlit_v :=
+                Nat.mod_eq_of_lt (by omega)
+              have hdist_toNat : hdist_v.toUInt32.toNat = hdist_v :=
+                Nat.mod_eq_of_lt (by omega)
+              have hclen_toNat : hclen_v.toUInt32.toNat = hclen_v :=
+                Nat.mod_eq_of_lt (by omega)
+              rw [hrb1_nat]; simp only []
+              rw [hrb2_nat]; simp only []
+              rw [hrb3_nat]; simp only []
+              simp only [hclen_toNat, hlit_toNat, hdist_toNat]
+              rw [hrcl_nat]; simp only []
+              rw [hft]; simp only []
+              rw [hdcl_nat]; simp only []
+              rw [show Zip.Native.HuffTree.fromLengths
+                    (clResults.extract 0 (hlit_v + 257)) 15 = .ok litTree from hflit]
+              simp only []
+              rw [show Zip.Native.HuffTree.fromLengths
+                    (clResults.extract (hlit_v + 257) (hlit_v + 257 + (hdist_v + 1))) 15
+                    = .ok distTree from hfdist]; rfl
+            · exact hlit_valid
+            · exact hdist_valid
+            · -- litArr.size ≤ UInt16.size
+              show (clResults.extract 0 (hlit_v + 257)).size ≤ UInt16.size
+              simp only [Array.size_extract, hcl_res_sz, UInt16.size]
+              have := Deflate.Spec.readBitsLSB_bound hrb1_spec
+              omega
+            · -- distArr.size ≤ UInt16.size
+              show (clResults.extract (hlit_v + 257)
+                (hlit_v + 257 + (hdist_v + 1))).size ≤ UInt16.size
+              simp only [Array.size_extract, hcl_res_sz, UInt16.size]
+              have := Deflate.Spec.readBitsLSB_bound hrb2_spec
+              omega
+
 end Deflate.Correctness
