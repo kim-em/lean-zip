@@ -210,6 +210,40 @@ have h_result : ∃ bytes, operation = .ok (bytes, finalState) := by
 obtain ⟨bytes, h_result⟩ := h_result
 ```
 
+## `simp only` for Option Case Splits with `nomatch`
+
+When case-splitting on monadic `Option` operations and a hypothesis `hgo`
+tracks the overall computation result (e.g., `decode.go bits acc = some result`):
+
+```lean
+-- None branch (contradiction): substitute then close
+| none => simp only [hX] at hgo; exact nomatch hgo
+
+-- Some branch (continue): just substitute, don't inject yet
+| some p =>
+  obtain ⟨val, rest⟩ := p
+  simp only [hX] at hgo
+
+-- True branch of by_cases (extract equality): inject manually
+· simp only [hf] at hgo; obtain rfl := Option.some.inj hgo
+  exact some_prefix_lemma
+
+-- False branch of by_cases (continue or contradiction):
+· simp only [hf] at hgo
+  -- If no more alternatives: exact nomatch hgo
+  -- If more case splits needed: continue
+```
+
+**Pitfalls** (each of these cost a build cycle to debug):
+- `↓reduceIte` is **unnecessary** with `simp only [hf]` — iota reduction
+  handles `if true/false then A else B` automatically after hypothesis
+  substitution. The linter flags it as unused.
+- `hgo ▸ X` **fails** after `simp only` because `hgo` is
+  `some X = some result`, not `X = result`. Use
+  `obtain rfl := Option.some.inj hgo` instead.
+- `Option.some.injEq` as a **simp arg** is flagged unused by the linter.
+  Use `Option.some.inj` explicitly (not via simp).
+
 ## `dsimp` vs `simp` After `unfold` on Recursive Functions
 
 **CRITICAL**: After `unfold F at h` on a recursive function, do NOT use

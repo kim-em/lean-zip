@@ -15,8 +15,8 @@ The specification is structured in layers:
 3. **Block structure**: stored, fixed Huffman, and dynamic Huffman blocks
 4. **Stream decode**: sequence of blocks terminated by a final block
 
-The key correctness theorem (to be proved in future sessions) is that the
-`Zip.Native.Inflate.inflate` implementation agrees with this specification.
+The key correctness theorem `inflate_correct` (in `Zip.Spec.InflateCorrect`)
+proves that `Zip.Native.Inflate.inflate` agrees with this specification.
 -/
 
 namespace Deflate.Spec
@@ -53,7 +53,7 @@ def alignToByte (bits : List Bool) : List Bool :=
 /-- Each byte converts to exactly 8 bits. -/
 protected theorem bytesToBits.byteToBits_length (b : UInt8) :
     (bytesToBits.byteToBits b).length = 8 := by
-  simp [bytesToBits.byteToBits]
+  simp only [bytesToBits.byteToBits, List.length_ofFn]
 
 /-- `bytesToBits` produces exactly `data.size * 8` bits. -/
 theorem bytesToBits_length (data : ByteArray) :
@@ -63,7 +63,7 @@ theorem bytesToBits_length (data : ByteArray) :
       (l.flatMap bytesToBits.byteToBits).length = l.length * 8 by
     rw [this, Array.length_toList]
   intro l; induction l with
-  | nil => simp
+  | nil => simp only [List.flatMap_nil, List.length_nil, Nat.zero_mul]
   | cons b bs ih =>
     simp only [List.flatMap_cons, List.length_append, List.length_cons,
                bytesToBits.byteToBits_length, ih]; omega
@@ -75,17 +75,18 @@ theorem readBitsLSB_some_length {n : Nat} {bits : List Bool}
     rest.length + n = bits.length := by
   induction n generalizing bits val with
   | zero =>
-    unfold readBitsLSB at h; simp at h; obtain ⟨-, rfl⟩ := h; simp
+    unfold readBitsLSB at h
+    obtain ⟨-, rfl⟩ := h; omega
   | succ k ih =>
     cases bits with
-    | nil => simp [readBitsLSB] at h
+    | nil => simp only [readBitsLSB] at h; exact nomatch h
     | cons b bs =>
       simp only [readBitsLSB] at h
       cases hk : readBitsLSB k bs with
-      | none => simp [hk] at h
+      | none => simp only [hk, bind, Option.bind] at h; exact nomatch h
       | some p =>
         obtain ⟨v, rem⟩ := p
-        simp [hk] at h
+        simp only [hk, bind, Option.bind, pure, Pure.pure] at h
         obtain ⟨-, rfl⟩ := h
         have := ih hk; simp only [List.length_cons]; omega
 
@@ -95,17 +96,17 @@ theorem readBitsLSB_bound {n : Nat} {bits : List Bool}
     (h : readBitsLSB n bits = some (val, rest)) :
     val < 2 ^ n := by
   induction n generalizing bits val with
-  | zero => simp [readBitsLSB] at h; omega
+  | zero => unfold readBitsLSB at h; obtain ⟨rfl, -⟩ := h; omega
   | succ k ih =>
     cases bits with
-    | nil => simp [readBitsLSB] at h
+    | nil => simp only [readBitsLSB] at h; exact nomatch h
     | cons b bs =>
       simp only [readBitsLSB] at h
       cases hk : readBitsLSB k bs with
-      | none => simp [hk] at h
+      | none => simp only [hk, bind, Option.bind] at h; exact nomatch h
       | some p =>
         obtain ⟨v, rem⟩ := p
-        simp [hk] at h
+        simp only [hk, bind, Option.bind, pure, Pure.pure] at h
         obtain ⟨rfl, rfl⟩ := h
         have := ih hk; split <;> omega
 
@@ -244,7 +245,7 @@ where
       let byte := bitsToByte (b :: rest)
       go ((b :: rest).drop 8) (acc.push byte)
   termination_by bits => bits.length
-  decreasing_by simp [List.length_drop]; omega
+  decreasing_by simp only [List.length_drop, List.length_cons]; omega
 
 /-- Write a natural number as `n` bits LSB-first. -/
 def writeBitsLSB : Nat → Nat → List Bool
@@ -463,13 +464,13 @@ theorem decode_go_acc_prefix
   simp only [bind, Option.bind] at hgo
   -- Case split on readBitsLSB 1 bits
   cases h1 : readBitsLSB 1 bits with
-  | none => simp [h1] at hgo
+  | none => simp only [h1] at hgo; exact nomatch hgo
   | some p1 =>
     obtain ⟨bfinal, bits1⟩ := p1
     simp only [h1] at hgo
     -- Case split on readBitsLSB 2 bits1
     cases h2 : readBitsLSB 2 bits1 with
-    | none => simp [h2] at hgo
+    | none => simp only [h2] at hgo; exact nomatch hgo
     | some p2 =>
       obtain ⟨btype, bits2⟩ := p2
       simp only [h2] at hgo
@@ -478,64 +479,65 @@ theorem decode_go_acc_prefix
       | 0, hgo =>
         -- Stored block
         cases hs : decodeStored bits2 with
-        | none => simp [hs] at hgo
+        | none => simp only [hs] at hgo; exact nomatch hgo
         | some ps =>
           obtain ⟨bytes, bits3⟩ := ps
           simp only [hs] at hgo
           by_cases hf : bfinal == 1
-          · simp [hf] at hgo; exact hgo ▸ List.prefix_append acc bytes
-          · simp [hf] at hgo
+          · simp only [hf] at hgo; obtain rfl := Option.some.inj hgo
+            exact List.prefix_append acc bytes
+          · simp only [hf] at hgo
             by_cases hblen : bits3.length < bits.length
-            · simp [hblen] at hgo
+            · simp only [hblen] at hgo
               exact List.IsPrefix.trans (List.prefix_append acc bytes)
                 (ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rfl hgo)
-            · simp [hblen] at hgo
+            · simp only [hblen] at hgo; exact nomatch hgo
       | 1, hgo =>
         -- Fixed Huffman
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
-        | none => simp [hd] at hgo
+        | none => simp only [hd] at hgo; exact nomatch hgo
         | some pd =>
           obtain ⟨syms, bits3⟩ := pd
           simp only [hd] at hgo
           cases hr : resolveLZ77 syms acc with
-          | none => simp [hr] at hgo
+          | none => simp only [hr] at hgo; exact nomatch hgo
           | some acc' =>
             simp only [hr] at hgo
             have hacc : acc <+: acc' := resolveLZ77_extends syms acc acc' hr
             by_cases hf : bfinal == 1
-            · simp [hf] at hgo; exact hgo ▸ hacc
-            · simp [hf] at hgo
+            · simp only [hf] at hgo; obtain rfl := Option.some.inj hgo; exact hacc
+            · simp only [hf] at hgo
               by_cases hblen : bits3.length < bits.length
-              · simp [hblen] at hgo
+              · simp only [hblen] at hgo
                 exact List.IsPrefix.trans hacc
                   (ih bits3.length (hlen ▸ hblen) bits3 acc' result rfl hgo)
-              · simp [hblen] at hgo
+              · simp only [hblen] at hgo; exact nomatch hgo
       | 2, hgo =>
         -- Dynamic Huffman
         cases hdt : decodeDynamicTables bits2 with
-        | none => simp [hdt] at hgo
+        | none => simp only [hdt] at hgo; exact nomatch hgo
         | some pdt =>
           obtain ⟨litLens, distLens, bits3⟩ := pdt
           simp only [hdt] at hgo
           cases hds : decodeSymbols litLens distLens bits3 with
-          | none => simp [hds] at hgo
+          | none => simp only [hds] at hgo; exact nomatch hgo
           | some pds =>
             obtain ⟨syms, bits4⟩ := pds
             simp only [hds] at hgo
             cases hr : resolveLZ77 syms acc with
-            | none => simp [hr] at hgo
+            | none => simp only [hr] at hgo; exact nomatch hgo
             | some acc' =>
               simp only [hr] at hgo
               have hacc : acc <+: acc' := resolveLZ77_extends syms acc acc' hr
               by_cases hf : bfinal == 1
-              · simp [hf] at hgo; exact hgo ▸ hacc
-              · simp [hf] at hgo
+              · simp only [hf] at hgo; obtain rfl := Option.some.inj hgo; exact hacc
+              · simp only [hf] at hgo
                 by_cases hblen : bits4.length < bits.length
-                · simp [hblen] at hgo
+                · simp only [hblen] at hgo
                   exact List.IsPrefix.trans hacc
                     (ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo)
-                · simp [hblen] at hgo
-      | n + 3, hgo => simp at hgo
+                · simp only [hblen] at hgo; exact nomatch hgo
+      | n + 3, hgo => exact nomatch hgo
 
 /-! ## Stored block roundtrip helpers -/
 
@@ -564,7 +566,8 @@ private theorem readBitsLSB_ofFn_testBit (v n : Nat) (rest : List Bool) :
     readBitsLSB n ((List.ofFn fun (i : Fin n) => v.testBit i.val) ++ rest) =
     some (v % 2^n, rest) := by
   induction n generalizing v with
-  | zero => simp [readBitsLSB]; omega
+  | zero => simp only [readBitsLSB, List.ofFn_zero, List.nil_append, Nat.pow_zero,
+      Nat.mod_one]
   | succ k ih =>
     simp only [List.ofFn_succ, List.cons_append]
     have htail : (List.ofFn fun i : Fin k => Nat.testBit v (Fin.succ i).val) =
@@ -597,7 +600,8 @@ private theorem readNBytes_byteToBitsSpec (data : List UInt8) (rest : List Bool)
     decodeStored.readNBytes data.length (data.flatMap byteToBitsSpec ++ rest) acc =
     some (acc ++ data, rest) by simpa using this []
   induction data with
-  | nil => intro acc; simp [decodeStored.readNBytes]
+  | nil => intro acc; simp only [List.length_nil, List.flatMap_nil, List.nil_append,
+      decodeStored.readNBytes, List.append_nil]
   | cons b bs ih =>
     intro acc
     simp only [List.flatMap_cons, List.length_cons, List.append_assoc]
@@ -605,15 +609,17 @@ private theorem readNBytes_byteToBitsSpec (data : List UInt8) (rest : List Bool)
     show (readBitsLSB 8 _ |>.bind _) = _
     rw [readBitsLSB_byteToBitsSpec]
     simp only [Option.bind]
-    have : b.toNat.toUInt8 = b := by simp
+    have : b.toNat.toUInt8 = b := by
+      unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
+      rw [BitVec.ofNat_toNat, BitVec.setWidth_eq]
     rw [this, ih (acc ++ [b])]
-    simp [List.append_assoc]
+    simp only [List.append_assoc, List.singleton_append]
 
 /-- `data.flatMap byteToBitsSpec` has length `8 * data.length`. -/
 private theorem flatMap_byteToBitsSpec_length (data : List UInt8) :
     (data.flatMap byteToBitsSpec).length = 8 * data.length := by
   induction data with
-  | nil => simp
+  | nil => simp only [List.flatMap_nil, List.length_nil, Nat.mul_zero]
   | cons b bs ih =>
     simp only [List.flatMap_cons, List.length_append, byteToBitsSpec,
                List.length_ofFn, List.length_cons, ih]; omega
@@ -626,7 +632,7 @@ private theorem encodeStored_length_mod8 (data : List UInt8) :
   · simp only [List.length_append, List.length_cons, List.length_nil,
                List.length_replicate, encodeStoredBlock, encodeLEU16,
                List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
-  · have ih := encodeStored_length_mod8 (data.drop 65535)
+  · have := encodeStored_length_mod8 (data.drop 65535)
     simp only [List.length_append, List.length_cons, List.length_nil,
                List.length_replicate, List.length_take,
                encodeStoredBlock, encodeLEU16,
@@ -644,8 +650,7 @@ private theorem decodeStored_encodeStoredBlock (data : List UInt8) (rest : List 
   rw [halign]
   -- drop 5 from [false, false, false, false, false] ++ ...
   simp only [show List.replicate 5 false = [false, false, false, false, false] from rfl,
-    List.cons_append, List.nil_append]
-  simp only [List.drop_succ_cons, List.drop_zero]
+    List.cons_append, List.nil_append, List.drop_succ_cons, List.drop_zero]
   -- Now: readBitsLSB 16 (encodeLEU16 len ++ encodeLEU16 nlen ++ data.flatMap byteToBitsSpec ++ rest)
   simp only [encodeStoredBlock, encodeLEU16, List.append_assoc]
   show (readBitsLSB 16 _ |>.bind _) = _
@@ -673,7 +678,8 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
     unfold encodeStored
     simp only [hle, ↓reduceIte]
     unfold decode.go
-    -- Reduce BFINAL=1, BTYPE=00 header, match on btype=0, then bfinal==1 → return
+    -- Evaluate readBitsLSB on concrete header bits (BFINAL=1, BTYPE=00).
+    -- Uses simp as a computation engine; readBitsLSB is the only non-default lemma.
     simp [readBitsLSB]
     -- Goal (cons-ified): (decodeStored (false::...::encodeStoredBlock data)).bind ... = ...
     have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
@@ -688,16 +694,17 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
     -- Convert cons form back to replicate form for rewriting
     show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
       fun x => some (acc ++ x.fst)) = some (acc ++ data)
-    rw [hdec]; simp
+    rw [hdec]; simp only [Option.bind]
   | case2 data hgt rest ih =>
     -- Multi-block: BFINAL=0, decode first 65535 bytes, recurse
     -- rest = data.drop 65535
     unfold encodeStored
     simp only [hgt, ↓reduceIte]
     unfold decode.go
+    -- Evaluate readBitsLSB on concrete header bits (BFINAL=0, BTYPE=00).
     simp [readBitsLSB]
     -- decodeStored on the first block recovers data.take 65535
-    have hle : (data.take 65535).length ≤ 65535 := by simp [List.length_take]; omega
+    have hle : (data.take 65535).length ≤ 65535 := by simp only [List.length_take]; omega
     have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
         encodeStored rest).length % 8 = 5 := by
       simp only [List.length_append, List.length_replicate, encodeStoredBlock, encodeLEU16,
@@ -745,6 +752,7 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
     unfold encodeStored
     simp only [hle, ↓reduceIte]
     unfold decode.goR
+    -- Evaluate readBitsLSB on concrete header bits (BFINAL=1, BTYPE=00).
     simp [readBitsLSB]
     have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
       simp only [List.append_nil, List.length_append, List.length_replicate,
@@ -756,14 +764,15 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
       simp only [List.append_nil] at h; exact h
     show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
       fun x => some (acc ++ x.fst, x.snd)) = some (acc ++ data, [])
-    rw [hdec]; simp
+    rw [hdec]; simp only [Option.bind]
   | case2 data hgt rest ih =>
     -- Multi-block: BFINAL=0, decode first 65535 bytes, recurse (goR variant)
     unfold encodeStored
     simp only [hgt, ↓reduceIte]
     unfold decode.goR
+    -- Evaluate readBitsLSB on concrete header bits (BFINAL=0, BTYPE=00).
     simp [readBitsLSB]
-    have hle : (data.take 65535).length ≤ 65535 := by simp [List.length_take]; omega
+    have hle : (data.take 65535).length ≤ 65535 := by simp only [List.length_take]; omega
     have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
         encodeStored rest).length % 8 = 5 := by
       simp only [List.length_append, List.length_replicate, encodeStoredBlock, encodeLEU16,
@@ -822,24 +831,24 @@ private theorem le_bytes_eq_encodeLEU16 (n : Nat) (hn : n < 65536) :
     byteToBitsSpec (((n.toUInt16 >>> 8) &&& 255).toUInt8) =
     encodeLEU16 n := by
   have hlo : (n.toUInt16 &&& 255).toUInt8.toNat = n % 256 := by
+    -- Normalizes UInt16/BitVec structure before the and→mod conversion.
     unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
   have hhi : ((n.toUInt16 >>> 8) &&& 255).toUInt8.toNat = n / 256 := by
     unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
   simp only [byteToBitsSpec, encodeLEU16]
-  apply List.ext_getElem
-  · simp
-  · intro i h₁ h₂
-    simp only [List.length_append, List.length_ofFn] at h₁
-    simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
-    split
-    · -- i < 8: bit from low byte
-      rename_i hi
-      rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow]
-      simp; omega
-    · -- i ≥ 8: bit from high byte
-      rename_i hi
-      rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
-      congr 1; omega
+  apply List.ext_getElem (by simp only [List.length_append, List.length_ofFn])
+  intro i h₁ h₂
+  simp only [List.length_append, List.length_ofFn] at h₁
+  simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
+  split
+  · -- i < 8: bit from low byte
+    rename_i hi
+    rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow,
+        show decide (i < 8) = true from decide_eq_true_eq.mpr hi, Bool.true_and]
+  · -- i ≥ 8: bit from high byte
+    rename_i hi
+    rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
+    congr 1; omega
 
 /-- `bytesToBits` distributes over ByteArray append. -/
 private theorem bytesToBits_append' (a b : ByteArray) :
@@ -869,18 +878,17 @@ private theorem le_bytes_eq_encodeLEU16' (v : UInt16) :
         and_255_eq_mod_256]
     have := UInt16.toNat_lt v; omega
   simp only [byteToBitsSpec, encodeLEU16]
-  apply List.ext_getElem
-  · simp
-  · intro i h₁ h₂
-    simp only [List.length_append, List.length_ofFn] at h₁
-    simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
-    split
-    · rename_i hi
-      rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow]
-      simp; omega
-    · rename_i hi
-      rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
-      congr 1; omega
+  apply List.ext_getElem (by simp only [List.length_append, List.length_ofFn])
+  intro i h₁ h₂
+  simp only [List.length_append, List.length_ofFn] at h₁
+  simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
+  split
+  · rename_i hi
+    rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow,
+        show decide (i < 8) = true from decide_eq_true_eq.mpr hi, Bool.true_and]
+  · rename_i hi
+    rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
+    congr 1; omega
 
 /-- `bytesToBits` of a 5-byte stored-block header produces the bfinal byte bits
     plus the encoded LEN and NLEN fields. -/
@@ -895,7 +903,7 @@ private theorem bytesToBits_storedHdr (bfinal : UInt8) (len nlen : UInt16) :
   simp only [← List.append_assoc]
   rw [show ∀ (a b c d e : List Bool),
     a ++ b ++ c ++ d ++ e = a ++ (b ++ c) ++ (d ++ e) from by
-    intros; simp [List.append_assoc]]
+    intros; simp only [List.append_assoc]]
   rw [le_bytes_eq_encodeLEU16' len, le_bytes_eq_encodeLEU16' nlen]
 
 /-- `byteToBitsSpec 0x01 = [true, false, false] ++ replicate 5 false` -/
@@ -910,7 +918,7 @@ private theorem byteToBitsSpec_0x00 :
 
 /-- `n.toUInt16.toNat = n` when `n < 65536`. -/
 private theorem toUInt16_toNat (n : Nat) (h : n < 65536) : n.toUInt16.toNat = n := by
-  simp [Nat.toUInt16, UInt16.toNat, UInt16.ofNat, BitVec.toNat_ofNat]; omega
+  simp only [Nat.toUInt16, UInt16.toNat, UInt16.ofNat, BitVec.toNat_ofNat]; omega
 
 /-- The native byte-level stored encoder (`deflateStoredPure`) produces the same bits
     as the spec-level stored encoder (`encodeStored`). -/
@@ -1005,14 +1013,14 @@ theorem fixedLitLengths_length : fixedLitLengths.length = 288 := by
 theorem fixedDistLengths_length : fixedDistLengths.length = 32 := by
   simp only [fixedDistLengths, List.length_replicate]
 
-set_option maxRecDepth 2048 in
+set_option maxRecDepth 1024 in
 /-- Fixed literal/length code lengths form a valid Huffman code. -/
 theorem fixedLitLengths_valid : Huffman.Spec.ValidLengths fixedLitLengths 15 := by
   constructor
   · intro l hl
     simp only [fixedLitLengths, List.mem_append, List.mem_replicate] at hl
     omega
-  · decide
+  · decide_cbv
 
 /-- Fixed distance code lengths form a valid Huffman code.
     Uses maxBits = 15 to match the default in `codeFor`/`allCodes`. -/
