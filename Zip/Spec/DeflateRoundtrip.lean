@@ -71,15 +71,14 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
 /-- For the encoder's output, `decode.goR` returns a short remaining (< 8 bits).
     This is the key fact connecting encoder structure to decoder bit consumption,
     needed by `inflateRaw_endPos_ge` to prove the decoder consumes all of `deflated`. -/
-theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 1024 * 1024 * 1024) :
+theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     ∃ remaining,
       Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits (deflateRaw data level)) []
-        10000000000 = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+        = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateRaw
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
-    exact ⟨[], Deflate.Spec.deflateStoredPure_goR data 10000000000 (by omega), by simp⟩
+    exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by simp⟩
   · split
     · -- Level 1: fixed Huffman (iterative LZ77)
       rw [deflateFixedIter, lz77GreedyIter_eq_lz77Greedy, ← deflateFixed]

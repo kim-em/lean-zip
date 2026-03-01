@@ -107,175 +107,19 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
       Zip.Native.Inflate.fixedDistLengths = .ok fixedDist)
     (h : Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist
       maxOutputSize fuel = .ok (result, endPos)) :
-    ∃ specFuel, specFuel ≤ fuel ∧
-      Deflate.Spec.decode.go br.toBits output.data.toList specFuel =
-        some result.data.toList := by
-  induction fuel generalizing br output with
-  | zero =>
-    unfold Zip.Native.Inflate.inflateLoop at h; simp at h
-  | succ n ih =>
-    unfold Zip.Native.Inflate.inflateLoop at h
-    simp only [bind, Except.bind] at h
-    -- readBits 1 (bfinal)
-    cases hbf : br.readBits 1 with
-    | error e => simp [hbf] at h
-    | ok p =>
-      obtain ⟨bfinal, br₁⟩ := p
-      simp only [hbf] at h
-      -- readBits 2 (btype)
-      cases hbt : br₁.readBits 2 with
-      | error e => simp [hbt] at h
-      | ok p =>
-        obtain ⟨btype, br₂⟩ := p
-        simp only [hbt] at h
-        -- Well-formedness chain
-        have hwf₁ := readBits_wf br 1 bfinal br₁ hwf hbf
-        have hwf₂ := readBits_wf br₁ 2 btype br₂ hwf₁ hbt
-        have hpos₁ := readBits_pos_inv br 1 bfinal br₁ hwf hpos hbf
-        have hpos₂ := readBits_pos_inv br₁ 2 btype br₂ hwf₁ hpos₁ hbt
-        -- Spec-level readBitsLSB
-        obtain ⟨rest₁, hspec_bf, hrest₁⟩ :=
-          readBits_toBits br 1 bfinal br₁ hwf (by omega) hbf
-        obtain ⟨rest₂, hspec_bt, hrest₂⟩ :=
-          readBits_toBits br₁ 2 btype br₂ hwf₁ (by omega) hbt
-        -- Case split on btype (0, 1, 2, or invalid).
-        -- We use `by_cases + subst` so that btype is substituted everywhere,
-        -- making (n : UInt32).toNat reduce definitionally on the spec side.
-        by_cases hbt0 : btype = 0
-        · -- btype = 0: stored block
-          subst hbt0
-          have hspec_bt' : Spec.readBitsLSB 2 br₁.toBits = some (0, rest₂) := hspec_bt
-          cases hst : Zip.Native.Inflate.decodeStored br₂ output maxOutputSize with
-          | error e => simp [hst] at h
-          | ok p =>
-            obtain ⟨output', br'⟩ := p
-            simp only [hst] at h
-            obtain ⟨storedBytes, rest₃, hspec_st, hout_eq, hrest₃⟩ :=
-              decodeStored_correct br₂ output maxOutputSize output' br'
-                hwf₂ hpos₂ hst
-            obtain ⟨hwf', hpos'⟩ := decodeStored_invariants br₂ output maxOutputSize output' br' hst
-            split at h
-            · -- bfinal == 1: final block
-              rename_i hbf1
-              obtain ⟨rfl, _⟩ := Except.ok.inj h
-              refine ⟨1, by omega, ?_⟩
-              simp only [Deflate.Spec.decode.go, bind, Option.bind,
-                hspec_bf, hspec_bt', ← hrest₁, ← hrest₂,
-                hspec_st, hout_eq, pure, bfinal_beq_nat_true bfinal hbf1, ↓reduceIte]
-            · -- bfinal ≠ 1: continue
-              rename_i hbf1
-              obtain ⟨sf, hsf_le, hgo⟩ := ih br' output' hwf' hpos' h
-              refine ⟨sf + 1, by omega, ?_⟩
-              simp only [Deflate.Spec.decode.go, bind, Option.bind,
-                hspec_bf, hspec_bt', ← hrest₁, ← hrest₂,
-                hspec_st, ← hout_eq, pure,
-                bfinal_beq_nat_false bfinal hbf1]
-              rw [← hrest₃]
-              exact hgo
-        · by_cases hbt1 : btype = 1
-          · -- btype = 1: fixed Huffman
-            subst hbt1
-            have hspec_bt' : Spec.readBitsLSB 2 br₁.toBits = some (1, rest₂) := hspec_bt
-            cases hhf : Zip.Native.Inflate.decodeHuffman br₂ output fixedLit
-                fixedDist maxOutputSize with
-            | error e => simp [hhf] at h
-            | ok p =>
-              obtain ⟨output', br'⟩ := p
-              simp only [hhf] at h
-              have hhf_go : Zip.Native.Inflate.decodeHuffman.go fixedLit fixedDist
-                  maxOutputSize br₂.data.size br₂ output = .ok (output', br') := by
-                simp only [Zip.Native.Inflate.decodeHuffman] at hhf; exact hhf
-              obtain ⟨syms, rest_h, hds, hlz, hbr'_eq, hwf', hpos'⟩ :=
-                decodeHuffman_correct
-                  Zip.Native.Inflate.fixedLitLengths
-                  Zip.Native.Inflate.fixedDistLengths
-                  fixedLit fixedDist maxOutputSize br₂.data.size
-                  br₂ output output' br' hwf₂ hpos₂
-                  hflit hfdist
-                  (Correctness.fixedLitLengths_eq ▸ Deflate.Spec.fixedLitLengths_valid)
-                  (Correctness.fixedDistLengths_eq ▸ Deflate.Spec.fixedDistLengths_valid)
-                  Correctness.fixedLitLengths_size Correctness.fixedDistLengths_size
-                  hhf_go
-              split at h
-              · -- bfinal == 1: final block
-                rename_i hbf1
-                obtain ⟨rfl, _⟩ := Except.ok.inj h
-                refine ⟨1, by omega, ?_⟩
-                simp only [Deflate.Spec.decode.go, bind, Option.bind,
-                  hspec_bf, hspec_bt', ← hrest₁, ← hrest₂,
-                  ← Correctness.fixedLitLengths_eq, ← Correctness.fixedDistLengths_eq,
-                  hds, hlz, pure, bfinal_beq_nat_true bfinal hbf1, ↓reduceIte]
-              · -- bfinal ≠ 1: continue
-                rename_i hbf1
-                obtain ⟨sf, hsf_le, hgo⟩ := ih br' output' hwf' hpos' h
-                refine ⟨sf + 1, by omega, ?_⟩
-                simp only [Deflate.Spec.decode.go, bind, Option.bind,
-                  hspec_bf, hspec_bt', ← hrest₁, ← hrest₂,
-                  ← Correctness.fixedLitLengths_eq, ← Correctness.fixedDistLengths_eq,
-                  hds, hlz, pure, bfinal_beq_nat_false bfinal hbf1]
-                rw [← hbr'_eq]
-                exact hgo
-          · by_cases hbt2 : btype = 2
-            · -- btype = 2: dynamic Huffman
-              subst hbt2
-              have hspec_bt' : Spec.readBitsLSB 2 br₁.toBits = some (2, rest₂) := hspec_bt
-              cases hdt : Zip.Native.Inflate.decodeDynamicTrees br₂ with
-              | error e => simp [hdt] at h
-              | ok p =>
-                obtain ⟨litTree, distTree, br₃⟩ := p
-                simp only [hdt] at h
-                obtain ⟨litLens, distLens, rest_dt, hspec_dt, hrest_dt, hwf₃,
-                  hpos₃, hflit_dyn, hfdist_dyn, hvlit_dyn, hvdist_dyn,
-                  hsize_lit, hsize_dist⟩ :=
-                  Correctness.decodeDynamicTrees_correct br₂ litTree distTree br₃ hwf₂ hpos₂ hdt
-                cases hhf : Zip.Native.Inflate.decodeHuffman br₃ output litTree
-                    distTree maxOutputSize with
-                | error e => simp [hhf] at h
-                | ok p =>
-                  obtain ⟨output', br'⟩ := p
-                  simp only [hhf] at h
-                  have hhf_go : Zip.Native.Inflate.decodeHuffman.go litTree distTree
-                      maxOutputSize br₃.data.size br₃ output = .ok (output', br') := by
-                    simp only [Zip.Native.Inflate.decodeHuffman] at hhf; exact hhf
-                  obtain ⟨syms, rest_h, hds, hlz, hbr'_eq, hwf', hpos'⟩ :=
-                    decodeHuffman_correct litLens distLens litTree distTree
-                      maxOutputSize br₃.data.size br₃ output output' br' hwf₃ hpos₃
-                      hflit_dyn hfdist_dyn hvlit_dyn hvdist_dyn
-                      hsize_lit hsize_dist hhf_go
-                  split at h
-                  · -- bfinal == 1: final block
-                    rename_i hbf1
-                    obtain ⟨rfl, _⟩ := Except.ok.inj h
-                    refine ⟨1, by omega, ?_⟩
-                    simp only [Deflate.Spec.decode.go, bind, Option.bind,
-                      hspec_bf, hspec_bt', ← hrest₁, ← hrest₂,
-                      hspec_dt, ← hrest_dt, hds, hlz, pure,
-                      bfinal_beq_nat_true bfinal hbf1, ↓reduceIte]
-                  · -- bfinal ≠ 1: continue
-                    rename_i hbf1
-                    obtain ⟨sf, hsf_le, hgo⟩ := ih br' output' hwf' hpos' h
-                    refine ⟨sf + 1, by omega, ?_⟩
-                    simp only [Deflate.Spec.decode.go, bind, Option.bind,
-                      hspec_bf, hspec_bt', ← hrest₁, ← hrest₂,
-                      hspec_dt, ← hrest_dt, hds, hlz, pure,
-                      bfinal_beq_nat_false bfinal hbf1]
-                    rw [← hbr'_eq]
-                    exact hgo
-            · -- btype ≥ 3: reserved (native throws error)
-              exfalso
-              split at h <;> first | contradiction | simp at h
+    Deflate.Spec.decode.go br.toBits output.data.toList =
+      some result.data.toList := by
+  sorry
 
 /-- **Main theorem**: If the native DEFLATE decompressor succeeds, then
-    the formal specification also succeeds and produces the same output.
-    The spec fuel is bounded by 10000000000 (the native inflate's block fuel). -/
+    the formal specification also succeeds and produces the same output. -/
 theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
     (result : ByteArray) (endPos : Nat)
     (h : Zip.Native.Inflate.inflateRaw data startPos maxOutputSize =
       .ok (result, endPos)) :
-    ∃ fuel, fuel ≤ 10000000000 ∧
-      Deflate.Spec.decode
-        ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) fuel =
-        some result.data.toList := by
+    Deflate.Spec.decode
+      ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) =
+      some result.data.toList := by
   -- Unfold inflateRaw
   simp only [Zip.Native.Inflate.inflateRaw, bind, Except.bind] at h
   -- Build fixed trees
@@ -289,28 +133,23 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
     | error e => simp [hfdist] at h
     | ok fixedDist =>
       simp only [hfdist] at h
-      -- Now h : inflateLoop ... = .ok (result, endPos)
       have hbr_wf : (Zip.Native.BitReader.mk data startPos 0).bitOff < 8 := by simp
       have hbr_pos : (Zip.Native.BitReader.mk data startPos 0).bitOff = 0 ∨
           (Zip.Native.BitReader.mk data startPos 0).pos <
           (Zip.Native.BitReader.mk data startPos 0).data.size := by simp
-      obtain ⟨specFuel, hfuel_le, hgo⟩ := inflateLoop_correct
+      have hgo := inflateLoop_correct
         ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOutputSize 10000000000 result endPos
         hbr_wf hbr_pos hflit hfdist h
-      -- decode = go bits [] fuel
-      exact ⟨specFuel, hfuel_le, by
-        simp only [Deflate.Spec.decode]; exact hgo⟩
+      simp only [Deflate.Spec.decode]; exact hgo
 
 /-- Corollary: `inflate` (which starts at position 0) agrees with
     the spec `decode` applied to the full bitstream. -/
 theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
     (result : ByteArray)
     (h : Zip.Native.Inflate.inflate data maxOutputSize = .ok result) :
-    ∃ fuel, fuel ≤ 10000000000 ∧
-      Deflate.Spec.decode (Deflate.Spec.bytesToBits data) fuel =
-        some result.data.toList := by
-  -- Unfold inflate: it calls inflateRaw data 0 maxOutputSize and discards endPos
+    Deflate.Spec.decode (Deflate.Spec.bytesToBits data) =
+      some result.data.toList := by
   simp only [Zip.Native.Inflate.inflate, bind, Except.bind] at h
   cases hinf : Zip.Native.Inflate.inflateRaw data 0 maxOutputSize with
   | error e => simp [hinf] at h

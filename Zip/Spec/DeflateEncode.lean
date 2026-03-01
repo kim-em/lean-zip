@@ -469,7 +469,7 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
     (hresolve : resolveLZ77 syms [] = some data)
     (hvalid : ValidSymbolList syms) :
     decode ([true, true, false] ++ bits ++ rest) = some data := by
-  show decode.go ([true, true, false] ++ bits ++ rest) [] 10000000000 = some data
+  show decode.go ([true, true, false] ++ bits ++ rest) [] = some data
   unfold decode.go
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
   simp only [readBitsLSB_2_true_false]
@@ -510,7 +510,7 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
     (hresolve : resolveLZ77 syms [] = some data)
     (hvalid : ValidSymbolList syms) :
     decode ([true, false, true] ++ headerBits ++ symBits ++ rest) = some data := by
-  show decode.go ([true, false, true] ++ headerBits ++ symBits ++ rest) [] 10000000000 = some data
+  show decode.go ([true, false, true] ++ headerBits ++ symBits ++ rest) [] = some data
   unfold decode.go
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
   simp only [readBitsLSB_2_false_true]
@@ -539,7 +539,7 @@ theorem encodeFixed_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
     (henc : encodeSymbols fixedLitLengths fixedDistLengths syms = some bits)
     (hresolve : resolveLZ77 syms [] = some data)
     (hvalid : ValidSymbolList syms) :
-    decode.goR ([true, true, false] ++ bits ++ rest) [] 10000000000 = some (data, rest) := by
+    decode.goR ([true, true, false] ++ bits ++ rest) [] = some (data, rest) := by
   unfold decode.goR
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
   simp only [readBitsLSB_2_true_false]
@@ -564,7 +564,7 @@ theorem encodeDynamic_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
     (henc : encodeSymbols litLens distLens syms = some symBits)
     (hresolve : resolveLZ77 syms [] = some data)
     (hvalid : ValidSymbolList syms) :
-    decode.goR ([true, false, true] ++ headerBits ++ symBits ++ rest) [] 10000000000 =
+    decode.goR ([true, false, true] ++ headerBits ++ symBits ++ rest) [] =
         some (data, rest) := by
   unfold decode.goR
   simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]

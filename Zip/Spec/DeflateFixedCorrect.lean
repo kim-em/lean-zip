@@ -328,8 +328,8 @@ theorem deflateFixed_spec (data : ByteArray) :
 
 open Deflate.Spec in
 /-- If spec `decode` succeeds on the bits of a bytestream, native `inflate`
-    also succeeds with the same result. Restricted to inputs within fuel
-    and size limits. -/
+    also succeeds with the same result. Restricted to inputs within
+    size limits. -/
 theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
     (hsize : result.length ≤ 1024 * 1024 * 1024)
     (hdec : decode (bytesToBits bytes) = some result) :
@@ -343,8 +343,8 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   obtain ⟨fixedLit, hflit⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
   obtain ⟨fixedDist, hfdist⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
   rw [hflit, hfdist]; simp only []
-  -- decode = decode.go bits [] 10000000000
-  have hgo : decode.go (bytesToBits bytes) [] 10000000000 = some result := by
+  -- decode = decode.go bits []
+  have hgo : decode.go (bytesToBits bytes) [] = some result := by
     simp only [decode] at hdec; exact hdec
   -- Apply inflateLoop_complete
   have hbr_wf : (Zip.Native.BitReader.mk bytes 0 0).bitOff < 8 := by simp
@@ -354,8 +354,8 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   obtain ⟨endPos, hloop⟩ :=
     Deflate.Correctness.inflateLoop_complete
       ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist
-      (1024 * 1024 * 1024) result
-      hbr_wf hbr_pos hflit hfdist hsize 10000000000 hgo
+      (1024 * 1024 * 1024) 10000000000 result
+      hbr_wf hbr_pos hflit hfdist hsize hgo
   rw [hloop]; simp [pure, Except.pure]
 
 /-! ## Main roundtrip theorem -/
