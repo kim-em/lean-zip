@@ -110,8 +110,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
           -- decodeCLSymbols
           cases hspec_dcl : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
               ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
-              (hlit_v + 257 + (hdist_v + 1)) [] bits₄
-              (hlit_v + 257 + (hdist_v + 1) + 1) with
+              (hlit_v + 257 + (hdist_v + 1)) [] bits₄ with
           | none => simp [hspec_dcl] at hspec
           | some p5 =>
             obtain ⟨codeLengths, bits₅⟩ := p5
@@ -170,7 +169,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
                 ((Huffman.Spec.allCodes (clArr.toList.map UInt8.toNat) 7).map
                   fun (sym, cw) => (cw, sym))
                 (hlit_v + 257 + (hdist_v + 1))
-                [] bits₄ (hlit_v + 257 + (hdist_v + 1) + 1) =
+                [] bits₄ =
                 some (codeLengths, bits₅) := by
               rw [hcl_map]; exact hspec_dcl
             -- Convert bits₄ to br₄.toBits
@@ -181,7 +180,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
                 (hlit_v + 257 + (hdist_v + 1))
                 (((Array.replicate (hlit_v + 257 + (hdist_v + 1)) (0 : UInt8)).extract 0 0).toList.map
                   UInt8.toNat)
-                br₄.toBits (hlit_v + 257 + (hdist_v + 1) + 1) =
+                br₄.toBits =
                 some (codeLengths, bits₅) := by
               simp; rw [hrest₄]; exact hspec_dcl_bridge
             have ⟨codeLengths', br₅, hdcl_nat, hcl_res_map, hrest₅, hwf₅, hpos₅⟩ :=
@@ -190,7 +189,7 @@ theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
                 (hlit_v + 257 + (hdist_v + 1))
                 (hlit_v + 257 + (hdist_v + 1) + 1)
                 codeLengths bits₅ hwf₄ hpos₄ hft (by rw [hcl_sz]; simp [UInt16.size])
-                (by omega) (by simp) hspec_dcl_native
+                (by omega) (by simp) (by omega) hspec_dcl_native
             -- Bridge native extract to spec take/drop
             have hcl_res_sz : codeLengths'.size =
                 hlit_v + 257 + (hdist_v + 1) := by

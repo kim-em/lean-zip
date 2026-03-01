@@ -325,7 +325,7 @@ def decodeDynamicTables (bits : List Bool) :
   let totalCodes := numLitLen + numDist
   let clCodes := Huffman.Spec.allCodes clLengths 7
   let clTable := clCodes.map fun (sym, cw) => (cw, sym)
-  let (codeLengths, bits) ← decodeCLSymbols clTable totalCodes [] bits (totalCodes + 1)
+  let (codeLengths, bits) ← decodeCLSymbols clTable totalCodes [] bits
   guard (codeLengths.length == totalCodes)
   let litLenLengths := codeLengths.take numLitLen
   let distLengths := codeLengths.drop numLitLen
@@ -334,34 +334,47 @@ def decodeDynamicTables (bits : List Bool) :
   guard (Huffman.Spec.ValidLengths distLengths 15)
   return (litLenLengths, distLengths, bits)
 where
+  /-- Decode code-length symbols using the CL Huffman table.
+      Uses well-founded recursion on `totalCodes - acc.length`. -/
   decodeCLSymbols (clTable : List (Huffman.Spec.Codeword × Nat))
       (totalCodes : Nat) (acc : List Nat) (bits : List Bool) :
-      Nat → Option (List Nat × List Bool)
-    | 0 => none
-    | fuel + 1 =>
-      if acc.length ≥ totalCodes then some (acc, bits)
-      else do
-        let (sym, bits) ← Huffman.Spec.decode clTable bits
+      Option (List Nat × List Bool) :=
+    if acc.length ≥ totalCodes then some (acc, bits)
+    else
+      match Huffman.Spec.decode clTable bits with
+      | none => none
+      | some (sym, bits) =>
         if sym < 16 then
-          decodeCLSymbols clTable totalCodes (acc ++ [sym]) bits fuel
+          decodeCLSymbols clTable totalCodes (acc ++ [sym]) bits
         else if sym == 16 then
-          guard (acc.length > 0)
-          let (rep, bits) ← readBitsLSB 2 bits
-          let prev := acc.getLast!
-          let acc := acc ++ List.replicate (rep + 3) prev
-          guard (acc.length ≤ totalCodes)
-          decodeCLSymbols clTable totalCodes acc bits fuel
+          if acc.length == 0 then none
+          else
+            match readBitsLSB 2 bits with
+            | none => none
+            | some (rep, bits) =>
+              let acc' := acc ++ List.replicate (rep + 3) acc.getLast!
+              if acc'.length ≤ totalCodes then
+                decodeCLSymbols clTable totalCodes acc' bits
+              else none
         else if sym == 17 then
-          let (rep, bits) ← readBitsLSB 3 bits
-          let acc := acc ++ List.replicate (rep + 3) 0
-          guard (acc.length ≤ totalCodes)
-          decodeCLSymbols clTable totalCodes acc bits fuel
+          match readBitsLSB 3 bits with
+          | none => none
+          | some (rep, bits) =>
+            let acc' := acc ++ List.replicate (rep + 3) 0
+            if acc'.length ≤ totalCodes then
+              decodeCLSymbols clTable totalCodes acc' bits
+            else none
         else if sym == 18 then
-          let (rep, bits) ← readBitsLSB 7 bits
-          let acc := acc ++ List.replicate (rep + 11) 0
-          guard (acc.length ≤ totalCodes)
-          decodeCLSymbols clTable totalCodes acc bits fuel
+          match readBitsLSB 7 bits with
+          | none => none
+          | some (rep, bits) =>
+            let acc' := acc ++ List.replicate (rep + 11) 0
+            if acc'.length ≤ totalCodes then
+              decodeCLSymbols clTable totalCodes acc' bits
+            else none
         else none
+  termination_by totalCodes - acc.length
+  decreasing_by all_goals simp_all [List.length_append, List.length_replicate]; omega
 
 /-! ## Stream decode -/
 
