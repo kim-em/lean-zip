@@ -258,6 +258,30 @@ When converting a fuel-based function to well-founded recursion:
 - **`omega` can't see data invariants**: Use the `dataSize` parameter
   pattern (above) to avoid needing `br.data.size` invariants in `omega`.
 
+## WF Goal Shape: Conjunction with Guard
+
+When proving properties of WF functions using `Nat.strongRecOn` (rather
+than `f.induct`), `simp` on the non-final recursive branch may produce
+a **conjunction** goal rather than a plain function application:
+
+```lean
+⊢ bits'.length < bits.length ∧ decode.go (bits' ++ suffix) acc' = some result
+```
+
+This happens because Lean's WF recursion elaboration bundles the
+termination proof with the recursive call. The left conjunct is the WF
+guard, the right is the actual property.
+
+**Fix:** Supply both parts explicitly:
+```lean
+exact ⟨hblen, ih bits'.length (hlen ▸ hblen) bits' acc' result rfl hgo⟩
+```
+
+**Don't try:** `dif_pos`, `rw`, or `simp only` with the guard hypothesis —
+the conjunction is not a `dite`, it's already been simplified past that.
+
+See `Zip/Spec/DeflateSuffix.lean:498` (`decode_go_suffix` proof).
+
 ## Cross-References
 
 - **Fuel-based patterns**: `lean-fuel-induction` skill (for functions still using fuel)
