@@ -121,35 +121,42 @@ theorem decodeLitLen_append (litLengths distLengths : List Nat)
 
 /-- `decodeSymbols` is suffix-invariant. -/
 theorem decodeSymbols_append (litLengths distLengths : List Nat)
-    (bits suffix : List Bool) (fuel : Nat)
+    (bits suffix : List Bool)
     (syms : List LZ77Symbol) (rest : List Bool)
     (hvl : Huffman.Spec.ValidLengths litLengths 15)
     (hvd : Huffman.Spec.ValidLengths distLengths 15)
-    (h : decodeSymbols litLengths distLengths bits fuel = some (syms, rest)) :
-    decodeSymbols litLengths distLengths (bits ++ suffix) fuel =
+    (h : decodeSymbols litLengths distLengths bits = some (syms, rest)) :
+    decodeSymbols litLengths distLengths (bits ++ suffix) =
       some (syms, rest ++ suffix) := by
-  induction fuel generalizing bits syms rest with
-  | zero => simp [decodeSymbols] at h
-  | succ n ih =>
-    unfold decodeSymbols at h ⊢
-    cases hlit : decodeLitLen litLengths distLengths bits with
-    | none => simp [hlit] at h
-    | some p =>
-      obtain ⟨sym, bits'⟩ := p
-      rw [hlit] at h; dsimp only [bind, Option.bind] at h ⊢
-      rw [decodeLitLen_append litLengths distLengths bits suffix sym bits' hvl hvd hlit]
-      dsimp only [bind, Option.bind]
-      match hsym : sym with
-      | .endOfBlock =>
-        obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-      | .literal _ | .reference .. =>
-        cases hrec : decodeSymbols litLengths distLengths bits' n with
+  unfold decodeSymbols at h ⊢
+  cases hlit : decodeLitLen litLengths distLengths bits with
+  | none => simp [hlit] at h
+  | some p =>
+    obtain ⟨sym, bits'⟩ := p
+    rw [hlit] at h; dsimp only [bind, Option.bind] at h ⊢
+    rw [decodeLitLen_append litLengths distLengths bits suffix sym bits' hvl hvd hlit]
+    dsimp only [bind, Option.bind]
+    match hsym : sym with
+    | .endOfBlock =>
+      obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+    | .literal _ | .reference .. =>
+      by_cases hlt : bits'.length < bits.length
+      · simp only [dif_pos hlt] at h
+        have hlt' : (bits' ++ suffix).length < (bits ++ suffix).length := by
+          simp [List.length_append]; omega
+        rw [dif_pos hlt']
+        cases hrec : decodeSymbols litLengths distLengths bits' with
         | none => simp [hrec] at h
         | some q =>
           obtain ⟨restSyms, bits''⟩ := q
           rw [hrec] at h; dsimp only [bind, Option.bind] at h
-          simp only [ih bits' restSyms bits'' hrec]
+          have ih := decodeSymbols_append litLengths distLengths bits' suffix
+            restSyms bits'' hvl hvd hrec
+          rw [ih]; dsimp only [bind, Option.bind]
           obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+      · simp only [dif_neg hlt] at h
+        exact absurd h (by simp)
+termination_by bits.length
 
 /-- `readNBytes` is suffix-invariant. -/
 private theorem readNBytes_append (n : Nat) (bits suffix : List Bool)
@@ -486,7 +493,7 @@ theorem decode_go_suffix
           | some r =>
             obtain ⟨syms, bits₃⟩ := r
             rw [hsyms] at h; dsimp only [bind, Option.bind] at h
-            rw [decodeSymbols_append fixedLitLengths fixedDistLengths bits₂ suffix _
+            rw [decodeSymbols_append fixedLitLengths fixedDistLengths bits₂ suffix
                 syms bits₃ fixedLitLengths_valid fixedDistLengths_valid hsyms]
             dsimp only [bind, Option.bind]
             cases hres : resolveLZ77 syms acc with
@@ -509,7 +516,7 @@ theorem decode_go_suffix
             | some s =>
               obtain ⟨syms, bits₄⟩ := s
               rw [hsyms] at h; dsimp only [bind, Option.bind] at h
-              rw [decodeSymbols_append litLens distLens bits₃ suffix _
+              rw [decodeSymbols_append litLens distLens bits₃ suffix
                   syms bits₄
                   (decodeDynamicTables_valid_lit bits₂ litLens distLens bits₃ hdt)
                   (decodeDynamicTables_valid_dist bits₂ litLens distLens bits₃ hdt) hsyms]

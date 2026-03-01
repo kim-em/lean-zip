@@ -182,18 +182,20 @@ def decodeLitLen (litLengths : List Nat) (distLengths : List Nat)
 
 /-- Decode a sequence of LZ77 symbols from a Huffman-coded block.
     Decodes until end-of-block marker (code 256) is found.
-    Uses fuel to ensure termination. -/
+    Terminates because each `decodeLitLen` call strictly reduces `bits.length`
+    (Huffman decoding always consumes at least one bit). -/
 def decodeSymbols (litLengths distLengths : List Nat) (bits : List Bool)
-    (fuel : Nat := 1000000000000000000) : Option (List LZ77Symbol × List Bool) :=
-  match fuel with
-  | 0 => none
-  | fuel + 1 => do
-    let (sym, bits) ← decodeLitLen litLengths distLengths bits
-    match sym with
-    | .endOfBlock => return ([.endOfBlock], bits)
-    | _ =>
-      let (rest, bits) ← decodeSymbols litLengths distLengths bits fuel
-      return (sym :: rest, bits)
+    : Option (List LZ77Symbol × List Bool) := do
+  let (sym, bits') ← decodeLitLen litLengths distLengths bits
+  match sym with
+  | .endOfBlock => return ([.endOfBlock], bits')
+  | _ =>
+    if _h : bits'.length < bits.length then
+      let (rest, bits'') ← decodeSymbols litLengths distLengths bits'
+      return (sym :: rest, bits'')
+    else
+      none
+termination_by bits.length
 
 /-- Decode a stored (uncompressed) block.
     Reads LEN and NLEN, verifies the complement check,

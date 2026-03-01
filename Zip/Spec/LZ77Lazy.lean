@@ -153,11 +153,10 @@ theorem deflateLevel1_spec_roundtrip (data : List UInt8)
     (bits : List Bool)
     (henc : encodeSymbols fixedLitLengths fixedDistLengths
       (matchLZ77 data windowSize) = some bits)
-    (hfuel : 1000000000000000000 ≥ (matchLZ77 data windowSize).length)
     (hvalid : ValidSymbolList (matchLZ77 data windowSize)) :
     decode ([true, true, false] ++ bits) = some data :=
   encodeFixed_decode (matchLZ77 data windowSize) data bits henc
-    (resolveLZ77_matchLZ77 data windowSize hw) hfuel hvalid
+    (resolveLZ77_matchLZ77 data windowSize hw) hvalid
 
 /-- Level 1 spec roundtrip (existential form): for any data, encoding with
     greedy LZ77 + fixed Huffman produces bits that decode back to the
@@ -177,7 +176,6 @@ theorem deflateLevel1_spec_roundtrip' (data : List UInt8)
     refine ⟨[true, true, false] ++ bits, ?_, ?_⟩
     · simp [encodeFixed, henc]
     · exact deflateLevel1_spec_roundtrip data windowSize hw bits henc
-        (by have := matchLZ77_length_le data windowSize; omega)
         (matchLZ77_validSymbolList data windowSize)
 
 /-! ## matchLZ77Lazy validity and symbol list properties -/
@@ -342,7 +340,6 @@ theorem deflateLevel2_spec_roundtrip (data : List UInt8)
     · simp [encodeFixed, henc]
     · exact encodeFixed_decode (matchLZ77Lazy data windowSize) data bits henc
         (resolveLZ77_matchLZ77Lazy data windowSize hw)
-        (by have := matchLZ77Lazy_length_le data windowSize; omega)
         (matchLZ77Lazy_validSymbolList data windowSize)
 
 end Deflate.Spec

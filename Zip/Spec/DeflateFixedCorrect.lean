@@ -113,7 +113,7 @@ open Deflate.Spec in
     the native greedy matcher instead of the spec-level `matchLZ77`. -/
 theorem lz77Greedy_spec_decode (data : ByteArray)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.size < 1000000000000000000) :
+    (_hsize : data.size < 1000000000000000000) :
     ∃ bits, encodeFixed (tokensToSymbols (lz77Greedy data windowSize)) =
               some bits ∧
             decode bits = some data.data.toList := by
@@ -128,10 +128,6 @@ theorem lz77Greedy_spec_decode (data : ByteArray)
         (tokensToSymbols (lz77Greedy data windowSize))
         data.data.toList bits henc
         (lz77Greedy_resolves data windowSize hw)
-        (by
-          have := lz77Greedy_size_le data windowSize
-          rw [tokensToSymbols_length]
-          omega)
         (tokensToSymbols_validSymbolList _)
 
 /-! ## Lazy LZ77 bridge lemmas -/
@@ -175,7 +171,7 @@ open Deflate.Spec in
     recovers the original data. -/
 theorem lz77Lazy_spec_decode (data : ByteArray)
     (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.size < 500000000000000000) :
+    (_hsize : data.size < 500000000000000000) :
     ∃ bits, encodeFixed (tokensToSymbols (lz77Lazy data windowSize)) =
               some bits ∧
             decode bits = some data.data.toList := by
@@ -190,10 +186,6 @@ theorem lz77Lazy_spec_decode (data : ByteArray)
         (tokensToSymbols (lz77Lazy data windowSize))
         data.data.toList bits henc
         (lz77Lazy_resolves data windowSize hw)
-        (by
-          have := lz77Lazy_size_le data windowSize
-          rw [tokensToSymbols_length]
-          omega)
         (tokensToSymbols_validSymbolList _)
 
 /-- `deflateFixedBlock` produces a bytestream whose bits are the spec-level
@@ -397,7 +389,6 @@ theorem inflate_deflateFixed (data : ByteArray)
         (tokensToSymbols (lz77Greedy data))
         data.data.toList allBits _ henc_syms
         (lz77Greedy_resolves data 32768 (by omega))
-        (by rw [tokensToSymbols_length]; have := lz77Greedy_size_le data 32768; omega)
         (tokensToSymbols_validSymbolList _)
     -- Step 4: inflate_complete bridges spec decode to native inflate
     have hinf := inflate_complete (deflateFixed data) data.data.toList
@@ -546,7 +537,6 @@ theorem inflate_deflateLazy (data : ByteArray)
         (tokensToSymbols (lz77Lazy data))
         data.data.toList allBits _ henc_syms
         (lz77Lazy_resolves data 32768 (by omega))
-        (by rw [tokensToSymbols_length]; have := lz77Lazy_size_le data 32768; omega)
         (tokensToSymbols_validSymbolList _)
     have hinf := inflate_complete (deflateLazy data) data.data.toList
       (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec

@@ -12,38 +12,6 @@ Split from `Deflate.lean` for file size management.
 
 namespace Deflate.Spec
 
-/-! ## Fuel independence -/
-
-/-- `decodeSymbols` is fuel-independent: if it succeeds with some fuel,
-    it returns the same result with any additional fuel. -/
-theorem decodeSymbols_fuel_independent
-    (litLengths distLengths : List Nat) (bits : List Bool)
-    (fuel : Nat) (result : List LZ77Symbol × List Bool) :
-    decodeSymbols litLengths distLengths bits fuel = some result →
-    ∀ k, decodeSymbols litLengths distLengths bits (fuel + k) = some result := by
-  intro h k
-  induction fuel generalizing bits result with
-  | zero => simp [decodeSymbols] at h
-  | succ n ih =>
-    -- Rewrite fuel arithmetic: (n + 1) + k = (n + k) + 1
-    conv => lhs; rw [show n + 1 + k = (n + k) + 1 from by omega]
-    unfold decodeSymbols at h ⊢
-    cases hlit : decodeLitLen litLengths distLengths bits with
-    | none => simp [hlit] at h
-    | some p =>
-      obtain ⟨sym, bits'⟩ := p
-      simp only [hlit, bind, Option.bind] at h ⊢
-      match sym with
-      | .endOfBlock => exact h
-      | .literal _ | .reference .. =>
-        cases hrec : decodeSymbols litLengths distLengths bits' n with
-        | none => simp [hrec] at h
-        | some q =>
-          obtain ⟨rest, bits''⟩ := q
-          simp only [hrec] at h
-          simp only [ih bits' (rest, bits'') hrec]
-          exact h
-
 set_option maxRecDepth 2048 in
 /-- `decode` is fuel-independent: if it succeeds with some fuel,
     it returns the same result with any additional fuel. -/

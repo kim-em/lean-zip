@@ -392,7 +392,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                 have hds_bridge : Deflate.Spec.decodeSymbols
                     (Zip.Native.Inflate.fixedLitLengths.toList.map UInt8.toNat)
                     (Zip.Native.Inflate.fixedDistLengths.toList.map UInt8.toNat)
-                    br₂.toBits 1000000000000000000 = some (syms, bits₃) := by
+                    br₂.toBits = some (syms, bits₃) := by
                   rw [hrest₂, Correctness.fixedLitLengths_eq, Correctness.fixedDistLengths_eq]; exact hspec_ds
                 have ⟨br', hhf_nat, hrest₃, hwf₃, hpos₃⟩ :=
                   decodeHuffman_complete
@@ -466,7 +466,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     have hds_bridge : Deflate.Spec.decodeSymbols
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
                         ((distLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
-                        br₃.toBits 1000000000000000000 = some (syms, bits₄) := by
+                        br₃.toBits = some (syms, bits₄) := by
                       rw [hlit_rt, hdist_rt, hrest_dt]; exact hspec_ds
                     have hvlit_bridge : Huffman.Spec.ValidLengths
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat) 15 := by

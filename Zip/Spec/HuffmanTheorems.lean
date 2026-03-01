@@ -381,4 +381,20 @@ theorem decode_suffix {α : Type} (table : List (Codeword × α))
   rw [List.append_assoc]
   exact decode_prefix_free table cw sym (rest ++ suffix) hmem hpf
 
+/-- If `decode` succeeds and all codewords in the table are non-empty,
+    then the remaining bits are strictly shorter than the input. -/
+theorem decode_shorter {α : Type} (table : List (Codeword × α))
+    (bits : List Bool) (sym : α) (rest : List Bool)
+    (h : decode table bits = some (sym, rest))
+    (hnonempty : ∀ cw s, (cw, s) ∈ table → cw ≠ []) :
+    rest.length < bits.length := by
+  obtain ⟨cw, hmem, rfl⟩ := decode_some_append table bits sym rest h
+  have hne := hnonempty cw sym hmem
+  have hpos : cw.length > 0 := by
+    cases cw with
+    | nil => exact absurd rfl hne
+    | cons _ _ => simp
+  simp [List.length_append]
+  omega
+
 end Huffman.Spec

@@ -448,7 +448,6 @@ theorem inflate_deflateDynamic (data : ByteArray)
         hheader'
         henc_syms
         (lz77Greedy_resolves data 32768 (by omega))
-        (by have := lz77Greedy_size_le data 32768; rw [tokensToSymbols_length]; omega)
         (tokensToSymbols_validSymbolList _)
     have hlen : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
       simp only [Array.length_toList, ByteArray.size_data]; omega
