@@ -15,8 +15,8 @@ The specification is structured in layers:
 3. **Block structure**: stored, fixed Huffman, and dynamic Huffman blocks
 4. **Stream decode**: sequence of blocks terminated by a final block
 
-The key correctness theorem (to be proved in future sessions) is that the
-`Zip.Native.Inflate.inflate` implementation agrees with this specification.
+The key correctness theorem `inflate_correct` (in `Zip.Spec.InflateCorrect`)
+proves that `Zip.Native.Inflate.inflate` agrees with this specification.
 -/
 
 namespace Deflate.Spec
@@ -632,7 +632,7 @@ private theorem encodeStored_length_mod8 (data : List UInt8) :
   · simp only [List.length_append, List.length_cons, List.length_nil,
                List.length_replicate, encodeStoredBlock, encodeLEU16,
                List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
-  · have ih := encodeStored_length_mod8 (data.drop 65535)
+  · have := encodeStored_length_mod8 (data.drop 65535)
     simp only [List.length_append, List.length_cons, List.length_nil,
                List.length_replicate, List.length_take,
                encodeStoredBlock, encodeLEU16,
@@ -650,8 +650,7 @@ private theorem decodeStored_encodeStoredBlock (data : List UInt8) (rest : List 
   rw [halign]
   -- drop 5 from [false, false, false, false, false] ++ ...
   simp only [show List.replicate 5 false = [false, false, false, false, false] from rfl,
-    List.cons_append, List.nil_append]
-  simp only [List.drop_succ_cons, List.drop_zero]
+    List.cons_append, List.nil_append, List.drop_succ_cons, List.drop_zero]
   -- Now: readBitsLSB 16 (encodeLEU16 len ++ encodeLEU16 nlen ++ data.flatMap byteToBitsSpec ++ rest)
   simp only [encodeStoredBlock, encodeLEU16, List.append_assoc]
   show (readBitsLSB 16 _ |>.bind _) = _
