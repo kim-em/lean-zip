@@ -122,4 +122,57 @@ theorem IsPrefix_of_IsPrefix_append {a b : List α} {c : List α}
         right; obtain ⟨t', ht'⟩ := h
         exact ⟨t', by rw [← hxy, cons_append, ht']⟩
 
+/-! ## flatMap with uniform-length outputs -/
+
+/-- Dropping `n * k` elements from a flatMap with uniform-length-`k` outputs
+    skips exactly `n` segments. -/
+theorem flatMap_drop_mul (l : List α) (f : α → List β)
+    (k n : Nat) (hk : ∀ a, (f a).length = k) :
+    (l.flatMap f).drop (n * k) = (l.drop n).flatMap f := by
+  induction n generalizing l with
+  | zero => simp
+  | succ m ih =>
+    cases l with
+    | nil => simp
+    | cons a rest =>
+      simp only [flatMap_cons, drop_succ_cons]
+      have hk_eq : (m + 1) * k = (f a).length + m * k := by
+        rw [Nat.succ_mul, hk a, Nat.add_comm]
+      rw [hk_eq, ← drop_drop, drop_left]
+      exact ih rest
+
+/-- Dropping past a prefix of known length. -/
+theorem drop_append_left' {l₁ l₂ : List α} {k : Nat}
+    (h : l₁.length = k) (n : Nat) :
+    (l₁ ++ l₂).drop (k + n) = l₂.drop n := by
+  rw [← drop_drop, drop_left' h]
+
+/-- Dropping `i * k` elements from a flatMap with uniform-length output
+    gives the `i`-th element's image followed by the rest. -/
+theorem flatMap_uniform_drop {f : α → List β} (hf : ∀ a, (f a).length = k)
+    (l : List α) (i : Nat) (hi : i < l.length) :
+    (l.flatMap f).drop (i * k) = f l[i] ++ (l.flatMap f).drop ((i + 1) * k) := by
+  induction l generalizing i with
+  | nil => simp at hi
+  | cons b rest ih =>
+    cases i with
+    | zero =>
+      simp only [flatMap_cons, Nat.zero_mul, drop_zero, getElem_cons_zero,
+        Nat.zero_add, Nat.one_mul]
+      rw [drop_left' (hf b)]
+    | succ j =>
+      simp only [flatMap_cons, getElem_cons_succ]
+      rw [show (j + 1) * k = k + j * k from by rw [Nat.succ_mul, Nat.add_comm],
+          drop_append_left' (hf b),
+          show (j + 2) * k = k + (j + 1) * k from by rw [show j + 2 = (j + 1) + 1 from rfl,
+            Nat.succ_mul, Nat.add_comm],
+          drop_append_left' (hf b)]
+      exact ih j (by simpa using hi)
+
+/-- If `l.drop n = a :: rest`, then `rest = l.drop (n + 1)`. -/
+theorem drop_cons_tail {l : List α} {a : α} {rest : List α} {n : Nat}
+    (h : l.drop n = a :: rest) : rest = l.drop (n + 1) := by
+  have : l.drop (n + 1) = (l.drop n).drop 1 := by rw [drop_drop, Nat.add_comm]
+  rw [this, h, drop_one, tail_cons]
+
 end List

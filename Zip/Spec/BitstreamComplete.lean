@@ -45,7 +45,7 @@ protected theorem readBit_complete (br : Zip.Native.BitReader) (b : Bool) (rest 
   have hrest_eq : rest = rest' := (List.cons.inj hbits).2.symm
   have hrest'_eq : rest' =
       (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff + 1) :=
-    Deflate.Correctness.list_drop_cons_tail hrest'
+    List.drop_cons_tail hrest'
   -- Unfold readBit — pos < data.size so the error branch is impossible
   have hge : ¬(br.pos ≥ br.data.size) := by omega
   simp only [Zip.Native.BitReader.readBit, hge, ↓reduceIte]
