@@ -128,6 +128,49 @@ directly mention the recursive call's result type.
 **Also**: `all_goals (have := f _ _; tac)` with semicolons inside parenthesized
 tactic blocks can cause parse errors. Use separate focused proofs (`·`) instead.
 
+## `simp only []` for Match Reduction
+
+`simp only []` (empty argument list) can reduce `match` expressions
+where the scrutinee is already a constructor:
+
+```lean
+-- After cases/split has resolved the scrutinee:
+simp only []  -- reduces match (LZ77Token.literal b) with ...
+```
+
+This replaces patterns like `simp only [htok]` where the named hypothesis
+was unused by simp — the match reduction happens without it.
+
+## `↓reduceIte` Decision Guide
+
+| Condition Form | `↓reduceIte` Works? | Fix |
+|----------------|---------------------|-----|
+| `if True/False then ...` | Yes | — |
+| `if (n > 0) then ...` (Prop) | After `rw [if_pos/if_neg h]` | Prove `h`, then `rw` |
+| `if (false = true) then ...` | **No** | `if_neg (show ¬(false = true) from nofun)` |
+| `if (x == y) then ...` (Bool) | After `show (x == y) = false` | `Bool.false_eq_true, ↓reduceIte` |
+
+**After WF unfolding** (`rw [f.eq_1]`), function bodies often contain
+`if` branches. The standard pattern: `rw [f.eq_1]; simp only [h, ↓reduceIte]`
+where `h` resolves the guard. See the `lean-wf-recursion` skill for details.
+
+## `decide` vs Structural Proofs for Large Finite Types
+
+`decide` on large finite types (e.g., `∀ i : Fin 288, ...`) requires high
+`maxRecDepth`. Replace with structural proofs that case-split on array
+segments:
+
+```lean
+-- BAD: needs maxRecDepth 4096
+theorem fixedLitLengths_le_15 : ∀ i : Fin 288, fixedLitLengths[i] ≤ 15 := by decide
+
+-- GOOD: structural proof on array segments
+theorem fixedLitLengths_le_15 : ∀ i : Fin 288, fixedLitLengths[i] ≤ 15 := by
+  intro ⟨i, hi⟩
+  simp only [fixedLitLengths, Array.getElem_ofFn]
+  omega  -- or split on ranges
+```
+
 ## `Nat.mod_eq_sub_mod` for Inductive Mod Proofs
 
 When proving `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`:

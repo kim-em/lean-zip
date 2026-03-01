@@ -242,7 +242,11 @@ Then `rw [f_case2 _ h]` in the main proof. This was essential for
 rewrite with `← f` to fold back won't work because `rw` can't match through
 `let` bindings. Use a standalone lemma instead.
 
-## Cross-Reference: Roundtrip Proofs
+## Cross-References
 
-For suffix invariance chains (_append lemmas), goR (decode-with-remaining),
-and accumulator equivalence patterns, see the `lean-roundtrip-proofs` skill.
+- **WF recursion patterns**: `lean-wf-recursion` skill — for well-founded
+  recursion (`termination_by`, `f.induct`, `unfold` vs `rw [f.eq_1]`,
+  dependent `if` guards with `dif_pos`/`dif_neg`, fuel-to-WF migration)
+- **Roundtrip proofs**: `lean-roundtrip-proofs` skill — for suffix invariance
+  chains (_append lemmas), goR (decode-with-remaining), and accumulator
+  equivalence patterns
