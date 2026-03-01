@@ -63,10 +63,15 @@ not the pre-rewrite form.
 
 ## `letFun` Linter False Positive
 
-When `unfold f at h` leaves `have x := e; body` bindings, `simp only [letFun] at h`
-is needed to reduce them before `split at h` can see inner `if` expressions.
+When `unfold f at h` leaves `have x := e; body` bindings, the `letFun` wrapper
+must be reduced before `split at h` can see inner `if` expressions.
 
-The linter may report `letFun` as unused — this is a false positive. Do NOT remove it.
+The linter flags `letFun` as unused in `simp only [letFun] at h` because simp
+handles it via built-in reduction, not the named lemma. Replace with:
+```lean
+dsimp only at h  -- definitional reduction handles letFun
+```
+This eliminates the linter warning while performing the same reduction.
 
 ## Fixing `bind`/`Option.bind`/`Except.bind` Linter Warnings
 
