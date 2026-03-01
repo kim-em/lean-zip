@@ -456,7 +456,98 @@ theorem decode_go_suffix
     (hsuf : suffix.length % 8 = 0)
     (h : decode.go bits acc = some result) :
     decode.go (bits ++ suffix) acc = some result := by
-  sorry
+  suffices ∀ n (bits : List Bool) (acc : List UInt8) (result : List UInt8),
+      bits.length = n → decode.go bits acc = some result →
+      decode.go (bits ++ suffix) acc = some result from
+    this _ bits acc result rfl h
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+  intro bits acc result hlen hgo
+  unfold decode.go at hgo ⊢
+  simp only [bind, Option.bind] at hgo ⊢
+  cases h1 : readBitsLSB 1 bits with
+  | none => simp [h1] at hgo
+  | some p1 =>
+    obtain ⟨bfinal, bits1⟩ := p1
+    simp only [h1] at hgo
+    rw [readBitsLSB_append 1 bits suffix bfinal bits1 h1]
+    simp only
+    cases h2 : readBitsLSB 2 bits1 with
+    | none => simp [h2] at hgo
+    | some p2 =>
+      obtain ⟨btype, bits2⟩ := p2
+      simp only [h2] at hgo
+      rw [readBitsLSB_append 2 bits1 suffix btype bits2 h2]
+      simp only
+      match btype, hgo with
+      | 0, hgo =>
+        -- Stored block
+        cases hs : decodeStored bits2 with
+        | none => simp [hs] at hgo
+        | some ps =>
+          obtain ⟨bytes, bits3⟩ := ps
+          simp only [hs] at hgo
+          rw [decodeStored_append bits2 suffix bytes bits3 hsuf hs]
+          simp only
+          by_cases hf : bfinal == 1
+          · simp [hf] at hgo ⊢; exact hgo
+          · simp [hf] at hgo ⊢
+            by_cases hblen : bits3.length < bits.length
+            · simp [hblen] at hgo
+              exact ⟨hblen, ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rfl hgo⟩
+            · simp [hblen] at hgo
+      | 1, hgo =>
+        -- Fixed Huffman
+        cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
+        | none => simp [hd] at hgo
+        | some pd =>
+          obtain ⟨syms, bits3⟩ := pd
+          simp only [hd] at hgo
+          rw [decodeSymbols_append fixedLitLengths fixedDistLengths bits2 suffix
+              syms bits3 fixedLitLengths_valid fixedDistLengths_valid hd]
+          simp only
+          cases hr : resolveLZ77 syms acc with
+          | none => simp [hr] at hgo
+          | some acc' =>
+            simp only [hr] at hgo ⊢
+            by_cases hf : bfinal == 1
+            · simp [hf] at hgo ⊢; exact hgo
+            · simp [hf] at hgo ⊢
+              by_cases hblen : bits3.length < bits.length
+              · simp [hblen] at hgo
+                exact ⟨hblen, ih bits3.length (hlen ▸ hblen) bits3 acc' result rfl hgo⟩
+              · simp [hblen] at hgo
+      | 2, hgo =>
+        -- Dynamic Huffman
+        cases hdt : decodeDynamicTables bits2 with
+        | none => simp [hdt] at hgo
+        | some pdt =>
+          obtain ⟨litLens, distLens, bits3⟩ := pdt
+          simp only [hdt] at hgo
+          rw [decodeDynamicTables_append bits2 suffix litLens distLens bits3 hdt]
+          simp only
+          have hvl := decodeDynamicTables_valid_lit bits2 litLens distLens bits3 hdt
+          have hvd := decodeDynamicTables_valid_dist bits2 litLens distLens bits3 hdt
+          cases hds : decodeSymbols litLens distLens bits3 with
+          | none => simp [hds] at hgo
+          | some pds =>
+            obtain ⟨syms, bits4⟩ := pds
+            simp only [hds] at hgo
+            rw [decodeSymbols_append litLens distLens bits3 suffix syms bits4 hvl hvd hds]
+            simp only
+            cases hr : resolveLZ77 syms acc with
+            | none => simp [hr] at hgo
+            | some acc' =>
+              simp only [hr] at hgo ⊢
+              by_cases hf : bfinal == 1
+              · simp [hf] at hgo ⊢; exact hgo
+              · simp [hf] at hgo ⊢
+                by_cases hblen : bits4.length < bits.length
+                · simp [hblen] at hgo
+                  exact ⟨hblen, ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo⟩
+                · simp [hblen] at hgo
+      | n + 3, hgo => simp at hgo
 
 /-! ## decode.go with remaining bits
 
@@ -472,12 +563,162 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
     (result : List UInt8) (rest : List Bool)
     (h : decode.goR bits acc = some (result, rest)) :
     decode.go bits acc = some result := by
-  sorry
+  suffices ∀ n (bits : List Bool) (acc : List UInt8)
+      (result : List UInt8) (rest : List Bool),
+      bits.length = n → decode.goR bits acc = some (result, rest) →
+      decode.go bits acc = some result from
+    this _ bits acc result rest rfl h
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+  intro bits acc result rest hlen hgoR
+  unfold decode.goR at hgoR
+  unfold decode.go
+  simp only [bind, Option.bind] at hgoR ⊢
+  cases h1 : readBitsLSB 1 bits with
+  | none => simp [h1] at hgoR
+  | some p1 =>
+    obtain ⟨bfinal, bits1⟩ := p1
+    simp only [h1] at hgoR ⊢
+    cases h2 : readBitsLSB 2 bits1 with
+    | none => simp [h2] at hgoR
+    | some p2 =>
+      obtain ⟨btype, bits2⟩ := p2
+      simp only [h2] at hgoR ⊢
+      match btype, hgoR with
+      | 0, hgoR =>
+        cases hs : decodeStored bits2 with
+        | none => simp [hs] at hgoR
+        | some ps =>
+          obtain ⟨bytes, bits3⟩ := ps
+          simp only [hs] at hgoR ⊢
+          by_cases hf : bfinal == 1
+          · simp [hf] at hgoR ⊢; exact hgoR.1
+          · simp [hf] at hgoR ⊢
+            by_cases hblen : bits3.length < bits.length
+            · simp [hblen] at hgoR ⊢
+              exact ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rest rfl hgoR
+            · simp [hblen] at hgoR
+      | 1, hgoR =>
+        cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
+        | none => simp [hd] at hgoR
+        | some pd =>
+          obtain ⟨syms, bits3⟩ := pd
+          simp only [hd] at hgoR ⊢
+          cases hr : resolveLZ77 syms acc with
+          | none => simp [hr] at hgoR
+          | some acc' =>
+            simp only [hr] at hgoR ⊢
+            by_cases hf : bfinal == 1
+            · simp [hf] at hgoR ⊢; exact hgoR.1
+            · simp [hf] at hgoR ⊢
+              by_cases hblen : bits3.length < bits.length
+              · simp [hblen] at hgoR ⊢
+                exact ih bits3.length (hlen ▸ hblen) bits3 acc' result rest rfl hgoR
+              · simp [hblen] at hgoR
+      | 2, hgoR =>
+        cases hdt : decodeDynamicTables bits2 with
+        | none => simp [hdt] at hgoR
+        | some pdt =>
+          obtain ⟨litLens, distLens, bits3⟩ := pdt
+          simp only [hdt] at hgoR ⊢
+          cases hds : decodeSymbols litLens distLens bits3 with
+          | none => simp [hds] at hgoR
+          | some pds =>
+            obtain ⟨syms, bits4⟩ := pds
+            simp only [hds] at hgoR ⊢
+            cases hr : resolveLZ77 syms acc with
+            | none => simp [hr] at hgoR
+            | some acc' =>
+              simp only [hr] at hgoR ⊢
+              by_cases hf : bfinal == 1
+              · simp [hf] at hgoR ⊢; exact hgoR.1
+              · simp [hf] at hgoR ⊢
+                by_cases hblen : bits4.length < bits.length
+                · simp [hblen] at hgoR ⊢
+                  exact ih bits4.length (hlen ▸ hblen) bits4 acc' result rest rfl hgoR
+                · simp [hblen] at hgoR
+      | n + 3, hgoR => simp at hgoR
 
 /-- If `decode.go` succeeds, `decode.goR` also succeeds with some remaining bits. -/
 theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
     (result : List UInt8) (h : decode.go bits acc = some result) :
     ∃ rest, decode.goR bits acc = some (result, rest) := by
-  sorry
+  suffices ∀ n (bits : List Bool) (acc : List UInt8)
+      (result : List UInt8),
+      bits.length = n → decode.go bits acc = some result →
+      ∃ rest, decode.goR bits acc = some (result, rest) from
+    this _ bits acc result rfl h
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+  intro bits acc result hlen hgo
+  unfold decode.go at hgo
+  unfold decode.goR
+  simp only [bind, Option.bind] at hgo ⊢
+  cases h1 : readBitsLSB 1 bits with
+  | none => simp [h1] at hgo
+  | some p1 =>
+    obtain ⟨bfinal, bits1⟩ := p1
+    simp only [h1] at hgo ⊢
+    cases h2 : readBitsLSB 2 bits1 with
+    | none => simp [h2] at hgo
+    | some p2 =>
+      obtain ⟨btype, bits2⟩ := p2
+      simp only [h2] at hgo ⊢
+      match btype, hgo with
+      | 0, hgo =>
+        cases hs : decodeStored bits2 with
+        | none => simp [hs] at hgo
+        | some ps =>
+          obtain ⟨bytes, bits3⟩ := ps
+          simp only [hs] at hgo ⊢
+          by_cases hf : bfinal == 1
+          · simp [hf] at hgo ⊢; exact hgo
+          · simp [hf] at hgo ⊢
+            by_cases hblen : bits3.length < bits.length
+            · simp [hblen] at hgo ⊢
+              exact ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rfl hgo
+            · simp [hblen] at hgo
+      | 1, hgo =>
+        cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
+        | none => simp [hd] at hgo
+        | some pd =>
+          obtain ⟨syms, bits3⟩ := pd
+          simp only [hd] at hgo ⊢
+          cases hr : resolveLZ77 syms acc with
+          | none => simp [hr] at hgo
+          | some acc' =>
+            simp only [hr] at hgo ⊢
+            by_cases hf : bfinal == 1
+            · simp [hf] at hgo ⊢; exact hgo
+            · simp [hf] at hgo ⊢
+              by_cases hblen : bits3.length < bits.length
+              · simp [hblen] at hgo ⊢
+                exact ih bits3.length (hlen ▸ hblen) bits3 acc' result rfl hgo
+              · simp [hblen] at hgo
+      | 2, hgo =>
+        cases hdt : decodeDynamicTables bits2 with
+        | none => simp [hdt] at hgo
+        | some pdt =>
+          obtain ⟨litLens, distLens, bits3⟩ := pdt
+          simp only [hdt] at hgo ⊢
+          cases hds : decodeSymbols litLens distLens bits3 with
+          | none => simp [hds] at hgo
+          | some pds =>
+            obtain ⟨syms, bits4⟩ := pds
+            simp only [hds] at hgo ⊢
+            cases hr : resolveLZ77 syms acc with
+            | none => simp [hr] at hgo
+            | some acc' =>
+              simp only [hr] at hgo ⊢
+              by_cases hf : bfinal == 1
+              · simp [hf] at hgo ⊢; exact hgo
+              · simp [hf] at hgo ⊢
+                by_cases hblen : bits4.length < bits.length
+                · simp [hblen] at hgo ⊢
+                  exact ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo
+                · simp [hblen] at hgo
+      | n + 3, hgo => simp at hgo
 
 end Deflate.Spec
