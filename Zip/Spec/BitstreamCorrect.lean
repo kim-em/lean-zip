@@ -1,5 +1,6 @@
 import Zip.Spec.Deflate
 import Zip.Native.Inflate
+import ZipForStd.List
 import ZipForStd.Nat
 
 /-!
@@ -17,25 +18,6 @@ def Zip.Native.BitReader.toBits (br : Zip.Native.BitReader) : List Bool :=
   (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff)
 
 namespace Deflate.Correctness
-
-/-! ### Helper lemmas for flatMap with uniform-length functions -/
-
-/-- Dropping `n * k` elements from a flatMap with uniform-length-`k` outputs
-    skips exactly `n` segments. -/
-private theorem flatMap_drop_mul {α β : Type} (l : List α) (f : α → List β)
-    (k n : Nat) (hk : ∀ a, (f a).length = k) :
-    (l.flatMap f).drop (n * k) = (l.drop n).flatMap f := by
-  induction n generalizing l with
-  | zero => simp
-  | succ m ih =>
-    cases l with
-    | nil => simp
-    | cons a rest =>
-      simp only [List.flatMap_cons, List.drop_succ_cons]
-      have hk_eq : (m + 1) * k = (f a).length + m * k := by
-        rw [Nat.succ_mul, hk a, Nat.add_comm]
-      rw [hk_eq, ← List.drop_drop, List.drop_left]
-      exact ih rest
 
 /-- Dropping within the first segment of a flatMap. -/
 private theorem flatMap_cons_drop {α β : Type} (a : α) (rest : List α)
@@ -65,17 +47,13 @@ protected theorem bytesToBits_drop_testBit (data : ByteArray) (pos off : Nat)
     ∃ rest, (Deflate.Spec.bytesToBits data).drop (pos * 8 + off) =
       data[pos].toNat.testBit off :: rest := by
   simp only [Deflate.Spec.bytesToBits]
-  -- Step 1: split drop (pos * 8 + off) into drop off ∘ drop (pos * 8)
-  rw [← List.drop_drop]
-  -- Step 2: drop (pos * 8) skips pos complete 8-bit segments
-  rw [flatMap_drop_mul data.data.toList _ 8 pos
+  -- Steps 1-2: split drop and skip pos complete 8-bit segments
+  rw [← List.drop_drop, List.flatMap_drop_mul data.data.toList _ 8 pos
     Deflate.Spec.bytesToBits.byteToBits_length]
-  -- Step 3: data.data.toList.drop pos = data[pos] :: tail
+  -- Steps 3-4: index into list, then drop within first segment
   have hlen : pos < data.data.toList.length := by
     rw [Array.length_toList]; exact hpos
-  rw [List.drop_eq_getElem_cons hlen]
-  -- Step 4: drop off within first segment
-  rw [flatMap_cons_drop _ _ _ off
+  rw [List.drop_eq_getElem_cons hlen, flatMap_cons_drop _ _ _ off
     (by rw [Deflate.Spec.bytesToBits.byteToBits_length]; omega)]
   -- Step 5: head of (byteToBits data[pos]).drop off is testBit off
   have heq : data.data.toList[pos] = data[pos] := by
@@ -106,11 +84,6 @@ protected theorem uint32_bit_eq_testBit (byte : UInt8) (off : Nat) (hoff : off <
       if byte.toNat.testBit off then 1 else 0 := by
   have := uint32_testBit byte.toUInt32 off (by omega)
   rwa [UInt8.toNat_toUInt32] at this
-
-protected theorem list_drop_cons_tail {l : List α} {a : α} {rest : List α} {n : Nat}
-    (h : l.drop n = a :: rest) : rest = l.drop (n + 1) := by
-  have : l.drop (n + 1) = (l.drop n).drop 1 := by rw [List.drop_drop, Nat.add_comm]
-  rw [this, h, List.drop_one, List.tail_cons]
 
 /-- `readBit` preserves the well-formedness invariant `bitOff < 8`. -/
 theorem readBit_wf (br : Zip.Native.BitReader) (bit : UInt32)
@@ -146,7 +119,7 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
     obtain ⟨rest, hrest⟩ := Deflate.Correctness.bytesToBits_drop_testBit br.data br.pos br.bitOff hpos' hwf
     have hrest_eq : rest =
         (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff + 1) :=
-      Deflate.Correctness.list_drop_cons_tail hrest
+      List.drop_cons_tail hrest
     -- The bit read by readBit matches data[pos]! which equals data[pos]
     have hget : br.data[br.pos]! = br.data[br.pos] := by simp [hpos']
     refine ⟨br.data[br.pos].toNat.testBit br.bitOff, rest, hrest, ?_, ?_⟩
@@ -318,8 +291,7 @@ private theorem readBitsLSB_testBit (m n : Nat) (hm : m < 2 ^ n) (rest : List Bo
   induction n generalizing m with
   | zero => simp [Deflate.Spec.readBitsLSB]; omega
   | succ k ih =>
-    simp only [List.ofFn_succ, List.cons_append]
-    simp only [Deflate.Spec.readBitsLSB]
+    simp only [List.ofFn_succ, List.cons_append, Deflate.Spec.readBitsLSB]
     -- Rewrite tail: m.testBit (i+1) = (m/2).testBit i
     have htb : (fun (i : Fin k) => m.testBit (Fin.succ i).val) =
                (fun (i : Fin k) => (m / 2).testBit i.val) := by
@@ -377,34 +349,6 @@ private theorem readBitsLSB_byteToBits (b : UInt8) (rest : List Bool) :
 
 /-! ### Byte indexing into bytesToBits -/
 
-/-- Helper: dropping past a prefix of known length. -/
-private theorem drop_append_left' {l₁ l₂ : List α} {k : Nat}
-    (h : l₁.length = k) (n : Nat) :
-    (l₁ ++ l₂).drop (k + n) = l₂.drop n := by
-  rw [← List.drop_drop, List.drop_left' h]
-
-/-- Dropping `i * k` elements from a flatMap with uniform-length output
-    gives the `i`-th element's image followed by the rest. -/
-private theorem flatMap_uniform_drop {f : α → List β} (hf : ∀ a, (f a).length = k)
-    (l : List α) (i : Nat) (hi : i < l.length) :
-    (l.flatMap f).drop (i * k) = f l[i] ++ (l.flatMap f).drop ((i + 1) * k) := by
-  induction l generalizing i with
-  | nil => simp at hi
-  | cons b rest ih =>
-    cases i with
-    | zero =>
-      simp only [List.flatMap_cons, Nat.zero_mul, List.drop_zero, List.getElem_cons_zero,
-        Nat.zero_add, Nat.one_mul]
-      rw [List.drop_left' (hf b)]
-    | succ j =>
-      simp only [List.flatMap_cons, List.getElem_cons_succ]
-      rw [show (j + 1) * k = k + j * k from by rw [Nat.succ_mul, Nat.add_comm],
-          drop_append_left' (hf b),
-          show (j + 2) * k = k + (j + 1) * k from by rw [show j + 2 = (j + 1) + 1 from rfl,
-            Nat.succ_mul, Nat.add_comm],
-          drop_append_left' (hf b)]
-      exact ih j (by simpa using hi)
-
 /-- At byte position `pos`, `bytesToBits` gives `byteToBits data[pos]` followed by the rest. -/
 private theorem bytesToBits_getElem (data : ByteArray) (pos : Nat) (hpos : pos < data.size) :
     (Deflate.Spec.bytesToBits data).drop (pos * 8) =
@@ -412,7 +356,7 @@ private theorem bytesToBits_getElem (data : ByteArray) (pos : Nat) (hpos : pos <
         (Deflate.Spec.bytesToBits data).drop ((pos + 1) * 8) := by
   simp only [Deflate.Spec.bytesToBits, ByteArray.size] at *
   have hlen := Deflate.Spec.bytesToBits.byteToBits_length
-  rw [flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simpa using hpos)]
+  rw [List.flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simpa using hpos)]
   simp only [Array.getElem_toList]; rfl
 
 /-- From a byte-aligned reader, `readBitsLSB 8` produces the next byte value. -/
@@ -422,8 +366,7 @@ theorem toBits_readBitsLSB_byte (br : Zip.Native.BitReader)
       some (br.data[br.pos].toNat,
             { br with pos := br.pos + 1, bitOff := 0 : Zip.Native.BitReader }.toBits) := by
   simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
-  rw [bytesToBits_getElem br.data br.pos hpos]
-  rw [readBitsLSB_byteToBits]
+  rw [bytesToBits_getElem br.data br.pos hpos, readBitsLSB_byteToBits]
 
 /-- `alignToByte` produces a byte-aligned BitReader. -/
 theorem alignToByte_wf (br : Zip.Native.BitReader) :
