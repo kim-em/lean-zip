@@ -124,7 +124,7 @@ where
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. -/
 def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
-  let tokens := lz77Greedy data windowSize
+  let tokens := lz77GreedyIter data windowSize
   let (litFreqs, distFreqs) := tokenFreqs tokens
   -- Convert frequencies to (symbol, freq) pairs
   let litFreqPairs := (List.range litFreqs.size).map fun i => (i, litFreqs[i]!)
