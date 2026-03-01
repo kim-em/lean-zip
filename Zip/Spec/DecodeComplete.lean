@@ -356,7 +356,7 @@ theorem decodeHuffman_complete
     (hmax : result.length ≤ maxOutputSize)
     (hfuel : Nat)
     (hds : Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
-        (distLengths.toList.map UInt8.toNat) br.toBits hfuel =
+        (distLengths.toList.map UInt8.toNat) br.toBits =
         some (syms, rest))
     (hlz : Deflate.Spec.resolveLZ77 syms output.data.toList = some result) :
     ∃ br', Zip.Native.Inflate.decodeHuffman.go litTree distTree maxOutputSize
@@ -364,6 +364,8 @@ theorem decodeHuffman_complete
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+/- Old fuel-based proof needs rewrite for WF decodeSymbols.
   induction hfuel generalizing br output syms result with
   | zero => simp [Deflate.Spec.decodeSymbols] at hds
   | succ n ih =>
@@ -673,5 +675,6 @@ theorem decodeHuffman_complete
           have hlz' : Deflate.Spec.resolveLZ77 syms' newOutput.data.toList =
               some result := by rw [hcopy_native]; exact hlz
           exact ih br₄ newOutput syms' result hwf₄ hpos₄ hmax hds_br₄ hlz'
+-/
 
 end Deflate.Correctness

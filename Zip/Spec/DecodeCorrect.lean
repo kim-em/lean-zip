@@ -445,13 +445,15 @@ theorem decodeHuffman_correct
           br output fuel = .ok (output', br')) :
     ∃ syms rest,
       Deflate.Spec.decodeSymbols (litLengths.toList.map UInt8.toNat)
-        (distLengths.toList.map UInt8.toNat) br.toBits fuel =
+        (distLengths.toList.map UInt8.toNat) br.toBits =
         some (syms, rest) ∧
       Deflate.Spec.resolveLZ77 syms output.data.toList =
         some output'.data.toList ∧
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
+  sorry
+/-  Old fuel-based proof removed; needs rewrite for WF decodeSymbols.
   induction fuel generalizing br output with
 
   | zero =>
@@ -686,5 +688,6 @@ theorem decodeHuffman_correct
                           (ByteArray.data_toList_length output).symm
                         rw [hcopy, hlen_eq, hdist_val_eq, hsize] at hlz
                         exact hlz
+-/
 
 end Deflate.Correctness

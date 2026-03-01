@@ -253,7 +253,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                 have hds_bridge : Deflate.Spec.decodeSymbols
                     (Inflate.fixedLitLengths.toList.map UInt8.toNat)
                     (Inflate.fixedDistLengths.toList.map UInt8.toNat)
-                    br₂.toBits 1000000000000000000 = some (syms, bits₃) := by
+                    br₂.toBits = some (syms, bits₃) := by
                   rw [hrest₂, Deflate.Correctness.fixedLitLengths_eq,
                       Deflate.Correctness.fixedDistLengths_eq]; exact hspec_ds
                 have ⟨br', hhf_nat, hrest₃, hwf₃, hpos₃⟩ :=
@@ -349,7 +349,7 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
                     have hds_bridge : Deflate.Spec.decodeSymbols
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
                         ((distLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat)
-                        br₃.toBits 1000000000000000000 = some (syms, bits₄) := by
+                        br₃.toBits = some (syms, bits₄) := by
                       rw [hlit_rt, hdist_rt, hrest_dt]; exact hspec_ds
                     have hvlit_bridge : Huffman.Spec.ValidLengths
                         ((litLens.map Nat.toUInt8).toArray.toList.map UInt8.toNat) 15 := by

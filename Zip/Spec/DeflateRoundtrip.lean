@@ -101,7 +101,6 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8)
         · exact Deflate.Spec.encodeFixed_goR_rest
             (tokensToSymbols (lz77Greedy data)) data.data.toList allBits padding
             henc_syms (lz77Greedy_resolves data 32768 (by omega))
-            (by rw [tokensToSymbols_length]; have := lz77Greedy_size_le data 32768; omega)
             (tokensToSymbols_validSymbolList _)
         · simp [padding, List.length_replicate]; omega
     · split
@@ -124,7 +123,6 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8)
           · exact Deflate.Spec.encodeFixed_goR_rest
               (tokensToSymbols (lz77Lazy data)) data.data.toList allBits padding
               henc_syms (lz77Lazy_resolves data 32768 (by omega))
-              (by rw [tokensToSymbols_length]; have := lz77Lazy_size_le data 32768; omega)
               (tokensToSymbols_validSymbolList _)
           · simp [padding, List.length_replicate]; omega
       · -- Levels 5+: dynamic Huffman
@@ -150,7 +148,6 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8)
             litLens distLens headerBits symBits padding
             hv_lit hv_dist hheader henc_syms
             (lz77Greedy_resolves data 32768 (by omega))
-            (by have := lz77Greedy_size_le data 32768; rw [tokensToSymbols_length]; omega)
             (tokensToSymbols_validSymbolList _)
         · simp [padding, List.length_replicate]; omega
 
