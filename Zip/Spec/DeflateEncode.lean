@@ -341,7 +341,7 @@ theorem findDistCode_upper (dist idx extraN extraV : Nat)
   rw [getElem!_pos distBase (idx + 1) hsize]
   exact this
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- If Huffman decode gives a symbol < 256, `decodeLitLen` returns a literal. -/
 theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
     (bits rest : List Bool) (sym : Nat)
@@ -353,7 +353,7 @@ theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
   unfold decodeLitLen
   simp only [hdec, bind, Option.bind, if_pos hlt, pure, Pure.pure]
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- If Huffman decode gives symbol 256, `decodeLitLen` returns endOfBlock. -/
 theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
     (bits rest : List Bool)
@@ -365,7 +365,7 @@ theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
   simp only [hdec, bind, Option.bind, show ¬(256 : Nat) < 256 from by omega,
     if_false, show (256 : Nat) == 256 from rfl, if_true, pure, Pure.pure]
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 2048 in
 /-- Encoding then decoding one LZ77 symbol recovers it. -/
 theorem encodeLitLen_decodeLitLen
     (litLengths distLengths : List Nat) (sym : LZ77Symbol)
