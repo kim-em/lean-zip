@@ -420,7 +420,7 @@ theorem copyLoop_eq_ofFn
     hd_pos (by omega) (Nat.zero_le _) rfl (fun _ _ => rfl) (by simp [List.ofFn])
 
 /-- Codewords in `allCodes` tables are nonempty. -/
-private theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
+theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
     ∀ cw (s : Nat), (cw, s) ∈
       (Huffman.Spec.allCodes lengths maxBits).map (fun (s, cw) => (cw, s)) →
       cw ≠ [] := by
