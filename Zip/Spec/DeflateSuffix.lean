@@ -230,78 +230,86 @@ private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
 private theorem decodeCLSymbols_append
     (clTable : List (Huffman.Spec.Codeword × Nat))
     (totalCodes : Nat) (acc : List Nat) (bits suffix : List Bool)
-    (fuel : Nat) (result : List Nat) (rest : List Bool)
+    (result : List Nat) (rest : List Bool)
     (hpf : ∀ cw₁ s₁ cw₂ s₂, (cw₁, s₁) ∈ clTable → (cw₂, s₂) ∈ clTable →
       (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂)
-    (h : decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits fuel =
+    (h : decodeDynamicTables.decodeCLSymbols clTable totalCodes acc bits =
       some (result, rest)) :
-    decodeDynamicTables.decodeCLSymbols clTable totalCodes acc (bits ++ suffix) fuel =
+    decodeDynamicTables.decodeCLSymbols clTable totalCodes acc (bits ++ suffix) =
       some (result, rest ++ suffix) := by
-  induction fuel generalizing acc bits result rest with
-  | zero => simp [decodeDynamicTables.decodeCLSymbols] at h
-  | succ n ih =>
-    unfold decodeDynamicTables.decodeCLSymbols at h ⊢
-    by_cases hge : acc.length ≥ totalCodes
-    · rw [if_pos hge] at h ⊢
-      obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-    · rw [if_neg hge] at h ⊢
-      cases hdec : Huffman.Spec.decode clTable bits with
-      | none => simp [hdec] at h
-      | some p =>
-        obtain ⟨sym, bits'⟩ := p
-        rw [hdec] at h; dsimp only [bind, Option.bind] at h ⊢
-        rw [Huffman.Spec.decode_suffix clTable bits suffix sym bits' hdec hpf]
-        dsimp only [bind, Option.bind]
-        by_cases hsym16 : sym < 16
-        · rw [if_pos hsym16] at h ⊢
-          exact ih (acc ++ [sym]) bits' result rest h
-        · rw [if_neg hsym16] at h ⊢
-          by_cases hsym16eq : (sym == 16) = true
-          · rw [if_pos hsym16eq] at h ⊢
-            by_cases hg : (0 : Nat) < acc.length
-            · simp only [guard, hg, ↓reduceIte] at h ⊢
-              cases hrb : readBitsLSB 2 bits' with
+  have hrec : ∀ (acc' : List Nat) (bits' : List Bool)
+      (result' : List Nat) (rest' : List Bool),
+      totalCodes - acc'.length < totalCodes - acc.length →
+      decodeDynamicTables.decodeCLSymbols clTable totalCodes acc' bits' =
+        some (result', rest') →
+      decodeDynamicTables.decodeCLSymbols clTable totalCodes acc' (bits' ++ suffix) =
+        some (result', rest' ++ suffix) :=
+    fun acc' bits' result' rest' hlt h' =>
+      decodeCLSymbols_append clTable totalCodes acc' bits' suffix result' rest' hpf h'
+  unfold decodeDynamicTables.decodeCLSymbols at h ⊢
+  by_cases hge : acc.length ≥ totalCodes
+  · rw [if_pos hge] at h ⊢
+    obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
+  · rw [if_neg hge] at h ⊢
+    cases hdec : Huffman.Spec.decode clTable bits with
+    | none => simp [hdec] at h
+    | some p =>
+      obtain ⟨sym, bits'⟩ := p
+      rw [hdec] at h; dsimp only [bind, Option.bind] at h ⊢
+      rw [Huffman.Spec.decode_suffix clTable bits suffix sym bits' hdec hpf]
+      dsimp only [bind, Option.bind]
+      by_cases hsym16 : sym < 16
+      · rw [if_pos hsym16] at h ⊢
+        exact hrec _ _ _ _ (by simp; omega) h
+      · rw [if_neg hsym16] at h ⊢
+        by_cases hsym16eq : (sym == 16) = true
+        · rw [if_pos hsym16eq] at h ⊢
+          by_cases hg : acc.length == 0
+          · simp [hg] at h
+          · rw [if_neg hg] at h ⊢
+            cases hrb : readBitsLSB 2 bits' with
+            | none => simp [hrb] at h
+            | some q =>
+              obtain ⟨rep, bits''⟩ := q
+              rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
+              rw [readBitsLSB_append 2 bits' suffix rep bits'' hrb]
+              dsimp only [bind, Option.bind]
+              by_cases hg2 : (acc ++ List.replicate (rep + 3) acc.getLast!).length ≤ totalCodes
+              · simp only [hg2, ↓reduceIte] at h ⊢
+                exact hrec _ _ _ _ (by simp [List.length_append, List.length_replicate]; omega) h
+              · simp only [hg2, ↓reduceIte] at h; simp at h
+        · rw [if_neg hsym16eq] at h ⊢
+          by_cases hsym17 : (sym == 17) = true
+          · rw [if_pos hsym17] at h ⊢
+            cases hrb : readBitsLSB 3 bits' with
+            | none => simp [hrb] at h
+            | some q =>
+              obtain ⟨rep, bits''⟩ := q
+              rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
+              rw [readBitsLSB_append 3 bits' suffix rep bits'' hrb]
+              dsimp only [bind, Option.bind]
+              by_cases hg : (acc ++ List.replicate (rep + 3) 0).length ≤ totalCodes
+              · simp only [hg, ↓reduceIte] at h ⊢
+                exact hrec _ _ _ _ (by simp [List.length_append, List.length_replicate]; omega) h
+              · simp only [hg, ↓reduceIte] at h; simp at h
+          · rw [if_neg hsym17] at h ⊢
+            by_cases hsym18 : (sym == 18) = true
+            · rw [if_pos hsym18] at h ⊢
+              cases hrb : readBitsLSB 7 bits' with
               | none => simp [hrb] at h
               | some q =>
                 obtain ⟨rep, bits''⟩ := q
                 rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
-                rw [readBitsLSB_append 2 bits' suffix rep bits'' hrb]
+                rw [readBitsLSB_append 7 bits' suffix rep bits'' hrb]
                 dsimp only [bind, Option.bind]
-                by_cases hg2 : (acc ++ List.replicate (rep + 3) acc.getLast!).length ≤ totalCodes
-                · simp only [hg2, ↓reduceIte] at h ⊢
-                  exact ih _ bits'' result rest h
-                · simp only [hg2, ↓reduceIte] at h; simp at h
-            · simp only [guard, hg, ↓reduceIte] at h; simp at h
-          · rw [if_neg hsym16eq] at h ⊢
-            by_cases hsym17 : (sym == 17) = true
-            · rw [if_pos hsym17] at h ⊢
-              cases hrb : readBitsLSB 3 bits' with
-              | none => simp [hrb] at h
-              | some q =>
-                obtain ⟨rep, bits''⟩ := q
-                rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
-                rw [readBitsLSB_append 3 bits' suffix rep bits'' hrb]
-                dsimp only [bind, Option.bind]
-                by_cases hg : (acc ++ List.replicate (rep + 3) 0).length ≤ totalCodes
-                · simp only [guard, hg, ↓reduceIte] at h ⊢
-                  exact ih _ bits'' result rest h
-                · simp only [guard, hg, ↓reduceIte] at h; simp at h
-            · rw [if_neg hsym17] at h ⊢
-              by_cases hsym18 : (sym == 18) = true
-              · rw [if_pos hsym18] at h ⊢
-                cases hrb : readBitsLSB 7 bits' with
-                | none => simp [hrb] at h
-                | some q =>
-                  obtain ⟨rep, bits''⟩ := q
-                  rw [hrb] at h; dsimp only [bind, Option.bind] at h ⊢
-                  rw [readBitsLSB_append 7 bits' suffix rep bits'' hrb]
-                  dsimp only [bind, Option.bind]
-                  by_cases hg : (acc ++ List.replicate (rep + 11) 0).length ≤ totalCodes
-                  · simp only [guard, hg, ↓reduceIte] at h ⊢
-                    exact ih _ bits'' result rest h
-                  · simp only [guard, hg, ↓reduceIte] at h; simp at h
-              · rw [if_neg hsym18] at h ⊢
-                simp at h
+                by_cases hg : (acc ++ List.replicate (rep + 11) 0).length ≤ totalCodes
+                · simp only [hg, ↓reduceIte] at h ⊢
+                  exact hrec _ _ _ _ (by simp [List.length_append, List.length_replicate]; omega) h
+                · simp only [hg, ↓reduceIte] at h; simp at h
+            · rw [if_neg hsym18] at h ⊢
+              simp at h
+termination_by totalCodes - acc.length
+decreasing_by all_goals assumption
 
 private theorem replicate_19_zero :
     List.replicate 19 0 =
@@ -336,8 +344,7 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
           by_cases hvCL : Huffman.Spec.ValidLengths clLengths 7
           · cases hcls : decodeDynamicTables.decodeCLSymbols
                 ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
-                (hlit + 257 + (hdist + 1)) [] bits₄
-                (hlit + 257 + (hdist + 1) + 1) with
+                (hlit + 257 + (hdist + 1)) [] bits₄ with
             | none =>
               simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
             | some p₅ =>
@@ -355,7 +362,7 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                     have h4' := readBitsLSB_append 4 bits₂ suffix hclen bits₃ h4
                     have hcl_a := replicate_19_zero ▸
                       readCLLengths_append _ 0 _ bits₃ suffix clLengths bits₄ hcl
-                    have hcls' := decodeCLSymbols_append _ _ [] bits₄ suffix _
+                    have hcls' := decodeCLSymbols_append _ _ [] bits₄ suffix
                         codeLengths bits₅
                         (allCodes_swapped_prefix_free clLengths 7 hvCL) hcls
                     simp [h5', h5d', h4', hcl_a, hvCL, hcls', hlen, hvLL, hvDL,
@@ -398,8 +405,7 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
           by_cases hvCL : Huffman.Spec.ValidLengths clLengths 7
           · cases hcls : decodeDynamicTables.decodeCLSymbols
                 ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
-                (hlit + 257 + (hdist + 1)) [] bits₄
-                (hlit + 257 + (hdist + 1) + 1) with
+                (hlit + 257 + (hdist + 1)) [] bits₄ with
             | none =>
               simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
             | some p₅ =>

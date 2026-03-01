@@ -101,12 +101,13 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
     (hsize_cl : clLengths.size ≤ UInt16.size)
     (hidx : idx ≤ totalCodes)
     (hsize : totalCodes ≤ codeLengths.size)
+    (hfuel : fuel ≥ totalCodes - idx + 1)
     (hspec : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
         ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
           fun (sym, cw) => (cw, sym))
         totalCodes
         ((codeLengths.extract 0 idx).toList.map UInt8.toNat)
-        br.toBits fuel =
+        br.toBits =
         some (resultLens, rest)) :
     ∃ codeLengths' br',
       Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes fuel =
@@ -116,7 +117,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
   induction fuel generalizing br codeLengths idx with
-  | zero => simp [Deflate.Spec.decodeDynamicTables.decodeCLSymbols] at hspec
+  | zero => omega
   | succ fuel ih =>
     unfold Deflate.Spec.decodeDynamicTables.decodeCLSymbols at hspec
     have hle : idx ≤ codeLengths.size := by omega
@@ -133,7 +134,6 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
     · -- acc.length < totalCodes: decode a symbol
       rename_i hlt; rw [h_acc_len] at hlt
       have hidx_lt : idx < totalCodes := by omega
-      simp only [bind, Option.bind] at hspec
       cases hdec_spec : Huffman.Spec.decode
           ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
             fun (sym, cw) => (cw, sym)) br.toBits with
@@ -168,7 +168,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
             simp [Array.size_setIfInBounds]; omega
           have ⟨cl', br', hrec, heq, hrest', hwf', hpos'⟩ :=
             ih br₁ (codeLengths.set! idx sym.toUInt16.toUInt8) (idx + 1) hwf₁ hpos₁
-              (by omega) hsize₁ (by
+              (by omega) hsize₁ (by omega) (by
                 rw [Array.extract_set_map_append codeLengths idx sym.toUInt16.toUInt8 (by omega),
                     hsym_conv, hrest₁]; exact hspec)
           refine ⟨cl', br', ?_, heq, hrest', hwf', hpos'⟩
@@ -187,11 +187,14 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
           · -- sym == 16: repeat previous
             rename_i hsym16
             have hsym16_val : sym = 16 := by simp only [beq_iff_eq] at hsym16; exact hsym16
-            simp only [guard, h_acc_len] at hspec
-            by_cases hidx0 : idx > 0
-            · -- guard passes
-              rw [if_pos hidx0] at hspec
-              simp only [pure, Pure.pure] at hspec
+            -- WF: if acc.length == 0 then none else match readBitsLSB 2 ...
+            split at hspec
+            · -- acc.length == 0: none = some contradiction
+              simp at hspec
+            · -- acc.length ≠ 0
+              rename_i hne0
+              have hidx0 : idx > 0 := by
+                simp only [h_acc_len, beq_iff_eq] at hne0; omega
               -- readBitsLSB 2
               cases hrd_spec : Deflate.Spec.readBitsLSB 2 bits₁ with
               | none => simp [hrd_spec] at hspec
@@ -202,16 +205,13 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                 have ⟨br₂, hrd_nat, hrest₂, hwf₂, hpos₂⟩ :=
                   readBits_complete br₁ 2 rep bits₂ hwf₁ hpos₁ (by omega) hval_bound
                     (by rw [hrest₁]; exact hrd_spec)
-                -- Split on second guard: idx + (rep + 3) ≤ totalCodes
-                have h_acc_len₂ : (List.map UInt8.toNat (codeLengths.extract 0 idx).toList ++
-                    List.replicate (rep + 3) (List.map UInt8.toNat (codeLengths.extract 0 idx).toList).getLast!).length
-                    = idx + (rep + 3) := by
-                  simp [List.length_append, List.length_replicate, List.length_map,
-                    Array.length_toList, Nat.min_eq_left hle]
-                simp only [guard, h_acc_len₂] at hspec
-                by_cases hbound_ok : idx + (rep + 3) ≤ totalCodes
-                · rw [if_pos hbound_ok] at hspec
-                  simp only [pure, Pure.pure] at hspec
+                -- Bound check: if acc'.length ≤ totalCodes
+                split at hspec
+                · -- bound holds
+                  rename_i h_le
+                  have hbound_ok : idx + (rep + 3) ≤ totalCodes := by
+                    simp [List.length_append, List.length_replicate, List.length_map,
+                      Array.length_toList, Nat.min_eq_left hle] at h_le; exact h_le
                   have hfill_snd := fillEntries_snd codeLengths idx (rep + 3) totalCodes
                     codeLengths[idx - 1]! hbound_ok
                   have hfill_ext := fillEntries_extract codeLengths idx (rep + 3) totalCodes
@@ -221,7 +221,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                     (Zip.Native.Inflate.fillEntries codeLengths idx (rep + 3) totalCodes
                       codeLengths[idx - 1]!).fst
                     (idx + (rep + 3)) hwf₂ hpos₂
-                    (by omega) (by rw [fillEntries_size]; omega) (by
+                    (by omega) (by rw [fillEntries_size]; omega) (by omega) (by
                       rw [hfill_ext, ← hprev_eq, hrest₂]; exact hspec)
                   refine ⟨cl', br', ?_, heq, hrest', hwf', hpos'⟩
                   unfold Zip.Native.Inflate.decodeCLSymbols
@@ -241,10 +241,8 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                   simp only [hcount, ↓reduceIte]
                   rw [show rep.toUInt32.toNat + 3 = rep + 3 from by rw [hrep_toNat]]
                   rw [hfill_snd]; exact hrec
-                · -- guard fails: none = some contradiction
-                  rw [if_neg hbound_ok] at hspec; simp at hspec
-            · -- idx = 0, guard fails: none = some contradiction
-              rw [if_neg (by omega : ¬(idx > 0))] at hspec; simp at hspec
+                · -- bound fails: none = some contradiction
+                  simp at hspec
           · -- sym ≠ 16
             rename_i hsym_ne16
             have h16_false : (sym.toUInt16 == 16) = false := by
@@ -265,15 +263,13 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                 have ⟨br₂, hrd_nat, hrest₂, hwf₂, hpos₂⟩ :=
                   readBits_complete br₁ 3 rep bits₂ hwf₁ hpos₁ (by omega) hval_bound
                     (by rw [hrest₁]; exact hrd_spec)
-                -- guard (acc.length + (rep + 3) ≤ totalCodes)
-                have h_acc_len₂ : (List.map UInt8.toNat (codeLengths.extract 0 idx).toList ++
-                    List.replicate (rep + 3) 0).length = idx + (rep + 3) := by
-                  simp [List.length_append, List.length_replicate, List.length_map,
-                    Array.length_toList, Nat.min_eq_left hle]
-                simp only [guard, h_acc_len₂] at hspec
-                by_cases hbound_ok : idx + (rep + 3) ≤ totalCodes
-                · rw [if_pos hbound_ok] at hspec
-                  simp only [pure, Pure.pure] at hspec
+                -- Bound check: if acc'.length ≤ totalCodes
+                split at hspec
+                · -- bound holds
+                  rename_i h_le
+                  have hbound_ok : idx + (rep + 3) ≤ totalCodes := by
+                    simp [List.length_append, List.length_replicate, List.length_map,
+                      Array.length_toList, Nat.min_eq_left hle] at h_le; exact h_le
                   have hfill_snd := fillEntries_snd codeLengths idx (rep + 3) totalCodes
                     (0 : UInt8) hbound_ok
                   have hfill_ext := fillEntries_extract codeLengths idx (rep + 3) totalCodes
@@ -281,7 +277,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                   have ⟨cl', br', hrec, heq, hrest', hwf', hpos'⟩ := ih br₂
                     (Zip.Native.Inflate.fillEntries codeLengths idx (rep + 3) totalCodes 0).fst
                     (idx + (rep + 3)) hwf₂ hpos₂
-                    (by omega) (by rw [fillEntries_size]; omega) (by
+                    (by omega) (by rw [fillEntries_size]; omega) (by omega) (by
                       rw [hfill_ext, show (0 : UInt8).toNat = 0 from rfl, hrest₂]
                       exact hspec)
                   refine ⟨cl', br', ?_, heq, hrest', hwf', hpos'⟩
@@ -299,7 +295,8 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                   simp only [hcount, ↓reduceIte]
                   rw [show rep.toUInt32.toNat + 3 = rep + 3 from by rw [hrep_toNat]]
                   rw [hfill_snd]; exact hrec
-                · rw [if_neg hbound_ok] at hspec; simp at hspec
+                · -- bound fails
+                  simp at hspec
             · -- sym ≠ 17
               rename_i hsym_ne17
               have h17_false : (sym.toUInt16 == 17) = false := by
@@ -320,15 +317,13 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                   have ⟨br₂, hrd_nat, hrest₂, hwf₂, hpos₂⟩ :=
                     readBits_complete br₁ 7 rep bits₂ hwf₁ hpos₁ (by omega) hval_bound
                       (by rw [hrest₁]; exact hrd_spec)
-                  -- guard
-                  have h_acc_len₂ : (List.map UInt8.toNat (codeLengths.extract 0 idx).toList ++
-                      List.replicate (rep + 11) 0).length = idx + (rep + 11) := by
-                    simp [List.length_append, List.length_replicate, List.length_map,
-                    Array.length_toList, Nat.min_eq_left hle]
-                  simp only [guard, h_acc_len₂] at hspec
-                  by_cases hbound_ok : idx + (rep + 11) ≤ totalCodes
-                  · rw [if_pos hbound_ok] at hspec
-                    simp only [pure, Pure.pure] at hspec
+                  -- Bound check: if acc'.length ≤ totalCodes
+                  split at hspec
+                  · -- bound holds
+                    rename_i h_le
+                    have hbound_ok : idx + (rep + 11) ≤ totalCodes := by
+                      simp [List.length_append, List.length_replicate, List.length_map,
+                        Array.length_toList, Nat.min_eq_left hle] at h_le; exact h_le
                     have hfill_snd := fillEntries_snd codeLengths idx (rep + 11) totalCodes
                       (0 : UInt8) hbound_ok
                     have hfill_ext := fillEntries_extract codeLengths idx (rep + 11) totalCodes
@@ -336,7 +331,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                     have ⟨cl', br', hrec, heq, hrest', hwf', hpos'⟩ := ih br₂
                       (Zip.Native.Inflate.fillEntries codeLengths idx (rep + 11) totalCodes 0).fst
                       (idx + (rep + 11)) hwf₂ hpos₂
-                      (by omega) (by rw [fillEntries_size]; omega) (by
+                      (by omega) (by rw [fillEntries_size]; omega) (by omega) (by
                         rw [hfill_ext, show (0 : UInt8).toNat = 0 from rfl, hrest₂]
                         exact hspec)
                     refine ⟨cl', br', ?_, heq, hrest', hwf', hpos'⟩
@@ -355,7 +350,8 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                     simp only [hcount, ↓reduceIte]
                     rw [show rep.toUInt32.toNat + 11 = rep + 11 from by rw [hrep_toNat]]
                     rw [hfill_snd]; exact hrec
-                  · rw [if_neg hbound_ok] at hspec; simp at hspec
+                  · -- bound fails
+                    simp at hspec
               · -- sym ∉ {<16, 16, 17, 18}: none, contradicts hspec
                 simp at hspec
 
