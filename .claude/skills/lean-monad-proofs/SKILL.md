@@ -95,6 +95,10 @@ false positive. Do NOT remove it; doing so breaks the proof.
 
 ## Fixing `bind`/`Option.bind` Linter Warnings
 
+**This is the most commonly rediscovered pattern in this codebase.**
+If you're about to write `simp only [hX, bind, Option.bind]`, stop —
+use the two-step pattern below instead.
+
 The linter flags `bind` and `Option.bind` as unused in
 `simp only [hX, bind, Option.bind]` because they contribute only via dsimp
 (definitional simplification), not as rewrite rules. Do NOT suppress with
