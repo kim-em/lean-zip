@@ -626,4 +626,142 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless e.contains "all weights are zero" do
       throw (IO.userError s!"all-zero weights: wrong error: {e}")
 
+  -- Test 55: decodeLitLenValue — code 0 (baseline 0, 0 extra bits)
+  match Zip.Native.decodeLitLenValue 0 0 with
+  | .ok v =>
+    unless v == 0 do throw (IO.userError s!"litLen code 0: expected 0, got {v}")
+  | .error e => throw (IO.userError s!"litLen code 0 failed: {e}")
+
+  -- Test 56: decodeLitLenValue — code 15 (baseline 15, 0 extra bits)
+  match Zip.Native.decodeLitLenValue 15 0 with
+  | .ok v =>
+    unless v == 15 do throw (IO.userError s!"litLen code 15: expected 15, got {v}")
+  | .error e => throw (IO.userError s!"litLen code 15 failed: {e}")
+
+  -- Test 57: decodeLitLenValue — code 16 (baseline 16, 1 extra bit)
+  -- With extraBits = 1: 16 + 1 = 17
+  match Zip.Native.decodeLitLenValue 16 1 with
+  | .ok v =>
+    unless v == 17 do throw (IO.userError s!"litLen code 16 extra 1: expected 17, got {v}")
+  | .error e => throw (IO.userError s!"litLen code 16 failed: {e}")
+
+  -- Test 58: decodeLitLenValue — code 35 (baseline 65536, 16 extra bits)
+  -- With extraBits = 0: 65536
+  match Zip.Native.decodeLitLenValue 35 0 with
+  | .ok v =>
+    unless v == 65536 do throw (IO.userError s!"litLen code 35: expected 65536, got {v}")
+  | .error e => throw (IO.userError s!"litLen code 35 failed: {e}")
+
+  -- Test 59: decodeLitLenValue — out of range code 36
+  match Zip.Native.decodeLitLenValue 36 0 with
+  | .ok _ => throw (IO.userError "litLen code 36: should have failed")
+  | .error e =>
+    unless e.contains "out of range" do
+      throw (IO.userError s!"litLen code 36: wrong error: {e}")
+
+  -- Test 60: decodeMatchLenValue — code 0 (baseline 3, 0 extra bits)
+  match Zip.Native.decodeMatchLenValue 0 0 with
+  | .ok v =>
+    unless v == 3 do throw (IO.userError s!"matchLen code 0: expected 3, got {v}")
+  | .error e => throw (IO.userError s!"matchLen code 0 failed: {e}")
+
+  -- Test 61: decodeMatchLenValue — code 31 (baseline 34, 0 extra bits)
+  match Zip.Native.decodeMatchLenValue 31 0 with
+  | .ok v =>
+    unless v == 34 do throw (IO.userError s!"matchLen code 31: expected 34, got {v}")
+  | .error e => throw (IO.userError s!"matchLen code 31 failed: {e}")
+
+  -- Test 62: decodeMatchLenValue — code 32 (baseline 35, 1 extra bit)
+  -- With extraBits = 1: 35 + 1 = 36
+  match Zip.Native.decodeMatchLenValue 32 1 with
+  | .ok v =>
+    unless v == 36 do throw (IO.userError s!"matchLen code 32 extra 1: expected 36, got {v}")
+  | .error e => throw (IO.userError s!"matchLen code 32 failed: {e}")
+
+  -- Test 63: decodeMatchLenValue — code 52 (baseline 65539, 16 extra bits)
+  match Zip.Native.decodeMatchLenValue 52 0 with
+  | .ok v =>
+    unless v == 65539 do throw (IO.userError s!"matchLen code 52: expected 65539, got {v}")
+  | .error e => throw (IO.userError s!"matchLen code 52 failed: {e}")
+
+  -- Test 64: decodeMatchLenValue — out of range code 53
+  match Zip.Native.decodeMatchLenValue 53 0 with
+  | .ok _ => throw (IO.userError "matchLen code 53: should have failed")
+  | .error e =>
+    unless e.contains "out of range" do
+      throw (IO.userError s!"matchLen code 53: wrong error: {e}")
+
+  -- Test 65: decodeOffsetValue — code 1, extraBits 0 → (1 << 1) + 0 = 2
+  let offVal1 := Zip.Native.decodeOffsetValue 1 0
+  unless offVal1 == 2 do throw (IO.userError s!"offset code 1: expected 2, got {offVal1}")
+
+  -- Test 66: decodeOffsetValue — code 5, extraBits 10 → (1 << 5) + 10 = 42
+  let offVal5 := Zip.Native.decodeOffsetValue 5 10
+  unless offVal5 == 42 do throw (IO.userError s!"offset code 5: expected 42, got {offVal5}")
+
+  -- Test 67: decodeOffsetValue — code 20, extraBits 0 → (1 << 20) = 1048576
+  let offVal20 := Zip.Native.decodeOffsetValue 20 0
+  unless offVal20 == 1048576 do throw (IO.userError s!"offset code 20: expected 1048576, got {offVal20}")
+
+  -- Test 68: decodeOffsetValue — code 0, extraBits 5 → 5 (special case)
+  let offVal0 := Zip.Native.decodeOffsetValue 0 5
+  unless offVal0 == 5 do throw (IO.userError s!"offset code 0: expected 5, got {offVal0}")
+
+  -- Test 69: parseSequencesHeaderWithModes — modes parsing
+  -- Construct: byte0 = 42 (small count), modes byte = 0b10_01_00_00 = 0x90
+  -- litLen=FSE_Compressed(2), offset=RLE(1), matchLen=Predefined(0), reserved=0
+  let modesInput := ByteArray.mk #[42, 0x90]
+  match Zip.Native.parseSequencesHeaderWithModes modesInput 0 with
+  | .ok (numSeq, modes, endPos) =>
+    unless numSeq == 42 do
+      throw (IO.userError s!"modes: expected numSeq 42, got {numSeq}")
+    unless endPos == 2 do
+      throw (IO.userError s!"modes: expected endPos 2, got {endPos}")
+    unless modes.litLenMode == .fseCompressed do
+      throw (IO.userError "modes: expected litLenMode = fseCompressed")
+    unless modes.offsetMode == .rle do
+      throw (IO.userError "modes: expected offsetMode = rle")
+    unless modes.matchLenMode == .predefined do
+      throw (IO.userError "modes: expected matchLenMode = predefined")
+  | .error e => throw (IO.userError s!"modes parsing failed: {e}")
+
+  -- Test 70: parseSequencesHeaderWithModes — 0 sequences returns default modes
+  let zeroModesInput := ByteArray.mk #[0x00]
+  match Zip.Native.parseSequencesHeaderWithModes zeroModesInput 0 with
+  | .ok (numSeq, modes, endPos) =>
+    unless numSeq == 0 do
+      throw (IO.userError s!"zero modes: expected numSeq 0, got {numSeq}")
+    unless endPos == 1 do
+      throw (IO.userError s!"zero modes: expected endPos 1, got {endPos}")
+    unless modes.litLenMode == .predefined do
+      throw (IO.userError "zero modes: expected litLenMode = predefined")
+    unless modes.offsetMode == .predefined do
+      throw (IO.userError "zero modes: expected offsetMode = predefined")
+    unless modes.matchLenMode == .predefined do
+      throw (IO.userError "zero modes: expected matchLenMode = predefined")
+  | .error e => throw (IO.userError s!"zero modes parsing failed: {e}")
+
+  -- Test 71: parseSequencesHeaderWithModes — all repeat mode (0xFF modes byte)
+  -- byte0 = 1 (1 sequence), modes = 0xFF → litLen=repeat(3), offset=repeat(3), matchLen=repeat(3)
+  let repeatModesInput := ByteArray.mk #[1, 0xFF]
+  match Zip.Native.parseSequencesHeaderWithModes repeatModesInput 0 with
+  | .ok (numSeq, modes, _) =>
+    unless numSeq == 1 do
+      throw (IO.userError s!"repeat modes: expected numSeq 1, got {numSeq}")
+    unless modes.litLenMode == .repeat do
+      throw (IO.userError "repeat modes: expected litLenMode = repeat")
+    unless modes.offsetMode == .repeat do
+      throw (IO.userError "repeat modes: expected offsetMode = repeat")
+    unless modes.matchLenMode == .repeat do
+      throw (IO.userError "repeat modes: expected matchLenMode = repeat")
+  | .error e => throw (IO.userError s!"repeat modes parsing failed: {e}")
+
+  -- Test 72: litLenExtraBits table has 36 entries
+  unless Zip.Native.litLenExtraBits.size == 36 do
+    throw (IO.userError s!"litLenExtraBits: expected 36 entries, got {Zip.Native.litLenExtraBits.size}")
+
+  -- Test 73: matchLenExtraBits table has 53 entries
+  unless Zip.Native.matchLenExtraBits.size == 53 do
+    throw (IO.userError s!"matchLenExtraBits: expected 53 entries, got {Zip.Native.matchLenExtraBits.size}")
+
   IO.println "ZstdNative tests: OK"
