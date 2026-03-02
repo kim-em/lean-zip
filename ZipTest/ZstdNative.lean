@@ -1001,4 +1001,69 @@ def ZipTest.ZstdNative.tests : IO Unit := do
         throw (IO.userError s!"4-stream small: wrong error: {e}")
   | .error e => throw (IO.userError s!"buildZstdHuffmanTable for 4-stream test failed: {e}")
 
+  -- Helper: check that a SequenceCompressionMode is one of the four valid variants
+  let isValidMode (m : Zip.Native.SequenceCompressionMode) : Bool :=
+    match m with
+    | .predefined | .rle | .fseCompressed | .repeat => true
+
+  -- Test 80: integration — FFI-compressed data at level 1, parse sequences header with modes
+  let modeTestData1 := "AAABBBCCCAAABBBCCCAAABBBCCC the quick brown fox jumps over the lazy dog AAABBBCCC".toUTF8
+  let modeCompressed1 ← Zstd.compress modeTestData1 1
+  match Zip.Native.parseFrameHeader modeCompressed1 0 with
+  | .ok (_, afterFrameHdr) =>
+    match Zip.Native.parseBlockHeader modeCompressed1 afterFrameHdr with
+    | .ok (blockHdr, afterBlockHdr) =>
+      if blockHdr.blockType == .compressed then
+        match Zip.Native.parseLiteralsSection modeCompressed1 afterBlockHdr with
+        | .ok (_, afterLiterals) =>
+          match Zip.Native.parseSequencesHeader modeCompressed1 afterLiterals with
+          | .ok (numSeq, modes, _) =>
+            unless numSeq > 0 do
+              throw (IO.userError s!"mode test L1: expected numSeq > 0, got {numSeq}")
+            unless isValidMode modes.litLenMode do
+              throw (IO.userError "mode test L1: invalid litLenMode")
+            unless isValidMode modes.offsetMode do
+              throw (IO.userError "mode test L1: invalid offsetMode")
+            unless isValidMode modes.matchLenMode do
+              throw (IO.userError "mode test L1: invalid matchLenMode")
+          | .error e => throw (IO.userError s!"mode test L1: parseSequencesHeader failed: {e}")
+        | .error e => throw (IO.userError s!"mode test L1: parseLiteralsSection failed: {e}")
+      else
+        pure ()  -- non-compressed block (raw/RLE), skip mode check
+    | .error e => throw (IO.userError s!"mode test L1: parseBlockHeader failed: {e}")
+  | .error e => throw (IO.userError s!"mode test L1: parseFrameHeader failed: {e}")
+
+  -- Test 81: integration — FFI-compressed data at level 3, parse sequences header with modes
+  let modeTestData3 := "Pack my box with five dozen liquor jugs. Pack my box with five dozen liquor jugs. How vexingly quick!".toUTF8
+  let modeCompressed3 ← Zstd.compress modeTestData3 3
+  match Zip.Native.parseFrameHeader modeCompressed3 0 with
+  | .ok (_, afterFrameHdr) =>
+    match Zip.Native.parseBlockHeader modeCompressed3 afterFrameHdr with
+    | .ok (blockHdr, afterBlockHdr) =>
+      if blockHdr.blockType == .compressed then
+        match Zip.Native.parseLiteralsSection modeCompressed3 afterBlockHdr with
+        | .ok (_, afterLiterals) =>
+          match Zip.Native.parseSequencesHeader modeCompressed3 afterLiterals with
+          | .ok (numSeq, modes, _) =>
+            unless numSeq > 0 do
+              throw (IO.userError s!"mode test L3: expected numSeq > 0, got {numSeq}")
+            unless isValidMode modes.litLenMode do
+              throw (IO.userError "mode test L3: invalid litLenMode")
+            unless isValidMode modes.offsetMode do
+              throw (IO.userError "mode test L3: invalid offsetMode")
+            unless isValidMode modes.matchLenMode do
+              throw (IO.userError "mode test L3: invalid matchLenMode")
+          | .error e => throw (IO.userError s!"mode test L3: parseSequencesHeader failed: {e}")
+        | .error e => throw (IO.userError s!"mode test L3: parseLiteralsSection failed: {e}")
+      else
+        pure ()  -- non-compressed block, skip mode check
+    | .error e => throw (IO.userError s!"mode test L3: parseBlockHeader failed: {e}")
+  | .error e => throw (IO.userError s!"mode test L3: parseFrameHeader failed: {e}")
+
+  -- Test 82: parseSequencesHeader on truncated data (1 byte claiming 2-byte format)
+  let truncSeqInput := ByteArray.mk #[200]  -- byte0 >= 128 needs byte1, but missing
+  match Zip.Native.parseSequencesHeader truncSeqInput 0 with
+  | .ok _ => throw (IO.userError "truncated seq header: should have failed")
+  | .error _ => pure ()
+
   IO.println "ZstdNative tests: OK"
