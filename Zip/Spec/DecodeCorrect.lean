@@ -553,7 +553,8 @@ theorem decodeHuffman_correct
         · exact nomatch h
         · rename_i hidx
           have hidx : sym.toNat - 257 < 29 := by
-            simp [Zip.Native.Inflate.lengthBase] at hidx -- bare simp: concrete array size
+            simp only [Zip.Native.Inflate.lengthBase, List.size_toArray,
+              List.length_cons, List.length_nil] at hidx
             omega
           -- Clean up pure PUnit.unit patterns
           simp only [pure, Except.pure] at h
@@ -575,7 +576,8 @@ theorem decodeHuffman_correct
               · exact nomatch h
               · rename_i hdidx
                 have hdidx : distSym.toNat < 30 := by
-                  simp [Zip.Native.Inflate.distBase] at hdidx -- bare simp: concrete array size
+                  simp only [Zip.Native.Inflate.distBase, List.size_toArray,
+                    List.length_cons, List.length_nil] at hdidx
                   omega
                 -- Step 5: readBits for distance extra
                 cases hdextra_r :
