@@ -9,19 +9,21 @@ import Zip.Native.Adler32
 
 namespace ZipTest.NativeScale
 
-inductive Pattern where | constant | cyclic | prng
+inductive Pattern where | constant | cyclic | prng | text
 
 def Pattern.name : Pattern → String
   | .constant => "constant"
   | .cyclic   => "cyclic"
   | .prng     => "prng"
+  | .text     => "text"
 
 def Pattern.generate : Pattern → Nat → ByteArray
   | .constant => mkConstantData
   | .cyclic   => mkCyclicData
   | .prng     => mkPrngData
+  | .text     => mkTextData
 
-def patterns : Array Pattern := #[.constant, .cyclic, .prng]
+def patterns : Array Pattern := #[.constant, .cyclic, .prng, .text]
 def levels : Array UInt8 := #[0, 1, 6]
 def matrixSizes : Array Nat := #[1024, 16384, 131072, 1048576]
 def sweepSizes : Array Nat := #[1024, 2048, 4096, 8192, 16384, 32768,

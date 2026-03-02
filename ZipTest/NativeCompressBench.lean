@@ -3,11 +3,8 @@ import Zip.Native.Inflate
 import Zip.Native.Gzip
 
 /-! Compression throughput and ratio benchmarks: native Lean compressor vs FFI (zlib).
-    Covers raw deflate, gzip, and zlib formats at levels 0, 1, and 6.
-
-    Levels 0 (stored) and 1 (greedy) use iterative LZ77 and support large inputs.
-    Levels 2+ (lazy/dynamic) still use non-tail-recursive LZ77 and are capped at
-    32KB to avoid stack overflow. -/
+    Covers raw deflate, gzip, and zlib formats at levels 0, 1, and 6
+    across sizes from 1KB to 256KB. -/
 
 namespace ZipTest.NativeCompressBench
 
@@ -31,20 +28,15 @@ def tests : IO Unit := do
   IO.println "  NativeCompressBench tests..."
   let pats := #[("constant", mkConstantData), ("cyclic", mkCyclicData), ("prng", mkPrngData),
                  ("text", mkTextData)]
-  -- Small sizes: all levels (0, 1, 6). Large sizes: levels 0 and 1 only
-  -- (lazy/dynamic LZ77 is still non-tail-recursive and overflows above ~50KB).
-  let smallSizes := #[1024, 4096, 16384, 32768]
+  let sizes := #[1024, 4096, 16384, 32768, 65536, 131072, 262144]
   let allLevels : Array UInt8 := #[0, 1, 6]
-  let largeSizes := #[65536, 131072, 262144]
-  let safeLevels : Array UInt8 := #[0, 1]
 
   -- Raw deflate
   IO.println "    --- raw deflate compression (native vs FFI) ---"
-  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
-   for size in sizes do
+  for size in sizes do
     for (pname, pgen) in pats do
       let data := pgen size
-      for level in levels do
+      for level in allLevels do
         let s1 ← IO.monoNanosNow
         let nc ← forceEval (Zip.Native.Deflate.deflateRaw data level)
         let e1 ← IO.monoNanosNow
@@ -59,11 +51,10 @@ def tests : IO Unit := do
 
   -- Gzip
   IO.println "    --- gzip compression (native vs FFI) ---"
-  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
-   for size in sizes do
+  for size in sizes do
     for (pname, pgen) in pats do
       let data := pgen size
-      for level in levels do
+      for level in allLevels do
         let s1 ← IO.monoNanosNow
         let nc ← forceEval (Zip.Native.GzipEncode.compress data level)
         let e1 ← IO.monoNanosNow
@@ -78,11 +69,10 @@ def tests : IO Unit := do
 
   -- Zlib
   IO.println "    --- zlib compression (native vs FFI) ---"
-  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
-   for size in sizes do
+  for size in sizes do
     for (pname, pgen) in pats do
       let data := pgen size
-      for level in levels do
+      for level in allLevels do
         let s1 ← IO.monoNanosNow
         let nc ← forceEval (Zip.Native.ZlibEncode.compress data level)
         let e1 ← IO.monoNanosNow
@@ -95,13 +85,13 @@ def tests : IO Unit := do
         | .error e => throw (IO.userError e)
         IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
 
-  -- Compression ratio (32KB all levels, 256KB levels 0-1)
+  -- Compression ratio
   IO.println "    --- compression ratio (native/FFI) ---"
   IO.println s!"      {pad "Size" 6} {pad "Format" 8} {pad "Pattern" 9} {pad "Level" 6} {pad "Native" 10} {pad "FFI" 10} Ratio"
-  for (ratioSize, ratioLevels) in [((32768 : Nat), allLevels), (262144, safeLevels)] do
+  for ratioSize in sizes do
    for (pname, pgen) in pats do
     let data := pgen ratioSize
-    for level in ratioLevels do
+    for level in allLevels do
       let ncR ← forceEval (Zip.Native.Deflate.deflateRaw data level)
       let fcR ← RawDeflate.compress data level
       let rR := if fcR.size == 0 then 0.0 else ncR.size.toFloat / fcR.size.toFloat
@@ -120,11 +110,10 @@ def tests : IO Unit := do
 
   -- Decompression benchmarks: compress with FFI, then time native vs FFI decompress
   IO.println "    --- raw deflate decompression (native vs FFI) ---"
-  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
-   for size in sizes do
+  for size in sizes do
     for (pname, pgen) in pats do
       let data := pgen size
-      for level in levels do
+      for level in allLevels do
         let compressed ← RawDeflate.compress data level
         let s1 ← IO.monoNanosNow
         let nd ← forceEval (match Zip.Native.Inflate.inflate compressed with
@@ -140,11 +129,10 @@ def tests : IO Unit := do
         IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
 
   IO.println "    --- gzip decompression (native vs FFI) ---"
-  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
-   for size in sizes do
+  for size in sizes do
     for (pname, pgen) in pats do
       let data := pgen size
-      for level in levels do
+      for level in allLevels do
         let compressed ← Gzip.compress data level
         let s1 ← IO.monoNanosNow
         let nd ← forceEval (match Zip.Native.GzipDecode.decompress compressed with
@@ -160,11 +148,10 @@ def tests : IO Unit := do
         IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
 
   IO.println "    --- zlib decompression (native vs FFI) ---"
-  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
-   for size in sizes do
+  for size in sizes do
     for (pname, pgen) in pats do
       let data := pgen size
-      for level in levels do
+      for level in allLevels do
         let compressed ← Zlib.compress data level
         let s1 ← IO.monoNanosNow
         let nd ← forceEval (match Zip.Native.ZlibDecode.decompress compressed with
