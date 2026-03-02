@@ -21,7 +21,7 @@ private theorem kraft_ge_count (ls : List Nat) (maxBits len : Nat) :
     (ls.filter (· == len)).length * 2 ^ (maxBits - len) ≤
     ls.foldl (fun acc l => acc + 2 ^ (maxBits - l)) 0 := by
   induction ls with
-  | nil => simp
+  | nil => simp only [List.filter_nil, List.length_nil, Nat.zero_mul, List.foldl_nil, Std.le_refl]
   | cons x xs ih =>
     simp only [List.foldl_cons, Nat.zero_add]
     rw [List.foldl_add_init]
@@ -88,7 +88,7 @@ private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
     Huffman.Spec.ncRec blCount b * 2 ^ (maxBits - b) + kraftSumFrom blCount maxBits b =
       kraftSumFrom blCount maxBits 0 := by
   induction b with
-  | zero => simp [Huffman.Spec.ncRec]
+  | zero => simp only [Spec.ncRec, Nat.sub_zero, Nat.zero_mul, Nat.zero_add]
   | succ n ih =>
     have ih' := ih (by omega)
     rw [kraftSumFrom_unfold blCount maxBits n (by omega)] at ih'
@@ -223,7 +223,8 @@ private theorem kraftSumFrom_replicate (maxBits b : Nat) :
   if hb : b > maxBits then exact kraftSumFrom_gt _ _ _ hb
   else
     rw [kraftSumFrom_unfold _ _ _ (by omega)]
-    simp [show b < maxBits + 1 from by omega, kraftSumFrom_replicate maxBits (b + 1)]
+    simp only [Array.size_replicate, show b < maxBits + 1 from by omega, getElem!_pos, Array.getElem_replicate,
+      Nat.zero_mul, kraftSumFrom_replicate maxBits (b + 1), Nat.add_zero]
 termination_by maxBits + 1 - b
 
 /-- `ValidLengths` is preserved when removing the head element. -/
@@ -254,7 +255,8 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
     exact hv.2
   intro acc hsize
   induction lengths generalizing acc with
-  | nil => simp
+  | nil => simp only [gt_iff_lt, Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, Array.set!_eq_setIfInBounds,
+      List.foldl_nil, List.filter_nil, Nat.add_zero]
   | cons l ls ih =>
     have hv_ls := Huffman.Spec.validLengths_cons hv
     simp only [List.foldl_cons]
@@ -299,7 +301,7 @@ protected theorem ncRec_shift (blCount : Array Nat) (b₁ b₂ : Nat) (h : b₁ 
         _ ≤ (Huffman.Spec.ncRec blCount k + blCount[k]!) * 2 :=
             Nat.mul_le_mul_right 2 (Nat.le_add_right _ _)
     | inr heq =>
-      subst heq; simp
+      subst heq; simp only [Nat.add_sub_cancel_left, Nat.pow_one, Std.le_refl]
 
 /-- The core ncRec bound: `ncRec blCount b + blCount[b]! ≤ 2^b` when the Kraft
     inequality holds for the full sum from 0. -/
