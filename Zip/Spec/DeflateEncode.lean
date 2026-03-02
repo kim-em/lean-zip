@@ -96,14 +96,14 @@ theorem encodeSymbol_mem (table : List (Huffman.Spec.Codeword × Nat))
     (h : encodeSymbol table sym = some cw) :
     (cw, sym) ∈ table := by
   induction table with
-  | nil => simp [encodeSymbol] at h
+  | nil => exact nomatch h
   | cons entry rest ih =>
     obtain ⟨cw', s'⟩ := entry
     simp only [encodeSymbol] at h
     split at h
     · rename_i heq
       have := beq_iff_eq.mp heq
-      subst this; simp at h; subst h
+      subst this; obtain rfl := Option.some.inj h
       exact List.mem_cons_self ..
     · exact List.mem_cons_of_mem _ (ih h)
 
@@ -128,7 +128,7 @@ theorem flipped_allCodes_prefix_free (lengths : List Nat) (maxBits : Nat)
   simp only [table, List.mem_map] at h₁ h₂
   obtain ⟨⟨a₁, b₁⟩, hm₁, heq₁⟩ := h₁
   obtain ⟨⟨a₂, b₂⟩, hm₂, heq₂⟩ := h₂
-  simp at heq₁ heq₂
+  simp only [Prod.mk.injEq] at heq₁ heq₂
   obtain ⟨rfl, rfl⟩ := heq₁
   obtain ⟨rfl, rfl⟩ := heq₂
   -- Now: (b₁, a₁) ∈ allCodes, (b₂, a₂) ∈ allCodes, (b₁, a₁) ≠ (b₂, a₂)
@@ -137,7 +137,7 @@ theorem flipped_allCodes_prefix_free (lengths : List Nat) (maxBits : Nat)
     subst hse
     rw [Huffman.Spec.allCodes_mem_iff] at hm₁ hm₂
     have := hm₁.2.symm.trans hm₂.2
-    simp at this; subst this
+    obtain rfl := Option.some.inj this
     exact absurd rfl hne
   · exact Huffman.Spec.allCodes_prefix_free_of_ne lengths maxBits hv a₁ a₂ b₁ b₂ hm₁ hm₂ hse
 
@@ -166,7 +166,7 @@ private theorem encodeSymbol_length_pos (lengths : List Nat) (maxBits : Nat)
   have hmem := encodeSymbol_mem _ sym bits henc
   simp only [List.mem_map] at hmem
   obtain ⟨⟨s, cw⟩, hmem, heq⟩ := hmem
-  simp at heq
+  simp only [Prod.mk.injEq] at heq
   obtain ⟨rfl, rfl⟩ := heq
   exact allCodes_cw_length_pos lengths maxBits s cw hmem
 
@@ -185,37 +185,38 @@ theorem encodeLitLen_nonempty (litLengths distLengths : List Nat)
   | reference len dist =>
     simp only [encodeLitLen, bind, Option.bind] at henc
     cases hfl : findLengthCode len with
-    | none => simp [hfl] at henc
+    | none => rw [hfl] at henc; exact nomatch henc
     | some lenResult =>
       obtain ⟨idx, extraN, extraV⟩ := lenResult
       simp only [hfl] at henc
       cases hels : encodeSymbol
           ((Huffman.Spec.allCodes litLengths).map fun x => (x.2, x.1))
           (257 + idx) with
-      | none => simp [hels] at henc
+      | none => rw [hels] at henc; exact nomatch henc
       | some lenBits =>
         simp only [hels] at henc
         cases hfd : findDistCode dist with
-        | none => simp [hfd] at henc
+        | none => rw [hfd] at henc; exact nomatch henc
         | some distResult =>
           obtain ⟨dCode, dExtraN, dExtraV⟩ := distResult
           simp only [hfd] at henc
           cases heds : encodeSymbol
               ((Huffman.Spec.allCodes distLengths).map fun x => (x.2, x.1))
               dCode with
-          | none => simp [heds] at henc
+          | none => rw [heds] at henc; exact nomatch henc
           | some distBits =>
             simp only [heds, pure, Pure.pure, Option.some.injEq] at henc
             subst henc
             have := encodeSymbol_length_pos litLengths 15 (257 + idx) lenBits hels
-            simp [List.length_append]; omega
+            simp only [List.length_append]; omega
 
 /-- Reading back bits written by `writeBitsLSB` recovers the original value. -/
 private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
     (h : val < 2 ^ n) :
     readBitsLSB n (writeBitsLSB n val ++ rest) = some (val, rest) := by
   induction n generalizing val with
-  | zero => simp [readBitsLSB, writeBitsLSB]; omega
+  | zero => -- bare simp: concrete readBitsLSB/writeBitsLSB computation
+    simp [readBitsLSB, writeBitsLSB]; omega
   | succ k ih =>
     simp only [writeBitsLSB, List.cons_append, readBitsLSB]
     have hlt : val / 2 < 2 ^ k := by
@@ -224,7 +225,7 @@ private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
     simp only [bind, Option.bind]
     congr 1; ext1
     · have := Nat.div_add_mod val 2
-      split <;> simp_all [beq_iff_eq] <;> omega
+      split <;> simp_all only [beq_iff_eq] <;> omega
     · rfl
 
 /-- Properties of `findLengthCode.go`: the returned index is valid,
@@ -237,7 +238,7 @@ private theorem findLengthCode_go_spec (len i idx extraN extraV : Nat)
     len < (lengthBase[idx + 1]?.getD 259) := by
   unfold findLengthCode.go at h
   split at h
-  · exact absurd h (by simp)
+  · exact nomatch h
   · rename_i hi
     dsimp only at h
     split at h
@@ -264,7 +265,9 @@ theorem findLengthCode_spec (len idx extraN extraV : Nat)
     extraN = lengthExtra[idx]! ∧
     extraV < 2 ^ extraN := by
   have hgo := findLengthCode_go_spec len 0 idx extraN extraV h
-  have hidx : idx < 29 := by simp [lengthBase] at hgo; exact hgo.1
+  have hidx : idx < 29 := by
+    have : lengthBase.size = 29 := by decide
+    omega
   refine ⟨hidx, hgo.2.2.1, hgo.2.1, ?_⟩
   have hgap := lengthTable_gap ⟨idx, hidx⟩
   dsimp only at hgap
@@ -280,7 +283,7 @@ private theorem findDistCode_go_spec (dist i idx extraN extraV : Nat)
     dist < (distBase[idx + 1]?.getD 32769) := by
   unfold findDistCode.go at h
   split at h
-  · exact absurd h (by simp)
+  · exact nomatch h
   · rename_i hi
     dsimp only at h
     split at h
@@ -306,7 +309,9 @@ theorem findDistCode_spec (dist idx extraN extraV : Nat)
     extraN = distExtra[idx]! ∧
     extraV < 2 ^ extraN := by
   have hgo := findDistCode_go_spec dist 0 idx extraN extraV h
-  have hidx : idx < 30 := by simp [distBase] at hgo; exact hgo.1
+  have hidx : idx < 30 := by
+    have : distBase.size = 30 := by decide
+    omega
   refine ⟨hidx, hgo.2.2.1, hgo.2.1, ?_⟩
   have hgap := distTable_gap ⟨idx, hidx⟩
   dsimp only at hgap
@@ -320,7 +325,9 @@ theorem findLengthCode_upper (len idx extraN extraV : Nat)
     (hidx : idx + 1 < 29) :
     len < lengthBase[idx + 1]! := by
   have hgo := findLengthCode_go_spec len 0 idx extraN extraV h
-  have hsize : idx + 1 < lengthBase.size := by simp [lengthBase]; omega
+  have hsize : idx + 1 < lengthBase.size := by
+    have : lengthBase.size = 29 := by decide
+    omega
   have := hgo.2.2.2
   rw [getElem?_pos lengthBase (idx + 1) hsize] at this
   simp only [Option.getD] at this
@@ -334,7 +341,9 @@ theorem findDistCode_upper (dist idx extraN extraV : Nat)
     (hidx : idx + 1 < 30) :
     dist < distBase[idx + 1]! := by
   have hgo := findDistCode_go_spec dist 0 idx extraN extraV h
-  have hsize : idx + 1 < distBase.size := by simp [distBase]; omega
+  have hsize : idx + 1 < distBase.size := by
+    have : distBase.size = 30 := by decide
+    omega
   have := hgo.2.2.2
   rw [getElem?_pos distBase (idx + 1) hsize] at this
   simp only [Option.getD] at this
@@ -381,7 +390,7 @@ theorem encodeLitLen_decodeLitLen
     have hdec := encodeSymbol_decode _ b.toNat bits rest henc hpf_lit
     have hlt : b.toNat < 256 := UInt8.toNat_lt b
     rw [decodeLitLen_of_literal litLengths distLengths (bits ++ rest) rest b.toNat hdec hlt]
-    simp [UInt8.ofNat_toNat]
+    simp only [UInt8.ofNat_toNat]
   | endOfBlock =>
     simp only [encodeLitLen] at henc
     have hdec := encodeSymbol_decode _ 256 bits rest henc hpf_lit
@@ -391,7 +400,7 @@ theorem encodeLitLen_decodeLitLen
     simp only [encodeLitLen, bind, Option.bind] at henc
     -- Split on findLengthCode
     cases hfl : findLengthCode len with
-    | none => simp [hfl] at henc
+    | none => rw [hfl] at henc; exact nomatch henc
     | some lenResult =>
       obtain ⟨idx, extraN, extraV⟩ := lenResult
       simp only [hfl] at henc
@@ -399,12 +408,12 @@ theorem encodeLitLen_decodeLitLen
       cases hels : encodeSymbol
           ((Huffman.Spec.allCodes litLengths).map fun x => (x.2, x.1))
           (257 + idx) with
-      | none => simp [hels] at henc
+      | none => rw [hels] at henc; exact nomatch henc
       | some lenBits =>
         simp only [hels] at henc
         -- Split on findDistCode
         cases hfd : findDistCode dist with
-        | none => simp [hfd] at henc
+        | none => rw [hfd] at henc; exact nomatch henc
         | some distResult =>
           obtain ⟨dCode, dExtraN, dExtraV⟩ := distResult
           simp only [hfd] at henc
@@ -412,7 +421,7 @@ theorem encodeLitLen_decodeLitLen
           cases heds : encodeSymbol
               ((Huffman.Spec.allCodes distLengths).map fun x => (x.2, x.1))
               dCode with
-          | none => simp [heds] at henc
+          | none => rw [heds] at henc; exact nomatch henc
           | some distBits =>
             simp only [heds, pure, Pure.pure, Option.some.injEq] at henc
             -- henc : bits = lenBits ++ writeBitsLSB extraN extraV ++
@@ -427,10 +436,18 @@ theorem encodeLitLen_decodeLitLen
             --         dExtraN = distExtra[dCode]!, dExtraV < 2^dExtraN
             have hpf_dist := flipped_allCodes_prefix_free distLengths 15 hvalid_dist
             -- Bounds for table indices
-            have hidx : idx < lengthBase.size := by simp [lengthBase]; omega
-            have hidxE : idx < lengthExtra.size := by simp [lengthExtra]; omega
-            have hdCode : dCode < distBase.size := by simp [distBase]; omega
-            have hdCodeE : dCode < distExtra.size := by simp [distExtra]; omega
+            have hidx : idx < lengthBase.size := by
+              have : lengthBase.size = 29 := by decide
+              omega
+            have hidxE : idx < lengthExtra.size := by
+              have : lengthExtra.size = 29 := by decide
+              omega
+            have hdCode : dCode < distBase.size := by
+              have : distBase.size = 30 := by decide
+              omega
+            have hdCodeE : dCode < distExtra.size := by
+              have : distExtra.size = 30 := by decide
+              omega
             -- Normalize getElem! to getElem in spec hypotheses
             rw [getElem!_pos lengthBase idx hidx] at hlspec
             rw [getElem!_pos lengthExtra idx hidxE] at hlspec
@@ -451,7 +468,7 @@ theorem encodeLitLen_decodeLitLen
             -- sym = 257 + idx ≥ 257, so not < 256 and not == 256
             rw [if_neg (by omega : ¬(257 + idx < 256))]
             rw [if_neg (show ¬((257 + idx == 256) = true) by
-              simp [beq_iff_eq]; omega)]
+              simp only [beq_iff_eq]; omega)]
             -- idx = (257 + idx) - 257
             simp only [show 257 + idx - 257 = idx from by omega]
             -- The do-notation expanded as nested match expressions.
@@ -483,6 +500,7 @@ theorem encodeLitLen_decodeLitLen
               (writeBitsLSB distExtra[dCode] dExtraV ++ rest) =
               some (dExtraV, rest) :=
               readBitsLSB_writeBitsLSB _ _ _ hdExtraV
+            -- bare simp: 7-hypothesis monadic chain reduction
             simp [hlb, hle, hrd2, hrd3, hdb, hde, hrd4, pure, Pure.pure]
             exact ⟨hlenSum, hdistSum⟩
 
@@ -509,13 +527,13 @@ theorem encodeSymbols_decodeSymbols
     -- Extract encoding of head symbol and rest
     simp only [encodeSymbols] at henc
     cases hes : encodeLitLen litLengths distLengths sym with
-    | none => simp [hes] at henc
+    | none => rw [hes] at henc; exact nomatch henc
     | some symBits =>
       simp only [hes, bind, Option.bind] at henc
       cases her : encodeSymbols litLengths distLengths syms with
-      | none => simp [her] at henc
+      | none => rw [her] at henc; exact nomatch henc
       | some restBits =>
-        simp [her] at henc
+        simp only [her, pure, Pure.pure, Option.some.injEq] at henc
         -- henc : bits = symBits ++ restBits
         subst henc
         -- Unfold one step of WF decodeSymbols
@@ -532,21 +550,21 @@ theorem encodeSymbols_decodeSymbols
           -- Must be the last symbol
           cases syms with
           | nil =>
-            simp [encodeSymbols] at her; subst her
-            simp [pure, Pure.pure]
+            simp only [encodeSymbols, Option.some.injEq] at her; subst her
+            rfl
           | cons _ _ => exact absurd hvalid id
         | literal _ | reference _ _ =>
           -- Show the WF guard is satisfied
           have hlen : (restBits ++ rest).length < (symBits ++ (restBits ++ rest)).length := by
             have hpos := encodeLitLen_nonempty litLengths distLengths _ symBits hes
-            simp [List.length_append]; omega
+            simp only [List.length_append]; omega
           rw [dif_pos hlen]
           have hvalid' : ValidSymbolList syms := by
             cases syms with
             | nil => exact absurd hvalid id
             | cons _ _ => exact hvalid
           rw [ih restBits her hvalid']
-          simp [pure, Pure.pure]
+          simp only [pure, Pure.pure]
 
 /-! ## Fixed Huffman block encoding -/
 
@@ -561,10 +579,12 @@ def encodeFixed (syms : List LZ77Symbol) : Option (List Bool) := do
 
 private theorem readBitsLSB_1_true (rest : List Bool) :
     readBitsLSB 1 (true :: rest) = some (1, rest) := by
+  -- bare simp: concrete readBitsLSB computation
   simp [readBitsLSB]
 
 private theorem readBitsLSB_2_true_false (rest : List Bool) :
     readBitsLSB 2 (true :: false :: rest) = some (1, rest) := by
+  -- bare simp: concrete readBitsLSB computation
   simp [readBitsLSB]
 
 /-! ## Encoding roundtrip theorems -/
@@ -588,7 +608,7 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.nil_append]
   rw [hdec]
   simp only [hresolve]
-  simp [pure, Pure.pure]
+  simp (config := { decide := true }) only [pure, Pure.pure, ite_true]
 
 /-- Encoding with fixed Huffman then decoding recovers the original data. -/
 theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
@@ -602,6 +622,7 @@ theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
 
 private theorem readBitsLSB_2_false_true (rest : List Bool) :
     readBitsLSB 2 (false :: true :: rest) = some (2, rest) := by
+  -- bare simp: concrete readBitsLSB computation
   simp [readBitsLSB]
 
 /-- Encoding with dynamic Huffman then decoding recovers the original data,
@@ -631,7 +652,7 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hresolve]
-  simp [pure, Pure.pure]
+  simp (config := { decide := true }) only [pure, Pure.pure, ite_true]
 
 /-! ## goR roundtrip theorems
 
@@ -656,7 +677,7 @@ theorem encodeFixed_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.nil_append]
   rw [hdec]
   simp only [hresolve]
-  simp [pure, Pure.pure]
+  simp (config := { decide := true }) only [pure, Pure.pure, ite_true]
 
 /-- `decode.goR` variant of `encodeDynamic_decode_append`: the remaining bits after
     decoding a dynamic Huffman block are exactly the trailing `rest`. -/
@@ -683,6 +704,6 @@ theorem encodeDynamic_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hresolve]
-  simp [pure, Pure.pure]
+  simp (config := { decide := true }) only [pure, Pure.pure, ite_true]
 
 end Deflate.Spec
