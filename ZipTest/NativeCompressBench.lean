@@ -29,7 +29,8 @@ private def fmtMs (ns : Nat) : String :=
 
 def tests : IO Unit := do
   IO.println "  NativeCompressBench tests..."
-  let pats := #[("constant", mkConstantData), ("cyclic", mkCyclicData), ("prng", mkPrngData)]
+  let pats := #[("constant", mkConstantData), ("cyclic", mkCyclicData), ("prng", mkPrngData),
+                 ("text", mkTextData)]
   -- Small sizes: all levels (0, 1, 6). Large sizes: levels 0 and 1 only
   -- (lazy/dynamic LZ77 is still non-tail-recursive and overflows above ~50KB).
   let smallSizes := #[1024, 4096, 16384, 32768]
@@ -116,6 +117,67 @@ def tests : IO Unit := do
       let rZ := if fcZ.size == 0 then 0.0 else ncZ.size.toFloat / fcZ.size.toFloat
       let sZ := let s := s!"{rZ}"; if s.length > 6 then s.take 6 else s
       IO.println s!"      {pad (sizeName ratioSize) 6} {pad "zlib" 8} {pad pname 9} {pad s!"lvl={level}" 6} {pad (toString ncZ.size) 10} {pad (toString fcZ.size) 10} {sZ}"
+
+  -- Decompression benchmarks: compress with FFI, then time native vs FFI decompress
+  IO.println "    --- raw deflate decompression (native vs FFI) ---"
+  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
+   for size in sizes do
+    for (pname, pgen) in pats do
+      let data := pgen size
+      for level in levels do
+        let compressed ← RawDeflate.compress data level
+        let s1 ← IO.monoNanosNow
+        let nd ← forceEval (match Zip.Native.Inflate.inflate compressed with
+          | .ok r => r | .error _ => ByteArray.empty)
+        let e1 ← IO.monoNanosNow
+        let s2 ← IO.monoNanosNow
+        let fd ← RawDeflate.decompress compressed
+        let e2 ← IO.monoNanosNow
+        unless nd == data do
+          throw (IO.userError s!"inflate raw roundtrip: {sizeName size} {pname} lvl={level}")
+        unless fd == data do
+          throw (IO.userError s!"ffi raw decomp roundtrip: {sizeName size} {pname} lvl={level}")
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+
+  IO.println "    --- gzip decompression (native vs FFI) ---"
+  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
+   for size in sizes do
+    for (pname, pgen) in pats do
+      let data := pgen size
+      for level in levels do
+        let compressed ← Gzip.compress data level
+        let s1 ← IO.monoNanosNow
+        let nd ← forceEval (match Zip.Native.GzipDecode.decompress compressed with
+          | .ok r => r | .error _ => ByteArray.empty)
+        let e1 ← IO.monoNanosNow
+        let s2 ← IO.monoNanosNow
+        let fd ← Gzip.decompress compressed
+        let e2 ← IO.monoNanosNow
+        unless nd == data do
+          throw (IO.userError s!"inflate gzip roundtrip: {sizeName size} {pname} lvl={level}")
+        unless fd == data do
+          throw (IO.userError s!"ffi gzip decomp roundtrip: {sizeName size} {pname} lvl={level}")
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+
+  IO.println "    --- zlib decompression (native vs FFI) ---"
+  for (sizes, levels) in [(smallSizes, allLevels), (largeSizes, safeLevels)] do
+   for size in sizes do
+    for (pname, pgen) in pats do
+      let data := pgen size
+      for level in levels do
+        let compressed ← Zlib.compress data level
+        let s1 ← IO.monoNanosNow
+        let nd ← forceEval (match Zip.Native.ZlibDecode.decompress compressed with
+          | .ok r => r | .error _ => ByteArray.empty)
+        let e1 ← IO.monoNanosNow
+        let s2 ← IO.monoNanosNow
+        let fd ← Zlib.decompress compressed
+        let e2 ← IO.monoNanosNow
+        unless nd == data do
+          throw (IO.userError s!"inflate zlib roundtrip: {sizeName size} {pname} lvl={level}")
+        unless fd == data do
+          throw (IO.userError s!"ffi zlib decomp roundtrip: {sizeName size} {pname} lvl={level}")
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
 
   IO.println "  NativeCompressBench tests passed."
 
