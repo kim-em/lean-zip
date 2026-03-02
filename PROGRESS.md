@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) progressing rapidly
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
 - **Sorries**: 0
-- **Sessions**: ~255 completed (Feb 19 – Mar 2)
+- **Sessions**: ~262 completed (Feb 19 – Mar 2)
 - **Source files**: 90 (43 spec, 11 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
-- **Merged PRs**: 218
-- **Bare simp**: ~129 remaining across 25 of 43 spec files (18 spec files fully clean)
+- **Merged PRs**: 226
+- **Bare simp**: 5 remaining across 4 of 43 spec files (39 spec files fully clean)
 
 ## Milestones
 
@@ -101,25 +101,29 @@ size bound is now the native inflate's default `maxOutputSize` (a runtime
 zip-bomb guard), not a fuel/termination limitation — all recursive functions
 use well-founded recursion (Track C2 complete).
 
-**Proof quality reviews** (70+ sessions): systematic code review across
+**Proof quality reviews** (80+ sessions): systematic code review across
 spec files, reducing proof size, extracting reusable lemmas to ZipForStd,
 splitting large files for maintainability, and converting bare `simp` to
-`simp only`. Reviews to date: Deflate (#369), DecodeComplete (#374, #442),
+`simp only`. Reviews to date: Deflate (#369), DecodeComplete (#374, #442, #517),
 BitReaderInvariant (#382), HuffmanCorrect + HuffmanCorrectLoop (#385),
-InflateCorrect (#387), InflateRawSuffix (#391), DeflateFixedCorrect (#404),
+InflateCorrect (#387), InflateRawSuffix (#391, #484), DeflateFixedCorrect (#404),
 LZ77 (#408), InflateLoopBounds (#413), DeflateDynamicFreqs (#414),
 DynamicTreesComplete (#440), DynamicTreesCorrect (#441),
 DeflateEncode (#448, #457), BitstreamCorrect (#459),
 HuffmanEncode (#467), EmitTokensCorrect (#470), DeflateEncodeProps (#485),
 BitWriterCorrect (#488, #505), DeflateStoredCorrect (#498),
-BitstreamWriteCorrect (#500), DeflateDynamicCorrect (#507).
+BitstreamWriteCorrect (#500), DeflateDynamicCorrect (#507),
+InflateComplete (#513), DeflateDynamicEmit (#514),
+HuffmanTheorems (#518).
 
-**Bare simp status**: ~129 remaining across 25 of 43 spec files. 18 spec
-files fully clean (0 bare simp). The highest-count unreviewed files:
-DecodeComplete (20), DeflateEncodeDynamicProps (15), DeflateDynamicHeader (12),
-DeflateEncodeDynamic (8), DeflateDynamicCorrect (8). Several reviewed files
-retain 1–6 documented resistant patterns (concrete bit computation, complex
-arithmetic goals where `simp only` lemma sets are impractically large).
+**Bare simp status**: 5 remaining across 4 of 43 spec files. 39 spec
+files fully clean (0 bare simp), up from 18 at the previous summary.
+The bare simp campaign reduced the count from ~129 to 5 (96% reduction)
+over ~20 review PRs. Remaining:
+- DeflateDynamicHeader.lean: 2 (open review PR #515, currently conflicting)
+- LZ77Lazy.lean: 1
+- DeflateEncodeDynamicProps.lean: 1
+- DeflateEncodeDynamic.lean: 1 (open review PR #522)
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -296,10 +300,15 @@ RLE/raw blocks, FSE distribution decoding, table construction, backward
 bitstream reading, sequence execution, Huffman weight parsing, compression
 mode parsing, multi-frame support, and checksum verification.
 
+**Huffman-compressed literals (#508, merged):**
+- `decodeHuffmanSymbol`, `decodeHuffmanStream`, `decodeFourHuffmanStreams` for
+  flat table lookup with `BackwardBitReader`
+- Handles litType 2 (Huffman-compressed) in `parseLiteralsSection` per
+  RFC 8878 §3.1.1.3.1
+
 **Remaining:**
 - Predefined FSE distribution tables for sequences (PR #489, conflicting)
-- Huffman-compressed literal stream decoding (PR #508, open)
-- Interleaved FSE sequence decode loop (PR #512, open)
+- Interleaved FSE sequence decode loop (PR #512, conflicting)
 - Wiring: compressed block decompression end-to-end
 - Spec-level decoder with correctness proofs
 - Compressor + roundtrip proof
@@ -307,20 +316,28 @@ mode parsing, multi-frame support, and checksum verification.
 Track E has crossed a significant threshold: the individual building blocks
 for compressed block decompression are all implemented — FSE tables, backward
 bitstreams, sequence execution, Huffman descriptors (both direct and FSE-
-compressed), extra bits tables, compression mode parsing, and multi-frame
-support. The remaining implementation work is primarily integration:
-connecting these components into the `decompressBlocks` pipeline for
-`ZstdBlockType.compressed`. Three PRs (#489, #508, #512) are open and
-would bring this close to end-to-end decompression of compressed blocks.
+compressed), Huffman-compressed literal streams, extra bits tables,
+compression mode parsing, and multi-frame support. The remaining
+implementation work is primarily integration: connecting these components
+into the `decompressBlocks` pipeline for `ZstdBlockType.compressed`.
+Two PRs (#489, #512) are open but both have merge conflicts that need
+resolution before they can be merged.
+
+**Health concern:** All 5 open PRs have merge conflicts. The rapid pace
+of merges on master has caused Track E feature PRs to fall behind. These
+conflicts need resolution before the integration work can proceed.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~255 sessions: majority implementation, ~110 review, ~8 self-improvement,
+- ~262 sessions: majority implementation, ~120 review, ~8 self-improvement,
   remainder PR maintenance, planning, and summarization
-- 218 merged PRs (Feb 19 – Mar 2)
+- 226 merged PRs (Feb 19 – Mar 2)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491)
+- **Open PR health**: 5 open PRs, all with merge conflicts (2 Track E features,
+  1 rebase, 1 meditate, 1 review). The rapid merge cadence on master causes
+  feature branches to fall behind quickly.
