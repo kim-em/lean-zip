@@ -1,4 +1,5 @@
 import Zip.Binary
+import Zip.Native.Fse
 import Zip.Native.XxHash
 
 /-!
@@ -14,8 +15,9 @@ import Zip.Native.XxHash
   Provides frame-level decompression (`decompressFrame`) that wires
   header parsing + block decompression together, and a top-level API
   (`decompressZstd`) for single-frame inputs.  Content checksum
-  verification uses XXH64 (upper 32 bits).  Compressed blocks
-  (FSE + Huffman) are not yet supported.
+  verification uses XXH64 (upper 32 bits).  Huffman-compressed literals
+  (type 2) are decoded using flat table lookup with `BackwardBitReader`;
+  sequence decoding (FSE) is not yet supported.
 -/
 
 namespace Zip.Native
@@ -186,10 +188,192 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
     result := result.push byte
   return (result, pos + 1)
 
+/-- A single entry in a Zstd Huffman decoding table.
+    `symbol` is the decoded byte value, `numBits` is the code length. -/
+structure HuffmanEntry where
+  symbol : UInt8 := 0
+  numBits : UInt8 := 0
+  deriving Repr, Inhabited
+
+/-- Flat Huffman decoding table for Zstd compressed literals.
+    The table has `1 << maxBits` entries, indexed by the next `maxBits` bits of input.
+    Each entry gives the decoded symbol and how many bits to actually consume. -/
+structure ZstdHuffmanTable where
+  maxBits : Nat
+  entries : Array HuffmanEntry
+  deriving Repr
+
+/-- Parse a direct-representation Huffman weight table (headerByte < 128).
+    Reads weights packed two per byte (4 bits each) from `data[off..off+numBytes)`.
+    Returns weights as an array of Nats and the position after the weight data. -/
+def parseHuffmanWeightsDirect (data : ByteArray) (off numBytes : Nat) :
+    Except String (Array Nat × Nat) := do
+  if data.size < off + numBytes then
+    throw "Zstd: not enough data for Huffman weight table"
+  let mut weights : Array Nat := #[]
+  for i in [:numBytes] do
+    let b := data[off + i]!
+    weights := weights.push (b >>> 4).toNat
+    weights := weights.push (b &&& 0x0F).toNat
+  return (weights, off + numBytes)
+
+/-- Compute the maximum code length from the weights array.
+    Weight w means code length = maxBits + 1 - w; weight 0 means unused.
+    maxBits is the smallest n such that 2^n >= sum of 2^(w-1) for nonzero weights. -/
+def weightsToMaxBits (weights : Array Nat) : Nat :=
+  -- Sum 2^(w-1) for nonzero w
+  let sum := weights.foldl (fun acc w =>
+    if w > 0 then acc + (1 <<< (w - 1)) else acc) 0
+  -- maxBits = ceil(log2(sum)) — but more precisely, smallest n with 2^n >= sum
+  -- Since sum should be a power of 2, log2 works
+  if sum == 0 then 1 else Nat.log2 sum + 1
+
+/-- Build a flat Huffman decoding table from an array of weights.
+    Each symbol `s` has weight `weights[s]`; weight 0 means unused.
+    The actual code length for symbol `s` is `maxBits + 1 - weights[s]`.
+    The last symbol (not in the weights array) gets weight derived from the
+    power-of-2 constraint. -/
+def buildZstdHuffmanTable (weights : Array Nat) : Except String ZstdHuffmanTable := do
+  -- Determine maxBits from existing weights
+  let sum := weights.foldl (fun acc w =>
+    if w > 0 then acc + (1 <<< (w - 1)) else acc) 0
+  if sum == 0 then
+    throw "Zstd: Huffman table has no symbols"
+  -- maxBits is the smallest n where 2^n >= sum
+  let mut maxBits := 0
+  let mut powerOf2 := 1
+  while powerOf2 <= sum do
+    maxBits := maxBits + 1
+    powerOf2 := powerOf2 * 2
+  -- The remaining capacity goes to the last symbol (index = weights.size)
+  let lastWeight_capacity := powerOf2 - sum
+  -- lastWeight_capacity should be a power of 2: 2^(lastWeight-1)
+  let mut lastWeight := 0
+  let mut tmp := lastWeight_capacity
+  while tmp > 1 do
+    lastWeight := lastWeight + 1
+    tmp := tmp / 2
+  lastWeight := lastWeight + 1
+  -- Build the full weights array including the last symbol
+  let allWeights := weights.push lastWeight
+  -- Build the flat table (1 << maxBits entries)
+  let tableSize := 1 <<< maxBits
+  let mut entries := Array.replicate tableSize default
+  -- Assign codes: symbols are assigned in order of code length (longest first)
+  -- For each code length, fill table entries
+  let mut code := 0
+  for bits in List.range (maxBits + 1) |>.reverse do
+    let codeBits := bits + 1  -- actual bit length
+    if codeBits > maxBits + 1 then continue
+    let weight := maxBits + 1 - codeBits
+    if weight == 0 then continue
+    for sym in [:allWeights.size] do
+      if allWeights[sym]! == weight then
+        -- Fill 2^(maxBits - codeBits) entries for this symbol
+        let numEntries := 1 <<< (maxBits - codeBits)
+        for j in [:numEntries] do
+          let idx := code + j
+          if idx < tableSize then
+            entries := entries.set! idx { symbol := sym.toUInt8, numBits := codeBits.toUInt8 }
+        code := code + numEntries
+  return { maxBits, entries }
+
+/-- Parse a Huffman tree descriptor from the bitstream (RFC 8878 §4.2.1).
+    Currently supports direct representation only (header byte < 128).
+    Returns the Huffman table and position after the tree descriptor. -/
+def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
+    Except String (ZstdHuffmanTable × Nat) := do
+  if data.size < pos + 1 then
+    throw "Zstd: not enough data for Huffman tree descriptor"
+  let headerByte := data[pos]!.toNat
+  if headerByte >= 128 then
+    -- FSE-compressed weights (future work)
+    throw "Zstd: FSE-compressed Huffman weights not yet supported"
+  -- Direct representation: headerByte = number of bytes of weight data
+  let numBytes := headerByte
+  if numBytes == 0 then
+    throw "Zstd: Huffman tree descriptor with 0 weight bytes"
+  let (weights, afterWeights) ← parseHuffmanWeightsDirect data (pos + 1) numBytes
+  -- Strip trailing zero weights (they're padding from the 2-per-byte packing)
+  let mut trimmed := weights
+  while trimmed.size > 0 && trimmed.back! == 0 do
+    trimmed := trimmed.pop
+  let table ← buildZstdHuffmanTable trimmed
+  return (table, afterWeights)
+
+/-- Decode a single Huffman symbol from a backward bitstream using a flat table.
+    Reads `maxBits` bits, looks up the table entry, and advances only `numBits`. -/
+def decodeHuffmanSymbol (table : ZstdHuffmanTable) (br : BackwardBitReader) :
+    Except String (UInt8 × BackwardBitReader) := do
+  -- Peek maxBits bits for the table lookup
+  let (bits, _) ← br.readBits table.maxBits
+  let entry := table.entries[bits.toNat]!
+  -- We read maxBits but only needed numBits; "put back" the extra bits.
+  -- Since BackwardBitReader doesn't support putting bits back, re-read
+  -- only numBits from the original position.
+  let (bits2, br2) ← br.readBits entry.numBits.toNat
+  let entry2 := table.entries[bits2.toNat <<< (table.maxBits - entry.numBits.toNat)]!
+  return (entry2.symbol, br2)
+
+/-- Decode `count` Huffman symbols from a backward bitstream.
+    Returns the decoded bytes as a ByteArray. -/
+def decodeHuffmanStream (table : ZstdHuffmanTable) (br : BackwardBitReader) (count : Nat) :
+    Except String ByteArray := do
+  let mut br := br
+  let mut result := ByteArray.empty
+  for _ in [:count] do
+    let (sym, br') ← decodeHuffmanSymbol table br
+    br := br'
+    result := result.push sym
+  return result
+
+/-- Decode 4 Huffman streams as specified in RFC 8878 §3.1.1.3.1.6.
+    The first 6 bytes are a jump table (3 × 2-byte LE sizes for streams 1-3).
+    Stream 4's size is the remainder. Each stream decodes ceil(regenSize/4) symbols
+    (last stream may decode fewer to reach exactly regenSize total). -/
+def decodeFourHuffmanStreams (table : ZstdHuffmanTable) (data : ByteArray)
+    (streamStart streamDataSize regenSize : Nat) :
+    Except String ByteArray := do
+  -- Need at least 6 bytes for the jump table
+  if streamDataSize < 6 then
+    throw "Zstd: 4-stream Huffman data too small for jump table"
+  let jumpOff := streamStart
+  if data.size < jumpOff + 6 then
+    throw "Zstd: not enough data for Huffman jump table"
+  let s1Size := (Binary.readUInt16LE data jumpOff).toNat
+  let s2Size := (Binary.readUInt16LE data (jumpOff + 2)).toNat
+  let s3Size := (Binary.readUInt16LE data (jumpOff + 4)).toNat
+  let afterJump := jumpOff + 6
+  let totalStreamBytes := streamDataSize - 6
+  if s1Size + s2Size + s3Size > totalStreamBytes then
+    throw "Zstd: Huffman stream sizes exceed available data"
+  let s4Size := totalStreamBytes - s1Size - s2Size - s3Size
+  -- Compute per-stream symbol counts
+  let perStream := (regenSize + 3) / 4
+  let s1Count := perStream
+  let s2Count := perStream
+  let s3Count := perStream
+  let s4Count := regenSize - s1Count - s2Count - s3Count
+  -- Decode each stream
+  let s1Start := afterJump
+  let s2Start := s1Start + s1Size
+  let s3Start := s2Start + s2Size
+  let s4Start := s3Start + s3Size
+  let br1 ← BackwardBitReader.init data s1Start (s1Start + s1Size)
+  let r1 ← decodeHuffmanStream table br1 s1Count
+  let br2 ← BackwardBitReader.init data s2Start (s2Start + s2Size)
+  let r2 ← decodeHuffmanStream table br2 s2Count
+  let br3 ← BackwardBitReader.init data s3Start (s3Start + s3Size)
+  let r3 ← decodeHuffmanStream table br3 s3Count
+  let br4 ← BackwardBitReader.init data s4Start (s4Start + s4Size)
+  let r4 ← decodeHuffmanStream table br4 s4Count
+  return r1 ++ r2 ++ r3 ++ r4
+
 /-- Parse the Literals_Section_Header and extract literal bytes (RFC 8878 §3.1.1.3.1).
     Returns the literal bytes and the position after the literals section.
     Raw literals are copied verbatim; RLE literals are expanded to `regeneratedSize` copies
-    of a single byte. Compressed and treeless literals return an error (not yet implemented). -/
+    of a single byte. Compressed literals (type 2) are decoded using Huffman tables.
+    Treeless literals (type 3) return an error (requires cross-block state). -/
 def parseLiteralsSection (data : ByteArray) (pos : Nat) :
     Except String (ByteArray × Nat) := do
   if data.size < pos + 1 then
@@ -197,10 +381,66 @@ def parseLiteralsSection (data : ByteArray) (pos : Nat) :
   let byte0 := data[pos]!
   let litType := (byte0 &&& 3).toNat       -- bits 0-1: Literals_Block_Type
   let sizeFormat := ((byte0 >>> 2) &&& 3).toNat  -- bits 2-3: Size_Format
-  -- Compressed and treeless literals require Huffman infrastructure
-  if litType == 2 then throw "Zstd: compressed literals not yet supported"
+  -- Treeless literals require cross-block Huffman table state (future issue)
   if litType == 3 then throw "Zstd: treeless literals not yet supported"
   if litType > 3 then throw "Zstd: invalid literals block type"
+  -- Compressed literals (type 2): both regeneratedSize and compressedSize in header
+  if litType == 2 then do
+    -- Parse the extended header for compressed literals (RFC 8878 §3.1.1.3.1.1).
+    -- The header is packed as a little-endian bitfield:
+    --   bits [1:0]  = litType, bits [3:2] = sizeFormat
+    --   sizeFormat 0,1: 3-byte header, 10-bit sizes, single stream
+    --   sizeFormat 2:   4-byte header, 14-bit sizes, 4 streams
+    --   sizeFormat 3:   5-byte header, 18-bit sizes, 4 streams
+    let (regenSize, compSize, headerBytes, fourStreams) ←
+      if sizeFormat <= 1 then do
+        if data.size < pos + 3 then throw "Zstd: truncated compressed literals header"
+        let b0 := data[pos]!.toNat
+        let b1 := data[pos + 1]!.toNat
+        let b2 := data[pos + 2]!.toNat
+        let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
+        let regen := (raw >>> 4) &&& 0x3FF
+        let comp := (raw >>> 14) &&& 0x3FF
+        pure (regen, comp, 3, false)
+      else if sizeFormat == 2 then do
+        if data.size < pos + 4 then throw "Zstd: truncated compressed literals header"
+        let b0 := data[pos]!.toNat
+        let b1 := data[pos + 1]!.toNat
+        let b2 := data[pos + 2]!.toNat
+        let b3 := data[pos + 3]!.toNat
+        let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
+        let regen := (raw >>> 4) &&& 0x3FFF
+        let comp := (raw >>> 18) &&& 0x3FFF
+        pure (regen, comp, 4, true)
+      else do
+        if data.size < pos + 5 then throw "Zstd: truncated compressed literals header"
+        let b0 := data[pos]!.toNat
+        let b1 := data[pos + 1]!.toNat
+        let b2 := data[pos + 2]!.toNat
+        let b3 := data[pos + 3]!.toNat
+        let b4 := data[pos + 4]!.toNat
+        let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24) ||| (b4 <<< 32)
+        let regen := (raw >>> 4) &&& 0x3FFFF
+        let comp := (raw >>> 22) &&& 0x3FFFF
+        pure (regen, comp, 5, true)
+    let afterHeader := pos + headerBytes
+    if data.size < afterHeader + compSize then
+      throw "Zstd: not enough data for compressed literals"
+    -- Parse Huffman tree descriptor (compSize includes tree + stream data)
+    let (huffTable, afterTree) ← parseHuffmanTreeDescriptor data afterHeader
+    let treeSize := afterTree - afterHeader
+    if treeSize > compSize then
+      throw "Zstd: Huffman tree descriptor exceeds compressed literals size"
+    let streamDataSize := compSize - treeSize
+    -- Decode the Huffman-compressed literal streams
+    if fourStreams then do
+      let result ← decodeFourHuffmanStreams huffTable data afterTree streamDataSize regenSize
+      pure (result, afterHeader + compSize)
+    else do
+      let br ← BackwardBitReader.init data afterTree (afterTree + streamDataSize)
+      let result ← decodeHuffmanStream huffTable br regenSize
+      pure (result, afterHeader + compSize)
+  else
   -- Raw (0) or RLE (1): parse regenerated size using variable-width header
   let (regenSize, headerBytes) ←
     if sizeFormat == 0 || sizeFormat == 2 then
@@ -439,167 +679,5 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
     for i in [litPos:literals.size] do
       output := output.push literals[i]!
   return output
-
-/-- A single entry in a Zstd Huffman decoding table. -/
-structure HuffmanEntry where
-  /-- The symbol this entry decodes to. -/
-  symbol : UInt8 := 0
-  /-- Number of bits consumed by this symbol's code. -/
-  numBits : UInt8 := 0
-  deriving Repr, Inhabited
-
-/-- A Zstd Huffman decoding table (flat lookup, RFC 8878 §4.2.1). -/
-structure ZstdHuffmanTable where
-  /-- Maximum code length (log2 of table size). -/
-  maxBits : Nat
-  /-- Flat lookup table, size = 1 << maxBits. -/
-  table : Array HuffmanEntry
-  deriving Repr
-
-/-- Unpack 4-bit Huffman weights from a byte array (direct representation, RFC 8878 §4.2.1).
-    Each byte packs two 4-bit weights: high nibble first, low nibble second.
-    `numWeightBytes` is the header byte value (< 128), giving the number of weight bytes.
-    Returns (weights array, new position after weight bytes). -/
-def parseHuffmanWeightsDirect (data : ByteArray) (pos : Nat) (numWeightBytes : Nat) :
-    Except String (Array UInt8 × Nat) := do
-  if data.size < pos + numWeightBytes then
-    throw "Zstd Huffman: not enough data for weight bytes"
-  let mut weights : Array UInt8 := #[]
-  for i in [:numWeightBytes] do
-    let byte := data[pos + i]!
-    weights := weights.push (byte >>> 4)       -- high nibble
-    weights := weights.push (byte &&& 0x0F)    -- low nibble
-  return (weights, pos + numWeightBytes)
-
-/-- Derive maxBits from a Huffman weight array (RFC 8878 §4.2.1.1).
-    Finds the smallest M such that the sum of 2^(W-1) for all W > 0 equals 2^M.
-    The last symbol's weight is implicit: its 2^(W-1) value = 2^M - sum. -/
-def weightsToMaxBits (weights : Array UInt8) : Except String Nat := do
-  -- Compute sum of 2^(W-1) for each explicit weight W > 0
-  let mut weightSum : Nat := 0
-  for w in weights do
-    if w.toNat > 0 then
-      weightSum := weightSum + (1 <<< (w.toNat - 1))
-  if weightSum == 0 then
-    throw "Zstd Huffman: all weights are zero"
-  -- Find maxBits: smallest M such that 2^M >= weightSum
-  -- The sum should be a power of 2 or just below one (the implicit last symbol fills the gap)
-  let mut maxBits := 0
-  let mut power : Nat := 1
-  while power < weightSum do
-    maxBits := maxBits + 1
-    power := power * 2
-  -- After adding the last implicit symbol, the total must equal exactly 2^maxBits
-  -- If weightSum is already 2^maxBits, we need maxBits+1 (the last symbol gets weight maxBits+1)
-  if weightSum == power then
-    maxBits := maxBits + 1
-  return maxBits
-
-/-- Build a Zstd Huffman decoding table from a weight array (RFC 8878 §4.2.1).
-    Adds the implicit last symbol, converts weights to code lengths, and fills
-    a flat lookup table of size 2^maxBits. -/
-def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTable := do
-  let maxBits ← weightsToMaxBits weights
-  let targetSum := 1 <<< maxBits
-  -- Compute sum of 2^(W-1) for explicit weights
-  let mut explicitSum : Nat := 0
-  for w in weights do
-    if w.toNat > 0 then
-      explicitSum := explicitSum + (1 <<< (w.toNat - 1))
-  let lastWeight2 := targetSum - explicitSum
-  if lastWeight2 == 0 then
-    throw "Zstd Huffman: implicit last symbol has zero weight"
-  -- Derive the last symbol's weight from its 2^(W-1) value
-  let mut lastWeight : Nat := 0
-  let mut tmp := lastWeight2
-  while tmp > 1 do
-    lastWeight := lastWeight + 1
-    tmp := tmp / 2
-  lastWeight := lastWeight + 1
-  -- Verify: 2^(lastWeight-1) should equal lastWeight2
-  if (1 <<< (lastWeight - 1)) != lastWeight2 then
-    throw s!"Zstd Huffman: implicit last symbol weight is not a power of 2 ({lastWeight2})"
-  -- Build complete weight array including the implicit last symbol
-  let numSymbols := weights.size + 1
-  let lastSymbol := weights.size
-  let allWeights := weights.push lastWeight.toUInt8
-  -- Build the flat lookup table
-  let tableSize := 1 <<< maxBits
-  let mut table : Array HuffmanEntry := Array.replicate tableSize default
-  -- For each symbol with weight W > 0: numberOfBits = maxBits + 1 - W
-  -- Each symbol occupies tableSize / 2^W entries (= 2^(maxBits - W) entries if W < maxBits+1,
-  -- but more precisely: numberOfBits = maxBits + 1 - W, and the symbol fills
-  -- 1 << (maxBits - numberOfBits) = 1 << (W - 1) entries).
-  -- Wait — that's the number of distinct codes for this symbol.
-  -- Each code prefix occupies 2^(maxBits - numberOfBits) = 2^(W-1) table entries.
-  -- Actually: numberOfBits for symbol = maxBits + 1 - W
-  -- Number of table entries per code = 2^(maxBits - numberOfBits) = 2^(W-1)
-  -- Number of codes for this symbol = count (we have 1 code per symbol in Huffman)
-  -- So each symbol with weight W fills 2^(W-1) table entries.
-
-  -- Assign codes: sort symbols by weight (ascending), then assign sequential codes.
-  -- Within each weight group, symbols are in ascending order.
-  -- We track the next available code for each weight.
-  let mut nextCode : Array Nat := Array.replicate (maxBits + 2) 0
-  -- Count symbols per weight
-  let mut weightCounts : Array Nat := Array.replicate (maxBits + 2) 0
-  for i in [:numSymbols] do
-    let w := allWeights[i]!.toNat
-    if w > 0 && w < weightCounts.size then
-      weightCounts := weightCounts.set! w (weightCounts[w]! + 1)
-  -- Compute starting codes for each weight (ascending weight = shorter codes = higher codes)
-  -- Symbols with weight 1 have numberOfBits = maxBits, so they occupy 1 entry each.
-  -- Symbols with weight maxBits have numberOfBits = 1, so they occupy 2^(maxBits-1) entries each.
-  -- Start from weight=1: codes start at 0, each code occupies 2^(W-1) entries.
-  let mut pos : Nat := 0
-  for w in List.range (maxBits + 1) do
-    if w > 0 then
-      nextCode := nextCode.set! w pos
-      pos := pos + weightCounts[w]! * (1 <<< (w - 1))
-
-  -- Fill the table
-  for sym in [:numSymbols] do
-    let w := allWeights[sym]!.toNat
-    if w == 0 then continue
-    let numBits := maxBits + 1 - w
-    let code := nextCode[w]!
-    nextCode := nextCode.set! w (code + (1 <<< (w - 1)))
-    let entry : HuffmanEntry := { symbol := sym.toUInt8, numBits := numBits.toUInt8 }
-    -- Fill 2^(W-1) entries starting at `code`
-    let stride := 1 <<< (w - 1)
-    for j in [:stride] do
-      let idx := code + j
-      if idx < tableSize then
-        table := table.set! idx entry
-      else if sym != lastSymbol then
-        -- Only error for non-last symbols; last symbol might have rounding issues
-        throw s!"Zstd Huffman: table index {idx} out of range (tableSize={tableSize})"
-
-  return { maxBits, table }
-
-/-- Parse a Huffman tree descriptor from a Zstd compressed block (RFC 8878 §4.2.1).
-    Reads the header byte at `pos`, dispatches to direct mode (< 128) or returns
-    an error for FSE-compressed mode (>= 128, not yet implemented).
-    Returns (Huffman table, new position after the tree descriptor). -/
-def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
-    Except String (ZstdHuffmanTable × Nat) := do
-  if data.size < pos + 1 then
-    throw "Zstd Huffman: not enough data for tree descriptor header"
-  let headerByte := data[pos]!.toNat
-  if headerByte >= 128 then
-    throw "Zstd Huffman: FSE-compressed tree descriptor not yet supported"
-  -- Direct representation: headerByte = number of weight bytes
-  let numWeightBytes := headerByte
-  if numWeightBytes == 0 then
-    throw "Zstd Huffman: tree descriptor with 0 weight bytes"
-  let (weights, afterWeights) ← parseHuffmanWeightsDirect data (pos + 1) numWeightBytes
-  -- Trim trailing zero weights (packed bytes may have a padding zero)
-  let mut trimmed := weights
-  while trimmed.size > 0 && trimmed.back! == 0 do
-    trimmed := trimmed.pop
-  if trimmed.size == 0 then
-    throw "Zstd Huffman: all weights are zero after trimming"
-  let table ← buildZstdHuffmanTable trimmed
-  return (table, afterWeights)
 
 end Zip.Native

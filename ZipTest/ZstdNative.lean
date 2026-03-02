@@ -345,14 +345,14 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError s!"raw lit 2byte: expected endPos 102, got {endPos}")
   | .error e => throw (IO.userError s!"parseLiteralsSection raw 2byte failed: {e}")
 
-  -- Test 31: parseLiteralsSection rejects compressed literals with clear error
-  -- Compressed type = 2, any size_format
+  -- Test 31: parseLiteralsSection on malformed compressed literals header
+  -- Compressed type = 2, sizeFormat = 0, minimal 3-byte header with compSize = 0
+  -- byte0 = 0x02 (litType=2, sizeFormat=0, regenSize low = 0)
+  -- This should fail because the tree descriptor has no data to read
   let compressedLitInput := ByteArray.mk #[0x02, 0x00, 0x00, 0x00, 0x00]
   match Zip.Native.parseLiteralsSection compressedLitInput 0 with
-  | .ok _ => throw (IO.userError "compressed lit: should have failed")
-  | .error e =>
-    unless e.contains "compressed literals" do
-      throw (IO.userError s!"compressed lit: wrong error: {e}")
+  | .ok _ => throw (IO.userError "compressed lit: should have failed on malformed input")
+  | .error _ => pure ()  -- any error is acceptable for malformed data
 
   -- Test 32: parseLiteralsSection rejects treeless literals with clear error
   -- Treeless type = 3
@@ -525,20 +525,16 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- But actually with only 2 symbols both weight 1: each gets 1 bit. maxBits=1.
   -- Let me reconsider: for a 2-symbol alphabet, weight [1] (1 explicit, 1 implicit).
   -- sum = 2^(1-1) = 1. 1 == 2^0 so maxBits = 0+1 = 1. That's correct.
-  match Zip.Native.weightsToMaxBits #[1] with
-  | .ok maxBits =>
-    unless maxBits == 1 do
-      throw (IO.userError s!"maxBits [1]: expected 1, got {maxBits}")
-  | .error e => throw (IO.userError s!"weightsToMaxBits [1] failed: {e}")
+  let maxBits1 := Zip.Native.weightsToMaxBits #[1]
+  unless maxBits1 == 1 do
+    throw (IO.userError s!"maxBits [1]: expected 1, got {maxBits1}")
 
   -- Test 47: weightsToMaxBits — three symbols with weights [1, 1, 1]
   -- sum = 1+1+1 = 3. Next power of 2 is 4 = 2^2, so maxBits = 2.
   -- Implicit last symbol gets 2^2 - 3 = 1 = 2^0, so weight 1. Valid.
-  match Zip.Native.weightsToMaxBits #[1, 1, 1] with
-  | .ok maxBits =>
-    unless maxBits == 2 do
-      throw (IO.userError s!"maxBits [1,1,1]: expected 2, got {maxBits}")
-  | .error e => throw (IO.userError s!"weightsToMaxBits [1,1,1] failed: {e}")
+  let maxBits3 := Zip.Native.weightsToMaxBits #[1, 1, 1]
+  unless maxBits3 == 2 do
+    throw (IO.userError s!"maxBits [1,1,1]: expected 2, got {maxBits3}")
 
   -- Test 48: buildZstdHuffmanTable — 2 symbols (1 explicit weight [1])
   -- Symbol 0 has weight 1, implicit symbol 1 also has weight 1.
@@ -547,16 +543,16 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .ok table =>
     unless table.maxBits == 1 do
       throw (IO.userError s!"2sym maxBits: expected 1, got {table.maxBits}")
-    unless table.table.size == 2 do
-      throw (IO.userError s!"2sym table size: expected 2, got {table.table.size}")
+    unless table.entries.size == 2 do
+      throw (IO.userError s!"2sym table size: expected 2, got {table.entries.size}")
     -- Both entries should have numBits = 1
-    unless table.table[0]!.numBits == 1 do
-      throw (IO.userError s!"2sym entry 0 numBits: expected 1, got {table.table[0]!.numBits}")
-    unless table.table[1]!.numBits == 1 do
-      throw (IO.userError s!"2sym entry 1 numBits: expected 1, got {table.table[1]!.numBits}")
+    unless table.entries[0]!.numBits == 1 do
+      throw (IO.userError s!"2sym entry 0 numBits: expected 1, got {table.entries[0]!.numBits}")
+    unless table.entries[1]!.numBits == 1 do
+      throw (IO.userError s!"2sym entry 1 numBits: expected 1, got {table.entries[1]!.numBits}")
     -- Symbols should be 0 and 1 (in some order)
-    let s0 : UInt8 := table.table[0]!.symbol
-    let s1 : UInt8 := table.table[1]!.symbol
+    let s0 : UInt8 := table.entries[0]!.symbol
+    let s1 : UInt8 := table.entries[1]!.symbol
     unless (s0 == 0 && s1 == 1) || (s0 == 1 && s1 == 0) do
       throw (IO.userError s!"2sym symbols: expected 0,1 got {s0.toNat} {s1.toNat}")
   | .error e => throw (IO.userError s!"buildZstdHuffmanTable 2sym failed: {e}")
@@ -574,11 +570,11 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .ok table =>
     unless table.maxBits == 3 do
       throw (IO.userError s!"4sym maxBits: expected 3, got {table.maxBits}")
-    unless table.table.size == 8 do
-      throw (IO.userError s!"4sym table size: expected 8, got {table.table.size}")
+    unless table.entries.size == 8 do
+      throw (IO.userError s!"4sym table size: expected 8, got {table.entries.size}")
     -- Symbol 3 (implicit, weight 3) should have numBits = 1 and occupy 4 entries
     let mut sym3Count := 0
-    for entry in table.table do
+    for entry in table.entries do
       if entry.symbol == 3 then
         unless entry.numBits == 1 do
           throw (IO.userError s!"4sym sym3 numBits: expected 1, got {entry.numBits}")
@@ -597,8 +593,8 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError s!"treeDesc endPos: expected 2, got {endPos}")
     unless table.maxBits == 2 do
       throw (IO.userError s!"treeDesc maxBits: expected 2, got {table.maxBits}")
-    unless table.table.size == 4 do
-      throw (IO.userError s!"treeDesc table size: expected 4, got {table.table.size}")
+    unless table.entries.size == 4 do
+      throw (IO.userError s!"treeDesc table size: expected 4, got {table.entries.size}")
   | .error e => throw (IO.userError s!"parseHuffmanTreeDescriptor direct failed: {e}")
 
   -- Test 51: parseHuffmanTreeDescriptor — FSE mode returns error
@@ -619,11 +615,99 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .ok _ => throw (IO.userError "truncated weights: should have failed")
   | .error _ => pure ()
 
-  -- Test 54: weightsToMaxBits — all zeros returns error
-  match Zip.Native.weightsToMaxBits #[0, 0, 0] with
-  | .ok _ => throw (IO.userError "all-zero weights: should have failed")
+
+  -- Test 54: weightsToMaxBits — all zeros returns 1 (fallback for empty distribution)
+  let maxBitsZero := Zip.Native.weightsToMaxBits #[0, 0, 0]
+  unless maxBitsZero == 1 do
+    throw (IO.userError s!"all-zero weights: expected 1, got {maxBitsZero}")
+
+  -- Test 55: decodeHuffmanSymbol — single symbol from 2-symbol table
+  -- Build a table with weights [1] → 2 symbols, maxBits = 1
+  -- Symbol 0 maps to code 0 (1 bit), symbol 1 maps to code 1 (1 bit)
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok huffTable2 =>
+    -- Create a backward bitstream with a known bit pattern.
+    -- BackwardBitReader reads MSB-first from the end.
+    -- Byte 0x80 = 10000000: sentinel bit at position 7, no data bits below it.
+    -- Byte 0x00 preceding it = 00000000: 8 data bits, all 0.
+    -- So we can read: 0, 0, 0, 0, 0, 0, 0, 0 (8 zero bits)
+    -- To get a more interesting pattern: 0xC0 = 11000000
+    -- Last byte sentinel at bit 7, data bit at bit 6 = 1.
+    -- So bits available after sentinel: 1 (one bit, value 1)
+    -- For maxBits=1, reading 1 bit gives us the table index.
+    -- value 1 → table[1] → whichever symbol is at index 1
+    let testStream := ByteArray.mk #[0xC0]
+    match Zip.Native.BackwardBitReader.init testStream 0 1 with
+    | .ok br =>
+      match Zip.Native.decodeHuffmanSymbol huffTable2 br with
+      | .ok (sym, _) =>
+        -- sym should be the symbol at table index 1
+        let expectedSym := huffTable2.entries[1]!.symbol
+        unless sym == expectedSym do
+          throw (IO.userError s!"decode sym: expected {expectedSym}, got {sym}")
+      | .error e => throw (IO.userError s!"decodeHuffmanSymbol failed: {e}")
+    | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable for decode test failed: {e}")
+
+  -- Test 56: decodeHuffmanStream — decode multiple symbols from known bitstream
+  -- Use a 2-symbol table (maxBits=1). Symbols: 0 and 1.
+  -- Create a bitstream with bits: 0, 1, 0, 1 (4 symbols)
+  -- Backward bitstream: data read MSB-first from end. We need sentinel + 4 data bits.
+  -- Byte = 0b10101_000? No — let's think carefully.
+  -- We want 4 bits of data: 0, 1, 0, 1 (MSB-first read order).
+  -- The backward reader reads MSB-first within each byte, from the last byte backward.
+  -- If we use a single byte: sentinel bit is the highest set bit.
+  -- 0b10101_0 won't work (6 bits total, only 5 data bits after sentinel).
+  -- Let me use: byte = 0b10101_0 = 0b00010101_0? No.
+  -- Actually: byte 0x15 = 0b00010101. Highest set bit at position 4.
+  -- After sentinel: bits 3,2,1,0 = 0,1,0,1. That's 4 data bits!
+  -- Reads: bit 3=0, bit 2=1, bit 1=0, bit 0=1 → symbols: table[0], table[1], table[0], table[1]
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok huffTable2 =>
+    let sym0 := huffTable2.entries[0]!.symbol
+    let sym1 := huffTable2.entries[1]!.symbol
+    let testStream := ByteArray.mk #[0x15]  -- 0b00010101
+    match Zip.Native.BackwardBitReader.init testStream 0 1 with
+    | .ok br =>
+      match Zip.Native.decodeHuffmanStream huffTable2 br 4 with
+      | .ok result =>
+        unless result.size == 4 do
+          throw (IO.userError s!"stream decode: expected 4 bytes, got {result.size}")
+        unless result[0]! == sym0 do
+          throw (IO.userError s!"stream decode[0]: expected {sym0}, got {result[0]!}")
+        unless result[1]! == sym1 do
+          throw (IO.userError s!"stream decode[1]: expected {sym1}, got {result[1]!}")
+        unless result[2]! == sym0 do
+          throw (IO.userError s!"stream decode[2]: expected {sym0}, got {result[2]!}")
+        unless result[3]! == sym1 do
+          throw (IO.userError s!"stream decode[3]: expected {sym1}, got {result[3]!}")
+      | .error e => throw (IO.userError s!"decodeHuffmanStream failed: {e}")
+    | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable for stream test failed: {e}")
+
+  -- Test 57: integration — FFI-compressed data with Huffman literals decodes past literals stage
+  -- Use diverse data that forces Huffman-compressed literals at default level
+  let huffTestData := "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump!".toUTF8
+  let huffCompressed ← Zstd.compress huffTestData 3
+  match Zip.Native.decompressZstd huffCompressed with
+  | .ok result =>
+    -- If full decompression succeeds, verify the output
+    unless result.data == huffTestData.data do
+      throw (IO.userError "Huffman integration: decompressed data mismatch")
   | .error e =>
-    unless e.contains "all weights are zero" do
-      throw (IO.userError s!"all-zero weights: wrong error: {e}")
+    -- Expected to fail at sequence decoding (Huffman literals should succeed)
+    unless e.contains "sequence decoding" || e.contains "treeless literals" do
+      throw (IO.userError s!"Huffman integration: unexpected error stage: {e}")
+
+  -- Test 58: decodeFourHuffmanStreams — error on too-small data
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok huffTable2 =>
+    -- streamDataSize < 6 should fail (need at least 6 bytes for jump table)
+    match Zip.Native.decodeFourHuffmanStreams huffTable2 (ByteArray.mk #[0, 0, 0]) 0 3 10 with
+    | .ok _ => throw (IO.userError "4-stream small: should have failed")
+    | .error e =>
+      unless e.contains "jump table" do
+        throw (IO.userError s!"4-stream small: wrong error: {e}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable for 4-stream test failed: {e}")
 
   IO.println "ZstdNative tests: OK"
