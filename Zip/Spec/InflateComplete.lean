@@ -23,7 +23,7 @@ private theorem uint8_nat_roundtrip (l : List UInt8) :
     show Nat.toUInt8 (UInt8.toNat u) = u
     unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
     rw [BitVec.ofNat_toNat, BitVec.setWidth_eq])]
-  simp
+  exact List.map_id _
 
 /-- Nat→UInt8→Nat roundtrip for lists with elements bounded by `maxBits ≤ 15`. -/
 theorem validLengths_toUInt8_roundtrip (lens : List Nat)
@@ -34,7 +34,7 @@ theorem validLengths_toUInt8_roundtrip (lens : List Nat)
     show (Nat.toUInt8 n).toNat = n
     simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
     exact Nat.mod_eq_of_lt (by have := hv.1 n hn; omega))]
-  simp
+  exact List.map_id _
 
 /-! ## WF guard helpers -/
 
@@ -92,12 +92,12 @@ theorem inflateLoop_fuel_le
     simp only [bind, Except.bind] at h ⊢
     -- readBits 1
     cases hbf : br.readBits 1 with
-    | error e => simp [hbf] at h
+    | error e => exact nomatch (hbf ▸ h)
     | ok p₁ =>
       obtain ⟨bfinal, br₁⟩ := p₁; simp only [hbf] at h ⊢
       -- readBits 2
       cases hbt : br₁.readBits 2 with
-      | error e => simp [hbt] at h
+      | error e => exact nomatch (hbt ▸ h)
       | ok p₂ =>
         obtain ⟨btype, br₂⟩ := p₂; simp only [hbt] at h ⊢
         -- Both h and ⊢ match on btype; only dataSize differs (n vs m)
@@ -112,11 +112,11 @@ theorem inflateLoop_fuel_le
             · rename_i h1 h2; exact absurd h2 h1
             · -- WF guards: progress (same in h and goal)
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i h_progress
                 -- WF guards: range (differs between n and m)
                 split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i h_range_n
                   -- Discharge goal's WF guards
                   split
@@ -132,10 +132,10 @@ theorem inflateLoop_fuel_le
             · rename_i h1 h2; exact absurd h1 h2
             · rename_i h1 h2; exact absurd h2 h1
             · split at h
-              · simp at h
+              · exact nomatch h
               · rename_i h_progress
                 split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i h_range_n
                   split
                   · rename_i h_prog_m; exact absurd h_prog_m h_progress
@@ -152,10 +152,10 @@ theorem inflateLoop_fuel_le
               · rename_i h1 h2; exact absurd h1 h2
               · rename_i h1 h2; exact absurd h2 h1
               · split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i h_progress
                   split at h
-                  · simp at h
+                  · exact nomatch h
                   · rename_i h_range_n
                     split
                     · rename_i h_prog_m; exact absurd h_prog_m h_progress
@@ -215,7 +215,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
     unfold Deflate.Spec.decode.go at hspec
     -- Extract readBitsLSB 1 (bfinal)
     cases hspec_bf : Deflate.Spec.readBitsLSB 1 br.toBits with
-    | none => simp [hspec_bf] at hspec
+    | none => exact nomatch (hspec_bf ▸ hspec)
     | some p₁ =>
       obtain ⟨bfinal_val, bits₁⟩ := p₁
       simp only [hspec_bf, bind, Option.bind] at hspec
@@ -226,7 +226,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
         Zip.Native.readBits_inv br br₁ 1 bfinal_val.toUInt32 hrb_bf hpos hple
       -- Extract readBitsLSB 2 (btype)
       cases hspec_bt : Deflate.Spec.readBitsLSB 2 bits₁ with
-      | none => simp [hspec_bt] at hspec
+      | none => exact nomatch (hspec_bt ▸ hspec)
       | some p₂ =>
         obtain ⟨btype_val, bits₂⟩ := p₂
         simp only [hspec_bt] at hspec
@@ -241,7 +241,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
         · -- btype_val = 0: stored
           -- Extract decodeStored from spec
           cases hspec_ds : Deflate.Spec.decodeStored bits₂ with
-          | none => simp [hspec_ds] at hspec
+          | none => exact nomatch (hspec_ds ▸ hspec)
           | some p₃ =>
             obtain ⟨storedBytes, rest⟩ := p₃
             simp only [hspec_ds] at hspec
@@ -321,19 +321,19 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     exact absurd h_rng (wf_range_of_data_le (by rw [hbo_0]; omega) hple_br hpos_br hds_br)
                   · exact hloop
               · -- ¬(rest.length < br.toBits.length): spec returns none
-                simp at hspec
+                exact nomatch hspec
 
         · -- btype_val = 1: fixed Huffman
           -- Extract decodeSymbols from spec
           cases hspec_ds : Deflate.Spec.decodeSymbols Deflate.Spec.fixedLitLengths
               Deflate.Spec.fixedDistLengths bits₂ with
-          | none => simp [hspec_ds] at hspec
+          | none => exact nomatch (hspec_ds ▸ hspec)
           | some p₃ =>
             obtain ⟨syms, rest⟩ := p₃
             simp only [hspec_ds] at hspec
             -- Extract resolveLZ77 from spec
             cases hspec_lz : Deflate.Spec.resolveLZ77 syms output.data.toList with
-            | none => simp [hspec_lz] at hspec
+            | none => exact nomatch (hspec_lz ▸ hspec)
             | some blockResult =>
               simp only [hspec_lz] at hspec
               -- Bridge decodeSymbols to native table names
@@ -432,23 +432,23 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     · rename_i h_rng
                       exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
                     · exact hloop
-                · simp at hspec
+                · exact nomatch hspec
         · -- btype_val = 2: dynamic Huffman
           -- Extract decodeDynamicTables from spec
           cases hspec_dt : Deflate.Spec.decodeDynamicTables bits₂ with
-          | none => simp [hspec_dt] at hspec
+          | none => exact nomatch (hspec_dt ▸ hspec)
           | some p₃ =>
             obtain ⟨litLens, distLens, bits₃⟩ := p₃
             simp only [hspec_dt] at hspec
             -- Extract decodeSymbols from spec
             cases hspec_ds : Deflate.Spec.decodeSymbols litLens distLens bits₃ with
-            | none => simp [hspec_ds] at hspec
+            | none => exact nomatch (hspec_ds ▸ hspec)
             | some p₄ =>
               obtain ⟨syms, rest⟩ := p₄
               simp only [hspec_ds] at hspec
               -- Extract resolveLZ77 from spec
               cases hspec_lz : Deflate.Spec.resolveLZ77 syms output.data.toList with
-              | none => simp [hspec_lz] at hspec
+              | none => exact nomatch (hspec_lz ▸ hspec)
               | some blockResult =>
                 simp only [hspec_lz] at hspec
                 -- Use decodeDynamicTrees_complete
@@ -552,8 +552,8 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                       · rename_i h_rng
                         exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
                       · exact hloop
-                  · simp at hspec
+                  · exact nomatch hspec
         · -- btype_val ≥ 3: reserved
-          simp at hspec
+          exact nomatch hspec
 
 end Deflate.Correctness
