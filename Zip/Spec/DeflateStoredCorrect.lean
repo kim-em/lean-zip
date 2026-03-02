@@ -97,8 +97,9 @@ theorem readBits_1_at_0 (data : ByteArray) (pos : Nat)
   simp only [Except.ok.injEq, Prod.mk.injEq]
   rw [getElem!_pos data pos hpos]
   constructor
-  · -- bare simp: concrete bit computation
-    simp [UInt32.shiftRight_zero, UInt32.shiftLeft_zero, UInt32.zero_or]
+  · -- concrete bit computation
+    simp only [show (Nat.toUInt32 0 : UInt32) = 0 from by decide,
+      UInt32.shiftRight_zero, UInt32.shiftLeft_zero, UInt32.zero_or]
   · trivial
 
 /-- Reading 2 bits starting at bitOff 1 within the same byte.
@@ -120,8 +121,11 @@ theorem readBits_2_at_1 (data : ByteArray) (pos : Nat)
   rw [getElem!_pos data pos hpos]
   simp only [Except.ok.injEq, Prod.mk.injEq]
   constructor
-  · -- bare simp: concrete bit computation
-    simp [UInt32.shiftLeft_zero, UInt32.zero_or]
+  · -- concrete bit computation
+    simp only [show (Nat.toUInt32 0 : UInt32) = 0 from by decide,
+      show (Nat.toUInt32 1 : UInt32) = 1 from by decide,
+      show (Nat.toUInt32 2 : UInt32) = 2 from by decide,
+      UInt32.shiftLeft_zero, UInt32.zero_or]
     generalize data[pos].toUInt32 = x
     bv_decide
   · trivial
@@ -190,8 +194,8 @@ theorem decodeStored_on_block (compressed : ByteArray) (brPos : Nat)
       hnlen_lo, hnlen_hi, uint16_le_roundtrip] at hru2
   -- Step 3: blockLen.toUInt16.toNat = blockLen
   have hbl_toNat : blockLen.toUInt16.toNat = blockLen := by
-    -- bare simp: UInt16 modular arithmetic via BitVec internals
-    simp [Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)]
+    -- UInt16 modular arithmetic: blockLen.toUInt16.toNat = blockLen % 65536
+    exact Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)
   -- Step 4: Compose everything
   simp only [Inflate.decodeStored, bind, Except.bind, hru1, hru2]
   -- XOR check: a ^^^ (a ^^^ 0xFFFF) = 0xFFFF

@@ -257,7 +257,9 @@ theorem deflateDynamic_spec (data : ByteArray) :
               | none => exact nomatch hds ▸ hdist_enc
               | some distBits =>
                 -- Close the goal: all four operations succeeded
-                simp [LZ77Token.toLZ77Symbol, hlc, hls, hdc, hds]
+                simp only [LZ77Token.toLZ77Symbol, hlc, hls, hdc, hds,
+                  Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+                  Option.isSome_some, List.append_assoc]
     | inr heob =>
       subst heob
       -- Need: encodeLitLen litLens distLens .endOfBlock succeeds
@@ -298,16 +300,18 @@ theorem deflateDynamic_spec (data : ByteArray) :
       cases henc_eob : Deflate.Spec.encodeLitLen litLens distLens .endOfBlock with
       | none => exact nomatch henc_eob ▸ henc_eob_syms
       | some eobBits' =>
-        simp [henc_eob] at henc_eob_syms
+        simp only [henc_eob,
+          Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+          List.append_nil, Option.some.injEq] at henc_eob_syms
         have heob_eq : eobBits = eobBits' := by rw [henc_eob_syms]
         -- Build canonical codes (same as in deflateDynamic)
         let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
         let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
         -- Size properties
         have hlit_codes_size : litCodes.size = litLens.length := by
-          simp [litCodes, canonicalCodes_size, List.size_toArray]
+          simp only [litCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
         have hdist_codes_size : distCodes.size = distLens.length := by
-          simp [distCodes, canonicalCodes_size, List.size_toArray]
+          simp only [distCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
         -- Code length bounds
         have hlit_lengths_arr_le := Deflate.toUInt8Array_le litLens hlit_bound
         have hdist_lengths_arr_le := Deflate.toUInt8Array_le distLens hdist_bound
