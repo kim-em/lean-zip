@@ -601,13 +601,12 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError s!"treeDesc table size: expected 4, got {table.table.size}")
   | .error e => throw (IO.userError s!"parseHuffmanTreeDescriptor direct failed: {e}")
 
-  -- Test 51: parseHuffmanTreeDescriptor — FSE mode returns error
+  -- Test 51: parseHuffmanTreeDescriptor — FSE mode with invalid data returns error
+  -- Header byte 0x80 → compressedSize=1, too small for a valid FSE distribution
   let fseTreeInput := ByteArray.mk #[0x80, 0x00, 0x00, 0x00]
   match Zip.Native.parseHuffmanTreeDescriptor fseTreeInput 0 with
-  | .ok _ => throw (IO.userError "FSE tree descriptor: should have failed")
-  | .error e =>
-    unless e.contains "FSE-compressed" do
-      throw (IO.userError s!"FSE tree descriptor: wrong error: {e}")
+  | .ok _ => throw (IO.userError "FSE tree descriptor invalid: should have failed")
+  | .error _ => pure ()
 
   -- Test 52: parseHuffmanTreeDescriptor — truncated input
   match Zip.Native.parseHuffmanTreeDescriptor ByteArray.empty 0 with
@@ -763,5 +762,94 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- Test 73: matchLenExtraBits table has 53 entries
   unless Zip.Native.matchLenExtraBits.size == 53 do
     throw (IO.userError s!"matchLenExtraBits: expected 53 entries, got {Zip.Native.matchLenExtraBits.size}")
+
+  -- Test 74: parseHuffmanTreeDescriptor — FSE-compressed on real zstd data
+  -- Compress ~1KB of varied data at level 3 (typically produces FSE-compressed Huffman weights)
+  let mut fseTestData := ByteArray.empty
+  for i in [:1024] do
+    -- Generate varied but not-too-random data to encourage compressed blocks with Huffman tables
+    fseTestData := fseTestData.push ((i * 7 + 13) % 256).toUInt8
+  let fseCompressed ← Zstd.compress fseTestData 3
+  -- Parse frame header + block header to find the literals section
+  match Zip.Native.parseFrameHeader fseCompressed 0 with
+  | .ok (_, blockStart) =>
+    match Zip.Native.parseBlockHeader fseCompressed blockStart with
+    | .ok (blkHdr, afterBlkHdr) =>
+      if blkHdr.blockType == .compressed then
+        -- Parse the literals section header to check if we get a compressed literal type
+        let byte0 := fseCompressed[afterBlkHdr]!
+        let litType := (byte0 &&& 3).toNat
+        if litType == 2 then
+          -- Compressed literals: parse the Huffman tree descriptor
+          -- Skip past the literals section header to reach the Huffman tree descriptor
+          let sizeFormat := ((byte0 >>> 2) &&& 3).toNat
+          let (headerBytes, _regenSize, _compSize) ←
+            if sizeFormat == 0 then do
+              -- 3-byte header for compressed: bits [4:5] are sizes
+              if fseCompressed.size < afterBlkHdr + 3 then
+                throw (IO.userError "FSE test: not enough data for 3-byte compressed lit header")
+              let b0 := fseCompressed[afterBlkHdr]!
+              let b1 := fseCompressed[afterBlkHdr + 1]!
+              let b2 := fseCompressed[afterBlkHdr + 2]!
+              let regen := ((b0 >>> 4).toNat &&& 0x3F) ||| ((b1.toNat &&& 0x3F) <<< 6)
+              -- Not used but needed for parsing
+              pure (3, regen, b2.toNat)
+            else if sizeFormat == 1 then do
+              -- 3-byte header
+              if fseCompressed.size < afterBlkHdr + 3 then
+                throw (IO.userError "FSE test: not enough data for 3-byte compressed lit header")
+              pure (3, 0, 0)
+            else if sizeFormat == 2 then do
+              -- 4-byte header
+              if fseCompressed.size < afterBlkHdr + 4 then
+                throw (IO.userError "FSE test: not enough data for 4-byte compressed lit header")
+              pure (4, 0, 0)
+            else do
+              -- 5-byte header
+              if fseCompressed.size < afterBlkHdr + 5 then
+                throw (IO.userError "FSE test: not enough data for 5-byte compressed lit header")
+              pure (5, 0, 0)
+          -- The Huffman tree descriptor follows the literals section header
+          let huffTreePos := afterBlkHdr + headerBytes
+          match Zip.Native.parseHuffmanTreeDescriptor fseCompressed huffTreePos with
+          | .ok (table, _) =>
+            -- Verify table has reasonable maxBits (typically 8-11 for literals)
+            unless table.maxBits ≥ 1 && table.maxBits ≤ 12 do
+              throw (IO.userError s!"FSE Huffman: unreasonable maxBits {table.maxBits}")
+            -- Verify the table has entries
+            unless table.table.size > 0 do
+              throw (IO.userError "FSE Huffman: table is empty")
+          | .error e => throw (IO.userError s!"FSE Huffman parseHuffmanTreeDescriptor failed: {e}")
+        else
+          -- Not compressed literals at this level; skip test quietly
+          pure ()
+      else
+        -- Not a compressed block; skip test quietly
+        pure ()
+    | .error e => throw (IO.userError s!"FSE test parseBlockHeader failed: {e}")
+  | .error e => throw (IO.userError s!"FSE test parseFrameHeader failed: {e}")
+
+  -- Test 75: decodeFseSymbolsAll — basic smoke test
+  -- Build a trivial 2-symbol FSE table manually and decode from a backward stream.
+  -- Symbols: 0 (prob=1), 1 (prob=1). accuracyLog=1, table size=2.
+  let trivialTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 0, numBits := 1, newState := 0 },
+      { symbol := 1, numBits := 1, newState := 0 }
+    ]
+  }
+  -- Create a minimal backward bitstream: one byte with sentinel + 1 bit of init state
+  -- Byte = 0b11 = 3: sentinel at bit 1, then bit 0 = 1 (init state = 1)
+  -- After init state=1, cell[1]={symbol=1, numBits=1, newState=0}, stream is finished
+  let bbrData := ByteArray.mk #[0x03]
+  match Zip.Native.BackwardBitReader.init bbrData 0 1 with
+  | .ok bbr =>
+    match Zip.Native.decodeFseSymbolsAll trivialTable bbr with
+    | .ok (syms, _) =>
+      unless syms.size ≥ 1 do
+        throw (IO.userError s!"decodeFseSymbolsAll trivial: expected at least 1 symbol, got {syms.size}")
+    | .error e => throw (IO.userError s!"decodeFseSymbolsAll trivial failed: {e}")
+  | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
 
   IO.println "ZstdNative tests: OK"
