@@ -133,7 +133,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
         throw (IO.userError s!"empty blocks: expected 0 output bytes, got {result.size}")
     | .error e =>
       -- If it fails because of compressed block type, that's acceptable
-      unless e.contains "compressed blocks not yet implemented" do
+      unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
         throw (IO.userError s!"empty blocks: unexpected error: {e}")
   | .error e => throw (IO.userError s!"parseFrameHeader on empty: {e}")
 
@@ -149,7 +149,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
         throw (IO.userError s!"const blocks: decompressed {result.size} bytes, expected {constData.size}")
     | .error e =>
       -- Compressed blocks are expected for some data — not a test failure
-      unless e.contains "compressed blocks not yet implemented" do
+      unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
         throw (IO.userError s!"const blocks: unexpected error: {e}")
   | .error e => throw (IO.userError s!"parseFrameHeader on const: {e}")
 
@@ -160,7 +160,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.size == 0 do
       throw (IO.userError s!"decompressZstd empty: expected 0 bytes, got {result.size}")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"decompressZstd empty: unexpected error: {e}")
 
   -- Test 17: decompressZstd round-trip on constant data (likely RLE blocks)
@@ -171,7 +171,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.data == constData2.data do
       throw (IO.userError s!"decompressZstd const: decompressed {result.size} bytes, expected {constData2.size}")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"decompressZstd const: unexpected error: {e}")
 
   -- Test 18: decompressZstd round-trip on single byte
@@ -182,7 +182,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.data == singleByte.data do
       throw (IO.userError s!"decompressZstd single: expected [0x42], got {result.data}")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"decompressZstd single: unexpected error: {e}")
 
   -- Test 19: decompressZstd round-trip on all-zeros (maximally compressible)
@@ -193,7 +193,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.data == zeros.data do
       throw (IO.userError s!"decompressZstd zeros: decompressed {result.size} bytes, expected {zeros.size}")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"decompressZstd zeros: unexpected error: {e}")
 
   -- Test 20: decompressZstd error on invalid magic number
@@ -232,7 +232,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless endPos ≥ 6 do
       throw (IO.userError s!"decompressFrame: endPos {endPos} too small")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"decompressFrame: unexpected error: {e}")
 
   -- Test 24: decompressFrame content size validation
@@ -246,7 +246,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.size == 512 do
       throw (IO.userError s!"decompressFrame size: expected 512 bytes, got {result.size}")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"decompressFrame size: unexpected error: {e}")
 
   -- Test 25: checksum verification — valid FFI-compressed data decompresses
@@ -259,7 +259,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.data == checksumData.data do
       throw (IO.userError "checksum valid: decompressed data mismatch")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"checksum valid: unexpected error: {e}")
 
   -- Test 26: checksum verification — corrupted data triggers checksum error
@@ -285,7 +285,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
         pure ()
       | .error e =>
         -- Should be either a checksum mismatch or compressed-blocks-not-implemented
-        unless e.contains "checksum mismatch" || e.contains "compressed blocks not yet implemented" do
+        unless e.contains "checksum mismatch" || e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
           throw (IO.userError s!"checksum corrupt: expected checksum error, got: {e}")
   | .error e => throw (IO.userError s!"checksum corrupt: header parse failed: {e}")
 
@@ -297,7 +297,136 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.size == 0 do
       throw (IO.userError s!"checksum empty: expected 0 bytes, got {result.size}")
   | .error e =>
-    unless e.contains "compressed blocks not yet implemented" do
+    unless e.contains "compressed blocks not yet implemented" || e.contains "sequence decoding not yet implemented" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"checksum empty: unexpected error: {e}")
+
+  -- Test 28: parseLiteralsSection on manually crafted Raw header (1-byte header, 5-bit size)
+  -- Raw type = 0, size_format = 0 (bit 2 = 0), regenSize = 5 (bits 3-7)
+  -- byte0 = (5 << 3) | 0 = 0x28, followed by 5 raw bytes
+  let rawLitInput := ByteArray.mk #[0x28, 0x48, 0x65, 0x6C, 0x6C, 0x6F]
+  match Zip.Native.parseLiteralsSection rawLitInput 0 with
+  | .ok (result, endPos) =>
+    unless result.size == 5 do
+      throw (IO.userError s!"raw lit: expected 5 bytes, got {result.size}")
+    unless endPos == 6 do
+      throw (IO.userError s!"raw lit: expected endPos 6, got {endPos}")
+    unless result == (ByteArray.mk #[0x48, 0x65, 0x6C, 0x6C, 0x6F]) do
+      throw (IO.userError "raw lit: incorrect bytes")
+  | .error e => throw (IO.userError s!"parseLiteralsSection raw failed: {e}")
+
+  -- Test 29: parseLiteralsSection on RLE header (1-byte header, 5-bit size)
+  -- RLE type = 1, size_format = 0 (bit 2 = 0), regenSize = 7 (bits 3-7)
+  -- byte0 = (7 << 3) | 1 = 0x39, followed by the byte to replicate
+  let rleLitInput := ByteArray.mk #[0x39, 0xBB]
+  match Zip.Native.parseLiteralsSection rleLitInput 0 with
+  | .ok (result, endPos) =>
+    unless result.size == 7 do
+      throw (IO.userError s!"rle lit: expected 7 bytes, got {result.size}")
+    unless endPos == 2 do
+      throw (IO.userError s!"rle lit: expected endPos 2, got {endPos}")
+    for i in [:7] do
+      unless result[i]! == 0xBB do
+        throw (IO.userError s!"rle lit: byte {i} expected 0xBB, got {result[i]!}")
+  | .error e => throw (IO.userError s!"parseLiteralsSection rle failed: {e}")
+
+  -- Test 30: parseLiteralsSection with 2-byte header (12-bit size)
+  -- Raw type = 0, size_format = 01, regenSize = 100
+  -- byte0 = (100 & 0xF) << 4 | (1 << 2) | 0 = 0x44
+  -- byte1 = 100 >> 4 = 6
+  -- Followed by 100 bytes of content
+  let mut bigRawInput := ByteArray.mk #[0x44, 0x06]
+  for i in [:100] do
+    bigRawInput := bigRawInput.push (i % 256).toUInt8
+  match Zip.Native.parseLiteralsSection bigRawInput 0 with
+  | .ok (result, endPos) =>
+    unless result.size == 100 do
+      throw (IO.userError s!"raw lit 2byte: expected 100 bytes, got {result.size}")
+    unless endPos == 102 do
+      throw (IO.userError s!"raw lit 2byte: expected endPos 102, got {endPos}")
+  | .error e => throw (IO.userError s!"parseLiteralsSection raw 2byte failed: {e}")
+
+  -- Test 31: parseLiteralsSection rejects compressed literals with clear error
+  -- Compressed type = 2, any size_format
+  let compressedLitInput := ByteArray.mk #[0x02, 0x00, 0x00, 0x00, 0x00]
+  match Zip.Native.parseLiteralsSection compressedLitInput 0 with
+  | .ok _ => throw (IO.userError "compressed lit: should have failed")
+  | .error e =>
+    unless e.contains "compressed literals" do
+      throw (IO.userError s!"compressed lit: wrong error: {e}")
+
+  -- Test 32: parseLiteralsSection rejects treeless literals with clear error
+  -- Treeless type = 3
+  let treelessLitInput := ByteArray.mk #[0x03, 0x00, 0x00, 0x00, 0x00]
+  match Zip.Native.parseLiteralsSection treelessLitInput 0 with
+  | .ok _ => throw (IO.userError "treeless lit: should have failed")
+  | .error e =>
+    unless e.contains "treeless literals" do
+      throw (IO.userError s!"treeless lit: wrong error: {e}")
+
+  -- Test 33: parseSequencesHeader with 0 sequences
+  let zeroSeqInput := ByteArray.mk #[0x00]
+  match Zip.Native.parseSequencesHeader zeroSeqInput 0 with
+  | .ok (numSeq, endPos) =>
+    unless numSeq == 0 do
+      throw (IO.userError s!"0 seq: expected 0, got {numSeq}")
+    unless endPos == 1 do
+      throw (IO.userError s!"0 seq: expected endPos 1, got {endPos}")
+  | .error e => throw (IO.userError s!"parseSequencesHeader 0 failed: {e}")
+
+  -- Test 34: parseSequencesHeader with small count (1-byte format)
+  -- byte0 = 42, followed by compression modes byte
+  let smallSeqInput := ByteArray.mk #[42, 0x00]
+  match Zip.Native.parseSequencesHeader smallSeqInput 0 with
+  | .ok (numSeq, endPos) =>
+    unless numSeq == 42 do
+      throw (IO.userError s!"42 seq: expected 42, got {numSeq}")
+    unless endPos == 2 do
+      throw (IO.userError s!"42 seq: expected endPos 2, got {endPos}")
+  | .error e => throw (IO.userError s!"parseSequencesHeader 42 failed: {e}")
+
+  -- Test 35: parseSequencesHeader with 2-byte format
+  -- byte0 = 200 (>= 128, < 255): numSeq = (200 - 128) << 8 + byte1 = 72 * 256 + 50 = 18482
+  let medSeqInput := ByteArray.mk #[200, 50, 0x00]
+  match Zip.Native.parseSequencesHeader medSeqInput 0 with
+  | .ok (numSeq, endPos) =>
+    unless numSeq == 18482 do
+      throw (IO.userError s!"2byte seq: expected 18482, got {numSeq}")
+    unless endPos == 3 do
+      throw (IO.userError s!"2byte seq: expected endPos 3, got {endPos}")
+  | .error e => throw (IO.userError s!"parseSequencesHeader 2byte failed: {e}")
+
+  -- Test 36: parseSequencesHeader with 3-byte format
+  -- byte0 = 255: numSeq = byte1 + (byte2 << 8) + 0x7F00 = 10 + (1 << 8) + 32512 = 32778
+  let largeSeqInput := ByteArray.mk #[255, 10, 1, 0x00]
+  match Zip.Native.parseSequencesHeader largeSeqInput 0 with
+  | .ok (numSeq, endPos) =>
+    unless numSeq == 32778 do
+      throw (IO.userError s!"3byte seq: expected 32778, got {numSeq}")
+    unless endPos == 4 do
+      throw (IO.userError s!"3byte seq: expected endPos 4, got {endPos}")
+  | .error e => throw (IO.userError s!"parseSequencesHeader 3byte failed: {e}")
+
+  -- Test 37: parseLiteralsSection on truncated input
+  match Zip.Native.parseLiteralsSection ByteArray.empty 0 with
+  | .ok _ => throw (IO.userError "truncated lit: should have failed")
+  | .error _ => pure ()
+
+  -- Test 38: parseSequencesHeader on truncated input
+  match Zip.Native.parseSequencesHeader ByteArray.empty 0 with
+  | .ok _ => throw (IO.userError "truncated seq: should have failed")
+  | .error _ => pure ()
+
+  -- Test 39: compressed block on FFI data — verify we get past header parsing
+  -- Use test data that should produce compressed blocks with sequences
+  let compBlockData := "The quick brown fox jumps over the lazy dog. ".toUTF8
+  let compBlockCompressed ← Zstd.compress compBlockData 3
+  match Zip.Native.decompressZstd compBlockCompressed with
+  | .ok result =>
+    unless result.data == compBlockData.data do
+      throw (IO.userError "comp block: decompressed data mismatch")
+  | .error e =>
+    -- Should fail at sequence decoding or compressed literals (not at block header parsing)
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"comp block: unexpected error stage: {e}")
 
   IO.println "ZstdNative tests: OK"

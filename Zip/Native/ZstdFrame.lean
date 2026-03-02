@@ -186,6 +186,83 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
     result := result.push byte
   return (result, pos + 1)
 
+/-- Parse the Literals_Section_Header and extract literal bytes (RFC 8878 §3.1.1.3.1).
+    Returns the literal bytes and the position after the literals section.
+    Raw literals are copied verbatim; RLE literals are expanded to `regeneratedSize` copies
+    of a single byte. Compressed and treeless literals return an error (not yet implemented). -/
+def parseLiteralsSection (data : ByteArray) (pos : Nat) :
+    Except String (ByteArray × Nat) := do
+  if data.size < pos + 1 then
+    throw "Zstd: not enough data for literals section header"
+  let byte0 := data[pos]!
+  let litType := (byte0 &&& 3).toNat       -- bits 0-1: Literals_Block_Type
+  let sizeFormat := ((byte0 >>> 2) &&& 3).toNat  -- bits 2-3: Size_Format
+  -- Compressed and treeless literals require Huffman infrastructure
+  if litType == 2 then throw "Zstd: compressed literals not yet supported"
+  if litType == 3 then throw "Zstd: treeless literals not yet supported"
+  if litType > 3 then throw "Zstd: invalid literals block type"
+  -- Raw (0) or RLE (1): parse regenerated size using variable-width header
+  let (regenSize, headerBytes) ←
+    if sizeFormat == 0 || sizeFormat == 2 then
+      -- 1-byte header, 5-bit size (bits 3-7 of byte0)
+      pure ((byte0 >>> 3).toNat, 1)
+    else if sizeFormat == 1 then
+      -- 2-byte header, 12-bit size (bits 4-7 of byte0 + all of byte1)
+      if data.size < pos + 2 then throw "Zstd: truncated literals section header"
+      let byte1 := data[pos + 1]!
+      pure ((byte0 >>> 4).toNat ||| (byte1.toNat <<< 4), 2)
+    else
+      -- 3-byte header, 20-bit size (bits 4-7 of byte0 + byte1 + byte2)
+      if data.size < pos + 3 then throw "Zstd: truncated literals section header"
+      let byte1 := data[pos + 1]!
+      let byte2 := data[pos + 2]!
+      pure ((byte0 >>> 4).toNat ||| (byte1.toNat <<< 4) ||| (byte2.toNat <<< 12), 3)
+  let afterHeader := pos + headerBytes
+  if litType == 0 then
+    -- Raw literals: copy regeneratedSize bytes verbatim
+    if data.size < afterHeader + regenSize then
+      throw "Zstd: not enough data for raw literals"
+    pure (data.extract afterHeader (afterHeader + regenSize), afterHeader + regenSize)
+  else
+    -- RLE literals: read 1 byte, replicate regeneratedSize times
+    if data.size < afterHeader + 1 then
+      throw "Zstd: not enough data for RLE literal byte"
+    let byte := data[afterHeader]!
+    let result := ByteArray.mk (Array.replicate regenSize byte)
+    pure (result, afterHeader + 1)
+
+/-- Parse the Sequences_Section header (RFC 8878 §3.1.1.3.2).
+    Returns (numberOfSequences, position after header including compression modes byte).
+    If numberOfSequences is 0, the block has only literals (no sequences to decode). -/
+def parseSequencesHeader (data : ByteArray) (pos : Nat) :
+    Except String (Nat × Nat) := do
+  if data.size < pos + 1 then
+    throw "Zstd: not enough data for sequences header"
+  let byte0 := data[pos]!.toNat
+  if byte0 == 0 then
+    -- 0 sequences: no compression modes byte follows
+    pure (0, pos + 1)
+  else if byte0 < 128 then
+    -- 1-byte count + compression modes byte
+    if data.size < pos + 2 then
+      throw "Zstd: not enough data for sequence compression modes"
+    pure (byte0, pos + 2)
+  else if byte0 < 255 then
+    -- 2-byte count: ((byte0 - 128) << 8) + byte1, then compression modes
+    if data.size < pos + 3 then
+      throw "Zstd: truncated sequences header"
+    let byte1 := data[pos + 1]!.toNat
+    let numSeq := ((byte0 - 128) <<< 8) + byte1
+    pure (numSeq, pos + 3)
+  else
+    -- 3-byte count (byte0 == 255): byte1 + (byte2 << 8) + 0x7F00, then compression modes
+    if data.size < pos + 4 then
+      throw "Zstd: truncated sequences header"
+    let byte1 := data[pos + 1]!.toNat
+    let byte2 := data[pos + 2]!.toNat
+    let numSeq := byte1 + (byte2 <<< 8) + 0x7F00
+    pure (numSeq, pos + 4)
+
 /-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
     Loops through block headers, dispatches on block type, and accumulates output.
     Returns the decompressed content and position after the last block.
@@ -207,7 +284,15 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
       output := output ++ block
       off := afterByte
     | .compressed =>
-      throw "Zstd: compressed blocks not yet implemented"
+      let blockEnd := off + hdr.blockSize.toNat
+      let (literals, afterLiterals) ← parseLiteralsSection data off
+      let (numSeq, _afterSeqHeader) ← parseSequencesHeader data afterLiterals
+      if numSeq == 0 then
+        -- No sequences: block is pure literals
+        output := output ++ literals
+        off := blockEnd
+      else
+        throw s!"Zstd: sequence decoding not yet implemented ({numSeq} sequences)"
     | .reserved =>
       throw "Zstd: reserved block type"
     if hdr.lastBlock then
