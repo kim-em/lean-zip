@@ -28,6 +28,19 @@ Expected reduction targets by file size:
 - Large files (500+ lines): 60-80% bare simp elimination
 - Files heavy in monadic chains: 50-70% (many are legitimately resistant)
 
+## Phase 1b: Check Sibling Files
+
+Before replacing bare simps, **grep for the same proof patterns in sibling
+files** (e.g. `DeflateFixedCorrect.lean` when working on `DeflateDynamicCorrect.lean`).
+Sibling files that prove similar theorems (same `lz77Greedy_encodable`,
+`encodeSymbols`, `canonicalCodes_size` patterns) often already have working
+`simp only` solutions. Copy those rather than guessing.
+
+```bash
+# Find how sibling files handle the same function/lemma
+grep -n 'simp.*hbounds\|simp.*henc_eob\|simp.*canonicalCodes_size' Zip/Spec/Deflate*Correct.lean
+```
+
 ## Phase 2: Mechanical Cleanup
 
 These steps are safe and should always be applied:
