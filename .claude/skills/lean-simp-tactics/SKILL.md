@@ -534,25 +534,34 @@ rw [Array.size_set!, Array.size_replicate]; omega
 **Common in**: `DeflateDynamicFreqs.lean` and any file building arrays
 via iterative `set!` operations on `Array.replicate` base arrays.
 
-## Array.size with `simp only` — Use `rfl` Not List Lemmas
+## Array.size with `simp only` — Two Approaches
 
 When an Array is defined as `def table : Array Nat := #[3, 4, 5, ...]` and you need
 to prove `idx < table.size`, bare `simp [table]; omega` evaluates `.size` via the
-full simp database. But `simp only [table, List.length_cons, List.length_nil]; omega`
-**fails** because `#[...]` is an `Array`, not a `List` — `List.length_*` lemmas
-don't apply.
+full simp database. Converting to `simp only` requires bridging from `Array.size`
+to `List.length`.
 
-**Fix**: Let the kernel evaluate the concrete size via `rfl`:
+**Approach 1 — `List.size_toArray` bridge** (preferred for inline `simp only`):
 ```lean
--- BAD: List lemmas don't apply to Array
-have h : idx < lengthBase.size := by simp only [lengthBase, List.length_cons, List.length_nil]; omega
-
--- GOOD: kernel evaluates Array.size to a concrete Nat
-have h : idx < lengthBase.size := by have : lengthBase.size = 29 := rfl; omega
+-- #[a, b, c] elaborates as List.toArray [a, b, c]
+-- List.size_toArray converts (List.toArray l).size to l.length
+-- Then List.length_cons + List.length_nil reduce to a concrete number
+simp only [table, List.size_toArray, List.length_cons, List.length_nil] at hidx
+omega
 ```
 
-The `rfl` proof works because the kernel can fully evaluate `#[...].size` for
-concrete array literals. Then `omega` handles the remaining arithmetic.
+**Approach 2 — kernel evaluation via `rfl`** (preferred for standalone bounds):
+```lean
+have h : idx < table.size := by have : table.size = 29 := rfl; omega
+```
+
+**Key insight**: `List.length_cons` and `List.length_nil` DO apply to Array sizes,
+but only after `List.size_toArray` converts the Array size to a List length.
+Without that bridge lemma, `List.length_*` lemmas won't match.
+
+**Important**: When using Approach 1, always include BOTH `List.length_cons` AND
+`List.length_nil`. Without `List.length_nil`, omega sees `[].length` as an opaque
+variable and cannot reduce it to 0.
 
 ## `simp only` vs `subst` for Dependent `getElem` Rewrites
 

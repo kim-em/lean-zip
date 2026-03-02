@@ -17,8 +17,18 @@ allowed-tools: Read, Bash, Grep
 ## Length Conversions
 
 - `Array.length_toList`: `arr.toList.length = arr.size`
+- `List.size_toArray`: `(l.toArray).size = l.length` — bridges Array.size to List.length
+  for array literals (`#[a, b, c]` elaborates as `List.toArray [a, b, c]`)
 - `ByteArray.size_data`: `ba.data.size = ba.size`
 - Chain them for `ba.data.toList.length`
+
+**Concrete array size in `simp only`**: To reduce `#[a, b, ...].size` to a number,
+use `List.size_toArray` + `List.length_cons` + `List.length_nil`:
+```lean
+simp only [myArray, List.size_toArray, List.length_cons, List.length_nil]
+-- Reduces #[a, b, c].size to 3
+```
+Note: `Array.size_toArray` does NOT exist — use `List.size_toArray`.
 
 ## `getElem?_pos`/`getElem!_pos` for Array Lookups
 
