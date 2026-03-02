@@ -50,12 +50,12 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
     rw [Inflate.inflateLoop.eq_1] at h
     simp only [bind, Except.bind] at h
     cases hbf : br.readBits 1 with
-    | error e => simp [hbf] at h
+    | error e => simp only [hbf] at h; exact nomatch h
     | ok p =>
       obtain ⟨bfinal, br₁⟩ := p; simp only [hbf] at h
       have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 1 bfinal hbf hpos hple
       cases hbt : br₁.readBits 2 with
-      | error e => simp [hbt] at h
+      | error e => simp only [hbt] at h; exact nomatch h
       | ok p =>
         obtain ⟨btype, br₂⟩ := p; simp only [hbt] at h
         have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 btype hbt hpos₁ hple₁
@@ -84,37 +84,37 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
             rw [hd'] at this; exact this
           · -- bfinal ≠ 1: WF guards then recursive call
             split at hif
-            · simp at hif
+            · exact nomatch hif
             · rename_i h_progress
               split at hif
-              · simp at hif
+              · exact nomatch hif
               · have hle := ih _ (by omega) br' output' result endPos Nat.le.refl hpos' hple' hif
                 rw [hd'] at hle; exact hle
         -- Dispatch by block type
         split at h
         · -- btype = 0: stored
-          split at h; · simp at h
+          split at h; · exact nomatch h
           · rename_i v hds; obtain ⟨out', br'⟩ := v; simp only [] at hds h
             have ⟨hd, hp, hl⟩ := decodeStored_inv br₂ br' output out' maxOut hds
             exact post_block br' out' (hd.trans (hd₂.trans hd₁)) hp hl h
         · -- btype = 1: fixed Huffman
-          split at h; · simp at h
+          split at h; · exact nomatch h
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
             have ⟨hd, hp, hl⟩ := decodeHuffman_inv fixedLit fixedDist br₂ br' output out'
               maxOut hdh hpos₂ hple₂
             exact post_block br' out' (hd.trans (hd₂.trans hd₁)) hp hl h
         · -- btype = 2: dynamic Huffman
-          split at h; · simp at h
+          split at h; · exact nomatch h
           · rename_i v hdt; obtain ⟨litT, distT, br₃⟩ := v; simp only [] at hdt h
             have ⟨hd₃, hpos₃, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litT distT hdt hpos₂ hple₂
-            split at h; · simp at h
+            split at h; · exact nomatch h
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
               unfold Inflate.decodeHuffman at hdh
               have ⟨hd, hp, hl⟩ := decodeHuffman_go_inv litT distT br₃ br' output out'
                 maxOut _ hdh hpos₃ hple₃
               exact post_block br' out' (hd.trans (hd₃.trans (hd₂.trans hd₁))) hp hl h
         · -- btype ≥ 3: reserved → error
-          simp at h
+          exact nomatch h
 
 /-! ## inflateLoop correctness with remaining bits (goR + br_final)
 
@@ -167,7 +167,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
     simp only [bind, Except.bind] at h
     -- Read bfinal (1 bit)
     cases hbf : br.readBits 1 with
-    | error e => simp [hbf] at h
+    | error e => simp only [hbf] at h; exact nomatch h
     | ok p₁ =>
       obtain ⟨bfinal, br₁⟩ := p₁; simp only [hbf] at h
       have hwf₁ := readBits_wf br 1 bfinal br₁ hwf hbf
@@ -176,7 +176,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
       have ⟨hd₁, _, hple₁⟩ := readBits_inv br br₁ 1 bfinal hbf hpos hple
       -- Read btype (2 bits)
       cases hbt : br₁.readBits 2 with
-      | error e => simp [hbt] at h
+      | error e => simp only [hbt] at h; exact nomatch h
       | ok p₂ =>
         obtain ⟨btype, br₂⟩ := p₂; simp only [hbt] at h
         have hwf₂ := readBits_wf br₁ 2 btype br₂ hwf₁ hbt
@@ -190,7 +190,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
         -- We construct the goR expression by unfolding one step
         split at h
         · -- btype = 0: stored
-          split at h; · simp at h
+          split at h; · exact nomatch h
           · rename_i v hds; obtain ⟨out', br'⟩ := v; simp only [] at hds h
             have ⟨storedBytes, rest, hspec_ds, hout, hrest⟩ :=
               decodeStored_correct br₂ output maxOut out' br' hwf₂ hpos₂ hds
@@ -211,10 +211,10 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
               rw [hrout, hrest]
             · -- bfinal ≠ 1: recursive
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i h_progress
                 split at h
-                · simp at h
+                · exact nomatch h
                 · obtain ⟨br_f, hep, hdf, hwff, hposf, hplef, hgoR⟩ :=
                     ih _ (by omega) br' out' result endPos Nat.le.refl hwf_s hpos_s hple_s h
                   refine ⟨br_f, hep, hdf.trans (hd_s.trans (hd₂.trans hd₁)),
@@ -231,7 +231,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                   simp only [show rest.length < br.toBits.length from by omega, ↓reduceDIte]
                   rw [hrest] at hgoR; exact hgoR
         · -- btype = 1: fixed Huffman
-          split at h; · simp at h
+          split at h; · exact nomatch h
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
             unfold Inflate.decodeHuffman at hdh
             have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
@@ -260,10 +260,10 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
               rw [hrout, hrest]
             · -- bfinal ≠ 1: recursive
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i h_progress
                 split at h
-                · simp at h
+                · exact nomatch h
                 · obtain ⟨br_f, hep, hdf, hwff, hposf, hplef, hgoR⟩ :=
                     ih _ (by omega) br' out' result endPos Nat.le.refl hwf' hpos' hple_h h
                   refine ⟨br_f, hep, hdf.trans (hd_h.trans (hd₂.trans hd₁)),
@@ -279,7 +279,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                   simp only [show rest.length < br.toBits.length from by omega, ↓reduceDIte]
                   rw [hrest] at hgoR; exact hgoR
         · -- btype = 2: dynamic Huffman
-          split at h; · simp at h
+          split at h; · exact nomatch h
           · rename_i v hdt
             obtain ⟨litTree, distTree, br₃⟩ := v; simp only [] at hdt h
             have ⟨litLens, distLens, rest_dt, hspec_dt, hbr₃_bits, hwf₃, hpos₃,
@@ -288,7 +288,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                 hwf₂ hpos₂ hdt
             rw [hbr₂_bits] at hspec_dt
             have ⟨hd₃, _, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litTree distTree hdt hpos₂ hple₂
-            split at h; · simp at h
+            split at h; · exact nomatch h
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
               unfold Inflate.decodeHuffman at hdh
               have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
@@ -314,10 +314,10 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                 rw [hrout, hrest]
               · -- bfinal ≠ 1: recursive
                 split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i h_progress
                   split at h
-                  · simp at h
+                  · exact nomatch h
                   · obtain ⟨br_f, hep, hdf, hwff, hposf, hplef, hgoR⟩ :=
                       ih _ (by omega) br' out' result endPos Nat.le.refl hwf' hpos' hple_h h
                     refine ⟨br_f, hep,
@@ -335,7 +335,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                     simp only [show rest.length < br.toBits.length from by omega, ↓reduceDIte]
                     rw [hrest] at hgoR; exact hgoR
         · -- btype ≥ 3: reserved
-          simp at h
+          exact nomatch h
 
 /-! ## inflateLoop completeness with final BitReader (extended)
 
@@ -392,11 +392,11 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
     endPos ≤ data.size := by
   simp only [Inflate.inflateRaw, bind, Except.bind] at h
   cases hflit : HuffTree.fromLengths Inflate.fixedLitLengths with
-  | error e => simp [hflit] at h
+  | error e => simp only [hflit] at h; exact nomatch h
   | ok fixedLit =>
     simp only [hflit] at h
     cases hfdist : HuffTree.fromLengths Inflate.fixedDistLengths with
-    | error e => simp [hfdist] at h
+    | error e => simp only [hfdist] at h; exact nomatch h
     | ok fixedDist =>
       simp only [hfdist] at h
       have hple : startPos ≤ data.size := by
@@ -407,11 +407,11 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
           have hfail : (BitReader.mk data startPos 0).readBit =
               .error "BitReader: unexpected end of input" := by
             simp only [BitReader.readBit]
-            simp [show startPos ≥ data.size from hgt]
+            simp only [show startPos ≥ data.size from hgt, ↓reduceIte]
           rw [Inflate.inflateLoop.eq_1] at h
           simp only [bind, Except.bind,
             BitReader.readBits, BitReader.readBits.go, hfail] at h
-          simp at h
+          exact nomatch h
       exact inflateLoop_endPos_le ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOut data.size result endPos (Or.inl rfl) hple h
 
@@ -430,7 +430,7 @@ private theorem alignToByte_pos_ge_of_toBits_short (br : BitReader)
   split
   · -- bitOff = 0: alignToByte is no-op, endPos = pos
     rename_i h0
-    have h0' : br.bitOff = 0 := by simp_all
+    have h0' : br.bitOff = 0 := by simp only [beq_iff_eq] at h0; exact h0
     rw [h0', Nat.add_zero] at htl
     have hle8 : br.pos * 8 ≤ br.data.size * 8 := Nat.mul_le_mul_right 8 hple
     have htl_add : br.toBits.length + br.pos * 8 = br.data.size * 8 := by
@@ -439,7 +439,7 @@ private theorem alignToByte_pos_ge_of_toBits_short (br : BitReader)
   · -- bitOff ≠ 0: alignToByte advances pos by 1
     rename_i hne
     cases hpos with
-    | inl h => simp [h] at hne
+    | inl h => exact absurd (by rw [h]; decide) hne
     | inr h =>
       have hlt8 : br.pos * 8 + br.bitOff < br.data.size * 8 := by omega
       have htl_add : br.toBits.length + (br.pos * 8 + br.bitOff) = br.data.size * 8 := by
@@ -469,11 +469,11 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
   obtain ⟨pad_remaining, hgoR_pad, hpadlen⟩ := hpad
   simp only [Inflate.inflateRaw, bind, Except.bind] at h
   cases hflit : HuffTree.fromLengths Inflate.fixedLitLengths with
-  | error e => simp [hflit] at h
+  | error e => simp only [hflit] at h; exact nomatch h
   | ok fixedLit =>
     simp only [hflit] at h
     cases hfdist : HuffTree.fromLengths Inflate.fixedDistLengths with
-    | error e => simp [hfdist] at h
+    | error e => simp only [hfdist] at h; exact nomatch h
     | ok fixedDist =>
       simp only [hfdist] at h
       have hbr_toBits : (BitReader.mk (pfx ++ deflated) pfx.size 0).toBits =
@@ -482,7 +482,7 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
         rw [show pfx.size * 8 + 0 = pfx.size * 8 from by omega]
         rw [show Deflate.Spec.bytesToBits (pfx ++ deflated) =
             Deflate.Spec.bytesToBits pfx ++ Deflate.Spec.bytesToBits deflated from by
-          simp [Deflate.Spec.bytesToBits, ByteArray.data_append, Array.toList_append,
+          simp only [Deflate.Spec.bytesToBits, ByteArray.data_append, Array.toList_append,
             List.flatMap_append]]
         rw [← Deflate.Spec.bytesToBits_length pfx, List.drop_left]
       have hspec' : Deflate.Spec.decode.go
@@ -491,20 +491,20 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
       obtain ⟨br_final, endPos', remaining, hloop, hep, hdf, hwff, hposf, hplef, hrestf, hgoR⟩ :=
         inflateLoop_complete_ext
           ⟨pfx ++ deflated, pfx.size, 0⟩ .empty fixedLit fixedDist
-          maxOut (pfx ++ deflated).size result.data.toList (by simp) (by simp)
-          (by simp [ByteArray.size_append]) (by simp)
+          maxOut (pfx ++ deflated).size result.data.toList (by show 0 < 8; omega) (Or.inl rfl)
+          (by simp only [ByteArray.size_append]; omega) Nat.le.refl
           hflit hfdist hmax hspec'
       have hloop_eq : Inflate.inflateLoop ⟨pfx ++ deflated, pfx.size, 0⟩
           .empty fixedLit fixedDist maxOut (pfx ++ deflated).size =
           .ok (result, endPos) := h
       have hep_eq : endPos = endPos' := by
-        rw [show (⟨⟨result.data.toList⟩⟩ : ByteArray) = result from by simp] at hloop
+        rw [show (⟨⟨result.data.toList⟩⟩ : ByteArray) = result from rfl] at hloop
         have := hloop_eq.symm.trans hloop
         simp only [Except.ok.injEq, Prod.mk.injEq] at this
         exact this.2
       rw [hep_eq, hep]
       rw [show (pfx ++ deflated).size = br_final.data.size from by
-        simp [hdf]]
+        simp only [hdf]]
       apply alignToByte_pos_ge_of_toBits_short br_final hwff hposf hplef
       rw [hrestf]
       have hgoR' : Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) []
@@ -553,10 +553,10 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
   obtain ⟨fixedLit, hflit⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
   obtain ⟨fixedDist, hfdist⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
   rw [hflit, hfdist]
-  have hbr_wf : (BitReader.mk data startPos 0).bitOff < 8 := by simp
+  have hbr_wf : (BitReader.mk data startPos 0).bitOff < 8 := by show 0 < 8; omega
   have hbr_pos : (BitReader.mk data startPos 0).bitOff = 0 ∨
       (BitReader.mk data startPos 0).pos <
-      (BitReader.mk data startPos 0).data.size := by simp
+      (BitReader.mk data startPos 0).data.size := Or.inl rfl
   have hbr_ple : (BitReader.mk data startPos 0).pos ≤
       (BitReader.mk data startPos 0).data.size := by
     by_cases hle : startPos ≤ data.size
@@ -568,18 +568,18 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
       rw [this] at hspec
       have h_none : Deflate.Spec.decode.go [] [] = none := by
         unfold Deflate.Spec.decode.go
-        simp [Deflate.Spec.readBitsLSB]
+        simp only [Deflate.Spec.readBitsLSB, bind, Option.bind]
       rw [h_none] at hspec
-      exact absurd hspec (by simp)
+      exact nomatch hspec
   have hbr_bits : (BitReader.mk data startPos 0).toBits =
       (Deflate.Spec.bytesToBits data).drop (startPos * 8) := by
-    simp [BitReader.toBits]
+    simp only [BitReader.toBits, Nat.add_zero]
   have hgo : Deflate.Spec.decode.go (BitReader.mk data startPos 0).toBits
       ByteArray.empty.data.toList = some result := by
     rw [hbr_bits]; exact hspec
   exact Deflate.Correctness.inflateLoop_complete
     ⟨data, startPos, 0⟩ .empty fixedLit fixedDist maxOutputSize
     data.size result
-    hbr_wf hbr_pos hbr_ple (by simp) hflit hfdist hsize hgo
+    hbr_wf hbr_pos hbr_ple Nat.le.refl hflit hfdist hsize hgo
 
 end Zip.Native
