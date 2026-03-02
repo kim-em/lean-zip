@@ -92,14 +92,22 @@ For each bare `simp` (without `only`), follow this decision tree:
 Run `simp?` in place of `simp` to get the minimal lemma set. If it
 produces a `simp only [...]` that works, use it.
 
-### Step 2: Try `dsimp only`
+### Step 2: Try `simp only []` or `dsimp only`
 
-If `simp?` fails or produces an unwieldy list, try `dsimp only` (with
-no arguments). This handles:
+If `simp?` fails or produces an unwieldy list:
+
+**`simp only []`** (empty argument list) handles:
+- Match/iota reduction when scrutinee is a constructor
+- After `split`/`match` chains where the goal has unreduced matches
+- Replaces `simp only [htok]` when linter flags the argument as unused
+
+**`dsimp only`** handles:
 - `letFun` reduction
-- Match/constructor iota reduction
 - Beta reduction
 - `bind`/`Option.bind` reduction (when scrutinee is known)
+
+Try `simp only []` first for match reduction; use `dsimp only` for
+definitional reductions like `letFun` and monadic bind.
 
 ### Step 3: Try a targeted replacement
 
@@ -114,6 +122,10 @@ Based on what the `simp` is doing:
 | `simp [hx, bind, Option.bind]` | `rw [hx]; dsimp only [bind, Option.bind]` |
 | `simp only []` | Keep — match iota reduction |
 | `simp [Prod.mk.injEq]` | `simp only [Except.ok.injEq, Prod.mk.injEq]` |
+| `simp; omega` (array size preservation) | `rw [Array.size_set!]; omega` or `rw [Array.size_replicate]; omega` |
+| `simp at h` (negated comparison) | `simp only [ge_iff_le, Nat.not_le] at h` or `simp only [gt_iff_lt, Nat.not_lt] at h` |
+| `simp_all` (beq→eq + close) | `simp only [beq_iff_eq] at h; exact h` |
+| `by simp` (struct field = literal) | `by show <literal_eq>; omega` or `Or.inl rfl` or `rfl` |
 
 ### Step 4: Accept bare simp with comment
 
