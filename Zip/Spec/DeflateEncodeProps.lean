@@ -22,12 +22,12 @@ theorem encodeSymbol_isSome (table : List (Huffman.Spec.Codeword × Nat))
     (h : (cw, sym) ∈ table) :
     (encodeSymbol table sym).isSome = true := by
   induction table with
-  | nil => simp at h
+  | nil => simp only [List.not_mem_nil] at h
   | cons entry rest ih =>
     obtain ⟨cw', s'⟩ := entry
     simp only [encodeSymbol]
     split
-    · simp
+    · simp only [Option.isSome_some]
     · rename_i hne
       simp only [beq_iff_eq] at hne
       simp only [List.mem_cons, Prod.mk.injEq] at h
@@ -44,7 +44,9 @@ theorem encodeSymbol_fixed_isSome (lengths : List Nat) (maxBits : Nat)
   have hcf : Huffman.Spec.codeFor lengths maxBits sym ≠ none := by
     simp only [Huffman.Spec.codeFor, dif_pos hsym]
     rw [getElem!_pos lengths sym hsym] at hlen hmb
-    simp [hlen, hmb]
+    simp only [gt_iff_lt, Bool.or_eq_true, beq_iff_eq, hlen, decide_eq_true_eq, false_or, ne_eq,
+      ite_eq_left_iff, Nat.not_lt, hmb, reduceCtorEq, imp_false, not_true_eq_false,
+      not_false_eq_true]
   obtain ⟨cw, hcw⟩ := Option.ne_none_iff_exists'.mp hcf
   have hmem : (sym, cw) ∈ Huffman.Spec.allCodes lengths maxBits :=
     (Huffman.Spec.allCodes_mem_iff ..).mpr ⟨hsym, hcw⟩
@@ -124,13 +126,13 @@ private theorem findLengthCode.go_isSome_of_covered (len i : Nat)
   unfold findLengthCode.go
   simp only [show ¬(i ≥ lengthBase.size) from by omega, dif_neg, not_false_eq_true]
   by_cases hbucket : (decide (lengthBase[i] ≤ len) && decide (len < (lengthBase[i + 1]?.getD 259))) = true
-  · simp [hbucket]
-  · simp [hbucket]
+  · simp only [hbucket, ↓reduceIte, Option.isSome_some]
+  · simp only [hbucket, Bool.false_eq_true, ↓reduceIte]
     -- Not in this bucket, so len ≥ nextBase
     simp only [Bool.and_eq_true, decide_eq_true_eq] at hbucket
     have hge_next : (lengthBase[i + 1]?.getD 259) ≤ len := by
       by_cases h : lengthBase[i] ≤ len
-      · simp [h] at hbucket; omega
+      · simp only [h, true_and, Nat.not_lt] at hbucket; omega
       · omega
     -- nextBase = lengthBase[i+1] if i+1 < size, else 259
     have hi1 : i + 1 < lengthBase.size := by
@@ -141,12 +143,12 @@ private theorem findLengthCode.go_isSome_of_covered (len i : Nat)
         have hout : ¬(i + 1 < lengthBase.size) := h
         have : (lengthBase[i + 1]?.getD 259) = 259 := by
           have := getElem?_neg lengthBase (i + 1) (by omega)
-          simp [this]
+          simp only [this, Option.getD_none]
         omega
     have hcov' : lengthBase[i + 1] ≤ len := by
       have : lengthBase[i + 1]? = some lengthBase[i + 1] :=
         getElem?_pos lengthBase (i + 1) hi1
-      simp [this] at hge_next
+      simp only [this, Option.getD_some] at hge_next
       exact hge_next
     exact findLengthCode.go_isSome_of_covered len (i + 1) hi1 hcov' hle
   termination_by lengthBase.size - i
@@ -156,7 +158,9 @@ theorem findLengthCode_isSome (len : Nat) (hge : len ≥ 3) (hle : len ≤ 258) 
     (findLengthCode len).isSome = true := by
   simp only [findLengthCode]
   exact findLengthCode.go_isSome_of_covered len 0
-    (by simp [lengthBase]) (by simp [lengthBase]; omega) hle
+    (by simp only [lengthBase, List.size_toArray, List.length_cons, List.length_nil, Nat.zero_add,
+      Nat.reduceAdd, Nat.zero_lt_succ])
+    (by simp only [lengthBase, List.getElem_toArray, List.getElem_cons_zero]; omega) hle
 
 /-- Helper: `findLengthCode.go` returns indices in [i, size). -/
 private theorem findLengthCode.go_idx_bound (len i idx extraN extraV : Nat)
@@ -164,13 +168,13 @@ private theorem findLengthCode.go_idx_bound (len i idx extraN extraV : Nat)
     i ≤ idx ∧ idx < lengthBase.size := by
   unfold findLengthCode.go at h
   split at h
-  · simp at h
-  · rename_i hsz; simp at hsz
+  · simp only [reduceCtorEq] at h
+  · rename_i hsz; simp only [ge_iff_le, Nat.not_le] at hsz
     by_cases hbucket : (decide (lengthBase[i] ≤ len) && decide (len < (lengthBase[i + 1]?.getD 259))) = true
-    · simp [hbucket] at h
+    · simp only [hbucket, ↓reduceIte, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, _, _⟩ := h
       exact ⟨Nat.le.refl, hsz⟩
-    · simp [hbucket] at h
+    · simp only [hbucket, Bool.false_eq_true, ↓reduceIte] at h
       have := findLengthCode.go_idx_bound len (i + 1) idx extraN extraV h
       exact ⟨by omega, this.2⟩
   termination_by lengthBase.size - i
@@ -180,7 +184,8 @@ theorem findLengthCode_idx_bound (len idx extraN extraV : Nat)
     (h : findLengthCode len = some (idx, extraN, extraV)) :
     idx < 29 := by
   have := (findLengthCode.go_idx_bound len 0 idx extraN extraV h).2
-  simp [lengthBase] at this
+  simp only [lengthBase, List.size_toArray, List.length_cons, List.length_nil, Nat.zero_add,
+    Nat.reduceAdd] at this
   exact this
 
 /-- Helper: `findDistCode.go i` succeeds when distBase[i] ≤ dist ≤ 32768. -/
@@ -192,24 +197,24 @@ private theorem findDistCode.go_isSome_of_covered (dist i : Nat)
   unfold findDistCode.go
   simp only [show ¬(i ≥ distBase.size) from by omega, dif_neg, not_false_eq_true]
   by_cases hbucket : (decide (distBase[i] ≤ dist) && decide (dist < (distBase[i + 1]?.getD 32769))) = true
-  · simp [hbucket]
-  · simp [hbucket]
+  · simp only [hbucket, ↓reduceIte, Option.isSome_some]
+  · simp only [hbucket, Bool.false_eq_true, ↓reduceIte]
     simp only [Bool.and_eq_true, decide_eq_true_eq] at hbucket
     have hge_next : (distBase[i + 1]?.getD 32769) ≤ dist := by
       by_cases h : distBase[i] ≤ dist
-      · simp [h] at hbucket; omega
+      · simp only [h, true_and, Nat.not_lt] at hbucket; omega
       · omega
     have hi1 : i + 1 < distBase.size := by
       by_cases h : i + 1 < distBase.size
       · exact h
       · exfalso
         have := getElem?_neg distBase (i + 1) (by omega)
-        simp [this] at hge_next
+        simp only [this, Option.getD_none] at hge_next
         omega
     have hcov' : distBase[i + 1] ≤ dist := by
       have : distBase[i + 1]? = some distBase[i + 1] :=
         getElem?_pos distBase (i + 1) hi1
-      simp [this] at hge_next
+      simp only [this, Option.getD_some] at hge_next
       exact hge_next
     exact findDistCode.go_isSome_of_covered dist (i + 1) hi1 hcov' hle
   termination_by distBase.size - i
@@ -219,7 +224,9 @@ theorem findDistCode_isSome (dist : Nat) (hge : dist ≥ 1) (hle : dist ≤ 3276
     (findDistCode dist).isSome = true := by
   simp only [findDistCode]
   exact findDistCode.go_isSome_of_covered dist 0
-    (by simp [distBase]) (by simp [distBase]; omega) hle
+    (by simp only [distBase, List.size_toArray, List.length_cons, List.length_nil, Nat.zero_add,
+      Nat.reduceAdd, Nat.zero_lt_succ])
+    (by simp only [distBase, List.getElem_toArray, List.getElem_cons_zero]; omega) hle
 
 /-- Helper: `findDistCode.go` returns codes in [i, size). -/
 private theorem findDistCode.go_code_bound (dist i dCode dExtraN dExtraV : Nat)
@@ -227,13 +234,13 @@ private theorem findDistCode.go_code_bound (dist i dCode dExtraN dExtraV : Nat)
     i ≤ dCode ∧ dCode < distBase.size := by
   unfold findDistCode.go at h
   split at h
-  · simp at h
-  · rename_i hsz; simp at hsz
+  · simp only [reduceCtorEq] at h
+  · rename_i hsz; simp only [ge_iff_le, Nat.not_le] at hsz
     by_cases hbucket : (decide (distBase[i] ≤ dist) && decide (dist < (distBase[i + 1]?.getD 32769))) = true
-    · simp [hbucket] at h
+    · simp only [hbucket, ↓reduceIte, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, _, _⟩ := h
       exact ⟨Nat.le.refl, hsz⟩
-    · simp [hbucket] at h
+    · simp only [hbucket, Bool.false_eq_true, ↓reduceIte] at h
       have := findDistCode.go_code_bound dist (i + 1) dCode dExtraN dExtraV h
       exact ⟨by omega, this.2⟩
   termination_by distBase.size - i
@@ -243,10 +250,10 @@ theorem findDistCode_code_bound (dist dCode dExtraN dExtraV : Nat)
     (h : findDistCode dist = some (dCode, dExtraN, dExtraV)) :
     dCode < 30 := by
   have := (findDistCode.go_code_bound dist 0 dCode dExtraN dExtraV h).2
-  simp [distBase] at this
+  simp only [distBase, List.size_toArray, List.length_cons, List.length_nil, Nat.zero_add,
+    Nat.reduceAdd] at this
   exact this
 
-set_option linter.unusedSimpArgs false in
 /-- `encodeLitLen` succeeds for references with appropriate bounds. -/
 theorem encodeLitLen_reference_isSome (len dist : Nat)
     (hlen_ge : len ≥ 3) (hlen_le : len ≤ 258)
@@ -257,7 +264,7 @@ theorem encodeLitLen_reference_isSome (len dist : Nat)
   -- findLengthCode succeeds
   have hflc := findLengthCode_isSome len hlen_ge hlen_le
   cases hlc : findLengthCode len with
-  | none => simp [hlc] at hflc
+  | none => simp only [hlc, Option.isSome_none, Bool.false_eq_true] at hflc
   | some p =>
     obtain ⟨idx, extraN, extraV⟩ := p
     have hidx := findLengthCode_idx_bound len idx extraN extraV hlc
@@ -270,17 +277,17 @@ theorem encodeLitLen_reference_isSome (len dist : Nat)
       (fixedLitLengths_getElem_le (257 + idx) hsym)
     cases hls : encodeSymbol
         ((Huffman.Spec.allCodes fixedLitLengths).map fun (s, cw) => (cw, s)) (257 + idx) with
-    | none => simp [hls] at hlit
+    | none => simp only [hls, Option.isSome_none, Bool.false_eq_true] at hlit
     | some lenBits =>
-      simp only [bind, Option.bind]
+      dsimp only [bind, Option.bind]
       -- findDistCode succeeds
       have hfdc := findDistCode_isSome dist hdist_ge hdist_le
       cases hdc : findDistCode dist with
-      | none => simp [hdc] at hfdc
+      | none => simp only [hdc, Option.isSome_none, Bool.false_eq_true] at hfdc
       | some q =>
         obtain ⟨dCode, dExtraN, dExtraV⟩ := q
         have hdcode := findDistCode_code_bound dist dCode dExtraN dExtraV hdc
-        simp only [bind]
+        dsimp only [bind]
         -- encodeSymbol distTable dCode succeeds
         have hdsym : dCode < fixedDistLengths.length := by
           rw [fixedDistLengths_length]; omega
@@ -289,9 +296,9 @@ theorem encodeLitLen_reference_isSome (len dist : Nat)
           (fixedDistLengths_getElem_le dCode hdsym)
         cases hds : encodeSymbol
             ((Huffman.Spec.allCodes fixedDistLengths).map fun (s, cw) => (cw, s)) dCode with
-        | none => simp [hds] at hdist
+        | none => simp only [hds, Option.isSome_none, Bool.false_eq_true] at hdist
         | some distBits =>
-          simp [pure, Pure.pure]
+          simp only [pure, List.append_assoc, Option.isSome_some]
 
 /-- `matchLength` returns at most 258 (the default maxLen). -/
 theorem matchLength_le_258 (data : List UInt8) (pos dist : Nat) :
@@ -307,17 +314,17 @@ theorem encodeSymbols_isSome_of_all (litLengths distLengths : List Nat)
     (h : ∀ s ∈ syms, (encodeLitLen litLengths distLengths s).isSome = true) :
     (encodeSymbols litLengths distLengths syms).isSome = true := by
   induction syms with
-  | nil => simp [encodeSymbols]
+  | nil => simp only [encodeSymbols, Option.isSome_some]
   | cons s rest ih =>
     simp only [encodeSymbols]
     have hs := h s (List.mem_cons_self ..)
     cases hes : encodeLitLen litLengths distLengths s with
-    | none => simp [hes] at hs
+    | none => simp only [hes, Option.isSome_none, Bool.false_eq_true] at hs
     | some bits =>
       simp only [bind, Option.bind]
       have hrest := ih (fun s' hs' => h s' (List.mem_cons_of_mem s hs'))
       cases her : encodeSymbols litLengths distLengths rest with
-      | none => simp [her] at hrest
-      | some restBits => simp [pure, Pure.pure]
+      | none => simp only [her, Option.isSome_none, Bool.false_eq_true] at hrest
+      | some restBits => simp only [pure, Option.isSome_some]
 
 end Deflate.Spec
