@@ -285,3 +285,190 @@ When proving `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`:
 ← Nat.mod_eq_sub_mod hge  -- rewrites (n - k) % k to n % k
 ```
 `omega` cannot reason about `%` directly.
+
+---
+
+# Bare `simp` Resistant Patterns
+
+Some proof patterns genuinely resist `simp only` conversion. This section
+documents the 5 categories discovered across 10+ review sessions, explains
+why each resists conversion, and provides workaround strategies.
+
+## Category 1: Nested `Option.bind` / `Except.bind` Chains
+
+**Why it resists**: `do`-notation in `Option`/`Except` desugars to nested
+`bind` calls. After `unfold` or `cases` on one monadic operation, the
+remaining goal has `Option.bind (Option.bind (Option.bind ... f) g) h`.
+`simp only [bind, Option.bind]` reduces one layer, but deeply nested
+chains (6+ levels, common in `decodeDynamicTables` and similar functions)
+require the full `@[simp]` database to traverse all layers at once.
+
+**Example** (DeflateSuffix.lean, `decodeDynamicTables_append`):
+```lean
+-- 21 instances where bare simp is needed:
+simp [hcl, hlit, hdist] at hgo
+-- simp only [hcl, hlit, hdist, bind, Option.bind] at hgo
+-- ↑ Fails: only reduces outermost bind, inner ones stay stuck
+```
+
+**Workaround strategies**:
+1. **Sequential `rw` + `dsimp`**: Break the chain into individual steps.
+   After each `cases hx : operation`, use `rw [hx]; dsimp only [bind, Option.bind]`
+   to reduce one layer at a time. This works but produces verbose proofs.
+2. **Helper lemma**: Extract the nested bind chain into a named lemma that
+   states the overall result, then apply it in one step.
+3. **Accept bare simp with comment**: For chains deeper than 4 levels,
+   bare `simp [h₁, h₂, ...]` is acceptable — add a comment:
+   `-- bare simp: 6-level Option.bind chain`
+
+**Decision**: If the chain is ≤3 levels deep, use sequential `rw + dsimp`.
+If >3 levels, accept bare simp with a justifying comment.
+
+## Category 2: `dite`/`if` Reduction with Mismatched Conditions
+
+**Why it resists**: After `split at h` on an `if`/`dite` inside a monadic
+chain, the remaining goal may have a *different* `if` whose condition uses
+`(bits ++ suffix).length` while the available hypothesis proves about
+`bits.length`. `rw [if_pos hf]` requires exact syntactic match and fails.
+`simp [hf]` succeeds because it implicitly applies `List.length_append`
+and arithmetic to bridge the gap.
+
+**Example** (DeflateSuffix.lean, `decode_go_suffix`):
+```lean
+-- Goal condition: (bits ++ suffix).length < maxPos
+-- Hypothesis: hblen : bits.length < maxPos - suffix.length
+-- rw [if_pos ...] fails — syntactic mismatch
+-- simp [hblen] works — applies List.length_append + omega internally
+simp [hblen] at hgo ⊢
+```
+
+**Workaround strategies**:
+1. **Bridge lemma**: Prove an intermediate `have` that matches the goal's
+   condition exactly:
+   ```lean
+   have hcond : (bits ++ suffix).length < maxPos := by
+     simp [List.length_append]; omega
+   rw [if_pos hcond] at hgo ⊢
+   ```
+2. **`conv` targeting**: Use `conv` to rewrite just the condition:
+   ```lean
+   conv at hgo => rw [show (bits ++ suffix).length = bits.length + suffix.length
+     from List.length_append ..]
+   ```
+3. **Accept bare simp with comment**: When the bridge lemma is trivial but
+   the proof is in a hot path, bare `simp [hf]` is acceptable.
+
+**Decision**: Use a bridge lemma when the condition appears in multiple
+branches (extract it once, use everywhere). Accept bare simp when it's a
+one-off in a single branch.
+
+## Category 3: `Prod.mk.injEq` Extraction in goR Patterns
+
+**Why it resists**: Many functions return `(result, remaining)` pairs.
+After proving `f x = Except.ok (result, bits')`, extracting the two
+components requires `Except.ok.injEq` + `Prod.mk.injEq`, then
+`obtain ⟨hval, hrest⟩`. This pattern uses `simp only` successfully —
+it is NOT bare-simp-resistant.
+
+**The actual pattern** (BitReaderInvariant.lean, InflateRawSuffix.lean):
+```lean
+split at h
+· -- error branch
+  exact nomatch h
+· -- ok branch
+  simp only [Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨hval, hrest⟩ := h
+```
+
+This is the canonical `simp only` pattern for pair extraction and does
+NOT need bare simp. It appears 35+ times across the codebase. The key
+insight is that `Except.ok.injEq` and `Prod.mk.injEq` are specific
+enough for `simp only` — they don't pull in the full database.
+
+**Anti-pattern**: Don't use `simp at h` for pair extraction — it
+over-simplifies and may rewrite terms you want to keep.
+
+## Category 4: `readBitsLSB` as Computation Engine
+
+**Why it resists**: `readBitsLSB n bits` for concrete `n` (typically
+1, 2, 3, or 5) unfolds into nested `match` on the list, producing
+concrete boolean values. `simp [readBitsLSB]` evaluates the entire
+chain including boolean arithmetic (`Nat.bit`, list cons/nil matching).
+Converting to `simp only` would require listing 20+ lemmas including
+`reduceCtorEq` for boolean equality, `List.cons.injEq`, etc.
+
+**Example** (Deflate.lean, header bit parsing):
+```lean
+-- Evaluating BFINAL/BTYPE from a concrete 3-bit header:
+simp [readBitsLSB]
+-- Reduces: readBitsLSB 3 [true, false, true, ...rest]
+--       → some (5, rest)  (after evaluating all bit arithmetic)
+```
+
+**Example** (BitstreamCorrect.lean, readBits base case):
+```lean
+exact ⟨0, br'.toBits, by simp [Deflate.Spec.readBitsLSB], rfl, by simp, hwf⟩
+```
+
+**Workaround strategies**:
+1. **`decide`/`decide_cbv`**: If the statement is decidable (concrete
+   inputs), these may work but require high `maxRecDepth`.
+2. **`native_decide`**: Forbidden in this codebase.
+3. **Accept bare simp**: For concrete bit-level computation, bare
+   `simp [readBitsLSB]` is the right tool. Add comment:
+   `-- bare simp: concrete bit computation`
+
+**Decision**: Always accept bare `simp [readBitsLSB]` for concrete
+header evaluation. It IS the computation engine — that's its job.
+
+## Category 5: BitVec / UInt16 Normalization Pipelines
+
+**Why it resists**: Converting between `Nat`, `UInt16`, `UInt8`, and
+`BitVec` requires multi-step normalization: unfold `Nat.toUInt16`, then
+`simp` to reduce `BitVec.toNat (BitVec.ofNat ...)`, then `rw` with
+domain-specific lemmas like `and_255_eq_mod_256`, then `omega` for
+arithmetic. The `simp` step in the middle needs the full `@[simp]`
+database for `BitVec` normalization.
+
+**Example** (Deflate.lean, byte extraction):
+```lean
+have hlo : (n.toUInt16 &&& 255).toUInt8.toNat = n % 256 := by
+  unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
+```
+
+**Partial `simp only` replacement** (DecodeComplete.lean):
+```lean
+simp only [Nat.toUInt16, UInt16.toNat, UInt16.ofNat,
+  BitVec.toNat_ofNat]; omega
+```
+
+**Decision**: When the full `simp only` lemma set is known (as in the
+DecodeComplete example), use it. When the BitVec normalization is
+complex (involving `&&&`, shifts, or casts through multiple types),
+bare `simp` in the pipeline is acceptable with comment:
+`-- bare simp: BitVec normalization`
+
+## When Bare `simp` Is Acceptable
+
+Not every bare `simp` needs conversion. The following categories should
+be left with a justifying comment rather than forced into `simp only`:
+
+| Category | Comment Template | Rationale |
+|----------|-----------------|-----------|
+| Deep Option.bind chains (>3 levels) | `-- bare simp: N-level Option.bind chain` | `simp only` needs full bind database |
+| Concrete bit computation | `-- bare simp: concrete bit computation` | `readBitsLSB` evaluation engine |
+| BitVec normalization pipeline | `-- bare simp: BitVec normalization` | Multi-type cast chain |
+| `if` with mismatched length forms | `-- bare simp: bridges List.length_append` | Condition uses `(a ++ b).length` vs `a.length` |
+
+**Categories that should always be converted:**
+- Constructor discrimination (`simp at h` on `error = ok`): use `exact nomatch h`
+- Pair extraction: use `simp only [Except.ok.injEq, Prod.mk.injEq]`
+- Single bind reduction: use `dsimp only [bind, Option.bind]`
+- `letFun` reduction: use `dsimp only`
+- Match iota reduction: use `simp only []`
+
+**Review workflow**: When reviewing bare `simp`:
+1. Try `simp only` with `simp?` output
+2. If that fails, try `dsimp only`
+3. If that fails, try a helper lemma or bridge `have`
+4. If all three fail, accept bare simp with a category comment

@@ -30,10 +30,35 @@ with the next `cases`/`split`.
 
 ## Closing `Except.error = Except.ok` Contradictions
 
-`simp only` does NOT know that `Except.error ≠ Except.ok` — it lacks the discriminator
-lemmas. Use `simp at h` (without `only`) which includes them, or explicitly
-`exact absurd h (by simp)`. Don't try `nofun h` or `exact Except.noConfusion h` —
-neither works directly.
+`simp only` does NOT know that `Except.error ≠ Except.ok` — it lacks the
+discriminator simproc. The canonical replacement is `exact nomatch h`:
+
+```lean
+-- Before (bare simp):
+| error e => simp at h
+
+-- After (targeted):
+| error e => exact nomatch h
+```
+
+For cases where a hypothesis must be rewritten first:
+```lean
+-- Before:
+| error e => simp [hrb] at h
+
+-- After (two steps):
+| error e => simp only [hrb] at h; exact nomatch h
+```
+
+**Why `nomatch` works**: `Eq` has one constructor (`rfl`) requiring
+definitional equality. `Except.error _` and `Except.ok _` are different
+constructors, so no pattern can match — `nomatch h` proves `False`.
+
+**Why NOT `contradiction`**: In deeply nested contexts (6+ bind levels),
+`contradiction` hits max recursion depth. `exact nomatch h` always works.
+
+**Why NOT `exact absurd h (by simp)`**: Roundabout — invokes simp just
+to produce the `≠` proof. `nomatch` is direct and needs no lemma database.
 
 ## Nested `cases` Parsing
 
@@ -88,10 +113,15 @@ match steps at once. This differs from `Except` monad do-blocks where
 
 ## `letFun` Linter False Positive
 
-When `unfold f at h` leaves `have x := e; body` bindings,
-`simp only [letFun] at h` is needed to reduce them before `split at h` can see
-inner `if` expressions. The linter may report `letFun` as unused — this is a
-false positive. Do NOT remove it; doing so breaks the proof.
+When `unfold f at h` leaves `have x := e; body` bindings, the `letFun`
+wrapper must be reduced before `split at h` can see inner `if` expressions.
+
+The linter flags `letFun` as unused in `simp only [letFun] at h` because
+simp handles it via built-in reduction, not the named lemma. Replace with:
+```lean
+dsimp only at h  -- definitional reduction handles letFun
+```
+This eliminates the linter warning while performing the same reduction.
 
 ## Fixing `bind`/`Option.bind` Linter Warnings
 
@@ -258,3 +288,79 @@ dsimp only [Bind.bind, Except.bind] at h
 `dsimp` (definitional simp) reduces `bind`/`Except.bind` without unfolding
 named definitions, so it won't re-enter `F`. This pattern is essential for
 fuel-based recursive functions in the `Except` monad.
+
+## `Except.ok.injEq` + `Prod.mk.injEq` Extraction Chains
+
+Functions returning `Except ε (α × β)` (e.g., `readBit`, `readBits`,
+`inflateBlock`) produce hypotheses like `Except.ok (val, rest) = Except.ok (x, y)`.
+The canonical two-step extraction:
+
+```lean
+simp only [Except.ok.injEq, Prod.mk.injEq] at h
+obtain ⟨hval, hrest⟩ := h
+```
+
+**Full pattern** after `split at h` on an Except-returning function:
+```lean
+split at h
+· -- error branch: constructor discrimination
+  exact nomatch h
+· -- ok branch: extract pair components
+  simp only [Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨hval, hrest⟩ := h
+  -- hval : val = x, hrest : rest = y
+```
+
+This pattern appears 35+ times in BitReaderInvariant.lean and
+InflateRawSuffix.lean. It is always `simp only` — never bare simp.
+
+**Common extensions**:
+- With `rfl` destructuring: `obtain ⟨rfl, rfl⟩ := h` when you want
+  substitution rather than named equalities
+- Chained with `simp_all`: `... at h <;> obtain ⟨_, rfl⟩ := h <;> simp_all`
+  for one-liner proofs of BitReader invariants
+
+**Anti-pattern**: Don't use bare `simp at h` for pair extraction — it
+may rewrite terms you want to keep (e.g., simplifying `br.data.size`).
+
+## Option.bind Chain Handling: `cases` + `dsimp` vs Bare `simp`
+
+When a hypothesis or goal has nested `Option.bind` from do-notation,
+choose the approach based on nesting depth:
+
+### Shallow chains (≤3 levels): Sequential `cases` + `dsimp`
+
+```lean
+-- h : (do let x ← f a; let y ← g x; pure (x, y)) = some result
+cases hf : f a with
+| none => rw [hf] at h; dsimp only [bind, Option.bind] at h; exact nomatch h
+| some x =>
+  rw [hf] at h; dsimp only [bind, Option.bind] at h
+  cases hg : g x with
+  | none => rw [hg] at h; dsimp only [bind, Option.bind] at h; exact nomatch h
+  | some y =>
+    rw [hg] at h; dsimp only [bind, Option.bind] at h
+    -- h is now fully reduced
+```
+
+### Deep chains (>3 levels): Bare `simp` with comment
+
+```lean
+-- 6-level bind chain in decodeDynamicTables
+simp [hcl, hlit, hdist, hacc, hfinal, hresult] at hgo
+-- bare simp: 6-level Option.bind chain
+```
+
+### Guard + bind interleaving
+
+After `split at h` on an `if` inside a bind chain, the remaining
+`match` on `Option.bind` may not reduce. Interleave a bind reduction:
+
+```lean
+split at h  -- splits the if
+· -- true branch
+  dsimp only [bind, Option.bind] at h  -- reduce the surrounding bind
+  -- continue with next case split
+```
+
+This was independently rediscovered in 3+ sessions before being codified.
