@@ -48,7 +48,7 @@ def unpack (v : UInt32) : State :=
 /-- `updateList` over a concatenation equals sequential application. -/
 theorem updateList_append (s : State) (xs ys : List UInt8) :
     updateList s (xs ++ ys) = updateList (updateList s xs) ys := by
-  simp [updateList, List.foldl_append]
+  simp only [updateList, List.foldl_append]
 
 /-- Empty input leaves the state unchanged. -/
 theorem updateList_nil (s : State) : updateList s [] = s := rfl
@@ -65,13 +65,13 @@ def Valid (s : State) : Prop := s.1 < MOD_ADLER ∧ s.2 < MOD_ADLER
 /-- The first component of `updateByte` is less than MOD_ADLER. -/
 theorem updateByte_fst_lt (s : State) (b : UInt8) :
     (updateByte s b).1 < MOD_ADLER := by
-  simp [updateByte, MOD_ADLER]
+  simp only [updateByte, MOD_ADLER]
   omega
 
 /-- The second component of `updateByte` is less than MOD_ADLER. -/
 theorem updateByte_snd_lt (s : State) (b : UInt8) :
     (updateByte s b).2 < MOD_ADLER := by
-  simp [updateByte, MOD_ADLER]
+  simp only [updateByte, MOD_ADLER]
   omega
 
 /-- `updateByte` preserves validity. -/
@@ -81,7 +81,7 @@ theorem updateByte_valid (s : State) (b : UInt8) :
 
 /-- The initial state is valid. -/
 theorem init_valid : Valid init := by
-  simp [Valid, init, MOD_ADLER]
+  simp only [Valid, init, MOD_ADLER]; constructor <;> omega
 
 /-- `updateList` preserves validity. -/
 theorem updateList_valid (s : State) (hs : Valid s) (data : List UInt8) :
