@@ -199,3 +199,24 @@ Bare simp: 45 → 12 (73% reduction)
 Remaining 12: 8 Option.bind chains, 2 readBitsLSB computations,
 2 BitVec normalizations
 ```
+
+## Campaign Status (as of 2026-03-02)
+
+The bare simp review campaign has reached effective completion:
+- **15 bare simps remain** across 10 files, all in documented resistant
+  categories (deep Option.bind chains, concrete bit computations,
+  BitVec normalization)
+- **10 files reviewed** in the most recent batch, achieving 96-100%
+  reduction in most files
+- Further review sessions on these files yield diminishing returns
+
+**When to schedule new reviews**: After significant new proof code is
+added (e.g., Track E correctness proofs, new roundtrip theorems).
+Don't schedule reviews for files that have already been reviewed to
+96%+ unless they've had substantial new proof additions since.
+
+**Cherry-pick-over-rebase for stalled review PRs**: When a review PR
+has accumulated merge conflicts from parallel work, create a fresh
+branch from master and cherry-pick (or `git apply`) the review commit.
+Three sessions used this pattern successfully. Prefer this over
+rebasing when the PR branch has unrelated commits.
