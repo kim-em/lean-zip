@@ -16,27 +16,36 @@ namespace Deflate.Correctness
 private theorem bitsToNat_testBit (m n : Nat) (hm : m < 2 ^ n) :
     Deflate.Spec.bitsToNat n (List.ofFn (n := n) fun (i : Fin n) => m.testBit i.val) = m := by
   induction n generalizing m with
-  | zero => simp at hm; simp [Deflate.Spec.bitsToNat]; omega
+  | zero =>
+    simp only [Nat.pow_zero, Nat.lt_one_iff] at hm
+    simp only [Spec.bitsToNat]
+    omega
   | succ k ih =>
     simp only [List.ofFn_succ, Deflate.Spec.bitsToNat]
     have htb : (fun (i : Fin k) => m.testBit (Fin.succ i).val) =
                (fun (i : Fin k) => (m / 2).testBit i.val) := by
-      ext i; simp [Fin.val_succ, ← Nat.testBit_div_two]
+      ext i; simp only [Fin.val_succ, ← Nat.testBit_div_two]
     have hdiv : m / 2 < 2 ^ k := by
       rw [Nat.div_lt_iff_lt_mul (by omega : 0 < 2)]; rw [Nat.pow_succ] at hm; omega
     rw [htb, ih (m / 2) hdiv]
     simp only [Nat.testBit, Nat.one_and_eq_mod_two]
     have := Nat.div_add_mod m 2
-    by_cases hmod : m % 2 = 0 <;> simp_all <;> omega
+    by_cases hmod : m % 2 = 0 <;>
+      simp_all only [Fin.val_succ, Nat.add_zero, Fin.val_zero, Nat.shiftRight_zero,
+        bne_self_eq_false, Bool.false_eq_true, ↓reduceIte, Nat.zero_add,
+        Nat.mod_two_not_eq_zero, Nat.reduceBNe] <;>
+      omega
 
 /-- `bitsToNat n` produces values less than `2^n`. -/
 private theorem bitsToNat_bound (n : Nat) (bits : List Bool) :
     Deflate.Spec.bitsToNat n bits < 2 ^ n := by
   induction n generalizing bits with
-  | zero => simp [Deflate.Spec.bitsToNat]
+  | zero => simp only [Spec.bitsToNat, Nat.pow_zero, Nat.lt_add_one]
   | succ k ih =>
     cases bits with
-    | nil => simp [Deflate.Spec.bitsToNat, Nat.pos_of_ne_zero, Nat.pow_eq_zero]
+    | nil =>
+      simp only [Spec.bitsToNat, ne_eq, Nat.pow_eq_zero, reduceCtorEq, Nat.add_eq_zero_iff,
+        Nat.succ_ne_self, and_false, not_false_eq_true, and_true, Nat.pos_of_ne_zero]
     | cons b rest =>
       simp only [Deflate.Spec.bitsToNat]
       have := ih rest; rw [Nat.pow_succ]; split <;> omega
@@ -49,20 +58,25 @@ private theorem testBit_bitsToNat (bits : List Bool) (n i : Nat)
   | zero => omega
   | succ k ih =>
     cases bits with
-    | nil => simp at hlen
+    | nil => simp only [List.length_nil, Nat.not_lt_zero] at hlen
     | cons b rest =>
       simp only [Deflate.Spec.bitsToNat]
       cases i with
       | zero =>
         simp only [List.getElem_cons_zero, Nat.testBit_zero]
-        cases b <;> simp <;> omega
+        cases b <;>
+          simp only [Bool.false_eq_true, ↓reduceIte, Nat.zero_add, Nat.mul_mod_right,
+            Nat.zero_ne_one, decide_false, Nat.add_mul_mod_self_left, Nat.mod_succ,
+            decide_true] <;>
+          omega
       | succ j =>
         simp only [List.getElem_cons_succ]
         rw [← Nat.testBit_div_two]
         have hdiv : ((if b then 1 else 0) + 2 * Deflate.Spec.bitsToNat k rest) / 2 =
             Deflate.Spec.bitsToNat k rest := by split <;> omega
         rw [hdiv]
-        exact ih rest j (by omega) (by simp at hlen; omega)
+        exact ih rest j (by omega)
+          (by simp only [List.length_cons, Nat.add_lt_add_iff_right] at hlen; omega)
 
 /-- `testBit i` on `bitsToNat n bits` is `false` for `i ≥ n`. -/
 private theorem testBit_bitsToNat_ge (bits : List Bool) (n i : Nat)
@@ -80,17 +94,20 @@ private theorem testBit_bitsToNat_ge_length (bits : List Bool) (n i : Nat)
   | zero => omega
   | succ k ih =>
     cases bits with
-    | nil => simp [Deflate.Spec.bitsToNat]
+    | nil => simp only [Spec.bitsToNat, Nat.zero_testBit]
     | cons b rest =>
       simp only [Deflate.Spec.bitsToNat]
       cases i with
-      | zero => simp at hlen
+      | zero =>
+        simp only [List.length_cons, ge_iff_le, Nat.le_zero_eq, Nat.add_eq_zero_iff,
+          List.length_eq_zero_iff, Nat.succ_ne_self, and_false] at hlen
       | succ j =>
         rw [← Nat.testBit_div_two]
         have hdiv : ((if b then 1 else 0) + 2 * Deflate.Spec.bitsToNat k rest) / 2 =
             Deflate.Spec.bitsToNat k rest := by split <;> omega
         rw [hdiv]
-        exact ih rest j (by omega) (by simp at hlen; omega)
+        exact ih rest j (by omega)
+          (by simp only [List.length_cons, ge_iff_le, Nat.add_le_add_iff_right] at hlen; omega)
 
 /-- `byteToBits (bitsToByte bits) = bits.take 8 ++ List.replicate (8 - min 8 bits.length) false`
     when `bits.length ≤ 8`. In particular, for length-8 lists this is the identity. -/
@@ -107,8 +124,8 @@ private theorem byteToBits_bitsToByte_take8 (bits : List Bool) :
     ⟨BitVec.ofNat 8 (Deflate.Spec.bitsToNat 8 bits)⟩ from rfl]
   simp only [UInt8.toNat, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hbound]
   by_cases hlen : i < bits.length
-  · rw [testBit_bitsToNat bits 8 i (by omega) hlen]; simp [hlen]
-  · rw [testBit_bitsToNat_ge_length bits 8 i (by omega) (by omega)]; simp [hlen]
+  · rw [testBit_bitsToNat bits 8 i (by omega) hlen]; simp only [hlen, ↓reduceDIte]
+  · rw [testBit_bitsToNat_ge_length bits 8 i (by omega) (by omega)]; simp only [hlen, ↓reduceDIte]
 
 /-! ### writeBitsLSB properties -/
 
@@ -116,8 +133,8 @@ private theorem byteToBits_bitsToByte_take8 (bits : List Bool) :
 theorem writeBitsLSB_length (n val : Nat) :
     (Deflate.Spec.writeBitsLSB n val).length = n := by
   induction n generalizing val with
-  | zero => simp [Deflate.Spec.writeBitsLSB]
-  | succ k ih => simp [Deflate.Spec.writeBitsLSB, ih]
+  | zero => simp only [Spec.writeBitsLSB, List.length_nil]
+  | succ k ih => simp only [Spec.writeBitsLSB, List.length_cons, ih]
 
 /-- Reading back a written value recovers the original. -/
 theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
@@ -125,7 +142,10 @@ theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
     Deflate.Spec.readBitsLSB n (Deflate.Spec.writeBitsLSB n val ++ rest) =
       some (val, rest) := by
   induction n generalizing val with
-  | zero => simp [Deflate.Spec.readBitsLSB, Deflate.Spec.writeBitsLSB]; omega
+  | zero =>
+    simp only [Spec.readBitsLSB, Spec.writeBitsLSB, List.nil_append, Option.some.injEq,
+      Prod.mk.injEq, and_true]
+    omega
   | succ k ih =>
     simp only [Deflate.Spec.writeBitsLSB, List.cons_append, Deflate.Spec.readBitsLSB]
     have hlt : val / 2 < 2 ^ k := by
@@ -134,7 +154,9 @@ theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
     simp only [bind, Option.bind]
     congr 1; ext1
     · have := Nat.div_add_mod val 2
-      split <;> simp_all [beq_iff_eq] <;> omega
+      split <;>
+        simp_all only [beq_iff_eq, Nat.mod_two_not_eq_one, Nat.zero_add, Nat.add_zero] <;>
+        omega
     · rfl
 
 /-! ### bitsToBytes / bytesToBits roundtrip -/
@@ -145,10 +167,12 @@ private theorem byteToBits_bitsToByte_eq (bits : List Bool) (h : bits.length = 8
   have := byteToBits_bitsToByte_take8 bits
   rw [this]
   apply List.ext_getElem
-  · simp; omega
+  · simp only [List.ofFn_succ, Fin.isValue, Fin.val_zero, Fin.val_succ, Nat.zero_add,
+      Nat.reduceAdd, Fin.val_eq_zero, List.ofFn_zero, List.length_cons, List.length_nil]
+    omega
   · intro i h1 h2
     simp only [List.getElem_ofFn]
-    simp [show i < bits.length from by omega]
+    simp only [show i < bits.length from by omega, ↓reduceDIte]
 
 /-- `bitsToBytes.go` with accumulator appends to the accumulator. -/
 private theorem bitsToBytes_go_eq (bits : List Bool) (acc : ByteArray) :
@@ -163,20 +187,22 @@ private theorem bitsToBytes_go_eq (bits : List Bool) (acc : ByteArray) :
   | _ n ih =>
     intro acc
     cases bits with
-    | nil => simp [Deflate.Spec.bitsToBytes.go]
+    | nil =>
+      simp only [Spec.bitsToBytes.go, ByteArray.data_empty, Array.toList_empty, List.append_nil]
     | cons b rest =>
       unfold Deflate.Spec.bitsToBytes.go
       have hlen : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp [List.length_drop]; omega
+        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       subst h
       rw [ih _ hlen _ rfl (acc.push (Deflate.Spec.bitsToByte (b :: rest)))]
       rw [ih _ hlen _ rfl (ByteArray.empty.push (Deflate.Spec.bitsToByte (b :: rest)))]
-      simp [ByteArray.push, Array.toList_push, List.append_assoc]
+      simp only [ByteArray.push, Array.toList_push, List.drop_succ_cons, List.append_assoc,
+        List.cons_append, List.nil_append, ByteArray.data_empty, List.push_toArray]
 
 /-- `bitsToBytes` of empty is empty. -/
 private theorem bitsToBytes_nil :
     Deflate.Spec.bitsToBytes [] = ByteArray.empty := by
-  simp [Deflate.Spec.bitsToBytes, Deflate.Spec.bitsToBytes.go]
+  simp only [Spec.bitsToBytes, Spec.bitsToBytes.go]
 
 /-- `bitsToBytes` of non-empty list prepends one byte then recurses. -/
 private theorem bitsToBytes_cons (b : Bool) (rest : List Bool) :
@@ -185,7 +211,8 @@ private theorem bitsToBytes_cons (b : Bool) (rest : List Bool) :
         (Deflate.Spec.bitsToBytes ((b :: rest).drop 8)).data.toList := by
   simp only [Deflate.Spec.bitsToBytes, Deflate.Spec.bitsToBytes.go]
   rw [bitsToBytes_go_eq]
-  simp [ByteArray.push]
+  simp only [ByteArray.push, ByteArray.data_empty, List.push_toArray, List.nil_append,
+    List.drop_succ_cons, List.cons_append]
 
 /-- `byteToBits_bitsToByte_take8` specialized: when `bits.length ≥ 8`,
     the output equals `bits.take 8`. -/
@@ -193,7 +220,10 @@ private theorem byteToBits_bitsToByte_take (bits : List Bool) (h : bits.length �
     Deflate.Spec.bytesToBits.byteToBits (Deflate.Spec.bitsToByte bits) = bits.take 8 := by
   rw [byteToBits_bitsToByte_take8]
   apply List.ext_getElem
-  · simp [List.length_take]; omega
+  · simp only [List.ofFn_succ, Fin.isValue, Fin.val_zero, Fin.val_succ, Nat.zero_add,
+      Nat.reduceAdd, Fin.val_eq_zero, List.ofFn_zero, List.length_cons, List.length_nil,
+      List.length_take]
+    omega
   · intro i h1 h2
     simp only [List.length_ofFn] at h1
     simp only [List.getElem_ofFn, show i < bits.length from by omega, ↓reduceDIte,
@@ -211,14 +241,17 @@ theorem bytesToBits_bitsToBytes_aligned (bits : List Bool)
   induction h' : bits.length using Nat.strongRecOn generalizing bits with
   | _ n ih =>
     cases bits with
-    | nil => simp [bitsToBytes_nil, Deflate.Spec.bytesToBits]
+    | nil =>
+      simp only [Spec.bytesToBits, bitsToBytes_nil, ByteArray.data_empty, Array.toList_empty,
+        List.flatMap_nil]
     | cons b rest =>
-      have hlen : (b :: rest).length ≥ 8 := by simp at h ⊢; omega
+      have hlen : (b :: rest).length ≥ 8 := by
+        simp only [List.length_cons, ge_iff_le, Nat.reduceLeDiff] at h ⊢; omega
       rw [bytesToBits_data, bitsToBytes_cons]
       simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
       rw [byteToBits_bitsToByte_take _ hlen]
       have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp [List.length_drop]; omega
+        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       have hdrop_mod : ((b :: rest).drop 8).length % 8 = 0 := by
         simp only [List.length_drop, List.length_cons] at h ⊢; omega
       rw [← bytesToBits_data, ih _ (by omega) _ hdrop_mod rfl]
@@ -231,13 +264,15 @@ private theorem bytesToBits_bitsToBytes_length_ge (bits : List Bool) :
   | _ n ih =>
     subst h'
     cases bits with
-    | nil => simp [bitsToBytes_nil, Deflate.Spec.bytesToBits]
+    | nil =>
+      simp only [Spec.bytesToBits, bitsToBytes_nil, ByteArray.data_empty, Array.toList_empty,
+        List.flatMap_nil, List.length_nil, ge_iff_le, Std.le_refl]
     | cons b rest =>
       rw [bytesToBits_data, bitsToBytes_cons]
       simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil,
         List.length_append, Deflate.Spec.bytesToBits.byteToBits_length]
       have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp [List.length_drop]; omega
+        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       have hih := ih _ hdrop_len ((b :: rest).drop 8) rfl
       rw [bytesToBits_data] at hih
       simp only [List.length_flatMap, Deflate.Spec.bytesToBits.byteToBits_length,
@@ -251,13 +286,15 @@ theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
   | _ n ih =>
     subst h'
     cases bits with
-    | nil => simp [bitsToBytes_nil, Deflate.Spec.bytesToBits]
+    | nil =>
+      simp only [List.length_nil, Spec.bytesToBits, bitsToBytes_nil, ByteArray.data_empty,
+        Array.toList_empty, List.flatMap_nil, List.take_nil]
     | cons b rest =>
       rw [bytesToBits_data, bitsToBytes_cons]
       simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
       rw [byteToBits_bitsToByte_take8]
       have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp [List.length_drop]; omega
+        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       have hlen_ge := bytesToBits_bitsToBytes_length_ge ((b :: rest).drop 8)
       rw [bytesToBits_data] at hlen_ge
       apply List.ext_getElem
@@ -269,16 +306,16 @@ theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
         simp only [List.length_take, List.length_append, List.length_ofFn] at h1
         simp only [List.getElem_take]
         by_cases hi8 : i < 8
-        · rw [List.getElem_append_left (by simp; exact hi8)]
+        · rw [List.getElem_append_left (by simp only [List.length_ofFn]; exact hi8)]
           simp only [List.getElem_ofFn, show i < (b :: rest).length from by omega, ↓reduceDIte]
           rfl
         · have hi8' : i ≥ 8 := by omega
-          rw [List.getElem_append_right (by simp; omega)]
+          rw [List.getElem_append_right (by simp only [List.length_ofFn]; omega)]
           simp only [List.length_ofFn]
           have hih := ih _ hdrop_len ((b :: rest).drop 8) rfl
           rw [bytesToBits_data] at hih
           have hidx : i - 8 < ((b :: rest).drop 8).length := by
-            simp [List.length_drop]; omega
+            simp only [List.drop_succ_cons, List.length_drop]; omega
           have hbound : i - 8 < (List.take ((b :: rest).drop 8).length
             (List.flatMap Deflate.Spec.bytesToBits.byteToBits
               (Deflate.Spec.bitsToBytes ((b :: rest).drop 8)).data.toList)).length := by
