@@ -7,10 +7,10 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4+ complete; Track C2 (fuel elimination) nearly complete
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
-- **Sorries**: 2 (both `inflateLoop_complete` variants — completeness direction of the block loop)
-- **Sessions**: ~204 completed (Feb 19 – Mar 1)
+- **Sorries**: 0
+- **Sessions**: ~215 completed (Feb 19 – Mar 2)
 - **Source files**: 84 (43 spec, 8 native impl, 9 FFI/archive, 4 ZipForStd, 20 test)
-- **Merged PRs**: 167
+- **Merged PRs**: 179
 
 ## Milestones
 
@@ -99,11 +99,12 @@ Covers all compression levels (stored, fixed, lazy, dynamic). The 1 GiB
 size bound arises from fuel-based termination in the native `inflateLoop`
 (the last remaining fuel-based function — see Track C2).
 
-**Proof quality reviews** (45+ sessions): systematic code review across
+**Proof quality reviews** (50+ sessions): systematic code review across
 all spec files, reducing proof size, extracting reusable lemmas to
-ZipForStd, splitting large files for maintainability. Recent reviews:
-BitstreamCorrect (#336), EmitTokensCorrect (#340), DecodeCorrect (#362),
-DeflateSuffix (#365).
+ZipForStd, splitting large files for maintainability, and converting
+bare `simp` to `simp only`. Recent reviews: Deflate (#369),
+DecodeComplete (#374), BitReaderInvariant (#382), HuffmanCorrect +
+HuffmanCorrectLoop (#385), InflateCorrect (#387).
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -162,11 +163,11 @@ The per-path bounds:
 The unified bound is now 1 GiB (`1024 * 1024 * 1024`), up from 500MB
 previously and 5MB at the start of Track C1.
 
-### Track C2: Fuel Elimination (nearly complete, Mar 1)
+### Track C2: Fuel Elimination (nearly complete, Mar 2)
 Replacing fuel-based recursion with well-founded recursion to eliminate
 the data size bound entirely.
 
-**Completed — 5 of 6 functions converted:**
+**Completed — 5 of 6 functions converted, all proofs repaired:**
 - Fuel audit (#323) identifying all 6 fuel-using functions
 - Spec `decodeCLSymbols` → WF (#328): `termination_by totalCodes - acc.length`
 - Native `decodeCLSymbols` → WF (#332): same termination measure
@@ -179,38 +180,58 @@ the data size bound entirely.
   composing block-level correctness with 7 new bit-length invariant lemmas
 - `decodeDynamicTrees_complete` proved (#361): composed from sub-completeness
   theorems for each component
+- `inflateLoop_complete` proved (#373): spec→native block loop correspondence,
+  strong induction on bit stream length, all 4 btype cases handled
+- `inflateLoop_fuel_le` proved (#373): fuel monotonicity (if inflateLoop
+  succeeds with fuel n, it succeeds with any m ≥ n)
+- `inflateRaw` fuel changed from hardcoded `10000000000` to data-dependent
+  `data.size * 8 + 1` (#373)
 - Proof repairs across 6 PRs (#345, #350, #351, #356, #357, #362): WF
-  conversions broke ~15 proofs; all repaired except 2 completeness sorries
+  conversions broke ~15 proofs; all repaired
 
-**Sorry count trajectory:** 0 → ~15 (during WF conversions) → 2 (after repairs).
-The rise was expected: changing function signatures cascades through proof files.
+**Sorry count trajectory:** 0 → ~15 (during WF conversions) → 2 (after repairs)
+→ 0 (after `inflateLoop_complete` proved). The codebase has returned to zero
+sorries.
 
 **Remaining:**
-- Native `inflateLoop` — still fuel-based (block dispatch loop)
-- 2 sorries: `inflateLoop_complete` and `inflateLoop_complete_ext` in the
-  completeness direction (spec succeeds → native succeeds). The correctness
-  direction (`inflateLoop_correct`: native succeeds → spec succeeds) is proved.
+- Native `inflateLoop` — still fuel-based (block dispatch loop). Issue #363
+  tracks the final WF conversion. All proofs already compile; this is a
+  code quality improvement, not a correctness gap.
 
 **New skill:** `lean-wf-recursion` (#349) capturing WF function unfolding rules,
 `f.induct` functional induction patterns, and fuel-to-WF migration checklist.
 
-### Track D: Benchmarking (started, Feb 25)
-Initial benchmark infrastructure comparing native Lean compression vs
-FFI (zlib) across levels 0/1/6 with various data patterns (constant,
-cyclic, random) at sizes 1KB–32KB. Key finding: native LZ77
-(`lz77Greedy_mainLoop`) had a stack overflow at 64KB+ due to
-non-tail recursion.
+### Track D: Benchmarking (in progress, Feb 25 – Mar 2)
+Benchmark infrastructure comparing native Lean compression/decompression
+vs FFI (zlib) across levels 0/1/6 with various data patterns (constant,
+cyclic, random, text) at sizes 1KB–1MB.
 
-**Fix:** `lz77GreedyIter` — a tail-recursive, Array-accumulating version
-with proved equivalence (`lz77GreedyIter_eq_lz77Greedy`). Conformance
-tests pass on inputs up to 256KB.
+**Large-input fixes:**
+- `lz77GreedyIter` — tail-recursive LZ77 greedy matcher with proved
+  equivalence (`lz77GreedyIter_eq_lz77Greedy`), replacing the stack-
+  overflowing `lz77Greedy_mainLoop` for level 5+ (#372)
+- `lz77LazyIter` — tail-recursive LZ77 lazy matcher with proved
+  equivalence (`lz77LazyIter_eq_lz77Lazy`), enabling levels 2–4 at
+  large input sizes (#380)
+- All compression levels now work at 256KB+ inputs
+
+**Benchmark infrastructure** (NativeScale.lean, NativeCompressBench.lean):
+- Decompression benchmarks added (#379): inflate, gzip decompress, zlib
+  decompress — native vs FFI across all patterns and sizes
+- Text corpus pattern added (#390): realistic text data alongside
+  constant, cyclic, and random patterns
+- Compression size cap removed (#390): all levels run at all sizes
+  (was previously split into small/large tiers with restricted levels)
+- Compression ratio comparison section: native vs FFI output sizes
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~204 sessions: majority implementation, ~90 review, ~4 self-improvement,
+- ~215 sessions: majority implementation, ~95 review, ~6 self-improvement,
   remainder PR maintenance, planning, and summarization
-- 167 merged PRs (Feb 19 – Mar 1)
+- 179 merged PRs (Feb 19 – Mar 2)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
+- Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
+  bare-simp-resistant pattern catalog (#386)
