@@ -51,10 +51,10 @@ def insertByWeight (t : BuildTree) : List BuildTree → List BuildTree
 theorem insertByWeight_length (t : BuildTree) (xs : List BuildTree) :
     (insertByWeight t xs).length = xs.length + 1 := by
   induction xs with
-  | nil => simp [insertByWeight]
+  | nil => simp only [insertByWeight, List.length_cons, List.length_nil]
   | cons x xs ih =>
     simp only [insertByWeight]
-    split <;> simp [ih]
+    split <;> simp only [List.length_cons, ih] <;> omega
 
 /-- Build a Huffman tree from a list of trees sorted by weight.
     Repeatedly merges the two lightest trees until one remains.
@@ -66,7 +66,7 @@ def buildHuffmanTree : List BuildTree → BuildTree
     let merged := BuildTree.node (t1.weight + t2.weight) t1 t2
     buildHuffmanTree (insertByWeight merged rest)
 termination_by xs => xs.length
-decreasing_by simp_all [insertByWeight_length]
+decreasing_by simp only [insertByWeight_length, List.length_cons]; omega
 
 /-! ## Depth extraction -/
 
@@ -130,11 +130,11 @@ private theorem foldl_set_length (depths : List (Nat × Nat)) (acc : List Nat) :
     (depths.foldl (fun acc (p : Nat × Nat) =>
       if p.1 < acc.length then acc.set p.1 p.2 else acc) acc).length = acc.length := by
   induction depths generalizing acc with
-  | nil => simp
+  | nil => simp only [List.foldl_nil]
   | cons d ds ih =>
     simp only [List.foldl_cons]
     split
-    · rw [ih]; simp [List.length_set]
+    · rw [ih]; simp only [List.length_set]
     · exact ih acc
 
 /-- `assignLengths` produces a list of the requested length. -/
@@ -153,7 +153,9 @@ theorem computeCodeLengths_length (freqs : List (Nat × Nat)) (n : Nat) (maxBits
   · split
     · exact assignLengths_length ..
     · simp only [fixKraftList]
-      split <;> simp [assignLengths_length]
+      split
+      · exact assignLengths_length ..
+      · simp only [List.length_map]; exact assignLengths_length ..
 
 /-! ## Tree structure properties -/
 
@@ -161,12 +163,13 @@ theorem computeCodeLengths_length (freqs : List (Nat × Nat)) (n : Nat) (maxBits
 theorem BuildTree.depths_ne_nil (t : BuildTree) (d : Nat) :
     t.depths d ≠ [] := by
   match t with
-  | .leaf _ _ => simp [depths]
+  | .leaf _ _ => simp only [depths, ne_eq, List.cons_ne_nil, not_false_eq_true]
   | .node _ l r =>
     simp only [depths, ne_eq]
     cases hl : l.depths (d + 1) with
     | nil => exact absurd hl (l.depths_ne_nil _)
-    | cons x xs => simp
+    | cons x xs => simp only [List.append_ne_nil_of_left_ne_nil, ne_eq, List.cons_ne_nil,
+        not_false_eq_true]
 
 /-- Every tree built by `buildHuffmanTree` from a non-empty list has at least
     one leaf, so `depths` is non-empty. -/
@@ -178,7 +181,8 @@ theorem buildTree_depths_nonempty (ts : List BuildTree) :
 theorem BuildTree.depths_ge (t : BuildTree) (d : Nat) :
     ∀ p ∈ t.depths d, p.2 ≥ d := by
   match t with
-  | .leaf _ s => simp [depths]
+  | .leaf _ s => simp only [depths, List.mem_cons, List.mem_nil_iff, or_false, forall_eq,
+      Nat.le_refl]
   | .node _ l r =>
     simp only [depths, List.mem_append]
     intro p hp
@@ -220,7 +224,8 @@ private theorem filter_ne_zero_replicate (n : Nat) :
     (List.replicate n (0 : Nat)).filter (· != 0) = [] := by
   induction n with
   | zero => rfl
-  | succ n ih => simp
+  | succ n ih =>
+    simp only [List.replicate_succ, List.filter_cons, ih]; rfl
 
 /-- Setting one position to 1 in an all-zero list, then filtering nonzero, gives `[1]`. -/
 private theorem filter_ne_zero_replicate_set (n i : Nat) (hi : i < n) :
@@ -230,11 +235,11 @@ private theorem filter_ne_zero_replicate_set (n i : Nat) (hi : i < n) :
   | succ n ih =>
     cases i with
     | zero =>
-      simp only [List.replicate_succ, List.set_cons_zero]
-      simp
+      simp only [List.replicate_succ, List.set_cons_zero, List.filter_cons,
+        filter_ne_zero_replicate]; rfl
     | succ i =>
-      simp only [List.replicate_succ, List.set_cons_succ]
-      simp [ih i (by omega)]
+      simp only [List.replicate_succ, List.set_cons_succ, List.filter_cons,
+        bne_self_eq_false, Bool.false_eq_true, ↓reduceIte, ih i (by omega)]
 
 /-- `ValidLengths` holds for a single symbol with length 1.
 
@@ -243,7 +248,9 @@ private theorem filter_ne_zero_replicate_set (n i : Nat) (hi : i < n) :
 private theorem validLengths_single (sym n maxBits : Nat) (hmb : maxBits > 0) :
     ValidLengths (assignLengths [(sym, 1)] n) maxBits := by
   constructor
-  · exact assignLengths_bounded [(sym, 1)] n maxBits (by simp; omega)
+  · exact assignLengths_bounded [(sym, 1)] n maxBits (by
+      intro p hp
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hp; subst hp; omega)
   · simp only [assignLengths, List.foldl_cons, List.foldl_nil, List.length_replicate]
     by_cases h : sym < n
     · simp only [h, ↓reduceIte, filter_ne_zero_replicate_set _ _ h,
@@ -259,7 +266,7 @@ private theorem kraftSum_init (depths : List Nat) (D init : Nat) :
     depths.foldl (fun acc d => acc + 2 ^ (D - d)) init =
     init + kraftSum depths D := by
   induction depths generalizing init with
-  | nil => simp [kraftSum]
+  | nil => simp only [List.foldl_nil, kraftSum, Nat.add_zero]
   | cons x xs ih =>
     simp only [List.foldl_cons, kraftSum]
     rw [ih, ih (0 + 2 ^ (D - x))]
@@ -279,7 +286,8 @@ theorem BuildTree.kraft_eq (t : BuildTree) (d D : Nat)
     kraftSum (t.depths d |>.map Prod.snd) D = 2 ^ (D - d) := by
   match t with
   | .leaf _ _ =>
-    simp [depths, kraftSum, List.foldl]
+    simp only [depths, List.map_cons, List.map_nil, kraftSum, List.foldl_cons, List.foldl_nil,
+      Nat.zero_add]
   | .node _ l r =>
     simp only [depths, List.map_append]
     rw [kraftSum_append]
@@ -301,13 +309,15 @@ theorem BuildTree.kraft_eq (t : BuildTree) (d D : Nat)
 theorem fixKraftList_length (lengths : List Nat) (maxBits : Nat) :
     (fixKraftList lengths maxBits).length = lengths.length := by
   simp only [fixKraftList]
-  split <;> simp [List.length_map]
+  split
+  · rfl
+  · exact List.length_map ..
 
 /-- When all entries of a list equal `D`, `kraftSum l D = l.length`. -/
 private theorem kraftSum_self (l : List Nat) (D : Nat) (h : ∀ x ∈ l, x = D) :
     kraftSum l D = l.length := by
   induction l with
-  | nil => simp [kraftSum]
+  | nil => simp only [kraftSum, List.foldl_nil, List.length_nil]
   | cons x xs ih =>
     simp only [kraftSum, List.foldl_cons]
     rw [kraftSum_init]
@@ -324,7 +334,10 @@ private theorem filter_map_eq_maxBits (l : List Nat) (maxBits : Nat) :
   intro x hx
   simp only [List.mem_filter, List.mem_map] at hx
   obtain ⟨⟨a, _, rfl⟩, hne⟩ := hx
-  cases ha : (a == 0) <;> simp_all
+  split <;> rename_i ha
+  · simp only [beq_iff_eq] at ha; subst ha
+    simp only [beq_self_eq_true, ↓reduceIte, bne_self_eq_false, Bool.false_eq_true] at hne
+  · rfl
 
 /-- `fixKraftList` satisfies the Kraft inequality when the list length
     is at most `2^maxBits`. -/
@@ -350,7 +363,7 @@ theorem fixKraftList_bounded (lengths : List Nat) (maxBits : Nat)
   · intro l hl
     simp only [List.mem_map] at hl
     obtain ⟨a, _, rfl⟩ := hl
-    cases ha : (a == 0) <;> simp_all <;> omega
+    split <;> omega
 
 /-! ## computeCodeLengths properties -/
 
@@ -390,7 +403,7 @@ theorem computeCodeLengths_valid (freqs : List (Nat × Nat)) (n : Nat)
   · exact computeCodeLengths_bounded freqs n maxBits hmb
   · simp only [computeCodeLengths]
     split
-    · simp
+    · simp only [filter_ne_zero_replicate, List.foldl_nil, Nat.zero_le]
     · split
       · exact (validLengths_single _ n maxBits hmb).2
       · -- Multi-symbol case: fixKraftList handles the Kraft inequality
@@ -408,10 +421,12 @@ theorem fixKraftList_nonzero (l : List Nat) (maxBits : Nat) (hmb : maxBits > 0)
   simp only [fixKraftList]
   split
   · exact hne
-  · rw [getElem!_pos (l.map _) i (by simp; exact hi)]
+  · rw [getElem!_pos (l.map _) i (by simp only [List.length_map]; exact hi)]
     simp only [List.getElem_map]
     rw [show l[i] = l[i]! from by rw [getElem!_pos l i hi]]
-    cases heq : (l[i]! == 0) <;> simp_all [beq_iff_eq] <;> omega
+    split
+    · rename_i heq; simp only [beq_iff_eq] at heq; omega
+    · omega
 
 
 /-- Generalized: foldl set over an accumulator yields positive at position `s`
@@ -427,23 +442,26 @@ private theorem foldl_set_pos_or_exists (depths : List (Nat × Nat)) (acc : List
   | nil =>
     cases hor with
     | inl h => exact h
-    | inr h => simp at h
+    | inr h => exact absurd h (by simp only [List.not_mem_nil, false_and, not_exists,
+        not_false_eq_true, implies_true])
   | cons d ds ih =>
     simp only [List.foldl_cons]
     have hs' : s < (if d.1 < acc.length then acc.set d.1 d.2 else acc).length := by
-      split <;> simp_all [List.length_set]
+      split
+      · rw [List.length_set]; exact hs
+      · exact hs
     apply ih _ hs' (fun p hp => hpos p (List.mem_cons_of_mem _ hp))
     by_cases hds : d.1 = s
     · left; split
-      · rw [hds, getElem!_pos _ s (by simp [List.length_set]; exact hs)]
-        simp [List.getElem_set_self]
+      · rw [hds, getElem!_pos _ s (by simp only [List.length_set]; exact hs)]
+        simp only [List.getElem_set_self]
         exact hpos d (List.mem_cons_self ..) hds
       · omega
     ·
       cases hor with
       | inl h =>
         left; split
-        · have hs_set : s < (acc.set d.1 d.2).length := by simp [List.length_set]; exact hs
+        · have hs_set : s < (acc.set d.1 d.2).length := by simp only [List.length_set]; exact hs
           rw [getElem!_pos _ s hs_set, List.getElem_set_ne hds hs_set,
               ← getElem!_pos acc s hs]; exact h
         · exact h
@@ -461,7 +479,7 @@ theorem assignLengths_pos (depths : List (Nat × Nat)) (n : Nat)
     (assignLengths depths n)[s]! > 0 := by
   simp only [assignLengths]
   apply foldl_set_pos_or_exists
-  · simp [List.length_replicate]; exact hs
+  · simp only [List.length_replicate]; exact hs
   · exact hpos
   · exact Or.inr hexists
 
@@ -471,13 +489,13 @@ private theorem insertByWeight_mem (t : BuildTree) (xs : List BuildTree) :
     ∀ x, x ∈ insertByWeight t xs ↔ x = t ∨ x ∈ xs := by
   intro x
   induction xs with
-  | nil => simp [insertByWeight]
+  | nil => simp only [insertByWeight, List.mem_cons, List.mem_nil_iff, or_false]
   | cons y ys ih =>
     simp only [insertByWeight]
     split
-    · simp [List.mem_cons]
+    · simp only [List.mem_cons]
     · simp only [List.mem_cons, ih]
-      constructor <;> (intro h; obtain h | h | h := h <;> simp_all)
+      constructor <;> (intro h; obtain h | h | h := h <;> simp_all only [true_or, or_true])
 
 /-- Symbol `s` is a leaf symbol in tree `t`. -/
 private inductive BuildTree.HasSym : BuildTree → Nat → Prop where
@@ -490,7 +508,7 @@ private theorem BuildTree.HasSym.in_depths {t : BuildTree} {s : Nat} (h : t.HasS
     ∀ d, ∃ d', (s, d') ∈ t.depths d := by
   induction h with
   | leaf w s =>
-    intro d; exact ⟨d, by simp [depths]⟩
+    intro d; exact ⟨d, by simp only [depths, List.mem_cons, List.mem_nil_iff, or_false]⟩
   | nodeLeft w l r s _ ih =>
     intro d
     obtain ⟨d', hd'⟩ := ih (d + 1)
@@ -518,7 +536,7 @@ private theorem buildHuffmanTree_HasSym_insertByWeight
 private theorem buildHuffmanTree_HasSym (ts : List BuildTree) (s : Nat)
     (h : ∃ t ∈ ts, t.HasSym s) : (buildHuffmanTree ts).HasSym s := by
   match ts with
-  | [] => obtain ⟨_, hmem, _⟩ := h; simp at hmem
+  | [] => obtain ⟨_, hmem, _⟩ := h; exact nomatch hmem
   | [t] =>
     obtain ⟨t', hmem, hsym⟩ := h
     simp only [buildHuffmanTree, List.mem_cons, List.mem_nil_iff, or_false] at hmem ⊢
@@ -526,7 +544,7 @@ private theorem buildHuffmanTree_HasSym (ts : List BuildTree) (s : Nat)
   | t1 :: t2 :: rest =>
     simp only [buildHuffmanTree]
     have : (insertByWeight (BuildTree.node (t1.weight + t2.weight) t1 t2) rest).length < (t1 :: t2 :: rest).length := by
-      simp [insertByWeight_length]
+      simp only [insertByWeight_length, List.length_cons]; omega
     apply buildHuffmanTree_HasSym _ s
     obtain ⟨t', hmem, hsym⟩ := h
     simp only [List.mem_cons] at hmem
@@ -544,8 +562,8 @@ termination_by ts.length
 private theorem buildHuffmanTree_isNode (ts : List BuildTree) (h : ts.length ≥ 2) :
     ∃ w l r, buildHuffmanTree ts = BuildTree.node w l r := by
   match ts with
-  | [] => simp at h
-  | [_] => simp at h
+  | [] => simp only [List.length_nil] at h; omega
+  | [_] => simp only [List.length_cons, List.length_nil] at h; omega
   | t1 :: t2 :: rest =>
     simp only [buildHuffmanTree]
     let merged := BuildTree.node (t1.weight + t2.weight) t1 t2
@@ -557,9 +575,9 @@ private theorem buildHuffmanTree_isNode (ts : List BuildTree) (h : ts.length ≥
     · -- rest non-empty, insertByWeight has ≥ 2 elements, recurse
       have hge2 : (insertByWeight merged rest).length ≥ 2 := by
         rw [insertByWeight_length]
-        cases rest with | nil => contradiction | cons _ _ => simp
+        cases rest with | nil => contradiction | cons _ _ => simp only [List.length_cons]; omega
       have : (insertByWeight merged rest).length < (t1 :: t2 :: rest).length := by
-        simp [insertByWeight_length]
+        simp only [insertByWeight_length, List.length_cons]; omega
       exact buildHuffmanTree_isNode _ hge2
 termination_by ts.length
 
@@ -609,9 +627,11 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
     have hhead : nz.head! = p := by
       have ⟨hd, tl, htl⟩ : ∃ hd tl, nz = hd :: tl := by
         cases hc : nz with
-        | nil => exact absurd (hc ▸ hs_nz') (by simp)
+        | nil => rw [hc] at hs_nz'; exact nomatch hs_nz'
         | cons x xs => exact ⟨x, xs, rfl⟩
-      have htl_nil : tl = [] := by rw [htl] at hlen1'; simp at hlen1'; exact hlen1'
+      have htl_nil : tl = [] := by
+        rw [htl] at hlen1'; simp only [List.length_cons] at hlen1'
+        exact List.eq_nil_of_length_eq_zero (by omega)
       rw [htl, htl_nil] at hs_nz'
       simp only [List.mem_cons, List.mem_nil_iff, or_false] at hs_nz'
       rw [htl, htl_nil]; simp only [List.head!]; exact hs_nz'.symm
