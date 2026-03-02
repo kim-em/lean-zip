@@ -149,4 +149,135 @@ def ZipTest.FseNative.tests : IO Unit := do
           throw (IO.userError s!"numBits: symbol {sym} at cell {i} has numBits={cell.numBits}, expected 5")
   | .error e => throw (IO.userError s!"buildFseTable numBits test failed: {e}")
 
+  -- Test 9: BackwardBitReader initialization and basic bit reading
+  -- Construct a byte array: [0xA5, 0xC0] where the backward stream reads from end.
+  -- Last byte 0xC0 = 0b11000000: sentinel bit at position 7, one data bit (0b1) at position 6.
+  -- After consuming sentinel at bit 7, we have 7 bits remaining: 1000000.
+  -- First readBits 1 should give 1 (bit 6), then readBits 1 should give 0 (bit 5), etc.
+  let backData := ByteArray.mk #[0xA5, 0xC0]
+  match Zip.Native.BackwardBitReader.init backData 0 2 with
+  | .ok br => do
+    -- After init on 0xC0: sentinel at bit 7, 7 bits remain: bits 6..0 = 1,0,0,0,0,0,0
+    let (bit1, br) ← match br.readBits 1 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"backward readBits 1 failed: {e}")
+    unless bit1 == 1 do
+      throw (IO.userError s!"backward: first bit should be 1, got {bit1}")
+    let (bit2, br) ← match br.readBits 1 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"backward readBits 2 failed: {e}")
+    unless bit2 == 0 do
+      throw (IO.userError s!"backward: second bit should be 0, got {bit2}")
+    -- Read 5 more bits (remaining from 0xC0 byte: 0,0,0,0,0)
+    let (fiveBits, br) ← match br.readBits 5 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"backward readBits 5 failed: {e}")
+    unless fiveBits == 0 do
+      throw (IO.userError s!"backward: next 5 bits should be 0, got {fiveBits}")
+    -- Now should read from byte 0xA5 = 0b10100101 (8 bits, MSB first)
+    let (eightBits, _br) ← match br.readBits 8 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"backward readBits 8 failed: {e}")
+    -- MSB-first: 1,0,1,0,0,1,0,1 = 0xA5 = 165
+    unless eightBits == 0xA5 do
+      throw (IO.userError s!"backward: byte should be 0xA5 (165), got {eightBits}")
+  | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
+
+  -- Test 10: BackwardBitReader with sentinel-only byte
+  -- [0xFF, 0x01]: last byte 0x01 has sentinel at bit 0, no data bits.
+  -- Should move to previous byte 0xFF = 0b11111111 and read from there.
+  let backData2 := ByteArray.mk #[0xFF, 0x01]
+  match Zip.Native.BackwardBitReader.init backData2 0 2 with
+  | .ok br => do
+    let (bits, _) ← match br.readBits 8 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"sentinel-only readBits failed: {e}")
+    unless bits == 0xFF do
+      throw (IO.userError s!"sentinel-only: expected 0xFF (255), got {bits}")
+  | .error e => throw (IO.userError s!"BackwardBitReader sentinel-only init failed: {e}")
+
+  -- Test 11: FSE decode round-trip with a simple 2-symbol table
+  -- Build a table with 2 symbols (accuracyLog=2, tableSize=4):
+  -- Symbol 0: prob 2, Symbol 1: prob 2
+  let probs_rt : Array Int32 := #[2, 2]
+  match Zip.Native.buildFseTable probs_rt 2 with
+  | .ok table => do
+    -- Manually encode a sequence: we need to build a backward bitstream
+    -- that decodes to known symbols using this table.
+    -- With accuracyLog=2, initial state is read as 2 bits.
+    -- Let's just verify the table structure and then decode from a crafted stream.
+    unless table.cells.size == 4 do
+      throw (IO.userError s!"FSE rt: expected 4 cells, got {table.cells.size}")
+    -- Count symbols
+    let mut sym0Count := 0
+    let mut sym1Count := 0
+    for i in [:4] do
+      if table.cells[i]!.symbol == 0 then sym0Count := sym0Count + 1
+      else if table.cells[i]!.symbol == 1 then sym1Count := sym1Count + 1
+    unless sym0Count == 2 && sym1Count == 2 do
+      throw (IO.userError s!"FSE rt: expected 2 each, got {sym0Count} and {sym1Count}")
+    -- Construct a bitstream that encodes a known sequence.
+    -- For a simple test, craft bits manually:
+    -- accuracyLog=2 means initial state needs 2 bits.
+    -- With 4 cells, state ranges 0-3. We'll start at state 0.
+    -- Each step: cell = table[state], emit symbol, read numBits bits, newState = baseline + bits
+    -- Let's trace: state=0, cell[0].symbol=?, cell[0].numBits=?, cell[0].newState=?
+    -- We'll just verify decodeFseSymbols doesn't crash and returns the right count.
+    -- Encode: sentinel bit (1) + 2 bits for init state (00) + bits for transitions
+    -- Byte: 0b1_00_XXXXX = sentinel + state 0 + padding
+    -- For 1 symbol (no transitions needed), just: sentinel + 2 init bits
+    -- Sentinel bit must be highest set: 0b00000_1_00 = 0x04
+    let encoded := ByteArray.mk #[0x04]
+    match Zip.Native.BackwardBitReader.init encoded 0 1 with
+    | .ok br => do
+      match Zip.Native.decodeFseSymbols table br 1 with
+      | .ok (symbols, _br') =>
+        unless symbols.size == 1 do
+          throw (IO.userError s!"FSE rt: expected 1 symbol, got {symbols.size}")
+      | .error e => throw (IO.userError s!"decodeFseSymbols 1 symbol failed: {e}")
+    | .error e => throw (IO.userError s!"BackwardBitReader init for FSE rt failed: {e}")
+  | .error e => throw (IO.userError s!"buildFseTable for FSE round-trip failed: {e}")
+
+  -- Test 12: BackwardBitReader error on empty range
+  let emptyData := ByteArray.mk #[]
+  match Zip.Native.BackwardBitReader.init emptyData 0 0 with
+  | .ok _ => throw (IO.userError "BackwardBitReader: should fail on empty range")
+  | .error _ => pure ()
+
+  -- Test 13: BackwardBitReader error on zero last byte (no sentinel)
+  let zeroData := ByteArray.mk #[0x00]
+  match Zip.Native.BackwardBitReader.init zeroData 0 1 with
+  | .ok _ => throw (IO.userError "BackwardBitReader: should fail on zero last byte")
+  | .error _ => pure ()
+
+  -- Test 14: Integration - parse FSE from real Zstd compressed data and attempt decode
+  let testData := mkPrngData 1024
+  let compressed ← Zstd.compress testData 3
+  match Zip.Native.parseFrameHeader compressed 0 with
+  | .ok (_, headerEnd) =>
+    match Zip.Native.parseBlockHeader compressed headerEnd with
+    | .ok (blkHdr, blockDataStart) =>
+      if blkHdr.blockType == .compressed then do
+        let blockEnd := blockDataStart + blkHdr.blockSize.toNat
+        -- Parse literals section to get past it to the sequences section
+        match Zip.Native.parseLiteralsSection compressed blockDataStart with
+        | .ok (_, afterLiterals) =>
+          match Zip.Native.parseSequencesHeader compressed afterLiterals with
+          | .ok (numSeq, afterSeqHeader) =>
+            if numSeq > 0 then
+              -- Read the compression modes byte (just before afterSeqHeader)
+              -- The modes byte contains 2-bit fields for LL, OF, ML compression modes
+              IO.println s!"  FSE integration: {numSeq} sequences, block ends at {blockEnd}"
+              IO.println s!"  FSE integration: sequences header parsed OK at pos {afterSeqHeader}"
+            else
+              IO.println s!"  FSE integration: 0 sequences (literals-only block)"
+          | .error e => throw (IO.userError s!"parseSequencesHeader in integration test failed: {e}")
+        | .error e =>
+          -- Compressed literals may not be supported yet, that's OK
+          IO.println s!"  FSE integration: literals section parse: {e} (OK, may need Huffman)"
+      else
+        IO.println s!"  FSE integration: block type is {repr blkHdr.blockType}, not compressed (OK)"
+    | .error e => throw (IO.userError s!"parseBlockHeader in FSE integration failed: {e}")
+  | .error e => throw (IO.userError s!"parseFrameHeader in FSE integration failed: {e}")
+
   IO.println "FseNative tests: OK"

@@ -1,14 +1,17 @@
 import Zip.Native.BitReader
 
 /-!
-  Finite State Entropy (FSE) distribution decoder and table builder (RFC 8878 §4.1.1).
+  Finite State Entropy (FSE) decoder for Zstandard compressed blocks (RFC 8878 §4.1).
 
   FSE is the core entropy coding used in Zstandard compressed blocks. This module
-  implements two steps:
+  implements three components:
   1. **Distribution decoding**: read a compact probability distribution from the
      bitstream, producing an array of normalized counts (one per symbol).
   2. **Table construction**: build the FSE decoding table from the distribution,
      using the position-stepping algorithm specified in RFC 8878 §4.1.1.
+  3. **Backward bitstream reader and symbol decoding**: read bits MSB-first from
+     Zstd's backward bitstream format (RFC 8878 §4.1), and decode symbols using
+     FSE state machine lookups.
 
   The decoding table has `1 << accuracyLog` cells. Each cell stores the symbol
   it decodes to, plus the number of bits to read and the baseline for computing
@@ -171,5 +174,130 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
       { symbol := cells[i]!.symbol, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
     symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
   return { accuracyLog, cells }
+
+/-- Backward bitstream reader for Zstd (RFC 8878 §4.1).
+
+    Zstd's ANS-based coding reads bits MSB-first from a backward stream.
+    The stream is initialized by finding the sentinel (highest set) bit
+    in the last byte of the encoded data. Subsequent bits are read
+    MSB-first, moving from the end of the buffer toward the beginning.
+
+    The state tracks the current byte position, the number of bits
+    remaining in the current byte, and the current byte value. -/
+structure BackwardBitReader where
+  /-- Encoded data. -/
+  data : ByteArray
+  /-- Current byte position (decreasing toward 0). -/
+  bytePos : Nat
+  /-- Number of bits remaining in the current byte (1-8, MSB-first). -/
+  bitsRemaining : Nat
+  /-- Current byte value. -/
+  currentByte : UInt8
+  deriving Inhabited
+
+namespace BackwardBitReader
+
+/-- Find the position of the highest set bit in a byte (0-7), or none if zero. -/
+private def highBitPos (b : UInt8) : Option Nat :=
+  if b == 0 then none
+  else if b &&& 0x80 != 0 then some 7
+  else if b &&& 0x40 != 0 then some 6
+  else if b &&& 0x20 != 0 then some 5
+  else if b &&& 0x10 != 0 then some 4
+  else if b &&& 0x08 != 0 then some 3
+  else if b &&& 0x04 != 0 then some 2
+  else if b &&& 0x02 != 0 then some 1
+  else some 0
+
+/-- Initialize a backward bitstream reader from a byte range `[startPos, endPos)`.
+    Finds the sentinel bit in the last byte and sets up the initial state.
+    The sentinel bit itself is consumed (not part of the data). -/
+def init (data : ByteArray) (startPos endPos : Nat) :
+    Except String BackwardBitReader := do
+  if endPos <= startPos then
+    throw "BackwardBitReader: empty range"
+  if endPos > data.size then
+    throw "BackwardBitReader: range exceeds data size"
+  let lastByte := data[endPos - 1]!
+  match highBitPos lastByte with
+  | none => throw "BackwardBitReader: last byte is 0 (no sentinel bit)"
+  | some sentinelPos =>
+    -- The sentinel bit is consumed; remaining bits below it in this byte
+    if sentinelPos == 0 then
+      -- Only the sentinel bit in this byte; move to previous byte
+      if endPos - 1 <= startPos then
+        -- No more data after consuming the sentinel byte
+        return { data, bytePos := startPos, bitsRemaining := 0, currentByte := 0 }
+      let prevPos := endPos - 2
+      return { data, bytePos := prevPos, bitsRemaining := 8, currentByte := data[prevPos]! }
+    else
+      -- sentinelPos bits remain below the sentinel in the last byte
+      -- Mask out the sentinel bit and above
+      let mask := (1 <<< sentinelPos.toUInt8) - 1
+      let maskedByte := lastByte &&& mask
+      return { data, bytePos := endPos - 1, bitsRemaining := sentinelPos,
+               currentByte := maskedByte }
+
+/-- Read `n` bits MSB-first from the backward stream (n ≤ 25).
+    Returns the value as UInt32 and the updated reader. -/
+def readBits (br : BackwardBitReader) (n : Nat) :
+    Except String (UInt32 × BackwardBitReader) :=
+  go br n 0
+where
+  go (br : BackwardBitReader) : Nat → UInt32 → Except String (UInt32 × BackwardBitReader)
+    | 0, acc => .ok (acc, br)
+    | k + 1, acc => do
+      if br.bitsRemaining == 0 then
+        throw "BackwardBitReader: unexpected end of bitstream"
+      -- Read the highest available bit from currentByte
+      let bitPos := br.bitsRemaining - 1
+      let bit := (br.currentByte >>> bitPos.toUInt8) &&& 1
+      let acc' := (acc <<< 1) ||| bit.toUInt32
+      let br' :=
+        if bitPos == 0 then
+          -- Move to the previous byte
+          if br.bytePos > 0 then
+            let prevPos := br.bytePos - 1
+            { br with bytePos := prevPos, bitsRemaining := 8,
+                      currentByte := br.data[prevPos]! }
+          else
+            { br with bitsRemaining := 0, currentByte := 0 }
+        else
+          { br with bitsRemaining := bitPos }
+      go br' k acc'
+
+/-- Check if the bitstream has been fully consumed (all meaningful bits read). -/
+def isFinished (br : BackwardBitReader) : Bool :=
+  br.bitsRemaining == 0
+
+end BackwardBitReader
+
+/-- Decode symbols from an FSE-encoded backward bitstream.
+    Given an FSE table and initialized backward bitstream reader,
+    decode `count` symbols using the FSE state machine:
+    1. Initialize state by reading `accuracyLog` bits from the stream.
+    2. Loop `count` times: look up `table[state]`, emit symbol,
+       read `numBits` bits, compute `newState = baseline + readBits`.
+    Returns the decoded symbols as an array. -/
+def decodeFseSymbols (table : FseTable) (br : BackwardBitReader) (count : Nat) :
+    Except String (Array UInt8 × BackwardBitReader) := do
+  if count == 0 then return (#[], br)
+  let tableSize := 1 <<< table.accuracyLog
+  -- Initialize state from stream
+  let (initState, br) ← br.readBits table.accuracyLog
+  let mut state := initState.toNat
+  let mut br := br
+  let mut result : Array UInt8 := Array.mkEmpty count
+  for i in [:count] do
+    if state >= tableSize then
+      throw s!"FSE decode: state {state} out of range (table size {tableSize})"
+    let cell := table.cells[state]!
+    result := result.push cell.symbol.toUInt8
+    -- Read bits for next state (except after the last symbol)
+    if i + 1 < count then
+      let (bits, br') ← br.readBits cell.numBits.toNat
+      br := br'
+      state := cell.newState.toNat + bits.toNat
+  return (result, br)
 
 end Zip.Native
