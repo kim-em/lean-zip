@@ -133,6 +133,46 @@ directly mention the recursive call's result type.
 **Also**: `all_goals (have := f _ _; tac)` with semicolons inside parenthesized
 tactic blocks can cause parse errors. Use separate focused proofs (`·`) instead.
 
+## Replacing Bare `simp at h` in Error Branches
+
+When `split at h` or `cases` produces a contradictory hypothesis
+(e.g., `h : Except.error e = Except.ok x`), bare `simp at h` closes
+the goal via built-in discriminator analysis (`reduceCtorEq` simproc).
+
+**`simp only` cannot do this** — it lacks the discriminator simproc.
+Neither `simp only [] at h` nor `contradiction` (max recursion in
+deeply nested contexts) are reliable replacements.
+
+**Canonical replacement**: `exact nomatch h`
+
+```lean
+-- Before (bare simp)
+split at h
+· simp at h  -- closes Except.error _ = Except.ok _
+
+-- After (targeted)
+split at h
+· exact nomatch h  -- constructor discrimination
+```
+
+For `simp [hrb] at h` that substitutes then closes:
+```lean
+-- Before
+| error e => simp [hrb] at h
+
+-- After (two steps: substitute + discriminate)
+| error e => simp only [hrb] at h; exact nomatch h
+```
+
+**Why `nomatch` works**: `Eq` has one constructor (`rfl`) requiring
+definitional equality. `Except.error _` and `Except.ok _` are different
+constructors, so no pattern matches — `nomatch h` produces the empty
+match, proving `False`.
+
+**Evaluating `if false = true then X else Y`**: Use `if_neg Bool.false_ne_true`
+since `simp only [ite_false]` requires the condition to already be `False`,
+not `false = true` (a decidable-but-not-reduced Prop).
+
 ## `simp only []` for Match Reduction
 
 `simp only []` (empty argument list) can reduce `match` expressions
