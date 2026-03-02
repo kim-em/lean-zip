@@ -39,6 +39,7 @@ When in doubt, prefer: **`omega`**, **`simp`**, **`grind`**, **`by_cases`**, **`
 - `grind` is the go-to for algebraic/arithmetic goals
 - `omega` handles linear integer/natural number arithmetic
 - `decide` for decidable propositions over small finite types
+- `decide_cbv` for larger decidable propositions (halves `maxRecDepth` vs `decide`)
 - `simp` with explicit lemma lists for equational reasoning
 
 ## `set` is Not Available

@@ -141,6 +141,26 @@ Based on what the `simp` is doing:
 | `simp` after `split` on Bool `if` | `split <;> rfl` |
 | `simp [Nat.toUInt32]; omega` | `simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd, Nat.mod_mod_of_dvd, ...]; omega` |
 
+### Tips for `<;>` Combinator Branches
+
+When `split <;> simp_all?` gives different `simp only` suggestions per
+branch, take the **union** of all lemma lists. `simp only` safely
+ignores lemmas that don't apply to a given goal.
+
+### Dagger-Named Auto-Generated Lemmas
+
+If `simp?` suggests a lemma with a dagger suffix (e.g.,
+`UInt32.reduceBEq✝`), this is an auto-generated simp lemma that may
+not be stable across Lean versions. Replace with `decide` or
+`decide_cbv` for the concrete computation instead.
+
+### `decide_cbv` for Large Decidable Propositions
+
+When `decide` causes `maxRecDepth` issues (e.g., Kraft inequality
+checks over large symbol tables), use `decide_cbv` instead. It uses
+kernel-level evaluation and typically halves the required
+`maxRecDepth`. `native_decide` is forbidden in this codebase.
+
 ### Step 4: Accept bare simp with comment
 
 If steps 1-3 all fail, the `simp` falls into a resistant category.
