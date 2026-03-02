@@ -1,7 +1,7 @@
 import Zip.Binary
 
 /-!
-  Pure Lean parser for Zstandard frame headers and blocks (RFC 8878 §3.1.1).
+  Pure Lean parser and decompressor for Zstandard frames (RFC 8878 §3.1.1).
 
   Parses the fixed-format header at the start of every Zstd frame:
   magic number, frame header descriptor (bit fields), optional window
@@ -9,6 +9,12 @@ import Zip.Binary
   Also parses the block-level structure within a frame: 3-byte block
   headers (Last_Block, Block_Type, Block_Size) and decompresses Raw
   (verbatim copy) and RLE (single byte repeated) blocks.
+
+  Provides frame-level decompression (`decompressFrame`) that wires
+  header parsing + block decompression together, and a top-level API
+  (`decompressZstd`) for single-frame inputs.  Compressed blocks
+  (FSE + Huffman) and content checksum verification (XXH64) are not
+  yet supported.
 -/
 
 namespace Zip.Native
@@ -181,9 +187,9 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
 
 /-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
     Loops through block headers, dispatches on block type, and accumulates output.
-    Returns the decompressed content.
+    Returns the decompressed content and position after the last block.
     Currently returns an error for compressed blocks (not yet implemented). -/
-def decompressBlocks (data : ByteArray) (pos : Nat) : Except String ByteArray := do
+def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
   let mut off := pos
   let mut output := ByteArray.empty
   let mut done := false
@@ -205,6 +211,42 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String ByteArray :=
       throw "Zstd: reserved block type"
     if hdr.lastBlock then
       done := true
-  return output
+  return (output, off)
+
+/-- Decompress a single Zstd frame starting at `pos` in `data`.
+    Parses the frame header, decompresses all blocks, handles the optional
+    content checksum (skips verification — XXH64 not yet available), and
+    validates content size if specified in the header.
+    Returns decompressed data and position after the frame. -/
+def decompressFrame (data : ByteArray) (pos : Nat) :
+    Except String (ByteArray × Nat) := do
+  let (header, afterHeader) ← parseFrameHeader data pos
+  let (content, afterBlocks) ← decompressBlocks data afterHeader
+  -- Content checksum: 4 bytes (lower 32 bits of XXH64) if flagged
+  let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
+  if header.contentChecksum then
+    if data.size < afterFrame then
+      throw "Zstd: not enough data for content checksum"
+    -- Checksum verification deferred until XXH64 is available
+  -- Validate content size if specified in the header
+  if let some expectedSize := header.contentSize then
+    if content.size.toUInt64 != expectedSize then
+      throw s!"Zstd: content size mismatch: expected {expectedSize}, got {content.size}"
+  return (content, afterFrame)
+
+/-- Top-level Zstd decompression: validates the magic number, decompresses a
+    single frame, and returns the decompressed data.
+    Returns an error for skippable frames or multi-frame inputs. -/
+def decompressZstd (data : ByteArray) : Except String ByteArray := do
+  if data.size < 4 then
+    throw "Zstd: input too short for magic number"
+  let magic := Binary.readUInt32LE data 0
+  -- Check for skippable frame magic (0x184D2A50 to 0x184D2A5F)
+  if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
+    throw "Zstd: skippable frames not supported"
+  if magic != zstdMagic then
+    throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} (expected 0xFD2FB528)"
+  let (content, _) ← decompressFrame data 0
+  return content
 
 end Zip.Native

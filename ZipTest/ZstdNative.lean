@@ -127,7 +127,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .ok (_, blockStart) =>
     -- Try to decompress blocks — may succeed (raw/RLE) or fail (compressed)
     match Zip.Native.decompressBlocks emptyCompressed blockStart with
-    | .ok result =>
+    | .ok (result, _) =>
       unless result.size == 0 do
         throw (IO.userError s!"empty blocks: expected 0 output bytes, got {result.size}")
     | .error e =>
@@ -143,7 +143,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   match Zip.Native.parseFrameHeader constCompressed 0 with
   | .ok (_, blockStart) =>
     match Zip.Native.decompressBlocks constCompressed blockStart with
-    | .ok result =>
+    | .ok (result, _) =>
       unless result.data == constData.data do
         throw (IO.userError s!"const blocks: decompressed {result.size} bytes, expected {constData.size}")
     | .error e =>
@@ -151,5 +151,101 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       unless e.contains "compressed blocks not yet implemented" do
         throw (IO.userError s!"const blocks: unexpected error: {e}")
   | .error e => throw (IO.userError s!"parseFrameHeader on const: {e}")
+
+  -- Test 16: decompressZstd round-trip on empty input
+  let emptyCompressed2 ← Zstd.compress ByteArray.empty
+  match Zip.Native.decompressZstd emptyCompressed2 with
+  | .ok result =>
+    unless result.size == 0 do
+      throw (IO.userError s!"decompressZstd empty: expected 0 bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"decompressZstd empty: unexpected error: {e}")
+
+  -- Test 17: decompressZstd round-trip on constant data (likely RLE blocks)
+  let constData2 := mkConstantData 256
+  let constCompressed2 ← Zstd.compress constData2 1
+  match Zip.Native.decompressZstd constCompressed2 with
+  | .ok result =>
+    unless result.data == constData2.data do
+      throw (IO.userError s!"decompressZstd const: decompressed {result.size} bytes, expected {constData2.size}")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"decompressZstd const: unexpected error: {e}")
+
+  -- Test 18: decompressZstd round-trip on single byte
+  let singleByte := ByteArray.mk #[0x42]
+  let singleCompressed ← Zstd.compress singleByte 1
+  match Zip.Native.decompressZstd singleCompressed with
+  | .ok result =>
+    unless result.data == singleByte.data do
+      throw (IO.userError s!"decompressZstd single: expected [0x42], got {result.data}")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"decompressZstd single: unexpected error: {e}")
+
+  -- Test 19: decompressZstd round-trip on all-zeros (maximally compressible)
+  let zeros := mkConstantData 1024
+  let zerosCompressed ← Zstd.compress zeros 1
+  match Zip.Native.decompressZstd zerosCompressed with
+  | .ok result =>
+    unless result.data == zeros.data do
+      throw (IO.userError s!"decompressZstd zeros: decompressed {result.size} bytes, expected {zeros.size}")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"decompressZstd zeros: unexpected error: {e}")
+
+  -- Test 20: decompressZstd error on invalid magic number
+  match Zip.Native.decompressZstd (ByteArray.mk #[0x00, 0x00, 0x00, 0x00, 0x00]) with
+  | .ok _ => throw (IO.userError "decompressZstd bad magic: should have failed")
+  | .error e =>
+    unless e.contains "invalid magic number" do
+      throw (IO.userError s!"decompressZstd bad magic: wrong error: {e}")
+
+  -- Test 21: decompressZstd error on truncated input
+  match Zip.Native.decompressZstd (ByteArray.mk #[0x28, 0xB5]) with
+  | .ok _ => throw (IO.userError "decompressZstd truncated: should have failed")
+  | .error e =>
+    unless e.contains "too short" do
+      throw (IO.userError s!"decompressZstd truncated: wrong error: {e}")
+
+  -- Test 22: decompressZstd error on skippable frame
+  -- Skippable frame magic: 0x184D2A50 (little-endian: 50 2A 4D 18)
+  let skippable := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+  match Zip.Native.decompressZstd skippable with
+  | .ok _ => throw (IO.userError "decompressZstd skippable: should have failed")
+  | .error e =>
+    unless e.contains "skippable" do
+      throw (IO.userError s!"decompressZstd skippable: wrong error: {e}")
+
+  -- Test 23: decompressFrame returns correct position after frame
+  let frameTestData := mkConstantData 128
+  let frameCompressed ← Zstd.compress frameTestData 1
+  match Zip.Native.decompressFrame frameCompressed 0 with
+  | .ok (result, endPos) =>
+    unless result.data == frameTestData.data do
+      throw (IO.userError s!"decompressFrame: decompressed {result.size} bytes, expected {frameTestData.size}")
+    -- endPos should be at or near the end of compressed data
+    unless endPos ≤ frameCompressed.size do
+      throw (IO.userError s!"decompressFrame: endPos {endPos} exceeds compressed size {frameCompressed.size}")
+    unless endPos ≥ 6 do
+      throw (IO.userError s!"decompressFrame: endPos {endPos} too small")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"decompressFrame: unexpected error: {e}")
+
+  -- Test 24: decompressFrame content size validation
+  -- We verify this indirectly: FFI-compressed data includes content size in header,
+  -- and our decompressor checks it matches the decompressed output.
+  -- If decompression succeeds, the size check passed.
+  let sizeTestData := mkConstantData 512
+  let sizeCompressed ← Zstd.compress sizeTestData 1
+  match Zip.Native.decompressFrame sizeCompressed 0 with
+  | .ok (result, _) =>
+    unless result.size == 512 do
+      throw (IO.userError s!"decompressFrame size: expected 512 bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"decompressFrame size: unexpected error: {e}")
 
   IO.println "ZstdNative tests: OK"
