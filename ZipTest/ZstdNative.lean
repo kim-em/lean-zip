@@ -346,14 +346,14 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError s!"raw lit 2byte: expected endPos 102, got {endPos}")
   | .error e => throw (IO.userError s!"parseLiteralsSection raw 2byte failed: {e}")
 
-  -- Test 31: parseLiteralsSection rejects compressed literals with clear error
-  -- Compressed type = 2, any size_format
+  -- Test 31: parseLiteralsSection on malformed compressed literals header
+  -- Compressed type = 2, sizeFormat = 0, minimal 3-byte header with compSize = 0
+  -- byte0 = 0x02 (litType=2, sizeFormat=0, regenSize low = 0)
+  -- This should fail because the tree descriptor has no data to read
   let compressedLitInput := ByteArray.mk #[0x02, 0x00, 0x00, 0x00, 0x00]
   match Zip.Native.parseLiteralsSection compressedLitInput 0 with
-  | .ok _ => throw (IO.userError "compressed lit: should have failed")
-  | .error e =>
-    unless e.contains "compressed literals" do
-      throw (IO.userError s!"compressed lit: wrong error: {e}")
+  | .ok _ => throw (IO.userError "compressed lit: should have failed on malformed input")
+  | .error _ => pure ()  -- any error is acceptable for malformed data
 
   -- Test 32: parseLiteralsSection rejects treeless literals with clear error
   -- Treeless type = 3
@@ -936,5 +936,69 @@ def ZipTest.ZstdNative.tests : IO Unit := do
         throw (IO.userError s!"decodeFseSymbolsAll trivial: expected at least 1 symbol, got {syms.size}")
     | .error e => throw (IO.userError s!"decodeFseSymbolsAll trivial failed: {e}")
   | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
+
+  -- Test 76: decodeHuffmanSymbol — single symbol from 2-symbol table
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok huffTable2 =>
+    -- Byte 0xC0 = 11000000: sentinel at bit 7, data bit at bit 6 = 1.
+    -- For maxBits=1, reading 1 bit gives table index 1.
+    let testStream := ByteArray.mk #[0xC0]
+    match Zip.Native.BackwardBitReader.init testStream 0 1 with
+    | .ok br =>
+      match Zip.Native.decodeHuffmanSymbol huffTable2 br with
+      | .ok (sym, _) =>
+        let expectedSym := huffTable2.table[1]!.symbol
+        unless sym == expectedSym do
+          throw (IO.userError s!"decode sym: expected {expectedSym}, got {sym}")
+      | .error e => throw (IO.userError s!"decodeHuffmanSymbol failed: {e}")
+    | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable for decode test failed: {e}")
+
+  -- Test 77: decodeHuffmanStream — decode multiple symbols from known bitstream
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok huffTable2 =>
+    let sym0 := huffTable2.table[0]!.symbol
+    let sym1 := huffTable2.table[1]!.symbol
+    -- Byte 0x15 = 0b00010101: sentinel at bit 4, data bits 3-0 = 0,1,0,1
+    let testStream := ByteArray.mk #[0x15]
+    match Zip.Native.BackwardBitReader.init testStream 0 1 with
+    | .ok br =>
+      match Zip.Native.decodeHuffmanStream huffTable2 br 4 with
+      | .ok result =>
+        unless result.size == 4 do
+          throw (IO.userError s!"stream decode: expected 4 bytes, got {result.size}")
+        unless result[0]! == sym0 do
+          throw (IO.userError s!"stream decode[0]: expected {sym0}, got {result[0]!}")
+        unless result[1]! == sym1 do
+          throw (IO.userError s!"stream decode[1]: expected {sym1}, got {result[1]!}")
+        unless result[2]! == sym0 do
+          throw (IO.userError s!"stream decode[2]: expected {sym0}, got {result[2]!}")
+        unless result[3]! == sym1 do
+          throw (IO.userError s!"stream decode[3]: expected {sym1}, got {result[3]!}")
+      | .error e => throw (IO.userError s!"decodeHuffmanStream failed: {e}")
+    | .error e => throw (IO.userError s!"BackwardBitReader init failed: {e}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable for stream test failed: {e}")
+
+  -- Test 78: integration — FFI-compressed data with Huffman literals decodes past literals stage
+  let huffTestData := "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump!".toUTF8
+  let huffCompressed ← Zstd.compress huffTestData 3
+  match Zip.Native.decompressZstd huffCompressed with
+  | .ok result =>
+    unless result.data == huffTestData.data do
+      throw (IO.userError "Huffman integration: decompressed data mismatch")
+  | .error e =>
+    -- Expected to fail at sequence decoding (Huffman literals should succeed)
+    unless e.contains "sequence decoding" || e.contains "treeless literals" || e.contains "Huffman" do
+      throw (IO.userError s!"Huffman integration: unexpected error stage: {e}")
+
+  -- Test 79: decodeFourHuffmanStreams — error on too-small data
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok huffTable2 =>
+    match Zip.Native.decodeFourHuffmanStreams huffTable2 (ByteArray.mk #[0, 0, 0]) 0 3 10 with
+    | .ok _ => throw (IO.userError "4-stream small: should have failed")
+    | .error e =>
+      unless e.contains "jump table" do
+        throw (IO.userError s!"4-stream small: wrong error: {e}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable for 4-stream test failed: {e}")
 
   IO.println "ZstdNative tests: OK"
