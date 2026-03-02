@@ -85,6 +85,12 @@ obtain ⟨rfl, rfl⟩ := h
 
 ## Phase 3: Bare `simp` Decision Tree
 
+**Build incrementally.** Process bare simps in batches of 5-15 changes,
+building after each batch. Do NOT change the entire file before building —
+proof edits cascade unpredictably and bulk failures are much harder to debug
+than small-batch failures. Two wasted full-file passes cost more than ten
+incremental builds.
+
 For each bare `simp` (without `only`), follow this decision tree:
 
 ### Step 1: Try `simp?`
@@ -126,6 +132,8 @@ Based on what the `simp` is doing:
 | `simp at h` (negated comparison) | `simp only [ge_iff_le, Nat.not_le] at h` or `simp only [gt_iff_lt, Nat.not_lt] at h` |
 | `simp_all` (beq→eq + close) | `simp only [beq_iff_eq] at h; exact h` |
 | `by simp` (struct field = literal) | `by show <literal_eq>; omega` or `Or.inl rfl` or `rfl` |
+| `simp; omega` (with `[].length`) | `simp only [List.length_nil]; omega` (`omega` can't reduce `[].length`) |
+| `by simp; omega` (negated beq) | `beq_false_of_ne (by omega)` |
 
 ### Step 4: Accept bare simp with comment
 
@@ -139,6 +147,8 @@ Add a justifying comment from this table:
 | BitVec normalization | `-- bare simp: BitVec normalization` |
 | Length mismatch bridging | `-- bare simp: bridges List.length_append` |
 | Complex `if`/`dite` with arithmetic | `-- bare simp: dite with arithmetic bridging` |
+| Multi-branch guard/failure in recursive fn | `-- bare simp: guard/failure contradiction in <fn>.go` |
+| Boolean guard chain (`if x == 16 then ...`) | `-- bare simp: boolean guard chain` |
 
 ## Phase 4: Linter Compliance
 
