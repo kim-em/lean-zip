@@ -210,14 +210,14 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless e.contains "too short" do
       throw (IO.userError s!"decompressZstd truncated: wrong error: {e}")
 
-  -- Test 22: decompressZstd error on skippable frame
-  -- Skippable frame magic: 0x184D2A50 (little-endian: 50 2A 4D 18)
+  -- Test 22: decompressZstd skips skippable-only input, returning empty output
+  -- Skippable frame magic: 0x184D2A50 (little-endian: 50 2A 4D 18), size = 4, payload = 4 zeros
   let skippable := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
   match Zip.Native.decompressZstd skippable with
-  | .ok _ => throw (IO.userError "decompressZstd skippable: should have failed")
-  | .error e =>
-    unless e.contains "skippable" do
-      throw (IO.userError s!"decompressZstd skippable: wrong error: {e}")
+  | .ok result =>
+    unless result.size == 0 do
+      throw (IO.userError s!"decompressZstd skippable-only: expected empty, got {result.size} bytes")
+  | .error e => throw (IO.userError s!"decompressZstd skippable-only: unexpected error: {e}")
 
   -- Test 23: decompressFrame returns correct position after frame
   let frameTestData := mkConstantData 128
@@ -498,5 +498,112 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.data == expected.data do
       throw (IO.userError s!"shifted repeat: expected {expected.data}, got {result.data}")
   | .error e => throw (IO.userError s!"shifted repeat failed: {e}")
+
+  -- Test 45: skipSkippableFrame — valid skippable frame
+  let skipInput := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18,  -- magic 0x184D2A50
+                                    0x03, 0x00, 0x00, 0x00,  -- size = 3
+                                    0xAA, 0xBB, 0xCC]        -- 3 bytes payload
+  match Zip.Native.skipSkippableFrame skipInput 0 with
+  | .ok endPos =>
+    unless endPos == 11 do
+      throw (IO.userError s!"skipSkippableFrame: expected endPos 11, got {endPos}")
+  | .error e => throw (IO.userError s!"skipSkippableFrame failed: {e}")
+
+  -- Test 46: skipSkippableFrame — highest magic in range (0x184D2A5F)
+  let skipHighMagic := ByteArray.mk #[0x5F, 0x2A, 0x4D, 0x18,  -- magic 0x184D2A5F
+                                       0x00, 0x00, 0x00, 0x00]  -- size = 0 (empty payload)
+  match Zip.Native.skipSkippableFrame skipHighMagic 0 with
+  | .ok endPos =>
+    unless endPos == 8 do
+      throw (IO.userError s!"skipSkippableFrame high magic: expected endPos 8, got {endPos}")
+  | .error e => throw (IO.userError s!"skipSkippableFrame high magic failed: {e}")
+
+  -- Test 47: skipSkippableFrame — truncated frame content
+  let skipTruncated := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18,
+                                       0x10, 0x00, 0x00, 0x00,  -- size = 16 but only 2 bytes follow
+                                       0xAA, 0xBB]
+  match Zip.Native.skipSkippableFrame skipTruncated 0 with
+  | .ok _ => throw (IO.userError "skipSkippableFrame truncated: should have failed")
+  | .error _ => pure ()
+
+  -- Test 48: skipSkippableFrame — non-skippable magic rejected
+  let skipBadMagic := ByteArray.mk #[0x28, 0xB5, 0x2F, 0xFD,  -- Zstd magic
+                                      0x00, 0x00, 0x00, 0x00]
+  match Zip.Native.skipSkippableFrame skipBadMagic 0 with
+  | .ok _ => throw (IO.userError "skipSkippableFrame bad magic: should have failed")
+  | .error _ => pure ()
+
+  -- Test 49: multi-frame decompression — two concatenated Zstd frames
+  let frame1Data := mkConstantData 64
+  let frame2Data := ByteArray.mk (Array.replicate 64 0xBB)
+  let frame1Compressed ← Zstd.compress frame1Data 1
+  let frame2Compressed ← Zstd.compress frame2Data 1
+  let multiFrame := frame1Compressed ++ frame2Compressed
+  match Zip.Native.decompressZstd multiFrame with
+  | .ok result =>
+    unless result.data == (frame1Data ++ frame2Data).data do
+      throw (IO.userError s!"multi-frame: expected {(frame1Data ++ frame2Data).size} bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"multi-frame: unexpected error: {e}")
+
+  -- Test 50: skippable frame followed by Zstd frame
+  -- Construct: skippable(magic=0x184D2A50, size=4, payload=4 zeros) ++ compressed frame
+  let skippablePrefix := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18,
+                                          0x04, 0x00, 0x00, 0x00,
+                                          0x00, 0x00, 0x00, 0x00]
+  let realData := mkConstantData 128
+  let realCompressed ← Zstd.compress realData 1
+  let skippablePlusFrame := skippablePrefix ++ realCompressed
+  match Zip.Native.decompressZstd skippablePlusFrame with
+  | .ok result =>
+    unless result.data == realData.data do
+      throw (IO.userError s!"skippable+frame: expected {realData.size} bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"skippable+frame: unexpected error: {e}")
+
+  -- Test 51: Zstd frame followed by skippable frame
+  let framePlusSkippable := realCompressed ++ skippablePrefix
+  match Zip.Native.decompressZstd framePlusSkippable with
+  | .ok result =>
+    unless result.data == realData.data do
+      throw (IO.userError s!"frame+skippable: expected {realData.size} bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"frame+skippable: unexpected error: {e}")
+
+  -- Test 52: trailing garbage after last frame produces an error
+  -- Manually construct a minimal valid Zstd frame with a raw block containing "AB":
+  --   Magic (4 bytes) + FHD (1: single_segment, FCS=0→1byte) + FCS (1: size=2)
+  --   + Block header (3 bytes: last=1, type=raw, size=2) + Block data ("AB")
+  -- No content checksum.
+  let minimalFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,   -- Zstd magic
+    0x20,                       -- FHD: single_segment=1, no checksum, DID=0, FCS_flag=0
+    0x02,                       -- FCS: content size = 2
+    0x11, 0x00, 0x00,           -- Block header: last=1, type=raw(0), size=2 → (2<<3)|1 = 0x11
+    0x41, 0x42                  -- Block data: "AB"
+  ]
+  -- Sanity check: the minimal frame decompresses to "AB"
+  match Zip.Native.decompressZstd minimalFrame with
+  | .ok result =>
+    unless result.data == #[0x41, 0x42] do
+      throw (IO.userError s!"minimal frame: expected AB, got {result.data}")
+  | .error e => throw (IO.userError s!"minimal frame: unexpected error: {e}")
+  -- Now append trailing garbage
+  let trailingGarbage := minimalFrame ++ ByteArray.mk #[0xFF, 0xFE, 0xFD, 0xFC]
+  match Zip.Native.decompressZstd trailingGarbage with
+  | .ok _ => throw (IO.userError "trailing garbage: should have failed")
+  | .error e =>
+    unless e.contains "invalid magic number" do
+      throw (IO.userError s!"trailing garbage: wrong error: {e}")
+
+  -- Test 53: empty input returns empty ByteArray
+  match Zip.Native.decompressZstd ByteArray.empty with
+  | .ok result =>
+    unless result.size == 0 do
+      throw (IO.userError s!"empty input: expected 0 bytes, got {result.size}")
+  | .error e => throw (IO.userError s!"empty input: unexpected error: {e}")
 
   IO.println "ZstdNative tests: OK"

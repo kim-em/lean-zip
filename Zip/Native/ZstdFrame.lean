@@ -13,9 +13,10 @@ import Zip.Native.XxHash
 
   Provides frame-level decompression (`decompressFrame`) that wires
   header parsing + block decompression together, and a top-level API
-  (`decompressZstd`) for single-frame inputs.  Content checksum
-  verification uses XXH64 (upper 32 bits).  Compressed blocks
-  (FSE + Huffman) are not yet supported.
+  (`decompressZstd`) that handles multi-frame concatenation and
+  skippable frames (RFC 8878 §3.1.2).  Content checksum verification
+  uses XXH64 (upper 32 bits).  Compressed blocks (FSE + Huffman)
+  are not yet supported.
 -/
 
 namespace Zip.Native
@@ -323,20 +324,43 @@ def decompressFrame (data : ByteArray) (pos : Nat) :
       throw s!"Zstd: content size mismatch: expected {expectedSize}, got {content.size}"
   return (content, afterFrame)
 
-/-- Top-level Zstd decompression: validates the magic number, decompresses a
-    single frame, and returns the decompressed data.
-    Returns an error for skippable frames or multi-frame inputs. -/
+/-- Skip a skippable frame (RFC 8878 §3.1.2) starting at `pos` in `data`.
+    Validates that the magic number is in the range 0x184D2A50–0x184D2A5F,
+    reads the 4-byte little-endian frame size, and returns the position
+    immediately after the frame data.  Errors if insufficient data. -/
+def skipSkippableFrame (data : ByteArray) (pos : Nat) : Except String Nat := do
+  if data.size < pos + 8 then
+    throw "Zstd: not enough data for skippable frame header"
+  let magic := Binary.readUInt32LE data pos
+  if magic < 0x184D2A50 || magic > 0x184D2A5F then
+    throw "Zstd: not a skippable frame"
+  let frameSize := (Binary.readUInt32LE data (pos + 4)).toNat
+  let afterFrame := pos + 8 + frameSize
+  if data.size < afterFrame then
+    throw "Zstd: not enough data for skippable frame content"
+  return afterFrame
+
+/-- Top-level Zstd decompression: loops through concatenated frames in `data`.
+    Zstd frames (magic 0xFD2FB528) are decompressed and their output concatenated.
+    Skippable frames (magic 0x184D2A50–0x184D2A5F) are silently skipped.
+    Any other magic number or trailing bytes after the last frame produce an error.
+    An empty file or a file with only skippable frames returns empty ByteArray. -/
 def decompressZstd (data : ByteArray) : Except String ByteArray := do
-  if data.size < 4 then
-    throw "Zstd: input too short for magic number"
-  let magic := Binary.readUInt32LE data 0
-  -- Check for skippable frame magic (0x184D2A50 to 0x184D2A5F)
-  if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
-    throw "Zstd: skippable frames not supported"
-  if magic != zstdMagic then
-    throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} (expected 0xFD2FB528)"
-  let (content, _) ← decompressFrame data 0
-  return content
+  let mut pos := 0
+  let mut output := ByteArray.empty
+  while pos < data.size do
+    if data.size < pos + 4 then
+      throw "Zstd: trailing bytes too short for frame magic"
+    let magic := Binary.readUInt32LE data pos
+    if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
+      pos ← skipSkippableFrame data pos
+    else if magic == zstdMagic then
+      let (content, afterFrame) ← decompressFrame data pos
+      output := output ++ content
+      pos := afterFrame
+    else
+      throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} (expected 0xFD2FB528 or skippable frame)"
+  return output
 
 /-- A decoded Zstd sequence triple (RFC 8878 §3.1.1.4): copy `literalLength` bytes
     from the literals buffer, then copy `matchLength` bytes from `offset` bytes back
