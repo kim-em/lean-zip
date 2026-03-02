@@ -548,6 +548,103 @@ theorem inflate_deflateLazy (data : ByteArray)
       (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
+/-! ## Iterative lazy LZ77 equivalence -/
+
+/-- The iterative `trailing` is the accumulator version of recursive `trailing` (lazy). -/
+private theorem trailing_lazy_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
+    lz77LazyIter.trailing data pos acc =
+    acc ++ (lz77Lazy.trailing data pos).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
+  | _ n ih =>
+    unfold lz77LazyIter.trailing lz77Lazy.trailing
+    split
+    · rw [ih _ (by omega) _ _ rfl]
+      rw [List.toArray_cons]
+      rw [← Array.append_assoc, Array.push_eq_append]
+    · simp
+
+/-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy).
+    Since `lz77LazyIter.mainLoop` directly uses `lz77Lazy.hash3`, `lz77Lazy.countMatch`,
+    and `lz77Lazy.updateHashes`, no helper rewrites are needed. -/
+private theorem mainLoop_lazy_eq (data : ByteArray) (windowSize hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
+    (acc : Array LZ77Token) :
+    lz77LazyIter.mainLoop data windowSize hashSize hashTable hashValid pos acc =
+    acc ++ (lz77Lazy.mainLoop data windowSize hashSize hashTable hashValid pos).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable hashValid with
+  | _ n ih =>
+    unfold lz77LazyIter.mainLoop
+    split
+    · rename_i hlt
+      -- Unfold RHS's lz77Lazy.mainLoop and reduce the dite with hlt
+      unfold lz77Lazy.mainLoop
+      simp only [dif_pos hlt]
+      -- Both sides now share the same let-bindings; split on nested ifs
+      split
+      · split
+        · split
+          · split
+            · split
+              · split
+                · split
+                  · -- Better match at pos+1: emit literal + reference
+                    rw [ih _ (by omega) _ _ _ _ rfl,
+                      Array.push_eq_append, Array.push_eq_append,
+                      Array.append_assoc, Array.append_assoc,
+                      ← List.toArray_cons, ← List.toArray_cons]
+                  · -- matchLen2 exceeds data: fall back
+                    rw [ih _ (by omega) _ _ _ _ rfl]
+                    simp only [Array.push_eq_append, Array.append_assoc,
+                      ← List.toArray_cons]
+                · rw [ih _ (by omega) _ _ _ _ rfl]
+                  simp only [Array.push_eq_append, Array.append_assoc,
+                    ← List.toArray_cons]
+              · rw [ih _ (by omega) _ _ _ _ rfl]
+                simp only [Array.push_eq_append, Array.append_assoc,
+                  ← List.toArray_cons]
+            · rw [ih _ (by omega) _ _ _ _ rfl]
+              simp only [Array.push_eq_append, Array.append_assoc,
+                ← List.toArray_cons]
+          · rw [ih _ (by omega) _ _ _ _ rfl]
+            simp only [Array.push_eq_append, Array.append_assoc,
+              ← List.toArray_cons]
+        · rw [ih _ (by omega) _ _ _ _ rfl]
+          simp only [Array.push_eq_append, Array.append_assoc,
+            ← List.toArray_cons]
+      · rw [ih _ (by omega) _ _ _ _ rfl]
+        simp only [Array.push_eq_append, Array.append_assoc,
+          ← List.toArray_cons]
+    · rename_i hlt
+      -- Unfold RHS's lz77Lazy.mainLoop and reduce the dite with ¬hlt
+      unfold lz77Lazy.mainLoop
+      simp only [dif_neg hlt]
+      exact trailing_lazy_eq data pos acc
+
+/-- The iterative LZ77 lazy matcher produces the same tokens as the
+    recursive version. -/
+theorem lz77LazyIter_eq_lz77Lazy (data : ByteArray) (ws : Nat) :
+    lz77LazyIter data ws = lz77Lazy data ws := by
+  unfold lz77LazyIter lz77Lazy
+  split
+  · rw [trailing_lazy_eq]
+    simp
+  · rw [mainLoop_lazy_eq]
+    simp
+
+/-- The iterative lazy compressor equals the recursive one. -/
+theorem deflateLazyIter_eq_deflateLazy (data : ByteArray) :
+    deflateLazyIter data = deflateLazy data := by
+  unfold deflateLazyIter deflateLazy
+  rw [lz77LazyIter_eq_lz77Lazy]
+
+/-- Roundtrip for the iterative lazy Huffman compressor.
+    Follows from `deflateLazyIter_eq_deflateLazy` + `inflate_deflateLazy`. -/
+theorem inflate_deflateLazyIter (data : ByteArray)
+    (hsize : data.size < 1024 * 1024 * 1024) :
+    Zip.Native.Inflate.inflate (deflateLazyIter data) = .ok data := by
+  rw [deflateLazyIter_eq_deflateLazy]
+  exact inflate_deflateLazy data hsize
+
 -- inflate_deflateDynamic is proved in DeflateDynamicCorrect.lean
 -- (to avoid circular imports)
 
