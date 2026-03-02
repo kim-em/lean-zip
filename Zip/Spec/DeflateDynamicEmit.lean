@@ -91,7 +91,7 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
     intro heq
     have hge : i ≥ tokens.size := by omega
     have hdrop : tokens.toList.drop i = [] := by
-      simp [List.drop_eq_nil_iff, Array.length_toList]; omega
+      simp only [List.drop_eq_nil_iff, Array.length_toList]; omega
     rw [hdrop, List.map_nil] at henc
     simp only [Deflate.Spec.encodeSymbols] at henc
     cases henc
@@ -100,12 +100,12 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
   | succ n ih =>
     intro heq
     have hlt : i < tokens.size := by omega
-    have hlt_list : i < tokens.toList.length := by simp; exact hlt
+    have hlt_list : i < tokens.toList.length := by simp only [Array.length_toList]; exact hlt
     rw [List.drop_eq_getElem_cons hlt_list, List.map_cons] at henc
     obtain ⟨symBits, restBits, hencsym, hencrest, hbits_eq⟩ :=
       Deflate.encodeSymbols_cons_some _ _ _ _ _ henc
     subst hbits_eq
-    have htoList : tokens[i] = tokens.toList[i] := by simp [Array.getElem_toList]
+    have htoList : tokens[i] = tokens.toList[i] := by simp only [Array.getElem_toList]
     -- Unfold emitTokensWithCodes one step
     unfold emitTokensWithCodes
     simp only [dif_pos hlt]
@@ -133,26 +133,34 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
       simp only [LZ77Token.toLZ77Symbol, htok_list] at hencsym
       simp only [Deflate.Spec.encodeLitLen] at hencsym
       cases hflc : Deflate.Spec.findLengthCode len with
-      | none => simp [hflc] at hencsym
+      | none => simp only [hflc, List.append_assoc, Option.pure_def, Option.bind_eq_bind,
+          Option.bind_none, reduceCtorEq] at hencsym
       | some lc =>
         obtain ⟨lidx, lextraN, lextraV⟩ := lc
         cases henclen : Deflate.Spec.encodeSymbol
             ((Huffman.Spec.allCodes (litLengths.toList.map UInt8.toNat) 15).map
               fun p => (p.2, p.1))
             (257 + lidx) with
-        | none => simp [hflc, henclen] at hencsym
+        | none => simp only [hflc, List.append_assoc, Option.pure_def, Option.bind_eq_bind,
+            Option.bind_some, henclen, Option.bind_none, reduceCtorEq] at hencsym
         | some lenBits =>
           cases hfdc : Deflate.Spec.findDistCode dist with
-          | none => simp [hflc, hfdc] at hencsym
+          | none => simp only [hflc, hfdc, List.append_assoc, Option.pure_def,
+              Option.bind_eq_bind, Option.bind_none, Option.bind_fun_none,
+              reduceCtorEq] at hencsym
           | some dc =>
             obtain ⟨didx, dextraN, dextraV⟩ := dc
             cases hencdist : Deflate.Spec.encodeSymbol
                 ((Huffman.Spec.allCodes (distLengths.toList.map UInt8.toNat) 15).map
                   fun p => (p.2, p.1))
                 didx with
-            | none => simp [hflc, hfdc, hencdist] at hencsym
+            | none => simp only [hflc, hfdc, List.append_assoc, Option.pure_def,
+                Option.bind_eq_bind, Option.bind_some, hencdist, Option.bind_none,
+                Option.bind_fun_none, reduceCtorEq] at hencsym
             | some distBits =>
-              simp [hflc, henclen, hfdc, hencdist] at hencsym
+              simp only [hflc, hfdc, List.append_assoc, Option.pure_def,
+                Option.bind_eq_bind, Option.bind_some, hencdist, henclen,
+                Option.some.injEq] at hencsym
               subst hencsym
               -- Bridge lemmas
               have hnflc := Deflate.findLengthCode_agree len lidx lextraN lextraV hflc
@@ -226,14 +234,14 @@ theorem emitTokensWithCodes_spec (bw : BitWriter) (tokens : Array LZ77Token)
       show UInt8.toNat (Nat.toUInt8 n) = n
       simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
       exact Nat.mod_eq_of_lt (by have := hv_lit.1 n hn; omega))]
-    simp
+    simp only [List.map_id_fun', id_eq]
   have hdl : distLens = (distLens.toArray.map Nat.toUInt8).toList.map UInt8.toNat := by
     simp only [Array.toList_map, List.map_map]; symm
     rw [List.map_congr_left (fun n hn => by
       show UInt8.toNat (Nat.toUInt8 n) = n
       simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
       exact Nat.mod_eq_of_lt (by have := hv_dist.1 n hn; omega))]
-    simp
+    simp only [List.map_id_fun', id_eq]
   rw [hll, hdl] at henc
   have hv_lit' : Huffman.Spec.ValidLengths
       ((litLens.toArray.map Nat.toUInt8).toList.map UInt8.toNat) 15 := hll ▸ hv_lit
