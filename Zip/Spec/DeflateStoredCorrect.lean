@@ -652,28 +652,6 @@ private theorem inflateLoop_deflateStored (data : ByteArray) (pos : Nat)
         (fun pos' hpos' pfx' output' fuel' hfuel' hfit' hlt =>
           ih (data.size - pos') (by omega) pos' hpos' pfx' output' fuel' rfl hfuel' hfit'))
 
-/-- Native Level 0 roundtrip: compressing with stored blocks then
-    decompressing with the native inflate recovers the original data.
-    The size constraint ensures the default maxOutputSize (1 GiB) suffices
-    and the default fuel (10000000000 blocks × 65535 bytes/block ≈ 655 TB) covers
-    the input. -/
-theorem inflate_deflateStoredPure (data : ByteArray)
-    (h : data.size ≤ 1024 * 1024 * 1024) :
-    Inflate.inflate (deflateStoredPure data) = .ok data := by
-  simp only [Inflate.inflate, Inflate.inflateRaw, bind, Except.bind]
-  -- Handle fromLengths calls
-  have ⟨fixedLit, hfl⟩ := fromLengths_fixedLit_ok
-  have ⟨fixedDist, hfd⟩ := fromLengths_fixedDist_ok
-  simp only [hfl, hfd]
-  -- Apply the main loop theorem
-  have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega)
-    ByteArray.empty ByteArray.empty fixedLit fixedDist 10000000000 (1024 * 1024 * 1024)
-    (by omega) (by simp [ByteArray.size_empty]; omega)
-  simp only [ByteArray.empty_append, ByteArray.size_empty] at hloop
-  rw [ByteArray.extract_zero_size] at hloop
-  rw [hloop]
-  simp [pure, Except.pure]
-
 /-! ## Output size theorems -/
 
 /-- Number of stored blocks: ⌈max(n,1) / 65535⌉, which equals (n-1)/65535 + 1 in Nat. -/
@@ -712,6 +690,29 @@ theorem deflateStoredPure_size (data : ByteArray) :
     data.size + 5 * numStoredBlocks data.size := by
   have := deflateStoredPure_size_aux data 0 (by omega)
   simp at this; exact this
+
+/-- Native Level 0 roundtrip: compressing with stored blocks then
+    decompressing with the native inflate recovers the original data.
+    The size constraint ensures the default maxOutputSize (1 GiB) suffices. -/
+theorem inflate_deflateStoredPure (data : ByteArray)
+    (h : data.size ≤ 1024 * 1024 * 1024) :
+    Inflate.inflate (deflateStoredPure data) = .ok data := by
+  simp only [Inflate.inflate, Inflate.inflateRaw, bind, Except.bind]
+  -- Handle fromLengths calls
+  have ⟨fixedLit, hfl⟩ := fromLengths_fixedLit_ok
+  have ⟨fixedDist, hfd⟩ := fromLengths_fixedDist_ok
+  simp only [hfl, hfd]
+  -- Apply the main loop theorem
+  have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega)
+    ByteArray.empty ByteArray.empty fixedLit fixedDist
+    ((deflateStoredPure data).size * 8 + 1) (1024 * 1024 * 1024)
+    (by have hsz := deflateStoredPure_size data
+        simp only [numStoredBlocks] at hsz; omega)
+    (by simp [ByteArray.size_empty]; omega)
+  simp only [ByteArray.empty_append, ByteArray.size_empty] at hloop
+  rw [ByteArray.extract_zero_size] at hloop
+  rw [hloop]
+  simp [pure, Except.pure]
 
 /-- Stored block compression adds at most ~0.008% overhead.
     For every 65535 bytes of input, exactly 5 bytes of overhead are added.

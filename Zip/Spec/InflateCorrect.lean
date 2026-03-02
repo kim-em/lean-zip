@@ -18,7 +18,7 @@ namespace Deflate.Correctness
 /-! ## Block loop helpers -/
 
 /-- `decodeStored` preserves `bitOff < 8` and the position invariant. -/
-private theorem decodeStored_invariants (br : Zip.Native.BitReader) (output : ByteArray)
+theorem decodeStored_invariants (br : Zip.Native.BitReader) (output : ByteArray)
     (maxOutputSize : Nat) (output' : ByteArray) (br' : Zip.Native.BitReader)
     (h : Zip.Native.Inflate.decodeStored br output maxOutputSize = .ok (output', br')) :
     br'.bitOff < 8 ∧ (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
@@ -89,7 +89,7 @@ private theorem readNBytes_rest_length {n : Nat} {bits : List Bool} {acc bytes :
       omega
 
 /-- If `decodeStored bits = some (bytes, rest)`, then `rest.length ≤ bits.length`. -/
-private theorem decodeStored_rest_le {bits : List Bool} {bytes : List UInt8}
+theorem decodeStored_rest_le {bits : List Bool} {bytes : List UInt8}
     {rest : List Bool}
     (h : Deflate.Spec.decodeStored bits = some (bytes, rest)) :
     rest.length ≤ bits.length := by
@@ -184,7 +184,7 @@ private theorem decodeLitLen_rest_lt {litLens distLens : List Nat}
                       omega
 
 /-- If `decodeSymbols` succeeds, `rest.length ≤ bits.length`. -/
-private theorem decodeSymbols_rest_le {litLens distLens : List Nat}
+theorem decodeSymbols_rest_le {litLens distLens : List Nat}
     {bits : List Bool} {syms : List Deflate.Spec.LZ77Symbol} {rest : List Bool}
     (h : Deflate.Spec.decodeSymbols litLens distLens bits = some (syms, rest)) :
     rest.length ≤ bits.length := by
@@ -331,7 +331,7 @@ private theorem decodeCLSymbols_rest_le {clTable : List (Huffman.Spec.Codeword �
                 simp at hds
 
 /-- If `decodeDynamicTables` succeeds, `rest.length ≤ bits.length`. -/
-private theorem decodeDynamicTables_rest_le {bits : List Bool}
+theorem decodeDynamicTables_rest_le {bits : List Bool}
     {litLens distLens : List Nat} {rest : List Bool}
     (h : Deflate.Spec.decodeDynamicTables bits = some (litLens, distLens, rest)) :
     rest.length ≤ bits.length := by
@@ -393,12 +393,12 @@ private theorem decodeDynamicTables_rest_le {bits : List Bool}
 /-! ## Main correctness theorem -/
 
 /-- Bridge: `(bfinal == 1) = true` (UInt32) implies `(bfinal.toNat == 1) = true` (Nat). -/
-private theorem bfinal_beq_nat_true (bfinal : UInt32) (h : (bfinal == 1) = true) :
+theorem bfinal_beq_nat_true (bfinal : UInt32) (h : (bfinal == 1) = true) :
     (bfinal.toNat == 1) = true := by
   rw [beq_iff_eq] at h ⊢; exact congrArg UInt32.toNat h
 
 /-- Bridge: `¬((bfinal == 1) = true)` (UInt32) implies `(bfinal.toNat == 1) = false`. -/
-private theorem bfinal_beq_nat_false (bfinal : UInt32) (h : ¬((bfinal == 1) = true)) :
+theorem bfinal_beq_nat_false (bfinal : UInt32) (h : ¬((bfinal == 1) = true)) :
     (bfinal.toNat == 1) = false := by
   cases heq : bfinal.toNat == 1 <;> simp_all [← UInt32.toNat_inj]
 
@@ -621,7 +621,7 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
           (Zip.Native.BitReader.mk data startPos 0).data.size := by simp
       have hgo := inflateLoop_correct
         ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
-        maxOutputSize 10000000000 result endPos
+        maxOutputSize (data.size * 8 + 1) result endPos
         hbr_wf hbr_pos hflit hfdist h
       simp only [Deflate.Spec.decode]; exact hgo
 
