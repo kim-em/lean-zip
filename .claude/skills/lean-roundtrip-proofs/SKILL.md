@@ -232,6 +232,23 @@ theorem iterFunc_eq_recFunc (acc : Array T) (args...) :
 - **`List.toArray_cons`** — converts `(x :: xs).toArray` to `#[x] ++ xs.toArray`
 - **Strong induction** on decreasing measure (e.g., `data.size - pos`)
 
+### Simp Loop: `push_eq_append` + `toArray_cons`
+
+**`simp only [Array.push_eq_append, List.toArray_cons, Array.append_assoc]` loops.**
+These two lemmas create a rewriting cycle. Use explicit `rw` in this order instead:
+
+```lean
+-- Single push: acc.push x ++ rest.toArray = acc ++ (x :: rest).toArray
+rw [Array.push_eq_append, Array.append_assoc, ← List.toArray_cons]
+
+-- Double push: (acc.push x).push y ++ rest.toArray = acc ++ (x :: y :: rest).toArray
+rw [Array.push_eq_append, Array.push_eq_append,
+  Array.append_assoc, Array.append_assoc,
+  ← List.toArray_cons, ← List.toArray_cons]
+```
+
+Order matters: normalize pushes to appends first, reassociate, then fold back.
+
 ### Composition
 
 Build bottom-up: helper equivalences first, then compose in the main theorem:

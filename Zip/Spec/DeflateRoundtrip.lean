@@ -14,7 +14,7 @@ compression strategy based on level (0 = stored, 1 = fixed Huffman,
 This composes the per-level roundtrip theorems:
 - `inflate_deflateStoredPure` (Level 0)
 - `inflate_deflateFixed` (Level 1)
-- `inflate_deflateLazy` (Levels 2-4)
+- `inflate_deflateLazyIter` (Levels 2-4)
 - `inflate_deflateDynamic` (Levels 5+)
 -/
 
@@ -35,7 +35,7 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
   · split
     · exact inflate_deflateFixedIter data (by omega)
     · split
-      · exact inflate_deflateLazy data hsize
+      · exact inflate_deflateLazyIter data hsize
       · exact inflate_deflateDynamic data (by omega)
 
 /-- The output of `deflateRaw` decomposes into content bits plus short padding.
@@ -57,7 +57,8 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
         hbytes, by simp [List.length_replicate]; omega⟩
     · split
-      · -- Levels 2-4: lazy LZ77 + fixed Huffman
+      · -- Levels 2-4: lazy LZ77 + fixed Huffman (iterative)
+        rw [deflateLazyIter_eq_deflateLazy]
         obtain ⟨bits, _, hbytes⟩ := deflateLazy_spec data
         exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
           hbytes, by simp [List.length_replicate]; omega⟩
@@ -103,7 +104,8 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
             (tokensToSymbols_validSymbolList _)
         · simp [padding, List.length_replicate]; omega
     · split
-      · -- Levels 2-4: lazy LZ77 + fixed Huffman
+      · -- Levels 2-4: lazy LZ77 + fixed Huffman (iterative)
+        rw [deflateLazyIter_eq_deflateLazy]
         obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateLazy_spec data
         simp only [Deflate.Spec.encodeFixed] at henc_fixed
         cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
