@@ -602,4 +602,139 @@ def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
   let table ← buildZstdHuffmanTable trimmed
   return (table, afterWeights)
 
+/-- Extra bits table for literal length codes 0-35 (RFC 8878 Table 14).
+    Each entry is `(baseline, numExtraBits)`. For codes 0-15 the literal
+    length is the code itself (0 extra bits). -/
+def litLenExtraBits : Array (Nat × Nat) := #[
+  (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0),       -- 0-7
+  (8, 0), (9, 0), (10, 0), (11, 0), (12, 0), (13, 0), (14, 0), (15, 0),  -- 8-15
+  (16, 1), (18, 1), (20, 1), (22, 1),                                      -- 16-19
+  (24, 2), (28, 2),                                                         -- 20-21
+  (32, 3), (40, 3),                                                         -- 22-23
+  (48, 4), (64, 6), (128, 7), (256, 8), (512, 9),                          -- 24-28
+  (1024, 10), (2048, 11), (4096, 12), (8192, 13),                          -- 29-32
+  (16384, 14), (32768, 15), (65536, 16)                                     -- 33-35
+]
+
+/-- Extra bits table for match length codes 0-52 (RFC 8878 Table 15).
+    Each entry is `(baseline, numExtraBits)`. For codes 0-31 the match
+    length is `code + 3` (0 extra bits). -/
+def matchLenExtraBits : Array (Nat × Nat) := #[
+  (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0),      -- 0-7
+  (11, 0), (12, 0), (13, 0), (14, 0), (15, 0), (16, 0), (17, 0), (18, 0),-- 8-15
+  (19, 0), (20, 0), (21, 0), (22, 0), (23, 0), (24, 0), (25, 0), (26, 0),-- 16-23
+  (27, 0), (28, 0), (29, 0), (30, 0), (31, 0), (32, 0), (33, 0), (34, 0),-- 24-31
+  (35, 1), (37, 1), (39, 1), (41, 1),                                      -- 32-35
+  (43, 2), (47, 2),                                                         -- 36-37
+  (51, 3), (59, 3),                                                         -- 38-39
+  (67, 4), (83, 4),                                                         -- 40-41
+  (99, 5), (131, 7), (259, 8), (515, 9), (1027, 10),                       -- 42-46
+  (2051, 11), (4099, 12), (8195, 13),                                       -- 47-49
+  (16387, 14), (32771, 15), (65539, 16)                                     -- 50-52
+]
+
+/-- Decode a literal length FSE symbol code into an actual literal length value
+    (RFC 8878 §3.1.1.3.2.1.1). Looks up the code in `litLenExtraBits` and
+    returns `baseline + extraBits`. -/
+def decodeLitLenValue (code : Nat) (extraBits : UInt32) : Except String Nat := do
+  if h : code < litLenExtraBits.size then
+    let (baseline, _) := litLenExtraBits[code]
+    pure (baseline + extraBits.toNat)
+  else
+    throw s!"Zstd: literal length code {code} out of range (max 35)"
+
+/-- Decode a match length FSE symbol code into an actual match length value
+    (RFC 8878 §3.1.1.3.2.1.2). Looks up the code in `matchLenExtraBits` and
+    returns `baseline + extraBits`. -/
+def decodeMatchLenValue (code : Nat) (extraBits : UInt32) : Except String Nat := do
+  if h : code < matchLenExtraBits.size then
+    let (baseline, _) := matchLenExtraBits[code]
+    pure (baseline + extraBits.toNat)
+  else
+    throw s!"Zstd: match length code {code} out of range (max 52)"
+
+/-- Decode an offset FSE symbol code into an offset value (RFC 8878 §3.1.1.4).
+    For code ≥ 1: returns `(1 <<< code) + extraBits`. For code 0: returns
+    `extraBits` (used by repeat offset mechanism). -/
+def decodeOffsetValue (code : Nat) (extraBits : UInt32) : Nat :=
+  if code == 0 then extraBits.toNat
+  else (1 <<< code) + extraBits.toNat
+
+/-- Compression mode for one of the three sequence symbol types
+    (RFC 8878 §3.1.1.3.2). -/
+inductive SequenceCompressionMode where
+  | predefined   -- 0: use default distribution
+  | rle           -- 1: single repeated symbol
+  | fseCompressed -- 2: custom FSE distribution in bitstream
+  | repeat        -- 3: reuse previous block's table
+  deriving Repr, BEq
+
+/-- Parsed compression modes for the three sequence symbol types. -/
+structure SequenceCompressionModes where
+  litLenMode  : SequenceCompressionMode
+  offsetMode  : SequenceCompressionMode
+  matchLenMode : SequenceCompressionMode
+  deriving Repr
+
+/-- Convert a 2-bit mode value to `SequenceCompressionMode`. -/
+private def modeFromBits (bits : UInt8) : SequenceCompressionMode :=
+  match bits.toNat with
+  | 0 => .predefined
+  | 1 => .rle
+  | 2 => .fseCompressed
+  | _ => .repeat
+
+/-- Parse the Sequences_Section header (RFC 8878 §3.1.1.3.2).
+    Returns (numberOfSequences, compressionModes, position after header).
+    If numberOfSequences is 0, compression modes are all `predefined` (no modes
+    byte present) and the block has only literals. -/
+def parseSequencesHeaderWithModes (data : ByteArray) (pos : Nat) :
+    Except String (Nat × SequenceCompressionModes × Nat) := do
+  if data.size < pos + 1 then
+    throw "Zstd: not enough data for sequences header"
+  let byte0 := data[pos]!.toNat
+  let defaultModes : SequenceCompressionModes :=
+    { litLenMode := .predefined, offsetMode := .predefined, matchLenMode := .predefined }
+  if byte0 == 0 then
+    -- 0 sequences: no compression modes byte follows
+    pure (0, defaultModes, pos + 1)
+  else if byte0 < 128 then
+    -- 1-byte count + compression modes byte
+    if data.size < pos + 2 then
+      throw "Zstd: not enough data for sequence compression modes"
+    let modesByte := data[pos + 1]!
+    let modes : SequenceCompressionModes := {
+      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
+      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
+      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
+    }
+    pure (byte0, modes, pos + 2)
+  else if byte0 < 255 then
+    -- 2-byte count: ((byte0 - 128) << 8) + byte1, then compression modes
+    if data.size < pos + 3 then
+      throw "Zstd: truncated sequences header"
+    let byte1 := data[pos + 1]!.toNat
+    let numSeq := ((byte0 - 128) <<< 8) + byte1
+    let modesByte := data[pos + 2]!
+    let modes : SequenceCompressionModes := {
+      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
+      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
+      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
+    }
+    pure (numSeq, modes, pos + 3)
+  else
+    -- 3-byte count (byte0 == 255): byte1 + (byte2 << 8) + 0x7F00, then compression modes
+    if data.size < pos + 4 then
+      throw "Zstd: truncated sequences header"
+    let byte1 := data[pos + 1]!.toNat
+    let byte2 := data[pos + 2]!.toNat
+    let numSeq := byte1 + (byte2 <<< 8) + 0x7F00
+    let modesByte := data[pos + 3]!
+    let modes : SequenceCompressionModes := {
+      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
+      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
+      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
+    }
+    pure (numSeq, modes, pos + 4)
+
 end Zip.Native
