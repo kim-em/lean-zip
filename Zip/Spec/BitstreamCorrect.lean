@@ -30,7 +30,7 @@ private theorem flatMap_cons_drop {α β : Type} (a : α) (rest : List α)
 private theorem ofFn_drop_head {n : Nat} {f : Fin n → β} {off : Nat}
     (hoff : off < n) :
     ∃ rest, (List.ofFn f).drop off = f ⟨off, hoff⟩ :: rest := by
-  have hlen : off < (List.ofFn f).length := by simp; exact hoff
+  have hlen : off < (List.ofFn f).length := by rw [List.length_ofFn]; exact hoff
   rw [List.drop_eq_getElem_cons hlen, List.getElem_ofFn]
   exact ⟨_, rfl⟩
 
@@ -57,7 +57,7 @@ protected theorem bytesToBits_drop_testBit (data : ByteArray) (pos off : Nat)
     (by rw [Deflate.Spec.bytesToBits.byteToBits_length]; omega)]
   -- Step 5: head of (byteToBits data[pos]).drop off is testBit off
   have heq : data.data.toList[pos] = data[pos] := by
-    simp [Array.getElem_toList]; rfl
+    simp only [Array.getElem_toList]; rfl
   obtain ⟨tail, htail⟩ := byteToBits_drop_head (data.data.toList[pos]) off hoff
   rw [htail, heq]; exact ⟨_, rfl⟩
 
@@ -74,9 +74,10 @@ theorem uint32_testBit (code : UInt32) (n : Nat) (hn : n < 32) :
       if code.toNat.testBit n then 1 else 0 := by
   apply UInt32.toNat_inj.mp
   rw [UInt32.toNat_and, UInt32.toNat_shiftRight]
-  have hn_eq : n.toUInt32.toNat % 32 = n := by simp [Nat.toUInt32]; omega
+  have hn_eq : n.toUInt32.toNat % 32 = n := by simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd,
+      Nat.mod_mod_of_dvd, Nat.mod_succ_eq_iff_lt, Nat.succ_eq_add_one, Nat.reduceAdd]; omega
   rw [hn_eq, UInt32.toNat_one, shift_and_one_eq_testBit]
-  split <;> simp
+  split <;> rfl
 
 /-- `uint32_testBit` specialized to UInt8 input. -/
 protected theorem uint32_bit_eq_testBit (byte : UInt8) (off : Nat) (hoff : off < 8) :
@@ -91,10 +92,10 @@ theorem readBit_wf (br : Zip.Native.BitReader) (bit : UInt32)
     (h : br.readBit = .ok (bit, br')) : br'.bitOff < 8 := by
   simp only [Zip.Native.BitReader.readBit] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    · obtain ⟨_, rfl⟩ := h; simp
-    · obtain ⟨_, rfl⟩ := h; simp; omega
+    · obtain ⟨_, rfl⟩ := h; simp only []; omega
+    · obtain ⟨_, rfl⟩ := h; simp only []; omega
 
 /-! ### readBit correspondence -/
 
@@ -111,7 +112,7 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
   -- Unfold readBit; the error case is impossible since h says it succeeded
   simp only [Zip.Native.BitReader.readBit] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i hpos
     -- hpos : ¬(br.pos ≥ br.data.size), so br.pos < br.data.size
     have hpos' : br.pos < br.data.size := by omega
@@ -121,7 +122,7 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
         (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff + 1) :=
       List.drop_cons_tail hrest
     -- The bit read by readBit matches data[pos]! which equals data[pos]
-    have hget : br.data[br.pos]! = br.data[br.pos] := by simp [hpos']
+    have hget : br.data[br.pos]! = br.data[br.pos] := getElem!_pos br.data br.pos hpos'
     refine ⟨br.data[br.pos].toNat.testBit br.bitOff, rest, hrest, ?_, ?_⟩
     · -- br'.toBits = rest
       split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
@@ -142,13 +143,15 @@ bits via `acc ||| (bit <<< shift.toUInt32)`. When the bits don't overlap
 
 private theorem shift_toUInt32_mod32 {shift : Nat} (hshift : shift < 32) :
     shift.toUInt32.toNat % 32 = shift := by
-  simp [Nat.toUInt32]; omega
+  simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd,
+      Nat.mod_mod_of_dvd, Nat.mod_succ_eq_iff_lt, Nat.succ_eq_add_one, Nat.reduceAdd]; omega
 
 protected theorem acc_or_shift_toNat (acc bit : UInt32) (shift : Nat)
     (hacc : acc.toNat < 2 ^ shift) (hbit : bit = 0 ∨ bit = 1) (hshift : shift < 32) :
     (acc ||| (bit <<< shift.toUInt32)).toNat = acc.toNat + bit.toNat * 2 ^ shift := by
   rcases hbit with rfl | rfl
-  · simp [UInt32.toNat_zero]
+  · simp only [UInt32.toNat_zero, Nat.zero_mul, Nat.add_zero,
+      UInt32.zero_shiftLeft, UInt32.or_zero]
   · rw [UInt32.toNat_or, UInt32.toNat_shiftLeft, shift_toUInt32_mod32 hshift,
         UInt32.toNat_one, Nat.shiftLeft_eq, Nat.one_mul,
         Nat.mod_eq_of_lt (Nat.pow_lt_pow_right (by omega) hshift),
@@ -158,7 +161,7 @@ protected theorem acc_or_shift_bound (acc bit : UInt32) (shift : Nat)
     (hacc : acc.toNat < 2 ^ shift) (hbit : bit = 0 ∨ bit = 1) (hshift : shift < 32) :
     (acc ||| (bit <<< shift.toUInt32)).toNat < 2 ^ (shift + 1) := by
   rw [Deflate.Correctness.acc_or_shift_toNat acc bit shift hacc hbit hshift, Nat.pow_succ]
-  rcases hbit with rfl | rfl <;> simp <;> omega
+  rcases hbit with rfl | rfl <;> simp only [UInt32.toNat_zero, UInt32.toNat_one] <;> omega
 
 /-! ### Generalized readBits.go invariant -/
 
@@ -178,14 +181,14 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
   | zero =>
     simp only [Zip.Native.BitReader.readBits.go] at h
     obtain ⟨rfl, rfl⟩ := Except.ok.inj h
-    exact ⟨0, br'.toBits, by simp [Deflate.Spec.readBitsLSB], rfl, by simp, hwf⟩
+    exact ⟨0, br'.toBits, by simp only [Deflate.Spec.readBitsLSB], rfl, by omega, hwf⟩
   | succ k ih =>
     -- Case split on whether readBit succeeds
     cases hrd : br.readBit with
     | error e =>
       -- readBit failed → readBits.go (k+1) fails, contradicting h
       simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind, hrd] at h
-      simp at h
+      exact nomatch h
     | ok p =>
       obtain ⟨bit, br₁⟩ := p
       -- readBit succeeded, unfold readBits.go using hrd
@@ -209,7 +212,8 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
       rw [hbr1_bits] at hspec'
       refine ⟨(if b then 1 else 0) + specVal' * 2, rest', ?_, hbr', ?_, hwf'⟩
       · -- readBitsLSB (k+1) br.toBits = some (...)
-        simp [Deflate.Spec.readBitsLSB, hbr_bits, hspec']
+        simp only [hbr_bits, Deflate.Spec.readBitsLSB, hspec', Option.pure_def,
+          Option.bind_eq_bind, Option.bind_some]
       · -- val.toNat = acc.toNat + ((if b then 1 else 0) + specVal' * 2) * 2^shift
         rw [hval', Deflate.Correctness.acc_or_shift_toNat acc bit shift hacc hbit01 hshift, Nat.pow_succ]
         cases b <;> simp_all [Nat.add_mul, Nat.mul_assoc, Nat.mul_comm] <;> omega
@@ -231,8 +235,9 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
   -- readBits = readBits.go br 0 0 n
   simp only [Zip.Native.BitReader.readBits] at h
   obtain ⟨specVal, rest, hspec, hrest, hval, _⟩ :=
-    readBits_go_spec br 0 0 n val br' hwf (by omega) (by simp) h
-  simp at hval
+    readBits_go_spec br 0 0 n val br' hwf (by omega) (by simp only [UInt32.toNat_zero,
+      Nat.pow_zero, Nat.lt_add_one]) h
+  simp only [UInt32.toNat_zero, Nat.zero_add, Nat.pow_zero, Nat.mul_one] at hval
   -- hval : val.toNat = specVal, need to rewrite specVal → val.toNat in hspec
   rw [← hval] at hspec
   exact ⟨rest, hspec, hrest⟩
@@ -242,7 +247,7 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
 /-- `toBits` length is a multiple of 8 minus `bitOff`. -/
 protected theorem toBits_length (br : Zip.Native.BitReader) :
     br.toBits.length = br.data.size * 8 - (br.pos * 8 + br.bitOff) := by
-  simp [Zip.Native.BitReader.toBits, List.length_drop, Deflate.Spec.bytesToBits_length]
+  simp only [Zip.Native.BitReader.toBits, List.length_drop, Deflate.Spec.bytesToBits_length]
 
 /-- When `bitOff = 0`, `toBits` has length divisible by 8. -/
 private theorem toBits_length_mod8_zero (br : Zip.Native.BitReader) (h : br.bitOff = 0) :
@@ -267,10 +272,12 @@ theorem alignToByte_toBits (br : Zip.Native.BitReader)
   simp only [Zip.Native.BitReader.alignToByte, Deflate.Spec.alignToByte]
   by_cases hoff : br.bitOff = 0
   · -- bitOff = 0: native is identity, spec drops 0
-    simp [hoff, toBits_length_mod8_zero br hoff]
+    simp only [hoff, toBits_length_mod8_zero br hoff, ↓reduceIte,
+      List.drop_zero, beq_self_eq_true]
   · -- bitOff > 0: native advances to next byte, spec drops (8 - bitOff) bits
     have hpos' : br.pos < br.data.size := hpos.resolve_left hoff
-    have hoff_ne : (br.bitOff == 0) = false := by simp [hoff]
+    have hoff_ne : (br.bitOff == 0) = false := by
+      simp only [beq_eq_false_iff_ne, ne_eq, hoff, not_false_eq_true]
     simp only [hoff_ne, Bool.false_eq_true, ↓reduceIte]
     rw [toBits_length_mod8_pos br hwf hoff hpos']
     simp only [Zip.Native.BitReader.toBits, Nat.add_zero]
@@ -289,17 +296,19 @@ private theorem readBitsLSB_testBit (m n : Nat) (hm : m < 2 ^ n) (rest : List Bo
       ((List.ofFn (n := n) fun (i : Fin n) => m.testBit i.val) ++ rest) =
       some (m, rest) := by
   induction n generalizing m with
-  | zero => simp [Deflate.Spec.readBitsLSB]; omega
+  | zero => simp only [Deflate.Spec.readBitsLSB, List.ofFn_zero, List.nil_append,
+      Option.some.injEq, Prod.mk.injEq, and_true]; omega
   | succ k ih =>
     simp only [List.ofFn_succ, List.cons_append, Deflate.Spec.readBitsLSB]
     -- Rewrite tail: m.testBit (i+1) = (m/2).testBit i
     have htb : (fun (i : Fin k) => m.testBit (Fin.succ i).val) =
                (fun (i : Fin k) => (m / 2).testBit i.val) := by
-      ext i; simp [Fin.val_succ, ← Nat.testBit_div_two]
+      ext i; simp only [Fin.val_succ, ← Nat.testBit_div_two]
     rw [htb]
     -- Apply IH with m/2
     rw [ih (m / 2) (by omega)]
-    simp
+    simp only [Fin.val_zero, Nat.testBit_zero, decide_eq_true_eq, Option.pure_def,
+      Option.bind_eq_bind, Option.bind_some, Option.some.injEq, Prod.mk.injEq, and_true]
     -- (if m % 2 = 1 then 1 else 0) + m / 2 * 2 = m
     have := Nat.mod_add_div m 2; split <;> omega
 
@@ -315,12 +324,12 @@ protected theorem readBitsLSB_split (m n : Nat) (bits : List Bool) :
     simp only [Deflate.Spec.readBitsLSB, Nat.zero_add, Option.bind]
     cases Deflate.Spec.readBitsLSB n bits with
     | none => rfl
-    | some p => simp
+    | some p => simp only [Nat.pow_zero, Nat.mul_one]
   | succ k ih =>
     -- Rewrite (k + 1) + n = (k + n) + 1 so readBitsLSB can unfold
     rw [show k + 1 + n = (k + n) + 1 from by omega]
     cases bits with
-    | nil => simp [Deflate.Spec.readBitsLSB]
+    | nil => simp only [Deflate.Spec.readBitsLSB, Option.bind_none]
     | cons b rest =>
       -- Unfold one step of readBitsLSB on LHS
       simp only [Deflate.Spec.readBitsLSB]
@@ -328,12 +337,12 @@ protected theorem readBitsLSB_split (m n : Nat) (bits : List Bool) :
       rw [ih rest]
       -- Both sides now match on readBitsLSB k rest
       cases hk : Deflate.Spec.readBitsLSB k rest with
-      | none => simp [bind, Option.bind]
+      | none => dsimp only [bind, Option.bind]
       | some p =>
         obtain ⟨v1, rest'⟩ := p
         simp only [bind, Option.bind]
         cases hn : Deflate.Spec.readBitsLSB n rest' with
-        | none => simp
+        | none => simp only []
         | some q =>
           obtain ⟨v2, rest''⟩ := q
           simp only []
@@ -371,13 +380,13 @@ theorem toBits_readBitsLSB_byte (br : Zip.Native.BitReader)
 /-- `alignToByte` produces a byte-aligned BitReader. -/
 theorem alignToByte_wf (br : Zip.Native.BitReader) :
     br.alignToByte.bitOff = 0 := by
-  simp [Zip.Native.BitReader.alignToByte]
+  simp only [Zip.Native.BitReader.alignToByte]
   split <;> simp_all
 
 /-- `alignToByte` preserves the data field. -/
 theorem alignToByte_data (br : Zip.Native.BitReader) :
     br.alignToByte.data = br.data := by
-  simp [Zip.Native.BitReader.alignToByte]
+  simp only [Zip.Native.BitReader.alignToByte]
   split <;> simp_all
 
 /-! ### readUInt16LE correspondence -/
@@ -397,7 +406,7 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
   -- Unfold readUInt16LE: aligns, bounds check, reads two bytes
   simp only [Zip.Native.BitReader.readUInt16LE] at h
   split at h
-  · simp at h -- bounds check failed → contradiction with h : error = ok
+  · exact nomatch h
   · -- bounds check passed
     rename_i hbound
     -- h : .ok (lo ||| (hi <<< 8), { ... pos + 2 ... }) = .ok (val, br')
@@ -429,7 +438,8 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
       simp only [Option.some.injEq, Prod.mk.injEq]
       constructor
       · -- Arithmetic: data[pos].toNat + data[pos+1].toNat * 256 = val.toNat
-        rw [hval]; simp [hpos0, hpos1]
+        rw [hval]; simp only [Nat.reducePow, hpos0, getElem!_pos, hpos1, UInt16.toNat_or,
+          UInt8.toNat_toUInt16, UInt16.toNat_shiftLeft, UInt16.reduceToNat, Nat.reduceMod]
         -- Goal: lo.toNat + hi.toNat * 256 = lo.toNat ||| (hi.toNat <<< 8 % 65536)
         have hlo : br.alignToByte.data[br.alignToByte.pos].toNat < 2 ^ 8 :=
           br.alignToByte.data[br.alignToByte.pos].toBitVec.isLt
@@ -455,7 +465,8 @@ protected theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
             (Deflate.Spec.bytesToBits data).drop ((pos + n) * 8)) := by
   induction n generalizing pos acc with
   | zero =>
-    simp [Deflate.Spec.decodeStored.readNBytes]
+    simp only [Deflate.Spec.decodeStored.readNBytes, Nat.add_zero, List.extract, Nat.sub_self,
+      List.take_zero, List.append_nil]
   | succ k ih =>
     -- Unfold one step of readNBytes
     simp only [Deflate.Spec.decodeStored.readNBytes]
@@ -474,7 +485,7 @@ protected theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
       -- [data[pos]] ++ extract(pos+1, pos+1+k) = extract(pos, pos+k+1)
       simp only [List.extract, show pos + (k + 1) - pos = k + 1 from by omega,
         show pos + 1 + k - (pos + 1) = k from by omega]
-      have hlen : pos < data.data.toList.length := by simp [Array.length_toList]; exact hpos
+      have hlen : pos < data.data.toList.length := by rw [Array.length_toList]; exact hpos
       rw [List.drop_eq_getElem_cons hlen, List.take_succ_cons]
       congr 1
       congr 1; omega
@@ -488,7 +499,7 @@ theorem readUInt16LE_wf (br : Zip.Native.BitReader)
     (h : br.readUInt16LE = .ok (val, br')) : br'.bitOff = 0 := by
   simp only [Zip.Native.BitReader.readUInt16LE] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · have : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by cases h; rfl
     rw [this]; exact alignToByte_wf br
 
@@ -498,7 +509,7 @@ theorem readUInt16LE_data (br : Zip.Native.BitReader)
     (h : br.readUInt16LE = .ok (val, br')) : br'.data = br.data := by
   simp only [Zip.Native.BitReader.readUInt16LE] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · have : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by cases h; rfl
     rw [this]; exact alignToByte_data br
 
@@ -508,7 +519,7 @@ theorem readBytes_wf (br : Zip.Native.BitReader)
     (h : br.readBytes n = .ok (bytes, br')) : br'.bitOff = 0 := by
   simp only [Zip.Native.BitReader.readBytes] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · have : br' = { br.alignToByte with pos := br.alignToByte.pos + n } := by cases h; rfl
     rw [this]; exact alignToByte_wf br
 
@@ -517,7 +528,7 @@ theorem alignToByte_id_of_aligned (br : Zip.Native.BitReader)
     (hoff : br.bitOff = 0) :
     Deflate.Spec.alignToByte br.toBits = br.toBits := by
   have : br.alignToByte = br := by
-    simp [Zip.Native.BitReader.alignToByte, hoff]
+    simp only [Zip.Native.BitReader.alignToByte, hoff, beq_self_eq_true, ↓reduceIte]
   rw [← alignToByte_toBits br (by omega) (Or.inl hoff), this]
 
 /-- Native `readBytes` corresponds to spec `readNBytes` after alignment.
@@ -535,7 +546,7 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
   -- Unfold readBytes: aligns, bounds check, extracts slice
   simp only [Zip.Native.BitReader.readBytes] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i hbound
     -- Extract bytes and reader from h
     have hbytes : bytes = br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) := by
