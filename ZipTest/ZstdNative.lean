@@ -210,14 +210,15 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless e.contains "too short" do
       throw (IO.userError s!"decompressZstd truncated: wrong error: {e}")
 
-  -- Test 22: decompressZstd error on skippable frame
-  -- Skippable frame magic: 0x184D2A50 (little-endian: 50 2A 4D 18)
+  -- Test 22: decompressZstd skips skippable-only input (returns empty output)
+  -- Skippable frame magic: 0x184D2A50 (little-endian: 50 2A 4D 18), size = 4, 4 payload bytes
   let skippable := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
   match Zip.Native.decompressZstd skippable with
-  | .ok _ => throw (IO.userError "decompressZstd skippable: should have failed")
+  | .ok result =>
+    unless result.size == 0 do
+      throw (IO.userError s!"decompressZstd skippable-only: expected empty output, got {result.size} bytes")
   | .error e =>
-    unless e.contains "skippable" do
-      throw (IO.userError s!"decompressZstd skippable: wrong error: {e}")
+    throw (IO.userError s!"decompressZstd skippable-only: unexpected error: {e}")
 
   -- Test 23: decompressFrame returns correct position after frame
   let frameTestData := mkConstantData 128
@@ -756,11 +757,95 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError "repeat modes: expected matchLenMode = repeat")
   | .error e => throw (IO.userError s!"repeat modes parsing failed: {e}")
 
-  -- Test 72: litLenExtraBits table has 36 entries
+  -- Test 72: skipSkippableFrame — valid skippable frame
+  -- Magic 0x184D2A50 (LE: 50 2A 4D 18), size = 3, then 3 payload bytes
+  let skipInput := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18, 0x03, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC]
+  match Zip.Native.skipSkippableFrame skipInput 0 with
+  | .ok endPos =>
+    unless endPos == 11 do
+      throw (IO.userError s!"skipSkippable: expected endPos 11, got {endPos}")
+  | .error e => throw (IO.userError s!"skipSkippableFrame failed: {e}")
+
+  -- Test 73: skipSkippableFrame — different magic in range (0x184D2A5F)
+  let skipInput2 := ByteArray.mk #[0x5F, 0x2A, 0x4D, 0x18, 0x00, 0x00, 0x00, 0x00]
+  match Zip.Native.skipSkippableFrame skipInput2 0 with
+  | .ok endPos =>
+    unless endPos == 8 do
+      throw (IO.userError s!"skipSkippable 5F: expected endPos 8, got {endPos}")
+  | .error e => throw (IO.userError s!"skipSkippableFrame 5F failed: {e}")
+
+  -- Test 74: skipSkippableFrame — truncated frame data
+  let skipTruncated := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18, 0x10, 0x00, 0x00, 0x00, 0x00]
+  match Zip.Native.skipSkippableFrame skipTruncated 0 with
+  | .ok _ => throw (IO.userError "skipSkippable truncated: should have failed")
+  | .error _ => pure ()
+
+  -- Test 75: multi-frame concatenation — two independently compressed frames
+  let frame1Data := mkConstantData 128
+  let frame2Data := ByteArray.mk #[0x42, 0x42, 0x42, 0x42]
+  let frame1 ← Zstd.compress frame1Data 1
+  let frame2 ← Zstd.compress frame2Data 1
+  let multiFrame := frame1 ++ frame2
+  match Zip.Native.decompressZstd multiFrame with
+  | .ok result =>
+    let expected := frame1Data ++ frame2Data
+    unless result.data == expected.data do
+      throw (IO.userError s!"multi-frame: expected {expected.size} bytes, got {result.size}")
+  | .error e =>
+    -- May fail if compressed blocks are used; that's acceptable
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"multi-frame: unexpected error: {e}")
+
+  -- Test 76: skippable frame followed by Zstd frame
+  let skippablePrefix := ByteArray.mk #[0x50, 0x2A, 0x4D, 0x18, 0x02, 0x00, 0x00, 0x00, 0xFF, 0xFF]
+  let zstdData := mkConstantData 64
+  let zstdFrame ← Zstd.compress zstdData 1
+  let skippablePlusZstd := skippablePrefix ++ zstdFrame
+  match Zip.Native.decompressZstd skippablePlusZstd with
+  | .ok result =>
+    unless result.data == zstdData.data do
+      throw (IO.userError s!"skippable+zstd: expected {zstdData.size} bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"skippable+zstd: unexpected error: {e}")
+
+  -- Test 77: Zstd frame followed by skippable frame
+  let zstdFirst ← Zstd.compress (mkConstantData 64) 1
+  let skippableSuffix := ByteArray.mk #[0x55, 0x2A, 0x4D, 0x18, 0x01, 0x00, 0x00, 0x00, 0x00]
+  let zstdPlusSkippable := zstdFirst ++ skippableSuffix
+  match Zip.Native.decompressZstd zstdPlusSkippable with
+  | .ok result =>
+    unless result.size == 64 do
+      throw (IO.userError s!"zstd+skippable: expected 64 bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+      throw (IO.userError s!"zstd+skippable: unexpected error: {e}")
+
+  -- Test 78: trailing garbage after last frame produces error
+  let trailingData := mkConstantData 64
+  let trailingFrame ← Zstd.compress trailingData 1
+  let trailingGarbage := trailingFrame ++ (ByteArray.mk #[0xDE, 0xAD, 0xBE, 0xEF])
+  match Zip.Native.decompressZstd trailingGarbage with
+  | .ok _ => throw (IO.userError "trailing garbage: should have failed")
+  | .error e =>
+    unless e.contains "invalid magic number" do
+      -- Also accept compressed block errors if they occur before trailing data
+      unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+        throw (IO.userError s!"trailing garbage: expected magic number error, got: {e}")
+
+  -- Test 79: empty input returns empty output
+  match Zip.Native.decompressZstd ByteArray.empty with
+  | .ok result =>
+    unless result.size == 0 do
+      throw (IO.userError s!"empty input: expected 0 bytes, got {result.size}")
+  | .error e =>
+    throw (IO.userError s!"empty input: unexpected error: {e}")
+
+  -- Test 80: litLenExtraBits table has 36 entries
   unless Zip.Native.litLenExtraBits.size == 36 do
     throw (IO.userError s!"litLenExtraBits: expected 36 entries, got {Zip.Native.litLenExtraBits.size}")
 
-  -- Test 73: matchLenExtraBits table has 53 entries
+  -- Test 81: matchLenExtraBits table has 53 entries
   unless Zip.Native.matchLenExtraBits.size == 53 do
     throw (IO.userError s!"matchLenExtraBits: expected 53 entries, got {Zip.Native.matchLenExtraBits.size}")
 
