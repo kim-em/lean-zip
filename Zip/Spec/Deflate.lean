@@ -679,8 +679,11 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
     simp only [hle, ↓reduceIte]
     unfold decode.go
     -- Evaluate readBitsLSB on concrete header bits (BFINAL=1, BTYPE=00).
-    -- Uses simp as a computation engine; readBitsLSB is the only non-default lemma.
-    simp [readBitsLSB]
+    -- Uses simp only as a computation engine; readBitsLSB is the only non-default lemma.
+    simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
+      ↓reduceIte, Option.pure_def, Option.bind_eq_bind, Option.bind_some, Nat.zero_mul,
+      Nat.add_zero, beq_iff_eq, List.length_cons, dite_eq_ite, Bool.false_eq_true,
+      Nat.zero_add, Option.bind_fun_some]
     -- Goal (cons-ified): (decodeStored (false::...::encodeStoredBlock data)).bind ... = ...
     have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
       simp only [List.append_nil, List.length_append, List.length_replicate,
@@ -702,7 +705,10 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
     simp only [hgt, ↓reduceIte]
     unfold decode.go
     -- Evaluate readBitsLSB on concrete header bits (BFINAL=0, BTYPE=00).
-    simp [readBitsLSB]
+    simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
+      Bool.false_eq_true, ↓reduceIte, Nat.zero_add, Option.pure_def, Option.bind_eq_bind,
+      Option.bind_some, Nat.zero_mul, beq_iff_eq, List.length_cons, List.length_append,
+      dite_eq_ite, Nat.zero_ne_one]
     -- decodeStored on the first block recovers data.take 65535
     have hle : (data.take 65535).length ≤ 65535 := by simp only [List.length_take]; omega
     have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
@@ -753,7 +759,10 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
     simp only [hle, ↓reduceIte]
     unfold decode.goR
     -- Evaluate readBitsLSB on concrete header bits (BFINAL=1, BTYPE=00).
-    simp [readBitsLSB]
+    simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
+      ↓reduceIte, Option.pure_def, Option.bind_eq_bind, Option.bind_some, Nat.zero_mul,
+      Nat.add_zero, beq_iff_eq, List.length_cons, dite_eq_ite, Bool.false_eq_true,
+      Nat.zero_add]
     have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
       simp only [List.append_nil, List.length_append, List.length_replicate,
         encodeStoredBlock, encodeLEU16,
@@ -771,7 +780,10 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
     simp only [hgt, ↓reduceIte]
     unfold decode.goR
     -- Evaluate readBitsLSB on concrete header bits (BFINAL=0, BTYPE=00).
-    simp [readBitsLSB]
+    simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
+      Bool.false_eq_true, ↓reduceIte, Nat.zero_add, Option.pure_def, Option.bind_eq_bind,
+      Option.bind_some, Nat.zero_mul, beq_iff_eq, List.length_cons, List.length_append,
+      dite_eq_ite, Nat.zero_ne_one]
     have hle : (data.take 65535).length ≤ 65535 := by simp only [List.length_take]; omega
     have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
         encodeStored rest).length % 8 = 5 := by
@@ -832,9 +844,16 @@ private theorem le_bytes_eq_encodeLEU16 (n : Nat) (hn : n < 65536) :
     encodeLEU16 n := by
   have hlo : (n.toUInt16 &&& 255).toUInt8.toNat = n % 256 := by
     -- Normalizes UInt16/BitVec structure before the and→mod conversion.
-    unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
+    unfold Nat.toUInt16
+    simp only [UInt16.toUInt8_and, UInt16.toUInt8_ofNat', UInt16.toUInt8_ofNat,
+      UInt8.toNat_and, UInt8.toNat_ofNat', Nat.reducePow, UInt8.reduceToNat]
+    rw [and_255_eq_mod_256]; omega
   have hhi : ((n.toUInt16 >>> 8) &&& 255).toUInt8.toNat = n / 256 := by
-    unfold Nat.toUInt16; simp; rw [and_255_eq_mod_256]; omega
+    unfold Nat.toUInt16
+    simp only [UInt16.toUInt8_and, UInt16.toUInt8_ofNat, UInt8.toNat_and,
+      UInt16.toNat_toUInt8, UInt16.toNat_shiftRight, UInt16.toNat_ofNat', Nat.reducePow,
+      UInt16.reduceToNat, Nat.reduceMod, UInt8.reduceToNat]
+    rw [and_255_eq_mod_256]; omega
   simp only [byteToBitsSpec, encodeLEU16]
   apply List.ext_getElem (by simp only [List.length_append, List.length_ofFn])
   intro i h₁ h₂
