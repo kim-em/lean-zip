@@ -324,4 +324,36 @@ def decodeFseSymbolsAll (table : FseTable) (br : BackwardBitReader)
     state := cell.newState.toNat + bits.toNat
   return (result, br)
 
+/-- Predefined normalized probability distribution for literal length codes
+    (RFC 8878 §6, Table 15). 36 symbols, accuracyLog = 6, tableSize = 64. -/
+def predefinedLitLenDistribution : Array Int32 := #[
+  4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1,
+  2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
+  -1, -1, -1, -1
+]
+
+/-- Predefined normalized probability distribution for match length codes
+    (RFC 8878 §6, Table 16). 53 symbols, accuracyLog = 6, tableSize = 64. -/
+def predefinedMatchLenDistribution : Array Int32 := #[
+  1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1,
+  -1, -1, -1, -1, -1
+]
+
+/-- Predefined normalized probability distribution for offset codes
+    (RFC 8878 §6, Table 17). 29 symbols, accuracyLog = 5, tableSize = 32. -/
+def predefinedOffsetDistribution : Array Int32 := #[
+  1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1
+]
+
+/-- Build the three predefined FSE decoding tables for Zstd sequence decoding.
+    Returns (litLenTable, matchLenTable, offsetTable) or an error. -/
+def buildPredefinedFseTables : Except String (FseTable × FseTable × FseTable) := do
+  let llTable ← buildFseTable predefinedLitLenDistribution 6
+  let mlTable ← buildFseTable predefinedMatchLenDistribution 6
+  let ofTable ← buildFseTable predefinedOffsetDistribution 5
+  return (llTable, mlTable, ofTable)
+
 end Zip.Native
