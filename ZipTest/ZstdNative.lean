@@ -1001,4 +1001,156 @@ def ZipTest.ZstdNative.tests : IO Unit := do
         throw (IO.userError s!"4-stream small: wrong error: {e}")
   | .error e => throw (IO.userError s!"buildZstdHuffmanTable for 4-stream test failed: {e}")
 
+  -- Test 84: decodeSequences — single sequence, minimal tables
+  -- Build 3 FSE tables with accuracyLog=1 (2 cells each).
+  -- litLen table: cell[0]=code 3, cell[1]=code 5 (both 0 extra bits)
+  -- offset table: cell[0]=code 1 (1 extra bit), cell[1]=code 2 (2 extra bits)
+  -- matchLen table: cell[0]=code 0, cell[1]=code 1 (both 0 extra bits)
+  let singleSeqLitLenTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 3, numBits := 1, newState := 0 },   -- litLen code 3 → baseline 3, 0 extra
+      { symbol := 5, numBits := 1, newState := 0 }    -- litLen code 5 → baseline 5, 0 extra
+    ]
+  }
+  let singleSeqOffsetTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 1, numBits := 1, newState := 0 },   -- offset code 1 → 1 extra bit
+      { symbol := 2, numBits := 1, newState := 0 }    -- offset code 2 → 2 extra bits
+    ]
+  }
+  let singleSeqMatchLenTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 0, numBits := 1, newState := 0 },   -- matchLen code 0 → baseline 3, 0 extra
+      { symbol := 1, numBits := 1, newState := 0 }    -- matchLen code 1 → baseline 4, 0 extra
+    ]
+  }
+  -- Backward bitstream for 1 sequence:
+  -- Bits (MSB-first reading order):
+  --   litLenInit=0 (1 bit), offsetInit=0 (1 bit), matchLenInit=0 (1 bit),
+  --   offsetExtra=1 (1 bit for code 1)
+  -- Total: 4 data bits → sentinel at bit 4 in one byte
+  -- Byte: 0b00010001 = 0x11 (sentinel=bit4, data bits 3-0 = 0001)
+  let singleSeqData := ByteArray.mk #[0x11]
+  match Zip.Native.BackwardBitReader.init singleSeqData 0 1 with
+  | .ok bbr =>
+    match Zip.Native.decodeSequences singleSeqLitLenTable singleSeqOffsetTable singleSeqMatchLenTable bbr 1 with
+    | .ok seqs =>
+      unless seqs.size == 1 do
+        throw (IO.userError s!"decodeSeq single: expected 1 seq, got {seqs.size}")
+      -- litLenState=0 → code 3 → litLen = 3
+      unless seqs[0]!.literalLength == 3 do
+        throw (IO.userError s!"decodeSeq single litLen: expected 3, got {seqs[0]!.literalLength}")
+      -- matchLenState=0 → code 0 → matchLen = 3
+      unless seqs[0]!.matchLength == 3 do
+        throw (IO.userError s!"decodeSeq single matchLen: expected 3, got {seqs[0]!.matchLength}")
+      -- offsetState=0 → code 1, extra=1 → (1<<1)+1 = 3
+      unless seqs[0]!.offset == 3 do
+        throw (IO.userError s!"decodeSeq single offset: expected 3, got {seqs[0]!.offset}")
+    | .error e => throw (IO.userError s!"decodeSequences single failed: {e}")
+  | .error e => throw (IO.userError s!"BackwardBitReader init single failed: {e}")
+
+  -- Test 85: decodeSequences — two sequences with state updates
+  -- Same tables as test 84. Bits for 2 sequences:
+  --   litLenInit=0, offsetInit=0, matchLenInit=0,
+  --   [seq1] offsetExtra=1 (1 bit), (0 matchLen extra, 0 litLen extra),
+  --   [seq1] litLenUpdate=1 (1 bit), matchLenUpdate=1 (1 bit), offsetUpdate=1 (1 bit),
+  --   [seq2] offsetExtra=01 (2 bits for code 2), (0 matchLen extra, 0 litLen extra)
+  -- Total: 9 data bits across 2 bytes
+  -- data[1] (last byte): sentinel at bit 1, bit 0 = first data bit = 0
+  -- data[0] (first byte): 8 data bits = 00111101 = 0x3D
+  let multiSeqData := ByteArray.mk #[0x3D, 0x02]
+  match Zip.Native.BackwardBitReader.init multiSeqData 0 2 with
+  | .ok bbr =>
+    match Zip.Native.decodeSequences singleSeqLitLenTable singleSeqOffsetTable singleSeqMatchLenTable bbr 2 with
+    | .ok seqs =>
+      unless seqs.size == 2 do
+        throw (IO.userError s!"decodeSeq multi: expected 2 seqs, got {seqs.size}")
+      -- Seq 1: litLen=3, matchLen=3, offset=3 (same as single test)
+      unless seqs[0]!.literalLength == 3 do
+        throw (IO.userError s!"decodeSeq multi seq0 litLen: expected 3, got {seqs[0]!.literalLength}")
+      unless seqs[0]!.matchLength == 3 do
+        throw (IO.userError s!"decodeSeq multi seq0 matchLen: expected 3, got {seqs[0]!.matchLength}")
+      unless seqs[0]!.offset == 3 do
+        throw (IO.userError s!"decodeSeq multi seq0 offset: expected 3, got {seqs[0]!.offset}")
+      -- After seq 1 state update: litLenState=0+1=1, matchLenState=0+1=1, offsetState=0+1=1
+      -- Seq 2: litLenState=1 → code 5 → litLen=5, matchLenState=1 → code 1 → matchLen=4,
+      --        offsetState=1 → code 2, 2 extra bits = 01 → offset = (1<<2)+1 = 5
+      unless seqs[1]!.literalLength == 5 do
+        throw (IO.userError s!"decodeSeq multi seq1 litLen: expected 5, got {seqs[1]!.literalLength}")
+      unless seqs[1]!.matchLength == 4 do
+        throw (IO.userError s!"decodeSeq multi seq1 matchLen: expected 4, got {seqs[1]!.matchLength}")
+      unless seqs[1]!.offset == 5 do
+        throw (IO.userError s!"decodeSeq multi seq1 offset: expected 5, got {seqs[1]!.offset}")
+    | .error e => throw (IO.userError s!"decodeSequences multi failed: {e}")
+  | .error e => throw (IO.userError s!"BackwardBitReader init multi failed: {e}")
+
+  -- Test 86: decodeSequences — 0 sequences returns empty array
+  -- Use dummy tables and a minimal bitstream (just needs to exist for init)
+  match Zip.Native.decodeSequences singleSeqLitLenTable singleSeqOffsetTable singleSeqMatchLenTable
+    (default : Zip.Native.BackwardBitReader) 0 with
+  | .ok seqs =>
+    unless seqs.size == 0 do
+      throw (IO.userError s!"decodeSeq zero: expected 0 seqs, got {seqs.size}")
+  | .error e => throw (IO.userError s!"decodeSequences zero failed: {e}")
+
+  -- Test 87: decodeSequences with extra bits (codes above direct-value threshold)
+  -- Test matchLen code 32 (baseline 35, 1 extra bit) and litLen code 16 (baseline 16, 1 extra bit)
+  -- offset code 3 (3 extra bits, offset = 8 + extra)
+  -- Build tables with accuracyLog=1:
+  let extraBitsLitLenTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 16, numBits := 1, newState := 0 },  -- litLen code 16 → baseline 16, 1 extra bit
+      { symbol := 0, numBits := 1, newState := 0 }
+    ]
+  }
+  let extraBitsOffsetTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 3, numBits := 1, newState := 0 },   -- offset code 3 → 3 extra bits
+      { symbol := 1, numBits := 1, newState := 0 }
+    ]
+  }
+  let extraBitsMatchLenTable : Zip.Native.FseTable := {
+    accuracyLog := 1
+    cells := #[
+      { symbol := 32, numBits := 1, newState := 0 },  -- matchLen code 32 → baseline 35, 1 extra bit
+      { symbol := 0, numBits := 1, newState := 0 }
+    ]
+  }
+  -- Backward bitstream for 1 sequence, all init states = 0:
+  -- Bits: litLenInit=0 (1), offsetInit=0 (1), matchLenInit=0 (1),
+  --   offsetExtra=101 (3 bits, val=5 → offset=8+5=13),
+  --   matchLenExtra=1 (1 bit → matchLen=35+1=36),
+  --   litLenExtra=0 (1 bit → litLen=16+0=16)
+  -- Total: 8 data bits → sentinel at bit 8... doesn't fit in 1 byte (max 7 data bits)
+  -- Use 2 bytes: data[1] has sentinel at bit 1, 1 data bit; data[0] has 7 data bits
+  -- Bits in order: 0, 0, 0, 1, 0, 1, 1, 0
+  -- data[1]: sentinel bit 1, bit 0 = first bit = 0 → 0b10 = 0x02
+  -- data[0]: bits 7-1 (unused bit 0) = 0010110 + bit 0 must be a valid byte
+  --   Actually data[0] provides a full 8 bits. After reading the 1 bit from data[1],
+  --   we need 7 more bits from data[0] (MSB-first): 0, 0, 1, 0, 1, 1, 0
+  --   So data[0] = 0b0010110X where X is unused (0) = 0b00101100 = 0x2C
+  let extraBitsData := ByteArray.mk #[0x2C, 0x02]
+  match Zip.Native.BackwardBitReader.init extraBitsData 0 2 with
+  | .ok bbr =>
+    match Zip.Native.decodeSequences extraBitsLitLenTable extraBitsOffsetTable extraBitsMatchLenTable bbr 1 with
+    | .ok seqs =>
+      unless seqs.size == 1 do
+        throw (IO.userError s!"decodeSeq extraBits: expected 1 seq, got {seqs.size}")
+      -- litLen code 16, extra=0 → 16+0 = 16
+      unless seqs[0]!.literalLength == 16 do
+        throw (IO.userError s!"decodeSeq extraBits litLen: expected 16, got {seqs[0]!.literalLength}")
+      -- matchLen code 32, extra=1 → 35+1 = 36
+      unless seqs[0]!.matchLength == 36 do
+        throw (IO.userError s!"decodeSeq extraBits matchLen: expected 36, got {seqs[0]!.matchLength}")
+      -- offset code 3, extra=101=5 → (1<<3)+5 = 13
+      unless seqs[0]!.offset == 13 do
+        throw (IO.userError s!"decodeSeq extraBits offset: expected 13, got {seqs[0]!.offset}")
+    | .error e => throw (IO.userError s!"decodeSequences extraBits failed: {e}")
+  | .error e => throw (IO.userError s!"BackwardBitReader init extraBits failed: {e}")
+
   IO.println "ZstdNative tests: OK"

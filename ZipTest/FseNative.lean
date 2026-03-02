@@ -280,4 +280,83 @@ def ZipTest.FseNative.tests : IO Unit := do
     | .error e => throw (IO.userError s!"parseBlockHeader in FSE integration failed: {e}")
   | .error e => throw (IO.userError s!"parseFrameHeader in FSE integration failed: {e}")
 
+  -- Test 15: Predefined literal length distribution sums to 2^6 = 64
+  let llDist := Zip.Native.predefinedLitLenDistribution
+  let mut llSum : Nat := 0
+  for p in llDist do
+    if p == -1 then llSum := llSum + 1
+    else llSum := llSum + p.toInt.toNat
+  unless llSum == 64 do
+    throw (IO.userError s!"predefined LL distribution sum: expected 64, got {llSum}")
+  unless llDist.size == 36 do
+    throw (IO.userError s!"predefined LL distribution size: expected 36, got {llDist.size}")
+
+  -- Test 16: Predefined match length distribution sums to 2^6 = 64
+  let mlDist := Zip.Native.predefinedMatchLenDistribution
+  let mut mlSum : Nat := 0
+  for p in mlDist do
+    if p == -1 then mlSum := mlSum + 1
+    else mlSum := mlSum + p.toInt.toNat
+  unless mlSum == 64 do
+    throw (IO.userError s!"predefined ML distribution sum: expected 64, got {mlSum}")
+  unless mlDist.size == 53 do
+    throw (IO.userError s!"predefined ML distribution size: expected 53, got {mlDist.size}")
+
+  -- Test 17: Predefined offset distribution sums to 2^5 = 32
+  let ofDist := Zip.Native.predefinedOffsetDistribution
+  let mut ofSum : Nat := 0
+  for p in ofDist do
+    if p == -1 then ofSum := ofSum + 1
+    else ofSum := ofSum + p.toInt.toNat
+  unless ofSum == 32 do
+    throw (IO.userError s!"predefined OF distribution sum: expected 32, got {ofSum}")
+  unless ofDist.size == 29 do
+    throw (IO.userError s!"predefined OF distribution size: expected 29, got {ofDist.size}")
+
+  -- Test 18: buildPredefinedFseTables produces tables with correct sizes
+  match Zip.Native.buildPredefinedFseTables with
+  | .ok (llTable, mlTable, ofTable) =>
+    unless llTable.cells.size == 64 do
+      throw (IO.userError s!"predefined LL table: expected 64 cells, got {llTable.cells.size}")
+    unless llTable.accuracyLog == 6 do
+      throw (IO.userError s!"predefined LL table: expected accuracyLog 6, got {llTable.accuracyLog}")
+    unless mlTable.cells.size == 64 do
+      throw (IO.userError s!"predefined ML table: expected 64 cells, got {mlTable.cells.size}")
+    unless mlTable.accuracyLog == 6 do
+      throw (IO.userError s!"predefined ML table: expected accuracyLog 6, got {mlTable.accuracyLog}")
+    unless ofTable.cells.size == 32 do
+      throw (IO.userError s!"predefined OF table: expected 32 cells, got {ofTable.cells.size}")
+    unless ofTable.accuracyLog == 5 do
+      throw (IO.userError s!"predefined OF table: expected accuracyLog 5, got {ofTable.accuracyLog}")
+  | .error e => throw (IO.userError s!"buildPredefinedFseTables failed: {e}")
+
+  -- Test 19: Symbol coverage - every symbol with nonzero probability appears in the table
+  match Zip.Native.buildPredefinedFseTables with
+  | .ok (llTable, mlTable, ofTable) => do
+    -- Check literal length table: all 36 symbols should appear (all have nonzero prob)
+    let mut llSymSeen := Array.replicate 36 false
+    for i in [:64] do
+      let sym := llTable.cells[i]!.symbol.toNat
+      if sym < 36 then llSymSeen := llSymSeen.set! sym true
+    for sym in [:36] do
+      unless llSymSeen[sym]! do
+        throw (IO.userError s!"predefined LL table: symbol {sym} not found in table")
+    -- Check match length table: all 53 symbols should appear
+    let mut mlSymSeen := Array.replicate 53 false
+    for i in [:64] do
+      let sym := mlTable.cells[i]!.symbol.toNat
+      if sym < 53 then mlSymSeen := mlSymSeen.set! sym true
+    for sym in [:53] do
+      unless mlSymSeen[sym]! do
+        throw (IO.userError s!"predefined ML table: symbol {sym} not found in table")
+    -- Check offset table: all 29 symbols should appear
+    let mut ofSymSeen := Array.replicate 29 false
+    for i in [:32] do
+      let sym := ofTable.cells[i]!.symbol.toNat
+      if sym < 29 then ofSymSeen := ofSymSeen.set! sym true
+    for sym in [:29] do
+      unless ofSymSeen[sym]! do
+        throw (IO.userError s!"predefined OF table: symbol {sym} not found in table")
+  | .error e => throw (IO.userError s!"buildPredefinedFseTables symbol coverage failed: {e}")
+
   IO.println "FseNative tests: OK"

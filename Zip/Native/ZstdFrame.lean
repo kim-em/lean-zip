@@ -698,7 +698,7 @@ structure ZstdSequence where
   matchLength : Nat
   /-- Raw offset value (1-3 are repeat offset codes; ≥4 is actual offset minus 3). -/
   offset : Nat
-  deriving Repr
+  deriving Repr, Inhabited
 
 /-- Resolve a raw offset value against the 3-entry offset history (RFC 8878 §3.1.1.5).
     Returns the actual byte offset and the updated offset history.
@@ -924,5 +924,81 @@ def parseSequencesHeaderWithModes (data : ByteArray) (pos : Nat) :
       matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
     }
     pure (numSeq, modes, pos + 4)
+
+/-- Decode interleaved FSE sequences from a backward bitstream (RFC 8878 §4.1.1).
+    Takes three FSE tables (litLen, offset, matchLen), a `BackwardBitReader`
+    positioned at the start of the encoded sequence data, and `numSeq`.
+    Returns the decoded sequence array.
+
+    Interleaving order per RFC 8878 §4.1.1:
+    - Symbol lookup: offset, matchLen, litLen
+    - Extra bits reading: offset, matchLen, litLen
+    - State update (not on last sequence): litLen, matchLen, offset -/
+def decodeSequences (litLenTable offsetTable matchLenTable : FseTable)
+    (br : BackwardBitReader) (numSeq : Nat) :
+    Except String (Array ZstdSequence) := do
+  if numSeq == 0 then return #[]
+  -- Initialize three FSE states
+  let (litLenInit, br) ← br.readBits litLenTable.accuracyLog
+  let (offsetInit, br) ← br.readBits offsetTable.accuracyLog
+  let (matchLenInit, br) ← br.readBits matchLenTable.accuracyLog
+  let mut litLenState := litLenInit.toNat
+  let mut offsetState := offsetInit.toNat
+  let mut matchLenState := matchLenInit.toNat
+  let mut br := br
+  let mut result : Array ZstdSequence := Array.mkEmpty numSeq
+  let litLenTableSize := 1 <<< litLenTable.accuracyLog
+  let offsetTableSize := 1 <<< offsetTable.accuracyLog
+  let matchLenTableSize := 1 <<< matchLenTable.accuracyLog
+  for i in [:numSeq] do
+    -- Bounds check states
+    if offsetState >= offsetTableSize then
+      throw s!"Zstd: offset FSE state {offsetState} out of range (table size {offsetTableSize})"
+    if matchLenState >= matchLenTableSize then
+      throw s!"Zstd: matchLen FSE state {matchLenState} out of range (table size {matchLenTableSize})"
+    if litLenState >= litLenTableSize then
+      throw s!"Zstd: litLen FSE state {litLenState} out of range (table size {litLenTableSize})"
+    -- Symbol lookup order: offset, matchLen, litLen
+    let offsetCell := offsetTable.cells[offsetState]!
+    let matchLenCell := matchLenTable.cells[matchLenState]!
+    let litLenCell := litLenTable.cells[litLenState]!
+    let offsetCode := offsetCell.symbol.toNat
+    let matchLenCode := matchLenCell.symbol.toNat
+    let litLenCode := litLenCell.symbol.toNat
+    -- Read extra bits order: offset, matchLen, litLen
+    -- Offset extra bits: offsetCode bits (code IS the number of extra bits)
+    let (offsetExtra, br') ← br.readBits offsetCode
+    br := br'
+    -- MatchLen extra bits: look up in matchLenExtraBits table
+    if h : matchLenCode < matchLenExtraBits.size then
+      let (_, matchExtraBitCount) := matchLenExtraBits[matchLenCode]
+      let (matchExtra, br') ← br.readBits matchExtraBitCount
+      br := br'
+      -- LitLen extra bits: look up in litLenExtraBits table
+      if h2 : litLenCode < litLenExtraBits.size then
+        let (_, litExtraBitCount) := litLenExtraBits[litLenCode]
+        let (litExtra, br') ← br.readBits litExtraBitCount
+        br := br'
+        -- Convert codes + extra bits to actual values
+        let offsetVal := decodeOffsetValue offsetCode offsetExtra
+        let matchLenVal ← decodeMatchLenValue matchLenCode matchExtra
+        let litLenVal ← decodeLitLenValue litLenCode litExtra
+        result := result.push { literalLength := litLenVal, matchLength := matchLenVal, offset := offsetVal }
+        -- State update (not on last sequence): litLen, matchLen, offset order
+        if i + 1 < numSeq then
+          let (litBits, br') ← br.readBits litLenCell.numBits.toNat
+          br := br'
+          litLenState := litLenCell.newState.toNat + litBits.toNat
+          let (matchBits, br') ← br.readBits matchLenCell.numBits.toNat
+          br := br'
+          matchLenState := matchLenCell.newState.toNat + matchBits.toNat
+          let (offBits, br') ← br.readBits offsetCell.numBits.toNat
+          br := br'
+          offsetState := offsetCell.newState.toNat + offBits.toNat
+      else
+        throw s!"Zstd: literal length code {litLenCode} out of range (max 35)"
+    else
+      throw s!"Zstd: match length code {matchLenCode} out of range (max 52)"
+  return result
 
 end Zip.Native
