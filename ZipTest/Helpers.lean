@@ -121,6 +121,33 @@ def timeIO (action : IO α) : IO (α × Float) := do
   let elapsedMs := (stop - start).toFloat / 1_000_000.0
   return (result, elapsedMs)
 
+/-- Deterministic pseudo-text: cycles through common English words with spaces and newlines.
+    Moderate redundancy similar to natural English, exercises different code paths than
+    constant/cyclic/prng patterns. -/
+def mkTextData (size : Nat) : ByteArray := Id.run do
+  let words := #["the", "of", "and", "to", "in", "a", "is", "that", "for", "it",
+                  "was", "on", "are", "be", "with", "as", "at", "this", "have", "from",
+                  "or", "by", "not", "but", "what", "all", "were", "when", "we", "there",
+                  "can", "an", "your", "which", "their", "if", "do", "will", "each", "how"]
+  let mut result := ByteArray.empty
+  let mut col : Nat := 0
+  let mut wi : Nat := 0
+  while result.size < size do
+    let word := words[wi % words.size]!
+    wi := wi + 1
+    if col > 0 then
+      if col + 1 + word.length > 72 then
+        result := result.push 0x0A  -- newline
+        col := 0
+      else
+        result := result.push 0x20  -- space
+        col := col + 1
+    for c in word.toUTF8 do
+      if result.size < size then
+        result := result.push c
+    col := col + word.length
+  return result.extract 0 size
+
 /-- Human-readable size name: 1024 → "1KB", 1048576 → "1MB". -/
 def sizeName (n : Nat) : String :=
   if n ≥ 1048576 then s!"{n / 1048576}MB"
