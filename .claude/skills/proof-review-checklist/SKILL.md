@@ -118,6 +118,8 @@ Based on what the `simp` is doing:
 | `simp at h` closing `error = ok` | `exact nomatch h` |
 | `simp at h` closing `none = some` | `exact nomatch h` |
 | `simp [hx]` then contradiction | `simp only [hx] at h; exact nomatch h` |
+| `simp at hmem` closing `x ∈ []` | `exact nomatch hmem` (NOT `absurd hmem (List.not_mem_nil _)` — `List.not_mem_nil` has type `False` not `¬(x ∈ [])`) |
+| `simp at h` closing `[].length ≥ 2` | `simp only [List.length_nil] at h; omega` (`omega` alone can't reduce `[].length`; same for `[_].length`, use `List.length_cons`) |
 | `simp [bind, Option.bind]` | `dsimp only [bind, Option.bind]` |
 | `simp [hx, bind, Option.bind]` | `rw [hx]; dsimp only [bind, Option.bind]` |
 | `simp only []` | Keep — match iota reduction |
