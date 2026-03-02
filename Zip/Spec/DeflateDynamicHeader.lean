@@ -35,9 +35,10 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
     intro heq
     have hge : i ≥ numCodeLen := by omega
     have hdrop : (Deflate.Spec.clPermutation.take numCodeLen).drop i = [] := by
-      simp [List.drop_eq_nil_iff, List.length_take]; omega
+      simp only [List.drop_eq_nil_iff, List.length_take]; omega
     unfold writeDynamicHeader.writeCLLengths
-    simp [show ¬(i < numCodeLen) from by omega, hdrop]
+    simp only [show ¬(i < numCodeLen) from by omega, ↓reduceIte, hdrop,
+      List.flatMap_nil, List.append_nil]
   | succ n ih =>
     intro heq
     have hlt : i < numCodeLen := by omega
@@ -48,19 +49,19 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
     rw [ih _ (i + 1) hwf' (by omega)]
     rw [hbits]
     have hperm_len : Deflate.Spec.clPermutation.length = 19 := by
-      simp [Deflate.Spec.clPermutation]
+      simp only [Deflate.Spec.clPermutation, List.length_cons, List.length_nil]
     have hi_bound : i < (Deflate.Spec.clPermutation.take numCodeLen).length := by
-      simp [List.length_take]; omega
+      simp only [List.length_take]; omega
     rw [List.drop_eq_getElem_cons hi_bound]
     simp only [List.flatMap_cons, List.append_assoc]
     congr 1
     · -- Show the element matches
       have hi_perm : i < Deflate.Spec.clPermutation.length := by
-        simp [Deflate.Spec.clPermutation]; omega
+        simp only [Deflate.Spec.clPermutation, List.length_cons, List.length_nil]; omega
       have hgetD : Deflate.Spec.clPermutation.getD i 0 =
           (Deflate.Spec.clPermutation.take numCodeLen)[i] := by
         rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hi_perm, Option.getD_some]
-        simp
+        simp only [List.getElem_take]
       rw [hgetD]
       simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat]
       have hmod : clLens.getD (Deflate.Spec.clPermutation.take numCodeLen)[i] 0 % 2 ^ 32 =
@@ -71,7 +72,7 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
           by_cases hb : (Deflate.Spec.clPermutation.take numCodeLen)[i] < clLens.length
           · rw [List.getElem?_eq_getElem hb, Option.getD_some]
             exact hcl_bound _ (List.getElem_mem ..)
-          · rw [List.getElem?_eq_none (by omega)]; simp
+          · rw [List.getElem?_eq_none (by omega)]; simp only [Option.getD_none]; omega
         omega
       rw [hmod]
 
@@ -87,7 +88,7 @@ private theorem writeCLLengths_go_wf (bw : BitWriter) (clLens : List Nat)
   | zero =>
     intro heq
     unfold writeDynamicHeader.writeCLLengths
-    simp [show ¬(i < numCodeLen) from by omega]; exact hwf
+    simp only [show ¬(i < numCodeLen) from by omega, ↓reduceIte]; exact hwf
   | succ n ih =>
     intro heq
     unfold writeDynamicHeader.writeCLLengths
@@ -103,7 +104,7 @@ private theorem writeCLEntries_wf (bw : BitWriter) (clCodes : Array (UInt16 × U
     (hvalid : ∀ p ∈ entries, p.1 < clCodes.size) :
     (writeDynamicHeader.writeCLEntries bw clCodes entries).wf := by
   induction entries generalizing bw with
-  | nil => simp [writeDynamicHeader.writeCLEntries]; exact hwf
+  | nil => simp only [writeDynamicHeader.writeCLEntries]; exact hwf
   | cons entry rest ih =>
     obtain ⟨code, extra⟩ := entry
     have hcode_lt : code < clCodes.size := hvalid ⟨code, extra⟩ (.head _)
@@ -140,8 +141,9 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
     bw.toBits ++ bits := by
   induction entries generalizing bw bits with
   | nil =>
+    -- bare simp: Option.bind chain in encodeCLEntries
     simp [Deflate.Spec.encodeCLEntries] at henc
-    simp [writeDynamicHeader.writeCLEntries, henc]
+    simp only [writeDynamicHeader.writeCLEntries, henc, List.append_nil]
   | cons entry rest ih =>
     obtain ⟨code, extra⟩ := entry
     simp only [Deflate.Spec.encodeCLEntries] at henc
@@ -149,14 +151,19 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
         ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
           fun p => (p.2, p.1))
         code with
-    | none => simp [hencsym] at henc
+    | none =>
+      -- bare simp: Option.bind chain with none
+      simp [hencsym] at henc
     | some cwBits =>
       cases hencrest : Deflate.Spec.encodeCLEntries
           ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
             fun p => (p.2, p.1))
           rest with
-      | none => simp [hencsym, hencrest] at henc
+      | none =>
+        -- bare simp: Option.bind chain with none
+        simp [hencsym, hencrest] at henc
       | some restBits =>
+        -- bare simp: Option.bind chain with some
         simp [hencsym, hencrest] at henc
         subst henc
         -- Bridge encodeSymbol ↔ canonicalCodes
@@ -232,12 +239,17 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
         Deflate.Spec.writeCLLengths clLens numCodeLen ++
         symbolBits := by
     unfold Deflate.Spec.encodeDynamicTrees at henc
+    -- bare simp: Prop↔Bool coercion for guard conditions
     simp only [show (litLens.length ≥ 257 ∧ litLens.length ≤ 288) = true from by simp [hlitLen],
                show (distLens.length ≥ 1 ∧ distLens.length ≤ 32) = true from by simp [hdistLen],
                guard, ↓reduceIte, pure, Pure.pure] at henc
     cases hcle : Deflate.Spec.encodeCLEntries clTable clEntries with
-    | none => rw [hcle] at henc; simp at henc
-    | some sb => rw [hcle] at henc; simp at henc; exact ⟨sb, rfl, henc.symm⟩
+    | none =>
+      -- bare simp: Option.bind chain with none
+      rw [hcle] at henc; simp at henc
+    | some sb =>
+      -- bare simp: Option.bind chain with some
+      rw [hcle] at henc; simp at henc; exact ⟨sb, rfl, henc.symm⟩
   obtain ⟨symbolBits, hcle_eq, hbits_eq⟩ := henc_cl
   subst hbits_eq
   -- Bounds needed throughout
@@ -282,7 +294,7 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
       show UInt8.toNat (Nat.toUInt8 n) = n
       simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
       exact Nat.mod_eq_of_lt (by have := hclLens_bounded n hn; omega))]
-    simp
+    exact List.map_id clLens
   -- CL ValidLengths for writeCLEntries_spec
   have hv_cl : Huffman.Spec.ValidLengths (clLengthsArr.toList.map UInt8.toNat) 7 :=
     hrt ▸ Huffman.Spec.computeCodeLengths_valid clFreqPairs 19 7 (by omega) (by omega)
@@ -342,7 +354,7 @@ theorem writeDynamicHeader_wf (bw : BitWriter) (litLens distLens : List Nat)
     Huffman.Spec.computeCodeLengths_bounded clFreqPairs 19 7 (by omega)
   have hcl_codes_size : clCodes.size = clLengthsArr.size := canonicalCodes_size clLengthsArr 7
   have hcl_arr_size : clLengthsArr.size = clLens.length := by
-    simp [clLengthsArr, Array.size_map, List.size_toArray]
+    simp only [clLengthsArr, Array.size_map, List.size_toArray]
   have hcl_len : clLens.length = 19 := Huffman.Spec.computeCodeLengths_length clFreqPairs 19 7
   have hlengths_le : ∀ j, j < clLengthsArr.size → clLengthsArr[j]!.toNat ≤ 7 := by
     intro k hk
