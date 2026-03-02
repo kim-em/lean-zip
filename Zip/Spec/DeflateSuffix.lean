@@ -328,22 +328,22 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
     decodeDynamicTables (bits ++ suffix) = some (litLens, distLens, rest ++ suffix) := by
   unfold decodeDynamicTables at h ⊢
   cases h5 : readBitsLSB 5 bits with
-  | none => simp [h5] at h
+  | none => simp [h5] at h -- bare simp: 1-level Option.bind chain
   | some p₁ =>
     obtain ⟨hlit, bits₁⟩ := p₁
     cases h5d : readBitsLSB 5 bits₁ with
-    | none => simp [h5, h5d] at h
+    | none => simp [h5, h5d] at h -- bare simp: 2-level Option.bind chain
     | some p₂ =>
       obtain ⟨hdist, bits₂⟩ := p₂
       cases h4 : readBitsLSB 4 bits₂ with
-      | none => simp [h5, h5d, h4] at h
+      | none => simp [h5, h5d, h4] at h -- bare simp: 3-level Option.bind chain
       | some p₃ =>
         obtain ⟨hclen, bits₃⟩ := p₃
         cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
             (List.replicate 19 0) bits₃ with
         | none =>
           rw [replicate_19_zero] at hcl
-          simp [h5, h5d, h4, hcl] at h
+          simp [h5, h5d, h4, hcl] at h -- bare simp: 4-level Option.bind chain
         | some p₄ =>
           obtain ⟨clLengths, bits₄⟩ := p₄
           have hcl' := replicate_19_zero ▸ hcl
@@ -352,6 +352,7 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                 ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
                 (hlit + 257 + (hdist + 1)) [] bits₄ with
             | none =>
+              -- bare simp: 6-level Option.bind chain with guard
               simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
             | some p₅ =>
               obtain ⟨codeLengths, bits₅⟩ := p₅
@@ -360,7 +361,8 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                     (codeLengths.take (hlit + 257)) 15
                 · by_cases hvDL : Huffman.Spec.ValidLengths
                       (codeLengths.drop (hlit + 257)) 15
-                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                  · -- bare simp: 6-level Option.bind chain with guard (success case)
+                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
                           guard, pure, Pure.pure] at h
                     obtain ⟨rfl, rfl, rfl⟩ := h
                     have h5' := readBitsLSB_append 5 bits suffix hlit bits₁ h5
@@ -371,15 +373,20 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                     have hcls' := decodeCLSymbols_append _ _ [] bits₄ suffix
                         codeLengths bits₅
                         (allCodes_swapped_prefix_free clLengths 7 hvCL) hcls
+                    -- bare simp: 6-level Option.bind chain with guard (goal)
                     simp [h5', h5d', h4', hcl_a, hvCL, hcls', hlen, hvLL, hvDL,
                           guard, pure, Pure.pure]
-                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                  · -- bare simp: 6-level Option.bind chain with guard+failure
+                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
                           guard, pure, Pure.pure, failure, Alternative.failure] at h
-                · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
+                · -- bare simp: 6-level Option.bind chain with guard+failure
+                  simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
                         guard, pure, Pure.pure, failure, Alternative.failure] at h
-              · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen,
+              · -- bare simp: 6-level Option.bind chain with guard+failure
+                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen,
                       guard, pure, Pure.pure, failure, Alternative.failure] at h
-          · simp [h5, h5d, h4, hcl', hvCL,
+          · -- bare simp: 5-level Option.bind chain with guard+failure
+            simp [h5, h5d, h4, hcl', hvCL,
                   guard, pure, Pure.pure, failure, Alternative.failure] at h
 
 /-- If `decodeDynamicTables` succeeds, both returned length lists are valid. -/
@@ -389,22 +396,22 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
     Huffman.Spec.ValidLengths litLens 15 ∧ Huffman.Spec.ValidLengths distLens 15 := by
   unfold decodeDynamicTables at h
   cases h5 : readBitsLSB 5 bits with
-  | none => simp [h5] at h
+  | none => simp [h5] at h -- bare simp: 1-level Option.bind chain
   | some p₁ =>
     obtain ⟨hlit, bits₁⟩ := p₁
     cases h5d : readBitsLSB 5 bits₁ with
-    | none => simp [h5, h5d] at h
+    | none => simp [h5, h5d] at h -- bare simp: 2-level Option.bind chain
     | some p₂ =>
       obtain ⟨hdist, bits₂⟩ := p₂
       cases h4 : readBitsLSB 4 bits₂ with
-      | none => simp [h5, h5d, h4] at h
+      | none => simp [h5, h5d, h4] at h -- bare simp: 3-level Option.bind chain
       | some p₃ =>
         obtain ⟨hclen, bits₃⟩ := p₃
         cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
             (List.replicate 19 0) bits₃ with
         | none =>
           rw [replicate_19_zero] at hcl
-          simp [h5, h5d, h4, hcl] at h
+          simp [h5, h5d, h4, hcl] at h -- bare simp: 4-level Option.bind chain
         | some p₄ =>
           obtain ⟨clLengths, bits₄⟩ := p₄
           have hcl' := replicate_19_zero ▸ hcl
@@ -413,6 +420,7 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
                 ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
                 (hlit + 257 + (hdist + 1)) [] bits₄ with
             | none =>
+              -- bare simp: 6-level Option.bind chain with guard
               simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
             | some p₅ =>
               obtain ⟨codeLengths, bits₅⟩ := p₅
@@ -421,16 +429,21 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
                     (codeLengths.take (hlit + 257)) 15
                 · by_cases hvDL : Huffman.Spec.ValidLengths
                       (codeLengths.drop (hlit + 257)) 15
-                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                  · -- bare simp: 6-level Option.bind chain with guard (success case)
+                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
                           guard, pure, Pure.pure] at h
                     exact ⟨h.1 ▸ hvLL, h.2.1 ▸ hvDL⟩
-                  · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                  · -- bare simp: 6-level Option.bind chain with guard+failure
+                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
                           guard, pure, Pure.pure, failure, Alternative.failure] at h
-                · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
+                · -- bare simp: 6-level Option.bind chain with guard+failure
+                  simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
                         guard, pure, Pure.pure, failure, Alternative.failure] at h
-              · simp [h5, h5d, h4, hcl', hvCL, hcls, hlen,
+              · -- bare simp: 6-level Option.bind chain with guard+failure
+                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen,
                       guard, pure, Pure.pure, failure, Alternative.failure] at h
-          · simp [h5, h5d, h4, hcl', hvCL,
+          · -- bare simp: 5-level Option.bind chain with guard+failure
+            simp [h5, h5d, h4, hcl', hvCL,
                   guard, pure, Pure.pure, failure, Alternative.failure] at h
 
 /-- If `decodeDynamicTables` succeeds, the returned litLen lengths are valid. -/
@@ -490,12 +503,14 @@ theorem decode_go_suffix
           rw [decodeStored_append bits2 suffix bytes bits3 hsuf hs]
           simp only
           by_cases hf : bfinal == 1
-          · simp [hf] at hgo ⊢; exact hgo
-          · simp [hf] at hgo ⊢
+          · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq] at hgo ⊢; exact hgo
+          · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+              Option.ite_none_right_eq_some, List.length_append,
+              Nat.add_lt_add_iff_right] at hgo ⊢
             by_cases hblen : bits3.length < bits.length
-            · simp [hblen] at hgo
+            · simp only [hblen, true_and] at hgo
               exact ⟨hblen, ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rfl hgo⟩
-            · simp [hblen] at hgo
+            · simp only [hblen, false_and] at hgo
       | 1, hgo =>
         -- Fixed Huffman
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
@@ -511,12 +526,14 @@ theorem decode_go_suffix
           | some acc' =>
             simp only [hr] at hgo ⊢
             by_cases hf : bfinal == 1
-            · simp [hf] at hgo ⊢; exact hgo
-            · simp [hf] at hgo ⊢
+            · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq] at hgo ⊢; exact hgo
+            · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                Option.ite_none_right_eq_some, List.length_append,
+                Nat.add_lt_add_iff_right] at hgo ⊢
               by_cases hblen : bits3.length < bits.length
-              · simp [hblen] at hgo
+              · simp only [hblen, true_and] at hgo
                 exact ⟨hblen, ih bits3.length (hlen ▸ hblen) bits3 acc' result rfl hgo⟩
-              · simp [hblen] at hgo
+              · simp only [hblen, false_and] at hgo
       | 2, hgo =>
         -- Dynamic Huffman
         cases hdt : decodeDynamicTables bits2 with
@@ -540,12 +557,14 @@ theorem decode_go_suffix
             | some acc' =>
               simp only [hr] at hgo ⊢
               by_cases hf : bfinal == 1
-              · simp [hf] at hgo ⊢; exact hgo
-              · simp [hf] at hgo ⊢
+              · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq] at hgo ⊢; exact hgo
+              · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                  Option.ite_none_right_eq_some, List.length_append,
+                  Nat.add_lt_add_iff_right] at hgo ⊢
                 by_cases hblen : bits4.length < bits.length
-                · simp [hblen] at hgo
+                · simp only [hblen, true_and] at hgo
                   exact ⟨hblen, ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo⟩
-                · simp [hblen] at hgo
+                · simp only [hblen, false_and] at hgo
       | n + 3, hgo => contradiction
 
 /-! ## decode.go with remaining bits
@@ -592,12 +611,14 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
           obtain ⟨bytes, bits3⟩ := ps
           simp only [hs] at hgoR ⊢
           by_cases hf : bfinal == 1
-          · simp [hf] at hgoR ⊢; exact hgoR.1
-          · simp [hf] at hgoR ⊢
+          · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at hgoR ⊢
+            exact hgoR.1
+          · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                Option.ite_none_right_eq_some] at hgoR ⊢
             by_cases hblen : bits3.length < bits.length
-            · simp [hblen] at hgoR ⊢
+            · simp only [hblen, true_and] at hgoR ⊢
               exact ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rest rfl hgoR
-            · simp [hblen] at hgoR
+            · simp only [hblen, false_and] at hgoR
       | 1, hgoR =>
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
         | none => simp only [hd] at hgoR; contradiction
@@ -609,12 +630,14 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
           | some acc' =>
             simp only [hr] at hgoR ⊢
             by_cases hf : bfinal == 1
-            · simp [hf] at hgoR ⊢; exact hgoR.1
-            · simp [hf] at hgoR ⊢
+            · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at hgoR ⊢
+              exact hgoR.1
+            · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                  Option.ite_none_right_eq_some] at hgoR ⊢
               by_cases hblen : bits3.length < bits.length
-              · simp [hblen] at hgoR ⊢
+              · simp only [hblen, true_and] at hgoR ⊢
                 exact ih bits3.length (hlen ▸ hblen) bits3 acc' result rest rfl hgoR
-              · simp [hblen] at hgoR
+              · simp only [hblen, false_and] at hgoR
       | 2, hgoR =>
         cases hdt : decodeDynamicTables bits2 with
         | none => simp only [hdt] at hgoR; contradiction
@@ -631,12 +654,14 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
             | some acc' =>
               simp only [hr] at hgoR ⊢
               by_cases hf : bfinal == 1
-              · simp [hf] at hgoR ⊢; exact hgoR.1
-              · simp [hf] at hgoR ⊢
+              · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at hgoR ⊢
+                exact hgoR.1
+              · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                    Option.ite_none_right_eq_some] at hgoR ⊢
                 by_cases hblen : bits4.length < bits.length
-                · simp [hblen] at hgoR ⊢
+                · simp only [hblen, true_and] at hgoR ⊢
                   exact ih bits4.length (hlen ▸ hblen) bits4 acc' result rest rfl hgoR
-                · simp [hblen] at hgoR
+                · simp only [hblen, false_and] at hgoR
       | n + 3, hgoR => contradiction
 
 /-- If `decode.go` succeeds, `decode.goR` also succeeds with some remaining bits. -/
@@ -673,12 +698,14 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
           obtain ⟨bytes, bits3⟩ := ps
           simp only [hs] at hgo ⊢
           by_cases hf : bfinal == 1
-          · simp [hf] at hgo ⊢; exact hgo
-          · simp [hf] at hgo ⊢
+          · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at hgo ⊢
+            exact ⟨bits3, hgo, rfl⟩
+          · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                Option.ite_none_right_eq_some] at hgo ⊢
             by_cases hblen : bits3.length < bits.length
-            · simp [hblen] at hgo ⊢
+            · simp only [hblen, true_and] at hgo ⊢
               exact ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rfl hgo
-            · simp [hblen] at hgo
+            · simp only [hblen, false_and] at hgo
       | 1, hgo =>
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
         | none => simp only [hd] at hgo; contradiction
@@ -690,12 +717,14 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
           | some acc' =>
             simp only [hr] at hgo ⊢
             by_cases hf : bfinal == 1
-            · simp [hf] at hgo ⊢; exact hgo
-            · simp [hf] at hgo ⊢
+            · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at hgo ⊢
+              exact ⟨bits3, hgo, rfl⟩
+            · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                  Option.ite_none_right_eq_some] at hgo ⊢
               by_cases hblen : bits3.length < bits.length
-              · simp [hblen] at hgo ⊢
+              · simp only [hblen, true_and] at hgo ⊢
                 exact ih bits3.length (hlen ▸ hblen) bits3 acc' result rfl hgo
-              · simp [hblen] at hgo
+              · simp only [hblen, false_and] at hgo
       | 2, hgo =>
         cases hdt : decodeDynamicTables bits2 with
         | none => simp only [hdt] at hgo; contradiction
@@ -712,12 +741,14 @@ theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
             | some acc' =>
               simp only [hr] at hgo ⊢
               by_cases hf : bfinal == 1
-              · simp [hf] at hgo ⊢; exact hgo
-              · simp [hf] at hgo ⊢
+              · simp only [hf, ↓reduceIte, Option.pure_def, Option.some.injEq, Prod.mk.injEq] at hgo ⊢
+                exact ⟨bits4, hgo, rfl⟩
+              · simp only [hf, Bool.false_eq_true, ↓reduceIte, dite_eq_ite,
+                    Option.ite_none_right_eq_some] at hgo ⊢
                 by_cases hblen : bits4.length < bits.length
-                · simp [hblen] at hgo ⊢
+                · simp only [hblen, true_and] at hgo ⊢
                   exact ih bits4.length (hlen ▸ hblen) bits4 acc' result rfl hgo
-                · simp [hblen] at hgo
+                · simp only [hblen, false_and] at hgo
       | n + 3, hgo => contradiction
 
 end Deflate.Spec
