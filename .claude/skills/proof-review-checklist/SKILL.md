@@ -85,12 +85,20 @@ obtain ⟨rfl, rfl⟩ := h
 
 ## Phase 3: Bare `simp` Decision Tree
 
-For each bare `simp` (without `only`), follow this decision tree:
+For each bare `simp` (without `only`), follow this decision tree.
+
+**CRITICAL: Do not batch replacements.** Replace at most 3-5 bare simps
+at a time, then build. `simp [X]` is NOT equivalent to `simp only [X]`
+— bare `simp` uses the entire `@[simp]` lemma database plus `X`, while
+`simp only [X]` uses ONLY `X`. A mechanical `simp [X]` → `simp only [X]`
+replacement will fail most of the time. Use the `simp?` discovery
+workflow below instead.
 
 ### Step 1: Try `simp?`
 
-Run `simp?` in place of `simp` to get the minimal lemma set. If it
-produces a `simp only [...]` that works, use it.
+Replace `simp` (or `simp [X]`) with `simp?` (or `simp? [X]`), build,
+and read the `Try this:` info message to get the minimal lemma set.
+If it produces a `simp only [...]` that works, use it.
 
 ### Step 2: Try `simp only []` or `dsimp only`
 
@@ -126,6 +134,10 @@ Based on what the `simp` is doing:
 | `simp at h` (negated comparison) | `simp only [ge_iff_le, Nat.not_le] at h` or `simp only [gt_iff_lt, Nat.not_lt] at h` |
 | `simp_all` (beq→eq + close) | `simp only [beq_iff_eq] at h; exact h` |
 | `by simp` (struct field = literal) | `by show <literal_eq>; omega` or `Or.inl rfl` or `rfl` |
+| `simp [Spec.readBitsLSB, ...]` (Option do-notation) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
+| `simp [hpos0, hpos1]` (getElem!/getElem) | `simp only [getElem!_pos, hpos0, hpos1, ...]` |
+| `simp` after `split` on Bool `if` | `split <;> rfl` |
+| `simp [Nat.toUInt32]; omega` | `simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd, Nat.mod_mod_of_dvd, ...]; omega` |
 
 ### Step 4: Accept bare simp with comment
 
