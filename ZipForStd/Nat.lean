@@ -12,7 +12,7 @@ namespace Nat
     This holds because bit `n` of `a` is 0, so there's no overlap. -/
 theorem or_two_pow_eq_add {a n : Nat} (h : a < 2 ^ n) : a ||| 2 ^ n = a + 2 ^ n := by
   have := Nat.two_pow_add_eq_or_of_lt h 1
-  simp [Nat.mul_one] at this
+  simp only [Nat.mul_one] at this
   rw [Nat.or_comm, ← this, Nat.add_comm]
 
 end Nat

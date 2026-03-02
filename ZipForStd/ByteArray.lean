@@ -32,13 +32,17 @@ theorem data_toList_length (data : ByteArray) :
 theorem extract_append_ge (a b : ByteArray) (i j : Nat) (h : i ≥ a.size) :
     (a ++ b).extract i j = b.extract (i - a.size) (j - a.size) := by
   apply ByteArray.ext
-  simp [ByteArray.data_extract, ByteArray.data_append, Array.extract_append]
+  simp only [data_extract, data_append, Array.extract_append, size_data,
+        Array.append_left_eq_self, Array.extract_eq_empty_iff]
   omega
 
 /-- Extracting from 0 to `a.size` in `a ++ b` gives `a`. -/
 theorem extract_append_left (a b : ByteArray) :
     (a ++ b).extract 0 a.size = a := by
-  apply ByteArray.ext; simp
+  apply ByteArray.ext
+  simp only [data_extract, data_append, Array.extract_append, size_data, Nat.zero_le,
+        Nat.sub_eq_zero_of_le, Nat.sub_self, Array.extract_zero, Array.append_empty,
+        Array.extract_eq_self_iff, size_eq_zero_iff, Std.le_refl, and_self, or_true]
 
 /-- `ByteArray.push` appends one element to `data.toList`. -/
 theorem push_data_toList (buf : ByteArray) (b : UInt8) :
