@@ -8,9 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) progressing rapidly
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
 - **Sorries**: 0
-- **Sessions**: ~242 completed (Feb 19 – Mar 2)
+- **Sessions**: ~255 completed (Feb 19 – Mar 2)
 - **Source files**: 90 (43 spec, 11 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
-- **Merged PRs**: 205
+- **Merged PRs**: 218
+- **Bare simp**: ~129 remaining across 25 of 43 spec files (18 spec files fully clean)
 
 ## Milestones
 
@@ -100,17 +101,25 @@ size bound is now the native inflate's default `maxOutputSize` (a runtime
 zip-bomb guard), not a fuel/termination limitation — all recursive functions
 use well-founded recursion (Track C2 complete).
 
-**Proof quality reviews** (60+ sessions): systematic code review across
-all spec files, reducing proof size, extracting reusable lemmas to
-ZipForStd, splitting large files for maintainability, and converting
-bare `simp` to `simp only`. Reviews to date: Deflate (#369),
-DecodeComplete (#374, #442), BitReaderInvariant (#382), HuffmanCorrect +
-HuffmanCorrectLoop (#385), InflateCorrect (#387), InflateRawSuffix (#391),
-DeflateFixedCorrect (#404), LZ77 (#408), InflateLoopBounds (#413),
-DeflateDynamicFreqs (#414), DynamicTreesComplete (#440),
-DynamicTreesCorrect (#441), DeflateEncode (#448, #457),
-BitstreamCorrect (#459). Bare `simp` reduced from hundreds across spec
-files to 15 remaining instances in 10 files (documented resistant patterns).
+**Proof quality reviews** (70+ sessions): systematic code review across
+spec files, reducing proof size, extracting reusable lemmas to ZipForStd,
+splitting large files for maintainability, and converting bare `simp` to
+`simp only`. Reviews to date: Deflate (#369), DecodeComplete (#374, #442),
+BitReaderInvariant (#382), HuffmanCorrect + HuffmanCorrectLoop (#385),
+InflateCorrect (#387), InflateRawSuffix (#391), DeflateFixedCorrect (#404),
+LZ77 (#408), InflateLoopBounds (#413), DeflateDynamicFreqs (#414),
+DynamicTreesComplete (#440), DynamicTreesCorrect (#441),
+DeflateEncode (#448, #457), BitstreamCorrect (#459),
+HuffmanEncode (#467), EmitTokensCorrect (#470), DeflateEncodeProps (#485),
+BitWriterCorrect (#488, #505), DeflateStoredCorrect (#498),
+BitstreamWriteCorrect (#500), DeflateDynamicCorrect (#507).
+
+**Bare simp status**: ~129 remaining across 25 of 43 spec files. 18 spec
+files fully clean (0 bare simp). The highest-count unreviewed files:
+DecodeComplete (20), DeflateEncodeDynamicProps (15), DeflateDynamicHeader (12),
+DeflateEncodeDynamic (8), DeflateDynamicCorrect (8). Several reviewed files
+retain 1–6 documented resistant patterns (concrete bit computation, complex
+arithmetic goals where `simp only` lemma sets are impractically large).
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -239,7 +248,7 @@ decompression and adding multi-frame support.
   block types × 3 size formats) and `parseSequencesHeader` (sequence count
   + compression mode bytes for literals/offsets/match lengths).
 
-**FSE (Finite State Entropy) infrastructure (`Zip/Native/Fse.lean`, ~303 lines):**
+**FSE (Finite State Entropy) infrastructure (`Zip/Native/Fse.lean`, ~327 lines):**
 - Distribution decoder (#429): `decodeFseDistribution` reads compact probability
   distributions from the bitstream, producing normalized symbol counts.
 - Table construction (#429): `buildFseTable` builds the FSE decoding table
@@ -249,6 +258,8 @@ decompression and adding multi-frame support.
   `isFinished`.
 - Symbol decoding (#452): `decodeFseSymbols` decodes sequences of symbols
   from FSE state machine lookups.
+- `decodeFseSymbolsAll` (#479): variant that loops until `BackwardBitReader.isFinished`
+  (for variable-length outputs like Huffman weight sequences).
 
 **Sequence execution (`ZstdFrame.lean`):**
 - Sequence execution engine (#447): `ZstdSequence` structure, `resolveOffset`
@@ -256,40 +267,60 @@ decompression and adding multi-frame support.
   semantics, `executeSequences` for reconstructing output from literal/match
   interleaving.
 
-**Huffman tree descriptors (#458):**
-- Direct representation parsing: `parseHuffmanWeightsDirect` reads raw 4-bit
+**Huffman tree descriptors (#458, #479):**
+- Direct representation parsing (#458): `parseHuffmanWeightsDirect` reads raw 4-bit
   weight nibbles, `weightsToMaxBits` computes max bit depth from weight
   distribution, `buildZstdHuffmanTable` constructs lookup table from weights.
+- FSE-compressed representation (#479): `parseHuffmanWeightsFse` decodes weight
+  sequences via FSE tables, the common case in real-world Zstd files at default
+  compression levels.
 - `parseHuffmanTreeDescriptor` dispatches between direct and FSE-compressed
   weight representations.
 
+**Sequence infrastructure (#466):**
+- Extra bits tables (`litLenExtraBits`, `matchLenExtraBits`, `litLenBaseValues`,
+  `matchLenBaseValues`) implementing RFC 8878 §3.1.1.3.2.1 tables.
+- Compression mode parsing: `parseCompressionMode` decodes 2-bit mode fields
+  (predefined, RLE, FSE-compressed, repeat) for sequence header entries.
+
+**Multi-frame support (#490):**
+- `decompressMultiFrame`: loops over concatenated frames (RFC 8878 §3.1),
+  accumulating decompressed output.
+- `decompressSkippableFrame`: identifies and skips skippable frames
+  (magic 0x184D2A50–0x184D2A5F).
+- `decompressZstd`: top-level entry point handling both standard and
+  skippable frames.
+
 **Tests:** 25+ tests in `ZipTest/ZstdNative.lean` covering header parsing,
 RLE/raw blocks, FSE distribution decoding, table construction, backward
-bitstream reading, sequence execution, and checksum verification.
+bitstream reading, sequence execution, Huffman weight parsing, compression
+mode parsing, multi-frame support, and checksum verification.
 
 **Remaining:**
-- Predefined FSE distribution tables for sequences (#437, PR open)
-- Huffman-compressed literal stream decoding
-- Sequence extra bits tables and compression mode parsing
-- Multi-frame and skippable frame support (#454, claimed)
+- Predefined FSE distribution tables for sequences (PR #489, conflicting)
+- Huffman-compressed literal stream decoding (PR #508, open)
+- Interleaved FSE sequence decode loop (PR #512, open)
 - Wiring: compressed block decompression end-to-end
 - Spec-level decoder with correctness proofs
 - Compressor + roundtrip proof
 
 Track E has crossed a significant threshold: the individual building blocks
-for compressed block decompression (FSE tables, backward bitstreams, sequence
-execution, Huffman descriptors) are implemented. The remaining implementation
-work is primarily integration — connecting these components into the
-`decompressBlocks` pipeline for `ZstdBlockType.compressed`.
+for compressed block decompression are all implemented — FSE tables, backward
+bitstreams, sequence execution, Huffman descriptors (both direct and FSE-
+compressed), extra bits tables, compression mode parsing, and multi-frame
+support. The remaining implementation work is primarily integration:
+connecting these components into the `decompressBlocks` pipeline for
+`ZstdBlockType.compressed`. Three PRs (#489, #508, #512) are open and
+would bring this close to end-to-end decompression of compressed blocks.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~242 sessions: majority implementation, ~100 review, ~7 self-improvement,
+- ~255 sessions: majority implementation, ~110 review, ~8 self-improvement,
   remainder PR maintenance, planning, and summarization
-- 205 merged PRs (Feb 19 – Mar 2)
+- 218 merged PRs (Feb 19 – Mar 2)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
-  bare-simp-resistant pattern catalog (#386)
+  bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491)
