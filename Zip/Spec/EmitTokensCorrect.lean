@@ -46,7 +46,7 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
     intro heq
     have hge : i ≥ tokens.size := by omega
     have hdrop : tokens.toList.drop i = [] := by
-      simp [List.drop_eq_nil_iff, Array.length_toList]; omega
+      simp only [List.drop_eq_nil_iff, Array.length_toList]; omega
     rw [hdrop, List.map_nil] at henc
     simp only [Deflate.Spec.encodeSymbols] at henc
     cases henc
@@ -61,7 +61,7 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
       Deflate.encodeSymbols_cons_some _ _ _ _ _ henc
     subst hbits_eq
     -- Bridge array ↔ list indexing
-    have htoList : tokens[i] = tokens.toList[i] := by simp [Array.getElem_toList]
+    have htoList : tokens[i] = tokens.toList[i] := by simp only [Array.getElem_toList]
     -- Unfold emitTokens one step and take the positive branch
     unfold emitTokens
     simp only [dif_pos hlt]
@@ -85,24 +85,36 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
       have htok_list : tokens.toList[i] = .reference len dist := htoList ▸ htok
       simp only [LZ77Token.toLZ77Symbol, htok_list, Deflate.Spec.encodeLitLen] at hencsym
       cases hflc : Deflate.Spec.findLengthCode len with
-      | none => simp [hflc] at hencsym
+      | none =>
+        simp only [hflc, bind, Option.bind] at hencsym
+        exact nomatch hencsym
       | some lc =>
         obtain ⟨lidx, lextraN, lextraV⟩ := lc
         cases henclen : Deflate.Spec.encodeSymbol
             ((Huffman.Spec.allCodes Deflate.Spec.fixedLitLengths).map fun p => (p.2, p.1))
             (257 + lidx) with
-        | none => simp [hflc, henclen] at hencsym
+        | none =>
+          simp only [hflc, henclen, bind, Option.bind] at hencsym
+          exact nomatch hencsym
         | some lenBits =>
           cases hfdc : Deflate.Spec.findDistCode dist with
-          | none => simp [hflc, hfdc] at hencsym
+          | none =>
+            simp only [hflc, bind, Option.bind] at hencsym
+            simp only [henclen, hfdc] at hencsym
+            exact nomatch hencsym
           | some dc =>
             obtain ⟨didx, dextraN, dextraV⟩ := dc
             cases hencdist : Deflate.Spec.encodeSymbol
                 ((Huffman.Spec.allCodes Deflate.Spec.fixedDistLengths).map fun p => (p.2, p.1))
                 didx with
-            | none => simp [hflc, hfdc, hencdist] at hencsym
+            | none =>
+              simp only [hflc, bind, Option.bind] at hencsym
+              simp only [henclen, hfdc, hencdist] at hencsym
+              exact nomatch hencsym
             | some distBits =>
-              simp [hflc, henclen, hfdc, hencdist] at hencsym
+              simp only [hflc, bind, Option.bind] at hencsym
+              simp only [henclen, hfdc, hencdist,
+                pure, Pure.pure, Option.some.injEq] at hencsym
               subst hencsym
               -- Bridge lemmas
               have hnflc := Deflate.findLengthCode_agree len lidx lextraN lextraV hflc
@@ -203,10 +215,10 @@ protected theorem encodeSymbols_append_inv
   | cons s rest ih =>
     simp only [List.cons_append, Deflate.Spec.encodeSymbols] at h
     cases hes : Deflate.Spec.encodeLitLen litLengths distLengths s with
-    | none => simp [hes] at h
+    | none => simp only [hes, bind, Option.bind] at h; exact nomatch h
     | some sBits =>
       cases her : Deflate.Spec.encodeSymbols litLengths distLengths (rest ++ ys) with
-      | none => simp [hes, her] at h
+      | none => simp only [hes, her, bind, Option.bind] at h; exact nomatch h
       | some restBits =>
         simp only [hes, her, bind, Option.bind, pure, Pure.pure] at h
         have h := Option.some.inj h
@@ -225,11 +237,11 @@ theorem findTableCode_go_idx_bound (baseTable : Array UInt16)
   unfold findTableCode.go at h
   split at h
   · split at h
-    · simp at h; omega
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h; omega
     · exact findTableCode_go_idx_bound baseTable extraTable value (i + 1) idx extraN extraV h
   · split at h
-    · simp at h; omega
-    · simp at h
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h; omega
+    · exact nomatch h
 termination_by baseTable.size - i
 
 /-- `findTableCode.go` returns extraN = extraTable[idx]!.toNat. -/
@@ -240,11 +252,11 @@ theorem findTableCode_go_extraN (baseTable : Array UInt16)
   unfold findTableCode.go at h
   split at h
   · split at h
-    · simp at h; rw [← h.1]; exact h.2.1.symm
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
     · exact findTableCode_go_extraN baseTable extraTable value (i + 1) idx extraN extraV h
   · split at h
-    · simp at h; rw [← h.1]; exact h.2.1.symm
-    · simp at h
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
+    · exact nomatch h
 termination_by baseTable.size - i
 
 /-- Native `findLengthCode` returns idx < 29. -/
@@ -288,19 +300,19 @@ theorem canonicalCodes_size (lengths : Array UInt8) (maxBits : Nat := 15) :
     (canonicalCodes lengths maxBits).size = lengths.size := by
   simp only [canonicalCodes]
   rw [Deflate.Correctness.canonicalCodes_go_size]
-  simp [Array.size_replicate]
+  simp only [Array.size_replicate]
 
 /-- `fixedLitCodes` has size 288 (= Inflate.fixedLitLengths.size). -/
 private theorem fixedLitCodes_size : fixedLitCodes.size = 288 := by
   show (canonicalCodes Inflate.fixedLitLengths).size = 288
   rw [canonicalCodes_size]
-  simp [Inflate.fixedLitLengths, Array.size_append, Array.size_replicate]
+  simp only [Inflate.fixedLitLengths, Array.size_append, Array.size_replicate]
 
 /-- `fixedDistCodes` has size 32 (= Inflate.fixedDistLengths.size). -/
 private theorem fixedDistCodes_size : fixedDistCodes.size = 32 := by
   show (canonicalCodes Inflate.fixedDistLengths).size = 32
   rw [canonicalCodes_size]
-  simp [Inflate.fixedDistLengths, Array.size_replicate]
+  simp only [Inflate.fixedDistLengths, Array.size_replicate]
 
 /-- `canonicalCodes.go` preserves a bound on `.snd.toNat`: if all entries in
     `result` have `.snd.toNat ≤ bound` and all entries in `lengths` have
@@ -354,11 +366,11 @@ theorem canonicalCodes_snd_le (lengths : Array UInt8) (bound : Nat)
     (canonicalCodes lengths)[i]!.2.toNat ≤ bound := by
   simp only [canonicalCodes] at hi ⊢
   apply canonicalCodes_go_snd_le lengths _ 0 _ bound
-  · simp [Array.size_replicate]
+  · simp only [Array.size_replicate]
   · intro j hj
     simp only [Array.size_replicate] at hj
-    rw [getElem!_pos _ _ (by simp [Array.size_replicate]; omega)]
-    simp [Array.getElem_replicate]
+    rw [getElem!_pos _ _ (by simp only [Array.size_replicate]; omega)]
+    simp only [Array.getElem_replicate]; exact Nat.zero_le _
   · exact hlengths
   · exact hi
 
@@ -369,11 +381,11 @@ theorem canonicalCodes_snd_le' (lengths : Array UInt8) (maxBits : Nat) (bound : 
     (canonicalCodes lengths maxBits)[i]!.2.toNat ≤ bound := by
   simp only [canonicalCodes] at hi ⊢
   apply canonicalCodes_go_snd_le lengths _ 0 _ bound
-  · simp [Array.size_replicate]
+  · simp only [Array.size_replicate]
   · intro j hj
     simp only [Array.size_replicate] at hj
-    rw [getElem!_pos _ _ (by simp [Array.size_replicate]; omega)]
-    simp [Array.getElem_replicate]
+    rw [getElem!_pos _ _ (by simp only [Array.size_replicate]; omega)]
+    simp only [Array.getElem_replicate]; exact Nat.zero_le _
   · exact hlengths
   · exact hi
 
@@ -384,22 +396,22 @@ private theorem fixedLitLengths_le_15 (j : Nat) (hj : j < Inflate.fixedLitLength
   simp only [Inflate.fixedLitLengths, Array.size_append, Array.size_replicate] at hj
   show ((Array.replicate 144 (8 : UInt8) ++ Array.replicate 112 9 ++
     Array.replicate 24 7 ++ Array.replicate 8 8)[j]!).toNat ≤ 15
-  rw [getElem!_pos _ _ (by simp [Array.size_append, Array.size_replicate]; omega)]
+  rw [getElem!_pos _ _ (by simp only [Array.size_append, Array.size_replicate]; omega)]
   simp only [Array.getElem_append, Array.size_append, Array.size_replicate]
   split
   · split
     · split
-      · simp [Array.getElem_replicate]
-      · simp [Array.getElem_replicate]
-    · simp [Array.getElem_replicate]
-  · simp [Array.getElem_replicate]
+      · simp only [Array.getElem_replicate]; decide
+      · simp only [Array.getElem_replicate]; decide
+    · simp only [Array.getElem_replicate]; decide
+  · simp only [Array.getElem_replicate]; decide
 
 /-- All entries in `fixedDistLengths` have `.toNat ≤ 15`. -/
 private theorem fixedDistLengths_le_15 (j : Nat) (hj : j < Inflate.fixedDistLengths.size) :
     Inflate.fixedDistLengths[j]!.toNat ≤ 15 := by
   simp only [Inflate.fixedDistLengths, Array.size_replicate] at hj ⊢
-  rw [getElem!_pos _ _ (by simp [Array.size_replicate]; omega)]
-  simp [Array.getElem_replicate]
+  rw [getElem!_pos _ _ (by simp only [Array.size_replicate]; omega)]
+  simp only [Array.getElem_replicate]; decide
 
 /-- All entries in `fixedLitCodes` have code length ≤ 15.
     Proof: the fixed Huffman table uses lengths 7, 8, 9 (all ≤ 15). -/
