@@ -1,12 +1,14 @@
 import Zip.Binary
 
 /-!
-  Pure Lean parser for Zstandard frame headers (RFC 8878 §3.1.1).
+  Pure Lean parser for Zstandard frame headers and blocks (RFC 8878 §3.1.1).
 
   Parses the fixed-format header at the start of every Zstd frame:
   magic number, frame header descriptor (bit fields), optional window
   descriptor, optional dictionary ID, and optional frame content size.
-  This is the foundation for native Zstd decompression.
+  Also parses the block-level structure within a frame: 3-byte block
+  headers (Last_Block, Block_Type, Block_Size) and decompresses Raw
+  (verbatim copy) and RLE (single byte repeated) blocks.
 -/
 
 namespace Zip.Native
@@ -115,5 +117,94 @@ def parseFrameHeader (data : ByteArray) (pos : Nat) :
     contentSize
     windowSize
   }, off)
+
+/-- Zstd block type (RFC 8878 §3.1.1.2): bits 1-2 of the 3-byte block header. -/
+inductive ZstdBlockType where
+  | raw        -- 0: uncompressed, copied verbatim
+  | rle        -- 1: single byte repeated Block_Size times
+  | compressed -- 2: Zstd-compressed data (FSE + Huffman)
+  | reserved   -- 3: not allowed
+  deriving Repr, BEq
+
+/-- Parsed Zstd block header (3 bytes, RFC 8878 §3.1.1.2). -/
+structure ZstdBlockHeader where
+  /-- True if this is the last block in the frame. -/
+  lastBlock : Bool
+  /-- Block type: raw, rle, compressed, or reserved. -/
+  blockType : ZstdBlockType
+  /-- Block content size in bytes (21-bit value). -/
+  blockSize : UInt32
+  deriving Repr
+
+/-- Parse a 3-byte Zstd block header at `pos`.
+    Returns the parsed header and the position after the 3 header bytes. -/
+def parseBlockHeader (data : ByteArray) (pos : Nat) :
+    Except String (ZstdBlockHeader × Nat) := do
+  if data.size < pos + 3 then
+    throw "Zstd: not enough data for block header"
+  -- Read 3 bytes as little-endian 24-bit value
+  let b0 := data[pos]!.toUInt32
+  let b1 := data[pos + 1]!.toUInt32
+  let b2 := data[pos + 2]!.toUInt32
+  let raw24 := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
+  let lastBlock := raw24 &&& 1 == 1       -- bit 0
+  let typeVal := (raw24 >>> 1) &&& 3      -- bits 1-2
+  let blockSize := raw24 >>> 3            -- bits 3-23
+  let blockType ← match typeVal with
+    | 0 => pure ZstdBlockType.raw
+    | 1 => pure ZstdBlockType.rle
+    | 2 => pure ZstdBlockType.compressed
+    | _ => throw "Zstd: reserved block type"
+  return ({ lastBlock, blockType, blockSize }, pos + 3)
+
+/-- Decompress a raw (verbatim) block: copy `blockSize` bytes from `pos`.
+    Returns the copied bytes and the position after the block content. -/
+def decompressRawBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
+    Except String (ByteArray × Nat) := do
+  let sz := blockSize.toNat
+  if data.size < pos + sz then
+    throw "Zstd: not enough data for raw block"
+  return (data.extract pos (pos + sz), pos + sz)
+
+/-- Decompress an RLE block: read 1 byte and repeat it `blockSize` times.
+    Returns the repeated bytes and the position after the single source byte. -/
+def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
+    Except String (ByteArray × Nat) := do
+  if data.size < pos + 1 then
+    throw "Zstd: not enough data for RLE block"
+  let byte := data[pos]!
+  let sz := blockSize.toNat
+  let mut result := ByteArray.empty
+  for _ in [:sz] do
+    result := result.push byte
+  return (result, pos + 1)
+
+/-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
+    Loops through block headers, dispatches on block type, and accumulates output.
+    Returns the decompressed content.
+    Currently returns an error for compressed blocks (not yet implemented). -/
+def decompressBlocks (data : ByteArray) (pos : Nat) : Except String ByteArray := do
+  let mut off := pos
+  let mut output := ByteArray.empty
+  let mut done := false
+  while !done do
+    let (hdr, afterHdr) ← parseBlockHeader data off
+    off := afterHdr
+    match hdr.blockType with
+    | .raw =>
+      let (block, afterBlock) ← decompressRawBlock data off hdr.blockSize
+      output := output ++ block
+      off := afterBlock
+    | .rle =>
+      let (block, afterByte) ← decompressRLEBlock data off hdr.blockSize
+      output := output ++ block
+      off := afterByte
+    | .compressed =>
+      throw "Zstd: compressed blocks not yet implemented"
+    | .reserved =>
+      throw "Zstd: reserved block type"
+    if hdr.lastBlock then
+      done := true
+  return output
 
 end Zip.Native

@@ -75,4 +75,81 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless cs == large.size.toUInt64 do
       throw (IO.userError s!"large: expected contentSize {large.size}, got {cs}")
 
+  -- Test 10: parseBlockHeader on FFI-compressed data (after frame header)
+  let compressed ← Zstd.compress testData
+  match Zip.Native.parseFrameHeader compressed 0 with
+  | .ok (_, blockStart) =>
+    match Zip.Native.parseBlockHeader compressed blockStart with
+    | .ok (blkHdr, _) =>
+      unless blkHdr.blockSize.toNat > 0 do
+        throw (IO.userError s!"block: expected blockSize > 0, got {blkHdr.blockSize}")
+      -- Block type should be raw, rle, or compressed (not reserved)
+      unless blkHdr.blockType != .reserved do
+        throw (IO.userError "block: got reserved block type")
+    | .error e => throw (IO.userError s!"parseBlockHeader failed: {e}")
+  | .error e => throw (IO.userError s!"parseFrameHeader failed: {e}")
+
+  -- Test 11: decompressRLEBlock produces correct repeated output
+  -- Manually construct a byte array: [0xAA] and decompress as RLE with size 5
+  let rleSrc := ByteArray.mk #[0xAA]
+  match Zip.Native.decompressRLEBlock rleSrc 0 5 with
+  | .ok (result, endPos) =>
+    unless result.size == 5 do
+      throw (IO.userError s!"RLE: expected 5 bytes, got {result.size}")
+    unless endPos == 1 do
+      throw (IO.userError s!"RLE: expected endPos 1, got {endPos}")
+    for i in [:5] do
+      unless result[i]! == 0xAA do
+        throw (IO.userError s!"RLE: byte {i} expected 0xAA, got {result[i]!}")
+  | .error e => throw (IO.userError s!"decompressRLEBlock failed: {e}")
+
+  -- Test 12: decompressRawBlock produces correct verbatim copy
+  let rawSrc := ByteArray.mk #[0x01, 0x02, 0x03, 0x04, 0x05]
+  match Zip.Native.decompressRawBlock rawSrc 1 3 with
+  | .ok (result, endPos) =>
+    unless result.size == 3 do
+      throw (IO.userError s!"Raw: expected 3 bytes, got {result.size}")
+    unless endPos == 4 do
+      throw (IO.userError s!"Raw: expected endPos 4, got {endPos}")
+    unless result[0]! == 0x02 && result[1]! == 0x03 && result[2]! == 0x04 do
+      throw (IO.userError "Raw: incorrect bytes copied")
+  | .error e => throw (IO.userError s!"decompressRawBlock failed: {e}")
+
+  -- Test 13: parseBlockHeader on truncated input fails
+  match Zip.Native.parseBlockHeader (ByteArray.mk #[0x00, 0x00]) 0 with
+  | .ok _ => throw (IO.userError "truncated block header: should have failed")
+  | .error _ => pure ()
+
+  -- Test 14: decompressBlocks on empty-input compressed data
+  -- Empty input compressed by zstd may produce a single block (likely RLE or raw of size 0)
+  let emptyCompressed ← Zstd.compress ByteArray.empty
+  match Zip.Native.parseFrameHeader emptyCompressed 0 with
+  | .ok (_, blockStart) =>
+    -- Try to decompress blocks — may succeed (raw/RLE) or fail (compressed)
+    match Zip.Native.decompressBlocks emptyCompressed blockStart with
+    | .ok result =>
+      unless result.size == 0 do
+        throw (IO.userError s!"empty blocks: expected 0 output bytes, got {result.size}")
+    | .error e =>
+      -- If it fails because of compressed block type, that's acceptable
+      unless e.contains "compressed blocks not yet implemented" do
+        throw (IO.userError s!"empty blocks: unexpected error: {e}")
+  | .error e => throw (IO.userError s!"parseFrameHeader on empty: {e}")
+
+  -- Test 15: decompressBlocks round-trip on constant data
+  -- Constant data often gets stored as RLE blocks by zstd
+  let constData := mkConstantData 256
+  let constCompressed ← Zstd.compress constData 1
+  match Zip.Native.parseFrameHeader constCompressed 0 with
+  | .ok (_, blockStart) =>
+    match Zip.Native.decompressBlocks constCompressed blockStart with
+    | .ok result =>
+      unless result.data == constData.data do
+        throw (IO.userError s!"const blocks: decompressed {result.size} bytes, expected {constData.size}")
+    | .error e =>
+      -- Compressed blocks are expected for some data — not a test failure
+      unless e.contains "compressed blocks not yet implemented" do
+        throw (IO.userError s!"const blocks: unexpected error: {e}")
+  | .error e => throw (IO.userError s!"parseFrameHeader on const: {e}")
+
   IO.println "ZstdNative tests: OK"
