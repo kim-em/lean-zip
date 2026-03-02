@@ -300,4 +300,28 @@ def decodeFseSymbols (table : FseTable) (br : BackwardBitReader) (count : Nat) :
       state := cell.newState.toNat + bits.toNat
   return (result, br)
 
+/-- Decode FSE symbols until the backward bitstream is fully consumed.
+    Used for Huffman weight decoding where the symbol count is not known in advance
+    (RFC 8878 §4.2.1). Uses a fuel parameter for termination.
+    Returns the decoded symbols as an array. -/
+def decodeFseSymbolsAll (table : FseTable) (br : BackwardBitReader)
+    (fuel : Nat := 4096) : Except String (Array UInt8 × BackwardBitReader) := do
+  let tableSize := 1 <<< table.accuracyLog
+  -- Initialize state from stream
+  let (initState, br) ← br.readBits table.accuracyLog
+  let mut state := initState.toNat
+  let mut br := br
+  let mut result : Array UInt8 := #[]
+  for _ in [:fuel] do
+    if state >= tableSize then
+      throw s!"FSE decode: state {state} out of range (table size {tableSize})"
+    let cell := table.cells[state]!
+    result := result.push cell.symbol.toUInt8
+    if br.isFinished then
+      break
+    let (bits, br') ← br.readBits cell.numBits.toNat
+    br := br'
+    state := cell.newState.toNat + bits.toNat
+  return (result, br)
+
 end Zip.Native
