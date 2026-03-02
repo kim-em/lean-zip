@@ -114,7 +114,7 @@ private theorem readBytes_append (br : BitReader) (suffix : ByteArray)
         (br.alignToByte.pos + n) =
         br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) := by
       apply ByteArray.ext
-      -- bare simp: Array.extract_append + suffix extract elimination needs full simp set
+      -- bare simp: Array.extract_append reduction needs full simp database
       simp [ByteArray.data_extract, ByteArray.data_append, Array.extract_append]
       omega
     rw [hext]

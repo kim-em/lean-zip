@@ -225,7 +225,7 @@ theorem readUInt16LE_complete (br : Zip.Native.BitReader) (val : Nat) (rest : Li
     rw [Nat.mod_eq_of_lt hhi_shift]
     -- val.toUInt16.toNat = val since val < 2^16
     rw [show val.toUInt16.toNat = val from by
-      simp [Nat.toUInt16, Nat.mod_eq_of_lt hbound]] -- bare simp: UInt16 normalization
+      dsimp only [Nat.toUInt16]; exact Nat.mod_eq_of_lt hbound]
     -- Goal: lo ||| hi * 2^8 = val
     -- Use Nat.or_comm then shiftLeft_add_eq_or_of_lt (reversed) to convert ||| to +
     rw [Nat.or_comm, ← Nat.shiftLeft_eq, ← Nat.shiftLeft_add_eq_or_of_lt hlo, Nat.shiftLeft_eq]
