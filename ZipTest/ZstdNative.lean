@@ -429,4 +429,74 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
       throw (IO.userError s!"comp block: unexpected error stage: {e}")
 
+  -- Test 40: executeSequences — literals only (0 sequences)
+  let litOnly := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]
+  match Zip.Native.executeSequences #[] litOnly with
+  | .ok result =>
+    unless result.data == litOnly.data do
+      throw (IO.userError s!"lit only: expected ABCD, got {result.data}")
+  | .error e => throw (IO.userError s!"lit only failed: {e}")
+
+  -- Test 41: executeSequences — simple match (non-overlapping)
+  -- 4 literal bytes "ABCD", then copy 4 bytes from offset 4 → "ABCDABCD"
+  let simpleLit := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]
+  let simpleSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 4, matchLength := 4, offset := 7 }  -- offset 7 = actual 4 (7-3)
+  ]
+  match Zip.Native.executeSequences simpleSeqs simpleLit with
+  | .ok result =>
+    let expected := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x41, 0x42, 0x43, 0x44]
+    unless result.data == expected.data do
+      throw (IO.userError s!"simple match: expected {expected.data}, got {result.data}")
+  | .error e => throw (IO.userError s!"simple match failed: {e}")
+
+  -- Test 42: executeSequences — overlap match (run-length expansion)
+  -- 1 literal byte "A", then copy 7 bytes from offset 1 → "AAAAAAAA"
+  let overlapLit := ByteArray.mk #[0x41]
+  let overlapSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 1, matchLength := 7, offset := 4 }  -- offset 4 = actual 1 (4-3)
+  ]
+  match Zip.Native.executeSequences overlapSeqs overlapLit with
+  | .ok result =>
+    let expected := ByteArray.mk #[0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41]
+    unless result.data == expected.data do
+      throw (IO.userError s!"overlap match: expected {expected.data}, got {result.data}")
+  | .error e => throw (IO.userError s!"overlap match failed: {e}")
+
+  -- Test 43: executeSequences — repeat offset code 1
+  -- Two sequences: first establishes offset 4, second reuses it via code 1
+  let repeatLit := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48]
+  let repeatSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 4, matchLength := 4, offset := 7 },  -- actual offset 4
+    { literalLength := 4, matchLength := 4, offset := 1 }   -- repeat code 1 → reuses offset 4
+  ]
+  match Zip.Native.executeSequences repeatSeqs repeatLit with
+  | .ok result =>
+    -- First seq: ABCD + copy 4 from offset 4 → ABCDABCD
+    -- Second seq: EFGH + copy 4 from offset 4 (repeat) → ABCDABCDEFGHEFGH
+    let expected := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x41, 0x42, 0x43, 0x44,
+                                    0x45, 0x46, 0x47, 0x48, 0x45, 0x46, 0x47, 0x48]
+    unless result.data == expected.data do
+      throw (IO.userError s!"repeat offset: expected {expected.data}, got {result.data}")
+  | .error e => throw (IO.userError s!"repeat offset failed: {e}")
+
+  -- Test 44: executeSequences — shifted repeat (literalLength=0, code 1 → history[1])
+  -- Initial history is [1, 4, 8]. First seq establishes offset 5.
+  -- History becomes [5, 1, 4]. Second seq has literalLength=0, code 1 → history[1] = 1
+  let shiftedLit := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x45]
+  let shiftedSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 5, matchLength := 5, offset := 8 },  -- actual offset 5 (8-3)
+    { literalLength := 0, matchLength := 5, offset := 1 }   -- shifted: code 1 → history[1]=1
+  ]
+  match Zip.Native.executeSequences shiftedSeqs shiftedLit with
+  | .ok result =>
+    -- First seq: ABCDE + copy 5 from offset 5 → ABCDEABCDE
+    -- Second seq: 0 literals + copy 5 from offset 1 (shifted: history[1]=1) → EEEEE
+    let expected := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x45,
+                                    0x41, 0x42, 0x43, 0x44, 0x45,
+                                    0x45, 0x45, 0x45, 0x45, 0x45]
+    unless result.data == expected.data do
+      throw (IO.userError s!"shifted repeat: expected {expected.data}, got {result.data}")
+  | .error e => throw (IO.userError s!"shifted repeat failed: {e}")
+
   IO.println "ZstdNative tests: OK"
