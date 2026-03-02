@@ -249,6 +249,35 @@ theorem fixedLitLengths_le_15 : ∀ i : Fin 288, fixedLitLengths[i] ≤ 15 := by
   omega  -- or split on ranges
 ```
 
+## Dagger Lemmas (`✝`) in `simp?` Suggestions
+
+`simp?` sometimes suggests auto-generated lemmas with `✝` suffixes
+(e.g., `UInt32.reduceBEq✝`). These are internal reduction lemmas that
+**cannot be referenced by name** in `simp only` — the `✝` character is
+not valid in Lean identifiers.
+
+**Common case**: UInt32/UInt16/UInt8 `BEq` reduction. `simp?` suggests
+`UInt32.reduceBEq✝` to evaluate expressions like `(1 : UInt32) == 0`.
+
+**Workaround**: Replace with `decide` or explicit case analysis:
+
+```lean
+-- BAD: simp? suggested this but it won't compile
+simp only [UInt32.reduceBEq✝, ↓reduceIte]
+
+-- GOOD: use decide for concrete BEq evaluation
+simp only [Nat.toUInt32_eq, this, ↓reduceIte]; decide
+
+-- GOOD: for Bool case splits that previously used simp_all
+cases b with
+| false => rfl
+| true => rw [hbit_val] at hbit; exact absurd hbit (by decide)
+```
+
+**When this arises**: Converting `cases b <;> simp_all` (which handles
+UInt BEq reduction via the full simp database) to `simp only`. The
+`simp_all` freely uses dagger lemmas internally, but `simp only` cannot.
+
 ## `Nat.mod_eq_sub_mod` for Inductive Mod Proofs
 
 When proving `(n - k) % k = 0` from `n % k = 0` and `n ≥ k`:
