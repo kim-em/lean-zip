@@ -19,7 +19,7 @@ namespace Huffman.Spec
 private theorem natToBits_append (val w₁ w₂ : Nat) :
     natToBits val (w₁ + w₂) = natToBits (val / 2 ^ w₂) w₁ ++ natToBits val w₂ := by
   induction w₁ with
-  | zero => simp [natToBits]
+  | zero => simp only [Nat.zero_add, natToBits, List.nil_append]
   | succ n ih =>
     rw [Nat.add_right_comm]
     simp only [natToBits]
@@ -37,7 +37,7 @@ private theorem natToBits_prefix_lt (a b n m : Nat)
   have hm : m = n + d := by omega
   rw [hm, natToBits_append b n d] at hpre
   obtain ⟨t, ht⟩ := hpre
-  have ⟨heq, _⟩ := List.append_inj ht (by simp [natToBits_length])
+  have ⟨heq, _⟩ := List.append_inj ht (by simp only [natToBits_length])
   have hdiv_bound : b / 2 ^ d < 2 ^ n := by
     rw [Nat.div_lt_iff_lt_mul hd_pos, ← Nat.pow_add]; rw [hm] at hb; exact hb
   have ha_eq : a = b / 2 ^ d := natToBits_injective a (b / 2 ^ d) n ha hdiv_bound heq
@@ -50,8 +50,8 @@ private theorem natToBits_prefix_lt (a b n m : Nat)
 private theorem isPrefixOf_self_append (cw rest : List Bool) :
     isPrefixOf cw (cw ++ rest) = true := by
   induction cw with
-  | nil => simp [isPrefixOf]
-  | cons x xs ih => simp [isPrefixOf, ih]
+  | nil => simp only [isPrefixOf]
+  | cons x xs ih => simp only [List.cons_append, isPrefixOf, BEq.rfl, ih, Bool.and_self]
 
 /-! ## Helper lemmas for codeFor proofs -/
 
@@ -59,7 +59,7 @@ private theorem isPrefixOf_self_append (cw rest : List Bool) :
 protected theorem count_foldl_mono (len : Nat) (l : List Nat) (init : Nat) :
     init ≤ l.foldl (fun acc x => if (x == len) = true then acc + 1 else acc) init := by
   induction l generalizing init with
-  | nil => simp
+  | nil => simp only [beq_iff_eq, List.foldl_nil, Std.le_refl]
   | cons x xs ih =>
     simp only [List.foldl_cons]
     cases hx : (x == len)
@@ -82,7 +82,7 @@ private theorem offset_of_lt (lengths : List Nat) (s₁ s₂ : Nat) (len : Nat)
       List.foldl (fun acc l => if (l == len) = true then acc + 1 else acc)
         init (List.take s₂ lengths) from this 0
   induction lengths generalizing s₁ s₂ with
-  | nil => simp at hs₁
+  | nil => simp only [List.length_nil, Nat.not_lt_zero] at hs₁
   | cons x xs ih =>
     intro init
     cases s₁ with
@@ -139,10 +139,10 @@ protected theorem codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Co
   · rename_i hs
     simp only [] at h
     split at h
-    · simp at h
+    · simp only [reduceCtorEq] at h
     · rename_i hlen
-      exact ⟨hs, hlen, by simpa using h.symm⟩
-  · simp at h
+      exact ⟨hs, hlen, by simpa only [beq_iff_eq, Option.some.injEq] using h.symm⟩
+  · simp only [reduceCtorEq] at h
 
 /-! ## Specification theorems -/
 
@@ -150,12 +150,13 @@ protected theorem codeFor_spec {lengths : List Nat} {maxBits sym : Nat} {cw : Co
 theorem isPrefixOf_iff (pre xs : List Bool) :
     isPrefixOf pre xs = true ↔ pre.IsPrefix xs := by
   induction pre generalizing xs with
-  | nil => simp [isPrefixOf, List.IsPrefix]
+  | nil => simp only [isPrefixOf, List.IsPrefix, List.nil_append, exists_eq]
   | cons a as ih =>
     cases xs with
-    | nil => simp [isPrefixOf, List.IsPrefix]
+    | nil => simp only [isPrefixOf, Bool.false_eq_true, List.IsPrefix, List.cons_append,
+        reduceCtorEq, exists_const]
     | cons b bs =>
-      simp [isPrefixOf, Bool.and_eq_true, beq_iff_eq, ih]
+      simp only [isPrefixOf, Bool.and_eq_true, beq_iff_eq, ih, List.cons_prefix_cons]
 
 /-- Decoding with a prefix-free code table is deterministic:
     if `decode` returns a result, it is the unique matching entry. -/
@@ -164,7 +165,7 @@ theorem decode_deterministic {α : Type} (table : List (Codeword × α))
     decode table bits = some (a, r₁) →
     decode table bits = some (b, r₂) →
     a = b ∧ r₁ = r₂ := by
-  intro h₁ h₂; simp_all
+  intro h₁ h₂; simp_all only [Option.some.injEq, Prod.mk.injEq, and_self]
 
 /-- The canonical code assigns distinct codewords to distinct symbols,
     provided the lengths are valid. -/
@@ -218,7 +219,7 @@ theorem canonical_prefix_free (lengths : List Nat) (maxBits : Nat)
     rw [← ht, List.length_append]
   by_cases heq : lengths[s₁] = lengths[s₂]
   · have : t = [] := List.eq_nil_of_length_eq_zero (by omega)
-    subst this; simp at ht; subst ht
+    subst this; simp only [List.append_nil] at ht; subst ht
     exact hne (codeFor_injective lengths maxBits hv s₁ s₂ cw₁ h₁ h₂)
   · have hlt_len : lengths[s₁] < lengths[s₂] := by omega
     have hb₁ := Huffman.Spec.code_value_bound lengths maxBits s₁ hv hs₁ hlen₁_cond
@@ -256,17 +257,19 @@ theorem decode_prefix_free {α : Type} (table : List (Codeword × α))
       (cw₁, s₁) ≠ (cw₂, s₂) → ¬cw₁.IsPrefix cw₂) :
     decode table (cw ++ rest) = some (sym, rest) := by
   induction table with
-  | nil => simp at hmem
+  | nil => simp only [List.not_mem_nil] at hmem
   | cons entry entries ih =>
     obtain ⟨cw', sym'⟩ := entry
     simp only [decode]
     cases hmem with
     | head =>
-      simp [isPrefixOf_self_append, List.drop_append_of_le_length (Nat.le_refl _)]
+      simp only [isPrefixOf_self_append, ↓reduceIte, List.drop_append_of_le_length (Nat.le_refl _),
+        List.drop_length, List.nil_append]
     | tail _ htail =>
       by_cases heq : (cw', sym') = (cw, sym)
       · obtain ⟨rfl, rfl⟩ := Prod.mk.inj heq
-        simp [isPrefixOf_self_append, List.drop_append_of_le_length (Nat.le_refl _)]
+        simp only [isPrefixOf_self_append, ↓reduceIte,
+          List.drop_append_of_le_length (Nat.le_refl _), List.drop_length, List.nil_append]
       · have hno : isPrefixOf cw' (cw ++ rest) = false := by
           cases hp : isPrefixOf cw' (cw ++ rest) with
           | false => rfl
@@ -294,12 +297,12 @@ theorem allCodes_mem_iff (lengths : List Nat) (maxBits : Nat) (s : Nat) (cw : Co
   constructor
   · rintro ⟨sym, hsym, h⟩
     cases hcf : codeFor lengths maxBits sym with
-    | none => simp [hcf] at h
+    | none => simp only [hcf, Option.map_none, reduceCtorEq] at h
     | some cw' =>
-      simp [hcf] at h
+      simp only [hcf, Option.map_some, Option.some.injEq, Prod.mk.injEq] at h
       exact ⟨h.1 ▸ hsym, h.1 ▸ h.2 ▸ hcf⟩
   · rintro ⟨hs, hcode⟩
-    exact ⟨s, hs, by simp [hcode]⟩
+    exact ⟨s, hs, by simp only [hcode, Option.map_some]⟩
 
 /-- `allCodes` has no duplicate entries (each symbol appears at most once). -/
 theorem allCodes_nodup (lengths : List Nat) (maxBits : Nat) :
@@ -308,12 +311,13 @@ theorem allCodes_nodup (lengths : List Nat) (maxBits : Nat) :
   apply List.Pairwise.filterMap (R := (· ≠ ·))
   · intro sym₁ sym₂ hne p₁ hp₁ p₂ hp₂
     cases hc₁ : codeFor lengths maxBits sym₁ with
-    | none => simp [hc₁] at hp₁
+    | none => simp only [hc₁, Option.map_none, reduceCtorEq] at hp₁
     | some cw₁ =>
       cases hc₂ : codeFor lengths maxBits sym₂ with
-      | none => simp [hc₂] at hp₂
+      | none => simp only [hc₂, Option.map_none, reduceCtorEq] at hp₂
       | some cw₂ =>
-        simp [hc₁] at hp₁; simp [hc₂] at hp₂
+        simp only [hc₁, Option.map_some, Option.some.injEq] at hp₁
+        simp only [hc₂, Option.map_some, Option.some.injEq] at hp₂
         subst hp₁; subst hp₂
         exact fun h => hne (Prod.mk.inj h).1
   · exact List.nodup_range
@@ -356,7 +360,7 @@ theorem decode_some_append {α : Type} (table : List (Codeword × α))
     (h : decode table bits = some (sym, rest)) :
     ∃ cw, (cw, sym) ∈ table ∧ bits = cw ++ rest := by
   induction table with
-  | nil => simp [decode] at h
+  | nil => simp only [decode, reduceCtorEq] at h
   | cons entry entries ih =>
     obtain ⟨cw', sym'⟩ := entry
     simp only [decode] at h
@@ -365,7 +369,7 @@ theorem decode_some_append {α : Type} (table : List (Codeword × α))
       obtain ⟨rfl, rfl⟩ := Option.some.inj h
       rw [isPrefixOf_iff] at hpre
       obtain ⟨t, rfl⟩ := hpre
-      exact ⟨cw', List.mem_cons_self .., by simp⟩
+      exact ⟨cw', List.mem_cons_self .., by simp only [List.drop_left']⟩
     · obtain ⟨cw, hmem, hbits⟩ := ih h
       exact ⟨cw, List.mem_cons_of_mem _ hmem, hbits⟩
 
@@ -393,8 +397,8 @@ theorem decode_shorter {α : Type} (table : List (Codeword × α))
   have hpos : cw.length > 0 := by
     cases cw with
     | nil => exact absurd rfl hne
-    | cons _ _ => simp
-  simp [List.length_append]
+    | cons _ _ => simp only [List.length_cons, gt_iff_lt, Nat.zero_lt_succ]
+  simp only [List.length_append, Nat.lt_add_left_iff_pos, gt_iff_lt]
   omega
 
 end Huffman.Spec
