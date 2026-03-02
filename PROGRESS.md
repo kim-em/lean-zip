@@ -5,12 +5,12 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) started
+- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) progressing rapidly
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
 - **Sorries**: 0
-- **Sessions**: ~227 completed (Feb 19 – Mar 2)
-- **Source files**: 86 (43 spec, 9 native impl, 9 FFI/archive, 4 ZipForStd, 21 test)
-- **Merged PRs**: 189
+- **Sessions**: ~242 completed (Feb 19 – Mar 2)
+- **Source files**: 90 (43 spec, 11 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
+- **Merged PRs**: 205
 
 ## Milestones
 
@@ -100,15 +100,17 @@ size bound is now the native inflate's default `maxOutputSize` (a runtime
 zip-bomb guard), not a fuel/termination limitation — all recursive functions
 use well-founded recursion (Track C2 complete).
 
-**Proof quality reviews** (55+ sessions): systematic code review across
+**Proof quality reviews** (60+ sessions): systematic code review across
 all spec files, reducing proof size, extracting reusable lemmas to
 ZipForStd, splitting large files for maintainability, and converting
 bare `simp` to `simp only`. Reviews to date: Deflate (#369),
-DecodeComplete (#374), BitReaderInvariant (#382), HuffmanCorrect +
+DecodeComplete (#374, #442), BitReaderInvariant (#382), HuffmanCorrect +
 HuffmanCorrectLoop (#385), InflateCorrect (#387), InflateRawSuffix (#391),
 DeflateFixedCorrect (#404), LZ77 (#408), InflateLoopBounds (#413),
-DeflateDynamicFreqs (#414). Bare `simp` reduced from hundreds across spec
-files to 17 remaining instances in 12 files (documented resistant patterns).
+DeflateDynamicFreqs (#414), DynamicTreesComplete (#440),
+DynamicTreesCorrect (#441), DeflateEncode (#448, #457),
+BitstreamCorrect (#459). Bare `simp` reduced from hundreds across spec
+files to 15 remaining instances in 10 files (documented resistant patterns).
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -220,35 +222,73 @@ cyclic, random, text) at sizes 1KB–1MB.
 
 ### Track E: Zstd Native Decompressor (in progress, Mar 2)
 Native Lean Zstd implementation, following the same methodology as DEFLATE
-(B-track). Currently at the frame/block parsing stage.
+(B-track). The core decompression infrastructure is now largely in place;
+the remaining work is wiring these components together for compressed block
+decompression and adding multi-frame support.
 
-**Completed:**
+**Frame and block layer:**
 - Frame header parser (#398): magic number, frame header descriptor bit fields,
   optional window descriptor, dictionary ID, frame content size — per
   RFC 8878 §3.1.1. `ZstdFrameHeader` structure with `parseFrameHeader`.
 - Block header parsing and raw/RLE decompression (#405): 3-byte block
   headers (Last_Block, Block_Type, Block_Size), verbatim copy for raw blocks,
   single-byte repeat for RLE blocks, `decompressFrame` loop over blocks.
-- Tests: 6 tests covering header parsing, RLE/raw blocks, round-trip
-  decompression against FFI (`ZipTest/ZstdNative.lean`).
+- XXH64 checksum verification (#432): pure Lean xxHash64 implementation wired
+  into frame decompressor for content checksum validation.
+- Compressed block header parsing (#439): `parseLiteralsSection` (4 literal
+  block types × 3 size formats) and `parseSequencesHeader` (sequence count
+  + compression mode bytes for literals/offsets/match lengths).
 
-**Remaining (per PLAN.md):**
-- Compressed block decompression (Huffman + FSE decoding)
-- FSE (Finite State Entropy) decoder
-- Sequence execution (literals + match copies)
+**FSE (Finite State Entropy) infrastructure (`Zip/Native/Fse.lean`, ~303 lines):**
+- Distribution decoder (#429): `decodeFseDistribution` reads compact probability
+  distributions from the bitstream, producing normalized symbol counts.
+- Table construction (#429): `buildFseTable` builds the FSE decoding table
+  (1 << accuracyLog cells) using RFC 8878 §4.1.1 position-stepping algorithm.
+- Backward bitstream reader (#452): `BackwardBitReader` for Zstd's MSB-first
+  backward bitstream format (RFC 8878 §4.1), with `init`, `readBits`,
+  `isFinished`.
+- Symbol decoding (#452): `decodeFseSymbols` decodes sequences of symbols
+  from FSE state machine lookups.
+
+**Sequence execution (`ZstdFrame.lean`):**
+- Sequence execution engine (#447): `ZstdSequence` structure, `resolveOffset`
+  with repeat offset codes 1–3 (RFC 8878 §3.1.2.3), `copyMatch` with overlap
+  semantics, `executeSequences` for reconstructing output from literal/match
+  interleaving.
+
+**Huffman tree descriptors (#458):**
+- Direct representation parsing: `parseHuffmanWeightsDirect` reads raw 4-bit
+  weight nibbles, `weightsToMaxBits` computes max bit depth from weight
+  distribution, `buildZstdHuffmanTable` constructs lookup table from weights.
+- `parseHuffmanTreeDescriptor` dispatches between direct and FSE-compressed
+  weight representations.
+
+**Tests:** 25+ tests in `ZipTest/ZstdNative.lean` covering header parsing,
+RLE/raw blocks, FSE distribution decoding, table construction, backward
+bitstream reading, sequence execution, and checksum verification.
+
+**Remaining:**
+- Predefined FSE distribution tables for sequences (#437, PR open)
+- Huffman-compressed literal stream decoding
+- Sequence extra bits tables and compression mode parsing
+- Multi-frame and skippable frame support (#454, claimed)
+- Wiring: compressed block decompression end-to-end
 - Spec-level decoder with correctness proofs
 - Compressor + roundtrip proof
 
-This is early-stage work. Only raw and RLE block types are decompressed;
-compressed blocks (the common case) are not yet implemented.
+Track E has crossed a significant threshold: the individual building blocks
+for compressed block decompression (FSE tables, backward bitstreams, sequence
+execution, Huffman descriptors) are implemented. The remaining implementation
+work is primarily integration — connecting these components into the
+`decompressBlocks` pipeline for `ZstdBlockType.compressed`.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~227 sessions: majority implementation, ~100 review, ~6 self-improvement,
+- ~242 sessions: majority implementation, ~100 review, ~7 self-improvement,
   remainder PR maintenance, planning, and summarization
-- 189 merged PRs (Feb 19 – Mar 2)
+- 205 merged PRs (Feb 19 – Mar 2)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
