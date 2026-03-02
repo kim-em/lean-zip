@@ -18,6 +18,7 @@ import ZipTest.NativeScale
 import ZipTest.NativeDeflate
 import ZipTest.NativeCompressBench
 import ZipTest.ZstdNative
+import ZipTest.XxHashNative
 
 def main : IO Unit := do
   unless ← System.FilePath.pathExists "testdata" do
@@ -42,4 +43,5 @@ def main : IO Unit := do
   ZipTest.NativeDeflate.tests
   ZipTest.NativeCompressBench.tests
   ZipTest.ZstdNative.tests
+  ZipTest.XxHashNative.tests
   IO.println "\nAll tests passed!"
