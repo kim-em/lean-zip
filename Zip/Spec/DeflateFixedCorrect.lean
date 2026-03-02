@@ -346,17 +346,23 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   -- decode = decode.go bits []
   have hgo : decode.go (bytesToBits bytes) [] = some result := by
     simp only [decode] at hdec; exact hdec
-  -- Apply inflateLoop_complete
+  -- Apply inflateLoop_complete (existential fuel) then bridge to inflateRaw's fuel
   have hbr_wf : (Zip.Native.BitReader.mk bytes 0 0).bitOff < 8 := by simp
   have hbr_pos : (Zip.Native.BitReader.mk bytes 0 0).bitOff = 0 ∨
       (Zip.Native.BitReader.mk bytes 0 0).pos <
       (Zip.Native.BitReader.mk bytes 0 0).data.size := by simp
-  obtain ⟨endPos, hloop⟩ :=
+  obtain ⟨fuel, endPos, hfuel_le, hloop⟩ :=
     Deflate.Correctness.inflateLoop_complete
       ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist
-      (1024 * 1024 * 1024) 10000000000 result
-      hbr_wf hbr_pos hflit hfdist hsize hgo
-  rw [hloop]; simp [pure, Except.pure]
+      (1024 * 1024 * 1024) result
+      hbr_wf hbr_pos (by simp) hflit hfdist hsize hgo
+  have hloop' := Deflate.Correctness.inflateLoop_fuel_le
+    ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist (1024 * 1024 * 1024)
+    fuel (bytes.size * 8 + 1) (⟨⟨result⟩⟩, endPos) hloop
+    (by have htl := Deflate.Correctness.toBits_length
+          (⟨bytes, 0, 0⟩ : Zip.Native.BitReader)
+        simp at htl; omega)
+  rw [hloop']; simp [pure, Except.pure]
 
 /-! ## Main roundtrip theorem -/
 

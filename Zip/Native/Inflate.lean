@@ -341,7 +341,7 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
   let br : BitReader := { data, pos := startPos, bitOff := 0 }
   let fixedLit ← HuffTree.fromLengths fixedLitLengths
   let fixedDist ← HuffTree.fromLengths fixedDistLengths
-  inflateLoop br .empty fixedLit fixedDist maxOutputSize 10000000000
+  inflateLoop br .empty fixedLit fixedDist maxOutputSize (data.size * 8 + 1)
 
 /-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
     `maxOutputSize` (default 1 GiB) limits decompressed output to guard against

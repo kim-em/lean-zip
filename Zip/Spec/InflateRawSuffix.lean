@@ -1,5 +1,6 @@
 import Zip.Native.Inflate
 import Zip.Spec.BinaryCorrect
+import Zip.Spec.InflateComplete
 
 /-!
 # inflateRaw suffix invariance
@@ -527,7 +528,12 @@ theorem inflateRaw_append_suffix (data suffix : ByteArray) (startPos maxOut : Na
     | error e => simp [hfdist] at h
     | ok fixedDist =>
       simp only [hfdist] at h
-      exact inflateLoop_append_suffix ⟨data, startPos, 0⟩ suffix .empty
-        fixedLit fixedDist maxOut 10000000000 result endPos h
+      -- h has fuel = data.size * 8 + 1, goal has fuel = (data ++ suffix).size * 8 + 1
+      have h' := inflateLoop_append_suffix ⟨data, startPos, 0⟩ suffix .empty
+        fixedLit fixedDist maxOut (data.size * 8 + 1) result endPos h
+      exact Deflate.Correctness.inflateLoop_fuel_le
+        ⟨data ++ suffix, startPos, 0⟩ .empty fixedLit fixedDist maxOut
+        (data.size * 8 + 1) ((data ++ suffix).size * 8 + 1) (result, endPos)
+        h' (by simp [ByteArray.size_append]; omega)
 
 end Zip.Native
