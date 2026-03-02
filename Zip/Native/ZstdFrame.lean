@@ -1,4 +1,5 @@
 import Zip.Binary
+import Zip.Native.Fse
 import Zip.Native.XxHash
 
 /-!
@@ -577,17 +578,52 @@ def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTab
 
   return { maxBits, table }
 
+/-- Parse FSE-compressed Huffman weights (RFC 8878 §4.2.1).
+    Header byte `h >= 128` means the compressed weight data occupies `h - 127` bytes.
+    Within those bytes: an FSE distribution (maxAccLog=6), then a backward bitstream
+    of FSE-encoded weight symbols.
+    Returns (weights array, position after compressed weight data). -/
+def parseHuffmanWeightsFse (data : ByteArray) (pos : Nat) (compressedSize : Nat) :
+    Except String (Array UInt8 × Nat) := do
+  let rangeStart := pos + 1  -- after the header byte
+  let rangeEnd := rangeStart + compressedSize
+  if data.size < rangeEnd then
+    throw "Zstd Huffman: not enough data for FSE-compressed weights"
+  -- Create a BitReader over the compressed range to decode the FSE distribution
+  let br : BitReader := { data := data, pos := rangeStart, bitOff := 0 }
+  let (probs, accuracyLog, br) ← decodeFseDistribution br 256 6
+  -- Build the FSE table from the decoded distribution
+  let table ← buildFseTable probs accuracyLog
+  -- Determine where the FSE distribution encoding ends (align to byte boundary)
+  let brAligned := br.alignToByte
+  let fseDistEnd := brAligned.pos
+  -- Create a BackwardBitReader from the remaining bytes up to the end of the compressed range
+  let bbr ← BackwardBitReader.init data fseDistEnd rangeEnd
+  -- Decode all weight values using the FSE table
+  let (weights, _) ← decodeFseSymbolsAll table bbr
+  return (weights, rangeEnd)
+
 /-- Parse a Huffman tree descriptor from a Zstd compressed block (RFC 8878 §4.2.1).
-    Reads the header byte at `pos`, dispatches to direct mode (< 128) or returns
-    an error for FSE-compressed mode (>= 128, not yet implemented).
+    Reads the header byte at `pos`, dispatches to direct mode (< 128) or
+    FSE-compressed mode (>= 128).
     Returns (Huffman table, new position after the tree descriptor). -/
 def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
     Except String (ZstdHuffmanTable × Nat) := do
   if data.size < pos + 1 then
     throw "Zstd Huffman: not enough data for tree descriptor header"
   let headerByte := data[pos]!.toNat
-  if headerByte >= 128 then
-    throw "Zstd Huffman: FSE-compressed tree descriptor not yet supported"
+  if headerByte >= 128 then do
+    -- FSE-compressed representation: compressed size = headerByte - 127
+    let compressedSize := headerByte - 127
+    let (weights, afterWeights) ← parseHuffmanWeightsFse data pos compressedSize
+    -- Trim trailing zero weights
+    let mut trimmed := weights
+    while trimmed.size > 0 && trimmed.back! == 0 do
+      trimmed := trimmed.pop
+    if trimmed.size == 0 then
+      throw "Zstd Huffman: FSE-compressed weights are all zero after trimming"
+    let table ← buildZstdHuffmanTable trimmed
+    return (table, afterWeights)
   -- Direct representation: headerByte = number of weight bytes
   let numWeightBytes := headerByte
   if numWeightBytes == 0 then
