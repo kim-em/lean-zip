@@ -130,10 +130,10 @@ Literal lengths and match lengths use baseline + extra bits encoding.
 Tables are defined as constant arrays (`litLenExtraBits`, `matchLenExtraBits`)
 following RFC 8878 Table 15 and Table 17.
 
-Keep the original `parseSequencesHeader` intact when adding new parsing
-functions. Add `parseSequencesHeaderWithModes` as a separate function to
-avoid disrupting existing callers. This pattern — extending without
-modifying — is important when existing tests depend on the original API.
+`parseSequencesHeader` returns `(numSeq, modes, pos)` where `modes` is a
+`SequenceCompressionModes` struct with `litLenMode`, `offsetMode`, and
+`matchLenMode` fields (each a `SequenceCompressionMode` enum). Callers
+that only need `numSeq` can wildcard the modes with `_`.
 
 ## Huffman Tree Descriptor
 

@@ -263,7 +263,7 @@ def ZipTest.FseNative.tests : IO Unit := do
         match Zip.Native.parseLiteralsSection compressed blockDataStart with
         | .ok (_, afterLiterals) =>
           match Zip.Native.parseSequencesHeader compressed afterLiterals with
-          | .ok (numSeq, afterSeqHeader) =>
+          | .ok (numSeq, _, afterSeqHeader) =>
             if numSeq > 0 then
               -- Read the compression modes byte (just before afterSeqHeader)
               -- The modes byte contains 2-bit fields for LL, OF, ML compression modes

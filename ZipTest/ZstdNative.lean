@@ -367,7 +367,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- Test 33: parseSequencesHeader with 0 sequences
   let zeroSeqInput := ByteArray.mk #[0x00]
   match Zip.Native.parseSequencesHeader zeroSeqInput 0 with
-  | .ok (numSeq, endPos) =>
+  | .ok (numSeq, _, endPos) =>
     unless numSeq == 0 do
       throw (IO.userError s!"0 seq: expected 0, got {numSeq}")
     unless endPos == 1 do
@@ -378,7 +378,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- byte0 = 42, followed by compression modes byte
   let smallSeqInput := ByteArray.mk #[42, 0x00]
   match Zip.Native.parseSequencesHeader smallSeqInput 0 with
-  | .ok (numSeq, endPos) =>
+  | .ok (numSeq, _, endPos) =>
     unless numSeq == 42 do
       throw (IO.userError s!"42 seq: expected 42, got {numSeq}")
     unless endPos == 2 do
@@ -389,7 +389,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- byte0 = 200 (>= 128, < 255): numSeq = (200 - 128) << 8 + byte1 = 72 * 256 + 50 = 18482
   let medSeqInput := ByteArray.mk #[200, 50, 0x00]
   match Zip.Native.parseSequencesHeader medSeqInput 0 with
-  | .ok (numSeq, endPos) =>
+  | .ok (numSeq, _, endPos) =>
     unless numSeq == 18482 do
       throw (IO.userError s!"2byte seq: expected 18482, got {numSeq}")
     unless endPos == 3 do
@@ -400,7 +400,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- byte0 = 255: numSeq = byte1 + (byte2 << 8) + 0x7F00 = 10 + (1 << 8) + 32512 = 32778
   let largeSeqInput := ByteArray.mk #[255, 10, 1, 0x00]
   match Zip.Native.parseSequencesHeader largeSeqInput 0 with
-  | .ok (numSeq, endPos) =>
+  | .ok (numSeq, _, endPos) =>
     unless numSeq == 32778 do
       throw (IO.userError s!"3byte seq: expected 32778, got {numSeq}")
     unless endPos == 4 do
@@ -707,11 +707,11 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   let offVal0 := Zip.Native.decodeOffsetValue 0 5
   unless offVal0 == 5 do throw (IO.userError s!"offset code 0: expected 5, got {offVal0}")
 
-  -- Test 69: parseSequencesHeaderWithModes — modes parsing
+  -- Test 69: parseSequencesHeader — modes parsing
   -- Construct: byte0 = 42 (small count), modes byte = 0b10_01_00_00 = 0x90
   -- litLen=FSE_Compressed(2), offset=RLE(1), matchLen=Predefined(0), reserved=0
   let modesInput := ByteArray.mk #[42, 0x90]
-  match Zip.Native.parseSequencesHeaderWithModes modesInput 0 with
+  match Zip.Native.parseSequencesHeader modesInput 0 with
   | .ok (numSeq, modes, endPos) =>
     unless numSeq == 42 do
       throw (IO.userError s!"modes: expected numSeq 42, got {numSeq}")
@@ -725,9 +725,9 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError "modes: expected matchLenMode = predefined")
   | .error e => throw (IO.userError s!"modes parsing failed: {e}")
 
-  -- Test 70: parseSequencesHeaderWithModes — 0 sequences returns default modes
+  -- Test 70: parseSequencesHeader — 0 sequences returns default modes
   let zeroModesInput := ByteArray.mk #[0x00]
-  match Zip.Native.parseSequencesHeaderWithModes zeroModesInput 0 with
+  match Zip.Native.parseSequencesHeader zeroModesInput 0 with
   | .ok (numSeq, modes, endPos) =>
     unless numSeq == 0 do
       throw (IO.userError s!"zero modes: expected numSeq 0, got {numSeq}")
@@ -741,10 +741,10 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError "zero modes: expected matchLenMode = predefined")
   | .error e => throw (IO.userError s!"zero modes parsing failed: {e}")
 
-  -- Test 71: parseSequencesHeaderWithModes — all repeat mode (0xFF modes byte)
+  -- Test 71: parseSequencesHeader — all repeat mode (0xFF modes byte)
   -- byte0 = 1 (1 sequence), modes = 0xFF → litLen=repeat(3), offset=repeat(3), matchLen=repeat(3)
   let repeatModesInput := ByteArray.mk #[1, 0xFF]
-  match Zip.Native.parseSequencesHeaderWithModes repeatModesInput 0 with
+  match Zip.Native.parseSequencesHeader repeatModesInput 0 with
   | .ok (numSeq, modes, _) =>
     unless numSeq == 1 do
       throw (IO.userError s!"repeat modes: expected numSeq 1, got {numSeq}")
