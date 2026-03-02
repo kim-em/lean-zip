@@ -487,6 +487,53 @@ by show 0 < 8; omega
 Similarly for `Or.inl rfl` when proving `{ ... bitOff := 0 }.bitOff = 0 ∨ ...` — the
 struct projection reduces definitionally, so `Or.inl rfl` works directly.
 
+## `simp at h` for Negated Comparisons
+
+When `split at h` produces a negation branch (the `if` condition was false),
+the hypothesis has form `¬(a ≥ b)` or `¬(a > b)`. Bare `simp at h` converts
+these to usable `<`/`≤` forms.
+
+**Replacements:**
+```lean
+-- Before: simp at h
+-- After (for ¬(a ≥ b)):
+simp only [ge_iff_le, Nat.not_le] at h  -- gives h : b < a... wait, Nat.not_le gives >
+
+-- ¬(a ≥ b) means ¬(b ≤ a) means a < b:
+simp only [ge_iff_le, Nat.not_le] at h  -- h : a < b
+
+-- ¬(a > b) means ¬(b < a) means a ≤ b:
+simp only [gt_iff_lt, Nat.not_lt] at h  -- h : a ≤ b (i.e., ¬(b < a) → b ≤ a... check)
+```
+
+**Warning**: The exact lemma combination depends on whether the original
+condition uses `≥`/`>` (Prop) or `>=`/`>` on `Nat`. Always build after
+replacing to verify the resulting hypothesis has the expected form.
+
+**Common in**: Guard conditions after `if bits.length ≥ maxPos` or
+`if pos > data.size` in WF-recursive functions.
+
+## `simp; omega` for Array Size After Mutation
+
+After `Array.set!` or when reasoning about `Array.replicate`, bare
+`simp; omega` is commonly used to prove size preservation. Replace with
+explicit rewrites:
+
+```lean
+-- Before: simp; omega
+-- After (size after set!):
+rw [Array.size_set!]; omega
+
+-- After (size of replicate):
+rw [Array.size_replicate]; omega
+
+-- After (combination):
+rw [Array.size_set!, Array.size_replicate]; omega
+```
+
+**Common in**: `DeflateDynamicFreqs.lean` and any file building arrays
+via iterative `set!` operations on `Array.replicate` base arrays.
+
 ## `BEq.beq` vs `Nat.beq` — Use `beq_iff_eq`
 
 When a hypothesis `h : (x == 0) = true` comes from a `split` on an `if x == 0` condition,
