@@ -13,6 +13,9 @@ import Zip.Native.BitReader
   The decoding table has `1 << accuracyLog` cells. Each cell stores the symbol
   it decodes to, plus the number of bits to read and the baseline for computing
   the next state during decoding.
+
+  Also provides the three predefined distribution arrays from RFC 8878 §6 and
+  a function to build them into ready-to-use FSE decoding tables.
 -/
 
 namespace Zip.Native
@@ -171,5 +174,38 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
       { symbol := cells[i]!.symbol, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
     symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
   return { accuracyLog, cells }
+
+-- ============================================================================
+-- Predefined FSE distribution tables (RFC 8878 §6)
+-- ============================================================================
+
+/-- Predefined literal length distribution (RFC 8878 §6, Table 15).
+    36 symbols (0–35), accuracyLog = 6, table size = 64. -/
+def predefinedLitLenDistribution : Array Int32 :=
+  #[ 4,  3,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  1,  1,  1,
+     2,  2,  2,  2,  2,  2,  2,  2,  2,  3,  2,  1,  1,  1,  1,  1,
+    -1, -1, -1, -1]
+
+/-- Predefined match length distribution (RFC 8878 §6, Table 16).
+    53 symbols (0–52), accuracyLog = 6, table size = 64. -/
+def predefinedMatchLenDistribution : Array Int32 :=
+  #[ 1,  4,  3,  2,  2,  2,  2,  2,  2,  1,  1,  1,  1,  1,  1,  1,
+     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, -1, -1,
+    -1, -1, -1, -1, -1]
+
+/-- Predefined offset distribution (RFC 8878 §6, Table 17).
+    29 symbols (0–28), accuracyLog = 5, table size = 32. -/
+def predefinedOffsetDistribution : Array Int32 :=
+  #[ 1,  1,  1,  1,  1,  1,  2,  2,  2,  1,  1,  1,  1,  1,  1,  1,
+     1,  1,  1,  1,  1,  1,  1,  1, -1, -1, -1, -1, -1]
+
+/-- Build the three predefined FSE decoding tables from the hardcoded
+    distributions in RFC 8878 §6. Returns (litLenTable, matchLenTable, offsetTable). -/
+def buildPredefinedFseTables : Except String (FseTable × FseTable × FseTable) := do
+  let llTable ← buildFseTable predefinedLitLenDistribution 6
+  let mlTable ← buildFseTable predefinedMatchLenDistribution 6
+  let ofTable ← buildFseTable predefinedOffsetDistribution 5
+  return (llTable, mlTable, ofTable)
 
 end Zip.Native
