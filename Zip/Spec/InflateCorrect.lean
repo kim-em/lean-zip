@@ -24,20 +24,20 @@ theorem decodeStored_invariants (br : Zip.Native.BitReader) (output : ByteArray)
     br'.bitOff < 8 ∧ (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
   simp only [Zip.Native.Inflate.decodeStored, bind, Except.bind] at h
   cases h₁ : br.readUInt16LE with
-  | error e => simp [h₁] at h
+  | error e => simp only [h₁] at h; exact absurd h nofun
   | ok p₁ =>
     obtain ⟨len, br₁⟩ := p₁; simp only [h₁] at h
     cases h₂ : br₁.readUInt16LE with
-    | error e => simp [h₂] at h
+    | error e => simp only [h₂] at h; exact absurd h nofun
     | ok p₂ =>
       obtain ⟨nlen, br₂⟩ := p₂; simp only [h₂] at h
       split at h
-      · simp at h
+      · exact absurd h nofun
       · simp only [pure, Except.pure] at h
         split at h
-        · simp at h
+        · exact absurd h nofun
         · cases h₃ : br₂.readBytes len.toNat with
-          | error e => simp [h₃] at h
+          | error e => simp only [h₃] at h; exact absurd h nofun
           | ok p₃ =>
             obtain ⟨bytes, br₃⟩ := p₃
             simp only [h₃, Except.ok.injEq, Prod.mk.injEq] at h
@@ -75,12 +75,12 @@ private theorem readNBytes_rest_length {n : Nat} {bits : List Bool} {acc bytes :
     rest.length + n * 8 = bits.length := by
   induction n generalizing bits acc with
   | zero =>
-    simp [Deflate.Spec.decodeStored.readNBytes] at h
+    simp only [Deflate.Spec.decodeStored.readNBytes] at h
     obtain ⟨_, rfl⟩ := h; omega
   | succ k ih =>
     simp only [Deflate.Spec.decodeStored.readNBytes] at h
     cases hrd : Deflate.Spec.readBitsLSB 8 bits with
-    | none => simp [hrd] at h
+    | none => simp only [hrd] at h; exact absurd h nofun
     | some p =>
       obtain ⟨v, bits'⟩ := p
       simp only [hrd, bind, Option.bind] at h
@@ -96,20 +96,20 @@ theorem decodeStored_rest_le {bits : List Bool} {bytes : List UInt8}
   unfold Deflate.Spec.decodeStored at h
   simp only [bind, Option.bind] at h
   have halign_len : (Deflate.Spec.alignToByte bits).length ≤ bits.length := by
-    simp [Deflate.Spec.alignToByte]
+    simp only [Deflate.Spec.alignToByte, List.length_drop]; omega
   cases h₁ : Deflate.Spec.readBitsLSB 16 (Deflate.Spec.alignToByte bits) with
-  | none => simp [h₁] at h
+  | none => simp only [h₁] at h; exact absurd h nofun
   | some p₁ =>
     obtain ⟨len, bits₁⟩ := p₁; simp only [h₁] at h
     have hlen₁ := Deflate.Spec.readBitsLSB_some_length h₁
     cases h₂ : Deflate.Spec.readBitsLSB 16 bits₁ with
-    | none => simp [h₂] at h
+    | none => simp only [h₂] at h; exact absurd h nofun
     | some p₂ =>
       obtain ⟨nlen, bits₂⟩ := p₂; simp only [h₂] at h
       have hlen₂ := Deflate.Spec.readBitsLSB_some_length h₂
       -- guard: split on the if
       split at h
-      · simp at h  -- guard fails → contradiction
+      · exact absurd h nofun
       · simp only [] at h  -- reduce lambda application
         have hlen₃ := readNBytes_rest_length h
         omega
@@ -125,7 +125,7 @@ private theorem decodeLitLen_rest_lt {litLens distLens : List Nat}
   -- Extract Huffman decode result
   cases hdec : Huffman.Spec.decode
       ((Huffman.Spec.allCodes litLens).map fun (sym, cw) => (cw, sym)) bits with
-  | none => simp [hdec] at h
+  | none => simp only [hdec] at h; exact absurd h nofun
   | some p =>
     obtain ⟨sym_val, bits'⟩ := p
     simp only [hdec] at h
@@ -144,35 +144,35 @@ private theorem decodeLitLen_rest_lt {litLens distLens : List Nat}
       · -- sym ≥ 257: length+distance
         -- Each read only consumes more bits from bits'
         cases h₁ : (Deflate.Spec.lengthBase[sym_val - 257]?) with
-        | none => simp [h₁] at h
+        | none => simp only [h₁] at h; exact absurd h nofun
         | some base =>
           simp only [h₁] at h
           cases h₂ : (Deflate.Spec.lengthExtra[sym_val - 257]?) with
-          | none => simp [h₂] at h
+          | none => simp only [h₂] at h; exact absurd h nofun
           | some extra =>
             simp only [h₂] at h
             cases h₃ : Deflate.Spec.readBitsLSB extra bits' with
-            | none => simp [h₃] at h
+            | none => simp only [h₃] at h; exact absurd h nofun
             | some p₃ =>
               obtain ⟨extraVal, bits₁⟩ := p₃
               simp only [h₃] at h
               have hlen₃ := Deflate.Spec.readBitsLSB_some_length h₃
               cases h₄ : Huffman.Spec.decode
                   ((Huffman.Spec.allCodes distLens).map fun (s, cw) => (cw, s)) bits₁ with
-              | none => simp [h₄] at h
+              | none => simp only [h₄] at h; exact absurd h nofun
               | some p₄ =>
                 obtain ⟨dSym, bits₂⟩ := p₄
                 simp only [h₄] at h
                 cases h₅ : (Deflate.Spec.distBase[dSym]?) with
-                | none => simp [h₅] at h
+                | none => simp only [h₅] at h; exact absurd h nofun
                 | some dBase =>
                   simp only [h₅] at h
                   cases h₆ : (Deflate.Spec.distExtra[dSym]?) with
-                  | none => simp [h₆] at h
+                  | none => simp only [h₆] at h; exact absurd h nofun
                   | some dExtra =>
                     simp only [h₆] at h
                     cases h₇ : Deflate.Spec.readBitsLSB dExtra bits₂ with
-                    | none => simp [h₇] at h
+                    | none => simp only [h₇] at h; exact absurd h nofun
                     | some p₇ =>
                       obtain ⟨dExtraVal, bits₃⟩ := p₇
                       simp only [h₇, pure,
@@ -199,7 +199,7 @@ theorem decodeSymbols_rest_le {litLens distLens : List Nat}
     intro bits syms rest hlen hds
     unfold Deflate.Spec.decodeSymbols at hds
     cases hdl : Deflate.Spec.decodeLitLen litLens distLens bits with
-    | none => simp [hdl] at hds
+    | none => simp only [hdl] at hds; exact absurd hds nofun
     | some p =>
       obtain ⟨sym, bits'⟩ := p
       simp only [hdl, bind, Option.bind] at hds
@@ -213,9 +213,9 @@ theorem decodeSymbols_rest_le {litLens distLens : List Nat}
         split at hds
         · -- WF guard holds
           cases hds_rec : Deflate.Spec.decodeSymbols litLens distLens bits' with
-          | none => simp [hds_rec] at hds
+          | none => simp only [hds_rec] at hds; exact absurd hds nofun
           | some p₂ =>
-            simp [hds_rec] at hds
+            simp only [hds_rec] at hds
             obtain ⟨_, rfl⟩ := hds
             have := ih bits'.length (by omega) bits' p₂.1 p₂.2 rfl hds_rec
             omega
@@ -225,9 +225,9 @@ theorem decodeSymbols_rest_le {litLens distLens : List Nat}
         split at hds
         · -- WF guard holds
           cases hds_rec : Deflate.Spec.decodeSymbols litLens distLens bits' with
-          | none => simp [hds_rec] at hds
+          | none => simp only [hds_rec] at hds; exact absurd hds nofun
           | some p₂ =>
-            simp [hds_rec] at hds
+            simp only [hds_rec] at hds
             obtain ⟨_, rfl⟩ := hds
             have := ih bits'.length (by omega) bits' p₂.1 p₂.2 rfl hds_rec
             omega
@@ -240,12 +240,12 @@ private theorem readCLLengths_rest_length {n idx : Nat} {acc acc' : List Nat}
     rest.length + n * 3 = bits.length := by
   induction n generalizing idx acc bits with
   | zero =>
-    simp [Deflate.Spec.readCLLengths] at h
+    simp only [Deflate.Spec.readCLLengths] at h
     obtain ⟨_, rfl⟩ := h; omega
   | succ k ih =>
     simp only [Deflate.Spec.readCLLengths, bind, Option.bind] at h
     cases h₁ : Deflate.Spec.readBitsLSB 3 bits with
-    | none => simp [h₁] at h
+    | none => simp only [h₁] at h; exact absurd h nofun
     | some p =>
       obtain ⟨v, bits'⟩ := p
       simp only [h₁] at h
@@ -278,7 +278,7 @@ private theorem decodeCLSymbols_rest_le {clTable : List (Huffman.Spec.Codeword �
       obtain ⟨_, rfl⟩ := hds; omega
     · -- Need to decode more symbols
       cases hdec : Huffman.Spec.decode clTable bits with
-      | none => simp [hdec] at hds
+      | none => simp only [hdec] at hds; exact absurd hds nofun
       | some p =>
         obtain ⟨sym, bits'⟩ := p
         simp only [hdec] at hds
@@ -291,9 +291,9 @@ private theorem decodeCLSymbols_rest_le {clTable : List (Huffman.Spec.Codeword �
         · split at hds
           · -- sym == 16: repeat
             split at hds
-            · simp at hds
+            · exact absurd hds nofun
             · cases hrd : Deflate.Spec.readBitsLSB 2 bits' with
-              | none => simp [hrd] at hds
+              | none => simp only [hrd] at hds; exact absurd hds nofun
               | some p₂ =>
                 obtain ⟨rep, bits''⟩ := p₂
                 simp only [hrd] at hds
@@ -301,11 +301,11 @@ private theorem decodeCLSymbols_rest_le {clTable : List (Huffman.Spec.Codeword �
                 split at hds
                 · have := ih bits''.length (by omega) bits'' _ _ _ rfl hds
                   omega
-                · simp at hds
+                · exact absurd hds nofun
           · split at hds
             · -- sym == 17: repeat 0
               cases hrd : Deflate.Spec.readBitsLSB 3 bits' with
-              | none => simp [hrd] at hds
+              | none => simp only [hrd] at hds; exact absurd hds nofun
               | some p₂ =>
                 obtain ⟨rep, bits''⟩ := p₂
                 simp only [hrd] at hds
@@ -313,12 +313,12 @@ private theorem decodeCLSymbols_rest_le {clTable : List (Huffman.Spec.Codeword �
                 split at hds
                 · have := ih bits''.length (by omega) bits'' _ _ _ rfl hds
                   omega
-                · simp at hds
+                · exact absurd hds nofun
             · -- ¬(sym == 17): split on sym == 18
               split at hds
               · -- sym == 18: repeat 0 (longer)
                 cases hrd : Deflate.Spec.readBitsLSB 7 bits' with
-                | none => simp [hrd] at hds
+                | none => simp only [hrd] at hds; exact absurd hds nofun
                 | some p₂ =>
                   obtain ⟨rep, bits''⟩ := p₂
                   simp only [hrd] at hds
@@ -326,9 +326,9 @@ private theorem decodeCLSymbols_rest_le {clTable : List (Huffman.Spec.Codeword �
                   split at hds
                   · have := ih bits''.length (by omega) bits'' _ _ _ rfl hds
                     omega
-                  · simp at hds
+                  · exact absurd hds nofun
               · -- sym ≥ 19: none, contradiction
-                simp at hds
+                exact absurd hds nofun
 
 /-- If `decodeDynamicTables` succeeds, `rest.length ≤ bits.length`. -/
 theorem decodeDynamicTables_rest_le {bits : List Bool}
@@ -338,17 +338,17 @@ theorem decodeDynamicTables_rest_le {bits : List Bool}
   unfold Deflate.Spec.decodeDynamicTables at h
   simp only [bind, Option.bind] at h
   cases h₁ : Deflate.Spec.readBitsLSB 5 bits with
-  | none => simp [h₁] at h
+  | none => simp only [h₁] at h; exact absurd h nofun
   | some p₁ =>
     obtain ⟨hlit, bits₁⟩ := p₁; simp only [h₁] at h
     have hlen₁ := Deflate.Spec.readBitsLSB_some_length h₁
     cases h₂ : Deflate.Spec.readBitsLSB 5 bits₁ with
-    | none => simp [h₂] at h
+    | none => simp only [h₂] at h; exact absurd h nofun
     | some p₂ =>
       obtain ⟨hdist, bits₂⟩ := p₂; simp only [h₂] at h
       have hlen₂ := Deflate.Spec.readBitsLSB_some_length h₂
       cases h₃ : Deflate.Spec.readBitsLSB 4 bits₂ with
-      | none => simp [h₃] at h
+      | none => simp only [h₃] at h; exact absurd h nofun
       | some p₃ =>
         obtain ⟨hclen, bits₃⟩ := p₃; simp only [h₃] at h
         have hlen₃ := Deflate.Spec.readBitsLSB_some_length h₃
@@ -358,34 +358,34 @@ theorem decodeDynamicTables_rest_le {bits : List Bool}
         rw [hrep] at h
         cases h₄ : Deflate.Spec.readCLLengths (hclen + 4) 0
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] bits₃ with
-        | none => simp [h₄] at h
+        | none => simp only [h₄] at h; exact absurd h nofun
         | some p₄ =>
           obtain ⟨clLens, bits₄⟩ := p₄; simp only [h₄] at h
           have hlen₄ := readCLLengths_rest_length h₄
           -- guard (ValidLengths clLens 7)
           split at h
-          · simp at h
+          · exact absurd h nofun
           · -- Reduce continuation after guard
             simp only [] at h
             -- decodeCLSymbols
             cases h₅ : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
                 (List.map (fun x => (x.snd, x.fst)) (Huffman.Spec.allCodes clLens 7))
                 (hlit + 257 + (hdist + 1)) [] bits₄ with
-            | none => simp [h₅] at h
+            | none => simp only [h₅] at h; exact absurd h nofun
             | some p₅ =>
               obtain ⟨codeLens, bits₅⟩ := p₅; simp only [h₅] at h
               have hlen₅ := decodeCLSymbols_rest_le (specTable_cw_nonempty clLens 7) h₅
               -- guard (codeLens.length == totalCodes)
               split at h
-              · simp at h
+              · exact absurd h nofun
               · simp only [] at h
                 -- guard (ValidLengths litLenLengths 15)
                 split at h
-                · simp at h
+                · exact absurd h nofun
                 · simp only [] at h
                   -- guard (ValidLengths distLengths 15)
                   split at h
-                  · simp at h
+                  · exact absurd h nofun
                   · simp only [pure] at h
                     obtain ⟨_, _, rfl⟩ := h
                     omega
@@ -413,7 +413,7 @@ protected theorem nat_beq_to_uint32_true (v : Nat) (hv : v < 2) (h : (v == 1) = 
 protected theorem nat_beq_to_uint32_false (v : Nat) (hv : v < 2) (h : ¬((v == 1) = true)) :
     ¬((v.toUInt32 == 1) = true) := by
   have hv0 : v = 0 := by simp only [beq_iff_eq] at h; omega
-  subst hv0; simp [Nat.toUInt32]
+  subst hv0; decide
 
 set_option maxRecDepth 2048 in
 /-- Block loop correspondence: the native `inflateLoop` agrees with
@@ -434,12 +434,12 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
     Deflate.Spec.decode.go br.toBits output.data.toList =
       some result.data.toList := by
   induction fuel generalizing br output with
-  | zero => simp [Zip.Native.Inflate.inflateLoop] at h
+  | zero => simp only [Zip.Native.Inflate.inflateLoop] at h; exact absurd h nofun
   | succ fuel ih =>
     simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind] at h
     -- Read bfinal (1 bit)
     cases hbf : br.readBits 1 with
-    | error e => simp [hbf] at h
+    | error e => simp only [hbf] at h; exact absurd h nofun
     | ok p₁ =>
       obtain ⟨bfinal, br₁⟩ := p₁; simp only [hbf] at h
       have hwf₁ := readBits_wf br 1 bfinal br₁ hwf hbf
@@ -447,7 +447,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
       have ⟨bits₁, hspec_bf, hbits₁⟩ := readBits_toBits br 1 bfinal br₁ hwf (by omega) hbf
       -- Read btype (2 bits)
       cases hbt : br₁.readBits 2 with
-      | error e => simp [hbt] at h
+      | error e => simp only [hbt] at h; exact absurd h nofun
       | ok p₂ =>
         obtain ⟨btype, br₂⟩ := p₂; simp only [hbt] at h
         have hwf₂ := readBits_wf br₁ 2 btype br₂ hwf₁ hbt
@@ -467,7 +467,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
           simp only [show UInt32.toNat 0 = 0 from rfl]
           -- Extract decodeStored result from h
           split at h
-          · simp at h
+          · exact absurd h nofun
           · rename_i v hds; obtain ⟨out', br'⟩ := v; simp only [] at hds h
             -- Use decodeStored_correct to get spec result
             have ⟨storedBytes, rest, hspec_ds, hout, hrest⟩ :=
@@ -502,7 +502,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
           simp only [show UInt32.toNat 1 = 1 from rfl]
           -- Extract decodeHuffman result from h
           split at h
-          · simp at h
+          · exact absurd h nofun
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
             -- Unfold decodeHuffman to get decodeHuffman.go
             unfold Zip.Native.Inflate.decodeHuffman at hdh
@@ -545,7 +545,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
           simp only [show UInt32.toNat 2 = 2 from rfl]
           -- Extract decodeDynamicTrees + decodeHuffman from h
           split at h
-          · simp at h
+          · exact absurd h nofun
           · rename_i v hdt
             obtain ⟨litTree, distTree, br₃⟩ := v; simp only [] at hdt h
             -- Apply decodeDynamicTrees_correct
@@ -556,7 +556,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
             rw [hbr₂_bits] at hspec_dt
             -- Now extract decodeHuffman from h
             split at h
-            · simp at h
+            · exact absurd h nofun
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
               -- Unfold decodeHuffman to get decodeHuffman.go
               unfold Zip.Native.Inflate.decodeHuffman at hdh
@@ -591,7 +591,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
                 rw [hrest] at h_ih
                 exact h_ih
         · -- Case 4: reserved (btype ≥ 3)
-          simp at h
+          exact absurd h nofun
 
 /-- **Main theorem**: If the native DEFLATE decompressor succeeds, then
     the formal specification also succeeds and produces the same output. -/
@@ -607,18 +607,19 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
   -- Build fixed trees
   cases hflit : Zip.Native.HuffTree.fromLengths
       Zip.Native.Inflate.fixedLitLengths with
-  | error e => simp [hflit] at h
+  | error e => simp only [hflit] at h; exact absurd h nofun
   | ok fixedLit =>
     simp only [hflit] at h
     cases hfdist : Zip.Native.HuffTree.fromLengths
         Zip.Native.Inflate.fixedDistLengths with
-    | error e => simp [hfdist] at h
+    | error e => simp only [hfdist] at h; exact absurd h nofun
     | ok fixedDist =>
       simp only [hfdist] at h
-      have hbr_wf : (Zip.Native.BitReader.mk data startPos 0).bitOff < 8 := by simp
+      have hbr_wf : (Zip.Native.BitReader.mk data startPos 0).bitOff < 8 := by
+        show 0 < 8; omega
       have hbr_pos : (Zip.Native.BitReader.mk data startPos 0).bitOff = 0 ∨
           (Zip.Native.BitReader.mk data startPos 0).pos <
-          (Zip.Native.BitReader.mk data startPos 0).data.size := by simp
+          (Zip.Native.BitReader.mk data startPos 0).data.size := by exact Or.inl rfl
       have hgo := inflateLoop_correct
         ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOutputSize (data.size * 8 + 1) result endPos
@@ -634,11 +635,11 @@ theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
       some result.data.toList := by
   simp only [Zip.Native.Inflate.inflate, bind, Except.bind] at h
   cases hinf : Zip.Native.Inflate.inflateRaw data 0 maxOutputSize with
-  | error e => simp [hinf] at h
+  | error e => simp only [hinf] at h; exact absurd h nofun
   | ok p =>
-    simp [hinf, pure, Except.pure] at h
+    simp only [hinf, pure, Except.pure, Except.ok.injEq] at h
     have := inflate_correct data 0 maxOutputSize p.1 p.2 (by rw [hinf])
-    simp at this
+    simp only [Nat.zero_mul, List.drop_zero] at this
     rw [← h]; exact this
 
 end Deflate.Correctness
