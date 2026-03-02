@@ -61,14 +61,14 @@ theorem readUInt32LE_bytes (v : UInt32) :
 /-- `getElem!` on a concatenated ByteArray reads from the left part when in bounds. -/
 theorem getElem!_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b)[i]! = a[i]! := by
-  rw [getElem!_pos (a ++ b) i (by simp [ByteArray.size_append]; omega),
+  rw [getElem!_pos (a ++ b) i (by simp only [ByteArray.size_append]; omega),
       getElem!_pos a i h]
   exact ByteArray.getElem_append_left h
 
 /-- `getElem!` on a concatenated ByteArray reads from the right part at offset `a.size`. -/
 theorem getElem!_append_right (a b : ByteArray) (i : Nat) (h : i < b.size) :
     (a ++ b)[a.size + i]! = b[i]! := by
-  rw [getElem!_pos (a ++ b) (a.size + i) (by simp [ByteArray.size_append]; omega),
+  rw [getElem!_pos (a ++ b) (a.size + i) (by simp only [ByteArray.size_append]; omega),
       getElem!_pos b i h]
   have hle : a.size ≤ a.size + i := Nat.le_add_right _ _
   rw [ByteArray.getElem_append_right hle]
@@ -122,10 +122,10 @@ theorem readUInt16LE_append_right (a b : ByteArray) (offset : Nat)
 theorem readUInt64LE_writeUInt64LE (val : UInt64) :
     readUInt64LE (writeUInt64LE val) 0 = val := by
   simp only [readUInt64LE, writeUInt64LE]
-  rw [readUInt32LE_append_left _ _ 0 (by simp),
+  rw [readUInt32LE_append_left _ _ 0 (by simp only [writeUInt32LE_size]; omega),
       readUInt32LE_writeUInt32LE,
-      show 0 + 4 = (writeUInt32LE val.toUInt32).size + 0 from by simp,
-      readUInt32LE_append_right _ _ 0 (by simp),
+      show 0 + 4 = (writeUInt32LE val.toUInt32).size + 0 from by simp only [writeUInt32LE_size],
+      readUInt32LE_append_right _ _ 0 (by simp only [writeUInt32LE_size]; omega),
       readUInt32LE_writeUInt32LE]
   bv_decide
 
@@ -134,19 +134,19 @@ theorem readUInt64LE_writeUInt64LE (val : UInt64) :
 /-- Index into the left part of a triple concatenation. -/
 theorem getElem!_append3_left (a b c : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b ++ c)[i]! = a[i]! := by
-  rw [getElem!_append_left (a ++ b) c i (by simp [ByteArray.size_append]; omega),
+  rw [getElem!_append_left (a ++ b) c i (by simp only [ByteArray.size_append]; omega),
       getElem!_append_left a b i h]
 
 /-- Index into the middle part of a triple concatenation. -/
 theorem getElem!_append3_mid (a b c : ByteArray) (i : Nat) (h : i < b.size) :
     (a ++ b ++ c)[a.size + i]! = b[i]! := by
-  rw [getElem!_append_left (a ++ b) c (a.size + i) (by simp [ByteArray.size_append]; omega),
+  rw [getElem!_append_left (a ++ b) c (a.size + i) (by simp only [ByteArray.size_append]; omega),
       getElem!_append_right a b i h]
 
 /-- Index into the right part of a triple concatenation. -/
 theorem getElem!_append3_right (a b c : ByteArray) (i : Nat) (h : i < c.size) :
     (a ++ b ++ c)[a.size + b.size + i]! = c[i]! := by
-  rw [show a.size + b.size + i = (a ++ b).size + i from by simp [ByteArray.size_append],
+  rw [show a.size + b.size + i = (a ++ b).size + i from by simp only [ByteArray.size_append],
       getElem!_append_right (a ++ b) c i h]
 
 /-! ## Triple-append read lemmas -/
@@ -214,15 +214,15 @@ theorem readUInt32BE_append_right (a b : ByteArray) (offset : Nat)
 
 @[simp] theorem writeUInt16LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt16) :
     (writeUInt16LEAt buf offset val).size = buf.size := by
-  simp [writeUInt16LEAt, ByteArray.size_set!]
+  simp only [writeUInt16LEAt, ByteArray.size_set!]
 
 @[simp] theorem writeUInt32LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt32) :
     (writeUInt32LEAt buf offset val).size = buf.size := by
-  simp [writeUInt32LEAt, ByteArray.size_set!]
+  simp only [writeUInt32LEAt, ByteArray.size_set!]
 
 @[simp] theorem writeUInt64LEAt_size (buf : ByteArray) (offset : Nat) (val : UInt64) :
     (writeUInt64LEAt buf offset val).size = buf.size := by
-  simp [writeUInt64LEAt, writeUInt32LEAt_size]
+  simp only [writeUInt64LEAt, writeUInt32LEAt_size]
 
 /-! ## In-place write roundtrips -/
 
@@ -292,9 +292,9 @@ theorem readUInt64LE_writeUInt64LEAt (buf : ByteArray) (offset : Nat) (val : UIn
     (h : offset + 8 ≤ buf.size) :
     readUInt64LE (writeUInt64LEAt buf offset val) offset = val := by
   simp only [readUInt64LE, writeUInt64LEAt]
-  rw [readUInt32LE_writeUInt32LEAt_ne _ _ _ _ (by simp; omega) (by omega),
+  rw [readUInt32LE_writeUInt32LEAt_ne _ _ _ _ (by simp only [writeUInt32LEAt_size]; omega) (by omega),
       readUInt32LE_writeUInt32LEAt _ _ _ (by omega),
-      readUInt32LE_writeUInt32LEAt _ _ _ (by simp; omega)]
+      readUInt32LE_writeUInt32LEAt _ _ _ (by simp only [writeUInt32LEAt_size]; omega)]
   bv_decide
 
 end Binary
