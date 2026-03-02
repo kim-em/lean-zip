@@ -36,10 +36,40 @@ theorem validLengths_toUInt8_roundtrip (lens : List Nat)
     exact Nat.mod_eq_of_lt (by have := hv.1 n hn; omega))]
   simp
 
-/-! ## Fuel monotonicity -/
+/-! ## WF guard helpers -/
 
-/-- Fuel monotonicity: if `inflateLoop` succeeds with fuel `n`, it succeeds
-    with any `m ≥ n` and produces the same result. -/
+/-- If `br'` has fewer remaining bits than `br` (same underlying data),
+    then `br'` is strictly ahead: `br'.bitPos > br.bitPos`. -/
+private theorem wf_progress_of_toBits_lt {br br' : Zip.Native.BitReader}
+    (hple : br.pos ≤ br.data.size)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (_hple' : br'.pos ≤ br'.data.size)
+    (hpos' : br'.bitOff = 0 ∨ br'.pos < br'.data.size)
+    (hdata : br'.data = br.data)
+    (hlt : br'.toBits.length < br.toBits.length) :
+    ¬(br'.bitPos ≤ br.bitPos) := by
+  have htl := Deflate.Correctness.toBits_length br
+  have htl' := Deflate.Correctness.toBits_length br'
+  rw [hdata] at htl'
+  simp only [Zip.Native.BitReader.bitPos] at *
+  rcases hpos with h | h <;> rcases hpos' with h' | h' <;> omega
+
+/-- If `br.data.size ≤ dataSize` and `br` is within bounds,
+    then `br.bitPos ≤ dataSize * 8`. -/
+private theorem wf_range_of_data_le {br : Zip.Native.BitReader} {dataSize : Nat}
+    (hwf : br.bitOff < 8)
+    (hple : br.pos ≤ br.data.size)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
+    (hds : br.data.size ≤ dataSize) :
+    ¬(dataSize * 8 < br.bitPos) := by
+  simp only [Zip.Native.BitReader.bitPos]
+  rcases hpos with h | h <;> omega
+
+/-! ## DataSize monotonicity -/
+
+/-- DataSize monotonicity: if `inflateLoop` succeeds with dataSize `n`,
+    it succeeds with any `m ≥ n` and produces the same result.
+    (The only effect of a larger dataSize is a more permissive range guard.) -/
 theorem inflateLoop_fuel_le
     (br : Zip.Native.BitReader) (output : ByteArray)
     (fixedLit fixedDist : Zip.Native.HuffTree) (maxOut n m : Nat)
@@ -47,11 +77,19 @@ theorem inflateLoop_fuel_le
     (h : Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut n = .ok x)
     (hle : n ≤ m) :
     Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut m = .ok x := by
-  induction n generalizing br output m with
-  | zero => simp [Zip.Native.Inflate.inflateLoop] at h
-  | succ n ih =>
-    obtain ⟨m', rfl⟩ : ∃ m', m = m' + 1 := ⟨m - 1, by omega⟩
-    simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind] at h ⊢
+  -- Strong induction on WF measure: n * 8 - br.bitPos
+  suffices ∀ k (br : Zip.Native.BitReader) (output : ByteArray) (x : ByteArray × Nat),
+      n * 8 - br.bitPos ≤ k →
+      Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut n = .ok x →
+      Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut m = .ok x from
+    this (n * 8 - br.bitPos) br output x (Nat.le.refl) h
+  intro k
+  induction k using Nat.strongRecOn with
+  | _ k ih =>
+    intro br output x hk h
+    rw [Zip.Native.Inflate.inflateLoop.eq_1] at h
+    rw [Zip.Native.Inflate.inflateLoop.eq_1]
+    simp only [bind, Except.bind] at h ⊢
     -- readBits 1
     cases hbf : br.readBits 1 with
     | error e => simp [hbf] at h
@@ -62,8 +100,7 @@ theorem inflateLoop_fuel_le
       | error e => simp [hbt] at h
       | ok p₂ =>
         obtain ⟨btype, br₂⟩ := p₂; simp only [hbt] at h ⊢
-        -- Both h and ⊢ match on btype; only fuel differs (n vs m')
-        -- split at h resolves the shared discriminant in both h and ⊢
+        -- Both h and ⊢ match on btype; only dataSize differs (n vs m)
         split at h
         · -- btype = 0: stored
           split at h
@@ -73,7 +110,20 @@ theorem inflateLoop_fuel_le
             · exact h
             · rename_i h1 h2; exact absurd h1 h2
             · rename_i h1 h2; exact absurd h2 h1
-            · exact ih _ _ _ h (by omega)
+            · -- WF guards: progress (same in h and goal)
+              split at h
+              · simp at h
+              · rename_i h_progress
+                -- WF guards: range (differs between n and m)
+                split at h
+                · simp at h
+                · rename_i h_range_n
+                  -- Discharge goal's WF guards
+                  split
+                  · rename_i h_prog_m; exact absurd h_prog_m h_progress
+                  · split
+                    · rename_i h_range_m; exfalso; omega
+                    · exact ih _ (by omega) _ _ _ Nat.le.refl h
         · -- btype = 1: fixed Huffman
           split at h
           · exact h
@@ -81,7 +131,17 @@ theorem inflateLoop_fuel_le
             · exact h
             · rename_i h1 h2; exact absurd h1 h2
             · rename_i h1 h2; exact absurd h2 h1
-            · exact ih _ _ _ h (by omega)
+            · split at h
+              · simp at h
+              · rename_i h_progress
+                split at h
+                · simp at h
+                · rename_i h_range_n
+                  split
+                  · rename_i h_prog_m; exact absurd h_prog_m h_progress
+                  · split
+                    · rename_i h_range_m; exfalso; omega
+                    · exact ih _ (by omega) _ _ _ Nat.le.refl h
         · -- btype = 2: dynamic Huffman
           split at h
           · exact h -- decodeDynamicTrees error
@@ -91,7 +151,17 @@ theorem inflateLoop_fuel_le
               · exact h
               · rename_i h1 h2; exact absurd h1 h2
               · rename_i h1 h2; exact absurd h2 h1
-              · exact ih _ _ _ h (by omega)
+              · split at h
+                · simp at h
+                · rename_i h_progress
+                  split at h
+                  · simp at h
+                  · rename_i h_range_n
+                    split
+                    · rename_i h_prog_m; exact absurd h_prog_m h_progress
+                    · split
+                      · rename_i h_range_m; exfalso; omega
+                      · exact ih _ (by omega) _ _ _ Nat.le.refl h
         · exact h -- btype ≥ 3: reserved error
 
 /-! ## Block loop completeness -/
@@ -100,19 +170,19 @@ set_option maxRecDepth 2048 in
 /-- **Completeness for block loop**: if the spec `decode.go` succeeds,
     the native `inflateLoop` also succeeds with the same result.
 
-    Note: `fuel` is existentially quantified because `inflateLoop 0` always
-    errors. The fuel bound allows transferring to any concrete fuel value
-    via `inflateLoop_fuel_le`.
+    The `dataSize` parameter must be at least `br.data.size`. The caller
+    can use `inflateLoop_fuel_le` to lift to any larger dataSize.
 
     This is the reverse of `inflateLoop_correct`. -/
 theorem inflateLoop_complete (br : Zip.Native.BitReader)
     (output : ByteArray)
     (fixedLit fixedDist : Zip.Native.HuffTree)
-    (maxOutputSize : Nat)
+    (maxOutputSize dataSize : Nat)
     (result : List UInt8)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hple : br.pos ≤ br.data.size)
+    (hds : br.data.size ≤ dataSize)
     (hflit : Zip.Native.HuffTree.fromLengths
       Zip.Native.Inflate.fixedLitLengths = .ok fixedLit)
     (hfdist : Zip.Native.HuffTree.fromLengths
@@ -120,10 +190,9 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
     (hmax : result.length ≤ maxOutputSize)
     (hspec : Deflate.Spec.decode.go br.toBits output.data.toList =
         some result) :
-    ∃ fuel endPos,
-      fuel ≤ br.toBits.length + 1 ∧
+    ∃ endPos,
       Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist
-        maxOutputSize fuel = .ok (⟨⟨result⟩⟩, endPos) := by
+        maxOutputSize dataSize = .ok (⟨⟨result⟩⟩, endPos) := by
   -- Strong induction on bit stream length
   suffices ∀ len (br : Zip.Native.BitReader) (output : ByteArray)
       (result : List UInt8),
@@ -131,17 +200,17 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
       br.bitOff < 8 →
       (br.bitOff = 0 ∨ br.pos < br.data.size) →
       br.pos ≤ br.data.size →
+      br.data.size ≤ dataSize →
       result.length ≤ maxOutputSize →
       Deflate.Spec.decode.go br.toBits output.data.toList = some result →
-      ∃ fuel endPos,
-        fuel ≤ len + 1 ∧
+      ∃ endPos,
         Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist
-          maxOutputSize fuel = .ok (⟨⟨result⟩⟩, endPos) from
-    this _ br output result rfl hwf hpos hple hmax hspec
+          maxOutputSize dataSize = .ok (⟨⟨result⟩⟩, endPos) from
+    this _ br output result rfl hwf hpos hple hds hmax hspec
   intro len
   induction len using Nat.strongRecOn with
   | _ len ih =>
-    intro br output result hlen hwf hpos hple hmaxout hspec
+    intro br output result hlen hwf hpos hple hds hmaxout hspec
     -- Unfold spec one step
     unfold Deflate.Spec.decode.go at hspec
     -- Extract readBitsLSB 1 (bfinal)
@@ -153,7 +222,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
       have hval_bf := Deflate.Spec.readBitsLSB_bound hspec_bf
       have ⟨br₁, hrb_bf, hrest₁, hwf₁, hpos₁⟩ :=
         readBits_complete br 1 bfinal_val bits₁ hwf hpos (by omega) hval_bf hspec_bf
-      have ⟨_, _, hple₁⟩ :=
+      have ⟨hdata₁, _, hple₁⟩ :=
         Zip.Native.readBits_inv br br₁ 1 bfinal_val.toUInt32 hrb_bf hpos hple
       -- Extract readBitsLSB 2 (btype)
       cases hspec_bt : Deflate.Spec.readBitsLSB 2 bits₁ with
@@ -165,7 +234,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
         have ⟨br₂, hrb_bt, hrest₂, hwf₂, hpos₂⟩ :=
           readBits_complete br₁ 2 btype_val bits₂ hwf₁ hpos₁ (by omega) hval_bt
             (by rw [hrest₁]; exact hspec_bt)
-        have ⟨_, _, hple₂⟩ :=
+        have ⟨hdata₂, _, hple₂⟩ :=
           Zip.Native.readBits_inv br₁ br₂ 2 btype_val.toUInt32 hrb_bt hpos₁ hple₁
         -- Dispatch on btype_val in spec
         split at hspec
@@ -191,23 +260,21 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                 simp only [ByteArray.size, Array.length_toList] at *; omega
               obtain ⟨br', hds_nat, _, _, _⟩ := decodeStored_complete br₂ output
                 maxOutputSize storedBytes rest hwf₂ hpos₂ hmax_s hspec_ds'
-              refine ⟨1, br'.alignToByte.pos, by omega, ?_⟩
-              simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind,
+              refine ⟨br'.alignToByte.pos, ?_⟩
+              rw [Zip.Native.Inflate.inflateLoop.eq_1]
+              simp only [bind, Except.bind,
                 hrb_bf, hrb_bt, hds_nat,
                 show Nat.toUInt32 0 = (0 : UInt32) from rfl]
               -- bfinal check
               have hbf_u32 : (bfinal_val.toUInt32 == 1) = true := by
                 rw [beq_iff_eq] at hbf1 ⊢; subst hbf1; rfl
               simp only [hbf_u32, ↓reduceIte, pure, Except.pure]
-              -- Goal: .ok (output ++ ⟨⟨storedBytes⟩⟩, br'.alignToByte.pos) =
-              --       .ok (⟨⟨result⟩⟩, br'.alignToByte.pos)
               rw [hresult]; rfl
             · -- bfinal_val ≠ 1: recursive case
               rename_i hbf_ne1
               -- Split the dite guard (rest.length < br.toBits.length)
               split at hspec
               · rename_i hrest_lt
-                -- hspec : decode.go rest (output.data.toList ++ storedBytes) = some result
                 -- Derive hmax_s for decodeStored_complete
                 have hpre := Deflate.Spec.decode_go_acc_prefix _ _ _ hspec
                 have hmax_s : output.size + storedBytes.length ≤ maxOutputSize := by
@@ -218,27 +285,41 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                 obtain ⟨br', hds_nat, hrest_br, hbo_0, hpos_br⟩ :=
                   decodeStored_complete br₂ output maxOutputSize storedBytes rest
                     hwf₂ hpos₂ hmax_s hspec_ds'
-                have ⟨_, _, hple_br⟩ :=
+                have ⟨hdata_ds, _, hple_br⟩ :=
                   Zip.Native.decodeStored_inv br₂ br' output _ maxOutputSize hds_nat
+                -- Data preservation chain
+                have hdata_chain : br'.data = br.data :=
+                  hdata_ds.trans (hdata₂.trans hdata₁)
+                have hds_br : br'.data.size ≤ dataSize := by
+                  rw [hdata_chain]; exact hds
                 -- Apply IH (rest.length < len)
                 have hrest_lt' : rest.length < len := by rw [← hlen]; exact hrest_lt
                 have hspec_br : Deflate.Spec.decode.go br'.toBits
                     (output ++ ⟨⟨storedBytes⟩⟩).data.toList = some result := by
                   rw [hrest_br]; exact hspec
-                obtain ⟨fuel', endPos, hfuel_le, hloop⟩ :=
+                obtain ⟨endPos, hloop⟩ :=
                   ih rest.length hrest_lt' br' (output ++ ⟨⟨storedBytes⟩⟩) result
                     (by rw [hrest_br])
-                    (by rw [hbo_0]; omega) hpos_br hple_br hmaxout hspec_br
-                -- Construct fuel = fuel' + 1
-                refine ⟨fuel' + 1, endPos, by omega, ?_⟩
-                simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind,
+                    (by rw [hbo_0]; omega) hpos_br hple_br hds_br hmaxout hspec_br
+                -- Construct native result
+                refine ⟨endPos, ?_⟩
+                rw [Zip.Native.Inflate.inflateLoop.eq_1]
+                simp only [bind, Except.bind,
                   hrb_bf, hrb_bt, hds_nat,
                   show Nat.toUInt32 0 = (0 : UInt32) from rfl]
                 have hbf_u32 : (bfinal_val.toUInt32 == 1) = false := by
                   have : bfinal_val = 0 := by simp only [beq_iff_eq] at hbf_ne1; omega
                   subst this; rfl
                 simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
-                exact hloop
+                -- Discharge WF guards
+                split
+                · rename_i h_prog
+                  exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
+                    hdata_chain (by rw [hrest_br]; exact hrest_lt))
+                · split
+                  · rename_i h_rng
+                    exact absurd h_rng (wf_range_of_data_le (by rw [hbo_0]; omega) hple_br hpos_br hds_br)
+                  · exact hloop
               · -- ¬(rest.length < br.toBits.length): spec returns none
                 simp at hspec
 
@@ -285,8 +366,9 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                     fixedLit fixedDist maxOutputSize =
                     .ok (⟨⟨result⟩⟩, br') := by
                   unfold Zip.Native.Inflate.decodeHuffman; exact hdh
-                refine ⟨1, br'.alignToByte.pos, by omega, ?_⟩
-                simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind,
+                refine ⟨br'.alignToByte.pos, ?_⟩
+                rw [Zip.Native.Inflate.inflateLoop.eq_1]
+                simp only [bind, Except.bind,
                   hrb_bf, hrb_bt, hdh_native,
                   show Nat.toUInt32 1 = (1 : UInt32) from rfl]
                 have hbf_u32 : (bfinal_val.toUInt32 == 1) = true := by
@@ -316,26 +398,40 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                       fixedLit fixedDist maxOutputSize =
                       .ok (⟨⟨blockResult⟩⟩, br') := by
                     unfold Zip.Native.Inflate.decodeHuffman; exact hdh
-                  have ⟨_, _, hple_br⟩ :=
+                  have ⟨hdata_dh, _, hple_br⟩ :=
                     Zip.Native.decodeHuffman_inv fixedLit fixedDist br₂ br' output
                       ⟨⟨blockResult⟩⟩ maxOutputSize hdh_native hpos₂ hple₂
+                  -- Data preservation chain
+                  have hdata_chain : br'.data = br.data :=
+                    hdata_dh.trans (hdata₂.trans hdata₁)
+                  have hds_br : br'.data.size ≤ dataSize := by
+                    rw [hdata_chain]; exact hds
                   -- Apply IH
                   have hrest_lt' : rest.length < len := by rw [← hlen]; exact hrest_lt
                   have hspec_br : Deflate.Spec.decode.go br'.toBits
                       (⟨⟨blockResult⟩⟩ : ByteArray).data.toList = some result := by
                     rw [hrest_br]; exact hspec
-                  obtain ⟨fuel', endPos, hfuel_le, hloop⟩ :=
+                  obtain ⟨endPos, hloop⟩ :=
                     ih rest.length hrest_lt' br' ⟨⟨blockResult⟩⟩ result
-                      (by rw [hrest_br]) hwf_br hpos_br hple_br hmaxout hspec_br
-                  refine ⟨fuel' + 1, endPos, by omega, ?_⟩
-                  simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind,
+                      (by rw [hrest_br]) hwf_br hpos_br hple_br hds_br hmaxout hspec_br
+                  refine ⟨endPos, ?_⟩
+                  rw [Zip.Native.Inflate.inflateLoop.eq_1]
+                  simp only [bind, Except.bind,
                     hrb_bf, hrb_bt, hdh_native,
                     show Nat.toUInt32 1 = (1 : UInt32) from rfl]
                   have hbf_u32 : (bfinal_val.toUInt32 == 1) = false := by
                     have : bfinal_val = 0 := by simp only [beq_iff_eq] at hbf_ne1; omega
                     subst this; rfl
                   simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
-                  exact hloop
+                  -- Discharge WF guards
+                  split
+                  · rename_i h_prog
+                    exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
+                      hdata_chain (by rw [hrest_br]; exact hrest_lt))
+                  · split
+                    · rename_i h_rng
+                      exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
+                    · exact hloop
                 · simp at hspec
         · -- btype_val = 2: dynamic Huffman
           -- Extract decodeDynamicTables from spec
@@ -393,8 +489,9 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                       litTree distTree maxOutputSize =
                       .ok (⟨⟨result⟩⟩, br') := by
                     unfold Zip.Native.Inflate.decodeHuffman; exact hdh
-                  refine ⟨1, br'.alignToByte.pos, by omega, ?_⟩
-                  simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind,
+                  refine ⟨br'.alignToByte.pos, ?_⟩
+                  rw [Zip.Native.Inflate.inflateLoop.eq_1]
+                  simp only [bind, Except.bind,
                     hrb_bf, hrb_bt, hdt_nat, hdh_native,
                     show Nat.toUInt32 2 = (2 : UInt32) from rfl]
                   have hbf_u32 : (bfinal_val.toUInt32 == 1) = true := by
@@ -421,26 +518,40 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
                         litTree distTree maxOutputSize =
                         .ok (⟨⟨blockResult⟩⟩, br') := by
                       unfold Zip.Native.Inflate.decodeHuffman; exact hdh
-                    have ⟨_, _, hple_br⟩ :=
+                    have ⟨hdata_dh, _, hple_br⟩ :=
                       Zip.Native.decodeHuffman_inv litTree distTree br₃ br' output
                         ⟨⟨blockResult⟩⟩ maxOutputSize hdh_native hpos₃ hple₃
+                    -- Data preservation chain
+                    have hdata_chain : br'.data = br.data :=
+                      hdata_dh.trans (hdata₃.trans (hdata₂.trans hdata₁))
+                    have hds_br : br'.data.size ≤ dataSize := by
+                      rw [hdata_chain]; exact hds
                     -- Apply IH
                     have hrest_lt' : rest.length < len := by rw [← hlen]; exact hrest_lt
                     have hspec_br : Deflate.Spec.decode.go br'.toBits
                         (⟨⟨blockResult⟩⟩ : ByteArray).data.toList = some result := by
                       rw [hrest_br]; exact hspec
-                    obtain ⟨fuel', endPos, hfuel_le, hloop⟩ :=
+                    obtain ⟨endPos, hloop⟩ :=
                       ih rest.length hrest_lt' br' ⟨⟨blockResult⟩⟩ result
-                        (by rw [hrest_br]) hwf_br hpos_br hple_br hmaxout hspec_br
-                    refine ⟨fuel' + 1, endPos, by omega, ?_⟩
-                    simp only [Zip.Native.Inflate.inflateLoop, bind, Except.bind,
+                        (by rw [hrest_br]) hwf_br hpos_br hple_br hds_br hmaxout hspec_br
+                    refine ⟨endPos, ?_⟩
+                    rw [Zip.Native.Inflate.inflateLoop.eq_1]
+                    simp only [bind, Except.bind,
                       hrb_bf, hrb_bt, hdt_nat, hdh_native,
                       show Nat.toUInt32 2 = (2 : UInt32) from rfl]
                     have hbf_u32 : (bfinal_val.toUInt32 == 1) = false := by
                       have : bfinal_val = 0 := by simp only [beq_iff_eq] at hbf_ne1; omega
                       subst this; rfl
                     simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
-                    exact hloop
+                    -- Discharge WF guards
+                    split
+                    · rename_i h_prog
+                      exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
+                        hdata_chain (by rw [hrest_br]; exact hrest_lt))
+                    · split
+                      · rename_i h_rng
+                        exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
+                      · exact hloop
                   · simp at hspec
         · -- btype_val ≥ 3: reserved
           simp at hspec

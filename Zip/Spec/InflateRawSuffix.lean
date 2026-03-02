@@ -447,16 +447,27 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
 
 /-- inflateLoop with appended suffix. -/
 private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
-    (output : ByteArray) (fixedLit fixedDist : HuffTree) (maxOut fuel : Nat)
+    (output : ByteArray) (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat)
     (result : ByteArray) (endPos : Nat)
-    (h : Inflate.inflateLoop br output fixedLit fixedDist maxOut fuel =
+    (h : Inflate.inflateLoop br output fixedLit fixedDist maxOut dataSize =
       .ok (result, endPos)) :
-    Inflate.inflateLoop (brAppend br suffix) output fixedLit fixedDist maxOut fuel =
+    Inflate.inflateLoop (brAppend br suffix) output fixedLit fixedDist maxOut dataSize =
       .ok (result, endPos) := by
-  induction fuel generalizing br output with
-  | zero => unfold Inflate.inflateLoop at h; exact nomatch h
-  | succ n ih =>
-    unfold Inflate.inflateLoop at h ⊢; simp only [bind, Except.bind] at h ⊢
+  suffices ∀ k (br : BitReader) (output : ByteArray)
+      (result : ByteArray) (endPos : Nat),
+      dataSize * 8 - br.bitPos ≤ k →
+      Inflate.inflateLoop br output fixedLit fixedDist maxOut dataSize =
+        .ok (result, endPos) →
+      Inflate.inflateLoop (brAppend br suffix) output fixedLit fixedDist maxOut dataSize =
+        .ok (result, endPos) from
+    this _ br output result endPos Nat.le.refl h
+  intro k
+  induction k using Nat.strongRecOn with
+  | _ k ih =>
+    intro br output result endPos hk h
+    rw [Inflate.inflateLoop.eq_1] at h
+    rw [Inflate.inflateLoop.eq_1]
+    simp only [bind, Except.bind] at h ⊢
     cases hbf : br.readBits 1 with
     | error e => simp only [hbf] at h; exact nomatch h
     | ok p =>
@@ -477,7 +488,19 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             by_cases hbf1 : (bfinal == 1) = true
             · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
               rw [alignToByte_append]; exact h
-            · rw [if_neg hbf1] at h ⊢; exact ih br' out' h
+            · rw [if_neg hbf1] at h ⊢
+              -- WF guards in h
+              split at h
+              · simp at h
+              · rename_i h_progress
+                split at h
+                · simp at h
+                · -- WF guards in goal (same conditions via brAppend preserving bitPos)
+                  split
+                  · rename_i h₁'; exact absurd h₁' h_progress
+                  · split
+                    · rename_i h₂'; exact absurd h₂' (by assumption)
+                    · exact ih _ (by omega) br' out' result endPos Nat.le.refl h
         · -- btype = 1: fixed Huffman
           simp only [Inflate.decodeHuffman] at h ⊢
           cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂.data.size br₂ output with
@@ -490,7 +513,17 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             by_cases hbf1 : (bfinal == 1) = true
             · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
               rw [alignToByte_append]; exact h
-            · rw [if_neg hbf1] at h ⊢; exact ih br' out' h
+            · rw [if_neg hbf1] at h ⊢
+              split at h
+              · simp at h
+              · rename_i h_progress
+                split at h
+                · simp at h
+                · split
+                  · rename_i h₁'; exact absurd h₁' h_progress
+                  · split
+                    · rename_i h₂'; exact absurd h₂' (by assumption)
+                    · exact ih _ (by omega) br' out' result endPos Nat.le.refl h
         · -- btype = 2: dynamic Huffman
           cases hdt : Inflate.decodeDynamicTrees br₂ with
           | error e => simp only [hdt] at h; exact nomatch h
@@ -508,7 +541,17 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
               by_cases hbf1 : (bfinal == 1) = true
               · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
                 rw [alignToByte_append]; exact h
-              · rw [if_neg hbf1] at h ⊢; exact ih br' out' h
+              · rw [if_neg hbf1] at h ⊢
+                split at h
+                · simp at h
+                · rename_i h_progress
+                  split at h
+                  · simp at h
+                  · split
+                    · rename_i h₁'; exact absurd h₁' h_progress
+                    · split
+                      · rename_i h₂'; exact absurd h₂' (by assumption)
+                      · exact ih _ (by omega) br' out' result endPos Nat.le.refl h
         · -- btype ≥ 3: reserved
           exact h
 
@@ -527,12 +570,12 @@ theorem inflateRaw_append_suffix (data suffix : ByteArray) (startPos maxOut : Na
     | error e => simp only [hfdist] at h; exact nomatch h
     | ok fixedDist =>
       simp only [hfdist] at h
-      -- h has fuel = data.size * 8 + 1, goal has fuel = (data ++ suffix).size * 8 + 1
+      -- h has dataSize = data.size, goal has dataSize = (data ++ suffix).size
       have h' := inflateLoop_append_suffix ⟨data, startPos, 0⟩ suffix .empty
-        fixedLit fixedDist maxOut (data.size * 8 + 1) result endPos h
+        fixedLit fixedDist maxOut data.size result endPos h
       exact Deflate.Correctness.inflateLoop_fuel_le
         ⟨data ++ suffix, startPos, 0⟩ .empty fixedLit fixedDist maxOut
-        (data.size * 8 + 1) ((data ++ suffix).size * 8 + 1) (result, endPos)
+        data.size (data ++ suffix).size (result, endPos)
         h' (by simp only [ByteArray.size_append]; omega)
 
 end Zip.Native

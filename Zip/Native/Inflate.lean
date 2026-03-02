@@ -309,13 +309,10 @@ where
   decreasing_by all_goals omega
 
 /-- Block loop for DEFLATE decompression. Decodes blocks until a final block
-    is seen or fuel is exhausted. Defined as explicit recursion for proof
-    tractability (`forIn` on `Range` cannot be unfolded). -/
+    is seen. Uses well-founded recursion on the remaining bits in the stream. -/
 def inflateLoop (br : BitReader) (output : ByteArray)
-    (fixedLit fixedDist : HuffTree) (maxOutputSize : Nat) :
-    Nat → Except String (ByteArray × Nat)
-  | 0 => .error "Inflate: too many blocks"
-  | fuel + 1 => do
+    (fixedLit fixedDist : HuffTree) (maxOutputSize : Nat)
+    (dataSize : Nat) : Except String (ByteArray × Nat) := do
     let (bfinal, br₁) ← br.readBits 1
     let (btype, br₂) ← br₁.readBits 2
     let (output', br') ← match btype with
@@ -329,7 +326,15 @@ def inflateLoop (br : BitReader) (output : ByteArray)
       let aligned := br'.alignToByte
       return (output', aligned.pos)
     else
-      inflateLoop br' output' fixedLit fixedDist maxOutputSize fuel
+      -- Guard: bit position must advance for WF termination
+      if _h₁ : br'.bitPos ≤ br.bitPos then
+        throw "Inflate: no progress in inflate loop"
+      else if _h₂ : dataSize * 8 < br'.bitPos then
+        throw "Inflate: bit position out of range"
+      else
+        inflateLoop br' output' fixedLit fixedDist maxOutputSize dataSize
+termination_by dataSize * 8 - br.bitPos
+decreasing_by all_goals omega
 
 /-- Inflate a raw DEFLATE stream starting at byte offset `startPos`. Returns the
     decompressed data and the byte-aligned position after the last DEFLATE block.
@@ -341,7 +346,7 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
   let br : BitReader := { data, pos := startPos, bitOff := 0 }
   let fixedLit ← HuffTree.fromLengths fixedLitLengths
   let fixedDist ← HuffTree.fromLengths fixedDistLengths
-  inflateLoop br .empty fixedLit fixedDist maxOutputSize (data.size * 8 + 1)
+  inflateLoop br .empty fixedLit fixedDist maxOutputSize data.size
 
 /-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
     `maxOutputSize` (default 1 GiB) limits decompressed output to guard against
