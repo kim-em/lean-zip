@@ -5,12 +5,12 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C2 (fuel elimination) nearly complete
+- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) started
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
 - **Sorries**: 0
-- **Sessions**: ~215 completed (Feb 19 – Mar 2)
-- **Source files**: 84 (43 spec, 8 native impl, 9 FFI/archive, 4 ZipForStd, 20 test)
-- **Merged PRs**: 179
+- **Sessions**: ~227 completed (Feb 19 – Mar 2)
+- **Source files**: 86 (43 spec, 9 native impl, 9 FFI/archive, 4 ZipForStd, 21 test)
+- **Merged PRs**: 189
 
 ## Milestones
 
@@ -96,15 +96,19 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     Inflate.inflate (deflateRaw data level) = .ok data
 ```
 Covers all compression levels (stored, fixed, lazy, dynamic). The 1 GiB
-size bound arises from fuel-based termination in the native `inflateLoop`
-(the last remaining fuel-based function — see Track C2).
+size bound is now the native inflate's default `maxOutputSize` (a runtime
+zip-bomb guard), not a fuel/termination limitation — all recursive functions
+use well-founded recursion (Track C2 complete).
 
-**Proof quality reviews** (50+ sessions): systematic code review across
+**Proof quality reviews** (55+ sessions): systematic code review across
 all spec files, reducing proof size, extracting reusable lemmas to
 ZipForStd, splitting large files for maintainability, and converting
-bare `simp` to `simp only`. Recent reviews: Deflate (#369),
+bare `simp` to `simp only`. Reviews to date: Deflate (#369),
 DecodeComplete (#374), BitReaderInvariant (#382), HuffmanCorrect +
-HuffmanCorrectLoop (#385), InflateCorrect (#387).
+HuffmanCorrectLoop (#385), InflateCorrect (#387), InflateRawSuffix (#391),
+DeflateFixedCorrect (#404), LZ77 (#408), InflateLoopBounds (#413),
+DeflateDynamicFreqs (#414). Bare `simp` reduced from hundreds across spec
+files to 17 remaining instances in 12 files (documented resistant patterns).
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -163,12 +167,12 @@ The per-path bounds:
 The unified bound is now 1 GiB (`1024 * 1024 * 1024`), up from 500MB
 previously and 5MB at the start of Track C1.
 
-### Track C2: Fuel Elimination (nearly complete, Mar 2)
-Replacing fuel-based recursion with well-founded recursion to eliminate
-the data size bound entirely.
+### Track C2: Fuel Elimination (complete, Mar 2)
+Replaced all fuel-based recursion with well-founded recursion, eliminating
+the data size bound as a proof artifact. The 1 GiB bound in the capstone
+theorem is now solely the native inflate's `maxOutputSize` zip-bomb guard.
 
-**Completed — 5 of 6 functions converted, all proofs repaired:**
-- Fuel audit (#323) identifying all 6 fuel-using functions
+**All 6 fuel-using functions converted to WF:**
 - Spec `decodeCLSymbols` → WF (#328): `termination_by totalCodes - acc.length`
 - Native `decodeCLSymbols` → WF (#332): same termination measure
 - Spec `decodeSymbols` → WF (#337): `termination_by` on remaining bits
@@ -176,34 +180,22 @@ the data size bound entirely.
 - Spec `decode.go`/`decode.goR` → WF (#344): required deleting DeflateFuelIndep.lean
   (fuel independence became moot once spec functions are WF) and updating 11
   downstream proof files
-- `inflateLoop_correct` proved (#358): native→spec block loop correspondence,
-  composing block-level correctness with 7 new bit-length invariant lemmas
-- `decodeDynamicTrees_complete` proved (#361): composed from sub-completeness
-  theorems for each component
-- `inflateLoop_complete` proved (#373): spec→native block loop correspondence,
-  strong induction on bit stream length, all 4 btype cases handled
-- `inflateLoop_fuel_le` proved (#373): fuel monotonicity (if inflateLoop
-  succeeds with fuel n, it succeeds with any m ≥ n)
-- `inflateRaw` fuel changed from hardcoded `10000000000` to data-dependent
-  `data.size * 8 + 1` (#373)
-- Proof repairs across 6 PRs (#345, #350, #351, #356, #357, #362): WF
-  conversions broke ~15 proofs; all repaired
+- Native `inflateLoop` → WF (#397): `termination_by dataSize * 8 - br.bitPos`
 
-**Sorry count trajectory:** 0 → ~15 (during WF conversions) → 2 (after repairs)
-→ 0 (after `inflateLoop_complete` proved). The codebase has returned to zero
-sorries.
+**Key proofs repaired during and after WF conversions:**
+- `inflateLoop_correct` (#358): native→spec block loop correspondence
+- `decodeDynamicTrees_complete` (#361): composed from sub-completeness theorems
+- `inflateLoop_complete` (#373): spec→native block loop, strong induction
+- Proof repairs across 6 PRs (#345, #350, #351, #356, #357, #362)
 
-**Remaining:**
-- Native `inflateLoop` — still fuel-based (block dispatch loop). Issue #363
-  tracks the final WF conversion. All proofs already compile; this is a
-  code quality improvement, not a correctness gap.
+**Sorry count trajectory:** 0 → ~15 (during conversions) → 0 (all repaired).
 
 **New skill:** `lean-wf-recursion` (#349) capturing WF function unfolding rules,
 `f.induct` functional induction patterns, and fuel-to-WF migration checklist.
 
 ### Track D: Benchmarking (in progress, Feb 25 – Mar 2)
 Benchmark infrastructure comparing native Lean compression/decompression
-vs FFI (zlib) across levels 0/1/6 with various data patterns (constant,
+vs FFI (zlib) across all levels (0–9) with various data patterns (constant,
 cyclic, random, text) at sizes 1KB–1MB.
 
 **Large-input fixes:**
@@ -222,15 +214,41 @@ cyclic, random, text) at sizes 1KB–1MB.
   constant, cyclic, and random patterns
 - Compression size cap removed (#390): all levels run at all sizes
   (was previously split into small/large tiers with restricted levels)
-- Compression ratio comparison section: native vs FFI output sizes
+- All-level compression ratios (#399): native vs FFI output sizes for
+  levels 0–9 across all 4 data patterns
+- MB/s throughput calculations (#399) added to all benchmark sections
+
+### Track E: Zstd Native Decompressor (in progress, Mar 2)
+Native Lean Zstd implementation, following the same methodology as DEFLATE
+(B-track). Currently at the frame/block parsing stage.
+
+**Completed:**
+- Frame header parser (#398): magic number, frame header descriptor bit fields,
+  optional window descriptor, dictionary ID, frame content size — per
+  RFC 8878 §3.1.1. `ZstdFrameHeader` structure with `parseFrameHeader`.
+- Block header parsing and raw/RLE decompression (#405): 3-byte block
+  headers (Last_Block, Block_Type, Block_Size), verbatim copy for raw blocks,
+  single-byte repeat for RLE blocks, `decompressFrame` loop over blocks.
+- Tests: 6 tests covering header parsing, RLE/raw blocks, round-trip
+  decompression against FFI (`ZipTest/ZstdNative.lean`).
+
+**Remaining (per PLAN.md):**
+- Compressed block decompression (Huffman + FSE decoding)
+- FSE (Finite State Entropy) decoder
+- Sequence execution (literals + match copies)
+- Spec-level decoder with correctness proofs
+- Compressor + roundtrip proof
+
+This is early-stage work. Only raw and RLE block types are decompressed;
+compressed blocks (the common case) are not yet implemented.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~215 sessions: majority implementation, ~95 review, ~6 self-improvement,
+- ~227 sessions: majority implementation, ~100 review, ~6 self-improvement,
   remainder PR maintenance, planning, and summarization
-- 179 merged PRs (Feb 19 – Mar 2)
+- 189 merged PRs (Feb 19 – Mar 2)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
