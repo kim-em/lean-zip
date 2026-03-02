@@ -23,7 +23,7 @@ protected theorem canonicalCodes_go_size (lengths : Array UInt8) (nextCode : Arr
   · dsimp only []
     split
     · rw [Deflate.Correctness.canonicalCodes_go_size]
-      simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds]; split <;> simp_all
+      simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]; split <;> simp_all
     · exact Deflate.Correctness.canonicalCodes_go_size lengths nextCode (i + 1) result
   · rfl
 termination_by lengths.size - i
@@ -98,7 +98,7 @@ private theorem canonicalCodes_go_inv
         (result.set! i ((nextCode[lengths[i].toNat]!).toUInt16, lengths[i]))
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
         (by -- hresSize: set! preserves array size
-          simp [Array.set!_eq_setIfInBounds, Array.setIfInBounds, hresSize]
+          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds, hresSize]
           split <;> simp_all)
         (by -- hncSize: set! preserves array size
           simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
@@ -163,13 +163,13 @@ private theorem canonicalCodes_go_inv
           simp only [List.getElem?_eq_getElem hls_len, Option.toList,
                      List.foldl_append, List.foldl_cons, List.foldl_nil, hls_val]
           have : ¬((0 == b) = true) := by rw [beq_iff_eq]; omega
-          simp [this])
+          simp only [beq_iff_eq, this, Bool.false_eq_true, ↓reduceIte])
         (by -- hprev: extend to cover i (which has length 0)
           intro k hk hks
           by_cases hk_eq : k = i
           · simp only [hk_eq]
             have hfut_i := hfut i Nat.le.refl hi
-            simp [hlen_pos, hfut_i]
+            simp only [gt_iff_lt, hlen_pos, ↓reduceIte, hfut_i]
           · exact hprev k (by omega) hks)
         (by -- hfut: positions ≥ i+1 still (0,0)
           intro k hk hks
