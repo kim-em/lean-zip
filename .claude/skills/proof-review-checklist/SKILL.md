@@ -54,9 +54,15 @@ simp only [hb] at h
 simp only [ha, hb] at h
 ```
 
-**Caveat**: Only merge when both target the same location (`at h` or
-`at ⊢`). Don't merge `simp only [ha] at h` with `simp only [hb]`
-(different targets).
+**Caveats**:
+- Only merge when both target the same location (`at h` or `at ⊢`).
+  Don't merge `simp only [ha] at h` with `simp only [hb]` (different targets).
+- Don't merge when the first call unfolds definitions that create new
+  redexes for the second call's lemmas. `simp only` applies all lemmas
+  simultaneously, not sequentially — so merging two calls that depend on
+  ordering (e.g. first unfolds `UInt32` terms, second normalizes
+  `List.append_assoc`) will change the simplification result and break
+  downstream proofs. Always build after attempting a merge.
 
 ### 2c. Remove dead `have` bindings
 
