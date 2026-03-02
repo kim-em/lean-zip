@@ -12,19 +12,19 @@ namespace Array
 /-- `Array.set!` preserves the size. -/
 theorem size_set! (arr : Array α) (i : Nat) (v : α) :
     (arr.set! i v).size = arr.size := by
-  simp [set!_eq_setIfInBounds]
+  simp only [set!_eq_setIfInBounds, size_setIfInBounds]
 
 /-- `Array.set!` at a different index preserves the element. -/
 theorem getElem!_set!_ne [Inhabited α] (arr : Array α) (i j : Nat) (v : α) (hij : i ≠ j) :
     (arr.set! i v)[j]! = arr[j]! := by
-  simp [getElem!_eq_getD, getD_eq_getD_getElem?,
-        set!_eq_setIfInBounds, getElem?_setIfInBounds_ne hij]
+  simp only [set!_eq_setIfInBounds, getElem!_eq_getD, getD_eq_getD_getElem?,
+        getElem?_setIfInBounds_ne hij]
 
 /-- `Array.set!` at the same index replaces the value. -/
 theorem getElem!_set!_self [Inhabited α] (arr : Array α) (i : Nat) (v : α) (hi : i < arr.size) :
     (arr.set! i v)[i]! = v := by
-  simp [getElem!_eq_getD, getD_eq_getD_getElem?,
-        set!_eq_setIfInBounds, getElem?_setIfInBounds_self_of_lt hi]
+  simp only [set!_eq_setIfInBounds, getElem!_eq_getD, getD_eq_getD_getElem?,
+        getElem?_setIfInBounds_self_of_lt hi, Option.getD_some]
 
 /-- Incrementing `arr[k]!` preserves monotonicity: `arr[idx]! ≤ (arr.set! k (arr[k]! + 1))[idx]!`. -/
 theorem getElem!_le_set!_incr (arr : Array Nat) (k idx : Nat) (hk : k < arr.size) :
@@ -44,7 +44,7 @@ theorem extract_set_map_append (arr : Array UInt8) (idx : Nat) (val : UInt8)
   rw [Array.set!, Array.toList_extract, Array.toList_setIfInBounds, Array.toList_extract]
   simp only [List.extract, Nat.sub_zero, List.drop_zero]
   rw [List.take_set_succ _ _ _ (by rw [Array.length_toList]; exact hidx)]
-  simp [List.map_append]
+  simp only [List.map_append, List.map_take, List.map_cons, List.map_nil]
 
 /-- The last element of a mapped extract equals the mapped array element. -/
 theorem extract_map_getLast_eq (arr : Array UInt8) (idx : Nat)
@@ -52,13 +52,13 @@ theorem extract_map_getLast_eq (arr : Array UInt8) (idx : Nat)
     ((arr.extract 0 idx).toList.map UInt8.toNat).getLast! = arr[idx - 1]!.toNat := by
   simp only [Array.toList_extract, List.extract, Nat.sub_zero, List.drop_zero, List.map_take]
   have hlen : (List.take idx (List.map UInt8.toNat arr.toList)).length = idx := by
-    simp [List.length_take, List.length_map, Array.length_toList, Nat.min_eq_left hle]
+    simp only [List.length_take, List.length_map, length_toList, Nat.min_eq_left hle]
   rw [List.getLast!_eq_getLast?_getD, List.getLast?_eq_getElem?, hlen,
     List.getElem?_eq_getElem (by omega)]
   simp only [Option.getD_some]
   rw [getElem!_pos arr _ (by omega),
     @List.getElem_take _ (arr.toList.map UInt8.toNat) idx (idx - 1) (by rw [hlen]; omega)]
-  simp [List.getElem_map]
+  simp only [List.getElem_map, getElem_toList]
 
 /-- `arr[i]? = some arr[i]!` when `i` is in bounds.
     Combines `getElem!_pos` and `getElem?_pos` into a single step. -/
