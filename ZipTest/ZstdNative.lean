@@ -499,4 +499,131 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       throw (IO.userError s!"shifted repeat: expected {expected.data}, got {result.data}")
   | .error e => throw (IO.userError s!"shifted repeat failed: {e}")
 
+  -- Test 45: parseHuffmanWeightsDirect — known byte sequence
+  -- Byte 0x35 packs weights [3, 5], byte 0xA1 packs [10, 1]
+  let weightInput := ByteArray.mk #[0x35, 0xA1]
+  match Zip.Native.parseHuffmanWeightsDirect weightInput 0 2 with
+  | .ok (weights, endPos) =>
+    unless weights.size == 4 do
+      throw (IO.userError s!"weights: expected 4 weights, got {weights.size}")
+    unless weights[0]! == 3 do
+      throw (IO.userError s!"weights[0]: expected 3, got {weights[0]!}")
+    unless weights[1]! == 5 do
+      throw (IO.userError s!"weights[1]: expected 5, got {weights[1]!}")
+    unless weights[2]! == 10 do
+      throw (IO.userError s!"weights[2]: expected 10, got {weights[2]!}")
+    unless weights[3]! == 1 do
+      throw (IO.userError s!"weights[3]: expected 1, got {weights[3]!}")
+    unless endPos == 2 do
+      throw (IO.userError s!"weights endPos: expected 2, got {endPos}")
+  | .error e => throw (IO.userError s!"parseHuffmanWeightsDirect failed: {e}")
+
+  -- Test 46: weightsToMaxBits — two symbols with weight 1 → maxBits = 1
+  -- sum of 2^(W-1) for W=1,1 = 1+1 = 2 = 2^1, so maxBits = 1+1 = 2?
+  -- Wait: per RFC, the last symbol is implicit. So we have 2 explicit symbols
+  -- with weight 1 each. Sum = 2 = 2^1. Since sum == 2^1, maxBits = 1+1 = 2.
+  -- But actually with only 2 symbols both weight 1: each gets 1 bit. maxBits=1.
+  -- Let me reconsider: for a 2-symbol alphabet, weight [1] (1 explicit, 1 implicit).
+  -- sum = 2^(1-1) = 1. 1 == 2^0 so maxBits = 0+1 = 1. That's correct.
+  match Zip.Native.weightsToMaxBits #[1] with
+  | .ok maxBits =>
+    unless maxBits == 1 do
+      throw (IO.userError s!"maxBits [1]: expected 1, got {maxBits}")
+  | .error e => throw (IO.userError s!"weightsToMaxBits [1] failed: {e}")
+
+  -- Test 47: weightsToMaxBits — three symbols with weights [1, 1, 1]
+  -- sum = 1+1+1 = 3. Next power of 2 is 4 = 2^2, so maxBits = 2.
+  -- Implicit last symbol gets 2^2 - 3 = 1 = 2^0, so weight 1. Valid.
+  match Zip.Native.weightsToMaxBits #[1, 1, 1] with
+  | .ok maxBits =>
+    unless maxBits == 2 do
+      throw (IO.userError s!"maxBits [1,1,1]: expected 2, got {maxBits}")
+  | .error e => throw (IO.userError s!"weightsToMaxBits [1,1,1] failed: {e}")
+
+  -- Test 48: buildZstdHuffmanTable — 2 symbols (1 explicit weight [1])
+  -- Symbol 0 has weight 1, implicit symbol 1 also has weight 1.
+  -- maxBits = 1, table size = 2. Both symbols have numBits = 1.
+  match Zip.Native.buildZstdHuffmanTable #[1] with
+  | .ok table =>
+    unless table.maxBits == 1 do
+      throw (IO.userError s!"2sym maxBits: expected 1, got {table.maxBits}")
+    unless table.table.size == 2 do
+      throw (IO.userError s!"2sym table size: expected 2, got {table.table.size}")
+    -- Both entries should have numBits = 1
+    unless table.table[0]!.numBits == 1 do
+      throw (IO.userError s!"2sym entry 0 numBits: expected 1, got {table.table[0]!.numBits}")
+    unless table.table[1]!.numBits == 1 do
+      throw (IO.userError s!"2sym entry 1 numBits: expected 1, got {table.table[1]!.numBits}")
+    -- Symbols should be 0 and 1 (in some order)
+    let s0 : UInt8 := table.table[0]!.symbol
+    let s1 : UInt8 := table.table[1]!.symbol
+    unless (s0 == 0 && s1 == 1) || (s0 == 1 && s1 == 0) do
+      throw (IO.userError s!"2sym symbols: expected 0,1 got {s0.toNat} {s1.toNat}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable 2sym failed: {e}")
+
+  -- Test 49: buildZstdHuffmanTable — 4 symbols with weights [2, 2, 1]
+  -- sum = 2 + 2 + 1 = 5. Next power of 2 is 8 = 2^3. maxBits = 3.
+  -- Implicit symbol has 8 - 5 = 3 = not power of 2! That's invalid.
+  -- Let's try [2, 1, 1]: sum = 2+1+1 = 4 = 2^2, maxBits = 3.
+  -- Implicit symbol = 2^3 - 4 = 4 = 2^2, weight = 3.
+  -- Symbol 0 (W=2): numBits = 3+1-2 = 2
+  -- Symbol 1 (W=1): numBits = 3+1-1 = 3
+  -- Symbol 2 (W=1): numBits = 3+1-1 = 3
+  -- Symbol 3 (W=3, implicit): numBits = 3+1-3 = 1
+  match Zip.Native.buildZstdHuffmanTable #[2, 1, 1] with
+  | .ok table =>
+    unless table.maxBits == 3 do
+      throw (IO.userError s!"4sym maxBits: expected 3, got {table.maxBits}")
+    unless table.table.size == 8 do
+      throw (IO.userError s!"4sym table size: expected 8, got {table.table.size}")
+    -- Symbol 3 (implicit, weight 3) should have numBits = 1 and occupy 4 entries
+    let mut sym3Count := 0
+    for entry in table.table do
+      if entry.symbol == 3 then
+        unless entry.numBits == 1 do
+          throw (IO.userError s!"4sym sym3 numBits: expected 1, got {entry.numBits}")
+        sym3Count := sym3Count + 1
+    unless sym3Count == 4 do
+      throw (IO.userError s!"4sym sym3 count: expected 4 entries, got {sym3Count}")
+  | .error e => throw (IO.userError s!"buildZstdHuffmanTable 4sym failed: {e}")
+
+  -- Test 50: parseHuffmanTreeDescriptor — direct mode
+  -- Header byte = 1 (1 weight byte), weight byte = 0x11 → weights [1, 1]
+  -- 2 explicit symbols + 1 implicit = 3 symbols
+  let treeDescInput := ByteArray.mk #[0x01, 0x11]
+  match Zip.Native.parseHuffmanTreeDescriptor treeDescInput 0 with
+  | .ok (table, endPos) =>
+    unless endPos == 2 do
+      throw (IO.userError s!"treeDesc endPos: expected 2, got {endPos}")
+    unless table.maxBits == 2 do
+      throw (IO.userError s!"treeDesc maxBits: expected 2, got {table.maxBits}")
+    unless table.table.size == 4 do
+      throw (IO.userError s!"treeDesc table size: expected 4, got {table.table.size}")
+  | .error e => throw (IO.userError s!"parseHuffmanTreeDescriptor direct failed: {e}")
+
+  -- Test 51: parseHuffmanTreeDescriptor — FSE mode returns error
+  let fseTreeInput := ByteArray.mk #[0x80, 0x00, 0x00, 0x00]
+  match Zip.Native.parseHuffmanTreeDescriptor fseTreeInput 0 with
+  | .ok _ => throw (IO.userError "FSE tree descriptor: should have failed")
+  | .error e =>
+    unless e.contains "FSE-compressed" do
+      throw (IO.userError s!"FSE tree descriptor: wrong error: {e}")
+
+  -- Test 52: parseHuffmanTreeDescriptor — truncated input
+  match Zip.Native.parseHuffmanTreeDescriptor ByteArray.empty 0 with
+  | .ok _ => throw (IO.userError "truncated tree descriptor: should have failed")
+  | .error _ => pure ()
+
+  -- Test 53: parseHuffmanWeightsDirect — truncated data
+  match Zip.Native.parseHuffmanWeightsDirect (ByteArray.mk #[0x35]) 0 2 with
+  | .ok _ => throw (IO.userError "truncated weights: should have failed")
+  | .error _ => pure ()
+
+  -- Test 54: weightsToMaxBits — all zeros returns error
+  match Zip.Native.weightsToMaxBits #[0, 0, 0] with
+  | .ok _ => throw (IO.userError "all-zero weights: should have failed")
+  | .error e =>
+    unless e.contains "all weights are zero" do
+      throw (IO.userError s!"all-zero weights: wrong error: {e}")
+
   IO.println "ZstdNative tests: OK"

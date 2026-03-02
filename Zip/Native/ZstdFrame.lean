@@ -440,4 +440,166 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
       output := output.push literals[i]!
   return output
 
+/-- A single entry in a Zstd Huffman decoding table. -/
+structure HuffmanEntry where
+  /-- The symbol this entry decodes to. -/
+  symbol : UInt8 := 0
+  /-- Number of bits consumed by this symbol's code. -/
+  numBits : UInt8 := 0
+  deriving Repr, Inhabited
+
+/-- A Zstd Huffman decoding table (flat lookup, RFC 8878 §4.2.1). -/
+structure ZstdHuffmanTable where
+  /-- Maximum code length (log2 of table size). -/
+  maxBits : Nat
+  /-- Flat lookup table, size = 1 << maxBits. -/
+  table : Array HuffmanEntry
+  deriving Repr
+
+/-- Unpack 4-bit Huffman weights from a byte array (direct representation, RFC 8878 §4.2.1).
+    Each byte packs two 4-bit weights: high nibble first, low nibble second.
+    `numWeightBytes` is the header byte value (< 128), giving the number of weight bytes.
+    Returns (weights array, new position after weight bytes). -/
+def parseHuffmanWeightsDirect (data : ByteArray) (pos : Nat) (numWeightBytes : Nat) :
+    Except String (Array UInt8 × Nat) := do
+  if data.size < pos + numWeightBytes then
+    throw "Zstd Huffman: not enough data for weight bytes"
+  let mut weights : Array UInt8 := #[]
+  for i in [:numWeightBytes] do
+    let byte := data[pos + i]!
+    weights := weights.push (byte >>> 4)       -- high nibble
+    weights := weights.push (byte &&& 0x0F)    -- low nibble
+  return (weights, pos + numWeightBytes)
+
+/-- Derive maxBits from a Huffman weight array (RFC 8878 §4.2.1.1).
+    Finds the smallest M such that the sum of 2^(W-1) for all W > 0 equals 2^M.
+    The last symbol's weight is implicit: its 2^(W-1) value = 2^M - sum. -/
+def weightsToMaxBits (weights : Array UInt8) : Except String Nat := do
+  -- Compute sum of 2^(W-1) for each explicit weight W > 0
+  let mut weightSum : Nat := 0
+  for w in weights do
+    if w.toNat > 0 then
+      weightSum := weightSum + (1 <<< (w.toNat - 1))
+  if weightSum == 0 then
+    throw "Zstd Huffman: all weights are zero"
+  -- Find maxBits: smallest M such that 2^M >= weightSum
+  -- The sum should be a power of 2 or just below one (the implicit last symbol fills the gap)
+  let mut maxBits := 0
+  let mut power : Nat := 1
+  while power < weightSum do
+    maxBits := maxBits + 1
+    power := power * 2
+  -- After adding the last implicit symbol, the total must equal exactly 2^maxBits
+  -- If weightSum is already 2^maxBits, we need maxBits+1 (the last symbol gets weight maxBits+1)
+  if weightSum == power then
+    maxBits := maxBits + 1
+  return maxBits
+
+/-- Build a Zstd Huffman decoding table from a weight array (RFC 8878 §4.2.1).
+    Adds the implicit last symbol, converts weights to code lengths, and fills
+    a flat lookup table of size 2^maxBits. -/
+def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTable := do
+  let maxBits ← weightsToMaxBits weights
+  let targetSum := 1 <<< maxBits
+  -- Compute sum of 2^(W-1) for explicit weights
+  let mut explicitSum : Nat := 0
+  for w in weights do
+    if w.toNat > 0 then
+      explicitSum := explicitSum + (1 <<< (w.toNat - 1))
+  let lastWeight2 := targetSum - explicitSum
+  if lastWeight2 == 0 then
+    throw "Zstd Huffman: implicit last symbol has zero weight"
+  -- Derive the last symbol's weight from its 2^(W-1) value
+  let mut lastWeight : Nat := 0
+  let mut tmp := lastWeight2
+  while tmp > 1 do
+    lastWeight := lastWeight + 1
+    tmp := tmp / 2
+  lastWeight := lastWeight + 1
+  -- Verify: 2^(lastWeight-1) should equal lastWeight2
+  if (1 <<< (lastWeight - 1)) != lastWeight2 then
+    throw s!"Zstd Huffman: implicit last symbol weight is not a power of 2 ({lastWeight2})"
+  -- Build complete weight array including the implicit last symbol
+  let numSymbols := weights.size + 1
+  let lastSymbol := weights.size
+  let allWeights := weights.push lastWeight.toUInt8
+  -- Build the flat lookup table
+  let tableSize := 1 <<< maxBits
+  let mut table : Array HuffmanEntry := Array.replicate tableSize default
+  -- For each symbol with weight W > 0: numberOfBits = maxBits + 1 - W
+  -- Each symbol occupies tableSize / 2^W entries (= 2^(maxBits - W) entries if W < maxBits+1,
+  -- but more precisely: numberOfBits = maxBits + 1 - W, and the symbol fills
+  -- 1 << (maxBits - numberOfBits) = 1 << (W - 1) entries).
+  -- Wait — that's the number of distinct codes for this symbol.
+  -- Each code prefix occupies 2^(maxBits - numberOfBits) = 2^(W-1) table entries.
+  -- Actually: numberOfBits for symbol = maxBits + 1 - W
+  -- Number of table entries per code = 2^(maxBits - numberOfBits) = 2^(W-1)
+  -- Number of codes for this symbol = count (we have 1 code per symbol in Huffman)
+  -- So each symbol with weight W fills 2^(W-1) table entries.
+
+  -- Assign codes: sort symbols by weight (ascending), then assign sequential codes.
+  -- Within each weight group, symbols are in ascending order.
+  -- We track the next available code for each weight.
+  let mut nextCode : Array Nat := Array.replicate (maxBits + 2) 0
+  -- Count symbols per weight
+  let mut weightCounts : Array Nat := Array.replicate (maxBits + 2) 0
+  for i in [:numSymbols] do
+    let w := allWeights[i]!.toNat
+    if w > 0 && w < weightCounts.size then
+      weightCounts := weightCounts.set! w (weightCounts[w]! + 1)
+  -- Compute starting codes for each weight (ascending weight = shorter codes = higher codes)
+  -- Symbols with weight 1 have numberOfBits = maxBits, so they occupy 1 entry each.
+  -- Symbols with weight maxBits have numberOfBits = 1, so they occupy 2^(maxBits-1) entries each.
+  -- Start from weight=1: codes start at 0, each code occupies 2^(W-1) entries.
+  let mut pos : Nat := 0
+  for w in List.range (maxBits + 1) do
+    if w > 0 then
+      nextCode := nextCode.set! w pos
+      pos := pos + weightCounts[w]! * (1 <<< (w - 1))
+
+  -- Fill the table
+  for sym in [:numSymbols] do
+    let w := allWeights[sym]!.toNat
+    if w == 0 then continue
+    let numBits := maxBits + 1 - w
+    let code := nextCode[w]!
+    nextCode := nextCode.set! w (code + (1 <<< (w - 1)))
+    let entry : HuffmanEntry := { symbol := sym.toUInt8, numBits := numBits.toUInt8 }
+    -- Fill 2^(W-1) entries starting at `code`
+    let stride := 1 <<< (w - 1)
+    for j in [:stride] do
+      let idx := code + j
+      if idx < tableSize then
+        table := table.set! idx entry
+      else if sym != lastSymbol then
+        -- Only error for non-last symbols; last symbol might have rounding issues
+        throw s!"Zstd Huffman: table index {idx} out of range (tableSize={tableSize})"
+
+  return { maxBits, table }
+
+/-- Parse a Huffman tree descriptor from a Zstd compressed block (RFC 8878 §4.2.1).
+    Reads the header byte at `pos`, dispatches to direct mode (< 128) or returns
+    an error for FSE-compressed mode (>= 128, not yet implemented).
+    Returns (Huffman table, new position after the tree descriptor). -/
+def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
+    Except String (ZstdHuffmanTable × Nat) := do
+  if data.size < pos + 1 then
+    throw "Zstd Huffman: not enough data for tree descriptor header"
+  let headerByte := data[pos]!.toNat
+  if headerByte >= 128 then
+    throw "Zstd Huffman: FSE-compressed tree descriptor not yet supported"
+  -- Direct representation: headerByte = number of weight bytes
+  let numWeightBytes := headerByte
+  if numWeightBytes == 0 then
+    throw "Zstd Huffman: tree descriptor with 0 weight bytes"
+  let (weights, afterWeights) ← parseHuffmanWeightsDirect data (pos + 1) numWeightBytes
+  -- Trim trailing zero weights (packed bytes may have a padding zero)
+  let mut trimmed := weights
+  while trimmed.size > 0 && trimmed.back! == 0 do
+    trimmed := trimmed.pop
+  if trimmed.size == 0 then
+    throw "Zstd Huffman: all weights are zero after trimming"
+  let table ← buildZstdHuffmanTable trimmed
+  return (table, afterWeights)
+
 end Zip.Native
