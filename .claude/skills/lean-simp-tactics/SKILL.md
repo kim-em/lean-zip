@@ -575,6 +575,55 @@ subst hlenSum; subst hdistSum; rfl
 in hypotheses, then `obtain` extracts the equality. The `arr[i]` in the hypothesis
 uses the `getElem!_pos` proof, while the goal's `arr[i]` came from a different path.
 
+## `simp (config := { decide := true }) only [...]`
+
+When you need both targeted lemma application AND decidable evaluation in
+a single step, use the `decide := true` configuration option:
+
+```lean
+simp (config := { decide := true }) only [h1, h2, ↓reduceIte]
+```
+
+This combines the precision of `simp only` (no uncontrolled lemma database)
+with the evaluation power of `decide` (can evaluate concrete boolean/decidable
+expressions). Useful for:
+
+- BFINAL flag checks in decode roundtrip theorems
+- Cases where `simp only [...]` does the rewrite but can't evaluate the
+  resulting concrete expression
+
+**Don't confuse with**: `simp only [...]; decide` (two steps) — that only works
+if `simp only` fully simplifies and `decide` can close the remaining goal.
+The config option integrates evaluation INTO the simplification.
+
+## `getElem!_pos` — Bridging `data[i]!` to `data[i]`
+
+When the goal has `data[i]!` (panicking access) but you have a bound proof
+`h : i < data.size`, use `getElem!_pos` to convert to bounded access:
+
+```lean
+simp only [getElem!_pos, hpos]
+-- Converts data[i]! to data[i] using hpos as the bound proof
+```
+
+This commonly arises in BitstreamCorrect and similar files where
+implementation code uses `!` but proofs need bounded access.
+
+## `Decidable.of_not_not` for Double Negation
+
+When bare `simp` implicitly applied `not_not` to eliminate double negation
+(e.g., after `bne` → `beq` conversion), replace with the explicit eliminator:
+
+```lean
+-- Before (bare simp):
+simp at h  -- h : ¬¬P → h : P
+
+-- After:
+exact Decidable.of_not_not h
+```
+
+Works when the proposition is decidable (which `Nat` comparisons always are).
+
 ## `BEq.beq` vs `Nat.beq` — Use `beq_iff_eq`
 
 When a hypothesis `h : (x == 0) = true` comes from a `split` on an `if x == 0` condition,

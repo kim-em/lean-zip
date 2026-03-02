@@ -240,6 +240,26 @@ have h_result : ∃ bytes, operation = .ok (bytes, finalState) := by
 obtain ⟨bytes, h_result⟩ := h_result
 ```
 
+## Option Monad Lemma Kit for `readBitsLSB` Unfolding
+
+When unfolding `readBitsLSB` do-notation in Option proofs, the standard
+lemma set is:
+
+```lean
+simp only [Spec.readBitsLSB, Option.pure_def, Option.bind_eq_bind, Option.bind_some]
+```
+
+This set handles:
+- `pure x` → `some x` (via `Option.pure_def`)
+- `Option.bind (some x) f` → `f x` (via `Option.bind_eq_bind` + `Option.bind_some`)
+- do-notation desugaring of `let x ← f; g x`
+
+**When this kit is insufficient**: For deeply nested readBitsLSB calls
+(e.g., reading 5+ bits with individual bit operations), you may also need
+`List.cons.injEq` and `reduceCtorEq` for the list pattern matching. At
+that point, bare `simp [Spec.readBitsLSB]` is acceptable (see the
+"readBitsLSB as Computation Engine" section in `lean-simp-tactics`).
+
 ## `simp only` for Option Case Splits with `nomatch`
 
 When case-splitting on monadic `Option` operations and a hypothesis `hgo`
