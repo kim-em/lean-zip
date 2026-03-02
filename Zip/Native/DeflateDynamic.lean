@@ -164,7 +164,7 @@ open Zip.Spec.DeflateStoredCorrect (deflateStoredPure)
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if level == 1 then deflateFixedIter data
-  else if level < 5 then deflateLazy data
+  else if level < 5 then deflateLazyIter data
   else deflateDynamic data
 
 end Zip.Native.Deflate
