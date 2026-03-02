@@ -472,3 +472,31 @@ be left with a justifying comment rather than forced into `simp only`:
 2. If that fails, try `dsimp only`
 3. If that fails, try a helper lemma or bridge `have`
 4. If all three fail, accept bare simp with a category comment
+
+## Struct Field Access Not Reduced by `omega` or `decide`
+
+When proving `{ data := d, pos := p, bitOff := 0 }.bitOff < 8`, neither `omega` nor
+`decide` works: `omega` doesn't reduce struct field access, and `decide` fails because
+the struct contains free variables.
+
+**Fix**: Use `show` to manually reduce the struct projection:
+```lean
+by show 0 < 8; omega
+```
+
+Similarly for `Or.inl rfl` when proving `{ ... bitOff := 0 }.bitOff = 0 ∨ ...` — the
+struct projection reduces definitionally, so `Or.inl rfl` works directly.
+
+## `BEq.beq` vs `Nat.beq` — Use `beq_iff_eq`
+
+When a hypothesis `h : (x == 0) = true` comes from a `split` on an `if x == 0` condition,
+the `==` creates `BEq.beq`, NOT `Nat.beq`. So `Nat.eq_of_beq_eq_true h` fails with a
+type mismatch.
+
+**Fix**: Use `simp only [beq_iff_eq] at h` to convert `(x == 0) = true` into `x = 0`.
+Or use `exact absurd (by rw [h]; decide) hne` for contradiction branches.
+
+## `⟨⟨result.data.toList⟩⟩ = result` for ByteArray
+
+`ByteArray.mk (Array.mk result.data.toList) = result` is true by **eta reduction** in
+Lean 4 (structures have eta). Just use `rfl` — no `simp`, `ext`, or library lemmas needed.
