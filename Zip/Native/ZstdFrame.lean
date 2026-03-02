@@ -338,4 +338,106 @@ def decompressZstd (data : ByteArray) : Except String ByteArray := do
   let (content, _) ← decompressFrame data 0
   return content
 
+/-- A decoded Zstd sequence triple (RFC 8878 §3.1.1.4): copy `literalLength` bytes
+    from the literals buffer, then copy `matchLength` bytes from `offset` bytes back
+    in the already-produced output. -/
+structure ZstdSequence where
+  /-- Number of literal bytes to copy from the literals buffer before the match. -/
+  literalLength : Nat
+  /-- Number of bytes to copy from the back-reference in the output. -/
+  matchLength : Nat
+  /-- Raw offset value (1-3 are repeat offset codes; ≥4 is actual offset minus 3). -/
+  offset : Nat
+  deriving Repr
+
+/-- Resolve a raw offset value against the 3-entry offset history (RFC 8878 §3.1.1.5).
+    Returns the actual byte offset and the updated offset history.
+    - Offset values 1, 2, 3 are repeat offset codes (refer to history entries).
+    - When `literalLength == 0`, repeat codes are shifted: 1→history[1], 2→history[2],
+      3→history[0] - 1.
+    - Offset values ≥ 4 are actual offsets (value - 3).
+    The history array must have exactly 3 entries. -/
+def resolveOffset (rawOffset : Nat) (history : Array Nat) (literalLength : Nat) :
+    Nat × Array Nat :=
+  if rawOffset > 3 then
+    -- Actual offset (subtract 3 to get the real byte offset)
+    let offset := rawOffset - 3
+    let history' := #[offset, history[0]!, history[1]!]
+    (offset, history')
+  else if literalLength > 0 then
+    -- Normal repeat offset mode
+    match rawOffset with
+    | 1 =>
+      let offset := history[0]!
+      (offset, history)  -- history unchanged for code 1
+    | 2 =>
+      let offset := history[1]!
+      let history' := #[offset, history[0]!, history[2]!]
+      (offset, history')
+    | 3 =>
+      let offset := history[2]!
+      let history' := #[offset, history[0]!, history[1]!]
+      (offset, history')
+    | _ => (1, history)  -- unreachable (rawOffset > 0 implied)
+  else
+    -- Shifted repeat mode when literalLength == 0
+    match rawOffset with
+    | 1 =>
+      let offset := history[1]!
+      let history' := #[offset, history[0]!, history[2]!]
+      (offset, history')
+    | 2 =>
+      let offset := history[2]!
+      let history' := #[offset, history[0]!, history[1]!]
+      (offset, history')
+    | 3 =>
+      let offset := history[0]! - 1
+      let history' := #[offset, history[1]!, history[2]!]
+      (offset, history')
+    | _ => (1, history)  -- unreachable
+
+/-- Copy `length` bytes from `offset` bytes back in `buf`, handling overlapping matches
+    (byte-by-byte copy so that repeated patterns are expanded correctly). -/
+private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
+  let start := buf.size - offset
+  let rec loop (b : ByteArray) (k : Nat) : ByteArray :=
+    if k < length then
+      loop (b.push b[start + (k % offset)]!) (k + 1)
+    else b
+  termination_by length - k
+  loop buf 0
+
+/-- Execute decoded Zstd sequences against a literals buffer to produce decompressed output
+    (RFC 8878 §3.1.1.4). Maintains a 3-entry offset history initialized to `[1, 4, 8]`.
+    For each sequence: copies `literalLength` bytes from literals, then copies `matchLength`
+    bytes from `offset` back in the output (with overlap semantics). After all sequences,
+    any remaining literals are appended. Returns the decompressed block or an error. -/
+def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
+    Except String ByteArray := do
+  let mut output := ByteArray.empty
+  let mut history : Array Nat := #[1, 4, 8]
+  let mut litPos := 0
+  for seq in sequences do
+    -- Copy literalLength bytes from literals buffer
+    if litPos + seq.literalLength > literals.size then
+      throw s!"Zstd: sequence requires {litPos + seq.literalLength} literal bytes but only {literals.size} available"
+    for i in [:seq.literalLength] do
+      output := output.push literals[litPos + i]!
+    litPos := litPos + seq.literalLength
+    -- Resolve offset
+    let (offset, history') := resolveOffset seq.offset history seq.literalLength
+    history := history'
+    -- Validate offset
+    if offset == 0 then
+      throw "Zstd: resolved offset is 0"
+    if offset > output.size then
+      throw s!"Zstd: match offset {offset} exceeds output size {output.size}"
+    -- Copy matchLength bytes from output (with overlap semantics)
+    output := copyMatch output offset seq.matchLength
+  -- Copy any remaining literals after the last sequence
+  if litPos < literals.size then
+    for i in [litPos:literals.size] do
+      output := output.push literals[i]!
+  return output
+
 end Zip.Native
