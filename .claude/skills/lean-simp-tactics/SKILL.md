@@ -534,6 +534,47 @@ rw [Array.size_set!, Array.size_replicate]; omega
 **Common in**: `DeflateDynamicFreqs.lean` and any file building arrays
 via iterative `set!` operations on `Array.replicate` base arrays.
 
+## Array.size with `simp only` — Use `rfl` Not List Lemmas
+
+When an Array is defined as `def table : Array Nat := #[3, 4, 5, ...]` and you need
+to prove `idx < table.size`, bare `simp [table]; omega` evaluates `.size` via the
+full simp database. But `simp only [table, List.length_cons, List.length_nil]; omega`
+**fails** because `#[...]` is an `Array`, not a `List` — `List.length_*` lemmas
+don't apply.
+
+**Fix**: Let the kernel evaluate the concrete size via `rfl`:
+```lean
+-- BAD: List lemmas don't apply to Array
+have h : idx < lengthBase.size := by simp only [lengthBase, List.length_cons, List.length_nil]; omega
+
+-- GOOD: kernel evaluates Array.size to a concrete Nat
+have h : idx < lengthBase.size := by have : lengthBase.size = 29 := rfl; omega
+```
+
+The `rfl` proof works because the kernel can fully evaluate `#[...].size` for
+concrete array literals. Then `omega` handles the remaining arithmetic.
+
+## `simp only` vs `subst` for Dependent `getElem` Rewrites
+
+When `hlenSum : arr[idx] + extraV = len` and the goal has `arr[idx]`, both
+`rw [hlenSum]` and `simp only [hlenSum]` may fail because the `getElem` bound
+proof (`idx < arr.size`) in the hypothesis differs from the one in the goal.
+Even though Lean 4 has proof irrelevance for Prop, `simp only` can still fail
+to match through different proof witnesses.
+
+**Fix**: Use `subst` to eliminate the variable entirely:
+```lean
+-- BAD: rw/simp fail on dependent getElem mismatch
+simp only [hlenSum, hdistSum]  -- "Did not find an occurrence of the pattern"
+
+-- GOOD: subst replaces the variable, sidestepping getElem proofs
+subst hlenSum; subst hdistSum; rfl
+```
+
+**When this arises**: After `rw [getElem!_pos ...]` converts `arr[i]!` to `arr[i]`
+in hypotheses, then `obtain` extracts the equality. The `arr[i]` in the hypothesis
+uses the `getElem!_pos` proof, while the goal's `arr[i]` came from a different path.
+
 ## `BEq.beq` vs `Nat.beq` — Use `beq_iff_eq`
 
 When a hypothesis `h : (x == 0) = true` comes from a `split` on an `if x == 0` condition,
