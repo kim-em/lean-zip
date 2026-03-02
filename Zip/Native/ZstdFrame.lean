@@ -375,7 +375,7 @@ structure ZstdSequence where
   matchLength : Nat
   /-- Raw offset value (1-3 are repeat offset codes; ≥4 is actual offset minus 3). -/
   offset : Nat
-  deriving Repr
+  deriving Repr, Inhabited
 
 /-- Resolve a raw offset value against the 3-entry offset history (RFC 8878 §3.1.1.5).
     Returns the actual byte offset and the updated offset history.
