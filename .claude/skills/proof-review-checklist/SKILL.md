@@ -140,6 +140,11 @@ Based on what the `simp` is doing:
 | `simp [hpos0, hpos1]` (getElem!/getElem) | `simp only [getElem!_pos, hpos0, hpos1, ...]` |
 | `simp` after `split` on Bool `if` | `split <;> rfl` |
 | `simp [Nat.toUInt32]; omega` | `simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd, Nat.mod_mod_of_dvd, ...]; omega` |
+| `simp (config := { decide := true }) only [...]` | Keep — needed for concrete evaluation + targeted lemma application (e.g. BFINAL flags) |
+| `have : T.size = N := by decide` then `omega` | Keep — table size computation via kernel |
+| `simp [Spec.readBitsLSB, ...]` (Option do-notation) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
+| `simp [hpos]` with `getElem!` | `simp only [getElem!_pos, hpos, ...]` — bridges `data[i]!` to `data[i]` |
+| `simp at h` (double negation) | `exact Decidable.of_not_not h` or `simp only [not_not] at h` |
 
 ### Step 4: Accept bare simp with comment
 
