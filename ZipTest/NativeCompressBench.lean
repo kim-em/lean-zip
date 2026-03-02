@@ -4,7 +4,8 @@ import Zip.Native.Gzip
 
 /-! Compression throughput and ratio benchmarks: native Lean compressor vs FFI (zlib).
     Covers raw deflate, gzip, and zlib formats at levels 0, 1, and 6
-    across sizes from 1KB to 256KB. -/
+    across sizes from 1KB to 256KB. Includes all-level (0–9) compression
+    ratio comparison at 64KB and MB/s throughput metrics. -/
 
 namespace ZipTest.NativeCompressBench
 
@@ -21,6 +22,20 @@ private def fmtMs (ns : Nat) : String :=
     s!"{ms}.{if d2 < 10 then "0" else ""}{d2}"
   else
     s!"{ms}.{if frac < 100 then "0" else ""}{if frac < 10 then "0" else ""}{frac}"
+
+private def fmtMBps (dataSize : Nat) (elapsedNs : Nat) : String :=
+  if elapsedNs == 0 then "    ∞" else
+  -- throughput = dataSize / (elapsedNs / 1e9) / (1024 * 1024)
+  -- = dataSize * 1e9 / elapsedNs / (1024 * 1024)
+  -- To avoid overflow with large sizes, compute in steps:
+  -- MB/s * 10 for one decimal place
+  let mbps10 := dataSize * 10000000000 / elapsedNs / (1024 * 1024)
+  let whole := mbps10 / 10
+  let frac := mbps10 % 10
+  let s := s!"{whole}.{frac}"
+  -- Right-align in 5 chars
+  let padding := if s.length < 5 then String.ofList (List.replicate (5 - s.length) ' ') else ""
+  padding ++ s
 
 @[noinline] private def forceEval (b : ByteArray) : IO ByteArray := pure b
 
@@ -47,7 +62,9 @@ def tests : IO Unit := do
         | .ok r => unless r == data do
             throw (IO.userError s!"deflate roundtrip: {sizeName size} {pname} lvl={level}")
         | .error e => throw (IO.userError e)
-        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+        let nElapsed := e1 - s1
+        let fElapsed := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs nElapsed ++ "ms") 10} ({fmtMBps size nElapsed} MB/s)  ffi={pad (fmtMs fElapsed ++ "ms") 10} ({fmtMBps size fElapsed} MB/s)"
 
   -- Gzip
   IO.println "    --- gzip compression (native vs FFI) ---"
@@ -65,7 +82,9 @@ def tests : IO Unit := do
         | .ok r => unless r == data do
             throw (IO.userError s!"gzip roundtrip: {sizeName size} {pname} lvl={level}")
         | .error e => throw (IO.userError e)
-        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+        let nElapsed := e1 - s1
+        let fElapsed := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs nElapsed ++ "ms") 10} ({fmtMBps size nElapsed} MB/s)  ffi={pad (fmtMs fElapsed ++ "ms") 10} ({fmtMBps size fElapsed} MB/s)"
 
   -- Zlib
   IO.println "    --- zlib compression (native vs FFI) ---"
@@ -83,7 +102,9 @@ def tests : IO Unit := do
         | .ok r => unless r == data do
             throw (IO.userError s!"zlib roundtrip: {sizeName size} {pname} lvl={level}")
         | .error e => throw (IO.userError e)
-        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+        let nElapsed := e1 - s1
+        let fElapsed := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs nElapsed ++ "ms") 10} ({fmtMBps size nElapsed} MB/s)  ffi={pad (fmtMs fElapsed ++ "ms") 10} ({fmtMBps size fElapsed} MB/s)"
 
   -- Compression ratio
   IO.println "    --- compression ratio (native/FFI) ---"
@@ -108,6 +129,19 @@ def tests : IO Unit := do
       let sZ := let s := s!"{rZ}"; if s.length > 6 then s.take 6 else s
       IO.println s!"      {pad (sizeName ratioSize) 6} {pad "zlib" 8} {pad pname 9} {pad s!"lvl={level}" 6} {pad (toString ncZ.size) 10} {pad (toString fcZ.size) 10} {sZ}"
 
+  -- All-level compression ratio at 64KB (raw deflate only)
+  IO.println "    --- all-level compression ratio at 64KB (raw deflate, native vs FFI) ---"
+  IO.println s!"      {pad "Pattern" 9} {pad "Level" 6} {pad "Native" 10} {pad "FFI" 10} Ratio"
+  let ratioFixedSize := 65536
+  for (pname, pgen) in pats do
+    let data := pgen ratioFixedSize
+    for level in #[(0 : UInt8), 1, 2, 3, 4, 5, 6, 7, 8, 9] do
+      let nc ← forceEval (Zip.Native.Deflate.deflateRaw data level)
+      let fc ← RawDeflate.compress data level
+      let r := if fc.size == 0 then 0.0 else nc.size.toFloat / fc.size.toFloat
+      let sr := let s := s!"{r}"; if s.length > 6 then s.take 6 else s
+      IO.println s!"      {pad pname 9} {pad s!"lvl={level}" 6} {pad (toString nc.size) 10} {pad (toString fc.size) 10} {sr}"
+
   -- Decompression benchmarks: compress with FFI, then time native vs FFI decompress
   IO.println "    --- raw deflate decompression (native vs FFI) ---"
   for size in sizes do
@@ -126,7 +160,9 @@ def tests : IO Unit := do
           throw (IO.userError s!"inflate raw roundtrip: {sizeName size} {pname} lvl={level}")
         unless fd == data do
           throw (IO.userError s!"ffi raw decomp roundtrip: {sizeName size} {pname} lvl={level}")
-        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+        let nElapsed := e1 - s1
+        let fElapsed := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs nElapsed ++ "ms") 10} ({fmtMBps size nElapsed} MB/s)  ffi={pad (fmtMs fElapsed ++ "ms") 10} ({fmtMBps size fElapsed} MB/s)"
 
   IO.println "    --- gzip decompression (native vs FFI) ---"
   for size in sizes do
@@ -145,7 +181,9 @@ def tests : IO Unit := do
           throw (IO.userError s!"inflate gzip roundtrip: {sizeName size} {pname} lvl={level}")
         unless fd == data do
           throw (IO.userError s!"ffi gzip decomp roundtrip: {sizeName size} {pname} lvl={level}")
-        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+        let nElapsed := e1 - s1
+        let fElapsed := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs nElapsed ++ "ms") 10} ({fmtMBps size nElapsed} MB/s)  ffi={pad (fmtMs fElapsed ++ "ms") 10} ({fmtMBps size fElapsed} MB/s)"
 
   IO.println "    --- zlib decompression (native vs FFI) ---"
   for size in sizes do
@@ -164,7 +202,9 @@ def tests : IO Unit := do
           throw (IO.userError s!"inflate zlib roundtrip: {sizeName size} {pname} lvl={level}")
         unless fd == data do
           throw (IO.userError s!"ffi zlib decomp roundtrip: {sizeName size} {pname} lvl={level}")
-        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs (e1 - s1) ++ "ms") 10} ffi={fmtMs (e2 - s2)}ms"
+        let nElapsed := e1 - s1
+        let fElapsed := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pname 9} lvl={level}  native={pad (fmtMs nElapsed ++ "ms") 10} ({fmtMBps size nElapsed} MB/s)  ffi={pad (fmtMs fElapsed ++ "ms") 10} ({fmtMBps size fElapsed} MB/s)"
 
   IO.println "  NativeCompressBench tests passed."
 
