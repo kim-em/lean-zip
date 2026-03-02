@@ -93,20 +93,19 @@ theorem decodeStored_complete (br : Zip.Native.BitReader)
         -- Derive readNBytes output length = len_val for size check
         have hbytes_len : storedBytes.length = len_val := by
           have := readNBytes_output_length hspec
-          simp at this -- bare simp: List.length_reverse
-          exact this
+          simp only [List.length_nil] at this; omega
         -- Use readBytes_complete
         obtain ⟨br3, hrd3, hbr3_bits, hbr3_off, hbr3_pos⟩ :=
           readBytes_complete br2 len_val storedBytes rest (by omega) hbr2_pos halign_pos2 hspec
         -- Complement check in native
         have hcomp : len_val.toUInt16 ^^^ nlen_val.toUInt16 = 0xFFFF := by
-          simp [beq_iff_eq] at hguard -- bare simp: beq to Prop conversion
+          rw [beq_iff_eq] at hguard
           exact UInt16.toNat_inj.mp (by
             rw [UInt16.toNat_xor]
             simp [Nat.toUInt16, Nat.mod_eq_of_lt hlen_bound, Nat.mod_eq_of_lt hnlen_bound] -- bare simp: UInt16 modular arithmetic
             exact hguard)
         have hcomp_ne : ¬(len_val.toUInt16 ^^^ nlen_val.toUInt16 != 0xFFFF) := by
-          simp [hcomp] -- bare simp: bne reduction
+          rw [hcomp]; nofun
         -- Size check in native
         have hsize_ok : ¬(output.size + len_val > maxOutputSize) := by
           rw [← hbytes_len]; omega
@@ -124,7 +123,7 @@ theorem decodeStored_complete (br : Zip.Native.BitReader)
           cases h : (len_val ^^^ nlen_val == 65535) <;> simp_all
         -- Rewrite the guard condition in hspec to get guard (false = true) = guard False = none
         rw [hbeq_false] at hspec
-        simp [guard, Bool.false_eq_true] at hspec -- bare simp: guard false reduction
+        simp only [guard, Bool.false_eq_true, ↓reduceIte] at hspec; exact nomatch hspec
 
 /-- **Completeness for `HuffTree.decode`**: if the spec `Huffman.Spec.decode`
     succeeds on the bit list corresponding to a `BitReader`, then the native
@@ -308,6 +307,8 @@ private theorem decodeLitLen_reference_inv {litLengths distLengths : List Nat}
       refine ⟨h_ge, ?_⟩
       have h256ne : ¬(sym_nat = 256) := h256eq
       simp only [show ¬(sym_nat < 256) from h256, ↓reduceIte, h256ne] at hdll
+      -- bare simp: 7-level Option.bind chain (lengthBase, lengthExtra, readBitsLSB,
+      -- dist decode, distBase, distExtra, readBitsLSB)
       cases hlb : Deflate.Spec.lengthBase[sym_nat - 257]? with
       | none => simp [hlb] at hdll
       | some base =>
