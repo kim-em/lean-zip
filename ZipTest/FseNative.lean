@@ -2,7 +2,15 @@ import ZipTest.Helpers
 import Zip.Native.Fse
 import Zip.Native.ZstdFrame
 
-/-! Tests for the native FSE distribution decoder and table builder. -/
+/-! Tests for the native FSE distribution decoder, table builder, and predefined tables. -/
+
+/-- Compute the effective sum of a distribution: positive values contribute directly,
+    -1 values contribute 1, zero values contribute 0. -/
+private def distributionSum (dist : Array Int32) : Nat :=
+  dist.foldl (fun acc x =>
+    if x == -1 then acc + 1
+    else if x > 0 then acc + x.toNatClampNeg
+    else acc) 0
 
 def ZipTest.FseNative.tests : IO Unit := do
   -- Test 1: buildFseTable with a known distribution for accuracyLog=5, tableSize=32
@@ -148,5 +156,83 @@ def ZipTest.FseNative.tests : IO Unit := do
         unless cell.numBits == 5 do
           throw (IO.userError s!"numBits: symbol {sym} at cell {i} has numBits={cell.numBits}, expected 5")
   | .error e => throw (IO.userError s!"buildFseTable numBits test failed: {e}")
+
+  -- =========================================================================
+  -- Predefined FSE distribution table tests (RFC 8878 §6)
+  -- =========================================================================
+
+  -- Test 9: Distribution sums equal 2^accuracyLog
+  let llSum := distributionSum Zip.Native.predefinedLitLenDistribution
+  unless llSum == 64 do
+    throw (IO.userError s!"litLen distribution sum: expected 64, got {llSum}")
+  let mlSum := distributionSum Zip.Native.predefinedMatchLenDistribution
+  unless mlSum == 64 do
+    throw (IO.userError s!"matchLen distribution sum: expected 64, got {mlSum}")
+  let ofSum := distributionSum Zip.Native.predefinedOffsetDistribution
+  unless ofSum == 32 do
+    throw (IO.userError s!"offset distribution sum: expected 32, got {ofSum}")
+
+  -- Test 10: Distribution sizes
+  unless Zip.Native.predefinedLitLenDistribution.size == 36 do
+    throw (IO.userError s!"litLen distribution: expected 36 symbols, got {Zip.Native.predefinedLitLenDistribution.size}")
+  unless Zip.Native.predefinedMatchLenDistribution.size == 53 do
+    throw (IO.userError s!"matchLen distribution: expected 53 symbols, got {Zip.Native.predefinedMatchLenDistribution.size}")
+  unless Zip.Native.predefinedOffsetDistribution.size == 29 do
+    throw (IO.userError s!"offset distribution: expected 29 symbols, got {Zip.Native.predefinedOffsetDistribution.size}")
+
+  -- Test 11: Build predefined tables and verify sizes
+  match Zip.Native.buildPredefinedFseTables with
+  | .ok (llTable, mlTable, ofTable) =>
+    unless llTable.cells.size == 64 do
+      throw (IO.userError s!"litLen table: expected 64 cells, got {llTable.cells.size}")
+    unless llTable.accuracyLog == 6 do
+      throw (IO.userError s!"litLen table: expected accuracyLog 6, got {llTable.accuracyLog}")
+    unless mlTable.cells.size == 64 do
+      throw (IO.userError s!"matchLen table: expected 64 cells, got {mlTable.cells.size}")
+    unless mlTable.accuracyLog == 6 do
+      throw (IO.userError s!"matchLen table: expected accuracyLog 6, got {mlTable.accuracyLog}")
+    unless ofTable.cells.size == 32 do
+      throw (IO.userError s!"offset table: expected 32 cells, got {ofTable.cells.size}")
+    unless ofTable.accuracyLog == 5 do
+      throw (IO.userError s!"offset table: expected accuracyLog 5, got {ofTable.accuracyLog}")
+
+    -- Test 12: Symbol coverage — every nonzero-probability symbol appears
+    for (dist, table, name) in [
+        (Zip.Native.predefinedLitLenDistribution, llTable, "litLen"),
+        (Zip.Native.predefinedMatchLenDistribution, mlTable, "matchLen"),
+        (Zip.Native.predefinedOffsetDistribution, ofTable, "offset")] do
+      let mut tableSymbols : Array Bool := Array.replicate dist.size false
+      for i in [:table.cells.size] do
+        let sym := table.cells[i]!.symbol.toNat
+        if sym < tableSymbols.size then
+          tableSymbols := tableSymbols.set! sym true
+      for sym in [:dist.size] do
+        if dist[sym]! != 0 then
+          unless tableSymbols[sym]! do
+            throw (IO.userError s!"{name} table: symbol {sym} with prob {dist[sym]!} not found in table")
+
+    -- Test 13: Symbol count matches distribution
+    for (dist, table, name) in [
+        (Zip.Native.predefinedLitLenDistribution, llTable, "litLen"),
+        (Zip.Native.predefinedMatchLenDistribution, mlTable, "matchLen"),
+        (Zip.Native.predefinedOffsetDistribution, ofTable, "offset")] do
+      let mut counts := Array.replicate dist.size (0 : Nat)
+      for i in [:table.cells.size] do
+        let sym := table.cells[i]!.symbol.toNat
+        if sym < counts.size then
+          counts := counts.set! sym (counts[sym]! + 1)
+      for sym in [:dist.size] do
+        let prob := dist[sym]!
+        let expected := if prob == -1 then 1 else if prob > 0 then prob.toNatClampNeg else 0
+        unless counts[sym]! == expected do
+          throw (IO.userError s!"{name} table: symbol {sym} has {counts[sym]!} cells, expected {expected}")
+
+    -- Test 14: numBits and newState are set for all cells
+    for (table, name) in [(llTable, "litLen"), (mlTable, "matchLen"), (ofTable, "offset")] do
+      for i in [:table.cells.size] do
+        let cell := table.cells[i]!
+        unless cell.numBits.toNat > 0 || cell.newState.toNat > 0 do
+          throw (IO.userError s!"{name} table cell {i}: numBits=0 and newState=0 for symbol {cell.symbol}")
+  | .error e => throw (IO.userError s!"buildPredefinedFseTables failed: {e}")
 
   IO.println "FseNative tests: OK"

@@ -1,14 +1,17 @@
 import Zip.Native.BitReader
 
 /-!
-  Finite State Entropy (FSE) distribution decoder and table builder (RFC 8878 §4.1.1).
+  Finite State Entropy (FSE) distribution decoder, table builder, and predefined
+  tables (RFC 8878 §4.1.1, §6).
 
   FSE is the core entropy coding used in Zstandard compressed blocks. This module
-  implements two steps:
+  implements:
   1. **Distribution decoding**: read a compact probability distribution from the
      bitstream, producing an array of normalized counts (one per symbol).
   2. **Table construction**: build the FSE decoding table from the distribution,
      using the position-stepping algorithm specified in RFC 8878 §4.1.1.
+  3. **Predefined tables**: the three hardcoded default distributions for literal
+     lengths, match lengths, and offsets (RFC 8878 §6).
 
   The decoding table has `1 << accuracyLog` cells. Each cell stores the symbol
   it decodes to, plus the number of bits to read and the baseline for computing
@@ -171,5 +174,38 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
       { symbol := cells[i]!.symbol, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
     symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
   return { accuracyLog, cells }
+
+-- ============================================================================
+-- Predefined FSE distribution tables (RFC 8878 §6)
+-- ============================================================================
+
+/-- Predefined literal length distribution (RFC 8878 §6, Table 15).
+    36 symbols (0–35), accuracyLog = 6, table size = 64. -/
+def predefinedLitLenDistribution : Array Int32 :=
+  #[ 4,  3,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  1,  1,  1,
+     2,  2,  2,  2,  2,  2,  2,  2,  2,  3,  2,  1,  1,  1,  1,  1,
+    -1, -1, -1, -1]
+
+/-- Predefined match length distribution (RFC 8878 §6, Table 16).
+    53 symbols (0–52), accuracyLog = 6, table size = 64. -/
+def predefinedMatchLenDistribution : Array Int32 :=
+  #[ 1,  4,  3,  2,  2,  2,  2,  2,  2,  1,  1,  1,  1,  1,  1,  1,
+     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, -1, -1,
+    -1, -1, -1, -1, -1]
+
+/-- Predefined offset distribution (RFC 8878 §6, Table 17).
+    29 symbols (0–28), accuracyLog = 5, table size = 32. -/
+def predefinedOffsetDistribution : Array Int32 :=
+  #[ 1,  1,  1,  1,  1,  1,  2,  2,  2,  1,  1,  1,  1,  1,  1,  1,
+     1,  1,  1,  1,  1,  1,  1,  1, -1, -1, -1, -1, -1]
+
+/-- Build the three predefined FSE decoding tables from the hardcoded
+    distributions in RFC 8878 §6. Returns (litLenTable, matchLenTable, offsetTable). -/
+def buildPredefinedFseTables : Except String (FseTable × FseTable × FseTable) := do
+  let llTable ← buildFseTable predefinedLitLenDistribution 6
+  let mlTable ← buildFseTable predefinedMatchLenDistribution 6
+  let ofTable ← buildFseTable predefinedOffsetDistribution 5
+  return (llTable, mlTable, ofTable)
 
 end Zip.Native
