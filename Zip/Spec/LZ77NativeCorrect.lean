@@ -112,9 +112,10 @@ theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List L
     simp only [Deflate.Spec.resolveLZ77]
     have hdneq : dist ≠ 0 := by omega
     have hacclen : (data.data.toList.take pos).length = pos := by
-      simp [List.length_take]; omega
+      simp only [List.length_take, Array.length_toList, ByteArray.size_data]; omega
     rw [show (dist == 0 || decide ((data.data.toList.take pos).length < dist)) = false
-      from by simp [hdneq, hacclen]; omega]
+      from by simp only [hacclen, Bool.or_eq_false_iff, beq_eq_false_iff_ne, ne_eq, hdneq,
+        not_false_eq_true, decide_eq_false_iff_not, Nat.not_lt, true_and]; omega]
     simp only [Bool.false_eq_true, ↓reduceIte, hacclen]
     suffices h : data.data.toList.take pos ++
         (List.ofFn fun (i : Fin len) =>
@@ -122,16 +123,16 @@ theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List L
         data.data.toList.take (pos + len) by rw [h]; exact ih
     have hdllen : data.data.toList.length = data.size := ByteArray.data_toList_length data
     apply List.ext_getElem
-    · simp [List.length_append, List.length_ofFn, List.length_take, hdllen]; omega
+    · simp only [List.length_append, List.length_ofFn, List.length_take, hdllen]; omega
     · intro i h1 h2
       simp only [List.length_take, hdllen, Nat.min_eq_left (by omega)] at h2
       simp only [List.getElem_take]
       by_cases hip : i < pos
       · -- Element from the take pos part
-        rw [List.getElem_append_left (by simp [List.length_take, hdllen]; omega)]
+        rw [List.getElem_append_left (by simp only [List.length_take, hdllen]; omega)]
         simp only [List.getElem_take]
       · -- Element from the ofFn part
-        rw [List.getElem_append_right (by simp [List.length_take, hdllen]; omega)]
+        rw [List.getElem_append_right (by simp only [List.length_take, hdllen]; omega)]
         simp only [List.length_take, hdllen]
         rw [List.getElem_ofFn]
         -- Goal: (take pos dl)[pos - dist + ((i - pos) % dist)]! = dl[i]
@@ -147,7 +148,7 @@ theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List L
           ((i - min pos data.size) % dist)]! = data.data.toList[i]
         rw [hmin]
         rw [getElem!_pos (data.data.toList.take pos) _ (by
-          simp [List.length_take, hdllen, hmin]; omega)]
+          simp only [List.length_take, hdllen, hmin]; omega)]
         simp only [List.getElem_take]
         exact hm.symm
 
@@ -157,7 +158,7 @@ theorem validDecomp_resolves (data : ByteArray) (tokens : List LZ77Token)
     Deflate.Spec.resolveLZ77 (tokens.map LZ77Token.toLZ77Symbol ++ [.endOfBlock]) [] =
       some data.data.toList := by
   have := validDecomp_resolves_aux data 0 tokens hv
-  simp at this; exact this
+  simp only [List.take_zero] at this; exact this
 
 /-! ## Explicit recursion validity -/
 
@@ -211,9 +212,9 @@ theorem lz77Greedy_valid (data : ByteArray) (windowSize : Nat) (hw : windowSize 
     ValidDecomp data 0 (lz77Greedy data windowSize).toList := by
   simp only [lz77Greedy]
   split
-  · simp
+  · simp only
     exact trailing_valid data 0
-  · simp
+  · simp only
     exact mainLoop_valid data windowSize 65536 _ _ 0 hw
 
 /-- Resolving the LZ77 tokens produced by `lz77Greedy` recovers the original data.
@@ -240,7 +241,7 @@ theorem trailing_encodable (data : ByteArray) (pos : Nat) :
     cases ht with
     | head => trivial
     | tail _ h => exact trailing_encodable data (pos + 1) t h
-  · simp
+  · simp only [List.not_mem_nil, false_implies, implies_true]
 termination_by data.size - pos
 
 theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
@@ -294,7 +295,7 @@ theorem trailing_length (data : ByteArray) (pos : Nat) :
   · simp only [List.length_cons]
     have ih := trailing_length data (pos + 1)
     omega
-  · simp
+  · simp only [List.length_nil, Nat.zero_le]
 termination_by data.size - pos
 
 /-- `mainLoop` emits at most `data.size - pos` tokens. -/
@@ -337,8 +338,8 @@ theorem lz77Greedy_encodable (data : ByteArray)
   have henc : Encodable t := by
     simp only [lz77Greedy] at ht
     split at ht
-    · simp at ht; exact trailing_encodable data 0 t ht
-    · simp at ht; exact mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
+    · simp only at ht; exact trailing_encodable data 0 t ht
+    · simp only at ht; exact mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
   exact henc
 
 /-! ## Lazy LZ77 correctness -/
@@ -391,7 +392,7 @@ theorem lz77Lazy.trailing_encodable (data : ByteArray) (pos : Nat) :
     cases ht with
     | head => trivial
     | tail _ h => exact lz77Lazy.trailing_encodable data (pos + 1) t h
-  · simp
+  · simp only [List.not_mem_nil, false_implies, implies_true]
 termination_by data.size - pos
 
 theorem lz77Lazy.trailing_length (data : ByteArray) (pos : Nat) :
@@ -401,7 +402,7 @@ theorem lz77Lazy.trailing_length (data : ByteArray) (pos : Nat) :
   · simp only [List.length_cons]
     have ih := lz77Lazy.trailing_length data (pos + 1)
     omega
-  · simp
+  · simp only [List.length_nil, Nat.zero_le]
 termination_by data.size - pos
 
 /-! ### Lazy mainLoop validity
@@ -508,8 +509,8 @@ theorem lz77Lazy_valid (data : ByteArray) (windowSize : Nat) (hw : windowSize > 
     ValidDecomp data 0 (lz77Lazy data windowSize).toList := by
   simp only [lz77Lazy]
   split
-  · simp; exact lz77Lazy.trailing_valid data 0
-  · simp; exact lz77Lazy.mainLoop_valid data windowSize 65536 _ _ 0 hw
+  · simp only; exact lz77Lazy.trailing_valid data 0
+  · simp only; exact lz77Lazy.mainLoop_valid data windowSize 65536 _ _ 0 hw
 
 /-- Resolving the LZ77 tokens produced by `lz77Lazy` recovers the original data. -/
 theorem lz77Lazy_resolves (data : ByteArray)
@@ -606,8 +607,8 @@ theorem lz77Lazy_encodable (data : ByteArray)
   have henc : Encodable t := by
     simp only [lz77Lazy] at ht
     split at ht
-    · simp at ht; exact lz77Lazy.trailing_encodable data 0 t ht
-    · simp at ht; exact lz77Lazy.mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
+    · simp only at ht; exact lz77Lazy.trailing_encodable data 0 t ht
+    · simp only at ht; exact lz77Lazy.mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
   exact henc
 
 /-! ### Lazy mainLoop length bounds -/
