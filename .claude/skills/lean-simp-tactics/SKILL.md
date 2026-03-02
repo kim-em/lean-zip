@@ -152,6 +152,24 @@ For deeply nested `do`-notation / `Option.bind` chains, bare `simp [hyps]`
 is often the only practical approach — converting to `simp only` would require
 explicitly listing every `@[simp]` lemma used in the bind reduction chain.
 
+## `simp at h` vs `dsimp at h` for `if P then a else none = some b`
+
+When `h : (if P then a else none) = some b`, `simp at h` deduces that `P`
+must be true (since the `else` branch is `none ≠ some b`) and simplifies to
+`h : a = some b`. **`dsimp at h` cannot do this** — it only performs
+definitional reduction (iota, beta), not propositional reasoning about `if`.
+
+This commonly arises in WF-recursive functions where the guard condition
+(e.g., `if bits₁.length < br.toBits.length then ...`) is embedded in the
+hypothesis. Replacing `simp at h` with `dsimp at h` will leave the guard
+unresolved, causing downstream proofs to fail because they lose the length
+bound that `simp` implicitly derived.
+
+**Rule**: Use `dsimp at h` only for pure constructor/match reduction (e.g.,
+reducing `match LZ77Symbol.literal b with | .literal b => ...`). Use
+`simp at h` when the hypothesis contains `if P then ... else none` patterns
+that need propositional resolution.
+
 ## `simp [hf]` vs `rw [if_pos/neg hf]` in Monadic Proofs
 
 In suffix/roundtrip proofs where the goal's condition differs syntactically
