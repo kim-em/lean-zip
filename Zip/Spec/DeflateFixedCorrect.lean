@@ -31,7 +31,7 @@ private theorem validSymbolList_map_append_endOfBlock
     Deflate.Spec.ValidSymbolList
       (ts.map LZ77Token.toLZ77Symbol ++ [.endOfBlock]) := by
   induction ts with
-  | nil => simp [Deflate.Spec.ValidSymbolList]
+  | nil => simp only [List.map_nil, List.nil_append, Deflate.Spec.ValidSymbolList]
   | cons t rest ih =>
     simp only [List.map_cons, List.cons_append]
     cases t with
@@ -70,7 +70,7 @@ theorem tokensToSymbols_encodable (data : ByteArray)
     cases t with
     | literal b => exact encodeLitLen_literal_isSome b
     | reference len dist =>
-      simp at hbounds
+      simp only at hbounds
       exact encodeLitLen_reference_isSome len dist
         hbounds.1 hbounds.2.1 hbounds.2.2.1 hbounds.2.2.2
   | inr heob =>
@@ -91,7 +91,8 @@ theorem encodeSymbols_tokensToSymbols_isSome (data : ByteArray)
 /-- `tokensToSymbols` has length `tokens.size + 1`. -/
 theorem tokensToSymbols_length (tokens : Array LZ77Token) :
     (tokensToSymbols tokens).length = tokens.size + 1 := by
-  simp [tokensToSymbols, List.length_append, List.length_map]
+  simp only [tokensToSymbols, List.length_append, List.length_map, Array.length_toList,
+    List.length_cons, List.length_nil, Nat.zero_add]
 
 /-- The token count from `lz77Greedy` is at most `data.size`. In the worst
     case every byte is a literal. -/
@@ -120,10 +121,11 @@ theorem lz77Greedy_spec_decode (data : ByteArray)
   have henc_some := encodeSymbols_tokensToSymbols_isSome data windowSize hw hws
   cases henc : encodeSymbols fixedLitLengths fixedDistLengths
       (tokensToSymbols (lz77Greedy data windowSize)) with
-  | none => simp [henc] at henc_some
+  | none => simp only [henc, Option.isSome_none, Bool.false_eq_true] at henc_some
   | some bits =>
     refine ⟨[true, true, false] ++ bits, ?_, ?_⟩
-    · simp [encodeFixed, henc]
+    · simp only [encodeFixed, henc, List.cons_append, List.nil_append, Option.pure_def,
+        Option.bind_eq_bind, Option.bind_some]
     · exact encodeFixed_decode
         (tokensToSymbols (lz77Greedy data windowSize))
         data.data.toList bits henc
@@ -150,7 +152,7 @@ theorem tokensToSymbols_lazy_encodable (data : ByteArray)
     cases t with
     | literal b => exact encodeLitLen_literal_isSome b
     | reference len dist =>
-      simp at hbounds
+      simp only at hbounds
       exact encodeLitLen_reference_isSome len dist
         hbounds.1 hbounds.2.1 hbounds.2.2.1 hbounds.2.2.2
   | inr heob =>
@@ -178,10 +180,11 @@ theorem lz77Lazy_spec_decode (data : ByteArray)
   have henc_some := encodeSymbols_tokensToSymbols_lazy_isSome data windowSize hw hws
   cases henc : encodeSymbols fixedLitLengths fixedDistLengths
       (tokensToSymbols (lz77Lazy data windowSize)) with
-  | none => simp [henc] at henc_some
+  | none => simp only [henc, Option.isSome_none, Bool.false_eq_true] at henc_some
   | some bits =>
     refine ⟨[true, true, false] ++ bits, ?_, ?_⟩
-    · simp [encodeFixed, henc]
+    · simp only [encodeFixed, henc, List.cons_append, List.nil_append, Option.pure_def,
+        Option.bind_eq_bind, Option.bind_some]
     · exact encodeFixed_decode
         (tokensToSymbols (lz77Lazy data windowSize))
         data.data.toList bits henc
@@ -207,7 +210,7 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
   cases henc_all : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
       Deflate.Spec.fixedDistLengths
       (tokensToSymbols tokens) with
-  | none => simp [henc_all] at henc_some
+  | none => simp only [henc_all, Option.isSome_none, Bool.false_eq_true] at henc_some
   | some allBits =>
     rw [htoks_eq] at henc_all
     obtain ⟨tokBits, eobBits, henc_tok, henc_eob_syms, hallBits_eq⟩ :=
@@ -217,14 +220,18 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
     simp only [Deflate.Spec.encodeSymbols] at henc_eob_syms
     cases henc_eob : Deflate.Spec.encodeLitLen Deflate.Spec.fixedLitLengths
         Deflate.Spec.fixedDistLengths .endOfBlock with
-    | none => simp [henc_eob] at henc_eob_syms
+    | none =>
+      simp only [henc_eob, Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+        List.append_nil, Option.bind_fun_some, reduceCtorEq] at henc_eob_syms
     | some eobBits' =>
-      simp [henc_eob] at henc_eob_syms
+      simp only [henc_eob, Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+        List.append_nil, Option.bind_fun_some, Option.some.injEq] at henc_eob_syms
       have heob_eq : eobBits = eobBits' := by rw [henc_eob_syms]
       have henc_combined := Deflate.encodeSymbols_append _ _
         (tokens.toList.map LZ77Token.toLZ77Symbol)
         [.endOfBlock] tokBits eobBits henc_tok
-        (by simp [Deflate.Spec.encodeSymbols, henc_eob, henc_eob_syms])
+        (by simp only [Deflate.Spec.encodeSymbols, henc_eob, henc_eob_syms, Option.pure_def,
+              Option.bind_eq_bind, Option.bind_some, List.append_nil, Option.bind_fun_some])
       have hencFixed : Deflate.Spec.encodeFixed
           (tokensToSymbols tokens) =
           some ([true, true, false] ++ allBits) := by
@@ -269,7 +276,8 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
           have hempty_emit : emitTokens
               (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) #[] 0 =
               (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) := by
-            simp [emitTokens]
+            simp only [emitTokens, List.size_toArray, List.length_nil, Nat.lt_irrefl,
+              ↓reduceDIte]
           rw [htokens, hempty_emit]; rfl
         · rfl
       rw [hdef]
@@ -299,8 +307,11 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         have hsum : ∀ (l : List UInt8),
             (l.map (fun _ => 8)).sum = l.length * 8 := by
           intro l; induction l with
-          | nil => simp
-          | cons _ _ ih => simp [ih, Nat.add_mul]; omega
+          | nil => simp only [List.map_nil, List.sum_nil, List.length_nil, Nat.zero_mul]
+          | cons _ _ ih =>
+            simp only [List.map_cons, List.sum_cons, ih, List.length_cons, Nat.add_mul,
+              Nat.one_mul]
+            omega
         rw [hsum]
       rw [hbits_eq] at htoBits_len
       omega
@@ -321,8 +332,9 @@ theorem deflateFixed_spec (data : ByteArray) :
     (fun hzero => by
       simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Greedy.trailing data 0 = [] := by
-        unfold lz77Greedy.trailing; simp [show ¬(0 < data.size) from by omega]
-      simp [this])
+        unfold lz77Greedy.trailing
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+      simp only [this])
 
 /-! ## Inflate completeness (restricted) -/
 
@@ -347,16 +359,18 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   have hgo : decode.go (bytesToBits bytes) [] = some result := by
     simp only [decode] at hdec; exact hdec
   -- Apply inflateLoop_complete (existential fuel) then bridge to inflateRaw's fuel
-  have hbr_wf : (Zip.Native.BitReader.mk bytes 0 0).bitOff < 8 := by simp
+  have hbr_wf : (Zip.Native.BitReader.mk bytes 0 0).bitOff < 8 := by
+    simp only [Nat.zero_lt_succ]
   have hbr_pos : (Zip.Native.BitReader.mk bytes 0 0).bitOff = 0 ∨
       (Zip.Native.BitReader.mk bytes 0 0).pos <
-      (Zip.Native.BitReader.mk bytes 0 0).data.size := by simp
+      (Zip.Native.BitReader.mk bytes 0 0).data.size := by
+    simp only [true_or]
   obtain ⟨endPos, hloop⟩ :=
     Deflate.Correctness.inflateLoop_complete
       ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist
       (1024 * 1024 * 1024) bytes.size result
-      hbr_wf hbr_pos (by simp) (by simp) hflit hfdist hsize hgo
-  rw [hloop]; simp [pure, Except.pure]
+      hbr_wf hbr_pos (by simp only [Nat.zero_le]) (by simp only [Nat.le_refl]) hflit hfdist hsize hgo
+  rw [hloop]; simp only [pure, Except.pure]
 
 /-! ## Main roundtrip theorem -/
 
@@ -373,7 +387,9 @@ theorem inflate_deflateFixed (data : ByteArray)
   cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
       Deflate.Spec.fixedDistLengths
       (tokensToSymbols (lz77Greedy data)) with
-  | none => simp [henc_syms] at henc_fixed
+  | none =>
+    simp only [henc_syms, List.cons_append, List.nil_append, Option.pure_def,
+      Option.bind_eq_bind, Option.bind_none, reduceCtorEq] at henc_fixed
   | some allBits =>
     simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
     -- bits_enc = [true, true, false] ++ allBits
@@ -392,7 +408,7 @@ theorem inflate_deflateFixed (data : ByteArray)
         (tokensToSymbols_validSymbolList _)
     -- Step 4: inflate_complete bridges spec decode to native inflate
     have hinf := inflate_complete (deflateFixed data) data.data.toList
-      (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
+      (by simp only [Array.length_toList, ByteArray.size_data, Nat.reduceMul]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
 /-! ## Iterative LZ77 equivalence -/
@@ -442,7 +458,7 @@ private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Toke
     · rw [ih _ (by omega) _ _ rfl]
       rw [List.toArray_cons]
       rw [← Array.append_assoc, Array.push_eq_append]
-    · simp
+    · simp only [Array.append_empty]
 
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop`. -/
 private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
@@ -480,9 +496,9 @@ theorem lz77GreedyIter_eq_lz77Greedy (data : ByteArray) (ws : Nat) :
   unfold lz77GreedyIter lz77Greedy
   split
   · rw [trailing_eq]
-    simp
+    simp only [List.append_toArray, List.nil_append]
   · rw [mainLoop_eq]
-    simp
+    simp only [List.append_toArray, List.nil_append]
 
 /-- Roundtrip for the iterative fixed Huffman compressor.
     Follows from `lz77GreedyIter_eq_lz77Greedy` + `inflate_deflateFixed`. -/
@@ -509,8 +525,9 @@ theorem deflateLazy_spec (data : ByteArray) :
     (fun hzero => by
       simp only [lz77Lazy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Lazy.trailing data 0 = [] := by
-        unfold lz77Lazy.trailing; simp [show ¬(0 < data.size) from by omega]
-      simp [this])
+        unfold lz77Lazy.trailing
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+      simp only [this])
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
     then decompressing recovers the original data. The size bound comes from the
@@ -523,7 +540,9 @@ theorem inflate_deflateLazy (data : ByteArray)
   cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
       Deflate.Spec.fixedDistLengths
       (tokensToSymbols (lz77Lazy data)) with
-  | none => simp [henc_syms] at henc_fixed
+  | none =>
+    simp only [henc_syms, List.cons_append, List.nil_append, Option.pure_def,
+      Option.bind_eq_bind, Option.bind_none, reduceCtorEq] at henc_fixed
   | some allBits =>
     simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
     have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
@@ -539,7 +558,7 @@ theorem inflate_deflateLazy (data : ByteArray)
         (lz77Lazy_resolves data 32768 (by omega))
         (tokensToSymbols_validSymbolList _)
     have hinf := inflate_complete (deflateLazy data) data.data.toList
-      (by simp [Array.length_toList, ByteArray.size_data]; omega) hdec
+      (by simp only [Array.length_toList, ByteArray.size_data, Nat.reduceMul]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
 /-! ## Iterative lazy LZ77 equivalence -/
@@ -555,7 +574,7 @@ private theorem trailing_lazy_eq (data : ByteArray) (pos : Nat) (acc : Array LZ7
     · rw [ih _ (by omega) _ _ rfl]
       rw [List.toArray_cons]
       rw [← Array.append_assoc, Array.push_eq_append]
-    · simp
+    · simp only [Array.append_empty]
 
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy).
     Since `lz77LazyIter.mainLoop` directly uses `lz77Lazy.hash3`, `lz77Lazy.countMatch`,
@@ -621,9 +640,9 @@ theorem lz77LazyIter_eq_lz77Lazy (data : ByteArray) (ws : Nat) :
   unfold lz77LazyIter lz77Lazy
   split
   · rw [trailing_lazy_eq]
-    simp
+    simp only [List.append_toArray, List.nil_append]
   · rw [mainLoop_lazy_eq]
-    simp
+    simp only [List.append_toArray, List.nil_append]
 
 /-- The iterative lazy compressor equals the recursive one. -/
 theorem deflateLazyIter_eq_deflateLazy (data : ByteArray) :
