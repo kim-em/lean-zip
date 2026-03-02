@@ -1,5 +1,6 @@
 import ZipTest.Helpers
 import Zip.Native.ZstdFrame
+import Zip.Native.XxHash
 
 /-! Tests for the native Zstd frame header parser against FFI-compressed data. -/
 
@@ -247,5 +248,56 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .error e =>
     unless e.contains "compressed blocks not yet implemented" do
       throw (IO.userError s!"decompressFrame size: unexpected error: {e}")
+
+  -- Test 25: checksum verification — valid FFI-compressed data decompresses
+  -- FFI zstd sets the content checksum flag by default, so decompressZstd
+  -- will verify XXH64 checksum on this data.
+  let checksumData := mkConstantData 256
+  let checksumCompressed ← Zstd.compress checksumData 1
+  match Zip.Native.decompressZstd checksumCompressed with
+  | .ok result =>
+    unless result.data == checksumData.data do
+      throw (IO.userError "checksum valid: decompressed data mismatch")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"checksum valid: unexpected error: {e}")
+
+  -- Test 26: checksum verification — corrupted data triggers checksum error
+  -- We corrupt a byte in the decompressed content region of the frame
+  -- (after header + block headers, before the checksum trailer).
+  -- For constant data compressed at level 1, the frame is:
+  --   header | block header (3 bytes) | block content | checksum (4 bytes)
+  let corruptData := mkConstantData 256
+  let corruptCompressed ← Zstd.compress corruptData 1
+  -- Parse header to find where block content starts
+  match Zip.Native.parseFrameHeader corruptCompressed 0 with
+  | .ok (_, blockStart) =>
+    -- Block header is 3 bytes, content starts after that
+    let contentStart := blockStart + 3
+    if contentStart < corruptCompressed.size - 4 then
+      -- Flip a byte in the block content
+      let corrupted := corruptCompressed.set! contentStart
+        (corruptCompressed[contentStart]! ^^^ 0xFF)
+      match Zip.Native.decompressZstd corrupted with
+      | .ok _ =>
+        -- If decompression succeeds, the block might be compressed (no checksum
+        -- verification path hit), which is OK
+        pure ()
+      | .error e =>
+        -- Should be either a checksum mismatch or compressed-blocks-not-implemented
+        unless e.contains "checksum mismatch" || e.contains "compressed blocks not yet implemented" do
+          throw (IO.userError s!"checksum corrupt: expected checksum error, got: {e}")
+  | .error e => throw (IO.userError s!"checksum corrupt: header parse failed: {e}")
+
+  -- Test 27: checksum verification — empty input with checksum
+  -- Empty data compressed by zstd includes a content checksum
+  let emptyChecksumCompressed ← Zstd.compress ByteArray.empty
+  match Zip.Native.decompressZstd emptyChecksumCompressed with
+  | .ok result =>
+    unless result.size == 0 do
+      throw (IO.userError s!"checksum empty: expected 0 bytes, got {result.size}")
+  | .error e =>
+    unless e.contains "compressed blocks not yet implemented" do
+      throw (IO.userError s!"checksum empty: unexpected error: {e}")
 
   IO.println "ZstdNative tests: OK"

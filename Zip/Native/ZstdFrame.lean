@@ -1,4 +1,5 @@
 import Zip.Binary
+import Zip.Native.XxHash
 
 /-!
   Pure Lean parser and decompressor for Zstandard frames (RFC 8878 §3.1.1).
@@ -12,9 +13,9 @@ import Zip.Binary
 
   Provides frame-level decompression (`decompressFrame`) that wires
   header parsing + block decompression together, and a top-level API
-  (`decompressZstd`) for single-frame inputs.  Compressed blocks
-  (FSE + Huffman) and content checksum verification (XXH64) are not
-  yet supported.
+  (`decompressZstd`) for single-frame inputs.  Content checksum
+  verification uses XXH64 (upper 32 bits).  Compressed blocks
+  (FSE + Huffman) are not yet supported.
 -/
 
 namespace Zip.Native
@@ -214,20 +215,23 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
   return (output, off)
 
 /-- Decompress a single Zstd frame starting at `pos` in `data`.
-    Parses the frame header, decompresses all blocks, handles the optional
-    content checksum (skips verification — XXH64 not yet available), and
-    validates content size if specified in the header.
+    Parses the frame header, decompresses all blocks, verifies the optional
+    content checksum (upper 32 bits of XXH64 with seed 0), and validates
+    content size if specified in the header.
     Returns decompressed data and position after the frame. -/
 def decompressFrame (data : ByteArray) (pos : Nat) :
     Except String (ByteArray × Nat) := do
   let (header, afterHeader) ← parseFrameHeader data pos
   let (content, afterBlocks) ← decompressBlocks data afterHeader
-  -- Content checksum: 4 bytes (lower 32 bits of XXH64) if flagged
+  -- Content checksum: upper 32 bits of XXH64 (RFC 8878 §3.1.1) if flagged
   let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
   if header.contentChecksum then
     if data.size < afterFrame then
       throw "Zstd: not enough data for content checksum"
-    -- Checksum verification deferred until XXH64 is available
+    let expected := Binary.readUInt32LE data afterBlocks
+    let actual := XxHash64.xxHash64Upper32 content
+    if expected != actual then
+      throw s!"Zstd: content checksum mismatch: expected 0x{String.ofList (Nat.toDigits 16 expected.toNat)}, got 0x{String.ofList (Nat.toDigits 16 actual.toNat)}"
   -- Validate content size if specified in the header
   if let some expectedSize := header.contentSize then
     if content.size.toUInt64 != expectedSize then
