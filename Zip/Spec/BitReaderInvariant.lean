@@ -19,8 +19,8 @@ private theorem readBit_data_eq (br br' : BitReader) (bit : UInt32)
     (h : br.readBit = .ok (bit, br')) : br'.data = br.data := by
   simp only [BitReader.readBit] at h
   split at h
-  · simp at h
-  · split at h <;> simp [Except.ok.injEq, Prod.mk.injEq] at h <;>
+  · exact nomatch h
+  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
       obtain ⟨_, rfl⟩ := h <;> rfl
 
 /-- `readBits.go` preserves the data field. -/
@@ -30,12 +30,12 @@ private theorem readBits_go_data_eq (br br' : BitReader) (acc : UInt32)
     br'.data = br.data := by
   induction n generalizing br acc shift with
   | zero =>
-    simp [BitReader.readBits.go] at h
+    simp only [BitReader.readBits.go] at h
     obtain ⟨_, rfl⟩ := h; rfl
   | succ n ih =>
     simp only [BitReader.readBits.go, bind, Except.bind] at h
     cases hrb : br.readBit with
-    | error e => simp [hrb] at h
+    | error e => simp only [hrb] at h; exact nomatch h
     | ok p =>
       obtain ⟨bit, br₁⟩ := p
       simp only [hrb] at h
@@ -56,9 +56,9 @@ private theorem readBit_hpos (br br' : BitReader) (bit : UInt32)
     br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
   simp only [BitReader.readBit] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i hlt
-    split at h <;> simp [Except.ok.injEq, Prod.mk.injEq] at h <;>
+    split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
       obtain ⟨_, rfl⟩ := h <;> simp_all
 
 /-- `readBits.go` preserves the hpos invariant. -/
@@ -69,12 +69,12 @@ private theorem readBits_go_hpos (br br' : BitReader) (acc : UInt32)
     br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
   induction n generalizing br acc shift with
   | zero =>
-    simp [BitReader.readBits.go] at h
+    simp only [BitReader.readBits.go] at h
     obtain ⟨_, rfl⟩ := h; exact hpos
   | succ n ih =>
     simp only [BitReader.readBits.go, bind, Except.bind] at h
     cases hrb : br.readBit with
-    | error e => simp [hrb] at h
+    | error e => simp only [hrb] at h; exact nomatch h
     | ok p =>
       obtain ⟨bit, br₁⟩ := p
       simp only [hrb] at h
@@ -100,7 +100,7 @@ theorem alignToByte_pos_le (br : BitReader)
   · exact hle
   · rename_i hne
     cases hpos with
-    | inl h => simp [h] at hne
+    | inl h => exact absurd (by rw [h]; decide) hne
     | inr h => simp only; omega
 
 
@@ -119,9 +119,9 @@ private theorem readBit_inv (br br' : BitReader) (bit : UInt32)
     br'.pos ≤ br'.data.size := by
   simp only [BitReader.readBit] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i hlt
-    split at h <;> simp [Except.ok.injEq, Prod.mk.injEq] at h <;>
+    split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
       obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
 
 /-- Combined: readBits.go preserves data, hpos, and pos ≤ data.size. -/
@@ -135,12 +135,12 @@ private theorem readBits_go_inv (br br' : BitReader) (acc : UInt32)
     br'.pos ≤ br'.data.size := by
   induction n generalizing br acc shift with
   | zero =>
-    simp [BitReader.readBits.go] at h
+    simp only [BitReader.readBits.go] at h
     obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
   | succ n ih =>
     simp only [BitReader.readBits.go, bind, Except.bind] at h
     cases hrb : br.readBit with
-    | error e => simp [hrb] at h
+    | error e => simp only [hrb] at h; exact nomatch h
     | ok p =>
       obtain ⟨bit, br₁⟩ := p
       simp only [hrb] at h
@@ -168,16 +168,16 @@ private theorem decode_go_inv (tree : HuffTree) (br br' : BitReader) (n : Nat)
     br'.pos ≤ br'.data.size := by
   induction tree generalizing br n with
   | leaf s =>
-    simp [HuffTree.decode.go] at h
+    simp only [HuffTree.decode.go] at h
     obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
-  | empty => simp [HuffTree.decode.go] at h
+  | empty => simp only [HuffTree.decode.go] at h; exact nomatch h
   | node z o ihz iho =>
     simp only [HuffTree.decode.go] at h
     split at h
-    · simp at h
+    · exact nomatch h
     · simp only [bind, Except.bind] at h
       cases hrb : br.readBit with
-      | error e => simp [hrb] at h
+      | error e => simp only [hrb] at h; exact nomatch h
       | ok p =>
         obtain ⟨bit, br₁⟩ := p
         simp only [hrb] at h
@@ -206,14 +206,14 @@ private theorem readUInt16LE_inv (br br' : BitReader) (v : UInt16)
   split at h
   next hbo =>
     split at h
-    · simp at h
+    · exact nomatch h
     · next hle =>
       simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
       have hbo' : br.bitOff = 0 := eq_of_beq hbo
       exact ⟨rfl, hbo', by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
   next hbo =>
     split at h
-    · simp at h
+    · exact nomatch h
     · next hle =>
       simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
       exact ⟨rfl, rfl, by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
@@ -226,14 +226,14 @@ private theorem readBytes_inv (br br' : BitReader) (n : Nat) (bytes : ByteArray)
   split at h
   next hbo =>
     split at h
-    · simp at h
+    · exact nomatch h
     · next hle =>
       simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
       have hbo' : br.bitOff = 0 := eq_of_beq hbo
       exact ⟨rfl, hbo', by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
   next hbo =>
     split at h
-    · simp at h
+    · exact nomatch h
     · next hle =>
       simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨_, rfl⟩ := h
       exact ⟨rfl, rfl, by dsimp [BitReader.data, BitReader.pos] at hle ⊢; omega⟩
@@ -250,26 +250,27 @@ theorem decodeStored_inv (br br' : BitReader)
   -- Extract that readBytes succeeded from the successful decodeStored call.
   simp only [Inflate.decodeStored, bind, Except.bind] at h
   match h1 : br.readUInt16LE with
-  | .error e => simp [h1] at h
+  | .error e => simp only [h1] at h; exact nomatch h
   | .ok (len, br₁) =>
     rw [h1] at h; simp only [] at h
     match h2 : br₁.readUInt16LE with
-    | .error e => simp [h2] at h
+    | .error e => simp only [h2] at h; exact nomatch h
     | .ok (nlen, br₂) =>
       rw [h2] at h; simp only [] at h
       have h_rb : ∃ bytes, br₂.readBytes len.toNat = .ok (bytes, br') := by
         revert h; intro h
         simp only [pure, Except.pure] at h
         by_cases hxor : (len ^^^ nlen != 0xFFFF) = true
-        · simp [hxor] at h
+        · simp only [hxor, ite_true] at h; exact nomatch h
         · simp only [hxor] at h
           by_cases hsize : output.size + len.toNat > maxOut
-          · simp [hsize] at h
+          · simp only [hsize, ite_true] at h; exact nomatch h
           · simp only [hsize, ite_false] at h
             match h3 : br₂.readBytes len.toNat with
-            | .error e => simp [h3] at h
+            | .error e => simp only [h3] at h; exact nomatch h
             | .ok (bytes, br₃) =>
-              simp [h3] at h
+              simp only [h3, if_neg Bool.false_ne_true, Except.ok.injEq,
+                Prod.mk.injEq] at h
               exact ⟨bytes, by rw [h.2]⟩
       obtain ⟨bytes, h_rb⟩ := h_rb
       have ⟨hd3, hbo3, hple3⟩ := readBytes_inv br₂ br' _ _ h_rb
@@ -302,7 +303,7 @@ theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
       decodeHuffman_go_inv litTree distTree br_i br' out output' maxOut dataSize h' hpos' hple'
   unfold Inflate.decodeHuffman.go at h
   cases hlit : litTree.decode br with
-  | error e => rw [hlit] at h; simp [Bind.bind, Except.bind] at h
+  | error e => rw [hlit] at h; simp only [Bind.bind, Except.bind] at h; exact nomatch h
   | ok p =>
     obtain ⟨sym, br₁⟩ := p; rw [hlit] at h; dsimp only [Bind.bind, Except.bind] at h
     simp only [pure, Except.pure] at h
@@ -310,12 +311,12 @@ theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
     split at h
     · -- sym < 256: literal byte
       split at h
-      · simp at h  -- output.size ≥ maxOut → error
+      · exact nomatch h  -- output.size ≥ maxOut → error
       · -- advancement guards
         split at h
-        · simp at h  -- bitPos ≤ guard → error
+        · exact nomatch h  -- bitPos ≤ guard → error
         · split at h
-          · simp at h  -- bitPos out of range → error
+          · exact nomatch h  -- bitPos out of range → error
           · -- recursive call: have advancement + bound from passed guards
             have hmeasure : dataSize * 8 - br₁.bitPos < dataSize * 8 - br.bitPos := by
               simp only [BitReader.bitPos] at *; omega
@@ -328,27 +329,27 @@ theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
         exact ⟨hd₁, hpos₁, hple₁⟩
       · -- sym ≥ 257: length+distance code
         split at h
-        · simp at h  -- invalid length code → error
+        · exact nomatch h  -- invalid length code → error
         · split at h
-          · simp at h  -- readBits error
+          · exact nomatch h  -- readBits error
           · rename_i v hrb1_eq
             split at h
-            · simp at h  -- decode dist error
+            · exact nomatch h  -- decode dist error
             · rename_i v₁ hdist_eq
               split at h
-              · simp at h  -- invalid distance code
+              · exact nomatch h  -- invalid distance code
               · split at h
-                · simp at h  -- readBits dist extra error
+                · exact nomatch h  -- readBits dist extra error
                 · rename_i v₂ hrb2_eq
                   split at h
-                  · simp at h  -- distance > output.size
+                  · exact nomatch h  -- distance > output.size
                   · split at h
-                    · simp at h  -- output.size + length > maxOut
+                    · exact nomatch h  -- output.size + length > maxOut
                     · -- advancement guards before recursive call
                       split at h
-                      · simp at h  -- bitPos ≤ guard → error
+                      · exact nomatch h  -- bitPos ≤ guard → error
                       · split at h
-                        · simp at h  -- bitPos out of range → error
+                        · exact nomatch h  -- bitPos out of range → error
                         · -- recursive go call remains
                           obtain ⟨extraBits, br₂⟩ := v
                           obtain ⟨distSym, br₃⟩ := v₁
@@ -406,7 +407,7 @@ theorem readCLCodeLengths_inv (br br' : BitReader)
     split at h
     · simp only [bind, Except.bind] at h
       cases hrb : br.readBits 3 with
-      | error e => simp [hrb] at h
+      | error e => simp only [hrb] at h; exact nomatch h
       | ok p =>
         obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
         have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 3 v hrb hpos hple
@@ -444,7 +445,7 @@ theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
     rename_i hlt
     dsimp only [Bind.bind, Except.bind] at h
     split at h
-    · simp at h  -- decode error
+    · exact nomatch h  -- decode error
     · rename_i v hdec_eq
       simp only [pure, Except.pure] at h
       obtain ⟨sym, br₁⟩ := v; simp only [] at hdec_eq h
@@ -456,40 +457,40 @@ theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
       · split at h
         · -- sym == 16: repeat previous
           split at h
-          · simp at h  -- idx == 0 error
+          · exact nomatch h  -- idx == 0 error
           · -- readBits 2
             split at h
-            · simp at h  -- readBits error
+            · exact nomatch h  -- readBits error
             · rename_i v₁ hrb_eq
               obtain ⟨rep, br₂⟩ := v₁; simp only [] at hrb_eq h
               have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 rep hrb_eq hpos₁ hple₁
               split at h
-              · simp at h  -- repeat exceeds total
+              · exact nomatch h  -- repeat exceeds total
               · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
                 exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
         · split at h
           · -- sym == 17: zero-fill short
             split at h
-            · simp at h  -- readBits error
+            · exact nomatch h  -- readBits error
             · rename_i v₂ hrb_eq
               obtain ⟨rep, br₂⟩ := v₂; simp only [] at hrb_eq h
               have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 3 rep hrb_eq hpos₁ hple₁
               split at h
-              · simp at h  -- repeat exceeds total
+              · exact nomatch h  -- repeat exceeds total
               · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
                 exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
           · split at h
             · -- sym == 18: zero-fill long
               split at h
-              · simp at h  -- readBits error
+              · exact nomatch h  -- readBits error
               · rename_i v₃ hrb_eq
                 obtain ⟨rep, br₂⟩ := v₃; simp only [] at hrb_eq h
                 have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 7 rep hrb_eq hpos₁ hple₁
                 split at h
-                · simp at h  -- repeat exceeds total
+                · exact nomatch h  -- repeat exceeds total
                 · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
                   exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
-            · simp at h  -- invalid symbol
+            · exact nomatch h  -- invalid symbol
 termination_by totalCodes - idx
 
 /-- Combined: decodeDynamicTrees preserves data, hpos, and pos ≤ data.size. -/
@@ -505,46 +506,46 @@ theorem decodeDynamicTrees_inv (br br' : BitReader)
   dsimp only [Bind.bind, Except.bind] at h
   -- readBits 5 (hlit)
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i v₁ hrb1_eq
     obtain ⟨hlit_val, br₁⟩ := v₁; simp only [] at hrb1_eq h
     have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 5 hlit_val hrb1_eq hpos hple
     -- readBits 5 (hdist)
     split at h
-    · simp at h
+    · exact nomatch h
     · rename_i v₂ hrb2_eq
       obtain ⟨hdist_val, br₂⟩ := v₂; simp only [] at hrb2_eq h
       have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 5 hdist_val hrb2_eq hpos₁ hple₁
       -- readBits 4 (hclen)
       split at h
-      · simp at h
+      · exact nomatch h
       · rename_i v₃ hrb3_eq
         obtain ⟨hclen_val, br₃⟩ := v₃; simp only [] at hrb3_eq h
         have ⟨hd₃, hpos₃, hple₃⟩ := readBits_inv br₂ br₃ 4 hclen_val hrb3_eq hpos₂ hple₂
         -- readCLCodeLengths
         split at h
-        · simp at h
+        · exact nomatch h
         · rename_i v₄ hrcl_eq
           obtain ⟨clLengths, br₄⟩ := v₄; simp only [] at hrcl_eq h
           have ⟨hd₄, hpos₄, hple₄⟩ := readCLCodeLengths_inv br₃ br₄ _ clLengths _ _ hrcl_eq hpos₃ hple₃
           -- HuffTree.fromLengths (pure, no BitReader change)
           split at h
-          · simp at h
+          · exact nomatch h
           · rename_i clTree _
             -- decodeCLSymbols
             split at h
-            · simp at h
+            · exact nomatch h
             · rename_i v₅ hdcl_eq
               obtain ⟨codeLengths, br₅⟩ := v₅; simp only [] at hdcl_eq h
               have ⟨hd₅, hpos₅, hple₅⟩ := decodeCLSymbols_inv clTree br₄ br₅
                 _ codeLengths _ _ hdcl_eq hpos₄ hple₄
               -- HuffTree.fromLengths (litTree) — pure
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i litTree' _
                 -- HuffTree.fromLengths (distTree) — pure
                 split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i distTree' _
                   simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
                   obtain ⟨_, _, rfl⟩ := h
