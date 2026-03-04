@@ -9,17 +9,28 @@ allowed-tools: Read, Bash, Grep, Glob
 Mechanical cleanup steps for Lean proof quality reviews. Follow this
 checklist in order for each file.
 
+## Phase 0: Verify Issue Accuracy
+
+**Before starting work**, verify the issue's bare simp counts against
+the actual master state. Issue descriptions go stale when other PRs
+clean the same or overlapping files.
+
+```bash
+# Accurate bare simp grep (excludes simp only, simp_all, simp?, simp_wf, etc.)
+grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+```
+
+If the actual count differs significantly from the issue (e.g., issue
+says 61 but master has 0), the file was already cleaned by another PR.
+Use `coordination skip` and move on — don't waste time investigating.
+
 ## Phase 1: Metrics (Before)
 
 Record starting metrics before making any changes:
 
 ```bash
-# Bare simp count (the primary quality metric)
-grep -c 'simp\b' File.lean          # total simp occurrences
-grep -c 'simp only' File.lean       # simp only occurrences
-grep -c 'simp \[' File.lean         # simp [...] (bare with args)
-grep -c 'simp at' File.lean         # simp at h (bare on hyps)
-# Difference = bare simp count
+# Bare simp count (the primary quality metric — use the accurate grep from Phase 0)
+grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
 ```
 
 Expected reduction targets by file size:
@@ -93,12 +104,26 @@ obtain ⟨rfl, rfl⟩ := h
 
 For each bare `simp` (without `only`), follow this decision tree.
 
-**CRITICAL: Do not batch replacements.** Replace at most 3-5 bare simps
-at a time, then build. `simp [X]` is NOT equivalent to `simp only [X]`
-— bare `simp` uses the entire `@[simp]` lemma database plus `X`, while
-`simp only [X]` uses ONLY `X`. A mechanical `simp [X]` → `simp only [X]`
-replacement will fail most of the time. Use the `simp?` discovery
-workflow below instead.
+**Batch discovery, sequential application.** For files with many bare
+simps (10+), the most efficient workflow is:
+
+1. **Batch discovery**: Convert ALL bare `simp` calls to `simp?`
+   simultaneously, then build ONCE. This produces all `Try this:`
+   suggestions in a single build pass — vastly more efficient than
+   converting one at a time.
+2. **Collect suggestions**: Read all info messages and note the
+   suggested `simp only [...]` replacements.
+3. **Apply in small batches**: Replace 3-5 at a time, building after
+   each batch to verify. Some suggestions may not work in combination
+   (simp? suggestions are computed independently).
+
+This batch-then-apply approach was discovered in the bare simp campaign
+and typically reduces a 20-bare-simp file in 2-3 build cycles instead
+of 20.
+
+**Important**: `simp [X]` is NOT equivalent to `simp only [X]` — bare
+`simp` uses the entire `@[simp]` lemma database plus `X`, while
+`simp only [X]` uses ONLY `X`. Never do a mechanical search-and-replace.
 
 ### Step 1: Try `simp?`
 
