@@ -113,7 +113,8 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
         else acc.set! len (acc[len]! + 1)) acc)[b]! =
       acc[b]! + lengths.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 by
     rw [this _ (Array.size_replicate ..)]
-    simp [show b < maxBits + 1 from by omega]
+    simp only [Array.size_replicate, show b < maxBits + 1 from by omega, getElem!_pos,
+      Array.getElem_replicate, beq_iff_eq, Nat.zero_add]
   intro acc hsize
   induction lengths generalizing acc with
   | nil => simp
@@ -124,7 +125,7 @@ protected theorem countLengths_eq (lengths : List Nat) (maxBits b : Nat)
       simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
       rw [ih acc hsize]; congr 1
       have hlb : l ≠ b := by cases hskip with | inl h => exact h ▸ Ne.symm hb | inr h => omega
-      simp [beq_eq_false_iff_ne.mpr hlb]
+      simp only [beq_iff_eq, beq_eq_false_iff_ne.mpr hlb, Bool.false_eq_true, ↓reduceIte]
     · rename_i hset
       simp only [Bool.or_eq_true, beq_iff_eq, not_or, decide_eq_true_eq] at hset
       have hl_ne : l ≠ 0 := hset.1
@@ -196,7 +197,8 @@ private theorem kraftSumFrom_incr (acc : Array Nat) (maxBits l b : Nat)
     kraftSumFrom (acc.set! l (acc[l]! + 1)) maxBits b =
       kraftSumFrom acc maxBits b + if b ≤ l then 2 ^ (maxBits - l) else 0 := by
   if hb : b > maxBits then
-    simp [kraftSumFrom_gt _ _ _ hb, show ¬(b ≤ l) from by omega]
+    simp only [Array.set!_eq_setIfInBounds, kraftSumFrom_gt _ _ _ hb,
+      show ¬(b ≤ l) from by omega, ↓reduceIte, Nat.add_zero]
   else
     have hb' : b ≤ maxBits := by omega
     rw [kraftSumFrom_unfold _ _ _ hb', kraftSumFrom_unfold _ _ _ hb']
@@ -223,7 +225,8 @@ private theorem kraftSumFrom_replicate (maxBits b : Nat) :
   if hb : b > maxBits then exact kraftSumFrom_gt _ _ _ hb
   else
     rw [kraftSumFrom_unfold _ _ _ (by omega)]
-    simp [show b < maxBits + 1 from by omega, kraftSumFrom_replicate maxBits (b + 1)]
+    simp only [Array.size_replicate, show b < maxBits + 1 from by omega, getElem!_pos,
+      Array.getElem_replicate, Nat.zero_mul, kraftSumFrom_replicate maxBits (b + 1), Nat.add_zero]
 termination_by maxBits + 1 - b
 
 /-- `ValidLengths` is preserved when removing the head element. -/
@@ -277,7 +280,7 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       rw [kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
       simp only [Nat.zero_le, ite_true]
       rw [show (l :: ls).filter (· != 0) = l :: ls.filter (· != 0) from by
-        simp [bne_iff_ne, hl_ne]]
+        simp only [bne_iff_ne, ne_eq, hl_ne, not_false_eq_true, List.filter_cons_of_pos]]
       rw [List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← List.foldl_add_init]
 
 /-- The ncRec recurrence at higher bit lengths bounds from below by
