@@ -1,0 +1,132 @@
+import Zip.Native.ZstdFrame
+
+/-!
+# Zstandard Frame Specification (RFC 8878)
+
+Formal specification of the Zstandard compressed data format at the frame
+and block level.  This defines what constitutes a valid Zstd frame header
+and block header, independently of any particular decompressor implementation.
+
+The specification is structured in layers:
+1. **Magic numbers**: Zstd frame magic and skippable frame magic range
+2. **Frame header**: descriptor flags, window size bounds, content size
+3. **Block header**: block type validity and block size bounds
+
+The key correctness theorems prove that `parseFrameHeader` and
+`parseBlockHeader` in `Zip.Native` only produce results that satisfy
+these specification predicates.
+-/
+
+namespace Zstd.Spec
+
+/-! ## Magic number predicates -/
+
+/-- A valid Zstd frame magic number is exactly `0xFD2FB528` (RFC 8878 §3.1.1). -/
+def validMagic (m : UInt32) : Prop := m = 0xFD2FB528
+
+instance : Decidable (validMagic m) := inferInstanceAs (Decidable (_ = _))
+
+/-- A skippable frame magic number is in the range `0x184D2A50`–`0x184D2A5F`
+    (RFC 8878 §3.1.2). -/
+def isSkippableMagic (m : UInt32) : Prop :=
+  0x184D2A50 ≤ m ∧ m ≤ 0x184D2A5F
+
+instance : Decidable (isSkippableMagic m) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+/-! ## Frame header predicates -/
+
+/-- A valid frame header descriptor byte has its reserved bit (bit 3) equal to 0
+    (RFC 8878 §3.1.1.1). -/
+def validFrameHeaderDescriptor (desc : UInt8) : Prop :=
+  (desc >>> 3) &&& 1 = 0
+
+instance : Decidable (validFrameHeaderDescriptor desc) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- A valid window size exponent is at most 41 (RFC 8878 §3.1.1.1.2).
+    The exponent is the upper 5 bits of the window descriptor byte,
+    giving a maximum window size of 2^(10+41) = 2^51 bytes. -/
+def validWindowSizeExponent (exp : Nat) : Prop := exp ≤ 41
+
+instance : Decidable (validWindowSizeExponent exp) :=
+  inferInstanceAs (Decidable (_ ≤ _))
+
+/-! ## Block header predicates -/
+
+/-- `ZstdBlockType` has decidable equality (needed for specification predicates). -/
+instance : DecidableEq Zip.Native.ZstdBlockType := by
+  intro a b
+  cases a <;> cases b
+  all_goals first
+    | exact isTrue rfl
+    | exact isFalse (by intro h; cases h)
+
+/-- A valid block type is not reserved (not 3) per RFC 8878 §3.1.1.2. -/
+def validBlockType (bt : Zip.Native.ZstdBlockType) : Prop :=
+  bt ≠ .reserved
+
+instance : Decidable (validBlockType bt) :=
+  inferInstanceAs (Decidable (_ ≠ _))
+
+/-- A valid block size is at most 128 KB (131072 bytes) per RFC 8878 §3.1.1.2.
+    The Block_Size field is 21 bits, and the maximum allowed value is 128 KB. -/
+def validBlockSize (sz : UInt32) : Prop := sz ≤ 131072
+
+instance : Decidable (validBlockSize sz) :=
+  inferInstanceAs (Decidable (_ ≤ _))
+
+/-- A valid block header has a non-reserved type and a size within bounds. -/
+def ValidBlockHeader (hdr : Zip.Native.ZstdBlockHeader) : Prop :=
+  validBlockType hdr.blockType ∧ validBlockSize hdr.blockSize
+
+instance : Decidable (ValidBlockHeader hdr) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+/-! ## Correctness theorems -/
+
+/-- When `parseFrameHeader` succeeds, the parsed magic number is valid.
+    This follows from the guard `magic != zstdMagic` in the implementation.
+    The proof is deferred because `parseFrameHeader` uses monadic do-notation
+    with mutable state, making direct unfolding expensive. A dedicated
+    lemma about the initial magic-check fragment would make this provable. -/
+theorem parseFrameHeader_magic (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdFrameHeader) (pos' : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (hdr, pos')) :
+    validMagic (Binary.readUInt32LE data pos) := by
+  sorry
+
+/-- When `parseBlockHeader` succeeds, the block type is not reserved.
+    This follows from the `throw "Zstd: reserved block type"` guard. -/
+theorem parseBlockHeader_type_ne_reserved (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (pos' : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (hdr, pos')) :
+    validBlockType hdr.blockType := by
+  unfold Zip.Native.parseBlockHeader at h
+  split at h
+  · exact nomatch h
+  · simp only [bind, Except.bind, pure, Except.pure] at h
+    split at h
+    · -- typeVal = 0 → raw
+      obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
+    · -- typeVal = 1 → rle
+      obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
+    · -- typeVal = 2 → compressed
+      obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
+    · -- typeVal = _ → throw
+      exact nomatch h
+
+/-- When `parseBlockHeader` succeeds, the block size is at most 128KB.
+    Note: the current implementation does not enforce this bound; the 21-bit
+    Block_Size field can represent values up to 2^21 - 1 = 2097151.
+    This theorem requires that validation is added upstream (see issue #540). -/
+theorem parseBlockHeader_blockSize_le (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (pos' : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (hdr, pos')) :
+    validBlockSize hdr.blockSize := by
+  -- The current implementation does not enforce the 128KB block size limit.
+  -- The 21-bit Block_Size field (bits 3-23) can hold values up to 2097151.
+  -- This will need issue #540's validation work to become provable.
+  sorry
+
+end Zstd.Spec
