@@ -43,6 +43,7 @@ import Zip.Native.DeflateDynamic
 import Zip.Native.ZstdFrame
 import Zip.Native.XxHash
 import Zip.Native.Fse
+import Zip.Spec.Fse
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.DeflateFixedTables
 import Zip.Spec.EmitTokensCorrect
