@@ -343,6 +343,28 @@ InflateRawSuffix.lean. It is always `simp only` — never bare simp.
 **Anti-pattern**: Don't use bare `simp at h` for pair extraction — it
 may rewrite terms you want to keep (e.g., simplifying `br.data.size`).
 
+### Constructor Inequality After Struct Substitution
+
+When proving `¬ Constructor1 = Constructor2` after monadic unfolding, `decide`
+fails if the goal or context contains free variables (e.g., `data[pos]!` in
+struct fields). The pattern:
+
+```lean
+-- After: simp only [bind, Except.bind, pure, Except.pure] at h
+-- h : Except.ok ({field1 := expr_with_free_vars, field2 := .raw, ...}, pos + 3)
+--     = Except.ok (hdr, pos')
+-- Goal: ¬ hdr.field2 = .reserved
+-- WRONG: decide  -- fails: "Expected type must not contain free variables"
+-- WRONG: intro h; exact nomatch h  -- fails: "Missing cases: Eq.refl"
+-- RIGHT: substitute the struct first, THEN discriminate
+obtain ⟨rfl, rfl⟩ := h  -- substitutes hdr := {field2 := .raw, ...}
+exact fun h => nomatch h  -- now .raw = .reserved has no free vars
+```
+
+The key insight: `obtain ⟨rfl, rfl⟩` substitutes the struct into the goal,
+replacing `hdr.field2` with the concrete constructor (e.g., `.raw`). Only
+then can `nomatch` (or `decide`) discriminate the constructors.
+
 ## Option.bind Chain Handling: `cases` + `dsimp` vs Bare `simp`
 
 When a hypothesis or goal has nested `Option.bind` from do-notation,
