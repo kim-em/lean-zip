@@ -130,10 +130,9 @@ Literal lengths and match lengths use baseline + extra bits encoding.
 Tables are defined as constant arrays (`litLenExtraBits`, `matchLenExtraBits`)
 following RFC 8878 Table 15 and Table 17.
 
-Keep the original `parseSequencesHeader` intact when adding new parsing
-functions. Add `parseSequencesHeaderWithModes` as a separate function to
-avoid disrupting existing callers. This pattern — extending without
-modifying — is important when existing tests depend on the original API.
+`parseSequencesHeader` returns `(numSeq, compressionModes, posAfterHeader)`.
+When `numSeq == 0`, modes default to `predefined`. The compression modes
+are needed by `resolveSequenceFseTables` to construct FSE decode tables.
 
 ## Huffman Tree Descriptor
 
