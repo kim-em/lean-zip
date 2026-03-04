@@ -19,8 +19,9 @@ import Zip.Native.XxHash
   multiple Zstd frames.  Content checksum verification uses XXH64
   (upper 32 bits).  Huffman-compressed literals (type 2) and treeless literals (type 3,
   reusing the previous block's Huffman tree) are decoded using flat table
-  lookup with `BackwardBitReader`; sequence decoding (FSE) is not yet
-  supported.
+  lookup with `BackwardBitReader`.  Compressed block sequence decoding
+  uses interleaved FSE with three tables (literal lengths, offsets, match
+  lengths).
 -/
 
 namespace Zip.Native
@@ -651,110 +652,6 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     }
     pure (numSeq, modes, pos + 4)
 
-/-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
-    Loops through block headers, dispatches on block type, and accumulates output.
-    Threads the Huffman table from compressed literals blocks to support treeless
-    literals (litType 3) in subsequent blocks.
-    Returns the decompressed content and position after the last block.
-    Compressed blocks with sequences are not yet fully wired (returns error). -/
-def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
-  let mut off := pos
-  let mut output := ByteArray.empty
-  let mut prevHuffTree : Option ZstdHuffmanTable := none
-  let mut done := false
-  while !done do
-    let (hdr, afterHdr) ← parseBlockHeader data off
-    off := afterHdr
-    match hdr.blockType with
-    | .raw =>
-      let (block, afterBlock) ← decompressRawBlock data off hdr.blockSize
-      output := output ++ block
-      off := afterBlock
-    | .rle =>
-      let (block, afterByte) ← decompressRLEBlock data off hdr.blockSize
-      output := output ++ block
-      off := afterByte
-    | .compressed =>
-      let blockEnd := off + hdr.blockSize.toNat
-      let (literals, afterLiterals, huffTree) ← parseLiteralsSection data off prevHuffTree
-      if let some ht := huffTree then
-        prevHuffTree := some ht
-      let (numSeq, _modes, _afterSeqHeader) ← parseSequencesHeader data afterLiterals
-      if numSeq == 0 then
-        -- No sequences: block is pure literals
-        output := output ++ literals
-        off := blockEnd
-      else
-        throw s!"Zstd: sequence decoding not yet implemented ({numSeq} sequences)"
-    | .reserved =>
-      throw "Zstd: reserved block type"
-    if hdr.lastBlock then
-      done := true
-  return (output, off)
-
-/-- Decompress a single Zstd frame starting at `pos` in `data`.
-    Parses the frame header, decompresses all blocks, verifies the optional
-    content checksum (upper 32 bits of XXH64 with seed 0), and validates
-    content size if specified in the header.
-    Returns decompressed data and position after the frame. -/
-def decompressFrame (data : ByteArray) (pos : Nat) :
-    Except String (ByteArray × Nat) := do
-  let (header, afterHeader) ← parseFrameHeader data pos
-  let (content, afterBlocks) ← decompressBlocks data afterHeader
-  -- Content checksum: upper 32 bits of XXH64 (RFC 8878 §3.1.1) if flagged
-  let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
-  if header.contentChecksum then
-    if data.size < afterFrame then
-      throw "Zstd: not enough data for content checksum"
-    let expected := Binary.readUInt32LE data afterBlocks
-    let actual := XxHash64.xxHash64Upper32 content
-    if expected != actual then
-      throw s!"Zstd: content checksum mismatch: expected 0x{String.ofList (Nat.toDigits 16 expected.toNat)}, got 0x{String.ofList (Nat.toDigits 16 actual.toNat)}"
-  -- Validate content size if specified in the header
-  if let some expectedSize := header.contentSize then
-    if content.size.toUInt64 != expectedSize then
-      throw s!"Zstd: content size mismatch: expected {expectedSize}, got {content.size}"
-  return (content, afterFrame)
-
-/-- Skip a skippable frame starting at `pos` (RFC 8878 §3.1.2).
-    Validates that the magic number is in the range 0x184D2A50–0x184D2A5F,
-    reads the 4-byte little-endian frame data size, and returns the position
-    immediately after the frame data.  Errors if there is insufficient data. -/
-def skipSkippableFrame (data : ByteArray) (pos : Nat) : Except String Nat := do
-  if data.size < pos + 8 then
-    throw "Zstd: not enough data for skippable frame header"
-  let magic := Binary.readUInt32LE data pos
-  if magic < 0x184D2A50 || magic > 0x184D2A5F then
-    throw "Zstd: not a skippable frame"
-  let frameSize := (Binary.readUInt32LE data (pos + 4)).toNat
-  let afterFrame := pos + 8 + frameSize
-  if data.size < afterFrame then
-    throw "Zstd: not enough data for skippable frame content"
-  return afterFrame
-
-/-- Top-level Zstd decompression: loops over all frames in the input,
-    decompressing Zstd frames and skipping skippable frames (RFC 8878 §3.1).
-    Returns the concatenated decompressed content from all Zstd frames.
-    An input containing only skippable frames (or empty) returns an empty ByteArray.
-    Trailing bytes that are neither a valid Zstd frame nor a skippable frame
-    produce an error. -/
-def decompressZstd (data : ByteArray) : Except String ByteArray := do
-  let mut pos := 0
-  let mut output := ByteArray.empty
-  while pos < data.size do
-    if data.size < pos + 4 then
-      throw "Zstd: trailing data too short for frame magic number"
-    let magic := Binary.readUInt32LE data pos
-    if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
-      pos ← skipSkippableFrame data pos
-    else if magic == zstdMagic then
-      let (content, afterFrame) ← decompressFrame data pos
-      output := output ++ content
-      pos := afterFrame
-    else
-      throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} at offset {pos} (expected 0xFD2FB528 or skippable frame)"
-  return output
-
 /-- A decoded Zstd sequence triple (RFC 8878 §3.1.1.4): copy `literalLength` bytes
     from the literals buffer, then copy `matchLength` bytes from `offset` bytes back
     in the already-produced output. -/
@@ -1040,5 +937,119 @@ def resolveSequenceFseTables (modes : SequenceCompressionModes)
   let (matchLenTable, pos) ← resolveSingleFseTable modes.matchLenMode
     53 9 data pos predefinedMatchLenDistribution 6
   return (litLenTable, offsetTable, matchLenTable, pos)
+
+/-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
+    Loops through block headers, dispatches on block type, and accumulates output.
+    Threads the Huffman table from compressed literals blocks to support treeless
+    literals (litType 3) in subsequent blocks.
+    Returns the decompressed content and position after the last block. -/
+def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
+  let mut off := pos
+  let mut output := ByteArray.empty
+  let mut prevHuffTree : Option ZstdHuffmanTable := none
+  let mut done := false
+  while !done do
+    let (hdr, afterHdr) ← parseBlockHeader data off
+    off := afterHdr
+    match hdr.blockType with
+    | .raw =>
+      let (block, afterBlock) ← decompressRawBlock data off hdr.blockSize
+      output := output ++ block
+      off := afterBlock
+    | .rle =>
+      let (block, afterByte) ← decompressRLEBlock data off hdr.blockSize
+      output := output ++ block
+      off := afterByte
+    | .compressed =>
+      let blockEnd := off + hdr.blockSize.toNat
+      let (literals, afterLiterals, huffTree) ← parseLiteralsSection data off prevHuffTree
+      if let some ht := huffTree then
+        prevHuffTree := some ht
+      let (numSeq, modes, afterSeqHeader) ← parseSequencesHeader data afterLiterals
+      if numSeq == 0 then
+        -- No sequences: block is pure literals
+        output := output ++ literals
+        off := blockEnd
+      else
+        -- Resolve FSE tables from compression modes
+        let (litLenTable, offsetTable, matchLenTable, afterTables) ←
+          resolveSequenceFseTables modes data afterSeqHeader
+        -- Initialize backward bitstream reader over the remaining block data
+        let br ← BackwardBitReader.init data afterTables blockEnd
+        -- Decode sequences using interleaved FSE decoding
+        let sequences ← decodeSequences litLenTable offsetTable matchLenTable
+          br numSeq
+        -- Execute sequences against literals to produce decompressed output
+        let blockOutput ← executeSequences sequences literals
+        output := output ++ blockOutput
+        off := blockEnd
+    | .reserved =>
+      throw "Zstd: reserved block type"
+    if hdr.lastBlock then
+      done := true
+  return (output, off)
+
+/-- Decompress a single Zstd frame starting at `pos` in `data`.
+    Parses the frame header, decompresses all blocks, verifies the optional
+    content checksum (upper 32 bits of XXH64 with seed 0), and validates
+    content size if specified in the header.
+    Returns decompressed data and position after the frame. -/
+def decompressFrame (data : ByteArray) (pos : Nat) :
+    Except String (ByteArray × Nat) := do
+  let (header, afterHeader) ← parseFrameHeader data pos
+  let (content, afterBlocks) ← decompressBlocks data afterHeader
+  -- Content checksum: upper 32 bits of XXH64 (RFC 8878 §3.1.1) if flagged
+  let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
+  if header.contentChecksum then
+    if data.size < afterFrame then
+      throw "Zstd: not enough data for content checksum"
+    let expected := Binary.readUInt32LE data afterBlocks
+    let actual := XxHash64.xxHash64Upper32 content
+    if expected != actual then
+      throw s!"Zstd: content checksum mismatch: expected 0x{String.ofList (Nat.toDigits 16 expected.toNat)}, got 0x{String.ofList (Nat.toDigits 16 actual.toNat)}"
+  -- Validate content size if specified in the header
+  if let some expectedSize := header.contentSize then
+    if content.size.toUInt64 != expectedSize then
+      throw s!"Zstd: content size mismatch: expected {expectedSize}, got {content.size}"
+  return (content, afterFrame)
+
+/-- Skip a skippable frame starting at `pos` (RFC 8878 §3.1.2).
+    Validates that the magic number is in the range 0x184D2A50–0x184D2A5F,
+    reads the 4-byte little-endian frame data size, and returns the position
+    immediately after the frame data.  Errors if there is insufficient data. -/
+def skipSkippableFrame (data : ByteArray) (pos : Nat) : Except String Nat := do
+  if data.size < pos + 8 then
+    throw "Zstd: not enough data for skippable frame header"
+  let magic := Binary.readUInt32LE data pos
+  if magic < 0x184D2A50 || magic > 0x184D2A5F then
+    throw "Zstd: not a skippable frame"
+  let frameSize := (Binary.readUInt32LE data (pos + 4)).toNat
+  let afterFrame := pos + 8 + frameSize
+  if data.size < afterFrame then
+    throw "Zstd: not enough data for skippable frame content"
+  return afterFrame
+
+/-- Top-level Zstd decompression: loops over all frames in the input,
+    decompressing Zstd frames and skipping skippable frames (RFC 8878 §3.1).
+    Returns the concatenated decompressed content from all Zstd frames.
+    An input containing only skippable frames (or empty) returns an empty ByteArray.
+    Trailing bytes that are neither a valid Zstd frame nor a skippable frame
+    produce an error. -/
+def decompressZstd (data : ByteArray) : Except String ByteArray := do
+  let mut pos := 0
+  let mut output := ByteArray.empty
+  while pos < data.size do
+    if data.size < pos + 4 then
+      throw "Zstd: trailing data too short for frame magic number"
+    let magic := Binary.readUInt32LE data pos
+    if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
+      pos ← skipSkippableFrame data pos
+    else if magic == zstdMagic then
+      let (content, afterFrame) ← decompressFrame data pos
+      output := output ++ content
+      pos := afterFrame
+    else
+      throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} at offset {pos} (expected 0xFD2FB528 or skippable frame)"
+  return output
 
 end Zip.Native
