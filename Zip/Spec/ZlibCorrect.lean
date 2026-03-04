@@ -158,7 +158,7 @@ theorem compress_adler32 (data : ByteArray) (level : UInt8) :
   rw [hceq,
     show 2 + (Deflate.deflateRaw data level).size =
       (header ++ Deflate.deflateRaw data level).size + 0 from by
-        simp [ByteArray.size_append, hhsz],
+        simp only [ByteArray.size_append, hhsz, Nat.add_zero, Nat.add_left_cancel_iff],
     Binary.readUInt32BE_append_right (header ++ Deflate.deflateRaw data level) trailer 0
       (by omega)]
   exact hadler
@@ -187,11 +187,11 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
   cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
   | error e => simp [hinf] at h
   | ok p =>
-    simp [hinf, pure, Except.pure] at h
+    simp only [Nat.reduceMul, hinf, pure, Except.pure, Except.ok.injEq] at h
     have hdec :=
       Deflate.Correctness.inflate_correct deflated 0 (1024 * 1024 * 1024) p.1 p.2
         (by rw [hinf])
-    simp at hdec
+    simp only [Nat.zero_mul, List.drop_zero] at hdec
     rw [← h]
     show Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) =
       some p.1.data.toList
@@ -223,7 +223,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
       hspec_go
   -- Use data.size bound to get result.length ≤ maxOutputSize
   have hdata_le : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
-    simp [Array.length_toList, ByteArray.size_data]; omega
+    simp only [Array.length_toList, ByteArray.size_data, Nat.reduceMul]; omega
   -- Spec decode on compressed bits at offset 2 (via compress_eq decomposition)
   have hspec_at2 : Deflate.Spec.decode.go
       ((Deflate.Spec.bytesToBits (ZlibEncode.compress data level)).drop (2 * 8))
@@ -282,7 +282,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
       (ZlibEncode.compress data level)[endPos + 2]!.toUInt32 <<< 8 |||
       (ZlibEncode.compress data level)[endPos + 3]!.toUInt32) = true := by
     rw [hep_val, ZlibEncode.compress_adler32]
-    simp [BEq.beq]
+    simp only [BEq.beq, decide_true]
   set_option maxRecDepth 8192 in
   simp only [ZlibDecode.decompressSingle, - ZlibDecode.decompressSingle.eq_1,
     bind, Except.bind, hcsz6, ↓reduceIte, pure, Except.pure,
