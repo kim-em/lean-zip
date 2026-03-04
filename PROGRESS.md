@@ -11,7 +11,7 @@ Per-session details are in `progress/`.
 - **Sessions**: ~275 completed (Feb 19 – Mar 4)
 - **Source files**: 90 (43 spec, 11 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
 - **Merged PRs**: 238
-- **Bare simp**: 1 standalone bare simp remaining in 1 of 43 spec files (42 spec files fully clean)
+- **Bare simp**: 0 remaining — campaign complete (43 spec files, ZipForStd/, Native/ all clean)
 
 ## Milestones
 
@@ -119,10 +119,10 @@ DeflateSuffix (#531), ZipForStd/ (#539), Adler32 + DeflateDynamicCorrect +
 DeflateStoredCorrect (#543), 5 small-count files (#545),
 GzipCorrect + HuffmanKraft + ZlibCorrect (#547).
 
-**Bare simp status**: 1 standalone bare simp remaining in 1 of 43 spec files
-(DeflateEncodeDynamicProps.lean:126). 42 spec files fully clean. The campaign
-reduced standalone bare simps from ~129 to 1 (99.2% reduction) over ~30
-review PRs. ZipForStd/ is also fully clean (0 bare simp).
+**Bare simp status**: 0 standalone bare simps remaining across all 43 spec files
+(100% clean). The campaign reduced standalone bare simps from ~129 to 0
+(100% reduction) over ~30 review PRs. ZipForStd/ and Native/ are also fully
+clean. Campaign completed Mar 4, 2026.
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
