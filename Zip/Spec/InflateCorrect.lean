@@ -481,7 +481,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
         simp only [show UInt32.toNat 0 = 0 from rfl]
         -- Extract decodeStored result from h
         split at h
-        · simp at h
+        · exact absurd h nofun
         · rename_i v hds; obtain ⟨out', br'⟩ := v; simp only [] at hds h
           -- Use decodeStored_correct to get spec result
           have ⟨storedBytes, rest, hspec_ds, hout, hrest⟩ :=
@@ -509,10 +509,10 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
             simp only [hrest_lt, ↓reduceDIte]
             -- Discharge native WF guards
             split at h
-            · simp at h
+            · exact absurd h nofun
             · rename_i h_progress
               split at h
-              · simp at h
+              · exact absurd h nofun
               · rename_i h_range
                 -- Apply IH with decreased measure
                 have hinv := decodeStored_invariants br₂ output maxOutputSize out' br' hds
@@ -525,7 +525,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
         simp only [show UInt32.toNat 1 = 1 from rfl]
         -- Extract decodeHuffman result from h
         split at h
-        · simp at h
+        · exact absurd h nofun
         · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
           -- Unfold decodeHuffman to get decodeHuffman.go
           unfold Zip.Native.Inflate.decodeHuffman at hdh
@@ -562,10 +562,10 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
             simp only [hrest_lt, ↓reduceDIte]
             -- Discharge native WF guards
             split at h
-            · simp at h
+            · exact absurd h nofun
             · rename_i h_progress
               split at h
-              · simp at h
+              · exact absurd h nofun
               · rename_i h_range
                 -- Apply IH with decreased measure
                 have h_ih := ih (dataSize * 8 - br'.bitPos)
@@ -577,7 +577,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
         simp only [show UInt32.toNat 2 = 2 from rfl]
         -- Extract decodeDynamicTrees + decodeHuffman from h
         split at h
-        · simp at h
+        · exact absurd h nofun
         · rename_i v hdt
           obtain ⟨litTree, distTree, br₃⟩ := v; simp only [] at hdt h
           -- Apply decodeDynamicTrees_correct
@@ -588,7 +588,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
           rw [hbr₂_bits] at hspec_dt
           -- Now extract decodeHuffman from h
           split at h
-          · simp at h
+          · exact absurd h nofun
           · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
             -- Unfold decodeHuffman to get decodeHuffman.go
             unfold Zip.Native.Inflate.decodeHuffman at hdh
@@ -620,10 +620,10 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
               simp only [hrest_lt, ↓reduceDIte]
               -- Discharge native WF guards
               split at h
-              · simp at h
+              · exact absurd h nofun
               · rename_i h_progress
                 split at h
-                · simp at h
+                · exact absurd h nofun
                 · rename_i h_range
                   -- Apply IH with decreased measure
                   have h_ih := ih (dataSize * 8 - br'.bitPos)
@@ -632,7 +632,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
                   rw [hrest] at h_ih
                   exact h_ih
       · -- Case 4: reserved (btype ≥ 3)
-        simp at h
+        exact absurd h nofun
 
 /-- **Main theorem**: If the native DEFLATE decompressor succeeds, then
     the formal specification also succeeds and produces the same output. -/

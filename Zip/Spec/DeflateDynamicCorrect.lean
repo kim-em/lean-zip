@@ -181,7 +181,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
         exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 b.toNat hb_lt hlen_nz hlen_le
       | reference len dist =>
         -- Need: encodeLitLen litLens distLens (.reference len dist) succeeds
-        simp at hbounds
+        simp only at hbounds
         simp only [Deflate.Spec.encodeLitLen]
         -- findLengthCode succeeds (spec version)
         have hflc_spec := Deflate.Spec.findLengthCode_isSome len hbounds.1 hbounds.2.1
@@ -456,7 +456,7 @@ theorem inflate_deflateDynamic (data : ByteArray)
         (tokensToSymbols_validSymbolList _)
     have hlen : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
       simp only [Array.length_toList, ByteArray.size_data]; omega
-    rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp]
+    rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from rfl]
     exact inflate_complete (deflateDynamic data) data.data.toList hlen hdec_padded
 
 end Zip.Native.Deflate
