@@ -1434,4 +1434,162 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .ok _ => throw (IO.userError "truncated frame: should have failed")
   | .error _ => pure ()  -- any error is acceptable for truncated data
 
+  -- === Malformed frame header tests (deliverable 1) ===
+
+  -- Test: reserved bits (bits 3-4) in frame descriptor are handled gracefully
+  -- Per RFC 8878, decoders should be able to parse frames with reserved bits set.
+  -- Descriptor 0x38: singleSegment=1 (bit 5), reserved bits 3-4 set, no checksum, no dict
+  -- fcsFlag=0 with singleSegment=1 → 1-byte FCS
+  let reservedBitsFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x38,                      -- descriptor: singleSegment + reserved bits 3-4
+    0x00,                      -- FCS: content size = 0
+    0x01, 0x00, 0x00           -- block header: lastBlock=1, type=raw, size=0
+  ]
+  match Zip.Native.parseFrameHeader reservedBitsFrame 0 with
+  | .ok (hdr, _) =>
+    -- Should parse without error; reserved bits are silently ignored
+    unless hdr.singleSegment do
+      throw (IO.userError "reserved bits: singleSegment should be true")
+  | .error e => throw (IO.userError s!"reserved bits: unexpected parse error: {e}")
+
+  -- Test: content size mismatch — declared size larger than actual decompressed data
+  -- Single-segment frame claiming content size = 100, but block has only 5 bytes
+  let sizeMismatchFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x20,                      -- descriptor: singleSegment=1, no checksum, no dict, fcsFlag=0
+    0x64,                      -- FCS: content size = 100
+    -- block header: lastBlock=1, type=raw(0), size=5
+    -- raw24 = (5 << 3) | (0 << 1) | 1 = 41 = 0x29
+    0x29, 0x00, 0x00,
+    -- 5 bytes of raw block content
+    0x41, 0x42, 0x43, 0x44, 0x45
+  ]
+  match Zip.Native.decompressZstd sizeMismatchFrame with
+  | .ok _ => throw (IO.userError "size mismatch: should have failed")
+  | .error e =>
+    unless e.contains "content size mismatch" do
+      throw (IO.userError s!"size mismatch: wrong error: {e}")
+
+  -- Test: window descriptor at maximum exponent (exponent=31, mantissa=7)
+  -- Descriptor 0x00: singleSegment=0 → window descriptor present, fcsFlag=0 → no FCS
+  -- Window byte 0xFF: exponent=31, mantissa=7 → windowLog=41, very large window
+  let maxWindowFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x00,                      -- descriptor: not single segment, no checksum, no dict, fcsFlag=0
+    0xFF,                      -- window descriptor: max exponent + mantissa
+    -- block header: lastBlock=1, type=raw(0), size=0
+    0x01, 0x00, 0x00
+  ]
+  match Zip.Native.parseFrameHeader maxWindowFrame 0 with
+  | .ok (hdr, _) =>
+    -- Should parse successfully; large window size is accepted
+    unless hdr.windowSize > 0 do
+      throw (IO.userError "max window: windowSize should be > 0")
+  | .error e => throw (IO.userError s!"max window: unexpected error: {e}")
+
+  -- Test: truncated frame header — descriptor says singleSegment=0 but no window byte
+  let truncatedHeader := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x00                       -- descriptor: singleSegment=0 → needs window byte, but EOF
+  ]
+  match Zip.Native.parseFrameHeader truncatedHeader 0 with
+  | .ok _ => throw (IO.userError "truncated header: should have failed")
+  | .error e =>
+    unless e.contains "not enough data for window descriptor" do
+      throw (IO.userError s!"truncated header: wrong error: {e}")
+
+  -- Test: truncated FCS — fcsFlag=3 needs 8 bytes but only 1 available
+  let truncatedFcs := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0xE0,                      -- descriptor: fcsFlag=3 (8-byte FCS), singleSegment=1
+    0x00                       -- only 1 byte of FCS (needs 8)
+  ]
+  match Zip.Native.parseFrameHeader truncatedFcs 0 with
+  | .ok _ => throw (IO.userError "truncated FCS: should have failed")
+  | .error e =>
+    unless e.contains "not enough data for frame content size" do
+      throw (IO.userError s!"truncated FCS: wrong error: {e}")
+
+  -- === Malformed block and literals tests (deliverable 2) ===
+
+  -- Test: reserved block type (type 3) through decompressZstd
+  let reservedBlockFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x20,                      -- descriptor: singleSegment=1
+    0x05,                      -- FCS: content size = 5
+    -- block header: lastBlock=1, type=reserved(3), size=5
+    -- raw24 = (5 << 3) | (3 << 1) | 1 = 40 + 6 + 1 = 47 = 0x2F
+    0x2F, 0x00, 0x00
+  ]
+  match Zip.Native.decompressZstd reservedBlockFrame with
+  | .ok _ => throw (IO.userError "reserved block type: should have failed")
+  | .error e =>
+    unless e.contains "reserved block type" do
+      throw (IO.userError s!"reserved block type: wrong error: {e}")
+
+  -- Test: raw block with blockSize exceeding remaining data
+  let rawOverflowFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x20,                      -- descriptor: singleSegment=1
+    0x64,                      -- FCS: content size = 100
+    -- block header: lastBlock=1, type=raw(0), size=100
+    -- raw24 = (100 << 3) | (0 << 1) | 1 = 800 + 1 = 801 = 0x321
+    0x21, 0x03, 0x00,
+    -- only 3 bytes of data (needs 100)
+    0x41, 0x42, 0x43
+  ]
+  match Zip.Native.decompressZstd rawOverflowFrame with
+  | .ok _ => throw (IO.userError "raw overflow: should have failed")
+  | .error e =>
+    unless e.contains "not enough data for raw block" do
+      throw (IO.userError s!"raw overflow: wrong error: {e}")
+
+  -- Test: RLE block consumes exactly 1 byte
+  -- Verify decompressRLEBlock endPos is start + 1 regardless of extra trailing bytes
+  let rleExtraBytes := ByteArray.mk #[0xAA, 0xBB, 0xCC, 0xDD]
+  match Zip.Native.decompressRLEBlock rleExtraBytes 0 3 with
+  | .ok (result, endPos) =>
+    unless endPos == 1 do
+      throw (IO.userError s!"RLE consumption: expected endPos 1, got {endPos}")
+    unless result.size == 3 do
+      throw (IO.userError s!"RLE consumption: expected 3 bytes, got {result.size}")
+    for i in [:3] do
+      unless result[i]! == 0xAA do
+        throw (IO.userError s!"RLE consumption: byte {i} expected 0xAA, got {result[i]!}")
+  | .error e => throw (IO.userError s!"RLE consumption failed: {e}")
+
+  -- Test: Huffman weights with non-power-of-2 implicit last symbol
+  -- Weights [2, 2, 1]: sum = 2 + 2 + 1 = 5, next power is 8 = 2^3
+  -- Implicit last symbol = 8 - 5 = 3 (not a power of 2 → error)
+  match Zip.Native.buildZstdHuffmanTable #[2, 2, 1] with
+  | .ok _ => throw (IO.userError "non-power-of-2 implicit weight: should have failed")
+  | .error e =>
+    unless e.contains "not a power of 2" do
+      throw (IO.userError s!"non-power-of-2 implicit weight: wrong error: {e}")
+
+  -- Test: skippable frame with claimed size exceeding remaining data
+  -- Magic 0x184D2A50, size = 0x00001000 (4096), but only 5 payload bytes
+  let skippableOverflow := ByteArray.mk #[
+    0x50, 0x2A, 0x4D, 0x18,  -- skippable magic
+    0x00, 0x10, 0x00, 0x00,  -- size = 4096
+    0x01, 0x02, 0x03, 0x04, 0x05  -- only 5 bytes
+  ]
+  match Zip.Native.skipSkippableFrame skippableOverflow 0 with
+  | .ok _ => throw (IO.userError "skippable overflow: should have failed")
+  | .error e =>
+    unless e.contains "not enough data for skippable frame" do
+      throw (IO.userError s!"skippable overflow: wrong error: {e}")
+
+  -- Test: valid frame followed by incomplete trailing magic (< 4 bytes)
+  let trailingShort ← Zstd.compress (mkConstantData 64) 1
+  let trailingTwoBytes := trailingShort ++ (ByteArray.mk #[0xAB, 0xCD])
+  match Zip.Native.decompressZstd trailingTwoBytes with
+  | .ok _ => throw (IO.userError "trailing 2 bytes: should have failed")
+  | .error e =>
+    unless e.contains "trailing data too short" || e.contains "invalid magic" do
+      -- Also accept compressed block errors if they occur before trailing data
+      unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
+        throw (IO.userError s!"trailing 2 bytes: wrong error: {e}")
+
   IO.println "ZstdNative tests: OK"
