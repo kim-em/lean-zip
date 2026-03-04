@@ -593,12 +593,16 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     Loops through block headers, dispatches on block type, and accumulates output.
     Returns the decompressed content and position after the last block.
     Currently returns an error for compressed blocks (not yet implemented). -/
-def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
+def decompressBlocks (data : ByteArray) (pos : Nat) (windowSize : UInt64) :
+    Except String (ByteArray × Nat) := do
   let mut off := pos
   let mut output := ByteArray.empty
   let mut done := false
   while !done do
     let (hdr, afterHdr) ← parseBlockHeader data off
+    -- RFC 8878 §3.1.1.1: Block_Content must be ≤ 128KB (131072 bytes)
+    if hdr.blockSize.toNat > 131072 then
+      throw s!"Zstd: block size {hdr.blockSize} exceeds maximum (128KB)"
     off := afterHdr
     match hdr.blockType with
     | .raw =>
@@ -633,7 +637,7 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
 def decompressFrame (data : ByteArray) (pos : Nat) :
     Except String (ByteArray × Nat) := do
   let (header, afterHeader) ← parseFrameHeader data pos
-  let (content, afterBlocks) ← decompressBlocks data afterHeader
+  let (content, afterBlocks) ← decompressBlocks data afterHeader header.windowSize
   -- Content checksum: upper 32 bits of XXH64 (RFC 8878 §3.1.1) if flagged
   let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
   if header.contentChecksum then
@@ -762,8 +766,8 @@ private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
     For each sequence: copies `literalLength` bytes from literals, then copies `matchLength`
     bytes from `offset` back in the output (with overlap semantics). After all sequences,
     any remaining literals are appended. Returns the decompressed block or an error. -/
-def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
-    Except String ByteArray := do
+def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
+    (windowSize : UInt64 := 0) : Except String ByteArray := do
   let mut output := ByteArray.empty
   let mut history : Array Nat := #[1, 4, 8]
   let mut litPos := 0
@@ -782,6 +786,9 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
       throw "Zstd: resolved offset is 0"
     if offset > output.size then
       throw s!"Zstd: match offset {offset} exceeds output size {output.size}"
+    -- RFC 8878 §3.1.1.3.2.3: offset must not exceed window size
+    if windowSize > 0 && offset > windowSize.toNat then
+      throw s!"Zstd: sequence offset {offset} exceeds window size {windowSize}"
     -- Copy matchLength bytes from output (with overlap semantics)
     output := copyMatch output offset seq.matchLength
   -- Copy any remaining literals after the last sequence

@@ -125,9 +125,9 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- Empty input compressed by zstd may produce a single block (likely RLE or raw of size 0)
   let emptyCompressed ← Zstd.compress ByteArray.empty
   match Zip.Native.parseFrameHeader emptyCompressed 0 with
-  | .ok (_, blockStart) =>
+  | .ok (hdr, blockStart) =>
     -- Try to decompress blocks — may succeed (raw/RLE) or fail (compressed)
-    match Zip.Native.decompressBlocks emptyCompressed blockStart with
+    match Zip.Native.decompressBlocks emptyCompressed blockStart hdr.windowSize with
     | .ok (result, _) =>
       unless result.size == 0 do
         throw (IO.userError s!"empty blocks: expected 0 output bytes, got {result.size}")
@@ -142,8 +142,8 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   let constData := mkConstantData 256
   let constCompressed ← Zstd.compress constData 1
   match Zip.Native.parseFrameHeader constCompressed 0 with
-  | .ok (_, blockStart) =>
-    match Zip.Native.decompressBlocks constCompressed blockStart with
+  | .ok (hdr, blockStart) =>
+    match Zip.Native.decompressBlocks constCompressed blockStart hdr.windowSize with
     | .ok (result, _) =>
       unless result.data == constData.data do
         throw (IO.userError s!"const blocks: decompressed {result.size} bytes, expected {constData.size}")
