@@ -1316,4 +1316,65 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless e.contains "no previous Huffman tree" do
       throw (IO.userError s!"treeless first-block: wrong error: {e}")
 
+  -- Test: dictionary-compressed frame is rejected
+  -- Construct a minimal frame with non-zero dictionary ID
+  -- Frame header descriptor: single segment(bit5)=1, dictIDFlag(bits1-0)=1 → 0x21
+  -- Dictionary ID: 1 byte = 42
+  -- FCS: 1 byte = 0 (single segment + fcsFlag=0 → 1-byte FCS)
+  -- Block header: lastBlock=1, type=raw(0), size=0 → raw24 = 0x01
+  let dictFrame := ByteArray.mk #[
+    -- Zstd magic number
+    0x28, 0xB5, 0x2F, 0xFD,
+    -- Frame header descriptor: single segment, no checksum, dictIDFlag=1
+    0x21,
+    -- Dictionary ID: 42
+    0x2A,
+    -- FCS: content size = 0
+    0x00,
+    -- Block header: lastBlock=1, type=raw(0), size=0
+    0x01, 0x00, 0x00
+  ]
+  match Zip.Native.decompressZstd dictFrame with
+  | .ok _ => throw (IO.userError "dictionary frame: should have been rejected")
+  | .error e =>
+    unless e.contains "dictionary" do
+      throw (IO.userError s!"dictionary frame: wrong error: {e}")
+
+  -- Test: content checksum corruption is detected
+  -- Compress data with FFI, then corrupt the checksum bytes
+  let checksumInput := "Hello checksum test!".toUTF8
+  let checksumCompressed ← Zstd.compress checksumInput 3
+  -- Parse header to check if checksum flag is set
+  match Zip.Native.parseFrameHeader checksumCompressed 0 with
+  | .error e => throw (IO.userError s!"checksum test: parse failed: {e}")
+  | .ok (hdr, _) =>
+    if hdr.contentChecksum then
+      -- Checksum is the last 4 bytes; corrupt the last byte
+      let corrupted := checksumCompressed.set! (checksumCompressed.size - 1)
+        (checksumCompressed[checksumCompressed.size - 1]! ^^^ 0xFF)
+      match Zip.Native.decompressZstd corrupted with
+      | .ok _ => throw (IO.userError "checksum corruption: should have failed")
+      | .error e =>
+        unless e.contains "checksum" do
+          throw (IO.userError s!"checksum corruption: wrong error: {e}")
+    else
+      -- If no checksum flag, skip this test (zstd may not always set it)
+      pure ()
+
+  -- Test: truncated frame (valid header but insufficient data for blocks)
+  -- Frame header descriptor: single segment(bit5)=1, fcsFlag=0, no dict, no checksum → 0x20
+  -- FCS: 1 byte = 10 (expects 10 bytes of content)
+  -- No block data at all
+  let truncatedFrame := ByteArray.mk #[
+    -- Zstd magic number
+    0x28, 0xB5, 0x2F, 0xFD,
+    -- Frame header descriptor: single segment, no checksum, no dict
+    0x20,
+    -- FCS: content size = 10
+    0x0A
+  ]
+  match Zip.Native.decompressZstd truncatedFrame with
+  | .ok _ => throw (IO.userError "truncated frame: should have failed")
+  | .error _ => pure ()  -- any error is acceptable for truncated data
+
   IO.println "ZstdNative tests: OK"
