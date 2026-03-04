@@ -51,7 +51,7 @@ end GzipDecode
 
 private theorem getElem!_ba_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b)[i]! = a[i]! := by
-  rw [getElem!_pos (a ++ b) i (by simp [ByteArray.size_append]; omega),
+  rw [getElem!_pos (a ++ b) i (by simp only [ByteArray.size_append]; omega),
       getElem!_pos a i h]
   exact ByteArray.getElem_append_left h
 
@@ -165,7 +165,7 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
       some result.data.toList := by
   simp only [Inflate.inflate, bind, Except.bind] at h
   cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
-  | error e => simp [hinf] at h
+  | error e => exact nomatch (hinf ▸ h)
   | ok p =>
     simp only [Nat.reduceMul, hinf, pure, Except.pure, Except.ok.injEq] at h
     have hdec :=
@@ -262,7 +262,8 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
     rw [hep_val, hceq]
     simp only [ByteArray.size_append, htsz, hhsz]; omega
   have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by omega
-  have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
+  have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by
+    simp only [Array.toArray_toList]
   -- CRC32 trailer match: use endPos = 10 + deflated.size to read trailer bytes
   have hcrc : (Crc32.Native.crc32 0 data ==
     Binary.readUInt32LE (GzipEncode.compress data level) endPos) = true := by
