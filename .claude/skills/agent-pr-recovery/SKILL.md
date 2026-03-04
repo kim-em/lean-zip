@@ -115,6 +115,57 @@ grep -n 'simp\b' Zip/Spec/File.lean | \
 If the actual count is 0 or very different from the issue, use
 `coordination skip` with an explanation.
 
+## Manifest File Conflicts (Zip.lean)
+
+`Zip.lean` is a root import manifest — every new module adds a line.
+When two PRs both create new files (e.g., two spec files), they both
+modify `Zip.lean` and conflict, even though their actual content files
+don't overlap at all.
+
+**These conflicts are trivial to resolve** — just add the missing import
+line in alphabetical order. They do NOT need a recovery issue. Workers
+should simply rebase before pushing:
+
+```bash
+git fetch origin && git rebase origin/master
+# The conflict in Zip.lean is always "add this import line"
+# Accept both sides and ensure alphabetical order
+```
+
+**Planners**: Do NOT create recovery issues for Zip.lean-only conflicts.
+Note this in the plan if the work creates a new file that will be
+imported from `Zip.lean`.
+
+## Large Shared File Conflicts
+
+Files over 500 lines that are actively modified by multiple agents are
+the primary source of non-trivial merge conflicts. The canonical example
+is `ZstdFrame.lean` (1059 lines), where multiple PRs targeting different
+features all touch the same file.
+
+**The conflict cascade pattern**:
+1. PR #A modifies large file → develops conflicts as other PRs merge
+2. Recovery issue created → PR #B cherry-picks from #A
+3. PR #B develops conflicts too (more PRs merged during recovery)
+4. Another recovery issue... (the cascade)
+
+**Prevention** (for planners):
+- **Split large files first**: Before scheduling concurrent work on a
+  >500-line file, create a splitting issue. Review #583 identified
+  natural extraction boundaries for ZstdFrame.lean — splitting reduces
+  the conflict surface by giving each feature its own file.
+- **Serialize modifications**: Don't schedule 3 agents to modify the
+  same file concurrently. One agent at a time on a hot file.
+- **Prioritize the bottleneck**: If one critical PR (#552) blocks
+  others, schedule it first and defer competing modifications.
+
+**Prevention** (for workers):
+- **Rebase immediately before pushing**: Even if you just created the
+  branch minutes ago. `git fetch origin && git rebase origin/master`
+- **Don't create recovery issues for your own recovery PRs**: If your
+  recovery PR develops conflicts, rebase your branch — don't ask for
+  another recovery issue. The cascade stops with you.
+
 ## Rapid Merge Cadence Mitigation
 
 When 8+ PRs merge in a single day, feature branches fall behind quickly.
@@ -128,3 +179,11 @@ Patterns that help:
    before pushing, even if you just created the branch minutes ago.
 4. **Don't fix conflicts on old PRs**: If a PR has conflicts, cherry-pick
    the content to a new branch rather than trying to rebase the old one.
+5. **Check for pending PRs on same files**: Before starting work, check
+   if other open PRs modify the same files. If so, consider waiting for
+   them to merge first, or coordinate to avoid overlapping changes.
+   ```bash
+   # List open PRs touching a specific file
+   gh pr list --state open --json number,title,files \
+     --jq '.[] | select(.files[]?.path == "Zip/Native/ZstdFrame.lean") | "\(.number) \(.title)"'
+   ```
