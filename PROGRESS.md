@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) progressing rapidly
 - **Toolchain**: leanprover/lean4:v4.29.0-rc2
 - **Sorries**: 0
-- **Sessions**: ~262 completed (Feb 19 – Mar 2)
+- **Sessions**: ~275 completed (Feb 19 – Mar 4)
 - **Source files**: 90 (43 spec, 11 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
-- **Merged PRs**: 226
-- **Bare simp**: 5 remaining across 4 of 43 spec files (39 spec files fully clean)
+- **Merged PRs**: 238
+- **Bare simp**: 1 standalone bare simp remaining in 1 of 43 spec files (42 spec files fully clean)
 
 ## Milestones
 
@@ -114,16 +114,15 @@ HuffmanEncode (#467), EmitTokensCorrect (#470), DeflateEncodeProps (#485),
 BitWriterCorrect (#488, #505), DeflateStoredCorrect (#498),
 BitstreamWriteCorrect (#500), DeflateDynamicCorrect (#507),
 InflateComplete (#513), DeflateDynamicEmit (#514),
-HuffmanTheorems (#518).
+HuffmanTheorems (#518), BinaryCorrect + LZ77Lazy + DeflateRoundtrip (#528),
+DeflateSuffix (#531), ZipForStd/ (#539), Adler32 + DeflateDynamicCorrect +
+DeflateStoredCorrect (#543), 5 small-count files (#545),
+GzipCorrect + HuffmanKraft + ZlibCorrect (#547).
 
-**Bare simp status**: 5 remaining across 4 of 43 spec files. 39 spec
-files fully clean (0 bare simp), up from 18 at the previous summary.
-The bare simp campaign reduced the count from ~129 to 5 (96% reduction)
-over ~20 review PRs. Remaining:
-- DeflateDynamicHeader.lean: 2 (open review PR #515, currently conflicting)
-- LZ77Lazy.lean: 1
-- DeflateEncodeDynamicProps.lean: 1
-- DeflateEncodeDynamic.lean: 1 (open review PR #522)
+**Bare simp status**: 1 standalone bare simp remaining in 1 of 43 spec files
+(DeflateEncodeDynamicProps.lean:126). 42 spec files fully clean. The campaign
+reduced standalone bare simps from ~129 to 1 (99.2% reduction) over ~30
+review PRs. ZipForStd/ is also fully clean (0 bare simp).
 
 ### Phase 4+: Gzip/Zlib Framing Roundtrip (complete, Feb 24–26)
 
@@ -233,7 +232,7 @@ cyclic, random, text) at sizes 1KB–1MB.
   levels 0–9 across all 4 data patterns
 - MB/s throughput calculations (#399) added to all benchmark sections
 
-### Track E: Zstd Native Decompressor (in progress, Mar 2)
+### Track E: Zstd Native Decompressor (in progress, Mar 2–4)
 Native Lean Zstd implementation, following the same methodology as DEFLATE
 (B-track). The core decompression infrastructure is now largely in place;
 the remaining work is wiring these components together for compressed block
@@ -252,7 +251,7 @@ decompression and adding multi-frame support.
   block types × 3 size formats) and `parseSequencesHeader` (sequence count
   + compression mode bytes for literals/offsets/match lengths).
 
-**FSE (Finite State Entropy) infrastructure (`Zip/Native/Fse.lean`, ~327 lines):**
+**FSE (Finite State Entropy) infrastructure (`Zip/Native/Fse.lean`, ~359 lines):**
 - Distribution decoder (#429): `decodeFseDistribution` reads compact probability
   distributions from the bitstream, producing normalized symbol counts.
 - Table construction (#429): `buildFseTable` builds the FSE decoding table
@@ -306,10 +305,23 @@ mode parsing, multi-frame support, and checksum verification.
 - Handles litType 2 (Huffman-compressed) in `parseLiteralsSection` per
   RFC 8878 §3.1.1.3.1
 
+**FSE table resolution (#548, merged):**
+- `buildRleFseTable`: constructs single-symbol FSE table for RLE mode
+- `resolveSingleFseTable`: dispatches on compression mode (predefined,
+  RLE, FSE-compressed, repeat) to produce an FSE decoding table
+- `resolveSequenceFseTables`: resolves all three sequence tables
+  (literal length, offset, match length) from compression modes
+- This was the critical connector between compression mode parsing
+  and sequence decoding — completing issue #473
+
 **Remaining:**
-- Predefined FSE distribution tables for sequences (PR #489, conflicting)
-- Interleaved FSE sequence decode loop (PR #512, conflicting)
-- Wiring: compressed block decompression end-to-end
+- Treeless literals (litType 3) — issue #554
+- Consolidate parseSequencesHeader and wire modes into decompressBlocks
+  — issue #520 (claimed)
+- Wire compressed block sequence decoding end-to-end — issue #552
+  (blocked on #520)
+- Block size and window size validation — issue #540 (has PR #549
+  with merge conflict)
 - Spec-level decoder with correctness proofs
 - Compressor + roundtrip proof
 
@@ -317,27 +329,27 @@ Track E has crossed a significant threshold: the individual building blocks
 for compressed block decompression are all implemented — FSE tables, backward
 bitstreams, sequence execution, Huffman descriptors (both direct and FSE-
 compressed), Huffman-compressed literal streams, extra bits tables,
-compression mode parsing, and multi-frame support. The remaining
-implementation work is primarily integration: connecting these components
-into the `decompressBlocks` pipeline for `ZstdBlockType.compressed`.
-Two PRs (#489, #512) are open but both have merge conflicts that need
-resolution before they can be merged.
+compression mode parsing, FSE table resolution, and multi-frame support. The
+remaining implementation work is primarily integration: connecting these
+components into the `decompressBlocks` pipeline for `ZstdBlockType.compressed`.
 
-**Health concern:** All 5 open PRs have merge conflicts. The rapid pace
-of merges on master has caused Track E feature PRs to fall behind. These
-conflicts need resolution before the integration work can proceed.
+**PR queue health improvement:** The previous summary flagged 5 open PRs all
+with merge conflicts. PR #535 rebased 3 of them (#489, #512, #515), which
+were subsequently closed (superseded by merged work). The queue is now down
+to 2 open PRs (#555 chore, #549 with merge conflict), a significant
+improvement.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~262 sessions: majority implementation, ~120 review, ~8 self-improvement,
+- ~275 sessions: majority implementation, ~130 review, ~9 self-improvement,
   remainder PR maintenance, planning, and summarization
-- 226 merged PRs (Feb 19 – Mar 2)
+- 238 merged PRs (Feb 19 – Mar 4)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
-  bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491)
-- **Open PR health**: 5 open PRs, all with merge conflicts (2 Track E features,
-  1 rebase, 1 meditate, 1 review). The rapid merge cadence on master causes
-  feature branches to fall behind quickly.
+  bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
+  `agent-pr-recovery` (#546)
+- **Open PR health**: 2 open PRs (down from 5 at last summary), 1 with merge
+  conflict (#549). Stale PRs cleaned up via #535 and #555.
