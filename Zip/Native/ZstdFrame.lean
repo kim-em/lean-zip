@@ -803,14 +803,23 @@ private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
   loop buf 0
 
 /-- Execute decoded Zstd sequences against a literals buffer to produce decompressed output
-    (RFC 8878 §3.1.1.4). Maintains a 3-entry offset history initialized to `[1, 4, 8]`.
-    For each sequence: copies `literalLength` bytes from literals, then copies `matchLength`
-    bytes from `offset` back in the output (with overlap semantics). After all sequences,
-    any remaining literals are appended. Returns the decompressed block or an error. -/
-def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
-    Except String ByteArray := do
-  let mut output := ByteArray.empty
-  let mut history : Array Nat := #[1, 4, 8]
+    (RFC 8878 §3.1.1.4). For each sequence: copies `literalLength` bytes from literals, then
+    copies `matchLength` bytes from `offset` back in the output (with overlap semantics).
+    After all sequences, any remaining literals are appended.
+
+    For multi-block frames (RFC 8878 §3.1.1.5):
+    - `windowPrefix`: previous blocks' output (last `windowSize` bytes) for cross-block
+      back-references. Match offsets can reach into the prefix.
+    - `offsetHistory`: 3-entry offset history from the previous block.
+
+    Returns the decompressed block output (excluding prefix) and the updated offset history
+    for the next block. -/
+def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
+    (windowPrefix : ByteArray := ByteArray.empty)
+    (offsetHistory : Array Nat := #[1, 4, 8]) :
+    Except String (ByteArray × Array Nat) := do
+  let mut output := windowPrefix
+  let mut history := offsetHistory
   let mut litPos := 0
   for seq in sequences do
     -- Copy literalLength bytes from literals buffer
@@ -833,7 +842,9 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray) :
   if litPos < literals.size then
     for i in [litPos:literals.size] do
       output := output.push literals[i]!
-  return output
+  -- Strip prefix and return block output with updated history
+  let blockOutput := output.extract windowPrefix.size output.size
+  return (blockOutput, history)
 
 /-- Extra bits table for literal length codes 0-35 (RFC 8878 Table 14).
     Each entry is `(baseline, numExtraBits)`. For codes 0-15 the literal
