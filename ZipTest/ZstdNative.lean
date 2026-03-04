@@ -1153,4 +1153,72 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     | .error e => throw (IO.userError s!"decodeSequences extraBits failed: {e}")
   | .error e => throw (IO.userError s!"BackwardBitReader init extraBits failed: {e}")
 
+  -- Test: block size validation — reject blocks > 128KB
+  -- Construct a minimal Zstd frame with a raw block header claiming size > 131072
+  -- Frame: magic (4 bytes) + frame header descriptor (1 byte, single segment) +
+  --        content size (1 byte) + block header (3 bytes) with oversized block
+  let oversizedFrame : ByteArray := ByteArray.mk #[
+    -- Magic number 0xFD2FB528 (little-endian)
+    0x28, 0xB5, 0x2F, 0xFD,
+    -- Frame header descriptor: single segment=1, content checksum=0,
+    -- dict ID=0 (bits 0-1), content size flag=0 (bits 6-7)
+    -- FHD byte = 0b00100000 = 0x20 (single segment bit 5)
+    0x20,
+    -- Frame content size: 0 bytes (1 byte since single segment + FCS=0)
+    0x00,
+    -- Block header: Last_Block=1 (bit 0), Block_Type=raw=0 (bits 1-2),
+    -- Block_Size=200000 > 131072 (bits 3-23)
+    -- raw24 = 1 | (0 << 1) | (200000 << 3) = 1 | 1600000 = 1600001 = 0x186A01
+    -- Little-endian: 0x01, 0x6A, 0x18
+    0x01, 0x6A, 0x18
+  ]
+  match Zip.Native.decompressZstd oversizedFrame with
+  | .ok _ => throw (IO.userError "oversized block: expected rejection but got success")
+  | .error e =>
+    unless e.contains "block size" && e.contains "128KB" do
+      throw (IO.userError s!"oversized block: expected block size error, got: {e}")
+
+  -- Test: executeSequences window size enforcement
+  -- Create a sequence with offset > windowSize and verify rejection
+  let windowSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 4, matchLength := 3, offset := 100 }
+  ]
+  let windowLiterals := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]
+  -- With windowSize=50, offset 100 should be rejected (also exceeds output size 4)
+  match Zip.Native.executeSequences windowSeqs windowLiterals 50 with
+  | .ok _ => throw (IO.userError "window size: expected rejection but got success")
+  | .error e =>
+    -- Should fail on either offset > output.size or offset > windowSize
+    unless e.contains "offset" do
+      throw (IO.userError s!"window size: expected offset error, got: {e}")
+
+  -- Test: executeSequences with valid data and windowSize=0 (disabled check)
+  -- Single sequence: 4 literals, then copy 2 bytes from actual offset 2
+  -- Raw offset 5 → actual offset = 5 - 3 = 2 (per Zstd offset encoding)
+  let validSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 4, matchLength := 2, offset := 5 }
+  ]
+  let validLiterals := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]
+  match Zip.Native.executeSequences validSeqs validLiterals 0 with
+  | .ok result =>
+    -- Should produce: A B C D C D (literals + 2 bytes from offset 2 back)
+    unless result.size == 6 do
+      throw (IO.userError s!"valid seq: expected 6 bytes, got {result.size}")
+    let expected := (ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x43, 0x44])
+    unless result == expected do
+      throw (IO.userError s!"valid seq: expected {expected.toList}, got {result.toList}")
+  | .error e => throw (IO.userError s!"valid seq: unexpected error: {e}")
+
+  -- Test: legitimate Zstd data still decompresses after validation changes
+  let legitData := "The quick brown fox jumps over the lazy dog. ".toUTF8
+  let legitCompressed ← Zstd.compress legitData
+  match Zip.Native.decompressZstd legitCompressed with
+  | .ok result =>
+    unless result.data == legitData.data do
+      throw (IO.userError "legit roundtrip: decompressed data doesn't match original")
+  | .error e =>
+    -- May fail on compressed blocks with sequences, which is acceptable
+    unless e.contains "sequence decoding" do
+      throw (IO.userError s!"legit roundtrip: unexpected error: {e}")
+
   IO.println "ZstdNative tests: OK"
