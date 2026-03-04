@@ -261,7 +261,7 @@ def ZipTest.FseNative.tests : IO Unit := do
         let blockEnd := blockDataStart + blkHdr.blockSize.toNat
         -- Parse literals section to get past it to the sequences section
         match Zip.Native.parseLiteralsSection compressed blockDataStart with
-        | .ok (_, afterLiterals) =>
+        | .ok (_, afterLiterals, _) =>
           match Zip.Native.parseSequencesHeader compressed afterLiterals with
           | .ok (numSeq, _modes, afterSeqHeader) =>
             if numSeq > 0 then

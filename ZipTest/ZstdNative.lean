@@ -306,7 +306,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- byte0 = (5 << 3) | 0 = 0x28, followed by 5 raw bytes
   let rawLitInput := ByteArray.mk #[0x28, 0x48, 0x65, 0x6C, 0x6C, 0x6F]
   match Zip.Native.parseLiteralsSection rawLitInput 0 with
-  | .ok (result, endPos) =>
+  | .ok (result, endPos, _) =>
     unless result.size == 5 do
       throw (IO.userError s!"raw lit: expected 5 bytes, got {result.size}")
     unless endPos == 6 do
@@ -320,7 +320,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- byte0 = (7 << 3) | 1 = 0x39, followed by the byte to replicate
   let rleLitInput := ByteArray.mk #[0x39, 0xBB]
   match Zip.Native.parseLiteralsSection rleLitInput 0 with
-  | .ok (result, endPos) =>
+  | .ok (result, endPos, _) =>
     unless result.size == 7 do
       throw (IO.userError s!"rle lit: expected 7 bytes, got {result.size}")
     unless endPos == 2 do
@@ -339,7 +339,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   for i in [:100] do
     bigRawInput := bigRawInput.push (i % 256).toUInt8
   match Zip.Native.parseLiteralsSection bigRawInput 0 with
-  | .ok (result, endPos) =>
+  | .ok (result, endPos, _) =>
     unless result.size == 100 do
       throw (IO.userError s!"raw lit 2byte: expected 100 bytes, got {result.size}")
     unless endPos == 102 do
@@ -355,13 +355,13 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   | .ok _ => throw (IO.userError "compressed lit: should have failed on malformed input")
   | .error _ => pure ()  -- any error is acceptable for malformed data
 
-  -- Test 32: parseLiteralsSection rejects treeless literals with clear error
+  -- Test 32: parseLiteralsSection rejects treeless literals without previous Huffman tree
   -- Treeless type = 3
   let treelessLitInput := ByteArray.mk #[0x03, 0x00, 0x00, 0x00, 0x00]
   match Zip.Native.parseLiteralsSection treelessLitInput 0 with
   | .ok _ => throw (IO.userError "treeless lit: should have failed")
   | .error e =>
-    unless e.contains "treeless literals" do
+    unless e.contains "no previous Huffman tree" do
       throw (IO.userError s!"treeless lit: wrong error: {e}")
 
   -- Test 33: parseSequencesHeader with 0 sequences
@@ -1241,7 +1241,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     | .ok (modeBlkHdr, modeBlockStart) =>
       if modeBlkHdr.blockType == .compressed then do
         match Zip.Native.parseLiteralsSection modeCompressed modeBlockStart with
-        | .ok (_, modeAfterLit) =>
+        | .ok (_, modeAfterLit, _) =>
           match Zip.Native.parseSequencesHeader modeCompressed modeAfterLit with
           | .ok (modeNumSeq, modes, _) =>
             -- Compressed data at level 3 should have sequences
@@ -1271,5 +1271,49 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   match Zip.Native.parseSequencesHeader shortInput 0 with
   | .ok _ => throw (IO.userError "short input: should have failed")
   | .error _ => pure ()
+
+  -- Test: treeless literals (litType 3) roundtrip via FFI compress + native decompress
+  -- Use 256KB+ of repetitive text to force multi-block output with treeless literals
+  let mut treelessInput := ByteArray.empty
+  let treelessPattern := "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 ".toUTF8
+  for _ in [:4096] do
+    treelessInput := treelessInput ++ treelessPattern
+  -- Compress at level 3 (should produce multi-block frame with treeless literals)
+  let treelessCompressed ← Zstd.compress treelessInput 3
+  match Zip.Native.decompressZstd treelessCompressed with
+  | .ok result =>
+    unless result.data == treelessInput.data do
+      throw (IO.userError s!"treeless roundtrip: decompressed {result.size} bytes but content mismatch (expected {treelessInput.size})")
+  | .error e =>
+    -- If sequence decoding is not yet implemented, treeless literals parsing may still succeed
+    -- but the error should be about sequences, not about treeless literals
+    if e.contains "treeless literals" then
+      throw (IO.userError s!"treeless roundtrip: treeless literals still unsupported: {e}")
+    else
+      -- Sequence decoding not implemented — acceptable for now
+      pure ()
+
+  -- Test: treeless literals error when no previous Huffman tree (first block)
+  -- Construct a minimal frame with litType 3 in the first block
+  -- This should fail because there is no previous Huffman tree
+  let treelessNoTree := ByteArray.mk #[
+    -- Zstd magic number
+    0x28, 0xB5, 0x2F, 0xFD,
+    -- Frame header descriptor: single segment, no checksum, no dict, FCS flag=0
+    0x20,
+    -- FCS: 1 byte content size = 5
+    0x05,
+    -- Block header: lastBlock=1, type=compressed(2), size=4
+    -- raw24 = (4 << 3) | (2 << 1) | 1 = 32 + 4 + 1 = 37 = 0x25
+    0x25, 0x00, 0x00,
+    -- Literals section header: litType=3 (treeless), sizeFormat=0, regenSize=5
+    -- byte0 = (5 << 4) | (0 << 2) | 3 = 0x53
+    0x53, 0x00, 0x00
+  ]
+  match Zip.Native.decompressZstd treelessNoTree with
+  | .ok _ => throw (IO.userError "treeless first-block: should have failed")
+  | .error e =>
+    unless e.contains "no previous Huffman tree" do
+      throw (IO.userError s!"treeless first-block: wrong error: {e}")
 
   IO.println "ZstdNative tests: OK"

@@ -17,9 +17,10 @@ import Zip.Native.XxHash
   (`decompressZstd`) that loops over concatenated frames, skipping
   skippable frames (RFC 8878 §3.1.2) and concatenating output from
   multiple Zstd frames.  Content checksum verification uses XXH64
-  (upper 32 bits).  Huffman-compressed literals (type 2) are decoded
-  using flat table lookup with `BackwardBitReader`; sequence decoding
-  (FSE) is not yet supported.
+  (upper 32 bits).  Huffman-compressed literals (type 2) and treeless literals (type 3,
+  reusing the previous block's Huffman tree) are decoded using flat table
+  lookup with `BackwardBitReader`; sequence decoding (FSE) is not yet
+  supported.
 -/
 
 namespace Zip.Native
@@ -455,77 +456,93 @@ def decodeFourHuffmanStreams (htable : ZstdHuffmanTable) (data : ByteArray)
   let r4 ← decodeHuffmanStream htable br4 s4Count
   return r1 ++ r2 ++ r3 ++ r4
 
+/-- Parse compressed/treeless literals header sizes (RFC 8878 §3.1.1.3.1.1).
+    Both litType 2 and 3 use the same header layout for regeneratedSize and compressedSize.
+    Returns `(regenSize, compSize, headerBytes, fourStreams)`. -/
+private def parseCompressedLiteralsHeader (data : ByteArray) (pos : Nat) (sizeFormat : Nat) :
+    Except String (Nat × Nat × Nat × Bool) := do
+  if sizeFormat <= 1 then do
+    if data.size < pos + 3 then throw "Zstd: truncated compressed literals header"
+    let b0 := data[pos]!.toNat
+    let b1 := data[pos + 1]!.toNat
+    let b2 := data[pos + 2]!.toNat
+    let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
+    let regen := (raw >>> 4) &&& 0x3FF
+    let comp := (raw >>> 14) &&& 0x3FF
+    pure (regen, comp, 3, false)
+  else if sizeFormat == 2 then do
+    if data.size < pos + 4 then throw "Zstd: truncated compressed literals header"
+    let b0 := data[pos]!.toNat
+    let b1 := data[pos + 1]!.toNat
+    let b2 := data[pos + 2]!.toNat
+    let b3 := data[pos + 3]!.toNat
+    let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
+    let regen := (raw >>> 4) &&& 0x3FFF
+    let comp := (raw >>> 18) &&& 0x3FFF
+    pure (regen, comp, 4, true)
+  else do
+    if data.size < pos + 5 then throw "Zstd: truncated compressed literals header"
+    let b0 := data[pos]!.toNat
+    let b1 := data[pos + 1]!.toNat
+    let b2 := data[pos + 2]!.toNat
+    let b3 := data[pos + 3]!.toNat
+    let b4 := data[pos + 4]!.toNat
+    let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24) ||| (b4 <<< 32)
+    let regen := (raw >>> 4) &&& 0x3FFFF
+    let comp := (raw >>> 22) &&& 0x3FFFF
+    pure (regen, comp, 5, true)
+
+/-- Decode Huffman-compressed literal streams using the given table.
+    Returns the decoded literals. -/
+private def decodeHuffmanLiterals (huffTable : ZstdHuffmanTable) (data : ByteArray)
+    (streamStart streamDataSize regenSize : Nat) (fourStreams : Bool) :
+    Except String ByteArray := do
+  if fourStreams then
+    decodeFourHuffmanStreams huffTable data streamStart streamDataSize regenSize
+  else do
+    let br ← BackwardBitReader.init data streamStart (streamStart + streamDataSize)
+    decodeHuffmanStream huffTable br regenSize
+
 /-- Parse the Literals_Section_Header and extract literal bytes (RFC 8878 §3.1.1.3.1).
-    Returns the literal bytes and the position after the literals section.
-    Raw literals are copied verbatim; RLE literals are expanded to `regeneratedSize` copies
-    of a single byte. Compressed literals (type 2) are decoded using Huffman tables.
-    Treeless literals (type 3) return an error (requires cross-block state). -/
-def parseLiteralsSection (data : ByteArray) (pos : Nat) :
-    Except String (ByteArray × Nat) := do
+    Returns `(literals, posAfter, huffmanTable)`: the literal bytes, the position after
+    the literals section, and the Huffman table used (if any — `some` for litType 2/3,
+    `none` for raw/RLE).
+    `prevHuffTree` is the Huffman table from the previous compressed block in this frame
+    (needed for treeless literals, litType 3). -/
+def parseLiteralsSection (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable := none) :
+    Except String (ByteArray × Nat × Option ZstdHuffmanTable) := do
   if data.size < pos + 1 then
     throw "Zstd: not enough data for literals section header"
   let byte0 := data[pos]!
   let litType := (byte0 &&& 3).toNat       -- bits 0-1: Literals_Block_Type
   let sizeFormat := ((byte0 >>> 2) &&& 3).toNat  -- bits 2-3: Size_Format
-  -- Treeless literals require cross-block Huffman table state (future issue)
-  if litType == 3 then throw "Zstd: treeless literals not yet supported"
   if litType > 3 then throw "Zstd: invalid literals block type"
-  -- Compressed literals (type 2): both regeneratedSize and compressedSize in header
-  if litType == 2 then do
-    -- Parse the extended header for compressed literals (RFC 8878 §3.1.1.3.1.1).
-    -- The header is packed as a little-endian bitfield:
-    --   bits [1:0]  = litType, bits [3:2] = sizeFormat
-    --   sizeFormat 0,1: 3-byte header, 10-bit sizes, single stream
-    --   sizeFormat 2:   4-byte header, 14-bit sizes, 4 streams
-    --   sizeFormat 3:   5-byte header, 18-bit sizes, 4 streams
+  -- Compressed (type 2) or treeless (type 3) literals
+  if litType == 2 || litType == 3 then do
     let (regenSize, compSize, headerBytes, fourStreams) ←
-      if sizeFormat <= 1 then do
-        if data.size < pos + 3 then throw "Zstd: truncated compressed literals header"
-        let b0 := data[pos]!.toNat
-        let b1 := data[pos + 1]!.toNat
-        let b2 := data[pos + 2]!.toNat
-        let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
-        let regen := (raw >>> 4) &&& 0x3FF
-        let comp := (raw >>> 14) &&& 0x3FF
-        pure (regen, comp, 3, false)
-      else if sizeFormat == 2 then do
-        if data.size < pos + 4 then throw "Zstd: truncated compressed literals header"
-        let b0 := data[pos]!.toNat
-        let b1 := data[pos + 1]!.toNat
-        let b2 := data[pos + 2]!.toNat
-        let b3 := data[pos + 3]!.toNat
-        let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
-        let regen := (raw >>> 4) &&& 0x3FFF
-        let comp := (raw >>> 18) &&& 0x3FFF
-        pure (regen, comp, 4, true)
-      else do
-        if data.size < pos + 5 then throw "Zstd: truncated compressed literals header"
-        let b0 := data[pos]!.toNat
-        let b1 := data[pos + 1]!.toNat
-        let b2 := data[pos + 2]!.toNat
-        let b3 := data[pos + 3]!.toNat
-        let b4 := data[pos + 4]!.toNat
-        let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24) ||| (b4 <<< 32)
-        let regen := (raw >>> 4) &&& 0x3FFFF
-        let comp := (raw >>> 22) &&& 0x3FFFF
-        pure (regen, comp, 5, true)
+      parseCompressedLiteralsHeader data pos sizeFormat
     let afterHeader := pos + headerBytes
-    if data.size < afterHeader + compSize then
-      throw "Zstd: not enough data for compressed literals"
-    -- Parse Huffman tree descriptor (compSize includes tree + stream data)
-    let (huffTable, afterTree) ← parseHuffmanTreeDescriptor data afterHeader
-    let treeSize := afterTree - afterHeader
-    if treeSize > compSize then
-      throw "Zstd: Huffman tree descriptor exceeds compressed literals size"
-    let streamDataSize := compSize - treeSize
-    -- Decode the Huffman-compressed literal streams
-    if fourStreams then do
-      let result ← decodeFourHuffmanStreams huffTable data afterTree streamDataSize regenSize
-      pure (result, afterHeader + compSize)
+    if litType == 3 then do
+      -- Treeless: reuse previous Huffman table, all compressedSize bytes are stream data
+      let huffTable ← match prevHuffTree with
+        | some t => pure t
+        | none => throw "Zstd: treeless literals (type 3) but no previous Huffman tree"
+      if data.size < afterHeader + compSize then
+        throw "Zstd: not enough data for treeless literals"
+      let result ← decodeHuffmanLiterals huffTable data afterHeader compSize regenSize fourStreams
+      pure (result, afterHeader + compSize, some huffTable)
     else do
-      let br ← BackwardBitReader.init data afterTree (afterTree + streamDataSize)
-      let result ← decodeHuffmanStream huffTable br regenSize
-      pure (result, afterHeader + compSize)
+      -- Compressed: parse fresh Huffman tree from the data
+      if data.size < afterHeader + compSize then
+        throw "Zstd: not enough data for compressed literals"
+      let (huffTable, afterTree) ← parseHuffmanTreeDescriptor data afterHeader
+      let treeSize := afterTree - afterHeader
+      if treeSize > compSize then
+        throw "Zstd: Huffman tree descriptor exceeds compressed literals size"
+      let streamDataSize := compSize - treeSize
+      let result ← decodeHuffmanLiterals huffTable data afterTree streamDataSize regenSize fourStreams
+      pure (result, afterHeader + compSize, some huffTable)
   else
   -- Raw (0) or RLE (1): parse regenerated size using variable-width header
   let (regenSize, headerBytes) ←
@@ -548,14 +565,14 @@ def parseLiteralsSection (data : ByteArray) (pos : Nat) :
     -- Raw literals: copy regeneratedSize bytes verbatim
     if data.size < afterHeader + regenSize then
       throw "Zstd: not enough data for raw literals"
-    pure (data.extract afterHeader (afterHeader + regenSize), afterHeader + regenSize)
+    pure (data.extract afterHeader (afterHeader + regenSize), afterHeader + regenSize, none)
   else
     -- RLE literals: read 1 byte, replicate regeneratedSize times
     if data.size < afterHeader + 1 then
       throw "Zstd: not enough data for RLE literal byte"
     let byte := data[afterHeader]!
     let result := ByteArray.mk (Array.replicate regenSize byte)
-    pure (result, afterHeader + 1)
+    pure (result, afterHeader + 1, none)
 
 /-- Compression mode for one of the three sequence symbol types
     (RFC 8878 §3.1.1.3.2). -/
@@ -636,11 +653,14 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
 
 /-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
     Loops through block headers, dispatches on block type, and accumulates output.
+    Threads the Huffman table from compressed literals blocks to support treeless
+    literals (litType 3) in subsequent blocks.
     Returns the decompressed content and position after the last block.
     Compressed blocks with sequences are not yet fully wired (returns error). -/
 def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
   let mut off := pos
   let mut output := ByteArray.empty
+  let mut prevHuffTree : Option ZstdHuffmanTable := none
   let mut done := false
   while !done do
     let (hdr, afterHdr) ← parseBlockHeader data off
@@ -656,7 +676,9 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
       off := afterByte
     | .compressed =>
       let blockEnd := off + hdr.blockSize.toNat
-      let (literals, afterLiterals) ← parseLiteralsSection data off
+      let (literals, afterLiterals, huffTree) ← parseLiteralsSection data off prevHuffTree
+      if let some ht := huffTree then
+        prevHuffTree := some ht
       let (numSeq, _modes, _afterSeqHeader) ← parseSequencesHeader data afterLiterals
       if numSeq == 0 then
         -- No sequences: block is pure literals
