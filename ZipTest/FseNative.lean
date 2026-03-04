@@ -359,4 +359,52 @@ def ZipTest.FseNative.tests : IO Unit := do
         throw (IO.userError s!"predefined OF table: symbol {sym} not found in table")
   | .error e => throw (IO.userError s!"buildPredefinedFseTables symbol coverage failed: {e}")
 
+  -- Test 20: buildFseTable with all -1 probability distribution
+  -- 32 symbols each with prob -1, accuracyLog=5, tableSize=32.
+  -- Each symbol gets exactly 1 cell, all placed at end of table.
+  let probsAll1 : Array Int32 := Array.replicate 32 (-1)
+  match Zip.Native.buildFseTable probsAll1 5 with
+  | .ok table =>
+    unless table.cells.size == 32 do
+      throw (IO.userError s!"all -1: expected 32 cells, got {table.cells.size}")
+    -- Every symbol should appear exactly once
+    let mut seen := Array.replicate 32 false
+    for i in [:32] do
+      let sym := table.cells[i]!.symbol.toNat
+      unless sym < 32 do
+        throw (IO.userError s!"all -1: cell {i} has invalid symbol {sym}")
+      if seen[sym]! then
+        throw (IO.userError s!"all -1: symbol {sym} appears more than once")
+      seen := seen.set! sym true
+    for sym in [:32] do
+      unless seen[sym]! do
+        throw (IO.userError s!"all -1: symbol {sym} not found in table")
+  | .error e => throw (IO.userError s!"buildFseTable all -1 distribution failed: {e}")
+
+  -- Test 21: BackwardBitReader multi-bit read spanning multiple bytes
+  -- Data: [0xAB, 0xCD, 0x40] — last byte 0x40 = 0b01000000, sentinel at bit 6,
+  -- 6 data bits below sentinel: bits 5..0 = 0b000000.
+  -- After consuming sentinel, 6 bits of zeros remain in last byte.
+  -- Then byte 0xCD = 0b11001101 (8 bits), then byte 0xAB = 0b10101011 (8 bits).
+  -- Read 12 bits: should get 6 zeros from last byte + 6 MSBs from 0xCD (110011)
+  let backData3 := ByteArray.mk #[0xAB, 0xCD, 0x40]
+  match Zip.Native.BackwardBitReader.init backData3 0 3 with
+  | .ok br => do
+    -- Read 6 bits from the masked last byte (all zeros)
+    let (sixBits, br) ← match br.readBits 6 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"multi-byte read 6 bits failed: {e}")
+    unless sixBits == 0 do
+      throw (IO.userError s!"multi-byte: first 6 bits should be 0, got {sixBits}")
+    -- Read 12 bits spanning byte 0xCD and into byte 0xAB
+    -- Should read all 8 bits of 0xCD (MSB-first: 11001101) plus 4 MSBs of 0xAB (1010)
+    let (twelveBits, _br) ← match br.readBits 12 with
+      | .ok r => pure r
+      | .error e => throw (IO.userError s!"multi-byte read 12 bits failed: {e}")
+    -- 0xCD MSB-first = 11001101 = 0xCD, plus 4 MSBs of 0xAB = 1010
+    -- Combined: 110011011010 = 0xCDA
+    unless twelveBits == 0xCDA do
+      throw (IO.userError s!"multi-byte: 12-bit read should be 0xCDA (3290), got {twelveBits}")
+  | .error e => throw (IO.userError s!"BackwardBitReader multi-byte init failed: {e}")
+
   IO.println "FseNative tests: OK"
