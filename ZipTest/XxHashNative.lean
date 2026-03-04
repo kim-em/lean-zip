@@ -68,4 +68,21 @@ def ZipTest.XxHashNative.tests : IO Unit := do
   unless seedA != seedB do
     throw (IO.userError "XXH64: different seeds should produce different hashes")
 
+  -- Test 12: 45-byte input exercises 1 stripe (32 bytes) + 8-byte + 4-byte + 1-byte remaining
+  let data45 := ByteArray.mk (Array.ofFn (n := 45) fun i => i.val.toUInt8)
+  let hash45 := XxHash64.xxHash64 data45 0
+  unless hash45 == 0x10FDD84D6409ABDF do
+    throw (IO.userError s!"XXH64 45 bytes: expected 0x10FDD84D6409ABDF, got {hash45}")
+
+  -- Test 13: non-zero seed with known reference value
+  let seedHash := XxHash64.xxHash64 "seed test".toUTF8 42
+  unless seedHash == 0xBD5B2F29B94F97EE do
+    throw (IO.userError s!"XXH64 seed=42: expected 0xBD5B2F29B94F97EE, got {seedHash}")
+
+  -- Test 14: 4-byte input exercises only the 4-byte remaining path (no stripes)
+  let data4 := ByteArray.mk #[0x01, 0x02, 0x03, 0x04]
+  let hash4 := XxHash64.xxHash64 data4 0
+  unless hash4 == 0x542620E3A2A92ED1 do
+    throw (IO.userError s!"XXH64 4 bytes: expected 0x542620E3A2A92ED1, got {hash4}")
+
   IO.println "XxHash64 native tests: OK"
