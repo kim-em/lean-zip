@@ -700,6 +700,10 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
 def decompressFrame (data : ByteArray) (pos : Nat) :
     Except String (ByteArray × Nat) := do
   let (header, afterHeader) ← parseFrameHeader data pos
+  -- Reject dictionary-compressed frames (lean-zip does not support dictionaries)
+  if let some dictId := header.dictionaryId then
+    if dictId != 0 then
+      throw s!"Zstd: dictionary decompression not supported (dictionary ID: {dictId})"
   let (content, afterBlocks) ← decompressBlocks data afterHeader
   -- Content checksum: upper 32 bits of XXH64 (RFC 8878 §3.1.1) if flagged
   let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
