@@ -167,11 +167,11 @@ private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArra
   cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
   | error e => simp [hinf] at h
   | ok p =>
-    simp [hinf, pure, Except.pure] at h
+    simp only [Nat.reduceMul, hinf, pure, Except.pure, Except.ok.injEq] at h
     have hdec :=
       Deflate.Correctness.inflate_correct deflated 0 (1024 * 1024 * 1024) p.1 p.2
         (by rw [hinf])
-    simp at hdec
+    simp only [Nat.zero_mul, List.drop_zero] at hdec
     rw [← h]
     show Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) =
       some p.1.data.toList
@@ -205,7 +205,7 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
       hspec_go
   -- Use data.size bound to get result.length ≤ maxOutputSize
   have hdata_le : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
-    simp [Array.length_toList, ByteArray.size_data]; omega
+    simp only [Array.length_toList, ByteArray.size_data, Nat.reduceMul]; omega
   -- Spec decode on compressed bits at offset 10 (via compress_eq decomposition)
   have hspec_at10 : Deflate.Spec.decode.go
       ((Deflate.Spec.bytesToBits (GzipEncode.compress data level)).drop (10 * 8))
@@ -267,12 +267,12 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
   have hcrc : (Crc32.Native.crc32 0 data ==
     Binary.readUInt32LE (GzipEncode.compress data level) endPos) = true := by
     rw [hep_val, GzipEncode.compress_crc32]
-    simp [BEq.beq]
+    simp only [BEq.beq, decide_true]
   -- ISIZE trailer match
   have hisize : (data.size.toUInt32 ==
     Binary.readUInt32LE (GzipEncode.compress data level) (endPos + 4)) = true := by
     rw [hep_val, GzipEncode.compress_isize]
-    simp [BEq.beq]
+    simp only [BEq.beq, Nat.toUInt32_eq, decide_true]
   set_option maxRecDepth 8192 in
   simp (config := { decide := true }) only [GzipDecode.decompressSingle,
     - GzipDecode.decompressSingle.eq_1,
