@@ -1001,4 +1001,54 @@ def decodeSequences (litLenTable offsetTable matchLenTable : FseTable)
       throw s!"Zstd: match length code {matchLenCode} out of range (max 52)"
   return result
 
+/-- Build an FSE table for RLE mode: a single-cell table where every state maps
+    to the given symbol with 0 extra bits (RFC 8878 §3.1.1.3.2.1, mode 1). -/
+def buildRleFseTable (symbol : UInt8) : FseTable :=
+  { accuracyLog := 0,
+    cells := #[{ symbol := symbol.toUInt16, numBits := 0, newState := 0 }] }
+
+/-- Resolve a single FSE table from its compression mode (RFC 8878 §3.1.1.3.2.1).
+    Reads any necessary data from `data` at `pos` and returns the table and updated position.
+    - Mode 0 (Predefined): build from predefined distribution and accuracy log.
+    - Mode 1 (RLE): read 1 byte, build single-symbol table.
+    - Mode 2 (FSE_Compressed): decode distribution from bitstream, build table.
+    - Mode 3 (Repeat): not yet supported (requires cross-block state). -/
+def resolveSingleFseTable (mode : SequenceCompressionMode) (maxSymbols : Nat)
+    (maxAccLog : Nat) (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat) :
+    Except String (FseTable × Nat) := do
+  match mode with
+  | .predefined =>
+    let table ← buildFseTable predefinedDist predefinedAccLog
+    return (table, pos)
+  | .rle =>
+    if data.size < pos + 1 then
+      throw "Zstd: not enough data for RLE FSE table symbol"
+    let symbol := data[pos]!
+    return (buildRleFseTable symbol, pos + 1)
+  | .fseCompressed =>
+    let br : BitReader := { data, pos, bitOff := 0 }
+    let (probs, accLog, br') ← decodeFseDistribution br maxSymbols maxAccLog
+    let table ← buildFseTable probs accLog
+    -- Advance to byte boundary after the consumed bits
+    let afterPos := if br'.bitOff == 0 then br'.pos else br'.pos + 1
+    return (table, afterPos)
+  | .repeat =>
+    throw "Zstd: Repeat mode (3) not yet supported (requires cross-block state)"
+
+/-- Resolve all three FSE tables for sequence decoding from their compression modes
+    (RFC 8878 §3.1.1.3.2.1). Tables are resolved in order: literal lengths, offsets,
+    match lengths. Each may read data from `data` starting at `pos`.
+    Returns (litLenTable, offsetTable, matchLenTable, posAfterTables). -/
+def resolveSequenceFseTables (modes : SequenceCompressionModes)
+    (data : ByteArray) (pos : Nat) :
+    Except String (FseTable × FseTable × FseTable × Nat) := do
+  let (litLenTable, pos) ← resolveSingleFseTable modes.litLenMode
+    36 9 data pos predefinedLitLenDistribution 6
+  let (offsetTable, pos) ← resolveSingleFseTable modes.offsetMode
+    32 8 data pos predefinedOffsetDistribution 5
+  let (matchLenTable, pos) ← resolveSingleFseTable modes.matchLenMode
+    53 9 data pos predefinedMatchLenDistribution 6
+  return (litLenTable, offsetTable, matchLenTable, pos)
+
 end Zip.Native

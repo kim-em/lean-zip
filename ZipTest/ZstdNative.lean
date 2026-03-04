@@ -1153,4 +1153,80 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     | .error e => throw (IO.userError s!"decodeSequences extraBits failed: {e}")
   | .error e => throw (IO.userError s!"BackwardBitReader init extraBits failed: {e}")
 
+  -- === FSE table resolution tests ===
+
+  -- Test: RLE mode produces single-symbol table
+  let rleTable := Zip.Native.buildRleFseTable 42
+  unless rleTable.accuracyLog == 0 do
+    throw (IO.userError s!"buildRleFseTable: expected accuracyLog 0, got {rleTable.accuracyLog}")
+  unless rleTable.cells.size == 1 do
+    throw (IO.userError s!"buildRleFseTable: expected 1 cell, got {rleTable.cells.size}")
+  unless rleTable.cells[0]!.symbol == 42 do
+    throw (IO.userError s!"buildRleFseTable: expected symbol 42, got {rleTable.cells[0]!.symbol}")
+  unless rleTable.cells[0]!.numBits == 0 do
+    throw (IO.userError s!"buildRleFseTable: expected numBits 0, got {rleTable.cells[0]!.numBits}")
+
+  -- Test: resolveSingleFseTable with predefined mode (no data consumed)
+  let emptyData := ByteArray.empty
+  match Zip.Native.resolveSingleFseTable .predefined 36 9 emptyData 0
+      Zip.Native.predefinedLitLenDistribution 6 with
+  | .ok (table, pos) =>
+    unless pos == 0 do
+      throw (IO.userError s!"resolveSingle predefined: expected pos 0, got {pos}")
+    unless table.accuracyLog == 6 do
+      throw (IO.userError s!"resolveSingle predefined: expected accuracyLog 6, got {table.accuracyLog}")
+    unless table.cells.size == 64 do
+      throw (IO.userError s!"resolveSingle predefined: expected 64 cells, got {table.cells.size}")
+  | .error e => throw (IO.userError s!"resolveSingle predefined failed: {e}")
+
+  -- Test: resolveSingleFseTable with RLE mode (consumes 1 byte)
+  let rleData := ByteArray.mk #[7]
+  match Zip.Native.resolveSingleFseTable .rle 36 9 rleData 0
+      Zip.Native.predefinedLitLenDistribution 6 with
+  | .ok (table, pos) =>
+    unless pos == 1 do
+      throw (IO.userError s!"resolveSingle RLE: expected pos 1, got {pos}")
+    unless table.cells[0]!.symbol == 7 do
+      throw (IO.userError s!"resolveSingle RLE: expected symbol 7, got {table.cells[0]!.symbol}")
+  | .error e => throw (IO.userError s!"resolveSingle RLE failed: {e}")
+
+  -- Test: resolveSingleFseTable with repeat mode returns error
+  match Zip.Native.resolveSingleFseTable .repeat 36 9 emptyData 0
+      Zip.Native.predefinedLitLenDistribution 6 with
+  | .ok _ => throw (IO.userError "resolveSingle repeat: expected error, got success")
+  | .error _ => pure ()
+
+  -- Test: resolveSequenceFseTables with all predefined modes (no data consumed)
+  let allPredefinedModes : Zip.Native.SequenceCompressionModes :=
+    { litLenMode := .predefined, offsetMode := .predefined, matchLenMode := .predefined }
+  match Zip.Native.resolveSequenceFseTables allPredefinedModes emptyData 0 with
+  | .ok (llTable, ofTable, mlTable, pos) =>
+    unless pos == 0 do
+      throw (IO.userError s!"resolveAll predefined: expected pos 0, got {pos}")
+    unless llTable.accuracyLog == 6 do
+      throw (IO.userError s!"resolveAll predefined: litLen accuracyLog expected 6, got {llTable.accuracyLog}")
+    unless ofTable.accuracyLog == 5 do
+      throw (IO.userError s!"resolveAll predefined: offset accuracyLog expected 5, got {ofTable.accuracyLog}")
+    unless mlTable.accuracyLog == 6 do
+      throw (IO.userError s!"resolveAll predefined: matchLen accuracyLog expected 6, got {mlTable.accuracyLog}")
+  | .error e => throw (IO.userError s!"resolveAll predefined failed: {e}")
+
+  -- Test: resolveSequenceFseTables with mixed modes (RLE for litLen, predefined for rest)
+  let mixedData := ByteArray.mk #[15]
+  let mixedModes : Zip.Native.SequenceCompressionModes :=
+    { litLenMode := .rle, offsetMode := .predefined, matchLenMode := .predefined }
+  match Zip.Native.resolveSequenceFseTables mixedModes mixedData 0 with
+  | .ok (llTable, ofTable, mlTable, pos) =>
+    unless pos == 1 do
+      throw (IO.userError s!"resolveAll mixed: expected pos 1, got {pos}")
+    unless llTable.cells.size == 1 do
+      throw (IO.userError s!"resolveAll mixed: litLen expected 1 cell, got {llTable.cells.size}")
+    unless llTable.cells[0]!.symbol == 15 do
+      throw (IO.userError s!"resolveAll mixed: litLen expected symbol 15, got {llTable.cells[0]!.symbol}")
+    unless ofTable.accuracyLog == 5 do
+      throw (IO.userError s!"resolveAll mixed: offset accuracyLog expected 5, got {ofTable.accuracyLog}")
+    unless mlTable.accuracyLog == 6 do
+      throw (IO.userError s!"resolveAll mixed: matchLen accuracyLog expected 6, got {mlTable.accuracyLog}")
+  | .error e => throw (IO.userError s!"resolveAll mixed failed: {e}")
+
   IO.println "ZstdNative tests: OK"
