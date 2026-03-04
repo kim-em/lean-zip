@@ -557,29 +557,68 @@ def parseLiteralsSection (data : ByteArray) (pos : Nat) :
     let result := ByteArray.mk (Array.replicate regenSize byte)
     pure (result, afterHeader + 1)
 
+/-- Compression mode for one of the three sequence symbol types
+    (RFC 8878 §3.1.1.3.2). -/
+inductive SequenceCompressionMode where
+  | predefined   -- 0: use default distribution
+  | rle           -- 1: single repeated symbol
+  | fseCompressed -- 2: custom FSE distribution in bitstream
+  | repeat        -- 3: reuse previous block's table
+  deriving Repr, BEq
+
+/-- Parsed compression modes for the three sequence symbol types. -/
+structure SequenceCompressionModes where
+  litLenMode  : SequenceCompressionMode
+  offsetMode  : SequenceCompressionMode
+  matchLenMode : SequenceCompressionMode
+  deriving Repr
+
+/-- Convert a 2-bit mode value to `SequenceCompressionMode`. -/
+private def modeFromBits (bits : UInt8) : SequenceCompressionMode :=
+  match bits.toNat with
+  | 0 => .predefined
+  | 1 => .rle
+  | 2 => .fseCompressed
+  | _ => .repeat
+
 /-- Parse the Sequences_Section header (RFC 8878 §3.1.1.3.2).
-    Returns (numberOfSequences, position after header including compression modes byte).
-    If numberOfSequences is 0, the block has only literals (no sequences to decode). -/
+    Returns (numberOfSequences, compressionModes, position after header).
+    If numberOfSequences is 0, compression modes are all `predefined` (no modes
+    byte present) and the block has only literals. -/
 def parseSequencesHeader (data : ByteArray) (pos : Nat) :
-    Except String (Nat × Nat) := do
+    Except String (Nat × SequenceCompressionModes × Nat) := do
   if data.size < pos + 1 then
     throw "Zstd: not enough data for sequences header"
   let byte0 := data[pos]!.toNat
+  let defaultModes : SequenceCompressionModes :=
+    { litLenMode := .predefined, offsetMode := .predefined, matchLenMode := .predefined }
   if byte0 == 0 then
     -- 0 sequences: no compression modes byte follows
-    pure (0, pos + 1)
+    pure (0, defaultModes, pos + 1)
   else if byte0 < 128 then
     -- 1-byte count + compression modes byte
     if data.size < pos + 2 then
       throw "Zstd: not enough data for sequence compression modes"
-    pure (byte0, pos + 2)
+    let modesByte := data[pos + 1]!
+    let modes : SequenceCompressionModes := {
+      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
+      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
+      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
+    }
+    pure (byte0, modes, pos + 2)
   else if byte0 < 255 then
     -- 2-byte count: ((byte0 - 128) << 8) + byte1, then compression modes
     if data.size < pos + 3 then
       throw "Zstd: truncated sequences header"
     let byte1 := data[pos + 1]!.toNat
     let numSeq := ((byte0 - 128) <<< 8) + byte1
-    pure (numSeq, pos + 3)
+    let modesByte := data[pos + 2]!
+    let modes : SequenceCompressionModes := {
+      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
+      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
+      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
+    }
+    pure (numSeq, modes, pos + 3)
   else
     -- 3-byte count (byte0 == 255): byte1 + (byte2 << 8) + 0x7F00, then compression modes
     if data.size < pos + 4 then
@@ -587,12 +626,18 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     let byte1 := data[pos + 1]!.toNat
     let byte2 := data[pos + 2]!.toNat
     let numSeq := byte1 + (byte2 <<< 8) + 0x7F00
-    pure (numSeq, pos + 4)
+    let modesByte := data[pos + 3]!
+    let modes : SequenceCompressionModes := {
+      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
+      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
+      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
+    }
+    pure (numSeq, modes, pos + 4)
 
 /-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
     Loops through block headers, dispatches on block type, and accumulates output.
     Returns the decompressed content and position after the last block.
-    Currently returns an error for compressed blocks (not yet implemented). -/
+    Compressed blocks with sequences are not yet fully wired (returns error). -/
 def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
   let mut off := pos
   let mut output := ByteArray.empty
@@ -612,7 +657,7 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
     | .compressed =>
       let blockEnd := off + hdr.blockSize.toNat
       let (literals, afterLiterals) ← parseLiteralsSection data off
-      let (numSeq, _afterSeqHeader) ← parseSequencesHeader data afterLiterals
+      let (numSeq, _modes, _afterSeqHeader) ← parseSequencesHeader data afterLiterals
       if numSeq == 0 then
         -- No sequences: block is pure literals
         output := output ++ literals
@@ -847,83 +892,6 @@ def decodeMatchLenValue (code : Nat) (extraBits : UInt32) : Except String Nat :=
 def decodeOffsetValue (code : Nat) (extraBits : UInt32) : Nat :=
   if code == 0 then extraBits.toNat
   else (1 <<< code) + extraBits.toNat
-
-/-- Compression mode for one of the three sequence symbol types
-    (RFC 8878 §3.1.1.3.2). -/
-inductive SequenceCompressionMode where
-  | predefined   -- 0: use default distribution
-  | rle           -- 1: single repeated symbol
-  | fseCompressed -- 2: custom FSE distribution in bitstream
-  | repeat        -- 3: reuse previous block's table
-  deriving Repr, BEq
-
-/-- Parsed compression modes for the three sequence symbol types. -/
-structure SequenceCompressionModes where
-  litLenMode  : SequenceCompressionMode
-  offsetMode  : SequenceCompressionMode
-  matchLenMode : SequenceCompressionMode
-  deriving Repr
-
-/-- Convert a 2-bit mode value to `SequenceCompressionMode`. -/
-private def modeFromBits (bits : UInt8) : SequenceCompressionMode :=
-  match bits.toNat with
-  | 0 => .predefined
-  | 1 => .rle
-  | 2 => .fseCompressed
-  | _ => .repeat
-
-/-- Parse the Sequences_Section header (RFC 8878 §3.1.1.3.2).
-    Returns (numberOfSequences, compressionModes, position after header).
-    If numberOfSequences is 0, compression modes are all `predefined` (no modes
-    byte present) and the block has only literals. -/
-def parseSequencesHeaderWithModes (data : ByteArray) (pos : Nat) :
-    Except String (Nat × SequenceCompressionModes × Nat) := do
-  if data.size < pos + 1 then
-    throw "Zstd: not enough data for sequences header"
-  let byte0 := data[pos]!.toNat
-  let defaultModes : SequenceCompressionModes :=
-    { litLenMode := .predefined, offsetMode := .predefined, matchLenMode := .predefined }
-  if byte0 == 0 then
-    -- 0 sequences: no compression modes byte follows
-    pure (0, defaultModes, pos + 1)
-  else if byte0 < 128 then
-    -- 1-byte count + compression modes byte
-    if data.size < pos + 2 then
-      throw "Zstd: not enough data for sequence compression modes"
-    let modesByte := data[pos + 1]!
-    let modes : SequenceCompressionModes := {
-      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
-      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
-      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
-    }
-    pure (byte0, modes, pos + 2)
-  else if byte0 < 255 then
-    -- 2-byte count: ((byte0 - 128) << 8) + byte1, then compression modes
-    if data.size < pos + 3 then
-      throw "Zstd: truncated sequences header"
-    let byte1 := data[pos + 1]!.toNat
-    let numSeq := ((byte0 - 128) <<< 8) + byte1
-    let modesByte := data[pos + 2]!
-    let modes : SequenceCompressionModes := {
-      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
-      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
-      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
-    }
-    pure (numSeq, modes, pos + 3)
-  else
-    -- 3-byte count (byte0 == 255): byte1 + (byte2 << 8) + 0x7F00, then compression modes
-    if data.size < pos + 4 then
-      throw "Zstd: truncated sequences header"
-    let byte1 := data[pos + 1]!.toNat
-    let byte2 := data[pos + 2]!.toNat
-    let numSeq := byte1 + (byte2 <<< 8) + 0x7F00
-    let modesByte := data[pos + 3]!
-    let modes : SequenceCompressionModes := {
-      litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
-      offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
-      matchLenMode := modeFromBits ((modesByte >>> 2) &&& 3)
-    }
-    pure (numSeq, modes, pos + 4)
 
 /-- Decode interleaved FSE sequences from a backward bitstream (RFC 8878 §4.1.1).
     Takes three FSE tables (litLen, offset, matchLen), a `BackwardBitReader`
