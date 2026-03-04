@@ -162,7 +162,15 @@ For `simp [hrb] at h` that substitutes then closes:
 
 -- After (two steps: substitute + discriminate)
 | error e => simp only [hrb] at h; exact nomatch h
+
+-- After (one step: substitute + discriminate via rewrite in match)
+| error e => exact nomatch (hrb ▸ h)
 ```
+
+The one-step `exact nomatch (hrb ▸ h)` form works when `hrb` rewrites the
+hypothesis into an impossible constructor equality (e.g., `none = some _`).
+It's cleaner than the two-step form and commonly used for `| none =>` branches
+where a `have` already established the substituted value.
 
 **Why `nomatch` works**: `Eq` has one constructor (`rfl`) requiring
 definitional equality. `Except.error _` and `Except.ok _` are different
@@ -646,3 +654,38 @@ Or use `exact absurd (by rw [h]; decide) hne` for contradiction branches.
 
 `ByteArray.mk (Array.mk result.data.toList) = result` is true by **eta reduction** in
 Lean 4 (structures have eta). Just use `rfl` — no `simp`, `ext`, or library lemmas needed.
+
+## `let` Binding Unfolding via `simp only`
+
+Local `let` bindings in Lean proofs are opaque to most tactics but can be
+unfolded by `simp only` using the binding name as a lemma:
+
+```lean
+-- Goal has: let cl := decodeCL ...; ...
+-- simp only [cl] unfolds the let binding
+simp only [cl] at hgo
+```
+
+This is useful when a bare `simp` was doing two things: unfolding a `let`
+binding AND simplifying the result. Split into `simp only [binding_name]`
+for the unfold, then a targeted tactic for the simplification.
+
+**Limitation**: This only works for `let` bindings in the local context.
+For `let` bindings inside definitions, use `unfold` or `simp only [defName]`.
+
+## Lemma Name Discovery: Always Use `simp?`
+
+**Never guess lemma names.** Common mistakes from the bare simp campaign:
+
+| Guessed Name | Actual Name | Why It's Wrong |
+|--------------|-------------|----------------|
+| `not_lt` | `Nat.not_lt` | Needs namespace qualifier |
+| `beq_iff_eq` | `beq_eq_false_iff_ne` | Wrong lemma entirely |
+| `List.not_mem_nil` | ✓ (correct) | This one exists |
+
+**Always use `simp?` discovery** to find the correct lemma names. The
+batch workflow (convert all bare simps to `simp?`, build once, read all
+info messages) is the most reliable and efficient approach.
+
+If `simp?` doesn't suggest a replacement, the bare simp may be
+genuinely resistant — see the "Bare `simp` Resistant Patterns" section.
