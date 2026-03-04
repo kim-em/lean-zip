@@ -433,7 +433,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
   -- Test 40: executeSequences — literals only (0 sequences)
   let litOnly := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]
   match Zip.Native.executeSequences #[] litOnly with
-  | .ok result =>
+  | .ok (result, _) =>
     unless result.data == litOnly.data do
       throw (IO.userError s!"lit only: expected ABCD, got {result.data}")
   | .error e => throw (IO.userError s!"lit only failed: {e}")
@@ -445,7 +445,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     { literalLength := 4, matchLength := 4, offset := 7 }  -- offset 7 = actual 4 (7-3)
   ]
   match Zip.Native.executeSequences simpleSeqs simpleLit with
-  | .ok result =>
+  | .ok (result, _) =>
     let expected := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x41, 0x42, 0x43, 0x44]
     unless result.data == expected.data do
       throw (IO.userError s!"simple match: expected {expected.data}, got {result.data}")
@@ -458,7 +458,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     { literalLength := 1, matchLength := 7, offset := 4 }  -- offset 4 = actual 1 (4-3)
   ]
   match Zip.Native.executeSequences overlapSeqs overlapLit with
-  | .ok result =>
+  | .ok (result, _) =>
     let expected := ByteArray.mk #[0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41]
     unless result.data == expected.data do
       throw (IO.userError s!"overlap match: expected {expected.data}, got {result.data}")
@@ -472,7 +472,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     { literalLength := 4, matchLength := 4, offset := 1 }   -- repeat code 1 → reuses offset 4
   ]
   match Zip.Native.executeSequences repeatSeqs repeatLit with
-  | .ok result =>
+  | .ok (result, _) =>
     -- First seq: ABCD + copy 4 from offset 4 → ABCDABCD
     -- Second seq: EFGH + copy 4 from offset 4 (repeat) → ABCDABCDEFGHEFGH
     let expected := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x41, 0x42, 0x43, 0x44,
@@ -490,7 +490,7 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     { literalLength := 0, matchLength := 5, offset := 1 }   -- shifted: code 1 → history[1]=1
   ]
   match Zip.Native.executeSequences shiftedSeqs shiftedLit with
-  | .ok result =>
+  | .ok (result, _) =>
     -- First seq: ABCDE + copy 5 from offset 5 → ABCDEABCDE
     -- Second seq: 0 literals + copy 5 from offset 1 (shifted: history[1]=1) → EEEEE
     let expected := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x45,
@@ -499,6 +499,63 @@ def ZipTest.ZstdNative.tests : IO Unit := do
     unless result.data == expected.data do
       throw (IO.userError s!"shifted repeat: expected {expected.data}, got {result.data}")
   | .error e => throw (IO.userError s!"shifted repeat failed: {e}")
+
+  -- Test 44b: executeSequences — offset history threading across blocks
+  -- Block 1: establish offset 4 (raw code 7 = 4+3). Block 2 uses repeat code 1
+  -- with the offset history returned from block 1.
+  let block1Lit := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]
+  let block1Seqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 4, matchLength := 4, offset := 7 }  -- actual offset 4
+  ]
+  match Zip.Native.executeSequences block1Seqs block1Lit with
+  | .ok (block1Out, history1) =>
+    -- block1Out should be "ABCDABCD"
+    let expected1 := ByteArray.mk #[0x41, 0x42, 0x43, 0x44, 0x41, 0x42, 0x43, 0x44]
+    unless block1Out.data == expected1.data do
+      throw (IO.userError s!"cross-block history block1: expected {expected1.data}, got {block1Out.data}")
+    -- history1 should be [4, 1, 4] (offset 4 pushed, old [1, 4] shifted right)
+    unless history1[0]! == 4 do
+      throw (IO.userError s!"cross-block history[0]: expected 4, got {history1[0]!}")
+    -- Block 2: use history from block 1, repeat code 1 → reuses offset 4
+    let block2Lit := ByteArray.mk #[0x45, 0x46, 0x47, 0x48]
+    let block2Seqs : Array Zip.Native.ZstdSequence := #[
+      { literalLength := 4, matchLength := 4, offset := 1 }  -- repeat code 1 → history1[0] = 4
+    ]
+    match Zip.Native.executeSequences block2Seqs block2Lit (offsetHistory := history1) with
+    | .ok (block2Out, _) =>
+      -- block2Out: "EFGH" + copy 4 from offset 4 → "EFGHEFGH"
+      let expected2 := ByteArray.mk #[0x45, 0x46, 0x47, 0x48, 0x45, 0x46, 0x47, 0x48]
+      unless block2Out.data == expected2.data do
+        throw (IO.userError s!"cross-block history block2: expected {expected2.data}, got {block2Out.data}")
+    | .error e => throw (IO.userError s!"cross-block history block2 failed: {e}")
+  | .error e => throw (IO.userError s!"cross-block history block1 failed: {e}")
+
+  -- Test 44c: executeSequences — cross-block back-reference via windowPrefix
+  -- Block 1 produces "ABCD". Block 2 references block 1's data via windowPrefix.
+  let prefixData := ByteArray.mk #[0x41, 0x42, 0x43, 0x44]  -- "ABCD" from block 1
+  let block2cLit := ByteArray.mk #[0x45, 0x46]  -- "EF"
+  let block2cSeqs : Array Zip.Native.ZstdSequence := #[
+    { literalLength := 2, matchLength := 4, offset := 9 }  -- actual offset 6 (9-3), reaches into prefix
+  ]
+  match Zip.Native.executeSequences block2cSeqs block2cLit (windowPrefix := prefixData) with
+  | .ok (block2cOut, _) =>
+    -- Working buffer starts as "ABCD" (prefix), then "EF" appended → "ABCDEF"
+    -- Match: offset 6 from position 6 → starts at 0 → copies "ABCD"
+    -- Result (stripped of prefix): "EFABCD"
+    let expected2c := ByteArray.mk #[0x45, 0x46, 0x41, 0x42, 0x43, 0x44]
+    unless block2cOut.data == expected2c.data do
+      throw (IO.userError s!"cross-block prefix: expected {expected2c.data}, got {block2cOut.data}")
+  | .error e => throw (IO.userError s!"cross-block prefix failed: {e}")
+
+  -- Test 44d: executeSequences — prefix stripping (returned output excludes prefix)
+  -- Even with a non-empty prefix and no sequences, only new literals are returned.
+  let prefixOnly := ByteArray.mk #[0x01, 0x02, 0x03]
+  let newLiterals := ByteArray.mk #[0x04, 0x05]
+  match Zip.Native.executeSequences #[] newLiterals (windowPrefix := prefixOnly) with
+  | .ok (result, _) =>
+    unless result.data == newLiterals.data do
+      throw (IO.userError s!"prefix strip: expected {newLiterals.data}, got {result.data}")
+  | .error e => throw (IO.userError s!"prefix strip failed: {e}")
 
   -- Test 45: parseHuffmanWeightsDirect — known byte sequence
   -- Byte 0x35 packs weights [3, 5], byte 0xA1 packs [10, 1]
