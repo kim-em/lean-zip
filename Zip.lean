@@ -62,3 +62,4 @@ import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
 import Zip.Spec.ZstdSequence
 import Zip.Spec.Zstd
+import Zip.Spec.XxHash
