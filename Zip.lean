@@ -41,6 +41,8 @@ import Zip.Native.BitWriter
 import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Native.ZstdFrame
+import Zip.Native.ZstdHuffman
+import Zip.Native.ZstdSequence
 import Zip.Native.XxHash
 import Zip.Native.Fse
 import Zip.Spec.Fse
