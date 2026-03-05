@@ -207,4 +207,53 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String ByteArray :=
       done := true
   return output
 
+/-! ## Zstd Huffman types (RFC 8878 §4.2.1) -/
+
+/-- Entry in a flat Huffman lookup table: symbol value and number of bits consumed. -/
+structure HuffmanEntry where
+  symbol : UInt8
+  numBits : UInt8
+  deriving Repr
+
+/-- A Zstd Huffman table built from weight data: flat lookup array and maximum bit depth. -/
+structure ZstdHuffmanTable where
+  table : Array HuffmanEntry
+  maxBits : Nat
+  deriving Repr
+
+/-- Compute `maxBits` from Huffman weights: the smallest `m` such that
+    `weightSum < 2^m`. Returns error if no non-zero weight exists. -/
+def weightsToMaxBits (_weights : Array UInt8) : Except String Nat := sorry
+
+/-- Build a flat Huffman lookup table from a weight array (RFC 8878 §4.2.1). -/
+def buildZstdHuffmanTable (_weights : Array UInt8) : Except String ZstdHuffmanTable := sorry
+
+/-! ## Zstd sequence types (RFC 8878 §3.1.1.4) -/
+
+/-- A Zstd sequence triple: literal copy length, match copy length, and offset. -/
+structure ZstdSequence where
+  literalLength : Nat
+  matchLength : Nat
+  offset : Nat
+  deriving Repr
+
+/-- Resolve a raw offset value against the 3-entry repeat offset history
+    (RFC 8878 §3.1.1.5). Returns the resolved offset and updated history. -/
+def resolveOffset (rawOffset : Nat) (history : Array Nat) (literalLength : Nat) :
+    Nat × Array Nat :=
+  if rawOffset > 3 then
+    (rawOffset - 3, #[rawOffset - 3, history[0]!, history[1]!])
+  else if literalLength > 0 then
+    match rawOffset with
+    | 1 => (history[0]!, history)
+    | 2 => (history[1]!, #[history[1]!, history[0]!, history[2]!])
+    | 3 => (history[2]!, #[history[2]!, history[0]!, history[1]!])
+    | _ => (history[0]!, history)
+  else
+    match rawOffset with
+    | 1 => (history[1]!, #[history[1]!, history[0]!, history[2]!])
+    | 2 => (history[2]!, #[history[2]!, history[0]!, history[1]!])
+    | 3 => (history[0]! - 1, #[history[0]! - 1, history[1]!, history[2]!])
+    | _ => (history[0]!, history)
+
 end Zip.Native

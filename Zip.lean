@@ -57,3 +57,6 @@ import Zip.Spec.InflateLoopBounds
 import Zip.Spec.InflateRawSuffix
 import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
+import Zip.Spec.HuffmanKraft
+import Zip.Spec.ZstdHuffman
+import Zip.Spec.ZstdSequence
