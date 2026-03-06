@@ -165,4 +165,121 @@ theorem decodeFseDistribution_sum_correct
     cellCount probs = 1 <<< al := by
   sorry
 
+/-! ## Structural properties of `buildFseTable`
+
+These theorems relate the output of `buildFseTable` to the validity
+predicates defined above. The two simplest structural properties are:
+- the accuracy log is passed through unchanged, and
+- the cells array has size `1 <<< accuracyLog`.
+These establish the foundation for the harder conjuncts of `ValidFseTable`
+(symbol bounds, numBits bounds) in future work. -/
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds, the returned accuracy log equals the
+    input accuracy log. This follows directly from the definition of
+    `buildFseTable` which wraps `buildFseTableCells` with unchanged
+    `accuracyLog`. -/
+theorem buildFseTable_accuracyLog_eq (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table) :
+    table.accuracyLog = al := by
+  simp only [buildFseTable, Except.ok.injEq] at h
+  rw [← h]
+
+/-- `List.forIn'.loop` in `Id` preserves any property `P` when every step
+    yields a result satisfying `P`. -/
+private theorem forIn'_loop_inv {α β : Type}
+    (as : List α) (f : (a : α) → a ∈ as → β → Id (ForInStep β))
+    (P : β → Prop)
+    (hf : ∀ a (h : a ∈ as) b, P b →
+      ∃ b', f a h b = ForInStep.yield b' ∧ P b')
+    (rest : List α) (init : β) (hinit : P init)
+    (hsuf : ∃ bs, bs ++ rest = as) :
+    P (List.forIn'.loop (m := Id) as f rest init hsuf) := by
+  induction rest generalizing init with
+  | nil => rw [List.forIn'.loop.eq_1]; exact hinit
+  | cons x xs ih =>
+    rw [List.forIn'.loop.eq_2]; simp only [Bind.bind]
+    have hx : x ∈ as := by
+      obtain ⟨bs, hbs⟩ := hsuf; rw [← hbs]
+      exact List.mem_append_right bs (List.Mem.head xs)
+    obtain ⟨b', hb'eq, hb'P⟩ := hf x hx init hinit
+    simp [hb'eq]; exact ih b' hb'P _
+
+/-- `forIn` on `Std.Legacy.Range` in `Id` equals `forIn` on
+    the corresponding `List.range'`. -/
+private theorem range_forIn_eq_list_forIn {β : Type} (n : Nat) (init : β)
+    (f : Nat → β → Id (ForInStep β)) :
+    forIn (m := Id) [:n] init f = forIn (m := Id) (List.range' 0 n 1) init f := by
+  show ForIn.forIn [:n] init f = ForIn.forIn (List.range' 0 n 1) init f
+  unfold ForIn.forIn; simp only [instForInOfForIn']
+  rw [Std.Legacy.Range.forIn'_eq_forIn'_range']
+  simp [Std.Legacy.Range.size]
+
+/-- `forIn` on `[:n]` in `Id` preserves any property `P` when every step
+    yields a result satisfying `P`. -/
+private theorem range_forIn_inv {β : Type} (n : Nat) (init : β)
+    (f : Nat → β → Id (ForInStep β)) (P : β → Prop) (hinit : P init)
+    (hf : ∀ a b, P b → ∃ b', f a b = ForInStep.yield b' ∧ P b') :
+    P (forIn (m := Id) [:n] init f) := by
+  rw [range_forIn_eq_list_forIn]
+  show P (List.forIn'.loop (m := Id) _ (fun a _ b => f a b) _ init ⟨[], by simp⟩)
+  exact forIn'_loop_inv _ (fun a _ b => f a b) P
+    (fun a _ b hb => hf a b hb) _ init hinit _
+
+/-- Specialized invariant for `forIn` on `[:n]` in `Id`: if every step
+    preserves `fst.size = k` and the `heq` equation decomposes the result,
+    then `result.size = k`. The body function `f` is resolved from `heq`
+    (which is elaborated first), ensuring `f` is concrete when proving `hf`. -/
+private theorem forIn_fst_size_of_heq {α β : Type} {n k : Nat}
+    {init : MProd (Array α) β}
+    {f : Nat → MProd (Array α) β → Id (ForInStep (MProd (Array α) β))}
+    {result : Array α} {rest : β}
+    (heq : forIn (m := Id) [:n] init f = ⟨result, rest⟩)
+    (hinit : init.fst.size = k)
+    (hf : ∀ a b, b.fst.size = k → ∃ b', f a b = ForInStep.yield b' ∧ b'.fst.size = k) :
+    result.size = k := by
+  have h := range_forIn_inv n init f (fun r => r.fst.size = k) hinit hf
+  rw [heq] at h; exact h
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds, the cells array has size `1 <<< al`.
+    This follows because `buildFseTableCells` initializes cells with
+    `Array.replicate (1 <<< al) default` and only modifies them via
+    `Array.set!` which preserves size. -/
+theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table) :
+    table.cells.size = 1 <<< al := by
+  simp only [buildFseTable, Except.ok.injEq] at h
+  rw [← h]
+  unfold buildFseTableCells
+  simp only [Id.run, pure, Pure.pure, Bind.bind]
+  -- Destructure the 3 sequential match/forIn passes
+  split; rename_i r₁ cells₁ _ _ heq₁
+  split; rename_i r₂ cells₂ _ heq₂
+  split; rename_i r₃ cells₃ _ heq₃
+  -- Pass 1: cells₁.size = 1 <<< al (yield-only, set! preserves size)
+  have h₁ : cells₁.size = 1 <<< al :=
+    forIn_fst_size_of_heq heq₁ (by simp) (fun _ b hb => by
+      split
+      · exact ⟨_, rfl, by simp [Array.size_setIfInBounds, hb]⟩
+      · exact ⟨_, rfl, hb⟩)
+  -- Pass 2: cells₂.size = 1 <<< al (nested inner loop, but set! preserves size)
+  have h₂ : cells₂.size = 1 <<< al :=
+    forIn_fst_size_of_heq heq₂ h₁ (fun _ b hb => by
+      split
+      · exact ⟨_, rfl, hb⟩  -- prob ≤ 0: fst unchanged
+      · -- else case: inner forIn + match destructuring
+        split; rename_i ic ip heq_inner
+        exact ⟨⟨ic, ip⟩, rfl, forIn_fst_size_of_heq heq_inner hb
+          (fun _ b' h' => ⟨_, rfl, by simp [Array.size_setIfInBounds, h']⟩)⟩)
+  -- Pass 4: cells₃.size = 1 <<< al (set! preserves size)
+  have h₃ : cells₃.size = 1 <<< al :=
+    forIn_fst_size_of_heq heq₃ h₂ (fun _ b hb => by
+      split
+      · exact ⟨_, rfl, hb⟩  -- sym >= probs.size
+      · split
+        · exact ⟨_, rfl, hb⟩  -- count == 0
+        · exact ⟨_, rfl, by simp [Array.size_setIfInBounds, hb]⟩)
+  exact h₃
+
 end Zstd.Spec.Fse

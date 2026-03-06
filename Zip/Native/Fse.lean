@@ -114,11 +114,11 @@ def decodeFseDistribution (br : Zip.Native.BitReader) (maxSymbols : Nat)
     throw s!"FSE: probabilities don't sum to table size: {remaining} remaining"
   return (probs, accuracyLog, br)
 
-/-- Build an FSE decoding table from a probability distribution.
-    `probs` is the array from `decodeFseDistribution`.
-    `accuracyLog` determines the table size (1 << accuracyLog cells). -/
-def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
-    Except String FseTable := do
+/-- Pure computation of FSE decoding table cells from a probability distribution.
+    This is the core algorithm separated from the `Except` wrapper in `buildFseTable`.
+    The function never fails, so the `Except` wrapper was only for API uniformity
+    with `decodeFseDistribution`. -/
+def buildFseTableCells (probs : Array Int32) (accuracyLog : Nat) : Array FseCell := Id.run do
   let tableSize := 1 <<< accuracyLog
   let tableMask := tableSize - 1
   -- Step constant: (tableSize >> 1) + (tableSize >> 3) + 3
@@ -173,7 +173,14 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
     cells := cells.set! i
       { symbol := cells[i]!.symbol, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
     symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
-  return { accuracyLog, cells }
+  return cells
+
+/-- Build an FSE decoding table from a probability distribution.
+    `probs` is the array from `decodeFseDistribution`.
+    `accuracyLog` determines the table size (1 << accuracyLog cells). -/
+def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
+    Except String FseTable :=
+  .ok { accuracyLog, cells := buildFseTableCells probs accuracyLog }
 
 /-- Backward bitstream reader for Zstd (RFC 8878 §4.1).
 
