@@ -8,9 +8,9 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 5 (3 XxHash.lean, 1 ZstdHuffman.lean, 1 Fse.lean)
-- **Sessions**: ~328 completed (Feb 19 – Mar 6)
+- **Sessions**: ~341 completed (Feb 19 – Mar 6)
 - **Source files**: 100 (48 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 295
+- **Merged PRs**: 308
 - **Bare simp**: 0 remaining — campaign complete (48 spec files, ZipForStd/, Native/ all clean)
 
 ## Milestones
@@ -447,46 +447,89 @@ mode parsing, multi-frame support, and checksum verification.
   `decodeLitLenValue_small`, `decodeMatchLenValue_small`,
   `decodeOffsetValue_positive` — RFC table sizes and decoded value bounds
 
-**Conformance testing (#680):**
+**Conformance testing (#680, #686):**
 - End-to-end test matrix: 48 combinations of FFI compress → native decompress
   across 4 compression levels × 4 data patterns × 3 sizes
 - Tests in `ZipTest/ZstdConformance.lean`
+- 36/48 passing (12 text-pattern Huffman failures, known bug tracked in #703)
+
+**Spec proofs (12-PR batch, Mar 6):**
+
+This batch deepened the sequence execution spec toolkit in ZstdSequence.lean
+(now 47 theorems/lemmas, 740 lines) across three areas:
+
+*Sequence execution framework:*
+- #700: `executeSequences_empty` (base case), `executeSequences_loop_output_size_ge`
+  (output size monotonicity)
+- #714: `executeSequences_loop_cons` (single-step unfolding),
+  `executeSequences_loop_cons_output_size` (output size composition)
+
+*Content theorems and value bounds:*
+- #690: `copyBytes_getElem_ge` and `copyMatch_getElem_ge` — content of newly
+  written bytes during sequence execution
+- #704: `copyMatch_loop_getElem_ge` and `copyMatch_getElem_ge` — general
+  content theorem for copyMatch including overlapping regions (subsumes the
+  non-overlapping case)
+- #705: `decodeMatchLenValue_ge_three` and `decodeOffsetValue_ge_two` — RFC
+  8878 value decoding bounds via `decide_cbv`
+
+*resolveOffset completeness:*
+- #687: `resolveOffset_shifted1_val`, `resolveOffset_shifted2_val`,
+  `resolveOffset_shifted3_val` — exact values and history rotation for shifted
+  repeat offsets (litLen = 0 case)
+- #695: `resolveOffset_history_valid_large` and
+  `resolveOffset_history_valid_repeat` — ValidOffsetHistory preservation
+- #710: `resolveOffset_positive_shifted12` (shifted repeat codes 1–2 positivity),
+  `resolveOffset_positive_all` (unified positivity covering all cases)
+
+*Infrastructure:*
+- #694, #699: stale PR cleanup (closed #686 duplicate, #689) + composability
+  audit identifying 4 gaps in the executeSequences proof path
+- #711: skills update — added WF helper functions, table correctness,
+  exhaustive case analysis, loop invariant sections to lean-zstd-spec-pattern;
+  added split/letFun chains, inline show proofs to lean-monad-proofs
 
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation), 1 in ZstdHuffman
   (`weightsToMaxBits_valid`), 1 in Fse (`buildFseTable_cells_size`
   requires `forIn` loop invariant)
+- Fix Huffman content mismatch in 12 text-pattern conformance tests (#703,
+  claimed and in progress)
 - Spec-level decoder with correctness proofs (algorithmic correspondence
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
 
-**Summary:** Track E has progressed from "all block types decompressing"
-to "all block types decompressing with growing spec coverage." The 14-PR
-batch since the last summary added WF refactoring for proof-friendliness
-(decompressBlocks, Huffman fill loops), block-level correctness theorems
-(content preservation, position advance), sequence execution properties
-(prefix preservation, offset exact values, extra bits bounds), and a
-conformance test matrix. The sorry count dropped from 7 to 5, with one
-ZstdHuffman sorry eliminated by the fill loop WF refactoring.
+**Summary:** Track E spec coverage has grown substantially. The Zstd spec
+infrastructure now spans 5 files with 124 theorems/lemmas: ZstdSequence (47),
+ZstdHuffman (26), Fse (20), XxHash (16), Zstd (15). ZstdSequence.lean in
+particular has become the most active proof surface, growing from ~15 theorems
+to 47 over the last two batches.
 
-Five Zstd spec files cover frame, FSE, XxHash, Huffman, and sequence
-semantics. The remaining 5 sorries are in areas where kernel evaluation
-limits prevent `decide`-based proofs (3 UInt64 test vectors in XxHash) or
-where opaque `forIn` loops resist specification (1 Fse, 1 ZstdHuffman).
-The next major milestone is a spec-level Zstd decoder for algorithmic
-correspondence proofs.
+The sequence execution toolkit is approaching proof readiness for end-to-end
+correctness: base case, monotonicity, single-step unfolding, and content
+theorems are in place. The resolveOffset function is now fully characterized
+(exact values for all cases, positivity, history validity preservation). The
+composability audit (#699) identified 4 gaps in the executeSequences proof
+path, of which 3 were addressed in this batch.
+
+The sorry count is stable at 5, all in areas where kernel evaluation limits
+(3 UInt64 test vectors) or opaque loop structures (1 Fse, 1 ZstdHuffman)
+prevent automation. The 36/48 conformance test pass rate is blocked by a
+known Huffman content mismatch bug (#703). The next major milestone is a
+spec-level Zstd decoder for algorithmic correspondence proofs.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~328 sessions (Feb 19 – Mar 6)
-- 295 merged PRs
+- ~341 sessions (Feb 19 – Mar 6)
+- 308 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
-  `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623),
-  `lean-monad-proofs` (updated #623)
-- **Open PR health**: 1 open PR (#686, conformance test matrix — merge conflict)
+  `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623,
+  updated #711), `lean-monad-proofs` (updated #711)
+- **Open PR health**: 1 open PR (#707, stale duplicate of merged #700 — should
+  be closed). #622 and #610 are claimed but stale.
