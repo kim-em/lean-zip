@@ -101,16 +101,8 @@ def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTab
   -- Build the flat lookup table
   let tableSize := 1 <<< maxBits
   let mut table : Array HuffmanEntry := Array.replicate tableSize default
-  -- For each symbol with weight W > 0: numberOfBits = maxBits + 1 - W
-  -- Each symbol occupies tableSize / 2^W entries (= 2^(maxBits - W) entries if W < maxBits+1,
-  -- but more precisely: numberOfBits = maxBits + 1 - W, and the symbol fills
-  -- 1 << (maxBits - numberOfBits) = 1 << (W - 1) entries).
-  -- Wait — that's the number of distinct codes for this symbol.
-  -- Each code prefix occupies 2^(maxBits - numberOfBits) = 2^(W-1) table entries.
-  -- Actually: numberOfBits for symbol = maxBits + 1 - W
-  -- Number of table entries per code = 2^(maxBits - numberOfBits) = 2^(W-1)
-  -- Number of codes for this symbol = count (we have 1 code per symbol in Huffman)
-  -- So each symbol with weight W fills 2^(W-1) table entries.
+  -- For each symbol with weight W > 0: numberOfBits = maxBits + 1 - W,
+  -- and each symbol fills 2^(W-1) table entries.
 
   -- Assign codes: sort symbols by weight (ascending), then assign sequential codes.
   -- Within each weight group, symbols are in ascending order.

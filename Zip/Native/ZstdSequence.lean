@@ -26,8 +26,11 @@ inductive SequenceCompressionMode where
 
 /-- Parsed compression modes for the three sequence symbol types. -/
 structure SequenceCompressionModes where
+  /-- How literal length codes are encoded. -/
   litLenMode  : SequenceCompressionMode
+  /-- How offset codes are encoded. -/
   offsetMode  : SequenceCompressionMode
+  /-- How match length codes are encoded. -/
   matchLenMode : SequenceCompressionMode
   deriving Repr
 
@@ -391,8 +394,11 @@ def resolveSingleFseTable (mode : SequenceCompressionMode) (maxSymbols : Nat)
 
 /-- Previous block's FSE tables for Repeat mode (mode 3). -/
 structure PrevFseTables where
+  /-- Previous block's literal length FSE table. -/
   litLen : Option FseTable := none
+  /-- Previous block's offset FSE table. -/
   offset : Option FseTable := none
+  /-- Previous block's match length FSE table. -/
   matchLen : Option FseTable := none
 
 /-- Resolve all three FSE tables for sequence decoding from their compression modes
