@@ -307,27 +307,45 @@ def skipSkippableFrame (data : ByteArray) (pos : Nat) : Except String Nat := do
     throw "Zstd: not enough data for skippable frame content"
   return afterFrame
 
+/-- Well-founded recursive frame loop for `decompressZstd`.
+    Processes concatenated Zstd frames one at a time, dispatching on the
+    4-byte magic number to either skip skippable frames or decompress
+    standard Zstd frames.  Uses explicit recursion with
+    `termination_by data.size - pos` so the function is unfoldable in proofs
+    (unlike the opaque `forIn` from `while`). -/
+def decompressZstdWF (data : ByteArray) (pos : Nat) (output : ByteArray) :
+    Except String ByteArray :=
+  if hpos : pos ≥ data.size then
+    return output
+  else do
+    if data.size < pos + 4 then
+      throw "Zstd: trailing data too short for frame magic number"
+    let magic := Binary.readUInt32LE data pos
+    if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
+      let afterFrame ← skipSkippableFrame data pos
+      if hadv : afterFrame ≤ pos then
+        throw "Zstd: skippable frame did not advance position"
+      else
+        have : data.size - afterFrame < data.size - pos := by omega
+        decompressZstdWF data afterFrame output
+    else if magic == zstdMagic then
+      let (content, afterFrame) ← decompressFrame data pos
+      if hadv : afterFrame ≤ pos then
+        throw "Zstd: frame did not advance position"
+      else
+        have : data.size - afterFrame < data.size - pos := by omega
+        decompressZstdWF data afterFrame (output ++ content)
+    else
+      throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} at offset {pos} (expected 0xFD2FB528 or skippable frame)"
+termination_by data.size - pos
+
 /-- Top-level Zstd decompression: loops over all frames in the input,
     decompressing Zstd frames and skipping skippable frames (RFC 8878 §3.1).
     Returns the concatenated decompressed content from all Zstd frames.
     An input containing only skippable frames (or empty) returns an empty ByteArray.
     Trailing bytes that are neither a valid Zstd frame nor a skippable frame
     produce an error. -/
-def decompressZstd (data : ByteArray) : Except String ByteArray := do
-  let mut pos := 0
-  let mut output := ByteArray.empty
-  while pos < data.size do
-    if data.size < pos + 4 then
-      throw "Zstd: trailing data too short for frame magic number"
-    let magic := Binary.readUInt32LE data pos
-    if magic >= 0x184D2A50 && magic <= 0x184D2A5F then
-      pos ← skipSkippableFrame data pos
-    else if magic == zstdMagic then
-      let (content, afterFrame) ← decompressFrame data pos
-      output := output ++ content
-      pos := afterFrame
-    else
-      throw s!"Zstd: invalid magic number 0x{String.ofList (Nat.toDigits 16 magic.toNat)} at offset {pos} (expected 0xFD2FB528 or skippable frame)"
-  return output
+def decompressZstd (data : ByteArray) : Except String ByteArray :=
+  decompressZstdWF data 0 ByteArray.empty
 
 end Zip.Native
