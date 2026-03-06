@@ -340,12 +340,13 @@ theorem deflateFixed_spec (data : ByteArray) :
 
 open Deflate.Spec in
 /-- If spec `decode` succeeds on the bits of a bytestream, native `inflate`
-    also succeeds with the same result. Restricted to inputs within
-    size limits. -/
+    also succeeds with the same result, for any `maxOutputSize` large enough
+    to hold the result. -/
 theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
-    (hsize : result.length ≤ 1024 * 1024 * 1024)
+    (maxOutputSize : Nat)
+    (hsize : result.length ≤ maxOutputSize)
     (hdec : decode (bytesToBits bytes) = some result) :
-    Zip.Native.Inflate.inflate bytes =
+    Zip.Native.Inflate.inflate bytes maxOutputSize =
     .ok ⟨⟨result⟩⟩ := by
   -- Unfold inflate: it calls inflateRaw then discards endPos
   simp only [Inflate.inflate, bind, Except.bind]
@@ -368,18 +369,18 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   obtain ⟨endPos, hloop⟩ :=
     Deflate.Correctness.inflateLoop_complete
       ⟨bytes, 0, 0⟩ .empty fixedLit fixedDist
-      (1024 * 1024 * 1024) bytes.size result
+      maxOutputSize bytes.size result
       hbr_wf hbr_pos (by simp only [Nat.zero_le]) (by simp only [Nat.le_refl]) hflit hfdist hsize hgo
   rw [hloop]; simp only [pure, Except.pure]
 
 /-! ## Main roundtrip theorem -/
 
 /-- Native Level 1 roundtrip: compressing with fixed Huffman codes then
-    decompressing recovers the original data. The size bound comes from the
-    spec decoder's per-block fuel limit (10^18 symbols, one per byte worst case). -/
+    decompressing recovers the original data. Generalized to any
+    `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateFixed (data : ByteArray)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateFixed data) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateFixed data) maxOutputSize = .ok data := by
   -- Step 1: deflateFixed_spec gives bits and bytesToBits relationship
   obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateFixed_spec data
   -- Step 2: Extract allBits from encodeFixed
@@ -407,8 +408,8 @@ theorem inflate_deflateFixed (data : ByteArray)
         (lz77Greedy_resolves data 32768 (by omega))
         (tokensToSymbols_validSymbolList _)
     -- Step 4: inflate_complete bridges spec decode to native inflate
-    have hinf := inflate_complete (deflateFixed data) data.data.toList
-      (by simp only [Array.length_toList, ByteArray.size_data, Nat.reduceMul]; omega) hdec
+    have hinf := inflate_complete (deflateFixed data) data.data.toList maxOutputSize
+      (by simp only [Array.length_toList, ByteArray.size_data]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
 /-! ## Iterative LZ77 equivalence -/
@@ -503,11 +504,11 @@ theorem lz77GreedyIter_eq_lz77Greedy (data : ByteArray) (ws : Nat) :
 /-- Roundtrip for the iterative fixed Huffman compressor.
     Follows from `lz77GreedyIter_eq_lz77Greedy` + `inflate_deflateFixed`. -/
 theorem inflate_deflateFixedIter (data : ByteArray)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateFixedIter data) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateFixedIter data) maxOutputSize = .ok data := by
   unfold deflateFixedIter
   rw [lz77GreedyIter_eq_lz77Greedy]
-  exact inflate_deflateFixed data hsize
+  exact inflate_deflateFixed data maxOutputSize hsize
 
 /-- `deflateLazy` produces a bytestream whose bits are the spec-level
     fixed Huffman encoding of the lazy LZ77 tokens. -/
@@ -530,11 +531,11 @@ theorem deflateLazy_spec (data : ByteArray) :
       simp only [this])
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
-    then decompressing recovers the original data. The size bound comes from the
-    spec decoder's fuel limit (10^18 symbols, up to 2 per byte for lazy). -/
+    then decompressing recovers the original data. Generalized to any
+    `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateLazy (data : ByteArray)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateLazy data) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateLazy data) maxOutputSize = .ok data := by
   obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateLazy_spec data
   simp only [Deflate.Spec.encodeFixed] at henc_fixed
   cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
@@ -557,8 +558,8 @@ theorem inflate_deflateLazy (data : ByteArray)
         data.data.toList allBits _ henc_syms
         (lz77Lazy_resolves data 32768 (by omega))
         (tokensToSymbols_validSymbolList _)
-    have hinf := inflate_complete (deflateLazy data) data.data.toList
-      (by simp only [Array.length_toList, ByteArray.size_data, Nat.reduceMul]; omega) hdec
+    have hinf := inflate_complete (deflateLazy data) data.data.toList maxOutputSize
+      (by simp only [Array.length_toList, ByteArray.size_data]; omega) hdec
     simp only at hinf ⊢; exact hinf
 
 /-! ## Iterative lazy LZ77 equivalence -/
@@ -653,10 +654,10 @@ theorem deflateLazyIter_eq_deflateLazy (data : ByteArray) :
 /-- Roundtrip for the iterative lazy Huffman compressor.
     Follows from `deflateLazyIter_eq_deflateLazy` + `inflate_deflateLazy`. -/
 theorem inflate_deflateLazyIter (data : ByteArray)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateLazyIter data) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateLazyIter data) maxOutputSize = .ok data := by
   rw [deflateLazyIter_eq_deflateLazy]
-  exact inflate_deflateLazy data hsize
+  exact inflate_deflateLazy data maxOutputSize hsize
 
 -- inflate_deflateDynamic is proved in DeflateDynamicCorrect.lean
 -- (to avoid circular imports)

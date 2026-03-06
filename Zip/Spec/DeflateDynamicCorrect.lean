@@ -419,11 +419,11 @@ theorem deflateDynamic_spec (data : ByteArray) :
         omega
 
 /-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
-    codes then decompressing recovers the original data.
-    Size bound: same as `inflate_deflateFixed`. -/
+    codes then decompressing recovers the original data. Generalized to any
+    `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateDynamic (data : ByteArray)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateDynamic data) maxOutputSize = .ok data := by
   have hspec := deflateDynamic_spec data
   match hspec with
   | ⟨litLens, distLens, headerBits, symBits, hv_lit, hv_dist,
@@ -454,9 +454,9 @@ theorem inflate_deflateDynamic (data : ByteArray)
         henc_syms
         (lz77Greedy_resolves data 32768 (by omega))
         (tokensToSymbols_validSymbolList _)
-    have hlen : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
+    have hlen : data.data.toList.length ≤ maxOutputSize := by
       simp only [Array.length_toList, ByteArray.size_data]; omega
     rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
-    exact inflate_complete (deflateDynamic data) data.data.toList hlen hdec_padded
+    exact inflate_complete (deflateDynamic data) data.data.toList maxOutputSize hlen hdec_padded
 
 end Zip.Native.Deflate

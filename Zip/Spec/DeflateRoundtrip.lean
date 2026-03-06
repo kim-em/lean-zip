@@ -23,20 +23,19 @@ namespace Zip.Native.Deflate
 open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
-    This is the Phase B4 capstone theorem from PLAN.md.
-    The size bound (1 GiB) is now determined by the native inflate's default
-    maxOutputSize, not the decoder fuel (which supports ~500 PB). -/
+    This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
+    `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateRaw data level) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   split
   · exact inflate_deflateStoredPure data _ (by omega)
   · split
-    · exact inflate_deflateFixedIter data (by omega)
+    · exact inflate_deflateFixedIter data _ (by omega)
     · split
-      · exact inflate_deflateLazyIter data hsize
-      · exact inflate_deflateDynamic data (by omega)
+      · exact inflate_deflateLazyIter data _ hsize
+      · exact inflate_deflateDynamic data _ (by omega)
 
 /-- The output of `deflateRaw` decomposes into content bits plus short padding.
     This is needed by `inflateRaw_endPos_ge` to establish that the native decoder
