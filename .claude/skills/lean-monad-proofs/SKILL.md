@@ -12,6 +12,35 @@ In `Option`/`Except` monads, `return` inside a `for` loop exits the loop (produc
 `some`), not the function. Use explicit recursive helper functions instead — they're
 also easier to reason about in proofs. Reserve `for`/`while` for `IO` code.
 
+**Critical reason: `while` loops are unprovable.** `while` in do-notation desugars
+to `Lean.Loop.forIn`, which internally calls `Lean.Loop.forIn.loop` — a `partial`
+definition. The kernel treats `partial` defs as axioms: they cannot be unfolded,
+have no equation lemmas, and no properties can be proven about them.
+
+**Workaround for existing `while`-based functions** (e.g., `weightsToMaxBits`):
+1. Define a pure WF-recursive function that mirrors the loop logic
+2. Prove properties about the pure version (sorry-free)
+3. Bridge with a sorry: `imperativeVersion = pureVersion := by sorry`
+4. Derive properties of the imperative version via the bridge
+
+```lean
+-- Pure spec version of a while loop that doubles `power` until `power ≥ ws`
+def findMaxBitsLoop (ws bits power : Nat) (hpow : power ≥ 1) : Nat × Nat :=
+  if h : power < ws then findMaxBitsLoop ws (bits + 1) (power * 2) (by omega)
+  else (bits, power)
+termination_by ws - power
+
+-- Bridge (inherently sorry — partial defs are axioms)
+theorem imperativeVersion_eq_spec : imperativeVersion x = pureSpec x := by sorry
+
+-- Derive properties via the bridge
+theorem imperativeVersion_valid : P (imperativeVersion x) := by
+  rw [imperativeVersion_eq_spec]; exact pureSpec_valid x
+```
+
+This sorry is **irreducible** — it can only be eliminated by refactoring the
+implementation to use explicit recursion instead of `while`.
+
 ## Unfolding do-notation with `Except.bind`
 
 When a hypothesis `h` contains a `do` block (`let x ← f; g x`), use `cases hrd : f`
