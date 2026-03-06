@@ -13,32 +13,20 @@ private def mkSequentialData (size : Nat) : ByteArray := Id.run do
     result := result.push (i % 256).toUInt8
   return result
 
-/-- Known pre-existing Huffman weight parsing bug. -/
-private def isKnownHuffmanBug (e : String) : Bool :=
-  e.contains "Huffman" || e.contains "power of 2"
-
-/-- Test a single FFI compress → native decompress roundtrip.
-    Returns .pass, .knownFail (pre-existing bug), or .fail (unexpected). -/
-private inductive TestResult | pass | knownFail | fail
-
+/-- Test a single FFI compress → native decompress roundtrip. -/
 private def testRoundtrip (input : ByteArray) (level : UInt8)
-    (label : String) (knownContentBug : Bool := false) : IO TestResult := do
+    (label : String) : IO Bool := do
   let compressed ← Zstd.compress input level
   match Zip.Native.decompressZstd compressed with
   | .ok result =>
     if result.data == input.data then
-      return .pass
-    else if knownContentBug then
-      return .knownFail
+      return true
     else
       IO.eprintln s!"  FAIL {label}: content mismatch (expected {input.size}, got {result.size})"
-      return .fail
+      return false
   | .error e =>
-    if isKnownHuffmanBug e then
-      return .knownFail
-    else
       IO.eprintln s!"  FAIL {label}: {e}"
-      return .fail
+      return false
 
 def ZipTest.ZstdConformance.tests : IO Unit := do
   -- === Conformance test matrix ===
@@ -48,7 +36,6 @@ def ZipTest.ZstdConformance.tests : IO Unit := do
   let patternNames := #["zeros", "sequential", "text", "prng"]
 
   let mut passed : Nat := 0
-  let mut knownFails : Nat := 0
   let mut failed : Nat := 0
 
   for level in levels do
@@ -61,16 +48,15 @@ def ZipTest.ZstdConformance.tests : IO Unit := do
           | 2 => mkTextData size
           | _ => mkPrngData size
         let label := s!"level={level} pattern={patName} size={sizeName size}"
-        -- Text pattern has known Huffman decode content mismatch
-        let isTextBug := patName == "text"
-        match ← testRoundtrip input level label (knownContentBug := isTextBug) with
-        | .pass => passed := passed + 1
-        | .knownFail => knownFails := knownFails + 1
-        | .fail => failed := failed + 1
+        if ← testRoundtrip input level label then
+          passed := passed + 1
+        else
+          failed := failed + 1
 
-  IO.println s!"Conformance matrix: {passed} passed, {knownFails} known failures (Huffman bug), {failed} unexpected failures"
+  let total := passed + failed
+  IO.println s!"Conformance matrix: {passed}/{total} passed, {failed} failures"
   if failed > 0 then
-    throw (IO.userError s!"Zstd conformance: {failed} unexpected test failures")
+    throw (IO.userError s!"Zstd conformance: {failed} test failures")
 
   -- === Multi-block frame tests ===
   -- 1MB input forces multiple blocks at most compression levels
@@ -78,10 +64,9 @@ def ZipTest.ZstdConformance.tests : IO Unit := do
   let bigInput := mkTextData bigSize
   for level in #[(1 : UInt8), 3] do
     let label := s!"multi-block level={level} size=1MB"
-    -- Text data has known Huffman decode content mismatch
-    match ← testRoundtrip bigInput level label (knownContentBug := true) with
-    | .pass => IO.println s!"  Multi-block {label}: OK"
-    | .knownFail => IO.println s!"  Multi-block {label}: known Huffman bug"
-    | .fail => throw (IO.userError s!"Multi-block test failed: {label}")
+    if ← testRoundtrip bigInput level label then
+      IO.println s!"  Multi-block {label}: OK"
+    else
+      throw (IO.userError s!"Multi-block test failed: {label}")
 
   IO.println "ZstdConformance tests: OK"
