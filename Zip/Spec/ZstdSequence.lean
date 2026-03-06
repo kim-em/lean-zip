@@ -390,6 +390,35 @@ theorem parseSequencesHeader_byte0_zero (data : ByteArray) (pos : Nat)
   simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte, hbyte,
     beq_self_eq_true]
 
+/-! ## buildRleFseTable structural properties -/
+
+/-- The accuracy log of an RLE FSE table is always 0. -/
+theorem buildRleFseTable_accuracyLog (symbol : UInt8) :
+    (buildRleFseTable symbol).accuracyLog = 0 := by
+  rfl
+
+/-- The RLE FSE table has exactly 1 cell. -/
+theorem buildRleFseTable_cells_size (symbol : UInt8) :
+    (buildRleFseTable symbol).cells.size = 1 := by
+  rfl
+
+/-! ## resolveSingleFseTable position properties -/
+
+/-- In predefined mode, the position is unchanged. -/
+theorem resolveSingleFseTable_predefined_pos (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .predefined maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    pos' = pos := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · simp at h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    exact h.2.symm
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
