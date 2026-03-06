@@ -465,23 +465,106 @@ theorem readBits_error_of_isFinished (br : BackwardBitReader) (n : Nat)
   simp only [BackwardBitReader.readBits, BackwardBitReader.readBits.go, hfin]
   exact ⟨_, rfl⟩
 
+/-! ## forIn always-ok lemmas -/
+
+/-- `List.forIn'.loop` in `Except` always returns `.ok` when the body never throws. -/
+private theorem forIn'_loop_always_ok {α β ε : Type}
+    (as curr : List α) (init : β)
+    (f : α → β → Except ε (ForInStep β))
+    (h_ok : ∀ a b, ∃ r, f a b = .ok r)
+    (hsuf : ∃ bs, bs ++ curr = as) :
+    ∃ result, List.forIn'.loop as (fun a _ b => f a b) curr init hsuf = .ok result := by
+  induction curr generalizing init with
+  | nil =>
+    unfold List.forIn'.loop
+    exact ⟨init, rfl⟩
+  | cons x xs ih =>
+    unfold List.forIn'.loop
+    dsimp only [Bind.bind, Except.bind]
+    obtain ⟨r, hr⟩ := h_ok x init
+    rw [hr]
+    cases r with
+    | done b' => exact ⟨b', rfl⟩
+    | yield b' => exact ih b' _
+
+/-- `forIn` over a range in `Except` always returns `.ok` when the body never throws. -/
+private theorem forIn_range_always_ok {β ε : Type} (n : Nat) (init : β)
+    (f : Nat → β → Except ε (ForInStep β))
+    (h_ok : ∀ i b, ∃ r, f i b = .ok r) :
+    ∃ result, forIn [:n] init f = .ok result := by
+  rw [Std.Legacy.Range.forIn_eq_forIn_range']
+  exact forIn'_loop_always_ok _ _ init (fun a b => f a b) h_ok _
+
+/-! ## buildFseTable always succeeds -/
+
+/-- If `x` always returns `.ok` and `f` always returns `.ok`, then `x >>= f`
+    always returns `.ok`. -/
+private theorem Except.bind_always_ok {α β ε : Type} {x : Except ε α}
+    {f : α → Except ε β}
+    (hx : ∃ a, x = .ok a) (hf : ∀ a, ∃ b, f a = .ok b) :
+    ∃ b, (x >>= f) = .ok b := by
+  obtain ⟨a, ha⟩ := hx
+  obtain ⟨b, hb⟩ := hf a
+  exact ⟨b, by rw [ha]; exact hb⟩
+
+open Zip.Native in
+/-- `buildFseTable` always succeeds — its body contains only pure array
+    operations (set!, replicate, arithmetic) and never throws. -/
+theorem buildFseTable_ok (probs : Array Int32) (al : Nat) :
+    ∃ table, buildFseTable probs al = .ok table := by
+  simp only [buildFseTable]
+  -- The goal is a chain of binds over 4 forIn loops, ending with pure.
+  -- Each loop body only returns .ok (.yield _), so each loop succeeds.
+  apply Except.bind_always_ok
+  · -- Loop 1: place -1 symbols (both branches return .ok (.yield _))
+    exact forIn_range_always_ok _ _ _ (fun i b => by
+      simp only [bind, Except.bind, pure, Except.pure]
+      split <;> exact ⟨_, rfl⟩)
+  · intro v1
+    apply Except.bind_always_ok
+    · -- Loop 2: distribute symbols (body contains nested forIn)
+      exact forIn_range_always_ok _ _ _ (fun i b => by
+        simp only [bind, Except.bind, pure, Except.pure]
+        split
+        · exact ⟨_, rfl⟩
+        · -- Nested forIn inside a bind chain
+          apply Except.bind_always_ok
+          · exact forIn_range_always_ok _ _ _
+              (fun j c => ⟨_, rfl⟩)
+          · intro r; exact ⟨_, rfl⟩)
+    · intro v2
+      apply Except.bind_always_ok
+      · -- Loop 3: count symbols (both branches return .ok (.yield _))
+        exact forIn_range_always_ok _ _ _ (fun i b => by
+          simp only [bind, Except.bind, pure, Except.pure]
+          split <;> exact ⟨_, rfl⟩)
+      · intro v3
+        apply Except.bind_always_ok
+        · -- Loop 4: compute numBits/newState (three branches, all return .ok (.yield _))
+          exact forIn_range_always_ok _ _ _ (fun i b => by
+            simp only [bind, Except.bind, pure, Except.pure]
+            split
+            · exact ⟨_, rfl⟩
+            · split <;> exact ⟨_, rfl⟩)
+        · intro v4
+          exact ⟨_, rfl⟩
+
 /-! ## Structural properties of `buildPredefinedFseTables` -/
 
 open Zip.Native in
 /-- `buildPredefinedFseTables` succeeds: the three predefined distributions
     are well-formed and `buildFseTable` accepts them.
 
-    Note: `buildFseTable` never throws — its body contains only pure array
-    operations. However, it uses a `while` loop which desugars to
-    `Lean.Loop.forIn`, a `partial def` whose body is opaque to the kernel.
-    This prevents `decide`, `rfl`, or structural proof techniques from
-    verifying success. The `native_decide` tactic could evaluate this but
-    is forbidden in this codebase. Runtime tests (`lake exe test`) confirm
-    the computation succeeds. To remove this sorry, refactor the `while`
-    loop in `buildFseTable` to use well-founded recursion. -/
+    This follows from `buildFseTable_ok`, which shows `buildFseTable` always
+    succeeds — its body contains only pure array operations and never throws. -/
 theorem buildPredefinedFseTables_success :
     ∃ tables, buildPredefinedFseTables = Except.ok tables := by
-  sorry
+  simp only [buildPredefinedFseTables]
+  obtain ⟨ll, hll⟩ := buildFseTable_ok predefinedLitLenDistribution 6
+  obtain ⟨ml, hml⟩ := buildFseTable_ok predefinedMatchLenDistribution 6
+  obtain ⟨of, hof⟩ := buildFseTable_ok predefinedOffsetDistribution 5
+  rw [hll, hml, hof]
+  exact ⟨_, rfl⟩
 
 open Zip.Native in
 /-- When `buildPredefinedFseTables` succeeds, the three tables have the
