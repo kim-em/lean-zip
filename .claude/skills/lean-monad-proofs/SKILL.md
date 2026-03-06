@@ -428,6 +428,28 @@ The key insight: `obtain ⟨rfl, rfl⟩` substitutes the struct into the goal,
 replacing `hdr.field2` with the concrete constructor (e.g., `.raw`). Only
 then can `nomatch` (or `decide`) discriminate the constructors.
 
+### `subst` leaves struct projections unreduced
+
+When `h : { field1 := e1, field2 := e2 } = result` and you `subst h`, Lean
+replaces `result` with the struct literal but does NOT reduce projections like
+`result.field1` → they remain as `{ field1 := e1, ... }.field1`. This causes
+`exact hwm` to fail when `hwm` expects the reduced form.
+
+**Workaround**: Use `constructor` to split the goal, then `rw [← h]` (which
+rewrites with the equation directly) instead of `subst h`:
+
+```lean
+-- BAD: subst h leaves { maxBits := m, ... }.maxBits unreduced
+simp only [Except.ok.injEq] at h; subst h
+exact ⟨hwm, ...⟩  -- fails: hwm is about `m`, goal has `{ maxBits := m, ... }.maxBits`
+
+-- GOOD: use rw to avoid the projection issue
+simp only [Except.ok.injEq] at h
+constructor
+· rw [← h]  -- rewrites result.maxBits to m directly
+· subst h; ...  -- subst is fine when projections aren't in the goal
+```
+
 ## `eq_of_beq` for BEq-to-Eq Conversion
 
 When a monadic function uses `bne` or `==` for guards (e.g.,

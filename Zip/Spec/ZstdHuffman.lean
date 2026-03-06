@@ -209,7 +209,7 @@ private theorem findMaxBitsWF_ge_one (ws : Nat) (hws : ws ≥ 1) :
   · -- 1 < ws: recurse with maxBits=1, power=2
     exact Nat.le_trans (by omega : 1 ≤ 1) (findMaxBitsWF_ge ws 1 2 (by omega))
   · -- ¬(1 < ws), so ws ≤ 1, combined with ws ≥ 1 means ws = 1
-    split <;> simp_all [beq_iff_eq] <;> omega
+    split <;> simp only [beq_iff_eq] at * <;> omega
 
 open Zip.Native in
 /-- When `weightsToMaxBits` succeeds, the result is at least 1.  The weight sum
@@ -229,7 +229,7 @@ private theorem weightsToMaxBits_ge_one (weights : Array UInt8) (m : Nat)
       dsimp only [pure, Pure.pure, Except.pure] at h
       simp only [Except.ok.injEq] at h
       subst h
-      exact findMaxBitsWF_ge_one ws (by simp_all [beq_iff_eq]; omega)
+      exact findMaxBitsWF_ge_one ws (by simp only [beq_iff_eq] at *; omega)
 
 open Zip.Native in
 /-- The WF loop returns a value `m` such that `ws ≤ 2^m`, given the loop
@@ -310,12 +310,14 @@ private theorem fillHuffmanTableWF_preserves_size
       · exact nomatch h  -- inner threw: contradiction
 termination_by numSymbols - sym
 
-/-- When `buildZstdHuffmanTable` succeeds, the resulting table has size
-    `1 << maxBits`.  The table starts as `Array.replicate (1 <<< maxBits) default`,
-    and `fillHuffmanTableWF` preserves array size (each step uses `set!`). -/
-theorem buildZstdHuffmanTable_tableSize (weights : Array UInt8)
+/-- Decompose a successful `buildZstdHuffmanTable` call: `weightsToMaxBits` succeeded
+    with `result.maxBits`, and the table has size `1 <<< result.maxBits`.  This peels
+    through the 7 monadic layers of the do-block once, deduplicating the shared work
+    between `buildZstdHuffmanTable_tableSize` and `buildZstdHuffmanTable_maxBits_pos`. -/
+private theorem buildZstdHuffmanTable_ok_elim (weights : Array UInt8)
     (result : ZstdHuffmanTable)
     (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
+    Zip.Native.weightsToMaxBits weights = .ok result.maxBits ∧
     result.table.size = 1 <<< result.maxBits := by
   open Zip.Native in
   simp only [buildZstdHuffmanTable, bind, Except.bind] at h
@@ -323,77 +325,39 @@ theorem buildZstdHuffmanTable_tableSize (weights : Array UInt8)
   | error e => simp only [hwm] at h; exact nomatch h
   | ok m =>
     rw [hwm] at h; dsimp only [Bind.bind, Except.bind] at h
-    -- Peel through the same 7 monadic layers as maxBits_pos
-    -- Layer 1: forIn weights (explicitSum loop)
+    -- Peel through 7 monadic layers (forIn, guard, while, guard, weightCounts, nextCode, fill)
     split at h; · exact nomatch h
-    · -- Layer 2: guard (lastWeight2 == 0)
-      split at h; · exact nomatch h
+    · split at h; · exact nomatch h
       · dsimp only [pure, Pure.pure, Except.pure] at h
-        -- Layer 3: forIn Loop (while loop)
         split at h; · exact nomatch h
-        · -- Layer 4: guard (power check)
-          split at h; · exact nomatch h
-          · -- Layer 5: forIn (weightCounts)
-            split at h; · exact nomatch h
-            · -- Layer 6: forIn (nextCode)
-              split at h; · exact nomatch h
-              · -- Layer 7: fillHuffmanTableWF
-                split at h
+        · split at h; · exact nomatch h
+          · split at h; · exact nomatch h
+            · split at h; · exact nomatch h
+              · split at h
                 · exact nomatch h
-                · -- success: extract table size from fillHuffmanTableWF result
-                  rename_i _ v hfill
-                  simp only [Except.ok.injEq] at h; subst h
-                  -- Goal: v.fst.size = 1 <<< m
-                  -- hfill: fillHuffmanTableWF (Array.replicate (1 <<< m) default) ... = .ok v
-                  obtain ⟨filledTable, filledNextCode⟩ := v
-                  simp only at hfill ⊢
-                  have hpres := fillHuffmanTableWF_preserves_size _ _ _ _ _ _ _ _ _ _ hfill
-                  rw [hpres, Array.size_replicate]
+                · rename_i _ v hfill
+                  simp only [Except.ok.injEq] at h
+                  constructor
+                  · rw [← h]
+                  · subst h
+                    obtain ⟨filledTable, filledNextCode⟩ := v
+                    simp only at hfill ⊢
+                    have hpres := fillHuffmanTableWF_preserves_size _ _ _ _ _ _ _ _ _ _ hfill
+                    rw [hpres, Array.size_replicate]
 
-open Zip.Native in
-/-- When `buildZstdHuffmanTable` succeeds, `maxBits ≥ 1`.  This follows
-    from `weightsToMaxBits` requiring at least one non-zero weight, so
-    `weightSum ≥ 1`, meaning `maxBits ≥ 1`. -/
+/-- When `buildZstdHuffmanTable` succeeds, the resulting table has size `1 <<< maxBits`. -/
+theorem buildZstdHuffmanTable_tableSize (weights : Array UInt8)
+    (result : ZstdHuffmanTable)
+    (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
+    result.table.size = 1 <<< result.maxBits :=
+  (buildZstdHuffmanTable_ok_elim weights result h).2
+
+/-- When `buildZstdHuffmanTable` succeeds, `maxBits ≥ 1`. -/
 theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
     (result : ZstdHuffmanTable)
     (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
-    result.maxBits ≥ 1 := by
-  -- Extract that weightsToMaxBits succeeded with result.maxBits
-  simp only [buildZstdHuffmanTable, bind, Except.bind] at h
-  cases hwm : weightsToMaxBits weights with
-  | error e => simp only [hwm] at h; exact nomatch h
-  | ok m =>
-    rw [hwm] at h; dsimp only [Bind.bind, Except.bind] at h
-    -- Peel through nested Except match chain.
-    -- Each layer is: match <operation> with | error => error | ok v => <rest>
-    -- If the whole thing = .ok result, the error branch is impossible.
-    -- Layer 1: forIn weights (explicitSum loop)
-    split at h
-    · exact nomatch h
-    · -- Layer 2: guard (lastWeight2 == 0)
-      split at h
-      · exact nomatch h
-      · -- match pure () — reduces away
-        dsimp only [pure, Pure.pure, Except.pure] at h
-        -- Layer 3: forIn Loop (while loop)
-        split at h
-        · exact nomatch h
-        · -- Layer 4: guard (power check)
-          split at h
-          · exact nomatch h
-          · -- Layer 5: forIn (weightCounts)
-            split at h
-            · exact nomatch h
-            · -- Layer 6: forIn (nextCode)
-              split at h
-              · exact nomatch h
-              · -- Layer 7: forIn (fill table)
-                split at h
-                · exact nomatch h
-                · -- Final: pure { maxBits := m, table := ... } = .ok result
-                  simp only [Except.ok.injEq] at h
-                  subst h
-                  exact weightsToMaxBits_ge_one weights m hwm
+    result.maxBits ≥ 1 :=
+  weightsToMaxBits_ge_one weights result.maxBits (buildZstdHuffmanTable_ok_elim weights result h).1
 
 /-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
     satisfies `0 < weightSum ≤ 2^m`. The function finds the smallest
@@ -429,7 +393,7 @@ theorem weightsToMaxBits_valid (weights : Array UInt8)
         rw [forIn_pure_yield_eq_foldl] at heq_forIn
         exact (Except.ok.inj heq_forIn).symm
       rw [← hws]
-      exact ⟨by simp_all [beq_iff_eq]; omega,
+      exact ⟨by simp only [beq_iff_eq] at *; omega,
              findMaxBitsWF_bound ws 0 1 (by omega) rfl⟩
 
 /-- The `weightSum` function agrees with the inline computation in
