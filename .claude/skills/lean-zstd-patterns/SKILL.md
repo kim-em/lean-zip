@@ -14,9 +14,12 @@ decompression pipeline in `Zip/Native/`.
 | File | Purpose |
 |------|---------|
 | `Zip/Native/ZstdFrame.lean` | Frame/block parsing, literals section, sequence header, sequence execution |
+| `Zip/Native/ZstdHuffman.lean` | Huffman tree descriptor parsing, weight decoding, symbol decoding |
 | `Zip/Native/Fse.lean` | FSE distribution decoding, table construction, backward bitstream, symbol decoding |
 | `Zip/Native/XxHash.lean` | XXH64 hash for content checksums |
-| `ZipTest/ZstdFrame.lean` | All Zstd tests (numbered sequentially) |
+| `ZipTest/ZstdNativeConformance.lean` | End-to-end conformance matrix (FFI compress + native decompress) |
+| `ZipTest/ZstdNativeComponents.lean` | Unit tests for individual Zstd components |
+| `ZipTest/ZstdNativeIntegration.lean` | Integration tests for Zstd pipeline |
 
 New Zstd features go in one of these existing files. Only create a new
 file if the module is genuinely independent (like XXH64 was).
@@ -71,6 +74,20 @@ Three-phase algorithm (RFC 8878 §4.1.1):
 - Probability 0 triggers a run-length encoding of consecutive zero-probability symbols
 - Use `Int32` for probabilities to naturally represent -1
 
+**PITFALL — `readProbValue` bit combination order**: The NCount variable-length
+encoding reads a short value (bitsNeeded-1 bits) then conditionally an extra bit.
+The bits are LSB-first: the first-read bits are the LOW bits, the extra bit is
+the HIGH bit. The correct logic is:
+- If `rawBits < lowThreshold`: value = rawBits (short path, no extra bit)
+- Else read 1 extra bit:
+  - If extraBit == 0: value = rawBits (no adjustment)
+  - If extraBit == 1: value = rawBits + threshold - lowThreshold
+
+**WRONG**: `combined = rawBits * 2 + extraBit` (puts rawBits in HIGH position).
+The reference `FSE_readNCount_body` uses `bitStream & (threshold-1)` for the
+short path and `bitStream & (2*threshold-1)` for the long path, with
+`if (count >= threshold) count -= max` — which is LSB-first ordering.
+
 ### Phase 2: Position Stepping (`buildFseTable`)
 
 ```
@@ -85,13 +102,28 @@ Three passes through the table:
 **Important**: The stepping algorithm only produces coprime steps for
 `tableSize >= 32`. Smaller tables may need special handling.
 
-### Phase 3: Symbol Decoding (`decodeFseSymbols`)
+### buildFseTable State Assignment
 
-State machine loop:
-1. Initialize state by reading `accuracyLog` bits
-2. For each symbol: look up `table[state]`, emit symbol, read `numBits` bits,
-   compute `newState = baseline + readBits`
-3. After the **last** symbol, skip the final bit read (state is not updated)
+Use the reference formula for computing `numBits` and `newState`:
+```
+nextState = count + stateIdx
+numBits = accuracyLog - log2(nextState)
+newState = (nextState << numBits) - tableSize
+```
+This is simpler than the doubleCells/highBit approach and matches the reference.
+
+### Phase 3: Symbol Decoding (`decodeFseSymbolsAll`)
+
+**Two interleaved states** (matching `FSE_decompress1X`):
+1. Initialize state1 by reading `accuracyLog` bits, then state2
+2. Loop: decode state1 (lookup, emit, read bits, update), then state2
+3. Termination is **overflow-based**: when `totalBitsRemaining < cell.numBits`,
+   emit the other state's symbol and break. Do NOT break on `br.isFinished`.
+4. The `BackwardBitReader` needs `totalBitsRemaining` to detect this condition.
+
+**WRONG**: Single-state decoding or breaking when the bitstream is "finished".
+The reference continues reading until an overflow condition, then emits one
+final symbol from the alternate state.
 
 ## Sequence Execution (Zstd's LZ77 Equivalent)
 
@@ -136,9 +168,19 @@ are needed by `resolveSequenceFseTables` to construct FSE decode tables.
 
 ## Huffman Tree Descriptor
 
+**CRITICAL: Follow the reference implementation, not the RFC text.**
+The RFC 8878 §4.2.1 table describes headerByte < 128 as direct and >= 128
+as FSE-compressed. The **actual reference zstd implementation** does the
+opposite: headerByte >= 128 means direct (numWeights = headerByte - 127),
+headerByte < 128 means FSE-compressed (compressedSize = headerByte).
+Always match the implementation for interoperability.
+
 Two modes for Huffman weight tables:
-- **Direct representation**: weights packed into header bytes (flat lookup table)
-- **FSE-compressed**: weights encoded using an FSE table (requires FSE infrastructure)
+- **Direct representation** (headerByte >= 128): numWeights = headerByte - 127,
+  weights packed as 4-bit nibbles (high nibble first). The function takes
+  `numWeights` (symbol count), NOT `numWeightBytes` (byte count).
+  Bytes consumed = `ceil(numWeights / 2)`.
+- **FSE-compressed** (headerByte < 128, headerByte > 0): compressedSize = headerByte bytes
 
 For the flat lookup table, use `Array.replicate (1 <<< maxBits) default`
 and fill entries. Trim trailing zero weights from packed representation
