@@ -361,19 +361,80 @@ theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
                   subst h
                   exact weightsToMaxBits_ge_one weights m hwm
 
-/-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
-    satisfies `2^(m-1) < weightSum ≤ 2^m` (except when `weightSum` is
-    exactly a power of 2, in which case `m` is bumped by 1).
+/-- When the power invariant `power = 1 <<< maxBits` holds, `findMaxBitsWF`
+    returns a value `r` satisfying `ws ≤ 1 <<< r`. -/
+private theorem findMaxBitsWF_bound (ws maxBits power : Nat) (hp : power > 0)
+    (hinv : power = 1 <<< maxBits) :
+    ws ≤ 1 <<< (Zip.Native.findMaxBitsWF ws maxBits power hp) := by
+  unfold Zip.Native.findMaxBitsWF
+  split
+  · -- power < ws: recurse
+    exact findMaxBitsWF_bound ws (maxBits + 1) (power * 2) (by omega)
+      (by subst hinv; simp [Nat.shiftLeft_eq, Nat.one_mul, Nat.pow_succ, Nat.mul_comm])
+  · split
+    · -- ws == power (bumped): result = maxBits + 1
+      -- ws ≤ power = 1 <<< maxBits ≤ 1 <<< (maxBits + 1)
+      subst hinv
+      simp only [Nat.shiftLeft_eq, Nat.one_mul, Nat.pow_succ, Nat.mul_comm]
+      omega
+    · -- not bumped: result = maxBits, ws ≤ power = 1 <<< maxBits
+      rw [← hinv]; omega
+termination_by ws - power
 
-    More precisely: `weightSum weights > 0 ∧ weightSum weights ≤ 2^(m-1)`,
-    since `m` is chosen so that `2^(m-1)` is the first power ≥ `weightSum`,
-    and if equality holds, `m` is incremented by 1 to accommodate the
-    implicit last symbol. -/
+/-- The weight-sum `forIn` loop body (always yields) equals `List.foldl` of
+    the weight step function. -/
+private theorem list_forIn_weightStep (l : List UInt8) (init : Nat) :
+    (forIn (m := Except String) l init (fun w r =>
+      if w.toNat > 0 then Except.ok (ForInStep.yield (r + 1 <<< (w.toNat - 1)))
+      else Except.ok (ForInStep.yield r)))
+    = Except.ok (l.foldl (fun acc w =>
+      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) init) := by
+  induction l generalizing init with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.forIn_cons, List.foldl_cons]
+    split <;> (dsimp only [Bind.bind, Except.bind]; exact ih _)
+
+/-- The weight-sum `forIn` loop in `weightsToMaxBits` computes `weightSum`. -/
+private theorem array_forIn_weightStep (weights : Array UInt8) :
+    (forIn (m := Except String) weights (0 : Nat) fun w r =>
+      if w.toNat > 0 then Except.ok (ForInStep.yield (r + 1 <<< (w.toNat - 1)))
+      else Except.ok (ForInStep.yield r))
+    = Except.ok (weightSum weights) := by
+  rw [← Array.forIn_toList, list_forIn_weightStep]
+  simp [weightSum, Array.foldl_toList]
+
+/-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
+    satisfies `0 < weightSum ≤ 2^m`. The function finds the smallest
+    `k` with `2^k ≥ weightSum`, then bumps by 1 if equality holds
+    (to accommodate the implicit last symbol).
+
+    Note: the original statement had `≤ 2^(m-1)` which is false.
+    Counterexample: `weights = #[1, 2]` gives `weightSum = 3`,
+    `m = 2`, but `3 > 2^(2-1) = 2`. The correct bound is `≤ 2^m`. -/
 theorem weightsToMaxBits_valid (weights : Array UInt8)
     (m : Nat)
     (h : Zip.Native.weightsToMaxBits weights = .ok m) :
-    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< (m - 1) := by
-  sorry
+    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< m := by
+  simp only [Zip.Native.weightsToMaxBits, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · rename_i ws heq
+    split at h
+    · exact nomatch h
+    · dsimp only [pure, Pure.pure, Except.pure] at h heq
+      simp only [Except.ok.injEq] at h
+      subst h
+      -- Establish ws = weightSum weights from heq (forIn with pure body)
+      have hws : ws = weightSum weights := by
+        have hstep := array_forIn_weightStep weights
+        rw [hstep] at heq
+        exact (Except.ok.inj heq).symm
+      rw [← hws]
+      constructor
+      · -- ws > 0 from the guard: ¬(ws == 0)
+        simp_all [beq_iff_eq]; omega
+      · exact findMaxBitsWF_bound ws 0 1 (by omega) rfl
 
 /-- The `weightSum` function agrees with the inline computation in
     `weightsToMaxBits`: both compute `∑ 2^(W-1)` for positive weights. -/
