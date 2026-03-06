@@ -39,8 +39,80 @@ structure FseTable where
   deriving Repr
 
 /-- Convert Int32 to Nat, clamping negative values to 0. -/
-private def int32ToNat (x : Int32) : Nat :=
+def int32ToNat (x : Int32) : Nat :=
   if x.toInt < 0 then 0 else x.toInt.toNat
+
+/-- Push `n` zero probabilities, respecting the `maxSymbols` limit. -/
+def pushZeros (probs : Array Int32) (symbolNum : Nat) :
+    Nat → Nat → Array Int32 × Nat
+  | 0, _ => (probs, symbolNum)
+  | n + 1, maxSymbols =>
+    if symbolNum < maxSymbols then
+      pushZeros (probs.push 0) (symbolNum + 1) n maxSymbols
+    else
+      (probs, symbolNum)
+
+/-- Inner loop for zero-repeat sequences in FSE distribution decoding.
+    Reads 2-bit repeat counts and pushes zeros until repeatCount < 3.
+    Uses fuel for termination (sufficient for any valid bitstream). -/
+def decodeZeroRepeats (br : BitReader) (probs : Array Int32)
+    (symbolNum : Nat) (maxSymbols : Nat) : Nat →
+    Except String (Array Int32 × Nat × BitReader)
+  | 0 => .error "FSE: zero repeat loop exceeded maximum iterations"
+  | fuel + 1 => do
+    let (repeatBits, br) ← br.readBits 2
+    let repeatCount := repeatBits.toNat
+    let (probs, symbolNum) := pushZeros probs symbolNum repeatCount maxSymbols
+    if repeatCount == 3 then
+      decodeZeroRepeats br probs symbolNum maxSymbols fuel
+    else
+      .ok (probs, symbolNum, br)
+
+/-- Read the probability value for the current symbol from the bitstream.
+    Uses variable-length encoding: values below `lowThreshold` use
+    `bitsNeeded - 1` bits; values at or above use `bitsNeeded` bits. -/
+def readProbValue (br : BitReader) (remaining : Nat) :
+    Except String (Nat × BitReader) := do
+  let maxVal := remaining + 1
+  let bitsNeeded := Nat.log2 maxVal + 1
+  let lowThreshold := (1 <<< bitsNeeded) - 1 - maxVal
+  let (rawBits, br) ← br.readBits (bitsNeeded - 1)
+  if rawBits.toNat < lowThreshold then
+    pure (rawBits.toNat, br)
+  else
+    let (extraBit, br) ← br.readBits 1
+    let combined := rawBits.toNat * 2 + extraBit.toNat
+    if combined >= lowThreshold then
+      pure (combined - lowThreshold, br)
+    else
+      pure (rawBits.toNat, br)
+
+/-- Main loop for FSE distribution decoding. Processes symbols one at a time,
+    reading probability values and handling zero-repeat sequences.
+    Uses fuel for termination. -/
+def decodeFseLoop (br : BitReader) (remaining : Nat) (probs : Array Int32)
+    (symbolNum : Nat) (maxSymbols : Nat) : Nat →
+    Except String (Nat × Array Int32 × Nat × BitReader)
+  | 0 => .error "FSE: distribution loop exceeded maximum iterations"
+  | fuel + 1 => do
+    if ¬(remaining > 0 ∧ symbolNum < maxSymbols) then
+      return (remaining, probs, symbolNum, br)
+    let (val, br) ← readProbValue br remaining
+    let prob : Int32 := Int32.ofNat val - 1
+    if prob == 0 then
+      let (probs, symbolNum, br) ←
+        decodeZeroRepeats br (probs.push 0) (symbolNum + 1) maxSymbols 1000
+      decodeFseLoop br remaining probs symbolNum maxSymbols fuel
+    else
+      let probs := probs.push prob
+      let symbolNum := symbolNum + 1
+      if prob == -1 then
+        decodeFseLoop br (remaining - 1) probs symbolNum maxSymbols fuel
+      else
+        let probNat := int32ToNat prob
+        if probNat > remaining then
+          throw s!"FSE: probability {prob} exceeds remaining {remaining}"
+        decodeFseLoop br (remaining - probNat) probs symbolNum maxSymbols fuel
 
 /-- Decode an FSE distribution (normalized probabilities) from a bitstream.
     `maxSymbols` is the maximum number of symbols allowed (e.g. 256 for literals,
@@ -51,65 +123,13 @@ private def int32ToNat (x : Int32) : Nat :=
 def decodeFseDistribution (br : Zip.Native.BitReader) (maxSymbols : Nat)
     (maxAccLog : Nat := 11) :
     Except String (Array Int32 × Nat × Zip.Native.BitReader) := do
-  -- Read accuracy log: 4 bits, value + 5
   let (accRaw, br) ← br.readBits 4
   let accuracyLog := accRaw.toNat + 5
   if accuracyLog > maxAccLog then
     throw s!"FSE: accuracy log {accuracyLog} exceeds maximum {maxAccLog}"
   let tableSize := 1 <<< accuracyLog
-  let mut remaining := tableSize
-  let mut probs : Array Int32 := #[]
-  let mut symbolNum := 0
-  let mut br := br
-  while remaining > 0 && symbolNum < maxSymbols do
-    -- Determine how many bits to read for this probability value.
-    -- We need to represent values in [0, remaining + 1] (inclusive).
-    -- The value 0 maps to probability -1, value 1 maps to probability 0, etc.
-    -- So maximum encodable value = remaining + 1.
-    let maxVal := remaining + 1
-    -- Number of bits needed: ceil(log2(maxVal + 1))
-    let bitsNeeded := Nat.log2 maxVal + 1
-    -- The "small" threshold: values below this use (bitsNeeded - 1) bits
-    let lowThreshold := (1 <<< bitsNeeded) - 1 - maxVal
-    let (rawBits, br') ← br.readBits (bitsNeeded - 1)
-    br := br'
-    let val ← if rawBits.toNat < lowThreshold then
-      pure rawBits.toNat
-    else
-      -- Read one more bit
-      let (extraBit, br') ← br.readBits 1
-      br := br'
-      let combined := rawBits.toNat * 2 + extraBit.toNat
-      if combined >= lowThreshold then
-        pure (combined - lowThreshold)
-      else
-        pure rawBits.toNat
-    -- Convert value to probability: value 0 → prob -1, value n → prob (n - 1)
-    let prob : Int32 := Int32.ofNat val - 1
-    if prob == 0 then
-      -- Zero probability: read 2-bit repeat count for consecutive zeros
-      probs := probs.push 0
-      symbolNum := symbolNum + 1
-      let mut doRepeat := true
-      while doRepeat do
-        let (repeatBits, br') ← br.readBits 2
-        br := br'
-        let repeatCount := repeatBits.toNat
-        for _ in [:repeatCount] do
-          if symbolNum < maxSymbols then
-            probs := probs.push 0
-            symbolNum := symbolNum + 1
-        doRepeat := repeatCount == 3
-    else
-      probs := probs.push prob
-      symbolNum := symbolNum + 1
-      if prob == -1 then
-        remaining := remaining - 1
-      else
-        let probNat := int32ToNat prob
-        if probNat > remaining then
-          throw s!"FSE: probability {prob} exceeds remaining {remaining}"
-        remaining := remaining - probNat
+  let (remaining, probs, _, br) ←
+    decodeFseLoop br tableSize #[] 0 maxSymbols 10000
   if remaining != 0 then
     throw s!"FSE: probabilities don't sum to table size: {remaining} remaining"
   return (probs, accuracyLog, br)
