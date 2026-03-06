@@ -31,7 +31,7 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     Zip.Native.Inflate.inflate (deflateRaw data level) = .ok data := by
   unfold deflateRaw
   split
-  · exact inflate_deflateStoredPure data (by omega)
+  · exact inflate_deflateStoredPure data _ (by omega)
   · split
     · exact inflate_deflateFixedIter data (by omega)
     · split
