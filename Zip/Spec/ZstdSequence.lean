@@ -419,6 +419,38 @@ theorem resolveSingleFseTable_predefined_pos (maxSymbols maxAccLog : Nat)
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h
     exact h.2.symm
 
+/-- In RLE mode, the position advances by exactly 1. The RLE branch reads one byte
+    at `pos` for the symbol and returns `(buildRleFseTable symbol, pos + 1)`. -/
+theorem resolveSingleFseTable_rle_pos (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .rle maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    pos' = pos + 1 := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    exact h.2.symm
+
+/-- In repeat mode, the position is unchanged. The repeat branch returns
+    `(prevTable.get!, pos)` without consuming any data. -/
+theorem resolveSingleFseTable_repeat_pos (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .repeat maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    pos' = pos := by
+  simp only [resolveSingleFseTable, pure, Except.pure] at h
+  split at h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    exact h.2.symm
+  · exact nomatch h
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
