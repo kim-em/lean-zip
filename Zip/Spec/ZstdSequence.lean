@@ -139,7 +139,8 @@ end Zip.Native
 namespace Zstd.Spec.Sequence
 
 open Zip.Native (ZstdSequence resolveOffset executeSequences
-  executeSequences_loop_inv copyBytes_size copyMatch_size)
+  executeSequences_loop_inv copyBytes_size copyMatch_size
+  litLenExtraBits matchLenExtraBits decodeLitLenValue decodeMatchLenValue decodeOffsetValue)
 
 /-! ## Validity predicates -/
 
@@ -273,6 +274,50 @@ theorem resolveOffset_repeat3_val (history : Array Nat) (litLen : Nat)
 
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
+
+/-! ## Extra bits table correctness (RFC 8878 Tables 14–15) -/
+
+/-- The literal length extra bits table has exactly 36 entries (codes 0–35, RFC 8878 Table 14). -/
+theorem litLenExtraBits_size : litLenExtraBits.size = 36 := by rfl
+
+/-- The match length extra bits table has exactly 53 entries (codes 0–52, RFC 8878 Table 15). -/
+theorem matchLenExtraBits_size : matchLenExtraBits.size = 53 := by rfl
+
+/-- For literal length codes 0–15, the decoded value equals `code + extraBits`
+    (baseline equals code, zero extra bits in the table). This validates that
+    the first 16 entries of RFC 8878 Table 14 are identity mappings. -/
+theorem decodeLitLenValue_small (code : Nat) (extraBits : UInt32) (h : code ≤ 15) :
+    decodeLitLenValue code extraBits = .ok (code + extraBits.toNat) := by
+  have hlt : code < litLenExtraBits.size := by simp only [litLenExtraBits_size]; omega
+  unfold decodeLitLenValue
+  simp only [hlt, ↓reduceDIte]
+  rcases code with _ | _ | _ | _ | _ | _ | _ | _ |
+                   _ | _ | _ | _ | _ | _ | _ | _ | _
+  all_goals first | omega | rfl
+
+/-- For match length codes 0–31, the decoded value equals `code + 3 + extraBits`
+    (baseline equals code + 3, zero extra bits in the table). This validates that
+    the first 32 entries of RFC 8878 Table 15 are offset-by-3 identity mappings. -/
+theorem decodeMatchLenValue_small (code : Nat) (extraBits : UInt32) (h : code ≤ 31) :
+    decodeMatchLenValue code extraBits = .ok (code + 3 + extraBits.toNat) := by
+  have hlt : code < matchLenExtraBits.size := by simp only [matchLenExtraBits_size]; omega
+  unfold decodeMatchLenValue
+  simp only [hlt, ↓reduceDIte]
+  rcases code with _ | _ | _ | _ | _ | _ | _ | _ |
+                   _ | _ | _ | _ | _ | _ | _ | _ |
+                   _ | _ | _ | _ | _ | _ | _ | _ |
+                   _ | _ | _ | _ | _ | _ | _ | _ | _
+  all_goals first | omega | rfl
+
+/-- When `code > 0`, `decodeOffsetValue` returns a positive value.
+    This follows from `1 <<< code > 0` for any natural `code`. -/
+theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : code > 0) :
+    decodeOffsetValue code extraBits > 0 := by
+  unfold decodeOffsetValue
+  split
+  · rename_i h; simp only [beq_iff_eq] at h; omega
+  · have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
+    omega
 
 /-- `executeSequences` output size characterization: when `executeSequences`
     succeeds with an empty window prefix, the output contains exactly the
