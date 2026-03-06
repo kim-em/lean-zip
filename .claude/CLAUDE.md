@@ -117,6 +117,14 @@ for how this applies to DEFLATE.
 - After getting a proof to work, refactor it immediately:
   combine steps, find minimal proof, extract reusable lemmas
 - Think about generally useful constructions that could be upstreamed
+- **Opaque loop functions**: Both `Lean.Loop.forIn` (from `while`) and
+  `Std.Legacy.Range.forIn'` (from `for ... in [:n]`) use auto-generated
+  `loop✝` functions that CANNOT be unfolded in proofs. If you need to
+  prove invariants through these loops, refactor the implementation to
+  use well-founded recursion with `termination_by` instead. See
+  `findMaxBitsWF` in `Zip/Native/ZstdHuffman.lean` for the pattern.
+  Don't waste time trying to unfold or reason about `forIn` for ranges
+  — discover this limitation early and refactor.
 
 ### Tests
 - Every new feature needs tests in `ZipTest/`
