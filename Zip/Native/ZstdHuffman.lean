@@ -30,20 +30,23 @@ structure ZstdHuffmanTable where
   table : Array HuffmanEntry
   deriving Repr
 
-/-- Unpack 4-bit Huffman weights from a byte array (direct representation, RFC 8878 §4.2.1).
+/-- Unpack 4-bit Huffman weights from a byte array (direct representation).
     Each byte packs two 4-bit weights: high nibble first, low nibble second.
-    `numWeightBytes` is the header byte value (< 128), giving the number of weight bytes.
-    Returns (weights array, new position after weight bytes). -/
-def parseHuffmanWeightsDirect (data : ByteArray) (pos : Nat) (numWeightBytes : Nat) :
+    `numWeights` is the number of weight symbols (headerByte - 127 when headerByte >= 128).
+    The number of bytes consumed is `ceil(numWeights / 2)`.
+    Returns (weights array of exactly numWeights elements, new position after weight bytes). -/
+def parseHuffmanWeightsDirect (data : ByteArray) (pos : Nat) (numWeights : Nat) :
     Except String (Array UInt8 × Nat) := do
-  if data.size < pos + numWeightBytes then
+  let numBytes := (numWeights + 1) / 2
+  if data.size < pos + numBytes then
     throw "Zstd: not enough data for weight bytes"
   let mut weights : Array UInt8 := #[]
-  for i in [:numWeightBytes] do
+  for i in [:numBytes] do
     let byte := data[pos + i]!
     weights := weights.push (byte >>> 4)       -- high nibble
     weights := weights.push (byte &&& 0x0F)    -- low nibble
-  return (weights, pos + numWeightBytes)
+  -- Trim to exactly numWeights (last nibble may be padding if numWeights is odd)
+  return (weights.extract 0 numWeights, pos + numBytes)
 
 /-- Find the smallest `maxBits` such that `2^maxBits ≥ weightSum`, then bump by 1
     if `weightSum` equals `2^maxBits` exactly.  Uses well-founded recursion
@@ -203,9 +206,15 @@ def parseHuffmanWeightsFse (data : ByteArray) (pos : Nat) (compressedSize : Nat)
   let (weights, _) ← decodeFseSymbolsAll table bbr
   return (weights, rangeEnd)
 
-/-- Parse a Huffman tree descriptor from a Zstd compressed block (RFC 8878 §4.2.1).
-    Reads the header byte at `pos`, dispatches to direct mode (< 128) or
-    FSE-compressed mode (>= 128).
+/-- Parse a Huffman tree descriptor from a Zstd compressed block.
+    Reads the header byte at `pos` and dispatches:
+    - headerByte >= 128: direct 4-bit nibble representation,
+      numWeights = headerByte - 127 (matching the reference implementation)
+    - headerByte < 128 (and > 0): FSE-compressed weights,
+      compressedSize = headerByte bytes
+    Note: the reference zstd implementation swaps these cases relative to
+    the RFC 8878 §4.2.1 table.  We follow the implementation for
+    interoperability.
     Returns (Huffman table, new position after the tree descriptor). -/
 def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
     Except String (ZstdHuffmanTable × Nat) := do
@@ -213,43 +222,51 @@ def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
     throw "Zstd: not enough data for Huffman tree descriptor header"
   let headerByte := data[pos]!.toNat
   if headerByte >= 128 then do
-    -- FSE-compressed representation: compressed size = headerByte - 127
-    let compressedSize := headerByte - 127
-    let (weights, afterWeights) ← parseHuffmanWeightsFse data pos compressedSize
-    -- Trim trailing zero weights
+    -- Direct 4-bit nibble representation: numWeights = headerByte - 127
+    let numWeights := headerByte - 127
+    let (weights, afterWeights) ← parseHuffmanWeightsDirect data (pos + 1) numWeights
+    -- Trim trailing zero weights (packed bytes may have a padding zero)
     let mut trimmed := weights
     while trimmed.size > 0 && trimmed.back! == 0 do
       trimmed := trimmed.pop
     if trimmed.size == 0 then
-      throw "Zstd: FSE-compressed Huffman weights are all zero after trimming"
+      throw "Zstd: all Huffman weights are zero after trimming"
     let table ← buildZstdHuffmanTable trimmed
     return (table, afterWeights)
-  -- Direct representation: headerByte = number of weight bytes
-  let numWeightBytes := headerByte
-  if numWeightBytes == 0 then
-    throw "Zstd: Huffman tree descriptor with 0 weight bytes"
-  let (weights, afterWeights) ← parseHuffmanWeightsDirect data (pos + 1) numWeightBytes
-  -- Trim trailing zero weights (packed bytes may have a padding zero)
+  -- FSE-compressed representation: compressedSize = headerByte
+  if headerByte == 0 then
+    throw "Zstd: Huffman tree descriptor with 0 compressed size"
+  let compressedSize := headerByte
+  let (weights, afterWeights) ← parseHuffmanWeightsFse data pos compressedSize
+  -- Trim trailing zero weights
   let mut trimmed := weights
   while trimmed.size > 0 && trimmed.back! == 0 do
     trimmed := trimmed.pop
   if trimmed.size == 0 then
-    throw "Zstd: all Huffman weights are zero after trimming"
+    throw "Zstd: FSE-compressed Huffman weights are all zero after trimming"
   let table ← buildZstdHuffmanTable trimmed
   return (table, afterWeights)
 
 /-- Decode a single Huffman symbol from a backward bitstream using a flat table.
-    Reads `maxBits` bits, looks up the table entry, and advances only `numBits`. -/
+    Reads up to `maxBits` bits, looks up the table entry, and advances only `numBits`.
+    Near end-of-stream, fewer than `maxBits` may remain; the value is left-aligned
+    (zero-padded on the right) to match the reference zstd wide-register behavior. -/
 def decodeHuffmanSymbol (htable : ZstdHuffmanTable) (br : BackwardBitReader) :
     Except String (UInt8 × BackwardBitReader) := do
-  -- Peek maxBits bits for the table lookup
-  let (bits, _) ← br.readBits htable.maxBits
-  let entry := htable.table[bits.toNat]!
-  -- We read maxBits but only needed numBits; "put back" the extra bits.
-  -- Since BackwardBitReader doesn't support putting bits back, re-read
-  -- only numBits from the original position.
-  let (bits2, br2) ← br.readBits entry.numBits.toNat
-  let entry2 := htable.table[bits2.toNat <<< (htable.maxBits - entry.numBits.toNat)]!
+  let avail := br.totalBitsRemaining
+  let peekBits := min htable.maxBits avail
+  if peekBits == 0 then
+    throw "Zstd Huffman: no bits remaining"
+  -- Read available bits and left-align to maxBits width for table lookup
+  let (bits, _) ← br.readBits peekBits
+  let lookupVal := bits.toNat <<< (htable.maxBits - peekBits)
+  let entry := htable.table[lookupVal]!
+  let numBits := entry.numBits.toNat
+  if numBits > avail then
+    throw s!"Zstd Huffman: need {numBits} bits but only {avail} remain"
+  -- Re-read only numBits from the original position to advance correctly
+  let (bits2, br2) ← br.readBits numBits
+  let entry2 := htable.table[bits2.toNat <<< (htable.maxBits - numBits)]!
   return (entry2.symbol, br2)
 
 /-- Decode `count` Huffman symbols from a backward bitstream.
@@ -319,7 +336,7 @@ private def parseCompressedLiteralsHeader (data : ByteArray) (pos : Nat) (sizeFo
     let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
     let regen := (raw >>> 4) &&& 0x3FF
     let comp := (raw >>> 14) &&& 0x3FF
-    pure (regen, comp, 3, false)
+    pure (regen, comp, 3, sizeFormat == 1)
   else if sizeFormat == 2 then do
     if data.size < pos + 4 then throw "Zstd: truncated compressed literals header"
     let b0 := data[pos]!.toNat
@@ -386,12 +403,14 @@ def parseLiteralsSection (data : ByteArray) (pos : Nat)
       -- Compressed: parse fresh Huffman tree from the data
       if data.size < afterHeader + compSize then
         throw "Zstd: not enough data for compressed literals"
-      let (huffTable, afterTree) ← parseHuffmanTreeDescriptor data afterHeader
+      let (huffTable, afterTree) ← (parseHuffmanTreeDescriptor data afterHeader).mapError
+        (· ++ " [in parseHuffmanTreeDescriptor]")
       let treeSize := afterTree - afterHeader
       if treeSize > compSize then
         throw "Zstd: Huffman tree descriptor exceeds compressed literals size"
       let streamDataSize := compSize - treeSize
-      let result ← decodeHuffmanLiterals huffTable data afterTree streamDataSize regenSize fourStreams
+      let result ← (decodeHuffmanLiterals huffTable data afterTree streamDataSize regenSize fourStreams).mapError
+        (· ++ s!" [in decodeHuffmanLiterals, streamDataSize={streamDataSize}, regenSize={regenSize}, fourStreams={fourStreams}]")
       pure (result, afterHeader + compSize, some huffTable)
   else
   -- Raw (0) or RLE (1): parse regenerated size using variable-width header

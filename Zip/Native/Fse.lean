@@ -76,16 +76,19 @@ def readProbValue (br : BitReader) (remaining : Nat) :
   let maxVal := remaining + 1
   let bitsNeeded := Nat.log2 maxVal + 1
   let lowThreshold := (1 <<< bitsNeeded) - 1 - maxVal
+  let threshold := 1 <<< (bitsNeeded - 1)
   let (rawBits, br) ← br.readBits (bitsNeeded - 1)
   if rawBits.toNat < lowThreshold then
     pure (rawBits.toNat, br)
   else
     let (extraBit, br) ← br.readBits 1
-    let combined := rawBits.toNat * 2 + extraBit.toNat
-    if combined >= lowThreshold then
-      pure (combined - lowThreshold, br)
-    else
+    if extraBit.toNat == 0 then
+      -- Low bit not set: value is just rawBits (no adjustment)
       pure (rawBits.toNat, br)
+    else
+      -- High bit set: value is rawBits + threshold - lowThreshold
+      -- This matches the reference: count = fullVal - max when fullVal >= threshold
+      pure (rawBits.toNat + threshold - lowThreshold, br)
 
 /-- Main loop for FSE distribution decoding. Processes symbols one at a time,
     reading probability values and handling zero-repeat sequences.
@@ -179,25 +182,20 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
     let sym := cells[i]!.symbol.toNat
     if sym < symbolCounts.size then
       symbolCounts := symbolCounts.set! sym (symbolCounts[sym]! + 1)
-  -- For each symbol, compute the number of bits and assign states
+  -- For each symbol, compute the number of bits and assign states.
+  -- Uses the reference formula: nextState = count + stateIdx,
+  -- nbBits = accuracyLog - log2(nextState),
+  -- newState = (nextState << nbBits) - tableSize.
   let mut symbolStateIndex := Array.replicate probs.size (0 : Nat)
   for i in [:tableSize] do
     let sym := cells[i]!.symbol.toNat
     if sym >= probs.size then continue
     let count := symbolCounts[sym]!
     if count == 0 then continue
-    -- highBit = floor(log2(count))
-    let highBit := Nat.log2 count
-    -- Number of states that need an extra bit
-    let doubleCells := (1 <<< (highBit + 1)) - count
     let stateIdx := symbolStateIndex[sym]!
-    let (numBits, baseline) :=
-      if stateIdx < doubleCells then
-        (accuracyLog - highBit,
-         (stateIdx + doubleCells) <<< (accuracyLog - highBit))
-      else
-        (accuracyLog - highBit - 1,
-         (stateIdx - doubleCells) <<< (accuracyLog - highBit - 1))
+    let nextState := count + stateIdx
+    let numBits := accuracyLog - Nat.log2 nextState
+    let baseline := (nextState <<< numBits) - tableSize
     cells := cells.set! i
       { symbol := cells[i]!.symbol, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
     symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
@@ -215,12 +213,14 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
 structure BackwardBitReader where
   /-- Encoded data. -/
   data : ByteArray
-  /-- Current byte position (decreasing toward 0). -/
+  /-- Current byte position (decreasing toward startPos). -/
   bytePos : Nat
   /-- Number of bits remaining in the current byte (1-8, MSB-first). -/
   bitsRemaining : Nat
   /-- Current byte value. -/
   currentByte : UInt8
+  /-- Lower boundary: the first byte in the valid range. -/
+  startPos : Nat := 0
   deriving Inhabited
 
 namespace BackwardBitReader
@@ -255,16 +255,16 @@ def init (data : ByteArray) (startPos endPos : Nat) :
       -- Only the sentinel bit in this byte; move to previous byte
       if endPos - 1 <= startPos then
         -- No more data after consuming the sentinel byte
-        return { data, bytePos := startPos, bitsRemaining := 0, currentByte := 0 }
+        return { data, bytePos := startPos, bitsRemaining := 0, currentByte := 0, startPos }
       let prevPos := endPos - 2
-      return { data, bytePos := prevPos, bitsRemaining := 8, currentByte := data[prevPos]! }
+      return { data, bytePos := prevPos, bitsRemaining := 8, currentByte := data[prevPos]!, startPos }
     else
       -- sentinelPos bits remain below the sentinel in the last byte
       -- Mask out the sentinel bit and above
       let mask := (1 <<< sentinelPos.toUInt8) - 1
       let maskedByte := lastByte &&& mask
       return { data, bytePos := endPos - 1, bitsRemaining := sentinelPos,
-               currentByte := maskedByte }
+               currentByte := maskedByte, startPos }
 
 /-- Read `n` bits MSB-first from the backward stream (n ≤ 25).
     Returns the value as UInt32 and the updated reader. -/
@@ -283,8 +283,8 @@ where
       let acc' := (acc <<< 1) ||| bit.toUInt32
       let br' :=
         if bitPos == 0 then
-          -- Move to the previous byte
-          if br.bytePos > 0 then
+          -- Move to the previous byte (stop at startPos boundary)
+          if br.bytePos > br.startPos then
             let prevPos := br.bytePos - 1
             { br with bytePos := prevPos, bitsRemaining := 8,
                       currentByte := br.data[prevPos]! }
@@ -297,6 +297,11 @@ where
 /-- Check if the bitstream has been fully consumed (all meaningful bits read). -/
 def isFinished (br : BackwardBitReader) : Bool :=
   br.bitsRemaining == 0
+
+/-- Total number of bits remaining in the stream. -/
+def totalBitsRemaining (br : BackwardBitReader) : Nat :=
+  if br.bitsRemaining == 0 then 0
+  else br.bitsRemaining + 8 * (br.bytePos - br.startPos)
 
 end BackwardBitReader
 
@@ -335,21 +340,48 @@ def decodeFseSymbols (table : FseTable) (br : BackwardBitReader) (count : Nat) :
 def decodeFseSymbolsAll (table : FseTable) (br : BackwardBitReader)
     (fuel : Nat := 4096) : Except String (Array UInt8 × BackwardBitReader) := do
   let tableSize := 1 <<< table.accuracyLog
-  -- Initialize state from stream
-  let (initState, br) ← br.readBits table.accuracyLog
-  let mut state := initState.toNat
+  -- Initialize TWO interleaved states from stream (per reference FSE_decompress1X)
+  let (initState1, br) ← br.readBits table.accuracyLog
+  let (initState2, br) ← br.readBits table.accuracyLog
+  let mut state1 := initState1.toNat
+  let mut state2 := initState2.toNat
   let mut br := br
   let mut result : Array UInt8 := #[]
   for _ in [:fuel] do
-    if state >= tableSize then
-      throw s!"FSE decode: state {state} out of range (table size {tableSize})"
-    let cell := table.cells[state]!
-    result := result.push cell.symbol.toUInt8
-    if br.isFinished then
+    -- Decode from state1: lookup, emit, then update
+    if state1 >= tableSize then
+      throw s!"FSE decode: state1 {state1} out of range (table size {tableSize})"
+    let cell1 := table.cells[state1]!
+    result := result.push cell1.symbol.toUInt8
+    -- If not enough bits to advance state1, emit state2's symbol and break.
+    -- Reference: on overflow after state1 decode, FSE_GETSYMBOL(&state2) then break.
+    let avail1 := br.totalBitsRemaining
+    if avail1 < cell1.numBits.toNat then
+      if state2 < tableSize then
+        result := result.push table.cells[state2]!.symbol.toUInt8
       break
-    let (bits, br') ← br.readBits cell.numBits.toNat
+    let (bits1, br') ← br.readBits cell1.numBits.toNat
     br := br'
-    state := cell.newState.toNat + bits.toNat
+    state1 := cell1.newState.toNat + bits1.toNat
+    -- Decode from state2: lookup, emit, then update
+    if state2 >= tableSize then
+      throw s!"FSE decode: state2 {state2} out of range (table size {tableSize})"
+    let cell2 := table.cells[state2]!
+    result := result.push cell2.symbol.toUInt8
+    -- If not enough bits to advance state2, emit state1's updated symbol and break.
+    -- Reference: on overflow after state2 decode, FSE_GETSYMBOL(&state1) then break.
+    -- Note: state1 has already been updated above, so this emits the NEW state1's symbol.
+    let avail2 := br.totalBitsRemaining
+    if avail2 < cell2.numBits.toNat then
+      if state1 < tableSize then
+        result := result.push table.cells[state1]!.symbol.toUInt8
+      break
+    let (bits2, br') ← br.readBits cell2.numBits.toNat
+    br := br'
+    state2 := cell2.newState.toNat + bits2.toNat
+    -- Do NOT break on br.isFinished. The reference continues until overflow:
+    -- when all bits are consumed (completed), the next iteration emits state1's
+    -- symbol, then the avail check detects insufficient bits and breaks.
   return (result, br)
 
 /-- Predefined normalized probability distribution for literal length codes

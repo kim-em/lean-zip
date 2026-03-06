@@ -265,8 +265,9 @@ def ZipTest.ZstdNativeComponents.tests : IO Unit := do
 
   -- Test 45: parseHuffmanWeightsDirect — known byte sequence
   -- Byte 0x35 packs weights [3, 5], byte 0xA1 packs [10, 1]
+  -- numWeights=4 means 4 weight symbols from ceil(4/2)=2 bytes
   let weightInput := ByteArray.mk #[0x35, 0xA1]
-  match Zip.Native.parseHuffmanWeightsDirect weightInput 0 2 with
+  match Zip.Native.parseHuffmanWeightsDirect weightInput 0 4 with
   | .ok (weights, endPos) =>
     unless weights.size == 4 do
       throw (IO.userError s!"weights: expected 4 weights, got {weights.size}")
@@ -352,9 +353,10 @@ def ZipTest.ZstdNativeComponents.tests : IO Unit := do
   | .error e => throw (IO.userError s!"buildZstdHuffmanTable 4sym failed: {e}")
 
   -- Test 50: parseHuffmanTreeDescriptor — direct mode
-  -- Header byte = 1 (1 weight byte), weight byte = 0x11 → weights [1, 1]
+  -- Header byte = 0x81 (129, >= 128 → direct), numWeights = 129 - 127 = 2
+  -- ceil(2/2) = 1 weight byte: 0x11 → weights [1, 1]
   -- 2 explicit symbols + 1 implicit = 3 symbols
-  let treeDescInput := ByteArray.mk #[0x01, 0x11]
+  let treeDescInput := ByteArray.mk #[0x81, 0x11]
   match Zip.Native.parseHuffmanTreeDescriptor treeDescInput 0 with
   | .ok (table, endPos) =>
     unless endPos == 2 do
@@ -366,8 +368,8 @@ def ZipTest.ZstdNativeComponents.tests : IO Unit := do
   | .error e => throw (IO.userError s!"parseHuffmanTreeDescriptor direct failed: {e}")
 
   -- Test 51: parseHuffmanTreeDescriptor — FSE mode with invalid data returns error
-  -- Header byte 0x80 → compressedSize=1, too small for a valid FSE distribution
-  let fseTreeInput := ByteArray.mk #[0x80, 0x00, 0x00, 0x00]
+  -- Header byte 0x01 (< 128 → FSE), compressedSize=1, too small for a valid FSE distribution
+  let fseTreeInput := ByteArray.mk #[0x01, 0x00, 0x00, 0x00]
   match Zip.Native.parseHuffmanTreeDescriptor fseTreeInput 0 with
   | .ok _ => throw (IO.userError "FSE tree descriptor invalid: should have failed")
   | .error _ => pure ()
@@ -378,7 +380,8 @@ def ZipTest.ZstdNativeComponents.tests : IO Unit := do
   | .error _ => pure ()
 
   -- Test 53: parseHuffmanWeightsDirect — truncated data
-  match Zip.Native.parseHuffmanWeightsDirect (ByteArray.mk #[0x35]) 0 2 with
+  -- 3 weights need ceil(3/2) = 2 bytes, but only 1 byte provided
+  match Zip.Native.parseHuffmanWeightsDirect (ByteArray.mk #[0x35]) 0 3 with
   | .ok _ => throw (IO.userError "truncated weights: should have failed")
   | .error _ => pure ()
 
