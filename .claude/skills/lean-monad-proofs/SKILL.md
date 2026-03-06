@@ -1,6 +1,6 @@
 ---
 name: lean-monad-proofs
-description: Use when working on Lean 4 proofs involving Option or Except monad, do-notation unfolding, guard patterns, bind handling, join points, or forIn loops in specifications.
+description: Use when working on Lean 4 proofs involving Option or Except monad, do-notation unfolding, guard patterns, bind handling, join points, forIn loops in specifications, or Id monad loop invariants (Id.run do with for loops).
 allowed-tools: Read, Bash, Grep
 ---
 
@@ -11,6 +11,35 @@ allowed-tools: Read, Bash, Grep
 In `Option`/`Except` monads, `return` inside a `for` loop exits the loop (producing
 `some`), not the function. Use explicit recursive helper functions instead — they're
 also easier to reason about in proofs. Reserve `for`/`while` for `IO` code.
+
+**Critical reason: `while` loops are unprovable.** `while` in do-notation desugars
+to `Lean.Loop.forIn`, which internally calls `Lean.Loop.forIn.loop` — a `partial`
+definition. The kernel treats `partial` defs as axioms: they cannot be unfolded,
+have no equation lemmas, and no properties can be proven about them.
+
+**Workaround for existing `while`-based functions** (e.g., `weightsToMaxBits`):
+1. Define a pure WF-recursive function that mirrors the loop logic
+2. Prove properties about the pure version (sorry-free)
+3. Bridge with a sorry: `imperativeVersion = pureVersion := by sorry`
+4. Derive properties of the imperative version via the bridge
+
+```lean
+-- Pure spec version of a while loop that doubles `power` until `power ≥ ws`
+def findMaxBitsLoop (ws bits power : Nat) (hpow : power ≥ 1) : Nat × Nat :=
+  if h : power < ws then findMaxBitsLoop ws (bits + 1) (power * 2) (by omega)
+  else (bits, power)
+termination_by ws - power
+
+-- Bridge (inherently sorry — partial defs are axioms)
+theorem imperativeVersion_eq_spec : imperativeVersion x = pureSpec x := by sorry
+
+-- Derive properties via the bridge
+theorem imperativeVersion_valid : P (imperativeVersion x) := by
+  rw [imperativeVersion_eq_spec]; exact pureSpec_valid x
+```
+
+This sorry is **irreducible** — it can only be eliminated by refactoring the
+implementation to use explicit recursion instead of `while`.
 
 ## Unfolding do-notation with `Except.bind`
 
@@ -364,3 +393,133 @@ split at h  -- splits the if
 ```
 
 This was independently rediscovered in 3+ sessions before being codified.
+
+## `forIn` Loop Invariants in the `Id` Monad
+
+Functions using `Id.run do` with `for` loops (e.g., `buildFseTableCells`) desugar to
+chains of `forIn (m := Id) [:n] init body`. To prove properties preserved across
+loops, use a loop invariant lemma like `range_forIn_inv`.
+
+**Metavariable trap**: When using `have := range_forIn_inv n _ _ P hinit hf`,
+the body function `f` is a metavariable `?m` during `hf` elaboration. Tactics
+like `split` fail because they can't find `if`/`match` in `?m x b`.
+
+**Fix**: Pass the `heq` equation (from `split; rename_i ... heq`) as an early
+argument so Lean resolves `f` before elaborating `hf`:
+
+```lean
+-- Helper that resolves f from heq before elaborating hf:
+private theorem forIn_fst_size_of_heq {α β : Type} {n k : Nat}
+    {init : MProd (Array α) β}
+    {f : Nat → MProd (Array α) β → Id (ForInStep (MProd (Array α) β))}
+    {result : Array α} {rest : β}
+    (heq : forIn (m := Id) [:n] init f = ⟨result, rest⟩)
+    (hinit : init.fst.size = k)
+    (hf : ∀ a b, b.fst.size = k → ∃ b', f a b = ForInStep.yield b' ∧ b'.fst.size = k) :
+    result.size = k := ...
+
+-- Usage: f is resolved from heq₁ before hf is elaborated
+have h₁ : cells₁.size = 1 <<< al :=
+  forIn_fst_size_of_heq heq₁ (by simp) (fun _ b hb => by
+    split  -- NOW works because f is concrete
+    · exact ⟨_, rfl, by simp [Array.size_setIfInBounds, hb]⟩
+    · exact ⟨_, rfl, hb⟩)
+```
+
+**Key pattern for `Id.run do` proofs**:
+1. `unfold f; simp only [Id.run, pure, Pure.pure, Bind.bind]` to reduce do-block
+2. `split; rename_i ... heq` to destructure each `match` on loop results
+3. Use `forIn_fst_size_of_heq heq ...` (not `range_forIn_inv _ _ _ P ...`)
+
+**For nested loops** (e.g., inner `for` inside outer `for`), `split` inside
+the outer `hf` proof to reach the inner `match`, then use
+`forIn_fst_size_of_heq heq_inner ...` for the inner loop.
+
+## `forIn` with Yield-Only Body → `Array.foldl`
+
+When a `for w in arr do` loop in `Except` always yields (no `break`/`return`),
+the `forIn` result equals the corresponding `Array.foldl`. Three steps are needed:
+
+### Step 1: Simplify do-notation desugaring artifacts
+
+Mutable variable assignment in `for` loops desugars to
+`match pure PUnit.unit with | .error => ... | .ok v => ...` wrappers.
+Simplify with:
+```lean
+simp only [pure, Pure.pure, Except.pure] at heq_forIn
+```
+
+### Step 2: Factor `Except.ok (ForInStep.yield ...)` out of `if` branches
+
+The body may have `if c then ok (yield a) else ok (yield b)` which must become
+`ok (yield (if c then a else b))`:
+```lean
+simp only [show ∀ (w : UInt8) (r : Nat),
+    (if w.toNat > 0 then Except.ok (ForInStep.yield (r + f w))
+     else (Except.ok (ForInStep.yield r) : Except ε (ForInStep Nat))) =
+    Except.ok (ForInStep.yield (if w.toNat > 0 then r + f w else r))
+  from fun w r => by split <;> rfl] at heq_forIn
+```
+
+### Step 3: Apply `forIn_pure_yield_eq_foldl`
+
+```lean
+rw [forIn_pure_yield_eq_foldl] at heq_forIn
+exact (Except.ok.inj heq_forIn).symm
+```
+
+### Critical: Match expression matching in `simp`/`rw`
+
+**Lean 4's `simp`/`rw` CANNOT match syntactically identical `match`
+expressions from different elaboration contexts.** Two `match` blocks that
+print identically may have different internal `casesOn` representations.
+
+This means a separately proved lemma about `List.foldlM` with a `match`
+body CANNOT be applied via `simp`/`rw` to a `foldlM` expression whose
+`match` came from `Array.forIn_eq_foldlM`.
+
+**Workaround**: Prove by `generalize` + induction directly on the goal,
+so the `match` expression is the one from the goal itself:
+
+```lean
+rw [Array.forIn_eq_foldlM, ← Array.foldlM_toList, ← Array.foldl_toList]
+generalize as.toList = l
+revert init
+induction l with
+| nil => intro init; rfl
+| cons x l ih =>
+  intro init
+  simp only [List.foldlM, bind, Except.bind, List.foldl_cons]
+  exact ih (f x init)
+```
+
+## `split at h` Step Limit on Large Unfolded Functions
+
+**Problem**: `split at h` uses `simp` internally. On large unfolded functions
+(e.g., `parseFrameHeader` with mutable state and many guards), it hits the
+simp step limit: `` `simp` failed: maximum number of steps exceeded ``.
+
+**Solution**: Use `by_cases` + `rw [if_pos/if_neg]` instead of `split at h`:
+
+```lean
+-- Instead of: split at h (hits step limit)
+-- Do:
+by_cases hcond : condition
+· rw [if_pos hcond] at h; exact nomatch h   -- throws → contradiction
+· rw [if_neg hcond] at h                     -- continues
+  -- For match on pure PUnit.unit after rw:
+  simp only [pure, Pure.pure] at h           -- reduces to .ok branch
+```
+
+**Why this works**: `rw [if_pos/if_neg]` does a targeted rewrite without
+traversing the whole term. `split at h` tries to analyze the entire
+hypothesis to find the match/ite, which is expensive on large terms.
+
+**Also avoid `simp [bne, hb]` on large hypotheses**. Instead, use targeted
+`show` + `rw` for Bool goals like `(!false) = true`:
+```lean
+exfalso; apply hmagic
+show (!(a == b)) = true
+rw [hb]  -- hb : (a == b) = false, goal becomes (!false) = true
+-- rfl closes it
+```
