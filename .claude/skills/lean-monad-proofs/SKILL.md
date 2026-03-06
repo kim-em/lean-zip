@@ -905,6 +905,40 @@ elaboration errors that `first` cannot catch (not a tactic failure).
 uses `by_cases` for 3 error guards, `split at h` for the singleSegment
 branch, then `iterate 5 (all_goals ...)` to process remaining branches.
 
+## `split at h` Cannot Decompose Matches on Structure Field Projections
+
+**Problem**: `split at h` cannot split `match header.fieldName with ...` when
+the discriminant is a structure field projection. The match remains unsplit
+in the hypothesis, blocking further progress.
+
+**Example**: In `decompressFrame`, after unfolding and simplifying with
+`simp only [hn]` (where `hn : header.contentSize = some n`), the hypothesis
+still contains `match header.dictionaryId with ...`. Neither `split at h`
+nor `dsimp` can decompose this — the match on a struct field projection is
+opaque to the `split` tactic's internal `simp`.
+
+**Why it happens**: `split` internally uses `simp` to find and decompose
+`match`/`if` expressions. When the discriminant is a projection like
+`header.dictionaryId`, simp cannot generalize over it to create the
+case split.
+
+**Solution**: Use `grind` instead. It handles congruence closure + case
+splitting + arithmetic in one shot, and can reason through matches on
+structure field projections.
+
+```lean
+-- After simp only [functionDef, bind, Except.bind, ...] at h:
+-- h still contains: match header.dictionaryId with | some dictId => ... | none => ...
+-- split at h    -- FAILS: cannot decompose the match
+-- dsimp at h    -- FAILS: makes no progress
+-- simp_all      -- FAILS: makes no progress
+grind            -- WORKS: handles deep case-splitting on struct fields
+```
+
+**When to accept `grind`**: If `grind` is the only tactic that works after
+3+ fundamentally different targeted approaches have failed, keep it with
+a comment documenting what it handles and why alternatives fail.
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
