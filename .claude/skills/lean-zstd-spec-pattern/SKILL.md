@@ -162,6 +162,53 @@ When creating `Zip/Spec/ZstdFoo.lean`:
 
 5. Leave loop/fold theorems as `sorry` with docstrings
 
+## Theorem Statement Validation
+
+**Before investing proof effort, validate theorem statements with concrete
+examples.** Two false theorems were discovered and corrected during this
+project (`parseBlockHeader_blockSize_le` in PR #639, `weightsToMaxBits_valid`
+in PR #622). Both cost multiple sessions of wasted proof attempts before
+counterexamples were found.
+
+### Validation checklist
+
+1. **`#eval` on concrete inputs**: Test the theorem's conclusion on 2-3
+   known-good inputs (from test vectors or RFC examples):
+   ```lean
+   -- Before proving: parseHeader returns blockSize ≤ 128*1024
+   #eval do
+     let input := ByteArray.mk #[0x21, 0x00, 0x00]  -- known test vector
+     let hdr ← parseBlockHeader input 0
+     return hdr.blockSize ≤ 128 * 1024  -- true? or false?
+   ```
+
+2. **`decide` on small instances**: For predicates with `Decidable` instances,
+   test on boundary cases:
+   ```lean
+   #eval decide (ValidWeights #[1, 2, 0, 3])  -- should be true
+   #eval decide (ValidWeights #[0, 0, 0])      -- should be false
+   ```
+
+3. **Check what the implementation actually enforces**: Read the implementation
+   code carefully. A parser that reads a 21-bit field does NOT enforce
+   `value ≤ 128*1024` — it only enforces `value < 2^21`. The theorem
+   should match what the code does, not what the RFC recommends.
+
+4. **Boundary cases**: Test at the edges of claimed bounds:
+   - Maximum-size inputs
+   - All-zero inputs
+   - Inputs that trigger error paths
+
+### When to weaken a theorem
+
+If validation reveals the theorem is false, **weaken it to what's actually
+provable** rather than abandoning it:
+- `blockSize ≤ 128*1024` → `blockSize < 2^21` (what the parser enforces)
+- `weight > 0` → `∃ i, weights[i] > 0` (existence, not universality)
+
+Document the weakening with a comment explaining the original intent and
+why it was too strong.
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
