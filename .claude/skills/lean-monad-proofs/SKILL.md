@@ -406,3 +406,34 @@ split at h  -- splits the if
 ```
 
 This was independently rediscovered in 3+ sessions before being codified.
+
+## `split at h` Step Limit on Large Unfolded Functions
+
+**Problem**: `split at h` uses `simp` internally. On large unfolded functions
+(e.g., `parseFrameHeader` with mutable state and many guards), it hits the
+simp step limit: `` `simp` failed: maximum number of steps exceeded ``.
+
+**Solution**: Use `by_cases` + `rw [if_pos/if_neg]` instead of `split at h`:
+
+```lean
+-- Instead of: split at h (hits step limit)
+-- Do:
+by_cases hcond : condition
+· rw [if_pos hcond] at h; exact nomatch h   -- throws → contradiction
+· rw [if_neg hcond] at h                     -- continues
+  -- For match on pure PUnit.unit after rw:
+  simp only [pure, Pure.pure] at h           -- reduces to .ok branch
+```
+
+**Why this works**: `rw [if_pos/if_neg]` does a targeted rewrite without
+traversing the whole term. `split at h` tries to analyze the entire
+hypothesis to find the match/ite, which is expensive on large terms.
+
+**Also avoid `simp [bne, hb]` on large hypotheses**. Instead, use targeted
+`show` + `rw` for Bool goals like `(!false) = true`:
+```lean
+exfalso; apply hmagic
+show (!(a == b)) = true
+rw [hb]  -- hb : (a == b) = false, goal becomes (!false) = true
+-- rfl closes it
+```
