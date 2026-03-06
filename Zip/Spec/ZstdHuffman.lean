@@ -93,6 +93,88 @@ instance {table : Array HuffmanEntry} {maxBits : Nat} :
     Decidable (ValidHuffmanTable table maxBits) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
+/-! ## Pure spec versions of `weightsToMaxBits` -/
+
+/-- Find the smallest `maxBits` such that `2^maxBits ≥ ws`, starting from
+    `power = 2^bits`. Pure recursive version of the while loop in
+    `weightsToMaxBits`. Returns `(maxBits, power)` where `power = 2^maxBits`.
+    Requires `power ≥ 1` for termination (power doubles each iteration). -/
+def findMaxBitsLoop (ws bits power : Nat) (hpow : power ≥ 1) : Nat × Nat :=
+  if h : power < ws then findMaxBitsLoop ws (bits + 1) (power * 2) (by omega)
+  else (bits, power)
+termination_by ws - power
+decreasing_by omega
+
+/-- Pure spec version of `weightsToMaxBits`. Computes `maxBits` from the weight
+    sum using explicit recursion instead of `while`. Returns `.error` when
+    `weightSum = 0`, otherwise finds the smallest `k` with `2^k ≥ weightSum`
+    and bumps by 1 if equality holds. -/
+def weightsToMaxBitsSpec (weights : Array UInt8) : Except String Nat :=
+  let ws := weightSum weights
+  if ws == 0 then .error "Zstd: all weights are zero"
+  else
+    let (maxBits, power) := findMaxBitsLoop ws 0 1 (by omega)
+    if ws == power then .ok (maxBits + 1)
+    else .ok maxBits
+
+/-! ### Properties of `findMaxBitsLoop` -/
+
+/-- `findMaxBitsLoop` preserves the `power = 2^bits` invariant and returns
+    a power of 2 that is `≥ ws`. -/
+theorem findMaxBitsLoop_spec (ws bits power : Nat) (hpow : power ≥ 1)
+    (hinv : power = 1 <<< bits) (hws : ws ≥ 1) :
+    (findMaxBitsLoop ws bits power hpow).2 ≥ ws ∧
+    (findMaxBitsLoop ws bits power hpow).2 = 1 <<< (findMaxBitsLoop ws bits power hpow).1 := by
+  unfold findMaxBitsLoop
+  split
+  · -- power < ws
+    rename_i hlt
+    have hmul : power * 2 = 1 <<< (bits + 1) := by
+      subst hinv; simp [Nat.shiftLeft_eq, Nat.pow_succ, Nat.mul_comm]
+    exact findMaxBitsLoop_spec ws (bits + 1) (power * 2) (by omega) hmul hws
+  · -- power ≥ ws
+    exact ⟨by omega, hinv⟩
+  termination_by ws - power
+
+/-- When the spec version of `weightsToMaxBits` succeeds with result `m`,
+    the weight sum satisfies `0 < weightSum ≤ 2^m`. -/
+theorem weightsToMaxBitsSpec_valid (weights : Array UInt8)
+    (m : Nat) (h : weightsToMaxBitsSpec weights = .ok m) :
+    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< m := by
+  simp only [weightsToMaxBitsSpec] at h
+  split at h
+  · exact nomatch h
+  · rename_i hne
+    have hws_pos : weightSum weights ≥ 1 := by
+      simp [BEq.beq] at hne; omega
+    have hloop := findMaxBitsLoop_spec (weightSum weights) 0 1 (by omega) rfl hws_pos
+    generalize findMaxBitsLoop (weightSum weights) 0 1 _ = r at h hloop
+    obtain ⟨hge, hpow⟩ := hloop
+    split at h
+    · -- bumped: ws == r.2, m = r.1 + 1
+      rename_i heq_bool
+      have heq : weightSum weights = r.2 := by
+        simp [BEq.beq] at heq_bool; exact heq_bool
+      simp only [Except.ok.injEq] at h; subst h
+      constructor
+      · omega
+      · rw [heq, hpow, Nat.shiftLeft_eq, Nat.shiftLeft_eq, Nat.pow_succ]
+        omega
+    · -- not bumped: m = r.1
+      simp only [Except.ok.injEq] at h; subst h
+      constructor
+      · omega
+      · rw [← hpow]; exact hge
+
+/-- `weightsToMaxBits` agrees with `weightsToMaxBitsSpec`.
+    This cannot be proven without `sorry` because `weightsToMaxBits` uses
+    `Lean.Loop.forIn` (a `partial` definition) for its `while` loop, which
+    the kernel treats as an axiom. The mathematical content of the validity
+    theorem is fully proven in `weightsToMaxBitsSpec_valid` above. -/
+theorem weightsToMaxBits_eq_spec (weights : Array UInt8) :
+    Zip.Native.weightsToMaxBits weights = weightsToMaxBitsSpec weights := by
+  sorry
+
 /-! ## Correctness theorems -/
 
 /-- When `buildZstdHuffmanTable` succeeds, the resulting table has size
@@ -115,18 +197,18 @@ theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
   sorry
 
 /-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
-    satisfies `2^(m-1) < weightSum ≤ 2^m` (except when `weightSum` is
-    exactly a power of 2, in which case `m` is bumped by 1).
+    satisfies `0 < weightSum ≤ 2^m`. The function finds the smallest
+    `k` with `2^k ≥ weightSum`, then bumps by 1 if equality holds
+    (to accommodate the implicit last symbol).
 
-    More precisely: `weightSum weights > 0 ∧ weightSum weights ≤ 2^(m-1)`,
-    since `m` is chosen so that `2^(m-1)` is the first power ≥ `weightSum`,
-    and if equality holds, `m` is incremented by 1 to accommodate the
-    implicit last symbol. -/
+    Counterexample for the previous `≤ 2^(m-1)` bound: `weights = #[1, 2]`
+    gives `weightSum = 3`, `m = 2`, but `3 > 2 = 2^(m-1)`. -/
 theorem weightsToMaxBits_valid (weights : Array UInt8)
     (m : Nat)
     (h : Zip.Native.weightsToMaxBits weights = .ok m) :
-    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< (m - 1) := by
-  sorry
+    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< m := by
+  rw [weightsToMaxBits_eq_spec] at h
+  exact weightsToMaxBitsSpec_valid weights m h
 
 /-- The `weightSum` function agrees with the inline computation in
     `weightsToMaxBits`: both compute `∑ 2^(W-1)` for positive weights. -/
