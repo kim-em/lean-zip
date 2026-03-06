@@ -462,15 +462,13 @@ theorem decodeMatchLenValue_small (code : Nat) (extraBits : UInt32) (h : code �
                    _ | _ | _ | _ | _ | _ | _ | _ | _
   all_goals first | omega | rfl
 
-/-- When `code > 0`, `decodeOffsetValue` returns a positive value.
-    This follows from `1 <<< code > 0` for any natural `code`. -/
+/-- `decodeOffsetValue` always returns a positive value.
+    This follows from `(1 <<< code) ≥ 1` for any natural `code`. -/
 theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : code > 0) :
     decodeOffsetValue code extraBits > 0 := by
   unfold decodeOffsetValue
-  split
-  · rename_i h; simp only [beq_iff_eq] at h; omega
-  · have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
-    omega
+  have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
+  omega
 
 /-- `executeSequences` output size characterization: when `executeSequences`
     succeeds with an empty window prefix, the output contains exactly the

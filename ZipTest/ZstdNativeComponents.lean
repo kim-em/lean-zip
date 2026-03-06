@@ -469,9 +469,10 @@ def ZipTest.ZstdNativeComponents.tests : IO Unit := do
   let offVal20 := Zip.Native.decodeOffsetValue 20 0
   unless offVal20 == 1048576 do throw (IO.userError s!"offset code 20: expected 1048576, got {offVal20}")
 
-  -- Test 68: decodeOffsetValue — code 0, extraBits 5 → 5 (special case)
-  let offVal0 := Zip.Native.decodeOffsetValue 0 5
-  unless offVal0 == 5 do throw (IO.userError s!"offset code 0: expected 5, got {offVal0}")
+  -- Test 68: decodeOffsetValue — code 0, extraBits 0 → (1 << 0) + 0 = 1
+  -- Code 0 means 0 extra bits, so extraBits is always 0 in practice.
+  let offVal0 := Zip.Native.decodeOffsetValue 0 0
+  unless offVal0 == 1 do throw (IO.userError s!"offset code 0: expected 1, got {offVal0}")
 
   -- Test 69: parseSequencesHeader — modes parsing
   -- Construct: byte0 = 42 (small count), modes byte = 0b10_01_00_00 = 0x90

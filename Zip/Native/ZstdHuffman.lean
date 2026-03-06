@@ -165,10 +165,11 @@ def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTab
     let w := allWeights[i]!.toNat
     if w > 0 && w < weightCounts.size then
       weightCounts := weightCounts.set! w (weightCounts[w]! + 1)
-  -- Compute starting codes for each weight (ascending weight = shorter codes = higher codes)
+  -- Compute starting codes for each weight (ascending weight = longest codes first)
   -- Symbols with weight 1 have numberOfBits = maxBits, so they occupy 1 entry each.
   -- Symbols with weight maxBits have numberOfBits = 1, so they occupy 2^(maxBits-1) entries each.
   -- Start from weight=1: codes start at 0, each code occupies 2^(W-1) entries.
+  -- This matches the reference zstd implementation's rankStart ordering.
   let mut pos : Nat := 0
   for w in List.range (maxBits + 1) do
     if w > 0 then
@@ -225,26 +226,20 @@ def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
     -- Direct 4-bit nibble representation: numWeights = headerByte - 127
     let numWeights := headerByte - 127
     let (weights, afterWeights) ← parseHuffmanWeightsDirect data (pos + 1) numWeights
-    -- Trim trailing zero weights (packed bytes may have a padding zero)
-    let mut trimmed := weights
-    while trimmed.size > 0 && trimmed.back! == 0 do
-      trimmed := trimmed.pop
-    if trimmed.size == 0 then
-      throw "Zstd: all Huffman weights are zero after trimming"
-    let table ← buildZstdHuffmanTable trimmed
+    -- Note: do NOT trim trailing zero weights — they are significant because the
+    -- implicit last symbol's identity depends on the weight array length.
+    -- parseHuffmanWeightsDirect already handles nibble padding via extract.
+    let table ← buildZstdHuffmanTable weights
     return (table, afterWeights)
   -- FSE-compressed representation: compressedSize = headerByte
   if headerByte == 0 then
     throw "Zstd: Huffman tree descriptor with 0 compressed size"
   let compressedSize := headerByte
   let (weights, afterWeights) ← parseHuffmanWeightsFse data pos compressedSize
-  -- Trim trailing zero weights
-  let mut trimmed := weights
-  while trimmed.size > 0 && trimmed.back! == 0 do
-    trimmed := trimmed.pop
-  if trimmed.size == 0 then
-    throw "Zstd: FSE-compressed Huffman weights are all zero after trimming"
-  let table ← buildZstdHuffmanTable trimmed
+  -- Note: do NOT trim trailing zero weights — they are significant because the
+  -- implicit last symbol's identity depends on the weight array length.
+  -- The FSE decoder produces exactly the right number of weights.
+  let table ← buildZstdHuffmanTable weights
   return (table, afterWeights)
 
 /-- Decode a single Huffman symbol from a backward bitstream using a flat table.
