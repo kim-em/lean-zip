@@ -650,6 +650,49 @@ type mismatch.
 **Fix**: Use `simp only [beq_iff_eq] at h` to convert `(x == 0) = true` into `x = 0`.
 Or use `exact absurd (by rw [h]; decide) hne` for contradiction branches.
 
+## Array Literal Indexing After `rcases` Case Split
+
+When proving a property about `arr[code]` for all `code < N` (e.g., validating
+RFC lookup tables), the working pattern is:
+
+```lean
+-- 1. Eliminate the dite/if on array bounds
+unfold myFunction
+simp only [hlt, ↓reduceDIte]
+-- 2. Case split on code (N+1 underscores for N values + impossible case)
+rcases code with _ | _ | _ | _ | _ | _ | _ | _ | _
+-- 3. Close each case: rfl for valid codes, omega for the impossible case
+all_goals first | omega | rfl
+```
+
+**Why this works**: `rcases` decomposes `code` into `0`, `Nat.succ 0`, etc.
+After `unfold`, `Array.get` on the literal array reduces definitionally for
+each concrete index, making `rfl` close the goal.
+
+**What does NOT work**:
+- `simp only [myArray]`: Expands the array definition but does NOT reduce
+  `Array.getInternal (0 + 1 + 1 + ...) ...` — the index stays symbolic-looking
+- `decide` on `∀ code : Nat, ...`: `Nat` is infinite, so `decide` can't enumerate
+- `Fin`-based `decide` helpers: Work in principle but have proof obligation
+  issues bridging `Array.get` with different proof terms
+
+## `omega` Cannot Handle Exponentiation (`2^n`, `1 <<< n`)
+
+`omega` only handles linear arithmetic. For goals involving `2^n` or `1 <<< n`:
+
+```lean
+-- Bridge shiftLeft to pow, then use the standard pow lemma
+have : 1 <<< n ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
+omega  -- now omega can use the linear bound
+```
+
+Key lemmas:
+- `Nat.one_shiftLeft : 1 <<< n = 2 ^ n` — bridges `<<<` and `^`
+- `Nat.one_le_two_pow : 1 ≤ 2 ^ n` — the standard positivity fact for powers of 2
+
+This pattern appears in Zstd offset decoding (`decodeOffsetValue`) and FSE
+table size proofs where `tableSize = 1 <<< accuracyLog`.
+
 ## `⟨⟨result.data.toList⟩⟩ = result` for ByteArray
 
 `ByteArray.mk (Array.mk result.data.toList) = result` is true by **eta reduction** in
