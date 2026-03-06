@@ -46,6 +46,30 @@ theorem copyBytes_getElem_lt (dst src : ByteArray) (srcPos count : Nat) (i : Nat
     rw [ih (dst.push src[srcPos]!) (srcPos + 1) (by simp [ByteArray.size_push]; omega)]
     exact ByteArray.push_getElem!_lt dst src[srcPos]! i hi
 
+/-- `copyBytes` content at new positions: the j-th new byte equals `src[srcPos + j]!`.
+    For `j < count` with `srcPos + j < src.size`,
+    `(copyBytes dst src srcPos count)[dst.size + j]! = src[srcPos + j]!`. -/
+theorem copyBytes_getElem_ge (dst src : ByteArray) (srcPos count : Nat) (j : Nat)
+    (hj : j < count) (hsrc : srcPos + count ≤ src.size) :
+    (copyBytes dst src srcPos count)[dst.size + j]! = src[srcPos + j]! := by
+  induction count generalizing dst srcPos j with
+  | zero => omega
+  | succ n ih =>
+    rw [copyBytes.eq_1]
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    cases j with
+    | zero =>
+      -- The first new byte: after pushing src[srcPos]!, it's at dst.size
+      simp only [Nat.add_zero]
+      rw [copyBytes_getElem_lt _ _ _ _ dst.size (by simp [ByteArray.size_push])]
+      exact ByteArray.push_getElem!_eq dst src[srcPos]!
+    | succ j' =>
+      -- Later new bytes: use the IH on the recursive call
+      have : dst.size + (j' + 1) = (dst.push src[srcPos]!).size + j' := by
+        simp [ByteArray.size_push]; omega
+      rw [this, ih (dst.push src[srcPos]!) (srcPos + 1) j' (by omega) (by omega)]
+      congr 1; omega
+
 private theorem copyMatch_loop_size (offset length start : Nat) (b : ByteArray) (k : Nat)
     (hk : k ≤ length) :
     (copyMatch.loop offset length start b k).size = b.size + (length - k) := by
@@ -81,6 +105,54 @@ theorem copyMatch_getElem_lt (buf : ByteArray) (offset length : Nat) (i : Nat)
     (copyMatch buf offset length)[i]! = buf[i]! := by
   unfold copyMatch
   exact copyMatch_loop_getElem_lt offset length (buf.size - offset) buf 0 (Nat.zero_le _) i hi
+
+private theorem copyMatch_loop_getElem_ge_nonoverlap (offset length start : Nat)
+    (buf b : ByteArray) (k j : Nat)
+    (hoff : offset ≥ length)
+    (hstart : start = buf.size - offset)
+    (hreach : offset ≤ buf.size)
+    (hbsize : b.size = buf.size + k)
+    (hprefix : ∀ i, i < buf.size → b[i]! = buf[i]!)
+    (hk : k ≤ length)
+    (hj : j < length - k) :
+    (copyMatch.loop offset length start b k)[b.size + j]! = buf[start + (k + j)]! := by
+  rw [copyMatch.loop.eq_1]
+  have hklt : k < length := by omega
+  simp only [hklt, ↓reduceIte]
+  have hkmod : k % offset = k := Nat.mod_eq_of_lt (by omega)
+  have hsk : start + k < buf.size := by omega
+  rw [hkmod]
+  cases j with
+  | zero =>
+    simp only [Nat.add_zero]
+    rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega)
+      b.size (by simp [ByteArray.size_push])]
+    rw [ByteArray.push_getElem!_eq]
+    exact hprefix _ hsk
+  | succ j' =>
+    have heq : b.size + (j' + 1) = (b.push b[start + k]!).size + j' := by
+      simp [ByteArray.size_push]; omega
+    rw [heq, copyMatch_loop_getElem_ge_nonoverlap offset length start buf _ (k + 1) j'
+      hoff hstart hreach (by simp [ByteArray.size_push, hbsize]; omega)
+      (fun i hi => by rw [ByteArray.push_getElem!_lt _ _ _ (by omega)]; exact hprefix i hi)
+      (by omega) (by omega)]
+    congr 1; omega
+  termination_by length - k
+
+/-- `copyMatch` content at new positions (non-overlapping case): when `offset ≥ length`,
+    the j-th new byte equals the byte `offset` positions back in the original buffer.
+    For `j < length`, `(copyMatch buf offset length)[buf.size + j]! = buf[buf.size - offset + j]!`.
+    Combined with `copyMatch_getElem_lt` and `copyMatch_size`, this fully specifies `copyMatch`
+    when the source region doesn't overlap the destination. -/
+theorem copyMatch_getElem_ge_nonoverlap (buf : ByteArray) (offset length : Nat) (j : Nat)
+    (hoff : offset ≥ length) (hreach : offset ≤ buf.size) (hj : j < length) :
+    (copyMatch buf offset length)[buf.size + j]! = buf[buf.size - offset + j]! := by
+  unfold copyMatch
+  simp only
+  have := copyMatch_loop_getElem_ge_nonoverlap offset length (buf.size - offset) buf buf 0 j
+    hoff rfl hreach rfl (fun _ _ => rfl) (Nat.zero_le _) (by omega)
+  simp only [Nat.zero_add] at this
+  exact this
 
 private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
     List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
