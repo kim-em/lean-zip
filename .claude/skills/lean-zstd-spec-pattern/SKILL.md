@@ -209,6 +209,146 @@ provable** rather than abandoning it:
 Document the weakening with a comment explaining the original intent and
 why it was too strong.
 
+## Size and Content Theorems for WF Helper Functions
+
+Functions like `copyBytes` and `copyMatch` use well-founded recursion
+(termination by `count` or `length - k`). Their spec theorems follow a
+consistent 3-theorem pattern:
+
+1. **Size theorem**: `f_size` — output size equals input size + amount copied
+2. **Preservation theorem**: `f_getElem_lt` — existing bytes are unchanged
+3. **Content theorem**: `f_getElem_ge` — new bytes have expected values
+
+### Proof structure
+
+All three use **induction matching the WF recursion**:
+
+```lean
+theorem copyBytes_size (dst src : ByteArray) (srcPos count : Nat) :
+    (copyBytes dst src srcPos count).size = dst.size + count := by
+  induction count generalizing dst srcPos with
+  | zero => simp [copyBytes]
+  | succ n ih =>
+    rw [copyBytes.eq_1]               -- one-level unfold via equation lemma
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih, ByteArray.size_push]; omega
+```
+
+Key patterns:
+- **`rw [f.eq_1]`** for one-level unfold (never `simp only [f]` — it loops)
+- **`generalizing dst srcPos`** when the function modifies these per step
+- **Size lemmas compose**: `rw [copyMatch_size, copyBytes_size] at this; omega`
+  chains through multiple operations in loop invariant proofs
+
+### Content theorems: non-overlapping vs overlapping
+
+Non-overlapping `copyMatch` (`offset ≥ length`) is straightforward: each
+new byte reads from the original buffer at a fixed position.
+
+Overlapping `copyMatch` (`offset < length`) requires tracking that each
+new byte reads from the *growing* buffer, creating a repeating pattern.
+The proof threads a `hprefix` invariant through the induction:
+```lean
+(hprefix : ∀ i, i < buf.size → b[i]! = buf[i]!)
+```
+
+## Table Correctness via `rcases` Case Split
+
+For proving properties about lookup tables (`litLenExtraBits`,
+`matchLenExtraBits`, offset baseline tables), the standard approach is:
+
+```lean
+theorem decodeLitLenValue_small (code : Nat) (extraBits : UInt32) (h : code ≤ 15) :
+    decodeLitLenValue code extraBits = .ok (code + extraBits.toNat) := by
+  have hlt : code < litLenExtraBits.size := by simp only [litLenExtraBits_size]; omega
+  unfold decodeLitLenValue
+  simp only [hlt, ↓reduceDIte]
+  rcases code with _ | _ | _ | _ | _ | _ | _ | _ |
+                   _ | _ | _ | _ | _ | _ | _ | _ | _
+  all_goals first | omega | rfl
+```
+
+**Pattern**: Eliminate `dite`/bounds check → `rcases` into N+1 arms
+(N valid + 1 impossible) → close each with `rfl` or `omega`.
+
+**Scaling**: This works for tables up to ~50 entries (tested with 32-entry
+match length table). Beyond that, build times may become excessive.
+
+## Exhaustive Case Analysis for Branch-Heavy Functions
+
+Functions like `resolveOffset` that branch on multiple conditions
+(rawOffset value × literalLength zero/nonzero) benefit from exhaustive
+`rcases` decomposition:
+
+```lean
+rcases rawOffset with _ | _ | _ | _ | n
+· omega  -- rawOffset = 0, impossible
+· -- rawOffset = 1
+  simp only [resolveOffset, show ¬(1 > 3) from by omega,
+    show litLen > 0 from hlit, ↓reduceIte]
+  exact h0pos
+· -- rawOffset = 2 ...
+· -- rawOffset = 3 ...
+· -- rawOffset = n + 4 > 3
+  simp only [resolveOffset, show n + 4 > 3 from by omega, ↓reduceIte]
+  omega
+```
+
+**Key techniques**:
+- **Inline `show` proofs**: `show ¬(N > 3) from by omega` provides the
+  condition directly to `simp only` without a separate `have`
+- **`↓reduceIte`**: reduces `if true/false then A else B` after the
+  condition is resolved
+- **`split` for inner branches**: after resolving the outer condition,
+  `split` handles `if litLen > 0 then ... else ...` cleanly
+
+For ValidOffsetHistory preservation through each branch:
+```lean
+refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+```
+This handles all three positivity goals at once. The bare `simp` reduces
+`#[a, b, c][0]!` etc., and `omega` closes the arithmetic.
+
+**Array literal access exemption**: When the goal involves `#[a,b,c][i]!`
+for a *known* array literal with *concrete* index, bare `simp` is
+acceptable — `simp only` requires listing `Array.getElem!_eq_getD`,
+`Array.getD`, `Array.get_push_lt/eq`, and `List.get` lemmas that vary
+by position and produce linter warnings. Add comment:
+`-- bare simp: array literal access`
+
+## Loop Invariant Theorems via Equation Lemma Matching
+
+For WF-recursive loop functions like `executeSequences.loop`, the loop
+invariant proof matches the function's equation lemmas:
+
+```lean
+theorem executeSequences_loop_inv (seqs : List ZstdSequence) ... := by
+  induction seqs generalizing output history litPos with
+  | nil =>
+    rw [executeSequences.loop.eq_1] at h  -- base case equation
+    simp at h; obtain ⟨rfl, _, rfl⟩ := h; ...
+  | cons seq rest ih =>
+    rw [executeSequences.loop.eq_2] at h  -- recursive case equation
+    split at h  -- split on first guard
+    · simp at h  -- error branch: contradiction
+    · ...
+      split at h  -- next guard
+      dsimp only [letFun] at h  -- reduce letFun between splits
+      split at h; · simp at h  -- error
+      · ...
+        have ⟨ih_size, ih_le, ih_bound⟩ := ih _ _ _ hlp' h
+        rw [copyMatch_size, copyBytes_size] at ih_size  -- compose sizes
+```
+
+**Key patterns**:
+- **`rw [f.eq_N]` not `unfold f`**: equation lemmas target specific cases
+- **`dsimp only [letFun]`** between `split at h` steps: Lean inserts
+  `letFun` wrappers that block further `split`
+- **`simp at h` for error branches**: closes `Except.error = Except.ok`
+  contradictions (or use `exact nomatch h`)
+- **Compose size lemmas**: chain `rw [f_size, g_size]` in the hypothesis
+  before using `omega`
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
@@ -225,3 +365,14 @@ why it was too strong.
 - **Don't forget the module docstring**: Each spec file begins with
   `/-! ... -/` describing the RFC section, the specification layers,
   and what predicates are defined.
+
+## Cross-References
+
+- **WF recursion patterns** (unfolding, `f.induct`, termination measures):
+  `lean-wf-recursion` skill
+- **Monadic unfolding** (`Except.bind` chains, `nomatch` for contradictions):
+  `lean-monad-proofs` skill
+- **Array literal indexing** (`rcases` + `rfl`/`omega`):
+  `lean-simp-tactics` skill, "Array Literal Indexing After `rcases` Case Split"
+- **`1 <<< n` and `2^n`** in offset decoding proofs:
+  `lean-simp-tactics` skill, "`omega` Cannot Handle Exponentiation"
