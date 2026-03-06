@@ -63,8 +63,9 @@ private theorem land_pred_even (n : Nat) (heven : n % 2 = 0) (hpos : n > 0) :
   intro i
   match i with
   | 0 =>
-    rw [Nat.testBit_and, Nat.testBit_zero, Nat.testBit_zero]
-    simp [heven]
+    rw [Nat.testBit_and]
+    simp only [Nat.testBit_zero, heven, Nat.mul_mod_right,
+      show (0 : Nat) ≠ 1 from by omega, decide_false, Bool.false_and]
   | i + 1 =>
     rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ]
     rw [Nat.testBit_succ, Nat.mul_div_cancel_left _ (by omega : 0 < 2)]
@@ -78,9 +79,9 @@ private theorem land_pred_odd (n : Nat) (hodd : n % 2 = 1) :
   intro i
   match i with
   | 0 =>
-    rw [Nat.testBit_and, Nat.testBit_zero, Nat.testBit_zero]
     have : (n - 1) % 2 = 0 := by omega
-    simp [hodd, this]
+    rw [Nat.testBit_and]
+    simp only [Nat.testBit_zero, hodd, this, Nat.mul_mod_right, decide_true, Bool.true_and]
   | i + 1 =>
     rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ,
         hdiv, Bool.and_self,
@@ -109,7 +110,7 @@ private theorem land_pred_zero_imp_pow2 (n : Nat) (hpos : n > 0) (hand : n &&& (
     -- hodd : 0 = 2 * (n / 2), so n / 2 = 0, so n = 1
     have : n / 2 = 0 := by omega
     have : n = 1 := by omega
-    exact ⟨0, by simp [this]⟩
+    exact ⟨0, by omega⟩
 
 /-- `isPow2` correctly characterizes powers of 2. -/
 theorem isPow2_iff (n : Nat) : isPow2 n = true ↔ ∃ k : Nat, 1 <<< k = n := by
@@ -120,9 +121,15 @@ theorem isPow2_iff (n : Nat) : isPow2 n = true ↔ ∃ k : Nat, 1 <<< k = n := b
   · intro ⟨k, hk⟩
     subst hk
     refine ⟨Nat.two_pow_pos k, ?_⟩
-    apply Nat.eq_of_testBit_eq
-    intro i
-    simp
+    -- 2^k &&& (2^k - 1) = 0 by induction using land_pred_even
+    induction k with
+    | zero => decide
+    | succ k ih =>
+      have hdiv : 2 ^ (k + 1) / 2 = 2 ^ k := by
+        rw [Nat.pow_succ, Nat.mul_comm, Nat.mul_div_cancel_left _ (by omega : 0 < 2)]
+      rw [land_pred_even (2 ^ (k + 1))
+        (by rw [Nat.pow_succ, Nat.mul_comm]; exact Nat.mul_mod_right 2 _)
+        (Nat.two_pow_pos _), hdiv, ih]
 
 /-- The Kraft equality holds for `weights` and `maxBits` when the sum of
     `2^(W-1)` for all positive explicit weights, plus the implicit last
@@ -238,11 +245,12 @@ theorem weightSum_pos_of_exists_nonzero (weights : Array UInt8)
   unfold weightSum
   rw [← Array.foldl_toList]
   -- Split the list at index i
-  rw [show weights.toList = weights.toList.take i.val ++ weights.toList.drop i.val from by simp,
+  rw [show weights.toList = weights.toList.take i.val ++ weights.toList.drop i.val
+        from (List.take_append_drop i.val weights.toList).symm,
       List.foldl_append,
       show weights.toList.drop i.val =
         weights.toList[i.val] :: weights.toList.drop (i.val + 1)
-        from List.drop_eq_getElem_cons (by simp [i.isLt]),
+        from List.drop_eq_getElem_cons (by simp only [Array.length_toList]; exact i.isLt),
       List.foldl_cons]
   -- After processing weights[i], the accumulator is ≥ 1
   apply Nat.lt_of_lt_of_le Nat.zero_lt_one
@@ -251,10 +259,10 @@ theorem weightSum_pos_of_exists_nonzero (weights : Array UInt8)
   · -- 1 <<< k ≥ 1, so acc + (1 <<< k) ≥ 1
     exact Nat.le_trans
       (show 1 ≤ 1 <<< (weights.toList[↑i].toNat - 1) by
-        simp [Nat.shiftLeft_eq]; exact Nat.two_pow_pos _)
+        simp only [Nat.shiftLeft_eq, Nat.one_mul]; exact Nat.two_pow_pos _)
       (Nat.le_add_left _ _)
   · -- Contradiction: weights.toList[↑i] = weights[i], whose toNat > 0
-    next hc => exact absurd (by simpa [Array.getElem_toList] using hi) hc
+    next hc => exact absurd (by simpa only [Array.getElem_toList] using hi) hc
 
 /-! ## Concrete validation examples -/
 

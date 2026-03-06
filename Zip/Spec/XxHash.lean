@@ -20,8 +20,9 @@ The specification is structured in layers:
 4. **Avalanche**: final 3-step mixing
 5. **Remaining byte processing**: tail handling (8-byte, 4-byte, 1-byte chunks)
 
-Correctness theorems prove determinism, empty-input characterization, and
-the connection between `xxHash64Upper32` and the full `xxHash64` function.
+Correctness theorems prove empty-input characterization, expansion
+equivalences, and the connection between `xxHash64Upper32` and the full
+`xxHash64` function.
 -/
 
 namespace XxHash64.Spec
@@ -124,10 +125,6 @@ theorem round_eq_expansion (acc lane : UInt64) :
     XxHash64.round acc lane =
       (XxHash64.rotl (acc + lane * XxHash64.PRIME64_2) 31) * XxHash64.PRIME64_1 := by
   rfl
-
-/-- `xxHash64` is deterministic: same input and seed produce the same output. -/
-theorem xxHash64_deterministic (data : ByteArray) (seed : UInt64) :
-    XxHash64.xxHash64 data seed = XxHash64.xxHash64 data seed := rfl
 
 /-- For empty input, `xxHash64` reduces to `avalanche (seed + PRIME64_5)`.
     This characterizes the short-path initialization where no stripes are
