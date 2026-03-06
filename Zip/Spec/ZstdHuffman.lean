@@ -166,14 +166,27 @@ instance {table : Array HuffmanEntry} {maxBits : Nat} :
     Decidable (ValidHuffmanTable table maxBits) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
-/-! ## Helper: Except.bind extraction -/
+/-! ## Helper: forIn with pure yield reduces to foldl -/
 
-/-- If `Except.bind f g = .ok r`, then `f` succeeded with some `a` and `g a = .ok r`. -/
-private theorem Except.bind_ok_extract {f : Except ε α} {g : α → Except ε β} {r : β}
-    (h : Except.bind f g = .ok r) : ∃ a, f = .ok a ∧ g a = .ok r := by
-  cases f with
-  | error e => exact nomatch h
-  | ok a => exact ⟨a, rfl, h⟩
+/-- When the body of `forIn` over an `Array` in the `Except` monad always
+    returns `Except.ok (ForInStep.yield ...)`, the result equals `Except.ok`
+    of the corresponding `Array.foldl`.
+
+    This is proved by converting through `Array.forIn_eq_foldlM` and
+    `Array.foldlM_toList`, then inducting on `as.toList`. -/
+private theorem forIn_pure_yield_eq_foldl {ε : Type} (as : Array α) (f : α → β → β) (init : β) :
+    forIn as init (fun a b =>
+      (Except.ok (ForInStep.yield (f a b)) : Except ε (ForInStep β))) =
+    (Except.ok (as.foldl (fun b a => f a b) init) : Except ε β) := by
+  rw [Array.forIn_eq_foldlM, ← Array.foldlM_toList, ← Array.foldl_toList]
+  generalize as.toList = l
+  revert init
+  induction l with
+  | nil => intro init; rfl
+  | cons x l ih =>
+    intro init
+    simp only [List.foldlM, bind, Except.bind, List.foldl_cons]
+    exact ih (f x init)
 
 /-! ## Correctness theorems -/
 
@@ -217,6 +230,27 @@ private theorem weightsToMaxBits_ge_one (weights : Array UInt8) (m : Nat)
       simp only [Except.ok.injEq] at h
       subst h
       exact findMaxBitsWF_ge_one ws (by simp_all [beq_iff_eq]; omega)
+
+open Zip.Native in
+/-- The WF loop returns a value `m` such that `ws ≤ 2^m`, given the loop
+    invariant `power = 2^maxBits`. -/
+private theorem findMaxBitsWF_bound (ws maxBits power : Nat) (hp : power > 0)
+    (hinv : power = 1 <<< maxBits) :
+    ws ≤ 1 <<< (findMaxBitsWF ws maxBits power hp) := by
+  unfold findMaxBitsWF
+  split
+  · -- power < ws: recurse with doubled power
+    exact findMaxBitsWF_bound ws (maxBits + 1) (power * 2) (by omega)
+      (by simp only [Nat.shiftLeft_eq, Nat.one_mul, Nat.pow_succ] at hinv ⊢; omega)
+  · split
+    · -- ws == power: return maxBits + 1
+      rename_i _ h2; simp only [beq_iff_eq] at h2; subst h2
+      simp only [hinv, Nat.shiftLeft_eq, Nat.one_mul, Nat.pow_succ]
+      have := Nat.two_pow_pos maxBits; omega
+    · -- power ≥ ws: return maxBits
+      rename_i h1 _
+      have := Nat.le_of_not_lt h1; rw [hinv] at this; exact this
+termination_by ws - power
 
 open Zip.Native in
 /-- The inner fill loop preserves array size: each step either uses `set!`
@@ -362,18 +396,41 @@ theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
                   exact weightsToMaxBits_ge_one weights m hwm
 
 /-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
-    satisfies `2^(m-1) < weightSum ≤ 2^m` (except when `weightSum` is
-    exactly a power of 2, in which case `m` is bumped by 1).
+    satisfies `0 < weightSum ≤ 2^m`. The function finds the smallest
+    `k` with `2^k ≥ weightSum`, then bumps by 1 if equality holds
+    (to accommodate the implicit last symbol).
 
-    More precisely: `weightSum weights > 0 ∧ weightSum weights ≤ 2^(m-1)`,
-    since `m` is chosen so that `2^(m-1)` is the first power ≥ `weightSum`,
-    and if equality holds, `m` is incremented by 1 to accommodate the
-    implicit last symbol. -/
+    The original statement claimed `weightSum ≤ 2^(m-1)`, which is false:
+    e.g. `weights = #[1, 2]` gives `weightSum = 3`, `m = 2`, but
+    `3 > 2^(2-1) = 2`. The correct bound is `2^m`. -/
 theorem weightsToMaxBits_valid (weights : Array UInt8)
     (m : Nat)
     (h : Zip.Native.weightsToMaxBits weights = .ok m) :
-    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< (m - 1) := by
-  sorry
+    weightSum weights > 0 ∧ weightSum weights ≤ 1 <<< m := by
+  open Zip.Native in
+  simp only [weightsToMaxBits, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · rename_i ws heq_forIn
+    split at h
+    · exact nomatch h
+    · dsimp only [pure, Pure.pure, Except.pure] at h
+      simp only [Except.ok.injEq] at h
+      subst h
+      have hws : ws = weightSum weights := by
+        -- Simplify match on pure PUnit.unit (do-notation desugaring artifact)
+        simp only [pure, Pure.pure, Except.pure] at heq_forIn
+        -- Pull Except.ok (ForInStep.yield ...) out of the if branches
+        simp only [show ∀ (w : UInt8) (r : Nat),
+            (if w.toNat > 0 then (Except.ok (ForInStep.yield (r + 1 <<< (w.toNat - 1))))
+             else (Except.ok (ForInStep.yield r) : Except String (ForInStep Nat))) =
+            Except.ok (ForInStep.yield (if w.toNat > 0 then r + 1 <<< (w.toNat - 1) else r))
+          from fun w r => by split <;> rfl] at heq_forIn
+        rw [forIn_pure_yield_eq_foldl] at heq_forIn
+        exact (Except.ok.inj heq_forIn).symm
+      rw [← hws]
+      exact ⟨by simp_all [beq_iff_eq]; omega,
+             findMaxBitsWF_bound ws 0 1 (by omega) rfl⟩
 
 /-- The `weightSum` function agrees with the inline computation in
     `weightsToMaxBits`: both compute `∑ 2^(W-1)` for positive weights. -/
