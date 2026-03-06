@@ -715,10 +715,12 @@ theorem deflateStoredPure_size (data : ByteArray) :
 
 /-- Native Level 0 roundtrip: compressing with stored blocks then
     decompressing with the native inflate recovers the original data.
-    The size constraint ensures the default maxOutputSize (1 GiB) suffices. -/
+    Parametric in `maxOutputSize`: the roundtrip holds for any bound
+    at least as large as the input data. -/
 theorem inflate_deflateStoredPure (data : ByteArray)
-    (h : data.size ≤ 1024 * 1024 * 1024) :
-    Inflate.inflate (deflateStoredPure data) = .ok data := by
+    (maxOutputSize : Nat)
+    (h : data.size ≤ maxOutputSize) :
+    Inflate.inflate (deflateStoredPure data) maxOutputSize = .ok data := by
   simp only [Inflate.inflate, Inflate.inflateRaw, bind, Except.bind]
   -- Handle fromLengths calls
   have ⟨fixedLit, hfl⟩ := fromLengths_fixedLit_ok
@@ -727,7 +729,7 @@ theorem inflate_deflateStoredPure (data : ByteArray)
   -- Apply the main loop theorem
   have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega)
     ByteArray.empty ByteArray.empty fixedLit fixedDist
-    (deflateStoredPure data).size (1024 * 1024 * 1024)
+    (deflateStoredPure data).size maxOutputSize
     (by simp only [ByteArray.empty_append]; omega)
     (by simp only [ByteArray.size_empty]; omega)
   simp only [ByteArray.empty_append, ByteArray.size_empty] at hloop
