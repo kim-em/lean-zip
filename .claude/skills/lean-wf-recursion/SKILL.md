@@ -309,6 +309,78 @@ the conjunction is not a `dite`, it's already been simplified past that.
 
 See `Zip/Spec/DeflateSuffix.lean:498` (`decode_go_suffix` proof).
 
+## Multi-State While Loops (decompressBlocks Pattern)
+
+Some `while` loops thread many state variables through iterations:
+
+```lean
+-- decompressBlocks threads 5 variables:
+while !done do
+  let (hdr, off') ← parseBlockHeader data off
+  let (blockOutput, off'') ← decodeBlock data off' hdr prevHuffTree prevFseTables
+  output := output ++ blockOutput
+  prevHuffTree := updatedTree
+  prevFseTables := updatedTables
+  offsetHistory := updatedHistory
+  off := off''
+  done := hdr.isLastBlock
+```
+
+### WF refactoring pattern
+
+Convert `while !done` to explicit recursion with all state as parameters:
+
+```lean
+def decompressBlocksWF (data : ByteArray) (off : Nat)
+    (output : ByteArray) (prevHuffTree : Option HuffmanTree)
+    (prevFseTables : Option FseTables) (offsetHistory : OffsetHistory) :
+    Except Error (ByteArray × Nat) :=
+  let hdr ← parseBlockHeader data off
+  let (blockOutput, off', tree', tables', hist') ← decodeBlock ...
+  if hdr.isLastBlock then
+    .ok (output ++ blockOutput, off')
+  else
+    decompressBlocksWF data off' (output ++ blockOutput) tree' tables' hist'
+termination_by data.size - off
+```
+
+### Key considerations
+
+1. **Termination measure**: Usually `data.size - off` where `off`
+   advances each iteration. Need a lemma that `parseBlockHeader` and
+   `decodeBlock` advance `off` (i.e., `off' > off`).
+
+2. **Implicit termination**: The original `while` loop terminates because
+   `hdr.isLastBlock` is eventually true OR `off` exceeds `data.size`. For
+   WF recursion, only `data.size - off` decreasing is needed (the
+   `isLastBlock` case is the base case, not a termination argument).
+
+3. **Error short-circuits**: In Except monad, errors terminate the
+   recursion naturally. Only the `.ok` path needs to show decreasing.
+
+4. **State bundling**: If the state tuple is large (5+ fields), consider
+   a structure:
+   ```lean
+   structure DecompressState where
+     output : ByteArray
+     huffTree : Option HuffmanTree
+     fseTables : Option FseTables
+     offsetHistory : OffsetHistory
+   ```
+   This keeps the function signature manageable and makes `f.induct`
+   cases more readable.
+
+### When NOT to refactor
+
+Not every `while` loop needs WF conversion. Only refactor when:
+- A spec theorem needs to unfold the loop body (e.g., proving output
+  size equals content size through block accumulation)
+- The loop invariant involves state that changes each iteration
+
+If the only spec theorem is about the function's return type or error
+conditions (not loop-internal state), leave the `while` loop and prove
+the theorem by treating the function as opaque.
+
 ## Cross-References
 
 - **Fuel-based patterns**: `lean-fuel-induction` skill (for functions still using fuel)

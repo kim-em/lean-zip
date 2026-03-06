@@ -474,6 +474,69 @@ deeply nested `match` chain that always ends in `Except.ok { field := al, ... }`
 after `forIn` modifications), `grind` cannot reason through the loop body.
 See the `forIn` limitation below.
 
+## Multi-Bind Chains with State Threading (decompressFrame Pattern)
+
+Functions like `decompressFrame` chain 5-10 monadic operations where each
+returns `(result, updatedState)` and the state threads through:
+
+```lean
+do
+  let (magic, br₁) ← readU32 br
+  unless magic == 0xFD2FB528 do throw .badMagic
+  let (hdr, br₂) ← parseFrameHeader br₁
+  let (blocks, br₃) ← decompressBlocks br₂ hdr
+  let (checksum, br₄) ← readChecksum br₃
+  ...
+```
+
+### Proof strategy for properties through long chains
+
+When proving a property about the final output (e.g., output size matches
+content size, or checksum is valid):
+
+1. **Unfold and reduce the first bind**:
+   ```lean
+   simp only [decompressFrame, bind, Except.bind] at h
+   cases hread : readU32 br with
+   | error e => simp only [hread] at h; exact nomatch h
+   | ok val =>
+     obtain ⟨magic, br₁⟩ := val
+     simp only [hread] at h; dsimp only [bind, Except.bind] at h
+   ```
+
+2. **Handle each guard between operations**:
+   ```lean
+   by_cases hmagic : magic == expected
+   · simp only [hmagic] at h; dsimp only [bind, Except.bind] at h
+   · simp only [hmagic] at h; exact nomatch h
+   ```
+
+3. **Thread through remaining operations** repeating steps 1-2.
+
+4. **At the final `pure`/`return`**: extract the result with
+   `simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h`
+   then `obtain ⟨rfl, rfl⟩ := h`.
+
+### When the chain is too deep (>6 operations)
+
+Rather than mechanically peeling all layers, prove **per-operation lemmas**
+for each step's contribution to the property, then compose:
+
+```lean
+-- Lemma: parseFrameHeader preserves br.data
+theorem parseFrameHeader_data (h : parseFrameHeader br = .ok (hdr, br')) :
+    br'.data = br.data := by ...
+
+-- Main theorem: compose per-operation results
+theorem decompressFrame_output_size ... := by
+  have hd₁ := readU32_data h₁
+  have hd₂ := parseFrameHeader_data h₂
+  have hd₃ := decompressBlocks_data h₃
+  ...
+```
+
+This scales better than monolithic unfolding and produces reusable lemmas.
+
 ## `forIn` Loop Invariants Are Not Automatable
 
 **Current gap**: There is no standard library theorem for proving properties
@@ -487,6 +550,70 @@ on the result." This doesn't exist for `Std.Legacy.Range.forIn'` in `Except`.
 
 **Workaround**: Leave as `sorry` with documentation. This is a known
 standard library gap, not a proof technique issue.
+
+## Nested `match` Within `do` Blocks
+
+When a `do` block contains `match expr with | ctor₁ => ... | ctor₂ => ...`,
+the do-notation desugaring wraps each branch in bind continuations, producing
+deeply nested terms. Two patterns arise:
+
+### Pattern 1: Match on a pure value mid-chain
+
+```lean
+-- Implementation:
+do
+  let hdr ← parseHeader br
+  match hdr.blockType with
+  | .raw => handleRaw hdr br
+  | .rle => handleRle hdr br
+  | .compressed => handleCompressed hdr br
+  | .reserved => throw .invalidBlockType
+```
+
+After `cases hparse : parseHeader br` and extracting the ok branch,
+the remaining hypothesis contains the `match`. Use `cases` on the
+discriminant directly:
+
+```lean
+cases hbt : hdr.blockType with
+| raw => simp only [hbt] at h; ...
+| rle => simp only [hbt] at h; ...
+| compressed => simp only [hbt] at h; ...
+| reserved => simp only [hbt] at h; exact nomatch h
+```
+
+**Key**: `simp only [hbt]` reduces the `match` to the selected branch.
+Don't use `split at h` here — it generates too many subgoals when the
+hypothesis also contains subsequent binds.
+
+### Pattern 2: Match on a monadic result that feeds subsequent binds
+
+```lean
+do
+  let result ← operation₁
+  let next ← match result with
+    | .modeA => operationA
+    | .modeB => operationB
+  finalOperation next
+```
+
+This produces nested `Except.bind (match result with ...) (fun next => ...)`.
+Unfold the match first, THEN handle the bind:
+
+```lean
+cases hmode : result with
+| modeA =>
+  simp only [hmode] at h
+  dsimp only [bind, Except.bind] at h
+  -- h now has operationA >>= finalOperation
+| modeB => ...
+```
+
+### Anti-pattern: `split at h` on match-within-bind
+
+`split at h` when the match is wrapped in `Except.bind` creates subgoals
+where `h` retains the outer bind wrapper around a partially-reduced match.
+Use `cases` on the discriminant + `simp only` to reduce cleanly.
 
 ## `split at h` Step Limit on Large Unfolded Functions
 
