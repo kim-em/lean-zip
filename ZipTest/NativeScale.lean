@@ -1,11 +1,13 @@
 import ZipTest.Helpers
 import Zip.Native.Inflate
 import Zip.Native.Gzip
+import Zip.Native.DeflateDynamic
 import Zip.Native.Crc32
 import Zip.Native.Adler32
 
-/-! Performance and conformance tests for native inflate, gzip, zlib, and checksums
-    across varying data sizes and compression patterns. -/
+/-! Performance and conformance tests for native inflate/deflate, gzip, zlib, and
+    checksums across varying data sizes and compression patterns. Includes both
+    decompression and compression benchmarks with native vs FFI comparison. -/
 
 namespace ZipTest.NativeScale
 
@@ -42,6 +44,17 @@ private def fmtMs (ns : Nat) : String :=
     s!"{ms}.{if d2 < 10 then "0" else ""}{d2}"
   else
     s!"{ms}.{if frac < 100 then "0" else ""}{if frac < 10 then "0" else ""}{frac}"
+
+private def fmtMBps (dataSize : Nat) (elapsedNs : Nat) : String :=
+  if elapsedNs == 0 then "    ∞" else
+  let mbps10 := dataSize * 10000000000 / elapsedNs / (1024 * 1024)
+  let whole := mbps10 / 10
+  let frac := mbps10 % 10
+  let s := s!"{whole}.{frac}"
+  let padding := if s.length < 5 then String.ofList (List.replicate (5 - s.length) ' ') else ""
+  padding ++ s
+
+@[noinline] private def forceEval (b : ByteArray) : IO ByteArray := pure b
 
 structure TimingEntry where
   op : String
@@ -207,15 +220,57 @@ private def testIncrementalChecksums : IO Unit := do
         throw (IO.userError s!"adler32 incremental != ffi: {sizeName size} {pat.name}")
       IO.println s!"      {pad (sizeName size) 6} {pad pat.name 9} crc32+adler32 OK"
 
+-- Compression throughput: native vs FFI across patterns, sizes, and levels
+private def testCompressMatrix (timings : IO.Ref (Array TimingEntry)) : IO Unit := do
+  IO.println "    --- raw deflate compression (native vs FFI) ---"
+  for size in matrixSizes do
+    for pat in patterns do
+      let data := pat.generate size
+      for level in levels do
+        let s1 ← IO.monoNanosNow
+        let nc ← forceEval (Zip.Native.Deflate.deflateRaw data level)
+        let e1 ← IO.monoNanosNow
+        let s2 ← IO.monoNanosNow
+        let _fc ← RawDeflate.compress data level
+        let e2 ← IO.monoNanosNow
+        -- Verify roundtrip: decompress native output with FFI
+        let rd ← RawDeflate.decompress nc
+        unless rd == data do
+          throw (IO.userError s!"compress roundtrip: {sizeName size} {pat.name} lvl={level}")
+        let nNs := e1 - s1
+        let fNs := e2 - s2
+        IO.println s!"      {pad (sizeName size) 6} {pad pat.name 9} lvl={level}  native={pad (fmtMs nNs ++ "ms") 10} ({fmtMBps size nNs} MB/s)  ffi={pad (fmtMs fNs ++ "ms") 10} ({fmtMBps size fNs} MB/s)"
+        if size == 1048576 then
+          timings.modify (·.push { op := s!"compress-l{level}", size, pat := pat.name, ns := nNs })
+
+-- Compression quality: native vs FFI output sizes at 1MB across all 10 levels
+private def testCompressQuality : IO Unit := do
+  IO.println "    --- compression quality at 1MB (native vs FFI, levels 0-9) ---"
+  IO.println s!"      {pad "Pattern" 9} {pad "Level" 6} {pad "Native" 10} {pad "FFI" 10} Ratio"
+  for pat in #[Pattern.prng, Pattern.text] do
+    let data := pat.generate 1048576
+    for level in #[(0 : UInt8), 1, 2, 3, 4, 5, 6, 7, 8, 9] do
+      let nc ← forceEval (Zip.Native.Deflate.deflateRaw data level)
+      let fc ← RawDeflate.compress data level
+      -- Verify native output decompresses correctly
+      let rd ← RawDeflate.decompress nc
+      unless rd == data do
+        throw (IO.userError s!"quality roundtrip: {pat.name} lvl={level}")
+      let ratio := if fc.size == 0 then 0.0 else nc.size.toFloat / fc.size.toFloat
+      let sr := let s := s!"{ratio}"; if s.length > 6 then s.take 6 else s
+      IO.println s!"      {pad pat.name 9} {pad s!"lvl={level}" 6} {pad (toString nc.size) 10} {pad (toString fc.size) 10} {sr}"
+
 def tests : IO Unit := do
   IO.println "  NativeScale tests..."
   let timings ← IO.mkRef #[]
   testInflateMatrix timings
   testGzipMatrix timings
   testZlibMatrix timings
+  testCompressMatrix timings
   testSizeSweep timings
   testChecksums timings
   testIncrementalChecksums
+  testCompressQuality
   -- Timing summary (1MB results)
   let entries ← timings.get
   if entries.size > 0 then
