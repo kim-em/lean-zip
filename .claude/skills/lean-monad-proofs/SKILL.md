@@ -57,6 +57,40 @@ After splitting the outer condition with `split at h`, the `pure` branch leaves 
 stuck `match`. Use `simp only [pure, Except.pure] at h` to reduce it, then continue
 with the next `cases`/`split`.
 
+## Non-Recursive Functions with Multiple Guards
+
+For non-recursive `do` functions with multiple `if ... then throw` guards
+(e.g., `parseSequencesHeader`), the cleanest approach is a **single-pass
+simp** that reduces all monadic constructs at once, then `split at h`:
+
+```lean
+-- Reduce ALL bind/pure in one pass (safe for non-recursive functions)
+simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+-- Now h is plain nested if-then-else — split works cleanly
+split at h
+· exact nomatch h  -- error branch
+· split at h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨-, -, rfl⟩ := h; omega
+  ...
+```
+
+**Why not interleaved `dsimp`/`split`**: Each guard produces a `bind`
+wrapper. With N guards, you'd need N rounds of `split` + `dsimp`. The
+single-pass `simp only [F, Bind.bind, ...]` eliminates all wrappers at
+once. This is safe because `F` is not recursive, so `simp` won't loop.
+
+**For the goal** (forward proofs like `parseSequencesHeader_byte0_zero`),
+the same single-pass works, followed by condition resolution:
+```lean
+simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure]
+simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte, hbyte,
+  beq_self_eq_true]
+```
+
+Note: `beq_self_eq_true` is needed when hypothesis substitution produces
+`(0 == 0) = true` as an if-condition — `↓reduceIte` alone won't reduce it.
+
 ## Closing `Except.error = Except.ok` Contradictions
 
 `simp only` does NOT know that `Except.error ≠ Except.ok` — it lacks the
