@@ -86,15 +86,28 @@ instance : Decidable (ValidBlockHeader hdr) :=
 /-! ## Correctness theorems -/
 
 /-- When `parseFrameHeader` succeeds, the parsed magic number is valid.
-    This follows from the guard `magic != zstdMagic` in the implementation.
-    The proof is deferred because `parseFrameHeader` uses monadic do-notation
-    with mutable state, making direct unfolding expensive. A dedicated
-    lemma about the initial magic-check fragment would make this provable. -/
+    This follows from the guard `magic != zstdMagic` in the implementation. -/
 theorem parseFrameHeader_magic (data : ByteArray) (pos : Nat)
     (hdr : Zip.Native.ZstdFrameHeader) (pos' : Nat)
     (h : Zip.Native.parseFrameHeader data pos = .ok (hdr, pos')) :
     validMagic (Binary.readUInt32LE data pos) := by
-  sorry
+  unfold Zip.Native.parseFrameHeader at h
+  dsimp only [Bind.bind, Except.bind] at h
+  -- Use by_cases + rw instead of split (split hits simp step limit on this large term)
+  by_cases hsize : data.size < pos + 4
+  · rw [if_pos hsize] at h; exact nomatch h
+  · rw [if_neg hsize] at h
+    simp only [pure, Pure.pure] at h
+    by_cases hmagic : (Binary.readUInt32LE data pos != Zip.Native.zstdMagic) = true
+    · rw [if_pos hmagic] at h; exact nomatch h
+    · rw [if_neg hmagic] at h
+      unfold validMagic
+      have heq : (Binary.readUInt32LE data pos == Zip.Native.zstdMagic) = true := by
+        cases hb : (Binary.readUInt32LE data pos == Zip.Native.zstdMagic)
+        · exfalso; apply hmagic; show (!(Binary.readUInt32LE data pos == Zip.Native.zstdMagic)) = true
+          rw [hb]; rfl
+        · rfl
+      exact eq_of_beq heq
 
 /-- When `parseBlockHeader` succeeds, the block type is not reserved.
     This follows from the `throw "Zstd: reserved block type"` guard. -/
