@@ -80,14 +80,17 @@ theorem cellCount_push (dist : Array Int32) (p : Int32) :
       if p.toInt > 0 then cellCount dist + p.toInt.toNat
       else if p == -1 then cellCount dist + 1
       else cellCount dist := by
-  simp [cellCount]
+  simp only [cellCount, gt_iff_lt, Int32.toNat_toInt, beq_iff_eq, Array.size_push,
+    Array.foldl_push']
 
 @[simp] theorem cellCount_push_zero (dist : Array Int32) :
     cellCount (dist.push 0) = cellCount dist := by
-  simp [cellCount_push]
+  rw [cellCount_push]
+  simp only [show ¬((0 : Int32).toInt > 0) from by decide,
+    show ((0 : Int32) == -1) = false from by decide, ↓reduceIte, Bool.false_eq_true]
 
 @[simp] theorem cellCount_empty : cellCount #[] = 0 := by
-  simp [cellCount]
+  simp only [cellCount, List.foldl_toArray', List.foldl_nil]
 
 /-! ## Loop invariant lemmas for decodeFseDistribution -/
 
@@ -111,7 +114,7 @@ theorem decodeZeroRepeats_cellCount
     (h : decodeZeroRepeats br probs sym ms fuel = .ok (probs', sym', br')) :
     cellCount probs' = cellCount probs := by
   induction fuel generalizing br probs sym with
-  | zero => simp [decodeZeroRepeats] at h
+  | zero => simp only [decodeZeroRepeats, reduceCtorEq] at h
   | succ fuel ih =>
     unfold decodeZeroRepeats at h
     dsimp only [Bind.bind, Except.bind] at h
@@ -138,7 +141,7 @@ theorem decodeFseLoop_invariant
     (h : decodeFseLoop br rem probs sym ms fuel = .ok (rem', probs', sym', br')) :
     rem' + cellCount probs' = rem + cellCount probs := by
   induction fuel generalizing br rem probs sym with
-  | zero => simp [decodeFseLoop] at h
+  | zero => simp only [decodeFseLoop, reduceCtorEq] at h
   | succ fuel ih =>
     -- Use equation lemma to unfold one level (no do-notation artifacts)
     rw [decodeFseLoop.eq_2] at h
@@ -152,7 +155,7 @@ theorem decodeFseLoop_invariant
       rw [if_neg hcond] at h
       -- Split on readProbValue
       cases hrpv : readProbValue br rem with
-      | error e => simp [hrpv] at h
+      | error e => simp only [hrpv, reduceCtorEq] at h
       | ok val =>
         simp only [hrpv] at h
         -- Split on prob == 0
@@ -160,7 +163,7 @@ theorem decodeFseLoop_invariant
         · rw [if_pos hp0] at h
           -- Zero probability: split on decodeZeroRepeats
           cases hzr : decodeZeroRepeats val.2 (probs.push 0) (sym + 1) ms 1000 with
-          | error e => simp [hzr] at h
+          | error e => simp only [hzr, reduceCtorEq] at h
           | ok val₂ =>
             simp only [hzr] at h
             rw [ih h, decodeZeroRepeats_cellCount hzr, cellCount_push_zero]
@@ -223,14 +226,14 @@ theorem decodeFseDistribution_accuracyLog_ge
     5 ≤ al := by
   unfold decodeFseDistribution at _h
   cases hrd : br.readBits 4 with
-  | error e => simp [hrd] at _h
+  | error e => simp only [hrd, reduceCtorEq] at _h
   | ok val =>
     simp only [hrd] at _h
     by_cases hgt : val.fst.toNat + 5 > maxAccLog
     · rw [if_pos hgt] at _h; exact nomatch _h
     · rw [if_neg hgt] at _h
       cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp [hdl] at _h
+      | error e => simp only [hdl, reduceCtorEq] at _h
       | ok dlval =>
         simp only [hdl] at _h
         split at _h
@@ -249,14 +252,14 @@ theorem decodeFseDistribution_accuracyLog_le
     al ≤ maxAccLog := by
   unfold decodeFseDistribution at _h
   cases hrd : br.readBits 4 with
-  | error e => simp [hrd] at _h
+  | error e => simp only [hrd, reduceCtorEq] at _h
   | ok val =>
     simp only [hrd] at _h
     by_cases hgt : val.fst.toNat + 5 > maxAccLog
     · rw [if_pos hgt] at _h; exact nomatch _h
     · rw [if_neg hgt] at _h
       cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp [hdl] at _h
+      | error e => simp only [hdl, reduceCtorEq] at _h
       | ok dlval =>
         simp only [hdl] at _h
         split at _h
@@ -276,14 +279,14 @@ theorem decodeFseDistribution_sum_correct
     cellCount probs = 1 <<< al := by
   unfold decodeFseDistribution at _h
   cases hrd : br.readBits 4 with
-  | error e => simp [hrd] at _h
+  | error e => simp only [hrd, reduceCtorEq] at _h
   | ok val =>
     simp only [hrd] at _h
     by_cases hgt : val.fst.toNat + 5 > maxAccLog
     · rw [if_pos hgt] at _h; exact nomatch _h
     · rw [if_neg hgt] at _h
       cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp [hdl] at _h
+      | error e => simp only [hdl, reduceCtorEq] at _h
       | ok dlval =>
         simp only [hdl] at _h
         by_cases hrem : dlval.1 != 0
@@ -292,7 +295,8 @@ theorem decodeFseDistribution_sum_correct
           simp only [Except.ok.injEq, Prod.mk.injEq] at _h
           obtain ⟨rfl, rfl, _⟩ := _h
           have hinv := decodeFseLoop_invariant hdl
-          simp at hinv hrem
+          simp only [cellCount_empty, Nat.add_zero, bne_iff_ne, ne_eq,
+            Decidable.not_not] at hinv hrem
           omega
 
 /-! ## Structural properties of `buildFseTable` -/
@@ -301,23 +305,8 @@ theorem decodeFseDistribution_sum_correct
 private theorem Except.bind_eq_ok' {α β ε : Type} {x : Except ε α} {f : α → Except ε β} {b : β}
     (h : (x >>= f) = Except.ok b) : ∃ a, x = Except.ok a ∧ f a = Except.ok b := by
   cases x with
-  | error e => simp [bind, Except.bind] at h
+  | error e => simp only [bind, Except.bind, reduceCtorEq] at h
   | ok a => exact ⟨a, rfl, h⟩
-
-open Zip.Native (FseTable FseCell) in
-/-- If an `Except.bind` chain ending in `pure { accuracyLog := al, cells := f a }`
-    equals `.ok table`, then `table.accuracyLog = al`. -/
-private theorem accuracyLog_of_bind_pure {α : Type}
-    {x : Except String α} {f : α → Array FseCell} {al : Nat} {table : FseTable}
-    (h : (x >>= fun a => Except.ok (FseTable.mk al (f a))) = .ok table) :
-    table.accuracyLog = al := by
-  cases x with
-  | error => exact nomatch h
-  | ok v =>
-    dsimp only [bind, Except.bind] at h
-    have := (Except.ok.inj h).symm
-    subst this
-    rfl
 
 /-- `List.forIn'.loop` in `Except` preserves a predicate when the body preserves it
     on both `.yield` and `.done` outcomes. Error outcomes are handled by the hypothesis
@@ -397,7 +386,8 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; simp [hb]
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+        simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds, Array.size_setIfInBounds, hb]
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
@@ -418,12 +408,12 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
           apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hinner
           · exact hb
           · intro a2 b2 b2' hb2 heq2
-            simp only [bind, Except.bind, pure, Except.pure] at heq2
             split at heq2
             · exact nomatch heq2
-            · rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; simp [hb2]
+            · rw [← ForInStep.yield.inj (Except.ok.inj heq2)]
+              simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
+                Array.size_setIfInBounds, hb2]
           · intro a2 b2 b2' hb2 heq2
-            simp only [bind, Except.bind] at heq2
             split at heq2 <;> exact nomatch heq2
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
@@ -439,7 +429,9 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · split at heq
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; simp [hb]
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+        simp only [Nat.toUInt8_eq, Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
+          Array.size_setIfInBounds, hb]
   · intro a b b' hb heq
     simp only [bind, Except.bind, pure, Except.pure] at heq
     split at heq
@@ -455,14 +447,14 @@ theorem BackwardBitReader_isFinished_iff_totalBitsRemaining_zero
     br.isFinished = true ↔ br.totalBitsRemaining = 0 := by
   simp only [BackwardBitReader.isFinished, BackwardBitReader.totalBitsRemaining]
   constructor
-  · intro h; simp [beq_iff_eq.mp h]
-  · intro h; split at h <;> simp_all
+  · intro h; simp only [beq_iff_eq.mp h, BEq.rfl, ↓reduceIte]
+  · intro h; split at h <;> simp_all only [beq_iff_eq, Nat.add_eq_zero_iff]
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading 0 bits is a no-op: returns (0, br) unchanged. -/
 theorem readBits_zero (br : BackwardBitReader) :
     br.readBits 0 = .ok (0, br) := by
-  simp [BackwardBitReader.readBits, BackwardBitReader.readBits.go]
+  simp only [BackwardBitReader.readBits, BackwardBitReader.readBits.go]
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading n > 0 bits from a finished reader always errors. -/
