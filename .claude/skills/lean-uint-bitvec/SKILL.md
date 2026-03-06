@@ -138,3 +138,35 @@ Direct `omega` and `rw [beq_iff_eq]` don't work — `omega` doesn't understand
 After substituting `(x == y) = false` via simp, `↓reduceIte` can't reduce
 `if false = true then ... else ...` because `false = true` is a `Prop`. Add
 `Bool.false_eq_true` to rewrite it to `False`, then `↓reduceIte` can reduce the `if`.
+
+## Exhaustive Proof over All UInt8 Values (Fin 256 Pattern)
+
+When proving `∀ d : UInt8, P d` and automated tactics fail (`decide_cbv`, `bv_decide`,
+`grind` all struggle with mixed Nat/UInt64 arithmetic from `.toNat` conversions):
+
+**Use `decide` on `Fin 256` instead:**
+```lean
+set_option maxRecDepth 1024 in
+theorem foo (d : UInt8) : P d := by
+  have h : ∀ i : Fin 256, P ⟨⟨i⟩⟩ := by decide
+  exact h d.toBitVec.toFin
+```
+
+**Why this works:**
+- `UInt8 = BitVec 8 = { toFin : Fin 256 }` (two nested structures)
+- `⟨⟨i⟩⟩` constructs `UInt8` from `Fin 256` (outer `UInt8.mk`, inner `BitVec.ofFin`)
+- `Fin n` has `Decidable (∀ i : Fin n, P i)` — so `decide` enumerates all 256 values
+- Structure eta fires: `⟨⟨d.toBitVec.toFin⟩⟩ = d` definitionally
+- `set_option maxRecDepth 1024` is needed for 256-case recursion
+
+**When to use:** Properties of functions that take `UInt8` and produce `UInt16`/`UInt32`/`UInt64`,
+especially when the function mixes `.toNat` conversions between different UInt widths.
+`bv_decide` abstracts `.toNat` as opaque; `decide_cbv` can't reduce the mixed arithmetic;
+`decide +revert` fails because `BitVec` lacks a `Decidable (∀ x : BitVec n, ...)` instance.
+
+**Tactics that DON'T work for this pattern:**
+- `decide_cbv` — gets stuck on UInt64 operations
+- `bv_decide` — spurious counterexample from opaque `.toNat` abstractions
+- `decide +revert` — no `Decidable (∀ d : UInt8, ...)` instance
+- `decide` alone — "free variables" error
+- `grind` — can't handle UInt64 modular arithmetic
