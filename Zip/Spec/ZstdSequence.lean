@@ -18,9 +18,94 @@ Correctness theorems relate the implementation (`resolveOffset`,
 `executeSequences`) to these predicates.
 -/
 
+/-! ## Size lemmas for sequence execution helpers -/
+
+namespace Zip.Native
+
+/-- `copyBytes` increases destination size by exactly `count`. -/
+theorem copyBytes_size (dst : ByteArray) (src : ByteArray) (srcPos count : Nat) :
+    (copyBytes dst src srcPos count).size = dst.size + count := by
+  induction count generalizing dst srcPos with
+  | zero => simp [copyBytes]
+  | succ n ih =>
+    rw [copyBytes.eq_1]
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih, ByteArray.size_push]; omega
+
+private theorem copyMatch_loop_size (offset length start : Nat) (b : ByteArray) (k : Nat)
+    (hk : k ≤ length) :
+    (copyMatch.loop offset length start b k).size = b.size + (length - k) := by
+  rw [copyMatch.loop.eq_1]
+  split
+  · rename_i hlt
+    rw [copyMatch_loop_size offset length start _ (k + 1) (by omega), ByteArray.size_push]; omega
+  · rename_i hge; omega
+  termination_by length - k
+
+/-- `copyMatch` increases buffer size by exactly `length`. -/
+theorem copyMatch_size (buf : ByteArray) (offset length : Nat) :
+    (copyMatch buf offset length).size = buf.size + length := by
+  unfold copyMatch
+  exact copyMatch_loop_size offset length (buf.size - offset) buf 0 (Nat.zero_le _)
+
+private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
+    List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
+    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs := by
+  induction seqs generalizing init with
+  | nil => simp
+  | cons s rest ih =>
+    simp only [List.foldl_cons]
+    rw [ih, ih 0, ih (0 + s.matchLength)]
+    omega
+
+/-- Loop invariant: if `executeSequences.loop` succeeds, the output size equals
+    initial output size + literals consumed + match bytes, and litPos bounds hold. -/
+theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos : Nat) (windowSize : Nat)
+    (output' : ByteArray) (history' : Array Nat) (litPos' : Nat)
+    (hlp : litPos ≤ literals.size)
+    (h : executeSequences.loop seqs literals output history litPos windowSize
+         = .ok (output', history', litPos')) :
+    output'.size = output.size + (litPos' - litPos) +
+      List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs
+    ∧ litPos ≤ litPos'
+    ∧ litPos' ≤ literals.size := by
+  induction seqs generalizing output history litPos with
+  | nil =>
+    rw [executeSequences.loop.eq_1] at h
+    simp at h
+    obtain ⟨rfl, _, rfl⟩ := h
+    exact ⟨by simp, Nat.le_refl _, hlp⟩
+  | cons seq rest ih =>
+    rw [executeSequences.loop.eq_2] at h
+    split at h
+    · simp at h
+    · rename_i hlit
+      split at h
+      simp only [letFun] at h
+      split at h
+      · simp at h
+      · split at h
+        · simp at h
+        · split at h
+          · simp at h
+          · have hlp' : litPos + seq.literalLength ≤ literals.size := by omega
+            have ⟨ih_size, ih_le, ih_bound⟩ := ih _ _ _ hlp' h
+            rw [copyMatch_size, copyBytes_size] at ih_size
+            refine ⟨?_, ?_, ih_bound⟩
+            · rw [ih_size]
+              simp only [List.foldl_cons, Nat.zero_add]
+              conv => rhs; rw [foldl_matchLen_add]
+              generalize List.foldl (fun acc s => acc + s.matchLength) 0 rest = matchSum
+              omega
+            · omega
+
+end Zip.Native
+
 namespace Zstd.Spec.Sequence
 
-open Zip.Native (ZstdSequence resolveOffset executeSequences)
+open Zip.Native (ZstdSequence resolveOffset executeSequences
+  executeSequences_loop_inv copyBytes_size copyMatch_size)
 
 /-! ## Validity predicates -/
 
@@ -131,13 +216,24 @@ theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
 
 /-- `executeSequences` output size characterization: when `executeSequences`
     succeeds with an empty window prefix, the output contains exactly the
-    literal bytes consumed plus match bytes copied. The proof requires deep
-    unfolding of the monadic `for` loop and `copyMatch`, so it is deferred. -/
+    literal bytes consumed plus match bytes copied. -/
 theorem executeSequences_output_length (seqs : Array ZstdSequence) (literals : ByteArray)
     (history : Array Nat) (output : ByteArray) (history' : Array Nat)
     (h : executeSequences seqs literals ByteArray.empty history = .ok (output, history')) :
     output.size = literals.size +
       seqs.foldl (fun acc s => acc + s.matchLength) 0 := by
-  sorry
+  unfold executeSequences at h
+  simp only [bind, Except.bind, pure, Pure.pure, Except.pure] at h
+  split at h
+  · simp at h
+  · rename_i v heq
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨hout, _⟩ := h
+    have ⟨hsize, _, hbound⟩ := executeSequences_loop_inv _ _ _ _ _ _ _ _ _ (Nat.zero_le _) heq
+    rw [ByteArray.size_empty, Nat.zero_add, Nat.sub_zero] at hsize
+    rw [← hout, ByteArray.size_extract, copyBytes_size, hsize]
+    rw [← Array.foldl_toList]
+    simp only [Nat.min_self, ByteArray.size_empty]
+    omega
 
 end Zstd.Spec.Sequence
