@@ -97,8 +97,10 @@ theorem readBits_1_at_0 (data : ByteArray) (pos : Nat)
   simp only [Except.ok.injEq, Prod.mk.injEq]
   rw [getElem!_pos data pos hpos]
   constructor
-  · simp [UInt32.shiftRight_zero, UInt32.shiftLeft_zero, UInt32.zero_or]
-  · simp
+  · -- concrete bit computation
+    simp only [show (Nat.toUInt32 0 : UInt32) = 0 from by decide,
+      UInt32.shiftRight_zero, UInt32.shiftLeft_zero, UInt32.zero_or]
+  · trivial
 
 /-- Reading 2 bits starting at bitOff 1 within the same byte.
     Returns bits 1-2 of the byte as a 2-bit value. -/
@@ -119,10 +121,14 @@ theorem readBits_2_at_1 (data : ByteArray) (pos : Nat)
   rw [getElem!_pos data pos hpos]
   simp only [Except.ok.injEq, Prod.mk.injEq]
   constructor
-  · simp [UInt32.shiftLeft_zero, UInt32.zero_or]
+  · -- concrete bit computation
+    simp only [show (Nat.toUInt32 0 : UInt32) = 0 from by decide,
+      show (Nat.toUInt32 1 : UInt32) = 1 from by decide,
+      show (Nat.toUInt32 2 : UInt32) = 2 from by decide,
+      UInt32.shiftLeft_zero, UInt32.zero_or]
     generalize data[pos].toUInt32 = x
     bv_decide
-  · simp
+  · trivial
 
 /-! ## Helper lemmas for readUInt16LE and readBytes -/
 
@@ -188,7 +194,8 @@ theorem decodeStored_on_block (compressed : ByteArray) (brPos : Nat)
       hnlen_lo, hnlen_hi, uint16_le_roundtrip] at hru2
   -- Step 3: blockLen.toUInt16.toNat = blockLen
   have hbl_toNat : blockLen.toUInt16.toNat = blockLen := by
-    simp [Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)]
+    -- UInt16 modular arithmetic: blockLen.toUInt16.toNat = blockLen % 65536
+    exact Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)
   -- Step 4: Compose everything
   simp only [Inflate.decodeStored, bind, Except.bind, hru1, hru2]
   -- XOR check: a ^^^ (a ^^^ 0xFFFF) = 0xFFFF
@@ -333,7 +340,7 @@ private theorem getElem_pfx_hdr_zero (pfx hdr rest : ByteArray)
     (hk : 0 < hdr.size) (h : pfx.size < (pfx ++ (hdr ++ rest)).size) :
     (pfx ++ (hdr ++ rest))[pfx.size] = hdr[0] := by
   have := getElem_pfx_hdr pfx hdr rest 0 hk (by omega)
-  simp at this; exact this
+  simp only [Nat.add_zero] at this; exact this
 
 /-! ## Stored block header abstraction -/
 
@@ -389,24 +396,24 @@ private theorem inflateLoop_deflateStored_final (data : ByteArray) (pos : Nat)
     (pfx ++ (storedBlockHdr (data.size - pos) true ++ data.extract pos data.size))
     pfx.size (data.size - pos) (by omega) output maxOutputSize fixedLit fixedDist dataSize
     h_fit
-    (by simp [ByteArray.size_append, ByteArray.size_extract]; omega)
-    (by rw [getElem_pfx_hdr_zero _ _ _ (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
-    (by simp [ByteArray.size_append, ByteArray.size_extract]; omega)
-    (by rw [getElem_pfx_hdr _ _ _ 1 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
-    (by rw [getElem_pfx_hdr _ _ _ 2 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
-    (by rw [getElem_pfx_hdr _ _ _ 3 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
-    (by rw [getElem_pfx_hdr _ _ _ 4 (by simp) (by simp [ByteArray.size_append]; omega)]; rfl)
+    (by simp only [ByteArray.size_append, ByteArray.size_extract, storedBlockHdr_size]; omega)
+    (by rw [getElem_pfx_hdr_zero _ _ _ (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size]; omega)]; rfl)
+    (by simp only [ByteArray.size_append, ByteArray.size_extract, storedBlockHdr_size]; omega)
+    (by rw [getElem_pfx_hdr _ _ _ 1 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 2 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 3 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 4 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size]; omega)]; rfl)
   rw [h_loop]; congr 1; congr 1
   rw [ByteArray.extract_append_ge _ _ _ _ (by omega)]
   simp only [show pfx.size + 5 - pfx.size = 5 from by omega,
     show pfx.size + 5 + (data.size - pos) - pfx.size = 5 + (data.size - pos) from by omega]
-  rw [ByteArray.extract_append_ge _ _ _ _ (by simp : (5 : Nat) ≥ (storedBlockHdr (data.size - pos) true).size)]
-  simp only [show (5 : Nat) - (storedBlockHdr (data.size - pos) true).size = 0 from by simp,
+  rw [ByteArray.extract_append_ge _ _ _ _ (by simp only [storedBlockHdr_size]; omega : (5 : Nat) ≥ (storedBlockHdr (data.size - pos) true).size)]
+  simp only [show (5 : Nat) - (storedBlockHdr (data.size - pos) true).size = 0 from by simp only [storedBlockHdr_size],
     show 5 + (data.size - pos) - (storedBlockHdr (data.size - pos) true).size =
-      data.size - pos from by simp]
+      data.size - pos from by simp only [storedBlockHdr_size]; omega]
   congr 1
   rw [show data.size - pos = (data.extract pos data.size).size from by
-    simp [ByteArray.size_extract]]
+    simp only [ByteArray.size_extract]; omega]
   exact ByteArray.extract_zero_size
 
 /-- Step through one non-final stored block via inflateLoop_nonfinal_stored. -/
@@ -437,13 +444,13 @@ private theorem inflateLoop_nonfinal_step (data : ByteArray) (pos : Nat)
     pfx.size 65535 (by omega)
     output maxOutputSize fixedLit fixedDist dataSize (by omega)
     (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)
-    (by rw [getElem_pfx_hdr_zero _ _ _ (by simp) (by simp [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr_zero _ _ _ (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
     (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)
     (by omega)
-    (by rw [getElem_pfx_hdr _ _ _ 1 (by simp) (by simp [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
-    (by rw [getElem_pfx_hdr _ _ _ 2 (by simp) (by simp [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
-    (by rw [getElem_pfx_hdr _ _ _ 3 (by simp) (by simp [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
-    (by rw [getElem_pfx_hdr _ _ _ 4 (by simp) (by simp [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 1 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 2 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 3 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
+    (by rw [getElem_pfx_hdr _ _ _ 4 (by simp only [storedBlockHdr_size]; omega) (by simp only [ByteArray.size_append, storedBlockHdr_size, h_block_sz]; omega)]; rfl)
 
 /-- After stepping one block, simplify the extracted block and restructure for IH. -/
 private theorem inflateLoop_nonfinal_after_step (data : ByteArray) (pos : Nat)
@@ -472,7 +479,7 @@ private theorem inflateLoop_nonfinal_after_step (data : ByteArray) (pos : Nat)
     .ok (output ++ data.extract pos data.size, endPos) := by
   rw [← h_pfx'_sz, h_ih, ByteArray.append_assoc,
       ByteArray.extract_append_extract]
-  simp [Nat.min_eq_left (Nat.le_add_right pos 65535),
+  simp only [Nat.min_eq_left (Nat.le_add_right pos 65535),
         Nat.max_eq_right h_pos65535]
 
 /-- Restructure data and output after stepping one block.
@@ -504,9 +511,9 @@ private theorem nonfinal_step_restructure (data : ByteArray) (pos : Nat)
     rw [ByteArray.extract_append_ge _ _ _ _ (by omega)]
     simp only [show pfx.size + 5 - pfx.size = 5 from by omega,
       show pfx.size + 5 + 65535 - pfx.size = 65540 from by omega]
-    rw [ByteArray.extract_append_ge _ _ _ _ (by simp : (5 : Nat) ≥ (storedBlockHdr 65535 false).size)]
-    simp only [show (5 : Nat) - (storedBlockHdr 65535 false).size = 0 from by simp,
-      show (65540 : Nat) - (storedBlockHdr 65535 false).size = 65535 from by simp]
+    rw [ByteArray.extract_append_ge _ _ _ _ (by simp only [storedBlockHdr_size]; omega : (5 : Nat) ≥ (storedBlockHdr 65535 false).size)]
+    simp only [show (5 : Nat) - (storedBlockHdr 65535 false).size = 0 from by simp only [storedBlockHdr_size],
+      show (65540 : Nat) - (storedBlockHdr 65535 false).size = 65535 from by simp only [storedBlockHdr_size]]
     have h := ByteArray.extract_append_left (data.extract pos (pos + 65535)) rest
     rw [h_block_sz] at h; exact h
   rw [h_extract]
@@ -704,14 +711,16 @@ theorem deflateStoredPure_size (data : ByteArray) :
     (deflateStoredPure data 0).size =
     data.size + 5 * numStoredBlocks data.size := by
   have := deflateStoredPure_size_aux data 0 (by omega)
-  simp at this; exact this
+  simp only [Nat.sub_zero] at this; exact this
 
 /-- Native Level 0 roundtrip: compressing with stored blocks then
     decompressing with the native inflate recovers the original data.
-    The size constraint ensures the default maxOutputSize (1 GiB) suffices. -/
+    Parametric in `maxOutputSize`: the roundtrip holds for any bound
+    at least as large as the input data. -/
 theorem inflate_deflateStoredPure (data : ByteArray)
-    (h : data.size ≤ 1024 * 1024 * 1024) :
-    Inflate.inflate (deflateStoredPure data) = .ok data := by
+    (maxOutputSize : Nat)
+    (h : data.size ≤ maxOutputSize) :
+    Inflate.inflate (deflateStoredPure data) maxOutputSize = .ok data := by
   simp only [Inflate.inflate, Inflate.inflateRaw, bind, Except.bind]
   -- Handle fromLengths calls
   have ⟨fixedLit, hfl⟩ := fromLengths_fixedLit_ok
@@ -720,13 +729,13 @@ theorem inflate_deflateStoredPure (data : ByteArray)
   -- Apply the main loop theorem
   have ⟨endPos, hloop⟩ := inflateLoop_deflateStored data 0 (by omega)
     ByteArray.empty ByteArray.empty fixedLit fixedDist
-    (deflateStoredPure data).size (1024 * 1024 * 1024)
-    (by simp [ByteArray.empty_append])
-    (by simp [ByteArray.size_empty]; omega)
+    (deflateStoredPure data).size maxOutputSize
+    (by simp only [ByteArray.empty_append]; omega)
+    (by simp only [ByteArray.size_empty]; omega)
   simp only [ByteArray.empty_append, ByteArray.size_empty] at hloop
   rw [ByteArray.extract_zero_size] at hloop
   rw [hloop]
-  simp [pure, Except.pure]
+  simp only [pure, Except.pure]
 
 /-- Stored block compression adds at most ~0.008% overhead.
     For every 65535 bytes of input, exactly 5 bytes of overhead are added.

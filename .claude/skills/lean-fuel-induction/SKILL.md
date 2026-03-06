@@ -242,6 +242,75 @@ Then `rw [f_case2 _ h]` in the main proof. This was essential for
 rewrite with `← f` to fold back won't work because `rw` can't match through
 `let` bindings. Use a standalone lemma instead.
 
+## Opaque Loop Catalog and Refactoring Priority (Zip/Native/)
+
+This catalog covers every function using opaque loop constructs (`while`,
+`for ... in [:n]`, `forIn`) in `Zip/Native/`. For each, it assesses
+whether WF refactoring is needed for spec proofs.
+
+### Recommendation: Per-function WF refactoring over generic `Range.forIn`
+
+A generic `Range.forIn` invariant lemma (analogous to `List.foldl_*`) is
+theoretically possible but impractical:
+- The `forIn` wrapper involves `Std.Legacy.Range.forIn'` with a hidden
+  `loop✝` that can't be named or unfolded
+- A generic invariant would need to parameterize over the monad, body,
+  and accumulator, making it very complex to apply
+- Each loop in this codebase has different state shapes and invariants
+
+**Continue with per-function WF refactoring** for loops that need spec proofs.
+Leave opaque loops that don't need unfolding.
+
+### Priority 1: Needs WF refactoring (blocking sorry proofs)
+
+| Function | File | Loop | State vars | Blocking theorem |
+|----------|------|------|-----------|-----------------|
+| `buildFseTable` (fill loops) | Fse.lean:148 | 4× `for ... in [:n]` + `while` | 5+ | `buildFseTable_cells_size` (sorry) |
+| `decompressZstd` | ZstdFrame.lean:308 | `while pos < data.size` | 2 | Top-level decompression specs |
+
+### Priority 2: Would benefit from WF but not urgently blocking
+
+| Function | File | Loop | State vars | Notes |
+|----------|------|------|-----------|-------|
+| `decodeSequences` | ZstdSequence.lean:290 | `for i in [:numSeq]` | 4+ | Interleaved FSE decoding; complex state |
+| `xxHash64` (stripe loop) | XxHash.lean:100 | `while pos < stripeEnd` | 5 | Blocked by UInt64 kernel eval anyway |
+| `decodeHuffmanStream` | ZstdHuffman.lean:223 | `for _ in [:count]` | 2 | No spec theorems yet |
+
+### Priority 3: Probably leave as-is
+
+| Function | File | Loop | Notes |
+|----------|------|------|-------|
+| `parseHuffmanWeightsDirect` | ZstdHuffman.lean:37 | `for i in [:n]` | Simple accumulation, no spec needs unfolding |
+| `weightsToMaxBits` (weight sum) | ZstdHuffman.lean:63 | `for w in weights` | Summation — already has WF alt (`findMaxBitsWF`) |
+| `buildZstdHuffmanTable` (count/fill) | ZstdHuffman.lean:76 | 4× `for` | Complex but `tableSize` theorem needs only the fill loops |
+| `parseHuffmanTreeDescriptor` (trim) | ZstdHuffman.lean:176 | `while` | Trailing-zero trim, no spec impact |
+| `decodeFseSymbols` | Fse.lean:310 | `for i in [:count]` | No spec theorems needed |
+| `decodeFseSymbolsAll` | Fse.lean:335 | `for _ in [:fuel]` | Fuel-bounded, no spec impact |
+| `Gzip.decompress` (member loop) | Gzip.lean:21 | `for _ in [:1000]` | Bounded member loop, specs don't unfold it |
+| `deflateStored` | Deflate.lean:25 | `while` | Compression, not spec'd |
+
+### Already refactored (WF-friendly)
+
+These functions already use explicit recursion or well-founded recursion:
+- `findMaxBitsWF` (ZstdHuffman.lean) — WF replacement for `weightsToMaxBits`
+- `decompressBlocksWF` (ZstdFrame.lean) — WF replacement for multi-block frame decompression (PR #667)
+- `copyBytes`, `copyMatch`, `executeSequences.loop` (ZstdSequence.lean) — explicit recursion with spec proofs
+- `processRemaining8`, `processRemaining1` (XxHash.lean) — WF recursion
+- `decodeFseLoop` (Fse.lean) — fuel-based with equation lemmas and spec proofs
+- `pushZeros`, `decodeZeroRepeats` (Fse.lean) — explicit recursion
+
+### Refactoring effort estimates
+
+- **buildFseTable**: High effort. 4 loops with different state shapes.
+  Consider refactoring only the specific loops that `cells_size` needs
+  (the fill loops at lines 128-143, 166-174), not all 4.
+- **decompressZstd**: Low effort. Simple position-advancing loop. But
+  depends on `decompressFrame` which depends on `decompressBlocks`
+  (now refactored).
+- **decodeSequences**: High effort. Interleaved FSE state transitions
+  with conditional updates. 4+ state variables with complex
+  interdependencies.
+
 ## Cross-References
 
 - **WF recursion patterns**: `lean-wf-recursion` skill — for well-founded

@@ -44,7 +44,7 @@ private theorem matchLZ77.go_encodable (data : List UInt8) (pos windowSize : Nat
     subst hs
     exact encodeLitLen_endOfBlock_isSome
   · -- pos < data.length
-    rename_i hlt; simp at hlt
+    rename_i hlt; simp only [ge_iff_le, Nat.not_le] at hlt
     split
     · -- findLongestMatch = some (len, dist)
       rename_i len dist hfind
@@ -115,9 +115,9 @@ private theorem matchLZ77.go_length_le (data : List UInt8) (pos windowSize : Nat
   unfold matchLZ77.go
   split
   · -- pos ≥ data.length → [.endOfBlock]
-    simp
+    simp only [List.length_cons, List.length_nil]; omega
   · -- pos < data.length
-    rename_i hlt; simp at hlt
+    rename_i hlt; simp only [ge_iff_le, Nat.not_le] at hlt
     split
     · -- findLongestMatch = some (len, dist)
       rename_i len dist hfind
@@ -142,8 +142,7 @@ decreasing_by all_goals omega
 theorem matchLZ77_length_le (data : List UInt8) (windowSize : Nat) :
     (matchLZ77 data windowSize).length ≤ data.length + 1 := by
   have := matchLZ77.go_length_le data 0 windowSize
-  simp at this
-  exact this
+  simp only [Nat.sub_zero] at this; exact this
 
 /-- Level 1 roundtrip (conditional): greedy LZ77 + fixed Huffman encoding
     then decoding recovers the original data. Requires explicit encoding
@@ -171,10 +170,10 @@ theorem deflateLevel1_spec_roundtrip' (data : List UInt8)
             decode bits = some data := by
   have henc_some := matchLZ77_encodable data windowSize hws
   cases henc : encodeSymbols fixedLitLengths fixedDistLengths (matchLZ77 data windowSize) with
-  | none => simp [henc] at henc_some
+  | none => exact nomatch (henc ▸ henc_some)
   | some bits =>
     refine ⟨[true, true, false] ++ bits, ?_, ?_⟩
-    · simp [encodeFixed, henc]
+    · simp only [encodeFixed, henc, bind, Option.bind, pure, Pure.pure]
     · exact deflateLevel1_spec_roundtrip data windowSize hw bits henc
         (matchLZ77_validSymbolList data windowSize)
 
@@ -211,8 +210,8 @@ private theorem matchLZ77Lazy.go_length_le (data : List UInt8) (pos windowSize :
     (matchLZ77Lazy.go data pos windowSize).length ≤ 2 * (data.length - pos) + 1 := by
   unfold matchLZ77Lazy.go
   split
-  · simp
-  · rename_i hlt; simp at hlt
+  · simp only [List.length_cons, List.length_nil]; omega
+  · rename_i hlt; simp only [ge_iff_le, Nat.not_le] at hlt
     split
     · rename_i len1 dist1 _
       split
@@ -245,7 +244,7 @@ decreasing_by all_goals omega
 theorem matchLZ77Lazy_length_le (data : List UInt8) (windowSize : Nat) :
     (matchLZ77Lazy data windowSize).length ≤ 2 * data.length + 1 := by
   have := matchLZ77Lazy.go_length_le data 0 windowSize
-  simp at this
+  simp only [Nat.sub_zero] at this
   exact this
 
 /-! ## matchLZ77Lazy encodability -/
@@ -334,10 +333,10 @@ theorem deflateLevel2_spec_roundtrip (data : List UInt8)
             decode bits = some data := by
   have henc_some := matchLZ77Lazy_encodable data windowSize hws
   cases henc : encodeSymbols fixedLitLengths fixedDistLengths (matchLZ77Lazy data windowSize) with
-  | none => simp [henc] at henc_some
+  | none => exact nomatch (henc ▸ henc_some)
   | some bits =>
     refine ⟨[true, true, false] ++ bits, ?_, ?_⟩
-    · simp [encodeFixed, henc]
+    · simp only [encodeFixed, henc, bind, Option.bind, pure, Pure.pure]
     · exact encodeFixed_decode (matchLZ77Lazy data windowSize) data bits henc
         (resolveLZ77_matchLZ77Lazy data windowSize hw)
         (matchLZ77Lazy_validSymbolList data windowSize)

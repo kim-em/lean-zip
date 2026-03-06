@@ -24,10 +24,10 @@ theorem fromLengths_valid (lengths : Array UInt8) (maxBits : Nat)
     Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits := by
   simp only [Zip.Native.HuffTree.fromLengths] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i hany
     split at h
-    · simp at h
+    · exact nomatch h
     · rename_i hkraft
       simp only [Huffman.Spec.ValidLengths]
       constructor
@@ -78,14 +78,14 @@ private theorem readCLCodeLengths_inv (br : Zip.Native.BitReader)
   | zero =>
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     have : ¬(i < numCodeLen) := by omega
-    simp [this] at h; obtain ⟨_, rfl⟩ := h; exact ⟨hwf, hpos⟩
+    simp only [this] at h; obtain ⟨_, rfl⟩ := h; exact ⟨hwf, hpos⟩
   | succ n ih =>
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     split at h
     · rename_i hi
       dsimp only [bind, Except.bind] at h
       cases hrb : br.readBits 3 with
-      | error e => simp [hrb] at h
+      | error e => simp only [hrb] at h; exact nomatch h
       | ok p =>
         obtain ⟨v, br₁⟩ := p
         simp only [hrb] at h
@@ -104,37 +104,37 @@ protected theorem readCLCodeLengths_size (br : Zip.Native.BitReader)
   | zero =>
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     have : ¬(i < numCodeLen) := by omega
-    simp [this] at h; obtain ⟨rfl, _⟩ := h; rfl
+    simp only [this] at h; obtain ⟨rfl, _⟩ := h; rfl
   | succ n ih =>
     have hi : i < numCodeLen := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     simp only [if_pos hi, bind, Except.bind] at h
     cases hrb : br.readBits 3 with
-    | error e => simp [hrb] at h
+    | error e => simp only [hrb] at h; exact nomatch h
     | ok p =>
       obtain ⟨v, br₁⟩ := p
       simp only [hrb] at h
       have := ih br₁ _ (i + 1) h (by omega)
-      simpa [Array.size_setIfInBounds] using this
+      rw [Array.size_set!] at this; exact this
 
 /-! ### fillEntries helpers -/
 
 theorem fillEntries_size (arr : Array UInt8) (idx count bound : Nat) (val : UInt8) :
     (Zip.Native.Inflate.fillEntries arr idx count bound val).fst.size = arr.size := by
   induction count generalizing arr idx with
-  | zero => simp [Zip.Native.Inflate.fillEntries]
+  | zero => unfold Zip.Native.Inflate.fillEntries; rfl
   | succ n ih =>
     unfold Zip.Native.Inflate.fillEntries
     simp only [Nat.succ_ne_zero, false_or]
     split
     · rfl
-    · simp only [Nat.add_sub_cancel]; rw [ih]; simp [Array.size_setIfInBounds]
+    · simp only [Nat.add_sub_cancel]; rw [ih, Array.size_set!]
 
 theorem fillEntries_snd (arr : Array UInt8) (idx count bound : Nat) (val : UInt8)
     (h : idx + count ≤ bound) :
     (Zip.Native.Inflate.fillEntries arr idx count bound val).snd = idx + count := by
   induction count generalizing arr idx with
-  | zero => simp [Zip.Native.Inflate.fillEntries]
+  | zero => unfold Zip.Native.Inflate.fillEntries; rfl
   | succ n ih =>
     unfold Zip.Native.Inflate.fillEntries
     simp only [Nat.succ_ne_zero, false_or, show ¬(idx ≥ bound) from by omega,
@@ -147,19 +147,21 @@ theorem fillEntries_extract (arr : Array UInt8) (idx count bound : Nat) (val : U
     (result.fst.extract 0 (idx + count)).toList.map UInt8.toNat =
     (arr.extract 0 idx).toList.map UInt8.toNat ++ List.replicate count val.toNat := by
   induction count generalizing arr idx with
-  | zero => simp [Zip.Native.Inflate.fillEntries, List.replicate]
+  | zero => unfold Zip.Native.Inflate.fillEntries
+            simp only [true_or, ↓reduceIte, List.replicate, List.append_nil, Nat.add_zero]
   | succ n ih =>
     unfold Zip.Native.Inflate.fillEntries
     simp only [Nat.succ_ne_zero, false_or, show ¬(idx ≥ bound) from by omega, ↓reduceIte,
                Nat.add_sub_cancel]
     have h_ih := ih (arr.set! idx val) (idx + 1) (by omega)
-      (by simp [Array.size_setIfInBounds]; omega)
+      (by rw [Array.size_set!]; omega)
     simp only [show idx + 1 + n = idx + (n + 1) from by omega] at h_ih
     rw [h_ih]
     rw [Array.set!, Array.toList_extract, Array.toList_setIfInBounds, Array.toList_extract]
     simp only [List.extract, Nat.sub_zero, List.drop_zero]
     rw [List.take_set_succ _ _ _ (by rw [Array.length_toList]; omega)]
-    simp [List.map_append, List.replicate_succ, List.append_assoc]
+    simp only [List.map_append, List.replicate_succ, List.append_assoc, List.map_cons,
+      List.map_nil, List.cons_append, List.nil_append]
 
 /-- `decodeCLSymbols` preserves well-formedness, position invariant, and array size. -/
 protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
@@ -188,7 +190,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
   · rename_i hlt
     simp only [bind, Except.bind] at h
     cases hdec : clTree.decode br with
-    | error e => simp [hdec] at h
+    | error e => simp only [hdec] at h; exact nomatch h
     | ok p =>
       obtain ⟨sym, br₁⟩ := p
       simp only [hdec] at h
@@ -197,19 +199,19 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
       split at h
       · -- sym < 16
         have ⟨hwf', hpos', hsz⟩ := hrec _ br₁ _ (by omega) hwf₁ hpos₁ h
-        exact ⟨hwf', hpos', by simpa [Array.size_setIfInBounds] using hsz⟩
+        exact ⟨hwf', hpos', by rw [Array.size_set!] at hsz; exact hsz⟩
       · split at h
         · -- sym == 16
           split at h
-          · simp at h
+          · exact nomatch h
           · dsimp only [pure, Except.pure] at h
             cases hrb : br₁.readBits 2 with
-            | error e => simp [hrb] at h
+            | error e => simp only [hrb] at h; exact nomatch h
             | ok p =>
               obtain ⟨rep, br₂⟩ := p
               simp only [hrb] at h
               split at h
-              · simp at h
+              · exact nomatch h
               · have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
                   (readBits_wf br₁ 2 rep br₂ hwf₁ hrb)
                   (readBits_pos_inv br₁ 2 rep br₂ hwf₁ hpos₁ hrb) h
@@ -217,12 +219,12 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
         · split at h
           · -- sym == 17
             cases hrb : br₁.readBits 3 with
-            | error e => simp [hrb] at h
+            | error e => simp only [hrb] at h; exact nomatch h
             | ok p =>
               obtain ⟨rep, br₂⟩ := p
               simp only [hrb] at h
               split at h
-              · simp at h
+              · exact nomatch h
               · dsimp only [pure, Except.pure] at h
                 have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
                   (readBits_wf br₁ 3 rep br₂ hwf₁ hrb)
@@ -231,18 +233,18 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
           · split at h
             · -- sym == 18
               cases hrb : br₁.readBits 7 with
-              | error e => simp [hrb] at h
+              | error e => simp only [hrb] at h; exact nomatch h
               | ok p =>
                 obtain ⟨rep, br₂⟩ := p
                 simp only [hrb] at h
                 split at h
-                · simp at h
+                · exact nomatch h
                 · dsimp only [pure, Except.pure] at h
                   have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
                     (readBits_wf br₁ 7 rep br₂ hwf₁ hrb)
                     (readBits_pos_inv br₁ 7 rep br₂ hwf₁ hpos₁ hrb) h
                   exact ⟨hwf', hpos', hsz.trans (fillEntries_size ..)⟩
-            · simp at h
+            · exact nomatch h
 termination_by totalCodes - idx
 
 /-- `readCLCodeLengths` corresponds to the spec's `readCLLengths`:
@@ -273,14 +275,14 @@ private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     simp only [if_pos hi, bind, Except.bind] at h
     cases hrb : br.readBits 3 with
-    | error e => simp [hrb] at h
+    | error e => simp only [hrb] at h; exact nomatch h
     | ok p =>
       obtain ⟨v, br₁⟩ := p
       simp only [hrb] at h
       have ⟨rest₁, hspec_rb, hrest₁⟩ := readBits_toBits br 3 v br₁ hwf (by omega) hrb
       have hwf₁ := readBits_wf br 3 v br₁ hwf hrb
       have hsize₁ : (clLengths.set! Zip.Native.Inflate.codeLengthOrder[i]! v.toUInt8).size = 19 := by
-        simp [Array.size_setIfInBounds, hsize]
+        rw [Array.size_set!]; exact hsize
       have hd₁ : numCodeLen - (i + 1) = n := by omega
       have ⟨rest₂, hspec_rec, hrest₂⟩ := ih br₁ _ (i + 1) hwf₁ hsize₁ h hd₁
       refine ⟨rest₂, ?_, hrest₂⟩
@@ -304,7 +306,7 @@ private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
 private theorem accLen_eq_min (codeLengths : Array UInt8) (idx : Nat) :
     (List.map UInt8.toNat (codeLengths.extract 0 idx).toList).length =
     min idx codeLengths.size := by
-  simp [List.length_map, Array.length_toList]
+  simp only [List.length_map, Array.length_toList, Array.size_extract, Nat.sub_zero]
 
 /-- `decodeCLSymbols` corresponds to the spec's `decodeDynamicTables.decodeCLSymbols`:
     native Array-based decoding matches spec List-based decoding. -/
@@ -360,12 +362,12 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
     unfold Deflate.Spec.decodeDynamicTables.decodeCLSymbols
     simp only [if_pos (show totalCodes ≤
         (List.map UInt8.toNat (codeLengths.extract 0 totalCodes).toList).length from by
-        simp [List.length_map, Array.length_toList]; omega)]
+        simp only [List.length_map, Array.length_toList, Array.size_extract]; omega)]
   · -- idx < totalCodes: decode a symbol
     rename_i hlt
     have hidx_lt : idx < totalCodes := by omega
     cases hdec : clTree.decode br with
-    | error e => simp [hdec] at h
+    | error e => simp only [hdec] at h; exact nomatch h
     | ok p =>
       obtain ⟨sym, br₁⟩ := p
       simp only [hdec] at h
@@ -386,7 +388,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
         have hsym_nat : sym.toNat < 16 := hsym_lt
         simp only [hsym_nat, ↓reduceIte]
         have hsize₁ : totalCodes ≤ (codeLengths.set! idx sym.toUInt8).size := by
-          simp [Array.size_setIfInBounds]; omega
+          rw [Array.size_set!]; omega
         have hidx₁ : idx + 1 ≤ totalCodes := by omega
         have ⟨rest₂, hspec_rec, hrest₂⟩ :=
           hrec (idx + 1) br₁ (codeLengths.set! idx sym.toUInt8) (by omega) hwf₁ hidx₁ hsize₁ h
@@ -406,18 +408,18 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
           have hsym16_val : sym.toNat = 16 := Deflate.Correctness.symVal_of_beq hsym16
           simp only [hsym16_val, show ((16 : Nat) == 16) = true from rfl, ↓reduceIte]
           split at h
-          · simp at h
+          · exact nomatch h
           · rename_i hidx_ne
             dsimp only [pure, Except.pure] at h
             have hidx_pos : 0 < idx := by
               simp only [beq_iff_eq] at hidx_ne; omega
             cases hrd : br₁.readBits 2 with
-            | error e => simp [hrd] at h
+            | error e => simp only [hrd] at h; exact nomatch h
             | ok p =>
               obtain ⟨rep, br₂⟩ := p
               simp only [hrd] at h
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i hbound
                 have hwf₂ := readBits_wf br₁ 2 rep br₂ hwf₁ hrd
                 have ⟨rest₂, hspec_rd, hrest₂⟩ :=
@@ -437,9 +439,9 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                 have hprev_eq := Array.extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
                 have hacc_len := accLen_eq_min codeLengths idx
                 have hne0 : ¬(min idx codeLengths.size == 0) = true := by
-                  simp [Nat.min_eq_left hle]; omega
+                  simp only [Nat.min_eq_left hle]; omega
                 have hguard2 : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
-                  simp [Nat.min_eq_left hle]; omega
+                  simp only [Nat.min_eq_left hle]; omega
                 simpa only [h_rd, hprev_eq, hacc_len,
                   List.length_append, List.length_replicate,
                   if_neg hne0, if_pos hguard2] using hspec_rec
@@ -452,12 +454,12 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
             simp only [hsym17_val, show ((17 : Nat) == 16) = false from rfl,
               show ((17 : Nat) == 17) = true from rfl, ↓reduceIte]
             cases hrd : br₁.readBits 3 with
-            | error e => simp [hrd] at h
+            | error e => simp only [hrd] at h; exact nomatch h
             | ok p =>
               obtain ⟨rep, br₂⟩ := p
               simp only [hrd] at h
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i hbound
                 dsimp only [pure, Except.pure] at h
                 have hwf₂ := readBits_wf br₁ 3 rep br₂ hwf₁ hrd
@@ -476,7 +478,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   rw [← hrest₁]; exact hspec_rd
                 have hacc_len := accLen_eq_min codeLengths idx
                 have hguard : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
-                  simp [Nat.min_eq_left hle]; omega
+                  simp only [Nat.min_eq_left hle]; omega
                 simpa only [h_rd, hacc_len,
                   List.length_append, List.length_replicate,
                   if_neg (show ¬(false = true) from nofun), if_pos hguard,
@@ -490,12 +492,12 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
               simp only [hsym18_val, show ((18 : Nat) == 16) = false from rfl,
                 show ((18 : Nat) == 17) = false from rfl]
               cases hrd : br₁.readBits 7 with
-              | error e => simp [hrd] at h
+              | error e => simp only [hrd] at h; exact nomatch h
               | ok p =>
                 obtain ⟨rep, br₂⟩ := p
                 simp only [hrd] at h
                 split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i hbound
                   dsimp only [pure, Except.pure] at h
                   have hwf₂ := readBits_wf br₁ 7 rep br₂ hwf₁ hrd
@@ -515,7 +517,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     rw [← hrest₁]; exact hspec_rd
                   have hacc_len := accLen_eq_min codeLengths idx
                   have hguard : min idx codeLengths.size + (rep.toNat + 11) ≤ totalCodes := by
-                    simp [Nat.min_eq_left hle]; omega
+                    simp only [Nat.min_eq_left hle]; omega
                   simpa only [h_rd, hacc_len,
                     List.length_append, List.length_replicate,
                     if_neg (show ¬(false = true) from nofun),
@@ -523,7 +525,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     if_pos hguard,
                     show (0 : UInt8).toNat = 0 from rfl] using hspec_rec
             · -- sym ∉ {16,17,18}: throw, contradicts .ok
-              simp at h
+              exact nomatch h
 termination_by totalCodes - idx
 
 /-- If the native dynamic tree decoder succeeds, the spec's
@@ -548,21 +550,21 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
       distLengths.size ≤ UInt16.size := by
   simp only [Zip.Native.Inflate.decodeDynamicTrees, bind, Except.bind] at h
   cases hrb1 : br.readBits 5 with
-  | error e => simp [hrb1] at h
+  | error e => simp only [hrb1] at h; exact nomatch h
   | ok p1 =>
     obtain ⟨hlit_v, br₁⟩ := p1; simp only [hrb1] at h
     have hwf₁ := readBits_wf br 5 hlit_v br₁ hwf hrb1
     have hpos₁ := readBits_pos_inv br 5 hlit_v br₁ hwf hpos hrb1
     have ⟨rest₁, hspec1, hrest₁⟩ := readBits_toBits br 5 hlit_v br₁ hwf (by omega) hrb1
     cases hrb2 : br₁.readBits 5 with
-    | error e => simp [hrb2] at h
+    | error e => simp only [hrb2] at h; exact nomatch h
     | ok p2 =>
       obtain ⟨hdist_v, br₂⟩ := p2; simp only [hrb2] at h
       have hwf₂ := readBits_wf br₁ 5 hdist_v br₂ hwf₁ hrb2
       have hpos₂ := readBits_pos_inv br₁ 5 hdist_v br₂ hwf₁ hpos₁ hrb2
       have ⟨rest₂, hspec2, hrest₂⟩ := readBits_toBits br₁ 5 hdist_v br₂ hwf₁ (by omega) hrb2
       cases hrb3 : br₂.readBits 4 with
-      | error e => simp [hrb3] at h
+      | error e => simp only [hrb3] at h; exact nomatch h
       | ok p3 =>
         obtain ⟨hclen_v, br₃⟩ := p3; simp only [hrb3] at h
         have hwf₃ := readBits_wf br₂ 4 hclen_v br₃ hwf₂ hrb3
@@ -570,22 +572,22 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
         have ⟨rest₃, hspec3, hrest₃⟩ := readBits_toBits br₂ 4 hclen_v br₃ hwf₂ (by omega) hrb3
         cases hrcl : Zip.Native.Inflate.readCLCodeLengths br₃
             (.replicate 19 0) 0 (hclen_v.toNat + 4) with
-        | error e => simp [hrcl] at h
+        | error e => simp only [hrcl] at h; exact nomatch h
         | ok p4 =>
           obtain ⟨clArr, br₄⟩ := p4; simp only [hrcl] at h
           have ⟨hwf₄, hpos₄⟩ := readCLCodeLengths_inv br₃ _ 0 _ clArr br₄ hwf₃ hpos₃ hrcl
           have hcl_sz : clArr.size = 19 :=
             by simpa using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl
           have ⟨rest₄, hspec_rcl, hrest₄⟩ :=
-            readCLCodeLengths_correct br₃ _ 0 _ clArr br₄ hwf₃ (by simp) hrcl
+            readCLCodeLengths_correct br₃ _ 0 _ clArr br₄ hwf₃ (by simp only [Array.size_replicate]) hrcl
           cases hft : Zip.Native.HuffTree.fromLengths clArr 7 with
-          | error e => simp [hft] at h
+          | error e => simp only [hft] at h; exact nomatch h
           | ok clTree₀ =>
             simp only [hft] at h
             cases hdcl : Zip.Native.Inflate.decodeCLSymbols clTree₀ br₄
                 (.replicate (hlit_v.toNat + 257 + (hdist_v.toNat + 1)) 0)
                 0 (hlit_v.toNat + 257 + (hdist_v.toNat + 1)) with
-            | error e => simp [hdcl] at h
+            | error e => simp only [hdcl] at h; exact nomatch h
             | ok p6 =>
               obtain ⟨clResults, br₅⟩ := p6; simp only [hdcl] at h
               have ⟨hwf₅, hpos₅, hcl_res_sz⟩ :=
@@ -597,16 +599,17 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                   (.replicate (hlit_v.toNat + 257 + (hdist_v.toNat + 1)) 0) 0
                   (hlit_v.toNat + 257 + (hdist_v.toNat + 1))
                   clResults br₅ hwf₄ hft
-                  (by rw [hcl_sz]; simp [UInt16.size]) (by omega) (by simp) hdcl
+                  (by rw [hcl_sz]; show 19 ≤ UInt16.size; unfold UInt16.size; omega)
+                  (by omega) (by simp only [Array.size_replicate]; omega) hdcl
               cases hflit : Zip.Native.HuffTree.fromLengths
                   (clResults.extract 0 (hlit_v.toNat + 257)) with
-              | error e => simp [hflit] at h
+              | error e => simp only [hflit] at h; exact nomatch h
               | ok litTree₀ =>
                 simp only [hflit] at h
                 cases hfdist : Zip.Native.HuffTree.fromLengths
                     (clResults.extract (hlit_v.toNat + 257)
                       (hlit_v.toNat + 257 + (hdist_v.toNat + 1))) with
-                | error e => simp [hfdist] at h
+                | error e => simp only [hfdist] at h; exact nomatch h
                 | ok distTree₀ =>
                   simp only [hfdist] at h
                   have hinj := Except.ok.inj h
@@ -630,7 +633,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                       rw [← hrest₃]
                       have : List.replicate 19 (0 : Nat) =
                           List.map UInt8.toNat (Array.replicate 19 0).toList := by
-                        simp [Array.toList_replicate]
+                        simp only [Array.toList_replicate, List.map_replicate,
+                          show (0 : UInt8).toNat = 0 from rfl]
                       rw [this]
                       exact hspec_rcl
                     simp only [hrcl_spec]
@@ -650,7 +654,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                       have : ([] : List Nat) = List.map UInt8.toNat
                           ((Array.replicate (hlit_v.toNat + 257 + (hdist_v.toNat + 1))
                             (0 : UInt8)).extract 0 0).toList := by
-                        simp
+                        simp only [Array.toList_extract, Array.toList_replicate, List.extract,
+                          Nat.sub_zero, List.drop_zero, List.take_zero, List.map_nil]
                       rw [this]
                       exact hspec_dcl
                     simp only [hdcl_spec]
@@ -658,7 +663,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                         (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList.map
                         UInt8.toNat).length =
                         hlit_v.toNat + 257 + (hdist_v.toNat + 1) := by
-                      simp [List.length_map, Array.length_toList, hcl_res_sz]
+                      simp only [List.length_map, Array.length_toList, Array.size_extract,
+                        Nat.sub_zero, hcl_res_sz, Nat.min_self]
                     -- Discharge lit/dist ValidLengths guards
                     have hlit_valid := fromLengths_valid
                       (clResults.extract 0 (hlit_v.toNat + 257)) 15 litTree₀ hflit
@@ -671,7 +677,9 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                           (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).take
                           (hlit_v.toNat + 257) =
                         (clResults.extract 0 (hlit_v.toNat + 257)).toList.map UInt8.toNat := by
-                      simp [Array.toList_extract, List.extract, List.map_take, List.take_take]
+                      simp only [Array.toList_extract, List.extract, List.map_take, List.take_take,
+                        Nat.sub_zero, List.drop_zero,
+                        Nat.min_eq_left (Nat.le_add_right _ _)]
                     have hdist_drop :
                         (List.map UInt8.toNat (clResults.extract 0
                           (hlit_v.toNat + 257 + (hdist_v.toNat + 1))).toList).drop
@@ -686,8 +694,9 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                     simp only [hlen_eq, beq_self_eq_true,
                       hlit_vl, hdist_vl, ↓reduceIte]
                     refine congrArg some (Prod.ext ?_ (Prod.ext ?_ rfl))
-                    · simp [Array.toList_extract, List.extract, List.map_take,
-                        List.take_take]
+                    · simp only [Array.toList_extract, List.extract, List.map_take,
+                        List.take_take, Nat.sub_zero, List.drop_zero,
+                        Nat.min_eq_left (Nat.le_add_right _ _)]
                     · simp only [Array.toList_extract, List.extract,
                         Nat.sub_zero, List.drop_zero]
                       rw [← List.map_drop, List.drop_take]
@@ -695,6 +704,7 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
                   all_goals
                     have := Deflate.Spec.readBitsLSB_bound hspec1
                     have := Deflate.Spec.readBitsLSB_bound hspec2
-                    simp [Array.size_extract, hcl_res_sz, UInt16.size]; omega
+                    simp only [Array.size_extract, hcl_res_sz]
+                    unfold UInt16.size; omega
 
 end Deflate.Correctness

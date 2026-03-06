@@ -37,7 +37,7 @@ theorem countRun_le_length (val : Nat) (xs : List Nat) :
   | nil => simp [countRun]
   | cons x xs ih =>
     simp only [countRun]
-    split <;> simp <;> omega
+    split <;> simp only [List.length_cons] <;> omega
 
 /-- RLE-encode a list of code lengths into CL entries.
     Greedy strategy: use the longest possible run at each position.
@@ -105,7 +105,7 @@ theorem countRun_take (val : Nat) (xs : List Nat) :
       rw [List.take_succ_cons, List.replicate_succ]
       exact congrArg (x :: ·) ih
     · show (x :: xs).take 0 = List.replicate 0 val
-      simp
+      simp only [List.take_zero, List.replicate_zero]
 
 /-- Taking at most `countRun val xs` elements from `xs` gives all `val`s. -/
 theorem take_countRun_eq_replicate (val : Nat) (xs : List Nat) (n : Nat) (hn : n ≤ countRun val xs) :
@@ -117,12 +117,12 @@ theorem take_countRun_eq_replicate (val : Nat) (xs : List Nat) (n : Nat) (hn : n
     split at hn
     · rename_i heq; simp only [beq_iff_eq] at heq; subst heq
       cases n with
-      | zero => simp
+      | zero => simp only [List.take_zero, List.replicate_zero]
       | succ n =>
         simp only [List.take_succ_cons, List.replicate_succ]
         exact congrArg (x :: ·) (ih n (by omega))
     · have : n = 0 := by omega
-      subst this; simp
+      subst this; simp only [List.take_zero, List.replicate_zero]
 
 private theorem drop_subset_valid {xs : List Nat} {n : Nat}
     (hvalid : ∀ y ∈ xs, y ≤ 15) : ∀ y ∈ xs.drop n, y ≤ 15 :=
@@ -139,19 +139,22 @@ protected theorem Deflate.Spec.rlDecode_go_code17 (extra : Nat)
     (rest : List CLEntry) (acc : List Nat) :
     rlDecodeLengths.go ((17, extra) :: rest) acc =
       rlDecodeLengths.go rest (acc ++ List.replicate (extra + 3) 0) := by
-  simp [rlDecodeLengths.go]
+  simp only [rlDecodeLengths.go, Nat.reduceLeDiff, ↓reduceIte, Nat.reduceBEq,
+    Bool.false_eq_true, BEq.rfl]
 
 protected theorem Deflate.Spec.rlDecode_go_code18 (extra : Nat)
     (rest : List CLEntry) (acc : List Nat) :
     rlDecodeLengths.go ((18, extra) :: rest) acc =
       rlDecodeLengths.go rest (acc ++ List.replicate (extra + 11) 0) := by
-  simp [rlDecodeLengths.go]
+  simp only [rlDecodeLengths.go, Nat.reduceLeDiff, ↓reduceIte, Nat.reduceBEq,
+    Bool.false_eq_true, BEq.rfl]
 
 protected theorem Deflate.Spec.rlDecode_go_code16 (extra : Nat)
     (rest : List CLEntry) (acc : List Nat) (hne : acc.length > 0) :
     rlDecodeLengths.go ((16, extra) :: rest) acc =
       rlDecodeLengths.go rest (acc ++ List.replicate (extra + 3) acc.getLast!) := by
-  simp [rlDecodeLengths.go, hne, guard, pure, bind]
+  simp only [rlDecodeLengths.go, Nat.reduceLeDiff, ↓reduceIte, BEq.rfl, bind, guard, gt_iff_lt,
+    hne, pure, List.getLast!_eq_getLast?_getD, Nat.default_eq_zero, Option.bind_some]
 
 /-- Replicate zeros plus the rest of the list equals the original cons-zero list. -/
 private theorem replicate_drop_eq_cons_zero (xs : List Nat) (n : Nat)
@@ -169,7 +172,7 @@ private theorem singleton_replicate_drop_eq_cons (x : Nat) (xs : List Nat) (m : 
     (hm : m ≤ countRun x xs) :
     [x] ++ List.replicate m x ++ xs.drop m = x :: xs := by
   rw [← take_countRun_eq_replicate x xs m hm]
-  simp [List.take_append_drop]
+  simp only [List.cons_append, List.nil_append, List.take_append_drop]
 
 /-- Generalized roundtrip: decoding an encoded list recovers the accumulator plus the list. -/
 theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List Nat)
@@ -206,14 +209,18 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
         · -- literal 0
           rw [if_neg (by omega), Deflate.Spec.rlDecode_go_literal 0 0 _ _ (by omega)]
           rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [0]) hxs_valid]
-          simp [List.append_assoc]
+          simp only [List.append_assoc, List.cons_append, List.nil_append]
     · simp only [show (x == 0) = false from by cases h : x == 0 <;> simp_all [beq_iff_eq],
                   Bool.false_eq_true, ↓reduceIte]
       by_cases hge3 : countRun x xs >= 3
       · -- literal + code 16: repeat previous 3-6
         rw [if_pos (by omega : countRun x xs ≥ 3)]
-        rw [Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid, Deflate.Spec.rlDecode_go_code16 _ _ _ (by simp)]
-        rw [show (acc ++ [x]).getLast! = x from by simp]
+        rw [Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid, Deflate.Spec.rlDecode_go_code16 _ _ _ (by
+          simp only [List.length_append, List.length_cons, List.length_nil, Nat.zero_add, gt_iff_lt,
+            Nat.zero_lt_succ])]
+        rw [show (acc ++ [x]).getLast! = x from by
+          simp only [List.getLast!_eq_getLast?_getD, List.getLast?_append, List.getLast?_singleton,
+            Option.some_or, Nat.default_eq_zero, Option.getD_some]]
         rw [show min (countRun x xs) 6 - 3 + 3 = min (countRun x xs) 6 from by omega]
         rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
         simp only [List.append_assoc]
@@ -222,7 +229,7 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
       · -- literal (no repeat)
         rw [if_neg (by omega), Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid]
         rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [x]) hxs_valid]
-        simp [List.append_assoc]
+        simp only [List.append_assoc, List.cons_append, List.nil_append]
 termination_by lengths.length
 decreasing_by all_goals simp_all [List.length_drop] <;> omega
 
@@ -232,7 +239,7 @@ theorem rlDecodeLengths_rlEncodeLengths (lengths : List Nat)
     rlDecodeLengths (rlEncodeLengths lengths) = some lengths := by
   simp only [rlDecodeLengths, rlEncodeLengths]
   have := rlDecodeLengths_go_rlEncodeLengths_go lengths [] hvalid
-  simp at this
+  simp only [List.nil_append] at this
   exact this
 
 /-- Every entry produced by `rlEncodeLengths.go` satisfies the CL code constraints. -/

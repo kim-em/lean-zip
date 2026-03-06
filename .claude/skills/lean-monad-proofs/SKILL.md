@@ -269,6 +269,26 @@ have h_result : ∃ bytes, operation = .ok (bytes, finalState) := by
 obtain ⟨bytes, h_result⟩ := h_result
 ```
 
+## Option Monad Lemma Kit for `readBitsLSB` Unfolding
+
+When unfolding `readBitsLSB` do-notation in Option proofs, the standard
+lemma set is:
+
+```lean
+simp only [Spec.readBitsLSB, Option.pure_def, Option.bind_eq_bind, Option.bind_some]
+```
+
+This set handles:
+- `pure x` → `some x` (via `Option.pure_def`)
+- `Option.bind (some x) f` → `f x` (via `Option.bind_eq_bind` + `Option.bind_some`)
+- do-notation desugaring of `let x ← f; g x`
+
+**When this kit is insufficient**: For deeply nested readBitsLSB calls
+(e.g., reading 5+ bits with individual bit operations), you may also need
+`List.cons.injEq` and `reduceCtorEq` for the list pattern matching. At
+that point, bare `simp [Spec.readBitsLSB]` is acceptable (see the
+"readBitsLSB as Computation Engine" section in `lean-simp-tactics`).
+
 ## `simp only` for Option Case Splits with `nomatch`
 
 When case-splitting on monadic `Option` operations and a hypothesis `hgo`
@@ -351,6 +371,55 @@ InflateRawSuffix.lean. It is always `simp only` — never bare simp.
 
 **Anti-pattern**: Don't use bare `simp at h` for pair extraction — it
 may rewrite terms you want to keep (e.g., simplifying `br.data.size`).
+
+### Constructor Inequality After Struct Substitution
+
+When proving `¬ Constructor1 = Constructor2` after monadic unfolding, `decide`
+fails if the goal or context contains free variables (e.g., `data[pos]!` in
+struct fields). The pattern:
+
+```lean
+-- After: simp only [bind, Except.bind, pure, Except.pure] at h
+-- h : Except.ok ({field1 := expr_with_free_vars, field2 := .raw, ...}, pos + 3)
+--     = Except.ok (hdr, pos')
+-- Goal: ¬ hdr.field2 = .reserved
+-- WRONG: decide  -- fails: "Expected type must not contain free variables"
+-- WRONG: intro h; exact nomatch h  -- fails: "Missing cases: Eq.refl"
+-- RIGHT: substitute the struct first, THEN discriminate
+obtain ⟨rfl, rfl⟩ := h  -- substitutes hdr := {field2 := .raw, ...}
+exact fun h => nomatch h  -- now .raw = .reserved has no free vars
+```
+
+The key insight: `obtain ⟨rfl, rfl⟩` substitutes the struct into the goal,
+replacing `hdr.field2` with the concrete constructor (e.g., `.raw`). Only
+then can `nomatch` (or `decide`) discriminate the constructors.
+
+## `eq_of_beq` for BEq-to-Eq Conversion
+
+When a monadic function uses `bne` or `==` for guards (e.g.,
+`if magic != expected then throw ...`), the negative branch gives
+`¬(a != b) = true` or `¬(a == b) = true`. To extract `a = b`:
+
+```lean
+-- After: by_cases hmagic : (magic != expected) = true
+-- Negative branch gives: hmagic : ¬(magic != expected) = true
+-- First derive the BEq equality:
+have heq : (magic == expected) = true := by
+  cases h : (magic == expected) <;> simp_all
+-- Then convert to propositional equality:
+exact eq_of_beq heq
+```
+
+**`eq_of_beq`** works for any type with a `LawfulBEq` instance (including
+`UInt32`, `UInt8`, `String`, etc.). It converts `(a == b) = true` to `a = b`.
+
+**Common context**: After `by_cases` on a `bne` guard, you need to derive
+the positive `==` form before `eq_of_beq` can be applied. The
+`cases h : (a == b) <;> simp_all` idiom handles the Boolean case split.
+
+**Anti-pattern**: Don't use `simp [bne, BEq.beq]` to try to normalize
+`bne` — it creates large intermediate terms on big hypotheses. Use the
+targeted `cases` + `eq_of_beq` pattern instead.
 
 ## Option.bind Chain Handling: `cases` + `dsimp` vs Bare `simp`
 
@@ -493,6 +562,234 @@ induction l with
   exact ih (f x init)
 ```
 
+## When to Use `split at h` vs `by_cases`
+
+**Choose based on the function size** after unfolding:
+
+| Function size | Recommended | Why |
+|---------------|-------------|-----|
+| < 15 branches | `split at h` | Fast, automatic, handles `if`/`match` uniformly |
+| 15-25 branches | Try `split`, fall back to `by_cases` | May or may not hit step limit |
+| > 25 branches or `let mut` | `by_cases` + `rw [if_pos/if_neg]` | `split` will definitely hit step limit |
+
+**Key indicator**: If the function uses `let mut` (mutable state in `do`),
+it almost certainly needs `by_cases`. Mutable state desugars into a large
+nested match that multiplies the term size.
+
+**Worked examples**:
+- `decodeFseDistribution_accuracyLog_ge` in `Zip/Spec/Fse.lean` — uses
+  `split at h` (medium-size function, ~15 branches)
+- `parseFrameHeader_magic` in `Zip/Spec/Zstd.lean` — uses `by_cases` +
+  `rw` (large function with `let mut`, `split` fails)
+
+## `grind` for Struct Field Extraction from Bind Chains
+
+When a function always returns `.ok { field := input, ... }` through deeply
+nested bind chains (e.g., `buildFseTable` returns `{ accuracyLog := al, ... }`),
+proving `result.field = input` after success:
+
+```lean
+-- Pattern: prove table.accuracyLog = al given buildFseTable probs al = .ok table
+simp only [buildFseTable, bind, Except.bind, pure, Except.pure] at h
+grind
+```
+
+**Why this works**: `simp only` reduces all bind/pure wrappers, leaving a
+deeply nested `match` chain that always ends in `Except.ok { field := al, ... }`.
+`grind` can extract the struct field equality from this reduced term.
+
+**When this fails**: If the field depends on loop iterations (e.g., array size
+after `forIn` modifications), `grind` cannot reason through the loop body.
+See the `forIn` limitation below.
+
+## Multi-Bind Chains with State Threading (decompressFrame Pattern)
+
+Functions like `decompressFrame` chain 5-10 monadic operations where each
+returns `(result, updatedState)` and the state threads through:
+
+```lean
+do
+  let (magic, br₁) ← readU32 br
+  unless magic == 0xFD2FB528 do throw .badMagic
+  let (hdr, br₂) ← parseFrameHeader br₁
+  let (blocks, br₃) ← decompressBlocks br₂ hdr
+  let (checksum, br₄) ← readChecksum br₃
+  ...
+```
+
+### Proof strategy for properties through long chains
+
+When proving a property about the final output (e.g., output size matches
+content size, or checksum is valid):
+
+1. **Unfold and reduce the first bind**:
+   ```lean
+   simp only [decompressFrame, bind, Except.bind] at h
+   cases hread : readU32 br with
+   | error e => simp only [hread] at h; exact nomatch h
+   | ok val =>
+     obtain ⟨magic, br₁⟩ := val
+     simp only [hread] at h; dsimp only [bind, Except.bind] at h
+   ```
+
+2. **Handle each guard between operations**:
+   ```lean
+   by_cases hmagic : magic == expected
+   · simp only [hmagic] at h; dsimp only [bind, Except.bind] at h
+   · simp only [hmagic] at h; exact nomatch h
+   ```
+
+3. **Thread through remaining operations** repeating steps 1-2.
+
+4. **At the final `pure`/`return`**: extract the result with
+   `simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h`
+   then `obtain ⟨rfl, rfl⟩ := h`.
+
+### When the chain is too deep (>6 operations)
+
+Rather than mechanically peeling all layers, prove **per-operation lemmas**
+for each step's contribution to the property, then compose:
+
+```lean
+-- Lemma: parseFrameHeader preserves br.data
+theorem parseFrameHeader_data (h : parseFrameHeader br = .ok (hdr, br')) :
+    br'.data = br.data := by ...
+
+-- Main theorem: compose per-operation results
+theorem decompressFrame_output_size ... := by
+  have hd₁ := readU32_data h₁
+  have hd₂ := parseFrameHeader_data h₂
+  have hd₃ := decompressBlocks_data h₃
+  ...
+```
+
+This scales better than monolithic unfolding and produces reusable lemmas.
+
+## `forIn` Loop Invariants Are Not Automatable
+
+**Current gap**: There is no standard library theorem for proving properties
+preserved through `forIn` iterations in the `Except` monad. Tactics like
+`grind`, `simp`, and `omega` cannot see through the opaque `forIn` wrapper.
+
+Example: proving `cells.size = tableSize` after a loop that only uses
+`Array.set!` (which preserves size) requires a loop invariant theorem:
+"if `P` holds initially and each iteration preserves `P`, then `P` holds
+on the result." This doesn't exist for `Std.Legacy.Range.forIn'` in `Except`.
+
+**Workaround**: Leave as `sorry` with documentation. This is a known
+standard library gap, not a proof technique issue.
+
+## Nested `match` Within `do` Blocks
+
+When a `do` block contains `match expr with | ctor₁ => ... | ctor₂ => ...`,
+the do-notation desugaring wraps each branch in bind continuations, producing
+deeply nested terms. Two patterns arise:
+
+### Pattern 1: Match on a pure value mid-chain
+
+```lean
+-- Implementation:
+do
+  let hdr ← parseHeader br
+  match hdr.blockType with
+  | .raw => handleRaw hdr br
+  | .rle => handleRle hdr br
+  | .compressed => handleCompressed hdr br
+  | .reserved => throw .invalidBlockType
+```
+
+After `cases hparse : parseHeader br` and extracting the ok branch,
+the remaining hypothesis contains the `match`. Use `cases` on the
+discriminant directly:
+
+```lean
+cases hbt : hdr.blockType with
+| raw => simp only [hbt] at h; ...
+| rle => simp only [hbt] at h; ...
+| compressed => simp only [hbt] at h; ...
+| reserved => simp only [hbt] at h; exact nomatch h
+```
+
+**Key**: `simp only [hbt]` reduces the `match` to the selected branch.
+Don't use `split at h` here — it generates too many subgoals when the
+hypothesis also contains subsequent binds.
+
+### Pattern 2: Match on a monadic result that feeds subsequent binds
+
+```lean
+do
+  let result ← operation₁
+  let next ← match result with
+    | .modeA => operationA
+    | .modeB => operationB
+  finalOperation next
+```
+
+This produces nested `Except.bind (match result with ...) (fun next => ...)`.
+Unfold the match first, THEN handle the bind:
+
+```lean
+cases hmode : result with
+| modeA =>
+  simp only [hmode] at h
+  dsimp only [bind, Except.bind] at h
+  -- h now has operationA >>= finalOperation
+| modeB => ...
+```
+
+### Anti-pattern: `split at h` on match-within-bind
+
+`split at h` when the match is wrapped in `Except.bind` creates subgoals
+where `h` retains the outer bind wrapper around a partially-reduced match.
+Use `cases` on the discriminant + `simp only` to reduce cleanly.
+
+## `split at h` Chains with `letFun` Interleaving
+
+When unfolding a function that chains multiple guards (e.g.,
+`executeSequences.loop`), successive `split at h` calls may stall
+because Lean inserts `letFun` wrappers between branches. Interleave
+`dsimp only [letFun]` between splits:
+
+```lean
+rw [executeSequences.loop.eq_2] at h
+split at h
+· simp at h  -- error branch
+· rename_i hlit
+  split at h
+  dsimp only [letFun] at h  -- ← required between splits
+  split at h
+  · simp at h  -- error branch
+  · split at h
+    · simp at h
+    · -- success path: apply IH
+      have ⟨ih_size, ih_le, ih_bound⟩ := ih _ _ _ hlp' h
+```
+
+**Key insight**: `letFun` appears when the desugared `do` block
+creates `have x := expr; body` bindings between monadic operations.
+Without `dsimp only [letFun]`, the next `split at h` cannot see the
+inner `if`/`match` expressions.
+
+## Inline `show` Proofs for Condition Resolution
+
+When `simp only` needs a proof that a condition is true or false,
+use inline `show ... from by omega` instead of a separate `have`:
+
+```lean
+-- Compact: condition proofs inline
+simp only [resolveOffset, show ¬(2 > 3) from by omega,
+  show litLen > 0 from hlit, ↓reduceIte]
+
+-- Verbose equivalent (avoid):
+have h1 : ¬(2 > 3) := by omega
+have h2 : litLen > 0 := hlit
+simp only [resolveOffset, h1, h2, ↓reduceIte]
+```
+
+This pattern is especially useful for resolving multiple `if` conditions
+in a single `simp only` call. Each `show P from proof` provides `P`
+as a simp argument without polluting the local context.
+
 ## `split at h` Step Limit on Large Unfolded Functions
 
 **Problem**: `split at h` uses `simp` internally. On large unfolded functions
@@ -523,3 +820,16 @@ show (!(a == b)) = true
 rw [hb]  -- hb : (a == b) = false, goal becomes (!false) = true
 -- rfl closes it
 ```
+
+## Cross-References
+
+- **Dependent `if` preserving hypotheses through `do` blocks**:
+  `lean-wf-recursion` skill, "Dependent `if` Hypotheses and `do` Early-Throw".
+  Critical when monadic functions need termination proofs later in the block.
+  Use `if hoff : cond then .error ... else do ...` not `do; if cond then throw ...`.
+- **`simp only` vs bare `simp` decisions**: `lean-simp-tactics` skill,
+  "Bare `simp` Resistant Patterns" section.
+- **WF function unfolding** (`rw [f.eq_1]` not `simp only [f]`):
+  `lean-wf-recursion` skill. Never use `simp only [f]` on recursive functions.
+- **Loop invariant proofs for Zstd spec**: `lean-zstd-spec-pattern` skill,
+  "Loop Invariant Theorems via Equation Lemma Matching".

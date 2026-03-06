@@ -68,8 +68,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
       obtain ⟨i, hi, hxi⟩ := hx
       rw [List.length_set] at hi
       by_cases h0 : i = 0
-      · subst h0; simp at hxi; omega
-      · simp [show ¬(0 = i) from Ne.symm h0] at hxi
+      · subst h0; simp only [List.getElem_set_self] at hxi; omega
+      · simp only [List.getElem_set, show ¬(0 = i) from Ne.symm h0, ↓reduceIte] at hxi
         exact hxi ▸ hdist₀_bound _ (List.getElem_mem ..)
     · exact hdist₀_bound x hx
   have hdist_valid : Huffman.Spec.ValidLengths distLens 15 := by
@@ -80,7 +80,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
       have hall : ∀ x ∈ distLens₀, x = 0 := by
         intro x hx
         have := List.all_eq_true.mp hall0 x hx
-        simp [beq_iff_eq] at this; exact this
+        simp only [beq_iff_eq] at this; exact this
       have hrepl : distLens₀ = List.replicate 30 0 := by
         rw [← hdist₀_len]; exact List.eq_replicate_iff.mpr ⟨rfl, hall⟩
       rw [hdl, hrepl]
@@ -90,7 +90,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
         obtain ⟨i, hi, hli⟩ := hl
         rw [List.length_set, List.length_replicate] at hi
         by_cases h0 : i = 0
-        · subst h0; simp at hli; omega
+        · subst h0; simp only [List.getElem_set_self] at hli; omega
         · rw [List.getElem_set] at hli
           simp only [show ¬(0 = i) from Ne.symm h0, ↓reduceIte, List.getElem_replicate] at hli
           omega
@@ -149,8 +149,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
     cases hcl : Deflate.Spec.encodeCLEntries
         ((Huffman.Spec.allCodes clLens 7).map fun p => (p.2, p.1))
         clEntries with
-    | none => simp [hcl] at hcl_isSome
-    | some _ => simp
+    | none => exact nomatch hcl ▸ hcl_isSome
+    | some _ => rfl
   -- encodeSymbols succeeds
   have henc_syms_some : (Deflate.Spec.encodeSymbols litLens distLens
       (tokensToSymbols tokens)).isSome = true := by
@@ -181,12 +181,12 @@ theorem deflateDynamic_spec (data : ByteArray) :
         exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 b.toNat hb_lt hlen_nz hlen_le
       | reference len dist =>
         -- Need: encodeLitLen litLens distLens (.reference len dist) succeeds
-        simp at hbounds
+        simp only [] at hbounds
         simp only [Deflate.Spec.encodeLitLen]
         -- findLengthCode succeeds (spec version)
         have hflc_spec := Deflate.Spec.findLengthCode_isSome len hbounds.1 hbounds.2.1
         cases hlc : Deflate.Spec.findLengthCode len with
-        | none => simp [hlc] at hflc_spec
+        | none => exact nomatch hlc ▸ hflc_spec
         | some p =>
           obtain ⟨idx, extraN, extraV⟩ := p
           have hidx := Deflate.Spec.findLengthCode_idx_bound len idx extraN extraV hlc
@@ -206,12 +206,12 @@ theorem deflateDynamic_spec (data : ByteArray) :
             hsym hlen_nz hlen_le'
           cases hls : Deflate.Spec.encodeSymbol
               ((Huffman.Spec.allCodes litLens).map fun (s, cw) => (cw, s)) (257 + idx) with
-          | none => simp [hls] at hlit_enc
+          | none => exact nomatch hls ▸ hlit_enc
           | some lenBits =>
             -- findDistCode succeeds (spec version)
             have hfdc_spec := Deflate.Spec.findDistCode_isSome dist hbounds.2.2.1 hbounds.2.2.2
             cases hdc : Deflate.Spec.findDistCode dist with
-            | none => simp [hdc] at hfdc_spec
+            | none => exact nomatch hdc ▸ hfdc_spec
             | some q =>
               obtain ⟨dCode, dExtraN, dExtraV⟩ := q
               have hdcode := Deflate.Spec.findDistCode_code_bound dist dCode dExtraN dExtraV hdc
@@ -231,7 +231,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
                 have hdc_lt : dCode < distLens₀.length := by omega
                 have hmem : distLens₀[dCode] ∈ distLens₀ := List.getElem_mem hdc_lt
                 have hzero := List.all_eq_true.mp hall _ hmem
-                simp [beq_iff_eq] at hzero
+                simp only [beq_iff_eq] at hzero
                 -- hzero : distLens₀[dCode] = 0
                 have : distLens₀[dCode]! = 0 := by
                   rw [getElem!_pos distLens₀ dCode hdc_lt]; exact hzero
@@ -254,10 +254,12 @@ theorem deflateDynamic_spec (data : ByteArray) :
                 hdsym hdlen_nz hdlen_le'
               cases hds : Deflate.Spec.encodeSymbol
                   ((Huffman.Spec.allCodes distLens).map fun (s, cw) => (cw, s)) dCode with
-              | none => simp [hds] at hdist_enc
+              | none => exact nomatch hds ▸ hdist_enc
               | some distBits =>
                 -- Close the goal: all four operations succeeded
-                simp [LZ77Token.toLZ77Symbol, hlc, hls, hdc, hds]
+                simp only [LZ77Token.toLZ77Symbol, hlc, hls, hdc, hds,
+                  Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+                  Option.isSome_some, List.append_assoc]
     | inr heob =>
       subst heob
       -- Need: encodeLitLen litLens distLens .endOfBlock succeeds
@@ -273,11 +275,11 @@ theorem deflateDynamic_spec (data : ByteArray) :
       exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 256 hsym hlen_nz hlen_le
   -- Extract the actual values
   cases henc_trees : Deflate.Spec.encodeDynamicTrees litLens distLens with
-  | none => simp [henc_trees] at henc_trees_some
+  | none => exact nomatch henc_trees ▸ henc_trees_some
   | some headerBits =>
     cases henc_syms : Deflate.Spec.encodeSymbols litLens distLens
         (tokensToSymbols tokens) with
-    | none => simp [henc_syms] at henc_syms_some
+    | none => exact nomatch henc_syms ▸ henc_syms_some
     | some symBits =>
       refine ⟨litLens, distLens, headerBits, symBits,
         hlit_valid, hdist_valid,
@@ -296,18 +298,20 @@ theorem deflateDynamic_spec (data : ByteArray) :
       -- Extract EOB encoding
       simp only [Deflate.Spec.encodeSymbols] at henc_eob_syms
       cases henc_eob : Deflate.Spec.encodeLitLen litLens distLens .endOfBlock with
-      | none => simp [henc_eob] at henc_eob_syms
+      | none => exact nomatch henc_eob ▸ henc_eob_syms
       | some eobBits' =>
-        simp [henc_eob] at henc_eob_syms
+        simp only [henc_eob,
+          Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+          List.append_nil, Option.some.injEq] at henc_eob_syms
         have heob_eq : eobBits = eobBits' := by rw [henc_eob_syms]
         -- Build canonical codes (same as in deflateDynamic)
         let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
         let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
         -- Size properties
         have hlit_codes_size : litCodes.size = litLens.length := by
-          simp [litCodes, canonicalCodes_size, List.size_toArray]
+          simp only [litCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
         have hdist_codes_size : distCodes.size = distLens.length := by
-          simp [distCodes, canonicalCodes_size, List.size_toArray]
+          simp only [distCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
         -- Code length bounds
         have hlit_lengths_arr_le := Deflate.toUInt8Array_le litLens hlit_bound
         have hdist_lengths_arr_le := Deflate.toUInt8Array_le distLens hdist_bound
@@ -325,7 +329,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
             show UInt8.toNat (Nat.toUInt8 n) = n
             simp only [Nat.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat]
             exact Nat.mod_eq_of_lt (by have := hlit_valid.1 n hn; omega))]
-          simp
+          exact (List.map_id _).symm
         have ⟨heob_cw, heob_len⟩ := encodeSymbol_canonicalCodes_eq
           (litLens.toArray.map Nat.toUInt8) 15 litCodes rfl
           (by rwa [hlit_roundtrip])
@@ -384,7 +388,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
               rw [if_neg (by omega)]
             have hemit_id : bw4 = bw3 := by
               show emitTokensWithCodes bw3 tokens litCodes distCodes 0 = bw3
-              rw [htok_empty]; unfold emitTokensWithCodes; simp
+              rw [htok_empty]; unfold emitTokensWithCodes; rfl
             rw [hemit_id]; rfl
           · rfl
         rw [hdef]
@@ -408,18 +412,18 @@ theorem deflateDynamic_spec (data : ByteArray) :
           have hsum : ∀ (l : List UInt8),
               (l.map (fun _ => 8)).sum = l.length * 8 := by
             intro l; induction l with
-            | nil => simp
-            | cons _ _ ih => simp [ih, Nat.add_mul]; omega
+            | nil => rfl
+            | cons _ _ ih => simp only [List.map_cons, List.sum_cons, List.length_cons, ih]; omega
           rw [hsum]
         rw [hbits_eq] at htoBits_len
         omega
 
 /-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
-    codes then decompressing recovers the original data.
-    Size bound: same as `inflate_deflateFixed`. -/
+    codes then decompressing recovers the original data. Generalized to any
+    `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateDynamic (data : ByteArray)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateDynamic data) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateDynamic data) maxOutputSize = .ok data := by
   have hspec := deflateDynamic_spec data
   match hspec with
   | ⟨litLens, distLens, headerBits, symBits, hv_lit, hv_dist,
@@ -450,9 +454,9 @@ theorem inflate_deflateDynamic (data : ByteArray)
         henc_syms
         (lz77Greedy_resolves data 32768 (by omega))
         (tokensToSymbols_validSymbolList _)
-    have hlen : data.data.toList.length ≤ 1024 * 1024 * 1024 := by
+    have hlen : data.data.toList.length ≤ maxOutputSize := by
       simp only [Array.length_toList, ByteArray.size_data]; omega
-    rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp]
-    exact inflate_complete (deflateDynamic data) data.data.toList hlen hdec_padded
+    rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
+    exact inflate_complete (deflateDynamic data) data.data.toList maxOutputSize hlen hdec_padded
 
 end Zip.Native.Deflate

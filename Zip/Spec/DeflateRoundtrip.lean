@@ -23,20 +23,19 @@ namespace Zip.Native.Deflate
 open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
-    This is the Phase B4 capstone theorem from PLAN.md.
-    The size bound (1 GiB) is now determined by the native inflate's default
-    maxOutputSize, not the decoder fuel (which supports ~500 PB). -/
+    This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
+    `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
-    (hsize : data.size < 1024 * 1024 * 1024) :
-    Zip.Native.Inflate.inflate (deflateRaw data level) = .ok data := by
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   split
-  · exact inflate_deflateStoredPure data (by omega)
+  · exact inflate_deflateStoredPure data _ (by omega)
   · split
-    · exact inflate_deflateFixedIter data (by omega)
+    · exact inflate_deflateFixedIter data _ (by omega)
     · split
-      · exact inflate_deflateLazyIter data hsize
-      · exact inflate_deflateDynamic data (by omega)
+      · exact inflate_deflateLazyIter data _ hsize
+      · exact inflate_deflateDynamic data _ (by omega)
 
 /-- The output of `deflateRaw` decomposes into content bits plus short padding.
     This is needed by `inflateRaw_endPos_ge` to establish that the native decoder
@@ -49,25 +48,25 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
   split
   · -- Level 0: stored blocks — all byte-aligned, padding = []
     exact ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
-      [], by simp, by simp⟩
+      [], by simp only [List.append_nil], by decide⟩
   · split
     · -- Level 1: fixed Huffman (iterative LZ77)
       rw [deflateFixedIter, lz77GreedyIter_eq_lz77Greedy]
       obtain ⟨bits, _, hbytes⟩ := deflateFixed_spec data
       exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
-        hbytes, by simp [List.length_replicate]; omega⟩
+        hbytes, by simp only [List.length_replicate]; omega⟩
     · split
       · -- Levels 2-4: lazy LZ77 + fixed Huffman (iterative)
         rw [deflateLazyIter_eq_deflateLazy]
         obtain ⟨bits, _, hbytes⟩ := deflateLazy_spec data
         exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
-          hbytes, by simp [List.length_replicate]; omega⟩
+          hbytes, by simp only [List.length_replicate]; omega⟩
       · -- Levels 5+: dynamic Huffman
         obtain ⟨_, _, headerBits, symBits, _, _, _, _, _, _, _, _, _, _, hbytes⟩ :=
           deflateDynamic_spec data
         exact ⟨[true, false, true] ++ headerBits ++ symBits,
           List.replicate ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false,
-          hbytes, by simp [List.length_replicate]; omega⟩
+          hbytes, by simp only [List.length_replicate]; omega⟩
 
 /-- For the encoder's output, `decode.goR` returns a short remaining (< 8 bits).
     This is the key fact connecting encoder structure to decoder bit consumption,
@@ -79,7 +78,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
   unfold deflateRaw
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
-    exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by simp⟩
+    exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
   · split
     · -- Level 1: fixed Huffman (iterative LZ77)
       rw [deflateFixedIter, lz77GreedyIter_eq_lz77Greedy, ← deflateFixed]
@@ -88,7 +87,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
       cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
           Deflate.Spec.fixedDistLengths
           (tokensToSymbols (lz77Greedy data)) with
-      | none => simp [henc_syms] at henc_fixed
+      | none => exact nomatch (henc_syms ▸ henc_fixed)
       | some allBits =>
         simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
         have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
@@ -102,7 +101,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
             (tokensToSymbols (lz77Greedy data)) data.data.toList allBits padding
             henc_syms (lz77Greedy_resolves data 32768 (by omega))
             (tokensToSymbols_validSymbolList _)
-        · simp [padding, List.length_replicate]; omega
+        · simp only [padding, List.length_replicate]; omega
     · split
       · -- Levels 2-4: lazy LZ77 + fixed Huffman (iterative)
         rw [deflateLazyIter_eq_deflateLazy]
@@ -111,7 +110,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
         cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
             Deflate.Spec.fixedDistLengths
             (tokensToSymbols (lz77Lazy data)) with
-        | none => simp [henc_syms] at henc_fixed
+        | none => exact nomatch (henc_syms ▸ henc_fixed)
         | some allBits =>
           simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
           have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
@@ -125,7 +124,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
               (tokensToSymbols (lz77Lazy data)) data.data.toList allBits padding
               henc_syms (lz77Lazy_resolves data 32768 (by omega))
               (tokensToSymbols_validSymbolList _)
-          · simp [padding, List.length_replicate]; omega
+          · simp only [padding, List.length_replicate]; omega
       · -- Levels 5+: dynamic Huffman
         obtain ⟨litLens, distLens, headerBits, symBits, hv_lit, hv_dist,
             hlitLen_lo, hlitLen_hi, hdistLen_lo, hdistLen_hi,
@@ -150,6 +149,6 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
             hv_lit hv_dist hheader henc_syms
             (lz77Greedy_resolves data 32768 (by omega))
             (tokensToSymbols_validSymbolList _)
-        · simp [padding, List.length_replicate]; omega
+        · simp only [padding, List.length_replicate]; omega
 
 end Zip.Native.Deflate

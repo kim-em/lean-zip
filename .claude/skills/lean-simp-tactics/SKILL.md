@@ -162,7 +162,15 @@ For `simp [hrb] at h` that substitutes then closes:
 
 -- After (two steps: substitute + discriminate)
 | error e => simp only [hrb] at h; exact nomatch h
+
+-- After (one step: substitute + discriminate via rewrite in match)
+| error e => exact nomatch (hrb ▸ h)
 ```
+
+The one-step `exact nomatch (hrb ▸ h)` form works when `hrb` rewrites the
+hypothesis into an impossible constructor equality (e.g., `none = some _`).
+It's cleaner than the two-step form and commonly used for `| none =>` branches
+where a `have` already established the substituted value.
 
 **Why `nomatch` works**: `Eq` has one constructor (`rfl`) requiring
 definitional equality. `Except.error _` and `Except.ok _` are different
@@ -487,6 +495,152 @@ by show 0 < 8; omega
 Similarly for `Or.inl rfl` when proving `{ ... bitOff := 0 }.bitOff = 0 ∨ ...` — the
 struct projection reduces definitionally, so `Or.inl rfl` works directly.
 
+## `simp at h` for Negated Comparisons
+
+When `split at h` produces a negation branch (the `if` condition was false),
+the hypothesis has form `¬(a ≥ b)` or `¬(a > b)`. Bare `simp at h` converts
+these to usable `<`/`≤` forms.
+
+**Replacements:**
+```lean
+-- Before: simp at h
+-- After (for ¬(a ≥ b)):
+simp only [ge_iff_le, Nat.not_le] at h  -- gives h : b < a... wait, Nat.not_le gives >
+
+-- ¬(a ≥ b) means ¬(b ≤ a) means a < b:
+simp only [ge_iff_le, Nat.not_le] at h  -- h : a < b
+
+-- ¬(a > b) means ¬(b < a) means a ≤ b:
+simp only [gt_iff_lt, Nat.not_lt] at h  -- h : a ≤ b (i.e., ¬(b < a) → b ≤ a... check)
+```
+
+**Warning**: The exact lemma combination depends on whether the original
+condition uses `≥`/`>` (Prop) or `>=`/`>` on `Nat`. Always build after
+replacing to verify the resulting hypothesis has the expected form.
+
+**Common in**: Guard conditions after `if bits.length ≥ maxPos` or
+`if pos > data.size` in WF-recursive functions.
+
+## `simp; omega` for Array Size After Mutation
+
+After `Array.set!` or when reasoning about `Array.replicate`, bare
+`simp; omega` is commonly used to prove size preservation. Replace with
+explicit rewrites:
+
+```lean
+-- Before: simp; omega
+-- After (size after set!):
+rw [Array.size_set!]; omega
+
+-- After (size of replicate):
+rw [Array.size_replicate]; omega
+
+-- After (combination):
+rw [Array.size_set!, Array.size_replicate]; omega
+```
+
+**Common in**: `DeflateDynamicFreqs.lean` and any file building arrays
+via iterative `set!` operations on `Array.replicate` base arrays.
+
+## Array.size with `simp only` — Two Approaches
+
+When an Array is defined as `def table : Array Nat := #[3, 4, 5, ...]` and you need
+to prove `idx < table.size`, bare `simp [table]; omega` evaluates `.size` via the
+full simp database. Converting to `simp only` requires bridging from `Array.size`
+to `List.length`.
+
+**Approach 1 — `List.size_toArray` bridge** (preferred for inline `simp only`):
+```lean
+-- #[a, b, c] elaborates as List.toArray [a, b, c]
+-- List.size_toArray converts (List.toArray l).size to l.length
+-- Then List.length_cons + List.length_nil reduce to a concrete number
+simp only [table, List.size_toArray, List.length_cons, List.length_nil] at hidx
+omega
+```
+
+**Approach 2 — kernel evaluation via `rfl`** (preferred for standalone bounds):
+```lean
+have h : idx < table.size := by have : table.size = 29 := rfl; omega
+```
+
+**Key insight**: `List.length_cons` and `List.length_nil` DO apply to Array sizes,
+but only after `List.size_toArray` converts the Array size to a List length.
+Without that bridge lemma, `List.length_*` lemmas won't match.
+
+**Important**: When using Approach 1, always include BOTH `List.length_cons` AND
+`List.length_nil`. Without `List.length_nil`, omega sees `[].length` as an opaque
+variable and cannot reduce it to 0.
+
+## `simp only` vs `subst` for Dependent `getElem` Rewrites
+
+When `hlenSum : arr[idx] + extraV = len` and the goal has `arr[idx]`, both
+`rw [hlenSum]` and `simp only [hlenSum]` may fail because the `getElem` bound
+proof (`idx < arr.size`) in the hypothesis differs from the one in the goal.
+Even though Lean 4 has proof irrelevance for Prop, `simp only` can still fail
+to match through different proof witnesses.
+
+**Fix**: Use `subst` to eliminate the variable entirely:
+```lean
+-- BAD: rw/simp fail on dependent getElem mismatch
+simp only [hlenSum, hdistSum]  -- "Did not find an occurrence of the pattern"
+
+-- GOOD: subst replaces the variable, sidestepping getElem proofs
+subst hlenSum; subst hdistSum; rfl
+```
+
+**When this arises**: After `rw [getElem!_pos ...]` converts `arr[i]!` to `arr[i]`
+in hypotheses, then `obtain` extracts the equality. The `arr[i]` in the hypothesis
+uses the `getElem!_pos` proof, while the goal's `arr[i]` came from a different path.
+
+## `simp (config := { decide := true }) only [...]`
+
+When you need both targeted lemma application AND decidable evaluation in
+a single step, use the `decide := true` configuration option:
+
+```lean
+simp (config := { decide := true }) only [h1, h2, ↓reduceIte]
+```
+
+This combines the precision of `simp only` (no uncontrolled lemma database)
+with the evaluation power of `decide` (can evaluate concrete boolean/decidable
+expressions). Useful for:
+
+- BFINAL flag checks in decode roundtrip theorems
+- Cases where `simp only [...]` does the rewrite but can't evaluate the
+  resulting concrete expression
+
+**Don't confuse with**: `simp only [...]; decide` (two steps) — that only works
+if `simp only` fully simplifies and `decide` can close the remaining goal.
+The config option integrates evaluation INTO the simplification.
+
+## `getElem!_pos` — Bridging `data[i]!` to `data[i]`
+
+When the goal has `data[i]!` (panicking access) but you have a bound proof
+`h : i < data.size`, use `getElem!_pos` to convert to bounded access:
+
+```lean
+simp only [getElem!_pos, hpos]
+-- Converts data[i]! to data[i] using hpos as the bound proof
+```
+
+This commonly arises in BitstreamCorrect and similar files where
+implementation code uses `!` but proofs need bounded access.
+
+## `Decidable.of_not_not` for Double Negation
+
+When bare `simp` implicitly applied `not_not` to eliminate double negation
+(e.g., after `bne` → `beq` conversion), replace with the explicit eliminator:
+
+```lean
+-- Before (bare simp):
+simp at h  -- h : ¬¬P → h : P
+
+-- After:
+exact Decidable.of_not_not h
+```
+
+Works when the proposition is decidable (which `Nat` comparisons always are).
+
 ## `BEq.beq` vs `Nat.beq` — Use `beq_iff_eq`
 
 When a hypothesis `h : (x == 0) = true` comes from a `split` on an `if x == 0` condition,
@@ -496,7 +650,110 @@ type mismatch.
 **Fix**: Use `simp only [beq_iff_eq] at h` to convert `(x == 0) = true` into `x = 0`.
 Or use `exact absurd (by rw [h]; decide) hne` for contradiction branches.
 
+## Array Literal Indexing After `rcases` Case Split
+
+When proving a property about `arr[code]` for all `code < N` (e.g., validating
+RFC lookup tables), the working pattern is:
+
+```lean
+-- 1. Eliminate the dite/if on array bounds
+unfold myFunction
+simp only [hlt, ↓reduceDIte]
+-- 2. Case split on code (N+1 underscores for N values + impossible case)
+rcases code with _ | _ | _ | _ | _ | _ | _ | _ | _
+-- 3. Close each case: rfl for valid codes, omega for the impossible case
+all_goals first | omega | rfl
+```
+
+**Why this works**: `rcases` decomposes `code` into `0`, `Nat.succ 0`, etc.
+After `unfold`, `Array.get` on the literal array reduces definitionally for
+each concrete index, making `rfl` close the goal.
+
+**What does NOT work**:
+- `simp only [myArray]`: Expands the array definition but does NOT reduce
+  `Array.getInternal (0 + 1 + 1 + ...) ...` — the index stays symbolic-looking
+- `decide` on `∀ code : Nat, ...`: `Nat` is infinite, so `decide` can't enumerate
+- `Fin`-based `decide` helpers: Work in principle but have proof obligation
+  issues bridging `Array.get` with different proof terms
+
+## `omega` Cannot Handle Exponentiation (`2^n`, `1 <<< n`)
+
+`omega` only handles linear arithmetic. For goals involving `2^n` or `1 <<< n`:
+
+```lean
+-- Bridge shiftLeft to pow, then use the standard pow lemma
+have : 1 <<< n ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
+omega  -- now omega can use the linear bound
+```
+
+Key lemmas:
+- `Nat.one_shiftLeft : 1 <<< n = 2 ^ n` — bridges `<<<` and `^`
+- `Nat.one_le_two_pow : 1 ≤ 2 ^ n` — the standard positivity fact for powers of 2
+
+This pattern appears in Zstd offset decoding (`decodeOffsetValue`) and FSE
+table size proofs where `tableSize = 1 <<< accuracyLog`.
+
 ## `⟨⟨result.data.toList⟩⟩ = result` for ByteArray
 
 `ByteArray.mk (Array.mk result.data.toList) = result` is true by **eta reduction** in
 Lean 4 (structures have eta). Just use `rfl` — no `simp`, `ext`, or library lemmas needed.
+
+## `let` Binding Unfolding via `simp only`
+
+Local `let` bindings in Lean proofs are opaque to most tactics but can be
+unfolded by `simp only` using the binding name as a lemma:
+
+```lean
+-- Goal has: let cl := decodeCL ...; ...
+-- simp only [cl] unfolds the let binding
+simp only [cl] at hgo
+```
+
+This is useful when a bare `simp` was doing two things: unfolding a `let`
+binding AND simplifying the result. Split into `simp only [binding_name]`
+for the unfold, then a targeted tactic for the simplification.
+
+**Limitation**: This only works for `let` bindings in the local context.
+For `let` bindings inside definitions, use `unfold` or `simp only [defName]`.
+
+## Lemma Name Discovery: Always Use `simp?`
+
+**Never guess lemma names.** Common mistakes from the bare simp campaign:
+
+| Guessed Name | Actual Name | Why It's Wrong |
+|--------------|-------------|----------------|
+| `not_lt` | `Nat.not_lt` | Needs namespace qualifier |
+| `beq_iff_eq` | `beq_eq_false_iff_ne` | Wrong lemma entirely |
+| `List.not_mem_nil` | ✓ (correct) | This one exists |
+
+**Always use `simp?` discovery** to find the correct lemma names. The
+batch workflow (convert all bare simps to `simp?`, build once, read all
+info messages) is the most reliable and efficient approach.
+
+If `simp?` doesn't suggest a replacement, the bare simp may be
+genuinely resistant — see the "Bare `simp` Resistant Patterns" section.
+
+## `Nat.testBit` Rewrite Ordering in Bitwise Proofs
+
+When converting bare `simp` in `Nat.testBit` / bitwise proofs, the order
+of `Nat.testBit_and` vs `Nat.testBit_zero` matters critically.
+
+**Problem**: `simp only [Nat.testBit_and, Nat.testBit_zero, ...]` may
+apply `Nat.testBit_zero` first (converting `(n &&& m).testBit 0` to
+`decide ((n &&& m) % 2 = 1)`), making `Nat.testBit_and` unmatchable.
+
+**Fix**: Use `rw [Nat.testBit_and]` BEFORE `simp only` to control order:
+```lean
+-- BAD: simp may apply testBit_zero first
+simp only [Nat.testBit_and, Nat.testBit_zero, heven, Nat.mul_mod_right]
+
+-- GOOD: rw controls order, simp handles the rest
+rw [Nat.testBit_and]
+simp only [Nat.testBit_zero, heven, Nat.mul_mod_right, Bool.false_and]
+```
+
+**Also**: `simp only` does NOT always reduce `decide True` to `true` or
+`decide (0 = 1)` to `false`. Add explicit lemmas:
+- `decide_true` + `Bool.true_and` for `decide True && x = x`
+- `show (0 : Nat) ≠ 1 from by omega` + `decide_false` + `Bool.false_and`
+  for `decide (0 = 1) && x = false`

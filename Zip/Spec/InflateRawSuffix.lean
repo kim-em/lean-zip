@@ -44,7 +44,7 @@ private theorem readBit_append (br : BitReader) (suffix : ByteArray)
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨hval, hbr'⟩ := h
       subst hbr'; subst hval
-      split <;> simp_all
+      split <;> (first | rfl | contradiction)
     }
 
 /-- readBits.go with appended suffix produces the same result. -/
@@ -114,8 +114,8 @@ private theorem readBytes_append (br : BitReader) (suffix : ByteArray)
         (br.alignToByte.pos + n) =
         br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) := by
       apply ByteArray.ext
-      -- bare simp: Array.extract_append reduction needs full simp database
-      simp [ByteArray.data_extract, ByteArray.data_append, Array.extract_append]
+      simp only [ByteArray.data_extract, ByteArray.data_append, Array.extract_append,
+        ByteArray.size_data, Array.append_right_eq_self, Array.extract_eq_empty_iff]
       omega
     rw [hext]
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
@@ -491,10 +491,10 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             · rw [if_neg hbf1] at h ⊢
               -- WF guards in h
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i h_progress
                 split at h
-                · simp at h
+                · exact nomatch h
                 · -- WF guards in goal (same conditions via brAppend preserving bitPos)
                   split
                   · rename_i h₁'; exact absurd h₁' h_progress
@@ -515,10 +515,10 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
               rw [alignToByte_append]; exact h
             · rw [if_neg hbf1] at h ⊢
               split at h
-              · simp at h
+              · exact nomatch h
               · rename_i h_progress
                 split at h
-                · simp at h
+                · exact nomatch h
                 · split
                   · rename_i h₁'; exact absurd h₁' h_progress
                   · split
@@ -543,10 +543,10 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
                 rw [alignToByte_append]; exact h
               · rw [if_neg hbf1] at h ⊢
                 split at h
-                · simp at h
+                · exact nomatch h
                 · rename_i h_progress
                   split at h
-                  · simp at h
+                  · exact nomatch h
                   · split
                     · rename_i h₁'; exact absurd h₁' h_progress
                     · split

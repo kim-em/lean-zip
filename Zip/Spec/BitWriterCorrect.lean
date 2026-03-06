@@ -21,10 +21,11 @@ def wf (bw : BitWriter) : Prop :=
   bw.bitCount.toNat < 8 ∧ bw.bitBuf.toNat < 2 ^ bw.bitCount.toNat
 
 theorem empty_wf : empty.wf := by
-  constructor <;> simp [empty]
+  constructor <;> simp only [empty, UInt8.toNat_zero, Nat.zero_lt_succ, Nat.pow_zero, Nat.lt_add_one]
 
 theorem empty_toBits : empty.toBits = [] := by
-  simp [toBits, empty]
+  simp only [toBits, empty, ByteArray.data_empty, Array.toList_empty, List.flatMap_nil,
+    UInt8.toNat_zero, Nat.zero_testBit, List.range_zero, List.map_nil, List.append_nil]
 
 /-! ## Helper lemmas -/
 
@@ -32,7 +33,8 @@ private theorem flatMap_byteToBits_push (data : ByteArray) (b : UInt8) :
     (data.push b).data.toList.flatMap Deflate.Spec.bytesToBits.byteToBits =
     data.data.toList.flatMap Deflate.Spec.bytesToBits.byteToBits ++
     Deflate.Spec.bytesToBits.byteToBits b := by
-  simp [ByteArray.push, Array.toList_push]
+  simp only [ByteArray.push, Array.toList_push, List.flatMap_append, List.flatMap_cons,
+    List.flatMap_nil, List.append_nil]
 
 /-- byteToBits splits at bit boundary k when upper bits are zero. -/
 private theorem byteToBits_split (b : UInt8) (k : Nat) (hk : k ≤ 8)
@@ -42,14 +44,17 @@ private theorem byteToBits_split (b : UInt8) (k : Nat) (hk : k ≤ 8)
     List.replicate (8 - k) false := by
   simp only [Deflate.Spec.bytesToBits.byteToBits]
   apply List.ext_getElem
-  · simp; omega
+  · simp only [List.ofFn_succ, Fin.isValue, Fin.val_zero, Nat.testBit_zero, Fin.val_succ,
+      Nat.zero_add, Nat.reduceAdd, Fin.val_eq_zero, List.ofFn_zero, List.length_cons,
+      List.length_nil, List.length_append, List.length_map, List.length_range,
+      List.length_replicate]; omega
   · intro i h1 h2
     simp only [List.length_ofFn] at h1
     simp only [List.getElem_ofFn]
     by_cases hik : i < k
-    · rw [List.getElem_append_left (by simp; omega)]
-      simp
-    · rw [List.getElem_append_right (by simp; omega)]
+    · rw [List.getElem_append_left (by simp only [List.length_map, List.length_range]; omega)]
+      simp only [List.getElem_map, List.getElem_range]
+    · rw [List.getElem_append_right (by simp only [List.length_map, List.length_range]; omega)]
       simp only [List.length_map, List.length_range, List.getElem_replicate]
       exact Nat.testBit_lt_two_pow
         (Nat.lt_of_lt_of_le hb (Nat.pow_le_pow_right (by omega) (by omega)))
@@ -60,23 +65,25 @@ private theorem byteToBits_split (b : UInt8) (k : Nat) (hk : k ≤ 8)
 private theorem testBit_or_shiftLeft_below (a b k j : Nat) (hj : j < k) :
     (a ||| (b <<< k)).testBit j = a.testBit j := by
   rw [Nat.testBit_or, Nat.testBit_shiftLeft]
-  simp [show ¬(k ≤ j) from by omega]
+  simp only [ge_iff_le, show ¬(k ≤ j) from by omega, decide_false, Bool.false_and, Bool.or_false]
 
 /-- testBit at the shift position sees the shifted bit. -/
 private theorem testBit_or_shiftLeft_at (a b k : Nat) (ha : a < 2 ^ k) :
     (a ||| (b <<< k)).testBit k = b.testBit 0 := by
   rw [Nat.testBit_or, Nat.testBit_lt_two_pow ha, Bool.false_or,
       Nat.testBit_shiftLeft]
-  simp
+  simp only [ge_iff_le, Std.le_refl, decide_true, Nat.sub_self, Nat.testBit_zero, Bool.true_and]
 
 /-- testBit 0 of a value ≤ 1 equals decide (val = 1). -/
 private theorem testBit_zero_of_le_one (b : Nat) (hb : b ≤ 1) :
     b.testBit 0 = decide (b = 1) := by
   cases b with
-  | zero => simp [Nat.testBit]
+  | zero => simp only [Nat.testBit, Nat.shiftRight_zero, Nat.and_zero, bne_self_eq_false,
+      Nat.zero_ne_one, decide_false]
   | succ n =>
     have : n = 0 := by omega
-    subst this; simp [Nat.testBit]
+    subst this; simp only [Nat.testBit, Nat.zero_add, Nat.shiftRight_zero, Nat.and_self,
+      Nat.reduceBNe, decide_true]
 
 /-- For small OR-shift on UInt8, toNat distributes. Key bridging lemma from
     UInt8 bit operations to Nat-level reasoning. -/
@@ -114,20 +121,22 @@ private theorem or_shiftLeft_lt_two_pow (buf bit k : Nat)
 /-- Range map extension: extending range by 1 where the new element equals
     testBit_or_shiftLeft_at. -/
 private theorem range_map_extend (buf : Nat) (bit : Nat) (k : Nat)
-    (hbuf : buf < 2 ^ k) (_hbit : bit ≤ 1) :
+    (hbuf : buf < 2 ^ k) :
     (List.range (k + 1)).map (fun i => (buf ||| (bit <<< k)).testBit i) =
     (List.range k).map (fun i => buf.testBit i) ++ [bit.testBit 0] := by
   apply List.ext_getElem
-  · simp
+  · simp only [Nat.testBit_or, Nat.testBit_shiftLeft, ge_iff_le, List.length_map,
+      List.length_range, Nat.testBit_zero, List.length_append, List.length_cons,
+      List.length_nil, Nat.zero_add]
   · intro i h1 h2
     simp only [List.length_map, List.length_range] at h1
     by_cases hik : i < k
-    · rw [List.getElem_append_left (by simp; omega)]
+    · rw [List.getElem_append_left (by simp only [List.length_map, List.length_range]; omega)]
       simp only [List.getElem_map, List.getElem_range]
       exact testBit_or_shiftLeft_below buf bit k i hik
     · have hieq : i = k := by omega
       subst hieq
-      rw [List.getElem_append_right (by simp)]
+      rw [List.getElem_append_right (by simp only [List.length_map, List.length_range, Std.le_refl])]
       simp only [List.getElem_map, List.getElem_range, List.length_map,
         List.length_range, Nat.sub_self, List.getElem_cons_zero]
       exact testBit_or_shiftLeft_at buf bit i hbuf
@@ -148,14 +157,15 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
   have hbridge := uint8_or_shiftLeft_toNat bw.bitBuf bit bw.bitCount hbc_lt hbit_le
   by_cases hflush : bw.bitCount.toNat + 1 ≥ 8
   · -- Case: k + 1 ≥ 8, i.e. k = 7 (flush)
-    have hk7 : bw.bitCount.toNat = 7 := by omega
     rw [if_pos (show bw.bitCount.toNat + 1 ≥ 8 from hflush)]
     -- Simplify toBits of the flushed writer
     have htb : (⟨bw.data.push (bw.bitBuf ||| (bit <<< bw.bitCount)),
         (0 : UInt8), (0 : UInt8)⟩ : BitWriter).toBits =
         (bw.data.push (bw.bitBuf ||| (bit <<< bw.bitCount))).data.toList.flatMap
           Deflate.Spec.bytesToBits.byteToBits := by
-      simp [toBits]
+      simp only [toBits, ByteArray.data_push, Array.toList_push, List.flatMap_append,
+        List.flatMap_cons, List.flatMap_nil, List.append_nil, UInt8.toNat_zero,
+        Nat.zero_testBit, List.range_zero, List.map_nil]
     rw [htb, flatMap_byteToBits_push]
     simp only [toBits, List.append_assoc]
     congr 1
@@ -163,9 +173,8 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
     have hk8 : 8 - (bw.bitCount.toNat + 1) = 0 := by omega
     rw [byteToBits_split (bw.bitBuf ||| (bit <<< bw.bitCount)) (bw.bitCount.toNat + 1) (by omega)]
     · -- replicate 0 false = []
-      rw [hk8, List.replicate_zero, List.append_nil]
-      rw [hbridge]
-      rw [range_map_extend bw.bitBuf.toNat bit.toNat bw.bitCount.toNat hbuf_lt hbit_le]
+      rw [hk8, List.replicate_zero, List.append_nil, hbridge,
+        range_map_extend bw.bitBuf.toNat bit.toNat bw.bitCount.toNat hbuf_lt]
       congr 1; congr 1
       rw [hbit_val, testBit_zero_of_le_one bit.toNat hbit_le]
     · rw [hbridge]; exact or_shiftLeft_lt_two_pow _ _ _ hbuf_lt hbit_le
@@ -179,8 +188,8 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
     rw [hbc_add]
     simp only [List.append_assoc]
     congr 1
-    rw [hbridge]
-    rw [range_map_extend bw.bitBuf.toNat bit.toNat bw.bitCount.toNat hbuf_lt hbit_le]
+    rw [hbridge,
+      range_map_extend bw.bitBuf.toNat bit.toNat bw.bitCount.toNat hbuf_lt]
     congr 1; congr 1
     rw [hbit_val, testBit_zero_of_le_one bit.toNat hbit_le]
 
@@ -200,7 +209,7 @@ private theorem addBit_wf (bw : BitWriter) (bit : UInt8)
   · -- Flush case: new BitWriter is ⟨_, 0, 0⟩, same as empty_wf
     rw [if_pos (show bw.bitCount.toNat + 1 ≥ 8 from hflush)]
     show (0 : UInt8).toNat < 8 ∧ (0 : UInt8).toNat < 2 ^ (0 : UInt8).toNat
-    simp
+    simp only [UInt8.toNat_zero, Nat.zero_lt_succ, Nat.pow_zero, Nat.lt_add_one, and_self]
   · -- No flush: bitCount goes to k+1, newBuf < 2^(k+1)
     rw [if_neg (show ¬(bw.bitCount.toNat + 1 ≥ 8) from hflush)]
     constructor
@@ -211,6 +220,24 @@ private theorem addBit_wf (bw : BitWriter) (bit : UInt8)
           2 ^ ((bw.bitCount.toNat + 1) % 256)
       rw [Nat.mod_eq_of_lt (by omega), hbridge]
       exact or_shiftLeft_lt_two_pow _ _ _ hbuf_lt hbit_le
+
+/-- `decide (x % 2 = 1) = (x % 2 != 0)` — common tail for extract_bit lemmas. -/
+private theorem decide_mod2_eq_bne (x : Nat) :
+    decide (x % 2 = 1) = (x % 2 != 0) := by
+  cases h : x % 2 with
+  | zero => simp only [Nat.zero_ne_one, decide_false, bne_self_eq_false]
+  | succ n =>
+    have : n = 0 := by omega
+    subst this; simp only [Nat.zero_add, decide_true, Nat.reduceBNe]
+
+/-- `(x % 2 == 1) = (x % 2 != 0)` — BEq variant for writeBits proofs. -/
+private theorem beq_mod2_eq_bne (x : Nat) :
+    (x % 2 == 1) = (x % 2 != 0) := by
+  cases h : x % 2 with
+  | zero => simp only [Nat.reduceBEq, bne_self_eq_false]
+  | succ n =>
+    have : n = 0 := by omega
+    subst this; simp only [Nat.zero_add, BEq.rfl, Nat.reduceBNe]
 
 /-- Extracting bit k from a UInt16 code: ((code >>> k) &&& 1).toUInt8 has toNat ≤ 1
     and equals testBit. -/
@@ -232,12 +259,7 @@ private theorem uint16_extract_bit (code : UInt16) (k : Nat) (hk : k < 16) :
       simp only [UInt16.size]; omega]
     simp only [Nat.testBit]
     rw [Nat.and_comm, Nat.one_and_eq_mod_two]
-    -- Goal: decide (x % 2 = 1) = (x % 2 != 0)
-    cases h : _ % 2 with
-    | zero => simp
-    | succ n =>
-      have : n = 0 := by omega
-      subst this; simp
+    exact decide_mod2_eq_bne _
 
 /-- Extracting bit i from a UInt32 value: ((val >>> i) &&& 1).toUInt8 has toNat ≤ 1
     and equals testBit. -/
@@ -259,12 +281,7 @@ private theorem uint32_extract_bit (val : UInt32) (i : Nat) (hi : i ≤ 25) :
       simp only [UInt32.size]; omega]
     simp only [Nat.testBit]
     rw [Nat.and_comm, Nat.one_and_eq_mod_two]
-    -- Goal: decide (x % 2 = 1) = (x % 2 != 0)
-    cases h : _ % 2 with
-    | zero => simp
-    | succ n =>
-      have : n = 0 := by omega
-      subst this; simp
+    exact decide_mod2_eq_bne _
 
 /-! ## writeHuffCode correspondence -/
 
@@ -275,7 +292,7 @@ private theorem writeHuffCode_go_spec (bw : BitWriter) (n : Nat) (code : UInt16)
     (writeHuffCode.go bw n code).wf := by
   induction n generalizing bw with
   | zero =>
-    simp [writeHuffCode.go, Huffman.Spec.natToBits, hwf]
+    simp only [writeHuffCode.go, Huffman.Spec.natToBits, List.append_nil, hwf, and_self]
   | succ k ih =>
     simp only [writeHuffCode.go, Huffman.Spec.natToBits]
     obtain ⟨hbit_le, hbit_val⟩ := uint16_extract_bit code k (by omega)
@@ -328,7 +345,8 @@ private theorem writeBits_go_spec (bw : BitWriter) (i n : Nat) (val : UInt32)
     intro heq
     have hieq : i = n := by omega
     subst hieq
-    simp [writeBits.go, Deflate.Spec.writeBitsLSB, hwf]
+    simp only [writeBits.go, ge_iff_le, Std.le_refl, ↓reduceIte, Deflate.Spec.writeBitsLSB,
+      List.append_nil, hwf, and_self]
   | succ m ihm =>
     intro heq
     have hin : i < n := by omega
@@ -342,11 +360,7 @@ private theorem writeBits_go_spec (bw : BitWriter) (i n : Nat) (val : UInt32)
     have hbc_lt := hwf.1
     have hhead : (val.toNat / 2 ^ i % 2 == 1) = val.toNat.testBit i := by
       simp only [Nat.testBit, Nat.shiftRight_eq_div_pow, Nat.one_and_eq_mod_two]
-      cases h : val.toNat / 2 ^ i % 2 with
-      | zero => simp
-      | succ j =>
-        have : j = 0 := by omega
-        subst this; simp
+      exact beq_mod2_eq_bne _
     have htail : val.toNat / 2 ^ i / 2 = val.toNat / 2 ^ (i + 1) := by
       rw [Nat.pow_succ, Nat.div_div_eq_div_mul]
     by_cases hflush_nat : bw.bitCount.toNat + 1 ≥ 8 <;> {
@@ -363,7 +377,7 @@ theorem writeBits_toBits (bw : BitWriter) (n : Nat) (val : UInt32)
     (bw.writeBits n val).toBits =
     bw.toBits ++ Deflate.Spec.writeBitsLSB n val.toNat := by
   have h := (writeBits_go_spec bw 0 n val hwf (by omega) hn).1
-  simp at h; exact h
+  simp only [Nat.sub_zero, Nat.pow_zero, Nat.div_one] at h; exact h
 
 theorem writeBits_wf (bw : BitWriter) (n : Nat) (val : UInt32)
     (hwf : bw.wf) (hn : n ≤ 25) :
@@ -381,7 +395,8 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
   · -- bitCount = 0: no flush needed
     have hcond : ¬(bw.bitCount > 0) := by show ¬(0 < bw.bitCount.toNat); omega
     rw [if_neg hcond]
-    simp only [hbc0, toBits, Deflate.Spec.bytesToBits]; simp
+    simp only [hbc0, toBits, Deflate.Spec.bytesToBits, List.range_zero, List.map_nil,
+      List.append_nil, Nat.zero_mod, Nat.sub_zero, Nat.mod_self, List.replicate_zero]
   · -- bitCount > 0: flush pushes bitBuf
     have hcond : bw.bitCount > 0 := by show 0 < bw.bitCount.toNat; omega
     rw [if_pos hcond]
@@ -391,7 +406,6 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
     congr 1
     rw [byteToBits_split bw.bitBuf bw.bitCount.toNat (by omega) hbuf_lt]
     congr 1
-    have hbc_pos : bw.bitCount.toNat > 0 := by omega
     rw [Nat.mod_eq_of_lt hbc_lt,
         Nat.mod_eq_of_lt (show 8 - bw.bitCount.toNat < 8 from by omega)]
 

@@ -9,17 +9,28 @@ allowed-tools: Read, Bash, Grep, Glob
 Mechanical cleanup steps for Lean proof quality reviews. Follow this
 checklist in order for each file.
 
+## Phase 0: Verify Issue Accuracy
+
+**Before starting work**, verify the issue's bare simp counts against
+the actual master state. Issue descriptions go stale when other PRs
+clean the same or overlapping files.
+
+```bash
+# Accurate bare simp grep (excludes simp only, simp_all, simp?, simp_wf, etc.)
+grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+```
+
+If the actual count differs significantly from the issue (e.g., issue
+says 61 but master has 0), the file was already cleaned by another PR.
+Use `coordination skip` and move on — don't waste time investigating.
+
 ## Phase 1: Metrics (Before)
 
 Record starting metrics before making any changes:
 
 ```bash
-# Bare simp count (the primary quality metric)
-grep -c 'simp\b' File.lean          # total simp occurrences
-grep -c 'simp only' File.lean       # simp only occurrences
-grep -c 'simp \[' File.lean         # simp [...] (bare with args)
-grep -c 'simp at' File.lean         # simp at h (bare on hyps)
-# Difference = bare simp count
+# Bare simp count (the primary quality metric — use the accurate grep from Phase 0)
+grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
 ```
 
 Expected reduction targets by file size:
@@ -54,9 +65,15 @@ simp only [hb] at h
 simp only [ha, hb] at h
 ```
 
-**Caveat**: Only merge when both target the same location (`at h` or
-`at ⊢`). Don't merge `simp only [ha] at h` with `simp only [hb]`
-(different targets).
+**Caveats**:
+- Only merge when both target the same location (`at h` or `at ⊢`).
+  Don't merge `simp only [ha] at h` with `simp only [hb]` (different targets).
+- Don't merge when the first call unfolds definitions that create new
+  redexes for the second call's lemmas. `simp only` applies all lemmas
+  simultaneously, not sequentially — so merging two calls that depend on
+  ordering (e.g. first unfolds `UInt32` terms, second normalizes
+  `List.append_assoc`) will change the simplification result and break
+  downstream proofs. Always build after attempting a merge.
 
 ### 2c. Remove dead `have` bindings
 
@@ -85,21 +102,51 @@ obtain ⟨rfl, rfl⟩ := h
 
 ## Phase 3: Bare `simp` Decision Tree
 
-For each bare `simp` (without `only`), follow this decision tree:
+For each bare `simp` (without `only`), follow this decision tree.
+
+**Batch discovery, sequential application.** For files with many bare
+simps (10+), the most efficient workflow is:
+
+1. **Batch discovery**: Convert ALL bare `simp` calls to `simp?`
+   simultaneously, then build ONCE. This produces all `Try this:`
+   suggestions in a single build pass — vastly more efficient than
+   converting one at a time.
+2. **Collect suggestions**: Read all info messages and note the
+   suggested `simp only [...]` replacements.
+3. **Apply in small batches**: Replace 3-5 at a time, building after
+   each batch to verify. Some suggestions may not work in combination
+   (simp? suggestions are computed independently).
+
+This batch-then-apply approach was discovered in the bare simp campaign
+and typically reduces a 20-bare-simp file in 2-3 build cycles instead
+of 20.
+
+**Important**: `simp [X]` is NOT equivalent to `simp only [X]` — bare
+`simp` uses the entire `@[simp]` lemma database plus `X`, while
+`simp only [X]` uses ONLY `X`. Never do a mechanical search-and-replace.
 
 ### Step 1: Try `simp?`
 
-Run `simp?` in place of `simp` to get the minimal lemma set. If it
-produces a `simp only [...]` that works, use it.
+Replace `simp` (or `simp [X]`) with `simp?` (or `simp? [X]`), build,
+and read the `Try this:` info message to get the minimal lemma set.
+If it produces a `simp only [...]` that works, use it.
 
-### Step 2: Try `dsimp only`
+### Step 2: Try `simp only []` or `dsimp only`
 
-If `simp?` fails or produces an unwieldy list, try `dsimp only` (with
-no arguments). This handles:
+If `simp?` fails or produces an unwieldy list:
+
+**`simp only []`** (empty argument list) handles:
+- Match/iota reduction when scrutinee is a constructor
+- After `split`/`match` chains where the goal has unreduced matches
+- Replaces `simp only [htok]` when linter flags the argument as unused
+
+**`dsimp only`** handles:
 - `letFun` reduction
-- Match/constructor iota reduction
 - Beta reduction
 - `bind`/`Option.bind` reduction (when scrutinee is known)
+
+Try `simp only []` first for match reduction; use `dsimp only` for
+definitional reductions like `letFun` and monadic bind.
 
 ### Step 3: Try a targeted replacement
 
@@ -109,11 +156,28 @@ Based on what the `simp` is doing:
 |---------|-------------|
 | `simp at h` closing `error = ok` | `exact nomatch h` |
 | `simp at h` closing `none = some` | `exact nomatch h` |
-| `simp [hx]` then contradiction | `simp only [hx] at h; exact nomatch h` |
+| `simp [hx]` then contradiction | `exact nomatch (hx ▸ h)` (one step) or `simp only [hx] at h; exact nomatch h` (two steps) |
+| `\| none => simp [hvar] at hspec` (Option case) | `\| none => exact nomatch (hvar ▸ hspec)` |
+| `\| error e => simp [hvar] at h` (Except case) | `\| error e => exact nomatch (hvar ▸ h)` |
+| `simp at hmem` closing `x ∈ []` | `exact nomatch hmem` (NOT `absurd hmem (List.not_mem_nil _)` — `List.not_mem_nil` has type `False` not `¬(x ∈ [])`) |
+| `simp at h` closing `[].length ≥ 2` | `simp only [List.length_nil] at h; omega` (`omega` alone can't reduce `[].length`; same for `[_].length`, use `List.length_cons`) |
 | `simp [bind, Option.bind]` | `dsimp only [bind, Option.bind]` |
 | `simp [hx, bind, Option.bind]` | `rw [hx]; dsimp only [bind, Option.bind]` |
 | `simp only []` | Keep — match iota reduction |
 | `simp [Prod.mk.injEq]` | `simp only [Except.ok.injEq, Prod.mk.injEq]` |
+| `simp; omega` (array size preservation) | `rw [Array.size_set!]; omega` or `rw [Array.size_replicate]; omega` |
+| `simp at h` (negated comparison) | `simp only [ge_iff_le, Nat.not_le] at h` or `simp only [gt_iff_lt, Nat.not_lt] at h` |
+| `simp_all` (beq→eq + close) | `simp only [beq_iff_eq] at h; exact h` |
+| `by simp` (struct field = literal) | `by show <literal_eq>; omega` or `Or.inl rfl` or `rfl` |
+| `simp [Spec.readBitsLSB, ...]` (Option do-notation) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
+| `simp [hpos0, hpos1]` (getElem!/getElem) | `simp only [getElem!_pos, hpos0, hpos1, ...]` |
+| `simp` after `split` on Bool `if` | `split <;> rfl` |
+| `simp [Nat.toUInt32]; omega` | `simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd, Nat.mod_mod_of_dvd, ...]; omega` |
+| `simp (config := { decide := true }) only [...]` | Keep — needed for concrete evaluation + targeted lemma application (e.g. BFINAL flags) |
+| `have : T.size = N := by decide` then `omega` | Keep — table size computation via kernel |
+| `simp [Spec.readBitsLSB, ...]` (Option do-notation) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
+| `simp [hpos]` with `getElem!` | `simp only [getElem!_pos, hpos, ...]` — bridges `data[i]!` to `data[i]` |
+| `simp at h` (double negation) | `exact Decidable.of_not_not h` or `simp only [not_not] at h` |
 
 ### Step 4: Accept bare simp with comment
 

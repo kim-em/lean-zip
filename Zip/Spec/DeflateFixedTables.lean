@@ -331,12 +331,13 @@ protected theorem encodeSymbols_cons_some
       bits = symBits ++ restBits := by
   simp only [Deflate.Spec.encodeSymbols] at h
   cases hencsym : Deflate.Spec.encodeLitLen litLengths distLengths s with
-  | none => simp [hencsym] at h
+  | none => rw [hencsym] at h; exact nomatch h
   | some symBits =>
     cases hencrest : Deflate.Spec.encodeSymbols litLengths distLengths rest with
-    | none => simp [hencsym, hencrest] at h
+    | none => rw [hencsym, hencrest] at h; exact nomatch h
     | some restBits =>
-      simp [hencsym, hencrest] at h
+      simp only [hencsym, hencrest, Option.pure_def, Option.bind_eq_bind, Option.bind_some,
+        Option.some.injEq] at h
       exact ⟨symBits, restBits, rfl, rfl, h.symm⟩
 
 /-! ## Extra bits bounds -/

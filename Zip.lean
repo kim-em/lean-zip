@@ -41,6 +41,11 @@ import Zip.Native.BitWriter
 import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Native.ZstdFrame
+import Zip.Native.ZstdHuffman
+import Zip.Native.ZstdSequence
+import Zip.Native.XxHash
+import Zip.Native.Fse
+import Zip.Spec.Fse
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.DeflateFixedTables
 import Zip.Spec.EmitTokensCorrect
@@ -57,3 +62,7 @@ import Zip.Spec.InflateLoopBounds
 import Zip.Spec.InflateRawSuffix
 import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
+import Zip.Spec.Zstd
+import Zip.Spec.ZstdHuffman
+import Zip.Spec.XxHash
+import Zip.Spec.ZstdSequence
