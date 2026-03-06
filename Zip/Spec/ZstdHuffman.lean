@@ -209,7 +209,7 @@ private theorem findMaxBitsWF_ge_one (ws : Nat) (hws : ws ≥ 1) :
   · -- 1 < ws: recurse with maxBits=1, power=2
     exact Nat.le_trans (by omega : 1 ≤ 1) (findMaxBitsWF_ge ws 1 2 (by omega))
   · -- ¬(1 < ws), so ws ≤ 1, combined with ws ≥ 1 means ws = 1
-    split <;> simp_all [beq_iff_eq] <;> omega
+    split <;> simp only [beq_iff_eq] at * <;> omega
 
 open Zip.Native in
 /-- When `weightsToMaxBits` succeeds, the result is at least 1.  The weight sum
@@ -229,7 +229,7 @@ private theorem weightsToMaxBits_ge_one (weights : Array UInt8) (m : Nat)
       dsimp only [pure, Pure.pure, Except.pure] at h
       simp only [Except.ok.injEq] at h
       subst h
-      exact findMaxBitsWF_ge_one ws (by simp_all [beq_iff_eq]; omega)
+      exact findMaxBitsWF_ge_one ws (by simp only [beq_iff_eq] at *; omega)
 
 open Zip.Native in
 /-- The WF loop returns a value `m` such that `ws ≤ 2^m`, given the loop
@@ -429,7 +429,7 @@ theorem weightsToMaxBits_valid (weights : Array UInt8)
         rw [forIn_pure_yield_eq_foldl] at heq_forIn
         exact (Except.ok.inj heq_forIn).symm
       rw [← hws]
-      exact ⟨by simp_all [beq_iff_eq]; omega,
+      exact ⟨by simp only [beq_iff_eq] at *; omega,
              findMaxBitsWF_bound ws 0 1 (by omega) rfl⟩
 
 /-- The `weightSum` function agrees with the inline computation in
