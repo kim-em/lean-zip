@@ -522,4 +522,94 @@ theorem weightSum_weight2 : weightSum #[2] = 2 := by decide
     `weightSum = 2 + 1 = 3`, `2^2 = 4`, gap = 1 which is a power of 2. -/
 theorem kraft_mixed : KraftComplete #[2, 1] 2 := by decide
 
+/-! ## parseLiteralsSection structural properties (raw/RLE) -/
+
+open Zip.Native in
+/-- For raw or RLE literals (types 0-1), the returned position is strictly
+    greater than the input position, and the returned Huffman table is `none`. -/
+private theorem parseLiteralsSection_simple_spec (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat ≤ 1)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    pos' > pos ∧ huffTable = none := by
+  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · -- data.size ≥ pos + 1, byte0 = data[pos]!
+    -- litType > 3 guard
+    split at h
+    · exact nomatch h
+    · -- litType ≤ 3; compressed/treeless check
+      split at h
+      · -- litType == 2 || litType == 3: contradicts hlit
+        rename_i hle3 hcomp
+        simp only [beq_iff_eq, Bool.or_eq_true] at hcomp
+        have : (data[pos]! &&& 3).toNat = 2 ∨ (data[pos]! &&& 3).toNat = 3 := hcomp
+        omega
+      · -- Raw/RLE path: parse header
+        -- sizeFormat dispatch
+        split at h
+        · -- sizeFormat == 0 || sizeFormat == 2: headerBytes = 1
+          split at h
+          · -- litType == 0: raw
+            split at h
+            · exact nomatch h
+            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              exact ⟨by omega, h.2.2.symm⟩
+          · -- litType == 1: RLE
+            split at h
+            · exact nomatch h
+            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              exact ⟨by omega, h.2.2.symm⟩
+        · split at h
+          · -- sizeFormat == 1: headerBytes = 2
+            split at h
+            · exact nomatch h
+            · split at h
+              · -- litType == 0: raw
+                split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  exact ⟨by omega, h.2.2.symm⟩
+              · -- litType == 1: RLE
+                split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  exact ⟨by omega, h.2.2.symm⟩
+          · -- sizeFormat == 3: headerBytes = 3
+            split at h
+            · exact nomatch h
+            · split at h
+              · -- litType == 0: raw
+                split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  exact ⟨by omega, h.2.2.symm⟩
+              · -- litType == 1: RLE
+                split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  exact ⟨by omega, h.2.2.symm⟩
+
+open Zip.Native in
+/-- For raw or RLE literals (types 0-1), the returned position advances. -/
+theorem parseLiteralsSection_pos_gt_simple (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat ≤ 1)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    pos' > pos :=
+  (parseLiteralsSection_simple_spec data pos prevHuffTree literals pos' huffTable hlit h).1
+
+open Zip.Native in
+/-- For raw or RLE literals (types 0-1), no Huffman table is returned. -/
+theorem parseLiteralsSection_huffTable_none_simple (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat ≤ 1)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    huffTable = none :=
+  (parseLiteralsSection_simple_spec data pos prevHuffTree literals pos' huffTable hlit h).2
+
 end Zstd.Spec.Huffman
