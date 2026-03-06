@@ -194,14 +194,16 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
 /-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
     Loops through block headers, dispatches on block type, and accumulates output.
     Threads the Huffman table from compressed literals blocks to support treeless
-    literals (litType 3) in subsequent blocks.
-    Returns the decompressed content and position after the last block.
-    Compressed blocks with sequences are not yet fully wired (returns error). -/
+    literals (litType 3) in subsequent blocks. Threads FSE tables for Repeat mode
+    and offset history between compressed blocks.
+    Returns the decompressed content and position after the last block. -/
 def decompressBlocks (data : ByteArray) (pos : Nat) (windowSize : UInt64 := 0) :
     Except String (ByteArray × Nat) := do
   let mut off := pos
   let mut output := ByteArray.empty
   let mut prevHuffTree : Option ZstdHuffmanTable := none
+  let mut prevFseTables : PrevFseTables := {}
+  let mut offsetHistory : Array Nat := #[1, 4, 8]
   let mut done := false
   while !done do
     let (hdr, afterHdr) ← parseBlockHeader data off
@@ -225,13 +227,28 @@ def decompressBlocks (data : ByteArray) (pos : Nat) (windowSize : UInt64 := 0) :
       let (literals, afterLiterals, huffTree) ← parseLiteralsSection data off prevHuffTree
       if let some ht := huffTree then
         prevHuffTree := some ht
-      let (numSeq, _modes, _afterSeqHeader) ← parseSequencesHeader data afterLiterals
+      let (numSeq, modes, afterSeqHeader) ← parseSequencesHeader data afterLiterals
       if numSeq == 0 then
         -- No sequences: block is pure literals
         output := output ++ literals
         off := blockEnd
       else
-        throw s!"Zstd: sequence decoding not yet implemented ({numSeq} sequences)"
+        -- Resolve FSE tables (supports Repeat mode via previous block's tables)
+        let (llTable, ofTable, mlTable, afterTables) ←
+          resolveSequenceFseTables modes data afterSeqHeader prevFseTables
+        prevFseTables := { litLen := some llTable, offset := some ofTable, matchLen := some mlTable }
+        -- Decode sequences from backward bitstream
+        let bbr ← BackwardBitReader.init data afterTables blockEnd
+        let sequences ← decodeSequences llTable ofTable mlTable bbr numSeq
+        -- Execute sequences: copy literals + back-references
+        let windowPrefix := if windowSize > 0 && output.size > windowSize.toNat
+          then output.extract (output.size - windowSize.toNat) output.size
+          else output
+        let (blockOutput, newHistory) ← executeSequences sequences literals
+          windowPrefix offsetHistory windowSize.toNat
+        offsetHistory := newHistory
+        output := output ++ blockOutput
+        off := blockEnd
     | .reserved =>
       throw "Zstd: reserved block type"
     if hdr.lastBlock then

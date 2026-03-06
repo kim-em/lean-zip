@@ -353,10 +353,11 @@ def buildRleFseTable (symbol : UInt8) : FseTable :=
     - Mode 0 (Predefined): build from predefined distribution and accuracy log.
     - Mode 1 (RLE): read 1 byte, build single-symbol table.
     - Mode 2 (FSE_Compressed): decode distribution from bitstream, build table.
-    - Mode 3 (Repeat): not yet supported (requires cross-block state). -/
+    - Mode 3 (Repeat): reuse previous block's table (requires `prevTable`). -/
 def resolveSingleFseTable (mode : SequenceCompressionMode) (maxSymbols : Nat)
     (maxAccLog : Nat) (data : ByteArray) (pos : Nat)
-    (predefinedDist : Array Int32) (predefinedAccLog : Nat) :
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable := none) :
     Except String (FseTable × Nat) := do
   match mode with
   | .predefined =>
@@ -375,21 +376,31 @@ def resolveSingleFseTable (mode : SequenceCompressionMode) (maxSymbols : Nat)
     let afterPos := if br'.bitOff == 0 then br'.pos else br'.pos + 1
     return (table, afterPos)
   | .repeat =>
-    throw "Zstd: Repeat mode (3) not yet supported (requires cross-block state)"
+    match prevTable with
+    | some table => return (table, pos)
+    | none => throw "Zstd: Repeat mode (3) used but no previous FSE table available"
+
+/-- Previous block's FSE tables for Repeat mode (mode 3). -/
+structure PrevFseTables where
+  litLen : Option FseTable := none
+  offset : Option FseTable := none
+  matchLen : Option FseTable := none
 
 /-- Resolve all three FSE tables for sequence decoding from their compression modes
     (RFC 8878 §3.1.1.3.2.1). Tables are resolved in order: literal lengths, offsets,
     match lengths. Each may read data from `data` starting at `pos`.
+    Accepts optional previous tables for Repeat mode support.
     Returns (litLenTable, offsetTable, matchLenTable, posAfterTables). -/
 def resolveSequenceFseTables (modes : SequenceCompressionModes)
-    (data : ByteArray) (pos : Nat) :
+    (data : ByteArray) (pos : Nat)
+    (prev : PrevFseTables := {}) :
     Except String (FseTable × FseTable × FseTable × Nat) := do
   let (litLenTable, pos) ← resolveSingleFseTable modes.litLenMode
-    36 9 data pos predefinedLitLenDistribution 6
+    36 9 data pos predefinedLitLenDistribution 6 prev.litLen
   let (offsetTable, pos) ← resolveSingleFseTable modes.offsetMode
-    32 8 data pos predefinedOffsetDistribution 5
+    32 8 data pos predefinedOffsetDistribution 5 prev.offset
   let (matchLenTable, pos) ← resolveSingleFseTable modes.matchLenMode
-    53 9 data pos predefinedMatchLenDistribution 6
+    53 9 data pos predefinedMatchLenDistribution 6 prev.matchLen
   return (litLenTable, offsetTable, matchLenTable, pos)
 
 end Zip.Native
