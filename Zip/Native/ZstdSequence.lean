@@ -170,26 +170,29 @@ def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
   loop buf 0
 
 /-- Process sequences recursively. This is the inner loop of `executeSequences`:
-    for each sequence, copy literal bytes then match bytes, threading state through. -/
+    for each sequence, copy literal bytes then match bytes, threading state through.
+    Written in applicative style (no `do`) for proof-friendliness. -/
 def executeSequences.loop (seqs : List ZstdSequence) (literals : ByteArray)
     (output : ByteArray) (history : Array Nat) (litPos : Nat) (windowSize : Nat) :
     Except String (ByteArray × Array Nat × Nat) :=
   match seqs with
   | [] => .ok (output, history, litPos)
-  | seq :: rest => do
+  | seq :: rest =>
     if litPos + seq.literalLength > literals.size then
-      throw s!"Zstd: sequence requires {litPos + seq.literalLength} literal bytes but only {literals.size} available"
-    let output := copyBytes output literals litPos seq.literalLength
-    let litPos := litPos + seq.literalLength
-    let (offset, history') := resolveOffset seq.offset history seq.literalLength
-    if offset == 0 then
-      throw "Zstd: resolved offset is 0"
-    if offset > output.size then
-      throw s!"Zstd: match offset {offset} exceeds output size {output.size}"
-    if windowSize > 0 && offset > windowSize then
-      throw s!"Zstd: sequence offset {offset} exceeds window size {windowSize}"
-    let output := copyMatch output offset seq.matchLength
-    executeSequences.loop rest literals output history' litPos windowSize
+      .error s!"Zstd: sequence requires {litPos + seq.literalLength} literal bytes but only {literals.size} available"
+    else
+      let output := copyBytes output literals litPos seq.literalLength
+      let litPos := litPos + seq.literalLength
+      let (offset, history') := resolveOffset seq.offset history seq.literalLength
+      if offset == 0 then
+        .error "Zstd: resolved offset is 0"
+      else if offset > output.size then
+        .error s!"Zstd: match offset {offset} exceeds output size {output.size}"
+      else if windowSize > 0 && offset > windowSize then
+        .error s!"Zstd: sequence offset {offset} exceeds window size {windowSize}"
+      else
+        let output := copyMatch output offset seq.matchLength
+        executeSequences.loop rest literals output history' litPos windowSize
 
 /-- Execute decoded Zstd sequences against a literals buffer to produce decompressed output
     (RFC 8878 §3.1.1.4). For each sequence: copies `literalLength` bytes from literals, then
