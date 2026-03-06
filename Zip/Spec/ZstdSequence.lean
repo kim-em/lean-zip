@@ -300,6 +300,56 @@ theorem resolveOffset_shifted3_val (history : Array Nat)
     ∧ (resolveOffset 3 history 0).2 = #[history[0]! - 1, history[1]!, history[2]!] := by
   simp [resolveOffset]
 
+/-- When `rawOffset > 3` and input has `ValidOffsetHistory`, the output history
+    also satisfies `ValidOffsetHistory`. The new history is
+    `#[rawOffset - 3, history[0]!, history[1]!]`, all positive. -/
+theorem resolveOffset_history_valid_large (rawOffset litLen : Nat)
+    (history : Array Nat) (hh : ValidOffsetHistory history)
+    (hr : rawOffset > 3) :
+    ValidOffsetHistory (resolveOffset rawOffset history litLen).2 := by
+  obtain ⟨_, h0pos, h1pos, _⟩ := hh
+  simp only [resolveOffset, hr, ↓reduceIte, ValidOffsetHistory]
+  refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+
+/-- For repeat codes (rawOffset ∈ {1,2,3}), when input has `ValidOffsetHistory`
+    and for the shifted rawOffset=3 case `history[0]! ≥ 2`, the output history
+    satisfies `ValidOffsetHistory`. Covers both normal (litLen > 0) and shifted
+    (litLen = 0) repeat offset modes per RFC 8878 §3.1.1.5. -/
+theorem resolveOffset_history_valid_repeat (rawOffset litLen : Nat)
+    (history : Array Nat) (hh : ValidOffsetHistory history)
+    (hr : rawOffset > 0) (hr' : rawOffset ≤ 3)
+    (hshift : litLen = 0 ∧ rawOffset = 3 → history[0]! ≥ 2) :
+    ValidOffsetHistory (resolveOffset rawOffset history litLen).2 := by
+  obtain ⟨hsz, h0pos, h1pos, h2pos⟩ := hh
+  rcases rawOffset with _ | _ | _ | _ | n
+  · omega  -- rawOffset = 0
+  · -- rawOffset = 1
+    unfold resolveOffset
+    simp only [show ¬(1 > 3) from by omega, ↓reduceIte]
+    split
+    · exact ⟨hsz, h0pos, h1pos, h2pos⟩  -- litLen > 0: history unchanged
+    · -- litLen = 0: #[history[1]!, history[0]!, history[2]!]
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+  · -- rawOffset = 2
+    unfold resolveOffset
+    simp only [show ¬(2 > 3) from by omega, ↓reduceIte]
+    split
+    · -- litLen > 0: #[history[1]!, history[0]!, history[2]!]
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+    · -- litLen = 0: #[history[2]!, history[0]!, history[1]!]
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+  · -- rawOffset = 3
+    unfold resolveOffset
+    simp only [show ¬(3 > 3) from by omega, ↓reduceIte]
+    split
+    · -- litLen > 0: #[history[2]!, history[0]!, history[1]!]
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+    · -- litLen = 0: #[history[0]! - 1, history[1]!, history[2]!]
+      rename_i hlit
+      have h02 := hshift ⟨by omega, rfl⟩
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+  · omega  -- rawOffset ≥ 4
+
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
 
