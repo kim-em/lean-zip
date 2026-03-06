@@ -175,7 +175,8 @@ private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
     for the next block. -/
 def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
     (windowPrefix : ByteArray := ByteArray.empty)
-    (offsetHistory : Array Nat := #[1, 4, 8]) :
+    (offsetHistory : Array Nat := #[1, 4, 8])
+    (windowSize : Nat := 0) :
     Except String (ByteArray × Array Nat) := do
   let mut output := windowPrefix
   let mut history := offsetHistory
@@ -195,6 +196,8 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
       throw "Zstd: resolved offset is 0"
     if offset > output.size then
       throw s!"Zstd: match offset {offset} exceeds output size {output.size}"
+    if windowSize > 0 && offset > windowSize then
+      throw s!"Zstd: sequence offset {offset} exceeds window size {windowSize}"
     -- Copy matchLength bytes from output (with overlap semantics)
     output := copyMatch output offset seq.matchLength
   -- Copy any remaining literals after the last sequence
