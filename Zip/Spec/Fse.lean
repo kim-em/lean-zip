@@ -1,4 +1,5 @@
 import Zip.Native.Fse
+import Zip.Spec.BitReaderInvariant
 
 /-!
 # FSE Distribution and Table Validity Predicates
@@ -500,5 +501,191 @@ theorem buildPredefinedFseTables_accuracyLogs :
   exact ⟨buildFseTable_accuracyLog_eq _ _ _ hll,
          buildFseTable_accuracyLog_eq _ _ _ hml,
          buildFseTable_accuracyLog_eq _ _ _ hof⟩
+
+/-! ## BitPos advancement for `decodeFseDistribution`
+
+Proves that `decodeFseDistribution` advances `BitReader.bitPos` by at least 4,
+corresponding to the 4 bits read for the accuracy log. This enables proving
+that the `fseCompressed` mode of `resolveSingleFseTable` strictly advances
+the byte position. -/
+
+-- Helper: readBit always produces bitOff < 8
+-- (The equivalent in BitReaderInvariant is private, so we reproduce it here.)
+open Zip.Native in
+private theorem readBit_bitOff_lt' (br br' : BitReader) (bit : UInt32)
+    (h : br.readBit = .ok (bit, br')) :
+    br'.bitOff < 8 := by
+  simp only [BitReader.readBit] at h
+  split at h
+  · exact nomatch h
+  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+
+-- readBits.go preserves bitOff < 8
+open Zip.Native in
+private theorem readBits_go_bitOff_lt' (br br' : BitReader)
+    (acc : UInt32) (shift n : Nat) (val : UInt32)
+    (h : BitReader.readBits.go br acc shift n = .ok (val, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitOff < 8 := by
+  induction n generalizing br acc shift with
+  | zero =>
+    simp only [BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := h; exact hbo
+  | succ n ih =>
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => simp only [hrb] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrb] at h
+      exact ih br₁ _ _ h (readBit_bitOff_lt' br br₁ bit hrb)
+
+-- readBits preserves bitOff < 8
+open Zip.Native in
+private theorem readBits_bitOff_lt' (br br' : BitReader) (n : Nat)
+    (val : UInt32) (h : br.readBits n = .ok (val, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitOff < 8 :=
+  readBits_go_bitOff_lt' br br' 0 0 n val h hbo
+
+open Zip.Native in
+/-- `readProbValue` advances or preserves `bitPos` and maintains `bitOff < 8`. -/
+private theorem readProbValue_bitPos_ge
+    {br br' : BitReader} {remaining val : Nat}
+    (h : readProbValue br remaining = .ok (val, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos ≥ br.bitPos ∧ br'.bitOff < 8 := by
+  unfold readProbValue at h
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  cases hrb : br.readBits (Nat.log2 (remaining + 1) + 1 - 1) with
+  | error e => rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+  | ok val₁ =>
+    rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h
+    have hbp := readBits_bitPos_eq br val₁.2 _ val₁.1 hrb hbo
+    have hbo₁ := readBits_bitOff_lt' br val₁.2 _ val₁.1 hrb hbo
+    split at h
+    · -- rawBits < lowThreshold
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, rfl⟩ := h
+      exact ⟨by rw [hbp]; omega, hbo₁⟩
+    · -- extra bit needed
+      cases hrb₂ : val₁.2.readBits 1 with
+      | error e => rw [hrb₂] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+      | ok val₂ =>
+        rw [hrb₂] at h; dsimp only [Bind.bind, Except.bind] at h
+        have hbp₂ := readBits_bitPos_eq val₁.2 val₂.2 1 val₂.1 hrb₂ hbo₁
+        have hbo₂ := readBits_bitOff_lt' val₁.2 val₂.2 1 val₂.1 hrb₂ hbo₁
+        split at h <;>
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+          obtain ⟨_, rfl⟩ := h <;>
+          exact ⟨by rw [hbp₂, hbp]; omega, hbo₂⟩
+
+open Zip.Native in
+/-- `decodeZeroRepeats` advances or preserves `bitPos` and maintains `bitOff < 8`. -/
+private theorem decodeZeroRepeats_bitPos_ge
+    {br : BitReader} {probs : Array Int32} {sym ms fuel : Nat}
+    {probs' : Array Int32} {sym' : Nat} {br' : BitReader}
+    (h : decodeZeroRepeats br probs sym ms fuel = .ok (probs', sym', br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos ≥ br.bitPos ∧ br'.bitOff < 8 := by
+  induction fuel generalizing br probs sym with
+  | zero => simp only [decodeZeroRepeats, reduceCtorEq] at h
+  | succ fuel ih =>
+    unfold decodeZeroRepeats at h
+    dsimp only [Bind.bind, Except.bind] at h
+    cases hrb : br.readBits 2 with
+    | error e => rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+    | ok val =>
+      rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h
+      have hbp := readBits_bitPos_eq br val.2 2 val.1 hrb hbo
+      have hbo₁ := readBits_bitOff_lt' br val.2 2 val.1 hrb hbo
+      split at h
+      · -- repeatCount == 3, recursive call
+        have ⟨hge, hbo'⟩ := ih h hbo₁
+        exact ⟨by rw [hbp] at hge; omega, hbo'⟩
+      · -- repeatCount != 3, done
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨_, _, rfl⟩ := h
+        exact ⟨by rw [hbp]; omega, hbo₁⟩
+
+open Zip.Native in
+/-- `decodeFseLoop` preserves or advances `bitPos` and maintains `bitOff < 8`. -/
+private theorem decodeFseLoop_bitPos_ge
+    {br : BitReader} {rem : Nat} {probs : Array Int32}
+    {sym ms : Nat} {fuel : Nat}
+    {rem' : Nat} {probs' : Array Int32} {sym' : Nat} {br' : BitReader}
+    (h : decodeFseLoop br rem probs sym ms fuel = .ok (rem', probs', sym', br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos ≥ br.bitPos ∧ br'.bitOff < 8 := by
+  induction fuel generalizing br rem probs sym with
+  | zero => simp only [decodeFseLoop, reduceCtorEq] at h
+  | succ fuel ih =>
+    rw [decodeFseLoop.eq_2] at h
+    by_cases hcond : ¬(rem > 0 ∧ sym < ms)
+    · -- Loop exits: return unchanged state
+      rw [if_pos hcond] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, _, _, rfl⟩ := h
+      exact ⟨Nat.le_refl _, hbo⟩
+    · -- Loop continues
+      rw [if_neg hcond] at h
+      cases hrpv : readProbValue br rem with
+      | error e => simp only [hrpv, reduceCtorEq] at h
+      | ok val =>
+        simp only [hrpv] at h
+        have ⟨hge_rpv, hbo_rpv⟩ := readProbValue_bitPos_ge hrpv hbo
+        by_cases hp0 : (Int32.ofNat val.fst - 1 == 0) = true
+        · rw [if_pos hp0] at h
+          cases hzr : decodeZeroRepeats val.2 (probs.push 0) (sym + 1) ms 1000 with
+          | error e => simp only [hzr, reduceCtorEq] at h
+          | ok val₂ =>
+            simp only [hzr] at h
+            have ⟨hge_zr, hbo_zr⟩ := decodeZeroRepeats_bitPos_ge hzr hbo_rpv
+            have ⟨hge_rec, hbo_rec⟩ := ih h hbo_zr
+            exact ⟨by omega, hbo_rec⟩
+        · rw [if_neg hp0] at h
+          by_cases hp1 : (Int32.ofNat val.fst - 1 == -1) = true
+          · rw [if_pos hp1] at h
+            have ⟨hge_rec, hbo_rec⟩ := ih h hbo_rpv
+            exact ⟨by omega, hbo_rec⟩
+          · rw [if_neg hp1] at h
+            by_cases hgt : int32ToNat (Int32.ofNat val.fst - 1) > rem
+            · rw [if_pos hgt] at h; exact nomatch h
+            · rw [if_neg hgt] at h
+              have ⟨hge_rec, hbo_rec⟩ := ih h hbo_rpv
+              exact ⟨by omega, hbo_rec⟩
+
+open Zip.Native in
+/-- When `decodeFseDistribution` succeeds, the returned BitReader's `bitPos` has
+    advanced by at least 4 (from the accuracy log) and `bitOff < 8` is maintained.
+    Requires `bitOff < 8` (always satisfied when constructed with `bitOff := 0`
+    as in the `fseCompressed` mode). -/
+theorem decodeFseDistribution_bitPos_ge
+    {br : BitReader} {maxSymbols maxAccLog : Nat}
+    {probs : Array Int32} {al : Nat} {br' : BitReader}
+    (h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos ≥ br.bitPos + 4 ∧ br'.bitOff < 8 := by
+  unfold decodeFseDistribution at h
+  cases hrd : br.readBits 4 with
+  | error e => simp only [hrd, reduceCtorEq] at h
+  | ok val =>
+    simp only [hrd] at h
+    have hbp := readBits_bitPos_eq br val.2 4 val.1 hrd hbo
+    have hbo₁ := readBits_bitOff_lt' br val.2 4 val.1 hrd hbo
+    by_cases hgt : val.fst.toNat + 5 > maxAccLog
+    · rw [if_pos hgt] at h; exact nomatch h
+    · rw [if_neg hgt] at h
+      cases hdl : decodeFseLoop val.2 (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
+      | error e => simp only [hdl, reduceCtorEq] at h
+      | ok dlval =>
+        simp only [hdl] at h
+        split at h
+        · exact nomatch h
+        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, _, rfl⟩ := h
+          have ⟨hge_loop, hbo_loop⟩ := decodeFseLoop_bitPos_ge hdl hbo₁
+          exact ⟨by rw [hbp] at hge_loop; omega, hbo_loop⟩
 
 end Zstd.Spec.Fse
