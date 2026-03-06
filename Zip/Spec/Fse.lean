@@ -295,4 +295,44 @@ theorem decodeFseDistribution_sum_correct
           simp at hinv hrem
           omega
 
+/-! ## Structural properties of `buildFseTable` -/
+
+open Zip.Native (FseTable FseCell) in
+/-- If an `Except.bind` chain ending in `pure { accuracyLog := al, cells := f a }`
+    equals `.ok table`, then `table.accuracyLog = al`. -/
+private theorem accuracyLog_of_bind_pure {α : Type}
+    {x : Except String α} {f : α → Array FseCell} {al : Nat} {table : FseTable}
+    (h : (x >>= fun a => Except.ok (FseTable.mk al (f a))) = .ok table) :
+    table.accuracyLog = al := by
+  cases x with
+  | error => exact nomatch h
+  | ok v =>
+    dsimp only [bind, Except.bind] at h
+    have := (Except.ok.inj h).symm
+    subst this
+    rfl
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds, the returned accuracy log equals the input.
+    This follows from the return statement `{ accuracyLog, cells }` where
+    `accuracyLog` is the input parameter unchanged. -/
+theorem buildFseTable_accuracyLog_eq (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table) :
+    table.accuracyLog = al := by
+  simp only [buildFseTable, bind, Except.bind, pure, Except.pure] at h
+  grind
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds, the returned cells array has size `1 <<< al`.
+    This follows from `Array.replicate` setting the initial size and `Array.set!`
+    preserving size through all loop iterations.
+
+    **Proof status**: requires a `forIn` loop invariant theorem showing that
+    `Array.setIfInBounds` preserves `.size` through `Std.Legacy.Range.forIn'`
+    iterations. This is a known gap in the standard library. -/
+theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table) :
+    table.cells.size = 1 <<< al := by
+  sorry
+
 end Zstd.Spec.Fse
