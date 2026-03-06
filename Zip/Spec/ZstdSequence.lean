@@ -188,7 +188,7 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArr
     · simp at h
     · rename_i hlit
       split at h
-      simp only [letFun] at h
+      dsimp only [letFun] at h
       split at h
       · simp at h
       · split at h
@@ -351,7 +351,8 @@ theorem resolveOffset_shifted1_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 1 history 0).1 = history[1]!
     ∧ (resolveOffset 1 history 0).2 = #[history[1]!, history[0]!, history[2]!] := by
-  simp [resolveOffset]
+  simp only [resolveOffset, show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega,
+    ↓reduceIte, and_self]
 
 /-- When `rawOffset = 2`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[2]!` (third most recent) and the history
@@ -360,7 +361,8 @@ theorem resolveOffset_shifted2_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 2 history 0).1 = history[2]!
     ∧ (resolveOffset 2 history 0).2 = #[history[2]!, history[0]!, history[1]!] := by
-  simp [resolveOffset]
+  simp only [resolveOffset, show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega,
+    ↓reduceIte, and_self]
 
 /-- When `rawOffset = 3`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[0]! - 1` (most recent minus one) and the history
@@ -370,7 +372,8 @@ theorem resolveOffset_shifted3_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 3 history 0).1 = history[0]! - 1
     ∧ (resolveOffset 3 history 0).2 = #[history[0]! - 1, history[1]!, history[2]!] := by
-  simp [resolveOffset]
+  simp only [resolveOffset, show ¬(3 > 3) from by omega, show ¬(0 > 0) from by omega,
+    ↓reduceIte, and_self]
 
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
