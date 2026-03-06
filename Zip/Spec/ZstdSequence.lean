@@ -511,6 +511,62 @@ theorem resolveOffset_history_valid_repeat (rawOffset litLen : Nat)
       refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
   · omega  -- rawOffset ≥ 4
 
+/-- For shifted repeat codes 1–2 (rawOffset ∈ {1,2}, literalLength = 0),
+    `ValidOffsetHistory` implies the resolved offset is positive. Shifted code 1
+    returns `history[1]!` and shifted code 2 returns `history[2]!`, both positive
+    by `ValidOffsetHistory`. The shifted code 3 case (`history[0]! - 1`) is excluded
+    because it can be 0 when `history[0]! = 1`. -/
+theorem resolveOffset_positive_shifted12 (rawOffset : Nat) (history : Array Nat)
+    (hraw : rawOffset > 0) (hraw' : rawOffset ≤ 2)
+    (hvalid : ValidOffsetHistory history) :
+    (resolveOffset rawOffset history 0).1 > 0 := by
+  obtain ⟨_, _, h1pos, h2pos⟩ := hvalid
+  rcases rawOffset with _ | _ | _ | n
+  · omega  -- rawOffset = 0
+  · -- rawOffset = 1: shifted → history[1]!
+    simp only [resolveOffset, show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega,
+      ↓reduceIte]
+    exact h1pos
+  · -- rawOffset = 2: shifted → history[2]!
+    simp only [resolveOffset, show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega,
+      ↓reduceIte]
+    exact h2pos
+  · omega  -- rawOffset ≥ 3
+
+/-- Unified positivity theorem for `resolveOffset`: covers all cases where the
+    resolved offset is guaranteed positive. This subsumes `resolveOffset_positive_large`
+    (rawOffset > 3), `resolveOffset_positive_litLen_pos` (litLen > 0), and
+    `resolveOffset_positive_shifted12` (shifted codes 1–2).
+
+    The only case requiring an extra hypothesis is rawOffset = 3 with litLen = 0
+    (shifted mode returns `history[0]! - 1`), captured by `hshift3`. For all other
+    inputs with `rawOffset > 0` and `ValidOffsetHistory`, positivity holds unconditionally.
+
+    This is the single theorem downstream proofs (e.g. `executeSequences` loop
+    invariants) should use, avoiding case splits on litLen and rawOffset at each
+    loop iteration. -/
+theorem resolveOffset_positive_all (rawOffset : Nat) (history : Array Nat) (litLen : Nat)
+    (hraw : rawOffset > 0) (hvalid : ValidOffsetHistory history)
+    (hshift3 : litLen = 0 ∧ rawOffset = 3 → history[0]! ≥ 2) :
+    (resolveOffset rawOffset history litLen).1 > 0 := by
+  by_cases hlit : litLen > 0
+  · exact resolveOffset_positive_litLen_pos rawOffset history litLen hraw hvalid hlit
+  · -- litLen = 0
+    have hlit0 : litLen = 0 := by omega
+    subst hlit0
+    by_cases hle : rawOffset ≤ 2
+    · exact resolveOffset_positive_shifted12 rawOffset history hraw hle hvalid
+    · by_cases heq3 : rawOffset = 3
+      · -- rawOffset = 3, litLen = 0: resolved offset = history[0]! - 1
+        have h02 := hshift3 ⟨rfl, heq3⟩
+        rw [heq3]
+        have := (resolveOffset_shifted3_val history hvalid.1).1
+        rw [this]
+        omega
+      · -- rawOffset > 3
+        have : rawOffset > 3 := by omega
+        exact resolveOffset_positive_large rawOffset history 0 this
+
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
 
