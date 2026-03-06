@@ -365,6 +365,33 @@ The key insight: `obtain ⟨rfl, rfl⟩` substitutes the struct into the goal,
 replacing `hdr.field2` with the concrete constructor (e.g., `.raw`). Only
 then can `nomatch` (or `decide`) discriminate the constructors.
 
+## `eq_of_beq` for BEq-to-Eq Conversion
+
+When a monadic function uses `bne` or `==` for guards (e.g.,
+`if magic != expected then throw ...`), the negative branch gives
+`¬(a != b) = true` or `¬(a == b) = true`. To extract `a = b`:
+
+```lean
+-- After: by_cases hmagic : (magic != expected) = true
+-- Negative branch gives: hmagic : ¬(magic != expected) = true
+-- First derive the BEq equality:
+have heq : (magic == expected) = true := by
+  cases h : (magic == expected) <;> simp_all
+-- Then convert to propositional equality:
+exact eq_of_beq heq
+```
+
+**`eq_of_beq`** works for any type with a `LawfulBEq` instance (including
+`UInt32`, `UInt8`, `String`, etc.). It converts `(a == b) = true` to `a = b`.
+
+**Common context**: After `by_cases` on a `bne` guard, you need to derive
+the positive `==` form before `eq_of_beq` can be applied. The
+`cases h : (a == b) <;> simp_all` idiom handles the Boolean case split.
+
+**Anti-pattern**: Don't use `simp [bne, BEq.beq]` to try to normalize
+`bne` — it creates large intermediate terms on big hypotheses. Use the
+targeted `cases` + `eq_of_beq` pattern instead.
+
 ## Option.bind Chain Handling: `cases` + `dsimp` vs Bare `simp`
 
 When a hypothesis or goal has nested `Option.bind` from do-notation,
@@ -406,6 +433,26 @@ split at h  -- splits the if
 ```
 
 This was independently rediscovered in 3+ sessions before being codified.
+
+## When to Use `split at h` vs `by_cases`
+
+**Choose based on the function size** after unfolding:
+
+| Function size | Recommended | Why |
+|---------------|-------------|-----|
+| < 15 branches | `split at h` | Fast, automatic, handles `if`/`match` uniformly |
+| 15-25 branches | Try `split`, fall back to `by_cases` | May or may not hit step limit |
+| > 25 branches or `let mut` | `by_cases` + `rw [if_pos/if_neg]` | `split` will definitely hit step limit |
+
+**Key indicator**: If the function uses `let mut` (mutable state in `do`),
+it almost certainly needs `by_cases`. Mutable state desugars into a large
+nested match that multiplies the term size.
+
+**Worked examples**:
+- `decodeFseDistribution_accuracyLog_ge` in `Zip/Spec/Fse.lean` — uses
+  `split at h` (medium-size function, ~15 branches)
+- `parseFrameHeader_magic` in `Zip/Spec/Zstd.lean` — uses `by_cases` +
+  `rw` (large function with `let mut`, `split` fails)
 
 ## `split at h` Step Limit on Large Unfolded Functions
 
