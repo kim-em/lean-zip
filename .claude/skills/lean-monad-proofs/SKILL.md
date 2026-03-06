@@ -454,6 +454,40 @@ nested match that multiplies the term size.
 - `parseFrameHeader_magic` in `Zip/Spec/Zstd.lean` — uses `by_cases` +
   `rw` (large function with `let mut`, `split` fails)
 
+## `grind` for Struct Field Extraction from Bind Chains
+
+When a function always returns `.ok { field := input, ... }` through deeply
+nested bind chains (e.g., `buildFseTable` returns `{ accuracyLog := al, ... }`),
+proving `result.field = input` after success:
+
+```lean
+-- Pattern: prove table.accuracyLog = al given buildFseTable probs al = .ok table
+simp only [buildFseTable, bind, Except.bind, pure, Except.pure] at h
+grind
+```
+
+**Why this works**: `simp only` reduces all bind/pure wrappers, leaving a
+deeply nested `match` chain that always ends in `Except.ok { field := al, ... }`.
+`grind` can extract the struct field equality from this reduced term.
+
+**When this fails**: If the field depends on loop iterations (e.g., array size
+after `forIn` modifications), `grind` cannot reason through the loop body.
+See the `forIn` limitation below.
+
+## `forIn` Loop Invariants Are Not Automatable
+
+**Current gap**: There is no standard library theorem for proving properties
+preserved through `forIn` iterations in the `Except` monad. Tactics like
+`grind`, `simp`, and `omega` cannot see through the opaque `forIn` wrapper.
+
+Example: proving `cells.size = tableSize` after a loop that only uses
+`Array.set!` (which preserves size) requires a loop invariant theorem:
+"if `P` holds initially and each iteration preserves `P`, then `P` holds
+on the result." This doesn't exist for `Std.Legacy.Range.forIn'` in `Except`.
+
+**Workaround**: Leave as `sorry` with documentation. This is a known
+standard library gap, not a proof technique issue.
+
 ## `split at h` Step Limit on Large Unfolded Functions
 
 **Problem**: `split at h` uses `simp` internally. On large unfolded functions
