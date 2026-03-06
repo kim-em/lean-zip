@@ -98,7 +98,7 @@ theorem resolveOffset_positive_large (rawOffset : Nat) (history : Array Nat) (li
     (hraw : rawOffset > 3) :
     (resolveOffset rawOffset history litLen).1 > 0 := by
   unfold resolveOffset
-  simp [show rawOffset > 3 from hraw]
+  simp only [show rawOffset > 3 from hraw, ↓reduceIte]
   omega
 
 /-- When `resolveOffset` is called with a valid offset history, `rawOffset > 0`,
@@ -115,16 +115,20 @@ theorem resolveOffset_positive_litLen_pos (rawOffset : Nat) (history : Array Nat
   rcases rawOffset with _ | _ | _ | _ | n
   · omega  -- rawOffset = 0, contradicts hraw
   · -- rawOffset = 1, litLen > 0: returns history[0]!
-    simp [resolveOffset, show ¬(1 > 3) from by omega, show litLen > 0 from hlit]
+    simp only [resolveOffset, show ¬(1 > 3) from by omega, show litLen > 0 from hlit,
+      ↓reduceIte]
     exact h0pos
   · -- rawOffset = 2, litLen > 0: returns history[1]!
-    simp [resolveOffset, show ¬(2 > 3) from by omega, show litLen > 0 from hlit]
+    simp only [resolveOffset, show ¬(2 > 3) from by omega, show litLen > 0 from hlit,
+      ↓reduceIte]
     exact h1pos
   · -- rawOffset = 3, litLen > 0: returns history[2]!
-    simp [resolveOffset, show ¬(3 > 3) from by omega, show litLen > 0 from hlit]
+    simp only [resolveOffset, show ¬(3 > 3) from by omega, show litLen > 0 from hlit,
+      ↓reduceIte]
     exact h2pos
   · -- rawOffset = n + 4 > 3: offset = n + 1 > 0
-    simp [resolveOffset, show n + 4 > 3 from by omega]
+    simp only [resolveOffset, show n + 4 > 3 from by omega, ↓reduceIte]
+    omega
 
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
