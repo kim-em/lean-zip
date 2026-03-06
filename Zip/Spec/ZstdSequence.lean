@@ -154,6 +154,59 @@ theorem copyMatch_getElem_ge_nonoverlap (buf : ByteArray) (offset length : Nat) 
   simp only [Nat.zero_add] at this
   exact this
 
+private theorem copyMatch_loop_getElem_ge (offset length start : Nat)
+    (buf b : ByteArray) (k j : Nat)
+    (hoff : offset > 0) (hstart : start + offset = buf.size)
+    (hbsize : b.size = buf.size + k)
+    (hprefix : ∀ i, i < buf.size → b[i]! = buf[i]!)
+    (hk : k ≤ length)
+    (hj : j < length - k) :
+    (copyMatch.loop offset length start b k)[b.size + j]! =
+      buf[start + ((k + j) % offset)]! := by
+  rw [copyMatch.loop.eq_1]
+  have hklt : k < length := by omega
+  simp only [hklt, ↓reduceIte]
+  have hsk : start + (k % offset) < buf.size := by
+    have := Nat.mod_lt k hoff; omega
+  cases j with
+  | zero =>
+    simp only [Nat.add_zero]
+    rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega)
+      b.size (by simp [ByteArray.size_push])]
+    rw [ByteArray.push_getElem!_eq]
+    exact hprefix _ hsk
+  | succ j' =>
+    have heq : b.size + (j' + 1) = (b.push b[start + (k % offset)]!).size + j' := by
+      simp [ByteArray.size_push]; omega
+    simp only [show k + (j' + 1) = k + 1 + j' from by omega]
+    rw [heq, copyMatch_loop_getElem_ge offset length start buf _ (k + 1) j'
+      hoff hstart (by simp [ByteArray.size_push, hbsize]; omega)
+      (fun i hi => by rw [ByteArray.push_getElem!_lt _ _ _ (by omega)]; exact hprefix i hi)
+      (by omega) (by omega)]
+  termination_by length - k
+
+/-- `copyMatch` content at new positions (general case, including overlap): the j-th
+    new byte equals the byte at position `buf.size - offset + (j % offset)` in the
+    original buffer. This captures the cyclic repetition semantics of LZ77
+    back-references (RFC 1951 §3.2.3, RFC 8878 §3.1.1.4).
+
+    Combined with `copyMatch_getElem_lt` (preservation) and `copyMatch_size` (size),
+    this fully specifies `copyMatch` for ALL cases — including overlapping matches
+    used for run-length encoding and pattern repetition.
+
+    Subsumes `copyMatch_getElem_ge_nonoverlap`: when `offset ≥ length`, `j < length`
+    implies `j % offset = j` by `Nat.mod_eq_of_lt`. -/
+theorem copyMatch_getElem_ge (buf : ByteArray) (offset length : Nat) (j : Nat)
+    (hoff : offset > 0) (hreach : offset ≤ buf.size) (hj : j < length) :
+    (copyMatch buf offset length)[buf.size + j]! =
+      buf[buf.size - offset + (j % offset)]! := by
+  unfold copyMatch
+  simp only
+  have := copyMatch_loop_getElem_ge offset length (buf.size - offset) buf buf 0 j
+    hoff (by omega) rfl (fun _ _ => rfl) (Nat.zero_le _) (by omega)
+  simp only [Nat.zero_add] at this
+  exact this
+
 private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
     List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
     init + List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs := by
