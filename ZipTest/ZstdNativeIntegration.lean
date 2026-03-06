@@ -78,6 +78,7 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
   -- Test 83: decodeFseSymbolsAll — basic smoke test
   -- Build a trivial 2-symbol FSE table manually and decode from a backward stream.
   -- Symbols: 0 (prob=1), 1 (prob=1). accuracyLog=1, table size=2.
+  -- decodeFseSymbolsAll uses two interleaved states (matching reference FSE_decompress1X).
   let trivialTable : Zip.Native.FseTable := {
     accuracyLog := 1
     cells := #[
@@ -85,10 +86,10 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
       { symbol := 1, numBits := 1, newState := 0 }
     ]
   }
-  -- Create a minimal backward bitstream: one byte with sentinel + 1 bit of init state
-  -- Byte = 0b11 = 3: sentinel at bit 1, then bit 0 = 1 (init state = 1)
-  -- After init state=1, cell[1]={symbol=1, numBits=1, newState=0}, stream is finished
-  let bbrData := ByteArray.mk #[0x03]
+  -- Create a backward bitstream with 2 data bits for two state inits (accuracyLog=1 each)
+  -- Byte = 0b111 = 7: sentinel at bit 2, bits 1,0 = init state1=1, init state2=1
+  -- After two inits, stream is finished: decode state1 → cell[1].symbol=1, break.
+  let bbrData := ByteArray.mk #[0x07]
   match Zip.Native.BackwardBitReader.init bbrData 0 1 with
   | .ok bbr =>
     match Zip.Native.decodeFseSymbolsAll trivialTable bbr with
@@ -148,9 +149,7 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
     unless result.data == huffTestData.data do
       throw (IO.userError "Huffman integration: decompressed data mismatch")
   | .error e =>
-    -- Some inputs hit pre-existing Huffman table building bugs (non-power-of-2 implicit weight)
-    unless e.contains "Huffman" || e.contains "power of 2" do
-      throw (IO.userError s!"Huffman integration: unexpected error: {e}")
+    throw (IO.userError s!"Huffman integration: unexpected error: {e}")
 
   -- Test 87: decodeFourHuffmanStreams — error on too-small data
   match Zip.Native.buildZstdHuffmanTable #[1] with
@@ -447,9 +446,7 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
       -- Multi-block decompression may have cross-block offset bugs; log but don't fail
       IO.eprintln s!"treeless roundtrip: size matches ({result.size}) but content differs (known multi-block issue)"
   | .error e =>
-    -- Huffman or other parsing bugs are pre-existing
-    unless e.contains "Huffman" || e.contains "power of 2" do
-      throw (IO.userError s!"treeless roundtrip: unexpected error: {e}")
+    throw (IO.userError s!"treeless roundtrip: unexpected error: {e}")
 
   -- Test: treeless literals error when no previous Huffman tree (first block)
   -- Construct a minimal frame with litType 3 in the first block
@@ -779,9 +776,7 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
     unless result.data == compBlockData.data do
       throw (IO.userError s!"compressed block roundtrip: content mismatch (got {result.size} bytes, expected {compBlockData.size})")
   | .error e =>
-    -- Tolerate pre-existing Huffman weight parsing bugs
-    unless e.contains "Huffman" || e.contains "power of 2" do
-      throw (IO.userError s!"compressed block roundtrip failed: {e}")
+    throw (IO.userError s!"compressed block roundtrip failed: {e}")
 
   -- Test: compressed block roundtrip with varied binary data
   let mut variedData := ByteArray.empty
@@ -793,7 +788,6 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
     unless result.data == variedData.data do
       throw (IO.userError s!"varied data roundtrip: content mismatch (got {result.size} bytes, expected {variedData.size})")
   | .error e =>
-    unless e.contains "Huffman" || e.contains "power of 2" do
-      throw (IO.userError s!"varied data roundtrip failed: {e}")
+    throw (IO.userError s!"varied data roundtrip failed: {e}")
 
   IO.println "ZstdNativeIntegration tests: OK"

@@ -20,6 +20,7 @@ import ZipTest.NativeCompressBench
 import ZipTest.ZstdNativeFrame
 import ZipTest.ZstdNativeComponents
 import ZipTest.ZstdNativeIntegration
+import ZipTest.ZstdNativeConformance
 import ZipTest.XxHashNative
 import ZipTest.FseNative
 import ZipTest.ZstdConformance
@@ -49,6 +50,7 @@ def main : IO Unit := do
   ZipTest.ZstdNativeFrame.tests
   ZipTest.ZstdNativeComponents.tests
   ZipTest.ZstdNativeIntegration.tests
+  ZipTest.ZstdNativeConformance.tests
   ZipTest.XxHashNative.tests
   ZipTest.FseNative.tests
   ZipTest.ZstdConformance.tests

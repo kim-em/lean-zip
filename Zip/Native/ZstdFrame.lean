@@ -219,7 +219,8 @@ def decompressBlocksWF (data : ByteArray) (off : Nat) (windowSize : UInt64)
         pure (output ++ block, afterByte, prevHuffTree, prevFseTables, offsetHistory)
       | .compressed => do
         let blockEnd := afterHdr + hdr.blockSize.toNat
-        let (literals, afterLiterals, huffTree) ← parseLiteralsSection data afterHdr prevHuffTree
+        let (literals, afterLiterals, huffTree) ←
+          (parseLiteralsSection data afterHdr prevHuffTree).mapError (· ++ " [in parseLiteralsSection]")
         let newHuff := if let some ht := huffTree then some ht else prevHuffTree
         let (numSeq, modes, afterSeqHeader) ← parseSequencesHeader data afterLiterals
         if numSeq == 0 then
@@ -230,7 +231,8 @@ def decompressBlocksWF (data : ByteArray) (off : Nat) (windowSize : UInt64)
           let newFse : PrevFseTables :=
             { litLen := some llTable, offset := some ofTable, matchLen := some mlTable }
           let bbr ← BackwardBitReader.init data afterTables blockEnd
-          let sequences ← decodeSequences llTable ofTable mlTable bbr numSeq
+          let sequences ← (decodeSequences llTable ofTable mlTable bbr numSeq).mapError
+            (· ++ " [in decodeSequences]")
           let windowPrefix := if windowSize > 0 && output.size > windowSize.toNat
             then output.extract (output.size - windowSize.toNat) output.size
             else output
