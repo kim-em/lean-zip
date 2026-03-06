@@ -446,4 +446,33 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     · exact nomatch heq
     · split at heq <;> exact nomatch heq
 
+/-! ## BackwardBitReader base-case specs -/
+
+open Zip.Native (BackwardBitReader) in
+/-- `isFinished` is true iff `totalBitsRemaining` is zero. -/
+theorem BackwardBitReader_isFinished_iff_totalBitsRemaining_zero
+    (br : BackwardBitReader) :
+    br.isFinished = true ↔ br.totalBitsRemaining = 0 := by
+  simp only [BackwardBitReader.isFinished, BackwardBitReader.totalBitsRemaining]
+  constructor
+  · intro h; simp [beq_iff_eq.mp h]
+  · intro h; split at h <;> simp_all
+
+open Zip.Native (BackwardBitReader) in
+/-- Reading 0 bits is a no-op: returns (0, br) unchanged. -/
+theorem readBits_zero (br : BackwardBitReader) :
+    br.readBits 0 = .ok (0, br) := by
+  simp [BackwardBitReader.readBits, BackwardBitReader.readBits.go]
+
+open Zip.Native (BackwardBitReader) in
+/-- Reading n > 0 bits from a finished reader always errors. -/
+theorem readBits_error_of_isFinished (br : BackwardBitReader) (n : Nat)
+    (hn : n > 0) (hfin : br.isFinished = true) :
+    ∃ e, br.readBits n = .error e := by
+  match n, hn with
+  | k + 1, _ =>
+  simp only [BackwardBitReader.isFinished, beq_iff_eq] at hfin
+  simp only [BackwardBitReader.readBits, BackwardBitReader.readBits.go, hfin]
+  exact ⟨_, rfl⟩
+
 end Zstd.Spec.Fse
