@@ -191,6 +191,66 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
   let result := ByteArray.mk (Array.replicate sz byte)
   return (result, pos + 1)
 
+/-- Well-founded recursive inner loop for `decompressBlocks`.
+    Processes blocks one at a time until `lastBlock` is seen, threading
+    Huffman tables, FSE tables, and offset history between compressed blocks.
+    Uses explicit recursion with `termination_by data.size - off` so the
+    function is unfoldable in proofs (unlike the opaque `forIn` from `while`). -/
+def decompressBlocksWF (data : ByteArray) (off : Nat) (windowSize : UInt64)
+    (output : ByteArray) (prevHuffTree : Option ZstdHuffmanTable)
+    (prevFseTables : PrevFseTables) (offsetHistory : Array Nat) :
+    Except String (ByteArray × Nat) :=
+  if hoff : data.size ≤ off then
+    .error "Zstd: unexpected end of block data"
+  else do
+    let (hdr, afterHdr) ← parseBlockHeader data off
+    -- Validate block size (RFC 8878 §3.1.1.2: Block_Content ≤ 128KB)
+    if hdr.blockSize > 131072 then
+      throw s!"Zstd: block size {hdr.blockSize} exceeds maximum (128KB)"
+    if windowSize > 0 && hdr.blockSize.toUInt64 > windowSize then
+      throw s!"Zstd: block size {hdr.blockSize} exceeds window size {windowSize}"
+    -- Process block content based on type
+    let (newOutput, newOff, newHuffTree, newFseTables, newHistory) ← match hdr.blockType with
+      | .raw => do
+        let (block, afterBlock) ← decompressRawBlock data afterHdr hdr.blockSize
+        pure (output ++ block, afterBlock, prevHuffTree, prevFseTables, offsetHistory)
+      | .rle => do
+        let (block, afterByte) ← decompressRLEBlock data afterHdr hdr.blockSize
+        pure (output ++ block, afterByte, prevHuffTree, prevFseTables, offsetHistory)
+      | .compressed => do
+        let blockEnd := afterHdr + hdr.blockSize.toNat
+        let (literals, afterLiterals, huffTree) ← parseLiteralsSection data afterHdr prevHuffTree
+        let newHuff := if let some ht := huffTree then some ht else prevHuffTree
+        let (numSeq, modes, afterSeqHeader) ← parseSequencesHeader data afterLiterals
+        if numSeq == 0 then
+          pure (output ++ literals, blockEnd, newHuff, prevFseTables, offsetHistory)
+        else
+          let (llTable, ofTable, mlTable, afterTables) ←
+            resolveSequenceFseTables modes data afterSeqHeader prevFseTables
+          let newFse : PrevFseTables :=
+            { litLen := some llTable, offset := some ofTable, matchLen := some mlTable }
+          let bbr ← BackwardBitReader.init data afterTables blockEnd
+          let sequences ← decodeSequences llTable ofTable mlTable bbr numSeq
+          let windowPrefix := if windowSize > 0 && output.size > windowSize.toNat
+            then output.extract (output.size - windowSize.toNat) output.size
+            else output
+          let (blockOutput, newHist) ← executeSequences sequences literals
+            windowPrefix offsetHistory windowSize.toNat
+          pure (output ++ blockOutput, blockEnd, newHuff, newFse, newHist)
+      | .reserved =>
+        throw "Zstd: reserved block type"
+    if hdr.lastBlock then
+      return (newOutput, newOff)
+    else
+      -- Position must advance for termination. This always holds: parseBlockHeader
+      -- reads 3 bytes (afterHdr = off + 3), and block processing advances further.
+      if hadv : newOff ≤ off then
+        throw "Zstd: block did not advance position"
+      else
+        have : data.size - newOff < data.size - off := by omega
+        decompressBlocksWF data newOff windowSize newOutput newHuffTree newFseTables newHistory
+termination_by data.size - off
+
 /-- Decompress all blocks in a Zstd frame starting at `pos` (after the frame header).
     Loops through block headers, dispatches on block type, and accumulates output.
     Threads the Huffman table from compressed literals blocks to support treeless
@@ -198,62 +258,8 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
     and offset history between compressed blocks.
     Returns the decompressed content and position after the last block. -/
 def decompressBlocks (data : ByteArray) (pos : Nat) (windowSize : UInt64 := 0) :
-    Except String (ByteArray × Nat) := do
-  let mut off := pos
-  let mut output := ByteArray.empty
-  let mut prevHuffTree : Option ZstdHuffmanTable := none
-  let mut prevFseTables : PrevFseTables := {}
-  let mut offsetHistory : Array Nat := #[1, 4, 8]
-  let mut done := false
-  while !done do
-    let (hdr, afterHdr) ← parseBlockHeader data off
-    off := afterHdr
-    -- Validate block size (RFC 8878 §3.1.1.2: Block_Content ≤ 128KB)
-    if hdr.blockSize > 131072 then
-      throw s!"Zstd: block size {hdr.blockSize} exceeds maximum (128KB)"
-    if windowSize > 0 && hdr.blockSize.toUInt64 > windowSize then
-      throw s!"Zstd: block size {hdr.blockSize} exceeds window size {windowSize}"
-    match hdr.blockType with
-    | .raw =>
-      let (block, afterBlock) ← decompressRawBlock data off hdr.blockSize
-      output := output ++ block
-      off := afterBlock
-    | .rle =>
-      let (block, afterByte) ← decompressRLEBlock data off hdr.blockSize
-      output := output ++ block
-      off := afterByte
-    | .compressed =>
-      let blockEnd := off + hdr.blockSize.toNat
-      let (literals, afterLiterals, huffTree) ← parseLiteralsSection data off prevHuffTree
-      if let some ht := huffTree then
-        prevHuffTree := some ht
-      let (numSeq, modes, afterSeqHeader) ← parseSequencesHeader data afterLiterals
-      if numSeq == 0 then
-        -- No sequences: block is pure literals
-        output := output ++ literals
-        off := blockEnd
-      else
-        -- Resolve FSE tables (supports Repeat mode via previous block's tables)
-        let (llTable, ofTable, mlTable, afterTables) ←
-          resolveSequenceFseTables modes data afterSeqHeader prevFseTables
-        prevFseTables := { litLen := some llTable, offset := some ofTable, matchLen := some mlTable }
-        -- Decode sequences from backward bitstream
-        let bbr ← BackwardBitReader.init data afterTables blockEnd
-        let sequences ← decodeSequences llTable ofTable mlTable bbr numSeq
-        -- Execute sequences: copy literals + back-references
-        let windowPrefix := if windowSize > 0 && output.size > windowSize.toNat
-          then output.extract (output.size - windowSize.toNat) output.size
-          else output
-        let (blockOutput, newHistory) ← executeSequences sequences literals
-          windowPrefix offsetHistory windowSize.toNat
-        offsetHistory := newHistory
-        output := output ++ blockOutput
-        off := blockEnd
-    | .reserved =>
-      throw "Zstd: reserved block type"
-    if hdr.lastBlock then
-      done := true
-  return (output, off)
+    Except String (ByteArray × Nat) :=
+  decompressBlocksWF data pos windowSize ByteArray.empty none {} #[1, 4, 8]
 
 /-- Decompress a single Zstd frame starting at `pos` in `data`.
     Parses the frame header, decompresses all blocks, verifies the optional

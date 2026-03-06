@@ -204,7 +204,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     ZlibDecode.decompressSingle (ZlibEncode.compress data level) = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
   have hinfl : Inflate.inflate (Deflate.deflateRaw data level) = .ok data :=
-    Deflate.inflate_deflateRaw data level hsize
+    Deflate.inflate_deflateRaw data level _ hsize
   -- Spec decode on deflated
   have hspec_go : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] =
