@@ -150,9 +150,17 @@ def resolveOffset (rawOffset : Nat) (history : Array Nat) (literalLength : Nat) 
       (offset, history')
     | _ => (1, history)  -- unreachable
 
+/-- Copy `count` bytes from `src` starting at `srcPos`, appending each byte to `dst`.
+    Equivalent to `for i in [:count] do dst := dst.push src[srcPos + i]!`, but uses
+    explicit recursion for proof-friendliness (Range.forIn cannot be unfolded by name). -/
+def copyBytes (dst : ByteArray) (src : ByteArray) (srcPos count : Nat) : ByteArray :=
+  if count = 0 then dst
+  else copyBytes (dst.push src[srcPos]!) src (srcPos + 1) (count - 1)
+termination_by count
+
 /-- Copy `length` bytes from `offset` bytes back in `buf`, handling overlapping matches
     (byte-by-byte copy so that repeated patterns are expanded correctly). -/
-private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
+def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
   let start := buf.size - offset
   let rec loop (b : ByteArray) (k : Nat) : ByteArray :=
     if k < length then
@@ -160,6 +168,31 @@ private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
     else b
   termination_by length - k
   loop buf 0
+
+/-- Process sequences recursively. This is the inner loop of `executeSequences`:
+    for each sequence, copy literal bytes then match bytes, threading state through.
+    Written in applicative style (no `do`) for proof-friendliness. -/
+def executeSequences.loop (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos : Nat) (windowSize : Nat) :
+    Except String (ByteArray × Array Nat × Nat) :=
+  match seqs with
+  | [] => .ok (output, history, litPos)
+  | seq :: rest =>
+    if litPos + seq.literalLength > literals.size then
+      .error s!"Zstd: sequence requires {litPos + seq.literalLength} literal bytes but only {literals.size} available"
+    else
+      let output := copyBytes output literals litPos seq.literalLength
+      let litPos := litPos + seq.literalLength
+      let (offset, history') := resolveOffset seq.offset history seq.literalLength
+      if offset == 0 then
+        .error "Zstd: resolved offset is 0"
+      else if offset > output.size then
+        .error s!"Zstd: match offset {offset} exceeds output size {output.size}"
+      else if windowSize > 0 && offset > windowSize then
+        .error s!"Zstd: sequence offset {offset} exceeds window size {windowSize}"
+      else
+        let output := copyMatch output offset seq.matchLength
+        executeSequences.loop rest literals output history' litPos windowSize
 
 /-- Execute decoded Zstd sequences against a literals buffer to produce decompressed output
     (RFC 8878 §3.1.1.4). For each sequence: copies `literalLength` bytes from literals, then
@@ -178,33 +211,9 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
     (offsetHistory : Array Nat := #[1, 4, 8])
     (windowSize : Nat := 0) :
     Except String (ByteArray × Array Nat) := do
-  let mut output := windowPrefix
-  let mut history := offsetHistory
-  let mut litPos := 0
-  for seq in sequences do
-    -- Copy literalLength bytes from literals buffer
-    if litPos + seq.literalLength > literals.size then
-      throw s!"Zstd: sequence requires {litPos + seq.literalLength} literal bytes but only {literals.size} available"
-    for i in [:seq.literalLength] do
-      output := output.push literals[litPos + i]!
-    litPos := litPos + seq.literalLength
-    -- Resolve offset
-    let (offset, history') := resolveOffset seq.offset history seq.literalLength
-    history := history'
-    -- Validate offset
-    if offset == 0 then
-      throw "Zstd: resolved offset is 0"
-    if offset > output.size then
-      throw s!"Zstd: match offset {offset} exceeds output size {output.size}"
-    if windowSize > 0 && offset > windowSize then
-      throw s!"Zstd: sequence offset {offset} exceeds window size {windowSize}"
-    -- Copy matchLength bytes from output (with overlap semantics)
-    output := copyMatch output offset seq.matchLength
-  -- Copy any remaining literals after the last sequence
-  if litPos < literals.size then
-    for i in [litPos:literals.size] do
-      output := output.push literals[i]!
-  -- Strip prefix and return block output with updated history
+  let (output, history, litPos) ←
+    executeSequences.loop sequences.toList literals windowPrefix offsetHistory 0 windowSize
+  let output := copyBytes output literals litPos (literals.size - litPos)
   let blockOutput := output.extract windowPrefix.size output.size
   return (blockOutput, history)
 
