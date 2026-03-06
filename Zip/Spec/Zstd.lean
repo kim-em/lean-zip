@@ -559,4 +559,19 @@ theorem parseFrameHeader_pos_ge_five (data : ByteArray) (pos : Nat)
             | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
                obtain ⟨-, rfl⟩ := h; omega)
 
+/-! ## Window size characterizing properties -/
+
+set_option maxRecDepth 1024 in
+/-- The minimum window size is 1KB (RFC 8878 §3.1.1.1.2: windowLog ≥ 10,
+    so windowBase ≥ 2^10 = 1024 and windowAdd ≥ 0). -/
+theorem windowSizeFromDescriptor_ge_1024 (d : UInt8) :
+    Zip.Native.windowSizeFromDescriptor d ≥ 1024 := by
+  have h : ∀ i : Fin 256, Zip.Native.windowSizeFromDescriptor ⟨⟨i⟩⟩ ≥ 1024 := by decide
+  exact h d.toBitVec.toFin
+
+/-- The window size is always positive (follows from `windowSizeFromDescriptor_ge_1024`). -/
+theorem windowSizeFromDescriptor_pos (d : UInt8) :
+    Zip.Native.windowSizeFromDescriptor d > 0 := by
+  exact Nat.lt_of_lt_of_le (by decide : (0 : UInt64) < 1024) (windowSizeFromDescriptor_ge_1024 d)
+
 end Zstd.Spec
