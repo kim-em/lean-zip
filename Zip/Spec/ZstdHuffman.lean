@@ -1,4 +1,5 @@
 import Zip.Native.ZstdHuffman
+import ZipForStd.Array
 
 /-!
 # Zstandard Huffman Weight Validity Predicates (RFC 8878 §4.2.1)
@@ -217,23 +218,103 @@ private theorem weightsToMaxBits_ge_one (weights : Array UInt8) (m : Nat)
       subst h
       exact findMaxBitsWF_ge_one ws (by simp_all [beq_iff_eq]; omega)
 
+open Zip.Native in
+/-- The inner fill loop preserves array size: each step either uses `set!`
+    (which preserves size) or leaves the table unchanged. -/
+private theorem fillHuffmanTableInnerWF_preserves_size
+    (table : Array HuffmanEntry) (entry : HuffmanEntry)
+    (code stride tableSize sym lastSymbol j : Nat)
+    (result : Array HuffmanEntry)
+    (h : fillHuffmanTableInnerWF table entry code stride tableSize sym lastSymbol j = .ok result) :
+    result.size = table.size := by
+  unfold fillHuffmanTableInnerWF at h
+  split at h
+  · -- j ≥ stride: result = table
+    simp only [Except.ok.injEq] at h; subst h; rfl
+  · -- j < stride: reduce `have idx := ...`
+    dsimp only [] at h
+    split at h
+    · -- idx < tableSize: recurse with table.set!
+      have ih := fillHuffmanTableInnerWF_preserves_size _ entry code stride tableSize
+        sym lastSymbol (j + 1) result h
+      rw [ih, Array.size_set!]
+    · -- idx ≥ tableSize
+      split at h
+      · exact nomatch h  -- throw: contradiction
+      · -- skip: recurse with table unchanged
+        exact fillHuffmanTableInnerWF_preserves_size _ entry code stride tableSize
+          sym lastSymbol (j + 1) result h
+termination_by stride - j
+
+open Zip.Native in
+/-- The outer fill loop preserves array size. -/
+private theorem fillHuffmanTableWF_preserves_size
+    (table : Array HuffmanEntry) (allWeights : Array UInt8)
+    (nextCode : Array Nat) (maxBits tableSize numSymbols lastSymbol sym : Nat)
+    (resultTable : Array HuffmanEntry) (resultNextCode : Array Nat)
+    (h : fillHuffmanTableWF table allWeights nextCode maxBits tableSize
+      numSymbols lastSymbol sym = .ok (resultTable, resultNextCode)) :
+    resultTable.size = table.size := by
+  unfold fillHuffmanTableWF at h
+  split at h
+  · -- sym ≥ numSymbols: result = table
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h; rw [h.1]
+  · -- sym < numSymbols: reduce `have w := ...`
+    dsimp only [] at h
+    split at h
+    · -- w == 0: recurse unchanged
+      exact fillHuffmanTableWF_preserves_size _ allWeights nextCode maxBits tableSize
+        numSymbols lastSymbol (sym + 1) resultTable resultNextCode h
+    · -- w ≠ 0: split on the inner match result
+      split at h
+      · -- inner succeeded with table'
+        rename_i _ _ hinner
+        have hsize := fillHuffmanTableInnerWF_preserves_size _ _ _ _ _ _ _ _ _ hinner
+        have ih := fillHuffmanTableWF_preserves_size _ allWeights _ maxBits tableSize
+          numSymbols lastSymbol _ resultTable resultNextCode h
+        rw [ih, hsize]
+      · exact nomatch h  -- inner threw: contradiction
+termination_by numSymbols - sym
+
 /-- When `buildZstdHuffmanTable` succeeds, the resulting table has size
-    `1 << maxBits`.  This follows from the `Array.replicate tableSize default`
-    initialization where `tableSize = 1 << maxBits`, and the subsequent
-    `set!` operations preserve the array size. -/
+    `1 << maxBits`.  The table starts as `Array.replicate (1 <<< maxBits) default`,
+    and `fillHuffmanTableWF` preserves array size (each step uses `set!`). -/
 theorem buildZstdHuffmanTable_tableSize (weights : Array UInt8)
     (result : ZstdHuffmanTable)
     (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
     result.table.size = 1 <<< result.maxBits := by
-  -- The table starts as Array.replicate (1 <<< maxBits) default, then set!
-  -- operations preserve size. However, the fill loops use forIn over
-  -- Std.Legacy.Range, whose internal loop function (loop✝) is auto-generated
-  -- and opaque — the same class of problem as Lean.Loop.forIn.
-  -- Proving this requires either:
-  -- (a) refactoring the fill loops to use WF recursion (as done for
-  --     weightsToMaxBits → findMaxBitsWF), or
-  -- (b) a general Range.forIn invariant lemma.
-  sorry
+  open Zip.Native in
+  simp only [buildZstdHuffmanTable, bind, Except.bind] at h
+  cases hwm : weightsToMaxBits weights with
+  | error e => simp only [hwm] at h; exact nomatch h
+  | ok m =>
+    rw [hwm] at h; dsimp only [Bind.bind, Except.bind] at h
+    -- Peel through the same 7 monadic layers as maxBits_pos
+    -- Layer 1: forIn weights (explicitSum loop)
+    split at h; · exact nomatch h
+    · -- Layer 2: guard (lastWeight2 == 0)
+      split at h; · exact nomatch h
+      · dsimp only [pure, Pure.pure, Except.pure] at h
+        -- Layer 3: forIn Loop (while loop)
+        split at h; · exact nomatch h
+        · -- Layer 4: guard (power check)
+          split at h; · exact nomatch h
+          · -- Layer 5: forIn (weightCounts)
+            split at h; · exact nomatch h
+            · -- Layer 6: forIn (nextCode)
+              split at h; · exact nomatch h
+              · -- Layer 7: fillHuffmanTableWF
+                split at h
+                · exact nomatch h
+                · -- success: extract table size from fillHuffmanTableWF result
+                  rename_i _ v hfill
+                  simp only [Except.ok.injEq] at h; subst h
+                  -- Goal: v.fst.size = 1 <<< m
+                  -- hfill: fillHuffmanTableWF (Array.replicate (1 <<< m) default) ... = .ok v
+                  obtain ⟨filledTable, filledNextCode⟩ := v
+                  simp only at hfill ⊢
+                  have hpres := fillHuffmanTableWF_preserves_size _ _ _ _ _ _ _ _ _ _ hfill
+                  rw [hpres, Array.size_replicate]
 
 open Zip.Native in
 /-- When `buildZstdHuffmanTable` succeeds, `maxBits ≥ 1`.  This follows
