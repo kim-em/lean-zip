@@ -150,9 +150,17 @@ def resolveOffset (rawOffset : Nat) (history : Array Nat) (literalLength : Nat) 
       (offset, history')
     | _ => (1, history)  -- unreachable
 
+/-- Copy `count` bytes from `src` starting at `srcPos`, appending each byte to `dst`.
+    Equivalent to `for i in [:count] do dst := dst.push src[srcPos + i]!`, but uses
+    explicit recursion for proof-friendliness (Range.forIn cannot be unfolded by name). -/
+def copyBytes (dst : ByteArray) (src : ByteArray) (srcPos count : Nat) : ByteArray :=
+  if count = 0 then dst
+  else copyBytes (dst.push src[srcPos]!) src (srcPos + 1) (count - 1)
+termination_by count
+
 /-- Copy `length` bytes from `offset` bytes back in `buf`, handling overlapping matches
     (byte-by-byte copy so that repeated patterns are expanded correctly). -/
-private def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
+def copyMatch (buf : ByteArray) (offset length : Nat) : ByteArray :=
   let start := buf.size - offset
   let rec loop (b : ByteArray) (k : Nat) : ByteArray :=
     if k < length then
@@ -185,8 +193,7 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
     -- Copy literalLength bytes from literals buffer
     if litPos + seq.literalLength > literals.size then
       throw s!"Zstd: sequence requires {litPos + seq.literalLength} literal bytes but only {literals.size} available"
-    for i in [:seq.literalLength] do
-      output := output.push literals[litPos + i]!
+    output := copyBytes output literals litPos seq.literalLength
     litPos := litPos + seq.literalLength
     -- Resolve offset
     let (offset, history') := resolveOffset seq.offset history seq.literalLength
@@ -201,9 +208,7 @@ def executeSequences (sequences : Array ZstdSequence) (literals : ByteArray)
     -- Copy matchLength bytes from output (with overlap semantics)
     output := copyMatch output offset seq.matchLength
   -- Copy any remaining literals after the last sequence
-  if litPos < literals.size then
-    for i in [litPos:literals.size] do
-      output := output.push literals[i]!
+  output := copyBytes output literals litPos (literals.size - litPos)
   -- Strip prefix and return block output with updated history
   let blockOutput := output.extract windowPrefix.size output.size
   return (blockOutput, history)
