@@ -551,6 +551,67 @@ on the result." This doesn't exist for `Std.Legacy.Range.forIn'` in `Except`.
 **Workaround**: Leave as `sorry` with documentation. This is a known
 standard library gap, not a proof technique issue.
 
+## `forIn` with Yield-Only Body → `Array.foldl`
+
+When a `for w in arr do` loop in `Except` always yields (no `break`/`return`),
+the `forIn` result equals the corresponding `Array.foldl`.
+
+### Proven pattern: List induction + Array bridge
+
+Three stdlib lemmas:
+- `Array.forIn_toList`: `forIn xs.toList b f = forIn xs b f` (unprimed!)
+- `List.forIn_cons`: `forIn (a::as) b f = f a b >>= fun | .done b => pure b | .yield b => forIn as b f`
+- `Array.foldl_toList`: `xs.toList.foldl f init = xs.foldl f init` (direction: List→Array)
+
+**Step 1**: Prove a List-level lemma by induction with the specific body:
+
+```lean
+private theorem list_forIn_weightStep (l : List UInt8) (init : Nat) :
+    (forIn (m := Except String) l init (fun w r =>
+      if w.toNat > 0 then Except.ok (ForInStep.yield (r + (1 <<< (w.toNat - 1))))
+      else Except.ok (ForInStep.yield r)))
+    = Except.ok (l.foldl (fun acc w =>
+      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) init) := by
+  induction l generalizing init with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.forIn_cons, List.foldl_cons]
+    split <;> (dsimp only [Bind.bind, Except.bind]; exact ih _)
+```
+
+**Key details**:
+- `forIn_cons` is in the `List` namespace: use `List.forIn_cons`
+- After `split` on the body's `if`, use `dsimp only [Bind.bind, Except.bind]`
+  (NOT `simp only [bind, Except.bind]`) to reduce `.ok (.yield val) >>= k`
+  to `forIn xs val body`. `dsimp` does definitional reduction which handles
+  the constructor matching.
+
+**Step 2**: Bridge to arrays:
+
+```lean
+private theorem array_forIn_weightStep (weights : Array UInt8) :
+    (forIn (m := Except String) weights (0 : Nat) fun w r => body w r)
+    = Except.ok (weightSum weights) := by
+  rw [← Array.forIn_toList, list_forIn_weightStep]
+  simp [weightSum, Array.foldl_toList]
+```
+
+- `Array.forIn_toList` (unprimed) directly connects `forIn` on Array to List
+  without membership proof complications. Do NOT use `Array.forIn'_toList`
+  (primed) — its pattern `fun a m b => f a ⋯ b` fails to match when the
+  body ignores membership.
+- `Array.foldl_toList` goes `xs.toList.foldl = xs.foldl` (List→Array direction).
+  Do NOT use `← Array.foldl_toList`.
+
+**Step 3**: Use in the main proof:
+
+```lean
+have hws : ws = weightSum weights := by
+  have hstep := array_forIn_weightStep weights
+  rw [hstep] at heq
+  exact (Except.ok.inj heq).symm
+```
+
 ## Nested `match` Within `do` Blocks
 
 When a `do` block contains `match expr with | ctor₁ => ... | ctor₂ => ...`,
