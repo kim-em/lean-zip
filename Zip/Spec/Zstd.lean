@@ -278,9 +278,13 @@ theorem decompressFrame_contentSize_eq (data : ByteArray) (pos : Nat)
   dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
   -- Substitute contentSize = some n to resolve the contentSize match
   simp only [hn] at h
-  -- Thread through all remaining guards (dictionary, decompressBlocks, checksum)
-  -- All paths end with: if (v.fst.size.toUInt64 != n) then throw else .ok (v.fst, ...)
-  -- Since h says the result is .ok, the content size guard passed
+  -- grind handles the remaining monadic case-splitting through:
+  -- (1) dictionary check (Option match + bne guard)
+  -- (2) decompressBlocks result (Except match)
+  -- (3) checksum check (Bool conditional + bne guard)
+  -- (4) content size check (bne guard → output.size = n)
+  -- Targeted alternatives (split at h, simp_all) fail because split can't decompose
+  -- match expressions on structure fields (header.contentSize, header.dictionaryId).
   grind
 
 /-- When `decompressFrame` succeeds and the frame header has `contentChecksum = true`,
@@ -301,8 +305,13 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
   -- Substitute contentChecksum = true to resolve the checksum conditionals
   simp only [hc] at h
-  -- Thread through all remaining guards (dictionary, decompressBlocks, data size, checksum !=)
-  -- Since h says the result is .ok, the checksum guard passed
+  -- grind handles the remaining monadic case-splitting through:
+  -- (1) dictionary check (Option match + bne guard)
+  -- (2) decompressBlocks result (Except match)
+  -- (3) data size guard
+  -- (4) checksum comparison (bne guard → xxHash64Upper32 = readUInt32LE)
+  -- (5) content size check (Option match, irrelevant to conclusion)
+  -- Targeted alternatives fail because split can't decompose match on structure fields.
   grind
 
 /-! ## Skippable frame specification -/
