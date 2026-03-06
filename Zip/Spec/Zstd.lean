@@ -1,4 +1,5 @@
 import Zip.Native.ZstdFrame
+import Std.Tactic.BVDecide
 
 /-!
 # Zstandard Frame Specification (RFC 8878)
@@ -129,18 +130,32 @@ theorem parseBlockHeader_type_ne_reserved (data : ByteArray) (pos : Nat)
     · -- typeVal = _ → throw
       exact nomatch h
 
-/-- When `parseBlockHeader` succeeds, the block size is at most 128KB.
-    Note: the current implementation does not enforce this bound; the 21-bit
-    Block_Size field can represent values up to 2^21 - 1 = 2097151.
-    This theorem requires that validation is added upstream (see issue #540). -/
-theorem parseBlockHeader_blockSize_le (data : ByteArray) (pos : Nat)
+/-- The 21-bit Block_Size field (bits 3–23 of a 24-bit header) is always less than 2^21.
+    This is the core bitwise arithmetic fact: right-shifting a 24-bit value by 3
+    yields at most a 21-bit value. -/
+private theorem raw24_shiftRight3_lt (b0 b1 b2 : UInt8) :
+    ((b0.toUInt32 ||| b1.toUInt32 <<< 8 ||| b2.toUInt32 <<< 16) >>> 3).toNat < 2 ^ 21 := by
+  show ((b0.toUInt32 ||| b1.toUInt32 <<< 8 ||| b2.toUInt32 <<< 16) >>> 3 : UInt32) < 2097152
+  bv_decide
+
+/-- When `parseBlockHeader` succeeds, the block size fits in 21 bits.
+    The Block_Size field occupies bits 3–23 of the 24-bit block header
+    (RFC 8878 §3.1.1.2), so the parsed value is always less than 2^21.
+    Note: the stricter 128 KB limit (`validBlockSize`) is enforced by
+    `decompressBlocks`, not by `parseBlockHeader`. -/
+theorem parseBlockHeader_blockSize_lt (data : ByteArray) (pos : Nat)
     (hdr : Zip.Native.ZstdBlockHeader) (pos' : Nat)
     (h : Zip.Native.parseBlockHeader data pos = .ok (hdr, pos')) :
-    validBlockSize hdr.blockSize := by
-  -- The current implementation does not enforce the 128KB block size limit.
-  -- The 21-bit Block_Size field (bits 3-23) can hold values up to 2097151.
-  -- This will need issue #540's validation work to become provable.
-  sorry
+    hdr.blockSize.toNat < 2 ^ 21 := by
+  unfold Zip.Native.parseBlockHeader at h
+  split at h
+  · exact nomatch h
+  · simp only [bind, Except.bind, pure, Except.pure] at h
+    split at h
+    · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
+    · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
+    · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
+    · exact nomatch h
 
 /-! ## Block decompression correctness -/
 
