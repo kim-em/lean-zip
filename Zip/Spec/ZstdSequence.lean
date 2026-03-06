@@ -272,6 +272,34 @@ theorem resolveOffset_repeat3_val (history : Array Nat) (litLen : Nat)
     (resolveOffset 3 history litLen).1 = history[2]! := by
   simp only [resolveOffset, show ¬(3 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
 
+/-- When `rawOffset = 1`, `history.size = 3`, and `literalLength = 0` (shifted mode),
+    the resolved offset equals `history[1]!` (second most recent) and the history
+    becomes `#[history[1]!, history[0]!, history[2]!]`. RFC 8878 §3.1.1.5 shifted case. -/
+theorem resolveOffset_shifted1_val (history : Array Nat)
+    (_hsize : history.size = 3) :
+    (resolveOffset 1 history 0).1 = history[1]!
+    ∧ (resolveOffset 1 history 0).2 = #[history[1]!, history[0]!, history[2]!] := by
+  simp [resolveOffset]
+
+/-- When `rawOffset = 2`, `history.size = 3`, and `literalLength = 0` (shifted mode),
+    the resolved offset equals `history[2]!` (third most recent) and the history
+    becomes `#[history[2]!, history[0]!, history[1]!]`. RFC 8878 §3.1.1.5 shifted case. -/
+theorem resolveOffset_shifted2_val (history : Array Nat)
+    (_hsize : history.size = 3) :
+    (resolveOffset 2 history 0).1 = history[2]!
+    ∧ (resolveOffset 2 history 0).2 = #[history[2]!, history[0]!, history[1]!] := by
+  simp [resolveOffset]
+
+/-- When `rawOffset = 3`, `history.size = 3`, and `literalLength = 0` (shifted mode),
+    the resolved offset equals `history[0]! - 1` (most recent minus one) and the history
+    becomes `#[history[0]! - 1, history[1]!, history[2]!]`. RFC 8878 §3.1.1.5 shifted case.
+    This is the special case used for run-length encoding patterns. -/
+theorem resolveOffset_shifted3_val (history : Array Nat)
+    (_hsize : history.size = 3) :
+    (resolveOffset 3 history 0).1 = history[0]! - 1
+    ∧ (resolveOffset 3 history 0).2 = #[history[0]! - 1, history[1]!, history[2]!] := by
+  simp [resolveOffset]
+
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
 
