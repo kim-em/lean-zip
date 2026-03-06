@@ -53,6 +53,47 @@ have : arr[k]! ≥ 1 := lemma ⟨k, hk⟩
 the anonymous hypothesis retains the Fin.val form and omega still sees two distinct
 variables. Always use the annotated form.
 
+**Deeper mismatch — `GetElem` vs `getInternal`**: After `unfold f at h`, the goal
+may use `Array.getInternal` (the raw internal accessor) while a helper lemma uses
+`arr[i]'hi` (the `GetElem` typeclass). Even with type annotation, `omega` treats
+these as distinct expressions. The fix is `exact` with `Nat.le_trans` (or similar)
+instead of `omega`, since `exact` does full definitional unification:
+
+```lean
+-- BAD: omega can't unify GetElem-based and getInternal-based array access
+have := helper_lemma code hlt  -- uses arr[code]'hlt via GetElem
+omega  -- fails: sees arr[code].fst and (arr.getInternal code hlt).fst as distinct
+
+-- GOOD: exact does definitional unification
+exact Nat.le_trans (helper_lemma code hlt) (Nat.le_add_right _ _)
+```
+
+## `decide_cbv` on Fin-Bounded Array Properties
+
+To verify a property holds for all entries of a concrete array, use `decide_cbv`
+on a `Fin`-bounded universal:
+
+```lean
+private theorem all_baselines_ge_three :
+    ∀ i : Fin myTable.size, (myTable[i.val]'i.isLt).1 ≥ 3 := by
+  decide_cbv
+```
+
+Then wrap in a Nat-indexed helper to avoid Fin coercion issues in callers:
+
+```lean
+private theorem baseline_ge_three (i : Nat) (hi : i < myTable.size) :
+    (myTable[i]'hi).1 ≥ 3 :=
+  all_baselines_ge_three ⟨i, hi⟩
+```
+
+**Key constraints**:
+- The `∀ i : Fin n, P i` form is needed for `decide_cbv` — it must be a closed
+  proposition (no free Nat variables)
+- `decide` (without `_cbv`) has the same constraint but may be slower
+- The Nat wrapper eliminates the Fin coercion so callers can use `exact` or
+  `Nat.le_trans` without the GetElem/getInternal mismatch
+
 ## `List.getElem_of_eq` for Extracting from List Equality
 
 When `hih : l1 = l2` and you need `l1[i] = l2[i]`, use
