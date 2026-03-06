@@ -1,4 +1,5 @@
 import Zip.Native.ZstdSequence
+import Zip.Spec.Fse
 import ZipForStd.ByteArray
 
 /-!
@@ -450,6 +451,47 @@ theorem resolveSingleFseTable_repeat_pos (maxSymbols maxAccLog : Nat)
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h
     exact h.2.symm
   · exact nomatch h
+
+/-- In fseCompressed mode, the returned position is strictly greater than the input.
+    The branch creates a BitReader at `(pos, bitOff=0)`, calls `decodeFseDistribution`
+    (which reads ≥4 bits for the accuracy log), then rounds up to the next byte
+    boundary. Since ≥4 bits are consumed starting from bit offset 0, the resulting
+    byte position must exceed the input. -/
+theorem resolveSingleFseTable_fseCompressed_pos_gt (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .fseCompressed maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    pos' > pos := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  -- Extract decodeFseDistribution call
+  cases hfse : decodeFseDistribution { data, pos, bitOff := 0 } maxSymbols maxAccLog with
+  | error e => rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+  | ok val =>
+    rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
+    -- Extract buildFseTable call
+    cases hbt : buildFseTable val.1 val.2.1 with
+    | error e => rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+    | ok tbl =>
+      rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, rfl⟩ := h
+      -- Use decodeFseDistribution_bitPos_ge: bitPos ≥ pos*8 + 4 and bitOff < 8
+      have ⟨hge, hbo_lt⟩ := Zstd.Spec.Fse.decodeFseDistribution_bitPos_ge hfse
+        (by omega : (0 : Nat) < 8)
+      simp only [BitReader.bitPos] at hge
+      -- Two cases: bitOff = 0 or bitOff > 0
+      by_cases hbo : val.2.2.bitOff == 0
+      · -- bitOff = 0: afterPos = br'.pos
+        simp only [hbo, ↓reduceIte]
+        have : val.2.2.bitOff = 0 := eq_of_beq hbo
+        rw [this] at hge; omega
+      · -- bitOff > 0: afterPos = br'.pos + 1
+        simp only [hbo, Bool.false_eq_true, ↓reduceIte]
+        -- bitOff < 8 from decodeFseDistribution_bitPos_ge, so pos ≥ pos
+        omega
 
 end Zip.Native
 
