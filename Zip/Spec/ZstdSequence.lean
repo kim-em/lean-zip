@@ -804,15 +804,13 @@ theorem decodeMatchLenValue_ge_three (code : Nat) (extraBits : UInt32) (n : Nat)
     exact Nat.le_trans (matchLen_baselines_ge_three code hlt) (Nat.le_add_right _ _)
   · exact nomatch h
 
-/-- When `code > 0`, `decodeOffsetValue` returns a positive value.
-    This follows from `1 <<< code > 0` for any natural `code`. -/
+/-- `decodeOffsetValue` always returns a positive value.
+    This follows from `(1 <<< code) ≥ 1` for any natural `code`. -/
 theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : code > 0) :
     decodeOffsetValue code extraBits > 0 := by
   unfold decodeOffsetValue
-  split
-  · rename_i h; simp only [beq_iff_eq] at h; omega
-  · have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
-    omega
+  have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
+  omega
 
 /-- When `code ≥ 1`, `decodeOffsetValue` returns a value ≥ 2.
     This distinguishes non-repeat offsets (≥ 2) from repeat offsets (code 0).
@@ -820,14 +818,12 @@ theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : co
 theorem decodeOffsetValue_ge_two (code : Nat) (extraBits : UInt32) (hcode : code ≥ 1) :
     decodeOffsetValue code extraBits ≥ 2 := by
   unfold decodeOffsetValue
-  split
-  · rename_i h; simp only [beq_iff_eq] at h; omega
-  · have : 1 <<< code ≥ 2 := by
-      rw [Nat.one_shiftLeft]
-      cases code with
-      | zero => omega
-      | succ n => rw [Nat.pow_succ]; have := Nat.one_le_two_pow (n := n); omega
-    omega
+  have : 1 <<< code ≥ 2 := by
+    rw [Nat.one_shiftLeft]
+    cases code with
+    | zero => omega
+    | succ n => rw [Nat.pow_succ]; have := Nat.one_le_two_pow (n := n); omega
+  omega
 
 /-- `executeSequences` output size characterization: when `executeSequences`
     succeeds with an empty window prefix, the output contains exactly the

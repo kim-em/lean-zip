@@ -272,11 +272,11 @@ def decodeMatchLenValue (code : Nat) (extraBits : UInt32) : Except String Nat :=
     throw s!"Zstd: match length code {code} out of range (max 52)"
 
 /-- Decode an offset FSE symbol code into an offset value (RFC 8878 §3.1.1.4).
-    For code ≥ 1: returns `(1 <<< code) + extraBits`. For code 0: returns
-    `extraBits` (used by repeat offset mechanism). -/
+    Offset_Value = (1 <<< code) + extraBits, where extraBits has `code` bits.
+    The formula applies uniformly to all codes including 0:
+    code 0 → (1 << 0) + 0 = 1 (repeat offset 1). -/
 def decodeOffsetValue (code : Nat) (extraBits : UInt32) : Nat :=
-  if code == 0 then extraBits.toNat
-  else (1 <<< code) + extraBits.toNat
+  (1 <<< code) + extraBits.toNat
 
 /-- Decode interleaved FSE sequences from a backward bitstream (RFC 8878 §4.1.1).
     Takes three FSE tables (litLen, offset, matchLen), a `BackwardBitReader`
