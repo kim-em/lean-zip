@@ -215,6 +215,51 @@ theorem decompressRLEBlock_content (data : ByteArray) (pos : Nat)
   · obtain ⟨rfl, rfl⟩ := h
     rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
 
+/-- When `decompressRawBlock` succeeds, the returned position is `pos + blockSize.toNat`.
+    The raw block consumes exactly `blockSize` bytes from the input. -/
+theorem decompressRawBlock_pos_eq (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (result, pos')) :
+    pos' = pos + blockSize.toNat := by
+  unfold Zip.Native.decompressRawBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h; rfl
+
+/-- When `decompressRLEBlock` succeeds, the returned position is `pos + 1`.
+    The RLE block consumes exactly 1 byte from the input (the repeated byte). -/
+theorem decompressRLEBlock_pos_eq (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (result, pos')) :
+    pos' = pos + 1 := by
+  unfold Zip.Native.decompressRLEBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h; rfl
+
+/-- When `decompressRawBlock` succeeds, each output byte equals the corresponding
+    input byte at offset `pos + i`. Raw blocks copy input verbatim. -/
+theorem decompressRawBlock_content (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (result, pos'))
+    (i : Nat) (hi : i < result.size) :
+    result[i] = data[pos + i]'(by
+      have := decompressRawBlock_size data pos blockSize result pos' h
+      have := decompressRawBlock_pos_eq data pos blockSize result pos' h
+      unfold Zip.Native.decompressRawBlock at h
+      simp only [bind, Except.bind, pure, Except.pure] at h
+      split at h
+      · exact nomatch h
+      · obtain ⟨rfl, rfl⟩ := h; simp [ByteArray.size_extract] at hi; omega) := by
+  unfold Zip.Native.decompressRawBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h
+    simp [ByteArray.getElem_extract]
+
 /-! ## Frame-level output guarantees -/
 
 /-- When `decompressFrame` succeeds and the frame header specifies a content size of `n`,
