@@ -114,6 +114,28 @@ def ValidProcessRemaining (acc : UInt64) (data : ByteArray) (off len : Nat)
 instance : Decidable (ValidProcessRemaining acc data off len result) :=
   inferInstanceAs (Decidable (_ = _))
 
+/-! ## Helper lemmas -/
+
+/-- processRemaining8 is a no-op when endPos = pos (8-byte loop skipped). -/
+theorem processRemaining8_self (h : UInt64) (data : ByteArray) (pos : Nat) :
+    XxHash64.processRemaining8 h data pos pos = (h, pos) := by
+  unfold XxHash64.processRemaining8
+  simp [show ¬(pos + 8 ≤ pos) from by omega]
+
+/-- processRemaining1 is a no-op when endPos = pos (1-byte loop skipped). -/
+theorem processRemaining1_self (h : UInt64) (data : ByteArray) (pos : Nat) :
+    XxHash64.processRemaining1 h data pos pos = h := by
+  unfold XxHash64.processRemaining1
+  simp [show ¬(pos < pos) from by omega]
+
+/-- processRemaining is a no-op when len = 0: all three phases
+    (8-byte, 4-byte, 1-byte) are immediately skipped. -/
+theorem processRemaining_zero (acc : UInt64) (data : ByteArray) (off : Nat) :
+    XxHash64.processRemaining acc data off 0 = acc := by
+  simp [XxHash64.processRemaining, Nat.add_zero,
+        processRemaining8_self, processRemaining1_self,
+        show ¬(off + 4 ≤ off) from by omega]
+
 /-! ## Specification theorems -/
 
 /-- The prime constants are correct. -/
@@ -135,7 +157,7 @@ theorem xxHash64_deterministic (data : ByteArray) (seed : UInt64) :
 theorem xxHash64_empty (seed : UInt64) :
     XxHash64.xxHash64 ByteArray.empty seed =
       XxHash64.avalanche (seed + XxHash64.PRIME64_5) := by
-  sorry
+  simp [XxHash64.xxHash64, processRemaining_zero]
 
 /-- `xxHash64Upper32` is defined as the upper 32 bits of `xxHash64 data 0`. -/
 theorem xxHash64Upper32_eq (data : ByteArray) :

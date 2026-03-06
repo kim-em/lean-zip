@@ -52,31 +52,42 @@ def PRIME64_5 : UInt64 := 0x27D4EB2F165667C5
   let h := h * PRIME64_3
   h ^^^ (h >>> 32)
 
+/-- Process remaining 8-byte chunks. -/
+def processRemaining8 (h : UInt64) (data : ByteArray) (pos endPos : Nat) : UInt64 × Nat :=
+  if pos + 8 ≤ endPos then
+    let lane := readU64LE data pos
+    let h := h ^^^ round 0 lane
+    let h := rotl h 27 * PRIME64_1 + PRIME64_4
+    processRemaining8 h data (pos + 8) endPos
+  else
+    (h, pos)
+termination_by endPos - pos
+
+/-- Process remaining 1-byte chunks. -/
+def processRemaining1 (h : UInt64) (data : ByteArray) (pos endPos : Nat) : UInt64 :=
+  if pos < endPos then
+    let lane := data[pos]!.toUInt64
+    let h := h ^^^ (lane * PRIME64_5)
+    let h := rotl h 11 * PRIME64_1
+    processRemaining1 h data (pos + 1) endPos
+  else
+    h
+termination_by endPos - pos
+
 /-- Process remaining bytes after full 32-byte stripes.
     Handles 8-byte, 4-byte, and 1-byte chunks. -/
-def processRemaining (acc : UInt64) (data : ByteArray) (off len : Nat) : UInt64 := Id.run do
-  let mut h := acc
-  let mut pos := off
+def processRemaining (acc : UInt64) (data : ByteArray) (off len : Nat) : UInt64 :=
   let endPos := off + len
-  -- 8-byte chunks
-  while pos + 8 ≤ endPos do
-    let lane := readU64LE data pos
-    h := h ^^^ round 0 lane
-    h := rotl h 27 * PRIME64_1 + PRIME64_4
-    pos := pos + 8
-  -- 4-byte chunk
-  if pos + 4 ≤ endPos then
-    let lane := readU32LE data pos
-    h := h ^^^ (lane * PRIME64_1)
-    h := rotl h 23 * PRIME64_2 + PRIME64_3
-    pos := pos + 4
-  -- 1-byte chunks
-  while pos < endPos do
-    let lane := data[pos]!.toUInt64
-    h := h ^^^ (lane * PRIME64_5)
-    h := rotl h 11 * PRIME64_1
-    pos := pos + 1
-  return h
+  let (h, pos) := processRemaining8 acc data off endPos
+  let (h, pos) :=
+    if pos + 4 ≤ endPos then
+      let lane := readU32LE data pos
+      let h := h ^^^ (lane * PRIME64_1)
+      let h := rotl h 23 * PRIME64_2 + PRIME64_3
+      (h, pos + 4)
+    else
+      (h, pos)
+  processRemaining1 h data pos endPos
 
 /-- Compute XXH64 hash of a `ByteArray` with the given seed.
     Follows the xxHash specification exactly:
