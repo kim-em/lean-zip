@@ -206,6 +206,39 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArr
               omega
             · omega
 
+/-- The `executeSequences.loop` output buffer is always at least as large as the
+    input buffer. Each iteration copies literal bytes then match bytes, both of
+    which only grow the buffer. This monotonicity property is the key invariant
+    for inductive arguments about the loop. -/
+theorem executeSequences_loop_output_size_ge
+    (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos windowSize : Nat)
+    (result : ByteArray × Array Nat × Nat)
+    (h : executeSequences.loop seqs literals output history litPos windowSize
+         = .ok result) :
+    result.1.size ≥ output.size := by
+  induction seqs generalizing output history litPos with
+  | nil =>
+    rw [executeSequences.loop.eq_1] at h
+    simp only [Except.ok.injEq] at h
+    subst h; simp
+  | cons seq rest ih =>
+    rw [executeSequences.loop.eq_2] at h
+    split at h
+    · simp at h
+    · rename_i hlit
+      split at h
+      simp only [letFun] at h
+      split at h
+      · simp at h
+      · split at h
+        · simp at h
+        · split at h
+          · simp at h
+          · have := ih _ _ _ h
+            rw [copyMatch_size, copyBytes_size] at this
+            omega
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
@@ -493,5 +526,25 @@ theorem executeSequences_output_length (seqs : Array ZstdSequence) (literals : B
     rw [← Array.foldl_toList]
     simp only [Nat.min_self, ByteArray.size_empty]
     omega
+
+/-! ## Base case and monotonicity for executeSequences -/
+
+/-- When the sequence array is empty, `executeSequences` succeeds with block
+    output of size equal to `literals.size`, and the offset history is unchanged.
+    This is the base case for inductive arguments about sequence execution;
+    Zstd frames with only raw or RLE blocks have no sequences, so this theorem
+    directly characterizes their sequence execution step. -/
+theorem executeSequences_empty (literals : ByteArray)
+    (windowPrefix : ByteArray) (history : Array Nat) (windowSize : Nat)
+    (blockOutput : ByteArray) (history' : Array Nat)
+    (h : executeSequences #[] literals windowPrefix history windowSize
+         = .ok (blockOutput, history')) :
+    blockOutput.size = literals.size ∧ history' = history := by
+  unfold executeSequences at h
+  simp only [bind, Except.bind, pure, Pure.pure, Except.pure,
+    executeSequences.loop, Nat.sub_zero] at h
+  simp only [Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨hout, hhist⟩ := h
+  exact ⟨by rw [← hout, ByteArray.size_extract, copyBytes_size]; omega, hhist.symm⟩
 
 end Zstd.Spec.Sequence
