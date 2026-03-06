@@ -158,7 +158,57 @@ instance {table : Array HuffmanEntry} {maxBits : Nat} :
     Decidable (ValidHuffmanTable table maxBits) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
+/-! ## Helper: Except.bind extraction -/
+
+/-- If `Except.bind f g = .ok r`, then `f` succeeded with some `a` and `g a = .ok r`. -/
+private theorem Except.bind_ok_extract {f : Except ε α} {g : α → Except ε β} {r : β}
+    (h : Except.bind f g = .ok r) : ∃ a, f = .ok a ∧ g a = .ok r := by
+  cases f with
+  | error e => exact nomatch h
+  | ok a => exact ⟨a, rfl, h⟩
+
 /-! ## Correctness theorems -/
+
+open Zip.Native in
+/-- The WF loop always returns at least its initial `maxBits` argument. -/
+private theorem findMaxBitsWF_ge (ws maxBits power : Nat) (hp : power > 0) :
+    findMaxBitsWF ws maxBits power hp ≥ maxBits := by
+  unfold findMaxBitsWF
+  split
+  · have ih := findMaxBitsWF_ge ws (maxBits + 1) (power * 2) (by omega); omega
+  · split <;> omega
+termination_by ws - power
+
+open Zip.Native in
+/-- When `weightSum ≥ 1`, `findMaxBitsWF weightSum 0 1 _ ≥ 1`. -/
+private theorem findMaxBitsWF_ge_one (ws : Nat) (hws : ws ≥ 1) :
+    findMaxBitsWF ws 0 1 (by omega) ≥ 1 := by
+  unfold findMaxBitsWF
+  split
+  · -- 1 < ws: recurse with maxBits=1, power=2
+    exact Nat.le_trans (by omega : 1 ≤ 1) (findMaxBitsWF_ge ws 1 2 (by omega))
+  · -- ¬(1 < ws), so ws ≤ 1, combined with ws ≥ 1 means ws = 1
+    split <;> simp_all [beq_iff_eq] <;> omega
+
+open Zip.Native in
+/-- When `weightsToMaxBits` succeeds, the result is at least 1.  The weight sum
+    is ≥ 1 (the guard rejects zero), and `findMaxBitsWF` with initial power = 1
+    always returns ≥ 1 when the weight sum is positive. -/
+private theorem weightsToMaxBits_ge_one (weights : Array UInt8) (m : Nat)
+    (h : weightsToMaxBits weights = .ok m) : m ≥ 1 := by
+  simp only [weightsToMaxBits, bind, Except.bind] at h
+  -- Layer 1: forIn weights (weightSum accumulation loop)
+  split at h
+  · exact nomatch h
+  · rename_i ws _
+    -- Layer 2: guard (weightSum == 0)
+    split at h
+    · exact nomatch h
+    · -- guard passes, pure () reduces
+      dsimp only [pure, Pure.pure, Except.pure] at h
+      simp only [Except.ok.injEq] at h
+      subst h
+      exact findMaxBitsWF_ge_one ws (by simp_all [beq_iff_eq]; omega)
 
 /-- When `buildZstdHuffmanTable` succeeds, the resulting table has size
     `1 << maxBits`.  This follows from the `Array.replicate tableSize default`
@@ -168,8 +218,17 @@ theorem buildZstdHuffmanTable_tableSize (weights : Array UInt8)
     (result : ZstdHuffmanTable)
     (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
     result.table.size = 1 <<< result.maxBits := by
+  -- The table starts as Array.replicate (1 <<< maxBits) default, then set!
+  -- operations preserve size. However, the fill loops use forIn over
+  -- Std.Legacy.Range, whose internal loop function (loop✝) is auto-generated
+  -- and opaque — the same class of problem as Lean.Loop.forIn.
+  -- Proving this requires either:
+  -- (a) refactoring the fill loops to use WF recursion (as done for
+  --     weightsToMaxBits → findMaxBitsWF), or
+  -- (b) a general Range.forIn invariant lemma.
   sorry
 
+open Zip.Native in
 /-- When `buildZstdHuffmanTable` succeeds, `maxBits ≥ 1`.  This follows
     from `weightsToMaxBits` requiring at least one non-zero weight, so
     `weightSum ≥ 1`, meaning `maxBits ≥ 1`. -/
@@ -177,7 +236,42 @@ theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
     (result : ZstdHuffmanTable)
     (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
     result.maxBits ≥ 1 := by
-  sorry
+  -- Extract that weightsToMaxBits succeeded with result.maxBits
+  simp only [buildZstdHuffmanTable, bind, Except.bind] at h
+  cases hwm : weightsToMaxBits weights with
+  | error e => simp only [hwm] at h; exact nomatch h
+  | ok m =>
+    rw [hwm] at h; dsimp only [Bind.bind, Except.bind] at h
+    -- Peel through nested Except match chain.
+    -- Each layer is: match <operation> with | error => error | ok v => <rest>
+    -- If the whole thing = .ok result, the error branch is impossible.
+    -- Layer 1: forIn weights (explicitSum loop)
+    split at h
+    · exact nomatch h
+    · -- Layer 2: guard (lastWeight2 == 0)
+      split at h
+      · exact nomatch h
+      · -- match pure () — reduces away
+        dsimp only [pure, Pure.pure, Except.pure] at h
+        -- Layer 3: forIn Loop (while loop)
+        split at h
+        · exact nomatch h
+        · -- Layer 4: guard (power check)
+          split at h
+          · exact nomatch h
+          · -- Layer 5: forIn (weightCounts)
+            split at h
+            · exact nomatch h
+            · -- Layer 6: forIn (nextCode)
+              split at h
+              · exact nomatch h
+              · -- Layer 7: forIn (fill table)
+                split at h
+                · exact nomatch h
+                · -- Final: pure { maxBits := m, table := ... } = .ok result
+                  simp only [Except.ok.injEq] at h
+                  subst h
+                  exact weightsToMaxBits_ge_one weights m hwm
 
 /-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
     satisfies `2^(m-1) < weightSum ≤ 2^m` (except when `weightSum` is
