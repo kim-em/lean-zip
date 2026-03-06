@@ -689,3 +689,38 @@ info messages) is the most reliable and efficient approach.
 
 If `simp?` doesn't suggest a replacement, the bare simp may be
 genuinely resistant — see the "Bare `simp` Resistant Patterns" section.
+
+## `split` on `match` Leaves `Prod.fst` Unreduced in Fallback Branch
+
+After `unfold f; split` on a `match x with | 1 => ... | _ => (1, arr)`,
+the fallback branch goal shows `(1, arr).fst > 0` but `Prod.fst` does NOT
+reduce — `dsimp only`, `simp`, `change`, `omega`, and `exact Nat.one_pos`
+all fail. This happens because `split` adds hypotheses constraining which
+branch we're in without fully substituting the match expression.
+
+**Fix**: Instead of `split` on the match, use `rcases` on the discriminant
+for structural case analysis. This forces iota reduction of the match:
+
+```lean
+-- BAD: split leaves Prod.fst unreduced in fallback
+unfold resolveOffset
+split  -- on rawOffset > 3
+· ...
+· split  -- on litLen > 0
+  · split  -- on match rawOffset with | 1 => ... | _ => (1, history)
+    · ...
+    · (1, history).fst > 0  -- STUCK: nothing reduces this
+
+-- GOOD: rcases on Nat forces match reduction
+rcases rawOffset with _ | _ | _ | _ | n
+· omega                      -- rawOffset = 0 (impossible)
+· simp [resolveOffset, ...]  -- rawOffset = 1 (match reduces)
+· simp [resolveOffset, ...]  -- rawOffset = 2
+· simp [resolveOffset, ...]  -- rawOffset = 3
+· simp [resolveOffset, ...]  -- rawOffset = n+4 (match reduces, Prod.fst reduces)
+```
+
+**When this arises**: Proving properties of functions that return `Prod` from
+a `match` on a `Nat` with specific patterns (1, 2, 3) plus a wildcard fallback.
+The `split` tactic handles `if` expressions well but struggles with `match`
+wildcard branches when the return type involves projections.
