@@ -17,7 +17,9 @@ import ZipTest.NativeIntegration
 import ZipTest.NativeScale
 import ZipTest.NativeDeflate
 import ZipTest.NativeCompressBench
-import ZipTest.ZstdNative
+import ZipTest.ZstdNativeFrame
+import ZipTest.ZstdNativeComponents
+import ZipTest.ZstdNativeIntegration
 import ZipTest.XxHashNative
 import ZipTest.FseNative
 
@@ -43,7 +45,9 @@ def main : IO Unit := do
   ZipTest.NativeScale.tests
   ZipTest.NativeDeflate.tests
   ZipTest.NativeCompressBench.tests
-  ZipTest.ZstdNative.tests
+  ZipTest.ZstdNativeFrame.tests
+  ZipTest.ZstdNativeComponents.tests
+  ZipTest.ZstdNativeIntegration.tests
   ZipTest.XxHashNative.tests
   ZipTest.FseNative.tests
   IO.println "\nAll tests passed!"
