@@ -104,6 +104,62 @@ theorem alignToByte_pos_le (br : BitReader)
     | inr h => simp only; omega
 
 
+/-! ### BitReader bitPos advancement
+
+`readBit` advances `bitPos` by exactly 1, and `readBits n` advances by exactly `n`.
+These are characterizing properties — they describe the quantitative behavior
+of the BitReader, not just invariant preservation. -/
+
+/-- A successful `readBit` always produces `bitOff < 8`. -/
+private theorem readBit_bitOff_lt (br br' : BitReader) (bit : UInt32)
+    (h : br.readBit = .ok (bit, br')) :
+    br'.bitOff < 8 := by
+  simp only [BitReader.readBit] at h
+  split at h
+  · exact nomatch h
+  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+
+/-- Reading one bit advances bitPos by exactly 1 (requires `bitOff < 8`). -/
+theorem readBit_bitPos_eq (br br' : BitReader) (bit : UInt32)
+    (h : br.readBit = .ok (bit, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos = br.bitPos + 1 := by
+  simp only [BitReader.readBit] at h
+  split at h
+  · exact nomatch h
+  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      obtain ⟨_, rfl⟩ := h <;> simp only [BitReader.bitPos] <;> omega
+
+/-- `readBits.go` reading `n` bits advances bitPos by exactly `n`. -/
+private theorem readBits_go_bitPos_eq (br br' : BitReader)
+    (acc : UInt32) (shift n : Nat) (val : UInt32)
+    (h : BitReader.readBits.go br acc shift n = .ok (val, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos = br.bitPos + n := by
+  induction n generalizing br acc shift with
+  | zero =>
+    simp only [BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := h; omega
+  | succ n ih =>
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => simp only [hrb] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrb] at h
+      have hbo₁ := readBit_bitOff_lt br br₁ bit hrb
+      have h₁ := readBit_bitPos_eq br br₁ bit hrb hbo
+      have h₂ := ih br₁ _ _ h hbo₁
+      omega
+
+/-- Reading `n` bits advances bitPos by exactly `n` (requires `bitOff < 8`). -/
+theorem readBits_bitPos_eq (br br' : BitReader) (n : Nat)
+    (val : UInt32) (h : br.readBits n = .ok (val, br'))
+    (hbo : br.bitOff < 8) :
+    br'.bitPos = br.bitPos + n :=
+  readBits_go_bitPos_eq br br' 0 0 n val h hbo
+
 /-! ### BitReader invariant preservation
 
 All BitReader operations preserve `data` and the position invariant
