@@ -157,6 +157,23 @@ theorem parseBlockHeader_blockSize_lt (data : ByteArray) (pos : Nat)
     · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
     · exact nomatch h
 
+/-- When `parseBlockHeader` succeeds, the returned position is exactly `pos + 3`.
+    This follows from the structure of the 3-byte block header (RFC 8878 §3.1.1.2):
+    on all success paths, the function returns `(_, pos + 3)`. -/
+theorem parseBlockHeader_pos_eq (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (header, afterHdr)) :
+    afterHdr = pos + 3 := by
+  unfold Zip.Native.parseBlockHeader at h
+  split at h
+  · exact nomatch h
+  · simp only [bind, Except.bind, pure, Except.pure] at h
+    split at h
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · exact nomatch h
+
 /-! ## Block decompression correctness -/
 
 /-- When `decompressRawBlock` succeeds, the output has exactly `blockSize` bytes. -/
