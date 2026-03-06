@@ -153,6 +153,60 @@ invalidates all outstanding PRs touching that file.
    entry. Splitting the file should be prioritized over further feature
    work on it.
 
+## Preventing Conflict Cascades from File Splits
+
+File-splitting PRs (refactoring one large file into multiple smaller files)
+are the most destructive source of conflict cascades. Every in-flight PR
+touching the original file becomes invalid after the split merges.
+
+### Case Study: ZstdFrame.lean (March 2026)
+
+`ZstdFrame.lean` was 1059 lines modified by 5+ concurrent agents. When
+the file-split PR (#599) merged, it invalidated all outstanding PRs
+touching that file:
+- 4 PRs developed conflicts and had to be closed
+- 2 recovery issues became stale
+- 2 triage sessions were consumed just cleaning up labels and issues
+
+Total cost: ~3 full agent sessions spent on cleanup instead of feature work.
+
+### Pre-Merge Checklist for File Splits
+
+Before merging a PR that splits or renames files:
+
+```bash
+# 1. List all open PRs touching files being split
+gh pr list --state open --json number,title,files \
+  --jq '.[] | select(.files | map(.path) | any(test("OriginalFile"))) | "\(.number) \(.title)"'
+
+# 2. If in-flight PRs exist, choose a strategy:
+```
+
+**Strategy A — Split first, rebase immediately** (preferred when split
+is blocking multiple future PRs):
+1. Merge the split PR
+2. Immediately rebase each in-flight PR onto the new master
+3. Fix the import paths in each rebased PR
+4. This should be a single coordinated session, not separate issues
+
+**Strategy B — Wait for in-flight PRs to land** (preferred when only
+1-2 PRs are in flight and close to merging):
+1. Let in-flight PRs merge first
+2. Then merge the split PR
+3. No cascading conflicts
+
+**Strategy C — Coordinate via `depends-on`** (preferred for planners):
+1. Create the split issue
+2. Add `depends-on: #split-issue` to all future issues touching the file
+3. `coordination check-blocked` prevents new work until the split lands
+
+### Key Rule for Planners
+
+**Never create concurrent issues targeting the same file as a pending
+file split.** If a split is planned or in progress, all new issues that
+would touch the original file should use `depends-on:` to wait for the
+split.
+
 ## Merge Order for Concurrent Conflicting PRs
 
 When multiple PRs conflict with each other (not just with master),
