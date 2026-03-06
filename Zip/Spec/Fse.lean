@@ -297,6 +297,13 @@ theorem decodeFseDistribution_sum_correct
 
 /-! ## Structural properties of `buildFseTable` -/
 
+/-- If `x >>= f = .ok b`, then `x` succeeded and `f` maps its result to `.ok b`. -/
+private theorem Except.bind_eq_ok' {α β ε : Type} {x : Except ε α} {f : α → Except ε β} {b : β}
+    (h : (x >>= f) = Except.ok b) : ∃ a, x = Except.ok a ∧ f a = Except.ok b := by
+  cases x with
+  | error e => simp [bind, Except.bind] at h
+  | ok a => exact ⟨a, rfl, h⟩
+
 open Zip.Native (FseTable FseCell) in
 /-- If an `Except.bind` chain ending in `pure { accuracyLog := al, cells := f a }`
     equals `.ok table`, then `table.accuracyLog = al`. -/
@@ -312,6 +319,37 @@ private theorem accuracyLog_of_bind_pure {α : Type}
     subst this
     rfl
 
+/-- `List.forIn'.loop` in `Except` preserves a predicate when the body preserves it
+    on both `.yield` and `.done` outcomes. Error outcomes are handled by the hypothesis
+    that the overall loop succeeded. The body must ignore the membership proof. -/
+private theorem forIn'_loop_preserves {α β ε : Type}
+    (P : β → Prop) (as curr : List α) (init result : β)
+    (f : α → β → Except ε (ForInStep β))
+    (h_init : P init)
+    (h_yield : ∀ a b b', P b → f a b = .ok (.yield b') → P b')
+    (h_done : ∀ a b b', P b → f a b = .ok (.done b') → P b')
+    (hsuf : ∃ bs, bs ++ curr = as)
+    (h_result : List.forIn'.loop as (fun a _ b => f a b) curr init hsuf = .ok result) :
+    P result := by
+  induction curr generalizing init with
+  | nil =>
+    unfold List.forIn'.loop at h_result
+    dsimp only [pure, Except.pure] at h_result
+    rw [← Except.ok.inj h_result]; exact h_init
+  | cons x xs ih =>
+    unfold List.forIn'.loop at h_result
+    dsimp only [Bind.bind, Except.bind] at h_result
+    cases hfx : f x init with
+    | error e => rw [hfx] at h_result; exact nomatch h_result
+    | ok step =>
+      rw [hfx] at h_result
+      cases step with
+      | done b' =>
+        dsimp only [pure, Except.pure] at h_result
+        rw [← Except.ok.inj h_result]; exact h_done x init b' h_init hfx
+      | yield b' =>
+        exact ih b' (h_yield x init b' h_init hfx) _ h_result
+
 open Zip.Native in
 /-- When `buildFseTable` succeeds, the returned accuracy log equals the input.
     This follows from the return statement `{ accuracyLog, cells }` where
@@ -322,17 +360,90 @@ theorem buildFseTable_accuracyLog_eq (probs : Array Int32) (al : Nat)
   simp only [buildFseTable, bind, Except.bind, pure, Except.pure] at h
   grind
 
+private theorem forIn_range_preserves {β ε : Type}
+    (P : β → Prop) (n : Nat) (init result : β)
+    (f : Nat → β → Except ε (ForInStep β))
+    (h_init : P init)
+    (h_yield : ∀ a b b', P b → f a b = .ok (.yield b') → P b')
+    (h_done : ∀ a b b', P b → f a b = .ok (.done b') → P b')
+    (h_result : forIn [:n] init f = .ok result) :
+    P result := by
+  rw [Std.Legacy.Range.forIn_eq_forIn_range'] at h_result
+  exact forIn'_loop_preserves P _ _ init result f h_init h_yield h_done _ h_result
+
 open Zip.Native in
 /-- When `buildFseTable` succeeds, the returned cells array has size `1 <<< al`.
     This follows from `Array.replicate` setting the initial size and `Array.set!`
-    preserving size through all loop iterations.
-
-    **Proof status**: requires a `forIn` loop invariant theorem showing that
-    `Array.setIfInBounds` preserves `.size` through `Std.Legacy.Range.forIn'`
-    iterations. This is a known gap in the standard library. -/
+    preserving size through all loop iterations. -/
 theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     (table : FseTable) (h : buildFseTable probs al = .ok table) :
     table.cells.size = 1 <<< al := by
-  sorry
+  simp only [buildFseTable] at h
+  -- Decompose the do-notation bind chain into individual loop equations
+  obtain ⟨v1, hloop1, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v2, hloop2, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v3, hloop3, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v4, hloop4, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq] at h; subst h
+  -- Thread cells size invariant: replicate → loop1 → loop2 → loop4
+  -- (loop3 only modifies symbolCounts, not cells)
+  -- Shorthand for Except.ok.inj ∘ ForInStep.yield.inj extraction
+  -- After simp [bind, ...], yield case gives Except.ok (yield X) = Except.ok (yield b')
+  -- We extract X = b' via ForInStep.yield.inj (Except.ok.inj h)
+  -- Loop 1 (place -1 probability symbols): cells.set! preserves size
+  have hsize1 : v1.fst.size = 1 <<< al := by
+    apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop1
+    · exact Array.size_replicate
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; simp [hb]
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> exact nomatch heq
+  -- Loop 2 (distribute symbols with stepping): cells.set! preserves size
+  have hsize2 : v2.fst.size = 1 <<< al := by
+    apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop2
+    · exact hsize1
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · -- Inner forIn with while loop
+        split at heq
+        · exact nomatch heq
+        · rename_i r hinner
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hinner
+          · exact hb
+          · intro a2 b2 b2' hb2 heq2
+            simp only [bind, Except.bind, pure, Except.pure] at heq2
+            split at heq2
+            · exact nomatch heq2
+            · rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; simp [hb2]
+          · intro a2 b2 b2' hb2 heq2
+            simp only [bind, Except.bind] at heq2
+            split at heq2 <;> exact nomatch heq2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · exact nomatch heq
+      · split at heq <;> exact nomatch heq
+  -- Loop 4 (compute numBits/newState): cells.set! preserves size
+  apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop4
+  · exact hsize2
+  · intro a b b' hb heq
+    simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq
+    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; simp [hb]
+  · intro a b b' hb heq
+    simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq
+    · exact nomatch heq
+    · split at heq <;> exact nomatch heq
 
 end Zstd.Spec.Fse
