@@ -4,6 +4,7 @@ import Zip.Native.XxHash
 
 /-! Tests for the native Zstd frame header parser against FFI-compressed data. -/
 
+set_option maxRecDepth 2048 in
 def ZipTest.ZstdNative.tests : IO Unit := do
   -- Helper: compress data and parse the frame header
   let parseCompressed (input : ByteArray) (level : UInt8 := 3) : IO Zip.Native.ZstdFrameHeader := do
@@ -1591,5 +1592,82 @@ def ZipTest.ZstdNative.tests : IO Unit := do
       -- Also accept compressed block errors if they occur before trailing data
       unless e.contains "sequence decoding" || e.contains "compressed literals" || e.contains "treeless literals" do
         throw (IO.userError s!"trailing 2 bytes: wrong error: {e}")
+
+  -- === Block size and window size validation tests ===
+
+  -- Test: block size exceeding 128KB is rejected
+  -- Construct frame with block header claiming size = 131073 (> 128KB)
+  -- raw24 = (131073 << 3) | (0 << 1) | 1 = 1048585 = 0x100009
+  let oversizedBlockFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x20,                      -- descriptor: singleSegment=1
+    0x00,                      -- FCS: content size = 0 (won't matter, block rejected first)
+    -- block header: lastBlock=1, type=raw(0), size=131073
+    0x09, 0x00, 0x10
+  ]
+  match Zip.Native.decompressZstd oversizedBlockFrame with
+  | .ok _ => throw (IO.userError "oversized block: should have been rejected")
+  | .error e =>
+    unless e.contains "block size" && e.contains "exceeds maximum" do
+      throw (IO.userError s!"oversized block: wrong error: {e}")
+
+  -- Test: block size at exactly 128KB is accepted (not rejected)
+  -- raw24 = (131072 << 3) | (0 << 1) | 1 = 1048577 = 0x100001
+  -- This frame has a valid 128KB raw block header but not enough data,
+  -- so it should fail with "not enough data for raw block", NOT "block size exceeds"
+  let maxBlockFrame := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x20,                      -- descriptor: singleSegment=1
+    0x00,                      -- FCS: content size = 0
+    -- block header: lastBlock=1, type=raw(0), size=131072
+    0x01, 0x00, 0x10
+  ]
+  match Zip.Native.decompressZstd maxBlockFrame with
+  | .ok _ => pure ()  -- would only succeed if enough data (it doesn't, but size is valid)
+  | .error e =>
+    if e.contains "block size" && e.contains "exceeds maximum" then
+      throw (IO.userError "max block (128KB): should NOT be rejected as oversized")
+    -- "not enough data" or "content size mismatch" are acceptable
+
+  -- Test: block size exceeding window size is rejected
+  -- Window descriptor 0x00: exponent=0, mantissa=0 → windowLog=10, window=1024
+  -- Block claiming 2048 bytes (> 1024 window)
+  -- raw24 = (2048 << 3) | (0 << 1) | 1 = 16385 = 0x4001
+  let blockExceedsWindow := ByteArray.mk #[
+    0x28, 0xB5, 0x2F, 0xFD,  -- magic
+    0x00,                      -- descriptor: not single segment, fcsFlag=0, no dict
+    0x00,                      -- window descriptor: exponent=0, mantissa=0 → 1024
+    -- block header: lastBlock=1, type=raw(0), size=2048
+    0x01, 0x40, 0x00
+  ]
+  match Zip.Native.decompressZstd blockExceedsWindow with
+  | .ok _ => throw (IO.userError "block > window: should have been rejected")
+  | .error e =>
+    unless e.contains "block size" && e.contains "exceeds window size" do
+      throw (IO.userError s!"block > window: wrong error: {e}")
+
+  -- Test: sequence offset exceeding window size is rejected
+  -- executeSequences with windowSize=2 but offset=5 should fail
+  let windowSeqs := #[{ literalLength := 3, matchLength := 2, offset := 8 : Zip.Native.ZstdSequence }]
+  let windowLits := ByteArray.mk #[0x41, 0x42, 0x43]
+  match Zip.Native.executeSequences windowSeqs windowLits (windowSize := 2) with
+  | .ok _ => throw (IO.userError "offset > window: should have been rejected")
+  | .error e =>
+    unless e.contains "sequence offset" && e.contains "exceeds window size" do
+      -- Could also be "exceeds output size" if that check fires first
+      unless e.contains "exceeds output size" do
+        throw (IO.userError s!"offset > window: wrong error: {e}")
+
+  -- Test: legitimate FFI-compressed data still decompresses (no false positives)
+  let legitimateData := ByteArray.mk (Array.replicate 1000 0x42)
+  let legitimateCompressed ← Zstd.compress legitimateData 3
+  match Zip.Native.decompressZstd legitimateCompressed with
+  | .ok result =>
+    unless result.data == legitimateData.data do
+      throw (IO.userError "legitimate data: decompressed content mismatch")
+  | .error e =>
+    -- Sequence decoding not yet implemented is acceptable
+    unless e.contains "sequence decoding" do
+      throw (IO.userError s!"legitimate data: unexpected error: {e}")
 
   IO.println "ZstdNative tests: OK"

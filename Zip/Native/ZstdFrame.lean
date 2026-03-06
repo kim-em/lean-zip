@@ -197,7 +197,8 @@ def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
     literals (litType 3) in subsequent blocks.
     Returns the decompressed content and position after the last block.
     Compressed blocks with sequences are not yet fully wired (returns error). -/
-def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray × Nat) := do
+def decompressBlocks (data : ByteArray) (pos : Nat) (windowSize : UInt64 := 0) :
+    Except String (ByteArray × Nat) := do
   let mut off := pos
   let mut output := ByteArray.empty
   let mut prevHuffTree : Option ZstdHuffmanTable := none
@@ -205,6 +206,11 @@ def decompressBlocks (data : ByteArray) (pos : Nat) : Except String (ByteArray �
   while !done do
     let (hdr, afterHdr) ← parseBlockHeader data off
     off := afterHdr
+    -- Validate block size (RFC 8878 §3.1.1.2: Block_Content ≤ 128KB)
+    if hdr.blockSize > 131072 then
+      throw s!"Zstd: block size {hdr.blockSize} exceeds maximum (128KB)"
+    if windowSize > 0 && hdr.blockSize.toUInt64 > windowSize then
+      throw s!"Zstd: block size {hdr.blockSize} exceeds window size {windowSize}"
     match hdr.blockType with
     | .raw =>
       let (block, afterBlock) ← decompressRawBlock data off hdr.blockSize
@@ -244,7 +250,7 @@ def decompressFrame (data : ByteArray) (pos : Nat) :
   if let some dictId := header.dictionaryId then
     if dictId != 0 then
       throw s!"Zstd: dictionary decompression not supported (dictionary ID: {dictId})"
-  let (content, afterBlocks) ← decompressBlocks data afterHeader
+  let (content, afterBlocks) ← decompressBlocks data afterHeader header.windowSize
   -- Content checksum: upper 32 bits of XXH64 (RFC 8878 §3.1.1) if flagged
   let afterFrame := if header.contentChecksum then afterBlocks + 4 else afterBlocks
   if header.contentChecksum then
