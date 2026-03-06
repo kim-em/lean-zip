@@ -266,7 +266,6 @@ Leave opaque loops that don't need unfolding.
 | Function | File | Loop | State vars | Blocking theorem |
 |----------|------|------|-----------|-----------------|
 | `buildFseTable` (fill loops) | Fse.lean:148 | 4× `for ... in [:n]` + `while` | 5+ | `buildFseTable_cells_size` (sorry) |
-| `decompressBlocks` | ZstdFrame.lean:200 | `while !done` | 5 | Frame-level output guarantees |
 | `decompressZstd` | ZstdFrame.lean:308 | `while pos < data.size` | 2 | Top-level decompression specs |
 
 ### Priority 2: Would benefit from WF but not urgently blocking
@@ -294,6 +293,7 @@ Leave opaque loops that don't need unfolding.
 
 These functions already use explicit recursion or well-founded recursion:
 - `findMaxBitsWF` (ZstdHuffman.lean) — WF replacement for `weightsToMaxBits`
+- `decompressBlocksWF` (ZstdFrame.lean) — WF replacement for multi-block frame decompression (PR #667)
 - `copyBytes`, `copyMatch`, `executeSequences.loop` (ZstdSequence.lean) — explicit recursion with spec proofs
 - `processRemaining8`, `processRemaining1` (XxHash.lean) — WF recursion
 - `decodeFseLoop` (Fse.lean) — fuel-based with equation lemmas and spec proofs
@@ -304,11 +304,9 @@ These functions already use explicit recursion or well-founded recursion:
 - **buildFseTable**: High effort. 4 loops with different state shapes.
   Consider refactoring only the specific loops that `cells_size` needs
   (the fill loops at lines 128-143, 166-174), not all 4.
-- **decompressBlocks**: Medium effort. Single `while` loop with clear
-  termination (`off` advances). See `lean-wf-recursion` skill for the
-  pattern. State can be bundled into a struct.
 - **decompressZstd**: Low effort. Simple position-advancing loop. But
-  depends on `decompressFrame` which depends on `decompressBlocks`.
+  depends on `decompressFrame` which depends on `decompressBlocks`
+  (now refactored).
 - **decodeSequences**: High effort. Interleaved FSE state transitions
   with conditional updates. 4+ state variables with complex
   interdependencies.
