@@ -475,4 +475,40 @@ theorem readBits_error_of_isFinished (br : BackwardBitReader) (n : Nat)
   simp only [BackwardBitReader.readBits, BackwardBitReader.readBits.go, hfin]
   exact ⟨_, rfl⟩
 
+/-! ## Structural properties of `buildPredefinedFseTables` -/
+
+open Zip.Native in
+/-- `buildPredefinedFseTables` succeeds: the three predefined distributions
+    are well-formed and `buildFseTable` accepts them.
+
+    Note: `buildFseTable` never throws — its body contains only pure array
+    operations. However, it uses a `while` loop which desugars to
+    `Lean.Loop.forIn`, a `partial def` whose body is opaque to the kernel.
+    This prevents `decide`, `rfl`, or structural proof techniques from
+    verifying success. The `native_decide` tactic could evaluate this but
+    is forbidden in this codebase. Runtime tests (`lake exe test`) confirm
+    the computation succeeds. To remove this sorry, refactor the `while`
+    loop in `buildFseTable` to use well-founded recursion. -/
+theorem buildPredefinedFseTables_success :
+    ∃ tables, buildPredefinedFseTables = Except.ok tables := by
+  sorry
+
+open Zip.Native in
+/-- When `buildPredefinedFseTables` succeeds, the three tables have the
+    expected accuracy logs: 6 for literal lengths, 6 for match lengths,
+    and 5 for offsets. -/
+theorem buildPredefinedFseTables_accuracyLogs :
+    ∀ ll ml of, buildPredefinedFseTables = Except.ok (ll, ml, of) →
+      ll.accuracyLog = 6 ∧ ml.accuracyLog = 6 ∧ of.accuracyLog = 5 := by
+  intro ll ml of h
+  simp only [buildPredefinedFseTables] at h
+  obtain ⟨ll', hll, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨ml', hml, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨of', hof, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl, rfl⟩ := h
+  exact ⟨buildFseTable_accuracyLog_eq _ _ _ hll,
+         buildFseTable_accuracyLog_eq _ _ _ hml,
+         buildFseTable_accuracyLog_eq _ _ _ hof⟩
+
 end Zstd.Spec.Fse
