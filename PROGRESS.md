@@ -5,13 +5,13 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) progressing rapidly
+- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) implementation + specification phase
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
-- **Sorries**: 3 (all in Zstd specs — `Zip/Spec/Fse.lean`)
-- **Sessions**: ~288 completed (Feb 19 – Mar 4)
-- **Source files**: 91 (44 spec, 11 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
-- **Merged PRs**: 251
-- **Bare simp**: 0 remaining — campaign complete (44 spec files, ZipForStd/, Native/ all clean)
+- **Sorries**: 11 (5 XxHash.lean, 5 ZstdHuffman.lean, 1 Zstd.lean)
+- **Sessions**: ~302 completed (Feb 19 – Mar 6)
+- **Source files**: 96 (47 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
+- **Merged PRs**: 267
+- **Bare simp**: 0 remaining — campaign complete (47 spec files, ZipForStd/, Native/ all clean)
 
 ## Milestones
 
@@ -232,7 +232,7 @@ cyclic, random, text) at sizes 1KB–1MB.
   levels 0–9 across all 4 data patterns
 - MB/s throughput calculations (#399) added to all benchmark sections
 
-### Track E: Zstd Native Decompressor (in progress, Mar 2–4)
+### Track E: Zstd Native Decompressor (in progress, Mar 2–6)
 Native Lean Zstd implementation, following the same methodology as DEFLATE
 (B-track). The core decompression infrastructure is now largely in place;
 the remaining work is wiring these components together for compressed block
@@ -340,33 +340,64 @@ mode parsing, multi-frame support, and checksum verification.
   block types, raw block underflow, RLE boundaries, Huffman weight
   validation, skippable frame overflow, trailing data detection
 
-**Zstd specification infrastructure (first Zstd specs):**
+**Zstd specification infrastructure:**
 - `Zip/Spec/Fse.lean` (#584, merged, 133 lines): FSE distribution validity
   predicates (`ValidAccuracyLog`, `ValidDistribution`, `ValidFseTable`)
   with `Decidable` instances. Predefined distribution validity proved by
-  `decide`. Three `sorry`s remain for monadic unfolding theorems about
-  `decodeFseDistribution`.
-- `Zip/Spec/Zstd.lean` (#578, has PR #587): initial frame specification types
-- `Zip/Spec/ZstdHuffman.lean` (#582, claimed): Huffman weight validity
-- `Zip/Spec/ZstdSequence.lean` (#585, claimed): sequence validity/execution
+  `decide`. Sorry count reduced from 3 to 1 by proving
+  `decodeFseDistribution_accuracyLog_ge` and `_le` (#603).
+  `decodeFseDistribution_sum_correct` proved via loop invariant (#619).
+- `Zip/Spec/XxHash.lean` (#618, merged, ~180 lines): XXH64 specification
+  predicates — prime value validation, initial state, round function
+  properties. 6 theorems proved (by `decide`/`rfl`), 5 sorry (UInt64
+  test vectors too expensive for kernel evaluation).
+- `Zip/Spec/ZstdHuffman.lean` (#606, merged, ~170 lines): Huffman weight
+  validity predicates per RFC 8878 §4.2.1 — `ValidWeights`, `ValidMaxBits`,
+  `ValidHuffmanTable`. 8 theorems proved, 5 sorry (monadic invariants for
+  `weightsToMaxBits` and `buildZstdHuffmanTable`).
+- `Zip/Spec/Zstd.lean` (#587, merged): frame specification predicates.
+  1 sorry remaining.
+- `Zip/Spec/ZstdSequence.lean` (#585, open PR #608): sequence validity
+  and execution invariants. Has merge conflicts.
+
+**Code modularity:**
+- ZstdFrame.lean split (#599): monolithic 1059-line file split into
+  `ZstdHuffman.lean` (400 lines), `ZstdSequence.lean` (392 lines),
+  `ZstdFrame.lean` (302 lines). Error prefixes normalized. This resolved
+  the merge conflict bottleneck by reducing concurrent modification surface.
+- Block size and window size validation (#613): `decompressBlocks` validates
+  block size ≤ 128KB, `executeSequences` validates match offsets against
+  window size. 4 validation tests added.
 
 **Code quality reviews:**
-- ZstdFrame.lean audit (#583): 1059 lines reviewed. Identified splitting
-  plan (ZstdHuffman ~270 lines, ZstdSequence ~250 lines, ZstdFrame ~540
-  lines). Found 1 potential issue: `resolveOffset` catch-all silently
-  produces offset 1. Error prefix inconsistency documented. Splitting
-  deferred until sequence wiring stabilizes.
+- ZstdFrame.lean audit (#583): 1059 lines reviewed. Splitting plan
+  identified and executed via #599.
 - Fse.lean + XxHash.lean audit (#579): 481 lines reviewed. No critical
   issues found.
+- Stale PR triage (#611): closed 4 conflicted PRs (#561, #577, #602,
+  #596) and 2 stale issues (#568, #558). Unblocked #540 and #552 for
+  fresh work.
+- Label cleanup (#612): removed stale `has-pr` labels, reviewed and
+  merged PR #606 (Huffman spec).
+- Final bare simp sweep (#607): completed with
+  DeflateEncodeDynamicProps residual fixed.
+- Zstd spec PR review (#624): reviewed #618 (XxHash) and #619 (FSE sum).
+  Noted one bare `simp` in #619 and CLAUDE.md modification in #618.
+
+**Self-improvement:**
+- Merge conflict cascade analysis (#597): documented recovery-of-recovery
+  anti-pattern and prevention strategies in `agent-pr-recovery` skill.
+- Zstd spec infrastructure retrospective (#623): created
+  `lean-zstd-spec-pattern` skill documenting file structure and naming
+  conventions. Updated `lean-monad-proofs` with `eq_of_beq` pattern and
+  `split vs by_cases` decision guide.
 
 **Remaining:**
-- Wire compressed block sequence decoding end-to-end — issue #552
-  (has PR #577, merge conflict)
-- Block size and window size validation — issue #540 (has PR #561,
-  merge conflict)
+- Wire compressed block sequence decoding end-to-end — issue #552 (claimed)
 - End-to-end conformance test matrix — issue #575 (blocked on #552)
-- Complete Zstd spec files (#578, #582, #585 — all in progress)
-- Prove `decodeFseDistribution` correctness theorems (3 sorry in Fse.lean)
+- Complete ZstdSequence spec (#585, open PR #608 with merge conflicts)
+- Prove remaining sorry stubs: 5 in XxHash (UInt64 kernel limits),
+  5 in ZstdHuffman (monadic invariants), 1 in Zstd (frame predicate)
 - Spec-level decoder with correctness proofs
 - Compressor + roundtrip proof
 
@@ -380,31 +411,31 @@ The remaining implementation work is primarily integration: connecting
 these components into the `decompressBlocks` pipeline for
 `ZstdBlockType.compressed` (issue #552).
 
-In parallel, the first Zstd specification files are being created. Unlike
-the DEFLATE specs which were written after the implementation was complete,
-Zstd specs are being developed concurrently with the implementation —
-four spec files planned, one merged (#584), one with open PR (#587), two
-claimed (#582, #585).
+The project has transitioned from pure implementation to concurrent
+implementation + specification. Four Zstd spec files now exist (three
+merged, one in PR), developing validity predicates with `Decidable`
+instances in parallel with the implementation. This is a deliberate
+departure from the DEFLATE model, where specs were written after
+implementation was complete.
 
-**Critical bottleneck:** Issue #552 (compressed block wiring) has been
-blocked by merge conflicts in both the original PR and recovery attempts.
-This single issue blocks the conformance test matrix (#575), which in turn
-blocks validation against real-world Zstd data. Two PRs (#577, #561) are
-open with merge conflicts.
+**Stale PR bottleneck resolved:** The merge conflict cascade that
+blocked issues #540 and #552 for multiple summary periods was resolved
+by triaging stale PRs (#611) and splitting ZstdFrame.lean (#599). Both
+issues are now unblocked — #540 was completed (#613), and #552 is
+claimed for fresh work. PR #608 (ZstdSequence spec) still has merge
+conflicts.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~288 sessions: majority implementation, ~130 review, ~9 self-improvement,
-  remainder PR maintenance, planning, and summarization
-- 251 merged PRs (Feb 19 – Mar 4)
+- ~302 sessions (Feb 19 – Mar 6)
+- 267 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
-  `agent-pr-recovery` (#546)
-- **Open PR health**: 3 open PRs (#587 Zstd frame spec, #577 compressed
-  block wiring, #561 block/window validation). #577 and #561 have merge
-  conflicts — these are the same two issues that have been stuck since the
-  previous summary period.
+  `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623),
+  `lean-monad-proofs` (updated #623)
+- **Open PR health**: 2 open PRs (#628 ZstdHuffman math properties,
+  #608 ZstdSequence spec). #608 has merge conflicts.
