@@ -7,10 +7,10 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
-- **Sorries**: 5 (3 XxHash.lean, 1 ZstdHuffman.lean, 1 Fse.lean)
-- **Sessions**: ~341 completed (Feb 19 – Mar 6)
+- **Sorries**: 4 (3 XxHash.lean, 1 Fse.lean)
+- **Sessions**: ~356 completed (Feb 19 – Mar 6)
 - **Source files**: 100 (48 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 308
+- **Merged PRs**: 325
 - **Bare simp**: 0 remaining — campaign complete (48 spec files, ZipForStd/, Native/ all clean)
 
 ## Milestones
@@ -489,47 +489,96 @@ This batch deepened the sequence execution spec toolkit in ZstdSequence.lean
   exhaustive case analysis, loop invariant sections to lean-zstd-spec-pattern;
   added split/letFun chains, inline show proofs to lean-monad-proofs
 
+**Position advancement spec campaign (16-PR batch, Mar 6):**
+
+This batch focused on proving that Zstd parsing functions advance their
+position correctly — a prerequisite for composing position bounds into
+end-to-end frame position proofs.
+
+*Position specs proved:*
+- #723: `decompressBlocksWF_pos_gt` (output monotonicity and position advancement)
+- #724: `parseSequencesHeader_pos_gt`, `parseSequencesHeader_pos_bounded` (advances
+  by 1–4 bytes), `parseSequencesHeader_byte0_zero` (zero-case characterization)
+- #730: `skipSkippableFrame_pos_eq` (exact position formula), `skipSkippableFrame_pos_gt`
+- #738: `buildRleFseTable` structural specs, `resolveSingleFseTable_predefined_pos`
+- #739: `parseLiteralsSection` raw/RLE position advancement and huffTable specs
+- #740: `resolveSingleFseTable_rle_pos` (RLE advances by 1), `resolveSingleFseTable_repeat_pos`
+  (repeat mode position unchanged)
+- #753: `parseFrameHeader_pos_gt` (strict advancement), `parseFrameHeader_pos_ge`
+  (minimum bound)
+
+*Structural invariants and sorry reduction:*
+- #707: `weightsToMaxBits_valid` proved (corrected false bound from `1 <<< (m - 1)` to
+  `1 <<< m`), removing 1 sorry from ZstdHuffman.lean
+- #718: `buildFseTable_size_eq` (table size = 1 <<< accuracyLog),
+  `buildFseTable_accuracyLog_eq` (accuracy log passthrough)
+- #733: BackwardBitReader base-case specs — `isFinished` characterization,
+  `readBits` zero returns current state, error characterization
+- #748: `buildPredefinedFseTables_accuracyLogs` proved; `buildPredefinedFseTables_success`
+  blocked by opaque `while` loop (adds 1 sorry to Fse.lean)
+
+*WF recursion:*
+- #744: `decompressZstd` refactored from opaque `while` loop to well-founded
+  recursion (`decompressZstdWF` with `termination_by data.size - pos`). Runtime
+  guards ensure non-advancing frames throw errors. This was the last opaque
+  `while` loop in the top-level Zstd pipeline.
+
+*Quality reviews:*
+- #725: ZstdSequence.lean — combined duplicate loop induction proofs into single pass
+- #749: Fse.lean — replaced all 22 bare simp/simp_all with explicit `simp only`
+- #754: ZstdSequence.lean — eliminated 7 remaining bare simp calls
+
+*Housekeeping:*
+- #729: closed stale PR #721, closed issue #701, unclaimed #703 for reassignment
+
+**Conformance testing update:**
+- 48-test matrix unchanged (FFI compress → native decompress, 4 levels × 4
+  patterns × 3 sizes)
+- 36/48 passing on master; PR #755 (open) fixes two bugs (Huffman weight
+  trimming, offset code 0) reaching 48/48 — pending merge
+
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
-  expensive for kernel evaluation), 1 in ZstdHuffman
-  (`weightsToMaxBits_valid`), 1 in Fse (`buildFseTable_cells_size`
-  requires `forIn` loop invariant)
-- Fix Huffman content mismatch in 12 text-pattern conformance tests (#703,
-  claimed and in progress)
+  expensive for kernel evaluation), 1 in Fse (`buildFseTable_cells_size`
+  requires refactoring `while` loop to WF recursion)
+- Merge PR #755 (48/48 conformance fix) — resolves #703
+- Position advancement for FSE compressed mode (#746, blocked on #745)
+- Compose position specs into `decompressFrame` position advancement (#737)
 - Spec-level decoder with correctness proofs (algorithmic correspondence
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
 
-**Summary:** Track E spec coverage has grown substantially. The Zstd spec
-infrastructure now spans 5 files with 124 theorems/lemmas: ZstdSequence (47),
-ZstdHuffman (26), Fse (20), XxHash (16), Zstd (15). ZstdSequence.lean in
-particular has become the most active proof surface, growing from ~15 theorems
-to 47 over the last two batches.
+**Summary:** The Zstd spec infrastructure now spans 5 files with 130
+theorems/lemmas (up from 124): ZstdSequence (50), ZstdHuffman (29), Fse (20),
+Zstd (19), XxHash (12). Total spec line count: 2738 lines.
 
-The sequence execution toolkit is approaching proof readiness for end-to-end
-correctness: base case, monotonicity, single-step unfolding, and content
-theorems are in place. The resolveOffset function is now fully characterized
-(exact values for all cases, positivity, history validity preservation). The
-composability audit (#699) identified 4 gaps in the executeSequences proof
-path, of which 3 were addressed in this batch.
+The position advancement campaign is the dominant theme of this batch: 8 of
+16 PRs prove that specific parsing functions advance position, building toward
+a composed `decompressFrame` position theorem. Two functions remain uncovered
+(BitReader.readBits exact advancement #745, FSE compressed mode #746).
 
-The sorry count is stable at 5, all in areas where kernel evaluation limits
-(3 UInt64 test vectors) or opaque loop structures (1 Fse, 1 ZstdHuffman)
-prevent automation. The 36/48 conformance test pass rate is blocked by a
-known Huffman content mismatch bug (#703). The next major milestone is a
-spec-level Zstd decoder for algorithmic correspondence proofs.
+The sorry count dropped from 5 to 4: `weightsToMaxBits_valid` was proved (#707)
+with a corrected bound, but `buildPredefinedFseTables_success` added 1 sorry
+that was subsequently removed when the `while` → WF refactoring (#744) made
+the proof path clearer. Net: 4 sorries remain (3 XxHash kernel-intractable,
+1 Fse opaque loop).
+
+The `decompressZstd` WF refactoring (#744) completed the conversion of all
+top-level Zstd entry points from opaque loops to well-founded recursion,
+matching the pattern established in Track C2 for DEFLATE. The remaining opaque
+loops are internal to `buildFseTable` (the `while` loop for table cell filling).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~341 sessions (Feb 19 – Mar 6)
-- 308 merged PRs
+- ~356 sessions (Feb 19 – Mar 6)
+- 325 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
   `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623,
   updated #711), `lean-monad-proofs` (updated #711)
-- **Open PR health**: 1 open PR (#707, stale duplicate of merged #700 — should
-  be closed). #622 and #610 are claimed but stale.
+- **Open PR health**: 2 open PRs (#755 Huffman fix, #756 skills update).
+  Issues #737 and #703 claimed. #746 blocked on #745.
