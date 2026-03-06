@@ -615,6 +615,53 @@ cases hmode : result with
 where `h` retains the outer bind wrapper around a partially-reduced match.
 Use `cases` on the discriminant + `simp only` to reduce cleanly.
 
+## `split at h` Chains with `letFun` Interleaving
+
+When unfolding a function that chains multiple guards (e.g.,
+`executeSequences.loop`), successive `split at h` calls may stall
+because Lean inserts `letFun` wrappers between branches. Interleave
+`dsimp only [letFun]` between splits:
+
+```lean
+rw [executeSequences.loop.eq_2] at h
+split at h
+· simp at h  -- error branch
+· rename_i hlit
+  split at h
+  dsimp only [letFun] at h  -- ← required between splits
+  split at h
+  · simp at h  -- error branch
+  · split at h
+    · simp at h
+    · -- success path: apply IH
+      have ⟨ih_size, ih_le, ih_bound⟩ := ih _ _ _ hlp' h
+```
+
+**Key insight**: `letFun` appears when the desugared `do` block
+creates `have x := expr; body` bindings between monadic operations.
+Without `dsimp only [letFun]`, the next `split at h` cannot see the
+inner `if`/`match` expressions.
+
+## Inline `show` Proofs for Condition Resolution
+
+When `simp only` needs a proof that a condition is true or false,
+use inline `show ... from by omega` instead of a separate `have`:
+
+```lean
+-- Compact: condition proofs inline
+simp only [resolveOffset, show ¬(2 > 3) from by omega,
+  show litLen > 0 from hlit, ↓reduceIte]
+
+-- Verbose equivalent (avoid):
+have h1 : ¬(2 > 3) := by omega
+have h2 : litLen > 0 := hlit
+simp only [resolveOffset, h1, h2, ↓reduceIte]
+```
+
+This pattern is especially useful for resolving multiple `if` conditions
+in a single `simp only` call. Each `show P from proof` provides `P`
+as a simp argument without polluting the local context.
+
 ## `split at h` Step Limit on Large Unfolded Functions
 
 **Problem**: `split at h` uses `simp` internally. On large unfolded functions
@@ -645,3 +692,16 @@ show (!(a == b)) = true
 rw [hb]  -- hb : (a == b) = false, goal becomes (!false) = true
 -- rfl closes it
 ```
+
+## Cross-References
+
+- **Dependent `if` preserving hypotheses through `do` blocks**:
+  `lean-wf-recursion` skill, "Dependent `if` Hypotheses and `do` Early-Throw".
+  Critical when monadic functions need termination proofs later in the block.
+  Use `if hoff : cond then .error ... else do ...` not `do; if cond then throw ...`.
+- **`simp only` vs bare `simp` decisions**: `lean-simp-tactics` skill,
+  "Bare `simp` Resistant Patterns" section.
+- **WF function unfolding** (`rw [f.eq_1]` not `simp only [f]`):
+  `lean-wf-recursion` skill. Never use `simp only [f]` on recursive functions.
+- **Loop invariant proofs for Zstd spec**: `lean-zstd-spec-pattern` skill,
+  "Loop Invariant Theorems via Equation Lemma Matching".
