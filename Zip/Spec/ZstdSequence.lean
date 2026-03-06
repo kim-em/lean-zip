@@ -27,7 +27,7 @@ namespace Zip.Native
 theorem copyBytes_size (dst : ByteArray) (src : ByteArray) (srcPos count : Nat) :
     (copyBytes dst src srcPos count).size = dst.size + count := by
   induction count generalizing dst srcPos with
-  | zero => simp [copyBytes]
+  | zero => rw [copyBytes.eq_1]; rfl
   | succ n ih =>
     rw [copyBytes.eq_1]
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
@@ -39,11 +39,11 @@ theorem copyBytes_getElem_lt (dst src : ByteArray) (srcPos count : Nat) (i : Nat
     (hi : i < dst.size) :
     (copyBytes dst src srcPos count)[i]! = dst[i]! := by
   induction count generalizing dst srcPos with
-  | zero => simp [copyBytes]
+  | zero => rw [copyBytes.eq_1]; rfl
   | succ n ih =>
     rw [copyBytes.eq_1]
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
-    rw [ih (dst.push src[srcPos]!) (srcPos + 1) (by simp [ByteArray.size_push]; omega)]
+    rw [ih (dst.push src[srcPos]!) (srcPos + 1) (by simp only [ByteArray.size_push]; omega)]
     exact ByteArray.push_getElem!_lt dst src[srcPos]! i hi
 
 /-- `copyBytes` content at new positions: the j-th new byte equals `src[srcPos + j]!`.
@@ -61,12 +61,12 @@ theorem copyBytes_getElem_ge (dst src : ByteArray) (srcPos count : Nat) (j : Nat
     | zero =>
       -- The first new byte: after pushing src[srcPos]!, it's at dst.size
       simp only [Nat.add_zero]
-      rw [copyBytes_getElem_lt _ _ _ _ dst.size (by simp [ByteArray.size_push])]
+      rw [copyBytes_getElem_lt _ _ _ _ dst.size (by simp only [ByteArray.size_push]; omega)]
       exact ByteArray.push_getElem!_eq dst src[srcPos]!
     | succ j' =>
       -- Later new bytes: use the IH on the recursive call
       have : dst.size + (j' + 1) = (dst.push src[srcPos]!).size + j' := by
-        simp [ByteArray.size_push]; omega
+        simp only [ByteArray.size_push]; omega
       rw [this, ih (dst.push src[srcPos]!) (srcPos + 1) j' (by omega) (by omega)]
       congr 1; omega
 
@@ -93,7 +93,7 @@ private theorem copyMatch_loop_getElem_lt (offset length start : Nat) (b : ByteA
   split
   · rename_i hlt
     rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega) i
-      (by simp [ByteArray.size_push]; omega)]
+      (by simp only [ByteArray.size_push]; omega)]
     exact ByteArray.push_getElem!_lt b _ i hi
   · rfl
   termination_by length - k
@@ -126,14 +126,14 @@ private theorem copyMatch_loop_getElem_ge_nonoverlap (offset length start : Nat)
   | zero =>
     simp only [Nat.add_zero]
     rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega)
-      b.size (by simp [ByteArray.size_push])]
+      b.size (by simp only [ByteArray.size_push]; omega)]
     rw [ByteArray.push_getElem!_eq]
     exact hprefix _ hsk
   | succ j' =>
     have heq : b.size + (j' + 1) = (b.push b[start + k]!).size + j' := by
-      simp [ByteArray.size_push]; omega
+      simp only [ByteArray.size_push]; omega
     rw [heq, copyMatch_loop_getElem_ge_nonoverlap offset length start buf _ (k + 1) j'
-      hoff hstart hreach (by simp [ByteArray.size_push, hbsize]; omega)
+      hoff hstart hreach (by simp only [ByteArray.size_push, hbsize]; omega)
       (fun i hi => by rw [ByteArray.push_getElem!_lt _ _ _ (by omega)]; exact hprefix i hi)
       (by omega) (by omega)]
     congr 1; omega
@@ -158,7 +158,7 @@ private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
     List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
     init + List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs := by
   induction seqs generalizing init with
-  | nil => simp
+  | nil => simp only [List.foldl_nil, Nat.add_zero]
   | cons s rest ih =>
     simp only [List.foldl_cons]
     rw [ih, ih 0, ih (0 + s.matchLength)]
@@ -179,22 +179,22 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArr
   induction seqs generalizing output history litPos with
   | nil =>
     rw [executeSequences.loop.eq_1] at h
-    simp at h
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, _, rfl⟩ := h
-    exact ⟨by simp, Nat.le_refl _, hlp⟩
+    exact ⟨by simp only [List.foldl_nil, Nat.sub_self, Nat.add_zero], Nat.le_refl _, hlp⟩
   | cons seq rest ih =>
     rw [executeSequences.loop.eq_2] at h
     split at h
-    · simp at h
+    · exact absurd h (by simp only [reduceCtorEq, not_false_eq_true])
     · rename_i hlit
       split at h
-      simp only [letFun] at h
+      simp only [] at h
       split at h
-      · simp at h
+      · exact absurd h (by simp only [reduceCtorEq, not_false_eq_true])
       · split at h
-        · simp at h
+        · exact absurd h (by simp only [reduceCtorEq, not_false_eq_true])
         · split at h
-          · simp at h
+          · exact absurd h (by simp only [reduceCtorEq, not_false_eq_true])
           · have hlp' : litPos + seq.literalLength ≤ literals.size := by omega
             have ⟨ih_size, ih_le, ih_bound⟩ := ih _ _ _ hlp' h
             rw [copyMatch_size, copyBytes_size] at ih_size
@@ -351,7 +351,8 @@ theorem resolveOffset_shifted1_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 1 history 0).1 = history[1]!
     ∧ (resolveOffset 1 history 0).2 = #[history[1]!, history[0]!, history[2]!] := by
-  simp [resolveOffset]
+  simp only [resolveOffset, show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega, ↓reduceIte,
+    and_self]
 
 /-- When `rawOffset = 2`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[2]!` (third most recent) and the history
@@ -360,7 +361,8 @@ theorem resolveOffset_shifted2_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 2 history 0).1 = history[2]!
     ∧ (resolveOffset 2 history 0).2 = #[history[2]!, history[0]!, history[1]!] := by
-  simp [resolveOffset]
+  simp only [resolveOffset, show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega, ↓reduceIte,
+    and_self]
 
 /-- When `rawOffset = 3`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[0]! - 1` (most recent minus one) and the history
@@ -370,7 +372,8 @@ theorem resolveOffset_shifted3_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 3 history 0).1 = history[0]! - 1
     ∧ (resolveOffset 3 history 0).2 = #[history[0]! - 1, history[1]!, history[2]!] := by
-  simp [resolveOffset]
+  simp only [resolveOffset, show ¬(3 > 3) from by omega, show ¬(0 > 0) from by omega, ↓reduceIte,
+    and_self]
 
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
@@ -430,7 +433,7 @@ theorem executeSequences_output_length (seqs : Array ZstdSequence) (literals : B
   unfold executeSequences at h
   simp only [bind, Except.bind, pure, Pure.pure, Except.pure] at h
   split at h
-  · simp at h
+  · exact absurd h (by simp only [reduceCtorEq, not_false_eq_true])
   · rename_i v heq
     simp only [Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨hout, _⟩ := h
