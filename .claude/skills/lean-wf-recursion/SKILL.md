@@ -230,6 +230,33 @@ else ...
 
 This was required for `decodeCLSymbols` and `decodeSymbols` WF conversions.
 
+### Dependent `if` Hypotheses and `do` Early-Throw
+
+In `do` notation, `if cond then throw ...` (without explicit `else`)
+does NOT bind the negated condition as a named hypothesis. This means
+termination proofs later in the block cannot reference the guard:
+
+```lean
+-- BAD: hoff is NOT available later in the do block
+def f ... := do
+  if hoff : data.size ≤ off then
+    throw "error"
+  -- hoff is lost through monadic bindings (← desugaring)
+  ...
+  have : data.size - newOff < data.size - off := by omega  -- FAILS
+
+-- GOOD: hoff survives as the else branch's hypothesis
+def f ... :=
+  if hoff : data.size ≤ off then
+    .error "error"
+  else do
+    -- hoff : ¬(data.size ≤ off) is in scope throughout
+    ...
+    have : data.size - newOff < data.size - off := by omega  -- WORKS
+```
+
+This was required for `decompressBlocksWF` in `ZstdFrame.lean`.
+
 ## Fuel-to-WF Migration Checklist
 
 When converting a fuel-based function to well-founded recursion:
