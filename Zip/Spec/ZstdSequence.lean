@@ -249,6 +249,28 @@ theorem resolveOffset_positive_litLen_pos (rawOffset : Nat) (history : Array Nat
     simp only [resolveOffset, show n + 4 > 3 from by omega, ↓reduceIte]
     omega
 
+/-- When `rawOffset = 1`, `history.size = 3`, and `literalLength > 0`, the resolved
+    offset equals `history[0]!` (the most recent offset). This is the exact value
+    returned by the RFC 8878 §3.1.1.5 repeat offset mechanism for code 1. -/
+theorem resolveOffset_repeat1_val (history : Array Nat) (litLen : Nat)
+    (_hsize : history.size = 3) (hlit : litLen > 0) :
+    (resolveOffset 1 history litLen).1 = history[0]! := by
+  simp only [resolveOffset, show ¬(1 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
+
+/-- When `rawOffset = 2`, `history.size = 3`, and `literalLength > 0`, the resolved
+    offset equals `history[1]!` (the second most recent offset). -/
+theorem resolveOffset_repeat2_val (history : Array Nat) (litLen : Nat)
+    (_hsize : history.size = 3) (hlit : litLen > 0) :
+    (resolveOffset 2 history litLen).1 = history[1]! := by
+  simp only [resolveOffset, show ¬(2 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
+
+/-- When `rawOffset = 3`, `history.size = 3`, and `literalLength > 0`, the resolved
+    offset equals `history[2]!` (the third most recent offset). -/
+theorem resolveOffset_repeat3_val (history : Array Nat) (litLen : Nat)
+    (_hsize : history.size = 3) (hlit : litLen > 0) :
+    (resolveOffset 3 history litLen).1 = history[2]! := by
+  simp only [resolveOffset, show ¬(3 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
+
 /-- The initial offset history `#[1, 4, 8]` is valid. -/
 theorem initial_history_valid : ValidOffsetHistory #[1, 4, 8] := by decide
 
