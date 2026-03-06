@@ -142,4 +142,45 @@ theorem parseBlockHeader_blockSize_le (data : ByteArray) (pos : Nat)
   -- This will need issue #540's validation work to become provable.
   sorry
 
+/-! ## Block decompression correctness -/
+
+/-- When `decompressRawBlock` succeeds, the output has exactly `blockSize` bytes. -/
+theorem decompressRawBlock_size (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (result, pos')) :
+    result.size = blockSize.toNat := by
+  unfold Zip.Native.decompressRawBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h
+    simp only [ByteArray.size_extract]
+    omega
+
+/-- When `decompressRLEBlock` succeeds, the output has exactly `blockSize` bytes. -/
+theorem decompressRLEBlock_size (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (result, pos')) :
+    result.size = blockSize.toNat := by
+  unfold Zip.Native.decompressRLEBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h
+    exact Array.size_replicate ..
+
+/-- When `decompressRLEBlock` succeeds, every byte in the output equals the
+    source byte at position `pos` in the input. -/
+theorem decompressRLEBlock_content (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (result, pos'))
+    (i : Nat) (hi : i < result.size) :
+    result[i] = data[pos]! := by
+  unfold Zip.Native.decompressRLEBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h
+    rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
+
 end Zstd.Spec
