@@ -89,30 +89,34 @@ def readProbValue (br : BitReader) (remaining : Nat) :
 
 /-- Main loop for FSE distribution decoding. Processes symbols one at a time,
     reading probability values and handling zero-repeat sequences.
-    Uses fuel for termination. -/
+    Uses fuel for termination.
+
+    Written without `do` notation for clean equation lemmas in proofs. -/
 def decodeFseLoop (br : BitReader) (remaining : Nat) (probs : Array Int32)
     (symbolNum : Nat) (maxSymbols : Nat) : Nat →
     Except String (Nat × Array Int32 × Nat × BitReader)
   | 0 => .error "FSE: distribution loop exceeded maximum iterations"
-  | fuel + 1 => do
+  | fuel + 1 =>
     if ¬(remaining > 0 ∧ symbolNum < maxSymbols) then
-      return (remaining, probs, symbolNum, br)
-    let (val, br) ← readProbValue br remaining
-    let prob : Int32 := Int32.ofNat val - 1
-    if prob == 0 then
-      let (probs, symbolNum, br) ←
-        decodeZeroRepeats br (probs.push 0) (symbolNum + 1) maxSymbols 1000
-      decodeFseLoop br remaining probs symbolNum maxSymbols fuel
+      .ok (remaining, probs, symbolNum, br)
     else
-      let probs := probs.push prob
-      let symbolNum := symbolNum + 1
-      if prob == -1 then
-        decodeFseLoop br (remaining - 1) probs symbolNum maxSymbols fuel
-      else
-        let probNat := int32ToNat prob
-        if probNat > remaining then
-          throw s!"FSE: probability {prob} exceeds remaining {remaining}"
-        decodeFseLoop br (remaining - probNat) probs symbolNum maxSymbols fuel
+      match readProbValue br remaining with
+      | .error e => .error e
+      | .ok (val, br) =>
+        let prob : Int32 := Int32.ofNat val - 1
+        if (prob == 0) = true then
+          match decodeZeroRepeats br (probs.push 0) (symbolNum + 1) maxSymbols 1000 with
+          | .error e => .error e
+          | .ok (probs, symbolNum, br) =>
+            decodeFseLoop br remaining probs symbolNum maxSymbols fuel
+        else if (prob == -1) = true then
+          decodeFseLoop br (remaining - 1) (probs.push prob) (symbolNum + 1) maxSymbols fuel
+        else
+          let probNat := int32ToNat prob
+          if probNat > remaining then
+            .error s!"FSE: probability {prob} exceeds remaining {remaining}"
+          else
+            decodeFseLoop br (remaining - probNat) (probs.push prob) (symbolNum + 1) maxSymbols fuel
 
 /-- Decode an FSE distribution (normalized probabilities) from a bitstream.
     `maxSymbols` is the maximum number of symbols allowed (e.g. 256 for literals,
@@ -122,17 +126,21 @@ def decodeFseLoop (br : BitReader) (remaining : Nat) (probs : Array Int32)
     0 = symbol not present. -/
 def decodeFseDistribution (br : Zip.Native.BitReader) (maxSymbols : Nat)
     (maxAccLog : Nat := 11) :
-    Except String (Array Int32 × Nat × Zip.Native.BitReader) := do
-  let (accRaw, br) ← br.readBits 4
-  let accuracyLog := accRaw.toNat + 5
-  if accuracyLog > maxAccLog then
-    throw s!"FSE: accuracy log {accuracyLog} exceeds maximum {maxAccLog}"
-  let tableSize := 1 <<< accuracyLog
-  let (remaining, probs, _, br) ←
-    decodeFseLoop br tableSize #[] 0 maxSymbols 10000
-  if remaining != 0 then
-    throw s!"FSE: probabilities don't sum to table size: {remaining} remaining"
-  return (probs, accuracyLog, br)
+    Except String (Array Int32 × Nat × Zip.Native.BitReader) :=
+  match br.readBits 4 with
+  | .error e => .error e
+  | .ok (accRaw, br) =>
+    let accuracyLog := accRaw.toNat + 5
+    if accuracyLog > maxAccLog then
+      .error s!"FSE: accuracy log {accuracyLog} exceeds maximum {maxAccLog}"
+    else
+      match decodeFseLoop br (1 <<< accuracyLog) #[] 0 maxSymbols 10000 with
+      | .error e => .error e
+      | .ok (remaining, probs, _, br) =>
+        if remaining != 0 then
+          .error s!"FSE: probabilities don't sum to table size: {remaining} remaining"
+        else
+          .ok (probs, accuracyLog, br)
 
 /-- Build an FSE decoding table from a probability distribution.
     `probs` is the array from `decodeFseDistribution`.
