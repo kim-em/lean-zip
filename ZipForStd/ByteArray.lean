@@ -58,6 +58,14 @@ theorem push_getElem!_lt (buf : ByteArray) (b : UInt8) (j : Nat)
   rw [getElem!_pos (buf.push b) j hj', getElem!_pos buf j hj]
   exact Array.getElem_push_lt hj
 
+/-- `ByteArray.push` places the new byte at index `buf.size`:
+    `(buf.push b)[buf.size]! = b`. -/
+theorem push_getElem!_eq (buf : ByteArray) (b : UInt8) :
+    (buf.push b)[buf.size]! = b := by
+  have h : buf.size < (buf.push b).size := by simp [ByteArray.size_push]
+  rw [getElem!_pos (buf.push b) buf.size h]
+  exact Array.getElem_push_eq
+
 /-! ## `set!` interaction lemmas -/
 
 /-- ByteArray.getElem! is the same as Array.getElem! on the underlying data. -/
