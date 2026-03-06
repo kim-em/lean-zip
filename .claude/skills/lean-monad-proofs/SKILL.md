@@ -855,6 +855,34 @@ rw [hb]  -- hb : (a == b) = false, goal becomes (!false) = true
 -- rfl closes it
 ```
 
+## `repeat split at h` Is Depth-First — Use `iterate` for Breadth
+
+**Problem**: `repeat split at h` follows ONE depth-first branch to
+completion, leaving all other goals with partially-split hypotheses.
+After it finishes, remaining goals still have `if`/`match` in `h`.
+
+**Solution**: Use `iterate N (all_goals (try (first | contradiction | (split at h))))`:
+
+```lean
+-- After by_cases eliminates error guards and initial split at h:
+repeat split at h          -- depth-first: only processes one branch
+iterate 5 (all_goals (try (first | contradiction | (split at h))))
+-- Now ALL goals either closed by contradiction or fully split
+all_goals first
+  | contradiction
+  | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
+     obtain ⟨-, rfl⟩ := h; omega)
+```
+
+**Why `contradiction` not `nomatch` in `first`**: `nomatch` produces
+elaboration errors that `first` cannot catch (not a tactic failure).
+`contradiction` is a proper tactic that fails gracefully. Use
+`contradiction` inside `first` combinators, `exact nomatch h` standalone.
+
+**Worked example**: `parseFrameHeader_pos_gt` in `Zip/Spec/Zstd.lean` —
+uses `by_cases` for 3 error guards, `split at h` for the singleSegment
+branch, then `iterate 5 (all_goals ...)` to process remaining branches.
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
