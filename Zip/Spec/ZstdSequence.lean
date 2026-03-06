@@ -27,7 +27,7 @@ namespace Zip.Native
 theorem copyBytes_size (dst : ByteArray) (src : ByteArray) (srcPos count : Nat) :
     (copyBytes dst src srcPos count).size = dst.size + count := by
   induction count generalizing dst srcPos with
-  | zero => simp [copyBytes]
+  | zero => simp only [copyBytes, ↓reduceIte]; omega
   | succ n ih =>
     rw [copyBytes.eq_1]
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
@@ -39,11 +39,11 @@ theorem copyBytes_getElem_lt (dst src : ByteArray) (srcPos count : Nat) (i : Nat
     (hi : i < dst.size) :
     (copyBytes dst src srcPos count)[i]! = dst[i]! := by
   induction count generalizing dst srcPos with
-  | zero => simp [copyBytes]
+  | zero => simp only [copyBytes, ↓reduceIte]
   | succ n ih =>
     rw [copyBytes.eq_1]
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
-    rw [ih (dst.push src[srcPos]!) (srcPos + 1) (by simp [ByteArray.size_push]; omega)]
+    rw [ih (dst.push src[srcPos]!) (srcPos + 1) (by simp only [ByteArray.size_push]; omega)]
     exact ByteArray.push_getElem!_lt dst src[srcPos]! i hi
 
 /-- `copyBytes` content at new positions: the j-th new byte equals `src[srcPos + j]!`.
@@ -61,12 +61,12 @@ theorem copyBytes_getElem_ge (dst src : ByteArray) (srcPos count : Nat) (j : Nat
     | zero =>
       -- The first new byte: after pushing src[srcPos]!, it's at dst.size
       simp only [Nat.add_zero]
-      rw [copyBytes_getElem_lt _ _ _ _ dst.size (by simp [ByteArray.size_push])]
+      rw [copyBytes_getElem_lt _ _ _ _ dst.size (by simp only [ByteArray.size_push]; omega)]
       exact ByteArray.push_getElem!_eq dst src[srcPos]!
     | succ j' =>
       -- Later new bytes: use the IH on the recursive call
       have : dst.size + (j' + 1) = (dst.push src[srcPos]!).size + j' := by
-        simp [ByteArray.size_push]; omega
+        simp only [ByteArray.size_push]; omega
       rw [this, ih (dst.push src[srcPos]!) (srcPos + 1) j' (by omega) (by omega)]
       congr 1; omega
 
@@ -93,7 +93,7 @@ private theorem copyMatch_loop_getElem_lt (offset length start : Nat) (b : ByteA
   split
   · rename_i hlt
     rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega) i
-      (by simp [ByteArray.size_push]; omega)]
+      (by simp only [ByteArray.size_push]; omega)]
     exact ByteArray.push_getElem!_lt b _ i hi
   · rfl
   termination_by length - k
@@ -126,14 +126,14 @@ private theorem copyMatch_loop_getElem_ge_nonoverlap (offset length start : Nat)
   | zero =>
     simp only [Nat.add_zero]
     rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega)
-      b.size (by simp [ByteArray.size_push])]
+      b.size (by simp only [ByteArray.size_push]; omega)]
     rw [ByteArray.push_getElem!_eq]
     exact hprefix _ hsk
   | succ j' =>
     have heq : b.size + (j' + 1) = (b.push b[start + k]!).size + j' := by
-      simp [ByteArray.size_push]; omega
+      simp only [ByteArray.size_push]; omega
     rw [heq, copyMatch_loop_getElem_ge_nonoverlap offset length start buf _ (k + 1) j'
-      hoff hstart hreach (by simp [ByteArray.size_push, hbsize]; omega)
+      hoff hstart hreach (by simp only [ByteArray.size_push, hbsize]; omega)
       (fun i hi => by rw [ByteArray.push_getElem!_lt _ _ _ (by omega)]; exact hprefix i hi)
       (by omega) (by omega)]
     congr 1; omega
@@ -172,15 +172,15 @@ private theorem copyMatch_loop_getElem_ge (offset length start : Nat)
   | zero =>
     simp only [Nat.add_zero]
     rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega)
-      b.size (by simp [ByteArray.size_push])]
+      b.size (by simp only [ByteArray.size_push]; omega)]
     rw [ByteArray.push_getElem!_eq]
     exact hprefix _ hsk
   | succ j' =>
     have heq : b.size + (j' + 1) = (b.push b[start + (k % offset)]!).size + j' := by
-      simp [ByteArray.size_push]; omega
+      simp only [ByteArray.size_push]; omega
     simp only [show k + (j' + 1) = k + 1 + j' from by omega]
     rw [heq, copyMatch_loop_getElem_ge offset length start buf _ (k + 1) j'
-      hoff hstart (by simp [ByteArray.size_push, hbsize]; omega)
+      hoff hstart (by simp only [ByteArray.size_push, hbsize]; omega)
       (fun i hi => by rw [ByteArray.push_getElem!_lt _ _ _ (by omega)]; exact hprefix i hi)
       (by omega) (by omega)]
   termination_by length - k
@@ -211,7 +211,7 @@ private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
     List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
     init + List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs := by
   induction seqs generalizing init with
-  | nil => simp
+  | nil => simp only [List.foldl_nil, Nat.add_zero]
   | cons s rest ih =>
     simp only [List.foldl_cons]
     rw [ih, ih 0, ih (0 + s.matchLength)]
@@ -660,7 +660,7 @@ theorem decodeMatchLenValue_ge_three (code : Nat) (extraBits : UInt32) (n : Nat)
     simp only [pure, Except.pure, Except.ok.injEq] at h
     subst h
     exact Nat.le_trans (matchLen_baselines_ge_three code hlt) (Nat.le_add_right _ _)
-  · simp at h
+  · exact nomatch h
 
 /-- When `code > 0`, `decodeOffsetValue` returns a positive value.
     This follows from `1 <<< code > 0` for any natural `code`. -/
@@ -698,7 +698,7 @@ theorem executeSequences_output_length (seqs : Array ZstdSequence) (literals : B
   unfold executeSequences at h
   simp only [bind, Except.bind, pure, Pure.pure, Except.pure] at h
   split at h
-  · simp at h
+  · exact nomatch h
   · rename_i v heq
     simp only [Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨hout, _⟩ := h
