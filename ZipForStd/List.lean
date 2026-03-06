@@ -13,7 +13,7 @@ theorem foldl_add_init (f : Nat → Nat) (init : Nat) (ls : List Nat) :
     ls.foldl (fun acc l => acc + f l) init =
       init + ls.foldl (fun acc l => acc + f l) 0 := by
   induction ls generalizing init with
-  | nil => simp
+  | nil => simp only [foldl_nil, Nat.add_zero]
   | cons x xs ih => simp only [foldl_cons, Nat.zero_add]; rw [ih, ih (f x)]; omega
 
 /-- A `foldl` that counts elements equal to `b` commutes with the initial value. -/
@@ -21,7 +21,7 @@ theorem foldl_count_init (b : Nat) (init : Nat) (ls : List Nat) :
     ls.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) init =
       init + ls.foldl (fun acc l => if (l == b) = true then acc + 1 else acc) 0 := by
   induction ls generalizing init with
-  | nil => simp
+  | nil => simp only [beq_iff_eq, foldl_nil, Nat.add_zero]
   | cons x xs ih =>
     simp only [foldl_cons, Nat.zero_add]
     split
@@ -34,7 +34,7 @@ theorem foldl_count_init (b : Nat) (init : Nat) (ls : List Nat) :
 theorem getLast?_getD_eq_getLast! [Inhabited α] (l : List α) (h : l.length > 0) :
     l.getLast?.getD default = l.getLast! := by
   induction l with
-  | nil => simp at h
+  | nil => simp only [length_nil, gt_iff_lt, Nat.lt_irrefl] at h
   | cons a as ih =>
     cases as with
     | nil => rfl
@@ -46,7 +46,7 @@ theorem getLast?_getD_eq_getLast! [Inhabited α] (l : List α) (h : l.length > 0
 theorem foldl_set_length (positions : List Nat) (f : Nat → α) (init : List α) :
     (positions.foldl (fun a pos => a.set pos (f pos)) init).length = init.length := by
   induction positions generalizing init with
-  | nil => simp
+  | nil => simp only [foldl_nil]
   | cons p ps ih => simp [ih, List.length_set]
 
 /-- At a position not in the fold list, the value is unchanged from init. -/
@@ -55,7 +55,7 @@ theorem foldl_set_getElem_not_mem (positions : List Nat) (f : Nat → α)
     (positions.foldl (fun a pos => a.set pos (f pos)) init)[p]'(by
       rw [foldl_set_length]; exact hlt) = init[p] := by
   induction positions generalizing init with
-  | nil => simp
+  | nil => simp only [foldl_nil]
   | cons q qs ih =>
     simp only [List.mem_cons, not_or] at hp
     simp only [List.foldl_cons]
@@ -70,7 +70,7 @@ theorem foldl_set_getElem_mem (positions : List Nat) (f : Nat → α)
     (positions.foldl (fun a pos => a.set pos (f pos)) init)[p]'(by
       rw [foldl_set_length]; exact hlt) = f p := by
   induction positions generalizing init with
-  | nil => simp at hp
+  | nil => simp only [not_mem_nil] at hp
   | cons q qs ih =>
     simp only [List.mem_cons] at hp
     simp only [List.foldl_cons]
@@ -130,10 +130,10 @@ theorem flatMap_drop_mul (l : List α) (f : α → List β)
     (k n : Nat) (hk : ∀ a, (f a).length = k) :
     (l.flatMap f).drop (n * k) = (l.drop n).flatMap f := by
   induction n generalizing l with
-  | zero => simp
+  | zero => simp only [Nat.zero_mul, drop_zero]
   | succ m ih =>
     cases l with
-    | nil => simp
+    | nil => simp only [flatMap_nil, drop_nil]
     | cons a rest =>
       simp only [flatMap_cons, drop_succ_cons]
       have hk_eq : (m + 1) * k = (f a).length + m * k := by
@@ -153,7 +153,7 @@ theorem flatMap_uniform_drop {f : α → List β} (hf : ∀ a, (f a).length = k)
     (l : List α) (i : Nat) (hi : i < l.length) :
     (l.flatMap f).drop (i * k) = f l[i] ++ (l.flatMap f).drop ((i + 1) * k) := by
   induction l generalizing i with
-  | nil => simp at hi
+  | nil => simp only [length_nil, Nat.not_lt_zero] at hi
   | cons b rest ih =>
     cases i with
     | zero =>

@@ -246,10 +246,12 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
     cases hcle : Deflate.Spec.encodeCLEntries clTable clEntries with
     | none =>
       -- bare simp: Option.bind chain with none
-      rw [hcle] at henc; simp at henc
+      rw [hcle] at henc; simp only [List.getD_eq_getElem?_getD, List.append_assoc,
+        Option.bind_eq_bind, Option.bind_none, Option.bind_fun_none, reduceCtorEq] at henc
     | some sb =>
-      -- bare simp: Option.bind chain with some
-      rw [hcle] at henc; simp at henc; exact ⟨sb, rfl, henc.symm⟩
+      rw [hcle] at henc; simp only [List.getD_eq_getElem?_getD, List.append_assoc,
+        Option.bind_eq_bind, Option.bind_some, Option.some.injEq] at henc
+      exact ⟨sb, rfl, henc.symm⟩
   obtain ⟨symbolBits, hcle_eq, hbits_eq⟩ := henc_cl
   subst hbits_eq
   -- Bounds needed throughout
