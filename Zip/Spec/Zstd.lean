@@ -305,6 +305,35 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   -- Since h says the result is .ok, the checksum guard passed
   grind
 
+/-! ## Skippable frame specification -/
+
+/-- When `skipSkippableFrame` succeeds, the returned position is exactly
+    `pos + 8 + frameSize` where `frameSize` is the 4-byte little-endian value
+    at `pos + 4` in the input data. -/
+theorem skipSkippableFrame_pos_eq (data : ByteArray) (pos : Nat)
+    (pos' : Nat)
+    (h : Zip.Native.skipSkippableFrame data pos = .ok pos') :
+    pos' = pos + 8 + (Binary.readUInt32LE data (pos + 4)).toNat := by
+  unfold Zip.Native.skipSkippableFrame at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · split at h
+      · exact nomatch h
+      · exact (Except.ok.inj h).symm
+
+/-- When `skipSkippableFrame` succeeds, the returned position is strictly greater than
+    the input position. The skippable frame header is 8 bytes, so the result is at least
+    `pos + 8`. -/
+theorem skipSkippableFrame_pos_gt (data : ByteArray) (pos : Nat)
+    (pos' : Nat)
+    (h : Zip.Native.skipSkippableFrame data pos = .ok pos') :
+    pos' > pos := by
+  have := skipSkippableFrame_pos_eq data pos pos' h
+  omega
+
 /-! ## Block loop structural lemmas -/
 
 /-- When `decompressBlocksWF` succeeds, the output ByteArray is at least as large as
