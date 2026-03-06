@@ -292,6 +292,49 @@ theorem executeSequences_loop_output_size_ge
             rw [copyMatch_size, copyBytes_size] at this
             omega
 
+/-- Single-step unfolding: when all guards pass, processing `seq :: rest` equals
+    processing `rest` with the intermediate state after one copy-literal +
+    resolve-offset + copy-match step. This is the fundamental building block
+    for compositional reasoning about `executeSequences.loop`. -/
+theorem executeSequences_loop_cons (seq : ZstdSequence) (rest : List ZstdSequence)
+    (literals : ByteArray) (output : ByteArray) (history : Array Nat)
+    (litPos windowSize : Nat)
+    (hlit : litPos + seq.literalLength ≤ literals.size)
+    (hoff : (resolveOffset seq.offset history seq.literalLength).1 ≠ 0)
+    (hreach : (resolveOffset seq.offset history seq.literalLength).1
+      ≤ (copyBytes output literals litPos seq.literalLength).size)
+    (hwin : windowSize = 0
+      ∨ (resolveOffset seq.offset history seq.literalLength).1 ≤ windowSize) :
+    executeSequences.loop (seq :: rest) literals output history litPos windowSize =
+      let output' := copyBytes output literals litPos seq.literalLength
+      let (offset, history') := resolveOffset seq.offset history seq.literalLength
+      let output'' := copyMatch output' offset seq.matchLength
+      executeSequences.loop rest literals output'' history'
+        (litPos + seq.literalLength) windowSize := by
+  rw [executeSequences.loop.eq_2]
+  simp only [show ¬(litPos + seq.literalLength > literals.size) from by omega, ↓reduceIte]
+  split
+  · rename_i h; exact absurd (beq_iff_eq.mp h) hoff
+  · split
+    · rename_i h; exact absurd hreach (by omega)
+    · split
+      · rename_i h
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+        exact absurd h.2 (by cases hwin with | inl hw => omega | inr hw => omega)
+      · rfl
+
+/-- After processing one sequence, the intermediate output has grown by exactly
+    `seq.literalLength + seq.matchLength` bytes. Composes `copyMatch_size` and
+    `copyBytes_size`. -/
+theorem executeSequences_loop_cons_output_size (seq : ZstdSequence)
+    (literals : ByteArray) (output : ByteArray) (history : Array Nat)
+    (litPos : Nat) :
+    let output' := copyBytes output literals litPos seq.literalLength
+    let (offset, _) := resolveOffset seq.offset history seq.literalLength
+    (copyMatch output' offset seq.matchLength).size =
+      output.size + seq.literalLength + seq.matchLength := by
+  simp only [copyMatch_size, copyBytes_size]
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
