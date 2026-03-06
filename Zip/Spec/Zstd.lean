@@ -305,4 +305,165 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   -- Since h says the result is .ok, the checksum guard passed
   grind
 
+/-! ## Block loop structural lemmas -/
+
+/-- When `decompressBlocksWF` succeeds, the output ByteArray is at least as large as
+    the input `output` parameter. Blocks only append data, never shrink the output. -/
+theorem decompressBlocksWF_output_size_ge (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (result, pos')) :
+    result.size ≥ output.size := by
+  unfold Zip.Native.decompressBlocksWF at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · rename_i hoff
+    split at h
+    · exact nomatch h  -- parseBlockHeader error
+    · -- parseBlockHeader ok
+      split at h
+      · exact nomatch h  -- blockSize > 131072
+      · split at h
+        · exact nomatch h  -- windowSize guard
+        · split at h  -- blockType match
+          · -- raw
+            split at h
+            · exact nomatch h  -- decompressRawBlock error
+            · split at h  -- lastBlock
+              · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                simp only [ByteArray.size_append]; omega
+              · split at h  -- position guard
+                · exact nomatch h
+                · have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
+                  simp only [ByteArray.size_append] at ih; omega
+          · -- rle
+            split at h
+            · exact nomatch h
+            · split at h
+              · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                simp only [ByteArray.size_append]; omega
+              · split at h
+                · exact nomatch h
+                · have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
+                  simp only [ByteArray.size_append] at ih; omega
+          · -- compressed: many sub-operations (parseLiteralsSection, parseSequencesHeader, etc.)
+            -- All paths produce output ++ something
+            split at h  -- parseLiteralsSection
+            · exact nomatch h
+            · split at h  -- parseSequencesHeader
+              · exact nomatch h
+              · split at h  -- numSeq == 0 check
+                · -- numSeq == 0: output ++ literals
+                  split at h  -- lastBlock
+                  · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                    simp only [ByteArray.size_append]; omega
+                  · split at h
+                    · exact nomatch h
+                    · have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
+                      simp only [ByteArray.size_append] at ih; omega
+                · -- numSeq > 0: resolveSequenceFseTables, decodeSequences, executeSequences
+                  split at h  -- resolveSequenceFseTables
+                  · exact nomatch h
+                  · split at h  -- BackwardBitReader.init
+                    · exact nomatch h
+                    · split at h  -- decodeSequences
+                      · exact nomatch h
+                      · split at h  -- executeSequences
+                        · exact nomatch h
+                        · split at h  -- lastBlock
+                          · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                            simp only [ByteArray.size_append]; omega
+                          · split at h
+                            · exact nomatch h
+                            · have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
+                              simp only [ByteArray.size_append] at ih; omega
+          · exact nomatch h  -- reserved
+  termination_by data.size - off
+  decreasing_by all_goals omega
+
+/-- When `decompressBlocksWF` succeeds, the returned position is strictly greater
+    than the input offset. Each block header is at least 3 bytes. -/
+theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (result, pos')) :
+    pos' > off := by
+  unfold Zip.Native.decompressBlocksWF at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · rename_i hoff
+    split at h
+    · exact nomatch h  -- parseBlockHeader error
+    · -- parseBlockHeader ok
+      split at h
+      · exact nomatch h  -- blockSize > 131072
+      · split at h
+        · exact nomatch h  -- windowSize guard
+        · split at h  -- blockType match
+          · -- raw
+            split at h
+            · exact nomatch h
+            · split at h  -- lastBlock
+              · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                have h1 := parseBlockHeader_pos_eq _ _ _ _ (by assumption)
+                have h2 := decompressRawBlock_pos_eq _ _ _ _ _ (by assumption)
+                omega
+              · split at h
+                · exact nomatch h
+                · have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
+                  omega
+          · -- rle
+            split at h
+            · exact nomatch h
+            · split at h
+              · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                have h1 := parseBlockHeader_pos_eq _ _ _ _ (by assumption)
+                have h2 := decompressRLEBlock_pos_eq _ _ _ _ _ (by assumption)
+                omega
+              · split at h
+                · exact nomatch h
+                · have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
+                  omega
+          · -- compressed
+            split at h
+            · exact nomatch h
+            · split at h
+              · exact nomatch h
+              · split at h
+                · -- numSeq == 0
+                  split at h
+                  · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                    have h1 := parseBlockHeader_pos_eq _ _ _ _ (by assumption)
+                    omega
+                  · split at h
+                    · exact nomatch h
+                    · have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
+                      omega
+                · -- numSeq > 0
+                  split at h
+                  · exact nomatch h
+                  · split at h
+                    · exact nomatch h
+                    · split at h
+                      · exact nomatch h
+                      · split at h
+                        · exact nomatch h
+                        · split at h
+                          · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+                            have h1 := parseBlockHeader_pos_eq _ _ _ _ (by assumption)
+                            omega
+                          · split at h
+                            · exact nomatch h
+                            · have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
+                              omega
+          · exact nomatch h  -- reserved
+  termination_by data.size - off
+  decreasing_by all_goals omega
+
 end Zstd.Spec
