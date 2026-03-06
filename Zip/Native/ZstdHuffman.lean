@@ -70,6 +70,54 @@ def weightsToMaxBits (weights : Array UInt8) : Except String Nat := do
     throw "Zstd: all weights are zero"
   return findMaxBitsWF weightSum 0 1 (by omega)
 
+/-- Inner loop: fill `stride` entries in the Huffman table starting at `code`.
+    WF recursive version of `for j in [:stride]` for provability.
+    Each step either writes via `set!` (preserving size) or skips. -/
+def fillHuffmanTableInnerWF (table : Array HuffmanEntry) (entry : HuffmanEntry)
+    (code stride tableSize sym lastSymbol j : Nat) :
+    Except String (Array HuffmanEntry) :=
+  if j ≥ stride then
+    .ok table
+  else
+    let idx := code + j
+    if idx < tableSize then
+      fillHuffmanTableInnerWF (table.set! idx entry) entry
+        code stride tableSize sym lastSymbol (j + 1)
+    else if sym != lastSymbol then
+      .error s!"Zstd: Huffman table index {idx} out of range (tableSize={tableSize})"
+    else
+      fillHuffmanTableInnerWF table entry
+        code stride tableSize sym lastSymbol (j + 1)
+termination_by stride - j
+
+/-- Outer loop: fill the Huffman lookup table for all symbols.
+    WF recursive version of `for sym in [:numSymbols]` for provability.
+    Threads both `table` and `nextCode` through iterations. -/
+def fillHuffmanTableWF (table : Array HuffmanEntry) (allWeights : Array UInt8)
+    (nextCode : Array Nat) (maxBits tableSize numSymbols lastSymbol sym : Nat) :
+    Except String (Array HuffmanEntry × Array Nat) :=
+  if sym ≥ numSymbols then
+    .ok (table, nextCode)
+  else
+    let w := allWeights[sym]!.toNat
+    if w == 0 then
+      fillHuffmanTableWF table allWeights nextCode maxBits tableSize
+        numSymbols lastSymbol (sym + 1)
+    else
+      let numBits := maxBits + 1 - w
+      let code := nextCode[w]!
+      let nextCode' := nextCode.set! w (code + (1 <<< (w - 1)))
+      let entry : HuffmanEntry :=
+        { symbol := sym.toUInt8, numBits := numBits.toUInt8 }
+      let stride := 1 <<< (w - 1)
+      match fillHuffmanTableInnerWF table entry code stride tableSize
+              sym lastSymbol 0 with
+      | .ok table' =>
+        fillHuffmanTableWF table' allWeights nextCode' maxBits tableSize
+          numSymbols lastSymbol (sym + 1)
+      | .error e => .error e
+termination_by numSymbols - sym
+
 /-- Build a Zstd Huffman decoding table from a weight array (RFC 8878 §4.2.1).
     Adds the implicit last symbol, converts weights to code lengths, and fills
     a flat lookup table of size 2^maxBits. -/
@@ -124,25 +172,11 @@ def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTab
       nextCode := nextCode.set! w pos
       pos := pos + weightCounts[w]! * (1 <<< (w - 1))
 
-  -- Fill the table
-  for sym in [:numSymbols] do
-    let w := allWeights[sym]!.toNat
-    if w == 0 then continue
-    let numBits := maxBits + 1 - w
-    let code := nextCode[w]!
-    nextCode := nextCode.set! w (code + (1 <<< (w - 1)))
-    let entry : HuffmanEntry := { symbol := sym.toUInt8, numBits := numBits.toUInt8 }
-    -- Fill 2^(W-1) entries starting at `code`
-    let stride := 1 <<< (w - 1)
-    for j in [:stride] do
-      let idx := code + j
-      if idx < tableSize then
-        table := table.set! idx entry
-      else if sym != lastSymbol then
-        -- Only error for non-last symbols; last symbol might have rounding issues
-        throw s!"Zstd: Huffman table index {idx} out of range (tableSize={tableSize})"
+  -- Fill the table (WF recursion for provability — see fillHuffmanTableWF)
+  let (filledTable, _) ← fillHuffmanTableWF table allWeights nextCode
+    maxBits tableSize numSymbols lastSymbol 0
 
-  return { maxBits, table }
+  return { maxBits, table := filledTable }
 
 /-- Parse FSE-compressed Huffman weights (RFC 8878 §4.2.1).
     Header byte `h >= 128` means the compressed weight data occupies `h - 127` bytes.
