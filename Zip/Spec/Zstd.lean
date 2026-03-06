@@ -574,4 +574,46 @@ theorem windowSizeFromDescriptor_pos (d : UInt8) :
     Zip.Native.windowSizeFromDescriptor d > 0 := by
   exact Nat.lt_of_lt_of_le (by decide : (0 : UInt64) < 1024) (windowSizeFromDescriptor_ge_1024 d)
 
+/-! ## Frame-level position advancement -/
+
+/-- When `decompressFrame` succeeds, the returned position is strictly greater
+    than the input position. This follows from `parseFrameHeader_pos_gt`
+    (header ≥ 6 bytes) and `decompressBlocksWF_pos_gt` (blocks ≥ 3 bytes),
+    plus an optional 4-byte checksum. -/
+theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
+    (output : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressFrame data pos = .ok (output, pos')) :
+    pos' > pos := by
+  unfold Zip.Native.decompressFrame at h
+  cases hph : Zip.Native.parseFrameHeader data pos with
+  | error e => simp only [hph, bind, Except.bind] at h; exact nomatch h
+  | ok val =>
+    obtain ⟨header, afterHeader⟩ := val
+    have hgt1 := parseFrameHeader_pos_gt _ _ _ _ hph
+    simp only [hph, bind, Except.bind, pure, Except.pure] at h
+    -- Dictionary check then decompressBlocks
+    split at h  -- dictionaryId
+    · -- some dictId
+      split at h  -- dictId != 0
+      · exact nomatch h
+      · unfold Zip.Native.decompressBlocks at h
+        cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
+            ByteArray.empty none {} #[1, 4, 8] with
+        | error e => simp only [hdb] at h; exact nomatch h
+        | ok val2 =>
+          obtain ⟨content, afterBlocks⟩ := val2
+          have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
+          simp only [hdb] at h
+          grind
+    · -- none
+      unfold Zip.Native.decompressBlocks at h
+      cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
+          ByteArray.empty none {} #[1, 4, 8] with
+      | error e => simp only [hdb] at h; exact nomatch h
+      | ok val2 =>
+        obtain ⟨content, afterBlocks⟩ := val2
+        have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
+        simp only [hdb] at h
+        grind
+
 end Zstd.Spec
