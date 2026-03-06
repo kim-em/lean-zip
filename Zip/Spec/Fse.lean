@@ -408,13 +408,11 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
           apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hinner
           · exact hb
           · intro a2 b2 b2' hb2 heq2
-            split at heq2
-            · exact nomatch heq2
-            · rw [← ForInStep.yield.inj (Except.ok.inj heq2)]
-              simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
-                Array.size_setIfInBounds, hb2]
+            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]
+            simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
+              Array.size_setIfInBounds, hb2]
           · intro a2 b2 b2' hb2 heq2
-            split at heq2 <;> exact nomatch heq2
+            exact nomatch heq2
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
