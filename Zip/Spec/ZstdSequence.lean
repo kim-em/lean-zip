@@ -1,4 +1,5 @@
 import Zip.Native.ZstdSequence
+import ZipForStd.ByteArray
 
 /-!
 # Zstd Sequence Validity and Execution Invariants (RFC 8878 §3.1.1.4–5)
@@ -32,6 +33,19 @@ theorem copyBytes_size (dst : ByteArray) (src : ByteArray) (srcPos count : Nat) 
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
     rw [ih, ByteArray.size_push]; omega
 
+/-- `copyBytes` preserves existing destination bytes: for `i < dst.size`,
+    `(copyBytes dst src srcPos count)[i]! = dst[i]!`. -/
+theorem copyBytes_getElem_lt (dst src : ByteArray) (srcPos count : Nat) (i : Nat)
+    (hi : i < dst.size) :
+    (copyBytes dst src srcPos count)[i]! = dst[i]! := by
+  induction count generalizing dst srcPos with
+  | zero => simp [copyBytes]
+  | succ n ih =>
+    rw [copyBytes.eq_1]
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih (dst.push src[srcPos]!) (srcPos + 1) (by simp [ByteArray.size_push]; omega)]
+    exact ByteArray.push_getElem!_lt dst src[srcPos]! i hi
+
 private theorem copyMatch_loop_size (offset length start : Nat) (b : ByteArray) (k : Nat)
     (hk : k ≤ length) :
     (copyMatch.loop offset length start b k).size = b.size + (length - k) := by
@@ -47,6 +61,26 @@ theorem copyMatch_size (buf : ByteArray) (offset length : Nat) :
     (copyMatch buf offset length).size = buf.size + length := by
   unfold copyMatch
   exact copyMatch_loop_size offset length (buf.size - offset) buf 0 (Nat.zero_le _)
+
+private theorem copyMatch_loop_getElem_lt (offset length start : Nat) (b : ByteArray)
+    (k : Nat) (_hk : k ≤ length) (i : Nat) (hi : i < b.size) :
+    (copyMatch.loop offset length start b k)[i]! = b[i]! := by
+  rw [copyMatch.loop.eq_1]
+  split
+  · rename_i hlt
+    rw [copyMatch_loop_getElem_lt offset length start _ (k + 1) (by omega) i
+      (by simp [ByteArray.size_push]; omega)]
+    exact ByteArray.push_getElem!_lt b _ i hi
+  · rfl
+  termination_by length - k
+
+/-- `copyMatch` preserves existing buffer bytes: for `i < buf.size`,
+    `(copyMatch buf offset length)[i]! = buf[i]!`. -/
+theorem copyMatch_getElem_lt (buf : ByteArray) (offset length : Nat) (i : Nat)
+    (hi : i < buf.size) :
+    (copyMatch buf offset length)[i]! = buf[i]! := by
+  unfold copyMatch
+  exact copyMatch_loop_getElem_lt offset length (buf.size - offset) buf 0 (Nat.zero_le _) i hi
 
 private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
     List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
