@@ -105,7 +105,25 @@ theorem decodeFseDistribution_accuracyLog_ge
     {probs : Array Int32} {al : Nat} {br' : BitReader}
     (_h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
     5 ≤ al := by
-  sorry
+  unfold decodeFseDistribution at _h
+  cases hrd : br.readBits 4 with
+  | error e => rw [hrd] at _h; dsimp only [Bind.bind, Except.bind] at _h; exact nomatch _h
+  | ok val =>
+    rw [hrd] at _h; dsimp only [Bind.bind, Except.bind] at _h
+    -- Peel through: if > maxAccLog, match pure, match forIn, if != 0, match pure
+    split at _h
+    · exact nomatch _h
+    · split at _h
+      · exact nomatch _h
+      · split at _h
+        · exact nomatch _h
+        · split at _h
+          · exact nomatch _h
+          · split at _h
+            · exact nomatch _h
+            · simp only [Pure.pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at _h
+              obtain ⟨_, rfl, _⟩ := _h
+              omega
 
 open Zip.Native in
 /-- When `decodeFseDistribution` succeeds, the returned accuracy log does
@@ -116,7 +134,24 @@ theorem decodeFseDistribution_accuracyLog_le
     {probs : Array Int32} {al : Nat} {br' : BitReader}
     (_h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
     al ≤ maxAccLog := by
-  sorry
+  unfold decodeFseDistribution at _h
+  cases hrd : br.readBits 4 with
+  | error e => rw [hrd] at _h; dsimp only [Bind.bind, Except.bind] at _h; exact nomatch _h
+  | ok val =>
+    rw [hrd] at _h; dsimp only [Bind.bind, Except.bind] at _h
+    split at _h
+    · exact nomatch _h
+    · split at _h
+      · exact nomatch _h
+      · split at _h
+        · exact nomatch _h
+        · split at _h
+          · exact nomatch _h
+          · split at _h
+            · exact nomatch _h
+            · simp only [Pure.pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at _h
+              obtain ⟨_, rfl, _⟩ := _h
+              omega
 
 open Zip.Native in
 /-- When `decodeFseDistribution` succeeds, the cell count of the returned
