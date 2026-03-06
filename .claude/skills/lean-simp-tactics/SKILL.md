@@ -689,3 +689,28 @@ info messages) is the most reliable and efficient approach.
 
 If `simp?` doesn't suggest a replacement, the bare simp may be
 genuinely resistant — see the "Bare `simp` Resistant Patterns" section.
+
+## `Nat.testBit` Rewrite Ordering in Bitwise Proofs
+
+When converting bare `simp` in `Nat.testBit` / bitwise proofs, the order
+of `Nat.testBit_and` vs `Nat.testBit_zero` matters critically.
+
+**Problem**: `simp only [Nat.testBit_and, Nat.testBit_zero, ...]` may
+apply `Nat.testBit_zero` first (converting `(n &&& m).testBit 0` to
+`decide ((n &&& m) % 2 = 1)`), making `Nat.testBit_and` unmatchable.
+
+**Fix**: Use `rw [Nat.testBit_and]` BEFORE `simp only` to control order:
+```lean
+-- BAD: simp may apply testBit_zero first
+simp only [Nat.testBit_and, Nat.testBit_zero, heven, Nat.mul_mod_right]
+
+-- GOOD: rw controls order, simp handles the rest
+rw [Nat.testBit_and]
+simp only [Nat.testBit_zero, heven, Nat.mul_mod_right, Bool.false_and]
+```
+
+**Also**: `simp only` does NOT always reduce `decide True` to `true` or
+`decide (0 = 1)` to `false`. Add explicit lemmas:
+- `decide_true` + `Bool.true_and` for `decide True && x = x`
+- `show (0 : Nat) ≠ 1 from by omega` + `decide_false` + `Bool.false_and`
+  for `decide (0 = 1) && x = false`
