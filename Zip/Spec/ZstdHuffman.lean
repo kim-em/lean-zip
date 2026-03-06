@@ -55,9 +55,74 @@ instance {weights : Array UInt8} : Decidable (ValidWeights weights) :=
 def isPow2 (n : Nat) : Bool :=
   n > 0 && (n &&& (n - 1)) == 0
 
+/-- Helper: for even n > 0, `n &&& (n - 1) = 2 * (n/2 &&& (n/2 - 1))`. -/
+private theorem land_pred_even (n : Nat) (heven : n % 2 = 0) (hpos : n > 0) :
+    n &&& (n - 1) = 2 * (n / 2 &&& (n / 2 - 1)) := by
+  have hdiv : (n - 1) / 2 = n / 2 - 1 := by omega
+  apply Nat.eq_of_testBit_eq
+  intro i
+  match i with
+  | 0 =>
+    rw [Nat.testBit_and, Nat.testBit_zero, Nat.testBit_zero]
+    simp [heven]
+  | i + 1 =>
+    rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ]
+    rw [Nat.testBit_succ, Nat.mul_div_cancel_left _ (by omega : 0 < 2)]
+    rw [Nat.testBit_and, hdiv]
+
+/-- Helper: for odd n, `n &&& (n - 1) = 2 * (n / 2)`. -/
+private theorem land_pred_odd (n : Nat) (hodd : n % 2 = 1) :
+    n &&& (n - 1) = 2 * (n / 2) := by
+  have hdiv : (n - 1) / 2 = n / 2 := by omega
+  apply Nat.eq_of_testBit_eq
+  intro i
+  match i with
+  | 0 =>
+    rw [Nat.testBit_and, Nat.testBit_zero, Nat.testBit_zero]
+    have : (n - 1) % 2 = 0 := by omega
+    simp [hodd, this]
+  | i + 1 =>
+    rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ,
+        hdiv, Bool.and_self,
+        Nat.testBit_succ, Nat.mul_div_cancel_left _ (by omega : 0 < 2)]
+
+/-- Strong induction helper: n > 0 ∧ n &&& (n-1) = 0 → ∃ k, 2^k = n. -/
+private theorem land_pred_zero_imp_pow2 (n : Nat) (hpos : n > 0) (hand : n &&& (n - 1) = 0) :
+    ∃ k : Nat, 2 ^ k = n := by
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+  rcases Nat.mod_two_eq_zero_or_one n with hmod | hmod
+  · -- n is even: use land_pred_even to reduce to n/2
+    have hge2 : n ≥ 2 := by omega
+    have heven := land_pred_even n hmod hpos
+    rw [hand] at heven
+    -- heven : 0 = 2 * (n/2 &&& (n/2 - 1)), so n/2 &&& (n/2 - 1) = 0
+    have hand2 : n / 2 &&& (n / 2 - 1) = 0 := by omega
+    have hpos2 : n / 2 > 0 := by omega
+    have hlt : n / 2 < n := by omega
+    have ⟨j, hj⟩ := ih (n / 2) hlt hpos2 hand2
+    exact ⟨j + 1, by rw [Nat.pow_succ, Nat.mul_comm]; omega⟩
+  · -- n is odd: if n ≥ 3, then n &&& (n-1) > 0, contradiction
+    -- So n must be 1
+    have hodd := land_pred_odd n hmod
+    rw [hand] at hodd
+    -- hodd : 0 = 2 * (n / 2), so n / 2 = 0, so n = 1
+    have : n / 2 = 0 := by omega
+    have : n = 1 := by omega
+    exact ⟨0, by simp [this]⟩
+
 /-- `isPow2` correctly characterizes powers of 2. -/
 theorem isPow2_iff (n : Nat) : isPow2 n = true ↔ ∃ k : Nat, 1 <<< k = n := by
-  sorry
+  simp only [isPow2, Nat.shiftLeft_eq, Nat.one_mul, Bool.and_eq_true, beq_iff_eq,
+    decide_eq_true_eq]
+  constructor
+  · exact fun ⟨hpos, hand⟩ => land_pred_zero_imp_pow2 n hpos hand
+  · intro ⟨k, hk⟩
+    subst hk
+    refine ⟨Nat.two_pow_pos k, ?_⟩
+    apply Nat.eq_of_testBit_eq
+    intro i
+    simp
 
 /-- The Kraft equality holds for `weights` and `maxBits` when the sum of
     `2^(W-1)` for all positive explicit weights, plus the implicit last
@@ -136,12 +201,60 @@ theorem weightSum_eq_inline (weights : Array UInt8) :
         if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) 0 := by
   rfl
 
-/-- A single non-zero weight gives a non-zero weight sum.
-    Proof requires induction over the fold; deferred to a future session. -/
+/-- The weight fold step never decreases the accumulator. -/
+private theorem weightStep_ge (acc : Nat) (w : UInt8) :
+    acc ≤ (if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) := by
+  split
+  · exact Nat.le_add_right acc _
+  · exact Nat.le_refl acc
+
+/-- The weight fold is monotone in the initial accumulator. -/
+private theorem weightFold_mono_init (l : List UInt8) (a b : Nat) (h : a ≤ b) :
+    l.foldl (fun acc w =>
+      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) a ≤
+    l.foldl (fun acc w =>
+      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) b := by
+  induction l generalizing a b with
+  | nil => exact h
+  | cons x l ih =>
+    simp only [List.foldl_cons]
+    apply ih
+    split <;> omega
+
+/-- The weight fold over a list preserves a lower bound on the accumulator. -/
+private theorem weightFold_ge_init (l : List UInt8) (acc : Nat) :
+    acc ≤ l.foldl (fun acc w =>
+      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) acc := by
+  induction l generalizing acc with
+  | nil => exact Nat.le_refl _
+  | cons x l ih =>
+    simp only [List.foldl_cons]
+    exact Nat.le_trans (weightStep_ge acc x) (ih _)
+
+/-- A single non-zero weight gives a non-zero weight sum. -/
 theorem weightSum_pos_of_exists_nonzero (weights : Array UInt8)
     (i : Fin weights.size) (hi : weights[i].toNat > 0) :
     weightSum weights > 0 := by
-  sorry
+  unfold weightSum
+  rw [← Array.foldl_toList]
+  -- Split the list at index i
+  rw [show weights.toList = weights.toList.take i.val ++ weights.toList.drop i.val from by simp,
+      List.foldl_append,
+      show weights.toList.drop i.val =
+        weights.toList[i.val] :: weights.toList.drop (i.val + 1)
+        from List.drop_eq_getElem_cons (by simp [i.isLt]),
+      List.foldl_cons]
+  -- After processing weights[i], the accumulator is ≥ 1
+  apply Nat.lt_of_lt_of_le Nat.zero_lt_one
+  apply Nat.le_trans _ (weightFold_ge_init _ _)
+  split
+  · -- 1 <<< k ≥ 1, so acc + (1 <<< k) ≥ 1
+    exact Nat.le_trans
+      (show 1 ≤ 1 <<< (weights.toList[↑i].toNat - 1) by
+        simp [Nat.shiftLeft_eq]; exact Nat.two_pow_pos _)
+      (Nat.le_add_left _ _)
+  · -- Contradiction: weights.toList[↑i] = weights[i], whose toNat > 0
+    next hc => exact absurd (by simpa [Array.getElem_toList] using hi) hc
 
 /-! ## Concrete validation examples -/
 
