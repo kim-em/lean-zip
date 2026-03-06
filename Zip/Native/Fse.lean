@@ -145,6 +145,19 @@ def decodeFseDistribution (br : Zip.Native.BitReader) (maxSymbols : Nat)
         else
           .ok (probs, accuracyLog, br)
 
+/-- Skip past occupied positions in the FSE table using well-founded recursion.
+    Replaces the `while occupied[position]!` loop in `buildFseTable` pass 2.
+    The loop advances `position` by `step` (modulo `tableMask + 1`) until it
+    finds an unoccupied position, using `fuel` to guarantee termination. -/
+def skipOccupiedWF (occupied : Array Bool) (position step tableMask fuel : Nat) : Nat :=
+  if fuel = 0 then position
+  else if h : position < occupied.size then
+    if occupied[position] then
+      skipOccupiedWF occupied ((position + step) &&& tableMask) step tableMask (fuel - 1)
+    else position
+  else position
+termination_by fuel
+
 /-- Build an FSE decoding table from a probability distribution.
     `probs` is the array from `decodeFseDistribution`.
     `accuracyLog` determines the table size (1 << accuracyLog cells). -/
@@ -171,8 +184,7 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
     if prob <= 0 then continue
     for _ in [:int32ToNat prob] do
       -- Skip occupied positions (from -1 symbols)
-      while occupied[position]! do
-        position := (position + step) &&& tableMask
+      position := skipOccupiedWF occupied position step tableMask tableSize
       cells := cells.set! position { symbol := sym.toUInt16 }
       position := (position + step) &&& tableMask
   -- Third pass: compute numBits and newState for each cell
