@@ -5,13 +5,13 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) implementation + specification phase
+- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
-- **Sorries**: 11 (5 XxHash.lean, 5 ZstdHuffman.lean, 1 Zstd.lean)
-- **Sessions**: ~302 completed (Feb 19 – Mar 6)
-- **Source files**: 96 (47 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 23 test)
-- **Merged PRs**: 267
-- **Bare simp**: 0 remaining — campaign complete (47 spec files, ZipForStd/, Native/ all clean)
+- **Sorries**: 7 (4 XxHash.lean, 2 ZstdHuffman.lean, 1 Fse.lean)
+- **Sessions**: ~312 completed (Feb 19 – Mar 6)
+- **Source files**: 99 (48 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 25 test)
+- **Merged PRs**: 280
+- **Bare simp**: 0 remaining — campaign complete (48 spec files, ZipForStd/, Native/ all clean)
 
 ## Milestones
 
@@ -169,7 +169,7 @@ split into 4 focused modules: `BitReaderInvariant.lean` (522 lines),
 `InflateLoopBounds.lean` (614 lines), `InflateRawSuffix.lean` (501 lines),
 and `GzipCorrect.lean` (286 lines).
 
-### Track C1: Size Bound Improvement (complete, Feb 25–26)
+### Track C1: Size Bound Improvement (in progress, Feb 25–26, Mar 6)
 Raised the size bound on all roundtrip theorems from 500MB to 1 GiB.
 PR #305 raised fuel limits throughout the spec decode functions.
 The per-path bounds:
@@ -180,6 +180,11 @@ The per-path bounds:
 
 The unified bound is now 1 GiB (`1024 * 1024 * 1024`), up from 500MB
 previously and 5MB at the start of Track C1.
+
+**Parametric maxOutputSize (#654):** Generalized `inflate_deflateStoredPure`
+from hard-coded 1 GiB to parametric `maxOutputSize`, so the stored block
+roundtrip theorem works for any output buffer size. Work continues on
+generalizing levels 1–4 (#648, #656) and dynamic + capstone (#649).
 
 ### Track C2: Fuel Elimination (complete, Mar 2)
 Replaced all fuel-based recursion with well-founded recursion, eliminating
@@ -347,18 +352,25 @@ mode parsing, multi-frame support, and checksum verification.
   `decide`. Sorry count reduced from 3 to 1 by proving
   `decodeFseDistribution_accuracyLog_ge` and `_le` (#603).
   `decodeFseDistribution_sum_correct` proved via loop invariant (#619).
+  `buildFseTable_accuracyLog_eq` proved (#646); 1 sorry remains
+  (`buildFseTable_cells_size`, requires `forIn` loop invariant).
 - `Zip/Spec/XxHash.lean` (#618, merged, ~180 lines): XXH64 specification
   predicates — prime value validation, initial state, round function
-  properties. 6 theorems proved (by `decide`/`rfl`), 5 sorry (UInt64
-  test vectors too expensive for kernel evaluation).
+  properties. `xxHash64_empty` proved (#642). 4 sorry remaining (3 UInt64
+  test vectors too expensive for kernel evaluation, 1 docstring mention).
 - `Zip/Spec/ZstdHuffman.lean` (#606, merged, ~170 lines): Huffman weight
   validity predicates per RFC 8878 §4.2.1 — `ValidWeights`, `ValidMaxBits`,
-  `ValidHuffmanTable`. 8 theorems proved, 5 sorry (monadic invariants for
-  `weightsToMaxBits` and `buildZstdHuffmanTable`).
+  `ValidHuffmanTable`. `isPow2_iff` and `weightSum_pos_of_exists_nonzero`
+  proved (#628). `buildZstdHuffmanTable_maxBits_pos` proved via WF
+  refactoring of `while` loop to `findMaxBitsWF` (#641). 2 sorry remaining
+  (`buildZstdHuffmanTable_tableSize` fill loop invariant, one other).
 - `Zip/Spec/Zstd.lean` (#587, merged): frame specification predicates.
-  1 sorry remaining.
-- `Zip/Spec/ZstdSequence.lean` (#585, open PR #608): sequence validity
-  and execution invariants. Has merge conflicts.
+  `parseBlockHeader_blockSize_lt` proved via `bv_decide` (#647) — corrected
+  from false `_le` statement to true `< 2^21` bound. 0 sorry remaining.
+- `Zip/Spec/ZstdSequence.lean` (#632, merged): sequence validity predicates
+  and block size validation. `executeSequences_output_length` proved (#653)
+  via refactoring `executeSequences` from `forIn` to explicit recursion.
+  0 sorry remaining.
 
 **Code modularity:**
 - ZstdFrame.lean split (#599): monolithic 1059-line file split into
@@ -392,50 +404,66 @@ mode parsing, multi-frame support, and checksum verification.
   conventions. Updated `lean-monad-proofs` with `eq_of_beq` pattern and
   `split vs by_cases` decision guide.
 
+**Compressed block integration (#651, milestone):**
+- Wired full compressed block pipeline end-to-end in `decompressBlocks`:
+  `resolveSequenceFseTables` → backward bitstream → `decodeSequences` →
+  `executeSequences`
+- Added `PrevFseTables` struct for FSE Repeat mode across blocks
+- All three Zstd block types (raw, RLE, compressed) now decompress
+  through a unified pipeline
+- This was the critical integration step (issue #552) that had been
+  blocked by merge conflict cascades for multiple summary periods
+
+**Zstd spec quality audit (#650):**
+- Eliminated 12 bare `simp` occurrences across ZstdHuffman.lean and
+  ZstdSequence.lean spec files
+- Removed `xxHash64_deterministic` (tautological — was just `rfl`)
+- Added missing docstrings to specification theorems
+
+**Test infrastructure expansion:**
+- `ZstdNative.lean` test monolith split into 3 focused files (#630):
+  `ZstdFrameNative.lean`, `ZstdFseNative.lean`, `ZstdHuffmanNative.lean`
+
 **Remaining:**
-- Wire compressed block sequence decoding end-to-end — issue #552 (claimed)
-- End-to-end conformance test matrix — issue #575 (blocked on #552)
-- Complete ZstdSequence spec (#585, open PR #608 with merge conflicts)
-- Prove remaining sorry stubs: 5 in XxHash (UInt64 kernel limits),
-  5 in ZstdHuffman (monadic invariants), 1 in Zstd (frame predicate)
+- End-to-end conformance test matrix — issue #575 (now unblocked,
+  #552 complete)
+- Prove remaining sorry stubs: 4 in XxHash (3 UInt64 test vectors
+  too expensive for kernel evaluation), 2 in ZstdHuffman (fill loop
+  invariants), 1 in Fse (`buildFseTable_cells_size` requires `forIn`
+  loop invariant)
+- Refactor `buildZstdHuffmanTable` fill loops to WF recursion (#652)
+- Generalize capstone roundtrip to parametric maxOutputSize (#649, #648)
 - Spec-level decoder with correctness proofs
 - Compressor + roundtrip proof
 
-Track E has crossed a significant threshold: all building blocks for
-compressed block decompression are implemented and individually tested —
-FSE tables, backward bitstreams, sequence execution (with cross-block
-state), Huffman descriptors (direct and FSE-compressed), all four literal
-types (raw, RLE, Huffman-compressed, treeless), extra bits tables,
-compression mode parsing, FSE table resolution, and multi-frame support.
-The remaining implementation work is primarily integration: connecting
-these components into the `decompressBlocks` pipeline for
-`ZstdBlockType.compressed` (issue #552).
+Track E has reached a major milestone: the native Zstd decompressor now
+handles all three block types end-to-end. Compressed blocks — the most
+complex case, involving FSE table construction, backward bitstream
+reading, Huffman decoding, and sequence execution — are fully wired
+through the `decompressBlocks` pipeline. The conformance test matrix
+(#575) is the natural next validation step, now unblocked.
 
-The project has transitioned from pure implementation to concurrent
-implementation + specification. Four Zstd spec files now exist (three
-merged, one in PR), developing validity predicates with `Decidable`
-instances in parallel with the implementation. This is a deliberate
-departure from the DEFLATE model, where specs were written after
-implementation was complete.
-
-**Stale PR bottleneck resolved:** The merge conflict cascade that
-blocked issues #540 and #552 for multiple summary periods was resolved
-by triaging stale PRs (#611) and splitting ZstdFrame.lean (#599). Both
-issues are now unblocked — #540 was completed (#613), and #552 is
-claimed for fresh work. PR #608 (ZstdSequence spec) still has merge
-conflicts.
+Five Zstd spec files are merged, with validity predicates and `Decidable`
+instances developed in parallel with implementation. The sorry count has
+dropped from 11 to 7 since the last summary, with key proofs including
+`buildFseTable_accuracyLog_eq` (#646), `buildZstdHuffmanTable_maxBits_pos`
+(#641), `xxHash64_empty` (#642), `parseBlockHeader_blockSize_lt` (#647),
+and `executeSequences_output_length` (#653). The remaining 7 sorries are
+concentrated in areas where kernel evaluation limits prevent `decide`-based
+proofs (UInt64 arithmetic) or where opaque `forIn` loops resist
+specification (array fill operations).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~302 sessions (Feb 19 – Mar 6)
-- 267 merged PRs
+- ~312 sessions (Feb 19 – Mar 6)
+- 280 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
   `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623),
   `lean-monad-proofs` (updated #623)
-- **Open PR health**: 2 open PRs (#628 ZstdHuffman math properties,
-  #608 ZstdSequence spec). #608 has merge conflicts.
+- **Open PR health**: 1 open PR (#656, Track C1 parametric maxOutputSize
+  for levels 1–4)
