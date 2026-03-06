@@ -415,7 +415,7 @@ theorem resolveSingleFseTable_predefined_pos (maxSymbols maxAccLog : Nat)
     pos' = pos := by
   simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
   split at h
-  · simp at h
+  · simp only [reduceCtorEq] at h
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h
     exact h.2.symm
 
@@ -629,7 +629,10 @@ theorem resolveOffset_history_valid_large (rawOffset litLen : Nat)
     ValidOffsetHistory (resolveOffset rawOffset history litLen).2 := by
   obtain ⟨_, h0pos, h1pos, _⟩ := hh
   simp only [resolveOffset, hr, ↓reduceIte, ValidOffsetHistory]
-  refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+  refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+        gt_iff_lt] <;> omega
 
 /-- For repeat codes (rawOffset ∈ {1,2,3}), when input has `ValidOffsetHistory`
     and for the shifted rawOffset=3 case `history[0]! ≥ 2`, the output history
@@ -649,25 +652,40 @@ theorem resolveOffset_history_valid_repeat (rawOffset litLen : Nat)
     split
     · exact ⟨hsz, h0pos, h1pos, h2pos⟩  -- litLen > 0: history unchanged
     · -- litLen = 0: #[history[1]!, history[0]!, history[2]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+        gt_iff_lt] <;> omega
   · -- rawOffset = 2
     unfold resolveOffset
     simp only [show ¬(2 > 3) from by omega, ↓reduceIte]
     split
     · -- litLen > 0: #[history[1]!, history[0]!, history[2]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+        gt_iff_lt] <;> omega
     · -- litLen = 0: #[history[2]!, history[0]!, history[1]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+        gt_iff_lt] <;> omega
   · -- rawOffset = 3
     unfold resolveOffset
     simp only [show ¬(3 > 3) from by omega, ↓reduceIte]
     split
     · -- litLen > 0: #[history[2]!, history[0]!, history[1]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+        gt_iff_lt] <;> omega
     · -- litLen = 0: #[history[0]! - 1, history[1]!, history[2]!]
       rename_i hlit
       have h02 := hshift ⟨by omega, rfl⟩
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
+      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+        gt_iff_lt] <;> omega
   · omega  -- rawOffset ≥ 4
 
 /-- For shifted repeat codes 1–2 (rawOffset ∈ {1,2}, literalLength = 0),
