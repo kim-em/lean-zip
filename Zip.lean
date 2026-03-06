@@ -63,3 +63,4 @@ import Zip.Spec.InflateRawSuffix
 import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
 import Zip.Spec.Zstd
+import Zip.Spec.ZstdHuffman
