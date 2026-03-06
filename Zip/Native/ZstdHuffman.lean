@@ -45,6 +45,18 @@ def parseHuffmanWeightsDirect (data : ByteArray) (pos : Nat) (numWeightBytes : N
     weights := weights.push (byte &&& 0x0F)    -- low nibble
   return (weights, pos + numWeightBytes)
 
+/-- Find the smallest `maxBits` such that `2^maxBits ≥ weightSum`, then bump by 1
+    if `weightSum` equals `2^maxBits` exactly.  Uses well-founded recursion
+    (termination measure: `weightSum - power`) so the loop is unfoldable in proofs. -/
+def findMaxBitsWF (weightSum maxBits power : Nat) (hpower : power > 0) : Nat :=
+  if h : power < weightSum then
+    findMaxBitsWF weightSum (maxBits + 1) (power * 2) (by omega)
+  else if weightSum == power then
+    maxBits + 1
+  else
+    maxBits
+termination_by weightSum - power
+
 /-- Derive maxBits from a Huffman weight array (RFC 8878 §4.2.1.1).
     Finds the smallest M such that the sum of 2^(W-1) for all W > 0 equals 2^M.
     The last symbol's weight is implicit: its 2^(W-1) value = 2^M - sum. -/
@@ -56,18 +68,7 @@ def weightsToMaxBits (weights : Array UInt8) : Except String Nat := do
       weightSum := weightSum + (1 <<< (w.toNat - 1))
   if weightSum == 0 then
     throw "Zstd: all weights are zero"
-  -- Find maxBits: smallest M such that 2^M >= weightSum
-  -- The sum should be a power of 2 or just below one (the implicit last symbol fills the gap)
-  let mut maxBits := 0
-  let mut power : Nat := 1
-  while power < weightSum do
-    maxBits := maxBits + 1
-    power := power * 2
-  -- After adding the last implicit symbol, the total must equal exactly 2^maxBits
-  -- If weightSum is already 2^maxBits, we need maxBits+1 (the last symbol gets weight maxBits+1)
-  if weightSum == power then
-    maxBits := maxBits + 1
-  return maxBits
+  return findMaxBitsWF weightSum 0 1 (by omega)
 
 /-- Build a Zstd Huffman decoding table from a weight array (RFC 8878 §4.2.1).
     Adds the implicit last symbol, converts weights to code lengths, and fills
