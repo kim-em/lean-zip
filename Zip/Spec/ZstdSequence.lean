@@ -335,6 +335,69 @@ theorem executeSequences_loop_cons_output_size (seq : ZstdSequence)
       output.size + seq.literalLength + seq.matchLength := by
   simp only [copyMatch_size, copyBytes_size]
 
+/-! ## parseSequencesHeader structural properties -/
+
+/-- When `parseSequencesHeader` succeeds, the returned position is strictly greater
+    than the input and advances by at most 4 bytes. -/
+private theorem parseSequencesHeader_pos_range (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
+    pos < pos' ∧ pos' ≤ pos + 4 := by
+  simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨-, -, rfl⟩ := h; omega
+    · split at h
+      · split at h
+        · exact nomatch h
+        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨-, -, rfl⟩ := h; omega
+      · split at h
+        · split at h
+          · exact nomatch h
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨-, -, rfl⟩ := h; omega
+        · split at h
+          · exact nomatch h
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨-, -, rfl⟩ := h; omega
+
+/-- When `parseSequencesHeader` succeeds, the returned position is strictly greater
+    than the input position. Each branch advances by 1–4 bytes. -/
+theorem parseSequencesHeader_pos_gt (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
+    pos' > pos :=
+  (parseSequencesHeader_pos_range data pos numSeq modes pos' h).1
+
+/-- When `parseSequencesHeader` succeeds, the position advances by at most 4 bytes.
+    The maximum occurs in the 3-byte count case (byte0 = 255): 3 count bytes +
+    1 modes byte. -/
+theorem parseSequencesHeader_pos_bounded (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
+    pos' ≤ pos + 4 :=
+  (parseSequencesHeader_pos_range data pos numSeq modes pos' h).2
+
+/-- When the input byte at `pos` is zero, `parseSequencesHeader` returns 0 sequences
+    with predefined compression modes and advances by exactly 1 byte.
+    This is the "no sequences" case (RFC 8878 §3.1.1.3.2): blocks that contain
+    only literals have byte0 = 0 and no compression modes byte follows.
+
+    Note: The converse does not hold — `parseSequencesHeader` can also return
+    numSeq = 0 from the 2-byte encoding when byte0 = 128 and the next byte is 0,
+    but in that case pos' = pos + 3 and modes are parsed from the data. -/
+theorem parseSequencesHeader_byte0_zero (data : ByteArray) (pos : Nat)
+    (hsize : pos + 1 ≤ data.size) (hbyte : data[pos]!.toNat = 0) :
+    parseSequencesHeader data pos =
+      .ok (0, { litLenMode := .predefined, offsetMode := .predefined,
+                matchLenMode := .predefined }, pos + 1) := by
+  simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte, hbyte,
+    beq_self_eq_true]
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
