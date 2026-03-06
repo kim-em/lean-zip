@@ -198,4 +198,49 @@ theorem decompressRLEBlock_content (data : ByteArray) (pos : Nat)
   · obtain ⟨rfl, rfl⟩ := h
     rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
 
+/-! ## Frame-level output guarantees -/
+
+/-- When `decompressFrame` succeeds and the frame header specifies a content size of `n`,
+    the decompressed output has exactly `n` bytes. This follows from the content size
+    validation guard at the end of `decompressFrame`. -/
+theorem decompressFrame_contentSize_eq (data : ByteArray) (pos : Nat)
+    (output : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressFrame data pos = .ok (output, pos'))
+    (header : Zip.Native.ZstdFrameHeader) (headerPos : Nat)
+    (hh : Zip.Native.parseFrameHeader data pos = .ok (header, headerPos))
+    (n : UInt64) (hn : header.contentSize = some n) :
+    output.size.toUInt64 = n := by
+  unfold Zip.Native.decompressFrame at h
+  dsimp only [Bind.bind, Except.bind] at h
+  rw [hh] at h
+  dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
+  -- Substitute contentSize = some n to resolve the contentSize match
+  simp only [hn] at h
+  -- Thread through all remaining guards (dictionary, decompressBlocks, checksum)
+  -- All paths end with: if (v.fst.size.toUInt64 != n) then throw else .ok (v.fst, ...)
+  -- Since h says the result is .ok, the content size guard passed
+  grind
+
+/-- When `decompressFrame` succeeds and the frame header has `contentChecksum = true`,
+    the output's XXH64 upper 32 bits matches the checksum stored in the 4 bytes
+    before `pos'` in the input. This follows from the checksum verification guard
+    in `decompressFrame`. -/
+theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
+    (output : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressFrame data pos = .ok (output, pos'))
+    (header : Zip.Native.ZstdFrameHeader) (headerPos : Nat)
+    (hh : Zip.Native.parseFrameHeader data pos = .ok (header, headerPos))
+    (hc : header.contentChecksum = true) :
+    XxHash64.xxHash64Upper32 output =
+      Binary.readUInt32LE data (pos' - 4) := by
+  unfold Zip.Native.decompressFrame at h
+  dsimp only [Bind.bind, Except.bind] at h
+  rw [hh] at h
+  dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
+  -- Substitute contentChecksum = true to resolve the checksum conditionals
+  simp only [hc] at h
+  -- Thread through all remaining guards (dictionary, decompressBlocks, data size, checksum !=)
+  -- Since h says the result is .ok, the checksum guard passed
+  grind
+
 end Zstd.Spec
