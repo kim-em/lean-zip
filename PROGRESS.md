@@ -5,12 +5,12 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C2 complete; Track E (Zstd) all block types decompressing
+- **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
-- **Sorries**: 7 (4 XxHash.lean, 2 ZstdHuffman.lean, 1 Fse.lean)
-- **Sessions**: ~312 completed (Feb 19 – Mar 6)
-- **Source files**: 99 (48 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 25 test)
-- **Merged PRs**: 280
+- **Sorries**: 5 (3 XxHash.lean, 1 ZstdHuffman.lean, 1 Fse.lean)
+- **Sessions**: ~328 completed (Feb 19 – Mar 6)
+- **Source files**: 100 (48 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
+- **Merged PRs**: 295
 - **Bare simp**: 0 remaining — campaign complete (48 spec files, ZipForStd/, Native/ all clean)
 
 ## Milestones
@@ -169,22 +169,24 @@ split into 4 focused modules: `BitReaderInvariant.lean` (522 lines),
 `InflateLoopBounds.lean` (614 lines), `InflateRawSuffix.lean` (501 lines),
 and `GzipCorrect.lean` (286 lines).
 
-### Track C1: Size Bound Improvement (in progress, Feb 25–26, Mar 6)
-Raised the size bound on all roundtrip theorems from 500MB to 1 GiB.
-PR #305 raised fuel limits throughout the spec decode functions.
-The per-path bounds:
-- Stored: 655MB
-- Fixed Huffman (greedy): 1GiB
-- Lazy LZ77 (levels 2–4): 500MB (most restrictive at previous bound)
-- Dynamic Huffman: 500MB
+### Track C1: Size Bound Improvement (complete, Feb 25 – Mar 6)
+Eliminated the hard-coded size bound from all roundtrip theorems. The
+capstone theorem is now fully parametric in `maxOutputSize`:
 
-The unified bound is now 1 GiB (`1024 * 1024 * 1024`), up from 500MB
-previously and 5MB at the start of Track C1.
+```lean
+theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
+    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data
+```
 
-**Parametric maxOutputSize (#654):** Generalized `inflate_deflateStoredPure`
-from hard-coded 1 GiB to parametric `maxOutputSize`, so the stored block
-roundtrip theorem works for any output buffer size. Work continues on
-generalizing levels 1–4 (#648, #656) and dynamic + capstone (#649).
+This was achieved progressively:
+- #305: raised fuel limits from 5MB to 500MB–1GiB
+- #654: generalized stored block roundtrip to parametric `maxOutputSize`
+- #656: generalized levels 1–4 and dynamic roundtrips, plus the capstone
+
+The `maxOutputSize` parameter is now a caller-chosen zip-bomb guard, not
+a proof limitation. Combined with Track C2 (fuel elimination), the DEFLATE
+roundtrip theorem has no artificial restrictions.
 
 ### Track C2: Fuel Elimination (complete, Mar 2)
 Replaced all fuel-based recursion with well-founded recursion, eliminating
@@ -424,46 +426,67 @@ mode parsing, multi-frame support, and checksum verification.
 - `ZstdNative.lean` test monolith split into 3 focused files (#630):
   `ZstdFrameNative.lean`, `ZstdFseNative.lean`, `ZstdHuffmanNative.lean`
 
+**WF refactoring (continued, #667, #671):**
+- `decompressBlocksWF` (#667): replaced opaque `forIn` loop with
+  well-founded recursion on remaining data, proved `parseBlockHeader_pos_eq`
+- `buildZstdHuffmanTable` fill loops (#671): extracted `fillHuffmanTableInnerWF`
+  and `fillHuffmanTableWF` from opaque `for` loops, proved
+  `fillHuffmanTableInnerWF_preserves_size` and `fillHuffmanTableWF_preserves_size`
+
+**Spec proofs (14-PR batch, Mar 6):**
+- #664: `decompressFrame_contentSize_eq` and `decompressFrame_checksum_valid`
+  — characterizing properties relating frame output to header metadata
+- #672: `copyBytes_getElem_lt` and `copyMatch_getElem_lt` — existing buffer
+  content preserved during sequence execution
+- #677: `decompressRawBlock_content`, `decompressRawBlock_pos_eq`,
+  `decompressRLEBlock_content`, `decompressRLEBlock_pos_eq` — raw and RLE
+  block content preservation and position advance
+- #681: `resolveOffset_repeat1_val`, `resolveOffset_repeat2_val`,
+  `resolveOffset_repeat3_val` — exact return values for repeat offset codes
+- #685: `litLenExtraBits_size`, `matchLenExtraBits_size`,
+  `decodeLitLenValue_small`, `decodeMatchLenValue_small`,
+  `decodeOffsetValue_positive` — RFC table sizes and decoded value bounds
+
+**Conformance testing (#680):**
+- End-to-end test matrix: 48 combinations of FFI compress → native decompress
+  across 4 compression levels × 4 data patterns × 3 sizes
+- Tests in `ZipTest/ZstdConformance.lean`
+
 **Remaining:**
-- End-to-end conformance test matrix — issue #575 (now unblocked,
-  #552 complete)
-- Prove remaining sorry stubs: 4 in XxHash (3 UInt64 test vectors
-  too expensive for kernel evaluation), 2 in ZstdHuffman (fill loop
-  invariants), 1 in Fse (`buildFseTable_cells_size` requires `forIn`
-  loop invariant)
-- Refactor `buildZstdHuffmanTable` fill loops to WF recursion (#652)
-- Generalize capstone roundtrip to parametric maxOutputSize (#649, #648)
-- Spec-level decoder with correctness proofs
+- Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
+  expensive for kernel evaluation), 1 in ZstdHuffman
+  (`weightsToMaxBits_valid`), 1 in Fse (`buildFseTable_cells_size`
+  requires `forIn` loop invariant)
+- Spec-level decoder with correctness proofs (algorithmic correspondence
+  between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
 
-Track E has reached a major milestone: the native Zstd decompressor now
-handles all three block types end-to-end. Compressed blocks — the most
-complex case, involving FSE table construction, backward bitstream
-reading, Huffman decoding, and sequence execution — are fully wired
-through the `decompressBlocks` pipeline. The conformance test matrix
-(#575) is the natural next validation step, now unblocked.
+**Summary:** Track E has progressed from "all block types decompressing"
+to "all block types decompressing with growing spec coverage." The 14-PR
+batch since the last summary added WF refactoring for proof-friendliness
+(decompressBlocks, Huffman fill loops), block-level correctness theorems
+(content preservation, position advance), sequence execution properties
+(prefix preservation, offset exact values, extra bits bounds), and a
+conformance test matrix. The sorry count dropped from 7 to 5, with one
+ZstdHuffman sorry eliminated by the fill loop WF refactoring.
 
-Five Zstd spec files are merged, with validity predicates and `Decidable`
-instances developed in parallel with implementation. The sorry count has
-dropped from 11 to 7 since the last summary, with key proofs including
-`buildFseTable_accuracyLog_eq` (#646), `buildZstdHuffmanTable_maxBits_pos`
-(#641), `xxHash64_empty` (#642), `parseBlockHeader_blockSize_lt` (#647),
-and `executeSequences_output_length` (#653). The remaining 7 sorries are
-concentrated in areas where kernel evaluation limits prevent `decide`-based
-proofs (UInt64 arithmetic) or where opaque `forIn` loops resist
-specification (array fill operations).
+Five Zstd spec files cover frame, FSE, XxHash, Huffman, and sequence
+semantics. The remaining 5 sorries are in areas where kernel evaluation
+limits prevent `decide`-based proofs (3 UInt64 test vectors in XxHash) or
+where opaque `forIn` loops resist specification (1 Fse, 1 ZstdHuffman).
+The next major milestone is a spec-level Zstd decoder for algorithmic
+correspondence proofs.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~312 sessions (Feb 19 – Mar 6)
-- 280 merged PRs
+- ~328 sessions (Feb 19 – Mar 6)
+- 295 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
   `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623),
   `lean-monad-proofs` (updated #623)
-- **Open PR health**: 1 open PR (#656, Track C1 parametric maxOutputSize
-  for levels 1–4)
+- **Open PR health**: 1 open PR (#686, conformance test matrix — merge conflict)
