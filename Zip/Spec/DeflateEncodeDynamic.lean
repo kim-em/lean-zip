@@ -117,12 +117,12 @@ theorem take_countRun_eq_replicate (val : Nat) (xs : List Nat) (n : Nat) (hn : n
     split at hn
     · rename_i heq; simp only [beq_iff_eq] at heq; subst heq
       cases n with
-      | zero => simp
+      | zero => simp only [List.take_zero, List.replicate_zero]
       | succ n =>
         simp only [List.take_succ_cons, List.replicate_succ]
         exact congrArg (x :: ·) (ih n (by omega))
     · have : n = 0 := by omega
-      subst this; simp
+      subst this; simp only [List.take_zero, List.replicate_zero]
 
 private theorem drop_subset_valid {xs : List Nat} {n : Nat}
     (hvalid : ∀ y ∈ xs, y ≤ 15) : ∀ y ∈ xs.drop n, y ≤ 15 :=
@@ -215,8 +215,12 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
       by_cases hge3 : countRun x xs >= 3
       · -- literal + code 16: repeat previous 3-6
         rw [if_pos (by omega : countRun x xs ≥ 3)]
-        rw [Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid, Deflate.Spec.rlDecode_go_code16 _ _ _ (by simp)]
-        rw [show (acc ++ [x]).getLast! = x from by simp]
+        rw [Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid, Deflate.Spec.rlDecode_go_code16 _ _ _ (by
+          simp only [List.length_append, List.length_cons, List.length_nil, Nat.zero_add, gt_iff_lt,
+            Nat.zero_lt_succ])]
+        rw [show (acc ++ [x]).getLast! = x from by
+          simp only [List.getLast!_eq_getLast?_getD, List.getLast?_append, List.getLast?_singleton,
+            Option.some_or, Nat.default_eq_zero, Option.getD_some]]
         rw [show min (countRun x xs) 6 - 3 + 3 = min (countRun x xs) 6 from by omega]
         rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
         simp only [List.append_assoc]

@@ -274,7 +274,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     rw [hep_val, hceq]
     simp only [ByteArray.size_append, htsz, hhsz]; omega
   have hendPos4 : ¬ (endPos + 4 > (ZlibEncode.compress data level).size) := by omega
-  have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp
+  have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp only [Array.toArray_toList]
   -- Adler32 trailer match: use endPos = 2 + deflated.size to read trailer bytes
   have hadler : (Adler32.Native.adler32 1 data ==
     (ZlibEncode.compress data level)[endPos]!.toUInt32 <<< 24 |||
