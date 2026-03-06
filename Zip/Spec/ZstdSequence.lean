@@ -548,6 +548,29 @@ theorem decodeMatchLenValue_small (code : Nat) (extraBits : UInt32) (h : code �
                    _ | _ | _ | _ | _ | _ | _ | _ | _
   all_goals first | omega | rfl
 
+/-- Any successful match length decoding produces a value ≥ 3.
+    This is the Zstd minimum match length (RFC 8878 §3.1.1.3.2.1.2):
+    every entry in `matchLenExtraBits` has baseline ≥ 3, and the decoded
+    value is `baseline + extraBits.toNat`. -/
+private theorem matchLen_baselines_ge_three_aux :
+    ∀ i : Fin matchLenExtraBits.size, (matchLenExtraBits[i.val]'i.isLt).1 ≥ 3 := by
+  decide_cbv
+
+private theorem matchLen_baselines_ge_three (i : Nat) (hi : i < matchLenExtraBits.size) :
+    (matchLenExtraBits[i]'hi).1 ≥ 3 :=
+  matchLen_baselines_ge_three_aux ⟨i, hi⟩
+
+theorem decodeMatchLenValue_ge_three (code : Nat) (extraBits : UInt32) (n : Nat)
+    (h : decodeMatchLenValue code extraBits = .ok n) :
+    n ≥ 3 := by
+  unfold decodeMatchLenValue at h
+  split at h
+  · rename_i hlt
+    simp only [pure, Except.pure, Except.ok.injEq] at h
+    subst h
+    exact Nat.le_trans (matchLen_baselines_ge_three code hlt) (Nat.le_add_right _ _)
+  · simp at h
+
 /-- When `code > 0`, `decodeOffsetValue` returns a positive value.
     This follows from `1 <<< code > 0` for any natural `code`. -/
 theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : code > 0) :
@@ -556,6 +579,21 @@ theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : co
   split
   · rename_i h; simp only [beq_iff_eq] at h; omega
   · have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
+    omega
+
+/-- When `code ≥ 1`, `decodeOffsetValue` returns a value ≥ 2.
+    This distinguishes non-repeat offsets (≥ 2) from repeat offsets (code 0).
+    Follows from `1 <<< code = 2^code ≥ 2` when `code ≥ 1`. -/
+theorem decodeOffsetValue_ge_two (code : Nat) (extraBits : UInt32) (hcode : code ≥ 1) :
+    decodeOffsetValue code extraBits ≥ 2 := by
+  unfold decodeOffsetValue
+  split
+  · rename_i h; simp only [beq_iff_eq] at h; omega
+  · have : 1 <<< code ≥ 2 := by
+      rw [Nat.one_shiftLeft]
+      cases code with
+      | zero => omega
+      | succ n => rw [Nat.pow_succ]; have := Nat.one_le_two_pow (n := n); omega
     omega
 
 /-- `executeSequences` output size characterization: when `executeSequences`
