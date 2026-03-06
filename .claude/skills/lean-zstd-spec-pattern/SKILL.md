@@ -349,6 +349,116 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) ... := by
 - **Compose size lemmas**: chain `rw [f_size, g_size]` in the hypothesis
   before using `omega`
 
+## Position-Advancement Proofs
+
+Parser functions in `Except` monad return `(result, pos')`. Proving
+`pos' > pos` (or `pos' = pos + k`) is the standard way to establish
+that a parser consumes input, which feeds WF termination obligations.
+
+### Standard proof template
+
+```lean
+theorem myParser_pos_gt (data : ByteArray) (pos : Nat)
+    (result : ResultType) (pos' : Nat)
+    (h : myParser data pos = .ok (result, pos')) :
+    pos' > pos := by
+  -- 1. Unfold and reduce monadic plumbing
+  simp only [myParser, bind, Except.bind, pure, Except.pure] at h
+  -- 2. Case-split each guard/branch
+  split at h
+  · exact nomatch h          -- error branch
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨-, rfl⟩ := h     -- extract pos' = pos + k
+    omega
+```
+
+### Multi-branch functions: prove a range, derive components
+
+When a function has N branches that each advance by different amounts,
+prove the conjunction in a private helper and derive separate theorems:
+
+```lean
+private theorem myParser_pos_range ... (h : ...) :
+    pos < pos' ∧ pos' ≤ pos + 4 := by
+  simp only [myParser, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨-, -, rfl⟩ := h; omega
+    · -- ... repeat for each branch
+      sorry
+
+theorem myParser_pos_gt ... (h : ...) : pos' > pos :=
+  (myParser_pos_range ... h).1
+
+theorem myParser_pos_bounded ... (h : ...) : pos' ≤ pos + 4 :=
+  (myParser_pos_range ... h).2
+```
+
+This avoids duplicating the case analysis across two separate proofs.
+
+### Composing position-advancing functions
+
+When function A calls B then C sequentially, compose their position
+specs rather than re-unfolding both:
+
+```lean
+theorem composed_pos_gt ... := by
+  -- Extract intermediate position from monadic chain
+  cases hB : B data pos with
+  | error => simp only [hB] at h; exact nomatch h
+  | ok val =>
+    obtain ⟨resultB, posB⟩ := val
+    simp only [hB] at h; dsimp only [bind, Except.bind] at h
+    -- Use B's spec
+    have hB_gt := B_pos_gt ... hB
+    -- Continue with C
+    cases hC : C data posB with
+    | error => simp only [hC] at h; exact nomatch h
+    | ok val =>
+      have hC_gt := C_pos_gt ... hC
+      omega
+```
+
+### Mode-dispatched functions (`resolveSingleFseTable` pattern)
+
+Functions like `resolveSingleFseTable` that dispatch on a compression
+mode enum (predefined/RLE/repeat/fseCompressed) need per-mode theorems:
+
+| Mode | Position change | Proof sketch |
+|------|----------------|--------------|
+| `predefined` | `pos' = pos` | Direct — returns `(buildFromPredefined ..., pos)` |
+| `rle` | `pos' = pos + 1` | Reads one byte for symbol |
+| `repeat` | `pos' = pos` | Returns `(prevTable, pos)` |
+| `fseCompressed` | `pos' ≥ pos + 1` | Calls `decodeFseDistribution` + byte-alignment |
+
+Each theorem uses the same structure:
+1. `simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h`
+2. `split at h` to match the mode
+3. Close impossible branches with `exact nomatch h`
+4. Extract position from `Except.ok.injEq, Prod.mk.injEq`
+
+The fseCompressed case is harder because it involves `BitReader`
+byte-alignment: `if br'.bitOff == 0 then br'.pos else br'.pos + 1`.
+This introduces a `by_cases` or `split` on `bitOff` and requires a
+separate lemma about `decodeFseDistribution` advancing the bit position.
+
+### Position specs feed WF termination
+
+These position-advancement theorems are not standalone — they serve as
+building blocks for `termination_by data.size - pos` obligations in
+WF-recursive functions like `decompressBlocksWF` and `decompressZstdWF`.
+The chain is:
+
+1. Per-parser `_pos_gt` theorems prove strict advancement
+2. WF function adds guard `if hadv : afterPos ≤ pos then throw`
+3. Guard gives `¬(afterPos ≤ pos)`, combined with `_pos_gt` gives
+   `afterPos > pos`, which proves `data.size - afterPos < data.size - pos`
+4. `omega` closes the termination obligation
+
+See `lean-wf-recursion` skill, "Non-Advancement Guard Pattern".
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
@@ -366,13 +476,24 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) ... := by
   `/-! ... -/` describing the RFC section, the specification layers,
   and what predicates are defined.
 
+- **Don't validate theorem statements by attempting proof only**: Use
+  `#eval` on concrete inputs first to catch false statements early.
+  Three false theorems were discovered during this project, each
+  costing multiple sessions. See "Theorem Statement Validation" above.
+
 ## Cross-References
 
 - **WF recursion patterns** (unfolding, `f.induct`, termination measures):
   `lean-wf-recursion` skill
+- **Non-advancement guard for WF termination**:
+  `lean-wf-recursion` skill, "Non-Advancement Guard Pattern"
 - **Monadic unfolding** (`Except.bind` chains, `nomatch` for contradictions):
   `lean-monad-proofs` skill
+- **Bool-to-Prop bridging** (`beq_iff_eq`, `Bool.and_eq_true`):
+  `lean-monad-proofs` skill, "`eq_of_beq` for BEq-to-Eq Conversion"
 - **Array literal indexing** (`rcases` + `rfl`/`omega`):
   `lean-simp-tactics` skill, "Array Literal Indexing After `rcases` Case Split"
 - **`1 <<< n` and `2^n`** in offset decoding proofs:
   `lean-simp-tactics` skill, "`omega` Cannot Handle Exponentiation"
+- **Auto-generated dagger lemmas** (`UInt32.reduceBEq✝`):
+  `lean-simp-tactics` skill, "Dagger Lemmas" — use `decide` or `show ... from by decide`

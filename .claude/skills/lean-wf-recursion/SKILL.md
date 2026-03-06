@@ -285,6 +285,22 @@ When converting a fuel-based function to well-founded recursion:
 - **`omega` can't see data invariants**: Use the `dataSize` parameter
   pattern (above) to avoid needing `br.data.size` invariants in `omega`.
 
+### Termination Obligations: `omega` Usually Suffices
+
+With the non-advancement guard pattern (see above), termination
+obligations are almost always closable by `omega`. The pattern
+produces goals like:
+
+```
+h : ¬(afterPos ≤ pos)
+⊢ data.size - afterPos < data.size - pos
+```
+
+These are pure linear arithmetic — `omega` handles them directly.
+No custom `decreasing_by` blocks are needed. If `omega` fails, check
+whether the measure involves non-linear terms (multiplication,
+exponentiation) — those require auxiliary `have` lemmas to linearize.
+
 ## WF Goal Shape: Conjunction with Guard
 
 When proving properties of WF functions using `Nat.strongRecOn` (rather
@@ -308,6 +324,49 @@ exact ⟨hblen, ih bits'.length (hlen ▸ hblen) bits' acc' result rfl hgo⟩
 the conjunction is not a `dite`, it's already been simplified past that.
 
 See `Zip/Spec/DeflateSuffix.lean:498` (`decode_go_suffix` proof).
+
+## Non-Advancement Guard Pattern
+
+WF-recursive parsers often need to prove that sub-operations advance
+the position. Rather than proving advancement inline, use a **guard +
+throw** pattern that makes the termination proof trivial:
+
+```lean
+def decompressZstdWF (data : ByteArray) (pos : Nat) (output : ByteArray) :
+    Except String ByteArray :=
+  if hpos : pos ≥ data.size then
+    return output
+  else do
+    let (content, afterFrame) ← decompressFrame data pos
+    if hadv : afterFrame ≤ pos then
+      throw "frame did not advance position"
+    else
+      have : data.size - afterFrame < data.size - pos := by omega
+      decompressZstdWF data afterFrame (output ++ content)
+termination_by data.size - pos
+```
+
+**Key insight**: The guard `if hadv : afterFrame ≤ pos then throw`
+creates a named hypothesis. In the `else` branch, `hadv` gives
+`¬(afterFrame ≤ pos)`, and `omega` closes the termination obligation
+`data.size - afterFrame < data.size - pos`.
+
+**When to use this pattern**:
+- The sub-operation's position-advancement proof exists but is complex
+  to inline
+- You want the WF function to be valid even without the
+  position-advancement theorem (the guard makes it self-contained)
+- Multiple recursive paths exist (skippable frames vs standard frames
+  in `decompressZstdWF`) and each needs its own guard
+
+**Cross-reference**: The per-parser `_pos_gt` theorems
+(see `lean-zstd-spec-pattern` skill, "Position-Advancement Proofs")
+prove that the guard never fires in practice, but the WF function
+doesn't depend on those proofs for termination.
+
+**Earlier example**: `decompressBlocksWF` in `ZstdFrame.lean` uses the
+same pattern with `parseBlockHeader` + `decodeBlock`, where the guard
+checks that the block processing advanced the byte offset.
 
 ## Multi-State While Loops (decompressBlocks Pattern)
 
