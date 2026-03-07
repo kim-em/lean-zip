@@ -192,6 +192,60 @@ Add a justifying comment from this table:
 | Length mismatch bridging | `-- bare simp: bridges List.length_append` |
 | Complex `if`/`dite` with arithmetic | `-- bare simp: dite with arithmetic bridging` |
 
+## Phase 3b: `simp_all` Conversion
+
+`simp_all` is a separate concern from bare `simp`. It applies `simp` to
+all hypotheses and the goal simultaneously, which is powerful but fragile
+(sensitive to lemma database changes).
+
+### `simp_all` → `simp_all only [...]`
+
+Replace bare `simp_all` with targeted variants using `simp_all?`:
+
+1. Replace `simp_all` with `simp_all?`, build, read the suggestion
+2. Apply the suggested `simp_all only [...]`
+
+### Common `simp_all` replacement patterns
+
+| `simp_all` usage | Targeted replacement |
+|------------------|---------------------|
+| `simp_all` closing Option/Prod destructuring | `simp_all only [Option.some.injEq, Prod.mk.injEq]` |
+| `simp_all` after `beq` hypothesis | `simp only [beq_iff_eq] at *; exact h` or `simp_all only [beq_iff_eq]` |
+| `simp_all` in termination proof | `simp_all only [countRun_le_length]; omega` — make the specific lemma explicit |
+| `simp_all` for Bool-to-Prop conversion | `simp_all only [beq_eq_false_iff_ne]` or use `beq_eq_false_iff_ne.mpr hx0` |
+
+### Injection lemma kit for Option/Prod
+
+When `simp_all` handles Option/Prod destructuring, the targeted replacements are:
+
+- **`Option.some.injEq`**: reduces `Option.some a = Option.some b` to `a = b`
+- **`Prod.mk.injEq`**: reduces `(a, b) = (c, d)` to `a = c ∧ b = d`
+- **`Except.ok.injEq`**: reduces `Except.ok a = Except.ok b` to `a = b`
+
+These three lemmas replace the majority of `simp_all` calls in monadic
+proof contexts. Combined with `obtain ⟨rfl, rfl⟩ := h`, they eliminate
+the need for `simp_all` in most injection scenarios.
+
+### `beq_eq_false_iff_ne.mpr` for Bool-to-Prop
+
+When `simp_all` is used to convert `(x == 0) = false` to `x ≠ 0`,
+the targeted replacement is:
+
+```lean
+-- Before (bare simp_all):
+simp_all [beq_iff_eq]
+
+-- After (direct):
+have hne := beq_eq_false_iff_ne.mpr hx0  -- hx0 : x ≠ 0
+```
+
+This is more explicit and doesn't depend on the simp lemma database.
+
+### Campaign status
+
+The bare `simp_all` campaign achieved zero bare `simp_all` across the
+entire codebase as of PR #832. New code should maintain this invariant.
+
 ## Phase 4: Linter Compliance
 
 Check for linter warnings on the cleaned-up proofs:
