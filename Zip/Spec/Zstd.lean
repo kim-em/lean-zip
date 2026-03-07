@@ -174,6 +174,19 @@ theorem parseBlockHeader_pos_eq (data : ByteArray) (pos : Nat)
     · obtain ⟨rfl, rfl⟩ := h; rfl
     · exact nomatch h
 
+/-- When `parseBlockHeader` succeeds, the returned position is within data bounds.
+    Follows from `parseBlockHeader_pos_eq` (pos' = pos + 3) and the bounds check
+    ¬(data.size < pos + 3). -/
+theorem parseBlockHeader_le_size (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdBlockHeader) (pos' : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (header, pos')) :
+    pos' ≤ data.size := by
+  have hpos := parseBlockHeader_pos_eq data pos header pos' h
+  unfold Zip.Native.parseBlockHeader at h
+  split at h
+  · exact nomatch h
+  · subst hpos; omega
+
 /-! ## Block decompression correctness -/
 
 /-- When `decompressRawBlock` succeeds, the output has exactly `blockSize` bytes. -/
@@ -542,6 +555,36 @@ theorem parseFrameHeader_pos_gt (data : ByteArray) (pos : Nat)
     (h : Zip.Native.parseFrameHeader data pos = .ok (header, pos')) :
     pos' > pos := by
   have := parseFrameHeader_pos_ge_five data pos header pos' h; omega
+
+/-- When `parseFrameHeader` succeeds, the returned position is within data bounds.
+    Each stage of the header has a bounds check (`data.size < off + N → throw`),
+    so on the success path, `off + N ≤ data.size` holds at every stage. The final
+    returned position is the last `off`, bounded by the last check. -/
+theorem parseFrameHeader_le_size (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (pos' : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (header, pos')) :
+    pos' ≤ data.size := by
+  unfold Zip.Native.parseFrameHeader at h
+  dsimp only [Bind.bind, Except.bind] at h
+  by_cases h1 : data.size < pos + 4
+  · rw [if_pos h1] at h; exact nomatch h
+  · rw [if_neg h1] at h
+    simp only [pure, Pure.pure] at h
+    by_cases h2 : (Binary.readUInt32LE data pos != Zip.Native.zstdMagic) = true
+    · rw [if_pos h2] at h; exact nomatch h
+    · rw [if_neg h2] at h
+      by_cases h3 : data.size < pos + 4 + 1
+      · rw [if_pos h3] at h; exact nomatch h
+      · rw [if_neg h3] at h
+        split at h
+        · exact nomatch h
+        · simp only [Except.pure] at h
+          repeat split at h
+          iterate 5 (all_goals (try (first | contradiction | (split at h))))
+          all_goals first
+            | contradiction
+            | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
+               obtain ⟨-, rfl⟩ := h; omega)
 
 /-! ## Window size characterizing properties -/
 
