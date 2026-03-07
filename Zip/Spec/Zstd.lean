@@ -227,6 +227,17 @@ theorem decompressRawBlock_pos_eq (data : ByteArray) (pos : Nat)
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h; rfl
 
+/-- When `decompressRawBlock` succeeds, the returned position is within data bounds. -/
+theorem decompressRawBlock_le_size (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (output : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (output, pos')) :
+    pos' ≤ data.size := by
+  unfold Zip.Native.decompressRawBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h; omega
+
 /-- When `decompressRLEBlock` succeeds, the returned position is `pos + 1`.
     The RLE block consumes exactly 1 byte from the input (the repeated byte). -/
 theorem decompressRLEBlock_pos_eq (data : ByteArray) (pos : Nat)
@@ -238,6 +249,17 @@ theorem decompressRLEBlock_pos_eq (data : ByteArray) (pos : Nat)
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h; rfl
+
+/-- When `decompressRLEBlock` succeeds, the returned position is within data bounds. -/
+theorem decompressRLEBlock_le_size (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (output : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (output, pos')) :
+    pos' ≤ data.size := by
+  unfold Zip.Native.decompressRLEBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · obtain ⟨rfl, rfl⟩ := h; omega
 
 /-- When `decompressRawBlock` succeeds, each output byte equals the corresponding
     input byte at offset `pos + i`. Raw blocks copy input verbatim. -/
@@ -342,6 +364,20 @@ theorem skipSkippableFrame_pos_gt (data : ByteArray) (pos : Nat)
     pos' > pos := by
   have := skipSkippableFrame_pos_eq data pos pos' h
   omega
+
+/-- When `skipSkippableFrame` succeeds, the returned position is within data bounds. -/
+theorem skipSkippableFrame_le_size (data : ByteArray) (pos pos' : Nat)
+    (h : Zip.Native.skipSkippableFrame data pos = .ok pos') :
+    pos' ≤ data.size := by
+  unfold Zip.Native.skipSkippableFrame at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · split at h
+      · exact nomatch h
+      · have := Except.ok.inj h; omega
 
 /-! ## Block loop structural lemmas -/
 
