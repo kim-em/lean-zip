@@ -69,9 +69,9 @@ private theorem land_pred_even (n : Nat) (heven : n % 2 = 0) (hpos : n > 0) :
     simp only [Nat.testBit_zero, heven, Nat.mul_mod_right,
       show (0 : Nat) ≠ 1 from by omega, decide_false, Bool.false_and]
   | i + 1 =>
-    rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ]
-    rw [Nat.testBit_succ, Nat.mul_div_cancel_left _ (by omega : 0 < 2)]
-    rw [Nat.testBit_and, hdiv]
+    rw [Nat.testBit_and, Nat.testBit_succ, Nat.testBit_succ,
+        Nat.testBit_succ, Nat.mul_div_cancel_left _ (by omega : 0 < 2),
+        Nat.testBit_and, hdiv]
 
 /-- Helper: for odd n, `n &&& (n - 1) = 2 * (n / 2)`. -/
 private theorem land_pred_odd (n : Nat) (hodd : n % 2 = 1) :
@@ -101,17 +101,13 @@ private theorem land_pred_zero_imp_pow2 (n : Nat) (hpos : n > 0) (hand : n &&& (
     rw [hand] at heven
     -- heven : 0 = 2 * (n/2 &&& (n/2 - 1)), so n/2 &&& (n/2 - 1) = 0
     have hand2 : n / 2 &&& (n / 2 - 1) = 0 := by omega
-    have hpos2 : n / 2 > 0 := by omega
-    have hlt : n / 2 < n := by omega
-    have ⟨j, hj⟩ := ih (n / 2) hlt hpos2 hand2
+    have ⟨j, hj⟩ := ih (n / 2) (by omega) (by omega) hand2
     exact ⟨j + 1, by rw [Nat.pow_succ, Nat.mul_comm]; omega⟩
   · -- n is odd: if n ≥ 3, then n &&& (n-1) > 0, contradiction
     -- So n must be 1
     have hodd := land_pred_odd n hmod
     rw [hand] at hodd
     -- hodd : 0 = 2 * (n / 2), so n / 2 = 0, so n = 1
-    have : n / 2 = 0 := by omega
-    have : n = 1 := by omega
     exact ⟨0, by omega⟩
 
 /-- `isPow2` correctly characterizes powers of 2. -/
@@ -608,65 +604,50 @@ private theorem parseLiteralsSection_simple_spec (data : ByteArray) (pos : Nat)
     (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
     (hlit : (data[pos]! &&& 3).toNat ≤ 1)
     (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
-    pos' > pos ∧ huffTable = none := by
+    pos' > pos ∧ huffTable = none ∧ pos' ≤ data.size := by
   simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
   split at h
   · exact nomatch h
-  · -- data.size ≥ pos + 1, byte0 = data[pos]!
-    -- litType > 3 guard
-    split at h
+  · split at h
     · exact nomatch h
-    · -- litType ≤ 3; compressed/treeless check
-      split at h
-      · -- litType == 2 || litType == 3: contradicts hlit
-        rename_i hle3 hcomp
+    · split at h
+      · rename_i hle3 hcomp
         simp only [beq_iff_eq, Bool.or_eq_true] at hcomp
         have : (data[pos]! &&& 3).toNat = 2 ∨ (data[pos]! &&& 3).toNat = 3 := hcomp
         omega
-      · -- Raw/RLE path: parse header
-        -- sizeFormat dispatch
-        split at h
-        · -- sizeFormat == 0 || sizeFormat == 2: headerBytes = 1
-          split at h
-          · -- litType == 0: raw
-            split at h
-            · exact nomatch h
-            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-              exact ⟨by omega, h.2.2.symm⟩
-          · -- litType == 1: RLE
-            split at h
-            · exact nomatch h
-            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-              exact ⟨by omega, h.2.2.symm⟩
+      · split at h
         · split at h
-          · -- sizeFormat == 1: headerBytes = 2
-            split at h
+          · split at h
+            · exact nomatch h
+            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              exact ⟨by omega, h.2.2.symm, by omega⟩
+          · split at h
+            · exact nomatch h
+            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              exact ⟨by omega, h.2.2.symm, by omega⟩
+        · split at h
+          · split at h
             · exact nomatch h
             · split at h
-              · -- litType == 0: raw
-                split at h
+              · split at h
                 · exact nomatch h
                 · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  exact ⟨by omega, h.2.2.symm⟩
-              · -- litType == 1: RLE
-                split at h
+                  exact ⟨by omega, h.2.2.symm, by omega⟩
+              · split at h
                 · exact nomatch h
                 · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  exact ⟨by omega, h.2.2.symm⟩
-          · -- sizeFormat == 3: headerBytes = 3
-            split at h
+                  exact ⟨by omega, h.2.2.symm, by omega⟩
+          · split at h
             · exact nomatch h
             · split at h
-              · -- litType == 0: raw
-                split at h
+              · split at h
                 · exact nomatch h
                 · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  exact ⟨by omega, h.2.2.symm⟩
-              · -- litType == 1: RLE
-                split at h
+                  exact ⟨by omega, h.2.2.symm, by omega⟩
+              · split at h
                 · exact nomatch h
                 · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  exact ⟨by omega, h.2.2.symm⟩
+                  exact ⟨by omega, h.2.2.symm, by omega⟩
 
 open Zip.Native in
 /-- For raw or RLE literals (types 0-1), the returned position advances. -/
@@ -686,7 +667,7 @@ theorem parseLiteralsSection_huffTable_none_simple (data : ByteArray) (pos : Nat
     (hlit : (data[pos]! &&& 3).toNat ≤ 1)
     (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
     huffTable = none :=
-  (parseLiteralsSection_simple_spec data pos prevHuffTree literals pos' huffTable hlit h).2
+  (parseLiteralsSection_simple_spec data pos prevHuffTree literals pos' huffTable hlit h).2.1
 
 open Zip.Native in
 /-- For raw or RLE literals (types 0-1), the returned position stays within `data.size`. -/
@@ -695,64 +676,49 @@ theorem parseLiteralsSection_le_size_simple (data : ByteArray) (pos : Nat)
     (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
     (hlit : (data[pos]! &&& 3).toNat ≤ 1)
     (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
-    pos' ≤ data.size := by
+    pos' ≤ data.size :=
+  (parseLiteralsSection_simple_spec data pos prevHuffTree literals pos' huffTable hlit h).2.2
+
+open Zip.Native in
+/-- Combined structural properties for compressed/treeless literals (types 2-3):
+    the returned position advances and stays within `data.size`. -/
+private theorem parseLiteralsSection_compressed_spec (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat ≥ 2)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    pos' > pos ∧ pos' ≤ data.size := by
   simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
   split at h
   · exact nomatch h
-  · -- data.size ≥ pos + 1
-    split at h
+  · split at h
     · exact nomatch h
-    · -- litType ≤ 3; compressed/treeless check
-      split at h
-      · -- litType == 2 || litType == 3: contradicts hlit
-        rename_i hle3 hcomp
-        simp only [beq_iff_eq, Bool.or_eq_true] at hcomp
-        have : (data[pos]! &&& 3).toNat = 2 ∨ (data[pos]! &&& 3).toNat = 3 := hcomp
-        omega
-      · -- Raw/RLE path: parse header
-        -- sizeFormat dispatch
-        split at h
-        · -- sizeFormat == 0 || sizeFormat == 2: headerBytes = 1
+    · split at h
+      · split at h
+        · exact nomatch h
+        · rename_i v heq
+          obtain ⟨regen, comp, hdr, fs⟩ := v
+          have hge := parseCompressedLiteralsHeader_headerBytes_ge data pos _ _ _ _ _ heq
           split at h
-          · -- litType == 0: raw
-            split at h
+          · split at h
+            · split at h
+              · exact nomatch h
+              · split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h; exact ⟨by omega, by omega⟩
             · exact nomatch h
-            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-              omega
-          · -- litType == 1: RLE
-            split at h
-            · exact nomatch h
-            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-              omega
-        · split at h
-          · -- sizeFormat == 1: headerBytes = 2
-            split at h
+          · split at h
             · exact nomatch h
             · split at h
-              · -- litType == 0: raw
-                split at h
+              · exact nomatch h
+              · split at h
                 · exact nomatch h
-                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  omega
-              · -- litType == 1: RLE
-                split at h
-                · exact nomatch h
-                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  omega
-          · -- sizeFormat == 3: headerBytes = 3
-            split at h
-            · exact nomatch h
-            · split at h
-              · -- litType == 0: raw
-                split at h
-                · exact nomatch h
-                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  omega
-              · -- litType == 1: RLE
-                split at h
-                · exact nomatch h
-                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-                  omega
+                · split at h
+                  · exact nomatch h
+                  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; exact ⟨by omega, by omega⟩
+      · rename_i hle3 hnotcomp
+        simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hnotcomp
+        omega
 
 open Zip.Native in
 /-- For compressed or treeless literals (types 2-3), the returned position advances. -/
@@ -761,52 +727,8 @@ theorem parseLiteralsSection_pos_gt_compressed (data : ByteArray) (pos : Nat)
     (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
     (hlit : (data[pos]! &&& 3).toNat ≥ 2)
     (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
-    pos' > pos := by
-  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
-  split at h
-  · exact nomatch h
-  · -- data.size ≥ pos + 1
-    split at h
-    · exact nomatch h
-    · -- litType ≤ 3
-      split at h
-      · -- Compressed/treeless path (litType == 2 || litType == 3)
-        -- bind result of parseCompressedLiteralsHeader: error vs ok
-        split at h
-        · exact nomatch h
-        · -- parseCompressedLiteralsHeader succeeded; headerBytes ≥ 3
-          rename_i v heq
-          obtain ⟨regen, comp, hdr, fs⟩ := v
-          have hge := parseCompressedLiteralsHeader_headerBytes_ge data pos _ _ _ _ _ heq
-          -- litType == 3 check
-          split at h
-          · -- treeless (type 3)
-            split at h
-            · -- prevHuffTree = some t
-              split at h
-              · exact nomatch h -- data too small
-              · -- decodeHuffmanLiterals result
-                split at h
-                · exact nomatch h
-                · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
-            · exact nomatch h -- no previous Huffman tree (prevHuffTree = none)
-          · -- compressed (type 2)
-            split at h
-            · exact nomatch h -- data too small
-            · -- parseHuffmanTreeDescriptor result via mapError
-              split at h
-              · exact nomatch h
-              · -- treeSize check
-                split at h
-                · exact nomatch h
-                · -- decodeHuffmanLiterals result via mapError
-                  split at h
-                  · exact nomatch h
-                  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
-      · -- Raw/RLE path: contradicts hlit
-        rename_i hle3 hnotcomp
-        simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hnotcomp
-        omega
+    pos' > pos :=
+  (parseLiteralsSection_compressed_spec data pos prevHuffTree literals pos' huffTable hlit h).1
 
 open Zip.Native in
 /-- For all literal types (0-3), the returned position advances. -/
@@ -831,51 +753,8 @@ theorem parseLiteralsSection_le_size_compressed (data : ByteArray) (pos : Nat)
     (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
     (hlit : (data[pos]! &&& 3).toNat ≥ 2)
     (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
-    pos' ≤ data.size := by
-  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
-  split at h
-  · exact nomatch h
-  · -- data.size ≥ pos + 1
-    split at h
-    · exact nomatch h
-    · -- litType ≤ 3
-      split at h
-      · -- Compressed/treeless path (litType == 2 || litType == 3)
-        -- bind result of parseCompressedLiteralsHeader: error vs ok
-        split at h
-        · exact nomatch h
-        · -- parseCompressedLiteralsHeader succeeded
-          rename_i v heq
-          obtain ⟨regen, comp, hdr, fs⟩ := v
-          -- litType == 3 check
-          split at h
-          · -- treeless (type 3)
-            split at h
-            · -- prevHuffTree = some t
-              split at h
-              · exact nomatch h -- data too small
-              · -- decodeHuffmanLiterals result
-                split at h
-                · exact nomatch h
-                · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
-            · exact nomatch h -- no previous Huffman tree (prevHuffTree = none)
-          · -- compressed (type 2)
-            split at h
-            · exact nomatch h -- data too small
-            · -- parseHuffmanTreeDescriptor result via mapError
-              split at h
-              · exact nomatch h
-              · -- treeSize check
-                split at h
-                · exact nomatch h
-                · -- decodeHuffmanLiterals result via mapError
-                  split at h
-                  · exact nomatch h
-                  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
-      · -- Raw/RLE path: contradicts hlit
-        rename_i hle3 hnotcomp
-        simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hnotcomp
-        omega
+    pos' ≤ data.size :=
+  (parseLiteralsSection_compressed_spec data pos prevHuffTree literals pos' huffTable hlit h).2
 
 open Zip.Native in
 /-- For all literal types (0-3), the returned position stays within `data.size`. -/
@@ -974,7 +853,7 @@ theorem parseHuffmanTreeDescriptor_pos_ge_two (data : ByteArray) (pos : Nat)
   simp only [parseHuffmanTreeDescriptor, bind, Except.bind] at h
   -- Size guard
   by_cases h1 : data.size < pos + 1
-  · simp [h1] at h
+  · rw [if_pos h1] at h; exact nomatch h
   · rw [if_neg h1] at h; simp only [pure, Pure.pure, Except.pure] at h
     -- headerByte >= 128 check
     by_cases h2 : data[pos]!.toNat ≥ 128
@@ -995,7 +874,7 @@ theorem parseHuffmanTreeDescriptor_pos_ge_two (data : ByteArray) (pos : Nat)
     · rw [if_neg (show ¬data[pos]!.toNat ≥ 128 from h2)] at h
       -- headerByte == 0 check
       by_cases h3 : (data[pos]!.toNat == 0) = true
-      · simp [h3] at h
+      · rw [if_pos h3] at h; exact nomatch h
       · rw [if_neg h3] at h
         cases hfse : parseHuffmanWeightsFse data pos data[pos]!.toNat with
         | error e => simp only [hfse] at h; exact nomatch h
