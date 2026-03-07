@@ -355,6 +355,23 @@ Parser functions in `Except` monad return `(result, pos')`. Proving
 `pos' > pos` (or `pos' = pos + k`) is the standard way to establish
 that a parser consumes input, which feeds WF termination obligations.
 
+### Naming convention: `_pos_gt` vs `_pos_ge` vs `_pos_eq`
+
+Choose the suffix based on the tightest bound you can prove:
+
+| Suffix | Meaning | When to use |
+|--------|---------|-------------|
+| `_pos_eq` | `pos' = pos + k` (exact) | Parser reads a fixed number of bytes (e.g., `parseBlockHeader` always reads 3) |
+| `_pos_gt` | `pos' > pos` (strict) | Parser reads at least 1 byte but exact count varies (e.g., `decompressFrame`) |
+| `_pos_ge` | `pos' ≥ pos` (weak) | Some branches don't advance (e.g., `resolveSingleFseTable` with `repeat` mode returns `pos' = pos`) |
+
+**Prefer the tightest bound**: `_pos_eq` > `_pos_gt` > `_pos_ge`. Stricter bounds
+are more useful for callers (exact bounds compose better than inequalities).
+
+**Deriving weaker from stronger**: A `_pos_eq` theorem trivially implies `_pos_gt`
+and `_pos_ge` via `omega`. A `_pos_gt` implies `_pos_ge`. Don't prove both unless
+callers specifically need the weaker form for API compatibility.
+
 ### Standard proof template
 
 ```lean
@@ -420,6 +437,35 @@ theorem composed_pos_gt ... := by
       have hC_gt := C_pos_gt ... hC
       omega
 ```
+
+### Worked composition example: `decompressFrame_pos_gt`
+
+`decompressFrame` calls `parseFrameHeader` then `decompressBlocksWF`. Rather
+than re-unfolding both functions, compose their position specs:
+
+```lean
+theorem decompressFrame_pos_gt ... (h : decompressFrame data pos = .ok (output, pos')) :
+    pos' > pos := by
+  unfold decompressFrame at h
+  cases hph : parseFrameHeader data pos with
+  | error e => simp only [hph, bind, Except.bind] at h; exact nomatch h
+  | ok val =>
+    obtain ⟨header, afterHeader⟩ := val
+    have hgt1 := parseFrameHeader_pos_gt _ _ _ _ hph    -- afterHeader > pos
+    simp only [hph, bind, Except.bind, pure, Except.pure] at h
+    ...
+    cases hdb : decompressBlocksWF data afterHeader ... with
+    | error e => simp only [hdb] at h; exact nomatch h
+    | ok val2 =>
+      obtain ⟨content, afterBlocks⟩ := val2
+      have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb  -- afterBlocks > afterHeader
+      ...  -- omega closes: pos' ≥ afterBlocks > afterHeader > pos
+```
+
+**Pattern**: At each monadic bind, case-split on the sub-call, dismiss error
+with `nomatch`, extract the ok result, and invoke the sub-call's `_pos_gt`
+theorem as a `have`. After all binds are processed, `omega` (or `grind`)
+chains the inequalities.
 
 ### Mode-dispatched functions (`resolveSingleFseTable` pattern)
 
