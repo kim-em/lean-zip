@@ -18,6 +18,10 @@ The key properties proved here:
    unchanged (skippable frames contribute no content).
 4. **Skippable then standard**: when a skippable frame is followed by a
    standard Zstd frame, only the standard frame contributes content.
+5. **Output monotonicity**: when `decompressZstdWF` succeeds, the result is
+   at least as large as the input accumulator (decompressing only adds data).
+6. **API-level single frame**: when the input contains exactly one standard
+   frame at position 0, the public `decompressZstd` returns the content.
 -/
 
 namespace Zip.Spec.ZstdFrame
