@@ -348,6 +348,8 @@ theorem buildFseTable_accuracyLog_eq (probs : Array Int32) (al : Nat)
     (table : FseTable) (h : buildFseTable probs al = .ok table) :
     table.accuracyLog = al := by
   simp only [buildFseTable, bind, Except.bind, pure, Except.pure] at h
+  -- grind handles case-splitting through the unfolded if/match/forIn branches,
+  -- extracting `table.accuracyLog = al` from each successful return path
   grind
 
 private theorem forIn_range_preserves {β ε : Type}
@@ -586,9 +588,7 @@ private theorem uint32_shift_or_bit_bound (acc : UInt32) (byte : UInt8) (pos : U
     · -- (acc <<< 1).toNat < 2^(m+1)
       simp only [UInt32.toNat_shiftLeft, Nat.shiftLeft_eq]
       have : (1 : UInt32).toNat % 32 = 1 := by decide
-      rw [this]
-      rw [Nat.pow_one]
-      rw [Nat.mod_eq_of_lt]
+      rw [this, Nat.pow_one, Nat.mod_eq_of_lt]
       · rw [Nat.pow_succ]; omega
       · calc acc.toNat * 2
             < 2 ^ m * 2 := by omega
@@ -645,7 +645,7 @@ private theorem readBits_go_totalBitsRemaining (br : BackwardBitReader)
   | zero =>
     simp only [BackwardBitReader.readBits.go] at h
     obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
-    simp
+    omega
   | succ k ih =>
     simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
     split at h
