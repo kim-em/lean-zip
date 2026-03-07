@@ -67,9 +67,11 @@ where
         else
           (x, 0) :: go xs
   termination_by xs => xs.length
-  decreasing_by
-    all_goals simp_all [List.length_drop]
-    all_goals have := countRun_le_length 0 xs; omega
+  decreasing_by all_goals
+    simp only [List.length_cons, List.length_drop]
+    have := countRun_le_length 0 xs
+    have := countRun_le_length x xs
+    omega
 
 /-- Decode a list of CL entries back into code lengths.
     This is the pure (non-Huffman) inverse of `rlEncodeLengths`.
@@ -210,7 +212,7 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
           rw [if_neg (by omega), Deflate.Spec.rlDecode_go_literal 0 0 _ _ (by omega)]
           rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [0]) hxs_valid]
           simp only [List.append_assoc, List.cons_append, List.nil_append]
-    · simp only [show (x == 0) = false from by cases h : x == 0 <;> simp_all [beq_iff_eq],
+    · simp only [show (x == 0) = false from beq_eq_false_iff_ne.mpr hx0,
                   Bool.false_eq_true, ↓reduceIte]
       by_cases hge3 : countRun x xs >= 3
       · -- literal + code 16: repeat previous 3-6
@@ -231,7 +233,11 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
         rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [x]) hxs_valid]
         simp only [List.append_assoc, List.cons_append, List.nil_append]
 termination_by lengths.length
-decreasing_by all_goals simp_all [List.length_drop] <;> omega
+decreasing_by all_goals
+  simp only [List.length_cons, List.length_drop]
+  have := countRun_le_length 0 xs
+  have := countRun_le_length x xs
+  omega
 
 /-- Encoding then decoding code lengths recovers the original list. -/
 theorem rlDecodeLengths_rlEncodeLengths (lengths : List Nat)
@@ -283,7 +289,7 @@ theorem rlEncodeLengths_go_valid (lengths : List Nat)
           | inl h => subst h; left; exact ⟨by omega, rfl⟩
           | inr h =>
             exact rlEncodeLengths_go_valid _ hxs_valid entry h
-    · simp only [show (x == 0) = false from by cases h : x == 0 <;> simp_all [beq_iff_eq],
+    · simp only [show (x == 0) = false from beq_eq_false_iff_ne.mpr hx0,
                   Bool.false_eq_true, ↓reduceIte]
       by_cases hge3 : countRun x xs ≥ 3
       · rw [if_pos (by omega : countRun x xs ≥ 3)]
@@ -304,7 +310,11 @@ theorem rlEncodeLengths_go_valid (lengths : List Nat)
         | inr h =>
           exact rlEncodeLengths_go_valid _ hxs_valid entry h
 termination_by lengths.length
-decreasing_by all_goals simp_all [List.length_drop] <;> omega
+decreasing_by all_goals
+  simp only [List.length_cons, List.length_drop]
+  have := countRun_le_length 0 xs
+  have := countRun_le_length x xs
+  omega
 
 /-- Every entry produced by `rlEncodeLengths` satisfies the CL code constraints:
     codes 0-15 have extra = 0, code 16 has extra ≤ 3, code 17 has extra ≤ 7,
