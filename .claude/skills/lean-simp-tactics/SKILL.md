@@ -240,6 +240,7 @@ proves about `bits.length`), `simp [hf]` can bridge the gap via
 | `if (n > 0) then ...` (Prop) | After `rw [if_pos/if_neg h]` | Prove `h`, then `rw` |
 | `if (false = true) then ...` | **No** | `dsimp` (definitional reduction) |
 | `if (x == y) then ...` (Bool) | After `show (x == y) = false` | `Bool.false_eq_true, ↓reduceIte` |
+| `if ((8 : Nat) = 0) then ...` (concrete numeral Prop) | **No** | `show ¬((8 : Nat) = 0) from by omega`, then `↓reduceIte` |
 
 **After `cases b` on `Bool`**: `if b then 1 else 0` becomes `if false then 1 else 0`,
 which elaborates to `@ite _ (false = true) (instDecidableEqBool false true) 1 0`.
