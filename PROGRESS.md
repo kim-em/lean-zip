@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~383 completed (Feb 19 – Mar 7)
+- **Sessions**: ~395 completed (Feb 19 – Mar 7)
 - **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 351
-- **Spec theorems/lemmas**: 991 across 49 spec files (24,401 lines)
+- **Merged PRs**: 364
+- **Spec theorems/lemmas**: 906 declarations across 49 spec files (25,318 lines)
 - **Bare simp**: 0 remaining — campaign complete (49 spec files, ZipForStd/, Native/ all clean)
 - **Bare simp_all**: 0 remaining — campaign complete (all spec files, DeflateEncodeDynamic included)
 
@@ -619,30 +619,66 @@ end-to-end frame position proofs.
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
 
-**Summary:** The Zstd spec infrastructure now spans 6 files with 185
-theorems/lemmas: ZstdSequence (59), Fse (47), ZstdHuffman (34), Zstd (25),
-XxHash (16), ZstdFrame (4). Total spec line count: 3,537 lines.
+**12-PR batch (Mar 7): le_size campaign + characterizing properties + quality reviews:**
 
-The previous batch (closed by #785) completed two significant milestones:
-sorry count 4→3 via `buildPredefinedFseTables_success` (#776) and near-
-completion of the position advancement campaign. This batch shifted focus to
-value bounds and top-level decompressor specs. The new `ZstdFrame.lean` file
-establishes the first formal properties of `decompressZstdWF`, covering base
-case, single-frame, and skippable-frame composition — the building blocks for
-end-to-end multi-frame correctness. BackwardBitReader now has full lifecycle
-spec coverage (init → readBits → isFinished). The quality reviews completed
-the bare simp_all campaign across DeflateEncodeDynamic and continued the
-ongoing pattern of tightening proof hygiene.
+This batch established position-within-bounds invariants (`le_size` theorems)
+across 6 Zstd parsing functions and extended characterizing properties for
+compressed headers and sequence parsing.
+
+*Track E le_size campaign (6 PRs):*
+- #825: `skipSkippableFrame_le_size`, `decompressRawBlock_le_size`,
+  `decompressRLEBlock_le_size` — frame-level position bounds
+- #835: `parseBlockHeader_le_size`, `parseFrameHeader_le_size` — header
+  parsers stay within data bounds
+- #834: `parseSequencesHeader_le_size`, `parseSequencesHeader_medium_encoding`
+  — sequence header position bound and medium encoding characterization
+
+*Characterizing properties (3 PRs):*
+- #833: `decodeHuffmanSymbol` specs — bit consumption monotonicity
+  (`decodeHuffmanSymbol_pos_mono`) and bounds
+- #829: `parseCompressedLiteralsHeader` specs — `headerSize`, `fourStreams`,
+  `regen_bound` characterizing compressed literal header fields
+- #826: `parseSequencesHeader_numSeq_small` — small encoding extraction
+  (1-byte case: numSeq = byte0 when 0 < byte0 < 128)
+
+*Top-level decompressor specs (1 PR):*
+- #839: `decompressZstdWF_output_size_ge` (output monotonicity via functional
+  induction) and `decompressZstd_single_frame` (API-level single-frame theorem)
+
+*Quality reviews (2 PRs):*
+- #832: DeflateSuffix.lean — converted 3 bare `simp_all`
+- #822: Fse.lean — fixed bare simp, documented grind, combined rw calls
+
+The le_size campaign now covers the "easy" functions (those with simple bounds
+checks): `skipSkippableFrame`, `decompressRawBlock`, `decompressRLEBlock`,
+`parseBlockHeader`, `parseFrameHeader`, `parseSequencesHeader`. Remaining
+le_size gaps require deeper invariants: `parseLiteralsSection` (variable-length
+compressed headers), `BitReader` operations, FSE distribution chain,
+`decompressBlocks` loop, and frame-level composition.
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 195
+theorems/lemmas: ZstdSequence (57), Fse (50), ZstdHuffman (43), Zstd (27),
+XxHash (12), ZstdFrame (6). Total spec line count: 4,448 lines.
+
+**Remaining:**
+- Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
+  expensive for kernel evaluation — intractable without native_decide)
+- Complete le_size campaign for remaining functions (parseLiteralsSection,
+  BitReader, FSE distribution, block loop, frame-level)
+- Compose position specs into end-to-end frame position theorem
+- Spec-level decoder with correctness proofs (algorithmic correspondence
+  between native and spec decoder, following the DEFLATE B3 pattern)
+- Compressor + roundtrip proof
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~383 sessions (Feb 19 – Mar 7)
-- 351 merged PRs
+- ~395 sessions (Feb 19 – Mar 7)
+- 364 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
   `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623,
-  updated #711), `lean-monad-proofs` (updated #711)
+  updated #711, #840), `lean-monad-proofs` (updated #711, #840)
