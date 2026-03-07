@@ -945,6 +945,74 @@ theorem helper (h : f x = .ok v) : v.2.2.fst ≥ 3 := by ...
 theorem helper (h : f x = .ok (a, b, hdr, fs)) : hdr ≥ 3 := by ...
 ```
 
+## BackwardBitReader Proof Patterns
+
+The `BackwardBitReader` in `Zip/Native/Fse.lean` reads bits MSB-first from a
+backward bitstream. Its `readBits` function uses an inner `readBits.go` loop
+with a `Nat` count parameter (fuel-like but well-founded). Three proof patterns
+have emerged for reasoning about it.
+
+### Induction on the count parameter
+
+`readBits.go br k acc` recurses on `k`. Proofs about it use:
+
+```lean
+induction k generalizing br acc with
+| zero =>
+  -- Base: readBits.go _ 0 acc = .ok (acc, br)
+  simp only [BackwardBitReader.readBits.go] at h
+  obtain ⟨rfl, _⟩ := Prod.mk.inj (Except.ok.inj h)
+  ...
+| succ k ih =>
+  -- Step: unfold one iteration, split on bitsRemaining == 0
+  simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
+  split at h
+  · exact nomatch h  -- error: no bits remaining
+  · simp only [pure, Except.pure] at h
+    -- Apply IH with updated br and acc
+    refine ih _ _ ... h
+```
+
+**Key**: `generalizing br acc` is essential because both change at each step.
+
+### Accumulator value bound invariant
+
+To prove `readBits n` produces `val.toNat < 2^n`, track the invariant
+`acc.toNat < 2^(n-k)` through the loop. The inductive step shows that
+`(acc <<< 1) ||| bit` preserves the bound with one more bit:
+
+```lean
+-- The invariant: acc < 2^(n-k) → result < 2^n
+private theorem readBits_go_value_bound {n : Nat}
+    (br : BackwardBitReader) (k : Nat) (acc val : UInt32)
+    (hkn : k ≤ n) (hacc : acc.toNat < 2 ^ (n - k))
+    (h : readBits.go br k acc = .ok (val, br')) :
+    val.toNat < 2 ^ n := by
+  induction k generalizing br acc ...
+```
+
+The wrapper theorem instantiates with `k = n`, `acc = 0`:
+```lean
+theorem readBits_value_lt_pow2 ... :=
+  readBits_go_value_bound br n 0 val br' (Nat.le_refl n) (by simp) h
+```
+
+This pattern (inner loop invariant → wrapper instantiation) applies to any
+accumulator-based loop in `Except`.
+
+### `totalBitsRemaining` as decreasing measure
+
+`totalBitsRemaining br` counts `bitsRemaining + 8 * (bytePos - startPos)`.
+For termination/progress proofs about callers that loop over `readBits`:
+
+1. Prove `readBits` decreases `totalBitsRemaining` when it succeeds
+2. Use `totalBitsRemaining` as the termination measure for outer loops
+
+The key helper `readBits_go_totalBitsRemaining_decreasing` shows that
+each successful bit read strictly decreases the total. The outer function
+then composes: `readBits n` decreases by at least `n` bits (when
+`n > 0` and enough bits are available).
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
