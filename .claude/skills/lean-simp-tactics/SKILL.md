@@ -246,6 +246,12 @@ which elaborates to `@ite _ (false = true) (instDecidableEqBool false true) 1 0`
 `↓reduceIte` does NOT reduce this because `false = true` is not literally `False`.
 Use `dsimp` instead — it performs definitional reduction through `instDecidableEqBool`.
 
+**Why `dsimp` works here**: `instDecidableEqBool` computes definitionally to
+`isFalse` or `isTrue`, which `dsimp` can reduce via iota reduction. `simp only
+[↓reduceIte]` only handles the case where the decidable instance is already
+`isTrue`/`isFalse` at the syntax level. This distinction was independently
+discovered by two separate review sessions (PRs #764, #787).
+
 **After WF unfolding** (`rw [f.eq_1]`), function bodies often contain
 `if` branches. The standard pattern: `rw [f.eq_1]; simp only [h, ↓reduceIte]`
 where `h` resolves the guard. See the `lean-wf-recursion` skill for details.
@@ -490,6 +496,29 @@ be left with a justifying comment rather than forced into `simp only`:
 2. If that fails, try `dsimp only`
 3. If that fails, try a helper lemma or bridge `have`
 4. If all three fail, accept bare simp with a category comment
+
+## `split <;> rfl` for Symmetric Bool Goals
+
+When a goal has the form `(if b then x else x) = x` or when both branches of
+a Bool `match`/`if` produce the same result, `split <;> rfl` closes it:
+
+```lean
+-- Goal: (if someCondition then value else value) = value
+split <;> rfl
+```
+
+This commonly arises after `simp_all` replacement in proofs where the original
+`simp_all` was handling trivial if-then-else branches. The pattern also works for:
+
+```lean
+-- Both branches equal after simplification
+-- Goal: (match mode with | .a => f x | .b => f x) = f x
+split <;> rfl
+```
+
+**When `split <;> rfl` fails**: If the branches differ by more than definitional
+equality (e.g., one branch has `x + 0` and the other has `x`), use
+`split <;> simp` or `split <;> omega` instead.
 
 ## Struct Field Access Not Reduced by `omega` or `decide`
 
