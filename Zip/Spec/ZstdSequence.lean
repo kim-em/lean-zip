@@ -374,6 +374,34 @@ theorem parseSequencesHeader_pos_bounded (data : ByteArray) (pos : Nat)
     pos' ≤ pos + 4 :=
   (parseSequencesHeader_pos_range data pos numSeq modes pos' h).2
 
+/-- When `parseSequencesHeader` succeeds, the returned position is within
+    `data.size`. Each branch checks `data.size < pos + k` before reading `k`
+    bytes, so on success `pos + k ≤ data.size` and `pos' = pos + k`. -/
+theorem parseSequencesHeader_le_size (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
+    pos' ≤ data.size := by
+  simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨-, -, rfl⟩ := h; omega
+    · split at h
+      · split at h
+        · exact nomatch h
+        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨-, -, rfl⟩ := h; omega
+      · split at h
+        · split at h
+          · exact nomatch h
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨-, -, rfl⟩ := h; omega
+        · split at h
+          · exact nomatch h
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨-, -, rfl⟩ := h; omega
+
 /-- When the input byte at `pos` is zero, `parseSequencesHeader` returns 0 sequences
     with predefined compression modes and advances by exactly 1 byte.
     This is the "no sequences" case (RFC 8878 §3.1.1.3.2): blocks that contain
@@ -414,6 +442,36 @@ theorem parseSequencesHeader_numSeq_small (data : ByteArray) (pos : Nat)
     rw [if_pos hbyte0_lt] at h
     -- Inner size check
     by_cases hsz2 : data.size < pos + 2
+    · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
+    · simp only [hsz2, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
+      exact h.1.symm
+
+/-- When 128 ≤ byte0 < 255, the number of sequences uses the 2-byte encoding:
+    `numSeq = ((byte0 - 128) << 8) + byte1` (RFC 8878 §3.1.1.3.2.1).
+    This covers sequence counts from 128 to 32511. -/
+theorem parseSequencesHeader_numSeq_medium (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos'))
+    (hbyte0_ge : data[pos]!.toNat ≥ 128)
+    (hbyte0_lt : data[pos]!.toNat < 255) :
+    numSeq = ((data[pos]!.toNat - 128) <<< 8) + data[pos + 1]!.toNat := by
+  unfold parseSequencesHeader at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  -- Size check
+  by_cases hsz : data.size < pos + 1
+  · simp only [hsz, ↓reduceIte] at h; exact nomatch h
+  · simp only [hsz, ↓reduceIte] at h
+    -- byte0 == 0 check
+    have hbeq : ¬((data[pos]!.toNat == 0) = true) := by
+      intro heq; exact absurd (eq_of_beq heq) (by omega)
+    rw [if_neg hbeq] at h
+    -- byte0 < 128 check
+    have hlt128 : ¬(data[pos]!.toNat < 128) := by omega
+    rw [if_neg hlt128] at h
+    -- byte0 < 255 check
+    rw [if_pos hbyte0_lt] at h
+    -- Inner size check
+    by_cases hsz2 : data.size < pos + 3
     · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
     · simp only [hsz2, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
