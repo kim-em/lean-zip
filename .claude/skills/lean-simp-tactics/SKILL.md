@@ -177,6 +177,11 @@ definitional equality. `Except.error _` and `Except.ok _` are different
 constructors, so no pattern matches — `nomatch h` produces the empty
 match, proving `False`.
 
+**Batching error cases**: To compress repeated `split at h / · exact nomatch h`
+patterns, use `split at h; next => exact nomatch h` (one line). Do NOT use
+`split at h <;> try exact nomatch h` — `nomatch` emits elaboration-level
+"Missing cases" errors that `try` does not catch.
+
 **Evaluating `if false = true then X else Y`**: Use `if_neg Bool.false_ne_true`
 since `simp only [ite_false]` requires the condition to already be `False`,
 not `false = true` (a decidable-but-not-reduced Prop).
