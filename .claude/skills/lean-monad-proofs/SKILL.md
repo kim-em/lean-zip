@@ -1079,6 +1079,41 @@ have hcount : v[kv]! ≤ bound := ...  -- kv matches goal terms
 it consistently in `have` statements. For `[:n]`, the element is what
 appears in array indexing expressions in the goal.
 
+## `omega` Limitations with `Except.ok.injEq` Conjunctions
+
+After `simp only [Except.ok.injEq, Prod.mk.injEq] at h`, the hypothesis is a
+conjunction like `A ∧ B ∧ C ∧ D`. **omega cannot decompose this conjunction if
+any conjunct contains non-linear terms** (bitwise `&&&`, `>>>`, `|||`).
+
+```lean
+-- BAD: omega can't extract `3 = headerSize` from the conjunction
+simp only [Except.ok.injEq, Prod.mk.injEq] at h
+-- h : (raw >>> 4) &&& 0x3FF = regen ∧ ... ∧ 3 = headerSize ∧ ...
+omega  -- FAILS: can't decompose h
+
+-- GOOD: extract the needed component first
+simp only [Except.ok.injEq, Prod.mk.injEq] at h
+obtain ⟨-, -, hhdr, -⟩ := h
+-- hhdr : 3 = headerSize
+omega  -- succeeds
+```
+
+**Related**: `split at h` on `if (x == y) then ...` (Bool condition) produces
+`h✝ : (x == y) = true` or `h✝ : ¬(x == y) = true`. Omega cannot use these.
+Convert with `simp only [beq_iff_eq] at *` before omega:
+
+```lean
+-- After split on `if sizeFormat == 2 then ...`
+-- h✝ : (sizeFormat == 2) = true   ← omega can't use this
+simp only [beq_iff_eq] at *
+-- h✝ : sizeFormat = 2             ← omega handles this
+omega  -- now succeeds for contradiction cases
+```
+
+Note: `split at h` on `if x ≤ y then ...` (Prop condition) produces
+`h✝ : x ≤ y` directly — no conversion needed. The issue is specific to
+Bool-valued `==`/`!=` conditions.
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
