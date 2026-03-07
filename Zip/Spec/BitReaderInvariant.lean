@@ -59,7 +59,10 @@ private theorem readBit_hpos (br br' : BitReader) (bit : UInt32)
   · exact nomatch h
   · rename_i hlt
     split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
-      obtain ⟨_, rfl⟩ := h <;> simp_all
+      obtain ⟨_, rfl⟩ := h <;>
+        simp_all only [ge_iff_le, Nat.not_le, Nat.reduceLeDiff, getElem!_pos,
+          Nat.toUInt32_eq, true_or, Nat.add_eq_zero_iff, Nat.succ_ne_self,
+          and_false, or_true]
 
 /-- `readBits.go` preserves the hpos invariant. -/
 private theorem readBits_go_hpos (br br' : BitReader) (acc : UInt32)
@@ -118,7 +121,9 @@ private theorem readBit_bitOff_lt (br br' : BitReader) (bit : UInt32)
   split at h
   · exact nomatch h
   · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
-      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+      obtain ⟨_, rfl⟩ := h <;>
+        simp_all only [ge_iff_le, Nat.not_le, Nat.reduceLeDiff, getElem!_pos,
+          Nat.toUInt32_eq, Nat.zero_lt_succ] <;> omega
 
 /-- Reading one bit advances bitPos by exactly 1 (requires `bitOff < 8`). -/
 theorem readBit_bitPos_eq (br br' : BitReader) (bit : UInt32)
@@ -178,7 +183,10 @@ private theorem readBit_inv (br br' : BitReader) (bit : UInt32)
   · exact nomatch h
   · rename_i hlt
     split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
-      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+      obtain ⟨_, rfl⟩ := h <;>
+        simp_all only [ge_iff_le, Nat.not_le, Nat.reduceLeDiff, getElem!_pos,
+          Nat.toUInt32_eq, true_or, true_and, or_true, Nat.add_eq_zero_iff,
+          Nat.succ_ne_self, and_false] <;> omega
 
 /-- Combined: readBits.go preserves data, hpos, and pos ≤ data.size. -/
 private theorem readBits_go_inv (br br' : BitReader) (acc : UInt32)
