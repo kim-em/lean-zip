@@ -233,8 +233,13 @@ proves about `bits.length`), `simp [hf]` can bridge the gap via
 |----------------|---------------------|-----|
 | `if True/False then ...` | Yes | — |
 | `if (n > 0) then ...` (Prop) | After `rw [if_pos/if_neg h]` | Prove `h`, then `rw` |
-| `if (false = true) then ...` | **No** | `if_neg (show ¬(false = true) from nofun)` |
+| `if (false = true) then ...` | **No** | `dsimp` (definitional reduction) |
 | `if (x == y) then ...` (Bool) | After `show (x == y) = false` | `Bool.false_eq_true, ↓reduceIte` |
+
+**After `cases b` on `Bool`**: `if b then 1 else 0` becomes `if false then 1 else 0`,
+which elaborates to `@ite _ (false = true) (instDecidableEqBool false true) 1 0`.
+`↓reduceIte` does NOT reduce this because `false = true` is not literally `False`.
+Use `dsimp` instead — it performs definitional reduction through `instDecidableEqBool`.
 
 **After WF unfolding** (`rw [f.eq_1]`), function bodies often contain
 `if` branches. The standard pattern: `rw [f.eq_1]; simp only [h, ↓reduceIte]`
@@ -641,13 +646,15 @@ exact Decidable.of_not_not h
 
 Works when the proposition is decidable (which `Nat` comparisons always are).
 
-## `BEq.beq` vs `Nat.beq` — Use `beq_iff_eq`
+## `BEq.beq` vs `Nat.beq` — Use `eq_of_beq`
 
 When a hypothesis `h : (x == 0) = true` comes from a `split` on an `if x == 0` condition,
 the `==` creates `BEq.beq`, NOT `Nat.beq`. So `Nat.eq_of_beq_eq_true h` fails with a
 type mismatch.
 
-**Fix**: Use `simp only [beq_iff_eq] at h` to convert `(x == 0) = true` into `x = 0`.
+**Fix**: Use `eq_of_beq h` to convert `(x == 0) = true` into `x = 0`.
+This is cleaner than `simp only [beq_iff_eq] at h`. Note: `beq_eq_true_iff_eq` does
+not exist — the correct simp lemma is `beq_iff_eq`.
 Or use `exact absurd (by rw [h]; decide) hne` for contradiction branches.
 
 ## Array Literal Indexing After `rcases` Case Split
