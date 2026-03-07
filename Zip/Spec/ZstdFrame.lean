@@ -99,4 +99,49 @@ theorem decompressZstdWF_skip_then_standard (data : ByteArray)
   exact decompressZstdWF_single_standard_frame data skipPos output content framePos
     hsize2 hmagic2 hframe hframe_adv hdone
 
+/-- When `decompressZstdWF` succeeds, the result is at least as large as the
+    input accumulator — decompressing frames only adds data, never removes it. -/
+theorem decompressZstdWF_output_size_ge (data : ByteArray) (pos : Nat)
+    (output result : ByteArray)
+    (h : Zip.Native.decompressZstdWF data pos output = .ok result) :
+    result.size ≥ output.size := by
+  induction pos, output using Zip.Native.decompressZstdWF.induct (data := data) generalizing result with
+  | case1 pos output hpos =>
+    -- Base case: pos ≥ data.size, function returns output unchanged
+    rw [decompressZstdWF_base data pos output hpos] at h
+    cases h; omega
+  | case2 pos output hpos hshort ih_skip ih_std =>
+    -- Error case: data.size < pos + 4, function throws — contradiction with .ok
+    unfold Zip.Native.decompressZstdWF at h
+    simp only [show ¬ (pos ≥ data.size) from hpos, ↓reduceDIte,
+      show (data.size < pos + 4) from hshort, ↓reduceIte,
+      bind, Bind.bind, Except.bind] at h
+    exact absurd h nofun
+  | case3 pos output hpos hlong ih_skip ih_std =>
+    -- Main case: enough data for magic number, dispatch on frame type
+    unfold Zip.Native.decompressZstdWF at h
+    simp only [show ¬ (pos ≥ data.size) from hpos, ↓reduceDIte,
+      show ¬ (data.size < pos + 4) from hlong, ↓reduceIte,
+      pure, Pure.pure, bind, Bind.bind, Except.bind, Except.pure] at h
+    -- Case split on magic number: skippable, standard, or invalid
+    split at h
+    · -- Skippable frame branch
+      split at h
+      · exact absurd h nofun  -- skipSkippableFrame errored
+      · split at h
+        · exact absurd h nofun  -- frame did not advance
+        · exact ih_skip _ ‹_› _ h  -- recursive call with same output
+    · -- Non-skippable: standard or invalid
+      split at h
+      · -- Standard frame branch
+        split at h
+        · exact absurd h nofun  -- decompressFrame errored
+        · split at h
+          · exact absurd h nofun  -- frame did not advance
+          · -- Recursive call with output ++ content
+            have := ih_std _ _ ‹_› _ h
+            simp only [ByteArray.size_append] at this ⊢
+            omega
+      · exact absurd h nofun  -- invalid magic number
+
 end Zip.Spec.ZstdFrame
