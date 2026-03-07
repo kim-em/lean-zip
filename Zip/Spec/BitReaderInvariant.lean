@@ -616,4 +616,49 @@ theorem decodeDynamicTrees_inv (br br' : BitReader)
                   exact ⟨hd₅.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))),
                          hpos₅, hple₅⟩
 
+/-! ### BitReader pos_le_size — unconditional position bounds
+
+`readBit` and `readBits` guarantee `pos ≤ data.size` on success.
+`readBit_pos_le_size` is fully unconditional — the success of `readBit`
+implies the guard `pos < data.size` passed. `readBits_pos_le_size`
+requires `br.pos ≤ br.data.size` for the `n = 0` base case (which
+returns the reader unchanged). -/
+
+/-- After a successful `readBit`, the resulting `pos ≤ data.size`. Unconditional. -/
+theorem readBit_pos_le_size (br br' : BitReader) (bit : UInt32)
+    (h : br.readBit = .ok (bit, br')) :
+    br'.pos ≤ br'.data.size := by
+  simp only [BitReader.readBit] at h
+  split at h
+  · exact nomatch h
+  · rename_i hlt
+    split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      obtain ⟨_, rfl⟩ := h <;> simp_all only [ge_iff_le, Nat.not_le] <;> omega
+
+/-- `readBits.go` preserves `pos ≤ data.size`. -/
+private theorem readBits_go_pos_le_size (br br' : BitReader) (acc : UInt32)
+    (shift n : Nat) (val : UInt32)
+    (h : BitReader.readBits.go br acc shift n = .ok (val, br'))
+    (hple : br.pos ≤ br.data.size) :
+    br'.pos ≤ br'.data.size := by
+  induction n generalizing br acc shift with
+  | zero =>
+    simp only [BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := h; exact hple
+  | succ n ih =>
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => simp only [hrb] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrb] at h
+      exact ih br₁ _ _ h (readBit_pos_le_size br br₁ bit hrb)
+
+/-- After a successful `readBits`, the resulting `pos ≤ data.size`. -/
+theorem readBits_pos_le_size (br br' : BitReader) (n : Nat)
+    (val : UInt32) (h : br.readBits n = .ok (val, br'))
+    (hple : br.pos ≤ br.data.size) :
+    br'.pos ≤ br'.data.size :=
+  readBits_go_pos_le_size br br' 0 0 n val h hple
+
 end Zip.Native
