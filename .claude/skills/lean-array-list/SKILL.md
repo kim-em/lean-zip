@@ -197,6 +197,45 @@ readUInt32LE_append3_mid   (a b c) (offset) (h : offset + 4 ≤ b.size) :
 **Size of concatenation:**
 `ByteArray.size_append : (a ++ b).size = a.size + b.size`
 
+## `get!` ↔ `getD` Bridge (`Array.getElem!_eq_getD`)
+
+`a[i]!` (for types with `Inhabited`) is definitionally `a.getD i default`.
+For `Nat`, `default = 0`, so `a[i]! = a.getD i 0` by `rfl`. The library
+provides `Array.getElem!_eq_getD : xs[i]! = xs.getD i default`.
+
+**When predicates use `getD` but goals have `get!`** (common when loop
+invariants are stated with `getD` but do-notation desugaring produces `get!`):
+
+```lean
+-- Direct: get! and getD are definitionally equal for Nat
+have hcount : v3[sym]! ≤ bound := h3_counts sym
+-- h3_counts : ∀ sym, v3.getD sym 0 ≤ bound
+-- Works because v3[sym]! = v3.getD sym 0 definitionally
+```
+
+**When you need explicit conversion**: `simp only [Array.getElem!_eq_getD]`
+rewrites `a[i]!` to `a.getD i default` in the goal.
+
+## `getD` After `set!` (`Array.getElem?_setIfInBounds`)
+
+`simp only [Array.getElem_setIfInBounds]` often **fails** after
+`unfold Array.getD; simp only [Array.size_setIfInBounds]` because the
+bound proof gets transported and the simp lemma can't match. This is
+because `Array.getElem_setIfInBounds` is `@[grind =]`, not `@[simp]`.
+
+**Workaround**: Prove a `getD`-level helper using `Array.getD_eq_getD_getElem?`
+and `Array.getElem?_setIfInBounds` (which IS `@[simp]`-compatible):
+
+```lean
+private theorem getD_set! (a : Array Nat) (i v s : Nat) :
+    (a.set! i v).getD s 0 = if i = s ∧ i < a.size then v else a.getD s 0 := by
+  simp only [Array.set!_eq_setIfInBounds, Array.getD_eq_getD_getElem?,
+    Array.getElem?_setIfInBounds]
+  split <;> split <;> simp_all <;> intro <;> omega
+```
+
+Then use `rw [getD_set!]; split` instead of manual unfolding.
+
 ## Build Missing API, Don't Work Around It
 
 If a proof is blocked by missing lemmas for standard types (ByteArray, Array, List,

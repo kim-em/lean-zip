@@ -1095,4 +1095,275 @@ theorem decodeFseDistribution_bitPos_ge
           have ⟨hge_loop, hbo_loop⟩ := decodeFseLoop_bitPos_ge hdl hbo₁
           exact ⟨by rw [hbp] at hge_loop; omega, hbo_loop⟩
 
+/-! ## Helper lemmas for newState bound -/
+
+/-- `Nat.log2 n ≤ k` when `n < 2^(k+1)`. Inverse of `Nat.lt_log2_self`. -/
+private theorem log2_le_of_lt_pow2_succ (n k : Nat) (h : n < 2 ^ (k + 1)) :
+    Nat.log2 n ≤ k := by
+  if hle : Nat.log2 n ≤ k then exact hle
+  else
+    exfalso
+    have hgt : k + 1 ≤ Nat.log2 n := by omega
+    have hpos : Nat.log2 n ≥ 1 := by omega
+    have h3 : n ≠ 0 := by
+      intro heq; subst heq
+      have : Nat.log2 0 = 0 := by decide
+      omega
+    have h1 : 2 ^ (k + 1) ≤ 2 ^ (Nat.log2 n) :=
+      @Nat.pow_le_pow_right 2 (by decide) (k + 1) (Nat.log2 n) hgt
+    have h4 : 2 ^ (Nat.log2 n) ≤ n := Nat.log2_self_le h3
+    exact Nat.lt_irrefl _ (Nat.lt_of_lt_of_le h (Nat.le_trans h1 h4))
+
+/-- `n * 2^(k - log2 n) < 2^(k+1)` when `log2 n ≤ k`. This bounds the
+    shifted value `nextState <<< numBits` in FSE table construction. -/
+private theorem mul_pow_sub_log2_lt (n k : Nat) (hk : Nat.log2 n ≤ k) :
+    n * 2 ^ (k - Nat.log2 n) < 2 ^ (k + 1) :=
+  calc n * 2 ^ (k - Nat.log2 n)
+      < 2 ^ (Nat.log2 n + 1) * 2 ^ (k - Nat.log2 n) :=
+        (Nat.mul_lt_mul_right (Nat.two_pow_pos _)).mpr Nat.lt_log2_self
+    _ = 2 ^ (k + 1) := by rw [← Nat.pow_add]; congr 1; omega
+
+/-- The baseline value `(nextState <<< numBits) - tableSize`, converted to
+    UInt16, is less than `1 <<< al` when `nextState < 2 * (1 <<< al)`. -/
+private theorem baseline_toUInt16_lt (nextState al : Nat)
+    (hlt : nextState < 2 * (1 <<< al)) :
+    ((nextState <<< (al - Nat.log2 nextState)) - (1 <<< al)).toUInt16.toNat <
+      1 <<< al := by
+  simp only [Nat.shiftLeft_eq, Nat.one_mul] at *
+  have hlog : Nat.log2 nextState ≤ al :=
+    log2_le_of_lt_pow2_succ _ _ (by
+      rw [Nat.pow_succ, Nat.mul_comm (2 ^ al)]; exact hlt)
+  have hmul := mul_pow_sub_log2_lt nextState al hlog
+  -- hmul : nextState * 2^(al - log2 nextState) < 2^(al+1)
+  -- Rewrite 2^(al+1) = 2 * 2^al, keeping LHS unchanged
+  rw [Nat.pow_succ, Nat.mul_comm (2 ^ al)] at hmul
+  -- Now hmul : nextState * 2^numBits < 2 * 2^al, both sides normalized
+  simp only [Nat.toUInt16_eq, UInt16.toNat_ofNat']
+  omega
+
+/-- `Array.getD` after `set!`: the result is `v` for the modified index (if in bounds),
+    or the original `getD` otherwise. -/
+private theorem getD_set! (a : Array Nat) (i v s : Nat) :
+    (a.set! i v).getD s 0 = if i = s ∧ i < a.size then v else a.getD s 0 := by
+  simp only [Array.set!_eq_setIfInBounds, Array.getD_eq_getD_getElem?,
+    Array.getElem?_setIfInBounds]
+  split <;> split <;> simp_all <;> intro <;> omega
+
+/-! ## Indexed loop invariant -/
+
+/-- `List.forIn'.loop` in `Except` preserves an index-dependent predicate.
+    The index `offset` tracks how many elements have been processed so far.
+    This is stronger than `forIn'_loop_preserves` when the predicate needs
+    to grow with the iteration count (e.g., bounding accumulated values). -/
+private theorem forIn'_loop_preserves_indexed {α β ε : Type}
+    (P : Nat → β → Prop) (target : Nat)
+    (as curr : List α) (init result : β)
+    (f : α → β → Except ε (ForInStep β))
+    (offset : Nat)
+    (h_init : P offset init)
+    (h_yield : ∀ (k : Nat) (a : α) (b b' : β),
+      k < target → P k b → f a b = .ok (.yield b') → P (k + 1) b')
+    (h_done : ∀ (k : Nat) (a : α) (b b' : β),
+      P k b → f a b = .ok (.done b') → P target b')
+    (hsuf : ∃ bs, bs ++ curr = as)
+    (h_len : offset + curr.length = target)
+    (h_result : List.forIn'.loop as (fun a _ b => f a b) curr init hsuf =
+      .ok result) :
+    P target result := by
+  induction curr generalizing init offset with
+  | nil =>
+    unfold List.forIn'.loop at h_result
+    dsimp only [pure, Except.pure] at h_result
+    rw [← Except.ok.inj h_result]
+    simp only [List.length_nil, Nat.add_zero] at h_len
+    exact h_len ▸ h_init
+  | cons x xs ih =>
+    unfold List.forIn'.loop at h_result
+    dsimp only [Bind.bind, Except.bind] at h_result
+    cases hfx : f x init with
+    | error e => rw [hfx] at h_result; exact nomatch h_result
+    | ok step =>
+      rw [hfx] at h_result
+      cases step with
+      | done b' =>
+        dsimp only [pure, Except.pure] at h_result
+        rw [← Except.ok.inj h_result]
+        exact h_done offset x init b' h_init hfx
+      | yield b' =>
+        have hlt : offset < target := by
+          simp only [List.length_cons] at h_len; omega
+        exact ih b' (offset + 1)
+          (h_yield offset x init b' hlt h_init hfx) _
+          (by simp only [List.length_cons] at h_len; omega) h_result
+
+/-- `forIn` over a range `[:n]` preserves an index-dependent predicate `P k b`
+    where `k` tracks the iteration count from 0 to n. -/
+private theorem forIn_range_preserves_indexed {β ε : Type}
+    (P : Nat → β → Prop) (n : Nat) (init result : β)
+    (f : Nat → β → Except ε (ForInStep β))
+    (h_init : P 0 init)
+    (h_yield : ∀ (k : Nat) (a : Nat) (b b' : β),
+      k < n → P k b → f a b = .ok (.yield b') → P (k + 1) b')
+    (h_done : ∀ (k : Nat) (a : Nat) (b b' : β),
+      P k b → f a b = .ok (.done b') → P n b')
+    (h_result : forIn [:n] init f = .ok result) :
+    P n result := by
+  rw [Std.Legacy.Range.forIn_eq_forIn_range'] at h_result
+  exact forIn'_loop_preserves_indexed P n _ _ init result f 0
+    h_init h_yield h_done _ (by simp) h_result
+
+/-! ## buildFseTable newState bound -/
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds, every cell's `newState` is less than
+    `1 <<< al` (the table size). This ensures the FSE state machine stays
+    in bounds: the next state `newState + readBits(numBits)` lands within
+    the table.
+
+    The proof tracks two invariants:
+    - Loop 3 (counting): each `symbolCounts[sym] ≤ tableSize` (via indexed
+      loop invariant — each count ≤ iteration index ≤ tableSize)
+    - Loop 4 (assignment): each `symbolStateIndex[sym] ≤ iteration index`,
+      so `stateIdx < tableSize`. Combined with `count ≤ tableSize`, this
+      gives `nextState = count + stateIdx < 2 * tableSize`, enabling the
+      algebraic bound on `baseline.toUInt16`. -/
+theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table)
+    (i : Fin table.cells.size) :
+    table.cells[i].newState.toNat < 1 <<< al := by
+  simp only [buildFseTable] at h
+  obtain ⟨v1, hloop1, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v2, hloop2, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v3, hloop3, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v4, hloop4, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq] at h; subst h
+  show v4.fst[i].newState.toNat < 1 <<< al
+  -- Establish type aliases for clarity
+  -- v3 : Array Nat (symbolCounts)
+  -- v4 : Array FseCell × Array Nat (cells × symbolStateIndex)
+  -- The per-cell predicate
+  let Q : FseCell → Prop := fun c => c.newState.toNat < 1 <<< al
+  -- The default cell has newState = 0 < tableSize
+  have hQ_default : Q default := by
+    change (0 : UInt16).toNat < 1 <<< al
+    simp only [Nat.shiftLeft_eq, Nat.one_mul]
+    exact Nat.two_pow_pos _
+  -- Initial cells: Array.replicate with default has newState = 0
+  have hinit : ∀ j : Fin (Array.replicate (1 <<< al) (default : FseCell)).size,
+      Q (Array.replicate (1 <<< al) (default : FseCell))[j] := by
+    intro ⟨j, hj⟩; simp; exact hQ_default
+  -- Loop 1: preserves Q (sets cells with { symbol := ... }, default newState = 0)
+  have h1 : ∀ j : Fin v1.fst.size, Q v1.fst[j] := by
+    apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
+      _ _ _ _ hinit _ _ hloop1
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+        exact set!_preserves_forall hb hQ_default
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> exact nomatch heq
+  -- Loop 2: preserves Q (sets cells with { symbol := ... }, default newState = 0)
+  have h2 : ∀ j : Fin v2.fst.size, Q v2.fst[j] := by
+    apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
+      _ _ _ _ h1 _ _ hloop2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · split at heq
+        · exact nomatch heq
+        · rename_i r hinner
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
+            _ _ _ _ hb _ _ hinner
+          · intro a2 b2 b2' hb2 heq2
+            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
+            exact set!_preserves_forall hb2 hQ_default
+          · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · exact nomatch heq
+      · split at heq <;> exact nomatch heq
+  -- Loop 3 (counting): prove each symbolCounts[sym] ≤ tableSize
+  -- Use indexed invariant: after k iterations, each count ≤ k
+  have h3_counts : ∀ s, v3.getD s 0 ≤ 1 <<< al := by
+    apply forIn_range_preserves_indexed
+      (fun k (sc : Array Nat) => ∀ s, sc.getD s 0 ≤ k)
+      _ _ _ _ _ _ _ hloop3
+    · -- Initial: Array.replicate probs.size 0, all zeros ≤ 0
+      intro s; unfold Array.getD; split <;> simp
+    · -- Yield step: incrementing one element preserves bound
+      intro k _ b b' _ hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · -- sym < symbolCounts.size: set! sym (count + 1)
+        rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+        intro s; rw [getD_set!]; split
+        · -- modified index: count + 1 ≤ k + 1
+          rename_i h; simp only [h.1]
+          exact Nat.succ_le_succ (hb s)
+        · -- other index: old value ≤ k ≤ k + 1
+          exact Nat.le_succ_of_le (hb s)
+      · -- sym ≥ symbolCounts.size: no change
+        rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+        intro s; exact Nat.le_succ_of_le (hb s)
+    · -- Done: never happens (body always yields)
+      intro k _ b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> exact nomatch heq
+  -- Loop 4: compute numBits/newState for each cell
+  -- Use indexed invariant: symIdx values ≤ iteration count
+  -- Combined with h3_counts (count ≤ tableSize) and the algebraic bound
+  have h4 : (∀ j : Fin v4.fst.size, Q v4.fst[j]) ∧
+      (∀ sym, v4.snd.getD sym 0 ≤ 1 <<< al) := by
+    apply forIn_range_preserves_indexed
+      (P := fun k s =>
+        (∀ j : Fin s.fst.size, Q s.fst[j]) ∧ (∀ sym, s.snd.getD sym 0 ≤ k))
+      (h_init := ⟨h2, fun sym => by
+        unfold Array.getD; split <;> simp⟩)
+      (h_result := hloop4)
+    · -- Yield step
+      intro k kv b b' hk ⟨hcells, hsymIdx⟩ heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · -- sym ≥ probs.size: continue, state unchanged
+        rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+        exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
+      · split at heq
+        · -- count == 0: continue, state unchanged
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+          exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
+        · -- Main case: compute and set newState
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          refine ⟨?_, ?_⟩
+          · -- Cells property: set! preserves Q, new value satisfies Q
+            apply set!_preserves_forall hcells
+            -- Q reduces to newState.toNat < 1 <<< al; apply the algebraic bound
+            show Q _; unfold Q; dsimp only []
+            apply baseline_toUInt16_lt
+            -- Need: nextState < 2 * (1 <<< al)
+            have hcount : v3[b.fst[kv]!.symbol.toNat]! ≤ 1 <<< al :=
+              h3_counts _
+            have hstateIdx : b.snd[b.fst[kv]!.symbol.toNat]! ≤ k :=
+              hsymIdx _
+            omega
+          · -- symIdx property: set! sym (stateIdx + 1) preserves getD ≤ k + 1
+            intro s; rw [getD_set!]; split
+            · -- modified index: stateIdx + 1 ≤ k + 1
+              rename_i h; simp only [h.1]
+              exact Nat.succ_le_succ (hsymIdx s)
+            · -- other index: old value ≤ k ≤ k + 1
+              exact Nat.le_succ_of_le (hsymIdx s)
+    · -- Done: never happens
+      intro k _ b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · exact nomatch heq
+      · split at heq <;> exact nomatch heq
+  exact h4.1 i
+
 end Zstd.Spec.Fse

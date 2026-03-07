@@ -1013,6 +1013,72 @@ each successful bit read strictly decreases the total. The outer function
 then composes: `readBits n` decreases by at least `n` bits (when
 `n > 0` and enough bits are available).
 
+## `MProd` vs `Prod` in `do`-Notation State
+
+**Problem**: Desugared `do`-notation with mutable variables uses `MProd`
+(mutable pair) for tuple state, NOT `Prod` (`×`). This causes type
+mismatches when pattern-matching or destructuring loop state.
+
+```lean
+-- After desugaring, a do block with `let mut a := ...; let mut b := ...`
+-- creates state of type `MProd (Array α) β`, NOT `Array α × β`.
+-- Pattern matching must use ⟨fst, snd⟩ (anonymous) or MProd.mk, not (a, b).
+```
+
+**Symptoms**:
+- `split; rename_i ... heq` gives `heq : forIn ... init f = ⟨result, rest⟩`
+  where the pair is `MProd`, not `Prod`
+- `obtain ⟨a, b⟩ := val` fails with type mismatch on `Prod` vs `MProd`
+- Hypothesis shows `MProd.fst` and `MProd.snd` instead of `Prod.fst`/`Prod.snd`
+
+**Solution**: Use `MProd` explicitly in invariant types and helper lemmas:
+
+```lean
+-- Helper theorem must use MProd, not Prod:
+private theorem forIn_fst_size_of_heq {α β : Type} {n k : Nat}
+    {init : MProd (Array α) β}  -- NOT: Array α × β
+    {f : Nat → MProd (Array α) β → Id (ForInStep (MProd (Array α) β))}
+    ...
+
+-- In proofs, access fields via .fst/.snd:
+have h₁ : cells₁.size = 1 <<< al :=
+  forIn_fst_size_of_heq heq₁ (by simp) (fun _ b hb => ...)
+```
+
+**Detection**: If `split; rename_i` on a `forIn` result gives a type
+involving `MProd`, all downstream lemmas and patterns must use `MProd`.
+
+## Counter vs Element in `forIn_range_preserves_indexed`
+
+**Problem**: `forIn_range_preserves_indexed` callbacks receive both a
+counter `k : Nat` and an element `a : Nat`. For `[:n]` ranges, these
+are numerically equal (`k = a`), but Lean treats them as distinct
+variables. Using the wrong one causes `omega` failures.
+
+```lean
+-- The callback signature:
+-- fun (k : Nat) (a : Nat) (b : β) (b' : β) => ...
+-- k = counter (0, 1, 2, ...), a = element from the range
+-- For [:n], k = a, but they are distinct free variables
+
+-- WRONG: using k when the goal needs a (the element)
+intro k _ b b' hk hinv heq
+have hcount : v[k]! ≤ bound := ...  -- k might not match goal terms
+
+-- RIGHT: name the element and use it
+intro k kv b b' hk hinv heq
+have hcount : v[kv]! ≤ bound := ...  -- kv matches goal terms
+```
+
+**Symptoms**:
+- `omega` fails on a goal that "looks" provable
+- Hypotheses mention `k` but the goal uses `a✝¹` (auto-named element)
+- `exact hinv _` type-checks but `omega` can't close the arithmetic
+
+**Solution**: Always name the element variable (don't use `_`) and use
+it consistently in `have` statements. For `[:n]`, the element is what
+appears in array indexing expressions in the goal.
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
