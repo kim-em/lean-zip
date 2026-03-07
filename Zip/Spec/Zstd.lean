@@ -278,9 +278,13 @@ theorem decompressFrame_contentSize_eq (data : ByteArray) (pos : Nat)
   dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
   -- Substitute contentSize = some n to resolve the contentSize match
   simp only [hn] at h
-  -- Thread through all remaining guards (dictionary, decompressBlocks, checksum)
-  -- All paths end with: if (v.fst.size.toUInt64 != n) then throw else .ok (v.fst, ...)
-  -- Since h says the result is .ok, the content size guard passed
+  -- grind handles the remaining monadic case-splitting through:
+  -- (1) dictionary check (Option match + bne guard)
+  -- (2) decompressBlocks result (Except match)
+  -- (3) checksum check (Bool conditional + bne guard)
+  -- (4) content size check (bne guard → output.size = n)
+  -- Targeted alternatives (split at h, simp_all) fail because split can't decompose
+  -- match expressions on structure fields (header.contentSize, header.dictionaryId).
   grind
 
 /-- When `decompressFrame` succeeds and the frame header has `contentChecksum = true`,
@@ -301,8 +305,13 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
   -- Substitute contentChecksum = true to resolve the checksum conditionals
   simp only [hc] at h
-  -- Thread through all remaining guards (dictionary, decompressBlocks, data size, checksum !=)
-  -- Since h says the result is .ok, the checksum guard passed
+  -- grind handles the remaining monadic case-splitting through:
+  -- (1) dictionary check (Option match + bne guard)
+  -- (2) decompressBlocks result (Except match)
+  -- (3) data size guard
+  -- (4) checksum comparison (bne guard → xxHash64Upper32 = readUInt32LE)
+  -- (5) content size check (Option match, irrelevant to conclusion)
+  -- Targeted alternatives fail because split can't decompose match on structure fields.
   grind
 
 /-! ## Skippable frame specification -/
@@ -497,39 +506,6 @@ theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
 
 /-! ## Frame header position advancement -/
 
-/-- When `parseFrameHeader` succeeds, the returned position is strictly greater
-    than the input position. The header is at least 6 bytes (4 magic + 1
-    descriptor + at least 1 byte for window descriptor or content size). -/
-theorem parseFrameHeader_pos_gt (data : ByteArray) (pos : Nat)
-    (header : Zip.Native.ZstdFrameHeader) (pos' : Nat)
-    (h : Zip.Native.parseFrameHeader data pos = .ok (header, pos')) :
-    pos' > pos := by
-  unfold Zip.Native.parseFrameHeader at h
-  dsimp only [Bind.bind, Except.bind] at h
-  by_cases h1 : data.size < pos + 4
-  · rw [if_pos h1] at h; exact nomatch h
-  · rw [if_neg h1] at h
-    simp only [pure, Pure.pure] at h
-    by_cases h2 : (Binary.readUInt32LE data pos != Zip.Native.zstdMagic) = true
-    · rw [if_pos h2] at h; exact nomatch h
-    · rw [if_neg h2] at h
-      -- Guard 3: descriptor size check
-      by_cases h3 : data.size < pos + 4 + 1
-      · rw [if_pos h3] at h; exact nomatch h
-      · rw [if_neg h3] at h
-        -- Branch: first top-level split
-        split at h
-        · exact nomatch h  -- error path
-        · -- Reduce residual `match Except.ok v✝` patterns (unexpanded binds)
-          simp only [Except.pure] at h
-          repeat split at h
-          -- Process remaining goals: close errors, split residual if/match
-          iterate 5 (all_goals (try (first | contradiction | (split at h))))
-          all_goals first
-            | contradiction
-            | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
-               obtain ⟨-, rfl⟩ := h; omega)
-
 /-- When `parseFrameHeader` succeeds, the returned position advances by at
     least 5 (4 magic bytes + 1 descriptor byte). In practice the minimum
     is 6 bytes (singleSegment frames have at least 1 byte of content size). -/
@@ -558,6 +534,15 @@ theorem parseFrameHeader_pos_ge_five (data : ByteArray) (pos : Nat)
             | contradiction
             | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
                obtain ⟨-, rfl⟩ := h; omega)
+
+/-- When `parseFrameHeader` succeeds, the returned position is strictly greater
+    than the input position. The header is at least 6 bytes (4 magic + 1
+    descriptor + at least 1 byte for window descriptor or content size). -/
+theorem parseFrameHeader_pos_gt (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (pos' : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (header, pos')) :
+    pos' > pos := by
+  have := parseFrameHeader_pos_ge_five data pos header pos' h; omega
 
 /-! ## Window size characterizing properties -/
 
