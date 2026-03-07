@@ -141,6 +141,46 @@ constructors, so no pattern can match — `nomatch h` proves `False`.
 **Why NOT `exact absurd h (by simp)`**: Roundabout — invokes simp just
 to produce the `≠` proof. `nomatch` is direct and needs no lemma database.
 
+### `nomatch` fails inside `try` and `<;>` combinators
+
+**Problem**: `split at h <;> try exact nomatch h` does NOT work. `nomatch`
+produces elaboration-level "Missing cases" errors, not tactic failures.
+`try` only catches tactic failures, so the elaboration error leaks through.
+
+**Solution**: Use `next =>` focusing to target the error branch specifically:
+
+```lean
+-- WRONG: elaboration error leaks through try
+split at h <;> try exact nomatch h
+
+-- RIGHT: next => focuses on first goal, closes it, leaves second goal
+split at h
+next => exact nomatch h
+-- ... now work on the success branch
+
+-- ALSO RIGHT: use contradiction in combinators (it fails gracefully)
+split at h <;> first | contradiction | skip
+```
+
+**Rule**: Use `exact nomatch h` standalone or after `next =>`. Use
+`contradiction` inside `first`, `try`, or `<;>` combinators.
+
+### Batching error elimination in multi-branch functions
+
+For functions with N branches where most are error paths, the efficient
+pattern is `iterate` + `all_goals`:
+
+```lean
+iterate 5 (all_goals (try (first | contradiction | (split at h))))
+all_goals first
+  | contradiction
+  | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
+     obtain ⟨-, rfl⟩ := h; omega)
+```
+
+This closes all error branches automatically, leaving only the success
+branches for manual work.
+
 ## Nested `cases` Parsing
 
 Nested `cases ... with | ... | ...` blocks cause Lean to misparse the inner
@@ -646,15 +686,43 @@ induction l with
 | 15-25 branches | Try `split`, fall back to `by_cases` | May or may not hit step limit |
 | > 25 branches or `let mut` | `by_cases` + `rw [if_pos/if_neg]` | `split` will definitely hit step limit |
 
-**Key indicator**: If the function uses `let mut` (mutable state in `do`),
-it almost certainly needs `by_cases`. Mutable state desugars into a large
-nested match that multiplies the term size.
+**Key indicators favoring `by_cases`**:
+- Function uses `let mut` (mutable state in `do`) — desugars into a large
+  nested match that multiplies the term size.
+- Guards use `BEq` comparisons (e.g., `x == 0`) — `split at h` creates
+  stuck `Decidable.rec` expressions or inaccessible hypotheses from `BEq`
+  conditions. `by_cases` with `beq_iff_eq` normalization avoids this.
+- Guard wraps `Except.bind` around a conditional — `split at h` may split
+  at the wrong level (the `Except.bind` rather than the guard condition).
 
 **Worked examples**:
 - `decodeFseDistribution_accuracyLog_ge` in `Zip/Spec/Fse.lean` — uses
   `split at h` (medium-size function, ~15 branches)
 - `parseFrameHeader_magic` in `Zip/Spec/Zstd.lean` — uses `by_cases` +
   `rw` (large function with `let mut`, `split` fails)
+- `parseSequencesHeader_numSeq_small` — uses `by_cases` because `BEq`
+  guards create inaccessible hypotheses with `split at h`
+- `parseHuffmanTreeDescriptor_pos_gt` — uses `by_cases` because `split
+  at h` creates stuck `Decidable.rec` in the FSE path
+
+### Destructured tuple arguments avoid projection issues
+
+When a function returns a tuple like `(Nat × Nat × Nat × Bool)`, using
+destructured arguments in helper lemma signatures avoids tuple projection
+reduction issues:
+
+```lean
+-- WRONG: omega can't reduce v.1, v.2.1, v.2.2.1
+theorem myLemma (v : Nat × Nat × Nat × Bool) (h : ...) : v.1 ≤ 1000 := by
+  omega  -- fails: can't see through projections
+
+-- RIGHT: destructuring gives omega direct access to the components
+theorem myLemma (regen comp hdr : Nat) (fs : Bool) (h : ...) : regen ≤ 1000 := by
+  omega  -- works: regen is a plain Nat
+```
+
+This pattern was essential in `parseLiteralsSection` proofs where the
+header is a 4-tuple.
 
 ## `grind` for Struct Field Extraction from Bind Chains
 
