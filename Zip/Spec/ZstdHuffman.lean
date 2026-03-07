@@ -937,6 +937,34 @@ private theorem parseHuffmanWeightsFse_pos_eq (data : ByteArray) (pos compressed
               rfl
 
 open Zip.Native in
+/-- When `parseHuffmanWeightsDirect` succeeds, the returned position is within
+    the data bounds: `pos' ≤ data.size`. -/
+theorem parseHuffmanWeightsDirect_le_size (data : ByteArray) (pos numWeights : Nat)
+    (weights : Array UInt8) (pos' : Nat)
+    (h : parseHuffmanWeightsDirect data pos numWeights = .ok (weights, pos')) :
+    pos' ≤ data.size := by
+  have hpos := parseHuffmanWeightsDirect_pos_eq data pos numWeights weights pos' h
+  simp only [parseHuffmanWeightsDirect, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · rename_i hle
+    rw [hpos]; omega
+
+open Zip.Native in
+/-- When `parseHuffmanWeightsFse` succeeds, the returned position is within
+    the data bounds: `pos' ≤ data.size`. -/
+private theorem parseHuffmanWeightsFse_le_size (data : ByteArray) (pos compressedSize : Nat)
+    (weights : Array UInt8) (pos' : Nat)
+    (h : parseHuffmanWeightsFse data pos compressedSize = .ok (weights, pos')) :
+    pos' ≤ data.size := by
+  have hpos := parseHuffmanWeightsFse_pos_eq data pos compressedSize weights pos' h
+  simp only [parseHuffmanWeightsFse, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · rename_i hle
+    rw [hpos]; omega
+
+open Zip.Native in
 /-- When `parseHuffmanTreeDescriptor` succeeds, the returned position is at least
     `pos + 2` (1 header byte + at least 1 data byte). -/
 theorem parseHuffmanTreeDescriptor_pos_ge_two (data : ByteArray) (pos : Nat)
@@ -991,6 +1019,50 @@ theorem parseHuffmanTreeDescriptor_pos_gt (data : ByteArray) (pos : Nat)
     pos' > pos := by
   have := parseHuffmanTreeDescriptor_pos_ge_two data pos table pos' h
   omega
+
+open Zip.Native in
+/-- When `parseHuffmanTreeDescriptor` succeeds, the returned position is within
+    the data bounds: `pos' ≤ data.size`. -/
+theorem parseHuffmanTreeDescriptor_le_size (data : ByteArray) (pos : Nat)
+    (table : ZstdHuffmanTable) (pos' : Nat)
+    (h : parseHuffmanTreeDescriptor data pos = .ok (table, pos')) :
+    pos' ≤ data.size := by
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind] at h
+  -- Size guard
+  by_cases h1 : data.size < pos + 1
+  · simp [h1] at h
+  · rw [if_neg h1] at h; simp only [pure, Pure.pure, Except.pure] at h
+    -- headerByte >= 128 check
+    by_cases h2 : data[pos]!.toNat ≥ 128
+    · rw [if_pos h2] at h
+      -- parseHuffmanWeightsDirect bind
+      cases hwd : parseHuffmanWeightsDirect data (pos + 1) (data[pos]!.toNat - 127) with
+      | error e => simp only [hwd] at h; exact nomatch h
+      | ok v =>
+        rw [hwd] at h; dsimp only [Bind.bind, Except.bind] at h
+        cases hbt : buildZstdHuffmanTable v.fst with
+        | error e => simp only [hbt] at h; exact nomatch h
+        | ok t =>
+          rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
+          obtain ⟨-, rfl⟩ := h
+          exact parseHuffmanWeightsDirect_le_size data (pos + 1)
+            (data[pos]!.toNat - 127) v.fst v.snd hwd
+    · rw [if_neg (show ¬data[pos]!.toNat ≥ 128 from h2)] at h
+      -- headerByte == 0 check
+      by_cases h3 : (data[pos]!.toNat == 0) = true
+      · simp [h3] at h
+      · rw [if_neg h3] at h
+        cases hfse : parseHuffmanWeightsFse data pos data[pos]!.toNat with
+        | error e => simp only [hfse] at h; exact nomatch h
+        | ok v =>
+          rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
+          cases hbt : buildZstdHuffmanTable v.fst with
+          | error e => simp only [hbt] at h; exact nomatch h
+          | ok t =>
+            rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
+            obtain ⟨-, rfl⟩ := h
+            exact parseHuffmanWeightsFse_le_size data pos
+              data[pos]!.toNat v.fst v.snd hfse
 
 /-! ## decodeHuffmanSymbol properties -/
 
