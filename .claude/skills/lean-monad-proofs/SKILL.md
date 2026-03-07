@@ -905,6 +905,46 @@ elaboration errors that `first` cannot catch (not a tactic failure).
 uses `by_cases` for 3 error guards, `split at h` for the singleSegment
 branch, then `iterate 5 (all_goals ...)` to process remaining branches.
 
+## Private Functions Are Opaque Cross-Module
+
+**Problem**: `private def` functions in module A cannot be unfolded by `simp only`
+in module B. After `simp only [callingFunction, ...]`, the private function appears
+as `Module.privateFunc✝` (with hygiene suffix) in hypotheses. You cannot reference
+it by name, unfold it, or apply lemmas about it.
+
+**Symptoms**:
+- `simp only [privateFunc, ...]` fails with "Unknown identifier"
+- `split at h` on the private call only gives error/ok (bind result), not internal branches
+- You need properties of the private function's output but can't prove them
+
+**Solution**: Either remove `private` or add a public helper lemma in the same module:
+
+```lean
+-- Option 1: Remove private (simplest, when encapsulation isn't critical)
+-- Change: private def parseHeader → def parseHeader
+
+-- Option 2: Add a public lemma in the SAME file as the private def
+-- (private defs CAN be referenced by non-private theorems in the same file)
+theorem parseHeader_headerBytes_ge (h : parseHeader data pos fmt = .ok (a, b, hdr, fs)) :
+    hdr ≥ 3 := by
+  simp only [parseHeader, ...] at h  -- works: same module
+  ...
+```
+
+**Key insight**: Check `private` visibility BEFORE writing the proof. If a proof
+needs to reason about a function's internals (not just its success/failure), and
+that function is `private` in another module, address visibility first.
+
+**Tuple projection gotcha**: After `subst h` where `h : tuple = v`, projections
+like `v.2.2.fst` remain unreduced. Use destructured arguments in helper lemmas:
+```lean
+-- BAD: v.2.2.fst doesn't reduce for omega
+theorem helper (h : f x = .ok v) : v.2.2.fst ≥ 3 := by ...
+
+-- GOOD: hdr is a plain Nat, omega works directly
+theorem helper (h : f x = .ok (a, b, hdr, fs)) : hdr ≥ 3 := by ...
+```
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
