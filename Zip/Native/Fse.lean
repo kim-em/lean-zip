@@ -238,7 +238,7 @@ structure BackwardBitReader where
 namespace BackwardBitReader
 
 /-- Find the position of the highest set bit in a byte (0-7), or none if zero. -/
-private def highBitPos (b : UInt8) : Option Nat :=
+def highBitPos (b : UInt8) : Option Nat :=
   if b == 0 then none
   else if b &&& 0x80 != 0 then some 7
   else if b &&& 0x40 != 0 then some 6

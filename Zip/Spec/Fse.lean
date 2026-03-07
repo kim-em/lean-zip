@@ -706,6 +706,90 @@ theorem readBits_totalBitsRemaining_lt (br : BackwardBitReader)
   have hge := readBits_go_totalBitsRemaining_ge br n 0 val br' h
   omega
 
+/-! ## BackwardBitReader.init specs -/
+
+open Zip.Native (BackwardBitReader) in
+/-- When `highBitPos b = some p`, the position is less than 8. -/
+private theorem highBitPos_lt_eight (b : UInt8) (p : Nat)
+    (h : BackwardBitReader.highBitPos b = some p) : p < 8 := by
+  unfold BackwardBitReader.highBitPos at h
+  split at h
+  · exact nomatch h
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  split at h
+  · simp only [Option.some.injEq] at h; omega
+  simp only [Option.some.injEq] at h; omega
+
+open Zip.Native (BackwardBitReader) in
+/-- Successful `init` preserves the `startPos` argument. -/
+theorem BackwardBitReader_init_startPos_eq (data : ByteArray)
+    (startPos endPos : Nat) (br : BackwardBitReader)
+    (h : BackwardBitReader.init data startPos endPos = .ok br) :
+    br.startPos = startPos := by
+  simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · split at h
+      · exact nomatch h
+      · rename_i sentinelPos
+        split at h
+        · split at h
+          · obtain rfl := Except.ok.inj h; rfl
+          · obtain rfl := Except.ok.inj h; rfl
+        · obtain rfl := Except.ok.inj h; rfl
+
+open Zip.Native (BackwardBitReader) in
+/-- The initial `totalBitsRemaining` is strictly less than `8 * (endPos - startPos)`.
+    This is because the sentinel bit itself is consumed during initialization. -/
+theorem BackwardBitReader_init_totalBitsRemaining_lt (data : ByteArray)
+    (startPos endPos : Nat) (br : BackwardBitReader)
+    (h : BackwardBitReader.init data startPos endPos = .ok br) :
+    br.totalBitsRemaining < 8 * (endPos - startPos) := by
+  simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · rename_i hle
+    split at h
+    · exact nomatch h
+    · rename_i hsize
+      split at h
+      · exact nomatch h
+      · rename_i sentinelPos
+        split at h
+        · -- sentinelPos == 0
+          rename_i hsp; simp only [beq_iff_eq] at hsp
+          split at h
+          · -- endPos - 1 ≤ startPos: totalBitsRemaining = 0
+            rename_i hge
+            obtain rfl := Except.ok.inj h
+            simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq, ↓reduceIte]
+            omega
+          · -- endPos - 1 > startPos: bitsRemaining = 8, bytePos = endPos - 2
+            rename_i hge
+            obtain rfl := Except.ok.inj h
+            simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq,
+              show ¬(8 : Nat) = 0 from by omega, ↓reduceIte]
+            omega
+        · -- sentinelPos ≠ 0: bitsRemaining = sentinelPos, bytePos = endPos - 1
+          rename_i hsp; simp only [beq_iff_eq] at hsp
+          obtain rfl := Except.ok.inj h
+          simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq, hsp, ↓reduceIte]
+          have hlt := highBitPos_lt_eight _ _ ‹_›
+          omega
+
 /-! ## forIn always-ok lemmas -/
 
 /-- `List.forIn'.loop` in `Except` always returns `.ok` when the body never throws. -/
