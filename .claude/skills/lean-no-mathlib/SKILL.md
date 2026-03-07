@@ -60,6 +60,27 @@ by_cases h : P
   -- ¬P case, derive False
 ```
 
+## Constructor Names That Clash with Tactic Keywords
+
+When pattern matching on an inductive type whose constructor name is also
+a Lean tactic keyword, use guillemets (`«»`) to escape it:
+
+```lean
+-- BAD: `repeat` is parsed as the tactic keyword
+cases mode with
+| repeat => ...   -- error: unexpected token 'repeat'
+
+-- GOOD: guillemets escape the constructor name
+cases mode with
+| «repeat» => ...
+```
+
+Known clashing names in this codebase:
+- `SequenceCompressionMode.repeat` — use `| «repeat» =>`
+
+Other common Lean keywords that could clash: `do`, `return`, `match`,
+`where`, `if`, `then`, `else`, `let`, `have`, `fun`.
+
 ## Missing Standard Library Lemmas
 
 If a proof is blocked by a missing lemma for standard types (ByteArray, Array,
