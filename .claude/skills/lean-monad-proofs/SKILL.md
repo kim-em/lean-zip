@@ -945,6 +945,31 @@ theorem helper (h : f x = .ok v) : v.2.2.fst ≥ 3 := by ...
 theorem helper (h : f x = .ok (a, b, hdr, fs)) : hdr ≥ 3 := by ...
 ```
 
+## Decomposing `bne` Guards (Non-Mathlib `¬¬P`)
+
+When monadic code uses `if (a != b) = true then .error ... else ...`,
+after `split at h` and extracting the success case, the hypothesis
+contains `¬(a != b) = true`. The simp chain to reduce this is:
+
+```lean
+simp only [bne_iff_ne, ne_eq, Decidable.not_not] at *
+-- bne_iff_ne: (a != b) = true ↔ a ≠ b
+-- ne_eq:      a ≠ b ↔ ¬(a = b)
+-- Decidable.not_not: ¬¬P ↔ P  (no Mathlib needed)
+```
+
+**Common mistake**: `not_not` does NOT exist without Mathlib. Always use
+`Decidable.not_not`. This project has no Mathlib dependency.
+
+**Full pattern for `bne` guard success branches:**
+```lean
+simp only [Except.ok.injEq, Prod.mk.injEq] at h
+obtain ⟨rfl, -⟩ := h  -- or ⟨rfl, rfl⟩ if both components needed
+simp only [bne_iff_ne, ne_eq, Decidable.not_not] at *
+first | assumption | (simp only [eq_comm]; assumption)
+-- eq_comm fallback handles reversed equality direction
+```
+
 ## Cross-References
 
 - **Dependent `if` preserving hypotheses through `do` blocks**:
