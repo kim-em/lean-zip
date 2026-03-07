@@ -8,12 +8,12 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~371 completed (Feb 19 – Mar 7)
-- **Source files**: 100 (48 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 336
-- **Spec theorems/lemmas**: 791 across 48 spec files (24,081 lines)
-- **Bare simp**: 0 remaining — campaign complete (48 spec files, ZipForStd/, Native/ all clean)
-- **Bare simp_all**: 0 remaining — completed in this batch (BitReaderInvariant, BitstreamCorrect, ZstdHuffman)
+- **Sessions**: ~383 completed (Feb 19 – Mar 7)
+- **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
+- **Merged PRs**: 351
+- **Spec theorems/lemmas**: 991 across 49 spec files (24,401 lines)
+- **Bare simp**: 0 remaining — campaign complete (49 spec files, ZipForStd/, Native/ all clean)
+- **Bare simp_all**: 0 remaining — campaign complete (all spec files, DeflateEncodeDynamic included)
 
 ## Milestones
 
@@ -577,6 +577,40 @@ end-to-end frame position proofs.
 - #780: BitReaderInvariant.lean — replaced 3 bare `simp_all` with explicit
   `simp_all only [...]` lemma lists.
 
+**11-PR batch (Mar 7): value bounds, top-level specs, quality reviews:**
+
+*Track E position/value specs (5 PRs):*
+- #792: `readBits_value_lt_pow2` — BackwardBitReader.readBits produces value < 2^n
+- #795: `buildFseTable_numBits_le` — cells numBits ≤ accuracyLog (ValidFseTable
+  condition c). Used `set!_preserves_forall` helper for dependent type reasoning.
+- #797: New `Zip/Spec/ZstdFrame.lean` — first specs for `decompressZstdWF`:
+  `decompressZstdWF_base`, `_single_standard_frame` (base case and single-frame
+  equivalence)
+- #803: `readBits_totalBitsRemaining_sub`, `_lt` — exact bit consumption tracking
+  for BackwardBitReader.readBits. Key discovery: `↓reduceIte` doesn't reduce
+  concrete numeral comparisons.
+- #808: `decompressZstdWF_single_skippable_frame`, `_skip_then_standard` — skippable
+  frame composition specs for the top-level decompressor
+
+*Quality reviews (5 PRs):*
+- #787: Zstd.lean spec audit — deduplicated `parseFrameHeader` position proofs,
+  documented grind usage (-15 lines)
+- #796: Closed stale PR #789, compressed `decompressBlocksWF` proof boilerplate
+  (-37 lines)
+- #802: Zstd.lean quality pass — documented grind, converted bare simp
+- #807: XxHash.lean quality pass — converted 4 bare simp to simp only
+- #811: DeflateEncodeDynamic.lean quality pass — replaced 5 simp_all with targeted
+  tactics (termination proofs: `simp only` + `omega`; Bool→Prop: `beq_eq_false_iff_ne`)
+
+*Skill updates (1 PR):*
+- #798: Updated lean-zstd-spec-pattern, lean-monad-proofs, lean-zstd-patterns with
+  position-spec campaign patterns and BackwardBitReader proof techniques
+
+**BackwardBitReader lifecycle coverage** now complete:
+- init → totalBitsRemaining bound and startPos
+- readBits → value bound (val < 2^n), exact bit consumption, bitPos advancement
+- isFinished → characterization
+
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
@@ -585,32 +619,27 @@ end-to-end frame position proofs.
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
 
-**Summary:** The Zstd spec infrastructure now spans 5 files with 151
-theorems/lemmas: ZstdSequence (53), ZstdHuffman (33), Fse (31), Zstd (22),
-XxHash (12). Total spec line count: 3227 lines.
+**Summary:** The Zstd spec infrastructure now spans 6 files with 185
+theorems/lemmas: ZstdSequence (59), Fse (47), ZstdHuffman (34), Zstd (25),
+XxHash (16), ZstdFrame (4). Total spec line count: 3,537 lines.
 
-This batch completed two significant milestones. First, the sorry count
-dropped from 4 to 3 by proving `buildPredefinedFseTables_success` (#776),
-leaving only 3 intractable XxHash UInt64 test vectors. Second, the position
-advancement campaign reached near-completion: BitReader.readBits (#760),
-resolveSingleFseTable FSE mode (#772), parseLiteralsSection (#779), and
-resolveSequenceFseTables (#781) all received position proofs. The
-`decompressFrame_pos_gt` theorem (#763) composed `parseFrameHeader` and
-`decompressBlocksWF` position advancement into the first end-to-end frame
-position proof.
-
-The bare simp_all cleanup across 3 spec files (#764, #778, #780) replaced
-all 10 remaining instances, extending the bare simp campaign to simp_all.
-The `buildFseTable` WF refactoring (#765) addressed the last remaining
-opaque `while` loop mentioned in the previous summary, though internal
-loops may remain in helper functions.
+The previous batch (closed by #785) completed two significant milestones:
+sorry count 4→3 via `buildPredefinedFseTables_success` (#776) and near-
+completion of the position advancement campaign. This batch shifted focus to
+value bounds and top-level decompressor specs. The new `ZstdFrame.lean` file
+establishes the first formal properties of `decompressZstdWF`, covering base
+case, single-frame, and skippable-frame composition — the building blocks for
+end-to-end multi-frame correctness. BackwardBitReader now has full lifecycle
+spec coverage (init → readBits → isFinished). The quality reviews completed
+the bare simp_all campaign across DeflateEncodeDynamic and continued the
+ongoing pattern of tightening proof hygiene.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~371 sessions (Feb 19 – Mar 7)
-- 336 merged PRs
+- ~383 sessions (Feb 19 – Mar 7)
+- 351 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
