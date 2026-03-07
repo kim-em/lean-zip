@@ -428,6 +428,7 @@ theorem decompressBlocksWF_output_size_ge (data : ByteArray) (off : Nat)
       have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
       simp only [ByteArray.size_append] at ih; omega
   · -- compressed
+    split at h; next => exact nomatch h  -- blockEnd guard
     split at h; next => exact nomatch h  -- parseLiteralsSection
     split at h; next => exact nomatch h  -- parseSequencesHeader
     split at h  -- numSeq == 0
@@ -490,6 +491,7 @@ theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
       have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
       omega
   · -- compressed
+    split at h; next => exact nomatch h  -- blockEnd guard
     split at h; next => exact nomatch h  -- parseLiteralsSection
     split at h; next => exact nomatch h  -- parseSequencesHeader
     split at h  -- numSeq == 0
