@@ -278,10 +278,14 @@ theorem decompressFrame_contentSize_eq (data : ByteArray) (pos : Nat)
   dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
   -- Substitute contentSize = some n to resolve the contentSize match
   simp only [hn] at h
-  -- Thread through all remaining guards (dictionary, decompressBlocks, checksum)
-  -- All paths end with: if (v.fst.size.toUInt64 != n) then throw else .ok (v.fst, ...)
-  -- Since h says the result is .ok, the content size guard passed
-  grind
+  -- Thread through remaining guards: dictionary, decompressBlocks, checksum, content size.
+  -- On every .ok path, the content size guard `v.fst.size.toUInt64 != n` was false.
+  iterate 10 (all_goals (try split at h))
+  all_goals first
+    | contradiction
+    | (simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, -⟩ := h
+       simp only [bne_iff_ne, ne_eq, Bool.not_eq_true, Decidable.not_not] at *
+       assumption)
 
 /-- When `decompressFrame` succeeds and the frame header has `contentChecksum = true`,
     the output's XXH64 upper 32 bits matches the checksum stored in the 4 bytes
@@ -301,9 +305,14 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
   -- Substitute contentChecksum = true to resolve the checksum conditionals
   simp only [hc] at h
-  -- Thread through all remaining guards (dictionary, decompressBlocks, data size, checksum !=)
-  -- Since h says the result is .ok, the checksum guard passed
-  grind
+  -- Thread through remaining guards: dictionary, decompressBlocks, data size, checksum.
+  -- On every .ok path, the checksum guard `expected != actual` was false.
+  iterate 10 (all_goals (try split at h))
+  all_goals first
+    | contradiction
+    | (simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, rfl⟩ := h
+       simp only [bne_iff_ne, ne_eq, Decidable.not_not] at *
+       first | assumption | (simp only [eq_comm]; assumption))
 
 /-! ## Skippable frame specification -/
 
@@ -579,7 +588,11 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
           obtain ⟨content, afterBlocks⟩ := val2
           have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
           simp only [hdb] at h
-          grind
+          -- Thread through checksum/contentSize guards; pos' ≥ afterBlocks > pos
+          iterate 10 (all_goals (try split at h))
+          all_goals first
+            | contradiction
+            | (simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨-, rfl⟩ := h; omega)
     · -- none
       unfold Zip.Native.decompressBlocks at h
       cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
@@ -589,6 +602,10 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
         obtain ⟨content, afterBlocks⟩ := val2
         have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
         simp only [hdb] at h
-        grind
+        -- Thread through checksum/contentSize guards; pos' ≥ afterBlocks > pos
+        iterate 10 (all_goals (try split at h))
+        all_goals first
+          | contradiction
+          | (simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨-, rfl⟩ := h; omega)
 
 end Zstd.Spec
