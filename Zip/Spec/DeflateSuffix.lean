@@ -22,7 +22,9 @@ theorem readBitsLSB_append (n : Nat) (bits suffix : List Bool)
     (h : readBitsLSB n bits = some (val, rest)) :
     readBitsLSB n (bits ++ suffix) = some (val, rest ++ suffix) := by
   induction n generalizing bits val rest with
-  | zero => simp_all [readBitsLSB]
+  | zero =>
+    simp only [readBitsLSB, Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h; simp only [readBitsLSB]
   | succ k ih =>
     cases bits with
     | nil => simp only [readBitsLSB] at h; contradiction
@@ -163,7 +165,9 @@ private theorem readNBytes_append (n : Nat) (bits suffix : List Bool)
     (h : decodeStored.readNBytes n bits acc = some (bytes, rest)) :
     decodeStored.readNBytes n (bits ++ suffix) acc = some (bytes, rest ++ suffix) := by
   induction n generalizing bits acc bytes rest with
-  | zero => simp_all [decodeStored.readNBytes]
+  | zero =>
+    simp only [decodeStored.readNBytes, Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h; simp only [decodeStored.readNBytes]
   | succ k ih =>
     unfold decodeStored.readNBytes at h ⊢
     cases hrb : readBitsLSB 8 bits with
@@ -221,7 +225,9 @@ private theorem readCLLengths_append (n idx : Nat) (acc : List Nat)
     (h : Deflate.Spec.readCLLengths n idx acc bits = some (result, rest)) :
     Deflate.Spec.readCLLengths n idx acc (bits ++ suffix) = some (result, rest ++ suffix) := by
   induction n generalizing idx acc bits result rest with
-  | zero => simp_all [Deflate.Spec.readCLLengths]
+  | zero =>
+    simp only [Deflate.Spec.readCLLengths, Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h; simp only [Deflate.Spec.readCLLengths]
   | succ k ih =>
     unfold Deflate.Spec.readCLLengths at h ⊢
     cases hrb : readBitsLSB 3 bits with
