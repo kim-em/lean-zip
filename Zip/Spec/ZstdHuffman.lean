@@ -663,4 +663,107 @@ theorem parseLiteralsSection_pos_gt (data : ByteArray) (pos : Nat)
   · exact parseLiteralsSection_pos_gt_compressed data pos prevHuffTree literals pos' huffTable
       (by omega) h
 
+/-! ## parseHuffmanTreeDescriptor position properties -/
+
+open Zip.Native in
+/-- When `parseHuffmanWeightsDirect` succeeds, the returned position equals
+    `pos + (numWeights + 1) / 2`. -/
+private theorem parseHuffmanWeightsDirect_pos_eq (data : ByteArray) (pos numWeights : Nat)
+    (weights : Array UInt8) (pos' : Nat)
+    (h : parseHuffmanWeightsDirect data pos numWeights = .ok (weights, pos')) :
+    pos' = pos + (numWeights + 1) / 2 := by
+  simp only [parseHuffmanWeightsDirect, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · simp only [pure, Pure.pure, Except.pure] at h
+      split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        exact h.2.symm
+
+open Zip.Native in
+/-- When `parseHuffmanWeightsFse` succeeds, the returned position equals
+    `pos + 1 + compressedSize`. -/
+private theorem parseHuffmanWeightsFse_pos_eq (data : ByteArray) (pos compressedSize : Nat)
+    (weights : Array UInt8) (pos' : Nat)
+    (h : parseHuffmanWeightsFse data pos compressedSize = .ok (weights, pos')) :
+    pos' = pos + 1 + compressedSize := by
+  simp only [parseHuffmanWeightsFse, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · -- decodeFseDistribution
+    split at h
+    · exact nomatch h
+    · -- buildFseTable
+      split at h
+      · exact nomatch h
+      · -- BackwardBitReader.init
+        split at h
+        · exact nomatch h
+        · -- decodeFseSymbolsAll
+          split at h
+          · exact nomatch h
+          · split at h
+            · exact nomatch h
+            · obtain ⟨-, rfl⟩ := h
+              rfl
+
+open Zip.Native in
+/-- When `parseHuffmanTreeDescriptor` succeeds, the returned position is at least
+    `pos + 2` (1 header byte + at least 1 data byte). -/
+theorem parseHuffmanTreeDescriptor_pos_ge_two (data : ByteArray) (pos : Nat)
+    (table : ZstdHuffmanTable) (pos' : Nat)
+    (h : parseHuffmanTreeDescriptor data pos = .ok (table, pos')) :
+    pos' ≥ pos + 2 := by
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind] at h
+  -- Size guard
+  by_cases h1 : data.size < pos + 1
+  · simp [h1] at h
+  · rw [if_neg h1] at h; simp only [pure, Pure.pure, Except.pure] at h
+    -- headerByte >= 128 check
+    by_cases h2 : data[pos]!.toNat ≥ 128
+    · rw [if_pos h2] at h
+      -- parseHuffmanWeightsDirect bind
+      cases hwd : parseHuffmanWeightsDirect data (pos + 1) (data[pos]!.toNat - 127) with
+      | error e => simp only [hwd] at h; exact nomatch h
+      | ok v =>
+        rw [hwd] at h; dsimp only [Bind.bind, Except.bind] at h
+        cases hbt : buildZstdHuffmanTable v.fst with
+        | error e => simp only [hbt] at h; exact nomatch h
+        | ok t =>
+          rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
+          have hpos := parseHuffmanWeightsDirect_pos_eq data (pos + 1)
+            (data[pos]!.toNat - 127) v.fst v.snd hwd
+          obtain ⟨-, rfl⟩ := h
+          rw [hpos]; omega
+    · rw [if_neg (show ¬data[pos]!.toNat ≥ 128 from h2)] at h
+      -- headerByte == 0 check
+      by_cases h3 : (data[pos]!.toNat == 0) = true
+      · simp [h3] at h
+      · rw [if_neg h3] at h
+        cases hfse : parseHuffmanWeightsFse data pos data[pos]!.toNat with
+        | error e => simp only [hfse] at h; exact nomatch h
+        | ok v =>
+          rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
+          cases hbt : buildZstdHuffmanTable v.fst with
+          | error e => simp only [hbt] at h; exact nomatch h
+          | ok t =>
+            rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
+            have hpos := parseHuffmanWeightsFse_pos_eq data pos
+              data[pos]!.toNat v.fst v.snd hfse
+            obtain ⟨-, rfl⟩ := h
+            rw [hpos]; simp only [beq_iff_eq] at h3; omega
+
+open Zip.Native in
+/-- When `parseHuffmanTreeDescriptor` succeeds, the returned position is strictly
+    greater than the input position. -/
+theorem parseHuffmanTreeDescriptor_pos_gt (data : ByteArray) (pos : Nat)
+    (table : ZstdHuffmanTable) (pos' : Nat)
+    (h : parseHuffmanTreeDescriptor data pos = .ok (table, pos')) :
+    pos' > pos := by
+  have := parseHuffmanTreeDescriptor_pos_ge_two data pos table pos' h
+  omega
+
 end Zstd.Spec.Huffman
