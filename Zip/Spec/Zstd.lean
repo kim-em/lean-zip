@@ -428,6 +428,7 @@ theorem decompressBlocksWF_output_size_ge (data : ByteArray) (off : Nat)
       have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
       simp only [ByteArray.size_append] at ih; omega
   · -- compressed
+    split at h; next => exact nomatch h  -- blockEnd guard
     split at h; next => exact nomatch h  -- parseLiteralsSection
     split at h; next => exact nomatch h  -- parseSequencesHeader
     split at h  -- numSeq == 0
@@ -490,6 +491,7 @@ theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
       have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
       omega
   · -- compressed
+    split at h; next => exact nomatch h  -- blockEnd guard
     split at h; next => exact nomatch h  -- parseLiteralsSection
     split at h; next => exact nomatch h  -- parseSequencesHeader
     split at h  -- numSeq == 0
@@ -512,6 +514,61 @@ theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
       · split at h; next => exact nomatch h  -- position guard
         have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
         omega
+  · exact nomatch h  -- reserved
+  termination_by data.size - off
+  decreasing_by all_goals omega
+
+/-- When `decompressBlocksWF` succeeds, the returned position is within the
+    data bounds. This is the block-loop level of the le_size campaign. -/
+theorem decompressBlocksWF_le_size (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (result, pos')) :
+    pos' ≤ data.size := by
+  unfold Zip.Native.decompressBlocksWF at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  split at h; next => exact nomatch h
+  split at h; next => exact nomatch h
+  split at h; next => exact nomatch h
+  split at h; next => exact nomatch h
+  split at h  -- blockType: raw | rle | compressed | reserved
+  · -- raw
+    split at h; next => exact nomatch h
+    split at h  -- lastBlock
+    · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+      exact decompressRawBlock_le_size _ _ _ _ _ (by assumption)
+    · split at h; next => exact nomatch h
+      exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
+  · -- rle
+    split at h; next => exact nomatch h
+    split at h  -- lastBlock
+    · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+      exact decompressRLEBlock_le_size _ _ _ _ _ (by assumption)
+    · split at h; next => exact nomatch h
+      exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
+  · -- compressed
+    split at h; next => exact nomatch h  -- blockEnd guard
+    rename_i hbe
+    split at h; next => exact nomatch h  -- parseLiteralsSection
+    split at h; next => exact nomatch h  -- parseSequencesHeader
+    split at h  -- numSeq == 0
+    · split at h  -- lastBlock
+      · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+        omega
+      · split at h; next => exact nomatch h
+        exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
+    · -- numSeq > 0
+      split at h; next => exact nomatch h  -- resolveSequenceFseTables
+      split at h; next => exact nomatch h  -- BackwardBitReader.init
+      split at h; next => exact nomatch h  -- decodeSequences
+      split at h; next => exact nomatch h  -- executeSequences
+      split at h  -- lastBlock
+      · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+        omega
+      · split at h; next => exact nomatch h
+        exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
   · exact nomatch h  -- reserved
   termination_by data.size - off
   decreasing_by all_goals omega
