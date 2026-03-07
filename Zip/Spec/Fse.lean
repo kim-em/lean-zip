@@ -466,6 +466,75 @@ theorem readBits_error_of_isFinished (br : BackwardBitReader) (n : Nat)
   simp only [BackwardBitReader.readBits, BackwardBitReader.readBits.go, hfin]
   exact ⟨_, rfl⟩
 
+/-! ## BackwardBitReader value bound -/
+
+/-- Shifting a UInt32 left by 1 and OR-ing with a UInt8 masked to 1 bit
+    produces a value less than `2^(m+1)` when the original is less than `2^m`. -/
+private theorem uint32_shift_or_bit_bound (acc : UInt32) (byte : UInt8) (pos : UInt8)
+    (m : Nat)
+    (hacc : acc.toNat < 2 ^ m) :
+    (acc <<< 1 ||| (byte >>> pos &&& 1).toUInt32).toNat < 2 ^ (m + 1) := by
+  -- The result is always < 2^32, so if m+1 ≥ 32, the bound is trivial
+  by_cases hm : m + 1 ≥ 32
+  · calc (acc <<< 1 ||| (byte >>> pos &&& 1).toUInt32).toNat
+        < 2 ^ 32 := UInt32.toNat_lt _
+      _ ≤ 2 ^ (m + 1) := Nat.pow_le_pow_right (by omega) hm
+  · -- m + 1 < 32, so m ≤ 30 and the result fits in 31 bits
+    have hm' : m ≤ 30 := by omega
+    -- Split into components
+    -- Use Nat.or_lt_two_pow: if both operands < 2^(m+1), their OR is too
+    rw [UInt32.toNat_or]
+    apply Nat.or_lt_two_pow
+    · -- (acc <<< 1).toNat < 2^(m+1)
+      simp only [UInt32.toNat_shiftLeft, Nat.shiftLeft_eq]
+      have : (1 : UInt32).toNat % 32 = 1 := by decide
+      rw [this]
+      rw [Nat.pow_one]
+      rw [Nat.mod_eq_of_lt]
+      · rw [Nat.pow_succ]; omega
+      · calc acc.toNat * 2
+            < 2 ^ m * 2 := by omega
+          _ = 2 ^ (m + 1) := by rw [Nat.pow_succ]
+          _ ≤ 2 ^ 31 := Nat.pow_le_pow_right (by omega) (by omega)
+          _ < 2 ^ 32 := by omega
+    · -- (byte >>> pos &&& 1).toUInt32.toNat < 2^(m+1)
+      simp only [UInt8.toNat_toUInt32, UInt8.toNat_and, UInt8.toNat_shiftRight,
+        UInt8.reduceToNat, Nat.and_one_is_mod]
+      omega
+
+open Zip.Native (BackwardBitReader) in
+/-- The inner loop of `readBits` maintains the value bound: if the accumulator
+    starts below `2^(n-k)`, the final value is below `2^n`. -/
+private theorem readBits_go_value_bound {n : Nat} (br : BackwardBitReader) (k : Nat)
+    (acc : UInt32) (val : UInt32) (br' : BackwardBitReader)
+    (hkn : k ≤ n)
+    (hacc : acc.toNat < 2 ^ (n - k))
+    (h : BackwardBitReader.readBits.go br k acc = .ok (val, br')) :
+    val.toNat < 2 ^ n := by
+  induction k generalizing br acc with
+  | zero =>
+    simp only [BackwardBitReader.readBits.go] at h
+    obtain ⟨rfl, _⟩ := Prod.mk.inj (Except.ok.inj h)
+    simpa only [Nat.sub_zero] using hacc
+  | succ k ih =>
+    simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
+    split at h
+    · exact nomatch h
+    · simp only [pure, Except.pure] at h
+      refine ih _ _ (by omega) ?_ h
+      have hne : n - k = (n - (k + 1)) + 1 := by omega
+      rw [hne]
+      exact uint32_shift_or_bit_bound acc _ _ _ hacc
+
+open Zip.Native (BackwardBitReader) in
+/-- Reading `n` bits from a backward bitstream produces a value less than `2^n`. -/
+theorem readBits_value_lt_pow2 (br : BackwardBitReader) (n : Nat)
+    (val : UInt32) (br' : BackwardBitReader)
+    (h : br.readBits n = .ok (val, br')) :
+    val.toNat < 2 ^ n := by
+  simp only [BackwardBitReader.readBits] at h
+  exact readBits_go_value_bound br n 0 val br' (Nat.le_refl n) (by simp) h
+
 /-! ## forIn always-ok lemmas -/
 
 /-- `List.forIn'.loop` in `Except` always returns `.ok` when the body never throws. -/
