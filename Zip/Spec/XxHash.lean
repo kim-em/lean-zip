@@ -121,21 +121,20 @@ instance : Decidable (ValidProcessRemaining acc data off len result) :=
 theorem processRemaining8_self (h : UInt64) (data : ByteArray) (pos : Nat) :
     XxHash64.processRemaining8 h data pos pos = (h, pos) := by
   unfold XxHash64.processRemaining8
-  simp [show ¬(pos + 8 ≤ pos) from by omega]
+  simp only [show ¬(pos + 8 ≤ pos) from by omega, ↓reduceIte]
 
 /-- processRemaining1 is a no-op when endPos = pos (1-byte loop skipped). -/
 theorem processRemaining1_self (h : UInt64) (data : ByteArray) (pos : Nat) :
     XxHash64.processRemaining1 h data pos pos = h := by
   unfold XxHash64.processRemaining1
-  simp [show ¬(pos < pos) from by omega]
+  simp only [show ¬(pos < pos) from by omega, ↓reduceIte]
 
 /-- processRemaining is a no-op when len = 0: all three phases
     (8-byte, 4-byte, 1-byte) are immediately skipped. -/
 theorem processRemaining_zero (acc : UInt64) (data : ByteArray) (off : Nat) :
     XxHash64.processRemaining acc data off 0 = acc := by
-  simp [XxHash64.processRemaining, Nat.add_zero,
-        processRemaining8_self, processRemaining1_self,
-        show ¬(off + 4 ≤ off) from by omega]
+  simp only [XxHash64.processRemaining, Nat.add_zero, processRemaining8_self,
+        show ¬(off + 4 ≤ off) from by omega, ↓reduceIte, processRemaining1_self]
 
 /-! ## Specification theorems -/
 
@@ -154,7 +153,9 @@ theorem round_eq_expansion (acc lane : UInt64) :
 theorem xxHash64_empty (seed : UInt64) :
     XxHash64.xxHash64 ByteArray.empty seed =
       XxHash64.avalanche (seed + XxHash64.PRIME64_5) := by
-  simp [XxHash64.xxHash64, processRemaining_zero]
+  simp only [XxHash64.xxHash64, ByteArray.size_empty, Nat.zero_lt_succ, ↓reduceIte,
+        Nat.toUInt64_eq, UInt64.reduceOfNat, UInt64.add_zero, Nat.zero_mod,
+        Nat.sub_self, processRemaining_zero]
 
 /-- `xxHash64Upper32` is defined as the upper 32 bits of `xxHash64 data 0`. -/
 theorem xxHash64Upper32_eq (data : ByteArray) :
@@ -185,14 +186,17 @@ with wrapping) are too expensive for kernel evaluation (`decide_cbv` times out).
 The same test vectors are verified at runtime in `ZipTest/XxHashNative.lean`. -/
 
 /-- Known test vector: empty input with seed 0. -/
+-- Verified at runtime in ZipTest/XxHashNative.lean
 theorem empty_seed0 :
     XxHash64.xxHash64 ByteArray.empty 0 = 0xEF46DB3751D8E999 := by sorry
 
 /-- Known test vector: single byte 0x42 with seed 0. -/
+-- Verified at runtime in ZipTest/XxHashNative.lean
 theorem single_byte_0x42 :
     XxHash64.xxHash64 (ByteArray.mk #[0x42]) 0 = 0x6D69E28F063257F9 := by sorry
 
 /-- Known test vector: upper 32 bits of empty input hash. -/
+-- Verified at runtime in ZipTest/XxHashNative.lean
 theorem upper32_empty :
     XxHash64.xxHash64Upper32 ByteArray.empty = 0xEF46DB37 := by sorry
 
