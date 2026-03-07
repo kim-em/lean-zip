@@ -507,6 +507,96 @@ private theorem parseCompressedLiteralsHeader_headerBytes_ge (data : ByteArray)
       · exact nomatch h
       · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
 
+open Zip.Native in
+/-- `parseCompressedLiteralsHeader` returns the correct `headerSize` for each `sizeFormat`:
+    `sizeFormat ≤ 1 → 3`, `sizeFormat = 2 → 4`, `sizeFormat > 2 → 5`. -/
+theorem parseCompressedLiteralsHeader_headerSize (data : ByteArray) (pos : Nat)
+    (sizeFormat : Nat) (regen comp headerSize : Nat) (fourStreams : Bool)
+    (h : parseCompressedLiteralsHeader data pos sizeFormat
+         = .ok (regen, comp, headerSize, fourStreams)) :
+    (sizeFormat ≤ 1 → headerSize = 3) ∧
+    (sizeFormat = 2 → headerSize = 4) ∧
+    (sizeFormat > 2 → headerSize = 5) := by
+  simp only [parseCompressedLiteralsHeader, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · split at h
+    · exact nomatch h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨-, -, hhdr, -⟩ := h
+      exact ⟨fun _ => by omega, fun _ => by omega, fun _ => by omega⟩
+  · split at h
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        simp only [beq_iff_eq] at *
+        obtain ⟨-, -, hhdr, -⟩ := h
+        exact ⟨fun _ => by omega, fun _ => by omega, fun _ => by omega⟩
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        simp only [beq_iff_eq] at *
+        obtain ⟨-, -, hhdr, -⟩ := h
+        exact ⟨fun _ => by omega, fun _ => by omega, fun _ => by omega⟩
+
+open Zip.Native in
+/-- `parseCompressedLiteralsHeader` returns the correct `fourStreams` value:
+    `sizeFormat = 0 → false`, `sizeFormat ≥ 1 → true`. -/
+theorem parseCompressedLiteralsHeader_fourStreams (data : ByteArray) (pos : Nat)
+    (sizeFormat : Nat) (regen comp headerSize : Nat) (fourStreams : Bool)
+    (h : parseCompressedLiteralsHeader data pos sizeFormat
+         = .ok (regen, comp, headerSize, fourStreams)) :
+    (sizeFormat = 0 → fourStreams = false) ∧
+    (sizeFormat ≥ 1 → fourStreams = true) := by
+  simp only [parseCompressedLiteralsHeader, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · split at h
+    · exact nomatch h
+    · rename_i hsf _
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨-, -, -, hfs⟩ := h
+      -- hfs : (sizeFormat == 1) = fourStreams
+      constructor
+      · intro heq; subst heq; exact hfs.symm
+      · intro hge
+        simp only [show sizeFormat = 1 from by omega, beq_self_eq_true] at hfs
+        exact hfs.symm
+  · split at h
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨-, -, -, hfs⟩ := h
+        exact ⟨fun _ => by omega, fun _ => hfs.symm⟩
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨-, -, -, hfs⟩ := h
+        exact ⟨fun _ => by omega, fun _ => hfs.symm⟩
+
+open Zip.Native in
+/-- `parseCompressedLiteralsHeader` always returns `regen ≤ 0x3FFFF`.
+    In all branches, `regen` is computed as `(raw >>> shift) &&& mask` where
+    `mask ∈ {0x3FF, 0x3FFF, 0x3FFFF}`, and `x &&& mask ≤ mask ≤ 0x3FFFF`. -/
+theorem parseCompressedLiteralsHeader_regen_bound (data : ByteArray) (pos : Nat)
+    (sizeFormat : Nat) (regen comp headerSize : Nat) (fourStreams : Bool)
+    (h : parseCompressedLiteralsHeader data pos sizeFormat
+         = .ok (regen, comp, headerSize, fourStreams)) :
+    regen ≤ 0x3FFFF := by
+  simp only [parseCompressedLiteralsHeader, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · split at h
+    · exact nomatch h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      rw [← h.1]; exact Nat.le_trans Nat.and_le_right (by omega)
+  · split at h
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        rw [← h.1]; exact Nat.le_trans Nat.and_le_right (by omega)
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        rw [← h.1]; exact Nat.and_le_right
+
 /-! ## parseLiteralsSection structural properties (raw/RLE) -/
 
 open Zip.Native in
