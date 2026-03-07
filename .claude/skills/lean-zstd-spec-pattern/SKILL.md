@@ -355,7 +355,7 @@ Parser functions in `Except` monad return `(result, pos')`. Proving
 `pos' > pos` (or `pos' = pos + k`) is the standard way to establish
 that a parser consumes input, which feeds WF termination obligations.
 
-### Naming convention: `_pos_gt` vs `_pos_ge` vs `_pos_eq`
+### Naming convention: `_pos_gt` vs `_pos_ge` vs `_pos_eq` vs `_le_size`
 
 Choose the suffix based on the tightest bound you can prove:
 
@@ -364,6 +364,8 @@ Choose the suffix based on the tightest bound you can prove:
 | `_pos_eq` | `pos' = pos + k` (exact) | Parser reads a fixed number of bytes (e.g., `parseBlockHeader` always reads 3) |
 | `_pos_gt` | `pos' > pos` (strict) | Parser reads at least 1 byte but exact count varies (e.g., `decompressFrame`) |
 | `_pos_ge` | `pos' ≥ pos` (weak) | Some branches don't advance (e.g., `resolveSingleFseTable` with `repeat` mode returns `pos' = pos`) |
+| `_le_size` | `pos' ≤ data.size` | Returned position stays within data bounds (feeds `getElem` preconditions) |
+| `_pos_bounded` | `pos' ≤ pos + k` | Upper bound complement to `_pos_gt` (together give tight range) |
 
 **Prefer the tightest bound**: `_pos_eq` > `_pos_gt` > `_pos_ge`. Stricter bounds
 are more useful for callers (exact bounds compose better than inequalities).
@@ -504,6 +506,62 @@ The chain is:
 4. `omega` closes the termination obligation
 
 See `lean-wf-recursion` skill, "Non-Advancement Guard Pattern".
+
+### `_le_size` proofs: position stays within data bounds
+
+The `_le_size` theorems prove that a parser's returned position doesn't exceed
+`data.size`. These feed `getElem` preconditions when subsequent code accesses
+`data[pos']`.
+
+**Standard template** (completely mechanical):
+
+```lean
+theorem myParser_le_size (data : ByteArray) (pos : Nat)
+    (result : ResultType) (pos' : Nat)
+    (h : myParser data pos = .ok (result, pos')) :
+    pos' ≤ data.size := by
+  -- Option A: derive from _pos_eq + guard negation
+  have hpos := myParser_pos_eq data pos result pos' h
+  unfold myParser at h
+  split at h
+  · exact nomatch h                -- error: guard `pos + k > data.size` held
+  · subst hpos; omega              -- success: guard failed, so pos + k ≤ data.size
+  -- Option B: derive directly from _pos_eq + _pos_gt when available
+  -- have hpe := myParser_pos_eq ... h
+  -- have hgt := myParser_pos_gt ... h   -- only if the function also has _pos_gt
+  -- omega
+```
+
+**The key insight**: parser functions check `if pos + n > data.size then throw`
+as a guard. On the success path, the guard's negation gives `pos + n ≤ data.size`,
+and since `pos' = pos + n` (from `_pos_eq`), we get `pos' ≤ data.size`.
+
+**Layering**: prove `_pos_eq` first (exact value), then derive both `_pos_gt` and
+`_le_size` as trivial corollaries. This avoids duplicating the unfolding work.
+
+**Established `_le_size` theorems**:
+- `parseBlockHeader_le_size` — derives from `_pos_eq`, unfold + nomatch + omega
+- `decompressRawBlock_le_size` — same pattern
+- `decompressRLEBlock_le_size` — same pattern
+- `skipSkippableFrame_le_size` — same pattern
+- `parseFrameHeader_le_size` — multi-branch, uses `_pos_eq` per branch
+- `parseSequencesHeader_le_size` — multi-branch with 1/2/3-byte encodings
+
+### Bitwise bound lemmas for value specs
+
+When proving bounds on parsed values that use bitmask operations:
+
+| Lemma | Use case |
+|-------|----------|
+| `Nat.and_le_right` | `x &&& mask ≤ mask` — bitmask extracts at most `mask` |
+| `Nat.or_lt_two_pow` | `x ||| y < 2^n` when both `x < 2^n` and `y < 2^n` |
+| `UInt32.toNat_or` | Bridge `(a ||| b).toNat = a.toNat ||| b.toNat` |
+| `UInt32.toNat_shiftLeft` | Bridge `(a <<< n).toNat` |
+| `Nat.shiftLeft_eq` | `x <<< n = x * 2^n` |
+
+These appear in `parseCompressedLiteralsHeader_regen_bound` and
+`readBits_value_lt_pow2`. The pattern is: convert UInt operations to
+Nat via bridge lemmas, apply the Nat bound lemma, close with `omega`.
 
 ## Anti-Patterns
 
