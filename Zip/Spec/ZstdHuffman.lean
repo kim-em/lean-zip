@@ -1,4 +1,5 @@
 import Zip.Native.ZstdHuffman
+import Zip.Spec.Fse
 import ZipForStd.Array
 
 /-!
@@ -855,5 +856,92 @@ theorem parseHuffmanTreeDescriptor_pos_gt (data : ByteArray) (pos : Nat)
     pos' > pos := by
   have := parseHuffmanTreeDescriptor_pos_ge_two data pos table pos' h
   omega
+
+/-! ## decodeHuffmanSymbol properties -/
+
+open Zip.Native in
+/-- When `decodeHuffmanSymbol` succeeds, the bit budget does not increase.
+    This is the key monotonicity property for proving termination of
+    Huffman stream decoding. -/
+theorem decodeHuffmanSymbol_totalBitsRemaining_le
+    (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (sym : UInt8) (br' : BackwardBitReader)
+    (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
+    br'.totalBitsRemaining ≤ br.totalBitsRemaining := by
+  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
+  -- if peekBits == 0
+  split at h; · exact nomatch h
+  -- first readBits (peek): cases on result
+  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
+  | error => simp only [hrd1] at h; exact nomatch h
+  | ok v1 =>
+    obtain ⟨bits1, br1⟩ := v1
+    rw [hrd1] at h
+    simp only [pure, Pure.pure, Except.pure] at h
+    -- if numBits > avail
+    split at h; · exact nomatch h
+    -- second readBits
+    split at h; · exact nomatch h
+    -- ok case: extract reader equation
+    rename_i v2 hrd2
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    have := Zstd.Spec.Fse.readBits_totalBitsRemaining_sub br _ _ _ hrd2
+    omega
+
+open Zip.Native in
+/-- The number of bits consumed is at most `maxBits`, given the table is
+    well-formed (all entries have `numBits ≤ maxBits`). This bounds per-symbol
+    cost and is needed for proving that stream decoding terminates within
+    the available bit budget. -/
+theorem decodeHuffmanSymbol_bits_le_maxBits
+    (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (sym : UInt8) (br' : BackwardBitReader)
+    (hvalid : ValidHuffmanTable htable.table htable.maxBits)
+    (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
+    br.totalBitsRemaining - br'.totalBitsRemaining ≤ htable.maxBits := by
+  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
+  split at h; · exact nomatch h
+  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
+  | error => simp only [hrd1] at h; exact nomatch h
+  | ok v1 =>
+    obtain ⟨bits1, br1⟩ := v1
+    rw [hrd1] at h
+    simp only [pure, Pure.pure, Except.pure] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    rename_i v2 hrd2
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    have hsub := Zstd.Spec.Fse.readBits_totalBitsRemaining_sub br _ _ _ hrd2
+    rw [hsub]
+    -- Need: numBits ≤ maxBits from ValidHuffmanTable
+    have h_nb_le : htable.table[bits1.toNat <<< (htable.maxBits - min htable.maxBits br.totalBitsRemaining)]!.numBits.toNat ≤ htable.maxBits := by
+      let idx := bits1.toNat <<< (htable.maxBits - min htable.maxBits br.totalBitsRemaining)
+      show htable.table[idx]!.numBits.toNat ≤ htable.maxBits
+      simp only [getElem!_def]
+      split
+      · rename_i e he
+        obtain ⟨hi, heq⟩ := Array.getElem?_eq_some_iff.mp he
+        rw [← heq]
+        exact hvalid.2.1 ⟨idx, hi⟩
+      · have : (default : HuffmanEntry).numBits.toNat = 0 := by decide
+        omega
+    omega
+
+open Zip.Native in
+/-- If decoding succeeds, the input reader had bits remaining. This is the
+    contrapositive of the `peekBits == 0` error check. -/
+theorem decodeHuffmanSymbol_totalBitsRemaining_pos
+    (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (sym : UInt8) (br' : BackwardBitReader)
+    (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
+    br.totalBitsRemaining > 0 := by
+  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
+  split at h
+  · exact nomatch h
+  · rename_i hpb
+    simp only [beq_iff_eq] at hpb
+    omega
 
 end Zstd.Spec.Huffman

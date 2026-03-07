@@ -57,6 +57,24 @@ After splitting the outer condition with `split at h`, the `pure` branch leaves 
 stuck `match`. Use `simp only [pure, Except.pure] at h` to reduce it, then continue
 with the next `cases`/`split`.
 
+## `pure PUnit.unit` Artifacts from Destructuring Bind
+
+`let (a, b) ← expr` in Except do-notation desugars to TWO nested matches:
+1. `match expr with | .error e => .error e | .ok v => ...` (the bind)
+2. `match pure PUnit.unit with | .error e => .error e | .ok _ => ...` (artifact)
+
+The second match is a no-op but `dsimp only []` cannot reduce it because
+`pure` is not unfolded. After handling the first match with `cases`/`split`,
+use:
+
+```lean
+simp only [pure, Pure.pure, Except.pure] at h
+```
+
+This unfolds `pure PUnit.unit` to `Except.ok PUnit.unit` and performs iota
+reduction, collapsing the trivial match. Without this step, subsequent
+`split at h` targets the wrong match expression.
+
 ## Non-Recursive Functions with Multiple Guards
 
 For non-recursive `do` functions with multiple `if ... then throw` guards
