@@ -200,7 +200,9 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
       have hwf₁ := readBit_wf br bit br₁ hwf hrd
       -- bit is 0 or 1
       have hbit01 : bit = 0 ∨ bit = 1 := by
-        cases b <;> simp_all
+        cases b <;> dsimp at hbit_val
+        · exact Or.inl hbit_val
+        · exact Or.inr hbit_val
       -- New accumulator bounds
       have hshift : shift < 32 := by omega
       have hacc' := Deflate.Correctness.acc_or_shift_bound acc bit shift hacc hbit01 hshift
@@ -216,7 +218,9 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
           Option.bind_eq_bind, Option.bind_some]
       · -- val.toNat = acc.toNat + ((if b then 1 else 0) + specVal' * 2) * 2^shift
         rw [hval', Deflate.Correctness.acc_or_shift_toNat acc bit shift hacc hbit01 hshift, Nat.pow_succ]
-        cases b <;> simp_all [Nat.add_mul, Nat.mul_assoc, Nat.mul_comm] <;> omega
+        cases b <;> dsimp at hbit_val ⊢ <;> subst hbit_val <;>
+          simp only [UInt32.toNat_zero, UInt32.toNat_one, Nat.zero_mul, Nat.one_mul,
+            Nat.zero_add, Nat.add_mul, Nat.mul_assoc, Nat.mul_comm] <;> omega
 
 /-! ### readBits correspondence -/
 
@@ -381,13 +385,15 @@ theorem toBits_readBitsLSB_byte (br : Zip.Native.BitReader)
 theorem alignToByte_wf (br : Zip.Native.BitReader) :
     br.alignToByte.bitOff = 0 := by
   simp only [Zip.Native.BitReader.alignToByte]
-  split <;> simp_all
+  split
+  · next h => exact eq_of_beq h
+  · rfl
 
 /-- `alignToByte` preserves the data field. -/
 theorem alignToByte_data (br : Zip.Native.BitReader) :
     br.alignToByte.data = br.data := by
   simp only [Zip.Native.BitReader.alignToByte]
-  split <;> simp_all
+  split <;> rfl
 
 /-! ### readUInt16LE correspondence -/
 
