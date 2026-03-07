@@ -182,6 +182,26 @@ patterns, use `split at h; next => exact nomatch h` (one line). Do NOT use
 `split at h <;> try exact nomatch h` — `nomatch` emits elaboration-level
 "Missing cases" errors that `try` does not catch.
 
+## `repeat split at h` Only Processes the First Goal
+
+`repeat tac` in Lean 4 only retries `tac` on the **first** unsolved goal.
+After `split at h` creates goals A and B, `repeat` retries on A (which may
+have nothing to split), fails, and stops — leaving B unsplit.
+
+For chained if-then-else splitting (e.g., `highBitPos` with 8 branches),
+use the flat pattern:
+```lean
+split at h
+· handle_true_case  -- closes this goal
+split at h           -- now operates on the remaining false case
+· handle_true_case
+...
+handle_last_case     -- no more splits needed
+```
+
+Each `split at h` operates on whatever is the current goal after the `·`
+block closes the previous case. This correctly walks through all branches.
+
 **Evaluating `if false = true then X else Y`**: Use `if_neg Bool.false_ne_true`
 since `simp only [ite_false]` requires the condition to already be `False`,
 not `false = true` (a decidable-but-not-reduced Prop).
