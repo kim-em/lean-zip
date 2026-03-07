@@ -144,4 +144,36 @@ theorem decompressZstdWF_output_size_ge (data : ByteArray) (pos : Nat)
             omega
       · exact absurd h nofun  -- invalid magic number
 
+/-- When the input contains exactly one standard Zstd frame starting at position 0,
+    `decompressZstd` returns the decompressed content.  This is the first API-level
+    theorem — it characterizes the public entry point rather than the internal
+    `decompressZstdWF`. -/
+theorem decompressZstd_single_frame (data : ByteArray)
+    (content : ByteArray) (pos' : Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (content, pos'))
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok content := by
+  -- Extract parseFrameHeader success from decompressFrame success
+  have ⟨hdr, afterHdr, hph⟩ : ∃ hdr afterHdr,
+      Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) := by
+    unfold Zip.Native.decompressFrame at hframe
+    cases hc : Zip.Native.parseFrameHeader data 0 with
+    | error e => simp only [hc, bind, Except.bind] at hframe; exact nomatch hframe
+    | ok val => exact ⟨val.1, val.2, rfl⟩
+  -- Derive required conditions
+  have hmagic : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic :=
+    Zstd.Spec.parseFrameHeader_magic data 0 hdr afterHdr hph
+  have hsize : data.size ≥ 0 + 4 := by
+    unfold Zip.Native.parseFrameHeader at hph
+    dsimp only [Bind.bind, Except.bind] at hph
+    by_cases hlt : data.size < 0 + 4
+    · rw [if_pos hlt] at hph; exact nomatch hph
+    · omega
+  have hadv : pos' > 0 :=
+    Zstd.Spec.decompressFrame_pos_gt data 0 content pos' hframe
+  -- Apply single standard frame theorem and simplify ByteArray.empty ++ content
+  unfold Zip.Native.decompressZstd
+  rw [decompressZstdWF_single_standard_frame data 0 ByteArray.empty content pos'
+    hsize hmagic hframe hadv hend, ByteArray.empty_append]
+
 end Zip.Spec.ZstdFrame
