@@ -790,6 +790,87 @@ theorem BackwardBitReader_init_totalBitsRemaining_lt (data : ByteArray)
           have hlt := highBitPos_lt_eight _ _ ‹_›
           omega
 
+/-! ## BackwardBitReader field preservation -/
+
+open Zip.Native (BackwardBitReader) in
+/-- The recursive helper `readBits.go` preserves the `data` field. -/
+private theorem readBits_go_data_eq (br : BackwardBitReader)
+    (k : Nat) (acc val : UInt32) (br' : BackwardBitReader)
+    (h : BackwardBitReader.readBits.go br k acc = .ok (val, br')) :
+    br'.data = br.data := by
+  induction k generalizing br acc with
+  | zero =>
+    simp only [BackwardBitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+    rfl
+  | succ k ih =>
+    simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
+    split at h
+    · exact nomatch h
+    · simp only [pure, Except.pure] at h
+      rw [ih _ _ h]
+      split
+      · split <;> rfl
+      · rfl
+
+open Zip.Native (BackwardBitReader) in
+/-- Reading `n` bits from a backward bitstream preserves the `data` field. -/
+theorem readBits_data_eq (br : BackwardBitReader) (n : Nat)
+    (val : UInt32) (br' : BackwardBitReader)
+    (h : br.readBits n = .ok (val, br')) :
+    br'.data = br.data := by
+  simp only [BackwardBitReader.readBits] at h
+  exact readBits_go_data_eq br n 0 val br' h
+
+open Zip.Native (BackwardBitReader) in
+/-- The recursive helper `readBits.go` preserves the `startPos` field. -/
+private theorem readBits_go_startPos_eq (br : BackwardBitReader)
+    (k : Nat) (acc val : UInt32) (br' : BackwardBitReader)
+    (h : BackwardBitReader.readBits.go br k acc = .ok (val, br')) :
+    br'.startPos = br.startPos := by
+  induction k generalizing br acc with
+  | zero =>
+    simp only [BackwardBitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+    rfl
+  | succ k ih =>
+    simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
+    split at h
+    · exact nomatch h
+    · simp only [pure, Except.pure] at h
+      rw [ih _ _ h]
+      split
+      · split <;> rfl
+      · rfl
+
+open Zip.Native (BackwardBitReader) in
+/-- Reading `n` bits from a backward bitstream preserves the `startPos` field. -/
+theorem readBits_startPos_eq (br : BackwardBitReader) (n : Nat)
+    (val : UInt32) (br' : BackwardBitReader)
+    (h : br.readBits n = .ok (val, br')) :
+    br'.startPos = br.startPos := by
+  simp only [BackwardBitReader.readBits] at h
+  exact readBits_go_startPos_eq br n 0 val br' h
+
+open Zip.Native (BackwardBitReader) in
+/-- Successful `init` sets the `data` field to the input data. -/
+theorem BackwardBitReader_init_data_eq (data : ByteArray)
+    (startPos endPos : Nat) (br : BackwardBitReader)
+    (h : BackwardBitReader.init data startPos endPos = .ok br) :
+    br.data = data := by
+  simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · split at h
+      · exact nomatch h
+      · split at h
+        · split at h
+          · obtain rfl := Except.ok.inj h; rfl
+          · obtain rfl := Except.ok.inj h; rfl
+        · obtain rfl := Except.ok.inj h; rfl
+
 /-! ## forIn always-ok lemmas -/
 
 /-- `List.forIn'.loop` in `Except` always returns `.ok` when the body never throws. -/
