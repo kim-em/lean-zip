@@ -463,7 +463,9 @@ def ZipTest.ZstdNativeIntegration.tests : IO Unit := do
     0x25, 0x00, 0x00,
     -- Literals section header: litType=3 (treeless), sizeFormat=0, regenSize=5
     -- byte0 = (5 << 4) | (0 << 2) | 3 = 0x53
-    0x53, 0x00, 0x00
+    0x53, 0x00, 0x00,
+    -- Padding byte to satisfy blockEnd bounds guard (block claims 4 bytes)
+    0x00
   ]
   match Zip.Native.decompressZstd treelessNoTree with
   | .ok _ => throw (IO.userError "treeless first-block: should have failed")

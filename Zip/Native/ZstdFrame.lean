@@ -219,6 +219,8 @@ def decompressBlocksWF (data : ByteArray) (off : Nat) (windowSize : UInt64)
         pure (output ++ block, afterByte, prevHuffTree, prevFseTables, offsetHistory)
       | .compressed => do
         let blockEnd := afterHdr + hdr.blockSize.toNat
+        if data.size < blockEnd then
+          throw "Zstd: compressed block extends past data"
         let (literals, afterLiterals, huffTree) ←
           (parseLiteralsSection data afterHdr prevHuffTree).mapError (· ++ " [in parseLiteralsSection]")
         let newHuff := if let some ht := huffTree then some ht else prevHuffTree
