@@ -40,6 +40,32 @@ exact getElem?_pos arr i h  -- proves arr[i]? = some arr[i]
 `getElem?_pos` needs the explicit container argument (not `_`) to avoid
 `GetElem?` type class synthesis failures.
 
+## `getElem!_def` + `getElem?_eq_some_iff` for Panic-Indexed Array Proofs
+
+When proving properties about `arr[idx]!` (panic-indexed access), unfold
+with `getElem!_def` and case-split on whether the index is in bounds:
+
+```lean
+simp only [getElem!_def]
+split
+· -- some case: arr[idx]? = some e
+  rename_i e he
+  obtain ⟨hi, heq⟩ := Array.getElem?_eq_some_iff.mp he
+  -- hi : idx < arr.size, heq : arr[idx] = e
+  rw [← heq]
+  exact some_property ⟨idx, hi⟩
+· -- none case: idx ≥ arr.size, result is `default`
+  have : (default : MyType).field = 0 := by decide
+  omega
+```
+
+**Key lemma**: `Array.getElem?_eq_some_iff : xs[i]? = some b ↔ ∃ h, xs[i] = b`
+
+**Common mistake**: Trying `Array.getElem?_eq_some` (doesn't exist),
+`Array.get!_pos`/`Array.get!_neg` (don't exist), or
+`Array.getElem?_pos` (different type — proves `arr[i]? = some arr[i]`,
+not the reverse direction needed here).
+
 ## Fin Coercion Mismatch in omega
 
 When a lemma over `Fin n` is applied as `lemma ⟨k, hk⟩`, omega treats
