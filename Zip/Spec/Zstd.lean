@@ -252,13 +252,13 @@ theorem decompressRawBlock_content (data : ByteArray) (pos : Nat)
       simp only [bind, Except.bind, pure, Except.pure] at h
       split at h
       · exact nomatch h
-      · obtain ⟨rfl, rfl⟩ := h; simp [ByteArray.size_extract] at hi; omega) := by
+      · obtain ⟨rfl, rfl⟩ := h; simp only [ByteArray.size_extract] at hi; omega) := by
   unfold Zip.Native.decompressRawBlock at h
   simp only [bind, Except.bind, pure, Except.pure] at h
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h
-    simp [ByteArray.getElem_extract]
+    simp only [ByteArray.getElem_extract]
 
 /-! ## Frame-level output guarantees -/
 
@@ -552,6 +552,14 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
           obtain ⟨content, afterBlocks⟩ := val2
           have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
           simp only [hdb] at h
+          -- grind handles the remaining monadic case-splitting through:
+          -- (1) checksum conditional (contentChecksum Bool → data size guard + bne guard)
+          -- (2) content size check (Option match on contentSize + bne guard)
+          -- and propagates pos' > pos from hgt1 (afterHeader > pos) and
+          -- hgt2 (afterBlocks > afterHeader) through all branches.
+          -- Targeted alternatives (split at h, simp_all) fail because split can't
+          -- decompose match expressions on structure fields (header.contentChecksum,
+          -- header.contentSize).
           grind
     · -- none
       unfold Zip.Native.decompressBlocks at h
@@ -562,6 +570,14 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
         obtain ⟨content, afterBlocks⟩ := val2
         have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
         simp only [hdb] at h
+        -- grind handles the remaining monadic case-splitting through:
+        -- (1) checksum conditional (contentChecksum Bool → data size guard + bne guard)
+        -- (2) content size check (Option match on contentSize + bne guard)
+        -- and propagates pos' > pos from hgt1 (afterHeader > pos) and
+        -- hgt2 (afterBlocks > afterHeader) through all branches.
+        -- Targeted alternatives (split at h, simp_all) fail because split can't
+        -- decompose match expressions on structure fields (header.contentChecksum,
+        -- header.contentSize).
         grind
 
 end Zstd.Spec
