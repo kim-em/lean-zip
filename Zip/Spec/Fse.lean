@@ -633,6 +633,79 @@ theorem readBits_value_lt_pow2 (br : BackwardBitReader) (n : Nat)
   simp only [BackwardBitReader.readBits] at h
   exact readBits_go_value_bound br n 0 val br' (Nat.le_refl n) (by simp) h
 
+/-! ## BackwardBitReader totalBitsRemaining tracking -/
+
+open Zip.Native (BackwardBitReader) in
+/-- The recursive helper `readBits.go` decreases `totalBitsRemaining` by exactly `k`. -/
+private theorem readBits_go_totalBitsRemaining (br : BackwardBitReader)
+    (k : Nat) (acc val : UInt32) (br' : BackwardBitReader)
+    (h : BackwardBitReader.readBits.go br k acc = .ok (val, br')) :
+    br'.totalBitsRemaining = br.totalBitsRemaining - k := by
+  induction k generalizing br acc with
+  | zero =>
+    simp only [BackwardBitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+    simp
+  | succ k ih =>
+    simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
+    split at h
+    · exact nomatch h
+    · simp only [pure, Except.pure] at h
+      rename_i hbr_ne; simp only [beq_iff_eq] at hbr_ne
+      rw [ih _ _ h]
+      simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq]
+      by_cases h1 : br.bitsRemaining - 1 = 0
+      · by_cases h2 : br.bytePos > br.startPos
+        · simp only [h1, h2, hbr_ne,
+                     show ¬((8 : Nat) = 0) from by omega, ↓reduceIte]; omega
+        · simp only [h1, h2, hbr_ne, ↓reduceIte]; omega
+      · simp only [h1, hbr_ne, ↓reduceIte]; omega
+
+open Zip.Native (BackwardBitReader) in
+/-- When `readBits.go` succeeds, the initial reader had enough bits. -/
+private theorem readBits_go_totalBitsRemaining_ge (br : BackwardBitReader)
+    (k : Nat) (acc val : UInt32) (br' : BackwardBitReader)
+    (h : BackwardBitReader.readBits.go br k acc = .ok (val, br')) :
+    br.totalBitsRemaining ≥ k := by
+  induction k generalizing br acc with
+  | zero => omega
+  | succ k ih =>
+    simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
+    split at h
+    · exact nomatch h
+    · simp only [pure, Except.pure] at h
+      rename_i hbr_ne; simp only [beq_iff_eq] at hbr_ne
+      have hrec := ih _ _ h
+      simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq] at hrec ⊢
+      by_cases h1 : br.bitsRemaining - 1 = 0
+      · by_cases h2 : br.bytePos > br.startPos
+        · simp only [h1, h2, hbr_ne,
+                     show ¬((8 : Nat) = 0) from by omega, ↓reduceIte] at hrec ⊢; omega
+        · simp only [h1, h2, hbr_ne, ↓reduceIte] at hrec ⊢; omega
+      · simp only [h1, hbr_ne, ↓reduceIte] at hrec ⊢; omega
+
+open Zip.Native (BackwardBitReader) in
+/-- Reading `n` bits from a backward bitstream decreases `totalBitsRemaining`
+    by exactly `n`. -/
+theorem readBits_totalBitsRemaining_sub (br : BackwardBitReader)
+    (n : Nat) (val : UInt32) (br' : BackwardBitReader)
+    (h : br.readBits n = .ok (val, br')) :
+    br'.totalBitsRemaining = br.totalBitsRemaining - n := by
+  simp only [BackwardBitReader.readBits] at h
+  exact readBits_go_totalBitsRemaining br n 0 val br' h
+
+open Zip.Native (BackwardBitReader) in
+/-- When reading a positive number of bits succeeds, `totalBitsRemaining`
+    strictly decreases. -/
+theorem readBits_totalBitsRemaining_lt (br : BackwardBitReader)
+    (n : Nat) (val : UInt32) (br' : BackwardBitReader)
+    (hn : n > 0) (h : br.readBits n = .ok (val, br')) :
+    br'.totalBitsRemaining < br.totalBitsRemaining := by
+  simp only [BackwardBitReader.readBits] at h
+  have hsub := readBits_go_totalBitsRemaining br n 0 val br' h
+  have hge := readBits_go_totalBitsRemaining_ge br n 0 val br' h
+  omega
+
 /-! ## forIn always-ok lemmas -/
 
 /-- `List.forIn'.loop` in `Except` always returns `.ok` when the body never throws. -/
