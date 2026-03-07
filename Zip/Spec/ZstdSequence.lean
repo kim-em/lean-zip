@@ -493,6 +493,63 @@ theorem resolveSingleFseTable_fseCompressed_pos_gt (maxSymbols maxAccLog : Nat)
         -- bitOff < 8 from decodeFseDistribution_bitPos_ge, so pos ≥ pos
         omega
 
+/-! ## resolveSingleFseTable unified position monotonicity -/
+
+/-- Across all four compression modes, the returned position is at least the input position.
+    This unifies predefined (=), rle (+1), repeat (=), and fseCompressed (>). -/
+theorem resolveSingleFseTable_pos_ge (mode : SequenceCompressionMode) (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat) (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable) (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable mode maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    pos' ≥ pos := by
+  cases mode with
+  | predefined =>
+    have := resolveSingleFseTable_predefined_pos _ _ _ _ _ _ _ _ _ h
+    omega
+  | rle =>
+    have := resolveSingleFseTable_rle_pos _ _ _ _ _ _ _ _ _ h
+    omega
+  | «repeat» =>
+    have := resolveSingleFseTable_repeat_pos _ _ _ _ _ _ _ _ _ h
+    omega
+  | fseCompressed =>
+    have := resolveSingleFseTable_fseCompressed_pos_gt _ _ _ _ _ _ _ _ _ h
+    omega
+
+/-! ## resolveSequenceFseTables position composition -/
+
+/-- The 3-table resolver doesn't decrease position. Composes three
+    `resolveSingleFseTable_pos_ge` applications via transitivity. -/
+theorem resolveSequenceFseTables_pos_ge (modes : SequenceCompressionModes)
+    (data : ByteArray) (pos : Nat) (prev : PrevFseTables)
+    (llTable ofTable mlTable : FseTable) (pos' : Nat)
+    (h : resolveSequenceFseTables modes data pos prev = .ok (llTable, ofTable, mlTable, pos')) :
+    pos' ≥ pos := by
+  simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure] at h
+  -- Extract the three resolveSingleFseTable calls
+  cases hll : resolveSingleFseTable modes.litLenMode 36 9 data pos
+      predefinedLitLenDistribution 6 prev.litLen with
+  | error e => rw [hll] at h; exact nomatch h
+  | ok val₁ =>
+    rw [hll] at h; dsimp only [Bind.bind, Except.bind] at h
+    cases hof : resolveSingleFseTable modes.offsetMode 32 8 data val₁.2
+        predefinedOffsetDistribution 5 prev.offset with
+    | error e => rw [hof] at h; exact nomatch h
+    | ok val₂ =>
+      rw [hof] at h; dsimp only [Bind.bind, Except.bind] at h
+      cases hml : resolveSingleFseTable modes.matchLenMode 53 9 data val₂.2
+          predefinedMatchLenDistribution 6 prev.matchLen with
+      | error e => rw [hml] at h; exact nomatch h
+      | ok val₃ =>
+        rw [hml] at h; dsimp only [Bind.bind, Except.bind] at h
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨-, -, -, rfl⟩ := h
+        have h₁ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hll
+        have h₂ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hof
+        have h₃ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hml
+        omega
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
