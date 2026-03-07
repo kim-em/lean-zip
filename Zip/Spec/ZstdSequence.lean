@@ -391,6 +391,63 @@ theorem parseSequencesHeader_byte0_zero (data : ByteArray) (pos : Nat)
   simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte, hbyte,
     beq_self_eq_true]
 
+/-- When 0 < byte0 < 128, the number of sequences is exactly byte0.
+    This is the 1-byte encoding (RFC 8878 §3.1.1.3.2.1) used for up to
+    127 sequences, covering the vast majority of real-world Zstd frames. -/
+theorem parseSequencesHeader_numSeq_small (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos'))
+    (hbyte0_pos : data[pos]!.toNat > 0)
+    (hbyte0_lt : data[pos]!.toNat < 128) :
+    numSeq = data[pos]!.toNat := by
+  unfold parseSequencesHeader at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  -- Size check
+  by_cases hsz : data.size < pos + 1
+  · simp only [hsz, ↓reduceIte] at h; exact nomatch h
+  · simp only [hsz, ↓reduceIte] at h
+    -- byte0 == 0 check
+    have hbeq : ¬((data[pos]!.toNat == 0) = true) := by
+      intro heq; exact absurd (eq_of_beq heq) (by omega)
+    rw [if_neg hbeq] at h
+    -- byte0 < 128 check
+    rw [if_pos hbyte0_lt] at h
+    -- Inner size check
+    by_cases hsz2 : data.size < pos + 2
+    · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
+    · simp only [hsz2, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
+      exact h.1.symm
+
+/-- For the 1-byte encoding (byte0 < 128), numSeq = 0 iff byte0 = 0.
+    Completes the characterization of zero vs positive sequence counts
+    when byte0 < 128. The 2-byte case (byte0 ≥ 128) can yield numSeq = 0
+    with byte0 ≠ 0, so this iff requires the byte0 < 128 restriction. -/
+theorem parseSequencesHeader_numSeq_zero_iff (data : ByteArray) (pos : Nat)
+    (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
+    (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos'))
+    (hbyte0_lt : data[pos]!.toNat < 128) :
+    numSeq = 0 ↔ data[pos]!.toNat = 0 := by
+  constructor
+  · -- → : numSeq = 0 → byte0 = 0
+    intro hzero
+    by_cases hne : data[pos]!.toNat = 0
+    · exact hne
+    · exfalso
+      have hpos : data[pos]!.toNat > 0 := by omega
+      have := parseSequencesHeader_numSeq_small data pos numSeq modes pos' h hpos hbyte0_lt
+      omega
+  · -- ← : byte0 = 0 → numSeq = 0
+    intro hbyte0
+    unfold parseSequencesHeader at h
+    simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    by_cases hsz : data.size < pos + 1
+    · simp only [hsz, ↓reduceIte] at h; exact nomatch h
+    · simp only [hsz, ↓reduceIte] at h
+      have hbeq : (data[pos]!.toNat == 0) = true := beq_iff_eq.mpr hbyte0
+      rw [if_pos hbeq] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      exact h.1.symm
+
 /-! ## buildRleFseTable structural properties -/
 
 /-- The accuracy log of an RLE FSE table is always 0. -/
