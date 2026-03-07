@@ -320,7 +320,7 @@ def decodeFourHuffmanStreams (htable : ZstdHuffmanTable) (data : ByteArray)
 /-- Parse compressed/treeless literals header sizes (RFC 8878 §3.1.1.3.1.1).
     Both litType 2 and 3 use the same header layout for regeneratedSize and compressedSize.
     Returns `(regenSize, compSize, headerBytes, fourStreams)`. -/
-private def parseCompressedLiteralsHeader (data : ByteArray) (pos : Nat) (sizeFormat : Nat) :
+def parseCompressedLiteralsHeader (data : ByteArray) (pos : Nat) (sizeFormat : Nat) :
     Except String (Nat × Nat × Nat × Bool) := do
   if sizeFormat <= 1 then do
     if data.size < pos + 3 then throw "Zstd: truncated compressed literals header"

@@ -486,6 +486,27 @@ theorem weightSum_weight2 : weightSum #[2] = 2 := by decide
     `weightSum = 2 + 1 = 3`, `2^2 = 4`, gap = 1 which is a power of 2. -/
 theorem kraft_mixed : KraftComplete #[2, 1] 2 := by decide
 
+/-! ## parseCompressedLiteralsHeader properties -/
+
+open Zip.Native in
+/-- `parseCompressedLiteralsHeader` always returns `headerBytes ≥ 3`. -/
+private theorem parseCompressedLiteralsHeader_headerBytes_ge (data : ByteArray)
+    (pos sizeFormat regen comp hdr : Nat) (fs : Bool)
+    (h : parseCompressedLiteralsHeader data pos sizeFormat = .ok (regen, comp, hdr, fs)) :
+    hdr ≥ 3 := by
+  simp only [parseCompressedLiteralsHeader, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · split at h
+    · exact nomatch h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+  · split at h
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+    · split at h
+      · exact nomatch h
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+
 /-! ## parseLiteralsSection structural properties (raw/RLE) -/
 
 open Zip.Native in
@@ -575,5 +596,71 @@ theorem parseLiteralsSection_huffTable_none_simple (data : ByteArray) (pos : Nat
     (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
     huffTable = none :=
   (parseLiteralsSection_simple_spec data pos prevHuffTree literals pos' huffTable hlit h).2
+
+open Zip.Native in
+/-- For compressed or treeless literals (types 2-3), the returned position advances. -/
+theorem parseLiteralsSection_pos_gt_compressed (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat ≥ 2)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    pos' > pos := by
+  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · -- data.size ≥ pos + 1
+    split at h
+    · exact nomatch h
+    · -- litType ≤ 3
+      split at h
+      · -- Compressed/treeless path (litType == 2 || litType == 3)
+        -- bind result of parseCompressedLiteralsHeader: error vs ok
+        split at h
+        · exact nomatch h
+        · -- parseCompressedLiteralsHeader succeeded; headerBytes ≥ 3
+          rename_i v heq
+          obtain ⟨regen, comp, hdr, fs⟩ := v
+          have hge := parseCompressedLiteralsHeader_headerBytes_ge data pos _ _ _ _ _ heq
+          -- litType == 3 check
+          split at h
+          · -- treeless (type 3)
+            split at h
+            · -- prevHuffTree = some t
+              split at h
+              · exact nomatch h -- data too small
+              · -- decodeHuffmanLiterals result
+                split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+            · exact nomatch h -- no previous Huffman tree (prevHuffTree = none)
+          · -- compressed (type 2)
+            split at h
+            · exact nomatch h -- data too small
+            · -- parseHuffmanTreeDescriptor result via mapError
+              split at h
+              · exact nomatch h
+              · -- treeSize check
+                split at h
+                · exact nomatch h
+                · -- decodeHuffmanLiterals result via mapError
+                  split at h
+                  · exact nomatch h
+                  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+      · -- Raw/RLE path: contradicts hlit
+        rename_i hle3 hnotcomp
+        simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hnotcomp
+        omega
+
+open Zip.Native in
+/-- For all literal types (0-3), the returned position advances. -/
+theorem parseLiteralsSection_pos_gt (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    pos' > pos := by
+  by_cases hlit : (data[pos]! &&& 3).toNat ≤ 1
+  · exact parseLiteralsSection_pos_gt_simple data pos prevHuffTree literals pos' huffTable hlit h
+  · exact parseLiteralsSection_pos_gt_compressed data pos prevHuffTree literals pos' huffTable
+      (by omega) h
 
 end Zstd.Spec.Huffman
