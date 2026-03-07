@@ -437,6 +437,104 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     · exact nomatch heq
     · split at heq <;> exact nomatch heq
 
+/-- `Array.set!` preserves a Fin-indexed property when the new value satisfies it.
+    After `set!`, each cell is either the new value (at the written index) or
+    unchanged from the original array. -/
+private theorem set!_preserves_forall {P : FseCell → Prop}
+    {cells : Array FseCell} {idx : Nat} {v : FseCell}
+    (hall : ∀ j : Fin cells.size, P cells[j])
+    (hv : P v) :
+    ∀ j : Fin (cells.set! idx v).size, P (cells.set! idx v)[j] := by
+  intro ⟨j, hj⟩
+  simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds] at hj
+  show P (cells.setIfInBounds idx v)[j]
+  by_cases hij : idx = j
+  · subst hij
+    exact (Array.getElem_setIfInBounds_self (h := by simp; exact hj)) ▸ hv
+  · exact (Array.getElem_setIfInBounds_ne hj hij) ▸ hall ⟨j, hj⟩
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds, every cell's `numBits` is at most `al`.
+    This follows from the construction: loops 1-2 set cells with default
+    `numBits = 0`, loop 3 doesn't modify cells, and loop 4 sets
+    `numBits := (al - Nat.log2 nextState).toUInt8` where `al - x ≤ al`. -/
+theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table)
+    (i : Fin table.cells.size) :
+    table.cells[i].numBits.toNat ≤ al := by
+  simp only [buildFseTable] at h
+  obtain ⟨v1, hloop1, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v2, hloop2, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v3, hloop3, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v4, hloop4, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq] at h; subst h
+  show v4.fst[i].numBits.toNat ≤ al
+  -- The predicate P: cell.numBits.toNat ≤ al
+  let P : FseCell → Prop := fun c => c.numBits.toNat ≤ al
+  -- Initial cells: Array.replicate with default has numBits = 0
+  have hinit : ∀ j : Fin (Array.replicate (1 <<< al) (default : FseCell)).size,
+      P (Array.replicate (1 <<< al) (default : FseCell))[j] := by
+    intro ⟨j, hj⟩; show P _; simp; exact Nat.zero_le _
+  -- Loop 1: preserves property (sets cells with { symbol := ... }, default numBits = 0)
+  have h1 : ∀ j : Fin v1.fst.size, P v1.fst[j] := by
+    apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+      _ _ _ _ hinit _ _ hloop1
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+        exact set!_preserves_forall hb (show P _ from Nat.zero_le _)
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> exact nomatch heq
+  -- Loop 2: preserves property (sets cells with { symbol := ... }, default numBits = 0)
+  have h2 : ∀ j : Fin v2.fst.size, P v2.fst[j] := by
+    apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+      _ _ _ _ h1 _ _ hloop2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · split at heq
+        · exact nomatch heq
+        · rename_i r hinner
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+            _ _ _ _ hb _ _ hinner
+          · intro a2 b2 b2' hb2 heq2
+            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
+            exact set!_preserves_forall hb2 (show P _ from Nat.zero_le _)
+          · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · exact nomatch heq
+      · split at heq <;> exact nomatch heq
+  -- Loop 3 modifies only symbolCounts (v3 : Array Nat), not cells.
+  -- Loop 4 starts with v2.fst as its initial cells.
+  -- Loop 4: sets numBits := (al - Nat.log2 nextState).toUInt8
+  -- The key bound: (al - x).toUInt8.toNat ≤ al
+  have numBits_bound : ∀ x : Nat, (al - x).toUInt8.toNat ≤ al := by
+    intro x
+    simp only [Nat.toUInt8_eq, UInt8.toNat_ofNat']
+    exact Nat.le_trans (Nat.mod_le _ _) (Nat.sub_le al x)
+  apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+    _ _ _ _ h2 _ _ hloop4
+  · intro a b b' hb heq
+    simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq
+    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+        exact set!_preserves_forall hb (numBits_bound _)
+  · intro a b b' hb heq
+    simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq
+    · exact nomatch heq
+    · split at heq <;> exact nomatch heq
+
 /-! ## BackwardBitReader base-case specs -/
 
 open Zip.Native (BackwardBitReader) in
