@@ -356,6 +356,147 @@ theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
     result.maxBits ≥ 1 :=
   weightsToMaxBits_ge_one weights result.maxBits (buildZstdHuffmanTable_ok_elim weights result h).1
 
+open Zip.Native in
+/-- `Array.set!` preserves a pointwise property on `HuffmanEntry` arrays:
+    if all entries satisfy `P` and the new value satisfies `P`, then all
+    entries of the updated array satisfy `P`. -/
+private theorem huffman_set!_preserves_forall {P : HuffmanEntry → Prop}
+    {table : Array HuffmanEntry} {idx : Nat} {v : HuffmanEntry}
+    (hall : ∀ j : Fin table.size, P table[j])
+    (hv : P v) :
+    ∀ j : Fin (table.set! idx v).size, P (table.set! idx v)[j] := by
+  intro ⟨j, hj⟩
+  simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds] at hj
+  show P (table.setIfInBounds idx v)[j]
+  by_cases hij : idx = j
+  · subst hij
+    exact (Array.getElem_setIfInBounds_self (h := by simp; exact hj)) ▸ hv
+  · exact (Array.getElem_setIfInBounds_ne hj hij) ▸ hall ⟨j, hj⟩
+
+open Zip.Native in
+/-- The inner fill loop preserves the `numBits ≤ maxBits` invariant.
+    Each step either writes an entry with `numBits = (maxBits + 1 - w).toUInt8`
+    (where `w ≥ 1`, so `numBits.toNat ≤ maxBits`) or leaves the table unchanged. -/
+private theorem fillHuffmanTableInnerWF_numBits_le
+    (table : Array HuffmanEntry) (entry : HuffmanEntry)
+    (code stride tableSize sym lastSymbol j : Nat)
+    (result : Array HuffmanEntry) (maxBits : Nat)
+    (hentry : entry.numBits.toNat ≤ maxBits)
+    (hinv : ∀ i : Fin table.size, table[i].numBits.toNat ≤ maxBits)
+    (h : fillHuffmanTableInnerWF table entry code stride tableSize sym lastSymbol j = .ok result) :
+    ∀ i : Fin result.size, result[i].numBits.toNat ≤ maxBits := by
+  unfold fillHuffmanTableInnerWF at h
+  split at h
+  · -- j ≥ stride: result = table
+    simp only [Except.ok.injEq] at h; subst h; exact hinv
+  · -- j < stride
+    dsimp only [] at h
+    split at h
+    · -- idx < tableSize: recurse with table.set!
+      exact fillHuffmanTableInnerWF_numBits_le _ entry code stride tableSize
+        sym lastSymbol (j + 1) result maxBits hentry
+        (huffman_set!_preserves_forall (P := fun e => e.numBits.toNat ≤ maxBits) hinv hentry) h
+    · split at h
+      · exact nomatch h  -- throw: contradiction
+      · -- skip: recurse with table unchanged
+        exact fillHuffmanTableInnerWF_numBits_le _ entry code stride tableSize
+          sym lastSymbol (j + 1) result maxBits hentry hinv h
+termination_by stride - j
+
+open Zip.Native in
+/-- The outer fill loop preserves the `numBits ≤ maxBits` invariant.
+    For each symbol with weight `w > 0`, the entry has `numBits = (maxBits + 1 - w).toUInt8`.
+    Since `w ≥ 1`, `(maxBits + 1 - w) ≤ maxBits`, so `numBits.toNat ≤ maxBits`. -/
+private theorem fillHuffmanTableWF_numBits_le
+    (table : Array HuffmanEntry) (allWeights : Array UInt8)
+    (nextCode : Array Nat) (maxBits tableSize numSymbols lastSymbol sym : Nat)
+    (resultTable : Array HuffmanEntry) (resultNextCode : Array Nat)
+    (hinv : ∀ i : Fin table.size, table[i].numBits.toNat ≤ maxBits)
+    (h : fillHuffmanTableWF table allWeights nextCode maxBits tableSize
+      numSymbols lastSymbol sym = .ok (resultTable, resultNextCode)) :
+    ∀ i : Fin resultTable.size, resultTable[i].numBits.toNat ≤ maxBits := by
+  unfold fillHuffmanTableWF at h
+  split at h
+  · -- sym ≥ numSymbols: result = table
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h; rw [h.1] at hinv; exact hinv
+  · -- sym < numSymbols
+    dsimp only [] at h
+    split at h
+    · -- w == 0: recurse unchanged
+      exact fillHuffmanTableWF_numBits_le _ allWeights nextCode maxBits tableSize
+        numSymbols lastSymbol (sym + 1) resultTable resultNextCode hinv h
+    · -- w ≠ 0: inner loop then recurse
+      rename_i hw0
+      split at h
+      · -- inner succeeded
+        rename_i _ hinner
+        have hw_pos : allWeights[sym]!.toNat ≥ 1 := by
+          revert hw0; simp only [beq_iff_eq]; omega
+        have hentry : ({ symbol := sym.toUInt8,
+                         numBits := (maxBits + 1 - allWeights[sym]!.toNat).toUInt8 }
+                       : HuffmanEntry).numBits.toNat ≤ maxBits := by
+          simp only [Nat.toUInt8_eq, UInt8.toNat_ofNat']
+          have hmod : (maxBits + 1 - allWeights[sym]!.toNat) % 2 ^ 8 ≤
+                  maxBits + 1 - allWeights[sym]!.toNat := Nat.mod_le _ _
+          omega
+        have hinv' := fillHuffmanTableInnerWF_numBits_le _ _ _ _ _ _ _ _ _
+          maxBits hentry hinv hinner
+        exact fillHuffmanTableWF_numBits_le _ allWeights _ maxBits tableSize
+          numSymbols lastSymbol _ resultTable resultNextCode hinv' h
+      · exact nomatch h  -- inner threw
+termination_by numSymbols - sym
+
+open Zip.Native in
+/-- When `buildZstdHuffmanTable` succeeds, every table entry's `numBits`
+    is at most `maxBits`. This threads the invariant through the initial
+    `Array.replicate` (default `numBits = 0`), the `fillHuffmanTableWF`
+    outer loop, and its `fillHuffmanTableInnerWF` inner loop. -/
+theorem buildZstdHuffmanTable_numBits_le (weights : Array UInt8)
+    (result : ZstdHuffmanTable)
+    (h : Zip.Native.buildZstdHuffmanTable weights = .ok result)
+    (i : Fin result.table.size) :
+    result.table[i].numBits.toNat ≤ result.maxBits := by
+  -- Decompose the buildZstdHuffmanTable call
+  simp only [buildZstdHuffmanTable, bind, Except.bind] at h
+  cases hwm : weightsToMaxBits weights with
+  | error e => simp only [hwm] at h; exact nomatch h
+  | ok m =>
+    rw [hwm] at h; dsimp only [Bind.bind, Except.bind] at h
+    split at h; · exact nomatch h
+    · split at h; · exact nomatch h
+      · dsimp only [pure, Pure.pure, Except.pure] at h
+        split at h; · exact nomatch h
+        · split at h; · exact nomatch h
+          · split at h; · exact nomatch h
+            · split at h; · exact nomatch h
+              · split at h
+                · exact nomatch h
+                · rename_i _ v hfill
+                  obtain ⟨filledTable, filledNextCode⟩ := v
+                  simp only [Except.ok.injEq] at h; subst h
+                  -- Initial table: Array.replicate with default has numBits = 0
+                  have hinit : ∀ j : Fin (Array.replicate (1 <<< m) (default : HuffmanEntry)).size,
+                      (Array.replicate (1 <<< m) (default : HuffmanEntry))[j].numBits.toNat ≤ m := by
+                    intro ⟨j, hj⟩
+                    show (Array.replicate (1 <<< m) (default : HuffmanEntry))[j].numBits.toNat ≤ m
+                    rw [Array.getElem_replicate]; exact Nat.zero_le _
+                  exact (fillHuffmanTableWF_numBits_le _ _ _ m _ _ _ _ _ _ hinit hfill) i
+
+open Zip.Native in
+/-- When `buildZstdHuffmanTable` succeeds, the resulting table satisfies
+    `ValidHuffmanTable`: size equals `1 <<< maxBits`, all `numBits` values
+    are at most `maxBits`, and all symbol indices are at most 255.
+
+    This composes `buildZstdHuffmanTable_tableSize`,
+    `buildZstdHuffmanTable_numBits_le`, and the trivial `UInt8` bound. -/
+theorem buildZstdHuffmanTable_valid (weights : Array UInt8)
+    (result : ZstdHuffmanTable)
+    (h : Zip.Native.buildZstdHuffmanTable weights = .ok result) :
+    ValidHuffmanTable result.table result.maxBits :=
+  ⟨buildZstdHuffmanTable_tableSize weights result h,
+   fun i => buildZstdHuffmanTable_numBits_le weights result h i,
+   fun i => Nat.lt_succ_iff.mp (UInt8.toNat_lt result.table[i].symbol)⟩
+
 /-- When `weightsToMaxBits` succeeds with result `m`, the weight sum
     satisfies `0 < weightSum ≤ 2^m`. The function finds the smallest
     `k` with `2^k ≥ weightSum`, then bumps by 1 if equality holds
