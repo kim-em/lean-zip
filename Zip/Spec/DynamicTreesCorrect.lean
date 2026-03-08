@@ -424,8 +424,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                 have hwf₂ := readBits_wf br₁ 2 rep br₂ hwf₁ hrd
                 have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                   readBits_toBits br₁ 2 rep br₂ hwf₁ (by omega) hrd
-                have hfill_snd := fillEntries_snd codeLengths idx (rep.toNat + 3) totalCodes
-                  codeLengths[idx - 1]! (by omega)
                 have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 3) totalCodes
                   codeLengths[idx - 1]! (by omega) (by omega)
                 have ⟨rest₃, hspec_rec, hrest₃⟩ := hrec (idx + (rep.toNat + 3)) br₂
@@ -465,8 +463,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                 have hwf₂ := readBits_wf br₁ 3 rep br₂ hwf₁ hrd
                 have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                   readBits_toBits br₁ 3 rep br₂ hwf₁ (by omega) hrd
-                have hfill_snd := fillEntries_snd codeLengths idx (rep.toNat + 3) totalCodes
-                  (0 : UInt8) (by omega)
                 have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 3) totalCodes
                   (0 : UInt8) (by omega) (by omega)
                 have ⟨rest₃, hspec_rec, hrest₃⟩ := hrec (idx + (rep.toNat + 3)) br₂
@@ -503,8 +499,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   have hwf₂ := readBits_wf br₁ 7 rep br₂ hwf₁ hrd
                   have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                     readBits_toBits br₁ 7 rep br₂ hwf₁ (by omega) hrd
-                  have hfill_snd := fillEntries_snd codeLengths idx (rep.toNat + 11) totalCodes
-                    (0 : UInt8) (by omega)
                   have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 11) totalCodes
                     (0 : UInt8) (by omega) (by omega)
                   have ⟨rest₃, hspec_rec, hrest₃⟩ := hrec (idx + (rep.toNat + 11)) br₂
