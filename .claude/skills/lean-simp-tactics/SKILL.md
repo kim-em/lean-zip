@@ -819,3 +819,34 @@ simp only [Nat.testBit_zero, heven, Nat.mul_mod_right, Bool.false_and]
 - `decide_true` + `Bool.true_and` for `decide True && x = x`
 - `show (0 : Nat) ≠ 1 from by omega` + `decide_false` + `Bool.false_and`
   for `decide (0 = 1) && x = false`
+
+## `Array.getElem_replicate` — Fin vs Nat Indexing
+
+`simp only [Array.getElem_replicate]` fails when the index is a `Fin`
+(from `intro ⟨j, hj⟩`) because the lemma expects `Nat` indexing.
+
+**Fix**: Use `show` to convert to `Nat` indexing first:
+```lean
+-- BAD: simp only [Array.getElem_replicate]  -- no progress with Fin index
+-- GOOD:
+intro ⟨j, hj⟩
+show (Array.replicate n default)[j].field ≤ bound
+rw [Array.getElem_replicate]  -- now matches Nat index
+```
+
+## Extracting Positivity from `beq` Guard Splits in WF Loops
+
+After `unfold fillWF at h; split at h` on a `if w == 0 then ... else ...`
+guard, the `w ≠ 0` hypothesis may not be directly usable by `omega`
+because it has form `¬(w == 0 = true)` rather than a plain `Nat` inequality.
+
+**Fix**: Use `revert` + `simp only [beq_iff_eq]` + `omega`:
+```lean
+rename_i hw0  -- the ¬(w == 0 = true) hypothesis
+have hw_pos : w ≥ 1 := by revert hw0; simp only [beq_iff_eq]; omega
+```
+
+**Why not `simp only [beq_iff_eq] at hw0; omega`**: After `dsimp only []`
+normalization, the hypothesis may no longer contain `beq` in a form that
+`simp only [beq_iff_eq]` can match. `revert` puts it back in the goal
+where simp has a cleaner target.
