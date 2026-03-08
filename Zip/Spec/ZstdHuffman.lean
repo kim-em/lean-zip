@@ -1071,6 +1071,67 @@ theorem parseHuffmanTreeDescriptor_le_size (data : ByteArray) (pos : Nat)
             exact parseHuffmanWeightsFse_le_size data pos
               data[pos]!.toNat v.fst v.snd hfse
 
+open Zip.Native in
+/-- Extract the `buildZstdHuffmanTable` success from either branch of
+    `parseHuffmanTreeDescriptor`. Both the direct and FSE paths call
+    `buildZstdHuffmanTable weights` and return the result, so we can
+    extract `∃ weights, buildZstdHuffmanTable weights = .ok table`. -/
+private theorem parseHuffmanTreeDescriptor_build_elim (data : ByteArray) (pos : Nat)
+    (table : ZstdHuffmanTable) (pos' : Nat)
+    (h : parseHuffmanTreeDescriptor data pos = .ok (table, pos')) :
+    ∃ weights : Array UInt8, buildZstdHuffmanTable weights = .ok table := by
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind] at h
+  by_cases h1 : data.size < pos + 1
+  · simp [h1] at h
+  · rw [if_neg h1] at h; simp only [pure, Pure.pure, Except.pure] at h
+    by_cases h2 : data[pos]!.toNat ≥ 128
+    · rw [if_pos h2] at h
+      cases hwd : parseHuffmanWeightsDirect data (pos + 1) (data[pos]!.toNat - 127) with
+      | error e => simp only [hwd] at h; exact nomatch h
+      | ok v =>
+        rw [hwd] at h; dsimp only [Bind.bind, Except.bind] at h
+        cases hbt : buildZstdHuffmanTable v.fst with
+        | error e => simp only [hbt] at h; exact nomatch h
+        | ok t =>
+          rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
+          obtain ⟨rfl, -⟩ := h
+          exact ⟨v.fst, hbt⟩
+    · rw [if_neg (show ¬data[pos]!.toNat ≥ 128 from h2)] at h
+      by_cases h3 : (data[pos]!.toNat == 0) = true
+      · simp [h3] at h
+      · rw [if_neg h3] at h
+        cases hfse : parseHuffmanWeightsFse data pos data[pos]!.toNat with
+        | error e => simp only [hfse] at h; exact nomatch h
+        | ok v =>
+          rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
+          cases hbt : buildZstdHuffmanTable v.fst with
+          | error e => simp only [hbt] at h; exact nomatch h
+          | ok t =>
+            rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
+            obtain ⟨rfl, -⟩ := h
+            exact ⟨v.fst, hbt⟩
+
+open Zip.Native in
+/-- When `parseHuffmanTreeDescriptor` succeeds, the returned table satisfies
+    `ValidHuffmanTable`. Both the direct and FSE paths call `buildZstdHuffmanTable`,
+    which guarantees validity. -/
+theorem parseHuffmanTreeDescriptor_valid (data : ByteArray) (pos : Nat)
+    (table : ZstdHuffmanTable) (pos' : Nat)
+    (h : parseHuffmanTreeDescriptor data pos = .ok (table, pos')) :
+    ValidHuffmanTable table.table table.maxBits := by
+  obtain ⟨weights, hbt⟩ := parseHuffmanTreeDescriptor_build_elim data pos table pos' h
+  exact buildZstdHuffmanTable_valid weights table hbt
+
+open Zip.Native in
+/-- When `parseHuffmanTreeDescriptor` succeeds, the table has `maxBits ≥ 1`.
+    This follows from `buildZstdHuffmanTable_maxBits_pos`. -/
+theorem parseHuffmanTreeDescriptor_maxBits_pos (data : ByteArray) (pos : Nat)
+    (table : ZstdHuffmanTable) (pos' : Nat)
+    (h : parseHuffmanTreeDescriptor data pos = .ok (table, pos')) :
+    0 < table.maxBits := by
+  obtain ⟨weights, hbt⟩ := parseHuffmanTreeDescriptor_build_elim data pos table pos' h
+  exact buildZstdHuffmanTable_maxBits_pos weights table hbt
+
 /-! ## decodeHuffmanSymbol properties -/
 
 open Zip.Native in
