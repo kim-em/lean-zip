@@ -1,6 +1,6 @@
 ---
 name: lean-content-preservation
-description: Use when proving that Lean 4 functions preserve existing bytes (prefix/content preservation), compose getElem_lt proofs through recursive structures, or prove append-only buffer invariants.
+description: Use when proving that Lean 4 functions preserve existing bytes (prefix/content preservation), compose getElem_lt proofs through recursive structures, prove append-only buffer invariants, or characterize what new bytes a function produces (raw extract, RLE all-equal, element-wise correspondence).
 allowed-tools: Read, Bash, Grep
 ---
 
@@ -223,6 +223,132 @@ Close with: `by rw [copyBytes_size]; omega`
   innermost. `(copyMatch_getElem_lt ...).trans (copyBytes_getElem_lt ...)`
   means "copyMatch preserves what copyBytes produced", which requires
   that the copyMatch index bound is for the copyBytes output size.
+
+## Content Characterization Patterns
+
+Content preservation (above) proves existing bytes are unchanged. Content
+characterization proves what the NEW bytes actually ARE. These are
+complementary: preservation says "didn't break old data", characterization
+says "new data is correct".
+
+Distilled from PRs #952 (parseLiteralsSection content) and #955
+(decompressBlocksWF single-block content).
+
+### Pattern 1: Raw Data — Extract Slice
+
+When a function copies a contiguous byte range from input to output,
+characterize the output as `data.extract`:
+
+```lean
+theorem parseLiteralsSection_raw_eq_extract (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 0)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    ∃ afterHeader, afterHeader > pos ∧ afterHeader ≤ pos' ∧
+      literals = data.extract afterHeader pos'
+```
+
+**Key technique**: Use existential quantification over the intermediate
+position (header end), then prove `literals = data.extract ...`.
+The existential avoids committing to a specific header-size formula
+in the theorem statement.
+
+**Proof structure**: Unfold the function, case-split on header format,
+extract the `ByteArray.extract` call from the success path, use
+`ByteArray.extract_eq_extract` or `rfl` when the output is directly
+the extract result.
+
+### Pattern 2: RLE — All-Equal Property
+
+When a function produces repeated copies of one byte, characterize
+via universal quantification over indices:
+
+```lean
+theorem parseLiteralsSection_rle_all_eq (data : ByteArray) (pos : Nat)
+    ...
+    (hlit : (data[pos]! &&& 3).toNat = 1)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable))
+    (i j : Nat) (hi : i < literals.size) (hj : j < literals.size) :
+    literals[i] = literals[j]
+```
+
+**Why this form**: `∀ i j, literals[i] = literals[j]` is more mathematical
+than referencing `Array.replicate`. It's implementation-independent — whether
+the function uses `replicate`, a loop, or any other mechanism, the spec
+captures the same property.
+
+**Proof technique**: Reduce to `ByteArray.getElem_eq_getElem_data` then
+`Array.getElem_replicate`. Both indices resolve to the same replicated
+value.
+
+### Pattern 3: Raw Block — Element-Wise Input Mapping
+
+When a function copies input bytes verbatim to output, characterize the
+per-element correspondence:
+
+```lean
+theorem decompressRawBlock_content (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : decompressRawBlock data pos blockSize = .ok (result, pos'))
+    (i : Nat) (hi : i < result.size) :
+    result[i] = data[pos + i]'(...)
+```
+
+**Key technique**: The bound proof for `data[pos + i]` derives from
+the size theorem (`result.size = blockSize.toNat`) and the position
+theorem (`pos' = pos + blockSize.toNat`), combined with the guard
+negation (parser checked `pos + blockSize ≤ data.size`).
+
+**Proof building block**: `ByteArray.getElem_extract` — reduces
+`(data.extract a b)[i]` to `data[a + i]`.
+
+### Pattern 4: RLE Block — Constant Byte Value
+
+When a function repeats a single byte, characterize each element:
+
+```lean
+theorem decompressRLEBlock_content (data : ByteArray) (pos : Nat)
+    (blockSize : UInt32) (result : ByteArray) (pos' : Nat)
+    (h : decompressRLEBlock data pos blockSize = .ok (result, pos'))
+    (i : Nat) (hi : i < result.size) :
+    result[i] = data[pos]!
+```
+
+**Proof building block**: `Array.getElem_replicate` — reduces
+`(Array.replicate n v)[i]` to `v`.
+
+### Composing Content Through Multi-Block Operations
+
+Single-block content theorems compose into multi-block theorems via
+case analysis on block type:
+
+```lean
+theorem decompressBlocksWF_single_raw_content ...
+    (htype : blockType = .raw) ...
+    (i : Nat) (hi : i < result.size) :
+    result[i] = data[dataOffset + i]'(...) := by
+  -- 1. Prove it's a single block (isLastBlock = true)
+  -- 2. Reduce to: result = output ++ rawBlockContent
+  -- 3. For i < output.size: use preservation (getElem!_ba_append_left)
+  -- 4. For i ≥ output.size: use decompressRawBlock_content
+```
+
+**Pattern**: Case-split on whether `i` falls in the preserved prefix
+(use `_getElem_lt` / `getElem!_ba_append_left`) or the new content
+(use the block-specific content theorem). The size theorem determines
+the boundary.
+
+### Hierarchy: Size → Preservation → Characterization
+
+Always prove in this order for each function:
+1. **`_size`**: How big is the output?
+2. **`_getElem_lt`** (preservation): Are existing bytes unchanged?
+3. **`_content`** or **`_getElem_ge`** (characterization): What are the new bytes?
+
+Each level depends on the previous: characterization proofs need size
+bounds, and often need preservation to handle the recursive/compositional
+case.
 
 ## Cross-References
 

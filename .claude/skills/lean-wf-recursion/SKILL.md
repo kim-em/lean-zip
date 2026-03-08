@@ -482,6 +482,128 @@ extract a helper (e.g., `decodeOneSequence`) to reduce nesting depth.
 The helper can use `do` notation since you don't need to unfold it in
 the main proof — only the loop's structure matters.
 
+## WF Conversion Template: Step-by-Step
+
+This section provides a concrete workflow for converting a fuel-based function
+to well-founded recursion and building its spec theorems. Distilled from 4 WF
+conversions in a single batch (PRs #929, #930, #943, #951).
+
+### Phase 1: Function Conversion
+
+**Step 1: Identify the recursion structure.**
+
+Determine the decreasing measure:
+- Counter-based (`remaining : Nat`): structural recursion via `match`, no
+  `termination_by` needed
+- Position-based (`data.size - pos`): needs `termination_by` + guard
+- Custom measure: needs `termination_by` + `decreasing_by` proof
+
+**Step 2: Remove fuel, add measure.**
+
+```lean
+-- BEFORE (fuel-based):
+def decode (fuel : Nat) (data : ByteArray) (pos : Nat) ... :=
+  match fuel with
+  | 0 => .error "out of fuel"
+  | fuel + 1 => ...
+
+-- AFTER (counter-based, structural):
+def decodeWF (data : ByteArray) (br : BackwardBitReader)
+    (count : Nat) (acc : ByteArray) :=
+  match count with
+  | 0 => .ok (acc, br)
+  | n + 1 => do
+    let (sym, br') ← decodeSymbol br
+    decodeWF data br' n (acc.push sym)
+```
+
+**Step 3: Replace `do`/`guard` with explicit `if`/`match`.**
+
+For proof-friendliness, use explicit `match` instead of `do`-notation when
+the function body has 3+ sequential monadic operations. For 1-2 simple
+binds, `do` notation is fine.
+
+**Step 4: Extract helpers if nesting exceeds ~10 levels.**
+
+When the loop body has 10+ levels of nested `match`/`if` (common in
+decoders that interleave multiple FSE tables), extract the per-iteration
+logic as a `private def` helper:
+
+```lean
+-- Helper: processes ONE iteration (not recursive)
+private def decodeOneStep (tables : Tables) (br : BackwardBitReader)
+    (state : Nat) :
+    Except String (Result × BackwardBitReader × StateUpdate) := do
+  let cell := tables.cells[state]!
+  let (extra, br') ← br.readBits cell.numBits.toNat
+  ...
+
+-- Main loop: structural recursion on counter
+def decodeWF.loop (tables : Tables) (br : BackwardBitReader)
+    (state : Nat) (remaining : Nat) (acc : Array UInt8) :=
+  match remaining with
+  | 0 => .ok (acc, br)
+  | n + 1 =>
+    match decodeOneStep tables br state with
+    | .error e => .error e
+    | .ok (result, br', stateUpdate) =>
+      decodeWF.loop tables br' stateUpdate.newState n (acc.push result)
+```
+
+**Benefit**: The helper can use `do` notation freely since proofs only
+need to unfold the loop structure, not the helper body.
+
+### Phase 2: Size Theorem
+
+The standard size theorem follows this template:
+
+```lean
+theorem decodeWF_size
+    {br br' : BackwardBitReader} {count : Nat} {acc result : ByteArray}
+    (h : decodeWF br count acc = .ok (result, br')) :
+    result.size = acc.size + count := by
+  induction count generalizing br acc with
+  | zero =>
+    simp only [decodeWF, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h; omega
+  | succ n ih =>
+    simp only [decodeWF, bind, Except.bind] at h
+    -- Case-split on the sub-operation
+    cases hsub : subOperation br with
+    | error => simp only [hsub] at h; exact nomatch h
+    | ok v =>
+      obtain ⟨val, br₁⟩ := v
+      rw [hsub] at h; dsimp only [Bind.bind, Except.bind] at h
+      have := ih h
+      simp only [ByteArray.size_push] at this; omega
+```
+
+**Key pattern**: Induction on the counter, with `simp only` to unfold
+one level, `cases` on sub-operations, `nomatch` for error branches,
+and `omega` for arithmetic closure.
+
+### Phase 3: Downstream Proof Repair
+
+After converting a function, all existing proofs that unfold it will break.
+
+1. **Patch everything with `sorry`** first to get a compiling codebase
+2. **Fix proofs one at a time**, starting with the simplest (size theorems)
+3. **Replace `simp only [f]`** with `unfold f` (WF functions loop under `simp`)
+4. **Replace `induction fuel`** with `induction count generalizing ...`
+5. **Delete fuel-independence proofs** — they're no longer needed
+
+### Helper Extraction Decision
+
+| Nesting depth | Recommendation |
+|---------------|---------------|
+| ≤ 5 levels | Inline — the function body is manageable |
+| 6-10 levels | Judgement call — extract if proofs are getting unwieldy |
+| > 10 levels | **Always extract** — 12+ nested splits become intractable |
+
+**Signs you need extraction**: When `split at h` produces goals with 4+ layers
+of unreduced `match`/`if`, or when the same error-branch dismissal pattern
+repeats more than 5 times in a single proof.
+
 ## Cross-References
 
 - **Fuel-based patterns**: `lean-fuel-induction` skill (for functions still using fuel)
@@ -489,3 +611,7 @@ the main proof — only the loop's structure matters.
 - **`↓reduceIte` and Bool/Prop**: `lean-simp-tactics` skill
 - **Monad unfolding after `unfold`**: `lean-monad-proofs` skill
   (use `dsimp only [bind, Except.bind]` after `unfold` on recursive functions)
+- **Size/content theorems for WF helpers**: `lean-zstd-spec-pattern` skill,
+  "Size and Content Theorems for WF Helper Functions"
+- **Content characterization**: `lean-content-preservation` skill,
+  "Content Characterization Patterns"

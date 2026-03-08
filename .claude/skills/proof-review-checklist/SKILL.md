@@ -241,6 +241,22 @@ have hne := beq_eq_false_iff_ne.mpr hx0  -- hx0 : x ≠ 0
 
 This is more explicit and doesn't depend on the simp lemma database.
 
+### When `simp_all?` fails: use `grind`
+
+If `simp_all?` doesn't produce a usable suggestion (e.g., when `simp_all`
+is handling deeply nested case-splitting across multiple hypotheses), try
+`grind` as a replacement. `grind` handles the same class of problems as
+`simp_all` (hypothesis rewriting + case splitting) but through a different
+mechanism. This was discovered in the Fse.lean review (PR #909) where
+`simp_all only [...]` blocked on hypothesis rewriting side effects but
+`grind` closed the goal directly.
+
+**Decision tree for `simp_all` resistance**:
+1. Try `simp_all?` → use suggestion if it works
+2. Try `grind` → use if it closes the goal
+3. Try decomposition: `simp only [...] at *; omega` or per-hypothesis targeting
+4. Accept `simp_all only [...]` with best-effort lemma list
+
 ### Campaign status
 
 Both bare `simp` and bare `simp_all` campaigns are complete across the
