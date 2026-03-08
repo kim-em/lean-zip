@@ -896,6 +896,119 @@ theorem parseLiteralsSection_le_size (data : ByteArray) (pos : Nat)
   · exact parseLiteralsSection_le_size_compressed data pos prevHuffTree literals pos' huffTable
       (by omega) h
 
+/-! ## parseLiteralsSection content properties -/
+
+open Zip.Native in
+/-- For raw literals (type 0), the output is an exact contiguous slice of the input data:
+    the bytes between the end of the variable-width header and `pos'`. -/
+theorem parseLiteralsSection_raw_eq_extract (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 0)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable)) :
+    ∃ afterHeader, afterHeader > pos ∧ afterHeader ≤ pos' ∧
+      literals = data.extract afterHeader pos' := by
+  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · split at h
+      · rename_i _ hcomp
+        simp only [beq_iff_eq, Bool.or_eq_true] at hcomp
+        have : (data[pos]! &&& 3).toNat = 2 ∨ (data[pos]! &&& 3).toNat = 3 := hcomp
+        omega
+      · split at h
+        · split at h
+          · split at h
+            · exact nomatch h
+            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, rfl, _⟩ := h
+              exact ⟨pos + 1, by omega, by omega, rfl⟩
+          · rename_i hne
+            simp only [beq_iff_eq] at hne
+            omega
+        · split at h
+          · split at h
+            · exact nomatch h
+            · split at h
+              · split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl, _⟩ := h
+                  exact ⟨pos + 2, by omega, by omega, rfl⟩
+              · rename_i hne
+                simp only [beq_iff_eq] at hne
+                omega
+          · split at h
+            · exact nomatch h
+            · split at h
+              · split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl, _⟩ := h
+                  exact ⟨pos + 3, by omega, by omega, rfl⟩
+              · rename_i hne
+                simp only [beq_iff_eq] at hne
+                omega
+
+open Zip.Native in
+/-- For RLE literals (type 1), all output bytes are identical: the mathematical
+    essence of run-length encoding. -/
+theorem parseLiteralsSection_rle_all_eq (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (literals : ByteArray) (pos' : Nat) (huffTable : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 1)
+    (h : parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable))
+    (i j : Nat) (hi : i < literals.size) (hj : j < literals.size) :
+    literals[i] = literals[j] := by
+  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · split at h
+    · exact nomatch h
+    · split at h
+      · rename_i _ hcomp
+        simp only [beq_iff_eq, Bool.or_eq_true] at hcomp
+        have : (data[pos]! &&& 3).toNat = 2 ∨ (data[pos]! &&& 3).toNat = 3 := hcomp
+        omega
+      · split at h
+        · split at h
+          · rename_i hne
+            simp only [beq_iff_eq] at hne
+            omega
+          · split at h
+            · exact nomatch h
+            · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, _, _⟩ := h
+              rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate,
+                  ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
+        · split at h
+          · split at h
+            · exact nomatch h
+            · split at h
+              · rename_i hne
+                simp only [beq_iff_eq] at hne
+                omega
+              · split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, _, _⟩ := h
+                  rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate,
+                      ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
+          · split at h
+            · exact nomatch h
+            · split at h
+              · rename_i hne
+                simp only [beq_iff_eq] at hne
+                omega
+              · split at h
+                · exact nomatch h
+                · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, _, _⟩ := h
+                  rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate,
+                      ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
+
 /-! ## parseHuffmanTreeDescriptor position properties -/
 
 open Zip.Native in
