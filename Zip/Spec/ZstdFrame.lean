@@ -364,4 +364,98 @@ theorem decompressZstd_skip_then_standard (data : ByteArray)
     (by omega) hmagic_lo hmagic_hi hskip hskipAdv hsize2 hmagic2 hframe hframeAdv hdone,
     ByteArray.empty_append]
 
+/-! ## API-level content characterization -/
+
+/-- When the input contains exactly one standard Zstd frame at position 0 with two
+    consecutive raw blocks (first non-last, second last), `decompressZstd` returns
+    `block1 ++ block2`.  Composes `decompressFrame_two_raw_blocks_content` (which
+    derives `output = block1 ++ block2`) with `decompressZstd_single_frame`. -/
+theorem decompressZstd_two_raw_blocks_content (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    -- Block 1 (non-last raw)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterBlock1 : Nat)
+    -- Block 2 (last raw)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterBlock2 : Nat)
+    -- Frame hypotheses
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    -- Block 1 hypotheses
+    (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (header.windowSize > 0 && hdr1.blockSize.toUInt64 > header.windowSize))
+    (htype1 : hdr1.blockType = .raw)
+    (hraw1 : Zip.Native.decompressRawBlock data afterHdr1 hdr1.blockSize
+               = .ok (block1, afterBlock1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterBlock1 ≤ afterHeader)
+    -- Block 2 hypotheses
+    (hoff2 : ¬ data.size ≤ afterBlock1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterBlock1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (header.windowSize > 0 && hdr2.blockSize.toUInt64 > header.windowSize))
+    (htype2 : hdr2.blockType = .raw)
+    (hraw2 : Zip.Native.decompressRawBlock data afterHdr2 hdr2.blockSize
+               = .ok (block2, afterBlock2))
+    (hlast2 : hdr2.lastBlock = true)
+    -- End of data
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok (block1 ++ block2) := by
+  have hcontent := Zstd.Spec.decompressFrame_two_raw_blocks_content data 0 output pos'
+    header afterHeader hdr1 afterHdr1 block1 afterBlock1
+    hdr2 afterHdr2 block2 afterBlock2
+    hframe hh hdict hparse1 hbs1 hws1 htype1 hraw1 hnotlast1 hadv1
+    hoff2 hparse2 hbs2 hws2 htype2 hraw2 hlast2
+  subst hcontent
+  exact decompressZstd_single_frame data (block1 ++ block2) pos' hframe hend
+
+/-- When the input contains exactly one standard Zstd frame at position 0 with two
+    consecutive RLE blocks (first non-last, second last), `decompressZstd` returns
+    `block1 ++ block2`.  Composes `decompressFrame_two_rle_blocks_content` (which
+    derives `output = block1 ++ block2`) with `decompressZstd_single_frame`. -/
+theorem decompressZstd_two_rle_blocks_content (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    -- Block 1 (non-last RLE)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterByte1 : Nat)
+    -- Block 2 (last RLE)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterByte2 : Nat)
+    -- Frame hypotheses
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    -- Block 1 hypotheses
+    (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (header.windowSize > 0 && hdr1.blockSize.toUInt64 > header.windowSize))
+    (htype1 : hdr1.blockType = .rle)
+    (hrle1 : Zip.Native.decompressRLEBlock data afterHdr1 hdr1.blockSize
+               = .ok (block1, afterByte1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterByte1 ≤ afterHeader)
+    -- Block 2 hypotheses
+    (hoff2 : ¬ data.size ≤ afterByte1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterByte1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (header.windowSize > 0 && hdr2.blockSize.toUInt64 > header.windowSize))
+    (htype2 : hdr2.blockType = .rle)
+    (hrle2 : Zip.Native.decompressRLEBlock data afterHdr2 hdr2.blockSize
+               = .ok (block2, afterByte2))
+    (hlast2 : hdr2.lastBlock = true)
+    -- End of data
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok (block1 ++ block2) := by
+  have hcontent := Zstd.Spec.decompressFrame_two_rle_blocks_content data 0 output pos'
+    header afterHeader hdr1 afterHdr1 block1 afterByte1
+    hdr2 afterHdr2 block2 afterByte2
+    hframe hh hdict hparse1 hbs1 hws1 htype1 hrle1 hnotlast1 hadv1
+    hoff2 hparse2 hbs2 hws2 htype2 hrle2 hlast2
+  subst hcontent
+  exact decompressZstd_single_frame data (block1 ++ block2) pos' hframe hend
+
 end Zip.Spec.ZstdFrame
