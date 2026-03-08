@@ -1409,4 +1409,35 @@ theorem decodeHuffmanStreamWF_totalBitsRemaining_le
       have h_rec := ih h
       omega
 
+open Zip.Native in
+/-- When `decodeFourHuffmanStreamsWF` succeeds, the output has exactly `regenSize`
+    bytes.  The precondition `3 * ((regenSize + 3) / 4) ≤ regenSize` is needed
+    because `perStream = (regenSize + 3) / 4` and the first three streams each
+    decode `perStream` symbols; without this bound the Nat subtraction
+    `regenSize - 3 * perStream` underflows, producing more than `regenSize`
+    bytes.  The condition holds for all `regenSize ∉ {1, 2, 5}`, and in
+    practice Zstd 4-stream mode requires `regenSize ≥ 256`. -/
+theorem decodeFourHuffmanStreamsWF_size
+    {htable : ZstdHuffmanTable} {data : ByteArray}
+    {streamStart streamDataSize regenSize : Nat} {result : ByteArray}
+    (h : decodeFourHuffmanStreamsWF htable data streamStart streamDataSize
+           regenSize = .ok result)
+    (hsize : 3 * ((regenSize + 3) / 4) ≤ regenSize) :
+    result.size = regenSize := by
+  simp only [decodeFourHuffmanStreamsWF, Bind.bind, Except.bind,
+    Pure.pure, Except.pure] at h
+  -- Eliminate 3 guard branches and 8 bind error branches
+  iterate 11 (all_goals (try (first | contradiction | (split at h))))
+  all_goals first
+    | contradiction
+    | (rename_i _ _ _ _ _ _ _ r1 hd1 _ _ _ _ r2 hd2 _ _ _ _ r3 hd3 _ _ _ _ r4 hd4
+       simp only [Except.ok.injEq] at h; subst h
+       simp only [ByteArray.size_append]
+       have h1 := decodeHuffmanStreamWF_size hd1
+       have h2 := decodeHuffmanStreamWF_size hd2
+       have h3 := decodeHuffmanStreamWF_size hd3
+       have h4 := decodeHuffmanStreamWF_size hd4
+       simp only [ByteArray.size_empty] at h1 h2 h3 h4
+       omega)
+
 end Zstd.Spec.Huffman
