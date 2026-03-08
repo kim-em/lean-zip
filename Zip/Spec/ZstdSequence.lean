@@ -600,6 +600,21 @@ theorem resolveSingleFseTable_predefined_pos (maxSymbols maxAccLog : Nat)
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h
     exact h.2.symm
 
+/-- In predefined mode, the returned position is at most `data.size`.
+    Since predefined mode doesn't advance the position (`pos' = pos`),
+    this follows directly from the input bound. -/
+theorem resolveSingleFseTable_predefined_le_size (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .predefined maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos'))
+    (hpos : pos ≤ data.size) :
+    pos' ≤ data.size := by
+  have := resolveSingleFseTable_predefined_pos _ _ _ _ _ _ _ _ _ h
+  omega
+
 /-- In RLE mode, the position advances by exactly 1. The RLE branch reads one byte
     at `pos` for the symbol and returns `(buildRleFseTable symbol, pos + 1)`. -/
 theorem resolveSingleFseTable_rle_pos (maxSymbols maxAccLog : Nat)
@@ -616,6 +631,25 @@ theorem resolveSingleFseTable_rle_pos (maxSymbols maxAccLog : Nat)
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h
     exact h.2.symm
 
+/-- In RLE mode, the returned position is at most `data.size`.
+    Success implies `data.size ≥ pos + 1` (from the guard), and
+    `pos' = pos + 1`, so `pos' ≤ data.size`. -/
+theorem resolveSingleFseTable_rle_le_size (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .rle maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    pos' ≤ data.size := by
+  have hpos_eq := resolveSingleFseTable_rle_pos _ _ _ _ _ _ _ _ _ h
+  -- Extract the guard: success means ¬(data.size < pos + 1)
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · rename_i hguard
+    omega
+
 /-- In repeat mode, the position is unchanged. The repeat branch returns
     `(prevTable.get!, pos)` without consuming any data. -/
 theorem resolveSingleFseTable_repeat_pos (maxSymbols maxAccLog : Nat)
@@ -631,6 +665,21 @@ theorem resolveSingleFseTable_repeat_pos (maxSymbols maxAccLog : Nat)
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h
     exact h.2.symm
   · exact nomatch h
+
+/-- In repeat mode, the returned position is at most `data.size`.
+    Since repeat mode doesn't advance the position (`pos' = pos`),
+    this follows directly from the input bound. -/
+theorem resolveSingleFseTable_repeat_le_size (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .repeat maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos'))
+    (hpos : pos ≤ data.size) :
+    pos' ≤ data.size := by
+  have := resolveSingleFseTable_repeat_pos _ _ _ _ _ _ _ _ _ h
+  omega
 
 /-- In fseCompressed mode, the returned position is strictly greater than the input.
     The branch creates a BitReader at `(pos, bitOff=0)`, calls `decodeFseDistribution`
