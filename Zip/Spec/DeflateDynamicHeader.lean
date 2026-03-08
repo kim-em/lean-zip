@@ -141,8 +141,7 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
     bw.toBits ++ bits := by
   induction entries generalizing bw bits with
   | nil =>
-    -- bare simp: Option.bind chain in encodeCLEntries
-    simp [Deflate.Spec.encodeCLEntries] at henc
+    simp only [Deflate.Spec.encodeCLEntries, Option.some.injEq, List.nil_eq] at henc
     simp only [writeDynamicHeader.writeCLEntries, henc, List.append_nil]
   | cons entry rest ih =>
     obtain ⟨code, extra⟩ := entry
@@ -152,19 +151,20 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
           fun p => (p.2, p.1))
         code with
     | none =>
-      -- bare simp: Option.bind chain with none
-      simp [hencsym] at henc
+      simp only [hencsym, List.append_assoc, Option.pure_def, Option.bind_eq_bind,
+        Option.bind_none, reduceCtorEq] at henc
     | some cwBits =>
       cases hencrest : Deflate.Spec.encodeCLEntries
           ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
             fun p => (p.2, p.1))
           rest with
       | none =>
-        -- bare simp: Option.bind chain with none
-        simp [hencsym, hencrest] at henc
+        simp only [hencsym, hencrest, List.append_assoc, Option.pure_def,
+          Option.bind_eq_bind, Option.bind_none, Option.bind_fun_none,
+          reduceCtorEq] at henc
       | some restBits =>
-        -- bare simp: Option.bind chain with some
-        simp [hencsym, hencrest] at henc
+        simp only [hencsym, hencrest, List.append_assoc, Option.pure_def,
+          Option.bind_eq_bind, Option.bind_some, Option.some.injEq] at henc
         subst henc
         -- Bridge encodeSymbol ↔ canonicalCodes
         have ⟨hcw, hlen⟩ := encodeSymbol_canonicalCodes_eq clLengths 7
@@ -239,13 +239,13 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
         Deflate.Spec.writeCLLengths clLens numCodeLen ++
         symbolBits := by
     unfold Deflate.Spec.encodeDynamicTrees at henc
-    -- bare simp: Prop↔Bool coercion for guard conditions
-    simp only [show (litLens.length ≥ 257 ∧ litLens.length ≤ 288) = true from by simp [hlitLen],
-               show (distLens.length ≥ 1 ∧ distLens.length ≤ 32) = true from by simp [hdistLen],
+    simp only [show (litLens.length ≥ 257 ∧ litLens.length ≤ 288) = true from by
+                  simp only [ge_iff_le, hlitLen, and_self],
+               show (distLens.length ≥ 1 ∧ distLens.length ≤ 32) = true from by
+                  simp only [ge_iff_le, hdistLen, and_self],
                guard, ↓reduceIte, pure, Pure.pure] at henc
     cases hcle : Deflate.Spec.encodeCLEntries clTable clEntries with
     | none =>
-      -- bare simp: Option.bind chain with none
       rw [hcle] at henc; simp only [List.getD_eq_getElem?_getD, List.append_assoc,
         Option.bind_eq_bind, Option.bind_none, Option.bind_fun_none, reduceCtorEq] at henc
     | some sb =>
