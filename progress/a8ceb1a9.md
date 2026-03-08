@@ -1,8 +1,8 @@
-# Session a8ceb1a9 — decompressBlocksWF raw/RLE step theorems
+# Session a8ceb1a9 — decompressBlocksWF raw/RLE step theorems + PR conflict fix
 
-**Issue**: #954
+**Issues**: #954, #965
 **Branch**: agent/a8ceb1a9
-**Status**: Complete
+**Status**: Complete (original work + merge conflict resolution)
 
 ## What was done
 
@@ -35,6 +35,17 @@ exact heq
 `generalize` makes the RHS opaque, so `unfold` only targets the LHS. After simp
 reduces all guard conditions and monadic binds, the goal becomes `f afterBlock ... = rhs`,
 which `exact heq` closes.
+
+## Merge conflict resolution (issue #965)
+
+PR #962 developed merge conflicts after PR #955 merged `decompressBlocksWF_single_raw`
+and `_single_rle` into the same region of `Zip/Spec/Zstd.lean`. Resolution:
+
+1. Reset branch to current master (which includes #955's single-block theorems)
+2. Cherry-picked the three content commits from the original PR
+3. Resolved conflict by placing step theorems after single-block theorems:
+   - `/-! ## decompressBlocksWF content properties -/` (from #955)
+   - `/-! ## decompressBlocksWF step theorems -/` (from this PR)
 
 ## Quality
 
