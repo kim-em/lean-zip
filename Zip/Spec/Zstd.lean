@@ -636,6 +636,50 @@ theorem decompressBlocksWF_le_size (data : ByteArray) (off : Nat)
         exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
   · exact nomatch h  -- reserved
 
+/-! ## decompressBlocksWF content properties -/
+
+/-- When `decompressBlocksWF` encounters a single raw last block, the result is
+    the accumulated output extended by the raw block content, and the position
+    after the raw data. -/
+theorem decompressBlocksWF_single_raw (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (block : ByteArray) (afterBlock : Nat)
+    (hoff : ¬ data.size ≤ off)
+    (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+    (htype : hdr.blockType = .raw)
+    (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+    (hlast : hdr.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (output ++ block, afterBlock) := by
+  unfold Zip.Native.decompressBlocksWF
+  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
+    ↓reduceIte, htype, hraw, hlast, Bool.false_eq_true]
+
+/-- When `decompressBlocksWF` encounters a single RLE last block, the result is
+    the accumulated output extended by the RLE block content, and the position
+    after the RLE byte. -/
+theorem decompressBlocksWF_single_rle (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (block : ByteArray) (afterByte : Nat)
+    (hoff : ¬ data.size ≤ off)
+    (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+    (htype : hdr.blockType = .rle)
+    (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+    (hlast : hdr.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (output ++ block, afterByte) := by
+  unfold Zip.Native.decompressBlocksWF
+  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
+    ↓reduceIte, htype, hrle, hlast, Bool.false_eq_true]
+
 /-! ## Frame header position advancement -/
 
 /-- When `parseFrameHeader` succeeds, the returned position advances by at
