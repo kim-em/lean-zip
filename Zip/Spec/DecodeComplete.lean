@@ -121,7 +121,9 @@ theorem decodeStored_complete (br : Zip.Native.BitReader)
       · -- guard failed → spec produces none, contradiction
         -- hguard : ¬(... == 65535) = true means the beq is false
         have hbeq_false : (len_val ^^^ nlen_val == 65535) = false := by
-          cases h : (len_val ^^^ nlen_val == 65535) <;> simp_all
+          cases h : (len_val ^^^ nlen_val == 65535)
+          · rfl
+          · exact absurd h hguard
         -- Rewrite the guard condition in hspec to get guard (false = true) = guard False = none
         rw [hbeq_false] at hspec
         simp only [guard, Bool.false_eq_true, ↓reduceIte] at hspec; exact nomatch hspec
@@ -441,7 +443,9 @@ theorem decodeHuffman_complete
     have hbp_bound : ¬(dataSize * 8 < br₁.bitPos) := by
       simp only [Zip.Native.BitReader.bitPos]
       rw [hdata₁] at hple₁
-      rcases hpos₁ with h | h <;> simp_all <;> omega
+      rcases hpos₁ with h | h
+      · rw [h]; omega
+      · rw [hdata₁] at h; omega
     -- Case split on sym_val (the LZ77Symbol from decodeLitLen)
     cases sym_val with
     | literal b =>
@@ -562,7 +566,6 @@ theorem decodeHuffman_complete
           -- readBitsLSB dExtra bits₃ = some (dExtraVal, bits₁): bits₁.length + dExtra = bits₃.length
           have h3 := Deflate.Spec.readBitsLSB_some_length hrd
           omega
-        rw [show bits₁ = bits₁ from rfl] at hds
         simp only [hbits₁_shorter] at hds
         cases hds_rec : Deflate.Spec.decodeSymbols
             (litLengths.toList.map UInt8.toNat) (distLengths.toList.map UInt8.toNat)
