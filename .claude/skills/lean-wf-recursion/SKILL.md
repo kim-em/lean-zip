@@ -55,6 +55,36 @@ See `Zip/Spec/HuffmanKraft.lean:74`.
 Lean generates `f.eq_1`, `f.eq_2`, etc. — one per match arm. Choose the
 equation matching your case.
 
+### Step Theorems: Unfolding Only One Side
+
+When proving `f old_args = f new_args` (step/continuation theorems),
+`unfold f` expands BOTH sides. Solutions:
+
+1. **`rw [f.eq_1]`** — rewrites only the first match. But the equation
+   lemma name varies and may not exist as `.eq_1`.
+
+2. **`rw [show f args = _ from by unfold f; rfl]`** — universally works.
+   This unfolds `f` inside a local proof, then `rfl` closes `body = body`,
+   producing an equation that `rw` applies to the first match only.
+
+After the LHS is unfolded and simplified through guards, the residual
+may have minor elaboration differences (e.g., `match x with` vs
+`match x, h with` where `h` is ignored). Close with:
+
+```lean
+congr 1
+cases x <;> rfl
+```
+
+**Example** (`decompressBlocksWF` step theorem):
+```lean
+  rw [show decompressBlocksWF data off ... = _ from by
+    unfold decompressBlocksWF; rfl]
+  simp only [hoff, ↓reduceDIte, hparse, ..., hnotlast, hadv]
+  congr 1
+  cases huffTree <;> rfl
+```
+
 ### Standalone Case Lemmas
 
 When `rw [f.eq_1]` produces a goal too large to work with (many
