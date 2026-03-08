@@ -409,7 +409,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
   | none => rw [hrb1_spec] at hspec; simp only [] at hspec; exact nomatch hspec
   | some p1 =>
     obtain ⟨hlit_v, bits₁⟩ := p1
-    rw [hrb1_spec] at hspec; simp only [] at hspec
+    simp only [hrb1_spec] at hspec
     have hval1 := Deflate.Spec.readBitsLSB_bound hrb1_spec
     have ⟨br₁, hrb1_nat, hrest₁, hwf₁, hpos₁⟩ :=
       readBits_complete br 5 hlit_v bits₁ hwf hpos (by omega) hval1 hrb1_spec
@@ -418,7 +418,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
     | none => rw [hrb2_spec] at hspec; simp only [] at hspec; exact nomatch hspec
     | some p2 =>
       obtain ⟨hdist_v, bits₂⟩ := p2
-      rw [hrb2_spec] at hspec; simp only [] at hspec
+      simp only [hrb2_spec] at hspec
       have hval2 := Deflate.Spec.readBitsLSB_bound hrb2_spec
       have ⟨br₂, hrb2_nat, hrest₂, hwf₂, hpos₂⟩ :=
         readBits_complete br₁ 5 hdist_v bits₂ hwf₁ hpos₁ (by omega) hval2
@@ -428,7 +428,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
       | none => rw [hrb3_spec] at hspec; simp only [] at hspec; exact nomatch hspec
       | some p3 =>
         obtain ⟨hclen_v, bits₃⟩ := p3
-        rw [hrb3_spec] at hspec; simp only [] at hspec
+        simp only [hrb3_spec] at hspec
         have hval3 := Deflate.Spec.readBitsLSB_bound hrb3_spec
         have ⟨br₃, hrb3_nat, hrest₃, hwf₃, hpos₃⟩ :=
           readBits_complete br₂ 4 hclen_v bits₃ hwf₂ hpos₂ (by omega) hval3
@@ -439,7 +439,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
         | none => rw [hrcl_spec] at hspec; simp only [] at hspec; exact nomatch hspec
         | some p4 =>
           obtain ⟨clLengths, bits₄⟩ := p4
-          rw [hrcl_spec] at hspec; simp only [] at hspec
+          simp only [hrcl_spec] at hspec
           -- Use readCLCodeLengths_complete
           have hsize_repl : (Array.replicate 19 (0 : UInt8)).size = 19 := by simp only [Array.size_replicate]
           have hrcl_rewrite : Deflate.Spec.readCLLengths (hclen_v + 4 - 0) 0
@@ -471,7 +471,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
           | none => rw [hdcl_spec] at hspec; simp only [] at hspec; exact nomatch hspec
           | some p6 =>
             obtain ⟨codeLengths_list, bits₅⟩ := p6
-            rw [hdcl_spec] at hspec; simp only [] at hspec
+            simp only [hdcl_spec] at hspec
             -- Step 8: Extract length, litVL, distVL guards
             have hlen_eq : codeLengths_list.length = hlit_v + 257 + (hdist_v + 1) := by
               by_cases h : codeLengths_list.length = hlit_v + 257 + (hdist_v + 1)
