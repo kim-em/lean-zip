@@ -1584,4 +1584,51 @@ theorem buildFseTable_valid (probs : Array Int32) (al : Nat)
    fun i => buildFseTable_symbol_lt probs al table h hpos i,
    fun i => buildFseTable_numBits_le probs al table h i⟩
 
+/-! ## Predefined FSE table `ValidFseTable` composition
+
+Composes `buildFseTable_valid` with the concrete predefined distributions
+to show each predefined table satisfies `ValidFseTable`. -/
+
+open Zip.Native in
+/-- The predefined literal-length FSE table satisfies `ValidFseTable` with
+    accuracy log 6 and 36 symbols. -/
+theorem buildPredefinedFseTables_litLen_valid (ll ml of : FseTable)
+    (h : buildPredefinedFseTables = .ok (ll, ml, of)) :
+    ValidFseTable ll.cells 6 36 := by
+  simp only [buildPredefinedFseTables] at h
+  obtain ⟨ll', hll, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, _, _⟩ := h
+  exact buildFseTable_valid _ _ _ hll (by decide)
+
+open Zip.Native in
+/-- The predefined match-length FSE table satisfies `ValidFseTable` with
+    accuracy log 6 and 53 symbols. -/
+theorem buildPredefinedFseTables_matchLen_valid (ll ml of : FseTable)
+    (h : buildPredefinedFseTables = .ok (ll, ml, of)) :
+    ValidFseTable ml.cells 6 53 := by
+  simp only [buildPredefinedFseTables] at h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨ml', hml, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨_, rfl, _⟩ := h
+  exact buildFseTable_valid _ _ _ hml (by decide)
+
+open Zip.Native in
+/-- The predefined offset FSE table satisfies `ValidFseTable` with
+    accuracy log 5 and 29 symbols. -/
+theorem buildPredefinedFseTables_offset_valid (ll ml of : FseTable)
+    (h : buildPredefinedFseTables = .ok (ll, ml, of)) :
+    ValidFseTable of.cells 5 29 := by
+  simp only [buildPredefinedFseTables] at h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨of', hof, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨_, _, rfl⟩ := h
+  exact buildFseTable_valid _ _ _ hof (by decide)
+
 end Zstd.Spec.Fse
