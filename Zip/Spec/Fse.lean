@@ -452,7 +452,8 @@ private theorem set!_preserves_forall {P : FseCell → Prop}
   show P (cells.setIfInBounds idx v)[j]
   by_cases hij : idx = j
   · subst hij
-    exact (Array.getElem_setIfInBounds_self (h := by simp; exact hj)) ▸ hv
+    exact (Array.getElem_setIfInBounds_self (h := by
+      simp only [Array.size_setIfInBounds]; exact hj)) ▸ hv
   · exact (Array.getElem_setIfInBounds_ne hj hij) ▸ hall ⟨j, hj⟩
 
 open Zip.Native in
@@ -476,7 +477,8 @@ theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
   -- Initial cells: Array.replicate with default has numBits = 0
   have hinit : ∀ j : Fin (Array.replicate (1 <<< al) (default : FseCell)).size,
       P (Array.replicate (1 <<< al) (default : FseCell))[j] := by
-    intro ⟨j, hj⟩; show P _; simp; exact Nat.zero_le _
+    intro ⟨j, hj⟩; show P _
+    simp only [Fin.getElem_fin, Array.getElem_replicate]; exact Nat.zero_le _
   -- Loop 1: preserves property (sets cells with { symbol := ... }, default numBits = 0)
   have h1 : ∀ j : Fin v1.fst.size, P v1.fst[j] := by
     apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
@@ -631,7 +633,8 @@ theorem readBits_value_lt_pow2 (br : BackwardBitReader) (n : Nat)
     (h : br.readBits n = .ok (val, br')) :
     val.toNat < 2 ^ n := by
   simp only [BackwardBitReader.readBits] at h
-  exact readBits_go_value_bound br n 0 val br' (Nat.le_refl n) (by simp) h
+  exact readBits_go_value_bound br n 0 val br' (Nat.le_refl n)
+    (by simp only [UInt32.toNat_zero, Nat.sub_self, Nat.pow_zero, Nat.lt_add_one]) h
 
 /-! ## BackwardBitReader totalBitsRemaining tracking -/
 
@@ -1291,7 +1294,10 @@ private theorem forIn_range_preserves_indexed {β ε : Type}
     P n result := by
   rw [Std.Legacy.Range.forIn_eq_forIn_range'] at h_result
   exact forIn'_loop_preserves_indexed P n _ _ init result f 0
-    h_init h_yield h_done _ (by simp) h_result
+    h_init h_yield h_done _
+    (by simp only [Std.Legacy.Range.size, Nat.sub_zero, Nat.add_one_sub_one, Nat.div_one,
+      List.length_range', Nat.zero_add])
+    h_result
 
 /-! ## buildFseTable newState bound -/
 
@@ -1332,7 +1338,8 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
   -- Initial cells: Array.replicate with default has newState = 0
   have hinit : ∀ j : Fin (Array.replicate (1 <<< al) (default : FseCell)).size,
       Q (Array.replicate (1 <<< al) (default : FseCell))[j] := by
-    intro ⟨j, hj⟩; simp; exact hQ_default
+    intro ⟨j, hj⟩
+    simp only [Fin.getElem_fin, Array.getElem_replicate]; exact hQ_default
   -- Loop 1: preserves Q (sets cells with { symbol := ... }, default newState = 0)
   have h1 : ∀ j : Fin v1.fst.size, Q v1.fst[j] := by
     apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
@@ -1376,7 +1383,8 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
       (fun k (sc : Array Nat) => ∀ s, sc.getD s 0 ≤ k)
       _ _ _ _ _ _ _ hloop3
     · -- Initial: Array.replicate probs.size 0, all zeros ≤ 0
-      intro s; unfold Array.getD; split <;> simp
+      intro s; unfold Array.getD; split
+        <;> simp only [Array.getInternal_eq_getElem, Array.getElem_replicate, Std.le_refl]
     · -- Yield step: incrementing one element preserves bound
       intro k _ b b' _ hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
@@ -1405,7 +1413,8 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
       (P := fun k s =>
         (∀ j : Fin s.fst.size, Q s.fst[j]) ∧ (∀ sym, s.snd.getD sym 0 ≤ k))
       (h_init := ⟨h2, fun sym => by
-        unfold Array.getD; split <;> simp⟩)
+        unfold Array.getD; split
+          <;> simp only [Array.getInternal_eq_getElem, Array.getElem_replicate, Std.le_refl]⟩)
       (h_result := hloop4)
     · -- Yield step
       intro k kv b b' hk ⟨hcells, hsymIdx⟩ heq
@@ -1481,7 +1490,8 @@ theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
   -- Initial cells: Array.replicate with default has symbol = 0
   have hinit : ∀ j : Fin (Array.replicate (1 <<< al) (default : FseCell)).size,
       P (Array.replicate (1 <<< al) (default : FseCell))[j] := by
-    intro ⟨j, hj⟩; show P _; simp; exact hpos
+    intro ⟨j, hj⟩; show P _
+    simp only [Fin.getElem_fin, Array.getElem_replicate]; exact hpos
   -- Loop 1: preserves property (sets cells with { symbol := sym.toUInt16 })
   have h1 : ∀ j : Fin v1.fst.size, P v1.fst[j] := by
     apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
