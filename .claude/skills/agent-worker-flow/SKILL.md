@@ -48,7 +48,9 @@ open. `check-blocked` (run by `pod` each loop) removes `blocked` when
 all dependencies close. Blocked issues are excluded from
 `list-unclaimed` and `queue-depth`.
 
-**Branch naming**: `agent/<first-8-chars-of-UUID>`
+**Branch naming**: `agent/<first-8-chars-of-UUID>` (base name). If the base
+branch already has an open PR for a different issue, append a suffix like
+`agent/<prefix>-<short-descriptor>` to avoid colliding with the existing PR.
 **Plan files**: `plans/<UUID-prefix>.md`
 **Progress files**: `progress/<UTC-timestamp>_<UUID-prefix>.md`
 
@@ -81,10 +83,10 @@ gh issue view <N> --json body --jq .body
 ## Step 2: Set Up
 
 ```bash
-# In worktree sessions (pod), the branch already exists — just verify:
-git branch --show-current   # should be agent/<UUID-prefix>
-# Only create if not already on the branch:
-git checkout -b agent/<first-8-chars-of-session-UUID> 2>/dev/null || true
+# Check if the base branch name already has an open PR from a prior session:
+gh pr list --head agent/<UUID-prefix> --state open --json number --jq '.[].number'
+# If a PR exists, use a suffixed branch name instead (e.g. agent/<prefix>-topic)
+git checkout -b agent/<branch-name>
 git rev-parse HEAD      # record starting commit
 ```
 
