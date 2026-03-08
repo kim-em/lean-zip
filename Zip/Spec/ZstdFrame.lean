@@ -22,9 +22,14 @@ The key properties proved here:
    at least as large as the input accumulator (decompressing only adds data).
 6. **Content preservation**: every byte in the initial accumulator is preserved
    at the same index in the result (append-only property).
-7. **API-level single frame**: when the input contains exactly one standard
+7. **Two consecutive standard frames**: when two standard frames fill the
+   remaining data, `decompressZstdWF` produces the accumulator appended with
+   both frames' content.
+8. **API-level single frame**: when the input contains exactly one standard
    frame at position 0, the public `decompressZstd` returns the content.
-8. **Empty input**: decompressing an empty ByteArray returns an empty ByteArray.
+9. **API-level two frames**: when the input contains exactly two standard
+   frames starting at position 0, `decompressZstd` returns their concatenation.
+10. **Empty input**: decompressing an empty ByteArray returns an empty ByteArray.
 -/
 
 namespace Zip.Spec.ZstdFrame
@@ -231,6 +236,86 @@ theorem decompressZstd_single_frame (data : ByteArray)
   unfold Zip.Native.decompressZstd
   rw [decompressZstdWF_single_standard_frame data 0 ByteArray.empty content pos'
     hsize hmagic hframe hadv hend, ByteArray.empty_append]
+
+/-- When two consecutive standard Zstd frames fill the remaining data,
+    `decompressZstdWF` produces the accumulated output appended with both
+    frames' content.  Unfolds one level for the first frame, then applies
+    `decompressZstdWF_single_standard_frame` for the second. -/
+theorem decompressZstdWF_standard_then_standard (data : ByteArray)
+    (pos : Nat) (output content1 content2 : ByteArray)
+    (pos1 pos2 : Nat)
+    (hsize1 : data.size ≥ pos + 4)
+    (hmagic1 : Binary.readUInt32LE data pos = Zip.Native.zstdMagic)
+    (hframe1 : Zip.Native.decompressFrame data pos = .ok (content1, pos1))
+    (hadv1 : pos1 > pos)
+    (hsize2 : data.size ≥ pos1 + 4)
+    (hmagic2 : Binary.readUInt32LE data pos1 = Zip.Native.zstdMagic)
+    (hframe2 : Zip.Native.decompressFrame data pos1 = .ok (content2, pos2))
+    (hadv2 : pos2 > pos1)
+    (hdone : pos2 ≥ data.size) :
+    Zip.Native.decompressZstdWF data pos output
+      = .ok (output ++ content1 ++ content2) := by
+  unfold Zip.Native.decompressZstdWF
+  simp only [show ¬ (pos ≥ data.size) from by omega, ↓reduceDIte,
+    show ¬ (data.size < pos + 4) from by omega, ↓reduceIte,
+    pure, Pure.pure, bind, Bind.bind, Except.bind, Except.pure]
+  rw [hmagic1, show Zip.Native.zstdMagic = (4247762216 : UInt32) from rfl]
+  simp (config := { decide := true }) only [hframe1, ite_true,
+    show ¬ (pos1 ≤ pos) from by omega, ↓reduceDIte]
+  exact decompressZstdWF_single_standard_frame data pos1 (output ++ content1)
+    content2 pos2 hsize2 hmagic2 hframe2 hadv2 hdone
+
+/-- When the input contains exactly two standard Zstd frames starting at
+    position 0, `decompressZstd` returns the concatenation of both frames'
+    content.  This extends `decompressZstd_single_frame` to the two-frame
+    case (RFC 8878 §3.1: concatenated frames are decompressed independently). -/
+theorem decompressZstd_two_frames (data : ByteArray)
+    (content1 content2 : ByteArray) (pos1 pos2 : Nat)
+    (hframe1 : Zip.Native.decompressFrame data 0 = .ok (content1, pos1))
+    (hframe2 : Zip.Native.decompressFrame data pos1 = .ok (content2, pos2))
+    (hend : pos2 ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok (content1 ++ content2) := by
+  -- Extract parseFrameHeader success from first frame
+  have ⟨hdr1, afterHdr1, hph1⟩ : ∃ hdr afterHdr,
+      Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) := by
+    unfold Zip.Native.decompressFrame at hframe1
+    cases hc : Zip.Native.parseFrameHeader data 0 with
+    | error e => simp only [hc, bind, Except.bind] at hframe1; exact nomatch hframe1
+    | ok val => exact ⟨val.1, val.2, rfl⟩
+  -- Extract parseFrameHeader success from second frame
+  have ⟨hdr2, afterHdr2, hph2⟩ : ∃ hdr afterHdr,
+      Zip.Native.parseFrameHeader data pos1 = .ok (hdr, afterHdr) := by
+    unfold Zip.Native.decompressFrame at hframe2
+    cases hc : Zip.Native.parseFrameHeader data pos1 with
+    | error e => simp only [hc, bind, Except.bind] at hframe2; exact nomatch hframe2
+    | ok val => exact ⟨val.1, val.2, rfl⟩
+  -- Derive required conditions for first frame
+  have hmagic1 : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic :=
+    Zstd.Spec.parseFrameHeader_magic data 0 hdr1 afterHdr1 hph1
+  have hsize1 : data.size ≥ 0 + 4 := by
+    unfold Zip.Native.parseFrameHeader at hph1
+    dsimp only [Bind.bind, Except.bind] at hph1
+    by_cases hlt : data.size < 0 + 4
+    · rw [if_pos hlt] at hph1; exact nomatch hph1
+    · omega
+  have hadv1 : pos1 > 0 :=
+    Zstd.Spec.decompressFrame_pos_gt data 0 content1 pos1 hframe1
+  -- Derive required conditions for second frame
+  have hmagic2 : Binary.readUInt32LE data pos1 = Zip.Native.zstdMagic :=
+    Zstd.Spec.parseFrameHeader_magic data pos1 hdr2 afterHdr2 hph2
+  have hsize2 : data.size ≥ pos1 + 4 := by
+    unfold Zip.Native.parseFrameHeader at hph2
+    dsimp only [Bind.bind, Except.bind] at hph2
+    by_cases hlt : data.size < pos1 + 4
+    · rw [if_pos hlt] at hph2; exact nomatch hph2
+    · omega
+  have hadv2 : pos2 > pos1 :=
+    Zstd.Spec.decompressFrame_pos_gt data pos1 content2 pos2 hframe2
+  -- Apply two-frame WF theorem and simplify
+  unfold Zip.Native.decompressZstd
+  rw [decompressZstdWF_standard_then_standard data 0 ByteArray.empty
+    content1 content2 pos1 pos2 hsize1 hmagic1 hframe1 hadv1
+    hsize2 hmagic2 hframe2 hadv2 hend, ByteArray.empty_append]
 
 /-- Decompressing an empty ByteArray returns an empty ByteArray.
     This is a direct corollary of `decompressZstdWF_base`. -/
