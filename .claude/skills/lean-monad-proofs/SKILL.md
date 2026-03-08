@@ -6,6 +6,10 @@ allowed-tools: Read, Bash, Grep
 
 # Lean 4 Monad Proof Patterns
 
+**Common pitfall**: `nomatch` fails inside `try` and `<;>` combinators —
+use `next => exact nomatch h` instead. See "`nomatch` fails inside `try`"
+section below.
+
 ## Avoid `for`/`while` in Spec Functions
 
 In `Option`/`Except` monads, `return` inside a `for` loop exits the loop (producing
@@ -743,6 +747,31 @@ deeply nested `match` chain that always ends in `Except.ok { field := al, ... }`
 **When this fails**: If the field depends on loop iterations (e.g., array size
 after `forIn` modifications), `grind` cannot reason through the loop body.
 See the `forIn` limitation below.
+
+### `grind` as finishing tactic for monadic case-splitting
+
+`grind` is also useful as a finishing tactic when the goal involves nested
+monadic matches on structure fields that `split` cannot decompose:
+
+```lean
+-- After unfolding and peeling error branches, the goal has
+-- nested matches on struct fields (checksum guard, etc.)
+grind  -- handles the remaining case analysis automatically
+```
+
+**When to use `grind` over `split`/`simp`**:
+- Nested `match` on structure fields (`hdr.isLastBlock`, `desc.checksum`)
+  that `split` cannot target because the scrutinee is a field accessor
+- Multi-branch functions where all branches lead to the same conclusion
+  (e.g., proving `pos' ≤ data.size` regardless of which branch was taken)
+- After `simp only [...]` has reduced bind/pure but leaves complex
+  conditional structure
+
+**When NOT to use `grind`**:
+- When you need specific hypotheses from cases (use `split at h` instead)
+- For loop invariants — `grind` cannot reason through `forIn` or
+  WF-recursive calls
+- When `omega` alone suffices (prefer `omega` for pure arithmetic)
 
 ## Multi-Bind Chains with State Threading (decompressFrame Pattern)
 
