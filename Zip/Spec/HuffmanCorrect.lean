@@ -120,8 +120,7 @@ inductive TreeHasLeaf : Zip.Native.HuffTree → List Bool → UInt16 → Prop
 protected theorem decodeBits_of_hasLeaf (tree : Zip.Native.HuffTree) (cw : List Bool)
     (sym : UInt16) (rest : List Bool) (h : TreeHasLeaf tree cw sym) :
     decodeBits tree (cw ++ rest) = some (sym, rest) := by
-  -- `simp_all only` needed: `left`/`right` cases require the induction hypothesis
-  induction h <;> simp_all only [decodeBits, List.nil_append, List.cons_append]
+  induction h <;> simp only [decodeBits, List.nil_append, List.cons_append] <;> assumption
 
 /-- **Completeness for `decode.go`**: if the tree has a leaf at path `cw` and
     the BitReader's bits start with `cw ++ rest`, then the native `decode.go`

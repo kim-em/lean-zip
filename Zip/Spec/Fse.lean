@@ -343,7 +343,7 @@ theorem readProbValue_le {br : BitReader} {remaining : Nat}
     -- hraw : rawVal.fst.toNat < 2 ^ Nat.log2 (remaining + 1)
     -- Convert 1 <<< k to 2 ^ k in all hypotheses before case split
     have hshift : ∀ k, 1 <<< k = 2 ^ k := fun k => by
-      simp [Nat.shiftLeft_eq]
+      simp only [Nat.shiftLeft_eq, Nat.one_mul]
     simp only [hshift, Nat.add_sub_cancel, Nat.pow_succ] at *
     -- Establish 2^L ≤ remaining + 1 for all cases
     have hle_p : 2 ^ Nat.log2 (remaining + 1) ≤ remaining + 1 :=
@@ -797,7 +797,13 @@ theorem BackwardBitReader_isFinished_iff_totalBitsRemaining_zero
   simp only [BackwardBitReader.isFinished, BackwardBitReader.totalBitsRemaining]
   constructor
   · intro h; simp only [beq_iff_eq.mp h, BEq.rfl, ↓reduceIte]
-  · intro h; split at h <;> simp_all only [beq_iff_eq, Nat.add_eq_zero_iff]
+  · intro h
+    split at h
+    · assumption
+    · -- bitsRemaining + 8 * (bytePos - startPos) = 0 contradicts ¬(bitsRemaining == 0)
+      rename_i hne
+      simp only [beq_iff_eq, Nat.add_eq_zero_iff] at hne h
+      exact absurd h.1 hne
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading 0 bits is a no-op: returns (0, br) unchanged. -/

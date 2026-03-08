@@ -495,7 +495,7 @@ private theorem insertByWeight_mem (t : BuildTree) (xs : List BuildTree) :
     split
     · simp only [List.mem_cons]
     · simp only [List.mem_cons, ih]
-      constructor <;> (intro h; obtain h | h | h := h <;> simp_all only [true_or, or_true])
+      simp only [or_left_comm]
 
 /-- Symbol `s` is a leaf symbol in tree `t`. -/
 private inductive BuildTree.HasSym : BuildTree → Nat → Prop where
