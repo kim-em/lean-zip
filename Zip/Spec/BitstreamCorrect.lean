@@ -93,9 +93,8 @@ theorem readBit_wf (br : Zip.Native.BitReader) (bit : UInt32)
   simp only [Zip.Native.BitReader.readBit] at h
   split at h
   · exact nomatch h
-  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    · obtain ⟨_, rfl⟩ := h; simp only []; omega
-    · obtain ⟨_, rfl⟩ := h; simp only []; omega
+  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      (obtain ⟨_, rfl⟩ := h; simp only []; omega)
 
 /-! ### readBit correspondence -/
 
@@ -125,11 +124,9 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
     have hget : br.data[br.pos]! = br.data[br.pos] := getElem!_pos br.data br.pos hpos'
     refine ⟨br.data[br.pos].toNat.testBit br.bitOff, rest, hrest, ?_, ?_⟩
     · -- br'.toBits = rest
-      split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      · obtain ⟨_, rfl⟩ := h
-        simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1; omega
-      · obtain ⟨_, rfl⟩ := h
-        simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1
+      split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+        (obtain ⟨_, rfl⟩ := h;
+         simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1; try omega)
     · -- bit = if testBit then 1 else 0 (same in both bitOff cases)
       split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
       all_goals (obtain ⟨rfl, _⟩ := h; rw [hget];
@@ -286,10 +283,7 @@ theorem alignToByte_toBits (br : Zip.Native.BitReader)
     rw [toBits_length_mod8_pos br hwf hoff hpos']
     simp only [Zip.Native.BitReader.toBits, Nat.add_zero]
     rw [List.drop_drop]
-    have hle : br.bitOff ≤ 8 := by omega
-    congr 1
-    rw [Nat.add_assoc, Nat.add_sub_cancel' hle]
-    omega
+    congr 1; omega
 
 /-! ### Byte-level read correspondence -/
 
@@ -344,7 +338,7 @@ protected theorem readBitsLSB_split (m n : Nat) (bits : List Bool) :
       | none => dsimp only [bind, Option.bind]
       | some p =>
         obtain ⟨v1, rest'⟩ := p
-        simp only [bind, Option.bind]
+        dsimp only [bind, Option.bind]
         cases hn : Deflate.Spec.readBitsLSB n rest' with
         | none => simp only []
         | some q =>
@@ -493,8 +487,7 @@ protected theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
         show pos + 1 + k - (pos + 1) = k from by omega]
       have hlen : pos < data.data.toList.length := by rw [Array.length_toList]; exact hpos
       rw [List.drop_eq_getElem_cons hlen, List.take_succ_cons]
-      congr 1
-      congr 1; omega
+      congr 2; omega
     · -- bits equality: (pos+1+k)*8 = (pos+k+1)*8
       show List.drop ((pos + 1 + k) * 8) _ = List.drop ((pos + (k + 1)) * 8) _
       congr 1; omega
