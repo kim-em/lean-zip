@@ -8,13 +8,14 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~451 completed (Feb 19 – Mar 8)
+- **Sessions**: ~465 completed (Feb 19 – Mar 8)
 - **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 421
-- **Spec declarations**: 1,137 across 49 spec files (27,055 lines)
-- **Bare simp**: 0 standalone bare `simp` remaining; 16 `simp [lemma]` calls outside DeflateSuffix.lean
-- **Bare simp_all**: 4 remaining (DeflateEncode, DeflateStoredCorrect, EmitTokensCorrect, InflateCorrect)
-- **simp_all only**: 12 across spec files (correct explicit-lemma-list form)
+- **Merged PRs**: 435
+- **Spec declarations**: 1,143 across 49 spec files (27,461 lines)
+- **Bare simp**: 0 standalone bare `simp` remaining; 1 `simp [lemma]` call outside DeflateSuffix.lean (DecodeCorrect.lean)
+- **Bare simp_all**: 2 remaining (DeflateEncode, InflateCorrect)
+- **simp_all only**: 2 across spec files (correct explicit-lemma-list form)
+- **Zstd spec**: 333 declarations across 6 files (6,719 lines)
 
 ## Milestones
 
@@ -868,14 +869,75 @@ execution preserves previously written bytes), this represents the beginning
 of end-to-end content characterization for Zstd frames — though significant
 gaps remain between the literal/sequence level and full frame output.
 
+**10-PR batch (Mar 8): content pipeline maturation + simp campaign completion:**
+
+This batch advanced the Zstd content pipeline from single-block to multi-block
+and frame-level characterization, while completing the simp_all campaign across
+most spec files.
+
+*Track E content pipeline — block-level multi-block (3 PRs):*
+- #962: `decompressBlocksWF_raw_step` and `decompressBlocksWF_rle_step` —
+  non-last block continuation: encountering a non-last raw/RLE block equals
+  a recursive call with appended output. Key technique: `generalize` to hide
+  the RHS before `unfold` so only the LHS unfolds.
+- #988: `decompressBlocksWF_two_raw` and `decompressBlocksWF_two_rle` —
+  two-block composition for same-type pairs (raw+raw, RLE+RLE).
+- #997: `decompressBlocksWF_raw_then_rle` and `decompressBlocksWF_rle_then_raw`
+  — mixed-type two-block composition (raw+RLE and RLE+raw block pairs).
+
+*Track E content pipeline — compressed literals (2 PRs):*
+- #982: Rebased PR #970 compressed literals-only theorems onto master. Fixed
+  merge conflicts by cherry-picking 3 commits and placing compressed theorems
+  after raw/RLE step theorems.
+- #1000: `decompressBlocksWF_two_compressed_literals` — two-block composition
+  for consecutive compressed-literals-only blocks.
+
+*Track E content pipeline — frame level (1 PR):*
+- #974: `decompressFrame_single_raw_content` and
+  `decompressFrame_single_rle_content` — single-block frame output
+  characterization for raw and RLE blocks. First frame-level content theorems.
+
+*Merge conflict fixes (1 PR):*
+- #989: Fix PR #977 merge conflicts — compressed sequences theorems rebased
+  onto current master.
+
+*Quality reviews — simp_all campaign (3 PRs):*
+- #971: BitReaderInvariant.lean — 3 `simp_all` converted to `simp_all only`.
+- #976: HuffmanTheorems + EmitTokensCorrect + DeflateStoredCorrect — simp_all
+  conversion across 3 files, reducing bare `simp_all` from 4 to 2.
+- #981: GzipCorrect.lean + ZlibCorrect.lean — bare simp cleanup.
+- #995: ZstdSequence.lean — simp_all conversion + proof optimization.
+- #996: Fse.lean + HuffmanEncode.lean + HuffmanCorrect.lean — completes the
+  simp_all campaign across all remaining files with bare `simp_all`.
+
+**simp_all campaign near-complete:** Bare `simp_all` reduced from 4 to 2
+remaining instances (DeflateEncode.lean and InflateCorrect.lean). Both use
+`simp_all` with explicit lemma arguments (`simp_all [beq_iff_eq]` and
+`simp_all [← UInt32.toNat_inj]`), making them borderline — they have arguments
+but aren't the fully explicit `simp_all only [...]` form.
+
+**Content pipeline status:**
+
+| Block type / proof level | Single-block | Step (non-last) | Two-block | Frame (single) |
+|---|---|---|---|---|
+| Raw | done | done | done | done |
+| RLE | done | done | done | done |
+| Compressed (literals-only) | done | done | done | — |
+| Mixed (raw+RLE, RLE+raw) | — | — | done | — |
+| Compressed (with sequences) | — | — | — | — |
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 333
+theorems/lemmas: ZstdSequence (84), Fse (80), ZstdHuffman (73), Zstd (59),
+XxHash (25), ZstdFrame (12). Total spec line count: 6,719 lines.
+
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
-- 4 bare simp_all remaining (DeflateEncode, DeflateStoredCorrect,
-  EmitTokensCorrect, InflateCorrect)
+- 2 bare simp_all remaining (DeflateEncode, InflateCorrect) — both have
+  explicit arguments, covered by existing review issue #968
+- Content pipeline gaps: frame-level multi-block, compressed blocks with
+  sequences, compressed literals frame-level
 - Compose position specs into end-to-end frame position theorem
-- Content preservation campaign: extend single-block content characterization
-  to multi-block frames and compressed block content
 - Spec-level decoder with correctness proofs (algorithmic correspondence
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
@@ -884,8 +946,8 @@ gaps remain between the literal/sequence level and full frame output.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~451 sessions (Feb 19 – Mar 8)
-- 421 merged PRs
+- ~465 sessions (Feb 19 – Mar 8)
+- 435 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
