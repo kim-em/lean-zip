@@ -34,7 +34,7 @@ def countRun (val : Nat) : List Nat → Nat
 theorem countRun_le_length (val : Nat) (xs : List Nat) :
     countRun val xs ≤ xs.length := by
   induction xs with
-  | nil => simp [countRun]
+  | nil => simp only [countRun, List.length_nil, Nat.le_refl]
   | cons x xs ih =>
     simp only [countRun]
     split <;> simp only [List.length_cons] <;> omega
@@ -97,7 +97,7 @@ where
 theorem countRun_take (val : Nat) (xs : List Nat) :
     xs.take (countRun val xs) = List.replicate (countRun val xs) val := by
   induction xs with
-  | nil => simp [countRun]
+  | nil => simp only [countRun, List.take_nil, List.replicate_zero]
   | cons x xs ih =>
     simp only [countRun]
     split
@@ -113,7 +113,8 @@ theorem countRun_take (val : Nat) (xs : List Nat) :
 theorem take_countRun_eq_replicate (val : Nat) (xs : List Nat) (n : Nat) (hn : n ≤ countRun val xs) :
     xs.take n = List.replicate n val := by
   induction xs generalizing n with
-  | nil => simp [countRun] at hn; simp [hn]
+  | nil => have h0 : n = 0 := by simp only [countRun] at hn; omega
+           subst h0; simp only [List.take_nil, List.replicate_zero]
   | cons x xs ih =>
     simp only [countRun] at hn
     split at hn
@@ -162,11 +163,12 @@ protected theorem Deflate.Spec.rlDecode_go_code16 (extra : Nat)
 private theorem replicate_drop_eq_cons_zero (xs : List Nat) (n : Nat)
     (hn1 : n ≥ 1) (hn : n ≤ 1 + countRun 0 xs) :
     List.replicate n 0 ++ xs.drop (n - 1) = 0 :: xs := by
-  rw [← take_countRun_eq_replicate 0 (0 :: xs) n (by simp [countRun]; omega)]
+  rw [← take_countRun_eq_replicate 0 (0 :: xs) n (by
+    show n ≤ countRun 0 (0 :: xs); simp only [countRun, beq_self_eq_true, ↓reduceIte]; omega)]
   have hdrop : xs.drop (n - 1) = (0 :: xs).drop n := by
     cases n with
     | zero => omega
-    | succ k => simp [List.drop_succ_cons]
+    | succ k => simp only [Nat.add_sub_cancel, List.drop_succ_cons]
   rw [hdrop, List.take_append_drop]
 
 /-- Singleton plus replicate plus drop equals the original cons list. -/
@@ -181,7 +183,7 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
     (hvalid : ∀ x ∈ lengths, x ≤ 15) :
     rlDecodeLengths.go (rlEncodeLengths.go lengths) acc = some (acc ++ lengths) := by
   match lengths with
-  | [] => simp [rlEncodeLengths.go, rlDecodeLengths.go]
+  | [] => simp only [rlEncodeLengths.go, rlDecodeLengths.go, List.append_nil]
   | x :: xs =>
     have hx_valid : x ≤ 15 := hvalid x (.head ..)
     have hxs_valid : ∀ y ∈ xs, y ≤ 15 := fun y hy => hvalid y (List.mem_cons_of_mem x hy)
@@ -257,7 +259,7 @@ theorem rlEncodeLengths_go_valid (lengths : List Nat)
       (entry.1 = 17 ∧ entry.2 ≤ 7) ∨
       (entry.1 = 18 ∧ entry.2 ≤ 127) := by
   match lengths with
-  | [] => simp [rlEncodeLengths.go]
+  | [] => simp only [rlEncodeLengths.go, List.not_mem_nil, false_implies, implies_true]
   | x :: xs =>
     have hx_valid : x ≤ 15 := hvalid x (.head ..)
     have hxs_valid : ∀ y ∈ xs, y ≤ 15 := fun y hy => hvalid y (List.mem_cons_of_mem x hy)
