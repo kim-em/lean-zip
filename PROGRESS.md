@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~410 completed (Feb 19 – Mar 8)
+- **Sessions**: ~424 completed (Feb 19 – Mar 8)
 - **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 380
-- **Spec theorems/lemmas**: 927 declarations across 49 spec files (25,781 lines)
+- **Merged PRs**: 393
+- **Spec theorems/lemmas**: 977 declarations across 49 spec files (26,271 lines)
 - **Bare simp**: 0 remaining — campaign complete (49 spec files, ZipForStd/, Native/ all clean)
 - **Bare simp_all**: 0 remaining — campaign complete (all spec files, DeflateEncodeDynamic included)
 
@@ -704,9 +704,55 @@ composition, and continued quality reviews across DEFLATE spec files.
 *Maintenance (1 PR):*
 - #866: Rebased PR #857 to resolve merge conflicts in progress files
 
-**Summary:** The Zstd spec infrastructure now spans 6 files with 213
-theorems/lemmas: ZstdSequence (58), Fse (58), ZstdHuffman (50), Zstd (29),
-XxHash (12), ZstdFrame (6). Total spec line count: 4,872 lines.
+**11-PR batch (Mar 8): Huffman validity, content preservation, offset history, bare simp completion, multi-frame composition:**
+
+This batch advanced Track E spec coverage across four dimensions and
+completed the bare simp campaign project-wide.
+
+*Track E table validity (1 PR):*
+- #884: `buildZstdHuffmanTable_numBits_le` (cells numBits within max bit
+  depth) and `buildZstdHuffmanTable_valid` (composed `ValidHuffmanTable`
+  predicate). 3 helper lemmas for fill loop invariants.
+
+*Track E content/field preservation (2 PRs):*
+- #887: `decompressZstdWF_prefix` (every byte in the initial accumulator
+  is preserved at the same index in the result — append-only property via
+  WF induction) and `decompressZstd_empty` (empty input → empty output).
+- #894: `decodeHuffmanSymbol_data_eq` and `decodeHuffmanSymbol_startPos_eq`
+  — BackwardBitReader `data` and `startPos` fields are unchanged through
+  Huffman symbol decoding.
+
+*Track E offset history validity (1 PR):*
+- #880: `resolveOffset_history_valid_of_fst_ne_zero` and
+  `executeSequences_loop_history_valid` — `ValidOffsetHistory` threaded
+  through the full sequence execution loop. This connects
+  `resolveOffset`'s per-step history validity to loop-level invariants.
+
+*Track E multi-frame composition (1 PR):*
+- #901: `decompressZstdWF_standard_then_standard` (two consecutive
+  standard frames produce concatenated output at WF level) and
+  `decompressZstd_two_frames` (same at API level). First compositional
+  spec for multi-frame Zstd streams.
+
+*Bare simp campaign completion (5 PRs):*
+- #879: DeflateDynamicHeader.lean — bare simp + linter pragma cleanup
+- #885: DeflateEncodeDynamicProps.lean first half (lines 17–310)
+- #886: DeflateEncodeDynamicProps.lean second half (lines 311–695)
+- #892: Huffman.lean — completes the non-intentional bare simp campaign
+- #900: Fse.lean, HuffmanKraft.lean, BitstreamComplete.lean — final sweep
+
+With #900, zero standalone bare `simp` or `simp_all` calls remain
+anywhere in the codebase (Zip/, ZipForStd/, Native/). Only the 15
+documented intentional instances in DeflateSuffix.lean persist.
+
+*Skill updates (1 PR):*
+- #891: Created `lean-content-preservation` skill from 16-PR batch
+  patterns. Updated `lean-zstd-patterns`, `lean-zstd-spec-pattern`,
+  `lean-content-preservation` with recurring proof strategies.
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 238
+theorems/lemmas: ZstdSequence (64), Fse (61), ZstdHuffman (57), Zstd (31),
+XxHash (12), ZstdFrame (13). Total spec line count: 5,248 lines.
 
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
@@ -722,11 +768,12 @@ XxHash (12), ZstdFrame (6). Total spec line count: 4,872 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~410 sessions (Feb 19 – Mar 8)
-- 380 merged PRs
+- ~424 sessions (Feb 19 – Mar 8)
+- 393 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
   bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
   `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623,
-  updated #711, #840), `lean-monad-proofs` (updated #711, #840)
+  updated #711, #840), `lean-monad-proofs` (updated #711, #840),
+  `lean-content-preservation` (#891)
