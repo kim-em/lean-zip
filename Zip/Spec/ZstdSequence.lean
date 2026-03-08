@@ -938,6 +938,67 @@ theorem resolveOffset_history_valid_repeat (rawOffset litLen : Nat)
         gt_iff_lt] <;> omega
   · omega  -- rawOffset ≥ 4
 
+/-- When `resolveOffset` returns a nonzero offset and the input history is valid,
+    the output history is also valid. Unifies `resolveOffset_history_valid_large`
+    and `resolveOffset_history_valid_repeat` into a single lemma whose precondition
+    matches the `executeSequences.loop` guard (`if offset == 0 then .error ...`). -/
+theorem resolveOffset_history_valid_of_fst_ne_zero
+    (rawOffset litLen : Nat) (history : Array Nat)
+    (hh : ValidOffsetHistory history)
+    (hne : (resolveOffset rawOffset history litLen).1 ≠ 0) :
+    ValidOffsetHistory (resolveOffset rawOffset history litLen).2 := by
+  by_cases hr : rawOffset > 3
+  · exact resolveOffset_history_valid_large rawOffset litLen history hh hr
+  · -- rawOffset ≤ 3
+    by_cases hr0 : rawOffset = 0
+    · -- rawOffset = 0: resolveOffset returns (1, history), history unchanged
+      subst hr0
+      simp only [resolveOffset, show ¬(0 > 3) from by omega, ↓reduceIte]
+      split <;> (simp only [Nat.not_lt] at * <;> exact hh)
+    · -- rawOffset ∈ {1, 2, 3}
+      apply resolveOffset_history_valid_repeat rawOffset litLen history hh (by omega) (by omega)
+      intro ⟨hlit0, hraw3⟩
+      -- litLen = 0 ∧ rawOffset = 3: resolveOffset returns history[0]! - 1
+      subst hraw3; subst hlit0
+      have := (resolveOffset_shifted3_val history hh.1).1
+      -- hne : (resolveOffset 3 history 0).1 ≠ 0, and .1 = history[0]! - 1
+      rw [this] at hne
+      omega
+
+/-- When `executeSequences.loop` succeeds and the input offset history is valid,
+    the output offset history is also valid. Threads `ValidOffsetHistory` through the
+    sequence loop by applying `resolveOffset_history_valid_of_fst_ne_zero` at each
+    step (the loop's `if offset == 0 then .error` guard ensures the precondition). -/
+theorem executeSequences_loop_history_valid
+    (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos windowSize : Nat)
+    (output' : ByteArray) (history' : Array Nat) (litPos' : Nat)
+    (hvalid : ValidOffsetHistory history)
+    (h : executeSequences.loop seqs literals output history litPos windowSize
+         = .ok (output', history', litPos')) :
+    ValidOffsetHistory history' := by
+  induction seqs generalizing output history litPos with
+  | nil =>
+    rw [Zip.Native.executeSequences.loop.eq_1] at h
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl, _⟩ := h
+    exact hvalid
+  | cons seq rest ih =>
+    rw [Zip.Native.executeSequences.loop.eq_2] at h
+    split at h
+    · exact nomatch h
+    · dsimp only [letFun] at h
+      split at h
+      · exact nomatch h
+      · split at h
+        · exact nomatch h
+        · split at h
+          · exact nomatch h
+          · exact ih _ _ _ (resolveOffset_history_valid_of_fst_ne_zero _ _ _ hvalid (by
+              -- After dsimp, the false BEq guard gives ¬(offset✝ == 0) = true
+              -- where offset✝ is definitionally (resolveOffset ...).1
+              simp_all only [ne_eq, beq_iff_eq, not_false_eq_true])) h
+
 /-- For shifted repeat codes 1–2 (rawOffset ∈ {1,2}, literalLength = 0),
     `ValidOffsetHistory` implies the resolved offset is positive. Shifted code 1
     returns `history[1]!` and shifted code 2 returns `history[2]!`, both positive
