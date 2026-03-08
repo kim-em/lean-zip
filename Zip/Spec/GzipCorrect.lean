@@ -49,12 +49,6 @@ def decompressSingle (data : ByteArray)
 
 end GzipDecode
 
-private theorem getElem!_ba_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
-    (a ++ b)[i]! = a[i]! := by
-  rw [getElem!_pos (a ++ b) i (by simp only [ByteArray.size_append]; omega),
-      getElem!_pos a i h]
-  exact ByteArray.getElem_append_left h
-
 namespace GzipEncode
 
 private theorem gzip_header_size (x : UInt8) :
@@ -80,9 +74,9 @@ theorem compress_header_bytes (data : ByteArray) (level : UInt8) :
   have hhs : ∀ (x : UInt8),
       (ByteArray.mk #[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, x, 0xFF]).size = 10 := fun _ => rfl
   refine ⟨?_, ?_, ?_, ?_⟩ <;> {
-    rw [getElem!_ba_append_left _ _ _ (by
+    rw [Binary.getElem!_append_left _ _ _ (by
       simp only [ByteArray.size_append]; split <;> (rw [hhs]; omega))]
-    rw [getElem!_ba_append_left _ _ _ (by split <;> (rw [hhs]; omega))]
+    rw [Binary.getElem!_append_left _ _ _ (by split <;> (rw [hhs]; omega))]
     split <;> first | rfl | (split <;> rfl)
   }
 
@@ -140,7 +134,7 @@ end GzipEncode
 /-! ## ByteArray/bitstream composition lemmas -/
 
 /-- `bytesToBits` distributes over ByteArray append. -/
-private theorem bytesToBits_append (a b : ByteArray) :
+theorem bytesToBits_append (a b : ByteArray) :
     Deflate.Spec.bytesToBits (a ++ b) =
     Deflate.Spec.bytesToBits a ++ Deflate.Spec.bytesToBits b := by
   simp only [Deflate.Spec.bytesToBits, ByteArray.data_append, Array.toList_append,
@@ -158,7 +152,7 @@ theorem bytesToBits_drop_prefix_three (a b c : ByteArray) :
 
 /-- If `inflate deflated = .ok data`, then the spec decode succeeds on
     `bytesToBits deflated`. -/
-private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
+theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
     (h : Inflate.inflate deflated = .ok result) :
     Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits deflated) [] =
