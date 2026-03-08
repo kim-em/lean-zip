@@ -1187,4 +1187,52 @@ theorem decodeHuffmanSymbol_totalBitsRemaining_pos
     simp only [beq_iff_eq] at hpb
     omega
 
+open Zip.Native in
+/-- When `decodeHuffmanStreamWF` succeeds, the output ByteArray has exactly
+    `acc.size + count` bytes. -/
+theorem decodeHuffmanStreamWF_size
+    {htable : ZstdHuffmanTable} {br br' : BackwardBitReader}
+    {count : Nat} {acc result : ByteArray}
+    (h : decodeHuffmanStreamWF htable br count acc = .ok (result, br')) :
+    result.size = acc.size + count := by
+  induction count generalizing br acc with
+  | zero =>
+    simp only [decodeHuffmanStreamWF, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h
+    omega
+  | succ n ih =>
+    simp only [decodeHuffmanStreamWF, bind, Except.bind] at h
+    cases hsym : decodeHuffmanSymbol htable br with
+    | error => simp only [hsym] at h; exact nomatch h
+    | ok v =>
+      obtain ⟨sym, br₁⟩ := v
+      rw [hsym] at h; dsimp only [Bind.bind, Except.bind] at h
+      have := ih h
+      simp only [ByteArray.size_push] at this
+      omega
+
+open Zip.Native in
+/-- The bit budget is monotonically non-increasing through Huffman stream
+    decoding: the final reader's `totalBitsRemaining` is at most the initial
+    reader's. -/
+theorem decodeHuffmanStreamWF_totalBitsRemaining_le
+    {htable : ZstdHuffmanTable} {br br' : BackwardBitReader}
+    {count : Nat} {acc result : ByteArray}
+    (h : decodeHuffmanStreamWF htable br count acc = .ok (result, br')) :
+    br'.totalBitsRemaining ≤ br.totalBitsRemaining := by
+  induction count generalizing br acc with
+  | zero =>
+    simp only [decodeHuffmanStreamWF, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h; omega
+  | succ n ih =>
+    simp only [decodeHuffmanStreamWF, bind, Except.bind] at h
+    cases hsym : decodeHuffmanSymbol htable br with
+    | error => simp only [hsym] at h; exact nomatch h
+    | ok v =>
+      obtain ⟨sym, br₁⟩ := v
+      rw [hsym] at h; dsimp only [Bind.bind, Except.bind] at h
+      have h_step := decodeHuffmanSymbol_totalBitsRemaining_le htable br sym br₁ hsym
+      have h_rec := ih h
+      omega
+
 end Zstd.Spec.Huffman
