@@ -371,7 +371,7 @@ theorem executeSequences_loop_getElem_lt
 private theorem parseSequencesHeader_pos_range (data : ByteArray) (pos : Nat)
     (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
     (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
-    pos < pos' ∧ pos' ≤ pos + 4 := by
+    pos < pos' ∧ pos' ≤ pos + 4 ∧ pos' ≤ data.size := by
   simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   split at h
   · exact nomatch h
@@ -408,7 +408,7 @@ theorem parseSequencesHeader_pos_bounded (data : ByteArray) (pos : Nat)
     (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
     (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
     pos' ≤ pos + 4 :=
-  (parseSequencesHeader_pos_range data pos numSeq modes pos' h).2
+  (parseSequencesHeader_pos_range data pos numSeq modes pos' h).2.1
 
 /-- When `parseSequencesHeader` succeeds, the returned position is within
     `data.size`. Each branch checks `data.size < pos + k` before reading `k`
@@ -416,27 +416,8 @@ theorem parseSequencesHeader_pos_bounded (data : ByteArray) (pos : Nat)
 theorem parseSequencesHeader_le_size (data : ByteArray) (pos : Nat)
     (numSeq : Nat) (modes : SequenceCompressionModes) (pos' : Nat)
     (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
-    pos' ≤ data.size := by
-  simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  split at h
-  · exact nomatch h
-  · split at h
-    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨-, -, rfl⟩ := h; omega
-    · split at h
-      · split at h
-        · exact nomatch h
-        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-          obtain ⟨-, -, rfl⟩ := h; omega
-      · split at h
-        · split at h
-          · exact nomatch h
-          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-            obtain ⟨-, -, rfl⟩ := h; omega
-        · split at h
-          · exact nomatch h
-          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-            obtain ⟨-, -, rfl⟩ := h; omega
+    pos' ≤ data.size :=
+  (parseSequencesHeader_pos_range data pos numSeq modes pos' h).2.2
 
 /-- When the input byte at `pos` is zero, `parseSequencesHeader` returns 0 sequences
     with predefined compression modes and advances by exactly 1 byte.
@@ -554,14 +535,18 @@ theorem buildRleFseTable_cells_size (symbol : UInt8) :
     (buildRleFseTable symbol).cells.size = 1 := by
   rfl
 
+/-- The RLE FSE table has a single cell, so any index into it must be 0. -/
+private theorem buildRleFseTable_fin_eq_zero (symbol : UInt8)
+    (i : Fin (buildRleFseTable symbol).cells.size) :
+    i = ⟨0, by show 0 < 1; omega⟩ :=
+  Fin.ext (by have : (buildRleFseTable symbol).cells.size = 1 := rfl; omega)
+
 /-- The single cell's symbol in an RLE FSE table is within bounds. -/
 theorem buildRleFseTable_symbol_lt (symbol : UInt8) (numSymbols : Nat)
     (hsym : symbol.toNat < numSymbols)
     (i : Fin (buildRleFseTable symbol).cells.size) :
     (buildRleFseTable symbol).cells[i].symbol.toNat < numSymbols := by
-  have hsz : (buildRleFseTable symbol).cells.size = 1 := rfl
-  have : i = ⟨0, hsz ▸ Nat.zero_lt_one⟩ := Fin.ext (by omega)
-  subst this
+  have hi := buildRleFseTable_fin_eq_zero symbol i; subst hi
   show symbol.toUInt16.toNat < numSymbols
   rw [UInt8.toNat_toUInt16]
   exact hsym
@@ -570,18 +555,9 @@ theorem buildRleFseTable_symbol_lt (symbol : UInt8) (numSymbols : Nat)
 theorem buildRleFseTable_valid (symbol : UInt8) (numSymbols : Nat)
     (hsym : symbol.toNat < numSymbols) :
     Zstd.Spec.Fse.ValidFseTable (buildRleFseTable symbol).cells 0 numSymbols := by
-  refine ⟨?_, ?_, ?_⟩
-  · -- cells.size = 1 <<< 0
-    exact buildRleFseTable_cells_size symbol
-  · -- ∀ i, cells[i].symbol.toNat < numSymbols
-    exact buildRleFseTable_symbol_lt symbol numSymbols hsym
-  · -- ∀ i, cells[i].numBits.toNat ≤ 0
-    intro i
-    have hsz : (buildRleFseTable symbol).cells.size = 1 := rfl
-    have : i = ⟨0, hsz ▸ Nat.zero_lt_one⟩ := Fin.ext (by omega)
-    subst this
-    show (0 : UInt8).toNat ≤ 0
-    decide
+  refine ⟨buildRleFseTable_cells_size symbol, buildRleFseTable_symbol_lt symbol numSymbols hsym, ?_⟩
+  intro i; have hi := buildRleFseTable_fin_eq_zero symbol i; subst hi
+  show (0 : UInt8).toNat ≤ 0; decide
 
 /-! ## resolveSingleFseTable position properties -/
 
@@ -877,7 +853,6 @@ theorem resolveSequenceFseTables_pos_ge (modes : SequenceCompressionModes)
     (h : resolveSequenceFseTables modes data pos prev = .ok (llTable, ofTable, mlTable, pos')) :
     pos' ≥ pos := by
   simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure] at h
-  -- Extract the three resolveSingleFseTable calls
   cases hll : resolveSingleFseTable modes.litLenMode 36 9 data pos
       predefinedLitLenDistribution 6 prev.litLen with
   | error e => rw [hll] at h; exact nomatch h
@@ -917,7 +892,6 @@ theorem resolveSequenceFseTables_valid (modes : SequenceCompressionModes)
     (∃ al ns, Zstd.Spec.Fse.ValidFseTable ofTable.cells al ns) ∧
     (∃ al ns, Zstd.Spec.Fse.ValidFseTable mlTable.cells al ns) := by
   simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure] at h
-  -- Extract the three resolveSingleFseTable calls
   cases hll : resolveSingleFseTable modes.litLenMode 36 9 data pos
       predefinedLitLenDistribution 6 prev.litLen with
   | error e => rw [hll] at h; exact nomatch h
@@ -1285,9 +1259,7 @@ theorem executeSequences_loop_history_valid
         · split at h
           · exact nomatch h
           · exact ih _ _ _ (resolveOffset_history_valid_of_fst_ne_zero _ _ _ hvalid (by
-              -- After dsimp, the false BEq guard gives ¬(offset✝ == 0) = true
-              -- where offset✝ is definitionally (resolveOffset ...).1
-              simp_all only [ne_eq, beq_iff_eq, not_false_eq_true])) h
+              simp only [ne_eq, beq_iff_eq] at *; assumption)) h
 
 /-- The loop preserves the history array size. Uses the weaker hypothesis
     `history.size = 3` rather than full `ValidOffsetHistory`. -/
