@@ -349,13 +349,13 @@ private theorem computeHCLEN_trailing_zero (clLens : List Nat) (j : Nat)
   have hperm_len := Deflate.Spec.clPermutation_length
   -- Work with the permuted lens list
   let pl := Deflate.Spec.clPermutation.map fun pos => clLens.getD pos 0
-  have hpl_len : pl.length = 19 := by simp [pl, hperm_len]
+  have hpl_len : pl.length = 19 := by simp only [List.length_map, hperm_len, pl]
   -- The trailing zeros in reverse
   let tw := pl.reverse.takeWhile (· == 0)
   -- tw is a prefix of pl.reverse
   have htw_prefix : tw <+: pl.reverse := List.takeWhile_prefix (· == 0)
   have htw_le : tw.length ≤ 19 := by
-    have := htw_prefix.length_le; simp [hpl_len] at this; exact this
+    have := htw_prefix.length_le; simp only [List.length_reverse, hpl_len] at this; exact this
   -- j ≥ lastNonZero = 19 - tw.length, so 18 - j < tw.length
   -- Rewrite hj to use pl.length and tw.length
   change j ≥ max 4 (pl.length - tw.length) at hj
@@ -449,7 +449,7 @@ private theorem rlDecodeLengths_go_entries_le_result
     (h : rlDecodeLengths.go entries acc = some result) :
     entries.length + acc.length ≤ result.length := by
   induction entries generalizing acc with
-  | nil => simp [rlDecodeLengths.go] at h; subst h; simp
+  | nil => simp only [rlDecodeLengths.go, Option.some.injEq] at h; subst h; simp only [List.length_nil, Nat.zero_add, Std.le_refl]
   | cons entry rest ih =>
     obtain ⟨code, extra⟩ := entry
     by_cases hle : code ≤ 15
@@ -462,7 +462,9 @@ private theorem rlDecodeLengths_go_entries_le_result
         · rw [Deflate.Spec.rlDecode_go_code16 extra rest acc hg] at h
           have := ih _ h
           simp only [List.length_append, List.length_replicate, List.length_cons] at this ⊢; omega
-        · exfalso; simp [rlDecodeLengths.go, hg, guard, failure, bind] at h
+        · exfalso; simp only [rlDecodeLengths.go, Nat.reduceLeDiff, ↓reduceIte, BEq.rfl, bind,
+            guard, gt_iff_lt, hg, failure, List.getLast!_eq_getLast?_getD, Nat.default_eq_zero,
+            Option.bind_none, reduceCtorEq] at h
       · by_cases h17 : code = 17
         · subst h17; rw [Deflate.Spec.rlDecode_go_code17 extra rest acc] at h
           have := ih _ h
@@ -514,7 +516,7 @@ theorem encodeDynamicTrees_decodeDynamicTables
   simp only [hlitLen.1, hlitLen.2, hdistLen.1, hdistLen.2, guard, and_self,
     ↓reduceIte, pure, Pure.pure, bind, Option.bind] at henc
   cases hsymEnc : encodeCLEntries clTable clEntries with
-  | none => simp [hsymEnc] at henc
+  | none => simp only [hsymEnc, List.append_assoc, reduceCtorEq] at henc
   | some symbolBits =>
     simp only [hsymEnc, Option.some.injEq] at henc
     subst henc
@@ -531,7 +533,7 @@ theorem encodeDynamicTrees_decodeDynamicTables
       writeBitsLSB 5 hlit_val ++ (writeBitsLSB 5 hdist_val ++
         (writeBitsLSB 4 hclen_val ++
           (writeCLLengths clLens numCodeLen ++ (symbolBits ++ rest)))) := by
-      simp [List.append_assoc]
+      simp only [List.append_assoc]
     -- Unfold decodeDynamicTables as a sequence of bind operations
     unfold decodeDynamicTables
     rw [hbits_assoc]
@@ -591,7 +593,8 @@ theorem encodeDynamicTrees_decodeDynamicTables
       rlEncodeLengths_valid allLens hallLens
     -- Total codes
     let totalCodes := litLens.length + distLens.length
-    have htotalLen : allLens.length = totalCodes := by simp [allLens, totalCodes]
+    have htotalLen : allLens.length = totalCodes := by
+      simp only [List.length_append, allLens, totalCodes]
     -- Apply the main roundtrip theorem
     have hdecCL := encodeCLEntries_decodeCLSymbols_go clLens clTable clEntries
       symbolBits rest totalCodes []
@@ -693,7 +696,7 @@ theorem encodeCLEntries_isSome (clLens : List Nat) (maxBits : Nat)
     (encodeCLEntries ((Huffman.Spec.allCodes clLens maxBits).map
       fun p => (p.2, p.1)) entries).isSome = true := by
   induction entries with
-  | nil => simp [encodeCLEntries]
+  | nil => simp only [encodeCLEntries, Option.isSome_some]
   | cons entry rest ih =>
     obtain ⟨code, extra⟩ := entry
     simp only [encodeCLEntries]
@@ -701,13 +704,13 @@ theorem encodeCLEntries_isSome (clLens : List Nat) (maxBits : Nat)
     have hsym := encodeSymbol_fixed_isSome clLens maxBits code hlt hne hle
     cases hes : encodeSymbol ((Huffman.Spec.allCodes clLens maxBits).map
         fun p => (p.2, p.1)) code with
-    | none => simp [hes] at hsym
+    | none => simp only [hes, Option.isSome_none, Bool.false_eq_true] at hsym
     | some cwBits =>
       dsimp only [bind, Option.bind]
       have hrest := ih (fun p hp => hall p (List.mem_cons_of_mem _ hp))
       cases her : encodeCLEntries ((Huffman.Spec.allCodes clLens maxBits).map
           fun p => (p.2, p.1)) rest with
-      | none => simp [her] at hrest
-      | some restBits => dsimp [pure, Pure.pure]
+      | none => simp only [her, Option.isSome_none, Bool.false_eq_true] at hrest
+      | some restBits => simp only [pure, List.append_assoc, Option.isSome_some]
 
 end Deflate.Spec
