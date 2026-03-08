@@ -246,6 +246,12 @@ This is more explicit and doesn't depend on the simp lemma database.
 The bare `simp_all` campaign achieved zero bare `simp_all` across the
 entire codebase as of PR #832. New code should maintain this invariant.
 
+The bare `simp` campaign is nearly complete (only
+`DeflateEncodeDynamicProps.lean` and `Huffman.lean` remain as of
+2026-03-08). The batch-then-apply workflow from Phase 3 was the key
+efficiency breakthrough, reducing per-file review time from ~20 build
+cycles to 2-3.
+
 ## Phase 4: Linter Compliance
 
 Check for linter warnings on the cleaned-up proofs:
