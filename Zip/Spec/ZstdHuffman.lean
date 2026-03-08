@@ -549,19 +549,6 @@ private theorem weightStep_ge (acc : Nat) (w : UInt8) :
   · exact Nat.le_add_right acc _
   · exact Nat.le_refl acc
 
-/-- The weight fold is monotone in the initial accumulator. -/
-private theorem weightFold_mono_init (l : List UInt8) (a b : Nat) (h : a ≤ b) :
-    l.foldl (fun acc w =>
-      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) a ≤
-    l.foldl (fun acc w =>
-      if w.toNat > 0 then acc + (1 <<< (w.toNat - 1)) else acc) b := by
-  induction l generalizing a b with
-  | nil => exact h
-  | cons x l ih =>
-    simp only [List.foldl_cons]
-    apply ih
-    split <;> omega
-
 /-- The weight fold over a list preserves a lower bound on the accumulator. -/
 private theorem weightFold_ge_init (l : List UInt8) (acc : Nat) :
     acc ≤ l.foldl (fun acc w =>
@@ -1087,6 +1074,32 @@ theorem parseHuffmanTreeDescriptor_le_size (data : ByteArray) (pos : Nat)
 /-! ## decodeHuffmanSymbol properties -/
 
 open Zip.Native in
+/-- Decompose a successful `decodeHuffmanSymbol` call: the result reader `br'`
+    comes from a single `readBits` call on the original reader `br`.  This
+    factors out the shared monadic unfolding used by `totalBitsRemaining_le`,
+    `data_eq`, and `startPos_eq`. -/
+private theorem decodeHuffmanSymbol_readBits_elim
+    (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (sym : UInt8) (br' : BackwardBitReader)
+    (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
+    ∃ (bits : UInt32) (numBits : Nat),
+      br.readBits numBits = .ok (bits, br') := by
+  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
+  split at h; · exact nomatch h
+  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
+  | error => simp only [hrd1] at h; exact nomatch h
+  | ok v1 =>
+    obtain ⟨bits1, br1⟩ := v1
+    rw [hrd1] at h
+    simp only [pure, Pure.pure, Except.pure] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    rename_i v2 hrd2
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    exact ⟨_, _, hrd2⟩
+
+open Zip.Native in
 /-- When `decodeHuffmanSymbol` succeeds, the bit budget does not increase.
     This is the key monotonicity property for proving termination of
     Huffman stream decoding. -/
@@ -1095,26 +1108,9 @@ theorem decodeHuffmanSymbol_totalBitsRemaining_le
     (sym : UInt8) (br' : BackwardBitReader)
     (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
     br'.totalBitsRemaining ≤ br.totalBitsRemaining := by
-  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
-  -- if peekBits == 0
-  split at h; · exact nomatch h
-  -- first readBits (peek): cases on result
-  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
-  | error => simp only [hrd1] at h; exact nomatch h
-  | ok v1 =>
-    obtain ⟨bits1, br1⟩ := v1
-    rw [hrd1] at h
-    simp only [pure, Pure.pure, Except.pure] at h
-    -- if numBits > avail
-    split at h; · exact nomatch h
-    -- second readBits
-    split at h; · exact nomatch h
-    -- ok case: extract reader equation
-    rename_i v2 hrd2
-    simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨_, rfl⟩ := h
-    have := Zstd.Spec.Fse.readBits_totalBitsRemaining_sub br _ _ _ hrd2
-    omega
+  obtain ⟨_, _, hrd⟩ := decodeHuffmanSymbol_readBits_elim htable br sym br' h
+  have := Zstd.Spec.Fse.readBits_totalBitsRemaining_sub br _ _ _ hrd
+  omega
 
 open Zip.Native in
 /-- The number of bits consumed is at most `maxBits`, given the table is
@@ -1157,53 +1153,24 @@ theorem decodeHuffmanSymbol_bits_le_maxBits
     omega
 
 open Zip.Native in
-/-- The `data` field is unchanged by `decodeHuffmanSymbol`. The first `readBits`
-    (peek) produces a reader that is discarded; the second `readBits` operates
-    on the original `br`, so one application of `readBits_data_eq` suffices. -/
+/-- The `data` field is unchanged by `decodeHuffmanSymbol`. -/
 theorem decodeHuffmanSymbol_data_eq
     (htable : ZstdHuffmanTable) (br : BackwardBitReader)
     (sym : UInt8) (br' : BackwardBitReader)
     (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
     br'.data = br.data := by
-  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
-  split at h; · exact nomatch h
-  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
-  | error => simp only [hrd1] at h; exact nomatch h
-  | ok v1 =>
-    obtain ⟨bits1, br1⟩ := v1
-    rw [hrd1] at h
-    simp only [pure, Pure.pure, Except.pure] at h
-    split at h; · exact nomatch h
-    split at h; · exact nomatch h
-    rename_i v2 hrd2
-    simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨_, rfl⟩ := h
-    exact Zstd.Spec.Fse.readBits_data_eq br _ _ _ hrd2
+  obtain ⟨_, _, hrd⟩ := decodeHuffmanSymbol_readBits_elim htable br sym br' h
+  exact Zstd.Spec.Fse.readBits_data_eq br _ _ _ hrd
 
 open Zip.Native in
-/-- The `startPos` field is unchanged by `decodeHuffmanSymbol`. The first
-    `readBits` (peek) produces a reader that is discarded; the second `readBits`
-    operates on the original `br`, so one application of `readBits_startPos_eq`
-    suffices. -/
+/-- The `startPos` field is unchanged by `decodeHuffmanSymbol`. -/
 theorem decodeHuffmanSymbol_startPos_eq
     (htable : ZstdHuffmanTable) (br : BackwardBitReader)
     (sym : UInt8) (br' : BackwardBitReader)
     (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
     br'.startPos = br.startPos := by
-  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
-  split at h; · exact nomatch h
-  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
-  | error => simp only [hrd1] at h; exact nomatch h
-  | ok v1 =>
-    obtain ⟨bits1, br1⟩ := v1
-    rw [hrd1] at h
-    simp only [pure, Pure.pure, Except.pure] at h
-    split at h; · exact nomatch h
-    split at h; · exact nomatch h
-    rename_i v2 hrd2
-    simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨_, rfl⟩ := h
-    exact Zstd.Spec.Fse.readBits_startPos_eq br _ _ _ hrd2
+  obtain ⟨_, _, hrd⟩ := decodeHuffmanSymbol_readBits_elim htable br sym br' h
+  exact Zstd.Spec.Fse.readBits_startPos_eq br _ _ _ hrd
 
 open Zip.Native in
 /-- If decoding succeeds, the input reader had bits remaining. This is the
