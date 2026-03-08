@@ -1949,4 +1949,141 @@ theorem decompressBlocksWF_compressed_seq_then_raw (data : ByteArray)
     hdr2 afterHdr2 block2 afterBlock2
     hoff2 hparse2 hbs2 hws2 htype2 hraw2 hlast2
 
+
+/-- When `decompressFrame` succeeds and the frame contains a single last
+    compressed block with numSeq=0 (literals only), the output equals the
+    literal section content. -/
+theorem decompressFrame_single_compressed_literals_content (data : ByteArray)
+    (pos : Nat) (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (literals : ByteArray) (afterLiterals : Nat)
+    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
+    (htype : hdr.blockType = .compressed)
+    (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+    (hlit : Zip.Native.parseLiteralsSection data afterHdr none
+              = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+              = .ok (0, modes, afterSeqHeader))
+    (hlast : hdr.lastBlock = true) :
+    output = literals := by
+  -- Derive that the block loop offset is within bounds
+  have hoff : ¬ data.size ≤ afterHeader := by
+    have := parseBlockHeader_le_size data afterHeader hdr afterHdr hparse
+    have := parseBlockHeader_pos_eq data afterHeader hdr afterHdr hparse
+    omega
+  -- Compute the exact block loop result
+  have hblocks := decompressBlocksWF_single_compressed_literals_only data afterHeader
+    header.windowSize ByteArray.empty none {} #[1, 4, 8] hdr afterHdr
+    literals afterLiterals huffTree modes afterSeqHeader
+    hoff hparse hbs hws htype hblockEnd hlit hseq hlast
+  -- Unfold decompressFrame and substitute the frame header result
+  unfold Zip.Native.decompressFrame at hframe
+  dsimp only [Bind.bind, Except.bind] at hframe
+  rw [hh] at hframe
+  simp only [pure, Except.pure] at hframe
+  -- Handle dictionary check, then substitute known block result
+  split at hframe
+  · -- dictionaryId = some dictId
+    split at hframe
+    · exact nomatch hframe  -- dictId != 0 throws
+    · unfold Zip.Native.decompressBlocks at hframe
+      rw [hblocks] at hframe
+      simp only [ByteArray.empty_append] at hframe
+      grind
+  · -- dictionaryId = none
+    unfold Zip.Native.decompressBlocks at hframe
+    rw [hblocks] at hframe
+    simp only [ByteArray.empty_append] at hframe
+    grind
+
+/-- When `decompressFrame` succeeds and the frame contains a single last
+    compressed block with sequences (numSeq > 0), the output equals the
+    sequence execution result. -/
+theorem decompressFrame_single_compressed_sequences_content (data : ByteArray)
+    (pos : Nat) (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (literals : ByteArray) (afterLiterals : Nat)
+    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq : Nat) (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (llTable ofTable mlTable : Zip.Native.FseTable) (afterTables : Nat)
+    (bbr : Zip.Native.BackwardBitReader)
+    (sequences : Array Zip.Native.ZstdSequence)
+    (blockOutput : ByteArray) (newHist : Array Nat)
+    (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
+    (htype : hdr.blockType = .compressed)
+    (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+    (hlit : Zip.Native.parseLiteralsSection data afterHdr none
+              = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+              = .ok (numSeq, modes, afterSeqHeader))
+    (hNumSeq : ¬ numSeq == 0)
+    (hfse : Zip.Native.resolveSequenceFseTables modes data afterSeqHeader {}
+              = .ok (llTable, ofTable, mlTable, afterTables))
+    (hbbr : Zip.Native.BackwardBitReader.init data afterTables
+              (afterHdr + hdr.blockSize.toNat) = .ok bbr)
+    (hdec : Zip.Native.decodeSequences llTable ofTable mlTable bbr numSeq
+              = .ok sequences)
+    (hexec : Zip.Native.executeSequences sequences literals ByteArray.empty
+               #[1, 4, 8] header.windowSize.toNat
+               = .ok (blockOutput, newHist))
+    (hlast : hdr.lastBlock = true) :
+    output = blockOutput := by
+  -- Derive that the block loop offset is within bounds
+  have hoff : ¬ data.size ≤ afterHeader := by
+    have := parseBlockHeader_le_size data afterHeader hdr afterHdr hparse
+    have := parseBlockHeader_pos_eq data afterHeader hdr afterHdr hparse
+    omega
+  -- The block-loop theorem needs the executeSequences with window-checked output.
+  -- Since decompressBlocks passes ByteArray.empty as initial output, and
+  -- ByteArray.empty.size = 0 is never > windowSize.toNat, the window check
+  -- simplifies to ByteArray.empty.
+  have hexec' : Zip.Native.executeSequences sequences literals
+      (if header.windowSize > 0 && ByteArray.empty.size > header.windowSize.toNat
+       then ByteArray.empty.extract (ByteArray.empty.size - header.windowSize.toNat)
+              ByteArray.empty.size
+       else ByteArray.empty)
+      #[1, 4, 8] header.windowSize.toNat
+      = .ok (blockOutput, newHist) := by
+    simp only [ByteArray.size_empty, Nat.not_lt_zero, decide_false, Bool.and_false]
+    exact hexec
+  -- Compute the exact block loop result
+  have hblocks := decompressBlocksWF_single_compressed_sequences data afterHeader
+    header.windowSize ByteArray.empty none {} #[1, 4, 8] hdr afterHdr
+    literals afterLiterals huffTree numSeq modes afterSeqHeader
+    llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
+    hoff hparse hbs hws htype hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec' hlast
+  -- Unfold decompressFrame and substitute the frame header result
+  unfold Zip.Native.decompressFrame at hframe
+  dsimp only [Bind.bind, Except.bind] at hframe
+  rw [hh] at hframe
+  simp only [pure, Except.pure] at hframe
+  -- Handle dictionary check, then substitute known block result
+  split at hframe
+  · -- dictionaryId = some dictId
+    split at hframe
+    · exact nomatch hframe  -- dictId != 0 throws
+    · unfold Zip.Native.decompressBlocks at hframe
+      rw [hblocks] at hframe
+      simp only [ByteArray.empty_append] at hframe
+      grind
+  · -- dictionaryId = none
+    unfold Zip.Native.decompressBlocks at hframe
+    rw [hblocks] at hframe
+    simp only [ByteArray.empty_append] at hframe
+    grind
+
 end Zstd.Spec
