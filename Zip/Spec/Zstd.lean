@@ -18,6 +18,13 @@ The key correctness theorems prove that `parseFrameHeader` and
 these specification predicates.
 -/
 
+-- Unfold monadic `Except` bind/pure in hypothesis `h`.
+-- This pattern appears throughout Zstd spec proofs that case-split on monadic
+-- computations returning `Except`.
+set_option hygiene false in
+local macro "unfold_except" : tactic =>
+  `(tactic| simp only [bind, Except.bind, pure, Except.pure] at h)
+
 namespace Zstd.Spec
 
 /-! ## Magic number predicates -/
@@ -119,7 +126,7 @@ theorem parseBlockHeader_type_ne_reserved (data : ByteArray) (pos : Nat)
   unfold Zip.Native.parseBlockHeader at h
   split at h
   · exact nomatch h
-  · simp only [bind, Except.bind, pure, Except.pure] at h
+  · unfold_except
     split at h
     · -- typeVal = 0 → raw
       obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
@@ -150,7 +157,7 @@ theorem parseBlockHeader_blockSize_lt (data : ByteArray) (pos : Nat)
   unfold Zip.Native.parseBlockHeader at h
   split at h
   · exact nomatch h
-  · simp only [bind, Except.bind, pure, Except.pure] at h
+  · unfold_except
     split at h
     · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
     · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
@@ -167,7 +174,7 @@ theorem parseBlockHeader_pos_eq (data : ByteArray) (pos : Nat)
   unfold Zip.Native.parseBlockHeader at h
   split at h
   · exact nomatch h
-  · simp only [bind, Except.bind, pure, Except.pure] at h
+  · unfold_except
     split at h
     · obtain ⟨rfl, rfl⟩ := h; rfl
     · obtain ⟨rfl, rfl⟩ := h; rfl
@@ -195,7 +202,7 @@ theorem decompressRawBlock_size (data : ByteArray) (pos : Nat)
     (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (result, pos')) :
     result.size = blockSize.toNat := by
   unfold Zip.Native.decompressRawBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h
@@ -208,7 +215,7 @@ theorem decompressRLEBlock_size (data : ByteArray) (pos : Nat)
     (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (result, pos')) :
     result.size = blockSize.toNat := by
   unfold Zip.Native.decompressRLEBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h
@@ -222,7 +229,7 @@ theorem decompressRLEBlock_content (data : ByteArray) (pos : Nat)
     (i : Nat) (hi : i < result.size) :
     result[i] = data[pos]! := by
   unfold Zip.Native.decompressRLEBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h
@@ -235,7 +242,7 @@ theorem decompressRawBlock_pos_eq (data : ByteArray) (pos : Nat)
     (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (result, pos')) :
     pos' = pos + blockSize.toNat := by
   unfold Zip.Native.decompressRawBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h; rfl
@@ -246,7 +253,7 @@ theorem decompressRawBlock_le_size (data : ByteArray) (pos : Nat)
     (h : Zip.Native.decompressRawBlock data pos blockSize = .ok (output, pos')) :
     pos' ≤ data.size := by
   unfold Zip.Native.decompressRawBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h; omega
@@ -258,7 +265,7 @@ theorem decompressRLEBlock_pos_eq (data : ByteArray) (pos : Nat)
     (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (result, pos')) :
     pos' = pos + 1 := by
   unfold Zip.Native.decompressRLEBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h; rfl
@@ -269,7 +276,7 @@ theorem decompressRLEBlock_le_size (data : ByteArray) (pos : Nat)
     (h : Zip.Native.decompressRLEBlock data pos blockSize = .ok (output, pos')) :
     pos' ≤ data.size := by
   unfold Zip.Native.decompressRLEBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h; omega
@@ -284,12 +291,12 @@ theorem decompressRawBlock_content (data : ByteArray) (pos : Nat)
       have := decompressRawBlock_size data pos blockSize result pos' h
       have := decompressRawBlock_pos_eq data pos blockSize result pos' h
       unfold Zip.Native.decompressRawBlock at h
-      simp only [bind, Except.bind, pure, Except.pure] at h
+      unfold_except
       split at h
       · exact nomatch h
       · obtain ⟨rfl, rfl⟩ := h; simp only [ByteArray.size_extract] at hi; omega) := by
   unfold Zip.Native.decompressRawBlock at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · obtain ⟨rfl, rfl⟩ := h
@@ -310,7 +317,7 @@ theorem decompressFrame_contentSize_eq (data : ByteArray) (pos : Nat)
   unfold Zip.Native.decompressFrame at h
   dsimp only [Bind.bind, Except.bind] at h
   rw [hh] at h
-  dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   -- Substitute contentSize = some n to resolve the contentSize match
   simp only [hn] at h
   -- grind handles the remaining monadic case-splitting through:
@@ -337,7 +344,7 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   unfold Zip.Native.decompressFrame at h
   dsimp only [Bind.bind, Except.bind] at h
   rw [hh] at h
-  dsimp only [Bind.bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   -- Substitute contentChecksum = true to resolve the checksum conditionals
   simp only [hc] at h
   -- grind handles the remaining monadic case-splitting through:
@@ -359,7 +366,7 @@ theorem skipSkippableFrame_pos_eq (data : ByteArray) (pos : Nat)
     (h : Zip.Native.skipSkippableFrame data pos = .ok pos') :
     pos' = pos + 8 + (Binary.readUInt32LE data (pos + 4)).toNat := by
   unfold Zip.Native.skipSkippableFrame at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · split at h
@@ -383,7 +390,7 @@ theorem skipSkippableFrame_le_size (data : ByteArray) (pos pos' : Nat)
     (h : Zip.Native.skipSkippableFrame data pos = .ok pos') :
     pos' ≤ data.size := by
   unfold Zip.Native.skipSkippableFrame at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h
   · exact nomatch h
   · split at h
@@ -404,7 +411,7 @@ theorem decompressBlocksWF_output_size_ge (data : ByteArray) (off : Nat)
       = .ok (result, pos')) :
     result.size ≥ output.size := by
   unfold Zip.Native.decompressBlocksWF at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   -- Peel off error cases: off guard, parseBlockHeader, blockSize, windowSize
   split at h; next => exact nomatch h
   split at h; next => exact nomatch h
@@ -472,7 +479,7 @@ theorem decompressBlocksWF_prefix (data : ByteArray) (off : Nat)
     (i : Nat) (hi : i < output.size) :
     result[i]! = output[i]! := by
   unfold Zip.Native.decompressBlocksWF at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   -- Peel off error cases: off guard, parseBlockHeader, blockSize, windowSize
   split at h; next => exact nomatch h
   split at h; next => exact nomatch h
@@ -535,7 +542,7 @@ theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
       = .ok (result, pos')) :
     pos' > off := by
   unfold Zip.Native.decompressBlocksWF at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   -- Peel off error cases: off guard, parseBlockHeader, blockSize, windowSize
   split at h; next => exact nomatch h
   split at h; next => exact nomatch h
@@ -600,7 +607,7 @@ theorem decompressBlocksWF_le_size (data : ByteArray) (off : Nat)
       = .ok (result, pos')) :
     pos' ≤ data.size := by
   unfold Zip.Native.decompressBlocksWF at h
-  simp only [bind, Except.bind, pure, Except.pure] at h
+  unfold_except
   split at h; next => exact nomatch h
   split at h; next => exact nomatch h
   split at h; next => exact nomatch h
