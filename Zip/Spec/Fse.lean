@@ -1447,4 +1447,131 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
       · split at heq <;> exact nomatch heq
   exact h4.1 i
 
+/-- Helper: `Nat.toUInt16.toNat` preserves strict upper bounds.
+    Since `n.toUInt16.toNat = n % UInt16.size ≤ n`, any upper bound on `n`
+    transfers to `n.toUInt16.toNat`. -/
+private theorem toUInt16_toNat_lt_of_lt {n m : Nat} (h : n < m) :
+    n.toUInt16.toNat < m := by
+  simp only [Nat.toUInt16_eq, UInt16.toNat_ofNat']
+  exact Nat.lt_of_le_of_lt (Nat.mod_le _ _) h
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds and the input distribution is non-empty,
+    every cell's symbol index is less than `probs.size`.
+    This is condition (b) of `ValidFseTable`.
+
+    The proof threads the invariant through all four bind chains:
+    - Initial cells have `symbol = 0 < probs.size` (by `hpos`)
+    - Loops 1-2 set `symbol := sym.toUInt16` where `sym < probs.size`
+    - Loop 3 doesn't modify cells
+    - Loop 4 preserves symbol (`{ cells[i]!.symbol with ... }`) -/
+theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table)
+    (hpos : 0 < probs.size)
+    (i : Fin table.cells.size) :
+    table.cells[i].symbol.toNat < probs.size := by
+  simp only [buildFseTable] at h
+  obtain ⟨v1, hloop1, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v2, hloop2, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v3, hloop3, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨v4, hloop4, h⟩ := Except.bind_eq_ok' h
+  simp only [pure, Except.pure, Except.ok.injEq] at h; subst h
+  show v4.fst[i].symbol.toNat < probs.size
+  let P : FseCell → Prop := fun c => c.symbol.toNat < probs.size
+  -- Initial cells: Array.replicate with default has symbol = 0
+  have hinit : ∀ j : Fin (Array.replicate (1 <<< al) (default : FseCell)).size,
+      P (Array.replicate (1 <<< al) (default : FseCell))[j] := by
+    intro ⟨j, hj⟩; show P _; simp; exact hpos
+  -- Loop 1: preserves property (sets cells with { symbol := sym.toUInt16 })
+  have h1 : ∀ j : Fin v1.fst.size, P v1.fst[j] := by
+    apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+      _ _ _ _ hinit _ _ hloop1
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+        rename_i hcond
+        apply set!_preserves_forall hb; show P _
+        apply toUInt16_toNat_lt_of_lt
+        by_cases h : a < probs.size
+        · exact h
+        · have hdef : probs[a]! = (default : Int32) := by
+            simp only [Array.getElem!_eq_getD, Array.getD, dif_neg h]
+          rw [hdef] at hcond; exact absurd hcond (by decide)
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> exact nomatch heq
+  -- Loop 2: preserves property (sets cells with { symbol := sym.toUInt16 })
+  have h2 : ∀ j : Fin v2.fst.size, P v2.fst[j] := by
+    apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+      _ _ _ _ h1 _ _ hloop2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · split at heq
+        · exact nomatch heq
+        · rename_i _ _ hinner
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          have ha : a < probs.size := by
+            by_cases h : a < probs.size
+            · exact h
+            · exfalso
+              have hnotleq := ‹¬probs[a]! ≤ 0›
+              have hdef : probs[a]! = (default : Int32) := by
+                simp only [Array.getElem!_eq_getD, Array.getD, dif_neg h]
+              rw [hdef] at hnotleq; exact hnotleq (by decide)
+          apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+            _ _ _ _ hb _ _ hinner
+          · intro a2 b2 b2' hb2 heq2
+            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
+            exact set!_preserves_forall hb2 (toUInt16_toNat_lt_of_lt ha)
+          · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+    · intro a b b' hb heq
+      simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq
+      · exact nomatch heq
+      · split at heq <;> exact nomatch heq
+  -- Loop 3 modifies only symbolCounts (v3 : Array Nat), not cells.
+  -- Loop 4 starts with v2.fst as its initial cells.
+  -- Loop 4: preserves symbol field ({ symbol := cells[i]!.symbol, ... })
+  apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+    _ _ _ _ h2 _ _ hloop4
+  · intro a b b' hb heq
+    simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq
+    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+    · split at heq
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+        exact set!_preserves_forall hb (show P _ by
+          -- symbol field is preserved: { symbol := b.fst[a]!.symbol, ... }
+          show (b.fst[a]!).symbol.toNat < probs.size
+          by_cases ha : a < b.fst.size
+          · simp only [Array.getElem!_eq_getD, Array.getD, dif_pos ha]
+            exact hb ⟨a, ha⟩
+          · simp only [Array.getElem!_eq_getD, Array.getD, dif_neg ha]
+            exact hpos)
+  · intro a b b' hb heq
+    simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq
+    · exact nomatch heq
+    · split at heq <;> exact nomatch heq
+
+open Zip.Native in
+/-- When `buildFseTable` succeeds and the input distribution is non-empty,
+    the resulting table satisfies `ValidFseTable`: size equals `1 <<< al`,
+    all symbols are within bounds, and all `numBits` values are at most `al`.
+
+    This composes `buildFseTable_cells_size`, `buildFseTable_symbol_lt`,
+    and `buildFseTable_numBits_le`. -/
+theorem buildFseTable_valid (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table)
+    (hpos : 0 < probs.size) :
+    ValidFseTable table.cells al probs.size :=
+  ⟨buildFseTable_cells_size probs al table h,
+   fun i => buildFseTable_symbol_lt probs al table h hpos i,
+   fun i => buildFseTable_numBits_le probs al table h i⟩
+
 end Zstd.Spec.Fse
