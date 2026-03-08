@@ -680,6 +680,36 @@ theorem decompressBlocksWF_single_rle (data : ByteArray) (off : Nat)
   simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
     ↓reduceIte, htype, hrle, hlast, Bool.false_eq_true]
 
+/-- When `decompressBlocksWF` encounters a single compressed last block with
+    numSeq == 0 (literals only, no sequence commands), the result is the
+    accumulated output extended by the literal data, and the position at
+    blockEnd = afterHdr + blockSize. -/
+theorem decompressBlocksWF_single_compressed_literals_only (data : ByteArray)
+    (off : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuffTree : Option Zip.Native.ZstdHuffmanTable) (prevFseTables : Zip.Native.PrevFseTables)
+    (offsetHistory : Array Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (literals : ByteArray) (afterLiterals : Nat) (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (hoff : ¬ data.size ≤ off)
+    (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+    (htype : hdr.blockType = .compressed)
+    (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+    (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuffTree
+      = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals = .ok (0, modes, afterSeqHeader))
+    (hlast : hdr.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuffTree prevFseTables offsetHistory
+      = .ok (output ++ literals, afterHdr + hdr.blockSize.toNat) := by
+  have hlit' : (Zip.Native.parseLiteralsSection data afterHdr prevHuffTree).mapError
+      (· ++ " [in parseLiteralsSection]") = .ok (literals, afterLiterals, huffTree) := by
+    rw [hlit]; rfl
+  unfold Zip.Native.decompressBlocksWF
+  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
+    ↓reduceIte, htype, hblockEnd, hlit', hseq, beq_self_eq_true, hlast, Bool.false_eq_true]
+
 /-! ## decompressBlocksWF step theorems -/
 
 /-- When `decompressBlocksWF` encounters a non-last raw block, it recurses with
@@ -734,49 +764,17 @@ theorem decompressBlocksWF_rle_step (data : ByteArray) (off : Nat)
     bind, Except.bind, pure, Except.pure, ↓reduceIte, Bool.false_eq_true]
   exact heq
 
-/-- When `decompressBlocksWF` encounters a single last compressed block with
-    numSeq == 0 (literals only, no sequence commands), the result is the
-    accumulated output extended by the literal data at position blockEnd. -/
-theorem decompressBlocksWF_single_compressed_literals_only (data : ByteArray)
-    (off : Nat) (windowSize : UInt64) (output : ByteArray)
-    (prevHuffTree : Option Zip.Native.ZstdHuffmanTable)
-    (prevFseTables : Zip.Native.PrevFseTables)
-    (offsetHistory : Array Nat)
-    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
-    (literals : ByteArray) (afterLiterals : Nat)
-    (huffTree : Option Zip.Native.ZstdHuffmanTable)
-    (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
-    (hoff : ¬ data.size ≤ off)
-    (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
-    (hbs : ¬ hdr.blockSize > 131072)
-    (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
-    (htype : hdr.blockType = .compressed)
-    (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
-    (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuffTree
-      = .ok (literals, afterLiterals, huffTree))
-    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
-      = .ok (0, modes, afterSeqHeader))
-    (hlast : hdr.lastBlock = true) :
-    Zip.Native.decompressBlocksWF data off windowSize output prevHuffTree prevFseTables
-        offsetHistory
-      = .ok (output ++ literals, afterHdr + hdr.blockSize.toNat) := by
-  unfold Zip.Native.decompressBlocksWF
-  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
-    ↓reduceIte, htype, hblockEnd, hlit, Except.mapError.eq_2, hseq, beq_self_eq_true,
-    hlast, Bool.false_eq_true]
-
 /-- When `decompressBlocksWF` encounters a non-last compressed block with
     numSeq == 0 (literals only), it recurses with `output ++ literals`,
     updated Huffman table (keeping new tree if present, otherwise preserving
-    previous), unchanged FSE tables and offset history, and position at blockEnd. -/
+    previous), unchanged FSE tables and offset history, and position at
+    blockEnd = afterHdr + blockSize. -/
 theorem decompressBlocksWF_compressed_literals_only_step (data : ByteArray)
     (off : Nat) (windowSize : UInt64) (output : ByteArray)
-    (prevHuffTree : Option Zip.Native.ZstdHuffmanTable)
-    (prevFseTables : Zip.Native.PrevFseTables)
+    (prevHuffTree : Option Zip.Native.ZstdHuffmanTable) (prevFseTables : Zip.Native.PrevFseTables)
     (offsetHistory : Array Nat)
     (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
-    (literals : ByteArray) (afterLiterals : Nat)
-    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (literals : ByteArray) (afterLiterals : Nat) (huffTree : Option Zip.Native.ZstdHuffmanTable)
     (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
     (hoff : ¬ data.size ≤ off)
     (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
@@ -786,23 +784,27 @@ theorem decompressBlocksWF_compressed_literals_only_step (data : ByteArray)
     (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
     (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuffTree
       = .ok (literals, afterLiterals, huffTree))
-    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
-      = .ok (0, modes, afterSeqHeader))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals = .ok (0, modes, afterSeqHeader))
     (hnotlast : hdr.lastBlock = false)
     (hadv : ¬ afterHdr + hdr.blockSize.toNat ≤ off) :
-    Zip.Native.decompressBlocksWF data off windowSize output prevHuffTree prevFseTables
-        offsetHistory
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuffTree prevFseTables offsetHistory
       = Zip.Native.decompressBlocksWF data (afterHdr + hdr.blockSize.toNat) windowSize
           (output ++ literals)
-          (if let some ht := huffTree then some ht else prevHuffTree)
+          (if let some ht := (id huffTree) then some ht else prevHuffTree)
           prevFseTables offsetHistory := by
-  rw [show Zip.Native.decompressBlocksWF data off windowSize output prevHuffTree
-    prevFseTables offsetHistory = _ from by unfold Zip.Native.decompressBlocksWF; rfl]
-  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
-    ↓reduceIte, htype, hblockEnd, hlit, Except.mapError.eq_2, hseq, beq_self_eq_true,
-    hnotlast, Bool.false_eq_true, hadv]
-  congr 1
-  cases huffTree <;> rfl
+  have hlit' : (Zip.Native.parseLiteralsSection data afterHdr prevHuffTree).mapError
+      (· ++ " [in parseLiteralsSection]") = .ok (literals, afterLiterals, huffTree) := by
+    rw [hlit]; rfl
+  generalize heq : Zip.Native.decompressBlocksWF data (afterHdr + hdr.blockSize.toNat) windowSize
+    (output ++ literals) (if let some ht := (id huffTree) then some ht else prevHuffTree)
+    prevFseTables offsetHistory = rhs
+  unfold Zip.Native.decompressBlocksWF
+  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, htype, ↓reduceIte, hblockEnd,
+    bind, Except.bind, pure, Except.pure]
+  rw [hlit']
+  simp only [hseq, beq_self_eq_true, hnotlast, hadv, Bool.false_eq_true,
+    ↓reduceIte, ↓reduceDIte]
+  exact heq
 
 /-! ## Frame header position advancement -/
 
