@@ -67,7 +67,6 @@ theorem encodeSymbol_canonicalCodes_eq (lengths : Array UInt8) (maxBits : Nat)
 
 /-! ## Main emitTokensWithCodes ↔ encodeSymbols correspondence -/
 
-set_option maxRecDepth 2048 in
 /-- Generalized loop invariant for `emitTokensWithCodes_spec`. -/
 private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
     (litLengths distLengths : Array UInt8)
@@ -252,8 +251,6 @@ theorem emitTokensWithCodes_spec (bw : BitWriter) (tokens : Array LZ77Token)
     litCodes distCodes 0 bits hwf hlc hdc hv_lit' hv_dist'
     (by rwa [List.drop_zero])
 
-set_option maxRecDepth 2048 in
-set_option linter.unusedSimpArgs false in
 /-- `emitTokensWithCodes` preserves `BitWriter.wf`. -/
 private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
     (litCodes distCodes : Array (UInt16 × UInt8))
@@ -279,19 +276,17 @@ private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77T
     simp only [dif_pos hlt]
     match htok : tokens[i] with
     | .literal b =>
-      simp only [htok]
+      dsimp only
       have hb_lt : b.toNat < litCodes.size := by have := UInt8.toNat_lt b; omega
       have hb_le : litCodes[b.toNat]!.2.toNat ≤ 15 := hlit_le b.toNat hb_lt
       exact ih _ (i + 1)
         (BitWriter.writeHuffCode_wf bw _ _ hwf hb_le) (by omega)
     | .reference len dist =>
-      simp only [htok]
+      dsimp only
       match hflc : findLengthCode len with
       | none =>
-        simp only [hflc]
         exact ih _ (i + 1) hwf (by omega)
       | some (idx, extraCount, extraVal) =>
-        simp only [hflc]
         have hidx := nativeFindLengthCode_idx_bound len idx extraCount extraVal hflc
         have hsym_lt : idx + 257 < litCodes.size := by omega
         have hlen_code : litCodes[idx + 257]!.2.toNat ≤ 15 := hlit_le (idx + 257) hsym_lt
@@ -304,10 +299,8 @@ private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77T
           extraCount extraVal hwf1 hextraN_le
         match hfdc : findDistCode dist with
         | none =>
-          simp only [hfdc]
           exact ih _ (i + 1) hwf2 (by omega)
         | some (dIdx, dExtraCount, dExtraVal) =>
-          simp only [hfdc]
           have hdidx := nativeFindDistCode_idx_bound dist dIdx dExtraCount dExtraVal hfdc
           have hdsym_lt : dIdx < distCodes.size := by omega
           have hdlen_code : distCodes[dIdx]!.2.toNat ≤ 15 := hdist_le dIdx hdsym_lt
