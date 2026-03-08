@@ -673,6 +673,127 @@ theorem resolveSingleFseTable_fseCompressed_pos_gt (maxSymbols maxAccLog : Nat)
         -- bitOff < 8 from decodeFseDistribution_bitPos_ge, so pos ≥ pos
         omega
 
+/-! ## resolveSingleFseTable validity — per-mode ValidFseTable proofs -/
+
+/-- In predefined mode, the returned table satisfies `ValidFseTable` with the predefined
+    distribution's accuracy log and symbol count, provided the distribution is non-empty. -/
+theorem resolveSingleFseTable_predefined_valid (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .predefined maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos'))
+    (hpos : 0 < predefinedDist.size) :
+    Zstd.Spec.Fse.ValidFseTable table.cells predefinedAccLog predefinedDist.size := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  cases hbt : buildFseTable predefinedDist predefinedAccLog with
+  | error e => rw [hbt] at h; exact nomatch h
+  | ok tbl =>
+    rw [hbt] at h
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h
+    exact Zstd.Spec.Fse.buildFseTable_valid _ _ _ hbt hpos
+
+/-- In RLE mode, the returned table satisfies `ValidFseTable` with accuracy log 0
+    and 256 symbols. Since the symbol is a `UInt8`, `symbol.toNat < 256` always holds. -/
+theorem resolveSingleFseTable_rle_valid (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .rle maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    Zstd.Spec.Fse.ValidFseTable table.cells 0 256 := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h
+    exact buildRleFseTable_valid _ 256 (UInt8.toNat_lt _)
+
+/-- In repeat mode, the returned table IS the previous table. If the previous table
+    satisfies `ValidFseTable`, so does the returned table. -/
+theorem resolveSingleFseTable_repeat_valid (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .repeat maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos'))
+    (al ns : Nat)
+    (hprev : ∀ t, prevTable = some t → Zstd.Spec.Fse.ValidFseTable t.cells al ns) :
+    Zstd.Spec.Fse.ValidFseTable table.cells al ns := by
+  simp only [resolveSingleFseTable, pure, Except.pure] at h
+  split at h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h
+    exact hprev _ rfl
+  · exact nomatch h
+
+/-- In fseCompressed mode, the returned table satisfies `ValidFseTable` for the decoded
+    distribution. The existential quantification is needed because `probs` and `accLog`
+    are read from the bitstream (not input parameters). -/
+theorem resolveSingleFseTable_fseCompressed_valid (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .fseCompressed maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    ∃ (probs : Array Int32) (accLog : Nat),
+      Zstd.Spec.Fse.ValidFseTable table.cells accLog probs.size := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  -- Extract decodeFseDistribution call
+  cases hfse : decodeFseDistribution { data, pos, bitOff := 0 } maxSymbols maxAccLog with
+  | error e => rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+  | ok val =>
+    rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
+    -- Extract buildFseTable call
+    cases hbt : buildFseTable val.1 val.2.1 with
+    | error e => rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+    | ok tbl =>
+      rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, _⟩ := h
+      exact ⟨val.1, val.2.1,
+        Zstd.Spec.Fse.buildFseTable_valid _ _ _ hbt
+          (Zstd.Spec.Fse.decodeFseDistribution_size_pos hfse)⟩
+
+/-! ## resolveSingleFseTable unified validity -/
+
+/-- Across all four compression modes, when `resolveSingleFseTable` succeeds, the returned
+    table satisfies `ValidFseTable` for some accuracy log and symbol count. Requires
+    non-empty predefined distribution (for predefined mode) and validity of previous table
+    (for repeat mode). -/
+theorem resolveSingleFseTable_valid_ex (mode : SequenceCompressionMode) (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat) (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable) (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable mode maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos'))
+    (hpos : 0 < predefinedDist.size)
+    (hprev : ∀ t, prevTable = some t → ∃ al ns, Zstd.Spec.Fse.ValidFseTable t.cells al ns) :
+    ∃ al ns, Zstd.Spec.Fse.ValidFseTable table.cells al ns := by
+  cases mode with
+  | predefined =>
+    exact ⟨predefinedAccLog, predefinedDist.size,
+      resolveSingleFseTable_predefined_valid _ _ _ _ _ _ _ _ _ h hpos⟩
+  | rle =>
+    exact ⟨0, 256, resolveSingleFseTable_rle_valid _ _ _ _ _ _ _ _ _ h⟩
+  | «repeat» =>
+    -- In repeat mode, table = prevTable.get!
+    simp only [resolveSingleFseTable, pure, Except.pure] at h
+    cases hpt : prevTable with
+    | none => rw [hpt] at h; exact nomatch h
+    | some t =>
+      rw [hpt] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, _⟩ := h
+      exact hprev t hpt
+  | fseCompressed =>
+    obtain ⟨probs, accLog, hv⟩ := resolveSingleFseTable_fseCompressed_valid _ _ _ _ _ _ _ _ _ h
+    exact ⟨accLog, probs.size, hv⟩
+
 /-! ## resolveSingleFseTable unified position monotonicity -/
 
 /-- Across all four compression modes, the returned position is at least the input position.
@@ -729,6 +850,45 @@ theorem resolveSequenceFseTables_pos_ge (modes : SequenceCompressionModes)
         have h₂ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hof
         have h₃ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hml
         omega
+
+/-! ## resolveSequenceFseTables validity composition -/
+
+/-- When `resolveSequenceFseTables` succeeds, all three returned FSE tables satisfy
+    `ValidFseTable` for some accuracy log and symbol count. Requires that any previous
+    tables (for repeat mode) are also valid. Composes three applications of
+    `resolveSingleFseTable_valid_ex` — one for each of litLen, offset, matchLen. -/
+theorem resolveSequenceFseTables_valid (modes : SequenceCompressionModes)
+    (data : ByteArray) (pos : Nat) (prev : PrevFseTables)
+    (llTable ofTable mlTable : FseTable) (pos' : Nat)
+    (h : resolveSequenceFseTables modes data pos prev = .ok (llTable, ofTable, mlTable, pos'))
+    (hprevLL : ∀ t, prev.litLen = some t → ∃ al ns, Zstd.Spec.Fse.ValidFseTable t.cells al ns)
+    (hprevOF : ∀ t, prev.offset = some t → ∃ al ns, Zstd.Spec.Fse.ValidFseTable t.cells al ns)
+    (hprevML : ∀ t, prev.matchLen = some t → ∃ al ns, Zstd.Spec.Fse.ValidFseTable t.cells al ns) :
+    (∃ al ns, Zstd.Spec.Fse.ValidFseTable llTable.cells al ns) ∧
+    (∃ al ns, Zstd.Spec.Fse.ValidFseTable ofTable.cells al ns) ∧
+    (∃ al ns, Zstd.Spec.Fse.ValidFseTable mlTable.cells al ns) := by
+  simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure] at h
+  -- Extract the three resolveSingleFseTable calls
+  cases hll : resolveSingleFseTable modes.litLenMode 36 9 data pos
+      predefinedLitLenDistribution 6 prev.litLen with
+  | error e => rw [hll] at h; exact nomatch h
+  | ok val₁ =>
+    rw [hll] at h; dsimp only [Bind.bind, Except.bind] at h
+    cases hof : resolveSingleFseTable modes.offsetMode 32 8 data val₁.2
+        predefinedOffsetDistribution 5 prev.offset with
+    | error e => rw [hof] at h; exact nomatch h
+    | ok val₂ =>
+      rw [hof] at h; dsimp only [Bind.bind, Except.bind] at h
+      cases hml : resolveSingleFseTable modes.matchLenMode 53 9 data val₂.2
+          predefinedMatchLenDistribution 6 prev.matchLen with
+      | error e => rw [hml] at h; exact nomatch h
+      | ok val₃ =>
+        rw [hml] at h; dsimp only [Bind.bind, Except.bind] at h
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl, rfl, _⟩ := h
+        exact ⟨resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hll (by decide) hprevLL,
+               resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hof (by decide) hprevOF,
+               resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hml (by decide) hprevML⟩
 
 end Zip.Native
 
