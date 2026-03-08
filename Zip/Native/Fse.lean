@@ -345,6 +345,37 @@ def decodeFseSymbols (table : FseTable) (br : BackwardBitReader) (count : Nat) :
       state := cell.newState.toNat + bits.toNat
   return (result, br)
 
+/-- WF variant of `decodeFseSymbols` inner loop for proof reasoning.
+    `state` is the current FSE state, `remaining` counts symbols left,
+    `acc` accumulates decoded symbols. Structurally recursive on `remaining`. -/
+def decodeFseSymbolsWF.loop (table : FseTable) (br : BackwardBitReader)
+    (state : Nat) (remaining : Nat)
+    (acc : Array UInt8) :
+    Except String (Array UInt8 × BackwardBitReader) :=
+  match remaining with
+  | 0 => .ok (acc, br)
+  | n + 1 =>
+    let tableSize := 1 <<< table.accuracyLog
+    if state >= tableSize then
+      throw s!"FSE decode: state {state} out of range (table size {tableSize})"
+    else
+      let cell := table.cells[state]!
+      let acc' := acc.push cell.symbol.toUInt8
+      if n == 0 then
+        .ok (acc', br)
+      else do
+        let (bits, br') ← br.readBits cell.numBits.toNat
+        let newState := cell.newState.toNat + bits.toNat
+        decodeFseSymbolsWF.loop table br' newState n acc'
+
+/-- WF variant of `decodeFseSymbols`. Structurally recursive on `count`. -/
+def decodeFseSymbolsWF (table : FseTable) (br : BackwardBitReader)
+    (count : Nat) :
+    Except String (Array UInt8 × BackwardBitReader) := do
+  if count == 0 then return (#[], br)
+  let (initState, br) ← br.readBits table.accuracyLog
+  decodeFseSymbolsWF.loop table br initState.toNat count #[]
+
 /-- Decode FSE symbols until the backward bitstream is fully consumed.
     Used for Huffman weight decoding where the symbol count is not known in advance
     (RFC 8878 §4.2.1). Uses a fuel parameter for termination.
