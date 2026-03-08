@@ -218,7 +218,7 @@ private theorem readBit_pos_inv (br : Zip.Native.BitReader)
   · exact nomatch h
   · rename_i hpos
     split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    · obtain ⟨_, rfl⟩ := h; simp_all
+    · obtain ⟨_, rfl⟩ := h; exact .inl rfl
     · obtain ⟨_, rfl⟩ := h; dsimp only; right; omega
 
 /-- `readBits.go` preserves the position invariant. -/
@@ -419,14 +419,13 @@ theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
       cw ≠ [] := by
   intro cw s hmem hnil
   obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem
-  simp only [Prod.mk.injEq] at he
-  obtain ⟨h_cw, h_s⟩ := he; subst h_cw; subst h_s
+  simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he
   rw [Huffman.Spec.allCodes_mem_iff] at hm
   obtain ⟨_, hcf⟩ := hm
   obtain ⟨_, hlen_cond, hcw_eq⟩ := Huffman.Spec.codeFor_spec hcf
   simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at hlen_cond
   have : cw'.length > 0 := by rw [hcw_eq, Huffman.Spec.natToBits_length]; omega
-  exact absurd hnil (by intro h; rw [h, List.length_nil] at this; omega)
+  simp [hnil] at this
 
 set_option maxRecDepth 2048 in
 /-- If the native Huffman block decoder succeeds, the spec's `decodeSymbols`
@@ -668,7 +667,7 @@ theorem decodeHuffman_correct
                             simp only [bind, Option.bind, hspec_sym,
                               if_neg (show ¬(sym.toNat < 256) from by omega)]
                             have hne256 : (sym.toNat == 256) = false := by
-                              cases heq : sym.toNat == 256 <;> simp_all [beq_iff_eq]
+                              rw [beq_eq_false_iff_ne]; omega
                             simp only [hne256, Bool.false_eq_true, ↓reduceIte]
                             have h1 := Array.getElem?_eq_some_getElem! Deflate.Spec.lengthBase _ hidx
                             have h2 := Array.getElem?_eq_some_getElem! Deflate.Spec.lengthExtra _ hidx
