@@ -416,11 +416,8 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
               Array.size_setIfInBounds, hb2]
           · intro a2 b2 b2' hb2 heq2
             exact nomatch heq2
-    · intro a b b' hb heq
-      simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq
-      · exact nomatch heq
-      · split at heq <;> exact nomatch heq
+    · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 4 (compute numBits/newState): cells.set! preserves size
   apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop4
   · exact hsize2
@@ -433,11 +430,8 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
         simp only [Nat.toUInt8_eq, Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
           Array.size_setIfInBounds, hb]
-  · intro a b b' hb heq
-    simp only [bind, Except.bind, pure, Except.pure] at heq
-    split at heq
-    · exact nomatch heq
-    · split at heq <;> exact nomatch heq
+  · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq <;> (try split at heq) <;> exact nomatch heq
 
 /-- `Array.set!` preserves a Fin-indexed property when the new value satisfies it.
     After `set!`, each cell is either the new value (at the written index) or
@@ -510,11 +504,8 @@ theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
             rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
             exact set!_preserves_forall hb2 (show P _ from Nat.zero_le _)
           · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
-    · intro a b b' hb heq
-      simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq
-      · exact nomatch heq
-      · split at heq <;> exact nomatch heq
+    · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 3 modifies only symbolCounts (v3 : Array Nat), not cells.
   -- Loop 4 starts with v2.fst as its initial cells.
   -- Loop 4: sets numBits := (al - Nat.log2 nextState).toUInt8
@@ -533,11 +524,8 @@ theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
         exact set!_preserves_forall hb (numBits_bound _)
-  · intro a b b' hb heq
-    simp only [bind, Except.bind, pure, Except.pure] at heq
-    split at heq
-    · exact nomatch heq
-    · split at heq <;> exact nomatch heq
+  · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq <;> (try split at heq) <;> exact nomatch heq
 
 /-! ## BackwardBitReader base-case specs -/
 
@@ -657,12 +645,8 @@ private theorem readBits_go_totalBitsRemaining (br : BackwardBitReader)
       rename_i hbr_ne; simp only [beq_iff_eq] at hbr_ne
       rw [ih _ _ h]
       simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq]
-      by_cases h1 : br.bitsRemaining - 1 = 0
-      · by_cases h2 : br.bytePos > br.startPos
-        · simp only [h1, h2, hbr_ne,
-                     show ¬((8 : Nat) = 0) from by omega, ↓reduceIte]; omega
-        · simp only [h1, h2, hbr_ne, ↓reduceIte]; omega
-      · simp only [h1, hbr_ne, ↓reduceIte]; omega
+      by_cases h1 : br.bitsRemaining - 1 = 0 <;> by_cases h2 : br.bytePos > br.startPos <;>
+        simp only [h1, h2, hbr_ne, show ¬((8 : Nat) = 0) from by omega, ↓reduceIte] <;> omega
 
 open Zip.Native (BackwardBitReader) in
 /-- When `readBits.go` succeeds, the initial reader had enough bits. -/
@@ -680,12 +664,9 @@ private theorem readBits_go_totalBitsRemaining_ge (br : BackwardBitReader)
       rename_i hbr_ne; simp only [beq_iff_eq] at hbr_ne
       have hrec := ih _ _ h
       simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq] at hrec ⊢
-      by_cases h1 : br.bitsRemaining - 1 = 0
-      · by_cases h2 : br.bytePos > br.startPos
-        · simp only [h1, h2, hbr_ne,
-                     show ¬((8 : Nat) = 0) from by omega, ↓reduceIte] at hrec ⊢; omega
-        · simp only [h1, h2, hbr_ne, ↓reduceIte] at hrec ⊢; omega
-      · simp only [h1, hbr_ne, ↓reduceIte] at hrec ⊢; omega
+      by_cases h1 : br.bitsRemaining - 1 = 0 <;> by_cases h2 : br.bytePos > br.startPos <;>
+        simp only [h1, h2, hbr_ne, show ¬((8 : Nat) = 0) from by omega, ↓reduceIte] at hrec ⊢
+          <;> omega
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading `n` bits from a backward bitstream decreases `totalBitsRemaining`
@@ -715,24 +696,7 @@ open Zip.Native (BackwardBitReader) in
 /-- When `highBitPos b = some p`, the position is less than 8. -/
 private theorem highBitPos_lt_eight (b : UInt8) (p : Nat)
     (h : BackwardBitReader.highBitPos b = some p) : p < 8 := by
-  unfold BackwardBitReader.highBitPos at h
-  split at h
-  · exact nomatch h
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  split at h
-  · simp only [Option.some.injEq] at h; omega
-  simp only [Option.some.injEq] at h; omega
+  unfold BackwardBitReader.highBitPos at h; grind
 
 open Zip.Native (BackwardBitReader) in
 /-- Successful `init` preserves the `startPos` argument. -/
@@ -741,18 +705,12 @@ theorem BackwardBitReader_init_startPos_eq (data : ByteArray)
     (h : BackwardBitReader.init data startPos endPos = .ok br) :
     br.startPos = startPos := by
   simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure] at h
+  split at h; · exact nomatch h
+  split at h; · exact nomatch h
+  split at h; · exact nomatch h
   split at h
-  · exact nomatch h
-  · split at h
-    · exact nomatch h
-    · split at h
-      · exact nomatch h
-      · rename_i sentinelPos
-        split at h
-        · split at h
-          · obtain rfl := Except.ok.inj h; rfl
-          · obtain rfl := Except.ok.inj h; rfl
-        · obtain rfl := Except.ok.inj h; rfl
+  · split at h <;> (obtain rfl := Except.ok.inj h; rfl)
+  · obtain rfl := Except.ok.inj h; rfl
 
 open Zip.Native (BackwardBitReader) in
 /-- The initial `totalBitsRemaining` is strictly less than `8 * (endPos - startPos)`.
@@ -772,22 +730,11 @@ theorem BackwardBitReader_init_totalBitsRemaining_lt (data : ByteArray)
       · exact nomatch h
       · rename_i sentinelPos
         split at h
-        · -- sentinelPos == 0
-          rename_i hsp; simp only [beq_iff_eq] at hsp
-          split at h
-          · -- endPos - 1 ≤ startPos: totalBitsRemaining = 0
-            rename_i hge
-            obtain rfl := Except.ok.inj h
-            simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq, ↓reduceIte]
-            omega
-          · -- endPos - 1 > startPos: bitsRemaining = 8, bytePos = endPos - 2
-            rename_i hge
-            obtain rfl := Except.ok.inj h
+        · rename_i hsp; simp only [beq_iff_eq] at hsp
+          split at h <;> (obtain rfl := Except.ok.inj h) <;>
             simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq,
-              show ¬(8 : Nat) = 0 from by omega, ↓reduceIte]
-            omega
-        · -- sentinelPos ≠ 0: bitsRemaining = sentinelPos, bytePos = endPos - 1
-          rename_i hsp; simp only [beq_iff_eq] at hsp
+              show ¬(8 : Nat) = 0 from by omega, ↓reduceIte] <;> omega
+        · rename_i hsp; simp only [beq_iff_eq] at hsp
           obtain rfl := Except.ok.inj h
           simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq, hsp, ↓reduceIte]
           have hlt := highBitPos_lt_eight _ _ ‹_›
@@ -804,17 +751,12 @@ private theorem readBits_go_data_eq (br : BackwardBitReader)
   induction k generalizing br acc with
   | zero =>
     simp only [BackwardBitReader.readBits.go] at h
-    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
-    rfl
+    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h); rfl
   | succ k ih =>
     simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
-    split at h
-    · exact nomatch h
-    · simp only [pure, Except.pure] at h
-      rw [ih _ _ h]
-      split
-      · split <;> rfl
-      · rfl
+    split at h; · exact nomatch h
+    simp only [pure, Except.pure] at h; rw [ih _ _ h]
+    split <;> (try split) <;> rfl
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading `n` bits from a backward bitstream preserves the `data` field. -/
@@ -834,17 +776,12 @@ private theorem readBits_go_startPos_eq (br : BackwardBitReader)
   induction k generalizing br acc with
   | zero =>
     simp only [BackwardBitReader.readBits.go] at h
-    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
-    rfl
+    obtain ⟨_, rfl⟩ := Prod.mk.inj (Except.ok.inj h); rfl
   | succ k ih =>
     simp only [BackwardBitReader.readBits.go, bind, Except.bind] at h
-    split at h
-    · exact nomatch h
-    · simp only [pure, Except.pure] at h
-      rw [ih _ _ h]
-      split
-      · split <;> rfl
-      · rfl
+    split at h; · exact nomatch h
+    simp only [pure, Except.pure] at h; rw [ih _ _ h]
+    split <;> (try split) <;> rfl
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading `n` bits from a backward bitstream preserves the `startPos` field. -/
@@ -862,17 +799,12 @@ theorem BackwardBitReader_init_data_eq (data : ByteArray)
     (h : BackwardBitReader.init data startPos endPos = .ok br) :
     br.data = data := by
   simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure] at h
+  split at h; · exact nomatch h
+  split at h; · exact nomatch h
+  split at h; · exact nomatch h
   split at h
-  · exact nomatch h
-  · split at h
-    · exact nomatch h
-    · split at h
-      · exact nomatch h
-      · split at h
-        · split at h
-          · obtain rfl := Except.ok.inj h; rfl
-          · obtain rfl := Except.ok.inj h; rfl
-        · obtain rfl := Except.ok.inj h; rfl
+  · split at h <;> (obtain rfl := Except.ok.inj h; rfl)
+  · obtain rfl := Except.ok.inj h; rfl
 
 /-! ## forIn always-ok lemmas -/
 
@@ -1010,7 +942,7 @@ private theorem readBit_bitOff_lt' (br br' : BitReader) (bit : UInt32)
   split at h
   · exact nomatch h
   · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
-      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+      obtain ⟨_, rfl⟩ := h <;> dsimp only [] <;> omega
 
 -- readBits.go preserves bitOff < 8
 open Zip.Native in
@@ -1184,19 +1116,13 @@ theorem decodeFseDistribution_bitPos_ge
 /-- `Nat.log2 n ≤ k` when `n < 2^(k+1)`. Inverse of `Nat.lt_log2_self`. -/
 private theorem log2_le_of_lt_pow2_succ (n k : Nat) (h : n < 2 ^ (k + 1)) :
     Nat.log2 n ≤ k := by
-  if hle : Nat.log2 n ≤ k then exact hle
-  else
-    exfalso
-    have hgt : k + 1 ≤ Nat.log2 n := by omega
-    have hpos : Nat.log2 n ≥ 1 := by omega
-    have h3 : n ≠ 0 := by
-      intro heq; subst heq
-      have : Nat.log2 0 = 0 := by decide
-      omega
-    have h1 : 2 ^ (k + 1) ≤ 2 ^ (Nat.log2 n) :=
-      @Nat.pow_le_pow_right 2 (by decide) (k + 1) (Nat.log2 n) hgt
-    have h4 : 2 ^ (Nat.log2 n) ≤ n := Nat.log2_self_le h3
-    exact Nat.lt_irrefl _ (Nat.lt_of_lt_of_le h (Nat.le_trans h1 h4))
+  if hle : Nat.log2 n ≤ k then exact hle else
+  exfalso
+  have hgt : k + 1 ≤ Nat.log2 n := by omega
+  have h3 : n ≠ 0 := by
+    intro heq; subst heq; exact absurd (show Nat.log2 0 = 0 from by decide) (by omega)
+  exact Nat.lt_irrefl _ (Nat.lt_of_lt_of_le h
+    (Nat.le_trans (Nat.pow_le_pow_right (by decide) hgt) (Nat.log2_self_le h3)))
 
 /-- `n * 2^(k - log2 n) < 2^(k+1)` when `log2 n ≤ k`. This bounds the
     shifted value `nextState <<< numBits` in FSE table construction. -/
@@ -1231,7 +1157,7 @@ private theorem getD_set! (a : Array Nat) (i v s : Nat) :
     (a.set! i v).getD s 0 = if i = s ∧ i < a.size then v else a.getD s 0 := by
   simp only [Array.set!_eq_setIfInBounds, Array.getD_eq_getD_getElem?,
     Array.getElem?_setIfInBounds]
-  split <;> split <;> simp_all <;> intro <;> omega
+  split <;> split <;> grind
 
 /-! ## Indexed loop invariant -/
 
@@ -1371,11 +1297,8 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
             rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
             exact set!_preserves_forall hb2 hQ_default
           · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
-    · intro a b b' hb heq
-      simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq
-      · exact nomatch heq
-      · split at heq <;> exact nomatch heq
+    · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 3 (counting): prove each symbolCounts[sym] ≤ tableSize
   -- Use indexed invariant: after k iterations, each count ≤ k
   have h3_counts : ∀ s, v3.getD s 0 ≤ 1 <<< al := by
@@ -1448,12 +1371,8 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
               exact Nat.succ_le_succ (hsymIdx s)
             · -- other index: old value ≤ k ≤ k + 1
               exact Nat.le_succ_of_le (hsymIdx s)
-    · -- Done: never happens
-      intro k _ b b' hb heq
-      simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq
-      · exact nomatch heq
-      · split at heq <;> exact nomatch heq
+    · intro _ _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   exact h4.1 i
 
 /-- Helper: `Nat.toUInt16.toNat` preserves strict upper bounds.
@@ -1538,11 +1457,8 @@ theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
             rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
             exact set!_preserves_forall hb2 (toUInt16_toNat_lt_of_lt ha)
           · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
-    · intro a b b' hb heq
-      simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq
-      · exact nomatch heq
-      · split at heq <;> exact nomatch heq
+    · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 3 modifies only symbolCounts (v3 : Array Nat), not cells.
   -- Loop 4 starts with v2.fst as its initial cells.
   -- Loop 4: preserves symbol field ({ symbol := cells[i]!.symbol, ... })
@@ -1563,11 +1479,8 @@ theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
             exact hb ⟨a, ha⟩
           · simp only [Array.getElem!_eq_getD, Array.getD, dif_neg ha]
             exact hpos)
-  · intro a b b' hb heq
-    simp only [bind, Except.bind, pure, Except.pure] at heq
-    split at heq
-    · exact nomatch heq
-    · split at heq <;> exact nomatch heq
+  · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
+    split at heq <;> (try split at heq) <;> exact nomatch heq
 
 open Zip.Native in
 /-- When `buildFseTable` succeeds and the input distribution is non-empty,
