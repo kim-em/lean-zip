@@ -1035,6 +1035,106 @@ theorem decompressBlocksWF_two_compressed_literals_blocks (data : ByteArray)
     hdr2 afterHdr2 literals2 afterLiterals2 huffTree2 modes2 afterSeqHeader2
     hoff2 hparse2 hbs2 hws2 htype2 hblockEnd2 hlit2 hseq2 hlast2
 
+/-- When `decompressBlocksWF` encounters a non-last compressed block with
+    numSeq == 0 (literals only) followed by a last raw block, the output is
+    `output ++ literals1 ++ block2` at the position after the raw data.
+    Composes `decompressBlocksWF_compressed_literals_only_step` and
+    `decompressBlocksWF_single_raw`. Raw blocks don't use Huffman/FSE state,
+    so the state threading from block 1 is irrelevant for block 2. -/
+theorem decompressBlocksWF_compressed_literals_then_raw (data : ByteArray)
+    (off : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    -- Block 1 (non-last compressed, numSeq=0)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (literals1 : ByteArray) (afterLiterals1 : Nat)
+    (huffTree1 : Option Zip.Native.ZstdHuffmanTable)
+    (modes1 : Zip.Native.SequenceCompressionModes) (afterSeqHeader1 : Nat)
+    -- Block 2 (last raw)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterBlock2 : Nat)
+    -- Block 1 hypotheses
+    (hoff1 : ¬ data.size ≤ off)
+    (hparse1 : Zip.Native.parseBlockHeader data off = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize))
+    (htype1 : hdr1.blockType = .compressed)
+    (hblockEnd1 : ¬ data.size < afterHdr1 + hdr1.blockSize.toNat)
+    (hlit1 : Zip.Native.parseLiteralsSection data afterHdr1 prevHuff
+               = .ok (literals1, afterLiterals1, huffTree1))
+    (hseq1 : Zip.Native.parseSequencesHeader data afterLiterals1
+               = .ok (0, modes1, afterSeqHeader1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterHdr1 + hdr1.blockSize.toNat ≤ off)
+    -- Block 2 hypotheses
+    (hoff2 : ¬ data.size ≤ afterHdr1 + hdr1.blockSize.toNat)
+    (hparse2 : Zip.Native.parseBlockHeader data (afterHdr1 + hdr1.blockSize.toNat)
+                 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (windowSize > 0 && hdr2.blockSize.toUInt64 > windowSize))
+    (htype2 : hdr2.blockType = .raw)
+    (hraw2 : Zip.Native.decompressRawBlock data afterHdr2 hdr2.blockSize
+               = .ok (block2, afterBlock2))
+    (hlast2 : hdr2.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (output ++ literals1 ++ block2, afterBlock2) := by
+  rw [decompressBlocksWF_compressed_literals_only_step data off windowSize output prevHuff
+    prevFse history hdr1 afterHdr1 literals1 afterLiterals1 huffTree1 modes1 afterSeqHeader1
+    hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1 hlit1 hseq1 hnotlast1 hadv1]
+  exact decompressBlocksWF_single_raw data (afterHdr1 + hdr1.blockSize.toNat) windowSize
+    (output ++ literals1) _ prevFse history hdr2 afterHdr2 block2 afterBlock2
+    hoff2 hparse2 hbs2 hws2 htype2 hraw2 hlast2
+
+/-- When `decompressBlocksWF` encounters a non-last compressed block with
+    numSeq == 0 (literals only) followed by a last RLE block, the output is
+    `output ++ literals1 ++ block2` at the position after the RLE byte.
+    Composes `decompressBlocksWF_compressed_literals_only_step` and
+    `decompressBlocksWF_single_rle`. RLE blocks don't use Huffman/FSE state,
+    so the state threading from block 1 is irrelevant for block 2. -/
+theorem decompressBlocksWF_compressed_literals_then_rle (data : ByteArray)
+    (off : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    -- Block 1 (non-last compressed, numSeq=0)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (literals1 : ByteArray) (afterLiterals1 : Nat)
+    (huffTree1 : Option Zip.Native.ZstdHuffmanTable)
+    (modes1 : Zip.Native.SequenceCompressionModes) (afterSeqHeader1 : Nat)
+    -- Block 2 (last RLE)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterByte2 : Nat)
+    -- Block 1 hypotheses
+    (hoff1 : ¬ data.size ≤ off)
+    (hparse1 : Zip.Native.parseBlockHeader data off = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize))
+    (htype1 : hdr1.blockType = .compressed)
+    (hblockEnd1 : ¬ data.size < afterHdr1 + hdr1.blockSize.toNat)
+    (hlit1 : Zip.Native.parseLiteralsSection data afterHdr1 prevHuff
+               = .ok (literals1, afterLiterals1, huffTree1))
+    (hseq1 : Zip.Native.parseSequencesHeader data afterLiterals1
+               = .ok (0, modes1, afterSeqHeader1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterHdr1 + hdr1.blockSize.toNat ≤ off)
+    -- Block 2 hypotheses
+    (hoff2 : ¬ data.size ≤ afterHdr1 + hdr1.blockSize.toNat)
+    (hparse2 : Zip.Native.parseBlockHeader data (afterHdr1 + hdr1.blockSize.toNat)
+                 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (windowSize > 0 && hdr2.blockSize.toUInt64 > windowSize))
+    (htype2 : hdr2.blockType = .rle)
+    (hrle2 : Zip.Native.decompressRLEBlock data afterHdr2 hdr2.blockSize
+               = .ok (block2, afterByte2))
+    (hlast2 : hdr2.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (output ++ literals1 ++ block2, afterByte2) := by
+  rw [decompressBlocksWF_compressed_literals_only_step data off windowSize output prevHuff
+    prevFse history hdr1 afterHdr1 literals1 afterLiterals1 huffTree1 modes1 afterSeqHeader1
+    hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1 hlit1 hseq1 hnotlast1 hadv1]
+  exact decompressBlocksWF_single_rle data (afterHdr1 + hdr1.blockSize.toNat) windowSize
+    (output ++ literals1) _ prevFse history hdr2 afterHdr2 block2 afterByte2
+    hoff2 hparse2 hbs2 hws2 htype2 hrle2 hlast2
+
 /-! ## Frame header position advancement -/
 
 /-- When `parseFrameHeader` succeeds, the returned position advances by at
