@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~395 completed (Feb 19 – Mar 7)
+- **Sessions**: ~410 completed (Feb 19 – Mar 8)
 - **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 364
-- **Spec theorems/lemmas**: 906 declarations across 49 spec files (25,318 lines)
+- **Merged PRs**: 380
+- **Spec theorems/lemmas**: 927 declarations across 49 spec files (25,781 lines)
 - **Bare simp**: 0 remaining — campaign complete (49 spec files, ZipForStd/, Native/ all clean)
 - **Bare simp_all**: 0 remaining — campaign complete (all spec files, DeflateEncodeDynamic included)
 
@@ -660,12 +660,60 @@ compressed headers), `BitReader` operations, FSE distribution chain,
 theorems/lemmas: ZstdSequence (57), Fse (50), ZstdHuffman (43), Zstd (27),
 XxHash (12), ZstdFrame (6). Total spec line count: 4,448 lines.
 
+**11-PR batch (Mar 7–8): le_size capstone + content preservation + FSE validity + quality reviews:**
+
+This batch completed the le_size campaign to the frame level, started content
+preservation proofs for sequence execution, proved FSE table validity
+composition, and continued quality reviews across DEFLATE spec files.
+
+*Track E le_size campaign completion (3 PRs):*
+- #848: `parseHuffmanTreeDescriptor_le_size` — tree descriptor position bounds
+- #856: `decompressBlocksWF_le_size` — block loop position within data bounds
+  (composed from `parseBlockHeader_le_size` + per-block-type bounds)
+- #861: `decompressFrame_le_size` — frame-level capstone. When
+  `decompressFrame` succeeds, returned position ≤ data.size. Composed from
+  `parseFrameHeader_le_size` and `decompressBlocksWF_le_size`. This completes
+  the le_size chain: `readBit` → `readBits` → `parseLiteralsSection` →
+  `parseHuffmanTreeDescriptor` → `decompressBlocksWF` → `decompressFrame`.
+
+*Track E content preservation (1 PR):*
+- #865: `executeSequences_loop_getElem_lt` — sequence execution loop preserves
+  previously written output bytes. First content preservation theorem for the
+  Zstd sequence execution pipeline.
+
+*Track E BackwardBitReader invariants (1 PR):*
+- #858: `readBits_data_eq`, `readBits_startPos_eq`, `init_data_eq`,
+  `init_startPos_eq` — field preservation through BackwardBitReader operations.
+
+*Track E FSE table validity (1 PR):*
+- #872: `buildFseTable_symbol_lt` (symbol indices within bounds through all 4
+  construction loops) and `buildFseTable_valid` (composed `ValidFseTable`
+  predicate). Used `forIn_range_preserves` helper for loop invariants. Added
+  `toUInt16_toNat_lt_of_lt` for UInt16 bounds reasoning.
+
+*Quality reviews (4 PRs):*
+- #853: ZstdHuffman.lean spec audit — eliminated bare `simp`, compressed
+  proofs, improved consistency (-121 lines net)
+- #857: DeflateEncodeDynamic.lean — converted all 7 bare `simp` to
+  `simp only` with explicit lemma lists
+- #862: DeflateEncodeDynamic.lean quality pass — aggregated skill updates
+  and progress documentation alongside bare simp conversions
+- #869: DeflateDynamicEmit.lean — removed 1 unused linter pragma and 2
+  unnecessary `maxRecDepth 2048` pragmas (default settings sufficient)
+
+*Maintenance (1 PR):*
+- #866: Rebased PR #857 to resolve merge conflicts in progress files
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 213
+theorems/lemmas: ZstdSequence (58), Fse (58), ZstdHuffman (50), Zstd (29),
+XxHash (12), ZstdFrame (6). Total spec line count: 4,872 lines.
+
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
-- Complete le_size campaign for remaining functions (parseLiteralsSection,
-  BitReader, FSE distribution, block loop, frame-level)
 - Compose position specs into end-to-end frame position theorem
+- Content preservation campaign: extend `executeSequences_loop_getElem_lt`
+  to full sequence execution and block loop levels
 - Spec-level decoder with correctness proofs (algorithmic correspondence
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
@@ -674,8 +722,8 @@ XxHash (12), ZstdFrame (6). Total spec line count: 4,448 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~395 sessions (Feb 19 – Mar 7)
-- 364 merged PRs
+- ~410 sessions (Feb 19 – Mar 8)
+- 380 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
