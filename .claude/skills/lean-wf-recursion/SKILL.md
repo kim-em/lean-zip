@@ -70,6 +70,33 @@ private theorem f_case2 (xs : List α) (h : ¬(xs.length ≤ N)) :
 Then `rw [f_case2 _ h]` in the main proof. Used for `encodeStored_non_final`
 in `Zip/Spec/Deflate.lean`.
 
+### `generalize` — Unfolding Only One Side of an Equality
+
+When proving `f args₁ = f args₂` (step theorems), `unfold f` rewrites
+BOTH sides. To unfold only the LHS, use `generalize` to hide the RHS:
+
+```lean
+theorem f_step (h1 ...) (h2 ...) :
+    f x₁ = f x₂ := by
+  generalize heq : f x₂ = rhs     -- RHS becomes opaque variable
+  unfold f                          -- only unfolds LHS (RHS is just 'rhs')
+  simp only [h1, h2, ..., ↓reduceDIte, ↓reduceIte,
+    bind, Except.bind, pure, Except.pure, Bool.false_eq_true]
+  exact heq                        -- goal is now: f x₂ = rhs
+```
+
+**Why other approaches fail:**
+- `conv_lhs => unfold f` — `unfold` is not available inside `conv` blocks
+- `Eq.trans` with metavariable — `simp` may leave `?mid` unsynthesized
+- `conv_lhs => rw [f.eq_1]` — works in principle but equation lemma
+  name may vary
+
+**When to use**: Step theorems for WF functions (e.g., proving that a
+parser loop with a non-last block recurses with updated arguments).
+
+See `Zip/Spec/Zstd.lean`: `decompressBlocksWF_raw_step`,
+`decompressBlocksWF_rle_step`.
+
 ## Functional Induction with `f.induct`
 
 For every WF-recursive function `f`, Lean auto-generates an induction
