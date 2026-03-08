@@ -217,7 +217,9 @@ theorem readUInt16LE_align (data : ByteArray) (pos bitOff : Nat)
     BitReader.readUInt16LE { data, pos := pos + 1, bitOff := 0 } := by
   unfold BitReader.readUInt16LE BitReader.alignToByte
   have hbo' : (bitOff == 0) = false := by
-    cases heq : bitOff == 0 <;> simp_all [beq_iff_eq]
+    cases heq : bitOff == 0
+    · rfl
+    · exact absurd (beq_iff_eq.mp heq) hbo
   simp only [show ((0 : Nat) == 0) = true from rfl, hbo',
     Bool.false_eq_true, ↓reduceIte]
 
