@@ -939,6 +939,74 @@ theorem resolveSequenceFseTables_valid (modes : SequenceCompressionModes)
                resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hof (by decide) hprevOF,
                resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hml (by decide) hprevML⟩
 
+/-! ## decodeSequencesWF output size -/
+
+/-- When the inner loop succeeds, the output array has exactly
+    `acc.size + remaining` elements. -/
+theorem decodeSequencesWF_loop_size
+    {litLenTable offsetTable matchLenTable : FseTable}
+    {br br' : BackwardBitReader}
+    {litLenState offsetState matchLenState remaining total : Nat}
+    {acc result : Array ZstdSequence}
+    (h : decodeSequencesWF.loop litLenTable offsetTable matchLenTable br
+           litLenState offsetState matchLenState remaining total acc
+           = .ok (result, br')) :
+    result.size = acc.size + remaining := by
+  induction remaining generalizing br litLenState offsetState matchLenState acc with
+  | zero =>
+    simp only [decodeSequencesWF.loop, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h; omega
+  | succ n ih =>
+    simp only [decodeSequencesWF.loop] at h
+    -- 3 bounds checks
+    split at h
+    · exact nomatch h
+    · split at h
+      · exact nomatch h
+      · split at h
+        · exact nomatch h
+        · -- match on decodeOneSequence
+          split at h
+          · exact nomatch h
+          · -- n == 0 check
+            simp only [beq_iff_eq] at h
+            split at h
+            · -- Last sequence
+              simp only [Except.ok.injEq, Prod.mk.injEq] at h
+              obtain ⟨rfl, _⟩ := h
+              simp only [Array.size_push]; omega
+            · -- Not last: 3 readBits for state update + recursion
+              split at h
+              · exact nomatch h
+              · split at h
+                · exact nomatch h
+                · split at h
+                  · exact nomatch h
+                  · rw [ih h]; simp only [Array.size_push]; omega
+
+/-- When `decodeSequencesWF` succeeds with `numSeq > 0`, the result has
+    exactly `numSeq` elements. -/
+theorem decodeSequencesWF_size
+    {litLenTable offsetTable matchLenTable : FseTable}
+    {br br' : BackwardBitReader}
+    {numSeq : Nat} {result : Array ZstdSequence}
+    (h : decodeSequencesWF litLenTable offsetTable matchLenTable br numSeq
+           = .ok (result, br'))
+    (hcount : 0 < numSeq) :
+    result.size = numSeq := by
+  simp only [decodeSequencesWF] at h
+  split at h
+  · rename_i h0; simp only [beq_iff_eq] at h0; omega
+  · -- 3 readBits for init states
+    split at h
+    · exact nomatch h
+    · split at h
+      · exact nomatch h
+      · split at h
+        · exact nomatch h
+        · have := decodeSequencesWF_loop_size h
+          simp only [Array.size_empty] at this; omega
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
