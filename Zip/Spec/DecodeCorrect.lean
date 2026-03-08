@@ -425,7 +425,7 @@ theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
   obtain ⟨_, hlen_cond, hcw_eq⟩ := Huffman.Spec.codeFor_spec hcf
   simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at hlen_cond
   have : cw'.length > 0 := by rw [hcw_eq, Huffman.Spec.natToBits_length]; omega
-  simp [hnil] at this
+  simp only [hnil, List.length_nil, Nat.not_lt_zero] at this
 
 set_option maxRecDepth 2048 in
 /-- If the native Huffman block decoder succeeds, the spec's `decodeSymbols`
