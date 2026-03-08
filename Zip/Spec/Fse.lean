@@ -1010,7 +1010,7 @@ private theorem readBit_bitOff_lt' (br br' : BitReader) (bit : UInt32)
   split at h
   · exact nomatch h
   · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
-      obtain ⟨_, rfl⟩ := h <;> simp_all <;> omega
+      obtain ⟨_, rfl⟩ := h <;> dsimp only [] <;> omega
 
 -- readBits.go preserves bitOff < 8
 open Zip.Native in
@@ -1231,7 +1231,7 @@ private theorem getD_set! (a : Array Nat) (i v s : Nat) :
     (a.set! i v).getD s 0 = if i = s ∧ i < a.size then v else a.getD s 0 := by
   simp only [Array.set!_eq_setIfInBounds, Array.getD_eq_getD_getElem?,
     Array.getElem?_setIfInBounds]
-  split <;> split <;> simp_all <;> intro <;> omega
+  split <;> split <;> grind
 
 /-! ## Indexed loop invariant -/
 
