@@ -276,13 +276,13 @@ private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77T
     simp only [dif_pos hlt]
     match htok : tokens[i] with
     | .literal b =>
-      simp only []
+      dsimp only
       have hb_lt : b.toNat < litCodes.size := by have := UInt8.toNat_lt b; omega
       have hb_le : litCodes[b.toNat]!.2.toNat ≤ 15 := hlit_le b.toNat hb_lt
       exact ih _ (i + 1)
         (BitWriter.writeHuffCode_wf bw _ _ hwf hb_le) (by omega)
     | .reference len dist =>
-      simp only []
+      dsimp only
       match hflc : findLengthCode len with
       | none =>
         exact ih _ (i + 1) hwf (by omega)
