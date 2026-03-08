@@ -377,7 +377,7 @@ where
             else none
         else none
   termination_by totalCodes - acc.length
-  decreasing_by all_goals simp_all [List.length_append, List.length_replicate]; omega
+  decreasing_by all_goals simp_all only [List.length_append, List.length_replicate, ge_iff_le, Nat.not_le, List.length_cons]; omega
 
 /-! ## Stream decode -/
 
@@ -559,7 +559,7 @@ private theorem mod_two_mul (v m : Nat) (hm : m > 0) :
 
 private theorem testBit_zero_eq_mod_two (v : Nat) :
     (if v.testBit 0 then 1 else 0) = v % 2 := by
-  rw [Nat.testBit_zero]; split <;> rename_i h <;> simp_all <;> omega
+  rw [Nat.testBit_zero]; split <;> rename_i h <;> simp_all only [decide_eq_true_eq] <;> omega
 
 /-- Reading `n` bits from the `testBit` encoding of `v` yields `v % 2^n`. -/
 private theorem readBitsLSB_ofFn_testBit (v n : Nat) (rest : List Bool) :
@@ -1022,7 +1022,7 @@ theorem deflateStoredPure_goR (data : ByteArray) :
     pure function, but stated for clarity.) -/
 theorem decode_deterministic (bits : List Bool) :
     ∀ a b, decode bits = some a → decode bits = some b → a = b := by
-  intro a b h₁ h₂; simp_all
+  intro _ _ h₁ h₂; exact Option.some.inj (h₁.symm.trans h₂)
 
 /-- Fixed literal/length code lengths have the correct size (288 symbols). -/
 theorem fixedLitLengths_length : fixedLitLengths.length = 288 := by
