@@ -328,6 +328,42 @@ theorem executeSequences_loop_cons_output_size (seq : ZstdSequence)
       output.size + seq.literalLength + seq.matchLength := by
   simp only [copyMatch_size, copyBytes_size]
 
+/-- When the sequence execution loop succeeds, every byte that was in the
+    output buffer before the loop started is still there at the same index.
+    This composes `copyBytes_getElem_lt` and `copyMatch_getElem_lt` through
+    the recursive loop structure via induction on the sequence list. -/
+theorem executeSequences_loop_getElem_lt
+    (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos : Nat) (windowSize : Nat)
+    (result : ByteArray × Array Nat × Nat)
+    (h : executeSequences.loop seqs literals output history litPos windowSize
+         = .ok result)
+    (i : Nat) (hi : i < output.size) :
+    result.1[i]! = output[i]! := by
+  induction seqs generalizing output history litPos with
+  | nil =>
+    rw [executeSequences.loop.eq_1] at h
+    simp only [Except.ok.injEq] at h
+    obtain ⟨rfl, _, _⟩ := h; rfl
+  | cons seq rest ih =>
+    rw [executeSequences.loop.eq_2] at h
+    split at h
+    · exact nomatch h
+    · split at h
+      dsimp only [letFun] at h
+      split at h
+      · exact nomatch h
+      · split at h
+        · exact nomatch h
+        · split at h
+          · exact nomatch h
+          · have hcb_size := copyBytes_size output literals litPos seq.literalLength
+            have hi_cb : i < (copyBytes output literals litPos seq.literalLength).size := by
+              rw [hcb_size]; omega
+            exact ih _ _ _ h (by rw [copyMatch_size, hcb_size]; omega)
+              |>.trans (copyMatch_getElem_lt _ _ _ _ hi_cb)
+              |>.trans (copyBytes_getElem_lt _ _ _ _ _ hi)
+
 /-! ## parseSequencesHeader structural properties -/
 
 /-- When `parseSequencesHeader` succeeds, the returned position is strictly greater
