@@ -1012,6 +1012,35 @@ theorem executeSequences_loop_history_valid
               -- where offset✝ is definitionally (resolveOffset ...).1
               simp_all only [ne_eq, beq_iff_eq, not_false_eq_true])) h
 
+/-- The loop preserves the history array size. Uses the weaker hypothesis
+    `history.size = 3` rather than full `ValidOffsetHistory`. -/
+theorem executeSequences_loop_history_size
+    (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos windowSize : Nat)
+    (output' : ByteArray) (history' : Array Nat) (litPos' : Nat)
+    (hsize : history.size = 3)
+    (h : executeSequences.loop seqs literals output history litPos windowSize
+         = .ok (output', history', litPos')) :
+    history'.size = 3 := by
+  induction seqs generalizing output history litPos with
+  | nil =>
+    rw [Zip.Native.executeSequences.loop.eq_1] at h
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl, _⟩ := h
+    exact hsize
+  | cons seq rest ih =>
+    rw [Zip.Native.executeSequences.loop.eq_2] at h
+    split at h
+    · exact nomatch h
+    · dsimp only [letFun] at h
+      split at h
+      · exact nomatch h
+      · split at h
+        · exact nomatch h
+        · split at h
+          · exact nomatch h
+          · exact ih _ _ _ (resolveOffset_history_size _ _ _ hsize) h
+
 /-- For shifted repeat codes 1–2 (rawOffset ∈ {1,2}, literalLength = 0),
     `ValidOffsetHistory` implies the resolved offset is positive. Shifted code 1
     returns `history[1]!` and shifted code 2 returns `history[2]!`, both positive
@@ -1190,5 +1219,45 @@ theorem executeSequences_empty (literals : ByteArray)
   simp only [Except.ok.injEq, Prod.mk.injEq] at h
   obtain ⟨hout, hhist⟩ := h
   exact ⟨by rw [← hout, ByteArray.size_extract, copyBytes_size]; omega, hhist.symm⟩
+
+/-- When `executeSequences` succeeds and the input offset history is valid,
+    the output offset history is also valid. Lifts `executeSequences_loop_history_valid`
+    through the monadic wrapper. -/
+theorem executeSequences_history_valid
+    (sequences : Array ZstdSequence) (literals : ByteArray)
+    (windowPrefix : ByteArray) (offsetHistory : Array Nat) (windowSize : Nat)
+    (blockOutput : ByteArray) (history' : Array Nat)
+    (hvalid : ValidOffsetHistory offsetHistory)
+    (h : executeSequences sequences literals windowPrefix offsetHistory windowSize
+         = .ok (blockOutput, history')) :
+    ValidOffsetHistory history' := by
+  unfold executeSequences at h
+  simp only [bind, Except.bind, pure, Pure.pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · rename_i v heq
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    exact executeSequences_loop_history_valid _ _ _ _ _ _ _ _ _ hvalid heq
+
+/-- The output history from `executeSequences` has exactly 3 entries when the
+    input history does. Uses the weaker hypothesis `offsetHistory.size = 3`
+    rather than full `ValidOffsetHistory`. -/
+theorem executeSequences_history_size
+    (sequences : Array ZstdSequence) (literals : ByteArray)
+    (windowPrefix : ByteArray) (offsetHistory : Array Nat) (windowSize : Nat)
+    (blockOutput : ByteArray) (history' : Array Nat)
+    (hinit : offsetHistory.size = 3)
+    (h : executeSequences sequences literals windowPrefix offsetHistory windowSize
+         = .ok (blockOutput, history')) :
+    history'.size = 3 := by
+  unfold executeSequences at h
+  simp only [bind, Except.bind, pure, Pure.pure, Except.pure] at h
+  split at h
+  · exact nomatch h
+  · rename_i v heq
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    exact executeSequences_loop_history_size _ _ _ _ _ _ _ _ _ hinit heq
 
 end Zstd.Spec.Sequence
