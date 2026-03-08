@@ -23,6 +23,7 @@ import ZipTest.ZstdNativeIntegration
 import ZipTest.XxHashNative
 import ZipTest.FseNative
 import ZipTest.ZstdConformance
+import ZipTest.ZstdDecompressBench
 
 def main : IO Unit := do
   unless ← System.FilePath.pathExists "testdata" do
@@ -52,4 +53,5 @@ def main : IO Unit := do
   ZipTest.XxHashNative.tests
   ZipTest.FseNative.tests
   ZipTest.ZstdConformance.tests
+  ZipTest.ZstdDecompressBench.tests
   IO.println "\nAll tests passed!"
