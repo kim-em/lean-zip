@@ -20,8 +20,11 @@ The key properties proved here:
    standard Zstd frame, only the standard frame contributes content.
 5. **Output monotonicity**: when `decompressZstdWF` succeeds, the result is
    at least as large as the input accumulator (decompressing only adds data).
-6. **API-level single frame**: when the input contains exactly one standard
+6. **Content preservation**: every byte in the initial accumulator is preserved
+   at the same index in the result (append-only property).
+7. **API-level single frame**: when the input contains exactly one standard
    frame at position 0, the public `decompressZstd` returns the content.
+8. **Empty input**: decompressing an empty ByteArray returns an empty ByteArray.
 -/
 
 namespace Zip.Spec.ZstdFrame
@@ -148,6 +151,55 @@ theorem decompressZstdWF_output_size_ge (data : ByteArray) (pos : Nat)
             omega
       · exact absurd h nofun  -- invalid magic number
 
+/-- When `decompressZstdWF` succeeds, every byte that was in the `output` buffer
+    before the call is present at the same index in the result.  This is the
+    content-level counterpart to `decompressZstdWF_output_size_ge`.  Together they
+    establish that frame-loop decompression is append-only: it only adds data. -/
+theorem decompressZstdWF_prefix (data : ByteArray) (pos : Nat)
+    (output result : ByteArray)
+    (h : Zip.Native.decompressZstdWF data pos output = .ok result)
+    (i : Nat) (hi : i < output.size) :
+    result[i]'(by have := decompressZstdWF_output_size_ge _ _ _ _ h; omega)
+      = output[i] := by
+  induction pos, output using Zip.Native.decompressZstdWF.induct (data := data) generalizing result with
+  | case1 pos output hpos =>
+    -- Base case: pos ≥ data.size, function returns output unchanged
+    rw [decompressZstdWF_base data pos output hpos] at h
+    cases h; rfl
+  | case2 pos output hpos hshort ih_skip ih_std =>
+    -- Error case: data.size < pos + 4, function throws — contradiction with .ok
+    unfold Zip.Native.decompressZstdWF at h
+    simp only [show ¬ (pos ≥ data.size) from hpos, ↓reduceDIte,
+      show (data.size < pos + 4) from hshort, ↓reduceIte,
+      bind, Bind.bind, Except.bind] at h
+    exact absurd h nofun
+  | case3 pos output hpos hlong ih_skip ih_std =>
+    -- Main case: enough data for magic number, dispatch on frame type
+    unfold Zip.Native.decompressZstdWF at h
+    simp only [show ¬ (pos ≥ data.size) from hpos, ↓reduceDIte,
+      show ¬ (data.size < pos + 4) from hlong, ↓reduceIte,
+      pure, Pure.pure, bind, Bind.bind, Except.bind, Except.pure] at h
+    -- Case split on magic number: skippable, standard, or invalid
+    split at h
+    · -- Skippable frame branch
+      split at h
+      · exact absurd h nofun  -- skipSkippableFrame errored
+      · split at h
+        · exact absurd h nofun  -- frame did not advance
+        · exact ih_skip _ ‹_› _ h hi  -- recursive call with same output
+    · -- Non-skippable: standard or invalid
+      split at h
+      · -- Standard frame branch
+        split at h
+        · exact absurd h nofun  -- decompressFrame errored
+        · split at h
+          · exact absurd h nofun  -- frame did not advance
+          · -- Recursive call with output ++ content
+            have := ih_std _ _ ‹_› _ h
+              (by simp only [ByteArray.size_append]; omega)
+            rw [this, ByteArray.getElem_append_left hi]
+      · exact absurd h nofun  -- invalid magic number
+
 /-- When the input contains exactly one standard Zstd frame starting at position 0,
     `decompressZstd` returns the decompressed content.  This is the first API-level
     theorem — it characterizes the public entry point rather than the internal
@@ -179,5 +231,12 @@ theorem decompressZstd_single_frame (data : ByteArray)
   unfold Zip.Native.decompressZstd
   rw [decompressZstdWF_single_standard_frame data 0 ByteArray.empty content pos'
     hsize hmagic hframe hadv hend, ByteArray.empty_append]
+
+/-- Decompressing an empty ByteArray returns an empty ByteArray.
+    This is a direct corollary of `decompressZstdWF_base`. -/
+theorem decompressZstd_empty :
+    Zip.Native.decompressZstd ⟨#[]⟩ = .ok ⟨#[]⟩ := by
+  unfold Zip.Native.decompressZstd
+  exact decompressZstdWF_base ⟨#[]⟩ 0 ByteArray.empty (by simp [ByteArray.size])
 
 end Zip.Spec.ZstdFrame
