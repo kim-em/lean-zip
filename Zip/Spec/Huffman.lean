@@ -37,15 +37,15 @@ def natToBits (val : Nat) : Nat → Codeword
 theorem natToBits_length (val width : Nat) :
     (natToBits val width).length = width := by
   induction width with
-  | zero => simp [natToBits]
-  | succ n ih => simp [natToBits, ih]
+  | zero => simp only [natToBits, List.length_nil]
+  | succ n ih => simp only [natToBits, List.length_cons, ih]
 
 /-- Two `natToBits` outputs of the same width are equal iff all testBit
     values agree on bit positions below the width. -/
 theorem natToBits_eq_iff (v₁ v₂ w : Nat) :
     natToBits v₁ w = natToBits v₂ w ↔ ∀ i < w, v₁.testBit i = v₂.testBit i := by
   induction w with
-  | zero => simp [natToBits]
+  | zero => simp only [natToBits, Nat.not_lt_zero, false_implies, implies_true]
   | succ n ih =>
     simp only [natToBits, List.cons.injEq]
     rw [ih]
@@ -99,7 +99,7 @@ private theorem nextCodes_go_size (blCount : Array Nat) (maxBits : Nat)
   split
   · exact hsize
   · exact nextCodes_go_size blCount maxBits _ _ _
-      (by simp [Array.set!_eq_setIfInBounds, hsize])
+      (by simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds, hsize])
   termination_by maxBits + 1 - bits
 
 /-- `nextCodes` returns an array of size `maxBits + 1`. -/
