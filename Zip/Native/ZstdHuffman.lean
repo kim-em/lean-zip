@@ -275,6 +275,18 @@ def decodeHuffmanStream (htable : ZstdHuffmanTable) (br : BackwardBitReader) (co
     result := result.push sym
   return result
 
+/-- Well-founded variant of `decodeHuffmanStream` using structural recursion
+    on `count`. Returns both the decoded bytes and the final `BackwardBitReader`,
+    making it suitable for proofs (the original discards the reader). -/
+def decodeHuffmanStreamWF (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (count : Nat) (acc : ByteArray := ByteArray.empty) :
+    Except String (ByteArray × BackwardBitReader) :=
+  match count with
+  | 0 => .ok (acc, br)
+  | n + 1 => do
+    let (sym, br') ← decodeHuffmanSymbol htable br
+    decodeHuffmanStreamWF htable br' n (acc.push sym)
+
 /-- Decode 4 Huffman streams as specified in RFC 8878 §3.1.1.3.1.6.
     The first 6 bytes are a jump table (3 × 2-byte LE sizes for streams 1-3).
     Stream 4's size is the remainder. Each stream decodes ceil(regenSize/4) symbols
