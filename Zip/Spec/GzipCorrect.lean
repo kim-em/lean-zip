@@ -125,8 +125,7 @@ theorem compress_isize (data : ByteArray) (level : UInt8) :
     data.size.toUInt32 := by
   obtain ⟨header, trailer, hhsz, htsz, hceq, _, hisize⟩ := compress_trailer data level
   rw [hceq, show 10 + _ + 4 = header.size + (Deflate.deflateRaw data level).size + 4
-    from by omega]
-  rw [Binary.readUInt32LE_append3_right _ _ _ 4 (by omega)]
+    from by omega, Binary.readUInt32LE_append3_right _ _ _ 4 (by omega)]
   exact hisize
 
 end GzipEncode
@@ -221,8 +220,8 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
   have hspec_hd : Deflate.Spec.decode.go
       ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (10 * 8))
       [] = some data.data.toList := by
-    rw [show 10 * 8 = header.size * 8 from by omega]
-    rw [bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
+    rw [show 10 * 8 = header.size * 8 from by omega,
+      bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
     exact hspec_go
   -- Apply inflateRaw_complete on (header ++ deflated) to get endPos' and tight bound
   obtain ⟨endPos', hinflRaw'⟩ :=
