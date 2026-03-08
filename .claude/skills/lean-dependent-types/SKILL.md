@@ -52,6 +52,33 @@ This applies generally: `▸` is designed for rewriting the goal by substituting
 the LHS of an equation with the RHS. For transitive equality chains, `.trans` is
 always cleaner and avoids dependent-type issues.
 
+## Dependent Match Gap After `simp only` with Hypotheses
+
+When `simp only` uses a hypothesis that mentions a variable matched by
+`if let` or `match`, it creates a **dependent match** on the RHS that
+doesn't match the LHS.
+
+**Symptom:** After `simp only [... hlit ...]`, the goal has:
+- LHS: `match huffTree with | some ht => some ht | _ => prev`
+- RHS: `match huffTree, hlit with | some ht, hlit => some ht | _, hlit => prev`
+
+The RHS carries `hlit` through the match because `hlit`'s type mentions
+`huffTree` (e.g. `hlit : parseLiterals ... huffTree = .ok ...`).
+
+**Fix:** `congr 1; cases huffTree <;> rfl`
+
+This works because:
+1. `congr 1` reduces to showing the match bodies are equal
+2. `cases huffTree` eliminates the variable in both branches
+3. `rfl` closes each case since the bodies become definitionally equal
+
+**When this arises:** Step theorems for WF-recursive functions where:
+- The function has `if let some x := v then ... else ...`
+- A hypothesis passed to `simp only` mentions `v`
+- The RHS contains a recursive call that preserves the `if let`
+
+See `decompressBlocksWF_compressed_sequences_step` in `Zip/Spec/Zstd.lean`.
+
 ## `exact` vs `have :=` for Wildcard Resolution
 
 `exact f _ _ _` does goal-directed elaboration — wildcards are resolved from the

@@ -16,7 +16,7 @@ tactic will loop or produce unusable goals.
 | Tactic | Behavior | When to Use |
 |--------|----------|-------------|
 | `unfold f` | Single-level unfold of `f` | Default choice for WF functions |
-| `rw [f.eq_1]` | Rewrites one application via equation lemma | When `unfold` is too aggressive or inside `conv` |
+| `rw [f.eq_def]` or `rw [f.eq_1]` | Rewrites one application via equation lemma | When `unfold` is too aggressive or inside `conv` |
 | `simp only [f]` | **FORBIDDEN** — loops on WF functions | Never for WF functions |
 
 **Why `simp only [f]` loops:** simp repeatedly rewrites `f` in its own
@@ -38,7 +38,7 @@ split
 After `unfold`, use `split` to case-analyze the exposed `if`/`match`.
 See `Zip/Spec/DeflateDynamicFreqs.lean:29`.
 
-### `rw [f.eq_1]` — Precise Rewriting
+### `rw [f.eq_def]` / `rw [f.eq_1]` — Precise Rewriting
 
 When `unfold` unfolds ALL occurrences (including recursive calls you
 want to keep opaque), use the auto-generated equation lemma instead:
@@ -51,9 +51,13 @@ exact if_neg (by omega)
 
 See `Zip/Spec/HuffmanKraft.lean:74`.
 
-**Multiple equation lemmas:** When `f` pattern-matches on constructors,
-Lean generates `f.eq_1`, `f.eq_2`, etc. — one per match arm. Choose the
-equation matching your case.
+**Which equation lemma to use:**
+- `f.eq_def` — for functions **without** top-level pattern matching
+  (e.g. `decompressBlocksWF` which starts with `if`/`do`)
+- `f.eq_1`, `f.eq_2`, etc. — for functions that pattern-match on
+  constructors at the top level. One per match arm.
+
+If `f.eq_1` gives "unknown constant", try `f.eq_def`.
 
 ### Standalone Case Lemmas
 
