@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~424 completed (Feb 19 – Mar 8)
+- **Sessions**: ~437 completed (Feb 19 – Mar 8)
 - **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 393
-- **Spec theorems/lemmas**: 977 declarations across 49 spec files (26,271 lines)
+- **Merged PRs**: 407
+- **Spec theorems/lemmas**: 1,086 declarations across 49 spec files (26,580 lines)
 - **Bare simp**: 0 remaining — campaign complete (49 spec files, ZipForStd/, Native/ all clean)
 - **Bare simp_all**: 0 remaining — campaign complete (all spec files, DeflateEncodeDynamic included)
 
@@ -750,9 +750,66 @@ documented intentional instances in DeflateSuffix.lean persist.
   patterns. Updated `lean-zstd-patterns`, `lean-zstd-spec-pattern`,
   `lean-content-preservation` with recurring proof strategies.
 
-**Summary:** The Zstd spec infrastructure now spans 6 files with 238
-theorems/lemmas: ZstdSequence (64), Fse (61), ZstdHuffman (57), Zstd (31),
-XxHash (12), ZstdFrame (13). Total spec line count: 5,248 lines.
+**12-PR batch (Mar 8): FSE validity chain capstone, WF decoder refactors, quality reviews:**
+
+This batch completed the FSE table validity chain from predefined tables
+through `resolveSequenceFseTables`, added WF variants of two decoder functions
+with output size theorems, proved API-level specs for sequence history and
+skippable frames, and continued quality reviews across core spec files.
+
+*FSE table validity chain completion (3 PRs):*
+- #911: `buildPredefinedFseTables_valid` — all three predefined FSE tables
+  satisfy `ValidFseTable` (litLen at accuracyLog 6, matchLen at 6, offset at 5)
+- #919: `resolveSingleFseTable_le_size` — per-mode position bound preservation
+  (predefined/RLE/repeat modes all return pos' ≤ data.size)
+- #924: `resolveSingleFseTable_fseCompressed_valid` (FSE-compressed mode
+  produces `ValidFseTable`), `resolveSingleFseTable_valid_ex` (unified across
+  all 4 modes), and `resolveSequenceFseTables_valid` (all three sequence tables
+  valid when previous tables valid). This is the FSE validity chain capstone:
+  `buildFseTable_valid` → `resolveSingleFseTable_*_valid` →
+  `resolveSequenceFseTables_valid`.
+
+*WF decoder refactors with output size theorems (2 PRs):*
+- #929: `decodeHuffmanStreamWF` — structurally recursive variant of
+  `decodeHuffmanStream` with two composition theorems:
+  `decodeHuffmanStreamWF_size` (output = acc.size + count) and
+  `decodeHuffmanStreamWF_totalBitsRemaining_le` (bit budget monotonicity)
+- #930: `decodeFseSymbolsWF` — structurally recursive variant of
+  `decodeFseSymbols` with `decodeFseSymbolsWF_size` (output has exactly
+  `count` elements). Both WF variants replace opaque `for` loops that
+  could not be unfolded in proofs.
+
+*API-level specs (2 PRs):*
+- #907: `executeSequences_history_valid` (ValidOffsetHistory preserved through
+  sequence execution) and `executeSequences_history_size` (output history
+  maintains 3 entries). These lift loop-level invariants to the API boundary.
+- #912: `decompressZstd_single_skippable` (single skippable frame → empty
+  output) and `decompressZstd_skip_then_standard` (skip + standard → only
+  standard content). API-level specializations of WF-level frame theorems.
+
+*Quality reviews (4 PRs):*
+- #908: ZstdHuffman.lean — extracted `readBits_elim` pattern, removed dead code
+- #915: Zstd.lean — `unfold_except` tactic macro replacing 20 identical
+  monadic unfolding calls, grind audit (6 calls verified appropriate),
+  removed 4 unused `termination_by`/`decreasing_by` clauses (-21 lines)
+- #918: Fse.lean — proof optimization (-87 lines, 5.5%), 2 bare simp_all
+  eliminated
+- #926: Deflate.lean — 3 bare simp_all to targeted tactics, proof optimization
+  (-67 lines, 6.3%), dead code removal (`le_bytes_eq_encodeLEU16`, 30 lines)
+
+*Skill updates (1 PR):*
+- #925: Meditate: updated `lean-zstd-spec-pattern` with table validity chain
+  and frame composition patterns; updated `proof-review-checklist` with
+  compression and helper extraction patterns
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 279
+theorems/lemmas: ZstdSequence (82), Fse (72), ZstdHuffman (60), Zstd (34),
+XxHash (16), ZstdFrame (15). Total spec line count: 5,709 lines.
+
+**FSE validity chain status:** Complete. The chain from `buildFseTable_valid`
+through per-mode `resolveSingleFseTable` validity to
+`resolveSequenceFseTables_valid` is fully proved. All four compression modes
+(predefined, RLE, repeat, FSE-compressed) have validity theorems.
 
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
@@ -768,12 +825,13 @@ XxHash (12), ZstdFrame (13). Total spec line count: 5,248 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~424 sessions (Feb 19 – Mar 8)
-- 393 merged PRs
+- ~437 sessions (Feb 19 – Mar 8)
+- 407 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
-- Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386),
-  bare-simp-resistant pattern catalog (#386), `lean-zstd-patterns` (#491),
-  `agent-pr-recovery` (#546, updated #597), `lean-zstd-spec-pattern` (#623,
-  updated #711, #840), `lean-monad-proofs` (updated #711, #840),
+- Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
+  updated #925), bare-simp-resistant pattern catalog (#386),
+  `lean-zstd-patterns` (#491), `agent-pr-recovery` (#546, updated #597),
+  `lean-zstd-spec-pattern` (#623, updated #711, #840, #925),
+  `lean-monad-proofs` (updated #711, #840),
   `lean-content-preservation` (#891)
