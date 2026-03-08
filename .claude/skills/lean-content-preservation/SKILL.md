@@ -350,10 +350,69 @@ Each level depends on the previous: characterization proofs need size
 bounds, and often need preservation to handle the recursive/compositional
 case.
 
+## N-Block Content via Induction
+
+Two-block composition theorems (see `lean-zstd-spec-pattern` skill) use
+explicit enumeration: `rw [step]; rw [single]`. This doesn't scale to
+N blocks. For N-block frames, use **induction on the WF recursion**.
+
+### Strategy: Induction via `decompressBlocksWF.induct`
+
+```lean
+theorem decompressBlocksWF_content_general
+    (h : decompressBlocksWF data off windowSize output prevHuff prevFse history
+           = .ok (result, pos')) :
+    ∃ blocks : List ByteArray,
+      result = output ++ blocks.foldl (· ++ ·) ByteArray.empty := by
+  induction off, output, prevHuff, prevFse, history
+    using decompressBlocksWF.induct (data := data) (windowSize := windowSize)
+    generalizing result with
+  | base hoff =>
+    -- pos ≥ data.size: no blocks processed
+    ...
+  | step hoff hparse hbs hws htype hdecomp hnotlast hadv ih =>
+    -- Non-last block: one block produced, recurse
+    -- Compose: result = output ++ block ++ rest_blocks
+    ...
+```
+
+### Why induction beats enumeration at scale
+
+| Approach | 2-block | 3-block | N-block |
+|----------|---------|---------|---------|
+| Enumeration | 16 theorems | 64 theorems | 4^N theorems |
+| Induction | 1 theorem | 1 theorem | 1 theorem |
+
+The induction approach handles all block counts with a single theorem.
+Each step of the induction applies the step theorem for whatever block
+type appears, then appeals to the induction hypothesis for the remaining
+blocks.
+
+### State threading in the inductive step
+
+The inductive step must thread all mutable state:
+- `output ++ blockContent` becomes the new `output`
+- Updated Huffman table feeds the next iteration
+- Updated FSE tables feed the next iteration
+- Updated offset history feeds the next iteration
+
+This is exactly what `decompressBlocksWF` does internally — the
+induction principle mirrors the function's recursion structure.
+
+### Relationship to two-block theorems
+
+Two-block theorems are **instances** of the inductive theorem. They're
+useful as building blocks and as more concrete/readable specifications,
+but the N-block inductive theorem is the general result. The two-block
+matrix should be completed for coverage of all type combinations, then
+the N-block theorem should be proved to subsume them.
+
 ## Cross-References
 
 - **Size theorems**: `lean-zstd-spec-pattern` skill, "Size and Content
   Theorems for WF Helper Functions"
+- **Two-block composition template**: `lean-zstd-spec-pattern` skill,
+  "Two-Block Composition Template"
 - **WF recursion unfolding**: `lean-wf-recursion` skill
 - **`nomatch` for error branches**: `lean-monad-proofs` skill
 - **ByteArray indexing**: `lean-array-list` skill
