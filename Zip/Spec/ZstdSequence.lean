@@ -870,6 +870,14 @@ theorem resolveOffset_shifted3_val (history : Array Nat)
   simp only [resolveOffset, show ¬(3 > 3) from by omega, show ¬(0 > 0) from by omega,
     ↓reduceIte, and_self]
 
+/-- Any 3-element array of positive naturals is a `ValidOffsetHistory`. -/
+private theorem validOffsetHistory_mk3 (a b c : Nat) (ha : a > 0) (hb : b > 0) (hc : c > 0) :
+    ValidOffsetHistory #[a, b, c] := by
+  refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
+    Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+    List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
+    gt_iff_lt] <;> omega
+
 /-- When `rawOffset > 3` and input has `ValidOffsetHistory`, the output history
     also satisfies `ValidOffsetHistory`. The new history is
     `#[rawOffset - 3, history[0]!, history[1]!]`, all positive. -/
@@ -878,11 +886,8 @@ theorem resolveOffset_history_valid_large (rawOffset litLen : Nat)
     (hr : rawOffset > 3) :
     ValidOffsetHistory (resolveOffset rawOffset history litLen).2 := by
   obtain ⟨_, h0pos, h1pos, _⟩ := hh
-  simp only [resolveOffset, hr, ↓reduceIte, ValidOffsetHistory]
-  refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
-        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
-        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
-        gt_iff_lt] <;> omega
+  simp only [resolveOffset, hr, ↓reduceIte]
+  exact validOffsetHistory_mk3 _ _ _ (by omega) h0pos h1pos
 
 /-- For repeat codes (rawOffset ∈ {1,2,3}), when input has `ValidOffsetHistory`
     and for the shifted rawOffset=3 case `history[0]! ≥ 2`, the output history
@@ -901,41 +906,20 @@ theorem resolveOffset_history_valid_repeat (rawOffset litLen : Nat)
     simp only [show ¬(1 > 3) from by omega, ↓reduceIte]
     split
     · exact ⟨hsz, h0pos, h1pos, h2pos⟩  -- litLen > 0: history unchanged
-    · -- litLen = 0: #[history[1]!, history[0]!, history[2]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
-        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
-        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
-        gt_iff_lt] <;> omega
+    · exact validOffsetHistory_mk3 _ _ _ h1pos h0pos h2pos
   · -- rawOffset = 2
     unfold resolveOffset
     simp only [show ¬(2 > 3) from by omega, ↓reduceIte]
     split
-    · -- litLen > 0: #[history[1]!, history[0]!, history[2]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
-        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
-        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
-        gt_iff_lt] <;> omega
-    · -- litLen = 0: #[history[2]!, history[0]!, history[1]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
-        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
-        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
-        gt_iff_lt] <;> omega
+    · exact validOffsetHistory_mk3 _ _ _ h1pos h0pos h2pos
+    · exact validOffsetHistory_mk3 _ _ _ h2pos h0pos h1pos
   · -- rawOffset = 3
     unfold resolveOffset
     simp only [show ¬(3 > 3) from by omega, ↓reduceIte]
     split
-    · -- litLen > 0: #[history[2]!, history[0]!, history[1]!]
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
-        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
-        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
-        gt_iff_lt] <;> omega
-    · -- litLen = 0: #[history[0]! - 1, history[1]!, history[2]!]
-      rename_i hlit
-      have h02 := hshift ⟨by omega, rfl⟩
-      refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp only [List.size_toArray, List.length_cons, List.length_nil,
-        Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
-        List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ,
-        gt_iff_lt] <;> omega
+    · exact validOffsetHistory_mk3 _ _ _ h2pos h0pos h1pos
+    · have h02 := hshift ⟨by omega, rfl⟩
+      exact validOffsetHistory_mk3 _ _ _ (by omega) h1pos h2pos
   · omega  -- rawOffset ≥ 4
 
 /-- For shifted repeat codes 1–2 (rawOffset ∈ {1,2}, literalLength = 0),
@@ -1056,7 +1040,7 @@ theorem decodeMatchLenValue_ge_three (code : Nat) (extraBits : UInt32) (n : Nat)
 
 /-- `decodeOffsetValue` always returns a positive value.
     This follows from `(1 <<< code) ≥ 1` for any natural `code`. -/
-theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) (hcode : code > 0) :
+theorem decodeOffsetValue_positive (code : Nat) (extraBits : UInt32) :
     decodeOffsetValue code extraBits > 0 := by
   unfold decodeOffsetValue
   have : 1 <<< code ≥ 1 := by rw [Nat.one_shiftLeft]; exact Nat.one_le_two_pow
