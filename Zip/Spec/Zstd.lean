@@ -680,6 +680,60 @@ theorem decompressBlocksWF_single_rle (data : ByteArray) (off : Nat)
   simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
     ↓reduceIte, htype, hrle, hlast, Bool.false_eq_true]
 
+/-! ## decompressBlocksWF step theorems -/
+
+/-- When `decompressBlocksWF` encounters a non-last raw block, it recurses with
+    `output ++ block` and position `afterBlock`. The Huffman table, FSE tables,
+    and offset history are unchanged (raw blocks don't update them). -/
+theorem decompressBlocksWF_raw_step (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (block : ByteArray) (afterBlock : Nat)
+    (hoff : ¬ data.size ≤ off)
+    (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+    (htype : hdr.blockType = .raw)
+    (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+    (hnotlast : hdr.lastBlock = false)
+    (hadv : ¬ afterBlock ≤ off) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = Zip.Native.decompressBlocksWF data afterBlock windowSize (output ++ block)
+          prevHuff prevFse history := by
+  generalize heq : Zip.Native.decompressBlocksWF data afterBlock windowSize
+    (output ++ block) prevHuff prevFse history = rhs
+  unfold Zip.Native.decompressBlocksWF
+  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, htype, hraw, hnotlast, hadv,
+    bind, Except.bind, pure, Except.pure, ↓reduceIte, Bool.false_eq_true]
+  exact heq
+
+/-- When `decompressBlocksWF` encounters a non-last RLE block, it recurses with
+    `output ++ block` and position `afterByte`. The Huffman table, FSE tables,
+    and offset history are unchanged (RLE blocks don't update them). -/
+theorem decompressBlocksWF_rle_step (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (block : ByteArray) (afterByte : Nat)
+    (hoff : ¬ data.size ≤ off)
+    (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+    (htype : hdr.blockType = .rle)
+    (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+    (hnotlast : hdr.lastBlock = false)
+    (hadv : ¬ afterByte ≤ off) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = Zip.Native.decompressBlocksWF data afterByte windowSize (output ++ block)
+          prevHuff prevFse history := by
+  generalize heq : Zip.Native.decompressBlocksWF data afterByte windowSize
+    (output ++ block) prevHuff prevFse history = rhs
+  unfold Zip.Native.decompressBlocksWF
+  simp only [hoff, ↓reduceDIte, hparse, hbs, hws, htype, hrle, hnotlast, hadv,
+    bind, Except.bind, pure, Except.pure, ↓reduceIte, Bool.false_eq_true]
+  exact heq
+
 /-! ## Frame header position advancement -/
 
 /-- When `parseFrameHeader` succeeds, the returned position advances by at
