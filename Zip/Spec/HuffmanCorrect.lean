@@ -86,8 +86,7 @@ protected theorem decode_go_decodeBits (tree : Zip.Native.HuffTree)
             | true => rw [hbit_val] at hbit; exact absurd hbit (by decide)
           obtain ⟨hspec, hwf'⟩ := ihz br₁ (n + 1) hwf₁ h
           refine ⟨?_, hwf'⟩
-          rw [hbr_bits, hb]; simp only [decodeBits]
-          rw [← hbr1_bits]; exact hspec
+          rw [hbr_bits, hb]; simp only [decodeBits, ← hbr1_bits]; exact hspec
         · -- bit != 0: go right (b = true)
           rename_i hbit
           have hb : b = true := by
@@ -96,8 +95,7 @@ protected theorem decode_go_decodeBits (tree : Zip.Native.HuffTree)
             | false => exfalso; rw [hbit_val] at hbit; exact hbit (by decide)
           obtain ⟨hspec, hwf'⟩ := iho br₁ (n + 1) hwf₁ h
           refine ⟨?_, hwf'⟩
-          rw [hbr_bits, hb]; simp only [decodeBits]
-          rw [← hbr1_bits]; exact hspec
+          rw [hbr_bits, hb]; simp only [decodeBits, ← hbr1_bits]; exact hspec
 
 /-! ### Tree-table correspondence via TreeHasLeaf
 
@@ -122,6 +120,7 @@ inductive TreeHasLeaf : Zip.Native.HuffTree → List Bool → UInt16 → Prop
 protected theorem decodeBits_of_hasLeaf (tree : Zip.Native.HuffTree) (cw : List Bool)
     (sym : UInt16) (rest : List Bool) (h : TreeHasLeaf tree cw sym) :
     decodeBits tree (cw ++ rest) = some (sym, rest) := by
+  -- `simp_all only` needed: `left`/`right` cases require the induction hypothesis
   induction h <;> simp_all only [decodeBits, List.nil_append, List.cons_append]
 
 /-- **Completeness for `decode.go`**: if the tree has a leaf at path `cw` and
@@ -182,11 +181,11 @@ protected theorem hasLeaf_of_decodeBits (tree : Zip.Native.HuffTree) (bits : Lis
       | false =>
         simp only [decodeBits] at h
         obtain ⟨cw, hleaf, hrst⟩ := ihz rest' h
-        exact ⟨false :: cw, .left hleaf, by rw [hrst]; rfl⟩
+        exact ⟨false :: cw, .left hleaf, by simp [hrst]⟩
       | true =>
         simp only [decodeBits] at h
         obtain ⟨cw, hleaf, hrst⟩ := iho rest' h
-        exact ⟨true :: cw, .right hleaf, by rw [hrst]; rfl⟩
+        exact ⟨true :: cw, .right hleaf, by simp [hrst]⟩
 
 /-! ### insert.go creates the correct leaf path -/
 
@@ -217,12 +216,10 @@ theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
         insert_bit_zero code n (by omega) htb
       cases tree with
       | empty =>
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym .empty (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
         exact .left (ih .empty (by omega) trivial)
       | node z o =>
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
         simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
@@ -234,12 +231,10 @@ theorem insert_go_hasLeaf (code : UInt32) (sym : UInt16)
         insert_bit_one code n (by omega) htb
       cases tree with
       | empty =>
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym .empty (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
         exact .right (ih .empty (by omega) trivial)
       | node z o =>
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
         simp only [Huffman.Spec.natToBits, htb, NoLeafOnPath] at hnl
@@ -265,8 +260,6 @@ theorem insert_go_preserves (code : UInt32) (sym : UInt16)
     cases h with
     | leaf =>
       -- tree = .leaf s, cw = []. Collision: insert.go returns .leaf s unchanged.
-      show TreeHasLeaf
-        (Zip.Native.HuffTree.insert.go code sym (.leaf _) (n + 1)) [] _
       unfold Zip.Native.HuffTree.insert.go
       exact .leaf
     | left h' =>
@@ -275,7 +268,6 @@ theorem insert_go_preserves (code : UInt32) (sym : UInt16)
       | false =>
         -- Same direction: insertion goes left too; recurse into z
         have hbit := insert_bit_zero code n (by omega) htb
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
         exact .left (ih _ (by omega) _ h' fun hpre =>
@@ -283,7 +275,6 @@ theorem insert_go_preserves (code : UInt32) (sym : UInt16)
       | true =>
         -- Different direction: insertion goes right; z is untouched
         have hbit := insert_bit_one code n (by omega) htb
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
         exact .left h'
@@ -293,14 +284,12 @@ theorem insert_go_preserves (code : UInt32) (sym : UInt16)
       | false =>
         -- Different direction: insertion goes left; o is untouched
         have hbit := insert_bit_zero code n (by omega) htb
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
         exact .right h'
       | true =>
         -- Same direction: insertion goes right too; recurse into o
         have hbit := insert_bit_one code n (by omega) htb
-        show TreeHasLeaf (Zip.Native.HuffTree.insert.go code sym _ (n + 1)) _ _
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
         exact .right (ih _ (by omega) _ h' fun hpre =>
@@ -335,7 +324,6 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
         cases tree with
         | empty =>
           -- insert into empty creates a node
-          show NoLeafOnPath (Zip.Native.HuffTree.insert.go code sym .empty (n + 1)) (b :: rest)
           unfold Zip.Native.HuffTree.insert.go; simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
           cases b with
           | false =>
@@ -344,7 +332,6 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
               hnp (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self])
           | true => trivial  -- different direction, child is .empty
         | node z o =>
-          show NoLeafOnPath (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) (b :: rest)
           unfold Zip.Native.HuffTree.insert.go; simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
           cases b with
           | false =>
@@ -360,7 +347,6 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
         have hbit := insert_bit_one code n (by omega) htb
         cases tree with
         | empty =>
-          show NoLeafOnPath (Zip.Native.HuffTree.insert.go code sym .empty (n + 1)) (b :: rest)
           unfold Zip.Native.HuffTree.insert.go
           simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
           cases b with
@@ -369,7 +355,6 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
             exact ih .empty (by omega) rest trivial fun hpre =>
               hnp (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self])
         | node z o =>
-          show NoLeafOnPath (Zip.Native.HuffTree.insert.go code sym (.node z o) (n + 1)) (b :: rest)
           unfold Zip.Native.HuffTree.insert.go
           simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
           cases b with
@@ -406,9 +391,9 @@ theorem insert_go_complete' (code : UInt32) (sym : UInt16)
         cases h with
         | left h' =>
           rcases ih .empty (by omega) _ h' with h | ⟨rfl, rfl⟩
-          · exact absurd h (by intro h; cases h)
+          · nomatch h
           · exact .inr ⟨by simp only [Huffman.Spec.natToBits, htb], rfl⟩
-        | right h' => exact absurd h' (by intro h; cases h)
+        | right h' => nomatch h'
       | node z o =>
         simp only [Zip.Native.HuffTree.insert.go, hbit, ite_true] at h
         cases h with
@@ -426,10 +411,10 @@ theorem insert_go_complete' (code : UInt32) (sym : UInt16)
       | empty =>
         simp only [Zip.Native.HuffTree.insert.go, hbit] at h
         cases h with
-        | left h' => exact absurd h' (by intro h; cases h)
+        | left h' => nomatch h'
         | right h' =>
           rcases ih .empty (by omega) _ h' with h | ⟨rfl, rfl⟩
-          · exact absurd h (by intro h; cases h)
+          · nomatch h
           · exact .inr ⟨by simp only [Huffman.Spec.natToBits, htb], rfl⟩
       | node z o =>
         simp only [Zip.Native.HuffTree.insert.go, hbit] at h
