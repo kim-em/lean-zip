@@ -743,6 +743,28 @@ This is cleaner than `simp only [beq_iff_eq] at h`. Note: `beq_eq_true_iff_eq` d
 not exist — the correct simp lemma is `beq_iff_eq`.
 Or use `exact absurd (by rw [h]; decide) hne` for contradiction branches.
 
+## `beq_iff_eq` Over-Rewrites Inside `foldl` Lambdas
+
+When a goal contains `foldl (fun acc l => if (l == b) = true then ...)`,
+`simp only [beq_iff_eq]` rewrites ALL `==` occurrences — including inside
+the lambda — changing `(l == b) = true` to `l = b`. This breaks downstream
+goals that expect the `(l == b) = true` form.
+
+**Wrong**:
+```lean
+simp only [beq_iff_eq, if_neg hbeq]  -- rewrites == inside foldl too
+```
+
+**Right**: Create a targeted `have` first:
+```lean
+have hf : ¬((x == b) = true) := by rw [beq_iff_eq]; exact hbeq
+simp only [if_neg hf]  -- only affects the outer if, not the foldl
+```
+
+The `rw [beq_iff_eq]` in the `have` is scoped to that subgoal, while
+`simp only [if_neg hf]` matches exactly the outer `if` without touching
+the lambda body.
+
 ## Array Literal Indexing After `rcases` Case Split
 
 When proving a property about `arr[code]` for all `code < N` (e.g., validating
