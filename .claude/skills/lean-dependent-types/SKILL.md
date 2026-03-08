@@ -1,6 +1,6 @@
 ---
 name: lean-dependent-types
-description: Use when Lean 4 gives "motive is not type correct", max recursion on List.ofFn, rewriting fails due to dependent types, or cross-file visibility issues with private/protected.
+description: Use when Lean 4 gives "motive is not type correct", max recursion on List.ofFn, rewriting fails due to dependent types, match elaboration adds extra discriminants from hypotheses, or cross-file visibility issues with private/protected.
 allowed-tools: Read, Bash, Grep
 ---
 
@@ -51,6 +51,28 @@ Use `exact hd'.trans hd₁` or `exact ⟨hd'.trans hd₁, ...⟩` instead.
 This applies generally: `▸` is designed for rewriting the goal by substituting
 the LHS of an equation with the RHS. For transitive equality chains, `.trans` is
 always cleaner and avoids dependent-type issues.
+
+## `id` Wrapper to Break Dependent Match Elaboration
+
+When a match discriminant variable `x` appears in the type of a hypothesis
+`h : ... = .ok (..., x)`, Lean's match elaborator adds `h` as an extra
+discriminant in `match x with | some a => ... | none => ...`, producing
+`match x, h with | some a, h => ... | none, h => ...`. This contaminates
+proof terms and makes `simp`/`exact` fail with type mismatches.
+
+**Fix**: Use `(id x)` instead of `x` in the match (or `if let`). `id x` has the
+same type and value but is not the same variable, so `h` doesn't depend on it:
+```lean
+-- BAD: hlit leaks into match discriminants
+(if let some ht := huffTree then some ht else prevHuffTree)
+
+-- GOOD: id breaks dependency chain
+(if let some ht := (id huffTree) then some ht else prevHuffTree)
+```
+
+This commonly arises in theorem RHS expressions where a variable appears both as
+a match target and in a hypothesis type (e.g. `parseLiteralsSection` returning
+a Huffman tree that's also pattern-matched for the next block).
 
 ## `exact` vs `have :=` for Wildcard Resolution
 
