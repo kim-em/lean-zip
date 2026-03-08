@@ -332,7 +332,7 @@ private theorem canonicalCodes_go_snd_le (lengths : Array UInt8) (nextCode : Arr
       let val := (nextCode[lengths[i].toNat]!.toUInt16, lengths[i])
       have hsize' : (result.set! i val).size = lengths.size := by
         simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
-        split <;> simp_all
+        split <;> simp only [Array.size_set, hsize]
       have hresult' : ∀ k, k < (result.set! i val).size →
           (result.set! i val)[k]!.2.toNat ≤ bound := by
         intro k hk
