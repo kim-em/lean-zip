@@ -207,6 +207,37 @@ file split.** If a split is planned or in progress, all new issues that
 would touch the original file should use `depends-on:` to wait for the
 split.
 
+## Hot File Tracking
+
+Track files that cause repeated merge conflicts across multiple PRs.
+As of 2026-03-08, the known hot files are:
+
+| File | Size | Conflict PRs | Status |
+|------|------|-------------|--------|
+| `Zip/Spec/Zstd.lean` | ~1100 lines | #982, #988, #989, #1006, #1009, #1014, #1015 | Active hot file — all two-block composition theorems land here |
+
+### Mitigation strategies for hot files
+
+1. **Serialize work**: Use `depends-on:` to prevent concurrent issues
+   that both modify the hot file. The planner should check open PRs
+   before creating new issues targeting it.
+2. **Append-only sections**: Structure theorems so new additions go at
+   the end of the file. Concurrent appends cause fewer conflicts than
+   interleaved edits.
+3. **Consider splitting when conflicts are chronic**: If 3+ consecutive
+   batches require conflict fixes for the same file, it should be split.
+   For `Zstd.lean`, potential split: block-level theorems vs frame-level
+   theorems vs composition theorems.
+4. **Quick turnaround**: For hot files, minimize branch lifetime. Claim,
+   implement, push, and PR in one session. Don't let branches sit.
+
+### When to propose a file split
+
+Flag a file for splitting in your progress entry when:
+- It exceeds 800 lines AND
+- 3+ PRs in the current batch had conflicts on it AND
+- The file has natural section boundaries (different theorem families)
+
 ## Merge Order for Concurrent Conflicting PRs
 
 When multiple PRs conflict with each other (not just with master),

@@ -265,6 +265,24 @@ entire codebase as of 2026-03-08. New code should maintain zero bare
 Phase 3 was the key efficiency breakthrough, reducing per-file review
 time from ~20 build cycles to 2-3.
 
+### Post-campaign: next review targets
+
+With bare simp/simp_all elimination complete, future review sessions
+should focus on (in priority order):
+
+1. **Dead hypotheses**: `have` bindings whose names never appear in
+   later tactics (but verify they're not implicitly used by `omega`
+   or `simp` — see Phase 2c above)
+2. **Redundant lemmas**: Private theorems used only once, or theorems
+   whose statement is a trivial consequence of another
+3. **Proof compression**: Multi-line proofs that could be shortened
+   via `grind`, tactic chaining (`<;>`), or helper extraction
+4. **`sorry` elimination**: Track E content theorems with remaining
+   `sorry` placeholders
+5. **Consistency**: Ensure naming conventions match across similar
+   theorem families (e.g., all position-advancement theorems use
+   `_pos_gt` suffix consistently)
+
 ## Phase 3c: Proof Compression
 
 After bare-simp cleanup, look for opportunities to shorten proofs

@@ -847,6 +847,105 @@ Three cases: base case (apply `decompressZstdWF_base`), error (contradict
 `.ok`), main case (dispatch on magic, apply IH for both skippable and
 standard branches).
 
+## Two-Block Composition Template
+
+Two-block composition theorems prove that `decompressBlocksWF` applied
+to a frame with two blocks yields `output ++ block1 ++ block2`. These
+fill a 4×4 matrix (raw, RLE, compressed-literals, compressed-sequences).
+
+### Why enumeration, not parameterization
+
+The four block types are too heterogeneous for a generic theorem:
+- **Raw/RLE**: No state updates (Huffman table, FSE tables, offset history
+  pass through unchanged)
+- **Compressed-literals (numSeq=0)**: Updates Huffman table, no sequence
+  execution, no history update
+- **Compressed-sequences (numSeq>0)**: Updates Huffman table, FSE tables,
+  offset history — full state threading
+
+A generic `decompressBlocksWF_two_blocks` would need a dependent type
+parameter that selects different decompression functions, state updates,
+and preconditions per block type. The resulting theorem statement would
+be harder to read and use than 16 concrete instances.
+
+### The mechanical pattern
+
+Every two-block theorem has exactly this structure:
+
+```lean
+theorem decompressBlocksWF_typeA_then_typeB (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    -- Block 1 variables (type A, non-last)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterBlock1 : Nat)
+    -- Block 2 variables (type B, last)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterBlock2 : Nat)
+    -- Block 1 hypotheses (always the same structure)
+    (hoff1 : ¬ data.size ≤ off)
+    (hparse1 : Zip.Native.parseBlockHeader data off = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize))
+    (htype1 : hdr1.blockType = .typeA)                    -- ← varies
+    (hdecomp1 : decompressTypeA ... = .ok (block1, ...))  -- ← varies
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterBlock1 ≤ off)
+    -- Block 2 hypotheses (same structure, different type)
+    (hoff2 : ¬ data.size ≤ afterBlock1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterBlock1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (windowSize > 0 && hdr2.blockSize.toUInt64 > windowSize))
+    (htype2 : hdr2.blockType = .typeB)                    -- ← varies
+    (hdecomp2 : decompressTypeB ... = .ok (block2, ...))  -- ← varies
+    (hlast2 : hdr2.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (output ++ block1 ++ block2, afterBlock2) := by
+  rw [decompressBlocksWF_typeA_step ...]   -- step theorem for block 1
+  rw [decompressBlocksWF_single_typeB ...] -- single-block theorem for block 2
+```
+
+**The proof is always two `rw` calls.** The hard work is in the step and
+single-block theorems, not in the composition.
+
+### Prerequisites for a new cell
+
+Before proving a two-block composition `typeA_then_typeB`, you need:
+1. `decompressBlocksWF_typeA_step` — the step theorem for block type A
+   (non-last block advances to the next iteration)
+2. `decompressBlocksWF_single_typeB` — the single-block theorem for type B
+   (last block produces final output)
+
+Both follow the patterns in the `lean-wf-recursion` skill (step theorems)
+and the "Frame-Level Composition" section above.
+
+### Compressed block state threading
+
+For compressed blocks, the hypothesis list is longer because of state:
+- **Huffman table**: `huffTree1` produced by block 1 feeds block 2
+- **FSE tables**: `fseTables1` threaded through (updated for sequences)
+- **Offset history**: `history1` produced by block 1's sequences feeds block 2
+- **Window**: Block 2's window includes `output ++ block1` (accumulated output)
+
+The theorem statement for compressed-sequence pairs can exceed 60
+hypotheses. This is expected — the theorem captures all state threading
+that `decompressBlocksWF` performs internally.
+
+### Scaling beyond two blocks
+
+The two-block matrix is sufficient for characterizing frame output up to
+two blocks. For N-block frames (N ≥ 3), the approach is **induction on
+the block list**, not N-block enumeration:
+
+1. Each step theorem proves that processing one non-last block advances
+   to the next call with updated state
+2. Induction composes arbitrarily many step theorems
+3. The final block uses the single-block theorem as the base case
+
+This avoids exponential growth in theorem count (16 for 2-block, 64 for
+3-block). See `lean-content-preservation` skill for the induction pattern.
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
