@@ -1157,6 +1157,55 @@ theorem decodeHuffmanSymbol_bits_le_maxBits
     omega
 
 open Zip.Native in
+/-- The `data` field is unchanged by `decodeHuffmanSymbol`. The first `readBits`
+    (peek) produces a reader that is discarded; the second `readBits` operates
+    on the original `br`, so one application of `readBits_data_eq` suffices. -/
+theorem decodeHuffmanSymbol_data_eq
+    (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (sym : UInt8) (br' : BackwardBitReader)
+    (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
+    br'.data = br.data := by
+  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
+  split at h; · exact nomatch h
+  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
+  | error => simp only [hrd1] at h; exact nomatch h
+  | ok v1 =>
+    obtain ⟨bits1, br1⟩ := v1
+    rw [hrd1] at h
+    simp only [pure, Pure.pure, Except.pure] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    rename_i v2 hrd2
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    exact Zstd.Spec.Fse.readBits_data_eq br _ _ _ hrd2
+
+open Zip.Native in
+/-- The `startPos` field is unchanged by `decodeHuffmanSymbol`. The first
+    `readBits` (peek) produces a reader that is discarded; the second `readBits`
+    operates on the original `br`, so one application of `readBits_startPos_eq`
+    suffices. -/
+theorem decodeHuffmanSymbol_startPos_eq
+    (htable : ZstdHuffmanTable) (br : BackwardBitReader)
+    (sym : UInt8) (br' : BackwardBitReader)
+    (h : decodeHuffmanSymbol htable br = .ok (sym, br')) :
+    br'.startPos = br.startPos := by
+  simp only [decodeHuffmanSymbol, bind, Except.bind] at h
+  split at h; · exact nomatch h
+  cases hrd1 : br.readBits (min htable.maxBits br.totalBitsRemaining) with
+  | error => simp only [hrd1] at h; exact nomatch h
+  | ok v1 =>
+    obtain ⟨bits1, br1⟩ := v1
+    rw [hrd1] at h
+    simp only [pure, Pure.pure, Except.pure] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    rename_i v2 hrd2
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    exact Zstd.Spec.Fse.readBits_startPos_eq br _ _ _ hrd2
+
+open Zip.Native in
 /-- If decoding succeeds, the input reader had bits remaining. This is the
     contrapositive of the `peekBits == 0` error check. -/
 theorem decodeHuffmanSymbol_totalBitsRemaining_pos
