@@ -354,6 +354,98 @@ def decodeSequences (litLenTable offsetTable matchLenTable : FseTable)
       throw s!"Zstd: match length code {matchLenCode} out of range (max 52)"
   return result
 
+/-- Decode one sequence's symbols and extra bits from the backward bitstream.
+    Returns the decoded sequence, the updated `BackwardBitReader`, and the three
+    FSE cells (for state update by the caller). -/
+private def decodeOneSequence
+    (litLenTable offsetTable matchLenTable : FseTable)
+    (br : BackwardBitReader)
+    (litLenState offsetState matchLenState : Nat) :
+    Except String (ZstdSequence × BackwardBitReader × FseCell × FseCell × FseCell) := do
+  let offsetCell := offsetTable.cells[offsetState]!
+  let matchLenCell := matchLenTable.cells[matchLenState]!
+  let litLenCell := litLenTable.cells[litLenState]!
+  let (offsetExtra, br) ← br.readBits offsetCell.symbol.toNat
+  if h : matchLenCell.symbol.toNat < matchLenExtraBits.size then
+    let (_, matchExtraBitCount) := matchLenExtraBits[matchLenCell.symbol.toNat]
+    let (matchExtra, br) ← br.readBits matchExtraBitCount
+    if h2 : litLenCell.symbol.toNat < litLenExtraBits.size then
+      let (_, litExtraBitCount) := litLenExtraBits[litLenCell.symbol.toNat]
+      let (litExtra, br) ← br.readBits litExtraBitCount
+      let offsetVal := decodeOffsetValue offsetCell.symbol.toNat offsetExtra
+      let matchLenVal ← decodeMatchLenValue matchLenCell.symbol.toNat matchExtra
+      let litLenVal ← decodeLitLenValue litLenCell.symbol.toNat litExtra
+      .ok ({ literalLength := litLenVal, matchLength := matchLenVal, offset := offsetVal },
+           br, litLenCell, matchLenCell, offsetCell)
+    else throw s!"litLen code {litLenCell.symbol.toNat} out of range"
+  else throw s!"matchLen code {matchLenCell.symbol.toNat} out of range"
+
+/-- WF variant of decodeSequences inner loop for proof reasoning.
+    Manages three interleaved FSE states (litLen, matchLen, offset),
+    decoding one sequence per step. Structural recursion on `remaining`. -/
+def decodeSequencesWF.loop
+    (litLenTable offsetTable matchLenTable : FseTable)
+    (br : BackwardBitReader)
+    (litLenState offsetState matchLenState : Nat)
+    (remaining : Nat) (total : Nat)
+    (acc : Array ZstdSequence) :
+    Except String (Array ZstdSequence × BackwardBitReader) :=
+  match remaining with
+  | 0 => .ok (acc, br)
+  | n + 1 =>
+    let litLenTableSize := 1 <<< litLenTable.accuracyLog
+    let offsetTableSize := 1 <<< offsetTable.accuracyLog
+    let matchLenTableSize := 1 <<< matchLenTable.accuracyLog
+    if offsetState >= offsetTableSize then
+      .error s!"Zstd: offset FSE state {offsetState} out of range (table size {offsetTableSize})"
+    else if matchLenState >= matchLenTableSize then
+      .error s!"Zstd: matchLen FSE state {matchLenState} out of range (table size {matchLenTableSize})"
+    else if litLenState >= litLenTableSize then
+      .error s!"Zstd: litLen FSE state {litLenState} out of range (table size {litLenTableSize})"
+    else
+      match decodeOneSequence litLenTable offsetTable matchLenTable br
+              litLenState offsetState matchLenState with
+      | .error e => .error e
+      | .ok (seq, br, litLenCell, matchLenCell, offsetCell) =>
+        let acc := acc.push seq
+        if n == 0 then
+          .ok (acc, br)
+        else
+          match br.readBits litLenCell.numBits.toNat with
+          | .error e => .error e
+          | .ok (litBits, br) =>
+          match br.readBits matchLenCell.numBits.toNat with
+          | .error e => .error e
+          | .ok (matchBits, br) =>
+          match br.readBits offsetCell.numBits.toNat with
+          | .error e => .error e
+          | .ok (offBits, br) =>
+          decodeSequencesWF.loop litLenTable offsetTable matchLenTable br
+            (litLenCell.newState.toNat + litBits.toNat)
+            (offsetCell.newState.toNat + offBits.toNat)
+            (matchLenCell.newState.toNat + matchBits.toNat)
+            n total acc
+
+/-- WF variant of decodeSequences. Initializes three FSE states, then
+    delegates to the structural-recursive loop. -/
+def decodeSequencesWF (litLenTable offsetTable matchLenTable : FseTable)
+    (br : BackwardBitReader) (numSeq : Nat) :
+    Except String (Array ZstdSequence × BackwardBitReader) :=
+  if numSeq == 0 then .ok (#[], br)
+  else
+    match br.readBits litLenTable.accuracyLog with
+    | .error e => .error e
+    | .ok (litLenInit, br) =>
+    match br.readBits offsetTable.accuracyLog with
+    | .error e => .error e
+    | .ok (offsetInit, br) =>
+    match br.readBits matchLenTable.accuracyLog with
+    | .error e => .error e
+    | .ok (matchLenInit, br) =>
+    decodeSequencesWF.loop litLenTable offsetTable matchLenTable br
+      litLenInit.toNat offsetInit.toNat matchLenInit.toNat
+      numSeq numSeq #[]
+
 /-- Build an FSE table for RLE mode: a single-cell table where every state maps
     to the given symbol with 0 extra bits (RFC 8878 §3.1.1.3.2.1, mode 1). -/
 def buildRleFseTable (symbol : UInt8) : FseTable :=
