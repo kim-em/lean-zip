@@ -158,44 +158,12 @@ theorem compress_adler32 (data : ByteArray) (level : UInt8) :
   rw [hceq,
     show 2 + (Deflate.deflateRaw data level).size =
       (header ++ Deflate.deflateRaw data level).size + 0 from by
-        simp only [ByteArray.size_append, hhsz, Nat.add_zero, Nat.add_left_cancel_iff],
+        simp only [ByteArray.size_append, hhsz, Nat.add_zero],
     Binary.readUInt32BE_append_right (header ++ Deflate.deflateRaw data level) trailer 0
       (by omega)]
   exact hadler
 
 end ZlibEncode
-
-/-! ## Bitstream composition lemmas -/
-
-/-- `bytesToBits` distributes over ByteArray append. -/
-private theorem bytesToBits_append (a b : ByteArray) :
-    Deflate.Spec.bytesToBits (a ++ b) =
-    Deflate.Spec.bytesToBits a ++ Deflate.Spec.bytesToBits b := by
-  simp only [Deflate.Spec.bytesToBits, ByteArray.data_append, Array.toList_append,
-    List.flatMap_append]
-
-/-! ## inflateRaw at offset via correctness + completeness -/
-
-/-- If `inflate deflated = .ok data`, then the spec decode succeeds on
-    `bytesToBits deflated`. -/
-private theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
-    (h : Inflate.inflate deflated = .ok result) :
-    Deflate.Spec.decode.go
-      (Deflate.Spec.bytesToBits deflated) [] =
-      some result.data.toList := by
-  simp only [Inflate.inflate, bind, Except.bind] at h
-  cases hinf : Inflate.inflateRaw deflated 0 (1024 * 1024 * 1024) with
-  | error e => simp [hinf] at h
-  | ok p =>
-    simp only [Nat.reduceMul, hinf, pure, Except.pure, Except.ok.injEq] at h
-    have hdec :=
-      Deflate.Correctness.inflate_correct deflated 0 (1024 * 1024 * 1024) p.1 p.2
-        (by rw [hinf])
-    simp only [Nat.zero_mul, List.drop_zero] at hdec
-    rw [← h]
-    show Deflate.Spec.decode (Deflate.Spec.bytesToBits deflated) =
-      some p.1.data.toList
-    exact hdec
 
 /-- Zlib roundtrip: decompressing the output of compress returns the original data.
     The size bound (1 GiB) is inherited from `inflate_deflateRaw`. -/
