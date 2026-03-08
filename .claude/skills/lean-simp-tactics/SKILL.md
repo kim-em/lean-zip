@@ -581,6 +581,37 @@ replacing to verify the resulting hypothesis has the expected form.
 **Common in**: Guard conditions after `if bits.length ≥ maxPos` or
 `if pos > data.size` in WF-recursive functions.
 
+## `simp_all only` in `decreasing_by` Blocks
+
+When converting bare `simp_all` inside `decreasing_by` to `simp_all only`,
+you typically need THREE categories of lemmas simultaneously:
+
+1. **Negated guard normalizers**: `ge_iff_le` + `Nat.not_le` (or `gt_iff_lt` +
+   `Nat.not_lt`) for the negated if-guard hypothesis
+2. **Structural lemmas for let bindings**: `simp_all only` doesn't take binding
+   names as arguments like `simp only [cl]`. Instead, provide lemmas that
+   simplify the let-bound expression. E.g., `List.length_cons` when the let
+   defines `let acc' := sym :: acc`
+3. **Original explicit lemmas**: Whatever was already in the `simp_all [...]` call
+
+**Example** (from `decodeCLSymbols` termination):
+```lean
+-- Before:
+decreasing_by all_goals simp_all [List.length_append, List.length_replicate]; omega
+
+-- After:
+decreasing_by all_goals simp_all only [
+  List.length_append, List.length_replicate,  -- (3) original lemmas
+  ge_iff_le, Nat.not_le,                      -- (1) negated guard
+  List.length_cons                             -- (2) let binding structure
+]; omega
+```
+
+**Why this is tricky**: Bare `simp_all` handles all three automatically. When
+restricting to `only`, each category must be added explicitly, and the
+interaction isn't obvious until you see the omega counterexample mentioning
+`let`-bound variables.
+
 ## `simp; omega` for Array Size After Mutation
 
 After `Array.set!` or when reasoning about `Array.replicate`, bare
