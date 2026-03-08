@@ -786,6 +786,39 @@ Key lemmas:
 This pattern appears in Zstd offset decoding (`decodeOffsetValue`) and FSE
 table size proofs where `tableSize = 1 <<< accuracyLog`.
 
+### `simp only [Nat.shiftLeft_eq]` Fails to Match `<<<` in Hypotheses
+
+When `<<<` appears in hypotheses (e.g. from function unfolding), `simp only
+[Nat.shiftLeft_eq] at *` may fail silently — the `<<<` remains unconverted.
+This happens because `<<<` goes through the typeclass chain `HShiftLeft →
+ShiftLeft → Nat.shiftLeft`, and `simp only` may not unfold the full chain
+to match `Nat.shiftLeft_eq`.
+
+**Reliable pattern**: Prove the conversion as a local `have`, then use it:
+```lean
+have hshift : ∀ k, 1 <<< k = 2 ^ k := fun k => by
+  simp [Nat.shiftLeft_eq]
+simp only [hshift] at *
+-- Now all 1 <<< k are converted to 2 ^ k
+```
+
+**Why this works**: `simp [Nat.shiftLeft_eq]` (without `only`) CAN match
+through the typeclass chain in a standalone goal. The `have` captures the
+result, and `simp only [hshift]` uses the universally quantified form to
+rewrite all occurrences reliably.
+
+**After converting shifts, use `generalize` for omega**: Since `omega`
+can't handle `2^n` directly, generalize the power to a fresh variable:
+```lean
+have hle_p : 2 ^ Nat.log2 (n + 1) ≤ n + 1 := Nat.log2_self_le (by omega)
+generalize 2 ^ Nat.log2 (n + 1) = p at *
+omega  -- now p is just a linear variable with bounds from hle_p
+```
+
+**Important**: Establish any needed bounds on `2^(...)` BEFORE `generalize`,
+otherwise `generalize` severs the connection between `p` and the original
+expression, and omega loses the bound information.
+
 ## `⟨⟨result.data.toList⟩⟩ = result` for ByteArray
 
 `ByteArray.mk (Array.mk result.data.toList) = result` is true by **eta reduction** in
