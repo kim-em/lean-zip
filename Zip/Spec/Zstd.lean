@@ -716,4 +716,41 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
         -- header.contentSize).
         grind
 
+/-- When `decompressFrame` succeeds, the returned position is within data bounds.
+    This is the frame-level capstone of the le_size campaign: it composes
+    `decompressBlocksWF_le_size` with the checksum bounds guard. -/
+theorem decompressFrame_le_size (data : ByteArray) (pos : Nat)
+    (output : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressFrame data pos = .ok (output, pos')) :
+    pos' ≤ data.size := by
+  unfold Zip.Native.decompressFrame at h
+  cases hph : Zip.Native.parseFrameHeader data pos with
+  | error e => simp only [hph, bind, Except.bind] at h; exact nomatch h
+  | ok val =>
+    obtain ⟨header, afterHeader⟩ := val
+    simp only [hph, bind, Except.bind, pure, Except.pure] at h
+    split at h  -- dictionaryId
+    · -- some dictId
+      split at h  -- dictId != 0
+      · exact nomatch h
+      · unfold Zip.Native.decompressBlocks at h
+        cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
+            ByteArray.empty none {} #[1, 4, 8] with
+        | error e => simp only [hdb] at h; exact nomatch h
+        | ok val2 =>
+          obtain ⟨content, afterBlocks⟩ := val2
+          have hle := decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ hdb
+          simp only [hdb] at h
+          grind
+    · -- none
+      unfold Zip.Native.decompressBlocks at h
+      cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
+          ByteArray.empty none {} #[1, 4, 8] with
+      | error e => simp only [hdb] at h; exact nomatch h
+      | ok val2 =>
+        obtain ⟨content, afterBlocks⟩ := val2
+        have hle := decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ hdb
+        simp only [hdb] at h
+        grind
+
 end Zstd.Spec
