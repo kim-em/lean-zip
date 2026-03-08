@@ -554,6 +554,35 @@ theorem buildRleFseTable_cells_size (symbol : UInt8) :
     (buildRleFseTable symbol).cells.size = 1 := by
   rfl
 
+/-- The single cell's symbol in an RLE FSE table is within bounds. -/
+theorem buildRleFseTable_symbol_lt (symbol : UInt8) (numSymbols : Nat)
+    (hsym : symbol.toNat < numSymbols)
+    (i : Fin (buildRleFseTable symbol).cells.size) :
+    (buildRleFseTable symbol).cells[i].symbol.toNat < numSymbols := by
+  have hsz : (buildRleFseTable symbol).cells.size = 1 := rfl
+  have : i = ⟨0, hsz ▸ Nat.zero_lt_one⟩ := Fin.ext (by omega)
+  subst this
+  show symbol.toUInt16.toNat < numSymbols
+  rw [UInt8.toNat_toUInt16]
+  exact hsym
+
+/-- The RLE-constructed table satisfies the `ValidFseTable` predicate. -/
+theorem buildRleFseTable_valid (symbol : UInt8) (numSymbols : Nat)
+    (hsym : symbol.toNat < numSymbols) :
+    Zstd.Spec.Fse.ValidFseTable (buildRleFseTable symbol).cells 0 numSymbols := by
+  refine ⟨?_, ?_, ?_⟩
+  · -- cells.size = 1 <<< 0
+    exact buildRleFseTable_cells_size symbol
+  · -- ∀ i, cells[i].symbol.toNat < numSymbols
+    exact buildRleFseTable_symbol_lt symbol numSymbols hsym
+  · -- ∀ i, cells[i].numBits.toNat ≤ 0
+    intro i
+    have hsz : (buildRleFseTable symbol).cells.size = 1 := rfl
+    have : i = ⟨0, hsz ▸ Nat.zero_lt_one⟩ := Fin.ext (by omega)
+    subst this
+    show (0 : UInt8).toNat ≤ 0
+    decide
+
 /-! ## resolveSingleFseTable position properties -/
 
 /-- In predefined mode, the position is unchanged. -/

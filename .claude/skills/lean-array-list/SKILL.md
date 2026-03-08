@@ -262,6 +262,33 @@ private theorem getD_set! (a : Array Nat) (i v s : Nat) :
 
 Then use `rw [getD_set!]; split` instead of manual unfolding.
 
+## Singleton Array Fin Elimination
+
+When proving properties about `arr[i]` where `arr` has exactly 1 element and
+`i : Fin arr.size`, direct `rw`/`simp` on the index fails due to dependent types
+(the bound proof depends on `i`). The solution:
+
+```lean
+-- arr has size 1 (by rfl or existing theorem)
+have hsz : arr.size = 1 := rfl
+-- Construct a Fin with a compatible proof term, prove equality via Fin.ext
+have : i = ⟨0, hsz ▸ Nat.zero_lt_one⟩ := Fin.ext (by omega)
+-- subst eliminates i entirely, enabling definitional reduction
+subst this
+-- Now arr[⟨0, _⟩] reduces and `show`/`change` can match the concrete value
+show someConcreteValue
+```
+
+**Why other approaches fail:**
+- `rw [show i.val = 0 from ...]` on `arr[i]` hits dependent type errors
+- `simp only [Array.getElem_singleton]` needs Nat indexing, not Fin
+- `Fin.getElem_fin` doesn't exist in this toolchain
+- `change`/`show` before subst can't reduce `arr[i]` with abstract `i`
+
+**The pattern**: `Fin.ext (by omega)` + `subst` is the reliable way to
+eliminate a Fin index in a singleton array. The `hsz ▸ Nat.zero_lt_one`
+constructs a proof term that `subst` can handle.
+
 ## Build Missing API, Don't Work Around It
 
 If a proof is blocked by missing lemmas for standard types (ByteArray, Array, List,
