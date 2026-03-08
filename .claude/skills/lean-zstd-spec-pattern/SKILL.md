@@ -563,6 +563,73 @@ These appear in `parseCompressedLiteralsHeader_regen_bound` and
 `readBits_value_lt_pow2`. The pattern is: convert UInt operations to
 Nat via bridge lemmas, apply the Nat bound lemma, close with `omega`.
 
+## Table Validity Composition
+
+Build functions like `buildFseTable` and `buildZstdHuffmanTable` produce
+tables that satisfy structural validity predicates (`ValidFseTable`,
+`ValidHuffmanTable`). Validity proofs compose from per-property theorems.
+
+### Validity predicate pattern
+
+```lean
+def ValidHuffmanTable (table : Array HuffmanCell) (maxBits : Nat) : Prop :=
+  table.size = 1 <<< maxBits ∧
+  (∀ i : Fin table.size, table[i].numBits ≤ maxBits) ∧
+  (∀ i : Fin table.size, table[i].symbol.toNat ≤ 255)
+
+instance : Decidable (ValidHuffmanTable table maxBits) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+```
+
+### Composition theorem
+
+Prove each conjunct separately, then compose:
+
+```lean
+theorem buildZstdHuffmanTable_valid (weights : Array UInt8)
+    (result : ZstdHuffmanTable)
+    (h : buildZstdHuffmanTable weights = .ok result) :
+    ValidHuffmanTable result.table result.maxBits :=
+  ⟨buildZstdHuffmanTable_tableSize weights result h,
+   fun i => buildZstdHuffmanTable_numBits_le weights result h i,
+   fun i => Nat.lt_succ_iff.mp (UInt8.toNat_lt result.table[i].symbol)⟩
+```
+
+### Per-property proof patterns
+
+**Size/tableSize** (`_tableSize`): unfold + induction on build loop,
+tracking `Array.size_set!` through each step.
+
+**Bound preservation** (`_numBits_le`, `_symbol_lt`): prove for each
+`set!` operation using `Array.getElem_set!` case analysis — either the
+element was just set (prove for the new value) or it was untouched (use
+the induction hypothesis).
+
+**Generic property preservation through `set!`**: When a loop sets array
+entries, extract a helper lemma:
+```lean
+theorem huffman_set!_preserves_forall (table : Array HuffmanCell)
+    (P : HuffmanCell → Prop) (hall : ∀ i : Fin table.size, P table[i])
+    (idx : Nat) (cell : HuffmanCell) (hcell : P cell)
+    (hsz : (table.set! idx cell).size = table.size) :
+    ∀ i : Fin (table.set! idx cell).size, P (table.set! idx cell)[i]
+```
+This factors out the `if idx = i then ... else ...` case split and
+avoids duplicating it across multiple property proofs.
+
+### ValidOffsetHistory threading
+
+For offset history validity through loops (`executeSequences.loop`),
+prove per-step preservation:
+
+1. **Per-mode theorems**: `resolveOffset_gt3_valid`, `resolveOffset_repeat_valid`
+2. **Unified theorem**: `resolveOffset_valid` combining all modes
+3. **Loop invariant**: `executeSequences_loop_history_valid` threading
+   `ValidOffsetHistory` through the list induction
+
+Use `validOffsetHistory_mk3` to handle the common case of 3-element
+arrays: `ValidOffsetHistory #[a, b, c]` when `a > 0 ∧ b > 0 ∧ c > 0`.
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
@@ -601,3 +668,5 @@ Nat via bridge lemmas, apply the Nat bound lemma, close with `omega`.
   `lean-simp-tactics` skill, "`omega` Cannot Handle Exponentiation"
 - **Auto-generated dagger lemmas** (`UInt32.reduceBEq✝`):
   `lean-simp-tactics` skill, "Dagger Lemmas" — use `decide` or `show ... from by decide`
+- **Content preservation** (`_getElem_lt`, `_prefix` proofs):
+  `lean-content-preservation` skill
