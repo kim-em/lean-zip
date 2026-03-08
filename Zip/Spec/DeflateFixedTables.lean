@@ -53,14 +53,12 @@ private theorem fixedLitCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
   have ⟨hs, hlen, _⟩ := Huffman.Spec.codeFor_spec hcf
   have ⟨hne0, hle15⟩ := Huffman.Spec.codeFor_len_bounds hlen
   -- Size bridge
-  have hsize_eq : Inflate.fixedLitLengths.size = Deflate.Spec.fixedLitLengths.length := by
+  have hsize : s < Inflate.fixedLitLengths.size := by
     have := congrArg List.length fixedLitLengths_eq
-    simp only [List.length_map, Array.length_toList] at this; exact this
-  have hsize : s < Inflate.fixedLitLengths.size := by omega
+    simp only [List.length_map, Array.length_toList] at this; omega
   -- Element-wise bridge
-  have hmap_len : s < (Inflate.fixedLitLengths.toList.map UInt8.toNat).length := by
-    simp only [List.length_map, Array.length_toList]; exact hsize
-  have helem := List.getElem_of_eq fixedLitLengths_eq hmap_len
+  have helem := List.getElem_of_eq fixedLitLengths_eq
+    (by simp only [List.length_map, Array.length_toList]; exact hsize)
   simp only [List.getElem_map, Array.getElem_toList] at helem
   -- Get canonical code entry (bridge UInt8 > 0 to Nat > 0 for omega)
   have hpos : 0 < Inflate.fixedLitLengths[s].toNat := by omega
@@ -76,13 +74,10 @@ private theorem fixedLitCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
   -- Match codewords
   have hcw_eq : cw = cw' := Option.some.inj (hcf.symm.trans hcf')
   subst hcw_eq
-  -- Bridge second component: lengths[s] → fixedLitCodes[s]!.snd
   rw [← hlen'] at hcw'
-  -- Bridge from canonicalCodes entry to Inflate.fixedLitLengths element (for omega)
-  have hlen'_nat := congrArg UInt8.toNat hlen'
-  -- omega sees canonicalCodes and fixedLitCodes as distinct; bridge explicitly
+  -- Bridge canonicalCodes ↔ fixedLitCodes (definitionally equal) for omega
   have : fixedLitCodes[s]!.snd.toNat = (canonicalCodes Inflate.fixedLitLengths)[s]!.snd.toNat := rfl
-  exact ⟨hcw', by omega⟩
+  exact ⟨hcw', by have := congrArg UInt8.toNat hlen'; omega⟩
 
 set_option maxRecDepth 2048 in
 /-- The codeword from `codeFor` on the fixed distance table matches
@@ -94,14 +89,12 @@ private theorem fixedDistCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
   have ⟨hs, hlen, _⟩ := Huffman.Spec.codeFor_spec hcf
   have ⟨hne0, hle15⟩ := Huffman.Spec.codeFor_len_bounds hlen
   -- Size bridge
-  have hsize_eq : Inflate.fixedDistLengths.size = Deflate.Spec.fixedDistLengths.length := by
+  have hsize : s < Inflate.fixedDistLengths.size := by
     have := congrArg List.length fixedDistLengths_eq
-    simp only [List.length_map, Array.length_toList] at this; exact this
-  have hsize : s < Inflate.fixedDistLengths.size := by omega
+    simp only [List.length_map, Array.length_toList] at this; omega
   -- Element-wise bridge
-  have hmap_len : s < (Inflate.fixedDistLengths.toList.map UInt8.toNat).length := by
-    simp only [List.length_map, Array.length_toList]; exact hsize
-  have helem := List.getElem_of_eq fixedDistLengths_eq hmap_len
+  have helem := List.getElem_of_eq fixedDistLengths_eq
+    (by simp only [List.length_map, Array.length_toList]; exact hsize)
   simp only [List.getElem_map, Array.getElem_toList] at helem
   -- Get canonical code entry (bridge UInt8 > 0 to Nat > 0 for omega)
   have hpos : 0 < Inflate.fixedDistLengths[s].toNat := by omega
@@ -117,13 +110,10 @@ private theorem fixedDistCodes_agree (s : Nat) (cw : Huffman.Spec.Codeword)
   -- Match codewords
   have hcw_eq : cw = cw' := Option.some.inj (hcf.symm.trans hcf')
   subst hcw_eq
-  -- Bridge second component: lengths[s] → fixedDistCodes[s]!.snd
   rw [← hlen'] at hcw'
-  -- Bridge from canonicalCodes entry to Inflate.fixedDistLengths element (for omega)
-  have hlen'_nat := congrArg UInt8.toNat hlen'
-  -- omega sees canonicalCodes and fixedDistCodes as distinct; bridge explicitly
+  -- Bridge canonicalCodes ↔ fixedDistCodes (definitionally equal) for omega
   have : fixedDistCodes[s]!.snd.toNat = (canonicalCodes Inflate.fixedDistLengths)[s]!.snd.toNat := rfl
-  exact ⟨hcw', by omega⟩
+  exact ⟨hcw', by have := congrArg UInt8.toNat hlen'; omega⟩
 
 /-! ## findTableCode correctness -/
 
@@ -161,7 +151,7 @@ private theorem nativeDistBase_size : Inflate.distBase.size = 30 := by rfl
 private theorem specLengthBase_monotone (j k : Nat) (hjk : j ≤ k) (hk : k < 29) :
     Deflate.Spec.lengthBase[j]! ≤ Deflate.Spec.lengthBase[k]! := by
   induction k with
-  | zero => simp_all
+  | zero => obtain rfl := Nat.le_zero.mp hjk; exact Nat.le_refl _
   | succ k ih =>
     by_cases hjk' : j ≤ k
     · exact Nat.le_trans (ih hjk' (by omega))
@@ -173,7 +163,7 @@ private theorem specLengthBase_monotone (j k : Nat) (hjk : j ≤ k) (hk : k < 29
 private theorem specDistBase_monotone (j k : Nat) (hjk : j ≤ k) (hk : k < 30) :
     Deflate.Spec.distBase[j]! ≤ Deflate.Spec.distBase[k]! := by
   induction k with
-  | zero => simp_all
+  | zero => obtain rfl := Nat.le_zero.mp hjk; exact Nat.le_refl _
   | succ k ih =>
     by_cases hjk' : j ≤ k
     · exact Nat.le_trans (ih hjk' (by omega))
@@ -211,15 +201,15 @@ private theorem findTableCode_go_of_first_match
       by_cases h_next : idx + 1 < baseTable.size
       · -- Has next entry: check upper bound
         have hgt := hmatch h_next
-        simp only [show idx + 1 < baseTable.size from h_next, ↓reduceIte,
+        simp only [show idx + 1 < baseTable.size from h_next,
           show baseTable[idx + 1]!.toNat > value from hgt, ↓reduceIte]
       · -- Last entry
-        simp only [show ¬(idx + 1 < baseTable.size) from h_next, ↓reduceIte,
+        simp only [show ¬(idx + 1 < baseTable.size) from h_next,
           show idx < baseTable.size from hidx, ↓reduceIte]
     · -- Skip: search passes through this index
-      have hlt_idx : i < idx := by omega  -- from ¬(idx = i) and i ≤ idx
+      have hlt_idx : i < idx := by omega
       obtain ⟨h_next_i, h_le_i⟩ := hskip i hlt_idx
-      simp only [show i + 1 < baseTable.size from h_next_i, ↓reduceIte,
+      simp only [show i + 1 < baseTable.size from h_next_i,
         show ¬(baseTable[i + 1]!.toNat > value) from by omega, ↓reduceIte]
       exact ih (i + 1) (by omega : i + 1 ≤ idx) (by omega)
 
