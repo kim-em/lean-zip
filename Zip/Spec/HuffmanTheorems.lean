@@ -165,7 +165,7 @@ theorem decode_deterministic {α : Type} (table : List (Codeword × α))
     decode table bits = some (a, r₁) →
     decode table bits = some (b, r₂) →
     a = b ∧ r₁ = r₂ := by
-  intro h₁ h₂; simp_all only [Option.some.injEq, Prod.mk.injEq, and_self]
+  intro h₁ h₂; exact Prod.mk.inj (Option.some.inj (h₁.symm.trans h₂))
 
 /-- The canonical code assigns distinct codewords to distinct symbols,
     provided the lengths are valid. -/
