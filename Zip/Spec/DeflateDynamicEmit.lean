@@ -67,7 +67,6 @@ theorem encodeSymbol_canonicalCodes_eq (lengths : Array UInt8) (maxBits : Nat)
 
 /-! ## Main emitTokensWithCodes ↔ encodeSymbols correspondence -/
 
-set_option maxRecDepth 2048 in
 /-- Generalized loop invariant for `emitTokensWithCodes_spec`. -/
 private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
     (litLengths distLengths : Array UInt8)
@@ -252,7 +251,6 @@ theorem emitTokensWithCodes_spec (bw : BitWriter) (tokens : Array LZ77Token)
     litCodes distCodes 0 bits hwf hlc hdc hv_lit' hv_dist'
     (by rwa [List.drop_zero])
 
-set_option maxRecDepth 2048 in
 /-- `emitTokensWithCodes` preserves `BitWriter.wf`. -/
 private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
     (litCodes distCodes : Array (UInt16 × UInt8))
