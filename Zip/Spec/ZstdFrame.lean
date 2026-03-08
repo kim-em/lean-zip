@@ -458,4 +458,86 @@ theorem decompressZstd_two_rle_blocks_content (data : ByteArray)
   subst hcontent
   exact decompressZstd_single_frame data (block1 ++ block2) pos' hframe hend
 
+/-- When the input contains exactly one standard Zstd frame at position 0 with a
+    single last compressed block having numSeq=0 (literals only), `decompressZstd`
+    returns the literal section content.  Composes
+    `decompressFrame_single_compressed_literals_content` with
+    `decompressZstd_single_frame`. -/
+theorem decompressZstd_single_compressed_literals (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (literals : ByteArray) (afterLiterals : Nat)
+    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
+    (htype : hdr.blockType = .compressed)
+    (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+    (hlit : Zip.Native.parseLiteralsSection data afterHdr none
+              = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+              = .ok (0, modes, afterSeqHeader))
+    (hlast : hdr.lastBlock = true)
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok literals := by
+  have hcontent := Zstd.Spec.decompressFrame_single_compressed_literals_content data 0
+    output pos' header afterHeader hdr afterHdr literals afterLiterals huffTree
+    modes afterSeqHeader hframe hh hdict hparse hbs hws htype hblockEnd hlit hseq hlast
+  subst hcontent
+  exact decompressZstd_single_frame data output pos' hframe hend
+
+/-- When the input contains exactly one standard Zstd frame at position 0 with a
+    single last compressed block having sequences (numSeq > 0), `decompressZstd`
+    returns the sequence execution result.  Composes
+    `decompressFrame_single_compressed_sequences_content` with
+    `decompressZstd_single_frame`. -/
+theorem decompressZstd_single_compressed_sequences (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (literals : ByteArray) (afterLiterals : Nat)
+    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq : Nat) (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (llTable ofTable mlTable : Zip.Native.FseTable) (afterTables : Nat)
+    (bbr : Zip.Native.BackwardBitReader)
+    (sequences : Array Zip.Native.ZstdSequence)
+    (blockOutput : ByteArray) (newHist : Array Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
+    (htype : hdr.blockType = .compressed)
+    (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+    (hlit : Zip.Native.parseLiteralsSection data afterHdr none
+              = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+              = .ok (numSeq, modes, afterSeqHeader))
+    (hNumSeq : ¬ numSeq == 0)
+    (hfse : Zip.Native.resolveSequenceFseTables modes data afterSeqHeader {}
+              = .ok (llTable, ofTable, mlTable, afterTables))
+    (hbbr : Zip.Native.BackwardBitReader.init data afterTables
+              (afterHdr + hdr.blockSize.toNat) = .ok bbr)
+    (hdec : Zip.Native.decodeSequences llTable ofTable mlTable bbr numSeq
+              = .ok sequences)
+    (hexec : Zip.Native.executeSequences sequences literals ByteArray.empty
+               #[1, 4, 8] header.windowSize.toNat
+               = .ok (blockOutput, newHist))
+    (hlast : hdr.lastBlock = true)
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok blockOutput := by
+  have hcontent := Zstd.Spec.decompressFrame_single_compressed_sequences_content data 0
+    output pos' header afterHeader hdr afterHdr literals afterLiterals huffTree
+    numSeq modes afterSeqHeader llTable ofTable mlTable afterTables bbr sequences
+    blockOutput newHist hframe hh hdict hparse hbs hws htype hblockEnd hlit hseq
+    hNumSeq hfse hbbr hdec hexec hlast
+  subst hcontent
+  exact decompressZstd_single_frame data output pos' hframe hend
+
 end Zip.Spec.ZstdFrame
