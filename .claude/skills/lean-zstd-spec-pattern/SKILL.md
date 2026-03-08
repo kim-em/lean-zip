@@ -630,6 +630,223 @@ prove per-step preservation:
 Use `validOffsetHistory_mk3` to handle the common case of 3-element
 arrays: `ValidOffsetHistory #[a, b, c]` when `a > 0 ∧ b > 0 ∧ c > 0`.
 
+### Table Validity Chain: Builder → Predefined → Resolver → Composed
+
+The Zstd pipeline propagates table validity through a composition chain.
+The full chain, established across PRs #884, #902, #911, #919:
+
+```
+Per-cell properties (symbol_lt, numBits_le, cells_size)
+  → ValidFseTable composition (buildFseTable_valid, buildRleFseTable_valid)
+  → Predefined table validity (buildPredefinedFseTables_*_valid)
+  → Resolver validity (resolveSingleFseTable_*_valid)
+  → Composed validity (resolveSequenceFseTables_valid)
+```
+
+#### Layer 1: `buildFseTable_valid`
+
+The generic builder composes three per-property theorems:
+
+```lean
+theorem buildFseTable_valid (probs : Array Int32) (al : Nat)
+    (table : FseTable) (h : buildFseTable probs al = .ok table)
+    (hpos : 0 < probs.size) :
+    ValidFseTable table.cells al probs.size :=
+  ⟨buildFseTable_cells_size probs al table h,
+   fun i => buildFseTable_symbol_lt probs al table h hpos i,
+   fun i => buildFseTable_numBits_le probs al table h i⟩
+```
+
+**The `0 < probs.size` precondition**: FSE table cells initialize with
+`symbol = 0`. If `probs` is empty, no symbol gets positive probability,
+all cells remain at default, and `symbol.toNat < probs.size` becomes
+`0 < 0` — unprovable. Real distributions always have at least one symbol.
+This precondition appears in `buildFseTable_valid` and
+`buildFseTable_symbol_lt` but NOT in `buildFseTable_numBits_le` (numBits
+bounds are independent of distribution size).
+
+#### Layer 2: `buildRleFseTable_valid`
+
+RLE tables have accuracy log 0 (1 cell) and need a `symbol < numSymbols`
+precondition instead of `0 < probs.size`:
+
+```lean
+theorem buildRleFseTable_valid (symbol : UInt8) (numSymbols : Nat)
+    (hsym : symbol.toNat < numSymbols) :
+    Zstd.Spec.Fse.ValidFseTable (buildRleFseTable symbol).cells 0 numSymbols
+```
+
+The single cell has `numBits = 0`, proved by `decide` on `0.toNat ≤ 0`.
+
+#### Layer 3: `buildPredefinedFseTables_*_valid`
+
+Predefined tables have concrete distributions — `hpos` is discharged
+by `decide`:
+
+```lean
+-- Proof pattern: extract the build call from the bind chain, apply buildFseTable_valid
+theorem buildPredefinedFseTables_litLen_valid (ll ml of : FseTable)
+    (h : buildPredefinedFseTables = .ok (ll, ml, of)) :
+    ValidFseTable ll.cells 6 36 := by
+  simp only [buildPredefinedFseTables] at h
+  obtain ⟨ll', hll, h⟩ := Except.bind_eq_ok' h
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h    -- skip matchLen build
+  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h    -- skip offset build
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, _, _⟩ := h
+  exact buildFseTable_valid _ _ _ hll (by decide)
+```
+
+Three variants: `_litLen_valid` (al=6, 36 symbols), `_matchLen_valid`
+(al=6, 53 symbols), `_offset_valid` (al=5, 29 symbols).
+
+#### Layer 4: `resolveSingleFseTable_*_valid`
+
+The resolver dispatches on compression mode. Each mode applies the
+appropriate builder's validity theorem:
+
+| Mode | Validity source | Key proof step |
+|------|----------------|----------------|
+| `predefined` | `buildPredefinedFseTables_*_valid` | Extract predefined build from monadic chain |
+| `rle` | `buildRleFseTable_valid` | Extract symbol from `data[pos]!`, prove `symbol < maxSymbols` |
+| `repeat` | Caller's hypothesis | Previous table assumed valid from prior block |
+| `fseCompressed` | `buildFseTable_valid` | Extract `decodeFseDistribution` result, prove `0 < probs.size` |
+
+The fseCompressed case requires an existential extraction: the decoded
+distribution is not directly available, so the proof must extract it
+from the monadic chain.
+
+#### Layer 5: `resolveSequenceFseTables_valid`
+
+Composes three `resolveSingleFseTable_*_valid` calls (literal-length,
+offset, match-length) by threading position and validity through the
+bind chain.
+
+#### Theorem naming in the chain
+
+Follow the pattern `function_property`:
+- `buildFseTable_cells_size`, `buildFseTable_symbol_lt`, `buildFseTable_numBits_le`
+- `buildFseTable_valid` (composition)
+- `buildPredefinedFseTables_litLen_valid` (specialization)
+- `resolveSingleFseTable_predefined_valid` (mode-specific)
+- `resolveSequenceFseTables_valid` (top-level)
+
+## Frame-Level Composition
+
+The frame loop `decompressZstdWF` uses well-founded recursion
+(`termination_by data.size - pos`). Frame-level theorems compose
+bottom-up from single-frame to multi-frame results.
+
+### WF-level theorem hierarchy
+
+Established across PRs #887, #901, #912:
+
+```
+decompressZstdWF_base (base case: pos ≥ data.size → return output)
+  → decompressZstdWF_single_standard_frame
+  → decompressZstdWF_single_skippable_frame
+  → decompressZstdWF_skip_then_standard
+  → decompressZstdWF_standard_then_standard
+```
+
+### Single-frame theorem pattern
+
+```lean
+theorem decompressZstdWF_single_standard_frame (data : ByteArray)
+    (pos : Nat) (output content : ByteArray) (pos' : Nat)
+    (hsize : data.size ≥ pos + 4)
+    (hmagic : Binary.readUInt32LE data pos = Zip.Native.zstdMagic)
+    (hframe : Zip.Native.decompressFrame data pos = .ok (content, pos'))
+    (hadv : pos' > pos)
+    (hdone : pos' ≥ data.size) :
+    Zip.Native.decompressZstdWF data pos output = .ok (output ++ content)
+```
+
+**Proof structure**:
+1. Unfold `decompressZstdWF`
+2. Discharge guard `pos < data.size` using `hsize` and `omega`
+3. Rewrite magic number match using `hmagic`
+4. Rewrite frame decompression using `hframe`
+5. Simplify advancement check using `hadv`
+6. Apply `decompressZstdWF_base` since `pos' ≥ data.size`
+
+### Multi-frame composition pattern
+
+Multi-frame theorems compose by applying single-frame theorems:
+
+```lean
+theorem decompressZstdWF_skip_then_standard (data : ByteArray)
+    (pos : Nat) (output content : ByteArray) (skipPos framePos : Nat)
+    -- skippable frame hypotheses
+    (hmagic_lo : Binary.readUInt32LE data pos ≥ 0x184D2A50)
+    (hmagic_hi : Binary.readUInt32LE data pos ≤ 0x184D2A5F)
+    (hskip : Zip.Native.skipSkippableFrame data pos = .ok skipPos)
+    (hskip_adv : skipPos > pos)
+    -- standard frame hypotheses
+    (hmagic2 : Binary.readUInt32LE data skipPos = Zip.Native.zstdMagic)
+    (hframe : Zip.Native.decompressFrame data skipPos = .ok (content, framePos))
+    (hframe_adv : framePos > skipPos)
+    (hdone : framePos ≥ data.size) :
+    Zip.Native.decompressZstdWF data pos output = .ok (output ++ content)
+```
+
+**Key technique**: Unfold to the skippable dispatch, simplify, then
+directly apply `decompressZstdWF_single_standard_frame` at the new
+position `skipPos`. Multi-frame theorems chain linearly — each step
+passes `output` and `pos` to the next.
+
+### Magic number handling
+
+- **Skippable range** `[0x184D2A50, 0x184D2A5F]`: Two separate bounds
+  hypotheses (`≥ lo` and `≤ hi`), combined with `decide_eq_true` to
+  discharge the `Bool.and` condition
+- **Standard magic** `0xFD2FB528`: Simple equality from
+  `parseFrameHeader_magic`
+
+### API-level lifting pattern (WF → public API)
+
+API theorems wrap WF theorems with `pos=0` and `output=ByteArray.empty`:
+
+```lean
+theorem decompressZstd_single_frame (data : ByteArray)
+    (content : ByteArray) (pos' : Nat)
+    (hframe : decompressFrame data 0 = .ok (content, pos'))
+    (hend : pos' ≥ data.size) :
+    decompressZstd data = .ok content
+```
+
+**The `parseFrameHeader` existence extraction pattern**: API theorems
+need to establish preconditions (magic number, size bounds) that are
+implicit in the WF theorem. Extract them from the successful
+`decompressFrame` call:
+
+```lean
+have ⟨hdr, afterHdr, hph⟩ : ∃ hdr afterHdr,
+    parseFrameHeader data 0 = .ok (hdr, afterHdr) := by
+  unfold decompressFrame at hframe
+  cases hc : parseFrameHeader data 0 with
+  | error e => simp only [hc, bind, Except.bind] at hframe; exact nomatch hframe
+  | ok val => exact ⟨val.1, val.2, rfl⟩
+```
+
+Then use `parseFrameHeader_magic` on `hph` to get the magic number,
+`parseFrameHeader_le_size` for size bounds, and `decompressFrame_pos_gt`
+for advancement. The final simplification is
+`ByteArray.empty_append content` (or `ByteArray.empty ++ content = content`).
+
+### WF-level induction theorems
+
+Monotonicity (`decompressZstdWF_output_size_ge`) and prefix preservation
+(`decompressZstdWF_prefix`) use the custom induction principle:
+
+```lean
+induction pos, output using decompressZstdWF.induct (data := data) generalizing result
+```
+
+Three cases: base case (apply `decompressZstdWF_base`), error (contradict
+`.ok`), main case (dispatch on magic, apply IH for both skippable and
+standard branches).
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
@@ -670,3 +887,5 @@ arrays: `ValidOffsetHistory #[a, b, c]` when `a > 0 ∧ b > 0 ∧ c > 0`.
   `lean-simp-tactics` skill, "Dagger Lemmas" — use `decide` or `show ... from by decide`
 - **Content preservation** (`_getElem_lt`, `_prefix` proofs):
   `lean-content-preservation` skill
+- **Proof quality review** (bare simp conversion, dead code, helper extraction):
+  `proof-review-checklist` skill
