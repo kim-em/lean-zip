@@ -243,14 +243,106 @@ This is more explicit and doesn't depend on the simp lemma database.
 
 ### Campaign status
 
-The bare `simp_all` campaign achieved zero bare `simp_all` across the
-entire codebase as of PR #832. New code should maintain this invariant.
+Both bare `simp` and bare `simp_all` campaigns are complete across the
+entire codebase as of 2026-03-08. New code should maintain zero bare
+`simp` and zero bare `simp_all`. The batch-then-apply workflow from
+Phase 3 was the key efficiency breakthrough, reducing per-file review
+time from ~20 build cycles to 2-3.
 
-The bare `simp` campaign is nearly complete (only
-`DeflateEncodeDynamicProps.lean` and `Huffman.lean` remain as of
-2026-03-08). The batch-then-apply workflow from Phase 3 was the key
-efficiency breakthrough, reducing per-file review time from ~20 build
-cycles to 2-3.
+## Phase 3c: Proof Compression
+
+After bare-simp cleanup, look for opportunities to shorten proofs
+without changing theorem statements. Discovered across PRs #885, #886,
+#900, #908:
+
+### `grind` for deeply nested monadic case-splitting
+
+When a proof requires 4+ nested `split at h` blocks to handle monadic
+branches, `grind` often closes the goal in one step. This is the
+correct use case for `grind` — deeply nested case-splitting where
+manual `split` would produce 20+ lines.
+
+**When to use**: Monadic chains with 3+ sequential `bind` operations
+where each has error/ok branches.
+
+**When NOT to use**: Simple goals where `omega`, `simp only`, or a
+single `split` suffices. `grind` is a sledgehammer — don't use it for
+nails.
+
+### Tactic chaining with `<;>`
+
+Compress repeated case-handling patterns:
+
+```lean
+-- Before (6 lines per error branch, 8 branches = 48 lines)
+split at h
+· exact nomatch h
+split at h
+· exact nomatch h
+...
+
+-- After (2 lines for all 8 branches)
+split at h; next => exact nomatch h
+split at h; next => exact nomatch h
+```
+
+Or for multiple identical closers:
+
+```lean
+-- Before
+· omega
+· omega
+· omega
+
+-- After (all three goals)
+all_goals omega
+```
+
+### Local tactic macros for repeated patterns
+
+When a proof pattern repeats 3+ times in a file, extract a local
+tactic macro:
+
+```lean
+set_option hygiene false in
+local macro "unfold_except" : tactic =>
+  `(tactic| simp only [bind, Except.bind, pure, Except.pure] at h)
+```
+
+**Note**: `set_option hygiene false` is needed to capture `h` by name.
+Always scope as `local` to avoid global pollution.
+
+### Helper lemma extraction
+
+When 3+ proofs share the same monadic unfolding pattern (unfold →
+case-split errors → extract key fact), extract a private helper:
+
+```lean
+private theorem myFunction_elim ...
+    (h : myFunction x = .ok (a, b)) :
+    subCallA x = .ok intermediateResult ∧ ... := by
+  -- 13 lines of monadic unfolding, done once
+```
+
+Each downstream proof then becomes 2-3 lines instead of 13.
+
+### Dead code removal
+
+Search for unused private theorems and helper definitions:
+```bash
+# Find private theorem definitions
+grep -n 'private theorem\|private def' File.lean
+# For each, check if it's referenced elsewhere in the file
+grep -n 'theoremName' File.lean
+```
+
+Remove unreferenced private definitions.
+
+### Unused `termination_by` / `decreasing_by` clauses
+
+When Lean can infer termination automatically, explicit
+`termination_by` and `decreasing_by` clauses are unnecessary. Remove
+them to reduce noise, but only after verifying the file still builds.
 
 ## Phase 4: Linter Compliance
 
