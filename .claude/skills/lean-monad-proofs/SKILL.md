@@ -6,6 +6,11 @@ allowed-tools: Read, Bash, Grep
 
 # Lean 4 Monad Proof Patterns
 
+**`Except.mapError` in simp sets**: Use `Except.mapError.eq_2` (not
+`Except.mapError`) to simplify `(.ok v).mapError f = .ok v`. The bare
+`Except.mapError` unfolds to a match that simp may not fully reduce.
+Also add `beq_self_eq_true` when the proof needs `(0 : Nat) == 0 = true`.
+
 **Common pitfall**: `nomatch` fails inside `try` and `<;>` combinators —
 use `next => exact nomatch h` instead. See "`nomatch` fails inside `try`"
 section below.
