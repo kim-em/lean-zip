@@ -453,6 +453,78 @@ theorem decompressBlocksWF_output_size_ge (data : ByteArray) (off : Nat)
   termination_by data.size - off
   decreasing_by all_goals omega
 
+private theorem getElem!_ba_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
+    (a ++ b)[i]! = a[i]! := by
+  rw [getElem!_pos (a ++ b) i (by simp only [ByteArray.size_append]; omega),
+      getElem!_pos a i h]
+  exact ByteArray.getElem_append_left h
+
+/-- When `decompressBlocksWF` succeeds, every byte that was in the `output` buffer
+    before the call is present at the same index in the result. This is the
+    content-level counterpart to `decompressBlocksWF_output_size_ge`. Together
+    they establish that block decompression is append-only. -/
+theorem decompressBlocksWF_prefix (data : ByteArray) (off : Nat)
+    (windowSize : UInt64) (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (result : ByteArray) (pos' : Nat)
+    (h : Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (result, pos'))
+    (i : Nat) (hi : i < output.size) :
+    result[i]! = output[i]! := by
+  unfold Zip.Native.decompressBlocksWF at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  -- Peel off error cases: off guard, parseBlockHeader, blockSize, windowSize
+  split at h; next => exact nomatch h
+  split at h; next => exact nomatch h
+  split at h; next => exact nomatch h
+  split at h; next => exact nomatch h
+  split at h  -- blockType: raw | rle | compressed | reserved
+  · -- raw
+    split at h; next => exact nomatch h
+    split at h  -- lastBlock
+    · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+      exact getElem!_ba_append_left _ _ _ hi
+    · split at h; next => exact nomatch h  -- position guard
+      have ih := decompressBlocksWF_prefix _ _ _ _ _ _ _ _ _ h i
+        (by simp only [ByteArray.size_append]; omega)
+      rw [ih, getElem!_ba_append_left _ _ _ hi]
+  · -- rle
+    split at h; next => exact nomatch h
+    split at h  -- lastBlock
+    · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+      exact getElem!_ba_append_left _ _ _ hi
+    · split at h; next => exact nomatch h  -- position guard
+      have ih := decompressBlocksWF_prefix _ _ _ _ _ _ _ _ _ h i
+        (by simp only [ByteArray.size_append]; omega)
+      rw [ih, getElem!_ba_append_left _ _ _ hi]
+  · -- compressed
+    split at h; next => exact nomatch h  -- blockEnd guard
+    split at h; next => exact nomatch h  -- parseLiteralsSection
+    split at h; next => exact nomatch h  -- parseSequencesHeader
+    split at h  -- numSeq == 0
+    · split at h  -- lastBlock
+      · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+        exact getElem!_ba_append_left _ _ _ hi
+      · split at h; next => exact nomatch h  -- position guard
+        have ih := decompressBlocksWF_prefix _ _ _ _ _ _ _ _ _ h i
+          (by simp only [ByteArray.size_append]; omega)
+        rw [ih, getElem!_ba_append_left _ _ _ hi]
+    · -- numSeq > 0
+      split at h; next => exact nomatch h  -- resolveSequenceFseTables
+      split at h; next => exact nomatch h  -- BackwardBitReader.init
+      split at h; next => exact nomatch h  -- decodeSequences
+      split at h; next => exact nomatch h  -- executeSequences
+      split at h  -- lastBlock
+      · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Except.ok.inj h)
+        exact getElem!_ba_append_left _ _ _ hi
+      · split at h; next => exact nomatch h  -- position guard
+        have ih := decompressBlocksWF_prefix _ _ _ _ _ _ _ _ _ h i
+          (by simp only [ByteArray.size_append]; omega)
+        rw [ih, getElem!_ba_append_left _ _ _ hi]
+  · exact nomatch h  -- reserved
+  termination_by data.size - off
+  decreasing_by all_goals omega
+
 /-- When `decompressBlocksWF` succeeds, the returned position is strictly greater
     than the input offset. Each block header is at least 3 bytes. -/
 theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
