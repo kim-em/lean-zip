@@ -121,17 +121,16 @@ private theorem insertLoop_forward
   · -- start < lengths.size
     rename_i hstart
     dsimp only []
+    have hls_len : start < lsList.length := by
+      simp only [hlsList, List.length_map, Array.length_toList, hstart]
     split
     · -- lengths[start] > 0: insert + recurse
       rename_i hlen_pos
-      -- Common facts for insert case
-      have hls_len : start < lsList.length := by simp only [hlsList, List.length_map, Array.length_toList, hstart]
       have hls_start : lsList[start] = lengths[start].toNat := by
         simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
-      -- The codeword for symbol `start` matches the insert path
       obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
         (by rw [hls_start]; omega) (by rw [hls_start]; omega)
       have hcw_s : cw_s = Huffman.Spec.natToBits
@@ -140,70 +139,52 @@ private theorem insertLoop_forward
         rw [hcw, hls_start]; congr 1
         rw [← hblCount, ← hncSpec]
         exact (hnc lengths[start].toNat (by omega) hlen_le).symm
-      -- Prefix-freeness: insert path is not prefix of any other codeword
       have hpf : ∀ k, k ≠ start → ∀ cw', Huffman.Spec.codeFor lsList maxBits k = some cw' →
           ¬(Huffman.Spec.natToBits (nextCode[lengths[start].toNat]!).toNat
             lengths[start].toNat).IsPrefix cw' := by
         intro k hne cw' hcf_k
-        have hcf_s' := hcw_s ▸ hcf_s
         exact Huffman.Spec.canonical_prefix_free lsList maxBits hv start k _ cw'
-          hcf_s' hcf_k (by omega)
+          (hcw_s ▸ hcf_s) hcf_k (by omega)
       exact insertLoop_forward lengths
         (nextCode.set! lengths[start].toNat (nextCode[lengths[start].toNat]! + 1))
         (start + 1)
         (tree.insert (nextCode[lengths[start].toNat]!) lengths[start].toNat start.toUInt16)
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
-        (by -- hncSize': set! preserves array size
-          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds, ge_iff_le]
-          split <;> simp_all only [ge_iff_le, beq_iff_eq, gt_iff_lt, Nat.toUInt16_eq,
-            List.getElem_map, Array.getElem_toList, getElem!_pos, getElem!_neg, ne_eq,
-            Array.size_set, not_false_eq_true, Nat.not_lt])
+        (by simp only [Array.size_set!, ge_iff_le]; omega)
         (nc_invariant_step lengths nextCode start lsList maxBits blCount hblCount
           ncSpec hncSpec hv hmb hncSize hstart hls_len hls_start hlen_le hlen_pos_nat hnc)
         (by -- hprev': forward invariant after insertion
           intro k hk hks hklen cw' hcf'
           by_cases hk_eq : k = start
-          · -- k = start: newly inserted leaf
-            have hcf_start : Huffman.Spec.codeFor lsList maxBits start = some cw' := by
-              rw [← hk_eq]; exact hcf'
-            have hcw_eq : cw_s = cw' := Option.some.inj (hcf_s.symm.trans hcf_start)
+          · have hcw_eq : cw_s = cw' :=
+              Option.some.inj (hcf_s.symm.trans (hk_eq ▸ hcf'))
             subst hcw_eq; rw [hcw_s, hk_eq]
-            have h_nlop : NoLeafOnPath tree cw_s :=
-              hnlop start Nat.le.refl hstart hlen_pos cw_s hcf_s
-            rw [hcw_s] at h_nlop
-            exact insert_go_hasLeaf _ _ _ _ (by omega) h_nlop
-          · -- k < start: leaf preserved by insert
-            exact insert_go_preserves _ _ _ _ (by omega) cw' k.toUInt16
+            exact insert_go_hasLeaf _ _ _ _ (by omega)
+              (hcw_s ▸ hnlop start Nat.le.refl hstart hlen_pos cw_s hcf_s)
+          · exact insert_go_preserves _ _ _ _ (by omega) cw' k.toUInt16
               (hprev k (by omega) hks hklen cw' hcf')
               (hpf k hk_eq cw' hcf'))
-        (by -- hnlop': NoLeafOnPath preserved after insert
-          intro k hk hks hklen cw' hcf'
-          exact insert_go_noLeafOnPath _ _ _ _ (by omega) cw'
-            (hnlop k (by omega) hks hklen cw' hcf')
-            (hpf k (by omega) cw' hcf'))
+        (by intro k hk hks hklen cw' hcf'
+            exact insert_go_noLeafOnPath _ _ _ _ (by omega) cw'
+              (hnlop k (by omega) hks hklen cw' hcf')
+              (hpf k (by omega) cw' hcf'))
         j hjs hjlen cw hcf
     · -- ¬(lengths[start] > 0): skip, recurse with same tree/nextCode
       rename_i hlen_zero
-      have hls_len : start < lsList.length := by simp only [hlsList, List.length_map, Array.length_toList, hstart]
       have hls_val : lsList[start] = 0 := by
-        have : ¬(0 < lengths[start].toNat) := fun hp => hlen_zero hp
+        have : ¬(0 < lengths[start].toNat) := hlen_zero
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; omega
       exact insertLoop_forward lengths nextCode (start + 1) tree
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv hncSize
-        (by -- NC: lsList[start] = 0 doesn't change count for any b ≥ 1
-          intro b hb1 hb15
-          rw [hnc b hb1 hb15]; congr 1
-          rw [List.take_add_one]
-          simp only [beq_iff_eq, List.getElem?_eq_getElem hls_len, hls_val, Option.toList_some,
-              List.foldl_append, List.foldl_cons, List.foldl_nil, right_eq_ite_iff,
-              Nat.left_eq_add, Nat.succ_ne_self, imp_false]
-          omega)
+        (by intro b hb1 hb15; rw [hnc b hb1 hb15]; congr 1
+            rw [List.take_add_one]
+            simp only [beq_iff_eq, List.getElem?_eq_getElem hls_len, hls_val, Option.toList_some,
+                List.foldl_append, List.foldl_cons, List.foldl_nil, right_eq_ite_iff,
+                Nat.left_eq_add, Nat.succ_ne_self, imp_false]
+            omega)
         (by intro k hk hks hklen cw' hcf'
-            have : k < start := by
-              by_cases h : k = start
-              · subst h; exact absurd hklen hlen_zero
-              · omega
-            exact hprev k this hks hklen cw' hcf')
+            have : k ≠ start := fun h => absurd (h ▸ hklen) hlen_zero
+            exact hprev k (by omega) hks hklen cw' hcf')
         (by intro k hk hks hklen cw' hcf'; exact hnlop k (by omega) hks hklen cw' hcf')
         j hjs hjlen cw hcf
   · exact hprev j (by omega) hjs hjlen cw hcf
@@ -234,16 +215,16 @@ private theorem insertLoop_backward
   · -- start < lengths.size
     rename_i hstart
     dsimp only [] at h
+    have hls_len : start < lsList.length := by
+      simp only [hlsList, List.length_map, Array.length_toList, hstart]
     split at h
     · -- lengths[start] > 0: insert case
       rename_i hlen_pos
-      have hls_len : start < lsList.length := by simp only [hlsList, List.length_map, Array.length_toList, hstart]
       have hls_start : lsList[start] = lengths[start].toNat := by
         simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
-      -- The codeword for symbol `start`
       obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
         (by rw [hls_start]; omega) (by rw [hls_start]; omega)
       have hcw_s : cw_s = Huffman.Spec.natToBits
@@ -252,22 +233,17 @@ private theorem insertLoop_backward
         rw [hcw, hls_start]; congr 1
         rw [← hblCount, ← hncSpec]
         exact (hnc lengths[start].toNat (by omega) hlen_le).symm
-      -- Apply IH to the recursive call
       have ih := insertLoop_backward lengths
         (nextCode.set! lengths[start].toNat (nextCode[lengths[start].toNat]! + 1))
         (start + 1)
         (tree.insert (nextCode[lengths[start].toNat]!) lengths[start].toNat start.toUInt16)
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
-        (by simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds, ge_iff_le]
-            split <;> simp_all only [ge_iff_le, beq_iff_eq, gt_iff_lt, Nat.toUInt16_eq,
-              List.getElem_map, Array.getElem_toList, getElem!_pos, getElem!_neg,
-              Array.size_set, not_false_eq_true, Nat.not_lt, Array.set!_eq_setIfInBounds])
+        (by simp only [Array.size_set!, ge_iff_le]; omega)
         (nc_invariant_step lengths nextCode start lsList maxBits blCount hblCount
           ncSpec hncSpec hv hmb hncSize hstart hls_len hls_start hlen_le hlen_pos_nat hnc)
         cw sym h
       cases ih with
       | inl h_in_insert =>
-        -- Leaf was in tree.insert: apply insert_go_complete'
         have ih2 := insert_go_complete' _ _ tree _ (by omega) cw sym h_in_insert
         cases ih2 with
         | inl h_in_tree => exact .inl h_in_tree
@@ -280,9 +256,8 @@ private theorem insertLoop_backward
         exact .inr ⟨k, by omega, hk_lt, hk_sym, hk_cf⟩
     · -- lengths[start] = 0: skip case
       rename_i hlen_zero
-      have hls_len : start < lsList.length := by simp only [hlsList, List.length_map, Array.length_toList, hstart]
       have hls_val : lsList[start] = 0 := by
-        have : ¬(0 < lengths[start].toNat) := fun hp => hlen_zero hp
+        have : ¬(0 < lengths[start].toNat) := hlen_zero
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; omega
       have ih := insertLoop_backward lengths nextCode (start + 1) tree
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv hncSize
@@ -369,9 +344,8 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
   have ⟨hlen_ne, _⟩ := Huffman.Spec.codeFor_len_bounds hlen_cond
   have hs : s < lengths.size := by simp only [List.length_map, Array.length_toList] at hs_len; omega
   have hjlen : lengths[s] > 0 := by
-    have : (lengths.toList.map UInt8.toNat)[s] ≠ 0 := hlen_ne
-    simp only [List.getElem_map, Array.getElem_toList, ne_eq] at this
-    exact Nat.pos_of_ne_zero this
+    simp only [List.getElem_map, Array.getElem_toList, ne_eq] at hlen_ne
+    exact Nat.pos_of_ne_zero hlen_ne
   -- Rewrite tree to fromLengthsTree = (insertLoop ...).1
   rw [fromLengths_ok_eq lengths maxBits tree htree]
   -- fromLengthsTree unfolds to insertLoop with spec-derived nextCode
