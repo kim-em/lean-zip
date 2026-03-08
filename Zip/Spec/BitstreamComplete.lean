@@ -67,7 +67,8 @@ protected theorem readBit_complete (br : Zip.Native.BitReader) (b : Bool) (rest 
     have hoff' : ¬(br.bitOff + 1 ≥ 8) := hoff
     simp only [hoff', ↓reduceIte]
     exact ⟨⟨br.data, br.pos, br.bitOff + 1⟩, by rw [hbit_val], by
-      rw [hrest_eq, hrest'_eq]; simp [Zip.Native.BitReader.toBits]; omega, -- bare simp: toBits normalization for omega
+      rw [hrest_eq, hrest'_eq]
+      simp only [Zip.Native.BitReader.toBits, List.drop_eq_drop_iff]; omega,
       by show br.bitOff + 1 < 8; omega, Or.inr hpos⟩
 
 /-- Generalized loop invariant for `readBits.go` completeness (reverse direction). -/
@@ -129,7 +130,10 @@ protected theorem readBits_go_complete (br : Zip.Native.BitReader) (acc : UInt32
         · -- result.toNat = acc.toNat + specVal * 2^shift
           rw [hresult, Deflate.Correctness.acc_or_shift_toNat acc (if b then 1 else 0) shift hacc hbit hshift,
               ← hval, Nat.pow_succ]
-          cases b <;> simp [UInt32.toNat_zero, UInt32.toNat_one] <;> grind -- bare simp: UInt32 normalization for grind
+          cases b
+          · simp only [Bool.false_eq_true, ↓reduceIte, UInt32.toNat_zero, Nat.zero_mul,
+              Nat.add_zero, Nat.zero_add, Nat.add_left_cancel_iff]; grind
+          · simp only [↓reduceIte, UInt32.toNat_one, Nat.one_mul]; grind
 
 /-- **Completeness for `readBits`**: if the spec-level `readBitsLSB n` succeeds
     on the bit list corresponding to a `BitReader`, then the native `readBits n`
@@ -162,7 +166,9 @@ theorem readBits_complete (br : Zip.Native.BitReader) (n val : Nat) (rest : List
   have hlt : val < UInt32.size :=
     Nat.lt_of_lt_of_le hbound (Nat.pow_le_pow_right (by omega) hn)
   have : result = val.toUInt32 :=
-    UInt32.toNat_inj.mp (by rw [hresult]; simp [Nat.toUInt32, Nat.mod_eq_of_lt hlt]) -- bare simp: UInt32 normalization
+    UInt32.toNat_inj.mp (by
+      rw [hresult]
+      simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.mod_eq_of_lt hlt])
   rw [this] at hgo
   exact hgo
 

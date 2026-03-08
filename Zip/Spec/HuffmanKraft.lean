@@ -36,7 +36,9 @@ private theorem kraft_ge_count (ls : List Nat) (maxBits len : Nat) :
 private theorem filter_ne_zero_filter_eq (ls : List Nat) (len : Nat) (hlen : len ≠ 0) :
     (ls.filter (· != 0)).filter (· == len) = ls.filter (· == len) := by
   rw [List.filter_filter]; congr 1; ext x
-  by_cases h : x = len <;> simp [bne_iff_ne, beq_iff_eq, h, hlen]
+  by_cases h : x = len
+  · simp only [h, BEq.rfl, Bool.true_and, bne_iff_ne, ne_eq, hlen, not_false_eq_true]
+  · simp only [Bool.and_eq_left_iff_imp, beq_iff_eq, h, bne_iff_ne, ne_eq, false_implies]
 
 /-- In a valid length assignment, the count of codes with a given non-zero length
     is at most `2^len`. -/
@@ -88,7 +90,7 @@ private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
     Huffman.Spec.ncRec blCount b * 2 ^ (maxBits - b) + kraftSumFrom blCount maxBits b =
       kraftSumFrom blCount maxBits 0 := by
   induction b with
-  | zero => simp [Huffman.Spec.ncRec]
+  | zero => simp only [Spec.ncRec, Nat.sub_zero, Nat.zero_mul, Nat.zero_add]
   | succ n ih =>
     have ih' := ih (by omega)
     rw [kraftSumFrom_unfold blCount maxBits n (by omega)] at ih'
@@ -167,7 +169,7 @@ private theorem nextCodes_go_eq_ncRec (blCount : Array Nat) (maxBits : Nat)
       simp only [code', hcode]
       cases bits with
       | zero => omega
-      | succ n => simp [Huffman.Spec.ncRec]
+      | succ n => simp only [Nat.add_one_sub_one, Spec.ncRec]
     have hprev' : ∀ b', 1 ≤ b' → b' < bits + 1 → arr'[b']! = Huffman.Spec.ncRec blCount b' := by
       intro b' hb' hb'lt
       cases Nat.eq_or_lt_of_le (Nat.lt_succ_iff.mp hb'lt) with
@@ -188,7 +190,7 @@ protected theorem nextCodes_eq_ncRec (blCount : Array Nat) (maxBits b : Nat)
     (nextCodes blCount maxBits)[b]! = Huffman.Spec.ncRec blCount b := by
   simp only [nextCodes]
   exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
-    (Array.size_replicate ..) (by omega) (by omega) (by simp [Huffman.Spec.ncRec])
+    (Array.size_replicate ..) (by omega) (by omega) (by simp only [Spec.ncRec])
     (fun b' hb' hlt => by omega) b (by omega) hbM
 
 /-- Incrementing one count at index `l` adds `2^(maxBits-l)` to the Kraft sum
@@ -270,7 +272,7 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       simp only [List.filter_cons]
       simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
       cases hskip with
-      | inl h => simp [h]
+      | inl h => simp only [h, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]
       | inr h => exfalso; exact Nat.not_lt.mpr (hv.1 l List.mem_cons_self) h
     · rename_i hset
       simp only [Bool.or_eq_true, beq_iff_eq, not_or, decide_eq_true_eq] at hset
