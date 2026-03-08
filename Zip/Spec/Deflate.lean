@@ -462,22 +462,18 @@ theorem decode_go_acc_prefix
   intro bits acc result hlen hgo
   unfold decode.go at hgo
   simp only [bind, Option.bind] at hgo
-  -- Case split on readBitsLSB 1 bits
   cases h1 : readBitsLSB 1 bits with
   | none => simp only [h1] at hgo; exact nomatch hgo
   | some p1 =>
     obtain ⟨bfinal, bits1⟩ := p1
     simp only [h1] at hgo
-    -- Case split on readBitsLSB 2 bits1
     cases h2 : readBitsLSB 2 bits1 with
     | none => simp only [h2] at hgo; exact nomatch hgo
     | some p2 =>
       obtain ⟨btype, bits2⟩ := p2
       simp only [h2] at hgo
-      -- Case split on btype
       match btype, hgo with
       | 0, hgo =>
-        -- Stored block
         cases hs : decodeStored bits2 with
         | none => simp only [hs] at hgo; exact nomatch hgo
         | some ps =>
@@ -493,7 +489,6 @@ theorem decode_go_acc_prefix
                 (ih bits3.length (hlen ▸ hblen) bits3 (acc ++ bytes) result rfl hgo)
             · simp only [hblen] at hgo; exact nomatch hgo
       | 1, hgo =>
-        -- Fixed Huffman
         cases hd : decodeSymbols fixedLitLengths fixedDistLengths bits2 with
         | none => simp only [hd] at hgo; exact nomatch hgo
         | some pd =>
@@ -513,7 +508,6 @@ theorem decode_go_acc_prefix
                   (ih bits3.length (hlen ▸ hblen) bits3 acc' result rfl hgo)
               · simp only [hblen] at hgo; exact nomatch hgo
       | 2, hgo =>
-        -- Dynamic Huffman
         cases hdt : decodeDynamicTables bits2 with
         | none => simp only [hdt] at hgo; exact nomatch hgo
         | some pdt =>
@@ -549,12 +543,10 @@ private theorem mod_two_mul (v m : Nat) (hm : m > 0) :
     rw [← h2] at h1; rw [Nat.mul_add, ← Nat.mul_assoc] at h1; omega
   calc v % (2 * m)
       = ((2 * m) * (v / 2 / m) + (2 * ((v / 2) % m) + v % 2)) % (2 * m) := by rw [← key]
-    _ = ((v / 2 / m) * (2 * m) + (2 * ((v / 2) % m) + v % 2)) % (2 * m) := by
-        rw [Nat.mul_comm]
-    _ = 2 * ((v / 2) % m) + v % 2 := Nat.mul_add_mod_of_lt (by
-        have := Nat.mod_lt (v / 2) hm
-        have := Nat.mod_lt v (show 0 < 2 by omega)
-        omega)
+    _ = 2 * ((v / 2) % m) + v % 2 := by
+        rw [Nat.mul_comm]; exact Nat.mul_add_mod_of_lt (by
+          have := Nat.mod_lt (v / 2) hm
+          have := Nat.mod_lt v (show 0 < 2 by omega); omega)
     _ = v % 2 + 2 * ((v / 2) % m) := by omega
 
 private theorem testBit_zero_eq_mod_two (v : Nat) :
@@ -577,9 +569,8 @@ private theorem readBitsLSB_ofFn_testBit (v n : Nat) (rest : List Bool) :
     show (readBitsLSB k _ |>.bind _) = _
     rw [ih (v / 2)]
     simp only [Option.bind, pure, Pure.pure]
-    congr 1; congr 1
-    simp only [show (0 : Fin (k + 1)).val = 0 from rfl]
-    rw [testBit_zero_eq_mod_two,
+    congr 2
+    rw [show (0 : Fin (k + 1)).val = 0 from rfl, testBit_zero_eq_mod_two,
         show (2:Nat)^(k+1) = 2 * 2^k from by rw [Nat.pow_succ, Nat.mul_comm],
         mod_two_mul v (2^k) Nat.one_le_two_pow]
     omega
@@ -589,8 +580,7 @@ private theorem readBitsLSB_byteToBitsSpec (b : UInt8) (rest : List Bool) :
     readBitsLSB 8 (byteToBitsSpec b ++ rest) = some (b.toNat, rest) := by
   have h := readBitsLSB_ofFn_testBit b.toNat 8 rest
   simp only [byteToBitsSpec] at h ⊢
-  rw [h]; congr 1; congr 1
-  exact Nat.mod_eq_of_lt (UInt8.toNat_lt b)
+  rw [h]; congr 2; exact Nat.mod_eq_of_lt (UInt8.toNat_lt b)
 
 /-- `readNBytes` on `data.flatMap byteToBitsSpec` recovers `data`. -/
 private theorem readNBytes_byteToBitsSpec (data : List UInt8) (rest : List Bool) :
@@ -674,42 +664,31 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
     decode.go (encodeStored data) acc = some (acc ++ data) := by
   induction data using encodeStored.induct generalizing acc with
   | case1 data hle =>
-    -- Single block: data.length ≤ 65535, BFINAL=1
-    unfold encodeStored
-    simp only [hle, ↓reduceIte]
+    unfold encodeStored; simp only [hle, ↓reduceIte]
     unfold decode.go
-    -- Evaluate readBitsLSB on concrete header bits (BFINAL=1, BTYPE=00).
-    -- Uses simp only as a computation engine; readBitsLSB is the only non-default lemma.
     simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
       ↓reduceIte, Option.pure_def, Option.bind_eq_bind, Option.bind_some, Nat.zero_mul,
       Nat.add_zero, beq_iff_eq, List.length_cons, dite_eq_ite, Bool.false_eq_true,
       Nat.zero_add, Option.bind_fun_some]
-    -- Goal (cons-ified): (decodeStored (false::...::encodeStoredBlock data)).bind ... = ...
     have halign : (List.replicate 5 false ++ encodeStoredBlock data ++ []).length % 8 = 5 := by
       simp only [List.append_nil, List.length_append, List.length_replicate,
         encodeStoredBlock, encodeLEU16,
         List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
-    -- decodeStored_encodeStoredBlock with rest=[], then strip ++ []
     have hdec : decodeStored (List.replicate 5 false ++ encodeStoredBlock data) =
         some (data, []) := by
       have h := decodeStored_encodeStoredBlock data [] hle halign
       simp only [List.append_nil] at h; exact h
-    -- Convert cons form back to replicate form for rewriting
     show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
       fun x => some (acc ++ x.fst)) = some (acc ++ data)
     rw [hdec]; simp only [Option.bind]
   | case2 data hgt rest ih =>
-    -- Multi-block: BFINAL=0, decode first 65535 bytes, recurse
-    -- rest = data.drop 65535
     unfold encodeStored
     simp only [hgt, ↓reduceIte]
     unfold decode.go
-    -- Evaluate readBitsLSB on concrete header bits (BFINAL=0, BTYPE=00).
     simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
       Bool.false_eq_true, ↓reduceIte, Nat.zero_add, Option.pure_def, Option.bind_eq_bind,
       Option.bind_some, Nat.zero_mul, beq_iff_eq, List.length_cons, List.length_append,
       dite_eq_ite, Nat.zero_ne_one]
-    -- decodeStored on the first block recovers data.take 65535
     have hle : (data.take 65535).length ≤ 65535 := by simp only [List.length_take]; omega
     have halign : (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
         encodeStored rest).length % 8 = 5 := by
@@ -721,7 +700,6 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
         encodeStored rest) = some (data.take 65535, encodeStored rest) := by
       rw [List.append_assoc]
       exact decodeStored_encodeStoredBlock (data.take 65535) (encodeStored rest) hle halign
-    -- Convert goal's cons+append form to match hdec's replicate+append form
     show (decodeStored (List.replicate 5 false ++ encodeStoredBlock (data.take 65535) ++
         encodeStored rest) |>.bind fun x =>
         if x.snd.length <
@@ -730,13 +708,11 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
           decode.go x.snd (acc ++ x.fst)
         else none) = some (acc ++ data)
     rw [hdec]; simp only [Option.bind]
-    -- Guard holds: 0 < encodeStoredBlock length + 8
     have hguard : (encodeStored rest).length <
         (encodeStoredBlock (data.take 65535)).length + (encodeStored rest).length + 8 := by
       simp only [encodeStoredBlock, List.length_append, encodeLEU16, List.length_ofFn,
         flatMap_byteToBitsSpec_length]; omega
     simp only [hguard, ↓reduceIte]
-    -- Apply IH and simplify
     rw [ih (acc ++ data.take 65535)]
     congr 1; rw [List.append_assoc, List.take_append_drop]
 
@@ -754,11 +730,8 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
     decode.goR (encodeStored data) acc = some (acc ++ data, []) := by
   induction data using encodeStored.induct generalizing acc with
   | case1 data hle =>
-    -- Single block: data.length ≤ 65535, BFINAL=1
-    unfold encodeStored
-    simp only [hle, ↓reduceIte]
+    unfold encodeStored; simp only [hle, ↓reduceIte]
     unfold decode.goR
-    -- Evaluate readBitsLSB on concrete header bits (BFINAL=1, BTYPE=00).
     simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
       ↓reduceIte, Option.pure_def, Option.bind_eq_bind, Option.bind_some, Nat.zero_mul,
       Nat.add_zero, beq_iff_eq, List.length_cons, dite_eq_ite, Bool.false_eq_true,
@@ -775,11 +748,8 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
       fun x => some (acc ++ x.fst, x.snd)) = some (acc ++ data, [])
     rw [hdec]; simp only [Option.bind]
   | case2 data hgt rest ih =>
-    -- Multi-block: BFINAL=0, decode first 65535 bytes, recurse (goR variant)
-    unfold encodeStored
-    simp only [hgt, ↓reduceIte]
+    unfold encodeStored; simp only [hgt, ↓reduceIte]
     unfold decode.goR
-    -- Evaluate readBitsLSB on concrete header bits (BFINAL=0, BTYPE=00).
     simp only [List.reduceReplicate, List.cons_append, List.nil_append, readBitsLSB,
       Bool.false_eq_true, ↓reduceIte, Nat.zero_add, Option.pure_def, Option.bind_eq_bind,
       Option.bind_some, Nat.zero_mul, beq_iff_eq, List.length_cons, List.length_append,
@@ -809,7 +779,7 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
         flatMap_byteToBitsSpec_length]; omega
     simp only [hguard, ↓reduceIte]
     rw [ih (acc ++ data.take 65535)]
-    congr 1; congr 1; rw [List.append_assoc, List.take_append_drop]
+    congr 2; rw [List.append_assoc, List.take_append_drop]
 
 /-- Encoding stored blocks then goR-decoding produces
     `(data, [])` — the stored encoding is consumed completely. -/
@@ -836,38 +806,6 @@ private theorem and_255_eq_mod_256 (n : Nat) : n &&& 255 = n % 256 := by
   rw [Nat.testBit_and, show (256 : Nat) = 2^8 from by omega,
       Nat.testBit_mod_two_pow, show (255 : Nat) = 2^8 - 1 from by omega,
       Nat.testBit_two_pow_sub_one, Bool.and_comm]
-
-/-- The low and high bytes of a UInt16 value, converted to bits, equal `encodeLEU16`. -/
-private theorem le_bytes_eq_encodeLEU16 (n : Nat) (hn : n < 65536) :
-    byteToBitsSpec ((n.toUInt16 &&& 255).toUInt8) ++
-    byteToBitsSpec (((n.toUInt16 >>> 8) &&& 255).toUInt8) =
-    encodeLEU16 n := by
-  have hlo : (n.toUInt16 &&& 255).toUInt8.toNat = n % 256 := by
-    -- Normalizes UInt16/BitVec structure before the and→mod conversion.
-    unfold Nat.toUInt16
-    simp only [UInt16.toUInt8_and, UInt16.toUInt8_ofNat', UInt16.toUInt8_ofNat,
-      UInt8.toNat_and, UInt8.toNat_ofNat', Nat.reducePow, UInt8.reduceToNat]
-    rw [and_255_eq_mod_256]; omega
-  have hhi : ((n.toUInt16 >>> 8) &&& 255).toUInt8.toNat = n / 256 := by
-    unfold Nat.toUInt16
-    simp only [UInt16.toUInt8_and, UInt16.toUInt8_ofNat, UInt8.toNat_and,
-      UInt16.toNat_toUInt8, UInt16.toNat_shiftRight, UInt16.toNat_ofNat', Nat.reducePow,
-      UInt16.reduceToNat, Nat.reduceMod, UInt8.reduceToNat]
-    rw [and_255_eq_mod_256]; omega
-  simp only [byteToBitsSpec, encodeLEU16]
-  apply List.ext_getElem (by simp only [List.length_append, List.length_ofFn])
-  intro i h₁ h₂
-  simp only [List.length_append, List.length_ofFn] at h₁
-  simp only [List.getElem_append, List.length_ofFn, List.getElem_ofFn]
-  split
-  · -- i < 8: bit from low byte
-    rename_i hi
-    rw [hlo, show (256 : Nat) = 2^8 from by omega, Nat.testBit_mod_two_pow,
-        show decide (i < 8) = true from decide_eq_true_eq.mpr hi, Bool.true_and]
-  · -- i ≥ 8: bit from high byte
-    rename_i hi
-    rw [hhi, show (256 : Nat) = 2^8 from by omega, Nat.testBit_div_two_pow]
-    congr 1; omega
 
 /-- `bytesToBits` distributes over ByteArray append. -/
 private theorem bytesToBits_append' (a b : ByteArray) :
@@ -917,9 +855,7 @@ private theorem bytesToBits_storedHdr (bfinal : UInt8) (len nlen : UInt16) :
       ((nlen >>> 8) &&& 0xFF).toUInt8]) =
     byteToBitsSpec bfinal ++ encodeLEU16 len.toNat ++ encodeLEU16 nlen.toNat := by
   simp only [bytesToBits, byteToBits_eq_byteToBitsSpec]
-  simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil]
-  -- Reassociate to group pairs for le_bytes_eq_encodeLEU16'
-  simp only [← List.append_assoc]
+  simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil, ← List.append_assoc]
   rw [show ∀ (a b c d e : List Bool),
     a ++ b ++ c ++ d ++ e = a ++ (b ++ c) ++ (d ++ e) from by
     intros; simp only [List.append_assoc]]
@@ -961,7 +897,6 @@ private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
       rw [hlen_drop]; omega
     unfold encodeStored
     simp only [hlen_list, ↓reduceIte, encodeStoredBlock, List.append_assoc]
-    -- Simplify take/drop and UInt16 conversions
     have htake_eq : List.take (pos + (data.size - pos) - pos) (List.drop pos data.data.toList) =
         data.data.toList.drop pos := by
       rw [show pos + (data.size - pos) - pos = data.size - pos from by omega,
@@ -986,7 +921,6 @@ private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
       rw [List.length_drop, hdata_len]
     have hlen_list : ¬((data.data.toList.drop pos).length ≤ 65535) := by
       rw [hlen_drop]; omega
-    -- Simplify take/drop and UInt16 conversions on LHS
     have htake_eq : List.take (pos + 65535 - pos) (List.drop pos data.data.toList) =
         (data.data.toList.drop pos).take 65535 := by
       rw [show pos + 65535 - pos = 65535 from by omega]
@@ -1003,7 +937,6 @@ private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
       rw [htake_len, UInt16.toNat_xor, UInt16.toNat_ofNat,
           show (65535 : Nat) % 2 ^ 16 = 65535 from by omega,
           toUInt16_toNat _ (by omega)]
-    -- Normalize LHS take/drop/UInt16, then fold into encodeStored
     rw [htake_eq, hdrop_eq, hlen_eq, hnlen_eq, encodeStored_non_final _ hlen_list]
     simp only [List.append_assoc]
 termination_by data.size - pos
