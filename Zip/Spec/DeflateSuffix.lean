@@ -334,22 +334,29 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
     decodeDynamicTables (bits ++ suffix) = some (litLens, distLens, rest ++ suffix) := by
   unfold decodeDynamicTables at h ⊢
   cases h5 : readBitsLSB 5 bits with
-  | none => simp [h5] at h -- bare simp: 1-level Option.bind chain
+  | none =>
+    simp only [h5, Option.bind_eq_bind, Option.bind_none, reduceCtorEq] at h
   | some p₁ =>
     obtain ⟨hlit, bits₁⟩ := p₁
     cases h5d : readBitsLSB 5 bits₁ with
-    | none => simp [h5, h5d] at h -- bare simp: 2-level Option.bind chain
+    | none =>
+      simp only [h5, h5d, Option.bind_eq_bind, Option.bind_some,
+        Option.bind_none, reduceCtorEq] at h
     | some p₂ =>
       obtain ⟨hdist, bits₂⟩ := p₂
       cases h4 : readBitsLSB 4 bits₂ with
-      | none => simp [h5, h5d, h4] at h -- bare simp: 3-level Option.bind chain
+      | none =>
+        simp only [h5, h5d, h4, Option.bind_eq_bind, Option.bind_some,
+          Option.bind_none, reduceCtorEq] at h
       | some p₃ =>
         obtain ⟨hclen, bits₃⟩ := p₃
         cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
             (List.replicate 19 0) bits₃ with
         | none =>
           rw [replicate_19_zero] at hcl
-          simp [h5, h5d, h4, hcl] at h -- bare simp: 4-level Option.bind chain
+          simp only [h5, h5d, h4, hcl, replicate_19_zero,
+            Option.bind_eq_bind, Option.bind_some,
+            Option.bind_none, reduceCtorEq] at h
         | some p₄ =>
           obtain ⟨clLengths, bits₄⟩ := p₄
           have hcl' := replicate_19_zero ▸ hcl
@@ -358,8 +365,10 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                 ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
                 (hlit + 257 + (hdist + 1)) [] bits₄ with
             | none =>
-              -- bare simp: 6-level Option.bind chain with guard
-              simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
+              simp only [h5, h5d, h4, hcl', hvCL, hcls, replicate_19_zero,
+                guard, pure, Pure.pure, failure, Alternative.failure,
+                Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                ↓reduceIte, reduceCtorEq] at h
             | some p₅ =>
               obtain ⟨codeLengths, bits₅⟩ := p₅
               by_cases hlen : codeLengths.length = hlit + 257 + (hdist + 1)
@@ -367,9 +376,12 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                     (codeLengths.take (hlit + 257)) 15
                 · by_cases hvDL : Huffman.Spec.ValidLengths
                       (codeLengths.drop (hlit + 257)) 15
-                  · -- bare simp: 6-level Option.bind chain with guard (success case)
-                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
-                          guard, pure, Pure.pure] at h
+                  · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                      replicate_19_zero,
+                      guard, pure, Pure.pure, failure, Alternative.failure,
+                      Option.bind_eq_bind, Option.bind_some,
+                      ↓reduceIte, beq_iff_eq, Option.some.injEq,
+                      Prod.mk.injEq] at h
                     obtain ⟨rfl, rfl, rfl⟩ := h
                     have h5' := readBitsLSB_append 5 bits suffix hlit bits₁ h5
                     have h5d' := readBitsLSB_append 5 bits₁ suffix hdist bits₂ h5d
@@ -379,21 +391,31 @@ theorem decodeDynamicTables_append (bits suffix : List Bool)
                     have hcls' := decodeCLSymbols_append _ _ [] bits₄ suffix
                         codeLengths bits₅
                         (allCodes_swapped_prefix_free clLengths 7 hvCL) hcls
-                    -- bare simp: 6-level Option.bind chain with guard (goal)
-                    simp [h5', h5d', h4', hcl_a, hvCL, hcls', hlen, hvLL, hvDL,
-                          guard, pure, Pure.pure]
-                  · -- bare simp: 6-level Option.bind chain with guard+failure
-                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
-                          guard, pure, Pure.pure, failure, Alternative.failure] at h
-                · -- bare simp: 6-level Option.bind chain with guard+failure
-                  simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
-                        guard, pure, Pure.pure, failure, Alternative.failure] at h
-              · -- bare simp: 6-level Option.bind chain with guard+failure
-                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen,
-                      guard, pure, Pure.pure, failure, Alternative.failure] at h
-          · -- bare simp: 5-level Option.bind chain with guard+failure
-            simp [h5, h5d, h4, hcl', hvCL,
-                  guard, pure, Pure.pure, failure, Alternative.failure] at h
+                    simp only [h5', h5d', h4', hcl_a, hvCL, hcls', hlen, hvLL, hvDL,
+                      replicate_19_zero,
+                      guard, pure, Pure.pure, failure, Alternative.failure,
+                      Option.bind_eq_bind, Option.bind_some,
+                      ↓reduceIte, beq_iff_eq]
+                  · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                      replicate_19_zero,
+                      guard, pure, Pure.pure, failure, Alternative.failure,
+                      Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                      ↓reduceIte, beq_iff_eq, reduceCtorEq] at h
+                · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
+                    replicate_19_zero,
+                    guard, pure, Pure.pure, failure, Alternative.failure,
+                    Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                    ↓reduceIte, beq_iff_eq, reduceCtorEq] at h
+              · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen,
+                  replicate_19_zero,
+                  guard, pure, Pure.pure, failure, Alternative.failure,
+                  Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                  ↓reduceIte, beq_iff_eq, reduceCtorEq] at h
+          · simp only [h5, h5d, h4, hcl', hvCL,
+              replicate_19_zero,
+              guard, pure, Pure.pure, failure, Alternative.failure,
+              Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+              ↓reduceIte, reduceCtorEq] at h
 
 /-- If `decodeDynamicTables` succeeds, both returned length lists are valid. -/
 private theorem decodeDynamicTables_valid_both (bits : List Bool)
@@ -402,22 +424,29 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
     Huffman.Spec.ValidLengths litLens 15 ∧ Huffman.Spec.ValidLengths distLens 15 := by
   unfold decodeDynamicTables at h
   cases h5 : readBitsLSB 5 bits with
-  | none => simp [h5] at h -- bare simp: 1-level Option.bind chain
+  | none =>
+    simp only [h5, Option.bind_eq_bind, Option.bind_none, reduceCtorEq] at h
   | some p₁ =>
     obtain ⟨hlit, bits₁⟩ := p₁
     cases h5d : readBitsLSB 5 bits₁ with
-    | none => simp [h5, h5d] at h -- bare simp: 2-level Option.bind chain
+    | none =>
+      simp only [h5, h5d, Option.bind_eq_bind, Option.bind_some,
+        Option.bind_none, reduceCtorEq] at h
     | some p₂ =>
       obtain ⟨hdist, bits₂⟩ := p₂
       cases h4 : readBitsLSB 4 bits₂ with
-      | none => simp [h5, h5d, h4] at h -- bare simp: 3-level Option.bind chain
+      | none =>
+        simp only [h5, h5d, h4, Option.bind_eq_bind, Option.bind_some,
+          Option.bind_none, reduceCtorEq] at h
       | some p₃ =>
         obtain ⟨hclen, bits₃⟩ := p₃
         cases hcl : Deflate.Spec.readCLLengths (hclen + 4) 0
             (List.replicate 19 0) bits₃ with
         | none =>
           rw [replicate_19_zero] at hcl
-          simp [h5, h5d, h4, hcl] at h -- bare simp: 4-level Option.bind chain
+          simp only [h5, h5d, h4, hcl, replicate_19_zero,
+            Option.bind_eq_bind, Option.bind_some,
+            Option.bind_none, reduceCtorEq] at h
         | some p₄ =>
           obtain ⟨clLengths, bits₄⟩ := p₄
           have hcl' := replicate_19_zero ▸ hcl
@@ -426,8 +455,10 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
                 ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
                 (hlit + 257 + (hdist + 1)) [] bits₄ with
             | none =>
-              -- bare simp: 6-level Option.bind chain with guard
-              simp [h5, h5d, h4, hcl', hvCL, hcls, guard, pure, Pure.pure] at h
+              simp only [h5, h5d, h4, hcl', hvCL, hcls, replicate_19_zero,
+                guard, pure, Pure.pure, failure, Alternative.failure,
+                Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                ↓reduceIte, reduceCtorEq] at h
             | some p₅ =>
               obtain ⟨codeLengths, bits₅⟩ := p₅
               by_cases hlen : codeLengths.length = hlit + 257 + (hdist + 1)
@@ -435,22 +466,33 @@ private theorem decodeDynamicTables_valid_both (bits : List Bool)
                     (codeLengths.take (hlit + 257)) 15
                 · by_cases hvDL : Huffman.Spec.ValidLengths
                       (codeLengths.drop (hlit + 257)) 15
-                  · -- bare simp: 6-level Option.bind chain with guard (success case)
-                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
-                          guard, pure, Pure.pure] at h
+                  · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                      replicate_19_zero,
+                      guard, pure, Pure.pure, failure, Alternative.failure,
+                      Option.bind_eq_bind, Option.bind_some,
+                      ↓reduceIte, beq_iff_eq, Option.some.injEq,
+                      Prod.mk.injEq] at h
                     exact ⟨h.1 ▸ hvLL, h.2.1 ▸ hvDL⟩
-                  · -- bare simp: 6-level Option.bind chain with guard+failure
-                    simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
-                          guard, pure, Pure.pure, failure, Alternative.failure] at h
-                · -- bare simp: 6-level Option.bind chain with guard+failure
-                  simp [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
-                        guard, pure, Pure.pure, failure, Alternative.failure] at h
-              · -- bare simp: 6-level Option.bind chain with guard+failure
-                simp [h5, h5d, h4, hcl', hvCL, hcls, hlen,
-                      guard, pure, Pure.pure, failure, Alternative.failure] at h
-          · -- bare simp: 5-level Option.bind chain with guard+failure
-            simp [h5, h5d, h4, hcl', hvCL,
-                  guard, pure, Pure.pure, failure, Alternative.failure] at h
+                  · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL, hvDL,
+                      replicate_19_zero,
+                      guard, pure, Pure.pure, failure, Alternative.failure,
+                      Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                      ↓reduceIte, beq_iff_eq, reduceCtorEq] at h
+                · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen, hvLL,
+                    replicate_19_zero,
+                    guard, pure, Pure.pure, failure, Alternative.failure,
+                    Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                    ↓reduceIte, beq_iff_eq, reduceCtorEq] at h
+              · simp only [h5, h5d, h4, hcl', hvCL, hcls, hlen,
+                  replicate_19_zero,
+                  guard, pure, Pure.pure, failure, Alternative.failure,
+                  Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+                  ↓reduceIte, beq_iff_eq, reduceCtorEq] at h
+          · simp only [h5, h5d, h4, hcl', hvCL,
+              replicate_19_zero,
+              guard, pure, Pure.pure, failure, Alternative.failure,
+              Option.bind_eq_bind, Option.bind_some, Option.bind_none,
+              ↓reduceIte, reduceCtorEq] at h
 
 /-- If `decodeDynamicTables` succeeds, the returned litLen lengths are valid. -/
 theorem decodeDynamicTables_valid_lit (bits : List Bool)
