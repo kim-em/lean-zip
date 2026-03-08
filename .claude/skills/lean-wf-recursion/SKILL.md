@@ -440,6 +440,48 @@ If the only spec theorem is about the function's return type or error
 conditions (not loop-internal state), leave the `while` loop and prove
 the theorem by treating the function as opaque.
 
+## Proof Style: Explicit Match vs `do` Notation in WF Functions
+
+**For WF functions intended as proof targets, prefer explicit `match` over
+`do` notation for monadic operations.** `do` notation desugars to `Bind.bind`
+which requires careful `simp only [bind, Bind.bind, Except.bind]` to unfold
+in proofs. After `dite` splits or `let` bindings, `simp only [bind, ...]`
+often fails because the bind isn't at the top level.
+
+Explicit `match` makes `split at h` predictable — each error/ok branch is
+directly visible in the unfolded goal.
+
+```lean
+-- BAD for proofs: do notation with deeply nested binds
+else do
+  let (a, br) ← f1 br
+  if h : cond then
+    let (b, br) ← f2 br   -- bind hidden inside dite branch
+    ...
+  else throw ...
+
+-- GOOD for proofs: explicit match, every branch visible
+else
+  match f1 br with
+  | .error e => .error e
+  | .ok (a, br) =>
+  if h : cond then
+    match f2 br with
+    | .error e => .error e
+    | .ok (b, br) => ...
+  else .error ...
+```
+
+**Exception:** `do` notation is fine for simple tail-position binds
+(1-2 levels of nesting), as in `decodeFseSymbolsWF.loop`. For deeply
+nested functions (3+ interleaved states like sequence decoding), always
+use explicit match.
+
+**Helper extraction:** When the function body has 10+ nested matches,
+extract a helper (e.g., `decodeOneSequence`) to reduce nesting depth.
+The helper can use `do` notation since you don't need to unfold it in
+the main proof — only the loop's structure matters.
+
 ## Cross-References
 
 - **Fuel-based patterns**: `lean-fuel-induction` skill (for functions still using fuel)
