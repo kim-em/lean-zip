@@ -329,6 +329,40 @@ def decodeFourHuffmanStreams (htable : ZstdHuffmanTable) (data : ByteArray)
   let r4 ← decodeHuffmanStream htable br4 s4Count
   return r1 ++ r2 ++ r3 ++ r4
 
+/-- WF variant of `decodeFourHuffmanStreams` using `decodeHuffmanStreamWF`
+    for proof-friendly structural recursion. Returns the decoded literals. -/
+def decodeFourHuffmanStreamsWF (htable : ZstdHuffmanTable) (data : ByteArray)
+    (streamStart streamDataSize regenSize : Nat) :
+    Except String ByteArray := do
+  if streamDataSize < 6 then
+    throw "Zstd: 4-stream Huffman data too small for jump table"
+  let jumpOff := streamStart
+  if data.size < jumpOff + 6 then
+    throw "Zstd: not enough data for Huffman jump table"
+  let s1Size := (Binary.readUInt16LE data jumpOff).toNat
+  let s2Size := (Binary.readUInt16LE data (jumpOff + 2)).toNat
+  let s3Size := (Binary.readUInt16LE data (jumpOff + 4)).toNat
+  let afterJump := jumpOff + 6
+  let totalStreamBytes := streamDataSize - 6
+  if s1Size + s2Size + s3Size > totalStreamBytes then
+    throw "Zstd: Huffman stream sizes exceed available data"
+  let s4Size := totalStreamBytes - s1Size - s2Size - s3Size
+  let perStream := (regenSize + 3) / 4
+  let s4Count := regenSize - 3 * perStream
+  let s1Start := afterJump
+  let s2Start := s1Start + s1Size
+  let s3Start := s2Start + s2Size
+  let s4Start := s3Start + s3Size
+  let br1 ← BackwardBitReader.init data s1Start (s1Start + s1Size)
+  let (r1, _) ← decodeHuffmanStreamWF htable br1 perStream
+  let br2 ← BackwardBitReader.init data s2Start (s2Start + s2Size)
+  let (r2, _) ← decodeHuffmanStreamWF htable br2 perStream
+  let br3 ← BackwardBitReader.init data s3Start (s3Start + s3Size)
+  let (r3, _) ← decodeHuffmanStreamWF htable br3 perStream
+  let br4 ← BackwardBitReader.init data s4Start (s4Start + s4Size)
+  let (r4, _) ← decodeHuffmanStreamWF htable br4 s4Count
+  return r1 ++ r2 ++ r3 ++ r4
+
 /-- Parse compressed/treeless literals header sizes (RFC 8878 §3.1.1.3.1.1).
     Both litType 2 and 3 use the same header layout for regeneratedSize and compressedSize.
     Returns `(regenSize, compSize, headerBytes, fourStreams)`. -/
