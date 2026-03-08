@@ -30,6 +30,10 @@ The key properties proved here:
 9. **API-level two frames**: when the input contains exactly two standard
    frames starting at position 0, `decompressZstd` returns their concatenation.
 10. **Empty input**: decompressing an empty ByteArray returns an empty ByteArray.
+11. **API-level single skippable**: when the input contains a single skippable frame
+    at position 0, `decompressZstd` returns empty output.
+12. **API-level skip then standard**: when the input starts with a skippable frame
+    followed by a standard frame, `decompressZstd` returns only the standard content.
 -/
 
 namespace Zip.Spec.ZstdFrame
@@ -323,5 +327,41 @@ theorem decompressZstd_empty :
     Zip.Native.decompressZstd ⟨#[]⟩ = .ok ⟨#[]⟩ := by
   unfold Zip.Native.decompressZstd
   exact decompressZstdWF_base ⟨#[]⟩ 0 ByteArray.empty (by simp [ByteArray.size])
+
+/-- When the input contains a single skippable frame starting at position 0 that
+    fills all remaining data, `decompressZstd` returns empty output.  Skippable
+    frames contribute no decompressed content (RFC 8878 §3.1.2). -/
+theorem decompressZstd_single_skippable (data : ByteArray) (pos' : Nat)
+    (hsize : data.size ≥ 4)
+    (hmagic_lo : Binary.readUInt32LE data 0 ≥ 0x184D2A50)
+    (hmagic_hi : Binary.readUInt32LE data 0 ≤ 0x184D2A5F)
+    (hskip : Zip.Native.skipSkippableFrame data 0 = .ok pos')
+    (hadv : pos' > 0)
+    (hdone : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok ⟨#[]⟩ := by
+  unfold Zip.Native.decompressZstd
+  exact decompressZstdWF_single_skippable_frame data 0 ByteArray.empty pos'
+    (by omega) hmagic_lo hmagic_hi hskip hadv hdone
+
+/-- When the input starts with a skippable frame followed by a standard frame
+    that fills all remaining data, `decompressZstd` returns only the standard
+    frame's content.  The skippable frame is transparent to decompression. -/
+theorem decompressZstd_skip_then_standard (data : ByteArray)
+    (content : ByteArray) (skipPos framePos : Nat)
+    (hsize : data.size ≥ 4)
+    (hmagic_lo : Binary.readUInt32LE data 0 ≥ 0x184D2A50)
+    (hmagic_hi : Binary.readUInt32LE data 0 ≤ 0x184D2A5F)
+    (hskip : Zip.Native.skipSkippableFrame data 0 = .ok skipPos)
+    (hskipAdv : skipPos > 0)
+    (hsize2 : data.size ≥ skipPos + 4)
+    (hmagic2 : Binary.readUInt32LE data skipPos = Zip.Native.zstdMagic)
+    (hframe : Zip.Native.decompressFrame data skipPos = .ok (content, framePos))
+    (hframeAdv : framePos > skipPos)
+    (hdone : framePos ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok content := by
+  unfold Zip.Native.decompressZstd
+  rw [decompressZstdWF_skip_then_standard data 0 ByteArray.empty content skipPos framePos
+    (by omega) hmagic_lo hmagic_hi hskip hskipAdv hsize2 hmagic2 hframe hframeAdv hdone,
+    ByteArray.empty_append]
 
 end Zip.Spec.ZstdFrame
