@@ -22,8 +22,7 @@ protected theorem canonicalCodes_go_size (lengths : Array UInt8) (nextCode : Arr
   split
   · dsimp only []
     split
-    · rw [Deflate.Correctness.canonicalCodes_go_size]
-      simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]; split <;> simp_all
+    · rw [Deflate.Correctness.canonicalCodes_go_size, Array.size_set!]
     · exact Deflate.Correctness.canonicalCodes_go_size lengths nextCode (i + 1) result
   · rfl
 termination_by lengths.size - i
@@ -77,7 +76,7 @@ private theorem canonicalCodes_go_inv
       -- Bridge UInt8 comparison to Nat
       have hlen_pos_nat : 0 < lengths[i].toNat := hlen_pos
       -- Common setup
-      have hls_len : i < lsList.length := by simp [hlsList, hi]
+      have hls_len : i < lsList.length := by simp only [hlsList, List.length_map, Array.length_toList, hi]
       have hls_i : lsList[i] = lengths[i].toNat := by
         simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[i].toNat ≤ maxBits := by
@@ -97,14 +96,8 @@ private theorem canonicalCodes_go_inv
         (i + 1)
         (result.set! i ((nextCode[lengths[i].toNat]!).toUInt16, lengths[i]))
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv
-        (by -- hresSize: set! preserves array size
-          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds, hresSize]
-          split <;> simp_all)
-        (by -- hncSize: set! preserves array size
-          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
-          split
-          · simp_all
-          · exact hncSize)
+        (by rw [Array.size_set!]; exact hresSize)
+        (by rw [Array.size_set!]; exact hncSize)
         (by -- hnc': NC invariant after increment
           intro b hb1 hb15
           rw [List.take_add_one]
@@ -151,7 +144,7 @@ private theorem canonicalCodes_go_inv
     · -- lengths[i] = 0: skip case
       simp only [hlen_pos, ↓reduceIte]
       have hlen_zero : lengths[i].toNat = 0 := Nat.eq_zero_of_not_pos hlen_pos
-      have hls_len : i < lsList.length := by simp [hlsList, hi]
+      have hls_len : i < lsList.length := by simp only [hlsList, List.length_map, Array.length_toList, hi]
       have hls_val : lsList[i] = 0 := by
         simp only [hlsList, List.getElem_map, Array.getElem_toList, hlen_zero]
       exact canonicalCodes_go_inv lengths nextCode (i + 1) result
@@ -163,7 +156,7 @@ private theorem canonicalCodes_go_inv
           simp only [List.getElem?_eq_getElem hls_len, Option.toList,
                      List.foldl_append, List.foldl_cons, List.foldl_nil, hls_val]
           have : ¬((0 == b) = true) := by rw [beq_iff_eq]; omega
-          simp only [beq_iff_eq, this, Bool.false_eq_true, ↓reduceIte])
+          simp only [if_neg this])
         (by -- hprev: extend to cover i (which has length 0)
           intro k hk hks
           by_cases hk_eq : k = i
@@ -231,7 +224,7 @@ private theorem canonicalCodes_inv_at (lengths : Array UInt8) (maxBits : Nat)
         simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
         exact initial_nc_invariant lsList maxBits (by omega) hv ncSpec rfl b hb1 hb15)
     (by intro k hk; omega)
-    (by intro k _ hks; simp [show k < lengths.size from hks])
+    (by intro k _ hks; simp only [Array.size_replicate, show k < lengths.size from hks, getElem!_pos, Array.getElem_replicate])
     i hi
 
 /-! ### Top-level correspondence theorems -/
@@ -251,7 +244,7 @@ protected theorem canonicalCodes_correct_pos (lengths : Array UInt8) (maxBits : 
       (Zip.Native.Deflate.canonicalCodes lengths maxBits)[i]!.2 = lengths[i] := by
   let lsList := lengths.toList.map UInt8.toNat
   have hlen_pos_nat : 0 < lengths[i].toNat := hlen
-  have hls_len : i < lsList.length := by simp [lsList, hi]
+  have hls_len : i < lsList.length := by simp only [List.length_map, Array.length_toList, hi, lsList]
   have hls_i : lsList[i] = lengths[i].toNat := by
     simp only [lsList, List.getElem_map, Array.getElem_toList]
   have hlen_le : lengths[i].toNat ≤ maxBits := by
@@ -290,7 +283,7 @@ protected theorem canonicalCodes_hasLeaf (lengths : Array UInt8)
       i.toUInt16 := by
   intro codes
   let lsList := lengths.toList.map UInt8.toNat
-  have hls_len : i < lsList.length := by simp [lsList, hi]
+  have hls_len : i < lsList.length := by simp only [List.length_map, Array.length_toList, hi, lsList]
   obtain ⟨cw, hcf, hcw, hlen_eq⟩ :=
     Deflate.Correctness.canonicalCodes_correct_pos lengths maxBits hv hmb i hi hlen
   have hmem : (i, cw) ∈ Huffman.Spec.allCodes lsList maxBits := by
