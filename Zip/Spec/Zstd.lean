@@ -320,13 +320,9 @@ theorem decompressFrame_contentSize_eq (data : ByteArray) (pos : Nat)
   unfold_except
   -- Substitute contentSize = some n to resolve the contentSize match
   simp only [hn] at h
-  -- grind handles the remaining monadic case-splitting through:
-  -- (1) dictionary check (Option match + bne guard)
-  -- (2) decompressBlocks result (Except match)
-  -- (3) checksum check (Bool conditional + bne guard)
-  -- (4) content size check (bne guard → output.size = n)
-  -- Targeted alternatives (split at h, simp_all) fail because split can't decompose
-  -- match expressions on structure fields (header.contentSize, header.dictionaryId).
+  -- grind handles the remaining deeply nested monadic case-splitting:
+  -- dictionary check, decompressBlocks, checksum guard, content size guard.
+  -- Manual `split at h` would require 4-6 nested blocks with no clarity benefit.
   grind
 
 /-- When `decompressFrame` succeeds and the frame header has `contentChecksum = true`,
@@ -347,13 +343,9 @@ theorem decompressFrame_checksum_valid (data : ByteArray) (pos : Nat)
   unfold_except
   -- Substitute contentChecksum = true to resolve the checksum conditionals
   simp only [hc] at h
-  -- grind handles the remaining monadic case-splitting through:
-  -- (1) dictionary check (Option match + bne guard)
-  -- (2) decompressBlocks result (Except match)
-  -- (3) data size guard
-  -- (4) checksum comparison (bne guard → xxHash64Upper32 = readUInt32LE)
-  -- (5) content size check (Option match, irrelevant to conclusion)
-  -- Targeted alternatives fail because split can't decompose match on structure fields.
+  -- grind handles the remaining deeply nested monadic case-splitting:
+  -- dictionary check, decompressBlocks, data size guard, checksum comparison,
+  -- content size check. Manual `split at h` would require 4-6 nested blocks.
   grind
 
 /-! ## Skippable frame specification -/
@@ -457,8 +449,6 @@ theorem decompressBlocksWF_output_size_ge (data : ByteArray) (off : Nat)
         have ih := decompressBlocksWF_output_size_ge _ _ _ _ _ _ _ _ _ h
         simp only [ByteArray.size_append] at ih; omega
   · exact nomatch h  -- reserved
-  termination_by data.size - off
-  decreasing_by all_goals omega
 
 private theorem getElem!_ba_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b)[i]! = a[i]! := by
@@ -529,8 +519,6 @@ theorem decompressBlocksWF_prefix (data : ByteArray) (off : Nat)
           (by simp only [ByteArray.size_append]; omega)
         rw [ih, getElem!_ba_append_left _ _ _ hi]
   · exact nomatch h  -- reserved
-  termination_by data.size - off
-  decreasing_by all_goals omega
 
 /-- When `decompressBlocksWF` succeeds, the returned position is strictly greater
     than the input offset. Each block header is at least 3 bytes. -/
@@ -594,8 +582,6 @@ theorem decompressBlocksWF_pos_gt (data : ByteArray) (off : Nat)
         have ih := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ h
         omega
   · exact nomatch h  -- reserved
-  termination_by data.size - off
-  decreasing_by all_goals omega
 
 /-- When `decompressBlocksWF` succeeds, the returned position is within the
     data bounds. This is the block-loop level of the le_size campaign. -/
@@ -649,8 +635,6 @@ theorem decompressBlocksWF_le_size (data : ByteArray) (off : Nat)
       · split at h; next => exact nomatch h
         exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
   · exact nomatch h  -- reserved
-  termination_by data.size - off
-  decreasing_by all_goals omega
 
 /-! ## Frame header position advancement -/
 
@@ -767,14 +751,8 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
           obtain ⟨content, afterBlocks⟩ := val2
           have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
           simp only [hdb] at h
-          -- grind handles the remaining monadic case-splitting through:
-          -- (1) checksum conditional (contentChecksum Bool → data size guard + bne guard)
-          -- (2) content size check (Option match on contentSize + bne guard)
-          -- and propagates pos' > pos from hgt1 (afterHeader > pos) and
-          -- hgt2 (afterBlocks > afterHeader) through all branches.
-          -- Targeted alternatives (split at h, simp_all) fail because split can't
-          -- decompose match expressions on structure fields (header.contentChecksum,
-          -- header.contentSize).
+          -- grind handles nested checksum/contentSize case-splitting and
+          -- propagates pos' > pos from hgt1 and hgt2 through all branches.
           grind
     · -- none
       unfold Zip.Native.decompressBlocks at h
@@ -785,14 +763,8 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
         obtain ⟨content, afterBlocks⟩ := val2
         have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
         simp only [hdb] at h
-        -- grind handles the remaining monadic case-splitting through:
-        -- (1) checksum conditional (contentChecksum Bool → data size guard + bne guard)
-        -- (2) content size check (Option match on contentSize + bne guard)
-        -- and propagates pos' > pos from hgt1 (afterHeader > pos) and
-        -- hgt2 (afterBlocks > afterHeader) through all branches.
-        -- Targeted alternatives (split at h, simp_all) fail because split can't
-        -- decompose match expressions on structure fields (header.contentChecksum,
-        -- header.contentSize).
+        -- grind handles nested checksum/contentSize case-splitting and
+        -- propagates pos' > pos from hgt1 and hgt2 through all branches.
         grind
 
 /-- When `decompressFrame` succeeds, the returned position is within data bounds.
