@@ -300,6 +300,25 @@ theorem decodeFseDistribution_sum_correct
             Decidable.not_not] at hinv hrem
           omega
 
+open Zip.Native in
+/-- When `decodeFseDistribution` succeeds, the returned probability array is
+    non-empty. This follows from `cellCount probs = 1 <<< al` (sum_correct)
+    and `al ≥ 5` (accuracyLog_ge): an empty array has cellCount 0, but
+    `1 <<< al ≥ 32 > 0`. -/
+theorem decodeFseDistribution_size_pos
+    {br : BitReader} {maxSymbols maxAccLog : Nat}
+    {probs : Array Int32} {al : Nat} {br' : BitReader}
+    (h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
+    0 < probs.size := by
+  have hcc := decodeFseDistribution_sum_correct h
+  have hal := decodeFseDistribution_accuracyLog_ge h
+  have hne : probs.size ≠ 0 := by
+    intro hsz
+    have : probs = #[] := Array.ext (by simp [hsz]) (fun i h1 _ => absurd h1 (by omega))
+    rw [this, cellCount_empty, Nat.shiftLeft_eq] at hcc
+    have := Nat.two_pow_pos al; omega
+  omega
+
 /-! ## Structural properties of `buildFseTable` -/
 
 /-- If `x >>= f = .ok b`, then `x` succeeded and `f` maps its result to `.ok b`. -/
