@@ -400,7 +400,9 @@ theorem bfinal_beq_nat_true (bfinal : UInt32) (h : (bfinal == 1) = true) :
 /-- Bridge: `¬((bfinal == 1) = true)` (UInt32) implies `(bfinal.toNat == 1) = false`. -/
 theorem bfinal_beq_nat_false (bfinal : UInt32) (h : ¬((bfinal == 1) = true)) :
     (bfinal.toNat == 1) = false := by
-  cases heq : bfinal.toNat == 1 <;> simp_all [← UInt32.toNat_inj]
+  cases heq : bfinal.toNat == 1
+  · rfl
+  · simp only [beq_iff_eq, ← UInt32.toNat_inj] at h; exact absurd (by rwa [beq_iff_eq] at heq) h
 
 /-- Bridge (reverse): `(v == 1) = true` (Nat) with `v < 2` implies
     `(v.toUInt32 == 1) = true` (UInt32). -/

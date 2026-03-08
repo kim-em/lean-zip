@@ -225,7 +225,7 @@ private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
     simp only [bind, Option.bind]
     congr 1; ext1
     · have := Nat.div_add_mod val 2
-      split <;> simp_all [beq_iff_eq] <;> omega
+      split <;> simp only [beq_iff_eq] at * <;> omega
     · rfl
 
 /-- Properties of `findLengthCode.go`: the returned index is valid,
@@ -433,10 +433,10 @@ theorem encodeLitLen_decodeLitLen
             have hdCode : dCode < distBase.size := by have : distBase.size = 30 := rfl; omega
             have hdCodeE : dCode < distExtra.size := by have : distExtra.size = 30 := rfl; omega
             -- Normalize getElem! to getElem in spec hypotheses
-            rw [getElem!_pos lengthBase idx hidx] at hlspec
-            rw [getElem!_pos lengthExtra idx hidxE] at hlspec
-            rw [getElem!_pos distBase dCode hdCode] at hdspec
-            rw [getElem!_pos distExtra dCode hdCodeE] at hdspec
+            rw [getElem!_pos lengthBase idx hidx,
+                getElem!_pos lengthExtra idx hidxE] at hlspec
+            rw [getElem!_pos distBase dCode hdCode,
+                getElem!_pos distExtra dCode hdCodeE] at hdspec
             -- Destructure spec results, substituting extraN/dExtraN
             obtain ⟨_, hlenSum, rfl, hextraV⟩ := hlspec
             obtain ⟨_, hdistSum, rfl, hdExtraV⟩ := hdspec
