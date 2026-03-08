@@ -888,6 +888,71 @@ theorem decompressBlocksWF_compressed_literals_only_step (data : ByteArray)
   congr 1
   cases huffTree <;> rfl
 
+/-- When `decompressBlocksWF` encounters two consecutive compressed blocks with
+    numSeq == 0 (literals only, no sequence commands), where the first is non-last
+    and the second is last, the output is `output ++ literals1 ++ literals2` at
+    the position after the second block. Block 2's literal parsing uses the
+    updated Huffman tree from block 1.
+
+    Composes `decompressBlocksWF_compressed_literals_only_step` and
+    `decompressBlocksWF_single_compressed_literals_only`. The two-block output
+    is the concatenation of both blocks' literal sections — combined with
+    `decompressRawBlock_content` and `decompressRLEBlock_content`, this gives
+    a complete characterization for two-block frames across all block types
+    (when numSeq=0 for compressed blocks). -/
+theorem decompressBlocksWF_two_compressed_literals_blocks (data : ByteArray)
+    (off : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    -- Block 1 (non-last compressed, numSeq=0)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (literals1 : ByteArray) (afterLiterals1 : Nat)
+    (huffTree1 : Option Zip.Native.ZstdHuffmanTable)
+    (modes1 : Zip.Native.SequenceCompressionModes) (afterSeqHeader1 : Nat)
+    -- Block 2 (last compressed, numSeq=0)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (literals2 : ByteArray) (afterLiterals2 : Nat)
+    (huffTree2 : Option Zip.Native.ZstdHuffmanTable)
+    (modes2 : Zip.Native.SequenceCompressionModes) (afterSeqHeader2 : Nat)
+    -- Block 1 hypotheses
+    (hoff1 : ¬ data.size ≤ off)
+    (hparse1 : Zip.Native.parseBlockHeader data off = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize))
+    (htype1 : hdr1.blockType = .compressed)
+    (hblockEnd1 : ¬ data.size < afterHdr1 + hdr1.blockSize.toNat)
+    (hlit1 : Zip.Native.parseLiteralsSection data afterHdr1 prevHuff
+               = .ok (literals1, afterLiterals1, huffTree1))
+    (hseq1 : Zip.Native.parseSequencesHeader data afterLiterals1
+               = .ok (0, modes1, afterSeqHeader1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterHdr1 + hdr1.blockSize.toNat ≤ off)
+    -- Block 2 hypotheses
+    (hoff2 : ¬ data.size ≤ afterHdr1 + hdr1.blockSize.toNat)
+    (hparse2 : Zip.Native.parseBlockHeader data (afterHdr1 + hdr1.blockSize.toNat)
+                 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (windowSize > 0 && hdr2.blockSize.toUInt64 > windowSize))
+    (htype2 : hdr2.blockType = .compressed)
+    (hblockEnd2 : ¬ data.size < afterHdr2 + hdr2.blockSize.toNat)
+    (hlit2 : Zip.Native.parseLiteralsSection data afterHdr2
+               (if let some ht := huffTree1 then some ht else prevHuff)
+               = .ok (literals2, afterLiterals2, huffTree2))
+    (hseq2 : Zip.Native.parseSequencesHeader data afterLiterals2
+               = .ok (0, modes2, afterSeqHeader2))
+    (hlast2 : hdr2.lastBlock = true) :
+    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+      = .ok (output ++ literals1 ++ literals2,
+             afterHdr2 + hdr2.blockSize.toNat) := by
+  rw [decompressBlocksWF_compressed_literals_only_step data off windowSize output prevHuff
+    prevFse history hdr1 afterHdr1 literals1 afterLiterals1 huffTree1 modes1 afterSeqHeader1
+    hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1 hlit1 hseq1 hnotlast1 hadv1]
+  exact decompressBlocksWF_single_compressed_literals_only data
+    (afterHdr1 + hdr1.blockSize.toNat) windowSize (output ++ literals1)
+    _ prevFse history
+    hdr2 afterHdr2 literals2 afterLiterals2 huffTree2 modes2 afterSeqHeader2
+    hoff2 hparse2 hbs2 hws2 htype2 hblockEnd2 hlit2 hseq2 hlast2
+
 /-! ## Frame header position advancement -/
 
 /-- When `parseFrameHeader` succeeds, the returned position advances by at
