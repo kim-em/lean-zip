@@ -8,12 +8,13 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~437 completed (Feb 19 – Mar 8)
+- **Sessions**: ~451 completed (Feb 19 – Mar 8)
 - **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 407
-- **Spec theorems/lemmas**: 1,086 declarations across 49 spec files (26,580 lines)
-- **Bare simp**: 0 remaining — campaign complete (49 spec files, ZipForStd/, Native/ all clean)
-- **Bare simp_all**: 0 remaining — campaign complete (all spec files, DeflateEncodeDynamic included)
+- **Merged PRs**: 421
+- **Spec declarations**: 1,137 across 49 spec files (27,055 lines)
+- **Bare simp**: 0 standalone bare `simp` remaining; 16 `simp [lemma]` calls outside DeflateSuffix.lean
+- **Bare simp_all**: 4 remaining (DeflateEncode, DeflateStoredCorrect, EmitTokensCorrect, InflateCorrect)
+- **simp_all only**: 12 across spec files (correct explicit-lemma-list form)
 
 ## Milestones
 
@@ -741,9 +742,11 @@ completed the bare simp campaign project-wide.
 - #892: Huffman.lean — completes the non-intentional bare simp campaign
 - #900: Fse.lean, HuffmanKraft.lean, BitstreamComplete.lean — final sweep
 
-With #900, zero standalone bare `simp` or `simp_all` calls remain
-anywhere in the codebase (Zip/, ZipForStd/, Native/). Only the 15
-documented intentional instances in DeflateSuffix.lean persist.
+With #900, zero standalone bare `simp` calls remain anywhere in the
+codebase (Zip/, ZipForStd/, Native/). Only the 15 documented intentional
+instances in DeflateSuffix.lean persist. 4 bare `simp_all` calls remain
+in DeflateEncode, DeflateStoredCorrect, EmitTokensCorrect, and
+InflateCorrect (see correction in Mar 8 batch notes).
 
 *Skill updates (1 PR):*
 - #891: Created `lean-content-preservation` skill from 16-PR batch
@@ -802,21 +805,77 @@ skippable frames, and continued quality reviews across core spec files.
   and frame composition patterns; updated `proof-review-checklist` with
   compression and helper extraction patterns
 
-**Summary:** The Zstd spec infrastructure now spans 6 files with 279
-theorems/lemmas: ZstdSequence (82), Fse (72), ZstdHuffman (60), Zstd (34),
-XxHash (16), ZstdFrame (15). Total spec line count: 5,709 lines.
+**13-PR batch (Mar 8): WF maturation, content characterization, simp_all review throughput:**
 
-**FSE validity chain status:** Complete. The chain from `buildFseTable_valid`
-through per-mode `resolveSingleFseTable` validity to
-`resolveSequenceFseTables_valid` is fully proved. All four compression modes
-(predefined, RLE, repeat, FSE-compressed) have validity theorems.
+This batch advanced Track E along two fronts — WF refactoring enabling output
+size theorems, and content characterization for raw/RLE literals and blocks —
+while continuing the simp_all elimination campaign across DEFLATE spec files.
+
+*Track E feature PRs (5):*
+- #935: `decodeFseLoop_probs_ge_neg1` — FSE loop probability bound invariant.
+  When `decodeFseLoop` succeeds and all input probs have `.toInt ≥ -1`, all
+  output probs also have `.toInt ≥ -1`. 8 supporting lemmas covering
+  `Array.push` preservation, `pushZeros` bounds, `readProbValue` output bounds.
+- #940: `parseHuffmanTreeDescriptor_valid` (composed `ValidHuffmanTable` from
+  descriptor parsing) and `parseHuffmanTreeDescriptor_maxBits_pos` (maxBits ≥ 1).
+  Validity composition connecting tree descriptor parsing to table construction.
+- #943: `decodeSequencesWF` — structurally recursive variant of
+  `decodeSequences` with `decodeSequencesWF_size` (output has exactly `numSeq`
+  elements when numSeq > 0). Replaces opaque `for` loop.
+- #951: `decodeFourHuffmanStreamsWF` — structurally recursive variant of
+  `decodeFourHuffmanStreams` with `decodeFourHuffmanStreamsWF_size` (output
+  buffer size = regenSize). Combines four individual `decodeHuffmanStreamWF_size`.
+- #952: `parseLiteralsSection_raw_eq_extract` (raw literals are an exact
+  contiguous slice of input data) and `parseLiteralsSection_rle_all_eq` (RLE
+  literals are all-equal). First content characterizations for literal sections.
+
+*Track E content — block level (1 PR):*
+- #955: `decompressBlocksWF_single_raw` and `decompressBlocksWF_single_rle` —
+  single-block output characterization. When the block loop processes a single
+  last raw/RLE block, the result is `output ++ block` at the correct position.
+
+*Review PRs — simp_all campaign (7):*
+- #936: HuffmanCorrectLoop.lean — simp_all conversion + proof optimization
+- #939: HuffmanCorrect.lean — simp_all audit + proof optimization
+- #944: HuffmanEncodeCorrect.lean — simp_all + bare simp elimination
+- #947: DecodeCorrect.lean — simp_all conversion + proof optimization
+- #950: DecodeComplete.lean — simp_all conversion + proof optimization
+- #956: BitstreamWriteCorrect.lean — simp_all conversion + proof optimization
+- #961: DeflateFixedTables.lean — simp_all conversion + proof optimization
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 272
+theorems/lemmas: ZstdSequence (77), Fse (73), ZstdHuffman (65), Zstd (33),
+XxHash (12), ZstdFrame (12). Total spec line count: 6,267 lines.
+
+**Bare simp_all correction:** The previous batch claimed "0 bare simp_all
+remaining" but 4 instances survived in DeflateEncode.lean,
+DeflateStoredCorrect.lean, EmitTokensCorrect.lean, and InflateCorrect.lean.
+These are pre-existing residuals, not regressions from this batch. The simp_all
+campaign has made substantial progress (12 `simp_all only` conversions across
+spec files) but is not yet complete.
+
+**WF refactoring status:** The WF refactoring pipeline now covers 5 Zstd
+decoder functions: `decodeFseSymbolsWF`, `decodeHuffmanStreamWF`,
+`decodeFourHuffmanStreamsWF`, `decodeSequencesWF`, `decompressBlocksWF`. Each
+WF variant replaces an opaque `for`/`while` loop that could not be unfolded
+in proofs, enabling output size theorems and loop invariant reasoning.
+
+**Content characterization emergence:** This batch introduced the first
+literal section content specs (raw extract, RLE all-equal) and composed them
+to the block loop level (single-block raw/RLE output = `output ++ block`).
+Combined with the existing `executeSequences_loop_getElem_lt` (sequence
+execution preserves previously written bytes), this represents the beginning
+of end-to-end content characterization for Zstd frames — though significant
+gaps remain between the literal/sequence level and full frame output.
 
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
+- 4 bare simp_all remaining (DeflateEncode, DeflateStoredCorrect,
+  EmitTokensCorrect, InflateCorrect)
 - Compose position specs into end-to-end frame position theorem
-- Content preservation campaign: extend `executeSequences_loop_getElem_lt`
-  to full sequence execution and block loop levels
+- Content preservation campaign: extend single-block content characterization
+  to multi-block frames and compressed block content
 - Spec-level decoder with correctness proofs (algorithmic correspondence
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
@@ -825,8 +884,8 @@ through per-mode `resolveSingleFseTable` validity to
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~437 sessions (Feb 19 – Mar 8)
-- 407 merged PRs
+- ~451 sessions (Feb 19 – Mar 8)
+- 421 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
