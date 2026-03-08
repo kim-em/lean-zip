@@ -850,3 +850,32 @@ have hw_pos : w ≥ 1 := by revert hw0; simp only [beq_iff_eq]; omega
 normalization, the hypothesis may no longer contain `beq` in a form that
 `simp only [beq_iff_eq]` can match. `revert` puts it back in the goal
 where simp has a cleaner target.
+
+## Defining Tactic Macros That Reference Hypothesis Names
+
+When defining a tactic macro that uses a specific hypothesis name (e.g., `h`),
+Lean 4's macro hygiene renames identifiers to avoid capture. Splicing `$h`
+into `at $h` in syntax quotations also fails with `h.raw` errors.
+
+**Working pattern** — unhygienic macro outside any namespace:
+```lean
+set_option hygiene false in
+local macro "unfold_except" : tactic =>
+  `(tactic| simp only [bind, Except.bind, pure, Except.pure] at h)
+```
+
+**Key constraints**:
+- Use `set_option hygiene false in` to capture `h` by name from the proof context
+- Place `set_option ... in` BEFORE `local macro` (not after a docstring — docstrings
+  expect a declaration immediately after)
+- Use a regular comment (`--`) instead of a docstring (`/-- -/`) before `set_option`
+- `local` prevents the macro from leaking to downstream files
+- Place the macro OUTSIDE `namespace` blocks — `local macro` inside a namespace
+  gets a private scoped name that call sites can't resolve
+
+**What does NOT work**:
+- `scoped macro "name" h:ident : tactic => \`(tactic| simp ... at $h)` — `h.raw` error
+- `scoped syntax` + `macro_rules` — same `h.raw` error
+- `scoped elab` — requires importing `Lean.Elab.Tactic`
+- Docstring before `set_option ... in` — parse error
+- `section; set_option hygiene false; scoped macro ...` inside namespace — parse error
