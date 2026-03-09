@@ -197,18 +197,13 @@ theorem decodeStored_on_block (compressed : ByteArray) (brPos : Nat)
     -- UInt16 modular arithmetic: blockLen.toUInt16.toNat = blockLen % 65536
     exact Nat.mod_eq_of_lt (show blockLen < 65536 from by omega)
   -- Step 4: Compose everything
-  simp only [Inflate.decodeStored, bind, Except.bind, hru1, hru2]
-  -- XOR check: a ^^^ (a ^^^ 0xFFFF) = 0xFFFF
-  rw [uint16_xor_complement]
-  -- NLEN check and pure reduction
-  simp only [show ((65535 : UInt16) != 65535) = false from by decide,
+  simp only [Inflate.decodeStored, bind, Except.bind, hru1, hru2,
+    uint16_xor_complement,
+    show ((65535 : UInt16) != 65535) = false from by decide,
     Bool.false_eq_true, ↓reduceIte, pure, Except.pure]
-  -- Size check (Prop-based if)
   rw [hbl_toNat]
-  simp only [show ¬(output.size + blockLen > maxOutputSize) from by omega, ↓reduceIte]
-  -- readBytes
-  have hrb' := readBytes_at_aligned compressed (brPos + 2 + 2) blockLen (by omega)
-  simp only [hrb']
+  simp only [show ¬(output.size + blockLen > maxOutputSize) from by omega, ↓reduceIte,
+    readBytes_at_aligned compressed (brPos + 2 + 2) blockLen (by omega)]
 
 /-- readUInt16LE with non-zero bitOff aligns to next byte first. -/
 theorem readUInt16LE_align (data : ByteArray) (pos bitOff : Nat)
@@ -271,9 +266,8 @@ theorem inflateLoop_final_stored (compressed : ByteArray) (brPos : Nat)
   rw [decodeStored_on_block compressed (brPos + 1) blockLen hlen output maxOutputSize
     hfit (by omega) hlen_lo hlen_hi hnlen_lo hnlen_hi]
   -- bfinal == 1 is true, alignToByte is identity at bitOff=0
-  have h_beq : ((1 : UInt32) == 1) = true := by decide
-  simp only [h_beq, ↓reduceIte, BitReader.alignToByte,
-    show ((0 : Nat) == 0) = true from rfl, pure, Except.pure]
+  simp only [show ((1 : UInt32) == 1) = true from by decide, ↓reduceIte,
+    BitReader.alignToByte, show ((0 : Nat) == 0) = true from rfl, pure, Except.pure]
 
 /-- inflateLoop correctly processes a single non-final stored block.
     The block starts at brPos with header byte 0x00 (BFINAL=0, BTYPE=00).
@@ -318,8 +312,7 @@ theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
   rw [decodeStored_on_block compressed (brPos + 1) blockLen hlen output maxOutputSize
     hfit (by omega) hlen_lo hlen_hi hnlen_lo hnlen_hi]
   -- bfinal == 1 is false (bfinal = 0), so inflateLoop recurses
-  have h_beq : ((0 : UInt32) == 1) = false := by decide
-  simp only [h_beq, Bool.false_eq_true, ↓reduceIte]
+  simp only [show ((0 : UInt32) == 1) = false from by decide, Bool.false_eq_true, ↓reduceIte]
   -- Discharge WF guards: bit position advances and stays in range
   simp only [BitReader.bitPos]
   have : ¬((brPos + 1 + 4 + blockLen) * 8 + 0 ≤ brPos * 8 + 0) := by omega
@@ -744,8 +737,7 @@ theorem inflate_deflateStoredPure (data : ByteArray)
     This bound is equivalent to: overhead ≤ 5 + data.size / 13107. -/
 theorem deflateStoredPure_size_bound (data : ByteArray) :
     (deflateStoredPure data 0).size ≤ data.size + 5 + data.size / 13107 := by
-  rw [deflateStoredPure_size]
-  simp only [numStoredBlocks]
+  simp only [deflateStoredPure_size, numStoredBlocks]
   -- Need: data.size + 5 * ((data.size - 1) / 65535 + 1) ≤ data.size + 5 + data.size / 13107
   -- Suffices: 5 * ((data.size - 1) / 65535) ≤ data.size / 13107
   suffices h : 5 * ((data.size - 1) / 65535) ≤ data.size / 13107 by omega
