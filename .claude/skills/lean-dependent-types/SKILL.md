@@ -52,6 +52,31 @@ This applies generally: `▸` is designed for rewriting the goal by substituting
 the LHS of an equation with the RHS. For transitive equality chains, `.trans` is
 always cleaner and avoids dependent-type issues.
 
+## `if let` Mismatch When Threading State Through Composition Theorems
+
+When a composition theorem has `(hlit2 : ... (if let some ht := huffTree1 then some ht else prevHuff) ...)`
+and you instantiate `prevHuff := none` at a call site, the `if let` elaboration includes
+earlier proof parameters (e.g. `hlit1`) as match scrutinees. The resulting match motive
+differs between the theorem's context and your call site, causing a type mismatch even
+though both types **print identically**.
+
+`exact`, `by exact`, and direct application all fail.
+
+**Fix**: Inline the two-step proof instead of calling the composition theorem:
+```lean
+-- Instead of: have h := composition_theorem ... hlit2
+-- Do:
+rw [step_theorem ...]
+exact single_block_theorem ... (by cases huffTree1 <;> exact hlit2) ...
+```
+
+Use `huffTree1` directly in your hypothesis (cleaner than `if let ... else none`),
+then `(by cases huffTree1 <;> exact hlit2)` bridges the gap at the single-block
+theorem call site by reducing the `if let` to concrete `none`/`some` values.
+
+See `decompressFrame_compressed_seq_then_compressed_lit_content` in `Zip/Spec/Zstd.lean`
+for the working pattern.
+
 ## `exact` vs `have :=` for Wildcard Resolution
 
 `exact f _ _ _` does goal-directed elaboration — wildcards are resolved from the
