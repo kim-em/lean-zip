@@ -86,8 +86,20 @@ each removal to verify. See the `lean-simp-tactics` skill section on
 
 ### 2d. Check for extractable lemmas
 
-If the same proof pattern (3+ lines) appears twice or more in the file,
-extract it into a `private theorem` or `private lemma`.
+**Extraction heuristic (≥3 rule):** Only extract a helper when:
+- The pattern appears **3+ times** in the file, OR
+- It appears **2 times** AND each instance is **6+ lines** (significant
+  savings)
+
+**Don't extract** when:
+- Only 2 call sites with short patterns (<5 lines each)
+- The pattern is parameterized differently at each site (different
+  tables, different types) — extraction adds complexity without reuse
+- The "pattern" is just a common tactic sequence that reads clearly
+  inline (e.g., `rw [h]; omega`)
+
+When extracting, use `private theorem` or `private lemma` to keep the
+helper local to the file.
 
 ### 2e. Simplify `obtain` patterns
 
