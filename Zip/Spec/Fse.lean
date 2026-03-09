@@ -1377,6 +1377,128 @@ theorem decodeFseDistribution_bitPos_ge
           have ⟨hge_loop, hbo_loop⟩ := decodeFseLoop_bitPos_ge hdl hbo₁
           exact ⟨by rw [hbp] at hge_loop; omega, hbo_loop⟩
 
+/-! ### BitReader pos_le_size — FSE distribution chain
+
+These theorems establish that `readProbValue`, `decodeZeroRepeats`,
+`decodeFseLoop`, and `decodeFseDistribution` preserve the invariant
+`pos ≤ data.size` on success. They chain through `readBits_pos_le_size`
+from `BitReaderInvariant.lean`. -/
+
+open Zip.Native in
+/-- `readProbValue` preserves `pos ≤ data.size`. -/
+theorem readProbValue_pos_le_size (br br' : BitReader) (remaining val : Nat)
+    (h : readProbValue br remaining = .ok (val, br'))
+    (hbr : br.pos ≤ br.data.size) :
+    br'.pos ≤ br'.data.size := by
+  unfold readProbValue at h
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  cases hrb : br.readBits (Nat.log2 (remaining + 1) + 1 - 1) with
+  | error e => rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+  | ok val₁ =>
+    rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h
+    have hple₁ := readBits_pos_le_size br val₁.2 _ val₁.1 hrb hbr
+    split at h
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, rfl⟩ := h; exact hple₁
+    · cases hrb₂ : val₁.2.readBits 1 with
+      | error e => rw [hrb₂] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+      | ok val₂ =>
+        rw [hrb₂] at h; dsimp only [Bind.bind, Except.bind] at h
+        have hple₂ := readBits_pos_le_size val₁.2 val₂.2 1 val₂.1 hrb₂ hple₁
+        split at h <;>
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+          obtain ⟨_, rfl⟩ := h <;>
+          exact hple₂
+
+open Zip.Native in
+/-- `decodeZeroRepeats` preserves `pos ≤ data.size`. -/
+private theorem decodeZeroRepeats_pos_le_size
+    {br : BitReader} {probs : Array Int32} {sym ms fuel : Nat}
+    {probs' : Array Int32} {sym' : Nat} {br' : BitReader}
+    (h : decodeZeroRepeats br probs sym ms fuel = .ok (probs', sym', br'))
+    (hbr : br.pos ≤ br.data.size) :
+    br'.pos ≤ br'.data.size := by
+  induction fuel generalizing br probs sym with
+  | zero => simp only [decodeZeroRepeats, reduceCtorEq] at h
+  | succ fuel ih =>
+    unfold decodeZeroRepeats at h
+    dsimp only [Bind.bind, Except.bind] at h
+    cases hrb : br.readBits 2 with
+    | error e => rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+    | ok val =>
+      rw [hrb] at h; dsimp only [Bind.bind, Except.bind] at h
+      have hple₁ := readBits_pos_le_size br val.2 2 val.1 hrb hbr
+      split at h
+      · exact ih h hple₁
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨_, _, rfl⟩ := h; exact hple₁
+
+open Zip.Native in
+/-- `decodeFseLoop` preserves `pos ≤ data.size`. -/
+private theorem decodeFseLoop_pos_le_size
+    {br : BitReader} {rem : Nat} {probs : Array Int32}
+    {sym ms : Nat} {fuel : Nat}
+    {rem' : Nat} {probs' : Array Int32} {sym' : Nat} {br' : BitReader}
+    (h : decodeFseLoop br rem probs sym ms fuel = .ok (rem', probs', sym', br'))
+    (hbr : br.pos ≤ br.data.size) :
+    br'.pos ≤ br'.data.size := by
+  induction fuel generalizing br rem probs sym with
+  | zero => simp only [decodeFseLoop, reduceCtorEq] at h
+  | succ fuel ih =>
+    rw [decodeFseLoop.eq_2] at h
+    by_cases hcond : ¬(rem > 0 ∧ sym < ms)
+    · rw [if_pos hcond] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, _, _, rfl⟩ := h; exact hbr
+    · rw [if_neg hcond] at h
+      cases hrpv : readProbValue br rem with
+      | error e => simp only [hrpv, reduceCtorEq] at h
+      | ok val =>
+        simp only [hrpv] at h
+        have hple_rpv := readProbValue_pos_le_size br val.2 rem val.1 hrpv hbr
+        by_cases hp0 : (Int32.ofNat val.fst - 1 == 0) = true
+        · rw [if_pos hp0] at h
+          cases hzr : decodeZeroRepeats val.2 (probs.push 0) (sym + 1) ms 1000 with
+          | error e => simp only [hzr, reduceCtorEq] at h
+          | ok val₂ =>
+            simp only [hzr] at h
+            have hple_zr := decodeZeroRepeats_pos_le_size hzr hple_rpv
+            exact ih h hple_zr
+        · rw [if_neg hp0] at h
+          by_cases hp1 : (Int32.ofNat val.fst - 1 == -1) = true
+          · rw [if_pos hp1] at h; exact ih h hple_rpv
+          · rw [if_neg hp1] at h
+            by_cases hgt : int32ToNat (Int32.ofNat val.fst - 1) > rem
+            · rw [if_pos hgt] at h; exact nomatch h
+            · rw [if_neg hgt] at h; exact ih h hple_rpv
+
+open Zip.Native in
+/-- When `decodeFseDistribution` succeeds and the input reader has
+    `pos ≤ data.size`, the output reader also has `pos ≤ data.size`. -/
+theorem decodeFseDistribution_pos_le_size (br br' : BitReader)
+    (maxSymbols maxAccLog : Nat) (probs : Array Int32) (al : Nat)
+    (h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br'))
+    (hbr : br.pos ≤ br.data.size) :
+    br'.pos ≤ br'.data.size := by
+  unfold decodeFseDistribution at h
+  cases hrd : br.readBits 4 with
+  | error e => simp only [hrd, reduceCtorEq] at h
+  | ok val =>
+    simp only [hrd] at h
+    have hple₁ := readBits_pos_le_size br val.2 4 val.1 hrd hbr
+    by_cases hgt : val.fst.toNat + 5 > maxAccLog
+    · rw [if_pos hgt] at h; exact nomatch h
+    · rw [if_neg hgt] at h
+      cases hdl : decodeFseLoop val.2 (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
+      | error e => simp only [hdl, reduceCtorEq] at h
+      | ok dlval =>
+        simp only [hdl] at h
+        split at h
+        · exact nomatch h
+        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, _, rfl⟩ := h
+          exact decodeFseLoop_pos_le_size hdl hple₁
+
 /-! ## Helper lemmas for newState bound -/
 
 /-- `Nat.log2 n ≤ k` when `n < 2^(k+1)`. Inverse of `Nat.lt_log2_self`. -/
