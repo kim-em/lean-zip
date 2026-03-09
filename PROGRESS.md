@@ -8,12 +8,13 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~465 completed (Feb 19 – Mar 8)
-- **Source files**: 101 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 26 test)
-- **Merged PRs**: 435
-- **Spec declarations**: 1,144 across 49 spec files (27,461 lines)
-- **Bare simp**: 0 standalone bare `simp` remaining; 10 `simp [lemma]` calls outside DeflateSuffix.lean
-- **Bare simp_all**: 2 remaining (DeflateEncode, InflateCorrect)
+- **Sessions**: ~484 completed (Feb 19 – Mar 9)
+- **Source files**: 102 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 27 test)
+- **Merged PRs**: 453
+- **Spec declarations**: 1,192 across 49 spec files (28,949 lines)
+- **Bare simp**: 0 standalone bare `simp` remaining across all spec files
+- **Bare simp_all**: 0 (former DeflateEncode and InflateCorrect instances now have explicit lemma lists)
+- **simp_all with args**: 2 (DeflateEncode `simp_all [beq_iff_eq]`, InflateCorrect `simp_all [← UInt32.toNat_inj]`)
 - **simp_all only**: 2 across spec files (correct explicit-lemma-list form)
 
 ## Milestones
@@ -927,13 +928,91 @@ InflateCorrect.lean). Both are covered by existing review issue #968. Down from
 theorems/lemmas: ZstdSequence (84), Fse (80), ZstdHuffman (73), Zstd (59),
 XxHash (25), ZstdFrame (12). Total spec line count: 6,719 lines.
 
+**15-PR batch (Mar 8–9): compressed composition matrix, API-level content, Zstd benchmarking:**
+
+This batch filled in the block-level compressed composition matrix,
+extended frame-level content to compressed block types, lifted content
+theorems to the API level, added Zstd decompression benchmarking, and
+continued quality reviews.
+
+*Track E block-level compositions (4 PRs):*
+- #1013: `decompressBlocksWF_two_compressed_sequences_blocks` (homogeneous
+  compSeq pair) and `decompressBlocksWF_compressed_seq_then_raw` (compSeq+raw)
+- #1019: `decompressBlocksWF_compressed_literals_then_raw` and
+  `decompressBlocksWF_compressed_literals_then_rle` (compLit+raw, compLit+RLE)
+- #1033: `decompressBlocksWF_raw_then_compressed_sequences`,
+  `decompressBlocksWF_rle_then_compressed_sequences`,
+  `decompressBlocksWF_compressed_seq_then_rle` (raw/RLE+compSeq, compSeq+RLE)
+- #1034: `decompressBlocksWF_compressed_seq_then_compressed_lit` and
+  `decompressBlocksWF_compressed_lit_then_compressed_seq` (cross-compressed pairs)
+
+*Track E frame-level content (3 PRs):*
+- #1020: `decompressFrame_raw_then_rle_content` and
+  `decompressFrame_rle_then_raw_content` (mixed raw/RLE two-block frames)
+- #1027: `decompressFrame_single_compressed_literals_content` and
+  `decompressFrame_single_compressed_sequences_content` (single compressed blocks)
+- #1051: `decompressFrame_compressed_lit_then_raw_content` and
+  `decompressFrame_compressed_lit_then_rle_content` (compressed-first + raw/RLE)
+
+*Track E API-level content (2 PRs):*
+- #1029: `decompressZstd_two_raw_blocks_content` and
+  `decompressZstd_two_rle_blocks_content` (two-block raw/RLE at API level)
+- #1039: `decompressZstd_single_compressed_literals` and
+  `decompressZstd_single_compressed_sequences` (single compressed-block at API level)
+
+*Track D (1 PR):*
+- #1038: Zstd decompression benchmarking suite in `ZipTest/ZstdBench.lean` —
+  native vs FFI across 4 compression levels × 4 data patterns × 3 sizes
+
+*Quality reviews (3 PRs):*
+- #1032: DynamicTreesComplete + DynamicTreesCorrect cleanup
+- #1040: DecodeCorrect.lean + GzipCorrect.lean bare simp cleanup
+- #1046: ZstdFrame.lean — 1 bare simp eliminated, helper lemma extraction
+
+*Merge conflict recovery (1 PR):*
+- #1023: rebased PR #1009 onto master, closed stale #1006
+
+*Self-improvement (1 PR):*
+- #1024: Meditate — composition matrix scaling patterns, review campaign
+  completion analysis, conflict resolution patterns
+
+**Block-level composition matrix status (14/16):**
+
+|  | Raw | RLE | CompLit | CompSeq |
+|---|---|---|---|---|
+| **Raw +** | done | done | — | done |
+| **RLE +** | done | done | — | done |
+| **CompLit +** | done | done | done | done |
+| **CompSeq +** | done | done | done | done |
+
+2 remaining: raw+compLit and RLE+compLit (covered by open PR #1011).
+
+**Content pipeline status (updated):**
+
+| Block type | Single block | Step (non-last) | Two-block (same) | Two-block (mixed) | Frame (single) | Frame (two-block) | API (single) |
+|---|---|---|---|---|---|---|---|
+| Raw | done | done | done | raw+RLE | done | two_raw, raw+RLE | two_raw |
+| RLE | done | done | done | RLE+raw | done | two_rle, RLE+raw | two_rle |
+| CompLit | done | done | done | compLit+raw, +RLE | done | compLit+raw, +RLE | done |
+| CompSeq | done | done | done | compSeq+raw, +RLE, +compLit, compLit+compSeq | done | — | done |
+
+**simp_all campaign status:** 0 bare `simp_all` remaining (DeflateEncode and
+InflateCorrect instances now have explicit lemma arguments: `simp_all [beq_iff_eq]`
+and `simp_all [← UInt32.toNat_inj]` respectively). Campaign complete.
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 361
+declarations: ZstdSequence (84), Fse (81), ZstdHuffman (73), Zstd (78),
+XxHash (26), ZstdFrame (19). Total spec line count: 8,172 lines.
+
 **Remaining:**
 - Prove remaining sorry stubs: 3 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
-- 2 bare simp_all remaining (DeflateEncode, InflateCorrect — covered by #968)
+- Block-level composition: 2 remaining (raw+compLit, RLE+compLit — PR #1011)
+- Frame-level content: extend to compSeq-first two-block pairs, cross-compressed pairs
+- API-level content: extend to two-block frames with compressed blocks
 - Compose position specs into end-to-end frame position theorem
-- Content preservation campaign: extend two-block content characterization
-  to N-block frames and compressed block content (with sequences)
+- Content preservation campaign: extend to N-block frames and compressed
+  block content (with sequences)
 - Spec-level decoder with correctness proofs (algorithmic correspondence
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
@@ -942,8 +1021,8 @@ XxHash (25), ZstdFrame (12). Total spec line count: 6,719 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~465 sessions (Feb 19 – Mar 8)
-- 435 merged PRs
+- ~484 sessions (Feb 19 – Mar 9)
+- 453 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
