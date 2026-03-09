@@ -225,7 +225,7 @@ private theorem readBitsLSB_writeBitsLSB (n val : Nat) (rest : List Bool)
     simp only [bind, Option.bind]
     congr 1; ext1
     · have := Nat.div_add_mod val 2
-      split <;> simp_all [beq_iff_eq] <;> omega
+      split <;> rename_i h <;> simp only [beq_iff_eq] at h <;> omega
     · rfl
 
 /-- Properties of `findLengthCode.go`: the returned index is valid,

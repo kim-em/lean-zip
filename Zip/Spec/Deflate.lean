@@ -377,7 +377,7 @@ where
             else none
         else none
   termination_by totalCodes - acc.length
-  decreasing_by all_goals simp_all only [List.length_append, List.length_replicate, ge_iff_le, Nat.not_le, List.length_cons]; omega
+  decreasing_by all_goals simp only [List.length_append, List.length_replicate, ge_iff_le, Nat.not_le, List.length_cons] at *; omega
 
 /-! ## Stream decode -/
 
@@ -551,7 +551,7 @@ private theorem mod_two_mul (v m : Nat) (hm : m > 0) :
 
 private theorem testBit_zero_eq_mod_two (v : Nat) :
     (if v.testBit 0 then 1 else 0) = v % 2 := by
-  rw [Nat.testBit_zero]; split <;> rename_i h <;> simp_all only [decide_eq_true_eq] <;> omega
+  rw [Nat.testBit_zero]; split <;> rename_i h <;> simp only [decide_eq_true_eq] at h <;> omega
 
 /-- Reading `n` bits from the `testBit` encoding of `v` yields `v % 2^n`. -/
 private theorem readBitsLSB_ofFn_testBit (v n : Nat) (rest : List Bool) :
