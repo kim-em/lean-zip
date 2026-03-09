@@ -236,11 +236,7 @@ protected theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
       by_cases hij : i = j
       · -- This is the token — i = j
         subst hij
-        have heq : LZ77Token.reference len' dist' = LZ77Token.reference len dist :=
-          htoki.symm.trans htok
-        have hlen_eq : len' = len := (LZ77Token.reference.inj heq).1
-        have hdist_eq : dist' = dist := (LZ77Token.reference.inj heq).2
-        -- The goal talks about findLengthCode len' and findDistCode dist' (from the match)
+        have ⟨hlen_eq, hdist_eq⟩ := LZ77Token.reference.inj (htoki.symm.trans htok)
         simp only [hlen_eq, hdist_eq, hflc]
         have hidx := nativeFindLengthCode_idx_bound _ idx extraN extraV hflc
         -- After set, litFreqs[257+idx]! ≥ 1
@@ -255,8 +251,8 @@ protected theorem tokenFreqs_go_lengthCode_pos (tokens : Array LZ77Token)
             | some p => obtain ⟨dIdx, _, _⟩ := p; rw [Array.size_set!]; omega)).1
           (by omega)
         have hset : (litFreqs.set! (idx + 257) (litFreqs[idx + 257]! + 1))[257 + idx]! ≥ 1 := by
-          rw [show idx + 257 = 257 + idx from by omega]
-          rw [Array.getElem!_set!_self litFreqs _ _ (by omega)]; omega
+          rw [show idx + 257 = 257 + idx from by omega,
+            Array.getElem!_set!_self litFreqs _ _ (by omega)]; omega
         exact Nat.le_trans hset hle
       · -- Not this token, recurse
         exact Deflate.tokenFreqs_go_lengthCode_pos tokens len dist idx extraN extraV _ _ (i + 1) j
@@ -309,10 +305,7 @@ protected theorem tokenFreqs_go_distCode_pos (tokens : Array LZ77Token)
       by_cases hij : i = j
       · -- This is the token — i = j
         subst hij
-        have heq : LZ77Token.reference len' dist' = LZ77Token.reference len dist :=
-          htoki.symm.trans htok
-        have hlen_eq : len' = len := (LZ77Token.reference.inj heq).1
-        have hdist_eq : dist' = dist := (LZ77Token.reference.inj heq).2
+        have ⟨hlen_eq, hdist_eq⟩ := LZ77Token.reference.inj (htoki.symm.trans htok)
         simp only [hlen_eq, hdist_eq, hfdc]
         have hdcode := nativeFindDistCode_idx_bound _ dCode dExtraN dExtraV hfdc
         -- After set, distFreqs[dCode]! ≥ 1

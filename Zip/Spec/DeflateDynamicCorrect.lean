@@ -17,6 +17,10 @@ original data.
 
 namespace Zip.Native.Deflate
 
+private theorem getElem!_le_of_forall_mem_le (l : List Nat) (i n : Nat)
+    (hi : i < l.length) (h : ∀ x ∈ l, x ≤ n) : l[i]! ≤ n := by
+  rw [getElem!_pos l i hi]; exact h _ (List.getElem_mem hi)
+
 /-- `deflateDynamic` produces a bytestream whose bits correspond to the
     spec-level dynamic Huffman encoding, plus padding to byte alignment. -/
 theorem deflateDynamic_spec (data : ByteArray) :
@@ -138,9 +142,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
           exact ⟨code, by omega, rfl⟩
         exact Huffman.Spec.computeCodeLengths_nonzero clFreqPairs 19 7 (by omega)
           code (by omega) hfreq_in
-      · have : code < clLens.length := by omega
-        rw [getElem!_pos clLens code this]
-        exact hcl_bound _ (List.getElem_mem this)
+      · exact getElem!_le_of_forall_mem_le clLens code 7 (by omega) hcl_bound
     have hcl_isSome := Deflate.Spec.encodeCLEntries_isSome clLens 7 clEntries hall
     -- The types should match definitionally since clTable = (allCodes clLens 7).map ...
     change (Deflate.Spec.encodeCLEntries
@@ -175,9 +177,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
         have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
           (by omega) b.toNat (by have := UInt8.toNat_lt b; omega)
           (Deflate.freqPairs_witness litFreqs b.toNat (by have := UInt8.toNat_lt b; omega) hfreq)
-        have hlen_le : litLens[b.toNat]! ≤ 15 := by
-          rw [getElem!_pos litLens b.toNat hb_lt]
-          exact hlit_bound _ (List.getElem_mem hb_lt)
+        have hlen_le := getElem!_le_of_forall_mem_le litLens b.toNat 15 hb_lt hlit_bound
         exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 b.toNat hb_lt hlen_nz hlen_le
       | reference len dist =>
         -- Need: encodeLitLen litLens distLens (.reference len dist) succeeds
@@ -199,9 +199,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
           have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
             (by omega) (257 + idx) (by omega)
             (Deflate.freqPairs_witness litFreqs (257 + idx) (by omega) hfreq)
-          have hlen_le' : litLens[257 + idx]! ≤ 15 := by
-            rw [getElem!_pos litLens (257 + idx) hsym]
-            exact hlit_bound _ (List.getElem_mem hsym)
+          have hlen_le' := getElem!_le_of_forall_mem_le litLens (257 + idx) 15 hsym hlit_bound
           have hlit_enc := Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 (257 + idx)
             hsym hlen_nz hlen_le'
           cases hls : Deflate.Spec.encodeSymbol
@@ -247,9 +245,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
                 exact Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
                   (by omega) dCode (by omega)
                   (Deflate.freqPairs_witness distFreqs dCode (by omega) hdfreq)
-              have hdlen_le' : distLens[dCode]! ≤ 15 := by
-                rw [getElem!_pos distLens dCode hdsym]
-                exact hdist_bound _ (List.getElem_mem hdsym)
+              have hdlen_le' := getElem!_le_of_forall_mem_le distLens dCode 15 hdsym hdist_bound
               have hdist_enc := Deflate.Spec.encodeSymbol_fixed_isSome distLens 15 dCode
                 hdsym hdlen_nz hdlen_le'
               cases hds : Deflate.Spec.encodeSymbol
@@ -269,9 +265,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
       have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
         (by omega) 256 (by omega)
         (Deflate.freqPairs_witness litFreqs 256 (by omega) hfreq)
-      have hlen_le : litLens[256]! ≤ 15 := by
-        rw [getElem!_pos litLens 256 hsym]
-        exact hlit_bound _ (List.getElem_mem hsym)
+      have hlen_le := getElem!_le_of_forall_mem_le litLens 256 15 hsym hlit_bound
       exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 256 hsym hlen_nz hlen_le
   -- Extract the actual values
   cases henc_trees : Deflate.Spec.encodeDynamicTrees litLens distLens with
