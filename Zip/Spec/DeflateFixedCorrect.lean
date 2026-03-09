@@ -34,13 +34,7 @@ private theorem validSymbolList_map_append_endOfBlock
   | nil => simp only [List.map_nil, List.nil_append, Deflate.Spec.ValidSymbolList]
   | cons t rest ih =>
     simp only [List.map_cons, List.cons_append]
-    cases t with
-    | literal b =>
-      show Deflate.Spec.ValidSymbolList _
-      exact ih
-    | reference len dist =>
-      show Deflate.Spec.ValidSymbolList _
-      exact ih
+    cases t <;> (show Deflate.Spec.ValidSymbolList _) <;> exact ih
 
 /-- The symbol list produced by `tokensToSymbols` is always valid:
     it ends with exactly one `.endOfBlock` and contains no `.endOfBlock`
@@ -307,11 +301,8 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         have hsum : ∀ (l : List UInt8),
             (l.map (fun _ => 8)).sum = l.length * 8 := by
           intro l; induction l with
-          | nil => simp only [List.map_nil, List.sum_nil, List.length_nil, Nat.zero_mul]
-          | cons _ _ ih =>
-            simp only [List.map_cons, List.sum_cons, ih, List.length_cons, Nat.add_mul,
-              Nat.one_mul]
-            omega
+          | nil => simp
+          | cons _ _ ih => simp [ih, Nat.add_mul]; omega
         rw [hsum]
       rw [hbits_eq] at htoBits_len
       omega
@@ -456,9 +447,8 @@ private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Toke
   | _ n ih =>
     unfold lz77GreedyIter.trailing lz77Greedy.trailing
     split
-    · rw [ih _ (by omega) _ _ rfl]
-      rw [List.toArray_cons]
-      rw [← Array.append_assoc, Array.push_eq_append]
+    · rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
+        ← Array.append_assoc, Array.push_eq_append]
     · simp only [Array.append_empty]
 
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop`. -/
@@ -476,18 +466,14 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
     · split
       · split
         · split
-          · rw [ih _ (by omega) _ _ _ _ rfl]
-            rw [List.toArray_cons]
-            rw [← Array.append_assoc, Array.push_eq_append]
-          · rw [ih _ (by omega) _ _ _ _ rfl]
-            rw [List.toArray_cons]
-            rw [← Array.append_assoc, Array.push_eq_append]
-        · rw [ih _ (by omega) _ _ _ _ rfl]
-          rw [List.toArray_cons]
-          rw [← Array.append_assoc, Array.push_eq_append]
-      · rw [ih _ (by omega) _ _ _ _ rfl]
-        rw [List.toArray_cons]
-        rw [← Array.append_assoc, Array.push_eq_append]
+          · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+              ← Array.append_assoc, Array.push_eq_append]
+          · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+              ← Array.append_assoc, Array.push_eq_append]
+        · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+            ← Array.append_assoc, Array.push_eq_append]
+      · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+          ← Array.append_assoc, Array.push_eq_append]
     · exact trailing_eq data pos acc
 
 /-- The iterative LZ77 greedy matcher produces the same tokens as the
@@ -572,9 +558,8 @@ private theorem trailing_lazy_eq (data : ByteArray) (pos : Nat) (acc : Array LZ7
   | _ n ih =>
     unfold lz77LazyIter.trailing lz77Lazy.trailing
     split
-    · rw [ih _ (by omega) _ _ rfl]
-      rw [List.toArray_cons]
-      rw [← Array.append_assoc, Array.push_eq_append]
+    · rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
+        ← Array.append_assoc, Array.push_eq_append]
     · simp only [Array.append_empty]
 
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy).
