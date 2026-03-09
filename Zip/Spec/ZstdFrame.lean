@@ -341,6 +341,58 @@ theorem decompressZstd_skip_then_standard (data : ByteArray)
     (by omega) hmagic_lo hmagic_hi hskip hskipAdv hsize2 hmagic2 hframe hframeAdv hdone,
     ByteArray.empty_append]
 
+/-! ## API-level single-block content characterization -/
+
+/-- When the input contains exactly one standard Zstd frame at position 0 with a
+    single last raw block, `decompressZstd` returns the raw block content.
+    Composes `decompressFrame_single_raw_content` with `decompressZstd_single_frame`. -/
+theorem decompressZstd_single_raw_block_content (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (block : ByteArray) (afterBlock : Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hend : pos' ≥ data.size)
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
+    (htype : hdr.blockType = .raw)
+    (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+    (hlast : hdr.lastBlock = true) :
+    Zip.Native.decompressZstd data = .ok block := by
+  have hcontent := Zstd.Spec.decompressFrame_single_raw_content data 0 output pos'
+    header afterHeader hdr afterHdr block afterBlock
+    hframe hh hdict hparse hbs hws htype hraw hlast
+  subst hcontent
+  exact decompressZstd_single_frame data output pos' hframe hend
+
+/-- When the input contains exactly one standard Zstd frame at position 0 with a
+    single last RLE block, `decompressZstd` returns the RLE block content.
+    Composes `decompressFrame_single_rle_content` with `decompressZstd_single_frame`. -/
+theorem decompressZstd_single_rle_block_content (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (block : ByteArray) (afterByte : Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hend : pos' ≥ data.size)
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
+    (hbs : ¬ hdr.blockSize > 131072)
+    (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
+    (htype : hdr.blockType = .rle)
+    (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+    (hlast : hdr.lastBlock = true) :
+    Zip.Native.decompressZstd data = .ok block := by
+  have hcontent := Zstd.Spec.decompressFrame_single_rle_content data 0 output pos'
+    header afterHeader hdr afterHdr block afterByte
+    hframe hh hdict hparse hbs hws htype hrle hlast
+  subst hcontent
+  exact decompressZstd_single_frame data output pos' hframe hend
+
 /-! ## API-level content characterization -/
 
 /-- When the input contains exactly one standard Zstd frame at position 0 with two
