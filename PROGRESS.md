@@ -7,11 +7,11 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
-- **Sorries**: 3 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~484 completed (Feb 19 – Mar 9)
+- **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
+- **Sessions**: ~500 completed (Feb 19 – Mar 9)
 - **Source files**: 102 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 27 test)
-- **Merged PRs**: 453
-- **Spec declarations**: 1,192 across 49 spec files (28,949 lines)
+- **Merged PRs**: 459
+- **Spec declarations**: 1,200+ across 49 spec files (29,315 lines)
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 (former DeflateEncode and InflateCorrect instances now have explicit lemma lists)
 - **simp_all with args**: 2 (DeflateEncode `simp_all [beq_iff_eq]`, InflateCorrect `simp_all [← UInt32.toNat_inj]`)
