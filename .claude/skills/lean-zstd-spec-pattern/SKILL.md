@@ -946,6 +946,85 @@ the block list**, not N-block enumeration:
 This avoids exponential growth in theorem count (16 for 2-block, 64 for
 3-block). See `lean-content-preservation` skill for the induction pattern.
 
+## Content Pipeline: Block → Frame → API Lifting
+
+The content pipeline lifts block-level theorems through three layers.
+This pattern has been applied 20+ times and is highly mechanical.
+
+### Layer 1: Block-level (`decompressBlocksWF_*`)
+
+Block-level theorems live in `Zip/Spec/Zstd.lean` and prove what
+`decompressBlocksWF` returns for specific block type combinations.
+These are the hardest theorems — they involve WF unfolding, state
+threading, and block-type-specific decompression logic.
+
+### Layer 2: Frame-level (`decompressFrame_*_content`)
+
+Frame-level theorems live in `Zip/Spec/Zstd.lean` and prove what
+`decompressFrame` returns. The proof pattern is always:
+
+```lean
+theorem decompressFrame_typeA_then_typeB_content (data : ByteArray) (pos : Nat)
+    -- Frame header hypotheses
+    (fhdr : Zip.Native.ZstdFrameHeader) (afterFhdr : Nat)
+    (hparse_fhdr : Zip.Native.parseFrameHeader data pos = .ok (fhdr, afterFhdr))
+    (hws : ¬ fhdr.windowSize > 8 * 1024 * 1024)
+    -- Block hypotheses (same as two-block theorem)
+    ...
+    -- Checksum hypothesis (if applicable)
+    (hck : ¬ fhdr.contentChecksum) :
+    ∃ content, Zip.Native.decompressFrame data pos = .ok (content, afterBlock2 + ...)
+      ∧ content = block1 ++ block2 := by
+  -- 1. Unfold decompressFrame
+  unfold Zip.Native.decompressFrame
+  -- 2. Plug in frame header parse result
+  simp only [hparse_fhdr, ...]
+  -- 3. Apply the block-level composition theorem
+  rw [decompressBlocksWF_typeA_then_typeB ...]
+  -- 4. Handle checksum (typically simp + exact ⟨_, rfl, rfl⟩)
+```
+
+**Key**: The proof always follows this 4-step pattern. The block-level
+theorem does the heavy lifting; the frame-level theorem just wraps it
+in `decompressFrame` boilerplate.
+
+### Layer 3: API-level (`decompressZstd_*_content`)
+
+API-level theorems live in `Zip/Spec/ZstdFrame.lean` and prove what
+`decompressZstd` returns. The proof applies the frame-level theorem
+then uses `decompressZstd_single_frame` or similar:
+
+```lean
+theorem decompressZstd_typeA_then_typeB_content (data : ByteArray)
+    -- All hypotheses from frame-level, plus:
+    (hskip : ¬ Zip.Native.isSkippableFrame data 0)
+    (hmagic : Zip.Native.isStandardFrame data 0) :
+    Zip.Native.decompressZstd data = .ok (block1 ++ block2) := by
+  -- Apply the single-frame lifting theorem
+  exact decompressZstd_single_standard_frame_content data 0 ByteArray.empty
+    (block1 ++ block2) ...
+    (by rw [ByteArray.empty_append]; exact decompressFrame_typeA_then_typeB_content ...)
+```
+
+### When to stop enumerating
+
+The two-block matrix (4×4 = 16 cells) is being filled systematically.
+Once complete, move to **inductive** N-block theorems rather than
+enumerating 3-block (64 cells). See `lean-content-preservation` skill.
+
+### File organization for content theorems
+
+| Layer | File | Current size |
+|-------|------|-------------|
+| Block | `Zip/Spec/Zstd.lean` | ~2800 lines (**needs split**) |
+| Frame | `Zip/Spec/Zstd.lean` | (same file) |
+| API | `Zip/Spec/ZstdFrame.lean` | ~720 lines |
+
+`Zstd.lean` at 2800 lines is far past the 1000-line split threshold.
+A natural split: block-level composition + frame-level content into a
+new `Zip/Spec/ZstdContent.lean`, keeping validity predicates and
+single-block theorems in `Zstd.lean`.
+
 ## Anti-Patterns
 
 - **Don't restate the implementation**: `f x = fImpl x` proves nothing.
