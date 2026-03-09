@@ -38,6 +38,27 @@ The key properties proved here:
 
 namespace Zip.Spec.ZstdFrame
 
+/-- When `decompressFrame` succeeds, `parseFrameHeader` must also succeed at the
+    same position — `decompressFrame` begins by calling `parseFrameHeader`. -/
+private theorem decompressFrame_has_header (data : ByteArray) (pos : Nat)
+    (content : ByteArray) (pos' : Nat)
+    (hframe : Zip.Native.decompressFrame data pos = .ok (content, pos')) :
+    ∃ hdr afterHdr, Zip.Native.parseFrameHeader data pos = .ok (hdr, afterHdr) := by
+  unfold Zip.Native.decompressFrame at hframe
+  cases hc : Zip.Native.parseFrameHeader data pos with
+  | error e => simp only [hc, bind, Except.bind] at hframe; exact nomatch hframe
+  | ok val => exact ⟨val.1, val.2, rfl⟩
+
+/-- When `parseFrameHeader` succeeds, the data is at least `pos + 4` bytes long
+    (enough for the magic number). -/
+private theorem parseFrameHeader_data_size_ge (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdFrameHeader) (afterHdr : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (hdr, afterHdr)) :
+    data.size ≥ pos + 4 := by
+  have := Zstd.Spec.parseFrameHeader_pos_ge_five data pos hdr afterHdr h
+  have := Zstd.Spec.parseFrameHeader_le_size data pos hdr afterHdr h
+  omega
+
 /-- When `pos ≥ data.size`, `decompressZstdWF` returns the accumulated output
     unchanged.  This is the recursion base case: no more data to process. -/
 theorem decompressZstdWF_base (data : ByteArray) (pos : Nat) (output : ByteArray)
@@ -218,25 +239,10 @@ theorem decompressZstd_single_frame (data : ByteArray)
     (hframe : Zip.Native.decompressFrame data 0 = .ok (content, pos'))
     (hend : pos' ≥ data.size) :
     Zip.Native.decompressZstd data = .ok content := by
-  -- Extract parseFrameHeader success from decompressFrame success
-  have ⟨hdr, afterHdr, hph⟩ : ∃ hdr afterHdr,
-      Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) := by
-    unfold Zip.Native.decompressFrame at hframe
-    cases hc : Zip.Native.parseFrameHeader data 0 with
-    | error e => simp only [hc, bind, Except.bind] at hframe; exact nomatch hframe
-    | ok val => exact ⟨val.1, val.2, rfl⟩
-  -- Derive required conditions
-  have hmagic : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic :=
-    Zstd.Spec.parseFrameHeader_magic data 0 hdr afterHdr hph
-  have hsize : data.size ≥ 0 + 4 := by
-    unfold Zip.Native.parseFrameHeader at hph
-    dsimp only [Bind.bind, Except.bind] at hph
-    by_cases hlt : data.size < 0 + 4
-    · rw [if_pos hlt] at hph; exact nomatch hph
-    · omega
-  have hadv : pos' > 0 :=
-    Zstd.Spec.decompressFrame_pos_gt data 0 content pos' hframe
-  -- Apply single standard frame theorem and simplify ByteArray.empty ++ content
+  have ⟨hdr, afterHdr, hph⟩ := decompressFrame_has_header data 0 content pos' hframe
+  have hmagic := Zstd.Spec.parseFrameHeader_magic data 0 hdr afterHdr hph
+  have hsize := parseFrameHeader_data_size_ge data 0 hdr afterHdr hph
+  have hadv := Zstd.Spec.decompressFrame_pos_gt data 0 content pos' hframe
   unfold Zip.Native.decompressZstd
   rw [decompressZstdWF_single_standard_frame data 0 ByteArray.empty content pos'
     hsize hmagic hframe hadv hend, ByteArray.empty_append]
@@ -279,43 +285,14 @@ theorem decompressZstd_two_frames (data : ByteArray)
     (hframe2 : Zip.Native.decompressFrame data pos1 = .ok (content2, pos2))
     (hend : pos2 ≥ data.size) :
     Zip.Native.decompressZstd data = .ok (content1 ++ content2) := by
-  -- Extract parseFrameHeader success from first frame
-  have ⟨hdr1, afterHdr1, hph1⟩ : ∃ hdr afterHdr,
-      Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) := by
-    unfold Zip.Native.decompressFrame at hframe1
-    cases hc : Zip.Native.parseFrameHeader data 0 with
-    | error e => simp only [hc, bind, Except.bind] at hframe1; exact nomatch hframe1
-    | ok val => exact ⟨val.1, val.2, rfl⟩
-  -- Extract parseFrameHeader success from second frame
-  have ⟨hdr2, afterHdr2, hph2⟩ : ∃ hdr afterHdr,
-      Zip.Native.parseFrameHeader data pos1 = .ok (hdr, afterHdr) := by
-    unfold Zip.Native.decompressFrame at hframe2
-    cases hc : Zip.Native.parseFrameHeader data pos1 with
-    | error e => simp only [hc, bind, Except.bind] at hframe2; exact nomatch hframe2
-    | ok val => exact ⟨val.1, val.2, rfl⟩
-  -- Derive required conditions for first frame
-  have hmagic1 : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic :=
-    Zstd.Spec.parseFrameHeader_magic data 0 hdr1 afterHdr1 hph1
-  have hsize1 : data.size ≥ 0 + 4 := by
-    unfold Zip.Native.parseFrameHeader at hph1
-    dsimp only [Bind.bind, Except.bind] at hph1
-    by_cases hlt : data.size < 0 + 4
-    · rw [if_pos hlt] at hph1; exact nomatch hph1
-    · omega
-  have hadv1 : pos1 > 0 :=
-    Zstd.Spec.decompressFrame_pos_gt data 0 content1 pos1 hframe1
-  -- Derive required conditions for second frame
-  have hmagic2 : Binary.readUInt32LE data pos1 = Zip.Native.zstdMagic :=
-    Zstd.Spec.parseFrameHeader_magic data pos1 hdr2 afterHdr2 hph2
-  have hsize2 : data.size ≥ pos1 + 4 := by
-    unfold Zip.Native.parseFrameHeader at hph2
-    dsimp only [Bind.bind, Except.bind] at hph2
-    by_cases hlt : data.size < pos1 + 4
-    · rw [if_pos hlt] at hph2; exact nomatch hph2
-    · omega
-  have hadv2 : pos2 > pos1 :=
-    Zstd.Spec.decompressFrame_pos_gt data pos1 content2 pos2 hframe2
-  -- Apply two-frame WF theorem and simplify
+  have ⟨hdr1, afterHdr1, hph1⟩ := decompressFrame_has_header data 0 content1 pos1 hframe1
+  have ⟨hdr2, afterHdr2, hph2⟩ := decompressFrame_has_header data pos1 content2 pos2 hframe2
+  have hmagic1 := Zstd.Spec.parseFrameHeader_magic data 0 hdr1 afterHdr1 hph1
+  have hsize1 := parseFrameHeader_data_size_ge data 0 hdr1 afterHdr1 hph1
+  have hadv1 := Zstd.Spec.decompressFrame_pos_gt data 0 content1 pos1 hframe1
+  have hmagic2 := Zstd.Spec.parseFrameHeader_magic data pos1 hdr2 afterHdr2 hph2
+  have hsize2 := parseFrameHeader_data_size_ge data pos1 hdr2 afterHdr2 hph2
+  have hadv2 := Zstd.Spec.decompressFrame_pos_gt data pos1 content2 pos2 hframe2
   unfold Zip.Native.decompressZstd
   rw [decompressZstdWF_standard_then_standard data 0 ByteArray.empty
     content1 content2 pos1 pos2 hsize1 hmagic1 hframe1 hadv1
@@ -326,7 +303,7 @@ theorem decompressZstd_two_frames (data : ByteArray)
 theorem decompressZstd_empty :
     Zip.Native.decompressZstd ⟨#[]⟩ = .ok ⟨#[]⟩ := by
   unfold Zip.Native.decompressZstd
-  exact decompressZstdWF_base ⟨#[]⟩ 0 ByteArray.empty (by simp [ByteArray.size])
+  exact decompressZstdWF_base ⟨#[]⟩ 0 ByteArray.empty (by decide)
 
 /-- When the input contains a single skippable frame starting at position 0 that
     fills all remaining data, `decompressZstd` returns empty output.  Skippable
