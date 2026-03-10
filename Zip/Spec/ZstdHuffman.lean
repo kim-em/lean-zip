@@ -1453,6 +1453,56 @@ theorem parseLiteralsSection_succeeds_treeless (data : ByteArray) (pos : Nat)
         simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hne
         omega
 
+open Zip.Native in
+/-- When litType = 2 (compressed with new Huffman tree), there is enough data,
+    the compressed header parses, `parseHuffmanTreeDescriptor` succeeds, the tree
+    fits within the compressed data, and Huffman decoding succeeds,
+    `parseLiteralsSection` succeeds with the exact output. The `prevHuffTree`
+    parameter is universally quantified — litType=2 never uses it. -/
+theorem parseLiteralsSection_succeeds_compressed (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (huffTable : ZstdHuffmanTable) (afterTree : Nat)
+    (regenSize compSize headerBytes : Nat) (fourStreams : Bool) (result : ByteArray)
+    (hlit : (data[pos]! &&& 3).toNat = 2)
+    (hpos : data.size ≥ pos + 1)
+    (hparse : parseCompressedLiteralsHeader data pos ((data[pos]! >>> 2) &&& 3).toNat
+              = .ok (regenSize, compSize, headerBytes, fourStreams))
+    (hdata : data.size ≥ pos + headerBytes + compSize)
+    (htree : parseHuffmanTreeDescriptor data (pos + headerBytes)
+             = .ok (huffTable, afterTree))
+    (htreeSize : afterTree - (pos + headerBytes) ≤ compSize)
+    (hdecode : decodeHuffmanLiterals huffTable data afterTree
+                (compSize - (afterTree - (pos + headerBytes)))
+                regenSize fourStreams = .ok result) :
+    parseLiteralsSection data pos prevHuffTree =
+      .ok (result, pos + headerBytes + compSize, some huffTable) := by
+  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure]
+  split
+  · -- data.size < pos + 1 → absurd
+    exfalso; omega
+  · -- past size guard
+    split
+    · -- litType > 3 → absurd since litType = 2
+      exfalso; omega
+    · -- litType ≤ 3
+      split
+      · -- litType == 2 || litType == 3 → compressed/treeless path
+        simp only [hparse]
+        split
+        · -- litType == 3 → absurd since hlit says litType = 2
+          rename_i heq3
+          simp only [beq_iff_eq] at heq3
+          omega
+        · -- litType ≠ 3 → compressed path (our case)
+          simp only [show ¬(data.size < pos + headerBytes + compSize) from by omega,
+            ↓reduceIte, Except.mapError, htree,
+            show ¬(afterTree - (pos + headerBytes) > compSize) from by omega,
+            hdecode]
+      · -- litType ≠ 2 and ≠ 3 → absurd since hlit says litType = 2
+        rename_i _ hne
+        simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hne
+        omega
+
 private theorem forIn'_loop_always_ok' {α β ε : Type}
     (as curr : List α) (init : β)
     (f : α → β → Except ε (ForInStep β))
