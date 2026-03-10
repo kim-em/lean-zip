@@ -58,6 +58,28 @@ to split on the result BEFORE simplifying `h`. Then
 This is cleaner than `simp [...] at h; split at h; rename_i ...` which produces
 fragile unnamed hypotheses.
 
+## `cases hrd : expr` Rewrites the Goal Too
+
+When you write `cases hrd : f` where `f` appears in the goal (not just
+in hypotheses), Lean rewrites `f` in the goal to the constructor value.
+So if the goal contains `f = .ok rdval`, after `cases hrd : f` with
+`| ok val =>`, the goal becomes `.ok val = .ok rdval` — and `hrd` has
+type `f = .ok val`, NOT `.ok val = .ok val`.
+
+**Consequence**: Use `rfl` (not `hrd`) to close the equality in the goal,
+since the goal already has the constructor form on both sides. Using `hrd`
+causes a type mismatch: `f = .ok val` vs `.ok val = .ok val`.
+
+```lean
+-- WRONG: type mismatch on hrd
+cases hrd : br.readBits 4 with
+| ok val => exact ⟨val, hrd⟩  -- hrd : br.readBits 4 = .ok val, but goal wants .ok val = .ok val
+
+-- RIGHT: goal already has .ok val, use rfl
+cases hrd : br.readBits 4 with
+| ok val => exact ⟨val, rfl⟩
+```
+
 ## do-notation Guards (`if ... then throw`)
 
 Guards like `if cond then throw err` in `Except` do-notation expand to
