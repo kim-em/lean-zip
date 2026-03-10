@@ -913,6 +913,45 @@ theorem resolveSequenceFseTables_valid (modes : SequenceCompressionModes)
                resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hof (by decide) hprevOF,
                resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hml (by decide) hprevML⟩
 
+/-! ## resolveSingleFseTable completeness -/
+
+/-- In predefined mode, `resolveSingleFseTable` always succeeds (unconditionally).
+    The only fallible operation is `buildFseTable`, which always succeeds by `buildFseTable_ok`. -/
+theorem resolveSingleFseTable_succeeds_predefined (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable) :
+    ∃ table,
+      resolveSingleFseTable .predefined maxSymbols maxAccLog data pos
+        predefinedDist predefinedAccLog prevTable = .ok (table, pos) := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure]
+  obtain ⟨t, ht⟩ := Zstd.Spec.Fse.buildFseTable_ok predefinedDist predefinedAccLog
+  rw [ht]
+  exact ⟨t, rfl⟩
+
+/-- In RLE mode, `resolveSingleFseTable` succeeds when there is at least 1 byte at `pos`. -/
+theorem resolveSingleFseTable_succeeds_rle (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (hsize : data.size ≥ pos + 1) :
+    ∃ table,
+      resolveSingleFseTable .rle maxSymbols maxAccLog data pos
+        predefinedDist predefinedAccLog prevTable = .ok (table, pos + 1) := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure]
+  have : ¬(data.size < pos + 1) := by omega
+  simp only [this, ↓reduceIte]
+  exact ⟨_, rfl⟩
+
+/-- In repeat mode, `resolveSingleFseTable` succeeds when a previous table is available. -/
+theorem resolveSingleFseTable_succeeds_repeat (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (table : FseTable) :
+    resolveSingleFseTable .repeat maxSymbols maxAccLog data pos
+      predefinedDist predefinedAccLog (some table) = .ok (table, pos) := by
+  simp only [resolveSingleFseTable, pure, Except.pure]
+
 /-! ## decodeSequencesWF output size -/
 
 /-- When the inner loop succeeds, the output array has exactly
