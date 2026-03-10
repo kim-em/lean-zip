@@ -1163,4 +1163,36 @@ theorem decompressZstd_compressed_seq_then_rle_content (data : ByteArray)
   subst hcontent
   exact decompressZstd_single_frame data (blockOutput1 ++ block2) pos' hframe hend
 
+/-! ## decompressZstd frame metadata characterizing properties -/
+
+/-- When `decompressZstd` succeeds on a single-frame input whose frame header
+    declares `contentSize = some n`, the output has exactly `n` bytes.
+    Composes `decompressZstd_single_frame` with `decompressFrame_contentSize_eq`. -/
+theorem decompressZstd_single_frame_contentSize (data : ByteArray)
+    (content : ByteArray) (pos' : Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (content, pos'))
+    (hend : pos' ≥ data.size)
+    (header : Zip.Native.ZstdFrameHeader) (headerPos : Nat)
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, headerPos))
+    (n : UInt64) (hn : header.contentSize = some n) :
+    Zip.Native.decompressZstd data = .ok content ∧ content.size.toUInt64 = n :=
+  ⟨decompressZstd_single_frame data content pos' hframe hend,
+   Zstd.Spec.decompressFrame_contentSize_eq data 0 content pos' hframe header headerPos hh n hn⟩
+
+/-- When `decompressZstd` succeeds on a single-frame input whose frame header
+    has `contentChecksum = true`, the output's XXH64 upper 32 bits match the
+    checksum stored in the 4 bytes before `pos'` in the input.
+    Composes `decompressZstd_single_frame` with `decompressFrame_checksum_valid`. -/
+theorem decompressZstd_single_frame_checksum (data : ByteArray)
+    (content : ByteArray) (pos' : Nat)
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (content, pos'))
+    (hend : pos' ≥ data.size)
+    (header : Zip.Native.ZstdFrameHeader) (headerPos : Nat)
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, headerPos))
+    (hc : header.contentChecksum = true) :
+    Zip.Native.decompressZstd data = .ok content ∧
+      XxHash64.xxHash64Upper32 content = Binary.readUInt32LE data (pos' - 4) :=
+  ⟨decompressZstd_single_frame data content pos' hframe hend,
+   Zstd.Spec.decompressFrame_checksum_valid data 0 content pos' hframe header headerPos hh hc⟩
+
 end Zip.Spec.ZstdFrame
