@@ -401,7 +401,7 @@ def parseCompressedLiteralsHeader (data : ByteArray) (pos : Nat) (sizeFormat : N
 
 /-- Decode Huffman-compressed literal streams using the given table.
     Returns the decoded literals. -/
-private def decodeHuffmanLiterals (huffTable : ZstdHuffmanTable) (data : ByteArray)
+def decodeHuffmanLiterals (huffTable : ZstdHuffmanTable) (data : ByteArray)
     (streamStart streamDataSize regenSize : Nat) (fourStreams : Bool) :
     Except String ByteArray := do
   if fourStreams then
