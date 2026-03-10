@@ -1547,6 +1547,29 @@ theorem parseHuffmanWeightsDirect_succeeds (data : ByteArray) (pos numWeights : 
     ⟨ForInStep.yield ((b.push (data[pos + i]! >>> 4)).push (data[pos + i]! &&& 15)), rfl⟩)
 
 open Zip.Native in
+/-- When data has enough bytes for the FSE-compressed weight range and
+    each sub-call (`decodeFseDistribution`, `buildFseTable`,
+    `BackwardBitReader.init`, `decodeFseSymbolsAll`) succeeds,
+    `parseHuffmanWeightsFse` succeeds and returns the decoded weights
+    with position advanced past the compressed range. -/
+theorem parseHuffmanWeightsFse_succeeds
+    (data : ByteArray) (pos compressedSize : Nat)
+    (hsize : data.size ≥ pos + 1 + compressedSize)
+    (probs : Array Int32) (accuracyLog : Nat) (br1 : BitReader)
+    (hfse : decodeFseDistribution ⟨data, pos + 1, 0⟩ 256 6 = .ok (probs, accuracyLog, br1))
+    (table : FseTable)
+    (hbuild : buildFseTable probs accuracyLog = .ok table)
+    (bbr : BackwardBitReader)
+    (hinit : BackwardBitReader.init data br1.alignToByte.pos (pos + 1 + compressedSize) = .ok bbr)
+    (weights : Array UInt8) (bbr' : BackwardBitReader)
+    (hdecode : decodeFseSymbolsAll table bbr = .ok (weights, bbr')) :
+    parseHuffmanWeightsFse data pos compressedSize =
+      .ok (weights, pos + 1 + compressedSize) := by
+  simp only [parseHuffmanWeightsFse, bind, Except.bind, pure, Except.pure]
+  simp only [show ¬(data.size < pos + 1 + compressedSize) from by omega, ↓reduceIte]
+  simp only [hfse, hbuild, hinit, hdecode]
+
+open Zip.Native in
 /-- When the header byte indicates direct mode (≥ 128), data has enough bytes
     for the header and weight nibbles, and `buildZstdHuffmanTable` succeeds on
     the parsed weights, `parseHuffmanTreeDescriptor` succeeds. -/
@@ -1569,5 +1592,24 @@ theorem parseHuffmanTreeDescriptor_succeeds_direct (data : ByteArray) (pos : Nat
   obtain ⟨table, ht⟩ := hbuild weights afterPos hw
   simp only [ht]
   exact ⟨_, _, rfl⟩
+
+open Zip.Native in
+/-- When the header byte indicates FSE mode (1..127), `parseHuffmanWeightsFse`
+    succeeds, and `buildZstdHuffmanTable` succeeds on the decoded weights,
+    `parseHuffmanTreeDescriptor` succeeds. -/
+theorem parseHuffmanTreeDescriptor_succeeds_fse (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 1)
+    (hbyte_pos : data[pos]!.toNat > 0)
+    (hbyte_fse : data[pos]!.toNat < 128)
+    (weights : Array UInt8) (afterWeights : Nat)
+    (hweights : parseHuffmanWeightsFse data pos data[pos]!.toNat = .ok (weights, afterWeights))
+    (huffTable : ZstdHuffmanTable)
+    (htable : buildZstdHuffmanTable weights = .ok huffTable) :
+    parseHuffmanTreeDescriptor data pos = .ok (huffTable, afterWeights) := by
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure]
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+  simp only [show ¬(data[pos]!.toNat ≥ 128) from by omega, ↓reduceIte]
+  have h0 : (data[pos]!.toNat == 0) = false := by rw [beq_eq_false_iff_ne]; omega
+  simp only [h0, Bool.false_eq_true, ↓reduceIte, hweights, htable]
 
 end Zstd.Spec.Huffman
