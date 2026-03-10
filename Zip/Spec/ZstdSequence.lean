@@ -913,6 +913,27 @@ theorem resolveSequenceFseTables_valid (modes : SequenceCompressionModes)
                resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hof (by decide) hprevOF,
                resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hml (by decide) hprevML⟩
 
+/-! ## resolveSequenceFseTables completeness -/
+
+/-- When each of the three `resolveSingleFseTable` calls succeeds, the composed
+    `resolveSequenceFseTables` succeeds and returns the exact output. The three
+    hypotheses capture position-threading: `pos → pos1 → pos2 → pos3`. -/
+theorem resolveSequenceFseTables_succeeds
+    (modes : SequenceCompressionModes) (data : ByteArray) (pos : Nat)
+    (prev : PrevFseTables)
+    (litLenTable : FseTable) (pos1 : Nat)
+    (offsetTable : FseTable) (pos2 : Nat)
+    (matchLenTable : FseTable) (pos3 : Nat)
+    (hlit : resolveSingleFseTable modes.litLenMode 36 9 data pos
+            predefinedLitLenDistribution 6 prev.litLen = .ok (litLenTable, pos1))
+    (hoff : resolveSingleFseTable modes.offsetMode 32 8 data pos1
+            predefinedOffsetDistribution 5 prev.offset = .ok (offsetTable, pos2))
+    (hml : resolveSingleFseTable modes.matchLenMode 53 9 data pos2
+           predefinedMatchLenDistribution 6 prev.matchLen = .ok (matchLenTable, pos3)) :
+    resolveSequenceFseTables modes data pos prev =
+      .ok (litLenTable, offsetTable, matchLenTable, pos3) := by
+  simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure, hlit, hoff, hml]
+
 /-! ## resolveSingleFseTable completeness -/
 
 /-- In predefined mode, `resolveSingleFseTable` always succeeds (unconditionally).
