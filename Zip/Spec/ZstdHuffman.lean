@@ -1440,4 +1440,97 @@ theorem decodeFourHuffmanStreamsWF_size
        simp only [ByteArray.size_empty] at h1 h2 h3 h4
        omega)
 
+/-! ## Parsing completeness (raw/RLE) -/
+
+/-- Minimum data size required for a raw literals section (litType = 0):
+    the variable-width header (1, 2, or 3 bytes depending on sizeFormat)
+    plus the payload (`regenSize` bytes). -/
+def rawLiteralsSectionSize (data : ByteArray) (pos : Nat) : Nat :=
+  let byte0 := data[pos]!
+  let sizeFormat := ((byte0 >>> 2) &&& 3).toNat
+  if sizeFormat == 0 || sizeFormat == 2 then
+    1 + (byte0 >>> 3).toNat
+  else if sizeFormat == 1 then
+    2 + ((byte0 >>> 4).toNat ||| (data[pos + 1]!.toNat <<< 4))
+  else
+    3 + ((byte0 >>> 4).toNat ||| (data[pos + 1]!.toNat <<< 4) ||| (data[pos + 2]!.toNat <<< 12))
+
+open Zip.Native in
+/-- When the first byte marks raw literals (litType = 0) and the data has at least
+    `rawLiteralsSectionSize data pos` bytes after `pos`, `parseLiteralsSection`
+    succeeds. -/
+theorem parseLiteralsSection_succeeds_raw (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 0)
+    (hsize : data.size ≥ pos + rawLiteralsSectionSize data pos) :
+    ∃ literals pos' huffTable,
+      parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable) := by
+  -- Work backward: case-split on the result, then derive contradiction in the error case
+  match hres : parseLiteralsSection data pos prevHuffTree with
+  | .ok (lits, p, ht) => exact ⟨lits, p, ht, rfl⟩
+  | .error e =>
+    exfalso
+    simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at hres
+    -- Guard 1: data.size < pos + 1
+    split at hres
+    · unfold rawLiteralsSectionSize at hsize; simp only [] at hsize
+      repeat (first | omega | split at hsize)
+    · -- Guard 2: litType > 3
+      split at hres
+      · omega
+      · -- Guard 3: litType == 2 || litType == 3 → compressed path (contradiction with hlit)
+        split at hres
+        · simp only [beq_iff_eq, Bool.or_eq_true] at *; omega
+        · -- Now in raw/RLE path only — case split all if-then-else in hres
+          split at hres <;> split at hres <;> (try split at hres) <;>
+            (try split at hres) <;> (try split at hres) <;> (try split at hres)
+          -- Close impossible branches (.ok = .error) and normalize Bool→Prop
+          all_goals (try simp at hres)
+          -- Unfold size helper so simp_all can see through the definition
+          all_goals (try unfold rawLiteralsSectionSize at hsize)
+          -- Close remaining goals
+          all_goals first
+            | contradiction
+            | omega
+            | (simp_all; try omega)
+
+/-- Minimum data size required for an RLE literals section (litType = 1):
+    the variable-width header (1, 2, or 3 bytes depending on sizeFormat)
+    plus 1 byte for the RLE value. -/
+def rleLiteralsSectionMinSize (data : ByteArray) (pos : Nat) : Nat :=
+  let sizeFormat := ((data[pos]! >>> 2) &&& 3).toNat
+  if sizeFormat == 0 || sizeFormat == 2 then 2
+  else if sizeFormat == 1 then 3 else 4
+
+open Zip.Native in
+/-- When the first byte marks RLE literals (litType = 1) and the data has at least
+    `rleLiteralsSectionMinSize data pos` bytes after `pos`, `parseLiteralsSection`
+    succeeds. -/
+theorem parseLiteralsSection_succeeds_rle (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 1)
+    (hsize : data.size ≥ pos + rleLiteralsSectionMinSize data pos) :
+    ∃ literals pos' huffTable,
+      parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable) := by
+  match hres : parseLiteralsSection data pos prevHuffTree with
+  | .ok (lits, p, ht) => exact ⟨lits, p, ht, rfl⟩
+  | .error e =>
+    exfalso
+    simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at hres
+    split at hres
+    · unfold rleLiteralsSectionMinSize at hsize; simp only [] at hsize
+      repeat (first | omega | split at hsize)
+    · split at hres
+      · omega
+      · split at hres
+        · simp only [beq_iff_eq, Bool.or_eq_true] at *; omega
+        · split at hres <;> split at hres <;> (try split at hres) <;>
+            (try split at hres) <;> (try split at hres) <;> (try split at hres)
+          all_goals (try simp at hres)
+          all_goals (try unfold rleLiteralsSectionMinSize at hsize)
+          all_goals first
+            | contradiction
+            | omega
+            | (simp_all; try omega)
+
 end Zstd.Spec.Huffman
