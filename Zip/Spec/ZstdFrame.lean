@@ -34,6 +34,24 @@ The key properties proved here:
     at position 0, `decompressZstd` returns empty output.
 12. **API-level skip then standard**: when the input starts with a skippable frame
     followed by a standard frame, `decompressZstd` returns only the standard content.
+
+## API-level content coverage matrix
+
+Single-block (4/4):
+- raw ✓ `decompressZstd_single_raw_block_content`
+- rle ✓ `decompressZstd_single_rle_block_content`
+- compLit ✓ `decompressZstd_single_compressed_literals`
+- compSeq ✓ `decompressZstd_single_compressed_sequences`
+
+Two-block (first non-last × second last, 12/16):
+                  raw     rle     compLit compSeq
+    raw      ✓       ✓       ✓       —
+    rle      ✓       ✓       ✓       —
+    compLit  ✓       ✓       —       ✓
+    compSeq  ✓       ✓       ✓       —
+
+Remaining gaps: raw+compSeq, rle+compSeq (issue #1082),
+compLit+compLit, compSeq+compSeq (issue #1078).
 -/
 
 namespace Zip.Spec.ZstdFrame
@@ -341,7 +359,7 @@ theorem decompressZstd_skip_then_standard (data : ByteArray)
     (by omega) hmagic_lo hmagic_hi hskip hskipAdv hsize2 hmagic2 hframe hframeAdv hdone,
     ByteArray.empty_append]
 
-/-! ## API-level single-block content characterization -/
+/-! ## API-level single-block content (raw/RLE) -/
 
 /-- When the input contains exactly one standard Zstd frame at position 0 with a
     single last raw block, `decompressZstd` returns the raw block content.
@@ -393,7 +411,7 @@ theorem decompressZstd_single_rle_block_content (data : ByteArray)
   subst hcontent
   exact decompressZstd_single_frame data output pos' hframe hend
 
-/-! ## API-level content characterization -/
+/-! ## API-level two-block content (raw/RLE homogeneous) -/
 
 /-- When the input contains exactly one standard Zstd frame at position 0 with two
     consecutive raw blocks (first non-last, second last), `decompressZstd` returns
@@ -579,6 +597,8 @@ theorem decompressZstd_rle_then_raw_content (data : ByteArray)
   subst hcontent
   exact decompressZstd_single_frame data (block1 ++ block2) pos' hframe hend
 
+/-! ## API-level single-block content (compressed) -/
+
 /-- When the input contains exactly one standard Zstd frame at position 0 with a
     single last compressed block having numSeq=0 (literals only), `decompressZstd`
     returns the literal section content.  Composes
@@ -661,7 +681,7 @@ theorem decompressZstd_single_compressed_sequences (data : ByteArray)
   subst hcontent
   exact decompressZstd_single_frame data output pos' hframe hend
 
-/-! ## decompressZstd compressed two-block content -/
+/-! ## API-level two-block content (mixed compressed) -/
 
 /-- When the input contains exactly one standard Zstd frame at position 0 with two
     blocks (first non-last compressed with numSeq=0, second last raw), `decompressZstd`
