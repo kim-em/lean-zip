@@ -1440,4 +1440,37 @@ theorem decodeFourHuffmanStreamsWF_size
        simp only [ByteArray.size_empty] at h1 h2 h3 h4
        omega)
 
+/-! ## Parsing completeness -/
+
+open Zip.Native in
+/-- When `data` has enough bytes for the compressed literals header (3, 4, or 5 bytes
+    depending on `sizeFormat`), `parseCompressedLiteralsHeader` always succeeds. -/
+theorem parseCompressedLiteralsHeader_succeeds (data : ByteArray) (pos sizeFormat : Nat)
+    (hsize : data.size ≥ pos + if sizeFormat ≤ 1 then 3 else if sizeFormat = 2 then 4 else 5) :
+    ∃ regenSize compSize headerBytes fourStreams,
+      parseCompressedLiteralsHeader data pos sizeFormat =
+        .ok (regenSize, compSize, headerBytes, fourStreams) := by
+  simp only [parseCompressedLiteralsHeader, bind, Except.bind, pure, Except.pure]
+  split
+  · -- sizeFormat ≤ 1: needs 3 bytes
+    rename_i hsf
+    have hge : data.size ≥ pos + 3 := by simp_all
+    simp only [show ¬(data.size < pos + 3) from by omega, ↓reduceIte]
+    exact ⟨_, _, _, _, rfl⟩
+  · split
+    · -- sizeFormat = 2: needs 4 bytes
+      rename_i hnsf hsf2
+      have hge : data.size ≥ pos + 4 := by
+        have : sizeFormat = 2 := by rwa [beq_iff_eq] at hsf2
+        simp_all
+      simp only [show ¬(data.size < pos + 4) from by omega, ↓reduceIte]
+      exact ⟨_, _, _, _, rfl⟩
+    · -- sizeFormat ≥ 3: needs 5 bytes
+      rename_i hnsf hnsf2
+      have hge : data.size ≥ pos + 5 := by
+        have : ¬(sizeFormat = 2) := by rwa [beq_iff_eq] at hnsf2
+        simp_all
+      simp only [show ¬(data.size < pos + 5) from by omega, ↓reduceIte]
+      exact ⟨_, _, _, _, rfl⟩
+
 end Zstd.Spec.Huffman
