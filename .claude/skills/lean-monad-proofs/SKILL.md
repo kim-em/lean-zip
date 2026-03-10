@@ -190,6 +190,48 @@ all_goals first
 This closes all error branches automatically, leaving only the success
 branches for manual work.
 
+## Completeness Proofs (Function Succeeds Under Preconditions)
+
+When proving `∃ result, f x = .ok result` (the function succeeds),
+the cleanest approach is **backward**: case-split on the result, derive
+`False` on the error branch.
+
+**Key pattern for `cases hres : f x`**: After `cases hres`, the GOAL
+has `.ok val` or `.error e` (not `f x`). So the `ok` branch uses `rfl`,
+not `hres`:
+
+```lean
+cases hres : f x with
+| ok val => obtain ⟨a, b⟩ := val; exact ⟨a, b, rfl⟩  -- NOT hres
+| error e => exfalso; ...
+```
+
+**Synchronizing case analysis across hypotheses**: When the function
+and a size hypothesis both depend on the same expressions (e.g.,
+descriptor byte fields), use `generalize` to abstract shared
+sub-expressions into variables present in BOTH `hres` and `hsize`.
+Then `by_cases`/`split at hres` substitutes consistently:
+
+```lean
+-- Generalize shared expressions into both hres and hsize
+generalize hss : (desc >>> 5 &&& 1 == 1) = ss at hres hsize
+generalize hdf : (desc &&& 3).toNat = df at hres hsize
+-- by_cases on Bool substitutes in ALL hypotheses
+by_cases hss_val : ss = true
+· simp only [hss_val, ...] at hres hsize
+  -- Now split walks through remaining guards
+  repeat (first | contradiction | (simp [...] at hsize; omega) | (split at hres))
+```
+
+**Why `generalize` is needed**: Without it, `split at hres` creates
+branches where the discriminant value is known in `hres` but NOT in
+`hsize`, so `omega` can't derive contradictions from size bounds.
+
+**Reducing `if false = true then ...` for omega**: After substituting
+`ss = false`, expressions like `if false = true then 0 else 1` remain
+opaque to `omega`. Use `simp only [Bool.false_eq_true, ite_false]` to
+reduce them to concrete values before `omega`.
+
 ## Nested `cases` Parsing
 
 Nested `cases ... with | ... | ...` blocks cause Lean to misparse the inner
