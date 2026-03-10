@@ -1056,6 +1056,30 @@ theorem BackwardBitReader_init_data_eq (data : ByteArray)
   · split at h <;> (obtain rfl := Except.ok.inj h; rfl)
   · obtain rfl := Except.ok.inj h; rfl
 
+/-! ## BackwardBitReader.init completeness -/
+
+open Zip.Native (BackwardBitReader) in
+/-- When a byte is nonzero, `highBitPos` returns `some`. -/
+theorem highBitPos_some_of_ne_zero (b : UInt8) (hb : b ≠ 0) :
+    ∃ n, BackwardBitReader.highBitPos b = some n := by
+  unfold BackwardBitReader.highBitPos
+  simp only [bne_iff_ne, ne_eq, beq_iff_eq, hb, ↓reduceIte]
+  repeat (first | exact ⟨_, rfl⟩ | split)
+
+open Zip.Native (BackwardBitReader) in
+/-- When `startPos < endPos`, `endPos ≤ data.size`, and the last byte is nonzero,
+    `BackwardBitReader.init` succeeds. -/
+theorem BackwardBitReader_init_succeeds (data : ByteArray)
+    (startPos endPos : Nat)
+    (hrange : startPos < endPos)
+    (hsize : endPos ≤ data.size)
+    (hlast : data[endPos - 1]! ≠ 0) :
+    ∃ br, BackwardBitReader.init data startPos endPos = .ok br := by
+  simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure]
+  rw [if_neg (by omega), if_neg (by omega)]
+  obtain ⟨n, hn⟩ := highBitPos_some_of_ne_zero _ hlast
+  simp only [hn]; split <;> (try split) <;> exact ⟨_, rfl⟩
+
 /-! ## forIn always-ok lemmas -/
 
 /-- `List.forIn'.loop` in `Except` always returns `.ok` when the body never throws. -/
