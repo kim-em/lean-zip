@@ -1453,4 +1453,71 @@ theorem parseLiteralsSection_succeeds_treeless (data : ByteArray) (pos : Nat)
         simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hne
         omega
 
+private theorem forIn'_loop_always_ok' {α β ε : Type}
+    (as curr : List α) (init : β)
+    (f : α → β → Except ε (ForInStep β))
+    (h_ok : ∀ a b, ∃ r, f a b = .ok r)
+    (hsuf : ∃ bs, bs ++ curr = as) :
+    ∃ result, List.forIn'.loop as (fun a _ b => f a b) curr init hsuf = .ok result := by
+  induction curr generalizing init with
+  | nil => exact ⟨init, rfl⟩
+  | cons x xs ih =>
+    unfold List.forIn'.loop
+    dsimp only [Bind.bind, Except.bind]
+    obtain ⟨r, hr⟩ := h_ok x init
+    rw [hr]
+    cases r with
+    | done b' => exact ⟨b', rfl⟩
+    | yield b' => exact ih b' _
+
+private theorem forIn_range_always_ok' {β ε : Type} (n : Nat) (init : β)
+    (f : Nat → β → Except ε (ForInStep β))
+    (h_ok : ∀ i b, ∃ r, f i b = .ok r) :
+    ∃ result, forIn [:n] init f = .ok result := by
+  rw [Std.Legacy.Range.forIn_eq_forIn_range']
+  exact forIn'_loop_always_ok' _ _ init (fun a b => f a b) h_ok _
+
+open Zip.Native in
+/-- When `data` has enough bytes for the nibble-packed weight data,
+    `parseHuffmanWeightsDirect` always succeeds. -/
+theorem parseHuffmanWeightsDirect_succeeds (data : ByteArray) (pos numWeights : Nat)
+    (hsize : data.size ≥ pos + (numWeights + 1) / 2) :
+    ∃ weights afterPos,
+      parseHuffmanWeightsDirect data pos numWeights = .ok (weights, afterPos) := by
+  simp only [parseHuffmanWeightsDirect, bind, Except.bind, pure, Except.pure]
+  simp only [show ¬(data.size < pos + (numWeights + 1) / 2) from by omega, ↓reduceIte]
+  -- The forIn loop body always returns .ok (.yield _), so the loop succeeds
+  suffices h : ∃ result, (forIn [:(numWeights + 1) / 2] (#[] : Array UInt8) fun i r =>
+      Except.ok (ForInStep.yield ((r.push (data[pos + i]! >>> 4)).push (data[pos + i]! &&& 15))))
+    = .ok result by
+    obtain ⟨result, hr⟩ := h
+    rw [hr]
+    exact ⟨_, _, rfl⟩
+  exact forIn_range_always_ok' _ _ _ (fun i (b : Array UInt8) =>
+    ⟨ForInStep.yield ((b.push (data[pos + i]! >>> 4)).push (data[pos + i]! &&& 15)), rfl⟩)
+
+open Zip.Native in
+/-- When the header byte indicates direct mode (≥ 128), data has enough bytes
+    for the header and weight nibbles, and `buildZstdHuffmanTable` succeeds on
+    the parsed weights, `parseHuffmanTreeDescriptor` succeeds. -/
+theorem parseHuffmanTreeDescriptor_succeeds_direct (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 1)
+    (hheader : data[pos]!.toNat ≥ 128)
+    (hweights : data.size ≥ pos + 1 + ((data[pos]!.toNat - 127 + 1) / 2))
+    (hbuild : ∀ weights afterPos,
+      parseHuffmanWeightsDirect data (pos + 1) (data[pos]!.toNat - 127) = .ok (weights, afterPos) →
+      ∃ table, buildZstdHuffmanTable weights = .ok table) :
+    ∃ table afterPos,
+      parseHuffmanTreeDescriptor data pos = .ok (table, afterPos) := by
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure]
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+  simp only [show data[pos]!.toNat ≥ 128 from hheader, ↓reduceIte]
+  -- Chain: parseHuffmanWeightsDirect succeeds, then buildZstdHuffmanTable succeeds
+  obtain ⟨weights, afterPos, hw⟩ :=
+    parseHuffmanWeightsDirect_succeeds data (pos + 1) (data[pos]!.toNat - 127) (by omega)
+  simp only [hw]
+  obtain ⟨table, ht⟩ := hbuild weights afterPos hw
+  simp only [ht]
+  exact ⟨_, _, rfl⟩
+
 end Zstd.Spec.Huffman
