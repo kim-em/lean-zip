@@ -1473,4 +1473,46 @@ theorem parseCompressedLiteralsHeader_succeeds (data : ByteArray) (pos sizeForma
       simp only [show ¬(data.size < pos + 5) from by omega, ↓reduceIte]
       exact ⟨_, _, _, _, rfl⟩
 
+open Zip.Native in
+/-- When litType = 3 (treeless), a previous Huffman table is available, the compressed
+    header parses successfully, there is enough data for the payload, and Huffman decoding
+    succeeds, `parseLiteralsSection` succeeds with the exact output determined by these
+    parameters. -/
+theorem parseLiteralsSection_succeeds_treeless (data : ByteArray) (pos : Nat)
+    (huffTable : ZstdHuffmanTable)
+    (regenSize compSize headerBytes : Nat) (fourStreams : Bool) (result : ByteArray)
+    (hlit : (data[pos]! &&& 3).toNat = 3)
+    (hpos : data.size ≥ pos + 1)
+    (hparse : parseCompressedLiteralsHeader data pos ((data[pos]! >>> 2) &&& 3).toNat
+              = .ok (regenSize, compSize, headerBytes, fourStreams))
+    (hdata : data.size ≥ pos + headerBytes + compSize)
+    (hdecode : decodeHuffmanLiterals huffTable data (pos + headerBytes)
+                compSize regenSize fourStreams = .ok result) :
+    parseLiteralsSection data pos (some huffTable) =
+      .ok (result, pos + headerBytes + compSize, some huffTable) := by
+  simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure]
+  split
+  · -- data.size < pos + 1 → absurd
+    exfalso; omega
+  · -- past size guard
+    split
+    · -- litType > 3 → absurd since litType = 3
+      exfalso; omega
+    · -- litType ≤ 3
+      split
+      · -- litType == 2 || litType == 3 → compressed/treeless path
+        simp only [hparse]
+        split
+        · -- litType == 3 → treeless path
+          simp only [show ¬(data.size < pos + headerBytes + compSize) from by omega,
+            ↓reduceIte, hdecode]
+        · -- litType ≠ 3 → absurd since hlit says litType = 3
+          rename_i hne
+          simp only [beq_iff_eq] at hne
+          omega
+      · -- litType ≠ 2 and ≠ 3 → absurd since hlit says litType = 3
+        rename_i _ hne
+        simp only [beq_iff_eq, Bool.or_eq_true, not_or] at hne
+        omega
+
 end Zstd.Spec.Huffman
