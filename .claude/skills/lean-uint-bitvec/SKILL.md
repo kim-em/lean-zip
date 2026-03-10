@@ -30,13 +30,23 @@ on UInt8/UInt16/UInt32/UInt64/BitVec:
    `generalize data[pos].toUInt32 = x` to abstract concrete array access into
    a BitVec variable, then `bv_decide` reasons about the variable.
 
-### `bv_decide` vs `decide_cbv`
+### `bv_decide` vs `bv_omega` vs `decide_cbv`
 
-- `bv_decide` handles BitVec/UInt goals via SAT solving — fast for symbolic reasoning
+- `bv_decide` handles BitVec/UInt goals via SAT solving — fast for symbolic reasoning,
+  **handles bitwise AND/OR/XOR/shift**
+- `bv_omega` extends `omega` with some BitVec support but **cannot reason about
+  bitwise AND/OR/XOR** — it only handles linear arithmetic. Use `bv_decide` instead
+  when the goal involves `&&&`, `|||`, `^^^`, or similar bitwise operations.
 - `decide_cbv` uses kernel evaluation — works for concrete decidable propositions but
   **fails on large arrays** (e.g., 288-element Huffman tables)
 - For large concrete instances, use `decide` with `set_option maxHeartbeats 1600000`
   instead of `decide_cbv`
+
+**Common pattern — UInt32 match catch-all elimination:**
+When `split` on a UInt32 match creates a catch-all case with hypotheses like
+`¬(expr &&& 3 = 0)`, `¬(expr &&& 3 = 1)`, `¬(expr &&& 3 = 2)`, `¬(expr &&& 3 = 3)`,
+use `exfalso; bv_decide` to close the goal. The SAT solver recognizes that
+`x &&& 3` can only produce values 0-3.
 
 ## UInt8→UInt32 Conversion for `bv_decide`
 
