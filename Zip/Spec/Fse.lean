@@ -458,6 +458,41 @@ These theorems relate the output of `decodeFseDistribution` to the
 validity predicates defined above. -/
 
 open Zip.Native in
+/-- Decomposition of a successful `decodeFseDistribution` call. Extracts
+    the readBits(4) result, the accuracy log relation, the maxAccLog bound,
+    and the decodeFseLoop result with remaining = 0. -/
+private theorem decodeFseDistribution_ok_decompose
+    {br : BitReader} {maxSymbols maxAccLog : Nat}
+    {probs : Array Int32} {al : Nat} {br' : BitReader}
+    (h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
+    ∃ (rdval : UInt32 × BitReader) (sym' : Nat),
+      br.readBits 4 = .ok rdval ∧
+      al = rdval.1.toNat + 5 ∧
+      al ≤ maxAccLog ∧
+      decodeFseLoop rdval.2 (1 <<< al) #[] 0 maxSymbols 10000 =
+        .ok (0, probs, sym', br') := by
+  unfold decodeFseDistribution at h
+  cases hrd : br.readBits 4 with
+  | error e => simp only [hrd, reduceCtorEq] at h
+  | ok val =>
+    simp only [hrd] at h
+    by_cases hgt : val.fst.toNat + 5 > maxAccLog
+    · rw [if_pos hgt] at h; exact nomatch h
+    · rw [if_neg hgt] at h
+      cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
+      | error e => simp only [hdl, reduceCtorEq] at h
+      | ok dlval =>
+        simp only [hdl] at h
+        by_cases hrem : dlval.1 != 0
+        · rw [if_pos hrem] at h; exact nomatch h
+        · rw [if_neg hrem] at h
+          simp only [bne_iff_ne, ne_eq, Decidable.not_not] at hrem
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          refine ⟨val, dlval.2.2.1, rfl, h.2.1.symm, by omega, ?_⟩
+          rw [h.2.1.symm, hdl]; congr 1
+          exact Prod.ext hrem (Prod.ext h.1 (Prod.ext rfl h.2.2))
+
+open Zip.Native in
 /-- When `decodeFseDistribution` succeeds, the returned accuracy log is
     at least 5. This follows from the computation `accuracyLog = readBits(4) + 5`
     where `readBits(4)` returns a non-negative value. -/
@@ -466,22 +501,7 @@ theorem decodeFseDistribution_accuracyLog_ge
     {probs : Array Int32} {al : Nat} {br' : BitReader}
     (_h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
     5 ≤ al := by
-  unfold decodeFseDistribution at _h
-  cases hrd : br.readBits 4 with
-  | error e => simp only [hrd, reduceCtorEq] at _h
-  | ok val =>
-    simp only [hrd] at _h
-    by_cases hgt : val.fst.toNat + 5 > maxAccLog
-    · rw [if_pos hgt] at _h; exact nomatch _h
-    · rw [if_neg hgt] at _h
-      cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp only [hdl, reduceCtorEq] at _h
-      | ok dlval =>
-        simp only [hdl] at _h
-        split at _h
-        · exact nomatch _h
-        · simp only [Except.ok.injEq, Prod.mk.injEq] at _h
-          obtain ⟨_, rfl, _⟩ := _h; omega
+  obtain ⟨_, _, _, hal, _, _⟩ := decodeFseDistribution_ok_decompose _h; omega
 
 open Zip.Native in
 /-- When `decodeFseDistribution` succeeds, the returned accuracy log does
@@ -492,22 +512,7 @@ theorem decodeFseDistribution_accuracyLog_le
     {probs : Array Int32} {al : Nat} {br' : BitReader}
     (_h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
     al ≤ maxAccLog := by
-  unfold decodeFseDistribution at _h
-  cases hrd : br.readBits 4 with
-  | error e => simp only [hrd, reduceCtorEq] at _h
-  | ok val =>
-    simp only [hrd] at _h
-    by_cases hgt : val.fst.toNat + 5 > maxAccLog
-    · rw [if_pos hgt] at _h; exact nomatch _h
-    · rw [if_neg hgt] at _h
-      cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp only [hdl, reduceCtorEq] at _h
-      | ok dlval =>
-        simp only [hdl] at _h
-        split at _h
-        · exact nomatch _h
-        · simp only [Except.ok.injEq, Prod.mk.injEq] at _h
-          obtain ⟨_, rfl, _⟩ := _h; omega
+  obtain ⟨_, _, _, _, hle, _⟩ := decodeFseDistribution_ok_decompose _h; exact hle
 
 open Zip.Native in
 /-- When `decodeFseDistribution` succeeds, the cell count of the returned
@@ -519,27 +524,9 @@ theorem decodeFseDistribution_sum_correct
     {probs : Array Int32} {al : Nat} {br' : BitReader}
     (_h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br')) :
     cellCount probs = 1 <<< al := by
-  unfold decodeFseDistribution at _h
-  cases hrd : br.readBits 4 with
-  | error e => simp only [hrd, reduceCtorEq] at _h
-  | ok val =>
-    simp only [hrd] at _h
-    by_cases hgt : val.fst.toNat + 5 > maxAccLog
-    · rw [if_pos hgt] at _h; exact nomatch _h
-    · rw [if_neg hgt] at _h
-      cases hdl : decodeFseLoop val.snd (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp only [hdl, reduceCtorEq] at _h
-      | ok dlval =>
-        simp only [hdl] at _h
-        by_cases hrem : dlval.1 != 0
-        · rw [if_pos hrem] at _h; exact nomatch _h
-        · rw [if_neg hrem] at _h
-          simp only [Except.ok.injEq, Prod.mk.injEq] at _h
-          obtain ⟨rfl, rfl, _⟩ := _h
-          have hinv := decodeFseLoop_invariant hdl
-          simp only [cellCount_empty, Nat.add_zero, bne_iff_ne, ne_eq,
-            Decidable.not_not] at hinv hrem
-          omega
+  obtain ⟨_, _, _, _, _, hdl⟩ := decodeFseDistribution_ok_decompose _h
+  have hinv := decodeFseLoop_invariant hdl
+  simp only [cellCount_empty, Nat.add_zero] at hinv; omega
 
 open Zip.Native in
 /-- When `decodeFseDistribution` succeeds, the returned probability array is
@@ -639,9 +626,6 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
   simp only [pure, Except.pure, Except.ok.injEq] at h; subst h
   -- Thread cells size invariant: replicate → loop1 → loop2 → loop4
   -- (loop3 only modifies symbolCounts, not cells)
-  -- Shorthand for Except.ok.inj ∘ ForInStep.yield.inj extraction
-  -- After simp [bind, ...], yield case gives Except.ok (yield X) = Except.ok (yield b')
-  -- We extract X = b' via ForInStep.yield.inj (Except.ok.inj h)
   -- Loop 1 (place -1 probability symbols): cells.set! preserves size
   have hsize1 : v1.fst.size = 1 <<< al := by
     apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop1
@@ -1356,28 +1340,13 @@ theorem decodeFseDistribution_bitPos_ge
     (h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br'))
     (hbo : br.bitOff < 8) :
     br'.bitPos ≥ br.bitPos + 4 ∧ br'.bitOff < 8 := by
-  unfold decodeFseDistribution at h
-  cases hrd : br.readBits 4 with
-  | error e => simp only [hrd, reduceCtorEq] at h
-  | ok val =>
-    simp only [hrd] at h
-    have hbp := readBits_bitPos_eq br val.2 4 val.1 hrd hbo
-    have hbo₁ := readBits_bitOff_lt' br val.2 4 val.1 hrd hbo
-    by_cases hgt : val.fst.toNat + 5 > maxAccLog
-    · rw [if_pos hgt] at h; exact nomatch h
-    · rw [if_neg hgt] at h
-      cases hdl : decodeFseLoop val.2 (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp only [hdl, reduceCtorEq] at h
-      | ok dlval =>
-        simp only [hdl] at h
-        split at h
-        · exact nomatch h
-        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-          obtain ⟨_, _, rfl⟩ := h
-          have ⟨hge_loop, hbo_loop⟩ := decodeFseLoop_bitPos_ge hdl hbo₁
-          exact ⟨by rw [hbp] at hge_loop; omega, hbo_loop⟩
+  obtain ⟨rdval, _, hrd, _, _, hdl⟩ := decodeFseDistribution_ok_decompose h
+  have hbp := readBits_bitPos_eq br rdval.2 4 rdval.1 hrd hbo
+  have hbo₁ := readBits_bitOff_lt' br rdval.2 4 rdval.1 hrd hbo
+  have ⟨hge_loop, hbo_loop⟩ := decodeFseLoop_bitPos_ge hdl hbo₁
+  exact ⟨by rw [hbp] at hge_loop; omega, hbo_loop⟩
 
-/-! ### BitReader pos_le_size — FSE distribution chain
+/-! ## BitReader pos_le_size — FSE distribution chain
 
 These theorems establish that `readProbValue`, `decodeZeroRepeats`,
 `decodeFseLoop`, and `decodeFseDistribution` preserve the invariant
@@ -1480,24 +1449,8 @@ theorem decodeFseDistribution_pos_le_size (br br' : BitReader)
     (h : decodeFseDistribution br maxSymbols maxAccLog = .ok (probs, al, br'))
     (hbr : br.pos ≤ br.data.size) :
     br'.pos ≤ br'.data.size := by
-  unfold decodeFseDistribution at h
-  cases hrd : br.readBits 4 with
-  | error e => simp only [hrd, reduceCtorEq] at h
-  | ok val =>
-    simp only [hrd] at h
-    have hple₁ := readBits_pos_le_size br val.2 4 val.1 hrd hbr
-    by_cases hgt : val.fst.toNat + 5 > maxAccLog
-    · rw [if_pos hgt] at h; exact nomatch h
-    · rw [if_neg hgt] at h
-      cases hdl : decodeFseLoop val.2 (1 <<< (val.fst.toNat + 5)) #[] 0 maxSymbols 10000 with
-      | error e => simp only [hdl, reduceCtorEq] at h
-      | ok dlval =>
-        simp only [hdl] at h
-        split at h
-        · exact nomatch h
-        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-          obtain ⟨_, _, rfl⟩ := h
-          exact decodeFseLoop_pos_le_size hdl hple₁
+  obtain ⟨rdval, _, hrd, _, _, hdl⟩ := decodeFseDistribution_ok_decompose h
+  exact decodeFseLoop_pos_le_size hdl (readBits_pos_le_size br rdval.2 4 rdval.1 hrd hbr)
 
 /-! ## Helper lemmas for newState bound -/
 
