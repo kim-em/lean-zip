@@ -1183,6 +1183,150 @@ theorem decompressZstd_compressed_seq_then_rle_content (data : ByteArray)
   subst hcontent
   exact decompressZstd_single_frame data (blockOutput1 ++ block2) pos' hframe hend
 
+/-- When the input contains exactly one standard Zstd frame at position 0 with two
+    blocks (first non-last raw, second last compressed with numSeq>0), `decompressZstd`
+    returns `block1 ++ blockOutput2`.  Composes
+    `decompressFrame_raw_then_compressed_seq_content` with
+    `decompressZstd_single_frame`. -/
+theorem decompressZstd_raw_then_compressed_seq_content (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    -- Block 1 (non-last raw)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterBlock1 : Nat)
+    -- Block 2 (last compressed, numSeq > 0)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (literals2 : ByteArray) (afterLiterals2 : Nat)
+    (huffTree2 : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq2 : Nat) (modes2 : Zip.Native.SequenceCompressionModes) (afterSeqHeader2 : Nat)
+    (llTable2 ofTable2 mlTable2 : Zip.Native.FseTable) (afterTables2 : Nat)
+    (bbr2 : Zip.Native.BackwardBitReader)
+    (sequences2 : Array Zip.Native.ZstdSequence)
+    (blockOutput2 : ByteArray) (newHist2 : Array Nat)
+    -- Frame hypotheses
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    -- Block 1 hypotheses (raw, non-last)
+    (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (header.windowSize > 0 && hdr1.blockSize.toUInt64 > header.windowSize))
+    (htype1 : hdr1.blockType = .raw)
+    (hraw1 : Zip.Native.decompressRawBlock data afterHdr1 hdr1.blockSize
+               = .ok (block1, afterBlock1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterBlock1 ≤ afterHeader)
+    -- Block 2 hypotheses (compressed, last, numSeq > 0)
+    (hoff2 : ¬ data.size ≤ afterBlock1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterBlock1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (header.windowSize > 0 && hdr2.blockSize.toUInt64 > header.windowSize))
+    (htype2 : hdr2.blockType = .compressed)
+    (hblockEnd2 : ¬ data.size < afterHdr2 + hdr2.blockSize.toNat)
+    (hlit2 : Zip.Native.parseLiteralsSection data afterHdr2 none
+               = .ok (literals2, afterLiterals2, huffTree2))
+    (hseq2 : Zip.Native.parseSequencesHeader data afterLiterals2
+               = .ok (numSeq2, modes2, afterSeqHeader2))
+    (hNumSeq2 : ¬ numSeq2 == 0)
+    (hfse2 : Zip.Native.resolveSequenceFseTables modes2 data afterSeqHeader2 {}
+               = .ok (llTable2, ofTable2, mlTable2, afterTables2))
+    (hbbr2 : Zip.Native.BackwardBitReader.init data afterTables2
+               (afterHdr2 + hdr2.blockSize.toNat) = .ok bbr2)
+    (hdec2 : Zip.Native.decodeSequences llTable2 ofTable2 mlTable2 bbr2 numSeq2
+               = .ok sequences2)
+    (hexec2 : Zip.Native.executeSequences sequences2 literals2
+                (if header.windowSize > 0 && block1.size > header.windowSize.toNat
+                 then block1.extract (block1.size - header.windowSize.toNat) block1.size
+                 else block1)
+                #[1, 4, 8] header.windowSize.toNat
+                = .ok (blockOutput2, newHist2))
+    (hlast2 : hdr2.lastBlock = true)
+    -- End of data
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok (block1 ++ blockOutput2) := by
+  have hcontent := Zstd.Spec.decompressFrame_raw_then_compressed_seq_content data 0 output pos'
+    header afterHeader hdr1 afterHdr1 block1 afterBlock1
+    hdr2 afterHdr2 literals2 afterLiterals2 huffTree2
+    numSeq2 modes2 afterSeqHeader2 llTable2 ofTable2 mlTable2 afterTables2 bbr2 sequences2
+    blockOutput2 newHist2
+    hframe hh hdict hparse1 hbs1 hws1 htype1 hraw1 hnotlast1 hadv1
+    hoff2 hparse2 hbs2 hws2 htype2 hblockEnd2 hlit2 hseq2 hNumSeq2
+    hfse2 hbbr2 hdec2 hexec2 hlast2
+  subst hcontent
+  exact decompressZstd_single_frame data (block1 ++ blockOutput2) pos' hframe hend
+
+/-- When the input contains exactly one standard Zstd frame at position 0 with two
+    blocks (first non-last RLE, second last compressed with numSeq>0), `decompressZstd`
+    returns `block1 ++ blockOutput2`.  Composes
+    `decompressFrame_rle_then_compressed_seq_content` with
+    `decompressZstd_single_frame`. -/
+theorem decompressZstd_rle_then_compressed_seq_content (data : ByteArray)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    -- Block 1 (non-last RLE)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterByte1 : Nat)
+    -- Block 2 (last compressed, numSeq > 0)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (literals2 : ByteArray) (afterLiterals2 : Nat)
+    (huffTree2 : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq2 : Nat) (modes2 : Zip.Native.SequenceCompressionModes) (afterSeqHeader2 : Nat)
+    (llTable2 ofTable2 mlTable2 : Zip.Native.FseTable) (afterTables2 : Nat)
+    (bbr2 : Zip.Native.BackwardBitReader)
+    (sequences2 : Array Zip.Native.ZstdSequence)
+    (blockOutput2 : ByteArray) (newHist2 : Array Nat)
+    -- Frame hypotheses
+    (hframe : Zip.Native.decompressFrame data 0 = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+    -- Block 1 hypotheses (RLE, non-last)
+    (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (header.windowSize > 0 && hdr1.blockSize.toUInt64 > header.windowSize))
+    (htype1 : hdr1.blockType = .rle)
+    (hrle1 : Zip.Native.decompressRLEBlock data afterHdr1 hdr1.blockSize
+               = .ok (block1, afterByte1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterByte1 ≤ afterHeader)
+    -- Block 2 hypotheses (compressed, last, numSeq > 0)
+    (hoff2 : ¬ data.size ≤ afterByte1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterByte1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (header.windowSize > 0 && hdr2.blockSize.toUInt64 > header.windowSize))
+    (htype2 : hdr2.blockType = .compressed)
+    (hblockEnd2 : ¬ data.size < afterHdr2 + hdr2.blockSize.toNat)
+    (hlit2 : Zip.Native.parseLiteralsSection data afterHdr2 none
+               = .ok (literals2, afterLiterals2, huffTree2))
+    (hseq2 : Zip.Native.parseSequencesHeader data afterLiterals2
+               = .ok (numSeq2, modes2, afterSeqHeader2))
+    (hNumSeq2 : ¬ numSeq2 == 0)
+    (hfse2 : Zip.Native.resolveSequenceFseTables modes2 data afterSeqHeader2 {}
+               = .ok (llTable2, ofTable2, mlTable2, afterTables2))
+    (hbbr2 : Zip.Native.BackwardBitReader.init data afterTables2
+               (afterHdr2 + hdr2.blockSize.toNat) = .ok bbr2)
+    (hdec2 : Zip.Native.decodeSequences llTable2 ofTable2 mlTable2 bbr2 numSeq2
+               = .ok sequences2)
+    (hexec2 : Zip.Native.executeSequences sequences2 literals2
+                (if header.windowSize > 0 && block1.size > header.windowSize.toNat
+                 then block1.extract (block1.size - header.windowSize.toNat) block1.size
+                 else block1)
+                #[1, 4, 8] header.windowSize.toNat
+                = .ok (blockOutput2, newHist2))
+    (hlast2 : hdr2.lastBlock = true)
+    -- End of data
+    (hend : pos' ≥ data.size) :
+    Zip.Native.decompressZstd data = .ok (block1 ++ blockOutput2) := by
+  have hcontent := Zstd.Spec.decompressFrame_rle_then_compressed_seq_content data 0 output pos'
+    header afterHeader hdr1 afterHdr1 block1 afterByte1
+    hdr2 afterHdr2 literals2 afterLiterals2 huffTree2
+    numSeq2 modes2 afterSeqHeader2 llTable2 ofTable2 mlTable2 afterTables2 bbr2 sequences2
+    blockOutput2 newHist2
+    hframe hh hdict hparse1 hbs1 hws1 htype1 hrle1 hnotlast1 hadv1
+    hoff2 hparse2 hbs2 hws2 htype2 hblockEnd2 hlit2 hseq2 hNumSeq2
+    hfse2 hbbr2 hdec2 hexec2 hlast2
+  subst hcontent
+  exact decompressZstd_single_frame data (block1 ++ blockOutput2) pos' hframe hend
+
 /-! ## decompressZstd frame metadata characterizing properties -/
 
 /-- When `decompressZstd` succeeds on a single-frame input whose frame header
