@@ -1298,8 +1298,62 @@ Note: `split at h` on `if x ≤ y then ...` (Prop condition) produces
 `h✝ : x ≤ y` directly — no conversion needed. The issue is specific to
 Bool-valued `==`/`!=` conditions.
 
+## Join Points (`__do_jp`) from Early Return
+
+When a `do` block uses `if cond then return x; rest`, Lean desugars this
+into a join point:
+
+```lean
+-- Source:
+do
+  if cond then return x
+  rest
+
+-- Elaborated:
+let __do_jp := fun _ => rest
+if cond then return x else __do_jp ()
+```
+
+**Problem**: After `unfold f at h`, the hypothesis and goal may appear
+syntactically identical but use different elaborated forms — the hypothesis
+uses `__do_jp` while the goal has the inline form.
+
+**Fix**: Rewrite the source to avoid join points:
+
+```lean
+-- Instead of:
+do { if cond then return x; rest }
+
+-- Use:
+if cond then some x else do { rest }
+```
+
+This produces cleaner elaborated terms without join points and makes
+`unfold` produce matching forms.
+
+## `List.replicate` Expansion After `unfold`
+
+After `unfold f at h` where `f` contains `List.replicate n v`, the
+replicate can expand to a literal list in the hypothesis (e.g.,
+`List.replicate 19 0` becomes `[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]`).
+
+This makes hypotheses unwieldy and `rw` slow on the large literal.
+
+**Fix**: Create a definitional alias for the literal form and use `show`
+or `change` to swap between forms:
+
+```lean
+private def defaultCodeLengths : List UInt8 :=
+  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+theorem replicate_eq : List.replicate 19 (0 : UInt8) = defaultCodeLengths := rfl
+```
+
 ## Cross-References
 
+- **Parsing completeness proofs**: `lean-parsing-completeness` skill.
+  Covers the specific workflow for proving that parsing functions succeed
+  on well-formed input, building on the monad proof patterns here.
 - **Dependent `if` preserving hypotheses through `do` blocks**:
   `lean-wf-recursion` skill, "Dependent `if` Hypotheses and `do` Early-Throw".
   Critical when monadic functions need termination proofs later in the block.
