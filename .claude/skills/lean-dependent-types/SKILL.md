@@ -77,6 +77,45 @@ theorem call site by reducing the `if let` to concrete `none`/`some` values.
 See `decompressFrame_compressed_seq_then_compressed_lit_content` in `Zip/Spec/Zstd.lean`
 for the working pattern.
 
+## `congrArg` for Large List/Array Rewrites
+
+When rewriting a term containing large constant lists (e.g., 288-element
+`fixedLitLengths`), `rw` can hit `maxRecDepth` because the motive involves
+traversing the entire structure:
+
+```lean
+-- FAILS: max recursion on 288-element list
+rw [← fixedLitLengths_eq] at h
+```
+
+**Fix**: Use `congrArg` to lift the equality through the outer function:
+
+```lean
+-- WORKS: avoids deep traversal
+have := congrArg (Huffman.Spec.codeFor · 15 s) fixedLitLengths_eq
+```
+
+This pattern applies whenever `rw` hits recursion limits on terms containing
+large constants. The key is to apply the equality through a function wrapper
+rather than directly rewriting inside the term.
+
+**Also**: For the theorem itself, you may need `maxRecDepth 4096` and
+`maxHeartbeats 4000000` when working with large constant tables (288
+literals, 32 distances, etc.).
+
+## `letFun` for `have` Bindings in Unfolded Definitions
+
+When `unfold f at h` leaves `have x := e; body` bindings, these appear
+as `letFun` in the elaborated term. Simplify with:
+
+```lean
+simp only [letFun] at h
+```
+
+**Note**: The `unusedHavesSuffice` linter may report `letFun` as unused
+in `simp only` — this is a false positive. The `letFun` lemma is needed
+to reduce the `have` binding.
+
 ## `exact` vs `have :=` for Wildcard Resolution
 
 `exact f _ _ _` does goal-directed elaboration — wildcards are resolved from the
