@@ -981,6 +981,48 @@ theorem decodeSequencesWF_size
         · have := decodeSequencesWF_loop_size h
           simp only [Array.size_empty] at this; omega
 
+/-! ## Parsing completeness -/
+
+/-- When the data has at least 4 bytes from `pos`, `parseSequencesHeader` always
+    succeeds, regardless of byte values. This is the universal completeness
+    theorem: 4 bytes is the maximum header size (3-byte count + modes byte),
+    so it covers all encoding cases (RFC 8878 §3.1.1.3.2.1). -/
+theorem parseSequencesHeader_succeeds (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 4) :
+    ∃ numSeq modes pos', parseSequencesHeader data pos = .ok (numSeq, modes, pos') := by
+  unfold parseSequencesHeader
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+    show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+  by_cases h0 : (data[pos]!.toNat == 0) = true
+  · simp only [h0, ↓reduceIte]
+    exact ⟨_, _, _, rfl⟩
+  · simp only [h0]
+    by_cases h128 : data[pos]!.toNat < 128
+    · simp only [h128, ↓reduceIte,
+        show ¬(data.size < pos + 2) from by omega]
+      exact ⟨_, _, _, rfl⟩
+    · simp only [h128, ↓reduceIte]
+      by_cases h255 : data[pos]!.toNat < 255
+      · simp only [h255, ↓reduceIte,
+          show ¬(data.size < pos + 3) from by omega]
+        exact ⟨_, _, _, rfl⟩
+      · simp only [h255, ↓reduceIte,
+          show ¬(data.size < pos + 4) from by omega]
+        exact ⟨_, _, _, rfl⟩
+
+/-- When the data has at least 1 byte from `pos` and that byte is 0,
+    `parseSequencesHeader` succeeds with 0 sequences and predefined modes.
+    This is the zero-sequences completeness theorem — only 1 byte is needed
+    (no compression modes byte follows when numSeq = 0). -/
+theorem parseSequencesHeader_succeeds_zero (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 1) (hbyte : data[pos]! = 0) :
+    parseSequencesHeader data pos =
+      .ok (0, { litLenMode := .predefined, offsetMode := .predefined,
+                matchLenMode := .predefined }, pos + 1) := by
+  simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
+    show data[pos]!.toNat = 0 from by simp [hbyte], beq_self_eq_true]
+
 end Zip.Native
 
 namespace Zstd.Spec.Sequence
