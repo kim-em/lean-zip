@@ -190,6 +190,31 @@ all_goals first
 This closes all error branches automatically, leaving only the success
 branches for manual work.
 
+**CRITICAL: `repeat` only processes the focused (first) subgoal.** When
+`split at h` creates two goals A and B, `repeat` continues on A, leaving
+B unsplit. Use one of these instead:
+
+- `iterate N (all_goals (try (first | contradiction | (split at h))))` — recommended
+- `split at h <;> split at h <;> (try split at h) <;> ...` — `<;>` propagates to all branches
+- NEVER: `repeat split at h` — only splits the leftmost branch path
+
+### Closing impossible `.ok = .error` equations
+
+When `hres : Except.ok v = Except.error e` is in context:
+- **Use `simp at hres`** — closes the goal by deriving `False` from the impossible equation
+- **Do NOT use `exact nomatch hres`** inside combinators — produces hard "Missing cases" errors
+- `contradiction` also works for these cases
+
+### `simp_all` succeeds without closing goals
+
+`simp_all` returns "success" even when it only simplifies hypotheses
+without closing the goal. Inside `first | ... | simp_all`, this means
+`first` considers the goal handled even though it remains open.
+
+**Fix**: Use `(simp_all; try omega)` or `(simp_all; done)` to ensure
+the goal is actually closed. The `try omega` handles remaining
+arithmetic after `simp_all` normalizes hypotheses.
+
 ## Nested `cases` Parsing
 
 Nested `cases ... with | ... | ...` blocks cause Lean to misparse the inner
