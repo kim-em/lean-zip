@@ -1305,6 +1305,77 @@ theorem parseFrameHeader_le_size (data : ByteArray) (pos : Nat)
             | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
                obtain ⟨-, rfl⟩ := h; omega)
 
+/-! ## Parsing completeness -/
+
+/-- Minimum data size required for `parseFrameHeader` to succeed, given
+    the frame header descriptor byte. The descriptor byte (at `pos + 4`)
+    determines the sizes of optional header fields:
+    - Window descriptor: 0 or 1 byte (absent if `singleSegment` flag set)
+    - Dictionary ID: 0, 1, 2, or 4 bytes (from `didFlag` bits 1-0)
+    - Frame content size: 0, 1, 2, 4, or 8 bytes (from `fcsFlag` bits 7-6) -/
+def frameHeaderMinSize (desc : UInt8) : Nat :=
+  let fcsFlag := (desc >>> 6).toNat
+  let singleSegment := (desc >>> 5) &&& 1 == 1
+  let didFlag := (desc &&& 3).toNat
+  let windowDescSize := if singleSegment then 0 else 1
+  let didSize := match didFlag with | 1 => 1 | 2 => 2 | 3 => 4 | _ => 0
+  let fcsSize := match fcsFlag with
+    | 0 => if singleSegment then 1 else 0
+    | 1 => 2 | 2 => 4 | _ => 8
+  4 + 1 + windowDescSize + didSize + fcsSize
+
+set_option maxRecDepth 4096 in
+set_option maxHeartbeats 800000 in
+set_option linter.unusedSimpArgs false in
+/-- When the data has the correct Zstd magic number and enough bytes for the
+    full header (as determined by the descriptor byte at `pos + 4`),
+    `parseFrameHeader` succeeds. -/
+theorem parseFrameHeader_succeeds (data : ByteArray) (pos : Nat)
+    (hmagic : Binary.readUInt32LE data pos = Zip.Native.zstdMagic)
+    (hsize : data.size ≥ pos + frameHeaderMinSize data[pos + 4]!) :
+    ∃ hdr afterHdr, Zip.Native.parseFrameHeader data pos = .ok (hdr, afterHdr) := by
+  have hmin : frameHeaderMinSize data[pos + 4]! ≥ 6 := by
+    have h : ∀ i : Fin 256, frameHeaderMinSize ⟨⟨i⟩⟩ ≥ 6 := by decide
+    exact h data[pos + 4]!.toBitVec.toFin
+  -- Backward approach: case-split on the result
+  cases hres : Zip.Native.parseFrameHeader data pos with
+  | ok val => obtain ⟨hdr, pos'⟩ := val; exact ⟨hdr, pos', rfl⟩
+  | error e =>
+    exfalso
+    -- Single-pass simp to reduce all monadic constructs
+    simp only [Zip.Native.parseFrameHeader, Bind.bind, Except.bind,
+      Pure.pure, Except.pure] at hres
+    unfold frameHeaderMinSize at hsize
+    dsimp only [] at hsize
+    -- Guard 1: magic size
+    rw [if_neg (show ¬(data.size < pos + 4) from by omega)] at hres
+    -- Guard 2: magic value
+    rw [hmagic] at hres
+    simp only [Zip.Native.zstdMagic, bne_self_eq_false, Bool.false_eq_true, ite_false] at hres
+    -- Guard 3: descriptor size
+    rw [if_neg (show ¬(data.size < pos + 4 + 1) from by omega)] at hres
+    -- Remaining guards depend on descriptor byte fields. Generalize them
+    -- so case analysis gives consistent values in hsize.
+    generalize hss : (data[pos + 4]! >>> 5 &&& 1 == 1) = ss at hres hsize
+    generalize hdf : (data[pos + 4]! &&& 3).toNat = df at hres hsize
+    generalize hff : (data[pos + 4]! >>> 6).toNat = ff at hres hsize
+    -- Case-split on singleSegment; simp resolves both hres and hsize
+    by_cases hss_val : ss = true
+    · -- singleSegment = true: no window descriptor
+      simp only [hss_val, Bool.not_true, Bool.false_eq_true, ite_false, ite_true] at hres hsize
+      -- Walk through didFlag + fcsSize guards via split.
+      -- contradiction closes ok branches (.ok _ = .error _)
+      -- omega closes error branches (guard contradicts hsize)
+      repeat (first | contradiction | (simp only [Bool.false_eq_true, ite_false, ite_true] at hsize; omega) | (split at hres))
+    · -- singleSegment = false: window descriptor present
+      have hss_false : ss = false := by cases ss <;> simp_all
+      simp only [hss_false, Bool.not_false, ite_true, ite_false,
+        Bool.false_eq_true] at hres hsize
+      -- Window descriptor guard
+      rw [if_neg (show ¬(data.size < pos + 4 + 1 + 1) from by omega)] at hres
+      -- Walk through remaining guards
+      repeat (first | contradiction | (simp only [Bool.false_eq_true, ite_false, ite_true] at hsize; omega) | (split at hres))
+
 /-! ## Window size characterizing properties -/
 
 set_option maxRecDepth 1024 in
