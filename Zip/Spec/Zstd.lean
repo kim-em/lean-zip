@@ -302,6 +302,47 @@ theorem decompressRawBlock_content (data : ByteArray) (pos : Nat)
   · obtain ⟨rfl, rfl⟩ := h
     simp only [ByteArray.getElem_extract]
 
+/-! ## Parsing completeness -/
+
+/-- When the data has at least 3 bytes from `pos` and the 2-bit block type field
+    is not the reserved value (3), `parseBlockHeader` succeeds. -/
+theorem parseBlockHeader_succeeds (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 3)
+    (htypeVal : ((data[pos]!.toUInt32 ||| (data[pos + 1]!.toUInt32 <<< 8)
+        ||| (data[pos + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 ≠ 3) :
+    ∃ hdr afterHdr, Zip.Native.parseBlockHeader data pos = .ok (hdr, afterHdr) := by
+  unfold Zip.Native.parseBlockHeader
+  simp only [show ¬(data.size < pos + 3) from by omega, ↓reduceIte,
+    bind, Except.bind, pure, Except.pure]
+  -- The match on typeVal has branches for 0, 1, 2, and the catch-all (reserved).
+  -- htypeVal eliminates the catch-all, so one of the first three branches applies.
+  split
+  · exact ⟨_, _, rfl⟩
+  · exact ⟨_, _, rfl⟩
+  · exact ⟨_, _, rfl⟩
+  · -- Catch-all: typeVal ∉ {0,1,2} from split, and ≠ 3 from htypeVal.
+    -- But typeVal = expr &&& 3 can only be 0-3, contradiction.
+    exfalso; rename_i _ h0 h1 h2; bv_decide
+
+/-- When the data has at least `blockSize.toNat` bytes from `pos`,
+    `decompressRawBlock` succeeds. -/
+theorem decompressRawBlock_succeeds (data : ByteArray) (pos : Nat) (blockSize : UInt32)
+    (hsize : data.size ≥ pos + blockSize.toNat) :
+    ∃ block afterBlock, Zip.Native.decompressRawBlock data pos blockSize
+        = .ok (block, afterBlock) := by
+  unfold Zip.Native.decompressRawBlock
+  simp only [show ¬(data.size < pos + blockSize.toNat) from by omega, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
+/-- When the data has at least 1 byte from `pos`, `decompressRLEBlock` succeeds. -/
+theorem decompressRLEBlock_succeeds (data : ByteArray) (pos : Nat) (blockSize : UInt32)
+    (hsize : data.size ≥ pos + 1) :
+    ∃ block afterBlock, Zip.Native.decompressRLEBlock data pos blockSize
+        = .ok (block, afterBlock) := by
+  unfold Zip.Native.decompressRLEBlock
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
 /-! ## Frame-level output guarantees -/
 
 /-- When `decompressFrame` succeeds and the frame header specifies a content size of `n`,
