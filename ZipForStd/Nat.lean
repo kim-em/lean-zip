@@ -4,6 +4,13 @@
 Lemmas about bitwise operations on natural numbers that are useful for
 reasoning about bit-level algorithms (CRC, DEFLATE, etc.) but missing
 from Lean 4's standard library. Candidates for upstreaming.
+
+## Upstream status (Lean 4.29)
+
+Upstream provides `Nat.two_pow_add_eq_or_of_lt` (the reverse direction:
+`2^n * a + b = 2^n * a ||| b`) and `Nat.or_comm`. This file's
+`or_two_pow_eq_add` specializes to `a = 1` and swaps the operand order,
+which is the form needed at call sites. No direct upstream equivalent.
 -/
 
 namespace Nat

@@ -3,6 +3,14 @@
 
 Generic lemmas about `List.foldl` that are useful beyond the Huffman module.
 Candidates for upstreaming to Lean's standard library.
+
+## Upstream status (Lean 4.29)
+
+Upstream provides the building blocks used in proofs here (`List.length_set`,
+`List.getElem_set_ne`, `List.getElem_set_self`, `List.drop_left'`,
+`List.drop_drop`, `List.take_set`) but none of the composite lemmas in
+this file (foldl-add commutativity, foldl-set reasoning, flatMap-drop
+uniformity, prefix comparability) exist upstream.
 -/
 
 namespace List
@@ -38,7 +46,7 @@ theorem getLast?_getD_eq_getLast! [Inhabited α] (l : List α) (h : l.length > 0
   | cons a as ih =>
     cases as with
     | nil => rfl
-    | cons b bs => simp [List.getLast?, List.getLast!]
+    | cons b bs => simp only [List.getLast?, List.getLast!, Option.getD_some]
 
 /-! ## foldl-set lemmas -/
 
@@ -47,7 +55,7 @@ theorem foldl_set_length (positions : List Nat) (f : Nat → α) (init : List α
     (positions.foldl (fun a pos => a.set pos (f pos)) init).length = init.length := by
   induction positions generalizing init with
   | nil => simp only [foldl_nil]
-  | cons p ps ih => simp [ih, List.length_set]
+  | cons p ps ih => simp only [foldl_cons, ih, List.length_set]
 
 /-- At a position not in the fold list, the value is unchanged from init. -/
 theorem foldl_set_getElem_not_mem (positions : List Nat) (f : Nat → α)
@@ -59,7 +67,7 @@ theorem foldl_set_getElem_not_mem (positions : List Nat) (f : Nat → α)
   | cons q qs ih =>
     simp only [List.mem_cons, not_or] at hp
     simp only [List.foldl_cons]
-    have hlt' : p < (init.set q (f q)).length := by simp [List.length_set]; exact hlt
+    have hlt' : p < (init.set q (f q)).length := by simp only [List.length_set]; exact hlt
     rw [ih (init.set q (f q)) hp.2 hlt']
     exact List.getElem_set_ne (Ne.symm hp.1) _
 
@@ -75,9 +83,9 @@ theorem foldl_set_getElem_mem (positions : List Nat) (f : Nat → α)
     simp only [List.mem_cons] at hp
     simp only [List.foldl_cons]
     rw [List.nodup_cons] at hnodup
-    have hlt' : p < (init.set q (f q)).length := by simp [List.length_set]; exact hlt
+    have hlt' : p < (init.set q (f q)).length := by simp only [List.length_set]; exact hlt
     have hbounds' : ∀ r ∈ qs, r < (init.set q (f q)).length := by
-      intro r hr; simp [List.length_set]; exact hbounds r (List.mem_cons_of_mem _ hr)
+      intro r hr; simp only [List.length_set]; exact hbounds r (List.mem_cons_of_mem _ hr)
     cases hp with
     | inl heq =>
       subst heq
@@ -111,9 +119,9 @@ theorem IsPrefix_of_IsPrefix_append {a b : List α} {c : List α}
     | nil => right; exact nil_prefix
     | cons y ys =>
       obtain ⟨t, ht⟩ := ha
-      have hxy : x = y := by simp [cons_append] at ht; exact ht.1
+      have hxy : x = y := by simp only [cons_append, List.cons.injEq] at ht; exact ht.1
       have hrest : xs <+: ys ++ c :=
-        ⟨t, by simp [cons_append] at ht; exact ht.2⟩
+        ⟨t, by simp only [cons_append, List.cons.injEq] at ht; exact ht.2⟩
       cases ih hrest with
       | inl h =>
         left; obtain ⟨t', ht'⟩ := h

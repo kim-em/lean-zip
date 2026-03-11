@@ -6,20 +6,28 @@ import ZipForStd.Array
 Generic lemmas about `ByteArray` indexing that bridge between
 `ByteArray` get-element, `Array` get-element, and `List` get-element.
 Candidates for upstreaming to Lean's standard library.
+
+## Upstream status (Lean 4.29)
+
+Upstream provides `ByteArray.data_push`, `ByteArray.extract_append`,
+`ByteArray.size_push`, and `getElem`-based Array lemmas. This file provides
+`getElem!`-based convenience wrappers and specialized extract lemmas
+(`extract_append_ge`, `extract_append_left`) that are not in upstream.
+No `ByteArray.set!`/`getElem!` lemmas exist upstream.
 -/
 
 namespace ByteArray
 
 /-- `ByteArray` indexing agrees with `Array.toList` indexing. -/
 theorem getElem_toList (data : ByteArray) (i : Nat) (h : i < data.size)
-    (h' : i < data.data.toList.length := by simp [Array.length_toList]; exact h) :
+    (h' : i < data.data.toList.length := by simp only [Array.length_toList]; exact h) :
     (data[i]'h : UInt8) = data.data.toList[i] := by
   show data.data[i] = data.data.toList[i]
   rw [← Array.getElem_toList]
 
 /-- `ByteArray.getElem!` agrees with `Array.toList` indexing when in bounds. -/
 theorem getElem!_toList (data : ByteArray) (i : Nat) (h : i < data.size) :
-    data[i]! = data.data.toList[i]'(by simp [Array.length_toList]; exact h) := by
+    data[i]! = data.data.toList[i]'(by simp only [Array.length_toList]; exact h) := by
   rw [getElem!_pos data i h]
   exact getElem_toList data i h
 
@@ -41,20 +49,21 @@ theorem extract_append_left (a b : ByteArray) :
     (a ++ b).extract 0 a.size = a := by
   apply ByteArray.ext
   simp only [data_extract, data_append, Array.extract_append, size_data, Nat.zero_le,
-        Nat.sub_eq_zero_of_le, Nat.sub_self, Array.extract_zero, Array.append_empty,
+        Nat.sub_eq_zero_of_le, Array.extract_zero, Array.append_empty,
         Array.extract_eq_self_iff, size_eq_zero_iff, Std.le_refl, and_self, or_true]
 
-/-- `ByteArray.push` appends one element to `data.toList`. -/
+/-- `ByteArray.push` appends one element to `data.toList`.
+    Upstream building blocks: `ByteArray.data_push`, `Array.toList_push`. -/
 theorem push_data_toList (buf : ByteArray) (b : UInt8) :
     (buf.push b).data.toList = buf.data.toList ++ [b] := by
-  simp [ByteArray.push, Array.toList_push]
+  simp only [ByteArray.data_push, Array.toList_push]
 
 /-- `ByteArray.push` preserves earlier elements: for `j < buf.size`,
     `(buf.push b)[j]! = buf[j]!`. -/
 theorem push_getElem!_lt (buf : ByteArray) (b : UInt8) (j : Nat)
     (hj : j < buf.size) :
     (buf.push b)[j]! = buf[j]! := by
-  have hj' : j < (buf.push b).size := by simp [ByteArray.size_push]; omega
+  have hj' : j < (buf.push b).size := by simp only [ByteArray.size_push]; omega
   rw [getElem!_pos (buf.push b) j hj', getElem!_pos buf j hj]
   exact Array.getElem_push_lt hj
 
@@ -62,7 +71,7 @@ theorem push_getElem!_lt (buf : ByteArray) (b : UInt8) (j : Nat)
     `(buf.push b)[buf.size]! = b`. -/
 theorem push_getElem!_eq (buf : ByteArray) (b : UInt8) :
     (buf.push b)[buf.size]! = b := by
-  have h : buf.size < (buf.push b).size := by simp [ByteArray.size_push]
+  have h : buf.size < (buf.push b).size := by simp only [ByteArray.size_push]; omega
   rw [getElem!_pos (buf.push b) buf.size h]
   exact Array.getElem_push_eq
 

@@ -5,6 +5,13 @@ import ZipForStd.List
 
 Generic lemmas about `Array.set!` and `getElem!` that are useful beyond the
 Huffman module. Candidates for upstreaming to Lean's standard library.
+
+## Upstream status (Lean 4.29)
+
+Upstream provides `getElem`-based variants (`Array.size_setIfInBounds`,
+`Array.getElem_setIfInBounds_ne`, `Array.getElem_setIfInBounds_self`) but not
+the `getElem!`/`set!` convenience wrappers that this file provides. All lemmas
+here are still needed.
 -/
 
 namespace Array
