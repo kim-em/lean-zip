@@ -1640,4 +1640,156 @@ theorem parseHuffmanTreeDescriptor_succeeds_fse (data : ByteArray) (pos : Nat)
   have h0 : (data[pos]!.toNat == 0) = false := by rw [beq_eq_false_iff_ne]; omega
   simp only [h0, Bool.false_eq_true, ↓reduceIte, hweights, htable]
 
+/-! ## Parsing completeness (raw/RLE) -/
+
+open Zip.Native in
+/-- Compute the total bytes needed for a raw literals section (litType = 0):
+    variable-width header bytes plus `regenSize` payload bytes.
+    The header size and regenerated size are extracted from the data bytes at `pos`. -/
+def rawLiteralsSectionSize (data : ByteArray) (pos : Nat) : Nat :=
+  if ((data[pos]! >>> 2 &&& 3).toNat == 0 || (data[pos]! >>> 2 &&& 3).toNat == 2) then
+    1 + (data[pos]! >>> 3).toNat
+  else if ((data[pos]! >>> 2 &&& 3).toNat == 1) then
+    2 + ((data[pos]! >>> 4).toNat ||| (data[pos + 1]!.toNat <<< 4))
+  else
+    3 + ((data[pos]! >>> 4).toNat ||| (data[pos + 1]!.toNat <<< 4) ||| (data[pos + 2]!.toNat <<< 12))
+
+open Zip.Native in
+/-- Compute the minimum bytes needed for an RLE literals section (litType = 1):
+    variable-width header bytes plus 1 byte for the RLE value.
+    Unlike raw literals, the payload is always exactly 1 byte regardless of `regenSize`. -/
+def rleLiteralsSectionMinSize (data : ByteArray) (pos : Nat) : Nat :=
+  if ((data[pos]! >>> 2 &&& 3).toNat == 0 || (data[pos]! >>> 2 &&& 3).toNat == 2) then 2
+  else if ((data[pos]! >>> 2 &&& 3).toNat == 1) then 3
+  else 4
+
+open Zip.Native in
+/-- When litType = 0 (raw) and the data has enough bytes for the variable-width
+    header plus `regenSize` payload bytes, `parseLiteralsSection` succeeds. -/
+theorem parseLiteralsSection_succeeds_raw (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 0)
+    (hsize : data.size ≥ pos + rawLiteralsSectionSize data pos) :
+    ∃ literals pos' huffTable,
+      parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable) := by
+  -- Match on the result to avoid unfolding parseLiteralsSection under existentials
+  match hresult : parseLiteralsSection data pos prevHuffTree with
+  | .ok (lit, pos', ht) => exact ⟨lit, pos', ht, rfl⟩
+  | .error _ =>
+    exfalso
+    simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at hresult
+    split at hresult
+    · -- data.size < pos + 1
+      have : rawLiteralsSectionSize data pos ≥ 1 := by
+        unfold rawLiteralsSectionSize
+        split
+        · omega
+        · split <;> omega
+      omega
+    · split at hresult
+      · omega -- litType > 3 contradicts hlit
+      · split at hresult
+        · rename_i _ hcomp -- litType == 2 || 3 contradicts hlit
+          simp only [beq_iff_eq, Bool.or_eq_true] at hcomp; omega
+        · -- raw/RLE path: sizeFormat case split
+          split at hresult
+          · -- sizeFormat == 0 || sizeFormat == 2
+            rename_i hsf
+            simp only [rawLiteralsSectionSize, hsf, ↓reduceIte] at hsize
+            split at hresult
+            · split at hresult
+              · omega
+              · exact nomatch hresult
+            · -- litType ≠ 0 contradicts hlit
+              simp_all [beq_iff_eq]
+          · split at hresult
+            · -- sizeFormat == 1
+              unfold rawLiteralsSectionSize at hsize
+              split at hsize
+              · contradiction
+              · -- sf1: hsize auto-resolved to concrete form
+                split at hresult
+                · omega
+                · split at hresult
+                  · split at hresult
+                    · omega
+                    · exact nomatch hresult
+                  · simp_all [beq_iff_eq]
+            · -- sizeFormat == 3
+              unfold rawLiteralsSectionSize at hsize
+              split at hsize
+              · contradiction
+              · -- sf3: hsize auto-resolved to concrete form
+                split at hresult
+                · omega
+                · split at hresult
+                  · split at hresult
+                    · omega
+                    · exact nomatch hresult
+                  · simp_all [beq_iff_eq]
+
+open Zip.Native in
+/-- When litType = 1 (RLE) and the data has enough bytes for the variable-width
+    header plus 1 byte for the repeated value, `parseLiteralsSection` succeeds. -/
+theorem parseLiteralsSection_succeeds_rle (data : ByteArray) (pos : Nat)
+    (prevHuffTree : Option ZstdHuffmanTable)
+    (hlit : (data[pos]! &&& 3).toNat = 1)
+    (hsize : data.size ≥ pos + rleLiteralsSectionMinSize data pos) :
+    ∃ literals pos' huffTable,
+      parseLiteralsSection data pos prevHuffTree = .ok (literals, pos', huffTable) := by
+  match hresult : parseLiteralsSection data pos prevHuffTree with
+  | .ok (lit, pos', ht) => exact ⟨lit, pos', ht, rfl⟩
+  | .error _ =>
+    exfalso
+    simp only [parseLiteralsSection, bind, Except.bind, pure, Except.pure] at hresult
+    split at hresult
+    · -- data.size < pos + 1
+      have : rleLiteralsSectionMinSize data pos ≥ 2 := by
+        unfold rleLiteralsSectionMinSize
+        split
+        · omega
+        · split <;> omega
+      omega
+    · split at hresult
+      · omega -- litType > 3 contradicts hlit
+      · split at hresult
+        · rename_i _ hcomp -- litType == 2 || 3 contradicts hlit
+          simp only [beq_iff_eq, Bool.or_eq_true] at hcomp; omega
+        · -- raw/RLE path: sizeFormat case split
+          split at hresult
+          · -- sizeFormat == 0 || sizeFormat == 2
+            rename_i hsf
+            simp only [rleLiteralsSectionMinSize, hsf, ↓reduceIte] at hsize
+            split at hresult
+            · -- litType == 0 contradicts hlit
+              simp_all [beq_iff_eq]
+            · split at hresult
+              · omega
+              · exact nomatch hresult
+          · split at hresult
+            · -- sizeFormat == 1
+              unfold rleLiteralsSectionMinSize at hsize
+              split at hsize
+              · contradiction
+              · -- sf1: hsize auto-resolved to concrete form (= 3)
+                split at hresult
+                · omega -- header guard: data.size < pos + 2 contradicts hsize
+                · split at hresult
+                  · simp_all [beq_iff_eq] -- litType == 0 contradicts hlit
+                  · split at hresult
+                    · omega
+                    · exact nomatch hresult
+            · -- sizeFormat == 3
+              unfold rleLiteralsSectionMinSize at hsize
+              split at hsize
+              · contradiction
+              · -- sf3: hsize auto-resolved to concrete form (= 4)
+                split at hresult
+                · omega -- header guard: data.size < pos + 3 contradicts hsize
+                · split at hresult
+                  · simp_all [beq_iff_eq] -- litType == 0 contradicts hlit
+                  · split at hresult
+                    · omega
+                    · exact nomatch hresult
+
 end Zstd.Spec.Huffman
