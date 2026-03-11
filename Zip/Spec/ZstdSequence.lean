@@ -1565,4 +1565,155 @@ theorem executeSequences_history_size
     obtain ⟨_, rfl⟩ := h
     exact executeSequences_loop_history_size _ _ _ _ _ _ _ _ _ hinit heq
 
+/-! ## executeSequences completeness -/
+
+private theorem foldl_litLen_add (init : Nat) (seqs : List ZstdSequence) :
+    List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) init seqs =
+    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) 0 seqs := by
+  induction seqs generalizing init with
+  | nil => simp only [List.foldl_nil, Nat.add_zero]
+  | cons s rest ih =>
+    simp only [List.foldl_cons]
+    rw [ih, ih 0, ih (0 + s.literalLength)]
+    omega
+
+/-- Array element access on a 3-element literal array: establishes bounds
+    on all three elements simultaneously. Used to thread the window-size bound
+    through `resolveOffset`'s constructed history arrays. -/
+private theorem mk3_getElem!_le (a b c bound : Nat)
+    (ha : a ≤ bound) (hb : b ≤ bound) (hc : c ≤ bound) :
+    (#[a, b, c] : Array Nat)[0]! ≤ bound ∧
+    (#[a, b, c] : Array Nat)[1]! ≤ bound ∧
+    (#[a, b, c] : Array Nat)[2]! ≤ bound := by
+  refine ⟨?_, ?_, ?_⟩ <;>
+    simp only [List.size_toArray, List.length_cons, List.length_nil,
+      Nat.zero_add, Nat.reduceAdd, Nat.reduceLT, getElem!_pos,
+      List.getElem_toArray, List.getElem_cons_zero, List.getElem_cons_succ] <;>
+    omega
+
+/-- When history entries are bounded by `bound` and actual offsets are bounded,
+    the resolved offset and updated history entries remain bounded.
+    Used to thread the window-size invariant through the sequence execution loop. -/
+private theorem resolveOffset_bounded (rawOffset litLen : Nat)
+    (history : Array Nat) (bound : Nat)
+    (hbound_pos : bound > 0)
+    (hbound : history[0]! ≤ bound ∧ history[1]! ≤ bound ∧ history[2]! ≤ bound)
+    (hactual : rawOffset > 3 → rawOffset - 3 ≤ bound) :
+    (resolveOffset rawOffset history litLen).1 ≤ bound ∧
+    (resolveOffset rawOffset history litLen).2[0]! ≤ bound ∧
+    (resolveOffset rawOffset history litLen).2[1]! ≤ bound ∧
+    (resolveOffset rawOffset history litLen).2[2]! ≤ bound := by
+  obtain ⟨hb0, hb1, hb2⟩ := hbound
+  unfold resolveOffset
+  split
+  · -- rawOffset > 3: offset = rawOffset - 3
+    dsimp only
+    exact ⟨hactual ‹_›, mk3_getElem!_le _ _ _ _ (hactual ‹_›) hb0 hb1⟩
+  · split
+    · -- litLen > 0
+      split
+      · exact ⟨hb0, hb0, hb1, hb2⟩  -- rawOffset = 1: history unchanged
+      · dsimp only; exact ⟨hb1, mk3_getElem!_le _ _ _ _ hb1 hb0 hb2⟩  -- rawOffset = 2
+      · dsimp only; exact ⟨hb2, mk3_getElem!_le _ _ _ _ hb2 hb0 hb1⟩  -- rawOffset = 3
+      · exact ⟨hbound_pos, hb0, hb1, hb2⟩  -- catch-all: offset = 1
+    · -- litLen = 0 (shifted mode)
+      split
+      · dsimp only; exact ⟨hb1, mk3_getElem!_le _ _ _ _ hb1 hb0 hb2⟩  -- rawOffset = 1
+      · dsimp only; exact ⟨hb2, mk3_getElem!_le _ _ _ _ hb2 hb0 hb1⟩  -- rawOffset = 2
+      · dsimp only; exact ⟨by omega, mk3_getElem!_le _ _ _ _ (by omega) hb1 hb2⟩  -- rawOffset = 3
+      · exact ⟨hbound_pos, hb0, hb1, hb2⟩  -- catch-all
+
+/-- In windowed mode, when all conditions are met, `executeSequences.loop` succeeds.
+    This is the critical completeness theorem for compressed blocks with sequences
+    (RFC 8878 §3.1.1.4).
+
+    Sufficient conditions for success:
+    - Total literal consumption fits within the literals buffer
+    - The offset history is valid (3 positive entries)
+    - All sequences have positive raw offsets
+    - No sequence triggers the shifted-3 edge case (rawOffset=3 with literalLength=0)
+    - Windowed mode is active with the window fitting in the output buffer
+    - All actual offsets and history entries are bounded by the window size -/
+theorem executeSequences_loop_succeeds
+    (seqs : List ZstdSequence) (literals : ByteArray)
+    (output : ByteArray) (history : Array Nat) (litPos : Nat) (windowSize : Nat)
+    (hlit : litPos + seqs.foldl (fun acc s => acc + s.literalLength) 0 ≤ literals.size)
+    (hvalid : ValidOffsetHistory history)
+    (hraw_pos : ∀ s ∈ seqs, s.offset > 0)
+    (hno_shift3 : ∀ s ∈ seqs, s.literalLength > 0 ∨ s.offset ≠ 3)
+    (hwin_pos : windowSize > 0)
+    (hwin_le : windowSize ≤ output.size)
+    (hoff_bound : ∀ s ∈ seqs, s.offset > 3 → s.offset - 3 ≤ windowSize)
+    (hhist_bound : history[0]! ≤ windowSize ∧ history[1]! ≤ windowSize
+      ∧ history[2]! ≤ windowSize) :
+    ∃ output' history' litPos',
+      executeSequences.loop seqs literals output history litPos windowSize
+        = .ok (output', history', litPos') := by
+  induction seqs generalizing output history litPos with
+  | nil => exact ⟨output, history, litPos, rfl⟩
+  | cons seq rest ih =>
+    -- Establish key facts
+    have hmem : seq ∈ seq :: rest := List.Mem.head _
+    have hlit_seq : litPos + seq.literalLength ≤ literals.size := by
+      simp only [List.foldl_cons] at hlit; rw [foldl_litLen_add] at hlit; omega
+    have hbnd := resolveOffset_bounded seq.offset seq.literalLength history windowSize
+      hwin_pos hhist_bound (hoff_bound seq hmem)
+    have hoff_ne : (resolveOffset seq.offset history seq.literalLength).1 ≠ 0 := by
+      have := resolveOffset_positive_all seq.offset history seq.literalLength
+        (hraw_pos seq hmem) hvalid (by
+          intro ⟨hlit0, hraw3⟩
+          exact absurd (Or.resolve_left (hno_shift3 seq hmem) (by omega)) (by omega))
+      omega
+    -- Unfold loop and split through the if-then-else chain
+    rw [Zip.Native.executeSequences.loop.eq_2]
+    simp only [show ¬(litPos + seq.literalLength > literals.size) from by omega, ↓reduceIte]
+    split
+    · exfalso; rename_i h; exact hoff_ne (beq_iff_eq.mp h)
+    · split
+      · exfalso; rename_i h
+        have := Zip.Native.copyBytes_size output literals litPos seq.literalLength; omega
+      · split
+        · exfalso; rename_i h
+          simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+          exact absurd hbnd.1 (by omega)
+        · -- Apply IH with explicit terms to avoid let-binding unification issues
+          obtain ⟨o, h', l, p⟩ := ih
+            (Zip.Native.copyMatch (Zip.Native.copyBytes output literals litPos seq.literalLength)
+              (resolveOffset seq.offset history seq.literalLength).1 seq.matchLength)
+            (resolveOffset seq.offset history seq.literalLength).2
+            (litPos + seq.literalLength)
+            (by simp only [List.foldl_cons] at hlit; rw [foldl_litLen_add] at hlit; omega)
+            (resolveOffset_history_valid_of_fst_ne_zero
+              seq.offset seq.literalLength history hvalid hoff_ne)
+            (fun s hs => hraw_pos s (List.Mem.tail _ hs))
+            (fun s hs => hno_shift3 s (List.Mem.tail _ hs))
+            (by rw [Zip.Native.copyMatch_size, Zip.Native.copyBytes_size]; omega)
+            (fun s hs => hoff_bound s (List.Mem.tail _ hs))
+            ⟨hbnd.2.1, hbnd.2.2.1, hbnd.2.2.2⟩
+          exact ⟨o, h', l, p⟩
+
+/-- Wrapper completeness: when the loop conditions are met, `executeSequences` succeeds.
+    Lifts `executeSequences_loop_succeeds` through the monadic wrapper, which adds
+    remaining literal bytes and extracts the block output — both total operations. -/
+theorem executeSequences_succeeds (sequences : Array ZstdSequence) (literals : ByteArray)
+    (windowPrefix : ByteArray) (offsetHistory : Array Nat) (windowSize : Nat)
+    (hlit : sequences.toList.foldl (fun acc s => acc + s.literalLength) 0 ≤ literals.size)
+    (hvalid : ValidOffsetHistory offsetHistory)
+    (hraw_pos : ∀ s ∈ sequences.toList, s.offset > 0)
+    (hno_shift3 : ∀ s ∈ sequences.toList, s.literalLength > 0 ∨ s.offset ≠ 3)
+    (hwin_pos : windowSize > 0)
+    (hwin_le : windowSize ≤ windowPrefix.size)
+    (hoff_bound : ∀ s ∈ sequences.toList, s.offset > 3 → s.offset - 3 ≤ windowSize)
+    (hhist_bound : offsetHistory[0]! ≤ windowSize ∧ offsetHistory[1]! ≤ windowSize
+      ∧ offsetHistory[2]! ≤ windowSize) :
+    ∃ blockOutput history',
+      executeSequences sequences literals windowPrefix offsetHistory windowSize
+        = .ok (blockOutput, history') := by
+  have ⟨output', history', litPos', hloop⟩ :=
+    executeSequences_loop_succeeds sequences.toList literals windowPrefix offsetHistory 0
+      windowSize (by omega) hvalid hraw_pos hno_shift3 hwin_pos hwin_le hoff_bound hhist_bound
+  unfold executeSequences
+  simp only [bind, Except.bind, hloop, pure, Pure.pure, Except.pure]
+  exact ⟨_, _, rfl⟩
+
 end Zstd.Spec.Sequence
