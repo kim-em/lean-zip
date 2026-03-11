@@ -1378,6 +1378,34 @@ theorem decodeFourHuffmanStreamsWF_size
        simp only [ByteArray.size_empty] at h1 h2 h3 h4
        omega)
 
+/-! ## decodeHuffmanLiterals completeness -/
+
+open Zip.Native in
+/-- When `fourStreams = false`, `BackwardBitReader.init` succeeds, and
+    `decodeHuffmanStream` succeeds, then `decodeHuffmanLiterals` succeeds. -/
+theorem decodeHuffmanLiterals_succeeds_single
+    (huffTable : ZstdHuffmanTable) (data : ByteArray)
+    (streamStart streamDataSize regenSize : Nat)
+    (br : BackwardBitReader)
+    (hinit : BackwardBitReader.init data streamStart (streamStart + streamDataSize) = .ok br)
+    (result : ByteArray)
+    (hdecode : decodeHuffmanStream huffTable br regenSize = .ok result) :
+    decodeHuffmanLiterals huffTable data streamStart streamDataSize regenSize false =
+      .ok result := by
+  simp only [decodeHuffmanLiterals, Bool.false_eq_true, ↓reduceIte, bind, Except.bind, hinit, hdecode]
+
+open Zip.Native in
+/-- When `fourStreams = true` and `decodeFourHuffmanStreams` succeeds,
+    then `decodeHuffmanLiterals` succeeds. -/
+theorem decodeHuffmanLiterals_succeeds_four
+    (huffTable : ZstdHuffmanTable) (data : ByteArray)
+    (streamStart streamDataSize regenSize : Nat)
+    (result : ByteArray)
+    (hfour : decodeFourHuffmanStreams huffTable data streamStart streamDataSize regenSize = .ok result) :
+    decodeHuffmanLiterals huffTable data streamStart streamDataSize regenSize true =
+      .ok result := by
+  simp only [decodeHuffmanLiterals, ite_true, hfour]
+
 /-! ## Parsing completeness -/
 
 open Zip.Native in
