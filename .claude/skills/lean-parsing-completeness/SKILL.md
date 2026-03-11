@@ -251,6 +251,52 @@ theorem parseBlockHeader_blockType_eq ... := by
     · exact nomatch h                     -- reserved type
 ```
 
+### Existential goals: use `match hresult` not `simp only`
+
+When the goal has existentials (`∃ x y z, f = .ok (x, y, z)`), do NOT
+unfold the function in the goal — `simp only [f, bind, ...]` explodes
+because it must distribute under `∃`. Instead, match on the result:
+
+```lean
+match hresult : parseFunction data pos with
+| .ok (a, b, c) => exact ⟨a, b, c, rfl⟩
+| .error _ =>
+  exfalso
+  simp only [parseFunction, bind, Except.bind, ...] at hresult
+  -- Now hresult is a hypothesis, no existentials to blow up
+```
+
+### Helper definitions: avoid `let` bindings
+
+Helper definitions used in `hsize` hypotheses (e.g., `rawLiteralsSectionSize`)
+must NOT use `let` bindings. After `unfold`/`delta`, `let` bindings become
+opaque `have` terms that block `split` from finding `if` expressions.
+
+**Bad** (blocks `split at hsize` after unfolding):
+```lean
+def rawSize (data : ByteArray) (pos : Nat) : Nat :=
+  let sizeFormat := ((data[pos]! >>> 2) &&& 3).toNat
+  if sizeFormat == 0 then 1 + ... else ...
+```
+
+**Good** (inlines everything so `split` sees the `if` directly):
+```lean
+def rawSize (data : ByteArray) (pos : Nat) : Nat :=
+  if ((data[pos]! >>> 2 &&& 3).toNat == 0) then 1 + ... else ...
+```
+
+After `unfold rawSize at hsize; split at hsize`, each branch gets the
+concrete value. Use `contradiction` to eliminate branches that conflict
+with the outer `split at hresult` context.
+
+### `split at h` auto-resolves with context hypotheses
+
+When `split at h` encounters `if cond then A else B` and the context
+already contains `h✝ : cond = true` (or `¬cond = true`), the `if` is
+automatically resolved — no second `split` is needed. This happens when
+the conditions in a helper definition match conditions from an outer
+`split at hresult`.
+
 ## Anti-Patterns
 
 ### Don't use `simp` to close error branches
