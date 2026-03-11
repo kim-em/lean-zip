@@ -968,6 +968,33 @@ theorem resolveSingleFseTable_succeeds_repeat (maxSymbols maxAccLog : Nat)
       predefinedDist predefinedAccLog (some table) = .ok (table, pos) := by
   simp only [resolveSingleFseTable, pure, Except.pure]
 
+/-- In FSE-compressed mode, `resolveSingleFseTable` succeeds when
+    `decodeFseDistribution` and `buildFseTable` both succeed. -/
+theorem resolveSingleFseTable_succeeds_fse (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (probs : Array Int32) (accLog : Nat) (br' : BitReader)
+    (hfse : decodeFseDistribution ⟨data, pos, 0⟩ maxSymbols maxAccLog
+            = .ok (probs, accLog, br'))
+    (table : FseTable)
+    (hbuild : buildFseTable probs accLog = .ok table) :
+    resolveSingleFseTable .fseCompressed maxSymbols maxAccLog data pos
+      predefinedDist predefinedAccLog prevTable =
+      .ok (table, if br'.bitOff == 0 then br'.pos else br'.pos + 1) := by
+  simp only [resolveSingleFseTable, bind, Except.bind, hfse, hbuild, pure, Except.pure]
+
+/-! ## decodeSequencesWF completeness -/
+
+/-- When `numSeq = 0`, `decodeSequencesWF` returns an empty array and
+    the unchanged backward bit reader. -/
+theorem decodeSequencesWF_succeeds_zero
+    (litLenTable offsetTable matchLenTable : FseTable)
+    (br : BackwardBitReader) :
+    decodeSequencesWF litLenTable offsetTable matchLenTable br 0 =
+      .ok (#[], br) := by
+  simp only [decodeSequencesWF, beq_self_eq_true, ↓reduceIte]
+
 /-! ## decodeSequencesWF output size -/
 
 /-- When the inner loop succeeds, the output array has exactly
