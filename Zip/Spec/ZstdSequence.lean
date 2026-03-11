@@ -515,6 +515,40 @@ theorem parseSequencesHeader_numSeq_zero_iff (data : ByteArray) (pos : Nat)
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
+/-! ## Parsing completeness -/
+
+/-- When the data has at least 4 bytes from `pos`, `parseSequencesHeader` always succeeds.
+    All four branches (byte0=0, byte0<128, byte0<255, byte0=255) have their size guards
+    satisfied by the 4-byte hypothesis, so the result is always `.ok`. -/
+theorem parseSequencesHeader_succeeds (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 4) :
+    ∃ numSeq modes pos', parseSequencesHeader data pos = .ok (numSeq, modes, pos') := by
+  unfold parseSequencesHeader
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+    show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+  split -- byte0 == 0
+  · exact ⟨_, _, _, rfl⟩
+  · split -- byte0 < 128
+    · simp only [show ¬(data.size < pos + 2) from by omega, ↓reduceIte]
+      exact ⟨_, _, _, rfl⟩
+    · split -- byte0 < 255
+      · simp only [show ¬(data.size < pos + 3) from by omega, ↓reduceIte]
+        exact ⟨_, _, _, rfl⟩
+      · simp only [show ¬(data.size < pos + 4) from by omega, ↓reduceIte]
+        exact ⟨_, _, _, rfl⟩
+
+/-- When `data[pos]! = 0` and there is at least 1 byte, parsing succeeds with
+    0 sequences, all-predefined modes, and advances by exactly 1 byte.
+    This is the "no sequences" fast path for literals-only blocks. -/
+theorem parseSequencesHeader_succeeds_zero (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 1) (hbyte : data[pos]! = 0) :
+    parseSequencesHeader data pos =
+      .ok (0, { litLenMode := .predefined, offsetMode := .predefined,
+                matchLenMode := .predefined }, pos + 1) := by
+  simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
+    show data[pos]!.toNat = 0 from by simp [hbyte], beq_self_eq_true]
+
 /-! ## buildRleFseTable structural properties -/
 
 /-- The accuracy log of an RLE FSE table is always 0. -/
