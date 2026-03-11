@@ -523,6 +523,24 @@ theorem skipSkippableFrame_le_size (data : ByteArray) (pos pos' : Nat)
       · exact nomatch h
       · have := Except.ok.inj h; omega
 
+/-- When the data has at least 8 bytes for the header plus `frameSize` bytes for the
+    payload, and the magic number is in the skippable range, `skipSkippableFrame` succeeds. -/
+theorem skipSkippableFrame_succeeds (data : ByteArray) (pos : Nat)
+    (hsize : data.size ≥ pos + 8)
+    (hmagic_lo : Binary.readUInt32LE data pos ≥ 0x184D2A50)
+    (hmagic_hi : Binary.readUInt32LE data pos ≤ 0x184D2A5F)
+    (hpayload : data.size ≥ pos + 8 + (Binary.readUInt32LE data (pos + 4)).toNat) :
+    ∃ pos', Zip.Native.skipSkippableFrame data pos = .ok pos' := by
+  unfold Zip.Native.skipSkippableFrame
+  simp only [show ¬(data.size < pos + 8) from by omega, ↓reduceIte,
+    bind, Except.bind, pure, Except.pure]
+  have h1 : ¬(Binary.readUInt32LE data pos < 0x184D2A50) := Nat.not_lt.mpr hmagic_lo
+  have h2 : ¬(Binary.readUInt32LE data pos > 0x184D2A5F) := Nat.not_lt.mpr hmagic_hi
+  have h3 : ¬(data.size < pos + 8 + (Binary.readUInt32LE data (pos + 4)).toNat) :=
+    Nat.not_lt.mpr hpayload
+  simp only [decide_eq_false h1, decide_eq_false h2, Bool.false_or, if_neg h3]
+  exact ⟨_, rfl⟩
+
 /-! ## Block loop structural lemmas -/
 
 /-- When `decompressBlocksWF` succeeds, the output ByteArray is at least as large as
