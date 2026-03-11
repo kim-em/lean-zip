@@ -8,15 +8,15 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~510 completed (Feb 19 – Mar 10)
+- **Sessions**: ~530 completed (Feb 19 – Mar 11)
 - **Source files**: 102 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 27 test)
-- **Merged PRs**: 480
-- **Spec declarations**: 1,819 across 49 spec files (31,120 lines)
+- **Merged PRs**: 497
+- **Spec declarations**: 1,793 across 49 spec files (31,191 lines)
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across DEFLATE spec files (campaign complete)
 - **simp_all with args**: 0 (DeflateEncode and InflateCorrect instances converted to `simp only` by #1069)
-- **simp_all only**: 0 across spec files
-- **Zstd spec**: 563 declarations across 6 files (10,377 lines)
+- **simp_all only**: 0 across DEFLATE spec files; 7 in Zstd spec files (4 in Zstd.lean, 3 in ZstdHuffman.lean)
+- **Zstd spec**: 572 declarations across 6 files (10,448 lines)
 
 ## Milestones
 
@@ -1177,13 +1177,121 @@ compressed pairs).
 declarations: Fse (152), ZstdSequence (147), Zstd (111), ZstdHuffman (86),
 XxHash (32), ZstdFrame (35). Total spec line count: 10,377 lines.
 
+**15-PR batch (Mar 10–11): completeness chain deepening + API-level content completion + review campaign:**
+
+This batch deepened the parsing completeness chain to cover nearly every
+sub-function in the Zstd decompression pipeline, completed the two-block
+API-level content matrix to 16/16, and advanced the code quality review
+campaign to 4 of 5 Zstd spec files.
+
+*Track E parsing completeness (7 PRs):*
+- #1121: `parseLiteralsSection_succeeds_compressed` — completeness for
+  Huffman-compressed literals (litType=2), the most complex literal path
+- #1123: `resolveSequenceFseTables_succeeds` — composed completeness
+  theorem threading three `resolveSingleFseTable` calls
+- #1130: `parseHuffmanTreeDescriptor_succeeds_fse` and
+  `parseHuffmanWeightsFse_succeeds` — FSE-path Huffman tree descriptor
+  completeness
+- #1131: `BackwardBitReader_init_succeeds` — backward bitstream
+  initialization completeness
+- #1134: `resolveSingleFseTable_succeeds_fse` (FSE-compressed mode) and
+  `decodeSequencesWF_succeeds_zero` (zero-sequence case)
+- #1135: `decodeHuffmanLiterals_succeeds_single` and
+  `decodeHuffmanLiterals_succeeds_four` — Huffman literal decoding
+  completeness for both 1-stream and 4-stream modes
+- #1138: `parseSequencesHeader_succeeds` and
+  `parseSequencesHeader_succeeds_zero` — universal parsing completeness
+  with byte0 case dispatch
+
+*Track E characterization (1 PR):*
+- #1144: `parseBlockHeader_lastBlock_eq`, `parseBlockHeader_blockType_eq`,
+  `parseBlockHeader_blockSize_eq` — field characterization theorems proving
+  each field equals specific bit ranges of the 24-bit header word
+
+*Track E API-level content completion (1 PR):*
+- #1151: `decompressZstd_two_compressed_literals_blocks_content` and
+  `decompressZstd_two_compressed_sequences_blocks_content` — the final
+  two API-level content theorems, completing the 16/16 matrix
+
+*Quality reviews (4 PRs):*
+- #1139: ZstdSequence.lean — proof body compression and refactoring
+- #1145: ZstdSequence.lean — proof quality audit
+- #1152: Zstd.lean — proof quality audit with `frame_from_blocks` tactic
+  macro extraction and `parseBlockHeader_data_not_le` helper (−406 lines,
+  −10.3%)
+- #1153: ZstdFrame.lean — proof quality audit
+
+*Housekeeping (2 PRs):*
+- #1127: Meditate — parsing completeness maturity analysis, created
+  `lean-parsing-completeness` skill (255 lines)
+- #1146: Stale issue cleanup — closed 2 moot issues, removed stale labels
+
+**Parsing completeness coverage (updated):**
+
+| Function | Status |
+|----------|--------|
+| `parseBlockHeader` | done |
+| `decompressRawBlock` | done |
+| `decompressRLEBlock` | done |
+| `parseFrameHeader` | done |
+| `parseCompressedLiteralsHeader` | done |
+| `parseLiteralsSection` (treeless) | done |
+| `parseLiteralsSection` (compressed, litType=2) | done |
+| `parseHuffmanWeightsDirect` | done |
+| `parseHuffmanWeightsFse` | done |
+| `parseHuffmanTreeDescriptor` (direct) | done |
+| `parseHuffmanTreeDescriptor` (FSE) | done |
+| `BackwardBitReader.init` | done |
+| `decodeHuffmanLiterals` (1-stream, 4-stream) | done |
+| `resolveSingleFseTable` (predefined/RLE/repeat/FSE) | done |
+| `resolveSequenceFseTables` (composed) | done |
+| `parseSequencesHeader` | done |
+| `decodeSequencesWF` (zero-case) | done |
+| `parseLiteralsSection` (raw/RLE) | gap |
+| `decompressBlocksWF` (composed) | gap |
+| `executeSequences` | gap |
+| Frame-level composed | gap |
+
+The completeness chain now covers 17 functions/paths. Remaining gaps:
+`parseLiteralsSection` raw/RLE paths, `decompressBlocksWF` loop
+composition, `executeSequences`, and full frame-level composition.
+
+**Two-block content theorem coverage matrix (block / frame / API) — COMPLETE:**
+
+| First \ Second | Raw | RLE | CompLit | CompSeq |
+|---|---|---|---|---|
+| **Raw** | B/F/A | B/F/A | B/F/A | B/F/A |
+| **RLE** | B/F/A | B/F/A | B/F/A | B/F/A |
+| **CompLit** | B/F/A | B/F/A | B/F/A | B/F/A |
+| **CompSeq** | B/F/A | B/F/A | B/F/A | B/F/A |
+
+All 16/16 combinations covered at all three levels (block, frame, API).
+All 4 single-block types also fully covered at all three levels.
+
+**Review campaign progress:** 4 of 5 Zstd spec files audited:
+- ZstdHuffman.lean (#1109, #853) — extracted shared eliminators, −4.3%
+- Fse.lean (#1112, #822) — extracted decomposition helpers, −2.4%
+- ZstdSequence.lean (#1145, #1139) — proof compression + quality audit
+- Zstd.lean (#1152) — tactic macro extraction, −10.3%
+- ZstdFrame.lean (#1153) — proof quality audit
+Remaining: XxHash.lean (previously audited at #807).
+
+**Spec declaration count note:** Total spec declarations dropped from
+1,819 to 1,793 despite net additions — the Zstd.lean review (#1152)
+removed dead code and deduplicated helper lemmas more aggressively
+than new theorems were added. The Zstd-specific declaration count rose
+from 563 to 572 (net +9 new theorems).
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 572
+declarations: ZstdSequence (168), Fse (148), Zstd (106), ZstdHuffman (89),
+ZstdFrame (37), XxHash (24). Total spec line count: 10,448 lines.
+
 **Remaining:**
 - Prove remaining sorry stubs: 4 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
-- API-level content: 2 remaining (compLit+compLit, compSeq+compSeq)
-- Parsing completeness: extend to Huffman-compressed literals,
-  `parseSequencesHeader`, FSE-compressed `resolveSingleFseTable`,
-  and compose into full-frame completeness
+- Parsing completeness: extend to `parseLiteralsSection` raw/RLE paths,
+  `decompressBlocksWF` composed, `executeSequences`, and full-frame
+  completeness composition
 - Compose position specs into end-to-end frame position theorem
 - Content preservation campaign: extend to N-block frames and compressed
   block content (with sequences)
@@ -1195,8 +1303,8 @@ XxHash (32), ZstdFrame (35). Total spec line count: 10,377 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~510 sessions (Feb 19 – Mar 10)
-- 480 merged PRs
+- ~530 sessions (Feb 19 – Mar 11)
+- 497 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
