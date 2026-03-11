@@ -43,15 +43,12 @@ Single-block (4/4):
 - compLit ✓ `decompressZstd_single_compressed_literals`
 - compSeq ✓ `decompressZstd_single_compressed_sequences`
 
-Two-block (first non-last × second last, 12/16):
+Two-block (first non-last × second last, 16/16):
                   raw     rle     compLit compSeq
-    raw      ✓       ✓       ✓       —
-    rle      ✓       ✓       ✓       —
-    compLit  ✓       ✓       —       ✓
-    compSeq  ✓       ✓       ✓       —
-
-Remaining gaps: raw+compSeq, rle+compSeq (issue #1082),
-compLit+compLit, compSeq+compSeq (issue #1078).
+    raw      ✓       ✓       ✓       ✓
+    rle      ✓       ✓       ✓       ✓
+    compLit  ✓       ✓       ✓       ✓
+    compSeq  ✓       ✓       ✓       ✓
 -/
 
 namespace Zip.Spec.ZstdFrame
