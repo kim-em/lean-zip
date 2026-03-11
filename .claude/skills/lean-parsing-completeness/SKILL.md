@@ -297,6 +297,37 @@ automatically resolved — no second `split` is needed. This happens when
 the conditions in a helper definition match conditions from an outer
 `split at hresult`.
 
+## Goal-Side vs Hypothesis-Side Guard Elimination
+
+Completeness proofs that **construct** the `.ok` result (existential goals)
+work on the **goal**, not a hypothesis. The `split at h` / `dsimp [letFun] at h`
+patterns from invariant proofs do NOT transfer directly.
+
+**Invariant proof (hypothesis-side)** — destructuring `h : f = .ok (...)`:
+```lean
+split at h; · exact nomatch h   -- error branch impossible
+dsimp only [letFun] at h        -- reduce let bindings in h
+split at h; · exact nomatch h   -- next guard
+```
+
+**Completeness proof (goal-side)** — constructing `∃ ..., f = .ok (...)`:
+```lean
+simp only [hguard_false, ↓reduceIte]  -- eliminate guard where possible
+split                                   -- case-split on if/match in goal
+· -- error case: derive contradiction
+  rename_i hbad; exact absurd hbad (by omega)
+· -- success case: continue
+  split
+  · rename_i hbad; exact absurd hbad (by ...)
+  · apply ih; ...                       -- recursive step
+```
+
+Key differences:
+- Use `split` (not `split at h`) for goal-side conditionals
+- `dsimp only [letFun]` often does nothing on the goal — just omit it
+- Use `absurd` + contradiction to close impossible branches (not `nomatch`)
+- `simp only [..., ↓reduceIte]` works for guards with known-false conditions
+
 ## Anti-Patterns
 
 ### Don't use `simp` to close error branches
