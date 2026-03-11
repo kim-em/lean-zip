@@ -1627,6 +1627,101 @@ theorem parseFrameHeader_succeeds (data : ByteArray) (pos : Nat)
       -- Walk through remaining guards
       repeat (first | contradiction | (simp only [Bool.false_eq_true, ite_false, ite_true] at hsize; omega) | (split at hres))
 
+/-! ## parseFrameHeader field characterization -/
+
+/-- When `parseFrameHeader` succeeds, the `contentChecksum` field equals
+    bit 2 of the descriptor byte at `pos + 4`. -/
+theorem parseFrameHeader_contentChecksum_eq (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdFrameHeader) (pos' : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (hdr, pos')) :
+    hdr.contentChecksum = ((data[pos + 4]! >>> 2) &&& 1 == 1) := by
+  unfold Zip.Native.parseFrameHeader at h
+  dsimp only [Bind.bind, Except.bind] at h
+  by_cases h1 : data.size < pos + 4
+  · rw [if_pos h1] at h; exact nomatch h
+  · rw [if_neg h1] at h
+    simp only [pure, Pure.pure] at h
+    by_cases h2 : (Binary.readUInt32LE data pos != Zip.Native.zstdMagic) = true
+    · rw [if_pos h2] at h; exact nomatch h
+    · rw [if_neg h2] at h
+      by_cases h3 : data.size < pos + 4 + 1
+      · rw [if_pos h3] at h; exact nomatch h
+      · rw [if_neg h3] at h
+        split at h
+        · exact nomatch h
+        · simp only [Except.pure] at h
+          repeat split at h
+          iterate 5 (all_goals (try (first | contradiction | (split at h))))
+          all_goals first
+            | contradiction
+            | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
+               obtain ⟨rfl, rfl⟩ := h; rfl)
+
+/-- When `parseFrameHeader` succeeds, the `singleSegment` field equals
+    bit 5 of the descriptor byte at `pos + 4`. -/
+theorem parseFrameHeader_singleSegment_eq (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdFrameHeader) (pos' : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (hdr, pos')) :
+    hdr.singleSegment = ((data[pos + 4]! >>> 5) &&& 1 == 1) := by
+  unfold Zip.Native.parseFrameHeader at h
+  dsimp only [Bind.bind, Except.bind] at h
+  by_cases h1 : data.size < pos + 4
+  · rw [if_pos h1] at h; exact nomatch h
+  · rw [if_neg h1] at h
+    simp only [pure, Pure.pure] at h
+    by_cases h2 : (Binary.readUInt32LE data pos != Zip.Native.zstdMagic) = true
+    · rw [if_pos h2] at h; exact nomatch h
+    · rw [if_neg h2] at h
+      by_cases h3 : data.size < pos + 4 + 1
+      · rw [if_pos h3] at h; exact nomatch h
+      · rw [if_neg h3] at h
+        split at h
+        · exact nomatch h
+        · simp only [Except.pure] at h
+          repeat split at h
+          iterate 5 (all_goals (try (first | contradiction | (split at h))))
+          all_goals first
+            | contradiction
+            | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
+               obtain ⟨rfl, rfl⟩ := h; rfl)
+
+set_option maxHeartbeats 800000 in
+/-- When `parseFrameHeader` succeeds, the `dictionaryId` field is determined
+    by bits 0-1 of the descriptor byte (DID_Field_Size) and the subsequent
+    0/1/2/4 bytes. The DID offset depends on the singleSegment flag:
+    `pos + 5` if singleSegment (no window descriptor), `pos + 6` otherwise. -/
+theorem parseFrameHeader_dictionaryId_eq (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdFrameHeader) (pos' : Nat)
+    (h : Zip.Native.parseFrameHeader data pos = .ok (hdr, pos')) :
+    let desc := data[pos + 4]!
+    let didFlag := (desc &&& 3).toNat
+    let didOff := if (desc >>> 5) &&& 1 == 1 then pos + 5 else pos + 6
+    (didFlag = 0 → hdr.dictionaryId = none) ∧
+    (didFlag = 1 → hdr.dictionaryId = some data[didOff]!.toUInt32) ∧
+    (didFlag = 2 → hdr.dictionaryId = some (Binary.readUInt16LE data didOff).toUInt32) ∧
+    (didFlag = 3 → hdr.dictionaryId = some (Binary.readUInt32LE data didOff)) := by
+  unfold Zip.Native.parseFrameHeader at h
+  dsimp only [Bind.bind, Except.bind] at h
+  by_cases h1 : data.size < pos + 4
+  · rw [if_pos h1] at h; exact nomatch h
+  · rw [if_neg h1] at h
+    simp only [pure, Pure.pure] at h
+    by_cases h2 : (Binary.readUInt32LE data pos != Zip.Native.zstdMagic) = true
+    · rw [if_pos h2] at h; exact nomatch h
+    · rw [if_neg h2] at h
+      by_cases h3 : data.size < pos + 4 + 1
+      · rw [if_pos h3] at h; exact nomatch h
+      · rw [if_neg h3] at h
+        split at h
+        · exact nomatch h
+        · simp only [Except.pure] at h
+          repeat split at h
+          iterate 5 (all_goals (try (first | contradiction | (split at h))))
+          all_goals first
+            | contradiction
+            | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
+               obtain ⟨rfl, rfl⟩ := h; simp_all)
+
 /-! ## Window size characterizing properties -/
 
 set_option maxRecDepth 1024 in
