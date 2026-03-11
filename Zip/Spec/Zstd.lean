@@ -830,6 +830,107 @@ theorem decompressBlocksWF_single_rle (data : ByteArray) (off : Nat)
   simp only [hoff, ↓reduceDIte, hparse, hbs, hws, bind, Except.bind, pure, Except.pure,
     ↓reduceIte, htype, hrle, hlast, Bool.false_eq_true]
 
+/-! ## decompressBlocksWF composed completeness -/
+
+/-- When a single raw last block is encoded at offset `off`, with sufficient
+    data for header + payload, `decompressBlocksWF` succeeds. This chains
+    `parseBlockHeader_succeeds` → field characterization → `decompressRawBlock_succeeds`
+    → `decompressBlocksWF_single_raw` into a single theorem with only raw-byte-level
+    preconditions. -/
+theorem decompressBlocksWF_succeeds_single_raw (data : ByteArray)
+    (off : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hsize : data.size ≥ off + 3)
+    (htypeVal : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit : (data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow : ¬ (windowSize > 0 &&
+        ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > windowSize))
+    (hpayload : data.size ≥ off + 3 +
+        (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat)) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') := by
+  -- Step 1: parseBlockHeader succeeds (typeVal=0 ≠ 3)
+  have htypeNe3 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+      ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 ≠ 3 := by
+    rw [htypeVal]; decide
+  obtain ⟨hdr, afterHdr, hparse⟩ := parseBlockHeader_succeeds data off hsize htypeNe3
+  -- Step 2: Extract field values from the existential result
+  have htype := (parseBlockHeader_blockType_eq data off hdr afterHdr hparse).1 htypeVal
+  have hlast_eq := parseBlockHeader_lastBlock_eq data off hdr afterHdr hparse
+  have hbs_eq := parseBlockHeader_blockSize_eq data off hdr afterHdr hparse
+  have hpos_eq := parseBlockHeader_pos_eq data off hdr afterHdr hparse
+  -- Step 3: Derive lastBlock = true from hlastBit
+  have hlast : hdr.lastBlock = true := by rw [hlast_eq, hlastBit]; decide
+  -- Step 4: Derive blockSize and window size constraints
+  have hbs : ¬ hdr.blockSize > 131072 := by rw [hbs_eq]; exact Nat.not_lt.mpr hblockSize
+  have hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize) := by
+    rw [hbs_eq]; exact hwindow
+  -- Step 5: decompressRawBlock succeeds (afterHdr = off + 3, sufficient payload)
+  have hpayload' : data.size ≥ afterHdr + hdr.blockSize.toNat := by
+    rw [hpos_eq, hbs_eq]; omega
+  obtain ⟨block, afterBlock, hraw⟩ := decompressRawBlock_succeeds data afterHdr
+    hdr.blockSize hpayload'
+  -- Step 6: Compose via decompressBlocksWF_single_raw
+  have hoff : ¬ data.size ≤ off := by omega
+  exact ⟨_, _, decompressBlocksWF_single_raw data off windowSize output prevHuff prevFse
+    history hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hlast⟩
+
+/-- When a single RLE last block is encoded at offset `off`, with sufficient
+    data for header + 1 byte payload, `decompressBlocksWF` succeeds. This chains
+    `parseBlockHeader_succeeds` → field characterization → `decompressRLEBlock_succeeds`
+    → `decompressBlocksWF_single_rle` into a single theorem with only raw-byte-level
+    preconditions. -/
+theorem decompressBlocksWF_succeeds_single_rle (data : ByteArray)
+    (off : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hsize : data.size ≥ off + 3)
+    (htypeVal : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit : (data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow : ¬ (windowSize > 0 &&
+        ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > windowSize))
+    (hpayload : data.size ≥ off + 4) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') := by
+  -- Step 1: parseBlockHeader succeeds (typeVal=1 ≠ 3)
+  have htypeNe3 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+      ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 ≠ 3 := by
+    rw [htypeVal]; decide
+  obtain ⟨hdr, afterHdr, hparse⟩ := parseBlockHeader_succeeds data off hsize htypeNe3
+  -- Step 2: Extract field values from the existential result
+  have htype := (parseBlockHeader_blockType_eq data off hdr afterHdr hparse).2.1 htypeVal
+  have hlast_eq := parseBlockHeader_lastBlock_eq data off hdr afterHdr hparse
+  have hbs_eq := parseBlockHeader_blockSize_eq data off hdr afterHdr hparse
+  have hpos_eq := parseBlockHeader_pos_eq data off hdr afterHdr hparse
+  -- Step 3: Derive lastBlock = true from hlastBit
+  have hlast : hdr.lastBlock = true := by rw [hlast_eq, hlastBit]; decide
+  -- Step 4: Derive blockSize and window size constraints
+  have hbs : ¬ hdr.blockSize > 131072 := by rw [hbs_eq]; exact Nat.not_lt.mpr hblockSize
+  have hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize) := by
+    rw [hbs_eq]; exact hwindow
+  -- Step 5: decompressRLEBlock succeeds (afterHdr = off + 3, need 1 byte)
+  have hpayload' : data.size ≥ afterHdr + 1 := by rw [hpos_eq]; omega
+  obtain ⟨block, afterByte, hrle⟩ := decompressRLEBlock_succeeds data afterHdr
+    hdr.blockSize hpayload'
+  -- Step 6: Compose via decompressBlocksWF_single_rle
+  have hoff : ¬ data.size ≤ off := by omega
+  exact ⟨_, _, decompressBlocksWF_single_rle data off windowSize output prevHuff prevFse
+    history hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hlast⟩
+
 /-! ## decompressBlocksWF step theorems -/
 
 /-- When `decompressBlocksWF` encounters a non-last raw block, it recurses with
