@@ -451,12 +451,9 @@ theorem parseSequencesHeader_numSeq_small (data : ByteArray) (pos : Nat)
   by_cases hsz : data.size < pos + 1
   · simp only [hsz, ↓reduceIte] at h; exact nomatch h
   · simp only [hsz, ↓reduceIte] at h
-    -- byte0 == 0 check
-    have hbeq : ¬((data[pos]!.toNat == 0) = true) := by
-      intro heq; exact absurd (eq_of_beq heq) (by omega)
-    rw [if_neg hbeq] at h
-    -- byte0 < 128 check
-    rw [if_pos hbyte0_lt] at h
+    -- byte0 == 0 check; byte0 < 128 check
+    have hbeq : ¬((data[pos]!.toNat == 0) = true) := by simp only [beq_iff_eq]; omega
+    rw [if_neg hbeq, if_pos hbyte0_lt] at h
     -- Inner size check
     by_cases hsz2 : data.size < pos + 2
     · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
@@ -478,15 +475,10 @@ theorem parseSequencesHeader_numSeq_medium (data : ByteArray) (pos : Nat)
   by_cases hsz : data.size < pos + 1
   · simp only [hsz, ↓reduceIte] at h; exact nomatch h
   · simp only [hsz, ↓reduceIte] at h
-    -- byte0 == 0 check
-    have hbeq : ¬((data[pos]!.toNat == 0) = true) := by
-      intro heq; exact absurd (eq_of_beq heq) (by omega)
-    rw [if_neg hbeq] at h
-    -- byte0 < 128 check
+    -- byte0 == 0 check; byte0 ≥ 128 check; byte0 < 255 check
+    have hbeq : ¬((data[pos]!.toNat == 0) = true) := by simp only [beq_iff_eq]; omega
     have hlt128 : ¬(data[pos]!.toNat < 128) := by omega
-    rw [if_neg hlt128] at h
-    -- byte0 < 255 check
-    rw [if_pos hbyte0_lt] at h
+    rw [if_neg hbeq, if_neg hlt128, if_pos hbyte0_lt] at h
     -- Inner size check
     by_cases hsz2 : data.size < pos + 3
     · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
@@ -843,15 +835,22 @@ theorem resolveSingleFseTable_pos_ge (mode : SequenceCompressionMode) (maxSymbol
     have := resolveSingleFseTable_fseCompressed_pos_gt _ _ _ _ _ _ _ _ _ h
     omega
 
-/-! ## resolveSequenceFseTables position composition -/
+/-! ## resolveSequenceFseTables decomposition -/
 
-/-- The 3-table resolver doesn't decrease position. Composes three
-    `resolveSingleFseTable_pos_ge` applications via transitivity. -/
-theorem resolveSequenceFseTables_pos_ge (modes : SequenceCompressionModes)
+/-- Decompose a successful `resolveSequenceFseTables` call into its three
+    constituent `resolveSingleFseTable` successes with threaded positions. -/
+private theorem resolveSequenceFseTables_destruct (modes : SequenceCompressionModes)
     (data : ByteArray) (pos : Nat) (prev : PrevFseTables)
     (llTable ofTable mlTable : FseTable) (pos' : Nat)
     (h : resolveSequenceFseTables modes data pos prev = .ok (llTable, ofTable, mlTable, pos')) :
-    pos' ≥ pos := by
+    ∃ (v₁ v₂ v₃ : FseTable × Nat),
+      resolveSingleFseTable modes.litLenMode 36 9 data pos
+        predefinedLitLenDistribution 6 prev.litLen = .ok v₁ ∧
+      resolveSingleFseTable modes.offsetMode 32 8 data v₁.2
+        predefinedOffsetDistribution 5 prev.offset = .ok v₂ ∧
+      resolveSingleFseTable modes.matchLenMode 53 9 data v₂.2
+        predefinedMatchLenDistribution 6 prev.matchLen = .ok v₃ ∧
+      v₁.1 = llTable ∧ v₂.1 = ofTable ∧ v₃.1 = mlTable ∧ v₃.2 = pos' := by
   simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure] at h
   cases hll : resolveSingleFseTable modes.litLenMode 36 9 data pos
       predefinedLitLenDistribution 6 prev.litLen with
@@ -869,11 +868,23 @@ theorem resolveSequenceFseTables_pos_ge (modes : SequenceCompressionModes)
       | ok val₃ =>
         rw [hml] at h; dsimp only [Bind.bind, Except.bind] at h
         simp only [Except.ok.injEq, Prod.mk.injEq] at h
-        obtain ⟨-, -, -, rfl⟩ := h
-        have h₁ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hll
-        have h₂ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hof
-        have h₃ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hml
-        omega
+        exact ⟨val₁, val₂, val₃, rfl, hof, hml, h.1, h.2.1, h.2.2.1, h.2.2.2⟩
+
+/-! ## resolveSequenceFseTables position composition -/
+
+/-- The 3-table resolver doesn't decrease position. Composes three
+    `resolveSingleFseTable_pos_ge` applications via transitivity. -/
+theorem resolveSequenceFseTables_pos_ge (modes : SequenceCompressionModes)
+    (data : ByteArray) (pos : Nat) (prev : PrevFseTables)
+    (llTable ofTable mlTable : FseTable) (pos' : Nat)
+    (h : resolveSequenceFseTables modes data pos prev = .ok (llTable, ofTable, mlTable, pos')) :
+    pos' ≥ pos := by
+  obtain ⟨v₁, v₂, v₃, hll, hof, hml, -, -, -, rfl⟩ :=
+    resolveSequenceFseTables_destruct _ _ _ _ _ _ _ _ h
+  have h₁ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hll
+  have h₂ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hof
+  have h₃ := resolveSingleFseTable_pos_ge _ _ _ _ _ _ _ _ _ _ hml
+  omega
 
 /-! ## resolveSequenceFseTables validity composition -/
 
@@ -891,27 +902,11 @@ theorem resolveSequenceFseTables_valid (modes : SequenceCompressionModes)
     (∃ al ns, Zstd.Spec.Fse.ValidFseTable llTable.cells al ns) ∧
     (∃ al ns, Zstd.Spec.Fse.ValidFseTable ofTable.cells al ns) ∧
     (∃ al ns, Zstd.Spec.Fse.ValidFseTable mlTable.cells al ns) := by
-  simp only [resolveSequenceFseTables, bind, Except.bind, pure, Except.pure] at h
-  cases hll : resolveSingleFseTable modes.litLenMode 36 9 data pos
-      predefinedLitLenDistribution 6 prev.litLen with
-  | error e => rw [hll] at h; exact nomatch h
-  | ok val₁ =>
-    rw [hll] at h; dsimp only [Bind.bind, Except.bind] at h
-    cases hof : resolveSingleFseTable modes.offsetMode 32 8 data val₁.2
-        predefinedOffsetDistribution 5 prev.offset with
-    | error e => rw [hof] at h; exact nomatch h
-    | ok val₂ =>
-      rw [hof] at h; dsimp only [Bind.bind, Except.bind] at h
-      cases hml : resolveSingleFseTable modes.matchLenMode 53 9 data val₂.2
-          predefinedMatchLenDistribution 6 prev.matchLen with
-      | error e => rw [hml] at h; exact nomatch h
-      | ok val₃ =>
-        rw [hml] at h; dsimp only [Bind.bind, Except.bind] at h
-        simp only [Except.ok.injEq, Prod.mk.injEq] at h
-        obtain ⟨rfl, rfl, rfl, _⟩ := h
-        exact ⟨resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hll (by decide) hprevLL,
-               resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hof (by decide) hprevOF,
-               resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hml (by decide) hprevML⟩
+  obtain ⟨_, _, _, hll, hof, hml, rfl, rfl, rfl, -⟩ :=
+    resolveSequenceFseTables_destruct _ _ _ _ _ _ _ _ h
+  exact ⟨resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hll (by decide) hprevLL,
+         resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hof (by decide) hprevOF,
+         resolveSingleFseTable_valid_ex _ _ _ _ _ _ _ _ _ _ hml (by decide) hprevML⟩
 
 /-! ## resolveSequenceFseTables completeness -/
 
