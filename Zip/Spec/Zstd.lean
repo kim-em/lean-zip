@@ -1527,7 +1527,6 @@ theorem decompressFrame_single_raw_content (data : ByteArray) (pos : Nat)
     (block : ByteArray) (afterBlock : Nat)
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
     (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
     (hbs : ¬ hdr.blockSize > 131072)
     (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
@@ -1574,7 +1573,6 @@ theorem decompressFrame_single_rle_content (data : ByteArray) (pos : Nat)
     (block : ByteArray) (afterByte : Nat)
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
     (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
     (hbs : ¬ hdr.blockSize > 131072)
     (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
@@ -1627,7 +1625,7 @@ theorem decompressFrame_two_raw_blocks_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -1694,7 +1692,7 @@ theorem decompressFrame_two_rle_blocks_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -1761,7 +1759,7 @@ theorem decompressFrame_raw_then_rle_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (raw, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -1828,7 +1826,7 @@ theorem decompressFrame_rle_then_raw_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (RLE, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -2340,7 +2338,6 @@ theorem decompressFrame_single_compressed_literals_content (data : ByteArray)
     (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
     (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
     (hbs : ¬ hdr.blockSize > 131072)
     (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
@@ -2398,7 +2395,6 @@ theorem decompressFrame_single_compressed_sequences_content (data : ByteArray)
     (blockOutput : ByteArray) (newHist : Array Nat)
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
     (hparse : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr, afterHdr))
     (hbs : ¬ hdr.blockSize > 131072)
     (hws : ¬ (header.windowSize > 0 && hdr.blockSize.toUInt64 > header.windowSize))
@@ -2483,7 +2479,7 @@ theorem decompressFrame_compressed_lit_then_raw_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -2558,7 +2554,7 @@ theorem decompressFrame_compressed_lit_then_rle_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -2637,7 +2633,7 @@ theorem decompressFrame_compressed_seq_then_raw_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last, numSeq > 0)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -2743,7 +2739,7 @@ theorem decompressFrame_compressed_seq_then_compressed_lit_content (data : ByteA
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last, numSeq > 0)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -2868,7 +2864,7 @@ theorem decompressFrame_compressed_lit_then_compressed_seq_content (data : ByteA
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last, numSeq=0)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -2984,7 +2980,7 @@ theorem decompressFrame_raw_then_compressed_lit_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (raw, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -3057,7 +3053,7 @@ theorem decompressFrame_rle_then_compressed_lit_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (RLE, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -3355,7 +3351,7 @@ theorem decompressFrame_compressed_seq_then_rle_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last, numSeq > 0)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -3454,7 +3450,7 @@ theorem decompressFrame_two_compressed_literals_blocks_content (data : ByteArray
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -3562,7 +3558,7 @@ theorem decompressFrame_two_compressed_sequences_blocks_content (data : ByteArra
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (compressed, non-last, numSeq > 0)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -3711,7 +3707,7 @@ theorem decompressFrame_raw_then_compressed_seq_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (raw, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
@@ -3816,7 +3812,7 @@ theorem decompressFrame_rle_then_compressed_seq_content (data : ByteArray)
     -- Frame hypotheses
     (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
     (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    (_hdict : header.dictionaryId = none ∨ header.dictionaryId = some 0)
+
     -- Block 1 hypotheses (RLE, non-last)
     (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
     (hbs1 : ¬ hdr1.blockSize > 131072)
