@@ -240,27 +240,22 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArr
     exact ⟨by simp only [List.foldl_nil]; omega, Nat.le_refl _, hlp, Nat.le_refl _⟩
   | cons seq rest ih =>
     rw [executeSequences.loop.eq_2] at h
-    split at h
-    · exact nomatch h
-    · rename_i hlit
-      split at h
-      dsimp only [letFun] at h
-      split at h
-      · exact nomatch h
-      · split at h
-        · exact nomatch h
-        · split at h
-          · exact nomatch h
-          · have hlp' : litPos + seq.literalLength ≤ literals.size := by omega
-            have ⟨ih_size, ih_le, ih_bound, ih_mono⟩ := ih _ _ _ hlp' h
-            rw [copyMatch_size, copyBytes_size] at ih_size ih_mono
-            refine ⟨?_, ?_, ih_bound, by omega⟩
-            · rw [ih_size]
-              simp only [List.foldl_cons, Nat.zero_add]
-              conv => rhs; rw [foldl_matchLen_add]
-              generalize List.foldl (fun acc s => acc + s.matchLength) 0 rest = matchSum
-              omega
-            · omega
+    split at h; · exact nomatch h
+    rename_i hlit
+    split at h; dsimp only [letFun] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    have hlp' : litPos + seq.literalLength ≤ literals.size := by omega
+    have ⟨ih_size, ih_le, ih_bound, ih_mono⟩ := ih _ _ _ hlp' h
+    rw [copyMatch_size, copyBytes_size] at ih_size ih_mono
+    refine ⟨?_, ?_, ih_bound, by omega⟩
+    · rw [ih_size]
+      simp only [List.foldl_cons, Nat.zero_add]
+      conv => rhs; rw [foldl_matchLen_add]
+      generalize List.foldl (fun acc s => acc + s.matchLength) 0 rest = matchSum
+      omega
+    · omega
 
 /-- The `executeSequences.loop` output buffer is always at least as large as the
     input buffer. Corollary of `executeSequences_loop_inv`. -/
@@ -347,22 +342,17 @@ theorem executeSequences_loop_getElem_lt
     obtain ⟨rfl, _, _⟩ := h; rfl
   | cons seq rest ih =>
     rw [executeSequences.loop.eq_2] at h
-    split at h
-    · exact nomatch h
-    · split at h
-      dsimp only [letFun] at h
-      split at h
-      · exact nomatch h
-      · split at h
-        · exact nomatch h
-        · split at h
-          · exact nomatch h
-          · have hcb_size := copyBytes_size output literals litPos seq.literalLength
-            have hi_cb : i < (copyBytes output literals litPos seq.literalLength).size := by
-              rw [hcb_size]; omega
-            exact ih _ _ _ h (by rw [copyMatch_size, hcb_size]; omega)
-              |>.trans (copyMatch_getElem_lt _ _ _ _ hi_cb)
-              |>.trans (copyBytes_getElem_lt _ _ _ _ _ hi)
+    split at h; · exact nomatch h
+    split at h; dsimp only [letFun] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    have hcb_size := copyBytes_size output literals litPos seq.literalLength
+    have hi_cb : i < (copyBytes output literals litPos seq.literalLength).size := by
+      rw [hcb_size]; omega
+    exact ih _ _ _ h (by rw [copyMatch_size, hcb_size]; omega)
+      |>.trans (copyMatch_getElem_lt _ _ _ _ hi_cb)
+      |>.trans (copyBytes_getElem_lt _ _ _ _ _ hi)
 
 /-! ## parseSequencesHeader structural properties -/
 
@@ -373,25 +363,17 @@ private theorem parseSequencesHeader_pos_range (data : ByteArray) (pos : Nat)
     (h : parseSequencesHeader data pos = .ok (numSeq, modes, pos')) :
     pos < pos' ∧ pos' ≤ pos + 4 ∧ pos' ≤ data.size := by
   simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  split at h; · exact nomatch h
   split at h
-  · exact nomatch h
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨-, -, rfl⟩ := h; omega
   · split at h
-    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨-, -, rfl⟩ := h; omega
+    · split at h; · exact nomatch h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨-, -, rfl⟩ := h; omega
     · split at h
-      · split at h
-        · exact nomatch h
-        · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-          obtain ⟨-, -, rfl⟩ := h; omega
-      · split at h
-        · split at h
-          · exact nomatch h
-          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-            obtain ⟨-, -, rfl⟩ := h; omega
-        · split at h
-          · exact nomatch h
-          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-            obtain ⟨-, -, rfl⟩ := h; omega
+      · split at h; · exact nomatch h
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨-, -, rfl⟩ := h; omega
+      · split at h; · exact nomatch h
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨-, -, rfl⟩ := h; omega
 
 /-- When `parseSequencesHeader` succeeds, the returned position is strictly greater
     than the input position. Each branch advances by 1–4 bytes. -/
@@ -1048,31 +1030,21 @@ theorem decodeSequencesWF_loop_size
     obtain ⟨rfl, _⟩ := h; omega
   | succ n ih =>
     simp only [decodeSequencesWF.loop] at h
-    -- 3 bounds checks
+    split at h; · exact nomatch h  -- bounds check 1
+    split at h; · exact nomatch h  -- bounds check 2
+    split at h; · exact nomatch h  -- bounds check 3
+    split at h; · exact nomatch h  -- decodeOneSequence
+    simp only [beq_iff_eq] at h
     split at h
-    · exact nomatch h
-    · split at h
-      · exact nomatch h
-      · split at h
-        · exact nomatch h
-        · -- match on decodeOneSequence
-          split at h
-          · exact nomatch h
-          · -- n == 0 check
-            simp only [beq_iff_eq] at h
-            split at h
-            · -- Last sequence
-              simp only [Except.ok.injEq, Prod.mk.injEq] at h
-              obtain ⟨rfl, _⟩ := h
-              simp only [Array.size_push]; omega
-            · -- Not last: 3 readBits for state update + recursion
-              split at h
-              · exact nomatch h
-              · split at h
-                · exact nomatch h
-                · split at h
-                  · exact nomatch h
-                  · rw [ih h]; simp only [Array.size_push]; omega
+    · -- Last sequence
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, _⟩ := h
+      simp only [Array.size_push]; omega
+    · -- Not last: 3 readBits for state update + recursion
+      split at h; · exact nomatch h
+      split at h; · exact nomatch h
+      split at h; · exact nomatch h
+      rw [ih h]; simp only [Array.size_push]; omega
 
 /-- When `decodeSequencesWF` succeeds with `numSeq > 0`, the result has
     exactly `numSeq` elements. -/
@@ -1087,15 +1059,11 @@ theorem decodeSequencesWF_size
   simp only [decodeSequencesWF] at h
   split at h
   · rename_i h0; simp only [beq_iff_eq] at h0; omega
-  · -- 3 readBits for init states
-    split at h
-    · exact nomatch h
-    · split at h
-      · exact nomatch h
-      · split at h
-        · exact nomatch h
-        · have := decodeSequencesWF_loop_size h
-          simp only [Array.size_empty] at this; omega
+  · split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    have := decodeSequencesWF_loop_size h
+    simp only [Array.size_empty] at this; omega
 
 end Zip.Native
 
@@ -1150,30 +1118,10 @@ theorem resolveOffset_history_size (rawOffset : Nat) (history : Array Nat) (litL
     (h : history.size = 3) :
     (resolveOffset rawOffset history litLen).2.size = 3 := by
   unfold resolveOffset
-  split
-  · -- rawOffset > 3: history' := #[offset, history[0]!, history[1]!]
-    rfl
-  · split
-    · -- literalLength > 0: normal repeat offset mode
-      split
-      · -- rawOffset = 1: history unchanged
-        exact h
-      · -- rawOffset = 2: #[_, _, _]
-        rfl
-      · -- rawOffset = 3: #[_, _, _]
-        rfl
-      · -- fallback
-        exact h
-    · -- literalLength = 0: shifted repeat mode
-      split
-      · -- rawOffset = 1: #[_, _, _]
-        rfl
-      · -- rawOffset = 2: #[_, _, _]
-        rfl
-      · -- rawOffset = 3: #[_, _, _]
-        rfl
-      · -- fallback
-        exact h
+  -- Every branch returns either a literal #[_, _, _] (size = 3 by rfl)
+  -- or the unchanged history (size = 3 by h).
+  split <;> (try rfl)
+  split <;> (split <;> first | rfl | exact h)
 
 /-- When `resolveOffset` is called with `rawOffset > 3`, the resolved offset
     is `rawOffset - 3`, which is positive. -/
@@ -1365,17 +1313,13 @@ theorem executeSequences_loop_history_valid
     exact hvalid
   | cons seq rest ih =>
     rw [Zip.Native.executeSequences.loop.eq_2] at h
-    split at h
-    · exact nomatch h
-    · dsimp only [letFun] at h
-      split at h
-      · exact nomatch h
-      · split at h
-        · exact nomatch h
-        · split at h
-          · exact nomatch h
-          · exact ih _ _ _ (resolveOffset_history_valid_of_fst_ne_zero _ _ _ hvalid (by
-              simp only [ne_eq, beq_iff_eq] at *; assumption)) h
+    split at h; · exact nomatch h
+    dsimp only [letFun] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    exact ih _ _ _ (resolveOffset_history_valid_of_fst_ne_zero _ _ _ hvalid (by
+        simp only [ne_eq, beq_iff_eq] at *; assumption)) h
 
 /-- The loop preserves the history array size. Uses the weaker hypothesis
     `history.size = 3` rather than full `ValidOffsetHistory`. -/
@@ -1395,16 +1339,12 @@ theorem executeSequences_loop_history_size
     exact hsize
   | cons seq rest ih =>
     rw [Zip.Native.executeSequences.loop.eq_2] at h
-    split at h
-    · exact nomatch h
-    · dsimp only [letFun] at h
-      split at h
-      · exact nomatch h
-      · split at h
-        · exact nomatch h
-        · split at h
-          · exact nomatch h
-          · exact ih _ _ _ (resolveOffset_history_size _ _ _ hsize) h
+    split at h; · exact nomatch h
+    dsimp only [letFun] at h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    split at h; · exact nomatch h
+    exact ih _ _ _ (resolveOffset_history_size _ _ _ hsize) h
 
 /-- For shifted repeat codes 1–2 (rawOffset ∈ {1,2}, literalLength = 0),
     `ValidOffsetHistory` implies the resolved offset is positive. Shifted code 1
