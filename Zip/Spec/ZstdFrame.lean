@@ -359,6 +359,25 @@ theorem decompressZstd_skip_then_standard (data : ByteArray)
     (by omega) hmagic_lo hmagic_hi hskip hskipAdv hsize2 hmagic2 hframe hframeAdv hdone,
     ByteArray.empty_append]
 
+/-- Composed completeness: when the input is a single valid skippable frame
+    (magic in range, enough bytes for header + payload, and the frame fills
+    all data), `decompressZstd` succeeds with empty output. Unlike
+    `decompressZstd_single_skippable`, this takes only byte-level preconditions
+    and does not require `skipSkippableFrame` success as a hypothesis. -/
+theorem decompressZstd_succeeds_single_skippable (data : ByteArray)
+    (hsize : data.size ≥ 8)
+    (hmagic_lo : Binary.readUInt32LE data 0 ≥ 0x184D2A50)
+    (hmagic_hi : Binary.readUInt32LE data 0 ≤ 0x184D2A5F)
+    (hpayload : data.size ≥ 8 + (Binary.readUInt32LE data 4).toNat)
+    (hexact : data.size = 8 + (Binary.readUInt32LE data 4).toNat) :
+    Zip.Native.decompressZstd data = .ok ⟨#[]⟩ := by
+  obtain ⟨pos', hskip⟩ := Zstd.Spec.skipSkippableFrame_succeeds data 0
+    (by omega) hmagic_lo hmagic_hi (by simp; exact hpayload)
+  have hadv := Zstd.Spec.skipSkippableFrame_pos_gt data 0 pos' hskip
+  have hpos := Zstd.Spec.skipSkippableFrame_pos_eq data 0 pos' hskip
+  have hdone : pos' ≥ data.size := by simp at hpos; omega
+  exact decompressZstd_single_skippable data pos' (by omega) hmagic_lo hmagic_hi hskip hadv hdone
+
 /-! ## API-level single-block content (raw/RLE) -/
 
 /-- When the input contains exactly one standard Zstd frame at position 0 with a
