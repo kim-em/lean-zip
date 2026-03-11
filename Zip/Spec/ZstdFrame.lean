@@ -171,7 +171,7 @@ theorem decompressZstdWF_output_size_ge (data : ByteArray) (pos : Nat)
     simp only [show ¬ (pos ≥ data.size) from hpos, ↓reduceDIte,
       show (data.size < pos + 4) from hshort, ↓reduceIte,
       bind, Bind.bind, Except.bind] at h
-    exact absurd h nofun
+    exact nomatch h
   | case3 pos output hpos hlong ih_skip ih_std =>
     -- Main case: enough data for magic number, dispatch on frame type
     unfold Zip.Native.decompressZstdWF at h
@@ -182,22 +182,22 @@ theorem decompressZstdWF_output_size_ge (data : ByteArray) (pos : Nat)
     split at h
     · -- Skippable frame branch
       split at h
-      · exact absurd h nofun  -- skipSkippableFrame errored
+      · exact nomatch h  -- skipSkippableFrame errored
       · split at h
-        · exact absurd h nofun  -- frame did not advance
+        · exact nomatch h  -- frame did not advance
         · exact ih_skip _ ‹_› _ h  -- recursive call with same output
     · -- Non-skippable: standard or invalid
       split at h
       · -- Standard frame branch
         split at h
-        · exact absurd h nofun  -- decompressFrame errored
+        · exact nomatch h  -- decompressFrame errored
         · split at h
-          · exact absurd h nofun  -- frame did not advance
+          · exact nomatch h  -- frame did not advance
           · -- Recursive call with output ++ content
             have := ih_std _ _ ‹_› _ h
             simp only [ByteArray.size_append] at this ⊢
             omega
-      · exact absurd h nofun  -- invalid magic number
+      · exact nomatch h  -- invalid magic number
 
 /-- When `decompressZstdWF` succeeds, every byte that was in the `output` buffer
     before the call is present at the same index in the result.  This is the
@@ -220,7 +220,7 @@ theorem decompressZstdWF_prefix (data : ByteArray) (pos : Nat)
     simp only [show ¬ (pos ≥ data.size) from hpos, ↓reduceDIte,
       show (data.size < pos + 4) from hshort, ↓reduceIte,
       bind, Bind.bind, Except.bind] at h
-    exact absurd h nofun
+    exact nomatch h
   | case3 pos output hpos hlong ih_skip ih_std =>
     -- Main case: enough data for magic number, dispatch on frame type
     unfold Zip.Native.decompressZstdWF at h
@@ -231,22 +231,22 @@ theorem decompressZstdWF_prefix (data : ByteArray) (pos : Nat)
     split at h
     · -- Skippable frame branch
       split at h
-      · exact absurd h nofun  -- skipSkippableFrame errored
+      · exact nomatch h  -- skipSkippableFrame errored
       · split at h
-        · exact absurd h nofun  -- frame did not advance
+        · exact nomatch h  -- frame did not advance
         · exact ih_skip _ ‹_› _ h hi  -- recursive call with same output
     · -- Non-skippable: standard or invalid
       split at h
       · -- Standard frame branch
         split at h
-        · exact absurd h nofun  -- decompressFrame errored
+        · exact nomatch h  -- decompressFrame errored
         · split at h
-          · exact absurd h nofun  -- frame did not advance
+          · exact nomatch h  -- frame did not advance
           · -- Recursive call with output ++ content
             have := ih_std _ _ ‹_› _ h
               (by simp only [ByteArray.size_append]; omega)
             rw [this, ByteArray.getElem_append_left hi]
-      · exact absurd h nofun  -- invalid magic number
+      · exact nomatch h  -- invalid magic number
 
 /-- When the input contains exactly one standard Zstd frame starting at position 0,
     `decompressZstd` returns the decompressed content.  This is the first API-level
