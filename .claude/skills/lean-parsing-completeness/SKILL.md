@@ -222,6 +222,35 @@ theorem parseY_complete (h : parseY data pos = .ok ...) : ... := by
 This avoids duplicating the same `by_cases`/`cases`/`nomatch` chain in
 every theorem that depends on `parseX` succeeding.
 
+### Field characterization from parse success
+
+When proving that a parsed struct's fields equal specific expressions over
+the input bytes, after `unfold_except` and `split at h` on the match:
+
+- Success branches give `h : {field1 := ..., field2 := ...} = result ∧ pos+k = afterPos`
+- Use `obtain ⟨rfl, rfl⟩ := h` to substitute `result` and `afterPos`
+- **Simple field projection** (e.g., `hdr.blockSize = raw >>> 3`): close with `rfl`
+- **Conjunction over match branches** (e.g., `(typeVal=0 → .raw) ∧ (typeVal=1 → .rle)`):
+  use `simp_all` because you need the `heq✝ : matchDiscrim = N` hypothesis to rule out
+  impossible implications
+
+**Always use explicit case split** (not `<;>`) because different branches may need
+different closers (`rfl` vs `simp_all` vs `exact nomatch h`).
+
+```lean
+-- Example: field characterization for parseBlockHeader
+theorem parseBlockHeader_blockType_eq ... := by
+  unfold Zip.Native.parseBlockHeader at h
+  unfold_except
+  split at h
+  · exact nomatch h          -- guard failure
+  · split at h
+    · obtain ⟨rfl, rfl⟩ := h; simp_all  -- typeVal = 0
+    · obtain ⟨rfl, rfl⟩ := h; simp_all  -- typeVal = 1
+    · obtain ⟨rfl, rfl⟩ := h; simp_all  -- typeVal = 2
+    · exact nomatch h                     -- reserved type
+```
+
 ## Anti-Patterns
 
 ### Don't use `simp` to close error branches
