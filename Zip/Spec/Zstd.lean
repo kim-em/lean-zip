@@ -343,6 +343,63 @@ theorem decompressRLEBlock_succeeds (data : ByteArray) (pos : Nat) (blockSize : 
   simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
+/-! ### parseBlockHeader field characterization -/
+
+/-- When `parseBlockHeader` succeeds, `hdr.lastBlock` equals whether bit 0 of the
+    3-byte little-endian header word is set. -/
+theorem parseBlockHeader_lastBlock_eq (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (hdr, afterHdr)) :
+    hdr.lastBlock = ((data[pos]!.toUInt32 ||| (data[pos + 1]!.toUInt32 <<< 8)
+      ||| (data[pos + 2]!.toUInt32 <<< 16)) &&& 1 == 1) := by
+  unfold Zip.Native.parseBlockHeader at h
+  unfold_except
+  split at h
+  · exact nomatch h
+  · split at h
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · exact nomatch h
+
+/-- When `parseBlockHeader` succeeds, `hdr.blockType` is determined by bits 1-2 of
+    the 3-byte little-endian header word: 0→raw, 1→rle, 2→compressed. -/
+theorem parseBlockHeader_blockType_eq (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (hdr, afterHdr)) :
+    (let raw24 := data[pos]!.toUInt32 ||| (data[pos + 1]!.toUInt32 <<< 8)
+      ||| (data[pos + 2]!.toUInt32 <<< 16)
+     let typeVal := (raw24 >>> 1) &&& 3
+     (typeVal = 0 → hdr.blockType = .raw) ∧
+     (typeVal = 1 → hdr.blockType = .rle) ∧
+     (typeVal = 2 → hdr.blockType = .compressed)) := by
+  unfold Zip.Native.parseBlockHeader at h
+  unfold_except
+  split at h
+  · exact nomatch h
+  · split at h
+    · obtain ⟨rfl, rfl⟩ := h; simp_all
+    · obtain ⟨rfl, rfl⟩ := h; simp_all
+    · obtain ⟨rfl, rfl⟩ := h; simp_all
+    · exact nomatch h
+
+/-- When `parseBlockHeader` succeeds, `hdr.blockSize` equals bits 3-23 of the
+    3-byte little-endian header word. -/
+theorem parseBlockHeader_blockSize_eq (data : ByteArray) (pos : Nat)
+    (hdr : Zip.Native.ZstdBlockHeader) (afterHdr : Nat)
+    (h : Zip.Native.parseBlockHeader data pos = .ok (hdr, afterHdr)) :
+    hdr.blockSize = (data[pos]!.toUInt32 ||| (data[pos + 1]!.toUInt32 <<< 8)
+      ||| (data[pos + 2]!.toUInt32 <<< 16)) >>> 3 := by
+  unfold Zip.Native.parseBlockHeader at h
+  unfold_except
+  split at h
+  · exact nomatch h
+  · split at h
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · obtain ⟨rfl, rfl⟩ := h; rfl
+    · exact nomatch h
+
 /-! ## Frame-level output guarantees -/
 
 /-- When `decompressFrame` succeeds and the frame header specifies a content size of `n`,
