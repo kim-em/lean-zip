@@ -321,6 +321,86 @@ dsimp only [Bind.bind, Except.bind] at h
 
 to collapse `match (.ok v) with | .ok x => ... | .error e => ...`.
 
+## Composed Completeness Proof Pattern
+
+Composed completeness theorems prove that a high-level operation succeeds
+given only raw-byte-level preconditions. They chain together:
+1. Sub-function completeness (e.g., `parseBlockHeader_succeeds`)
+2. Field characterization (e.g., `parseBlockHeader_blockType_eq`)
+3. A composition lemma (e.g., `decompressBlocksWF_single_raw`)
+
+### The 6-Step Recipe
+
+```lean
+theorem composed_completeness (data : ByteArray) (off : Nat)
+    (hsize : data.size ≥ off + minBytes)
+    (htypeVal : rawByteExpr = expectedValue)
+    (hlastBit : ...)
+    (hpayload : data.size ≥ off + headerSize + payloadSize) :
+    ∃ result pos', topLevelFunction data off ... = .ok (result, pos') := by
+  -- Step 1: Derive that the parser's guard is satisfiable
+  --   e.g., typeVal ≠ 3 (reserved) from typeVal = 0/1/2
+  have htypeNe3 : rawTypeExpr ≠ 3 := by rw [htypeVal]; decide
+  -- Step 2: Obtain parse result via sub-function completeness
+  obtain ⟨hdr, afterHdr, hparse⟩ := parseFunction_succeeds data off hsize htypeNe3
+  -- Step 3: Extract field characterizations
+  have htype := (parseFunction_blockType_eq ... hparse).1 htypeVal
+  have hlast_eq := parseFunction_lastBlock_eq ... hparse
+  have hbs_eq := parseFunction_blockSize_eq ... hparse
+  have hpos_eq := parseFunction_pos_eq ... hparse
+  -- Step 4: Derive high-level constraints from raw-byte hypotheses
+  --   Thread htypeVal/hlastBit/hblockSize through the characterization rewrites
+  have hlast : hdr.lastBlock = true := by rw [hlast_eq, hlastBit]; decide
+  have hbs : ¬ hdr.blockSize > maxSize := by rw [hbs_eq]; exact Nat.not_lt.mpr ...
+  -- Step 5: Obtain sub-operation result via its completeness theorem
+  have hpayload' : data.size ≥ afterHdr + neededBytes := by rw [hpos_eq]; omega
+  obtain ⟨block, afterBlock, hraw⟩ := subOperation_succeeds data afterHdr ... hpayload'
+  -- Step 6: Close via the composition lemma
+  have hoff : ¬ data.size ≤ off := by omega
+  exact ⟨_, _, composition_lemma ... hoff hparse hbs htype hraw hlast⟩
+```
+
+### Key Principles
+
+**Preconditions are raw-byte expressions.** The theorem's hypotheses use
+`data[off]!` expressions, not parsed struct fields. This makes the theorem
+usable without first running the parser — the caller only needs to know
+the bytes at the relevant offsets.
+
+**Field characterization theorems are the bridge.** Theorems like
+`parseBlockHeader_blockType_eq` translate between raw-byte expressions
+(`rawTypeExpr = 0`) and struct field values (`hdr.blockType = .raw`).
+These must exist before composed completeness can be proved.
+
+**Payload size flows through `hpos_eq`.** The sub-operation's payload
+requirement (`data.size ≥ afterHdr + payloadBytes`) is derived by
+rewriting `afterHdr` via the position characterization (`hpos_eq :
+afterHdr = off + headerSize`) and combining with the raw-byte payload
+hypothesis.
+
+**`decide` closes typeVal implications.** After rewriting with the
+characterization theorem, goals like `0 = 0 → .raw = .raw` or
+`(1 : UInt32) &&& 1 = 1 → ... = true` close with `decide`.
+
+### When to Use This Pattern
+
+- Proving that `decompressBlocksWF` succeeds for specific block types
+  (raw, RLE, compressed)
+- Building frame-level completeness from block-level completeness
+- Any theorem that chains parser success → field extraction → sub-operation
+  success → composition
+
+### Prerequisites
+
+Before writing a composed completeness theorem, ensure these exist:
+1. `parseFunction_succeeds` — sub-parser completeness
+2. `parseFunction_fieldName_eq` — field characterization for each relevant field
+3. `subOperation_succeeds` — sub-operation completeness
+4. `composition_lemma` — the step/single theorem that wires everything together
+
+See `Zip/Spec/Zstd.lean`: `decompressBlocksWF_succeeds_single_raw`,
+`decompressBlocksWF_succeeds_single_rle` for concrete examples.
+
 ## Cross-References
 
 - **lean-monad-proofs**: General `Except`/`Option` bind unfolding

@@ -28,6 +28,79 @@ or `Prop`:
 Don't use `show P = false from by omega` for `Prop` conditions — `>` on `Nat`
 creates a `Prop`, not a `Bool`.
 
+## Bool/Prop Bridging Quick Reference
+
+Multiple sessions independently rediscover these patterns. This section
+consolidates all Bool↔Prop conversion patterns in one place.
+
+### Converting `==`/`!=` (BEq) to `=`/`≠` (Prop)
+
+| From | To | Tactic |
+|------|----|--------|
+| `(x == y) = true` | `x = y` | `simp only [beq_iff_eq] at h` or `exact eq_of_beq h` |
+| `(x != y) = true` | `x ≠ y` | `simp only [bne_iff_ne] at h` |
+| `¬((x == 0) = true)` | `x ≠ 0` | `simp only [beq_iff_eq] at h` |
+| `¬((x == 0) = true)` | `x ≥ 1` (for omega) | `revert h; simp only [beq_iff_eq]; omega` |
+
+**Pitfall**: `Nat.eq_of_beq_eq_true` does NOT work — `==` produces
+`BEq.beq`, not `Nat.beq`. Use `eq_of_beq` (no namespace).
+
+**Pitfall**: `simp only [beq_iff_eq]` rewrites ALL `==` in the goal,
+including inside lambdas/foldl. If you need targeted rewriting, use a
+scoped `have` (see "beq_iff_eq Over-Rewrites" section below).
+
+### Converting `&&` compound guards to conjunctions
+
+```lean
+-- h : (a && decide P && decide Q) = true
+simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+-- h : (a = true ∧ P) ∧ Q  (left-nested due to left-associative &&)
+obtain ⟨⟨ha, hp⟩, hq⟩ := h
+```
+
+### Resolving `false = true` in `if` conditions
+
+After `cases b` on a `Bool`, `if b then ...` becomes `if false then ...`
+which elaborates to `if (false = true) then ...`.
+
+| Pattern | Fix |
+|---------|-----|
+| `if (false = true) then X else Y` | `dsimp` (definitional reduction) |
+| `¬(false = true)` | `Bool.false_ne_true` |
+| `if (false = true) then ...` in simp | `if_neg Bool.false_ne_true` |
+
+`↓reduceIte` does NOT work on `false = true` — see the `↓reduceIte`
+Decision Guide section for the full table.
+
+### `decide` for concrete Bool/Prop evaluations
+
+```lean
+-- For concrete values: (1 : UInt32) &&& 1 = 1
+decide
+
+-- For implications from concrete rewrites: 0 = 0 → .raw = .raw
+decide
+
+-- For compound: htypeVal = 0 → typeVal ≠ 3
+rw [htypeVal]; decide
+```
+
+### Bool negation and `or`/`and` patterns
+
+| Pattern | Tactic |
+|---------|--------|
+| `decide_eq_false` on `(x == 0) = false` | Gives `x ≠ 0` |
+| `Bool.false_or` | Simplifies `false || x` to `x` |
+| `Bool.false_and` | Simplifies `false && x` to `false` |
+| `Bool.true_and` | Simplifies `true && x` to `x` |
+
+### Cross-references
+
+The Bool/Prop boundary appears in several other skills:
+- **lean-parsing-completeness**: `BEq` to `Prop` bridging (for `==` guards)
+- **lean-wf-recursion**: `↓reduceIte` limitations with Bool-to-Prop coercion
+- **lean-simp-tactics**: `↓reduceIte` Decision Guide (this file, below)
+
 ## Extracting Conditions from `&&` Boolean Hypotheses
 
 When a proof has `hcond : (a && decide P && decide Q) = true` from an `if` guard:
