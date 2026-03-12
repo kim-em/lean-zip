@@ -432,6 +432,148 @@ Before writing a composed completeness theorem, ensure these exist:
 See `Zip/Spec/Zstd.lean`: `decompressBlocksWF_succeeds_single_raw`,
 `decompressBlocksWF_succeeds_single_rle` for concrete examples.
 
+## Two-Block Composed Completeness
+
+Two-block composed completeness extends the single-block 6-step recipe to
+prove that two consecutive blocks (first non-last, second last) succeed.
+The key addition is **position threading** — the second block's offset
+depends on the first block's output position.
+
+### Pattern: Position Threading with `off2`
+
+Introduce an explicit `off2` parameter for the second block's offset and
+a hypothesis relating it to the first block's computed position:
+
+```lean
+theorem decompressBlocksWF_succeeds_two_raw_blocks
+    (data : ByteArray) (off off2 : Nat)
+    -- Block 1: non-last raw block
+    (hsize1 : data.size ≥ off + 3)
+    (htypeVal1 : (data[off]! >>> 1 &&& 3).toNat = 0)
+    (hlastBit1 : data[off]! &&& 1 = 0)          -- non-last
+    (hblockSize1 : ...)
+    (hpayload1 : data.size ≥ off + 3 + blockSize1.toNat)
+    -- Position threading
+    (hoff2 : off2 = off + 3 + blockSize1.toNat)
+    -- Block 2: last raw block (same pattern as single-block)
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : (data[off2]! >>> 1 &&& 3).toNat = 0)
+    (hlastBit2 : data[off2]! &&& 1 = 1)          -- last
+    ... :
+    ∃ result pos', decompressBlocksWF data off ... = .ok (result, pos') := by
+```
+
+### The `subst` Technique
+
+After obtaining the first block's result and position characterization,
+use `subst` to unify `off2` with the computed position:
+
+```lean
+  -- Steps 1-5 for block 1 (same as single-block recipe)
+  obtain ⟨hdr1, afterHdr1, hparse1⟩ := parseBlockHeader_succeeds ...
+  have hpos1_eq := parseBlockHeader_pos_eq ... hparse1
+  obtain ⟨block1, afterBlock1, hraw1⟩ := decompressRawBlock_succeeds ...
+  have hAfterBlock1_eq := decompressRawBlock_pos_eq ... hraw1
+  -- Unify off2 with afterBlock1
+  have hoff2_eq : off2 = afterBlock1 := by rw [hoff2, hpos1_eq]; omega
+  subst hoff2_eq
+  -- Now all block 2 hypotheses use afterBlock1 directly
+  -- Steps 1-6 for block 2 (same as single-block recipe)
+  ...
+  -- Close via step theorem + single-block theorem
+  exact ⟨_, _, raw_step ... hparse1 hraw1 hlast1_false (single_raw ... hparse2 ...)⟩
+```
+
+**Why `subst` works here**: After `subst hoff2_eq`, every hypothesis
+mentioning `off2` is rewritten to use `afterBlock1`. This avoids manual
+`rw` chains and prevents variable confusion.
+
+**Direction matters**: `subst` eliminates the later-introduced variable.
+If `hoff2_eq : off2 = afterBlock1`, it eliminates `off2`, keeping
+`afterBlock1`. Post-subst, reference the surviving variable.
+
+### Block Type Matrix
+
+Two-block theorems form a matrix over block types:
+
+| Block 1 \ Block 2 | Raw | RLE | Compressed |
+|-------------------|-----|-----|------------|
+| Raw               | `_two_raw_blocks` | `_raw_then_rle` | `_raw_then_compressed` |
+| RLE               | `_rle_then_raw` | `_two_rle_blocks` | `_rle_then_compressed` |
+| Compressed        | `_compressed_then_raw` | `_compressed_then_rle` | `_two_compressed` |
+
+Each entry follows the same pattern; only the step/single theorems and
+position formulas differ (`off + 3 + blockSize` for raw, `off + 4` for
+RLE, variable for compressed).
+
+### Composition vs. Induction
+
+Two-block theorems use explicit composition (step + single). For N-block
+frames, use induction on the WF recursion instead — see the
+`lean-content-preservation` skill's "N-Block Content via Induction"
+section. Two-block theorems remain valuable as:
+- Concrete specifications with byte-level preconditions
+- Building blocks for frame-level composed completeness
+- Test cases that validate the step/single infrastructure
+
+## Multi-Level Composition Chain
+
+Composed completeness scales across abstraction levels. Each level adds
+a wrapper around the previous level's theorem:
+
+```
+decompressBlocksWF_succeeds_*   (block loop level)
+    ↓
+decompressFrame_succeeds_*      (frame level: + header/dict/checksum)
+    ↓
+decompressZstd_succeeds_*       (API level: + magic/end-of-data)
+```
+
+### Frame-Level Pattern
+
+Frame-level theorems wrap block-level completeness with frame header
+parsing and dictionary/checksum/size checks:
+
+```lean
+theorem decompressFrame_succeeds_single_raw
+    (data : ByteArray) (off : Nat)
+    (hsize : data.size ≥ off + frameHeaderMinSize)
+    -- Frame header hypotheses
+    (hmagic : ...)
+    -- Block hypotheses (universally quantified over parsed header)
+    (hblock : ∀ hdr afterHdr, parseFrameHeader data off = .ok (hdr, afterHdr) →
+       ... block byte conditions ...) :
+    ∃ content pos', decompressFrame data off ... = .ok (content, pos') := by
+  obtain ⟨hdr, afterHdr, hparse⟩ := parseFrameHeader_succeeds ...
+  have ⟨htype, hlast, ...⟩ := hblock hdr afterHdr hparse
+  obtain ⟨result, pos', hblocks⟩ := decompressBlocksWF_succeeds_single_raw ...
+  exact ⟨_, _, decompressFrame_single_block ... hparse hblocks ...⟩
+```
+
+**Key technique**: Block hypotheses are universally quantified over
+`(hdr, afterHdr)` from `parseFrameHeader`. This lets the theorem
+state byte-level conditions that depend on the header size (which
+varies by frame header format).
+
+### API-Level Pattern
+
+API-level theorems add the final wrapper:
+
+```lean
+theorem decompressZstd_succeeds_single_raw_frame ...
+    (hterm : ∀ content pos', decompressFrame ... = .ok (content, pos') →
+       pos' ≥ data.size) :
+    ∃ output, decompressZstd data = .ok output := by
+  obtain ⟨content, pos', hframe⟩ := decompressFrame_succeeds_single_raw ...
+  exact ⟨_, decompressZstd_single_frame hframe (hterm content pos' hframe)⟩
+```
+
+**`hterm` pattern**: The "frame fills data" condition is stated as a
+universally quantified hypothesis (`∀ content pos', ... → pos' ≥ data.size`)
+rather than a byte-level assertion. This is cleaner than computing the
+exact end position from byte-level conditions (which would require
+threading all position computations).
+
 ## Cross-References
 
 - **lean-monad-proofs**: General `Except`/`Option` bind unfolding

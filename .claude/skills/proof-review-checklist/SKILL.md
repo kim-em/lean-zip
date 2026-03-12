@@ -326,6 +326,56 @@ should focus on (in priority order):
    theorem families (e.g., all position-advancement theorems use
    `_pos_gt` suffix consistently)
 
+### Review campaign completion status (2026-03-12)
+
+**DEFLATE write-side** — all audited:
+BitstreamWriteCorrect, BitWriterCorrect, DeflateDynamicHeader,
+DeflateDynamicEmit, DeflateEncode, DeflateEncodeProps,
+DeflateEncodeDynamic, DeflateEncodeDynamicProps, HuffmanEncode,
+HuffmanEncodeCorrect, DynamicTreesCorrect, DynamicTreesComplete,
+GzipCorrect, ZlibCorrect, DeflateRoundtrip
+
+**DEFLATE read-side** — all audited:
+BitstreamCorrect, BitstreamComplete, DecodeCorrect, DecodeComplete,
+InflateCorrect, InflateComplete, InflateLoopBounds, InflateRawSuffix,
+HuffmanCorrect, HuffmanCorrectLoop
+
+**Remaining unaudited spec files** (for future review sessions):
+DeflateDynamicCorrect, DeflateDynamicFreqs, DeflateFixedTables,
+EmitTokensCorrect, HuffmanKraft, HuffmanTheorems,
+LZ77, LZ77Lazy, LZ77NativeCorrect,
+Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, etc.)
+
+### Patterns discovered during the review campaign
+
+**UInt8-to-Nat `have` for omega**: When `split` gives UInt8 comparison
+hypotheses (e.g., `hlen_pos : sym.len > 0` where `sym.len : UInt8`),
+`omega` cannot reduce the UInt8 comparison. A `have hlen_pos_nat :
+sym.len.toNat > 0 := by ...` is NOT dead — it's an intentional type
+annotation that provides the Nat version `omega` needs. Don't remove.
+
+**`exact nomatch (h ▸ h)` limitation**: This concise error-branch
+closer hits `maxRecDepth` after unfolding large definitions (e.g.,
+`inflateRaw`). For those cases, retain the two-step pattern:
+`simp only [h] at h; exact absurd h nofun`.
+
+**Stale counts in issues**: Always verify the issue's bare simp counts
+against master before starting. Multiple agents may clean the same
+files in overlapping sessions. Use `coordination skip` if the file is
+already clean.
+
+**`show ... from` wrappers**: After `simp only` unfolds let-bindings,
+`show T from h` wrappers become redundant when `h` already has type `T`.
+Remove these to reduce noise.
+
+**Identical split branches**: Use `<;>` combinator to merge identical
+branches in multi-case `split` blocks (e.g., GzipCorrect/ZlibCorrect
+compress theorems).
+
+**`List.length_replicate` over expansion**: Replace verbose
+`List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
+with direct `List.length_replicate`.
+
 ## Phase 3c: Proof Compression
 
 After bare-simp cleanup, look for opportunities to shorten proofs
