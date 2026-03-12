@@ -393,12 +393,8 @@ theorem decode_shorter {α : Type} (table : List (Codeword × α))
     (hnonempty : ∀ cw s, (cw, s) ∈ table → cw ≠ []) :
     rest.length < bits.length := by
   obtain ⟨cw, hmem, rfl⟩ := decode_some_append table bits sym rest h
-  have hne := hnonempty cw sym hmem
-  have hpos : cw.length > 0 := by
-    cases cw with
-    | nil => exact absurd rfl hne
-    | cons _ _ => simp only [List.length_cons, gt_iff_lt, Nat.zero_lt_succ]
-  simp only [List.length_append, Nat.lt_add_left_iff_pos, gt_iff_lt]
-  omega
+  cases cw with
+  | nil => exact absurd rfl (hnonempty _ _ hmem)
+  | cons _ _ => simp only [List.length_append, List.length_cons]; omega
 
 end Huffman.Spec

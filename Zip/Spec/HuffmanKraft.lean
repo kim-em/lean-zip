@@ -23,9 +23,8 @@ private theorem kraft_ge_count (ls : List Nat) (maxBits len : Nat) :
   induction ls with
   | nil => simp only [List.filter_nil, List.length_nil, Nat.zero_mul, List.foldl_nil, Std.le_refl]
   | cons x xs ih =>
-    simp only [List.foldl_cons, Nat.zero_add]
+    simp only [List.foldl_cons, Nat.zero_add, List.filter_cons]
     rw [List.foldl_add_init]
-    simp only [List.filter_cons]
     cases hxl : x == len
     · exact Nat.le_trans ih (Nat.le_add_left _ _)
     · have hxeq : x = len := beq_iff_eq.mp hxl
@@ -213,7 +212,7 @@ private theorem kraftSumFrom_incr (acc : Array Nat) (maxBits l b : Nat)
       rw [ih]; simp only [show b ≤ b from Nat.le_refl _, ite_true]
       rw [Nat.add_mul]; omega
     else
-      rw [Array.getElem!_set!_ne acc l b _ (by exact fun h => hbl h.symm)]
+      rw [Array.getElem!_set!_ne acc l b _ (Ne.symm hbl)]
       have ih := kraftSumFrom_incr acc maxBits l (b + 1) hl hsize
       rw [ih]
       if hbl' : b ≤ l then
@@ -280,12 +279,12 @@ private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
       have hl_le : l ≤ maxBits := by omega
       have hsize' : (acc.set! l (acc[l]! + 1)).size = maxBits + 1 := by
         rw [Array.size_set!]; exact hsize
-      rw [ih hv_ls (acc.set! l (acc[l]! + 1)) hsize']
-      rw [kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
+      rw [ih hv_ls (acc.set! l (acc[l]! + 1)) hsize',
+          kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
       simp only [Nat.zero_le, ite_true]
       rw [show (l :: ls).filter (· != 0) = l :: ls.filter (· != 0) from by
-        simp only [bne_iff_ne, ne_eq, hl_ne, not_false_eq_true, List.filter_cons_of_pos]]
-      rw [List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← List.foldl_add_init]
+        simp only [bne_iff_ne, ne_eq, hl_ne, not_false_eq_true, List.filter_cons_of_pos],
+        List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← List.foldl_add_init]
 
 /-- The ncRec recurrence at higher bit lengths bounds from below by
     scaling the value at a lower length:
