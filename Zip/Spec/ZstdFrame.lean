@@ -1671,4 +1671,121 @@ theorem decompressZstd_succeeds_single_compressed_sequences_frame (data : ByteAr
   -- Step 5: Apply decompressZstd_single_frame
   exact ⟨content, decompressZstd_single_frame data content pos' hframe (hterm content pos' hframe)⟩
 
+/-! ## decompressZstd composed completeness for raw/RLE blocks -/
+
+/-- End-to-end composed completeness for a single raw-block frame: byte-level conditions
+    on the frame header and block header imply `decompressZstd` succeeds.
+
+    Composes the full chain:
+    1. `parseFrameHeader_succeeds` (byte-level magic + size → frame header parsed)
+    2. `decompressFrame_succeeds_single_raw` (frame header + block conditions → frame success)
+    3. `decompressZstd_single_frame` (frame success + end-of-data → API success)
+
+    The header field constraints and block conditions are universally quantified over
+    `(hdr, afterHdr)` from `parseFrameHeader`, since the caller doesn't know these values
+    without parsing. The termination hypothesis `hterm` states that the frame fills all
+    remaining data — this cannot be derived from byte-level conditions without a separate
+    characterization of `decompressFrame`'s output position. -/
+theorem decompressZstd_succeeds_single_raw_frame (data : ByteArray)
+    -- Frame header conditions (from parseFrameHeader_succeeds)
+    (hmagic : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic)
+    (hframeSize : data.size ≥ Zstd.Spec.frameHeaderMinSize data[4]!)
+    -- Header field constraints (universally quantified over parseFrameHeader result)
+    (hnodict : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → hdr.dictionaryId = none)
+    (hnocksum : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → hdr.contentChecksum = false)
+    (hnosize : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → hdr.contentSize = none)
+    -- Block conditions at afterHdr (byte-level raw block: type=0, lastBlock=1)
+    (htypeVal : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → (data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSizeBound : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → ¬ (hdr.windowSize > 0 &&
+            ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > hdr.windowSize))
+    (hpayload : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → data.size ≥ afterHdr + 3 +
+            (((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    -- Frame terminates the data (for decompressZstdWF recursion termination)
+    (hterm : ∀ content pos', Zip.Native.decompressFrame data 0 = .ok (content, pos')
+        → pos' ≥ data.size) :
+    ∃ output, Zip.Native.decompressZstd data = .ok output := by
+  -- Step 1: Obtain header from parseFrameHeader_succeeds
+  obtain ⟨hdr, afterHdr, hparse⟩ :=
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+  -- Step 2: Specialize universally quantified hypotheses
+  have htypeVal' := htypeVal hdr afterHdr hparse
+  have hlastBit' := hlastBit hdr afterHdr hparse
+  have hblockSizeBound' := hblockSizeBound hdr afterHdr hparse
+  have hwindow' := hwindow hdr afterHdr hparse
+  have hpayload' := hpayload hdr afterHdr hparse
+  -- Step 3: Apply decompressFrame_succeeds_single_raw
+  obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_single_raw
+    data 0 hdr afterHdr hparse (hnodict hdr afterHdr hparse) (hnocksum hdr afterHdr hparse)
+    (hnosize hdr afterHdr hparse) (by omega) htypeVal' hlastBit' hblockSizeBound' hwindow' hpayload'
+  -- Step 4: Apply decompressZstd_single_frame
+  exact ⟨content, decompressZstd_single_frame data content pos' hframe (hterm content pos' hframe)⟩
+
+/-- End-to-end composed completeness for a single RLE-block frame: byte-level conditions
+    on the frame header and block header imply `decompressZstd` succeeds.
+
+    Same structure as `decompressZstd_succeeds_single_raw_frame` but for RLE blocks
+    (block type = 1). RLE blocks need only 1 byte of payload (the repeated byte),
+    so `hpayload` requires `afterHdr + 4` instead of `afterHdr + 3 + blockSize`. -/
+theorem decompressZstd_succeeds_single_rle_frame (data : ByteArray)
+    -- Frame header conditions (from parseFrameHeader_succeeds)
+    (hmagic : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic)
+    (hframeSize : data.size ≥ Zstd.Spec.frameHeaderMinSize data[4]!)
+    -- Header field constraints (universally quantified over parseFrameHeader result)
+    (hnodict : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → hdr.dictionaryId = none)
+    (hnocksum : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → hdr.contentChecksum = false)
+    (hnosize : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → hdr.contentSize = none)
+    -- Block conditions at afterHdr (byte-level RLE block: type=1, lastBlock=1)
+    (htypeVal : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → (data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSizeBound : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
+        → ¬ (hdr.windowSize > 0 &&
+            ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
+              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > hdr.windowSize))
+    (hpayload : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
+        → data.size ≥ afterHdr + 4)
+    -- Frame terminates the data (for decompressZstdWF recursion termination)
+    (hterm : ∀ content pos', Zip.Native.decompressFrame data 0 = .ok (content, pos')
+        → pos' ≥ data.size) :
+    ∃ output, Zip.Native.decompressZstd data = .ok output := by
+  -- Step 1: Obtain header from parseFrameHeader_succeeds
+  obtain ⟨hdr, afterHdr, hparse⟩ :=
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+  -- Step 2: Specialize universally quantified hypotheses
+  have htypeVal' := htypeVal hdr afterHdr hparse
+  have hlastBit' := hlastBit hdr afterHdr hparse
+  have hblockSizeBound' := hblockSizeBound hdr afterHdr hparse
+  have hwindow' := hwindow hdr afterHdr hparse
+  have hpayload' := hpayload hdr afterHdr hparse
+  -- Step 3: Apply decompressFrame_succeeds_single_rle
+  obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_single_rle
+    data 0 hdr afterHdr hparse (hnodict hdr afterHdr hparse) (hnocksum hdr afterHdr hparse)
+    (hnosize hdr afterHdr hparse) (by omega) htypeVal' hlastBit' hblockSizeBound' hwindow' hpayload'
+  -- Step 4: Apply decompressZstd_single_frame
+  exact ⟨content, decompressZstd_single_frame data content pos' hframe (hterm content pos' hframe)⟩
+
 end Zip.Spec.ZstdFrame
