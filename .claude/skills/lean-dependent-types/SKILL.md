@@ -77,6 +77,45 @@ theorem call site by reducing the `if let` to concrete `none`/`some` values.
 See `decompressFrame_compressed_seq_then_compressed_lit_content` in `Zip/Spec/Zstd.lean`
 for the working pattern.
 
+## `subst` Before `cases` to Avoid Alpha-Equivalence Mismatch
+
+When composing two-block theorems, a step theorem produces output with
+`if let` expressions containing proof variables whose names differ from
+the theorem statement's elaboration. This causes type mismatches even
+when both types **print identically** — the underlying match motives
+differ in alpha-equivalence.
+
+**Symptom**: `exact`, `by exact`, and direct application of a single-block
+theorem all fail after applying a step theorem, despite the goal appearing
+to match the theorem's type.
+
+**Fix**: Use `subst` to eliminate intermediate position variables early,
+before `cases` on the `if let` discriminant:
+
+```lean
+-- Composition theorem: block1 (step) + block2 (single-block)
+theorem f_two_block ... := by
+  rw [step_theorem ...]
+  -- Goal now has: if let some ht := huffTree1 then some ht else prevHuff
+  -- DON'T try exact single_block_theorem directly — alpha mismatch
+  subst hpos_eq1              -- eliminate afterHdr1 early, avoids hlit1' creation
+  cases huffTree1             -- reduces if let to concrete none/some values
+  · exact single_block_none_theorem ...
+  · exact single_block_some_theorem ...
+```
+
+**Why it works**: `subst` eliminates the intermediate variable before Lean
+elaborates the `if let` match. Without `subst`, the `if let` captures
+earlier proof parameters (e.g., `hlit1`) as match scrutinees, creating
+a motive that differs from the single-block theorem's context.
+
+**When to use**: Two-block composition theorems in `Zip/Spec/Zstd.lean`
+where `huffTree` state is threaded between blocks via `if let ... then
+some ht else prevHuff` patterns.
+
+See `decompressBlocksWF_succeeds_compressed_zero_seq_then_compressed_zero_seq`
+in `Zip/Spec/Zstd.lean` for the working pattern.
+
 ## `congrArg` for Large List/Array Rewrites
 
 When rewriting a term containing large constant lists (e.g., 288-element
