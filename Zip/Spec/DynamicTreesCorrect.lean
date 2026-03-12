@@ -37,7 +37,7 @@ theorem fromLengths_valid (lengths : Array UInt8) (maxBits : Nat)
         rw [Array.mem_toList_iff, Array.mem_iff_getElem] at hu
         obtain ⟨i, hi, rfl⟩ := hu
         rw [Bool.not_eq_true, Array.any_eq_false] at hany
-        simpa using hany i hi
+        simpa only [gt_iff_lt, decide_eq_true_eq, Nat.not_lt] using hany i hi
       · exact Nat.le_of_not_lt hkraft
 
 /-- If `ValidLengths` holds, `fromLengths` succeeds. (Reverse of `fromLengths_valid`.) -/
@@ -571,7 +571,8 @@ protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
           obtain ⟨clArr, br₄⟩ := p4; simp only [hrcl] at h
           have ⟨hwf₄, hpos₄⟩ := readCLCodeLengths_inv br₃ _ 0 _ clArr br₄ hwf₃ hpos₃ hrcl
           have hcl_sz : clArr.size = 19 :=
-            by simpa using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl
+            by simpa only [Array.size_replicate] using
+              Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl
           have ⟨rest₄, hspec_rcl, hrest₄⟩ :=
             readCLCodeLengths_correct br₃ _ 0 _ clArr br₄ hwf₃ (by simp only [Array.size_replicate]) hrcl
           cases hft : Zip.Native.HuffTree.fromLengths clArr 7 with
