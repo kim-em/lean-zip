@@ -2379,6 +2379,135 @@ theorem decompressBlocksWF_succeeds_single_compressed_sequences (data : ByteArra
     afterSeqHeader llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
     hoff hparse hbs hws htype hblockEnd' hlit' hseq hNumSeq hfse hbbr' hdec hexec hlast⟩
 
+/-! ## decompressFrame composed completeness for compressed blocks -/
+
+/-- When a frame contains a single compressed last block with zero sequences
+    (literals only), with no dictionary, no content checksum, and no declared
+    content size, `decompressFrame` succeeds. This composes
+    `decompressBlocksWF_succeeds_single_compressed_zero_seq` with the frame-level
+    dictionary/checksum/size guards. -/
+theorem decompressFrame_succeeds_single_compressed_zero_seq (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (literals : ByteArray) (afterLiterals : Nat)
+    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    (hsize : data.size ≥ afterHeader + 3)
+    (htypeVal : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
+    (hlastBit : (data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow : ¬ (header.windowSize > 0 &&
+        ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hblockEnd : data.size ≥ afterHeader + 3 +
+        (((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    (hlit : Zip.Native.parseLiteralsSection data (afterHeader + 3) none
+              = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+              = .ok (0, modes, afterSeqHeader)) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 1: Get block-level success from byte-level conditions
+  obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_single_compressed_zero_seq
+    data afterHeader header.windowSize ByteArray.empty none {} #[1, 4, 8]
+    literals afterLiterals huffTree modes afterSeqHeader
+    hsize htypeVal hlastBit hblockSize hwindow hblockEnd hlit hseq
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none — both guards are trivial
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
+/-- When a frame contains a single compressed last block with sequences
+    (numSeq > 0), with no dictionary, no content checksum, and no declared
+    content size, `decompressFrame` succeeds. This composes
+    `decompressBlocksWF_succeeds_single_compressed_sequences` with the frame-level
+    dictionary/checksum/size guards. -/
+theorem decompressFrame_succeeds_single_compressed_sequences (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (literals : ByteArray) (afterLiterals : Nat)
+    (huffTree : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq : Nat) (modes : Zip.Native.SequenceCompressionModes) (afterSeqHeader : Nat)
+    (llTable ofTable mlTable : Zip.Native.FseTable) (afterTables : Nat)
+    (bbr : Zip.Native.BackwardBitReader)
+    (sequences : Array Zip.Native.ZstdSequence)
+    (blockOutput : ByteArray) (newHist : Array Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    (hsize : data.size ≥ afterHeader + 3)
+    (htypeVal : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
+    (hlastBit : (data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow : ¬ (header.windowSize > 0 &&
+        ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hblockEnd : data.size ≥ afterHeader + 3 +
+        (((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    (hlit : Zip.Native.parseLiteralsSection data (afterHeader + 3) none
+              = .ok (literals, afterLiterals, huffTree))
+    (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+              = .ok (numSeq, modes, afterSeqHeader))
+    (hNumSeq : ¬ numSeq == 0)
+    (hfse : Zip.Native.resolveSequenceFseTables modes data afterSeqHeader {}
+              = .ok (llTable, ofTable, mlTable, afterTables))
+    (hbbr : Zip.Native.BackwardBitReader.init data afterTables
+              (afterHeader + 3 + (((data[afterHeader]!.toUInt32
+                ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+                ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+              = .ok bbr)
+    (hdec : Zip.Native.decodeSequences llTable ofTable mlTable bbr numSeq
+              = .ok sequences)
+    (hexec : Zip.Native.executeSequences sequences literals ByteArray.empty #[1, 4, 8]
+               header.windowSize.toNat
+               = .ok (blockOutput, newHist)) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 0: Convert hexec to match block-level form (if-guard simplifies for empty output)
+  have hexec' : Zip.Native.executeSequences sequences literals
+      (if header.windowSize > 0 && ByteArray.empty.size > header.windowSize.toNat
+       then ByteArray.empty.extract (ByteArray.empty.size - header.windowSize.toNat)
+         ByteArray.empty.size
+       else ByteArray.empty)
+      #[1, 4, 8] header.windowSize.toNat = .ok (blockOutput, newHist) := by
+    simp only [ByteArray.size_empty, Nat.not_lt_zero, decide_false, Bool.and_false,
+      Bool.false_eq_true, ↓reduceIte]; exact hexec
+  -- Step 1: Get block-level success from byte-level conditions
+  obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_single_compressed_sequences
+    data afterHeader header.windowSize ByteArray.empty none {} #[1, 4, 8]
+    literals afterLiterals huffTree numSeq modes afterSeqHeader
+    llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
+    hsize htypeVal hlastBit hblockSize hwindow hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec'
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none — both guards are trivial
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
 /-- When `decompressBlocksWF` encounters two consecutive compressed blocks with
     sequences (numSeq > 0), where the first is non-last and the second is last,
     the output is `output ++ blockOutput1 ++ blockOutput2` at the position after
