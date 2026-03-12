@@ -379,9 +379,13 @@ already clean.
 `show T from h` wrappers become redundant when `h` already has type `T`.
 Remove these to reduce noise.
 
-**Identical split branches**: Use `<;>` combinator to merge identical
-branches in multi-case `split` blocks (e.g., GzipCorrect/ZlibCorrect
-compress theorems).
+**Identical split branches**: When all branches of a nested `split`
+produce the same closer, use `repeat (first | closer | split)` to
+collapse them into one line. This handles any nesting depth (3-branch,
+4-branch, etc.) by alternating between trying the closer and splitting
+further. Example: `repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)`
+or `repeat (first | decide | split)`. See GzipCorrect/ZlibCorrect
+compress theorems for the pattern in practice.
 
 **`List.length_replicate` over expansion**: Replace verbose
 `List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
@@ -441,24 +445,6 @@ With:
 ```lean
 rw [(Prod.mk.inj (Option.some.inj (h₁.symm.trans h₂))).2]; exact hfinal
 ```
-
-**Tactic macro quotation syntax**: When extracting repeated tactic
-blocks into `local macro "name" : tactic`, the `·` (bullet/focus dot)
-syntax does NOT work inside `\`(tactic| ...)` quotations. Use `next =>`
-instead. Wrap the entire tactic in parentheses to parse correctly:
-```lean
-set_option hygiene false in
-local macro "my_tactic" : tactic =>
-  `(tactic| (
-    by_cases h : condition
-    next => tactic_for_true
-    next => tactic_for_false))
-```
-
-**`show T; omega` for structure projections**: `omega` cannot reduce
-structure projections (e.g., `(BitReader.mk data startPos 0).bitOff`).
-Use `show 0 < 8; omega` to explicitly narrow the goal before calling
-`omega`. Do NOT simplify to `by omega` — it will fail.
 
 ## Phase 3c: Proof Compression
 

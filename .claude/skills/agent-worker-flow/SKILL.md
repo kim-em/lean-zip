@@ -85,13 +85,6 @@ git checkout -b agent/<first-8-chars-of-session-UUID>
 git rev-parse HEAD      # record starting commit
 ```
 
-**Branch name collision**: If the branch already exists (from a prior session
-in the same worktree), check whether it has a remote with unrelated commits.
-If so, use a suffixed name like `agent/<UUID>-<issue-type>` (e.g.,
-`agent/b0db81a5-review`) and skip rebasing — the prior branch's commits are
-from a different PR and will conflict.
-
-
 Record any project-specific quality metrics (e.g. sorry count, test coverage)
 as described in the project's CLAUDE.md.
 
