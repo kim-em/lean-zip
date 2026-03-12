@@ -180,8 +180,7 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
               -- Reduce native findLengthCode/findDistCode matches
               simp only [hnflc, hnfdc]
               -- Normalize lidx + 257 → 257 + lidx
-              have h257 : lidx + 257 = 257 + lidx := by omega
-              rw [h257]
+              rw [show lidx + 257 = 257 + lidx by omega]
               -- Chain BitWriter correspondence
               let lcode := litCodes[257 + lidx]!.fst
               let llen := litCodes[257 + lidx]!.snd
@@ -200,8 +199,7 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
               have hbits4 := BitWriter.writeBits_toBits bw3 dextraN dextraV.toUInt32 hwf3 dextraN_le
               -- Apply IH
               rw [ih _ (i + 1) restBits hwf4 hencrest (by omega)]
-              rw [hbits4, hbits3, hbits2, hbits1]
-              rw [hlcw, hdcw]
+              rw [hbits4, hbits3, hbits2, hbits1, hlcw, hdcw]
               -- UInt32 faithfulness for extra values
               have hlextraV_small : lextraV < 2 ^ 32 := Nat.lt_of_lt_of_le
                 hflc_spec.2.2.2 (Nat.pow_le_pow_right (by omega) (by omega))
@@ -209,8 +207,8 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
                 hfdc_spec.2.2.2 (Nat.pow_le_pow_right (by omega) (by omega))
               simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
                 show lextraV % 2 ^ 32 = lextraV from Nat.mod_eq_of_lt hlextraV_small,
-                show dextraV % 2 ^ 32 = dextraV from Nat.mod_eq_of_lt hdextraV_small]
-              simp only [List.append_assoc]
+                show dextraV % 2 ^ 32 = dextraV from Nat.mod_eq_of_lt hdextraV_small,
+                List.append_assoc]
               rfl
 
 /-- `emitTokensWithCodes` produces the same bit sequence as spec `encodeSymbols`

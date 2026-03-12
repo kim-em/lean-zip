@@ -48,10 +48,9 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
     have hbits := BitWriter.writeBits_toBits bw 3 (clLens.getD (Deflate.Spec.clPermutation.getD i 0) 0).toUInt32 hwf (by omega)
     rw [ih _ (i + 1) hwf' (by omega)]
     rw [hbits]
-    have hperm_len : Deflate.Spec.clPermutation.length = 19 := by
-      simp only [Deflate.Spec.clPermutation, List.length_cons, List.length_nil]
     have hi_bound : i < (Deflate.Spec.clPermutation.take numCodeLen).length := by
-      simp only [List.length_take]; omega
+      simp only [List.length_take, Deflate.Spec.clPermutation, List.length_cons,
+        List.length_nil]; omega
     rw [List.drop_eq_getElem_cons hi_bound]
     simp only [List.flatMap_cons, List.append_assoc]
     congr 1
@@ -186,24 +185,24 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
           have hwf2 := BitWriter.writeBits_wf _ 2 extra.toUInt32 hwf1 (by omega)
           have hbits2 := BitWriter.writeBits_toBits _ 2 extra.toUInt32 hwf1 (by omega)
           rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
-          simp only [Deflate.Spec.encodeCLExtra, h16, ↓reduceIte]
-          simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+          simp only [Deflate.Spec.encodeCLExtra, h16, ↓reduceIte,
+            Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
             Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
         · by_cases h17 : code == 17
           · simp only [h16, h17, ↓reduceIte, Bool.false_eq_true]
             have hwf2 := BitWriter.writeBits_wf _ 3 extra.toUInt32 hwf1 (by omega)
             have hbits2 := BitWriter.writeBits_toBits _ 3 extra.toUInt32 hwf1 (by omega)
             rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
-            simp only [Deflate.Spec.encodeCLExtra, h16, h17, ↓reduceIte, Bool.false_eq_true]
-            simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+            simp only [Deflate.Spec.encodeCLExtra, h16, h17, ↓reduceIte, Bool.false_eq_true,
+              Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
               Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
           · by_cases h18 : code == 18
             · simp only [h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
               have hwf2 := BitWriter.writeBits_wf _ 7 extra.toUInt32 hwf1 (by omega)
               have hbits2 := BitWriter.writeBits_toBits _ 7 extra.toUInt32 hwf1 (by omega)
               rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
-              simp only [Deflate.Spec.encodeCLExtra, h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
-              simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
+              simp only [Deflate.Spec.encodeCLExtra, h16, h17, h18, ↓reduceIte, Bool.false_eq_true,
+                Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
                 Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
             · simp only [h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
               rw [ih _ _ hwf1 hext_rest hencrest, hbits1, hcw]
