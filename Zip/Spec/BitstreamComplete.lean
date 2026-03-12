@@ -57,15 +57,13 @@ protected theorem readBit_complete (br : Zip.Native.BitReader) (b : Bool) (rest 
   -- Split on bitOff + 1 ≥ 8
   by_cases hoff : br.bitOff + 1 ≥ 8
   · -- bitOff + 1 ≥ 8 → advance to next byte
-    have hoff' : br.bitOff + 1 ≥ 8 := hoff
-    simp only [hoff', ↓reduceIte]
+    simp only [hoff, ↓reduceIte]
     exact ⟨⟨br.data, br.pos + 1, 0⟩, by rw [hbit_val], by
       rw [hrest_eq, hrest'_eq]
       simp only [Zip.Native.BitReader.toBits, Nat.add_zero]
       congr 1; omega, by simp only []; omega, Or.inl rfl⟩
   · -- bitOff + 1 < 8 → stay in same byte
-    have hoff' : ¬(br.bitOff + 1 ≥ 8) := hoff
-    simp only [hoff', ↓reduceIte]
+    simp only [hoff, ↓reduceIte]
     exact ⟨⟨br.data, br.pos, br.bitOff + 1⟩, by rw [hbit_val], by
       rw [hrest_eq, hrest'_eq]
       simp only [Zip.Native.BitReader.toBits, List.drop_eq_drop_iff]; omega,
@@ -117,8 +115,7 @@ protected theorem readBits_go_complete (br : Zip.Native.BitReader) (acc : UInt32
           have : (if b then 1 else 0) + v * 2 = specVal := hval
           cases b <;> simp only [ite_true] at this <;> omega
         -- Apply IH
-        rw [← hbr1_bits] at hk
-        rw [hrst] at hk
+        rw [← hbr1_bits, hrst] at hk
         obtain ⟨result, br', hgo, hresult, hbr'_bits, hwf', hpos'⟩ := ih br₁
           (acc ||| ((if b then 1 else 0) <<< shift.toUInt32))
           (shift + 1) v hwf₁ hpos₁ (by omega) hacc' hv_bound hk
