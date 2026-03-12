@@ -20,16 +20,16 @@ private theorem ba2_getElem!_0 (a b : UInt8) :
 private theorem ba2_getElem!_1 (a b : UInt8) :
     (ByteArray.mk #[a, b])[0 + 1]! = b := rfl
 
-theorem ba4_getElem!_0 (a b c d : UInt8) :
+private theorem ba4_getElem!_0 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0]! = a := rfl
 
-theorem ba4_getElem!_1 (a b c d : UInt8) :
+private theorem ba4_getElem!_1 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0 + 1]! = b := rfl
 
-theorem ba4_getElem!_2 (a b c d : UInt8) :
+private theorem ba4_getElem!_2 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0 + 2]! = c := rfl
 
-theorem ba4_getElem!_3 (a b c d : UInt8) :
+private theorem ba4_getElem!_3 (a b c d : UInt8) :
     (ByteArray.mk #[a, b, c, d])[0 + 3]! = d := rfl
 
 /-! ## UInt16 roundtrip -/
