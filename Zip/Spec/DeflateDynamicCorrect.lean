@@ -372,8 +372,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
           -- is definitionally equal to using .1/.2. So `split` on the `if` suffices.
           split
           · rename_i hzero
-            have hzero' : data.size = 0 := by
-              rw [beq_iff_eq] at hzero; exact hzero
+            rw [beq_iff_eq] at hzero
             have htok_empty : tokens = #[] := by
               simp only [tokens, lz77Greedy]
               rw [if_pos (show data.size < 3 by omega)]
@@ -390,8 +389,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
         -- The bits decomposition
         have hbits_eq : (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).toBits =
             [true, false, true] ++ headerBits ++ symBits := by
-          rw [hbw_eob]
-          rw [hsymBits_eq, heob_eq, heob_cw]
+          rw [hbw_eob, hsymBits_eq, heob_eq, heob_cw]
           simp only [List.append_assoc]
         rw [hflush, hbits_eq]
         -- Align the bitCount % 8
