@@ -84,7 +84,7 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
       header.size = 10 ∧ trailer.size = 8 ∧
       compress data level = header ++ Deflate.deflateRaw data level ++ trailer := by
   unfold compress
-  split <;> first | exact ⟨_, _, rfl, rfl, rfl⟩ | (split <;> exact ⟨_, _, rfl, rfl, rfl⟩)
+  repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)
 
 /-- Decomposition with concrete trailer: `compress` = header(10) ++ deflateRaw ++ trailer
     where `readUInt32LE trailer 0 = crc32 0 data` and `readUInt32LE trailer 4 = isize`. -/
@@ -95,9 +95,7 @@ private theorem compress_trailer (data : ByteArray) (level : UInt8) :
       Binary.readUInt32LE trailer 0 = Crc32.Native.crc32 0 data ∧
       Binary.readUInt32LE trailer 4 = data.size.toUInt32 := by
   unfold compress
-  split <;>
-    first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
-          | (split <;> exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩)
+  repeat (first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩ | split)
 
 /-- CRC32 trailer match: `readUInt32LE` at endPos reads `crc32 0 data`. -/
 theorem compress_crc32 (data : ByteArray) (level : UInt8) :
@@ -223,10 +221,7 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
   have hinflRaw'' : Inflate.inflateRaw ((header ++ Deflate.deflateRaw data level) ++ trailer)
       10 (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') :=
     inflateRaw_append_suffix _ trailer 10 _ _ _ hinflRaw'
-  -- (header ++ deflated) ++ trailer = compress data level
-  have hreassoc : (header ++ Deflate.deflateRaw data level) ++ trailer =
-      GzipEncode.compress data level := hceq.symm
-  rw [hreassoc] at hinflRaw''
+  rw [hceq.symm] at hinflRaw''
   -- endPos' = endPos by injectivity
   have hep_eq : endPos = endPos' := by
     have := hinflRaw.symm.trans hinflRaw''
@@ -241,10 +236,8 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
       hspec_go (Deflate.deflateRaw_goR_pad data level) hdata_le
   have hep_val : endPos = 10 + (Deflate.deflateRaw data level).size := by
     rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
-  have hendPos_tight : endPos + 8 ≤ (GzipEncode.compress data level).size := by
-    rw [hep_val, hceq]
-    simp only [ByteArray.size_append, htsz, hhsz]; omega
-  have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by omega
+  have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by
+    rw [hep_val, hceq]; simp only [ByteArray.size_append, htsz, hhsz]; omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by
     simp only [Array.toArray_toList]
   -- CRC32 trailer match: use endPos = 10 + deflated.size to read trailer bytes
