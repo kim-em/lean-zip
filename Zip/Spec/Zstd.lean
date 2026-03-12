@@ -1067,6 +1067,150 @@ theorem decompressBlocksWF_rle_step (data : ByteArray) (off : Nat)
     bind, Except.bind, pure, Except.pure, ↓reduceIte, Bool.false_eq_true]
   exact heq
 
+/-! ## WellFormedSimpleBlocks induction predicate -/
+
+/-- An inductive predicate encoding a sequence of raw/RLE blocks, each satisfying
+    the hypotheses of the existing step/base theorems. Raw and RLE blocks don't
+    update Huffman tables, FSE tables, or offset history, so the recursive calls
+    use the same `prevHuff`, `prevFse`, `history`. -/
+inductive WellFormedSimpleBlocks (data : ByteArray) :
+    Nat → UInt64 → ByteArray →
+    Option Zip.Native.ZstdHuffmanTable →
+    Zip.Native.PrevFseTables → Array Nat → Prop where
+  | last_raw (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .raw)
+      (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+      (hlast : hdr.lastBlock = true) :
+      WellFormedSimpleBlocks data off windowSize output prevHuff prevFse history
+  | last_rle (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .rle)
+      (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+      (hlast : hdr.lastBlock = true) :
+      WellFormedSimpleBlocks data off windowSize output prevHuff prevFse history
+  | step_raw (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .raw)
+      (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+      (hnotlast : hdr.lastBlock = false)
+      (hadv : ¬ afterBlock ≤ off)
+      (rest : WellFormedSimpleBlocks data afterBlock windowSize
+        (output ++ block) prevHuff prevFse history) :
+      WellFormedSimpleBlocks data off windowSize output prevHuff prevFse history
+  | step_rle (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .rle)
+      (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+      (hnotlast : hdr.lastBlock = false)
+      (hadv : ¬ afterByte ≤ off)
+      (rest : WellFormedSimpleBlocks data afterByte windowSize
+        (output ++ block) prevHuff prevFse history) :
+      WellFormedSimpleBlocks data off windowSize output prevHuff prevFse history
+
+/-- `decompressBlocksWF` succeeds on any well-formed sequence of raw/RLE blocks.
+    This subsumes all specific N-block raw/RLE completeness theorems. -/
+theorem decompressBlocksWF_succeeds_of_well_formed_simple
+    (data : ByteArray) (off : Nat) (windowSize : UInt64)
+    (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hwf : WellFormedSimpleBlocks data off windowSize output prevHuff prevFse history) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') := by
+  induction hwf with
+  | last_raw off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hlast =>
+    exact ⟨_, _, decompressBlocksWF_single_raw data off windowSize output prevHuff prevFse
+      history hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hlast⟩
+  | last_rle off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hlast =>
+    exact ⟨_, _, decompressBlocksWF_single_rle data off windowSize output prevHuff prevFse
+      history hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hlast⟩
+  | step_raw off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hnotlast hadv _rest ih =>
+    rw [decompressBlocksWF_raw_step data off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hnotlast hadv]
+    exact ih
+  | step_rle off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hnotlast hadv _rest ih =>
+    rw [decompressBlocksWF_rle_step data off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hnotlast hadv]
+    exact ih
+
+/-- Three consecutive raw blocks (two non-last, one last) succeed. Demonstrates that
+    N-block completeness is a trivial corollary of `WellFormedSimpleBlocks` induction:
+    construct the chain and apply the theorem. -/
+theorem decompressBlocksWF_succeeds_three_raw
+    (data : ByteArray) (off : Nat) (windowSize : UInt64)
+    (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    -- Block 1 (non-last raw)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterBlock1 : Nat)
+    (hoff1 : ¬ data.size ≤ off)
+    (hparse1 : Zip.Native.parseBlockHeader data off = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize))
+    (htype1 : hdr1.blockType = .raw)
+    (hraw1 : Zip.Native.decompressRawBlock data afterHdr1 hdr1.blockSize
+               = .ok (block1, afterBlock1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterBlock1 ≤ off)
+    -- Block 2 (non-last raw)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterBlock2 : Nat)
+    (hoff2 : ¬ data.size ≤ afterBlock1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterBlock1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (windowSize > 0 && hdr2.blockSize.toUInt64 > windowSize))
+    (htype2 : hdr2.blockType = .raw)
+    (hraw2 : Zip.Native.decompressRawBlock data afterHdr2 hdr2.blockSize
+               = .ok (block2, afterBlock2))
+    (hnotlast2 : hdr2.lastBlock = false)
+    (hadv2 : ¬ afterBlock2 ≤ afterBlock1)
+    -- Block 3 (last raw)
+    (hdr3 : Zip.Native.ZstdBlockHeader) (afterHdr3 : Nat)
+    (block3 : ByteArray) (afterBlock3 : Nat)
+    (hoff3 : ¬ data.size ≤ afterBlock2)
+    (hparse3 : Zip.Native.parseBlockHeader data afterBlock2 = .ok (hdr3, afterHdr3))
+    (hbs3 : ¬ hdr3.blockSize > 131072)
+    (hws3 : ¬ (windowSize > 0 && hdr3.blockSize.toUInt64 > windowSize))
+    (htype3 : hdr3.blockType = .raw)
+    (hraw3 : Zip.Native.decompressRawBlock data afterHdr3 hdr3.blockSize
+               = .ok (block3, afterBlock3))
+    (hlast3 : hdr3.lastBlock = true) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') :=
+  decompressBlocksWF_succeeds_of_well_formed_simple data off windowSize output
+    prevHuff prevFse history
+    (.step_raw off windowSize output prevHuff prevFse history
+      hdr1 afterHdr1 block1 afterBlock1
+      hoff1 hparse1 hbs1 hws1 htype1 hraw1 hnotlast1 hadv1
+      (.step_raw afterBlock1 windowSize (output ++ block1) prevHuff prevFse history
+        hdr2 afterHdr2 block2 afterBlock2
+        hoff2 hparse2 hbs2 hws2 htype2 hraw2 hnotlast2 hadv2
+        (.last_raw afterBlock2 windowSize (output ++ block1 ++ block2) prevHuff prevFse history
+          hdr3 afterHdr3 block3 afterBlock3
+          hoff3 hparse3 hbs3 hws3 htype3 hraw3 hlast3)))
+
 /-! ## decompressBlocksWF two-block composition theorems -/
 
 /-- When `decompressBlocksWF` encounters two consecutive raw blocks (first non-last,
