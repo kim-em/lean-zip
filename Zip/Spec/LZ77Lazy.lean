@@ -71,7 +71,6 @@ private theorem matchLZ77.go_encodable (data : List UInt8) (pos windowSize : Nat
       | inl heq => subst heq; exact encodeLitLen_literal_isSome _
       | inr hmem => exact matchLZ77.go_encodable data _ windowSize hws s hmem
 termination_by data.length - pos
-decreasing_by all_goals omega
 
 /-- The greedy LZ77 matcher produces symbols that can be encoded with
     fixed Huffman tables (symbols 0–285 for lit/len, 0–29 for dist). -/
@@ -87,20 +86,9 @@ private theorem matchLZ77.go_validSymbolList (data : List UInt8) (pos windowSize
     ValidSymbolList (matchLZ77.go data pos windowSize) := by
   unfold matchLZ77.go
   split
-  · -- pos ≥ data.length → [.endOfBlock]
-    exact trivial
-  · -- pos < data.length
-    split
-    · -- findLongestMatch = some (len, dist)
-      split
-      · -- len ≥ 3 → .reference :: go ...
-        exact matchLZ77.go_validSymbolList data _ windowSize
-      · -- ¬(len ≥ 3) → .literal :: go ...
-        exact matchLZ77.go_validSymbolList data _ windowSize
-    · -- findLongestMatch = none → .literal :: go ...
-      exact matchLZ77.go_validSymbolList data _ windowSize
+  · exact trivial
+  · repeat (first | exact matchLZ77.go_validSymbolList data _ windowSize | split)
 termination_by data.length - pos
-decreasing_by all_goals omega
 
 /-- The greedy LZ77 matcher produces a valid symbol list
     (ends with exactly one endOfBlock). -/
@@ -136,7 +124,6 @@ private theorem matchLZ77.go_length_le (data : List UInt8) (pos windowSize : Nat
       have ih := matchLZ77.go_length_le data (pos + 1) windowSize
       omega
 termination_by data.length - pos
-decreasing_by all_goals omega
 
 /-- `matchLZ77` produces at most `data.length + 1` symbols. -/
 theorem matchLZ77_length_le (data : List UInt8) (windowSize : Nat) :
@@ -160,12 +147,9 @@ theorem deflateLevel1_spec_roundtrip (data : List UInt8)
 /-- Level 1 spec roundtrip (existential form): for any data, encoding with
     greedy LZ77 + fixed Huffman produces bits that decode back to the
     original data. Uses `matchLZ77_encodable` and `matchLZ77_validSymbolList`
-    to eliminate all side conditions.
-    Note: the `hfuel` hypothesis requires `data.length < 1000000000000000000`
-    (about 1 exabyte), which is easily satisfied in practice. -/
+    to eliminate all side conditions. -/
 theorem deflateLevel1_spec_roundtrip' (data : List UInt8)
-    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.length < 1000000000000000000) :
+    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∃ bits, encodeFixed (matchLZ77 data windowSize) = some bits ∧
             decode bits = some data := by
   have henc_some := matchLZ77_encodable data windowSize hws
@@ -184,19 +168,8 @@ private theorem matchLZ77Lazy.go_validSymbolList (data : List UInt8) (pos window
   unfold matchLZ77Lazy.go
   split
   · exact trivial
-  · split
-    · split
-      · exact matchLZ77Lazy.go_validSymbolList data _ windowSize
-      · split
-        · split
-          · split
-            · exact matchLZ77Lazy.go_validSymbolList data _ windowSize
-            · exact matchLZ77Lazy.go_validSymbolList data _ windowSize
-          · exact matchLZ77Lazy.go_validSymbolList data _ windowSize
-        · exact matchLZ77Lazy.go_validSymbolList data _ windowSize
-    · exact matchLZ77Lazy.go_validSymbolList data _ windowSize
+  · repeat (first | exact matchLZ77Lazy.go_validSymbolList data _ windowSize | split)
 termination_by data.length - pos
-decreasing_by all_goals omega
 
 /-- The lazy LZ77 matcher produces a valid symbol list
     (ends with exactly one endOfBlock). -/
@@ -238,7 +211,6 @@ private theorem matchLZ77Lazy.go_length_le (data : List UInt8) (pos windowSize :
       have ih := matchLZ77Lazy.go_length_le data (pos + 1) windowSize
       omega
 termination_by data.length - pos
-decreasing_by all_goals omega
 
 /-- `matchLZ77Lazy` produces at most `2 * data.length + 1` symbols. -/
 theorem matchLZ77Lazy_length_le (data : List UInt8) (windowSize : Nat) :
@@ -311,7 +283,6 @@ private theorem matchLZ77Lazy.go_encodable (data : List UInt8) (pos windowSize :
       | inl heq => subst heq; exact encodeLitLen_literal_isSome _
       | inr hmem => exact matchLZ77Lazy.go_encodable data _ windowSize hws s hmem
 termination_by data.length - pos
-decreasing_by all_goals omega
 
 /-- The lazy LZ77 matcher produces symbols that can be encoded with
     fixed Huffman tables. -/
@@ -327,8 +298,7 @@ theorem matchLZ77Lazy_encodable (data : List UInt8) (windowSize : Nat)
     lazy LZ77 + fixed Huffman produces bits that decode back to the
     original data. -/
 theorem deflateLevel2_spec_roundtrip (data : List UInt8)
-    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768)
-    (hsize : data.length < 500000000000000000) :
+    (windowSize : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∃ bits, encodeFixed (matchLZ77Lazy data windowSize) = some bits ∧
             decode bits = some data := by
   have henc_some := matchLZ77Lazy_encodable data windowSize hws
