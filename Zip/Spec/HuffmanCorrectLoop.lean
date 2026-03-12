@@ -354,8 +354,7 @@ protected theorem fromLengths_hasLeaf (lengths : Array UInt8)
   dsimp only []
   -- Apply insertLoop_forward with start = 0
   exact insertLoop_forward lengths _ 0 .empty _ rfl maxBits hmb _ rfl _ rfl hv
-    (by simp only [Nat.toUInt32_eq, Array.size_map, Huffman.Spec.nextCodes_size, ge_iff_le,
-          Std.le_refl])
+    (by simp only [Nat.toUInt32_eq, Array.size_map, Huffman.Spec.nextCodes_size, ge_iff_le]; omega)
     (by intro b hb1 hb15
         simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
         exact initial_nc_invariant lengths maxBits hmb hv b hb1 hb15)
@@ -378,8 +377,7 @@ protected theorem fromLengths_leaf_spec (lengths : Array UInt8)
   unfold Zip.Native.HuffTree.fromLengthsTree at h
   dsimp only [] at h
   have ih := insertLoop_backward lengths _ 0 .empty _ rfl maxBits hmb _ rfl _ rfl hv
-    (by simp only [Nat.toUInt32_eq, Array.size_map, Huffman.Spec.nextCodes_size, ge_iff_le,
-          Std.le_refl])
+    (by simp only [Nat.toUInt32_eq, Array.size_map, Huffman.Spec.nextCodes_size, ge_iff_le]; omega)
     (by intro b hb1 hb15
         simp only [List.take_zero, List.foldl_nil, Nat.add_zero]
         exact initial_nc_invariant lengths maxBits hmb hv b hb1 hb15)
