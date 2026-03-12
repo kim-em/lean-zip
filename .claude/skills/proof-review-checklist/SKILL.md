@@ -548,6 +548,24 @@ grep -n 'theoremName' File.lean
 
 Remove unreferenced private definitions.
 
+### Duplicate theorem declarations
+
+When multiple PRs add the same theorem (common with parallel agent
+sessions), the file won't build. Check for duplicates:
+```bash
+grep -n 'theorem TheoremName' File.lean
+```
+
+If the duplicate is a large block (100+ lines), don't try to remove it
+with the Edit tool (which matches old_string → new_string). Instead:
+```bash
+# Keep lines 1-N (last good line), append the end marker
+head -N File.lean > /tmp/clean.lean
+echo "" >> /tmp/clean.lean
+echo "end Namespace" >> /tmp/clean.lean
+cp /tmp/clean.lean File.lean
+```
+
 ### Unused `termination_by` / `decreasing_by` clauses
 
 When Lean can infer termination automatically, explicit
