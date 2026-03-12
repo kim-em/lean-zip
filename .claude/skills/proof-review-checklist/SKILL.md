@@ -383,6 +383,24 @@ compress theorems).
 `List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
 with direct `List.length_replicate`.
 
+**Tactic macro quotation syntax**: When extracting repeated tactic
+blocks into `local macro "name" : tactic`, the `·` (bullet/focus dot)
+syntax does NOT work inside `\`(tactic| ...)` quotations. Use `next =>`
+instead. Wrap the entire tactic in parentheses to parse correctly:
+```lean
+set_option hygiene false in
+local macro "my_tactic" : tactic =>
+  `(tactic| (
+    by_cases h : condition
+    next => tactic_for_true
+    next => tactic_for_false))
+```
+
+**`show T; omega` for structure projections**: `omega` cannot reduce
+structure projections (e.g., `(BitReader.mk data startPos 0).bitOff`).
+Use `show 0 < 8; omega` to explicitly narrow the goal before calling
+`omega`. Do NOT simplify to `by omega` — it will fail.
+
 ## Phase 3c: Proof Compression
 
 After bare-simp cleanup, look for opportunities to shorten proofs
