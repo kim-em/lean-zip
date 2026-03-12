@@ -357,6 +357,14 @@ To prevent conflict cascades at the planning stage:
    grep -n 'simp\b' Zip/Spec/File.lean | \
      grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
    ```
+   **CRITICAL**: Do NOT use `grep -c 'simp[^_]'` — this pattern matches
+   `simp only`, `simpa`, and other non-bare variants, inflating counts
+   by 10-100x. This was the single largest source of wasted effort in
+   the review campaign: 6+ sessions independently discovered their
+   assigned files had 0 bare simps despite the issue claiming 40-70.
+   Always use the `\b` word-boundary pattern above, then exclude
+   `simp only` explicitly.
+
    Three review agents in the last batch found their assigned bare-simp
    cleanup was already done by prior PRs. They adapted by doing deeper
    quality audits, but the planning was wasted.

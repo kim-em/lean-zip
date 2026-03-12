@@ -85,6 +85,11 @@ git checkout -b agent/<first-8-chars-of-session-UUID>
 git rev-parse HEAD      # record starting commit
 ```
 
+**If the branch already exists** (common in reused worktrees): check for an
+open PR on it first (`gh pr list --head agent/<id>`). If a PR exists, create
+a new branch with a suffix (`agent/<id>-v2`). If no PR exists, reset it to
+master: `git checkout agent/<id> && git reset --hard origin/master`.
+
 Record any project-specific quality metrics (e.g. sorry count, test coverage)
 as described in the project's CLAUDE.md.
 
