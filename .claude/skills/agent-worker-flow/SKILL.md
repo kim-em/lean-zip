@@ -85,12 +85,15 @@ git checkout -b agent/<first-8-chars-of-session-UUID>
 git rev-parse HEAD      # record starting commit
 ```
 
-**Branch name collision**: If the branch already exists (from a prior session
-in the same worktree), check whether it has a remote with unrelated commits.
-If so, use a suffixed name like `agent/<UUID>-<issue-type>` (e.g.,
-`agent/b0db81a5-review`) and skip rebasing — the prior branch's commits are
-from a different PR and will conflict.
-
+**Branch name collision**: If the branch already exists (from a prior
+session in the same worktree), check whether it has a remote with an
+open PR (`gh pr list --head agent/<UUID>`). If so:
+- The old PR will be reused by `coordination create-pr` (it can't
+  create a second PR for the same branch)
+- After force-pushing your new work, manually update the old PR's
+  title, body, and closing issue with `gh pr edit`
+- Re-label the orphaned issue (from the old PR) with `replan` and
+  remove `has-pr`
 
 Record any project-specific quality metrics (e.g. sorry count, test coverage)
 as described in the project's CLAUDE.md.
