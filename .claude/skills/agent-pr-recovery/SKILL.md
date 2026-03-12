@@ -214,8 +214,8 @@ As of 2026-03-08, the known hot files are:
 
 | File | Size | Conflict PRs | Status |
 |------|------|-------------|--------|
-| `Zip/Spec/Zstd.lean` | ~2800 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063 | **Critical** — 2.8× the 1000-line threshold; all block/frame/API content theorems land here. Split is overdue. |
-| `Zip/Spec/ZstdFrame.lean` | ~720 lines | #1063 | Growing — API-level `decompressZstd` content theorems accumulating here |
+| `Zip/Spec/Zstd.lean` | ~4400 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063, #1213 | **Critical** — 4.4× the 1000-line threshold. Every two-block completeness theorem appends here. Split urgently needed into block-level / frame-level / composition sections. |
+| `Zip/Spec/ZstdFrame.lean` | ~1670 lines | #1063, #1188 | **High** — 1.7× threshold. API-level `decompressZstd` completeness theorems accumulating. Frame-header completeness, single-frame composition, and end-to-end compressed completeness all land here. |
 
 ### Mitigation strategies for hot files
 
