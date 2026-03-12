@@ -548,6 +548,23 @@ grep -n 'theoremName' File.lean
 
 Remove unreferenced private definitions.
 
+### Large block deletion (50+ lines)
+
+**Do NOT use the Edit tool to delete large blocks** (50+ lines). The
+Edit tool requires exact `old_string` matching, which is error-prone
+for large spans and wastes context tokens. Instead:
+
+- **Tail deletion** (removing everything after line N):
+  ```bash
+  head -n N File.lean > /tmp/File_truncated.lean && mv /tmp/File_truncated.lean File.lean
+  ```
+- **Middle deletion** (removing lines M through N):
+  ```bash
+  sed 'M,Nd' File.lean > /tmp/File_trimmed.lean && mv /tmp/File_trimmed.lean File.lean
+  ```
+
+Always verify the result with `wc -l` and `tail -5` after truncation.
+
 ### Unused `termination_by` / `decreasing_by` clauses
 
 When Lean can infer termination automatically, explicit
