@@ -55,8 +55,6 @@ theorem encodeSymbol_fixed_isSome (lengths : List Nat) (maxBits : Nat)
     exact ⟨(sym, cw), hmem, rfl⟩
   exact encodeSymbol_isSome _ _ _ this
 
-/-! ## findLengthCode and findDistCode coverage -/
-
 /-! ## Fixed table properties -/
 
 /-- All entries in `fixedLitLengths` are between 1 and 15. -/
@@ -117,6 +115,8 @@ theorem encodeLitLen_endOfBlock_isSome :
     (by have := fixedLitLengths_getElem_pos 256 hsym; omega)
     (fixedLitLengths_getElem_le 256 hsym)
 
+/-! ## findLengthCode and findDistCode coverage -/
+
 /-- Helper: `findLengthCode.go i` succeeds when some entry at index ≥ i covers len. -/
 private theorem findLengthCode.go_isSome_of_covered (len i : Nat)
     (hi : i < lengthBase.size)
@@ -139,11 +139,8 @@ private theorem findLengthCode.go_isSome_of_covered (len i : Nat)
       by_cases h : i + 1 < lengthBase.size
       · exact h
       · exfalso
-        -- i is the last entry, nextBase = 259
-        have hout : ¬(i + 1 < lengthBase.size) := h
         have : (lengthBase[i + 1]?.getD 259) = 259 := by
-          have := getElem?_neg lengthBase (i + 1) (by omega)
-          simp only [this, Option.getD_none]
+          simp only [getElem?_neg lengthBase (i + 1) (by omega), Option.getD_none]
         omega
     have hcov' : lengthBase[i + 1] ≤ len := by
       have : lengthBase[i + 1]? = some lengthBase[i + 1] :=
