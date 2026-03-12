@@ -134,7 +134,7 @@ private theorem foldl_set_length (depths : List (Nat × Nat)) (acc : List Nat) :
   | cons d ds ih =>
     simp only [List.foldl_cons]
     split
-    · rw [ih]; simp only [List.length_set]
+    · rw [ih, List.length_set]
     · exact ih acc
 
 /-- `assignLengths` produces a list of the requested length. -/
@@ -225,7 +225,8 @@ private theorem filter_ne_zero_replicate (n : Nat) :
   induction n with
   | zero => rfl
   | succ n ih =>
-    simp only [List.replicate_succ, List.filter_cons, ih]; rfl
+    simp only [List.replicate_succ, List.filter_cons, bne_self_eq_false,
+      Bool.false_eq_true, ↓reduceIte, ih]
 
 /-- Setting one position to 1 in an all-zero list, then filtering nonzero, gives `[1]`. -/
 private theorem filter_ne_zero_replicate_set (n i : Nat) (hi : i < n) :
@@ -649,9 +650,8 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
     let tree := buildHuffmanTree sorted
     -- sorted has ≥ 2 elements
     have hnz_ge2 : nz.length ≥ 2 := by
-      have hne1 : nz.length ≠ 1 := by
-        intro h1; exact hlen_ne1 (by rw [h1]; decide)
       have : nz.length > 0 := List.length_pos_of_mem hs_nz
+      have : nz.length ≠ 1 := fun h => hlen_ne1 (by rw [h]; decide)
       omega
     have hsorted_ge2 : sorted.length ≥ 2 := by
       simp only [sorted, List.length_mergeSort, List.length_map]; exact hnz_ge2
