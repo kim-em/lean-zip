@@ -351,11 +351,15 @@ BinaryCorrect, BitReaderInvariant
 **Checksum + Huffman base** — all audited:
 Adler32, Crc32, Huffman, DeflateFixedTables
 
+**Zstd spec files — review in progress** (2026-03-12):
+Zstd.lean foundational sections (PR #1359 merged), Fse.lean (in progress),
+ZstdFrame.lean (in progress), ZstdHuffman.lean (done), ZstdSequence.lean (done)
+
 **Remaining unaudited spec files** (for future review sessions):
 HuffmanKraft, HuffmanTheorems,
 LZ77, LZ77Lazy,
 XxHash (4 intentional sorries, special status),
-Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, Zstd, Deflate)
+Deflate.lean, Zstd.lean remaining sections (~lines 1017-6280)
 
 ### Patterns discovered during the review campaign
 
@@ -379,13 +383,55 @@ already clean.
 `show T from h` wrappers become redundant when `h` already has type `T`.
 Remove these to reduce noise.
 
-**Identical split branches**: When all branches of a nested `split`
-produce the same closer, use `repeat (first | closer | split)` to
-collapse them into one line. This handles any nesting depth (3-branch,
-4-branch, etc.) by alternating between trying the closer and splitting
-further. Example: `repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)`
-or `repeat (first | decide | split)`. See GzipCorrect/ZlibCorrect
-compress theorems for the pattern in practice.
+**`repeat (first | closer | split)` — the most impactful compression
+pattern from the review campaign.** When all branches of a nested
+`split` produce the same closer (or a small set of closers), this
+one-liner replaces arbitrarily deep nested case-split blocks.
+
+How it works: `repeat` applies to the first goal. `first` tries the
+closer; if it succeeds, that goal is closed and `repeat` moves to the
+next goal from `split`. If the closer fails, `split` generates new
+sub-goals, and `repeat` continues.
+
+Common variants:
+
+```lean
+-- Existential witnesses (GzipCorrect/ZlibCorrect compress theorems)
+repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)
+
+-- Decidable goals (ZlibCorrect)
+repeat (first | decide | split)
+
+-- With lemma application in witness (ZlibCorrect trailer)
+repeat (first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩ | split)
+
+-- Guard contradictions in RFC parsing (Zstd.lean parseFrameHeader)
+repeat (first | contradiction | (simp only [...] at hsize; omega) | (split at hres))
+
+-- Recursive function validation (LZ77Lazy)
+repeat (first | exact matchLZ77.go_validSymbolList data _ windowSize | split)
+
+-- Constructor existential (Fse.lean highBitPos)
+repeat (first | exact ⟨_, rfl⟩ | split)
+```
+
+**Ordering rule**: Put the closer BEFORE `split` in the `first` list.
+For multiple closers, put the most permissive last. **`nomatch` must
+come LAST** because it gives hard errors (not tactic failures) on
+satisfiable types — `first` cannot catch hard errors.
+
+**`simp_all?` produces inaccessible lemma names**: When `simp_all?`
+suggests a replacement containing dagger names like `UInt32.reduceEq✝`
+(with the `✝` suffix), the suggestion is unusable — Lean cannot parse
+the dagger character in `simp only [...]`. Use `grind` as a drop-in
+replacement in these cases. This was discovered in the Zstd.lean
+foundational review (PR #1359) for `parseBlockHeader_blockType_eq`.
+
+**`dsimp only` for definitional-only reductions**: When `simp only []`
+(empty list) appears and only reduces let-bindings or struct projections,
+prefer `dsimp only` — it's more precise and never unfolds non-definitional
+lemmas. This refinement was applied across 6 call sites in
+BitReaderInvariant/BitWriterCorrect during the review campaign.
 
 **`List.length_replicate` over expansion**: Replace verbose
 `List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
