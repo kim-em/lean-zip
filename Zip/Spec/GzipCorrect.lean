@@ -83,10 +83,8 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
     ∃ (header trailer : ByteArray),
       header.size = 10 ∧ trailer.size = 8 ∧
       compress data level = header ++ Deflate.deflateRaw data level ++ trailer := by
-  simp only [compress]
-  split
-  · exact ⟨_, _, rfl, rfl, rfl⟩
-  · split <;> exact ⟨_, _, rfl, rfl, rfl⟩
+  unfold compress
+  split <;> first | exact ⟨_, _, rfl, rfl, rfl⟩ | (split <;> exact ⟨_, _, rfl, rfl, rfl⟩)
 
 /-- Decomposition with concrete trailer: `compress` = header(10) ++ deflateRaw ++ trailer
     where `readUInt32LE trailer 0 = crc32 0 data` and `readUInt32LE trailer 4 = isize`. -/
@@ -97,9 +95,9 @@ private theorem compress_trailer (data : ByteArray) (level : UInt8) :
       Binary.readUInt32LE trailer 0 = Crc32.Native.crc32 0 data ∧
       Binary.readUInt32LE trailer 4 = data.size.toUInt32 := by
   unfold compress
-  split
-  · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
-  · split <;> exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
+  split <;>
+    first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
+          | (split <;> exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩)
 
 /-- CRC32 trailer match: `readUInt32LE` at endPos reads `crc32 0 data`. -/
 theorem compress_crc32 (data : ByteArray) (level : UInt8) :
@@ -221,8 +219,6 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
   obtain ⟨endPos', hinflRaw'⟩ :=
     inflateRaw_complete (header ++ Deflate.deflateRaw data level) 10 _
       data.data.toList hdata_le hspec_hd
-  have hep_le : endPos' ≤ (header ++ Deflate.deflateRaw data level).size :=
-    inflateRaw_endPos_le _ _ _ _ _ hinflRaw'
   -- By suffix invariance, inflateRaw on (header ++ deflated) ++ trailer gives same endPos'
   have hinflRaw'' : Inflate.inflateRaw ((header ++ Deflate.deflateRaw data level) ++ trailer)
       10 (1024 * 1024 * 1024) = .ok (⟨⟨data.data.toList⟩⟩, endPos') :=
