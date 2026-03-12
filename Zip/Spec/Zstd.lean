@@ -3147,6 +3147,216 @@ theorem decompressBlocksWF_succeeds_compressed_zero_seq_then_rle (data : ByteArr
   exact decompressBlocksWF_succeeds_single_rle data _ windowSize (output ++ literals1)
     _ prevFse history hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
 
+/-! ## decompressBlocksWF two-block composed completeness (compressed sequences + raw/RLE) -/
+
+/-- When a non-last compressed block with numSeq > 0 at `off` is followed by a last raw
+    block at `off2`, `decompressBlocksWF` succeeds. Composes
+    `decompressBlocksWF_compressed_sequences_step` with
+    `decompressBlocksWF_succeeds_single_raw` using only byte-level preconditions. -/
+theorem decompressBlocksWF_succeeds_compressed_sequences_then_raw (data : ByteArray)
+    (off off2 : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (literals1 : ByteArray) (afterLiterals1 : Nat)
+    (huffTree1 : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq1 : Nat) (modes1 : Zip.Native.SequenceCompressionModes) (afterSeqHeader1 : Nat)
+    (llTable1 ofTable1 mlTable1 : Zip.Native.FseTable) (afterTables1 : Nat)
+    (bbr1 : Zip.Native.BackwardBitReader)
+    (sequences1 : Array Zip.Native.ZstdSequence)
+    (blockOutput1 : ByteArray) (newHist1 : Array Nat)
+    -- Block 1 (non-last compressed, numSeq > 0) byte-level conditions at off
+    (hsize1 : data.size ≥ off + 3)
+    (htypeVal1 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
+    (hlastBit1 : (data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
+    (hblockSize1 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow1 : ¬ (windowSize > 0 &&
+        ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > windowSize))
+    (hblockEnd1 : data.size ≥ off + 3 +
+        (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    (hlit1 : Zip.Native.parseLiteralsSection data (off + 3) prevHuff
+              = .ok (literals1, afterLiterals1, huffTree1))
+    (hseq1 : Zip.Native.parseSequencesHeader data afterLiterals1
+              = .ok (numSeq1, modes1, afterSeqHeader1))
+    (hNumSeq1 : ¬ numSeq1 == 0)
+    (hfse1 : Zip.Native.resolveSequenceFseTables modes1 data afterSeqHeader1 prevFse
+              = .ok (llTable1, ofTable1, mlTable1, afterTables1))
+    (hbbr1 : Zip.Native.BackwardBitReader.init data afterTables1
+              (off + 3 + (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+                ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+              = .ok bbr1)
+    (hdec1 : Zip.Native.decodeSequences llTable1 ofTable1 mlTable1 bbr1 numSeq1
+              = .ok sequences1)
+    (hexec1 : Zip.Native.executeSequences sequences1 literals1
+               (if windowSize > 0 && output.size > windowSize.toNat
+                then output.extract (output.size - windowSize.toNat) output.size
+                else output)
+               history windowSize.toNat
+               = .ok (blockOutput1, newHist1))
+    -- off2 = position after block 1's payload
+    (hoff2 : off2 = off + 3 + (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    -- Block 2 (last raw) byte-level conditions at off2
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit2 : (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow2 : ¬ (windowSize > 0 &&
+        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > windowSize))
+    (hpayload2 : data.size ≥ off2 + 3 +
+        (((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat)) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') := by
+  -- Block 1: parseBlockHeader succeeds (typeVal=2 ≠ 3)
+  have htypeNe3 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+      ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 ≠ 3 := by
+    rw [htypeVal1]; decide
+  obtain ⟨hdr1, afterHdr1, hparse1⟩ := parseBlockHeader_succeeds data off hsize1 htypeNe3
+  have htype1 := (parseBlockHeader_blockType_eq data off hdr1 afterHdr1 hparse1).2.2 htypeVal1
+  have hbs_eq1 := parseBlockHeader_blockSize_eq data off hdr1 afterHdr1 hparse1
+  have hpos_eq1 := parseBlockHeader_pos_eq data off hdr1 afterHdr1 hparse1
+  have hnotlast1 : hdr1.lastBlock = false := by
+    rw [parseBlockHeader_lastBlock_eq data off hdr1 afterHdr1 hparse1, hlastBit1]; decide
+  have hbs1 : ¬ hdr1.blockSize > 131072 := by rw [hbs_eq1]; exact Nat.not_lt.mpr hblockSize1
+  have hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize) := by
+    rw [hbs_eq1]; exact hwindow1
+  -- Block 1: derive compressed block hypotheses
+  have hblockEnd1' : ¬ data.size < afterHdr1 + hdr1.blockSize.toNat := by
+    rw [hpos_eq1, hbs_eq1]; exact Nat.not_lt.mpr hblockEnd1
+  have hlit1' : Zip.Native.parseLiteralsSection data afterHdr1 prevHuff
+      = .ok (literals1, afterLiterals1, huffTree1) := by
+    rw [← hpos_eq1] at hlit1; exact hlit1
+  have hbbr1' : Zip.Native.BackwardBitReader.init data afterTables1
+      (afterHdr1 + hdr1.blockSize.toNat) = .ok bbr1 := by
+    rw [← hpos_eq1, ← hbs_eq1] at hbbr1; exact hbbr1
+  have hoff1 : ¬ data.size ≤ off := by omega
+  have hadv1 : ¬ afterHdr1 + hdr1.blockSize.toNat ≤ off := by rw [hpos_eq1]; omega
+  -- off2 = afterHdr1 + blockSize1, substitute
+  have : off2 = afterHdr1 + hdr1.blockSize.toNat := by rw [hoff2, hpos_eq1, hbs_eq1]
+  subst this
+  -- Step through block 1, then apply succeeds_single_raw for block 2
+  rw [decompressBlocksWF_compressed_sequences_step data off windowSize output prevHuff
+    prevFse history hdr1 afterHdr1 literals1 afterLiterals1 huffTree1 numSeq1 modes1
+    afterSeqHeader1 llTable1 ofTable1 mlTable1 afterTables1 bbr1 sequences1 blockOutput1
+    newHist1 hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1' hlit1' hseq1 hNumSeq1 hfse1 hbbr1'
+    hdec1 hexec1 hnotlast1 hadv1]
+  exact decompressBlocksWF_succeeds_single_raw data _ windowSize (output ++ blockOutput1)
+    _ { litLen := some llTable1, offset := some ofTable1, matchLen := some mlTable1 }
+    newHist1 hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+
+/-- When a non-last compressed block with numSeq > 0 at `off` is followed by a last RLE
+    block at `off2`, `decompressBlocksWF` succeeds. Composes
+    `decompressBlocksWF_compressed_sequences_step` with
+    `decompressBlocksWF_succeeds_single_rle` using only byte-level preconditions. -/
+theorem decompressBlocksWF_succeeds_compressed_sequences_then_rle (data : ByteArray)
+    (off off2 : Nat) (windowSize : UInt64) (output : ByteArray)
+    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (literals1 : ByteArray) (afterLiterals1 : Nat)
+    (huffTree1 : Option Zip.Native.ZstdHuffmanTable)
+    (numSeq1 : Nat) (modes1 : Zip.Native.SequenceCompressionModes) (afterSeqHeader1 : Nat)
+    (llTable1 ofTable1 mlTable1 : Zip.Native.FseTable) (afterTables1 : Nat)
+    (bbr1 : Zip.Native.BackwardBitReader)
+    (sequences1 : Array Zip.Native.ZstdSequence)
+    (blockOutput1 : ByteArray) (newHist1 : Array Nat)
+    -- Block 1 (non-last compressed, numSeq > 0) byte-level conditions at off
+    (hsize1 : data.size ≥ off + 3)
+    (htypeVal1 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
+    (hlastBit1 : (data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
+    (hblockSize1 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+        ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow1 : ¬ (windowSize > 0 &&
+        ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > windowSize))
+    (hblockEnd1 : data.size ≥ off + 3 +
+        (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    (hlit1 : Zip.Native.parseLiteralsSection data (off + 3) prevHuff
+              = .ok (literals1, afterLiterals1, huffTree1))
+    (hseq1 : Zip.Native.parseSequencesHeader data afterLiterals1
+              = .ok (numSeq1, modes1, afterSeqHeader1))
+    (hNumSeq1 : ¬ numSeq1 == 0)
+    (hfse1 : Zip.Native.resolveSequenceFseTables modes1 data afterSeqHeader1 prevFse
+              = .ok (llTable1, ofTable1, mlTable1, afterTables1))
+    (hbbr1 : Zip.Native.BackwardBitReader.init data afterTables1
+              (off + 3 + (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+                ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+              = .ok bbr1)
+    (hdec1 : Zip.Native.decodeSequences llTable1 ofTable1 mlTable1 bbr1 numSeq1
+              = .ok sequences1)
+    (hexec1 : Zip.Native.executeSequences sequences1 literals1
+               (if windowSize > 0 && output.size > windowSize.toNat
+                then output.extract (output.size - windowSize.toNat) output.size
+                else output)
+               history windowSize.toNat
+               = .ok (blockOutput1, newHist1))
+    -- off2 = position after block 1's payload
+    (hoff2 : off2 = off + 3 + (((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+          ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    -- Block 2 (last RLE) byte-level conditions at off2
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit2 : (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow2 : ¬ (windowSize > 0 &&
+        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > windowSize))
+    (hpayload2 : data.size ≥ off2 + 4) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') := by
+  -- Block 1: parseBlockHeader succeeds (typeVal=2 ≠ 3)
+  have htypeNe3 : ((data[off]!.toUInt32 ||| (data[off + 1]!.toUInt32 <<< 8)
+      ||| (data[off + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 ≠ 3 := by
+    rw [htypeVal1]; decide
+  obtain ⟨hdr1, afterHdr1, hparse1⟩ := parseBlockHeader_succeeds data off hsize1 htypeNe3
+  have htype1 := (parseBlockHeader_blockType_eq data off hdr1 afterHdr1 hparse1).2.2 htypeVal1
+  have hbs_eq1 := parseBlockHeader_blockSize_eq data off hdr1 afterHdr1 hparse1
+  have hpos_eq1 := parseBlockHeader_pos_eq data off hdr1 afterHdr1 hparse1
+  have hnotlast1 : hdr1.lastBlock = false := by
+    rw [parseBlockHeader_lastBlock_eq data off hdr1 afterHdr1 hparse1, hlastBit1]; decide
+  have hbs1 : ¬ hdr1.blockSize > 131072 := by rw [hbs_eq1]; exact Nat.not_lt.mpr hblockSize1
+  have hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize) := by
+    rw [hbs_eq1]; exact hwindow1
+  -- Block 1: derive compressed block hypotheses
+  have hblockEnd1' : ¬ data.size < afterHdr1 + hdr1.blockSize.toNat := by
+    rw [hpos_eq1, hbs_eq1]; exact Nat.not_lt.mpr hblockEnd1
+  have hlit1' : Zip.Native.parseLiteralsSection data afterHdr1 prevHuff
+      = .ok (literals1, afterLiterals1, huffTree1) := by
+    rw [← hpos_eq1] at hlit1; exact hlit1
+  have hbbr1' : Zip.Native.BackwardBitReader.init data afterTables1
+      (afterHdr1 + hdr1.blockSize.toNat) = .ok bbr1 := by
+    rw [← hpos_eq1, ← hbs_eq1] at hbbr1; exact hbbr1
+  have hoff1 : ¬ data.size ≤ off := by omega
+  have hadv1 : ¬ afterHdr1 + hdr1.blockSize.toNat ≤ off := by rw [hpos_eq1]; omega
+  -- off2 = afterHdr1 + blockSize1, substitute
+  have : off2 = afterHdr1 + hdr1.blockSize.toNat := by rw [hoff2, hpos_eq1, hbs_eq1]
+  subst this
+  -- Step through block 1, then apply succeeds_single_rle for block 2
+  rw [decompressBlocksWF_compressed_sequences_step data off windowSize output prevHuff
+    prevFse history hdr1 afterHdr1 literals1 afterLiterals1 huffTree1 numSeq1 modes1
+    afterSeqHeader1 llTable1 ofTable1 mlTable1 afterTables1 bbr1 sequences1 blockOutput1
+    newHist1 hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1' hlit1' hseq1 hNumSeq1 hfse1 hbbr1'
+    hdec1 hexec1 hnotlast1 hadv1]
+  exact decompressBlocksWF_succeeds_single_rle data _ windowSize (output ++ blockOutput1)
+    _ { litLen := some llTable1, offset := some ofTable1, matchLen := some mlTable1 }
+    newHist1 hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+
 /-- When a single compressed last block with numSeq > 0 is encoded at offset `off`,
     with sufficient data for header + payload, and all sub-functions succeed,
     `decompressBlocksWF` succeeds. This chains `parseBlockHeader_succeeds` → field
