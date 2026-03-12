@@ -77,6 +77,36 @@ theorem call site by reducing the `if let` to concrete `none`/`some` values.
 See `decompressFrame_compressed_seq_then_compressed_lit_content` in `Zip/Spec/Zstd.lean`
 for the working pattern.
 
+## `rw` Leaks Dependent Match From Proof Term (`congr`/`cases` Proofs)
+
+When a step theorem's proof uses `congr 1; cases x <;> rfl`, the proof term
+internally contains a dependent case split. When `rw [step_theorem ...]` applies
+this proof, the goal gets `match x, proof_hyp with ...` instead of the stated
+`if let some v := x then ...`. These are **propositionally but NOT definitionally
+equal**, so:
+
+- `show` / `change` with the `if let` form: **fails** (not defEq)
+- `have h : (match ...) = (if let ...); rw [h]`: **fails** (`rw` can't find the
+  internal match pattern)
+- `simp only [h]`: also fails for the same reason
+
+**Fix: `cases x` on the goal.** This reduces BOTH the dependent match in the goal
+AND the `if let` in the hypothesis type to the same concrete values:
+
+```lean
+rw [step_theorem ...]
+-- Goal now has: match x, some_proof with | some v, _ => ... | _, _ => ...
+-- But hlit2 has: if let some v := x then ... else ...
+cases x <;> exact single_block_theorem ... hlit2 ...
+```
+
+In each case (`some v` / `none`), both the dependent match and the `if let`
+reduce to the same concrete value, making `exact` succeed.
+
+**When to suspect this**: type mismatch error where both types print identically
+except one has `match x, hyp with` and the other has `match x with` or
+`if let ... := x`.
+
 ## `congrArg` for Large List/Array Rewrites
 
 When rewriting a term containing large constant lists (e.g., 288-element
