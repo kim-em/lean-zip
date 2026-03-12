@@ -8,14 +8,14 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~577 completed (Feb 19 – Mar 12)
+- **Sessions**: ~583 completed (Feb 19 – Mar 12)
 - **Source files**: 102 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 27 test)
-- **Merged PRs**: 546
-- **Spec lines**: 34,692 across 49 spec files
+- **Merged PRs**: 560
+- **Spec lines**: 35,663 across 49 spec files
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
-- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 8 bare in Zstd spec files (3 in ZstdHuffman.lean, 5 in Zstd.lean)
-- **simp_all with args**: 0 in DEFLATE spec files; 6 in ZstdHuffman.lean (all `simp_all [beq_iff_eq]`)
-- **Zstd spec**: 501 declarations across 6 files (14,081 lines)
+- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 5 bare in Zstd.lean only (ZstdHuffman.lean now clean)
+- **simp_all with args**: 0 in DEFLATE spec files; 0 in ZstdHuffman.lean (previously 6, now eliminated)
+- **Zstd spec**: 491 declarations across 6 files (15,091 lines)
 
 ## Milestones
 
@@ -1587,12 +1587,75 @@ review coverage across both DEFLATE and Zstd spec layers.
 declarations: Zstd (145), ZstdSequence (104), Fse (95), ZstdHuffman (86),
 ZstdFrame (48), XxHash (23). Total spec line count: 14,081 lines.
 
+**8-PR batch (Mar 12): API-level succeeds near-completion + review campaign deepening:**
+
+This batch advanced the API-level succeeds matrix to 19/21 and continued
+the DEFLATE proof quality review campaign across 4 more spec file pairs.
+
+*Track E API-level succeeds (3 PRs):*
+- #1296: Merge conflict fix for frame-level comp_zero_seq + compressed
+  block theorems, unblocking downstream API-level lifting
+- #1306: `decompressZstd_succeeds_compressed_sequences_then_raw_frame` and
+  `decompressZstd_succeeds_compressed_sequences_then_rle_frame` — compressed
+  sequences first + raw/RLE at API level
+- #1320: `decompressZstd_succeeds_raw_then_compressed_sequences_frame`,
+  `decompressZstd_succeeds_rle_then_compressed_sequences_frame`,
+  `decompressZstd_succeeds_compressed_sequences_then_compressed_zero_seq_frame`,
+  `decompressZstd_succeeds_two_compressed_sequences_frame` — 4 compressed-
+  sequences two-block pairs at API level, derived from content theorems
+
+*Quality reviews — DEFLATE spec files (4 PRs):*
+- #1300: DeflateDynamicCorrect + DeflateDynamicFreqs — proof optimization
+- #1304: InflateLoopBounds + InflateRawSuffix — proof quality audit
+  (conflict fix for #1276)
+- #1314: DynamicTreesCorrect + DynamicTreesComplete — minimal changes,
+  files already at review quality
+- #1316: BitReaderInvariant + BitWriterCorrect — proof quality audit
+
+*Infrastructure (1 PR):*
+- #1307: Meditate — merge conflict frequency analysis, completeness matrix
+  scaling patterns
+
+*Housekeeping (3 PRs):*
+- #1321: Triage stale issue #1318 (work already merged via #1306)
+- #1325: Recovered proof-review-checklist patterns from conflicted PR #1312
+- #1326: Recovered `bfinal_suffix_dispatch` tactic macro from PR #1312
+
+**Two-block composed completeness ("succeeds") matrix — current state:**
+
+API-level (19/21):
+
+|  | Raw | RLE | CompZS | CompSeq |
+|---|---|---|---|---|
+| **Raw +** | done | done | done | done |
+| **RLE +** | done | done | done | done |
+| **CompZS +** | done | done | — | — |
+| **CompSeq +** | done | done | done | done |
+
+Missing at API level: czs+czs and czs+cs. Both exist at frame level
+(from `decompressFrame_succeeds_compressed_zero_seq_then_compressed_*`
+theorems in Zstd.lean) and need only the standard API-level lift.
+
+Frame-level completeness is 16/16 for two-block combinations plus all
+4 single-block types. Block-level completeness is 16/16.
+
+**Review campaign progress:** The DEFLATE proof quality review campaign
+now covers all 49 spec files across multiple passes. This batch audited
+4 DEFLATE spec file pairs (BitReaderInvariant, BitWriterCorrect,
+InflateLoopBounds, InflateRawSuffix, DeflateDynamicCorrect,
+DeflateDynamicFreqs, DynamicTreesCorrect, DynamicTreesComplete).
+Most files required only minimal changes, confirming convergence toward
+review-complete quality.
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 491
+declarations: Zstd (137), ZstdSequence (97), Fse (87), ZstdHuffman (88),
+ZstdFrame (56), XxHash (26). Total spec line count: 15,091 lines.
+
 **Remaining:**
 - Prove remaining sorry stubs: 4 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
-- Composed completeness: fill block-level gaps (raw/rle+comp_sequences),
-  extend compressed-to-compressed pairs to frame and API levels, compose
-  multi-block completeness to end-to-end `decompressZstd`
+- Composed completeness: lift czs+czs and czs+cs to API level (19→21),
+  compose multi-block completeness to end-to-end `decompressZstd`
 - Content preservation campaign: extend to N-block frames and compressed
   block content (with sequences)
 - Spec-level decoder with correctness proofs (algorithmic correspondence
@@ -1603,12 +1666,12 @@ ZstdFrame (48), XxHash (23). Total spec line count: 14,081 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~577 sessions (Feb 19 – Mar 12)
-- 546 merged PRs
+- ~583 sessions (Feb 19 – Mar 12)
+- 560 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
-  updated #925), bare-simp-resistant pattern catalog (#386),
+  updated #925, #1325), bare-simp-resistant pattern catalog (#386),
   `lean-zstd-patterns` (#491), `agent-pr-recovery` (#546, updated #597),
   `lean-zstd-spec-pattern` (#623, updated #711, #840, #925),
   `lean-monad-proofs` (updated #711, #840),
