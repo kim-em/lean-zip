@@ -153,7 +153,7 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
       (⟨bw.data, newBuf, bw.bitCount + 1⟩ : BitWriter)).toBits =
     bw.toBits ++ [bval] := by
   obtain ⟨hbc_lt, hbuf_lt⟩ := hwf
-  simp only
+  dsimp only
   have hbridge := uint8_or_shiftLeft_toNat bw.bitBuf bit bw.bitCount hbc_lt hbit_le
   by_cases hflush : bw.bitCount.toNat + 1 ≥ 8
   · -- Case: k + 1 ≥ 8, i.e. k = 7 (flush)
@@ -203,7 +203,7 @@ private theorem addBit_wf (bw : BitWriter) (bit : UInt8)
     else
       (⟨bw.data, newBuf, bw.bitCount + 1⟩ : BitWriter)).wf := by
   obtain ⟨hbc_lt, hbuf_lt⟩ := hwf
-  simp only
+  dsimp only
   have hbridge := uint8_or_shiftLeft_toNat bw.bitBuf bit bw.bitCount hbc_lt hbit_le
   by_cases hflush : bw.bitCount.toNat + 1 ≥ 8
   · -- Flush case: new BitWriter is ⟨_, 0, 0⟩, same as empty_wf
@@ -232,19 +232,14 @@ private theorem decide_mod2_eq_bne (x : Nat) :
 
 /-- `(x % 2 == 1) = (x % 2 != 0)` — BEq variant for writeBits proofs. -/
 private theorem beq_mod2_eq_bne (x : Nat) :
-    (x % 2 == 1) = (x % 2 != 0) := by
-  cases h : x % 2 with
-  | zero => simp only [Nat.reduceBEq, bne_self_eq_false]
-  | succ n =>
-    have : n = 0 := by omega
-    subst this; simp only [Nat.zero_add, BEq.rfl, Nat.reduceBNe]
+    (x % 2 == 1) = (x % 2 != 0) := decide_mod2_eq_bne x
 
 /-- Extracting bit k from a UInt16 code: ((code >>> k) &&& 1).toUInt8 has toNat ≤ 1
     and equals testBit. -/
 private theorem uint16_extract_bit (code : UInt16) (k : Nat) (hk : k < 16) :
     let bit := ((code >>> k.toUInt16) &&& 1).toUInt8
     bit.toNat ≤ 1 ∧ (decide (bit.toNat = 1) = code.toNat.testBit k) := by
-  simp only
+  dsimp only
   have hand_le : (code >>> k.toUInt16).toNat &&& 1 ≤ 1 := Nat.and_le_right
   constructor
   · show (((code >>> k.toUInt16) &&& 1).toUInt8).toNat ≤ 1
@@ -266,7 +261,7 @@ private theorem uint16_extract_bit (code : UInt16) (k : Nat) (hk : k < 16) :
 private theorem uint32_extract_bit (val : UInt32) (i : Nat) (hi : i ≤ 25) :
     let bit := ((val >>> i.toUInt32) &&& 1).toUInt8
     bit.toNat ≤ 1 ∧ (decide (bit.toNat = 1) = val.toNat.testBit i) := by
-  simp only
+  dsimp only
   have hand_le : (val >>> i.toUInt32).toNat &&& 1 ≤ 1 := Nat.and_le_right
   constructor
   · show (((val >>> i.toUInt32) &&& 1).toUInt8).toNat ≤ 1
@@ -298,7 +293,7 @@ private theorem writeHuffCode_go_spec (bw : BitWriter) (n : Nat) (code : UInt16)
     obtain ⟨hbit_le, hbit_val⟩ := uint16_extract_bit code k (by omega)
     have hab := addBit_toBits bw _ (code.toNat.testBit k) hwf hbit_le hbit_val.symm
     have hawf := addBit_wf bw _ hwf hbit_le
-    simp only at hab hawf
+    dsimp only at hab hawf
     by_cases hflush : bw.bitCount.toNat + 1 ≥ 8 <;>
     · first | rw [if_pos hflush] at hab hawf ⊢ | rw [if_neg hflush] at hab hawf ⊢
       have hih := ih _ hawf (by omega)
@@ -354,7 +349,7 @@ private theorem writeBits_go_spec (bw : BitWriter) (i n : Nat) (val : UInt32)
     obtain ⟨hbit_le, hbit_val⟩ := uint32_extract_bit val i (by omega)
     have hab := addBit_toBits bw _ (val.toNat.testBit i) hwf hbit_le hbit_val.symm
     have hawf := addBit_wf bw _ hwf hbit_le
-    simp only at hab hawf
+    dsimp only at hab hawf
     -- The goal's if uses UInt8 condition; hab/hawf use Nat condition.
     -- Bridge via flush_iff_nat, then the two branches are identical.
     have hbc_lt := hwf.1
