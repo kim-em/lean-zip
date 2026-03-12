@@ -509,6 +509,19 @@ Or for multiple identical closers:
 all_goals omega
 ```
 
+**`nomatch` ordering in `first` chains**: `exact nomatch h` produces a
+hard error (not a tactic failure) when `h` has a satisfiable type (e.g.,
+`Except.ok x = Except.ok y`). Since `first` cannot catch hard errors,
+`nomatch` must come LAST in any `first` chain:
+
+```lean
+-- WRONG: nomatch gives hard error on valid equations, blocks the obtain branch
+split at h <;> first | exact nomatch h | (obtain ⟨rfl, rfl⟩ := h; rfl)
+
+-- RIGHT: try success pattern first (fails gracefully), nomatch as fallback
+split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
+```
+
 ### Local tactic macros for repeated patterns
 
 When a proof pattern repeats 3+ times in a file, extract a local
