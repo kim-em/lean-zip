@@ -101,7 +101,7 @@ theorem alignToByte_pos_le (br : BitReader)
   · rename_i hne
     cases hpos with
     | inl h => exact absurd (by rw [h]; decide) hne
-    | inr h => simp only; omega
+    | inr h => dsimp only; omega
 
 /-! ### BitReader bitPos advancement
 
@@ -307,11 +307,11 @@ theorem decodeStored_inv (br br' : BitReader)
   match h1 : br.readUInt16LE with
   | .error e => simp only [h1] at h; exact nomatch h
   | .ok (len, br₁) =>
-    rw [h1] at h; simp only [] at h
+    simp only [h1] at h
     match h2 : br₁.readUInt16LE with
     | .error e => simp only [h2] at h; exact nomatch h
     | .ok (nlen, br₂) =>
-      rw [h2] at h; simp only [] at h
+      simp only [h2] at h
       have h_rb : ∃ bytes, br₂.readBytes len.toNat = .ok (bytes, br') := by
         revert h; intro h
         simp only [pure, Except.pure] at h
