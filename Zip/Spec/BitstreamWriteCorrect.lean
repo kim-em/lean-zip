@@ -10,6 +10,12 @@ and `bitsToBytes`. Establishes roundtrip properties with `bytesToBits` and
 
 namespace Deflate.Correctness
 
+/-- Dropping 8 from a non-empty list strictly decreases length. Used by several
+    bitsToBytes roundtrip proofs. -/
+private theorem drop8_cons_length_lt (b : Bool) (rest : List Bool) :
+    ((b :: rest).drop 8).length < (b :: rest).length := by
+  simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
+
 /-! ### bitsToNat / bitsToByte properties -/
 
 /-- `bitsToNat n` on `testBit` values recovers the original number. -/
@@ -102,7 +108,7 @@ private theorem testBit_bitsToNat_ge_length (bits : List Bool) (n i : Nat)
             Deflate.Spec.bitsToNat k rest := by split <;> omega
         rw [hdiv]
         exact ih rest j (by omega)
-          (by simp only [List.length_cons, ge_iff_le, Nat.add_le_add_iff_right] at hlen; omega)
+          (by simp only [List.length_cons] at hlen; omega)
 
 /-- `byteToBits (bitsToByte bits) = bits.take 8 ++ List.replicate (8 - min 8 bits.length) false`
     when `bits.length ≤ 8`. In particular, for length-8 lists this is the identity. -/
@@ -183,11 +189,11 @@ private theorem bitsToBytes_go_eq (bits : List Bool) (acc : ByteArray) :
       simp only [Spec.bitsToBytes.go, ByteArray.data_empty, Array.toList_empty, List.append_nil]
     | cons b rest =>
       unfold Deflate.Spec.bitsToBytes.go
-      have hlen : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       subst h
-      rw [ih _ hlen _ rfl (acc.push (Deflate.Spec.bitsToByte (b :: rest)))]
-      rw [ih _ hlen _ rfl (ByteArray.empty.push (Deflate.Spec.bitsToByte (b :: rest)))]
+      rw [ih _ (drop8_cons_length_lt b rest) _ rfl
+            (acc.push (Deflate.Spec.bitsToByte (b :: rest)))]
+      rw [ih _ (drop8_cons_length_lt b rest) _ rfl
+            (ByteArray.empty.push (Deflate.Spec.bitsToByte (b :: rest)))]
       simp only [ByteArray.push, Array.toList_push, List.drop_succ_cons, List.append_assoc,
         List.cons_append, List.nil_append, ByteArray.data_empty, List.push_toArray]
 
@@ -242,11 +248,10 @@ theorem bytesToBits_bitsToBytes_aligned (bits : List Bool)
       rw [bytesToBits_data, bitsToBytes_cons]
       simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
       rw [byteToBits_bitsToByte_take _ hlen]
-      have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       have hdrop_mod : ((b :: rest).drop 8).length % 8 = 0 := by
         simp only [List.length_drop, List.length_cons] at h ⊢; omega
-      rw [← bytesToBits_data, ih _ (by omega) _ hdrop_mod rfl]
+      rw [← bytesToBits_data,
+          ih _ (Nat.lt_of_lt_of_le (drop8_cons_length_lt b rest) (by omega)) _ hdrop_mod rfl]
       exact List.take_append_drop 8 (b :: rest)
 
 /-- The output of `bytesToBits ∘ bitsToBytes` is at least as long as the input. -/
@@ -263,9 +268,7 @@ private theorem bytesToBits_bitsToBytes_length_ge (bits : List Bool) :
       rw [bytesToBits_data, bitsToBytes_cons]
       simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil,
         List.length_append, Deflate.Spec.bytesToBits.byteToBits_length]
-      have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
-      have hih := ih _ hdrop_len ((b :: rest).drop 8) rfl
+      have hih := ih _ (drop8_cons_length_lt b rest) ((b :: rest).drop 8) rfl
       rw [bytesToBits_data] at hih
       simp only [List.length_flatMap, Deflate.Spec.bytesToBits.byteToBits_length,
         List.length_drop] at hih ⊢
@@ -285,8 +288,6 @@ theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
       rw [bytesToBits_data, bitsToBytes_cons]
       simp only [List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
       rw [byteToBits_bitsToByte_take8]
-      have hdrop_len : ((b :: rest).drop 8).length < (b :: rest).length := by
-        simp only [List.drop_succ_cons, List.length_drop, List.length_cons]; omega
       have hlen_ge := bytesToBits_bitsToBytes_length_ge ((b :: rest).drop 8)
       rw [bytesToBits_data] at hlen_ge
       apply List.ext_getElem
@@ -303,7 +304,7 @@ theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
           rfl
         · rw [List.getElem_append_right (by simp only [List.length_ofFn]; omega)]
           simp only [List.length_ofFn]
-          have hih := ih _ hdrop_len ((b :: rest).drop 8) rfl
+          have hih := ih _ (drop8_cons_length_lt b rest) ((b :: rest).drop 8) rfl
           rw [bytesToBits_data] at hih
           have hidx : i - 8 < ((b :: rest).drop 8).length := by
             simp only [List.drop_succ_cons, List.length_drop]; omega

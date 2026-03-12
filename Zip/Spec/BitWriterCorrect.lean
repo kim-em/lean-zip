@@ -157,7 +157,7 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
   have hbridge := uint8_or_shiftLeft_toNat bw.bitBuf bit bw.bitCount hbc_lt hbit_le
   by_cases hflush : bw.bitCount.toNat + 1 ≥ 8
   · -- Case: k + 1 ≥ 8, i.e. k = 7 (flush)
-    rw [if_pos (show bw.bitCount.toNat + 1 ≥ 8 from hflush)]
+    rw [if_pos hflush]
     -- Simplify toBits of the flushed writer
     have htb : (⟨bw.data.push (bw.bitBuf ||| (bit <<< bw.bitCount)),
         (0 : UInt8), (0 : UInt8)⟩ : BitWriter).toBits =
@@ -179,7 +179,7 @@ private theorem addBit_toBits (bw : BitWriter) (bit : UInt8) (bval : Bool)
       rw [hbit_val, testBit_zero_of_le_one bit.toNat hbit_le]
     · rw [hbridge]; exact or_shiftLeft_lt_two_pow _ _ _ hbuf_lt hbit_le
   · -- Case: k + 1 < 8 (no flush)
-    rw [if_neg (show ¬(bw.bitCount.toNat + 1 ≥ 8) from hflush)]
+    rw [if_neg hflush]
     simp only [toBits]
     -- bitCount of new writer = bw.bitCount + 1
     have hbc_add : (bw.bitCount + 1).toNat = bw.bitCount.toNat + 1 := by
@@ -207,11 +207,11 @@ private theorem addBit_wf (bw : BitWriter) (bit : UInt8)
   have hbridge := uint8_or_shiftLeft_toNat bw.bitBuf bit bw.bitCount hbc_lt hbit_le
   by_cases hflush : bw.bitCount.toNat + 1 ≥ 8
   · -- Flush case: new BitWriter is ⟨_, 0, 0⟩, same as empty_wf
-    rw [if_pos (show bw.bitCount.toNat + 1 ≥ 8 from hflush)]
+    rw [if_pos hflush]
     show (0 : UInt8).toNat < 8 ∧ (0 : UInt8).toNat < 2 ^ (0 : UInt8).toNat
     simp only [UInt8.toNat_zero, Nat.zero_lt_succ, Nat.pow_zero, Nat.lt_add_one, and_self]
   · -- No flush: bitCount goes to k+1, newBuf < 2^(k+1)
-    rw [if_neg (show ¬(bw.bitCount.toNat + 1 ≥ 8) from hflush)]
+    rw [if_neg hflush]
     constructor
     · -- (bw.bitCount + 1).toNat < 8
       show (bw.bitCount.toNat + 1) % 256 < 8
@@ -350,7 +350,7 @@ private theorem writeBits_go_spec (bw : BitWriter) (i n : Nat) (val : UInt32)
   | succ m ihm =>
     intro heq
     have hin : i < n := by omega
-    rw [writeBits.go, if_neg (show ¬(i ≥ n) from by omega)]
+    rw [writeBits.go, if_neg (by omega)]
     obtain ⟨hbit_le, hbit_val⟩ := uint32_extract_bit val i (by omega)
     have hab := addBit_toBits bw _ (val.toNat.testBit i) hwf hbit_le hbit_val.symm
     have hawf := addBit_wf bw _ hwf hbit_le
