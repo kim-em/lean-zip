@@ -48,6 +48,25 @@ grep -n 'simp\b' Zip/Spec/TargetFile.lean | grep -v 'simp only\|simp_all\|simp?'
 coordination close-pr N "Superseded by PR #M which already cleaned this file"
 ```
 
+## Check for Existing PRs on Your Branch
+
+**Before resetting or force-pushing any branch**, check if an open PR
+already uses it:
+
+```bash
+# Check if the current branch has an open PR
+gh pr list --head agent/<session-id> --json number,title --jq '.[] | "#\(.number) \(.title)"'
+```
+
+If an open PR exists on your branch from a previous session:
+- **Do NOT reset or force-push** — you'll destroy that PR's content
+- **Create a new branch** with a suffix (e.g., `agent/<session-id>-fix`)
+- Push and create your PR on the new branch
+
+This is common when worktrees are reused across sessions: the branch
+name `agent/<session-id>` may already be taken by a PR from the
+previous session in the same worktree.
+
 ## Cherry-Pick Rebase Pattern
 
 The most reliable recovery pattern for PRs with merge conflicts:
