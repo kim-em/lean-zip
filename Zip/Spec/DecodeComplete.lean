@@ -202,7 +202,6 @@ private theorem decodeLitLen_ge257_isReference {litLengths distLengths : List Na
     (h256 : ¬(sym_nat < 256)) (h256ne : ¬(sym_nat = 256)) :
     ∃ len dist, sym = .reference len dist := by
   unfold Deflate.Spec.decodeLitLen at hdll
-  -- bare simp: 7-level Option.bind chain after unfold decodeLitLen
   simp only [hd, Nat.toUInt8_eq, Option.pure_def, beq_iff_eq, Option.bind_eq_bind, Option.bind_some] at hdll
   simp only [show ¬(sym_nat < 256) from h256, ↓reduceIte, h256ne] at hdll
   cases hlb : Deflate.Spec.lengthBase[sym_nat - 257]? with
@@ -245,7 +244,6 @@ private theorem decodeLitLen_literal_inv {litLengths distLengths : List Nat}
     sym_nat < 256 ∧ b = sym_nat.toUInt8 ∧ rest = rest₁ := by
   by_cases h256 : sym_nat < 256
   · unfold Deflate.Spec.decodeLitLen at hdll
-    -- bare simp: Option do-notation match chain after unfold
     simp only [hd, Nat.toUInt8_eq, Option.pure_def, beq_iff_eq, Option.bind_eq_bind, Option.bind_some, h256,
       ↓reduceIte, Option.some.injEq, Prod.mk.injEq, Spec.LZ77Symbol.literal.injEq] at hdll
     exact ⟨h256, hdll.1.symm, hdll.2.symm⟩
@@ -317,8 +315,6 @@ private theorem decodeLitLen_reference_inv {litLengths distLengths : List Nat}
       refine ⟨h_ge, ?_⟩
       have h256ne : ¬(sym_nat = 256) := h256eq
       simp only [show ¬(sym_nat < 256) from h256, ↓reduceIte, h256ne] at hdll
-      -- bare simp: 7-level Option.bind chain (lengthBase, lengthExtra, readBitsLSB,
-      -- dist decode, distBase, distExtra, readBitsLSB)
       cases hlb : Deflate.Spec.lengthBase[sym_nat - 257]? with
       | none => simp only [hlb, Option.bind_none, reduceCtorEq] at hdll
       | some base =>
