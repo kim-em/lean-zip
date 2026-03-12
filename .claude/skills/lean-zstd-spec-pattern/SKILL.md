@@ -1043,18 +1043,57 @@ The two-block matrix (4×4 = 16 cells) is being filled systematically.
 Once complete, move to **inductive** N-block theorems rather than
 enumerating 3-block (64 cells). See `lean-content-preservation` skill.
 
+### Completeness matrix status (2026-03-12)
+
+Block types: raw, rle, comp_zero_seq (czs), comp_sequences (cseq).
+
+| Level | Done | Remaining | Key blockers |
+|-------|------|-----------|-------------|
+| Block | 12/16 | raw+cseq, rle+cseq, cseq+czs, cseq+cseq | In progress (#1232, #1239) |
+| Frame | 8/16 | All cseq combos, czs+czs/cseq | Blocked on block-level |
+| API | 6/16 | Most czs/cseq combos | Blocked on frame-level |
+| Single | 4/4 block, 4/4 frame, 3/3+skip API | Complete | — |
+
+Each remaining cell requires 3 issues (block → frame → API) in strict
+sequence (frame depends on block, API depends on frame). At current
+velocity (~2 cells/day across all levels), the full two-block matrix
+needs ~5 more planning cycles.
+
+### Diminishing returns from enumeration
+
+Each new block-type combination generates 9 issues (3 levels × 3 issues:
+the cell itself + conflict fix + lift to next level). The conflict fix
+rate is accelerating (18% in the latest batch). Consider:
+
+1. **Prioritize block-level completion** — all 16 cells there first,
+   then batch frame-level, then batch API-level. This reduces cross-level
+   dependency chains and lets frame/API work serialize naturally.
+2. **Batch same-file work into fewer PRs** — instead of 1 theorem per PR,
+   put 2-3 related theorems (same first-block type) in a single PR.
+3. **After two-block is done, prove the N-block inductive theorem** —
+   this subsumes all finite enumerations and is the real goal.
+
 ### File organization for content theorems
 
 | Layer | File | Current size |
 |-------|------|-------------|
-| Block | `Zip/Spec/Zstd.lean` | ~2800 lines (**needs split**) |
+| Block | `Zip/Spec/Zstd.lean` | ~5650 lines (**critical — 5.6× threshold**) |
 | Frame | `Zip/Spec/Zstd.lean` | (same file) |
-| API | `Zip/Spec/ZstdFrame.lean` | ~720 lines |
+| API | `Zip/Spec/ZstdFrame.lean` | ~2220 lines (**needs split**) |
 
-`Zstd.lean` at 2800 lines is far past the 1000-line split threshold.
-A natural split: block-level composition + frame-level content into a
-new `Zip/Spec/ZstdContent.lean`, keeping validity predicates and
-single-block theorems in `Zstd.lean`.
+`Zstd.lean` at 5650 lines is the single biggest source of merge
+conflicts in the project. It grew 1250 lines in 4 days from
+completeness matrix expansion. A file split is the highest-priority
+structural improvement. Natural split points:
+
+- **`Zip/Spec/ZstdCompletion.lean`** — all `_succeeds_` theorems
+  (block-level and frame-level composed completeness, ~3800 lines)
+- **Keep in `Zstd.lean`** — validity predicates, correctness theorems,
+  parsing completeness, structural lemmas (~1850 lines)
+
+This split would eliminate the majority of merge conflicts because
+concurrent completeness-matrix agents would touch different sections
+of the new file. The existing file's remaining content changes rarely.
 
 ## Anti-Patterns
 
