@@ -211,10 +211,7 @@ theorem readUInt16LE_align (data : ByteArray) (pos bitOff : Nat)
     BitReader.readUInt16LE { data, pos, bitOff } =
     BitReader.readUInt16LE { data, pos := pos + 1, bitOff := 0 } := by
   unfold BitReader.readUInt16LE BitReader.alignToByte
-  have hbo' : (bitOff == 0) = false := by
-    cases heq : bitOff == 0
-    · rfl
-    · exact absurd (beq_iff_eq.mp heq) hbo
+  have hbo' : (bitOff == 0) = false := beq_eq_false_iff_ne.mpr hbo
   simp only [show ((0 : Nat) == 0) = true from rfl, hbo',
     Bool.false_eq_true, ↓reduceIte]
 
@@ -312,13 +309,12 @@ theorem inflateLoop_nonfinal_stored (compressed : ByteArray) (brPos : Nat)
   rw [decodeStored_on_block compressed (brPos + 1) blockLen hlen output maxOutputSize
     hfit (by omega) hlen_lo hlen_hi hnlen_lo hnlen_hi]
   -- bfinal == 1 is false (bfinal = 0), so inflateLoop recurses
-  simp only [show ((0 : UInt32) == 1) = false from by decide, Bool.false_eq_true, ↓reduceIte]
+  simp only [show ((0 : UInt32) == 1) = false from by decide, Bool.false_eq_true, ↓reduceIte,
+    BitReader.bitPos]
   -- Discharge WF guards: bit position advances and stays in range
-  simp only [BitReader.bitPos]
-  have : ¬((brPos + 1 + 4 + blockLen) * 8 + 0 ≤ brPos * 8 + 0) := by omega
-  simp only [this, ↓reduceDIte]
-  have : ¬(dataSize * 8 < (brPos + 1 + 4 + blockLen) * 8 + 0) := by omega
-  simp only [this, ↓reduceDIte]
+  have h_wf1 : ¬((brPos + 1 + 4 + blockLen) * 8 + 0 ≤ brPos * 8 + 0) := by omega
+  have h_wf2 : ¬(dataSize * 8 < (brPos + 1 + 4 + blockLen) * 8 + 0) := by omega
+  simp only [h_wf1, h_wf2, ↓reduceDIte]
 
 /-! ## Helper lemmas for ByteArray operations on concatenated arrays -/
 
