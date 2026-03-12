@@ -932,6 +932,37 @@ The theorem statement for compressed-sequence pairs can exceed 60
 hypotheses. This is expected — the theorem captures all state threading
 that `decompressBlocksWF` performs internally.
 
+### Huffman table `if let` dependent-match workaround
+
+When block 2 is compressed, `hlit2` references the updated Huffman table
+`(if let some ht := huffTree1 then some ht else prevHuff)`. Lean
+elaborates this `if let` as a dependent match that captures `hlit1` as
+an extra discriminant. The step theorem's output creates its OWN match
+with different bound variable names, causing an alpha-equivalence
+mismatch that Lean's kernel rejects.
+
+**The fix (mandatory for compressed+compressed two-block theorems):**
+
+1. **`subst hpos_eq1`** immediately after `obtain` — eliminates
+   `afterHdr1`, so `hlit1` is never rewritten (no `hlit1'`). This
+   keeps the discriminant IDENTITY consistent.
+
+2. **`cases huffTree1`** after `rw [step_theorem]` — reduces the
+   `if let` match entirely in both the goal and `hlit2`, bypassing
+   the alpha-equivalence issue.
+
+```lean
+-- After rw [step_theorem ... hlit1 ...]:
+-- DON'T: exact single_block_theorem ... hlit2   -- alpha mismatch!
+-- DO:
+cases huffTree1 <;>
+  exact single_block_theorem ... hlit2            -- match reduced, works!
+```
+
+**When this matters:** Only when block 2 is compressed (has `hlit2`
+referencing the Huffman table update from block 1). Raw/RLE block 2
+theorems don't have this issue since they lack `hlit2`.
+
 ### Scaling beyond two blocks
 
 The two-block matrix is sufficient for characterizing frame output up to
