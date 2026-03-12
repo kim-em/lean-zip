@@ -93,10 +93,7 @@ private theorem readUInt16LE_append (br : BitReader) (suffix : ByteArray)
     rw [getElem!_ba_append_left _ _ _ (by omega),
         getElem!_ba_append_left _ _ _ (by omega)]
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
-    obtain ⟨hval, hbr'⟩ := h
-    subst hbr'; constructor
-    · exact hval
-    · rfl
+    obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
 
 /-- readBytes with appended suffix produces the same result. -/
 private theorem readBytes_append (br : BitReader) (suffix : ByteArray)
@@ -119,10 +116,7 @@ private theorem readBytes_append (br : BitReader) (suffix : ByteArray)
       omega
     rw [hext]
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
-    obtain ⟨hval, hbr'⟩ := h
-    subst hbr'; constructor
-    · exact hval
-    · rfl
+    obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
 
 /-! ### Higher-level suffix invariance -/
 
@@ -346,11 +340,8 @@ private theorem decodeDynamicTrees_append (br : BitReader) (suffix : ByteArray)
                 | error e => simp only [hdt_eq] at h; exact nomatch h
                 | ok distTree' =>
                   simp only [hdt_eq] at h; dsimp only [] at h ⊢
-                  simp only [pure, Except.pure] at h ⊢
-                  have hinj := Except.ok.inj h
-                  simp only [Prod.mk.injEq] at hinj
-                  obtain ⟨h1, h2, h3⟩ := hinj
-                  subst h1; subst h2; subst h3; rfl
+                  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+                  obtain ⟨rfl, rfl, rfl⟩ := h; rfl
 
 set_option maxRecDepth 4096 in
 /-- decodeHuffman.go with appended suffix. -/

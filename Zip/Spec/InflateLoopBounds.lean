@@ -508,12 +508,7 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
       have hgoR' : Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) []
           = some (result.data.toList, remaining) := by
         rw [← hbr_toBits]; exact hgoR
-      have : some (result.data.toList, remaining) =
-          some (result.data.toList, pad_remaining) :=
-        hgoR'.symm.trans hgoR_pad
-      have heq := (Option.some.inj this)
-      have : remaining = pad_remaining := (Prod.mk.inj heq).2
-      rw [this]; exact hpadlen
+      rw [(Prod.mk.inj (Option.some.inj (hgoR'.symm.trans hgoR_pad))).2]; exact hpadlen
 
 /-- endPos exactness: combining ≤ and ≥ gives equality. -/
 theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
