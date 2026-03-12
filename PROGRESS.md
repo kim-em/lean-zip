@@ -8,14 +8,14 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~540 completed (Feb 19 – Mar 12)
+- **Sessions**: ~555 completed (Feb 19 – Mar 12)
 - **Source files**: 102 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 27 test)
-- **Merged PRs**: 509
-- **Spec declarations**: 1,890 across 49 spec files (31,879 lines)
+- **Merged PRs**: 526
+- **Spec lines**: 32,581 across 49 spec files
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
-- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 5 bare in Zstd spec files (3 in Zstd.lean, 2 in ZstdHuffman.lean)
+- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 8 bare in Zstd spec files (3 in ZstdHuffman.lean, 5 in Zstd.lean)
 - **simp_all with args**: 0 in DEFLATE spec files; 6 in ZstdHuffman.lean (all `simp_all [beq_iff_eq]`)
-- **Zstd spec**: 634 declarations across 6 files (11,136 lines)
+- **Zstd spec**: 454 declarations across 6 files (11,879 lines)
 
 ## Milestones
 
@@ -1401,11 +1401,92 @@ completeness, and end-to-end `decompressZstd` completeness.
 declarations: ZstdSequence (181), Fse (154), Zstd (130), ZstdHuffman (99),
 ZstdFrame (38), XxHash (32). Total spec line count: 11,136 lines.
 
+**14-PR batch (Mar 12): two-block compressed completeness + write-side review campaign:**
+
+This batch advanced Track E composed completeness into compressed block
+territory (both at block and frame/API levels) while the review campaign
+audited 8 DEFLATE write-side spec file pairs.
+
+*Track E composed completeness — block level (3 PRs):*
+- #1198: `decompressBlocksWF_succeeds_two_raw_blocks` and
+  `decompressBlocksWF_succeeds_two_rle_blocks` — homogeneous two-block
+  completeness for raw and RLE blocks
+- #1205: `decompressBlocksWF_succeeds_raw_then_rle`,
+  `decompressBlocksWF_succeeds_rle_then_raw` — heterogeneous raw/RLE
+  two-block completeness
+- #1220: `decompressBlocksWF_succeeds_raw_then_compressed_zero_seq` and
+  `decompressBlocksWF_succeeds_rle_then_compressed_zero_seq` — first
+  two-block completeness involving compressed blocks (raw/RLE + compressed
+  zero-seq)
+
+*Track E composed completeness — frame and API levels (2 PRs):*
+- #1193: `decompressFrame_succeeds_single_compressed_zero_seq` and
+  `decompressFrame_succeeds_single_compressed_sequences` — frame-level
+  completeness for single compressed blocks (both zero-seq and with-seq)
+- #1212: `decompressZstd_succeeds_single_compressed_zero_seq_frame` and
+  `decompressZstd_succeeds_single_compressed_sequences_frame` — end-to-end
+  API-level completeness for single compressed blocks. Composes
+  `parseFrameHeader_succeeds` → `decompressFrame_succeeds_*` →
+  `decompressZstd_single_frame`.
+
+*DEFLATE write-side review campaign (7 PRs):*
+- #1189: DecodeCorrect + DecodeComplete — bare `simpa` conversion,
+  dead hypothesis removal
+- #1194: HuffmanCorrect — proof audit, no changes needed
+- #1195: GzipCorrect + ZlibCorrect + DeflateRoundtrip (695 lines) —
+  redundant `have` inlining, proof optimization (−18 lines)
+- #1199: BitstreamCorrect + BitstreamComplete — proof audit
+- #1202: DeflateDynamicHeader + DeflateDynamicEmit (706 lines) —
+  merged consecutive `simp only` pairs, inlined dead `have` bindings
+- #1206: BitstreamWriteCorrect + BitWriterCorrect — proof audit
+- #1209: DeflateEncode + DeflateEncodeProps (1021 lines) — merged
+  consecutive `rw` calls, removed unnecessary case split, dead variable
+- #1214: DeflateEncodeDynamic + DeflateEncodeDynamicProps (1141 lines) —
+  replaced verbose `List.reduceReplicate` pattern with `List.length_replicate`
+- #1215: DynamicTreesCorrect + DynamicTreesComplete (1305 lines) — 2 bare
+  `simpa` → `simpa only`, 1 dead hypothesis removed. Discovered bare simp
+  count from issue was inflated — all `simp` calls already used `simp only`.
+
+**Composed completeness coverage (updated):**
+
+| Function | Status |
+|----------|--------|
+| `decompressBlocksWF` (two raw) | done |
+| `decompressBlocksWF` (two RLE) | done |
+| `decompressBlocksWF` (raw+RLE, RLE+raw) | done |
+| `decompressBlocksWF` (raw/RLE + compressed zero-seq) | done |
+| `decompressFrame` (single compressed zero-seq) | done |
+| `decompressFrame` (single compressed with-seq) | done |
+| `decompressZstd` (single compressed zero-seq frame) | done |
+| `decompressZstd` (single compressed with-seq frame) | done |
+| `decompressBlocksWF` (raw/RLE + compressed with-seq) | gap |
+| `decompressBlocksWF` (compressed + raw/RLE) | gap |
+| `decompressFrame` (two-block compressed) | gap |
+| `decompressZstd` (full end-to-end multi-block) | gap |
+
+The composed completeness chain now reaches the API level for single
+compressed blocks (both zero-seq and with-sequences). Two-block
+completeness covers all raw/RLE combinations and the first mixed
+raw/RLE + compressed pairings. Remaining gaps: compressed-first
+two-block completeness, and composing multi-block completeness to
+frame and API levels.
+
+**Review campaign progress:** The write-side DEFLATE review campaign
+covered 8 file pairs (4,868 lines total). All files are now clean:
+0 bare `simp`, 0 bare `simp_all`, no dead hypotheses. The campaign
+confirmed that most files had already reached review quality from
+previous passes — the main value was verification rather than
+remediation.
+
+**Summary:** The Zstd spec infrastructure now spans 6 files with 454
+declarations: Zstd (117), ZstdSequence (97), ZstdHuffman (88),
+Fse (87), ZstdFrame (39), XxHash (26). Total spec line count: 11,879 lines.
+
 **Remaining:**
 - Prove remaining sorry stubs: 4 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
-- Parsing completeness: extend composed completeness to multi-block frames,
-  compressed-block frame-level, and end-to-end `decompressZstd`
+- Composed completeness: extend two-block completeness to compressed-first
+  combinations, compose multi-block completeness to frame and API levels
 - Content preservation campaign: extend to N-block frames and compressed
   block content (with sequences)
 - Spec-level decoder with correctness proofs (algorithmic correspondence
@@ -1416,8 +1497,8 @@ ZstdFrame (38), XxHash (32). Total spec line count: 11,136 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~540 sessions (Feb 19 – Mar 12)
-- 509 merged PRs
+- ~555 sessions (Feb 19 – Mar 12)
+- 526 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
