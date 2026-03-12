@@ -8,10 +8,10 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~583 completed (Feb 19 – Mar 12)
-- **Source files**: 102 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 27 test)
-- **Merged PRs**: 560
-- **Spec lines**: 35,663 across 49 spec files
+- **Sessions**: ~597 completed (Feb 19 – Mar 12)
+- **Source files**: 103 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 28 test)
+- **Merged PRs**: 565
+- **Spec lines**: 35,676 across 49 spec files
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 5 bare in Zstd.lean only (ZstdHuffman.lean now clean)
 - **simp_all with args**: 0 in DEFLATE spec files; 0 in ZstdHuffman.lean (previously 6, now eliminated)
@@ -1651,6 +1651,49 @@ review-complete quality.
 declarations: Zstd (137), ZstdSequence (97), Fse (87), ZstdHuffman (88),
 ZstdFrame (56), XxHash (26). Total spec line count: 15,091 lines.
 
+**5-PR batch (Mar 12): review campaign completion + Track D1 benchmark:**
+
+This batch completed the DEFLATE proof quality review campaign to cover
+all 49 spec files and added the first DEFLATE decompression throughput
+benchmark.
+
+*Quality reviews — final DEFLATE spec files (4 PRs):*
+- #1327/#1328: HuffmanCorrect + HuffmanCorrectLoop proof quality audit
+  (with merge conflict rebase)
+- #1332: Deflate.lean proof quality audit
+- #1333: Final spec file batch — Adler32, Crc32, Huffman, DeflateFixedTables.
+  These were the last 4 unreviewed DEFLATE spec files. With this PR, all
+  49 spec files in `Zip/Spec/` have been audited at least once.
+
+*Track D1 (1 PR):*
+- #1339: DEFLATE decompression throughput benchmark (`ZipTest/DeflateBench.lean`).
+  Measures native vs FFI inflate/gzip/zlib decompression across 4 data
+  patterns (constant, cyclic, random, text) and 4 sizes (1KB–1MB).
+  Adds the first Track D infrastructure since the compression benchmark
+  suite (#399).
+
+**Review campaign — project-wide completion:**
+
+All 49 spec files in `Zip/Spec/` have now been audited at least once
+across the review campaign (spanning ~30 review PRs from #369 to #1333).
+The campaign covered:
+- 43 DEFLATE spec files (checksums, bitstream, Huffman, LZ77, inflate,
+  deflate encode/decode, dynamic trees, framing, roundtrip)
+- 6 Zstd spec files (Fse, XxHash, ZstdHuffman, ZstdSequence, Zstd,
+  ZstdFrame)
+
+Quality metrics at campaign completion:
+- 0 standalone bare `simp` across all spec files
+- 0 bare `simp_all` across DEFLATE spec files
+- 5 bare `simp_all` remaining in Zstd.lean only (post-campaign additions
+  from Track E completeness work)
+- Multiple files saw significant proof compression (Zstd.lean −10.3%,
+  ZstdHuffman.lean −4.3%, Fse.lean −2.4%)
+
+The review campaign reached diminishing returns — most files in the final
+batch required minimal or no changes, confirming convergence toward
+stable proof quality.
+
 **Remaining:**
 - Prove remaining sorry stubs: 4 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
@@ -1666,8 +1709,8 @@ ZstdFrame (56), XxHash (26). Total spec line count: 15,091 lines.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~583 sessions (Feb 19 – Mar 12)
-- 560 merged PRs
+- ~597 sessions (Feb 19 – Mar 12)
+- 565 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
