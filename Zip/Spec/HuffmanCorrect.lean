@@ -180,11 +180,11 @@ protected theorem hasLeaf_of_decodeBits (tree : Zip.Native.HuffTree) (bits : Lis
       | false =>
         simp only [decodeBits] at h
         obtain ⟨cw, hleaf, hrst⟩ := ihz rest' h
-        exact ⟨false :: cw, .left hleaf, by simp [hrst]⟩
+        exact ⟨false :: cw, .left hleaf, by simp only [List.cons_append, hrst]⟩
       | true =>
         simp only [decodeBits] at h
         obtain ⟨cw, hleaf, hrst⟩ := iho rest' h
-        exact ⟨true :: cw, .right hleaf, by simp [hrst]⟩
+        exact ⟨true :: cw, .right hleaf, by simp only [List.cons_append, hrst]⟩
 
 /-! ### insert.go creates the correct leaf path -/
 
