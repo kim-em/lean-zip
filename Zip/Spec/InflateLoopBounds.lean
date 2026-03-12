@@ -242,8 +242,8 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                 (by rw [Deflate.Correctness.fixedLitLengths_eq]; exact Deflate.Spec.fixedLitLengths_valid)
                 (by rw [Deflate.Correctness.fixedDistLengths_eq]; exact Deflate.Spec.fixedDistLengths_valid)
                 Deflate.Correctness.fixedLitLengths_size Deflate.Correctness.fixedDistLengths_size hdh
-            rw [hbr₂_bits] at hspec_ds
-            rw [Deflate.Correctness.fixedLitLengths_eq, Deflate.Correctness.fixedDistLengths_eq] at hspec_ds
+            rw [hbr₂_bits, Deflate.Correctness.fixedLitLengths_eq,
+              Deflate.Correctness.fixedDistLengths_eq] at hspec_ds
             have ⟨hd_h, _, hple_h⟩ := decodeHuffman_inv fixedLit fixedDist br₂ br' output out' maxOut
               (show Inflate.decodeHuffman br₂ output fixedLit fixedDist maxOut = .ok (out', br') from by
                 unfold Inflate.decodeHuffman; exact hdh) hpos₂ hple₂

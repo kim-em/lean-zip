@@ -436,6 +436,30 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
                                 _ maxOut dataSize dataSize' result br' hds h
   termination_by dataSize * 8 - br.bitPos
 
+-- Tactic macro for the bfinal dispatch in inflateLoop_append_suffix.
+-- Handles both bfinal=1 (alignToByte) and bfinal≠1 (WF guards + recursive call).
+set_option hygiene false in
+local macro "bfinal_suffix_dispatch" : tactic =>
+  `(tactic| (
+    by_cases hbf1 : (bfinal == 1) = true
+    next =>
+      rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
+      rw [alignToByte_append]; exact h
+    next =>
+      rw [if_neg hbf1] at h ⊢
+      split at h
+      next => exact nomatch h
+      next h_progress =>
+        split at h
+        next => exact nomatch h
+        next =>
+          split
+          next h₁' => exact absurd h₁' h_progress
+          next =>
+            split
+            next h₂' => exact absurd h₂' (by assumption)
+            next => exact ih _ (by omega) br' out' result endPos Nat.le.refl h))
+
 /-- inflateLoop with appended suffix. -/
 private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
     (output : ByteArray) (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat)
@@ -476,22 +500,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
           | ok v =>
             obtain ⟨out', br'⟩ := v; simp only [hds] at h
             rw [decodeStored_append br₂ suffix _ _ out' br' hds]; dsimp only []
-            by_cases hbf1 : (bfinal == 1) = true
-            · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
-              rw [alignToByte_append]; exact h
-            · rw [if_neg hbf1] at h ⊢
-              -- WF guards in h
-              split at h
-              · exact nomatch h
-              · rename_i h_progress
-                split at h
-                · exact nomatch h
-                · -- WF guards in goal (same conditions via brAppend preserving bitPos)
-                  split
-                  · rename_i h₁'; exact absurd h₁' h_progress
-                  · split
-                    · rename_i h₂'; exact absurd h₂' (by assumption)
-                    · exact ih _ (by omega) br' out' result endPos Nat.le.refl h
+            bfinal_suffix_dispatch
         · -- btype = 1: fixed Huffman
           simp only [Inflate.decodeHuffman] at h ⊢
           cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂.data.size br₂ output with
@@ -501,20 +510,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             rw [decodeHuffman_go_append fixedLit fixedDist br₂ suffix _ _ _
               (brAppend br₂ suffix).data.size out' br' (by simp only [ByteArray.size_append]; omega) hdh]
             dsimp only []
-            by_cases hbf1 : (bfinal == 1) = true
-            · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
-              rw [alignToByte_append]; exact h
-            · rw [if_neg hbf1] at h ⊢
-              split at h
-              · exact nomatch h
-              · rename_i h_progress
-                split at h
-                · exact nomatch h
-                · split
-                  · rename_i h₁'; exact absurd h₁' h_progress
-                  · split
-                    · rename_i h₂'; exact absurd h₂' (by assumption)
-                    · exact ih _ (by omega) br' out' result endPos Nat.le.refl h
+            bfinal_suffix_dispatch
         · -- btype = 2: dynamic Huffman
           cases hdt : Inflate.decodeDynamicTrees br₂ with
           | error e => simp only [hdt] at h; exact nomatch h
@@ -529,20 +525,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
               rw [decodeHuffman_go_append litT distT br₃ suffix _ _ _
                 (brAppend br₃ suffix).data.size out' br' (by simp only [ByteArray.size_append]; omega) hdh]
               dsimp only []
-              by_cases hbf1 : (bfinal == 1) = true
-              · rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
-                rw [alignToByte_append]; exact h
-              · rw [if_neg hbf1] at h ⊢
-                split at h
-                · exact nomatch h
-                · rename_i h_progress
-                  split at h
-                  · exact nomatch h
-                  · split
-                    · rename_i h₁'; exact absurd h₁' h_progress
-                    · split
-                      · rename_i h₂'; exact absurd h₂' (by assumption)
-                      · exact ih _ (by omega) br' out' result endPos Nat.le.refl h
+              bfinal_suffix_dispatch
         · -- btype ≥ 3: reserved
           exact h
 

@@ -393,11 +393,30 @@ that `(brAppend br suffix).bitPos = br.bitPos` because `bitPos` is a
 `def`. The anonymous `have : (brAppend br suffix).bitPos = br.bitPos
 := rfl` is NOT dead — it provides the equality that `omega` needs.
 
-**Tactic macro hygiene limitation**: `set_option hygiene false` local
-tactic macros cannot capture names introduced by `obtain` destructuring
-(e.g., `obtain ⟨bfinal, br₁⟩ := p`). These become `bfinal✝` at the
-macro expansion site. Use helper lemmas instead of macros when the
-captured names come from pattern matching.
+**Tactic macro hygiene**: `set_option hygiene false` local tactic
+macros CAN capture names introduced by `obtain` destructuring (e.g.,
+`bfinal` from `obtain ⟨bfinal, br₁⟩ := p`). This is useful for DRYing
+repeated tactic blocks — see `bfinal_suffix_dispatch` in
+`InflateRawSuffix.lean` which captures `bfinal`, `br'`, `out'`, `h`,
+`ih` from the surrounding proof context.
+
+**Tactic macro quotation syntax**: When extracting repeated tactic
+blocks into `local macro "name" : tactic`, the `·` (bullet/focus dot)
+syntax does NOT work inside `\`(tactic| ...)` quotations. Use `next =>`
+instead. Wrap the entire tactic in parentheses to parse correctly:
+```lean
+set_option hygiene false in
+local macro "my_tactic" : tactic =>
+  `(tactic| (
+    by_cases h : condition
+    next => tactic_for_true
+    next => tactic_for_false))
+```
+
+**`show T; omega` for structure projections**: `omega` cannot reduce
+structure projections (e.g., `(BitReader.mk data startPos 0).bitOff`).
+Use `show 0 < 8; omega` to explicitly narrow the goal before calling
+`omega`. Do NOT simplify to `by omega` — it will fail.
 
 **`obtain/subst/constructor` → `obtain/exact` compression**: Replace:
 ```lean
