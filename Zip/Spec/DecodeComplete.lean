@@ -154,9 +154,7 @@ theorem huffTree_decode_complete (lengths : Array UInt8)
     Deflate.Correctness.decode_some_mem _ br.toBits sym rest hspec
   -- Convert (cw, sym) ∈ specTable to (sym, cw) ∈ allCodes
   have hmem_codes : (sym, cw) ∈ Huffman.Spec.allCodes
-      (lengths.toList.map UInt8.toNat) maxBits := by
-    obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_table
-    simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+      (lengths.toList.map UInt8.toNat) maxBits := specTable_mem_codes hmem_table
   -- Get TreeHasLeaf from fromLengths_hasLeaf
   have hleaf := Deflate.Correctness.fromLengths_hasLeaf lengths maxBits
     (by omega) tree htree hv sym cw hmem_codes
@@ -406,9 +404,8 @@ theorem decodeHuffman_complete
     obtain ⟨cw_lit, hmem_table, _⟩ :=
       Deflate.Correctness.decode_some_mem _ _ _ _ hspec_sym
     have hmem_codes : (sym_nat, cw_lit) ∈
-        Huffman.Spec.allCodes (litLengths.toList.map UInt8.toNat) 15 := by
-      obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_table
-      simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+        Huffman.Spec.allCodes (litLengths.toList.map UInt8.toNat) 15 :=
+      specTable_mem_codes hmem_table
     have hsym_bound : sym_nat < litLengths.size := by
       rw [Huffman.Spec.allCodes_mem_iff] at hmem_codes
       simp only [List.length_map, Array.length_toList] at hmem_codes; exact hmem_codes.1
@@ -607,9 +604,8 @@ theorem decodeHuffman_complete
           obtain ⟨cw_dist, hmem_dist_table, _⟩ :=
             Deflate.Correctness.decode_some_mem _ _ _ _ hdd
           have hmem_dist_codes : (dSym, cw_dist) ∈
-              Huffman.Spec.allCodes (distLengths.toList.map UInt8.toNat) 15 := by
-            obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem_dist_table
-            simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+              Huffman.Spec.allCodes (distLengths.toList.map UInt8.toNat) 15 :=
+            specTable_mem_codes hmem_dist_table
           have hdSym_bound : dSym < distLengths.size := by
             rw [Huffman.Spec.allCodes_mem_iff] at hmem_dist_codes
             simp only [List.length_map, Array.length_toList] at hmem_dist_codes
