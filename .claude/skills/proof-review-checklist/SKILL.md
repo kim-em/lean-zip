@@ -346,13 +346,16 @@ DeflateStoredCorrect, DeflateFixedCorrect,
 LZ77NativeCorrect, EmitTokensCorrect
 
 **Foundational / cross-cutting** — all audited:
-BinaryCorrect
+BinaryCorrect, BitReaderInvariant
+
+**Checksum + Huffman base** — all audited:
+Adler32, Crc32, Huffman, DeflateFixedTables
 
 **Remaining unaudited spec files** (for future review sessions):
-DeflateFixedTables,
 HuffmanKraft, HuffmanTheorems,
 LZ77, LZ77Lazy,
-Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, etc.)
+XxHash (4 intentional sorries, special status),
+Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, Zstd, Deflate)
 
 ### Patterns discovered during the review campaign
 
