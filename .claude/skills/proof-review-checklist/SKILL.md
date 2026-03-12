@@ -332,7 +332,8 @@ should focus on (in priority order):
 
 **DEFLATE write-side** — all audited:
 BitstreamWriteCorrect, BitWriterCorrect, DeflateDynamicHeader,
-DeflateDynamicEmit, DeflateEncode, DeflateEncodeProps,
+DeflateDynamicEmit, DeflateDynamicCorrect, DeflateDynamicFreqs,
+DeflateEncode, DeflateEncodeProps,
 DeflateEncodeDynamic, DeflateEncodeDynamicProps, HuffmanEncode,
 HuffmanEncodeCorrect, DynamicTreesCorrect, DynamicTreesComplete,
 GzipCorrect, ZlibCorrect, DeflateRoundtrip
@@ -348,7 +349,7 @@ LZ77NativeCorrect, EmitTokensCorrect
 BinaryCorrect
 
 **Remaining unaudited spec files** (for future review sessions):
-DeflateDynamicCorrect, DeflateDynamicFreqs, DeflateFixedTables,
+DeflateFixedTables,
 HuffmanKraft, HuffmanTheorems,
 LZ77, LZ77Lazy,
 Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, etc.)
