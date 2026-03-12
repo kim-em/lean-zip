@@ -370,7 +370,7 @@ private theorem huffman_set!_preserves_forall {P : HuffmanEntry → Prop}
   show P (table.setIfInBounds idx v)[j]
   by_cases hij : idx = j
   · subst hij
-    exact (Array.getElem_setIfInBounds_self (h := by simp; exact hj)) ▸ hv
+    exact (Array.getElem_setIfInBounds_self (h := by simp only [Array.size_setIfInBounds]; exact hj)) ▸ hv
   · exact (Array.getElem_setIfInBounds_ne hj hij) ▸ hall ⟨j, hj⟩
 
 open Zip.Native in
@@ -1420,7 +1420,7 @@ theorem parseCompressedLiteralsHeader_succeeds (data : ByteArray) (pos sizeForma
   split
   · -- sizeFormat ≤ 1: needs 3 bytes
     rename_i hsf
-    have hge : data.size ≥ pos + 3 := by simp_all
+    have hge : data.size ≥ pos + 3 := by rw [if_pos hsf] at hsize; exact hsize
     simp only [show ¬(data.size < pos + 3) from by omega, ↓reduceIte]
     exact ⟨_, _, _, _, rfl⟩
   · split
@@ -1428,14 +1428,14 @@ theorem parseCompressedLiteralsHeader_succeeds (data : ByteArray) (pos sizeForma
       rename_i hnsf hsf2
       have hge : data.size ≥ pos + 4 := by
         have : sizeFormat = 2 := by rwa [beq_iff_eq] at hsf2
-        simp_all
+        rw [if_neg hnsf, if_pos this] at hsize; exact hsize
       simp only [show ¬(data.size < pos + 4) from by omega, ↓reduceIte]
       exact ⟨_, _, _, _, rfl⟩
     · -- sizeFormat ≥ 3: needs 5 bytes
       rename_i hnsf hnsf2
       have hge : data.size ≥ pos + 5 := by
         have : ¬(sizeFormat = 2) := by rwa [beq_iff_eq] at hnsf2
-        simp_all
+        rw [if_neg hnsf, if_neg this] at hsize; exact hsize
       simp only [show ¬(data.size < pos + 5) from by omega, ↓reduceIte]
       exact ⟨_, _, _, _, rfl⟩
 
@@ -1562,8 +1562,8 @@ theorem parseHuffmanWeightsDirect_succeeds (data : ByteArray) (pos numWeights : 
     (hsize : data.size ≥ pos + (numWeights + 1) / 2) :
     ∃ weights afterPos,
       parseHuffmanWeightsDirect data pos numWeights = .ok (weights, afterPos) := by
-  simp only [parseHuffmanWeightsDirect, bind, Except.bind, pure, Except.pure]
-  simp only [show ¬(data.size < pos + (numWeights + 1) / 2) from by omega, ↓reduceIte]
+  simp only [parseHuffmanWeightsDirect, bind, Except.bind, pure, Except.pure,
+    show ¬(data.size < pos + (numWeights + 1) / 2) from by omega, ↓reduceIte]
   -- The forIn loop body always returns .ok (.yield _), so the loop succeeds
   suffices h : ∃ result, (forIn [:(numWeights + 1) / 2] (#[] : Array UInt8) fun i r =>
       Except.ok (ForInStep.yield ((r.push (data[pos + i]! >>> 4)).push (data[pos + i]! &&& 15))))
@@ -1593,9 +1593,9 @@ theorem parseHuffmanWeightsFse_succeeds
     (hdecode : decodeFseSymbolsAll table bbr = .ok (weights, bbr')) :
     parseHuffmanWeightsFse data pos compressedSize =
       .ok (weights, pos + 1 + compressedSize) := by
-  simp only [parseHuffmanWeightsFse, bind, Except.bind, pure, Except.pure]
-  simp only [show ¬(data.size < pos + 1 + compressedSize) from by omega, ↓reduceIte]
-  simp only [hfse, hbuild, hinit, hdecode]
+  simp only [parseHuffmanWeightsFse, bind, Except.bind, pure, Except.pure,
+    show ¬(data.size < pos + 1 + compressedSize) from by omega, ↓reduceIte,
+    hfse, hbuild, hinit, hdecode]
 
 open Zip.Native in
 /-- When the header byte indicates direct mode (≥ 128), data has enough bytes
@@ -1610,9 +1610,9 @@ theorem parseHuffmanTreeDescriptor_succeeds_direct (data : ByteArray) (pos : Nat
       ∃ table, buildZstdHuffmanTable weights = .ok table) :
     ∃ table afterPos,
       parseHuffmanTreeDescriptor data pos = .ok (table, afterPos) := by
-  simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure]
-  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
-  simp only [show data[pos]!.toNat ≥ 128 from hheader, ↓reduceIte]
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure,
+    show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
+    show data[pos]!.toNat ≥ 128 from hheader]
   -- Chain: parseHuffmanWeightsDirect succeeds, then buildZstdHuffmanTable succeeds
   obtain ⟨weights, afterPos, hw⟩ :=
     parseHuffmanWeightsDirect_succeeds data (pos + 1) (data[pos]!.toNat - 127) (by omega)
@@ -1634,9 +1634,9 @@ theorem parseHuffmanTreeDescriptor_succeeds_fse (data : ByteArray) (pos : Nat)
     (huffTable : ZstdHuffmanTable)
     (htable : buildZstdHuffmanTable weights = .ok huffTable) :
     parseHuffmanTreeDescriptor data pos = .ok (huffTable, afterWeights) := by
-  simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure]
-  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
-  simp only [show ¬(data[pos]!.toNat ≥ 128) from by omega, ↓reduceIte]
+  simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure,
+    show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
+    show ¬(data[pos]!.toNat ≥ 128) from by omega]
   have h0 : (data[pos]!.toNat == 0) = false := by rw [beq_eq_false_iff_ne]; omega
   simp only [h0, Bool.false_eq_true, ↓reduceIte, hweights, htable]
 
@@ -1701,7 +1701,7 @@ theorem parseLiteralsSection_succeeds_raw (data : ByteArray) (pos : Nat)
               · omega
               · exact nomatch hresult
             · -- litType ≠ 0 contradicts hlit
-              simp_all [beq_iff_eq]
+              simp only [beq_iff_eq] at *; omega
           · split at hresult
             · -- sizeFormat == 1
               unfold rawLiteralsSectionSize at hsize
@@ -1714,7 +1714,7 @@ theorem parseLiteralsSection_succeeds_raw (data : ByteArray) (pos : Nat)
                   · split at hresult
                     · omega
                     · exact nomatch hresult
-                  · simp_all [beq_iff_eq]
+                  · simp only [beq_iff_eq] at *; omega
             · -- sizeFormat == 3
               unfold rawLiteralsSectionSize at hsize
               split at hsize
@@ -1726,7 +1726,7 @@ theorem parseLiteralsSection_succeeds_raw (data : ByteArray) (pos : Nat)
                   · split at hresult
                     · omega
                     · exact nomatch hresult
-                  · simp_all [beq_iff_eq]
+                  · simp only [beq_iff_eq] at *; omega
 
 open Zip.Native in
 /-- When litType = 1 (RLE) and the data has enough bytes for the variable-width
@@ -1762,7 +1762,7 @@ theorem parseLiteralsSection_succeeds_rle (data : ByteArray) (pos : Nat)
             simp only [rleLiteralsSectionMinSize, hsf, ↓reduceIte] at hsize
             split at hresult
             · -- litType == 0 contradicts hlit
-              simp_all [beq_iff_eq]
+              simp only [beq_iff_eq] at *; omega
             · split at hresult
               · omega
               · exact nomatch hresult
@@ -1775,7 +1775,7 @@ theorem parseLiteralsSection_succeeds_rle (data : ByteArray) (pos : Nat)
                 split at hresult
                 · omega -- header guard: data.size < pos + 2 contradicts hsize
                 · split at hresult
-                  · simp_all [beq_iff_eq] -- litType == 0 contradicts hlit
+                  · simp only [beq_iff_eq] at *; omega -- litType == 0 contradicts hlit
                   · split at hresult
                     · omega
                     · exact nomatch hresult
@@ -1787,7 +1787,7 @@ theorem parseLiteralsSection_succeeds_rle (data : ByteArray) (pos : Nat)
                 split at hresult
                 · omega -- header guard: data.size < pos + 3 contradicts hsize
                 · split at hresult
-                  · simp_all [beq_iff_eq] -- litType == 0 contradicts hlit
+                  · simp only [beq_iff_eq] at *; omega -- litType == 0 contradicts hlit
                   · split at hresult
                     · omega
                     · exact nomatch hresult
