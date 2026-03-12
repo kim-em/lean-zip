@@ -118,6 +118,18 @@ work in Nat (e.g. `bw.bitCount.toNat + 1 >= 8`), bridge with
 Prefer plain induction + `by_cases` on the Nat condition, then convert to UInt8
 for the goal's `if` using an iff bridging lemma.
 
+## UInt8/UInt16 Hypotheses from `split`/`if` Need Nat Annotation for `omega`
+
+When `split` or `if h : cond then ...` introduces a UInt comparison hypothesis
+(e.g., `hlen_pos : lengths[start] > (0 : UInt8)`), `omega` CANNOT use it directly
+because UInt comparison is opaque to `omega`. Add an explicit Nat annotation:
+```lean
+have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
+```
+This forces Lean to elaborate the UInt comparison into a Nat constraint that `omega`
+can see. The `have` looks like a redundant alias but is NOT — removing it breaks
+downstream `omega` calls. This applies to UInt8, UInt16, UInt32, and UInt64.
+
 ## UInt8 Positivity from Nat Membership
 
 When you have `hne0 : (lengths.toList.map UInt8.toNat)[s] ≠ 0` and need
