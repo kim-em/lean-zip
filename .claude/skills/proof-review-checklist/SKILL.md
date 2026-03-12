@@ -379,9 +379,13 @@ already clean.
 `show T from h` wrappers become redundant when `h` already has type `T`.
 Remove these to reduce noise.
 
-**Identical split branches**: Use `<;>` combinator to merge identical
-branches in multi-case `split` blocks (e.g., GzipCorrect/ZlibCorrect
-compress theorems).
+**Identical split branches**: When all branches of a nested `split`
+produce the same closer, use `repeat (first | closer | split)` to
+collapse them into one line. This handles any nesting depth (3-branch,
+4-branch, etc.) by alternating between trying the closer and splitting
+further. Example: `repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)`
+or `repeat (first | decide | split)`. See GzipCorrect/ZlibCorrect
+compress theorems for the pattern in practice.
 
 **`List.length_replicate` over expansion**: Replace verbose
 `List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
