@@ -1721,7 +1721,7 @@ theorem decompressZstd_succeeds_single_raw_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Specialize universally quantified hypotheses
   have htypeVal' := htypeVal hdr afterHdr hparse
   have hlastBit' := hlastBit hdr afterHdr hparse
@@ -1774,7 +1774,7 @@ theorem decompressZstd_succeeds_single_rle_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Specialize universally quantified hypotheses
   have htypeVal' := htypeVal hdr afterHdr hparse
   have hlastBit' := hlastBit hdr afterHdr hparse
@@ -1850,7 +1850,7 @@ theorem decompressZstd_succeeds_two_rle_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_two_rle_blocks
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_two_rle_blocks
     data 0 hdr afterHdr hparse
@@ -1927,7 +1927,7 @@ theorem decompressZstd_succeeds_rle_then_raw_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_rle_then_raw
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_rle_then_raw
     data 0 hdr afterHdr hparse
@@ -2012,7 +2012,7 @@ theorem decompressZstd_succeeds_rle_then_compressed_zero_seq_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit2', hseq2'⟩ :=
     hparsing2 hdr afterHdr hparse
@@ -2114,7 +2114,7 @@ theorem decompressZstd_succeeds_two_raw_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_two_raw_blocks
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_two_raw_blocks
     data 0 hdr afterHdr hparse
@@ -2207,7 +2207,7 @@ theorem decompressZstd_succeeds_raw_then_rle_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_raw_then_rle
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_raw_then_rle
     data 0 hdr afterHdr hparse
@@ -2313,7 +2313,7 @@ theorem decompressZstd_succeeds_raw_then_compressed_zero_seq_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit', hseq'⟩ :=
     hparsing2 hdr afterHdr hparse
@@ -2450,7 +2450,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_raw_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit1', hseq1'⟩ :=
     hparsing1 hdr afterHdr hparse
@@ -2575,7 +2575,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_rle_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit1', hseq1'⟩ :=
     hparsing1 hdr afterHdr hparse
@@ -2695,7 +2695,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_compressed_zero_seq_fra
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals1, afterLiterals1, huffTree1, modes1, afterSeqHeader1,
           literals2, afterLiterals2, huffTree2, modes2, afterSeqHeader2,
@@ -2839,7 +2839,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_compressed_sequences_fr
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain full pipeline from combined hypothesis
   obtain ⟨literals1, afterLiterals1, huffTree1, modes1, afterSeqHeader1,
           literals2, afterLiterals2, huffTree2, numSeq2, modes2, afterSeqHeader2,
@@ -2972,7 +2972,7 @@ theorem decompressZstd_succeeds_compressed_sequences_then_raw_frame (data : Byte
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Destructure pipeline existential for block 1
   obtain ⟨literals, afterLiterals, huffTree, numSeq, modes, afterSeqHeader,
     llTable, ofTable, mlTable, afterTables, bbr, sequences, blockOutput1, newHist1,
@@ -3106,7 +3106,7 @@ theorem decompressZstd_succeeds_compressed_sequences_then_rle_frame (data : Byte
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Destructure pipeline existential for block 1
   obtain ⟨literals, afterLiterals, huffTree, numSeq, modes, afterSeqHeader,
     llTable, ofTable, mlTable, afterTables, bbr, sequences, blockOutput1, newHist1,
@@ -3431,279 +3431,5 @@ theorem decompressZstd_succeeds_rle_then_compressed_sequences_frame (data : Byte
     hframe hh hparse1 hbs1 hws1 htype1 hrle1 hnotlast1 hadv1
     hoff2 hparse2 hbs2 hws2 htype2 hblockEnd2 hlit2 hseq2 hNumSeq2
     hfse2 hbbr2 hdec2 hexec2 hlast2 hend⟩
-
-/-! ## decompressZstd two-block composed completeness (comp_zero_seq first, compressed second) -/
-
-/-- End-to-end composed completeness for a frame with a non-last compressed block
-    (numSeq=0) followed by a last compressed block (numSeq=0): byte-level conditions
-    on the frame header, both block headers, and both blocks' literals/sequences parsing
-    imply `decompressZstd` succeeds.
-
-    Composes the full chain:
-    1. `parseFrameHeader_succeeds` (byte-level magic + size → frame header parsed)
-    2. `decompressFrame_succeeds_compressed_zero_seq_then_compressed_zero_seq` (header + two compressed blocks → frame)
-    3. `decompressZstd_single_frame` (frame success + end-of-data → API success) -/
-theorem decompressZstd_succeeds_compressed_zero_seq_then_compressed_zero_seq_frame (data : ByteArray)
-    -- Frame header conditions (from parseFrameHeader_succeeds)
-    (hmagic : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic)
-    (hframeSize : data.size ≥ Zstd.Spec.frameHeaderMinSize data[4]!)
-    -- Header field constraints (universally quantified over parseFrameHeader result)
-    (hnodict : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → hdr.dictionaryId = none)
-    (hnocksum : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → hdr.contentChecksum = false)
-    (hnosize : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → hdr.contentSize = none)
-    -- Block 1 (non-last compressed, zero sequences) at afterHdr
-    (hsize1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → data.size ≥ afterHdr + 3)
-    (htypeVal1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
-    (hlastBit1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → (data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
-    (hblockSize1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
-    (hwindow1 : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → ¬ (hdr.windowSize > 0 &&
-            ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > hdr.windowSize))
-    (hblockEnd1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → data.size ≥ afterHdr + 3 +
-            (((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
-    -- Block 2 (last compressed, zero sequences) at off2 = afterHdr + 3 + blockSize1
-    (hsize2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        data.size ≥ off2 + 3)
-    (htypeVal2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-            ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
-    (hlastBit2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-            ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
-    (hblockSize2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-            ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
-    (hwindow2 : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ¬ (hdr.windowSize > 0 &&
-            ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-              ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > hdr.windowSize))
-    (hblockEnd2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        data.size ≥ off2 + 3 +
-            (((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-              ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
-    -- Combined literals/sequences parsing for both blocks (block 2 depends on block 1's huffTree)
-    (hparsing : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ∃ literals1 afterLiterals1 huffTree1 modes1 afterSeqHeader1
-            literals2 afterLiterals2 huffTree2 modes2 afterSeqHeader2,
-            Zip.Native.parseLiteralsSection data (afterHdr + 3) none
-              = .ok (literals1, afterLiterals1, huffTree1) ∧
-            Zip.Native.parseSequencesHeader data afterLiterals1
-              = .ok (0, modes1, afterSeqHeader1) ∧
-            Zip.Native.parseLiteralsSection data (off2 + 3)
-              (if let some ht := huffTree1 then some ht else none)
-              = .ok (literals2, afterLiterals2, huffTree2) ∧
-            Zip.Native.parseSequencesHeader data afterLiterals2
-              = .ok (0, modes2, afterSeqHeader2))
-    -- Frame terminates the data
-    (hterm : ∀ content pos', Zip.Native.decompressFrame data 0 = .ok (content, pos')
-        → pos' ≥ data.size) :
-    ∃ output, Zip.Native.decompressZstd data = .ok output := by
-  -- Step 1: Obtain header from parseFrameHeader_succeeds
-  obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
-  -- Step 2: Destructure combined parsing hypothesis
-  obtain ⟨literals1, afterLiterals1, huffTree1, modes1, afterSeqHeader1,
-    literals2, afterLiterals2, huffTree2, modes2, afterSeqHeader2,
-    hlit1', hseq1', hlit2', hseq2'⟩ := hparsing hdr afterHdr hparse
-  -- Step 3: Case-split huffTree1 to reduce if-let in hlit2' and avoid dependent type mismatch
-  cases huffTree1 <;> (
-  obtain ⟨content, pos', hframe⟩ :=
-    Zstd.Spec.decompressFrame_succeeds_compressed_zero_seq_then_compressed_zero_seq
-    data 0 hdr afterHdr literals1 afterLiterals1 _ modes1 afterSeqHeader1
-    literals2 afterLiterals2 huffTree2 modes2 afterSeqHeader2
-    hparse (hnodict hdr afterHdr hparse) (hnocksum hdr afterHdr hparse)
-    (hnosize hdr afterHdr hparse)
-    (hsize1 hdr afterHdr hparse) (htypeVal1 hdr afterHdr hparse) (hlastBit1 hdr afterHdr hparse)
-    (hblockSize1 hdr afterHdr hparse) (hwindow1 hdr afterHdr hparse)
-    (hblockEnd1 hdr afterHdr hparse) hlit1' hseq1'
-    _ rfl
-    (hsize2 hdr afterHdr hparse) (htypeVal2 hdr afterHdr hparse) (hlastBit2 hdr afterHdr hparse)
-    (hblockSize2 hdr afterHdr hparse) (hwindow2 hdr afterHdr hparse)
-    (hblockEnd2 hdr afterHdr hparse) hlit2' hseq2'
-  -- Step 4: Apply decompressZstd_single_frame
-  exact ⟨content, decompressZstd_single_frame data content pos' hframe (hterm content pos' hframe)⟩)
-
-/-- End-to-end composed completeness for a frame with a non-last compressed block
-    (numSeq=0) followed by a last compressed block with sequences (numSeq > 0):
-    byte-level conditions on the frame header, both block headers, and the full
-    parsing/decoding/execution pipeline for both blocks imply `decompressZstd` succeeds.
-
-    Composes the full chain:
-    1. `parseFrameHeader_succeeds` (byte-level magic + size → frame header parsed)
-    2. `decompressFrame_succeeds_compressed_zero_seq_then_compressed_sequences` (header + two compressed blocks → frame)
-    3. `decompressZstd_single_frame` (frame success + end-of-data → API success) -/
-theorem decompressZstd_succeeds_compressed_zero_seq_then_compressed_sequences_frame (data : ByteArray)
-    -- Frame header conditions (from parseFrameHeader_succeeds)
-    (hmagic : Binary.readUInt32LE data 0 = Zip.Native.zstdMagic)
-    (hframeSize : data.size ≥ Zstd.Spec.frameHeaderMinSize data[4]!)
-    -- Header field constraints (universally quantified over parseFrameHeader result)
-    (hnodict : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → hdr.dictionaryId = none)
-    (hnocksum : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → hdr.contentChecksum = false)
-    (hnosize : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → hdr.contentSize = none)
-    -- Block 1 (non-last compressed, zero sequences) at afterHdr
-    (hsize1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → data.size ≥ afterHdr + 3)
-    (htypeVal1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
-    (hlastBit1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → (data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
-    (hblockSize1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-            ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
-    (hwindow1 : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr)
-        → ¬ (hdr.windowSize > 0 &&
-            ((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > hdr.windowSize))
-    (hblockEnd1 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr)
-        → data.size ≥ afterHdr + 3 +
-            (((data[afterHdr]!.toUInt32 ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
-    -- Block 2 (last compressed, with sequences) at off2 = afterHdr + 3 + blockSize1
-    (hsize2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        data.size ≥ off2 + 3)
-    (htypeVal2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-            ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 2)
-    (hlastBit2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-            ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
-    (hblockSize2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-            ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
-    (hwindow2 : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ¬ (hdr.windowSize > 0 &&
-            ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-              ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > hdr.windowSize))
-    (hblockEnd2 : ∀ _hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (_hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        data.size ≥ off2 + 3 +
-            (((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
-              ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
-    -- Combined block 1 parsing + block 2 full pipeline (block 2 depends on block 1's huffTree)
-    (hpipeline : ∀ hdr afterHdr, Zip.Native.parseFrameHeader data 0 = .ok (hdr, afterHdr) →
-        let off2 := afterHdr + 3 + (((data[afterHdr]!.toUInt32
-              ||| (data[afterHdr + 1]!.toUInt32 <<< 8)
-              ||| (data[afterHdr + 2]!.toUInt32 <<< 16)) >>> 3).toNat)
-        ∃ literals1 afterLiterals1 huffTree1 modes1 afterSeqHeader1
-            literals2 afterLiterals2 huffTree2 numSeq2 modes2 afterSeqHeader2
-            llTable2 ofTable2 mlTable2 afterTables2 bbr2 sequences2
-            blockOutput2 newHist2,
-            -- Block 1 parsing (comp_zero_seq)
-            Zip.Native.parseLiteralsSection data (afterHdr + 3) none
-              = .ok (literals1, afterLiterals1, huffTree1) ∧
-            Zip.Native.parseSequencesHeader data afterLiterals1
-              = .ok (0, modes1, afterSeqHeader1) ∧
-            -- Block 2 full pipeline (comp_sequences)
-            Zip.Native.parseLiteralsSection data (off2 + 3)
-              (if let some ht := huffTree1 then some ht else none)
-              = .ok (literals2, afterLiterals2, huffTree2) ∧
-            Zip.Native.parseSequencesHeader data afterLiterals2
-              = .ok (numSeq2, modes2, afterSeqHeader2) ∧
-            ¬ (numSeq2 == 0) ∧
-            Zip.Native.resolveSequenceFseTables modes2 data afterSeqHeader2 {}
-              = .ok (llTable2, ofTable2, mlTable2, afterTables2) ∧
-            Zip.Native.BackwardBitReader.init data afterTables2
-              (off2 + 3 + (((data[off2]!.toUInt32
-                ||| (data[off2 + 1]!.toUInt32 <<< 8)
-                ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
-              = .ok bbr2 ∧
-            Zip.Native.decodeSequences llTable2 ofTable2 mlTable2 bbr2 numSeq2
-              = .ok sequences2 ∧
-            Zip.Native.executeSequences sequences2 literals2
-              (if hdr.windowSize > 0 &&
-                    (ByteArray.empty ++ literals1).size > hdr.windowSize.toNat
-                then (ByteArray.empty ++ literals1).extract
-                  ((ByteArray.empty ++ literals1).size - hdr.windowSize.toNat)
-                  (ByteArray.empty ++ literals1).size
-                else (ByteArray.empty ++ literals1))
-              #[1, 4, 8] hdr.windowSize.toNat = .ok (blockOutput2, newHist2))
-    -- Frame terminates the data
-    (hterm : ∀ content pos', Zip.Native.decompressFrame data 0 = .ok (content, pos')
-        → pos' ≥ data.size) :
-    ∃ output, Zip.Native.decompressZstd data = .ok output := by
-  -- Step 1: Obtain header from parseFrameHeader_succeeds
-  obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
-  -- Step 2: Destructure combined pipeline hypothesis
-  obtain ⟨literals1, afterLiterals1, huffTree1, modes1, afterSeqHeader1,
-    literals2, afterLiterals2, huffTree2, numSeq2, modes2, afterSeqHeader2,
-    llTable2, ofTable2, mlTable2, afterTables2, bbr2, sequences2,
-    blockOutput2, newHist2,
-    hlit1', hseq1', hlit2', hseq2', hNumSeq2', hfse2', hbbr2', hdec2', hexec2'⟩ :=
-    hpipeline hdr afterHdr hparse
-  -- Step 3: Case-split huffTree1 to reduce if-let in hlit2' and avoid dependent type mismatch
-  cases huffTree1 <;> (
-  obtain ⟨content, pos', hframe⟩ :=
-    Zstd.Spec.decompressFrame_succeeds_compressed_zero_seq_then_compressed_sequences
-    data 0 hdr afterHdr literals1 afterLiterals1 _ modes1 afterSeqHeader1
-    literals2 afterLiterals2 huffTree2 numSeq2 modes2 afterSeqHeader2
-    llTable2 ofTable2 mlTable2 afterTables2 bbr2 sequences2 blockOutput2 newHist2
-    hparse (hnodict hdr afterHdr hparse) (hnocksum hdr afterHdr hparse)
-    (hnosize hdr afterHdr hparse)
-    (hsize1 hdr afterHdr hparse) (htypeVal1 hdr afterHdr hparse) (hlastBit1 hdr afterHdr hparse)
-    (hblockSize1 hdr afterHdr hparse) (hwindow1 hdr afterHdr hparse)
-    (hblockEnd1 hdr afterHdr hparse) hlit1' hseq1'
-    _ rfl
-    (hsize2 hdr afterHdr hparse) (htypeVal2 hdr afterHdr hparse) (hlastBit2 hdr afterHdr hparse)
-    (hblockSize2 hdr afterHdr hparse) (hwindow2 hdr afterHdr hparse)
-    (hblockEnd2 hdr afterHdr hparse) hlit2' hseq2' hNumSeq2' hfse2' hbbr2' hdec2' hexec2'
-  -- Step 4: Apply decompressZstd_single_frame
-  exact ⟨content, decompressZstd_single_frame data content pos' hframe (hterm content pos' hframe)⟩)
 
 end Zip.Spec.ZstdFrame
