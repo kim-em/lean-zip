@@ -144,8 +144,8 @@ private theorem specDistBase_step : ∀ i : Fin 29,
     Deflate.Spec.distBase[i.val]! ≤ Deflate.Spec.distBase[i.val + 1]! := by decide
 
 -- Sizes
-private theorem nativeLengthBase_size : Inflate.lengthBase.size = 29 := by rfl
-private theorem nativeDistBase_size : Inflate.distBase.size = 30 := by rfl
+private theorem nativeLengthBase_size : Inflate.lengthBase.size = 29 := rfl
+private theorem nativeDistBase_size : Inflate.distBase.size = 30 := rfl
 
 /-- Monotonicity of the spec length base table (full transitive closure). -/
 private theorem specLengthBase_monotone (j k : Nat) (hjk : j ≤ k) (hk : k < 29) :
