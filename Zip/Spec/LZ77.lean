@@ -179,7 +179,6 @@ where
       | none =>
         .literal data[pos]! :: go data (pos + 1) windowSize
   termination_by data.length - pos
-  decreasing_by all_goals omega
 
 /-! ## LZ77 matching properties -/
 
@@ -203,7 +202,6 @@ termination_by maxLen - count
 
 /-- `matchLength.go` only counts positions where bytes match. -/
 theorem matchLength.go_correct (data : List UInt8) (pos dist count maxLen : Nat)
-    (_ : count ≤ maxLen)
     (n : Nat) (hgo : matchLength.go data pos dist count maxLen = n) :
     ∀ i, count ≤ i → i < n →
       data[pos + i]? = data[pos - dist + (i % dist)]? := by
@@ -220,8 +218,7 @@ theorem matchLength.go_correct (data : List UInt8) (pos dist count maxLen : Nat)
         simp only [hpa, hpb, beq_iff_eq] at hgo
         split at hgo
         · rename_i hab
-          have ih := matchLength.go_correct data pos dist (count + 1) maxLen
-            (by omega) n hgo
+          have ih := matchLength.go_correct data pos dist (count + 1) maxLen n hgo
           intro i hi hilt
           by_cases heq : i = count
           · rw [heq, hpa, hpb, hab]
@@ -231,7 +228,6 @@ termination_by maxLen - count
 
 /-- `matchLength.go` ensures all counted positions are in bounds. -/
 theorem matchLength.go_in_bounds (data : List UInt8) (pos dist count maxLen : Nat)
-    (_ : count ≤ maxLen)
     (n : Nat) (hgo : matchLength.go data pos dist count maxLen = n) :
     ∀ i, count ≤ i → i < n → pos + i < data.length := by
   unfold matchLength.go at hgo
@@ -247,8 +243,7 @@ theorem matchLength.go_in_bounds (data : List UInt8) (pos dist count maxLen : Na
       | some b =>
         simp only [hpa, hpb, beq_iff_eq] at hgo
         split at hgo
-        · have ih := matchLength.go_in_bounds data pos dist (count + 1) maxLen
-            (by omega) n hgo
+        · have ih := matchLength.go_in_bounds data pos dist (count + 1) maxLen n hgo
           intro i hi hilt
           by_cases heq : i = count
           · rw [heq]
@@ -267,7 +262,7 @@ theorem matchLength_correct (data : List UInt8) (pos dist : Nat)
   unfold matchLength at h
   split at h
   · omega
-  · exact matchLength.go_correct data pos dist 0 maxLen (by omega) n h i (by omega) hi
+  · exact matchLength.go_correct data pos dist 0 maxLen n h i (by omega) hi
 
 /-- All positions counted by `matchLength` are in bounds. -/
 theorem matchLength_in_bounds (data : List UInt8) (pos dist : Nat)
@@ -277,7 +272,7 @@ theorem matchLength_in_bounds (data : List UInt8) (pos dist : Nat)
   unfold matchLength at h
   split at h
   · omega
-  · exact matchLength.go_in_bounds data pos dist 0 maxLen (by omega) n h i (by omega) hi
+  · exact matchLength.go_in_bounds data pos dist 0 maxLen n h i (by omega) hi
 
 /-- Invariant for `findLongestMatch.go`: if it returns `some (len, dist)`,
     then `len ≥ 3`, `1 ≤ dist ≤ maxDist`, and `matchLength data pos dist = len`. -/
@@ -494,7 +489,6 @@ where
       | none =>
         .literal data[pos]! :: go data (pos + 1) windowSize
   termination_by data.length - pos
-  decreasing_by all_goals omega
 
 /-- Inner correctness lemma for `matchLZ77Lazy.go`. -/
 private theorem matchLZ77Lazy.go_correct (data : List UInt8) (pos windowSize : Nat)
