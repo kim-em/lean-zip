@@ -210,12 +210,31 @@ split.
 ## Hot File Tracking
 
 Track files that cause repeated merge conflicts across multiple PRs.
-As of 2026-03-08, the known hot files are:
+As of 2026-03-12, the known hot files are:
 
 | File | Size | Conflict PRs | Status |
 |------|------|-------------|--------|
-| `Zip/Spec/Zstd.lean` | ~4400 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063, #1213 | **Critical** — 4.4× the 1000-line threshold. Every two-block completeness theorem appends here. Split urgently needed into block-level / frame-level / composition sections. |
-| `Zip/Spec/ZstdFrame.lean` | ~1670 lines | #1063, #1188 | **High** — 1.7× threshold. API-level `decompressZstd` completeness theorems accumulating. Frame-header completeness, single-frame composition, and end-to-end compressed completeness all land here. |
+| `Zip/Spec/Zstd.lean` | ~5650 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063, #1213, #1253, #1257, #1263, #1264, #1265 | **Critical** — 5.6× the 1000-line threshold. Grew 1250 lines in 4 days. Every two-block completeness theorem appends here. Split urgently needed. |
+| `Zip/Spec/ZstdFrame.lean` | ~2220 lines | #1063, #1188, #1253, #1269 | **Critical** — 2.2× threshold. API-level theorems accumulating fast. Grew 550 lines in 4 days. |
+
+### Conflict rate is accelerating
+
+The combinatorial expansion of the completeness matrix drives the conflict
+rate up superlinearly as more cells are filled:
+
+| Period | Issues | Conflict fixes | Rate |
+|--------|--------|---------------|------|
+| #983–#1219 (early matrix) | ~236 | ~12 | ~5% |
+| #1219–#1285 (recent batch) | 39 | 7 | **18%** |
+
+**Root cause**: Multiple agents add theorems to the end of the same
+section in `Zstd.lean` or `ZstdFrame.lean`. With 4+ agents running
+concurrently and auto-merge enabled, the merge-to-conflict window
+is shrinking — PRs go stale between push and merge.
+
+**The conflict tax**: Each conflict-fix issue consumes a full agent
+session (~5 minutes of wall time, ~100K tokens). At 18% conflict rate,
+nearly 1 in 5 sessions produces no new theorems — only conflict fixes.
 
 ### Mitigation strategies for hot files
 
