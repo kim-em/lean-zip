@@ -186,6 +186,16 @@ protected theorem hasLeaf_of_decodeBits (tree : Zip.Native.HuffTree) (bits : Lis
         obtain ⟨cw, hleaf, hrst⟩ := iho rest' h
         exact ⟨true :: cw, .right hleaf, by simp only [List.cons_append, hrst]⟩
 
+/-! ### natToBits prefix helper -/
+
+/-- If `natToBits code n` is a prefix of `path`, then `natToBits code (n+1)` is a prefix of
+    `(testBit n) :: path`. Used by `insert_go_preserves` and `insert_go_noLeafOnPath`. -/
+private theorem natToBits_cons_prefix (code : UInt32) (n : Nat) (b : Bool)
+    (htb : code.toNat.testBit n = b) (path : List Bool)
+    (hpre : (Huffman.Spec.natToBits code.toNat n).IsPrefix path) :
+    (Huffman.Spec.natToBits code.toNat (n + 1)).IsPrefix (b :: path) := by
+  simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self]
+
 /-! ### insert.go creates the correct leaf path -/
 
 /-- Predicate: tree `t` has no leaf at an intermediate position along `path`.
@@ -270,7 +280,7 @@ theorem insert_go_preserves (code : UInt32) (sym : UInt16)
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
         exact .left (ih _ (by omega) _ h' fun hpre =>
-          hne (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self]))
+          hne (natToBits_cons_prefix code n _ htb _ hpre))
       | true =>
         -- Different direction: insertion goes right; z is untouched
         have hbit := insert_bit_one code n (by omega) htb
@@ -292,7 +302,7 @@ theorem insert_go_preserves (code : UInt32) (sym : UInt16)
         unfold Zip.Native.HuffTree.insert.go
         simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
         exact .right (ih _ (by omega) _ h' fun hpre =>
-          hne (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self]))
+          hne (natToBits_cons_prefix code n _ htb _ hpre))
 
 /-! ### insert.go preserves NoLeafOnPath for non-prefix paths -/
 
@@ -328,7 +338,7 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
           | false =>
             -- Same direction: recurse
             exact ih .empty (by omega) rest trivial fun hpre =>
-              hnp (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self])
+              hnp (natToBits_cons_prefix code n _ htb _ hpre)
           | true => trivial  -- different direction, child is .empty
         | node z o =>
           unfold Zip.Native.HuffTree.insert.go; simp only [Nat.toUInt32_eq, hbit, ↓reduceIte]
@@ -336,7 +346,7 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
           | false =>
             simp only [NoLeafOnPath] at hno
             exact ih z (by omega) rest hno fun hpre =>
-              hnp (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self])
+              hnp (natToBits_cons_prefix code n _ htb _ hpre)
           | true =>
             simp only [NoLeafOnPath] at hno; exact hno
         | leaf s =>
@@ -352,7 +362,7 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
           | false => trivial  -- different direction, child is .empty
           | true =>
             exact ih .empty (by omega) rest trivial fun hpre =>
-              hnp (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self])
+              hnp (natToBits_cons_prefix code n _ htb _ hpre)
         | node z o =>
           unfold Zip.Native.HuffTree.insert.go
           simp only [Nat.toUInt32_eq, hbit, Bool.false_eq_true, ↓reduceIte]
@@ -362,7 +372,7 @@ theorem insert_go_noLeafOnPath (code : UInt32) (sym : UInt16)
           | true =>
             simp only [NoLeafOnPath] at hno
             exact ih o (by omega) rest hno fun hpre =>
-              hnp (by simp only [Huffman.Spec.natToBits, htb, List.cons_prefix_cons, hpre, and_self])
+              hnp (natToBits_cons_prefix code n _ htb _ hpre)
         | leaf s =>
           simp only [NoLeafOnPath] at hno
 
