@@ -256,6 +256,8 @@ Replace bare `simp_all` with targeted variants using `simp_all?`:
 | `simp_all` after `beq` hypothesis | `simp only [beq_iff_eq] at *; exact h` or `simp_all only [beq_iff_eq]` |
 | `simp_all` in termination proof | `simp_all only [countRun_le_length]; omega` — make the specific lemma explicit |
 | `simp_all` for Bool-to-Prop conversion | `simp_all only [beq_eq_false_iff_ne]` or use `beq_eq_false_iff_ne.mpr hx0` |
+| `simp_all` reducing `if` in hypothesis | `rw [if_pos h]` / `rw [if_neg h] at hsize` — use `if_pos`/`if_neg` lemmas directly when `simp_all` is just reducing a conditional whose branch is known |
+| `simp_all [beq_iff_eq]` for contradiction | `simp only [beq_iff_eq] at *; omega` — when the goal is arithmetic contradiction after BEq→Prop conversion |
 
 ### Injection lemma kit for Option/Prod
 
