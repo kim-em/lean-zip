@@ -88,6 +88,27 @@ private theorem nc_invariant_step
     rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
     exact hnc b hb1 hb15
 
+/-- NC invariant skip: when `lsList[start] = 0`, the NC invariant at `start` implies
+    the NC invariant at `start + 1` with the same `nextCode`. Shared by
+    `insertLoop_forward` and `insertLoop_backward`. -/
+private theorem nc_invariant_skip
+    (nextCode : Array UInt32) (start : Nat)
+    (lsList : List Nat) (maxBits : Nat) (ncSpec : Array Nat)
+    (hls_len : start < lsList.length)
+    (hls_val : lsList[start] = 0)
+    (hnc : ∀ b, 1 ≤ b → b ≤ maxBits →
+      nextCode[b]!.toNat = ncSpec[b]! +
+        (lsList.take start).foldl (fun acc l => if l == b then acc + 1 else acc) 0)
+    (b : Nat) (hb1 : 1 ≤ b) (hb15 : b ≤ maxBits) :
+    nextCode[b]!.toNat = ncSpec[b]! +
+      (lsList.take (start + 1)).foldl (fun acc l => if l == b then acc + 1 else acc) 0 := by
+  rw [hnc b hb1 hb15]; congr 1
+  rw [List.take_add_one]
+  simp only [beq_iff_eq, List.getElem?_eq_getElem hls_len, hls_val, Option.toList_some,
+    List.foldl_append, List.foldl_cons, List.foldl_nil, right_eq_ite_iff,
+    Nat.left_eq_add, Nat.succ_ne_self, imp_false]
+  omega
+
 /-- The tree produced by `insertLoop` has a leaf for every symbol with nonzero length,
     at the codeword given by `codeFor`. Proved by well-founded induction on `lengths.size - start`,
     maintaining the NC invariant, forward invariant, and NoLeafOnPath invariant. -/
@@ -176,12 +197,7 @@ private theorem insertLoop_forward
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; omega
       exact insertLoop_forward lengths nextCode (start + 1) tree
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv hncSize
-        (by intro b hb1 hb15; rw [hnc b hb1 hb15]; congr 1
-            rw [List.take_add_one]
-            simp only [beq_iff_eq, List.getElem?_eq_getElem hls_len, hls_val, Option.toList_some,
-                List.foldl_append, List.foldl_cons, List.foldl_nil, right_eq_ite_iff,
-                Nat.left_eq_add, Nat.succ_ne_self, imp_false]
-            omega)
+        (nc_invariant_skip nextCode start lsList maxBits ncSpec hls_len hls_val hnc)
         (by intro k hk hks hklen cw' hcf'
             have : k ≠ start := fun h => absurd (h ▸ hklen) hlen_zero
             exact hprev k (by omega) hks hklen cw' hcf')
@@ -261,11 +277,7 @@ private theorem insertLoop_backward
         simp only [hlsList, List.getElem_map, Array.getElem_toList]; omega
       have ih := insertLoop_backward lengths nextCode (start + 1) tree
         lsList hlsList maxBits hmb blCount hblCount ncSpec hncSpec hv hncSize
-        (by intro b hb1 hb15; rw [hnc b hb1 hb15]; congr 1
-            rw [List.take_add_one]
-            simp only [beq_iff_eq, List.getElem?_eq_getElem hls_len, hls_val, Option.toList_some,
-              List.foldl_append, List.foldl_cons, List.foldl_nil, right_eq_ite_iff,
-              Nat.left_eq_add, Nat.succ_ne_self, imp_false]; omega)
+        (nc_invariant_skip nextCode start lsList maxBits ncSpec hls_len hls_val hnc)
         cw sym h
       cases ih with
       | inl h_pre => exact .inl h_pre
