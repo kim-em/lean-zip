@@ -242,8 +242,8 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
                 (by rw [Deflate.Correctness.fixedLitLengths_eq]; exact Deflate.Spec.fixedLitLengths_valid)
                 (by rw [Deflate.Correctness.fixedDistLengths_eq]; exact Deflate.Spec.fixedDistLengths_valid)
                 Deflate.Correctness.fixedLitLengths_size Deflate.Correctness.fixedDistLengths_size hdh
-            rw [hbr₂_bits] at hspec_ds
-            rw [Deflate.Correctness.fixedLitLengths_eq, Deflate.Correctness.fixedDistLengths_eq] at hspec_ds
+            rw [hbr₂_bits, Deflate.Correctness.fixedLitLengths_eq,
+              Deflate.Correctness.fixedDistLengths_eq] at hspec_ds
             have ⟨hd_h, _, hple_h⟩ := decodeHuffman_inv fixedLit fixedDist br₂ br' output out' maxOut
               (show Inflate.decodeHuffman br₂ output fixedLit fixedDist maxOut = .ok (out', br') from by
                 unfold Inflate.decodeHuffman; exact hdh) hpos₂ hple₂
@@ -508,11 +508,8 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
       have hgoR' : Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits deflated) []
           = some (result.data.toList, remaining) := by
         rw [← hbr_toBits]; exact hgoR
-      have : some (result.data.toList, remaining) =
-          some (result.data.toList, pad_remaining) :=
-        hgoR'.symm.trans hgoR_pad
-      have heq := (Option.some.inj this)
-      have : remaining = pad_remaining := (Prod.mk.inj heq).2
+      have : remaining = pad_remaining :=
+        (Prod.mk.inj (Option.some.inj (hgoR'.symm.trans hgoR_pad))).2
       rw [this]; exact hpadlen
 
 /-- endPos exactness: combining ≤ and ≥ gives equality. -/
