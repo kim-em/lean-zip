@@ -342,11 +342,18 @@ BitstreamCorrect, BitstreamComplete, DecodeCorrect, DecodeComplete,
 InflateCorrect, InflateComplete, InflateLoopBounds, InflateRawSuffix,
 HuffmanCorrect, HuffmanCorrectLoop
 
+**LZ77 + Huffman** — audited (2026-03-12):
+EmitTokensCorrect, LZ77NativeCorrect, HuffmanKraft, HuffmanTheorems,
+LZ77, LZ77Lazy, DeflateStoredCorrect, DeflateFixedCorrect,
+DeflateSuffix, BinaryCorrect
+
+**Zstd spec** — audited (2026-03-12):
+ZstdHuffman, ZstdFrame, Fse
+
 **Remaining unaudited spec files** (for future review sessions):
 DeflateDynamicCorrect, DeflateDynamicFreqs, DeflateFixedTables,
-EmitTokensCorrect, HuffmanKraft, HuffmanTheorems,
-LZ77, LZ77Lazy, LZ77NativeCorrect,
-Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, etc.)
+Zstd.lean (5650 lines — defer until after file split),
+ZstdSequence
 
 ### Patterns discovered during the review campaign
 
