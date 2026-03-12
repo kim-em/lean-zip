@@ -403,11 +403,9 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
         by_cases hle : startPos ≤ data.size
         · exact hle
         · exfalso
-          have hgt : startPos ≥ data.size := by omega
           have hfail : (BitReader.mk data startPos 0).readBit =
               .error "BitReader: unexpected end of input" := by
-            simp only [BitReader.readBit]
-            simp only [show startPos ≥ data.size from hgt, ↓reduceIte]
+            simp only [BitReader.readBit, show startPos ≥ data.size from by omega, ↓reduceIte]
           rw [Inflate.inflateLoop.eq_1] at h
           simp only [bind, Except.bind,
             BitReader.readBits, BitReader.readBits.go, hfail] at h
@@ -562,7 +560,6 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
     by_cases hle : startPos ≤ data.size
     · exact hle
     · exfalso
-      have h_gt : startPos > data.size := by omega
       have : (Deflate.Spec.bytesToBits data).drop (startPos * 8) = [] :=
         List.drop_eq_nil_of_le (by rw [Deflate.Spec.bytesToBits_length]; omega)
       rw [this] at hspec
