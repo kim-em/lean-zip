@@ -81,24 +81,14 @@ gh issue view <N> --json body --jq .body
 ## Step 2: Set Up
 
 ```bash
-# In worktree sessions (pod), the branch already exists — just verify:
-git branch --show-current   # should be agent/<UUID-prefix>
-# Only create if not already on the branch:
-git checkout -b agent/<first-8-chars-of-session-UUID> 2>/dev/null || true
+git checkout -b agent/${POD_SESSION_ID:0:8}
 git rev-parse HEAD      # record starting commit
 ```
 
-**Stale remote branch**: The branch name `agent/<UUID-prefix>` may have a
-remote counterpart with prior work from an earlier session. If the remote
-branch exists and has diverged from master, **reset to master first**:
-```bash
-git fetch origin
-git reset --hard origin/master
-```
-Then add your changes on top of current master and force-push when creating
-the PR. Do NOT try to rebase/cherry-pick/merge the stale remote content —
-prior PRs from this branch were squash-merged into master, so the content
-is already there.
+**Note**: Always derive the branch name from `$POD_SESSION_ID`, not from
+the worktree directory name — they may differ. If the worktree was
+pre-created with a different branch name, rename it:
+`git branch -m <old-name> agent/${POD_SESSION_ID:0:8}`
 
 Record any project-specific quality metrics (e.g. sorry count, test coverage)
 as described in the project's CLAUDE.md.
