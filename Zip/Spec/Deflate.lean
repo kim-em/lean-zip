@@ -588,7 +588,7 @@ private theorem readNBytes_byteToBitsSpec (data : List UInt8) (rest : List Bool)
     some (data, rest) := by
   suffices ∀ (acc : List UInt8),
     decodeStored.readNBytes data.length (data.flatMap byteToBitsSpec ++ rest) acc =
-    some (acc ++ data, rest) by simpa using this []
+    some (acc ++ data, rest) by simpa only [List.nil_append] using this []
   induction data with
   | nil => intro acc; simp only [List.length_nil, List.flatMap_nil, List.nil_append,
       decodeStored.readNBytes, List.append_nil]
@@ -639,7 +639,7 @@ private theorem decodeStored_encodeStoredBlock (data : List UInt8) (rest : List 
   simp only [alignToByte]
   rw [halign]
   -- drop 5 from [false, false, false, false, false] ++ ...
-  simp only [show List.replicate 5 false = [false, false, false, false, false] from rfl,
+  simp only [List.reduceReplicate,
     List.cons_append, List.nil_append, List.drop_succ_cons, List.drop_zero]
   -- Now: readBitsLSB 16 (encodeLEU16 len ++ encodeLEU16 nlen ++ data.flatMap byteToBitsSpec ++ rest)
   simp only [encodeStoredBlock, encodeLEU16, List.append_assoc]
@@ -676,8 +676,7 @@ private theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
         List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
     have hdec : decodeStored (List.replicate 5 false ++ encodeStoredBlock data) =
         some (data, []) := by
-      have h := decodeStored_encodeStoredBlock data [] hle halign
-      simp only [List.append_nil] at h; exact h
+      simpa only [List.append_nil] using decodeStored_encodeStoredBlock data [] hle halign
     show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
       fun x => some (acc ++ x.fst)) = some (acc ++ data)
     rw [hdec]; simp only [Option.bind]
@@ -742,8 +741,7 @@ private theorem encodeStored_goR (data : List UInt8) (acc : List UInt8) :
         List.length_ofFn, flatMap_byteToBitsSpec_length]; omega
     have hdec : decodeStored (List.replicate 5 false ++ encodeStoredBlock data) =
         some (data, []) := by
-      have h := decodeStored_encodeStoredBlock data [] hle halign
-      simp only [List.append_nil] at h; exact h
+      simpa only [List.append_nil] using decodeStored_encodeStoredBlock data [] hle halign
     show (decodeStored (List.replicate 5 false ++ encodeStoredBlock data) |>.bind
       fun x => some (acc ++ x.fst, x.snd)) = some (acc ++ data, [])
     rw [hdec]; simp only [Option.bind]
@@ -854,8 +852,8 @@ private theorem bytesToBits_storedHdr (bfinal : UInt8) (len nlen : UInt16) :
       ((len >>> 8) &&& 0xFF).toUInt8, (nlen &&& 0xFF).toUInt8,
       ((nlen >>> 8) &&& 0xFF).toUInt8]) =
     byteToBitsSpec bfinal ++ encodeLEU16 len.toNat ++ encodeLEU16 nlen.toNat := by
-  simp only [bytesToBits, byteToBits_eq_byteToBitsSpec]
-  simp only [List.flatMap_cons, List.flatMap_nil, List.append_nil, ← List.append_assoc]
+  simp only [bytesToBits, byteToBits_eq_byteToBitsSpec,
+    List.flatMap_cons, List.flatMap_nil, List.append_nil, ← List.append_assoc]
   rw [show ∀ (a b c d e : List Bool),
     a ++ b ++ c ++ d ++ e = a ++ (b ++ c) ++ (d ++ e) from by
     intros; simp only [List.append_assoc]]
@@ -882,6 +880,10 @@ private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
     encodeStored (data.data.toList.drop pos) := by
   unfold Zip.Spec.DeflateStoredCorrect.deflateStoredPure
   simp only []
+  have hdata_len : data.data.toList.length = data.size := by
+    unfold ByteArray.size; rfl
+  have hlen_drop : (data.data.toList.drop pos).length = data.size - pos := by
+    rw [List.length_drop, hdata_len]
   split
   · -- Final block case: pos + blockSize ≥ data.size
     rename_i h
@@ -889,10 +891,6 @@ private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
     simp only [hbs]
     rw [bytesToBits_append', bytesToBits_storedHdr, byteToBitsSpec_0x01,
         bytesToBits_extract_eq]
-    have hdata_len : data.data.toList.length = data.size := by
-      unfold ByteArray.size; rfl
-    have hlen_drop : (data.data.toList.drop pos).length = data.size - pos := by
-      rw [List.length_drop, hdata_len]
     have hlen_list : (data.data.toList.drop pos).length ≤ 65535 := by
       rw [hlen_drop]; omega
     unfold encodeStored
@@ -915,10 +913,6 @@ private theorem bytesToBits_deflateStoredPure (data : ByteArray) (pos : Nat) :
     simp only [hbs]
     rw [bytesToBits_append', bytesToBits_append', bytesToBits_storedHdr, byteToBitsSpec_0x00,
         bytesToBits_extract_eq, bytesToBits_deflateStoredPure data (pos + 65535)]
-    have hdata_len : data.data.toList.length = data.size := by
-      unfold ByteArray.size; rfl
-    have hlen_drop : (data.data.toList.drop pos).length = data.size - pos := by
-      rw [List.length_drop, hdata_len]
     have hlen_list : ¬((data.data.toList.drop pos).length ≤ 65535) := by
       rw [hlen_drop]; omega
     have htake_eq : List.take (pos + 65535 - pos) (List.drop pos data.data.toList) =
