@@ -321,7 +321,6 @@ private theorem decodeCLSymbols_append
             · rw [if_neg hsym18] at h ⊢
               contradiction
 termination_by totalCodes - acc.length
-decreasing_by all_goals assumption
 
 private theorem replicate_19_zero :
     List.replicate 19 0 =

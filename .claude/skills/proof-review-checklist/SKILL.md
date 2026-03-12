@@ -340,12 +340,17 @@ GzipCorrect, ZlibCorrect, DeflateRoundtrip
 **DEFLATE read-side** — all audited:
 BitstreamCorrect, BitstreamComplete, DecodeCorrect, DecodeComplete,
 InflateCorrect, InflateComplete, InflateLoopBounds, InflateRawSuffix,
-HuffmanCorrect, HuffmanCorrectLoop
+HuffmanCorrect, HuffmanCorrectLoop, DeflateSuffix,
+DeflateStoredCorrect, DeflateFixedCorrect,
+LZ77NativeCorrect, EmitTokensCorrect
+
+**Foundational / cross-cutting** — all audited:
+BinaryCorrect
 
 **Remaining unaudited spec files** (for future review sessions):
 DeflateDynamicCorrect, DeflateDynamicFreqs, DeflateFixedTables,
-EmitTokensCorrect, HuffmanKraft, HuffmanTheorems,
-LZ77, LZ77Lazy, LZ77NativeCorrect,
+HuffmanKraft, HuffmanTheorems,
+LZ77, LZ77Lazy,
 Zstd spec files (ZstdFrame, ZstdHuffman, ZstdSequence, Fse, etc.)
 
 ### Patterns discovered during the review campaign
