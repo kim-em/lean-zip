@@ -90,7 +90,6 @@ where
       let code := (code + blCount[bits - 1]!) * 2
       go (arr.set! bits code) (bits + 1) code
   termination_by maxBits + 1 - bits
-  decreasing_by omega
 
 private theorem nextCodes_go_size (blCount : Array Nat) (maxBits : Nat)
     (arr : Array Nat) (bits code : Nat) (hsize : arr.size = maxBits + 1) :
