@@ -123,11 +123,8 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
     have hget : br.data[br.pos]! = br.data[br.pos] := getElem!_pos br.data br.pos hpos'
     refine ⟨br.data[br.pos].toNat.testBit br.bitOff, rest, hrest, ?_, ?_⟩
     · -- br'.toBits = rest
-      split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      · obtain ⟨_, rfl⟩ := h
-        simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1; omega
-      · obtain ⟨_, rfl⟩ := h
-        simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1
+      split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+        (obtain ⟨_, rfl⟩ := h; simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1; try omega)
     · -- bit = if testBit then 1 else 0 (same in both bitOff cases)
       split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
       all_goals (obtain ⟨rfl, _⟩ := h; rw [hget];
@@ -367,7 +364,7 @@ private theorem bytesToBits_getElem (data : ByteArray) (pos : Nat) (hpos : pos <
         (Deflate.Spec.bytesToBits data).drop ((pos + 1) * 8) := by
   simp only [Deflate.Spec.bytesToBits, ByteArray.size] at *
   have hlen := Deflate.Spec.bytesToBits.byteToBits_length
-  rw [List.flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simpa using hpos)]
+  rw [List.flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simpa only [Array.length_toList] using hpos)]
   simp only [Array.getElem_toList]; rfl
 
 /-- From a byte-aligned reader, `readBitsLSB 8` produces the next byte value. -/
