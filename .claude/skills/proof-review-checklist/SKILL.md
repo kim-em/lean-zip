@@ -602,15 +602,22 @@ sessions), the file won't build. Check for duplicates:
 grep -n 'theorem TheoremName' File.lean
 ```
 
-If the duplicate is a large block (100+ lines), don't try to remove it
-with the Edit tool (which matches old_string → new_string). Instead:
-```bash
-# Keep lines 1-N (last good line), append the end marker
-head -N File.lean > /tmp/clean.lean
-echo "" >> /tmp/clean.lean
-echo "end Namespace" >> /tmp/clean.lean
-cp /tmp/clean.lean File.lean
-```
+### Large block deletion (50+ lines)
+
+**Do NOT use the Edit tool to delete large blocks** (50+ lines). The
+Edit tool requires exact `old_string` matching, which is error-prone
+for large spans and wastes context tokens. Instead:
+
+- **Tail deletion** (removing everything after line N):
+  ```bash
+  head -n N File.lean > /tmp/File_truncated.lean && mv /tmp/File_truncated.lean File.lean
+  ```
+- **Middle deletion** (removing lines M through N):
+  ```bash
+  sed 'M,Nd' File.lean > /tmp/File_trimmed.lean && mv /tmp/File_trimmed.lean File.lean
+  ```
+
+Always verify the result with `wc -l` and `tail -5` after truncation.
 
 ### Unused `termination_by` / `decreasing_by` clauses
 
