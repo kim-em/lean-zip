@@ -81,14 +81,15 @@ gh issue view <N> --json body --jq .body
 ## Step 2: Set Up
 
 ```bash
-git checkout -b agent/${POD_SESSION_ID:0:8}
+git checkout -b agent/<first-8-chars-of-session-UUID>
 git rev-parse HEAD      # record starting commit
 ```
 
-**Note**: Always derive the branch name from `$POD_SESSION_ID`, not from
-the worktree directory name — they may differ. If the worktree was
-pre-created with a different branch name, rename it:
-`git branch -m <old-name> agent/${POD_SESSION_ID:0:8}`
+**Branch name collision**: If the branch already exists (from a prior session
+in the same worktree), check whether it has a remote with unrelated commits.
+If so, use a suffixed name like `agent/<UUID>-<issue-type>` (e.g.,
+`agent/b0db81a5-review`) and skip rebasing — the prior branch's commits are
+from a different PR and will conflict.
 
 Record any project-specific quality metrics (e.g. sorry count, test coverage)
 as described in the project's CLAUDE.md.
