@@ -495,9 +495,6 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
             -- Extract the final result
             obtain ⟨rfl, rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hspec)
             -- Use decodeCLSymbols_complete
-            have hcl_eq_spec : clLengths =
-                clArr.toList.map UInt8.toNat := hcl_eq.symm
-            -- Rewrite the spec decodeCLSymbols hypothesis
             have hdcl_rewrite : Deflate.Spec.decodeDynamicTables.decodeCLSymbols
                 ((Huffman.Spec.allCodes (clArr.toList.map UInt8.toNat) 7).map
                   fun (sym, cw) => (cw, sym))
@@ -507,7 +504,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
                 some (codeLengths_list, bits') := by
               simp only [Array.toList_extract, List.extract, Nat.sub_self,
                 List.take_zero, List.drop_zero, List.map_nil]
-              rw [← hcl_eq_spec, hrest₄]; exact hdcl_spec
+              rw [hcl_eq, hrest₄]; exact hdcl_spec
             have hsize_cl : clArr.size ≤ UInt16.size := by
               rw [hcl_sz]; decide
             have ⟨clResults, br₅, hdcl_nat, hcl_res_eq, hrest₅, hwf₅, hpos₅⟩ :=
