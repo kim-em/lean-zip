@@ -17,7 +17,6 @@ fixed and dynamic Huffman correctness proofs.
 - `emitTokens_spec`: native `emitTokens` produces the same bits as spec `encodeSymbols`
 - `emitTokens_wf`: `emitTokens` preserves `BitWriter.wf`
 - `encodeSymbols_append` / `encodeSymbols_append_inv`: `encodeSymbols` distributes over list append
-- `encodeSymbols_singleton`: `encodeSymbols` on a one-element list
 - `canonicalCodes_size`: `canonicalCodes` preserves array size
 - `fixedLitCodes_snd_le` / `fixedDistCodes_snd_le`: code length bounds
 -/
@@ -55,7 +54,7 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
   | succ n ih =>
     intro heq
     have hlt : i < tokens.size := by omega
-    have hlt_list : i < tokens.toList.length := by simpa
+    have hlt_list : i < tokens.toList.length := by simpa only [Array.length_toList]
     rw [List.drop_eq_getElem_cons hlt_list, List.map_cons] at henc
     obtain ⟨symBits, restBits, hencsym, hencrest, hbits_eq⟩ :=
       Deflate.encodeSymbols_cons_some _ _ _ _ _ henc
@@ -99,8 +98,7 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
         | some lenBits =>
           cases hfdc : Deflate.Spec.findDistCode dist with
           | none =>
-            simp only [hflc, bind, Option.bind] at hencsym
-            simp only [henclen, hfdc] at hencsym
+            simp only [hflc, henclen, hfdc, bind, Option.bind] at hencsym
             exact nomatch hencsym
           | some dc =>
             obtain ⟨didx, dextraN, dextraV⟩ := dc
@@ -108,13 +106,11 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
                 ((Huffman.Spec.allCodes Deflate.Spec.fixedDistLengths).map fun p => (p.2, p.1))
                 didx with
             | none =>
-              simp only [hflc, bind, Option.bind] at hencsym
-              simp only [henclen, hfdc, hencdist] at hencsym
+              simp only [hflc, henclen, hfdc, hencdist, bind, Option.bind] at hencsym
               exact nomatch hencsym
             | some distBits =>
-              simp only [hflc, bind, Option.bind] at hencsym
-              simp only [henclen, hfdc, hencdist,
-                pure, Pure.pure, Option.some.injEq] at hencsym
+              simp only [hflc, henclen, hfdc, hencdist,
+                bind, Option.bind, pure, Pure.pure, Option.some.injEq] at hencsym
               subst hencsym
               -- Bridge lemmas
               have hnflc := Deflate.findLengthCode_agree len lidx lextraN lextraV hflc
@@ -358,22 +354,6 @@ private theorem canonicalCodes_go_snd_le (lengths : Array UInt8) (nextCode : Arr
     exact hresult j hj
 termination_by lengths.size - i
 
-/-- `canonicalCodes` entries have `.snd.toNat ≤ bound` when all input lengths
-    have `.toNat ≤ bound`. -/
-theorem canonicalCodes_snd_le (lengths : Array UInt8) (bound : Nat)
-    (hlengths : ∀ j, j < lengths.size → lengths[j]!.toNat ≤ bound) (i : Nat)
-    (hi : i < (canonicalCodes lengths).size) :
-    (canonicalCodes lengths)[i]!.2.toNat ≤ bound := by
-  simp only [canonicalCodes] at hi ⊢
-  apply canonicalCodes_go_snd_le lengths _ 0 _ bound
-  · simp only [Array.size_replicate]
-  · intro j hj
-    simp only [Array.size_replicate] at hj
-    rw [getElem!_pos _ _ (by simp only [Array.size_replicate]; omega)]
-    simp only [Array.getElem_replicate]; exact Nat.zero_le _
-  · exact hlengths
-  · exact hi
-
 /-- `canonicalCodes` entries have `.snd.toNat ≤ bound` (explicit maxBits version). -/
 theorem canonicalCodes_snd_le' (lengths : Array UInt8) (maxBits : Nat) (bound : Nat)
     (hlengths : ∀ j, j < lengths.size → lengths[j]!.toNat ≤ bound) (i : Nat)
@@ -388,6 +368,14 @@ theorem canonicalCodes_snd_le' (lengths : Array UInt8) (maxBits : Nat) (bound : 
     simp only [Array.getElem_replicate]; exact Nat.zero_le _
   · exact hlengths
   · exact hi
+
+/-- `canonicalCodes` entries have `.snd.toNat ≤ bound` when all input lengths
+    have `.toNat ≤ bound`. -/
+theorem canonicalCodes_snd_le (lengths : Array UInt8) (bound : Nat)
+    (hlengths : ∀ j, j < lengths.size → lengths[j]!.toNat ≤ bound) (i : Nat)
+    (hi : i < (canonicalCodes lengths).size) :
+    (canonicalCodes lengths)[i]!.2.toNat ≤ bound :=
+  canonicalCodes_snd_le' lengths 15 bound hlengths i hi
 
 /-- All entries in `fixedLitLengths` have `.toNat ≤ 15`. -/
 private theorem fixedLitLengths_le_15 (j : Nat) (hj : j < Inflate.fixedLitLengths.size) :
@@ -491,13 +479,5 @@ theorem emitTokens_wf (bw : BitWriter) (tokens : Array LZ77Token)
     (hwf : bw.wf) :
     (emitTokens bw tokens 0).wf :=
   emitTokens_wf_go bw tokens 0 hwf
-
-/-- `encodeSymbols` on a singleton list returns `encodeLitLen` of that symbol. -/
-private theorem encodeSymbols_singleton
-    (litLengths distLengths : List Nat) (s : Deflate.Spec.LZ77Symbol)
-    (bits : List Bool)
-    (h : Deflate.Spec.encodeLitLen litLengths distLengths s = some bits) :
-    Deflate.Spec.encodeSymbols litLengths distLengths [s] = some bits := by
-  simp only [Deflate.Spec.encodeSymbols, h, bind, Option.bind, List.append_nil, pure, Pure.pure]
 
 end Zip.Native.Deflate
