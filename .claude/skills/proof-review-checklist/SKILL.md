@@ -18,7 +18,14 @@ clean the same or overlapping files.
 ```bash
 # Accurate bare simp grep (excludes simp only, simp_all, simp?, simp_wf, etc.)
 grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+
+# Also check for bare simpa (simpa without 'only' is just as fragile as bare simp)
+grep -n 'simpa\b' File.lean | grep -v 'simpa only\|simpa?'
 ```
+
+**Note**: bare `simpa` (without `only`) uses the full simp database,
+just like bare `simp`. Issue descriptions often miss these because the
+grep pattern `simp\b` doesn't match `simpa`. Always check both.
 
 If the actual count differs significantly from the issue (e.g., issue
 says 61 but master has 0), the file was already cleaned by another PR.
@@ -31,6 +38,9 @@ Record starting metrics before making any changes:
 ```bash
 # Bare simp count (the primary quality metric — use the accurate grep from Phase 0)
 grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+
+# Bare simpa count
+grep -n 'simpa\b' File.lean | grep -v 'simpa only\|simpa?'
 ```
 
 Expected reduction targets by file size:
@@ -204,6 +214,26 @@ Add a justifying comment from this table:
 | BitVec normalization | `-- bare simp: BitVec normalization` |
 | Length mismatch bridging | `-- bare simp: bridges List.length_append` |
 | Complex `if`/`dite` with arithmetic | `-- bare simp: dite with arithmetic bridging` |
+
+## Phase 3a: Bare `simpa` Conversion
+
+Bare `simpa` (without `only`) uses the full simp database, just like
+bare `simp`. The `simpa` tactic is `simp` + `assumption`, so
+`simpa using term` applies `simp` to both the goal and `term`, then
+checks if they match.
+
+**Conversion**: Replace `simpa` with `simpa?`, build, and use the
+suggested `simpa only [...]`.
+
+**Common patterns**:
+
+| `simpa` usage | Targeted replacement |
+|---------------|---------------------|
+| `simpa using term` (Bool decide) | `simpa only [gt_iff_lt, decide_eq_true_eq, Nat.not_lt] using term` |
+| `simpa using size_theorem` | `simpa only [Array.size_replicate] using size_theorem` |
+
+**Note**: `simpa only []` (empty list) is valid and common — it does
+structural reduction + `assumption`. Don't flag it as bare.
 
 ## Phase 3b: `simp_all` Conversion
 
