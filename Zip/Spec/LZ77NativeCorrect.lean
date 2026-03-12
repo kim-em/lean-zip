@@ -83,8 +83,8 @@ theorem direct_match_implies_modular (data : ByteArray) (pos dist len : Nat)
     intro hi
     by_cases hid : i < dist
     · rw [Nat.mod_eq_of_lt hid]; exact hmatch i hi
-    · rw [Nat.mod_eq_sub_mod (by omega)]
-      rw [hmatch i hi, show pos - dist + i = pos + (i - dist) from by omega]
+    · rw [Nat.mod_eq_sub_mod (by omega),
+        hmatch i hi, show pos - dist + i = pos + (i - dist) from by omega]
       exact ih (i - dist) (by omega) (by omega)
 
 /-! ## validDecomp_resolves -/
@@ -139,15 +139,14 @@ theorem validDecomp_resolves_aux (data : ByteArray) (pos : Nat) (tokens : List L
         have hmin : min pos data.size = pos := Nat.min_eq_left (by omega)
         have hk : (i - pos) % dist < dist := Nat.mod_lt _ (by omega)
         have hm := hmod (i - pos) (by omega)
-        rw [show pos + (i - pos) = i from by omega] at hm
-        rw [ByteArray.getElem!_toList data i (by omega)] at hm
-        rw [ByteArray.getElem!_toList data (pos - dist + ((i - pos) % dist))
-          (by omega)] at hm
+        rw [show pos + (i - pos) = i from by omega,
+          ByteArray.getElem!_toList data i (by omega),
+          ByteArray.getElem!_toList data (pos - dist + ((i - pos) % dist))
+            (by omega)] at hm
         -- Simplify min in getElem! bounds
         show (data.data.toList.take pos)[pos - dist +
           ((i - min pos data.size) % dist)]! = data.data.toList[i]
-        rw [hmin]
-        rw [getElem!_pos (data.data.toList.take pos) _ (by
+        rw [hmin, getElem!_pos (data.data.toList.take pos) _ (by
           simp only [List.length_take, hdllen, hmin]; omega)]
         simp only [List.getElem_take]
         exact hm.symm
@@ -335,12 +334,10 @@ theorem lz77Greedy_encodable (data : ByteArray)
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   intro t ht
-  have henc : Encodable t := by
-    simp only [lz77Greedy] at ht
-    split at ht
-    · simp only at ht; exact trailing_encodable data 0 t ht
-    · simp only at ht; exact mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
-  exact henc
+  simp only [lz77Greedy] at ht
+  split at ht
+  · simp only at ht; exact trailing_encodable data 0 t ht
+  · simp only at ht; exact mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
 
 /-! ## Lazy LZ77 correctness -/
 
@@ -604,12 +601,10 @@ theorem lz77Lazy_encodable (data : ByteArray)
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   intro t ht
-  have henc : Encodable t := by
-    simp only [lz77Lazy] at ht
-    split at ht
-    · simp only at ht; exact lz77Lazy.trailing_encodable data 0 t ht
-    · simp only at ht; exact lz77Lazy.mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
-  exact henc
+  simp only [lz77Lazy] at ht
+  split at ht
+  · simp only at ht; exact lz77Lazy.trailing_encodable data 0 t ht
+  · simp only at ht; exact lz77Lazy.mainLoop_encodable data windowSize 65536 _ _ 0 hw hws t ht
 
 /-! ### Lazy mainLoop length bounds -/
 
