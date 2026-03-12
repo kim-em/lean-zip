@@ -150,14 +150,10 @@ theorem parseBlockHeader_type_ne_reserved (data : ByteArray) (pos : Nat)
   · exact nomatch h
   · unfold_except
     split at h
-    · -- typeVal = 0 → raw
-      obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
-    · -- typeVal = 1 → rle
-      obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
-    · -- typeVal = 2 → compressed
-      obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h
-    · -- typeVal = _ → throw
-      exact nomatch h
+    -- typeVal cases: 0→raw, 1→rle, 2→compressed share the same proof; catch-all is absurd
+    <;> first
+      | (obtain ⟨rfl, rfl⟩ := h; exact fun h => nomatch h)
+      | exact nomatch h
 
 /-- The 21-bit Block_Size field (bits 3–23 of a 24-bit header) is always less than 2^21.
     This is the core bitwise arithmetic fact: right-shifting a 24-bit value by 3
@@ -180,11 +176,9 @@ theorem parseBlockHeader_blockSize_lt (data : ByteArray) (pos : Nat)
   split at h
   · exact nomatch h
   · unfold_except
-    split at h
-    · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
-    · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
-    · obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..
-    · exact nomatch h
+    split at h <;> first
+      | (obtain ⟨rfl, rfl⟩ := h; exact raw24_shiftRight3_lt ..)
+      | exact nomatch h
 
 /-- When `parseBlockHeader` succeeds, the returned position is exactly `pos + 3`.
     This follows from the structure of the 3-byte block header (RFC 8878 §3.1.1.2):
@@ -197,11 +191,7 @@ theorem parseBlockHeader_pos_eq (data : ByteArray) (pos : Nat)
   split at h
   · exact nomatch h
   · unfold_except
-    split at h
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · exact nomatch h
+    split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
 
 /-- When `parseBlockHeader` succeeds, the returned position is within data bounds.
     Follows from `parseBlockHeader_pos_eq` (pos' = pos + 3) and the bounds check
@@ -390,11 +380,7 @@ theorem parseBlockHeader_lastBlock_eq (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · split at h
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · exact nomatch h
+  · split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
 
 /-- When `parseBlockHeader` succeeds, `hdr.blockType` is determined by bits 1-2 of
     the 3-byte little-endian header word: 0→raw, 1→rle, 2→compressed. -/
@@ -411,11 +397,9 @@ theorem parseBlockHeader_blockType_eq (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · split at h
-    · obtain ⟨rfl, rfl⟩ := h; simp_all
-    · obtain ⟨rfl, rfl⟩ := h; simp_all
-    · obtain ⟨rfl, rfl⟩ := h; simp_all
-    · exact nomatch h
+  · split at h <;> first
+      | (obtain ⟨rfl, rfl⟩ := h; grind)
+      | exact nomatch h
 
 /-- When `parseBlockHeader` succeeds, `hdr.blockSize` equals bits 3-23 of the
     3-byte little-endian header word. -/
@@ -428,11 +412,7 @@ theorem parseBlockHeader_blockSize_eq (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · split at h
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · obtain ⟨rfl, rfl⟩ := h; rfl
-    · exact nomatch h
+  · split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
 
 /-! ## Frame-level output guarantees -/
 
@@ -765,7 +745,6 @@ theorem decompressBlocksWF_le_size (data : ByteArray) (off : Nat)
       exact decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ h
   · -- compressed
     split at h; next => exact nomatch h  -- blockEnd guard
-    rename_i hbe
     split at h; next => exact nomatch h  -- parseLiteralsSection
     split at h; next => exact nomatch h  -- parseSequencesHeader
     split at h  -- numSeq == 0
