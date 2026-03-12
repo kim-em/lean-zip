@@ -369,10 +369,10 @@ theorem decompressZstd_succeeds_single_skippable (data : ByteArray)
     (hexact : data.size = 8 + (Binary.readUInt32LE data 4).toNat) :
     Zip.Native.decompressZstd data = .ok ⟨#[]⟩ := by
   obtain ⟨pos', hskip⟩ := Zstd.Spec.skipSkippableFrame_succeeds data 0
-    (by omega) hmagic_lo hmagic_hi (by simp; exact hpayload)
+    (by omega) hmagic_lo hmagic_hi (by simp only [Nat.zero_add]; exact hpayload)
   have hadv := Zstd.Spec.skipSkippableFrame_pos_gt data 0 pos' hskip
   have hpos := Zstd.Spec.skipSkippableFrame_pos_eq data 0 pos' hskip
-  have hdone : pos' ≥ data.size := by simp at hpos; omega
+  have hdone : pos' ≥ data.size := by simp only [Nat.zero_add] at hpos; omega
   exact decompressZstd_single_skippable data pos' (by omega) hmagic_lo hmagic_hi hskip hadv hdone
 
 /-! ## API-level single-block content (raw/RLE) -/
@@ -1564,7 +1564,7 @@ theorem decompressZstd_succeeds_single_compressed_zero_seq_frame (data : ByteArr
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Specialize universally quantified hypotheses
   have htypeVal' := htypeVal hdr afterHdr hparse
   have hlastBit' := hlastBit hdr afterHdr hparse
@@ -1650,7 +1650,7 @@ theorem decompressZstd_succeeds_single_compressed_sequences_frame (data : ByteAr
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Specialize universally quantified hypotheses
   have htypeVal' := htypeVal hdr afterHdr hparse
   have hlastBit' := hlastBit hdr afterHdr hparse
