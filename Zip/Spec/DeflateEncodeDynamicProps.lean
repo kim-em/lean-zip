@@ -108,7 +108,7 @@ theorem readCLLengths_writeCLLengths
       (List.replicate 19 0), rest) := by
   rw [writeCLLengths_eq_flatMap]
   have := readCLLengths_writeCLLengths_go clLens numCodeLen 0 (List.replicate 19 0) rest
-    (by simp only [List.reduceReplicate, List.length_cons, List.length_nil, Nat.zero_add, Nat.reduceAdd]) (by omega) hvals
+    (List.length_replicate ..) (by omega) hvals
   simp only [List.drop_zero] at this
   exact this
 
@@ -410,13 +410,13 @@ private theorem readCLLengths_recovers_clLens
     by_cases hmem : p ∈ positions
     · -- p was set by the foldl
       rw [List.foldl_set_getElem_mem positions _ _ p hmem hpos_nodup
-          (by simp only [List.reduceReplicate, List.length_cons, List.length_nil, Nat.zero_add, Nat.reduceAdd]; omega)
-          (fun q hq => by simp only [List.reduceReplicate, List.length_cons, List.length_nil, Nat.zero_add, Nat.reduceAdd]; exact hpos_bounds q hq)]
+          (by simp only [List.length_replicate]; omega)
+          (fun q hq => by simp only [List.length_replicate]; exact hpos_bounds q hq)]
       -- Goal: clLens.getD p 0 = clLens[p]
       exact (List.getElem_eq_getD 0).symm
     · -- p was NOT set; value is 0 from replicate
       rw [List.foldl_set_getElem_not_mem positions _ _ p hmem
-          (by simp only [List.reduceReplicate, List.length_cons, List.length_nil, Nat.zero_add, Nat.reduceAdd]; omega)]
+          (by simp only [List.length_replicate]; omega)]
       simp only [List.getElem_replicate]
       -- Need: clLens[p] = 0
       -- p ∉ positions = clPermutation.take numCodeLen
