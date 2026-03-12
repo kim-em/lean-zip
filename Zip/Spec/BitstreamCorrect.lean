@@ -93,9 +93,8 @@ theorem readBit_wf (br : Zip.Native.BitReader) (bit : UInt32)
   simp only [Zip.Native.BitReader.readBit] at h
   split at h
   · exact nomatch h
-  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    · obtain ⟨_, rfl⟩ := h; simp only []; omega
-    · obtain ⟨_, rfl⟩ := h; simp only []; omega
+  · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
+      (obtain ⟨_, rfl⟩ := h; simp only []; omega)
 
 /-! ### readBit correspondence -/
 
@@ -113,8 +112,7 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
   simp only [Zip.Native.BitReader.readBit] at h
   split at h
   · exact nomatch h
-  · rename_i hpos
-    -- hpos : ¬(br.pos ≥ br.data.size), so br.pos < br.data.size
+  · -- ¬(br.pos ≥ br.data.size), so br.pos < br.data.size
     have hpos' : br.pos < br.data.size := by omega
     -- Get the bit list structure from bytesToBits_drop_testBit
     obtain ⟨rest, hrest⟩ := Deflate.Correctness.bytesToBits_drop_testBit br.data br.pos br.bitOff hpos' hwf
@@ -413,10 +411,7 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
   simp only [Zip.Native.BitReader.readUInt16LE] at h
   split at h
   · exact nomatch h
-  · -- bounds check passed
-    rename_i hbound
-    -- h : .ok (lo ||| (hi <<< 8), { ... pos + 2 ... }) = .ok (val, br')
-    -- hbound : ¬(br.alignToByte.pos + 2 > br.alignToByte.data.size)
+  · -- bounds check passed: ¬(br.alignToByte.pos + 2 > br.alignToByte.data.size)
     have hle : br.alignToByte.pos + 2 ≤ br.alignToByte.data.size := by omega
     -- Extract value and reader from h
     have hval : val = br.alignToByte.data[br.alignToByte.pos]!.toUInt16 |||
@@ -553,8 +548,7 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
   simp only [Zip.Native.BitReader.readBytes] at h
   split at h
   · exact nomatch h
-  · rename_i hbound
-    -- Extract bytes and reader from h
+  · -- Extract bytes and reader from h
     have hbytes : bytes = br.alignToByte.data.extract br.alignToByte.pos (br.alignToByte.pos + n) := by
       cases h; rfl
     have hbr' : br' = { br.alignToByte with pos := br.alignToByte.pos + n } := by
