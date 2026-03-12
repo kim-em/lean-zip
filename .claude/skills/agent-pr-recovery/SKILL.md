@@ -67,9 +67,57 @@ This is common when worktrees are reused across sessions: the branch
 name `agent/<session-id>` may already be taken by a PR from the
 previous session in the same worktree.
 
+## Manual Insertion: The Primary Strategy for Spec Files
+
+**Cherry-pick and rebase always fail on `Zip/Spec/Zstd.lean` and
+`Zip/Spec/ZstdFrame.lean`.** Across 8+ sessions, the same sequence plays out:
+
+1. Agent tries `git cherry-pick` or `git rebase`
+2. It produces 6-12 conflict hunks (additive theorems in the same section)
+3. Agent aborts
+4. Agent falls back to manual insertion
+
+**Skip directly to manual insertion for spec files.** The cherry-pick attempt
+wastes time and never succeeds because multiple agents append theorems to
+the same section markers.
+
+### Manual Insertion Pattern
+
+```bash
+# 1. Read the conflicting PR's content (theorems to preserve)
+gh api repos/OWNER/REPO/pulls/N/commits \
+  --jq '.[].sha[:8] + " " + (.[].commit.message | split("\n")[0])'
+# Then read the actual diff to extract the theorem text:
+gh pr diff N
+
+# 2. Create a fresh branch from current master
+git checkout -b agent/<session-id> origin/master
+
+# 3. Manually insert the theorems into the correct section
+#    Find the section header: /-! ## decompressBlocksWF two-block ... -/
+#    Add theorems at the end of that section, before the next section header
+
+# 4. Build to verify
+lake build Zip.Spec.Zstd   # or Zip.Spec.ZstdFrame
+
+# 5. Commit, push, create PR
+```
+
+**Key**: The theorems are always additive (new definitions/theorems, no
+modifications to existing ones). So the conflict resolution is always
+"keep master + insert new theorems in the right section."
+
+### Conflict Metrics (as of 2026-03-12)
+
+Of the last 30 merged PRs:
+- 4 (13%) required conflict resolution
+- 9 (30%) of closed PRs were abandoned (many due to conflicts)
+- Every conflict was in `Zstd.lean` or `ZstdFrame.lean`
+
 ## Cherry-Pick Rebase Pattern
 
-The most reliable recovery pattern for PRs with merge conflicts:
+The most reliable recovery pattern for PRs with merge conflicts on
+**non-spec files** (for spec files, use manual insertion above):
 
 ```bash
 # 1. Identify the content commit(s) — skip merge commits, CI fixes, etc.
@@ -229,12 +277,12 @@ split.
 ## Hot File Tracking
 
 Track files that cause repeated merge conflicts across multiple PRs.
-As of 2026-03-08, the known hot files are:
+As of 2026-03-12, the known hot files are:
 
 | File | Size | Conflict PRs | Status |
 |------|------|-------------|--------|
-| `Zip/Spec/Zstd.lean` | ~4400 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063, #1213 | **Critical** — 4.4× the 1000-line threshold. Every two-block completeness theorem appends here. Split urgently needed into block-level / frame-level / composition sections. |
-| `Zip/Spec/ZstdFrame.lean` | ~1670 lines | #1063, #1188 | **High** — 1.7× threshold. API-level `decompressZstd` completeness theorems accumulating. Frame-header completeness, single-frame composition, and end-to-end compressed completeness all land here. |
+| `Zip/Spec/Zstd.lean` | ~6280 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063, #1213, #1264, #1280, #1281, #1287 | **Critical** — 6.3× the 1000-line threshold. Every two-block completeness theorem at block/frame level appends here. Has 19 major sections organized by block-type pair. Split urgently needed. |
+| `Zip/Spec/ZstdFrame.lean` | ~2600 lines | #1063, #1188, #1253, #1257, #1263, #1279, #1295 | **Critical** — 2.6× threshold. API-level `decompressZstd` completeness theorems accumulating. Every API-level two-block theorem lands here, causing conflicts with every parallel Track E agent. |
 
 ### Mitigation strategies for hot files
 
@@ -293,11 +341,22 @@ Patterns that help:
 To prevent conflict cascades at the planning stage:
 
 1. **Avoid concurrent issues targeting the same file**: If an open issue
-   already modifies `Zip/Native/ZstdFrame.lean`, don't create another
-   issue that also modifies it. Use `depends-on:` to serialize them.
+   already modifies `Zip/Spec/Zstd.lean` or `Zip/Spec/ZstdFrame.lean`,
+   don't create another issue that also modifies it. Use `depends-on:`
+   to serialize them.
 2. **Split large files first**: Files over 500 lines that are actively
    being modified by multiple agents should be split before further
    feature work. Create a splitting issue with higher priority.
 3. **Check open PRs before planning**: Run `coordination orient` and
    note which files have open PRs. New issues should avoid those files
    unless they depend on the PR landing first.
+4. **Verify issue metrics before creating review issues**: Stale metrics
+   waste agent time. Before creating a review issue that claims "N bare
+   simps in File.lean", verify the count on current master:
+   ```bash
+   grep -n 'simp\b' Zip/Spec/File.lean | \
+     grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+   ```
+   Three review agents in the last batch found their assigned bare-simp
+   cleanup was already done by prior PRs. They adapted by doing deeper
+   quality audits, but the planning was wasted.
