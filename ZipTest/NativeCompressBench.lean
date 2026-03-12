@@ -1,4 +1,5 @@
 import ZipTest.Helpers
+import ZipTest.BenchHelpers
 import Zip.Native.Inflate
 import Zip.Native.Gzip
 
@@ -8,36 +9,6 @@ import Zip.Native.Gzip
     ratio comparison at 64KB and MB/s throughput metrics. -/
 
 namespace ZipTest.NativeCompressBench
-
-private def pad (s : String) (w : Nat) : String :=
-  s ++ String.ofList (List.replicate (w - min w s.length) ' ')
-
-private def fmtMs (ns : Nat) : String :=
-  let us := ns / 1000
-  let ms := us / 1000
-  let frac := us % 1000
-  if ms ≥ 10 then s!"{ms}.{frac / 100}"
-  else if ms ≥ 1 then
-    let d2 := frac / 10
-    s!"{ms}.{if d2 < 10 then "0" else ""}{d2}"
-  else
-    s!"{ms}.{if frac < 100 then "0" else ""}{if frac < 10 then "0" else ""}{frac}"
-
-private def fmtMBps (dataSize : Nat) (elapsedNs : Nat) : String :=
-  if elapsedNs == 0 then "    ∞" else
-  -- throughput = dataSize / (elapsedNs / 1e9) / (1024 * 1024)
-  -- = dataSize * 1e9 / elapsedNs / (1024 * 1024)
-  -- To avoid overflow with large sizes, compute in steps:
-  -- MB/s * 10 for one decimal place
-  let mbps10 := dataSize * 10000000000 / elapsedNs / (1024 * 1024)
-  let whole := mbps10 / 10
-  let frac := mbps10 % 10
-  let s := s!"{whole}.{frac}"
-  -- Right-align in 5 chars
-  let padding := if s.length < 5 then String.ofList (List.replicate (5 - s.length) ' ') else ""
-  padding ++ s
-
-@[noinline] private def forceEval (b : ByteArray) : IO ByteArray := pure b
 
 def tests : IO Unit := do
   IO.println "  NativeCompressBench tests..."

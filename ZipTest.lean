@@ -1,3 +1,4 @@
+import ZipTest.BenchHelpers
 import ZipTest.Zlib
 import ZipTest.Gzip
 import ZipTest.RawDeflate

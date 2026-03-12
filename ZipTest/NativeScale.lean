@@ -1,4 +1,5 @@
 import ZipTest.Helpers
+import ZipTest.BenchHelpers
 import Zip.Native.Inflate
 import Zip.Native.Gzip
 import Zip.Native.DeflateDynamic
@@ -30,31 +31,6 @@ def levels : Array UInt8 := #[0, 1, 6]
 def matrixSizes : Array Nat := #[1024, 16384, 131072, 1048576]
 def sweepSizes : Array Nat := #[1024, 2048, 4096, 8192, 16384, 32768,
                                   65536, 131072, 262144, 524288, 1048576]
-
-private def pad (s : String) (w : Nat) : String :=
-  s ++ String.ofList (List.replicate (w - min w s.length) ' ')
-
-private def fmtMs (ns : Nat) : String :=
-  let us := ns / 1000      -- microseconds
-  let ms := us / 1000      -- whole milliseconds
-  let frac := us % 1000    -- fractional microseconds
-  if ms ≥ 10 then s!"{ms}.{frac / 100}"
-  else if ms ≥ 1 then
-    let d2 := frac / 10
-    s!"{ms}.{if d2 < 10 then "0" else ""}{d2}"
-  else
-    s!"{ms}.{if frac < 100 then "0" else ""}{if frac < 10 then "0" else ""}{frac}"
-
-private def fmtMBps (dataSize : Nat) (elapsedNs : Nat) : String :=
-  if elapsedNs == 0 then "    ∞" else
-  let mbps10 := dataSize * 10000000000 / elapsedNs / (1024 * 1024)
-  let whole := mbps10 / 10
-  let frac := mbps10 % 10
-  let s := s!"{whole}.{frac}"
-  let padding := if s.length < 5 then String.ofList (List.replicate (5 - s.length) ' ') else ""
-  padding ++ s
-
-@[noinline] private def forceEval (b : ByteArray) : IO ByteArray := pure b
 
 structure TimingEntry where
   op : String
