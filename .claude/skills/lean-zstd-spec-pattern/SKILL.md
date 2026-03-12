@@ -963,19 +963,42 @@ cases huffTree1 <;>
 referencing the Huffman table update from block 1). Raw/RLE block 2
 theorems don't have this issue since they lack `hlit2`.
 
-### Scaling beyond two blocks
+### Two-block matrix completion status (2026-03-12)
 
-The two-block matrix is sufficient for characterizing frame output up to
-two blocks. For N-block frames (N ≥ 3), the approach is **induction on
-the block list**, not N-block enumeration:
+The 4×4 two-block matrix (raw, RLE, comp_zero_seq, comp_sequences) is
+**complete at all three levels**: block, frame, and API. All 16 cells
+are proved and merged. This milestone validates the step-theorem
+approach and the `frame_from_blocks` macro for mechanical lifting.
 
-1. Each step theorem proves that processing one non-last block advances
-   to the next call with updated state
-2. Induction composes arbitrarily many step theorems
-3. The final block uses the single-block theorem as the base case
+### Scaling beyond two blocks: WellFormedBlocks induction
 
-This avoids exponential growth in theorem count (16 for 2-block, 64 for
-3-block). See `lean-content-preservation` skill for the induction pattern.
+The two-block matrix characterizes frame output for exactly two blocks.
+For N-block frames (N ≥ 3), the approach is **induction via a
+`WellFormedBlocks` predicate**, not N-block enumeration:
+
+1. Define a `WellFormedBlocks` inductive predicate that captures what
+   it means for a byte sequence to contain a valid sequence of Zstd
+   blocks (each block parses correctly, non-last blocks have
+   `lastBlock = false`, the final block has `lastBlock = true`)
+2. Prove that `decompressBlocksWF` succeeds on any input satisfying
+   `WellFormedBlocks` — by induction on the predicate
+3. Each inductive case uses the corresponding step theorem (raw_step,
+   rle_step, compressed_step) plus the inductive hypothesis
+
+**Why a predicate, not enumeration:** 16 cells for 2-block, 64 for
+3-block, 256 for 4-block — enumeration grows as 4^N. The inductive
+predicate handles arbitrary N with a single theorem.
+
+**Key design decisions:**
+- The predicate should be parameterized by block type (raw/RLE/compressed)
+  at each step, not by the specific block content
+- State threading (Huffman tables, FSE tables, offset history) must be
+  part of the inductive predicate's hypotheses
+- The base case is `lastBlock = true` (single-block succeeds theorems)
+- The inductive step is `lastBlock = false` (step theorems)
+
+See `lean-content-preservation` skill for the content-level induction
+pattern and issue #1360 for the implementation plan.
 
 ## Content Pipeline: Block → Frame → API Lifting
 
@@ -992,32 +1015,57 @@ threading, and block-type-specific decompression logic.
 ### Layer 2: Frame-level (`decompressFrame_*_content`)
 
 Frame-level theorems live in `Zip/Spec/Zstd.lean` and prove what
-`decompressFrame` returns. The proof pattern is always:
+`decompressFrame` returns. They use the `frame_from_blocks` local
+tactic macro, which mechanically handles the `decompressFrame` →
+`decompressBlocks` → `decompressBlocksWF` unfolding chain.
+
+#### The `frame_from_blocks` macro
+
+This 19-line tactic (defined near the top of `Zstd.lean`) is used
+by ~20 frame-level theorems:
+
+```lean
+local macro "frame_from_blocks" : tactic =>
+  `(tactic| (
+    unfold Zip.Native.decompressFrame at hframe
+    dsimp only [Bind.bind, Except.bind] at hframe
+    rw [hh] at hframe                              -- plug in frame header
+    simp only [pure, Except.pure] at hframe
+    split at hframe                                 -- dictionary check
+    · split at hframe                               -- window size check
+      · exact nomatch hframe
+      · unfold Zip.Native.decompressBlocks at hframe
+        rw [hblocks] at hframe                      -- plug in block-level result
+        simp only [ByteArray.empty_append] at hframe
+        grind
+    · unfold Zip.Native.decompressBlocks at hframe
+      rw [hblocks] at hframe
+      simp only [ByteArray.empty_append] at hframe
+      grind))
+```
+
+**What it assumes:** The proof context has `hframe` (frame result),
+`hh` (frame header parse result), and `hblocks` (block-level result).
+
+#### Frame-level theorem pattern
 
 ```lean
 theorem decompressFrame_typeA_then_typeB_content (data : ByteArray) (pos : Nat)
-    -- Frame header hypotheses
-    (fhdr : Zip.Native.ZstdFrameHeader) (afterFhdr : Nat)
-    (hparse_fhdr : Zip.Native.parseFrameHeader data pos = .ok (fhdr, afterFhdr))
-    (hws : ¬ fhdr.windowSize > 8 * 1024 * 1024)
-    -- Block hypotheses (same as two-block theorem)
-    ...
-    -- Checksum hypothesis (if applicable)
-    (hck : ¬ fhdr.contentChecksum) :
-    ∃ content, Zip.Native.decompressFrame data pos = .ok (content, afterBlock2 + ...)
-      ∧ content = block1 ++ block2 := by
-  -- 1. Unfold decompressFrame
-  unfold Zip.Native.decompressFrame
-  -- 2. Plug in frame header parse result
-  simp only [hparse_fhdr, ...]
-  -- 3. Apply the block-level composition theorem
-  rw [decompressBlocksWF_typeA_then_typeB ...]
-  -- 4. Handle checksum (typically simp + exact ⟨_, rfl, rfl⟩)
+    (output : ByteArray) (pos' : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    -- block hypotheses...
+    (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
+    (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    ... :
+    output = block1 ++ block2 := by
+  have hoff := parseBlockHeader_data_not_le ...
+  have hblocks := decompressBlocksWF_typeA_then_typeB ...  -- block-level theorem
+  frame_from_blocks                                        -- mechanical lifting
 ```
 
-**Key**: The proof always follows this 4-step pattern. The block-level
-theorem does the heavy lifting; the frame-level theorem just wraps it
-in `decompressFrame` boilerplate.
+**Key**: The proof is always: (1) establish position bound, (2) invoke
+block-level theorem, (3) `frame_from_blocks`. The block-level theorem
+does the heavy lifting.
 
 ### Layer 3: API-level (`decompressZstd_*_content`)
 
@@ -1039,22 +1087,24 @@ theorem decompressZstd_typeA_then_typeB_content (data : ByteArray)
 
 ### When to stop enumerating
 
-The two-block matrix (4×4 = 16 cells) is being filled systematically.
-Once complete, move to **inductive** N-block theorems rather than
-enumerating 3-block (64 cells). See `lean-content-preservation` skill.
+The two-block matrix (4×4 = 16 cells) is **complete at all levels**
+as of 2026-03-12. The next step is the WellFormedBlocks induction
+predicate for N-block generalization. Do NOT start 3-block enumeration
+(64 cells). See `lean-content-preservation` skill.
 
 ### File organization for content theorems
 
 | Layer | File | Current size |
 |-------|------|-------------|
-| Block | `Zip/Spec/Zstd.lean` | ~2800 lines (**needs split**) |
+| Block | `Zip/Spec/Zstd.lean` | ~6280 lines (**critical — needs split**) |
 | Frame | `Zip/Spec/Zstd.lean` | (same file) |
-| API | `Zip/Spec/ZstdFrame.lean` | ~720 lines |
+| API | `Zip/Spec/ZstdFrame.lean` | ~2600 lines (**needs split**) |
 
-`Zstd.lean` at 2800 lines is far past the 1000-line split threshold.
-A natural split: block-level composition + frame-level content into a
-new `Zip/Spec/ZstdContent.lean`, keeping validity predicates and
-single-block theorems in `Zstd.lean`.
+Both files are well past the 1000-line threshold and cause chronic
+merge conflicts (see `agent-pr-recovery` skill). `Zstd.lean` should
+be split into block-level vs frame-level vs composition theorems.
+`ZstdFrame.lean` should separate API-level succeeds from content
+theorems.
 
 ## Anti-Patterns
 
