@@ -87,9 +87,7 @@ theorem compress_header_check (data : ByteArray) (level : UInt8) :
   · decide
   · split
     · decide
-    · split
-      · decide
-      · decide
+    · split <;> decide
 
 /-- The CM field (low nibble of CMF) is 8. -/
 theorem compress_cm (data : ByteArray) (level : UInt8) :
@@ -112,9 +110,7 @@ theorem compress_no_fdict (data : ByteArray) (level : UInt8) :
   · decide
   · split
     · decide
-    · split
-      · decide
-      · decide
+    · split <;> decide
 
 /-- Decomposition: `compress` = header (2 bytes) ++ deflateRaw ++ trailer (4 bytes). -/
 theorem compress_eq (data : ByteArray) (level : UInt8) :
@@ -126,9 +122,7 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
   · exact ⟨_, _, rfl, rfl, rfl⟩
   · split
     · exact ⟨_, _, rfl, rfl, rfl⟩
-    · split
-      · exact ⟨_, _, rfl, rfl, rfl⟩
-      · exact ⟨_, _, rfl, rfl, rfl⟩
+    · split <;> exact ⟨_, _, rfl, rfl, rfl⟩
 
 private theorem compress_trailer (data : ByteArray) (level : UInt8) :
     ∃ (header trailer : ByteArray),
@@ -142,9 +136,7 @@ private theorem compress_trailer (data : ByteArray) (level : UInt8) :
   · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
   · split
     · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
-    · split
-      · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
-      · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
+    · split <;> exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
 
 /-- Adler32 trailer match: reading 4 bytes big-endian at endPos gives `adler32 1 data`. -/
 theorem compress_adler32 (data : ByteArray) (level : UInt8) :

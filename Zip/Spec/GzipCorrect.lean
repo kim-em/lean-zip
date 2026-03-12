@@ -71,12 +71,10 @@ theorem compress_header_bytes (data : ByteArray) (level : UInt8) :
     (compress data level)[2]! = 8 ∧
     (compress data level)[3]! = 0 := by
   unfold compress
-  have hhs : ∀ (x : UInt8),
-      (ByteArray.mk #[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, x, 0xFF]).size = 10 := fun _ => rfl
   refine ⟨?_, ?_, ?_, ?_⟩ <;> {
     rw [Binary.getElem!_append_left _ _ _ (by
-      simp only [ByteArray.size_append]; split <;> (rw [hhs]; omega))]
-    rw [Binary.getElem!_append_left _ _ _ (by split <;> (rw [hhs]; omega))]
+      simp only [ByteArray.size_append]; split <;> (rw [gzip_header_size]; omega))]
+    rw [Binary.getElem!_append_left _ _ _ (by split <;> (rw [gzip_header_size]; omega))]
     split <;> first | rfl | (split <;> rfl)
   }
 
@@ -88,9 +86,7 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
   simp only [compress]
   split
   · exact ⟨_, _, rfl, rfl, rfl⟩
-  · split
-    · exact ⟨_, _, rfl, rfl, rfl⟩
-    · exact ⟨_, _, rfl, rfl, rfl⟩
+  · split <;> exact ⟨_, _, rfl, rfl, rfl⟩
 
 /-- Decomposition with concrete trailer: `compress` = header(10) ++ deflateRaw ++ trailer
     where `readUInt32LE trailer 0 = crc32 0 data` and `readUInt32LE trailer 4 = isize`. -/
@@ -103,9 +99,7 @@ private theorem compress_trailer (data : ByteArray) (level : UInt8) :
   unfold compress
   split
   · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
-  · split
-    · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
-    · exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
+  · split <;> exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32LE_bytes _, Binary.readUInt32LE_bytes _⟩
 
 /-- CRC32 trailer match: `readUInt32LE` at endPos reads `crc32 0 data`. -/
 theorem compress_crc32 (data : ByteArray) (level : UInt8) :
