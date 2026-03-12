@@ -83,7 +83,7 @@ theorem compress_header_check (data : ByteArray) (level : UInt8) :
         simp only [ByteArray.size_append]; rw [zlib_header_size]; omega),
       Binary.getElem!_append_left _ _ 1 (by rw [zlib_header_size]; omega)]
   -- Split on all four flevel branches to get concrete values
-  split <;> first | decide | (split <;> first | decide | (split <;> decide))
+  repeat (first | decide | split)
 
 /-- The CM field (low nibble of CMF) is 8. -/
 theorem compress_cm (data : ByteArray) (level : UInt8) :
@@ -102,7 +102,7 @@ theorem compress_no_fdict (data : ByteArray) (level : UInt8) :
   rw [Binary.getElem!_append_left _ _ 1 (by
         simp only [ByteArray.size_append]; rw [zlib_header_size]; omega),
       Binary.getElem!_append_left _ _ 1 (by rw [zlib_header_size]; omega)]
-  split <;> first | decide | (split <;> first | decide | (split <;> decide))
+  repeat (first | decide | split)
 
 /-- Decomposition: `compress` = header (2 bytes) ++ deflateRaw ++ trailer (4 bytes). -/
 theorem compress_eq (data : ByteArray) (level : UInt8) :
@@ -110,9 +110,7 @@ theorem compress_eq (data : ByteArray) (level : UInt8) :
       header.size = 2 ∧ trailer.size = 4 ∧
       compress data level = header ++ Deflate.deflateRaw data level ++ trailer := by
   unfold compress
-  split <;> first
-    | exact ⟨_, _, rfl, rfl, rfl⟩
-    | (split <;> first | exact ⟨_, _, rfl, rfl, rfl⟩ | (split <;> exact ⟨_, _, rfl, rfl, rfl⟩))
+  repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)
 
 private theorem compress_trailer (data : ByteArray) (level : UInt8) :
     ∃ (header trailer : ByteArray),
@@ -122,10 +120,7 @@ private theorem compress_trailer (data : ByteArray) (level : UInt8) :
        trailer[2]!.toUInt32 <<< 8 ||| trailer[3]!.toUInt32) =
       Adler32.Native.adler32 1 data := by
   unfold compress
-  split <;> first
-    | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
-    | (split <;> first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩
-                       | (split <;> exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩))
+  repeat (first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩ | split)
 
 /-- Adler32 trailer match: reading 4 bytes big-endian at endPos gives `adler32 1 data`. -/
 theorem compress_adler32 (data : ByteArray) (level : UInt8) :
@@ -218,11 +213,8 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
       hspec_go (Deflate.deflateRaw_goR_pad data level) hdata_le
   have hep_val : endPos = 2 + (Deflate.deflateRaw data level).size := by
     rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
-  -- Tight endPos bound
-  have hendPos_tight : endPos + 4 ≤ (ZlibEncode.compress data level).size := by
-    rw [hep_val, hceq]
-    simp only [ByteArray.size_append, htsz, hhsz]; omega
-  have hendPos4 : ¬ (endPos + 4 > (ZlibEncode.compress data level).size) := by omega
+  have hendPos4 : ¬ (endPos + 4 > (ZlibEncode.compress data level).size) := by
+    rw [hep_val, hceq]; simp only [ByteArray.size_append, htsz, hhsz]; omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by simp only [Array.toArray_toList]
   -- Adler32 trailer match: use endPos = 2 + deflated.size to read trailer bytes
   have hadler : (Adler32.Native.adler32 1 data ==
