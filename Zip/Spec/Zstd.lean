@@ -1300,6 +1300,126 @@ theorem decompressBlocksWF_succeeds_two_rle_blocks (data : ByteArray)
   exact decompressBlocksWF_succeeds_single_rle data off2 windowSize (output ++ block1)
     prevHuff prevFse history hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
 
+/-! ## decompressFrame two-block composed completeness (homogeneous) -/
+
+/-- When a frame contains two consecutive raw blocks (first non-last, second last),
+    with no dictionary, no content checksum, and no declared content size,
+    `decompressFrame` succeeds. Composes `parseFrameHeader` success with
+    `decompressBlocksWF_succeeds_two_raw_blocks` and threads through the
+    frame-level dictionary/checksum/size guards. -/
+theorem decompressFrame_succeeds_two_raw_blocks (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    -- Block 1 byte-level conditions (non-last raw at afterHeader)
+    (hsize1 : data.size ≥ afterHeader + 3)
+    (htypeVal1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit1 : (data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
+    (hblockSize1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow1 : ¬ (header.windowSize > 0 &&
+        ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload1 : data.size ≥ afterHeader + 3 +
+        (((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    -- Block 2 position and byte-level conditions (last raw)
+    {off2 : Nat}
+    (hoff2 : off2 = afterHeader + 3 +
+        (((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit2 : (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow2 : ¬ (header.windowSize > 0 &&
+        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload2 : data.size ≥ off2 + 3 +
+        (((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat)) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 1: Get block-level success from byte-level conditions
+  obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_two_raw_blocks
+    data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
+    hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hpayload1 hoff2
+    hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none — both guards are trivial
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
+/-- When a frame contains two consecutive RLE blocks (first non-last, second last),
+    with no dictionary, no content checksum, and no declared content size,
+    `decompressFrame` succeeds. Composes `parseFrameHeader` success with
+    `decompressBlocksWF_succeeds_two_rle_blocks` and threads through the
+    frame-level dictionary/checksum/size guards. -/
+theorem decompressFrame_succeeds_two_rle_blocks (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    -- Block 1 byte-level conditions (non-last RLE at afterHeader)
+    (hsize1 : data.size ≥ afterHeader + 3)
+    (htypeVal1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit1 : (data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
+    (hblockSize1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow1 : ¬ (header.windowSize > 0 &&
+        ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload1 : data.size ≥ afterHeader + 4)
+    -- Block 2 position and byte-level conditions (last RLE)
+    {off2 : Nat}
+    (hoff2 : off2 = afterHeader + 4)
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit2 : (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow2 : ¬ (header.windowSize > 0 &&
+        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload2 : data.size ≥ off2 + 4) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 1: Get block-level success from byte-level conditions
+  obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_two_rle_blocks
+    data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
+    hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hpayload1 hoff2
+    hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none — both guards are trivial
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
 /-- When `decompressBlocksWF` encounters a non-last raw block followed by a last
     RLE block, the output is `output ++ block1 ++ block2` at the position after
     the RLE byte. Composes `decompressBlocksWF_raw_step` and
@@ -1521,6 +1641,126 @@ theorem decompressBlocksWF_succeeds_rle_then_raw (data : ByteArray)
     hdr1 afterHdr1 block1 off2 hoff1 hparse1 hbs1 hws1 htype1 hrle1 hnotlast1 hadv1]
   exact decompressBlocksWF_succeeds_single_raw data off2 windowSize (output ++ block1)
     prevHuff prevFse history hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+
+/-! ## decompressFrame two-block composed completeness (heterogeneous) -/
+
+/-- When a frame contains a non-last raw block followed by a last RLE block,
+    with no dictionary, no content checksum, and no declared content size,
+    `decompressFrame` succeeds. This composes `parseFrameHeader` success with
+    `decompressBlocksWF_succeeds_raw_then_rle` and threads through the
+    frame-level dictionary/checksum/size guards. -/
+theorem decompressFrame_succeeds_raw_then_rle (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    -- Block 1 (non-last raw) at afterHeader
+    (hsize1 : data.size ≥ afterHeader + 3)
+    (htypeVal1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit1 : (data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
+    (hblockSize1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow1 : ¬ (header.windowSize > 0 &&
+        ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload1 : data.size ≥ afterHeader + 3 +
+        (((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    -- Block 2 (last RLE) at off2
+    (off2 : Nat)
+    (hoff2 : off2 = afterHeader + 3 + (((data[afterHeader]!.toUInt32
+          ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toNat))
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit2 : (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow2 : ¬ (header.windowSize > 0 &&
+        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload2 : data.size ≥ off2 + 4) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 1: Get block-level success from byte-level conditions
+  obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_raw_then_rle
+    data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
+    hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hpayload1 hoff2
+    hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none — both guards are trivial
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
+/-- When a frame contains a non-last RLE block followed by a last raw block,
+    with no dictionary, no content checksum, and no declared content size,
+    `decompressFrame` succeeds. This composes `parseFrameHeader` success with
+    `decompressBlocksWF_succeeds_rle_then_raw` and threads through the
+    frame-level dictionary/checksum/size guards. -/
+theorem decompressFrame_succeeds_rle_then_raw (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    -- Block 1 (non-last RLE) at afterHeader
+    (hsize1 : data.size ≥ afterHeader + 3)
+    (htypeVal1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 1)
+    (hlastBit1 : (data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) &&& 1 = 0)
+    (hblockSize1 : ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+        ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow1 : ¬ (header.windowSize > 0 &&
+        ((data[afterHeader]!.toUInt32 ||| (data[afterHeader + 1]!.toUInt32 <<< 8)
+          ||| (data[afterHeader + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload1 : data.size ≥ afterHeader + 4)
+    -- Block 2 (last raw) at off2
+    (off2 : Nat)
+    (hoff2 : off2 = afterHeader + 4)
+    (hsize2 : data.size ≥ off2 + 3)
+    (htypeVal2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 = 0)
+    (hlastBit2 : (data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) &&& 1 = 1)
+    (hblockSize2 : ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+        ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3) ≤ 131072)
+    (hwindow2 : ¬ (header.windowSize > 0 &&
+        ((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toUInt64 > header.windowSize))
+    (hpayload2 : data.size ≥ off2 + 3 +
+        (((data[off2]!.toUInt32 ||| (data[off2 + 1]!.toUInt32 <<< 8)
+          ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat)) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 1: Get block-level success from byte-level conditions
+  obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_rle_then_raw
+    data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
+    hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hpayload1 hoff2
+    hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none — both guards are trivial
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
 
 /-- When `decompressBlocksWF` encounters a single last compressed block with
     numSeq == 0 (literals only, no sequence commands), the result is the
