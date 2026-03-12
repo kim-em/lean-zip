@@ -111,7 +111,6 @@ private theorem matchLZ77.go_length_le (data : List UInt8) (pos windowSize : Nat
       rename_i len dist hfind
       split
       · -- len ≥ 3
-        rename_i hlen3
         simp only [List.length_cons]
         have ih := matchLZ77.go_length_le data (pos + len) windowSize
         omega

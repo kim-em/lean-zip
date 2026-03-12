@@ -246,9 +246,7 @@ theorem matchLength.go_in_bounds (data : List UInt8) (pos dist count maxLen : Na
         · have ih := matchLength.go_in_bounds data pos dist (count + 1) maxLen n hgo
           intro i hi hilt
           by_cases heq : i = count
-          · rw [heq]
-            have ⟨h, _⟩ := List.getElem?_eq_some_iff.mp hpa
-            exact h
+          · exact heq ▸ (List.getElem?_eq_some_iff.mp hpa).1
           · exact ih i (by omega) hilt
         · subst hgo; intro i hi hilt; omega
 termination_by maxLen - count
@@ -366,21 +364,19 @@ private theorem take_append_copied_eq_take
     simp only [List.length_ofFn] at h1
     simp only [List.length_take, List.length_drop,
                Nat.min_eq_left (by omega : len ≤ data.length - pos)] at h2
-    rw [List.getElem_ofFn]
-    rw [List.getElem_take, List.getElem_drop]
+    rw [List.getElem_ofFn, List.getElem_take, List.getElem_drop]
     have hidx_lt : pos - dist + (i % dist) < pos := by
       have : i % dist < dist := Nat.mod_lt _ (by omega)
       omega
     rw [getElem!_pos (data.take pos) _ (by
-      simp only [List.length_take, Nat.min_eq_left hpos_le]; exact hidx_lt)]
-    rw [List.getElem_take]
+      simp only [List.length_take, Nat.min_eq_left hpos_le]; exact hidx_lt),
+      List.getElem_take]
     have hmatch := matchLength_correct data pos dist 258 len hlen_eq ⟨i, h1⟩
-    simp only at hmatch
-    rw [List.getElem?_eq_getElem (h := by omega)] at hmatch
-    rw [List.getElem?_eq_getElem (h := by
-      have : i % dist < dist := Nat.mod_lt _ (by omega); omega)] at hmatch
-    simp only [Option.some.injEq] at hmatch
-    exact hmatch.symm
+    dsimp only at hmatch
+    rw [List.getElem?_eq_getElem (h := by omega),
+      List.getElem?_eq_getElem (h := by
+        have : i % dist < dist := Nat.mod_lt _ (by omega); omega)] at hmatch
+    exact (Option.some.inj hmatch).symm
 
 /-- When `findLongestMatch` succeeds, the match doesn't extend past the data. -/
 theorem findLongestMatch_end_le (data : List UInt8)
@@ -390,7 +386,7 @@ theorem findLongestMatch_end_le (data : List UInt8)
   have hlen_ge := findLongestMatch_len_ge _ _ _ _ _ hfind
   have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
   have hlen_in := matchLength_in_bounds data pos dist 258 len hml
-  have := hlen_in ⟨len - 1, by omega⟩; simp only at this; omega
+  have := hlen_in ⟨len - 1, by omega⟩; dsimp only at this; omega
 
 /-- Resolving a back-reference from a `findLongestMatch` result advances
     the accumulator from `data.take pos` to `data.take (pos + len)`. -/
@@ -401,21 +397,13 @@ private theorem resolveLZ77_findMatch_step (data : List UInt8)
     (rest : List LZ77Symbol)
     (ih : resolveLZ77 rest (data.take (pos + len)) = some data) :
     resolveLZ77 (.reference len dist :: rest) (data.take pos) = some data := by
-  simp only [resolveLZ77]
   have ⟨hdist_pos, hdist_le⟩ := findLongestMatch_dist_bounds _ _ _ _ _ hfind
   have hml := findLongestMatch_matchLength _ _ _ _ _ hfind
   have hlen_le := findLongestMatch_end_le _ _ _ _ _ hfind
-  have hdneq : dist ≠ 0 := by omega
-  rw [show (dist == 0 || decide (List.length (List.take pos data) < dist)) = false
-    from by simp only [List.length_take, Nat.min_eq_left hpos, Bool.or_eq_false_iff,
-      beq_eq_false_iff_ne, ne_eq, hdneq, not_false_eq_true, decide_eq_false_iff_not,
-      Nat.not_lt, true_and]; omega]
-  simp only [Bool.false_eq_true, ↓reduceIte]
-  have hcopy := take_append_copied_eq_take data pos dist len
-    hdist_pos hdist_le hml hpos hlen_le
-  conv => lhs; rw [show (List.take pos data).length = pos
-    from by simp only [List.length_take, Nat.min_eq_left hpos]]
-  rw [hcopy]
+  rw [resolveLZ77_reference_valid _ _ _ _ (by omega)
+    (by simp only [List.length_take, Nat.min_eq_left hpos]; omega)]
+  simp only [List.length_take, Nat.min_eq_left hpos]
+  rw [take_append_copied_eq_take data pos dist len (by omega) hdist_le hml hpos hlen_le]
   exact ih
 
 /-- Inner correctness lemma for `matchLZ77.go`: resolving the symbols
