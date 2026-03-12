@@ -2885,6 +2885,227 @@ theorem decompressBlocksWF_compressed_sequences_step (data : ByteArray)
     hdec, hexec, hnotlast, Bool.false_eq_true, hadv]
   congr 1; cases huffTree <;> rfl
 
+/-! ## WellFormedBlocks induction predicate (all block types) -/
+
+/-- An inductive predicate encoding a sequence of blocks of any type (raw, RLE,
+    compressed zero-seq, compressed sequences), each satisfying the hypotheses of
+    the existing step/base theorems. Unlike `WellFormedSimpleBlocks`, compressed
+    block constructors thread updated Huffman table, FSE tables, and offset history
+    through the recursive `rest`, enabling heterogeneous block sequences. -/
+inductive WellFormedBlocks (data : ByteArray) :
+    Nat → UInt64 → ByteArray →
+    Option Zip.Native.ZstdHuffmanTable →
+    Zip.Native.PrevFseTables → Array Nat → Prop where
+  | last_raw (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .raw)
+      (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+      (hlast : hdr.lastBlock = true) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | last_rle (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .rle)
+      (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+      (hlast : hdr.lastBlock = true) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | last_compressed_zero_seq (off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree
+      modes afterSeqHeader :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .compressed)
+      (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+      (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuff
+        = .ok (literals, afterLiterals, huffTree))
+      (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+        = .ok (0, modes, afterSeqHeader))
+      (hlast : hdr.lastBlock = true) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | last_compressed_sequences (off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree
+      numSeq modes afterSeqHeader
+      llTable ofTable mlTable afterTables
+      bbr sequences blockOutput newHist :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .compressed)
+      (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+      (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuff
+                = .ok (literals, afterLiterals, huffTree))
+      (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+                = .ok (numSeq, modes, afterSeqHeader))
+      (hNumSeq : ¬ numSeq == 0)
+      (hfse : Zip.Native.resolveSequenceFseTables modes data afterSeqHeader prevFse
+                = .ok (llTable, ofTable, mlTable, afterTables))
+      (hbbr : Zip.Native.BackwardBitReader.init data afterTables (afterHdr + hdr.blockSize.toNat)
+                = .ok bbr)
+      (hdec : Zip.Native.decodeSequences llTable ofTable mlTable bbr numSeq
+                = .ok sequences)
+      (hexec : Zip.Native.executeSequences sequences literals
+                 (if windowSize > 0 && output.size > windowSize.toNat
+                  then output.extract (output.size - windowSize.toNat) output.size
+                  else output)
+                 history windowSize.toNat
+                 = .ok (blockOutput, newHist))
+      (hlast : hdr.lastBlock = true) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | step_raw (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .raw)
+      (hraw : Zip.Native.decompressRawBlock data afterHdr hdr.blockSize = .ok (block, afterBlock))
+      (hnotlast : hdr.lastBlock = false)
+      (hadv : ¬ afterBlock ≤ off)
+      (rest : WellFormedBlocks data afterBlock windowSize
+        (output ++ block) prevHuff prevFse history) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | step_rle (off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .rle)
+      (hrle : Zip.Native.decompressRLEBlock data afterHdr hdr.blockSize = .ok (block, afterByte))
+      (hnotlast : hdr.lastBlock = false)
+      (hadv : ¬ afterByte ≤ off)
+      (rest : WellFormedBlocks data afterByte windowSize
+        (output ++ block) prevHuff prevFse history) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | step_compressed_zero_seq (off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree
+      modes afterSeqHeader :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .compressed)
+      (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+      (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuff
+        = .ok (literals, afterLiterals, huffTree))
+      (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+        = .ok (0, modes, afterSeqHeader))
+      (hnotlast : hdr.lastBlock = false)
+      (hadv : ¬ afterHdr + hdr.blockSize.toNat ≤ off)
+      (rest : WellFormedBlocks data (afterHdr + hdr.blockSize.toNat) windowSize
+        (output ++ literals)
+        (if let some ht := huffTree then some ht else prevHuff)
+        prevFse history) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+  | step_compressed_sequences (off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree
+      numSeq modes afterSeqHeader
+      llTable ofTable mlTable afterTables
+      bbr sequences blockOutput newHist :_)
+      (hoff : ¬ data.size ≤ off)
+      (hparse : Zip.Native.parseBlockHeader data off = .ok (hdr, afterHdr))
+      (hbs : ¬ hdr.blockSize > 131072)
+      (hws : ¬ (windowSize > 0 && hdr.blockSize.toUInt64 > windowSize))
+      (htype : hdr.blockType = .compressed)
+      (hblockEnd : ¬ data.size < afterHdr + hdr.blockSize.toNat)
+      (hlit : Zip.Native.parseLiteralsSection data afterHdr prevHuff
+                = .ok (literals, afterLiterals, huffTree))
+      (hseq : Zip.Native.parseSequencesHeader data afterLiterals
+                = .ok (numSeq, modes, afterSeqHeader))
+      (hNumSeq : ¬ numSeq == 0)
+      (hfse : Zip.Native.resolveSequenceFseTables modes data afterSeqHeader prevFse
+                = .ok (llTable, ofTable, mlTable, afterTables))
+      (hbbr : Zip.Native.BackwardBitReader.init data afterTables (afterHdr + hdr.blockSize.toNat)
+                = .ok bbr)
+      (hdec : Zip.Native.decodeSequences llTable ofTable mlTable bbr numSeq
+                = .ok sequences)
+      (hexec : Zip.Native.executeSequences sequences literals
+                 (if windowSize > 0 && output.size > windowSize.toNat
+                  then output.extract (output.size - windowSize.toNat) output.size
+                  else output)
+                 history windowSize.toNat
+                 = .ok (blockOutput, newHist))
+      (hnotlast : hdr.lastBlock = false)
+      (hadv : ¬ (afterHdr + hdr.blockSize.toNat) ≤ off)
+      (rest : WellFormedBlocks data (afterHdr + hdr.blockSize.toNat) windowSize
+        (output ++ blockOutput)
+        (if let some ht := huffTree then some ht else prevHuff)
+        { litLen := some llTable, offset := some ofTable, matchLen := some mlTable }
+        newHist) :
+      WellFormedBlocks data off windowSize output prevHuff prevFse history
+
+/-- `decompressBlocksWF` succeeds on any well-formed sequence of blocks (raw, RLE,
+    compressed zero-seq, or compressed sequences). This subsumes all specific N-block
+    completeness theorems across all block types. -/
+theorem decompressBlocksWF_succeeds_of_well_formed
+    (data : ByteArray) (off : Nat) (windowSize : UInt64)
+    (output : ByteArray) (prevHuff : Option Zip.Native.ZstdHuffmanTable)
+    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
+    (hwf : WellFormedBlocks data off windowSize output prevHuff prevFse history) :
+    ∃ result pos',
+      Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
+        = .ok (result, pos') := by
+  induction hwf with
+  | last_raw off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hlast =>
+    exact ⟨_, _, decompressBlocksWF_single_raw data off windowSize output prevHuff prevFse
+      history hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hlast⟩
+  | last_rle off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hlast =>
+    exact ⟨_, _, decompressBlocksWF_single_rle data off windowSize output prevHuff prevFse
+      history hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hlast⟩
+  | last_compressed_zero_seq off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree modes afterSeqHeader
+      hoff hparse hbs hws htype hblockEnd hlit hseq hlast =>
+    exact ⟨_, _, decompressBlocksWF_single_compressed_literals_only data off windowSize output
+      prevHuff prevFse history hdr afterHdr literals afterLiterals huffTree modes afterSeqHeader
+      hoff hparse hbs hws htype hblockEnd hlit hseq hlast⟩
+  | last_compressed_sequences off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree numSeq modes afterSeqHeader
+      llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
+      hoff hparse hbs hws htype hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec hlast =>
+    exact ⟨_, _, decompressBlocksWF_single_compressed_sequences data off windowSize output
+      prevHuff prevFse history hdr afterHdr literals afterLiterals huffTree numSeq modes
+      afterSeqHeader llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
+      hoff hparse hbs hws htype hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec hlast⟩
+  | step_raw off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hnotlast hadv _rest ih =>
+    rw [decompressBlocksWF_raw_step data off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterBlock hoff hparse hbs hws htype hraw hnotlast hadv]
+    exact ih
+  | step_rle off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hnotlast hadv _rest ih =>
+    rw [decompressBlocksWF_rle_step data off windowSize output prevHuff prevFse history
+      hdr afterHdr block afterByte hoff hparse hbs hws htype hrle hnotlast hadv]
+    exact ih
+  | step_compressed_zero_seq off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree modes afterSeqHeader
+      hoff hparse hbs hws htype hblockEnd hlit hseq hnotlast hadv _rest ih =>
+    rw [decompressBlocksWF_compressed_literals_only_step data off windowSize output prevHuff
+      prevFse history hdr afterHdr literals afterLiterals huffTree modes afterSeqHeader
+      hoff hparse hbs hws htype hblockEnd hlit hseq hnotlast hadv]
+    exact ih
+  | step_compressed_sequences off windowSize output prevHuff prevFse history
+      hdr afterHdr literals afterLiterals huffTree numSeq modes afterSeqHeader
+      llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
+      hoff hparse hbs hws htype hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec
+      hnotlast hadv _rest ih =>
+    rw [decompressBlocksWF_compressed_sequences_step data off windowSize output prevHuff
+      prevFse history hdr afterHdr literals afterLiterals huffTree numSeq modes afterSeqHeader
+      llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
+      hoff hparse hbs hws htype hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec hnotlast hadv]
+    exact ih
+
 /-! ## decompressBlocksWF composed completeness for compressed blocks -/
 
 /-- When a single compressed last block with numSeq=0 is encoded at offset `off`,
