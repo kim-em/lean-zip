@@ -171,6 +171,7 @@ Based on what the `simp` is doing:
 | `simp [hx]` then contradiction | `exact nomatch (hx ▸ h)` (one step) or `simp only [hx] at h; exact nomatch h` (two steps) |
 | `\| none => simp [hvar] at hspec` (Option case) | `\| none => exact nomatch (hvar ▸ hspec)` |
 | `\| error e => simp [hvar] at h` (Except case) | `\| error e => exact nomatch (hvar ▸ h)` |
+| (**caveat**: `nomatch (▸)` maxRecDepth) | After unfolding large definitions (e.g. `inflateRaw`), `▸` may hit `maxRecDepth`. Keep the two-step `simp only [h] at h; exact absurd h nofun` for those cases. |
 | `simp at hmem` closing `x ∈ []` | `exact nomatch hmem` (NOT `absurd hmem (List.not_mem_nil _)` — `List.not_mem_nil` has type `False` not `¬(x ∈ [])`) |
 | `simp at h` closing `[].length ≥ 2` | `simp only [List.length_nil] at h; omega` (`omega` alone can't reduce `[].length`; same for `[_].length`, use `List.length_cons`) |
 | `simp [bind, Option.bind]` | `dsimp only [bind, Option.bind]` |
