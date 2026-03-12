@@ -35,7 +35,6 @@ protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
   | zero =>
     -- i ≥ numCodeLen, both sides return immediately
     unfold Deflate.Spec.readCLLengths at hspec
-    unfold Deflate.Spec.readCLLengths at hspec
     have hge : ¬(i < numCodeLen) := by omega
     have : numCodeLen - i = 0 := by omega
     rw [this] at hspec
@@ -406,7 +405,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
   simp only [bind, Option.bind] at hspec
   -- Step 1: Read HLIT (5 bits)
   cases hrb1_spec : Deflate.Spec.readBitsLSB 5 br.toBits with
-  | none => rw [hrb1_spec] at hspec; simp only [] at hspec; exact nomatch hspec
+  | none => rw [hrb1_spec] at hspec; exact nomatch hspec
   | some p1 =>
     obtain ⟨hlit_v, bits₁⟩ := p1
     simp only [hrb1_spec] at hspec
@@ -415,7 +414,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
       readBits_complete br 5 hlit_v bits₁ hwf hpos (by omega) hval1 hrb1_spec
     -- Step 2: Read HDIST (5 bits)
     cases hrb2_spec : Deflate.Spec.readBitsLSB 5 bits₁ with
-    | none => rw [hrb2_spec] at hspec; simp only [] at hspec; exact nomatch hspec
+    | none => rw [hrb2_spec] at hspec; exact nomatch hspec
     | some p2 =>
       obtain ⟨hdist_v, bits₂⟩ := p2
       simp only [hrb2_spec] at hspec
@@ -425,7 +424,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
           (by rw [hrest₁]; exact hrb2_spec)
       -- Step 3: Read HCLEN (4 bits)
       cases hrb3_spec : Deflate.Spec.readBitsLSB 4 bits₂ with
-      | none => rw [hrb3_spec] at hspec; simp only [] at hspec; exact nomatch hspec
+      | none => rw [hrb3_spec] at hspec; exact nomatch hspec
       | some p3 =>
         obtain ⟨hclen_v, bits₃⟩ := p3
         simp only [hrb3_spec] at hspec
@@ -436,7 +435,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
         -- Step 4: Read CL code lengths
         cases hrcl_spec : Deflate.Spec.readCLLengths (hclen_v + 4) 0
             (List.replicate 19 0) bits₃ with
-        | none => rw [hrcl_spec] at hspec; simp only [] at hspec; exact nomatch hspec
+        | none => rw [hrcl_spec] at hspec; exact nomatch hspec
         | some p4 =>
           obtain ⟨clLengths, bits₄⟩ := p4
           simp only [hrcl_spec] at hspec
@@ -468,7 +467,7 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
               ((Huffman.Spec.allCodes clLengths 7).map fun (sym, cw) => (cw, sym))
               (hlit_v + 257 + (hdist_v + 1))
               [] bits₄ with
-          | none => rw [hdcl_spec] at hspec; simp only [] at hspec; exact nomatch hspec
+          | none => rw [hdcl_spec] at hspec; exact nomatch hspec
           | some p6 =>
             obtain ⟨codeLengths_list, bits₅⟩ := p6
             simp only [hdcl_spec] at hspec

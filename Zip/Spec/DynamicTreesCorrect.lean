@@ -77,8 +77,8 @@ private theorem readCLCodeLengths_inv (br : Zip.Native.BitReader)
   induction hd : numCodeLen - i generalizing br clLengths i with
   | zero =>
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    have : ¬(i < numCodeLen) := by omega
-    simp only [this] at h; obtain ⟨_, rfl⟩ := h; exact ⟨hwf, hpos⟩
+    simp only [show ¬(i < numCodeLen) from by omega] at h
+    obtain ⟨_, rfl⟩ := h; exact ⟨hwf, hpos⟩
   | succ n ih =>
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     split at h
@@ -103,8 +103,8 @@ protected theorem readCLCodeLengths_size (br : Zip.Native.BitReader)
   induction hd : numCodeLen - i generalizing br clLengths i with
   | zero =>
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    have : ¬(i < numCodeLen) := by omega
-    simp only [this] at h; obtain ⟨rfl, _⟩ := h; rfl
+    simp only [show ¬(i < numCodeLen) from by omega] at h
+    obtain ⟨rfl, _⟩ := h; rfl
   | succ n ih =>
     have hi : i < numCodeLen := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
