@@ -378,6 +378,42 @@ compress theorems).
 `List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
 with direct `List.length_replicate`.
 
+**`brAppend` `bitPos` equality for `omega`**: When `brAppend` (an
+`abbrev` preserving `pos` and `bitOff`) is used, `omega` cannot see
+that `(brAppend br suffix).bitPos = br.bitPos` because `bitPos` is a
+`def`. The anonymous `have : (brAppend br suffix).bitPos = br.bitPos
+:= rfl` is NOT dead — it provides the equality that `omega` needs.
+
+**Tactic macro hygiene limitation**: `set_option hygiene false` local
+tactic macros cannot capture names introduced by `obtain` destructuring
+(e.g., `obtain ⟨bfinal, br₁⟩ := p`). These become `bfinal✝` at the
+macro expansion site. Use helper lemmas instead of macros when the
+captured names come from pattern matching.
+
+**`obtain/subst/constructor` → `obtain/exact` compression**: Replace:
+```lean
+obtain ⟨hval, hbr'⟩ := h
+subst hbr'; constructor
+· exact hval
+· rfl
+```
+With the more concise one-liner:
+```lean
+obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
+```
+
+**Multi-step injection → single expression**: Replace:
+```lean
+have : some (a, b) = some (a, c) := h₁.symm.trans h₂
+have heq := Option.some.inj this
+have : b = c := (Prod.mk.inj heq).2
+rw [this]; exact hfinal
+```
+With:
+```lean
+rw [(Prod.mk.inj (Option.some.inj (h₁.symm.trans h₂))).2]; exact hfinal
+```
+
 ## Phase 3c: Proof Compression
 
 After bare-simp cleanup, look for opportunities to shorten proofs
