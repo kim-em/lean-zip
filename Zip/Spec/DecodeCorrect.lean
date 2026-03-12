@@ -20,6 +20,22 @@ See `InflateCorrect` for the stream-level block loop and main theorem.
 
 namespace Deflate.Correctness
 
+/-- Convert table membership `(cw, s) ∈ specTable` to codes membership
+    `(s, cw) ∈ allCodes`. The specTable is the map-swapped version of allCodes. -/
+theorem specTable_mem_codes {lengths : List Nat} {maxBits : Nat}
+    {cw : List Bool} {s : Nat}
+    (h : (cw, s) ∈ (Huffman.Spec.allCodes lengths maxBits).map fun (s, cw) => (cw, s)) :
+    (s, cw) ∈ Huffman.Spec.allCodes lengths maxBits := by
+  obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp h
+  simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+
+/-- Unfold `HuffTree.decode` to `HuffTree.decode.go` with starting depth 0. -/
+private theorem decode_unfold {tree : Zip.Native.HuffTree}
+    {br : Zip.Native.BitReader} {sym : UInt16} {br' : Zip.Native.BitReader}
+    (h : tree.decode br = .ok (sym, br')) :
+    Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
+  simp only [Zip.Native.HuffTree.decode] at h; exact h
+
 /-- Step 2: For a tree built from code lengths, `decodeBits` agrees with
     the spec's table-based decode. Requires the tree to be well-formed
     (built via `fromLengths`) and the lengths to satisfy the Kraft inequality. -/
@@ -37,10 +53,7 @@ private theorem decodeBits_eq_spec_decode (lengths : Array UInt8)
   intro specLengths specCodes specTable
   -- Helper: specTable membership ↔ specCodes membership
   have to_codes : ∀ {cw : List Bool} {s : Nat},
-      (cw, s) ∈ specTable → (s, cw) ∈ specCodes := by
-    intro cw s h
-    obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp h
-    simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he; exact hm
+      (cw, s) ∈ specTable → (s, cw) ∈ specCodes := fun h => specTable_mem_codes h
   have to_table : ∀ {s : Nat} {cw : List Bool},
       (s, cw) ∈ specCodes → (cw, s) ∈ specTable := by
     intro s cw h; exact List.mem_map.mpr ⟨(s, cw), h, rfl⟩
@@ -105,8 +118,7 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
       Huffman.Spec.decode specTable br.toBits = some (sym.toNat, rest) ∧
       br'.toBits = rest := by
   -- Step 1: BitReader decode → pure decodeBits
-  have hdecode_go : Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
-    simp only [Zip.Native.HuffTree.decode] at hdecode; exact hdecode
+  have hdecode_go := decode_unfold hdecode
   obtain ⟨hdb, _⟩ :=
     Deflate.Correctness.decode_go_decodeBits tree br 0 sym br' hwf hdecode_go
   -- Step 2: decodeBits → spec decode via tree-table correspondence
@@ -204,9 +216,7 @@ theorem decode_wf (tree : Zip.Native.HuffTree)
     (br : Zip.Native.BitReader) (sym : UInt16) (br' : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
     (h : tree.decode br = .ok (sym, br')) : br'.bitOff < 8 := by
-  have hgo : Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
-    simp only [Zip.Native.HuffTree.decode] at h; exact h
-  exact (Deflate.Correctness.decode_go_decodeBits tree br 0 sym br' hwf hgo).2
+  exact (Deflate.Correctness.decode_go_decodeBits tree br 0 sym br' hwf (decode_unfold h)).2
 
 /-- `readBit` preserves the position invariant `bitOff = 0 ∨ pos < data.size`. -/
 private theorem readBit_pos_inv (br : Zip.Native.BitReader)
@@ -289,9 +299,7 @@ theorem decode_pos_inv (tree : Zip.Native.HuffTree)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : tree.decode br = .ok (sym, br')) :
     br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
-  have hgo : Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
-    simp only [Zip.Native.HuffTree.decode] at h; exact h
-  exact decode_go_pos_inv tree br 0 sym br' hwf hpos hgo
+  exact decode_go_pos_inv tree br 0 sym br' hwf hpos (decode_unfold h)
 
 /-- `readBits.go` preserves the well-formedness invariant `bitOff < 8`. -/
 private theorem readBits_go_wf (br : Zip.Native.BitReader)
@@ -418,13 +426,12 @@ theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
       (Huffman.Spec.allCodes lengths maxBits).map (fun (s, cw) => (cw, s)) →
       cw ≠ [] := by
   intro cw s hmem hnil
-  obtain ⟨⟨s', cw'⟩, hm, he⟩ := List.mem_map.mp hmem
-  simp only [Prod.mk.injEq] at he; obtain ⟨rfl, rfl⟩ := he
+  have hm := specTable_mem_codes hmem
   rw [Huffman.Spec.allCodes_mem_iff] at hm
   obtain ⟨_, hcf⟩ := hm
   obtain ⟨_, hlen_cond, hcw_eq⟩ := Huffman.Spec.codeFor_spec hcf
   simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at hlen_cond
-  have : cw'.length > 0 := by rw [hcw_eq, Huffman.Spec.natToBits_length]; omega
+  have : cw.length > 0 := by rw [hcw_eq, Huffman.Spec.natToBits_length]; omega
   simp only [hnil, List.length_nil, Nat.not_lt_zero] at this
 
 set_option maxRecDepth 2048 in
