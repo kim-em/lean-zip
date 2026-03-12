@@ -433,10 +433,10 @@ theorem encodeLitLen_decodeLitLen
             have hdCode : dCode < distBase.size := by have : distBase.size = 30 := rfl; omega
             have hdCodeE : dCode < distExtra.size := by have : distExtra.size = 30 := rfl; omega
             -- Normalize getElem! to getElem in spec hypotheses
-            rw [getElem!_pos lengthBase idx hidx] at hlspec
-            rw [getElem!_pos lengthExtra idx hidxE] at hlspec
-            rw [getElem!_pos distBase dCode hdCode] at hdspec
-            rw [getElem!_pos distExtra dCode hdCodeE] at hdspec
+            rw [getElem!_pos lengthBase idx hidx,
+                getElem!_pos lengthExtra idx hidxE] at hlspec
+            rw [getElem!_pos distBase dCode hdCode,
+                getElem!_pos distExtra dCode hdCodeE] at hdspec
             -- Destructure spec results, substituting extraN/dExtraN
             obtain ⟨_, hlenSum, rfl, hextraV⟩ := hlspec
             obtain ⟨_, hdistSum, rfl, hdExtraV⟩ := hdspec
@@ -542,11 +542,7 @@ theorem encodeSymbols_decodeSymbols
             have hpos := encodeLitLen_nonempty litLengths distLengths _ symBits hes
             simp only [List.length_append]; omega
           rw [dif_pos hlen]
-          have hvalid' : ValidSymbolList syms := by
-            cases syms with
-            | nil => exact absurd hvalid id
-            | cons _ _ => exact hvalid
-          rw [ih restBits her hvalid']
+          rw [ih restBits her hvalid]
           simp only [pure, Pure.pure]
 
 /-! ## Fixed Huffman block encoding -/
