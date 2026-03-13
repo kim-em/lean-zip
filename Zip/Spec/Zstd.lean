@@ -4288,8 +4288,7 @@ theorem decompressBlocksWF_succeeds_compressed_sequences_then_compressed_zero_se
     afterSeqHeader1 llTable1 ofTable1 mlTable1 afterTables1 bbr1 sequences1 blockOutput1
     newHist1 hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1' hlit1 hseq1 hNumSeq1 hfse1 hbbr1
     hdec1 hexec1 hnotlast1 hadv1]
-  -- rw introduces dependent match huffTree1, hlit1; case split to reduce both it
-  -- and the if-let in hlit2 to the same concrete form
+  -- Case split huffTree1 to reduce the if-let match in hlit2
   cases huffTree1 <;> exact decompressBlocksWF_succeeds_single_compressed_zero_seq data _
     windowSize (output ++ blockOutput1) _ _ newHist1 literals2 afterLiterals2 huffTree2 modes2
     afterSeqHeader2 hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hblockEnd2 hlit2 hseq2
@@ -4429,9 +4428,7 @@ theorem decompressBlocksWF_succeeds_compressed_sequences_then_compressed_sequenc
     afterSeqHeader1 llTable1 ofTable1 mlTable1 afterTables1 bbr1 sequences1 blockOutput1
     newHist1 hoff1 hparse1 hbs1 hws1 htype1 hblockEnd1' hlit1 hseq1 hNumSeq1 hfse1 hbbr1
     hdec1 hexec1 hnotlast1 hadv1]
-  -- Normalize: rw introduces dependent match huffTree1, hlit1 which is propositionally
-  -- rw introduces dependent match huffTree1, hlit1; case split to reduce both it
-  -- and the if-let in hlit2 to the same concrete form
+  -- Case split huffTree1 to reduce the if-let match in hlit2
   cases huffTree1 <;> exact decompressBlocksWF_succeeds_single_compressed_sequences data _
     windowSize (output ++ blockOutput1) _ _ newHist1 literals2 afterLiterals2 huffTree2 numSeq2
     modes2 afterSeqHeader2 llTable2 ofTable2 mlTable2 afterTables2 bbr2 sequences2 blockOutput2
@@ -4473,20 +4470,14 @@ theorem decompressFrame_succeeds_single_compressed_zero_seq (data : ByteArray) (
               = .ok (0, modes, afterSeqHeader)) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_single_compressed_zero_seq
     data afterHeader header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree modes afterSeqHeader
     hsize htypeVal hlastBit hblockSize hwindow hblockEnd hlit hseq
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -4540,7 +4531,7 @@ theorem decompressFrame_succeeds_single_compressed_sequences (data : ByteArray) 
                = .ok (blockOutput, newHist)) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 0: Convert hexec to match block-level form (if-guard simplifies for empty output)
+  -- Convert hexec to match block-level form (if-guard simplifies for empty output)
   have hexec' : Zip.Native.executeSequences sequences literals
       (if header.windowSize > 0 && ByteArray.empty.size > header.windowSize.toNat
        then ByteArray.empty.extract (ByteArray.empty.size - header.windowSize.toNat)
@@ -4549,21 +4540,15 @@ theorem decompressFrame_succeeds_single_compressed_sequences (data : ByteArray) 
       #[1, 4, 8] header.windowSize.toNat = .ok (blockOutput, newHist) := by
     simp only [ByteArray.size_empty, Nat.not_lt_zero, decide_false, Bool.and_false,
       Bool.false_eq_true, ↓reduceIte]; exact hexec
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_single_compressed_sequences
     data afterHeader header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree numSeq modes afterSeqHeader
     llTable ofTable mlTable afterTables bbr sequences blockOutput newHist
     hsize htypeVal hlastBit hblockSize hwindow hblockEnd hlit hseq hNumSeq hfse hbbr hdec hexec'
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -4621,21 +4606,15 @@ theorem decompressFrame_succeeds_raw_then_compressed_zero_seq (data : ByteArray)
               = .ok (0, modes, afterSeqHeader)) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_raw_then_compressed_zero_seq
     data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree modes afterSeqHeader
     hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hpayload1 hoff2
     hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hblockEnd2 hlit2 hseq2
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -4687,21 +4666,15 @@ theorem decompressFrame_succeeds_rle_then_compressed_zero_seq (data : ByteArray)
               = .ok (0, modes, afterSeqHeader)) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_rle_then_compressed_zero_seq
     data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree modes afterSeqHeader
     hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hpayload1 hoff2
     hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hblockEnd2 hlit2 hseq2
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -4759,21 +4732,15 @@ theorem decompressFrame_succeeds_compressed_zero_seq_then_raw (data : ByteArray)
           ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat)) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_compressed_zero_seq_then_raw
     data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree modes afterSeqHeader
     hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hblockEnd1 hlit1 hseq1 hoff2
     hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -4827,21 +4794,15 @@ theorem decompressFrame_succeeds_compressed_zero_seq_then_rle (data : ByteArray)
     (hpayload2 : data.size ≥ off2 + 4) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_compressed_zero_seq_then_rle
     data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree modes afterSeqHeader
     hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hblockEnd1 hlit1 hseq1 hoff2
     hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -4919,7 +4880,6 @@ theorem decompressFrame_succeeds_compressed_sequences_then_raw (data : ByteArray
           ||| (data[off2 + 2]!.toUInt32 <<< 16)) >>> 3).toNat)) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_compressed_sequences_then_raw
     data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree numSeq modes afterSeqHeader
@@ -4927,15 +4887,10 @@ theorem decompressFrame_succeeds_compressed_sequences_then_raw (data : ByteArray
     hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hblockEnd1 hlit1 hseq1 hNumSeq1
     hfse1 hbbr1 hdec1 hexec1 hoff2
     hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
@@ -5009,7 +4964,6 @@ theorem decompressFrame_succeeds_compressed_sequences_then_rle (data : ByteArray
     (hpayload2 : data.size ≥ off2 + 4) :
     ∃ content pos',
       Zip.Native.decompressFrame data pos = .ok (content, pos') := by
-  -- Step 1: Get block-level success from byte-level conditions
   obtain ⟨result, blockPos, hblocks⟩ := decompressBlocksWF_succeeds_compressed_sequences_then_rle
     data afterHeader off2 header.windowSize ByteArray.empty none {} #[1, 4, 8]
     literals afterLiterals huffTree numSeq modes afterSeqHeader
@@ -5017,15 +4971,10 @@ theorem decompressFrame_succeeds_compressed_sequences_then_rle (data : ByteArray
     hsize1 htypeVal1 hlastBit1 hblockSize1 hwindow1 hblockEnd1 hlit1 hseq1 hNumSeq1
     hfse1 hbbr1 hdec1 hexec1 hoff2
     hsize2 htypeVal2 hlastBit2 hblockSize2 hwindow2 hpayload2
-  -- Step 2: Unfold decompressFrame and thread through
   unfold Zip.Native.decompressFrame
-  simp only [bind, Except.bind, pure, Except.pure, hparse]
-  -- Step 3: Dictionary check — header.dictionaryId = none, so if-let doesn't match
-  simp only [hnodict]
-  -- Step 4: Block decompression succeeds
+  simp only [bind, Except.bind, pure, Except.pure, hparse, hnodict]
   unfold Zip.Native.decompressBlocks
   rw [hblocks]
-  -- Step 5: Checksum is false, content size is none — both guards are trivial
   simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
   exact ⟨_, _, rfl⟩
 
