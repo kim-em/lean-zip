@@ -228,13 +228,14 @@ protected theorem encodeSymbols_append_inv
 /-- `findTableCode.go` returns an index < baseTable.size. -/
 theorem findTableCode_go_idx_bound (baseTable : Array UInt16)
     (extraTable : Array UInt8) (value i idx extraN : Nat) (extraV : UInt32)
-    (h : findTableCode.go baseTable extraTable value i = some (idx, extraN, extraV)) :
+    (hsize : baseTable.size ≤ extraTable.size)
+    (h : findTableCode.go baseTable extraTable value i hsize = some (idx, extraN, extraV)) :
     idx < baseTable.size := by
   unfold findTableCode.go at h
   split at h
   · split at h
     · simp only [Option.some.injEq, Prod.mk.injEq] at h; omega
-    · exact findTableCode_go_idx_bound baseTable extraTable value (i + 1) idx extraN extraV h
+    · exact findTableCode_go_idx_bound baseTable extraTable value (i + 1) idx extraN extraV hsize h
   · split at h
     · simp only [Option.some.injEq, Prod.mk.injEq] at h; omega
     · exact nomatch h
@@ -243,13 +244,14 @@ termination_by baseTable.size - i
 /-- `findTableCode.go` returns extraN = extraTable[idx]!.toNat. -/
 theorem findTableCode_go_extraN (baseTable : Array UInt16)
     (extraTable : Array UInt8) (value i idx extraN : Nat) (extraV : UInt32)
-    (h : findTableCode.go baseTable extraTable value i = some (idx, extraN, extraV)) :
+    (hsize : baseTable.size ≤ extraTable.size)
+    (h : findTableCode.go baseTable extraTable value i hsize = some (idx, extraN, extraV)) :
     extraN = extraTable[idx]!.toNat := by
   unfold findTableCode.go at h
   split at h
   · split at h
     · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
-    · exact findTableCode_go_extraN baseTable extraTable value (i + 1) idx extraN extraV h
+    · exact findTableCode_go_extraN baseTable extraTable value (i + 1) idx extraN extraV hsize h
   · split at h
     · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
     · exact nomatch h
@@ -259,7 +261,7 @@ termination_by baseTable.size - i
 theorem nativeFindLengthCode_idx_bound (len idx extraN : Nat) (extraV : UInt32)
     (h : findLengthCode len = some (idx, extraN, extraV)) :
     idx < 29 := by
-  have := findTableCode_go_idx_bound _ _ _ _ _ _ _ h
+  have := findTableCode_go_idx_bound _ _ _ _ _ _ _ _ h
   have : Inflate.lengthBase.size = 29 := by rfl
   omega
 
@@ -268,7 +270,7 @@ theorem nativeFindLengthCode_extraN_bound (len idx extraN : Nat) (extraV : UInt3
     (h : findLengthCode len = some (idx, extraN, extraV)) :
     extraN ≤ 5 := by
   have hidx := nativeFindLengthCode_idx_bound len idx extraN extraV h
-  have hextraN := findTableCode_go_extraN _ _ _ _ _ _ _ h
+  have hextraN := findTableCode_go_extraN _ _ _ _ _ _ _ _ h
   rw [hextraN]
   have : ∀ j : Fin 29, Inflate.lengthExtra[j.val]!.toNat ≤ 5 := by decide
   exact this ⟨idx, hidx⟩
@@ -277,7 +279,7 @@ theorem nativeFindLengthCode_extraN_bound (len idx extraN : Nat) (extraV : UInt3
 theorem nativeFindDistCode_idx_bound (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
     dIdx < 30 := by
-  have := findTableCode_go_idx_bound _ _ _ _ _ _ _ h
+  have := findTableCode_go_idx_bound _ _ _ _ _ _ _ _ h
   have : Inflate.distBase.size = 30 := by rfl
   omega
 
@@ -286,7 +288,7 @@ theorem nativeFindDistCode_extraN_bound (dist dIdx dExtraN : Nat) (dExtraV : UIn
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
     dExtraN ≤ 13 := by
   have hidx := nativeFindDistCode_idx_bound dist dIdx dExtraN dExtraV h
-  have hextraN := findTableCode_go_extraN _ _ _ _ _ _ _ h
+  have hextraN := findTableCode_go_extraN _ _ _ _ _ _ _ _ h
   rw [hextraN]
   have : ∀ j : Fin 30, Inflate.distExtra[j.val]!.toNat ≤ 13 := by decide
   exact this ⟨dIdx, hidx⟩
