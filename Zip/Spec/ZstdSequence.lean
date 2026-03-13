@@ -20,6 +20,16 @@ Correctness theorems relate the implementation (`resolveOffset`,
 `executeSequences`) to these predicates.
 -/
 
+private theorem foldl_add_comm {α : Type} (f : α → Nat) (init : Nat) (xs : List α) :
+    List.foldl (fun acc x => acc + f x) init xs =
+    init + List.foldl (fun acc x => acc + f x) 0 xs := by
+  induction xs generalizing init with
+  | nil => simp only [List.foldl_nil, Nat.add_zero]
+  | cons x rest ih =>
+    simp only [List.foldl_cons]
+    rw [ih, ih 0, ih (0 + f x)]
+    omega
+
 /-! ## Size lemmas for sequence execution helpers -/
 
 namespace Zip.Native
@@ -208,16 +218,6 @@ theorem copyMatch_getElem_ge (buf : ByteArray) (offset length : Nat) (j : Nat)
   simp only [Nat.zero_add] at this
   exact this
 
-private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
-    List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
-    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs := by
-  induction seqs generalizing init with
-  | nil => simp only [List.foldl_nil, Nat.add_zero]
-  | cons s rest ih =>
-    simp only [List.foldl_cons]
-    rw [ih, ih 0, ih (0 + s.matchLength)]
-    omega
-
 /-- Loop invariant: if `executeSequences.loop` succeeds, the output size equals
     initial output size + literals consumed + match bytes, litPos bounds hold,
     and the output is at least as large as the input (monotonicity). -/
@@ -252,7 +252,7 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArr
     refine ⟨?_, ?_, ih_bound, by omega⟩
     · rw [ih_size]
       simp only [List.foldl_cons, Nat.zero_add]
-      conv => rhs; rw [foldl_matchLen_add]
+      conv => rhs; rw [foldl_add_comm]
       generalize List.foldl (fun acc s => acc + s.matchLength) 0 rest = matchSum
       omega
     · omega
@@ -273,12 +273,10 @@ theorem executeSequences_loop_output_size_ge
     rw [executeSequences.loop.eq_1] at h
     simp only [Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, _, _⟩ := h; omega
-  | cons seq rest =>
-    have h' := h
-    rw [executeSequences.loop.eq_2] at h'
-    split at h'
-    · exact nomatch h'
-    · exact (executeSequences_loop_inv _ _ _ _ _ _ _ _ _ (by omega) h).2.2.2
+  | cons seq _ =>
+    have h' := h; rw [executeSequences.loop.eq_2] at h'
+    split at h'; · exact nomatch h'
+    exact (executeSequences_loop_inv _ _ _ _ _ _ _ _ _ (by omega) h).2.2.2
 
 /-- Single-step unfolding: when all guards pass, processing `seq :: rest` equals
     processing `rest` with the intermediate state after one copy-literal +
@@ -1567,16 +1565,6 @@ theorem executeSequences_history_size
 
 /-! ## Literal length foldl commutativity -/
 
-private theorem foldl_litLen_add (init : Nat) (seqs : List ZstdSequence) :
-    List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) init seqs =
-    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) 0 seqs := by
-  induction seqs generalizing init with
-  | nil => simp only [List.foldl_nil, Nat.add_zero]
-  | cons s rest ih =>
-    simp only [List.foldl_cons]
-    rw [ih, ih 0, ih (0 + s.literalLength)]
-    omega
-
 /-! ## executeSequences completeness
 
 These theorems prove WHEN `executeSequences.loop` and `executeSequences` succeed,
@@ -1628,7 +1616,7 @@ theorem executeSequences_loop_succeeds
     -- Guard 1: enough literals
     have hlit1 : ¬(litPos + seq.literalLength > literals.size) := by
       simp only [List.foldl_cons, Nat.zero_add] at hlit
-      rw [foldl_litLen_add] at hlit; omega
+      rw [foldl_add_comm] at hlit; omega
     simp only [hlit1, ↓reduceIte]
     -- Extract offset validity components
     obtain ⟨hraw_pos, hshift3, hwin_bound, hrest_valid⟩ := hoffsets
@@ -1654,7 +1642,7 @@ theorem executeSequences_loop_succeeds
           apply ih
           · -- hlit: literal consumption for rest
             simp only [List.foldl_cons, Nat.zero_add] at hlit
-            rw [foldl_litLen_add] at hlit; omega
+            rw [foldl_add_comm] at hlit; omega
           · exact resolveOffset_history_valid_of_fst_ne_zero _ _ _ hvalid (by omega)
           · exact hrest_valid
           · rw [copyMatch_size, hcb_size]; omega
