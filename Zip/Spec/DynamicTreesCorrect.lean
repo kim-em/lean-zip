@@ -83,14 +83,17 @@ private theorem readCLCodeLengths_inv (br : Zip.Native.BitReader)
     unfold Zip.Native.Inflate.readCLCodeLengths at h
     split at h
     · rename_i hi
-      dsimp only [bind, Except.bind] at h
-      cases hrb : br.readBits 3 with
-      | error e => simp only [hrb] at h; exact nomatch h
-      | ok p =>
-        obtain ⟨v, br₁⟩ := p
-        simp only [hrb] at h
-        exact ih br₁ _ (i + 1) (readBits_wf br 3 v br₁ hwf hrb)
-          (readBits_pos_inv br 3 v br₁ hwf hpos hrb) h (by omega)
+      split at h
+      · rename_i h_i
+        dsimp only [bind, Except.bind] at h
+        cases hrb : br.readBits 3 with
+        | error e => simp only [hrb] at h; exact nomatch h
+        | ok p =>
+          obtain ⟨v, br₁⟩ := p
+          simp only [hrb] at h
+          exact ih br₁ _ (i + 1) (readBits_wf br 3 v br₁ hwf hrb)
+            (readBits_pos_inv br 3 v br₁ hwf hpos hrb) h (by omega)
+      · exact nomatch h
     · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact ⟨hwf, hpos⟩
 
 /-- `readCLCodeLengths` preserves array size. -/
@@ -108,14 +111,18 @@ protected theorem readCLCodeLengths_size (br : Zip.Native.BitReader)
   | succ n ih =>
     have hi : i < numCodeLen := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    simp only [if_pos hi, bind, Except.bind] at h
-    cases hrb : br.readBits 3 with
-    | error e => simp only [hrb] at h; exact nomatch h
-    | ok p =>
-      obtain ⟨v, br₁⟩ := p
-      simp only [hrb] at h
-      have := ih br₁ _ (i + 1) h (by omega)
-      rw [Array.size_set!] at this; exact this
+    simp only [if_pos hi] at h
+    split at h
+    · rename_i h_i
+      simp only [bind, Except.bind] at h
+      cases hrb : br.readBits 3 with
+      | error e => simp only [hrb] at h; exact nomatch h
+      | ok p =>
+        obtain ⟨v, br₁⟩ := p
+        simp only [hrb] at h
+        have := ih br₁ _ (i + 1) h (by omega)
+        rw [Array.size_set!] at this; exact this
+    · exact nomatch h
 
 /-! ### fillEntries helpers -/
 
@@ -205,17 +212,20 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
           split at h
           · exact nomatch h
           · dsimp only [pure, Except.pure] at h
-            cases hrb : br₁.readBits 2 with
-            | error e => simp only [hrb] at h; exact nomatch h
-            | ok p =>
-              obtain ⟨rep, br₂⟩ := p
-              simp only [hrb] at h
-              split at h
-              · exact nomatch h
-              · have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
-                  (readBits_wf br₁ 2 rep br₂ hwf₁ hrb)
-                  (readBits_pos_inv br₁ 2 rep br₂ hwf₁ hpos₁ hrb) h
-                exact ⟨hwf', hpos', hsz.trans (fillEntries_size ..)⟩
+            split at h
+            · -- idx - 1 < codeLengths.size
+              cases hrb : br₁.readBits 2 with
+              | error e => simp only [hrb] at h; exact nomatch h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrb] at h
+                split at h
+                · exact nomatch h
+                · have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
+                    (readBits_wf br₁ 2 rep br₂ hwf₁ hrb)
+                    (readBits_pos_inv br₁ 2 rep br₂ hwf₁ hpos₁ hrb) h
+                  exact ⟨hwf', hpos', hsz.trans (fillEntries_size ..)⟩
+            · exact nomatch h
         · split at h
           · -- sym == 17
             cases hrb : br₁.readBits 3 with
@@ -273,34 +283,42 @@ private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
     -- i < numCodeLen
     have hi : i < numCodeLen := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    simp only [if_pos hi, bind, Except.bind] at h
-    cases hrb : br.readBits 3 with
-    | error e => simp only [hrb] at h; exact nomatch h
-    | ok p =>
-      obtain ⟨v, br₁⟩ := p
-      simp only [hrb] at h
-      have ⟨rest₁, hspec_rb, hrest₁⟩ := readBits_toBits br 3 v br₁ hwf (by omega) hrb
-      have hwf₁ := readBits_wf br 3 v br₁ hwf hrb
-      have hsize₁ : (clLengths.set! Zip.Native.Inflate.codeLengthOrder[i]! v.toUInt8).size = 19 := by
-        rw [Array.size_set!]; exact hsize
-      have hd₁ : numCodeLen - (i + 1) = n := by omega
-      have ⟨rest₂, hspec_rec, hrest₂⟩ := ih br₁ _ (i + 1) hwf₁ hsize₁ h hd₁
-      refine ⟨rest₂, ?_, hrest₂⟩
-      show Deflate.Spec.readCLLengths (n + 1) i
-        (List.map UInt8.toNat clLengths.toList) br.toBits =
-        some (List.map UInt8.toNat clLengths'.toList, rest₂)
-      rw [Deflate.Spec.readCLLengths]
-      simp only [bind, Option.bind, hspec_rb]
-      have h_acc :
-        (List.map UInt8.toNat clLengths.toList).set (Deflate.Spec.codeLengthOrder[i]!) v.toNat =
-        List.map UInt8.toNat
-          (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) v.toUInt8).toList := by
-        rw [Array.set!, Array.toList_setIfInBounds, List.map_set]
-        congr 1
-        have hbound := Deflate.Spec.readBitsLSB_bound hspec_rb
-        show v.toNat = v.toNat % 256; omega
-      rw [h_acc, ← hrest₁]
-      exact hspec_rec
+    simp only [if_pos hi] at h
+    split at h
+    · rename_i h_i
+      dsimp only [bind, Except.bind] at h
+      cases hrb : br.readBits 3 with
+      | error e => simp only [hrb] at h; exact nomatch h
+      | ok p =>
+        obtain ⟨v, br₁⟩ := p
+        simp only [hrb] at h
+        have ⟨rest₁, hspec_rb, hrest₁⟩ := readBits_toBits br 3 v br₁ hwf (by omega) hrb
+        have hwf₁ := readBits_wf br 3 v br₁ hwf hrb
+        have h_getelem : Zip.Native.Inflate.codeLengthOrder[i] =
+            Zip.Native.Inflate.codeLengthOrder[i]! :=
+          (getElem!_pos Zip.Native.Inflate.codeLengthOrder i h_i).symm
+        have hsize₁ : (clLengths.set! Zip.Native.Inflate.codeLengthOrder[i]! v.toUInt8).size = 19 := by
+          rw [Array.size_set!]; exact hsize
+        rw [h_getelem] at h
+        have hd₁ : numCodeLen - (i + 1) = n := by omega
+        have ⟨rest₂, hspec_rec, hrest₂⟩ := ih br₁ _ (i + 1) hwf₁ hsize₁ h hd₁
+        refine ⟨rest₂, ?_, hrest₂⟩
+        show Deflate.Spec.readCLLengths (n + 1) i
+          (List.map UInt8.toNat clLengths.toList) br.toBits =
+          some (List.map UInt8.toNat clLengths'.toList, rest₂)
+        rw [Deflate.Spec.readCLLengths]
+        simp only [bind, Option.bind, hspec_rb]
+        have h_acc :
+            (List.map UInt8.toNat clLengths.toList).set (Deflate.Spec.codeLengthOrder[i]!) v.toNat =
+            List.map UInt8.toNat
+              (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) v.toUInt8).toList := by
+          rw [Array.set!, Array.toList_setIfInBounds, List.map_set]
+          congr 1
+          have hbound := Deflate.Spec.readBitsLSB_bound hspec_rb
+          show v.toNat = v.toNat % 256; omega
+        rw [h_acc, ← hrest₁]
+        exact hspec_rec
+    · exact nomatch h
 
 /-- The length of the accumulated code lengths list equals `min idx codeLengths.size`. -/
 private theorem accLen_eq_min (codeLengths : Array UInt8) (idx : Nat) :
@@ -411,38 +429,43 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
           · exact nomatch h
           · rename_i hidx_ne
             dsimp only [pure, Except.pure] at h
-            have hidx_pos : 0 < idx := by
-              simp only [beq_iff_eq] at hidx_ne; omega
-            cases hrd : br₁.readBits 2 with
-            | error e => simp only [hrd] at h; exact nomatch h
-            | ok p =>
-              obtain ⟨rep, br₂⟩ := p
-              simp only [hrd] at h
-              split at h
-              · exact nomatch h
-              · rename_i hbound
-                have hwf₂ := readBits_wf br₁ 2 rep br₂ hwf₁ hrd
-                have ⟨rest₂, hspec_rd, hrest₂⟩ :=
-                  readBits_toBits br₁ 2 rep br₂ hwf₁ (by omega) hrd
-                have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 3) totalCodes
-                  codeLengths[idx - 1]! (by omega) (by omega)
-                have ⟨rest₃, hspec_rec, hrest₃⟩ := hrec (idx + (rep.toNat + 3)) br₂
-                  (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 3) totalCodes
-                    codeLengths[idx - 1]!).fst
-                  (by omega) hwf₂ (by omega) (by rw [fillEntries_size]; omega) h
-                refine ⟨rest₃, ?_, hrest₃⟩
-                rw [hfill_ext, hrest₂] at hspec_rec
-                have h_rd : Deflate.Spec.readBitsLSB 2 rest₁ = some (rep.toNat, rest₂) := by
-                  rw [← hrest₁]; exact hspec_rd
-                have hprev_eq := Array.extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
-                have hacc_len := accLen_eq_min codeLengths idx
-                have hne0 : ¬(min idx codeLengths.size == 0) = true := by
-                  simp only [Nat.min_eq_left hle]; omega
-                have hguard2 : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
-                  simp only [Nat.min_eq_left hle]; omega
-                simpa only [h_rd, hprev_eq, hacc_len,
-                  List.length_append, List.length_replicate,
-                  if_neg hne0, if_pos hguard2] using hspec_rec
+            split at h
+            · -- idx - 1 < codeLengths.size
+              rename_i h_cl
+              have hidx_pos : 0 < idx := by
+                simp only [beq_iff_eq] at hidx_ne; omega
+              cases hrd : br₁.readBits 2 with
+              | error e => simp only [hrd] at h; exact nomatch h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p
+                simp only [hrd] at h
+                split at h
+                · exact nomatch h
+                · rename_i hbound
+                  have hwf₂ := readBits_wf br₁ 2 rep br₂ hwf₁ hrd
+                  have ⟨rest₂, hspec_rd, hrest₂⟩ :=
+                    readBits_toBits br₁ 2 rep br₂ hwf₁ (by omega) hrd
+                  have hfill_ext := fillEntries_extract codeLengths idx (rep.toNat + 3) totalCodes
+                    codeLengths[idx - 1] (by omega) (by omega)
+                  have ⟨rest₃, hspec_rec, hrest₃⟩ := hrec (idx + (rep.toNat + 3)) br₂
+                    (Zip.Native.Inflate.fillEntries codeLengths idx (rep.toNat + 3) totalCodes
+                      codeLengths[idx - 1]).fst
+                    (by omega) hwf₂ (by omega) (by rw [fillEntries_size]; omega) h
+                  refine ⟨rest₃, ?_, hrest₃⟩
+                  rw [hfill_ext, hrest₂] at hspec_rec
+                  have h_rd : Deflate.Spec.readBitsLSB 2 rest₁ = some (rep.toNat, rest₂) := by
+                    rw [← hrest₁]; exact hspec_rd
+                  have hprev_eq := Array.extract_map_getLast_eq codeLengths idx hidx_pos (by omega)
+                  have hacc_len := accLen_eq_min codeLengths idx
+                  have hne0 : ¬(min idx codeLengths.size == 0) = true := by
+                    simp only [Nat.min_eq_left hle]; omega
+                  have hguard2 : min idx codeLengths.size + (rep.toNat + 3) ≤ totalCodes := by
+                    simp only [Nat.min_eq_left hle]; omega
+                  simpa only [h_rd, hprev_eq, hacc_len,
+                    List.length_append, List.length_replicate,
+                    if_neg hne0, if_pos hguard2,
+                    getElem!_pos codeLengths (idx - 1) h_cl] using hspec_rec
+            · exact nomatch h
         · -- sym ≠ 16
           rename_i hsym_ne16
           split at h
