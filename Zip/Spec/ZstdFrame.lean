@@ -1699,7 +1699,7 @@ theorem decompressZstd_succeeds_single_raw_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Specialize universally quantified hypotheses
   have htypeVal' := htypeVal hdr afterHdr hparse
   have hlastBit' := hlastBit hdr afterHdr hparse
@@ -1752,7 +1752,7 @@ theorem decompressZstd_succeeds_single_rle_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Specialize universally quantified hypotheses
   have htypeVal' := htypeVal hdr afterHdr hparse
   have hlastBit' := hlastBit hdr afterHdr hparse
@@ -1828,7 +1828,7 @@ theorem decompressZstd_succeeds_two_rle_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_two_rle_blocks
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_two_rle_blocks
     data 0 hdr afterHdr hparse
@@ -1905,7 +1905,7 @@ theorem decompressZstd_succeeds_rle_then_raw_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_rle_then_raw
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_rle_then_raw
     data 0 hdr afterHdr hparse
@@ -1990,7 +1990,7 @@ theorem decompressZstd_succeeds_rle_then_compressed_zero_seq_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit2', hseq2'⟩ :=
     hparsing2 hdr afterHdr hparse
@@ -2092,7 +2092,7 @@ theorem decompressZstd_succeeds_two_raw_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_two_raw_blocks
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_two_raw_blocks
     data 0 hdr afterHdr hparse
@@ -2185,7 +2185,7 @@ theorem decompressZstd_succeeds_raw_then_rle_frame (data : ByteArray)
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Apply decompressFrame_succeeds_raw_then_rle
   obtain ⟨content, pos', hframe⟩ := Zstd.Spec.decompressFrame_succeeds_raw_then_rle
     data 0 hdr afterHdr hparse
@@ -2291,7 +2291,7 @@ theorem decompressZstd_succeeds_raw_then_compressed_zero_seq_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit', hseq'⟩ :=
     hparsing2 hdr afterHdr hparse
@@ -2428,7 +2428,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_raw_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit1', hseq1'⟩ :=
     hparsing1 hdr afterHdr hparse
@@ -2553,7 +2553,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_rle_frame (data : ByteA
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals, afterLiterals, huffTree, modes, afterSeqHeader, hlit1', hseq1'⟩ :=
     hparsing1 hdr afterHdr hparse
@@ -2673,7 +2673,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_compressed_zero_seq_fra
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain literals and sequences parsing from combined hypothesis
   obtain ⟨literals1, afterLiterals1, huffTree1, modes1, afterSeqHeader1,
           literals2, afterLiterals2, huffTree2, modes2, afterSeqHeader2,
@@ -2817,7 +2817,7 @@ theorem decompressZstd_succeeds_compressed_zero_seq_then_compressed_sequences_fr
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Obtain full pipeline from combined hypothesis
   obtain ⟨literals1, afterLiterals1, huffTree1, modes1, afterSeqHeader1,
           literals2, afterLiterals2, huffTree2, numSeq2, modes2, afterSeqHeader2,
@@ -2950,7 +2950,7 @@ theorem decompressZstd_succeeds_compressed_sequences_then_raw_frame (data : Byte
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Destructure pipeline existential for block 1
   obtain ⟨literals, afterLiterals, huffTree, numSeq, modes, afterSeqHeader,
     llTable, ofTable, mlTable, afterTables, bbr, sequences, blockOutput1, newHist1,
@@ -3084,7 +3084,7 @@ theorem decompressZstd_succeeds_compressed_sequences_then_rle_frame (data : Byte
     ∃ output, Zip.Native.decompressZstd data = .ok output := by
   -- Step 1: Obtain header from parseFrameHeader_succeeds
   obtain ⟨hdr, afterHdr, hparse⟩ :=
-    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa using hframeSize)
+    Zstd.Spec.parseFrameHeader_succeeds data 0 hmagic (by simpa only [Nat.zero_add] using hframeSize)
   -- Step 2: Destructure pipeline existential for block 1
   obtain ⟨literals, afterLiterals, huffTree, numSeq, modes, afterSeqHeader,
     llTable, ofTable, mlTable, afterTables, bbr, sequences, blockOutput1, newHist1,
