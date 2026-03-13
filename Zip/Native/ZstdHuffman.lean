@@ -368,36 +368,39 @@ def decodeFourHuffmanStreamsWF (htable : ZstdHuffmanTable) (data : ByteArray)
     Returns `(regenSize, compSize, headerBytes, fourStreams)`. -/
 def parseCompressedLiteralsHeader (data : ByteArray) (pos : Nat) (sizeFormat : Nat) :
     Except String (Nat × Nat × Nat × Bool) := do
-  if sizeFormat <= 1 then do
-    if data.size < pos + 3 then throw "Zstd: truncated compressed literals header"
-    let b0 := data[pos]!.toNat
-    let b1 := data[pos + 1]!.toNat
-    let b2 := data[pos + 2]!.toNat
-    let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
-    let regen := (raw >>> 4) &&& 0x3FF
-    let comp := (raw >>> 14) &&& 0x3FF
-    pure (regen, comp, 3, sizeFormat == 1)
-  else if sizeFormat == 2 then do
-    if data.size < pos + 4 then throw "Zstd: truncated compressed literals header"
-    let b0 := data[pos]!.toNat
-    let b1 := data[pos + 1]!.toNat
-    let b2 := data[pos + 2]!.toNat
-    let b3 := data[pos + 3]!.toNat
-    let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
-    let regen := (raw >>> 4) &&& 0x3FFF
-    let comp := (raw >>> 18) &&& 0x3FFF
-    pure (regen, comp, 4, true)
-  else do
-    if data.size < pos + 5 then throw "Zstd: truncated compressed literals header"
-    let b0 := data[pos]!.toNat
-    let b1 := data[pos + 1]!.toNat
-    let b2 := data[pos + 2]!.toNat
-    let b3 := data[pos + 3]!.toNat
-    let b4 := data[pos + 4]!.toNat
-    let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24) ||| (b4 <<< 32)
-    let regen := (raw >>> 4) &&& 0x3FFFF
-    let comp := (raw >>> 22) &&& 0x3FFFF
-    pure (regen, comp, 5, true)
+  if sizeFormat <= 1 then
+    if h : pos + 3 ≤ data.size then
+      let b0 := data[pos]'(by omega) |>.toNat
+      let b1 := data[pos + 1]'(by omega) |>.toNat
+      let b2 := data[pos + 2]'(by omega) |>.toNat
+      let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
+      let regen := (raw >>> 4) &&& 0x3FF
+      let comp := (raw >>> 14) &&& 0x3FF
+      pure (regen, comp, 3, sizeFormat == 1)
+    else throw "Zstd: truncated compressed literals header"
+  else if sizeFormat == 2 then
+    if h : pos + 4 ≤ data.size then
+      let b0 := data[pos]'(by omega) |>.toNat
+      let b1 := data[pos + 1]'(by omega) |>.toNat
+      let b2 := data[pos + 2]'(by omega) |>.toNat
+      let b3 := data[pos + 3]'(by omega) |>.toNat
+      let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24)
+      let regen := (raw >>> 4) &&& 0x3FFF
+      let comp := (raw >>> 18) &&& 0x3FFF
+      pure (regen, comp, 4, true)
+    else throw "Zstd: truncated compressed literals header"
+  else
+    if h : pos + 5 ≤ data.size then
+      let b0 := data[pos]'(by omega) |>.toNat
+      let b1 := data[pos + 1]'(by omega) |>.toNat
+      let b2 := data[pos + 2]'(by omega) |>.toNat
+      let b3 := data[pos + 3]'(by omega) |>.toNat
+      let b4 := data[pos + 4]'(by omega) |>.toNat
+      let raw := b0 ||| (b1 <<< 8) ||| (b2 <<< 16) ||| (b3 <<< 24) ||| (b4 <<< 32)
+      let regen := (raw >>> 4) &&& 0x3FFFF
+      let comp := (raw >>> 22) &&& 0x3FFFF
+      pure (regen, comp, 5, true)
+    else throw "Zstd: truncated compressed literals header"
 
 /-- Decode Huffman-compressed literal streams using the given table.
     Returns the decoded literals. -/
