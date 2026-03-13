@@ -417,23 +417,26 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
                   rw [readBits_append br₃ suffix _ dExtraBits br₄ hdextra_r]; dsimp only []
                   split at h
                   · exact nomatch h
-                  · rename_i hdist_ok; rw [if_neg hdist_ok]
+                  · rename_i hdist_nz; rw [dif_neg hdist_nz]
                     split at h
                     · exact nomatch h
-                    · rename_i hmax_ok; rw [if_neg hmax_ok]
+                    · rename_i hdist_ok; rw [dif_neg hdist_ok]
                       split at h
                       · exact nomatch h
-                      · rename_i h₁
+                      · rename_i hmax_ok; rw [if_neg hmax_ok]
                         split at h
                         · exact nomatch h
-                        · rename_i h₂
-                          have : (brAppend br₄ suffix).bitPos = br₄.bitPos := rfl
-                          split
-                          · rename_i h₁'; exact absurd h₁' h₁
-                          · split
-                            · rename_i h₂'; exfalso; exact h₂ (by omega)
-                            · exact decodeHuffman_go_append litTree distTree br₄ suffix
-                                _ maxOut dataSize dataSize' result br' hds h
+                        · rename_i h₁
+                          split at h
+                          · exact nomatch h
+                          · rename_i h₂
+                            have : (brAppend br₄ suffix).bitPos = br₄.bitPos := rfl
+                            split
+                            · rename_i h₁'; exact absurd h₁' h₁
+                            · split
+                              · rename_i h₂'; exfalso; exact h₂ (by omega)
+                              · exact decodeHuffman_go_append litTree distTree br₄ suffix
+                                  _ maxOut dataSize dataSize' result br' hds h
   termination_by dataSize * 8 - br.bitPos
 
 -- Tactic macro for the bfinal dispatch in inflateLoop_append_suffix.

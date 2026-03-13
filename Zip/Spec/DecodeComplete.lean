@@ -663,7 +663,7 @@ theorem decodeHuffman_complete
           -- idx bounds check: sym.toNat - 257 < lengthBase.size
           have hidx_ok : ¬(sym_nat - 257 ≥ Zip.Native.Inflate.lengthBase.size) := by
             show ¬(_ ≥ 29); omega
-          simp only [hsym_toNat, hidx_ok, ↓reduceDIte, pure, Except.pure]
+          simp only [hsym_toNat, hidx_ok, ↓reduceDIte]
           simp only [← getElem!_pos]
           -- readBits for length extra
           rw [hnative_extra_eq,
@@ -682,11 +682,16 @@ theorem decodeHuffman_complete
           rw [hnative_dextra_eq,
             show br₃.readBits dExtra = .ok (dExtraVal.toUInt32, br₄) from hrd_dextra]
           dsimp only [bind, Except.bind]
+          -- Distance = 0 check
+          have hdist_nz : ¬((Zip.Native.Inflate.distBase[dSym]!).toNat +
+              dExtraVal.toUInt32.toNat = 0) := by
+            rw [hnative_dist]; omega
+          simp only [hdist_nz, ↓reduceDIte]
           -- Distance > output.size check
           have hdist_ok : ¬((Zip.Native.Inflate.distBase[dSym]!).toNat +
               dExtraVal.toUInt32.toNat > output.size) := by
             rw [hnative_dist]; simp only [Array.length_toList, ByteArray.size_data] at hdist_le; omega
-          simp only [hdist_ok, ↓reduceIte]
+          simp only [hdist_ok, ↓reduceDIte]
           -- MaxOutputSize check
           have hmax_ok : ¬(output.size +
               ((Zip.Native.Inflate.lengthBase[sym_nat - 257]!).toNat +
@@ -732,9 +737,9 @@ theorem decodeHuffman_complete
               output.data.toList ++ List.ofFn (fun (i : Fin len) =>
                 output.data.toList[(output.data.toList.length - dist) +
                   (i.val % dist)]!) := by
-            rw [hnative_dist, hnative_len,
-              show output.size = output.data.toList.length from by
-                simp only [Array.length_toList, ByteArray.size_data]]
+            simp only [show output.data.toList.length = output.size from
+                  ByteArray.data_toList_length output,
+                hnative_dist, hnative_len]
             exact hcopy
           let newOutput := Zip.Native.Inflate.copyLoop output
             (output.size - ((Zip.Native.Inflate.distBase[dSym]!).toNat +

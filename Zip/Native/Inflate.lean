@@ -147,9 +147,13 @@ def distExtra : Array UInt8 := #[
     `distance` bytes (LZ77 back-reference copy with wrap-around).
     Defined as explicit recursion for proof tractability. -/
 def copyLoop (buf : ByteArray) (start distance : Nat)
-    (k length : Nat) : ByteArray :=
+    (k length : Nat)
+    (hd_pos : distance > 0 := by omega) (hsd : start + distance ≤ buf.size := by omega) : ByteArray :=
   if k < length then
-    copyLoop (buf.push buf[start + (k % distance)]!) start distance (k + 1) length
+    have hidx : start + (k % distance) < buf.size := by
+      have := Nat.mod_lt k hd_pos; omega
+    copyLoop (buf.push buf[start + (k % distance)]) start distance (k + 1) length
+      hd_pos (by simp [ByteArray.size_push]; omega)
   else buf
 termination_by length - k
 
@@ -302,12 +306,16 @@ where
       let (dExtraBits, br₄) ← br₃.readBits dExtra.toNat
       let distance := dBase.toNat + dExtraBits.toNat
       -- Copy from output buffer (LZ77 back-reference)
-      if distance > output.size then
+      if hd0 : distance = 0 then
+        throw s!"Inflate: zero back-reference distance"
+      else if hds : distance > output.size then
         throw s!"Inflate: distance {distance} exceeds output size {output.size}"
-      if output.size + length > maxOutputSize then
+      else if output.size + length > maxOutputSize then
         throw "Inflate: output exceeds maximum size"
+      else
       let start := output.size - distance
       let out := copyLoop output start distance 0 length
+        (by omega) (by omega)
       -- Guard: bit position must advance for WF termination
       if _h₁ : br₄.bitPos ≤ br.bitPos then
         throw "Inflate: no progress in Huffman decode"

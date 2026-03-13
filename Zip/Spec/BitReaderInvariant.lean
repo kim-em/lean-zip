@@ -397,26 +397,28 @@ theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
                 · exact nomatch h  -- readBits dist extra error
                 · rename_i v₂ hrb2_eq
                   split at h
-                  · exact nomatch h  -- distance > output.size
+                  · exact nomatch h  -- distance = 0
                   · split at h
-                    · exact nomatch h  -- output.size + length > maxOut
-                    · -- advancement guards before recursive call
-                      split at h
-                      · exact nomatch h  -- bitPos ≤ guard → error
-                      · split at h
-                        · exact nomatch h  -- bitPos out of range → error
-                        · -- recursive go call remains
-                          obtain ⟨extraBits, br₂⟩ := v
-                          obtain ⟨distSym, br₃⟩ := v₁
-                          obtain ⟨dExtraBits, br₄⟩ := v₂
-                          simp only [] at hrb1_eq hdist_eq hrb2_eq h
-                          have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ _ _ hrb1_eq hpos₁ hple₁
-                          have ⟨hd₃, hpos₃, hple₃⟩ := decode_inv distTree br₂ br₃ distSym hdist_eq hpos₂ hple₂
-                          have ⟨hd₄, hpos₄, hple₄⟩ := readBits_inv br₃ br₄ _ _ hrb2_eq hpos₃ hple₃
-                          have hmeasure : dataSize * 8 - br₄.bitPos < dataSize * 8 - br.bitPos := by
-                            simp only [BitReader.bitPos] at *; omega
-                          have ⟨hd', hp', hl'⟩ := hrec br₄ _ hmeasure h hpos₄ hple₄
-                          exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
+                    · exact nomatch h  -- distance > output.size
+                    · split at h
+                      · exact nomatch h  -- output.size + length > maxOut
+                      · -- advancement guards before recursive call
+                        split at h
+                        · exact nomatch h  -- bitPos ≤ guard → error
+                        · split at h
+                          · exact nomatch h  -- bitPos out of range → error
+                          · -- recursive go call remains
+                            obtain ⟨extraBits, br₂⟩ := v
+                            obtain ⟨distSym, br₃⟩ := v₁
+                            obtain ⟨dExtraBits, br₄⟩ := v₂
+                            simp only [] at hrb1_eq hdist_eq hrb2_eq h
+                            have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ _ _ hrb1_eq hpos₁ hple₁
+                            have ⟨hd₃, hpos₃, hple₃⟩ := decode_inv distTree br₂ br₃ distSym hdist_eq hpos₂ hple₂
+                            have ⟨hd₄, hpos₄, hple₄⟩ := readBits_inv br₃ br₄ _ _ hrb2_eq hpos₃ hple₃
+                            have hmeasure : dataSize * 8 - br₄.bitPos < dataSize * 8 - br.bitPos := by
+                              simp only [BitReader.bitPos] at *; omega
+                            have ⟨hd', hp', hl'⟩ := hrec br₄ _ hmeasure h hpos₄ hple₄
+                            exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
 termination_by dataSize * 8 - br.bitPos
 
 /-- `decodeHuffman` preserves the BitReader invariant. Wrapper around `decodeHuffman_go_inv`. -/
