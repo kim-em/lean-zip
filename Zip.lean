@@ -62,6 +62,8 @@ import Zip.Spec.InflateLoopBounds
 import Zip.Spec.InflateRawSuffix
 import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
+import Zip.Spec.ZstdBase
+import Zip.Spec.ZstdBlockLoop
 import Zip.Spec.Zstd
 import Zip.Spec.ZstdHuffman
 import Zip.Spec.XxHash
