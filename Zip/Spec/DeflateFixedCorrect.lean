@@ -226,6 +226,9 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
           Option.bind, pure, Pure.pure]
         rw [hallBits_eq]
       refine ⟨[true, true, false] ++ allBits, hencFixed, ?_⟩
+      -- Bridge: proven-bounds access ↔ getElem! for fixedLitCodes[256]
+      have h256_lt : 256 < fixedLitCodes.size := by
+        rw [Deflate.fixedLitCodes_size]; omega
       have hwf0 := BitWriter.empty_wf
       have hwf1 := BitWriter.writeBits_wf _ 1 1 hwf0 (by omega)
       have hwf2 := BitWriter.writeBits_wf _ 2 1 hwf1 (by omega)
@@ -237,6 +240,8 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         simp only [List.nil_append] at h1
         rw [h1] at h2; exact h2
       have ⟨heob_cw, heob_len⟩ := Deflate.encodeSymbol_litTable_eq 256 eobBits' henc_eob
+      -- Bridge: encodeSymbol_litTable_eq uses [·]!, convert to proven-bounds
+      rw [getElem!_pos fixedLitCodes 256 h256_lt] at heob_cw heob_len
       have hemit := emitTokens_spec
         (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
         tokens tokBits hwf2 henc_tok
@@ -245,15 +250,15 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         tokens hwf2
       have hwf4 := BitWriter.writeHuffCode_wf
         (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) tokens 0)
-        fixedLitCodes[256]!.1 fixedLitCodes[256]!.2 hwf3 heob_len
+        (fixedLitCodes[256]'h256_lt).1 (fixedLitCodes[256]'h256_lt).2 hwf3 heob_len
       have hbits4 := BitWriter.writeHuffCode_toBits
         (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) tokens 0)
-        fixedLitCodes[256]!.1 fixedLitCodes[256]!.2 hwf3 heob_len
+        (fixedLitCodes[256]'h256_lt).1 (fixedLitCodes[256]'h256_lt).2 hwf3 heob_len
       rw [hemit, hbw2_bits] at hbits4
       have hdef : deflateFixedBlock data tokens =
           (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
             tokens 0
-            |>.writeHuffCode fixedLitCodes[256]!.1 fixedLitCodes[256]!.2).flush := by
+            |>.writeHuffCode (fixedLitCodes[256]'h256_lt).1 (fixedLitCodes[256]'h256_lt).2).flush := by
         unfold deflateFixedBlock
         split
         · rename_i hzero
@@ -270,25 +275,25 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
       rw [hdef]
       have hflush := BitWriter.flush_toBits _ hwf4
       have hbits_eq : (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
-          fixedLitCodes[256]!.2).toBits =
+          tokens 0 |>.writeHuffCode (fixedLitCodes[256]'h256_lt).1
+          (fixedLitCodes[256]'h256_lt).2).toBits =
           [true, true, false] ++ allBits := by
         rw [hbits4, hallBits_eq, heob_eq, heob_cw, List.append_assoc]
       rw [hflush, hbits_eq]
       suffices hmod : (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
-          fixedLitCodes[256]!.2).bitCount.toNat % 8 =
+          tokens 0 |>.writeHuffCode (fixedLitCodes[256]'h256_lt).1
+          (fixedLitCodes[256]'h256_lt).2).bitCount.toNat % 8 =
           ([true, true, false] ++ allBits).length % 8 by
         simp only [hmod]
       have htoBits_len : (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
-          fixedLitCodes[256]!.2).toBits.length =
+          tokens 0 |>.writeHuffCode (fixedLitCodes[256]'h256_lt).1
+          (fixedLitCodes[256]'h256_lt).2).toBits.length =
           (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
-          fixedLitCodes[256]!.2).data.data.toList.length * 8 +
+          tokens 0 |>.writeHuffCode (fixedLitCodes[256]'h256_lt).1
+          (fixedLitCodes[256]'h256_lt).2).data.data.toList.length * 8 +
           (emitTokens (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1)
-          tokens 0 |>.writeHuffCode fixedLitCodes[256]!.1
-          fixedLitCodes[256]!.2).bitCount.toNat := by
+          tokens 0 |>.writeHuffCode (fixedLitCodes[256]'h256_lt).1
+          (fixedLitCodes[256]'h256_lt).2).bitCount.toNat := by
         simp only [BitWriter.toBits, List.length_append, List.length_flatMap,
           Deflate.Spec.bytesToBits.byteToBits_length, List.length_map, List.length_range]
         have hsum : ∀ (l : List UInt8),
