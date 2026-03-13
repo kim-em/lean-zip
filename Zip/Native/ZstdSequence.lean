@@ -48,9 +48,10 @@ private def modeFromBits (bits : UInt8) : SequenceCompressionMode :=
     byte present) and the block has only literals. -/
 def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     Except String (Nat × SequenceCompressionModes × Nat) := do
-  if data.size < pos + 1 then
+  if h : data.size < pos + 1 then
     throw "Zstd: not enough data for sequences header"
-  let byte0 := data[pos]!.toNat
+  else
+  let byte0 := data[pos]'(by omega) |>.toNat
   let defaultModes : SequenceCompressionModes :=
     { litLenMode := .predefined, offsetMode := .predefined, matchLenMode := .predefined }
   if byte0 == 0 then
@@ -58,9 +59,10 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     pure (0, defaultModes, pos + 1)
   else if byte0 < 128 then
     -- 1-byte count + compression modes byte
-    if data.size < pos + 2 then
+    if h2 : data.size < pos + 2 then
       throw "Zstd: not enough data for sequence compression modes"
-    let modesByte := data[pos + 1]!
+    else
+    let modesByte := data[pos + 1]'(by omega)
     let modes : SequenceCompressionModes := {
       litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
       offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
@@ -69,11 +71,12 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     pure (byte0, modes, pos + 2)
   else if byte0 < 255 then
     -- 2-byte count: ((byte0 - 128) << 8) + byte1, then compression modes
-    if data.size < pos + 3 then
+    if h3 : data.size < pos + 3 then
       throw "Zstd: truncated sequences header"
-    let byte1 := data[pos + 1]!.toNat
+    else
+    let byte1 := data[pos + 1]'(by omega) |>.toNat
     let numSeq := ((byte0 - 128) <<< 8) + byte1
-    let modesByte := data[pos + 2]!
+    let modesByte := data[pos + 2]'(by omega)
     let modes : SequenceCompressionModes := {
       litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
       offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
@@ -82,12 +85,13 @@ def parseSequencesHeader (data : ByteArray) (pos : Nat) :
     pure (numSeq, modes, pos + 3)
   else
     -- 3-byte count (byte0 == 255): byte1 + (byte2 << 8) + 0x7F00, then compression modes
-    if data.size < pos + 4 then
+    if h4 : data.size < pos + 4 then
       throw "Zstd: truncated sequences header"
-    let byte1 := data[pos + 1]!.toNat
-    let byte2 := data[pos + 2]!.toNat
+    else
+    let byte1 := data[pos + 1]'(by omega) |>.toNat
+    let byte2 := data[pos + 2]'(by omega) |>.toNat
     let numSeq := byte1 + (byte2 <<< 8) + 0x7F00
-    let modesByte := data[pos + 3]!
+    let modesByte := data[pos + 3]'(by omega)
     let modes : SequenceCompressionModes := {
       litLenMode := modeFromBits ((modesByte >>> 6) &&& 3)
       offsetMode := modeFromBits ((modesByte >>> 4) &&& 3)
@@ -116,40 +120,42 @@ structure ZstdSequence where
     The history array must have exactly 3 entries. -/
 def resolveOffset (rawOffset : Nat) (history : Array Nat) (literalLength : Nat) :
     Nat × Array Nat :=
+  if hhs : history.size < 3 then (rawOffset, history)
+  else
   if rawOffset > 3 then
     -- Actual offset (subtract 3 to get the real byte offset)
     let offset := rawOffset - 3
-    let history' := #[offset, history[0]!, history[1]!]
+    let history' := #[offset, history[0]'(by omega), history[1]'(by omega)]
     (offset, history')
   else if literalLength > 0 then
     -- Normal repeat offset mode
     match rawOffset with
     | 1 =>
-      let offset := history[0]!
+      let offset := history[0]'(by omega)
       (offset, history)  -- history unchanged for code 1
     | 2 =>
-      let offset := history[1]!
-      let history' := #[offset, history[0]!, history[2]!]
+      let offset := history[1]'(by omega)
+      let history' := #[offset, history[0]'(by omega), history[2]'(by omega)]
       (offset, history')
     | 3 =>
-      let offset := history[2]!
-      let history' := #[offset, history[0]!, history[1]!]
+      let offset := history[2]'(by omega)
+      let history' := #[offset, history[0]'(by omega), history[1]'(by omega)]
       (offset, history')
     | _ => (1, history)  -- unreachable (rawOffset > 0 implied)
   else
     -- Shifted repeat mode when literalLength == 0
     match rawOffset with
     | 1 =>
-      let offset := history[1]!
-      let history' := #[offset, history[0]!, history[2]!]
+      let offset := history[1]'(by omega)
+      let history' := #[offset, history[0]'(by omega), history[2]'(by omega)]
       (offset, history')
     | 2 =>
-      let offset := history[2]!
-      let history' := #[offset, history[0]!, history[1]!]
+      let offset := history[2]'(by omega)
+      let history' := #[offset, history[0]'(by omega), history[1]'(by omega)]
       (offset, history')
     | 3 =>
-      let offset := history[0]! - 1
-      let history' := #[offset, history[1]!, history[2]!]
+      let offset := history[0]'(by omega) - 1
+      let history' := #[offset, history[1]'(by omega), history[2]'(by omega)]
       (offset, history')
     | _ => (1, history)  -- unreachable
 
@@ -468,9 +474,10 @@ def resolveSingleFseTable (mode : SequenceCompressionMode) (maxSymbols : Nat)
     let table ← buildFseTable predefinedDist predefinedAccLog
     return (table, pos)
   | .rle =>
-    if data.size < pos + 1 then
+    if h : data.size < pos + 1 then
       throw "Zstd: not enough data for RLE FSE table symbol"
-    let symbol := data[pos]!
+    else
+    let symbol := data[pos]'(by omega)
     return (buildRleFseTable symbol, pos + 1)
   | .fseCompressed =>
     let br : BitReader := { data, pos, bitOff := 0 }

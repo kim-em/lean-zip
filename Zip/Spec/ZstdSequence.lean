@@ -415,8 +415,8 @@ theorem parseSequencesHeader_byte0_zero (data : ByteArray) (pos : Nat)
       .ok (0, { litLenMode := .predefined, offsetMode := .predefined,
                 matchLenMode := .predefined }, pos + 1) := by
   simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte, hbyte,
-    beq_self_eq_true]
+  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte, dite_false,
+    ← getElem!_pos, hbyte, beq_self_eq_true]
 
 /-- When 0 < byte0 < 128, the number of sequences is exactly byte0.
     This is the 1-byte encoding (RFC 8878 §3.1.1.3.2.1) used for up to
@@ -431,15 +431,15 @@ theorem parseSequencesHeader_numSeq_small (data : ByteArray) (pos : Nat)
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   -- Size check
   by_cases hsz : data.size < pos + 1
-  · simp only [hsz, ↓reduceIte] at h; exact nomatch h
-  · simp only [hsz, ↓reduceIte] at h
+  · simp only [hsz, dite_true] at h; exact nomatch h
+  · simp only [hsz, dite_false, ← getElem!_pos] at h
     -- byte0 == 0 check; byte0 < 128 check
     have hbeq : ¬((data[pos]!.toNat == 0) = true) := by simp only [beq_iff_eq]; omega
     rw [if_neg hbeq, if_pos hbyte0_lt] at h
     -- Inner size check
     by_cases hsz2 : data.size < pos + 2
-    · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
-    · simp only [hsz2, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
+    · simp only [hsz2, dite_true] at h; exact nomatch h
+    · simp only [hsz2, dite_false, ← getElem!_pos, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
 /-- When 128 ≤ byte0 < 255, the number of sequences uses the 2-byte encoding:
@@ -455,16 +455,16 @@ theorem parseSequencesHeader_numSeq_medium (data : ByteArray) (pos : Nat)
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   -- Size check
   by_cases hsz : data.size < pos + 1
-  · simp only [hsz, ↓reduceIte] at h; exact nomatch h
-  · simp only [hsz, ↓reduceIte] at h
+  · simp only [hsz, dite_true] at h; exact nomatch h
+  · simp only [hsz, dite_false, ← getElem!_pos] at h
     -- byte0 == 0 check; byte0 ≥ 128 check; byte0 < 255 check
     have hbeq : ¬((data[pos]!.toNat == 0) = true) := by simp only [beq_iff_eq]; omega
     have hlt128 : ¬(data[pos]!.toNat < 128) := by omega
     rw [if_neg hbeq, if_neg hlt128, if_pos hbyte0_lt] at h
     -- Inner size check
     by_cases hsz2 : data.size < pos + 3
-    · simp only [hsz2, ↓reduceIte] at h; exact nomatch h
-    · simp only [hsz2, ↓reduceIte, Except.ok.injEq, Prod.mk.injEq] at h
+    · simp only [hsz2, dite_true] at h; exact nomatch h
+    · simp only [hsz2, dite_false, ← getElem!_pos, Except.ok.injEq, Prod.mk.injEq] at h
       exact h.1.symm
 
 /-- For the 1-byte encoding (byte0 < 128), numSeq = 0 iff byte0 = 0.
@@ -490,8 +490,8 @@ theorem parseSequencesHeader_numSeq_zero_iff (data : ByteArray) (pos : Nat)
     unfold parseSequencesHeader at h
     simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
     by_cases hsz : data.size < pos + 1
-    · simp only [hsz, ↓reduceIte] at h; exact nomatch h
-    · simp only [hsz, ↓reduceIte] at h
+    · simp only [hsz, dite_true] at h; exact nomatch h
+    · simp only [hsz, dite_false, ← getElem!_pos] at h
       have hbeq : (data[pos]!.toNat == 0) = true := beq_iff_eq.mpr hbyte0
       rw [if_pos hbeq] at h
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
@@ -507,16 +507,16 @@ theorem parseSequencesHeader_succeeds (data : ByteArray) (pos : Nat)
     ∃ numSeq modes pos', parseSequencesHeader data pos = .ok (numSeq, modes, pos') := by
   unfold parseSequencesHeader
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-    show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+    show ¬(data.size < pos + 1) from by omega, dite_false]
   split -- byte0 == 0
   · exact ⟨_, _, _, rfl⟩
   · split -- byte0 < 128
-    · simp only [show ¬(data.size < pos + 2) from by omega, ↓reduceIte]
+    · simp only [show ¬(data.size < pos + 2) from by omega, dite_false]
       exact ⟨_, _, _, rfl⟩
     · split -- byte0 < 255
-      · simp only [show ¬(data.size < pos + 3) from by omega, ↓reduceIte]
+      · simp only [show ¬(data.size < pos + 3) from by omega, dite_false]
         exact ⟨_, _, _, rfl⟩
-      · simp only [show ¬(data.size < pos + 4) from by omega, ↓reduceIte]
+      · simp only [show ¬(data.size < pos + 4) from by omega, dite_false]
         exact ⟨_, _, _, rfl⟩
 
 /-- When `data[pos]! = 0` and there is at least 1 byte, parsing succeeds with
@@ -528,8 +528,9 @@ theorem parseSequencesHeader_succeeds_zero (data : ByteArray) (pos : Nat)
       .ok (0, { litLenMode := .predefined, offsetMode := .predefined,
                 matchLenMode := .predefined }, pos + 1) := by
   simp only [parseSequencesHeader, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
-    show data[pos]!.toNat = 0 from by simp [hbyte], beq_self_eq_true]
+  simp only [show ¬(data.size < pos + 1) from by omega, dite_false,
+    ← getElem!_pos, show data[pos]!.toNat = 0 from by simp [hbyte], beq_self_eq_true,
+    ↓reduceIte]
 
 /-! ## buildRleFseTable structural properties -/
 
@@ -970,7 +971,7 @@ theorem resolveSingleFseTable_succeeds_rle (maxSymbols maxAccLog : Nat)
         predefinedDist predefinedAccLog prevTable = .ok (table, pos + 1) := by
   simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure]
   have : ¬(data.size < pos + 1) := by omega
-  simp only [this, ↓reduceIte]
+  simp only [this, dite_false]
   exact ⟨_, rfl⟩
 
 /-- In repeat mode, `resolveSingleFseTable` succeeds when a previous table is available. -/
@@ -1116,6 +1117,7 @@ theorem resolveOffset_history_size (rawOffset : Nat) (history : Array Nat) (litL
     (h : history.size = 3) :
     (resolveOffset rawOffset history litLen).2.size = 3 := by
   unfold resolveOffset
+  simp only [show ¬(history.size < 3) from by omega, dite_false]
   -- Every branch returns either a literal #[_, _, _] (size = 3 by rfl)
   -- or the unchanged history (size = 3 by h).
   split <;> (try rfl)
@@ -1127,8 +1129,9 @@ theorem resolveOffset_positive_large (rawOffset : Nat) (history : Array Nat) (li
     (hraw : rawOffset > 3) :
     (resolveOffset rawOffset history litLen).1 > 0 := by
   unfold resolveOffset
-  simp only [show rawOffset > 3 from hraw, ↓reduceIte]
-  omega
+  split -- history.size < 3
+  · omega
+  · dsimp only; omega
 
 /-- When `resolveOffset` is called with a valid offset history, `rawOffset > 0`,
     and `literalLength > 0`, the resolved offset is positive. This covers the
@@ -1139,24 +1142,25 @@ theorem resolveOffset_positive_large (rawOffset : Nat) (history : Array Nat) (li
 theorem resolveOffset_positive_litLen_pos (rawOffset : Nat) (history : Array Nat) (litLen : Nat)
     (hraw : rawOffset > 0) (hvalid : ValidOffsetHistory history) (hlit : litLen > 0) :
     (resolveOffset rawOffset history litLen).1 > 0 := by
-  obtain ⟨_, h0pos, h1pos, h2pos⟩ := hvalid
+  obtain ⟨hsz, h0pos, h1pos, h2pos⟩ := hvalid
   -- Case split on rawOffset: 0 (impossible), 1, 2, 3, or ≥ 4
   rcases rawOffset with _ | _ | _ | _ | n
   · omega  -- rawOffset = 0, contradicts hraw
   · -- rawOffset = 1, litLen > 0: returns history[0]!
-    simp only [resolveOffset, show ¬(1 > 3) from by omega, show litLen > 0 from hlit,
-      ↓reduceIte]
+    simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(1 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte, ← getElem!_pos]
     exact h0pos
   · -- rawOffset = 2, litLen > 0: returns history[1]!
-    simp only [resolveOffset, show ¬(2 > 3) from by omega, show litLen > 0 from hlit,
-      ↓reduceIte]
+    simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(2 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte, ← getElem!_pos]
     exact h1pos
   · -- rawOffset = 3, litLen > 0: returns history[2]!
-    simp only [resolveOffset, show ¬(3 > 3) from by omega, show litLen > 0 from hlit,
-      ↓reduceIte]
+    simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(3 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte, ← getElem!_pos]
     exact h2pos
   · -- rawOffset = n + 4 > 3: offset = n + 1 > 0
-    simp only [resolveOffset, show n + 4 > 3 from by omega, ↓reduceIte]
+    simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+      show n + 4 > 3 from by omega, ↓reduceIte]
     omega
 
 /-- When `rawOffset = 1`, `history.size = 3`, and `literalLength > 0`, the resolved
@@ -1165,21 +1169,24 @@ theorem resolveOffset_positive_litLen_pos (rawOffset : Nat) (history : Array Nat
 theorem resolveOffset_repeat1_val (history : Array Nat) (litLen : Nat)
     (_hsize : history.size = 3) (hlit : litLen > 0) :
     (resolveOffset 1 history litLen).1 = history[0]! := by
-  simp only [resolveOffset, show ¬(1 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    show ¬(1 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte, ← getElem!_pos]
 
 /-- When `rawOffset = 2`, `history.size = 3`, and `literalLength > 0`, the resolved
     offset equals `history[1]!` (the second most recent offset). -/
 theorem resolveOffset_repeat2_val (history : Array Nat) (litLen : Nat)
     (_hsize : history.size = 3) (hlit : litLen > 0) :
     (resolveOffset 2 history litLen).1 = history[1]! := by
-  simp only [resolveOffset, show ¬(2 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    show ¬(2 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte, ← getElem!_pos]
 
 /-- When `rawOffset = 3`, `history.size = 3`, and `literalLength > 0`, the resolved
     offset equals `history[2]!` (the third most recent offset). -/
 theorem resolveOffset_repeat3_val (history : Array Nat) (litLen : Nat)
     (_hsize : history.size = 3) (hlit : litLen > 0) :
     (resolveOffset 3 history litLen).1 = history[2]! := by
-  simp only [resolveOffset, show ¬(3 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte]
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    show ¬(3 > 3) from by omega, show litLen > 0 from hlit, ↓reduceIte, ← getElem!_pos]
 
 /-- When `rawOffset = 1`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[1]!` (second most recent) and the history
@@ -1188,8 +1195,9 @@ theorem resolveOffset_shifted1_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 1 history 0).1 = history[1]!
     ∧ (resolveOffset 1 history 0).2 = #[history[1]!, history[0]!, history[2]!] := by
-  simp only [resolveOffset, show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega,
-    ↓reduceIte, and_self]
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega,
+    ↓reduceIte, ← getElem!_pos, and_self]
 
 /-- When `rawOffset = 2`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[2]!` (third most recent) and the history
@@ -1198,8 +1206,9 @@ theorem resolveOffset_shifted2_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 2 history 0).1 = history[2]!
     ∧ (resolveOffset 2 history 0).2 = #[history[2]!, history[0]!, history[1]!] := by
-  simp only [resolveOffset, show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega,
-    ↓reduceIte, and_self]
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega,
+    ↓reduceIte, ← getElem!_pos, and_self]
 
 /-- When `rawOffset = 3`, `history.size = 3`, and `literalLength = 0` (shifted mode),
     the resolved offset equals `history[0]! - 1` (most recent minus one) and the history
@@ -1209,8 +1218,9 @@ theorem resolveOffset_shifted3_val (history : Array Nat)
     (_hsize : history.size = 3) :
     (resolveOffset 3 history 0).1 = history[0]! - 1
     ∧ (resolveOffset 3 history 0).2 = #[history[0]! - 1, history[1]!, history[2]!] := by
-  simp only [resolveOffset, show ¬(3 > 3) from by omega, show ¬(0 > 0) from by omega,
-    ↓reduceIte, and_self]
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    show ¬(3 > 3) from by omega, show ¬(0 > 0) from by omega,
+    ↓reduceIte, ← getElem!_pos, and_self]
 
 /-- Any 3-element array of positive naturals is a `ValidOffsetHistory`. -/
 private theorem validOffsetHistory_mk3 (a b c : Nat) (ha : a > 0) (hb : b > 0) (hc : c > 0) :
@@ -1227,8 +1237,9 @@ theorem resolveOffset_history_valid_large (rawOffset litLen : Nat)
     (history : Array Nat) (hh : ValidOffsetHistory history)
     (hr : rawOffset > 3) :
     ValidOffsetHistory (resolveOffset rawOffset history litLen).2 := by
-  obtain ⟨_, h0pos, h1pos, _⟩ := hh
-  simp only [resolveOffset, hr, ↓reduceIte]
+  obtain ⟨hsz, h0pos, h1pos, _⟩ := hh
+  simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+    hr, ↓reduceIte, ← getElem!_pos]
   exact validOffsetHistory_mk3 _ _ _ (by omega) h0pos h1pos
 
 /-- For repeat codes (rawOffset ∈ {1,2,3}), when input has `ValidOffsetHistory`
@@ -1245,19 +1256,22 @@ theorem resolveOffset_history_valid_repeat (rawOffset litLen : Nat)
   · omega  -- rawOffset = 0
   · -- rawOffset = 1
     unfold resolveOffset
-    simp only [show ¬(1 > 3) from by omega, ↓reduceIte]
+    simp only [show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(1 > 3) from by omega, ↓reduceIte, ← getElem!_pos]
     split
     · exact ⟨hsz, h0pos, h1pos, h2pos⟩  -- litLen > 0: history unchanged
     · exact validOffsetHistory_mk3 _ _ _ h1pos h0pos h2pos
   · -- rawOffset = 2
     unfold resolveOffset
-    simp only [show ¬(2 > 3) from by omega, ↓reduceIte]
+    simp only [show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(2 > 3) from by omega, ↓reduceIte, ← getElem!_pos]
     split
     · exact validOffsetHistory_mk3 _ _ _ h1pos h0pos h2pos
     · exact validOffsetHistory_mk3 _ _ _ h2pos h0pos h1pos
   · -- rawOffset = 3
     unfold resolveOffset
-    simp only [show ¬(3 > 3) from by omega, ↓reduceIte]
+    simp only [show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(3 > 3) from by omega, ↓reduceIte, ← getElem!_pos]
     split
     · exact validOffsetHistory_mk3 _ _ _ h2pos h0pos h1pos
     · have h02 := hshift ⟨by omega, rfl⟩
@@ -1279,8 +1293,10 @@ theorem resolveOffset_history_valid_of_fst_ne_zero
     by_cases hr0 : rawOffset = 0
     · -- rawOffset = 0: resolveOffset returns (1, history), history unchanged
       subst hr0
-      simp only [resolveOffset, show ¬(0 > 3) from by omega, ↓reduceIte]
-      split <;> (simp only [Nat.not_lt] at * <;> exact hh)
+      have hsz := hh.1
+      simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+        show ¬(0 > 3) from by omega, ↓reduceIte]
+      split <;> exact hh
     · -- rawOffset ∈ {1, 2, 3}
       apply resolveOffset_history_valid_repeat rawOffset litLen history hh (by omega) (by omega)
       intro ⟨hlit0, hraw3⟩
@@ -1353,16 +1369,18 @@ theorem resolveOffset_positive_shifted12 (rawOffset : Nat) (history : Array Nat)
     (hraw : rawOffset > 0) (hraw' : rawOffset ≤ 2)
     (hvalid : ValidOffsetHistory history) :
     (resolveOffset rawOffset history 0).1 > 0 := by
-  obtain ⟨_, _, h1pos, h2pos⟩ := hvalid
+  obtain ⟨hsz, _, h1pos, h2pos⟩ := hvalid
   rcases rawOffset with _ | _ | _ | n
   · omega  -- rawOffset = 0
   · -- rawOffset = 1: shifted → history[1]!
-    simp only [resolveOffset, show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega,
-      ↓reduceIte]
+    simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(1 > 3) from by omega, show ¬(0 > 0) from by omega,
+      ↓reduceIte, ← getElem!_pos]
     exact h1pos
   · -- rawOffset = 2: shifted → history[2]!
-    simp only [resolveOffset, show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega,
-      ↓reduceIte]
+    simp only [resolveOffset, show ¬(history.size < 3) from by omega, dite_false,
+      show ¬(2 > 3) from by omega, show ¬(0 > 0) from by omega,
+      ↓reduceIte, ← getElem!_pos]
     exact h2pos
   · omega  -- rawOffset ≥ 3
 
