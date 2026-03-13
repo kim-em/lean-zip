@@ -8,14 +8,14 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~608 completed (Feb 19 – Mar 13)
-- **Source files**: 103 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 28 test)
-- **Merged PRs**: 584
-- **Spec lines**: 36,353 across 49 spec files
+- **Sessions**: ~622 completed (Feb 19 – Mar 13)
+- **Source files**: 106 (51 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 29 test)
+- **Merged PRs**: 600
+- **Spec lines**: ~37,000 across 51 spec files
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
-- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 2 bare in Zstd.lean only
-- **simp_all with args**: 0 in DEFLATE spec files; 0 in ZstdHuffman.lean (previously 6, now eliminated)
-- **Zstd spec**: 422 declarations across 6 files (15,811 lines)
+- **Bare simp_all**: 0 across all spec files (campaign complete)
+- **Zstd spec**: 549 declarations across 8 files (16,470 lines)
+- **Proven-bounds**: 149 `]!` remaining across native files (campaign in progress)
 
 ## Milestones
 
@@ -1728,10 +1728,53 @@ proof quality review campaign, and consolidated benchmark infrastructure.
 
 Bare simp_all in Zstd.lean: 5 → 2. Zstd spec lines: 15,091 → 15,811.
 
+**14-PR batch (Mar 13): proven-bounds campaign + Zstd splitting + WellFormedBlocks completion:**
+
+This batch launched the proven-bounds campaign (converting `[i]!` runtime
+bounds checks to proven-bounds `[i]` access), split Spec/Zstd.lean into
+three files, and completed the WellFormedBlocks/WellFormedSimpleBlocks
+induction predicates at frame and API levels.
+
+*Proven-bounds campaign (5 PRs):*
+- #1414: Deflate.lean — encoding helpers + constant tables (22 patterns)
+- #1417: DEFLATE length/distance tables — 4 patterns in `decodeHuffman.go`
+  with `@[simp]` size lemmas for all 5 constant tables
+- #1426: ZstdHuffman.lean — 13 `data[pos + i]!` → `data[pos + i]'(by omega)`
+  in `parseCompressedLiteralsHeader`
+- #1427: Merge conflict fix for ZstdFrame.lean proven-bounds PR #1413
+- #1428: ZstdSequence.lean — data byte reads + history array access
+
+*Zstd spec splitting (1 PR):*
+- #1409: Extracted ZstdBase.lean (542 lines, L1: base predicates) and
+  ZstdBlockLoop.lean (493 lines, L2: block loop specs) from the 6011-line
+  Spec/Zstd.lean. Spec/Zstd.lean remains at 6011 lines — further splitting
+  planned.
+
+*Track E WellFormedBlocks completion (3 PRs):*
+- #1393: API-level `WellFormedBlocks` succeeds (full predicate)
+- #1398, #1401: Frame/API-level `WellFormedSimpleBlocks` succeeds,
+  including 3-block corollary (raw → RLE → raw)
+
+*Quality reviews (3 PRs):*
+- #1394: ZstdSequence.lean proof quality audit
+- #1397: Zstd.lean file organization — splitting plan
+- #1402: Zstd.lean proof quality audit (frame characterization + compressed
+  two-block) — eliminated 2 bare `simp_all`
+
+*Self-improvement (1 PR):*
+- #1420: Meditate — created `proven-bounds` skill, assessed Zstd splitting
+  readiness
+
+**Proven-bounds campaign status:** 149 `]!` remaining across 10 native files.
+Largest concentrations: Deflate.lean (53), ZstdSequence.lean (29), Fse.lean (18),
+ZstdHuffman.lean (14), Gzip.lean (12), DeflateDynamic.lean (11). Files fully
+converted: Crc32.lean, Adler32.lean, BitWriter.lean.
+
 **Remaining:**
-- Zstd.lean at 6754 lines needs splitting (plan: #1391)
+- Zstd.lean at 6011 lines needs further splitting (plan: #1432)
 - Prove remaining sorry stubs: 4 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
+- Proven-bounds campaign: 149 `]!` across 10 native files
 - Composed completeness: lift czs+czs and czs+cs to API level (19→21),
   compose multi-block completeness to end-to-end `decompressZstd`
 - Content preservation campaign: extend to N-block frames and compressed
