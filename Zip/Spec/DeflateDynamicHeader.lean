@@ -99,9 +99,10 @@ private theorem writeCLLengths_go_wf (bw : BitWriter) (clLens : List Nat)
 
 private theorem writeCLEntries_wf (bw : BitWriter) (clCodes : Array (UInt16 × UInt8))
     (entries : List (Nat × Nat)) (hwf : bw.wf)
+    (hcl : clCodes.size ≥ 19)
     (hlen : ∀ j, j < clCodes.size → clCodes[j]!.2.toNat ≤ 15)
     (hvalid : ∀ p ∈ entries, p.1 < clCodes.size) :
-    (writeDynamicHeader.writeCLEntries bw clCodes entries).wf := by
+    (writeDynamicHeader.writeCLEntries bw clCodes entries hcl).wf := by
   induction entries generalizing bw with
   | nil => simp only [writeDynamicHeader.writeCLEntries]; exact hwf
   | cons entry rest ih =>
@@ -109,9 +110,10 @@ private theorem writeCLEntries_wf (bw : BitWriter) (clCodes : Array (UInt16 × U
     have hcode_lt : code < clCodes.size := hvalid ⟨code, extra⟩ (.head _)
     have hvalid_rest : ∀ p ∈ rest, p.1 < clCodes.size :=
       fun p hp => hvalid p (.tail _ hp)
-    simp only [writeDynamicHeader.writeCLEntries, array_get!Internal_eq]
-    have hlen15 : clCodes[code]!.2.toNat ≤ 15 := hlen code hcode_lt
-    have hwf1 := BitWriter.writeHuffCode_wf bw clCodes[code]!.1 clCodes[code]!.2 hwf hlen15
+    simp only [writeDynamicHeader.writeCLEntries, dif_pos hcode_lt]
+    have hgetEq : clCodes[code]! = clCodes[code] := getElem!_pos clCodes code hcode_lt
+    have hlen15 : clCodes[code].2.toNat ≤ 15 := by rw [← hgetEq]; exact hlen code hcode_lt
+    have hwf1 := BitWriter.writeHuffCode_wf bw clCodes[code].1 clCodes[code].2 hwf hlen15
     by_cases h16 : code == 16
     · simp only [h16, ↓reduceIte]
       exact ih _ (BitWriter.writeBits_wf _ 2 _ hwf1 (by omega)) hvalid_rest
@@ -132,11 +134,13 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
     (hc : clCodes = canonicalCodes clLengths 7)
     (hv : Huffman.Spec.ValidLengths (clLengths.toList.map UInt8.toNat) 7)
     (hext : ∀ p ∈ entries, p.2 < 2 ^ 32)
+    (hcl : clCodes.size ≥ 19)
+    (hvalid : ∀ p ∈ entries, p.1 < clCodes.size)
     (henc : Deflate.Spec.encodeCLEntries
         ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
           fun p => (p.2, p.1))
         entries = some bits) :
-    (writeDynamicHeader.writeCLEntries bw clCodes entries).toBits =
+    (writeDynamicHeader.writeCLEntries bw clCodes entries hcl).toBits =
     bw.toBits ++ bits := by
   induction entries generalizing bw bits with
   | nil =>
@@ -144,6 +148,9 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
     simp only [writeDynamicHeader.writeCLEntries, henc, List.append_nil]
   | cons entry rest ih =>
     obtain ⟨code, extra⟩ := entry
+    have hcode_lt : code < clCodes.size := hvalid ⟨code, extra⟩ (.head _)
+    have hvalid_rest : ∀ p ∈ rest, p.1 < clCodes.size :=
+      fun p hp => hvalid p (.tail _ hp)
     simp only [Deflate.Spec.encodeCLEntries] at henc
     cases hencsym : Deflate.Spec.encodeSymbol
         ((Huffman.Spec.allCodes (clLengths.toList.map UInt8.toNat) 7).map
@@ -168,23 +175,30 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
         -- Bridge encodeSymbol ↔ canonicalCodes
         have ⟨hcw, hlen⟩ := encodeSymbol_canonicalCodes_eq clLengths 7
           clCodes hc hv (by omega) code cwBits hencsym
+        rw [getElem!_pos clCodes code hcode_lt] at hcw hlen
         -- Unfold native
-        simp only [writeDynamicHeader.writeCLEntries, array_get!Internal_eq]
+        unfold writeDynamicHeader.writeCLEntries
+        rw [dif_pos hcode_lt]
         -- writeHuffCode correspondence
-        have hlen15 : clCodes[code]!.2.toNat ≤ 15 := by omega
+        have hlen15 : clCodes[code].2.toNat ≤ 15 := by omega
         have hwf1 := BitWriter.writeHuffCode_wf bw
-          clCodes[code]!.1 clCodes[code]!.2 hwf hlen15
+          clCodes[code].1 clCodes[code].2 hwf hlen15
         have hbits1 := BitWriter.writeHuffCode_toBits bw
-          clCodes[code]!.1 clCodes[code]!.2 hwf hlen15
+          clCodes[code].1 clCodes[code].2 hwf hlen15
         have hext_rest : ∀ p ∈ rest, p.2 < 2 ^ 32 :=
           fun p hp => hext p (List.mem_cons_of_mem _ hp)
         have hextra_bound : extra < 2 ^ 32 := hext (code, extra) List.mem_cons_self
         -- Extra bits
+        -- After dif_pos + simp, `getInternal` appears; it's defEq to `getElem`
+        -- so `change`/`show` normalizes the mismatch for `rw`
         by_cases h16 : code == 16
         · simp only [h16, ↓reduceIte]
           have hwf2 := BitWriter.writeBits_wf _ 2 extra.toUInt32 hwf1 (by omega)
           have hbits2 := BitWriter.writeBits_toBits _ 2 extra.toUInt32 hwf1 (by omega)
-          rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
+          change (writeDynamicHeader.writeCLEntries
+            ((bw.writeHuffCode clCodes[code].1 clCodes[code].2).writeBits 2 extra.toUInt32)
+            clCodes rest hcl).toBits = _
+          rw [ih _ _ hwf2 hext_rest hvalid_rest hencrest, hbits2, hbits1, hcw]
           simp only [Deflate.Spec.encodeCLExtra, h16, ↓reduceIte,
             Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
             Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
@@ -192,7 +206,10 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
           · simp only [h16, h17, ↓reduceIte, Bool.false_eq_true]
             have hwf2 := BitWriter.writeBits_wf _ 3 extra.toUInt32 hwf1 (by omega)
             have hbits2 := BitWriter.writeBits_toBits _ 3 extra.toUInt32 hwf1 (by omega)
-            rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
+            change (writeDynamicHeader.writeCLEntries
+              ((bw.writeHuffCode clCodes[code].1 clCodes[code].2).writeBits 3 extra.toUInt32)
+              clCodes rest hcl).toBits = _
+            rw [ih _ _ hwf2 hext_rest hvalid_rest hencrest, hbits2, hbits1, hcw]
             simp only [Deflate.Spec.encodeCLExtra, h16, h17, ↓reduceIte, Bool.false_eq_true,
               Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
               Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
@@ -200,12 +217,18 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
             · simp only [h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
               have hwf2 := BitWriter.writeBits_wf _ 7 extra.toUInt32 hwf1 (by omega)
               have hbits2 := BitWriter.writeBits_toBits _ 7 extra.toUInt32 hwf1 (by omega)
-              rw [ih _ _ hwf2 hext_rest hencrest, hbits2, hbits1, hcw]
+              change (writeDynamicHeader.writeCLEntries
+                ((bw.writeHuffCode clCodes[code].1 clCodes[code].2).writeBits 7 extra.toUInt32)
+                clCodes rest hcl).toBits = _
+              rw [ih _ _ hwf2 hext_rest hvalid_rest hencrest, hbits2, hbits1, hcw]
               simp only [Deflate.Spec.encodeCLExtra, h16, h17, h18, ↓reduceIte, Bool.false_eq_true,
                 Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
                 Nat.mod_eq_of_lt hextra_bound, List.append_assoc]
             · simp only [h16, h17, h18, ↓reduceIte, Bool.false_eq_true]
-              rw [ih _ _ hwf1 hext_rest hencrest, hbits1, hcw]
+              change (writeDynamicHeader.writeCLEntries
+                (bw.writeHuffCode clCodes[code].1 clCodes[code].2)
+                clCodes rest hcl).toBits = _
+              rw [ih _ _ hwf1 hext_rest hvalid_rest hencrest, hbits1, hcw]
               simp only [Deflate.Spec.encodeCLExtra, h16, h17, h18, ↓reduceIte, Bool.false_eq_true,
                 List.nil_append, List.append_assoc]
 
@@ -257,6 +280,13 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
   have hnum_le : numCodeLen ≤ 19 := Deflate.Spec.computeHCLEN_le_nineteen clLens
   have hclLens_bounded : ∀ l ∈ clLens, l ≤ 7 :=
     Huffman.Spec.computeCodeLengths_bounded clFreqPairs 19 7 (by omega)
+  -- Size proof for CL codes
+  have hclSize : nativeClCodes.size ≥ 19 := by
+    have h1 : nativeClCodes.size = clLengthsArr.size := canonicalCodes_size clLengthsArr 7
+    have h2 : clLengthsArr.size = clLens.length := by
+      simp [clLengthsArr, List.size_toArray]
+    have h3 : clLens.length = 19 := Huffman.Spec.computeCodeLengths_length clFreqPairs 19 7
+    omega
   -- writeDynamicHeader unfolds to the chain of BitWriter operations
   -- All intermediate let bindings match the proof context, so this is definitional
   show (writeDynamicHeader.writeCLEntries
@@ -265,7 +295,7 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
         |>.writeBits 5 (distLens.length - 1).toUInt32
         |>.writeBits 4 (numCodeLen - 4).toUInt32)
       clLens numCodeLen 0)
-    nativeClCodes clEntries).toBits =
+    nativeClCodes clEntries hclSize).toBits =
     bw.toBits ++ (Deflate.Spec.writeBitsLSB 5 (litLens.length - 257) ++
       Deflate.Spec.writeBitsLSB 5 (distLens.length - 1) ++
       Deflate.Spec.writeBitsLSB 4 (numCodeLen - 4) ++
@@ -313,8 +343,15 @@ theorem writeDynamicHeader_spec (bw : BitWriter) (litLens distLens : List Nat)
       | inl h => exact hlit_bound x h
       | inr h => exact hdist_bound x h) p hp
     rcases hvalid with ⟨_, h⟩ | ⟨_, h⟩ | ⟨_, h⟩ | ⟨_, h⟩ <;> omega
+  -- Entry code bounds for writeCLEntries
+  have hentry_valid : ∀ p ∈ clEntries, p.1 < nativeClCodes.size := by
+    intro p hp
+    have hv := Deflate.Spec.rlEncodeLengths_valid allLens (by
+      intro x hx; simp only [allLens, List.mem_append] at hx
+      cases hx with | inl h => exact hlit_bound x h | inr h => exact hdist_bound x h) p hp
+    rcases hv with ⟨h, _⟩ | ⟨h, _⟩ | ⟨h, _⟩ | ⟨h, _⟩ <;> omega
   have h5 := writeCLEntries_spec bw4 clLengthsArr nativeClCodes clEntries symbolBits
-    hwf4 rfl hv_cl hext hcle_eq'
+    hwf4 rfl hv_cl hext hclSize hentry_valid hcle_eq'
   -- Combine all the chains
   rw [h5, h4, h3, h2, h1]
   -- Normalize UInt32 conversions
@@ -375,6 +412,7 @@ theorem writeDynamicHeader_wf (bw : BitWriter) (litLens distLens : List Nat)
       cases hx with | inl h => exact hlit_bound x h | inr h => exact hdist_bound x h) p hp
     rw [hcl_codes_size, hcl_arr_size, hcl_len]
     rcases hv with ⟨h, _⟩ | ⟨h, _⟩ | ⟨h, _⟩ | ⟨h, _⟩ <;> omega
-  exact writeCLEntries_wf bw4 clCodes clEntries hwf4 hcl_snd hentry_valid
+  have hclSize : clCodes.size ≥ 19 := by omega
+  exact writeCLEntries_wf bw4 clCodes clEntries hwf4 hclSize hcl_snd hentry_valid
 
 end Zip.Native.Deflate

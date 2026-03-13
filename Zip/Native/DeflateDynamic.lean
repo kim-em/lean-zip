@@ -1,6 +1,8 @@
 import Zip.Native.Deflate
 import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.DeflateStoredCorrect
+import Zip.Spec.EmitTokensCorrect
+import Zip.Spec.HuffmanEncode
 
 /-!
   Native DEFLATE compressor — dynamic Huffman blocks (Level 5).
@@ -88,6 +90,12 @@ def writeDynamicHeader (bw : BitWriter) (litLens distLens : List Nat) : BitWrite
   -- Step 3: Build CL canonical codes
   let clLengthsArr : Array UInt8 := clLens.toArray.map Nat.toUInt8
   let clCodes := canonicalCodes clLengthsArr 7
+  have hclSize : clCodes.size ≥ 19 := by
+    have h1 : clCodes.size = clLengthsArr.size := canonicalCodes_size clLengthsArr 7
+    have h2 : clLengthsArr.size = clLens.length := by
+      simp [clLengthsArr, List.size_toArray]
+    have h3 : clLens.length = 19 := Huffman.Spec.computeCodeLengths_length clFreqPairs 19 7
+    omega
   -- Step 4: Determine HCLEN
   let numCodeLen := Deflate.Spec.computeHCLEN clLens
   let hclen := numCodeLen - 4
@@ -98,7 +106,7 @@ def writeDynamicHeader (bw : BitWriter) (litLens distLens : List Nat) : BitWrite
   -- Step 6: Write CL code lengths in clPermutation order (3 bits each)
   let bw := writeCLLengths bw clLens numCodeLen 0
   -- Step 7: Write RLE entries using CL Huffman codes
-  writeCLEntries bw clCodes clEntries
+  writeCLEntries bw clCodes clEntries hclSize
 where
   writeCLLengths (bw : BitWriter) (clLens : List Nat) (numCodeLen i : Nat) : BitWriter :=
     if i < numCodeLen then
@@ -108,18 +116,21 @@ where
     else bw
   termination_by numCodeLen - i
   writeCLEntries (bw : BitWriter) (clCodes : Array (UInt16 × UInt8))
-      (entries : List (Nat × Nat)) : BitWriter :=
+      (entries : List (Nat × Nat)) (hcl : clCodes.size ≥ 19) : BitWriter :=
     match entries with
     | [] => bw
     | (code, extra) :: rest =>
-      let (cw, cwLen) := clCodes[code]!
-      let bw := bw.writeHuffCode cw cwLen
-      let bw :=
-        if code == 16 then bw.writeBits 2 extra.toUInt32
-        else if code == 17 then bw.writeBits 3 extra.toUInt32
-        else if code == 18 then bw.writeBits 7 extra.toUInt32
-        else bw
-      writeCLEntries bw clCodes rest
+      if h : code < clCodes.size then
+        let (cw, cwLen) := clCodes[code]
+        let bw := bw.writeHuffCode cw cwLen
+        let bw :=
+          if code == 16 then bw.writeBits 2 extra.toUInt32
+          else if code == 17 then bw.writeBits 3 extra.toUInt32
+          else if code == 18 then bw.writeBits 7 extra.toUInt32
+          else bw
+        writeCLEntries bw clCodes rest hcl
+      else
+        writeCLEntries bw clCodes rest hcl
 
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. -/
