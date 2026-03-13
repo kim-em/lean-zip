@@ -173,14 +173,16 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
   -- First pass: place "less than 1" probability symbols at end of table
   let mut highPos := tableSize - 1
   for sym in [:probs.size] do
-    if probs[sym]! == -1 then
+    if h_sym : sym < probs.size then
+    if probs[sym] == -1 then
       cells := cells.set! highPos { symbol := sym.toUInt16 }
       occupied := occupied.set! highPos true
       highPos := highPos - 1
   -- Second pass: distribute remaining symbols using stepping algorithm
   let mut position := 0
   for sym in [:probs.size] do
-    let prob := probs[sym]!
+    if h_sym : sym < probs.size then
+    let prob := probs[sym]
     if prob <= 0 then continue
     for _ in [:int32ToNat prob] do
       -- Skip occupied positions (from -1 symbols)
@@ -191,26 +193,30 @@ def buildFseTable (probs : Array Int32) (accuracyLog : Nat) :
   -- For each symbol, count how many cells it has
   let mut symbolCounts := Array.replicate probs.size (0 : Nat)
   for i in [:tableSize] do
-    let sym := cells[i]!.symbol.toNat
-    if sym < symbolCounts.size then
-      symbolCounts := symbolCounts.set! sym (symbolCounts[sym]! + 1)
+    if h_i : i < cells.size then
+      let sym := cells[i].symbol.toNat
+      if h_sym : sym < symbolCounts.size then
+        symbolCounts := symbolCounts.set! sym (symbolCounts[sym] + 1)
   -- For each symbol, compute the number of bits and assign states.
   -- Uses the reference formula: nextState = count + stateIdx,
   -- nbBits = accuracyLog - log2(nextState),
   -- newState = (nextState << nbBits) - tableSize.
   let mut symbolStateIndex := Array.replicate probs.size (0 : Nat)
   for i in [:tableSize] do
-    let sym := cells[i]!.symbol.toNat
-    if sym >= probs.size then continue
-    let count := symbolCounts[sym]!
-    if count == 0 then continue
-    let stateIdx := symbolStateIndex[sym]!
-    let nextState := count + stateIdx
-    let numBits := accuracyLog - Nat.log2 nextState
-    let baseline := (nextState <<< numBits) - tableSize
-    cells := cells.set! i
-      { symbol := cells[i]!.symbol, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
-    symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
+    if h_i : i < cells.size then
+      let cellSym := cells[i].symbol
+      let sym := cellSym.toNat
+      if h_sc : sym < symbolCounts.size then
+        if h_si : sym < symbolStateIndex.size then
+          let count := symbolCounts[sym]
+          let stateIdx := symbolStateIndex[sym]
+          if count != 0 then
+            let nextState := count + stateIdx
+            let numBits := accuracyLog - Nat.log2 nextState
+            let baseline := (nextState <<< numBits) - tableSize
+            cells := cells.set! i
+              { symbol := cellSym, numBits := numBits.toUInt8, newState := baseline.toUInt16 }
+            symbolStateIndex := symbolStateIndex.set! sym (stateIdx + 1)
   return { accuracyLog, cells }
 
 /-- Backward bitstream reader for Zstd (RFC 8878 §4.1).

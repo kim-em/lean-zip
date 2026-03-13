@@ -628,12 +628,14 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
-        simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds, Array.size_setIfInBounds, hb]
+      · split at heq
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+          simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds, Array.size_setIfInBounds, hb]
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 2 (distribute symbols with stepping): cells.set! preserves size
   have hsize2 : v2.fst.size = 1 <<< al := by
     apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop2
@@ -641,36 +643,51 @@ theorem buildFseTable_cells_size (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-      · -- Inner forIn with while loop
+      · -- if h_sym : sym < probs.size
         split at heq
-        · exact nomatch heq
-        · rename_i r hinner
-          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-          apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hinner
-          · exact hb
-          · intro a2 b2 b2' hb2 heq2
-            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]
-            simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
-              Array.size_setIfInBounds, hb2]
-          · intro a2 b2 b2' hb2 heq2
-            exact nomatch heq2
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · -- Inner forIn with while loop
+          split at heq
+          · exact nomatch heq
+          · rename_i r hinner
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+            apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hinner
+            · exact hb
+            · intro a2 b2 b2' hb2 heq2
+              rw [← ForInStep.yield.inj (Except.ok.inj heq2)]
+              simp only [Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
+                Array.size_setIfInBounds, hb2]
+            · intro a2 b2 b2' hb2 heq2
+              exact nomatch heq2
+      · -- h_sym doesn't hold
+        rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> (try split at heq) <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> (try split at heq) <;> exact nomatch heq
   -- Loop 4 (compute numBits/newState): cells.set! preserves size
   apply forIn_range_preserves (fun s => s.fst.size = 1 <<< al) _ _ _ _ _ _ _ hloop4
   · exact hsize2
   · intro a b b' hb heq
     simp only [bind, Except.bind, pure, Except.pure] at heq
     split at heq
-    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-    · split at heq
+    · -- if h_i : i < cells.size
+      split at heq
+      · -- if h_sc : sym < symbolCounts.size
+        split at heq
+        · -- if h_si : sym < symbolStateIndex.size
+          split at heq
+          · -- if count != 0
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+            simp only [Nat.toUInt8_eq, Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
+              Array.size_setIfInBounds, hb]
+          · -- count == 0
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
-        simp only [Nat.toUInt8_eq, Nat.toUInt16_eq, Array.set!_eq_setIfInBounds,
-          Array.size_setIfInBounds, hb]
+    · -- h_i doesn't hold
+      rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
   · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-    split at heq <;> (try split at heq) <;> exact nomatch heq
+    split at heq <;> (try split at heq) <;> (try split at heq) <;>
+    (try split at heq) <;> exact nomatch heq
 
 /-- `Array.set!` preserves a Fin-indexed property when the new value satisfies it.
     After `set!`, each cell is either the new value (at the written index) or
@@ -719,12 +736,14 @@ theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-        exact set!_preserves_forall hb (show P _ from Nat.zero_le _)
+      · split at heq
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          exact set!_preserves_forall hb (show P _ from Nat.zero_le _)
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 2: preserves property (sets cells with { symbol := ... }, default numBits = 0)
   have h2 : ∀ j : Fin v2.fst.size, P v2.fst[j] := by
     apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
@@ -732,19 +751,21 @@ theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · split at heq
-        · exact nomatch heq
-        · rename_i r hinner
-          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-          apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
-            _ _ _ _ hb _ _ hinner
-          · intro a2 b2 b2' hb2 heq2
-            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
-            exact set!_preserves_forall hb2 (show P _ from Nat.zero_le _)
-          · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · split at heq
+          · exact nomatch heq
+          · rename_i r hinner
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+            apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+              _ _ _ _ hb _ _ hinner
+            · intro a2 b2 b2' hb2 heq2
+              rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
+              exact set!_preserves_forall hb2 (show P _ from Nat.zero_le _)
+            · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> (try split at heq) <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> (try split at heq) <;> exact nomatch heq
   -- Loop 3 modifies only symbolCounts (v3 : Array Nat), not cells.
   -- Loop 4 starts with v2.fst as its initial cells.
   -- Loop 4: sets numBits := (al - Nat.log2 nextState).toUInt8
@@ -758,13 +779,23 @@ theorem buildFseTable_numBits_le (probs : Array Int32) (al : Nat)
   · intro a b b' hb heq
     simp only [bind, Except.bind, pure, Except.pure] at heq
     split at heq
-    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-    · split at heq
+    · -- if h_i : i < cells.size
+      split at heq
+      · -- if h_sc
+        split at heq
+        · -- if h_si
+          split at heq
+          · -- count != 0: set! with numBits bound
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+            exact set!_preserves_forall hb (numBits_bound _)
+          · -- count == 0
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-        exact set!_preserves_forall hb (numBits_bound _)
+    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
   · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-    split at heq <;> (try split at heq) <;> exact nomatch heq
+    split at heq <;> (try split at heq) <;> (try split at heq) <;>
+    (try split at heq) <;> exact nomatch heq
 
 /-! ## BackwardBitReader base-case specs -/
 
@@ -1125,36 +1156,37 @@ theorem buildFseTable_ok (probs : Array Int32) (al : Nat) :
   -- The goal is a chain of binds over 4 forIn loops, ending with pure.
   -- Each loop body only returns .ok (.yield _), so each loop succeeds.
   apply Except.bind_always_ok
-  · -- Loop 1: place -1 symbols (both branches return .ok (.yield _))
+  · -- Loop 1: all branches return .ok (.yield _)
     exact forIn_range_always_ok _ _ _ (fun i b => by
       simp only [bind, Except.bind, pure, Except.pure]
-      split <;> exact ⟨_, rfl⟩)
+      split <;> (try split) <;> exact ⟨_, rfl⟩)
   · intro v1
     apply Except.bind_always_ok
     · -- Loop 2: distribute symbols (body contains nested forIn)
       exact forIn_range_always_ok _ _ _ (fun i b => by
         simp only [bind, Except.bind, pure, Except.pure]
         split
-        · exact ⟨_, rfl⟩
-        · -- Nested forIn inside a bind chain
-          apply Except.bind_always_ok
-          · exact forIn_range_always_ok _ _ _
-              (fun j c => ⟨_, rfl⟩)
-          · intro r; exact ⟨_, rfl⟩)
+        · -- if h_sym
+          split
+          · exact ⟨_, rfl⟩
+          · -- Nested forIn inside a bind chain
+            apply Except.bind_always_ok
+            · exact forIn_range_always_ok _ _ _
+                (fun j c => ⟨_, rfl⟩)
+            · intro r; exact ⟨_, rfl⟩
+        · exact ⟨_, rfl⟩)
     · intro v2
       apply Except.bind_always_ok
-      · -- Loop 3: count symbols (both branches return .ok (.yield _))
+      · -- Loop 3: count symbols
         exact forIn_range_always_ok _ _ _ (fun i b => by
           simp only [bind, Except.bind, pure, Except.pure]
-          split <;> exact ⟨_, rfl⟩)
+          split <;> (try split) <;> exact ⟨_, rfl⟩)
       · intro v3
         apply Except.bind_always_ok
-        · -- Loop 4: compute numBits/newState (three branches, all return .ok (.yield _))
+        · -- Loop 4: compute numBits/newState
           exact forIn_range_always_ok _ _ _ (fun i b => by
             simp only [bind, Except.bind, pure, Except.pure]
-            split
-            · exact ⟨_, rfl⟩
-            · split <;> exact ⟨_, rfl⟩)
+            split <;> (try split) <;> (try split) <;> (try split) <;> exact ⟨_, rfl⟩)
         · intro v4
           exact ⟨_, rfl⟩
 
@@ -1516,6 +1548,10 @@ private theorem getD_set! (a : Array Nat) (i v s : Nat) :
     Array.getElem?_setIfInBounds]
   split <;> split <;> grind
 
+private theorem getD_eq_getElem (a : Array Nat) (i : Nat) (h : i < a.size) :
+    a.getD i 0 = a[i] := by
+  unfold Array.getD; exact dif_pos h
+
 /-! ## Indexed loop invariant -/
 
 /-- `List.forIn'.loop` in `Except` preserves an index-dependent predicate.
@@ -1630,12 +1666,14 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-        exact set!_preserves_forall hb hQ_default
+      · split at heq
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          exact set!_preserves_forall hb hQ_default
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 2: preserves Q (sets cells with { symbol := ... }, default newState = 0)
   have h2 : ∀ j : Fin v2.fst.size, Q v2.fst[j] := by
     apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
@@ -1643,19 +1681,21 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · split at heq
-        · exact nomatch heq
-        · rename_i r hinner
-          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-          apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
-            _ _ _ _ hb _ _ hinner
-          · intro a2 b2 b2' hb2 heq2
-            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
-            exact set!_preserves_forall hb2 hQ_default
-          · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · split at heq
+          · exact nomatch heq
+          · rename_i r hinner
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+            apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, Q s.fst[j])
+              _ _ _ _ hb _ _ hinner
+            · intro a2 b2 b2' hb2 heq2
+              rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
+              exact set!_preserves_forall hb2 hQ_default
+            · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> (try split at heq) <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> (try split at heq) <;> exact nomatch heq
   -- Loop 3 (counting): prove each symbolCounts[sym] ≤ tableSize
   -- Use indexed invariant: after k iterations, each count ≤ k
   have h3_counts : ∀ s, v3.getD s 0 ≤ 1 <<< al := by
@@ -1669,21 +1709,27 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
       intro k _ b b' _ hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · -- sym < symbolCounts.size: set! sym (count + 1)
-        rw [← ForInStep.yield.inj (Except.ok.inj heq)]
-        intro s; rw [getD_set!]; split
-        · -- modified index: count + 1 ≤ k + 1
-          rename_i h; simp only [h.1]
-          exact Nat.succ_le_succ (hb s)
-        · -- other index: old value ≤ k ≤ k + 1
-          exact Nat.le_succ_of_le (hb s)
-      · -- sym ≥ symbolCounts.size: no change
+      · -- if h_i : i < cells.size
+        split at heq
+        · -- if h_sym : sym < symbolCounts.size — set! sym (count + 1)
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+          intro s; rw [getD_set!]; split
+          · -- modified index: count + 1 ≤ k + 1
+            rename_i h; obtain ⟨rfl, h_lt⟩ := h
+            rw [← getD_eq_getElem _ _ h_lt]
+            exact Nat.succ_le_succ (hb _)
+          · -- other index: old value ≤ k ≤ k + 1
+            exact Nat.le_succ_of_le (hb s)
+        · -- h_sym doesn't hold: no change
+          rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+          intro s; exact Nat.le_succ_of_le (hb s)
+      · -- h_i doesn't hold: no change
         rw [← ForInStep.yield.inj (Except.ok.inj heq)]
         intro s; exact Nat.le_succ_of_le (hb s)
     · -- Done: never happens (body always yields)
       intro k _ b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 4: compute numBits/newState for each cell
   -- Use indexed invariant: symIdx values ≤ iteration count
   -- Combined with h3_counts (count ≤ tableSize) and the algebraic bound
@@ -1700,36 +1746,43 @@ theorem buildFseTable_newState_lt (probs : Array Int32) (al : Nat)
       intro k kv b b' hk ⟨hcells, hsymIdx⟩ heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · -- sym ≥ probs.size: continue, state unchanged
-        rw [← ForInStep.yield.inj (Except.ok.inj heq)]
-        exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
-      · split at heq
-        · -- count == 0: continue, state unchanged
-          rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+      · -- if h_i : i < cells.size
+        split at heq
+        · -- if h_sc : sym < symbolCounts.size
+          split at heq
+          · -- if h_si : sym < symbolStateIndex.size
+            split at heq
+            · -- count != 0: Main case
+              rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+              refine ⟨?_, ?_⟩
+              · -- Cells property: set! preserves Q, new value satisfies Q
+                apply set!_preserves_forall hcells
+                show Q _; unfold Q; dsimp only []
+                apply baseline_toUInt16_lt
+                -- Convert getD to getElem using the in-bounds proofs from the if-guards
+                have hcount := h3_counts (b.fst[kv].symbol.toNat)
+                rw [getD_eq_getElem _ _ ‹b.fst[kv].symbol.toNat < v3.size›] at hcount
+                have hstateIdx := hsymIdx (b.fst[kv].symbol.toNat)
+                rw [getD_eq_getElem _ _ ‹b.fst[kv].symbol.toNat < b.snd.size›] at hstateIdx
+                omega
+              · -- symIdx property: set! sym (stateIdx + 1) preserves getD ≤ k + 1
+                intro s; rw [getD_set!]; split
+                · rename_i h; obtain ⟨rfl, h_lt⟩ := h
+                  rw [← getD_eq_getElem _ _ h_lt]
+                  exact Nat.succ_le_succ (hsymIdx _)
+                · exact Nat.le_succ_of_le (hsymIdx s)
+            · -- count == 0
+              rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+              exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
+          · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+            exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
           exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
-        · -- Main case: compute and set newState
-          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-          refine ⟨?_, ?_⟩
-          · -- Cells property: set! preserves Q, new value satisfies Q
-            apply set!_preserves_forall hcells
-            -- Q reduces to newState.toNat < 1 <<< al; apply the algebraic bound
-            show Q _; unfold Q; dsimp only []
-            apply baseline_toUInt16_lt
-            -- Need: nextState < 2 * (1 <<< al)
-            have hcount : v3[b.fst[kv]!.symbol.toNat]! ≤ 1 <<< al :=
-              h3_counts _
-            have hstateIdx : b.snd[b.fst[kv]!.symbol.toNat]! ≤ k :=
-              hsymIdx _
-            omega
-          · -- symIdx property: set! sym (stateIdx + 1) preserves getD ≤ k + 1
-            intro s; rw [getD_set!]; split
-            · -- modified index: stateIdx + 1 ≤ k + 1
-              rename_i h; simp only [h.1]
-              exact Nat.succ_le_succ (hsymIdx s)
-            · -- other index: old value ≤ k ≤ k + 1
-              exact Nat.le_succ_of_le (hsymIdx s)
+      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]
+        exact ⟨hcells, fun sym => Nat.le_succ_of_le (hsymIdx sym)⟩
     · intro _ _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> (try split at heq) <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> (try split at heq) <;>
+      (try split at heq) <;> exact nomatch heq
   exact h4.1 i
 
 /-- Helper: `Nat.toUInt16.toNat` preserves strict upper bounds.
@@ -1775,19 +1828,17 @@ theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-        rename_i hcond
-        apply set!_preserves_forall hb; show P _
-        apply toUInt16_toNat_lt_of_lt
-        by_cases h : a < probs.size
-        · exact h
-        · have hdef : probs[a]! = (default : Int32) := by
-            simp only [Array.getElem!_eq_getD, Array.getD, dif_neg h]
-          rw [hdef] at hcond; exact absurd hcond (by decide)
+      · -- if h_sym : sym < probs.size
+        split at heq
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+          rename_i h_sym hcond
+          apply set!_preserves_forall hb; show P _
+          exact toUInt16_toNat_lt_of_lt h_sym
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> exact nomatch heq
   -- Loop 2: preserves property (sets cells with { symbol := sym.toUInt16 })
   have h2 : ∀ j : Fin v2.fst.size, P v2.fst[j] := by
     apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
@@ -1795,27 +1846,23 @@ theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
     · intro a b b' hb heq
       simp only [bind, Except.bind, pure, Except.pure] at heq
       split at heq
+      · -- if h_sym : sym < probs.size
+        rename_i ha_bound
+        split at heq
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · split at heq
+          · exact nomatch heq
+          · rename_i _ _ hinner
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+            apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
+              _ _ _ _ hb _ _ hinner
+            · intro a2 b2 b2' hb2 heq2
+              rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
+              exact set!_preserves_forall hb2 (toUInt16_toNat_lt_of_lt ha_bound)
+            · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-      · split at heq
-        · exact nomatch heq
-        · rename_i _ _ hinner
-          rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-          have ha : a < probs.size := by
-            by_cases h : a < probs.size
-            · exact h
-            · exfalso
-              have hnotleq := ‹¬probs[a]! ≤ 0›
-              have hdef : probs[a]! = (default : Int32) := by
-                simp only [Array.getElem!_eq_getD, Array.getD, dif_neg h]
-              rw [hdef] at hnotleq; exact hnotleq (by decide)
-          apply forIn_range_preserves (fun s => ∀ j : Fin s.fst.size, P s.fst[j])
-            _ _ _ _ hb _ _ hinner
-          · intro a2 b2 b2' hb2 heq2
-            rw [← ForInStep.yield.inj (Except.ok.inj heq2)]; dsimp only
-            exact set!_preserves_forall hb2 (toUInt16_toNat_lt_of_lt ha)
-          · intro a2 b2 b2' hb2 heq2; exact nomatch heq2
     · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-      split at heq <;> (try split at heq) <;> exact nomatch heq
+      split at heq <;> (try split at heq) <;> (try split at heq) <;> exact nomatch heq
   -- Loop 3 modifies only symbolCounts (v3 : Array Nat), not cells.
   -- Loop 4 starts with v2.fst as its initial cells.
   -- Loop 4: preserves symbol field ({ symbol := cells[i]!.symbol, ... })
@@ -1824,20 +1871,26 @@ theorem buildFseTable_symbol_lt (probs : Array Int32) (al : Nat)
   · intro a b b' hb heq
     simp only [bind, Except.bind, pure, Except.pure] at heq
     split at heq
-    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-    · split at heq
+    · -- if h_i : i < cells.size
+      split at heq
+      · -- if h_sc
+        split at heq
+        · -- if h_si
+          split at heq
+          · -- count != 0: set! preserves symbol field
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
+            rename_i h_i _ _ _
+            exact set!_preserves_forall hb (show P _ by
+              show (b.fst[a]).symbol.toNat < probs.size
+              exact hb ⟨a, h_i⟩)
+          · -- count == 0
+            rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
+        · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
       · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
-      · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; dsimp only
-        exact set!_preserves_forall hb (show P _ by
-          -- symbol field is preserved: { symbol := b.fst[a]!.symbol, ... }
-          show (b.fst[a]!).symbol.toNat < probs.size
-          by_cases ha : a < b.fst.size
-          · simp only [Array.getElem!_eq_getD, Array.getD, dif_pos ha]
-            exact hb ⟨a, ha⟩
-          · simp only [Array.getElem!_eq_getD, Array.getD, dif_neg ha]
-            exact hpos)
+    · rw [← ForInStep.yield.inj (Except.ok.inj heq)]; exact hb
   · intro _ _ _ _ heq; simp only [bind, Except.bind, pure, Except.pure] at heq
-    split at heq <;> (try split at heq) <;> exact nomatch heq
+    split at heq <;> (try split at heq) <;> (try split at heq) <;>
+    (try split at heq) <;> exact nomatch heq
 
 open Zip.Native in
 /-- When `buildFseTable` succeeds and the input distribution is non-empty,
