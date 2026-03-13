@@ -260,7 +260,8 @@ theorem decompressRLEBlock_content (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · obtain ⟨rfl, rfl⟩ := h
+  · simp only [getElem!_pos data pos (by omega)]
+    obtain ⟨rfl, rfl⟩ := h
     rw [ByteArray.getElem_eq_getElem_data, Array.getElem_replicate]
 
 /-- When `decompressRawBlock` succeeds, the returned position is `pos + blockSize.toNat`.
@@ -340,17 +341,24 @@ theorem parseBlockHeader_succeeds (data : ByteArray) (pos : Nat)
         ||| (data[pos + 2]!.toUInt32 <<< 16)) >>> 1) &&& 3 ≠ 3) :
     ∃ hdr afterHdr, Zip.Native.parseBlockHeader data pos = .ok (hdr, afterHdr) := by
   unfold Zip.Native.parseBlockHeader
-  simp only [show ¬(data.size < pos + 3) from by omega, ↓reduceIte,
+  simp only [dif_neg (show ¬(data.size < pos + 3) from by omega),
     bind, Except.bind, pure, Except.pure]
   -- The match on typeVal has branches for 0, 1, 2, and the catch-all (reserved).
   -- htypeVal eliminates the catch-all, so one of the first three branches applies.
+  -- Normalize data[pos]! to data[pos] so bv_decide sees consistent terms.
+  rw [getElem!_pos data pos (by omega), getElem!_pos data (pos + 1) (by omega),
+    getElem!_pos data (pos + 2) (by omega)] at htypeVal
   split
   · exact ⟨_, _, rfl⟩
   · exact ⟨_, _, rfl⟩
   · exact ⟨_, _, rfl⟩
   · -- Catch-all: typeVal ∉ {0,1,2} from split, and ≠ 3 from htypeVal.
     -- But typeVal = expr &&& 3 can only be 0-3, contradiction.
-    exfalso; rename_i _ h0 h1 h2; bv_decide
+    exfalso; rename_i _ h0 h1 h2
+    generalize data[pos] = b0 at *
+    generalize data[pos + 1] = b1 at *
+    generalize data[pos + 2] = b2 at *
+    bv_decide
 
 /-- When the data has at least `blockSize.toNat` bytes from `pos`,
     `decompressRawBlock` succeeds. -/
@@ -368,7 +376,7 @@ theorem decompressRLEBlock_succeeds (data : ByteArray) (pos : Nat) (blockSize : 
     ∃ block afterBlock, Zip.Native.decompressRLEBlock data pos blockSize
         = .ok (block, afterBlock) := by
   unfold Zip.Native.decompressRLEBlock
-  simp only [show ¬(data.size < pos + 1) from by omega, ↓reduceIte]
+  simp only [dif_neg (show ¬(data.size < pos + 1) from by omega)]
   exact ⟨_, _, rfl⟩
 
 /-! ### parseBlockHeader field characterization -/
@@ -384,7 +392,9 @@ theorem parseBlockHeader_lastBlock_eq (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
+  · simp only [getElem!_pos data pos (by omega), getElem!_pos data (pos + 1) (by omega),
+      getElem!_pos data (pos + 2) (by omega)]
+    split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
 
 /-- When `parseBlockHeader` succeeds, `hdr.blockType` is determined by bits 1-2 of
     the 3-byte little-endian header word: 0→raw, 1→rle, 2→compressed. -/
@@ -401,7 +411,9 @@ theorem parseBlockHeader_blockType_eq (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · split at h <;> first
+  · simp only [getElem!_pos data pos (by omega), getElem!_pos data (pos + 1) (by omega),
+      getElem!_pos data (pos + 2) (by omega)]
+    split at h <;> first
       | (obtain ⟨rfl, rfl⟩ := h; grind)
       | exact nomatch h
 
@@ -416,7 +428,9 @@ theorem parseBlockHeader_blockSize_eq (data : ByteArray) (pos : Nat)
   unfold_except
   split at h
   · exact nomatch h
-  · split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
+  · simp only [getElem!_pos data pos (by omega), getElem!_pos data (pos + 1) (by omega),
+      getElem!_pos data (pos + 2) (by omega)]
+    split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
 
 /-! ## Frame-level output guarantees -/
 

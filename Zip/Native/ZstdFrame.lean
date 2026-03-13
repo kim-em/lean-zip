@@ -154,22 +154,23 @@ structure ZstdBlockHeader where
     Returns the parsed header and the position after the 3 header bytes. -/
 def parseBlockHeader (data : ByteArray) (pos : Nat) :
     Except String (ZstdBlockHeader × Nat) := do
-  if data.size < pos + 3 then
+  if h : data.size < pos + 3 then
     throw "Zstd: not enough data for block header"
-  -- Read 3 bytes as little-endian 24-bit value
-  let b0 := data[pos]!.toUInt32
-  let b1 := data[pos + 1]!.toUInt32
-  let b2 := data[pos + 2]!.toUInt32
-  let raw24 := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
-  let lastBlock := raw24 &&& 1 == 1       -- bit 0
-  let typeVal := (raw24 >>> 1) &&& 3      -- bits 1-2
-  let blockSize := raw24 >>> 3            -- bits 3-23
-  let blockType ← match typeVal with
-    | 0 => pure ZstdBlockType.raw
-    | 1 => pure ZstdBlockType.rle
-    | 2 => pure ZstdBlockType.compressed
-    | _ => throw "Zstd: reserved block type"
-  return ({ lastBlock, blockType, blockSize }, pos + 3)
+  else
+    -- Read 3 bytes as little-endian 24-bit value
+    let b0 := data[pos].toUInt32
+    let b1 := data[pos + 1].toUInt32
+    let b2 := data[pos + 2].toUInt32
+    let raw24 := b0 ||| (b1 <<< 8) ||| (b2 <<< 16)
+    let lastBlock := raw24 &&& 1 == 1       -- bit 0
+    let typeVal := (raw24 >>> 1) &&& 3      -- bits 1-2
+    let blockSize := raw24 >>> 3            -- bits 3-23
+    let blockType ← match typeVal with
+      | 0 => pure ZstdBlockType.raw
+      | 1 => pure ZstdBlockType.rle
+      | 2 => pure ZstdBlockType.compressed
+      | _ => throw "Zstd: reserved block type"
+    return ({ lastBlock, blockType, blockSize }, pos + 3)
 
 /-- Decompress a raw (verbatim) block: copy `blockSize` bytes from `pos`.
     Returns the copied bytes and the position after the block content. -/
@@ -184,12 +185,13 @@ def decompressRawBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
     Returns the repeated bytes and the position after the single source byte. -/
 def decompressRLEBlock (data : ByteArray) (pos : Nat) (blockSize : UInt32) :
     Except String (ByteArray × Nat) := do
-  if data.size < pos + 1 then
+  if h : data.size < pos + 1 then
     throw "Zstd: not enough data for RLE block"
-  let byte := data[pos]!
-  let sz := blockSize.toNat
-  let result := ByteArray.mk (Array.replicate sz byte)
-  return (result, pos + 1)
+  else
+    let byte := data[pos]
+    let sz := blockSize.toNat
+    let result := ByteArray.mk (Array.replicate sz byte)
+    return (result, pos + 1)
 
 /-- Well-founded recursive inner loop for `decompressBlocks`.
     Processes blocks one at a time until `lastBlock` is seen, threading
