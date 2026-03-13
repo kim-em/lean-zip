@@ -153,6 +153,42 @@ Only convert `]!` to `]` when:
 
 Mechanical conversion of every `]!` is not always worth the complexity.
 
+### 6. Spec proof repair after conversion
+
+Converting `]!` to `]` changes the term structure, breaking existing proofs:
+
+- **`ite` → `dite`**: `if h : cond` desugars to `dite`, not `ite`. Replace
+  `if_pos`/`if_neg` with `dif_pos`/`dif_neg`, and `↓reduceIte` with
+  `dite_false`/`dite_true` in simp calls.
+- **`getElem!_pos` bridge**: Spec proofs that reference `data[pos]!` can be
+  updated using `rw [getElem!_pos data pos (by omega)]` to rewrite
+  hypotheses to match the new `data[pos]'(proof)` term.
+- **`dite` closure bloat**: `dite` generates larger closure terms than `ite`,
+  which can cause `simp only` to exceed step limits. If this happens,
+  try `unfold` + `split` instead of `simp only [functionName, ...]`.
+- **`forIn` loop body term matching**: Spec proofs using
+  `forIn_range_always_ok'` require exact syntactic matching of the loop
+  body closure. Changing `data[i]!` to `data[i]'(proof)` inside a loop
+  creates a different closure that won't match. You may need to update
+  the `suffices` block or refactor to well-founded recursion.
+
+### 7. Do-notation guard caveat
+
+In do-notation, `if h : cond then throw "err"` does NOT make `¬cond`
+available in the continuation after the `if`. You must use an explicit
+`else` branch:
+```lean
+-- WRONG: ¬cond NOT available after this
+if h : cond then throw "err"
+let x := ...  -- h is not in scope here
+
+-- RIGHT: ¬cond available in else branch
+if h : cond then
+  throw "err"
+else
+  let x := ...  -- h : ¬cond is in scope
+```
+
 ## Checklist for Conversion
 
 1. Identify all `]!` sites in the target function
@@ -164,4 +200,5 @@ Mechanical conversion of every `]!` is not always worth the complexity.
 4. Replace `]!` with `]` — Lean will check the proof is in scope
 5. If the function uses `for`/`while`, consider refactoring to
    well-founded recursion (see Pattern above)
-6. Build and verify: `lake build <module>`
+6. Check for existing spec proofs and plan repair (see pitfall 6)
+7. Build and verify: `lake build <module>`

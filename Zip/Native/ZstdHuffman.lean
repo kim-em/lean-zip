@@ -226,9 +226,10 @@ def parseHuffmanWeightsFse (data : ByteArray) (pos : Nat) (compressedSize : Nat)
     Returns (Huffman table, new position after the tree descriptor). -/
 def parseHuffmanTreeDescriptor (data : ByteArray) (pos : Nat) :
     Except String (ZstdHuffmanTable × Nat) := do
-  if data.size < pos + 1 then
+  if h : data.size < pos + 1 then
     throw "Zstd: not enough data for Huffman tree descriptor header"
-  let headerByte := data[pos]!.toNat
+  else
+  let headerByte := data[pos]'(by omega) |>.toNat
   if headerByte >= 128 then do
     -- Direct 4-bit nibble representation: numWeights = headerByte - 127
     let numWeights := headerByte - 127
