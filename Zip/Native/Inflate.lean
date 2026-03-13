@@ -118,11 +118,15 @@ def lengthBase : Array UInt16 := #[
   35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258
 ]
 
+@[simp] theorem lengthBase_size : lengthBase.size = 29 := by decide
+
 -- Extra bits for length codes 257–285
 def lengthExtra : Array UInt8 := #[
   0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
   3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0
 ]
+
+@[simp] theorem lengthExtra_size : lengthExtra.size = 29 := by decide
 
 -- Distance base values for codes 0–29
 def distBase : Array UInt16 := #[
@@ -131,11 +135,15 @@ def distBase : Array UInt16 := #[
   16385, 24577
 ]
 
+@[simp] theorem distBase_size : distBase.size = 30 := by decide
+
 -- Extra bits for distance codes 0–29
 def distExtra : Array UInt8 := #[
   0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
   7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
 ]
+
+@[simp] theorem distExtra_size : distExtra.size = 30 := by decide
 
 /-- Copy `length` bytes from `buf` starting at `start`, repeating every
     `distance` bytes (LZ77 back-reference copy with wrap-around).
@@ -151,6 +159,8 @@ termination_by length - k
 def codeLengthOrder : Array Nat := #[
   16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
 ]
+
+@[simp] theorem codeLengthOrder_size : codeLengthOrder.size = 19 := by decide
 
 /-- Fill `count` consecutive entries starting at `idx` with `val`,
     stopping when `idx ≥ bound`. Returns updated array and new index. -/
@@ -176,8 +186,11 @@ private theorem fillEntries_snd_eq (arr : Array UInt8) (idx count bound : Nat) (
 def readCLCodeLengths (br : BitReader) (clLengths : Array UInt8)
     (i numCodeLen : Nat) : Except String (Array UInt8 × BitReader) :=
   if i < numCodeLen then do
-    let (v, br) ← br.readBits 3
-    readCLCodeLengths br (clLengths.set! (codeLengthOrder[i]!) v.toUInt8) (i + 1) numCodeLen
+    if h : i < codeLengthOrder.size then
+      let (v, br) ← br.readBits 3
+      readCLCodeLengths br (clLengths.set! (codeLengthOrder[i]) v.toUInt8) (i + 1) numCodeLen
+    else
+      throw "Inflate: code length index out of bounds"
   else
     .ok (clLengths, br)
 termination_by numCodeLen - i
@@ -276,19 +289,21 @@ where
     else
       -- Length code 257–285
       let idx := sym.toNat - 257
-      if idx ≥ lengthBase.size then
+      if h_idx : idx ≥ lengthBase.size then
         throw s!"Inflate: invalid length code {sym}"
-      let base := lengthBase[idx]!
-      let extra := lengthExtra[idx]!
+      else
+      let base := lengthBase[idx]'(by omega)
+      let extra := lengthExtra[idx]'(by have := lengthExtra_size; have := lengthBase_size; omega)
       let (extraBits, br₂) ← br₁.readBits extra.toNat
       let length := base.toNat + extraBits.toNat
       -- Distance code
       let (distSym, br₃) ← distTree.decode br₂
       let dIdx := distSym.toNat
-      if dIdx ≥ distBase.size then
+      if h_didx : dIdx ≥ distBase.size then
         throw s!"Inflate: invalid distance code {distSym}"
-      let dBase := distBase[dIdx]!
-      let dExtra := distExtra[dIdx]!
+      else
+      let dBase := distBase[dIdx]'(by omega)
+      let dExtra := distExtra[dIdx]'(by have := distExtra_size; have := distBase_size; omega)
       let (dExtraBits, br₄) ← br₃.readBits dExtra.toNat
       let distance := dBase.toNat + dExtraBits.toNat
       -- Copy from output buffer (LZ77 back-reference)

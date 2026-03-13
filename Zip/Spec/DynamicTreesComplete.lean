@@ -21,6 +21,7 @@ protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hsize : clLengths.size = 19)
+    (hncl : numCodeLen ≤ Zip.Native.Inflate.codeLengthOrder.size)
     (hspec : Deflate.Spec.readCLLengths (numCodeLen - i) i
         (clLengths.toList.map UInt8.toNat) br.toBits =
         some (clLengths', rest)) :
@@ -61,17 +62,22 @@ protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
         readBits_complete br 3 val bits₁ hwf hpos (by omega) hval_bound hrb_spec
       -- The spec updates via List.set, native updates via Array.set!
       -- Need to show the accumulator correspondence is preserved
+      -- numCodeLen ≤ 19, so i < 19
+      have hico : i < Zip.Native.Inflate.codeLengthOrder.size := by omega
       have h_acc :
           (List.map UInt8.toNat clLengths.toList).set (Deflate.Spec.codeLengthOrder[i]!) val =
           List.map UInt8.toNat
-            (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) val.toUInt32.toUInt8).toList := by
-        rw [Array.set!, Array.toList_setIfInBounds, List.map_set]
+            (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]'hico) val.toUInt32.toUInt8).toList := by
+        rw [show (Zip.Native.Inflate.codeLengthOrder[i]'hico) =
+              Zip.Native.Inflate.codeLengthOrder[i]! from
+            (getElem!_pos Zip.Native.Inflate.codeLengthOrder i hico).symm,
+          Array.set!, Array.toList_setIfInBounds, List.map_set]
         congr 1
         simp only [UInt32.toUInt8, UInt8.toNat, UInt8.ofNat, BitVec.toNat_ofNat,
           UInt32.toNat, UInt32.ofNat, BitVec.toNat_ofNat]
         omega
       rw [h_acc] at hspec
-      have hsize₁ : (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]!) val.toUInt32.toUInt8).size = 19 := by
+      have hsize₁ : (clLengths.set! (Zip.Native.Inflate.codeLengthOrder[i]'hico) val.toUInt32.toUInt8).size = 19 := by
         simp only [Array.set!, Array.size_setIfInBounds, hsize]
       have hd₁ : numCodeLen - (i + 1) = n := by omega
       rw [← hrest₁, show n = numCodeLen - (i + 1) from by omega] at hspec
@@ -81,6 +87,8 @@ protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
       -- Unfold native
       unfold Zip.Native.Inflate.readCLCodeLengths
       simp only [if_pos hi, bind, Except.bind]
+      -- Handle codeLengthOrder bounds dite
+      simp only [show i < Zip.Native.Inflate.codeLengthOrder.size from hico, ↓reduceDIte]
       -- readBits 3 succeeds
       rw [hrb_nat]
       exact hrec
@@ -447,9 +455,13 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
             simp only [Nat.sub_zero, Array.toList_replicate, List.map_replicate,
               show (0 : UInt8).toNat = 0 from rfl]
             rw [hrest₃]; exact hrcl_spec
+          have hncl : hclen_v + 4 ≤ Zip.Native.Inflate.codeLengthOrder.size := by
+            simp only [Zip.Native.Inflate.codeLengthOrder_size]
+            have := Deflate.Spec.readBitsLSB_bound hrb3_spec
+            omega
           have ⟨br₄, clArr, hrcl_nat, hcl_eq, hrest₄, hwf₄, hpos₄⟩ :=
             Correctness.readCLCodeLengths_complete br₃ (.replicate 19 0) 0
-              (hclen_v + 4) clLengths bits₄ hwf₃ hpos₃ hsize_repl hrcl_rewrite
+              (hclen_v + 4) clLengths bits₄ hwf₃ hpos₃ hsize_repl hncl hrcl_rewrite
           have hcl_sz : clArr.size = 19 := by
             simpa only [] using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl_nat
           -- Step 5: ValidLengths guard for CL tree

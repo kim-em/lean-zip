@@ -461,13 +461,16 @@ theorem readCLCodeLengths_inv (br br' : BitReader)
     unfold Inflate.readCLCodeLengths at h
     split at h
     · simp only [bind, Except.bind] at h
-      cases hrb : br.readBits 3 with
-      | error e => simp only [hrb] at h; exact nomatch h
-      | ok p =>
-        obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
-        have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 3 v hrb hpos hple
-        have ⟨hd', hp', hl'⟩ := ih br₁ _ (i + 1) ncl (by omega) h hpos₁ hple₁
-        exact ⟨hd'.trans hd₁, hp', hl'⟩
+      split at h
+      · -- i < codeLengthOrder.size: normal case
+        cases hrb : br.readBits 3 with
+        | error e => simp only [hrb] at h; exact nomatch h
+        | ok p =>
+          obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
+          have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 3 v hrb hpos hple
+          have ⟨hd', hp', hl'⟩ := ih br₁ _ (i + 1) ncl (by omega) h hpos₁ hple₁
+          exact ⟨hd'.trans hd₁, hp', hl'⟩
+      · exact nomatch h  -- i ≥ codeLengthOrder.size: error
     · simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
 

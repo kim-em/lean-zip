@@ -195,11 +195,17 @@ private theorem readCLCodeLengths_append (br : BitReader) (suffix : ByteArray)
   · rw [if_pos hlt] at h ⊢
     simp only [bind, Except.bind] at h ⊢
     cases hrb : br.readBits 3 with
-    | error e => simp only [hrb] at h; exact nomatch h
+    | error e =>
+      simp [hrb] at h; split at h <;> exact nomatch h
     | ok p =>
-      obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
+      obtain ⟨v, br₁⟩ := p; simp only [hrb, bind, Except.bind] at h
       rw [readBits_append br suffix 3 v br₁ hrb]; dsimp only []
-      exact readCLCodeLengths_append br₁ suffix _ (i + 1) numCodeLen result br' h
+      -- Handle codeLengthOrder bounds dite
+      split at h
+      · split
+        · exact readCLCodeLengths_append br₁ suffix _ (i + 1) numCodeLen result br' h
+        · rename_i h1 h2; exact absurd h1 h2
+      · exact nomatch h
   · rw [if_neg hlt] at h ⊢
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
     obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
@@ -395,8 +401,14 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
         rw [if_neg hge, if_neg hne256]
         split at h
         · exact nomatch h
-        · rename_i hidx; rw [if_neg hidx]
+        · rename_i hidx; rw [dif_neg hidx]
           simp only [pure, Except.pure] at h ⊢
+          have hle_idx : sym.toNat - 257 < Inflate.lengthExtra.size := by
+            simp only [Inflate.lengthExtra_size, Inflate.lengthBase_size] at hidx ⊢; omega
+          have hle_conv : (Inflate.lengthExtra[sym.toNat - 257]'hle_idx) =
+              Inflate.lengthExtra[sym.toNat - 257]! :=
+            (getElem!_pos Inflate.lengthExtra (sym.toNat - 257) hle_idx).symm
+          erw [hle_conv] at h ⊢
           cases hextra_r : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]!).toNat with
           | error e => simp only [hextra_r] at h; exact nomatch h
           | ok p =>
@@ -409,7 +421,13 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
               rw [huffDecode_append distTree br₂ suffix distSym br₃ hdist_dec]; dsimp only []
               split at h
               · exact nomatch h
-              · rename_i hdidx; rw [if_neg hdidx]
+              · rename_i hdidx; rw [dif_neg hdidx]
+                have hdle_idx : distSym.toNat < Inflate.distExtra.size := by
+                  simp only [Inflate.distExtra_size, Inflate.distBase_size] at hdidx ⊢; omega
+                have hdle_conv : (Inflate.distExtra[distSym.toNat]'hdle_idx) =
+                    Inflate.distExtra[distSym.toNat]! :=
+                  (getElem!_pos Inflate.distExtra distSym.toNat hdle_idx).symm
+                erw [hdle_conv] at h ⊢
                 cases hdextra_r : br₃.readBits (Inflate.distExtra[distSym.toNat]!).toNat with
                 | error e => simp only [hdextra_r] at h; exact nomatch h
                 | ok p =>
