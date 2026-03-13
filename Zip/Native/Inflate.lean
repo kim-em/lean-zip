@@ -124,6 +124,9 @@ def lengthExtra : Array UInt8 := #[
   3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0
 ]
 
+@[simp] theorem lengthBase_size : lengthBase.size = 29 := by decide
+@[simp] theorem lengthExtra_size : lengthExtra.size = 29 := by decide
+
 -- Distance base values for codes 0–29
 def distBase : Array UInt16 := #[
   1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
@@ -136,6 +139,9 @@ def distExtra : Array UInt8 := #[
   0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
   7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13
 ]
+
+@[simp] theorem distBase_size : distBase.size = 30 := by decide
+@[simp] theorem distExtra_size : distExtra.size = 30 := by decide
 
 /-- Copy `length` bytes from `buf` starting at `start`, repeating every
     `distance` bytes (LZ77 back-reference copy with wrap-around).
@@ -151,6 +157,8 @@ termination_by length - k
 def codeLengthOrder : Array Nat := #[
   16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15
 ]
+
+@[simp] theorem codeLengthOrder_size : codeLengthOrder.size = 19 := by decide
 
 /-- Fill `count` consecutive entries starting at `idx` with `val`,
     stopping when `idx ≥ bound`. Returns updated array and new index. -/
@@ -276,19 +284,21 @@ where
     else
       -- Length code 257–285
       let idx := sym.toNat - 257
-      if idx ≥ lengthBase.size then
+      if h : idx ≥ lengthBase.size then
         throw s!"Inflate: invalid length code {sym}"
-      let base := lengthBase[idx]!
-      let extra := lengthExtra[idx]!
+      else
+      let base := lengthBase[idx]
+      let extra := lengthExtra[idx]'(by simp [lengthExtra_size, lengthBase_size] at h ⊢; omega)
       let (extraBits, br₂) ← br₁.readBits extra.toNat
       let length := base.toNat + extraBits.toNat
       -- Distance code
       let (distSym, br₃) ← distTree.decode br₂
       let dIdx := distSym.toNat
-      if dIdx ≥ distBase.size then
+      if h : dIdx ≥ distBase.size then
         throw s!"Inflate: invalid distance code {distSym}"
-      let dBase := distBase[dIdx]!
-      let dExtra := distExtra[dIdx]!
+      else
+      let dBase := distBase[dIdx]
+      let dExtra := distExtra[dIdx]'(by simp [distExtra_size, distBase_size] at h ⊢; omega)
       let (dExtraBits, br₄) ← br₃.readBits dExtra.toNat
       let distance := dBase.toNat + dExtraBits.toNat
       -- Copy from output buffer (LZ77 back-reference)
