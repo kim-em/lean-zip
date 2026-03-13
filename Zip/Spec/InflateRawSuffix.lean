@@ -395,8 +395,8 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
         rw [if_neg hge, if_neg hne256]
         split at h
         · exact nomatch h
-        · rename_i hidx; rw [if_neg hidx]
-          simp only [pure, Except.pure] at h ⊢
+        · rename_i hidx; rw [dif_neg hidx]
+          simp only [pure, Except.pure, ← getElem!_pos] at h ⊢
           cases hextra_r : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]!).toNat with
           | error e => simp only [hextra_r] at h; exact nomatch h
           | ok p =>
@@ -409,7 +409,7 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
               rw [huffDecode_append distTree br₂ suffix distSym br₃ hdist_dec]; dsimp only []
               split at h
               · exact nomatch h
-              · rename_i hdidx; rw [if_neg hdidx]
+              · rename_i hdidx; rw [dif_neg hdidx]
                 cases hdextra_r : br₃.readBits (Inflate.distExtra[distSym.toNat]!).toNat with
                 | error e => simp only [hdextra_r] at h; exact nomatch h
                 | ok p =>
