@@ -3,16 +3,20 @@
 namespace Binary
 
 def readUInt16LE (data : ByteArray) (offset : Nat) : UInt16 :=
-  let b0 := data[offset]!
-  let b1 := data[offset + 1]!
-  b0.toUInt16 ||| (b1.toUInt16 <<< 8)
+  if h : offset + 2 ≤ data.size then
+    let b0 := data[offset]'(by omega)
+    let b1 := data[offset + 1]'(by omega)
+    b0.toUInt16 ||| (b1.toUInt16 <<< 8)
+  else 0
 
 def readUInt32LE (data : ByteArray) (offset : Nat) : UInt32 :=
-  let b0 := data[offset]!
-  let b1 := data[offset + 1]!
-  let b2 := data[offset + 2]!
-  let b3 := data[offset + 3]!
-  b0.toUInt32 ||| (b1.toUInt32 <<< 8) ||| (b2.toUInt32 <<< 16) ||| (b3.toUInt32 <<< 24)
+  if h : offset + 4 ≤ data.size then
+    let b0 := data[offset]'(by omega)
+    let b1 := data[offset + 1]'(by omega)
+    let b2 := data[offset + 2]'(by omega)
+    let b3 := data[offset + 3]'(by omega)
+    b0.toUInt32 ||| (b1.toUInt32 <<< 8) ||| (b2.toUInt32 <<< 16) ||| (b3.toUInt32 <<< 24)
+  else 0
 
 def writeUInt16LE (val : UInt16) : ByteArray :=
   .mk #[val.toUInt8, (val >>> 8).toUInt8]
@@ -43,8 +47,8 @@ def writeUInt64LE (val : UInt64) : ByteArray :=
 /-- Copy `src` into `buf` starting at `offset`. -/
 @[noinline] def writeField (buf : ByteArray) (offset : Nat) (src : ByteArray) : ByteArray := Id.run do
   let mut b := buf
-  for i in [:src.size] do
-    b := b.set! (offset + i) src[i]!
+  for h : i in [:src.size] do
+    b := b.set! (offset + i) src[i]
   return b
 
 -- Octal ASCII read/write (used by Tar)
@@ -70,20 +74,26 @@ def writeUInt64LE (val : UInt64) : ByteArray :=
   let mut result := ByteArray.empty
   for _ in [:digits - buf.size] do
     result := result.push '0'.toNat.toUInt8
-  for i in [:buf.size] do
-    result := result.push buf[buf.size - 1 - i]!
+  for h : i in [:buf.size] do
+    have hi : i < buf.size := h.upper
+    have : buf.size - 1 - i < buf.size := by omega
+    result := result.push buf[buf.size - 1 - i]
   result := result.push 0
   return result
 
 /-- Read an octal ASCII number from a byte array field. Stops at NUL or space. -/
-@[noinline] def readOctal (data : ByteArray) (offset : Nat) (len : Nat) : UInt64 := Id.run do
-  let mut result : UInt64 := 0
-  for i in [:len] do
-    let b := data[offset + i]!
-    if b == 0 || b == ' '.toNat.toUInt8 then break
-    if b >= '0'.toNat.toUInt8 && b <= '7'.toNat.toUInt8 then
-      result := result * 8 + (b - '0'.toNat.toUInt8).toUInt64
-  return result
+@[noinline] def readOctal (data : ByteArray) (offset : Nat) (len : Nat) : UInt64 :=
+  if h : offset + len ≤ data.size then Id.run do
+    let mut result : UInt64 := 0
+    for hm : i in [:len] do
+      have hi : i < len := hm.upper
+      have : offset + i < data.size := by omega
+      let b := data[offset + i]
+      if b == 0 || b == ' '.toNat.toUInt8 then break
+      if b >= '0'.toNat.toUInt8 && b <= '7'.toNat.toUInt8 then
+        result := result * 8 + (b - '0'.toNat.toUInt8).toUInt64
+    return result
+  else 0
 
 -- NUL-padded string read/write (used by Tar)
 
@@ -92,8 +102,10 @@ def writeUInt64LE (val : UInt64) : ByteArray :=
   let utf8 := s.toUTF8
   let mut result := ByteArray.empty
   let toCopy := min utf8.size width
-  for i in [:toCopy] do
-    result := result.push utf8[i]!
+  for hm : i in [:toCopy] do
+    have hi : i < toCopy := hm.upper
+    have : i < utf8.size := by omega
+    result := result.push utf8[i]
   for _ in [:width - toCopy] do
     result := result.push 0
   return result
@@ -105,15 +117,19 @@ def fromLatin1 (data : ByteArray) : String :=
 
 /-- Read a NUL-terminated string from a byte array field.
     Falls back to Latin-1 decoding if bytes are not valid UTF-8. -/
-@[noinline] def readString (data : ByteArray) (offset : Nat) (len : Nat) : String := Id.run do
-  let mut bytes := ByteArray.empty
-  for i in [:len] do
-    let b := data[offset + i]!
-    if b == 0 then break
-    bytes := bytes.push b
-  match String.fromUTF8? bytes with
-  | some s => return s
-  | none => return fromLatin1 bytes
+@[noinline] def readString (data : ByteArray) (offset : Nat) (len : Nat) : String :=
+  if h : offset + len ≤ data.size then Id.run do
+    let mut bytes := ByteArray.empty
+    for hm : i in [:len] do
+      have hi : i < len := hm.upper
+      have : offset + i < data.size := by omega
+      let b := data[offset + i]
+      if b == 0 then break
+      bytes := bytes.push b
+    match String.fromUTF8? bytes with
+    | some s => return s
+    | none => return fromLatin1 bytes
+  else ""
 
 /-- Check if a path is safe for extraction.
     Rejects absolute paths, `..` traversal, `.` components, empty components (from `//`),
