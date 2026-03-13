@@ -64,6 +64,8 @@ import Zip.Spec.GzipCorrect
 import Zip.Spec.ZlibCorrect
 import Zip.Spec.ZstdBase
 import Zip.Spec.ZstdBlockLoop
+import Zip.Spec.ZstdTwoBlockBase
+import Zip.Spec.ZstdTwoBlockCompressed
 import Zip.Spec.ZstdTwoBlock
 import Zip.Spec.Zstd
 import Zip.Spec.ZstdHuffman
