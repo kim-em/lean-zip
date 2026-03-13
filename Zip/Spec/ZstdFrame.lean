@@ -3410,6 +3410,113 @@ theorem decompressZstd_succeeds_rle_then_compressed_sequences_frame (data : Byte
     hoff2 hparse2 hbs2 hws2 htype2 hblockEnd2 hlit2 hseq2 hNumSeq2
     hfse2 hbbr2 hdec2 hexec2 hlast2 hend⟩
 
+/-! ## WellFormedSimpleBlocks frame-level and API-level lifting -/
+
+/-- When a frame has no dictionary, no checksum, and no content size, and its block
+    sequence satisfies `WellFormedSimpleBlocks`, `decompressFrame` succeeds.
+    This subsumes all specific N-block raw/RLE frame-level succeeds theorems. -/
+theorem decompressFrame_succeeds_of_well_formed_simple (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    (hwf : Zstd.Spec.WellFormedSimpleBlocks data afterHeader header.windowSize
+      ByteArray.empty none {} #[1, 4, 8]) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') := by
+  -- Step 1: Get block-level success from WellFormedSimpleBlocks induction
+  obtain ⟨result, blockPos, hblocks⟩ :=
+    Zstd.Spec.decompressBlocksWF_succeeds_of_well_formed_simple
+      data afterHeader header.windowSize ByteArray.empty none {} #[1, 4, 8] hwf
+  -- Step 2: Unfold decompressFrame and thread through
+  unfold Zip.Native.decompressFrame
+  simp only [bind, Except.bind, pure, Except.pure, hparse]
+  -- Step 3: Dictionary check — header.dictionaryId = none
+  simp only [hnodict]
+  -- Step 4: Block decompression succeeds
+  unfold Zip.Native.decompressBlocks
+  rw [hblocks]
+  -- Step 5: Checksum is false, content size is none
+  simp only [hnocksum, hnosize, Bool.false_eq_true, ↓reduceIte]
+  exact ⟨_, _, rfl⟩
+
+/-- Three-block raw/RLE/raw corollary at frame level. Demonstrates that
+    `decompressFrame_succeeds_of_well_formed_simple` handles N-block mixed
+    raw/RLE sequences: construct the `WellFormedSimpleBlocks` chain and apply. -/
+theorem decompressFrame_succeeds_three_raw_rle_raw (data : ByteArray) (pos : Nat)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    -- Block 1 (non-last raw)
+    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
+    (block1 : ByteArray) (afterBlock1 : Nat)
+    (hoff1 : ¬ data.size ≤ afterHeader)
+    (hparse1 : Zip.Native.parseBlockHeader data afterHeader = .ok (hdr1, afterHdr1))
+    (hbs1 : ¬ hdr1.blockSize > 131072)
+    (hws1 : ¬ (header.windowSize > 0 && hdr1.blockSize.toUInt64 > header.windowSize))
+    (htype1 : hdr1.blockType = .raw)
+    (hraw1 : Zip.Native.decompressRawBlock data afterHdr1 hdr1.blockSize
+               = .ok (block1, afterBlock1))
+    (hnotlast1 : hdr1.lastBlock = false)
+    (hadv1 : ¬ afterBlock1 ≤ afterHeader)
+    -- Block 2 (non-last RLE)
+    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
+    (block2 : ByteArray) (afterByte2 : Nat)
+    (hoff2 : ¬ data.size ≤ afterBlock1)
+    (hparse2 : Zip.Native.parseBlockHeader data afterBlock1 = .ok (hdr2, afterHdr2))
+    (hbs2 : ¬ hdr2.blockSize > 131072)
+    (hws2 : ¬ (header.windowSize > 0 && hdr2.blockSize.toUInt64 > header.windowSize))
+    (htype2 : hdr2.blockType = .rle)
+    (hrle2 : Zip.Native.decompressRLEBlock data afterHdr2 hdr2.blockSize
+               = .ok (block2, afterByte2))
+    (hnotlast2 : hdr2.lastBlock = false)
+    (hadv2 : ¬ afterByte2 ≤ afterBlock1)
+    -- Block 3 (last raw)
+    (hdr3 : Zip.Native.ZstdBlockHeader) (afterHdr3 : Nat)
+    (block3 : ByteArray) (afterBlock3 : Nat)
+    (hoff3 : ¬ data.size ≤ afterByte2)
+    (hparse3 : Zip.Native.parseBlockHeader data afterByte2 = .ok (hdr3, afterHdr3))
+    (hbs3 : ¬ hdr3.blockSize > 131072)
+    (hws3 : ¬ (header.windowSize > 0 && hdr3.blockSize.toUInt64 > header.windowSize))
+    (htype3 : hdr3.blockType = .raw)
+    (hraw3 : Zip.Native.decompressRawBlock data afterHdr3 hdr3.blockSize
+               = .ok (block3, afterBlock3))
+    (hlast3 : hdr3.lastBlock = true) :
+    ∃ content pos',
+      Zip.Native.decompressFrame data pos = .ok (content, pos') :=
+  decompressFrame_succeeds_of_well_formed_simple data pos header afterHeader
+    hparse hnodict hnocksum hnosize
+    (.step_raw afterHeader header.windowSize ByteArray.empty none {} #[1, 4, 8]
+      hdr1 afterHdr1 block1 afterBlock1
+      hoff1 hparse1 hbs1 hws1 htype1 hraw1 hnotlast1 hadv1
+      (.step_rle afterBlock1 header.windowSize (ByteArray.empty ++ block1) none {} #[1, 4, 8]
+        hdr2 afterHdr2 block2 afterByte2
+        hoff2 hparse2 hbs2 hws2 htype2 hrle2 hnotlast2 hadv2
+        (.last_raw afterByte2 header.windowSize (ByteArray.empty ++ block1 ++ block2) none {} #[1, 4, 8]
+          hdr3 afterHdr3 block3 afterBlock3
+          hoff3 hparse3 hbs3 hws3 htype3 hraw3 hlast3)))
+
+/-- When the input contains exactly one standard Zstd frame at position 0 whose block
+    sequence satisfies `WellFormedSimpleBlocks`, `decompressZstd` succeeds. This lifts
+    `decompressFrame_succeeds_of_well_formed_simple` to the top-level API. -/
+theorem decompressZstd_single_frame_succeeds_of_well_formed_simple (data : ByteArray)
+    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
+    (hparse : Zip.Native.parseFrameHeader data 0 = .ok (header, afterHeader))
+    (hnodict : header.dictionaryId = none)
+    (hnocksum : header.contentChecksum = false)
+    (hnosize : header.contentSize = none)
+    (hwf : Zstd.Spec.WellFormedSimpleBlocks data afterHeader header.windowSize
+      ByteArray.empty none {} #[1, 4, 8])
+    (hterm : ∀ content pos', Zip.Native.decompressFrame data 0 = .ok (content, pos')
+        → pos' ≥ data.size) :
+    ∃ output, Zip.Native.decompressZstd data = .ok output := by
+  obtain ⟨content, pos', hframe⟩ := decompressFrame_succeeds_of_well_formed_simple
+    data 0 header afterHeader hparse hnodict hnocksum hnosize hwf
+  exact ⟨content, decompressZstd_single_frame data content pos' hframe (hterm content pos' hframe)⟩
+
 /-! ## Unified API-level completeness via WellFormedBlocks -/
 
 /-- When the input contains a standard Zstd frame at position 0 with a well-formed
