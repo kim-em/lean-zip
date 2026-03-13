@@ -53,6 +53,9 @@ Two-block (first non-last × second last, 16/16):
 
 namespace Zip.Spec.ZstdFrame
 
+/-- The Zstd magic number as a concrete UInt32 literal. -/
+private theorem zstdMagic_val : Zip.Native.zstdMagic = (4247762216 : UInt32) := rfl
+
 /-- When `decompressFrame` succeeds, `parseFrameHeader` must also succeed at the
     same position — `decompressFrame` begins by calling `parseFrameHeader`. -/
 private theorem decompressFrame_has_header (data : ByteArray) (pos : Nat)
@@ -98,8 +101,7 @@ theorem decompressZstdWF_single_standard_frame (data : ByteArray) (pos : Nat)
   simp only [show ¬ (pos ≥ data.size) from by omega, ↓reduceDIte,
     show ¬ (data.size < pos + 4) from by omega, ↓reduceIte,
     pure, Pure.pure, bind, Bind.bind, Except.bind, Except.pure]
-  rw [hmagic, show Zip.Native.zstdMagic = (4247762216 : UInt32) from rfl]
-  simp (config := { decide := true }) only [hframe, ite_true,
+  simp (config := { decide := true }) only [hmagic, zstdMagic_val, hframe, ite_true,
     show ¬ (pos' ≤ pos) from by omega, ↓reduceDIte]
   exact decompressZstdWF_base data pos' (output ++ content) hdone
 
@@ -282,8 +284,7 @@ theorem decompressZstdWF_standard_then_standard (data : ByteArray)
   simp only [show ¬ (pos ≥ data.size) from by omega, ↓reduceDIte,
     show ¬ (data.size < pos + 4) from by omega, ↓reduceIte,
     pure, Pure.pure, bind, Bind.bind, Except.bind, Except.pure]
-  rw [hmagic1, show Zip.Native.zstdMagic = (4247762216 : UInt32) from rfl]
-  simp (config := { decide := true }) only [hframe1, ite_true,
+  simp (config := { decide := true }) only [hmagic1, zstdMagic_val, hframe1, ite_true,
     show ¬ (pos1 ≤ pos) from by omega, ↓reduceDIte]
   exact decompressZstdWF_single_standard_frame data pos1 (output ++ content1)
     content2 pos2 hsize2 hmagic2 hframe2 hadv2 hdone
@@ -3411,3 +3412,4 @@ theorem decompressZstd_succeeds_rle_then_compressed_sequences_frame (data : Byte
     hfse2 hbbr2 hdec2 hexec2 hlast2 hend⟩
 
 end Zip.Spec.ZstdFrame
+
