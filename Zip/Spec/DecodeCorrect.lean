@@ -566,7 +566,7 @@ theorem decodeHuffman_correct
           simp only [pure, Except.pure] at h
           -- Step 2: readBits for length extra bits
           cases hextra_r :
-            br₁.readBits (Zip.Native.Inflate.lengthExtra[sym.toNat - 257]!).toNat with
+            br₁.readBits (Zip.Native.Inflate.lengthExtra[sym.toNat - 257]'(by simp [Zip.Native.Inflate.lengthExtra_size]; omega)).toNat with
           | error e => simp only [hextra_r] at h; exact nomatch h
           | ok p =>
             obtain ⟨extraBits, br₂⟩ := p
@@ -587,7 +587,7 @@ theorem decodeHuffman_correct
                   omega
                 -- Step 5: readBits for distance extra
                 cases hdextra_r :
-                  br₃.readBits (Zip.Native.Inflate.distExtra[distSym.toNat]!).toNat with
+                  br₃.readBits (Zip.Native.Inflate.distExtra[distSym.toNat]'(by simp [Zip.Native.Inflate.distExtra_size]; omega)).toNat with
                 | error e => simp only [hdextra_r] at h; exact nomatch h
                 | ok p =>
                   obtain ⟨dExtraBits, br₄⟩ := p
@@ -625,20 +625,28 @@ theorem decodeHuffman_correct
                               maxOutputSize dataSize br₄ _ output' br'
                               hwf₄ hpos₄ hlit hdist hvlit hvdist hlen_lit hlen_dist h
                           -- Spec-level readBits for length extra
+                          have hextra_r' := hextra_r
+                          rw [show Zip.Native.Inflate.lengthExtra[sym.toNat - 257] =
+                            Zip.Native.Inflate.lengthExtra[sym.toNat - 257]! from
+                            (getElem!_pos _ _ (by simp [Zip.Native.Inflate.lengthExtra_size]; omega)).symm] at hextra_r'
                           obtain ⟨rest₂, hspec_extra, hrest₂⟩ :=
                             readBits_toBits br₁ _ extraBits br₂ hwf₁
                               (lengthExtra_le_32 ⟨sym.toNat - 257, hidx⟩)
-                              hextra_r
+                              hextra_r'
                           -- Spec-level distance tree decode
                           obtain ⟨rest₃, hspec_dist_sym, hrest₃⟩ :=
                             huffTree_decode_correct distLengths 15 (by omega) distTree br₂
                               distSym br₃ hwf₂ hdist hvdist hlen_dist hdist_dec
                           -- Spec-level readBits for distance extra
+                          have hdextra_r' := hdextra_r
+                          rw [show Zip.Native.Inflate.distExtra[distSym.toNat] =
+                            Zip.Native.Inflate.distExtra[distSym.toNat]! from
+                            (getElem!_pos _ _ (by simp [Zip.Native.Inflate.distExtra_size]; omega)).symm] at hdextra_r'
                           obtain ⟨rest₄, hspec_dextra, hrest₄⟩ :=
                             readBits_toBits br₃ _ dExtraBits br₄ hwf₃
                               (distExtra_le_32 ⟨distSym.toNat, hdidx⟩)
-                              hdextra_r
-                          -- Table correspondence
+                              hdextra_r'
+                          -- Table correspondence (bridge proven-bounds ↔ get!)
                           have hlen_eq : Zip.Native.Inflate.lengthBase[sym.toNat - 257]!.toNat =
                               Deflate.Spec.lengthBase[sym.toNat - 257]! :=
                             lengthBase_eq ⟨sym.toNat - 257, hidx⟩
@@ -718,8 +726,11 @@ theorem decodeHuffman_correct
                             omega
                           have hdist_le' : ¬(Deflate.Spec.distBase[distSym.toNat]! +
                               dExtraBits.toNat > output.data.toList.length) := by
-                            rw [ByteArray.data_toList_length,
-                              ← hdist_val_eq]; exact hdist_ok
+                            have := congrArg UInt16.toNat
+                              (getElem!_pos Zip.Native.Inflate.distBase distSym.toNat
+                                (by simp [Zip.Native.Inflate.distBase_size]; omega))
+                            rw [ByteArray.data_toList_length, ← hdist_val_eq, this]
+                            exact hdist_ok
                           simp only [hdist_pos', hdist_le', decide_false,
                             Bool.false_or, Bool.false_eq_true, ↓reduceIte]
                           -- Copy loop correspondence
@@ -731,11 +742,13 @@ theorem decodeHuffman_correct
                             (by have : Deflate.Spec.distBase[distSym.toNat]! ≥ 1 :=
                                   spec_distBase_pos ⟨distSym.toNat, hdidx⟩
                                 rw [hdist_val_eq]; omega)
-                            (by rw [Nat.not_lt] at hdist_ok; exact hdist_ok)
+                            (by simp only [← getElem!_pos, Nat.not_lt] at hdist_ok
+                                exact hdist_ok)
                           -- Rewrite copyLoop result, native→spec table values,
                           -- and output.size→output.data.toList.length
                           have hsize : output.size = output.data.toList.length :=
                             (ByteArray.data_toList_length output).symm
+                          simp only [← getElem!_pos] at hlz
                           rw [hcopy, hlen_eq, hdist_val_eq, hsize] at hlz
                           exact hlz
   termination_by dataSize * 8 - br.bitPos

@@ -663,7 +663,8 @@ theorem decodeHuffman_complete
           -- idx bounds check: sym.toNat - 257 < lengthBase.size
           have hidx_ok : ¬(sym_nat - 257 ≥ Zip.Native.Inflate.lengthBase.size) := by
             show ¬(_ ≥ 29); omega
-          simp only [hsym_toNat, hidx_ok, ↓reduceIte, pure, Except.pure]
+          simp only [hsym_toNat, hidx_ok, ↓reduceDIte, pure, Except.pure]
+          simp only [← getElem!_pos]
           -- readBits for length extra
           rw [hnative_extra_eq,
             show br₁.readBits extra = .ok (extraVal.toUInt32, br₂) from hrd_extra]
@@ -676,7 +677,7 @@ theorem decodeHuffman_complete
             Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hdSym_bound hlen_dist)
           have hdidx_ok : ¬(dSym ≥ Zip.Native.Inflate.distBase.size) := by
             show ¬(_ ≥ 30); omega
-          simp only [hdSym_toNat, hdidx_ok, ↓reduceIte]
+          simp only [hdSym_toNat, hdidx_ok, ↓reduceDIte]
           -- readBits for distance extra
           rw [hnative_dextra_eq,
             show br₃.readBits dExtra = .ok (dExtraVal.toUInt32, br₄) from hrd_dextra]
