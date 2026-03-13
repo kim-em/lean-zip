@@ -233,7 +233,11 @@ structure BackwardBitReader where
   currentByte : UInt8
   /-- Lower boundary: the first byte in the valid range. -/
   startPos : Nat := 0
-  deriving Inhabited
+  /-- Invariant: bytePos is within data bounds. -/
+  h_bytePos_le : bytePos ≤ data.size := by omega
+
+instance : Inhabited BackwardBitReader where
+  default := { data := .empty, bytePos := 0, bitsRemaining := 0, currentByte := 0 }
 
 namespace BackwardBitReader
 
@@ -253,30 +257,34 @@ def highBitPos (b : UInt8) : Option Nat :=
     Finds the sentinel bit in the last byte and sets up the initial state.
     The sentinel bit itself is consumed (not part of the data). -/
 def init (data : ByteArray) (startPos endPos : Nat) :
-    Except String BackwardBitReader := do
-  if endPos <= startPos then
-    throw "BackwardBitReader: empty range"
-  if endPos > data.size then
-    throw "BackwardBitReader: range exceeds data size"
-  let lastByte := data[endPos - 1]!
-  match highBitPos lastByte with
-  | none => throw "BackwardBitReader: last byte is 0 (no sentinel bit)"
-  | some sentinelPos =>
-    -- The sentinel bit is consumed; remaining bits below it in this byte
-    if sentinelPos == 0 then
-      -- Only the sentinel bit in this byte; move to previous byte
-      if endPos - 1 <= startPos then
-        -- No more data after consuming the sentinel byte
-        return { data, bytePos := startPos, bitsRemaining := 0, currentByte := 0, startPos }
-      let prevPos := endPos - 2
-      return { data, bytePos := prevPos, bitsRemaining := 8, currentByte := data[prevPos]!, startPos }
-    else
-      -- sentinelPos bits remain below the sentinel in the last byte
-      -- Mask out the sentinel bit and above
-      let mask := (1 <<< sentinelPos.toUInt8) - 1
-      let maskedByte := lastByte &&& mask
-      return { data, bytePos := endPos - 1, bitsRemaining := sentinelPos,
-               currentByte := maskedByte, startPos }
+    Except String BackwardBitReader :=
+  if h_empty : endPos ≤ startPos then
+    .error "BackwardBitReader: empty range"
+  else if h_size : endPos > data.size then
+    .error "BackwardBitReader: range exceeds data size"
+  else
+    let lastByte := data[endPos - 1]
+    match highBitPos lastByte with
+    | none => .error "BackwardBitReader: last byte is 0 (no sentinel bit)"
+    | some sentinelPos =>
+      -- The sentinel bit is consumed; remaining bits below it in this byte
+      if sentinelPos == 0 then
+        -- Only the sentinel bit in this byte; move to previous byte
+        if h_end1 : endPos - 1 ≤ startPos then
+          -- No more data after consuming the sentinel byte
+          .ok { data, bytePos := startPos, bitsRemaining := 0, currentByte := 0, startPos,
+                h_bytePos_le := by omega }
+        else
+          let prevPos := endPos - 2
+          .ok { data, bytePos := prevPos, bitsRemaining := 8,
+                currentByte := data[prevPos], startPos }
+      else
+        -- sentinelPos bits remain below the sentinel in the last byte
+        -- Mask out the sentinel bit and above
+        let mask := (1 <<< sentinelPos.toUInt8) - 1
+        let maskedByte := lastByte &&& mask
+        .ok { data, bytePos := endPos - 1, bitsRemaining := sentinelPos,
+              currentByte := maskedByte, startPos }
 
 /-- Read `n` bits MSB-first from the backward stream (n ≤ 25).
     Returns the value as UInt32 and the updated reader. -/
@@ -296,10 +304,11 @@ where
       let br' :=
         if bitPos == 0 then
           -- Move to the previous byte (stop at startPos boundary)
-          if br.bytePos > br.startPos then
+          if h_pos : br.bytePos > br.startPos then
             let prevPos := br.bytePos - 1
             { br with bytePos := prevPos, bitsRemaining := 8,
-                      currentByte := br.data[prevPos]! }
+                      currentByte := br.data[prevPos]'(by have := br.h_bytePos_le; omega),
+                      h_bytePos_le := by have := br.h_bytePos_le; omega }
           else
             { br with bitsRemaining := 0, currentByte := 0 }
         else
@@ -327,22 +336,22 @@ end BackwardBitReader
 def decodeFseSymbols (table : FseTable) (br : BackwardBitReader) (count : Nat) :
     Except String (Array UInt8 × BackwardBitReader) := do
   if count == 0 then return (#[], br)
-  let tableSize := 1 <<< table.accuracyLog
   -- Initialize state from stream
   let (initState, br) ← br.readBits table.accuracyLog
   let mut state := initState.toNat
   let mut br := br
   let mut result : Array UInt8 := Array.mkEmpty count
   for i in [:count] do
-    if state >= tableSize then
-      throw s!"FSE decode: state {state} out of range (table size {tableSize})"
-    let cell := table.cells[state]!
-    result := result.push cell.symbol.toUInt8
-    -- Read bits for next state (except after the last symbol)
-    if i + 1 < count then
-      let (bits, br') ← br.readBits cell.numBits.toNat
-      br := br'
-      state := cell.newState.toNat + bits.toNat
+    if h : state < table.cells.size then
+      let cell := table.cells[state]
+      result := result.push cell.symbol.toUInt8
+      -- Read bits for next state (except after the last symbol)
+      if i + 1 < count then
+        let (bits, br') ← br.readBits cell.numBits.toNat
+        br := br'
+        state := cell.newState.toNat + bits.toNat
+    else
+      throw s!"FSE decode: state {state} out of range (table size {table.cells.size})"
   return (result, br)
 
 /-- WF variant of `decodeFseSymbols` inner loop for proof reasoning.
@@ -355,11 +364,8 @@ def decodeFseSymbolsWF.loop (table : FseTable) (br : BackwardBitReader)
   match remaining with
   | 0 => .ok (acc, br)
   | n + 1 =>
-    let tableSize := 1 <<< table.accuracyLog
-    if state >= tableSize then
-      throw s!"FSE decode: state {state} out of range (table size {tableSize})"
-    else
-      let cell := table.cells[state]!
+    if h : state < table.cells.size then
+      let cell := table.cells[state]
       let acc' := acc.push cell.symbol.toUInt8
       if n == 0 then
         .ok (acc', br)
@@ -367,6 +373,8 @@ def decodeFseSymbolsWF.loop (table : FseTable) (br : BackwardBitReader)
         let (bits, br') ← br.readBits cell.numBits.toNat
         let newState := cell.newState.toNat + bits.toNat
         decodeFseSymbolsWF.loop table br' newState n acc'
+    else
+      throw s!"FSE decode: state {state} out of range (table size {table.cells.size})"
 
 /-- WF variant of `decodeFseSymbols`. Structurally recursive on `count`. -/
 def decodeFseSymbolsWF (table : FseTable) (br : BackwardBitReader)
@@ -382,7 +390,6 @@ def decodeFseSymbolsWF (table : FseTable) (br : BackwardBitReader)
     Returns the decoded symbols as an array. -/
 def decodeFseSymbolsAll (table : FseTable) (br : BackwardBitReader)
     (fuel : Nat := 4096) : Except String (Array UInt8 × BackwardBitReader) := do
-  let tableSize := 1 <<< table.accuracyLog
   -- Initialize TWO interleaved states from stream (per reference FSE_decompress1X)
   let (initState1, br) ← br.readBits table.accuracyLog
   let (initState2, br) ← br.readBits table.accuracyLog
@@ -392,39 +399,41 @@ def decodeFseSymbolsAll (table : FseTable) (br : BackwardBitReader)
   let mut result : Array UInt8 := #[]
   for _ in [:fuel] do
     -- Decode from state1: lookup, emit, then update
-    if state1 >= tableSize then
-      throw s!"FSE decode: state1 {state1} out of range (table size {tableSize})"
-    let cell1 := table.cells[state1]!
-    result := result.push cell1.symbol.toUInt8
-    -- If not enough bits to advance state1, emit state2's symbol and break.
-    -- Reference: on overflow after state1 decode, FSE_GETSYMBOL(&state2) then break.
-    let avail1 := br.totalBitsRemaining
-    if avail1 < cell1.numBits.toNat then
-      if state2 < tableSize then
-        result := result.push table.cells[state2]!.symbol.toUInt8
-      break
-    let (bits1, br') ← br.readBits cell1.numBits.toNat
-    br := br'
-    state1 := cell1.newState.toNat + bits1.toNat
-    -- Decode from state2: lookup, emit, then update
-    if state2 >= tableSize then
-      throw s!"FSE decode: state2 {state2} out of range (table size {tableSize})"
-    let cell2 := table.cells[state2]!
-    result := result.push cell2.symbol.toUInt8
-    -- If not enough bits to advance state2, emit state1's updated symbol and break.
-    -- Reference: on overflow after state2 decode, FSE_GETSYMBOL(&state1) then break.
-    -- Note: state1 has already been updated above, so this emits the NEW state1's symbol.
-    let avail2 := br.totalBitsRemaining
-    if avail2 < cell2.numBits.toNat then
-      if state1 < tableSize then
-        result := result.push table.cells[state1]!.symbol.toUInt8
-      break
-    let (bits2, br') ← br.readBits cell2.numBits.toNat
-    br := br'
-    state2 := cell2.newState.toNat + bits2.toNat
-    -- Do NOT break on br.isFinished. The reference continues until overflow:
-    -- when all bits are consumed (completed), the next iteration emits state1's
-    -- symbol, then the avail check detects insufficient bits and breaks.
+    if h1 : state1 < table.cells.size then
+      let cell1 := table.cells[state1]
+      result := result.push cell1.symbol.toUInt8
+      -- If not enough bits to advance state1, emit state2's symbol and break.
+      -- Reference: on overflow after state1 decode, FSE_GETSYMBOL(&state2) then break.
+      let avail1 := br.totalBitsRemaining
+      if avail1 < cell1.numBits.toNat then
+        if h2 : state2 < table.cells.size then
+          result := result.push table.cells[state2].symbol.toUInt8
+        break
+      let (bits1, br') ← br.readBits cell1.numBits.toNat
+      br := br'
+      state1 := cell1.newState.toNat + bits1.toNat
+      -- Decode from state2: lookup, emit, then update
+      if h3 : state2 < table.cells.size then
+        let cell2 := table.cells[state2]
+        result := result.push cell2.symbol.toUInt8
+        -- If not enough bits to advance state2, emit state1's updated symbol and break.
+        -- Reference: on overflow after state2 decode, FSE_GETSYMBOL(&state1) then break.
+        -- Note: state1 has already been updated above, so this emits the NEW state1's symbol.
+        let avail2 := br.totalBitsRemaining
+        if avail2 < cell2.numBits.toNat then
+          if h4 : state1 < table.cells.size then
+            result := result.push table.cells[state1].symbol.toUInt8
+          break
+        let (bits2, br') ← br.readBits cell2.numBits.toNat
+        br := br'
+        state2 := cell2.newState.toNat + bits2.toNat
+        -- Do NOT break on br.isFinished. The reference continues until overflow:
+        -- when all bits are consumed (completed), the next iteration emits state1's
+        -- symbol, then the avail check detects insufficient bits and breaks.
+      else
+        throw s!"FSE decode: state2 {state2} out of range (table size {table.cells.size})"
+    else
+      throw s!"FSE decode: state1 {state1} out of range (table size {table.cells.size})"
   return (result, br)
 
 /-- Predefined normalized probability distribution for literal length codes

@@ -888,9 +888,14 @@ private theorem readBits_go_totalBitsRemaining (br : BackwardBitReader)
     · simp only [pure, Except.pure] at h
       rename_i hbr_ne; simp only [beq_iff_eq] at hbr_ne
       rw [ih _ _ h]
-      simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq]
-      by_cases h1 : br.bitsRemaining - 1 = 0 <;> by_cases h2 : br.bytePos > br.startPos <;>
-        simp only [h1, h2, hbr_ne, show ¬((8 : Nat) = 0) from by omega, ↓reduceIte] <;> omega
+      by_cases h1 : br.bitsRemaining - 1 = 0
+      · by_cases h2 : br.bytePos > br.startPos
+        · simp only [h1, hbr_ne, show ¬((8 : Nat) = 0) from by omega, ↓reduceIte, dif_pos h2,
+            BackwardBitReader.totalBitsRemaining, beq_iff_eq]; omega
+        · simp only [h1, hbr_ne, ↓reduceIte, dif_neg h2,
+            BackwardBitReader.totalBitsRemaining, beq_iff_eq]; omega
+      · simp only [h1, ↓reduceIte, BackwardBitReader.totalBitsRemaining, beq_iff_eq, hbr_ne];
+          omega
 
 open Zip.Native (BackwardBitReader) in
 /-- When `readBits.go` succeeds, the initial reader had enough bits. -/
@@ -907,10 +912,15 @@ private theorem readBits_go_totalBitsRemaining_ge (br : BackwardBitReader)
     · simp only [pure, Except.pure] at h
       rename_i hbr_ne; simp only [beq_iff_eq] at hbr_ne
       have hrec := ih _ _ h
-      simp only [BackwardBitReader.totalBitsRemaining, beq_iff_eq] at hrec ⊢
-      by_cases h1 : br.bitsRemaining - 1 = 0 <;> by_cases h2 : br.bytePos > br.startPos <;>
-        simp only [h1, h2, hbr_ne, show ¬((8 : Nat) = 0) from by omega, ↓reduceIte] at hrec ⊢
-          <;> omega
+      by_cases h1 : br.bitsRemaining - 1 = 0
+      · by_cases h2 : br.bytePos > br.startPos
+        · simp only [h1, hbr_ne, show ¬((8 : Nat) = 0) from by omega, ↓reduceIte, dif_pos h2,
+            BackwardBitReader.totalBitsRemaining, beq_iff_eq] at hrec ⊢; omega
+        · simp only [h1, hbr_ne, ↓reduceIte, dif_neg h2,
+            BackwardBitReader.totalBitsRemaining, beq_iff_eq] at hrec ⊢; omega
+      · simp only [h1, ↓reduceIte, BackwardBitReader.totalBitsRemaining, beq_iff_eq, hbr_ne]
+            at hrec ⊢;
+          omega
 
 open Zip.Native (BackwardBitReader) in
 /-- Reading `n` bits from a backward bitstream decreases `totalBitsRemaining`
@@ -1067,10 +1077,10 @@ theorem BackwardBitReader_init_succeeds (data : ByteArray)
     (startPos endPos : Nat)
     (hrange : startPos < endPos)
     (hsize : endPos ≤ data.size)
-    (hlast : data[endPos - 1]! ≠ 0) :
+    (hlast : data[endPos - 1]'(by omega) ≠ 0) :
     ∃ br, BackwardBitReader.init data startPos endPos = .ok br := by
-  simp only [BackwardBitReader.init, bind, Except.bind, pure, Except.pure]
-  rw [if_neg (by omega), if_neg (by omega)]
+  simp only [BackwardBitReader.init]
+  rw [dif_neg (by omega), dif_neg (by omega)]
   obtain ⟨n, hn⟩ := highBitPos_some_of_ne_zero _ hlast
   simp only [hn]; split <;> (try split) <;> exact ⟨_, rfl⟩
 
@@ -1921,8 +1931,8 @@ theorem decodeFseSymbolsWF_loop_size
   | succ n ih =>
     simp only [decodeFseSymbolsWF.loop] at h
     split at h
-    · exact nomatch h
-    · simp only [beq_iff_eq] at h
+    · -- state < table.cells.size: main case
+      simp only [beq_iff_eq] at h
       split at h
       · -- n = 0, last symbol
         simp only [Except.ok.injEq, Prod.mk.injEq] at h
@@ -1936,6 +1946,7 @@ theorem decodeFseSymbolsWF_loop_size
         · rw [ih h]
           simp only [Array.size_push]
           omega
+    · exact nomatch h
 
 open Zip.Native in
 /-- When `decodeFseSymbolsWF` succeeds with `count > 0`, the output array
