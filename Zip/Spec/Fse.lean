@@ -172,9 +172,7 @@ theorem decodeFseLoop_invariant
           -- Split on prob == -1
           by_cases hp1 : (Int32.ofNat val.fst - 1 == -1) = true
           · rw [if_pos hp1] at h
-            rw [ih h, cellCount_push]
-            have heq : Int32.ofNat val.fst - 1 = -1 := eq_of_beq hp1
-            rw [heq]
+            rw [ih h, cellCount_push, eq_of_beq hp1]
             simp only [show ((-1 : Int32).toInt > 0) = False from by decide,
                         show ((-1 : Int32) == -1) = true from by decide,
                         ↓reduceIte]
@@ -379,8 +377,7 @@ private theorem int32_ofNat_sub_one_ge_neg1 {n : Nat} (hn : n < 2 ^ 31) :
     (Int32.ofNat n - 1).toInt ≥ -1 := by
   by_cases h0 : n = 0
   · subst h0; decide
-  · have h1 : 1 ≤ n := Nat.pos_of_ne_zero h0
-    -- Reduce to BitVec level: Int32/UInt32 subtraction is definitionally BitVec subtraction
+  · -- Reduce to BitVec level: Int32/UInt32 subtraction is definitionally BitVec subtraction
     change (BitVec.ofNat 32 n - BitVec.ofNat 32 1).toInt ≥ -1
     simp only [BitVec.toInt, BitVec.toNat_sub, BitVec.toNat_ofNat]
     omega
@@ -424,9 +421,7 @@ theorem decodeFseLoop_probs_ge_neg1
         · rw [if_neg hp0] at h
           by_cases hp1 : (Int32.ofNat val.fst - 1 == -1) = true
           · rw [if_pos hp1] at h
-            have hv : (Int32.ofNat val.fst - 1).toInt ≥ -1 := by
-              have := eq_of_beq hp1; simp only [this]; decide
-            exact ih h (push_preserves_ge_neg1 hbase hv) (by omega)
+            exact ih h (push_preserves_ge_neg1 hbase (by simp [eq_of_beq hp1])) (by omega)
           · rw [if_neg hp1] at h
             by_cases hgt : int32ToNat (Int32.ofNat val.fst - 1) > rem
             · rw [if_pos hgt] at h; exact nomatch h
@@ -871,8 +866,7 @@ theorem readBits_value_lt_pow2 (br : BackwardBitReader) (n : Nat)
     (h : br.readBits n = .ok (val, br')) :
     val.toNat < 2 ^ n := by
   simp only [BackwardBitReader.readBits] at h
-  exact readBits_go_value_bound br n 0 val br' (Nat.le_refl n)
-    (by simp only [UInt32.toNat_zero, Nat.sub_self, Nat.pow_zero, Nat.lt_add_one]) h
+  exact readBits_go_value_bound br n 0 val br' (Nat.le_refl n) (by simp) h
 
 /-! ## BackwardBitReader totalBitsRemaining tracking -/
 
@@ -1483,11 +1477,9 @@ private theorem log2_le_of_lt_pow2_succ (n k : Nat) (h : n < 2 ^ (k + 1)) :
     Nat.log2 n ≤ k := by
   if hle : Nat.log2 n ≤ k then exact hle else
   exfalso
-  have hgt : k + 1 ≤ Nat.log2 n := by omega
-  have h3 : n ≠ 0 := by
-    intro heq; subst heq; exact absurd (show Nat.log2 0 = 0 from by decide) (by omega)
+  have h3 : n ≠ 0 := by intro heq; subst heq; simp at hle
   exact Nat.lt_irrefl _ (Nat.lt_of_lt_of_le h
-    (Nat.le_trans (Nat.pow_le_pow_right (by decide) hgt) (Nat.log2_self_le h3)))
+    (Nat.le_trans (Nat.pow_le_pow_right (by omega) (by omega)) (Nat.log2_self_le h3)))
 
 /-- `n * 2^(k - log2 n) < 2^(k+1)` when `log2 n ≤ k`. This bounds the
     shifted value `nextState <<< numBits` in FSE table construction. -/
