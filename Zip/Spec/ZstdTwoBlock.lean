@@ -1265,6 +1265,7 @@ theorem decompressBlocksWF_rle_then_compressed_literals (data : ByteArray)
 
 /-! ## Frame header position advancement -/
 
+set_option maxHeartbeats 400000 in
 /-- When `parseFrameHeader` succeeds, the returned position advances by at
     least 5 (4 magic bytes + 1 descriptor byte). In practice the minimum
     is 6 bytes (singleSegment frames have at least 1 byte of content size). -/
@@ -1294,6 +1295,7 @@ theorem parseFrameHeader_pos_ge_five (data : ByteArray) (pos : Nat)
             | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
                obtain ⟨-, rfl⟩ := h; omega)
 
+set_option maxHeartbeats 400000 in
 /-- When `parseFrameHeader` succeeds, the returned position is strictly greater
     than the input position. The header is at least 6 bytes (4 magic + 1
     descriptor + at least 1 byte for window descriptor or content size). -/
@@ -1303,6 +1305,7 @@ theorem parseFrameHeader_pos_gt (data : ByteArray) (pos : Nat)
     pos' > pos := by
   have := parseFrameHeader_pos_ge_five data pos header pos' h; omega
 
+set_option maxHeartbeats 400000 in
 /-- When `parseFrameHeader` succeeds, the returned position is within data bounds.
     Each stage of the header has a bounds check (`data.size < off + N → throw`),
     so on the success path, `off + N ≤ data.size` holds at every stage. The final
@@ -1406,6 +1409,7 @@ theorem parseFrameHeader_succeeds (data : ByteArray) (pos : Nat)
 
 /-! ## parseFrameHeader field characterization -/
 
+set_option maxHeartbeats 400000 in
 /-- When `parseFrameHeader` succeeds, the `contentChecksum` field equals
     bit 2 of the descriptor byte at `pos + 4`. -/
 theorem parseFrameHeader_contentChecksum_eq (data : ByteArray) (pos : Nat)
@@ -1434,6 +1438,7 @@ theorem parseFrameHeader_contentChecksum_eq (data : ByteArray) (pos : Nat)
             | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
                obtain ⟨rfl, rfl⟩ := h; rfl)
 
+set_option maxHeartbeats 400000 in
 /-- When `parseFrameHeader` succeeds, the `singleSegment` field equals
     bit 5 of the descriptor byte at `pos + 4`. -/
 theorem parseFrameHeader_singleSegment_eq (data : ByteArray) (pos : Nat)
