@@ -1098,11 +1098,12 @@ private theorem parseHuffmanTreeDescriptor_ok_elim (data : ByteArray) (pos : Nat
     pos' ≥ pos + 2 ∧ pos' ≤ data.size := by
   simp only [parseHuffmanTreeDescriptor, bind, Except.bind] at h
   by_cases h1 : data.size < pos + 1
-  · rw [if_pos h1] at h; exact nomatch h
-  · rw [if_neg h1] at h; simp only [pure, Pure.pure, Except.pure] at h
-    by_cases h2 : data[pos]!.toNat ≥ 128
+  · rw [dif_pos h1] at h; exact nomatch h
+  · rw [dif_neg h1] at h; simp only [pure, Pure.pure, Except.pure] at h
+    have hpos_bound : pos < data.size := by omega
+    by_cases h2 : (data[pos]'hpos_bound).toNat ≥ 128
     · rw [if_pos h2] at h
-      cases hwd : parseHuffmanWeightsDirect data (pos + 1) (data[pos]!.toNat - 127) with
+      cases hwd : parseHuffmanWeightsDirect data (pos + 1) ((data[pos]'hpos_bound).toNat - 127) with
       | error e => simp only [hwd] at h; exact nomatch h
       | ok v =>
         rw [hwd] at h; dsimp only [Bind.bind, Except.bind] at h
@@ -1111,16 +1112,16 @@ private theorem parseHuffmanTreeDescriptor_ok_elim (data : ByteArray) (pos : Nat
         | ok t =>
           rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
           have hpos := parseHuffmanWeightsDirect_pos_eq data (pos + 1)
-            (data[pos]!.toNat - 127) v.fst v.snd hwd
+            ((data[pos]'hpos_bound).toNat - 127) v.fst v.snd hwd
           have hle := parseHuffmanWeightsDirect_le_size data (pos + 1)
-            (data[pos]!.toNat - 127) v.fst v.snd hwd
+            ((data[pos]'hpos_bound).toNat - 127) v.fst v.snd hwd
           obtain ⟨rfl, rfl⟩ := h
           exact ⟨⟨v.fst, hbt⟩, by rw [hpos]; omega, hle⟩
-    · rw [if_neg (show ¬data[pos]!.toNat ≥ 128 from h2)] at h
-      by_cases h3 : (data[pos]!.toNat == 0) = true
+    · rw [if_neg (show ¬(data[pos]'hpos_bound).toNat ≥ 128 from h2)] at h
+      by_cases h3 : ((data[pos]'hpos_bound).toNat == 0) = true
       · rw [if_pos h3] at h; exact nomatch h
       · rw [if_neg h3] at h
-        cases hfse : parseHuffmanWeightsFse data pos data[pos]!.toNat with
+        cases hfse : parseHuffmanWeightsFse data pos (data[pos]'hpos_bound).toNat with
         | error e => simp only [hfse] at h; exact nomatch h
         | ok v =>
           rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
@@ -1129,9 +1130,9 @@ private theorem parseHuffmanTreeDescriptor_ok_elim (data : ByteArray) (pos : Nat
           | ok t =>
             rw [hbt] at h; dsimp only [pure, Pure.pure, Except.pure] at h
             have hpos := parseHuffmanWeightsFse_pos_eq data pos
-              data[pos]!.toNat v.fst v.snd hfse
+              (data[pos]'hpos_bound).toNat v.fst v.snd hfse
             have hle := parseHuffmanWeightsFse_le_size data pos
-              data[pos]!.toNat v.fst v.snd hfse
+              (data[pos]'hpos_bound).toNat v.fst v.snd hfse
             obtain ⟨rfl, rfl⟩ := h
             exact ⟨⟨v.fst, hbt⟩, by rw [hpos]; simp only [beq_iff_eq] at h3; omega, hle⟩
 
@@ -1610,12 +1611,13 @@ theorem parseHuffmanTreeDescriptor_succeeds_direct (data : ByteArray) (pos : Nat
       ∃ table, buildZstdHuffmanTable weights = .ok table) :
     ∃ table afterPos,
       parseHuffmanTreeDescriptor data pos = .ok (table, afterPos) := by
+  rw [getElem!_pos data pos (by omega)] at hheader hweights hbuild
   simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure,
-    show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
-    show data[pos]!.toNat ≥ 128 from hheader]
+    show ¬(data.size < pos + 1) from by omega, dite_false,
+    show (data[pos]'(by omega)).toNat ≥ 128 from hheader]
   -- Chain: parseHuffmanWeightsDirect succeeds, then buildZstdHuffmanTable succeeds
   obtain ⟨weights, afterPos, hw⟩ :=
-    parseHuffmanWeightsDirect_succeeds data (pos + 1) (data[pos]!.toNat - 127) (by omega)
+    parseHuffmanWeightsDirect_succeeds data (pos + 1) ((data[pos]'(by omega)).toNat - 127) (by omega)
   simp only [hw]
   obtain ⟨table, ht⟩ := hbuild weights afterPos hw
   simp only [ht]
@@ -1634,10 +1636,11 @@ theorem parseHuffmanTreeDescriptor_succeeds_fse (data : ByteArray) (pos : Nat)
     (huffTable : ZstdHuffmanTable)
     (htable : buildZstdHuffmanTable weights = .ok huffTable) :
     parseHuffmanTreeDescriptor data pos = .ok (huffTable, afterWeights) := by
+  rw [getElem!_pos data pos (by omega)] at hbyte_pos hbyte_fse hweights
   simp only [parseHuffmanTreeDescriptor, bind, Except.bind, pure, Except.pure,
-    show ¬(data.size < pos + 1) from by omega, ↓reduceIte,
-    show ¬(data[pos]!.toNat ≥ 128) from by omega]
-  have h0 : (data[pos]!.toNat == 0) = false := by rw [beq_eq_false_iff_ne]; omega
+    show ¬(data.size < pos + 1) from by omega, dite_false,
+    show ¬((data[pos]'(by omega)).toNat ≥ 128) from by omega]
+  have h0 : ((data[pos]'(by omega)).toNat == 0) = false := by rw [beq_eq_false_iff_ne]; omega
   simp only [h0, Bool.false_eq_true, ↓reduceIte, hweights, htable]
 
 /-! ## Parsing completeness (raw/RLE) -/
