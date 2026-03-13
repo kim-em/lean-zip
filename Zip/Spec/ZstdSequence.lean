@@ -208,14 +208,14 @@ theorem copyMatch_getElem_ge (buf : ByteArray) (offset length : Nat) (j : Nat)
   simp only [Nat.zero_add] at this
   exact this
 
-private theorem foldl_matchLen_add (init : Nat) (seqs : List ZstdSequence) :
-    List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) init seqs =
-    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.matchLength) 0 seqs := by
+protected theorem foldl_nat_add (f : ZstdSequence → Nat) (init : Nat) (seqs : List ZstdSequence) :
+    List.foldl (fun acc s => acc + f s) init seqs =
+    init + List.foldl (fun acc s => acc + f s) 0 seqs := by
   induction seqs generalizing init with
   | nil => simp only [List.foldl_nil, Nat.add_zero]
   | cons s rest ih =>
     simp only [List.foldl_cons]
-    rw [ih, ih 0, ih (0 + s.matchLength)]
+    rw [ih, ih 0, ih (0 + f s)]
     omega
 
 /-- Loop invariant: if `executeSequences.loop` succeeds, the output size equals
@@ -252,7 +252,7 @@ theorem executeSequences_loop_inv (seqs : List ZstdSequence) (literals : ByteArr
     refine ⟨?_, ?_, ih_bound, by omega⟩
     · rw [ih_size]
       simp only [List.foldl_cons, Nat.zero_add]
-      conv => rhs; rw [foldl_matchLen_add]
+      conv => rhs; rw [Zip.Native.foldl_nat_add]
       generalize List.foldl (fun acc s => acc + s.matchLength) 0 rest = matchSum
       omega
     · omega
@@ -665,6 +665,34 @@ theorem resolveSingleFseTable_repeat_le_size (maxSymbols maxAccLog : Nat)
   have := resolveSingleFseTable_repeat_pos _ _ _ _ _ _ _ _ _ h
   omega
 
+/-- Decompose a successful `resolveSingleFseTable` call in fseCompressed mode into its
+    constituent `decodeFseDistribution` and `buildFseTable` successes, plus the
+    position computation. -/
+private theorem resolveSingleFseTable_fseCompressed_destruct (maxSymbols maxAccLog : Nat)
+    (data : ByteArray) (pos : Nat)
+    (predefinedDist : Array Int32) (predefinedAccLog : Nat)
+    (prevTable : Option FseTable)
+    (table : FseTable) (pos' : Nat)
+    (h : resolveSingleFseTable .fseCompressed maxSymbols maxAccLog data pos
+           predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
+    ∃ (probs : Array Int32) (accLog : Nat) (br' : BitReader),
+      decodeFseDistribution ⟨data, pos, 0⟩ maxSymbols maxAccLog = .ok (probs, accLog, br') ∧
+      buildFseTable probs accLog = .ok table ∧
+      pos' = (if br'.bitOff == 0 then br'.pos else br'.pos + 1) := by
+  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
+  cases hfse : decodeFseDistribution { data, pos, bitOff := 0 } maxSymbols maxAccLog with
+  | error e => rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+  | ok val =>
+    obtain ⟨probs, accLog, br'⟩ := val
+    rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
+    cases hbt : buildFseTable probs accLog with
+    | error e => rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
+    | ok tbl =>
+      rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨probs, accLog, br', rfl, hbt, rfl⟩
+
 /-- In fseCompressed mode, the returned position is strictly greater than the input.
     The branch creates a BitReader at `(pos, bitOff=0)`, calls `decodeFseDistribution`
     (which reads ≥4 bits for the accuracy log), then rounds up to the next byte
@@ -678,33 +706,14 @@ theorem resolveSingleFseTable_fseCompressed_pos_gt (maxSymbols maxAccLog : Nat)
     (h : resolveSingleFseTable .fseCompressed maxSymbols maxAccLog data pos
            predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
     pos' > pos := by
-  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
-  -- Extract decodeFseDistribution call
-  cases hfse : decodeFseDistribution { data, pos, bitOff := 0 } maxSymbols maxAccLog with
-  | error e => rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
-  | ok val =>
-    rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
-    -- Extract buildFseTable call
-    cases hbt : buildFseTable val.1 val.2.1 with
-    | error e => rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
-    | ok tbl =>
-      rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h
-      simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨_, rfl⟩ := h
-      -- Use decodeFseDistribution_bitPos_ge: bitPos ≥ pos*8 + 4 and bitOff < 8
-      have ⟨hge, hbo_lt⟩ := Zstd.Spec.Fse.decodeFseDistribution_bitPos_ge hfse
-        (by omega : (0 : Nat) < 8)
-      simp only [BitReader.bitPos] at hge
-      -- Two cases: bitOff = 0 or bitOff > 0
-      by_cases hbo : val.2.2.bitOff == 0
-      · -- bitOff = 0: afterPos = br'.pos
-        simp only [hbo, ↓reduceIte]
-        have : val.2.2.bitOff = 0 := eq_of_beq hbo
-        rw [this] at hge; omega
-      · -- bitOff > 0: afterPos = br'.pos + 1
-        simp only [hbo, Bool.false_eq_true, ↓reduceIte]
-        -- bitOff < 8 from decodeFseDistribution_bitPos_ge, so pos ≥ pos
-        omega
+  obtain ⟨_, _, br', hfse, _, rfl⟩ :=
+    resolveSingleFseTable_fseCompressed_destruct _ _ _ _ _ _ _ _ _ h
+  have ⟨hge, _⟩ := Zstd.Spec.Fse.decodeFseDistribution_bitPos_ge hfse
+    (by omega : (0 : Nat) < 8)
+  simp only [BitReader.bitPos] at hge
+  by_cases hbo : br'.bitOff == 0
+  · simp only [hbo, ↓reduceIte]; have := eq_of_beq hbo; rw [this] at hge; omega
+  · simp only [hbo, Bool.false_eq_true, ↓reduceIte]; omega
 
 /-! ## resolveSingleFseTable validity — per-mode ValidFseTable proofs -/
 
@@ -776,22 +785,11 @@ theorem resolveSingleFseTable_fseCompressed_valid (maxSymbols maxAccLog : Nat)
            predefinedDist predefinedAccLog prevTable = .ok (table, pos')) :
     ∃ (probs : Array Int32) (accLog : Nat),
       Zstd.Spec.Fse.ValidFseTable table.cells accLog probs.size := by
-  simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h
-  -- Extract decodeFseDistribution call
-  cases hfse : decodeFseDistribution { data, pos, bitOff := 0 } maxSymbols maxAccLog with
-  | error e => rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
-  | ok val =>
-    rw [hfse] at h; dsimp only [Bind.bind, Except.bind] at h
-    -- Extract buildFseTable call
-    cases hbt : buildFseTable val.1 val.2.1 with
-    | error e => rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h; exact nomatch h
-    | ok tbl =>
-      rw [hbt] at h; dsimp only [Bind.bind, Except.bind] at h
-      simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨rfl, _⟩ := h
-      exact ⟨val.1, val.2.1,
-        Zstd.Spec.Fse.buildFseTable_valid _ _ _ hbt
-          (Zstd.Spec.Fse.decodeFseDistribution_size_pos hfse)⟩
+  obtain ⟨probs, accLog, _, hfse, hbt, _⟩ :=
+    resolveSingleFseTable_fseCompressed_destruct _ _ _ _ _ _ _ _ _ h
+  exact ⟨probs, accLog,
+    Zstd.Spec.Fse.buildFseTable_valid _ _ _ hbt
+      (Zstd.Spec.Fse.decodeFseDistribution_size_pos hfse)⟩
 
 /-! ## resolveSingleFseTable unified validity -/
 
@@ -1569,13 +1567,8 @@ theorem executeSequences_history_size
 
 private theorem foldl_litLen_add (init : Nat) (seqs : List ZstdSequence) :
     List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) init seqs =
-    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) 0 seqs := by
-  induction seqs generalizing init with
-  | nil => simp only [List.foldl_nil, Nat.add_zero]
-  | cons s rest ih =>
-    simp only [List.foldl_cons]
-    rw [ih, ih 0, ih (0 + s.literalLength)]
-    omega
+    init + List.foldl (fun acc (s : ZstdSequence) => acc + s.literalLength) 0 seqs :=
+  Zip.Native.foldl_nat_add _ init seqs
 
 /-! ## executeSequences completeness
 
