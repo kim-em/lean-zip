@@ -57,15 +57,18 @@ private def hdrPrefix   := (345, 155)
     and GNU base-256 encoding (high bit set in first byte). -/
 @[noinline] def readNumeric (data : ByteArray) (offset : Nat) (len : Nat) : UInt64 := Id.run do
   if len == 0 then return 0
-  let firstByte := data[offset]!
-  -- GNU base-256: if high bit is set, remaining bytes are big-endian binary
-  if firstByte &&& 0x80 != 0 then
-    let mut result : UInt64 := (firstByte &&& 0x7F).toUInt64
-    for i in [1:len] do
-      result := (result <<< 8) ||| data[offset + i]!.toUInt64
-    return result
-  -- Standard octal ASCII
-  return Binary.readOctal data offset len
+  if h : offset < data.size then
+    let firstByte := data[offset]
+    -- GNU base-256: if high bit is set, remaining bytes are big-endian binary
+    if firstByte &&& 0x80 != 0 then
+      let mut result : UInt64 := (firstByte &&& 0x7F).toUInt64
+      for hi : i in [1:len] do
+        if h2 : offset + i < data.size then
+          result := (result <<< 8) ||| data[offset + i].toUInt64
+      return result
+    -- Standard octal ASCII
+    return Binary.readOctal data offset len
+  else return 0
 
 /-- Parse PAX extended header records from data.
     Format: `<length> <key>=<value>\n` where length includes itself.
@@ -79,8 +82,8 @@ private def hdrPrefix   := (345, 155)
     let mut lenEnd := pos
     let mut validLen := true
     let mut digitCount := 0
-    while lenEnd < data.size do
-      let b := data[lenEnd]!
+    while h : lenEnd < data.size do
+      let b := data[lenEnd]
       if b == ' '.toNat.toUInt8 then
         lenEnd := lenEnd + 1
         break
@@ -100,13 +103,17 @@ private def hdrPrefix   := (345, 155)
     -- Find '=' separator
     let mut eqPos := lenEnd
     while eqPos < recordEnd do
-      if data[eqPos]! == '='.toNat.toUInt8 then break
+      if h : eqPos < data.size then
+        if data[eqPos] == '='.toNat.toUInt8 then break
+      else break
       eqPos := eqPos + 1
     if eqPos < recordEnd then
       let keyBytes := data.extract lenEnd eqPos
       -- Value runs from after '=' to before trailing newline
-      let valueEnd := if recordEnd > 0 && data[recordEnd - 1]! == '\n'.toNat.toUInt8
-                       then recordEnd - 1 else recordEnd
+      let valueEnd := if h : recordEnd - 1 < data.size then
+                        if recordEnd > 0 && data[recordEnd - 1] == '\n'.toNat.toUInt8
+                        then recordEnd - 1 else recordEnd
+                      else recordEnd
       let valueBytes := data.extract (eqPos + 1) valueEnd
       -- Skip records with invalid UTF-8 rather than panicking
       if let (some key, some value) := (String.fromUTF8? keyBytes, String.fromUTF8? valueBytes) then
@@ -198,8 +205,8 @@ def splitPath (path : String) : Option (String × String) := Id.run do
   -- Find last '/' that gives name <= 100 and prefix <= 155
   let bytes := path.toUTF8
   let mut bestSplit : Option Nat := none
-  for i in [:bytes.size] do
-    if bytes[i]! == '/'.toNat.toUInt8 then
+  for h : i in [:bytes.size] do
+    if bytes[i] == '/'.toNat.toUInt8 then
       let nameLen := bytes.size - i - 1
       let pfxLen := i
       if nameLen <= 100 && pfxLen <= 155 then
@@ -214,11 +221,12 @@ def splitPath (path : String) : Option (String × String) := Id.run do
 /-- Compute tar checksum: sum all 512 bytes, treating bytes 148..155 as spaces. -/
 @[noinline] def computeChecksum (header : ByteArray) : UInt32 := Id.run do
   let mut sum : UInt32 := 0
-  for i in [:512] do
+  for h : i in [:header.size] do
+    if i >= 512 then break
     if i >= 148 && i < 156 then
       sum := sum + ' '.toNat.toUInt32
     else
-      sum := sum + (header[i]!).toUInt32
+      sum := sum + header[i].toUInt32
   return sum
 
 -- Helper to write fields into a header at a given offset
@@ -332,11 +340,15 @@ def buildPaxEntry (paxData : ByteArray) (entryPath : String) : IO ByteArray := d
 /-- Parse a 512-byte header block into an Entry. Returns `none` for zero blocks.
     Validates magic and checksum; throws on malformed headers. -/
 def parseHeader (block : ByteArray) : IO (Option Entry) := do
+  if block.size < 512 then
+    throw (IO.userError "tar: header block too short")
+  -- We know block.size ≥ 512 after the guard
   -- Check for zero block (end of archive)
   let allZero := Id.run do
     let mut z := true
-    for i in [:512] do
-      if block[i]! != 0 then
+    for h : i in [:block.size] do
+      if i >= 512 then break
+      if block[i] != 0 then
         z := false
         break
     return z
@@ -358,7 +370,7 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
     mtime := readNumeric block hdrMtime.1 hdrMtime.2
     uid := (Binary.readOctal block hdrUid.1 hdrUid.2).toUInt32
     gid := (Binary.readOctal block hdrGid.1 hdrGid.2).toUInt32
-    typeflag := block[hdrTypeflag.1]!
+    typeflag := if h : hdrTypeflag.1 < block.size then block[hdrTypeflag.1] else 0
     linkname := Binary.readString block hdrLinkname.1 hdrLinkname.2
     uname := Binary.readString block hdrUname.1 hdrUname.2
     gname := Binary.readString block hdrGname.1 hdrGname.2
@@ -428,7 +440,10 @@ partial def createFromDir (output : IO.FS.Stream) (dir : System.FilePath) : IO U
 private def stripTrailingNuls (data : ByteArray) : ByteArray :=
   let n := Id.run do
     let mut n := data.size
-    while n > 0 && data[n - 1]! == 0 do n := n - 1
+    while n > 0 do
+      if h : n - 1 < data.size then
+        if data[n - 1] == 0 then n := n - 1 else break
+      else break
     return n
   data.extract 0 n
 
