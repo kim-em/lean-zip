@@ -178,14 +178,15 @@ private theorem findTableCode_go_of_first_match
     (value i idx : Nat)
     (hi : i ≤ idx)
     (hidx : idx < baseTable.size)
+    (hsize : baseTable.size ≤ extraTable.size)
     (hmatch : idx + 1 < baseTable.size → baseTable[idx + 1]!.toNat > value)
     (hskip : ∀ j, j < idx → j + 1 < baseTable.size ∧
         baseTable[j + 1]!.toNat ≤ value) :
-    findTableCode.go baseTable extraTable value i =
+    findTableCode.go baseTable extraTable value i hsize =
     some (idx, extraTable[idx]!.toNat,
           (value - baseTable[idx]!.toNat).toUInt32) := by
   suffices ∀ k, k = baseTable.size - i →
-      findTableCode.go baseTable extraTable value i =
+      findTableCode.go baseTable extraTable value i hsize =
       some (idx, extraTable[idx]!.toNat,
             (value - baseTable[idx]!.toNat).toUInt32) by
     exact this _ rfl
@@ -224,10 +225,10 @@ protected theorem findLengthCode_agree (length idx extraN extraV : Nat)
   have hidx := hgo.1
   have hbase := hgo.2.1
   have hextraN := hgo.2.2.1
-  show findTableCode.go Inflate.lengthBase Inflate.lengthExtra length 0 =
+  show findTableCode.go Inflate.lengthBase Inflate.lengthExtra length 0 (by decide) =
     some (idx, extraN, extraV.toUInt32)
   have result := findTableCode_go_of_first_match Inflate.lengthBase Inflate.lengthExtra
-    length 0 idx (by omega) (by rw [nativeLengthBase_size]; omega)
+    length 0 idx (by omega) (by rw [nativeLengthBase_size]; omega) (by decide)
     (fun h_next => by
       rw [nativeLengthBase_size] at h_next
       have h1 := nativeLengthBase_eq ⟨idx + 1, h_next⟩
@@ -252,10 +253,10 @@ protected theorem findDistCode_agree (dist idx extraN extraV : Nat)
   have hidx := hgo.1
   have hbase := hgo.2.1
   have hextraN := hgo.2.2.1
-  show findTableCode.go Inflate.distBase Inflate.distExtra dist 0 =
+  show findTableCode.go Inflate.distBase Inflate.distExtra dist 0 (by decide) =
     some (idx, extraN, extraV.toUInt32)
   have result := findTableCode_go_of_first_match Inflate.distBase Inflate.distExtra
-    dist 0 idx (by omega) (by rw [nativeDistBase_size]; omega)
+    dist 0 idx (by omega) (by rw [nativeDistBase_size]; omega) (by decide)
     (fun h_next => by
       rw [nativeDistBase_size] at h_next
       have h1 := nativeDistBase_eq ⟨idx + 1, h_next⟩
