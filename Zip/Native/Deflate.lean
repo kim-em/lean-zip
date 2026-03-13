@@ -83,16 +83,18 @@ def fixedLitCodes : Array (UInt16 × UInt8) :=
 def fixedDistCodes : Array (UInt16 × UInt8) :=
   canonicalCodes Inflate.fixedDistLengths
 
-/-- Inner loop for `findTableCode`: linear search through base/extra tables. -/
+/-- Inner loop for `findTableCode`: linear search through base/extra tables.
+    Requires `baseTable.size ≤ extraTable.size` for safe indexing. -/
 def findTableCode.go (baseTable : Array UInt16) (extraTable : Array UInt8)
-    (value : Nat) (i : Nat) : Option (Nat × Nat × UInt32) :=
+    (value : Nat) (i : Nat) (hsize : baseTable.size ≤ extraTable.size) :
+    Option (Nat × Nat × UInt32) :=
   if i + 1 < baseTable.size then
     if baseTable[i + 1]!.toNat > value then
       let extra := extraTable[i]!.toNat
       let extraVal := (value - baseTable[i]!.toNat).toUInt32
       some (i, extra, extraVal)
     else
-      findTableCode.go baseTable extraTable value (i + 1)
+      findTableCode.go baseTable extraTable value (i + 1) hsize
   else if i < baseTable.size then
     let extra := extraTable[i]!.toNat
     let extraVal := (value - baseTable[i]!.toNat).toUInt32
@@ -105,8 +107,9 @@ termination_by baseTable.size - i
     Returns (code_index, extra_bits_count, extra_bits_value).
     Used for both length codes (RFC 1951 §3.2.5) and distance codes. -/
 def findTableCode (baseTable : Array UInt16) (extraTable : Array UInt8)
-    (value : Nat) : Option (Nat × Nat × UInt32) :=
-  findTableCode.go baseTable extraTable value 0
+    (value : Nat) (hsize : baseTable.size ≤ extraTable.size := by decide) :
+    Option (Nat × Nat × UInt32) :=
+  findTableCode.go baseTable extraTable value 0 hsize
 
 /-- Find length code for length 3–258.
     Returns (code_index 0–28, extra_bits_count, extra_bits_value). -/
