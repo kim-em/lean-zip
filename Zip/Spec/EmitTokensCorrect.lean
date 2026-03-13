@@ -67,19 +67,26 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
     -- Case split on token type, then reduce let-match pattern
     cases htok : tokens[i] with
     | literal b =>
-      simp only [array_get!Internal_eq]  -- normalize get!Internal → [·]!
+      simp only []
       -- Spec side
       have htok_list : tokens.toList[i] = .literal b := htoList ▸ htok
       simp only [LZ77Token.toLZ77Symbol, htok_list, Deflate.Spec.encodeLitLen] at hencsym
       have ⟨hcw, hlen⟩ := Deflate.encodeSymbol_litTable_eq b.toNat symBits hencsym
-      -- BitWriter correspondence + IH
+      -- Bridge: convert [·]! hypotheses to [·] (proven-bounds) to match goal
+      have hb_lt : b.toNat < fixedLitCodes.size := by
+        have := UInt8.toNat_lt b; rw [Deflate.fixedLitCodes_size]; omega
+      rw [getElem!_pos fixedLitCodes b.toNat hb_lt] at hcw hlen
+      -- BitWriter correspondence + IH (explicit args for getInternal/getElem unification)
       have hwf' := BitWriter.writeHuffCode_wf bw
-        fixedLitCodes[b.toNat]!.1 fixedLitCodes[b.toNat]!.2 hwf hlen
+        (fixedLitCodes[b.toNat]'hb_lt).1 (fixedLitCodes[b.toNat]'hb_lt).2 hwf hlen
       have hbits := BitWriter.writeHuffCode_toBits bw
-        fixedLitCodes[b.toNat]!.1 fixedLitCodes[b.toNat]!.2 hwf hlen
-      rw [ih _ (i + 1) restBits hwf' hencrest (by omega), hbits, hcw, List.append_assoc]
+        (fixedLitCodes[b.toNat]'hb_lt).1 (fixedLitCodes[b.toNat]'hb_lt).2 hwf hlen
+      -- Build ih result then rewrite its RHS (avoids getInternal/getElem mismatch in rw)
+      have h_ih := ih _ (i + 1) restBits hwf' hencrest (by omega)
+      rw [hbits, List.append_assoc] at h_ih
+      rw [hcw]; exact h_ih
     | reference len dist =>
-      simp only [array_get!Internal_eq]  -- normalize get!Internal → [·]!
+      simp only []
       -- Spec side: decompose encodeLitLen for reference
       have htok_list : tokens.toList[i] = .reference len dist := htoList ▸ htok
       simp only [LZ77Token.toLZ77Symbol, htok_list, Deflate.Spec.encodeLitLen] at hencsym
@@ -126,30 +133,40 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
               have dextraN_le : dextraN ≤ 25 := by
                 rw [hfdc_spec.2.2.1]
                 exact Nat.le_trans (Deflate.distExtra_le_13 didx hfdc_spec.1) (by omega)
-              -- Reduce native findLengthCode/findDistCode matches
-              simp only [hnflc, hnfdc]
-              -- Normalize lidx + 257 → 257 + lidx to match spec convention
-              rw [show lidx + 257 = 257 + lidx from by omega]
-              -- Chain BitWriter correspondence (explicit args to avoid inference failure)
-              let lcode := fixedLitCodes[257 + lidx]!.fst
-              let llen := fixedLitCodes[257 + lidx]!.snd
-              let dcode := fixedDistCodes[didx]!.fst
-              let dlen := fixedDistCodes[didx]!.snd
-              have hwf1 := BitWriter.writeHuffCode_wf bw lcode llen hwf hllen
-              have hbits1 := BitWriter.writeHuffCode_toBits bw lcode llen hwf hllen
-              let bw1 := bw.writeHuffCode lcode llen
-              have hwf2 := BitWriter.writeBits_wf bw1 lextraN lextraV.toUInt32 hwf1 lextraN_le
-              have hbits2 := BitWriter.writeBits_toBits bw1 lextraN lextraV.toUInt32 hwf1 lextraN_le
-              let bw2 := bw1.writeBits lextraN lextraV.toUInt32
-              have hwf3 := BitWriter.writeHuffCode_wf bw2 dcode dlen hwf2 hdlen
-              have hbits3 := BitWriter.writeHuffCode_toBits bw2 dcode dlen hwf2 hdlen
-              let bw3 := bw2.writeHuffCode dcode dlen
-              have hwf4 := BitWriter.writeBits_wf bw3 dextraN dextraV.toUInt32 hwf3 dextraN_le
-              have hbits4 := BitWriter.writeBits_toBits bw3 dextraN dextraV.toUInt32 hwf3 dextraN_le
-              -- Apply IH for remaining tokens
-              rw [ih _ (i + 1) restBits hwf4 hencrest (by omega),
-                hbits4, hbits3, hbits2, hbits1, hlcw, hdcw]
-              -- UInt32 faithfulness for extra values
+              -- Bounds for the if-guards in the implementation
+              have hlit_bound : lidx + 257 < fixedLitCodes.size := by
+                have := hflc_spec.1; rw [Deflate.fixedLitCodes_size]; omega
+              have hdist_bound : didx < fixedDistCodes.size := by
+                have := hfdc_spec.1; rw [Deflate.fixedDistCodes_size]; omega
+              -- Convert [·]! bridge lemma results to [·] (proven-bounds) form
+              rw [show 257 + lidx = lidx + 257 from by omega] at hlcw hllen
+              rw [getElem!_pos fixedLitCodes (lidx + 257) hlit_bound] at hlcw hllen
+              rw [getElem!_pos fixedDistCodes didx hdist_bound] at hdcw hdlen
+              -- Reduce native findLengthCode/findDistCode matches and if-guards
+              simp only [hnflc, hnfdc, dif_pos hlit_bound, dif_pos hdist_bound]
+              -- Chain BitWriter correspondence (explicit args for getInternal unification)
+              have hwf1 := BitWriter.writeHuffCode_wf bw
+                (fixedLitCodes[lidx + 257]'hlit_bound).1 (fixedLitCodes[lidx + 257]'hlit_bound).2
+                hwf hllen
+              have hbits1 := BitWriter.writeHuffCode_toBits bw
+                (fixedLitCodes[lidx + 257]'hlit_bound).1 (fixedLitCodes[lidx + 257]'hlit_bound).2
+                hwf hllen
+              have hwf2 := BitWriter.writeBits_wf _ lextraN lextraV.toUInt32 hwf1 lextraN_le
+              have hbits2 := BitWriter.writeBits_toBits _ lextraN lextraV.toUInt32 hwf1 lextraN_le
+              have hwf3 := BitWriter.writeHuffCode_wf _
+                (fixedDistCodes[didx]'hdist_bound).1 (fixedDistCodes[didx]'hdist_bound).2
+                hwf2 hdlen
+              have hbits3 := BitWriter.writeHuffCode_toBits _
+                (fixedDistCodes[didx]'hdist_bound).1 (fixedDistCodes[didx]'hdist_bound).2
+                hwf2 hdlen
+              have hwf4 := BitWriter.writeBits_wf _ dextraN dextraV.toUInt32 hwf3 dextraN_le
+              have hbits4 := BitWriter.writeBits_toBits _ dextraN dextraV.toUInt32 hwf3 dextraN_le
+              -- Build IH result, expand BitWriter chain on h_ih
+              have h_ih := ih _ (i + 1) restBits hwf4 hencrest (by omega)
+              rw [hbits4, hbits3, hbits2, hbits1, List.append_assoc, List.append_assoc,
+                List.append_assoc, List.append_assoc] at h_ih
+              -- Expand spec symbols on goal, normalize UInt32
+              rw [hlcw, hdcw]
               have hlextraV_small : lextraV < 2 ^ 32 := Nat.lt_of_lt_of_le
                 hflc_spec.2.2.2 (Nat.pow_le_pow_right (by omega) (by omega))
               have hdextraV_small : dextraV < 2 ^ 32 := Nat.lt_of_lt_of_le
@@ -157,8 +174,8 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
               simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat,
                 show lextraV % 2 ^ 32 = lextraV from Nat.mod_eq_of_lt hlextraV_small,
                 show dextraV % 2 ^ 32 = dextraV from Nat.mod_eq_of_lt hdextraV_small,
-                List.append_assoc]
-              rfl
+                List.append_assoc] at h_ih ⊢
+              exact h_ih
 
 /-- `emitTokens` produces the same bit sequence as spec `encodeSymbols`. -/
 theorem emitTokens_spec (bw : BitWriter) (tokens : Array LZ77Token)
@@ -300,18 +317,6 @@ theorem canonicalCodes_size (lengths : Array UInt8) (maxBits : Nat := 15) :
   rw [Deflate.Correctness.canonicalCodes_go_size]
   simp only [Array.size_replicate]
 
-/-- `fixedLitCodes` has size 288 (= Inflate.fixedLitLengths.size). -/
-private theorem fixedLitCodes_size : fixedLitCodes.size = 288 := by
-  show (canonicalCodes Inflate.fixedLitLengths).size = 288
-  rw [canonicalCodes_size]
-  simp only [Inflate.fixedLitLengths, Array.size_append, Array.size_replicate]
-
-/-- `fixedDistCodes` has size 32 (= Inflate.fixedDistLengths.size). -/
-private theorem fixedDistCodes_size : fixedDistCodes.size = 32 := by
-  show (canonicalCodes Inflate.fixedDistLengths).size = 32
-  rw [canonicalCodes_size]
-  simp only [Inflate.fixedDistLengths, Array.size_replicate]
-
 /-- `canonicalCodes.go` preserves a bound on `.snd.toNat`: if all entries in
     `result` have `.snd.toNat ≤ bound` and all entries in `lengths` have
     `.toNat ≤ bound`, then the output has all `.snd.toNat ≤ bound`. -/
@@ -438,42 +443,51 @@ private theorem emitTokens_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
     | .literal b =>
       simp only []
       have hb : b.toNat < fixedLitCodes.size := by
-        have := fixedLitCodes_size
+        have := Deflate.fixedLitCodes_size
         have : b.toNat < 256 := UInt8.toNat_lt b
         omega
+      have hsnd := fixedLitCodes_snd_le b.toNat hb
+      rw [getElem!_pos fixedLitCodes b.toNat hb] at hsnd
       exact ih _ (i + 1)
-        (BitWriter.writeHuffCode_wf bw _ _ hwf (fixedLitCodes_snd_le b.toNat hb))
+        (BitWriter.writeHuffCode_wf bw
+          (fixedLitCodes[b.toNat]'hb).1 (fixedLitCodes[b.toNat]'hb).2 hwf hsnd)
         (by omega)
     | .reference len dist =>
       simp only []
-      match hflc : findLengthCode len with
+      match hflc_pf : findLengthCode len with
       | none =>
         exact ih _ (i + 1) hwf (by omega)
       | some (idx, extraCount, extraVal) =>
-        simp only []
-        have hidx := nativeFindLengthCode_idx_bound len idx extraCount extraVal hflc
-        have hlen_code := fixedLitCodes_snd_le (idx + 257)
-          (by have := fixedLitCodes_size; omega)
+        have hidx := nativeFindLengthCode_idx_bound len idx extraCount extraVal hflc_pf
+        have hlit_bound : idx + 257 < fixedLitCodes.size := by
+          have := Deflate.fixedLitCodes_size; omega
+        -- Resolve the if-guard for lit code bounds
+        simp only [dif_pos hlit_bound]
+        have hlen_code := fixedLitCodes_snd_le (idx + 257) hlit_bound
+        rw [getElem!_pos fixedLitCodes (idx + 257) hlit_bound] at hlen_code
         have hextraN_le : extraCount ≤ 25 := by
-          have := nativeFindLengthCode_extraN_bound len idx extraCount extraVal hflc; omega
+          have := nativeFindLengthCode_extraN_bound len idx extraCount extraVal hflc_pf; omega
         have hwf1 := BitWriter.writeHuffCode_wf bw
-          fixedLitCodes[idx + 257]!.1 fixedLitCodes[idx + 257]!.2 hwf hlen_code
-        have hwf2 := BitWriter.writeBits_wf
-          (bw.writeHuffCode fixedLitCodes[idx + 257]!.1 fixedLitCodes[idx + 257]!.2)
-          extraCount extraVal hwf1 hextraN_le
-        match hfdc : findDistCode dist with
+          (fixedLitCodes[idx + 257]'hlit_bound).1 (fixedLitCodes[idx + 257]'hlit_bound).2
+          hwf hlen_code
+        have hwf2 := BitWriter.writeBits_wf _ extraCount extraVal hwf1 hextraN_le
+        match hfdc_pf : findDistCode dist with
         | none =>
           simp only []
           exact ih _ (i + 1) hwf2 (by omega)
         | some (dIdx, dExtraCount, dExtraVal) =>
-          simp only []
-          have hdidx := nativeFindDistCode_idx_bound dist dIdx dExtraCount dExtraVal hfdc
-          have hdlen_code := fixedDistCodes_snd_le dIdx
-            (by have := fixedDistCodes_size; omega)
+          have hdidx := nativeFindDistCode_idx_bound dist dIdx dExtraCount dExtraVal hfdc_pf
+          have hdist_bound : dIdx < fixedDistCodes.size := by
+            have := Deflate.fixedDistCodes_size; omega
+          -- Resolve the if-guard for dist code bounds
+          simp only [dif_pos hdist_bound]
+          have hdlen_code := fixedDistCodes_snd_le dIdx hdist_bound
+          rw [getElem!_pos fixedDistCodes dIdx hdist_bound] at hdlen_code
           have hdextraN_le : dExtraCount ≤ 25 := by
-            have := nativeFindDistCode_extraN_bound dist dIdx dExtraCount dExtraVal hfdc; omega
+            have := nativeFindDistCode_extraN_bound dist dIdx dExtraCount dExtraVal hfdc_pf; omega
           have hwf3 := BitWriter.writeHuffCode_wf _
-            fixedDistCodes[dIdx]!.1 fixedDistCodes[dIdx]!.2 hwf2 hdlen_code
+            (fixedDistCodes[dIdx]'hdist_bound).1 (fixedDistCodes[dIdx]'hdist_bound).2
+            hwf2 hdlen_code
           have hwf4 := BitWriter.writeBits_wf _ dExtraCount dExtraVal hwf3 hdextraN_le
           exact ih _ (i + 1) hwf4 (by omega)
 
