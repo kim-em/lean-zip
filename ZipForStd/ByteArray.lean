@@ -105,4 +105,18 @@ theorem getElem!_set!_ne (data : ByteArray) (i j : Nat) (v : UInt8) (hij : i ≠
   show (data.data.set! i v)[j]! = data.data[j]!
   exact Array.getElem!_set!_ne data.data i j v hij
 
+/-- Proven-bounds variant: setting byte at `i` doesn't affect reads at different index `j`. -/
+theorem getElem_set!_ne (data : ByteArray) (i j : Nat) (v : UInt8) (hij : i ≠ j)
+    (hj : j < data.size) :
+    (data.set! i v)[j]'(by rw [size_set!]; exact hj) = data[j] := by
+  rw [← getElem!_pos (data.set! i v) j (by rw [size_set!]; exact hj),
+      ← getElem!_pos data j hj,
+      getElem!_set!_ne _ _ _ _ hij]
+
+/-- Proven-bounds variant: setting byte at `i` and reading at `i` returns the written value. -/
+theorem getElem_set!_self (data : ByteArray) (i : Nat) (v : UInt8) (h : i < data.size) :
+    (data.set! i v)[i]'(by rw [size_set!]; exact h) = v := by
+  rw [← getElem!_pos (data.set! i v) i (by rw [size_set!]; exact h),
+      getElem!_set!_self _ _ _ h]
+
 end ByteArray
