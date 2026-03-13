@@ -8,14 +8,14 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
 - **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
-- **Sessions**: ~597 completed (Feb 19 – Mar 12)
+- **Sessions**: ~608 completed (Feb 19 – Mar 13)
 - **Source files**: 103 (49 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 28 test)
-- **Merged PRs**: 565
-- **Spec lines**: 35,676 across 49 spec files
+- **Merged PRs**: 584
+- **Spec lines**: 36,353 across 49 spec files
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
-- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 5 bare in Zstd.lean only (ZstdHuffman.lean now clean)
+- **Bare simp_all**: 0 across DEFLATE spec files (campaign complete); 2 bare in Zstd.lean only
 - **simp_all with args**: 0 in DEFLATE spec files; 0 in ZstdHuffman.lean (previously 6, now eliminated)
-- **Zstd spec**: 491 declarations across 6 files (15,091 lines)
+- **Zstd spec**: 422 declarations across 6 files (15,811 lines)
 
 ## Milestones
 
@@ -1694,7 +1694,42 @@ The review campaign reached diminishing returns — most files in the final
 batch required minimal or no changes, confirming convergence toward
 stable proof quality.
 
+**11-PR batch (Mar 12–13): WellFormedBlocks all-type induction + review campaign + benchmarks:**
+
+This batch generalized the WellFormedBlocks induction predicate to all block
+types, expanded block-level two-block succeeds coverage, continued the Zstd
+proof quality review campaign, and consolidated benchmark infrastructure.
+
+*Track E feature PRs (3):*
+- #1361: `WellFormedSimpleBlocks` induction predicate for raw/RLE N-block
+  sequences
+- #1372: `WellFormedBlocks` generalized to all 8 block types (raw, RLE,
+  compressed_literals, compressed_sequences × last/non-last). **Milestone**:
+  universal induction predicate for arbitrary block sequences.
+- #1382: Block-level two-block succeeds for raw/RLE + compressed_sequences
+  combinations (closes #1232)
+
+*Proof quality reviews (3 PRs):*
+- #1359: Zstd.lean foundational sections audit — proof compression
+- #1380: Zstd.lean step theorems + raw/RLE two-block audit
+- #1383: Fse.lean proof quality audit — compressed proof patterns
+
+*Proof compression (1 PR):*
+- #1358: GzipCorrect + ZlibCorrect proof pattern compression
+
+*Infrastructure (3 PRs):*
+- #1356: Recovered skill updates from superseded PR #1351
+- #1368: Meditate — two-block completion + review campaign transition
+- #1377: Rebased ZstdFrame.lean review PRs (#1366 + #1371), net −149 lines
+
+*Track D (1 PR):*
+- #1357: Benchmark consolidation — merged NativeCompressBench + NativeScale
+  into unified Benchmark.lean, added Zstd multi-iteration support
+
+Bare simp_all in Zstd.lean: 5 → 2. Zstd spec lines: 15,091 → 15,811.
+
 **Remaining:**
+- Zstd.lean at 6754 lines needs splitting (plan: #1391)
 - Prove remaining sorry stubs: 4 in XxHash (UInt64 test vectors too
   expensive for kernel evaluation — intractable without native_decide)
 - Composed completeness: lift czs+czs and czs+cs to API level (19→21),
@@ -1709,8 +1744,8 @@ stable proof quality.
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~597 sessions (Feb 19 – Mar 12)
-- 565 merged PRs
+- ~608 sessions (Feb 19 – Mar 13)
+- 584 merged PRs
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
