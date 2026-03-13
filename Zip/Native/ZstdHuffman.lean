@@ -77,48 +77,52 @@ def weightsToMaxBits (weights : Array UInt8) : Except String Nat := do
     WF recursive version of `for j in [:stride]` for provability.
     Each step either writes via `set!` (preserving size) or skips. -/
 def fillHuffmanTableInnerWF (table : Array HuffmanEntry) (entry : HuffmanEntry)
-    (code stride tableSize sym lastSymbol j : Nat) :
+    (code stride sym lastSymbol j : Nat) :
     Except String (Array HuffmanEntry) :=
   if j ≥ stride then
     .ok table
   else
     let idx := code + j
-    if idx < tableSize then
-      fillHuffmanTableInnerWF (table.set! idx entry) entry
-        code stride tableSize sym lastSymbol (j + 1)
+    if hidx : idx < table.size then
+      fillHuffmanTableInnerWF (table.set idx entry) entry
+        code stride sym lastSymbol (j + 1)
     else if sym != lastSymbol then
-      .error s!"Zstd: Huffman table index {idx} out of range (tableSize={tableSize})"
+      .error s!"Zstd: Huffman table index {idx} out of range (tableSize={table.size})"
     else
       fillHuffmanTableInnerWF table entry
-        code stride tableSize sym lastSymbol (j + 1)
+        code stride sym lastSymbol (j + 1)
 termination_by stride - j
 
 /-- Outer loop: fill the Huffman lookup table for all symbols.
     WF recursive version of `for sym in [:numSymbols]` for provability.
     Threads both `table` and `nextCode` through iterations. -/
 def fillHuffmanTableWF (table : Array HuffmanEntry) (allWeights : Array UInt8)
-    (nextCode : Array Nat) (maxBits tableSize numSymbols lastSymbol sym : Nat) :
+    (nextCode : Array Nat) (maxBits numSymbols lastSymbol sym : Nat)
+    (haw : numSymbols ≤ allWeights.size) :
     Except String (Array HuffmanEntry × Array Nat) :=
-  if sym ≥ numSymbols then
+  if hsym : sym ≥ numSymbols then
     .ok (table, nextCode)
   else
-    let w := allWeights[sym]!.toNat
+    let w := allWeights[sym]'(by omega) |>.toNat
     if w == 0 then
-      fillHuffmanTableWF table allWeights nextCode maxBits tableSize
-        numSymbols lastSymbol (sym + 1)
+      fillHuffmanTableWF table allWeights nextCode maxBits
+        numSymbols lastSymbol (sym + 1) haw
     else
       let numBits := maxBits + 1 - w
-      let code := nextCode[w]!
-      let nextCode' := nextCode.set! w (code + (1 <<< (w - 1)))
-      let entry : HuffmanEntry :=
-        { symbol := sym.toUInt8, numBits := numBits.toUInt8 }
-      let stride := 1 <<< (w - 1)
-      match fillHuffmanTableInnerWF table entry code stride tableSize
-              sym lastSymbol 0 with
-      | .ok table' =>
-        fillHuffmanTableWF table' allWeights nextCode' maxBits tableSize
-          numSymbols lastSymbol (sym + 1)
-      | .error e => .error e
+      if hw : w < nextCode.size then
+        let code := nextCode[w]
+        let nextCode' := nextCode.set w (code + (1 <<< (w - 1)))
+        let entry : HuffmanEntry :=
+          { symbol := sym.toUInt8, numBits := numBits.toUInt8 }
+        let stride := 1 <<< (w - 1)
+        match fillHuffmanTableInnerWF table entry code stride
+                sym lastSymbol 0 with
+        | .ok table' =>
+          fillHuffmanTableWF table' allWeights nextCode' maxBits
+            numSymbols lastSymbol (sym + 1) haw
+        | .error e => .error e
+      else
+        .error s!"Zstd: Huffman weight {w} exceeds nextCode array size {nextCode.size}"
 termination_by numSymbols - sym
 
 /-- Build a Zstd Huffman decoding table from a weight array (RFC 8878 §4.2.1).
@@ -162,9 +166,11 @@ def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTab
   -- Count symbols per weight
   let mut weightCounts : Array Nat := Array.replicate (maxBits + 2) 0
   for i in [:numSymbols] do
-    let w := allWeights[i]!.toNat
-    if w > 0 && w < weightCounts.size then
-      weightCounts := weightCounts.set! w (weightCounts[w]! + 1)
+    if hi : i < allWeights.size then
+      let w := allWeights[i]'hi |>.toNat
+      if _ : w > 0 then
+        if hwc : w < weightCounts.size then
+          weightCounts := weightCounts.set w (weightCounts[w] + 1)
   -- Compute starting codes for each weight (ascending weight = shorter codes = higher codes)
   -- Symbols with weight 1 have numberOfBits = maxBits, so they occupy 1 entry each.
   -- Symbols with weight maxBits have numberOfBits = 1, so they occupy 2^(maxBits-1) entries each.
@@ -172,12 +178,14 @@ def buildZstdHuffmanTable (weights : Array UInt8) : Except String ZstdHuffmanTab
   let mut pos : Nat := 0
   for w in List.range (maxBits + 1) do
     if w > 0 then
-      nextCode := nextCode.set! w pos
-      pos := pos + weightCounts[w]! * (1 <<< (w - 1))
+      if hw : w < nextCode.size then
+        nextCode := nextCode.set w pos
+        if hwc : w < weightCounts.size then
+          pos := pos + weightCounts[w] * (1 <<< (w - 1))
 
   -- Fill the table (WF recursion for provability — see fillHuffmanTableWF)
   let (filledTable, _) ← fillHuffmanTableWF table allWeights nextCode
-    maxBits tableSize numSymbols lastSymbol 0
+    maxBits numSymbols lastSymbol 0 (by simp [numSymbols, allWeights, Array.size_push])
 
   return { maxBits, table := filledTable }
 
@@ -254,14 +262,21 @@ def decodeHuffmanSymbol (htable : ZstdHuffmanTable) (br : BackwardBitReader) :
   -- Read available bits and left-align to maxBits width for table lookup
   let (bits, _) ← br.readBits peekBits
   let lookupVal := bits.toNat <<< (htable.maxBits - peekBits)
-  let entry := htable.table[lookupVal]!
-  let numBits := entry.numBits.toNat
-  if numBits > avail then
-    throw s!"Zstd Huffman: need {numBits} bits but only {avail} remain"
-  -- Re-read only numBits from the original position to advance correctly
-  let (bits2, br2) ← br.readBits numBits
-  let entry2 := htable.table[bits2.toNat <<< (htable.maxBits - numBits)]!
-  return (entry2.symbol, br2)
+  if h1 : lookupVal < htable.table.size then
+    let entry := htable.table[lookupVal]
+    let numBits := entry.numBits.toNat
+    if numBits > avail then
+      throw s!"Zstd Huffman: need {numBits} bits but only {avail} remain"
+    -- Re-read only numBits from the original position to advance correctly
+    let (bits2, br2) ← br.readBits numBits
+    let idx2 := bits2.toNat <<< (htable.maxBits - numBits)
+    if h2 : idx2 < htable.table.size then
+      let entry2 := htable.table[idx2]
+      return (entry2.symbol, br2)
+    else
+      throw s!"Zstd Huffman: table index {idx2} out of range (table size {htable.table.size})"
+  else
+    throw s!"Zstd Huffman: table index {lookupVal} out of range (table size {htable.table.size})"
 
 /-- Decode `count` Huffman symbols from a backward bitstream.
     Returns the decoded bytes as a ByteArray. -/

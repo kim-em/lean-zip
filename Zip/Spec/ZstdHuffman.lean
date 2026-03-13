@@ -254,9 +254,9 @@ open Zip.Native in
     (which preserves size) or leaves the table unchanged. -/
 private theorem fillHuffmanTableInnerWF_preserves_size
     (table : Array HuffmanEntry) (entry : HuffmanEntry)
-    (code stride tableSize sym lastSymbol j : Nat)
+    (code stride sym lastSymbol j : Nat)
     (result : Array HuffmanEntry)
-    (h : fillHuffmanTableInnerWF table entry code stride tableSize sym lastSymbol j = .ok result) :
+    (h : fillHuffmanTableInnerWF table entry code stride sym lastSymbol j = .ok result) :
     result.size = table.size := by
   unfold fillHuffmanTableInnerWF at h
   split at h
@@ -265,15 +265,15 @@ private theorem fillHuffmanTableInnerWF_preserves_size
   · -- j < stride: reduce `have idx := ...`
     dsimp only [] at h
     split at h
-    · -- idx < tableSize: recurse with table.set!
-      have ih := fillHuffmanTableInnerWF_preserves_size _ entry code stride tableSize
+    · -- idx < table.size: recurse with table.set
+      have ih := fillHuffmanTableInnerWF_preserves_size _ entry code stride
         sym lastSymbol (j + 1) result h
-      rw [ih, Array.size_set!]
-    · -- idx ≥ tableSize
+      rw [ih, Array.size_set]
+    · -- idx ≥ table.size
       split at h
       · exact nomatch h  -- throw: contradiction
       · -- skip: recurse with table unchanged
-        exact fillHuffmanTableInnerWF_preserves_size _ entry code stride tableSize
+        exact fillHuffmanTableInnerWF_preserves_size _ entry code stride
           sym lastSymbol (j + 1) result h
 termination_by stride - j
 
@@ -281,10 +281,11 @@ open Zip.Native in
 /-- The outer fill loop preserves array size. -/
 private theorem fillHuffmanTableWF_preserves_size
     (table : Array HuffmanEntry) (allWeights : Array UInt8)
-    (nextCode : Array Nat) (maxBits tableSize numSymbols lastSymbol sym : Nat)
+    (nextCode : Array Nat) (maxBits numSymbols lastSymbol sym : Nat)
+    (haw : numSymbols ≤ allWeights.size)
     (resultTable : Array HuffmanEntry) (resultNextCode : Array Nat)
-    (h : fillHuffmanTableWF table allWeights nextCode maxBits tableSize
-      numSymbols lastSymbol sym = .ok (resultTable, resultNextCode)) :
+    (h : fillHuffmanTableWF table allWeights nextCode maxBits
+      numSymbols lastSymbol sym haw = .ok (resultTable, resultNextCode)) :
     resultTable.size = table.size := by
   unfold fillHuffmanTableWF at h
   split at h
@@ -294,17 +295,20 @@ private theorem fillHuffmanTableWF_preserves_size
     dsimp only [] at h
     split at h
     · -- w == 0: recurse unchanged
-      exact fillHuffmanTableWF_preserves_size _ allWeights nextCode maxBits tableSize
-        numSymbols lastSymbol (sym + 1) resultTable resultNextCode h
-    · -- w ≠ 0: split on the inner match result
+      exact fillHuffmanTableWF_preserves_size _ allWeights nextCode maxBits
+        numSymbols lastSymbol (sym + 1) haw resultTable resultNextCode h
+    · -- w ≠ 0: split on guard
       split at h
-      · -- inner succeeded with table'
-        rename_i _ _ hinner
-        have hsize := fillHuffmanTableInnerWF_preserves_size _ _ _ _ _ _ _ _ _ hinner
-        have ih := fillHuffmanTableWF_preserves_size _ allWeights _ maxBits tableSize
-          numSymbols lastSymbol _ resultTable resultNextCode h
-        rw [ih, hsize]
-      · exact nomatch h  -- inner threw: contradiction
+      · -- w < nextCode.size: split on inner match
+        split at h
+        · -- inner succeeded with table'
+          rename_i _ _ _ hinner
+          have hsize := fillHuffmanTableInnerWF_preserves_size _ _ _ _ _ _ _ _ hinner
+          have ih := fillHuffmanTableWF_preserves_size _ allWeights _ maxBits
+            numSymbols lastSymbol _ haw resultTable resultNextCode h
+          rw [ih, hsize]
+        · exact nomatch h  -- inner threw
+      · exact nomatch h  -- w ≥ nextCode.size: threw
 termination_by numSymbols - sym
 
 /-- Decompose a successful `buildZstdHuffmanTable` call: `weightsToMaxBits` succeeded
@@ -357,21 +361,20 @@ theorem buildZstdHuffmanTable_maxBits_pos (weights : Array UInt8)
   weightsToMaxBits_ge_one weights result.maxBits (buildZstdHuffmanTable_ok_elim weights result h).1
 
 open Zip.Native in
-/-- `Array.set!` preserves a pointwise property on `HuffmanEntry` arrays:
+/-- `Array.set` preserves a pointwise property on `HuffmanEntry` arrays:
     if all entries satisfy `P` and the new value satisfies `P`, then all
     entries of the updated array satisfy `P`. -/
-private theorem huffman_set!_preserves_forall {P : HuffmanEntry → Prop}
+private theorem huffman_set_preserves_forall {P : HuffmanEntry → Prop}
     {table : Array HuffmanEntry} {idx : Nat} {v : HuffmanEntry}
+    {hidx : idx < table.size}
     (hall : ∀ j : Fin table.size, P table[j])
     (hv : P v) :
-    ∀ j : Fin (table.set! idx v).size, P (table.set! idx v)[j] := by
+    ∀ j : Fin (table.set idx v hidx).size, P (table.set idx v hidx)[j] := by
   intro ⟨j, hj⟩
-  simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds] at hj
-  show P (table.setIfInBounds idx v)[j]
+  simp only [Array.size_set] at hj
   by_cases hij : idx = j
-  · subst hij
-    exact (Array.getElem_setIfInBounds_self (h := by simp only [Array.size_setIfInBounds]; exact hj)) ▸ hv
-  · exact (Array.getElem_setIfInBounds_ne hj hij) ▸ hall ⟨j, hj⟩
+  · subst hij; exact Array.getElem_set_self hidx ▸ hv
+  · exact (Array.getElem_set_ne hidx hj hij) ▸ hall ⟨j, hj⟩
 
 open Zip.Native in
 /-- The inner fill loop preserves the `numBits ≤ maxBits` invariant.
@@ -379,11 +382,11 @@ open Zip.Native in
     (where `w ≥ 1`, so `numBits.toNat ≤ maxBits`) or leaves the table unchanged. -/
 private theorem fillHuffmanTableInnerWF_numBits_le
     (table : Array HuffmanEntry) (entry : HuffmanEntry)
-    (code stride tableSize sym lastSymbol j : Nat)
+    (code stride sym lastSymbol j : Nat)
     (result : Array HuffmanEntry) (maxBits : Nat)
     (hentry : entry.numBits.toNat ≤ maxBits)
     (hinv : ∀ i : Fin table.size, table[i].numBits.toNat ≤ maxBits)
-    (h : fillHuffmanTableInnerWF table entry code stride tableSize sym lastSymbol j = .ok result) :
+    (h : fillHuffmanTableInnerWF table entry code stride sym lastSymbol j = .ok result) :
     ∀ i : Fin result.size, result[i].numBits.toNat ≤ maxBits := by
   unfold fillHuffmanTableInnerWF at h
   split at h
@@ -392,14 +395,14 @@ private theorem fillHuffmanTableInnerWF_numBits_le
   · -- j < stride
     dsimp only [] at h
     split at h
-    · -- idx < tableSize: recurse with table.set!
-      exact fillHuffmanTableInnerWF_numBits_le _ entry code stride tableSize
+    · -- idx < table.size: recurse with table.set
+      exact fillHuffmanTableInnerWF_numBits_le _ entry code stride
         sym lastSymbol (j + 1) result maxBits hentry
-        (huffman_set!_preserves_forall (P := fun e => e.numBits.toNat ≤ maxBits) hinv hentry) h
+        (huffman_set_preserves_forall (P := fun e => e.numBits.toNat ≤ maxBits) hinv hentry) h
     · split at h
       · exact nomatch h  -- throw: contradiction
       · -- skip: recurse with table unchanged
-        exact fillHuffmanTableInnerWF_numBits_le _ entry code stride tableSize
+        exact fillHuffmanTableInnerWF_numBits_le _ entry code stride
           sym lastSymbol (j + 1) result maxBits hentry hinv h
 termination_by stride - j
 
@@ -409,11 +412,12 @@ open Zip.Native in
     Since `w ≥ 1`, `(maxBits + 1 - w) ≤ maxBits`, so `numBits.toNat ≤ maxBits`. -/
 private theorem fillHuffmanTableWF_numBits_le
     (table : Array HuffmanEntry) (allWeights : Array UInt8)
-    (nextCode : Array Nat) (maxBits tableSize numSymbols lastSymbol sym : Nat)
+    (nextCode : Array Nat) (maxBits numSymbols lastSymbol sym : Nat)
+    (haw : numSymbols ≤ allWeights.size)
     (resultTable : Array HuffmanEntry) (resultNextCode : Array Nat)
     (hinv : ∀ i : Fin table.size, table[i].numBits.toNat ≤ maxBits)
-    (h : fillHuffmanTableWF table allWeights nextCode maxBits tableSize
-      numSymbols lastSymbol sym = .ok (resultTable, resultNextCode)) :
+    (h : fillHuffmanTableWF table allWeights nextCode maxBits
+      numSymbols lastSymbol sym haw = .ok (resultTable, resultNextCode)) :
     ∀ i : Fin resultTable.size, resultTable[i].numBits.toNat ≤ maxBits := by
   unfold fillHuffmanTableWF at h
   split at h
@@ -423,27 +427,30 @@ private theorem fillHuffmanTableWF_numBits_le
     dsimp only [] at h
     split at h
     · -- w == 0: recurse unchanged
-      exact fillHuffmanTableWF_numBits_le _ allWeights nextCode maxBits tableSize
-        numSymbols lastSymbol (sym + 1) resultTable resultNextCode hinv h
-    · -- w ≠ 0: inner loop then recurse
+      exact fillHuffmanTableWF_numBits_le _ allWeights nextCode maxBits
+        numSymbols lastSymbol (sym + 1) haw resultTable resultNextCode hinv h
+    · -- w ≠ 0
       rename_i hw0
       split at h
-      · -- inner succeeded
-        rename_i _ hinner
-        have hw_pos : allWeights[sym]!.toNat ≥ 1 := by
-          revert hw0; simp only [beq_iff_eq]; omega
-        have hentry : ({ symbol := sym.toUInt8,
-                         numBits := (maxBits + 1 - allWeights[sym]!.toNat).toUInt8 }
-                       : HuffmanEntry).numBits.toNat ≤ maxBits := by
-          simp only [Nat.toUInt8_eq, UInt8.toNat_ofNat']
-          have hmod : (maxBits + 1 - allWeights[sym]!.toNat) % 2 ^ 8 ≤
-                  maxBits + 1 - allWeights[sym]!.toNat := Nat.mod_le _ _
-          omega
-        have hinv' := fillHuffmanTableInnerWF_numBits_le _ _ _ _ _ _ _ _ _
-          maxBits hentry hinv hinner
-        exact fillHuffmanTableWF_numBits_le _ allWeights _ maxBits tableSize
-          numSymbols lastSymbol _ resultTable resultNextCode hinv' h
-      · exact nomatch h  -- inner threw
+      · -- w < nextCode.size: inner loop then recurse
+        split at h
+        · -- inner succeeded
+          rename_i _ _ hinner
+          have hw_pos : (allWeights[sym]'(by omega)).toNat ≥ 1 := by
+            revert hw0; simp only [beq_iff_eq]; omega
+          have hentry : ({ symbol := sym.toUInt8,
+                           numBits := (maxBits + 1 - (allWeights[sym]'(by omega)).toNat).toUInt8 }
+                         : HuffmanEntry).numBits.toNat ≤ maxBits := by
+            simp only [Nat.toUInt8_eq, UInt8.toNat_ofNat']
+            have hmod : (maxBits + 1 - (allWeights[sym]'(by omega)).toNat) % 2 ^ 8 ≤
+                    maxBits + 1 - (allWeights[sym]'(by omega)).toNat := Nat.mod_le _ _
+            omega
+          have hinv' := fillHuffmanTableInnerWF_numBits_le _ _ _ _ _ _ _ _
+            maxBits hentry hinv hinner
+          exact fillHuffmanTableWF_numBits_le _ allWeights _ maxBits
+            numSymbols lastSymbol _ haw resultTable resultNextCode hinv' h
+        · exact nomatch h  -- inner threw
+      · exact nomatch h  -- w ≥ nextCode.size: threw
 termination_by numSymbols - sym
 
 open Zip.Native in
@@ -1203,13 +1210,23 @@ private theorem decodeHuffmanSymbol_readBits_elim
   | ok v1 =>
     obtain ⟨bits1, br1⟩ := v1
     rw [hrd1] at h
-    simp only [pure, Pure.pure, Except.pure] at h
-    split at h; · exact nomatch h
-    split at h; · exact nomatch h
-    rename_i v2 hrd2
-    simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨_, rfl⟩ := h
-    exact ⟨_, _, hrd2⟩
+    dsimp only [pure, Pure.pure, Except.pure, Bind.bind, Except.bind] at h
+    split at h
+    · -- lookupVal < table.size
+      split at h; · exact nomatch h  -- numBits > avail
+      cases hrd2 : br.readBits _ with
+      | error => rw [hrd2] at h; exact nomatch h
+      | ok v2 =>
+        obtain ⟨bits2, br2⟩ := v2
+        rw [hrd2] at h
+        dsimp only [] at h
+        split at h
+        · -- idx2 < table.size
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, rfl⟩ := h
+          exact ⟨_, _, hrd2⟩
+        · exact nomatch h  -- idx2 ≥ table.size
+    · exact nomatch h  -- lookupVal ≥ table.size
 
 open Zip.Native in
 /-- When `decodeHuffmanSymbol` succeeds, the bit budget does not increase.
@@ -1242,27 +1259,33 @@ theorem decodeHuffmanSymbol_bits_le_maxBits
   | ok v1 =>
     obtain ⟨bits1, br1⟩ := v1
     rw [hrd1] at h
-    simp only [pure, Pure.pure, Except.pure] at h
-    split at h; · exact nomatch h
-    split at h; · exact nomatch h
-    rename_i v2 hrd2
-    simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨_, rfl⟩ := h
-    have hsub := Zstd.Spec.Fse.readBits_totalBitsRemaining_sub br _ _ _ hrd2
-    rw [hsub]
-    -- Need: numBits ≤ maxBits from ValidHuffmanTable
-    have h_nb_le : htable.table[bits1.toNat <<< (htable.maxBits - min htable.maxBits br.totalBitsRemaining)]!.numBits.toNat ≤ htable.maxBits := by
-      let idx := bits1.toNat <<< (htable.maxBits - min htable.maxBits br.totalBitsRemaining)
-      show htable.table[idx]!.numBits.toNat ≤ htable.maxBits
-      simp only [getElem!_def]
-      split
-      · rename_i e he
-        obtain ⟨hi, heq⟩ := Array.getElem?_eq_some_iff.mp he
-        rw [← heq]
-        exact hvalid.2.1 ⟨idx, hi⟩
-      · have : (default : HuffmanEntry).numBits.toNat = 0 := by decide
-        omega
-    omega
+    dsimp only [pure, Pure.pure, Except.pure, Bind.bind, Except.bind] at h
+    split at h
+    · -- lookupVal < table.size
+      rename_i hidx1
+      split at h; · exact nomatch h  -- numBits > avail
+      cases hrd2 : br.readBits _ with
+      | error => rw [hrd2] at h; exact nomatch h
+      | ok v2 =>
+        obtain ⟨bits2, br2⟩ := v2
+        rw [hrd2] at h
+        dsimp only [] at h
+        split at h
+        · -- idx2 < table.size
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, rfl⟩ := h
+          have hsub := Zstd.Spec.Fse.readBits_totalBitsRemaining_sub br _ _ _ hrd2
+          rw [hsub]
+          -- numBits ≤ maxBits from ValidHuffmanTable and proven bounds
+          -- readBits gives us br'.totalBitsRemaining = br.totalBitsRemaining - numBits
+          -- where numBits = entry.numBits.toNat from the table lookup
+          -- hvalid gives us entry.numBits.toNat ≤ maxBits
+          -- The Fin vs Nat index discrepancy needs `show` to align
+          suffices htable.table[bits1.toNat <<< (htable.maxBits -
+            min htable.maxBits br.totalBitsRemaining)].numBits.toNat ≤ htable.maxBits by omega
+          exact hvalid.2.1 ⟨_, hidx1⟩
+        · exact nomatch h  -- idx2 ≥ table.size
+    · exact nomatch h  -- lookupVal ≥ table.size
 
 open Zip.Native in
 /-- The `data` field is unchanged by `decodeHuffmanSymbol`. -/
