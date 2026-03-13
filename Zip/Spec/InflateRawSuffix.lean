@@ -193,13 +193,17 @@ private theorem readCLCodeLengths_append (br : BitReader) (suffix : ByteArray)
   unfold Inflate.readCLCodeLengths at h ⊢
   by_cases hlt : i < numCodeLen
   · rw [if_pos hlt] at h ⊢
-    simp only [bind, Except.bind] at h ⊢
-    cases hrb : br.readBits 3 with
-    | error e => simp only [hrb] at h; exact nomatch h
-    | ok p =>
-      obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
-      rw [readBits_append br suffix 3 v br₁ hrb]; dsimp only []
-      exact readCLCodeLengths_append br₁ suffix _ (i + 1) numCodeLen result br' h
+    split at h
+    · rename_i h_i
+      simp only [dif_pos h_i] at ⊢
+      simp only [bind, Except.bind] at h ⊢
+      cases hrb : br.readBits 3 with
+      | error e => simp only [hrb] at h; exact nomatch h
+      | ok p =>
+        obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
+        rw [readBits_append br suffix 3 v br₁ hrb]; dsimp only []
+        exact readCLCodeLengths_append br₁ suffix _ (i + 1) numCodeLen result br' h
+    · exact nomatch h
   · rw [if_neg hlt] at h ⊢
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
     obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
@@ -241,15 +245,19 @@ private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suf
           · rw [if_pos hidx0] at h ⊢; exact nomatch h
           · rw [if_neg hidx0] at h ⊢
             simp only [pure, Except.pure] at h ⊢
-            cases hrb : br₁.readBits 2 with
-            | error e => simp only [hrb] at h; exact nomatch h
-            | ok p =>
-              obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
-              rw [readBits_append br₁ suffix 2 rep br₂ hrb]; dsimp only []
-              by_cases hgt : idx + (rep.toNat + 3) > totalCodes
-              · rw [if_pos hgt] at h ⊢; exact nomatch h
-              · rw [if_neg hgt] at h ⊢
-                exact hrec _ br₂ _ (by omega) h
+            split at h
+            · rename_i h_cl
+              simp only [dif_pos h_cl] at ⊢
+              cases hrb : br₁.readBits 2 with
+              | error e => simp only [hrb] at h; exact nomatch h
+              | ok p =>
+                obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
+                rw [readBits_append br₁ suffix 2 rep br₂ hrb]; dsimp only []
+                by_cases hgt : idx + (rep.toNat + 3) > totalCodes
+                · rw [if_pos hgt] at h ⊢; exact nomatch h
+                · rw [if_neg hgt] at h ⊢
+                  exact hrec _ br₂ _ (by omega) h
+            · exact nomatch h
         · rw [if_neg hs16eq] at h ⊢
           by_cases hs17 : (sym == 17) = true
           · rw [if_pos hs17] at h ⊢

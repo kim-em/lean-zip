@@ -462,14 +462,16 @@ theorem readCLCodeLengths_inv (br br' : BitReader)
     intro br cl i ncl heq h hpos hple
     unfold Inflate.readCLCodeLengths at h
     split at h
-    · simp only [bind, Except.bind] at h
-      cases hrb : br.readBits 3 with
-      | error e => simp only [hrb] at h; exact nomatch h
-      | ok p =>
-        obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
-        have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 3 v hrb hpos hple
-        have ⟨hd', hp', hl'⟩ := ih br₁ _ (i + 1) ncl (by omega) h hpos₁ hple₁
-        exact ⟨hd'.trans hd₁, hp', hl'⟩
+    · split at h
+      · simp only [bind, Except.bind] at h
+        cases hrb : br.readBits 3 with
+        | error e => simp only [hrb] at h; exact nomatch h
+        | ok p =>
+          obtain ⟨v, br₁⟩ := p; simp only [hrb] at h
+          have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ 3 v hrb hpos hple
+          have ⟨hd', hp', hl'⟩ := ih br₁ _ (i + 1) ncl (by omega) h hpos₁ hple₁
+          exact ⟨hd'.trans hd₁, hp', hl'⟩
+      · exact nomatch h
     · simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨_, rfl⟩ := h; exact ⟨rfl, hpos, hple⟩
 
@@ -515,16 +517,20 @@ theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
         · -- sym == 16: repeat previous
           split at h
           · exact nomatch h  -- idx == 0 error
-          · -- readBits 2
+          · -- idx ≠ 0
             split at h
-            · exact nomatch h  -- readBits error
-            · rename_i v₁ hrb_eq
-              obtain ⟨rep, br₂⟩ := v₁; simp only [] at hrb_eq h
-              have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 rep hrb_eq hpos₁ hple₁
+            · -- idx - 1 < codeLengths.size
+              -- readBits 2
               split at h
-              · exact nomatch h  -- repeat exceeds total
-              · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
-                exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
+              · exact nomatch h  -- readBits error
+              · rename_i v₁ hrb_eq
+                obtain ⟨rep, br₂⟩ := v₁; simp only [] at hrb_eq h
+                have ⟨hd₂, hpos₂, hple₂⟩ := readBits_inv br₁ br₂ 2 rep hrb_eq hpos₁ hple₁
+                split at h
+                · exact nomatch h  -- repeat exceeds total
+                · have ⟨hd', hp', hl'⟩ := hrec _ br₂ _ (by omega) h hpos₂ hple₂
+                  exact ⟨hd'.trans (hd₂.trans hd₁), hp', hl'⟩
+            · exact nomatch h  -- idx out of bounds error
         · split at h
           · -- sym == 17: zero-fill short
             split at h

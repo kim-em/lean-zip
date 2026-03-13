@@ -188,8 +188,11 @@ private theorem fillEntries_snd_eq (arr : Array UInt8) (idx count bound : Nat) (
 def readCLCodeLengths (br : BitReader) (clLengths : Array UInt8)
     (i numCodeLen : Nat) : Except String (Array UInt8 × BitReader) :=
   if i < numCodeLen then do
-    let (v, br) ← br.readBits 3
-    readCLCodeLengths br (clLengths.set! (codeLengthOrder[i]!) v.toUInt8) (i + 1) numCodeLen
+    if h_i : i < codeLengthOrder.size then
+      let (v, br) ← br.readBits 3
+      readCLCodeLengths br (clLengths.set! (codeLengthOrder[i]) v.toUInt8) (i + 1) numCodeLen
+    else
+      throw "Inflate: code length index out of bounds"
   else
     .ok (clLengths, br)
 termination_by numCodeLen - i
@@ -208,12 +211,14 @@ def decodeCLSymbols (clTree : HuffTree) (br : BitReader)
       decodeCLSymbols clTree br (codeLengths.set! idx sym.toUInt8) (idx + 1) totalCodes
     else if sym == 16 then
       if idx == 0 then throw "Inflate: repeat code at start"
-      let (rep, br) ← br.readBits 2
-      let prev := codeLengths[idx - 1]!
-      let count := rep.toNat + 3
-      if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
-      decodeCLSymbols clTree br (fillEntries codeLengths idx count totalCodes prev).1
-        (idx + count) totalCodes
+      if h_cl : idx - 1 < codeLengths.size then do
+        let (rep, br) ← br.readBits 2
+        let prev := codeLengths[idx - 1]
+        let count := rep.toNat + 3
+        if idx + count > totalCodes then throw "Inflate: repeat code exceeds total"
+        decodeCLSymbols clTree br (fillEntries codeLengths idx count totalCodes prev).1
+          (idx + count) totalCodes
+      else throw "Inflate: repeat code index out of bounds"
     else if sym == 17 then
       let (rep, br) ← br.readBits 3
       let count := rep.toNat + 3

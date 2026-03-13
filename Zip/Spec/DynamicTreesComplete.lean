@@ -21,6 +21,7 @@ protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hsize : clLengths.size = 19)
+    (hnum : numCodeLen ≤ 19)
     (hspec : Deflate.Spec.readCLLengths (numCodeLen - i) i
         (clLengths.toList.map UInt8.toNat) br.toBits =
         some (clLengths', rest)) :
@@ -80,9 +81,12 @@ protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
       refine ⟨br', clArr, ?_, heq, hrest', hwf', hpos'⟩
       -- Unfold native
       unfold Zip.Native.Inflate.readCLCodeLengths
-      simp only [if_pos hi, bind, Except.bind]
+      have h_clo_sz : Zip.Native.Inflate.codeLengthOrder.size = 19 := by decide
+      have h_i : i < Zip.Native.Inflate.codeLengthOrder.size := by omega
+      simp only [if_pos hi, dif_pos h_i, bind, Except.bind]
       -- readBits 3 succeeds
       rw [hrb_nat]
+      rw [getElem!_pos Zip.Native.Inflate.codeLengthOrder i h_i |>.symm]
       exact hrec
 
 -- guard/pure/Pure.pure false positives: removing them breaks the proof
@@ -254,6 +258,8 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                 have hidx_ne0 : ((idx == 0) = false) := by
                   rw [beq_eq_false_iff_ne]; omega
                 simp only [hidx_ne0, Bool.false_eq_true, ↓reduceIte, pure, Except.pure]
+                have h_cl : idx - 1 < codeLengths.size := by omega
+                simp only [dif_pos h_cl]
                 rw [hrd_nat]
                 have hrep_toNat : rep.toUInt32.toNat = rep :=
                   Nat.mod_eq_of_lt (by omega)
@@ -261,6 +267,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                   rw [hrep_toNat]; omega
                 simp only [hcount, ↓reduceIte]
                 rw [show rep.toUInt32.toNat + 3 = rep + 3 from by rw [hrep_toNat]]
+                rw [getElem!_pos codeLengths (idx - 1) h_cl |>.symm]
                 exact hrec
               · -- bound fails: none = some contradiction
                 exact nomatch hspec
@@ -447,9 +454,11 @@ protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
             simp only [Nat.sub_zero, Array.toList_replicate, List.map_replicate,
               show (0 : UInt8).toNat = 0 from rfl]
             rw [hrest₃]; exact hrcl_spec
+          have hnum : hclen_v + 4 ≤ 19 := by
+            have h := hval3; simp only [Nat.reducePow] at h; omega
           have ⟨br₄, clArr, hrcl_nat, hcl_eq, hrest₄, hwf₄, hpos₄⟩ :=
             Correctness.readCLCodeLengths_complete br₃ (.replicate 19 0) 0
-              (hclen_v + 4) clLengths bits₄ hwf₃ hpos₃ hsize_repl hrcl_rewrite
+              (hclen_v + 4) clLengths bits₄ hwf₃ hpos₃ hsize_repl hnum hrcl_rewrite
           have hcl_sz : clArr.size = 19 := by
             simpa only [] using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl_nat
           -- Step 5: ValidLengths guard for CL tree
