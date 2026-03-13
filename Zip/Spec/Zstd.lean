@@ -2335,7 +2335,7 @@ theorem parseFrameHeader_succeeds (data : ByteArray) (pos : Nat)
       -- omega closes error branches (guard contradicts hsize)
       repeat (first | contradiction | (simp only [Bool.false_eq_true, ite_false, ite_true] at hsize; omega) | (split at hres))
     · -- singleSegment = false: window descriptor present
-      have hss_false : ss = false := by cases ss <;> simp_all
+      have hss_false : ss = false := by cases ss <;> first | rfl | exact absurd rfl hss_val
       simp only [hss_false, Bool.not_false, ite_true, ite_false,
         Bool.false_eq_true] at hres hsize
       -- Window descriptor guard
@@ -2436,7 +2436,7 @@ theorem parseFrameHeader_dictionaryId_eq (data : ByteArray) (pos : Nat)
           all_goals first
             | contradiction
             | (simp only [Except.ok.injEq, Prod.mk.injEq] at h
-               obtain ⟨rfl, rfl⟩ := h; simp_all)
+               obtain ⟨rfl, rfl⟩ := h; grind)
 
 /-! ## Window size characterizing properties -/
 
@@ -2470,10 +2470,9 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
     obtain ⟨header, afterHeader⟩ := val
     have hgt1 := parseFrameHeader_pos_gt _ _ _ _ hph
     simp only [hph, bind, Except.bind, pure, Except.pure] at h
-    -- Dictionary check then decompressBlocks
-    split at h  -- dictionaryId
-    · -- some dictId
-      split at h  -- dictId != 0
+    -- Dictionary check: close the dictId != 0 error branch, then handle both paths uniformly
+    split at h
+    · split at h
       · exact nomatch h
       · unfold Zip.Native.decompressBlocks at h
         cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
@@ -2482,22 +2481,15 @@ theorem decompressFrame_pos_gt (data : ByteArray) (pos : Nat)
         | ok val2 =>
           obtain ⟨content, afterBlocks⟩ := val2
           have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
-          simp only [hdb] at h
-          -- grind handles nested checksum/contentSize case-splitting and
-          -- propagates pos' > pos from hgt1 and hgt2 through all branches.
-          grind
-    · -- none
-      unfold Zip.Native.decompressBlocks at h
+          simp only [hdb] at h; grind
+    · unfold Zip.Native.decompressBlocks at h
       cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
           ByteArray.empty none {} #[1, 4, 8] with
       | error e => simp only [hdb] at h; exact nomatch h
       | ok val2 =>
         obtain ⟨content, afterBlocks⟩ := val2
         have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb
-        simp only [hdb] at h
-        -- grind handles nested checksum/contentSize case-splitting and
-        -- propagates pos' > pos from hgt1 and hgt2 through all branches.
-        grind
+        simp only [hdb] at h; grind
 
 /-- When `decompressFrame` succeeds, the returned position is within data bounds.
     This is the frame-level capstone of the le_size campaign: it composes
@@ -2512,9 +2504,8 @@ theorem decompressFrame_le_size (data : ByteArray) (pos : Nat)
   | ok val =>
     obtain ⟨header, afterHeader⟩ := val
     simp only [hph, bind, Except.bind, pure, Except.pure] at h
-    split at h  -- dictionaryId
-    · -- some dictId
-      split at h  -- dictId != 0
+    split at h
+    · split at h
       · exact nomatch h
       · unfold Zip.Native.decompressBlocks at h
         cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
@@ -2523,18 +2514,15 @@ theorem decompressFrame_le_size (data : ByteArray) (pos : Nat)
         | ok val2 =>
           obtain ⟨content, afterBlocks⟩ := val2
           have hle := decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ hdb
-          simp only [hdb] at h
-          grind
-    · -- none
-      unfold Zip.Native.decompressBlocks at h
+          simp only [hdb] at h; grind
+    · unfold Zip.Native.decompressBlocks at h
       cases hdb : Zip.Native.decompressBlocksWF data afterHeader header.windowSize
           ByteArray.empty none {} #[1, 4, 8] with
       | error e => simp only [hdb] at h; exact nomatch h
       | ok val2 =>
         obtain ⟨content, afterBlocks⟩ := val2
         have hle := decompressBlocksWF_le_size _ _ _ _ _ _ _ _ _ hdb
-        simp only [hdb] at h
-        grind
+        simp only [hdb] at h; grind
 
 /-! ## Frame-level content characterization -/
 
