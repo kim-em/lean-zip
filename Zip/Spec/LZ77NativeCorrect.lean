@@ -31,12 +31,20 @@ theorem lz77Greedy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
   split
   · rename_i hlt
     split
-    · rename_i heq
-      have ih := lz77Greedy.go_matches data p1 p2 (i + 1) maxLen (by omega)
-      refine ⟨fun j hj hjn => ?_, by omega, ih.2.2⟩
-      by_cases hji : j = i
-      · subst hji; exact beq_iff_eq.mp heq
-      · exact ih.1 j (by omega) hjn
+    · rename_i h1
+      split
+      · rename_i h2
+        split
+        · rename_i heq
+          have ih := lz77Greedy.go_matches data p1 p2 (i + 1) maxLen (by omega)
+          refine ⟨fun j hj hjn => ?_, by omega, ih.2.2⟩
+          by_cases hji : j = i
+          · subst hji
+            rw [getElem!_pos data _ h1, getElem!_pos data _ h2]
+            exact beq_iff_eq.mp heq
+          · exact ih.1 j (by omega) hjn
+        · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
+      · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
     · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
   · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
 termination_by maxLen - i
@@ -166,7 +174,7 @@ theorem trailing_valid (data : ByteArray) (pos : Nat) :
   unfold lz77Greedy.trailing
   split
   · rename_i hlt
-    exact .literal hlt rfl (trailing_valid data (pos + 1))
+    exact .literal hlt (getElem!_pos data pos hlt) (trailing_valid data (pos + 1))
   · exact .done (by omega)
 termination_by data.size - pos
 
@@ -198,9 +206,12 @@ theorem mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
                 hashTable[lz77Greedy.hash3 data pos hashSize]! from by omega]
             exact (hcm.1 i hi).symm
           · exact mainLoop_valid _ _ _ _ _ _ hw
-        · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
-      · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
-    · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
+        · exact .literal (by omega) (getElem!_pos data pos (by omega))
+            (mainLoop_valid _ _ _ _ _ _ hw)
+      · exact .literal (by omega) (getElem!_pos data pos (by omega))
+          (mainLoop_valid _ _ _ _ _ _ hw)
+    · exact .literal (by omega) (getElem!_pos data pos (by omega))
+        (mainLoop_valid _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 
@@ -355,12 +366,20 @@ theorem lz77Lazy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
   split
   · rename_i hlt
     split
-    · rename_i heq
-      have ih := lz77Lazy.go_matches data p1 p2 (i + 1) maxLen (by omega)
-      refine ⟨fun j hj hjn => ?_, by omega, ih.2.2⟩
-      by_cases hji : j = i
-      · subst hji; exact beq_iff_eq.mp heq
-      · exact ih.1 j (by omega) hjn
+    · rename_i h1
+      split
+      · rename_i h2
+        split
+        · rename_i heq
+          have ih := lz77Lazy.go_matches data p1 p2 (i + 1) maxLen (by omega)
+          refine ⟨fun j hj hjn => ?_, by omega, ih.2.2⟩
+          by_cases hji : j = i
+          · subst hji
+            rw [getElem!_pos data _ h1, getElem!_pos data _ h2]
+            exact beq_iff_eq.mp heq
+          · exact ih.1 j (by omega) hjn
+        · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
+      · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
     · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
   · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
 termination_by maxLen - i
@@ -377,7 +396,7 @@ theorem lz77Lazy.trailing_valid (data : ByteArray) (pos : Nat) :
   unfold lz77Lazy.trailing
   split
   · rename_i hlt
-    exact .literal hlt rfl (lz77Lazy.trailing_valid data (pos + 1))
+    exact .literal hlt (getElem!_pos data pos hlt) (lz77Lazy.trailing_valid data (pos + 1))
   · exact .done (by omega)
 termination_by data.size - pos
 
@@ -470,7 +489,7 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
                   have hcm2 := lz77Lazy.countMatch_matches data
                     (hashTable.set! (lz77Lazy.hash3 data pos hashSize) pos)[lz77Lazy.hash3 data (pos + 1) hashSize]!
                     (pos + 1) (min 258 (data.size - (pos + 1)))
-                  exact .literal (by omega) rfl
+                  exact .literal (by omega) (getElem!_pos data pos (by omega))
                     (.reference (by omega)
                       (by omega) (Nat.sub_le _ _) hle2
                       (fun i hi => by
@@ -492,11 +511,14 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
             exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
               hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
         · -- ¬(pos + matchLen ≤ data.size) → literal
-          exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
+          exact .literal (by omega) (getElem!_pos data pos (by omega))
+            (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
       · -- ¬(matchLen ≥ 3) → literal
-        exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
+        exact .literal (by omega) (getElem!_pos data pos (by omega))
+          (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
     · -- ¬(isValid && ...) → literal
-      exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
+      exact .literal (by omega) (getElem!_pos data pos (by omega))
+        (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
   · exact lz77Lazy.trailing_valid data pos
 termination_by data.size - pos
 decreasing_by all_goals omega

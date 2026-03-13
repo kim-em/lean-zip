@@ -317,7 +317,7 @@ theorem deflateFixed_spec (data : ByteArray) :
       simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Greedy.trailing data 0 = [] := by
         unfold lz77Greedy.trailing
-        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
       simp only [this])
 
 /-! ## Inflate completeness (restricted) -/
@@ -413,7 +413,11 @@ private theorem go_eq (data : ByteArray) (p1 p2 i maxLen : Nat) :
     unfold lz77GreedyIter.go lz77Greedy.go
     split
     · split
-      · exact ih _ (by omega) _ rfl
+      · split
+        · split
+          · exact ih _ (by omega) _ rfl
+          · rfl
+        · rfl
       · rfl
     · rfl
 
@@ -513,7 +517,7 @@ theorem deflateLazy_spec (data : ByteArray) :
       simp only [lz77Lazy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Lazy.trailing data 0 = [] := by
         unfold lz77Lazy.trailing
-        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
       simp only [this])
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes

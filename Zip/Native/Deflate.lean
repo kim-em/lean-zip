@@ -137,30 +137,35 @@ def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
     (mainLoop data windowSize hashSize
       (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
 where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
-    let a := data[pos]!.toNat
-    let b := data[pos + 1]!.toNat
-    let c := data[pos + 2]!.toNat
+  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
+      (_ : pos + 2 < data.size := by omega) : Nat :=
+    let a := data[pos].toNat
+    let b := data[pos + 1].toNat
+    let c := data[pos + 2].toNat
     ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
     go data p1 p2 0 maxLen
   go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
     if i < maxLen then
-      if data[p1 + i]! == data[p2 + i]! then
-        go data p1 p2 (i + 1) maxLen
+      if h1 : p1 + i < data.size then
+        if h2 : p2 + i < data.size then
+          if data[p1 + i] == data[p2 + i] then
+            go data p1 p2 (i + 1) maxLen
+          else i
+        else i
       else i
     else i
   termination_by maxLen - i
   trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
-    if pos < data.size then
-      .literal data[pos]! :: trailing data (pos + 1)
+    if h : pos < data.size then
+      .literal data[pos] :: trailing data (pos + 1)
     else []
   termination_by data.size - pos
   updateHashes (data : ByteArray) (hashSize : Nat)
       (hashTable : Array Nat) (hashValid : Array Bool)
       (pos j matchLen : Nat) : Array Nat × Array Bool :=
     if j < matchLen then
-      if pos + j + 2 < data.size then
+      if hpj : pos + j + 2 < data.size then
         let h := hash3 data (pos + j) hashSize
         updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
           pos (j + 1) matchLen
@@ -189,13 +194,13 @@ where
             .reference matchLen (pos - matchPos) ::
               mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
           else
-            .literal data[pos]! ::
+            .literal data[pos] ::
               mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
         else
-          .literal data[pos]! ::
+          .literal data[pos] ::
             mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
       else
-        .literal data[pos]! ::
+        .literal data[pos] ::
           mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
     else
       trailing data pos
@@ -216,31 +221,36 @@ def lz77GreedyIter (data : ByteArray) (windowSize : Nat := 32768) :
     mainLoop data windowSize hashSize
       (.replicate hashSize 0) (.replicate hashSize false) 0 #[]
 where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
-    let a := data[pos]!.toNat
-    let b := data[pos + 1]!.toNat
-    let c := data[pos + 2]!.toNat
+  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
+      (_ : pos + 2 < data.size := by omega) : Nat :=
+    let a := data[pos].toNat
+    let b := data[pos + 1].toNat
+    let c := data[pos + 2].toNat
     ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
     go data p1 p2 0 maxLen
   go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
     if i < maxLen then
-      if data[p1 + i]! == data[p2 + i]! then
-        go data p1 p2 (i + 1) maxLen
+      if h1 : p1 + i < data.size then
+        if h2 : p2 + i < data.size then
+          if data[p1 + i] == data[p2 + i] then
+            go data p1 p2 (i + 1) maxLen
+          else i
+        else i
       else i
     else i
   termination_by maxLen - i
   trailing (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
-    if pos < data.size then
-      trailing data (pos + 1) (acc.push (.literal data[pos]!))
+    if h : pos < data.size then
+      trailing data (pos + 1) (acc.push (.literal data[pos]))
     else acc
   termination_by data.size - pos
   updateHashes (data : ByteArray) (hashSize : Nat)
       (hashTable : Array Nat) (hashValid : Array Bool)
       (pos j matchLen : Nat) : Array Nat × Array Bool :=
     if j < matchLen then
-      if pos + j + 2 < data.size then
+      if hpj : pos + j + 2 < data.size then
         let h := hash3 data (pos + j) hashSize
         updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
           pos (j + 1) matchLen
@@ -271,13 +281,13 @@ where
               (acc.push (.reference matchLen (pos - matchPos)))
           else
             mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-              (acc.push (.literal data[pos]!))
+              (acc.push (.literal data[pos]))
         else
           mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-            (acc.push (.literal data[pos]!))
+            (acc.push (.literal data[pos]))
       else
         mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-          (acc.push (.literal data[pos]!))
+          (acc.push (.literal data[pos]))
     else
       trailing data pos acc
   termination_by data.size - pos
@@ -344,30 +354,35 @@ def lz77Lazy (data : ByteArray) (windowSize : Nat := 32768) :
     (mainLoop data windowSize hashSize
       (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
 where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat) : Nat :=
-    let a := data[pos]!.toNat
-    let b := data[pos + 1]!.toNat
-    let c := data[pos + 2]!.toNat
+  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
+      (_ : pos + 2 < data.size := by omega) : Nat :=
+    let a := data[pos].toNat
+    let b := data[pos + 1].toNat
+    let c := data[pos + 2].toNat
     ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat) : Nat :=
     go data p1 p2 0 maxLen
   go (data : ByteArray) (p1 p2 i maxLen : Nat) : Nat :=
     if i < maxLen then
-      if data[p1 + i]! == data[p2 + i]! then
-        go data p1 p2 (i + 1) maxLen
+      if h1 : p1 + i < data.size then
+        if h2 : p2 + i < data.size then
+          if data[p1 + i] == data[p2 + i] then
+            go data p1 p2 (i + 1) maxLen
+          else i
+        else i
       else i
     else i
   termination_by maxLen - i
   trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
-    if pos < data.size then
-      .literal data[pos]! :: trailing data (pos + 1)
+    if h : pos < data.size then
+      .literal data[pos] :: trailing data (pos + 1)
     else []
   termination_by data.size - pos
   updateHashes (data : ByteArray) (hashSize : Nat)
       (hashTable : Array Nat) (hashValid : Array Bool)
       (pos j matchLen : Nat) : Array Nat × Array Bool :=
     if j < matchLen then
-      if pos + j + 2 < data.size then
+      if hpj : pos + j + 2 < data.size then
         let h := hash3 data (pos + j) hashSize
         updateHashes data hashSize (hashTable.set! h (pos + j)) (hashValid.set! h true)
           pos (j + 1) matchLen
@@ -391,7 +406,7 @@ where
         if hge : matchLen ≥ 3 then
           if hle : pos + matchLen ≤ data.size then
             -- Lazy: check pos + 1 for a longer match
-            if pos + 3 < data.size then
+            if hlt3 : pos + 3 < data.size then
               let h2 := hash3 data (pos + 1) hashSize
               let matchPos2 := hashTable[h2]!
               let isValid2 := hashValid[h2]!
@@ -403,7 +418,7 @@ where
                     -- Better match at pos+1: emit literal + reference
                     have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                     let (ht, hv) := updateHashes data hashSize hashTable hashValid pos 1 matchLen2
-                    .literal data[pos]! ::
+                    .literal data[pos] ::
                       .reference matchLen2 (pos + 1 - matchPos2) ::
                       mainLoop data windowSize hashSize ht hv (pos + 1 + matchLen2)
                   else
@@ -430,13 +445,13 @@ where
               .reference matchLen (pos - matchPos) ::
                 mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
           else
-            .literal data[pos]! ::
+            .literal data[pos] ::
               mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
         else
-          .literal data[pos]! ::
+          .literal data[pos] ::
             mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
       else
-        .literal data[pos]! ::
+        .literal data[pos] ::
           mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
     else
       trailing data pos
@@ -462,8 +477,8 @@ def lz77LazyIter (data : ByteArray) (windowSize : Nat := 32768) :
 where
   trailing (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
-    if pos < data.size then
-      trailing data (pos + 1) (acc.push (.literal data[pos]!))
+    if h : pos < data.size then
+      trailing data (pos + 1) (acc.push (.literal data[pos]))
     else acc
   termination_by data.size - pos
   mainLoop (data : ByteArray) (windowSize hashSize : Nat)
@@ -482,7 +497,7 @@ where
         if hge : matchLen ≥ 3 then
           if hle : pos + matchLen ≤ data.size then
             -- Lazy: check pos + 1 for a longer match
-            if pos + 3 < data.size then
+            if hlt3 : pos + 3 < data.size then
               let h2 := lz77Lazy.hash3 data (pos + 1) hashSize
               let matchPos2 := hashTable[h2]!
               let isValid2 := hashValid[h2]!
@@ -495,7 +510,7 @@ where
                     have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                     let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen2
                     mainLoop data windowSize hashSize ht hv (pos + 1 + matchLen2)
-                      (acc.push (.literal data[pos]!) |>.push (.reference matchLen2 (pos + 1 - matchPos2)))
+                      (acc.push (.literal data[pos]) |>.push (.reference matchLen2 (pos + 1 - matchPos2)))
                   else
                     -- matchLen2 exceeds data: fall back to match at pos
                     have : data.size - (pos + matchLen) < data.size - pos := by omega
@@ -521,13 +536,13 @@ where
                 (acc.push (.reference matchLen (pos - matchPos)))
           else
             mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-              (acc.push (.literal data[pos]!))
+              (acc.push (.literal data[pos]))
         else
           mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-            (acc.push (.literal data[pos]!))
+            (acc.push (.literal data[pos]))
       else
         mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-          (acc.push (.literal data[pos]!))
+          (acc.push (.literal data[pos]))
     else
       trailing data pos acc
   termination_by data.size - pos
