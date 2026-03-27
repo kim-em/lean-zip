@@ -24,7 +24,7 @@ private theorem getElem?_some_eq_getElem! [Inhabited α] {arr : Array α} {i : N
     the native `Inflate.decodeStored` also succeeds with the same output.
 
     This is the reverse of `decodeStored_correct`. -/
-theorem decodeStored_complete (br : Zip.Native.BitReader)
+theorem decodeStored_complete (br : ZipCommon.BitReader)
     (output : ByteArray) (maxOutputSize : Nat)
     (storedBytes : List UInt8) (rest : List Bool)
     (hwf : br.bitOff < 8)
@@ -79,9 +79,9 @@ theorem decodeStored_complete (br : Zip.Native.BitReader)
         -- Derive halign_pos for readBytes_complete: br2.alignToByte.pos ≤ data.size
         have halign_pos2 : br2.alignToByte.pos ≤ br2.alignToByte.data.size := by
           rw [show br2.alignToByte = br2 from by
-            simp only [Zip.Native.BitReader.alignToByte, hbr2_off, BEq.rfl, ↓reduceIte]]
+            simp only [ZipCommon.BitReader.alignToByte, hbr2_off, BEq.rfl, ↓reduceIte]]
           -- Unfold readUInt16LE on br1 to extract the bounds check
-          simp only [Zip.Native.BitReader.readUInt16LE, Zip.Native.BitReader.alignToByte,
+          simp only [ZipCommon.BitReader.readUInt16LE, ZipCommon.BitReader.alignToByte,
             hbr1_off] at hrd2
           by_cases hle2 : br1.data.size < br1.pos + 2
           · simp only [BEq.rfl, ↓reduceIte, gt_iff_lt, hle2, Nat.toUInt16_eq, reduceCtorEq] at hrd2
@@ -135,7 +135,7 @@ theorem decodeStored_complete (br : Zip.Native.BitReader)
     This is the reverse of `huffTree_decode_correct`. -/
 theorem huffTree_decode_complete (lengths : Array UInt8)
     (maxBits : Nat) (hmb : maxBits ≤ 20)
-    (tree : Zip.Native.HuffTree) (br : Zip.Native.BitReader)
+    (tree : Zip.Native.HuffTree) (br : ZipCommon.BitReader)
     (sym : Nat) (rest : List Bool)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
@@ -364,7 +364,7 @@ theorem decodeHuffman_complete
     (litLengths distLengths : Array UInt8)
     (litTree distTree : Zip.Native.HuffTree)
     (maxOutputSize : Nat)
-    (br : Zip.Native.BitReader) (output : ByteArray)
+    (br : ZipCommon.BitReader) (output : ByteArray)
     (syms : List Deflate.Spec.LZ77Symbol) (rest : List Bool)
     (result : List UInt8)
     (hwf : br.bitOff < 8)
@@ -430,11 +430,11 @@ theorem decodeHuffman_complete
       have htl₁ := Deflate.Correctness.toBits_length br₁
       rw [hdata₁] at htl₁
       rw [← hrest₁] at hlen_shorter
-      simp only [Zip.Native.BitReader.bitPos] at hle
+      simp only [ZipCommon.BitReader.bitPos] at hle
       omega
     -- bitPos stays within dataSize: ¬(dataSize * 8 < br₁.bitPos)
     have hbp_bound : ¬(dataSize * 8 < br₁.bitPos) := by
-      simp only [Zip.Native.BitReader.bitPos]
+      simp only [ZipCommon.BitReader.bitPos]
       rw [hdata₁] at hple₁
       rcases hpos₁ with h | h
       · rw [h]; omega
@@ -705,19 +705,19 @@ theorem decodeHuffman_complete
           simp only [hmax_ok, ↓reduceIte]
           -- bitPos guards for reference branch (br₄)
           -- Data preservation chain
-          have ⟨hd₂, _, hple₂⟩ := Zip.Native.readBits_inv br₁ br₂ _ _ hrd_extra hpos₁ hple₁
+          have ⟨hd₂, _, hple₂⟩ := ZipCommon.readBits_inv br₁ br₂ _ _ hrd_extra hpos₁ hple₁
           have ⟨hd₃, _, hple₃⟩ := Zip.Native.decode_inv distTree br₂ br₃ _ hdec_dist hpos₂ hple₂
-          have ⟨hd₄, _, hple₄⟩ := Zip.Native.readBits_inv br₃ br₄ _ _ hrd_dextra hpos₃ hple₃
+          have ⟨hd₄, _, hple₄⟩ := ZipCommon.readBits_inv br₃ br₄ _ _ hrd_dextra hpos₃ hple₃
           have hbp_advance₄ : ¬(br₄.bitPos ≤ br.bitPos) := by
             intro hle'
             have htl := Deflate.Correctness.toBits_length br
             have htl₄ := Deflate.Correctness.toBits_length br₄
             rw [hd₄, hd₃, hd₂, hdata₁] at htl₄
             rw [← hrest₄] at hbits₁_shorter
-            simp only [Zip.Native.BitReader.bitPos] at hle'
+            simp only [ZipCommon.BitReader.bitPos] at hle'
             omega
           have hbp_bound₄ : ¬(dataSize * 8 < br₄.bitPos) := by
-            simp only [Zip.Native.BitReader.bitPos]
+            simp only [ZipCommon.BitReader.bitPos]
             have : br₄.data.size ≤ dataSize := by
               have : br₄.data.size = br.data.size := by rw [hd₄, hd₃, hd₂, hdata₁]
               omega

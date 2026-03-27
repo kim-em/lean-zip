@@ -18,6 +18,8 @@ Also contains:
 
 namespace Zip.Native
 
+open ZipCommon
+
 /-! ### inflateLoop endPos bound -/
 
 /-- After a successful `inflateLoop`, the returned endPos ≤ br.data.size.

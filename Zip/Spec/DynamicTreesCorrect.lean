@@ -66,9 +66,9 @@ theorem fromLengths_complete (lengths : Array UInt8) (maxBits : Nat)
 /-! ## Dynamic trees correspondence -/
 
 /-- `readCLCodeLengths` preserves well-formedness and position invariant. -/
-private theorem readCLCodeLengths_inv (br : Zip.Native.BitReader)
+private theorem readCLCodeLengths_inv (br : ZipCommon.BitReader)
     (clLengths : Array UInt8) (i numCodeLen : Nat)
-    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (clLengths' : Array UInt8) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
@@ -97,9 +97,9 @@ private theorem readCLCodeLengths_inv (br : Zip.Native.BitReader)
     · obtain ⟨_, rfl⟩ := Except.ok.inj h; exact ⟨hwf, hpos⟩
 
 /-- `readCLCodeLengths` preserves array size. -/
-protected theorem readCLCodeLengths_size (br : Zip.Native.BitReader)
+protected theorem readCLCodeLengths_size (br : ZipCommon.BitReader)
     (clLengths : Array UInt8) (i numCodeLen : Nat)
-    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (clLengths' : Array UInt8) (br' : ZipCommon.BitReader)
     (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
       .ok (clLengths', br')) :
     clLengths'.size = clLengths.size := by
@@ -172,16 +172,16 @@ theorem fillEntries_extract (arr : Array UInt8) (idx count bound : Nat) (val : U
 
 /-- `decodeCLSymbols` preserves well-formedness, position invariant, and array size. -/
 protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
-    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (br : ZipCommon.BitReader) (codeLengths : Array UInt8)
     (idx totalCodes : Nat)
-    (codeLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (codeLengths' : Array UInt8) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : Zip.Native.Inflate.decodeCLSymbols clTree br codeLengths idx totalCodes =
       .ok (codeLengths', br')) :
     br'.bitOff < 8 ∧ (br'.bitOff = 0 ∨ br'.pos < br'.data.size) ∧
     codeLengths'.size = codeLengths.size := by
-  have hrec : ∀ (idx' : Nat) (br_i : Zip.Native.BitReader) (cl : Array UInt8),
+  have hrec : ∀ (idx' : Nat) (br_i : ZipCommon.BitReader) (cl : Array UInt8),
       totalCodes - idx' < totalCodes - idx →
       br_i.bitOff < 8 →
       (br_i.bitOff = 0 ∨ br_i.pos < br_i.data.size) →
@@ -259,9 +259,9 @@ termination_by totalCodes - idx
 
 /-- `readCLCodeLengths` corresponds to the spec's `readCLLengths`:
     native Array-based reading matches spec List-based reading. -/
-private theorem readCLCodeLengths_correct (br : Zip.Native.BitReader)
+private theorem readCLCodeLengths_correct (br : ZipCommon.BitReader)
     (clLengths : Array UInt8) (i numCodeLen : Nat)
-    (clLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (clLengths' : Array UInt8) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hsize : clLengths.size = 19)
     (h : Zip.Native.Inflate.readCLCodeLengths br clLengths i numCodeLen =
@@ -330,9 +330,9 @@ private theorem accLen_eq_min (codeLengths : Array UInt8) (idx : Nat) :
     native Array-based decoding matches spec List-based decoding. -/
 private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
     (clLengths : Array UInt8)
-    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (br : ZipCommon.BitReader) (codeLengths : Array UInt8)
     (idx totalCodes : Nat)
-    (codeLengths' : Array UInt8) (br' : Zip.Native.BitReader)
+    (codeLengths' : Array UInt8) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hcl : Zip.Native.HuffTree.fromLengths clLengths 7 = .ok clTree)
     (hsize_cl : clLengths.size ≤ UInt16.size)
@@ -349,7 +349,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
         acc br.toBits =
         some ((codeLengths'.extract 0 totalCodes).toList.map UInt8.toNat, rest) ∧
       br'.toBits = rest := by
-  have hrec : ∀ (idx' : Nat) (br_i : Zip.Native.BitReader) (cl : Array UInt8),
+  have hrec : ∀ (idx' : Nat) (br_i : ZipCommon.BitReader) (cl : Array UInt8),
       totalCodes - idx' < totalCodes - idx →
       br_i.bitOff < 8 →
       idx' ≤ totalCodes →
@@ -547,8 +547,8 @@ termination_by totalCodes - idx
 
 /-- If the native dynamic tree decoder succeeds, the spec's
     `decodeDynamicTables` also succeeds with corresponding code lengths. -/
-protected theorem decodeDynamicTrees_correct (br : Zip.Native.BitReader)
-    (litTree distTree : Zip.Native.HuffTree) (br' : Zip.Native.BitReader)
+protected theorem decodeDynamicTrees_correct (br : ZipCommon.BitReader)
+    (litTree distTree : Zip.Native.HuffTree) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : Zip.Native.Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br')) :

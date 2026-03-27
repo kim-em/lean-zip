@@ -1,17 +1,18 @@
 # lean-zip
 
-Lean 4 bindings for [zlib](https://zlib.net/) and [Zstandard](https://facebook.github.io/zstd/) compression, plus tar and ZIP archive support.
+Lean 4 bindings for [zlib](https://zlib.net/) compression, plus tar and ZIP archive support.
 
-Provides whole-buffer and streaming APIs for zlib, gzip, raw deflate, and Zstandard formats, CRC32/Adler32 checksums, tar archives (.tar and .tar.gz with PAX/GNU extension support), and ZIP archives (with ZIP64 support).
+Provides whole-buffer and streaming APIs for zlib, gzip, and raw deflate formats, CRC32/Adler32 checksums, tar archives (.tar and .tar.gz with PAX/GNU extension support), and ZIP archives (with ZIP64 support).
+
+For Zstandard (zstd) support, see [lean-zstd](https://github.com/kim-em/lean-zstd).
 
 ## Requirements
 
 - Lean 4 (tested with v4.20.0 through v4.29.0-rc1)
 - zlib development headers (`zlib-dev`, `zlib1g-dev`, or equivalent)
-- libzstd development headers (`libzstd-dev` or equivalent)
 - `pkg-config` (for header discovery on NixOS and similar)
 
-On NixOS (or any system where zlib/zstd aren't in the default library path),
+On NixOS (or any system where zlib isn't in the default library path),
 the project includes a `shell.nix` that provides all C dependencies:
 
 ```bash
@@ -23,8 +24,7 @@ Or use [direnv](https://direnv.net/) for automatic environment activation:
 direnv allow   # one-time setup; environment then activates on cd
 ```
 
-You can also set `ZLIB_CFLAGS` and `ZSTD_CFLAGS` manually to point at the
-headers if you prefer.
+You can also set `ZLIB_CFLAGS` manually to point at the headers if you prefer.
 
 ## Usage
 
@@ -51,9 +51,6 @@ let original ← Gzip.decompress gzipped
 let deflated ← RawDeflate.compress data
 let original ← RawDeflate.decompress deflated
 
--- Zstandard (modern, fast, excellent compression ratio)
-let compressed ← Zstd.compress data (level := 3)
-let original ← Zstd.decompress compressed
 ```
 
 ### Streaming
@@ -65,16 +62,9 @@ For data too large to fit in memory:
 Gzip.compressStream inputStream outputStream (level := 6)
 Gzip.decompressStream inputStream outputStream
 
--- Zstd streaming
-Zstd.compressStream inputStream outputStream (level := 3)
-Zstd.decompressStream inputStream outputStream
-
 -- File helpers
 let gzPath ← Gzip.compressFile "/path/to/file"         -- writes /path/to/file.gz
 let outPath ← Gzip.decompressFile "/path/to/file.gz"   -- writes /path/to/file
-
-Zstd.compressFile "/path/to/file"                       -- writes /path/to/file.zst
-Zstd.decompressFile "/path/to/file.zst"                 -- writes /path/to/file
 ```
 
 ### Low-level streaming state
@@ -84,10 +74,6 @@ let state ← Gzip.DeflateState.new (level := 6)
 let compressed ← state.push chunk1
 let compressed2 ← state.push chunk2
 let final ← state.finish  -- must call exactly once
-
-let state ← Zstd.CompressState.new (level := 3)
-let compressed ← state.push chunk
-let final ← state.finish
 ```
 
 ### Checksums

@@ -1,5 +1,5 @@
 import Zip.Native.Inflate
-import Zip.Spec.BinaryCorrect
+import ZipCommon.Spec.BinaryCorrect
 import Zip.Spec.InflateComplete
 
 /-!
@@ -15,6 +15,8 @@ BitReader operation, then composing through the inflate machinery.
 -/
 
 namespace Zip.Native
+
+open ZipCommon (BitReader)
 
 private theorem getElem!_ba_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b)[i]! = a[i]! := by

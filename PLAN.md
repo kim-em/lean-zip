@@ -1,6 +1,6 @@
 # Plan for lean-zip
 
-A verified compression library in Lean 4, covering zlib/zstd via C FFI,
+A verified compression library in Lean 4, covering zlib via C FFI,
 pure-Lean native implementations, and formal proofs of correctness.
 Starting from an empty repository, this plan builds the entire library
 from project scaffolding through verified, optimized compression.
@@ -42,18 +42,6 @@ Step 2 is the hardest implementation work but the most tractable proof.
 Step 3 is where the real pain lies -- the compression side has complex
 heuristics (lazy matching, level-dependent strategies) that are correct
 but messy to reason about.
-
-### Zstd Roundtrip
-
-Significantly harder than DEFLATE. The Zstd format involves:
-
-- Finite State Entropy (FSE) coding (more complex than Huffman)
-- Multiple interleaved bitstreams
-- A dictionary system
-- Repeat offset codes
-- Frame/block structure with multiple block types
-
-Estimated at 3-5x the work of DEFLATE.
 
 ## Optimization Strategy
 
@@ -167,9 +155,9 @@ of the formalization.
 
 ### Overview
 
-The work is organized into five tracks: a bootstrapping **A-track**, a
-linear **B-track** (DEFLATE verification pipeline), and three tracks
-**C**, **D**, and **E** that can be worked on concurrently once their
+The work is organized into four tracks: a bootstrapping **A-track**, a
+linear **B-track** (DEFLATE verification pipeline), and two tracks
+**C** and **D** that can be worked on concurrently once their
 dependencies are met. Two cross-cutting concerns run throughout.
 
 **Dependency graph:**
@@ -181,7 +169,6 @@ A1 → A2 → A3
            │    │
            ↓    ↓
            D    C
-E (independent, needs A2)
 ```
 
 - **A1–A3** are sequential: project setup, FFI wrappers, archive formats.
@@ -191,9 +178,6 @@ E (independent, needs A2)
   exist before they can be replaced with well-founded recursion.
 - **D** (benchmarking and optimization) depends on B2: native
   implementations must exist before they can be profiled.
-- **E** (Zstd) is independent of the B-track: it follows the same
-  methodology for a different compression format. It needs A2 (FFI
-  wrappers for Zstd) but can otherwise start at any time.
 - **Cross-cutting concerns** (characterizing properties, ZipForStd)
   apply from B1 onwards and are not gated on any particular phase.
 
@@ -207,8 +191,8 @@ Lake project scaffolding, toolchain configuration, and build system.
 **Deliverables**:
 - `lakefile.lean` with Lake build configuration
 - `lean-toolchain` pinning the Lean version
-- `shell.nix` providing zlib, zstd, and pkg-config for NixOS
-- C FFI scaffolding: `pkg-config` detection for zlib/zstd link flags,
+- `shell.nix` providing zlib and pkg-config for NixOS
+- C FFI scaffolding: `pkg-config` detection for zlib link flags,
   static linking support, platform detection
 - `ARCHITECTURE.md` documenting the project structure
 - `README.md` with build and usage instructions
@@ -222,7 +206,6 @@ path and serve as the reference implementation for conformance testing.
 - **Zlib FFI**: gzip compress/decompress (whole-buffer and streaming),
   raw DEFLATE compress/decompress, zlib-format compress/decompress
 - **Checksum FFI**: CRC32 and Adler32 via zlib
-- **Zstd FFI**: compress/decompress (whole-buffer and streaming)
 - **File helpers**: `compressFile`, `decompressFile` for each format
 - **Streaming API**: incremental compression/decompression with bounded
   memory, stream piping between sources and sinks
@@ -554,23 +537,6 @@ with or faster than the C libraries on both runtime and compression
 quality. At that point, the FFI wrappers become optional — the native
 path is verified, performant, and compresses well.
 
-### E: Zstd
-
-**Independent — needs A2 for FFI wrappers, but can otherwise start at
-any time.**
-
-Native Lean Zstd implementation following the same B1–B4 methodology.
-This is a separate multi-month to multi-year project.
-
-**Deliverables**:
-- FSE (Finite State Entropy) decoder and encoder
-- Zstd frame/block parsing
-- Decompressor with proofs (following the B2–B3 pattern)
-- Compressor with roundtrip proof (following the B4 pattern)
-
-The same C and D tracks apply to Zstd once its B-track equivalent is
-sufficiently advanced.
-
 ## Cross-Cutting Concerns
 
 These are not phases — they apply throughout all work from B1 onwards.
@@ -604,9 +570,12 @@ and `BitVec` are routinely developed that have nothing to do with
 compression — they are general-purpose facts missing from Lean's
 standard library.
 
+ZipForStd now lives in the `lean-zip-common` repository
+(kim-em/lean-zip-common) and is shared between lean-zip and lean-zstd.
+
 These should be:
 
-1. Collected in `ZipForStd/` as they are developed
+1. Collected in `ZipForStd/` (in lean-zip-common) as they are developed
 2. Kept general (no compression-specific assumptions)
 3. In a form where collaborators could upstream them to Lean's standard library via PRs
 
@@ -637,9 +606,6 @@ contributes back to the ecosystem.
 - **LZ77 match-finding**: Inherently heuristic. Proving it produces
   *valid* output is tractable; proving it produces *good* output
   (compression ratio bounds) is a characterizing property target.
-- **Zstd is a moving target**: The format is complex and has evolved; the
-  RFC (3.1) is 100+ pages.
-
 ## References
 
 - **RFC 1951** (Deutsch, 1996), "DEFLATE Compressed Data Format

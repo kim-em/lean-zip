@@ -1,6 +1,6 @@
 # lean-zip
 
-Lean 4 compression library: zlib/zstd via C FFI, plus pure-Lean tar and ZIP archives.
+Lean 4 compression library: zlib via C FFI, plus pure-Lean tar and ZIP archives.
 Toolchain: see `lean-toolchain`. Build system: Lake.
 
 ## Build and Test
@@ -14,7 +14,7 @@ Run from the project root. Tests require `testdata/` directory.
 
 ### NixOS / nix-shell
 
-On NixOS, the project's `shell.nix` provides zlib/zstd/pkg-config.
+On NixOS, the project's `shell.nix` provides zlib/pkg-config.
 If direnv is set up, the environment activates automatically on `cd`.
 Otherwise, prefix commands with `nix-shell --run`:
 
@@ -25,21 +25,22 @@ Otherwise, prefix commands with `nix-shell --run`:
 environment changes, you may need `rm -rf .lake` before building — a
 plain `lake clean` is not sufficient to clear the cached link flags.
 
-On systems where zlib and zstd are available system-wide (e.g. Ubuntu
-with `libz-dev` and `libzstd-dev`), no nix-shell wrapper is needed.
+On systems where zlib is available system-wide (e.g. Ubuntu
+with `libz-dev`), no nix-shell wrapper is needed.
 
 ## Code Organization
 
 ### Source layout
 
-Survey `Zip/`, `ZipTest/`, and `ZipForStd/` directly. Every source file has a
+Survey `Zip/` and `ZipTest/` directly. Every source file has a
 module-level `/-! ... -/` docstring describing its purpose. Run `ls Zip/**/*.lean`
 to orient. Key directories:
 - `Zip/` — FFI wrappers and pure-Lean implementations
 - `Zip/Native/` — Native Lean implementations (no FFI)
 - `Zip/Spec/` — Formal specifications and correctness proofs
-- `ZipForStd/` — Missing standard library lemmas (candidates for upstreaming)
 - `ZipTest/` — Per-module tests
+- Shared utilities (Binary, Handle, BitReader, ZipForStd) live in
+  [lean-zip-common](https://github.com/kim-em/lean-zip-common)
 
 ### Key documents
     PLAN.md              — Phased roadmap and development cycle (do not modify)
@@ -110,9 +111,6 @@ for how this applies to DEFLATE.
   tempted to use it (e.g. for decidable propositions over large finite
   types), try `decide_cbv` instead, which uses kernel-level evaluation
   without native code generation
-- `decide_cbv` times out on UInt64-heavy computations (xxHash, Zstd
-  internals). Don't waste build cycles retrying with higher heartbeats.
-  Use `sorry` and document that runtime tests verify the same values.
 - Prefer `omega`, `decide`, `simp`, `grind` over manual arithmetic
 - After getting a proof to work, refactor it immediately:
   combine steps, find minimal proof, extract reusable lemmas
@@ -121,8 +119,7 @@ for how this applies to DEFLATE.
   `Std.Legacy.Range.forIn'` (from `for ... in [:n]`) use auto-generated
   `loop✝` functions that CANNOT be unfolded in proofs. If you need to
   prove invariants through these loops, refactor the implementation to
-  use well-founded recursion with `termination_by` instead. See
-  `findMaxBitsWF` in `Zip/Native/ZstdHuffman.lean` for the pattern.
+  use well-founded recursion with `termination_by` instead.
   Don't waste time trying to unfold or reason about `forIn` for ranges
   — discover this limitation early and refactor.
 

@@ -1,4 +1,4 @@
-import Zip.Native.BitReader
+import ZipCommon.Spec.BitReaderInvariant
 import Zip.Spec.Huffman
 
 /-!
@@ -13,6 +13,8 @@ import Zip.Spec.Huffman
 -/
 
 namespace Zip.Native
+
+open ZipCommon (BitReader)
 
 /-- A Huffman tree for decoding DEFLATE symbols.
     Leaf holds a symbol value; Node branches on 0 (left) vs 1 (right). -/
@@ -98,9 +100,6 @@ where
         if bit == 0 then go z br' (n + 1) else go o br' (n + 1)
 
 end HuffTree
-
-/-- The effective bit position of a BitReader, used as a termination measure. -/
-def BitReader.bitPos (br : BitReader) : Nat := br.pos * 8 + br.bitOff
 
 namespace Inflate
 

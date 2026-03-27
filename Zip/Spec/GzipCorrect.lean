@@ -1,6 +1,6 @@
 import Zip.Native.Gzip
 import Zip.Spec.DeflateRoundtrip
-import Zip.Spec.BinaryCorrect
+import ZipCommon.Spec.BinaryCorrect
 import Zip.Spec.DeflateSuffix
 import Zip.Spec.InflateLoopBounds
 import Zip.Spec.InflateRawSuffix

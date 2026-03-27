@@ -6,7 +6,6 @@ import ZipTest.Checksum
 import ZipTest.Binary
 import ZipTest.Tar
 import ZipTest.Archive
-import ZipTest.Zstd
 import ZipTest.ZipFixtures
 import ZipTest.TarFixtures
 import ZipTest.CompressFixtures
@@ -18,13 +17,6 @@ import ZipTest.NativeIntegration
 import ZipTest.NativeScale
 import ZipTest.NativeDeflate
 import ZipTest.NativeCompressBench
-import ZipTest.ZstdNativeFrame
-import ZipTest.ZstdNativeComponents
-import ZipTest.ZstdNativeIntegration
-import ZipTest.XxHashNative
-import ZipTest.FseNative
-import ZipTest.ZstdConformance
-import ZipTest.ZstdDecompressBench
 import ZipTest.Benchmark
 
 def main : IO Unit := do
@@ -37,7 +29,6 @@ def main : IO Unit := do
   ZipTest.Binary.tests
   ZipTest.Tar.tests
   ZipTest.Archive.tests
-  ZipTest.Zstd.tests
   ZipTest.ZipFixtures.tests
   ZipTest.TarFixtures.tests
   ZipTest.CompressFixtures.tests
@@ -49,12 +40,5 @@ def main : IO Unit := do
   ZipTest.NativeScale.tests
   ZipTest.NativeDeflate.tests
   ZipTest.NativeCompressBench.tests
-  ZipTest.ZstdNativeFrame.tests
-  ZipTest.ZstdNativeComponents.tests
-  ZipTest.ZstdNativeIntegration.tests
-  ZipTest.XxHashNative.tests
-  ZipTest.FseNative.tests
-  ZipTest.ZstdConformance.tests
-  ZipTest.ZstdDecompressBench.tests
   ZipTest.Benchmark.tests
   IO.println "\nAll tests passed!"
