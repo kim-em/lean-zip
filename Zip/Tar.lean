@@ -1,6 +1,6 @@
-import Zip.Binary
+import ZipCommon.Binary
 import Zip.Gzip
-import Zip.Handle
+import ZipCommon.Handle
 import Zip.Native.Gzip
 
 /-! Tar archive creation, listing, and extraction with UStar, GNU, and PAX format support.

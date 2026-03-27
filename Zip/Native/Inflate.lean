@@ -1,4 +1,4 @@
-import Zip.Native.BitReader
+import ZipCommon.BitReader
 import Zip.Spec.Huffman
 
 /-!

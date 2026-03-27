@@ -1,5 +1,5 @@
 import Zip.Native.Inflate
-import Zip.Spec.BinaryCorrect
+import ZipCommon.Spec.BinaryCorrect
 import Zip.Spec.InflateComplete
 
 /-!

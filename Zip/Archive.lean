@@ -1,6 +1,6 @@
-import Zip.Binary
+import ZipCommon.Binary
 import Zip.Checksum
-import Zip.Handle
+import ZipCommon.Handle
 import Zip.RawDeflate
 import Zip.Native.Inflate
 import Zip.Native.Crc32
