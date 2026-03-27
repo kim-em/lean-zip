@@ -5,16 +5,17 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete; Track E (Zstd) all block types decompressing
+- **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete
 - **Toolchain**: leanprover/lean4:v4.29.0-rc4
-- **Sorries**: 4 (all XxHash.lean — UInt64 test vectors too expensive for kernel evaluation)
+- **Sorries**: 0
 - **Sessions**: ~622 completed (Feb 19 – Mar 13)
-- **Source files**: 106 (51 spec, 13 native impl, 9 FFI/archive, 4 ZipForStd, 29 test)
+- **Source files**: ~78 (38 spec, 8 native impl, 9 FFI/archive, 21 test)
 - **Merged PRs**: 600
-- **Spec lines**: ~37,000 across 51 spec files
+- **Spec lines**: ~20,500 across 38 spec files
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across all spec files (campaign complete)
-- **Zstd spec**: 549 declarations across 8 files (16,470 lines)
+- **Zstd**: Moved to https://github.com/kim-em/lean-zstd
+- **Shared utilities**: Moved to https://github.com/kim-em/lean-zip-common
 - **Proven-bounds**: 149 `]!` remaining across native files (campaign in progress)
 
 ## Milestones
