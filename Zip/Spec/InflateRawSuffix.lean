@@ -16,6 +16,8 @@ BitReader operation, then composing through the inflate machinery.
 
 namespace Zip.Native
 
+open ZipCommon (BitReader)
+
 private theorem getElem!_ba_append_left (a b : ByteArray) (i : Nat) (h : i < a.size) :
     (a ++ b)[i]! = a[i]! := by
   rw [getElem!_pos (a ++ b) i (by simp only [ByteArray.size_append]; omega),

@@ -18,8 +18,8 @@ namespace Deflate.Correctness
 /-! ## Block loop helpers -/
 
 /-- `decodeStored` preserves `bitOff < 8` and the position invariant. -/
-theorem decodeStored_invariants (br : Zip.Native.BitReader) (output : ByteArray)
-    (maxOutputSize : Nat) (output' : ByteArray) (br' : Zip.Native.BitReader)
+theorem decodeStored_invariants (br : ZipCommon.BitReader) (output : ByteArray)
+    (maxOutputSize : Nat) (output' : ByteArray) (br' : ZipCommon.BitReader)
     (h : Zip.Native.Inflate.decodeStored br output maxOutputSize = .ok (output', br')) :
     br'.bitOff < 8 ∧ (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
   simp only [Zip.Native.Inflate.decodeStored, bind, Except.bind] at h
@@ -420,7 +420,7 @@ protected theorem nat_beq_to_uint32_false (v : Nat) (hv : v < 2) (h : ¬((v == 1
 set_option maxRecDepth 2048 in
 /-- Block loop correspondence: the native `inflateLoop` agrees with
     the spec's `decode.go` on a block-by-block basis. -/
-theorem inflateLoop_correct (br : Zip.Native.BitReader)
+theorem inflateLoop_correct (br : ZipCommon.BitReader)
     (output : ByteArray)
     (fixedLit fixedDist : Zip.Native.HuffTree)
     (maxOutputSize dataSize : Nat)
@@ -436,7 +436,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
     Deflate.Spec.decode.go br.toBits output.data.toList =
       some result.data.toList := by
   -- Strong induction on the WF termination measure
-  suffices ∀ m : Nat, ∀ (br : Zip.Native.BitReader) (output : ByteArray)
+  suffices ∀ m : Nat, ∀ (br : ZipCommon.BitReader) (output : ByteArray)
       (result : ByteArray) (endPos : Nat),
       dataSize * 8 - br.bitPos = m →
       br.bitOff < 8 →
@@ -519,7 +519,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
                 -- Apply IH with decreased measure
                 have hinv := decodeStored_invariants br₂ output maxOutputSize out' br' hds
                 have h_ih := ih (dataSize * 8 - br'.bitPos)
-                  (by simp only [Zip.Native.BitReader.bitPos] at h_progress h_range hm ⊢; omega)
+                  (by simp only [ZipCommon.BitReader.bitPos] at h_progress h_range hm ⊢; omega)
                   br' out' result endPos rfl hinv.1 hinv.2 h
                 rw [hrest] at h_ih
                 exact h_ih
@@ -571,7 +571,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
               · rename_i h_range
                 -- Apply IH with decreased measure
                 have h_ih := ih (dataSize * 8 - br'.bitPos)
-                  (by simp only [Zip.Native.BitReader.bitPos] at h_progress h_range hm ⊢; omega)
+                  (by simp only [ZipCommon.BitReader.bitPos] at h_progress h_range hm ⊢; omega)
                   br' out' result endPos rfl hwf' hpos' h
                 rw [hrest] at h_ih
                 exact h_ih
@@ -629,7 +629,7 @@ theorem inflateLoop_correct (br : Zip.Native.BitReader)
                 · rename_i h_range
                   -- Apply IH with decreased measure
                   have h_ih := ih (dataSize * 8 - br'.bitPos)
-                    (by simp only [Zip.Native.BitReader.bitPos] at h_progress h_range hm ⊢; omega)
+                    (by simp only [ZipCommon.BitReader.bitPos] at h_progress h_range hm ⊢; omega)
                     br' out' result endPos rfl hwf' hpos' h
                   rw [hrest] at h_ih
                   exact h_ih
@@ -658,11 +658,11 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
     | error e => simp only [hfdist] at h; exact absurd h nofun
     | ok fixedDist =>
       simp only [hfdist] at h
-      have hbr_wf : (Zip.Native.BitReader.mk data startPos 0).bitOff < 8 := by
+      have hbr_wf : (ZipCommon.BitReader.mk data startPos 0).bitOff < 8 := by
         show 0 < 8; omega
-      have hbr_pos : (Zip.Native.BitReader.mk data startPos 0).bitOff = 0 ∨
-          (Zip.Native.BitReader.mk data startPos 0).pos <
-          (Zip.Native.BitReader.mk data startPos 0).data.size := by exact Or.inl rfl
+      have hbr_pos : (ZipCommon.BitReader.mk data startPos 0).bitOff = 0 ∨
+          (ZipCommon.BitReader.mk data startPos 0).pos <
+          (ZipCommon.BitReader.mk data startPos 0).data.size := by exact Or.inl rfl
       have hgo := inflateLoop_correct
         ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOutputSize data.size result endPos

@@ -15,6 +15,8 @@ block decoding, Huffman block decoding, and dynamic tree decoding.
 
 namespace Zip.Native
 
+open ZipCommon
+
 /-- Combined: HuffTree.decode.go preserves data, hpos, and pos ≤ data.size. -/
 private theorem decode_go_inv (tree : HuffTree) (br br' : BitReader) (n : Nat)
     (sym : UInt16) (h : HuffTree.decode.go tree br n = .ok (sym, br'))

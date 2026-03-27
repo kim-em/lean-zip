@@ -20,6 +20,7 @@ import Std.Tactic.BVDecide
 namespace Zip.Spec.DeflateStoredCorrect
 
 open Zip.Native
+open ZipCommon (BitReader)
 
 /-- Pure recursive version of deflateStored for proof purposes.
     Encodes data as stored DEFLATE blocks starting from position `pos`.

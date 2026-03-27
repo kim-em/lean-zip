@@ -349,11 +349,11 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   have hgo : decode.go (bytesToBits bytes) [] = some result := by
     simp only [decode] at hdec; exact hdec
   -- Apply inflateLoop_complete (existential fuel) then bridge to inflateRaw's fuel
-  have hbr_wf : (Zip.Native.BitReader.mk bytes 0 0).bitOff < 8 := by
+  have hbr_wf : (ZipCommon.BitReader.mk bytes 0 0).bitOff < 8 := by
     simp only [Nat.zero_lt_succ]
-  have hbr_pos : (Zip.Native.BitReader.mk bytes 0 0).bitOff = 0 ∨
-      (Zip.Native.BitReader.mk bytes 0 0).pos <
-      (Zip.Native.BitReader.mk bytes 0 0).data.size := by
+  have hbr_pos : (ZipCommon.BitReader.mk bytes 0 0).bitOff = 0 ∨
+      (ZipCommon.BitReader.mk bytes 0 0).pos <
+      (ZipCommon.BitReader.mk bytes 0 0).data.size := by
     simp only [true_or]
   obtain ⟨endPos, hloop⟩ :=
     Deflate.Correctness.inflateLoop_complete

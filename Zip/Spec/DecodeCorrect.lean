@@ -31,7 +31,7 @@ theorem specTable_mem_codes {lengths : List Nat} {maxBits : Nat}
 
 /-- Unfold `HuffTree.decode` to `HuffTree.decode.go` with starting depth 0. -/
 private theorem decode_unfold {tree : Zip.Native.HuffTree}
-    {br : Zip.Native.BitReader} {sym : UInt16} {br' : Zip.Native.BitReader}
+    {br : ZipCommon.BitReader} {sym : UInt16} {br' : ZipCommon.BitReader}
     (h : tree.decode br = .ok (sym, br')) :
     Zip.Native.HuffTree.decode.go tree br 0 = .ok (sym, br') := by
   simp only [Zip.Native.HuffTree.decode] at h; exact h
@@ -104,8 +104,8 @@ theorem symVal_of_beq {sym : UInt16} {n : UInt16}
     `readBit` calls via `readBit_toBits`. -/
 theorem huffTree_decode_correct (lengths : Array UInt8)
     (maxBits : Nat) (hmb : maxBits < 32)
-    (tree : Zip.Native.HuffTree) (br : Zip.Native.BitReader)
-    (sym : UInt16) (br' : Zip.Native.BitReader)
+    (tree : Zip.Native.HuffTree) (br : ZipCommon.BitReader)
+    (sym : UInt16) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
     (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
@@ -132,9 +132,9 @@ theorem huffTree_decode_correct (lengths : Array UInt8)
 /-- If the native stored-block decoder succeeds, the spec's `decodeStored`
     also succeeds and produces the same bytes and remaining bit position.
     The `output` parameter is pass-through (native prepends to output). -/
-theorem decodeStored_correct (br : Zip.Native.BitReader)
+theorem decodeStored_correct (br : ZipCommon.BitReader)
     (output : ByteArray) (maxOutputSize : Nat)
-    (output' : ByteArray) (br' : Zip.Native.BitReader)
+    (output' : ByteArray) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : Zip.Native.Inflate.decodeStored br output maxOutputSize = .ok (output', br')) :
@@ -213,17 +213,17 @@ theorem decodeStored_correct (br : Zip.Native.BitReader)
 
 /-- `HuffTree.decode` preserves the well-formedness invariant `bitOff < 8`. -/
 theorem decode_wf (tree : Zip.Native.HuffTree)
-    (br : Zip.Native.BitReader) (sym : UInt16) (br' : Zip.Native.BitReader)
+    (br : ZipCommon.BitReader) (sym : UInt16) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (h : tree.decode br = .ok (sym, br')) : br'.bitOff < 8 := by
   exact (Deflate.Correctness.decode_go_decodeBits tree br 0 sym br' hwf (decode_unfold h)).2
 
 /-- `readBit` preserves the position invariant `bitOff = 0 ∨ pos < data.size`. -/
-private theorem readBit_pos_inv (br : Zip.Native.BitReader)
-    (bit : UInt32) (br' : Zip.Native.BitReader)
+private theorem readBit_pos_inv (br : ZipCommon.BitReader)
+    (bit : UInt32) (br' : ZipCommon.BitReader)
     (h : br.readBit = .ok (bit, br')) :
     br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
-  simp only [Zip.Native.BitReader.readBit] at h
+  simp only [ZipCommon.BitReader.readBit] at h
   split at h
   · exact nomatch h
   · rename_i hpos
@@ -232,19 +232,19 @@ private theorem readBit_pos_inv (br : Zip.Native.BitReader)
     · obtain ⟨_, rfl⟩ := h; dsimp only; right; omega
 
 /-- `readBits.go` preserves the position invariant. -/
-private theorem readBits_go_pos_inv (br : Zip.Native.BitReader)
+private theorem readBits_go_pos_inv (br : ZipCommon.BitReader)
     (acc : UInt32) (shift k : Nat) (val : UInt32)
-    (br' : Zip.Native.BitReader)
+    (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
-    (h : Zip.Native.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    (h : ZipCommon.BitReader.readBits.go br acc shift k = .ok (val, br')) :
     br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
   induction k generalizing br acc shift with
   | zero =>
-    simp only [Zip.Native.BitReader.readBits.go] at h
+    simp only [ZipCommon.BitReader.readBits.go] at h
     obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hpos
   | succ k ih =>
-    simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind] at h
+    simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind] at h
     cases hrd : br.readBit with
     | error e => simp only [hrd] at h; exact nomatch h
     | ok p =>
@@ -254,19 +254,19 @@ private theorem readBits_go_pos_inv (br : Zip.Native.BitReader)
         (readBit_pos_inv br bit br₁ hrd) h
 
 /-- `readBits` preserves the position invariant. -/
-theorem readBits_pos_inv (br : Zip.Native.BitReader)
-    (n : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+theorem readBits_pos_inv (br : ZipCommon.BitReader)
+    (n : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : br.readBits n = .ok (val, br')) :
     br'.bitOff = 0 ∨ br'.pos < br'.data.size := by
-  simp only [Zip.Native.BitReader.readBits] at h
+  simp only [ZipCommon.BitReader.readBits] at h
   exact readBits_go_pos_inv br 0 0 n val br' hwf hpos h
 
 /-- `HuffTree.decode.go` preserves the position invariant. -/
 private theorem decode_go_pos_inv (tree : Zip.Native.HuffTree)
-    (br : Zip.Native.BitReader) (n : Nat) (sym : UInt16)
-    (br' : Zip.Native.BitReader)
+    (br : ZipCommon.BitReader) (n : Nat) (sym : UInt16)
+    (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : Zip.Native.HuffTree.decode.go tree br n = .ok (sym, br')) :
@@ -294,7 +294,7 @@ private theorem decode_go_pos_inv (tree : Zip.Native.HuffTree)
 
 /-- `HuffTree.decode` preserves the position invariant. -/
 theorem decode_pos_inv (tree : Zip.Native.HuffTree)
-    (br : Zip.Native.BitReader) (sym : UInt16) (br' : Zip.Native.BitReader)
+    (br : ZipCommon.BitReader) (sym : UInt16) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : tree.decode br = .ok (sym, br')) :
@@ -302,17 +302,17 @@ theorem decode_pos_inv (tree : Zip.Native.HuffTree)
   exact decode_go_pos_inv tree br 0 sym br' hwf hpos (decode_unfold h)
 
 /-- `readBits.go` preserves the well-formedness invariant `bitOff < 8`. -/
-private theorem readBits_go_wf (br : Zip.Native.BitReader)
-    (acc : UInt32) (shift k : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+private theorem readBits_go_wf (br : ZipCommon.BitReader)
+    (acc : UInt32) (shift k : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
-    (h : Zip.Native.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    (h : ZipCommon.BitReader.readBits.go br acc shift k = .ok (val, br')) :
     br'.bitOff < 8 := by
   induction k generalizing br acc shift with
   | zero =>
-    simp only [Zip.Native.BitReader.readBits.go] at h
+    simp only [ZipCommon.BitReader.readBits.go] at h
     obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hwf
   | succ k ih =>
-    simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind] at h
+    simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind] at h
     cases hrd : br.readBit with
     | error e => simp only [hrd] at h; exact nomatch h
     | ok p =>
@@ -321,11 +321,11 @@ private theorem readBits_go_wf (br : Zip.Native.BitReader)
       exact ih br₁ _ _ (readBit_wf br bit br₁ hwf hrd) h
 
 /-- `readBits` preserves the well-formedness invariant `bitOff < 8`. -/
-theorem readBits_wf (br : Zip.Native.BitReader)
-    (n : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+theorem readBits_wf (br : ZipCommon.BitReader)
+    (n : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (h : br.readBits n = .ok (val, br')) : br'.bitOff < 8 := by
-  simp only [Zip.Native.BitReader.readBits] at h
+  simp only [ZipCommon.BitReader.readBits] at h
   exact readBits_go_wf br 0 0 n val br' hwf h
 
 /-! ## Table correspondence lemmas -/
@@ -450,8 +450,8 @@ theorem decodeHuffman_correct
     (litLengths distLengths : Array UInt8)
     (litTree distTree : Zip.Native.HuffTree)
     (maxOutputSize dataSize : Nat)
-    (br : Zip.Native.BitReader) (output : ByteArray)
-    (output' : ByteArray) (br' : Zip.Native.BitReader)
+    (br : ZipCommon.BitReader) (output : ByteArray)
+    (output' : ByteArray) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hlit : Zip.Native.HuffTree.fromLengths litLengths = .ok litTree)

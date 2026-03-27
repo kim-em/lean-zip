@@ -14,7 +14,7 @@ to the bit list `(bytesToBits data).drop (pos * 8 + bitOff)`.
 -/
 
 /-- The spec-level bit list corresponding to a `BitReader`'s current position. -/
-def Zip.Native.BitReader.toBits (br : Zip.Native.BitReader) : List Bool :=
+def ZipCommon.BitReader.toBits (br : ZipCommon.BitReader) : List Bool :=
   (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff)
 
 namespace Deflate.Correctness
@@ -87,10 +87,10 @@ protected theorem uint32_bit_eq_testBit (byte : UInt8) (off : Nat) (hoff : off <
   rwa [UInt8.toNat_toUInt32] at this
 
 /-- `readBit` preserves the well-formedness invariant `bitOff < 8`. -/
-theorem readBit_wf (br : Zip.Native.BitReader) (bit : UInt32)
-    (br' : Zip.Native.BitReader) (hwf : br.bitOff < 8)
+theorem readBit_wf (br : ZipCommon.BitReader) (bit : UInt32)
+    (br' : ZipCommon.BitReader) (hwf : br.bitOff < 8)
     (h : br.readBit = .ok (bit, br')) : br'.bitOff < 8 := by
-  simp only [Zip.Native.BitReader.readBit] at h
+  simp only [ZipCommon.BitReader.readBit] at h
   split at h
   · exact nomatch h
   · split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
@@ -100,8 +100,8 @@ theorem readBit_wf (br : Zip.Native.BitReader) (bit : UInt32)
 
 /-- Reading a single bit from the `BitReader` corresponds to consuming
     the head of the corresponding bit list. Requires `bitOff < 8`. -/
-theorem readBit_toBits (br : Zip.Native.BitReader)
-    (bit : UInt32) (br' : Zip.Native.BitReader)
+theorem readBit_toBits (br : ZipCommon.BitReader)
+    (bit : UInt32) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (h : br.readBit = .ok (bit, br')) :
     ∃ b rest,
@@ -109,7 +109,7 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
       br'.toBits = rest ∧
       bit = if b then 1 else 0 := by
   -- Unfold readBit; the error case is impossible since h says it succeeded
-  simp only [Zip.Native.BitReader.readBit] at h
+  simp only [ZipCommon.BitReader.readBit] at h
   split at h
   · exact nomatch h
   · -- ¬(br.pos ≥ br.data.size), so br.pos < br.data.size
@@ -124,7 +124,7 @@ theorem readBit_toBits (br : Zip.Native.BitReader)
     refine ⟨br.data[br.pos].toNat.testBit br.bitOff, rest, hrest, ?_, ?_⟩
     · -- br'.toBits = rest
       split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h <;>
-        (obtain ⟨_, rfl⟩ := h; simp only [Zip.Native.BitReader.toBits, hrest_eq]; congr 1; try omega)
+        (obtain ⟨_, rfl⟩ := h; simp only [ZipCommon.BitReader.toBits, hrest_eq]; congr 1; try omega)
     · -- bit = if testBit then 1 else 0 (same in both bitOff cases)
       split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
       all_goals (obtain ⟨rfl, _⟩ := h; rw [hget];
@@ -163,10 +163,10 @@ protected theorem acc_or_shift_bound (acc bit : UInt32) (shift : Nat)
 /-- Generalized loop invariant for `readBits.go`: the spec-level
     `readBitsLSB k` on the corresponding bit list produces a value `specVal`
     such that `val.toNat = acc.toNat + specVal * 2^shift`. -/
-private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
-    (shift k : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+private theorem readBits_go_spec (br : ZipCommon.BitReader) (acc : UInt32)
+    (shift k : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8) (hsk : shift + k ≤ 32) (hacc : acc.toNat < 2 ^ shift)
-    (h : Zip.Native.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    (h : ZipCommon.BitReader.readBits.go br acc shift k = .ok (val, br')) :
     ∃ specVal rest,
       Deflate.Spec.readBitsLSB k br.toBits = some (specVal, rest) ∧
       br'.toBits = rest ∧
@@ -174,7 +174,7 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
       br'.bitOff < 8 := by
   induction k generalizing br acc shift with
   | zero =>
-    simp only [Zip.Native.BitReader.readBits.go] at h
+    simp only [ZipCommon.BitReader.readBits.go] at h
     obtain ⟨rfl, rfl⟩ := Except.ok.inj h
     exact ⟨0, br'.toBits, by simp only [Deflate.Spec.readBitsLSB], rfl, by omega, hwf⟩
   | succ k ih =>
@@ -182,12 +182,12 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
     cases hrd : br.readBit with
     | error e =>
       -- readBit failed → readBits.go (k+1) fails, contradicting h
-      simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind, hrd] at h
+      simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind, hrd] at h
       exact nomatch h
     | ok p =>
       obtain ⟨bit, br₁⟩ := p
       -- readBit succeeded, unfold readBits.go using hrd
-      simp only [Zip.Native.BitReader.readBits.go, bind, Except.bind, hrd] at h
+      simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind, hrd] at h
       -- h : readBits.go br₁ (acc ||| (bit <<< shift.toUInt32)) (shift + 1) k = .ok (val, br')
       -- Extract bit correspondence from readBit_toBits
       obtain ⟨b, rest₁, hbr_bits, hbr1_bits, hbit_val⟩ :=
@@ -224,15 +224,15 @@ private theorem readBits_go_spec (br : Zip.Native.BitReader) (acc : UInt32)
     Requires `bitOff < 8` (well-formedness) and `n ≤ 32` (UInt32 shift
     correctness — native `readBits.go` uses `bit <<< shift.toUInt32`
     where `UInt32.shiftLeft` reduces shift mod 32). -/
-theorem readBits_toBits (br : Zip.Native.BitReader)
-    (n : Nat) (val : UInt32) (br' : Zip.Native.BitReader)
+theorem readBits_toBits (br : ZipCommon.BitReader)
+    (n : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8) (hn : n ≤ 32)
     (h : br.readBits n = .ok (val, br')) :
     ∃ rest,
       Deflate.Spec.readBitsLSB n br.toBits = some (val.toNat, rest) ∧
       br'.toBits = rest := by
   -- readBits = readBits.go br 0 0 n
-  simp only [Zip.Native.BitReader.readBits] at h
+  simp only [ZipCommon.BitReader.readBits] at h
   obtain ⟨specVal, rest, hspec, hrest, hval, _⟩ :=
     readBits_go_spec br 0 0 n val br' hwf (by omega) (by simp only [UInt32.toNat_zero,
       Nat.pow_zero, Nat.lt_add_one]) h
@@ -244,18 +244,18 @@ theorem readBits_toBits (br : Zip.Native.BitReader)
 /-! ### alignToByte correspondence -/
 
 /-- `toBits` length is a multiple of 8 minus `bitOff`. -/
-protected theorem toBits_length (br : Zip.Native.BitReader) :
+protected theorem toBits_length (br : ZipCommon.BitReader) :
     br.toBits.length = br.data.size * 8 - (br.pos * 8 + br.bitOff) := by
-  simp only [Zip.Native.BitReader.toBits, List.length_drop, Deflate.Spec.bytesToBits_length]
+  simp only [ZipCommon.BitReader.toBits, List.length_drop, Deflate.Spec.bytesToBits_length]
 
 /-- When `bitOff = 0`, `toBits` has length divisible by 8. -/
-private theorem toBits_length_mod8_zero (br : Zip.Native.BitReader) (h : br.bitOff = 0) :
+private theorem toBits_length_mod8_zero (br : ZipCommon.BitReader) (h : br.bitOff = 0) :
     br.toBits.length % 8 = 0 := by
   rw [Deflate.Correctness.toBits_length, h, Nat.add_zero]
   omega
 
 /-- When `0 < bitOff < 8` and the BitReader is within bounds, `toBits.length % 8 = 8 - bitOff`. -/
-private theorem toBits_length_mod8_pos (br : Zip.Native.BitReader)
+private theorem toBits_length_mod8_pos (br : ZipCommon.BitReader)
     (hwf : br.bitOff < 8) (hoff : br.bitOff ≠ 0) (hpos : br.pos < br.data.size) :
     br.toBits.length % 8 = 8 - br.bitOff := by
   rw [Deflate.Correctness.toBits_length]
@@ -264,11 +264,11 @@ private theorem toBits_length_mod8_pos (br : Zip.Native.BitReader)
 
 /-- Native `alignToByte` corresponds to spec `alignToByte` on the bit list.
     Requires `bitOff < 8` and that the BitReader is within bounds when `bitOff > 0`. -/
-theorem alignToByte_toBits (br : Zip.Native.BitReader)
+theorem alignToByte_toBits (br : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size) :
     br.alignToByte.toBits = Deflate.Spec.alignToByte br.toBits := by
-  simp only [Zip.Native.BitReader.alignToByte, Deflate.Spec.alignToByte]
+  simp only [ZipCommon.BitReader.alignToByte, Deflate.Spec.alignToByte]
   by_cases hoff : br.bitOff = 0
   · -- bitOff = 0: native is identity, spec drops 0
     simp only [hoff, toBits_length_mod8_zero br hoff, ↓reduceIte,
@@ -279,7 +279,7 @@ theorem alignToByte_toBits (br : Zip.Native.BitReader)
       simp only [beq_eq_false_iff_ne, ne_eq, hoff, not_false_eq_true]
     simp only [hoff_ne, Bool.false_eq_true, ↓reduceIte]
     rw [toBits_length_mod8_pos br hwf hoff hpos']
-    simp only [Zip.Native.BitReader.toBits, Nat.add_zero]
+    simp only [ZipCommon.BitReader.toBits, Nat.add_zero]
     rw [List.drop_drop]
     have hle : br.bitOff ≤ 8 := by omega
     congr 1
@@ -368,26 +368,26 @@ private theorem bytesToBits_getElem (data : ByteArray) (pos : Nat) (hpos : pos <
   simp only [Array.getElem_toList]; rfl
 
 /-- From a byte-aligned reader, `readBitsLSB 8` produces the next byte value. -/
-theorem toBits_readBitsLSB_byte (br : Zip.Native.BitReader)
+theorem toBits_readBitsLSB_byte (br : ZipCommon.BitReader)
     (hoff : br.bitOff = 0) (hpos : br.pos < br.data.size) :
     Deflate.Spec.readBitsLSB 8 br.toBits =
       some (br.data[br.pos].toNat,
-            { br with pos := br.pos + 1, bitOff := 0 : Zip.Native.BitReader }.toBits) := by
-  simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
+            { br with pos := br.pos + 1, bitOff := 0 : ZipCommon.BitReader }.toBits) := by
+  simp only [ZipCommon.BitReader.toBits, hoff, Nat.add_zero]
   rw [bytesToBits_getElem br.data br.pos hpos, readBitsLSB_byteToBits]
 
 /-- `alignToByte` produces a byte-aligned BitReader. -/
-theorem alignToByte_wf (br : Zip.Native.BitReader) :
+theorem alignToByte_wf (br : ZipCommon.BitReader) :
     br.alignToByte.bitOff = 0 := by
-  simp only [Zip.Native.BitReader.alignToByte]
+  simp only [ZipCommon.BitReader.alignToByte]
   split
   · next h => exact eq_of_beq h
   · rfl
 
 /-- `alignToByte` preserves the data field. -/
-theorem alignToByte_data (br : Zip.Native.BitReader) :
+theorem alignToByte_data (br : ZipCommon.BitReader) :
     br.alignToByte.data = br.data := by
-  simp only [Zip.Native.BitReader.alignToByte]
+  simp only [ZipCommon.BitReader.alignToByte]
   split <;> rfl
 
 /-! ### readUInt16LE correspondence -/
@@ -395,8 +395,8 @@ theorem alignToByte_data (br : Zip.Native.BitReader) :
 /-- Native `readUInt16LE` corresponds to spec `readBitsLSB 16` after alignment.
     The native reader aligns to a byte boundary, reads two bytes as LE uint16.
     The spec aligns and reads 16 bits LSB-first, giving the same value. -/
-theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
-    (val : UInt16) (br' : Zip.Native.BitReader)
+theorem readUInt16LE_toBits (br : ZipCommon.BitReader)
+    (val : UInt16) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : br.readUInt16LE = .ok (val, br')) :
@@ -405,7 +405,7 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
         some (val.toNat, rest) ∧
       br'.toBits = rest := by
   -- Unfold readUInt16LE: aligns, bounds check, reads two bytes
-  simp only [Zip.Native.BitReader.readUInt16LE] at h
+  simp only [ZipCommon.BitReader.readUInt16LE] at h
   split at h
   · exact nomatch h
   · -- bounds check passed: ¬(br.alignToByte.pos + 2 > br.alignToByte.data.size)
@@ -449,7 +449,7 @@ theorem readUInt16LE_toBits (br : Zip.Native.BitReader)
       · rfl
     · -- br'.toBits = bits'
       rw [hbr']
-      simp only [Zip.Native.BitReader.toBits, hoff]
+      simp only [ZipCommon.BitReader.toBits, hoff]
 
 /-! ### readBytes correspondence -/
 
@@ -492,48 +492,48 @@ protected theorem readNBytes_aligned (data : ByteArray) (pos n : Nat)
       congr 1; omega
 
 /-- `readUInt16LE` preserves well-formedness: output reader has `bitOff = 0`. -/
-theorem readUInt16LE_wf (br : Zip.Native.BitReader)
-    (val : UInt16) (br' : Zip.Native.BitReader)
+theorem readUInt16LE_wf (br : ZipCommon.BitReader)
+    (val : UInt16) (br' : ZipCommon.BitReader)
     (h : br.readUInt16LE = .ok (val, br')) : br'.bitOff = 0 := by
-  simp only [Zip.Native.BitReader.readUInt16LE] at h
+  simp only [ZipCommon.BitReader.readUInt16LE] at h
   split at h
   · exact nomatch h
   · have : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by cases h; rfl
     rw [this]; exact alignToByte_wf br
 
 /-- `readUInt16LE` preserves the data field. -/
-theorem readUInt16LE_data (br : Zip.Native.BitReader)
-    (val : UInt16) (br' : Zip.Native.BitReader)
+theorem readUInt16LE_data (br : ZipCommon.BitReader)
+    (val : UInt16) (br' : ZipCommon.BitReader)
     (h : br.readUInt16LE = .ok (val, br')) : br'.data = br.data := by
-  simp only [Zip.Native.BitReader.readUInt16LE] at h
+  simp only [ZipCommon.BitReader.readUInt16LE] at h
   split at h
   · exact nomatch h
   · have : br' = { br.alignToByte with pos := br.alignToByte.pos + 2 } := by cases h; rfl
     rw [this]; exact alignToByte_data br
 
 /-- `readBytes` preserves well-formedness: output reader has `bitOff = 0`. -/
-theorem readBytes_wf (br : Zip.Native.BitReader)
-    (n : Nat) (bytes : ByteArray) (br' : Zip.Native.BitReader)
+theorem readBytes_wf (br : ZipCommon.BitReader)
+    (n : Nat) (bytes : ByteArray) (br' : ZipCommon.BitReader)
     (h : br.readBytes n = .ok (bytes, br')) : br'.bitOff = 0 := by
-  simp only [Zip.Native.BitReader.readBytes] at h
+  simp only [ZipCommon.BitReader.readBytes] at h
   split at h
   · exact nomatch h
   · have : br' = { br.alignToByte with pos := br.alignToByte.pos + n } := by cases h; rfl
     rw [this]; exact alignToByte_wf br
 
 /-- For byte-aligned reader, `alignToByte` on the spec side is identity. -/
-theorem alignToByte_id_of_aligned (br : Zip.Native.BitReader)
+theorem alignToByte_id_of_aligned (br : ZipCommon.BitReader)
     (hoff : br.bitOff = 0) :
     Deflate.Spec.alignToByte br.toBits = br.toBits := by
   have : br.alignToByte = br := by
-    simp only [Zip.Native.BitReader.alignToByte, hoff, beq_self_eq_true, ↓reduceIte]
+    simp only [ZipCommon.BitReader.alignToByte, hoff, beq_self_eq_true, ↓reduceIte]
   rw [← alignToByte_toBits br (by omega) (Or.inl hoff), this]
 
 /-- Native `readBytes` corresponds to spec `readNBytes` after alignment.
     The native reader aligns to a byte boundary and reads `n` contiguous bytes.
     The spec reads `n` bytes one at a time via `readBitsLSB 8`. -/
-theorem readBytes_toBits (br : Zip.Native.BitReader)
-    (n : Nat) (bytes : ByteArray) (br' : Zip.Native.BitReader)
+theorem readBytes_toBits (br : ZipCommon.BitReader)
+    (n : Nat) (bytes : ByteArray) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (h : br.readBytes n = .ok (bytes, br')) :
@@ -542,7 +542,7 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
         some (bytes.data.toList, rest) ∧
       br'.toBits = rest := by
   -- Unfold readBytes: aligns, bounds check, extracts slice
-  simp only [Zip.Native.BitReader.readBytes] at h
+  simp only [ZipCommon.BitReader.readBytes] at h
   split at h
   · exact nomatch h
   · -- Extract bytes and reader from h
@@ -557,7 +557,7 @@ theorem readBytes_toBits (br : Zip.Native.BitReader)
     have hle : br.alignToByte.pos + n ≤ br.alignToByte.data.size := by omega
     -- Use readNBytes_aligned
     rw [← halign]
-    simp only [Zip.Native.BitReader.toBits, hoff, Nat.add_zero]
+    simp only [ZipCommon.BitReader.toBits, hoff, Nat.add_zero]
     rw [Deflate.Correctness.readNBytes_aligned br.alignToByte.data br.alignToByte.pos n hle []]
     simp only [List.nil_append]
     -- bytes and remaining bits

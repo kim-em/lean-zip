@@ -40,7 +40,7 @@ theorem validLengths_toUInt8_roundtrip (lens : List Nat)
 
 /-- If `br'` has fewer remaining bits than `br` (same underlying data),
     then `br'` is strictly ahead: `br'.bitPos > br.bitPos`. -/
-private theorem wf_progress_of_toBits_lt {br br' : Zip.Native.BitReader}
+private theorem wf_progress_of_toBits_lt {br br' : ZipCommon.BitReader}
     (hple : br.pos ≤ br.data.size)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (_hple' : br'.pos ≤ br'.data.size)
@@ -51,18 +51,18 @@ private theorem wf_progress_of_toBits_lt {br br' : Zip.Native.BitReader}
   have htl := Deflate.Correctness.toBits_length br
   have htl' := Deflate.Correctness.toBits_length br'
   rw [hdata] at htl'
-  simp only [Zip.Native.BitReader.bitPos] at *
+  simp only [ZipCommon.BitReader.bitPos] at *
   rcases hpos with h | h <;> rcases hpos' with h' | h' <;> omega
 
 /-- If `br.data.size ≤ dataSize` and `br` is within bounds,
     then `br.bitPos ≤ dataSize * 8`. -/
-private theorem wf_range_of_data_le {br : Zip.Native.BitReader} {dataSize : Nat}
+private theorem wf_range_of_data_le {br : ZipCommon.BitReader} {dataSize : Nat}
     (hwf : br.bitOff < 8)
     (hple : br.pos ≤ br.data.size)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hds : br.data.size ≤ dataSize) :
     ¬(dataSize * 8 < br.bitPos) := by
-  simp only [Zip.Native.BitReader.bitPos]
+  simp only [ZipCommon.BitReader.bitPos]
   rcases hpos with h | h <;> omega
 
 /-! ## DataSize monotonicity -/
@@ -71,14 +71,14 @@ private theorem wf_range_of_data_le {br : Zip.Native.BitReader} {dataSize : Nat}
     it succeeds with any `m ≥ n` and produces the same result.
     (The only effect of a larger dataSize is a more permissive range guard.) -/
 theorem inflateLoop_fuel_le
-    (br : Zip.Native.BitReader) (output : ByteArray)
+    (br : ZipCommon.BitReader) (output : ByteArray)
     (fixedLit fixedDist : Zip.Native.HuffTree) (maxOut n m : Nat)
     (x : ByteArray × Nat)
     (h : Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut n = .ok x)
     (hle : n ≤ m) :
     Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut m = .ok x := by
   -- Strong induction on WF measure: n * 8 - br.bitPos
-  suffices ∀ k (br : Zip.Native.BitReader) (output : ByteArray) (x : ByteArray × Nat),
+  suffices ∀ k (br : ZipCommon.BitReader) (output : ByteArray) (x : ByteArray × Nat),
       n * 8 - br.bitPos ≤ k →
       Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut n = .ok x →
       Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist maxOut m = .ok x from
@@ -174,7 +174,7 @@ set_option maxRecDepth 2048 in
     can use `inflateLoop_fuel_le` to lift to any larger dataSize.
 
     This is the reverse of `inflateLoop_correct`. -/
-theorem inflateLoop_complete (br : Zip.Native.BitReader)
+theorem inflateLoop_complete (br : ZipCommon.BitReader)
     (output : ByteArray)
     (fixedLit fixedDist : Zip.Native.HuffTree)
     (maxOutputSize dataSize : Nat)
@@ -194,7 +194,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
       Zip.Native.Inflate.inflateLoop br output fixedLit fixedDist
         maxOutputSize dataSize = .ok (⟨⟨result⟩⟩, endPos) := by
   -- Strong induction on bit stream length
-  suffices ∀ len (br : Zip.Native.BitReader) (output : ByteArray)
+  suffices ∀ len (br : ZipCommon.BitReader) (output : ByteArray)
       (result : List UInt8),
       br.toBits.length = len →
       br.bitOff < 8 →
@@ -223,7 +223,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
       have ⟨br₁, hrb_bf, hrest₁, hwf₁, hpos₁⟩ :=
         readBits_complete br 1 bfinal_val bits₁ hwf hpos (by omega) hval_bf hspec_bf
       have ⟨hdata₁, _, hple₁⟩ :=
-        Zip.Native.readBits_inv br br₁ 1 bfinal_val.toUInt32 hrb_bf hpos hple
+        ZipCommon.readBits_inv br br₁ 1 bfinal_val.toUInt32 hrb_bf hpos hple
       -- Extract readBitsLSB 2 (btype)
       cases hspec_bt : Deflate.Spec.readBitsLSB 2 bits₁ with
       | none => exact nomatch (hspec_bt ▸ hspec)
@@ -235,7 +235,7 @@ theorem inflateLoop_complete (br : Zip.Native.BitReader)
           readBits_complete br₁ 2 btype_val bits₂ hwf₁ hpos₁ (by omega) hval_bt
             (by rw [hrest₁]; exact hspec_bt)
         have ⟨hdata₂, _, hple₂⟩ :=
-          Zip.Native.readBits_inv br₁ br₂ 2 btype_val.toUInt32 hrb_bt hpos₁ hple₁
+          ZipCommon.readBits_inv br₁ br₂ 2 btype_val.toUInt32 hrb_bt hpos₁ hple₁
         -- Dispatch on btype_val in spec
         split at hspec
         · -- btype_val = 0: stored

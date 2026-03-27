@@ -14,6 +14,8 @@ import Zip.Spec.Huffman
 
 namespace Zip.Native
 
+open ZipCommon (BitReader)
+
 /-- A Huffman tree for decoding DEFLATE symbols.
     Leaf holds a symbol value; Node branches on 0 (left) vs 1 (right). -/
 inductive HuffTree where

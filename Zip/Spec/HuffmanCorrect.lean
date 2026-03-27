@@ -48,8 +48,8 @@ def decodeBits : Zip.Native.HuffTree → List Bool → Option (UInt16 × List Bo
 /-- Step 1: `decode.go` via BitReader corresponds to `decodeBits` on the
     spec bit list. By induction on the tree structure. -/
 protected theorem decode_go_decodeBits (tree : Zip.Native.HuffTree)
-    (br : Zip.Native.BitReader) (n : Nat)
-    (sym : UInt16) (br' : Zip.Native.BitReader)
+    (br : ZipCommon.BitReader) (n : Nat)
+    (sym : UInt16) (br' : ZipCommon.BitReader)
     (hwf : br.bitOff < 8)
     (h : Zip.Native.HuffTree.decode.go tree br n = .ok (sym, br')) :
     decodeBits tree br.toBits = some (sym, br'.toBits) ∧
@@ -127,7 +127,7 @@ protected theorem decodeBits_of_hasLeaf (tree : Zip.Native.HuffTree) (cw : List 
     succeeds with the same symbol. This is the reverse of `decode_go_decodeBits`. -/
 protected theorem decode_go_complete (tree : Zip.Native.HuffTree)
     (cw : List Bool) (sym : UInt16) (rest : List Bool)
-    (br : Zip.Native.BitReader) (n : Nat)
+    (br : ZipCommon.BitReader) (n : Nat)
     (hleaf : TreeHasLeaf tree cw sym)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)

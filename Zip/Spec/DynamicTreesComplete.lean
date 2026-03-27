@@ -15,7 +15,7 @@ namespace Deflate.Correctness
 
 /-- `readCLCodeLengths` completeness: if the spec's `readCLLengths` succeeds,
     then the native `readCLCodeLengths` also succeeds with corresponding results. -/
-protected theorem readCLCodeLengths_complete (br : Zip.Native.BitReader)
+protected theorem readCLCodeLengths_complete (br : ZipCommon.BitReader)
     (clLengths : Array UInt8) (i numCodeLen : Nat)
     (clLengths' : List Nat) (rest : List Bool)
     (hwf : br.bitOff < 8)
@@ -95,7 +95,7 @@ set_option linter.unusedSimpArgs false in
     then the native `decodeCLSymbols` also succeeds with corresponding results. -/
 protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
     (clLengths : Array UInt8)
-    (br : Zip.Native.BitReader) (codeLengths : Array UInt8)
+    (br : ZipCommon.BitReader) (codeLengths : Array UInt8)
     (idx totalCodes : Nat)
     (resultLens : List Nat) (rest : List Bool)
     (hwf : br.bitOff < 8)
@@ -118,7 +118,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
       br'.toBits = rest ∧
       br'.bitOff < 8 ∧
       (br'.bitOff = 0 ∨ br'.pos < br'.data.size) := by
-  have ih : ∀ (idx' : Nat) (br_i : Zip.Native.BitReader) (cl : Array UInt8)
+  have ih : ∀ (idx' : Nat) (br_i : ZipCommon.BitReader) (cl : Array UInt8)
       (resultLens' : List Nat) (rest' : List Bool),
       totalCodes - idx' < totalCodes - idx →
       br_i.bitOff < 8 →
@@ -388,12 +388,12 @@ termination_by totalCodes - idx
 
 /-- If the spec's `decodeDynamicTables` succeeds, the native
     `decodeDynamicTrees` also succeeds with corresponding Huffman trees. -/
-protected theorem decodeDynamicTrees_complete (br : Zip.Native.BitReader)
+protected theorem decodeDynamicTrees_complete (br : ZipCommon.BitReader)
     (litLens distLens : List Nat) (bits' : List Bool)
     (hwf : br.bitOff < 8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hspec : Deflate.Spec.decodeDynamicTables br.toBits = some (litLens, distLens, bits')) :
-    ∃ (litTree distTree : Zip.Native.HuffTree) (br' : Zip.Native.BitReader),
+    ∃ (litTree distTree : Zip.Native.HuffTree) (br' : ZipCommon.BitReader),
       Zip.Native.Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br') ∧
       br'.toBits = bits' ∧
       br'.bitOff < 8 ∧
