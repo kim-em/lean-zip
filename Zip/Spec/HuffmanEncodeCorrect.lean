@@ -22,7 +22,9 @@ protected theorem canonicalCodes_go_size (lengths : Array UInt8) (nextCode : Arr
   split
   · dsimp only []
     split
-    · rw [Deflate.Correctness.canonicalCodes_go_size, Array.size_set!]
+    · split
+      · rw [Deflate.Correctness.canonicalCodes_go_size, Array.size_set!]
+      · exact Deflate.Correctness.canonicalCodes_go_size lengths nextCode (i + 1) result
     · exact Deflate.Correctness.canonicalCodes_go_size lengths nextCode (i + 1) result
   · rfl
 termination_by lengths.size - i
@@ -81,6 +83,10 @@ private theorem canonicalCodes_go_inv
         simp only [hlsList, List.getElem_map, Array.getElem_toList]
       have hlen_le : lengths[i].toNat ≤ maxBits := by
         rw [← hls_i]; exact hv.1 _ (List.getElem_mem hls_len)
+      -- The new bounds guard is discharged by hlen_le + hncSize
+      have hlen_lt : lengths[i].toNat < nextCode.size := by omega
+      simp only [hlen_lt, ↓reduceDIte,
+        ← getElem!_pos nextCode lengths[i].toNat hlen_lt]
       -- Code value from NC invariant
       have hcode_val := hnc lengths[i].toNat (by omega) hlen_le
       have h_partial_le := count_foldl_take_le lsList lengths[i].toNat i
