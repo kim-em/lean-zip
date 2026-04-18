@@ -41,4 +41,4 @@ jobs:
         run: lake -R build
 
       - name: Test
-        run: lake -R exe test
+        run: lake -R test
