@@ -377,7 +377,7 @@ theorem lz77Lazy.trailing_valid (data : ByteArray) (pos : Nat) :
   unfold lz77Lazy.trailing
   split
   · rename_i hlt
-    exact .literal hlt rfl (lz77Lazy.trailing_valid data (pos + 1))
+    exact .literal hlt (getElem!_pos data pos hlt) (lz77Lazy.trailing_valid data (pos + 1))
   · exact .done (by omega)
 termination_by data.size - pos
 
@@ -411,28 +411,28 @@ The proof follows the lazy mainLoop case structure. Helper for the recurring
 private theorem lazyRef_at_pos (data : ByteArray) (windowSize hashSize : Nat)
     (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
     (hlt : pos + 2 < data.size)
-    (hcond : (hashValid[lz77Lazy.hash3 data pos hashSize]! &&
-        decide (hashTable[lz77Lazy.hash3 data pos hashSize]! < pos) &&
-        decide (pos - hashTable[lz77Lazy.hash3 data pos hashSize]! ≤ windowSize)) = true)
-    (hge : lz77Lazy.countMatch data (hashTable[lz77Lazy.hash3 data pos hashSize]!) pos
+    (hcond : (hashValid[lz77Lazy.hash3 data pos hashSize hlt]! &&
+        decide (hashTable[lz77Lazy.hash3 data pos hashSize hlt]! < pos) &&
+        decide (pos - hashTable[lz77Lazy.hash3 data pos hashSize hlt]! ≤ windowSize)) = true)
+    (hge : lz77Lazy.countMatch data (hashTable[lz77Lazy.hash3 data pos hashSize hlt]!) pos
         (min 258 (data.size - pos)) ≥ 3)
-    (hle : pos + lz77Lazy.countMatch data (hashTable[lz77Lazy.hash3 data pos hashSize]!) pos
+    (hle : pos + lz77Lazy.countMatch data (hashTable[lz77Lazy.hash3 data pos hashSize hlt]!) pos
         (min 258 (data.size - pos)) ≤ data.size)
     {rest : List LZ77Token}
     (hrest : ValidDecomp data (pos + lz77Lazy.countMatch data
-        (hashTable[lz77Lazy.hash3 data pos hashSize]!) pos (min 258 (data.size - pos))) rest) :
+        (hashTable[lz77Lazy.hash3 data pos hashSize hlt]!) pos (min 258 (data.size - pos))) rest) :
     ValidDecomp data pos
-      (.reference (lz77Lazy.countMatch data (hashTable[lz77Lazy.hash3 data pos hashSize]!) pos
+      (.reference (lz77Lazy.countMatch data (hashTable[lz77Lazy.hash3 data pos hashSize hlt]!) pos
           (min 258 (data.size - pos)))
-        (pos - hashTable[lz77Lazy.hash3 data pos hashSize]!) :: rest) := by
+        (pos - hashTable[lz77Lazy.hash3 data pos hashSize hlt]!) :: rest) := by
   simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
   have hmp_lt := hcond.1.2
   have hcm := lz77Lazy.countMatch_matches data
-    hashTable[lz77Lazy.hash3 data pos hashSize]! pos (min 258 (data.size - pos))
+    hashTable[lz77Lazy.hash3 data pos hashSize hlt]! pos (min 258 (data.size - pos))
   exact .reference hge (by omega) (Nat.sub_le _ _) hle
     (fun i hi => by
-      rw [show pos - (pos - hashTable[lz77Lazy.hash3 data pos hashSize]!) =
-          hashTable[lz77Lazy.hash3 data pos hashSize]! from by omega]
+      rw [show pos - (pos - hashTable[lz77Lazy.hash3 data pos hashSize hlt]!) =
+          hashTable[lz77Lazy.hash3 data pos hashSize hlt]! from by omega]
       exact (hcm.1 i hi).symm)
     hrest
 
@@ -457,7 +457,7 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
           · -- pos + 3 < data.size (positive) → lazy check
             split
             · -- isValid2 && ... (positive)
-              rename_i hcond2
+              rename_i h3lt hcond2
               split
               · -- matchLen2 > matchLen (positive) → try longer match
                 rename_i hlen2_gt
@@ -468,15 +468,15 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
                   have hmp2_lt := hcond2.1.2
                   -- Use UPDATED hash table for countMatch at pos+1
                   have hcm2 := lz77Lazy.countMatch_matches data
-                    (hashTable.set! (lz77Lazy.hash3 data pos hashSize) pos)[lz77Lazy.hash3 data (pos + 1) hashSize]!
+                    (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]!
                     (pos + 1) (min 258 (data.size - (pos + 1)))
-                  exact .literal (by omega) rfl
+                  exact .literal (by omega) (getElem!_pos data pos (by omega))
                     (.reference (by omega)
                       (by omega) (Nat.sub_le _ _) hle2
                       (fun i hi => by
                         rw [show pos + 1 -
-                            (pos + 1 - (hashTable.set! (lz77Lazy.hash3 data pos hashSize) pos)[lz77Lazy.hash3 data (pos + 1) hashSize]!) =
-                            (hashTable.set! (lz77Lazy.hash3 data pos hashSize) pos)[lz77Lazy.hash3 data (pos + 1) hashSize]! from by omega]
+                            (pos + 1 - (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]!) =
+                            (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]! from by omega]
                         exact (hcm2.1 i hi).symm)
                       (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw))
                 · -- pos + 1 + matchLen2 > data.size → fall back to match at pos
@@ -492,11 +492,11 @@ theorem lz77Lazy.mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
             exact lazyRef_at_pos data windowSize hashSize hashTable hashValid pos
               hlt hcond hge hle (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
         · -- ¬(pos + matchLen ≤ data.size) → literal
-          exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
+          exact .literal (by omega) (getElem!_pos data pos (by omega)) (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
       · -- ¬(matchLen ≥ 3) → literal
-        exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
+        exact .literal (by omega) (getElem!_pos data pos (by omega)) (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
     · -- ¬(isValid && ...) → literal
-      exact .literal (by omega) rfl (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
+      exact .literal (by omega) (getElem!_pos data pos (by omega)) (lz77Lazy.mainLoop_valid _ _ _ _ _ _ hw)
   · exact lz77Lazy.trailing_valid data pos
 termination_by data.size - pos
 decreasing_by all_goals omega
@@ -526,21 +526,22 @@ theorem lz77Lazy.mainLoop_encodable (data : ByteArray) (windowSize hashSize : Na
       Encodable t := by
   unfold lz77Lazy.mainLoop
   split
-  · dsimp only
+  · rename_i hlt
+    dsimp only
     split
     · rename_i hcond
       simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
       have hcm := lz77Lazy.countMatch_matches data
-        hashTable[lz77Lazy.hash3 data pos hashSize]! pos (min 258 (data.size - pos))
+        hashTable[lz77Lazy.hash3 data pos hashSize hlt]! pos (min 258 (data.size - pos))
       split
       · rename_i hge
         split
         · split
           · split
-            · rename_i hcond2
+            · rename_i h3lt hcond2
               simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond2
               have hcm2 := lz77Lazy.countMatch_matches data
-                (hashTable.set! (lz77Lazy.hash3 data pos hashSize) pos)[lz77Lazy.hash3 data (pos + 1) hashSize]!
+                (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]!
                 (pos + 1) (min 258 (data.size - (pos + 1)))
               split
               · split

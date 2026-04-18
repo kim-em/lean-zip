@@ -658,7 +658,7 @@ theorem deflateLazy_spec (data : ByteArray) :
       simp only [lz77Lazy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Lazy.trailing data 0 = [] := by
         unfold lz77Lazy.trailing
-        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
       simp only [this])
 
 /-- Native Level 2 roundtrip: compressing with lazy LZ77 + fixed Huffman codes
@@ -683,8 +683,10 @@ private theorem trailing_lazy_eq (data : ByteArray) (pos : Nat) (acc : Array LZ7
   | _ n ih =>
     unfold lz77LazyIter.trailing lz77Lazy.trailing
     split
-    · rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
-        ← Array.append_assoc, Array.push_eq_append]
+    · rename_i hlt
+      rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
+        ← Array.append_assoc, Array.push_eq_append,
+        getElem!_pos data pos hlt]
     · simp only [Array.append_empty]
 
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy).
@@ -715,7 +717,8 @@ private theorem mainLoop_lazy_eq (data : ByteArray) (windowSize hashSize : Nat)
                     rw [ih _ (by omega) _ _ _ _ rfl,
                       Array.push_eq_append, Array.push_eq_append,
                       Array.append_assoc, Array.append_assoc,
-                      ← List.toArray_cons, ← List.toArray_cons]
+                      ← List.toArray_cons, ← List.toArray_cons,
+                      getElem!_pos data pos (by omega)]
                   · -- matchLen2 exceeds data: fall back
                     rw [ih _ (by omega) _ _ _ _ rfl]
                     simp only [Array.push_eq_append, Array.append_assoc,
@@ -729,13 +732,16 @@ private theorem mainLoop_lazy_eq (data : ByteArray) (windowSize hashSize : Nat)
             · rw [ih _ (by omega) _ _ _ _ rfl]
               simp only [Array.push_eq_append, Array.append_assoc,
                 ← List.toArray_cons]
-          · rw [ih _ (by omega) _ _ _ _ rfl]
+          · rw [ih _ (by omega) _ _ _ _ rfl,
+              getElem!_pos data pos (by omega)]
             simp only [Array.push_eq_append, Array.append_assoc,
               ← List.toArray_cons]
-        · rw [ih _ (by omega) _ _ _ _ rfl]
+        · rw [ih _ (by omega) _ _ _ _ rfl,
+            getElem!_pos data pos (by omega)]
           simp only [Array.push_eq_append, Array.append_assoc,
             ← List.toArray_cons]
-      · rw [ih _ (by omega) _ _ _ _ rfl]
+      · rw [ih _ (by omega) _ _ _ _ rfl,
+          getElem!_pos data pos (by omega)]
         simp only [Array.push_eq_append, Array.append_assoc,
           ← List.toArray_cons]
     · rename_i hlt
