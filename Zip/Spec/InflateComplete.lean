@@ -67,6 +67,29 @@ private theorem wf_range_of_data_le {br : ZipCommon.BitReader} {dataSize : Nat}
 
 /-! ## DataSize monotonicity -/
 
+-- Shared tail tactic for `inflateLoop_fuel_le`. After the block-decode
+-- `split at h`, handles the bfinal check and WF guards. Captures `h`
+-- and `ih` from the enclosing proof context.
+set_option hygiene false in
+local macro "inflateLoop_fuel_le_ok_case" : tactic => `(tactic| (
+  split at h <;> split
+  next => exact h
+  next h1 h2 => exact absurd h1 h2
+  next h1 h2 => exact absurd h2 h1
+  next =>
+    split at h
+    next => exact nomatch h
+    next h_progress =>
+      split at h
+      next => exact nomatch h
+      next h_range_n =>
+        split
+        next h_prog_m => exact absurd h_prog_m h_progress
+        next =>
+          split
+          next h_range_m => exfalso; omega
+          next => exact ih _ (by omega) _ _ _ Nat.le.refl h))
+
 /-- DataSize monotonicity: if `inflateLoop` succeeds with dataSize `n`,
     it succeeds with any `m ≥ n` and produces the same result.
     (The only effect of a larger dataSize is a more permissive range guard.) -/
@@ -105,63 +128,17 @@ theorem inflateLoop_fuel_le
         · -- btype = 0: stored
           split at h
           · exact h -- error case
-          · -- ok case: bfinal check
-            split at h <;> split
-            · exact h
-            · rename_i h1 h2; exact absurd h1 h2
-            · rename_i h1 h2; exact absurd h2 h1
-            · -- WF guards: progress (same in h and goal)
-              split at h
-              · exact nomatch h
-              · rename_i h_progress
-                -- WF guards: range (differs between n and m)
-                split at h
-                · exact nomatch h
-                · rename_i h_range_n
-                  -- Discharge goal's WF guards
-                  split
-                  · rename_i h_prog_m; exact absurd h_prog_m h_progress
-                  · split
-                    · rename_i h_range_m; exfalso; omega
-                    · exact ih _ (by omega) _ _ _ Nat.le.refl h
+          · inflateLoop_fuel_le_ok_case
         · -- btype = 1: fixed Huffman
           split at h
           · exact h
-          · split at h <;> split
-            · exact h
-            · rename_i h1 h2; exact absurd h1 h2
-            · rename_i h1 h2; exact absurd h2 h1
-            · split at h
-              · exact nomatch h
-              · rename_i h_progress
-                split at h
-                · exact nomatch h
-                · rename_i h_range_n
-                  split
-                  · rename_i h_prog_m; exact absurd h_prog_m h_progress
-                  · split
-                    · rename_i h_range_m; exfalso; omega
-                    · exact ih _ (by omega) _ _ _ Nat.le.refl h
+          · inflateLoop_fuel_le_ok_case
         · -- btype = 2: dynamic Huffman
           split at h
           · exact h -- decodeDynamicTrees error
           · split at h
             · exact h -- decodeHuffman error
-            · split at h <;> split
-              · exact h
-              · rename_i h1 h2; exact absurd h1 h2
-              · rename_i h1 h2; exact absurd h2 h1
-              · split at h
-                · exact nomatch h
-                · rename_i h_progress
-                  split at h
-                  · exact nomatch h
-                  · rename_i h_range_n
-                    split
-                    · rename_i h_prog_m; exact absurd h_prog_m h_progress
-                    · split
-                      · rename_i h_range_m; exfalso; omega
-                      · exact ih _ (by omega) _ _ _ Nat.le.refl h
+            · inflateLoop_fuel_le_ok_case
         · exact h -- btype ≥ 3: reserved error
 
 /-! ## Block loop completeness -/

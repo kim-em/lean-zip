@@ -662,7 +662,7 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
         show 0 < 8; omega
       have hbr_pos : (ZipCommon.BitReader.mk data startPos 0).bitOff = 0 ∨
           (ZipCommon.BitReader.mk data startPos 0).pos <
-          (ZipCommon.BitReader.mk data startPos 0).data.size := by exact Or.inl rfl
+          (ZipCommon.BitReader.mk data startPos 0).data.size := Or.inl rfl
       have hgo := inflateLoop_correct
         ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
         maxOutputSize data.size result endPos
