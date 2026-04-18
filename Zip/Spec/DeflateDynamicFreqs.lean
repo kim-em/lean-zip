@@ -373,10 +373,10 @@ protected theorem toUInt8Array_le (lens : List Nat) (hbound : ∀ x ∈ lens, x 
     contains a witness with matching symbol and positive frequency. -/
 protected theorem freqPairs_witness (freqs : Array Nat) (sym : Nat)
     (hsym : sym < freqs.size) (hfreq : freqs[sym]! ≥ 1) :
-    ∃ p ∈ (List.range freqs.size).map fun i => (i, freqs[i]!),
-      p.1 = sym ∧ p.2 > 0 :=
-  ⟨(sym, freqs[sym]!), by
-    simp only [List.mem_map, List.mem_range]
-    exact ⟨sym, hsym, rfl⟩, rfl, hfreq⟩
+    ∃ p ∈ freqsToPairs freqs, p.1 = sym ∧ p.2 > 0 := by
+  refine ⟨(sym, freqs[sym]'hsym), ?_, rfl, ?_⟩
+  · simp only [freqsToPairs, List.mem_pmap, List.mem_range]
+    exact ⟨sym, hsym, rfl⟩
+  · rw [getElem!_pos freqs sym hsym] at hfreq; exact hfreq
 
 end Zip.Native.Deflate
