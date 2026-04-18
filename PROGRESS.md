@@ -5,18 +5,22 @@ Per-session details are in `progress/`.
 
 ## Current State
 
-- **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete
-- **Toolchain**: leanprover/lean4:v4.29.0-rc4
+- **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete;
+  proven-bounds campaign in progress (DEFLATE LZ77 matchers remain)
+- **Toolchain**: leanprover/lean4:v4.29.1
 - **Sorries**: 0
-- **Sessions**: ~622 completed (Feb 19 – Mar 13)
-- **Source files**: ~78 (38 spec, 8 native impl, 9 FFI/archive, 21 test)
-- **Merged PRs**: 600
-- **Spec lines**: ~20,500 across 38 spec files
+- **Sessions**: ~620 completed (Feb 19 – Apr 18)
+- **Source files in-repo**: `Zip/Spec/` 42, `Zip/Native/` 7,
+  `Zip/` (FFI/archive/tar/gzip/basic) 6, `ZipTest/` 21
+- **Merged PRs**: 615 (approximate; authoritative count via `gh pr list`)
+- **Spec lines**: 20,151 across 42 spec files (DEFLATE-only, post-split)
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across all spec files (campaign complete)
-- **Zstd**: Moved to https://github.com/kim-em/lean-zstd
+- **Zstd**: Moved to https://github.com/kim-em/lean-zstd (#1487, 2026-03-27)
 - **Shared utilities**: Moved to https://github.com/kim-em/lean-zip-common
-- **Proven-bounds**: 149 `]!` remaining across native files (campaign in progress)
+  (#1487, 2026-03-27); pulled in via `require zipCommon from git`
+- **Proven-bounds**: 50 `]!` remaining in `Zip/Native/` (42 in
+  `Deflate.lean` LZ77 matchers, 8 in `DeflateDynamic.lean`)
 
 ## Milestones
 
@@ -1784,18 +1788,80 @@ converted: Crc32.lean, Adler32.lean, BitWriter.lean.
   between native and spec decoder, following the DEFLATE B3 pattern)
 - Compressor + roundtrip proof
 
+**31-PR batch (Mar 13 – Apr 18): proven-bounds continuation + lean-zip-common/lean-zstd split + Lean 4.29.1 CI fixes (summarize #1511):**
+
+This batch is dominated by two strands: the proven-bounds campaign
+(converting `[i]!` runtime bounds checks to statically-proven access)
+and a structural split of the repository into three repos. See
+`progress/20260418T081059Z_10fac7ec.md` for the full PR breakdown.
+
+*The structural change (#1487, 2026-03-27):* `lean-zip` was split into
+three repositories:
+
+- [lean-zip-common](https://github.com/kim-em/lean-zip-common) — shared
+  utilities (Binary, Handle, BitReader, ZipForStd, io_ffi.c)
+- [lean-zstd](https://github.com/kim-em/lean-zstd) — Zstandard
+  decompression (13 spec files + FSE + XxHash + frame decoder +
+  Huffman + sequences)
+- `lean-zip` (this repo) — zlib/DEFLATE/Gzip/ZIP/Tar with all specs and
+  proofs
+
+39 files were moved out; a `require zipCommon from git` pin replaced
+them. `Zip/Spec/` dropped from 51 files to 42.
+
+*Proven-bounds campaign (18 PRs)*: pre-split coverage in
+ZstdHuffman/ZstdSequence/Fse/BitReader/Binary (now in sibling repos)
+plus DEFLATE-side work in Deflate.lean (#1446 emitTokens, #1500
+canonicalCodes/findTableCode/insertLoop), DeflateDynamic.lean (#1450,
+#1498), Inflate.lean (#1449, #1451), Tar.lean (#1459), and
+Gzip.lean (#1492). A cross-file consistency audit (#1431) kept
+conventions aligned.
+
+*Spec file splitting (5 PRs, pre-split)*: Spec/Zstd.lean and
+ZstdFrame.lean were modularized in-repo just before the #1487 split
+(#1438 ZstdTwoBlock extraction; #1460/#1466 splitting assessments;
+#1473 ZstdFrameBase extraction; #1479 three-way Spec/Zstd.lean split).
+The resulting files migrated to lean-zstd.
+
+*Other PRs (4)*: #1468 Track C1 fuel-dependent Zstd audit, #1491
+closing stale Zstd PRs post-split, #1497 Track E ZIP local-header span
+validation, #1501 InflateCorrect + InflateComplete proof-quality audit,
+#1502 localized Array.set! monotonicity lemma.
+
+*Toolchain / CI (3 PRs)*: Lean 4.29.1 introduced a Lake "compiled
+configuration invalid" regression on `lake exe test`. #1495 switched CI
+to `lake test`; #1506 pinned zipCommon + added `lake reconfigure` in
+CI; #1499 renamed call sites to upstream-compatible lemma names
+(`Nat.or_two_pow_eq_add_of_lt`, `List.getElem_foldl_set_*`,
+`ByteArray.getElem!_push_lt`) and pinned zipCommon to cleanup commit
+`89204d6`.
+
+*Carry-over*: 50 `]!` remaining in Native/, all in two files —
+`Zip/Native/Deflate.lean` (42, LZ77 matcher family: tracked in new
+issues #1508/#1509/#1510 splitting into three clusters) and
+`Zip/Native/DeflateDynamic.lean` (8, tracked in #1505 with open PR
+#1513). Three diag PRs (#1496, #1503, #1507) remain open as
+instrumentation for the Lake/Lean 4.29.1 regression.
+
+Quality metrics: 0 sorries; `Zip/Spec/` at 42 files, 20,151 LOC
+(DEFLATE-only — Zstd's ~16 kLOC of spec work migrated to lean-zstd);
+`Zip/Native/` at 7 files, 1,603 LOC. Toolchain: `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~608 sessions (Feb 19 – Mar 13)
-- 584 merged PRs
+- ~620 sessions (Feb 19 – Apr 18)
+- 615 merged PRs (approximate; authoritative count via `gh pr list`)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
+- Repository split into `lean-zip` + `lean-zip-common` + `lean-zstd`
+  (#1487, 2026-03-27)
 - Agent skills: `lean-wf-recursion` (#349), `proof-review-checklist` (#386,
   updated #925, #1325), bare-simp-resistant pattern catalog (#386),
   `lean-zstd-patterns` (#491), `agent-pr-recovery` (#546, updated #597),
   `lean-zstd-spec-pattern` (#623, updated #711, #840, #925),
   `lean-monad-proofs` (updated #711, #840),
   `lean-content-preservation` (#891),
-  `lean-parsing-completeness` (#1127, updated #1171)
+  `lean-parsing-completeness` (#1127, updated #1171),
+  `proven-bounds` (#1420)
