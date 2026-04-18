@@ -59,7 +59,7 @@ package «lean-zip» where
   moreLinkArgs := run_io linkFlags
   testDriver := "test"
 
-require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "main"
+require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "f53e8866e9c8427aa887dc9329d43912968c45f9"
 
 lean_lib Zip
 
