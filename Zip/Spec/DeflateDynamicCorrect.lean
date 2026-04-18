@@ -329,6 +329,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
           (by rwa [hlit_roundtrip])
           (by omega) 256 eobBits'
           (by simp only [Deflate.Spec.encodeLitLen] at henc_eob; rwa [hlit_roundtrip])
+        have h256_lt : 256 < litCodes.size := by rw [hlit_codes_size]; omega
+        rw [getElem!_pos litCodes 256 h256_lt] at heob_cw heob_len
         -- BitWriter chain
         have hwf0 := BitWriter.empty_wf
         have hwf1 := BitWriter.writeBits_wf _ 1 1 hwf0 (by omega)
@@ -355,21 +357,20 @@ theorem deflateDynamic_spec (data : ByteArray) :
           hlit_le hdist_le
         -- writeHuffCode for EOB
         let bw4 := emitTokensWithCodes bw3 tokens litCodes distCodes 0
-        have h256_lt : 256 < litCodes.size := by rw [hlit_codes_size]; omega
+        have hlen256_le : (litCodes[256]'h256_lt).snd.toNat ≤ 15 := by
+          have := hlit_le 256 h256_lt
+          rwa [getElem!_pos litCodes 256 h256_lt] at this
         have hwf_eob := BitWriter.writeHuffCode_wf bw4
-          litCodes[256]!.1 litCodes[256]!.2 hwf_emit (hlit_le 256 h256_lt)
+          (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2 hwf_emit hlen256_le
         have hbw_eob := BitWriter.writeHuffCode_toBits bw4
-          litCodes[256]!.1 litCodes[256]!.2 hwf_emit (hlit_le 256 h256_lt)
+          (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2 hwf_emit hlen256_le
         -- Chain all the bits
         rw [hemit, hbw_hdr, hbw2_bits] at hbw_eob
         -- Show deflateDynamic data equals the flushed writer
         have hdef : deflateDynamic data =
-            (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).flush := by
+            (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush := by
           unfold deflateDynamic
-          rw [lz77GreedyIter_eq_lz77Greedy]
-          -- After unfold + rewrite, we have `let (litFreqs, distFreqs) := tokenFreqs tokens; ...`
-          -- This is definitionally equal to using .1/.2, and `let (code, len) := litCodes[256]!`
-          -- is definitionally equal to using .1/.2. So `split` on the `if` suffices.
+          simp only [lz77GreedyIter_eq_lz77Greedy]
           split
           · rename_i hzero
             rw [beq_iff_eq] at hzero
@@ -387,18 +388,18 @@ theorem deflateDynamic_spec (data : ByteArray) :
         rw [hdef]
         have hflush := BitWriter.flush_toBits _ hwf_eob
         -- The bits decomposition
-        have hbits_eq : (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).toBits =
+        have hbits_eq : (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).toBits =
             [true, false, true] ++ headerBits ++ symBits := by
           rw [hbw_eob, hsymBits_eq, heob_eq, heob_cw]
           simp only [List.append_assoc]
         rw [hflush, hbits_eq]
         -- Align the bitCount % 8
-        suffices hmod : (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).bitCount.toNat % 8 =
+        suffices hmod : (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).bitCount.toNat % 8 =
             ([true, false, true] ++ headerBits ++ symBits).length % 8 by
           simp only [hmod]
-        have htoBits_len : (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).toBits.length =
-            (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).data.data.toList.length * 8 +
-            (bw4.writeHuffCode litCodes[256]!.1 litCodes[256]!.2).bitCount.toNat := by
+        have htoBits_len : (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).toBits.length =
+            (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).data.data.toList.length * 8 +
+            (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).bitCount.toNat := by
           simp only [BitWriter.toBits, List.length_append, List.length_flatMap,
             Deflate.Spec.bytesToBits.byteToBits_length, List.length_map, List.length_range]
           have hsum : ∀ (l : List UInt8),
