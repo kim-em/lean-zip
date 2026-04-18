@@ -7,6 +7,17 @@ from project scaffolding through verified, optimized compression.
 
 ## What Is Realistic to Prove
 
+Formal verification here can make the codec core extremely robust, but
+it does not automatically secure:
+
+- unverified archive parsers and file-format plumbing
+- the Lean runtime and C FFI code
+- `IO`-driven allocation paths fed by attacker-controlled sizes
+- resource-usage properties such as memory exhaustion and zip bombs
+
+The plan must therefore treat "verified core + audited boundary" as the
+target, not just "proved roundtrip theorems for compression."
+
 ### Checksums (CRC32, Adler32)
 
 Very provable. These are pure mathematical functions. Tractable theorems:
@@ -151,6 +162,34 @@ Writing specs before implementations ensures the work stays grounded in
 what we can actually prove, and prevents implementations from getting ahead
 of the formalization.
 
+## Security-Driven Development Cycle
+
+Every component that touches untrusted bytes, sizes, offsets, file
+handles, allocators, or FFI must also follow this cycle:
+
+1. **Threat model the boundary**: identify attacker-controlled fields,
+   especially lengths, offsets, counts, recursion depth, and output-size
+   growth.
+2. **State boundary contracts first**: what must be validated before any
+   allocation, seek, slice, or read; what errors are returned on malformed
+   inputs; what resource limits are enforced.
+3. **Implement guards before optimization**: size/offset validation,
+   overflow checks, truncation checks, and configurable output limits.
+4. **Add malformed fixtures and regression tests**: truncated inputs,
+   impossible sizes, overlapping or inconsistent metadata, and known CVE
+   pattern families.
+5. **Run adversarial tooling**: sanitizer builds, fuzzers, and corpus
+   minimization against the touched boundary.
+6. **Prove what is tractable**: parser soundness, validated-size lemmas,
+   non-panicking helper invariants, and equivalence between guarded
+   implementations and proof-friendly specs.
+7. **Record trusted-boundary assumptions**: if a bug is in Lean runtime,
+   libc, zlib, or another dependency, log it explicitly and either patch
+   upstream, guard around it locally, or both.
+
+No boundary-facing work is complete when only the happy-path theorem or
+conformance tests pass.
+
 ## Phased Plan
 
 ### Overview
@@ -158,7 +197,9 @@ of the formalization.
 The work is organized into four tracks: a bootstrapping **A-track**, a
 linear **B-track** (DEFLATE verification pipeline), and two tracks
 **C** and **D** that can be worked on concurrently once their
-dependencies are met. Two cross-cutting concerns run throughout.
+dependencies are met, plus a security/assurance **E-track** that starts
+as soon as untrusted-input code exists. Two cross-cutting concerns run
+throughout.
 
 **Dependency graph:**
 
@@ -169,6 +210,9 @@ A1 → A2 → A3
            │    │
            ↓    ↓
            D    C
+           │
+           ↓
+           E
 ```
 
 - **A1–A3** are sequential: project setup, FFI wrappers, archive formats.
@@ -178,11 +222,16 @@ A1 → A2 → A3
   exist before they can be replaced with well-founded recursion.
 - **D** (benchmarking and optimization) depends on B2: native
   implementations must exist before they can be profiled.
+- **E** (trusted boundary, parser hardening, fuzzing, sanitizers) begins
+  at A2/A3 and continues through the life of the project; it is not a
+  clean-up phase to defer until after proofs.
 - **Cross-cutting concerns** (characterizing properties, ZipForStd)
   apply from B1 onwards and are not gated on any particular phase.
 
 Planning agents should spread work across tracks wherever dependencies
-allow, rather than finishing one track before starting another.
+allow, rather than finishing one track before starting another. In
+particular, they should always keep some effort on Track E once archive,
+FFI, or `IO` code exists.
 
 ### A1: Project Setup
 
@@ -212,6 +261,9 @@ path and serve as the reference implementation for conformance testing.
 - C implementation in `c/` with overflow guards and allocation failure
   checks
 - Basic tests for each FFI function
+- Trusted-boundary notes for each FFI entry point: which sizes cross
+  between Lean and C, what overflows are possible, and which side owns
+  each allocation
 
 ### A3: Archive Formats and Test Infrastructure
 
@@ -225,11 +277,15 @@ Pure Lean archive format implementations and conformance test harness.
 - **ZIP archives**: local file headers, central directory, EOCD record,
   ZIP64 support, DEFLATE and stored methods, UTF-8 filenames
 - **Security hardening**: path traversal prevention, checksum validation
-  on parse, truncation detection
+  on parse, truncation detection, header-size validation against file
+  bounds before allocation or `Handle.read`
 - **Conformance test infrastructure**: random input generation,
   cross-implementation testing (native compress + FFI decompress and vice
   versa once native implementations exist), edge cases (empty, single
   byte, large, incompressible)
+- **Malformed corpus**: adversarial ZIP/gzip/tar fixtures covering
+  truncated data, impossible lengths, oversized ZIP64 fields, bad
+  offsets, duplicate headers, and archive bombs
 
 ### B1: Checksums
 
@@ -537,6 +593,54 @@ with or faster than the C libraries on both runtime and compression
 quality. At that point, the FFI wrappers become optional — the native
 path is verified, performant, and compresses well.
 
+### E: Trusted Boundary, Parser Hardening, and Adversarial Assurance
+
+**Begins at: A2/A3 and never stops**
+
+This track exists to cover the gap that roundtrip proofs do not cover:
+unverified parsers, FFI glue, runtime assumptions, and resource-safety
+under hostile inputs.
+
+**Deliverables:**
+
+- **Trusted computing base inventory**: maintain a living list of all
+  components relied on but not proved here: Lean runtime allocation and
+  `IO`, C FFI shims, zlib, libc/file I/O, and any unsafe helpers.
+- **Boundary contract ledger**: for every function that consumes
+  untrusted lengths or offsets, document:
+  input source, validation performed, maximum allowed allocation, and
+  failure mode.
+- **Parser hardening proofs/tests**: archive readers must validate
+  claimed sizes and offsets against actual file bounds before seeking or
+  reading. Where proof is tractable, state and prove lemmas that guarded
+  reads never request more bytes than remain.
+- **Adversarial harnesses**: dedicated fuzz targets for ZIP extract,
+  gzip/zlib/deflate decode, tar extract, archive metadata parsing, and
+  FFI whole-buffer helpers.
+- **Sanitizer matrix**: ASan, UBSan, and Valgrind runs for boundary code;
+  keep the invocation scripts and regression corpus in-repo.
+- **Malformed regression corpus**: every discovered crash, panic,
+  timeout, or upstream-runtime issue gets a minimized reproducer and a
+  permanent regression test when feasible.
+- **Upstream bug workflow**: when a bug lands in Lean runtime or another
+  dependency, immediately produce:
+  a minimized reproducer, upstream issue/PR link, local guardrail or
+  workaround, and a note in the trusted-boundary inventory.
+- **Resource-safety policy**: all public decompression/archive APIs
+  expose explicit bounds for maximum output, per-entry size, total
+  extracted bytes, recursion depth if relevant, and member counts where
+  applicable.
+
+**Exit criteria for any boundary-facing subsystem:**
+
+- Happy-path conformance tests pass.
+- Malformed corpus tests pass.
+- Sanitizer builds are clean.
+- Fuzzing has run long enough to exercise the surface meaningfully.
+- The boundary contract is documented.
+- Either the subsystem is verified, or the unverified portion is
+  explicitly named and guarded.
+
 ## Cross-Cutting Concerns
 
 These are not phases — they apply throughout all work from B1 onwards.
@@ -562,6 +666,60 @@ Examples, to be pursued as the relevant algorithms are implemented:
 These properties are not gated on optimization or size limit work.
 They can and should be pursued as soon as the relevant algorithms
 exist, starting from B1.
+
+### Trusted Boundary Discipline
+
+The project must maintain an explicit list of what is trusted and why.
+This includes:
+
+- Lean runtime functions used by `ByteArray`, `Handle.read`, and stream
+  operations
+- C FFI allocation and formatting helpers
+- external libraries such as zlib
+- parser modules that are currently tested/hardened but not formally proved
+
+For each trusted component, track one of:
+
+- proved in-repo
+- guarded locally with validation and limits
+- covered by fuzzing/sanitizers only
+- reported upstream and awaiting fix
+
+The goal is not to eliminate trust entirely, but to shrink unknown trust
+and make the remaining trust visible.
+
+### Adversarial Validation
+
+Fuzzing, sanitizer runs, malformed fixtures, and differential testing are
+first-class deliverables, not optional "testing polish." They answer a
+different question than proofs:
+
+- proofs show the modeled algorithm is correct under its assumptions
+- adversarial validation finds missing assumptions, unmodeled boundaries,
+  runtime bugs, and denial-of-service cases
+
+Agents should therefore treat every new parser, streaming interface, and
+FFI path as requiring both proof work and adversarial work.
+
+### Orchestrator Policy
+
+If an agent orchestrator is driving development, it should follow these
+rules:
+
+1. Never declare a feature "done" on roundtrip theorems alone when the
+   feature includes parsing, `IO`, FFI, or allocation.
+2. For every new untrusted-input entry point, create or update:
+   tests, malformed fixtures, fuzz target, and boundary-contract notes
+   in the same wave of work.
+3. Keep a standing queue of Track E tasks and always schedule some of
+   them in parallel with proof expansion.
+4. When fuzzing or sanitizers find a bug outside the proved core, treat
+   that as plan-conforming work, not as an interruption.
+5. Prefer shrinking the trusted boundary over merely documenting it:
+   move checks into Lean, prove guards, and avoid passing unchecked sizes
+   into runtime/FFI calls.
+6. If a bug is upstream, land the local regression test and workaround
+   before moving on.
 
 ### ZipForStd / Standard Library Pipeline
 
