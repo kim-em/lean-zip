@@ -47,7 +47,7 @@ jobs:
           echo "=== filtered build strace ==="
           grep -nE 'lakefile\.olean\.trace|lakefile\.olean|config/\[anonymous\]|zipCommon/.lake/config' /tmp/lake-build.strace.* || true
           echo "=== root trace context ==="
-          first_match="$(grep -n '/\\.lake/config/\\[anonymous\\]/lakefile\\.olean\\.trace' /tmp/lake-build.strace.* | head -n1 || true)"
+          first_match="$(grep -n '/.lake/config/\\[anonymous\\]/lakefile.olean.trace' /tmp/lake-build.strace.* | head -n1 || true)"
           if [ -n "$first_match" ]; then
             file="$(printf '%s' "$first_match" | cut -d: -f1)"
             line="$(printf '%s' "$first_match" | cut -d: -f2)"
@@ -56,7 +56,7 @@ jobs:
             sed -n "${start},${end}p" "$file"
           fi
           echo "=== writer pid traces ==="
-          grep 'lakefile\\.olean\\.trace' /tmp/lake-build.strace.* | grep 'write(' | sed -E 's#.*/lake-build\\.strace\\.([0-9]+):.*#\\1#' | sort -u | while read -r pid; do
+          grep 'lakefile.olean.trace' /tmp/lake-build.strace.* | grep 'write(' | sed -E 's#.*/lake-build\.strace\.([0-9]+):.*#\1#' | sort -u | while read -r pid; do
             echo "--- pid $pid ---"
             sed -n '1,220p' "/tmp/lake-build.strace.$pid"
           done
