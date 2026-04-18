@@ -381,7 +381,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
               rw [if_pos (show data.size < 3 by omega)]
               show (lz77Greedy.trailing data 0).toArray = #[]
               unfold lz77Greedy.trailing
-              rw [if_neg (by omega)]
+              rw [dif_neg (show ¬(0 < data.size) by omega)]
             have hemit_id : bw4 = bw3 := by
               show emitTokensWithCodes bw3 tokens litCodes distCodes hlit_size hdist_size 0 = bw3
               rw [htok_empty]; unfold emitTokensWithCodes; rfl

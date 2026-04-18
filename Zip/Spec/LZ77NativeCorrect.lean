@@ -23,8 +23,9 @@ def tokensToSymbols (tokens : Array LZ77Token) : List Deflate.Spec.LZ77Symbol :=
     such that `i ≤ n ≤ maxLen` and all positions in `[i, n)` have matching
     bytes. -/
 theorem lz77Greedy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
+    (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size)
     (hle : i ≤ maxLen) :
-    let n := lz77Greedy.go data p1 p2 i maxLen
+    let n := lz77Greedy.go data p1 p2 i maxLen h1 h2
     (∀ j, i ≤ j → j < n → data[p1 + j]! = data[p2 + j]!) ∧
     i ≤ n ∧ n ≤ maxLen := by
   unfold lz77Greedy.go
@@ -32,10 +33,13 @@ theorem lz77Greedy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
   · rename_i hlt
     split
     · rename_i heq
-      have ih := lz77Greedy.go_matches data p1 p2 (i + 1) maxLen (by omega)
+      have ih := lz77Greedy.go_matches data p1 p2 (i + 1) maxLen h1 h2 (by omega)
       refine ⟨fun j hj hjn => ?_, by omega, ih.2.2⟩
       by_cases hji : j = i
-      · subst hji; exact beq_iff_eq.mp heq
+      · subst hji
+        rw [getElem!_pos data (p1 + j) (by omega),
+            getElem!_pos data (p2 + j) (by omega)]
+        exact beq_iff_eq.mp heq
       · exact ih.1 j (by omega) hjn
     · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
   · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
@@ -43,11 +47,12 @@ termination_by maxLen - i
 
 /-- `countMatch` returns a count of consecutive matching bytes starting from
     position 0, with all counted positions verified equal. -/
-theorem lz77Greedy.countMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat) :
-    let n := lz77Greedy.countMatch data p1 p2 maxLen
+theorem lz77Greedy.countMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat)
+    (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) :
+    let n := lz77Greedy.countMatch data p1 p2 maxLen h1 h2
     (∀ j, j < n → data[p1 + j]! = data[p2 + j]!) ∧ n ≤ maxLen := by
   simp only [lz77Greedy.countMatch]
-  have h := lz77Greedy.go_matches data p1 p2 0 maxLen (by omega)
+  have h := lz77Greedy.go_matches data p1 p2 0 maxLen h1 h2 (by omega)
   exact ⟨fun j hj => h.1 j (by omega) hj, h.2.2⟩
 
 /-! ## ValidDecomp predicate -/
@@ -166,7 +171,7 @@ theorem trailing_valid (data : ByteArray) (pos : Nat) :
   unfold lz77Greedy.trailing
   split
   · rename_i hlt
-    exact .literal hlt rfl (trailing_valid data (pos + 1))
+    exact .literal hlt (getElem!_pos data pos hlt) (trailing_valid data (pos + 1))
   · exact .done (by omega)
 termination_by data.size - pos
 
@@ -180,27 +185,41 @@ theorem mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
   · rename_i hlt
     dsimp only
     split
-    · rename_i hcond
+    · rename_i hht
       split
-      · rename_i hge
+      · rename_i hhv
         split
-        · rename_i hle
-          simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
-          have hmp_lt := hcond.1.2
-          have hcm := lz77Greedy.countMatch_matches data
-            hashTable[lz77Greedy.hash3 data pos hashSize]! pos (min 258 (data.size - pos))
-          apply ValidDecomp.reference hge
-          · omega
-          · exact Nat.sub_le _ _
-          · exact hle
-          · intro i hi
-            rw [show pos - (pos - hashTable[lz77Greedy.hash3 data pos hashSize]!) =
-                hashTable[lz77Greedy.hash3 data pos hashSize]! from by omega]
-            exact (hcm.1 i hi).symm
-          · exact mainLoop_valid _ _ _ _ _ _ hw
-        · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
-      · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
-    · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
+        · rename_i hcond
+          split
+          · rename_i hge
+            split
+            · rename_i hle
+              have hmp_lt := hcond.2.1
+              have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
+              have hmaxLenM : hashTable[lz77Greedy.hash3 data pos hashSize hlt] +
+                  min 258 (data.size - pos) ≤ data.size := by omega
+              have hcm := lz77Greedy.countMatch_matches data
+                hashTable[lz77Greedy.hash3 data pos hashSize hlt] pos
+                (min 258 (data.size - pos)) hmaxLenM hmaxLenP
+              apply ValidDecomp.reference hge
+              · omega
+              · exact Nat.sub_le _ _
+              · exact hle
+              · intro i hi
+                rw [show pos - (pos - hashTable[lz77Greedy.hash3 data pos hashSize hlt]) =
+                    hashTable[lz77Greedy.hash3 data pos hashSize hlt] from by omega]
+                exact (hcm.1 i hi).symm
+              · exact mainLoop_valid _ _ _ _ _ _ hw
+            · exact .literal (by omega) (getElem!_pos data pos (by omega))
+                (mainLoop_valid _ _ _ _ _ _ hw)
+          · exact .literal (by omega) (getElem!_pos data pos (by omega))
+              (mainLoop_valid _ _ _ _ _ _ hw)
+        · exact .literal (by omega) (getElem!_pos data pos (by omega))
+            (mainLoop_valid _ _ _ _ _ _ hw)
+      · exact .literal (by omega) (getElem!_pos data pos (by omega))
+          (mainLoop_valid _ _ _ _ _ _ hw)
+    · exact .literal (by omega) (getElem!_pos data pos (by omega))
+        (mainLoop_valid _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 
@@ -253,22 +272,36 @@ theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
   · rename_i hlt
     dsimp only
     split
-    · rename_i hcond
+    · rename_i hht
       split
-      · rename_i hge
+      · rename_i hhv
         split
-        · rename_i hle
-          -- Reference case
-          simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
-          obtain ⟨⟨_, hmp_lt⟩, hmp_ws⟩ := hcond
-          intro t ht
-          cases ht with
-          | head =>
-            show 3 ≤ _ ∧ _ ≤ 258 ∧ 1 ≤ _ ∧ _ ≤ 32768
-            have hcm := lz77Greedy.countMatch_matches data
-              hashTable[lz77Greedy.hash3 data pos hashSize]! pos (min 258 (data.size - pos))
-            exact ⟨hge, by omega, by omega, by omega⟩
-          | tail _ h => exact mainLoop_encodable _ _ _ _ _ _ hw hws t h
+        · rename_i hcond
+          split
+          · rename_i hge
+            split
+            · rename_i hle
+              obtain ⟨_, hmp_lt, hmp_ws⟩ := hcond
+              have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
+              have hmaxLenM : hashTable[lz77Greedy.hash3 data pos hashSize hlt] +
+                  min 258 (data.size - pos) ≤ data.size := by omega
+              have hcm := lz77Greedy.countMatch_matches data
+                hashTable[lz77Greedy.hash3 data pos hashSize hlt] pos
+                (min 258 (data.size - pos)) hmaxLenM hmaxLenP
+              intro t ht
+              cases ht with
+              | head =>
+                show 3 ≤ _ ∧ _ ≤ 258 ∧ 1 ≤ _ ∧ _ ≤ 32768
+                exact ⟨hge, by omega, by omega, by omega⟩
+              | tail _ h => exact mainLoop_encodable _ _ _ _ _ _ hw hws t h
+            · intro t ht
+              cases ht with
+              | head => trivial
+              | tail _ h => exact mainLoop_encodable _ _ _ _ _ _ hw hws t h
+          · intro t ht
+            cases ht with
+            | head => trivial
+            | tail _ h => exact mainLoop_encodable _ _ _ _ _ _ hw hws t h
         · intro t ht
           cases ht with
           | head => trivial
@@ -312,9 +345,15 @@ theorem mainLoop_length (data : ByteArray) (windowSize hashSize : Nat)
     split
     · split
       · split
-        · rename_i hle
-          simp only [List.length_cons]
-          exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) hle
+        · split
+          · split
+            · rename_i hle
+              simp only [List.length_cons]
+              exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) hle
+            · simp only [List.length_cons]
+              exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) (by omega)
+          · simp only [List.length_cons]
+            exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) (by omega)
         · simp only [List.length_cons]
           exact length_cons_le_of_advance (mainLoop_length _ _ _ _ _ _) (by omega) (by omega)
       · simp only [List.length_cons]

@@ -322,7 +322,7 @@ theorem deflateFixed_spec (data : ByteArray) :
       simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Greedy.trailing data 0 = [] := by
         unfold lz77Greedy.trailing
-        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
       simp only [this])
 
 /-! ## Inflate completeness (restricted) -/
@@ -410,39 +410,35 @@ theorem inflate_deflateFixed (data : ByteArray)
 
 /-! ## Iterative LZ77 equivalence -/
 
-/-- Bridge: `lz77GreedyIter.hash3` agrees with `lz77Greedy.hash3` when
-    the bounds hypothesis holds. -/
+/-- Bridge: `lz77GreedyIter.hash3` agrees with `lz77Greedy.hash3`.
+    Both helpers have identical bodies after the proven-bounds
+    conversion, so the equality reduces to `rfl` after unfolding. -/
 private theorem hash3_eq (data : ByteArray) (pos hashSize : Nat)
     (h : pos + 2 < data.size) :
-    lz77GreedyIter.hash3 data pos hashSize h = lz77Greedy.hash3 data pos hashSize := by
-  unfold lz77GreedyIter.hash3 lz77Greedy.hash3
-  rw [getElem!_pos data pos (by omega),
-      getElem!_pos data (pos + 1) (by omega),
-      getElem!_pos data (pos + 2) (by omega)]
+    lz77GreedyIter.hash3 data pos hashSize h =
+      lz77Greedy.hash3 data pos hashSize h := by
+  rfl
 
-/-- The `go` helper agrees with its recursive counterpart (when its
-    bounds hypotheses hold). -/
+/-- The `go` helper agrees with its recursive counterpart. -/
 private theorem go_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
     (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) :
     lz77GreedyIter.go data p1 p2 i maxLen h1 h2 =
-    lz77Greedy.go data p1 p2 i maxLen := by
+    lz77Greedy.go data p1 p2 i maxLen h1 h2 := by
   induction h : maxLen - i using Nat.strongRecOn generalizing i with
   | _ n ih =>
     unfold lz77GreedyIter.go lz77Greedy.go
     by_cases hi : i < maxLen
-    · simp only [hi, ↓reduceDIte, ↓reduceIte]
-      rw [getElem!_pos data (p1 + i) (by omega),
-          getElem!_pos data (p2 + i) (by omega)]
+    · simp only [hi, ↓reduceDIte]
       split
       · exact ih _ (by omega) _ rfl
       · rfl
-    · simp only [hi, ↓reduceDIte, ↓reduceIte]
+    · simp only [hi, ↓reduceDIte]
 
 /-- The `countMatch` helper agrees with its recursive counterpart. -/
 private theorem countMatch_eq (data : ByteArray) (p1 p2 maxLen : Nat)
     (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) :
     lz77GreedyIter.countMatch data p1 p2 maxLen h1 h2 =
-    lz77Greedy.countMatch data p1 p2 maxLen := by
+    lz77Greedy.countMatch data p1 p2 maxLen h1 h2 := by
   simp only [lz77GreedyIter.countMatch, lz77Greedy.countMatch]
   exact go_eq data p1 p2 0 maxLen h1 h2
 
@@ -458,9 +454,9 @@ private theorem updateHashes_eq (data : ByteArray) (hashSize : Nat)
     by_cases hj : j < matchLen
     · simp only [hj, ↓reduceIte]
       by_cases hd : pos + j + 2 < data.size
-      · simp only [hd, ↓reduceDIte, ↓reduceIte, hash3_eq data (pos + j) hashSize hd]
+      · simp only [hd, ↓reduceDIte, hash3_eq data (pos + j) hashSize hd]
         exact ih _ (by omega) _ _ _ rfl
-      · simp only [hd, ↓reduceDIte, ↓reduceIte]
+      · simp only [hd, ↓reduceDIte]
         exact ih _ (by omega) _ _ _ rfl
     · simp only [hj, ↓reduceIte]
 
@@ -472,10 +468,10 @@ private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Toke
   | _ n ih =>
     unfold lz77GreedyIter.trailing lz77Greedy.trailing
     by_cases hp : pos < data.size
-    · simp only [hp, ↓reduceDIte, ↓reduceIte, getElem!_pos data pos hp]
+    · simp only [hp, ↓reduceDIte]
       rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
         ← Array.append_assoc, Array.push_eq_append]
-    · simp only [hp, ↓reduceDIte, ↓reduceIte, List.toArray,
+    · simp only [hp, ↓reduceDIte, List.toArray,
         Array.append_empty]
 
 /-- `lz77Greedy.updateHashes` preserves `hashTable.size`. -/
@@ -524,56 +520,32 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
     unfold lz77GreedyIter.mainLoop lz77Greedy.mainLoop
     by_cases hlt : pos + 2 < data.size
     · have hash_eq := hash3_eq data pos hashSize hlt
-      -- Show the Iter hash index is a valid index into both arrays.
       have hhash_lt : lz77GreedyIter.hash3 data pos hashSize hlt < hashSize :=
         Nat.mod_lt _ hhs
       have hht_lt : lz77GreedyIter.hash3 data pos hashSize hlt < hashTable.size := by omega
       have hhv_lt : lz77GreedyIter.hash3 data pos hashSize hlt < hashValid.size := by omega
-      -- Bridge `!`-reads to proven-bounds reads (on the Iter-side hash index).
-      have hget_t : hashTable[lz77GreedyIter.hash3 data pos hashSize hlt]! =
-          hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] :=
-        getElem!_pos hashTable _ hht_lt
-      have hget_v : hashValid[lz77GreedyIter.hash3 data pos hashSize hlt]! =
-          hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] :=
-        getElem!_pos hashValid _ hhv_lt
-      -- Reduce the Iter guards: `hlt`, `hht_lt`, `hhv_lt` all hold.
-      -- Also bridge Greedy's `!`-reads into Iter's proven reads.
-      simp only [hlt, ↓reduceDIte, hht_lt, hhv_lt, ← hash_eq, hget_t, hget_v]
+      simp only [hlt, ↓reduceDIte, hht_lt, hhv_lt, ← hash_eq]
       -- Size preservation through `set!` on both arrays.
       have hht' : (hashTable.set! (lz77GreedyIter.hash3 data pos hashSize hlt) pos).size
-          = hashSize := by
-        simp [hht]
+          = hashSize := by simp [hht]
       have hhv' : (hashValid.set! (lz77GreedyIter.hash3 data pos hashSize hlt) true).size
-          = hashSize := by
-        simp [hhv]
+          = hashSize := by simp [hhv]
       -- Case split on the match condition.
       by_cases hcond : (hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] : Bool) ∧
           hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] < pos ∧
           pos - hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] ≤ windowSize
-      · obtain ⟨hiv, hmp, hwin⟩ := hcond
-        have hiv' : hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] = true := hiv
-        have hand : (hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] &&
-            decide (hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] < pos) &&
-            decide (pos - hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] ≤
-              windowSize)) = true := by
-          rw [hiv', Bool.true_and, Bool.and_eq_true, decide_eq_true_eq,
-              decide_eq_true_eq]
-          exact ⟨hmp, hwin⟩
-        simp only [hand, ↓reduceIte, dif_pos (⟨hiv, hmp, hwin⟩ :
-          (hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] : Bool) ∧
-          hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] < pos ∧
-          pos - hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] ≤ windowSize)]
+      · simp only [dif_pos hcond]
         have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
         have hmaxLenM : hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] +
             min 258 (data.size - pos) ≤ data.size := by omega
         rw [countMatch_eq data _ pos _ hmaxLenM hmaxLenP]
         by_cases hge : lz77Greedy.countMatch data
             hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] pos
-            (min 258 (data.size - pos)) ≥ 3
+            (min 258 (data.size - pos)) hmaxLenM hmaxLenP ≥ 3
         · simp only [hge, ↓reduceDIte]
           by_cases hle : pos + lz77Greedy.countMatch data
               hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] pos
-              (min 258 (data.size - pos)) ≤ data.size
+              (min 258 (data.size - pos)) hmaxLenM hmaxLenP ≤ data.size
           · simp only [hle, ↓reduceDIte]
             rw [updateHashes_eq]
             have hht'' : (lz77Greedy.updateHashes data hashSize
@@ -581,41 +553,24 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
                 (hashValid.set! (lz77GreedyIter.hash3 data pos hashSize hlt) true)
                 pos 1 (lz77Greedy.countMatch data
                   hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] pos
-                  (min 258 (data.size - pos)))).1.size = hashSize :=
+                  (min 258 (data.size - pos)) hmaxLenM hmaxLenP)).1.size = hashSize :=
               (lz77Greedy_updateHashes_fst_size ..).trans hht'
             have hhv'' : (lz77Greedy.updateHashes data hashSize
                 (hashTable.set! (lz77GreedyIter.hash3 data pos hashSize hlt) pos)
                 (hashValid.set! (lz77GreedyIter.hash3 data pos hashSize hlt) true)
                 pos 1 (lz77Greedy.countMatch data
                   hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] pos
-                  (min 258 (data.size - pos)))).2.size = hashSize :=
+                  (min 258 (data.size - pos)) hmaxLenM hmaxLenP)).2.size = hashSize :=
               (lz77Greedy_updateHashes_snd_size ..).trans hhv'
             rw [ih _ (by omega) _ _ _ _ hht'' hhv'' rfl,
                 List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-          · simp only [hle, ↓reduceDIte,
-              getElem!_pos data pos (by omega)]
+          · simp only [hle, ↓reduceDIte]
             rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl,
                 List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-        · simp only [hge, ↓reduceDIte,
-            getElem!_pos data pos (by omega)]
+        · simp only [hge, ↓reduceDIte]
           rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl,
               List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-      · have hand : (hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] &&
-            decide (hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] < pos) &&
-            decide (pos - hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] ≤
-              windowSize)) ≠ true := by
-          intro hne
-          apply hcond
-          rw [Bool.and_eq_true, Bool.and_eq_true, decide_eq_true_eq,
-              decide_eq_true_eq] at hne
-          exact ⟨hne.1.1, hne.1.2, hne.2⟩
-        have hand' : (hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] &&
-            decide (hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] < pos) &&
-            decide (pos - hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] ≤
-              windowSize)) = false :=
-          Bool.eq_false_iff.mpr hand
-        simp only [dif_neg hcond, hand', Bool.false_eq_true, ↓reduceIte,
-          getElem!_pos data pos (by omega)]
+      · simp only [dif_neg hcond]
         rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl,
             List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
