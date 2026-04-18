@@ -144,6 +144,47 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     unless entries[0]!.path == "hello.txt" do
       throw (IO.userError s!"TAR malformed ({fixture}): expected regular entry 'hello.txt', got '{entries[0]!.path}'")
 
+  -- === TAR malformed GNU long-name / long-link fixtures ===
+  -- Truncated long-name and long-link payloads must surface as a clean
+  -- end-of-archive error rather than a panic.
+  let gnuLnTruncData ← readFixture "tar/malformed/gnu-longname-truncated.tar"
+  let gnuLnTruncPath ← writeFixtureTmp "gnu-longname-truncated.tar" gnuLnTruncData
+  assertThrows "TAR malformed (gnu-longname-truncated.tar)"
+    (IO.FS.withFile gnuLnTruncPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "end of archive"
+
+  let gnuLkTruncData ← readFixture "tar/malformed/gnu-longlink-truncated.tar"
+  let gnuLkTruncPath ← writeFixtureTmp "gnu-longlink-truncated.tar" gnuLkTruncData
+  assertThrows "TAR malformed (gnu-longlink-truncated.tar)"
+    (IO.FS.withFile gnuLkTruncPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "end of archive"
+
+  -- Non-throwing variants: payloads with no trailing NUL and with
+  -- invalid UTF-8 must each apply a predictable name to the next entry.
+  let gnuLnNoTermData ← readFixture "tar/malformed/gnu-longname-no-terminator.tar"
+  let gnuLnNoTermPath ← writeFixtureTmp "gnu-longname-no-terminator.tar" gnuLnNoTermData
+  let gnuLnNoTermEntries ← IO.FS.withFile gnuLnNoTermPath .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless gnuLnNoTermEntries.size == 1 do
+    throw (IO.userError s!"gnu-longname-no-terminator.tar: expected 1 entry, got {gnuLnNoTermEntries.size}")
+  let expectedNoTermPath := String.ofList (List.replicate 100 'a')
+  unless gnuLnNoTermEntries[0]!.path == expectedNoTermPath do
+    throw (IO.userError s!"gnu-longname-no-terminator.tar: path mismatch: {repr gnuLnNoTermEntries[0]!.path}")
+
+  let gnuLnUtf8Data ← readFixture "tar/malformed/gnu-longname-invalid-utf8.tar"
+  let gnuLnUtf8Path ← writeFixtureTmp "gnu-longname-invalid-utf8.tar" gnuLnUtf8Data
+  let gnuLnUtf8Entries ← IO.FS.withFile gnuLnUtf8Path .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless gnuLnUtf8Entries.size == 1 do
+    throw (IO.userError s!"gnu-longname-invalid-utf8.tar: expected 1 entry, got {gnuLnUtf8Entries.size}")
+  let expectedUtf8Path := Binary.fromLatin1 (ByteArray.mk #[0xFF, 0xFF, 0xFF])
+  unless gnuLnUtf8Entries[0]!.path == expectedUtf8Path do
+    throw (IO.userError s!"gnu-longname-invalid-utf8.tar: path mismatch: {repr gnuLnUtf8Entries[0]!.path}")
+
   -- === TAR security fixtures ===
 
   let tarSlipData ← readFixture "tar/security/tar-slip.tar"
@@ -178,6 +219,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-oversized-length.tar", "pax-truncated-record.tar",
              "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
              "pax-inconsistent-length.tar",
+             "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
+             "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",

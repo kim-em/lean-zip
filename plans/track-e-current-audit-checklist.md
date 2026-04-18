@@ -43,8 +43,10 @@ Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
    `pax-truncated-record.tar`, `pax-invalid-utf8-key.tar`,
    `pax-invalid-utf8-value.tar`, `pax-inconsistent-length.tar`;
    built by `scripts/build-pax-malformed-fixtures.lean`.)
-- [ ] Add malformed GNU long-name fixtures:
+- [x] Add malformed GNU long-name fixtures:
   missing terminator, truncated payload, invalid UTF-8.
+  (`gnu-longname-truncated.tar`, `gnu-longname-no-terminator.tar`,
+  `gnu-longname-invalid-utf8.tar`, `gnu-longlink-truncated.tar`)
 - [ ] Document symlink and hardlink extraction policy explicitly and test
   archive-slip variants against it.
 
