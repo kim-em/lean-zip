@@ -35,9 +35,13 @@ Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
 - [ ] Enumerate all `String.fromUTF8!` callsites reachable from untrusted
   tar bytes and replace them with validated or failure-returning paths
   where needed.
-- [ ] Add malformed PAX fixtures:
+- [x] Add malformed PAX fixtures:
   invalid UTF-8 keys, invalid UTF-8 values, oversized decimal lengths,
   truncated records, and inconsistent record lengths.
+  (`testdata/tar/malformed/pax-oversized-length.tar`,
+   `pax-truncated-record.tar`, `pax-invalid-utf8-key.tar`,
+   `pax-invalid-utf8-value.tar`, `pax-inconsistent-length.tar`;
+   built by `scripts/build-pax-malformed-fixtures.lean`.)
 - [ ] Add malformed GNU long-name fixtures:
   missing terminator, truncated payload, invalid UTF-8.
 - [ ] Document symlink and hardlink extraction policy explicitly and test

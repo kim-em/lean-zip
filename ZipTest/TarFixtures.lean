@@ -128,6 +128,22 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       pure ())
     "unsupported format"
 
+  -- === TAR malformed PAX fixtures ===
+  -- Each fixture pairs a malformed PAX extended header with a regular
+  -- "hello.txt" entry. Existing guards in `parsePaxRecords` silently
+  -- skip the PAX block; listing should return just the regular entry.
+  for fixture in #["pax-oversized-length.tar", "pax-truncated-record.tar",
+                    "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
+                    "pax-inconsistent-length.tar"] do
+    let paxData ← readFixture s!"tar/malformed/{fixture}"
+    let paxPath ← writeFixtureTmp fixture paxData
+    let entries ← IO.FS.withFile paxPath .read fun h =>
+      Tar.list (IO.FS.Stream.ofHandle h)
+    unless entries.size == 1 do
+      throw (IO.userError s!"TAR malformed ({fixture}): expected 1 entry, got {entries.size}")
+    unless entries[0]!.path == "hello.txt" do
+      throw (IO.userError s!"TAR malformed ({fixture}): expected regular entry 'hello.txt', got '{entries[0]!.path}'")
+
   -- === TAR security fixtures ===
 
   let tarSlipData ← readFixture "tar/security/tar-slip.tar"
@@ -159,6 +175,9 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
+             "pax-oversized-length.tar", "pax-truncated-record.tar",
+             "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
+             "pax-inconsistent-length.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
