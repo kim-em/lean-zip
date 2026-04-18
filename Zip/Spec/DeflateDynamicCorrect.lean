@@ -42,8 +42,8 @@ theorem deflateDynamic_spec (data : ByteArray) :
   let tokens := lz77Greedy data 32768
   let litFreqs := (tokenFreqs tokens).1
   let distFreqs := (tokenFreqs tokens).2
-  let litFreqPairs := (List.range litFreqs.size).map fun i => (i, litFreqs[i]!)
-  let distFreqPairs := (List.range distFreqs.size).map fun i => (i, distFreqs[i]!)
+  let litFreqPairs := freqsToPairs litFreqs
+  let distFreqPairs := freqsToPairs distFreqs
   let litLens := Huffman.Spec.computeCodeLengths litFreqPairs 286 15
   let distLens₀ := Huffman.Spec.computeCodeLengths distFreqPairs 30 15
   let distLens := if distLens₀.all (fun x => x == 0) then distLens₀.set 0 1 else distLens₀

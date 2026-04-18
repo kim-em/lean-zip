@@ -132,6 +132,12 @@ where
       else
         writeCLEntries bw clCodes rest hcl
 
+/-- Build the `(symbol, freq)` pair list for a frequency array. -/
+def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
+  (List.range freqs.size).pmap
+    (fun i (h : i < freqs.size) => (i, freqs[i]'h))
+    (fun _ hi => List.mem_range.mp hi)
+
 /-- Helper: 256 is in bounds for `canonicalCodes` of lit/len code lengths
     produced by `computeCodeLengths _ 286 15`. -/
 private theorem deflateDynamic.lit256_lt (litFreqPairs : List (Nat × Nat)) :
@@ -147,8 +153,8 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
   let tokens := lz77GreedyIter data windowSize
   let (litFreqs, distFreqs) := tokenFreqs tokens
   -- Convert frequencies to (symbol, freq) pairs
-  let litFreqPairs := (List.range litFreqs.size).map fun i => (i, litFreqs[i]!)
-  let distFreqPairs := (List.range distFreqs.size).map fun i => (i, distFreqs[i]!)
+  let litFreqPairs := freqsToPairs litFreqs
+  let distFreqPairs := freqsToPairs distFreqs
   -- Compute code lengths
   let litLens := Huffman.Spec.computeCodeLengths litFreqPairs 286 15
   let distLens := Huffman.Spec.computeCodeLengths distFreqPairs 30 15
