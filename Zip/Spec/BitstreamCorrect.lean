@@ -150,7 +150,7 @@ protected theorem acc_or_shift_toNat (acc bit : UInt32) (shift : Nat)
   · rw [UInt32.toNat_or, UInt32.toNat_shiftLeft, shift_toUInt32_mod32 hshift,
         UInt32.toNat_one, Nat.shiftLeft_eq, Nat.one_mul,
         Nat.mod_eq_of_lt (Nat.pow_lt_pow_right (by omega) hshift),
-        Nat.or_two_pow_eq_add hacc]
+        Nat.or_two_pow_eq_add_of_lt hacc]
 
 protected theorem acc_or_shift_bound (acc bit : UInt32) (shift : Nat)
     (hacc : acc.toNat < 2 ^ shift) (hbit : bit = 0 ∨ bit = 1) (hshift : shift < 32) :

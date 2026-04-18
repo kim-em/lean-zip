@@ -409,13 +409,13 @@ private theorem readCLLengths_recovers_clLens
     have hp19 : p < 19 := by rw [List.foldl_set_length, List.length_replicate] at h1; exact h1
     by_cases hmem : p ∈ positions
     · -- p was set by the foldl
-      rw [List.foldl_set_getElem_mem positions _ _ p hmem hpos_nodup
+      rw [List.getElem_foldl_set_mem positions _ _ p hmem hpos_nodup
           (by simp only [List.length_replicate]; omega)
           (fun q hq => by simp only [List.length_replicate]; exact hpos_bounds q hq)]
       -- Goal: clLens.getD p 0 = clLens[p]
       exact (List.getElem_eq_getD 0).symm
     · -- p was NOT set; value is 0 from replicate
-      rw [List.foldl_set_getElem_not_mem positions _ _ p hmem
+      rw [List.getElem_foldl_set_not_mem positions _ _ p hmem
           (by simp only [List.length_replicate]; omega)]
       simp only [List.getElem_replicate]
       -- Need: clLens[p] = 0

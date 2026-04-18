@@ -403,7 +403,7 @@ private theorem copyLoop_spec (output : ByteArray) (start distance : Nat)
     · omega
     · simp only [ByteArray.size_push]; omega
     · intro j hj
-      rw [ByteArray.push_getElem!_lt _ _ _ (by rw [hbuf_size]; omega)]
+      rw [ByteArray.getElem!_push_lt _ _ _ (by rw [hbuf_size]; omega)]
       exact hbuf_prefix j hj
     · -- Bridge proven-bounds access to getElem! for the push argument
       rw [show buf[start + (k % distance)]'hbuf_idx =
