@@ -47,27 +47,54 @@ def tokenFreqs (tokens : Array LZ77Token) : Array Nat × Array Nat :=
   let distFreqs := Array.replicate 30 0
   -- Always count end-of-block
   let litLenFreqs := litLenFreqs.set! 256 1
-  go tokens litLenFreqs distFreqs 0
+  go tokens litLenFreqs distFreqs
+    (by show ((Array.replicate 286 0).set! 256 1).size = 286
+        rw [Array.size_set!, Array.size_replicate])
+    (by show (Array.replicate 30 0).size = 30
+        rw [Array.size_replicate]) 0
 where
   go (tokens : Array LZ77Token) (litLenFreqs distFreqs : Array Nat)
+      (hlit : litLenFreqs.size = 286) (hdist : distFreqs.size = 30)
       (i : Nat) : Array Nat × Array Nat :=
     if h : i < tokens.size then
       match tokens[i] with
       | .literal b =>
         let idx := b.toNat
-        let litLenFreqs := litLenFreqs.set! idx (litLenFreqs[idx]! + 1)
-        go tokens litLenFreqs distFreqs (i + 1)
+        have hidx : idx < litLenFreqs.size := by
+          have := UInt8.toNat_lt b; omega
+        let litLenFreqs' := litLenFreqs.set! idx (litLenFreqs[idx] + 1)
+        go tokens litLenFreqs' distFreqs
+          (by simp [litLenFreqs', hlit]) hdist (i + 1)
       | .reference length distance =>
-        let litLenFreqs := match findLengthCode length with
-          | some (idx, _, _) =>
-            let symIdx := idx + 257
-            litLenFreqs.set! symIdx (litLenFreqs[symIdx]! + 1)
-          | none => litLenFreqs
-        let distFreqs := match findDistCode distance with
+        match hflc : findLengthCode length with
+        | none =>
+          match hfdc : findDistCode distance with
+          | none => go tokens litLenFreqs distFreqs hlit hdist (i + 1)
           | some (dIdx, _, _) =>
-            distFreqs.set! dIdx (distFreqs[dIdx]! + 1)
-          | none => distFreqs
-        go tokens litLenFreqs distFreqs (i + 1)
+            have hd : dIdx < distFreqs.size := by
+              have := nativeFindDistCode_idx_bound _ _ _ _ hfdc; omega
+            let distFreqs' := distFreqs.set! dIdx (distFreqs[dIdx] + 1)
+            go tokens litLenFreqs distFreqs' hlit
+              (by show (distFreqs.set! dIdx (distFreqs[dIdx] + 1)).size = 30
+                  rw [Array.size_set!]; exact hdist)
+              (i + 1)
+        | some (lIdx, _, _) =>
+          have hsym : lIdx + 257 < litLenFreqs.size := by
+            have := nativeFindLengthCode_idx_bound _ _ _ _ hflc; omega
+          let litLenFreqs' := litLenFreqs.set! (lIdx + 257) (litLenFreqs[lIdx + 257] + 1)
+          have hlit' : litLenFreqs'.size = 286 := by
+            show (litLenFreqs.set! (lIdx + 257) (litLenFreqs[lIdx + 257] + 1)).size = 286
+            rw [Array.size_set!]; exact hlit
+          match hfdc : findDistCode distance with
+          | none => go tokens litLenFreqs' distFreqs hlit' hdist (i + 1)
+          | some (dIdx, _, _) =>
+            have hd : dIdx < distFreqs.size := by
+              have := nativeFindDistCode_idx_bound _ _ _ _ hfdc; omega
+            let distFreqs' := distFreqs.set! dIdx (distFreqs[dIdx] + 1)
+            go tokens litLenFreqs' distFreqs' hlit'
+              (by show (distFreqs.set! dIdx (distFreqs[dIdx] + 1)).size = 30
+                  rw [Array.size_set!]; exact hdist)
+              (i + 1)
     else (litLenFreqs, distFreqs)
   termination_by tokens.size - i
 
