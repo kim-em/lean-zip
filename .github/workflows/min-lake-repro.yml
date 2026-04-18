@@ -17,54 +17,216 @@ jobs:
 
       - name: Create tiny repro project
         run: |
-          mkdir -p /tmp/min-lake-repro
-          cat > /tmp/min-lake-repro/lean-toolchain <<'EOF'
-          leanprover/lean4:v4.29.1
-          EOF
-          cat > /tmp/min-lake-repro/lakefile.lean <<'EOF'
-          import Lake
-          open System Lake DSL
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
 
+          root = Path("/tmp/min-lake-repro")
+          root.mkdir(parents=True, exist_ok=True)
+
+          def write_project(name: str, lakefile: str, main: str = "def main : IO Unit := pure ()\n", extra=None):
+            d = root / name
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "lean-toolchain").write_text("leanprover/lean4:v4.29.1\n")
+            (d / "lakefile.lean").write_text(textwrap.dedent(lakefile).lstrip())
+            (d / "Main.lean").write_text(main)
+            if extra:
+              for rel, content in extra.items():
+                p = d / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(textwrap.dedent(content).lstrip())
+
+          common_bump = """
           def bump : IO (Array String) := do
-            let path : FilePath := "/tmp/min-lake-repro-count.txt"
+            let path : FilePath := "/tmp/{name}-count.txt"
             let n ← try
               let s ← IO.FS.readFile path
               pure s.trim.toNat!
             catch _ =>
               pure 0
-            IO.FS.writeFile path s!"{n+1}\n"
+            IO.FS.writeFile path s!"{n+1}\\n"
             pure #[]
+          """
 
-          package repro where
-            moreLinkArgs := run_io bump
+          write_project(
+            "base",
+            f"""
+            import Lake
+            open System Lake DSL
 
-          @[default_target]
-          lean_exe repro where
-            root := `Main
-          EOF
-          cat > /tmp/min-lake-repro/Main.lean <<'EOF'
-          def main : IO Unit := pure ()
-          EOF
+            {common_bump.format(name="base")}
 
-      - name: Build tiny repro project
+            package repro where
+              moreLinkArgs := run_io bump
+
+            @[default_target]
+            lean_exe repro where
+              root := `Main
+            """
+          )
+
+          write_project(
+            "multi-target",
+            f"""
+            import Lake
+            open System Lake DSL
+
+            {common_bump.format(name="multi-target")}
+
+            package repro where
+              moreLinkArgs := run_io bump
+              testDriver := "test"
+
+            lean_lib LibA
+            lean_lib LibB
+
+            @[default_target]
+            lean_exe repro where
+              root := `Main
+
+            lean_exe test where
+              root := `Main
+            """
+          )
+
+          write_project(
+            "extern-lib",
+            f"""
+            import Lake
+            open System Lake DSL
+
+            {common_bump.format(name="extern-lib")}
+
+            package repro where
+              moreLinkArgs := run_io bump
+
+            input_file hello.c where
+              path := "c" / "hello.c"
+              text := true
+
+            target hello.o pkg : FilePath := do
+              let srcJob ← hello.c.fetch
+              let oFile := pkg.buildDir / "c" / "hello.o"
+              buildO oFile srcJob #[] #[] "cc"
+
+            extern_lib libhello pkg := do
+              let ffiO ← hello.o.fetch
+              let name := nameToStaticLib "hello"
+              buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
+            @[default_target]
+            lean_exe repro where
+              root := `Main
+            """,
+            extra={"c/hello.c": "int hello(void) { return 0; }\n"}
+          )
+
+          write_project(
+            "git-dep",
+            f"""
+            import Lake
+            open System Lake DSL
+
+            {common_bump.format(name="git-dep")}
+
+            package repro where
+              moreLinkArgs := run_io bump
+
+            require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "main"
+
+            @[default_target]
+            lean_exe repro where
+              root := `Main
+            """
+          )
+
+          write_project(
+            "lean-zip-like",
+            f"""
+            import Lake
+            open System Lake DSL
+
+            def splitFlags (s : String) : Array String :=
+              s.splitOn " " |>.filter (· ≠ "") |>.toArray
+
+            def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
+              let out ← IO.Process.output {{ cmd := "pkg-config", args := #[flag, pkg] }}
+              if out.exitCode != 0 then
+                pure #[]
+              else
+                pure <| splitFlags out.stdout.trimAscii.toString
+
+            def bump : IO (Array String) := do
+              let path : FilePath := "/tmp/lean-zip-like-count.txt"
+              let n ← try
+                let s ← IO.FS.readFile path
+                pure s.trim.toNat!
+              catch _ =>
+                pure 0
+              let flags ← pkgConfig "zlib" "--libs"
+              IO.FS.writeFile path s!"{{n+1}} flags={{flags.size}}\\n"
+              pure flags
+
+            package repro where
+              moreLinkArgs := run_io bump
+              testDriver := "test"
+
+            require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "main"
+
+            lean_lib Zip
+            lean_lib ZipTest where
+              globs := #[.submodules `ZipTest]
+
+            input_file hello.c where
+              path := "c" / "hello.c"
+              text := true
+
+            target hello.o pkg : FilePath := do
+              let srcJob ← hello.c.fetch
+              let oFile := pkg.buildDir / "c" / "hello.o"
+              buildO oFile srcJob #[] #[] "cc"
+
+            extern_lib libhello pkg := do
+              let ffiO ← hello.o.fetch
+              let name := nameToStaticLib "hello"
+              buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
+            @[default_target]
+            lean_exe repro where
+              root := `Main
+
+            lean_exe test where
+              root := `Main
+            """,
+            extra={"c/hello.c": "int hello(void) { return 0; }\n", "ZipTest/Dummy.lean": "def x := 1\n"}
+          )
+          PY
+
+      - name: Build repro scenarios
         run: |
-          cd /tmp/min-lake-repro
-          lake build
+          for scenario in base multi-target extern-lib git-dep lean-zip-like; do
+            echo "=== BUILD $scenario ==="
+            cd "/tmp/min-lake-repro/$scenario"
+            lake build
+          done
 
-      - name: Inspect side effects and trace
+      - name: Inspect side effects and traces
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          count = Path('/tmp/min-lake-repro-count.txt')
-          print('COUNT_EXISTS', count.exists())
-          if count.exists():
-            print('COUNT_VALUE', count.read_text())
+          root = Path('/tmp/min-lake-repro')
+          for scenario in ['base', 'multi-target', 'extern-lib', 'git-dep', 'lean-zip-like']:
+            print(f'=== {scenario} ===')
+            count = Path(f'/tmp/{scenario}-count.txt')
+            print('COUNT_EXISTS', count.exists())
+            if count.exists():
+              print('COUNT_VALUE', count.read_text())
 
-          trace = Path('/tmp/min-lake-repro/.lake/config/[anonymous]/lakefile.olean.trace')
-          print('TRACE_EXISTS', trace.exists())
-          if trace.exists():
-            data = trace.read_bytes()
-            print('TRACE_SIZE', len(data))
-            print(repr(data))
+            trace = root / scenario / '.lake/config/[anonymous]/lakefile.olean.trace'
+            print('TRACE_EXISTS', trace.exists())
+            if trace.exists():
+              data = trace.read_bytes()
+              print('TRACE_SIZE', len(data))
+              print(repr(data))
           PY
