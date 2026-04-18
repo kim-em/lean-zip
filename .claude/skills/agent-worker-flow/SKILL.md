@@ -210,6 +210,11 @@ git push -u origin <branch>
 coordination create-pr <issue-number>
 ```
 
+**Once the PR is created, exit.** Do not poll CI, wait for the merge, or
+otherwise spin on the PR. Another session will pick up any follow-up work
+(e.g. a "fix PR #N" issue if CI fails). Polling burns context and tokens
+for no benefit.
+
 **Partial completion** (did NOT complete all deliverables):
 - Progress entry lists: completed deliverables, NOT-completed deliverables and why,
   whether unfinished work needs a new issue
