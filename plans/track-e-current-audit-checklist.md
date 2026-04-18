@@ -15,12 +15,13 @@ Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
 - [x] Make `readEntryData` fail before `Handle.read` if the claimed local
   data span extends past EOF. (Span checks wrap the header, name+extra,
   and payload reads; see `readEntryData` in `Zip/Archive.lean`.)
-- [ ] Add malformed fixtures for ZIP64 entries claiming exabyte-scale
+- [x] Add malformed fixtures for ZIP64 entries claiming exabyte-scale
   compressed or uncompressed sizes. (Partially covered by the 32-bit
-  `oversized-compressed-size.zip` fixture; ~~ZIP64-specific variants
-  still outstanding~~ ZIP64 `compressedSize` variant landed in
-  `testdata/zip/malformed/oversized-zip64-compressed-size.zip`;
-  matching `uncompressedSize` variant still outstanding.)
+  `oversized-compressed-size.zip` fixture; ZIP64 `compressedSize`
+  variant landed in
+  `testdata/zip/malformed/oversized-zip64-compressed-size.zip` and
+  ZIP64 `uncompressedSize` variant landed in
+  `testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`.)
 - [x] Add a regression test that ensures oversized claims fail cleanly
   without panic or OOM.
   (`testdata/zip/malformed/oversized-compressed-size.zip` +
