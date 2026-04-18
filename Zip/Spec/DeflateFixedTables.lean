@@ -202,16 +202,21 @@ private theorem findTableCode_go_of_first_match
       by_cases h_next : idx + 1 < baseTable.size
       · -- Has next entry: check upper bound
         have hgt := hmatch h_next
-        simp only [show idx + 1 < baseTable.size from h_next,
-          show baseTable[idx + 1]!.toNat > value from hgt, ↓reduceIte]
+        have hb1' : baseTable[idx + 1]'h_next = baseTable[idx + 1]! :=
+          (getElem!_pos baseTable (idx + 1) h_next).symm
+        rw [dif_pos h_next, hb1', if_pos hgt,
+            getElem!_pos extraTable idx (by omega),
+            getElem!_pos baseTable idx hidx]
       · -- Last entry
-        simp only [show ¬(idx + 1 < baseTable.size) from h_next,
-          show idx < baseTable.size from hidx, ↓reduceIte]
+        rw [dif_neg h_next, dif_pos hidx,
+            getElem!_pos extraTable idx (by omega),
+            getElem!_pos baseTable idx hidx]
     · -- Skip: search passes through this index
       have hlt_idx : i < idx := by omega
       obtain ⟨h_next_i, h_le_i⟩ := hskip i hlt_idx
-      simp only [show i + 1 < baseTable.size from h_next_i,
-        show ¬(baseTable[i + 1]!.toNat > value) from by omega, ↓reduceIte]
+      have hb1' : baseTable[i + 1]'h_next_i = baseTable[i + 1]! :=
+        (getElem!_pos baseTable (i + 1) h_next_i).symm
+      rw [dif_pos h_next_i, hb1', if_neg (by omega : ¬ baseTable[i + 1]!.toNat > value)]
       exact ih (i + 1) (by omega : i + 1 ≤ idx) (by omega)
 
 /-! ## findLengthCode / findDistCode agreement -/

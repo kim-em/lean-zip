@@ -68,10 +68,13 @@ where
     if h : i < lengths.size then
       let len := lengths[i]
       if len > 0 then
-        let code := nextCode[len.toNat]!
-        let result' := result.set! i (code.toUInt16, len)
-        let nextCode' := nextCode.set! len.toNat (code + 1)
-        go lengths nextCode' (i + 1) result'
+        if hlen : len.toNat < nextCode.size then
+          let code := nextCode[len.toNat]
+          let result' := result.set! i (code.toUInt16, len)
+          let nextCode' := nextCode.set! len.toNat (code + 1)
+          go lengths nextCode' (i + 1) result'
+        else
+          go lengths nextCode (i + 1) result
       else
         go lengths nextCode (i + 1) result
     else result
@@ -92,9 +95,13 @@ private theorem canonicalCodes_go_size (lengths : Array UInt8) (nextCode : Array
   · simp only [hi, ↓reduceDIte]
     by_cases hlen : lengths[i] > 0
     · simp only [hlen, ↓reduceIte]
-      exact canonicalCodes_go_size lengths _ (i + 1) _ (by
-        simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
-        split <;> simp [Array.size_set, hrs])
+      by_cases hnc : lengths[i].toNat < nextCode.size
+      · simp only [hnc, ↓reduceDIte]
+        exact canonicalCodes_go_size lengths _ (i + 1) _ (by
+          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
+          split <;> simp [Array.size_set, hrs])
+      · simp only [show ¬(lengths[i].toNat < nextCode.size) from hnc, ↓reduceDIte]
+        exact canonicalCodes_go_size lengths nextCode (i + 1) result hrs
     · simp only [show ¬(lengths[i] > 0) from hlen, ↓reduceIte]
       exact canonicalCodes_go_size lengths nextCode (i + 1) result hrs
   · simp only [show ¬(i < lengths.size) from hi, ↓reduceDIte]; exact hrs
@@ -120,16 +127,16 @@ private theorem canonicalCodes_size' (lengths : Array UInt8) (maxBits : Nat) :
 def findTableCode.go (baseTable : Array UInt16) (extraTable : Array UInt8)
     (value : Nat) (i : Nat) (hsize : baseTable.size ≤ extraTable.size) :
     Option (Nat × Nat × UInt32) :=
-  if i + 1 < baseTable.size then
-    if baseTable[i + 1]!.toNat > value then
-      let extra := extraTable[i]!.toNat
-      let extraVal := (value - baseTable[i]!.toNat).toUInt32
+  if h1 : i + 1 < baseTable.size then
+    if baseTable[i + 1].toNat > value then
+      let extra := (extraTable[i]'(by omega)).toNat
+      let extraVal := (value - (baseTable[i]'(by omega)).toNat).toUInt32
       some (i, extra, extraVal)
     else
       findTableCode.go baseTable extraTable value (i + 1) hsize
-  else if i < baseTable.size then
-    let extra := extraTable[i]!.toNat
-    let extraVal := (value - baseTable[i]!.toNat).toUInt32
+  else if h2 : i < baseTable.size then
+    let extra := (extraTable[i]'(by omega)).toNat
+    let extraVal := (value - baseTable[i].toNat).toUInt32
     some (i, extra, extraVal)
   else
     none

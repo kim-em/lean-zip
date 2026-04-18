@@ -152,6 +152,9 @@ private theorem insertLoop_forward
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
+      have hlen_lt : lengths[start].toNat < nextCode.size := by omega
+      simp only [hlen_lt, ↓reduceDIte,
+        ← getElem!_pos nextCode lengths[start].toNat hlen_lt]
       obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
         (by rw [hls_start]; omega) (by rw [hls_start]; omega)
       have hcw_s : cw_s = Huffman.Spec.natToBits
@@ -241,6 +244,9 @@ private theorem insertLoop_backward
       have hlen_le : lengths[start].toNat ≤ maxBits := by
         rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
       have hlen_pos_nat : 0 < lengths[start].toNat := hlen_pos
+      have hlen_lt : lengths[start].toNat < nextCode.size := by omega
+      simp only [hlen_lt, ↓reduceDIte,
+        ← getElem!_pos nextCode lengths[start].toNat hlen_lt] at h
       obtain ⟨cw_s, hcf_s⟩ := codeFor_some lsList maxBits start hls_len
         (by rw [hls_start]; omega) (by rw [hls_start]; omega)
       have hcw_s : cw_s = Huffman.Spec.natToBits

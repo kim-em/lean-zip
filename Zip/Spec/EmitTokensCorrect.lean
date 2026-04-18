@@ -266,11 +266,15 @@ theorem findTableCode_go_extraN (baseTable : Array UInt16)
     extraN = extraTable[idx]!.toNat := by
   unfold findTableCode.go at h
   split at h
-  · split at h
-    · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
+  · rename_i h1
+    split at h
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h
+      rw [← h.1, getElem!_pos extraTable i (by omega)]; exact h.2.1.symm
     · exact findTableCode_go_extraN baseTable extraTable value (i + 1) idx extraN extraV hsize h
   · split at h
-    · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
+    · rename_i h2
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      rw [← h.1, getElem!_pos extraTable i (by omega)]; exact h.2.1.symm
     · exact nomatch h
 termination_by baseTable.size - i
 
@@ -332,28 +336,33 @@ private theorem canonicalCodes_go_snd_le (lengths : Array UInt8) (nextCode : Arr
   · simp only [hi, ↓reduceDIte] at hj ⊢
     by_cases hlen : lengths[i] > 0
     · simp only [hlen, ↓reduceIte] at hj ⊢
-      let val := (nextCode[lengths[i].toNat]!.toUInt16, lengths[i])
-      have hsize' : (result.set! i val).size = lengths.size := by
-        simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
-        split <;> simp only [Array.size_set, hsize]
-      have hresult' : ∀ k, k < (result.set! i val).size →
-          (result.set! i val)[k]!.2.toNat ≤ bound := by
-        intro k hk
-        by_cases heq : k = i
-        · rw [heq, getElem!_pos (result.set! i val) i (by rw [hsize']; exact hi)]
-          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds,
-            show i < result.size from by rw [hsize]; exact hi, ↓reduceDIte,
-            Array.getElem_set, ↓reduceIte, val]
-          rw [← getElem!_pos lengths i hi]
-          exact hlengths i hi
-        · rw [getElem!_pos (result.set! i val) k (by rw [hsize']; omega)]
-          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds,
-            show i < result.size from by rw [hsize]; exact hi, ↓reduceDIte,
-            Array.getElem_set, show ¬(i = k) from (Ne.symm heq), ↓reduceIte]
-          rw [← getElem!_pos result k (by rw [hsize]; omega)]
-          exact hresult k (by rw [hsize]; omega)
-      exact canonicalCodes_go_snd_le lengths _ (i + 1) _ bound hsize' hresult'
-        hlengths j hj
+      by_cases hnc : lengths[i].toNat < nextCode.size
+      · simp only [hnc, ↓reduceDIte] at hj ⊢
+        let val := (nextCode[lengths[i].toNat].toUInt16, lengths[i])
+        have hsize' : (result.set! i val).size = lengths.size := by
+          simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds]
+          split <;> simp only [Array.size_set, hsize]
+        have hresult' : ∀ k, k < (result.set! i val).size →
+            (result.set! i val)[k]!.2.toNat ≤ bound := by
+          intro k hk
+          by_cases heq : k = i
+          · rw [heq, getElem!_pos (result.set! i val) i (by rw [hsize']; exact hi)]
+            simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds,
+              show i < result.size from by rw [hsize]; exact hi, ↓reduceDIte,
+              Array.getElem_set, ↓reduceIte, val]
+            rw [← getElem!_pos lengths i hi]
+            exact hlengths i hi
+          · rw [getElem!_pos (result.set! i val) k (by rw [hsize']; omega)]
+            simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds,
+              show i < result.size from by rw [hsize]; exact hi, ↓reduceDIte,
+              Array.getElem_set, show ¬(i = k) from (Ne.symm heq), ↓reduceIte]
+            rw [← getElem!_pos result k (by rw [hsize]; omega)]
+            exact hresult k (by rw [hsize]; omega)
+        exact canonicalCodes_go_snd_le lengths _ (i + 1) _ bound hsize' hresult'
+          hlengths j hj
+      · simp only [hnc, ↓reduceDIte] at hj ⊢
+        exact canonicalCodes_go_snd_le lengths nextCode (i + 1) result bound hsize hresult
+          hlengths j hj
     · simp only [show ¬(lengths[i] > 0) from hlen, ↓reduceIte] at hj ⊢
       exact canonicalCodes_go_snd_le lengths nextCode (i + 1) result bound hsize hresult
         hlengths j hj
