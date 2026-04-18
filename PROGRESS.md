@@ -1849,6 +1849,90 @@ Quality metrics: 0 sorries; `Zip/Spec/` at 42 files, 20,151 LOC
 (DEFLATE-only — Zstd's ~16 kLOC of spec work migrated to lean-zstd);
 `Zip/Native/` at 7 files, 1,603 LOC. Toolchain: `v4.29.1`.
 
+**10-PR batch (Apr 18): proven-bounds campaign completion (summarize #1537):**
+
+This batch closes out the DEFLATE-side proven-bounds campaign carried
+forward from the batch above. Eight feature PRs converted every
+remaining `]!` runtime-bounds access in the LZ77 matcher family of
+`Zip/Native/Deflate.lean` (clusters A/B/C1/C2/C3 — spanning the
+recursive and iterative variants of `lz77Greedy` and `lz77Lazy` plus
+their `where`-local `hash3`/`countMatch`/`trailing`/`mainLoop`/
+`updateHashes` helpers) and in the two remaining clusters of
+`Zip/Native/DeflateDynamic.lean` (cluster A `emitTokensWithCodes`;
+cluster B `tokenFreqs.go`). End-point: `]!` in
+`Zip/Native/Deflate.lean` 24 → 0 and `Zip/Native/DeflateDynamic.lean`
+6 → 0 as runtime reads — the only remaining `]!` in `Deflate.lean`
+(2 occurrences) live inside comments, with no runtime-bounded
+accesses left in the compressor.
+
+*Cluster pattern that landed.* The matcher plumbing grew three
+signature-level size invariants threaded from the top-level call down
+through each `where`-local helper:
+`hht : hashTable.size = hashSize`, `hhv : hashValid.size = hashSize`,
+and `hhs : 0 < hashSize` for the hash-table reads;
+`h1 : p1 + maxLen ≤ data.size` + `h2 : p2 + maxLen ≤ data.size` for
+the `countMatch` byte-compare loops; and `h : pos + 2 < data.size` on
+each local `hash3`. The iterative (`lz77GreedyIter`/`lz77LazyIter`,
+PRs #1517 and #1529) and recursive (`lz77Greedy`/`lz77Lazy`,
+PRs #1532 and #1524 + #1535) variants each required their own
+size-preservation lemma pair —
+`lz77{Greedy,Lazy}_updateHashes_{fst,snd}_size`, four in total —
+because `updateHashes` is private to each `where`-block and cannot be
+shared without a larger refactor. Dead-branch fallbacks for the outer
+`hht`/`hhv` failure are byte-identical across the iterative and lazy
+variants (emit one literal, advance `pos + 1`); the inner lookahead
+guard in `mainLoop_lazy` takes the lookahead-dropped branch and
+commits the already-found match. The `emitTokensWithCodes` dead
+fallback recurses without emitting — ruled out by
+`nativeFindLengthCode_idx_bound` + `hlit_size`, retained only to keep
+the elaborator happy.
+
+*Skill-file deltas (#1530).* Appended two pitfalls to
+`.claude/skills/proven-bounds/SKILL.md`, bringing the numbered list
+from 7 to 9. Pitfall #8 records that `unless` rebinds the threaded
+`mut` state even when the body does not write to it, so bounds
+captured before `unless` no longer apply to reads after; remedy is to
+read all fields up front inside the `if h : pos + N ≤ data.size`
+guard (pattern used in the Gzip decompressor rewrite). Pitfall #9
+records that `List.pmap` (and other `@[expose]` combinators) cause
+`rfl`-proved specs to unfold the skeleton simultaneously on each side
+and blow the kernel recursion limit; remedy is a named-helper wrapper
+(`freqsToPairs` in `DeflateDynamic.lean`).
+
+*Proof-quality review (#1536).* Audited the six feature PRs landed
+across the clusters. No cross-cluster renames rose to the "wrap it"
+bar — hypothesis names (`hht`, `hhv`, `hhs`, `hlit`, `hdist`) overload
+by scope in ways that are consistently scope-disambiguated.
+`getElem!_le_set!_incr` was the sole repeated spec-cascade idiom that
+justified a local helper lemma, and #1526 already introduced it. The
+four size-preservation lemmas in `Zip/Spec/DeflateFixedCorrect.lean`
+(`lz77{Greedy,Lazy}_updateHashes_{fst,snd}_size`) remain independent
+rather than being collapsed, because `lz77Greedy.updateHashes` and
+`lz77Lazy.updateHashes` are private to their respective `where`-blocks
+— unification would require a separate refactor hoisting
+`updateHashes` to top-level. Review landed doc-only (no cleanup
+commit), per the issue's explicit opt-out.
+
+*Self-improvement (#1516).* Post-proven-bounds-campaign meditate
+captured the clustering heuristic that split the Deflate matcher work
+into sub-issues #1508/#1509/#1510, and recorded the `]!` distribution
+across `Zip/Native/` that scoped this batch.
+
+Quality metrics: 0 sorries across `Zip/`;
+`Zip/Native/Deflate.lean` and `Zip/Native/DeflateDynamic.lean` both at
+0 runtime `]!` reads (2 comment-only occurrences remain in the
+former); `Zip/Native/` at 7 files, 1,780 LOC (up from 1,603 —
++177 LOC from the threaded size hypotheses and dead-branch
+fallbacks); `Zip/Spec/` at 42 files, 20,516 LOC (up from 20,151 —
++365 LOC across `DeflateFixedCorrect.lean`, `DeflateDynamicEmit.lean`,
+`DeflateDynamicFreqs.lean`, `DeflateDynamicCorrect.lean`,
+`LZ77NativeCorrect.lean`); toolchain `v4.29.1`.
+
+*Track E carry-over.* #1531 and #1533 (ZIP64
+oversized-compressedSize / oversized-uncompressedSize malformed-
+fixture features) remain unclaimed Priority-0 work for the next
+planner.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
