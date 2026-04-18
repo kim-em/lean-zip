@@ -102,7 +102,7 @@ private theorem nextCodes_go_size (blCount : Array Nat) (maxBits : Nat)
   termination_by maxBits + 1 - bits
 
 /-- `nextCodes` returns an array of size `maxBits + 1`. -/
-protected theorem nextCodes_size (blCount : Array Nat) (maxBits : Nat) :
+@[simp] protected theorem nextCodes_size (blCount : Array Nat) (maxBits : Nat) :
     (nextCodes blCount maxBits).size = maxBits + 1 :=
   nextCodes_go_size blCount maxBits _ 1 0 (Array.size_replicate ..)
 
