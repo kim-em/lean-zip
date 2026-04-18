@@ -40,19 +40,26 @@ jobs:
       - name: Build
         run: |
           set +e
-          strace -f -y -o /tmp/lake-build.strace \
+          strace -ff -y -o /tmp/lake-build.strace \
             -e trace=openat,read,write,lseek,ftruncate,close,fcntl,flock,clone,fork,vfork,execve \
             lake -R build
           status=$?
           echo "=== filtered build strace ==="
-          grep -nE 'lakefile\.olean\.trace|lakefile\.olean|config/\[anonymous\]|zipCommon/.lake/config' /tmp/lake-build.strace || true
+          grep -nE 'lakefile\.olean\.trace|lakefile\.olean|config/\[anonymous\]|zipCommon/.lake/config' /tmp/lake-build.strace.* || true
           echo "=== root trace context ==="
-          line="$(grep -n '/\\.lake/config/\\[anonymous\\]/lakefile\\.olean\\.trace' /tmp/lake-build.strace | head -n1 | cut -d: -f1)"
-          if [ -n "$line" ]; then
+          first_match="$(grep -n '/\\.lake/config/\\[anonymous\\]/lakefile\\.olean\\.trace' /tmp/lake-build.strace.* | head -n1 || true)"
+          if [ -n "$first_match" ]; then
+            file="$(printf '%s' "$first_match" | cut -d: -f1)"
+            line="$(printf '%s' "$first_match" | cut -d: -f2)"
             start=$(( line > 40 ? line - 40 : 1 ))
             end=$(( line + 120 ))
-            sed -n "${start},${end}p" /tmp/lake-build.strace
+            sed -n "${start},${end}p" "$file"
           fi
+          echo "=== writer pid traces ==="
+          grep 'lakefile\\.olean\\.trace' /tmp/lake-build.strace.* | grep 'write(' | sed -E 's#.*/lake-build\\.strace\\.([0-9]+):.*#\\1#' | sort -u | while read -r pid; do
+            echo "--- pid $pid ---"
+            sed -n '1,220p' "/tmp/lake-build.strace.$pid"
+          done
           exit $status
 
       - name: Inspect Lake config traces
