@@ -28,9 +28,23 @@ static lean_obj_res mk_io_error(const char *msg) {
 static lean_obj_res mk_zlib_error(const char *prefix, int ret, const char *zmsg) {
     /* Use zlib's message if available, otherwise zError for the return code */
     const char *detail = zmsg ? zmsg : zError(ret);
-    char buf[256];
-    snprintf(buf, sizeof(buf), "%s: %s", prefix, detail);
-    return mk_io_error(buf);
+    size_t prefix_len = strlen(prefix);
+    size_t detail_len = strlen(detail);
+
+    if (prefix_len > SIZE_MAX - detail_len - 3) {
+        return mk_io_error("zlib error: message too large");
+    }
+
+    size_t msg_len = prefix_len + detail_len + 3;
+    char *buf = (char *)malloc(msg_len);
+    if (!buf) {
+        return mk_io_error("zlib error: out of memory while formatting error");
+    }
+
+    snprintf(buf, msg_len, "%s: %s", prefix, detail);
+    lean_obj_res err = mk_io_error(buf);
+    free(buf);
+    return err;
 }
 
 /*
