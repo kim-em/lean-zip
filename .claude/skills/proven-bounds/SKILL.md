@@ -189,6 +189,87 @@ else
   let x := ...  -- h : ¬cond is in scope
 ```
 
+### 8. `unless` rebinds `mut` variables, dropping bounds
+
+Pitfall #7 covered how `if h : cond then throw` leaves no `¬cond` in
+scope afterwards. `unless` has the same flavour and an extra sting:
+even when its body doesn't touch a `mut` variable, the elaborator
+threads the `mut`-state through it and emits a fresh binding in the
+continuation. Any bound you captured on that variable earlier in the
+block is no longer attached to the `pos` you see after the `unless`.
+
+```lean
+-- WRONG: hHdr bounds the `pos` at the `if`, but after the first
+-- `unless`, `pos` is a fresh `Nat` — hHdr no longer helps the
+-- `data[pos + 1]` access below.
+if hHdr : pos + 10 ≤ data.size then
+  let id1 := data[pos]
+  unless id1 == 0x1f do return result
+  let id2 := data[pos + 1]   -- bound unprovable: `pos` was rebound
+```
+
+Remedy: **read every byte you need from the array before any
+control-flow branch that may rebind the `mut`**, then branch on the
+captured values:
+
+```lean
+-- RIGHT: all reads happen while hHdr is alive
+if hHdr : pos + 10 ≤ data.size then
+  let id1 := data[pos]
+  let id2 := data[pos + 1]
+  let cm  := data[pos + 2]
+  let flg := data[pos + 3]
+  unless id1 == 0x1f && id2 == 0x8b do return result
+  unless cm == 8 do throw "unsupported"
+  pos := pos + 10
+  ...
+```
+
+Symptom to look for: a `data[pos + k]` failing with a bounds goal
+that `omega` can't close, even though an earlier `if h : pos + N ≤
+data.size` should cover it. Scan upward for the first `unless` (or
+`if ... then throw` without an `else`) and hoist the reads above it.
+
+### 9. `List.pmap` and other `@[expose]` combinators break `rfl` specs
+
+When a native function is used inside a spec whose final step is
+`rfl` (common for algorithmic-correspondence specs), inlining an
+`@[expose]` combinator like `List.pmap` can trigger `maximum
+recursion depth has been reached` during elaboration. `@[expose]`
+makes the definition eagerly unfold on both sides of the equality,
+and the kernel recurses through the `pmap` skeleton on each side
+simultaneously.
+
+```lean
+-- Inline pmap inside a def whose spec ends in `rfl`:
+def deflateDynamic ... :=
+  let litFreqPairs :=
+    (List.range litFreqs.size).pmap
+      (fun i (h : i < litFreqs.size) => (i, litFreqs[i]'h)) ...
+  ...
+
+example : deflateDynamic data = ... := by
+  unfold deflateDynamic; rfl   -- BOOM: maximum recursion depth
+```
+
+Remedy: wrap the `pmap` call in a named helper so the elaborator
+does not recurse into its body on both sides of the `rfl`:
+
+```lean
+def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
+  (List.range freqs.size).pmap
+    (fun i (h : i < freqs.size) => (i, freqs[i]'h))
+    (fun _ hi => List.mem_range.mp hi)
+
+def deflateDynamic ... :=
+  let litFreqPairs := freqsToPairs litFreqs
+  ...
+```
+
+Hiding the combinator behind a function symbol stops the unfolder
+cold. Expect to see this when a spec that was `rfl` before a
+proven-bounds conversion now reports `maximum recursion depth`.
+
 ## Checklist for Conversion
 
 1. Identify all `]!` sites in the target function
