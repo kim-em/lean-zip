@@ -38,7 +38,7 @@ jobs:
           rm -rf .lake
 
       - name: Build
-        run: lake build
+        run: lake -R build
 
       - name: Test
-        run: lake exe test
+        run: lake -R exe test

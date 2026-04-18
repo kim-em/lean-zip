@@ -21,6 +21,16 @@ used by the dynamic Huffman compressor. These are internal helpers for
 
 namespace Zip.Native.Deflate
 
+/-- Incrementing one counter in a Nat frequency array cannot decrease any entry. -/
+private theorem getElem!_le_set!_incr (arr : Array Nat) (k idx : Nat) (hk : k < arr.size) :
+    arr[idx]! ≤ (arr.set! k (arr[k]! + 1))[idx]! := by
+  by_cases heq : k = idx
+  · subst heq
+    rw [Array.getElem!_set!_self arr _ _ hk]
+    omega
+  · rw [Array.getElem!_set!_ne arr _ _ _ heq]
+    omega
+
 /-- `tokenFreqs.go` preserves array sizes. -/
 protected theorem tokenFreqs_go_sizes (tokens : Array LZ77Token)
     (litFreqs distFreqs : Array Nat) (i : Nat)
@@ -73,7 +83,7 @@ protected theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
         (by rw [Array.size_set!]; omega) hdist
       constructor
       · intro hidx
-        exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs b.toNat idx
+        exact Nat.le_trans (getElem!_le_set!_incr litFreqs b.toNat idx
           (by have := UInt8.toNat_lt b; omega)) (ih.1 hidx)
       · exact ih.2
     | .reference length distance =>
@@ -101,7 +111,7 @@ protected theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1)) distFreqs (i + 1) idx
               (by rw [Array.size_set!]; omega) hdist
             have hlIdx := nativeFindLengthCode_idx_bound _ lIdx lN lV hflc
-            exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
+            exact Nat.le_trans (getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
           | some q =>
             obtain ⟨dIdx, dN, dV⟩ := q
             have hlIdx := nativeFindLengthCode_idx_bound _ lIdx lN lV hflc
@@ -109,7 +119,7 @@ protected theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
               (by rw [Array.size_set!]; omega) (by rw [Array.size_set!]; omega)
-            exact Nat.le_trans (Array.getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
+            exact Nat.le_trans (getElem!_le_set!_incr litFreqs _ idx (by omega)) (ih.1 hidx)
       · intro hidx
         cases hflc : findLengthCode length with
         | none =>
@@ -123,7 +133,7 @@ protected theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
             have ih := Deflate.tokenFreqs_go_mono tokens litFreqs
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
               hlit (by rw [Array.size_set!]; omega)
-            exact Nat.le_trans (Array.getElem!_le_set!_incr distFreqs dIdx idx (by omega)) (ih.2 hidx)
+            exact Nat.le_trans (getElem!_le_set!_incr distFreqs dIdx idx (by omega)) (ih.2 hidx)
         | some p =>
           obtain ⟨lIdx, lN, lV⟩ := p
           cases hfdc : findDistCode distance with
@@ -139,7 +149,7 @@ protected theorem tokenFreqs_go_mono (tokens : Array LZ77Token)
               (litFreqs.set! (lIdx + 257) (litFreqs[lIdx + 257]! + 1))
               (distFreqs.set! dIdx (distFreqs[dIdx]! + 1)) (i + 1) idx
               (by rw [Array.size_set!]; omega) (by rw [Array.size_set!]; omega)
-            exact Nat.le_trans (Array.getElem!_le_set!_incr distFreqs dIdx idx (by omega)) (ih.2 hidx)
+            exact Nat.le_trans (getElem!_le_set!_incr distFreqs dIdx idx (by omega)) (ih.2 hidx)
   · exact ⟨fun _ => Nat.le.refl, fun _ => Nat.le.refl⟩
 termination_by tokens.size - i
 
