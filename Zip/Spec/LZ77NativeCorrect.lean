@@ -166,7 +166,7 @@ theorem trailing_valid (data : ByteArray) (pos : Nat) :
   unfold lz77Greedy.trailing
   split
   · rename_i hlt
-    exact .literal hlt rfl (trailing_valid data (pos + 1))
+    exact .literal hlt (getElem!_pos data pos hlt) (trailing_valid data (pos + 1))
   · exact .done (by omega)
 termination_by data.size - pos
 
@@ -198,9 +198,9 @@ theorem mainLoop_valid (data : ByteArray) (windowSize hashSize : Nat)
                 hashTable[lz77Greedy.hash3 data pos hashSize]! from by omega]
             exact (hcm.1 i hi).symm
           · exact mainLoop_valid _ _ _ _ _ _ hw
-        · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
-      · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
-    · exact .literal (by omega) rfl (mainLoop_valid _ _ _ _ _ _ hw)
+        · exact .literal (by omega) (getElem!_pos data pos (by omega)) (mainLoop_valid _ _ _ _ _ _ hw)
+      · exact .literal (by omega) (getElem!_pos data pos (by omega)) (mainLoop_valid _ _ _ _ _ _ hw)
+    · exact .literal (by omega) (getElem!_pos data pos (by omega)) (mainLoop_valid _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 

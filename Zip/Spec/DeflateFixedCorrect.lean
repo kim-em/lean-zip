@@ -322,7 +322,7 @@ theorem deflateFixed_spec (data : ByteArray) :
       simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
       have : lz77Greedy.trailing data 0 = [] := by
         unfold lz77Greedy.trailing
-        simp only [show ¬(0 < data.size) from by omega, ↓reduceIte]
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
       simp only [this])
 
 /-! ## Inflate completeness (restricted) -/
@@ -410,6 +410,36 @@ theorem inflate_deflateFixed (data : ByteArray)
 
 /-! ## Iterative LZ77 equivalence -/
 
+/-- The `hash3` helper agrees pointwise between `lz77GreedyIter` and `lz77Greedy`.
+    The recursive variant uses internal-guard `dite` reads; both equal
+    `data[pos]!` (which itself unfolds to the same `dite`). -/
+private theorem hash3_eq (data : ByteArray) (pos hashSize : Nat) :
+    lz77GreedyIter.hash3 data pos hashSize = lz77Greedy.hash3 data pos hashSize := by
+  unfold lz77GreedyIter.hash3 lz77Greedy.hash3
+  by_cases h0 : pos < data.size
+  · by_cases h1 : pos + 1 < data.size
+    · by_cases h2 : pos + 2 < data.size
+      · simp only [getElem!_pos data pos h0, getElem!_pos data (pos + 1) h1,
+          getElem!_pos data (pos + 2) h2, dif_pos h0, dif_pos h1, dif_pos h2]
+      · simp only [getElem!_pos data pos h0, getElem!_pos data (pos + 1) h1,
+          getElem!_neg data (pos + 2) h2, dif_pos h0, dif_pos h1, dif_neg h2]
+    · by_cases h2 : pos + 2 < data.size
+      · simp only [getElem!_pos data pos h0, getElem!_neg data (pos + 1) h1,
+          getElem!_pos data (pos + 2) h2, dif_pos h0, dif_neg h1, dif_pos h2]
+      · simp only [getElem!_pos data pos h0, getElem!_neg data (pos + 1) h1,
+          getElem!_neg data (pos + 2) h2, dif_pos h0, dif_neg h1, dif_neg h2]
+  · by_cases h1 : pos + 1 < data.size
+    · by_cases h2 : pos + 2 < data.size
+      · simp only [getElem!_neg data pos h0, getElem!_pos data (pos + 1) h1,
+          getElem!_pos data (pos + 2) h2, dif_neg h0, dif_pos h1, dif_pos h2]
+      · simp only [getElem!_neg data pos h0, getElem!_pos data (pos + 1) h1,
+          getElem!_neg data (pos + 2) h2, dif_neg h0, dif_pos h1, dif_neg h2]
+    · by_cases h2 : pos + 2 < data.size
+      · simp only [getElem!_neg data pos h0, getElem!_neg data (pos + 1) h1,
+          getElem!_pos data (pos + 2) h2, dif_neg h0, dif_neg h1, dif_pos h2]
+      · simp only [getElem!_neg data pos h0, getElem!_neg data (pos + 1) h1,
+          getElem!_neg data (pos + 2) h2, dif_neg h0, dif_neg h1, dif_neg h2]
+
 /-- The `go` helper is identical between `lz77GreedyIter` and `lz77Greedy`. -/
 private theorem go_eq (data : ByteArray) (p1 p2 i maxLen : Nat) :
     lz77GreedyIter.go data p1 p2 i maxLen = lz77Greedy.go data p1 p2 i maxLen := by
@@ -438,6 +468,7 @@ private theorem updateHashes_eq (data : ByteArray) (hashSize : Nat)
   induction h : matchLen - j using Nat.strongRecOn generalizing j hashTable hashValid with
   | _ n ih =>
     unfold lz77GreedyIter.updateHashes lz77Greedy.updateHashes
+    simp only [hash3_eq]
     split
     · split
       · exact ih _ (by omega) _ _ _ rfl
@@ -452,8 +483,10 @@ private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Toke
   | _ n ih =>
     unfold lz77GreedyIter.trailing lz77Greedy.trailing
     split
-    · rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
-        ← Array.append_assoc, Array.push_eq_append]
+    · rename_i hlt
+      rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
+        ← Array.append_assoc, Array.push_eq_append,
+        getElem!_pos data pos hlt]
     · simp only [Array.append_empty]
 
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop`. -/
@@ -465,20 +498,23 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable hashValid with
   | _ n ih =>
     unfold lz77GreedyIter.mainLoop lz77Greedy.mainLoop
-    simp only [show @lz77GreedyIter.hash3 = @lz77Greedy.hash3 from rfl,
-      countMatch_eq, updateHashes_eq]
+    simp only [hash3_eq, countMatch_eq, updateHashes_eq]
     split
-    · split
+    · rename_i hlt
+      split
       · split
         · split
           · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
               ← Array.append_assoc, Array.push_eq_append]
           · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-              ← Array.append_assoc, Array.push_eq_append]
+              ← Array.append_assoc, Array.push_eq_append,
+              getElem!_pos data pos (by omega)]
         · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-            ← Array.append_assoc, Array.push_eq_append]
+            ← Array.append_assoc, Array.push_eq_append,
+            getElem!_pos data pos (by omega)]
       · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-          ← Array.append_assoc, Array.push_eq_append]
+          ← Array.append_assoc, Array.push_eq_append,
+          getElem!_pos data pos (by omega)]
     · exact trailing_eq data pos acc
 
 /-- The iterative LZ77 greedy matcher produces the same tokens as the
