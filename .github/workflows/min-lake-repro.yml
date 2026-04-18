@@ -44,7 +44,7 @@ jobs:
               pure s.trim.toNat!
             catch _ =>
               pure 0
-            IO.FS.writeFile path s!"{n+1}\\n"
+            IO.FS.writeFile path s!"{{n+1}}\\n"
             pure #[]
           """
 
