@@ -16,6 +16,15 @@ namespace Zip.Native
 
 namespace GzipDecode
 
+/-- Scan forward from `pos` in `data` for the next zero byte (NUL).
+    Returns the index of the zero byte, or `data.size` if none is found. -/
+def scanToZero (data : ByteArray) (pos : Nat) : Nat :=
+  if h : pos < data.size then
+    if data[pos] == 0 then pos
+    else scanToZero data (pos + 1)
+  else pos
+termination_by data.size - pos
+
 /-- Decompress a gzip stream (RFC 1952). Supports concatenated members.
     Returns the decompressed data. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
@@ -26,55 +35,59 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
   -- Process concatenated gzip members
   for _ in [:1000] do
     if pos ≥ data.size then return result
-    -- Parse header
-    if pos + 10 > data.size then throw "Gzip: truncated header"
-    let id1 := data[pos]!
-    let id2 := data[pos + 1]!
-    unless id1 == 0x1f && id2 == 0x8b do
-      if pos == 0 then throw "Gzip: invalid magic bytes"
-      -- End of concatenated stream
-      return result
-    let cm := data[pos + 2]!
-    unless cm == 8 do throw "Gzip: unsupported compression method"
-    let flg := data[pos + 3]!
-    -- Skip MTIME (4), XFL (1), OS (1)
-    pos := pos + 10
-    -- FEXTRA
-    if flg &&& 0x04 != 0 then
-      if pos + 2 > data.size then throw "Gzip: truncated FEXTRA length"
-      let xlen := (Binary.readUInt16LE data pos).toNat
-      pos := pos + 2 + xlen
-    -- FNAME (null-terminated)
-    if flg &&& 0x08 != 0 then
-      while pos < data.size && data[pos]! != 0 do pos := pos + 1
-      pos := pos + 1 -- skip NUL
-    -- FCOMMENT (null-terminated)
-    if flg &&& 0x10 != 0 then
-      while pos < data.size && data[pos]! != 0 do pos := pos + 1
-      pos := pos + 1
-    -- FHCRC (2-byte header CRC)
-    if flg &&& 0x02 != 0 then pos := pos + 2
-    if pos > data.size then throw "Gzip: header extends past end of input"
-    -- Inflate (cap each member to remaining budget so total stays within maxOutputSize)
-    let memberMax := maxOutputSize - result.size
-    let (decompressed, endPos) ← Inflate.inflateRaw data pos memberMax
-    pos := endPos
-    -- Parse trailer: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
-    if pos + 8 > data.size then throw "Gzip: truncated trailer"
-    let expectedCrc := Binary.readUInt32LE data pos
-    let expectedSize := Binary.readUInt32LE data (pos + 4)
-    pos := pos + 8
-    -- Verify CRC32
-    let actualCrc := Crc32.Native.crc32 0 decompressed
-    unless actualCrc == expectedCrc do
-      throw s!"Gzip: CRC32 mismatch: expected {expectedCrc}, got {actualCrc}"
-    -- Verify size (mod 2^32)
-    let actualSize := decompressed.size.toUInt32
-    unless actualSize == expectedSize do
-      throw s!"Gzip: size mismatch: expected {expectedSize}, got {actualSize}"
-    result := result ++ decompressed
-    if result.size > maxOutputSize then
-      throw "Gzip: total output exceeds maximum size"
+    -- Parse header (need 10 bytes: ID1, ID2, CM, FLG, MTIME[4], XFL, OS)
+    if hHdr : pos + 10 ≤ data.size then
+      -- Read all four header bytes up front so the bound `hHdr` is in scope
+      -- (do-notation rebinds `mut pos` after `unless`, losing the proof).
+      let id1 := data[pos]
+      let id2 := data[pos + 1]
+      let cm := data[pos + 2]
+      let flg := data[pos + 3]
+      unless id1 == 0x1f && id2 == 0x8b do
+        if pos == 0 then throw "Gzip: invalid magic bytes"
+        -- End of concatenated stream
+        return result
+      unless cm == 8 do throw "Gzip: unsupported compression method"
+      -- Skip MTIME (4), XFL (1), OS (1)
+      pos := pos + 10
+      -- FEXTRA
+      if flg &&& 0x04 != 0 then
+        if pos + 2 > data.size then throw "Gzip: truncated FEXTRA length"
+        let xlen := (Binary.readUInt16LE data pos).toNat
+        pos := pos + 2 + xlen
+      -- FNAME (null-terminated)
+      if flg &&& 0x08 != 0 then
+        pos := scanToZero data pos
+        pos := pos + 1 -- skip NUL
+      -- FCOMMENT (null-terminated)
+      if flg &&& 0x10 != 0 then
+        pos := scanToZero data pos
+        pos := pos + 1
+      -- FHCRC (2-byte header CRC)
+      if flg &&& 0x02 != 0 then pos := pos + 2
+      if pos > data.size then throw "Gzip: header extends past end of input"
+      -- Inflate (cap each member to remaining budget so total stays within maxOutputSize)
+      let memberMax := maxOutputSize - result.size
+      let (decompressed, endPos) ← Inflate.inflateRaw data pos memberMax
+      pos := endPos
+      -- Parse trailer: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
+      if pos + 8 > data.size then throw "Gzip: truncated trailer"
+      let expectedCrc := Binary.readUInt32LE data pos
+      let expectedSize := Binary.readUInt32LE data (pos + 4)
+      pos := pos + 8
+      -- Verify CRC32
+      let actualCrc := Crc32.Native.crc32 0 decompressed
+      unless actualCrc == expectedCrc do
+        throw s!"Gzip: CRC32 mismatch: expected {expectedCrc}, got {actualCrc}"
+      -- Verify size (mod 2^32)
+      let actualSize := decompressed.size.toUInt32
+      unless actualSize == expectedSize do
+        throw s!"Gzip: size mismatch: expected {expectedSize}, got {actualSize}"
+      result := result ++ decompressed
+      if result.size > maxOutputSize then
+        throw "Gzip: total output exceeds maximum size"
+    else
+      throw "Gzip: truncated header"
   throw "Gzip: too many concatenated members"
 
 end GzipDecode
@@ -108,37 +121,40 @@ namespace ZlibDecode
     Returns the decompressed data. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
     Except String ByteArray := do
-  if data.size < 6 then throw "Zlib: input too short"
-  -- Parse header: CMF (1 byte) + FLG (1 byte)
-  let cmf := data[0]!
-  let flg := data[1]!
-  -- Check header checksum
-  let check := cmf.toUInt16 * 256 + flg.toUInt16
-  unless check % 31 == 0 do throw "Zlib: header check failed"
-  -- CM must be 8 (deflate)
-  unless cmf &&& 0x0F == 8 do throw "Zlib: unsupported compression method"
-  -- CINFO (window size) must be ≤ 7
-  let cinfo := cmf >>> 4
-  unless cinfo ≤ 7 do throw s!"Zlib: invalid window size {cinfo}"
-  let mut pos : Nat := 2
-  -- FDICT: preset dictionary (not supported)
-  if flg &&& 0x20 != 0 then
-    throw "Zlib: preset dictionaries not supported"
-  -- Inflate
-  let (decompressed, endPos) ← Inflate.inflateRaw data pos maxOutputSize
-  pos := endPos
-  -- Parse trailer: Adler32 (4 bytes big-endian)
-  if pos + 4 > data.size then throw "Zlib: truncated trailer"
-  let b0 := data[pos]!.toUInt32
-  let b1 := data[pos + 1]!.toUInt32
-  let b2 := data[pos + 2]!.toUInt32
-  let b3 := data[pos + 3]!.toUInt32
-  let expectedAdler := (b0 <<< 24) ||| (b1 <<< 16) ||| (b2 <<< 8) ||| b3
-  -- Verify Adler32
-  let actualAdler := Adler32.Native.adler32 1 decompressed
-  unless actualAdler == expectedAdler do
-    throw s!"Zlib: Adler32 mismatch: expected {expectedAdler}, got {actualAdler}"
-  return decompressed
+  if hSz : data.size < 6 then throw "Zlib: input too short"
+  else
+    -- Parse header: CMF (1 byte) + FLG (1 byte)
+    let cmf := data[0]
+    let flg := data[1]
+    -- Check header checksum
+    let check := cmf.toUInt16 * 256 + flg.toUInt16
+    unless check % 31 == 0 do throw "Zlib: header check failed"
+    -- CM must be 8 (deflate)
+    unless cmf &&& 0x0F == 8 do throw "Zlib: unsupported compression method"
+    -- CINFO (window size) must be ≤ 7
+    let cinfo := cmf >>> 4
+    unless cinfo ≤ 7 do throw s!"Zlib: invalid window size {cinfo}"
+    let mut pos : Nat := 2
+    -- FDICT: preset dictionary (not supported)
+    if flg &&& 0x20 != 0 then
+      throw "Zlib: preset dictionaries not supported"
+    -- Inflate
+    let (decompressed, endPos) ← Inflate.inflateRaw data pos maxOutputSize
+    pos := endPos
+    -- Parse trailer: Adler32 (4 bytes big-endian)
+    if hT : pos + 4 ≤ data.size then
+      let b0 := data[pos].toUInt32
+      let b1 := data[pos + 1].toUInt32
+      let b2 := data[pos + 2].toUInt32
+      let b3 := data[pos + 3].toUInt32
+      let expectedAdler := (b0 <<< 24) ||| (b1 <<< 16) ||| (b2 <<< 8) ||| b3
+      -- Verify Adler32
+      let actualAdler := Adler32.Native.adler32 1 decompressed
+      unless actualAdler == expectedAdler do
+        throw s!"Zlib: Adler32 mismatch: expected {expectedAdler}, got {actualAdler}"
+      return decompressed
+    else
+      throw "Zlib: truncated trailer"
 
 end ZlibDecode
 
