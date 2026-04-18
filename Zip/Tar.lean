@@ -164,6 +164,23 @@ def paddingFor (size : UInt64) : Nat :=
   let rem := size.toNat % 512
   if rem == 0 then 0 else 512 - rem
 
+/-- Truncate `s` so that its UTF-8 byte length is at most `maxBytes`,
+    stopping at a codepoint boundary. The result is always valid UTF-8,
+    so callers can avoid the panicking fromUTF8 variant on the output.
+    Used by the tar writer when placing a long path into a fixed-width
+    header field (UStar name is 100 bytes, PAX placeholder is 80 bytes). -/
+def truncateUTF8 (s : String) (maxBytes : Nat) : String :=
+  if s.utf8ByteSize ≤ maxBytes then s
+  else Id.run do
+    let mut result := ""
+    let mut bytes : Nat := 0
+    for c in s.toList do
+      let cBytes := c.utf8Size
+      if bytes + cBytes > maxBytes then break
+      result := result.push c
+      bytes := bytes + cBytes
+    return result
+
 /-- Read exactly `n` bytes from a stream, looping on short reads.
     Returns fewer bytes only at true EOF. -/
 private partial def readExact (input : IO.FS.Stream) (n : Nat) : IO ByteArray := do
@@ -213,6 +230,10 @@ def splitPath (path : String) : Option (String × String) := Id.run do
         bestSplit := some i
   match bestSplit with
   | some i =>
+    -- Safe: `i` is the index of a `'/'` byte (0x2F, ASCII), which is
+    -- always a codepoint boundary. `bytes` comes from `path.toUTF8`,
+    -- so both the prefix `[0, i)` and suffix `(i, size)` are valid
+    -- UTF-8 by construction. No panic path through `fromUTF8!`.
     let pfx := String.fromUTF8! (bytes.extract 0 i)
     let name := String.fromUTF8! (bytes.extract (i + 1) bytes.size)
     return some (pfx, name)
@@ -313,16 +334,12 @@ def needsPaxHeader (entry : Entry) : Option ByteArray := Id.run do
 
 /-- Build a PAX extended header entry (typeflag 'x') for the given PAX data. -/
 def buildPaxEntry (paxData : ByteArray) (entryPath : String) : IO ByteArray := do
-  -- Truncate the entry path to fit in UStar name field
-  let paxName :=
-    let truncated := if entryPath.utf8ByteSize > 80 then
-      -- Take first 80 bytes worth of the path
-      String.fromUTF8! (entryPath.toUTF8.extract 0 80)
-    else entryPath
-    s!"PaxHeader/{truncated}"
+  -- Truncate the entry path to fit in UStar name field; `truncateUTF8`
+  -- respects codepoint boundaries so multibyte paths never produce a
+  -- partial UTF-8 sequence here.
+  let paxName := s!"PaxHeader/{truncateUTF8 entryPath 80}"
   let paxEntry : Entry := {
-    path := (if paxName.utf8ByteSize > 100 then
-      String.fromUTF8! (paxName.toUTF8.extract 0 100) else paxName)
+    path := truncateUTF8 paxName 100
     size := paxData.size.toUInt64
     mode := 0o644
     typeflag := typePaxExtended
@@ -407,8 +424,10 @@ partial def create (output : IO.FS.Stream) (basePath : System.FilePath)
     -- Build UStar header, with truncated path if PAX is handling it
     let pathOvr : Option (String × String) :=
       if splitPath entry.path |>.isNone then
-        -- PAX has the real path; use a truncated placeholder in UStar header
-        some ("", String.fromUTF8! (entry.path.toUTF8.extract 0 (min entry.path.utf8ByteSize 100)))
+        -- PAX has the real path; use a truncated placeholder in UStar header.
+        -- `truncateUTF8` keeps the placeholder valid UTF-8 even for paths
+        -- whose 100th byte lands inside a multibyte sequence.
+        some ("", truncateUTF8 entry.path 100)
       else none
     let header ← buildHeader entry pathOvr
     output.write header

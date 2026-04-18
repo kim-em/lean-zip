@@ -8,6 +8,7 @@ import ZipTest.Tar
 import ZipTest.Archive
 import ZipTest.ZipFixtures
 import ZipTest.TarFixtures
+import ZipTest.TarPathTruncation
 import ZipTest.CompressFixtures
 import ZipTest.Utf8Fixtures
 import ZipTest.NativeChecksum
@@ -31,6 +32,7 @@ def main : IO Unit := do
   ZipTest.Archive.tests
   ZipTest.ZipFixtures.tests
   ZipTest.TarFixtures.tests
+  ZipTest.TarPathTruncation.tests
   ZipTest.CompressFixtures.tests
   ZipTest.Utf8Fixtures.tests
   ZipTest.NativeChecksum.tests
