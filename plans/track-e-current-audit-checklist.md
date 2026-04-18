@@ -33,9 +33,14 @@ Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
 
 Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
 
-- [ ] Enumerate all `String.fromUTF8!` callsites reachable from untrusted
+- [x] Enumerate all `String.fromUTF8!` callsites reachable from untrusted
   tar bytes and replace them with validated or failure-returning paths
   where needed.
+  (Three panicking raw-byte truncations in `buildPaxEntry` and `create`
+  replaced by `Tar.truncateUTF8` which rounds to the nearest codepoint
+  boundary; the two remaining `fromUTF8!` sites in `splitPath` are
+  documented as safe because the split is at an ASCII `'/'` byte.
+  Regression coverage in `ZipTest/TarPathTruncation.lean`.)
 - [x] Add malformed PAX fixtures:
   invalid UTF-8 keys, invalid UTF-8 values, oversized decimal lengths,
   truncated records, and inconsistent record lengths.
