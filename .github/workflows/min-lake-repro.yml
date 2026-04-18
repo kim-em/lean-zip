@@ -1,0 +1,70 @@
+name: Minimal Lake Repro
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Create tiny repro project
+        run: |
+          mkdir -p /tmp/min-lake-repro
+          cat > /tmp/min-lake-repro/lean-toolchain <<'EOF'
+          leanprover/lean4:v4.29.1
+          EOF
+          cat > /tmp/min-lake-repro/lakefile.lean <<'EOF'
+          import Lake
+          open System Lake DSL
+
+          def bump : IO (Array String) := do
+            let path : FilePath := "/tmp/min-lake-repro-count.txt"
+            let n ← try
+              let s ← IO.FS.readFile path
+              pure s.trim.toNat!
+            catch _ =>
+              pure 0
+            IO.FS.writeFile path s!"{n+1}\n"
+            pure #[]
+
+          package repro where
+            moreLinkArgs := run_io bump
+
+          @[default_target]
+          lean_exe repro where
+            root := `Main
+          EOF
+          cat > /tmp/min-lake-repro/Main.lean <<'EOF'
+          def main : IO Unit := pure ()
+          EOF
+
+      - name: Build tiny repro project
+        run: |
+          cd /tmp/min-lake-repro
+          lake build
+
+      - name: Inspect side effects and trace
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          count = Path('/tmp/min-lake-repro-count.txt')
+          print('COUNT_EXISTS', count.exists())
+          if count.exists():
+            print('COUNT_VALUE', count.read_text())
+
+          trace = Path('/tmp/min-lake-repro/.lake/config/[anonymous]/lakefile.olean.trace')
+          print('TRACE_EXISTS', trace.exists())
+          if trace.exists():
+            data = trace.read_bytes()
+            print('TRACE_SIZE', len(data))
+            print(repr(data))
+          PY
