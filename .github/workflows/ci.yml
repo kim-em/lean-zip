@@ -38,7 +38,15 @@ jobs:
           rm -rf .lake
 
       - name: Build
-        run: lake -R build
+        run: |
+          set +e
+          strace -f -y -o /tmp/lake-build.strace \
+            -e trace=openat,read,write,lseek,ftruncate,close,fcntl,flock \
+            lake -R build
+          status=$?
+          echo "=== filtered build strace ==="
+          grep -nE 'lakefile\.olean\.trace|lakefile\.olean|config/\[anonymous\]|zipCommon/.lake/config' /tmp/lake-build.strace || true
+          exit $status
 
       - name: Inspect Lake config traces
         run: |
