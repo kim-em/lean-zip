@@ -960,6 +960,7 @@ theorem fixedDistLengths_length : fixedDistLengths.length = 32 := by
   simp only [fixedDistLengths, List.length_replicate]
 
 set_option maxRecDepth 1024 in
+set_option cbv.warning false in
 /-- Fixed literal/length code lengths form a valid Huffman code. -/
 theorem fixedLitLengths_valid : Huffman.Spec.ValidLengths fixedLitLengths 15 := by
   constructor

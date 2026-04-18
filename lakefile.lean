@@ -1,17 +1,38 @@
 import Lake
 open System Lake DSL
 
+/-- Split a shell-style flag string on spaces and drop empties. -/
+def splitFlags (s : String) : Array String :=
+  s.splitOn " " |>.filter (· ≠ "") |>.toArray
+
 /-- Run `pkg-config` and split the output into flags. Returns `#[]` on failure. -/
 def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
   let out ← IO.Process.output { cmd := "pkg-config", args := #[flag, pkg] }
   if out.exitCode != 0 then return #[]
-  return out.stdout.trimAscii.toString.splitOn " " |>.filter (· ≠ "") |>.toArray
+  return splitFlags out.stdout.trimAscii.toString
+
+/-- Run `xcrun --show-sdk-path` and return the SDK path on Apple platforms. -/
+def macSdkPath : IO (Option FilePath) := do
+  let out ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
+  if out.exitCode != 0 then
+    return none
+  else
+    return some out.stdout.trimAscii.toString
+
+/-- Prefer an explicit linker override when supplied by the environment. -/
+def zlibLdFlagsOverride : IO (Option (Array String)) := do
+  return (← IO.getEnv "ZLIB_LDFLAGS") |>.map (splitFlags ·.trimAscii.toString)
 
 /-- Get zlib include flags, respecting `ZLIB_CFLAGS` env var override. -/
 def zlibCFlags : IO (Array String) := do
   if let some flags := (← IO.getEnv "ZLIB_CFLAGS") then
-    return flags.trimAscii.toString.splitOn " " |>.filter (· ≠ "") |>.toArray
-  pkgConfig "zlib" "--cflags"
+    return splitFlags flags.trimAscii.toString
+  let flags ← pkgConfig "zlib" "--cflags"
+  if !flags.isEmpty then
+    return flags
+  if let some sdk := (← macSdkPath) then
+    return #["-I", (sdk / "usr/include").toString]
+  return #[]
 
 /-- Extract `-L` library paths from `NIX_LDFLAGS` (set by nix-shell). -/
 def nixLdLibPaths : IO (Array String) := do
@@ -19,12 +40,18 @@ def nixLdLibPaths : IO (Array String) := do
   return val.splitOn " " |>.filter (·.startsWith "-L") |>.toArray
 
 /-- Get link flags for zlib.
-    Tries pkg-config, then `NIX_LDFLAGS`, then bare `-lz`. -/
+    Tries `ZLIB_LDFLAGS`, then pkg-config, then macOS SDK / Nix fallbacks. -/
 def linkFlags : IO (Array String) := do
+  if let some flags := (← zlibLdFlagsOverride) then
+    return flags
   let libPaths ← nixLdLibPaths
   let zlibFlags ← pkgConfig "zlib" "--libs"
-  if !zlibFlags.isEmpty then
+  if !zlibFlags.isEmpty && zlibFlags.any (·.startsWith "-L") then
     return zlibFlags
+  if let some sdk := (← macSdkPath) then
+    return #["-L", (sdk / "usr/lib").toString, "-lz"]
+  if !zlibFlags.isEmpty then
+    return libPaths ++ zlibFlags
   -- pkg-config unavailable — try NIX_LDFLAGS for -L paths
   return libPaths ++ #["-lz"]
 
@@ -32,7 +59,7 @@ package «lean-zip» where
   moreLinkArgs := run_io linkFlags
   testDriver := "test"
 
-require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "87480b0"
+require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "main"
 
 lean_lib Zip
 

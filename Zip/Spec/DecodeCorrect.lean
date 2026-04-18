@@ -330,28 +330,36 @@ theorem readBits_wf (br : ZipCommon.BitReader)
 
 /-! ## Table correspondence lemmas -/
 
+set_option cbv.warning false in
+set_option cbv.warning false in
 theorem lengthBase_eq : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthBase[i.val]!).toNat =
     (Deflate.Spec.lengthBase[i.val]!) := by decide_cbv
 
+set_option cbv.warning false in
 theorem lengthExtra_eq : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthExtra[i.val]!).toNat =
     (Deflate.Spec.lengthExtra[i.val]!) := by decide_cbv
 
+set_option cbv.warning false in
 theorem distBase_eq : ∀ i : Fin 30,
     (Zip.Native.Inflate.distBase[i.val]!).toNat =
     (Deflate.Spec.distBase[i.val]!) := by decide_cbv
 
+set_option cbv.warning false in
 theorem distExtra_eq : ∀ i : Fin 30,
     (Zip.Native.Inflate.distExtra[i.val]!).toNat =
     (Deflate.Spec.distExtra[i.val]!) := by decide_cbv
 
+set_option cbv.warning false in
 theorem lengthExtra_le_32 : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthExtra[i.val]!).toNat ≤ 32 := by decide_cbv
 
+set_option cbv.warning false in
 theorem distExtra_le_32 : ∀ i : Fin 30,
     (Zip.Native.Inflate.distExtra[i.val]!).toNat ≤ 32 := by decide_cbv
 
+set_option cbv.warning false in
 private theorem spec_distBase_pos : ∀ i : Fin 30,
     (Deflate.Spec.distBase[i.val]!) ≥ 1 := by decide_cbv
 

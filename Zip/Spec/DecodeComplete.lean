@@ -141,7 +141,7 @@ theorem huffTree_decode_complete (lengths : Array UInt8)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (htree : Zip.Native.HuffTree.fromLengths lengths maxBits = .ok tree)
     (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
-    (hsym_bound : sym < lengths.size)
+    (_hsym_bound : sym < lengths.size)
     (hspec : Huffman.Spec.decode
       ((Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits).map
         fun (s, cw) => (cw, s)) br.toBits = some (sym, rest)) :
@@ -769,4 +769,3 @@ theorem decodeHuffman_complete
   termination_by br.toBits.length
 
 end Deflate.Correctness
-
