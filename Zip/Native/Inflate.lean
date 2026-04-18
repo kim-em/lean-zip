@@ -50,10 +50,13 @@ def insertLoop (lengths : Array UInt8) (nextCode : Array UInt32)
   if h : start < lengths.size then
     let len := lengths[start]
     if len > 0 then
-      let c := nextCode[len.toNat]!
-      let tree' := tree.insert c len.toNat start.toUInt16
-      let nextCode' := nextCode.set! len.toNat (c + 1)
-      insertLoop lengths nextCode' (start + 1) tree'
+      if hlen : len.toNat < nextCode.size then
+        let c := nextCode[len.toNat]
+        let tree' := tree.insert c len.toNat start.toUInt16
+        let nextCode' := nextCode.set! len.toNat (c + 1)
+        insertLoop lengths nextCode' (start + 1) tree'
+      else
+        insertLoop lengths nextCode (start + 1) tree
     else
       insertLoop lengths nextCode (start + 1) tree
   else (tree, nextCode)
