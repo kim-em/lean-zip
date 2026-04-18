@@ -41,11 +41,18 @@ jobs:
         run: |
           set +e
           strace -f -y -o /tmp/lake-build.strace \
-            -e trace=openat,read,write,lseek,ftruncate,close,fcntl,flock \
+            -e trace=openat,read,write,lseek,ftruncate,close,fcntl,flock,clone,fork,vfork,execve \
             lake -R build
           status=$?
           echo "=== filtered build strace ==="
           grep -nE 'lakefile\.olean\.trace|lakefile\.olean|config/\[anonymous\]|zipCommon/.lake/config' /tmp/lake-build.strace || true
+          echo "=== root trace context ==="
+          line="$(grep -n '/\\.lake/config/\\[anonymous\\]/lakefile\\.olean\\.trace' /tmp/lake-build.strace | head -n1 | cut -d: -f1)"
+          if [ -n "$line" ]; then
+            start=$(( line > 40 ? line - 40 : 1 ))
+            end=$(( line + 120 ))
+            sed -n "${start},${end}p" /tmp/lake-build.strace
+          fi
           exit $status
 
       - name: Inspect Lake config traces
