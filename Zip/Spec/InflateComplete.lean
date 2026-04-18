@@ -266,8 +266,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 hrb_bf, hrb_bt, hds_nat,
                 show Nat.toUInt32 0 = (0 : UInt32) from rfl]
               -- bfinal check
-              have hbf_u32 : (bfinal_val.toUInt32 == 1) = true := by
-                rw [beq_iff_eq] at hbf1 ⊢; subst hbf1; rfl
+              have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
               simp only [hbf_u32, ↓reduceIte, pure, Except.pure]
               rw [hresult]; rfl
             · -- bfinal_val ≠ 1: recursive case
@@ -307,9 +306,8 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 simp only [bind, Except.bind,
                   hrb_bf, hrb_bt, hds_nat,
                   show Nat.toUInt32 0 = (0 : UInt32) from rfl]
-                have hbf_u32 : (bfinal_val.toUInt32 == 1) = false := by
-                  have : bfinal_val = 0 := by simp only [beq_iff_eq] at hbf_ne1; omega
-                  subst this; rfl
+                have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
+                  bfinal_val hval_bf hbf_ne1
                 simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
                 -- Discharge WF guards
                 split
@@ -371,8 +369,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 simp only [bind, Except.bind,
                   hrb_bf, hrb_bt, hdh_native,
                   show Nat.toUInt32 1 = (1 : UInt32) from rfl]
-                have hbf_u32 : (bfinal_val.toUInt32 == 1) = true := by
-                  rw [beq_iff_eq] at hbf1 ⊢; subst hbf1; rfl
+                have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
                 simp only [hbf_u32, ↓reduceIte, pure, Except.pure]
               · -- bfinal_val ≠ 1: recursive case
                 rename_i hbf_ne1
@@ -419,9 +416,8 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   simp only [bind, Except.bind,
                     hrb_bf, hrb_bt, hdh_native,
                     show Nat.toUInt32 1 = (1 : UInt32) from rfl]
-                  have hbf_u32 : (bfinal_val.toUInt32 == 1) = false := by
-                    have : bfinal_val = 0 := by simp only [beq_iff_eq] at hbf_ne1; omega
-                    subst this; rfl
+                  have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
+                    bfinal_val hval_bf hbf_ne1
                   simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
                   -- Discharge WF guards
                   split
@@ -494,8 +490,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   simp only [bind, Except.bind,
                     hrb_bf, hrb_bt, hdt_nat, hdh_native,
                     show Nat.toUInt32 2 = (2 : UInt32) from rfl]
-                  have hbf_u32 : (bfinal_val.toUInt32 == 1) = true := by
-                    rw [beq_iff_eq] at hbf1 ⊢; subst hbf1; rfl
+                  have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
                   simp only [hbf_u32, ↓reduceIte, pure, Except.pure]
                 · -- bfinal_val ≠ 1: recursive case
                   rename_i hbf_ne1
@@ -539,9 +534,8 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                     simp only [bind, Except.bind,
                       hrb_bf, hrb_bt, hdt_nat, hdh_native,
                       show Nat.toUInt32 2 = (2 : UInt32) from rfl]
-                    have hbf_u32 : (bfinal_val.toUInt32 == 1) = false := by
-                      have : bfinal_val = 0 := by simp only [beq_iff_eq] at hbf_ne1; omega
-                      subst this; rfl
+                    have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
+                      bfinal_val hval_bf hbf_ne1
                     simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
                     -- Discharge WF guards
                     split

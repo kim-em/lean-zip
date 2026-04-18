@@ -412,10 +412,10 @@ protected theorem nat_beq_to_uint32_true (v : Nat) (hv : v < 2) (h : (v == 1) = 
 
 /-- Bridge (reverse): `¬((v == 1) = true)` (Nat) with `v < 2` implies
     `(v.toUInt32 == 1) = false` (UInt32). -/
-protected theorem nat_beq_to_uint32_false (v : Nat) (hv : v < 2) (h : ¬((v == 1) = true)) :
-    ¬((v.toUInt32 == 1) = true) := by
+protected theorem nat_beq_to_uint32_eq_false (v : Nat) (hv : v < 2) (h : ¬((v == 1) = true)) :
+    (v.toUInt32 == 1) = false := by
   have hv0 : v = 0 := by simp only [beq_iff_eq] at h; omega
-  subst hv0; decide
+  subst hv0; rfl
 
 set_option maxRecDepth 2048 in
 /-- Block loop correspondence: the native `inflateLoop` agrees with
