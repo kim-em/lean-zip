@@ -96,6 +96,23 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract badMethodPath badMethodExtractDir)
     "unsupported method"
 
+  -- oversized-compressed-size.zip: 122-byte archive whose entry's
+  -- central-directory `compressedSize` claims 2 MiB of payload. The local
+  -- header mirrors the same oversized claim. `Archive.extract` must reject
+  -- this before any `Handle.read` is driven by the bogus size.
+  -- Regenerate (if ever lost): see the Python recipe under
+  -- `scripts/make-oversized-compressed-size.py` — or inline, build a valid
+  -- 122-byte archive storing `hello\n` and overwrite the `compressedSize`
+  -- fields at local offset 18 and CD offset (cd_offset + 20) with 0x00200000.
+  let oversizedData ← readFixture "zip/malformed/oversized-compressed-size.zip"
+  let oversizedPath ← writeFixtureTmp "oversized-compressed-size.zip" oversizedData
+  let oversizedExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-oversized-compressed-size-extract"
+  IO.FS.createDirAll oversizedExtractDir
+  assertThrows "ZIP malformed (oversized-compressed-size.zip)"
+    (Archive.extract oversizedPath oversizedExtractDir)
+    "local data span"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -116,9 +133,11 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- Clean up temp files
   for f in #["go-test.zip", "go-zip64.zip", "go-unix.zip", "go-crc32-not-streamed.zip",
              "too-short.zip", "no-eocd.zip", "cd-past-eof.zip", "bad-crc.zip",
-             "bad-method.zip", "zip-slip.zip", "absolute-path.zip"] do
+             "bad-method.zip", "oversized-compressed-size.zip",
+             "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
+             "/tmp/lean-zip-fixture-oversized-compressed-size-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"

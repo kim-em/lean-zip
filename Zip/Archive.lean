@@ -336,6 +336,21 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
     pos := pos + 46 + nameLen + extraLen + commentLen
   return entries
 
+/-- Check that a read span `[offset, offset + length)` lies entirely within a
+    file whose size is `fileSize`. Throws a descriptive `IO.userError` if
+    `offset > fileSize`, if `offset + length` would overflow `UInt64`, or if
+    `offset + length > fileSize`. The overflow case is subsumed by comparing
+    `length` against the saturating remainder `fileSize - offset`, which only
+    takes a meaningful value once `offset ≤ fileSize`. -/
+private def assertSpanInFile (fileSize offset length : UInt64) (what : String) : IO Unit := do
+  if offset > fileSize then
+    throw (IO.userError
+      s!"zip: {what} offset ({offset}) exceeds file size ({fileSize})")
+  let remaining := fileSize - offset
+  if length > remaining then
+    throw (IO.userError
+      s!"zip: {what} extends past end of file (offset={offset}, length={length}, fileSize={fileSize})")
+
 /-- Read exactly `n` bytes from a handle, throwing on short read.
     Loops to handle short reads from pipes/network streams. -/
 private partial def readExact (h : IO.FS.Handle) (n : Nat) (what : String) : IO ByteArray := do
@@ -393,12 +408,25 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     (maxEntrySize : UInt64 := 0) (useNative : Bool := false) : IO ByteArray := do
   if maxEntrySize > 0 && entry.uncompressedSize > maxEntrySize then
     throw (IO.userError s!"zip: entry '{label}' uncompressed size ({entry.uncompressedSize}) exceeds limit ({maxEntrySize})")
+  -- Span-validate every attacker-controlled read against actual file size.
+  let fileSize ← Handle.fileSize h
+  assertSpanInFile fileSize entry.localOffset 30 s!"local header for {label}"
   Handle.seek h entry.localOffset
   let localHdr ← readExact h 30 s!"local header for {label}"
   unless Binary.readUInt32LE localHdr 0 == sigLocal do
     throw (IO.userError s!"zip: bad local header signature for {label}")
   let nameLen := (Binary.readUInt16LE localHdr 26).toNat
   let extraLen := (Binary.readUInt16LE localHdr 28).toNat
+  -- Verify the full local data span (header + name + extra + compressed payload)
+  -- lies within the file before any further `Handle.read` is driven by
+  -- untrusted metadata. `nameLen + extraLen` is bounded by `2 * UInt16.max`,
+  -- so the first addend cannot overflow `UInt64`; the second call bounds
+  -- `entry.compressedSize` against the remaining file tail.
+  let headerAndNames : UInt64 := 30 + nameLen.toUInt64 + extraLen.toUInt64
+  assertSpanInFile fileSize entry.localOffset headerAndNames
+    s!"local name+extra for {label}"
+  assertSpanInFile fileSize (entry.localOffset + headerAndNames)
+    entry.compressedSize s!"local data span for {label}"
   let _ ← readExact h (nameLen + extraLen) s!"local name+extra for {label}"
   let compData ← readExact h entry.compressedSize.toNat s!"compressed data for {label}"
   let fileData ←
