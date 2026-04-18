@@ -132,6 +132,15 @@ where
       else
         writeCLEntries bw clCodes rest hcl
 
+/-- Helper: 256 is in bounds for `canonicalCodes` of lit/len code lengths
+    produced by `computeCodeLengths _ 286 15`. -/
+private theorem deflateDynamic.lit256_lt (litFreqPairs : List (Nat × Nat)) :
+    256 < (canonicalCodes
+      ((Huffman.Spec.computeCodeLengths litFreqPairs 286 15).toArray.map Nat.toUInt8)).size := by
+  rw [canonicalCodes_size, Array.size_map, List.size_toArray,
+    Huffman.Spec.computeCodeLengths_length]
+  omega
+
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. -/
 def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
@@ -156,15 +165,16 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
   let bw := bw.writeBits 2 2  -- BTYPE = 10
   -- Write dynamic tree header
   let bw := writeDynamicHeader bw litLens distLens
-  -- Write tokens
+  -- Write tokens. `litCodes` has size 286 (via `canonicalCodes_size`),
+  -- so index 256 is in bounds for the end-of-block symbol.
   if data.size == 0 then
     -- Empty: just write end-of-block
-    let (code, len) := litCodes[256]!
+    let (code, len) := litCodes[256]'(deflateDynamic.lit256_lt litFreqPairs)
     let bw := bw.writeHuffCode code len
     bw.flush
   else
     let bw := emitTokensWithCodes bw tokens litCodes distCodes 0
-    let (code, len) := litCodes[256]!
+    let (code, len) := litCodes[256]'(deflateDynamic.lit256_lt litFreqPairs)
     let bw := bw.writeHuffCode code len
     bw.flush
 
