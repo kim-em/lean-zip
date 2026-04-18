@@ -19,8 +19,9 @@ Per-session details are in `progress/`.
 - **Zstd**: Moved to https://github.com/kim-em/lean-zstd (#1487, 2026-03-27)
 - **Shared utilities**: Moved to https://github.com/kim-em/lean-zip-common
   (#1487, 2026-03-27); pulled in via `require zipCommon from git`
-- **Proven-bounds**: 50 `]!` remaining in `Zip/Native/` (42 in
-  `Deflate.lean` LZ77 matchers, 8 in `DeflateDynamic.lean`)
+- **Proven-bounds**: 48 `]!` remaining in `Zip/Native/` (42 in
+  `Deflate.lean` LZ77 matchers, 6 in `DeflateDynamic.lean` after #1513
+  merged mid-summarize)
 
 ## Milestones
 
@@ -1836,12 +1837,13 @@ CI; #1499 renamed call sites to upstream-compatible lemma names
 `ByteArray.getElem!_push_lt`) and pinned zipCommon to cleanup commit
 `89204d6`.
 
-*Carry-over*: 50 `]!` remaining in Native/, all in two files —
+*Carry-over*: 48 `]!` remaining in Native/, all in two files —
 `Zip/Native/Deflate.lean` (42, LZ77 matcher family: tracked in new
 issues #1508/#1509/#1510 splitting into three clusters) and
-`Zip/Native/DeflateDynamic.lean` (8, tracked in #1505 with open PR
-#1513). Three diag PRs (#1496, #1503, #1507) remain open as
-instrumentation for the Lake/Lean 4.29.1 regression.
+`Zip/Native/DeflateDynamic.lean` (6, after PR #1513 merged mid-
+summarize addressed 2 of the 8 from #1505). Three diag PRs (#1496,
+#1503, #1507) remain open as instrumentation for the Lake/Lean 4.29.1
+regression.
 
 Quality metrics: 0 sorries; `Zip/Spec/` at 42 files, 20,151 LOC
 (DEFLATE-only — Zstd's ~16 kLOC of spec work migrated to lean-zstd);
