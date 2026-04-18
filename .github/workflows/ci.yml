@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev pkg-config strace
 
       - name: Install elan
         run: |
@@ -40,5 +40,32 @@ jobs:
       - name: Build
         run: lake -R build
 
+      - name: Inspect Lake config traces
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          trace_paths = sorted(Path(".lake").glob("**/*.olean.trace"))
+          print("TRACE_FILES", len(trace_paths))
+          for path in trace_paths:
+            data = path.read_bytes()
+            print(f"TRACE {path} size={len(data)}")
+            print(repr(data))
+            try:
+              parsed = json.loads(data)
+            except Exception as exc:
+              print(f"JSON_ERROR {path}: {exc}")
+            else:
+              print(f"JSON_OK {path}: {parsed}")
+          PY
+
       - name: Test
-        run: lake -R exe test
+        run: |
+          set +e
+          strace -f -o /tmp/lake-exe-test.strace -e trace=openat,read,close,fcntl,flock lake -R exe test
+          status=$?
+          echo "lake exe test exit status: $status"
+          echo "=== filtered strace ==="
+          grep -nE 'olean(\.trace)?|config/\[anonymous\]|zipCommon/.lake/config' /tmp/lake-exe-test.strace || true
+          exit $status
