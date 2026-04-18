@@ -13,27 +13,44 @@ import Zip.Spec.HuffmanEncode
 
 namespace Zip.Native.Deflate
 
-/-- Emit LZ77 tokens using the given lit/len and distance Huffman codes. -/
+/-- Emit LZ77 tokens using the given lit/len and distance Huffman codes.
+    Requires `litCodes.size ≥ 286` (for lit/length symbols 0..285) and
+    `distCodes.size ≥ 30` (for distance symbols 0..29); callers discharge
+    these from `canonicalCodes_size` + `computeCodeLengths_length`.
+
+    Inner `if h : …` guards convert the Huffman table reads to proven-
+    bounds access. The `else` branches are dead code (ruled out by
+    `nativeFindLengthCode_idx_bound` / `nativeFindDistCode_idx_bound`
+    combined with the `hlit` / `hdist` size invariants); matching the
+    pattern used by `emitTokens` keeps spec proofs uniform. -/
 def emitTokensWithCodes (bw : BitWriter) (tokens : Array LZ77Token)
-    (litCodes distCodes : Array (UInt16 × UInt8)) (i : Nat) : BitWriter :=
+    (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlit : litCodes.size ≥ 286) (hdist : distCodes.size ≥ 30)
+    (i : Nat) : BitWriter :=
   if h : i < tokens.size then
     match tokens[i] with
     | .literal b =>
-      let (code, len) := litCodes[b.toNat]!
-      emitTokensWithCodes (bw.writeHuffCode code len) tokens litCodes distCodes (i + 1)
+      have : b.toNat < litCodes.size := by
+        have := UInt8.toNat_lt b; omega
+      let (code, len) := litCodes[b.toNat]
+      emitTokensWithCodes (bw.writeHuffCode code len) tokens litCodes distCodes hlit hdist (i + 1)
     | .reference length distance =>
       match findLengthCode length with
       | some (idx, extraCount, extraVal) =>
-        let (code, len) := litCodes[idx + 257]!
-        let bw := bw.writeHuffCode code len
-        let bw := bw.writeBits extraCount extraVal
-        match findDistCode distance with
-        | some (dIdx, dExtraCount, dExtraVal) =>
-          let (dCode, dLen) := distCodes[dIdx]!
-          let bw := bw.writeHuffCode dCode dLen
-          emitTokensWithCodes (bw.writeBits dExtraCount dExtraVal) tokens litCodes distCodes (i + 1)
-        | none => emitTokensWithCodes bw tokens litCodes distCodes (i + 1)
-      | none => emitTokensWithCodes bw tokens litCodes distCodes (i + 1)
+        if hlitlt : idx + 257 < litCodes.size then
+          let (code, len) := litCodes[idx + 257]
+          let bw := bw.writeHuffCode code len
+          let bw := bw.writeBits extraCount extraVal
+          match findDistCode distance with
+          | some (dIdx, dExtraCount, dExtraVal) =>
+            if hdistlt : dIdx < distCodes.size then
+              let (dCode, dLen) := distCodes[dIdx]
+              let bw := bw.writeHuffCode dCode dLen
+              emitTokensWithCodes (bw.writeBits dExtraCount dExtraVal) tokens litCodes distCodes hlit hdist (i + 1)
+            else emitTokensWithCodes bw tokens litCodes distCodes hlit hdist (i + 1)
+          | none => emitTokensWithCodes bw tokens litCodes distCodes hlit hdist (i + 1)
+        else emitTokensWithCodes bw tokens litCodes distCodes hlit hdist (i + 1)
+      | none => emitTokensWithCodes bw tokens litCodes distCodes hlit hdist (i + 1)
   else bw
 termination_by tokens.size - i
 
@@ -138,14 +155,27 @@ def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
     (fun i (h : i < freqs.size) => (i, freqs[i]'h))
     (fun _ hi => List.mem_range.mp hi)
 
+/-- Helper: `canonicalCodes` of lit/len code lengths produced by
+    `computeCodeLengths _ 286 15` has size exactly 286. -/
+private theorem deflateDynamic.litCodes_size (litFreqPairs : List (Nat × Nat)) :
+    (canonicalCodes
+      ((Huffman.Spec.computeCodeLengths litFreqPairs 286 15).toArray.map Nat.toUInt8)).size
+      = 286 := by
+  rw [canonicalCodes_size, Array.size_map, List.size_toArray,
+    Huffman.Spec.computeCodeLengths_length]
+
 /-- Helper: 256 is in bounds for `canonicalCodes` of lit/len code lengths
     produced by `computeCodeLengths _ 286 15`. -/
 private theorem deflateDynamic.lit256_lt (litFreqPairs : List (Nat × Nat)) :
     256 < (canonicalCodes
       ((Huffman.Spec.computeCodeLengths litFreqPairs 286 15).toArray.map Nat.toUInt8)).size := by
-  rw [canonicalCodes_size, Array.size_map, List.size_toArray,
-    Huffman.Spec.computeCodeLengths_length]
-  omega
+  rw [deflateDynamic.litCodes_size]; omega
+
+/-- Helper: `canonicalCodes` of a distance length list of length 30 has size 30. -/
+private theorem deflateDynamic.distCodes_size (distLens : List Nat)
+    (hlen : distLens.length = 30) :
+    (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size = 30 := by
+  rw [canonicalCodes_size, Array.size_map, List.size_toArray, hlen]
 
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. -/
@@ -171,6 +201,21 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
   let bw := bw.writeBits 2 2  -- BTYPE = 10
   -- Write dynamic tree header
   let bw := writeDynamicHeader bw litLens distLens
+  -- Size invariants: `litCodes.size = 286` and `distCodes.size = 30`,
+  -- discharged via `canonicalCodes_size` + `computeCodeLengths_length`
+  -- and the fact that the distance fixup preserves length.
+  have hlit_size : litCodes.size ≥ 286 := by
+    show (canonicalCodes _).size ≥ 286
+    rw [deflateDynamic.litCodes_size]; omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    have hdl : List.length distLens = 30 := by
+      show List.length (if _ then _ else _) = 30
+      split
+      · rw [List.length_set]
+        exact Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
+      · exact Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
+    show (canonicalCodes _).size ≥ 30
+    rw [deflateDynamic.distCodes_size distLens hdl]; omega
   -- Write tokens. `litCodes` has size 286 (via `canonicalCodes_size`),
   -- so index 256 is in bounds for the end-of-block symbol.
   if data.size == 0 then
@@ -179,7 +224,7 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
     let bw := bw.writeHuffCode code len
     bw.flush
   else
-    let bw := emitTokensWithCodes bw tokens litCodes distCodes 0
+    let bw := emitTokensWithCodes bw tokens litCodes distCodes hlit_size hdist_size 0
     let (code, len) := litCodes[256]'(deflateDynamic.lit256_lt litFreqPairs)
     let bw := bw.writeHuffCode code len
     bw.flush

@@ -350,13 +350,15 @@ theorem deflateDynamic_spec (data : ByteArray) :
           hlit_bound hdist_bound ⟨by omega, by omega⟩ ⟨by omega, by omega⟩ henc_trees
         -- emitTokensWithCodes
         let bw3 := writeDynamicHeader bw2 litLens distLens
+        have hlit_size : litCodes.size ≥ 286 := by rw [hlit_codes_size]; omega
+        have hdist_size : distCodes.size ≥ 30 := by rw [hdist_codes_size]; omega
         have hemit := emitTokensWithCodes_spec bw3 tokens litLens distLens
-          litCodes distCodes tokBits hwf_hdr rfl rfl hlit_valid hdist_valid henc_tok
-        have hwf_emit := emitTokensWithCodes_wf bw3 tokens litCodes distCodes hwf_hdr
-          (by rw [hlit_codes_size]; omega) (by rw [hdist_codes_size]; omega)
-          hlit_le hdist_le
+          litCodes distCodes hlit_size hdist_size tokBits hwf_hdr rfl rfl
+          hlit_valid hdist_valid henc_tok
+        have hwf_emit := emitTokensWithCodes_wf bw3 tokens litCodes distCodes
+          hlit_size hdist_size hwf_hdr hlit_le hdist_le
         -- writeHuffCode for EOB
-        let bw4 := emitTokensWithCodes bw3 tokens litCodes distCodes 0
+        let bw4 := emitTokensWithCodes bw3 tokens litCodes distCodes hlit_size hdist_size 0
         have hlen256_le : (litCodes[256]'h256_lt).snd.toNat ≤ 15 := by
           have := hlit_le 256 h256_lt
           rwa [getElem!_pos litCodes 256 h256_lt] at this
@@ -381,7 +383,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
               unfold lz77Greedy.trailing
               rw [if_neg (by omega)]
             have hemit_id : bw4 = bw3 := by
-              show emitTokensWithCodes bw3 tokens litCodes distCodes 0 = bw3
+              show emitTokensWithCodes bw3 tokens litCodes distCodes hlit_size hdist_size 0 = bw3
               rw [htok_empty]; unfold emitTokensWithCodes; rfl
             rw [hemit_id]; rfl
           · rfl
