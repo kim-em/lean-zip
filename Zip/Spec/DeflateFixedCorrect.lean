@@ -683,71 +683,147 @@ private theorem trailing_lazy_eq (data : ByteArray) (pos : Nat) (acc : Array LZ7
   | _ n ih =>
     unfold lz77LazyIter.trailing lz77Lazy.trailing
     split
-    · rename_i hlt
-      rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
-        ← Array.append_assoc, Array.push_eq_append,
-        getElem!_pos data pos hlt]
+    · rw [ih _ (by omega) _ _ rfl, List.toArray_cons,
+        ← Array.append_assoc, Array.push_eq_append]
     · simp only [Array.append_empty]
 
-/-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy).
-    Since `lz77LazyIter.mainLoop` directly uses `lz77Lazy.hash3`, `lz77Lazy.countMatch`,
-    and `lz77Lazy.updateHashes`, no helper rewrites are needed. -/
+/-- `lz77Lazy.updateHashes` preserves `hashTable.size`. -/
+private theorem lz77Lazy_updateHashes_fst_size (data : ByteArray) (hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos j matchLen : Nat) :
+    (lz77Lazy.updateHashes data hashSize hashTable hashValid pos j matchLen).1.size =
+      hashTable.size := by
+  induction h : matchLen - j using Nat.strongRecOn
+      generalizing j hashTable hashValid with
+  | _ n ih =>
+    unfold lz77Lazy.updateHashes
+    split
+    · split
+      · rw [ih _ (by omega) _ _ _ rfl]; simp
+      · exact ih _ (by omega) _ _ _ rfl
+    · rfl
+
+/-- `lz77Lazy.updateHashes` preserves `hashValid.size`. -/
+private theorem lz77Lazy_updateHashes_snd_size (data : ByteArray) (hashSize : Nat)
+    (hashTable : Array Nat) (hashValid : Array Bool) (pos j matchLen : Nat) :
+    (lz77Lazy.updateHashes data hashSize hashTable hashValid pos j matchLen).2.size =
+      hashValid.size := by
+  induction h : matchLen - j using Nat.strongRecOn
+      generalizing j hashTable hashValid with
+  | _ n ih =>
+    unfold lz77Lazy.updateHashes
+    split
+    · split
+      · rw [ih _ (by omega) _ _ _ rfl]; simp
+      · exact ih _ (by omega) _ _ _ rfl
+    · rfl
+
+/-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy),
+    assuming the hash-table and hash-valid arrays have size equal to `hashSize`
+    and `0 < hashSize`. -/
 private theorem mainLoop_lazy_eq (data : ByteArray) (windowSize hashSize : Nat)
     (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
-    (acc : Array LZ77Token) :
+    (acc : Array LZ77Token)
+    (hht : hashTable.size = hashSize) (hhv : hashValid.size = hashSize)
+    (hhs : 0 < hashSize) :
     lz77LazyIter.mainLoop data windowSize hashSize hashTable hashValid pos acc =
     acc ++ (lz77Lazy.mainLoop data windowSize hashSize hashTable hashValid pos).toArray := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable hashValid with
+  induction h : data.size - pos using Nat.strongRecOn
+      generalizing pos acc hashTable hashValid with
   | _ n ih =>
-    unfold lz77LazyIter.mainLoop
-    split
-    · rename_i hlt
-      -- Unfold RHS's lz77Lazy.mainLoop and reduce the dite with hlt
-      unfold lz77Lazy.mainLoop
-      simp only [dif_pos hlt]
+    unfold lz77LazyIter.mainLoop lz77Lazy.mainLoop
+    by_cases hlt : pos + 2 < data.size
+    · -- Bound for the outer hash index
+      have hhash_lt : lz77Lazy.hash3 data pos hashSize hlt < hashSize :=
+        Nat.mod_lt _ hhs
+      have hht_lt : lz77Lazy.hash3 data pos hashSize hlt < hashTable.size := by omega
+      have hhv_lt : lz77Lazy.hash3 data pos hashSize hlt < hashValid.size := by omega
+      -- Bridge `!`-reads (used by Lazy) to proven-bounds reads (used by Iter).
+      have hget_t : hashTable[lz77Lazy.hash3 data pos hashSize hlt]! =
+          hashTable[lz77Lazy.hash3 data pos hashSize hlt] :=
+        getElem!_pos hashTable _ hht_lt
+      have hget_v : hashValid[lz77Lazy.hash3 data pos hashSize hlt]! =
+          hashValid[lz77Lazy.hash3 data pos hashSize hlt] :=
+        getElem!_pos hashValid _ hhv_lt
+      -- Size preservation through `set!` on both arrays.
+      have hht' : (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos).size
+          = hashSize := by simp [hht]
+      have hhv' : (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true).size
+          = hashSize := by simp [hhv]
+      simp only [hlt, ↓reduceDIte, hht_lt, hhv_lt, hget_t, hget_v]
       -- Both sides now share the same let-bindings; split on nested ifs
       split
       · split
         · split
           · split
-            · split
+            -- h3lt : pos + 3 < data.size
+            · rename_i hge hle h3lt
+              -- Bounds for the inner h2 reads
+              have hh2_lt : lz77Lazy.hash3 data (pos + 1) hashSize (by omega) < hashSize :=
+                Nat.mod_lt _ hhs
+              have hht2_lt : lz77Lazy.hash3 data (pos + 1) hashSize (by omega) <
+                  (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos).size := by
+                omega
+              have hhv2_lt : lz77Lazy.hash3 data (pos + 1) hashSize (by omega) <
+                  (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true).size := by
+                omega
+              have hget_t2 :
+                  (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[
+                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]! =
+                  (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[
+                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)] :=
+                getElem!_pos (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos) _
+                  hht2_lt
+              have hget_v2 :
+                  (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true)[
+                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]! =
+                  (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true)[
+                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)] :=
+                getElem!_pos (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true) _
+                  hhv2_lt
+              simp only [hht2_lt, hhv2_lt, ↓reduceDIte, hget_t2, hget_v2]
+              -- Now case-split on the inner conditions
+              split
               · split
                 · split
                   · -- Better match at pos+1: emit literal + reference
-                    rw [ih _ (by omega) _ _ _ _ rfl,
+                    rw [ih _ (by omega) _ _ _ _
+                        ((lz77Lazy_updateHashes_fst_size ..).trans hht')
+                        ((lz77Lazy_updateHashes_snd_size ..).trans hhv') rfl,
                       Array.push_eq_append, Array.push_eq_append,
                       Array.append_assoc, Array.append_assoc,
-                      ← List.toArray_cons, ← List.toArray_cons,
-                      getElem!_pos data pos (by omega)]
-                  · -- matchLen2 exceeds data: fall back
-                    rw [ih _ (by omega) _ _ _ _ rfl]
+                      ← List.toArray_cons, ← List.toArray_cons]
+                  · -- matchLen2 exceeds data: fall back to match at pos
+                    rw [ih _ (by omega) _ _ _ _
+                        ((lz77Lazy_updateHashes_fst_size ..).trans hht')
+                        ((lz77Lazy_updateHashes_snd_size ..).trans hhv') rfl]
                     simp only [Array.push_eq_append, Array.append_assoc,
                       ← List.toArray_cons]
-                · rw [ih _ (by omega) _ _ _ _ rfl]
+                · -- matchLen2 ≤ matchLen: keep match at pos
+                  rw [ih _ (by omega) _ _ _ _
+                      ((lz77Lazy_updateHashes_fst_size ..).trans hht')
+                      ((lz77Lazy_updateHashes_snd_size ..).trans hhv') rfl]
                   simp only [Array.push_eq_append, Array.append_assoc,
                     ← List.toArray_cons]
-              · rw [ih _ (by omega) _ _ _ _ rfl]
+              · -- No valid match at pos+1: keep match at pos
+                rw [ih _ (by omega) _ _ _ _
+                    ((lz77Lazy_updateHashes_fst_size ..).trans hht')
+                    ((lz77Lazy_updateHashes_snd_size ..).trans hhv') rfl]
                 simp only [Array.push_eq_append, Array.append_assoc,
                   ← List.toArray_cons]
-            · rw [ih _ (by omega) _ _ _ _ rfl]
+            -- ¬h3lt : near end of data
+            · rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl]
               simp only [Array.push_eq_append, Array.append_assoc,
                 ← List.toArray_cons]
-          · rw [ih _ (by omega) _ _ _ _ rfl,
-              getElem!_pos data pos (by omega)]
+          · rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl]
             simp only [Array.push_eq_append, Array.append_assoc,
               ← List.toArray_cons]
-        · rw [ih _ (by omega) _ _ _ _ rfl,
-            getElem!_pos data pos (by omega)]
+        · rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl]
           simp only [Array.push_eq_append, Array.append_assoc,
             ← List.toArray_cons]
-      · rw [ih _ (by omega) _ _ _ _ rfl,
-          getElem!_pos data pos (by omega)]
+      · rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl]
         simp only [Array.push_eq_append, Array.append_assoc,
           ← List.toArray_cons]
-    · rename_i hlt
-      -- Unfold RHS's lz77Lazy.mainLoop and reduce the dite with ¬hlt
-      unfold lz77Lazy.mainLoop
-      simp only [dif_neg hlt]
+    · simp only [hlt, ↓reduceDIte]
       exact trailing_lazy_eq data pos acc
 
 /-- The iterative LZ77 lazy matcher produces the same tokens as the
@@ -758,7 +834,7 @@ theorem lz77LazyIter_eq_lz77Lazy (data : ByteArray) (ws : Nat) :
   split
   · rw [trailing_lazy_eq]
     simp only [List.append_toArray, List.nil_append]
-  · rw [mainLoop_lazy_eq]
+  · rw [mainLoop_lazy_eq _ _ _ _ _ _ _ (by simp) (by simp) (by decide)]
     simp only [List.append_toArray, List.nil_append]
 
 /-- The iterative lazy compressor equals the recursive one. -/
