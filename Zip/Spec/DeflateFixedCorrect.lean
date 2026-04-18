@@ -672,6 +672,7 @@ private theorem lz77Lazy_updateHashes_snd_size (data : ByteArray) (hashSize : Na
       · exact ih _ (by omega) _ _ _ rfl
     · rfl
 
+set_option backward.split false in
 /-- The iterative `mainLoop` is the accumulator version of recursive `mainLoop` (lazy),
     assuming the hash-table and hash-valid arrays have size equal to `hashSize`
     and `0 < hashSize`. -/
@@ -692,19 +693,12 @@ private theorem mainLoop_lazy_eq (data : ByteArray) (windowSize hashSize : Nat)
         Nat.mod_lt _ hhs
       have hht_lt : lz77Lazy.hash3 data pos hashSize hlt < hashTable.size := by omega
       have hhv_lt : lz77Lazy.hash3 data pos hashSize hlt < hashValid.size := by omega
-      -- Bridge `!`-reads (used by Lazy) to proven-bounds reads (used by Iter).
-      have hget_t : hashTable[lz77Lazy.hash3 data pos hashSize hlt]! =
-          hashTable[lz77Lazy.hash3 data pos hashSize hlt] :=
-        getElem!_pos hashTable _ hht_lt
-      have hget_v : hashValid[lz77Lazy.hash3 data pos hashSize hlt]! =
-          hashValid[lz77Lazy.hash3 data pos hashSize hlt] :=
-        getElem!_pos hashValid _ hhv_lt
       -- Size preservation through `set!` on both arrays.
       have hht' : (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos).size
           = hashSize := by simp [hht]
       have hhv' : (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true).size
           = hashSize := by simp [hhv]
-      simp only [hlt, ↓reduceDIte, hht_lt, hhv_lt, hget_t, hget_v]
+      simp only [hlt, ↓reduceDIte, hht_lt, hhv_lt]
       -- Both sides now share the same let-bindings; split on nested ifs
       split
       · split
@@ -721,21 +715,7 @@ private theorem mainLoop_lazy_eq (data : ByteArray) (windowSize hashSize : Nat)
               have hhv2_lt : lz77Lazy.hash3 data (pos + 1) hashSize (by omega) <
                   (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true).size := by
                 omega
-              have hget_t2 :
-                  (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[
-                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]! =
-                  (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos)[
-                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)] :=
-                getElem!_pos (hashTable.set! (lz77Lazy.hash3 data pos hashSize hlt) pos) _
-                  hht2_lt
-              have hget_v2 :
-                  (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true)[
-                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)]! =
-                  (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true)[
-                    lz77Lazy.hash3 data (pos + 1) hashSize (by omega)] :=
-                getElem!_pos (hashValid.set! (lz77Lazy.hash3 data pos hashSize hlt) true) _
-                  hhv2_lt
-              simp only [hht2_lt, hhv2_lt, ↓reduceDIte, hget_t2, hget_v2]
+              simp only [hht2_lt, hhv2_lt, ↓reduceDIte]
               -- Now case-split on the inner conditions
               split
               · split
