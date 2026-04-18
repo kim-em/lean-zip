@@ -172,7 +172,30 @@ Converting `]!` to `]` changes the term structure, breaking existing proofs:
   creates a different closure that won't match. You may need to update
   the `suffices` block or refactor to well-founded recursion.
 
-### 7. Do-notation guard caveat
+### 7. Internal-guard let-bindings + `split` hostility
+
+The "internal-guard" pattern
+`let v := if h : i < xs.size then xs[i]'h else default` is defeq to
+`xs[i]!` for `UInt8` (since `default = 0`) and seems like a clean
+local conversion. But if any spec proof uses `dsimp only [funcName, ...]`
+followed by `split`, the conversion breaks:
+
+1. `dsimp only` performs let-zeta, hoisting the new dite to the top of
+   the term tree.
+2. `split` greedily consumes the FIRST decidable expression top-down —
+   which is now the new internal-guard dite, NOT the intended outer
+   guard the proof was written against.
+3. Cascading "Application type mismatch" / "simp made no progress"
+   errors follow.
+
+This is especially painful when a function has a sibling iterator
+implementation (e.g. `funcIter` ≡ `func`) — converting `func` alone
+desyncs dite-shapes from `funcIter`, breaking the equivalence proof.
+Either change BOTH sides in lockstep, refactor the spec to not rely on
+top-level `split`, or skip the conversion. Don't try to land asymmetric
+dite-shapes through `dsimp + split` proofs.
+
+### 8. Do-notation guard caveat
 
 In do-notation, `if h : cond then throw "err"` does NOT make `¬cond`
 available in the continuation after the `if`. You must use an explicit
