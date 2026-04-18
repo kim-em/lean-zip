@@ -120,16 +120,16 @@ private theorem canonicalCodes_size' (lengths : Array UInt8) (maxBits : Nat) :
 def findTableCode.go (baseTable : Array UInt16) (extraTable : Array UInt8)
     (value : Nat) (i : Nat) (hsize : baseTable.size ≤ extraTable.size) :
     Option (Nat × Nat × UInt32) :=
-  if i + 1 < baseTable.size then
-    if baseTable[i + 1]!.toNat > value then
-      let extra := extraTable[i]!.toNat
-      let extraVal := (value - baseTable[i]!.toNat).toUInt32
+  if h1 : i + 1 < baseTable.size then
+    if baseTable[i + 1].toNat > value then
+      let extra := (extraTable[i]'(by omega)).toNat
+      let extraVal := (value - (baseTable[i]'(by omega)).toNat).toUInt32
       some (i, extra, extraVal)
     else
       findTableCode.go baseTable extraTable value (i + 1) hsize
-  else if i < baseTable.size then
-    let extra := extraTable[i]!.toNat
-    let extraVal := (value - baseTable[i]!.toNat).toUInt32
+  else if h2 : i < baseTable.size then
+    let extra := (extraTable[i]'(by omega)).toNat
+    let extraVal := (value - baseTable[i].toNat).toUInt32
     some (i, extra, extraVal)
   else
     none

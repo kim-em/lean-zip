@@ -266,11 +266,15 @@ theorem findTableCode_go_extraN (baseTable : Array UInt16)
     extraN = extraTable[idx]!.toNat := by
   unfold findTableCode.go at h
   split at h
-  · split at h
-    · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
+  · rename_i h1
+    split at h
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h
+      rw [← h.1, getElem!_pos extraTable i (by omega)]; exact h.2.1.symm
     · exact findTableCode_go_extraN baseTable extraTable value (i + 1) idx extraN extraV hsize h
   · split at h
-    · simp only [Option.some.injEq, Prod.mk.injEq] at h; rw [← h.1]; exact h.2.1.symm
+    · rename_i h2
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      rw [← h.1, getElem!_pos extraTable i (by omega)]; exact h.2.1.symm
     · exact nomatch h
 termination_by baseTable.size - i
 
