@@ -11,6 +11,7 @@ protected_files = ["PLAN.md"]      # Files agents may not modify in PRs
 model = "opus"                     # Claude model to use
 quota_check = "~/.claude/skills/claude-usage/claude-available-model"
 quota_retry_seconds = 60           # Sleep duration when quota unavailable
+isolated_config = true             # Use isolated CLAUDE_CONFIG_DIR for agents
 
 [pricing]
 # Dollars per million tokens

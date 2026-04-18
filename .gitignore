@@ -5,3 +5,4 @@
 /sessions
 /worktrees
 __pycache__/
+/.claude/.pod-checksums
