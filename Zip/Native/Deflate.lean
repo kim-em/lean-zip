@@ -550,8 +550,8 @@ def lz77LazyIter (data : ByteArray) (windowSize : Nat := 32768) :
 where
   trailing (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
-    if pos < data.size then
-      trailing data (pos + 1) (acc.push (.literal data[pos]!))
+    if h : pos < data.size then
+      trailing data (pos + 1) (acc.push (.literal (data[pos]'h)))
     else acc
   termination_by data.size - pos
   mainLoop (data : ByteArray) (windowSize hashSize : Nat)
@@ -559,63 +559,83 @@ where
       (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
-      let h := lz77Lazy.hash3 data pos hashSize hlt
-      let matchPos := hashTable[h]!
-      let isValid := hashValid[h]!
-      let hashTable := hashTable.set! h pos
-      let hashValid := hashValid.set! h true
-      if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
-        let maxLen := min 258 (data.size - pos)
-        let matchLen := lz77Lazy.countMatch data matchPos pos maxLen
-        if hge : matchLen ≥ 3 then
-          if hle : pos + matchLen ≤ data.size then
-            -- Lazy: check pos + 1 for a longer match
-            if h3lt : pos + 3 < data.size then
-              let h2 := lz77Lazy.hash3 data (pos + 1) hashSize (by omega)
-              let matchPos2 := hashTable[h2]!
-              let isValid2 := hashValid[h2]!
-              if isValid2 && matchPos2 < pos + 1 && pos + 1 - matchPos2 ≤ windowSize then
-                let maxLen2 := min 258 (data.size - (pos + 1))
-                let matchLen2 := lz77Lazy.countMatch data matchPos2 (pos + 1) maxLen2
-                if matchLen2 > matchLen then
-                  if hle2 : pos + 1 + matchLen2 ≤ data.size then
-                    -- Better match at pos+1: emit literal + reference
-                    have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
-                    let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen2
-                    mainLoop data windowSize hashSize ht hv (pos + 1 + matchLen2)
-                      (acc.push (.literal data[pos]!) |>.push (.reference matchLen2 (pos + 1 - matchPos2)))
+      let hsh := lz77Lazy.hash3 data pos hashSize hlt
+      if hht : hsh < hashTable.size then
+        if hhv : hsh < hashValid.size then
+          let matchPos := hashTable[hsh]
+          let isValid := hashValid[hsh]
+          let hashTable := hashTable.set! hsh pos
+          let hashValid := hashValid.set! hsh true
+          if isValid && matchPos < pos && pos - matchPos ≤ windowSize then
+            let maxLen := min 258 (data.size - pos)
+            let matchLen := lz77Lazy.countMatch data matchPos pos maxLen
+            if hge : matchLen ≥ 3 then
+              if hle : pos + matchLen ≤ data.size then
+                -- Lazy: check pos + 1 for a longer match
+                if h3lt : pos + 3 < data.size then
+                  let h2 := lz77Lazy.hash3 data (pos + 1) hashSize (by omega)
+                  if hht2 : h2 < hashTable.size then
+                    if hhv2 : h2 < hashValid.size then
+                      let matchPos2 := hashTable[h2]
+                      let isValid2 := hashValid[h2]
+                      if isValid2 && matchPos2 < pos + 1 && pos + 1 - matchPos2 ≤ windowSize then
+                        let maxLen2 := min 258 (data.size - (pos + 1))
+                        let matchLen2 := lz77Lazy.countMatch data matchPos2 (pos + 1) maxLen2
+                        if matchLen2 > matchLen then
+                          if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                            -- Better match at pos+1: emit literal + reference
+                            have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                            let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen2
+                            mainLoop data windowSize hashSize ht hv (pos + 1 + matchLen2)
+                              (acc.push (.literal (data[pos]'(by omega))) |>.push (.reference matchLen2 (pos + 1 - matchPos2)))
+                          else
+                            -- matchLen2 exceeds data: fall back to match at pos
+                            have : data.size - (pos + matchLen) < data.size - pos := by omega
+                            let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen
+                            mainLoop data windowSize hashSize ht hv (pos + matchLen)
+                              (acc.push (.reference matchLen (pos - matchPos)))
+                        else
+                          -- Keep match at pos (no better match at pos+1)
+                          have : data.size - (pos + matchLen) < data.size - pos := by omega
+                          let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen
+                          mainLoop data windowSize hashSize ht hv (pos + matchLen)
+                            (acc.push (.reference matchLen (pos - matchPos)))
+                      else
+                        -- No valid match at pos+1: keep match at pos
+                        have : data.size - (pos + matchLen) < data.size - pos := by omega
+                        let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen
+                        mainLoop data windowSize hashSize ht hv (pos + matchLen)
+                          (acc.push (.reference matchLen (pos - matchPos)))
+                    else
+                      -- hashValid guard failed at h2: keep match at pos
+                      have : data.size - (pos + matchLen) < data.size - pos := by omega
+                      mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
+                        (acc.push (.reference matchLen (pos - matchPos)))
                   else
-                    -- matchLen2 exceeds data: fall back to match at pos
+                    -- hashTable guard failed at h2: keep match at pos
                     have : data.size - (pos + matchLen) < data.size - pos := by omega
-                    let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen
-                    mainLoop data windowSize hashSize ht hv (pos + matchLen)
+                    mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
                       (acc.push (.reference matchLen (pos - matchPos)))
                 else
-                  -- Keep match at pos (no better match at pos+1)
+                  -- Near end of data: keep match at pos
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
-                  let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen
-                  mainLoop data windowSize hashSize ht hv (pos + matchLen)
+                  mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
                     (acc.push (.reference matchLen (pos - matchPos)))
               else
-                -- No valid match at pos+1: keep match at pos
-                have : data.size - (pos + matchLen) < data.size - pos := by omega
-                let (ht, hv) := lz77Lazy.updateHashes data hashSize hashTable hashValid pos 1 matchLen
-                mainLoop data windowSize hashSize ht hv (pos + matchLen)
-                  (acc.push (.reference matchLen (pos - matchPos)))
+                mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+                  (acc.push (.literal (data[pos]'(by omega))))
             else
-              -- Near end of data: keep match at pos
-              have : data.size - (pos + matchLen) < data.size - pos := by omega
-              mainLoop data windowSize hashSize hashTable hashValid (pos + matchLen)
-                (acc.push (.reference matchLen (pos - matchPos)))
+              mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
+                (acc.push (.literal (data[pos]'(by omega))))
           else
             mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-              (acc.push (.literal data[pos]!))
+              (acc.push (.literal (data[pos]'(by omega))))
         else
           mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-            (acc.push (.literal data[pos]!))
+            (acc.push (.literal (data[pos]'(by omega))))
       else
         mainLoop data windowSize hashSize hashTable hashValid (pos + 1)
-          (acc.push (.literal data[pos]!))
+          (acc.push (.literal (data[pos]'(by omega))))
     else
       trailing data pos acc
   termination_by data.size - pos
