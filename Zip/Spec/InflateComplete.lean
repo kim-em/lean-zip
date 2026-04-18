@@ -143,6 +143,22 @@ theorem inflateLoop_fuel_le
 
 /-! ## Block loop completeness -/
 
+-- Shared WF-guard discharge for `inflateLoop_complete` recursive
+-- branches. Captures `hple`, `hpos`, `hple_br`, `hpos_br`,
+-- `hdata_chain`, `hrest_br`, `hrest_lt`, `hwf_br`, `hds_br`, `hloop`
+-- from the enclosing proof context.
+set_option hygiene false in
+local macro "inflateLoop_complete_wf_discharge" : tactic => `(tactic| (
+  split
+  next h_prog =>
+    exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
+      hdata_chain (by rw [hrest_br]; exact hrest_lt))
+  next =>
+    split
+    next h_rng =>
+      exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
+    next => exact hloop))
+
 set_option maxRecDepth 2048 in
 /-- **Completeness for block loop**: if the spec `decode.go` succeeds,
     the native `inflateLoop` also succeeds with the same result.
@@ -268,6 +284,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   hdata_ds.trans (hdata₂.trans hdata₁)
                 have hds_br : br'.data.size ≤ dataSize := by
                   rw [hdata_chain]; exact hds
+                have hwf_br : br'.bitOff < 8 := by rw [hbo_0]; omega
                 -- Apply IH (rest.length < len)
                 have hrest_lt' : rest.length < len := by rw [← hlen]; exact hrest_lt
                 have hspec_br : Deflate.Spec.decode.go br'.toBits
@@ -276,7 +293,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 obtain ⟨endPos, hloop⟩ :=
                   ih rest.length hrest_lt' br' (output ++ ⟨⟨storedBytes⟩⟩) result
                     (by rw [hrest_br])
-                    (by rw [hbo_0]; omega) hpos_br hple_br hds_br hmaxout hspec_br
+                    hwf_br hpos_br hple_br hds_br hmaxout hspec_br
                 -- Construct native result
                 refine ⟨endPos, ?_⟩
                 rw [Zip.Native.Inflate.inflateLoop.eq_1]
@@ -286,15 +303,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
                   bfinal_val hval_bf hbf_ne1
                 simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
-                -- Discharge WF guards
-                split
-                · rename_i h_prog
-                  exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
-                    hdata_chain (by rw [hrest_br]; exact hrest_lt))
-                · split
-                  · rename_i h_rng
-                    exact absurd h_rng (wf_range_of_data_le (by rw [hbo_0]; omega) hple_br hpos_br hds_br)
-                  · exact hloop
+                inflateLoop_complete_wf_discharge
               · -- ¬(rest.length < br.toBits.length): spec returns none
                 exact nomatch hspec
 
@@ -396,15 +405,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
                     bfinal_val hval_bf hbf_ne1
                   simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
-                  -- Discharge WF guards
-                  split
-                  · rename_i h_prog
-                    exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
-                      hdata_chain (by rw [hrest_br]; exact hrest_lt))
-                  · split
-                    · rename_i h_rng
-                      exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
-                    · exact hloop
+                  inflateLoop_complete_wf_discharge
                 · exact nomatch hspec
         · -- btype_val = 2: dynamic Huffman
           -- Extract decodeDynamicTables from spec
@@ -514,15 +515,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                     have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
                       bfinal_val hval_bf hbf_ne1
                     simp only [hbf_u32, Bool.false_eq_true, ↓reduceIte]
-                    -- Discharge WF guards
-                    split
-                    · rename_i h_prog
-                      exact absurd h_prog (wf_progress_of_toBits_lt hple hpos hple_br hpos_br
-                        hdata_chain (by rw [hrest_br]; exact hrest_lt))
-                    · split
-                      · rename_i h_rng
-                        exact absurd h_rng (wf_range_of_data_le hwf_br hple_br hpos_br hds_br)
-                      · exact hloop
+                    inflateLoop_complete_wf_discharge
                   · exact nomatch hspec
         · -- btype_val ≥ 3: reserved
           exact nomatch hspec
