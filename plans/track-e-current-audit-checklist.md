@@ -8,15 +8,21 @@ parallel with proof work.
 
 Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
 
-- [ ] Add a helper that validates `entry.localOffset`, local header size,
+- [x] Add a helper that validates `entry.localOffset`, local header size,
   `nameLen`, `extraLen`, and `compressedSize` against actual file size
   before any `readExact` of local metadata or payload.
-- [ ] Make `readEntryData` fail before `Handle.read` if the claimed local
-  data span extends past EOF.
+  (`assertSpanInFile` in `Zip/Archive.lean`.)
+- [x] Make `readEntryData` fail before `Handle.read` if the claimed local
+  data span extends past EOF. (Span checks wrap the header, name+extra,
+  and payload reads; see `readEntryData` in `Zip/Archive.lean`.)
 - [ ] Add malformed fixtures for ZIP64 entries claiming exabyte-scale
-  compressed or uncompressed sizes.
-- [ ] Add a regression test that ensures oversized claims fail cleanly
+  compressed or uncompressed sizes. (Partially covered by the 32-bit
+  `oversized-compressed-size.zip` fixture; ZIP64-specific variants
+  still outstanding.)
+- [x] Add a regression test that ensures oversized claims fail cleanly
   without panic or OOM.
+  (`testdata/zip/malformed/oversized-compressed-size.zip` +
+   `ZipTest/ZipFixtures.lean` assertThrows on `"local data span"`.)
 - [ ] Audit central-directory vs local-header consistency checks and decide
   which mismatches should be hard errors.
 

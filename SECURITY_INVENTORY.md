@@ -71,11 +71,14 @@ known gaps that sit outside the formally verified codec core.
   - central directory must fit within file size
   - configurable `maxCentralDirSize`
   - local `readExact` checks `Nat -> USize` roundtrip before `Handle.read`
+  - `assertSpanInFile` validates local-header, name+extra, and compressed-data
+    spans against actual file size before each attacker-controlled `Handle.read`
+    in `readEntryData`
+  - regression fixture `testdata/zip/malformed/oversized-compressed-size.zip`
+    exercises the oversized-compressedSize rejection path
   - path traversal blocked via `Binary.isPathSafe`
   - CRC and final size checked after extraction
 - Missing work:
-  - validate local-header data span against file size before reading
-    `nameLen + extraLen + compressedSize`
   - add explicit mismatch checks between central and local metadata where useful
   - add oversized ZIP64 regression fixtures and fuzzing for metadata parsing
   - prove bounded-read lemmas for the guarded read paths if tractable
