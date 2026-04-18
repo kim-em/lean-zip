@@ -141,6 +141,35 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract oversizedZ64Path oversizedZ64ExtractDir)
     "local data span"
 
+  -- oversized-zip64-uncompressed-size.zip: 134-byte ZIP64 archive whose
+  -- central-directory entry sets the 32-bit `uncompressedSize` to
+  -- 0xFFFFFFFF (ZIP64 marker) and places the actual exabyte-scale u64
+  -- `uncompressedSize = 0x1000000000000000` (≈ 1.15 EiB) in the ZIP64
+  -- extra field (header id 0x0001). `compressedSize` and `localOffset`
+  -- fit in 32 bits so are absent from the ZIP64 extra — see
+  -- `parseZip64Extra`'s conditional parse order. The 6-byte `hello\n`
+  -- payload (stored, method 0) is decompressed unchanged, so the CRC
+  -- check passes; the oversized `uncompressedSize` claim is caught by
+  -- the `size mismatch` check at the end of `readEntryData`.
+  -- Regenerate (if ever lost) with:
+  --   python3 -c 'import struct,zlib
+  --   p=b"hello\n"; n=b"hello.txt"; c=zlib.crc32(p); big=1<<60
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,0,0,0,c,len(p),0xFFFFFFFF,len(n),0)
+  --   ex=struct.pack("<HHQ",1,8,big)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,30,20,0,0,0,0,c,len(p),
+  --       0xFFFFFFFF,len(n),len(ex),0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n+ex
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("oversized-zip64-uncompressed-size.zip","wb").write(lhe+cde+eocd)'
+  let oversizedZ64UData ← readFixture "zip/malformed/oversized-zip64-uncompressed-size.zip"
+  let oversizedZ64UPath ← writeFixtureTmp "oversized-zip64-uncompressed-size.zip" oversizedZ64UData
+  let oversizedZ64UExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-oversized-zip64-uncompressed-size-extract"
+  IO.FS.createDirAll oversizedZ64UExtractDir
+  assertThrows "ZIP malformed (oversized-zip64-uncompressed-size.zip)"
+    (Archive.extract oversizedZ64UPath oversizedZ64UExtractDir)
+    "size mismatch"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -163,11 +192,13 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "too-short.zip", "no-eocd.zip", "cd-past-eof.zip", "bad-crc.zip",
              "bad-method.zip", "oversized-compressed-size.zip",
              "oversized-zip64-compressed-size.zip",
+             "oversized-zip64-uncompressed-size.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
              "/tmp/lean-zip-fixture-oversized-compressed-size-extract",
              "/tmp/lean-zip-fixture-oversized-zip64-compressed-size-extract",
+             "/tmp/lean-zip-fixture-oversized-zip64-uncompressed-size-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"
