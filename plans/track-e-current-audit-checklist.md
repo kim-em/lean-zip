@@ -71,9 +71,15 @@ Targets:
 - [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean:1)
 - [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:432)
 
-- [ ] Inventory every public API where `0 = no limit`.
-- [ ] Decide which APIs should keep that behavior and which should expose
+- [x] Inventory every public API where `0 = no limit`.
+  (See *"Decompression Limit Inventory"* in
+  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:151).)
+- [x] Decide which APIs should keep that behavior and which should expose
   safer extraction defaults.
+  (Proposed direction in the *"Recommended policy"* subsection of
+  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:151);
+  final numbers and signature changes are deferred to follow-up issues
+  so this inventory stays doc-only.)
 - [ ] Add decompression-bomb tests for:
   raw deflate, gzip, zlib, ZIP extraction, and tar.gz extraction.
 - [ ] Make the limit policy explicit in docstrings and user-facing errors.
