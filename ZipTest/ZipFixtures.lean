@@ -147,10 +147,11 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- `uncompressedSize = 0x1000000000000000` (≈ 1.15 EiB) in the ZIP64
   -- extra field (header id 0x0001). `compressedSize` and `localOffset`
   -- fit in 32 bits so are absent from the ZIP64 extra — see
-  -- `parseZip64Extra`'s conditional parse order. The 6-byte `hello\n`
-  -- payload (stored, method 0) is decompressed unchanged, so the CRC
-  -- check passes; the oversized `uncompressedSize` claim is caught by
-  -- the `size mismatch` check at the end of `readEntryData`.
+  -- `parseZip64Extra`'s conditional parse order. The local header sets
+  -- `uncompressedSize = 0xFFFFFFFF` but, intentionally, omits the
+  -- ZIP64 local extra block — so the strict LH ZIP64 parse in
+  -- `readEntryData` rejects the archive at the `truncated ZIP64 local
+  -- extra field` check before any `Handle.read` of the payload.
   -- Regenerate (if ever lost) with:
   --   python3 -c 'import struct,zlib
   --   p=b"hello\n"; n=b"hello.txt"; c=zlib.crc32(p); big=1<<60
@@ -168,7 +169,57 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   IO.FS.createDirAll oversizedZ64UExtractDir
   assertThrows "ZIP malformed (oversized-zip64-uncompressed-size.zip)"
     (Archive.extract oversizedZ64UPath oversizedZ64UExtractDir)
-    "size mismatch"
+    "truncated ZIP64 local extra field"
+
+  -- cd-lh-method-mismatch.zip: 122-byte stored ZIP whose CD advertises
+  -- method=8 (deflate) while the local header advertises method=0
+  -- (stored).  `Archive.extract` must reject this with a
+  -- `method mismatch between CD and local header` error before the
+  -- compressed payload is decompressed (the payload is raw `hello\n`,
+  -- which would otherwise fail deflate decoding much later).
+  -- Regenerate (if ever lost): see `make_lh` / `make_cd` in
+  -- `scripts/build-cd-lh-mismatch.py` or this 2026 inline recipe:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p); CD_M,LH_M=8,0
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,LH_M,0,0,c,len(p),len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,0,CD_M,0,0,c,len(p),len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("cd-lh-method-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let cdLhMethodData ← readFixture "zip/malformed/cd-lh-method-mismatch.zip"
+  let cdLhMethodPath ← writeFixtureTmp "cd-lh-method-mismatch.zip" cdLhMethodData
+  let cdLhMethodExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-lh-method-mismatch-extract"
+  IO.FS.createDirAll cdLhMethodExtractDir
+  assertThrows "ZIP malformed (cd-lh-method-mismatch.zip)"
+    (Archive.extract cdLhMethodPath cdLhMethodExtractDir)
+    "method mismatch between CD and local header"
+
+  -- cd-lh-size-mismatch.zip: 122-byte stored ZIP whose CD advertises
+  -- compressedSize=6 while the local header advertises
+  -- compressedSize=7.  Both headers report method=0 (stored) so the
+  -- CD/LH consistency check is reached.  `Archive.extract` must reject
+  -- this with a `compressedSize mismatch between CD and local header`
+  -- error.
+  -- Regenerate (if ever lost): see `make_lh` / `make_cd` in
+  -- `scripts/build-cd-lh-mismatch.py` or this 2026 inline recipe:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p); CD_C,LH_C=len(p),len(p)+1
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,0,0,0,c,LH_C,len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,0,0,0,0,c,CD_C,len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("cd-lh-size-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let cdLhSizeData ← readFixture "zip/malformed/cd-lh-size-mismatch.zip"
+  let cdLhSizePath ← writeFixtureTmp "cd-lh-size-mismatch.zip" cdLhSizeData
+  let cdLhSizeExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-lh-size-mismatch-extract"
+  IO.FS.createDirAll cdLhSizeExtractDir
+  assertThrows "ZIP malformed (cd-lh-size-mismatch.zip)"
+    (Archive.extract cdLhSizePath cdLhSizeExtractDir)
+    "compressedSize mismatch between CD and local header"
 
   -- === ZIP security fixtures ===
 
@@ -193,12 +244,15 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "bad-method.zip", "oversized-compressed-size.zip",
              "oversized-zip64-compressed-size.zip",
              "oversized-zip64-uncompressed-size.zip",
+             "cd-lh-method-mismatch.zip", "cd-lh-size-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
              "/tmp/lean-zip-fixture-oversized-compressed-size-extract",
              "/tmp/lean-zip-fixture-oversized-zip64-compressed-size-extract",
              "/tmp/lean-zip-fixture-oversized-zip64-uncompressed-size-extract",
+             "/tmp/lean-zip-fixture-cd-lh-method-mismatch-extract",
+             "/tmp/lean-zip-fixture-cd-lh-size-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"

@@ -415,6 +415,14 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   let localHdr ← readExact h 30 s!"local header for {label}"
   unless Binary.readUInt32LE localHdr 0 == sigLocal do
     throw (IO.userError s!"zip: bad local header signature for {label}")
+  -- Parse the remaining local-header fields for CD/LH consistency checks.
+  -- Offsets per PKZIP APPNOTE Appendix D: 6=flags, 8=method, 14=crc,
+  -- 18=stdLocalCompSize, 22=stdLocalUncompSize, 26=nameLen, 28=extraLen.
+  let localFlags := Binary.readUInt16LE localHdr 6
+  let localMethod := Binary.readUInt16LE localHdr 8
+  let localCrc := Binary.readUInt32LE localHdr 14
+  let stdLocalCompSize := Binary.readUInt32LE localHdr 18
+  let stdLocalUncompSize := Binary.readUInt32LE localHdr 22
   let nameLen := (Binary.readUInt16LE localHdr 26).toNat
   let extraLen := (Binary.readUInt16LE localHdr 28).toNat
   -- Verify the full local data span (header + name + extra + compressed payload)
@@ -427,7 +435,39 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     s!"local name+extra for {label}"
   assertSpanInFile fileSize (entry.localOffset + headerAndNames)
     entry.compressedSize s!"local data span for {label}"
-  let _ ← readExact h (nameLen + extraLen) s!"local name+extra for {label}"
+  let nameAndExtra ← readExact h (nameLen + extraLen) s!"local name+extra for {label}"
+  -- Resolve the effective local sizes through any ZIP64 local extra block.
+  -- Local headers do not carry the file-offset field, so pass `stdOffset = 0`
+  -- to `parseZip64Extra` and discard the offset slot it returns.
+  let localExtra := nameAndExtra.extract nameLen (nameLen + extraLen)
+  let (localUncompSize, localCompSize, _) ←
+    if stdLocalCompSize == val32Max || stdLocalUncompSize == val32Max then
+      match parseZip64Extra localExtra stdLocalUncompSize stdLocalCompSize 0 with
+      | some v => pure v
+      | none => throw (IO.userError s!"zip: truncated ZIP64 local extra field for {label}")
+    else
+      pure (stdLocalUncompSize.toUInt64, stdLocalCompSize.toUInt64, (0 : UInt64))
+  -- CD vs LH consistency. Method must always agree.  When bit 3 of the local
+  -- flags ("data descriptor present") is set, the LH crc/compSize/uncompSize
+  -- fields are legitimately zero with the real values trailing the payload in
+  -- a data descriptor — defer crc/size checks to `actualCrc` below in that
+  -- case (we do not parse the data descriptor itself today).  We do not yet
+  -- check the UTF-8 (bit 11) or other flag bits because `Entry` does not carry
+  -- the CD flags; a follow-up issue can thread `flags` through and add that.
+  unless localMethod == entry.method do
+    throw (IO.userError
+      s!"zip: method mismatch between CD and local header for {label} (CD={entry.method}, LH={localMethod})")
+  let usesDataDescriptor := (localFlags &&& 0x0008) != 0
+  unless usesDataDescriptor do
+    unless localCompSize == entry.compressedSize do
+      throw (IO.userError
+        s!"zip: compressedSize mismatch between CD and local header for {label} (CD={entry.compressedSize}, LH={localCompSize})")
+    unless localUncompSize == entry.uncompressedSize do
+      throw (IO.userError
+        s!"zip: uncompressedSize mismatch between CD and local header for {label} (CD={entry.uncompressedSize}, LH={localUncompSize})")
+    unless localCrc == entry.crc32 do
+      throw (IO.userError
+        s!"zip: crc32 mismatch between CD and local header for {label} (CD={entry.crc32}, LH={localCrc})")
   let compData ← readExact h entry.compressedSize.toNat s!"compressed data for {label}"
   let fileData ←
     if entry.method == 0 then pure compData
