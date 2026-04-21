@@ -181,6 +181,159 @@ Regression fixtures live under `testdata/tar/security/`:
 - Needed:
   - policy decision on safer defaults for archive extraction APIs
   - tests for decompression-bomb limits
+- See: *"Decompression Limit Inventory"* below for the full surface.
+
+## Decompression Limit Inventory
+
+Inventory of every public API that accepts untrusted compressed bytes
+and drives decompression or extraction. This is the reference the
+Priority 2 bomb-limit regression tests work against — it is
+intentionally concrete (parameter, default, and semantics of `0`) so
+callers and tests can reason about behaviour without re-reading the
+source. The corresponding checklist item is Priority 2 items 1–2 in
+[plans/track-e-current-audit-checklist.md](/home/kim/lean-zip/plans/track-e-current-audit-checklist.md:65).
+
+### Public decompression / extraction APIs
+
+| Entry point | Parameter | Default | Semantics of 0 | Notes |
+|---|---|---|---|---|
+| [Zlib.decompress](/home/kim/lean-zip/Zip/Basic.lean:11) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer zlib (RFC 1950). Only API with a committed bomb-limit regression test today ([ZipTest/Zlib.lean:14-19](/home/kim/lean-zip/ZipTest/Zlib.lean:14)). |
+| [Gzip.decompress](/home/kim/lean-zip/Zip/Gzip.lean:12) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer gzip (RFC 1952) + auto-zlib. No bomb-limit regression test. |
+| [RawDeflate.decompress](/home/kim/lean-zip/Zip/RawDeflate.lean:16) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer raw DEFLATE (ZIP method 8). No bomb-limit regression test. |
+| [Gzip.decompressStream](/home/kim/lean-zip/Zip/Gzip.lean:73) (FFI) | — | — | — | streaming; no per-call output cap. Bounded only by caller's sink / disk. |
+| [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:97) (FFI) | — | — | — | writes direct to disk via `decompressStream`; no cap. |
+| [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:45) (FFI) | — | — | — | streaming; no per-call output cap. |
+| [Zip.Native.Inflate.inflate](/home/kim/lean-zip/Zip/Native/Inflate.lean:379) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB. |
+| [Zip.Native.GzipDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:30) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
+| [Zip.Native.ZlibDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:122) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
+| [Zip.Native.decompressAuto](/home/kim/lean-zip/Zip/Native/Gzip.lean:212) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | format-auto dispatch over the three natives above. |
+| [Archive.list](/home/kim/lean-zip/Zip/Archive.lean:494) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | metadata-only; caps CD allocation, not decompressed payload. |
+| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:500) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
+| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:500) | `maxEntrySize : UInt64` | `0` | **asymmetric** — FFI: no limit; native: silently upgraded to 256 MiB inside `readEntryData` (see [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477)) | per-entry cap on the decompressed payload. |
+| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:524) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
+| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:524) | `maxEntrySize : UInt64` | `0` | same asymmetry as `Archive.extract` | per-entry cap. |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:537) | `maxEntrySize : UInt64` | `0` | no limit | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:544](/home/kim/lean-zip/Zip/Tar.lean:544)). No whole-archive cap. |
+| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:625) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:660) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:660) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
+
+### Known inconsistencies
+
+- **`Archive.readEntryData` per-entry cap asymmetry.** When
+  `maxEntrySize = 0`, the FFI path (`RawDeflate.decompress`) runs
+  unlimited, but the native path (`Zip.Native.Inflate.inflate`)
+  silently upgrades to a hard 256 MiB cap — see the
+  `nativeMax := if maxEntrySize == 0 then 256 * 1024 * 1024 else ...`
+  branch at [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477).
+  The same caller argument therefore produces different bomb-rejection
+  behaviour depending on `useNative`.
+- **`Tar.extractTarGz.maxOutputSize` vs. low-level defaults.**
+  `Tar.extractTarGzNative` caps the outer gzip decode at 256 MiB,
+  mirroring `Zip.Native.GzipDecode.decompress`. But the lower-level
+  FFI APIs — `Zlib.decompress`, `Gzip.decompress`,
+  `RawDeflate.decompress` — default to **unlimited** for the same
+  kind of whole-buffer decompression. A caller copying the
+  `Tar.extractTarGz`-style pattern with the FFI decoders gets no
+  default protection.
+- **Native decompression defaults disagree with each other.**
+  `Zip.Native.Inflate.inflate` defaults to **1 GiB**;
+  `Zip.Native.GzipDecode.decompress`,
+  `Zip.Native.ZlibDecode.decompress`, and
+  `Zip.Native.decompressAuto` default to **256 MiB**. Picking a
+  format auto-dispatch vs. raw DEFLATE directly changes the default
+  cap by a factor of 4.
+- **`maxCentralDirSize` vs. `maxEntrySize` semantics.** In
+  `Archive.list` / `Archive.extract` / `Archive.extractFile`, the CD
+  cap defaults to a finite 64 MiB (good), while the per-entry cap
+  defaults to `0 = unlimited` (weak). The mixed semantics are easy to
+  misread — a caller who sees "limits default to sensible values" on
+  the CD side might reasonably assume the entry side is also
+  bounded.
+- **Streaming FFI APIs have no output cap at all.**
+  `Gzip.decompressStream`, `Gzip.decompressFile`, and
+  `RawDeflate.decompressStream` take no output-size parameter — they
+  are bounded only by the caller's sink (`output.write`). Any tool
+  built on top that writes to disk is a potential bomb target with
+  no library-level guard.
+
+### Recommended policy
+
+This is a **proposal** for the safer-default direction; numbers are
+placeholders to seed discussion, not final values. Treat each
+recommendation as a starting point for the bomb-limit regression
+issues and the follow-up docstring/default change.
+
+1. **Low-level whole-buffer FFI decoders** — `Zlib.decompress`,
+   `Gzip.decompress`, `RawDeflate.decompress`.
+   - Keep `0 = no limit` as the literal encoding, but change the
+     **default** to a finite value (suggested: **256 MiB**, matching
+     the native decoders).
+   - Callers that genuinely need unlimited mode pass `0` explicitly
+     — the intent is visible at the call site.
+2. **Streaming FFI decoders** — `Gzip.decompressStream`,
+   `Gzip.decompressFile`, `RawDeflate.decompressStream`.
+   - Add an optional `maxDecompressedSize : UInt64 := 256 * 1024^2`
+     parameter and enforce it by counting pushed output bytes.
+   - The streaming case is the one with no current guard; adding
+     the parameter is the only way to expose a cap without
+     reading into memory.
+3. **Archive extraction — per-entry cap** —
+   `Archive.extract.maxEntrySize`, `Archive.extractFile.maxEntrySize`,
+   `Tar.extract.maxEntrySize`, `Tar.extractTarGz.maxEntrySize`,
+   `Tar.extractTarGzNative.maxEntrySize`.
+   - Change default from `0` to a finite per-entry cap
+     (suggested: **1 GiB** per entry). `0` continues to mean
+     "no per-entry limit" for callers that opt in.
+   - Remove the silent `0 → 256 MiB` upgrade in
+     `Archive.readEntryData` for the native backend; once the
+     default is finite, the two backends behave identically.
+4. **Archive extraction — whole-archive cap**.
+   - Add a new `maxTotalSize : UInt64 := 0` (sum of decompressed
+     entries) to `Archive.extract` and the tar extractors. Default
+     `0 = no limit` is acceptable here as a starting point because
+     `maxEntrySize` (recommendation 3) already bounds the common
+     case; the total cap is a second line of defence against
+     many-small-entries bombs.
+5. **Native-side uniformity**.
+   - Normalise the native decoder defaults to match one value
+     (suggested: **1 GiB**, matching `Zip.Native.Inflate.inflate`).
+     Whichever value is chosen, all four — `Inflate.inflate`,
+     `GzipDecode.decompress`, `ZlibDecode.decompress`,
+     `decompressAuto` — should agree.
+6. **Docstrings and error messages**.
+   - Every decompression API should state its default, the
+     meaning of `0`, and the exact error thrown on cap overflow.
+     This is Priority 2 item 4 on the audit checklist and is a
+     separate issue.
+
+Known caller impact if recommendations 1–5 land:
+
+- `ZipTest/*.lean` mostly uses tiny inputs; switching FFI
+  decompression defaults to 256 MiB is a no-op there.
+- `ZipTest/NativeScale.lean` currently decompresses multi-MiB
+  payloads — still well under 256 MiB.
+- The public `README.md` example (`Tar.extractTarGz "..."`) works
+  unchanged because its proposed default per-entry cap (1 GiB) is
+  larger than any realistic test archive.
+- No Lean-level caller passes `0` explicitly except the
+  implicit default; after the change, callers who need unlimited
+  mode must opt in — the migration is local and detectable via
+  `grep`.
+
+### Missing work
+
+- No bomb-limit regression test yet exists for any FFI decompression
+  default except `Zlib.decompress`. Sibling issues in this session
+  add coverage for `Gzip.decompress`, `RawDeflate.decompress`,
+  `Zip.Native.GzipDecode.decompress`, `Archive.extract`,
+  `Archive.extractFile`, `Tar.extract`, and `Tar.extractTarGz`.
+- No cap is enforced on the streaming FFI decoders
+  (`Gzip.decompressStream`, `Gzip.decompressFile`,
+  `RawDeflate.decompressStream`) — see recommendation 2. A crafted
+  input that inflates to terabytes will happily write terabytes to
+  the caller's sink today.
+- There is no public API for "whole-archive" decompressed-size cap
+  on ZIP or tar extraction — see recommendation 4.
 
 ## Required Maintenance Rule
 
