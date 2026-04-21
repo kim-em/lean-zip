@@ -10,6 +10,14 @@ def ZipTest.RawDeflate.tests : IO Unit := do
   let rawDecompressed ← RawDeflate.decompress rawCompressed
   assert! rawDecompressed.beq big
 
+  -- Decompression limit (bomb)
+  let rawLimitResult ← (RawDeflate.decompress rawCompressed (maxDecompressedSize := 10)).toBaseIO
+  match rawLimitResult with
+  | .ok _ => throw (IO.userError "raw deflate decompress limit should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"raw deflate decompress limit wrong error: {e}")
+
   -- Streaming roundtrip
   let rawState ← RawDeflate.DeflateState.new
   let mut rawChunks := ByteArray.empty

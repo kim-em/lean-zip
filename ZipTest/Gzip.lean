@@ -11,6 +11,14 @@ def ZipTest.Gzip.tests : IO Unit := do
   let gunzipped ← Gzip.decompress gzipped
   assert! gunzipped.beq big
 
+  -- Decompression limit (bomb)
+  let gzipLimitResult ← (Gzip.decompress gzipped (maxDecompressedSize := 10)).toBaseIO
+  match gzipLimitResult with
+  | .ok _ => throw (IO.userError "gzip decompress limit should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"gzip decompress limit wrong error: {e}")
+
   -- Compression levels
   let fast ← Gzip.compress big (level := 1)
   let best ← Gzip.compress big (level := 9)

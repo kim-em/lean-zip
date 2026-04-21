@@ -229,6 +229,15 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   | .ok result => assert! result == helloBytes
   | .error e => throw (IO.userError s!"compressAuto raw L5 roundtrip failed: {e}")
 
+  -- Decompression limit (bomb). Native error reads "Inflate: output exceeds
+  -- maximum size" — the substring differs from the FFI's "exceeds limit".
+  let gzippedBomb ← Gzip.compress big
+  match Zip.Native.GzipDecode.decompress gzippedBomb (maxOutputSize := 10) with
+  | .ok _ => throw (IO.userError "native gzip decompress limit should have been rejected")
+  | .error e =>
+    unless e.contains "exceeds maximum size" do
+      throw (IO.userError s!"native gzip decompress limit wrong error: {e}")
+
   -- Error cases
   -- Error cases: gzip
   match Zip.Native.GzipDecode.decompress ByteArray.empty with
