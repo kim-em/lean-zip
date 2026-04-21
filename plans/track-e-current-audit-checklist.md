@@ -59,8 +59,15 @@ Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
   missing terminator, truncated payload, invalid UTF-8.
   (`gnu-longname-truncated.tar`, `gnu-longname-no-terminator.tar`,
   `gnu-longname-invalid-utf8.tar`, `gnu-longlink-truncated.tar`)
-- [ ] Document symlink and hardlink extraction policy explicitly and test
+- [x] Document symlink and hardlink extraction policy explicitly and test
   archive-slip variants against it.
+  (Per-typeflag policy now in the `Tar.extract` docstring and in
+  `SECURITY_INVENTORY.md` § "Tar Parser/Extractor — Symlink/hardlink
+  extraction policy"; `typeHardlink` is now a named constant in
+  `Zip/Tar.lean`. Fixtures: `testdata/tar/security/symlink-absolute.tar`,
+  `hardlink-outside.tar`, and the previously orphaned
+  `backslash-slip.tar`, asserted in `ZipTest/TarFixtures.lean`; built
+  by `scripts/build-symlink-hardlink-malformed-fixtures.lean`.)
 
 ## Priority 2: Public decompression limit policy
 

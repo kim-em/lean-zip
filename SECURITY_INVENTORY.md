@@ -97,8 +97,43 @@ known gaps that sit outside the formally verified codec core.
   - invalid PAX UTF-8 is skipped instead of panicking in `parsePaxRecords`
 - Missing work:
   - review all `String.fromUTF8!` callsites reachable from untrusted archives
-  - document and test symlink-handling policy explicitly
   - add malformed PAX and GNU-longname fuzz/fixture coverage
+
+#### Symlink/hardlink extraction policy
+
+`Tar.extract` (in [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1))
+applies a fixed per-typeflag policy:
+
+- `typeRegular` ('0') and `typeDirectory` ('5') — written under
+  `outDir/path` after `Binary.isPathSafe` rejects unsafe paths
+  (absolute, `..`, `.`, empty components, backslash, Windows drive
+  letters).
+- `typeSymlink` ('2') — `linkname` is rejected before any
+  `Handle.createSymlink` call if it starts with `/`, contains `\`, or
+  has any `..` component (path-component split). The payload is
+  always discarded.
+- `typeHardlink` ('1') — silently skipped. No filesystem entry is
+  created, the payload is consumed and discarded, and no
+  `Handle.createHardlink` call exists in the extractor. A crafted
+  `linkname` therefore cannot escape `outDir`.
+- All other typeflags (devices, FIFO, GNU sparse, etc.) — same silent
+  skip as `typeHardlink`.
+
+Regression fixtures live under `testdata/tar/security/`:
+
+- `tar-slip.tar`, `tar-absolute.tar` — regular-file entries that must
+  fail `"unsafe path"`.
+- `backslash-slip.tar` — regular-file entry whose path contains `\`;
+  also fails `"unsafe path"` (the backslash check fires before the
+  `..` component check).
+- `symlink-slip.tar` — symlink whose linkname contains `..`; must
+  fail `"unsafe symlink"`.
+- `symlink-absolute.tar` — symlink whose linkname is `/etc/passwd`;
+  must fail `"unsafe symlink"`. Built deterministically by
+  `scripts/build-symlink-hardlink-malformed-fixtures.lean`.
+- `hardlink-outside.tar` — `typeHardlink` entry with linkname
+  `../outside`; extraction must succeed with an empty extract dir.
+  Built by the same script.
 
 ### Gzip/Zlib/Raw DEFLATE Public APIs
 
