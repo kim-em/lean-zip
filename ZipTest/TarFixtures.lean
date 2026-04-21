@@ -213,6 +213,48 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     (IO.FS.withFile symlinkSlipPath .read fun h =>
       Tar.extract (IO.FS.Stream.ofHandle h) symlinkSlipExtract)
     "unsafe symlink"
+
+  -- backslash-slip.tar: regular-file path "..\evil.txt".
+  -- `Binary.isPathSafe` rejects `\` before any traversal check fires,
+  -- so the error reads "unsafe path".
+  let backslashSlipData ← readFixture "tar/security/backslash-slip.tar"
+  let backslashSlipPath ← writeFixtureTmp "backslash-slip.tar" backslashSlipData
+  let backslashSlipExtract : System.FilePath := "/tmp/lean-zip-fixture-backslash-slip-extract"
+  IO.FS.createDirAll backslashSlipExtract
+  assertThrows "TAR security (backslash-slip.tar)"
+    (IO.FS.withFile backslashSlipPath .read fun h =>
+      Tar.extract (IO.FS.Stream.ofHandle h) backslashSlipExtract)
+    "unsafe path"
+
+  -- symlink-absolute.tar: typeflag '2' with linkname "/etc/passwd".
+  -- Must be rejected before `Handle.createSymlink` is called.
+  let symAbsData ← readFixture "tar/security/symlink-absolute.tar"
+  let symAbsPath ← writeFixtureTmp "symlink-absolute.tar" symAbsData
+  let symAbsExtract : System.FilePath := "/tmp/lean-zip-fixture-symlink-abs-extract"
+  IO.FS.createDirAll symAbsExtract
+  assertThrows "TAR security (symlink-absolute.tar)"
+    (IO.FS.withFile symAbsPath .read fun h =>
+      Tar.extract (IO.FS.Stream.ofHandle h) symAbsExtract)
+    "unsafe symlink"
+
+  -- hardlink-outside.tar: typeflag '1' (typeHardlink) with linkname
+  -- "../outside". Policy: silently skip — no filesystem entry created,
+  -- so the extract dir must remain empty. This doubles as a
+  -- regression against accidentally promoting hardlinks to a live
+  -- `createHardlink` call.
+  let hlData ← readFixture "tar/security/hardlink-outside.tar"
+  let hlPath ← writeFixtureTmp "hardlink-outside.tar" hlData
+  let hlExtract : System.FilePath := "/tmp/lean-zip-fixture-hardlink-outside-extract"
+  if ← hlExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", hlExtract.toString] }
+  IO.FS.createDirAll hlExtract
+  IO.FS.withFile hlPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) hlExtract
+  let hlEntries ← hlExtract.readDir
+  unless hlEntries.isEmpty do
+    let names := hlEntries.map (·.fileName)
+    throw (IO.userError s!"hardlink-outside.tar: extract dir should be empty, got {names}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -221,9 +263,14 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-inconsistent-length.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
-             "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar"] do
+             "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
+             "backslash-slip.tar", "symlink-absolute.tar",
+             "hardlink-outside.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
-             "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract"] do
+             "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
+             "/tmp/lean-zip-fixture-backslash-slip-extract",
+             "/tmp/lean-zip-fixture-symlink-abs-extract",
+             "/tmp/lean-zip-fixture-hardlink-outside-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"

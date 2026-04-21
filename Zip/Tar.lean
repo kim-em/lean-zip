@@ -24,6 +24,9 @@ structure Entry where
 
 /-- Typeflag for regular file. -/
 def typeRegular : UInt8 := 0x30  -- '0'
+/-- Typeflag for hard link. Recognised by name only — `extract` does not
+    create hard links and silently skips entries with this typeflag. -/
+def typeHardlink : UInt8 := 0x31  -- '1'
 /-- Typeflag for directory. -/
 def typeDirectory : UInt8 := 0x35  -- '5'
 /-- Typeflag for symbolic link. -/
@@ -533,7 +536,25 @@ private partial def forEntries (input : IO.FS.Stream)
 
 /-- Extract a tar archive from input stream to output directory.
     Handles UStar, GNU long name/link, and PAX extended headers.
-    Skips unsupported entry types (symlinks, hardlinks, devices). -/
+
+    Per-typeflag policy:
+
+    * `typeRegular` ('0'): write the payload to `outDir/path` after
+      `Binary.isPathSafe` rejects unsafe paths.
+    * `typeDirectory` ('5'): create `outDir/path` (and parents) after
+      the same path-safety check.
+    * `typeSymlink` ('2'): require `linkname` to be relative — reject
+      any target that starts with `/`, contains `\`, or has any `..`
+      component — then call `Handle.createSymlink`. The payload is
+      always discarded.
+    * Any other typeflag (including `typeHardlink` ('1') and device
+      nodes): the payload is silently consumed and no filesystem entry
+      is created. Hard links are never materialised; an attacker who
+      crafts `typeflag == '1'` with a malicious `linkname` cannot
+      escape `outDir`.
+
+    `maxEntrySize` (when non-zero) bounds each entry's declared size
+    before any data is read. -/
 partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
     (maxEntrySize : UInt64 := 0) : IO Unit := do
   forEntries input fun e => do
@@ -583,7 +604,11 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
       Handle.createSymlink e.linkname outPath.toString
       skipEntryData input e.size
     else
-      -- Skip unsupported entry types (hardlinks, devices, etc.)
+      -- Skip unsupported entry types: `typeHardlink` ('1'), character
+      -- and block devices, FIFOs, GNU sparse, etc. The payload is
+      -- discarded and no filesystem entry is created — hard links
+      -- specifically are never materialised so a crafted `linkname`
+      -- cannot escape `outDir`.
       skipEntryData input e.size
 
 /-- List entries in a tar archive without extracting.
