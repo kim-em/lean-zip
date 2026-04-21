@@ -61,6 +61,50 @@ def ZipTest.Tar.tests : IO Unit := do
   let nestedGz ← IO.FS.readFile (extractGzDir / "subdir" / "nested.txt")
   unless nestedGz == "Nested file content here." do throw (IO.userError s!"tar.gz extract nested: {nestedGz}")
 
+  -- maxEntrySize bomb regression: a tar entry whose declared size exceeds
+  -- the limit must be rejected before any payload is read (Zip/Tar.lean:565-566).
+  let bombSrcDir : System.FilePath := "/tmp/lean-zip-tar-bomb-src"
+  let bombTarPath : System.FilePath := "/tmp/lean-zip-tar-bomb.tar"
+  let bombExtractDir : System.FilePath := "/tmp/lean-zip-tar-bomb-extract"
+  if ← bombSrcDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombSrcDir.toString] }
+  IO.FS.createDirAll bombSrcDir
+  let bombPayload ← mkTestData  -- 6200 bytes, well above the 100-byte threshold
+  IO.FS.writeBinFile (bombSrcDir / "bomb.txt") bombPayload
+  IO.FS.withFile bombTarPath .write fun h =>
+    Tar.create (IO.FS.Stream.ofHandle h) bombSrcDir #[bombSrcDir / "bomb.txt"]
+  if ← bombExtractDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombExtractDir.toString] }
+  IO.FS.createDirAll bombExtractDir
+  let tarBombResult ← (IO.FS.withFile bombTarPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) bombExtractDir (maxEntrySize := 10)).toBaseIO
+  match tarBombResult with
+  | .ok _ => throw (IO.userError "tar: maxEntrySize bomb should have been rejected by extract")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"tar: maxEntrySize bomb wrong error: {e}")
+
+  -- maxOutputSize bomb regression for Tar.extractTarGzNative: gzip the bomb
+  -- tar and confirm the native gzip decoder rejects it before any tar parsing.
+  -- The substring "exceeds maximum size" is what `Inflate.inflateRaw` actually
+  -- emits (Zip/Native/Inflate.lean:269,285,321) when the per-member budget
+  -- passed in by `GzipDecode.decompress` is exhausted.
+  let bombTarBytes ← IO.FS.readBinFile bombTarPath
+  let bombGzPath : System.FilePath := "/tmp/lean-zip-tar-bomb.tar.gz"
+  let bombGz ← Gzip.compress bombTarBytes
+  IO.FS.writeBinFile bombGzPath bombGz
+  let gzBombResult ← (Tar.extractTarGzNative bombGzPath bombExtractDir
+    (maxEntrySize := 0) (maxOutputSize := 10)).toBaseIO
+  match gzBombResult with
+  | .ok _ => throw (IO.userError "tar.gz: maxOutputSize bomb should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds maximum size" do
+      throw (IO.userError s!"tar.gz: maxOutputSize bomb wrong error: {e}")
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombSrcDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombExtractDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", bombTarPath.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", bombGzPath.toString] }
+
   -- Test splitPath
   let some (pfx1, name1) := Tar.splitPath "short.txt" | throw (IO.userError "splitPath short")
   unless pfx1 == "" && name1 == "short.txt" do throw (IO.userError "splitPath short values")
