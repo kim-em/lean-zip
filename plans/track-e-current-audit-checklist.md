@@ -26,8 +26,15 @@ Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
   without panic or OOM.
   (`testdata/zip/malformed/oversized-compressed-size.zip` +
    `ZipTest/ZipFixtures.lean` assertThrows on `"local data span"`.)
-- [ ] Audit central-directory vs local-header consistency checks and decide
+- [x] Audit central-directory vs local-header consistency checks and decide
   which mismatches should be hard errors.
+  (`readEntryData` in `Zip/Archive.lean` now parses the local header's
+  flags/method/crc/sizes — including the ZIP64 local extra block — and
+  hard-errors on method/compressedSize/uncompressedSize/crc disagreement
+  with the CD entry, except when local flag bit 3 leaves crc/sizes
+  legitimately zero in the LH; regression coverage added in
+  `testdata/zip/malformed/cd-lh-method-mismatch.zip` and
+  `testdata/zip/malformed/cd-lh-size-mismatch.zip`.)
 
 ## Priority 1: Tar partial-decoder audit
 
