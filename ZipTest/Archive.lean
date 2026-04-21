@@ -82,6 +82,38 @@ def ZipTest.Archive.tests : IO Unit := do
     unless (toString e).contains "central directory too large" do
       throw (IO.userError s!"zip: CD size limit wrong error: {e}")
 
+  -- maxEntrySize bomb regression: an uncompressedSize larger than the limit
+  -- must be rejected before any decompression happens (Zip/Archive.lean:408-410).
+  let bombSrcDir : System.FilePath := "/tmp/lean-zlib-zip-bomb-src"
+  let bombZipPath : System.FilePath := "/tmp/lean-zlib-zip-bomb.zip"
+  let bombExtractDir : System.FilePath := "/tmp/lean-zlib-zip-bomb-extract"
+  if ← bombSrcDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombSrcDir.toString] }
+  IO.FS.createDirAll bombSrcDir
+  let bombPayload ← mkTestData  -- 6200 bytes, well above the 100-byte threshold
+  IO.FS.writeBinFile (bombSrcDir / "bomb.txt") bombPayload
+  Archive.create bombZipPath #[("bomb.txt", bombSrcDir / "bomb.txt")]
+  if ← bombExtractDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombExtractDir.toString] }
+  IO.FS.createDirAll bombExtractDir
+  let extractBombResult ←
+    (Archive.extract bombZipPath bombExtractDir (maxEntrySize := 10)).toBaseIO
+  match extractBombResult with
+  | .ok _ => throw (IO.userError "zip: maxEntrySize bomb should have been rejected by extract")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"zip: maxEntrySize bomb wrong error from extract: {e}")
+  let extractFileBombResult ←
+    (Archive.extractFile bombZipPath "bomb.txt" (maxEntrySize := 10)).toBaseIO
+  match extractFileBombResult with
+  | .ok _ => throw (IO.userError "zip: maxEntrySize bomb should have been rejected by extractFile")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"zip: maxEntrySize bomb wrong error from extractFile: {e}")
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombSrcDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombExtractDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", bombZipPath.toString] }
+
   -- readExactStream with fragmenting stream (Bug #1: short read robustness)
   let testPayload := "Hello, World! This is test data for readExactStream.".toUTF8
   let fragStream := fragmentingStream (← byteArrayReadStream testPayload) 3
