@@ -16,11 +16,11 @@ Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
   data span extends past EOF. (Span checks wrap the header, name+extra,
   and payload reads; see `readEntryData` in `Zip/Archive.lean`.)
 - [x] Add malformed fixtures for ZIP64 entries claiming exabyte-scale
-  compressed or uncompressed sizes. (Partially covered by the 32-bit
-  `oversized-compressed-size.zip` fixture; ZIP64 `compressedSize`
-  variant landed in
-  `testdata/zip/malformed/oversized-zip64-compressed-size.zip` and
-  ZIP64 `uncompressedSize` variant landed in
+  compressed or uncompressed sizes. (32-bit variant already covered by
+  `testdata/zip/malformed/oversized-compressed-size.zip`; ZIP64
+  `compressedSize` variant landed by PR #1543 in
+  `testdata/zip/malformed/oversized-zip64-compressed-size.zip`; ZIP64
+  `uncompressedSize` variant landed by PR #1544 in
   `testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`.)
 - [x] Add a regression test that ensures oversized claims fail cleanly
   without panic or OOM.
@@ -28,11 +28,11 @@ Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
    `ZipTest/ZipFixtures.lean` assertThrows on `"local data span"`.)
 - [x] Audit central-directory vs local-header consistency checks and decide
   which mismatches should be hard errors.
-  (`readEntryData` in `Zip/Archive.lean` now parses the local header's
-  flags/method/crc/sizes — including the ZIP64 local extra block — and
-  hard-errors on method/compressedSize/uncompressedSize/crc disagreement
-  with the CD entry, except when local flag bit 3 leaves crc/sizes
-  legitimately zero in the LH; regression coverage added in
+  (Landed by PR #1554: `readEntryData` in `Zip/Archive.lean` now parses
+  the local header's flags/method/crc/sizes — including the ZIP64 local
+  extra block — and hard-errors on method/compressedSize/uncompressedSize/
+  crc disagreement with the CD entry, except when local flag bit 3 leaves
+  crc/sizes legitimately zero in the LH; regression coverage added in
   `testdata/zip/malformed/cd-lh-method-mismatch.zip` and
   `testdata/zip/malformed/cd-lh-size-mismatch.zip`.)
 
@@ -43,31 +43,34 @@ Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
 - [x] Enumerate all `String.fromUTF8!` callsites reachable from untrusted
   tar bytes and replace them with validated or failure-returning paths
   where needed.
-  (Three panicking raw-byte truncations in `buildPaxEntry` and `create`
-  replaced by `Tar.truncateUTF8` which rounds to the nearest codepoint
-  boundary; the two remaining `fromUTF8!` sites in `splitPath` are
-  documented as safe because the split is at an ASCII `'/'` byte.
-  Regression coverage in `ZipTest/TarPathTruncation.lean`.)
+  (Landed by PR #1550: three panicking raw-byte truncations in
+  `buildPaxEntry` and `create` replaced by `Tar.truncateUTF8` which rounds
+  to the nearest codepoint boundary; the two remaining `fromUTF8!` sites
+  in `splitPath` are documented as safe because the split is at an ASCII
+  `'/'` byte. Regression coverage in `ZipTest/TarPathTruncation.lean`.)
 - [x] Add malformed PAX fixtures:
   invalid UTF-8 keys, invalid UTF-8 values, oversized decimal lengths,
   truncated records, and inconsistent record lengths.
-  (`testdata/tar/malformed/pax-oversized-length.tar`,
+  (Landed by PR #1545:
+   `testdata/tar/malformed/pax-oversized-length.tar`,
    `pax-truncated-record.tar`, `pax-invalid-utf8-key.tar`,
    `pax-invalid-utf8-value.tar`, `pax-inconsistent-length.tar`;
    built by `scripts/build-pax-malformed-fixtures.lean`.)
 - [x] Add malformed GNU long-name fixtures:
   missing terminator, truncated payload, invalid UTF-8.
-  (`gnu-longname-truncated.tar`, `gnu-longname-no-terminator.tar`,
-  `gnu-longname-invalid-utf8.tar`, `gnu-longlink-truncated.tar`)
+  (Landed by PR #1546: `testdata/tar/malformed/gnu-longname-truncated.tar`,
+  `gnu-longname-no-terminator.tar`, `gnu-longname-invalid-utf8.tar`,
+  `gnu-longlink-truncated.tar`.)
 - [x] Document symlink and hardlink extraction policy explicitly and test
   archive-slip variants against it.
-  (Per-typeflag policy now in the `Tar.extract` docstring and in
-  `SECURITY_INVENTORY.md` § "Tar Parser/Extractor — Symlink/hardlink
-  extraction policy"; `typeHardlink` is now a named constant in
-  `Zip/Tar.lean`. Fixtures: `testdata/tar/security/symlink-absolute.tar`,
-  `hardlink-outside.tar`, and the previously orphaned
-  `backslash-slip.tar`, asserted in `ZipTest/TarFixtures.lean`; built
-  by `scripts/build-symlink-hardlink-malformed-fixtures.lean`.)
+  (Landed by PR #1555: per-typeflag policy now in the `Tar.extract`
+  docstring and in `SECURITY_INVENTORY.md` § "Tar Parser/Extractor —
+  Symlink/hardlink extraction policy"; `typeHardlink` is now a named
+  constant in `Zip/Tar.lean`. Fixtures:
+  `testdata/tar/security/symlink-absolute.tar`, `hardlink-outside.tar`,
+  and the previously orphaned `backslash-slip.tar`, asserted in
+  `ZipTest/TarFixtures.lean`; built by
+  `scripts/build-symlink-hardlink-malformed-fixtures.lean`.)
 
 ## Priority 2: Public decompression limit policy
 

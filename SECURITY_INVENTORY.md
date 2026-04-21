@@ -79,9 +79,15 @@ known gaps that sit outside the formally verified codec core.
   - path traversal blocked via `Binary.isPathSafe`
   - CRC and final size checked after extraction
 - Missing work:
-  - add explicit mismatch checks between central and local metadata where useful
-  - add oversized ZIP64 regression fixtures and fuzzing for metadata parsing
   - prove bounded-read lemmas for the guarded read paths if tractable
+- Recent wins:
+  - central-directory vs. local-header mismatch checks — PR #1554
+    (`testdata/zip/malformed/cd-lh-method-mismatch.zip`,
+    `cd-lh-size-mismatch.zip`)
+  - oversized ZIP64 compressed-size fixture — PR #1543
+    (`testdata/zip/malformed/oversized-zip64-compressed-size.zip`)
+  - oversized ZIP64 uncompressed-size fixture — PR #1544
+    (`testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`)
 
 ### Tar Parser/Extractor
 
@@ -96,8 +102,18 @@ known gaps that sit outside the formally verified codec core.
   - short-read detection in entry and padding reads
   - invalid PAX UTF-8 is skipped instead of panicking in `parsePaxRecords`
 - Missing work:
-  - review all `String.fromUTF8!` callsites reachable from untrusted archives
-  - add malformed PAX and GNU-longname fuzz/fixture coverage
+  - none open at this layer; the policy and fixture work below are done
+- Recent wins:
+  - `String.fromUTF8!` callsite audit — PR #1550
+    (`Tar.truncateUTF8`; regression coverage in
+    `ZipTest/TarPathTruncation.lean`)
+  - malformed PAX fixtures — PR #1545
+    (`testdata/tar/malformed/pax-*.tar`)
+  - malformed GNU long-name/long-link fixtures — PR #1546
+    (`testdata/tar/malformed/gnu-longname-*.tar`,
+    `gnu-longlink-truncated.tar`)
+  - symlink/hardlink extraction policy + archive-slip tests — PR #1555
+    (see subsection below; `testdata/tar/security/`)
 
 #### Symlink/hardlink extraction policy
 
@@ -159,8 +175,11 @@ Regression fixtures live under `testdata/tar/security/`:
   - `readExact` itself guards `Nat -> USize`, but callers still need proof
     or validation that attacker-controlled sizes are file-bounded before reading
 - Needed:
-  - explicit pre-read checks against file size and local header span
-  - malformed ZIP64 fixtures
+  - prove bounded-read lemmas for the guarded read paths (still open)
+- Recent wins:
+  - explicit pre-read span validation landed via `assertSpanInFile` in
+    `Zip/Archive.lean` (wraps local-header, name+extra, and payload reads)
+  - malformed ZIP64 size fixtures landed via PRs #1543 and #1544
 
 ### 2. Tar UTF-8 partial functions
 
@@ -168,8 +187,11 @@ Regression fixtures live under `testdata/tar/security/`:
 - Concern:
   - `String.fromUTF8!` is partial and should not be reachable from
     attacker-controlled invalid bytes without prior validation
-- Needed:
-  - callsite audit plus tests covering invalid path/name encodings
+- Status: audit landed via PR #1550. The three panicking raw-byte
+  truncations in `buildPaxEntry` and `create` now go through
+  `Tar.truncateUTF8`; the two remaining `fromUTF8!` callsites in
+  `splitPath` split at an ASCII `'/'` byte and are documented safe.
+  Regression coverage in `ZipTest/TarPathTruncation.lean`.
 
 ### 3. Unlimited decompression knobs
 
