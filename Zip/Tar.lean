@@ -569,7 +569,8 @@ private partial def forEntries (input : IO.FS.Stream)
     | some entry =>
       -- GNU long name: read data as the name for the next entry
       if entry.typeflag == typeGnuLongName then
-        let nameData ← readEntryData input entry.size.toNat maxHeaderSize
+        let nameData ← readBoundedEntryData input entry.size.toNat maxHeaderSize
+          "GNU long name"
         let nameBytes := stripTrailingNuls nameData
         let name := match String.fromUTF8? nameBytes with
           | some s => s
@@ -578,7 +579,8 @@ private partial def forEntries (input : IO.FS.Stream)
         continue
       -- GNU long link: read data as the linkname for the next entry
       if entry.typeflag == typeGnuLongLink then
-        let linkData ← readEntryData input entry.size.toNat maxHeaderSize
+        let linkData ← readBoundedEntryData input entry.size.toNat maxHeaderSize
+          "GNU long link"
         let linkBytes := stripTrailingNuls linkData
         let link := match String.fromUTF8? linkBytes with
           | some s => s
@@ -587,12 +589,14 @@ private partial def forEntries (input : IO.FS.Stream)
         continue
       -- PAX extended header: parse records for the next entry
       if entry.typeflag == typePaxExtended then
-        let paxData ← readEntryData input entry.size.toNat maxHeaderSize
+        let paxData ← readBoundedEntryData input entry.size.toNat maxHeaderSize
+          "PAX extended header"
         paxOverrides := some (parsePaxRecords paxData)
         continue
       -- PAX global header: skip (we don't track global state)
       if entry.typeflag == typePaxGlobal then
-        let _ ← readEntryData input entry.size.toNat maxHeaderSize
+        let _ ← readBoundedEntryData input entry.size.toNat maxHeaderSize
+          "PAX global header"
         continue
       -- Apply GNU/PAX overrides
       let mut e := entry

@@ -448,9 +448,8 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     throw (IO.userError s!"zip: entry '{label}' uncompressed size ({entry.uncompressedSize}) exceeds limit ({maxEntrySize})")
   -- Span-validate every attacker-controlled read against actual file size.
   let fileSize ← Handle.fileSize h
-  assertSpanInFile fileSize entry.localOffset 30 s!"local header for {label}"
-  Handle.seek h entry.localOffset
-  let localHdr ← readExact h 30 s!"local header for {label}"
+  let localHdr ← readBoundedSpanFromHandle h fileSize entry.localOffset 30
+    s!"local header for {label}"
   unless Binary.readUInt32LE localHdr 0 == sigLocal do
     throw (IO.userError s!"zip: bad local header signature for {label}")
   -- Parse the remaining local-header fields for CD/LH consistency checks.
@@ -463,17 +462,19 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   let stdLocalUncompSize := Binary.readUInt32LE localHdr 22
   let nameLen := (Binary.readUInt16LE localHdr 26).toNat
   let extraLen := (Binary.readUInt16LE localHdr 28).toNat
-  -- Verify the full local data span (header + name + extra + compressed payload)
-  -- lies within the file before any further `Handle.read` is driven by
-  -- untrusted metadata. `nameLen + extraLen` is bounded by `2 * UInt16.max`,
-  -- so the first addend cannot overflow `UInt64`; the second call bounds
-  -- `entry.compressedSize` against the remaining file tail.
+  -- Verify the compressed-payload span lies within the file before the
+  -- `readBoundedSpanFromHandle` calls below are driven by untrusted metadata.
+  -- `nameLen + extraLen` is bounded by `2 * UInt16.max`, so `headerAndNames`
+  -- cannot overflow `UInt64`; this assertion bounds `entry.compressedSize`
+  -- against the remaining file tail. The `readBoundedSpanFromHandle` for the
+  -- compressed payload re-asserts the same span internally — that redundancy
+  -- is harmless and keeps the helper interface uniform across the three reads.
   let headerAndNames : UInt64 := 30 + nameLen.toUInt64 + extraLen.toUInt64
-  assertSpanInFile fileSize entry.localOffset headerAndNames
-    s!"local name+extra for {label}"
   assertSpanInFile fileSize (entry.localOffset + headerAndNames)
     entry.compressedSize s!"local data span for {label}"
-  let nameAndExtra ← readExact h (nameLen + extraLen) s!"local name+extra for {label}"
+  let nameAndExtra ← readBoundedSpanFromHandle h fileSize
+    (entry.localOffset + 30) (nameLen.toUInt64 + extraLen.toUInt64)
+    s!"local name+extra for {label}"
   -- Resolve the effective local sizes through any ZIP64 local extra block.
   -- Local headers do not carry the file-offset field, so pass `stdOffset = 0`
   -- to `parseZip64Extra` and discard the offset slot it returns.
@@ -506,7 +507,9 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     unless localCrc == entry.crc32 do
       throw (IO.userError
         s!"zip: crc32 mismatch between CD and local header for {label} (CD={entry.crc32}, LH={localCrc})")
-  let compData ← readExact h entry.compressedSize.toNat s!"compressed data for {label}"
+  let compData ← readBoundedSpanFromHandle h fileSize
+    (entry.localOffset + headerAndNames) entry.compressedSize
+    s!"compressed data for {label}"
   let fileData ←
     if entry.method == 0 then pure compData
     else if entry.method == 8 then
