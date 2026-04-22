@@ -224,6 +224,33 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract cdLhSizePath cdLhSizeExtractDir)
     "compressedSize mismatch between CD and local header"
 
+  -- cd-lh-flags-mismatch.zip: 122-byte stored ZIP whose CD advertises
+  -- flags=0x0800 (UTF-8 name flag bit 11 set) while the local header
+  -- advertises flags=0x0000 (bit 11 clear).  Both headers share the
+  -- same ASCII name `hello.txt` so the CD-vs-LH consistency check is
+  -- reached; `Archive.extract` must reject this with a
+  -- `flags mismatch between CD and local header` error before the
+  -- stored payload is delivered.  This exercises a known ZIP-smuggling
+  -- vector: a CD-only UTF-8 flag tricks downstream LH re-parsers into
+  -- decoding the name under the Latin-1 fallback path.
+  -- Regenerate (if ever lost) with:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p); CD_F,LH_F=0x0800,0x0000
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,LH_F,0,0,0,c,len(p),len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,CD_F,0,0,0,c,len(p),len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("cd-lh-flags-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let cdLhFlagsData ← readFixture "zip/malformed/cd-lh-flags-mismatch.zip"
+  let cdLhFlagsPath ← writeFixtureTmp "cd-lh-flags-mismatch.zip" cdLhFlagsData
+  let cdLhFlagsExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-lh-flags-mismatch-extract"
+  IO.FS.createDirAll cdLhFlagsExtractDir
+  assertThrows "ZIP malformed (cd-lh-flags-mismatch.zip)"
+    (Archive.extract cdLhFlagsPath cdLhFlagsExtractDir)
+    "flags mismatch between CD and local header"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -248,6 +275,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "oversized-zip64-compressed-size.zip",
              "oversized-zip64-uncompressed-size.zip",
              "cd-lh-method-mismatch.zip", "cd-lh-size-mismatch.zip",
+             "cd-lh-flags-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
@@ -256,6 +284,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-oversized-zip64-uncompressed-size-extract",
              "/tmp/lean-zip-fixture-cd-lh-method-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-size-mismatch-extract",
+             "/tmp/lean-zip-fixture-cd-lh-flags-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"
