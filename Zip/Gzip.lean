@@ -72,19 +72,34 @@ partial def compressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
   output.flush
 
 /-- Decompress gzip data from input stream to output stream.
-    Handles concatenated gzip streams. Input memory usage is bounded, but there
-    is no library-level cap on total decompressed output — the caller's sink is
-    the only bound. See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*
-    (recommendation 2) for the proposed `maxDecompressedSize` streaming cap. -/
-partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream) : IO Unit := do
+    Handles concatenated gzip streams. Input memory usage is bounded.
+    `maxDecompressedSize` caps the *total* output bytes written to `output`;
+    default `0` means unlimited (bomb-unsafe for untrusted input). Overflow
+    raises `IO.userError` containing `"exceeds limit"` (full message:
+    `"gzip: decompressed stream exceeds limit (<N> bytes)"`) and aborts
+    before writing the overflowing chunk, so the already-written prefix is
+    at most `maxDecompressedSize` bytes.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
+partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
+    (maxDecompressedSize : UInt64 := 0) : IO Unit := do
   let state ← InflateState.new
+  let totalRef ← IO.mkRef (0 : UInt64)
+  let checkAndWrite (chunk : ByteArray) : IO Unit := do
+    if chunk.size > 0 then
+      let total ← totalRef.get
+      let next := total + chunk.size.toUInt64
+      if maxDecompressedSize ≠ 0 && next > maxDecompressedSize then
+        throw (IO.userError
+          s!"gzip: decompressed stream exceeds limit ({maxDecompressedSize} bytes)")
+      totalRef.set next
+      output.write chunk
   repeat do
     let chunk ← input.read 65536
     if chunk.isEmpty then break
     let decompressed ← state.push chunk
-    if decompressed.size > 0 then output.write decompressed
+    checkAndWrite decompressed
   let final ← state.finish
-  if final.size > 0 then output.write final
+  checkAndWrite final
   output.flush
 
 -- File helpers
@@ -99,12 +114,14 @@ def compressFile (path : System.FilePath) (level : UInt8 := 6) : IO System.FileP
   return outPath
 
 /-- Decompress a gzip file. Strips `.gz` suffix, or appends `.ungz` as fallback.
-    Optional explicit output path. Streams with bounded input memory; as with
-    `decompressStream`, there is no library-level cap on total decompressed
-    output, so a bomb can fill the output path's disk.
+    Optional explicit output path. Streams with bounded input memory.
+    `maxDecompressedSize` is forwarded to `decompressStream`; default `0`
+    means unlimited (bomb-unsafe for untrusted input, since a bomb can
+    fill the output path's disk). Overflow raises `IO.userError` containing
+    `"exceeds limit"`.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompressFile (path : System.FilePath) (outPath : Option System.FilePath := none)
-    : IO System.FilePath := do
+    (maxDecompressedSize : UInt64 := 0) : IO System.FilePath := do
   let out := match outPath with
     | some p => p
     | none =>
@@ -113,6 +130,7 @@ def decompressFile (path : System.FilePath) (outPath : Option System.FilePath :=
   IO.FS.withFile path .read fun inH =>
     IO.FS.withFile out .write fun outH =>
       decompressStream (IO.FS.Stream.ofHandle inH) (IO.FS.Stream.ofHandle outH)
+        (maxDecompressedSize := maxDecompressedSize)
   return out
 
 end Gzip

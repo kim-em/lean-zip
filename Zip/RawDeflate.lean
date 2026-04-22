@@ -45,19 +45,34 @@ partial def compressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
   output.flush
 
 /-- Decompress raw deflate data from input stream to output stream.
-    Input memory usage is bounded, but there is no library-level cap on total
-    decompressed output — the caller's sink is the only bound. See
-    `SECURITY_INVENTORY.md` *Decompression Limit Inventory* (recommendation 2)
-    for the proposed `maxDecompressedSize` streaming cap. -/
-partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream) : IO Unit := do
+    Input memory usage is bounded. `maxDecompressedSize` caps the *total*
+    output bytes written to `output`; default `0` means unlimited
+    (bomb-unsafe for untrusted input). Overflow raises `IO.userError`
+    containing `"exceeds limit"` (full message:
+    `"raw deflate: decompressed stream exceeds limit (<N> bytes)"`) and
+    aborts before writing the overflowing chunk, so the already-written
+    prefix is at most `maxDecompressedSize` bytes.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
+partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
+    (maxDecompressedSize : UInt64 := 0) : IO Unit := do
   let state ← InflateState.new
+  let totalRef ← IO.mkRef (0 : UInt64)
+  let checkAndWrite (chunk : ByteArray) : IO Unit := do
+    if chunk.size > 0 then
+      let total ← totalRef.get
+      let next := total + chunk.size.toUInt64
+      if maxDecompressedSize ≠ 0 && next > maxDecompressedSize then
+        throw (IO.userError
+          s!"raw deflate: decompressed stream exceeds limit ({maxDecompressedSize} bytes)")
+      totalRef.set next
+      output.write chunk
   repeat do
     let chunk ← input.read 65536
     if chunk.isEmpty then break
     let decompressed ← state.push chunk
-    if decompressed.size > 0 then output.write decompressed
+    checkAndWrite decompressed
   let final ← state.finish
-  if final.size > 0 then output.write final
+  checkAndWrite final
   output.flush
 
 end RawDeflate
