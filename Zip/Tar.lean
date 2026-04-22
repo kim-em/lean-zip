@@ -827,11 +827,18 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
 
     `maxOutputSize` (default 256 MiB) caps the decompressed tar buffer
-    produced by the outer native gzip decode. The native variant exposes this
-    parameter because the pure Lean `Zip.Native.GzipDecode.decompress` API
-    requires a bound up front; the streaming `extractTarGz` variant does not
-    need one because it drains the outer compressed stream chunk-by-chunk
-    into the tar parser.
+    produced by the outer native gzip decode. Unlike the FFI path, where
+    `0` means unlimited, here `0` rejects any non-empty output (the
+    underlying native `GzipDecode.decompress` compares
+    `output.size + len > maxOutputSize`, so even a single produced byte
+    exceeds the bound). Overflow raises `IO.userError` containing
+    `"exceeds maximum size"`, wrapped as
+    `"tar.gz: native gzip decompression failed: …"`.
+    The native variant exposes this parameter because the pure Lean
+    `Zip.Native.GzipDecode.decompress` API requires a bound up front;
+    the streaming `extractTarGz` variant does not need one because it
+    drains the outer compressed stream chunk-by-chunk into the tar
+    parser.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
 
     `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the

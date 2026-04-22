@@ -372,9 +372,9 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:651) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all regular-file entries; directories and symlinks contribute zero. |
 | [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:779) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
 | [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:779) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:842) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:842) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:842) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:848) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:848) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:851) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
 
 ### Known inconsistencies
 
@@ -412,11 +412,15 @@ issues and the follow-up docstring/default change.
    `ZlibDecode.decompress`, `decompressAuto`) now default to **1 GiB**,
    matching `Zip.Native.Inflate.inflate`. The factor-of-4 asymmetry
    between raw-DEFLATE and format-auto-dispatch is gone.
-6. **Docstrings and error messages**.
-   - Every decompression API should state its default, the
-     meaning of `0`, and the exact error thrown on cap overflow.
-     This is Priority 2 item 4 on the audit checklist and is a
-     separate issue.
+6. **Docstrings and error messages**. Executed — every public
+   decompression / extraction API now states its default cap, the
+   meaning of `0` (unlimited on the FFI path; rejects any non-empty
+   output on the native path), and the exact `IO.userError` /
+   `Except` substring thrown on cap overflow. The closing audit
+   covered all twelve decompression / extraction surfaces plus the
+   `Archive.list` central-directory cap; the only outstanding gap
+   (the `maxOutputSize` paragraph on `Tar.extractTarGzNative`) was
+   filled inline in this PR. See this PR.
 
 Known caller impact if recommendations 1–5 land:
 
