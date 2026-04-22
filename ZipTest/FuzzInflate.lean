@@ -75,17 +75,21 @@ private def splitIntoChunks (data : ByteArray) (state : UInt64) :
 
 /-- Run one FFI whole-buffer entry point. Any thrown `IO.userError`
     is swallowed (that is the handled case). Other exceptions (e.g.
-    a panic leaking through) propagate and fail the fuzz run. -/
+    a panic leaking through) propagate and fail the fuzz run.
+
+    `.userError` is the only `IO.Error` variant the zlib FFI emits
+    (via `lean_mk_io_user_error` in `c/zlib_ffi.c`); any other variant
+    reaching the catch is either an FFI contract regression or a
+    runtime-level error that should surface loudly, so we re-raise. -/
 private def tryFFI (label : String) (action : IO ByteArray) : IO Unit := do
   try
     let _ ← action
   catch e =>
-    -- `toString` on an IO.Error always produces a message; catching
-    -- any exception here means the decoder declined the input
-    -- without crashing the process. Sanitizer traps are process-level
-    -- and bypass this catch entirely.
-    let _ := s!"[fuzz {label}] {e}"
-    pure ()
+    match e with
+    | .userError _ =>
+      let _ := s!"[fuzz {label}] {e}"
+      pure ()
+    | _ => throw e
 
 /-- Run one native whole-buffer entry point. Returns `()` regardless
     of `Except` outcome — a parse failure is the expected common case. -/
@@ -155,11 +159,15 @@ def runFuzzUntil (seed : UInt64) (deadlineMs : Nat)
     count := count + 1
   return count
 
-/-- Smoke test: fixed-seed 100-iteration run invoked from `lake exe
-    test`. Iteration count is bounded to keep CI runtime reasonable. -/
+/-- Smoke test: fixed-seed 1000-iteration run invoked from `lake exe
+    test`. Iteration count is bounded to keep CI runtime reasonable
+    (~100 ms at ~100 μs/iteration). Prints the seed up front so a
+    future CI failure log carries enough information to reproduce
+    locally. -/
 def tests : IO Unit := do
-  IO.println "  FuzzInflate tests..."
-  runFuzz 0xdeadbeef 100
-  IO.println "    100 iterations completed"
+  let seed : UInt64 := 0xdeadbeef
+  IO.println s!"  FuzzInflate tests (seed=0x{String.ofList (Nat.toDigits 16 seed.toNat)})..."
+  runFuzz seed 1000
+  IO.println "    1000 iterations completed"
 
 end ZipTest.FuzzInflate
