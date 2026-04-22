@@ -183,22 +183,22 @@ theorem checksum_pair (b₁ b₂ : UInt8) :
        (2 + 2 * b₁.toNat + b₂.toNat) * 65536) := by
   have h1 : b₁.toNat < 256 := b₁.toNat_lt
   have h2 : b₂.toNat < 256 := b₂.toNat_lt
-  rw [← UInt32.toNat_inj]
-  simp only [checksum, updateList, List.foldl_cons, List.foldl_nil,
-    updateByte, init, MOD_ADLER]
-  have ha₁ : (1 + b₁.toNat) % 65521 = 1 + b₁.toNat :=
-    Nat.mod_eq_of_lt (by omega)
+  have ha₁ : (1 + b₁.toNat) % 65521 = 1 + b₁.toNat := Nat.mod_eq_of_lt (by omega)
   have ha₂ : (1 + b₁.toNat + b₂.toNat) % 65521 = 1 + b₁.toNat + b₂.toNat :=
     Nat.mod_eq_of_lt (by omega)
   have hb₂ : ((1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat)) % 65521 =
              (1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat) :=
     Nat.mod_eq_of_lt (by omega)
-  rw [ha₁, Nat.zero_add, ha₁, ha₂, hb₂,
-    pack_toNat_of_bounds (show 1 + b₁.toNat + b₂.toNat < 65536 by omega)
-                          (show (1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat) < 65536 by omega),
-    UInt32.toNat_ofNat_of_lt' (show (1 + b₁.toNat + b₂.toNat) +
-        (2 + 2 * b₁.toNat + b₂.toNat) * 65536 < UInt32.size by
-      simp only [UInt32.size]; omega)]
+  have hpack₁ : 1 + b₁.toNat + b₂.toNat < 65536 := by omega
+  have hpack₂ : (1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat) < 65536 := by omega
+  have hbnd : (1 + b₁.toNat + b₂.toNat) +
+      (2 + 2 * b₁.toNat + b₂.toNat) * 65536 < UInt32.size := by
+    simp only [UInt32.size]; omega
+  rw [← UInt32.toNat_inj]
+  simp only [checksum, updateList, List.foldl_cons, List.foldl_nil,
+    updateByte, init, MOD_ADLER, Nat.zero_add, ha₁, ha₂, hb₂,
+    pack_toNat_of_bounds hpack₁ hpack₂,
+    UInt32.toNat_ofNat_of_lt' hbnd]
   omega
 
 /-- The Adler-32 checksum of `n` zero bytes has the closed form
