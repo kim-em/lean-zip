@@ -215,19 +215,14 @@ theorem checksum_replicate_zero (n : Nat) (hn : n < 65521) :
     | zero => intros; rfl
     | succ m ih =>
       intro k hkm
-      rw [List.replicate_succ, updateList_cons]
       have hk1 : k + 1 < 65521 := by omega
-      have hbyte : updateByte (1, k) 0 = (1, k + 1) := by
-        show ((1 + (0:UInt8).toNat) % MOD_ADLER,
-              (k + (1 + (0:UInt8).toNat) % MOD_ADLER) % MOD_ADLER) = (1, k + 1)
-        rw [show (1 + (0:UInt8).toNat) % MOD_ADLER = 1 from by decide,
-            show (k + 1) % MOD_ADLER = k + 1 from Nat.mod_eq_of_lt hk1]
-      rw [hbyte, ih (k + 1) (by omega)]
+      rw [List.replicate_succ, updateList_cons]
+      simp only [updateByte, MOD_ADLER, show (0:UInt8).toNat = 0 from rfl,
+        Nat.add_zero, show (1:Nat) % 65521 = 1 from rfl, Nat.mod_eq_of_lt hk1]
+      rw [ih (k + 1) (by omega)]
       congr 1; omega
   have hupdate : updateList init (List.replicate n 0) = (1, n) := by
-    have h := hstate n 0 (by omega)
-    show updateList (1, 0) (List.replicate n 0) = (1, n)
-    rw [h, Nat.zero_add]
+    simpa [init] using hstate n 0 (by omega)
   have hbnd : 1 + n * 65536 < UInt32.size := by
     simp only [UInt32.size]; omega
   rw [← UInt32.toNat_inj]
