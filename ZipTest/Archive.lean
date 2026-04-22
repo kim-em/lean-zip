@@ -114,6 +114,44 @@ def ZipTest.Archive.tests : IO Unit := do
   let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombExtractDir.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", bombZipPath.toString] }
 
+  -- maxTotalSize whole-archive bomb regression (SECURITY_INVENTORY Rec. 4):
+  -- a three-entry zip whose per-entry sizes pass the `maxEntrySize` check
+  -- individually must still be rejected by the running-sum check when the
+  -- cumulative uncompressed bytes exceed `maxTotalSize`. The per-entry
+  -- payloads are each 100 bytes (total 300); the exact-fit run at 300 must
+  -- succeed, while `300 - 1 = 299` must trip the whole-archive cap.
+  let totSrcDir : System.FilePath := "/tmp/lean-zip-zip-total-src"
+  let totZipPath : System.FilePath := "/tmp/lean-zip-zip-total.zip"
+  let totExtractDir : System.FilePath := "/tmp/lean-zip-zip-total-extract"
+  if ← totSrcDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totSrcDir.toString] }
+  IO.FS.createDirAll totSrcDir
+  let totPayload : ByteArray := ByteArray.mk (Array.replicate 100 (0x41 : UInt8))
+  IO.FS.writeBinFile (totSrcDir / "a.txt") totPayload
+  IO.FS.writeBinFile (totSrcDir / "b.txt") totPayload
+  IO.FS.writeBinFile (totSrcDir / "c.txt") totPayload
+  Archive.create totZipPath #[
+    ("a.txt", totSrcDir / "a.txt"),
+    ("b.txt", totSrcDir / "b.txt"),
+    ("c.txt", totSrcDir / "c.txt")]
+  if ← totExtractDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  let totOverResult ←
+    (Archive.extract totZipPath totExtractDir (maxTotalSize := 299)).toBaseIO
+  match totOverResult with
+  | .ok _ => throw (IO.userError "zip: maxTotalSize bomb should have been rejected by extract")
+  | .error e =>
+    unless (toString e).contains "exceeds whole-archive limit" do
+      throw (IO.userError s!"zip: maxTotalSize bomb wrong error from extract: {e}")
+  -- Clean any partial output from the previous attempt before the exact-fit run.
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  Archive.extract totZipPath totExtractDir (maxTotalSize := 300)
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totSrcDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", totZipPath.toString] }
+
   -- readExactStream with fragmenting stream (Bug #1: short read robustness)
   let testPayload := "Hello, World! This is test data for readExactStream.".toUTF8
   let fragStream := fragmentingStream (← byteArrayReadStream testPayload) 3

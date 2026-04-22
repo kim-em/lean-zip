@@ -2,6 +2,79 @@ import ZipTest.Helpers
 
 /-! Tests for tar archive creation, listing, extraction, tar.gz roundtrips, and PAX record parsing. -/
 
+/-- maxTotalSize whole-archive bomb regression (SECURITY_INVENTORY Rec. 4):
+    a three-entry tar whose per-entry sizes pass the `maxEntrySize` check
+    individually must still be rejected by the running-sum check when the
+    cumulative uncompressed bytes exceed `maxTotalSize`. Per-entry payloads
+    are 100 bytes each (total 300); at `maxTotalSize := 299` the cap trips
+    on the third entry; at `maxTotalSize := 300` all three entries fit
+    exactly. Both the streaming .tar.gz and the native .tar.gz extractors
+    forward the cap to `Tar.extract`. Extracted as a top-level helper to
+    keep `ZipTest.Tar.tests`'s single `do` block under the elaborator's
+    recursion limit. -/
+private def runMaxTotalSizeBombTest : IO Unit := do
+  let totSrcDir : System.FilePath := "/tmp/lean-zip-tar-total-src"
+  let totTarPath : System.FilePath := "/tmp/lean-zip-tar-total.tar"
+  let totTarGzPath : System.FilePath := "/tmp/lean-zip-tar-total.tar.gz"
+  let totExtractDir : System.FilePath := "/tmp/lean-zip-tar-total-extract"
+  if ← totSrcDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totSrcDir.toString] }
+  IO.FS.createDirAll totSrcDir
+  let totPayload : ByteArray := ByteArray.mk (Array.replicate 100 (0x41 : UInt8))
+  IO.FS.writeBinFile (totSrcDir / "a.txt") totPayload
+  IO.FS.writeBinFile (totSrcDir / "b.txt") totPayload
+  IO.FS.writeBinFile (totSrcDir / "c.txt") totPayload
+  IO.FS.withFile totTarPath .write fun h =>
+    Tar.create (IO.FS.Stream.ofHandle h) totSrcDir
+      #[totSrcDir / "a.txt", totSrcDir / "b.txt", totSrcDir / "c.txt"]
+  Tar.createTarGz totTarGzPath totSrcDir
+  -- Tar.extract: cap trips on third entry.
+  if ← totExtractDir.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  let totOverResult ← (IO.FS.withFile totTarPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) totExtractDir (maxTotalSize := 299)).toBaseIO
+  match totOverResult with
+  | .ok _ => throw (IO.userError "tar: maxTotalSize bomb should have been rejected by extract")
+  | .error e =>
+    unless (toString e).contains "exceeds whole-archive limit" do
+      throw (IO.userError s!"tar: maxTotalSize bomb wrong error from extract: {e}")
+  -- Tar.extract: exact-fit succeeds.
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  IO.FS.withFile totTarPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) totExtractDir (maxTotalSize := 300)
+  -- Tar.extractTarGz: streaming .tar.gz, same bomb.
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  let totGzOverResult ←
+    (Tar.extractTarGz totTarGzPath totExtractDir (maxTotalSize := 299)).toBaseIO
+  match totGzOverResult with
+  | .ok _ => throw (IO.userError "tar.gz: maxTotalSize bomb should have been rejected by extractTarGz")
+  | .error e =>
+    unless (toString e).contains "exceeds whole-archive limit" do
+      throw (IO.userError s!"tar.gz: maxTotalSize bomb wrong error from extractTarGz: {e}")
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  Tar.extractTarGz totTarGzPath totExtractDir (maxTotalSize := 300)
+  -- Tar.extractTarGzNative: whole-buffer .tar.gz, same bomb.
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  let totGzNatOverResult ←
+    (Tar.extractTarGzNative totTarGzPath totExtractDir (maxTotalSize := 299)).toBaseIO
+  match totGzNatOverResult with
+  | .ok _ => throw (IO.userError "tar.gz native: maxTotalSize bomb should have been rejected by extractTarGzNative")
+  | .error e =>
+    unless (toString e).contains "exceeds whole-archive limit" do
+      throw (IO.userError s!"tar.gz native: maxTotalSize bomb wrong error from extractTarGzNative: {e}")
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  IO.FS.createDirAll totExtractDir
+  Tar.extractTarGzNative totTarGzPath totExtractDir (maxTotalSize := 300)
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totSrcDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-rf", totExtractDir.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", totTarPath.toString] }
+  let _ ← IO.Process.run { cmd := "rm", args := #["-f", totTarGzPath.toString] }
+
 def ZipTest.Tar.tests : IO Unit := do
   -- Create a temp directory with test files
   let tarTestDir : System.FilePath := "/tmp/lean-zlib-tar-test"
@@ -104,6 +177,8 @@ def ZipTest.Tar.tests : IO Unit := do
   let _ ← IO.Process.run { cmd := "rm", args := #["-rf", bombExtractDir.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", bombTarPath.toString] }
   let _ ← IO.Process.run { cmd := "rm", args := #["-f", bombGzPath.toString] }
+
+  runMaxTotalSizeBombTest
 
   -- Test splitPath
   let some (pfx1, name1) := Tar.splitPath "short.txt" | throw (IO.userError "splitPath short")

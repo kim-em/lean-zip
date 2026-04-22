@@ -552,13 +552,22 @@ def list (inputPath : System.FilePath) (maxCentralDirSize : Nat := 67108864) : I
     Overflow raises `IO.userError` containing
     `"zip: entry '…' uncompressed size (…) exceeds limit (…)"`.
 
+    `maxTotalSize` (when non-zero) caps the sum of decompressed bytes across
+    all entries written by this extraction. Default `0` means no whole-archive
+    cap; rely on `maxEntrySize` for per-entry bounding. Overflow raises
+    `IO.userError` containing
+    `"zip: total extracted size (…) exceeds whole-archive limit (…)"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
+
     When `useNative` is true, uses pure Lean decompression (no C FFI).
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def extract (inputPath : System.FilePath) (outDir : System.FilePath)
     (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 1024 * 1024 * 1024)
+    (maxTotalSize : UInt64 := 0)
     (useNative : Bool := false) : IO Unit := do
   IO.FS.withFile inputPath .read fun h => do
     let entries ← listFromHandle h maxCentralDirSize
+    let totalRef ← IO.mkRef (0 : UInt64)
     for entry in entries do
       -- Strip trailing slash for path safety check (directories end with "/")
       let checkPath := if entry.path.endsWith "/" then entry.path.dropEnd 1 |>.toString else entry.path
@@ -569,11 +578,19 @@ def extract (inputPath : System.FilePath) (outDir : System.FilePath)
         continue
       unless Binary.isPathSafe checkPath do
         throw (IO.userError s!"zip: unsafe path: {entry.path}")
+      -- Whole-archive running-total check: fires before any payload bytes are
+      -- written for this entry. The invariant `running ≤ maxTotalSize` keeps
+      -- `maxTotalSize - running` well-defined in UInt64 arithmetic.
+      if maxTotalSize > 0 then
+        let running ← totalRef.get
+        if maxTotalSize - running < entry.uncompressedSize then
+          throw (IO.userError s!"zip: total extracted size ({entry.uncompressedSize.toNat + running.toNat}) exceeds whole-archive limit ({maxTotalSize})")
       let outPath := outDir / entry.path
       if let some parent := outPath.parent then
         IO.FS.createDirAll parent
       let fileData ← readEntryData h entry entry.path maxEntrySize useNative
       IO.FS.writeBinFile outPath fileData
+      totalRef.modify (· + entry.uncompressedSize)
 
 /-- Extract a single file from a ZIP archive by name.
     Memory: O(65KB + central directory + target file).
