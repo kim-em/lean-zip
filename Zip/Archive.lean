@@ -20,6 +20,7 @@ private def sigLocator64 : UInt32 := 0x07064b50
 -- Sentinel values indicating ZIP64 is needed
 private def val32Max : UInt32 := 0xFFFFFFFF
 private def val16Max : UInt16 := 0xFFFF
+private def dataDescriptorBitMask : UInt16 := 0xFFF7  -- CD/LH flag comparison: all bits except bit 3 (data-descriptor presence is a per-LH concern)
 
 /-- ZIP entry metadata. Sizes and offsets are 64-bit to support ZIP64. -/
 structure Entry where
@@ -596,8 +597,7 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   -- known smuggling vector — the CD-derived `Entry.path` we already
   -- parsed used CD's bit-11 setting; if the LH disagrees, downstream
   -- consumers that re-parse the LH would get a different name.
-  let flagsMask : UInt16 := 0xFFF7  -- all bits except bit 3
-  unless (localFlags &&& flagsMask) == (entry.flags &&& flagsMask) do
+  unless (localFlags &&& dataDescriptorBitMask) == (entry.flags &&& dataDescriptorBitMask) do
     throw (IO.userError
       s!"zip: flags mismatch between CD and local header for {label} (CD={entry.flags}, LH={localFlags})")
   let usesDataDescriptor := (localFlags &&& 0x0008) != 0
