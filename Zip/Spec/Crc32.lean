@@ -89,4 +89,106 @@ def crcByteTable (table : Array UInt32) (crc : UInt32) (byte : UInt8) : UInt32 :
   else
     crc -- unreachable for a 256-entry table
 
+/-! ## Table-level closed form for a single byte
+
+Helpers below are duplicated from `Zip/Native/Crc32.lean` so that the
+Spec file does not depend on the Native implementation. The Native
+side keeps its own copies as the build order is `Spec → Native`. -/
+
+/-- The `mkTable` array has size 256. -/
+theorem mkTable_size : mkTable.size = 256 := Array.size_ofFn ..
+
+private theorem mkTable_getElem (i : Nat) (h : i < mkTable.size) :
+    mkTable[i] = crcBit (crcBit (crcBit (crcBit
+      (crcBit (crcBit (crcBit (crcBit (UInt32.ofNat i)))))))) := by
+  simp only [mkTable, Array.getElem_ofFn]
+
+/-- 8-fold `crcBit` splits: the high 24 bits shift right and XOR
+separately from the low 8 bits that go through the polynomial
+reduction. -/
+private theorem crcBits8_split (v : UInt32) :
+    crcBit (crcBit (crcBit (crcBit (crcBit (crcBit (crcBit (crcBit v))))))) =
+    (v >>> 8) ^^^ crcBit (crcBit (crcBit (crcBit
+      (crcBit (crcBit (crcBit (crcBit (v &&& 0xFF)))))))) := by
+  simp only [crcBit, POLY]; bv_decide
+
+private theorem UInt32_ofNat_UInt8_toNat (b : UInt8) :
+    UInt32.ofNat b.toNat = ⟨b.toBitVec.setWidth 32⟩ := by
+  show UInt32.ofBitVec (BitVec.ofNat 32 b.toBitVec.toNat) =
+       UInt32.ofBitVec (b.toBitVec.setWidth 32)
+  congr 1; exact BitVec.ofNat_toNat 32 b.toBitVec
+
+private theorem and_0xFF_toNat_lt (x : UInt32) : (x &&& 0xFF).toNat < 256 := by
+  show (x.toBitVec &&& (255 : BitVec 32)).toNat < 256
+  rw [BitVec.toNat_and]
+  change x.toBitVec.toNat &&& 255 < 256
+  exact Nat.and_lt_two_pow _ (by omega : (255 : Nat) < 2 ^ 8)
+
+private theorem xor_byte_shr8 (crc : UInt32) (byte : UInt8) :
+    (crc ^^^ UInt32.ofNat byte.toNat) >>> 8 = crc >>> 8 := by
+  rw [UInt32_ofNat_UInt8_toNat]
+  show UInt32.ofBitVec ((crc.toBitVec ^^^ byte.toBitVec.setWidth 32) >>> 8) =
+       UInt32.ofBitVec (crc.toBitVec >>> 8)
+  congr 1; bv_decide
+
+/-- Table-driven byte update equals bit-by-bit `crcByte`. Spec-level
+restatement of the identity proven at the Native level; stated here so
+downstream Spec-level closed-form theorems (like `checksum_singleton`)
+do not have to pull in the Native implementation. -/
+theorem crcByteTable_mkTable_eq_crcByte (crc : UInt32) (byte : UInt8) :
+    crcByteTable mkTable crc byte = crcByte crc byte := by
+  simp only [crcByteTable]
+  have hlt : ((crc ^^^ UInt32.ofNat byte.toNat) &&& 0xFF).toNat < mkTable.size := by
+    rw [mkTable_size]; exact and_0xFF_toNat_lt _
+  rw [dif_pos hlt, mkTable_getElem _ hlt, UInt32.ofNat_toNat]
+  simp only [crcByte]
+  rw [crcBits8_split (crc ^^^ UInt32.ofNat byte.toNat), xor_byte_shr8]
+
+/-- The CRC-32 checksum of a single byte has a closed form as a single
+`mkTable` lookup. This is the `checksum_singleton` rung of the CRC-32
+ladder, analogous to `Adler32.Spec.checksum_singleton`. The high byte
+`0xFF000000` comes from `(0xFFFFFFFF >>> 8) ^^^ 0xFFFFFFFF`. -/
+theorem checksum_singleton (b : UInt8) :
+    checksum [b] =
+      0xFF000000 ^^^
+        mkTable[0xFF ^^^ b.toNat]'(by
+          rw [mkTable_size]
+          have hb : b.toNat < 2 ^ 8 := by have := b.toNat_lt; omega
+          exact Nat.xor_lt_two_pow (by decide : (0xFF : Nat) < 2 ^ 8) hb) := by
+  -- Bridge via the table-driven byte update.
+  have hbridge : crcByte 0xFFFFFFFF b = crcByteTable mkTable 0xFFFFFFFF b :=
+    (crcByteTable_mkTable_eq_crcByte 0xFFFFFFFF b).symm
+  have h1 : checksum [b] = crcByte 0xFFFFFFFF b ^^^ 0xFFFFFFFF := rfl
+  rw [h1, hbridge]
+  simp only [crcByteTable]
+  -- Discharge the dif guard.
+  have hlt : ((((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat) <
+      mkTable.size := by
+    rw [mkTable_size]; exact and_0xFF_toNat_lt _
+  rw [dif_pos hlt]
+  -- Match the index `((0xFFFFFFFF ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat`
+  -- with the simpler `0xFF ^^^ b.toNat`.
+  have hb : b.toNat < 256 := b.toNat_lt
+  have hb32 : b.toNat < UInt32.size := by simp only [UInt32.size]; omega
+  have h_xor : ((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat).toNat =
+      0xFFFFFFFF ^^^ b.toNat := by
+    rw [UInt32.toNat_xor, UInt32.toNat_ofNat_of_lt' hb32]; rfl
+  have hidx :
+      (((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat =
+      0xFF ^^^ b.toNat := by
+    rw [UInt32.toNat_and, h_xor]
+    -- `(0xFFFFFFFF ^^^ b.toNat) &&& 0xFF = 0xFF ^^^ b.toNat` since both operands
+    -- mask to the low 8 bits.
+    show (0xFFFFFFFF ^^^ b.toNat) &&& ((0xFF : UInt32).toNat) = 0xFF ^^^ b.toNat
+    rw [show (0xFF : UInt32).toNat = 0xFF from rfl,
+        Nat.and_xor_distrib_right]
+    rw [show (0xFFFFFFFF : Nat) &&& 0xFF = 0xFF from rfl,
+        Nat.and_two_pow_sub_one_of_lt_two_pow (n := 8)
+          (by omega : b.toNat < 2 ^ 8)]
+  -- Rewrite the getElem index so both `mkTable` accesses share the same
+  -- nat index; proof irrelevance then makes them identical.
+  rw [getElem_congr_idx (c := mkTable) hidx]
+  generalize mkTable[0xFF ^^^ b.toNat]'(hidx ▸ hlt) = t
+  bv_decide
+
 end Crc32.Spec
