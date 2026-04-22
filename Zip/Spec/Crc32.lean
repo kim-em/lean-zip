@@ -57,6 +57,11 @@ theorem updateList_append (crc : UInt32) (xs ys : List UInt8) :
 /-- Empty input leaves the CRC unchanged. -/
 theorem updateList_nil (crc : UInt32) : updateList crc [] = crc := rfl
 
+/-- The CRC-32 checksum of the empty input is `0`. -/
+@[simp] theorem checksum_empty : checksum [] = 0 := by
+  simp only [checksum, updateList_nil]
+  bv_decide
+
 /-- Compositionality of incremental CRC-32 computation (spec level).
 The running state after processing `xs` is `checksum xs ^^^ 0xFFFFFFFF`;
 feeding `ys` into that state and re-applying the final XOR yields

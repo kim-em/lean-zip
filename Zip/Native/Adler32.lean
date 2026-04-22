@@ -32,6 +32,26 @@ theorem updateBytes_valid (s : Spec.State) (hs : Spec.Valid s) (data : ByteArray
   rw [updateBytes_eq_updateList]
   exact Spec.updateList_valid s hs _
 
+/-- The Adler-32 of an empty input equals the supplied `init`.
+The pack/unpack roundtrip is the identity on any `UInt32`, so feeding
+no bytes leaves the state — and therefore the packed checksum —
+unchanged. -/
+@[simp] theorem adler32_empty (init : UInt32) :
+    adler32 init ByteArray.empty = init := by
+  simp only [adler32, updateBytes, ByteArray.data_empty, Array.foldl_empty]
+  exact Spec.pack_unpack init
+
+/-- Closed form for the Adler-32 of a single byte starting from the
+default `init = 1`. Matches `Spec.checksum_singleton` after bridging
+the pack/unpack on the initial state. -/
+theorem adler32_singleton (b : UInt8) :
+    adler32 1 (ByteArray.push ByteArray.empty b) =
+    UInt32.ofNat ((1 + b.toNat) * 65537) := by
+  have hdata : (ByteArray.push ByteArray.empty b).data.toList = [b] := rfl
+  have hunpack : Spec.unpack 1 = Spec.init := by decide
+  simp only [adler32, updateBytes_eq_updateList, hdata, hunpack]
+  exact Spec.checksum_singleton b
+
 /-- Compositionality of incremental Adler-32 computation (native level,
 see `PLAN.md:27-28`). Associativity of `adler32` over `ByteArray`
 append — an incremental streaming pipeline over concatenated chunks
