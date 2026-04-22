@@ -241,6 +241,48 @@ private partial def readEntryData (input : IO.FS.Stream) (size : Nat)
       padRemaining := padRemaining - chunk.size
   return result
 
+/-- Thin bounded-length `readExact`-style helper over `IO.FS.Stream`, adding the
+    `length.toUSize.toNat = length` addressable-range guard that the ZIP
+    `readExact` already applies at `Zip/Archive.lean` but the Tar `readExact`
+    does not. On the addressable-range violation throws `IO.userError` with
+    substring `"tar: {what} size {n} exceeds addressable range"`; on short read
+    throws with the message produced by the caller-handled EOF path (the
+    underlying loop returns a shorter `ByteArray` at true EOF — callers that
+    require strict `length` bytes must check `result.size = length`).
+
+    This wraps the existing private `readExact` for the Tar surface so callers
+    on `Stream` get the same `Nat → USize` roundtrip as the ZIP `Handle` path.
+    Cross-reference: `SECURITY_INVENTORY.md` § "Local guard inventory for
+    `Handle.read` and `Stream.read`". -/
+partial def readBoundedExactFromStream (s : IO.FS.Stream) (length : Nat)
+    (what : String) : IO ByteArray := do
+  unless length.toUSize.toNat == length do
+    throw (IO.userError s!"tar: {what} size {length} exceeds addressable range")
+  readExact s length
+
+/-- General-purpose bounded wrapper around `readEntryData` that enforces a
+    caller-supplied `maxSize` upper bound on the payload before the allocator
+    loop starts. On violation throws `IO.userError` with substring
+    `"exceeds maximum"` (stable phrase kept in sync with the existing
+    `readEntryData` `"exceeds maximum header size"` guard). Otherwise delegates
+    to `readEntryData` — the existing `maxHeaderSize` cap there still applies
+    and uses the same substring anchor, so the two bounds compose.
+
+    Used by callers that have a semantically meaningful per-call maximum
+    (e.g. PAX record size, long-name size) distinct from `defaultMaxHeaderSize`.
+    The existing `readEntryData (maxHeaderSize := ...)` signature is not a
+    substitute for this helper: that parameter is the **global** default cap
+    for any header-buffering caller, whereas `readBoundedEntryData` is the
+    **per-call** cap primitive — typically the stricter of the two. Cross-
+    reference: `SECURITY_INVENTORY.md` § "Local guard inventory for
+    `Handle.read` and `Stream.read`". -/
+partial def readBoundedEntryData (input : IO.FS.Stream) (size maxSize : Nat)
+    (what : String) : IO ByteArray := do
+  if size > maxSize then
+    throw (IO.userError
+      s!"tar: {what} size ({size}) exceeds maximum ({maxSize})")
+  readEntryData input size
+
 /-- Split a path into (prefix, name) for UStar format.
     Returns `none` if the path is too long to encode. -/
 def splitPath (path : String) : Option (String × String) := Id.run do
