@@ -86,6 +86,14 @@ theorem updateBytes_eq_updateList (crc : UInt32) (data : ByteArray) :
     funext fun _ => funext fun _ => crcByteTable_eq_crcByte ..
   rw [this]
 
+/-- The CRC-32 of an empty input equals the supplied `init` (with the
+zlib convention that `init = 0` denotes a fresh checksum that still
+ends up at `0`). -/
+@[simp] theorem crc32_empty (init : UInt32) :
+    crc32 init ByteArray.empty = init := by
+  simp only [crc32, updateBytes, ByteArray.data_empty, Array.foldl_empty]
+  bv_decide
+
 /-- Compositionality of incremental CRC-32 computation (native level,
 see `PLAN.md:27-28`). Associativity of `crc32` over `ByteArray` append
 — an incremental streaming pipeline over concatenated chunks yields

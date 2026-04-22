@@ -62,6 +62,11 @@ theorem updateList_nil (s : State) : updateList s [] = s := rfl
 theorem updateList_cons (s : State) (b : UInt8) (bs : List UInt8) :
     updateList s (b :: bs) = updateList (updateByte s b) bs := rfl
 
+/-- The Adler-32 checksum of the empty input is `1`. -/
+@[simp] theorem checksum_empty : checksum [] = 1 := by
+  simp only [checksum, updateList_nil, pack, init]
+  decide
+
 /-! ## Bounds theorems -/
 
 /-- A state is valid when both components are less than MOD_ADLER. -/
@@ -149,6 +154,27 @@ theorem unpack_pack_of_valid (s : State) (hs : Valid s) :
   · rw [Nat.add_mul_mod_self_right]; exact Nat.mod_eq_of_lt (by omega)
   · rw [Nat.add_mul_div_right _ _ (by decide : (0 : Nat) < 65536)]
     simp [Nat.div_eq_of_lt (show a < 65536 by omega)]
+
+/-- The Adler-32 checksum of a single byte `b` has the closed form
+`(1 + b.toNat) * 65537`. Both Adler-32 components reduce to `1 + b.toNat`
+because no modular reduction fires (`1 + b.toNat < 256 < 65521`), and
+`pack (a, a) = a + a * 65536 = a * 65537` for `a < 65536`. -/
+theorem checksum_singleton (b : UInt8) :
+    checksum [b] = UInt32.ofNat ((1 + b.toNat) * 65537) := by
+  have h256 : b.toNat < 256 := b.toNat_lt
+  rw [← UInt32.toNat_inj]
+  simp only [checksum, updateList, List.foldl_cons, List.foldl_nil,
+    updateByte, init, MOD_ADLER]
+  have ha : (1 + b.toNat) % 65521 = 1 + b.toNat :=
+    Nat.mod_eq_of_lt (by omega)
+  rw [ha, Nat.zero_add, ha,
+    pack_toNat_of_bounds (show 1 + b.toNat < 65536 by omega)
+                          (show 1 + b.toNat < 65536 by omega),
+    UInt32.toNat_ofNat_of_lt' (show (1 + b.toNat) * 65537 < UInt32.size by
+      have : (1 + b.toNat) * 65537 ≤ 257 * 65537 :=
+        Nat.mul_le_mul_right _ (by omega)
+      simp only [UInt32.size]; omega)]
+  omega
 
 /-- Compositionality of incremental Adler-32 computation (spec level).
 The running state after processing `xs` is `unpack (checksum xs)`;
