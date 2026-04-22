@@ -20,6 +20,7 @@ one makes the test brittle to message rewrites.
 | FFI streaming decoders (gzip) | `Zip/Gzip.lean` (`decompressStream`, `decompressFile`) | `gzip: decompressed stream exceeds limit (<N> bytes)` | `"exceeds limit"` |
 | FFI streaming decoders (raw deflate) | `Zip/RawDeflate.lean` (`decompressStream`) | `raw deflate: decompressed stream exceeds limit (<N> bytes)` | `"exceeds limit"` |
 | Archive per-entry bomb | `Zip/Archive.lean:408-410` | `Archive: entry <name> exceeds limit (…)` | `"exceeds limit"` |
+| Whole-archive bomb | `Zip/Archive.lean:677`, `Zip/Tar.lean:677` (`extract` `maxTotalSize`) | `zip:`/`tar: total extracted size (…) exceeds whole-archive limit (…)` | `"exceeds whole-archive limit"` |
 | Archive ZIP64 span check | `Zip/Archive.lean:428-429` | `Archive: local data span for <name> (…)` | `"local data span"` |
 | Archive CD/LH consistency | `Zip/Archive.lean` | `mismatch between CD and local header (<field>)` | `"mismatch between CD and local header"` |
 | Archive LH ZIP64 parse | `Zip/Archive.lean` | `truncated ZIP64 local extra field` | `"truncated ZIP64 local extra field"` |
@@ -55,6 +56,14 @@ Track E Priority 2 item 4 follow-up candidate — if you are landing a
 test that needs to be stable under a future rewording, match the
 short shared noun (`"exceeds"`) only after reading the source and
 confirming no other message in the call graph contains it.
+
+**Streaming-FFI docstring phrasing differs from whole-buffer
+phrasing.** Streaming FFI docstrings (post-#1610 / #1631) use
+*"bomb-unsafe — only do this when the input is trusted"* while
+whole-buffer docstrings (post-#1573) use *"bomb-unsafe for
+untrusted input"*. Mild drift, not a bug. Tests that grep on
+docstring text (there are currently none) should match
+*"bomb-unsafe"* as the stable substring.
 
 ## Which message fires first
 
