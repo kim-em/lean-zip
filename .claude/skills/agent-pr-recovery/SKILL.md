@@ -182,6 +182,75 @@ grep -n 'simp\b' Zip/Spec/File.lean | \
 If the actual count is 0 or very different from the issue, use
 `coordination skip` with an explanation.
 
+### Also verify source-anchored details, not just metrics
+
+In addition to counts, the following issue-body claims go stale quickly
+and should be re-checked against current master before starting:
+
+- **Line numbers in referenced files.** `Zip/Archive.lean:477` or
+  `Zip/Tar.lean:537` style pointers silently drift when unrelated PRs
+  add or remove lines. Grep the referenced symbol (`readEntryData`,
+  `extractTarGzNative`, etc.) instead of trusting the line number. The
+  Track E inventory PR (#1556, session `ef6bd988`) explicitly noted:
+  *"The issue cited some stale line numbers in `Zip/Archive.lean` and
+  `Zip/Tar.lean` (written against a slightly earlier tree)."*
+- **Function signatures quoted verbatim.** Issue bodies sometimes
+  paraphrase an API (e.g., `Tar.extractGz` with a hypothetical
+  `(ByteArray, ...)` signature when the actual function is
+  `Tar.extractTarGzNative` taking a `System.FilePath`). See #1561.
+  When the signature matters, `rg "def <name>" Zip/` confirms the
+  real shape in one second.
+- **Which test file / fixture directory.** Issue bodies sometimes say
+  "add to `ZipTest/Fixtures.lean`" when the file is actually
+  `ZipTest/ZipFixtures.lean`. `ls ZipTest/*.lean` at claim time is
+  faster than chasing a stale filename.
+- **Which error substring fires.** Don't trust the issue body's
+  quoted error message — probe the test with a sentinel substring
+  like `<<PROBE>>` to surface the real one. A new check in an
+  earlier PR may have pre-empted the original failure path (see
+  #1554 / `oversized-zip64-uncompressed-size.zip`).
+
+None of these are reasons to `skip` the issue — just silent tax
+you pay once per task. Adjust in your own commit, note in the
+progress entry, and move on.
+
+## Verifying the Full Conflict Scope on Fix-PR Issues
+
+"Fix PR #N" issues often list *one* conflicting file when the
+real rebase touches several. #1547 (the fix-PR for #1544) said
+"only `plans/track-e-current-audit-checklist.md` will conflict"
+but the rebase hit three conflict regions across two files
+because master had merged the sibling #1543 branch (which also
+edited `ZipTest/ZipFixtures.lean`) in the meantime. The
+resolution was mechanical — keep both fixture blocks, extend
+both cleanup loops — but the worker had to re-diagnose on the
+fly.
+
+**Before starting a rebase**, run these checks and treat them
+as the source of truth, not the issue body:
+
+    # What does GitHub think the conflict state is right now?
+    gh pr view N --json mergeable,mergeStateStatus,files \
+      --jq '{mergeable, mergeStateStatus, files: [.files[].path]}'
+
+    # What does a local rebase preview show?
+    git fetch origin
+    git checkout pr-N                           # PR's head branch
+    git rebase --abort 2>/dev/null || true      # reset any prior rebase
+    git rebase origin/master                    # let it report conflicts
+    git diff --name-only --diff-filter=U        # the actual conflict list
+    git rebase --abort                          # clean up before you commit
+
+The file list from `--diff-filter=U` is authoritative. Use it,
+not the plan.
+
+**Planner guidance**: when writing a "Fix PR #N" issue, run the
+same `gh pr view --json mergeable,files` + local rebase preview
+at plan time. List *every* conflicting file in the issue body,
+with a one-liner on the expected resolution. The cost is one
+command and one paragraph; the benefit is the worker doesn't
+re-run the diagnostic from a confused state.
+
 ## Avoiding the Recovery-of-Recovery Anti-Pattern
 
 A recovery PR can itself develop merge conflicts, creating a cascade:
