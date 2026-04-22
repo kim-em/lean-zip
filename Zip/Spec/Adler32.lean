@@ -8,6 +8,11 @@ modulo 65521 (the largest prime less than 2^16):
   B = sum of all A values after each byte
 
 The result is `(B <<< 16) ||| A`, packed into a `UInt32`.
+
+Characterizing property: compositionality of incremental computation
+(see `PLAN.md:27-28`) — `checksum (xs ++ ys)` can be recovered from
+`checksum xs` by unpacking its running state, feeding more bytes, then
+re-packing. See `checksum_append` below.
 -/
 
 namespace Adler32.Spec
@@ -90,5 +95,70 @@ theorem updateList_valid (s : State) (hs : Valid s) (data : List UInt8) :
   induction data generalizing s with
   | nil => exact hs
   | cons b bs ih => exact ih (updateByte s b) (updateByte_valid s b)
+
+/-! ## Compositionality -/
+
+/-- `pack` applied to a valid state has `.toNat = s.1 + s.2 * 65536`
+(the natural Nat-level view of the bitwise layout). -/
+private theorem pack_toNat_of_bounds {a b : Nat} (ha : a < 65536) (hb : b < 65536) :
+    (pack (a, b)).toNat = a + b * 65536 := by
+  simp only [pack, UInt32.toNat_or, UInt32.toNat_shiftLeft, UInt32.toNat_ofNat,
+    UInt32.toNat_ofNat', Nat.shiftLeft_eq]
+  have hpow : (2 : Nat) ^ (16 % 2 ^ 32 % 32) = 65536 := by decide
+  rw [Nat.mod_eq_of_lt (show a < 2^32 by omega),
+      Nat.mod_eq_of_lt (show b < 2^32 by omega), hpow,
+      Nat.mod_eq_of_lt (show b * 65536 < 2^32 by
+        have hsz : (2:Nat)^32 = 65536 * 65536 := by decide
+        omega)]
+  have hkey := Nat.two_pow_add_eq_or_of_lt (i := 16) (show a < 2^16 from ha) b
+  have heq : b * 65536 = 2 ^ 16 * b := by
+    show b * 65536 = 65536 * b
+    exact Nat.mul_comm _ _
+  rw [heq, ← hkey]
+  omega
+
+/-- The pack/unpack pair is a right-inverse: `pack ∘ unpack = id` on
+any `UInt32`. The packed representation recovers the whole 32-bit
+value because `unpack` splits it into the low 16 bits (first component)
+and the high 16 bits (second component), and `pack` re-layers them. -/
+theorem pack_unpack (v : UInt32) : pack (unpack v) = v := by
+  rw [← UInt32.toNat_inj]
+  have hmod_lt : v.toNat % 65536 < 65536 := Nat.mod_lt _ (by decide)
+  have hdiv_lt : v.toNat / 65536 < 65536 := by
+    rw [Nat.div_lt_iff_lt_mul (by decide : (0 : Nat) < 65536)]
+    have hpow : (65536 : Nat) * 65536 = 2 ^ 32 := by decide
+    have := v.toNat_lt
+    omega
+  simp only [unpack, pack_toNat_of_bounds hmod_lt hdiv_lt]
+  have := Nat.div_add_mod v.toNat 65536
+  omega
+
+/-- `unpack ∘ pack` is the identity on `Valid` states. The pack/unpack
+pair places `s.1` into the low 16 bits and `s.2` into the high 16 bits
+of a `UInt32`; both components fit in 16 bits when `Valid`, so the
+layering is lossless. -/
+theorem unpack_pack_of_valid (s : State) (hs : Valid s) :
+    unpack (pack s) = s := by
+  obtain ⟨h1, h2⟩ := hs
+  simp only [MOD_ADLER] at h1 h2
+  obtain ⟨a, b⟩ := s
+  simp only at h1 h2
+  simp only [unpack, pack_toNat_of_bounds (show a < 65536 by omega) (show b < 65536 by omega),
+    Prod.mk.injEq]
+  refine ⟨?_, ?_⟩
+  · rw [Nat.add_mul_mod_self_right]; exact Nat.mod_eq_of_lt (by omega)
+  · rw [Nat.add_mul_div_right _ _ (by decide : (0 : Nat) < 65536)]
+    simp [Nat.div_eq_of_lt (show a < 65536 by omega)]
+
+/-- Compositionality of incremental Adler-32 computation (spec level).
+The running state after processing `xs` is `unpack (checksum xs)`;
+feeding `ys` into that state and re-packing yields
+`checksum (xs ++ ys)`. -/
+theorem checksum_append (xs ys : List UInt8) :
+    checksum (xs ++ ys) =
+    pack (updateList (unpack (checksum xs)) ys) := by
+  unfold checksum
+  rw [updateList_append]
+  rw [unpack_pack_of_valid _ (updateList_valid init init_valid xs)]
 
 end Adler32.Spec
