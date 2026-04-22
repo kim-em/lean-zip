@@ -42,15 +42,22 @@ def ZipTest.NativeChecksum.tests : IO Unit := do
   let nativeSingle := Adler32.Native.adler32 1 singleByte
   assert! ffiSingle == nativeSingle
 
-  -- adler32_combine on three (xs, ys) pairs of distinct lengths: empty, 1 byte, 10 bytes.
+  -- adler32_combine on six (xs, ys) pairs: empty-ys, single-byte ys, moderate ys,
+  -- moderate-on-both, empty-xs boundary, and a deterministic 1000-byte split-at-500.
   let combineEmpty : ByteArray := ByteArray.empty
   let combineOne : ByteArray := ByteArray.mk #[7]
   let combineTen : ByteArray := ByteArray.mk #[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  let emptyXsYs : ByteArray := ByteArray.mk #[0x42, 0x07, 0xFF, 0x00, 0x80]
+  let largeData : ByteArray :=
+    ByteArray.mk ((List.range 1000).map (fun i => (i * 31 + 17).toUInt8)).toArray
+  let largeXs := largeData.extract 0 500
+  let largeYs := largeData.extract 500 1000
   let prefix₁ := ByteArray.mk #[100, 101, 102]
   let prefix₂ := helloBytes
   let cases : List (ByteArray × ByteArray) :=
     [(prefix₁, combineEmpty), (prefix₂, combineOne),
-     (combineOne, combineTen), (prefix₂, combineTen)]
+     (combineOne, combineTen), (prefix₂, combineTen),
+     (combineEmpty, emptyXsYs), (largeXs, largeYs)]
   for (xs, ys) in cases do
     let ax := Adler32.Native.adler32 1 xs
     let ay := Adler32.Native.adler32 1 ys
