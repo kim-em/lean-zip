@@ -379,6 +379,43 @@ partial def readExactStream (s : IO.FS.Stream) (n : Nat) (what : String) : IO By
     buf := buf ++ chunk
   return buf
 
+/-- Validate a read span against `fileSize`, seek to `offset`, and read exactly
+    `length` bytes. The one-shot "validate the span, then read" primitive that
+    `Archive.readEntryData`'s three open-coded `assertSpanInFile` + seek +
+    `readExact` chains implement today.
+
+    Precondition: `offset + length ≤ fileSize`. On violation, throws
+    `IO.userError` with one of two substrings (sourced from `assertSpanInFile`):
+    `"offset (…) exceeds file size (…)"` if `offset > fileSize`, or
+    `"extends past end of file"` if the span runs past the tail. If the span is
+    valid but the underlying handle returns fewer than `length` bytes, throws
+    with substring `"short read for {what}"` (sourced from `readExact`). The
+    addressable-range guard (`"exceeds addressable range"`) also fires here for
+    any `length` whose `Nat` value does not round-trip through `USize`.
+
+    Callers that have already validated the span and only need the read primitive
+    should use `readBoundedExactFromHandle` instead. Cross-reference:
+    `SECURITY_INVENTORY.md` § "Local guard inventory for `Handle.read` and
+    `Stream.read`". -/
+def readBoundedSpanFromHandle (h : IO.FS.Handle)
+    (fileSize offset length : UInt64) (what : String) : IO ByteArray := do
+  assertSpanInFile fileSize offset length what
+  Handle.seek h offset
+  readExact h length.toNat what
+
+/-- Bounded-length `readExact` for callers that have validated their span
+    separately (e.g. after seeking within a span they already confirmed lies
+    inside the file). Asserts `length.toUSize.toNat = length` before any
+    `Handle.read`; on violation throws `IO.userError` with substring
+    `"exceeds addressable range"`. Short reads surface the
+    `"short read for {what}"` substring from `readExact`. This is the "already-
+    validated span" cousin of `readBoundedSpanFromHandle`. Cross-reference:
+    `SECURITY_INVENTORY.md` § "Local guard inventory for `Handle.read` and
+    `Stream.read`". -/
+def readBoundedExactFromHandle (h : IO.FS.Handle)
+    (length : UInt64) (what : String) : IO ByteArray :=
+  readExact h length.toNat what
+
 /-- Read entries from a file handle by seeking to the tail, EOCD, and central directory.
     Memory usage: O(65KB + central directory size). -/
 private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 67108864) : IO (Array Entry) := do
