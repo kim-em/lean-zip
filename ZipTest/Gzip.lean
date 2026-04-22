@@ -29,6 +29,16 @@ def ZipTest.Gzip.tests : IO Unit := do
   let gde ← Gzip.decompress ge
   assert! gde.beq ByteArray.empty
 
+  -- Truncated input rejection (FFI)
+  let trailerTrunc := gzipped.extract 0 (gzipped.size - 4)
+  match ← (Gzip.decompress trailerTrunc).toBaseIO with
+  | .ok _ => throw (IO.userError "gzip decompress should reject trailer-truncated stream")
+  | .error _ => pure ()
+  let bodyTrunc := gzipped.extract 0 8
+  match ← (Gzip.decompress bodyTrunc).toBaseIO with
+  | .ok _ => throw (IO.userError "gzip decompress should reject body-truncated stream")
+  | .error _ => pure ()
+
   -- Concatenated gzip streams
   let part1 := "First gzip member. ".toUTF8
   let part2 := "Second gzip member. ".toUTF8

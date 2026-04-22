@@ -36,4 +36,15 @@ def ZipTest.RawDeflate.tests : IO Unit := do
   let rawCE ← RawDeflate.compress ByteArray.empty
   let rawDE ← RawDeflate.decompress rawCE
   assert! rawDE.beq ByteArray.empty
+
+  -- Truncated input rejection (FFI)
+  -- Stored-block header claiming 5 data bytes but no NLEN + no data.
+  let storedTrunc := ByteArray.mk #[0x01, 0x05, 0x00]
+  match ← (RawDeflate.decompress storedTrunc).toBaseIO with
+  | .ok _ => throw (IO.userError "raw deflate should reject truncated stored block")
+  | .error _ => pure ()
+  let compTrunc := rawCompressed.extract 0 (rawCompressed.size - 2)
+  match ← (RawDeflate.decompress compTrunc).toBaseIO with
+  | .ok _ => throw (IO.userError "raw deflate should reject truncated compressed stream")
+  | .error _ => pure ()
   IO.println "RawDeflate tests: OK"
