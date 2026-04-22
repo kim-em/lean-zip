@@ -12,7 +12,10 @@ namespace RawDeflate
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
 /-- Decompress raw deflate data.
-    `maxDecompressedSize` limits output size (0 = no limit). -/
+    `maxDecompressedSize` caps output size; default `0` means unlimited
+    (bomb-unsafe for untrusted input). Overflow raises `IO.userError`
+    containing `"decompressed size exceeds limit"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 @[extern "lean_raw_deflate_decompress"]
 opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
@@ -41,7 +44,11 @@ partial def compressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
   if final.size > 0 then output.write final
   output.flush
 
-/-- Decompress raw deflate data from input stream to output stream. -/
+/-- Decompress raw deflate data from input stream to output stream.
+    Input memory usage is bounded, but there is no library-level cap on total
+    decompressed output — the caller's sink is the only bound. See
+    `SECURITY_INVENTORY.md` *Decompression Limit Inventory* (recommendation 2)
+    for the proposed `maxDecompressedSize` streaming cap. -/
 partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream) : IO Unit := do
   let state ← InflateState.new
   repeat do

@@ -8,7 +8,10 @@ namespace Gzip
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
 /-- Decompress gzip data. Also handles concatenated gzip streams and raw zlib data.
-    `maxDecompressedSize` limits output size (0 = no limit). -/
+    `maxDecompressedSize` caps the *total* output across all concatenated members;
+    default `0` means unlimited (bomb-unsafe for untrusted input). Overflow raises
+    `IO.userError` containing `"decompressed size exceeds limit"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 @[extern "lean_gzip_decompress"]
 opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
@@ -69,7 +72,10 @@ partial def compressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
   output.flush
 
 /-- Decompress gzip data from input stream to output stream.
-    Handles concatenated gzip streams. Memory usage is bounded. -/
+    Handles concatenated gzip streams. Input memory usage is bounded, but there
+    is no library-level cap on total decompressed output — the caller's sink is
+    the only bound. See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*
+    (recommendation 2) for the proposed `maxDecompressedSize` streaming cap. -/
 partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream) : IO Unit := do
   let state ← InflateState.new
   repeat do
@@ -93,7 +99,10 @@ def compressFile (path : System.FilePath) (level : UInt8 := 6) : IO System.FileP
   return outPath
 
 /-- Decompress a gzip file. Strips `.gz` suffix, or appends `.ungz` as fallback.
-    Optional explicit output path. Streams with bounded memory. -/
+    Optional explicit output path. Streams with bounded input memory; as with
+    `decompressStream`, there is no library-level cap on total decompressed
+    output, so a bomb can fill the output path's disk.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompressFile (path : System.FilePath) (outPath : Option System.FilePath := none)
     : IO System.FilePath := do
   let out := match outPath with

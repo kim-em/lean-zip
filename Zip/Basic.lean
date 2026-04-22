@@ -7,7 +7,10 @@ namespace Zlib
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
 /-- Decompress zlib-compressed data.
-    `maxDecompressedSize` limits output size (0 = no limit). -/
+    `maxDecompressedSize` caps output size; default `0` means unlimited
+    (bomb-unsafe for untrusted input). Overflow raises `IO.userError`
+    containing `"decompressed size exceeds limit"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 @[extern "lean_zlib_decompress"]
 opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
 
