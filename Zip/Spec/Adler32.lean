@@ -253,45 +253,39 @@ theorem checksum_replicate (n : Nat) (b : UInt8)
   -- Strengthened invariant, free over the starting `(a, bsum)`.
   have hstate : ∀ (m a bsum : Nat),
       a + m * b.toNat < 65521 →
-      bsum + m * a + b.toNat * (m * (m + 1) / 2) < 65521 →
+      bsum + m * a + (m * (m + 1) / 2) * b.toNat < 65521 →
       updateList (a, bsum) (List.replicate m b) =
-        (a + m * b.toNat, bsum + m * a + b.toNat * (m * (m + 1) / 2)) := by
+        (a + m * b.toNat, bsum + m * a + (m * (m + 1) / 2) * b.toNat) := by
     intro m
     induction m with
-    | zero => intros; simp [updateList]
+    | zero => intros; simp only [updateList, List.replicate, List.foldl_nil,
+        Nat.zero_mul, Nat.zero_div, Nat.add_zero]
     | succ k ih =>
       intro a bsum ha hb
       -- Normalize `k + 1 + 1` → `k + 2` so omega sees matching atoms.
-      change bsum + (k + 1) * a + b.toNat * ((k + 1) * (k + 2) / 2) < 65521 at hb
+      change bsum + (k + 1) * a + ((k + 1) * (k + 2) / 2) * b.toNat < 65521 at hb
       show updateList (a, bsum) (List.replicate (k + 1) b) =
         (a + (k + 1) * b.toNat,
-         bsum + (k + 1) * a + b.toNat * ((k + 1) * (k + 2) / 2))
-      -- Distributivity facts (omega treats `k*_`, `b*T_k`, `b*T_{k+1}` as atoms).
+         bsum + (k + 1) * a + ((k + 1) * (k + 2) / 2) * b.toNat)
+      -- Distributivity facts (omega treats `k*_`, `T_k*b`, `T_{k+1}*b` as atoms).
       have hka : (k + 1) * a = k * a + a := Nat.succ_mul k a
       have hkb : (k + 1) * b.toNat = k * b.toNat + b.toNat := Nat.succ_mul k b.toNat
       have hkab : k * (a + b.toNat) = k * a + k * b.toNat := Nat.mul_add k a b.toNat
-      have hbtri : b.toNat * ((k + 1) * (k + 2) / 2)
-                 = b.toNat * (k * (k + 1) / 2) + (k * b.toNat + b.toNat) := by
-        rw [htri k, Nat.mul_add, Nat.mul_succ b.toNat k, Nat.mul_comm b.toNat k]
-      have hbT : b.toNat ≤ b.toNat * ((k + 1) * (k + 2) / 2) := by
-        have : (1 : Nat) ≤ (k + 1) * (k + 2) / 2 := by rw [htri k]; omega
-        simpa using Nat.mul_le_mul_left b.toNat this
-      -- Compute `updateByte (a, bsum) b` under bounds.
-      have hbyte : updateByte (a, bsum) b = (a + b.toNat, bsum + (a + b.toNat)) := by
-        show ((a + b.toNat) % MOD_ADLER,
-              (bsum + (a + b.toNat) % MOD_ADLER) % MOD_ADLER) = _
-        rw [Nat.mod_eq_of_lt (by simp only [MOD_ADLER]; omega),
-            Nat.mod_eq_of_lt (by simp only [MOD_ADLER]; omega)]
-      rw [List.replicate_succ, updateList_cons, hbyte,
-          ih (a + b.toNat) (bsum + (a + b.toNat)) (by omega) (by omega)]
+      have hbtri : ((k + 1) * (k + 2) / 2) * b.toNat
+                 = (k * (k + 1) / 2) * b.toNat + (k * b.toNat + b.toNat) := by
+        rw [htri k, Nat.add_mul, Nat.succ_mul k b.toNat]
+      rw [List.replicate_succ, updateList_cons]
+      simp only [updateByte, MOD_ADLER,
+        Nat.mod_eq_of_lt (show a + b.toNat < 65521 by omega),
+        Nat.mod_eq_of_lt (show bsum + (a + b.toNat) < 65521 by omega)]
+      rw [ih (a + b.toNat) (bsum + (a + b.toNat)) (by omega) (by omega)]
       refine Prod.mk.injEq .. |>.mpr ⟨?_, ?_⟩ <;> omega
   -- Instantiate at (1, 0) and n.
-  have hc : b.toNat * (n * (n + 1) / 2) = (n * (n + 1) / 2) * b.toNat := Nat.mul_comm ..
   have hupdate : updateList init (List.replicate n b) =
       (1 + n * b.toNat, n + (n * (n + 1) / 2) * b.toNat) := by
-    have h := hstate n 1 0 hA (by rw [hc]; omega)
+    have h := hstate n 1 0 hA (by omega)
     show updateList (1, 0) (List.replicate n b) = _
-    rw [h]; refine Prod.mk.injEq .. |>.mpr ⟨rfl, ?_⟩; rw [hc]; omega
+    rw [h]; refine Prod.mk.injEq .. |>.mpr ⟨rfl, ?_⟩; omega
   have hbnd : (n + (n * (n + 1) / 2) * b.toNat) * 65536
               + (1 + n * b.toNat) < UInt32.size := by
     simp only [UInt32.size]; omega
