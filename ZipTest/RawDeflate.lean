@@ -60,4 +60,38 @@ def ZipTest.RawDeflate.tests : IO Unit := do
   match ← (RawDeflate.decompress compTrunc).toBaseIO with
   | .ok _ => throw (IO.userError "raw deflate should reject truncated compressed stream")
   | .error _ => pure ()
+
+  -- Streaming decompress with a non-zero limit larger than the decompressed
+  -- size: happy path, output matches input.
+  let mkWriteStream : IO (IO.Ref ByteArray × IO.FS.Stream) := do
+    let ref ← IO.mkRef ByteArray.empty
+    let stream : IO.FS.Stream := {
+      flush := pure (), read := fun _ => pure ByteArray.empty
+      write := fun c => ref.modify (· ++ c)
+      getLine := pure "", putStr := fun _ => pure (), isTty := pure false
+    }
+    return (ref, stream)
+  let smallInput := "raw deflate streaming happy path".toUTF8
+  let rdSmall ← RawDeflate.compress smallInput
+  let rdInOk ← byteArrayReadStream rdSmall
+  let (rdOutRefOk, rdOutOk) ← mkWriteStream
+  RawDeflate.decompressStream rdInOk rdOutOk (maxDecompressedSize := 1024)
+  let rdOkBytes ← rdOutRefOk.get
+  assert! rdOkBytes.beq smallInput
+
+  -- Streaming decompress with a limit smaller than the decompressed size:
+  -- must abort mid-stream with `"exceeds limit"`, and the partial output
+  -- must be at most `maxDecompressedSize` bytes.
+  let rdInBomb ← byteArrayReadStream rawCompressed
+  let (rdOutRefBomb, rdOutBomb) ← mkWriteStream
+  let rdStreamLimit : UInt64 := 10
+  match ← (RawDeflate.decompressStream rdInBomb rdOutBomb
+      (maxDecompressedSize := rdStreamLimit)).toBaseIO with
+  | .ok _ =>
+    throw (IO.userError "raw deflate decompressStream limit should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"raw deflate decompressStream limit wrong error: {e}")
+  let rdPartial ← rdOutRefBomb.get
+  assert! rdPartial.size.toUInt64 ≤ rdStreamLimit
   IO.println "RawDeflate tests: OK"

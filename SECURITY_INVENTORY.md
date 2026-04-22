@@ -386,12 +386,18 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
   misread — a caller who sees "limits default to sensible values" on
   the CD side might reasonably assume the entry side is also
   bounded.
-- **Streaming FFI APIs have no output cap at all.**
-  `Gzip.decompressStream`, `Gzip.decompressFile`, and
-  `RawDeflate.decompressStream` take no output-size parameter — they
-  are bounded only by the caller's sink (`output.write`). Any tool
-  built on top that writes to disk is a potential bomb target with
-  no library-level guard.
+- **Streaming FFI APIs expose `maxDecompressedSize` but default to
+  `0 = no limit`.** `Gzip.decompressStream`, `Gzip.decompressFile`, and
+  `RawDeflate.decompressStream` now accept an optional
+  `maxDecompressedSize : UInt64 := 0` parameter (matching the
+  whole-buffer FFI decoders). Overflow raises `IO.userError`
+  containing `"exceeds limit"` (same substring as the whole-buffer
+  path) and aborts before writing the overflowing chunk. See the
+  function docstrings for the exact error wording. Callers that want
+  bomb protection for disk-backed flows must pass a finite value —
+  the default `0` preserves today's unlimited behaviour for back-compat.
+  Changing the **default** to a finite value is still open; see
+  *Recommended policy* item 2 below.
 
 ### Recommended policy
 

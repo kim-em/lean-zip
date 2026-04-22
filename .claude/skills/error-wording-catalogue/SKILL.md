@@ -17,6 +17,8 @@ one makes the test brittle to message rewrites.
 | Subsystem | Emits from | Full message (approx.) | Recommended match substring |
 |-----------|------------|------------------------|-----------------------------|
 | FFI whole-buffer decoders | `c/zlib_ffi.c:195` | `ZLib: decompressed data exceeds limit (…)` | `"exceeds limit"` |
+| FFI streaming decoders (gzip) | `Zip/Gzip.lean` (`decompressStream`, `decompressFile`) | `gzip: decompressed stream exceeds limit (<N> bytes)` | `"exceeds limit"` |
+| FFI streaming decoders (raw deflate) | `Zip/RawDeflate.lean` (`decompressStream`) | `raw deflate: decompressed stream exceeds limit (<N> bytes)` | `"exceeds limit"` |
 | Archive per-entry bomb | `Zip/Archive.lean:408-410` | `Archive: entry <name> exceeds limit (…)` | `"exceeds limit"` |
 | Archive ZIP64 span check | `Zip/Archive.lean:428-429` | `Archive: local data span for <name> (…)` | `"local data span"` |
 | Archive CD/LH consistency | `Zip/Archive.lean` | `mismatch between CD and local header (<field>)` | `"mismatch between CD and local header"` |

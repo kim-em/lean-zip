@@ -150,6 +150,52 @@ def ZipTest.Gzip.tests : IO Unit := do
   let roundtripped2 ← IO.FS.readBinFile customOut
   assert! roundtripped2.beq big
 
+  -- Streaming decompress with a non-zero limit that is larger than the
+  -- decompressed size: happy path, full output reconstructed.
+  let mkWriteStream : IO (IO.Ref ByteArray × IO.FS.Stream) := do
+    let ref ← IO.mkRef ByteArray.empty
+    let stream : IO.FS.Stream := {
+      flush := pure (), read := fun _ => pure ByteArray.empty
+      write := fun c => ref.modify (· ++ c)
+      getLine := pure "", putStr := fun _ => pure (), isTty := pure false
+    }
+    return (ref, stream)
+  let smallInput := "hello, streaming world!".toUTF8
+  let gzSmall ← Gzip.compress smallInput
+  let inStreamOk ← byteArrayReadStream gzSmall
+  let (outRefOk, outStreamOk) ← mkWriteStream
+  Gzip.decompressStream inStreamOk outStreamOk (maxDecompressedSize := 1024)
+  let outOk ← outRefOk.get
+  assert! outOk.beq smallInput
+
+  -- Streaming decompress with a limit smaller than the decompressed size:
+  -- must abort mid-stream with the shared `"exceeds limit"` substring, and
+  -- the partial output must be at most `maxDecompressedSize` bytes.
+  let bombInput ← mkTestData  -- 6200 bytes of redundant text
+  let gzBomb ← Gzip.compress bombInput
+  let inStreamBomb ← byteArrayReadStream gzBomb
+  let (outRefBomb, outStreamBomb) ← mkWriteStream
+  let streamLimit : UInt64 := 10
+  match ← (Gzip.decompressStream inStreamBomb outStreamBomb
+      (maxDecompressedSize := streamLimit)).toBaseIO with
+  | .ok _ => throw (IO.userError "gzip decompressStream limit should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"gzip decompressStream limit wrong error: {e}")
+  let partial_ ← outRefBomb.get
+  assert! partial_.size.toUInt64 ≤ streamLimit
+
+  -- decompressFile with a generous non-zero limit: happy path.
+  let fileLimitTmp : System.FilePath := "/tmp/lean-zlib-test-filelimit.bin"
+  IO.FS.writeBinFile fileLimitTmp big
+  let fileLimitGz ← Gzip.compressFile fileLimitTmp
+  let fileLimitOut ← Gzip.decompressFile fileLimitGz
+    (maxDecompressedSize := (big.size * 2).toUInt64)
+  let fileLimitRoundtripped ← IO.FS.readBinFile fileLimitOut
+  assert! fileLimitRoundtripped.beq big
+  for f in #["/tmp/lean-zlib-test-filelimit.bin", "/tmp/lean-zlib-test-filelimit.bin.gz"] do
+    let _ ← IO.Process.run { cmd := "rm", args := #["-f", f] }
+
   -- Large data via streaming
   let large ← mkLargeData
   let largeTmp : System.FilePath := "/tmp/lean-zlib-test-large.bin"
