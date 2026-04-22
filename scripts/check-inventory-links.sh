@@ -28,6 +28,14 @@
 #       tolerates prose phrasing drift that is orthogonal to code
 #       drift.
 #
+#       Pass (c) warnings are silenced on any inventory line that
+#       contains `<!-- drift-detector: ... -->` — an opt-out
+#       intended for quote/anchor mismatches where the quote is
+#       structurally unverifiable against the cited file (e.g.,
+#       declaration-style quotes with keyword-argument callsites).
+#       The marker suppresses the warning at line granularity; it
+#       does not affect passes (a) or (b).
+#
 # Why (a)/(b) are hard and (c) is soft: (a)/(b) are unambiguous
 # correctness failures — either the anchor is live or the audit
 # trail is broken. (c) is a best-effort detector for stale line
@@ -199,6 +207,14 @@ while IFS=: read -r srcln path lineno; do
     done
 
     if (( !found )); then
+        # Per-line opt-out: a `<!-- drift-detector: ... -->` marker on
+        # the inventory line silences pass (c) warnings for that line.
+        # Reserved for cases where the quote is structurally
+        # unverifiable against the cited file (e.g., declaration-style
+        # quotes with keyword-argument callsites).
+        if grep -Fq -- '<!-- drift-detector:' <<< "$prose"; then
+            continue
+        fi
         cited=$(awk -v n="$lineno" 'NR==n{print; exit}' "$path")
         # Trim cited line for display.
         cited="${cited:0:120}"
