@@ -176,6 +176,35 @@ theorem checksum_singleton (b : UInt8) :
       simp only [UInt32.size]; omega)]
   omega
 
+/-- The Adler-32 checksum of a two-byte input `[b₁, b₂]` has the closed
+form `(1 + b₁ + b₂) + (2 + 2·b₁ + b₂) * 65536` (as a `UInt32`). Both
+state components stay well below `MOD_ADLER = 65521` after two updates
+(max values `511` and `767`), so no modular reduction fires, and the
+result is the unreduced packed pair. -/
+theorem checksum_pair (b₁ b₂ : UInt8) :
+    checksum [b₁, b₂] = UInt32.ofNat
+      ((1 + b₁.toNat + b₂.toNat) +
+       (2 + 2 * b₁.toNat + b₂.toNat) * 65536) := by
+  have h1 : b₁.toNat < 256 := b₁.toNat_lt
+  have h2 : b₂.toNat < 256 := b₂.toNat_lt
+  rw [← UInt32.toNat_inj]
+  simp only [checksum, updateList, List.foldl_cons, List.foldl_nil,
+    updateByte, init, MOD_ADLER]
+  have ha₁ : (1 + b₁.toNat) % 65521 = 1 + b₁.toNat :=
+    Nat.mod_eq_of_lt (by omega)
+  have ha₂ : (1 + b₁.toNat + b₂.toNat) % 65521 = 1 + b₁.toNat + b₂.toNat :=
+    Nat.mod_eq_of_lt (by omega)
+  have hb₂ : ((1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat)) % 65521 =
+             (1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat) :=
+    Nat.mod_eq_of_lt (by omega)
+  rw [ha₁, Nat.zero_add, ha₁, ha₂, hb₂,
+    pack_toNat_of_bounds (show 1 + b₁.toNat + b₂.toNat < 65536 by omega)
+                          (show (1 + b₁.toNat) + (1 + b₁.toNat + b₂.toNat) < 65536 by omega),
+    UInt32.toNat_ofNat_of_lt' (show (1 + b₁.toNat + b₂.toNat) +
+        (2 + 2 * b₁.toNat + b₂.toNat) * 65536 < UInt32.size by
+      simp only [UInt32.size]; omega)]
+  omega
+
 /-- Compositionality of incremental Adler-32 computation (spec level).
 The running state after processing `xs` is `unpack (checksum xs)`;
 feeding `ys` into that state and re-packing yields

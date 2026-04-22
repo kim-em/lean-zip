@@ -52,6 +52,19 @@ theorem adler32_singleton (b : UInt8) :
   simp only [adler32, updateBytes_eq_updateList, hdata, hunpack]
   exact Spec.checksum_singleton b
 
+/-- Closed form for the Adler-32 of a two-byte input starting from the
+default `init = 1`. Matches `Spec.checksum_pair` after bridging the
+pack/unpack on the initial state. -/
+theorem adler32_pair (b₁ b₂ : UInt8) :
+    adler32 1 ((ByteArray.empty.push b₁).push b₂) =
+    UInt32.ofNat
+      ((1 + b₁.toNat + b₂.toNat) +
+       (2 + 2 * b₁.toNat + b₂.toNat) * 65536) := by
+  have hdata : ((ByteArray.empty.push b₁).push b₂).data.toList = [b₁, b₂] := rfl
+  have hunpack : Spec.unpack 1 = Spec.init := by decide
+  simp only [adler32, updateBytes_eq_updateList, hdata, hunpack]
+  exact Spec.checksum_pair b₁ b₂
+
 /-- Compositionality of incremental Adler-32 computation (native level,
 see `PLAN.md:27-28`). Associativity of `adler32` over `ByteArray`
 append — an incremental streaming pipeline over concatenated chunks
