@@ -347,11 +347,15 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Archive.list](/home/kim/lean-zip/Zip/Archive.lean:497) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | metadata-only; caps CD allocation, not decompressed payload. |
 | [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
 | [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited (FFI backend only; native inflate rejects `0`) | per-entry cap on the decompressed payload. |
+| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all entries; intended as a second line of defence against many-small-entries bombs. |
 | [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
 | [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited (FFI backend only; native inflate rejects `0`) | per-entry cap. |
-| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:602) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610)). No whole-archive cap. |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:602) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610)). |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:602) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all regular-file entries; directories and symlinks contribute zero. |
 | [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:714) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
+| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:714) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
 | [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
 | [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
 
 ### Known inconsistencies
@@ -393,13 +397,11 @@ issues and the follow-up docstring/default change.
    (pass `0` to opt into unlimited mode on the FFI backend), and the
    silent `0 → 256 MiB` upgrade in `Archive.readEntryData` has been
    removed. See this PR.
-4. **Archive extraction — whole-archive cap**.
-   - Add a new `maxTotalSize : UInt64 := 0` (sum of decompressed
-     entries) to `Archive.extract` and the tar extractors. Default
-     `0 = no limit` is acceptable here as a starting point because
-     `maxEntrySize` (recommendation 3) already bounds the common
-     case; the total cap is a second line of defence against
-     many-small-entries bombs.
+4. **Archive extraction — whole-archive cap**. Executed —
+   `Archive.extract`, `Tar.extract`, `Tar.extractTarGz`, and
+   `Tar.extractTarGzNative` now accept an optional
+   `maxTotalSize : UInt64 := 0` parameter; default `0` is unlimited
+   and callers opt into a finite cap. See this PR.
 5. **Native-side uniformity**. Executed (issue #1609) — all four
    native decoders (`Inflate.inflate`, `GzipDecode.decompress`,
    `ZlibDecode.decompress`, `decompressAuto`) now default to **1 GiB**,
@@ -439,9 +441,6 @@ Known caller impact if recommendations 1–5 land:
   is still open. Until a caller passes a finite value, a crafted
   input that inflates to terabytes will still write terabytes to
   the caller's sink.
-- There is no public API for "whole-archive" decompressed-size cap
-  on ZIP or tar extraction — see recommendation 4.
-
 ### Local guard inventory for `Handle.read` and `Stream.read`
 
 Per-callsite audit of every `Handle.read`, `Stream.read`, and

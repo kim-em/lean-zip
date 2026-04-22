@@ -618,11 +618,14 @@ private partial def forEntries (input : IO.FS.Stream)
     tar header's `e.size` before any payload bytes are read. Default `1 GiB`
     per entry; pass `0` to opt out into unlimited mode. Overflow raises
     `IO.userError` containing
-    `"tar: entry '…' size (…) exceeds limit (…)"`. There is no
-    library-level cap on total extracted bytes across an archive — many
-    small entries can still exhaust disk. See `SECURITY_INVENTORY.md`
-    *Decompression Limit Inventory* (recommendation 3 calls out the
-    total-bytes gap).
+    `"tar: entry '…' size (…) exceeds limit (…)"`.
+
+    `maxTotalSize` (when non-zero) caps the sum of decompressed bytes across
+    all entries written by this extraction. Default `0` means no whole-archive
+    cap; rely on `maxEntrySize` for per-entry bounding. Overflow raises
+    `IO.userError` containing
+    `"tar: total extracted size (…) exceeds whole-archive limit (…)"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
 
     `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the
     buffered payload of every GNU long-name, GNU long-link, and PAX
@@ -647,7 +650,9 @@ private partial def forEntries (input : IO.FS.Stream)
       escape `outDir`. -/
 partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
     (maxEntrySize : UInt64 := 1024 * 1024 * 1024)
+    (maxTotalSize : UInt64 := 0)
     (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
+  let totalRef ← IO.mkRef (0 : UInt64)
   forEntries (maxHeaderSize := maxHeaderSize) input fun e => do
     -- Strip trailing slash for path safety check (directories end with "/")
     let checkPath := if e.path.endsWith "/" then e.path.dropEnd 1 |>.toString else e.path
@@ -664,6 +669,12 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
         IO.Prim.setAccessRights outPath mode
       skipEntryData input e.size
     else if e.typeflag == typeRegular then
+      -- Whole-archive running-total check: fires before any payload bytes are
+      -- written for this entry. Only regular-file payloads contribute.
+      if maxTotalSize > 0 then
+        let running ← totalRef.get
+        if maxTotalSize - running < e.size then
+          throw (IO.userError s!"tar: total extracted size ({e.size.toNat + running.toNat}) exceeds whole-archive limit ({maxTotalSize})")
       if let some parent := outPath.parent then
         IO.FS.createDirAll parent
       IO.FS.withFile outPath .write fun h => do
@@ -684,6 +695,7 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
           let chunk ← input.read (min padRemaining 512).toUSize
           if chunk.isEmpty then break
           padRemaining := padRemaining - chunk.size
+      totalRef.modify (· + e.size)
     else if e.typeflag == typeSymlink then
       -- Component-level validation: reject absolute, backslash, and `..` traversal
       if e.linkname.startsWith "/" || e.linkname.any (· == '\\') then
@@ -753,12 +765,20 @@ partial def createTarGz (outputPath : System.FilePath) (dir : System.FilePath)
     `maxOutputSize` parameter today (the known gap tracked by
     `SECURITY_INVENTORY.md` *Decompression Limit Inventory*, recommendation 2).
 
+    `maxTotalSize` (when non-zero) caps the sum of decompressed bytes across
+    all entries written by this extraction. Default `0` means no whole-archive
+    cap; rely on `maxEntrySize` for per-entry bounding. Overflow raises
+    `IO.userError` containing
+    `"tar: total extracted size (…) exceeds whole-archive limit (…)"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
+
     `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the
     buffered payload of every GNU long-name, GNU long-link, and PAX
     pseudo-entry. Overflow raises `IO.userError` containing the
     substring `"exceeds maximum header size"`. -/
 partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath)
     (maxEntrySize : UInt64 := 1024 * 1024 * 1024)
+    (maxTotalSize : UInt64 := 0)
     (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
   IO.FS.withFile inputPath .read fun inH => do
     let inStream := IO.FS.Stream.ofHandle inH
@@ -787,7 +807,7 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
       putStr := fun _ => pure ()
       isTty := pure false
     }
-    extract tarStream outDir maxEntrySize maxHeaderSize
+    extract tarStream outDir maxEntrySize maxTotalSize maxHeaderSize
 
 /-- Extract a .tar.gz archive using pure Lean decompression (no C FFI).
     Unlike `extractTarGz`, this reads the entire file into memory before
@@ -798,6 +818,13 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
     bytes are read. Default `1 GiB` per entry; pass `0` to opt out into
     unlimited mode. Overflow raises `IO.userError`
     containing `"tar: entry '…' size (…) exceeds limit (…)"`.
+
+    `maxTotalSize` (when non-zero) caps the sum of decompressed bytes across
+    all entries written by this extraction. Default `0` means no whole-archive
+    cap; rely on `maxEntrySize` for per-entry bounding. Overflow raises
+    `IO.userError` containing
+    `"tar: total extracted size (…) exceeds whole-archive limit (…)"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
 
     `maxOutputSize` (default 256 MiB) caps the decompressed tar buffer
     produced by the outer native gzip decode. The native variant exposes this
@@ -812,7 +839,9 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
     pseudo-entry. Overflow raises `IO.userError` containing the
     substring `"exceeds maximum header size"`. -/
 partial def extractTarGzNative (inputPath : System.FilePath) (outDir : System.FilePath)
-    (maxEntrySize : UInt64 := 1024 * 1024 * 1024) (maxOutputSize : Nat := 256 * 1024 * 1024)
+    (maxEntrySize : UInt64 := 1024 * 1024 * 1024)
+    (maxTotalSize : UInt64 := 0)
+    (maxOutputSize : Nat := 256 * 1024 * 1024)
     (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
   let gzData ← IO.FS.readBinFile inputPath
   let tarData ← match Zip.Native.GzipDecode.decompress gzData maxOutputSize with
@@ -835,6 +864,6 @@ partial def extractTarGzNative (inputPath : System.FilePath) (outDir : System.Fi
     putStr := fun _ => pure ()
     isTty := pure false
   }
-  extract tarStream outDir maxEntrySize maxHeaderSize
+  extract tarStream outDir maxEntrySize maxTotalSize maxHeaderSize
 
 end Tar
