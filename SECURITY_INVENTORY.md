@@ -194,7 +194,11 @@ Summary — what this pattern catches and what it does not:
   - path traversal blocked via `Binary.isPathSafe`
   - CRC and final size checked after extraction
 - Missing work:
-  - prove bounded-read lemmas for the guarded read paths if tractable
+  - Executed — bounded-read helpers for `Handle`/`Stream` landed in
+    PR #1608 (Track E P5.1); `SpanInFile` predicate + IO reduction
+    lemmas in PR #1636 (Track E P5.2); `Archive`/`Tar` callers
+    migrated to the helpers in PR #1626 (Track E P5.3). No residual
+    sites currently identified at this layer.
 - Recent wins:
   - central-directory vs. local-header mismatch checks — PR #1554
     (`testdata/zip/malformed/cd-lh-method-mismatch.zip`,
@@ -203,6 +207,12 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/oversized-zip64-compressed-size.zip`)
   - oversized ZIP64 uncompressed-size fixture — PR #1544
     (`testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`)
+  - bounded-read helpers for `Handle`/`Stream` — PR #1608
+    (Track E P5.1)
+  - `SpanInFile` predicate + IO reduction lemmas — PR #1636
+    (Track E P5.2)
+  - `Archive`/`Tar` callers migrated to bounded-read helpers — PR #1626
+    (Track E P5.3)
 
 ### Tar Parser/Extractor
 
@@ -277,9 +287,17 @@ Regression fixtures live under `testdata/tar/security/`:
   - decompression APIs expose `maxDecompressedSize` or native equivalents
   - malformed fixture coverage already exists for some gzip/zip/tar cases
 - Missing work:
-  - inventory all call sites using unlimited decompression (`0 = no limit`)
-  - decide whether all public extraction APIs should default to bounded mode
-  - add sanitizer-backed regression coverage for streaming decode paths
+  - Executed — call-site inventory of `0 = no limit` is the
+    *Decompression Limit Inventory* table below; this bullet is
+    superseded by that table.
+  - Executed — *Recommended policy* items 1–5 below all landed;
+    extraction APIs now default to bounded mode (1 GiB per-entry,
+    1 GiB FFI whole-buffer; opt-in `0` for unlimited).
+  - Executed — sanitizer recipe in
+    [`scripts/sanitize-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-ffi.sh)
+    covers FFI entry points; streaming paths additionally exercised
+    by the fuzz harness (PR #1602) extended to streaming
+    `decompressStream` APIs in PR #1653.
 
 ## Known Immediate Audit Targets
 
@@ -416,11 +434,16 @@ Known caller impact if recommendations 1–5 land:
 
 ### Missing work
 
-- No bomb-limit regression test yet exists for any FFI decompression
-  default except `Zlib.decompress`. Sibling issues in this session
-  add coverage for `Gzip.decompress`, `RawDeflate.decompress`,
-  `Zip.Native.GzipDecode.decompress`, `Archive.extract`,
-  `Archive.extractFile`, `Tar.extract`, and `Tar.extractTarGz`.
+_All bomb-limit regression coverage proposed in the original block
+has landed (Track E P3 + P5 + F-series, 2026-04-22)._ Per-API
+coverage is documented in the audit table at
+[`progress/20260422T115256Z_d2757984.md`](/home/kim/lean-zip/progress/20260422T115256Z_d2757984.md).
+Notably absent surfaces (`Zlib.decompressStream`,
+`Zlib.decompressFile`, `RawDeflate.decompressFile`) are absent
+because the public API does not expose them, not because tests are
+missing.
+
+Residual gaps: none currently open at this layer.
 
 ### Local guard inventory for `Handle.read` and `Stream.read`
 
