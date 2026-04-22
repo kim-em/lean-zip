@@ -29,6 +29,10 @@ structure Entry where
   crc32            : UInt32 := 0
   method           : UInt16 := 0  -- 0 = stored, 8 = deflated
   localOffset      : UInt64 := 0
+  -- Central-directory general-purpose bit flag word, carried through so
+  -- `readEntryData` can enforce CD/LH flags consistency (bit 11 UTF-8 name,
+  -- etc.). Writers ignore this field and emit a fixed `0x0800` flag word.
+  flags            : UInt16 := 0
   deriving Repr, Inhabited
 
 /-- Check if an entry needs ZIP64 extra fields. -/
@@ -332,6 +336,7 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
       crc32 := crc
       method := method
       localOffset := localOff
+      flags := flags
     }
     pos := pos + 46 + nameLen + extraLen + commentLen
   return entries
@@ -580,12 +585,21 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   -- flags ("data descriptor present") is set, the LH crc/compSize/uncompSize
   -- fields are legitimately zero with the real values trailing the payload in
   -- a data descriptor — defer crc/size checks to `actualCrc` below in that
-  -- case (we do not parse the data descriptor itself today).  We do not yet
-  -- check the UTF-8 (bit 11) or other flag bits because `Entry` does not carry
-  -- the CD flags; a follow-up issue can thread `flags` through and add that.
+  -- case (we do not parse the data descriptor itself today).
+  -- Flag bits other than bit 3 are checked below for CD/LH consistency.
   unless localMethod == entry.method do
     throw (IO.userError
       s!"zip: method mismatch between CD and local header for {label} (CD={entry.method}, LH={localMethod})")
+  -- Flags must agree on every bit except bit 3 (data-descriptor presence,
+  -- which is a per-segment local concern), so XOR-mask out bit 3 before
+  -- comparing. A mismatch on bit 11 (UTF-8 name) in particular is a
+  -- known smuggling vector — the CD-derived `Entry.path` we already
+  -- parsed used CD's bit-11 setting; if the LH disagrees, downstream
+  -- consumers that re-parse the LH would get a different name.
+  let flagsMask : UInt16 := 0xFFF7  -- all bits except bit 3
+  unless (localFlags &&& flagsMask) == (entry.flags &&& flagsMask) do
+    throw (IO.userError
+      s!"zip: flags mismatch between CD and local header for {label} (CD={entry.flags}, LH={localFlags})")
   let usesDataDescriptor := (localFlags &&& 0x0008) != 0
   unless usesDataDescriptor do
     unless localCompSize == entry.compressedSize do
