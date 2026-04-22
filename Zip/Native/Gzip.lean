@@ -26,7 +26,17 @@ def scanToZero (data : ByteArray) (pos : Nat) : Nat :=
 termination_by data.size - pos
 
 /-- Decompress a gzip stream (RFC 1952). Supports concatenated members.
-    Returns the decompressed data. -/
+    Returns the decompressed data.
+
+    `maxOutputSize` (default 256 MiB) caps the *total* output across all
+    concatenated members as a zip-bomb guard. Unlike the FFI path, where
+    `maxDecompressedSize := 0` means unlimited, here `0` rejects any
+    non-empty output (the inner inflate guards compare
+    `output.size + len > maxOutputSize`). The outer-loop guard raises an
+    `Except` error containing `"Gzip: total output exceeds maximum size"`;
+    the inner per-member `Inflate.inflateRaw` call also enforces the bound
+    and may surface `"Inflate: output exceeds maximum size"` first.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
     Except String ByteArray := do
   if data.size < 10 then throw "Gzip: input too short for gzip header"
@@ -118,7 +128,15 @@ end GzipEncode
 namespace ZlibDecode
 
 /-- Decompress a zlib stream (RFC 1950).
-    Returns the decompressed data. -/
+    Returns the decompressed data.
+
+    `maxOutputSize` (default 256 MiB) is forwarded to the inner
+    `Inflate.inflateRaw`; this layer adds no separate guard. Unlike the
+    FFI path, where `maxDecompressedSize := 0` means unlimited, here `0`
+    rejects any non-empty output (the inflate guards compare
+    `output.size + len > maxOutputSize`). Overflow raises an `Except`
+    error containing `"Inflate: output exceeds maximum size"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
     Except String ByteArray := do
   if hSz : data.size < 6 then throw "Zlib: input too short"
@@ -208,7 +226,17 @@ def detectFormat (data : ByteArray) : CompressFormat :=
   else
     .rawDeflate
 
-/-- Decompress data by auto-detecting the format (gzip, zlib, or raw deflate). -/
+/-- Decompress data by auto-detecting the format (gzip, zlib, or raw deflate).
+
+    `maxOutputSize` (default 256 MiB) is forwarded to whichever of
+    `GzipDecode.decompress`, `ZlibDecode.decompress`, or `Inflate.inflate`
+    the dispatch picks based on `detectFormat`. The surfaced error
+    substring depends on the dispatch: `"Gzip: total output exceeds
+    maximum size"` (gzip outer guard), or `"Inflate: output exceeds
+    maximum size"` (zlib, raw deflate, or any inner inflate guard).
+    Unlike the FFI path, where `maxDecompressedSize := 0` means unlimited,
+    here `0` rejects any non-empty output.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompressAuto (data : ByteArray) (maxOutputSize : Nat := 256 * 1024 * 1024) :
     Except String ByteArray :=
   match detectFormat data with
