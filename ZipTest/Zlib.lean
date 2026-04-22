@@ -23,4 +23,14 @@ def ZipTest.Zlib.tests : IO Unit := do
   let ce ← Zlib.compress empty
   let de ← Zlib.decompress ce
   assert! de.beq empty
+
+  -- Truncated input rejection (FFI)
+  let trailerTrunc := compressed.extract 0 (compressed.size - 4)
+  match ← (Zlib.decompress trailerTrunc).toBaseIO with
+  | .ok _ => throw (IO.userError "zlib decompress should reject trailer-truncated stream")
+  | .error _ => pure ()
+  let bodyTrunc := compressed.extract 0 8
+  match ← (Zlib.decompress bodyTrunc).toBaseIO with
+  | .ok _ => throw (IO.userError "zlib decompress should reject body-truncated stream")
+  | .error _ => pure ()
   IO.println "Zlib tests: OK"
