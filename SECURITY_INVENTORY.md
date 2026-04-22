@@ -285,7 +285,7 @@ Regression fixtures live under `testdata/tar/security/`:
 
 ### 1. ZIP metadata to `Handle.read`
 
-- File: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:341)
+- File: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:356)
 - Concern:
   - `readExact` itself guards `Nat -> USize`, but callers still need proof
     or validation that attacker-controlled sizes are file-bounded before reading
@@ -298,7 +298,7 @@ Regression fixtures live under `testdata/tar/security/`:
 
 ### 2. Tar UTF-8 partial functions
 
-- File: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:216)
+- File: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:246)
 - Concern:
   - `String.fromUTF8!` is partial and should not be reachable from
     attacker-controlled invalid bytes without prior validation
@@ -312,7 +312,7 @@ Regression fixtures live under `testdata/tar/security/`:
 
 - Files:
   - [Zip/Basic.lean](/home/kim/lean-zip/Zip/Basic.lean:9)
-  - [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:386)
+  - [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:492)
 - Concern:
   - `0 = no limit` is convenient but weak as a default for hostile inputs
 - Needed:
@@ -334,25 +334,25 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 
 | Entry point | Parameter | Default | Semantics of 0 | Notes |
 |---|---|---|---|---|
-| [Zlib.decompress](/home/kim/lean-zip/Zip/Basic.lean:11) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer zlib (RFC 1950). Only API with a committed bomb-limit regression test today ([ZipTest/Zlib.lean:14-19](/home/kim/lean-zip/ZipTest/Zlib.lean:14)). |
-| [Gzip.decompress](/home/kim/lean-zip/Zip/Gzip.lean:12) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer gzip (RFC 1952) + auto-zlib. No bomb-limit regression test. |
-| [RawDeflate.decompress](/home/kim/lean-zip/Zip/RawDeflate.lean:16) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer raw DEFLATE (ZIP method 8). No bomb-limit regression test. |
-| [Gzip.decompressStream](/home/kim/lean-zip/Zip/Gzip.lean:73) (FFI) | — | — | — | streaming; no per-call output cap. Bounded only by caller's sink / disk. |
-| [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:97) (FFI) | — | — | — | writes direct to disk via `decompressStream`; no cap. |
-| [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:45) (FFI) | — | — | — | streaming; no per-call output cap. |
-| [Zip.Native.Inflate.inflate](/home/kim/lean-zip/Zip/Native/Inflate.lean:379) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB. |
-| [Zip.Native.GzipDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:30) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
-| [Zip.Native.ZlibDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:122) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
-| [Zip.Native.decompressAuto](/home/kim/lean-zip/Zip/Native/Gzip.lean:212) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | format-auto dispatch over the three natives above. |
-| [Archive.list](/home/kim/lean-zip/Zip/Archive.lean:494) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | metadata-only; caps CD allocation, not decompressed payload. |
-| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:500) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
-| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:500) | `maxEntrySize : UInt64` | `0` | **asymmetric** — FFI: no limit; native: silently upgraded to 256 MiB inside `readEntryData` (see [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477)) | per-entry cap on the decompressed payload. |
-| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:524) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
-| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:524) | `maxEntrySize : UInt64` | `0` | same asymmetry as `Archive.extract` | per-entry cap. |
-| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:537) | `maxEntrySize : UInt64` | `0` | no limit | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:544](/home/kim/lean-zip/Zip/Tar.lean:544)). No whole-archive cap. |
-| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:625) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:660) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:660) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
+| [Zlib.decompress](/home/kim/lean-zip/Zip/Basic.lean:15) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer zlib (RFC 1950). Only API with a committed bomb-limit regression test today ([ZipTest/Zlib.lean:14-19](/home/kim/lean-zip/ZipTest/Zlib.lean:14)). |
+| [Gzip.decompress](/home/kim/lean-zip/Zip/Gzip.lean:16) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer gzip (RFC 1952) + auto-zlib. No bomb-limit regression test. |
+| [RawDeflate.decompress](/home/kim/lean-zip/Zip/RawDeflate.lean:20) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer raw DEFLATE (ZIP method 8). No bomb-limit regression test. |
+| [Gzip.decompressStream](/home/kim/lean-zip/Zip/Gzip.lean:79) (FFI) | — | — | — | streaming; no per-call output cap. Bounded only by caller's sink / disk. |
+| [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:106) (FFI) | — | — | — | writes direct to disk via `decompressStream`; no cap. |
+| [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:52) (FFI) | — | — | — | streaming; no per-call output cap. |
+| [Zip.Native.Inflate.inflate](/home/kim/lean-zip/Zip/Native/Inflate.lean:384) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB. |
+| [Zip.Native.GzipDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:40) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
+| [Zip.Native.ZlibDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:140) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
+| [Zip.Native.decompressAuto](/home/kim/lean-zip/Zip/Native/Gzip.lean:240) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | format-auto dispatch over the three natives above. |
+| [Archive.list](/home/kim/lean-zip/Zip/Archive.lean:497) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | metadata-only; caps CD allocation, not decompressed payload. |
+| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
+| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxEntrySize : UInt64` | `0` | **asymmetric** — FFI: no limit; native: silently upgraded to 256 MiB inside `readEntryData` (see [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477)) | per-entry cap on the decompressed payload. |
+| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
+| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxEntrySize : UInt64` | `0` | same asymmetry as `Archive.extract` | per-entry cap. |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:602) | `maxEntrySize : UInt64` | `0` | no limit | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610)). No whole-archive cap. |
+| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:714) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
 
 ### Known inconsistencies
 
@@ -484,7 +484,7 @@ upstream-runtime risk for each site — it is the behaviour that would
 surface if the caller bypassed the guard.
 
 The creator-side `h.read` in `Zip/Tar.lean` `create` at
-[Zip/Tar.lean:442](/home/kim/lean-zip/Zip/Tar.lean:442) is **not**
+[Zip/Tar.lean:466](/home/kim/lean-zip/Zip/Tar.lean:466) is **not**
 listed: it reads local files chosen by the caller (the archive author),
 not untrusted archive bytes, so it falls outside this inventory's
 scope.
@@ -493,8 +493,8 @@ Trust-boundary callers reach the actual `.read` primitive via
 `readExact` ([Zip/Archive.lean:356](/home/kim/lean-zip/Zip/Archive.lean:356),
 [Zip/Tar.lean:189](/home/kim/lean-zip/Zip/Tar.lean:189)),
 `readExactStream` ([Zip/Archive.lean:370](/home/kim/lean-zip/Zip/Archive.lean:370)),
-`readEntryData` ([Zip/Tar.lean:199](/home/kim/lean-zip/Zip/Tar.lean:199)),
-`skipEntryData` ([Zip/Tar.lean:473](/home/kim/lean-zip/Zip/Tar.lean:473)),
+`readEntryData` ([Zip/Tar.lean:220](/home/kim/lean-zip/Zip/Tar.lean:220)),
+`skipEntryData` ([Zip/Tar.lean:497](/home/kim/lean-zip/Zip/Tar.lean:497)),
 or open-coded read loops. Each row below names the call site that
 drives an `n`-byte read; the `readExact`-family helpers themselves
 perform a `Nat → USize` roundtrip check before every `Handle.read`.
@@ -507,12 +507,12 @@ perform a `Nat → USize` roundtrip check before every `Handle.read`.
 | [Zip/Archive.lean:415](/home/kim/lean-zip/Zip/Archive.lean:415) `readExact h 30 "local header for {label}"` | fixed `30` bytes | `assertSpanInFile fileSize entry.localOffset 30` at [Zip/Archive.lean:413](/home/kim/lean-zip/Zip/Archive.lean:413) | N/A — fixed 30-byte read |
 | [Zip/Archive.lean:438](/home/kim/lean-zip/Zip/Archive.lean:438) `readExact h (nameLen + extraLen) "local name+extra for {label}"` | `nameLen + extraLen`, both `UInt16` read from the local header (≤ 2·`UInt16.max` ≈ 128 KiB) | `assertSpanInFile` at [Zip/Archive.lean:434](/home/kim/lean-zip/Zip/Archive.lean:434); `UInt16` type bound on each addend | N/A — `UInt16` type bounds each addend, total ≤ 128 KiB regardless of input |
 | [Zip/Archive.lean:471](/home/kim/lean-zip/Zip/Archive.lean:471) `readExact h entry.compressedSize.toNat "compressed data for {label}"` | `entry.compressedSize` from CD / ZIP64 local extra (attacker-controlled `UInt64`) | `assertSpanInFile fileSize (entry.localOffset + headerAndNames) entry.compressedSize` at [Zip/Archive.lean:436](/home/kim/lean-zip/Zip/Archive.lean:436); CD-vs-LH `compressedSize` consistency check at [Zip/Archive.lean:462](/home/kim/lean-zip/Zip/Archive.lean:462) (only skipped when the LH data-descriptor flag bit 3 is set); `Nat → USize` roundtrip in `readExact`. Regression fixtures: `testdata/zip/malformed/oversized-compressed-size.zip`, `oversized-zip64-compressed-size.zip` | would request petabyte allocation on a crafted oversized `compressedSize`; relies on `assertSpanInFile` + CD/LH consistency to reject before `Handle.read` |
-| [Zip/Tar.lean:492](/home/kim/lean-zip/Zip/Tar.lean:492) `readExact input 512` in `forEntries` | fixed `512` (one tar header block) | fixed constant | N/A — fixed 512-byte read |
+| [Zip/Tar.lean:523](/home/kim/lean-zip/Zip/Tar.lean:523) `readExact input 512` in `forEntries` | fixed `512` (one tar header block) | fixed constant | N/A — fixed 512-byte read |
 | [Zip/Tar.lean:530](/home/kim/lean-zip/Zip/Tar.lean:530), [:539](/home/kim/lean-zip/Zip/Tar.lean:539), [:548](/home/kim/lean-zip/Zip/Tar.lean:548), [:553](/home/kim/lean-zip/Zip/Tar.lean:553) `readEntryData input entry.size.toNat maxHeaderSize` (GNU long-name, GNU long-link, PAX extended header, PAX global header) | `entry.size` from tar header (attacker-controlled `UInt64`) | `maxHeaderSize` cap inside `readEntryData` at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) (default `defaultMaxHeaderSize = 8 MiB` at [Zip/Tar.lean:212](/home/kim/lean-zip/Zip/Tar.lean:212)) — rejects `entry.size > maxHeaderSize` before any allocation with `IO.userError` containing `"exceeds maximum header size"`. Per-chunk reads are also capped at 64 KiB ([Zip/Tar.lean:227](/home/kim/lean-zip/Zip/Tar.lean:227)) and padding at 512 bytes per chunk ([Zip/Tar.lean:238](/home/kim/lean-zip/Zip/Tar.lean:238)). The cap is independent of the caller's `maxEntrySize`, which only bounds payload-bearing entries. Regression fixtures: `testdata/tar/malformed/gnu-longname-oversized-size.tar`, `pax-extended-oversized-size.tar` | with the cap raised, `readEntryData` would accumulate `entry.size` bytes into memory on a crafted GNU long-name or PAX header claiming multi-GB size — depends on runtime allocation to reject |
-| [Zip/Tar.lean:574](/home/kim/lean-zip/Zip/Tar.lean:574), [:605](/home/kim/lean-zip/Zip/Tar.lean:605), [:612](/home/kim/lean-zip/Zip/Tar.lean:612), [:620](/home/kim/lean-zip/Zip/Tar.lean:620) `skipEntryData input e.size` (directory-entry payload skip, symlink-entry payload skip, unsupported-typeflag payload skip, `Tar.list`) | `e.size + paddingFor e.size` (attacker-controlled `UInt64`) | 64 KiB per-chunk cap at [Zip/Tar.lean:477](/home/kim/lean-zip/Zip/Tar.lean:477); discarded bytes are not buffered (peak allocation = 64 KiB per iteration) | no memory amplification, but a malicious stream can force an unbounded number of 64 KiB reads. `Tar.extract` applies `maxEntrySize` at [Zip/Tar.lean:565](/home/kim/lean-zip/Zip/Tar.lean:565) for payload-bearing entries before the skip; `Tar.list` applies no cap |
-| [Zip/Tar.lean:582](/home/kim/lean-zip/Zip/Tar.lean:582) `input.read toRead.toUSize` in `Tar.extract` regular-file loop | `min remaining 65536` where `remaining ≤ e.size.toNat` (attacker-controlled `UInt64` from tar header) | `maxEntrySize` check at [Zip/Tar.lean:565](/home/kim/lean-zip/Zip/Tar.lean:565) (effective only when `maxEntrySize > 0`); 64 KiB per-chunk cap; data is written through to disk, not buffered | with `maxEntrySize = 0` (the current default), `Tar.extract` writes an attacker-controlled `e.size` bytes to disk. The per-read allocation is bounded at 64 KiB regardless. Documented as the "per-entry cap" row in *Decompression Limit Inventory* |
-| [Zip/Tar.lean:593](/home/kim/lean-zip/Zip/Tar.lean:593) `input.read (min padRemaining 512).toUSize` in `Tar.extract` padding loop | `min padRemaining 512`; `padRemaining ≤ 511` by tar framing (`paddingFor size < 512`) | fixed 512-byte per-chunk cap; `pad < 512` by tar block alignment | N/A — ≤ 512 bytes per read, bounded by tar block alignment |
-| [Zip/Tar.lean:662](/home/kim/lean-zip/Zip/Tar.lean:662) `inStream.read 65536` in `extractTarGz` tarStream wrapper | fixed `65536` | fixed chunk constant regardless of input | N/A — fixed 64 KiB read |
+| [Zip/Tar.lean:619](/home/kim/lean-zip/Zip/Tar.lean:619), [:650](/home/kim/lean-zip/Zip/Tar.lean:650), [:657](/home/kim/lean-zip/Zip/Tar.lean:657), [:671](/home/kim/lean-zip/Zip/Tar.lean:671) `skipEntryData input e.size` (directory-entry payload skip, symlink-entry payload skip, unsupported-typeflag payload skip, `Tar.list`) | `e.size + paddingFor e.size` (attacker-controlled `UInt64`) | 64 KiB per-chunk cap at [Zip/Tar.lean:501](/home/kim/lean-zip/Zip/Tar.lean:501); discarded bytes are not buffered (peak allocation = 64 KiB per iteration) | no memory amplification, but a malicious stream can force an unbounded number of 64 KiB reads. `Tar.extract` applies `maxEntrySize` at [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610) for payload-bearing entries before the skip; `Tar.list` applies no cap |
+| [Zip/Tar.lean:627](/home/kim/lean-zip/Zip/Tar.lean:627) `input.read toRead.toUSize` in `Tar.extract` regular-file loop | `min remaining 65536` where `remaining ≤ e.size.toNat` (attacker-controlled `UInt64` from tar header) | `maxEntrySize` check at [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610) (effective only when `maxEntrySize > 0`); 64 KiB per-chunk cap; data is written through to disk, not buffered | with `maxEntrySize = 0` (the current default), `Tar.extract` writes an attacker-controlled `e.size` bytes to disk. The per-read allocation is bounded at 64 KiB regardless. Documented as the "per-entry cap" row in *Decompression Limit Inventory* |
+| [Zip/Tar.lean:638](/home/kim/lean-zip/Zip/Tar.lean:638) `input.read (min padRemaining 512).toUSize` in `Tar.extract` padding loop | `min padRemaining 512`; `padRemaining ≤ 511` by tar framing (`paddingFor size < 512`) | fixed 512-byte per-chunk cap; `pad < 512` by tar block alignment | N/A — ≤ 512 bytes per read, bounded by tar block alignment |
+| [Zip/Tar.lean:727](/home/kim/lean-zip/Zip/Tar.lean:727) `inStream.read 65536` in `extractTarGz` tarStream wrapper | fixed `65536` | fixed chunk constant regardless of input | N/A — fixed 64 KiB read |
 
 Summary — what the inventory catches and what it does not:
 
@@ -575,26 +575,26 @@ to be silently skipped.
 
 | Fixture (testdata/…) | Size | Defence exercised | First landed | Related class |
 |---|---|---|---|---|
-| [testdata/tar/malformed/bad-checksum.tar](/home/kim/lean-zip/testdata/tar/malformed/bad-checksum.tar) | 2048 B | Tar header checksum verification at [Zip/Tar.lean:378](/home/kim/lean-zip/Zip/Tar.lean:378) — *"header checksum mismatch"* | `481e562` | other (integrity check) |
-| [testdata/tar/malformed/gnu-longlink-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longlink-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:206](/home/kim/lean-zip/Zip/Tar.lean:206) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
-| [testdata/tar/malformed/gnu-longname-invalid-utf8.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-invalid-utf8.tar) | 1536 B | `String.fromUTF8?` → `Binary.fromLatin1` fallback at [Zip/Tar.lean:501](/home/kim/lean-zip/Zip/Tar.lean:501) (no panicking `fromUTF8!` path) | #1546 | partial-decoder panic |
-| [testdata/tar/malformed/gnu-longname-no-terminator.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-no-terminator.tar) | 1536 B | `stripTrailingNuls` is a no-op when the payload has no trailing NUL ([Zip/Tar.lean:500](/home/kim/lean-zip/Zip/Tar.lean:500)); full payload becomes the name without a panic | #1546 | partial-decoder panic |
-| [testdata/tar/malformed/gnu-longname-oversized-size.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-oversized-size.tar) | 512 B | `readEntryData` `maxHeaderSize` cap at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) — *"exceeds maximum header size"* (header `size ≈ 8 GiB`, default cap `8 MiB`) | #1593 | oversized allocation |
-| [testdata/tar/malformed/gnu-longname-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:206](/home/kim/lean-zip/Zip/Tar.lean:206) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
-| [testdata/tar/malformed/no-magic.tar](/home/kim/lean-zip/testdata/tar/malformed/no-magic.tar) | 2048 B | Tar magic check at [Zip/Tar.lean:382](/home/kim/lean-zip/Zip/Tar.lean:382) — *"unsupported format"* | `481e562` | other (header validation) |
-| [testdata/tar/malformed/pax-extended-oversized-size.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-extended-oversized-size.tar) | 512 B | `readEntryData` `maxHeaderSize` cap at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) — *"exceeds maximum header size"* (PAX header `size ≈ 8 GiB`, default cap `8 MiB`) | #1593 | oversized allocation |
+| [testdata/tar/malformed/bad-checksum.tar](/home/kim/lean-zip/testdata/tar/malformed/bad-checksum.tar) | 2048 B | Tar header checksum verification at [Zip/Tar.lean:402](/home/kim/lean-zip/Zip/Tar.lean:402) — *"header checksum mismatch"* | `481e562` | other (integrity check) |
+| [testdata/tar/malformed/gnu-longlink-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longlink-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:230](/home/kim/lean-zip/Zip/Tar.lean:230) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/gnu-longname-invalid-utf8.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-invalid-utf8.tar) | 1536 B | `String.fromUTF8?` → `Binary.fromLatin1` fallback at [Zip/Tar.lean:534](/home/kim/lean-zip/Zip/Tar.lean:534) (no panicking `fromUTF8!` path) | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/gnu-longname-no-terminator.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-no-terminator.tar) | 1536 B | `stripTrailingNuls` is a no-op when the payload has no trailing NUL ([Zip/Tar.lean:531](/home/kim/lean-zip/Zip/Tar.lean:531)); full payload becomes the name without a panic | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/gnu-longname-oversized-size.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-oversized-size.tar) | 512 B | `readEntryData` `maxHeaderSize` cap at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) — *"exceeds maximum header size"* (header `size ≈ 8 GiB`, default cap `8 MiB`) | #1597 | oversized allocation |
+| [testdata/tar/malformed/gnu-longname-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:230](/home/kim/lean-zip/Zip/Tar.lean:230) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/no-magic.tar](/home/kim/lean-zip/testdata/tar/malformed/no-magic.tar) | 2048 B | Tar magic check at [Zip/Tar.lean:406](/home/kim/lean-zip/Zip/Tar.lean:406) — *"unsupported format"* | `481e562` | other (header validation) |
+| [testdata/tar/malformed/pax-extended-oversized-size.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-extended-oversized-size.tar) | 512 B | `readEntryData` `maxHeaderSize` cap at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) — *"exceeds maximum header size"* (PAX header `size ≈ 8 GiB`, default cap `8 MiB`) | #1597 | oversized allocation |
 | [testdata/tar/malformed/pax-inconsistent-length.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-inconsistent-length.tar) | 2048 B | `parsePaxRecords` silent-skip when no `=` is found before the declared record end (scan at [Zip/Tar.lean:108](/home/kim/lean-zip/Zip/Tar.lean:108); record dropped at [Zip/Tar.lean:113](/home/kim/lean-zip/Zip/Tar.lean:113)) | #1545 | partial-decoder panic |
 | [testdata/tar/malformed/pax-invalid-utf8-key.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-invalid-utf8-key.tar) | 2048 B | `parsePaxRecords` `String.fromUTF8?` guard on key/value at [Zip/Tar.lean:122](/home/kim/lean-zip/Zip/Tar.lean:122) (record dropped, no panic) | #1545 | partial-decoder panic |
 | [testdata/tar/malformed/pax-invalid-utf8-value.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-invalid-utf8-value.tar) | 2048 B | Same `String.fromUTF8?` guard at [Zip/Tar.lean:122](/home/kim/lean-zip/Zip/Tar.lean:122) | #1545 | partial-decoder panic |
 | [testdata/tar/malformed/pax-oversized-length.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-oversized-length.tar) | 2048 B | `parsePaxRecords` `digitCount > 20` guard at [Zip/Tar.lean:95](/home/kim/lean-zip/Zip/Tar.lean:95) (length-parse aborted before multiplying) | #1545 | oversized allocation |
 | [testdata/tar/malformed/pax-truncated-record.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-truncated-record.tar) | 2048 B | `parsePaxRecords` `recordEnd > data.size` guard at [Zip/Tar.lean:105](/home/kim/lean-zip/Zip/Tar.lean:105) (iteration breaks, remaining bytes ignored) | #1545 | partial-decoder panic |
-| [testdata/tar/malformed/truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/truncated.tar) | 522 B | `Tar.extract` regular-file loop short-read at [Zip/Tar.lean:591](/home/kim/lean-zip/Zip/Tar.lean:591) — *"unexpected end of archive reading {path} ({n} bytes remaining)"* | `481e562` | other (framing) |
-| [testdata/tar/security/backslash-slip.tar](/home/kim/lean-zip/testdata/tar/security/backslash-slip.tar) | 2048 B | `Binary.isPathSafe` rejects backslashes before component-level `..` check at [Zip/Tar.lean:570](/home/kim/lean-zip/Zip/Tar.lean:570) — *"unsafe path"* | `481e562` (assertion added by #1555) | archive-slip |
-| [testdata/tar/security/hardlink-outside.tar](/home/kim/lean-zip/testdata/tar/security/hardlink-outside.tar) | 512 B | `typeHardlink` silent-skip else-branch at [Zip/Tar.lean:613](/home/kim/lean-zip/Zip/Tar.lean:613); payload discarded, no `createHardlink` call, extract directory remains empty | #1555 | archive-slip |
-| [testdata/tar/security/symlink-absolute.tar](/home/kim/lean-zip/testdata/tar/security/symlink-absolute.tar) | 512 B | Symlink linkname absolute/backslash check at [Zip/Tar.lean:605](/home/kim/lean-zip/Zip/Tar.lean:605) — *"unsafe symlink target"* | #1555 | archive-slip |
-| [testdata/tar/security/symlink-slip.tar](/home/kim/lean-zip/testdata/tar/security/symlink-slip.tar) | 10240 B | Symlink linkname component `..` check at [Zip/Tar.lean:607](/home/kim/lean-zip/Zip/Tar.lean:607) — *"unsafe symlink target"* | `481e562` | archive-slip |
-| [testdata/tar/security/tar-absolute.tar](/home/kim/lean-zip/testdata/tar/security/tar-absolute.tar) | 2048 B | `Binary.isPathSafe` rejects absolute paths at [Zip/Tar.lean:570](/home/kim/lean-zip/Zip/Tar.lean:570) — *"unsafe path"* | `481e562` | archive-slip |
-| [testdata/tar/security/tar-slip.tar](/home/kim/lean-zip/testdata/tar/security/tar-slip.tar) | 10240 B | `Binary.isPathSafe` rejects `..` component traversal at [Zip/Tar.lean:570](/home/kim/lean-zip/Zip/Tar.lean:570) — *"unsafe path"* | `481e562` | archive-slip |
+| [testdata/tar/malformed/truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/truncated.tar) | 522 B | `Tar.extract` regular-file loop short-read at [Zip/Tar.lean:629](/home/kim/lean-zip/Zip/Tar.lean:629) — *"unexpected end of archive reading {path} ({n} bytes remaining)"* | `481e562` | other (framing) |
+| [testdata/tar/security/backslash-slip.tar](/home/kim/lean-zip/testdata/tar/security/backslash-slip.tar) | 2048 B | `Binary.isPathSafe` rejects backslashes before component-level `..` check at [Zip/Tar.lean:608](/home/kim/lean-zip/Zip/Tar.lean:608) — *"unsafe path"* | `481e562` (assertion added by #1555) | archive-slip |
+| [testdata/tar/security/hardlink-outside.tar](/home/kim/lean-zip/testdata/tar/security/hardlink-outside.tar) | 512 B | `typeHardlink` silent-skip else-branch at [Zip/Tar.lean:651](/home/kim/lean-zip/Zip/Tar.lean:651); payload discarded, no `createHardlink` call, extract directory remains empty | #1555 | archive-slip |
+| [testdata/tar/security/symlink-absolute.tar](/home/kim/lean-zip/testdata/tar/security/symlink-absolute.tar) | 512 B | Symlink linkname absolute/backslash check at [Zip/Tar.lean:643](/home/kim/lean-zip/Zip/Tar.lean:643) — *"unsafe symlink target"* | #1555 | archive-slip |
+| [testdata/tar/security/symlink-slip.tar](/home/kim/lean-zip/testdata/tar/security/symlink-slip.tar) | 10240 B | Symlink linkname component `..` check at [Zip/Tar.lean:645](/home/kim/lean-zip/Zip/Tar.lean:645) — *"unsafe symlink target"* | `481e562` | archive-slip |
+| [testdata/tar/security/tar-absolute.tar](/home/kim/lean-zip/testdata/tar/security/tar-absolute.tar) | 2048 B | `Binary.isPathSafe` rejects absolute paths at [Zip/Tar.lean:608](/home/kim/lean-zip/Zip/Tar.lean:608) — *"unsafe path"* | `481e562` | archive-slip |
+| [testdata/tar/security/tar-slip.tar](/home/kim/lean-zip/testdata/tar/security/tar-slip.tar) | 10240 B | `Binary.isPathSafe` rejects `..` component traversal at [Zip/Tar.lean:608](/home/kim/lean-zip/Zip/Tar.lean:608) — *"unsafe path"* | `481e562` | archive-slip |
 | [testdata/zip/malformed/bad-crc.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-crc.zip) | 140 B | Post-extraction CRC32 verification at [Zip/Archive.lean:487](/home/kim/lean-zip/Zip/Archive.lean:487) — *"CRC32 mismatch"* | `481e562` | other (integrity check) |
 | [testdata/zip/malformed/bad-method.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-method.zip) | 140 B | Method-dispatch guard at [Zip/Archive.lean:482](/home/kim/lean-zip/Zip/Archive.lean:482) — *"unsupported method"* | `481e562` | other (method validation) |
 | [testdata/zip/malformed/cd-lh-method-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-method-mismatch.zip) | 122 B | CD/LH method-consistency check at [Zip/Archive.lean:459](/home/kim/lean-zip/Zip/Archive.lean:459) — *"method mismatch between CD and local header"* | #1554 | other (CD/LH consistency) |
