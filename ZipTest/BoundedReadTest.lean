@@ -94,6 +94,14 @@ private def testReadBoundedEntryData : IO Unit := do
       pure ())
     "exceeds maximum"
 
+/-- Sanity checks for the P5.2 pure `Archive.SpanInFile` predicate. Concrete
+    `UInt64` triples kernel-evaluate via `decide`. -/
+example : Archive.SpanInFile 100 10 20 := by decide
+example : ¬ Archive.SpanInFile 100 90 20 := by decide
+example : ¬ Archive.SpanInFile 100 200 0 := by decide
+example : Archive.SpanInFile 100 0 0 := by decide
+example : Archive.SpanInFile 100 100 0 := by decide
+
 def tests : IO Unit := do
   testReadBoundedSpanFromHandle
   testReadBoundedExactFromHandle

@@ -351,6 +351,100 @@ private def assertSpanInFile (fileSize offset length : UInt64) (what : String) :
     throw (IO.userError
       s!"zip: {what} extends past end of file (offset={offset}, length={length}, fileSize={fileSize})")
 
+/-- `SpanInFile fileSize offset length` states that the half-open byte range
+    `[offset, offset + length)` lies inside a file of size `fileSize`, with
+    overflow-safe arithmetic on `UInt64`.
+
+    Mirrors the two-check shape of `assertSpanInFile`: `offset ≤ fileSize`
+    first, then `length ≤ fileSize - offset`, where the subtraction is the
+    saturating remainder (well-defined once `offset ≤ fileSize`). Do NOT
+    restate this as `offset + length ≤ fileSize` — `UInt64` addition wraps
+    silently on overflow, which the asymmetric form exists to avoid. -/
+def SpanInFile (fileSize offset length : UInt64) : Prop :=
+  offset ≤ fileSize ∧ length ≤ fileSize - offset
+
+instance (fileSize offset length : UInt64) :
+    Decidable (SpanInFile fileSize offset length) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+@[simp] theorem SpanInFile_iff {fileSize offset length : UInt64} :
+    SpanInFile fileSize offset length ↔
+      offset ≤ fileSize ∧ length ≤ fileSize - offset := Iff.rfl
+
+/-- Helper: an `IO Unit` action that evaluates to `EST.Out.error _ _` at
+    some `Void IO.RealWorld` state cannot equal `pure ()`. Used to discharge
+    the `assertSpanInFile = pure ()` hypothesis once a guard has been shown
+    to fire, by evaluating both sides at an arbitrary state. -/
+private theorem io_ne_pure_of_state_error
+    {x : IO Unit} {e : IO.Error}
+    (hx : ∀ s : Void IO.RealWorld, x s = EST.Out.error e s) :
+    x ≠ pure () := fun h => by
+  have ⟨s⟩ : Nonempty (Void IO.RealWorld) := Void.instNonempty
+  have happ : EST.Out.error (σ := IO.RealWorld) (α := Unit) e s = EST.Out.ok () s := by
+    rw [← hx s]; exact congrFun h s
+  cases happ
+
+/-- Forward reduction: if the span is valid then `assertSpanInFile` is
+    `pure ()`. Both `if` guards fall through to the `else` branch and the
+    residual `pure PUnit.unit >>= fun _ => pure PUnit.unit` reduces to
+    `pure ()` definitionally. -/
+private theorem assertSpanInFile_eq_pure_of_spanInFile
+    {fileSize offset length : UInt64} {what : String}
+    (h : SpanInFile fileSize offset length) :
+    assertSpanInFile fileSize offset length what = pure () := by
+  obtain ⟨h1, h2⟩ := h
+  unfold assertSpanInFile
+  rw [if_neg (UInt64.not_lt.mpr h1), if_neg (UInt64.not_lt.mpr h2)]
+  rfl
+
+/-- Backward reduction: success of `assertSpanInFile` implies the pure
+    predicate `SpanInFile` holds. For each guard, contraposition reduces
+    `assertSpanInFile` to an action whose state-level value is
+    `EST.Out.error`, which `io_ne_pure_of_state_error` rules out. -/
+private theorem spanInFile_of_assertSpanInFile_succeeds
+    {fileSize offset length : UInt64} {what : String}
+    (h : assertSpanInFile fileSize offset length what = pure ()) :
+    SpanInFile fileSize offset length := by
+  refine ⟨?_, ?_⟩
+  · refine Decidable.by_contra fun h1 => ?_
+    unfold assertSpanInFile at h
+    rw [if_pos (UInt64.not_le.mp h1)] at h
+    exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
+  · refine Decidable.by_contra fun h2 => ?_
+    have h1 : offset ≤ fileSize := by
+      refine Decidable.by_contra fun h1 => ?_
+      unfold assertSpanInFile at h
+      rw [if_pos (UInt64.not_le.mp h1)] at h
+      exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
+    unfold assertSpanInFile at h
+    rw [if_neg (UInt64.not_lt.mpr h1), if_pos (UInt64.not_le.mp h2)] at h
+    exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
+
+/-- `Nat`-level consequence of `SpanInFile`: the end-offset of the span is
+    file-bounded. Caller-facing arithmetic lemma — future bounded-read
+    reasoning cites this without re-deriving the `UInt64` arithmetic. -/
+theorem SpanInFile.toNat_add_le
+    {fileSize offset length : UInt64}
+    (h : SpanInFile fileSize offset length) :
+    offset.toNat + length.toNat ≤ fileSize.toNat := by
+  obtain ⟨h1, h2⟩ := h
+  have h1n : offset.toNat ≤ fileSize.toNat := UInt64.le_iff_toNat_le.mp h1
+  have h2n : length.toNat ≤ (fileSize - offset).toNat := UInt64.le_iff_toNat_le.mp h2
+  rw [UInt64.toNat_sub_of_le _ _ h1] at h2n
+  omega
+
+/-- `Nat`-level consequence of `SpanInFile`: the span length is bounded by the
+    remaining file size past the span's start offset. Caller-facing
+    arithmetic lemma — future bounded-read reasoning cites this without
+    re-deriving the `UInt64` saturating subtraction. -/
+theorem SpanInFile.toNat_length_le_remaining
+    {fileSize offset length : UInt64}
+    (h : SpanInFile fileSize offset length) :
+    length.toNat ≤ fileSize.toNat - offset.toNat := by
+  obtain ⟨h1, h2⟩ := h
+  have h2n : length.toNat ≤ (fileSize - offset).toNat := UInt64.le_iff_toNat_le.mp h2
+  rwa [UInt64.toNat_sub_of_le _ _ h1] at h2n
+
 /-- Read exactly `n` bytes from a handle, throwing on short read.
     Loops to handle short reads from pipes/network streams. -/
 private partial def readExact (h : IO.FS.Handle) (n : Nat) (what : String) : IO ByteArray := do

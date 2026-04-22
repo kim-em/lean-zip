@@ -190,8 +190,14 @@ Targets:
   `readBoundedExactFromHandle`, `readBoundedExactFromStream`, and
   `readBoundedEntryData` plus smoke coverage in
   `ZipTest/BoundedReadTest.lean`.)
-- [ ] Prove simple lemmas of the form:
+- [x] Prove simple lemmas of the form:
   validated span implies requested read length is file-bounded.
+  (This PR introduced the pure `Archive.SpanInFile` predicate alongside
+  `assertSpanInFile`, the two `IO` reduction theorems
+  `assertSpanInFile_eq_pure_of_spanInFile` /
+  `spanInFile_of_assertSpanInFile_succeeds`, and the `Nat`-level
+  arithmetic corollaries `SpanInFile.toNat_add_le` /
+  `SpanInFile.toNat_length_le_remaining`.)
 - [x] Use those helpers so parser hardening is easier to audit and less
   likely to regress than open-coded checks.
   (This PR migrated the three `Zip/Archive.lean` `readEntryData`
