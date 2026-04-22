@@ -3,6 +3,8 @@ import ZipTest.Helpers
 /-! Tests for gzip compression/decompression: streaming, file I/O, compression levels,
     and concatenated streams. -/
 
+set_option maxRecDepth 2048
+
 -- Compile-time probe: FFI whole-buffer default is 1 GiB (SECURITY_INVENTORY Rec. 1).
 example (d : ByteArray) : Gzip.decompress d = @Gzip.decompress d (1024 * 1024 * 1024) := rfl
 
@@ -203,6 +205,31 @@ def ZipTest.Gzip.tests : IO Unit := do
   let fileLimitRoundtripped ← IO.FS.readBinFile fileLimitOut
   assert! fileLimitRoundtripped.beq big
   for f in #["/tmp/lean-zlib-test-filelimit.bin", "/tmp/lean-zlib-test-filelimit.bin.gz"] do
+    let _ ← IO.Process.run { cmd := "rm", args := #["-f", f] }
+
+  -- decompressFile with a limit smaller than the decompressed size:
+  -- must abort with the shared `"exceeds limit"` substring, and the
+  -- partially-written output file must be at most `maxDecompressedSize`
+  -- bytes. Mirrors the `decompressStream` bomb test at lines 180-195
+  -- to catch regressions in the wrapper's parameter-forwarding and the
+  -- end-to-end on-disk sink invariant (check-before-write preserved by
+  -- `Gzip.decompressStream`). F-b recommendation from PR #1610 review.
+  let fileBombTmp : System.FilePath := "/tmp/lean-zlib-test-decompressfile-bomb.bin"
+  IO.FS.writeBinFile fileBombTmp big
+  let fileBombGz ← Gzip.compressFile fileBombTmp
+  let fileBombOut : System.FilePath := "/tmp/lean-zlib-test-decompressfile-bomb.out"
+  match ← (Gzip.decompressFile fileBombGz (outPath := some fileBombOut)
+      (maxDecompressedSize := 10)).toBaseIO with
+  | .ok _ => throw (IO.userError
+      "gzip decompressFile limit should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"gzip decompressFile limit wrong error: {e}")
+  let partial_ ← IO.FS.readBinFile fileBombOut
+  assert! partial_.size.toUInt64 ≤ 10
+  for f in #["/tmp/lean-zlib-test-decompressfile-bomb.bin",
+             "/tmp/lean-zlib-test-decompressfile-bomb.bin.gz",
+             "/tmp/lean-zlib-test-decompressfile-bomb.out"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", f] }
 
   -- Large data via streaming
