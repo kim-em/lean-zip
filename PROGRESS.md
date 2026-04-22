@@ -6,22 +6,28 @@ Per-session details are in `progress/`.
 ## Current State
 
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete;
-  proven-bounds campaign in progress (DEFLATE LZ77 matchers remain)
+  proven-bounds campaign complete (0 runtime `]!` across `Zip/Native/`
+  and `Zip/`); Track E (security audit) in progress — P0 + P1 closed,
+  P2 items 1–3 closed, P2 item 4 + P3–P5 open
 - **Toolchain**: leanprover/lean4:v4.29.1
 - **Sorries**: 0
-- **Sessions**: ~620 completed (Feb 19 – Apr 18)
+- **Sessions**: ~631 completed (Feb 19 – Apr 21)
 - **Source files in-repo**: `Zip/Spec/` 42, `Zip/Native/` 7,
-  `Zip/` (FFI/archive/tar/gzip/basic) 6, `ZipTest/` 21
-- **Merged PRs**: 615 (approximate; authoritative count via `gh pr list`)
-- **Spec lines**: 20,151 across 42 spec files (DEFLATE-only, post-split)
+  `Zip/` (FFI/archive/tar/gzip/basic) 6, `ZipTest/` 22
+- **Merged PRs**: 626 (approximate; authoritative count via `gh pr list`)
+- **Spec lines**: 20,516 across 42 spec files (DEFLATE-only, post-split)
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across all spec files (campaign complete)
 - **Zstd**: Moved to https://github.com/kim-em/lean-zstd (#1487, 2026-03-27)
 - **Shared utilities**: Moved to https://github.com/kim-em/lean-zip-common
   (#1487, 2026-03-27); pulled in via `require zipCommon from git`
-- **Proven-bounds**: 48 `]!` remaining in `Zip/Native/` (42 in
-  `Deflate.lean` LZ77 matchers, 6 in `DeflateDynamic.lean` after #1513
-  merged mid-summarize)
+- **Proven-bounds**: 0 runtime `]!` across `Zip/Native/` and `Zip/`;
+  only 2 comment-only occurrences remain in `Zip/Native/Deflate.lean`
+- **Track E audit checklist**:
+  [`plans/track-e-current-audit-checklist.md`](plans/track-e-current-audit-checklist.md)
+  is the source of truth for "what is done vs. what remains"; the
+  human-readable trust-boundary catalogue is
+  [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 
 ## Milestones
 
@@ -1933,12 +1939,174 @@ oversized-compressedSize / oversized-uncompressedSize malformed-
 fixture features) remain unclaimed Priority-0 work for the next
 planner.
 
+**11-PR batch (Apr 18 – Apr 21): Track E security-audit cluster (summarize #1563):**
+
+This batch is the first concentrated sweep of the Track E security-audit
+sub-roadmap. No DEFLATE / Huffman / LZ77 code path changed; no spec file
+was touched; `grep -rc sorry Zip/` stayed at `0` throughout. The work is
+entirely on the trust boundary — parser guards, malformed fixtures,
+regression tests, and boundary documentation. The library's
+cryptographic and compression kernels are unchanged; what moved is how
+much of the attack surface is now explicitly guarded, tested, or
+catalogued. The corresponding Track E checklist is
+[`plans/track-e-current-audit-checklist.md`](plans/track-e-current-audit-checklist.md);
+this summary reads side-by-side with it rather than restating the full
+matrix.
+
+*Priority 0 — ZIP unchecked-size + local-span audit (closed).*
+
+- #1543 — ZIP64 oversized-`compressedSize` malformed fixture
+  (`testdata/zip/malformed/oversized-zip64-compressed-size.zip`,
+  134 B; fires `assertSpanInFile`'s `"local data span"` branch with
+  a claimed exabyte `compressedSize`).
+- #1544 — ZIP64 oversized-`uncompressedSize` malformed fixture
+  (`testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`,
+  134 B; the exabyte claim is caught by the post-read
+  `"size mismatch"` guard rather than a span check — method-0 stored
+  payload, so `fileData.size` never matches `entry.uncompressedSize`).
+  A later strict ZIP64 local-extra parse (landed in #1554) now rejects
+  this fixture earlier with `truncated ZIP64 local extra field`; the
+  fixture's assert was updated to reflect the stricter check.
+- #1554 — Central-directory vs. local-header consistency audit.
+  `Archive.readEntryData` now parses the remaining LH fields
+  (`flags`, `method`, `crc`, `stdLocalCompSize`, `stdLocalUncompSize`,
+  ZIP64 local-extra block) and hard-errors on any CD/LH mismatch on
+  method / compressedSize / uncompressedSize / crc, except when flag
+  bit 3 (data-descriptor) legitimately leaves LH crc/sizes at zero.
+  Covered by
+  `testdata/zip/malformed/cd-lh-method-mismatch.zip` and
+  `cd-lh-size-mismatch.zip` (both deterministic, built by
+  `scripts/build-cd-lh-mismatch.py`). `parseZip64Extra` is reused for
+  the LH case; a follow-up could thread `Entry.flags` for a bit-11
+  UTF-8 check.
+
+*Priority 1 — Tar partial-decoder audit (closed).*
+
+- #1545 — Malformed PAX extended-header fixtures
+  (`testdata/tar/malformed/pax-oversized-length.tar`,
+  `pax-truncated-record.tar`, `pax-invalid-utf8-key.tar`,
+  `pax-invalid-utf8-value.tar`, `pax-inconsistent-length.tar` —
+  each 2048 B; built deterministically by
+  `scripts/build-pax-malformed-fixtures.lean`). Every malformation
+  was silently skipped by existing `parsePaxRecords` guards; no
+  hardening needed, but the regression pins behaviour.
+- #1546 — Malformed GNU long-name / long-link fixtures
+  (`testdata/tar/malformed/gnu-longname-truncated.tar`,
+  `gnu-longname-no-terminator.tar`, `gnu-longname-invalid-utf8.tar`,
+  `gnu-longlink-truncated.tar`; built by
+  `scripts/build-gnu-long-malformed-fixtures.lean`). Invalid UTF-8
+  in long-names falls through `String.fromUTF8?` to a Latin-1
+  fallback, which is now pinned by test rather than left implicit.
+- #1550 — `String.fromUTF8!` callsite audit in `Zip/Tar.lean`. Three
+  panicking raw-byte truncations in `buildPaxEntry` and `create`
+  replaced by `Tar.truncateUTF8` (codepoint-aware); the two remaining
+  `fromUTF8!` callsites in `splitPath` now carry an explanatory
+  comment (split is at an ASCII `'/'` byte, safe by construction).
+  Regression coverage in new test module `ZipTest/TarPathTruncation.lean`.
+- #1555 — Symlink / hardlink extraction policy documented explicitly.
+  Per-typeflag policy is now in both the `Tar.extract` docstring and
+  `SECURITY_INVENTORY.md`'s new
+  *"Symlink/hardlink extraction policy"* subsection: `typeRegular` /
+  `typeDirectory` go through `Binary.isPathSafe`; `typeSymlink`
+  validates `linkname` for absolute / backslash / `..` components
+  before `createSymlink`; `typeHardlink` (now a named constant,
+  `0x31`) and all other typeflags (devices, FIFO, GNU sparse) silently
+  skip — the payload is consumed but no filesystem entry is created.
+  New fixtures `testdata/tar/security/symlink-absolute.tar` and
+  `hardlink-outside.tar` plus the previously orphaned
+  `backslash-slip.tar` now have asserts in `ZipTest/TarFixtures.lean`;
+  built by `scripts/build-symlink-hardlink-malformed-fixtures.lean`.
+
+*Priority 2 — Public decompression limit policy (items 1–3 closed,
+item 4 open).*
+
+- #1556 — Public decompression limit policy inventory. Added a new
+  *"Decompression Limit Inventory"* section to `SECURITY_INVENTORY.md`
+  cataloguing every public decompression / extraction API (16 entry
+  points across FFI + native + archive + tar) with *Entry point /
+  Parameter / Default / Semantics of 0 / Notes* columns. Flagged four
+  known inconsistencies (FFI whole-buffer vs. streaming cap defaults;
+  `Archive.readEntryData` silent `0 → 256 MiB` upgrade on the native
+  backend; native-decoder 1 GiB vs. 256 MiB default disagreement;
+  `maxCentralDirSize` finite but `maxEntrySize` unlimited mixed
+  semantics) and proposed a six-point *"Recommended policy"* with
+  placeholder numbers (256 MiB FFI whole-buffer, 1 GiB archive
+  per-entry, streaming FFI gains a cap, native-decoder defaults
+  normalised). No `Zip/*.lean` changes — inventory + policy proposal
+  only.
+- #1560 — Bomb-limit regression tests for `Gzip.decompress`,
+  `RawDeflate.decompress`, and `Zip.Native.GzipDecode.decompress`
+  (added to `ZipTest/Gzip.lean`, `ZipTest/RawDeflate.lean`,
+  `ZipTest/NativeGzip.lean`). Each test compresses ~6200 B of
+  `mkTestData`, then calls the decoder with `maxDecompressedSize := 10`
+  (or `maxOutputSize := 10` for native) and asserts the error
+  substring (`"exceeds limit"` for FFI, `"exceeds maximum size"` for
+  native — the substrings diverge because the native path errors
+  originate in `Zip/Native/Inflate.lean`, not in the C code).
+- #1561 — Bomb-limit regression tests for `Archive.extract`,
+  `Archive.extractFile`, `Tar.extract`, and `Tar.extractTarGzNative`
+  (added to `ZipTest/Archive.lean` and `ZipTest/Tar.lean`). Each test
+  builds the bomb in-memory via `mkTestData` + `Tar.create` /
+  `Gzip.compress` rather than committing new fixtures. The `Tar`
+  test uses `(maxEntrySize := 0) (maxOutputSize := 10)` and asserts
+  `"exceeds maximum size"` — the gzip-decode budget fails before
+  per-entry limits are reached.
+- #1562 — Reconcile audit checklist + `SECURITY_INVENTORY.md`
+  missing-work lists. Checklist line for each of the six items closed
+  above now carries its closing PR number. `SECURITY_INVENTORY.md`'s
+  ZIP / Tar "Missing work" lists shrunk to genuinely-open items
+  (bounded-read lemmas on the ZIP side, none on the tar side);
+  completed items moved to a new per-subsystem *"Recent wins"* bullet
+  list referencing the closing PRs. Documentation-only — no code
+  changes.
+
+*Test-fixture inventory added in this batch.* New fixtures landed in
+three families, all built by committed deterministic builders
+(`scripts/build-*`) so they can be regenerated byte-stable:
+
+- `testdata/zip/malformed/` — 4 new: `oversized-zip64-compressed-size.zip`,
+  `oversized-zip64-uncompressed-size.zip`, `cd-lh-method-mismatch.zip`,
+  `cd-lh-size-mismatch.zip` (count 11 after this batch, up from 7).
+- `testdata/tar/malformed/` — 9 new: 5 `pax-*.tar` + 4 `gnu-longname/longlink-*.tar`
+  (count 12, up from 3).
+- `testdata/tar/security/` — 2 new files
+  (`symlink-absolute.tar`, `hardlink-outside.tar`) and the
+  previously-orphaned `backslash-slip.tar` now exercised rather than
+  committed-but-unused (count 6, up from 4; the other three are
+  `tar-slip.tar`, `tar-absolute.tar`, `symlink-slip.tar`).
+
+*Scope discipline.* Every PR in this batch deliberately stopped at
+the doc / fixture / test boundary. Where `Zip/*.lean` did change —
+#1550 (Tar.truncateUTF8 + `ZipTest/TarPathTruncation.lean`), #1554
+(`Archive.readEntryData` LH consistency) — the changes were new
+guards + regression fixtures; nothing was removed or weakened, and
+no proof / spec file was touched. `SECURITY_INVENTORY.md` *"Recommended
+policy"* numbers are deliberately flagged as seed values for follow-up
+issues, not decisions. The library's proof corpus (42 spec files,
+20,516 LOC, 0 sorries) is byte-identical to the pre-batch tree.
+
+Quality metrics: 0 sorries across `Zip/`; 0 runtime `]!`; `Zip/Spec/`
+at 42 files, 20,516 LOC (unchanged); `Zip/Native/` at 7 files, 1,780
+LOC (unchanged); `Zip/` (FFI / archive / tar / gzip / basic) at 6
+files, 1,437 LOC (+ `Archive.lean` grew from `readEntryData` LH
+parse + guards; `Tar.lean` grew from `truncateUTF8` + docstring);
+`ZipTest/` at 22 files (+1 from `TarPathTruncation.lean`); toolchain
+`v4.29.1`.
+
+*Track E open work (post-batch).* P2 item 4 (docstring + error-message
+policy), all of P3 (FFI adversarial validation: sanitizer harness,
+truncated / concatenated-gzip / repeated-`inflateReset` / near-limit
+regression tests, fuzz harness), P4 (runtime-boundary docs), and P5
+(proof-friendly guard lemmas for bounded reads). Planner has already
+queued the next wave: #1558 / #1559 / #1564 / #1565 / #1566 track the
+remaining Priority 2–3 items.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~620 sessions (Feb 19 – Apr 18)
-- 615 merged PRs (approximate; authoritative count via `gh pr list`)
+- ~631 sessions (Feb 19 – Apr 21)
+- 626 merged PRs (approximate; authoritative count via `gh pr list`)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Repository split into `lean-zip` + `lean-zip-common` + `lean-zstd`
