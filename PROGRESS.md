@@ -35,6 +35,8 @@ Per-session details are in `progress/`.
   is the source of truth for "what is done vs. what remains"; the
   human-readable trust-boundary catalogue is
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
+- **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
+- **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
 
 ## Milestones
 
