@@ -8,16 +8,21 @@ Per-session details are in `progress/`.
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete;
   proven-bounds campaign complete (0 runtime `]!` across `Zip/Native/`
   and `Zip/`); Track E (security audit) in progress — P0 + P1 + P2
-  closed, P3.1 / P3.2 / P3.4 closed (P3.3 fuzz harness open, issue
-  #1595), P4 closed, P5 (proof-friendly guard lemmas) open
-  (P5.1 issue #1596; P5.2 / P5.3 untracked)
+  closed, all of P3 closed (P3.1 / P3.2 / P3.4 in prior batches;
+  P3.3 fuzz harness landed as #1602 in this batch), P4 closed, P5.1
+  proof-friendly helpers landed as #1608 in this batch (P5.2 filed
+  mid-batch as #1628; P5.3 tracked as #1614 and in flight as PR #1626
+  at batch close). `SECURITY_INVENTORY.md` *Recommended policy* block:
+  Rec. 1 / 3 / 5 executed in this batch (#1623 / #1618 / #1617);
+  Rec. 2 structurally set up by #1610 (parameter added; default still
+  `0`, issue #1625 tracks the flip); Rec. 4 tracked as #1621
 - **Toolchain**: leanprover/lean4:v4.29.1
 - **Sorries**: 0
-- **Sessions**: ~647 completed (Feb 19 – Apr 22)
+- **Sessions**: ~660 completed (Feb 19 – Apr 22)
 - **Source files in-repo**: `Zip/Spec/` 42, `Zip/Native/` 7,
-  `Zip/` (FFI/archive/tar/gzip/basic) 6, `ZipTest/` 22
-- **Merged PRs**: ~641 (approximate; authoritative count via `gh pr list`)
-- **Spec lines**: 20,516 across 42 spec files (DEFLATE-only, post-split)
+  `Zip/` (FFI/archive/tar/gzip/basic/checksum) 6, `ZipTest/` 24
+- **Merged PRs**: ~653 (approximate; authoritative count via `gh pr list`)
+- **Spec lines**: 20,606 across 42 spec files (DEFLATE-only, post-split)
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across all spec files (campaign complete)
 - **Zstd**: Moved to https://github.com/kim-em/lean-zstd (#1487, 2026-03-27)
@@ -2230,12 +2235,144 @@ unchanged (P3.2 added test cases inside existing modules);
 `zip/malformed`, `tar/malformed`, `tar/security`); 16 new
 progress entries in this batch; toolchain `v4.29.1`.
 
+**12-PR batch (Apr 22): Track E audit-completion wave (summarize #1629):**
+
+This batch is the third concentrated Track E wave. It finishes off
+the checklist items that were still open after summarize #1598 —
+P3.3 (fuzz harness) lands as #1602 and P5.1 (proof-friendly
+bounded-read helpers) lands as #1608 — and executes three of the
+five entries in the `SECURITY_INVENTORY.md` *"Recommended policy"*
+block (Rec. 1, 3, 5). A fourth recommendation (Rec. 2, streaming FFI
+default-flip) is set up structurally by #1610, which adds the
+`maxDecompressedSize` parameter to the three streaming FFI decoders
+but leaves the default at `0` (half-closed, no policy flip). As in
+the prior two Track E waves, no DEFLATE / Huffman / LZ77 logic
+changed; no spec file was touched; `grep -rc sorry Zip/` stayed at
+`0` throughout. The window runs from 04:18Z (#1600 meditate) to
+07:35Z (#1623 Rec. 1 default-flip) on 2026-04-22. The audit
+checklist source of truth remains
+[`plans/track-e-current-audit-checklist.md`](plans/track-e-current-audit-checklist.md).
+
+*Track E feature work (7 PRs), grouped by `SECURITY_INVENTORY.md`
+recommendation or checklist item:*
+
+- **Rec. 1 — whole-buffer FFI default → 1 GiB.** #1623 flips
+  `Zip.Basic.decompress`, `Zip.Gzip.decompress`, and
+  `Zip.RawDeflate.decompress` from `maxDecompressedSize = 0` (no
+  limit) to `1073741824` (1 GiB). Per-decoder bomb-limit regression
+  tests added to `ZipTest/Zlib.lean`, `ZipTest/Gzip.lean`, and
+  `ZipTest/RawDeflate.lean`.
+- **Rec. 3 — per-entry archive extractor default → 1 GiB.** #1618
+  flips `Archive.extract`, `Archive.extractFile`, `Tar.extract`,
+  `Tar.extractTarGz`, and `Tar.extractTarGzNative` from
+  `maxEntrySize = 0` to `1073741824`. Fast-followed by the rebase
+  fix #1620 (superseded; its progress entry landed as the ride-along
+  #1622).
+- **Rec. 5 — native-side uniformity at 1 GiB.** #1617 lifts the
+  native `Zip.Native.Inflate.inflate`, `Zip.Native.GzipDecode.decompress`,
+  `Zip.Native.ZlibDecode.decompress`, and `Zip.Native.ZlibDecode.decompressAuto`
+  default `maxOutputSize` from the previous non-uniform mix to a
+  single 1 GiB cap matched with the FFI side.
+- **Streaming FFI `maxDecompressedSize` parameter (not a default
+  flip).** #1610 adds the parameter to `Gzip.decompressStream`,
+  `Gzip.decompressFile`, and `RawDeflate.decompressStream`. The
+  default stays at `0` (no limit) in this PR — it half-closes the
+  `SECURITY_INVENTORY.md` Rec. 2 gap by making the cap expressible;
+  the default flip is a separate follow-up, filed as issue #1625.
+- **P3.3 — fuzz harness for whole-buffer and streaming inflate
+  entry points.** #1602 adds `ZipTest/FuzzInflate.lean`, a randomized
+  harness that exercises both FFI and native backends across random
+  seeds; harness quality was audited out-of-band by review #1607.
+- **P5.1 — proof-friendly helpers for bounded reads and validated
+  spans.** #1608 lands four helpers —
+  `readBoundedSpanFromHandle`, `readBoundedExactFromHandle`,
+  `readBoundedEntryData`, and `readBoundedExactFromStream` — plus
+  `ZipTest/BoundedReadTest.lean` exercising each. #1608 deliberately
+  left its checklist box unticked; the box is the concern of the
+  follow-up P5.3 caller migration.
+- **Inventory-drift detector** (tooling, not a recommendation).
+  #1612 lands `scripts/check-inventory-links.sh`, a line-number /
+  fixture-path drift checker for `SECURITY_INVENTORY.md` that fires
+  at PR review time.
+
+*Review rounds (3 PRs).* All three are doc-only and pair with a
+specific feature PR:
+
+- #1604 — standalone review of `SECURITY_INVENTORY.md` /
+  audit-checklist reference drift (pairs with no single feature PR;
+  fixes line-number drift and cross-references).
+- #1607 — quality audit of #1602 (fuzz harness) before Track E's
+  7-day exit-criterion window closes.
+- #1616 — quality audit of #1610 (streaming FFI
+  `maxDecompressedSize` parameter).
+
+*Infrastructure (2 PRs).*
+
+- #1600 — meditate session that catalogued the patterns and friction
+  of the prior Track E wave (~15 PRs since #1569). Drafted skill
+  notes in its progress entry; the SKILL.md file edits themselves
+  were either part of the prior wave (#1579) or reserved for a
+  later meditate.
+- #1622 — ride-along progress entry for the #1620 rebase fix of
+  PR #1618 (per-entry `maxEntrySize` default flip). Doc-only.
+
+*Remaining gaps (as of batch close, 07:35Z).* Per the issue body,
+three Track E items remained outside this batch:
+
+- **Rec. 2 — streaming FFI default-flip.** Tracked as issue #1625
+  at summarize-issue filing; structurally set up by #1610.
+- **Rec. 4 — whole-archive `maxTotalSize` cap.** Tracked as issue
+  #1621 at summarize-issue filing; not started in this batch.
+- **P5.2** — validated-span / bounded-read lemma proofs over the
+  P5.1 helpers; filed fresh mid-batch as issue #1628.
+- **P5.3** — caller migrations in `Zip/Archive.lean` / `Zip/Tar.lean`
+  to consume the P5.1 helpers. The issue body flagged PR #1626 as
+  "in flight at summarize time"; in reality #1626 had merged at
+  07:48:16Z, ~2 minutes *before* the summarize issue was filed
+  (07:50Z). It is out of the 12-PR batch by issue scope, but the
+  P5.3 checklist box is closed at the time this summary lands.
+  Since batch close, the three remaining gaps above have also
+  landed (#1630 Rec. 4 at 08:10Z, #1631 Rec. 2 at 08:28Z, #1636
+  P5.2 at 09:17Z); they belong to the next summarize batch.
+
+*Scope discipline.* Same rule as the prior two Track E waves: the
+only `Zip/*.lean` edits in the batch are narrow parameter-addition
+and default-flip changes on FFI / native / extractor entry points
+(#1610 streaming-FFI parameter; #1617 native-side default unification;
+#1618 extractor `maxEntrySize`; #1623 FFI whole-buffer
+`maxDecompressedSize`), plus the new P5.1 helper family in
+`Zip/Archive.lean` and `Zip/Tar.lean` (#1608). No spec file was
+touched. No proof was changed. The library's proof corpus (42
+spec files, 20,606 LOC, 0 sorries) remains intact; the only spec
+LOC movement (20,516 → 20,606) is from a spec file not in this
+batch's window, inherited post-#1598. The `]!` count is still 0
+and `Zip/Native/` retains 0 runtime bounds assertions.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged; the issue
+body's "4 → 4 XxHash" baseline claim is stale — `Zip/Spec/XxHash.lean`
+does not exist in this repository, and `grep -rc sorry Zip/` sums
+to 0); 0 runtime `]!` (unchanged); `Zip/Spec/` at 42 files, 20,606
+LOC (+90 LOC relative to prior summarize; not attributable to a PR
+in this batch); `Zip/Native/` at 7 files, 1,852 LOC (was 1,813;
++39 LOC from #1617 default-unification docstrings + #1608 helper
+support); `Zip/` (FFI / archive / tar / gzip / basic / checksum) at
+6 files, 1,833 LOC (was 1,511; +322 LOC from #1608 bounded-read
+helper family landing in `Zip/Archive.lean` + `Zip/Tar.lean`, plus
+the streaming-FFI parameter in #1610 and the default-flip docstring
+updates in #1617 / #1618 / #1623; `Zip/Checksum.lean` is a new
+sixth file present in the file list but inherited from earlier);
+`ZipTest/` at 24 files (+2 — `ZipTest/FuzzInflate.lean` from #1602
+and `ZipTest/BoundedReadTest.lean` from #1608); `testdata/` fixture
+counts 11 / 14 / 6 (the +2 in `testdata/tar/malformed/` is from
+pre-batch PR #1597 — it merged 03:43Z but was outside the prior
+summarize's stated scope); toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~647 sessions (Feb 19 – Apr 22)
-- ~641 merged PRs (approximate; authoritative count via `gh pr list`)
+- ~660 sessions (Feb 19 – Apr 22)
+- ~653 merged PRs (approximate; authoritative count via `gh pr list`)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Repository split into `lean-zip` + `lean-zip-common` + `lean-zstd`
