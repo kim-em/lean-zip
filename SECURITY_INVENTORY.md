@@ -24,15 +24,66 @@ known gaps that sit outside the formally verified codec core.
 - Known concern:
   - crafted oversized reads can become runtime-allocation hazards if
     unchecked sizes reach `Handle.read`
-  - the April 2026 report against Lean runtime allocation/read paths is
-    exactly the kind of risk this inventory must track
+- Upstream tracking:
+  - Report: no upstream link yet — local tracking only. The April 2026
+    report against Lean runtime allocation/read paths is recorded in
+    this repository (see *"Current local guardrails"* above and
+    *"Local guard inventory for `Handle.read` and `Stream.read`"*
+    below) but has not yet been filed as a leanprover/lean4 issue.
+  - Status: not yet reported upstream (as of 2026-04-22). An honest
+    search of `progress/`, the lean-zip issue tracker, and
+    leanprover/lean4 (`allocation`, `ByteArray`, `Handle.read`
+    queries) did not find a matching upstream issue. Re-triage
+    required once one is filed.
+  - Local regression coverage (fixtures + assertion sites that guard
+    this attack surface today):
+    - `testdata/zip/malformed/oversized-compressed-size.zip` —
+      oversized 32-bit `compressedSize`; asserted in
+      `ZipTest/ZipFixtures.lean`.
+    - `testdata/zip/malformed/oversized-zip64-compressed-size.zip` —
+      oversized ZIP64 `compressedSize` (PR #1543); asserted in
+      `ZipTest/ZipFixtures.lean`.
+    - `testdata/zip/malformed/oversized-zip64-uncompressed-size.zip` —
+      oversized ZIP64 `uncompressedSize` (PR #1544); asserted in
+      `ZipTest/ZipFixtures.lean`.
+    - `testdata/zip/malformed/cd-lh-method-mismatch.zip` and
+      `cd-lh-size-mismatch.zip` — CD vs local-header mismatches
+      (PR #1554); asserted in `ZipTest/ZipFixtures.lean`.
+    - Bomb-limit regression tests for `Gzip.decompress`,
+      `RawDeflate.decompress`, and `Zip.Native.GzipDecode.decompress`
+      (PR #1560); coverage in `ZipTest/Gzip.lean`,
+      `ZipTest/RawDeflate.lean`, and `ZipTest/NativeGzip.lean`.
+    - Bomb-limit regression tests for `Archive.extract` /
+      `Archive.extractFile` / `Tar.extract` / `Tar.extractTarGz`
+      (PR #1561); coverage in `ZipTest/Archive.lean` and
+      `ZipTest/Tar.lean`.
+  - Local guardrails (cross-ref *"Current local guardrails"* above):
+    `readExact`'s `Nat → USize` roundtrip before every `Handle.read`;
+    `assertSpanInFile` for local-header / name+extra / compressed-data
+    spans in `Zip/Archive.lean` (PR #1497); ZIP `maxCentralDirSize`
+    (default 64 MiB) and `maxEntrySize` caps on `Archive.extract` /
+    `Archive.extractFile`; tar `maxEntrySize` cap on `Tar.extract` /
+    `Tar.extractTarGz` / `Tar.extractTarGzNative`; native inflate
+    `maxOutputSize` caps (`Zip.Native.Inflate.inflate` default 1 GiB;
+    `Zip.Native.GzipDecode.decompress`, `Zip.Native.ZlibDecode.decompress`,
+    `Zip.Native.decompressAuto` default 256 MiB — see
+    *"Decompression Limit Inventory"* below for the full table).
 - Missing work:
   - prove or enforce stronger preconditions before every `Handle.read`
     and `Stream.read` driven by archive metadata
     - see *"Local guard inventory for `Handle.read` and `Stream.read`"*
       below for the per-site audit of what protections are currently in
       place
-  - add regression fixtures for oversized ZIP64 size claims
+  - file or link the upstream Lean runtime issue so the *"Report"* and
+    *"Status"* fields in *"Upstream tracking"* above can be updated
+    with a concrete target
+- Recent wins:
+  - oversized ZIP64 compressed-size fixture — PR #1543
+    (`testdata/zip/malformed/oversized-zip64-compressed-size.zip`)
+  - oversized ZIP64 uncompressed-size fixture — PR #1544
+    (`testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`)
+    — together these close the previous *"add regression fixtures for
+    oversized ZIP64 size claims"* Missing-work bullet
 
 ### zlib via C FFI
 

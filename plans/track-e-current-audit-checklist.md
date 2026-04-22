@@ -132,8 +132,17 @@ Targets:
 - [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
 - [PLAN.md](/home/kim/lean-zip/PLAN.md:1)
 
-- [ ] Keep the Lean runtime allocation/read issue tracked here until
+- [x] Keep the Lean runtime allocation/read issue tracked here until
   upstream fix status is confirmed and local regression coverage exists.
+  (Landed by the PR closing issue #1582: new *"Upstream tracking"*
+  sub-block in
+  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
+  § *"Lean Runtime"* records the report, the current upstream status
+  (*"no upstream link yet — local tracking only"*, dated 2026-04-22),
+  and the local regression coverage — ZIP64 oversized-size fixtures
+  from PRs #1543/#1544, CD-vs-LH mismatch fixtures from PR #1554,
+  and the bomb-limit regression tests from PRs #1560/#1561 — that
+  guards this attack surface today.)
 - [ ] Add minimized reproducer references once they are checked into the repo
   or linked from issues.
 - [x] Record which callsites have been guarded locally to avoid depending on
