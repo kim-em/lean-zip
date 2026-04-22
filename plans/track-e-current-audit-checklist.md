@@ -109,8 +109,16 @@ Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c:1)
   truncated streams, concatenated-member edge cases, repeated `inflateReset`,
   zero-length chunks, and near-limit outputs.
 - [ ] Add a fuzz harness for whole-buffer and streaming inflate entry points.
-- [ ] Audit all `malloc`/`realloc`/buffer-growth sites after each substantial
+- [x] Audit all `malloc`/`realloc`/buffer-growth sites after each substantial
   C change.
+  (Initial snapshot landed: see
+  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:59)
+  § *"Allocation site audit (`c/zlib_ffi.c`)"* for the current row-per-
+  call-site table. The re-audit-on-change obligation remains — this
+  item tracks the invariant, not a one-time snapshot.
+  [`scripts/check-c-allocations.sh`](/home/kim/lean-zip/scripts/check-c-allocations.sh)
+  flags accidental new `malloc`/`realloc`/`calloc` sites at PR-review
+  time against the baseline count recorded there.)
 
 ## Priority 4: Trusted runtime boundary documentation
 

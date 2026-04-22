@@ -49,7 +49,48 @@ known gaps that sit outside the formally verified codec core.
 - Missing work:
   - maintain sanitizer coverage for all FFI entry points
   - add dedicated malformed-input regression tests for streaming paths
-  - audit all formatted error and allocation helpers after any C changes
+  - any new `malloc`/`realloc`/`calloc`/`grow_buffer` call, or change
+    to `grow_buffer` semantics, in `c/zlib_ffi.c` requires re-running
+    the audit below and updating the snapshot table. The helper
+    [`scripts/check-c-allocations.sh`](/home/kim/lean-zip/scripts/check-c-allocations.sh)
+    prints a one-line warning at PR-review time if the count of
+    `malloc`/`realloc`/`calloc` mentions drifts from the baseline.
+
+#### Allocation site audit (`c/zlib_ffi.c`)
+
+Snapshot of every `malloc`, `realloc`, `calloc`, and `grow_buffer`
+call in [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c) as of
+2026-04-22. `grow_buffer` is the shared doubling helper at
+[c/zlib_ffi.c:54](/home/kim/lean-zip/c/zlib_ffi.c:54); its
+`*buf_size > SIZE_MAX/2` overflow check and `free(buf)`-on-failure
+semantics are the linchpin for every decompression-side growth
+site. Callers of `grow_buffer` must NOT free `buf` themselves on a
+`NULL` return — it has already been freed.
+
+| Site (line) | Function | Bound | Failure handling | Notes |
+|---|---|---|---|---|
+| [c/zlib_ffi.c:39](/home/kim/lean-zip/c/zlib_ffi.c:39) | `mk_zlib_error` (shared error-string formatter; reached by every FFI entry point on a non-OK zlib return) | `prefix_len + detail_len + 3`, with `prefix_len > SIZE_MAX - detail_len - 3` overflow guard at [c/zlib_ffi.c:34](/home/kim/lean-zip/c/zlib_ffi.c:34) | returns `mk_io_error("zlib error: out of memory while formatting error")` (no resource held at this point) | `buf` is `free`d immediately after `snprintf` + `mk_io_error`; the Lean string owns its own copy. Allocation is small (≤ 256 + message). |
+| [c/zlib_ffi.c:60](/home/kim/lean-zip/c/zlib_ffi.c:60) | `grow_buffer` (shared helper; caller-dependent) | `*buf_size *= 2`, pre-checked by `if (*buf_size > SIZE_MAX / 2)` at [c/zlib_ffi.c:55](/home/kim/lean-zip/c/zlib_ffi.c:55); on overflow, frees old `buf` and returns `NULL` | returns `NULL`; **frees the old `buf` on `realloc` failure** ([c/zlib_ffi.c:62](/home/kim/lean-zip/c/zlib_ffi.c:62)) | Every caller treats `NULL` as "buffer already freed" — no `free(buf)` on the caller's error path. |
+| [c/zlib_ffi.c:162](/home/kim/lean-zip/c/zlib_ffi.c:162) | `decompress_inflate` — reached by `lean_zlib_decompress`, `lean_gzip_decompress`, `lean_raw_deflate_decompress` | `initial_decompress_buf(src_len)` at [c/zlib_ffi.c:71](/home/kim/lean-zip/c/zlib_ffi.c:71): `src_len * 4` with a `SIZE_MAX/4` overflow guard, floored at 1024. `src_len ≤ UINT_MAX` already enforced by the caller at [c/zlib_ffi.c:143](/home/kim/lean-zip/c/zlib_ffi.c:143) | `inflateEnd(&strm); return mk_io_error("<label>: out of memory")` | Initial whole-buffer decompression buffer. |
+| [c/zlib_ffi.c:173](/home/kim/lean-zip/c/zlib_ffi.c:173) | `decompress_inflate` (same callers) | `grow_buffer` doubling, capped at `SIZE_MAX/2` | on `NULL`: `inflateEnd(&strm); return mk_io_error("<label>: out of memory")` — does **not** re-free `buf` (`grow_buffer` already did) | The `max_output` cap (when non-zero) is checked **after** `inflate` writes into the grown buffer ([c/zlib_ffi.c:191](/home/kim/lean-zip/c/zlib_ffi.c:191)), not before `grow_buffer` — see the summary below. |
+| [c/zlib_ffi.c:320](/home/kim/lean-zip/c/zlib_ffi.c:320) | `lean_gzip_deflate_new` (streaming compression state constructor) | fixed `sizeof(deflate_state)` (small struct; zlib's internal `deflateInit2` buffers are allocated separately inside zlib) | `return mk_io_error("gzip deflate new: out of memory")` (no zlib stream yet) | `calloc` zero-initialises `finished` so the finalizer always makes a well-defined `deflateEnd` decision. |
+| [c/zlib_ffi.c:353](/home/kim/lean-zip/c/zlib_ffi.c:353) | `lean_gzip_deflate_push` (streaming compression, per-chunk output buffer) | fixed 65 536 bytes initial | `return mk_io_error("gzip deflate push: out of memory")`. **Does not** call `deflateEnd` — the `deflate_state` remains live and the finalizer will clean it up | Grown by `grow_buffer` in the loop. |
+| [c/zlib_ffi.c:361](/home/kim/lean-zip/c/zlib_ffi.c:361) | `lean_gzip_deflate_push` | `grow_buffer` doubling, capped at `SIZE_MAX/2` | on `NULL`: `return mk_io_error("gzip deflate push: out of memory")` (no `free`, no `deflateEnd` — finalizer cleans the state) | No per-call output cap; bounded only by `grow_buffer`'s `SIZE_MAX/2` guard. |
+| [c/zlib_ffi.c:397](/home/kim/lean-zip/c/zlib_ffi.c:397) | `lean_gzip_deflate_finish` (streaming compression, `Z_FINISH` flush buffer) | fixed 65 536 bytes initial | `return mk_io_error("gzip deflate finish: out of memory")`. State stays live; finalizer calls `deflateEnd` | Used by both gzip and raw-deflate streaming paths (they share the same `deflate_state`). |
+| [c/zlib_ffi.c:404](/home/kim/lean-zip/c/zlib_ffi.c:404) | `lean_gzip_deflate_finish` | `grow_buffer` doubling, capped at `SIZE_MAX/2` | on `NULL`: `return mk_io_error("gzip deflate finish: out of memory")` (no re-free, no `deflateEnd` — finalizer cleans) | No per-call output cap. |
+| [c/zlib_ffi.c:435](/home/kim/lean-zip/c/zlib_ffi.c:435) | `lean_gzip_inflate_new` (streaming decompression state constructor; `MAX_WBITS + 32` auto-detect) | fixed `sizeof(inflate_state)` | `return mk_io_error("gzip inflate new: out of memory")` | `calloc` zero-initialises `finished`. |
+| [c/zlib_ffi.c:468](/home/kim/lean-zip/c/zlib_ffi.c:468) | `lean_gzip_inflate_push` (streaming decompression, per-chunk output buffer; shared with raw inflate) | fixed 65 536 bytes initial | `return mk_io_error("gzip inflate push: out of memory")`. State stays live | No `max_output` parameter on this path — caller is responsible for whole-archive bounding. |
+| [c/zlib_ffi.c:479](/home/kim/lean-zip/c/zlib_ffi.c:479) | `lean_gzip_inflate_push` | `grow_buffer` doubling, capped at `SIZE_MAX/2` | on `NULL`: `return mk_io_error("gzip inflate push: out of memory")` (no re-free, no `inflateEnd` — finalizer cleans) | No per-call output cap. |
+| [c/zlib_ffi.c:607](/home/kim/lean-zip/c/zlib_ffi.c:607) | `lean_raw_deflate_new` (streaming raw-deflate compression state) | fixed `sizeof(deflate_state)` | `return mk_io_error("raw deflate new: out of memory")` | Reuses the shared `lean_gzip_deflate_push` / `_finish` helpers via `g_deflate_class`. |
+| [c/zlib_ffi.c:628](/home/kim/lean-zip/c/zlib_ffi.c:628) | `lean_raw_inflate_new` (streaming raw-deflate decompression state; `-MAX_WBITS`) | fixed `sizeof(inflate_state)` | `return mk_io_error("raw inflate new: out of memory")` | Reuses the shared `lean_gzip_inflate_push` helper via `g_inflate_class`. |
+
+Summary — what this pattern catches and what it does not:
+
+- **Catches**: `size_t` overflow in the doubling step (`SIZE_MAX/2` guard in `grow_buffer`); individual `malloc`/`realloc`/`calloc` failure (every site has a `NULL`-check and returns an `IO` error); double-free after `grow_buffer` failure (callers never re-`free(buf)` on a `NULL` return because `grow_buffer` already did); and over-4 GiB whole-buffer inputs (guarded at the caller before any allocation, via `src_len > UINT_MAX` checks).
+- **Does NOT catch**:
+  1. A decompression bomb passed to a whole-buffer decoder with `max_output == 0` (the "no limit" sentinel) can still walk the buffer up to `SIZE_MAX/2` before `grow_buffer` refuses: the `max_output` check at [c/zlib_ffi.c:191](/home/kim/lean-zip/c/zlib_ffi.c:191) fires only **after** `inflate` has written into the already-grown buffer. The guard is therefore a "refuses to keep going" limit, not a "refuses to allocate" limit — see the *Decompression Limit Inventory* below for the caller-level mitigation.
+  2. The streaming entry points (`lean_gzip_deflate_push`, `lean_gzip_deflate_finish`, `lean_gzip_inflate_push`) accept no output-size parameter at all. Their per-call output buffer is bounded only by `grow_buffer`'s `SIZE_MAX/2` guard; whole-archive bounding is the caller's problem.
+  3. zlib's own internal allocations (`inflateInit2` / `deflateInit2` stream state, Huffman tables, sliding window) are made via zlib's `zalloc` (default `malloc`). They are not enumerated here — they live inside zlib itself and sit under the "upstream-risk" portion of this entry's trust status.
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
