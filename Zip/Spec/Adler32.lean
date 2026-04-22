@@ -235,6 +235,78 @@ theorem checksum_replicate_zero (n : Nat) (hn : n < 65521) :
     pack_toNat_of_bounds (show (1:Nat) < 65536 by omega) (show n < 65536 by omega),
     UInt32.toNat_ofNat_of_lt' hbnd]
 
+/-- The Adler-32 checksum of `n` copies of byte `b` has the closed
+form `(n + (n·(n+1)/2)·b) · 65536 + (1 + n·b)` (packed into a
+`UInt32`) when both components stay below `65521`. The A-component
+accumulates `n·b` and the B-component follows a triangular
+progression because it sums consecutive A-values.
+Generalizes `checksum_replicate_zero` (the `b = 0` case) and
+provides the last arbitrary-byte closed form needed before the
+ladder graduates to the append-based compositional theorem. -/
+theorem checksum_replicate (n : Nat) (b : UInt8)
+    (hA : 1 + n * b.toNat < 65521)
+    (hB : n + (n * (n + 1) / 2) * b.toNat < 65521) :
+    checksum (List.replicate n b) =
+      UInt32.ofNat ((n + (n * (n + 1) / 2) * b.toNat) * 65536
+                     + (1 + n * b.toNat)) := by
+  -- Triangular-number recurrence `T_{k+1} = T_k + (k+1)`.
+  have htri : ∀ (m : Nat), (m + 1) * (m + 2) / 2 = m * (m + 1) / 2 + (m + 1) := by
+    intro m
+    rw [show (m + 1) * (m + 2) = m * (m + 1) + (m + 1) * 2 by
+          rw [Nat.mul_add (m + 1) m 2, Nat.mul_comm (m + 1) m],
+        Nat.add_mul_div_right _ _ (by decide : 0 < 2)]
+  -- Strengthened invariant, free over the starting `(a, bsum)`.
+  have hstate : ∀ (m a bsum : Nat),
+      a + m * b.toNat < 65521 →
+      bsum + m * a + b.toNat * (m * (m + 1) / 2) < 65521 →
+      updateList (a, bsum) (List.replicate m b) =
+        (a + m * b.toNat, bsum + m * a + b.toNat * (m * (m + 1) / 2)) := by
+    intro m
+    induction m with
+    | zero => intros; simp [updateList]
+    | succ k ih =>
+      intro a bsum ha hb
+      -- Normalize `k + 1 + 1` → `k + 2` so omega sees matching atoms.
+      change bsum + (k + 1) * a + b.toNat * ((k + 1) * (k + 2) / 2) < 65521 at hb
+      show updateList (a, bsum) (List.replicate (k + 1) b) =
+        (a + (k + 1) * b.toNat,
+         bsum + (k + 1) * a + b.toNat * ((k + 1) * (k + 2) / 2))
+      -- Distributivity facts (omega treats `k*_`, `b*T_k`, `b*T_{k+1}` as atoms).
+      have hka : (k + 1) * a = k * a + a := Nat.succ_mul k a
+      have hkb : (k + 1) * b.toNat = k * b.toNat + b.toNat := Nat.succ_mul k b.toNat
+      have hkab : k * (a + b.toNat) = k * a + k * b.toNat := Nat.mul_add k a b.toNat
+      have hbtri : b.toNat * ((k + 1) * (k + 2) / 2)
+                 = b.toNat * (k * (k + 1) / 2) + (k * b.toNat + b.toNat) := by
+        rw [htri k, Nat.mul_add, Nat.mul_succ b.toNat k, Nat.mul_comm b.toNat k]
+      have hbT : b.toNat ≤ b.toNat * ((k + 1) * (k + 2) / 2) := by
+        have : (1 : Nat) ≤ (k + 1) * (k + 2) / 2 := by rw [htri k]; omega
+        simpa using Nat.mul_le_mul_left b.toNat this
+      -- Compute `updateByte (a, bsum) b` under bounds.
+      have hbyte : updateByte (a, bsum) b = (a + b.toNat, bsum + (a + b.toNat)) := by
+        show ((a + b.toNat) % MOD_ADLER,
+              (bsum + (a + b.toNat) % MOD_ADLER) % MOD_ADLER) = _
+        rw [Nat.mod_eq_of_lt (by simp only [MOD_ADLER]; omega),
+            Nat.mod_eq_of_lt (by simp only [MOD_ADLER]; omega)]
+      rw [List.replicate_succ, updateList_cons, hbyte,
+          ih (a + b.toNat) (bsum + (a + b.toNat)) (by omega) (by omega)]
+      refine Prod.mk.injEq .. |>.mpr ⟨?_, ?_⟩ <;> omega
+  -- Instantiate at (1, 0) and n.
+  have hc : b.toNat * (n * (n + 1) / 2) = (n * (n + 1) / 2) * b.toNat := Nat.mul_comm ..
+  have hupdate : updateList init (List.replicate n b) =
+      (1 + n * b.toNat, n + (n * (n + 1) / 2) * b.toNat) := by
+    have h := hstate n 1 0 hA (by rw [hc]; omega)
+    show updateList (1, 0) (List.replicate n b) = _
+    rw [h]; refine Prod.mk.injEq .. |>.mpr ⟨rfl, ?_⟩; rw [hc]; omega
+  have hbnd : (n + (n * (n + 1) / 2) * b.toNat) * 65536
+              + (1 + n * b.toNat) < UInt32.size := by
+    simp only [UInt32.size]; omega
+  rw [← UInt32.toNat_inj]
+  simp only [checksum, hupdate,
+    pack_toNat_of_bounds (show 1 + n * b.toNat < 65536 by omega)
+      (show n + (n * (n + 1) / 2) * b.toNat < 65536 by omega),
+    UInt32.toNat_ofNat_of_lt' hbnd]
+  omega
+
 /-- Compositionality of incremental Adler-32 computation (spec level).
 The running state after processing `xs` is `unpack (checksum xs)`;
 feeding `ys` into that state and re-packing yields

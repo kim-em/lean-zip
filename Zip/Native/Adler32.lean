@@ -75,6 +75,19 @@ theorem adler32_replicate_zero (n : Nat) (hn : n < 65521) :
   simp only [adler32, updateBytes_eq_updateList, hunpack]
   exact Spec.checksum_replicate_zero n hn
 
+/-- Native Adler-32 of `n` copies of byte `b` starting from the
+default `init = 1`, closed form matching `Spec.checksum_replicate`
+after bridging the `ByteArray` to its underlying `List UInt8`. -/
+theorem adler32_replicate (n : Nat) (b : UInt8)
+    (hA : 1 + n * b.toNat < 65521)
+    (hB : n + (n * (n + 1) / 2) * b.toNat < 65521) :
+    adler32 1 (ByteArray.mk (Array.replicate n b)) =
+      UInt32.ofNat ((n + (n * (n + 1) / 2) * b.toNat) * 65536
+                     + (1 + n * b.toNat)) := by
+  have hunpack : Spec.unpack 1 = Spec.init := by decide
+  simp only [adler32, updateBytes_eq_updateList, hunpack]
+  exact Spec.checksum_replicate n b hA hB
+
 /-- Compositionality of incremental Adler-32 computation (native level,
 see `PLAN.md:27-28`). Associativity of `adler32` over `ByteArray`
 append — an incremental streaming pipeline over concatenated chunks
