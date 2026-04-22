@@ -38,22 +38,17 @@ append — an incremental streaming pipeline over concatenated chunks
 yields the same result as a whole-buffer computation. -/
 theorem adler32_append (init : UInt32) (a b : ByteArray) :
     adler32 init (a ++ b) = adler32 (adler32 init a) b := by
-  simp only [adler32]
-  rw [updateBytes_eq_updateList, updateBytes_eq_updateList, updateBytes_eq_updateList,
-      ByteArray.data_append, Array.toList_append, Spec.updateList_append]
+  simp only [adler32, updateBytes_eq_updateList, ByteArray.data_append,
+    Array.toList_append, Spec.updateList_append]
   -- Goal: pack (updateList (updateList (unpack init) A) B)
   --     = pack (updateList (unpack (pack (updateList (unpack init) A))) B)
   -- Case split on whether A = a.data.toList is empty; Valid applies only in the
   -- cons case. The nil case reduces via `pack_unpack`.
-  generalize ha : a.data.toList = A
+  generalize a.data.toList = A
   match A with
-  | [] =>
-    simp only [Spec.updateList_nil]
-    rw [Spec.pack_unpack]
+  | [] => rw [Spec.updateList_nil, Spec.pack_unpack]
   | x :: xs =>
-    have hvalid : Spec.Valid (Spec.updateList (Spec.unpack init) (x :: xs)) := by
-      rw [Spec.updateList_cons]
-      exact Spec.updateList_valid _ (Spec.updateByte_valid _ _) _
-    rw [Spec.unpack_pack_of_valid _ hvalid]
+    rw [Spec.unpack_pack_of_valid _ (Spec.updateList_cons .. ▸
+      Spec.updateList_valid _ (Spec.updateByte_valid ..) _)]
 
 end Adler32.Native

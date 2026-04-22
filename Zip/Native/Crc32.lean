@@ -94,11 +94,10 @@ theorem crc32_append (init : UInt32) (a b : ByteArray) :
     crc32 init (a ++ b) = crc32 (crc32 init a) b := by
   have raw_eq : ∀ x : UInt32,
       (if x == 0 then (0xFFFFFFFF : UInt32) else x ^^^ 0xFFFFFFFF) = x ^^^ 0xFFFFFFFF := by
-    intro x; bv_decide
-  have xor_twice : ∀ x : UInt32, (x ^^^ 0xFFFFFFFF) ^^^ 0xFFFFFFFF = x := by
-    intro x; bv_decide
+    bv_decide
   simp only [crc32, raw_eq]
-  rw [updateBytes_eq_updateList, updateBytes_eq_updateList, updateBytes_eq_updateList,
-      xor_twice, ByteArray.data_append, Array.toList_append, Spec.updateList_append]
+  simp only [UInt32.xor_assoc, UInt32.xor_self, UInt32.xor_zero,
+    updateBytes_eq_updateList, ByteArray.data_append, Array.toList_append,
+    Spec.updateList_append]
 
 end Crc32.Native
