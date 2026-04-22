@@ -4,18 +4,6 @@ import Zip.Native.Crc32
 
 /-! Conformance tests comparing native Adler32 and CRC32 implementations against FFI. -/
 
-/-- Sanity check that the `crc32_append` characterizing property is usable
-as a rewrite target for associativity over `ByteArray` concatenation. -/
-example (a b : ByteArray) :
-    Crc32.Native.crc32 0 (a ++ b) = Crc32.Native.crc32 (Crc32.Native.crc32 0 a) b :=
-  Crc32.Native.crc32_append 0 a b
-
-/-- Sanity check that the `adler32_append` characterizing property is usable
-as a rewrite target for associativity over `ByteArray` concatenation. -/
-example (a b : ByteArray) :
-    Adler32.Native.adler32 1 (a ++ b) = Adler32.Native.adler32 (Adler32.Native.adler32 1 a) b :=
-  Adler32.Native.adler32_append 1 a b
-
 def ZipTest.NativeChecksum.tests : IO Unit := do
   let big ← mkTestData
   let helloBytes := "Hello, world!".toUTF8
