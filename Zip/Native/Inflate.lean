@@ -374,8 +374,13 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
   inflateLoop br .empty fixedLit fixedDist maxOutputSize data.size
 
 /-- Inflate a raw DEFLATE stream. Processes blocks until a final block is seen.
-    `maxOutputSize` (default 1 GiB) limits decompressed output to guard against
-    zip bombs. -/
+    `maxOutputSize` (default 1 GiB) caps decompressed output as a zip-bomb
+    guard. Unlike the FFI path, where `maxDecompressedSize := 0` means
+    unlimited, here `0` rejects any non-empty output (the comparison is
+    `output.size + len > maxOutputSize`, so even a single produced byte
+    exceeds the bound). Overflow raises an `Except` error containing
+    `"Inflate: output exceeds maximum size"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def inflate (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   let (output, _) ← inflateRaw data 0 maxOutputSize

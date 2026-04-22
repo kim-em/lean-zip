@@ -90,9 +90,13 @@ Targets:
   [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:151);
   final numbers and signature changes are deferred to follow-up issues
   so this inventory stays doc-only.)
-- [ ] Add decompression-bomb tests for:
+- [x] Add decompression-bomb tests for:
   raw deflate, gzip, zlib, ZIP extraction, and tar.gz extraction.
-- [ ] Make the limit policy explicit in docstrings and user-facing errors.
+  (`ZipTest/{RawDeflate,Gzip,Zlib,Archive,Tar,NativeGzip}.lean` — every
+  surface has at least one test asserting the bomb error substring.)
+- [x] Make the limit policy explicit in docstrings and user-facing errors.
+  (FFI: PR #1573; Archive + Tar: PR #1586; native: this PR for
+  `Zip/Native/Inflate.lean` and `Zip/Native/Gzip.lean`.)
 
 ## Priority 3: FFI adversarial validation
 
