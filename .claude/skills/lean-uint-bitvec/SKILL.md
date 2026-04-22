@@ -48,6 +48,12 @@ When `split` on a UInt32 match creates a catch-all case with hypotheses like
 use `exfalso; bv_decide` to close the goal. The SAT solver recognizes that
 `x &&& 3` can only produce values 0-3.
 
+**Common pattern — `if x == 0 then a else b = c` on `UInt32`:**
+prefer `bv_decide`. It handles the case-split inline without manual
+`by_cases`. Precedent: the `raw_eq` helper inside `crc32_append` at
+[`Zip/Native/Crc32.lean:103`](../../../Zip/Native/Crc32.lean) folds
+the post-init zero-check into a single XOR via one `bv_decide`.
+
 ## UInt8→UInt32 Conversion for `bv_decide`
 
 When `bv_decide` fails on `UInt32.ofNat byte.toNat`, rewrite to `⟨byte.toBitVec.setWidth 32⟩`
@@ -63,6 +69,35 @@ congr 1; bv_decide
 When `bv_decide` fails with "spurious counterexample" because it abstracts the same
 expression (e.g., `data[pos]`) as multiple opaque variables, use
 `generalize data[pos].toUInt32 = x` first to unify them into a single variable.
+
+## Packing small nibbles via bitwise OR
+
+When a `Nat` (or `UInt*`) is built by `x ||| (y <<< n)` with
+`x < 2 ^ n` (and the high half stays in range), its `toNat` (or
+value) equals `x + y * 2 ^ n`. The library lemma is
+`Nat.two_pow_add_eq_or_of_lt`; for `BitVec` / `UInt*` use the
+bitwidth-aware equivalent.
+
+A reusable `Nat`-level helper for two-nibble packs:
+
+```lean
+lemma pack_toNat_of_bounds {x y : Nat} {n : Nat}
+    (hx : x < 2 ^ n) :
+    (y <<< n ||| x) = y * 2 ^ n + x := by
+  rw [Nat.two_pow_add_eq_or_of_lt hx]
+  ring
+```
+
+Use this whenever a checksum, packed header, or bitfield adds
+lower bits into a higher-bit container. Adler-32 (PR #1641) is
+the project's first user; CRC32 could adopt it on its next
+refactor.
+
+The concrete `UInt32`-specific instance lives as a `private`
+helper at [`Zip/Spec/Adler32.lean:108`](../../../Zip/Spec/Adler32.lean) —
+`pack_toNat_of_bounds {a b : Nat} (ha : a < 65536) (hb : b < 65536) :`
+`(pack (a, b)).toNat = a + b * 65536`. Promote it to a public
+`Nat`-level lemma the next time a third caller needs it.
 
 ## UInt32 Bit Operations → `Nat.testBit`
 
