@@ -100,7 +100,12 @@ example : Archive.SpanInFile 100 10 20 := by decide
 example : ¬ Archive.SpanInFile 100 90 20 := by decide
 example : ¬ Archive.SpanInFile 100 200 0 := by decide
 example : Archive.SpanInFile 100 0 0 := by decide
+-- Tail-boundary: zero-length read at EOF is valid (offset = fileSize, length = 0).
 example : Archive.SpanInFile 100 100 0 := by decide
+-- Overflow regression: `length = 1` past `offset = fileSize = UInt64.max` is
+-- correctly rejected by the `length ≤ fileSize - offset` form. The alternative
+-- `offset + length ≤ fileSize` would wrap to `0 ≤ fileSize` and spuriously accept.
+example : ¬ Archive.SpanInFile 0xFFFFFFFFFFFFFFFF 0xFFFFFFFFFFFFFFFF 1 := by decide
 
 def tests : IO Unit := do
   testReadBoundedSpanFromHandle

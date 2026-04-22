@@ -372,7 +372,7 @@ instance (fileSize offset length : UInt64) :
       offset ≤ fileSize ∧ length ≤ fileSize - offset := Iff.rfl
 
 /-- Helper: an `IO Unit` action that evaluates to `EST.Out.error _ _` at
-    some `Void IO.RealWorld` state cannot equal `pure ()`. Used to discharge
+    every `Void IO.RealWorld` state cannot equal `pure ()`. Used to discharge
     the `assertSpanInFile = pure ()` hypothesis once a guard has been shown
     to fire, by evaluating both sides at an arbitrary state. -/
 private theorem io_ne_pure_of_state_error
@@ -405,20 +405,16 @@ private theorem spanInFile_of_assertSpanInFile_succeeds
     {fileSize offset length : UInt64} {what : String}
     (h : assertSpanInFile fileSize offset length what = pure ()) :
     SpanInFile fileSize offset length := by
-  refine ⟨?_, ?_⟩
-  · refine Decidable.by_contra fun h1 => ?_
+  have h1 : offset ≤ fileSize := by
+    refine Decidable.by_contra fun h1 => ?_
     unfold assertSpanInFile at h
     rw [if_pos (UInt64.not_le.mp h1)] at h
     exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
-  · refine Decidable.by_contra fun h2 => ?_
-    have h1 : offset ≤ fileSize := by
-      refine Decidable.by_contra fun h1 => ?_
-      unfold assertSpanInFile at h
-      rw [if_pos (UInt64.not_le.mp h1)] at h
-      exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
-    unfold assertSpanInFile at h
-    rw [if_neg (UInt64.not_lt.mpr h1), if_pos (UInt64.not_le.mp h2)] at h
-    exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
+  refine ⟨h1, ?_⟩
+  refine Decidable.by_contra fun h2 => ?_
+  unfold assertSpanInFile at h
+  rw [if_neg (UInt64.not_lt.mpr h1), if_pos (UInt64.not_le.mp h2)] at h
+  exact io_ne_pure_of_state_error (e := _) (fun _ => rfl) h
 
 /-- `Nat`-level consequence of `SpanInFile`: the end-offset of the span is
     file-bounded. Caller-facing arithmetic lemma — future bounded-read
