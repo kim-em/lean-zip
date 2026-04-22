@@ -100,6 +100,22 @@ known gaps that sit outside the formally verified codec core.
     rebuilds `c/zlib_ffi.c` under `-fsanitize=address,undefined` and
     runs the test suite so FFI-level memory and UB errors surface as
     runtime traps; the April 2026 tree is ASan + UBSan clean.
+  - [`ZipTest/FuzzInflate.lean`](/home/kim/lean-zip/ZipTest/FuzzInflate.lean)
+    + [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh)
+    land a deterministic xorshift-seeded fuzz driver that feeds every
+    whole-buffer FFI decoder (`Zlib.decompress`, `Gzip.decompress`,
+    `RawDeflate.decompress`) and the streaming `Gzip.InflateState`
+    path with pseudo-random inputs at sizes {0, 1, 16, 512, 8192,
+    65536} and chunk sizes {1, 7, 31, 127}. `lake exe test` runs a
+    100-iteration fixed-seed smoke check (≈ 10 ms); the `fuzz_inflate`
+    lake executable takes a wall-clock budget (default 30 s, override
+    via CLI arg or `LEAN_ZIP_FUZZ_SECONDS`). For sanitizer coverage,
+    reuse the `ZLIB_CFLAGS / ZLIB_LDFLAGS / LD_PRELOAD` recipe from
+    `scripts/sanitize-ffi.sh` — the fuzz driver is linked into
+    `.lake/build/bin/fuzz_inflate` which inherits the same sanitizer
+    runtime when built under those flags. Any `IO.userError` is the
+    handled case; an uncaught panic, segfault, or ASan/UBSan trap
+    terminates with non-zero status.
 - Missing work:
   - maintain sanitizer coverage for all FFI entry points
   - add dedicated malformed-input regression tests for streaming paths

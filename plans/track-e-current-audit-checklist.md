@@ -117,7 +117,19 @@ Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c:1)
   edge cases), and PR #1577 (repeated `inflateReset` across concatenated
   gzip members + exact-fit and n−1 near-limit outputs). Coverage in
   `ZipTest/Gzip.lean`, `ZipTest/Zlib.lean`, and `ZipTest/RawDeflate.lean`.)
-- [ ] Add a fuzz harness for whole-buffer and streaming inflate entry points.
+- [x] Add a fuzz harness for whole-buffer and streaming inflate entry points.
+  ([`ZipTest/FuzzInflate.lean`](/home/kim/lean-zip/ZipTest/FuzzInflate.lean),
+  [`ZipFuzzInflate.lean`](/home/kim/lean-zip/ZipFuzzInflate.lean),
+  [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh)
+  land a deterministic xorshift-seeded driver that feeds every
+  whole-buffer (`Zlib.decompress`, `Gzip.decompress`,
+  `RawDeflate.decompress`, and the four native decoders) and the
+  streaming `Gzip.InflateState` path with pseudo-random inputs.
+  `lake exe test` runs a fixed-seed 100-iteration smoke check; the
+  `fuzz_inflate` lake executable drives longer wall-clock budgeted
+  runs. Sanitizer coverage is obtained by reusing the
+  `ZLIB_CFLAGS / ZLIB_LDFLAGS / LD_PRELOAD` recipe from
+  `scripts/sanitize-ffi.sh`.)
 - [x] Audit all `malloc`/`realloc`/buffer-growth sites after each substantial
   C change.
   (Initial snapshot landed: see
