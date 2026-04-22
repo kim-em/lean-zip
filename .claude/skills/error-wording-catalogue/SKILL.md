@@ -22,6 +22,7 @@ one makes the test brittle to message rewrites.
 | Archive CD/LH consistency | `Zip/Archive.lean` | `mismatch between CD and local header (<field>)` | `"mismatch between CD and local header"` |
 | Archive LH ZIP64 parse | `Zip/Archive.lean` | `truncated ZIP64 local extra field` | `"truncated ZIP64 local extra field"` |
 | Tar per-entry bomb | `Zip/Tar.lean:565-566` | `Tar: entry <name> exceeds limit (…)` | `"exceeds limit"` |
+| Tar header pseudo-entry cap | `Zip/Tar.lean:223` | `tar: header entry size (…) exceeds maximum header size (…)` | `"exceeds maximum header size"` |
 | Tar unsafe path | `Zip/Tar.lean` (via `Binary.isPathSafe`) | `Tar: unsafe path <name>` | `"unsafe path"` |
 | Tar unsafe symlink | `Zip/Tar.lean` | `Tar: unsafe symlink target <linkname>` | `"unsafe symlink"` |
 | Tar short-read | `Zip/Tar.lean` | `tar: unexpected end of archive reading entry data` | `"unexpected end of archive"` |
@@ -37,6 +38,15 @@ caller-supplied `maxEntrySize`). `"exceeds maximum size"` is emitted
 by the native Lean path (`Zip/Native/Inflate.lean`,
 `Zip/Native/Gzip.lean`) when the output budget is exhausted inside
 the Lean-level inflater.
+
+A third family — `"exceeds maximum header size"` — was added in
+#1597 for the Tar header-path pseudo-entries (GNU long-name /
+long-link, PAX extended / global). It sits on a *separate* knob
+(`maxHeaderSize`, default 8 MiB) from the per-entry cap
+(`maxEntrySize`), so a test that wants to exercise the header cap
+**must** match the long form — `"exceeds maximum header size"` —
+not bare `"exceeds"` or `"exceeds limit"`, both of which would
+also succeed against the payload path and produce false positives.
 
 This divergence is **intentional today** but documented as a
 Track E Priority 2 item 4 follow-up candidate — if you are landing a

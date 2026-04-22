@@ -437,3 +437,55 @@ To prevent conflict cascades at the planning stage:
    Three review agents in the last batch found their assigned bare-simp
    cleanup was already done by prior PRs. They adapted by doing deeper
    quality audits, but the planning was wasted.
+
+
+## Auto-merge race: ride-along progress entries
+
+When a small rebase-fix PR has its own `progress/` entry, the most
+convenient pattern is a "ride-along" — commit the progress entry on
+the same branch as the rebase fix, so a single PR closes both the
+fix issue and documents the work. This works most of the time, but
+breaks when `coordination create-pr` marks the branch auto-merge
+and CI finishes quickly. In the post-#1569 audit wave this bit
+twice:
+
+- **PR #1577 / #1581**: auto-merge landed the rebased CI on
+  `agent/b87e52f8` before the progress entry could be tacked onto
+  the same branch. The progress entry had to be submitted as its
+  own tiny follow-up PR. Session `0eaa9a61` recorded the friction.
+- **PR #1590 / #1592**: mirror of the above for the Minimized
+  Reproducer Corpus rebase. Session `452d633a`.
+
+### Two reliable patterns
+
+1. **Progress-entry-first**: stage and commit the progress entry
+   *before* pushing the rebase. The push and PR creation then pick
+   up both commits together.
+2. **Accept the split**: plan for a separate tiny
+   "doc: progress entry for #<N> rebase fix" PR. This is what
+   `0eaa9a61` and `452d633a` ended up doing. Size it to one commit,
+   one file; merge latency is negligible.
+
+Do **not** try to amend the auto-merged commit after the fact —
+`--force-with-lease` is pointless once the branch has been deleted
+upstream, and reopening the PR to push to a new branch under the
+same issue creates churn.
+
+## Fresh-worktree `lake build` needs `-R`
+
+When a pod worktree has been idle across a toolchain pin change, the
+first `lake build` in that worktree can fail with:
+
+    compiled configuration is invalid
+
+This is not the same as the `.lake/` stale-link-flags issue covered
+in the project CLAUDE.md — it is a *configuration* rebuild, not a
+*link-args* rebuild. The fix is:
+
+    nix-shell --run "lake build -R"
+
+(`-R` forces reconfigure.) The session `0eaa9a61` friction note
+recommended escalating this to the project CLAUDE.md's NixOS
+section; that change is out of scope for agents (CLAUDE.md is
+off-limits) but the skill documents it so the next worker doesn't
+burn a build cycle on it.
