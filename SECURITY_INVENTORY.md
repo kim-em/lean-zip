@@ -622,3 +622,9 @@ added, this file must be updated in the same change set with:
 - guardrails
 - known missing work
 - regression references if a bug prompted the change
+
+Run `bash scripts/check-inventory-links.sh` after any change touching
+`Zip/**`, `ZipTest/**`, `testdata/**`, or this file, and resolve any
+hard-failure errors before merging. The script also emits advisory
+warnings when a cited line number may have drifted relative to the
+quoted error-substring prose — treat these as hints, not blockers.
