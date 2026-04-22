@@ -19,6 +19,18 @@ def ZipTest.Gzip.tests : IO Unit := do
     unless (toString e).contains "exceeds limit" do
       throw (IO.userError s!"gzip decompress limit wrong error: {e}")
 
+  -- Near-limit boundary: exact-fit must succeed; one-byte-under must fail.
+  -- Exercises the cap check at c/zlib_ffi.c:191 (`total > max_output`).
+  let gzExactFit ← Gzip.decompress gzipped (maxDecompressedSize := big.size.toUInt64)
+  assert! gzExactFit.beq big
+  let gzUnderResult ← (Gzip.decompress gzipped
+      (maxDecompressedSize := (big.size - 1).toUInt64)).toBaseIO
+  match gzUnderResult with
+  | .ok _ => throw (IO.userError "gzip decompress near-limit (n-1) should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"gzip decompress near-limit wrong error: {e}")
+
   -- Compression levels
   let fast ← Gzip.compress big (level := 1)
   let best ← Gzip.compress big (level := 9)
@@ -90,6 +102,20 @@ def ZipTest.Gzip.tests : IO Unit := do
   let ifinal ← istate.finish
   decompressedChunks := decompressedChunks ++ ifinal
   assert! decompressedChunks.beq big
+
+  -- Repeated inflateReset across four concatenated gzip members (streaming).
+  -- Exercises the `inflateReset` branch at c/zlib_ffi.c:505 three times in
+  -- one `push` call; four distinct payloads make loop-accumulated-state bugs
+  -- visible in the final diagnostic.
+  let rr1 ← Gzip.compress "a".toUTF8
+  let rr2 ← Gzip.compress "bb".toUTF8
+  let rr3 ← Gzip.compress "ccc".toUTF8
+  let rr4 ← Gzip.compress "dddd".toUTF8
+  let rrConcat := rr1 ++ rr2 ++ rr3 ++ rr4
+  let rrState ← Gzip.InflateState.new
+  let rrPush ← rrState.push rrConcat
+  let rrFin ← rrState.finish
+  assert! (rrPush ++ rrFin).beq "abbcccdddd".toUTF8
 
   -- Zero-length chunk through streaming decompressor (empty chunk is a no-op)
   let zigzip ← Gzip.compress big

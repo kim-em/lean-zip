@@ -18,6 +18,19 @@ def ZipTest.RawDeflate.tests : IO Unit := do
     unless (toString e).contains "exceeds limit" do
       throw (IO.userError s!"raw deflate decompress limit wrong error: {e}")
 
+  -- Near-limit boundary: exact-fit must succeed; one-byte-under must fail.
+  -- Exercises the cap check at c/zlib_ffi.c:191 (`total > max_output`).
+  let rawExactFit ← RawDeflate.decompress rawCompressed
+    (maxDecompressedSize := big.size.toUInt64)
+  assert! rawExactFit.beq big
+  let rawUnderResult ← (RawDeflate.decompress rawCompressed
+      (maxDecompressedSize := (big.size - 1).toUInt64)).toBaseIO
+  match rawUnderResult with
+  | .ok _ => throw (IO.userError "raw deflate decompress near-limit (n-1) should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"raw deflate decompress near-limit wrong error: {e}")
+
   -- Streaming roundtrip
   let rawState ← RawDeflate.DeflateState.new
   let mut rawChunks := ByteArray.empty
