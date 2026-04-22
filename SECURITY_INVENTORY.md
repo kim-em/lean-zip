@@ -487,7 +487,7 @@ perform a `Nat → USize` roundtrip check before every `Handle.read`.
 | [Zip/Tar.lean:565](/home/kim/lean-zip/Zip/Tar.lean:565) `readExact input 512` in `forEntries` | fixed `512` (one tar header block) | fixed constant | N/A — fixed 512-byte read |
 | [Zip/Tar.lean:572](/home/kim/lean-zip/Zip/Tar.lean:572), [:582](/home/kim/lean-zip/Zip/Tar.lean:582), [:592](/home/kim/lean-zip/Zip/Tar.lean:592), [:598](/home/kim/lean-zip/Zip/Tar.lean:598) `readEntryData input entry.size.toNat maxHeaderSize` (GNU long-name, GNU long-link, PAX extended header, PAX global header) | `entry.size` from tar header (attacker-controlled `UInt64`) | `maxHeaderSize` cap inside `readEntryData` at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) (default `defaultMaxHeaderSize = 8 MiB` at [Zip/Tar.lean:212](/home/kim/lean-zip/Zip/Tar.lean:212)) — rejects `entry.size > maxHeaderSize` before any allocation with `IO.userError` containing `"exceeds maximum header size"`. Per-chunk reads are also capped at 64 KiB ([Zip/Tar.lean:229](/home/kim/lean-zip/Zip/Tar.lean:229)) and padding at 512 bytes per chunk ([Zip/Tar.lean:238](/home/kim/lean-zip/Zip/Tar.lean:238)). The cap is independent of the caller's `maxEntrySize`, which only bounds payload-bearing entries. Regression fixtures: `testdata/tar/malformed/gnu-longname-oversized-size.tar`, `pax-extended-oversized-size.tar` | with the cap raised, `readEntryData` would accumulate `entry.size` bytes into memory on a crafted GNU long-name or PAX header claiming multi-GB size — depends on runtime allocation to reject |
 | [Zip/Tar.lean:619](/home/kim/lean-zip/Zip/Tar.lean:619), [:650](/home/kim/lean-zip/Zip/Tar.lean:650), [:657](/home/kim/lean-zip/Zip/Tar.lean:657), [:671](/home/kim/lean-zip/Zip/Tar.lean:671) `skipEntryData input e.size` (directory-entry payload skip, symlink-entry payload skip, unsupported-typeflag payload skip, `Tar.list`) | `e.size + paddingFor e.size` (attacker-controlled `UInt64`) | 64 KiB per-chunk cap at [Zip/Tar.lean:539](/home/kim/lean-zip/Zip/Tar.lean:539); discarded bytes are not buffered (peak allocation = 64 KiB per iteration) | no memory amplification, but a malicious stream can force an unbounded number of 64 KiB reads. `Tar.extract` applies `maxEntrySize` at [Zip/Tar.lean:661](/home/kim/lean-zip/Zip/Tar.lean:661) for payload-bearing entries before the skip; `Tar.list` applies no cap |
-| [Zip/Tar.lean:627](/home/kim/lean-zip/Zip/Tar.lean:627) `input.read toRead.toUSize` in `Tar.extract` regular-file loop | `min remaining 65536` where `remaining ≤ e.size.toNat` (attacker-controlled `UInt64` from tar header) | `maxEntrySize` check at [Zip/Tar.lean:661](/home/kim/lean-zip/Zip/Tar.lean:661) (effective only when `maxEntrySize > 0`); 64 KiB per-chunk cap; data is written through to disk, not buffered | with `maxEntrySize = 0` (the current default), `Tar.extract` writes an attacker-controlled `e.size` bytes to disk. The per-read allocation is bounded at 64 KiB regardless. Documented as the "per-entry cap" row in *Decompression Limit Inventory* |
+| [Zip/Tar.lean:627](/home/kim/lean-zip/Zip/Tar.lean:627) `input.read toRead.toUSize` in `Tar.extract` regular-file loop | `min remaining 65536` where `remaining ≤ e.size.toNat` (attacker-controlled `UInt64` from tar header) | `maxEntrySize` check at [Zip/Tar.lean:661](/home/kim/lean-zip/Zip/Tar.lean:661) (effective only when `maxEntrySize > 0`); 64 KiB per-chunk cap; data is written through to disk, not buffered | with the default 1 GiB cap, `Tar.extract` writes up to 1 GiB to disk per regular-file entry; with `maxEntrySize = 0` (opt-in unlimited), the read is bounded only by `e.size` (attacker-controlled `UInt64`). The per-read allocation is bounded at 64 KiB regardless. Documented as the "per-entry cap" row in *Decompression Limit Inventory* |
 | [Zip/Tar.lean:695](/home/kim/lean-zip/Zip/Tar.lean:695) `input.read (min padRemaining 512).toUSize` in `Tar.extract` padding loop | `min padRemaining 512`; `padRemaining ≤ 511` by tar framing (`paddingFor size < 512`) | fixed 512-byte per-chunk cap; `pad < 512` by tar block alignment | N/A — ≤ 512 bytes per read, bounded by tar block alignment |
 | [Zip/Tar.lean:793](/home/kim/lean-zip/Zip/Tar.lean:793) `inStream.read 65536` in `extractTarGz` tarStream wrapper | fixed `65536` | fixed chunk constant regardless of input | N/A — fixed 64 KiB read |
 
@@ -501,9 +501,14 @@ Summary — what the inventory catches and what it does not:
   or 512 bytes) and discarded, so they cannot amplify memory.
 - **Does NOT catch** — one residual gap that would benefit from a
   follow-up issue:
-  1. `Tar.extract` at row 10 relies on a caller-supplied
-     `maxEntrySize` that defaults to `0` (no limit). The read is
-     bounded by the caller's disk, not by a library-level cap.
+  1. `Tar.extract` row 10 relies on a per-entry `maxEntrySize` cap
+     of 1 GiB by default; an attacker who crafts many entries can
+     still drive disk usage past this cap because the
+     whole-archive `maxTotalSize` parameter on `Tar.extract` /
+     `Tar.extractTarGz` / `Tar.extractTarGzNative` defaults to
+     `0` (no limit) per Recommended Policy item 4. Callers
+     concerned about multi-entry exhaustion must opt into a
+     finite `maxTotalSize`.
 
   The previously-listed `Tar.readEntryData` gap at the four GNU
   long-name / long-link / PAX callsites is now closed by the
