@@ -29,6 +29,9 @@ known gaps that sit outside the formally verified codec core.
 - Missing work:
   - prove or enforce stronger preconditions before every `Handle.read`
     and `Stream.read` driven by archive metadata
+    - see *"Local guard inventory for `Handle.read` and `Stream.read`"*
+      below for the per-site audit of what protections are currently in
+      place
   - add regression fixtures for oversized ZIP64 size claims
 
 ### zlib via C FFI
@@ -401,6 +404,67 @@ Known caller impact if recommendations 1–5 land:
   the caller's sink today.
 - There is no public API for "whole-archive" decompressed-size cap
   on ZIP or tar extraction — see recommendation 4.
+
+### Local guard inventory for `Handle.read` and `Stream.read`
+
+Per-callsite audit of every `Handle.read`, `Stream.read`, and
+`inStream.read` invocation reachable from untrusted archive bytes in
+`Zip/Archive.lean` and `Zip/Tar.lean`. This documents which guards
+**already run before** each read, so a reader does not have to trace
+back through the source to confirm that every metadata-driven read is
+protected. The *"Failure mode"* column states the residual
+upstream-runtime risk for each site — it is the behaviour that would
+surface if the caller bypassed the guard.
+
+The creator-side `h.read` in `Zip/Tar.lean` `create` at
+[Zip/Tar.lean:442](/home/kim/lean-zip/Zip/Tar.lean:442) is **not**
+listed: it reads local files chosen by the caller (the archive author),
+not untrusted archive bytes, so it falls outside this inventory's
+scope.
+
+Trust-boundary callers reach the actual `.read` primitive via
+`readExact` ([Zip/Archive.lean:356](/home/kim/lean-zip/Zip/Archive.lean:356),
+[Zip/Tar.lean:189](/home/kim/lean-zip/Zip/Tar.lean:189)),
+`readExactStream` ([Zip/Archive.lean:370](/home/kim/lean-zip/Zip/Archive.lean:370)),
+`readEntryData` ([Zip/Tar.lean:199](/home/kim/lean-zip/Zip/Tar.lean:199)),
+`skipEntryData` ([Zip/Tar.lean:473](/home/kim/lean-zip/Zip/Tar.lean:473)),
+or open-coded read loops. Each row below names the call site that
+drives an `n`-byte read; the `readExact`-family helpers themselves
+perform a `Nat → USize` roundtrip check before every `Handle.read`.
+
+| Callsite (file:line) | Reads driven by | Local guard | Failure mode if guard absent |
+|---|---|---|---|
+| [Zip/Archive.lean:370](/home/kim/lean-zip/Zip/Archive.lean:370) `readExactStream` helper (inner `s.read` at line 376) | caller-provided `n : Nat` | `Nat → USize` roundtrip at [Zip/Archive.lean:371](/home/kim/lean-zip/Zip/Archive.lean:371) | no production parser reaches this helper today — only `ZipTest/Archive.lean` exercises it. Any future stream-fed parser that wires into `readExactStream` must apply its own `n`-bound before calling; otherwise this row downgrades to caller-bounded |
+| [Zip/Archive.lean:391](/home/kim/lean-zip/Zip/Archive.lean:391) `readExact h tailSize "EOCD tail"` | `tailSize = min fileSize 65558` at [Zip/Archive.lean:388](/home/kim/lean-zip/Zip/Archive.lean:388) | `min` clamp (≤ 65 558 bytes regardless of input); `Nat → USize` roundtrip in `readExact` | N/A — the read is structurally bounded to ≤ 65 558 bytes |
+| [Zip/Archive.lean:400](/home/kim/lean-zip/Zip/Archive.lean:400) `readExact h cdSize "central directory"` | `cdSize` parsed from EOCD (attacker-controlled) | `cdOffset + cdSize ≤ fileSize` check at [Zip/Archive.lean:394](/home/kim/lean-zip/Zip/Archive.lean:394); `maxCentralDirSize` cap (default 64 MiB) at [Zip/Archive.lean:396](/home/kim/lean-zip/Zip/Archive.lean:396); `Nat → USize` roundtrip in `readExact` | would request a crafted multi-GB allocation; depends on runtime to reject or OOM |
+| [Zip/Archive.lean:415](/home/kim/lean-zip/Zip/Archive.lean:415) `readExact h 30 "local header for {label}"` | fixed `30` bytes | `assertSpanInFile fileSize entry.localOffset 30` at [Zip/Archive.lean:413](/home/kim/lean-zip/Zip/Archive.lean:413) | N/A — fixed 30-byte read |
+| [Zip/Archive.lean:438](/home/kim/lean-zip/Zip/Archive.lean:438) `readExact h (nameLen + extraLen) "local name+extra for {label}"` | `nameLen + extraLen`, both `UInt16` read from the local header (≤ 2·`UInt16.max` ≈ 128 KiB) | `assertSpanInFile` at [Zip/Archive.lean:434](/home/kim/lean-zip/Zip/Archive.lean:434); `UInt16` type bound on each addend | N/A — `UInt16` type bounds each addend, total ≤ 128 KiB regardless of input |
+| [Zip/Archive.lean:471](/home/kim/lean-zip/Zip/Archive.lean:471) `readExact h entry.compressedSize.toNat "compressed data for {label}"` | `entry.compressedSize` from CD / ZIP64 local extra (attacker-controlled `UInt64`) | `assertSpanInFile fileSize (entry.localOffset + headerAndNames) entry.compressedSize` at [Zip/Archive.lean:436](/home/kim/lean-zip/Zip/Archive.lean:436); CD-vs-LH `compressedSize` consistency check at [Zip/Archive.lean:462](/home/kim/lean-zip/Zip/Archive.lean:462) (only skipped when the LH data-descriptor flag bit 3 is set); `Nat → USize` roundtrip in `readExact`. Regression fixtures: `testdata/zip/malformed/oversized-compressed-size.zip`, `oversized-zip64-compressed-size.zip` | would request petabyte allocation on a crafted oversized `compressedSize`; relies on `assertSpanInFile` + CD/LH consistency to reject before `Handle.read` |
+| [Zip/Tar.lean:492](/home/kim/lean-zip/Zip/Tar.lean:492) `readExact input 512` in `forEntries` | fixed `512` (one tar header block) | fixed constant | N/A — fixed 512-byte read |
+| [Zip/Tar.lean:499](/home/kim/lean-zip/Zip/Tar.lean:499), [:508](/home/kim/lean-zip/Zip/Tar.lean:508), [:517](/home/kim/lean-zip/Zip/Tar.lean:517), [:522](/home/kim/lean-zip/Zip/Tar.lean:522) `readEntryData input entry.size.toNat` (GNU long-name, GNU long-link, PAX extended header, PAX global header) | `entry.size` from tar header (attacker-controlled `UInt64`) | **none** at the call site. `readEntryData` itself caps per-chunk reads at 64 KiB ([Zip/Tar.lean:203](/home/kim/lean-zip/Zip/Tar.lean:203)) and padding at 512 bytes per chunk ([Zip/Tar.lean:214](/home/kim/lean-zip/Zip/Tar.lean:214)), but accumulates the full `entry.size` into `result : ByteArray`. The caller's `maxEntrySize` check in `Tar.extract` fires on the *payload-bearing* entry that follows — it does **not** bound the long-name/PAX header entry whose size is being read here | would accumulate `entry.size` bytes into memory on a crafted GNU long-name or PAX header claiming e.g. petabyte size — depends on runtime allocation to reject. **Follow-up issue needed**: add an explicit per-call cap on these four callsites (e.g. thread `maxEntrySize` or a dedicated `maxHeaderSize` into `readEntryData`) so the header path matches the payload path |
+| [Zip/Tar.lean:574](/home/kim/lean-zip/Zip/Tar.lean:574), [:605](/home/kim/lean-zip/Zip/Tar.lean:605), [:612](/home/kim/lean-zip/Zip/Tar.lean:612), [:620](/home/kim/lean-zip/Zip/Tar.lean:620) `skipEntryData input e.size` (directory-entry payload skip, symlink-entry payload skip, unsupported-typeflag payload skip, `Tar.list`) | `e.size + paddingFor e.size` (attacker-controlled `UInt64`) | 64 KiB per-chunk cap at [Zip/Tar.lean:477](/home/kim/lean-zip/Zip/Tar.lean:477); discarded bytes are not buffered (peak allocation = 64 KiB per iteration) | no memory amplification, but a malicious stream can force an unbounded number of 64 KiB reads. `Tar.extract` applies `maxEntrySize` at [Zip/Tar.lean:565](/home/kim/lean-zip/Zip/Tar.lean:565) for payload-bearing entries before the skip; `Tar.list` applies no cap |
+| [Zip/Tar.lean:582](/home/kim/lean-zip/Zip/Tar.lean:582) `input.read toRead.toUSize` in `Tar.extract` regular-file loop | `min remaining 65536` where `remaining ≤ e.size.toNat` (attacker-controlled `UInt64` from tar header) | `maxEntrySize` check at [Zip/Tar.lean:565](/home/kim/lean-zip/Zip/Tar.lean:565) (effective only when `maxEntrySize > 0`); 64 KiB per-chunk cap; data is written through to disk, not buffered | with `maxEntrySize = 0` (the current default), `Tar.extract` writes an attacker-controlled `e.size` bytes to disk. The per-read allocation is bounded at 64 KiB regardless. Documented as the "per-entry cap" row in *Decompression Limit Inventory* |
+| [Zip/Tar.lean:593](/home/kim/lean-zip/Zip/Tar.lean:593) `input.read (min padRemaining 512).toUSize` in `Tar.extract` padding loop | `min padRemaining 512`; `padRemaining ≤ 511` by tar framing (`paddingFor size < 512`) | fixed 512-byte per-chunk cap; `pad < 512` by tar block alignment | N/A — ≤ 512 bytes per read, bounded by tar block alignment |
+| [Zip/Tar.lean:662](/home/kim/lean-zip/Zip/Tar.lean:662) `inStream.read 65536` in `extractTarGz` tarStream wrapper | fixed `65536` | fixed chunk constant regardless of input | N/A — fixed 64 KiB read |
+
+Summary — what the inventory catches and what it does not:
+
+- **Catches**: every metadata-driven read in ZIP extraction
+  (`Archive.readEntryData`) is span-checked against the actual file
+  size before `Handle.read` runs, and the CD-vs-LH consistency check
+  rejects crafted size mismatches before the compressed-payload read.
+  Padding and skip reads in `Tar.lean` are bounded per chunk (64 KiB
+  or 512 bytes) and discarded, so they cannot amplify memory.
+- **Does NOT catch** — two residual gaps that would benefit from
+  follow-up issues:
+  1. `Tar.readEntryData` at the four GNU long-name / long-link / PAX
+     callsites (rows 8 above) accumulates the attacker-supplied
+     `entry.size` into `ByteArray` without a local cap. Today only
+     the runtime allocator stands between a crafted header claiming
+     multi-TB size and OOM.
+  2. `Tar.extract` at row 10 relies on a caller-supplied
+     `maxEntrySize` that defaults to `0` (no limit). The read is
+     bounded by the caller's disk, not by a library-level cap.
 
 ## Required Maintenance Rule
 
