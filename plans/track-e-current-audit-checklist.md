@@ -184,12 +184,21 @@ Targets:
 - [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:341)
 - [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:169)
 
-- [ ] Introduce proof-friendly helper functions for bounded reads and
+- [x] Introduce proof-friendly helper functions for bounded reads and
   validated spans.
+  (PR #1608 landed `readBoundedSpanFromHandle`,
+  `readBoundedExactFromHandle`, `readBoundedExactFromStream`, and
+  `readBoundedEntryData` plus smoke coverage in
+  `ZipTest/BoundedReadTest.lean`.)
 - [ ] Prove simple lemmas of the form:
   validated span implies requested read length is file-bounded.
-- [ ] Use those helpers so parser hardening is easier to audit and less
+- [x] Use those helpers so parser hardening is easier to audit and less
   likely to regress than open-coded checks.
+  (This PR migrated the three `Zip/Archive.lean` `readEntryData`
+  `assertSpanInFile` + seek + `readExact` chains to
+  `readBoundedSpanFromHandle`, and the four GNU/PAX
+  `Zip/Tar.lean` `readEntryData` callsites to
+  `readBoundedEntryData`.)
 
 ## Completion Rule
 

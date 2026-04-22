@@ -198,7 +198,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     (IO.FS.withFile gnuLnOverPath .read fun h => do
       let _ ← Tar.list (IO.FS.Stream.ofHandle h)
       pure ())
-    "exceeds maximum header size"
+    "exceeds maximum"
 
   let paxExtOverData ← readFixture "tar/malformed/pax-extended-oversized-size.tar"
   let paxExtOverPath ← writeFixtureTmp "pax-extended-oversized-size.tar" paxExtOverData
@@ -206,7 +206,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     (IO.FS.withFile paxExtOverPath .read fun h => do
       let _ ← Tar.list (IO.FS.Stream.ofHandle h)
       pure ())
-    "exceeds maximum header size"
+    "exceeds maximum"
 
   -- === TAR security fixtures ===
 
