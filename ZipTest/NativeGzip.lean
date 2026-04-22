@@ -6,6 +6,20 @@ import Zip.Spec.ZlibCorrect
 /-! Tests for native gzip/zlib decompression and compression against FFI,
     across compression levels and data patterns. -/
 
+/-- Regression probe for SECURITY_INVENTORY.md Rec. 5: all three native
+    decoders default to 1 GiB. If a future refactor silently flips the
+    default back to 256 MiB (or any other value), `rfl` fails and these
+    examples stop type-checking. -/
+example (data : ByteArray) :
+    Zip.Native.GzipDecode.decompress data
+      = Zip.Native.GzipDecode.decompress data (1024 * 1024 * 1024) := rfl
+example (data : ByteArray) :
+    Zip.Native.ZlibDecode.decompress data
+      = Zip.Native.ZlibDecode.decompress data (1024 * 1024 * 1024) := rfl
+example (data : ByteArray) :
+    Zip.Native.decompressAuto data
+      = Zip.Native.decompressAuto data (1024 * 1024 * 1024) := rfl
+
 def ZipTest.NativeGzip.tests : IO Unit := do
   IO.println "  NativeGzip tests..."
   let big ← mkTestData

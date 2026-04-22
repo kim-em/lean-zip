@@ -341,9 +341,9 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:123) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | thin wrapper forwarding to `decompressStream`; default still unlimited (bomb-unsafe for untrusted input written to disk). Landed by PR #1610. |
 | [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:56) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | streaming raw DEFLATE; same counter/check structure as `Gzip.decompressStream`. Landed by PR #1610. |
 | [Zip.Native.Inflate.inflate](/home/kim/lean-zip/Zip/Native/Inflate.lean:384) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB. |
-| [Zip.Native.GzipDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:40) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
-| [Zip.Native.ZlibDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:140) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
-| [Zip.Native.decompressAuto](/home/kim/lean-zip/Zip/Native/Gzip.lean:240) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | format-auto dispatch over the three natives above. |
+| [Zip.Native.GzipDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:40) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB (unified with `Inflate.inflate` per Rec. 5). |
+| [Zip.Native.ZlibDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:140) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB (unified with `Inflate.inflate` per Rec. 5). |
+| [Zip.Native.decompressAuto](/home/kim/lean-zip/Zip/Native/Gzip.lean:240) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | format-auto dispatch over the three natives above. |
 | [Archive.list](/home/kim/lean-zip/Zip/Archive.lean:497) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | metadata-only; caps CD allocation, not decompressed payload. |
 | [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
 | [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxEntrySize : UInt64` | `0` | **asymmetric** — FFI: no limit; native: silently upgraded to 256 MiB inside `readEntryData` (see [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477)) | per-entry cap on the decompressed payload. |
@@ -372,13 +372,6 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
   kind of whole-buffer decompression. A caller copying the
   `Tar.extractTarGz`-style pattern with the FFI decoders gets no
   default protection.
-- **Native decompression defaults disagree with each other.**
-  `Zip.Native.Inflate.inflate` defaults to **1 GiB**;
-  `Zip.Native.GzipDecode.decompress`,
-  `Zip.Native.ZlibDecode.decompress`, and
-  `Zip.Native.decompressAuto` default to **256 MiB**. Picking a
-  format auto-dispatch vs. raw DEFLATE directly changes the default
-  cap by a factor of 4.
 - **`maxCentralDirSize` vs. `maxEntrySize` semantics.** In
   `Archive.list` / `Archive.extract` / `Archive.extractFile`, the CD
   cap defaults to a finite 64 MiB (good), while the per-entry cap
@@ -437,12 +430,11 @@ issues and the follow-up docstring/default change.
      `maxEntrySize` (recommendation 3) already bounds the common
      case; the total cap is a second line of defence against
      many-small-entries bombs.
-5. **Native-side uniformity**.
-   - Normalise the native decoder defaults to match one value
-     (suggested: **1 GiB**, matching `Zip.Native.Inflate.inflate`).
-     Whichever value is chosen, all four — `Inflate.inflate`,
-     `GzipDecode.decompress`, `ZlibDecode.decompress`,
-     `decompressAuto` — should agree.
+5. **Native-side uniformity**. Executed (issue #1609) — all four
+   native decoders (`Inflate.inflate`, `GzipDecode.decompress`,
+   `ZlibDecode.decompress`, `decompressAuto`) now default to **1 GiB**,
+   matching `Zip.Native.Inflate.inflate`. The factor-of-4 asymmetry
+   between raw-DEFLATE and format-auto-dispatch is gone.
 6. **Docstrings and error messages**.
    - Every decompression API should state its default, the
      meaning of `0`, and the exact error thrown on cap overflow.
