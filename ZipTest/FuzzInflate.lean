@@ -109,6 +109,95 @@ private def tryStreaming (chunks : Array ByteArray) : IO Unit := do
   catch _ =>
     pure ()
 
+/-- `maxDecompressedSize` classes used by the high-level streaming
+    fuzz probes. `0` opts into unlimited mode (the PR #1610
+    pre-default / the opt-in for trusted input), so the "no-cap"
+    code path is still exercised after PR #1631 flipped the default
+    to 1 GiB. The finite entries stress the `IO.Ref UInt64` counter +
+    guard at different "distance to cap" regimes. Bomb detection is
+    out of scope — random bytes rarely decompress, and when they do
+    the output is tiny — the value is cross-chunk counter
+    soundness. See PR #1616 review F-c. -/
+private def maxClasses : Array UInt64 :=
+  #[0, 64, 1024, 65536]
+
+/-- Sink `IO.FS.Stream` that discards every byte written. Used as
+    the output side of the high-level streaming fuzz probes — the
+    fuzz driver cares only about whether the decoder crashes or
+    violates a contract, not about the decompressed bytes. -/
+private def discardSinkStream : IO.FS.Stream := {
+  flush := pure ()
+  read := fun _ => pure ByteArray.empty
+  write := fun _ => pure ()
+  getLine := pure ""
+  putStr := fun _ => pure ()
+  isTty := pure false
+}
+
+/-- Readable `IO.FS.Stream` that yields the given `chunks` in order,
+    one chunk per `read` call (capped to the requested byte count).
+    Skips exhausted / empty chunks so the consumer sees an empty
+    read only after every chunk is drained — critical because
+    `decompressStream` treats the first empty read as EOF. -/
+private def chunksReadStream (chunks : Array ByteArray) : IO IO.FS.Stream := do
+  let idxRef ← IO.mkRef 0
+  let offRef ← IO.mkRef 0
+  return {
+    flush := pure ()
+    read := fun n => do
+      let mut idx ← idxRef.get
+      let mut off ← offRef.get
+      -- Advance past already-drained chunks. At most `chunks.size`
+      -- iterations; bounded `for` keeps this obviously terminating.
+      for _ in [:chunks.size] do
+        if idx ≥ chunks.size then break
+        if off < chunks[idx]!.size then break
+        idx := idx + 1
+        off := 0
+      if idx ≥ chunks.size then
+        idxRef.set idx
+        offRef.set 0
+        return ByteArray.empty
+      let chunk := chunks[idx]!
+      let available := chunk.size - off
+      let toRead := min n.toNat available
+      let result := chunk.extract off (off + toRead)
+      idxRef.set idx
+      offRef.set (off + toRead)
+      return result
+    write := fun _ => throw (IO.userError "chunksReadStream: write not supported")
+    getLine := pure ""
+    putStr := fun _ => pure ()
+    isTty := pure false
+  }
+
+/-- Drive the high-level `Gzip.decompressStream` path with the
+    fuzz-generated `chunks` feeding an in-memory input stream and a
+    PRNG-picked `maxDecompressedSize`. Exercises the Lean-side
+    `IO.Ref UInt64` counter at `Zip/Gzip.lean:89-97` that the
+    low-level `InflateState.push/finish` surface does not see. -/
+private def tryStreamingGzip (chunks : Array ByteArray)
+    (maxCap : UInt64) : IO Unit := do
+  try
+    let inStream ← chunksReadStream chunks
+    Gzip.decompressStream inStream discardSinkStream
+      (maxDecompressedSize := maxCap)
+  catch _ =>
+    pure ()
+
+/-- Drive the high-level `RawDeflate.decompressStream` path with the
+    fuzz-generated `chunks` and a PRNG-picked `maxDecompressedSize`.
+    Same counter pattern as `tryStreamingGzip`, on the raw-deflate
+    wrapper at `Zip/RawDeflate.lean:59-69`. -/
+private def tryStreamingRawDeflate (chunks : Array ByteArray)
+    (maxCap : UInt64) : IO Unit := do
+  try
+    let inStream ← chunksReadStream chunks
+    RawDeflate.decompressStream inStream discardSinkStream
+      (maxDecompressedSize := maxCap)
+  catch _ =>
+    pure ()
+
 /-- One fuzz iteration: generate a random input of some size and
     drive every inflate entry point on it. Updates and returns the
     PRNG state. -/
@@ -130,10 +219,18 @@ private def oneIteration (state : UInt64) : IO UInt64 := do
     (Zip.Native.ZlibDecode.decompress input defaultMaxOutput)
   tryNative "Zip.Native.decompressAuto"
     (Zip.Native.decompressAuto input defaultMaxOutput)
-  -- Streaming FFI path (the only streaming decoder we expose).
+  -- Streaming FFI paths: the low-level `InflateState.push/finish`
+  -- surface and the high-level `decompressStream` wrappers. The
+  -- high-level probes share one PRNG-picked `maxDecompressedSize`
+  -- across the gzip + raw-deflate calls — fewer xorshift advances
+  -- per iteration keeps the PRNG state-space simple.
   let (chunks, s2) := splitIntoChunks input s1
   tryStreaming chunks
-  return s2
+  let s3 := xorshift64 s2
+  let maxCap := pick maxClasses s3
+  tryStreamingGzip chunks maxCap
+  tryStreamingRawDeflate chunks maxCap
+  return s3
 
 /-- Run `iterations` fuzz iterations starting from `seed`. Every
     iteration drives every inflate entry point listed above on a
