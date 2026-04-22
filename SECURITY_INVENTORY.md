@@ -517,6 +517,76 @@ Summary — what the inventory catches and what it does not:
      `maxEntrySize` that defaults to `0` (no limit). The read is
      bounded by the caller's disk, not by a library-level cap.
 
+## Minimized Reproducer Corpus
+
+Each row below is a minimised input that trips a specific defensive
+guard in the parsers or extractors. Regression of a listed guard
+surfaces as a test failure in
+[`ZipTest/ZipFixtures.lean`](/home/kim/lean-zip/ZipTest/ZipFixtures.lean),
+[`ZipTest/TarFixtures.lean`](/home/kim/lean-zip/ZipTest/TarFixtures.lean),
+or (for the UTF-8 entry-name check)
+[`ZipTest/Utf8Fixtures.lean`](/home/kim/lean-zip/ZipTest/Utf8Fixtures.lean).
+The corpus realises the *"malformed regression corpus"* goal in
+[`PLAN.md` lines 621-624](/home/kim/lean-zip/PLAN.md:621):
+*"every discovered crash, panic, timeout, or upstream-runtime issue
+gets a minimized reproducer and a permanent regression test when
+feasible."*
+
+Columns:
+
+- **Fixture** — relative-path link into `testdata/`.
+- **Size** — on-disk byte size (as reported by `wc -c`).
+- **Defence exercised** — the concrete guard that must continue to
+  trip, linked to the source line that raises the error or applies
+  the silent-skip policy.
+- **First landed** — PR number if the fixture entered via a dedicated
+  PR; commit `481e562` for the fixtures inherited from the initial
+  `lean-zlib → lean-zip` import (no PR).
+- **Related class** — one of {*oversized allocation*,
+  *partial-decoder panic*, *archive-slip*, *decompression bomb*,
+  *other*} so an auditor tracking regressions of a single class can
+  filter.
+
+Row order: by `testdata/` subdirectory, then alphabetically within
+each subdirectory. Every row below has a live assertion in
+`ZipTest/` (checked by `grep`-of-filename across `ZipTest/`); no
+fixture is currently orphaned. `hardlink-outside.tar` is a
+*positive* regression — the assertion is that extraction leaves the
+output directory empty, confirming that `typeHardlink` continues
+to be silently skipped.
+
+| Fixture (testdata/…) | Size | Defence exercised | First landed | Related class |
+|---|---|---|---|---|
+| [testdata/tar/malformed/bad-checksum.tar](/home/kim/lean-zip/testdata/tar/malformed/bad-checksum.tar) | 2048 B | Tar header checksum verification at [Zip/Tar.lean:378](/home/kim/lean-zip/Zip/Tar.lean:378) — *"header checksum mismatch"* | `481e562` | other (integrity check) |
+| [testdata/tar/malformed/gnu-longlink-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longlink-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:206](/home/kim/lean-zip/Zip/Tar.lean:206) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/gnu-longname-invalid-utf8.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-invalid-utf8.tar) | 1536 B | `String.fromUTF8?` → `Binary.fromLatin1` fallback at [Zip/Tar.lean:501](/home/kim/lean-zip/Zip/Tar.lean:501) (no panicking `fromUTF8!` path) | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/gnu-longname-no-terminator.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-no-terminator.tar) | 1536 B | `stripTrailingNuls` is a no-op when the payload has no trailing NUL ([Zip/Tar.lean:500](/home/kim/lean-zip/Zip/Tar.lean:500)); full payload becomes the name without a panic | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/gnu-longname-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:206](/home/kim/lean-zip/Zip/Tar.lean:206) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
+| [testdata/tar/malformed/no-magic.tar](/home/kim/lean-zip/testdata/tar/malformed/no-magic.tar) | 2048 B | Tar magic check at [Zip/Tar.lean:382](/home/kim/lean-zip/Zip/Tar.lean:382) — *"unsupported format"* | `481e562` | other (header validation) |
+| [testdata/tar/malformed/pax-inconsistent-length.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-inconsistent-length.tar) | 2048 B | `parsePaxRecords` silent-skip when no `=` is found before the declared record end (scan at [Zip/Tar.lean:108](/home/kim/lean-zip/Zip/Tar.lean:108); record dropped at [Zip/Tar.lean:113](/home/kim/lean-zip/Zip/Tar.lean:113)) | #1545 | partial-decoder panic |
+| [testdata/tar/malformed/pax-invalid-utf8-key.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-invalid-utf8-key.tar) | 2048 B | `parsePaxRecords` `String.fromUTF8?` guard on key/value at [Zip/Tar.lean:122](/home/kim/lean-zip/Zip/Tar.lean:122) (record dropped, no panic) | #1545 | partial-decoder panic |
+| [testdata/tar/malformed/pax-invalid-utf8-value.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-invalid-utf8-value.tar) | 2048 B | Same `String.fromUTF8?` guard at [Zip/Tar.lean:122](/home/kim/lean-zip/Zip/Tar.lean:122) | #1545 | partial-decoder panic |
+| [testdata/tar/malformed/pax-oversized-length.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-oversized-length.tar) | 2048 B | `parsePaxRecords` `digitCount > 20` guard at [Zip/Tar.lean:95](/home/kim/lean-zip/Zip/Tar.lean:95) (length-parse aborted before multiplying) | #1545 | oversized allocation |
+| [testdata/tar/malformed/pax-truncated-record.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-truncated-record.tar) | 2048 B | `parsePaxRecords` `recordEnd > data.size` guard at [Zip/Tar.lean:105](/home/kim/lean-zip/Zip/Tar.lean:105) (iteration breaks, remaining bytes ignored) | #1545 | partial-decoder panic |
+| [testdata/tar/malformed/truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/truncated.tar) | 522 B | `Tar.extract` regular-file loop short-read at [Zip/Tar.lean:591](/home/kim/lean-zip/Zip/Tar.lean:591) — *"unexpected end of archive reading {path} ({n} bytes remaining)"* | `481e562` | other (framing) |
+| [testdata/tar/security/backslash-slip.tar](/home/kim/lean-zip/testdata/tar/security/backslash-slip.tar) | 2048 B | `Binary.isPathSafe` rejects backslashes before component-level `..` check at [Zip/Tar.lean:570](/home/kim/lean-zip/Zip/Tar.lean:570) — *"unsafe path"* | `481e562` (assertion added by #1555) | archive-slip |
+| [testdata/tar/security/hardlink-outside.tar](/home/kim/lean-zip/testdata/tar/security/hardlink-outside.tar) | 512 B | `typeHardlink` silent-skip else-branch at [Zip/Tar.lean:613](/home/kim/lean-zip/Zip/Tar.lean:613); payload discarded, no `createHardlink` call, extract directory remains empty | #1555 | archive-slip |
+| [testdata/tar/security/symlink-absolute.tar](/home/kim/lean-zip/testdata/tar/security/symlink-absolute.tar) | 512 B | Symlink linkname absolute/backslash check at [Zip/Tar.lean:605](/home/kim/lean-zip/Zip/Tar.lean:605) — *"unsafe symlink target"* | #1555 | archive-slip |
+| [testdata/tar/security/symlink-slip.tar](/home/kim/lean-zip/testdata/tar/security/symlink-slip.tar) | 10240 B | Symlink linkname component `..` check at [Zip/Tar.lean:607](/home/kim/lean-zip/Zip/Tar.lean:607) — *"unsafe symlink target"* | `481e562` | archive-slip |
+| [testdata/tar/security/tar-absolute.tar](/home/kim/lean-zip/testdata/tar/security/tar-absolute.tar) | 2048 B | `Binary.isPathSafe` rejects absolute paths at [Zip/Tar.lean:570](/home/kim/lean-zip/Zip/Tar.lean:570) — *"unsafe path"* | `481e562` | archive-slip |
+| [testdata/tar/security/tar-slip.tar](/home/kim/lean-zip/testdata/tar/security/tar-slip.tar) | 10240 B | `Binary.isPathSafe` rejects `..` component traversal at [Zip/Tar.lean:570](/home/kim/lean-zip/Zip/Tar.lean:570) — *"unsafe path"* | `481e562` | archive-slip |
+| [testdata/zip/malformed/bad-crc.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-crc.zip) | 140 B | Post-extraction CRC32 verification at [Zip/Archive.lean:487](/home/kim/lean-zip/Zip/Archive.lean:487) — *"CRC32 mismatch"* | `481e562` | other (integrity check) |
+| [testdata/zip/malformed/bad-method.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-method.zip) | 140 B | Method-dispatch guard at [Zip/Archive.lean:482](/home/kim/lean-zip/Zip/Archive.lean:482) — *"unsupported method"* | `481e562` | other (method validation) |
+| [testdata/zip/malformed/cd-lh-method-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-method-mismatch.zip) | 122 B | CD/LH method-consistency check at [Zip/Archive.lean:459](/home/kim/lean-zip/Zip/Archive.lean:459) — *"method mismatch between CD and local header"* | #1554 | other (CD/LH consistency) |
+| [testdata/zip/malformed/cd-lh-size-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-size-mismatch.zip) | 122 B | CD/LH `compressedSize` consistency check at [Zip/Archive.lean:464](/home/kim/lean-zip/Zip/Archive.lean:464) — *"compressedSize mismatch between CD and local header"* | #1554 | other (CD/LH consistency) |
+| [testdata/zip/malformed/cd-past-eof.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-past-eof.zip) | 22 B | `cdOffset + cdSize ≤ fileSize` check at [Zip/Archive.lean:395](/home/kim/lean-zip/Zip/Archive.lean:395) — *"central directory extends beyond file"* | `481e562` | oversized allocation |
+| [testdata/zip/malformed/invalid-utf8-with-flag.zip](/home/kim/lean-zip/testdata/zip/malformed/invalid-utf8-with-flag.zip) | 120 B | UTF-8-flagged entry name strict parse at [Zip/Archive.lean:313](/home/kim/lean-zip/Zip/Archive.lean:313) — *"invalid UTF-8 in entry name (UTF-8 flag set)"* | `481e562` | partial-decoder panic |
+| [testdata/zip/malformed/no-eocd.zip](/home/kim/lean-zip/testdata/zip/malformed/no-eocd.zip) | 44 B | EOCD-scan failure at [Zip/Archive.lean:393](/home/kim/lean-zip/Zip/Archive.lean:393) — *"cannot find end of central directory"* | `481e562` | other (framing) |
+| [testdata/zip/malformed/oversized-compressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-compressed-size.zip) | 122 B | `assertSpanInFile` for the compressed payload at [Zip/Archive.lean:436](/home/kim/lean-zip/Zip/Archive.lean:436) — *"local data span"* | #1497 | oversized allocation |
+| [testdata/zip/malformed/oversized-zip64-compressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-zip64-compressed-size.zip) | 134 B | `assertSpanInFile` for the compressed payload at [Zip/Archive.lean:436](/home/kim/lean-zip/Zip/Archive.lean:436) — *"local data span"* (ZIP64 extra resolves an exabyte-scale `compressedSize`) | #1543 | oversized allocation |
+| [testdata/zip/malformed/oversized-zip64-uncompressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-zip64-uncompressed-size.zip) | 134 B | Strict LH ZIP64-extra parse at [Zip/Archive.lean:447](/home/kim/lean-zip/Zip/Archive.lean:447) — *"truncated ZIP64 local extra field"* (CD claims `uncompressedSize = 0xFFFFFFFF` but LH omits the ZIP64 block) | #1544 | oversized allocation |
+| [testdata/zip/malformed/too-short.zip](/home/kim/lean-zip/testdata/zip/malformed/too-short.zip) | 10 B | EOCD-scan failure at [Zip/Archive.lean:393](/home/kim/lean-zip/Zip/Archive.lean:393) — *"cannot find end of central directory"* | `481e562` | other (framing) |
+
 ## Required Maintenance Rule
 
 Whenever a new parser, extraction path, FFI helper, or streaming API is
