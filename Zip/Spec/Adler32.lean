@@ -201,6 +201,40 @@ theorem checksum_pair (b₁ b₂ : UInt8) :
       simp only [UInt32.size]; omega)]
   omega
 
+/-- The Adler-32 checksum of `n` zero bytes has the closed form
+`1 + n * 65536` (as a `UInt32`) when `n < 65521 = MOD_ADLER`. The
+state after `n` updates with byte `0` starting from `init = (1, 0)`
+is `(1, n)`, because the first component never changes (adding `0`
+mod anything) and the second accumulates `1` per step. -/
+theorem checksum_replicate_zero (n : Nat) (hn : n < 65521) :
+    checksum (List.replicate n 0) = UInt32.ofNat (1 + n * 65536) := by
+  have hstate : ∀ (m k : Nat), k + m < 65521 →
+      updateList (1, k) (List.replicate m 0) = (1, k + m) := by
+    intro m
+    induction m with
+    | zero => intros; rfl
+    | succ m ih =>
+      intro k hkm
+      rw [List.replicate_succ, updateList_cons]
+      have hk1 : k + 1 < 65521 := by omega
+      have hbyte : updateByte (1, k) 0 = (1, k + 1) := by
+        show ((1 + (0:UInt8).toNat) % MOD_ADLER,
+              (k + (1 + (0:UInt8).toNat) % MOD_ADLER) % MOD_ADLER) = (1, k + 1)
+        rw [show (1 + (0:UInt8).toNat) % MOD_ADLER = 1 from by decide,
+            show (k + 1) % MOD_ADLER = k + 1 from Nat.mod_eq_of_lt hk1]
+      rw [hbyte, ih (k + 1) (by omega)]
+      congr 1; omega
+  have hupdate : updateList init (List.replicate n 0) = (1, n) := by
+    have h := hstate n 0 (by omega)
+    show updateList (1, 0) (List.replicate n 0) = (1, n)
+    rw [h, Nat.zero_add]
+  have hbnd : 1 + n * 65536 < UInt32.size := by
+    simp only [UInt32.size]; omega
+  rw [← UInt32.toNat_inj]
+  simp only [checksum, hupdate,
+    pack_toNat_of_bounds (show (1:Nat) < 65536 by omega) (show n < 65536 by omega),
+    UInt32.toNat_ofNat_of_lt' hbnd]
+
 /-- Compositionality of incremental Adler-32 computation (spec level).
 The running state after processing `xs` is `unpack (checksum xs)`;
 feeding `ys` into that state and re-packing yields
