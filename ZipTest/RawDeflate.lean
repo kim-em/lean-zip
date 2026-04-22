@@ -2,6 +2,9 @@ import ZipTest.Helpers
 
 /-! Tests for raw DEFLATE compression/decompression with streaming roundtrip verification. -/
 
+-- Compile-time probe: FFI whole-buffer default is 1 GiB (SECURITY_INVENTORY Rec. 1).
+example (d : ByteArray) : RawDeflate.decompress d = @RawDeflate.decompress d (1024 * 1024 * 1024) := rfl
+
 def ZipTest.RawDeflate.tests : IO Unit := do
   let big ← mkTestData
 

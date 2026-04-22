@@ -2,6 +2,9 @@ import ZipTest.Helpers
 
 /-! Tests for zlib compression/decompression with decompression size limits and roundtrip verification. -/
 
+-- Compile-time probe: FFI whole-buffer default is 1 GiB (SECURITY_INVENTORY Rec. 1).
+example (d : ByteArray) : Zlib.decompress d = @Zlib.decompress d (1024 * 1024 * 1024) := rfl
+
 def ZipTest.Zlib.tests : IO Unit := do
   let big ← mkTestData
 

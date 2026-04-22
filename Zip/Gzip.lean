@@ -9,11 +9,13 @@ opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
 /-- Decompress gzip data. Also handles concatenated gzip streams and raw zlib data.
     `maxDecompressedSize` caps the *total* output across all concatenated members;
-    default `0` means unlimited (bomb-unsafe for untrusted input). Overflow raises
-    `IO.userError` containing `"decompressed size exceeds limit"`.
+    default 1 GiB; pass `0` to opt into unlimited mode (bomb-unsafe for untrusted
+    input). Overflow raises `IO.userError` containing
+    `"decompressed size exceeds limit"`.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 @[extern "lean_gzip_decompress"]
-opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
+opaque decompress (data : @& ByteArray)
+    (maxDecompressedSize : UInt64 := 1024 * 1024 * 1024) : IO ByteArray
 
 -- Streaming compression
 

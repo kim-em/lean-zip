@@ -12,12 +12,13 @@ namespace RawDeflate
 opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
 
 /-- Decompress raw deflate data.
-    `maxDecompressedSize` caps output size; default `0` means unlimited
-    (bomb-unsafe for untrusted input). Overflow raises `IO.userError`
-    containing `"decompressed size exceeds limit"`.
+    `maxDecompressedSize` caps output size; default 1 GiB; pass `0` to opt
+    into unlimited mode (bomb-unsafe for untrusted input). Overflow raises
+    `IO.userError` containing `"decompressed size exceeds limit"`.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 @[extern "lean_raw_deflate_decompress"]
-opaque decompress (data : @& ByteArray) (maxDecompressedSize : UInt64 := 0) : IO ByteArray
+opaque decompress (data : @& ByteArray)
+    (maxDecompressedSize : UInt64 := 1024 * 1024 * 1024) : IO ByteArray
 
 -- Streaming raw deflate. Reuses Gzip.DeflateState/InflateState types
 -- since the underlying z_stream state is format-agnostic after init.
