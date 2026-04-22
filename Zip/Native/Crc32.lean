@@ -86,4 +86,19 @@ theorem updateBytes_eq_updateList (crc : UInt32) (data : ByteArray) :
     funext fun _ => funext fun _ => crcByteTable_eq_crcByte ..
   rw [this]
 
+/-- Compositionality of incremental CRC-32 computation (native level,
+see `PLAN.md:27-28`). Associativity of `crc32` over `ByteArray` append
+— an incremental streaming pipeline over concatenated chunks yields
+the same result as a whole-buffer computation. -/
+theorem crc32_append (init : UInt32) (a b : ByteArray) :
+    crc32 init (a ++ b) = crc32 (crc32 init a) b := by
+  have raw_eq : ∀ x : UInt32,
+      (if x == 0 then (0xFFFFFFFF : UInt32) else x ^^^ 0xFFFFFFFF) = x ^^^ 0xFFFFFFFF := by
+    intro x; bv_decide
+  have xor_twice : ∀ x : UInt32, (x ^^^ 0xFFFFFFFF) ^^^ 0xFFFFFFFF = x := by
+    intro x; bv_decide
+  simp only [crc32, raw_eq]
+  rw [updateBytes_eq_updateList, updateBytes_eq_updateList, updateBytes_eq_updateList,
+      xor_twice, ByteArray.data_append, Array.toList_append, Spec.updateList_append]
+
 end Crc32.Native

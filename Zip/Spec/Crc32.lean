@@ -1,3 +1,5 @@
+import Std.Tactic.BVDecide
+
 /-!
 # CRC-32 Specification
 
@@ -11,6 +13,11 @@ The algorithm:
    then for each of the 8 bits, if the LSB is set, shift right and
    XOR with the polynomial; otherwise just shift right.
 3. Final XOR with 0xFFFFFFFF (complement).
+
+Characterizing property: compositionality of incremental computation
+(see `PLAN.md:27-28`) — `checksum (xs ++ ys)` can be recovered from
+`checksum xs` by decoding its running state, feeding more bytes, then
+re-applying the final XOR. See `checksum_append` below.
 -/
 
 namespace Crc32.Spec
@@ -49,6 +56,19 @@ theorem updateList_append (crc : UInt32) (xs ys : List UInt8) :
 
 /-- Empty input leaves the CRC unchanged. -/
 theorem updateList_nil (crc : UInt32) : updateList crc [] = crc := rfl
+
+/-- Compositionality of incremental CRC-32 computation (spec level).
+The running state after processing `xs` is `checksum xs ^^^ 0xFFFFFFFF`;
+feeding `ys` into that state and re-applying the final XOR yields
+`checksum (xs ++ ys)`. -/
+theorem checksum_append (xs ys : List UInt8) :
+    checksum (xs ++ ys) =
+    updateList (checksum xs ^^^ 0xFFFFFFFF) ys ^^^ 0xFFFFFFFF := by
+  unfold checksum
+  rw [updateList_append]
+  have xor_twice : ∀ x : UInt32, (x ^^^ 0xFFFFFFFF) ^^^ 0xFFFFFFFF = x := by
+    intro x; bv_decide
+  rw [xor_twice]
 
 /-- The CRC-32 lookup table: precomputed CRC for each byte value 0..255. -/
 def mkTable : Array UInt32 :=
