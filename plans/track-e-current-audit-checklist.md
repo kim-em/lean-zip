@@ -136,8 +136,13 @@ Targets:
   upstream fix status is confirmed and local regression coverage exists.
 - [ ] Add minimized reproducer references once they are checked into the repo
   or linked from issues.
-- [ ] Record which callsites have been guarded locally to avoid depending on
+- [x] Record which callsites have been guarded locally to avoid depending on
   runtime behavior for adversarial size rejection.
+  (See [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
+  § *"Local guard inventory for `Handle.read` and `Stream.read`"* for
+  the per-site audit of the `Zip/Archive.lean` and `Zip/Tar.lean` read
+  surface, with explicit rows for each `readExact`, `readEntryData`,
+  `skipEntryData`, and inline-loop callsite.)
 
 ## Priority 5: Proof-friendly guard lemmas
 
