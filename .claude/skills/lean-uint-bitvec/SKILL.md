@@ -70,6 +70,29 @@ When `bv_decide` fails with "spurious counterexample" because it abstracts the s
 expression (e.g., `data[pos]`) as multiple opaque variables, use
 `generalize data[pos].toUInt32 = x` first to unify them into a single variable.
 
+### Distinct Proof Terms Break Abstraction
+
+A stronger variant of the same pitfall: when the same `GetElem` expression `arr[i]`
+appears twice with **different proof-of-bounds terms** — one side has the
+theorem-signature's named bounds proof, the other gets a term of shape `hidx ▸ hlt`
+produced by `getElem_congr_idx` — `bv_decide`'s abstraction pass treats them as two
+opaque variables and returns a spurious counterexample with conflicting assignments.
+Proof irrelevance is not applied during abstraction; the two proof terms have to be
+collapsed manually. First align the indices with `getElem_congr_idx`, then
+`generalize` the unified expression to a fresh variable, then `bv_decide`:
+
+```lean
+rw [getElem_congr_idx (c := arr) hidx]
+generalize arr[i]'(hidx ▸ hlt) = t
+bv_decide
+```
+
+Precedents in [`Zip/Spec/Crc32.lean`](../../../Zip/Spec/Crc32.lean): the closed-form
+proof `Crc32.Spec.checksum_singleton` uses the full three-step dance to collapse
+`mkTable[0xFF ^^^ b.toNat]'(hidx ▸ hlt)` for the single-byte CRC; `checksum_pair`
+reuses the index-alignment half (`rw [getElem_congr_idx ...]`) for the inner byte of
+the two-byte CRC.
+
 ## Packing small nibbles via bitwise OR
 
 When a `Nat` (or `UInt*`) is built by `x ||| (y <<< n)` with
