@@ -98,6 +98,14 @@ side keeps its own copies as the build order is `Spec → Native`. -/
 /-- The `mkTable` array has size 256. -/
 theorem mkTable_size : mkTable.size = 256 := Array.size_ofFn ..
 
+/-- For any byte `b`, `0xFF ^^^ b.toNat < mkTable.size`. Shared by
+`checksum_singleton` and its native-side wrapper `crc32_singleton`. -/
+theorem xor_ff_byte_lt_mkTable_size (b : UInt8) :
+    0xFF ^^^ b.toNat < mkTable.size := by
+  rw [mkTable_size]
+  exact Nat.xor_lt_two_pow (by decide : (0xFF : Nat) < 2 ^ 8)
+    (by have := b.toNat_lt; omega : b.toNat < 2 ^ 8)
+
 private theorem mkTable_getElem (i : Nat) (h : i < mkTable.size) :
     mkTable[i] = crcBit (crcBit (crcBit (crcBit
       (crcBit (crcBit (crcBit (crcBit (UInt32.ofNat i)))))))) := by
@@ -150,43 +158,28 @@ ladder, analogous to `Adler32.Spec.checksum_singleton`. The high byte
 `0xFF000000` comes from `(0xFFFFFFFF >>> 8) ^^^ 0xFFFFFFFF`. -/
 theorem checksum_singleton (b : UInt8) :
     checksum [b] =
-      0xFF000000 ^^^
-        mkTable[0xFF ^^^ b.toNat]'(by
-          rw [mkTable_size]
-          have hb : b.toNat < 2 ^ 8 := by have := b.toNat_lt; omega
-          exact Nat.xor_lt_two_pow (by decide : (0xFF : Nat) < 2 ^ 8) hb) := by
-  -- Bridge via the table-driven byte update.
-  have hbridge : crcByte 0xFFFFFFFF b = crcByteTable mkTable 0xFFFFFFFF b :=
-    (crcByteTable_mkTable_eq_crcByte 0xFFFFFFFF b).symm
-  have h1 : checksum [b] = crcByte 0xFFFFFFFF b ^^^ 0xFFFFFFFF := rfl
-  rw [h1, hbridge]
+      0xFF000000 ^^^ mkTable[0xFF ^^^ b.toNat]'(by exact xor_ff_byte_lt_mkTable_size b) := by
+  -- Bridge via the table-driven byte update; `checksum [b]` is literally
+  -- `crcByte 0xFFFFFFFF b ^^^ 0xFFFFFFFF` by unfolding `checksum`.
+  show crcByte 0xFFFFFFFF b ^^^ 0xFFFFFFFF = _
+  rw [← crcByteTable_mkTable_eq_crcByte]
   simp only [crcByteTable]
-  -- Discharge the dif guard.
+  have hb32 : b.toNat < UInt32.size := by have := b.toNat_lt; simp [UInt32.size]; omega
   have hlt : ((((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat) <
-      mkTable.size := by
-    rw [mkTable_size]; exact and_0xFF_toNat_lt _
+      mkTable.size := by rw [mkTable_size]; exact and_0xFF_toNat_lt _
   rw [dif_pos hlt]
-  -- Match the index `((0xFFFFFFFF ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat`
-  -- with the simpler `0xFF ^^^ b.toNat`.
-  have hb : b.toNat < 256 := b.toNat_lt
-  have hb32 : b.toNat < UInt32.size := by simp only [UInt32.size]; omega
-  have h_xor : ((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat).toNat =
-      0xFFFFFFFF ^^^ b.toNat := by
-    rw [UInt32.toNat_xor, UInt32.toNat_ofNat_of_lt' hb32]; rfl
+  -- The internal `crcByteTable` index equals the simpler `0xFF ^^^ b.toNat`.
   have hidx :
       (((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat =
       0xFF ^^^ b.toNat := by
-    rw [UInt32.toNat_and, h_xor]
-    -- `(0xFFFFFFFF ^^^ b.toNat) &&& 0xFF = 0xFF ^^^ b.toNat` since both operands
-    -- mask to the low 8 bits.
-    show (0xFFFFFFFF ^^^ b.toNat) &&& ((0xFF : UInt32).toNat) = 0xFF ^^^ b.toNat
-    rw [show (0xFF : UInt32).toNat = 0xFF from rfl,
-        Nat.and_xor_distrib_right]
-    rw [show (0xFFFFFFFF : Nat) &&& 0xFF = 0xFF from rfl,
-        Nat.and_two_pow_sub_one_of_lt_two_pow (n := 8)
-          (by omega : b.toNat < 2 ^ 8)]
-  -- Rewrite the getElem index so both `mkTable` accesses share the same
-  -- nat index; proof irrelevance then makes them identical.
+    rw [UInt32.toNat_and, UInt32.toNat_xor, UInt32.toNat_ofNat_of_lt' hb32,
+      show ((0xFFFFFFFF : UInt32).toNat) = 0xFFFFFFFF from rfl,
+      show ((0xFF : UInt32).toNat) = 0xFF from rfl,
+      Nat.and_xor_distrib_right,
+      show (0xFFFFFFFF : Nat) &&& 0xFF = 0xFF from rfl,
+      Nat.and_two_pow_sub_one_of_lt_two_pow (n := 8)
+        (by have := b.toNat_lt; omega : b.toNat < 2 ^ 8)]
+  -- Unify the two `mkTable` accesses via index congruence + proof irrelevance.
   rw [getElem_congr_idx (c := mkTable) hidx]
   generalize mkTable[0xFF ^^^ b.toNat]'(hidx ▸ hlt) = t
   bv_decide

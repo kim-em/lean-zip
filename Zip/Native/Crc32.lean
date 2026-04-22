@@ -100,20 +100,13 @@ running state `0xFFFFFFFF`). Matches `Spec.checksum_singleton` via
 `updateBytes_eq_updateList`. -/
 theorem crc32_singleton (b : UInt8) :
     crc32 0 (ByteArray.mk #[b]) =
-      0xFF000000 ^^^
-        Spec.mkTable[0xFF ^^^ b.toNat]'(by
-          rw [Spec.mkTable_size]
-          have hb : b.toNat < 2 ^ 8 := by have := b.toNat_lt; omega
-          exact Nat.xor_lt_two_pow (by decide : (0xFF : Nat) < 2 ^ 8) hb) := by
+      0xFF000000 ^^^ Spec.mkTable[0xFF ^^^ b.toNat]'(by
+        exact Spec.xor_ff_byte_lt_mkTable_size b) := by
   have hdata : (ByteArray.mk #[b]).data.toList = [b] := rfl
-  have hupd : updateBytes 0xFFFFFFFF (ByteArray.mk #[b]) =
-      Spec.updateList 0xFFFFFFFF [b] := by
-    rw [updateBytes_eq_updateList, hdata]
-  have hchk : Spec.updateList 0xFFFFFFFF [b] ^^^ 0xFFFFFFFF = Spec.checksum [b] :=
-    rfl
   simp only [crc32]
   show _ ^^^ (0xFFFFFFFF : UInt32) = _
-  rw [show ((0 : UInt32) == 0) = true from rfl, if_pos rfl, hupd, hchk]
+  rw [show ((0 : UInt32) == 0) = true from rfl, if_pos rfl,
+    updateBytes_eq_updateList, hdata]
   exact Spec.checksum_singleton b
 
 /-- Compositionality of incremental CRC-32 computation (native level,
