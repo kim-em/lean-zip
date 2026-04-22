@@ -42,6 +42,10 @@ known gaps that sit outside the formally verified codec core.
   - overflow-aware buffer growth helpers
   - explicit `max_output` check in whole-buffer decompression
   - state finalizers for streaming objects
+  - [`scripts/sanitize-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-ffi.sh)
+    rebuilds `c/zlib_ffi.c` under `-fsanitize=address,undefined` and
+    runs the test suite so FFI-level memory and UB errors surface as
+    runtime traps; the April 2026 tree is ASan + UBSan clean.
 - Missing work:
   - maintain sanitizer coverage for all FFI entry points
   - add dedicated malformed-input regression tests for streaming paths

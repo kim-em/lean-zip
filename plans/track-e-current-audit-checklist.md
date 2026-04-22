@@ -98,8 +98,13 @@ Targets:
 
 Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c:1)
 
-- [ ] Add a dedicated sanitizer script or documented invocation for
+- [x] Add a dedicated sanitizer script or documented invocation for
   building/running the FFI paths under ASan and UBSan.
+  (`scripts/sanitize-ffi.sh` rebuilds `c/zlib_ffi.c` under
+  `-fsanitize=address,undefined`, explicitly links GCC's
+  libasan/libubsan past Lean's bundled clang, and runs the test
+  suite with `LD_PRELOAD` so ASan initialises first. The April 2026
+  tree is ASan + UBSan clean; see the PR for the trailing transcript.)
 - [ ] Add regression coverage for:
   truncated streams, concatenated-member edge cases, repeated `inflateReset`,
   zero-length chunks, and near-limit outputs.
