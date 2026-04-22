@@ -62,7 +62,9 @@ partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
     if chunk.size > 0 then
       let total ← totalRef.get
       let next := total + chunk.size.toUInt64
-      if maxDecompressedSize ≠ 0 && next > maxDecompressedSize then
+      -- `next < total` detects UInt64 wrap-around; without it the cap
+      -- check below could be silently bypassed on >UInt64.max-byte streams.
+      if next < total || (maxDecompressedSize ≠ 0 && next > maxDecompressedSize) then
         throw (IO.userError
           s!"raw deflate: decompressed stream exceeds limit ({maxDecompressedSize} bytes)")
       totalRef.set next
