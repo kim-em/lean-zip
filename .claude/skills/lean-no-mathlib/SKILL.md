@@ -18,7 +18,7 @@ This project uses only **Lean 4 core + Std**. Mathlib is NOT available.
 | `polyrith` | `grind` or manual calculation |
 | `norm_num` (Mathlib version) | `decide` for small concrete computations; `omega` for linear arithmetic |
 | `push_neg` | Manual `simp only [not_forall, not_exists, not_le, not_lt, ...]` |
-| `by_contra h` | `by_cases h : P` then `exfalso` in the `¬P` branch |
+| `by_contra h` | `by_cases h : P` then `exfalso` in the `¬P` branch; or `Decidable.by_contra fun h => …` when `P` is `Decidable` (see *Contradiction Proofs* below; precedent: #1636 guard-lemma refactor, session `5c97dd11`) |
 | `rcases h with ⟨a, b, c⟩` | `obtain ⟨a, b, c⟩ := h` (available in Std) |
 | `obtain` | Available — use it freely |
 | `set x := expr with hx` | `let x := expr` or `have hx : expr = expr := rfl` |
@@ -59,6 +59,17 @@ by_cases h : P
 · exfalso
   -- ¬P case, derive False
 ```
+
+When `P` is `Decidable` (typically a UInt/Nat comparison or any
+`DecidableEq` proposition), `Decidable.by_contra` is shorter and
+keeps the goal flat — no `exfalso` and no second branch:
+```lean
+-- Replaces by_contra h on a Decidable P
+exact Decidable.by_contra fun h : ¬P => …  -- derive False from h
+```
+This is what the #1636 guard-lemma refactor (session `5c97dd11`)
+adopted for the three *assert-then-refute* sub-proofs over
+`UInt64.≤`.
 
 ## Constructor Names That Clash with Tactic Keywords
 
