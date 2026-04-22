@@ -537,6 +537,16 @@ private partial def forEntries (input : IO.FS.Stream)
 /-- Extract a tar archive from input stream to output directory.
     Handles UStar, GNU long name/link, and PAX extended headers.
 
+    `maxEntrySize` (when non-zero) bounds each entry's declared size — checked
+    against the tar header's `e.size` before any payload bytes are read.
+    Default `0` means no per-entry bound (bomb-unsafe without an external
+    total-extracted cap). Overflow raises `IO.userError` containing
+    `"tar: entry '…' size (…) exceeds limit (…)"`. There is no
+    library-level cap on total extracted bytes across an archive — many
+    small entries can still exhaust disk. See `SECURITY_INVENTORY.md`
+    *Decompression Limit Inventory* (recommendation 3 calls out the
+    total-bytes gap).
+
     Per-typeflag policy:
 
     * `typeRegular` ('0'): write the payload to `outDir/path` after
@@ -551,10 +561,7 @@ private partial def forEntries (input : IO.FS.Stream)
       nodes): the payload is silently consumed and no filesystem entry
       is created. Hard links are never materialised; an attacker who
       crafts `typeflag == '1'` with a malicious `linkname` cannot
-      escape `outDir`.
-
-    `maxEntrySize` (when non-zero) bounds each entry's declared size
-    before any data is read. -/
+      escape `outDir`. -/
 partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
     (maxEntrySize : UInt64 := 0) : IO Unit := do
   forEntries input fun e => do
@@ -646,7 +653,15 @@ partial def createTarGz (outputPath : System.FilePath) (dir : System.FilePath)
     outStream.flush
 
 /-- Extract a .tar.gz archive.
-    True streaming — bounded memory regardless of archive size. -/
+    True streaming — bounded memory regardless of archive size.
+
+    `maxEntrySize` (when non-zero) bounds each entry's declared size before any
+    payload bytes are read; default `0` means no per-entry bound (bomb-unsafe
+    without an external total-extracted cap). Overflow raises `IO.userError`
+    containing `"tar: entry '…' size (…) exceeds limit (…)"`. There is no
+    outer gzip-stream cap on this variant: streaming FFI gzip has no
+    `maxOutputSize` parameter today (the known gap tracked by
+    `SECURITY_INVENTORY.md` *Decompression Limit Inventory*, recommendation 2). -/
 partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath)
     (maxEntrySize : UInt64 := 0) : IO Unit := do
   IO.FS.withFile inputPath .read fun inH => do
@@ -681,7 +696,20 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
 /-- Extract a .tar.gz archive using pure Lean decompression (no C FFI).
     Unlike `extractTarGz`, this reads the entire file into memory before
     decompressing, so memory usage is O(file_size). Use this when C
-    libraries are unavailable. -/
+    libraries are unavailable.
+
+    `maxEntrySize` (when non-zero) bounds each entry's declared size before any
+    payload bytes are read; default `0` means no per-entry bound (bomb-unsafe
+    without an external total-extracted cap). Overflow raises `IO.userError`
+    containing `"tar: entry '…' size (…) exceeds limit (…)"`.
+
+    `maxOutputSize` (default 256 MiB) caps the decompressed tar buffer
+    produced by the outer native gzip decode. The native variant exposes this
+    parameter because the pure Lean `Zip.Native.GzipDecode.decompress` API
+    requires a bound up front; the streaming `extractTarGz` variant does not
+    need one because it drains the outer compressed stream chunk-by-chunk
+    into the tar parser.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 partial def extractTarGzNative (inputPath : System.FilePath) (outDir : System.FilePath)
     (maxEntrySize : UInt64 := 0) (maxOutputSize : Nat := 256 * 1024 * 1024) : IO Unit := do
   let gzData ← IO.FS.readBinFile inputPath

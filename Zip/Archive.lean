@@ -490,13 +490,28 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   return fileData
 
 /-- List entries in a ZIP archive. Memory: O(65KB + central directory metadata).
-    `maxCentralDirSize` limits the central directory allocation (default 64MB, 0 = no limit). -/
+    `maxCentralDirSize` limits the central directory allocation; default 64 MiB,
+    `0` means unlimited (bomb-unsafe for untrusted input). Overflow raises
+    `IO.userError` containing `"zip: central directory too large"`.
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def list (inputPath : System.FilePath) (maxCentralDirSize : Nat := 67108864) : IO (Array Entry) :=
   IO.FS.withFile inputPath .read (listFromHandle · maxCentralDirSize)
 
 /-- Extract a ZIP archive to an output directory.
     Memory: O(65KB + central directory + largest single file).
-    When `useNative` is true, uses pure Lean decompression (no C FFI). -/
+
+    `maxCentralDirSize` limits the central directory allocation; default 64 MiB,
+    `0` means unlimited. Overflow raises `IO.userError` containing
+    `"zip: central directory too large"`.
+
+    `maxEntrySize` limits each entry's decompressed size. Default `0` means
+    no limit on the FFI backend (bomb-unsafe for untrusted input); the native
+    backend silently caps at 256 MiB when `maxEntrySize = 0` as a zip-bomb
+    guard. Overflow raises `IO.userError` containing
+    `"zip: entry '…' uncompressed size (…) exceeds limit (…)"`.
+
+    When `useNative` is true, uses pure Lean decompression (no C FFI).
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def extract (inputPath : System.FilePath) (outDir : System.FilePath)
     (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 0)
     (useNative : Bool := false) : IO Unit := do
@@ -520,7 +535,19 @@ def extract (inputPath : System.FilePath) (outDir : System.FilePath)
 
 /-- Extract a single file from a ZIP archive by name.
     Memory: O(65KB + central directory + target file).
-    When `useNative` is true, uses pure Lean decompression (no C FFI). -/
+
+    `maxCentralDirSize` limits the central directory allocation; default 64 MiB,
+    `0` means unlimited. Overflow raises `IO.userError` containing
+    `"zip: central directory too large"`.
+
+    `maxEntrySize` limits the decompressed entry size. Default `0` means
+    no limit on the FFI backend (bomb-unsafe for untrusted input); the native
+    backend silently caps at 256 MiB when `maxEntrySize = 0` as a zip-bomb
+    guard. Overflow raises `IO.userError` containing
+    `"zip: entry '…' uncompressed size (…) exceeds limit (…)"`.
+
+    When `useNative` is true, uses pure Lean decompression (no C FFI).
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def extractFile (inputPath : System.FilePath) (filename : String)
     (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 0)
     (useNative : Bool := false) : IO ByteArray := do
