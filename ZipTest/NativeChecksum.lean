@@ -42,6 +42,22 @@ def ZipTest.NativeChecksum.tests : IO Unit := do
   let nativeSingle := Adler32.Native.adler32 1 singleByte
   assert! ffiSingle == nativeSingle
 
+  -- adler32_combine on three (xs, ys) pairs of distinct lengths: empty, 1 byte, 10 bytes.
+  let combineEmpty : ByteArray := ByteArray.empty
+  let combineOne : ByteArray := ByteArray.mk #[7]
+  let combineTen : ByteArray := ByteArray.mk #[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  let prefix₁ := ByteArray.mk #[100, 101, 102]
+  let prefix₂ := helloBytes
+  let cases : List (ByteArray × ByteArray) :=
+    [(prefix₁, combineEmpty), (prefix₂, combineOne),
+     (combineOne, combineTen), (prefix₂, combineTen)]
+  for (xs, ys) in cases do
+    let ax := Adler32.Native.adler32 1 xs
+    let ay := Adler32.Native.adler32 1 ys
+    let combined := Adler32.Native.adler32_combine ax ay ys.size
+    let whole := Adler32.Native.adler32 1 (xs ++ ys)
+    assert! combined == whole
+
   -- Native CRC32 matches FFI on known data
   let ffiCrc := Checksum.crc32 0 helloBytes
   let nativeCrc := Crc32.Native.crc32 0 helloBytes

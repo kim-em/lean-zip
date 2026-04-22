@@ -307,4 +307,177 @@ theorem checksum_append (xs ys : List UInt8) :
   rw [updateList_append]
   rw [unpack_pack_of_valid _ (updateList_valid init init_valid xs)]
 
+/-! ## Combine: the two-block closed form -/
+
+/-- Sum of a byte list as `Nat`. Internal helper for the combine lemma —
+expresses the linear "s1"-delta produced by `updateList`. -/
+private def sumBytes : List UInt8 → Nat
+  | [] => 0
+  | x :: xs => x.toNat + sumBytes xs
+
+/-- Triangular-weighted sum: byte at index 0 is counted `xs.length` times,
+the next byte `xs.length - 1` times, and so on. This is exactly the "s2"
+increment produced by `updateList` started from `(0, 0)` (the s2 component
+is `∑_{i=1..n} A_i` where `A_i = ∑_{j=1..i} bytes`). -/
+private def triSum : List UInt8 → Nat
+  | [] => 0
+  | x :: xs => x.toNat * (xs.length + 1) + triSum xs
+
+private theorem sumBytes_cons (x : UInt8) (xs : List UInt8) :
+    sumBytes (x :: xs) = x.toNat + sumBytes xs := rfl
+
+private theorem triSum_cons (x : UInt8) (xs : List UInt8) :
+    triSum (x :: xs) = x.toNat * (xs.length + 1) + triSum xs := rfl
+
+/-- Substituting `d` for `d % M` inside `(a + c * d) % M` is a no-op. -/
+private theorem mod_subst_mul (a c d : Nat) :
+    (a + c * (d % MOD_ADLER)) % MOD_ADLER = (a + c * d) % MOD_ADLER := by
+  rw [Nat.add_mod, Nat.mul_mod_mod, ← Nat.add_mod]
+
+/-- Like `mod_subst_mul`, with a trailing additive term. -/
+private theorem mod_subst_mul_middle (a b c d : Nat) :
+    (a + b * (c % MOD_ADLER) + d) % MOD_ADLER = (a + b * c + d) % MOD_ADLER := by
+  rw [Nat.add_mod _ d MOD_ADLER, mod_subst_mul, ← Nat.add_mod]
+
+/-- Extracting `(X % M)` appearing as the leading term of a chain of sums
+followed by `% M`: `(X % M + Y + Z) % M = (X + Y + Z) % M`. -/
+private theorem mod_absorb_leading (a b c : Nat) :
+    (a % MOD_ADLER + b + c) % MOD_ADLER = (a + b + c) % MOD_ADLER := by
+  rw [Nat.add_assoc, Nat.mod_add_mod, ← Nat.add_assoc]
+
+/-- Separation formula for `updateList`: the state after processing `xs`
+from starting state `(a, b)` is `((a + S) % M, (b + n·a + T) % M)`, where
+`S = sumBytes xs`, `T = triSum xs`, `n = xs.length`, `M = MOD_ADLER`.
+The lemma requires `a, b < M` so that the base case `updateList (a, b) []`
+agrees with `(a % M, b % M)`. -/
+private theorem updateList_separation (xs : List UInt8) :
+    ∀ (a b : Nat), a < MOD_ADLER → b < MOD_ADLER →
+      updateList (a, b) xs =
+        ((a + sumBytes xs) % MOD_ADLER,
+         (b + xs.length * a + triSum xs) % MOD_ADLER) := by
+  induction xs with
+  | nil =>
+    intro a b ha hb
+    simp only [updateList_nil, sumBytes, triSum, List.length_nil,
+      Nat.zero_mul, Nat.add_zero]
+    refine Prod.mk.injEq .. |>.mpr ⟨?_, ?_⟩
+    · exact (Nat.mod_eq_of_lt ha).symm
+    · exact (Nat.mod_eq_of_lt hb).symm
+  | cons x xs ih =>
+    intro a b ha hb
+    have hsum_add : (a + x.toNat) % MOD_ADLER < MOD_ADLER :=
+      Nat.mod_lt _ (by decide)
+    have hb_upd : (b + (a + x.toNat) % MOD_ADLER) % MOD_ADLER < MOD_ADLER :=
+      Nat.mod_lt _ (by decide)
+    rw [updateList_cons, updateByte]
+    rw [ih _ _ hsum_add hb_upd]
+    refine Prod.mk.injEq .. |>.mpr ⟨?_, ?_⟩
+    · -- First component: ((a + x) % M + S xs) % M = (a + (x + S xs)) % M
+      simp only [sumBytes_cons, Nat.mod_add_mod]
+      congr 1; omega
+    · -- Second component: push all `% M` out of subterms, then algebra.
+      simp only [triSum_cons, List.length_cons]
+      -- Step 1: reduce `(b + (a + x) % M) % M` to `(b + (a + x)) % M` via `Nat.add_mod_mod`.
+      rw [Nat.add_mod_mod]
+      -- Step 2: extract the leading `(b + (a + x)) % M`, then substitute the inner
+      -- `(a + x.toNat) % M` in `xs.length * ((a + x.toNat) % M)`.
+      rw [mod_absorb_leading, mod_subst_mul_middle]
+      congr 1
+      have h1 : (xs.length + 1) * a = xs.length * a + a := Nat.succ_mul _ _
+      have h2 : x.toNat * (xs.length + 1) = x.toNat * xs.length + x.toNat := by
+        rw [Nat.mul_succ]
+      have h3 : xs.length * (a + x.toNat) = xs.length * a + xs.length * x.toNat :=
+        Nat.mul_add _ _ _
+      have h4 : x.toNat * xs.length = xs.length * x.toNat := Nat.mul_comm _ _
+      omega
+
+/-- `updateList init xs` has its first component equal to
+`(1 + sumBytes xs) % MOD_ADLER`. -/
+private theorem updateList_init_fst (xs : List UInt8) :
+    (updateList init xs).1 = (1 + sumBytes xs) % MOD_ADLER := by
+  have h := updateList_separation xs 1 0 (by decide) (by decide)
+  show (updateList (1, 0) xs).1 = _
+  rw [h]
+
+/-- `updateList init xs` has its second component equal to
+`(xs.length + triSum xs) % MOD_ADLER`. -/
+private theorem updateList_init_snd (xs : List UInt8) :
+    (updateList init xs).2 = (xs.length + triSum xs) % MOD_ADLER := by
+  have h := updateList_separation xs 1 0 (by decide) (by decide)
+  show (updateList (1, 0) xs).2 = _
+  rw [h]
+  -- Goal: (0 + xs.length * 1 + triSum xs) % M = (xs.length + triSum xs) % M
+  rw [show (0 + xs.length * 1 + triSum xs : Nat) = xs.length + triSum xs from by omega]
+
+/-- State-level combine lemma: the state reached from starting point
+`(a, b)` after processing `ys` can be expressed from the `(1, 0)`-chain
+state `(b1, b2) = updateList init ys` and the length `n = ys.length`
+alone. Each additive shift `+ MOD_ADLER - 1` and `+ n * MOD_ADLER - n`
+keeps the arithmetic non-negative in `ℕ` (subtraction is saturating). -/
+private theorem updateList_combine (ys : List UInt8) (a b : Nat)
+    (ha : a < MOD_ADLER) (hb : b < MOD_ADLER) :
+    let b1 := (updateList init ys).1
+    let b2 := (updateList init ys).2
+    let n := ys.length
+    updateList (a, b) ys =
+      ((a + b1 + MOD_ADLER - 1) % MOD_ADLER,
+       (b + n * a + b2 + n * MOD_ADLER - n) % MOD_ADLER) := by
+  simp only
+  rw [updateList_separation ys a b ha hb]
+  rw [updateList_init_fst ys, updateList_init_snd ys]
+  refine Prod.mk.injEq .. |>.mpr ⟨?_, ?_⟩
+  · -- Goal: (a + sumBytes ys) % M = (a + (1 + sumBytes ys) % M + M - 1) % M
+    -- Rearrange: a + (1+S)%M + M - 1 = (a + M - 1) + (1+S)%M
+    have hM : (1 : Nat) ≤ MOD_ADLER := by decide
+    have hrearr : a + (1 + sumBytes ys) % MOD_ADLER + MOD_ADLER - 1
+              = (a + MOD_ADLER - 1) + (1 + sumBytes ys) % MOD_ADLER := by omega
+    rw [hrearr, Nat.add_mod_mod]
+    have heq : (a + MOD_ADLER - 1) + (1 + sumBytes ys) = (a + sumBytes ys) + MOD_ADLER := by
+      omega
+    rw [heq, Nat.add_mod_right]
+  · -- Goal: (b + n*a + T) % M = (b + n*a + (n + T) % M + n*M - n) % M, where n = ys.length
+    have hnM : ys.length ≤ ys.length * MOD_ADLER := by
+      calc ys.length = ys.length * 1 := (Nat.mul_one _).symm
+           _ ≤ ys.length * MOD_ADLER :=
+              Nat.mul_le_mul_left ys.length (by decide : 1 ≤ MOD_ADLER)
+    have hrearr : b + ys.length * a + (ys.length + triSum ys) % MOD_ADLER
+                + ys.length * MOD_ADLER - ys.length
+              = (b + ys.length * a + ys.length * MOD_ADLER - ys.length)
+                + (ys.length + triSum ys) % MOD_ADLER := by omega
+    rw [hrearr, Nat.add_mod_mod]
+    have heq : (b + ys.length * a + ys.length * MOD_ADLER - ys.length)
+              + (ys.length + triSum ys)
+              = (b + ys.length * a + triSum ys) + ys.length * MOD_ADLER := by omega
+    rw [heq, Nat.add_mul_mod_self_right]
+
+/-- Combine theorem: Adler-32 of a concatenation is a closed-form
+function of the individual running states and the length of the
+second block. This is the characterizing "combine" property used by
+zlib's `adler32_combine` — it lets two parallel workers each hash a
+block independently, then assemble the result without touching bytes.
+
+The additive `+ MOD_ADLER - 1` and `+ n * MOD_ADLER - n` are Nat-safe
+shifts of `- 1` and `- n` modulo `MOD_ADLER`. -/
+theorem checksum_combine (xs ys : List UInt8) :
+    let a1 := (updateList init xs).1
+    let a2 := (updateList init xs).2
+    let b1 := (updateList init ys).1
+    let b2 := (updateList init ys).2
+    let n := ys.length
+    checksum (xs ++ ys) =
+      pack ((a1 + b1 + MOD_ADLER - 1) % MOD_ADLER,
+            (a2 + n * a1 + b2 + n * MOD_ADLER - n) % MOD_ADLER) := by
+  have ⟨ha1, ha2⟩ : Valid (updateList init xs) :=
+    updateList_valid init init_valid xs
+  have hexp : checksum (xs ++ ys) =
+      pack (updateList (updateList init xs) ys) := by
+    unfold checksum; rw [updateList_append]
+  have hcomb := updateList_combine ys (updateList init xs).1
+    (updateList init xs).2 ha1 ha2
+  simp only at hcomb ⊢
+  rw [hexp]
+  have hmk : updateList init xs =
+      ((updateList init xs).1, (updateList init xs).2) := rfl
+  rw [hmk, hcomb]
+
 end Adler32.Spec

@@ -107,4 +107,48 @@ theorem adler32_append (init : UInt32) (a b : ByteArray) :
     rw [Spec.unpack_pack_of_valid _ (Spec.updateList_cons .. ▸
       Spec.updateList_valid _ (Spec.updateByte_valid ..) _)]
 
+/-- Combine two Adler-32 checksums of adjacent byte blocks into the
+checksum of their concatenation, given the length of the second block.
+Mirrors zlib's `adler32_combine` closed form — this is a characterizing
+property of Adler-32 that makes parallel hashing possible. -/
+def adler32_combine (a b : UInt32) (len2 : Nat) : UInt32 :=
+  let ⟨a1, a2⟩ := Spec.unpack a
+  let ⟨b1, b2⟩ := Spec.unpack b
+  Spec.pack ((a1 + b1 + Spec.MOD_ADLER - 1) % Spec.MOD_ADLER,
+             (a2 + len2 * a1 + b2 + len2 * Spec.MOD_ADLER - len2) % Spec.MOD_ADLER)
+
+/-- Correctness of `adler32_combine` starting from the default `init = 1`:
+combining the two block checksums produces the checksum of the
+concatenation. Native-level counterpart of `Spec.checksum_combine`,
+bridged through `updateBytes_eq_updateList`. -/
+theorem adler32_combine_eq_concat (xs ys : ByteArray) :
+    adler32_combine (adler32 1 xs) (adler32 1 ys) ys.size
+      = adler32 1 (xs ++ ys) := by
+  have hunpack : Spec.unpack 1 = Spec.init := by decide
+  have ha_valid : Spec.Valid (Spec.updateList Spec.init xs.data.toList) :=
+    Spec.updateList_valid Spec.init Spec.init_valid _
+  have hb_valid : Spec.Valid (Spec.updateList Spec.init ys.data.toList) :=
+    Spec.updateList_valid Spec.init Spec.init_valid _
+  -- Unpack the packed intermediate results back to the running states.
+  have hunpack_a :
+      Spec.unpack (adler32 1 xs) = Spec.updateList Spec.init xs.data.toList := by
+    simp only [adler32, updateBytes_eq_updateList, hunpack]
+    exact Spec.unpack_pack_of_valid _ ha_valid
+  have hunpack_b :
+      Spec.unpack (adler32 1 ys) = Spec.updateList Spec.init ys.data.toList := by
+    simp only [adler32, updateBytes_eq_updateList, hunpack]
+    exact Spec.unpack_pack_of_valid _ hb_valid
+  have hsize : ys.size = ys.data.toList.length := by
+    simp only [ByteArray.size_data, Array.length_toList]
+  -- Bridge `adler32 1 (xs ++ ys)` to the spec `checksum` formula.
+  have hcat : adler32 1 (xs ++ ys) =
+      Spec.checksum (xs.data.toList ++ ys.data.toList) := by
+    simp only [adler32, updateBytes_eq_updateList, ByteArray.data_append,
+      Array.toList_append, hunpack, Spec.checksum]
+  have hcomb := Spec.checksum_combine xs.data.toList ys.data.toList
+  simp only at hcomb
+  unfold adler32_combine
+  simp only [hunpack_a, hunpack_b, hsize]
+  rw [hcat, hcomb]
+
 end Adler32.Native
