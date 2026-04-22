@@ -99,15 +99,20 @@ private def tryNative (_label : String) (action : Except String ByteArray) : IO 
   | .error _ => pure ()
 
 /-- Drive the streaming `lean_gzip_inflate_push` path with chunked
-    input. Any caught exception is the handled case. -/
+    input. `.userError` is the only `IO.Error` variant the FFI emits
+    (see `tryFFI` for rationale); any other variant reaching the catch
+    is either an FFI contract regression or a runtime-level error that
+    should surface loudly, so we re-raise. -/
 private def tryStreaming (chunks : Array ByteArray) : IO Unit := do
   try
     let state ← Gzip.InflateState.new
     for chunk in chunks do
       let _ ← state.push chunk
     let _ ← state.finish
-  catch _ =>
-    pure ()
+  catch e =>
+    match e with
+    | .userError _ => pure ()
+    | _ => throw e
 
 /-- `maxDecompressedSize` classes used by the high-level streaming
     fuzz probes. `0` opts into unlimited mode (the PR #1610
@@ -175,28 +180,35 @@ private def chunksReadStream (chunks : Array ByteArray) : IO IO.FS.Stream := do
     fuzz-generated `chunks` feeding an in-memory input stream and a
     PRNG-picked `maxDecompressedSize`. Exercises the Lean-side
     `IO.Ref UInt64` counter at `Zip/Gzip.lean:89-97` that the
-    low-level `InflateState.push/finish` surface does not see. -/
+    low-level `InflateState.push/finish` surface does not see.
+    Catch is narrowed to `.userError` (matches `tryFFI`); other
+    `IO.Error` variants propagate to fail the fuzz run loudly. -/
 private def tryStreamingGzip (chunks : Array ByteArray)
     (maxCap : UInt64) : IO Unit := do
   try
     let inStream ← chunksReadStream chunks
     Gzip.decompressStream inStream discardSinkStream
       (maxDecompressedSize := maxCap)
-  catch _ =>
-    pure ()
+  catch e =>
+    match e with
+    | .userError _ => pure ()
+    | _ => throw e
 
 /-- Drive the high-level `RawDeflate.decompressStream` path with the
     fuzz-generated `chunks` and a PRNG-picked `maxDecompressedSize`.
     Same counter pattern as `tryStreamingGzip`, on the raw-deflate
-    wrapper at `Zip/RawDeflate.lean:59-69`. -/
+    wrapper at `Zip/RawDeflate.lean:59-69`. Same `.userError`-only
+    narrowing for symmetry with `tryFFI`. -/
 private def tryStreamingRawDeflate (chunks : Array ByteArray)
     (maxCap : UInt64) : IO Unit := do
   try
     let inStream ← chunksReadStream chunks
     RawDeflate.decompressStream inStream discardSinkStream
       (maxDecompressedSize := maxCap)
-  catch _ =>
-    pure ()
+  catch e =>
+    match e with
+    | .userError _ => pure ()
+    | _ => throw e
 
 /-- One fuzz iteration: generate a random input of some size and
     drive every inflate entry point on it. Updates and returns the
