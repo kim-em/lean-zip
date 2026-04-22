@@ -48,6 +48,18 @@ def ZipTest.Gzip.tests : IO Unit := do
   let decoded ← Gzip.decompress concatenated
   assert! decoded.beq (part1 ++ part2)
 
+  -- maxDecompressedSize crosses concatenated-member boundary
+  let memA := "0123456789".toUTF8  -- 10 bytes
+  let memB := "abcdefghij".toUTF8  -- 10 bytes
+  let gzA ← Gzip.compress memA
+  let gzB ← Gzip.compress memB
+  let concatLimitResult ← (Gzip.decompress (gzA ++ gzB) (maxDecompressedSize := 5)).toBaseIO
+  match concatLimitResult with
+  | .ok _ => throw (IO.userError "concat gzip decompress limit should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"concat gzip decompress limit wrong error: {e}")
+
   -- Streaming compression roundtrip
   let state ← Gzip.DeflateState.new
   let mut compressedChunks := ByteArray.empty
@@ -78,6 +90,22 @@ def ZipTest.Gzip.tests : IO Unit := do
   let ifinal ← istate.finish
   decompressedChunks := decompressedChunks ++ ifinal
   assert! decompressedChunks.beq big
+
+  -- Zero-length chunk through streaming decompressor (empty chunk is a no-op)
+  let zigzip ← Gzip.compress big
+  let zistate ← Gzip.InflateState.new
+  let zo1 ← zistate.push ByteArray.empty
+  let zo2 ← zistate.push zigzip
+  let zof ← zistate.finish
+  assert! (zo1 ++ zo2 ++ zof).beq big
+
+  -- Zero-length chunk through streaming compressor (empty chunk is a no-op)
+  let zdstate ← Gzip.DeflateState.new
+  let zd1 ← zdstate.push ByteArray.empty
+  let zd2 ← zdstate.push big
+  let zdf ← zdstate.finish
+  let zdRoundtrip ← Gzip.decompress (zd1 ++ zd2 ++ zdf)
+  assert! zdRoundtrip.beq big
 
   -- File compress/decompress roundtrip
   let tmpFile : System.FilePath := "/tmp/lean-zlib-test-data.bin"
