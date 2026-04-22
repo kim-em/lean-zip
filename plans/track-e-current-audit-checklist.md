@@ -143,8 +143,16 @@ Targets:
   from PRs #1543/#1544, CD-vs-LH mismatch fixtures from PR #1554,
   and the bomb-limit regression tests from PRs #1560/#1561 — that
   guards this attack surface today.)
-- [ ] Add minimized reproducer references once they are checked into the repo
+- [x] Add minimized reproducer references once they are checked into the repo
   or linked from issues.
+  (Landed by this PR: new *"Minimized Reproducer Corpus"* section in
+  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
+  tabulates all 29 fixtures under `testdata/zip/malformed/`,
+  `testdata/tar/malformed/`, and `testdata/tar/security/` with the
+  guard they exercise, their first-landing PR (or `481e562` for
+  fixtures inherited from the initial `lean-zlib → lean-zip` import),
+  and a `{oversized allocation, partial-decoder panic, archive-slip,
+  decompression bomb, other}` class tag.)
 - [x] Record which callsites have been guarded locally to avoid depending on
   runtime behavior for adversarial size rejection.
   (See [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
