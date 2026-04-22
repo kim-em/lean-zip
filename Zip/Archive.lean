@@ -33,7 +33,11 @@ structure Entry where
   -- `readEntryData` can enforce CD/LH flags consistency (bit 11 UTF-8 name,
   -- etc.). Writers ignore this field and emit a fixed `0x0800` flag word.
   flags            : UInt16 := 0
-  deriving Repr, Inhabited
+  /-- Raw CD-side name bytes, preserved for CD-vs-LH consistency
+      checking. Distinct from `path : String` which is the
+      UTF-8-decoded form (or Latin-1 fallback). -/
+  pathBytes        : ByteArray := default
+  deriving Inhabited
 
 /-- Check if an entry needs ZIP64 extra fields. -/
 private def needsZip64 (entry : Entry) : Bool :=
@@ -337,6 +341,7 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
       method := method
       localOffset := localOff
       flags := flags
+      pathBytes := nameBytes
     }
     pos := pos + 46 + nameLen + extraLen + commentLen
   return entries
@@ -600,6 +605,17 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   unless (localFlags &&& flagsMask) == (entry.flags &&& flagsMask) do
     throw (IO.userError
       s!"zip: flags mismatch between CD and local header for {label} (CD={entry.flags}, LH={localFlags})")
+  -- Name bytes must agree between CD and LH. Compared at the byte level
+  -- (not as a decoded `String`) because the smuggling vector is precisely
+  -- the case where two different byte sequences decode to the same
+  -- `String` under the CD's declared encoding but to a different
+  -- `String` when an LH re-parser uses its own (possibly divergent)
+  -- encoding choice. Like the flags check, not gated on bit 3 of the
+  -- data-descriptor flag — the name field is independent of bit 3.
+  let localName := nameAndExtra.extract 0 nameLen
+  unless localName == entry.pathBytes do
+    throw (IO.userError
+      s!"zip: name mismatch between CD and local header for {label}")
   let usesDataDescriptor := (localFlags &&& 0x0008) != 0
   unless usesDataDescriptor do
     unless localCompSize == entry.compressedSize do
