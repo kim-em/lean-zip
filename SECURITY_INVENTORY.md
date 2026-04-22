@@ -337,9 +337,9 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Zlib.decompress](/home/kim/lean-zip/Zip/Basic.lean:15) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer zlib (RFC 1950). Only API with a committed bomb-limit regression test today ([ZipTest/Zlib.lean:14-19](/home/kim/lean-zip/ZipTest/Zlib.lean:14)). |
 | [Gzip.decompress](/home/kim/lean-zip/Zip/Gzip.lean:16) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer gzip (RFC 1952) + auto-zlib. No bomb-limit regression test. |
 | [RawDeflate.decompress](/home/kim/lean-zip/Zip/RawDeflate.lean:20) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer raw DEFLATE (ZIP method 8). No bomb-limit regression test. |
-| [Gzip.decompressStream](/home/kim/lean-zip/Zip/Gzip.lean:79) (FFI) | — | — | — | streaming; no per-call output cap. Bounded only by caller's sink / disk. |
-| [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:106) (FFI) | — | — | — | writes direct to disk via `decompressStream`; no cap. |
-| [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:52) (FFI) | — | — | — | streaming; no per-call output cap. |
+| [Gzip.decompressStream](/home/kim/lean-zip/Zip/Gzip.lean:83) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | streaming via `IO.Ref UInt64` counter on pushed output; cap check fires before `output.write`, so the already-written prefix is ≤ `maxDecompressedSize` bytes. Landed by PR #1610. |
+| [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:123) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | thin wrapper forwarding to `decompressStream`; default still unlimited (bomb-unsafe for untrusted input written to disk). Landed by PR #1610. |
+| [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:56) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | streaming raw DEFLATE; same counter/check structure as `Gzip.decompressStream`. Landed by PR #1610. |
 | [Zip.Native.Inflate.inflate](/home/kim/lean-zip/Zip/Native/Inflate.lean:384) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 1 GiB. |
 | [Zip.Native.GzipDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:40) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
 | [Zip.Native.ZlibDecode.decompress](/home/kim/lean-zip/Zip/Native/Gzip.lean:140) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | no unlimited mode; default is 256 MiB. |
@@ -470,11 +470,13 @@ Known caller impact if recommendations 1–5 land:
   add coverage for `Gzip.decompress`, `RawDeflate.decompress`,
   `Zip.Native.GzipDecode.decompress`, `Archive.extract`,
   `Archive.extractFile`, `Tar.extract`, and `Tar.extractTarGz`.
-- No cap is enforced on the streaming FFI decoders
-  (`Gzip.decompressStream`, `Gzip.decompressFile`,
-  `RawDeflate.decompressStream`) — see recommendation 2. A crafted
-  input that inflates to terabytes will happily write terabytes to
-  the caller's sink today.
+- The streaming FFI decoders (`Gzip.decompressStream`,
+  `Gzip.decompressFile`, `RawDeflate.decompressStream`) now accept
+  `maxDecompressedSize : UInt64` (PR #1610), but the default is
+  still `0 = no limit` — the default-change half of recommendation 2
+  is still open. Until a caller passes a finite value, a crafted
+  input that inflates to terabytes will still write terabytes to
+  the caller's sink.
 - There is no public API for "whole-archive" decompressed-size cap
   on ZIP or tar extraction — see recommendation 4.
 
