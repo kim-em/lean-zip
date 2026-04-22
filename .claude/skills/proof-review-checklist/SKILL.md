@@ -657,6 +657,13 @@ After all changes:
 3. Verify no sorry introduced
 4. Verify no `maxRecDepth` increased (indicates a regression)
 
+Additionally, when the PR touches a public-API signature default:
+
+- [ ] If this PR changes a function-signature default literal
+      (e.g., `max…Size := N`), add an `example ... rfl` probe next to
+      the docstring that pins the exact literal value. Silent on
+      success, loud on drift. Pattern from #1617 / #1623 / #1631.
+
 ## Phase 6: Commit
 
 One commit per file reviewed. Use prefix `refactor:` with a summary:
