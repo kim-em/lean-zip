@@ -167,8 +167,11 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   let oversizedZ64UExtractDir : System.FilePath :=
     "/tmp/lean-zip-fixture-oversized-zip64-uncompressed-size-extract"
   IO.FS.createDirAll oversizedZ64UExtractDir
+  -- Opt out of the per-entry cap (default 1 GiB) so the 1-EiB uncompressedSize
+  -- does not trip "exceeds limit" before the LH ZIP64 parse — this fixture
+  -- specifically exercises the `truncated ZIP64 local extra field` path.
   assertThrows "ZIP malformed (oversized-zip64-uncompressed-size.zip)"
-    (Archive.extract oversizedZ64UPath oversizedZ64UExtractDir)
+    (Archive.extract oversizedZ64UPath oversizedZ64UExtractDir (maxEntrySize := 0))
     "truncated ZIP64 local extra field"
 
   -- cd-lh-method-mismatch.zip: 122-byte stored ZIP whose CD advertises

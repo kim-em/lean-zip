@@ -346,24 +346,16 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Zip.Native.decompressAuto](/home/kim/lean-zip/Zip/Native/Gzip.lean:240) | `maxOutputSize : Nat` | `1 * 1024^3` (1 GiB) | hard cap at 0 bytes (explicit) | format-auto dispatch over the three natives above. |
 | [Archive.list](/home/kim/lean-zip/Zip/Archive.lean:497) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | metadata-only; caps CD allocation, not decompressed payload. |
 | [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
-| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxEntrySize : UInt64` | `0` | **asymmetric** — FFI: no limit; native: silently upgraded to 256 MiB inside `readEntryData` (see [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477)) | per-entry cap on the decompressed payload. |
+| [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:515) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited (FFI backend only; native inflate rejects `0`) | per-entry cap on the decompressed payload. |
 | [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
-| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxEntrySize : UInt64` | `0` | same asymmetry as `Archive.extract` | per-entry cap. |
-| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:602) | `maxEntrySize : UInt64` | `0` | no limit | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610)). No whole-archive cap. |
-| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:714) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxEntrySize : UInt64` | `0` | no limit | per-entry cap. |
+| [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:551) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited (FFI backend only; native inflate rejects `0`) | per-entry cap. |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:602) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:610](/home/kim/lean-zip/Zip/Tar.lean:610)). No whole-archive cap. |
+| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:714) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
 | [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:768) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
 
 ### Known inconsistencies
 
-- **`Archive.readEntryData` per-entry cap asymmetry.** When
-  `maxEntrySize = 0`, the FFI path (`RawDeflate.decompress`) runs
-  unlimited, but the native path (`Zip.Native.Inflate.inflate`)
-  silently upgrades to a hard 256 MiB cap — see the
-  `nativeMax := if maxEntrySize == 0 then 256 * 1024 * 1024 else ...`
-  branch at [Zip/Archive.lean:477](/home/kim/lean-zip/Zip/Archive.lean:477).
-  The same caller argument therefore produces different bomb-rejection
-  behaviour depending on `useNative`.
 - **`Tar.extractTarGz.maxOutputSize` vs. low-level defaults.**
   `Tar.extractTarGzNative` caps the outer gzip decode at 256 MiB,
   mirroring `Zip.Native.GzipDecode.decompress`. But the lower-level
@@ -372,13 +364,6 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
   kind of whole-buffer decompression. A caller copying the
   `Tar.extractTarGz`-style pattern with the FFI decoders gets no
   default protection.
-- **`maxCentralDirSize` vs. `maxEntrySize` semantics.** In
-  `Archive.list` / `Archive.extract` / `Archive.extractFile`, the CD
-  cap defaults to a finite 64 MiB (good), while the per-entry cap
-  defaults to `0 = unlimited` (weak). The mixed semantics are easy to
-  misread — a caller who sees "limits default to sensible values" on
-  the CD side might reasonably assume the entry side is also
-  bounded.
 - **Streaming FFI APIs expose `maxDecompressedSize` but default to
   `0 = no limit`.** `Gzip.decompressStream`, `Gzip.decompressFile`, and
   `RawDeflate.decompressStream` now accept an optional
@@ -413,16 +398,12 @@ issues and the follow-up docstring/default change.
    - The streaming case is the one with no current guard; adding
      the parameter is the only way to expose a cap without
      reading into memory.
-3. **Archive extraction — per-entry cap** —
-   `Archive.extract.maxEntrySize`, `Archive.extractFile.maxEntrySize`,
-   `Tar.extract.maxEntrySize`, `Tar.extractTarGz.maxEntrySize`,
-   `Tar.extractTarGzNative.maxEntrySize`.
-   - Change default from `0` to a finite per-entry cap
-     (suggested: **1 GiB** per entry). `0` continues to mean
-     "no per-entry limit" for callers that opt in.
-   - Remove the silent `0 → 256 MiB` upgrade in
-     `Archive.readEntryData` for the native backend; once the
-     default is finite, the two backends behave identically.
+3. **Archive extraction — per-entry cap** — Executed. The per-entry
+   default on `Archive.extract`, `Archive.extractFile`, `Tar.extract`,
+   `Tar.extractTarGz`, and `Tar.extractTarGzNative` is now `1 GiB`
+   (pass `0` to opt into unlimited mode on the FFI backend), and the
+   silent `0 → 256 MiB` upgrade in `Archive.readEntryData` has been
+   removed. See this PR.
 4. **Archive extraction — whole-archive cap**.
    - Add a new `maxTotalSize : UInt64 := 0` (sum of decompressed
      entries) to `Archive.extract` and the tar extractors. Default

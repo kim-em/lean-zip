@@ -438,11 +438,12 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   parseCentralDir cdBuf 0 cdSize
 
 /-- Read an entry's decompressed data from a file handle by seeking to its local header.
-    `maxEntrySize` limits decompressed entry size (0 = no limit for FFI; the native
-    backend caps at 256 MiB when `maxEntrySize = 0` as a zip-bomb guard).
+    `maxEntrySize` limits decompressed entry size; `0` means no limit on the FFI
+    backend. Both public extractors default `maxEntrySize` to `1 GiB` and
+    always pass the value through explicitly, so this helper has no default.
     When `useNative` is true, uses the pure Lean DEFLATE decompressor and CRC-32. -/
 private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
-    (maxEntrySize : UInt64 := 0) (useNative : Bool := false) : IO ByteArray := do
+    (maxEntrySize : UInt64) (useNative : Bool := false) : IO ByteArray := do
   if maxEntrySize > 0 && entry.uncompressedSize > maxEntrySize then
     throw (IO.userError s!"zip: entry '{label}' uncompressed size ({entry.uncompressedSize}) exceeds limit ({maxEntrySize})")
   -- Span-validate every attacker-controlled read against actual file size.
@@ -510,9 +511,11 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     if entry.method == 0 then pure compData
     else if entry.method == 8 then
       if useNative then
-        -- maxEntrySize 0 means "no limit" in FFI; native inflate needs an actual bound
-        let nativeMax := if maxEntrySize == 0 then 256 * 1024 * 1024 else maxEntrySize.toNat
-        match Zip.Native.Inflate.inflate compData nativeMax with
+        -- `Zip.Native.Inflate.inflate` treats `0` as "reject any non-empty
+        -- output", unlike the FFI path where `0` means unlimited. Callers
+        -- that opt into `maxEntrySize := 0` for unlimited FFI decompression
+        -- therefore get an immediate rejection on the native backend.
+        match Zip.Native.Inflate.inflate compData maxEntrySize.toNat with
         | .ok data => pure data
         | .error msg => throw (IO.userError s!"zip: native inflate failed for {label}: {msg}")
       else RawDeflate.decompress compData maxEntrySize
@@ -541,16 +544,15 @@ def list (inputPath : System.FilePath) (maxCentralDirSize : Nat := 67108864) : I
     `0` means unlimited. Overflow raises `IO.userError` containing
     `"zip: central directory too large"`.
 
-    `maxEntrySize` limits each entry's decompressed size. Default `0` means
-    no limit on the FFI backend (bomb-unsafe for untrusted input); the native
-    backend silently caps at 256 MiB when `maxEntrySize = 0` as a zip-bomb
-    guard. Overflow raises `IO.userError` containing
+    `maxEntrySize` limits each entry's decompressed size. Default `1 GiB`
+    per entry; pass `0` to opt out into unlimited mode on the FFI backend.
+    Overflow raises `IO.userError` containing
     `"zip: entry '…' uncompressed size (…) exceeds limit (…)"`.
 
     When `useNative` is true, uses pure Lean decompression (no C FFI).
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def extract (inputPath : System.FilePath) (outDir : System.FilePath)
-    (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 0)
+    (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 1024 * 1024 * 1024)
     (useNative : Bool := false) : IO Unit := do
   IO.FS.withFile inputPath .read fun h => do
     let entries ← listFromHandle h maxCentralDirSize
@@ -577,16 +579,15 @@ def extract (inputPath : System.FilePath) (outDir : System.FilePath)
     `0` means unlimited. Overflow raises `IO.userError` containing
     `"zip: central directory too large"`.
 
-    `maxEntrySize` limits the decompressed entry size. Default `0` means
-    no limit on the FFI backend (bomb-unsafe for untrusted input); the native
-    backend silently caps at 256 MiB when `maxEntrySize = 0` as a zip-bomb
-    guard. Overflow raises `IO.userError` containing
+    `maxEntrySize` limits the decompressed entry size. Default `1 GiB`
+    per entry; pass `0` to opt out into unlimited mode on the FFI backend.
+    Overflow raises `IO.userError` containing
     `"zip: entry '…' uncompressed size (…) exceeds limit (…)"`.
 
     When `useNative` is true, uses pure Lean decompression (no C FFI).
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def extractFile (inputPath : System.FilePath) (filename : String)
-    (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 0)
+    (maxCentralDirSize : Nat := 67108864) (maxEntrySize : UInt64 := 1024 * 1024 * 1024)
     (useNative : Bool := false) : IO ByteArray := do
   IO.FS.withFile inputPath .read fun h => do
     let entries ← listFromHandle h maxCentralDirSize
