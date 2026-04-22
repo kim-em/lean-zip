@@ -162,18 +162,14 @@ because no modular reduction fires (`1 + b.toNat < 256 < 65521`), and
 theorem checksum_singleton (b : UInt8) :
     checksum [b] = UInt32.ofNat ((1 + b.toNat) * 65537) := by
   have h256 : b.toNat < 256 := b.toNat_lt
+  have hb : 1 + b.toNat < 65536 := by omega
+  have ha : (1 + b.toNat) % 65521 = 1 + b.toNat := Nat.mod_eq_of_lt (by omega)
+  have hbnd : (1 + b.toNat) * 65537 < UInt32.size := by
+    simp only [UInt32.size]; omega
   rw [← UInt32.toNat_inj]
   simp only [checksum, updateList, List.foldl_cons, List.foldl_nil,
-    updateByte, init, MOD_ADLER]
-  have ha : (1 + b.toNat) % 65521 = 1 + b.toNat :=
-    Nat.mod_eq_of_lt (by omega)
-  rw [ha, Nat.zero_add, ha,
-    pack_toNat_of_bounds (show 1 + b.toNat < 65536 by omega)
-                          (show 1 + b.toNat < 65536 by omega),
-    UInt32.toNat_ofNat_of_lt' (show (1 + b.toNat) * 65537 < UInt32.size by
-      have : (1 + b.toNat) * 65537 ≤ 257 * 65537 :=
-        Nat.mul_le_mul_right _ (by omega)
-      simp only [UInt32.size]; omega)]
+    updateByte, init, MOD_ADLER, Nat.zero_add, ha,
+    pack_toNat_of_bounds hb hb, UInt32.toNat_ofNat_of_lt' hbnd]
   omega
 
 /-- The Adler-32 checksum of a two-byte input `[b₁, b₂]` has the closed
