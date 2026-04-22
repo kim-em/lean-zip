@@ -6,6 +6,12 @@ import ZipTest.Helpers
 -- Compile-time probe: FFI whole-buffer default is 1 GiB (SECURITY_INVENTORY Rec. 1).
 example (d : ByteArray) : Gzip.decompress d = @Gzip.decompress d (1024 * 1024 * 1024) := rfl
 
+-- Compile-time probes: streaming FFI defaults are 1 GiB (SECURITY_INVENTORY Rec. 2).
+example (i o : IO.FS.Stream) :
+    Gzip.decompressStream i o = @Gzip.decompressStream i o (1024 * 1024 * 1024) := rfl
+example (p : System.FilePath) :
+    Gzip.decompressFile p = @Gzip.decompressFile p none (1024 * 1024 * 1024) := rfl
+
 def ZipTest.Gzip.tests : IO Unit := do
   let big ← mkTestData
 

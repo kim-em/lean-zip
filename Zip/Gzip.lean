@@ -76,14 +76,15 @@ partial def compressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
 /-- Decompress gzip data from input stream to output stream.
     Handles concatenated gzip streams. Input memory usage is bounded.
     `maxDecompressedSize` caps the *total* output bytes written to `output`;
-    default `0` means unlimited (bomb-unsafe for untrusted input). Overflow
-    raises `IO.userError` containing `"exceeds limit"` (full message:
+    default 1 GiB; pass `0` to opt into unlimited mode (bomb-unsafe — only
+    do this when the input is trusted). Overflow raises `IO.userError`
+    containing `"exceeds limit"` (full message:
     `"gzip: decompressed stream exceeds limit (<N> bytes)"`) and aborts
     before writing the overflowing chunk, so the already-written prefix is
     at most `maxDecompressedSize` bytes.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 partial def decompressStream (input : IO.FS.Stream) (output : IO.FS.Stream)
-    (maxDecompressedSize : UInt64 := 0) : IO Unit := do
+    (maxDecompressedSize : UInt64 := 1024 * 1024 * 1024) : IO Unit := do
   let state ← InflateState.new
   let totalRef ← IO.mkRef (0 : UInt64)
   let checkAndWrite (chunk : ByteArray) : IO Unit := do
@@ -117,13 +118,14 @@ def compressFile (path : System.FilePath) (level : UInt8 := 6) : IO System.FileP
 
 /-- Decompress a gzip file. Strips `.gz` suffix, or appends `.ungz` as fallback.
     Optional explicit output path. Streams with bounded input memory.
-    `maxDecompressedSize` is forwarded to `decompressStream`; default `0`
-    means unlimited (bomb-unsafe for untrusted input, since a bomb can
-    fill the output path's disk). Overflow raises `IO.userError` containing
-    `"exceeds limit"`.
+    `maxDecompressedSize` is forwarded to `decompressStream`; default 1 GiB;
+    pass `0` to opt into unlimited mode (bomb-unsafe — only do this when
+    the input is trusted, since a bomb can fill the output path's disk).
+    Overflow raises `IO.userError` containing `"exceeds limit"` (full
+    message: `"gzip: decompressed stream exceeds limit (<N> bytes)"`).
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompressFile (path : System.FilePath) (outPath : Option System.FilePath := none)
-    (maxDecompressedSize : UInt64 := 0) : IO System.FilePath := do
+    (maxDecompressedSize : UInt64 := 1024 * 1024 * 1024) : IO System.FilePath := do
   let out := match outPath with
     | some p => p
     | none =>
