@@ -163,7 +163,7 @@ Targets:
   or linked from issues.
   (Landed by this PR: new *"Minimized Reproducer Corpus"* section in
   [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
-  tabulates all 29 fixtures under `testdata/zip/malformed/`,
+  tabulates all 31 fixtures under `testdata/zip/malformed/`,
   `testdata/tar/malformed/`, and `testdata/tar/security/` with the
   guard they exercise, their first-landing PR (or `481e562` for
   fixtures inherited from the initial `lean-zlib → lean-zip` import),
