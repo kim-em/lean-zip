@@ -334,9 +334,9 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 
 | Entry point | Parameter | Default | Semantics of 0 | Notes |
 |---|---|---|---|---|
-| [Zlib.decompress](/home/kim/lean-zip/Zip/Basic.lean:15) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer zlib (RFC 1950). Only API with a committed bomb-limit regression test today ([ZipTest/Zlib.lean:14-19](/home/kim/lean-zip/ZipTest/Zlib.lean:14)). |
-| [Gzip.decompress](/home/kim/lean-zip/Zip/Gzip.lean:16) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer gzip (RFC 1952) + auto-zlib. No bomb-limit regression test. |
-| [RawDeflate.decompress](/home/kim/lean-zip/Zip/RawDeflate.lean:20) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | whole-buffer raw DEFLATE (ZIP method 8). No bomb-limit regression test. |
+| [Zlib.decompress](/home/kim/lean-zip/Zip/Basic.lean:15) (FFI) | `maxDecompressedSize : UInt64` | `1073741824` (1 GiB) | no limit (opt-in) | whole-buffer zlib (RFC 1950). Bomb-limit regression test at [ZipTest/Zlib.lean:17-22](/home/kim/lean-zip/ZipTest/Zlib.lean:17). |
+| [Gzip.decompress](/home/kim/lean-zip/Zip/Gzip.lean:16) (FFI) | `maxDecompressedSize : UInt64` | `1073741824` (1 GiB) | no limit (opt-in) | whole-buffer gzip (RFC 1952) + auto-zlib. Bomb-limit regression test at [ZipTest/Gzip.lean:18-23](/home/kim/lean-zip/ZipTest/Gzip.lean:18). |
+| [RawDeflate.decompress](/home/kim/lean-zip/Zip/RawDeflate.lean:20) (FFI) | `maxDecompressedSize : UInt64` | `1073741824` (1 GiB) | no limit (opt-in) | whole-buffer raw DEFLATE (ZIP method 8). Bomb-limit regression test at [ZipTest/RawDeflate.lean:17-22](/home/kim/lean-zip/ZipTest/RawDeflate.lean:17). |
 | [Gzip.decompressStream](/home/kim/lean-zip/Zip/Gzip.lean:83) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | streaming via `IO.Ref UInt64` counter on pushed output; cap check fires before `output.write`, so the already-written prefix is ≤ `maxDecompressedSize` bytes. Landed by PR #1610. |
 | [Gzip.decompressFile](/home/kim/lean-zip/Zip/Gzip.lean:123) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | thin wrapper forwarding to `decompressStream`; default still unlimited (bomb-unsafe for untrusted input written to disk). Landed by PR #1610. |
 | [RawDeflate.decompressStream](/home/kim/lean-zip/Zip/RawDeflate.lean:56) (FFI) | `maxDecompressedSize : UInt64` | `0` | no limit | streaming raw DEFLATE; same counter/check structure as `Gzip.decompressStream`. Landed by PR #1610. |
@@ -356,14 +356,6 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 
 ### Known inconsistencies
 
-- **`Tar.extractTarGz.maxOutputSize` vs. low-level defaults.**
-  `Tar.extractTarGzNative` caps the outer gzip decode at 256 MiB,
-  mirroring `Zip.Native.GzipDecode.decompress`. But the lower-level
-  FFI APIs — `Zlib.decompress`, `Gzip.decompress`,
-  `RawDeflate.decompress` — default to **unlimited** for the same
-  kind of whole-buffer decompression. A caller copying the
-  `Tar.extractTarGz`-style pattern with the FFI decoders gets no
-  default protection.
 - **Streaming FFI APIs expose `maxDecompressedSize` but default to
   `0 = no limit`.** `Gzip.decompressStream`, `Gzip.decompressFile`, and
   `RawDeflate.decompressStream` now accept an optional
@@ -386,11 +378,8 @@ issues and the follow-up docstring/default change.
 
 1. **Low-level whole-buffer FFI decoders** — `Zlib.decompress`,
    `Gzip.decompress`, `RawDeflate.decompress`.
-   - Keep `0 = no limit` as the literal encoding, but change the
-     **default** to a finite value (suggested: **256 MiB**, matching
-     the native decoders).
-   - Callers that genuinely need unlimited mode pass `0` explicitly
-     — the intent is visible at the call site.
+   Executed — the three FFI whole-buffer decoders now default to 1 GiB;
+   `0` continues to mean unlimited on the opt-in path. See this PR.
 2. **Streaming FFI decoders** — `Gzip.decompressStream`,
    `Gzip.decompressFile`, `RawDeflate.decompressStream`.
    - Add an optional `maxDecompressedSize : UInt64 := 256 * 1024^2`
