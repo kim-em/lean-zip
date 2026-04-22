@@ -7,14 +7,16 @@ Per-session details are in `progress/`.
 
 - **Phase**: Phase 4+ complete; Track C1 complete; Track C2 complete;
   proven-bounds campaign complete (0 runtime `]!` across `Zip/Native/`
-  and `Zip/`); Track E (security audit) in progress — P0 + P1 closed,
-  P2 items 1–3 closed, P2 item 4 + P3–P5 open
+  and `Zip/`); Track E (security audit) in progress — P0 + P1 + P2
+  closed, P3.1 / P3.2 / P3.4 closed (P3.3 fuzz harness open, issue
+  #1595), P4 closed, P5 (proof-friendly guard lemmas) open
+  (P5.1 issue #1596; P5.2 / P5.3 untracked)
 - **Toolchain**: leanprover/lean4:v4.29.1
 - **Sorries**: 0
-- **Sessions**: ~631 completed (Feb 19 – Apr 21)
+- **Sessions**: ~647 completed (Feb 19 – Apr 22)
 - **Source files in-repo**: `Zip/Spec/` 42, `Zip/Native/` 7,
   `Zip/` (FFI/archive/tar/gzip/basic) 6, `ZipTest/` 22
-- **Merged PRs**: 626 (approximate; authoritative count via `gh pr list`)
+- **Merged PRs**: ~641 (approximate; authoritative count via `gh pr list`)
 - **Spec lines**: 20,516 across 42 spec files (DEFLATE-only, post-split)
 - **Bare simp**: 0 standalone bare `simp` remaining across all spec files
 - **Bare simp_all**: 0 across all spec files (campaign complete)
@@ -2101,12 +2103,139 @@ regression tests, fuzz harness), P4 (runtime-boundary docs), and P5
 queued the next wave: #1558 / #1559 / #1564 / #1565 / #1566 track the
 remaining Priority 2–3 items.
 
+**15-PR batch (Apr 22): Track E security-audit follow-ups (summarize #1588):**
+
+This batch is the second concentrated wave of the Track E security-audit
+sub-roadmap. It builds on the 11-PR cluster captured in the prior block
+(summarize #1563 / PR #1568) by closing every remaining audit-checklist
+P-item except P3.3 (fuzz harness) and P5.* (proof-friendly guard
+lemmas). No DEFLATE / Huffman / LZ77 code path changed; no spec file
+was touched; `grep -rc sorry Zip/` stayed at `0` throughout. All work
+sits on the trust boundary — limit-policy docstrings, FFI regression
+tests, sanitizer harness, allocation-site audit, and three new
+`SECURITY_INVENTORY.md` sub-sections (upstream-runtime tracking,
+minimized reproducer corpus, and local guard inventory). The library's
+cryptographic and compression kernels are unchanged; what moved is
+how much of the audit checklist is now formally documented and locally
+guarded. The corresponding checklist file is
+[`plans/track-e-current-audit-checklist.md`](plans/track-e-current-audit-checklist.md)
+(source of truth for checkbox state).
+
+*Priority 2 item 4 — Limit-policy docstrings (closed).*
+
+- #1573 — Explicit limit-policy docstrings for FFI whole-buffer +
+  streaming decompression (`Zip/Basic.lean`, `Zip/Gzip.lean`,
+  `Zip/RawDeflate.lean`). Documents per-API the `0 = no limit` /
+  `Some n` / default-cap semantics surfaced by #1556's inventory.
+- #1586 — Public-API limit-policy docstrings for `Archive.extract`,
+  `Archive.extractFile`, `Tar.extract`, `Tar.extractTarGzNative`
+  (`Zip/Archive.lean`, `Zip/Tar.lean`).
+- #1594 — P2.4 final wedge: native-decoder limit-policy docstrings
+  for `Zip/Native/Inflate.lean` (`maxOutputSize`) and
+  `Zip/Native/Gzip.lean` (`maxDecompressedSize`).
+
+*Priority 3 — FFI adversarial validation (P3.1 / P3.2 / P3.4 closed; P3.3 open).*
+
+- #1576 — P3.1: dedicated sanitizer script `scripts/sanitize-ffi.sh`
+  rebuilds `c/zlib_ffi.c` under `-fsanitize=address,undefined`,
+  explicitly links GCC's libasan / libubsan past Lean's bundled
+  clang, and runs the test suite with `LD_PRELOAD` so ASan
+  initialises first. The April 2026 tree is ASan + UBSan clean.
+- #1571 — P3.2 first tranche: truncated-stream regression tests for
+  `Zlib`, `Gzip`, and `RawDeflate` FFI entry points (added to
+  `ZipTest/Zlib.lean`, `ZipTest/Gzip.lean`, `ZipTest/RawDeflate.lean`).
+- #1572 — P3.2 second tranche: concatenated-gzip-member +
+  zero-length-chunk regression tests (added to the same FFI test
+  modules).
+- #1577 — P3.2 third tranche: repeated-`inflateReset` across
+  concatenated gzip members + exact-fit and n−1 near-limit-output
+  regression tests.
+- #1580 — P3.4: `c/zlib_ffi.c` malloc/realloc/buffer-growth audit.
+  New *"Allocation site audit (`c/zlib_ffi.c`)"* sub-section in
+  `SECURITY_INVENTORY.md` enumerates every allocation call-site
+  (kind / overflow guard / failure mode);
+  `scripts/check-c-allocations.sh` flags accidental new sites at
+  PR-review time against the recorded baseline.
+
+*Priority 4 — Trusted runtime boundary documentation (P4.1 / P4.2 / P4.3 closed).*
+
+- #1585 — P4.3: per-call-site local-guard inventory for
+  `Handle.read` and `Stream.read` callsites in `Zip/Archive.lean`
+  and `Zip/Tar.lean`. New *"Local guard inventory for `Handle.read`
+  and `Stream.read`"* sub-section in `SECURITY_INVENTORY.md`
+  records each `readExact`, `readEntryData`, `skipEntryData`, and
+  inline-loop callsite together with the bound it relies on
+  (claimed-vs-actual span, `assertSpanInFile` enclosure, etc.).
+- #1589 — P4.1: upstream-runtime tracking sub-block in
+  `SECURITY_INVENTORY.md` § *"Lean Runtime"*. Records the
+  ZIP64 oversized-size / CD-vs-LH attack surface, pins the upstream
+  status as *"no upstream link yet — local tracking only"* (dated
+  2026-04-22), and lists the local regression coverage
+  (#1543 / #1544 / #1554 / #1560 / #1561) that guards the surface
+  today.
+- #1590 — P4.2: *"Minimized Reproducer Corpus"* section in
+  `SECURITY_INVENTORY.md` tabulating all 29 fixtures under
+  `testdata/zip/malformed/`, `testdata/tar/malformed/`, and
+  `testdata/tar/security/` with the guard each exercises, the
+  first-landing PR (or `481e562` for fixtures inherited from the
+  initial `lean-zlib → lean-zip` import), and a `{oversized
+  allocation, partial-decoder panic, archive-slip, decompression
+  bomb, other}` class tag.
+
+*Housekeeping (4 PRs).*
+
+- #1569 — Meditate session: patterns and friction in the Track E
+  security-audit phase (drafted skill notes; the materialised SKILL
+  files landed in #1579).
+- #1579 — Materialise the skill drafts from #1569 as
+  `.claude/skills/<skill>/SKILL.md` files.
+- #1584 — Doc: progress entry for #1581 rebase fix.
+- #1592 — Doc: progress entry for #1590 rebase fix.
+
+*Track E open work (post-batch).* Two checklist items remain:
+
+- **P3.3** — fuzz harness for whole-buffer and streaming inflate
+  entry points. Tracking issue: #1595 (unclaimed at the time of
+  writing).
+- **P5.1** — proof-friendly helpers for bounded reads and validated
+  spans in `Zip/Archive.lean` / `Zip/Tar.lean`. Tracking issue:
+  #1596 (unclaimed at the time of writing).
+- **P5.2 / P5.3** — bounded-span lemmas + helper-adoption rollout;
+  no tracking issue yet, downstream of #1596.
+
+A bonus boundary-hardening PR is in flight outside the checklist:
+PR #1597 / issue #1593 caps Tar `readEntryData` reads at the
+GNU-long-name and PAX extended-header callsites (open at the time
+this summary lands; not counted in the 15-PR batch above).
+
+*Scope discipline.* Same rule as the prior batch: every PR in this
+wave stopped at the doc / fixture / test boundary, plus narrow
+boundary-layer edits in `Zip/Native/Inflate.lean`,
+`Zip/Native/Gzip.lean`, `Zip/Basic.lean`, `Zip/Gzip.lean`,
+`Zip/RawDeflate.lean`, `Zip/Archive.lean`, and `Zip/Tar.lean` for
+the limit-policy docstring PRs (#1573 / #1586 / #1594) — none of
+these touched a logic guard or a spec file. The library's proof
+corpus (42 spec files, 20,516 LOC, 0 sorries) is byte-identical to
+the pre-batch tree.
+
+Quality metrics: 0 sorries across `Zip/`; 0 runtime `]!`;
+`Zip/Spec/` at 42 files, 20,516 LOC (unchanged); `Zip/Native/` at
+7 files, 1,813 LOC (was 1,780; +33 LOC from limit-policy
+docstrings in `Zip/Native/Inflate.lean` and `Zip/Native/Gzip.lean`);
+`Zip/` (FFI / archive / tar / gzip / basic) at 6 files, 1,511 LOC
+(was 1,437; +74 LOC across the four FFI modules + `Archive.lean` +
+`Tar.lean` for limit-policy docstrings); `ZipTest/` at 22 files,
+unchanged (P3.2 added test cases inside existing modules);
+`testdata/` fixture counts unchanged (11 / 12 / 6 across
+`zip/malformed`, `tar/malformed`, `tar/security`); 16 new
+progress entries in this batch; toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
 - Session dispatch: planners create issues, workers claim and execute
-- ~631 sessions (Feb 19 – Apr 21)
-- 626 merged PRs (approximate; authoritative count via `gh pr list`)
+- ~647 sessions (Feb 19 – Apr 22)
+- ~641 merged PRs (approximate; authoritative count via `gh pr list`)
 - 100% module docstring coverage across all source files
 - Full linter compliance (all warnings eliminated)
 - Repository split into `lean-zip` + `lean-zip-common` + `lean-zstd`
