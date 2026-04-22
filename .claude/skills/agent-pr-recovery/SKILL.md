@@ -439,32 +439,58 @@ To prevent conflict cascades at the planning stage:
    quality audits, but the planning was wasted.
 
 
-## Auto-merge race: ride-along progress entries
+## Auto-merge race: the ride-along ladder
 
-When a small rebase-fix PR has its own `progress/` entry, the most
-convenient pattern is a "ride-along" — commit the progress entry on
-the same branch as the rebase fix, so a single PR closes both the
-fix issue and documents the work. This works most of the time, but
-breaks when `coordination create-pr` marks the branch auto-merge
-and CI finishes quickly. In the post-#1569 audit wave this bit
-twice:
+When a small rebase-fix PR also wants its own `progress/` entry, the
+routine shape is a *split PR* — two PRs in sequence: (a) the rebase
+PR (feature commits + conflict resolution), then (b) a one-file
+ride-along PR carrying just the progress entry. Together with the
+upstream feature merge, these form the *ride-along ladder*:
 
-- **PR #1577 / #1581**: auto-merge landed the rebased CI on
-  `agent/b87e52f8` before the progress entry could be tacked onto
-  the same branch. The progress entry had to be submitted as its
-  own tiny follow-up PR. Session `0eaa9a61` recorded the friction.
-- **PR #1590 / #1592**: mirror of the above for the Minimized
-  Reproducer Corpus rebase. Session `452d633a`.
+> *feature PR merges → rebase-fix PR merges → progress-entry PR
+> merges.*
 
-### Two reliable patterns
+**Split-PR is the primary path, not a fallback.** The post-#1569
+and post-#1646 audit waves both confirmed this empirically:
 
-1. **Progress-entry-first**: stage and commit the progress entry
-   *before* pushing the rebase. The push and PR creation then pick
-   up both commits together.
-2. **Accept the split**: plan for a separate tiny
-   "doc: progress entry for #<N> rebase fix" PR. This is what
-   `0eaa9a61` and `452d633a` ended up doing. Size it to one commit,
-   one file; merge latency is negligible.
+- **PR #1577 / #1581** (post-#1569): auto-merge landed the rebased
+  CI on `agent/b87e52f8` before the progress entry could be tacked
+  onto the same branch. Session `0eaa9a61`.
+- **PR #1590 / #1592** (post-#1569): mirror of the above for the
+  Minimized Reproducer Corpus rebase. Session `452d633a`.
+- **PRs #1622, #1624, #1632** (post-#1646): three of three
+  rebase-fix PRs in this wave used the split-PR path. The
+  progress-entry-first path did not win once.
+
+### When progress-entry-first is still viable
+
+Committing the progress entry *before* pushing the rebase only beats
+auto-merge in the narrow ~30-second window between `git push` and
+the first CI status firing. Use it only when:
+
+- The rebase commit is already staged when you write the progress
+  entry (no further investigation needed), and
+- You can push within seconds of the progress-entry commit landing
+  on the local branch.
+
+Outside that window, plan for the split.
+
+### Submitting the ride-along PR
+
+After the rebased feature PR has merged, submit a one-file
+"doc: progress entry for #<N> rebase fix" PR targeting the same
+issue. Size: one commit, one file under `progress/`; merge latency
+is negligible. This doubles as a visible institutional-memory entry
+the next planner can read.
+
+### Dispatcher budgeting
+
+One rebase-fix issue normally spawns one ride-along PR. When
+estimating dispatcher load for a wave with `k` non-trivial rebase
+fixes, budget for `k` ride-along PRs in addition to the rebase PRs
+themselves.
+
+### Anti-pattern: amending after auto-merge
 
 Do **not** try to amend the auto-merged commit after the fact —
 `--force-with-lease` is pointless once the branch has been deleted
