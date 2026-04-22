@@ -103,8 +103,7 @@ theorem mkTable_size : mkTable.size = 256 := Array.size_ofFn ..
 theorem xor_ff_byte_lt_mkTable_size (b : UInt8) :
     0xFF ^^^ b.toNat < mkTable.size := by
   rw [mkTable_size]
-  exact Nat.xor_lt_two_pow (by decide : (0xFF : Nat) < 2 ^ 8)
-    (by have := b.toNat_lt; omega : b.toNat < 2 ^ 8)
+  exact Nat.xor_lt_two_pow (by decide : (0xFF : Nat) < 2 ^ 8) b.toNat_lt
 
 private theorem mkTable_getElem (i : Nat) (h : i < mkTable.size) :
     mkTable[i] = crcBit (crcBit (crcBit (crcBit
@@ -164,7 +163,7 @@ theorem checksum_singleton (b : UInt8) :
   show crcByte 0xFFFFFFFF b ^^^ 0xFFFFFFFF = _
   rw [← crcByteTable_mkTable_eq_crcByte]
   simp only [crcByteTable]
-  have hb32 : b.toNat < UInt32.size := by have := b.toNat_lt; simp [UInt32.size]; omega
+  have hb32 : b.toNat < UInt32.size := Nat.lt_trans b.toNat_lt (by decide)
   have hlt : ((((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat) <
       mkTable.size := by rw [mkTable_size]; exact and_0xFF_toNat_lt _
   rw [dif_pos hlt]
@@ -177,8 +176,7 @@ theorem checksum_singleton (b : UInt8) :
       show ((0xFF : UInt32).toNat) = 0xFF from rfl,
       Nat.and_xor_distrib_right,
       show (0xFFFFFFFF : Nat) &&& 0xFF = 0xFF from rfl,
-      Nat.and_two_pow_sub_one_of_lt_two_pow (n := 8)
-        (by have := b.toNat_lt; omega : b.toNat < 2 ^ 8)]
+      Nat.and_two_pow_sub_one_of_lt_two_pow (n := 8) b.toNat_lt]
   -- Unify the two `mkTable` accesses via index congruence + proof irrelevance.
   rw [getElem_congr_idx (c := mkTable) hidx]
   generalize mkTable[0xFF ^^^ b.toNat]'(hidx ▸ hlt) = t
