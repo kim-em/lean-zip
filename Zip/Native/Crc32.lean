@@ -109,6 +109,24 @@ theorem crc32_singleton (b : UInt8) :
     updateBytes_eq_updateList, hdata]
   exact Spec.checksum_singleton b
 
+/-- Closed form for the CRC-32 of a two-byte input starting from the
+default `init = 0`. Matches `Spec.checksum_pair` via
+`updateBytes_eq_updateList`. -/
+theorem crc32_pair (b₁ b₂ : UInt8) :
+    crc32 0 (ByteArray.mk #[b₁, b₂]) =
+      (let s₁ : UInt32 :=
+        0x00FFFFFF ^^^ Spec.mkTable[0xFF ^^^ b₁.toNat]'
+          (by exact Spec.xor_ff_byte_lt_mkTable_size b₁)
+       (s₁ >>> 8) ^^^
+         Spec.mkTable[((s₁ ^^^ UInt32.ofNat b₂.toNat) &&& 0xFF).toNat]'(by
+           rw [Spec.mkTable_size]; exact and_0xFF_toNat_lt _) ^^^ 0xFFFFFFFF) := by
+  have hdata : (ByteArray.mk #[b₁, b₂]).data.toList = [b₁, b₂] := rfl
+  simp only [crc32]
+  show _ ^^^ (0xFFFFFFFF : UInt32) = _
+  rw [show ((0 : UInt32) == 0) = true from rfl, if_pos rfl,
+    updateBytes_eq_updateList, hdata]
+  exact Spec.checksum_pair b₁ b₂
+
 /-- Compositionality of incremental CRC-32 computation (native level,
 see `PLAN.md:27-28`). Associativity of `crc32` over `ByteArray` append
 — an incremental streaming pipeline over concatenated chunks yields

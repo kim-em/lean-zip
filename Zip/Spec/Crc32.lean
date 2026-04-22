@@ -182,4 +182,48 @@ theorem checksum_singleton (b : UInt8) :
   generalize mkTable[0xFF ^^^ b.toNat]'(hidx ▸ hlt) = t
   bv_decide
 
+/-- The CRC-32 checksum of a two-byte input `[b₁, b₂]` has a closed
+form as two `mkTable` lookups. The running state `s₁` after byte `b₁`
+is `0x00FFFFFF ^^^ mkTable[0xFF ^^^ b₁.toNat]` (the `0x00FFFFFF` comes
+from `0xFFFFFFFF >>> 8`); then the second table lookup is indexed by
+the low byte of `s₁ ^^^ b₂`. The trailing `^^^ 0xFFFFFFFF` is the
+final complement. -/
+theorem checksum_pair (b₁ b₂ : UInt8) :
+    checksum [b₁, b₂] =
+      (let s₁ : UInt32 :=
+        0x00FFFFFF ^^^ mkTable[0xFF ^^^ b₁.toNat]'
+          (by exact xor_ff_byte_lt_mkTable_size b₁)
+       (s₁ >>> 8) ^^^
+         mkTable[((s₁ ^^^ UInt32.ofNat b₂.toNat) &&& 0xFF).toNat]'(by
+           rw [mkTable_size]; exact and_0xFF_toNat_lt _) ^^^ 0xFFFFFFFF) := by
+  -- Bridge the inner `crcByte` through the table.
+  show crcByte (crcByte 0xFFFFFFFF b₁) b₂ ^^^ 0xFFFFFFFF = _
+  rw [← crcByteTable_mkTable_eq_crcByte 0xFFFFFFFF b₁]
+  simp only [crcByteTable]
+  have hb1 : b₁.toNat < UInt32.size := Nat.lt_trans b₁.toNat_lt (by decide)
+  have hlt₁ : ((((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b₁.toNat) &&& 0xFF).toNat) <
+      mkTable.size := by rw [mkTable_size]; exact and_0xFF_toNat_lt _
+  rw [dif_pos hlt₁]
+  -- Simplify the inner index to `0xFF ^^^ b₁.toNat`.
+  have hidx₁ :
+      (((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b₁.toNat) &&& 0xFF).toNat =
+      0xFF ^^^ b₁.toNat := by
+    rw [UInt32.toNat_and, UInt32.toNat_xor, UInt32.toNat_ofNat_of_lt' hb1,
+      show ((0xFFFFFFFF : UInt32).toNat) = 0xFFFFFFFF from rfl,
+      show ((0xFF : UInt32).toNat) = 0xFF from rfl,
+      Nat.and_xor_distrib_right,
+      show (0xFFFFFFFF : Nat) &&& 0xFF = 0xFF from rfl,
+      Nat.and_two_pow_sub_one_of_lt_two_pow (n := 8) b₁.toNat_lt]
+  rw [getElem_congr_idx (c := mkTable) hidx₁]
+  -- `0xFFFFFFFF >>> 8 = 0x00FFFFFF`, so the running state matches `s₁`.
+  rw [show ((0xFFFFFFFF : UInt32) >>> 8) = 0x00FFFFFF from rfl]
+  -- Bridge the outer `crcByte` through the table.
+  rw [← crcByteTable_mkTable_eq_crcByte _ b₂]
+  simp only [crcByteTable]
+  have hlt₂ : ((((0x00FFFFFF : UInt32) ^^^
+      mkTable[0xFF ^^^ b₁.toNat]'(by exact xor_ff_byte_lt_mkTable_size b₁) ^^^
+      UInt32.ofNat b₂.toNat) &&& 0xFF).toNat) < mkTable.size := by
+    rw [mkTable_size]; exact and_0xFF_toNat_lt _
+  rw [dif_pos hlt₂]
+
 end Crc32.Spec
