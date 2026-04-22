@@ -185,6 +185,29 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   unless gnuLnUtf8Entries[0]!.path == expectedUtf8Path do
     throw (IO.userError s!"gnu-longname-invalid-utf8.tar: path mismatch: {repr gnuLnUtf8Entries[0]!.path}")
 
+  -- === TAR malformed header-oversized fixtures ===
+  -- A crafted GNU long-name (typeflag 'L') / PAX extended-header
+  -- (typeflag 'x') pseudo-entry whose `size` field decodes to ≈ 8 GiB
+  -- must be rejected by the `maxHeaderSize` cap in `readEntryData`
+  -- before any allocation runs. Each fixture is a single 512-byte
+  -- header — no payload required, since the cap fires before the read
+  -- loop.
+  let gnuLnOverData ← readFixture "tar/malformed/gnu-longname-oversized-size.tar"
+  let gnuLnOverPath ← writeFixtureTmp "gnu-longname-oversized-size.tar" gnuLnOverData
+  assertThrows "TAR malformed (gnu-longname-oversized-size.tar)"
+    (IO.FS.withFile gnuLnOverPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "exceeds maximum header size"
+
+  let paxExtOverData ← readFixture "tar/malformed/pax-extended-oversized-size.tar"
+  let paxExtOverPath ← writeFixtureTmp "pax-extended-oversized-size.tar" paxExtOverData
+  assertThrows "TAR malformed (pax-extended-oversized-size.tar)"
+    (IO.FS.withFile paxExtOverPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "exceeds maximum header size"
+
   -- === TAR security fixtures ===
 
   let tarSlipData ← readFixture "tar/security/tar-slip.tar"
@@ -263,6 +286,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-inconsistent-length.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
+             "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",
              "hardlink-outside.tar"] do

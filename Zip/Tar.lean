@@ -195,8 +195,32 @@ private partial def readExact (input : IO.FS.Stream) (n : Nat) : IO ByteArray :=
     buf := buf ++ chunk
   return buf
 
-/-- Read entry data from a stream (for GNU long name / PAX headers). -/
-private partial def readEntryData (input : IO.FS.Stream) (size : Nat) : IO ByteArray := do
+/-- Default upper bound on a single GNU long-name / long-link / PAX
+    header-entry payload accumulated by `readEntryData`. The four
+    callers in `forEntries` buffer the entire payload into memory before
+    treating it as a name, link target, or PAX record block, so an
+    attacker-controlled `entry.size` from a crafted header would
+    otherwise drive an arbitrarily large allocation.
+
+    8 MiB was chosen as a safe default: GNU `PATH_MAX` is 4096 bytes on
+    most systems, libarchive caps each PAX record block at roughly
+    1 MiB, and 8 MiB still bounds the accumulator at three orders of
+    magnitude above realistic header sizes. Callers that legitimately
+    handle larger header blobs can raise the cap via the
+    `maxHeaderSize` parameter exposed on `Tar.extract`, `Tar.list`,
+    `Tar.extractTarGz`, and `Tar.extractTarGzNative`. -/
+def defaultMaxHeaderSize : Nat := 8 * 1024 * 1024
+
+/-- Read entry data from a stream (for GNU long name / PAX headers).
+    `maxHeaderSize` caps the buffered payload before any allocation
+    happens; on overflow the function throws `IO.userError` containing
+    the substring `"exceeds maximum header size"`. The payload-bearing
+    `Tar.extract` regular-file path uses its own open-coded loop and is
+    not affected by this cap (see `Zip/Tar.lean` regular-file branch). -/
+private partial def readEntryData (input : IO.FS.Stream) (size : Nat)
+    (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO ByteArray := do
+  if size > maxHeaderSize then
+    throw (IO.userError s!"tar: header entry size ({size}) exceeds maximum header size ({maxHeaderSize})")
   let mut result := ByteArray.empty
   let mut remaining := size
   while remaining > 0 do
@@ -482,9 +506,16 @@ private partial def skipEntryData (input : IO.FS.Stream) (size : UInt64) : IO Un
 /-- Iterate over entries in a tar archive stream, resolving GNU long name/link
     and PAX extended/global headers. Calls `f` for each resolved entry.
     The callback must consume `entry.size` bytes of data plus padding from
-    the input stream (use `skipEntryData` to discard unwanted data). -/
+    the input stream (use `skipEntryData` to discard unwanted data).
+
+    `maxHeaderSize` bounds the buffered payload of every GNU long-name,
+    GNU long-link, PAX extended, and PAX global pseudo-entry; see
+    `defaultMaxHeaderSize` for the rationale behind the default. The
+    cap is independent of `Tar.extract`'s `maxEntrySize`, which only
+    bounds payload-bearing entries. -/
 private partial def forEntries (input : IO.FS.Stream)
-    (f : Entry → IO Unit) : IO Unit := do
+    (f : Entry → IO Unit)
+    (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
   let mut gnuLongName : Option String := none
   let mut gnuLongLink : Option String := none
   let mut paxOverrides : Option (Array (String × String)) := none
@@ -496,7 +527,7 @@ private partial def forEntries (input : IO.FS.Stream)
     | some entry =>
       -- GNU long name: read data as the name for the next entry
       if entry.typeflag == typeGnuLongName then
-        let nameData ← readEntryData input entry.size.toNat
+        let nameData ← readEntryData input entry.size.toNat maxHeaderSize
         let nameBytes := stripTrailingNuls nameData
         let name := match String.fromUTF8? nameBytes with
           | some s => s
@@ -505,7 +536,7 @@ private partial def forEntries (input : IO.FS.Stream)
         continue
       -- GNU long link: read data as the linkname for the next entry
       if entry.typeflag == typeGnuLongLink then
-        let linkData ← readEntryData input entry.size.toNat
+        let linkData ← readEntryData input entry.size.toNat maxHeaderSize
         let linkBytes := stripTrailingNuls linkData
         let link := match String.fromUTF8? linkBytes with
           | some s => s
@@ -514,12 +545,12 @@ private partial def forEntries (input : IO.FS.Stream)
         continue
       -- PAX extended header: parse records for the next entry
       if entry.typeflag == typePaxExtended then
-        let paxData ← readEntryData input entry.size.toNat
+        let paxData ← readEntryData input entry.size.toNat maxHeaderSize
         paxOverrides := some (parsePaxRecords paxData)
         continue
       -- PAX global header: skip (we don't track global state)
       if entry.typeflag == typePaxGlobal then
-        let _ ← readEntryData input entry.size.toNat
+        let _ ← readEntryData input entry.size.toNat maxHeaderSize
         continue
       -- Apply GNU/PAX overrides
       let mut e := entry
@@ -547,6 +578,12 @@ private partial def forEntries (input : IO.FS.Stream)
     *Decompression Limit Inventory* (recommendation 3 calls out the
     total-bytes gap).
 
+    `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the
+    buffered payload of every GNU long-name, GNU long-link, and PAX
+    pseudo-entry, independent of `maxEntrySize`. Overflow raises
+    `IO.userError` containing the substring
+    `"exceeds maximum header size"`.
+
     Per-typeflag policy:
 
     * `typeRegular` ('0'): write the payload to `outDir/path` after
@@ -563,8 +600,9 @@ private partial def forEntries (input : IO.FS.Stream)
       crafts `typeflag == '1'` with a malicious `linkname` cannot
       escape `outDir`. -/
 partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
-    (maxEntrySize : UInt64 := 0) : IO Unit := do
-  forEntries input fun e => do
+    (maxEntrySize : UInt64 := 0)
+    (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
+  forEntries (maxHeaderSize := maxHeaderSize) input fun e => do
     -- Strip trailing slash for path safety check (directories end with "/")
     let checkPath := if e.path.endsWith "/" then e.path.dropEnd 1 |>.toString else e.path
     unless Binary.isPathSafe checkPath do
@@ -619,10 +657,16 @@ partial def extract (input : IO.FS.Stream) (outDir : System.FilePath)
       skipEntryData input e.size
 
 /-- List entries in a tar archive without extracting.
-    Handles UStar, GNU long name/link, and PAX extended headers. -/
-partial def list (input : IO.FS.Stream) : IO (Array Entry) := do
+    Handles UStar, GNU long name/link, and PAX extended headers.
+
+    `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the
+    buffered payload of every GNU long-name, GNU long-link, and PAX
+    pseudo-entry. Overflow raises `IO.userError` containing the
+    substring `"exceeds maximum header size"`. -/
+partial def list (input : IO.FS.Stream)
+    (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO (Array Entry) := do
   let entriesRef ← IO.mkRef (#[] : Array Entry)
-  forEntries input fun e => do
+  forEntries (maxHeaderSize := maxHeaderSize) input fun e => do
     entriesRef.modify (·.push e)
     skipEntryData input e.size
   entriesRef.get
@@ -661,9 +705,15 @@ partial def createTarGz (outputPath : System.FilePath) (dir : System.FilePath)
     containing `"tar: entry '…' size (…) exceeds limit (…)"`. There is no
     outer gzip-stream cap on this variant: streaming FFI gzip has no
     `maxOutputSize` parameter today (the known gap tracked by
-    `SECURITY_INVENTORY.md` *Decompression Limit Inventory*, recommendation 2). -/
+    `SECURITY_INVENTORY.md` *Decompression Limit Inventory*, recommendation 2).
+
+    `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the
+    buffered payload of every GNU long-name, GNU long-link, and PAX
+    pseudo-entry. Overflow raises `IO.userError` containing the
+    substring `"exceeds maximum header size"`. -/
 partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath)
-    (maxEntrySize : UInt64 := 0) : IO Unit := do
+    (maxEntrySize : UInt64 := 0)
+    (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
   IO.FS.withFile inputPath .read fun inH => do
     let inStream := IO.FS.Stream.ofHandle inH
     let inflate ← Gzip.InflateState.new
@@ -691,7 +741,7 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
       putStr := fun _ => pure ()
       isTty := pure false
     }
-    extract tarStream outDir maxEntrySize
+    extract tarStream outDir maxEntrySize maxHeaderSize
 
 /-- Extract a .tar.gz archive using pure Lean decompression (no C FFI).
     Unlike `extractTarGz`, this reads the entire file into memory before
@@ -709,9 +759,15 @@ partial def extractTarGz (inputPath : System.FilePath) (outDir : System.FilePath
     requires a bound up front; the streaming `extractTarGz` variant does not
     need one because it drains the outer compressed stream chunk-by-chunk
     into the tar parser.
-    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
+    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
+
+    `maxHeaderSize` (default `defaultMaxHeaderSize` = 8 MiB) bounds the
+    buffered payload of every GNU long-name, GNU long-link, and PAX
+    pseudo-entry. Overflow raises `IO.userError` containing the
+    substring `"exceeds maximum header size"`. -/
 partial def extractTarGzNative (inputPath : System.FilePath) (outDir : System.FilePath)
-    (maxEntrySize : UInt64 := 0) (maxOutputSize : Nat := 256 * 1024 * 1024) : IO Unit := do
+    (maxEntrySize : UInt64 := 0) (maxOutputSize : Nat := 256 * 1024 * 1024)
+    (maxHeaderSize : Nat := defaultMaxHeaderSize) : IO Unit := do
   let gzData ← IO.FS.readBinFile inputPath
   let tarData ← match Zip.Native.GzipDecode.decompress gzData maxOutputSize with
     | .ok data => pure data
@@ -733,6 +789,6 @@ partial def extractTarGzNative (inputPath : System.FilePath) (outDir : System.Fi
     putStr := fun _ => pure ()
     isTty := pure false
   }
-  extract tarStream outDir maxEntrySize
+  extract tarStream outDir maxEntrySize maxHeaderSize
 
 end Tar
