@@ -18,6 +18,18 @@ def ZipTest.Zlib.tests : IO Unit := do
     unless (toString e).contains "exceeds limit" do
       throw (IO.userError s!"decompress limit wrong error: {e}")
 
+  -- Near-limit boundary: exact-fit must succeed; one-byte-under must fail.
+  -- Exercises the cap check at c/zlib_ffi.c:191 (`total > max_output`).
+  let zExactFit ← Zlib.decompress compressed (maxDecompressedSize := big.size.toUInt64)
+  assert! zExactFit.beq big
+  let zUnderResult ← (Zlib.decompress compressed
+      (maxDecompressedSize := (big.size - 1).toUInt64)).toBaseIO
+  match zUnderResult with
+  | .ok _ => throw (IO.userError "zlib decompress near-limit (n-1) should have been rejected")
+  | .error e =>
+    unless (toString e).contains "exceeds limit" do
+      throw (IO.userError s!"zlib decompress near-limit wrong error: {e}")
+
   -- Empty input roundtrip
   let empty := ByteArray.empty
   let ce ← Zlib.compress empty
