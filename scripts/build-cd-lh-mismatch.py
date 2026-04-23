@@ -2,12 +2,14 @@
 
 Each fixture wraps a single stored entry containing `b"hello\\n"`.  The
 local header is mutated post-construction so that one field disagrees
-with the central directory.  Both fixtures are byte-stable (no
+with the central directory.  All fixtures are byte-stable (no
 timestamps, no random padding).
 
 Outputs:
 - testdata/zip/malformed/cd-lh-method-mismatch.zip
 - testdata/zip/malformed/cd-lh-size-mismatch.zip
+- testdata/zip/malformed/cd-lh-uncompsize-mismatch.zip
+- testdata/zip/malformed/cd-lh-crc-mismatch.zip
 """
 import os, struct, zlib
 
@@ -18,7 +20,7 @@ CRC = zlib.crc32(PAYLOAD) & 0xFFFFFFFF
 N = len(NAME)
 P = len(PAYLOAD)
 
-def make_lh(method, comp_size, uncomp_size):
+def make_lh(method, comp_size, uncomp_size, crc=CRC):
     # PKZIP local file header (30 bytes).
     return struct.pack(
         "<IHHHHHIIIHH",
@@ -28,7 +30,7 @@ def make_lh(method, comp_size, uncomp_size):
         method,      # compression method
         0,           # mod time
         0,           # mod date
-        CRC,
+        crc,
         comp_size,   # compressed size
         uncomp_size, # uncompressed size
         N,           # file name length
@@ -69,10 +71,11 @@ def make_eocd(cd_size, cd_offset):
         0,           # comment length
     )
 
-def write(path, *, lh_method, cd_method, lh_comp, cd_comp):
-    lh = make_lh(lh_method, lh_comp, P)
+def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
+          lh_uncomp=P, cd_uncomp=P, lh_crc=CRC):
+    lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc)
     lhe = lh + NAME + PAYLOAD
-    cd = make_cd(cd_method, cd_comp, P)
+    cd = make_cd(cd_method, cd_comp, cd_uncomp)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe))
     with open(path, "wb") as f:
@@ -91,4 +94,20 @@ write(
 write(
     os.path.join(OUT_DIR, "cd-lh-size-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P + 1, cd_comp=P,
+)
+# CD says uncompressedSize=6; LH says uncompressedSize=7.
+# Both stored (method=0); LH compressed size matches CD so the earlier
+# `:607` compressedSize guard does not fire first.
+write(
+    os.path.join(OUT_DIR, "cd-lh-uncompsize-mismatch.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_uncomp=P + 1, cd_uncomp=P,
+)
+# CD says crc32=CRC; LH says crc32=CRC ^ 0xFF.
+# Both stored (method=0); sizes match on both sides so the earlier
+# `:607` / `:610` guards don't fire first.
+write(
+    os.path.join(OUT_DIR, "cd-lh-crc-mismatch.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_crc=CRC ^ 0xFF,
 )

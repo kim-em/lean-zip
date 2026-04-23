@@ -251,6 +251,57 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract cdLhFlagsPath cdLhFlagsExtractDir)
     "flags mismatch between CD and local header"
 
+  -- cd-lh-uncompsize-mismatch.zip: 122-byte stored ZIP whose CD advertises
+  -- uncompressedSize=6 while the local header advertises
+  -- uncompressedSize=7.  Both headers report method=0 (stored) and matching
+  -- compressedSize=6, so the earlier method/compressedSize CD/LH guards do
+  -- not fire first.  `Archive.extract` must reject this with an
+  -- `uncompressedSize mismatch between CD and local header` error.
+  -- Regenerate (if ever lost): see `make_lh` / `make_cd` in
+  -- `scripts/build-cd-lh-mismatch.py` or this 2026 inline recipe:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p); CD_U,LH_U=len(p),len(p)+1
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,0,0,0,c,len(p),LH_U,len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,0,0,0,0,c,len(p),CD_U,
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("cd-lh-uncompsize-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let cdLhUncompData ← readFixture "zip/malformed/cd-lh-uncompsize-mismatch.zip"
+  let cdLhUncompPath ← writeFixtureTmp "cd-lh-uncompsize-mismatch.zip" cdLhUncompData
+  let cdLhUncompExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-lh-uncompsize-mismatch-extract"
+  IO.FS.createDirAll cdLhUncompExtractDir
+  assertThrows "ZIP malformed (cd-lh-uncompsize-mismatch.zip)"
+    (Archive.extract cdLhUncompPath cdLhUncompExtractDir)
+    "uncompressedSize mismatch between CD and local header"
+
+  -- cd-lh-crc-mismatch.zip: 122-byte stored ZIP whose CD advertises the
+  -- correct CRC32 of `hello\n` while the local header advertises
+  -- `CRC ^ 0xFF`.  Both headers report method=0 (stored) and matching
+  -- compressed/uncompressed sizes, so the earlier method/size CD/LH
+  -- guards do not fire first.  `Archive.extract` must reject this with a
+  -- `crc32 mismatch between CD and local header` error before the
+  -- post-extract CRC32 verification (which would otherwise also fail).
+  -- Regenerate (if ever lost): see `make_lh` / `make_cd` in
+  -- `scripts/build-cd-lh-mismatch.py` or this 2026 inline recipe:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p); LH_C=c^0xFF
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,0,0,0,LH_C,len(p),len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,0,0,0,0,c,len(p),len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("cd-lh-crc-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let cdLhCrcData ← readFixture "zip/malformed/cd-lh-crc-mismatch.zip"
+  let cdLhCrcPath ← writeFixtureTmp "cd-lh-crc-mismatch.zip" cdLhCrcData
+  let cdLhCrcExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-lh-crc-mismatch-extract"
+  IO.FS.createDirAll cdLhCrcExtractDir
+  assertThrows "ZIP malformed (cd-lh-crc-mismatch.zip)"
+    (Archive.extract cdLhCrcPath cdLhCrcExtractDir)
+    "crc32 mismatch between CD and local header"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -276,6 +327,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "oversized-zip64-uncompressed-size.zip",
              "cd-lh-method-mismatch.zip", "cd-lh-size-mismatch.zip",
              "cd-lh-flags-mismatch.zip",
+             "cd-lh-uncompsize-mismatch.zip", "cd-lh-crc-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
@@ -285,6 +337,8 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-cd-lh-method-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-size-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-flags-mismatch-extract",
+             "/tmp/lean-zip-fixture-cd-lh-uncompsize-mismatch-extract",
+             "/tmp/lean-zip-fixture-cd-lh-crc-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"
