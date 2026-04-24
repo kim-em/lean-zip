@@ -72,7 +72,7 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
             cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
-            internal_attrs=0, cd_flags=0, name_bytes=None):
+            internal_attrs=0, cd_flags=0, name_bytes=None, cd_crc=None):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -97,7 +97,15 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # constant `NAME`".  Parallel to the same kwarg on `make_lh`:
     # preserves byte-identity of every existing fixture; only
     # `cd-nul-in-name.zip` passes a custom value with embedded NUL.
+    # `cd_crc` defaults to `None`, meaning "use the module-level `CRC`
+    # (the CRC32 of `PAYLOAD = b"hello\n"`)".  The default is
+    # load-bearing: it preserves byte-identity of every existing
+    # fixture whose CD `crc32` field carries the payload CRC.  Only
+    # `cd-empty-entry-crc-nonzero.zip` exercises the non-default
+    # branch (`cd_crc=0xDEADBEEF` alongside `cd_uncomp=0` — the
+    # empty-entry CRC invariant violation).
     nb = NAME if name_bytes is None else name_bytes
+    cc = CRC if cd_crc is None else cd_crc
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
@@ -107,7 +115,7 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
         method,      # compression method
         cd_mod_time, # mod time
         cd_mod_date, # mod date
-        CRC,
+        cc,
         comp_size,
         uncomp_size,
         len(nb),     # name length
@@ -146,7 +154,7 @@ def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0,
     )
 
 def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
-          lh_uncomp=P, cd_uncomp=P, lh_crc=CRC,
+          lh_uncomp=P, cd_uncomp=P, lh_crc=CRC, cd_crc=None,
           lh_version=20, cd_version=20,
           lh_mod_time=0, lh_mod_date=0,
           cd_mod_time=0, cd_mod_date=0,
@@ -154,7 +162,7 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_local_hdr_offset=0,
           cd_internal_attrs=0,
           lh_flags=0, cd_flags=0,
-          name_bytes=None,
+          name_bytes=None, payload=None,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
     # `name_bytes` defaults to `None`, meaning "derive from the module
@@ -163,17 +171,27 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
     # branch with `b"a\x00b.txt"`).  Both the LH and CD use the same
     # `name_bytes`, keeping the CD/LH name-bytes consistency invariant
     # intact when issue #1722's guard lands.
+    # `payload` defaults to `None`, meaning "derive from the module
+    # constant `PAYLOAD = b"hello\n"`".  The default preserves
+    # byte-identity of every existing fixture; only
+    # `cd-empty-entry-crc-nonzero.zip` passes `payload=b""` (together
+    # with `lh_comp=cd_comp=lh_uncomp=cd_uncomp=0`) to exercise the
+    # empty-entry CRC invariant.
+    # `cd_crc` defaults to `None` (→ module-level `CRC`).  Plumbed to
+    # `make_cd` for the empty-entry CRC invariant; see the `make_cd`
+    # docstring.
     nb = NAME if name_bytes is None else name_bytes
+    pl = PAYLOAD if payload is None else payload
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
                  lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date,
                  lh_flags=lh_flags, name_bytes=name_bytes)
-    lhe = lh + nb + PAYLOAD
+    lhe = lh + nb + pl
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
                  local_hdr_offset=cd_local_hdr_offset,
                  internal_attrs=cd_internal_attrs,
-                 cd_flags=cd_flags, name_bytes=name_bytes)
+                 cd_flags=cd_flags, name_bytes=name_bytes, cd_crc=cd_crc)
     cde = cd + nb
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -469,4 +487,37 @@ write(
     os.path.join(OUT_DIR, "cd-empty-name.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     name_bytes=b"",
+)
+# CD-parse empty-entry CRC invariant anomaly: CD and LH both advertise a
+# zero-byte stored entry (`method=0, compSize=0, uncompSize=0`) but the
+# CRC field is patched to `0xDEADBEEF`.  APPNOTE §4.4.7 defines the
+# CRC32 field as the ANSI-CRC-32 of the uncompressed payload; the empty
+# byte string has CRC32 `0x00000000` (start state `0xFFFFFFFF`; no data
+# to process; final complement returns `0x00000000`), so
+# `uncompSize == 0 → crc == 0` is a universal mathematical invariant.
+# Every correct writer (Info-ZIP, Go `archive/zip`, CPython `zipfile`,
+# 7-Zip, lean-zip's own `create`) obeys it.  `parseCentralDir` now
+# rejects at CD parse time, post-ZIP64-resolution, after the
+# stored-method size invariant — the empty-file premise pins
+# attribution to the invariant rather than a generic CRC check.  LH
+# and CD carry the same crafted CRC so the earlier CD/LH `crc32`
+# consistency check (`cd-lh-crc-mismatch.zip` family) does not fire
+# first.  Payload is empty (`payload=b""`) because `compSize = 0` —
+# the 9-byte name bytes follow the LH immediately, then the CD.  The
+# stored-method `compSize == uncompSize` invariant holds (both `0`)
+# so that guard does not fire first.  File layout:
+#   LH (30 B) + name (9 B) = 39 B; CD (46 B) + name (9 B) = 55 B;
+#   EOCD (22 B); total 116 B.  Sentinel value `0xDEADBEEF` chosen as
+# a canonical "obviously crafted" non-zero UInt32 — any nonzero value
+# fires the same guard.  Pre-PR, `Archive.list` propagated the crafted
+# CRC into `Entry.crc32` verbatim (callers routing on `entry.crc32`
+# saw the smuggled value) and `Archive.extract` caught the mismatch
+# only post-extraction via the `"CRC32 mismatch"` guard at
+# Zip/Archive.lean:1088 — after any I/O work had been performed.
+write(
+    os.path.join(OUT_DIR, "cd-empty-entry-crc-nonzero.zip"),
+    lh_method=0, cd_method=0,
+    lh_comp=0, cd_comp=0, lh_uncomp=0, cd_uncomp=0,
+    lh_crc=0xDEADBEEF, cd_crc=0xDEADBEEF,
+    payload=b"",
 )

@@ -758,6 +758,40 @@ private def parseCentralDir (data : ByteArray)
       unless compSize == uncompSize do
         throw (IO.userError
           s!"zip: stored-method size mismatch for {name} (method=0, compressedSize={compSize}, uncompressedSize={uncompSize})")
+    -- APPNOTE §4.4.7: the CRC32 field is the ANSI-CRC-32 of the
+    -- uncompressed payload. The empty byte string has CRC32
+    -- `0x00000000` by the CRC-32 definition (start state
+    -- `0xFFFFFFFF`; no data to process; final complement returns
+    -- `0x00000000`), so `uncompSize == 0 → crc == 0` is a
+    -- universal mathematical invariant — every correct writer
+    -- (Info-ZIP, Go `archive/zip`, CPython `zipfile`, 7-Zip,
+    -- lean-zip's own `create` at
+    -- [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195)
+    -- which emits `Checksum.crc32 0 fileData`) obeys it. Crafted
+    -- archives carrying `uncompSize = 0` alongside any nonzero CRC
+    -- are structurally malformed and a parser-differential smuggle
+    -- vector: pre-PR, `parseCentralDir` propagated the crafted CRC
+    -- into `Entry.crc32` verbatim — callers routing on
+    -- `entry.crc32` saw the smuggled value — while strict peer
+    -- parsers or CRC-cross-checking callers reject. Pre-PR,
+    -- `Archive.extract` caught the mismatch only post-extraction
+    -- via the `"CRC32 mismatch"` guard at
+    -- [Zip/Archive.lean:1088](/home/kim/lean-zip/Zip/Archive.lean:1088),
+    -- after any I/O work had been performed; `Archive.list` had no
+    -- gate at all. Placed after the stored-method size invariant
+    -- so `uncompSize : UInt64` is the resolved value (post-ZIP64)
+    -- rather than the `0xFFFFFFFF` sentinel, and so attribution
+    -- pins on the empty-file premise rather than a generic CRC
+    -- check. Check `uncompSize == 0` first so the CRC field is
+    -- inspected only when the empty-file premise holds. Method
+    -- 0 (stored) and method 8 (deflate) share the same invariant
+    -- — a deflate-encoded empty stream has `compSize = 2` (the
+    -- `03 00` empty-block encoding) but `uncompSize = 0`, so the
+    -- check applies regardless of method.
+    if uncompSize == 0 then
+      unless crc == 0 do
+        throw (IO.userError
+          s!"zip: CD entry CRC must be zero when uncompressedSize is zero (crc={crc}, uncompressedSize={uncompSize}) for {name} at CD offset {pos}")
     entries := entries.push {
       path := name
       compressedSize := compSize

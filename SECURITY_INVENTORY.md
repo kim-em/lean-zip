@@ -637,6 +637,52 @@ Summary — what this pattern catches and what it does not:
     at CD parse: zero-length, NUL-embedded, and path-traversal forms
     are all rejected pre-decode. Net-new dimension observed during
     the CD-parse filename-validation coverage sweep
+  - CD-entry empty-entry CRC invariant rejection — PR #N
+    (`testdata/zip/malformed/cd-empty-entry-crc-nonzero.zip`) rejects
+    CD entries whose `uncompressedSize == 0` with any nonzero `crc32`
+    at `parseCentralDir` time
+    ([Zip/Archive.lean:794](/home/kim/lean-zip/Zip/Archive.lean:794)),
+    post-ZIP64-resolution, after the stored-method size invariant.
+    APPNOTE §4.4.7 defines the CRC32 field as the ANSI-CRC-32 of the
+    uncompressed payload; the empty byte string has CRC32 `0x00000000`
+    (start state `0xFFFFFFFF`; no data to process; final complement
+    returns `0x00000000`), so `uncompSize == 0 → crc == 0` is a
+    universal mathematical invariant. Every correct writer — Info-ZIP,
+    Go `archive/zip`, CPython `zipfile`, 7-Zip, and lean-zip's own
+    `create` at
+    [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195)
+    (which emits `Checksum.crc32 0 fileData` and hence `0` on an empty
+    payload) — obeys it. Crafted archives carrying `uncompSize = 0`
+    alongside any nonzero CRC are structurally malformed and a
+    parser-differential smuggle vector: pre-PR, `parseCentralDir`
+    propagated the crafted CRC into `Entry.crc32` verbatim, so
+    `Archive.list` callers that routed on `entry.crc32` (logging,
+    deduplication, downstream CRC cross-checks) saw the smuggled value
+    while strict peer parsers or CRC-cross-checking callers rejected.
+    Pre-PR, `Archive.extract` caught the mismatch only post-extraction
+    via the `"CRC32 mismatch"` guard at
+    [Zip/Archive.lean:1088](/home/kim/lean-zip/Zip/Archive.lean:1088),
+    after the I/O work had been performed; `Archive.list` had no gate
+    at all. Placed after the stored-method size invariant so the
+    resolved `uncompSize : UInt64` is the value checked (rather than
+    the `0xFFFFFFFF` sentinel) and so attribution pins on the empty-
+    file premise rather than a generic CRC check. The `uncompSize == 0`
+    probe runs first so the CRC field is inspected only when the
+    empty-file premise holds; method 0 (stored) and method 8 (deflate)
+    share the same invariant — a deflate-encoded empty stream has
+    `compSize = 2` (the `03 00` empty-block encoding) but `uncompSize
+    = 0`, so the check applies regardless of method. Writer-side at
+    [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195) is
+    trivially compliant (`Checksum.crc32 0 ByteArray.empty == 0` by
+    the CRC-32 init⊕complement identity); the CD-parse guard is
+    read-side only. Sibling of PR #1773 (stored-method size invariant)
+    at the CD-parse mathematical-invariant family: #1773 closes the
+    `compSize == uncompSize` dimension (tautological for stored
+    entries); the present bullet closes the `uncompSize == 0 → crc == 0`
+    dimension (tautological for every empty entry, regardless of
+    method). Net-new dimension observed during the CD-parse
+    mathematical-invariant coverage sweep — the *Missing work* block
+    had not previously flagged the empty-entry CRC invariant
   - oversized ZIP64 compressed-size fixture — PR #1543
     (`testdata/zip/malformed/oversized-zip64-compressed-size.zip`)
   - oversized ZIP64 uncompressed-size fixture — PR #1544
@@ -1024,6 +1070,7 @@ to be silently skipped.
 | [testdata/zip/malformed/bad-crc.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-crc.zip) | 140 B | Post-extraction CRC32 verification at [Zip/Archive.lean:1088](/home/kim/lean-zip/Zip/Archive.lean:1088) — *"CRC32 mismatch"* | `481e562` | other (integrity check) |
 | [testdata/zip/malformed/bad-method.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-method.zip) | 140 B | CD-entry compression-method allowlist check at [Zip/Archive.lean:668](/home/kim/lean-zip/Zip/Archive.lean:668) — *"unsupported compression method"* (CD/LH both advertise method=14 (LZMA), outside lean-zip's `{0, 8}` allowlist; `parseCentralDir` rejects at CD parse time, pre-ZIP64-resolution, before any LH read. Previously caught by the late method-dispatch guard at [Zip/Archive.lean:1083](/home/kim/lean-zip/Zip/Archive.lean:1083) — *"unsupported method"* — which still fires as defense-in-depth if a future caller bypasses CD parsing) | #1801 | other (method validation) |
 | [testdata/zip/malformed/cd-bad-method-early.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-bad-method-early.zip) | 122 B | CD-entry compression-method allowlist check at [Zip/Archive.lean:668](/home/kim/lean-zip/Zip/Archive.lean:668) — *"unsupported compression method"* (CD/LH both advertise method=6 (imploded — deprecated in PKZIP 2.0, 1993), outside lean-zip's `{0, 8}` allowlist; `parseCentralDir` rejects at CD parse time, pre-ZIP64-resolution, before any LH read. Companion to `bad-method.zip` (CD/LH method=14, LZMA): both fixtures trip the same CD-parse guard, but distinct method values let paired-review distinguish which fixture fired) | #1801 | other (method validation) |
+| [testdata/zip/malformed/cd-empty-entry-crc-nonzero.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-empty-entry-crc-nonzero.zip) | 116 B | CD-entry empty-entry CRC invariant check at [Zip/Archive.lean:794](/home/kim/lean-zip/Zip/Archive.lean:794) — *"CD entry CRC must be zero when uncompressedSize is zero"* (CD and LH both advertise a zero-byte stored entry (`method=0, compSize=0, uncompSize=0`) but carry a crafted nonzero CRC (`0xDEADBEEF`). APPNOTE §4.4.7 defines the CRC32 field as the ANSI-CRC-32 of the uncompressed payload; the empty byte string has CRC32 `0x00000000` by the CRC-32 start-state `0xFFFFFFFF` + final-complement identity, so `uncompSize == 0 → crc == 0` is a universal mathematical invariant that every correct writer — Info-ZIP, Go `archive/zip`, CPython `zipfile`, 7-Zip, lean-zip's own `create` — obeys. `parseCentralDir` rejects at CD parse time post-ZIP64-resolution, after the stored-method size invariant — so the resolved `uncompSize : UInt64` is the value checked rather than the `0xFFFFFFFF` sentinel, and attribution pins on the empty-file premise rather than a generic CRC check. LH and CD carry the same crafted CRC so the CD/LH `crc32` consistency check (`cd-lh-crc-mismatch.zip`, PR #1728) does not fire first; `compSize == uncompSize == 0` so the stored-method size invariant (`cd-stored-size-mismatch.zip`, PR #1773) does not fire first. Closes both `Archive.list` (pre-PR propagated the crafted CRC into `Entry.crc32` verbatim — callers routing on `entry.crc32` saw the smuggled value) and `Archive.extract` (pre-PR caught the mismatch only post-extraction via the `"CRC32 mismatch"` guard at [Zip/Archive.lean:1088](/home/kim/lean-zip/Zip/Archive.lean:1088), after any I/O work had been performed) dimensions simultaneously. Sibling of PR #1773 at the CD-parse mathematical-invariant family — #1773 closes the `compSize == uncompSize` column (tautological for stored), this PR closes the `uncompSize == 0 → crc == 0` column (tautological for empty entries, method-agnostic)) | #N | other (CRC/empty-file invariant) |
 | [testdata/zip/malformed/cd-empty-name.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-empty-name.zip) | 104 B | CD-entry empty-filename rejection at [Zip/Archive.lean:535](/home/kim/lean-zip/Zip/Archive.lean:535) — *"CD entry has empty filename"* (CD and LH entries both carry `name_bytes=b""`, so the `name length` UInt16 at CD +28 — APPNOTE §4.4.10 — reads as `0`. `parseCentralDir` rejects at CD parse time immediately after the `nameLen` read, before the `entryEnd > cdEnd` overrun check and before the sibling NUL-byte / path-safety filename guards — so the failure attribution pins cleanly to the structural anomaly rather than the path-safety predicate (which would otherwise catch the empty string via its empty-component rejection, but only if the decode succeeds). Every legitimate ZIP entry has at least one byte of name; `nameLen == 0` is structurally pathological and a parser-differential smuggling vector (lenient readers emit `entry.path = ""` — an `Entry` with no useful identity; `Archive.extract` would resolve `outDir / ""` to either `outDir` itself or a path with a trailing separator, surfacing as an unrelated `IO.FS.writeBinFile` / `createDir` error). Sibling of `cd-nul-in-name.zip` (PR #1831, byte-content dimension) and `cd-path-unsafe.zip` (PR #1840, path-shape dimension): together they close the smuggled-name attack class at CD parse — zero-length, NUL-embedded, and path-traversal forms all rejected pre-decode. Interop pre-flight over `testdata/zip/{interop,malformed}/*.zip` returned zero hits before landing) | #N | other (filename validation) |
 | [testdata/zip/malformed/cd-entry-disknum-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-disknum-mismatch.zip) | 122 B | CD per-entry `diskNumberStart` consistency check at [Zip/Archive.lean:549](/home/kim/lean-zip/Zip/Archive.lean:549) — *"CD entry diskNumberStart mismatch"* (CD entry's APPNOTE §4.4.11 disk-number field at offset +34 is `7`; lean-zip supports single-disk archives only, so any nonzero value is rejected. Per-entry counterpart to `eocd-disknum-mismatch.zip` which covers the archive-level EOCD disk-number fields) | #1759 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip) | 122 B | CD per-entry `internalFileAttributes` reserved-bits check at [Zip/Archive.lean:567](/home/kim/lean-zip/Zip/Archive.lean:567) — *"internalAttrs reserved bits set"* (CD entry's APPNOTE §4.4.10 field at offset +36 carries `0x0080` — bit 7 set, reserved; only bit 0 "apparent ASCII/text data" is defined in version 1.0, bits 1-2 are PKWARE-reserved, bits 3-15 unused. Guard `internalAttrs &&& 0xFFFE == 0` preserves Info-ZIP bit-0 interop while rejecting smuggled reserved-bit values. Contiguous writer-zero `UInt16` sibling of `cd-entry-disknum-mismatch.zip` (CD +34): `parseCentralDir` reads both fields in order and both guards fire pre-ZIP64-resolution, before the `entryEnd > cdEnd` span check) | #1819 | other (CD writer-invariant) |
