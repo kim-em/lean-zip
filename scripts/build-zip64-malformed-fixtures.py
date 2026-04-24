@@ -13,6 +13,7 @@ Outputs:
 - testdata/zip/malformed/eocd-zip64-override-nosentinel.zip
 - testdata/zip/malformed/zip64-eocd64-bad-recsize.zip
 - testdata/zip/malformed/zip64-extra-oversized-datasize.zip
+- testdata/zip/malformed/cd-extra-overrun-datasize.zip
 """
 import os, struct, zlib
 
@@ -175,4 +176,64 @@ def write_zip64_extra_oversized_fixture(path):
 
 write_zip64_extra_oversized_fixture(
     os.path.join(OUT_DIR, "zip64-extra-oversized-datasize.zip"),
+)
+
+
+def make_lh_extra_overrun(extra_len):
+    # Plain (non-ZIP64) local header with an `extraLen` that matches the
+    # length of the malformed extra-data sub-field header below.  The
+    # outer length is *honest*; the inner sub-field header lies about its
+    # payload length.
+    return struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034b50, 20, 0, 0, 0, 0,
+        CRC, P, P, N, extra_len,
+    )
+
+
+def make_cd_extra_overrun(extra_len):
+    # Plain CD header with an honest outer `extraLen` that matches the
+    # length of the malformed extra-data below.
+    return struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014b50, 20, 20, 0, 0, 0, 0,
+        CRC, P, P, N, extra_len, 0, 0, 0, 0, 0,
+    )
+
+
+def make_overrun_extra():
+    # APPNOTE §4.5: an extra-data sub-field is
+    # `[headerId:UInt16][dataSize:UInt16][payload:dataSize bytes]`,
+    # iterated until the extra-data is exhausted.  Here headerId=0x5455
+    # (extended-timestamp — a plausible legitimate sub-field), but the
+    # declared `dataSize=0xFF` (255 bytes) far exceeds the remaining
+    # `extraLen - 4 = 4` bytes of payload buffer.  A strict parser
+    # rejects the archive; the pre-PR lean-zip silently `break`s inside
+    # `parseZip64Extra` — and since no ZIP64 sentinel is set the caller
+    # does not even invoke `parseZip64Extra`, leaving the anomaly
+    # entirely invisible.
+    return struct.pack(
+        "<HH4s", 0x5455, 0xFF, b"\x00\x00\x00\x00",
+    )
+
+
+def write_cd_extra_overrun_fixture(path):
+    extra = make_overrun_extra()
+    extra_len = len(extra)
+    lh = make_lh_extra_overrun(extra_len)
+    lhe = lh + NAME + extra + PAYLOAD
+    cd = make_cd_extra_overrun(extra_len)
+    cde = cd + NAME + extra
+    eocd = make_eocd(
+        cd_size=len(cde), cd_offset=len(lhe),
+        total_entries=1, entries_this_disk=1,
+        this_disk=0, disk_cd=0,
+    )
+    with open(path, "wb") as f:
+        f.write(lhe + cde + eocd)
+    print(f"wrote {path} ({os.path.getsize(path)} bytes)")
+
+
+write_cd_extra_overrun_fixture(
+    os.path.join(OUT_DIR, "cd-extra-overrun-datasize.zip"),
 )

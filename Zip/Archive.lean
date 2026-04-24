@@ -353,6 +353,29 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
   return some (pos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
     numEntriesThisDisk)
 
+/-- Validate the outer sub-field layout of a CD/LH extra-data blob
+    (APPNOTE §4.5 *"Extensible Data Fields"*): each sub-field has a
+    4-byte header `[headerId : UInt16] [dataSize : UInt16]` followed by
+    exactly `dataSize` payload bytes, iterated until the blob is
+    exhausted. Returns `false` if any sub-field's declared `dataSize`
+    extends past the end of the blob, or if a trailing 1-3 byte partial
+    header follows the last complete sub-field.
+
+    This is a structural check run unconditionally on extra-data before
+    `parseZip64Extra`. Without it, the `parseZip64Extra` loop silently
+    `break`s on a malformed sub-field — leaving the anomaly invisible
+    in the no-ZIP64-sentinel case (the caller skips `parseZip64Extra`
+    entirely) and misattributed to ZIP64-field resolution in the
+    sentinel case. A malformed sub-field header is a parser-differential
+    smuggling vector independent of ZIP64. -/
+private def validateExtraFieldStructure (extraData : ByteArray) : Bool := Id.run do
+  let mut epos := 0
+  while epos + 4 <= extraData.size do
+    let dataSize := (Binary.readUInt16LE extraData (epos + 2)).toNat
+    if epos + 4 + dataSize > extraData.size then return false
+    epos := epos + 4 + dataSize
+  return epos == extraData.size
+
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
     Only reads fields whose standard values are 0xFFFFFFFF. Returns `none` if a required field
     is missing from the ZIP64 extra data. -/
@@ -465,8 +488,16 @@ private def parseCentralDir (data : ByteArray)
         pure (match String.fromUTF8? nameBytes with
           | some s => s
           | none => Binary.fromLatin1 nameBytes)
-    -- Parse ZIP64 extra field if any standard field is 0xFFFFFFFF
+    -- Parse ZIP64 extra field if any standard field is 0xFFFFFFFF.
+    -- Structural check runs unconditionally (APPNOTE §4.5) so the
+    -- no-ZIP64-sentinel path also rejects extra-data whose sub-field
+    -- declared `dataSize` overruns the blob. Without this, a malformed
+    -- sub-field header in a non-ZIP64 entry is entirely invisible
+    -- (`parseZip64Extra` is skipped) and in the ZIP64 case the anomaly
+    -- would be misattributed as a missing-0x0001 block.
     let extraData := data.extract (pos + 46 + nameLen) (pos + 46 + nameLen + extraLen)
+    unless validateExtraFieldStructure extraData do
+      throw (IO.userError s!"zip: malformed extra field for {name}")
     let (uncompSize, compSize, localOff) ←
       if stdCompSize == val32Max || stdUncompSize == val32Max || stdOffset == val32Max then
         match parseZip64Extra extraData stdUncompSize stdCompSize stdOffset with
@@ -746,7 +777,12 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   -- Resolve the effective local sizes through any ZIP64 local extra block.
   -- Local headers do not carry the file-offset field, so pass `stdOffset = 0`
   -- to `parseZip64Extra` and discard the offset slot it returns.
+  -- Structural check on sub-field layout runs unconditionally (APPNOTE §4.5)
+  -- so the no-ZIP64-sentinel LH path also rejects extra-data whose sub-field
+  -- declared `dataSize` overruns the blob — mirrors the CD-side check.
   let localExtra := nameAndExtra.extract nameLen (nameLen + extraLen)
+  unless validateExtraFieldStructure localExtra do
+    throw (IO.userError s!"zip: malformed local extra field for {label}")
   let (localUncompSize, localCompSize, _) ←
     if stdLocalCompSize == val32Max || stdLocalUncompSize == val32Max then
       match parseZip64Extra localExtra stdLocalUncompSize stdLocalCompSize 0 with
