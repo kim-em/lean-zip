@@ -503,6 +503,36 @@ private def parseCentralDir (data : ByteArray)
     let stdCompSize := Binary.readUInt32LE data (pos + 20)
     let stdUncompSize := Binary.readUInt32LE data (pos + 24)
     let nameLen := (Binary.readUInt16LE data (pos + 28)).toNat
+    -- APPNOTE §4.4.10 `file name length`: every legitimate CD entry —
+    -- file or directory — has at least one byte of filename, so
+    -- `nameLen == 0` is structurally pathological and a parser-
+    -- differential smuggling vector. Lenient readers emit
+    -- `entry.path = ""` (an `Entry` with no useful identity, distinct
+    -- from every legitimate filename but not rejected), and
+    -- `Archive.extract` would then resolve `outDir / ""` — depending
+    -- on `System.FilePath` semantics — to either `outDir` itself or a
+    -- path with a trailing separator, which the downstream
+    -- `IO.FS.writeBinFile` / `createDir` calls surface as an unrelated
+    -- error. Reject at the first opportunity: this guard fires on the
+    -- 16-bit `nameLen` field alone, before any later field-read or
+    -- decode step, and before the sibling CD-parse path-safety /
+    -- NUL-byte filename guards below — so the failure attribution
+    -- pins cleanly to the structural anomaly rather than the
+    -- path-safety predicate (which would otherwise catch the empty
+    -- string via its empty-component rejection, but only if the
+    -- decode succeeds). Writer-side at
+    -- [Zip/Archive.lean:84](/home/kim/lean-zip/Zip/Archive.lean:84)
+    -- and :110 inherits the invariant from caller-supplied
+    -- `entry.path` (no emit-time enforcement); the CD-parse guard is
+    -- read-side only. Sibling of PR #1831 (CD-entry name NUL-byte
+    -- rejection) and PR #1840 (CD-entry path-safety rejection) on
+    -- the same filename-validation layer — the trio together closes
+    -- the "smuggled name" attack class on the `list` path
+    -- (zero-length, NUL-embedded, and path-traversal forms all
+    -- rejected at CD parse).
+    unless nameLen > 0 do
+      throw (IO.userError
+        s!"zip: CD entry has empty filename (nameLen=0) at CD offset {pos}")
     let extraLen := (Binary.readUInt16LE data (pos + 30)).toNat
     let commentLen := (Binary.readUInt16LE data (pos + 32)).toNat
     -- Per-entry disk-number sanity: lean-zip supports single-disk archives
