@@ -12,6 +12,7 @@ the guard.
 Outputs:
 - testdata/zip/malformed/eocd-zip64-override-nosentinel.zip
 - testdata/zip/malformed/zip64-eocd64-bad-recsize.zip
+- testdata/zip/malformed/zip64-extra-oversized-datasize.zip
 """
 import os, struct, zlib
 
@@ -115,4 +116,63 @@ write_fixture(
 write_fixture(
     os.path.join(OUT_DIR, "zip64-eocd64-bad-recsize.zip"),
     eocd64_record_size=0,
+)
+
+
+def make_lh_zip64(comp_sentinel=True):
+    # Local header whose `stdCompSize` is the ZIP64 sentinel so the file is
+    # parseable as a ZIP64-per-entry archive without needing an outer
+    # EOCD64.  The LH ZIP64 extra block matches the CD's oversized-dataSize
+    # layout so the LH strict-parse (if reached) sees the same anomaly.
+    comp = SENTINEL_32 if comp_sentinel else P
+    return struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034b50, 45, 0, 0, 0, 0,
+        CRC, comp, P, N, 20,
+    )
+
+
+def make_cd_zip64():
+    # CD entry whose `stdCompSize` is the ZIP64 sentinel.  nameLen=9,
+    # extraLen=20 (4-byte header + 16-byte dataSize-claimed block).
+    return struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014b50, (3 << 8) | 45, 45, 0, 0, 0, 0,
+        CRC, SENTINEL_32, P, N, 20, 0, 0, 0, 0, 0,
+    )
+
+
+def make_zip64_extra_oversized():
+    # APPNOTE §4.5.3: ZIP64 extra-field `Data Size` is exactly `8 * N`
+    # where N is the count of standard 32-bit fields set to the
+    # `0xFFFFFFFF` sentinel.  Here only `stdCompSize` is a sentinel, so N=1
+    # and the compliant `dataSize` is 8.  This fixture declares
+    # `dataSize=16` and supplies 8 bytes of attacker-chosen slack
+    # (`0xDEADBEEFCAFEBABE`) past the single legitimate `compSize` UInt64.
+    # A lenient parser silently discards the slack; a strict parser
+    # (post-PR #TBD) rejects with "malformed ZIP64 extra field".
+    return struct.pack(
+        "<HHQQ", 0x0001, 16, P, 0xDEADBEEFCAFEBABE,
+    )
+
+
+def write_zip64_extra_oversized_fixture(path):
+    lh = make_lh_zip64()
+    lh_ex = make_zip64_extra_oversized()
+    lhe = lh + NAME + lh_ex + PAYLOAD
+    cd = make_cd_zip64()
+    cd_ex = make_zip64_extra_oversized()
+    cde = cd + NAME + cd_ex
+    eocd = make_eocd(
+        cd_size=len(cde), cd_offset=len(lhe),
+        total_entries=1, entries_this_disk=1,
+        this_disk=0, disk_cd=0,
+    )
+    with open(path, "wb") as f:
+        f.write(lhe + cde + eocd)
+    print(f"wrote {path} ({os.path.getsize(path)} bytes)")
+
+
+write_zip64_extra_oversized_fixture(
+    os.path.join(OUT_DIR, "zip64-extra-oversized-datasize.zip"),
 )
