@@ -568,6 +568,39 @@ private def parseCentralDir (data : ByteArray)
         pure (match String.fromUTF8? nameBytes with
           | some s => s
           | none => Binary.fromLatin1 nameBytes)
+    -- APPNOTE §4.4.17 `file name`: reject CD entries whose decoded
+    -- `name` is path-unsafe per `Binary.isPathSafe` — absolute paths
+    -- (`/` prefix), backslashes anywhere (`\`), `..`/`.` components,
+    -- empty components (from `//`), and Windows drive-letter
+    -- components (`C:`, `D:`, …). The canonical list lives on
+    -- `Binary.isPathSafe` in `lean-zip-common`. Closes the
+    -- path-traversal / archive-slip smuggling dimension on the
+    -- `Archive.list` path, which pre-PR returned the `Entry` with
+    -- the unsafe `path` verbatim — exposing the full smuggled form
+    -- to callers who route on `entry.path` before any filesystem
+    -- I/O. The extract-time `Binary.isPathSafe` calls in
+    -- `Archive.extract` (around Zip/Archive.lean:1070 and :1074)
+    -- remain in place as defense-in-depth — unreachable for
+    -- CD-parseable archives via the public API, but kept for the
+    -- precedence-shift story. Mirror the trailing-slash carve-out
+    -- at Zip/Archive.lean:1068: directory entries end with `"/"`
+    -- and `isPathSafe` is checked on the slash-stripped form, so
+    -- legitimate directory entries (including the empty-component
+    -- case produced by stripping `"/"`) are not tripped. Run on the
+    -- decoded `String` (not raw `nameBytes`) since the unsafe-path
+    -- semantics live at the path level, not the byte level; quote
+    -- via `String.quote` so control bytes from the smuggled name
+    -- never reach logs unescaped. Writer-side at
+    -- Zip/Archive.lean:84 and :110 inherits the invariant from
+    -- caller-supplied `entry.path` (no emit-time enforcement); the
+    -- CD-parse guard is read-side only. Sibling of PR #1831
+    -- (CD-entry name NUL-byte rejection) on the same filename-
+    -- validation layer — the pair together closes the "smuggled
+    -- name" attack class (NUL byte + path-shape).
+    let checkPath := if name.endsWith "/" then (name.dropEnd 1).toString else name
+    unless Binary.isPathSafe checkPath do
+      throw (IO.userError
+        s!"zip: CD entry has unsafe path {name.quote} at CD offset {pos}")
     -- APPNOTE §4.4.3.2: `versionNeededToExtract` is a plain UInt16
     -- with no sentinel-gating; lean-zip handles only `20` (stored /
     -- deflate with ≤ 2 GiB sizes) and `45` (ZIP64). Any higher value
