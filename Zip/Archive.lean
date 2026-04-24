@@ -317,6 +317,24 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             unless eocd64RecordSize == 44 do
               throw (IO.userError
                 s!"zip: ZIP64 EOCD64 record-size mismatch (size={eocd64RecordSize}, expected 44 for v1 EOCD64)")
+            -- EOCD64 `versionMadeBy` spec-version byte upper-bound (APPNOTE
+            -- §4.4.2.1 / §4.4.2.2).  The lower byte of `versionMadeBy` is
+            -- the "version of the ZIP specification" in decimal-coded form;
+            -- APPNOTE defines values through 6.3 (encoded `63`). A lower
+            -- byte greater than `63` is either a forward-looking extension
+            -- that lean-zip does not support or a crafted smuggle targeting
+            -- the gap between parsers that validate the field and parsers
+            -- that don't.  Writer-side at
+            -- `Zip/Archive.lean:153` hard-codes `3 * 256 + 45 = 0x032D`, so
+            -- `versionMadeBy &&& 0xFF = 45 ≤ 63` holds trivially for every
+            -- lean-zip-produced archive.  Only the lower byte is checked:
+            -- the upper byte (host OS code, APPNOTE §4.4.2.2) is
+            -- open-ended and real-world producers emit a wide range of
+            -- values.  Per-entry sibling at CD+4 (issue #1812).
+            let eocd64VersionMadeBy := Binary.readUInt16LE data (bufPos + 12)
+            unless (eocd64VersionMadeBy &&& 0xFF) ≤ 63 do
+              throw (IO.userError
+                s!"zip: ZIP64 EOCD64 versionMadeBy spec-version byte too high (versionMadeBy={eocd64VersionMadeBy}, spec-version={eocd64VersionMadeBy &&& 0xFF}, max supported 63)")
             cdSize := (Binary.readUInt64LE data (bufPos + 40)).toNat
             cdOffset := (Binary.readUInt64LE data (bufPos + 48)).toNat
             totalEntries := (Binary.readUInt64LE data (bufPos + 32)).toNat

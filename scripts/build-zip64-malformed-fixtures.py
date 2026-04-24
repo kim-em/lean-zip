@@ -12,6 +12,7 @@ the guard.
 Outputs:
 - testdata/zip/malformed/eocd-zip64-override-nosentinel.zip
 - testdata/zip/malformed/zip64-eocd64-bad-recsize.zip
+- testdata/zip/malformed/zip64-eocd64-versionmadeby-too-high.zip
 - testdata/zip/malformed/zip64-extra-oversized-datasize.zip
 - testdata/zip/malformed/cd-extra-overrun-datasize.zip
 - testdata/zip/malformed/cd-zip64-extra-duplicate.zip
@@ -47,7 +48,7 @@ def make_cd():
     )
 
 
-def make_eocd64(cd_size, cd_offset, record_size=44):
+def make_eocd64(cd_size, cd_offset, record_size=44, version_made_by=45):
     # 56-byte EOCD64 record.  Stores real (non-sentinel) values for
     # all fields — we are forcing ZIP64 emission even though sizes fit
     # in 32 bits, so the reader's override branch fires.
@@ -56,11 +57,20 @@ def make_eocd64(cd_size, cd_offset, record_size=44):
     # directory record" field at bufPos+4.  Default `44` matches the v1
     # EOCD64 shape (56 bytes - 12 bytes for signature + size-field).
     # Override to forge a mismatch for the reader's record-size check.
+    #
+    # `version_made_by` is the APPNOTE §4.4.2 `versionMadeBy` field at
+    # bufPos+12.  Low byte encodes the ZIP spec version (APPNOTE-defined
+    # values 1.0 through 6.3, encoded `10`..`63`), high byte encodes the
+    # host OS code.  Default `45` matches lean-zip's writer emission
+    # (low byte 45 for spec version 4.5 = ZIP64; writer actually emits
+    # host OS 3 / `0x032D` but `45` suffices for fixtures not probing
+    # the host-OS byte).  Override to forge a low byte > 63 for the
+    # reader's versionMadeBy upper-bound check.
     return struct.pack(
         "<IQHHIIQQQQ",
         0x06064b50,
         record_size,
-        45, 45, 0, 0,  # versionMade, versionNeeded, thisDisk, diskCD
+        version_made_by, 45, 0, 0,  # versionMade, versionNeeded, thisDisk, diskCD
         1, 1,          # numEntriesThisDisk, totalEntries
         cd_size, cd_offset,
     )
@@ -86,14 +96,19 @@ def make_eocd(*,
     )
 
 
-def write_fixture(path, *, eocd64_record_size=44, **overrides):
+def write_fixture(path, *, eocd64_record_size=44, eocd64_version_made_by=45,
+                  **overrides):
     lh = make_lh()
     lhe = lh + NAME + PAYLOAD
     cd = make_cd()
     cde = cd + NAME
     cd_size = len(cde)
     cd_offset = len(lhe)
-    eocd64 = make_eocd64(cd_size, cd_offset, record_size=eocd64_record_size)
+    eocd64 = make_eocd64(
+        cd_size, cd_offset,
+        record_size=eocd64_record_size,
+        version_made_by=eocd64_version_made_by,
+    )
     eocd64_offset = len(lhe) + len(cde)
     locator = make_locator(eocd64_offset)
     eocd = make_eocd(**overrides)
@@ -119,6 +134,20 @@ write_fixture(
 write_fixture(
     os.path.join(OUT_DIR, "zip64-eocd64-bad-recsize.zip"),
     eocd64_record_size=0,
+)
+# EOCD64 `versionMadeBy` field (APPNOTE §4.4.2.1 / §4.4.2.2) carries
+# `0x0340` — low byte `0x40 = 64`, exceeding the APPNOTE-defined cap
+# of `63` (spec version 6.3).  High byte `3` = Unix host OS, matching
+# lean-zip's writer.  Standard EOCD keeps the sentinel layout so the
+# ZIP64-override sentinel check does not fire first.  Record-size is
+# the valid `44`, so the record-size check passes before the new
+# versionMadeBy guard fires.  Sibling of per-entry CD+4 fixture
+# `cd-entry-versionmadeby-too-high.zip` (issue #1812 / PR #1820):
+# together they close the versionMadeBy upper-bound dimension across
+# both ZIP layers (archive-level EOCD64 and per-entry CD+4).
+write_fixture(
+    os.path.join(OUT_DIR, "zip64-eocd64-versionmadeby-too-high.zip"),
+    eocd64_version_made_by=0x0340,
 )
 
 
