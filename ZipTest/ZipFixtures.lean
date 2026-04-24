@@ -331,6 +331,34 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract cdLhVersionPath cdLhVersionExtractDir)
     "LH versionNeededToExtract"
 
+  -- eocd-comment-trailing-garbage.zip: 128-byte archive = valid 122-byte
+  -- stored `hello.txt` archive + 6 bytes (`PK_INJ`) appended past the
+  -- EOCD comment (commentLength=0).  The backward EOCD scan still finds
+  -- the signature at its natural position, but `findEndOfCentralDir`'s
+  -- caller reconciles `pos + 22 + commentLength` with the archive size
+  -- and rejects the 6-byte surplus as a polyglot / smuggling attempt.
+  -- The trailing sequence deliberately avoids another EOCD signature
+  -- (`PK\\x05\\x06`) so the backward scan cannot be redirected to a
+  -- different candidate — `_` is 0x5F, not 0x05.
+  -- Regenerate (if ever lost): see `make_lh` / `make_cd` in
+  -- `scripts/build-cd-lh-mismatch.py` or this 2026 inline recipe:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p)
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,0,0,0,c,len(p),len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,0,0,0,0,c,len(p),len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("eocd-comment-trailing-garbage.zip","wb").write(lhe+cde+eocd+b"PK_INJ")'
+  let eocdTrailingData ← readFixture "zip/malformed/eocd-comment-trailing-garbage.zip"
+  let eocdTrailingPath ← writeFixtureTmp "eocd-comment-trailing-garbage.zip" eocdTrailingData
+  let eocdTrailingExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-eocd-comment-trailing-garbage-extract"
+  IO.FS.createDirAll eocdTrailingExtractDir
+  assertThrows "ZIP malformed (eocd-comment-trailing-garbage.zip)"
+    (Archive.extract eocdTrailingPath eocdTrailingExtractDir)
+    "EOCD trailing garbage"
+
   -- eocd-numentries-mismatch.zip: 122-byte stored ZIP whose EOCD declares
   -- totalEntries=2 while only one CD entry is actually present.  This is a
   -- CD-vs-EOCD anomaly (orthogonal to the CD/LH consistency family above):
@@ -384,6 +412,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "cd-lh-flags-mismatch.zip",
              "cd-lh-uncompsize-mismatch.zip", "cd-lh-crc-mismatch.zip",
              "cd-lh-version-mismatch.zip",
+             "eocd-comment-trailing-garbage.zip",
              "eocd-numentries-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
@@ -397,6 +426,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-cd-lh-uncompsize-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-crc-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-version-mismatch-extract",
+             "/tmp/lean-zip-fixture-eocd-comment-trailing-garbage-extract",
              "/tmp/lean-zip-fixture-eocd-numentries-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
