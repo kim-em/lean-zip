@@ -55,7 +55,7 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
     )
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
-            cd_mod_time=0, cd_mod_date=0):
+            cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -63,6 +63,11 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # `cd_mod_time` / `cd_mod_date` default to `0` — see the parallel
     # defaults on `make_lh` above.  Only `cd-lh-modtime-mismatch.zip`
     # exercises the non-default branch.
+    # `local_hdr_offset` defaults to `0` (legitimate LH-at-file-start
+    # layout).  The default is load-bearing for every fixture whose LH
+    # sits at file offset 0; only
+    # `cd-entry-localoffset-past-cdstart.zip` exercises the non-default
+    # branch.
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
@@ -81,7 +86,7 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
         disk_number_start,  # disk number start (CD offset 34, UInt16)
         0,           # internal attrs
         0,           # external attrs
-        0,           # local header offset
+        local_hdr_offset,  # local header offset (CD offset 42, UInt32)
     )
 
 def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0,
@@ -116,6 +121,7 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           lh_mod_time=0, lh_mod_date=0,
           cd_mod_time=0, cd_mod_date=0,
           cd_disk_number_start=0,
+          cd_local_hdr_offset=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
@@ -123,7 +129,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
-                 cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date)
+                 cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
+                 local_hdr_offset=cd_local_hdr_offset)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -271,4 +278,25 @@ write(
     os.path.join(OUT_DIR, "cd-version-needed-too-high.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_version=51, cd_version=51,
+)
+# CD-parse per-entry `localOffset + 30 <= cdOffset` archive-layout
+# anomaly.  The LH+data sits at file offset 0 (length 45 = 30-byte
+# header + 9-byte name + 6-byte payload).  The CD starts at file offset
+# 45 (cdOffset=45).  The CD entry's `localOffset` field (CD +42, UInt32)
+# is crafted to 50 — strictly greater than `cdOffset - 30 = 15`, so the
+# new check `localOff + 30 <= cdOffset` (50+30=80 > 45) fires.  The
+# late `assertSpanInFile` guard in `readEntryData` would accept it
+# (50+30=80 <= fileSize=122), so the new CD-parse check is the
+# only gate that catches this construction on the `Archive.list` path
+# and is what attributes the fault to CD parse on the extract path.
+# All other CD/LH fields are internally consistent (stock hello.txt
+# stored entry, versionNeeded=20, method=0, no ZIP64) so no sibling
+# guard fires first.  Companion to the archive-level sibling fixture
+# `cd-extends-past-eocd.zip` (cdOffset + cdSize past EOCD): together
+# they close the full archive-layout invariant surface — macro
+# (CD fits before EOCD) and micro (LH fits before CD).
+write(
+    os.path.join(OUT_DIR, "cd-entry-localoffset-past-cdstart.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    cd_local_hdr_offset=50,
 )
