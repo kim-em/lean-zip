@@ -509,6 +509,23 @@ private def parseCentralDir (data : ByteArray)
         pure (match String.fromUTF8? nameBytes with
           | some s => s
           | none => Binary.fromLatin1 nameBytes)
+    -- APPNOTE §4.4.5: the compression `method` field is a plain UInt16
+    -- with no sentinel-gating, so the allowlist check is safe to run
+    -- pre-ZIP64-resolution. lean-zip implements only method 0 (stored)
+    -- and method 8 (deflate); any other value triggers the late
+    -- `"unsupported method"` guard in `readEntryData`, but only on the
+    -- `Archive.extract` path. Reject early here so `Archive.list` also
+    -- catches the anomaly and so the error message attributes the
+    -- fault to the CD-parse stage. Writer-side confirmation: `create`
+    -- emits only `method == 0` or `method == 8`
+    -- (see `let method : UInt16 := if useDeflate then 8 else 0` at
+    -- Zip/Archive.lean:192). The late `readEntryData` throw stays in
+    -- place as defense-in-depth — unreachable for CD-parseable archives
+    -- via the public API, but kept so the precedence-shift story is
+    -- grep-discoverable.
+    unless method == 0 ∨ method == 8 do
+      throw (IO.userError
+        s!"zip: unsupported compression method {method} for {name} (lean-zip supports method 0 (stored) and method 8 (deflate))")
     -- Structural check runs unconditionally (APPNOTE §4.5) so the
     -- no-ZIP64-sentinel path also rejects extra-data whose sub-field
     -- declared `dataSize` overruns the blob. Without this, a malformed

@@ -21,6 +21,7 @@ Outputs:
 - testdata/zip/malformed/cd-entry-disknum-mismatch.zip
 - testdata/zip/malformed/cd-lh-modtime-mismatch.zip
 - testdata/zip/malformed/cd-stored-size-mismatch.zip
+- testdata/zip/malformed/cd-bad-method-early.zip
 """
 import os, struct, zlib
 
@@ -237,4 +238,18 @@ write(
     os.path.join(OUT_DIR, "cd-stored-size-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_uncomp=P + 1, cd_uncomp=P + 1,
+)
+# CD-parse method allowlist anomaly: both CD and LH advertise
+# `method=6` (imploded — deprecated in PKZIP 2.0, 1993).  lean-zip's
+# allowlist is `{0, 8}`; any other value is rejected at CD parse time
+# with `"unsupported compression method"`.  Companion to
+# `bad-method.zip` (LH/CD method=14, LZMA): both fixtures trip the
+# same CD-parse guard, but the distinct method values let the
+# paired-review distinguish which fixture fired.  The payload bytes
+# are the literal `b"hello\n"` regardless of the method field —
+# the guard rejects before any payload decode is attempted, so the
+# bytes are never interpreted as imploded data.
+write(
+    os.path.join(OUT_DIR, "cd-bad-method-early.zip"),
+    lh_method=6, cd_method=6, lh_comp=P, cd_comp=P,
 )
