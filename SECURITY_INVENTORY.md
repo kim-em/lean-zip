@@ -249,6 +249,16 @@ Summary — what this pattern catches and what it does not:
     `testdata/zip/interop/go-zip64.zip`). Closes the
     parser-differential smuggling vector where one reader trusts the
     standard EOCD and another trusts the ZIP64 override
+  - ZIP64 EOCD64 self-declared record-size check — PR #TBD
+    (`testdata/zip/malformed/zip64-eocd64-bad-recsize.zip`) rejects
+    archives whose EOCD64 `size of this record` field (APPNOTE §4.3.14,
+    at `bufPos + 4`) is not exactly `44` — the v1 EOCD64 shape lean-zip
+    produces and consumes. lean-zip reads the EOCD64 at fixed per-field
+    offsets from a hard-coded 56-byte layout; a stricter parser that
+    trusts the self-declared length would read past or short of that,
+    yielding a parser-differential smuggling vector (writer-side at
+    [Zip/Archive.lean:142](/home/kim/lean-zip/Zip/Archive.lean:142)
+    hard-codes `44`)
   - CD-vs-LH `versionNeededToExtract` downgrade check — PR #1736
     (`testdata/zip/malformed/cd-lh-version-mismatch.zip`) rejects LH
     claiming a higher version than CD (CD > LH is legitimate per
@@ -650,13 +660,14 @@ to be silently skipped.
 | [testdata/zip/malformed/eocd-disknum-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-disknum-mismatch.zip) | 122 B | CD-vs-EOCD disk-number consistency check at [Zip/Archive.lean:378](/home/kim/lean-zip/Zip/Archive.lean:378) — *"EOCD disk-number mismatch"* (standard EOCD `diskWhereCDStarts=1`; lean-zip supports single-disk archives only, so any nonzero value in either disk-number field is rejected post-ZIP64-override) | #1742 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/eocd-numentries-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-numentries-mismatch.zip) | 122 B | CD-vs-EOCD `totalEntries` consistency check at [Zip/Archive.lean:454](/home/kim/lean-zip/Zip/Archive.lean:454) — *"EOCD totalEntries mismatch"* (EOCD declares 2 entries, CD has 1 — parser's trailing-signature loop would silently accept the short list without this guard) | #1733 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip) | 122 B | EOCD-internal `numEntriesThisDisk` vs. `totalEntries` consistency check at [Zip/Archive.lean:388](/home/kim/lean-zip/Zip/Archive.lean:388) — *"EOCD numEntriesThisDisk mismatch"* (`numEntriesThisDisk=2`, `totalEntries=1`; single-disk archives must have the sibling EOCD entry-count fields equal, and the writer emits them at the same value) | #1752 | other (CD/EOCD consistency) |
-| [testdata/zip/malformed/eocd-zip64-override-nosentinel.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-zip64-override-nosentinel.zip) | 198 B | ZIP64/standard-EOCD override sentinel check at [Zip/Archive.lean:307](/home/kim/lean-zip/Zip/Archive.lean:307) — *"EOCD ZIP64-override mismatch"* (standard-EOCD `cdOffset=42`, ZIP64 `cdOffset=45`; standard value is neither the APPNOTE §4.3.16 sentinel `0xFFFFFFFF` nor a numeric match with the ZIP64 override — a parser-differential smuggling vector) | #1745 | other (ZIP64 consistency) |
+| [testdata/zip/malformed/eocd-zip64-override-nosentinel.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-zip64-override-nosentinel.zip) | 198 B | ZIP64/standard-EOCD override sentinel check at [Zip/Archive.lean:327](/home/kim/lean-zip/Zip/Archive.lean:327) — *"EOCD ZIP64-override mismatch"* (standard-EOCD `cdOffset=42`, ZIP64 `cdOffset=45`; standard value is neither the APPNOTE §4.3.16 sentinel `0xFFFFFFFF` nor a numeric match with the ZIP64 override — a parser-differential smuggling vector) | #1745 | other (ZIP64 consistency) |
 | [testdata/zip/malformed/invalid-utf8-with-flag.zip](/home/kim/lean-zip/testdata/zip/malformed/invalid-utf8-with-flag.zip) | 120 B | UTF-8-flagged entry name strict parse at [Zip/Archive.lean:426](/home/kim/lean-zip/Zip/Archive.lean:426) — *"invalid UTF-8 in entry name (UTF-8 flag set)"* | `481e562` | partial-decoder panic |
 | [testdata/zip/malformed/no-eocd.zip](/home/kim/lean-zip/testdata/zip/malformed/no-eocd.zip) | 44 B | EOCD-scan failure at [Zip/Archive.lean:640](/home/kim/lean-zip/Zip/Archive.lean:640) — *"cannot find end of central directory"* | `481e562` | other (framing) |
 | [testdata/zip/malformed/oversized-compressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-compressed-size.zip) | 122 B | `assertSpanInFile` for the compressed payload at [Zip/Archive.lean:687](/home/kim/lean-zip/Zip/Archive.lean:687) — *"local data span"* | #1497 | oversized allocation |
 | [testdata/zip/malformed/oversized-zip64-compressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-zip64-compressed-size.zip) | 134 B | `assertSpanInFile` for the compressed payload at [Zip/Archive.lean:687](/home/kim/lean-zip/Zip/Archive.lean:687) — *"local data span"* (ZIP64 extra resolves an exabyte-scale `compressedSize`) | #1543 | oversized allocation |
 | [testdata/zip/malformed/oversized-zip64-uncompressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-zip64-uncompressed-size.zip) | 134 B | Strict LH ZIP64-extra parse at [Zip/Archive.lean:699](/home/kim/lean-zip/Zip/Archive.lean:699) — *"truncated ZIP64 local extra field"* (CD claims `uncompressedSize = 0xFFFFFFFF` but LH omits the ZIP64 block) | #1544 | oversized allocation |
 | [testdata/zip/malformed/too-short.zip](/home/kim/lean-zip/testdata/zip/malformed/too-short.zip) | 10 B | EOCD-scan failure at [Zip/Archive.lean:640](/home/kim/lean-zip/Zip/Archive.lean:640) — *"cannot find end of central directory"* | `481e562` | other (framing) |
+| [testdata/zip/malformed/zip64-eocd64-bad-recsize.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-eocd64-bad-recsize.zip) | 198 B | ZIP64 EOCD64 self-declared record-size check at [Zip/Archive.lean:307](/home/kim/lean-zip/Zip/Archive.lean:307) — *"ZIP64 EOCD64 record-size mismatch"* (EOCD64 `size of this record` field at `bufPos + 4` carries `0` instead of the required `44` for a v1 EOCD64; lean-zip reads the record at fixed per-field offsets from a hard-coded 56-byte layout, while a stricter parser that trusts the self-declared length would read past or short of that — a parser-differential smuggling vector) | #TBD | other (ZIP64 consistency) |
 
 ## Required Maintenance Rule
 

@@ -208,6 +208,14 @@ After landing the builder and fixtures, update:
    filenames to the cleanup loop (`for f in #[...] do`, `for d in
    #[...] do`). This is where #1544's rebase hit a conflict — the
    cleanup lists are hot.
+
+   **maxRecDepth cap.** The cleanup `for` loops use large array
+   literals that trip Lean's default `maxRecDepth` once they cross
+   ~25 entries. Symptom: `maximum recursion depth has been reached`
+   at the `for` line of the cleanup loop. Fix: add
+   `set_option maxRecDepth 2048` at file scope — the same setting
+   `ZipTest/Helpers.lean` and `ZipTest/Gzip.lean` already carry.
+   First hit by PR #1761 (ZIP64 EOCD64 record-size).
 2. **Checklist** (`plans/track-e-current-audit-checklist.md`) — move
    the bullet from `- [ ]` to `- [x]` and add the fixture names +
    closing PR number in parentheses.

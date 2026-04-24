@@ -11,6 +11,7 @@ the guard.
 
 Outputs:
 - testdata/zip/malformed/eocd-zip64-override-nosentinel.zip
+- testdata/zip/malformed/zip64-eocd64-bad-recsize.zip
 """
 import os, struct, zlib
 
@@ -42,14 +43,19 @@ def make_cd():
     )
 
 
-def make_eocd64(cd_size, cd_offset):
+def make_eocd64(cd_size, cd_offset, record_size=44):
     # 56-byte EOCD64 record.  Stores real (non-sentinel) values for
     # all fields — we are forcing ZIP64 emission even though sizes fit
     # in 32 bits, so the reader's override branch fires.
+    #
+    # `record_size` is the APPNOTE §4.3.14 "size of zip64 end of central
+    # directory record" field at bufPos+4.  Default `44` matches the v1
+    # EOCD64 shape (56 bytes - 12 bytes for signature + size-field).
+    # Override to forge a mismatch for the reader's record-size check.
     return struct.pack(
         "<IQHHIIQQQQ",
         0x06064b50,
-        44,            # recordSize = 56 - 12
+        record_size,
         45, 45, 0, 0,  # versionMade, versionNeeded, thisDisk, diskCD
         1, 1,          # numEntriesThisDisk, totalEntries
         cd_size, cd_offset,
@@ -76,14 +82,14 @@ def make_eocd(*,
     )
 
 
-def write_fixture(path, **overrides):
+def write_fixture(path, *, eocd64_record_size=44, **overrides):
     lh = make_lh()
     lhe = lh + NAME + PAYLOAD
     cd = make_cd()
     cde = cd + NAME
     cd_size = len(cde)
     cd_offset = len(lhe)
-    eocd64 = make_eocd64(cd_size, cd_offset)
+    eocd64 = make_eocd64(cd_size, cd_offset, record_size=eocd64_record_size)
     eocd64_offset = len(lhe) + len(cde)
     locator = make_locator(eocd64_offset)
     eocd = make_eocd(**overrides)
@@ -100,4 +106,13 @@ os.makedirs(OUT_DIR, exist_ok=True)
 write_fixture(
     os.path.join(OUT_DIR, "eocd-zip64-override-nosentinel.zip"),
     cd_offset=42,
+)
+# EOCD64 `size of this record` field (APPNOTE §4.3.14) carries the
+# value `0` instead of the expected `44` for a v1 EOCD64.  Standard
+# EOCD keeps the sentinel layout so the ZIP64-override sentinel check
+# does not fire first — the record-size check must run on the EOCD64
+# branch regardless of whether any override mismatch is present.
+write_fixture(
+    os.path.join(OUT_DIR, "zip64-eocd64-bad-recsize.zip"),
+    eocd64_record_size=0,
 )

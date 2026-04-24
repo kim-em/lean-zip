@@ -247,7 +247,13 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
     standard-EOCD disk-number slots, not sentinels). A non-sentinel standard
     value combined with a numerically differing ZIP64 value is a
     parser-differential smuggling vector: one parser trusts the standard
-    EOCD, another trusts the ZIP64 override. -/
+    EOCD, another trusts the ZIP64 override.
+
+    Also raises an `IO.userError` containing
+    `"ZIP64 EOCD64 record-size mismatch"` when the EOCD64 record's
+    self-declared `size of zip64 end of central directory record` field
+    (APPNOTE §4.3.14, at `bufPos + 4`) is not exactly `44` — the v1
+    EOCD64 shape lean-zip produces and consumes. -/
 private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
     : IO (Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat)) := do
   -- Find standard EOCD
@@ -287,6 +293,20 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
         let bufPos := eocd64Offset - baseOffset
         if bufPos + 56 <= data.size then
           if Binary.readUInt32LE data bufPos == sigEOCD64 then
+            -- EOCD64 self-declared record-size sanity (APPNOTE §4.3.14).
+            -- For the v1 EOCD64 without an extensible data sector — the
+            -- only shape lean-zip produces or consumes — this field must
+            -- equal `SizeOfFixedFields + SizeOfVariableData - 12`, i.e.
+            -- `44` (56 fixed bytes minus the 12 bytes of signature +
+            -- size field).  Writer-side confirmation:
+            -- `Zip/Archive.lean:142` hard-codes `44`.  A non-44 value is
+            -- a parser-differential smuggling vector: lean-zip uses the
+            -- fixed 56-byte layout, while a stricter parser trusts the
+            -- self-declared length and reads past or short of that.
+            let eocd64RecordSize := Binary.readUInt64LE data (bufPos + 4)
+            unless eocd64RecordSize == 44 do
+              throw (IO.userError
+                s!"zip: ZIP64 EOCD64 record-size mismatch (size={eocd64RecordSize}, expected 44 for v1 EOCD64)")
             cdSize := (Binary.readUInt64LE data (bufPos + 40)).toNat
             cdOffset := (Binary.readUInt64LE data (bufPos + 48)).toNat
             totalEntries := (Binary.readUInt64LE data (bufPos + 32)).toNat
