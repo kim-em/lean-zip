@@ -118,9 +118,20 @@ private def hdrPrefix   := (345, 155)
                         then recordEnd - 1 else recordEnd
                       else recordEnd
       let valueBytes := data.extract (eqPos + 1) valueEnd
-      -- Skip records with invalid UTF-8 rather than panicking
+      -- Skip records with invalid UTF-8 rather than panicking.
+      -- Also skip records whose raw key or value bytes contain NUL (0x00):
+      -- `String.fromUTF8?` accepts U+0000 as valid UTF-8, so without this
+      -- guard an attacker-controlled PAX record `path=a\x00b/c` would
+      -- decode to a `"path"` override whose value smuggles a NUL past
+      -- `Binary.isPathSafe` into `Tar.extract`, where POSIX `open`
+      -- truncates at NUL and the file lands at the short prefix while
+      -- `Tar.list` callers see the full embedded string — a classic
+      -- parser-differential / filesystem-truncation smuggle vector,
+      -- sibling to the ZIP CD name NUL guard at Zip/Archive.lean:630.
       if let (some key, some value) := (String.fromUTF8? keyBytes, String.fromUTF8? valueBytes) then
-        records := records.push (key, value)
+        if (keyBytes.findIdx? (· == 0)).isNone
+            && (valueBytes.findIdx? (· == 0)).isNone then
+          records := records.push (key, value)
     pos := recordEnd
   return records
 
