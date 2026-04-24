@@ -350,8 +350,12 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             unless stdNumEntriesThisDisk16 == val16Max ∨ stdNumEntriesThisDisk16.toNat == numEntriesThisDisk do
               throw (IO.userError
                 s!"zip: EOCD ZIP64-override mismatch: standard EOCD numEntriesThisDisk={stdNumEntriesThisDisk16}, ZIP64 numEntriesThisDisk={numEntriesThisDisk} (expected sentinel {val16Max} or numeric match)")
-  return some (pos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
-    numEntriesThisDisk)
+  -- Return the EOCD signature position as a file-absolute offset (by
+  -- adding `baseOffset` to the buffer-relative index).  Callers —
+  -- notably `listFromHandle` — cross-check this against the
+  -- file-absolute `cdOffset + cdSize` archive-layout invariant.
+  return some (baseOffset + pos, cdOffset, cdSize, totalEntries, numberOfThisDisk,
+    diskWhereCDStarts, numEntriesThisDisk)
 
 /-- Validate the outer sub-field layout of a CD/LH extra-data blob
     (APPNOTE §4.5 *"Extensible Data Fields"*): each sub-field has a
@@ -762,10 +766,23 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   let tailStart := fileSize - tailSize
   Handle.seek h tailStart.toUInt64
   let tail ← readExact h tailSize "EOCD tail"
-  let some (_, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
+  let some (eocdPos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
       numEntriesThisDisk) ←
       findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
+  -- Archive-layout envelope (APPNOTE §4.3.6): the declared CD region
+  -- must end at or before the standard EOCD signature.  Enforced
+  -- before the weaker `cdOffset + cdSize ≤ fileSize` guard — the
+  -- former subsumes the latter (`eocdPos ≤ fileSize - 22`) but the
+  -- redundancy is harmless and keeps the downstream span-in-file
+  -- lemmas named on `fileSize`.  Closes a parser-differential
+  -- smuggling vector where the declared CD region overshoots the
+  -- EOCD (and, in the ZIP64 case, the EOCD64 / EOCD64 Locator),
+  -- letting a lenient parser pick up CD signatures inside the
+  -- overlapping EOCD bytes.
+  unless cdOffset + cdSize ≤ eocdPos do
+    throw (IO.userError
+      s!"zip: central directory extends past EOCD (cdOffset={cdOffset}, cdSize={cdSize}, eocdPos={eocdPos})")
   unless cdOffset + cdSize <= fileSize do
     throw (IO.userError "zip: central directory extends beyond file")
   if maxCentralDirSize > 0 && cdSize > maxCentralDirSize then

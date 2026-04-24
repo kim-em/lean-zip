@@ -22,6 +22,7 @@ Outputs:
 - testdata/zip/malformed/cd-lh-modtime-mismatch.zip
 - testdata/zip/malformed/cd-stored-size-mismatch.zip
 - testdata/zip/malformed/cd-bad-method-early.zip
+- testdata/zip/malformed/cd-extends-past-eocd.zip
 """
 import os, struct, zlib
 
@@ -117,7 +118,13 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_mod_time=0, cd_mod_date=0,
           cd_disk_number_start=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
-          eocd_entries_this_disk=None, eocd_total_entries=1):
+          eocd_entries_this_disk=None, eocd_total_entries=1,
+          eocd_cd_size_override=None):
+    # `eocd_cd_size_override`: when non-None, overrides the EOCD-declared
+    # `cdSize` field (bytes 12-16 of the EOCD).  Default `None` preserves
+    # byte-identity with the pre-override fixtures: the EOCD declares the
+    # true CD size `len(cde)`.  Only `cd-extends-past-eocd.zip` exercises
+    # the non-default branch.
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
                  lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date)
     lhe = lh + NAME + PAYLOAD
@@ -125,7 +132,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date)
     cde = cd + NAME
-    eocd = make_eocd(len(cde), len(lhe),
+    declared_cd_size = eocd_cd_size_override if eocd_cd_size_override is not None else len(cde)
+    eocd = make_eocd(declared_cd_size, len(lhe),
                      disk_start=eocd_disk_start,
                      num_this_disk=eocd_num_this_disk,
                      entries_this_disk=eocd_entries_this_disk,
@@ -252,4 +260,22 @@ write(
 write(
     os.path.join(OUT_DIR, "cd-bad-method-early.zip"),
     lh_method=6, cd_method=6, lh_comp=P, cd_comp=P,
+)
+# Archive-layout envelope anomaly: the EOCD declares `cdSize = len(cde) + 22`
+# so the declared CD region overshoots the EOCD record by exactly the 22-byte
+# std EOCD.  The CD/LH bytes on disk are well-formed (stock `hello.txt`
+# stored entry); the anomaly is entirely in the EOCD-declared `cdSize`.
+# APPNOTE §4.3.6 lists the archive layout `[local file header 1] ... [central
+# directory] [end of central directory record]` — the declared CD region must
+# end at or before `eocdPos`.  Overshooting gives a parser-differential
+# smuggling vector: a lenient parser walks the declared CD region and picks
+# up signatures inside the overlapping EOCD bytes.  `cdOffset + cdSize`
+# equals `fileSize` here so the legacy `≤ fileSize` check still passes —
+# only the new `≤ eocdPos` guard at `listFromHandle` fires.  Companion to
+# `cd-past-eof.zip` (CD region extends past end-of-file) and
+# `eocd-numentries-mismatch.zip` (CD parser short-reads the declared count).
+write(
+    os.path.join(OUT_DIR, "cd-extends-past-eocd.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    eocd_cd_size_override=len(make_cd(0, P, P) + NAME) + 22,
 )

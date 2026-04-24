@@ -82,6 +82,25 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (do let _ ← Archive.list cdPastPath; pure ())
     "central directory"
 
+  -- cd-extends-past-eocd.zip: 122-byte stored ZIP whose EOCD declares
+  -- `cdSize = len(cde) + 22 = 77` so the declared CD region overshoots
+  -- the EOCD signature position by exactly the 22-byte EOCD record.
+  -- `cdOffset + cdSize == fileSize == 122` — the legacy
+  -- `central directory extends beyond file` guard still passes — but the
+  -- new archive-layout envelope guard (`cdOffset + cdSize ≤ eocdPos`)
+  -- fires at `listFromHandle`.  Closes the parser-differential
+  -- archive-layout smuggling vector where a lenient parser walks the
+  -- declared CD region past `eocdPos` and picks up signatures inside the
+  -- overlapping EOCD bytes.  Sibling of `cd-past-eof.zip`
+  -- (`central directory` substring, `≤ fileSize` check) and
+  -- `eocd-numentries-mismatch.zip` (CD short-read against declared count).
+  let cdExtendsPastEocdData ← readFixture "zip/malformed/cd-extends-past-eocd.zip"
+  let cdExtendsPastEocdPath ←
+    writeFixtureTmp "cd-extends-past-eocd.zip" cdExtendsPastEocdData
+  assertThrows "ZIP malformed (cd-extends-past-eocd.zip)"
+    (do let _ ← Archive.list cdExtendsPastEocdPath; pure ())
+    "central directory extends past EOCD"
+
   let badCrcZipData ← readFixture "zip/malformed/bad-crc.zip"
   let badCrcZipPath ← writeFixtureTmp "bad-crc.zip" badCrcZipData
   let badCrcExtractDir : System.FilePath := "/tmp/lean-zip-fixture-bad-crc-extract"
@@ -636,7 +655,8 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     "unsafe path"
   -- Clean up temp files
   for f in #["go-test.zip", "go-zip64.zip", "go-unix.zip", "go-crc32-not-streamed.zip",
-             "too-short.zip", "no-eocd.zip", "cd-past-eof.zip", "bad-crc.zip",
+             "too-short.zip", "no-eocd.zip", "cd-past-eof.zip",
+             "cd-extends-past-eocd.zip", "bad-crc.zip",
              "bad-method.zip", "oversized-compressed-size.zip",
              "oversized-zip64-compressed-size.zip",
              "oversized-zip64-uncompressed-size.zip",
