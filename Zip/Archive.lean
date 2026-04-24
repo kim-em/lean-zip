@@ -509,6 +509,26 @@ private def parseCentralDir (data : ByteArray)
         pure (match String.fromUTF8? nameBytes with
           | some s => s
           | none => Binary.fromLatin1 nameBytes)
+    -- APPNOTE §4.4.3.2: `versionNeededToExtract` is a plain UInt16
+    -- with no sentinel-gating; lean-zip handles only `20` (stored /
+    -- deflate with ≤ 2 GiB sizes) and `45` (ZIP64). Any higher value
+    -- indicates an unsupported feature (Deflate64, BZIP2, AES,
+    -- LZMA/PPMd/XZ — see APPNOTE §4.4.3.2 for the full taxonomy), so
+    -- reject at CD parse time. The existing CD/LH downgrade check in
+    -- `readEntryData` (`"LH versionNeededToExtract exceeds CD"`, PR
+    -- #1736) is one-sided and lets crafted archives with both sides
+    -- claiming e.g. `51` (AES) through — this upper bound closes that
+    -- gap. Writer-side confirmation: `writeLocalHeader` at
+    -- Zip/Archive.lean:90 and `writeCentralHeader` at :117 both emit
+    -- `if z64 then 45 else 20`, so legitimate archives never exceed
+    -- this threshold. Sibling of PR #1801 (method allowlist): both
+    -- guards are independent dimensions of the CD-parse early-reject
+    -- story — method 0 with `versionNeeded = 51` is caught here but
+    -- not by the allowlist; method 14 with `versionNeeded = 20` is
+    -- caught by the allowlist but not here.
+    unless versionNeeded ≤ 45 do
+      throw (IO.userError
+        s!"zip: unsupported versionNeededToExtract ({versionNeeded}) for {name} at CD offset {pos}; lean-zip supports values up to 45 (ZIP64)")
     -- APPNOTE §4.4.5: the compression `method` field is a plain UInt16
     -- with no sentinel-gating, so the allowlist check is safe to run
     -- pre-ZIP64-resolution. lean-zip implements only method 0 (stored)

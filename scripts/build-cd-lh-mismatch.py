@@ -253,3 +253,22 @@ write(
     os.path.join(OUT_DIR, "cd-bad-method-early.zip"),
     lh_method=6, cd_method=6, lh_comp=P, cd_comp=P,
 )
+# CD-parse per-entry `versionNeededToExtract` upper-bound anomaly: both
+# CD and LH advertise `versionNeededToExtract=51` (AES per APPNOTE
+# §4.4.3.2).  lean-zip handles only `20` (stored/deflate) and `45`
+# (ZIP64); any higher value signals an unsupported feature (Deflate64
+# `21`, BZIP2 `46`, AES `51`, LZMA/PPMd/XZ `63`).  `parseCentralDir`
+# rejects at CD parse time with
+# `"unsupported versionNeededToExtract"` before the one-sided CD/LH
+# downgrade check (`"LH versionNeededToExtract exceeds CD"`) — that
+# check only catches LH > CD, so CD=LH=51 would otherwise pass it.
+# Complements the allowlist/stored-method/version-downgrade family:
+# `cd-bad-method-early.zip` (method allowlist), `cd-stored-size-mismatch.zip`
+# (method=0 size invariant), `cd-lh-version-mismatch.zip` (LH>CD
+# downgrade), and now this fixture close the per-entry CD-parse
+# smuggling surface.
+write(
+    os.path.join(OUT_DIR, "cd-version-needed-too-high.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_version=51, cd_version=51,
+)
