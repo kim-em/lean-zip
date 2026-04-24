@@ -36,11 +36,36 @@
 #       The marker suppresses the warning at line granularity; it
 #       does not affect passes (a) or (b).
 #
-# Why (a)/(b) are hard and (c) is soft: (a)/(b) are unambiguous
-# correctness failures — either the anchor is live or the audit
-# trail is broken. (c) is a best-effort detector for stale line
-# numbers; false positives happen when the surrounding prose uses
-# phrasing that never appeared verbatim in the code.
+#   (d) Unresolved-placeholder-PR scan (WARNING, not fatal).
+#       Scans the inventory line-by-line for `#TBD` or the phrase
+#       `this PR` and emits a warning for each occurrence. A feature
+#       worker does not know the landing PR number at write time
+#       (assigned only by `coordination create-pr`) and typically
+#       leaves `#TBD` or `— this PR` / `by this PR` / `See this PR`
+#       as a placeholder, expecting a follow-up sweep. Empirically,
+#       the sweep is often missed; this pass flags stale
+#       placeholders so they can be substituted with the real PR
+#       number via `git blame` + `gh pr list --search <sha>`.
+#
+#       The phrase `this PR` is matched case-sensitively but is
+#       deliberately false-positive-tolerant: prose like "has this
+#       PR" or "in this PR" would also warn. Every observed
+#       inventory use of the phrase to date has been a placeholder,
+#       so the tolerance is acceptable. `#TBD` is matched literally
+#       and has no natural-prose ambiguity.
+#
+#       Pass (d) honours the same `<!-- drift-detector: ... -->`
+#       opt-out marker as pass (c), in case a future legitimate
+#       prose use of "this PR" needs to be exempted.
+#
+# Why (a)/(b) are hard and (c)/(d) are soft: (a)/(b) are
+# unambiguous correctness failures — either the anchor is live or
+# the audit trail is broken. (c) is a best-effort detector for
+# stale line numbers; false positives happen when the surrounding
+# prose uses phrasing that never appeared verbatim in the code.
+# (d) is soft because a stale placeholder is a documentation
+# drift, not a correctness failure — the inventory still points at
+# the right file, just with a missing PR cross-ref.
 #
 # The script is opt-in tooling and is NOT wired into `lake exe test`
 # or `.github/` workflows. Run it manually after any change that
@@ -232,9 +257,33 @@ while IFS=: read -r srcln path lineno; do
 done < <(grep -noE "$ZIP_RE" "$INVENTORY" | sort -u || true)
 
 # ---------------------------------------------------------------------------
+# Pass (d): unresolved-placeholder-PR scan (warnings only).
+# ---------------------------------------------------------------------------
+placeholder_checks=0
+
+# Collect every `#TBD` and every `this PR` occurrence with line
+# number. `grep -no` emits `<lineno>:<match>` per occurrence, so a
+# line with two matches (e.g. "filled inline in this PR. See this
+# PR.") is flagged twice — the intent is zero placeholders.
+while IFS=: read -r srcln _; do
+    [[ -z "$srcln" ]] && continue
+    placeholder_checks=$((placeholder_checks + 1))
+    prose=$(awk -v n="$srcln" 'NR==n{print; exit}' "$INVENTORY")
+    # Per-line opt-out: same `<!-- drift-detector: ... -->` marker
+    # as pass (c). Reserved for prose uses of "this PR" that are
+    # not placeholders.
+    if grep -Fq -- '<!-- drift-detector:' <<< "$prose"; then
+        continue
+    fi
+    prose_trim="${prose:0:140}"
+    echo "warning: $INVENTORY:$srcln contains unresolved placeholder-PR reference (\"#TBD\" or \"this PR\"); substitute with the real PR number via git blame + gh pr list --search. Line: $prose_trim" >&2
+    warnings=$((warnings + 1))
+done < <(grep -noE '#TBD|this PR' "$INVENTORY" || true)
+
+# ---------------------------------------------------------------------------
 # Summary.
 # ---------------------------------------------------------------------------
-echo "check-inventory-links.sh: checked $zip_checked unique line anchors, $fix_checked unique fixture paths, $quote_checks line-content heuristics (errors=$errors, warnings=$warnings)"
+echo "check-inventory-links.sh: checked $zip_checked unique line anchors, $fix_checked unique fixture paths, $quote_checks line-content heuristics, $placeholder_checks placeholder-PR occurrences (errors=$errors, warnings=$warnings)"
 
 if (( errors > 0 )); then
     exit 1
