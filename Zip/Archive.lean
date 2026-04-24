@@ -220,9 +220,10 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
 
 /-- Find the EOCD record in a (possibly tail-) buffer.
     `baseOffset` is the file-absolute byte offset where `data` starts (0 for full file).
-    Returns `(eocdPos, cdOffset, cdSize)` where cdOffset/cdSize are file-absolute. -/
+    Returns `(eocdPos, cdOffset, cdSize, totalEntries)` where cdOffset/cdSize are
+    file-absolute and totalEntries is the EOCD-advertised CD entry count. -/
 private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
-    : Option (Nat × Nat × Nat) := Id.run do
+    : Option (Nat × Nat × Nat × Nat) := Id.run do
   -- Find standard EOCD
   if data.size < 22 then return none
   let mut eocdPos : Option Nat := none
@@ -238,6 +239,7 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
   -- Read standard EOCD values (file-absolute)
   let mut cdSize := (Binary.readUInt32LE data (pos + 12)).toNat
   let mut cdOffset := (Binary.readUInt32LE data (pos + 16)).toNat
+  let mut totalEntries := (Binary.readUInt16LE data (pos + 10)).toNat
   -- Check for ZIP64 EOCD Locator (20 bytes before standard EOCD)
   if pos >= 20 then
     if Binary.readUInt32LE data (pos - 20) == sigLocator64 then
@@ -249,7 +251,8 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
           if Binary.readUInt32LE data bufPos == sigEOCD64 then
             cdSize := (Binary.readUInt64LE data (bufPos + 40)).toNat
             cdOffset := (Binary.readUInt64LE data (bufPos + 48)).toNat
-  return some (pos, cdOffset, cdSize)
+            totalEntries := (Binary.readUInt64LE data (bufPos + 32)).toNat
+  return some (pos, cdOffset, cdSize, totalEntries)
 
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
     Only reads fields whose standard values are 0xFFFFFFFF. Returns `none` if a required field
@@ -290,7 +293,8 @@ private def parseZip64Extra (extraData : ByteArray) (stdUncomp stdComp stdOffset
   return some (uncompSize, compSize, localOff)
 
 /-- Parse central directory entries from a ZIP file. -/
-private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Array Entry) := do
+private def parseCentralDir (data : ByteArray) (cdOffset cdSize declaredEntries : Nat)
+    : IO (Array Entry) := do
   let mut entries : Array Entry := #[]
   let mut pos := cdOffset
   let cdEnd := cdOffset + cdSize
@@ -340,6 +344,9 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize : Nat) : IO (Arr
       flags := flags
     }
     pos := pos + 46 + nameLen + extraLen + commentLen
+  unless entries.size == declaredEntries do
+    throw (IO.userError
+      s!"zip: EOCD totalEntries mismatch (EOCD={declaredEntries}, parsed={entries.size})")
   return entries
 
 /-- Check that a read span `[offset, offset + length)` lies entirely within a
@@ -522,7 +529,7 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   let tailStart := fileSize - tailSize
   Handle.seek h tailStart.toUInt64
   let tail ← readExact h tailSize "EOCD tail"
-  let some (_, cdOffset, cdSize) := findEndOfCentralDir tail tailStart
+  let some (_, cdOffset, cdSize, totalEntries) := findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
   unless cdOffset + cdSize <= fileSize do
     throw (IO.userError "zip: central directory extends beyond file")
@@ -531,7 +538,7 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   -- Read just the central directory
   Handle.seek h cdOffset.toUInt64
   let cdBuf ← readExact h cdSize "central directory"
-  parseCentralDir cdBuf 0 cdSize
+  parseCentralDir cdBuf 0 cdSize totalEntries
 
 /-- Read an entry's decompressed data from a file handle by seeking to its local header.
     `maxEntrySize` limits decompressed entry size; `0` means no limit on the FFI
