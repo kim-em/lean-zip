@@ -303,6 +303,32 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
         let bufPos := eocd64Offset - baseOffset
         if bufPos + 56 <= data.size then
           if Binary.readUInt32LE data bufPos == sigEOCD64 then
+            -- EOCD64 archive-layout invariant (APPNOTE §4.3.6).  The
+            -- ZIP64 layout pins the three trailer records in the order
+            -- `[CD] [EOCD64] [Locator] [EOCD]`, so a legitimate archive
+            -- satisfies `eocd64Offset + 56 ≤ locatorPos = eocdPos - 20`
+            -- (the 56-byte v1 EOCD64 record ends strictly before the
+            -- Locator begins).  In buffer-relative coordinates the
+            -- equivalent invariant is `bufPos + 56 ≤ pos - 20`, which
+            -- `pos ≥ 20` (established by the outer guard at
+            -- `findEndOfCentralDir` line 298) makes well-defined under
+            -- `Nat` subtraction.  Without this guard, a crafted archive
+            -- can make the Locator point back into itself (or into the
+            -- Locator's own 20 bytes), smuggling bytes that a strict
+            -- peer reader would reject — the buffer-readability check
+            -- at line 304 only bounds the record against `data.size`
+            -- and therefore remains in place as defense-in-depth but is
+            -- strictly weaker than this layout invariant.  Writer-side
+            -- at `Zip/Archive.lean:141-164` emits the three records
+            -- contiguously in APPNOTE order, so the invariant holds
+            -- trivially for every lean-zip-produced archive.
+            -- Archive-level macro sibling: `cdOffset + cdSize ≤ eocdPos`
+            -- (issue #1799 / PR #1809); per-entry micro sibling:
+            -- `localOffset + 30 ≤ cdOffset` (PR #1813).  Together the
+            -- three invariants close the ZIP archive-layout dimension.
+            unless bufPos + 56 ≤ pos - 20 do
+              throw (IO.userError
+                s!"zip: ZIP64 EOCD64 record overlaps locator (eocd64Offset={eocd64Offset}, locatorPos={baseOffset + pos - 20})")
             -- EOCD64 self-declared record-size sanity (APPNOTE §4.3.14).
             -- For the v1 EOCD64 without an extensible data sector — the
             -- only shape lean-zip produces or consumes — this field must
