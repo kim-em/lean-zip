@@ -26,6 +26,7 @@ one makes the test brittle to message rewrites.
 | Archive CD/EOCD totalEntries | `Zip/Archive.lean` (`parseCentralDir` tail) | `zip: EOCD totalEntries mismatch (EOCD=<n>, parsed=<m>)` | `"EOCD totalEntries mismatch"` |
 | Archive CD/EOCD disk-number | `Zip/Archive.lean` (`parseCentralDir` head) | `zip: EOCD disk-number mismatch (numberOfThisDisk=<n>, diskWhereCDStarts=<m>); lean-zip supports single-disk archives only` | `"EOCD disk-number mismatch"` |
 | Archive CD/EOCD numEntriesThisDisk | `Zip/Archive.lean` (`parseCentralDir` head) | `zip: EOCD numEntriesThisDisk mismatch (this-disk=<n>, total=<m>)` | `"EOCD numEntriesThisDisk mismatch"` |
+| Archive ZIP64/standard-EOCD override sentinel | `Zip/Archive.lean` (`findEndOfCentralDir` ZIP64 branch) | `zip: EOCD ZIP64-override mismatch: standard EOCD <field>=<V>, ZIP64 <field>=<Z> (expected sentinel <S> or numeric match)` | `"EOCD ZIP64-override mismatch"`
 | Archive LH ZIP64 parse | `Zip/Archive.lean` | `truncated ZIP64 local extra field` | `"truncated ZIP64 local extra field"` |
 | Tar per-entry bomb | `Zip/Tar.lean:565-566` | `Tar: entry <name> exceeds limit (…)` | `"exceeds limit"` |
 | Tar header pseudo-entry cap | `Zip/Tar.lean:223` | `tar: header entry size (…) exceeds maximum header size (…)` | `"exceeds maximum header size"` |
