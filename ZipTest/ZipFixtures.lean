@@ -302,6 +302,32 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract cdLhCrcPath cdLhCrcExtractDir)
     "crc32 mismatch between CD and local header"
 
+  -- eocd-numentries-mismatch.zip: 122-byte stored ZIP whose EOCD declares
+  -- totalEntries=2 while only one CD entry is actually present.  This is a
+  -- CD-vs-EOCD anomaly (orthogonal to the CD/LH consistency family above):
+  -- the reader walks the CD until the trailing signature stops matching and
+  -- would otherwise silently accept the single parsed entry.  `parseCentralDir`
+  -- asserts `entries.size == declaredEntries` at its tail and must reject
+  -- this with an `EOCD totalEntries mismatch` error before the caller sees
+  -- the truncated entry list.
+  -- Regenerate (if ever lost) with:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p)
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,20,0,0,0,0,c,len(p),len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,20,0,0,0,0,c,len(p),len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,2,2,len(cde),len(lhe),0)
+  --   open("eocd-numentries-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let eocdNumEntriesData ← readFixture "zip/malformed/eocd-numentries-mismatch.zip"
+  let eocdNumEntriesPath ← writeFixtureTmp "eocd-numentries-mismatch.zip" eocdNumEntriesData
+  let eocdNumEntriesExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-eocd-numentries-mismatch-extract"
+  IO.FS.createDirAll eocdNumEntriesExtractDir
+  assertThrows "ZIP malformed (eocd-numentries-mismatch.zip)"
+    (Archive.extract eocdNumEntriesPath eocdNumEntriesExtractDir)
+    "EOCD totalEntries mismatch"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -328,6 +354,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "cd-lh-method-mismatch.zip", "cd-lh-size-mismatch.zip",
              "cd-lh-flags-mismatch.zip",
              "cd-lh-uncompsize-mismatch.zip", "cd-lh-crc-mismatch.zip",
+             "eocd-numentries-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
@@ -339,6 +366,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-cd-lh-flags-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-uncompsize-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-crc-mismatch-extract",
+             "/tmp/lean-zip-fixture-eocd-numentries-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"
