@@ -40,6 +40,16 @@ structure Entry where
   -- the check in `readEntryData` only rejects LH claiming a higher
   -- version than CD.
   versionNeeded    : UInt16 := 0
+  -- CD-side DOS-encoded last-modified time (APPNOTE §4.4.6), preserved
+  -- for CD-vs-LH consistency checking.  Writers ignore this field and
+  -- emit `defaultDosTime`.  Default `0` preserves byte-identity for
+  -- field-name-syntax constructions (tests and direct callers).
+  lastModTime      : UInt16 := 0
+  -- CD-side DOS-encoded last-modified date (APPNOTE §4.4.6), preserved
+  -- for CD-vs-LH consistency checking.  Writers ignore this field and
+  -- emit `defaultDosDate`.  Default `0` preserves byte-identity for
+  -- field-name-syntax constructions (tests and direct callers).
+  lastModDate      : UInt16 := 0
   deriving Repr, Inhabited
 
 /-- Check if an entry needs ZIP64 extra fields. -/
@@ -415,6 +425,8 @@ private def parseCentralDir (data : ByteArray)
     let versionNeeded := Binary.readUInt16LE data (pos + 6)
     let flags := Binary.readUInt16LE data (pos + 8)
     let method := Binary.readUInt16LE data (pos + 10)
+    let lastModTime := Binary.readUInt16LE data (pos + 12)
+    let lastModDate := Binary.readUInt16LE data (pos + 14)
     let crc := Binary.readUInt32LE data (pos + 16)
     let stdCompSize := Binary.readUInt32LE data (pos + 20)
     let stdUncompSize := Binary.readUInt32LE data (pos + 24)
@@ -467,6 +479,8 @@ private def parseCentralDir (data : ByteArray)
       localOffset := localOff
       flags := flags
       versionNeeded := versionNeeded
+      lastModTime := lastModTime
+      lastModDate := lastModDate
     }
     pos := pos + 46 + nameLen + extraLen + commentLen
   unless entries.size == declaredEntries do
@@ -690,6 +704,8 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   let localVersion := Binary.readUInt16LE localHdr 4
   let localFlags := Binary.readUInt16LE localHdr 6
   let localMethod := Binary.readUInt16LE localHdr 8
+  let localModTime := Binary.readUInt16LE localHdr 10
+  let localModDate := Binary.readUInt16LE localHdr 12
   let localCrc := Binary.readUInt32LE localHdr 14
   let stdLocalCompSize := Binary.readUInt32LE localHdr 18
   let stdLocalUncompSize := Binary.readUInt32LE localHdr 22
@@ -747,6 +763,16 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   unless localVersion ≤ entry.versionNeeded do
     throw (IO.userError
       s!"zip: LH versionNeededToExtract ({localVersion}) exceeds CD versionNeededToExtract ({entry.versionNeeded}) for {label}")
+  -- DOS last-modified time/date (APPNOTE §4.4.6) must agree between CD
+  -- and LH.  Unlike crc/compSize/uncompSize, these fields are metadata
+  -- and are NOT legitimately zeroed by the data-descriptor bit — keep
+  -- the check ungated.  A single combined `unless` because the two
+  -- fields are physically adjacent (LH +10/+12, CD +12/+14) and
+  -- semantically a single DOS timestamp pair.
+  unless localModTime == entry.lastModTime ∧
+         localModDate == entry.lastModDate do
+    throw (IO.userError
+      s!"zip: lastModTime/Date mismatch between CD and local header for {label} (CD time={entry.lastModTime}, date={entry.lastModDate}; LH time={localModTime}, date={localModDate})")
   let usesDataDescriptor := (localFlags &&& 0x0008) != 0
   unless usesDataDescriptor do
     unless localCompSize == entry.compressedSize do

@@ -19,6 +19,7 @@ Outputs:
 - testdata/zip/malformed/eocd-disknum-mismatch.zip
 - testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip
 - testdata/zip/malformed/cd-entry-disknum-mismatch.zip
+- testdata/zip/malformed/cd-lh-modtime-mismatch.zip
 """
 import os, struct, zlib
 
@@ -29,16 +30,21 @@ CRC = zlib.crc32(PAYLOAD) & 0xFFFFFFFF
 N = len(NAME)
 P = len(PAYLOAD)
 
-def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20):
+def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
+            lh_mod_time=0, lh_mod_date=0):
     # PKZIP local file header (30 bytes).
+    # `lh_mod_time` / `lh_mod_date` default to `0` — preserving
+    # byte-identity of fixtures produced before the modtime/date
+    # kwargs were threaded through.  Only
+    # `cd-lh-modtime-mismatch.zip` exercises the non-default branch.
     return struct.pack(
         "<IHHHHHIIIHH",
         0x04034b50,  # signature
         version,     # version needed
         0,           # flags
         method,      # compression method
-        0,           # mod time
-        0,           # mod date
+        lh_mod_time, # mod time
+        lh_mod_date, # mod date
         crc,
         comp_size,   # compressed size
         uncomp_size, # uncompressed size
@@ -46,11 +52,15 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20):
         0,           # extra field length
     )
 
-def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0):
+def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
+            cd_mod_time=0, cd_mod_date=0):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
     # Only `cd-entry-disknum-mismatch.zip` exercises the non-default branch.
+    # `cd_mod_time` / `cd_mod_date` default to `0` — see the parallel
+    # defaults on `make_lh` above.  Only `cd-lh-modtime-mismatch.zip`
+    # exercises the non-default branch.
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
@@ -58,8 +68,8 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0):
         version,     # version needed
         0,           # flags
         method,      # compression method
-        0,           # mod time
-        0,           # mod date
+        cd_mod_time, # mod time
+        cd_mod_date, # mod date
         CRC,
         comp_size,
         uncomp_size,
@@ -101,13 +111,17 @@ def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0,
 def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           lh_uncomp=P, cd_uncomp=P, lh_crc=CRC,
           lh_version=20, cd_version=20,
+          lh_mod_time=0, lh_mod_date=0,
+          cd_mod_time=0, cd_mod_date=0,
           cd_disk_number_start=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
-    lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version)
+    lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
+                 lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
-                 disk_number_start=cd_disk_number_start)
+                 disk_number_start=cd_disk_number_start,
+                 cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -194,4 +208,15 @@ write(
     os.path.join(OUT_DIR, "cd-entry-disknum-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_disk_number_start=7,
+)
+# CD/LH lastModTime anomaly: LH mod-time `0x1234` while CD mod-time
+# remains `0` (writer-side default).  Single-dimension mismatch — only
+# the time field disagrees, so error attribution is unambiguous.  The
+# check fires regardless of bit 3 (data descriptor) because APPNOTE
+# §4.4.6 gates bit 3 on crc/compSize/uncompSize only; the timestamp
+# fields are always carried in the LH.
+write(
+    os.path.join(OUT_DIR, "cd-lh-modtime-mismatch.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_mod_time=0x1234,
 )
