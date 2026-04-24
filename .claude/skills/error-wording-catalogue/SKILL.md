@@ -112,7 +112,7 @@ Knowing the order matters for picking the right substring:
   claim so the stored-method check does not fire.
 - **`Archive.extract` on an archive whose CD `method` is outside
   `{0, 8}`**: the `parseCentralDir` compression-method allowlist
-  (`"unsupported compression method"`, added in PR #1797) fires
+  (`"unsupported compression method"`, added in PR #1801) fires
   pre-ZIP64-resolution and shadows the late `readEntryData`
   `"unsupported method"` dispatch for all CD-parseable archives.
   `bad-method.zip` (CD/LH method=14) and `cd-bad-method-early.zip`
