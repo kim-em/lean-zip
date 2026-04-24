@@ -37,7 +37,7 @@ Per-session details are in `progress/`.
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 - **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
 - **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
-- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1765): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 6 / 7 per-entry CD/LH dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32 — name-bytes remaining); 21 fixtures in `testdata/zip/malformed/` (was 12 at #1721)
+- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1797): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); 27 fixtures in `testdata/zip/malformed/` (was 22 at #1770, 12 at #1721)
 
 ## Milestones
 
@@ -2425,6 +2425,121 @@ Quality metrics: 0 sorries across `Zip/` (unchanged); 0 runtime
 `bash scripts/check-inventory-links.sh` → `errors=0, warnings=34`
 (34 line-anchor warnings inherited from the five-Archive-edit
 stack; the fixture-path and cross-reference gates stay clean).
+
+**12-PR batch (Apr 24): ZIP64 extra-field layout-smuggling closure + Track E CD-parse cadence (summarize #1797):**
+
+Twelve PRs merged in the ~5-hour window between summarize #1770
+(merge commit `3679495`, 06:23Z 2026-04-24) and PR #1796 (merge
+commit `25c4318`, 11:16Z 2026-04-24). No spec file touched;
+`grep -rc sorry Zip/` stayed at 0 throughout.
+
+*Track E feature PRs (4), grouped by closed attack-class cluster.*
+
+- **CD-parse-time intra-entry invariant (1 PR).** #1773 adds the
+  method 0 (stored) `compressedSize == uncompressedSize`
+  tautological invariant to `parseCentralDir`. APPNOTE §4.4.5 defines
+  method 0 as *"no compression"*, so the equality is a tautology;
+  crafted archives with mismatched sizes are malformed. `Archive.list`
+  now rejects them at CD-parse time, before the late post-decode
+  `"size mismatch"` guard at [Zip/Archive.lean:811](/home/kim/lean-zip/Zip/Archive.lean:811).
+  Complements the CD/LH `uncompressedSize` consistency check landed
+  earlier (`cd-lh-uncompsize-mismatch.zip`): that caught CD-vs-LH
+  skew, this catches intra-CD invariant violation with no CD/LH
+  divergence. Fixture: `cd-stored-size-mismatch.zip`.
+  `SECURITY_INVENTORY.md` *Recent wins* (:343-358).
+- **ZIP64 extra-field layout-smuggling (3 PRs).** Three dimensions
+  of the APPNOTE §4.5 CD/LH extra-data smuggling class closed
+  together at the CD/LH boundary:
+  - #1785 — inner-0x0001 block `dataSize == 8 * N` exactness check
+    in `parseZip64Extra`, rejecting CD entries whose ZIP64
+    (`headerId 0x0001`) extra-field `dataSize` exceeds the `8 * N`
+    bytes consumed by the `N` sentinel-gated 32-bit standard fields
+    (APPNOTE §4.5.3). Trailing slack past the consumed prefix is
+    attacker-controllable and a parser-differential smuggling
+    vector. Fixture: `zip64-extra-oversized-datasize.zip`.
+    `SECURITY_INVENTORY.md` *Recent wins* (:281-289).
+  - #1788 — outer sub-field structural walk
+    `validateExtraFieldStructure`, invoked unconditionally on the
+    blob at the CD site (`parseCentralDir`) and the LH site
+    (`readEntryData`) before any sentinel guard. Pre-PR, the outer
+    iteration lived only inside `parseZip64Extra`, which `break`s
+    silently on a malformed sub-field; the caller skipped
+    `parseZip64Extra` entirely when no ZIP64 sentinel was set, so
+    the anomaly was invisible in the no-sentinel case. Fixture:
+    `cd-extra-overrun-datasize.zip`. `SECURITY_INVENTORY.md`
+    *Recent wins* (:262-280).
+  - #1793 — duplicate-0x0001 block rejection via a new
+    `hasDuplicateZip64Extra` helper that walks the TLV structure
+    once, invoked at both the CD-side caller (`parseCentralDir`)
+    and the LH-side caller (`readEntryData`) before
+    `parseZip64Extra`. APPNOTE §4.5 forbids more than one instance
+    of any registered header ID per entry; for ZIP64 in particular
+    the layout of each block depends on which standard 32-bit
+    fields are at the `0xFFFFFFFF` sentinel, so two blocks with
+    different payloads make the resolved sizes/offset ambiguous
+    (first-wins vs. last-wins parser-differential). Two error
+    wordings (`"duplicate ZIP64 extra field"` vs `"duplicate ZIP64
+    local extra field"`) keep CD/LH attribution distinct.
+    Fixtures: `cd-zip64-extra-duplicate.zip`,
+    `lh-zip64-extra-duplicate.zip`.
+    `SECURITY_INVENTORY.md` *Recent wins* (:296-323).
+
+  Together these three PRs close the ZIP64 extra-field layout-
+  smuggling attack class at the CD/LH boundary (three dimensions:
+  inner block self-length exactness, outer TLV structural
+  soundness, uniqueness of the 0x0001 block).
+
+*Paired-review PRs (6).* #1772 (reviews #1754), #1776 (reviews
+#1759), #1779 (reviews #1761), #1783 (reviews #1769), #1784
+(reviews #1773), #1792 (reviews #1785). Four of the six
+(#1772/#1776/#1779/#1783) pair with feature PRs from the prior
+#1770 wave — they close out the post-wave review queue inherited
+across the summarize boundary. Two (#1784/#1792) pair with in-wave
+features: #1773 → #1784 at ~206 min and #1785 → #1792 at ~34 min
+— both inside the *30 min to several hours* bracket noted in the
+Track E post-#1773 cadence entry
+[progress/20260424T105643Z_c4046753-paired-review-1785.md](progress/20260424T105643Z_c4046753-paired-review-1785.md)
+§F. The remaining two in-wave feature PRs (#1788 and #1793) have
+no paired-review entry at batch close — they are the next
+planner's backlog, inherited across this summarize boundary just
+as the prior wave's #1754/#1759/#1761/#1769 pairs were.
+
+*Doc / chore (2).*
+
+- #1794 (doc) — fixes the PR-number attribution in three
+  `ZipTest/ZipFixtures.lean` precedence-shift comments, replacing
+  `#1770` with the correct `#1773` authorship. Follow-up to the
+  prior-wave paired-review PR #1778 §F.2 attribution-drift finding.
+- #1796 (chore) — extends `scripts/check-inventory-links.sh` with
+  a placeholder-PR linter rule that fires on any `(this PR)` /
+  `(PR #TBD)` text in the `SECURITY_INVENTORY.md` *Recent wins* /
+  *Minimized Reproducer Corpus* blocks, and sweeps the outstanding
+  placeholders in the ZIP64 extra-field *Recent wins* block so they
+  reference committed `#NNNN` values. Closes #1786.
+
+*Scope discipline.* Source-code changes this wave touched only
+`Zip/Archive.lean` (+87 net LOC: +89/−2 from four CD-parse checks
+— one stored-method invariant, three ZIP64 extra-field
+dimensions) and `ZipTest/ZipFixtures.lean` (+130 net LOC:
++135/−5 from five new fixture/assert blocks plus the #1794
+comment fixes). `Zip/Spec/` stayed at 42 × 21,067 LOC with zero
+edits, matching the scope discipline of the prior two Track E
+waves.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/`
+and `Zip/*.lean` (unchanged); `bash scripts/check-inventory-links.sh`
+→ `errors=0, warnings=0` post-#1796 sweep (the placeholder-PR
+linter now fires if any `(this PR)` / `(PR #TBD)` text reappears,
+and all inherited line-anchor warnings have been reconciled).
+Fixtures in `testdata/zip/malformed/` grew from 22 to 27 (five
+new: `cd-stored-size-mismatch.zip`,
+`zip64-extra-oversized-datasize.zip`,
+`cd-extra-overrun-datasize.zip`,
+`cd-zip64-extra-duplicate.zip`,
+`lh-zip64-extra-duplicate.zip`). Tar fixture counts (14 / 6)
+unchanged. Type mix across the 12 PRs: feature 4 / paired-review
+6 / doc 1 / chore 1. Toolchain `v4.29.1`.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
