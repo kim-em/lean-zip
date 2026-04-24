@@ -14,6 +14,7 @@ Outputs:
 - testdata/zip/malformed/zip64-eocd64-bad-recsize.zip
 - testdata/zip/malformed/zip64-eocd64-versionmadeby-too-high.zip
 - testdata/zip/malformed/zip64-eocd64-versionneeded-too-high.zip
+- testdata/zip/malformed/zip64-eocd64-v2-record.zip
 - testdata/zip/malformed/zip64-extra-oversized-datasize.zip
 - testdata/zip/malformed/cd-extra-overrun-datasize.zip
 - testdata/zip/malformed/cd-zip64-extra-duplicate.zip
@@ -50,15 +51,20 @@ def make_cd():
 
 
 def make_eocd64(cd_size, cd_offset, record_size=44, version_made_by=45,
-                version_needed=45):
-    # 56-byte EOCD64 record.  Stores real (non-sentinel) values for
-    # all fields — we are forcing ZIP64 emission even though sizes fit
+                version_needed=45, extensible_data=b""):
+    # v1 EOCD64 record: 56 bytes (4-byte signature + 8-byte recSize field
+    # + 44-byte v1 body).  When `extensible_data` is non-empty the record
+    # is a v2-shape EOCD64 (APPNOTE §4.3.14.2) whose extensible data
+    # sector follows the v1 body.  Stores real (non-sentinel) values for
+    # the v1 fields — we are forcing ZIP64 emission even though sizes fit
     # in 32 bits, so the reader's override branch fires.
     #
     # `record_size` is the APPNOTE §4.3.14 "size of zip64 end of central
     # directory record" field at bufPos+4.  Default `44` matches the v1
     # EOCD64 shape (56 bytes - 12 bytes for signature + size-field).
-    # Override to forge a mismatch for the reader's record-size check.
+    # Override to forge a mismatch for the reader's record-size check,
+    # or set to `44 + len(extensible_data)` for an internally-consistent
+    # v2-shape record whose claimed length matches its physical layout.
     #
     # `version_made_by` is the APPNOTE §4.4.2 `versionMadeBy` field at
     # bufPos+12.  Low byte encodes the ZIP spec version (APPNOTE-defined
@@ -75,7 +81,11 @@ def make_eocd64(cd_size, cd_offset, record_size=44, version_made_by=45,
     # writer emission (ZIP64 support requires at least spec version
     # 4.5).  Override to forge a value > 63 for the reader's
     # versionNeededToExtract upper-bound check.
-    return struct.pack(
+    #
+    # `extensible_data` is the APPNOTE §4.3.14.2 "zip64 extensible data
+    # sector" — appended to the v1 body, making the physical record
+    # `56 + len(extensible_data)` bytes.  Default empty (v1 shape).
+    v1 = struct.pack(
         "<IQHHIIQQQQ",
         0x06064b50,
         record_size,
@@ -83,6 +93,7 @@ def make_eocd64(cd_size, cd_offset, record_size=44, version_made_by=45,
         1, 1,          # numEntriesThisDisk, totalEntries
         cd_size, cd_offset,
     )
+    return v1 + extensible_data
 
 
 def make_locator(eocd64_offset):
@@ -106,7 +117,8 @@ def make_eocd(*,
 
 
 def write_fixture(path, *, eocd64_record_size=44, eocd64_version_made_by=45,
-                  eocd64_version_needed=45, **overrides):
+                  eocd64_version_needed=45, eocd64_extensible_data=b"",
+                  **overrides):
     lh = make_lh()
     lhe = lh + NAME + PAYLOAD
     cd = make_cd()
@@ -118,6 +130,7 @@ def write_fixture(path, *, eocd64_record_size=44, eocd64_version_made_by=45,
         record_size=eocd64_record_size,
         version_made_by=eocd64_version_made_by,
         version_needed=eocd64_version_needed,
+        extensible_data=eocd64_extensible_data,
     )
     eocd64_offset = len(lhe) + len(cde)
     locator = make_locator(eocd64_offset)
@@ -173,6 +186,43 @@ write_fixture(
 write_fixture(
     os.path.join(OUT_DIR, "zip64-eocd64-versionneeded-too-high.zip"),
     eocd64_version_needed=0x00FF,
+)
+# EOCD64 v2-shape record (APPNOTE §4.3.14.2).  The v2 EOCD64 extends the
+# v1 56-byte record with a "zip64 extensible data sector" tied to the
+# APPNOTE strong-encryption (SES) extension; the extensible sector
+# carries fields such as `compositeSize` + `encryptionAlgID` and makes
+# the on-disk record `56 + N` bytes for an N-byte sector.  Per APPNOTE
+# §4.3.14 the `size of this record` field encodes
+# `SizeOfFixedFields + SizeOfVariableData - 12`, so a v2 record with a
+# 16-byte extensible sector declares `recSize = 56 + 16 - 12 = 60`.
+#
+# lean-zip does not implement strong encryption and so cannot consume
+# v2 EOCD64 records; the existing record-size guard
+# (`unless recSize == 44` at
+# [Zip/Archive.lean:343](/home/kim/lean-zip/Zip/Archive.lean:343))
+# rejects them by falling outside the v1-only `44` expectation.  This
+# fixture is an *internally-consistent* v2-shape probe: the claimed
+# `recSize=60` matches the 72-byte physical record layout
+# (`4 signature + 8 recSize + 44 v1 body + 16 extensible sector`), so
+# a reader that trusts the declared length and parses per APPNOTE v2
+# semantics would *accept* the archive.  Sibling of
+# `zip64-eocd64-bad-recsize.zip` (PR #1761), which probes the same
+# guard at the `recSize=0` boundary; this fixture pins the rejection
+# behaviour specifically against the APPNOTE-documented v2 shape.
+#
+# The extensible sector payload is 16 zero bytes — a plausible v2 shape
+# for a reader that expects `compositeSize` + `encryptionAlgID` fields
+# but does not validate their contents.  The fixture is not exercising
+# SES semantics; it documents v2-record rejection at the entry guard.
+#
+# Archive-layout invariant (PR #1856, `bufPos + 56 ≤ pos - 20`) passes
+# because the 72-byte physical record places the Locator at
+# `bufPos + 72 > bufPos + 56`, so the layout guard does not fire first
+# and the record-size check is the one that rejects.
+write_fixture(
+    os.path.join(OUT_DIR, "zip64-eocd64-v2-record.zip"),
+    eocd64_record_size=60,
+    eocd64_extensible_data=b"\x00" * 16,
 )
 
 
