@@ -376,6 +376,27 @@ private def validateExtraFieldStructure (extraData : ByteArray) : Bool := Id.run
     epos := epos + 4 + dataSize
   return epos == extraData.size
 
+/-- Detect APPNOTE §4.5 duplicate ZIP64 (`headerId == 0x0001`) blocks
+    in a CD/LH extra-data area.  Returns `true` iff two or more 0x0001
+    blocks are present.  Assumes `validateExtraFieldStructure` has
+    already returned `true` for the same buffer; under that precondition
+    every sub-field header is well-formed and the inner length guard is
+    redundant but kept for defence in depth.  Closes the parser-
+    differential vector where two well-formed 0x0001 blocks let a
+    "first-wins" reader (lean-zip pre-fix) and a "last-wins" reader
+    disagree on the resolved sizes/offset for the same bytes. -/
+private def hasDuplicateZip64Extra (extraData : ByteArray) : Bool := Id.run do
+  let mut epos := 0
+  let mut seen := false
+  while epos + 4 <= extraData.size do
+    let dataSize := (Binary.readUInt16LE extraData (epos + 2)).toNat
+    if epos + 4 + dataSize > extraData.size then break
+    if Binary.readUInt16LE extraData epos == 0x0001 then
+      if seen then return true
+      seen := true
+    epos := epos + 4 + dataSize
+  return false
+
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
     Only reads fields whose standard values are 0xFFFFFFFF. Returns `none` if a required field
     is missing from the ZIP64 extra data. -/
@@ -488,18 +509,24 @@ private def parseCentralDir (data : ByteArray)
         pure (match String.fromUTF8? nameBytes with
           | some s => s
           | none => Binary.fromLatin1 nameBytes)
-    -- Parse ZIP64 extra field if any standard field is 0xFFFFFFFF.
     -- Structural check runs unconditionally (APPNOTE §4.5) so the
     -- no-ZIP64-sentinel path also rejects extra-data whose sub-field
     -- declared `dataSize` overruns the blob. Without this, a malformed
     -- sub-field header in a non-ZIP64 entry is entirely invisible
     -- (`parseZip64Extra` is skipped) and in the ZIP64 case the anomaly
     -- would be misattributed as a missing-0x0001 block.
+    -- The duplicate-0x0001 guard runs only when ZIP64 parsing is needed
+    -- (some standard size/offset field is the sentinel) — APPNOTE §4.5
+    -- forbids more than one ZIP64 extra block per entry, and lean-zip's
+    -- `parseZip64Extra` would otherwise silently use the first match
+    -- ("first-wins") while a "last-wins" parser would use the second.
     let extraData := data.extract (pos + 46 + nameLen) (pos + 46 + nameLen + extraLen)
     unless validateExtraFieldStructure extraData do
       throw (IO.userError s!"zip: malformed extra field for {name}")
     let (uncompSize, compSize, localOff) ←
       if stdCompSize == val32Max || stdUncompSize == val32Max || stdOffset == val32Max then
+        if hasDuplicateZip64Extra extraData then
+          throw (IO.userError s!"zip: duplicate ZIP64 extra field for {name}")
         match parseZip64Extra extraData stdUncompSize stdCompSize stdOffset with
         | some v => pure v
         | none => throw (IO.userError s!"zip: malformed ZIP64 extra field for {name}")
@@ -785,6 +812,11 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     throw (IO.userError s!"zip: malformed local extra field for {label}")
   let (localUncompSize, localCompSize, _) ←
     if stdLocalCompSize == val32Max || stdLocalUncompSize == val32Max then
+      -- Mirrors the CD-side duplicate-0x0001 guard in `parseCentralDir`:
+      -- APPNOTE §4.5 forbids more than one ZIP64 extra-field block per
+      -- entry on the LH side as well.
+      if hasDuplicateZip64Extra localExtra then
+        throw (IO.userError s!"zip: duplicate ZIP64 local extra field for {label}")
       match parseZip64Extra localExtra stdLocalUncompSize stdLocalCompSize 0 with
       | some v => pure v
       | none => throw (IO.userError s!"zip: truncated ZIP64 local extra field for {label}")
