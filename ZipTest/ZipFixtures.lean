@@ -113,7 +113,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   IO.FS.createDirAll oversizedExtractDir
   -- This fixture has method=0 with CD compSize=2 MiB and uncompSize=6 —
   -- a stored-method size-invariant violation that `parseCentralDir` now
-  -- rejects at CD parse time (PR #1770), earlier than the `local data
+  -- rejects at CD parse time (PR #1773), earlier than the `local data
   -- span` check in `readEntryData` that historically caught the fault.
   -- Kept in-corpus for regression coverage at the earlier layer.
   assertThrows "ZIP malformed (oversized-compressed-size.zip)"
@@ -146,7 +146,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   IO.FS.createDirAll oversizedZ64ExtractDir
   -- This fixture has method=0 with ZIP64-resolved compSize=1<<60 and
   -- uncompSize=6 — a stored-method size-invariant violation that
-  -- `parseCentralDir` now rejects at CD parse time (PR #1770, post-
+  -- `parseCentralDir` now rejects at CD parse time (PR #1773, post-
   -- ZIP64-resolution), earlier than the `local data span` check in
   -- `readEntryData` that historically caught the fault.  Kept in-corpus
   -- for regression coverage at the earlier layer.
@@ -184,7 +184,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- does not trip "exceeds limit" before the CD-parse stored-method check.
   -- This fixture has method=0 with compSize=6 and ZIP64-resolved
   -- uncompSize=1<<60 — a stored-method size-invariant violation that
-  -- `parseCentralDir` now rejects at CD parse time (PR #1770, post-
+  -- `parseCentralDir` now rejects at CD parse time (PR #1773, post-
   -- ZIP64-resolution), earlier than the `truncated ZIP64 local extra
   -- field` check in `readEntryData` that historically caught the fault.
   -- Kept in-corpus for regression coverage at the earlier layer.
