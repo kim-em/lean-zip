@@ -440,3 +440,33 @@ write(
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     name_bytes=b"../evil.txt",
 )
+# CD-parse entry-name empty-filename anomaly: both CD and LH carry
+# `name_bytes=b""` (length 0), so the `name length` UInt16 at CD +28
+# and LH +26 is `0`.  APPNOTE §4.4.10 defines the filename-length
+# field; every legitimate ZIP entry — file or directory — has at
+# least one byte of name, so `nameLen == 0` is structurally
+# pathological and a parser-differential smuggling vector (lenient
+# readers emit `entry.path = ""` — an `Entry` with no useful identity;
+# strict readers reject).  `parseCentralDir` now rejects at CD parse
+# time with `"CD entry has empty filename"` immediately after the
+# `nameLen` read at CD +28, before the `entryEnd > cdEnd` overrun
+# check and before the sibling path-safety / NUL-byte filename
+# guards so the failure attribution pins to the structural anomaly
+# rather than the path-safety predicate (which would otherwise catch
+# the empty string via its empty-component rejection, but only if
+# the decode succeeds).  LH and CD `name_bytes` match byte-for-byte
+# (both empty), keeping the CD/LH name-bytes consistency invariant
+# (issue #1722) intact — both sides agree so the LH `nameLen` overrun
+# guard at line 540 and any CD/LH name-bytes-mismatch check do not
+# fire first.  The 9-byte savings on each side (vs. the 9-byte
+# default `NAME = b"hello.txt"`) shift the file length by -18 from
+# the 122-byte baseline to 104 bytes.  Sibling of `cd-nul-in-name.zip`
+# (PR #1831, byte-content dimension) and `cd-path-unsafe.zip`
+# (PR #1840, path-shape dimension): together they close the
+# smuggled-name attack class (zero-length, NUL-embedded, and
+# path-traversal forms all rejected at CD parse).
+write(
+    os.path.join(OUT_DIR, "cd-empty-name.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    name_bytes=b"",
+)
