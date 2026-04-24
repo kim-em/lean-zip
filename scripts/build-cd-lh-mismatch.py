@@ -20,6 +20,7 @@ Outputs:
 - testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip
 - testdata/zip/malformed/cd-entry-disknum-mismatch.zip
 - testdata/zip/malformed/cd-lh-modtime-mismatch.zip
+- testdata/zip/malformed/cd-stored-size-mismatch.zip
 """
 import os, struct, zlib
 
@@ -219,4 +220,21 @@ write(
     os.path.join(OUT_DIR, "cd-lh-modtime-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_mod_time=0x1234,
+)
+# Stored-method (method=0) size-invariant anomaly: both CD and LH
+# advertise `compressedSize=6, uncompressedSize=7` with method=0.  Both
+# sides agree, so the CD/LH `uncompressedSize` consistency check
+# (`cd-lh-uncompsize-mismatch.zip`) does *not* fire.  APPNOTE §4.4.5
+# defines method 0 as "no compression", so `compSize == uncompSize` is
+# tautological — `parseCentralDir` rejects this with a
+# `stored-method size mismatch` error, before any LH read.  Companion to
+# `cd-lh-uncompsize-mismatch.zip`: that fixture has a CD-vs-LH divergence
+# on `uncompSize`; this fixture has no CD-vs-LH divergence but violates
+# the stored-method equality tautology.  Together they close the
+# stored-method size-invariant dimension from both angles (CD/LH skew
+# and intra-CD invariant violation).
+write(
+    os.path.join(OUT_DIR, "cd-stored-size-mismatch.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_uncomp=P + 1, cd_uncomp=P + 1,
 )

@@ -23,6 +23,7 @@ one makes the test brittle to message rewrites.
 | Whole-archive bomb | `Zip/Archive.lean:677`, `Zip/Tar.lean:677` (`extract` `maxTotalSize`) | `zip:`/`tar: total extracted size (…) exceeds whole-archive limit (…)` | `"exceeds whole-archive limit"` |
 | Archive ZIP64 span check | `Zip/Archive.lean:428-429` | `Archive: local data span for <name> (…)` | `"local data span"` |
 | Archive CD/LH consistency | `Zip/Archive.lean` | `mismatch between CD and local header (<field>)` | `"mismatch between CD and local header"` |
+| Archive CD stored-method size invariant | `Zip/Archive.lean` (`parseCentralDir`, post-ZIP64-resolution) | `zip: stored-method size mismatch for <name> (method=0, compressedSize=<C>, uncompressedSize=<U>)` | `"stored-method size mismatch"` |
 | Archive CD/LH lastModTime/Date | `Zip/Archive.lean` (`readEntryData`, ungated — fires even when bit 3 data-descriptor is set) | `zip: lastModTime/Date mismatch between CD and local header for <label> (CD time=<Tcd>, date=<Dcd>; LH time=<Tlh>, date=<Dlh>)` | `"lastModTime/Date mismatch"` |
 | Archive CD/EOCD totalEntries | `Zip/Archive.lean` (`parseCentralDir` tail) | `zip: EOCD totalEntries mismatch (EOCD=<n>, parsed=<m>)` | `"EOCD totalEntries mismatch"` |
 | Archive CD/EOCD disk-number | `Zip/Archive.lean` (`parseCentralDir` head) | `zip: EOCD disk-number mismatch (numberOfThisDisk=<n>, diskWhereCDStarts=<m>); lean-zip supports single-disk archives only` | `"EOCD disk-number mismatch"` |
@@ -92,6 +93,17 @@ Knowing the order matters for picking the right substring:
   claim**: the second `assertSpanInFile` (span check for local data)
   fires before the read is attempted. Match `"local data span"`. See
   #1543.
+- **`Archive.extract` on a method=0 archive with mismatched CD sizes**:
+  the `parseCentralDir` stored-method size-invariant check
+  (`"stored-method size mismatch"`) fires before `readEntryData` runs,
+  so it precedes the `"local data span"` check (#1497, #1543) and the
+  `"truncated ZIP64 local extra field"` check (#1554) for the subset of
+  fixtures where method=0 and the CD-resolved `compSize ≠ uncompSize`.
+  The three `oversized-*.zip` fixtures in `testdata/zip/malformed/`
+  all shifted to this substring as of the CD-parse-guard addition. If
+  you need a regression that still exercises the later span or
+  ZIP64-truncation checks, use method=8 (deflate) with the oversized
+  claim so the stored-method check does not fire.
 - **`Tar.extract` on an archive-slip symlink**: the unsafe-symlink
   reject fires before `Handle.createSymlink`. Match
   `"unsafe symlink"`. See #1555.

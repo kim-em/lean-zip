@@ -470,6 +470,21 @@ private def parseCentralDir (data : ByteArray)
         | none => throw (IO.userError s!"zip: truncated ZIP64 extra field for {name}")
       else
         pure (stdUncompSize.toUInt64, stdCompSize.toUInt64, stdOffset.toUInt64)
+    -- APPNOTE §4.4.5: method 0 ("stored") means no compression, so
+    -- `compressedSize == uncompressedSize` is a tautological invariant.
+    -- The writer emits equal values for stored entries; crafted archives
+    -- with mismatched sizes are malformed and would trigger the late
+    -- generic `"size mismatch"` guard in `readEntryData` only after
+    -- burning any `maxEntrySize` cap on I/O.  Reject early here so
+    -- `Archive.list` also catches the anomaly and so the error message
+    -- attributes the fault to the stored invariant.  Placed after the
+    -- ZIP64 resolution so the resolved `UInt64` values are checked, not
+    -- the 0xFFFFFFFF sentinels (which would spuriously fail the
+    -- equality for legitimate ZIP64-stored archives).
+    if method == 0 then
+      unless compSize == uncompSize do
+        throw (IO.userError
+          s!"zip: stored-method size mismatch for {name} (method=0, compressedSize={compSize}, uncompressedSize={uncompSize})")
     entries := entries.push {
       path := name
       compressedSize := compSize
