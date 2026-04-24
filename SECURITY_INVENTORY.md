@@ -230,6 +230,20 @@ Summary — what this pattern catches and what it does not:
     `Binary.zeros`-initialised CD header — see *"disk number start
     (34)"* comment around
     [Zip/Archive.lean:121](/home/kim/lean-zip/Zip/Archive.lean:121))
+  - CD-parse encryption-flag rejection — PR #TBD
+    (`testdata/zip/malformed/cd-encrypted-flag.zip`) rejects archives
+    whose CD flag word carries any of APPNOTE §4.4.4 bits 0 / 6 / 13
+    (traditional ZipCrypto / strong encryption (SES/AES, Annex H) /
+    encrypted central directory; combined mask `0x2041`). lean-zip
+    ships no cryptographic primitives and cannot honour any of them;
+    reject at CD-parse time so the CRC mismatch does not fire late
+    after running DEFLATE over encrypted bytes. Orthogonal to the
+    CD/LH flags-consistency check — an absolute bit-presence
+    rejection, not a CD-vs-LH divergence check (both sides set bit 0
+    in the fixture). Writer-side at
+    [Zip/Archive.lean:81](/home/kim/lean-zip/Zip/Archive.lean:81) /
+    [:108](/home/kim/lean-zip/Zip/Archive.lean:108) which both
+    hard-code `flags = 0x0800` (bit 11 UTF-8 only).
   - EOCD `numEntriesThisDisk` vs. `totalEntries` consistency check —
     PR #1752 (`testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip`)
     rejects archives where the sibling EOCD entry-count fields disagree
@@ -649,6 +663,7 @@ to be silently skipped.
 | [testdata/tar/security/tar-slip.tar](/home/kim/lean-zip/testdata/tar/security/tar-slip.tar) | 10240 B | `Binary.isPathSafe` rejects `..` component traversal at [Zip/Tar.lean:639](/home/kim/lean-zip/Zip/Tar.lean:639) — *"unsafe path"* | `481e562` | archive-slip |
 | [testdata/zip/malformed/bad-crc.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-crc.zip) | 140 B | Post-extraction CRC32 verification at [Zip/Archive.lean:761](/home/kim/lean-zip/Zip/Archive.lean:761) — *"CRC32 mismatch"* | `481e562` | other (integrity check) |
 | [testdata/zip/malformed/bad-method.zip](/home/kim/lean-zip/testdata/zip/malformed/bad-method.zip) | 140 B | Method-dispatch guard at [Zip/Archive.lean:756](/home/kim/lean-zip/Zip/Archive.lean:756) — *"unsupported method"* | `481e562` | other (method validation) |
+| [testdata/zip/malformed/cd-encrypted-flag.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-encrypted-flag.zip) | 122 B | CD-parse encryption-flag rejection at [Zip/Archive.lean:430](/home/kim/lean-zip/Zip/Archive.lean:430) — *"encryption-related general-purpose flag set"* (CD and LH flag words both carry bit 0 / traditional ZipCrypto; APPNOTE §4.4.4 bits 0 / 6 / 13 — the three encryption-related general-purpose flag bits, combined mask `0x2041` — are rejected at CD parse because lean-zip ships no cryptographic primitives and would otherwise either hand back garbage plaintext or throw a late `"CRC32 mismatch"` after running DEFLATE over encrypted bytes. Orthogonal to the CD/LH flags-consistency check, which only fires on CD-vs-LH divergence — here the flags agree on both sides) | #TBD | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/cd-entry-disknum-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-disknum-mismatch.zip) | 122 B | CD per-entry `diskNumberStart` consistency check at [Zip/Archive.lean:415](/home/kim/lean-zip/Zip/Archive.lean:415) — *"CD entry diskNumberStart mismatch"* (CD entry's APPNOTE §4.4.11 disk-number field at offset +34 is `7`; lean-zip supports single-disk archives only, so any nonzero value is rejected. Per-entry counterpart to `eocd-disknum-mismatch.zip` which covers the archive-level EOCD disk-number fields) | #1759 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/cd-lh-crc-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-crc-mismatch.zip) | 122 B | CD/LH `crc32` consistency check at [Zip/Archive.lean:740](/home/kim/lean-zip/Zip/Archive.lean:740) — *"crc32 mismatch between CD and local header"* (LH crc differs from CD; both stored, sizes match so earlier guards do not fire first) | #1728 | other (CD/LH consistency) |
 | [testdata/zip/malformed/cd-lh-flags-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-flags-mismatch.zip) | 122 B | CD/LH flags-consistency check (bit-3-masked) at [Zip/Archive.lean:719](/home/kim/lean-zip/Zip/Archive.lean:719) — *"flags mismatch between CD and local header"* (CD sets bit 11 UTF-8-name, LH clears it — a known ZIP-smuggling vector) | #1715 | other (CD/LH consistency) |

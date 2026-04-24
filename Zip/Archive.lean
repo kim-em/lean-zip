@@ -414,6 +414,20 @@ private def parseCentralDir (data : ByteArray)
     if sig != sigCentral then break
     let versionNeeded := Binary.readUInt16LE data (pos + 6)
     let flags := Binary.readUInt16LE data (pos + 8)
+    -- APPNOTE §4.4.4: encryption-related general-purpose flag bits that
+    -- lean-zip does not support.  Bit 0 = traditional ZipCrypto, bit 6 =
+    -- strong encryption (SES/AES, APPNOTE Annex H), bit 13 = encrypted
+    -- central directory.  All three require cryptographic primitives we
+    -- do not ship; reject early so the CRC mismatch does not fire late
+    -- after running DEFLATE over encrypted bytes.  Writer-side is
+    -- trivially compliant: both `writeLocalHeader` and `writeCentralHeader`
+    -- hard-code `flags = 0x0800` (bit 11 UTF-8 only) and never set any of
+    -- these.  Mask value `0x2041 = 1 + 64 + 8192` catches all three bits
+    -- in one compare; orthogonal to the CD/LH flags-consistency check
+    -- which only fires on CD-vs-LH divergence.
+    unless (flags &&& 0x2041) == 0 do
+      throw (IO.userError
+        s!"zip: encryption-related general-purpose flag set (flags={flags}); lean-zip does not support encrypted archives")
     let method := Binary.readUInt16LE data (pos + 10)
     let crc := Binary.readUInt32LE data (pos + 16)
     let stdCompSize := Binary.readUInt32LE data (pos + 20)
