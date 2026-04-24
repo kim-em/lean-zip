@@ -132,9 +132,14 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   -- Each fixture pairs a malformed PAX extended header with a regular
   -- "hello.txt" entry. Existing guards in `parsePaxRecords` silently
   -- skip the PAX block; listing should return just the regular entry.
+  -- `pax-path-nul-in-value.tar` specifically exercises the NUL-byte
+  -- guard — the smuggled `path=a\x00b/c` override must NOT reach
+  -- `applyPaxOverrides`, so `entry.path` stays as the regular header's
+  -- declared `"hello.txt"` rather than the NUL-truncation target `"a"`.
   for fixture in #["pax-oversized-length.tar", "pax-truncated-record.tar",
                     "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
-                    "pax-inconsistent-length.tar"] do
+                    "pax-inconsistent-length.tar",
+                    "pax-path-nul-in-value.tar"] do
     let paxData ← readFixture s!"tar/malformed/{fixture}"
     let paxPath ← writeFixtureTmp fixture paxData
     let entries ← IO.FS.withFile paxPath .read fun h =>
@@ -283,7 +288,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
              "pax-oversized-length.tar", "pax-truncated-record.tar",
              "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
-             "pax-inconsistent-length.tar",
+             "pax-inconsistent-length.tar", "pax-path-nul-in-value.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
              "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",

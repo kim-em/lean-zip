@@ -18,6 +18,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/pax-invalid-utf8-key.tar
 - testdata/tar/malformed/pax-invalid-utf8-value.tar
 - testdata/tar/malformed/pax-inconsistent-length.tar
+- testdata/tar/malformed/pax-path-nul-in-value.tar
 -/
 
 /-- Build a fixture whose PAX header carries `paxData` (verbatim),
@@ -79,6 +80,19 @@ def fixtureInvalidUtf8Value : ByteArray :=
 def fixtureInconsistentLength : ByteArray :=
   "10 abcdef\n".toUTF8
 
+/-- PAX record `"14 path=a\x00b/c\n"` — a `path` override whose value
+    carries an embedded NUL byte. `String.fromUTF8?` accepts U+0000 as
+    valid UTF-8, so without the NUL guard on `keyBytes` / `valueBytes`
+    at [Zip/Tar.lean:122] the override would reach `applyPaxOverrides`
+    and set `entry.path := "a\x00b/c"` — a filesystem-truncation smuggle
+    that POSIX `open` reduces to `a`. With the guard, the record is
+    silently dropped (matching the existing invalid-UTF-8 precedent)
+    and the follow-on regular-file entry keeps its declared name.
+    Record size 14 = 2 digit-prefix + 1 space + 4 `"path"` + 1 `"="`
+    + 5 `"a\x00b/c"` + 1 newline. -/
+def fixturePathNulInValue : ByteArray :=
+  "14 path=a".toUTF8 ++ ByteArray.mk #[0x00] ++ "b/c\n".toUTF8
+
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/malformed"
   buildPaxMalformedFixture fixtureOversizedLength (outDir / "pax-oversized-length.tar")
@@ -86,4 +100,5 @@ def main : IO Unit := do
   buildPaxMalformedFixture fixtureInvalidUtf8Key (outDir / "pax-invalid-utf8-key.tar")
   buildPaxMalformedFixture fixtureInvalidUtf8Value (outDir / "pax-invalid-utf8-value.tar")
   buildPaxMalformedFixture fixtureInconsistentLength (outDir / "pax-inconsistent-length.tar")
-  IO.println "Built 5 malformed PAX fixtures under testdata/tar/malformed/."
+  buildPaxMalformedFixture fixturePathNulInValue (outDir / "pax-path-nul-in-value.tar")
+  IO.println "Built 6 malformed PAX fixtures under testdata/tar/malformed/."
