@@ -572,6 +572,21 @@ private def parseCentralDir (data : ByteArray)
     unless method == 0 ∨ method == 8 do
       throw (IO.userError
         s!"zip: unsupported compression method {method} for {name} (lean-zip supports method 0 (stored) and method 8 (deflate))")
+    -- APPNOTE §4.4.4 bit 4: Enhanced Deflating. When set, method 8
+    -- payloads use Deflate64 (64 KiB window, extended literal
+    -- alphabet). Neither the FFI zlib path nor `Zip/Native/Inflate.lean`
+    -- implements Deflate64; crafted method-8 payloads with bit 4 set
+    -- decode as plain DEFLATE, producing attacker-controlled output
+    -- that differs from a Deflate64-aware reader. Reject at CD parse.
+    -- Writer-side: `writeCentralHeader` emits `0x0800` only (bit 11
+    -- UTF-8), so lean-zip archives never set this bit. The check is
+    -- unconditional on method: gating on `method == 8 ∧ bit 4` would
+    -- leave a method-0-bit-4 smuggling vector open (stored entry with
+    -- bit 4 set is out-of-invariant relative to lean-zip's own writer
+    -- regardless of method).
+    unless flags &&& 0x0010 == 0 do
+      throw (IO.userError
+        s!"zip: CD entry enhanced-deflating flag bit 4 set (flags={flags}) for {name} at CD offset {pos}; lean-zip does not support APPNOTE §4.4.4 Deflate64")
     -- Structural check runs unconditionally (APPNOTE §4.5) so the
     -- no-ZIP64-sentinel path also rejects extra-data whose sub-field
     -- declared `dataSize` overruns the blob. Without this, a malformed

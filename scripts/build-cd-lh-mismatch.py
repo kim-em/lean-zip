@@ -23,6 +23,7 @@ Outputs:
 - testdata/zip/malformed/cd-stored-size-mismatch.zip
 - testdata/zip/malformed/cd-bad-method-early.zip
 - testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip
+- testdata/zip/malformed/cd-enhanced-deflating-flag.zip
 """
 import os, struct, zlib
 
@@ -34,17 +35,21 @@ N = len(NAME)
 P = len(PAYLOAD)
 
 def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
-            lh_mod_time=0, lh_mod_date=0):
+            lh_mod_time=0, lh_mod_date=0, flags=0):
     # PKZIP local file header (30 bytes).
     # `lh_mod_time` / `lh_mod_date` default to `0` — preserving
     # byte-identity of fixtures produced before the modtime/date
     # kwargs were threaded through.  Only
     # `cd-lh-modtime-mismatch.zip` exercises the non-default branch.
+    # `flags` defaults to `0` (writer-side invariant: `writeLocalHeader`
+    # emits `0x0800` for UTF-8 names, but the fixture family uses
+    # Latin-1-safe ASCII names like `hello.txt` so `0` matches).  Only
+    # `cd-enhanced-deflating-flag.zip` exercises the non-default branch.
     return struct.pack(
         "<IHHHHHIIIHH",
         0x04034b50,  # signature
         version,     # version needed
-        0,           # flags
+        flags,       # flags
         method,      # compression method
         lh_mod_time, # mod time
         lh_mod_date, # mod date
@@ -57,7 +62,7 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
             cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
-            internal_attrs=0):
+            internal_attrs=0, flags=0):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -75,12 +80,16 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # header).  The default is load-bearing: only
     # `cd-entry-internal-attrs-reserved.zip` exercises the non-default
     # branch (a reserved-bit value outside the bit-0 text-flag allowance).
+    # `flags` defaults to `0` (writer-side invariant: `writeCentralHeader`
+    # emits `0x0800` for UTF-8 names, but the fixture family uses
+    # Latin-1-safe ASCII names like `hello.txt` so `0` matches).  Only
+    # `cd-enhanced-deflating-flag.zip` exercises the non-default branch.
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
         20,          # version made by
         version,     # version needed
-        0,           # flags
+        flags,       # flags
         method,      # compression method
         cd_mod_time, # mod time
         cd_mod_date, # mod date
@@ -130,16 +139,19 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_disk_number_start=0,
           cd_local_hdr_offset=0,
           cd_internal_attrs=0,
+          lh_flags=0, cd_flags=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
-                 lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date)
+                 lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date,
+                 flags=lh_flags)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
                  local_hdr_offset=cd_local_hdr_offset,
-                 internal_attrs=cd_internal_attrs)
+                 internal_attrs=cd_internal_attrs,
+                 flags=cd_flags)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -328,4 +340,24 @@ write(
     os.path.join(OUT_DIR, "cd-entry-internal-attrs-reserved.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_internal_attrs=0x0080,
+)
+# CD-parse general-purpose flag bit 4 (APPNOTE §4.4.4 "enhanced deflating"
+# / Deflate64) anomaly: both CD and LH carry `flags=0x0010` (bit 4 set).
+# lean-zip does not implement Deflate64, and its writer never sets this
+# bit (writer emits `0x0800` UTF-8 or `0x0000` only), so any archive
+# with bit 4 set is out-of-invariant.  The method is `0` (stored), not
+# `8` — APPNOTE §4.4.4 documents bit 4 as "For Method 8", but lean-zip's
+# guard fires regardless of method to close the method-0-bit-4
+# smuggling vector (an attacker could set bit 4 on a stored entry to
+# smuggle Deflate64-decoder-differential interpretations).  Sibling of
+# the other flag-bit guards (#1762 bits 0/6/13 encryption, `a2e749f3-2`
+# bit 5 patched data); together these close the general-purpose
+# flag-word dimension of the CD-parse early-reject surface.  LH mirrors
+# CD (`lh_flags=0x0010`) so the CD/LH flags-consistency check in
+# `readEntryData` does not fire first — the CD-parse bit-4 guard is
+# the only gate.
+write(
+    os.path.join(OUT_DIR, "cd-enhanced-deflating-flag.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_flags=0x0010, cd_flags=0x0010,
 )
