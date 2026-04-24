@@ -5,12 +5,18 @@ local header is mutated post-construction so that one field disagrees
 with the central directory.  All fixtures are byte-stable (no
 timestamps, no random padding).
 
+The script also emits CD/EOCD consistency fixtures where the anomaly
+lives in the EOCD record itself — `eocd-disknum-mismatch.zip` is one
+such fixture, and the EOCD writer takes an optional `disk_start` kwarg
+(default `0`, preserving byte-identity of the CD/LH fixtures above).
+
 Outputs:
 - testdata/zip/malformed/cd-lh-method-mismatch.zip
 - testdata/zip/malformed/cd-lh-size-mismatch.zip
 - testdata/zip/malformed/cd-lh-uncompsize-mismatch.zip
 - testdata/zip/malformed/cd-lh-crc-mismatch.zip
 - testdata/zip/malformed/cd-lh-version-mismatch.zip
+- testdata/zip/malformed/eocd-disknum-mismatch.zip
 """
 import os, struct, zlib
 
@@ -61,11 +67,17 @@ def make_cd(method, comp_size, uncomp_size, version=20):
         0,           # local header offset
     )
 
-def make_eocd(cd_size, cd_offset):
+def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0):
+    # `disk_start` / `num_this_disk` default to 0 (single-disk).  The
+    # defaults are load-bearing: they preserve byte-identity of the
+    # CD/LH fixtures below, whose SHA-256s are recorded in progress
+    # entries.  Only `eocd-disknum-mismatch.zip` exercises the
+    # non-default branch.
     return struct.pack(
         "<IHHHHIIH",
         0x06054b50,  # signature
-        0, 0,        # disk number, disk with CD
+        num_this_disk,  # disk number (EOCD pos+4, UInt16)
+        disk_start,     # disk where CD starts (EOCD pos+6, UInt16)
         1, 1,        # entries on disk, total entries
         cd_size,
         cd_offset,
@@ -74,12 +86,15 @@ def make_eocd(cd_size, cd_offset):
 
 def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           lh_uncomp=P, cd_uncomp=P, lh_crc=CRC,
-          lh_version=20, cd_version=20):
+          lh_version=20, cd_version=20,
+          eocd_disk_start=0, eocd_num_this_disk=0):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version)
     cde = cd + NAME
-    eocd = make_eocd(len(cde), len(lhe))
+    eocd = make_eocd(len(cde), len(lhe),
+                     disk_start=eocd_disk_start,
+                     num_this_disk=eocd_num_this_disk)
     with open(path, "wb") as f:
         f.write(lhe + cde + eocd)
     print(f"wrote {path} ({os.path.getsize(path)} bytes)")
@@ -125,4 +140,16 @@ write(
     os.path.join(OUT_DIR, "cd-lh-version-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_version=45, cd_version=20,
+)
+# EOCD disk-number anomaly: `diskWhereCDStarts=1` instead of `0`.  The
+# CD/LH fields are otherwise consistent (stock hello.txt stored entry);
+# `numberOfThisDisk` is left at `0` so only `diskWhereCDStarts` fires
+# in the error message — deterministic attribution.  lean-zip only
+# supports single-disk archives, so any nonzero disk-number field is
+# rejected post-ZIP64-override (the fixture uses the standard EOCD,
+# not ZIP64, so both widths of the check exercise the same branch).
+write(
+    os.path.join(OUT_DIR, "eocd-disknum-mismatch.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    eocd_disk_start=1,
 )
