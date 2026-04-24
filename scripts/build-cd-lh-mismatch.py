@@ -26,6 +26,7 @@ Outputs:
 - testdata/zip/malformed/cd-patched-data-flag.zip
 - testdata/zip/malformed/cd-nul-in-name.zip
 - testdata/zip/malformed/cd-path-unsafe.zip
+- testdata/zip/malformed/cd-deflate-zero-compsize.zip
 """
 import os, struct, zlib
 
@@ -519,5 +520,43 @@ write(
     lh_method=0, cd_method=0,
     lh_comp=0, cd_comp=0, lh_uncomp=0, cd_uncomp=0,
     lh_crc=0xDEADBEEF, cd_crc=0xDEADBEEF,
+    payload=b"",
+)
+# CD-parse deflate-method zero-compSize/nonzero-uncompSize math invariant
+# anomaly: CD and LH both advertise `method=8` (deflate) with
+# `compressedSize=0` and `uncompressedSize=42`.  APPNOTE §4.4.8 / §4.4.9
+# define these fields; every ZIP compression method produces at least one
+# compressed byte from non-empty uncompressed input (method 0 has
+# `compSize == uncompSize`; method 8 has a 2-byte minimum block-header
+# encoding per RFC 1951 — the `03 00` empty-stored-block marker).  So
+# `compSize == 0 ∧ uncompSize > 0` is structurally impossible regardless
+# of method — a universal mathematical invariant every correct writer
+# obeys.  The sibling `cd-stored-size-mismatch.zip` catches this shape
+# only when `method == 0` (via the equality mismatch); the sibling
+# `cd-empty-entry-crc-nonzero.zip` covers `uncompSize == 0` entries.
+# This fixture closes the method=8 residual at CD parse — pre-PR,
+# `Archive.list` returned an `Entry` with the smuggled values verbatim
+# and `Archive.extract` failed only later inside the inflate backend
+# with an undescriptive decompression error whose attribution did not
+# pin the structural anomaly.  `parseCentralDir` now rejects at CD
+# parse time, post-ZIP64-resolution, after the stored-method size
+# invariant and the empty-entry CRC invariant — the three math-invariant
+# columns sit as a contiguous block.  CRC is `0` so the empty-entry
+# guard (which only fires on `uncompSize == 0`) does not interact; the
+# stored-method guard (which only fires on `method == 0`) is also
+# silent.  Payload is empty (`payload=b""`) because `compSize=0` — the
+# 9-byte name bytes follow the LH immediately, then the CD.  LH and
+# CD fields match byte-for-byte, keeping the CD/LH consistency
+# invariants (method / sizes / crc / version / flags) intact so no
+# sibling CD/LH skew guard fires first.  File layout:
+#   LH (30 B) + name (9 B) = 39 B; CD (46 B) + name (9 B) = 55 B;
+#   EOCD (22 B); total 116 B.  Uncompressed-size value `42` chosen as
+# a canonical "obviously crafted" non-zero UInt32 — any positive value
+# fires the same guard.
+write(
+    os.path.join(OUT_DIR, "cd-deflate-zero-compsize.zip"),
+    lh_method=8, cd_method=8,
+    lh_comp=0, cd_comp=0, lh_uncomp=42, cd_uncomp=42,
+    lh_crc=0, cd_crc=0,
     payload=b"",
 )
