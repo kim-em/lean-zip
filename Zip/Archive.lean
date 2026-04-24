@@ -234,9 +234,22 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
     field. All fields are read from the standard EOCD and overridden by the
     ZIP64 EOCD64 block when present. lean-zip writes single-disk archives only,
     so `numEntriesThisDisk` is expected to equal `totalEntries`; the pair is
-    threaded through for a consistency check in `parseCentralDir`. -/
+    threaded through for a consistency check in `parseCentralDir`.
+
+    When the ZIP64 EOCD Locator + EOCD64 pair is found and the ZIP64 record
+    overrides one of the standard-EOCD fields
+    (cdSize/cdOffset/totalEntries/numberOfThisDisk/diskWhereCDStarts/
+    numEntriesThisDisk), this raises an `IO.userError` containing
+    `"EOCD ZIP64-override mismatch"` unless the standard-EOCD field carries
+    the APPNOTE §4.3.16 sentinel — 0xFFFFFFFF for 4-byte fields, 0xFFFF for
+    2-byte fields — or numerically matches the ZIP64 override (real-world
+    producers such as Go's `archive/zip` emit ZIP64 with real zeros in the
+    standard-EOCD disk-number slots, not sentinels). A non-sentinel standard
+    value combined with a numerically differing ZIP64 value is a
+    parser-differential smuggling vector: one parser trusts the standard
+    EOCD, another trusts the ZIP64 override. -/
 private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
-    : Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat) := Id.run do
+    : IO (Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat)) := do
   -- Find standard EOCD
   if data.size < 22 then return none
   let mut eocdPos : Option Nat := none
@@ -249,13 +262,22 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
     if i == 0 then break
     i := i - 1
   let some pos := eocdPos | return none
-  -- Read standard EOCD values (file-absolute)
-  let mut cdSize := (Binary.readUInt32LE data (pos + 12)).toNat
-  let mut cdOffset := (Binary.readUInt32LE data (pos + 16)).toNat
-  let mut totalEntries := (Binary.readUInt16LE data (pos + 10)).toNat
-  let mut numberOfThisDisk := (Binary.readUInt16LE data (pos + 4)).toNat
-  let mut diskWhereCDStarts := (Binary.readUInt16LE data (pos + 6)).toNat
-  let mut numEntriesThisDisk := (Binary.readUInt16LE data (pos + 8)).toNat
+  -- Capture raw standard-EOCD values for the ZIP64-override sentinel check
+  -- below.  These must remain untouched across the override branch so the
+  -- `unless` guards compare the original file-byte values, not the mutated
+  -- ZIP64 values.
+  let stdNumberOfThisDisk16   := Binary.readUInt16LE data (pos + 4)
+  let stdDiskWhereCDStarts16  := Binary.readUInt16LE data (pos + 6)
+  let stdNumEntriesThisDisk16 := Binary.readUInt16LE data (pos + 8)
+  let stdTotalEntries16       := Binary.readUInt16LE data (pos + 10)
+  let stdCdSize32             := Binary.readUInt32LE data (pos + 12)
+  let stdCdOffset32           := Binary.readUInt32LE data (pos + 16)
+  let mut cdSize := stdCdSize32.toNat
+  let mut cdOffset := stdCdOffset32.toNat
+  let mut totalEntries := stdTotalEntries16.toNat
+  let mut numberOfThisDisk := stdNumberOfThisDisk16.toNat
+  let mut diskWhereCDStarts := stdDiskWhereCDStarts16.toNat
+  let mut numEntriesThisDisk := stdNumEntriesThisDisk16.toNat
   -- Check for ZIP64 EOCD Locator (20 bytes before standard EOCD)
   if pos >= 20 then
     if Binary.readUInt32LE data (pos - 20) == sigLocator64 then
@@ -271,6 +293,33 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             numberOfThisDisk := (Binary.readUInt32LE data (bufPos + 16)).toNat
             diskWhereCDStarts := (Binary.readUInt32LE data (bufPos + 20)).toNat
             numEntriesThisDisk := (Binary.readUInt64LE data (bufPos + 24)).toNat
+            -- ZIP64-override sentinel checks (APPNOTE §4.3.16).  Each guard
+            -- permits either the sentinel (strict APPNOTE-compliant overflow
+            -- encoding) or a numeric match against the ZIP64 override
+            -- (producers such as Go's `archive/zip` emit ZIP64 with the real
+            -- disk-number value `0` in the standard EOCD rather than
+            -- `0xFFFF` — see `testdata/zip/interop/go-zip64.zip`). Rejection
+            -- fires only when the standard field is both non-sentinel AND
+            -- numerically disagrees with the ZIP64 override — the
+            -- parser-differential smuggling vector.
+            unless stdCdSize32 == val32Max ∨ stdCdSize32.toNat == cdSize do
+              throw (IO.userError
+                s!"zip: EOCD ZIP64-override mismatch: standard EOCD cdSize={stdCdSize32}, ZIP64 cdSize={cdSize} (expected sentinel {val32Max} or numeric match)")
+            unless stdCdOffset32 == val32Max ∨ stdCdOffset32.toNat == cdOffset do
+              throw (IO.userError
+                s!"zip: EOCD ZIP64-override mismatch: standard EOCD cdOffset={stdCdOffset32}, ZIP64 cdOffset={cdOffset} (expected sentinel {val32Max} or numeric match)")
+            unless stdTotalEntries16 == val16Max ∨ stdTotalEntries16.toNat == totalEntries do
+              throw (IO.userError
+                s!"zip: EOCD ZIP64-override mismatch: standard EOCD totalEntries={stdTotalEntries16}, ZIP64 totalEntries={totalEntries} (expected sentinel {val16Max} or numeric match)")
+            unless stdNumberOfThisDisk16 == val16Max ∨ stdNumberOfThisDisk16.toNat == numberOfThisDisk do
+              throw (IO.userError
+                s!"zip: EOCD ZIP64-override mismatch: standard EOCD numberOfThisDisk={stdNumberOfThisDisk16}, ZIP64 numberOfThisDisk={numberOfThisDisk} (expected sentinel {val16Max} or numeric match)")
+            unless stdDiskWhereCDStarts16 == val16Max ∨ stdDiskWhereCDStarts16.toNat == diskWhereCDStarts do
+              throw (IO.userError
+                s!"zip: EOCD ZIP64-override mismatch: standard EOCD diskWhereCDStarts={stdDiskWhereCDStarts16}, ZIP64 diskWhereCDStarts={diskWhereCDStarts} (expected sentinel {val16Max} or numeric match)")
+            unless stdNumEntriesThisDisk16 == val16Max ∨ stdNumEntriesThisDisk16.toNat == numEntriesThisDisk do
+              throw (IO.userError
+                s!"zip: EOCD ZIP64-override mismatch: standard EOCD numEntriesThisDisk={stdNumEntriesThisDisk16}, ZIP64 numEntriesThisDisk={numEntriesThisDisk} (expected sentinel {val16Max} or numeric match)")
   return some (pos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
     numEntriesThisDisk)
 
@@ -574,7 +623,7 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   Handle.seek h tailStart.toUInt64
   let tail ← readExact h tailSize "EOCD tail"
   let some (_, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
-      numEntriesThisDisk) :=
+      numEntriesThisDisk) ←
       findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
   unless cdOffset + cdSize <= fileSize do
