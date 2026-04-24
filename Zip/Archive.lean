@@ -499,6 +499,26 @@ private def parseCentralDir (data : ByteArray)
     unless diskNumberStart == 0 do
       throw (IO.userError
         s!"zip: CD entry diskNumberStart mismatch (diskNumberStart={diskNumberStart}) for entry at CD offset {pos}; lean-zip supports single-disk archives only")
+    -- APPNOTE §4.4.10: `internalFileAttributes` (CD +36, UInt16) has
+    -- bit 0 defined as "apparent ASCII/text data"; bits 1 and 2 are
+    -- "reserved for use by PKWARE"; remaining bits are "unused in
+    -- version 1.0". lean-zip's writer emits zero here (the 46-byte CD
+    -- header is `Binary.zeros`-initialised and the writer never
+    -- overwrites `pos + 36` — see the "internal attrs (36)" comment at
+    -- the writer site around Zip/Archive.lean:131). Info-ZIP legitimately
+    -- sets bit 0 on apparent text files (interop checked against
+    -- `testdata/zip/interop/`: go-unix, go-test, go-crc32 all use
+    -- `0x0000` or `0x0001`), so preserve bit 0 and reject any reserved
+    -- bit (1-15). A crafted archive with reserved bits set is either
+    -- smuggled attribution data a lenient parser silently trusts, or a
+    -- parser-differential vector where a strict reader rejects. Sibling
+    -- of the PR #1759 CD+34 (diskNumberStart) and PR #1752 EOCD
+    -- numEntriesThisDisk writer-invariant guards on the same fast-fail
+    -- layer — this closes the CD+36 writer-zero column.
+    let internalAttrs := Binary.readUInt16LE data (pos + 36)
+    unless internalAttrs &&& 0xFFFE == 0 do
+      throw (IO.userError
+        s!"zip: CD entry internalAttrs reserved bits set (internalAttrs={internalAttrs}) for entry at CD offset {pos}")
     let entryEnd := pos + 46 + nameLen + extraLen + commentLen
     if entryEnd > cdEnd then
       throw (IO.userError "zip: central directory entry extends past end of central directory")

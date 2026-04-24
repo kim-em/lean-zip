@@ -22,6 +22,7 @@ Outputs:
 - testdata/zip/malformed/cd-lh-modtime-mismatch.zip
 - testdata/zip/malformed/cd-stored-size-mismatch.zip
 - testdata/zip/malformed/cd-bad-method-early.zip
+- testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip
 """
 import os, struct, zlib
 
@@ -55,7 +56,8 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
     )
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
-            cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0):
+            cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
+            internal_attrs=0):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -68,6 +70,11 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # sits at file offset 0; only
     # `cd-entry-localoffset-past-cdstart.zip` exercises the non-default
     # branch.
+    # `internal_attrs` defaults to `0` (APPNOTE §4.4.10 writer-zero
+    # invariant, matching lean-zip's `Binary.zeros`-initialised CD
+    # header).  The default is load-bearing: only
+    # `cd-entry-internal-attrs-reserved.zip` exercises the non-default
+    # branch (a reserved-bit value outside the bit-0 text-flag allowance).
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
@@ -84,7 +91,7 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
         0,           # extra length
         0,           # comment length
         disk_number_start,  # disk number start (CD offset 34, UInt16)
-        0,           # internal attrs
+        internal_attrs,     # internal attrs   (CD offset 36, UInt16)
         0,           # external attrs
         local_hdr_offset,  # local header offset (CD offset 42, UInt32)
     )
@@ -122,6 +129,7 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_mod_time=0, cd_mod_date=0,
           cd_disk_number_start=0,
           cd_local_hdr_offset=0,
+          cd_internal_attrs=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
@@ -130,7 +138,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
-                 local_hdr_offset=cd_local_hdr_offset)
+                 local_hdr_offset=cd_local_hdr_offset,
+                 internal_attrs=cd_internal_attrs)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -299,4 +308,24 @@ write(
     os.path.join(OUT_DIR, "cd-entry-localoffset-past-cdstart.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_local_hdr_offset=50,
+)
+# CD-entry `internalFileAttributes` reserved-bits anomaly (APPNOTE §4.4.10):
+# the CD entry's internal-attrs field at CD +36 (UInt16) carries `0x0080`
+# — bit 7 set, reserved for PKWARE per APPNOTE §4.4.10 which defines only
+# bit 0 ("apparent ASCII/text data") and leaves bits 1-15 as
+# reserved/unused in version 1.0.  lean-zip's writer emits zero here
+# (writer-zero invariant: the 46-byte CD header is `Binary.zeros`-
+# initialised and `pos + 36` is never overwritten), and Info-ZIP/Go/
+# Python interop fixtures use only `0x0000` or `0x0001` (text-flag).
+# `parseCentralDir` rejects with `"internalAttrs reserved bits set"`
+# early in the iteration loop (after `diskNumberStart`, before
+# `entryEnd`).  Companion to `cd-entry-disknum-mismatch.zip` (CD +34
+# writer-zero field) and the archive-level `eocd-numentries-thisdisk-
+# mismatch.zip` (EOCD writer-invariant); together they extend the
+# "writer-zero single-field at CD+offset" early-reject lineage.  LH
+# mirrors the CD (no LH `internalAttrs` field exists; APPNOTE §4.3.7).
+write(
+    os.path.join(OUT_DIR, "cd-entry-internal-attrs-reserved.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    cd_internal_attrs=0x0080,
 )
