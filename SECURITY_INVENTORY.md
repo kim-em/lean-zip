@@ -310,6 +310,49 @@ Summary — what this pattern catches and what it does not:
     largest entry. Interop sweep across
     `testdata/zip/{interop,malformed}/*.zip` reports every EOCD64
     `versionNeededToExtract` at `45`, comfortably below the bound
+  - ZIP64 EOCD64 record archive-layout invariant — PR #TBD
+    (`testdata/zip/malformed/zip64-eocd64-overlap-locator.zip`)
+    rejects archives whose Locator-declared `eocd64Offset` plus the
+    56-byte v1 EOCD64 record reaches into or past the Locator at
+    `findEndOfCentralDir` time
+    ([Zip/Archive.lean:306](/home/kim/lean-zip/Zip/Archive.lean:306)).
+    APPNOTE §4.3.6 pins the ZIP64 trailer layout as `[CD] [EOCD64]
+    [Locator] [EOCD]`, so a legitimate archive satisfies
+    `eocd64Offset + 56 ≤ locatorPos = eocdPos - 20` — the EOCD64
+    record must end strictly before the Locator begins. Pre-PR
+    reader silently let the claimed EOCD64 overlap the Locator (or
+    claim to start anywhere inside it), reading Locator bytes as the
+    tail of the EOCD64 record — classic parser-differential /
+    layout-smuggling vector where a strict peer reader rejects and
+    lean-zip accepts. Writer-side at
+    [Zip/Archive.lean:148-164](/home/kim/lean-zip/Zip/Archive.lean:148)
+    emits the three records contiguously in APPNOTE order, so the
+    invariant holds trivially for every lean-zip-produced archive.
+    Buffer-relative form `bufPos + 56 ≤ pos - 20` matches the
+    surrounding `bufPos`/`pos` arithmetic and is well-defined under
+    `Nat` subtraction via the outer `pos ≥ 20` guard. Placed
+    immediately after the `sigEOCD64` match so the layout check
+    runs before the record-size / versionMadeBy / versionNeeded
+    guards — error attribution stays tightly scoped to
+    layout-shape failures. The pre-existing `bufPos + 56 ≤
+    data.size` buffer-readability check remains as defense-in-depth
+    but is now strictly weaker than the layout invariant for any
+    archive whose buffer extends past the Locator. Peer-parser
+    confirmation: CPython's `zipfile._EndRecData64` enforces the
+    same invariant (`if reloff > offset: raise BadZipFile("Corrupt
+    zip64 end of central directory locator")`) — the new guard
+    brings lean-zip into alignment with a strict reference
+    implementation. Archive-level macro sibling: `cdOffset + cdSize
+    ≤ eocdPos` (issue #1799 / in-flight PR #1809). Per-entry micro
+    sibling: `localOffset + 30 ≤ cdOffset` (PR #1813). Together the
+    three invariants close the ZIP archive-layout dimension across
+    the standard-EOCD macro, the ZIP64-EOCD64 macro, and the
+    per-entry micro granularities. Interop pre-flight swept
+    `testdata/zip/interop/*.zip`: only `go-zip64.zip` carries an
+    EOCD64 + Locator pair, and its `eocd64Offset + 56 = 200 =
+    locatorPos` satisfies the invariant tightly (EOCD64 ends
+    exactly at Locator start). Net-new dimension observed during
+    the ZIP64-layer archive-layout coverage sweep
   - CD/LH extra-data sub-field structural check — PR #1788
     (`testdata/zip/malformed/cd-extra-overrun-datasize.zip`) rejects
     CD/LH entries whose extra-data contains a sub-field whose declared

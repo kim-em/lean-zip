@@ -176,6 +176,63 @@ write_fixture(
 )
 
 
+def write_zip64_overlap_locator_fixture(path):
+    # APPNOTE §4.3.6 pins the ZIP64 archive layout as
+    # `[LH+data]* [CD] [EOCD64] [Locator] [EOCD]`, so a legitimate archive
+    # satisfies `eocd64Offset + 56 <= locatorPos = eocdPos - 20` — the
+    # 56-byte v1 EOCD64 record must end strictly before the Locator
+    # begins.  This fixture emits a *truncated* 48-byte EOCD64 "record"
+    # whose trailing 8 bytes would be the `cdOffset` field (APPNOTE
+    # §4.3.14 at `bufPos + 48`) and places the Locator immediately after
+    # — so a reader that trusts the layout (and reads the full 56-byte
+    # record at the claimed `eocd64Offset`) silently overlaps 8 bytes of
+    # the Locator, reading `sigLocator64` + `diskWithZip64EOCD` as the
+    # EOCD64's `cdOffset`.
+    #
+    # The Locator's `eocd64Offset` points to the start of the 48-byte
+    # block (`locatorPos - 48`), so `eocd64Offset + 56 = locatorPos + 8
+    # > locatorPos` trips the archive-layout-invariant guard.  Standard
+    # EOCD keeps sentinel values so the ZIP64-override sentinel check
+    # does not fire first; the `sigEOCD64` check at the claimed offset
+    # passes because the synthetic block starts with a valid signature.
+    # Record-size (44), versionMadeBy (45), and versionNeededToExtract
+    # (45) are all stored as valid values so the subsequent guards
+    # would pass — the new layout-invariant guard is the *only* thing
+    # that rejects this archive.
+    #
+    # Archive-level macro sibling: `cdOffset + cdSize <= eocdPos`
+    # (issue #1799 / in-flight PR #1809).  Per-entry micro sibling:
+    # `localOffset + 30 <= cdOffset` (PR #1813).  Together the three
+    # invariants close the ZIP archive-layout dimension.
+    lh = make_lh()
+    lhe = lh + NAME + PAYLOAD
+    cd = make_cd()
+    cde = cd + NAME
+    # Full 56-byte EOCD64, then we drop the last 8 bytes (cdOffset field)
+    # so the synthetic record is only 48 bytes.  Trailing reader will
+    # spill the final 8 bytes into the Locator.
+    eocd64_full = make_eocd64(len(cde), len(lhe))
+    assert len(eocd64_full) == 56
+    eocd64_truncated = eocd64_full[:48]
+    eocd64_offset = len(lhe) + len(cde)          # points at sigEOCD64
+    locator_pos   = eocd64_offset + 48            # 8 bytes short of 56
+    # Locator claims eocd64Offset = locator_pos - 48:
+    locator = make_locator(eocd64_offset)
+    eocd = make_eocd(
+        cd_size=len(cde), cd_offset=len(lhe),
+        total_entries=1, entries_this_disk=1,
+        this_disk=0, disk_cd=0,
+    )
+    with open(path, "wb") as f:
+        f.write(lhe + cde + eocd64_truncated + locator + eocd)
+    print(f"wrote {path} ({os.path.getsize(path)} bytes)")
+
+
+write_zip64_overlap_locator_fixture(
+    os.path.join(OUT_DIR, "zip64-eocd64-overlap-locator.zip"),
+)
+
+
 def make_lh_zip64(comp_sentinel=True):
     # Local header whose `stdCompSize` is the ZIP64 sentinel so the file is
     # parseable as a ZIP64-per-entry archive without needing an outer
