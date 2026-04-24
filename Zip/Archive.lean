@@ -818,6 +818,40 @@ private def parseCentralDir (data : ByteArray)
       unless crc == 0 do
         throw (IO.userError
           s!"zip: CD entry CRC must be zero when uncompressedSize is zero (crc={crc}, uncompressedSize={uncompSize}) for {name} at CD offset {pos}")
+    -- APPNOTE §4.4.8 / §4.4.9: the `compressedSize` and
+    -- `uncompressedSize` fields carry the on-disk and post-decompression
+    -- byte counts respectively.  Every ZIP compression method produces
+    -- at least one compressed byte from non-empty uncompressed input:
+    -- method 0 (stored, APPNOTE §4.4.5) has `compSize == uncompSize`;
+    -- method 8 (deflate, RFC 1951) has a 2-byte minimum block header
+    -- (`03 00` for the empty-stored-block encoding), so any non-empty
+    -- inflate output requires at minimum a block header plus encoded
+    -- data.  Therefore `compSize == 0 ∧ uncompSize > 0` is structurally
+    -- impossible for a well-formed ZIP entry regardless of method — a
+    -- universal mathematical invariant every correct writer (Info-ZIP,
+    -- Go `archive/zip`, CPython `zipfile`, 7-Zip, lean-zip's own
+    -- `create` at [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195)
+    -- which emits `Checksum.crc32` + deflate/stored payload) obeys.
+    -- This is the third column of the per-entry mathematical-invariant
+    -- family at CD parse: the sibling stored-method guard above catches
+    -- `compSize == 0 ∧ uncompSize > 0` only when `method == 0` (via the
+    -- equality mismatch), leaving `method == 8` entries with this shape
+    -- unguarded at CD parse — they previously fell through to the
+    -- downstream `readEntryData` + inflate path, which only runs on
+    -- `Archive.extract` and whose error attribution is scattered among
+    -- the decompression backends rather than pinned on the CD-parse
+    -- structural anomaly.  The sibling empty-entry CRC guard
+    -- (`uncompSize == 0 → crc == 0`) fires only when `uncompSize == 0`;
+    -- the new invariant fires only when `uncompSize > 0`, so the two
+    -- are ordering-disjoint.  Placed after the empty-entry CRC
+    -- invariant so the three math-invariant columns sit as a contiguous
+    -- block.  `uncompSize : UInt64` is the resolved value (post-ZIP64)
+    -- by this point, so the `0xFFFFFFFF` sentinel does not spuriously
+    -- trip the guard for legitimate ZIP64-per-entry archives.
+    if uncompSize > 0 then
+      unless compSize > 0 do
+        throw (IO.userError
+          s!"zip: CD entry has zero compressedSize with nonzero uncompressedSize (compressedSize={compSize}, uncompressedSize={uncompSize}) for {name} at CD offset {pos}")
     entries := entries.push {
       path := name
       compressedSize := compSize
