@@ -537,8 +537,21 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   let tailStart := fileSize - tailSize
   Handle.seek h tailStart.toUInt64
   let tail ← readExact h tailSize "EOCD tail"
-  let some (_, cdOffset, cdSize, totalEntries) := findEndOfCentralDir tail tailStart
+  let some (eocdPos, cdOffset, cdSize, totalEntries) := findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
+  -- Reject trailing garbage or a declared EOCD comment that overshoots
+  -- the archive buffer. `findEndOfCentralDir` takes the first EOCD
+  -- signature found scanning backward from the end of the tail but
+  -- never reconciles the comment-length field (`pos + 20`, `UInt16`)
+  -- with the actual end of the archive. Without this check a polyglot
+  -- / smuggled payload can append arbitrary bytes after the EOCD
+  -- comment and still be parsed as a valid ZIP. `tail.size` is the
+  -- tail-buffer size (`tailStart + tail.size == fileSize`), so the
+  -- equality is the file-absolute postcondition.
+  let commentLength := (Binary.readUInt16LE tail (eocdPos + 20)).toNat
+  unless eocdPos + 22 + commentLength == tail.size do
+    throw (IO.userError
+      s!"zip: EOCD trailing garbage (EOCD at offset {tailStart + eocdPos}, commentLength={commentLength}, fileSize={fileSize}; expected fileSize={tailStart + eocdPos + 22 + commentLength})")
   unless cdOffset + cdSize <= fileSize do
     throw (IO.userError "zip: central directory extends beyond file")
   if maxCentralDirSize > 0 && cdSize > maxCentralDirSize then

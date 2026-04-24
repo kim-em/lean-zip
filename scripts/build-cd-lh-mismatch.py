@@ -11,6 +11,7 @@ Outputs:
 - testdata/zip/malformed/cd-lh-uncompsize-mismatch.zip
 - testdata/zip/malformed/cd-lh-crc-mismatch.zip
 - testdata/zip/malformed/cd-lh-version-mismatch.zip
+- testdata/zip/malformed/eocd-comment-trailing-garbage.zip
 """
 import os, struct, zlib
 
@@ -74,14 +75,14 @@ def make_eocd(cd_size, cd_offset):
 
 def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           lh_uncomp=P, cd_uncomp=P, lh_crc=CRC,
-          lh_version=20, cd_version=20):
+          lh_version=20, cd_version=20, trailing_bytes=b""):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe))
     with open(path, "wb") as f:
-        f.write(lhe + cde + eocd)
+        f.write(lhe + cde + eocd + trailing_bytes)
     print(f"wrote {path} ({os.path.getsize(path)} bytes)")
 
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -125,4 +126,18 @@ write(
     os.path.join(OUT_DIR, "cd-lh-version-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_version=45, cd_version=20,
+)
+# Otherwise-valid archive with 6 bytes of trailing garbage appended
+# after the EOCD (which has commentLength=0).  The backward EOCD-scan
+# still finds the signature at its natural position, but the strict
+# `pos + 22 + commentLength == fileSize` postcondition in
+# `findEndOfCentralDir`'s caller fires on the 6-byte surplus and
+# rejects the archive as a polyglot / trailing-garbage smuggling
+# attempt.  The six bytes `PK_INJ` are deliberately chosen to NOT
+# contain another `PK\x05\x06` EOCD signature (`_` is 0x5F, not 0x05)
+# so the backward scan cannot be redirected to a different candidate.
+write(
+    os.path.join(OUT_DIR, "eocd-comment-trailing-garbage.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    trailing_bytes=b"PK_INJ",
 )
