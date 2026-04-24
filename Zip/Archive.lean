@@ -247,7 +247,14 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
     standard-EOCD disk-number slots, not sentinels). A non-sentinel standard
     value combined with a numerically differing ZIP64 value is a
     parser-differential smuggling vector: one parser trusts the standard
-    EOCD, another trusts the ZIP64 override. -/
+    EOCD, another trusts the ZIP64 override.
+
+    Inside the ZIP64 EOCD64 branch, also enforces APPNOTE §4.3.14.1 —
+    `versionNeededToExtract` at `bufPos + 14` must be `≥ 45`. A ZIP64
+    EOCD64 block declaring a lower version is rejected with
+    `"ZIP64 EOCD64 versionNeededToExtract"`; otherwise a capability-gated
+    extractor that feature-checks on that field would decode the archive
+    as plain ZIP while lean-zip silently processes the ZIP64 overrides. -/
 private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
     : IO (Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat)) := do
   -- Find standard EOCD
@@ -287,6 +294,18 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
         let bufPos := eocd64Offset - baseOffset
         if bufPos + 56 <= data.size then
           if Binary.readUInt32LE data bufPos == sigEOCD64 then
+            -- APPNOTE §4.3.14.1: ZIP64 archives MUST set the EOCD64
+            -- `versionNeededToExtract` field to 45 or greater. A lower
+            -- value is a capability-smuggling vector — a reader that
+            -- feature-gates on this field decodes the archive as plain
+            -- ZIP (mis-reading `cdOffset`/`cdSize` from the standard
+            -- EOCD) while a permissive reader processes the ZIP64
+            -- overrides. Checked before the override reads so the
+            -- resulting error does not reveal the smuggled values.
+            let eocd64Version := Binary.readUInt16LE data (bufPos + 14)
+            unless eocd64Version ≥ 45 do
+              throw (IO.userError
+                s!"zip: ZIP64 EOCD64 versionNeededToExtract ({eocd64Version}) below ZIP64 minimum (45)")
             cdSize := (Binary.readUInt64LE data (bufPos + 40)).toNat
             cdOffset := (Binary.readUInt64LE data (bufPos + 48)).toNat
             totalEntries := (Binary.readUInt64LE data (bufPos + 32)).toNat

@@ -3,6 +3,8 @@ import ZipTest.Helpers
 /-! Tests for ZIP interop: stored/deflated methods, ZIP64, multi-entry archives,
     and malformed/security fixtures. -/
 
+set_option maxRecDepth 2048
+
 def ZipTest.ZipFixtures.tests : IO Unit := do
   -- go-test.zip: 2 entries (test.txt deflated, gophercolor16x16.png stored)
   let goTestData ← readFixture "zip/interop/go-test.zip"
@@ -433,6 +435,27 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract eocdZ64OverridePath eocdZ64OverrideExtractDir)
     "EOCD ZIP64-override mismatch"
 
+  -- zip64-eocd64-version-low.zip: 242-byte ZIP64 archive derived from
+  -- `testdata/zip/interop/go-zip64.zip` by overwriting the two bytes at
+  -- absolute offset 158 (EOCD64 `bufPos + 14`, the
+  -- `versionNeededToExtract` field) from `\x2d\x00` (45) to `\x14\x00`
+  -- (20).  APPNOTE §4.3.14.1 requires the EOCD64 `versionNeededToExtract`
+  -- field to be `≥ 45` whenever a ZIP64 EOCD64 record is present;
+  -- `findEndOfCentralDir`'s ZIP64 branch rejects the archive with a
+  -- `ZIP64 EOCD64 versionNeededToExtract` error at
+  -- `Archive.list`/`Archive.extract` time, before the ZIP64 overrides are
+  -- read (so the smuggled values are not revealed by the error message).
+  -- This closes the parser-differential smuggling vector where a
+  -- capability-gated extractor feature-checks on the version field and
+  -- decodes the archive as plain ZIP (mis-reading `cdOffset`/`cdSize`
+  -- from the standard EOCD) while a permissive reader processes the
+  -- ZIP64 overrides.
+  let z64VersionLowData ← readFixture "zip/malformed/zip64-eocd64-version-low.zip"
+  let z64VersionLowPath ← writeFixtureTmp "zip64-eocd64-version-low.zip" z64VersionLowData
+  assertThrows "ZIP malformed (zip64-eocd64-version-low.zip)"
+    (do let _ ← Archive.list z64VersionLowPath; pure ())
+    "ZIP64 EOCD64 versionNeededToExtract"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -465,6 +488,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "eocd-numentries-thisdisk-mismatch.zip",
              "cd-entry-disknum-mismatch.zip",
              "eocd-zip64-override-nosentinel.zip",
+             "zip64-eocd64-version-low.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
