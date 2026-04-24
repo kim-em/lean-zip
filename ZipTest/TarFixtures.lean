@@ -163,6 +163,17 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       pure ())
     "end of archive"
 
+  -- NUL-byte smuggle in GNU long-name payload: must be rejected by the
+  -- new raw-bytes guard before UTF-8 / Latin-1 decode runs. Sibling of
+  -- the ZIP CD-parse NUL-byte guard (PR #1831).
+  let gnuLnNulData ← readFixture "tar/malformed/gnu-longname-nul-in-name.tar"
+  let gnuLnNulPath ← writeFixtureTmp "gnu-longname-nul-in-name.tar" gnuLnNulData
+  assertThrows "TAR malformed (gnu-longname-nul-in-name.tar)"
+    (IO.FS.withFile gnuLnNulPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "GNU long-name contains NUL byte"
+
   -- Non-throwing variants: payloads with no trailing NUL and with
   -- invalid UTF-8 must each apply a predictable name to the next entry.
   let gnuLnNoTermData ← readFixture "tar/malformed/gnu-longname-no-terminator.tar"

@@ -572,6 +572,8 @@ private partial def forEntries (input : IO.FS.Stream)
         let nameData ← readBoundedEntryData input entry.size.toNat maxHeaderSize
           "GNU long name"
         let nameBytes := stripTrailingNuls nameData
+        if (nameBytes.findIdx? (· == 0)).isSome then
+          throw (IO.userError "tar: GNU long-name contains NUL byte")
         let name := match String.fromUTF8? nameBytes with
           | some s => s
           | none => Binary.fromLatin1 nameBytes
@@ -582,6 +584,8 @@ private partial def forEntries (input : IO.FS.Stream)
         let linkData ← readBoundedEntryData input entry.size.toNat maxHeaderSize
           "GNU long link"
         let linkBytes := stripTrailingNuls linkData
+        if (linkBytes.findIdx? (· == 0)).isSome then
+          throw (IO.userError "tar: GNU long-link contains NUL byte")
         let link := match String.fromUTF8? linkBytes with
           | some s => s
           | none => Binary.fromLatin1 linkBytes
