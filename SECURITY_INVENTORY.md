@@ -306,12 +306,12 @@ Summary — what this pattern catches and what it does not:
     `headerId == 0x0001` match — a "first-wins" policy that lets a
     "last-wins" parser disagree on identical bytes. The new
     `hasDuplicateZip64Extra` helper at
-    [Zip/Archive.lean:364](/home/kim/lean-zip/Zip/Archive.lean:364)
+    [Zip/Archive.lean:388](/home/kim/lean-zip/Zip/Archive.lean:388)
     walks the TLV structure once and is invoked by both the CD-side
     caller in `parseCentralDir`
-    ([Zip/Archive.lean:497](/home/kim/lean-zip/Zip/Archive.lean:497))
+    ([Zip/Archive.lean:545](/home/kim/lean-zip/Zip/Archive.lean:545))
     and the LH-side caller in `readEntryData`
-    ([Zip/Archive.lean:799](/home/kim/lean-zip/Zip/Archive.lean:799))
+    ([Zip/Archive.lean:835](/home/kim/lean-zip/Zip/Archive.lean:835))
     before `parseZip64Extra` is called. The two error wordings
     (`"duplicate ZIP64 extra field"` vs `"duplicate ZIP64 local extra
     field"`) keep attribution distinct between layers. Sibling of the
