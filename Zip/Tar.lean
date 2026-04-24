@@ -75,9 +75,22 @@ private def hdrPrefix   := (345, 155)
 
 /-- Parse PAX extended header records from data.
     Format: `<length> <key>=<value>\n` where length includes itself.
-    Returns an array of (key, value) pairs. -/
-@[noinline] def parsePaxRecords (data : ByteArray) : Array (String × String) := Id.run do
+    Returns an array of (key, value) pairs on success, or an error
+    message when the block violates a parser-differential validity
+    invariant — currently just "duplicate key": POSIX SUSv4 §pax leaves
+    the order of records unspecified, so an attacker-crafted block
+    with two records sharing a key (e.g. `path=` twice) is a classic
+    smuggling vector where lenient and strict readers disagree on
+    which value wins. Rejecting at parse time closes the last
+    parser-differential dimension on the PAX-record validation surface
+    (sibling of the embedded-NUL and invalid-UTF-8 silent-skip guards
+    on the same loop). Malformed records (invalid UTF-8, embedded
+    NUL in key / value) are silently dropped before the duplicate
+    check, so they cannot smuggle a duplicate past this guard. -/
+@[noinline] def parsePaxRecords (data : ByteArray) :
+    Except String (Array (String × String)) := Id.run do
   let mut records : Array (String × String) := #[]
+  let mut err : Option String := none
   let mut pos := 0
   while pos < data.size do
     -- Read the decimal length field (digits only, terminated by space)
@@ -131,9 +144,14 @@ private def hdrPrefix   := (345, 155)
       if let (some key, some value) := (String.fromUTF8? keyBytes, String.fromUTF8? valueBytes) then
         if (keyBytes.findIdx? (· == 0)).isNone
             && (valueBytes.findIdx? (· == 0)).isNone then
+          if records.any (·.1 == key) then
+            err := some s!"tar: PAX extended header has duplicate {key.quote} record"
+            break
           records := records.push (key, value)
     pos := recordEnd
-  return records
+  match err with
+  | some msg => return .error msg
+  | none => return .ok records
 
 /-- Apply PAX extended header overrides to an entry. -/
 def applyPaxOverrides (entry : Entry) (records : Array (String × String)) : Entry := Id.run do
@@ -648,7 +666,9 @@ private partial def forEntries (input : IO.FS.Stream)
       if entry.typeflag == typePaxExtended then
         let paxData ← readBoundedEntryData input entry.size.toNat maxHeaderSize
           "PAX extended header"
-        paxOverrides := some (parsePaxRecords paxData)
+        match parsePaxRecords paxData with
+        | .ok records => paxOverrides := some records
+        | .error msg => throw (IO.userError msg)
         continue
       -- PAX global header: skip (we don't track global state)
       if entry.typeflag == typePaxGlobal then

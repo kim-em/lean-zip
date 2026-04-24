@@ -196,7 +196,7 @@ def ZipTest.Tar.tests : IO Unit := do
 
   -- PAX record parsing
   let paxData := "12 path=abc\n10 uid=42\n".toUTF8
-  let records := Tar.parsePaxRecords paxData
+  let records ← IO.ofExcept (Tar.parsePaxRecords paxData)
   unless records.size == 2 do throw (IO.userError s!"pax parse: expected 2 records, got {records.size}")
   unless records[0]! == ("path", "abc") do throw (IO.userError "pax parse: record 0")
   unless records[1]! == ("uid", "42") do throw (IO.userError "pax parse: record 1")
