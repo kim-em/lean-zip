@@ -37,7 +37,7 @@ Per-session details are in `progress/`.
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 - **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
 - **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
-- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1797): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); 27 fixtures in `testdata/zip/malformed/` (was 22 at #1770, 12 at #1721)
+- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1836): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826, paired with per-entry CD `versionMadeBy > 63` issue #1812 / PR #1820 still in flight at batch close); 34 fixtures in `testdata/zip/malformed/` (was 28 at #1803, 22 at #1770, 12 at #1721)
 
 ## Milestones
 
@@ -2540,6 +2540,173 @@ new: `cd-stored-size-mismatch.zip`,
 `lh-zip64-extra-duplicate.zip`). Tar fixture counts (14 / 6)
 unchanged. Type mix across the 12 PRs: feature 4 / paired-review
 6 / doc 1 / chore 1. Toolchain `v4.29.1`.
+
+**12-PR batch (Apr 24): Track E CD-parse defensive-check cadence + EOCD64 upper-bound sibling (summarize #1839):**
+
+Twelve PRs merged in the ~4.5-hour window between summarize #1803
+(merge commit `6ed456d`, 11:48:25Z 2026-04-24) and PR #1836 (merge
+commit `41bf587`, 16:17:05Z 2026-04-24). No spec file touched;
+`grep -rc sorry Zip/` stayed at 0 throughout.
+
+*Track E feature PRs (6).* Each PR closes an independent CD-parse-
+time defensive dimension on the CD entry or the ZIP64 EOCD64
+record; no two dimensions share a field.
+
+- **CD `versionNeededToExtract > 45` upper bound (#1807).** Rejects
+  CD entries claiming a `versionNeededToExtract` greater than `45`
+  (the APPNOTE 6.3 ZIP64 ceiling) at `parseCentralDir`
+  ([Zip/Archive.lean:546](/home/kim/lean-zip/Zip/Archive.lean:546)),
+  before the existing CD-vs-LH one-sided downgrade check (PR #1736)
+  can be bypassed by both sides claiming an unsupported value.
+  Fixture: `cd-version-needed-too-high.zip`. Distinct error
+  substring (`"unsupported versionNeededToExtract"`) from the
+  later CD/LH downgrade check (`"LH versionNeededToExtract"` at
+  :889); the `.claude/skills/error-wording-catalogue/SKILL.md`
+  entries for both live side-by-side so future tests unambiguously
+  pick the upper-bound vs. the downgrade message.
+- **Per-entry `localOffset + 30 ≤ cdOffset` archive-layout
+  invariant (#1813).** Per-entry micro-counterpart of the in-flight
+  archive-level macro `cdOffset + cdSize ≤ eocdPos` guard (issue
+  #1799 / PR #1809). APPNOTE §4.3.6 pins the archive layout as
+  `[LH+data]* [CD] [EOCD]`, so every entry's LH must be readable
+  strictly before the CD start. Pre-PR, `Archive.list` had no gate
+  at all — only the extract path's late LH-signature check caught
+  a subset of the construction. Fires at
+  [Zip/Archive.lean:665](/home/kim/lean-zip/Zip/Archive.lean:665)
+  post-ZIP64-resolution so the resolved `UInt64` `localOff` is
+  checked, not the `0xFFFFFFFF` sentinel; uses asymmetric
+  `SpanInFile`-shaped subtraction to avoid `UInt64` wrap on crafted
+  very-large values. Fixture:
+  `cd-entry-localoffset-past-cdstart.zip`.
+  `SECURITY_INVENTORY.md` *Recent wins* (:414-442).
+- **`internalFileAttributes` reserved-bits guard (#1819).** Rejects
+  CD entries with any bit other than bit 0 ("apparent ASCII/text
+  data") set in APPNOTE §4.4.10 `internalFileAttributes` (CD +36,
+  UInt16). Mask `internalAttrs &&& 0xFFFE == 0` preserves Info-ZIP
+  text-flag interop (spot-check over `testdata/zip/interop/`:
+  `go-unix.zip`, `go-test.zip`, `go-crc32-not-streamed.zip` set
+  bit 0 on apparent-text files; the remaining interop fixtures
+  use `0x0000`) while rejecting smuggled reserved-bit values.
+  Fires at
+  [Zip/Archive.lean:537](/home/kim/lean-zip/Zip/Archive.lean:537)
+  pre-ZIP64-resolution. Contiguous writer-zero `UInt16` sibling of
+  PR #1759 (CD +34 `diskNumberStart`): the three writer-zero CD
+  fields `+34 → +36 → EOCD.numEntriesThisDisk` now fire their
+  guards in the order the fields appear. Fixture:
+  `cd-entry-internal-attrs-reserved.zip`.
+  `SECURITY_INVENTORY.md` *Recent wins* (:443-473).
+- **CD flag bit-5 (compressed patched data) rejection (#1824).**
+  Rejects CD entries whose APPNOTE §4.4.4 general-purpose flag
+  bit 5 (PKWARE's proprietary compressed-patched-data format §4.6)
+  is set at `parseCentralDir`
+  ([Zip/Archive.lean:619](/home/kim/lean-zip/Zip/Archive.lean:619)),
+  pre-ZIP64-resolution. lean-zip implements neither creation nor
+  extraction of the format; the writer emits `flags = 0x0800`
+  (bit 11 UTF-8 names) only. Third independent GPF bit dimension
+  closed; siblings #1818 (bit 4 enhanced deflating) and #1822
+  (bits 7-10/12/14/15 reserved/unused) are in flight at batch
+  close. Once those land, the GPF word is fully validated except
+  bits 1-3 (deflate/data-descriptor) and bit 11 (UTF-8), which
+  are legitimate. Mask-equality form (`flags &&& 0x0020 == 0`)
+  matches the `0xFFF7` bit-3-masking convention in `readEntryData`.
+  Fixture: `cd-patched-data-flag.zip`. `SECURITY_INVENTORY.md`
+  *Recent wins* (:474-499).
+- **ZIP64 EOCD64 `versionMadeBy` spec-version upper bound (#1826).**
+  Rejects EOCD64 records whose `versionMadeBy` field (APPNOTE §4.4.2.2,
+  at `bufPos + 12`) carries a lower byte greater than `63` (spec
+  version 6.3) at `findEndOfCentralDir`
+  ([Zip/Archive.lean:337](/home/kim/lean-zip/Zip/Archive.lean:337)).
+  Only the lower byte is checked — real archives vary widely in
+  host-OS code (upper byte: Info-ZIP emits `3`, Windows producers
+  `11` NTFS, etc.); the lower byte is a pure spec-version field
+  with a well-defined APPNOTE maximum. Interop sweep:
+  `testdata/zip/interop/go-zip64.zip` — the only interop fixture
+  with an EOCD64 — has `versionMadeBy=0x002d` (low byte `45`),
+  comfortably below the bound. Archive-level counterpart to the
+  per-entry CD `versionMadeBy > 63` guard (issue #1812 / PR #1820
+  in flight at batch close); together the pair closes the
+  `versionMadeBy` upper-bound dimension across both ZIP layers.
+  Fixture: `zip64-eocd64-versionmadeby-too-high.zip`.
+  `SECURITY_INVENTORY.md` *Recent wins* (:262-289).
+- **CD entry name NUL-byte rejection (#1831).** Rejects raw CD
+  `nameBytes` containing `0x00` at `parseCentralDir`
+  ([Zip/Archive.lean:559](/home/kim/lean-zip/Zip/Archive.lean:559)),
+  before the UTF-8 decode at :562-572. A NUL in the filename is a
+  classic parser-differential / filesystem-truncation smuggling
+  vector: POSIX `open`/`stat` treats `evil.txt\x00.zip` as
+  `evil.txt`, while `Archive.list` callers and strict peer readers
+  see the full NUL-embedded string. Guarding on the raw `ByteArray`
+  before UTF-8 decode closes both the UTF-8 and Latin-1 decode
+  branches uniformly and keeps the error message NUL-free.
+  Simultaneously closes `Archive.list` (silent NUL-path surfacing)
+  and `Archive.extract` (silent truncated-filename drop) dimensions.
+  Interop pre-flight swept
+  `testdata/zip/{interop,malformed}/*.zip` for pre-existing
+  NUL-in-name fixtures — zero hits. Fixture: `cd-nul-in-name.zip`.
+  `SECURITY_INVENTORY.md` *Recent wins* (:500-532).
+
+*Paired-review PRs (5).* #1808 (reviews #1801, the prior-wave
+feature #1803 excluded from its 12-PR scope — inherited-backlog
+closure at 38 min), #1815 (reviews #1807, in-wave at 43 min),
+#1830 (reviews #1813, in-wave at 2 h 35 min), #1832 (reviews
+#1819, in-wave at 2 h 40 min), #1835 (reviews #1824, in-wave at
+2 h 37 min). The three mid-wave in-wave pairs all crossed the 2 h
+mark — still inside the *30 min to several hours* bracket
+documented in
+[progress/20260424T105643Z_c4046753-paired-review-1785.md](progress/20260424T105643Z_c4046753-paired-review-1785.md)
+§F, but the median has slid from 43 min (wave start) to ~2.5 h
+(wave tail) as the paired-review queue filled faster than it
+drained. #1826 and #1831 have no paired-review entry at batch
+close; paired-review issues #1828 and #1833 are unclaimed in the
+queue, inherited across the summarize boundary the same way the
+prior wave's #1788/#1793 pairs were.
+
+*Doc (1).* #1836 fixes a PR-number misattribution in
+`SECURITY_INVENTORY.md`'s CD flag bit-5 *Recent wins* entry
+(`#1820 → #1824`) plus a related-class label drift. The particular
+drift was a real `#NNNN` value pointing at the wrong PR, not a
+placeholder; the #1796 placeholder-PR linter did not catch it, so
+the error was found by reviewer cross-check. A small footprint
+follow-up to the #1794/#1796 attribution-hygiene cluster of the
+prior wave.
+
+*Scope discipline.* Source-code changes this wave touched only
+`Zip/Archive.lean` (999 → 1113 LOC, +114 from five new CD-parse
+checks — four field-per-field validations plus the archive-layout
+invariant — plus the EOCD64 `versionMadeBy` guard) and
+`ZipTest/ZipFixtures.lean` (687 → 841 LOC, +154 from six new
+fixture/assert blocks). `Zip/Spec/` stayed at 42 files × 21,067
+LOC with zero edits, matching the scope discipline of the prior
+three Track E waves.
+
+*Dispatcher snapshot.* At batch close, `coordination orient`
+listed 11 open PRs in the `merge-conflict` state, all Track E
+CD-parse cascades from the rapid `Archive.lean` edits across this
+and the prior wave. This is flagged as a known-state observation
+(the pr-repair lane will drain it), not a summarize concern — the
+same cascading-conflict pattern follows every multi-PR Track E
+wave that edits a common section of `parseCentralDir`.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/`
+and `Zip/*.lean` (unchanged); `bash scripts/check-inventory-links.sh`
+→ `errors=0, warnings=0` post-wave. Fixtures in
+`testdata/zip/malformed/` grew from 28 to 34 (six new:
+`cd-version-needed-too-high.zip`,
+`cd-entry-localoffset-past-cdstart.zip`,
+`cd-entry-internal-attrs-reserved.zip`,
+`cd-patched-data-flag.zip`,
+`zip64-eocd64-versionmadeby-too-high.zip`,
+`cd-nul-in-name.zip`). Tar fixture counts (14 / 6) unchanged.
+Type mix across the 12 PRs: feature 6 / paired-review 5 / doc 1.
+Toolchain `v4.29.1`.
+
+Note: the pre-wave baseline of 28 fixtures is the actual tree
+count at #1803 merge, one higher than the 27 the prior
+summarize's *Current State* bullet recorded — #1801's
+`cd-bad-method-early.zip` landed 10 min before #1803 and was
+outside the prior summarize's 12-PR scope, so its fixture was
+omitted from the tally but was present in the tree.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
