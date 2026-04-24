@@ -287,6 +287,29 @@ Summary — what this pattern catches and what it does not:
     `testdata/zip/interop/go-zip64.zip` — the only interop fixture
     with an EOCD64 — has `versionMadeBy=0x002d` (low byte `45`),
     comfortably below the bound
+  - ZIP64 EOCD64 `versionNeededToExtract` upper-bound check — PR #TBD
+    (`testdata/zip/malformed/zip64-eocd64-versionneeded-too-high.zip`)
+    rejects archives whose EOCD64 `versionNeededToExtract` field
+    (APPNOTE §4.4.3.2, at `bufPos + 14`) exceeds `63` (spec version
+    6.3, the APPNOTE-defined maximum) at `findEndOfCentralDir` time.
+    The field declares the minimum ZIP specification version needed
+    to interpret the EOCD64 record; any higher value is either a
+    forward-looking extension lean-zip does not support or a crafted
+    smuggle against strict readers. Writer-side at
+    [Zip/Archive.lean:150](/home/kim/lean-zip/Zip/Archive.lean:150)
+    hard-codes `45` (EOCD64 requires ZIP64 support, §4.4.3.2), so the
+    bound `45 ≤ 63` holds trivially for every lean-zip-produced
+    archive. Upper-bound sibling of the lower-bound `≥ 45` check
+    (issue #1758 / PR #1764); together the two bounds close the
+    EOCD64 `versionNeededToExtract` two-sided-bound dimension.
+    Archive-level analog of the per-entry CD +6 upper bound
+    (PR #1807, `cd-version-needed-too-high.zip`), which caps the
+    per-entry field at `45`; the archive-level EOCD64 cap is `63`
+    because APPNOTE §4.4.3.2 documents the field as the version
+    needed to *interpret the record* rather than to extract the
+    largest entry. Interop sweep across
+    `testdata/zip/{interop,malformed}/*.zip` reports every EOCD64
+    `versionNeededToExtract` at `45`, comfortably below the bound
   - CD/LH extra-data sub-field structural check — PR #1788
     (`testdata/zip/malformed/cd-extra-overrun-datasize.zip`) rejects
     CD/LH entries whose extra-data contains a sub-field whose declared
@@ -1032,6 +1055,7 @@ to be silently skipped.
 | [testdata/zip/malformed/too-short.zip](/home/kim/lean-zip/testdata/zip/malformed/too-short.zip) | 10 B | EOCD-scan failure at [Zip/Archive.lean:945](/home/kim/lean-zip/Zip/Archive.lean:945) — *"cannot find end of central directory"* | `481e562` | other (framing) |
 | [testdata/zip/malformed/zip64-eocd64-bad-recsize.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-eocd64-bad-recsize.zip) | 198 B | ZIP64 EOCD64 self-declared record-size check at [Zip/Archive.lean:319](/home/kim/lean-zip/Zip/Archive.lean:319) — *"ZIP64 EOCD64 record-size mismatch"* (EOCD64 `size of this record` field at `bufPos + 4` carries `0` instead of the required `44` for a v1 EOCD64; lean-zip reads the record at fixed per-field offsets from a hard-coded 56-byte layout, while a stricter parser that trusts the self-declared length would read past or short of that — a parser-differential smuggling vector) | #1761 | other (ZIP64 consistency) |
 | [testdata/zip/malformed/zip64-eocd64-versionmadeby-too-high.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-eocd64-versionmadeby-too-high.zip) | 198 B | ZIP64 EOCD64 `versionMadeBy` lower-byte upper-bound check at [Zip/Archive.lean:337](/home/kim/lean-zip/Zip/Archive.lean:337) — *"ZIP64 EOCD64 versionMadeBy spec-version byte too high"* (EOCD64 `versionMadeBy` field at `bufPos + 12` carries `0x0340` — low byte `0x40 = 64`, one past the APPNOTE §4.4.2.2 cap of `63` (spec version 6.3); archive-level counterpart to the per-entry CD+4 `versionMadeBy` fixture, closing the `versionMadeBy` upper-bound dimension across both ZIP layers) | #1826 | other (ZIP64 consistency) |
+| [testdata/zip/malformed/zip64-eocd64-versionneeded-too-high.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-eocd64-versionneeded-too-high.zip) | 198 B | ZIP64 EOCD64 `versionNeededToExtract` upper-bound check at [Zip/Archive.lean:354](/home/kim/lean-zip/Zip/Archive.lean:354) — *"ZIP64 EOCD64 versionNeededToExtract too high"* (EOCD64 `versionNeededToExtract` field at `bufPos + 14` carries `0x00FF` — spec version 25.5, well above the APPNOTE §4.4.3.2 cap of `63` (spec version 6.3); upper-bound sibling of the lower-bound `≥ 45` check (issue #1758 / PR #1764), together closing the EOCD64 `versionNeededToExtract` two-sided-bound dimension. Archive-level analog of the per-entry CD+6 upper bound (PR #1807, `cd-version-needed-too-high.zip`); the archive-level cap is `63` (not `45`) because APPNOTE §4.4.3.2 documents the EOCD64 field as the version needed to interpret the record rather than to extract the largest entry) | #TBD | other (ZIP64 consistency) |
 | [testdata/zip/malformed/zip64-extra-oversized-datasize.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-extra-oversized-datasize.zip) | 162 B | ZIP64 extra-field `dataSize` exactness check at [Zip/Archive.lean:697](/home/kim/lean-zip/Zip/Archive.lean:697) — *"malformed ZIP64 extra field"* (CD entry's ZIP64 extra `dataSize=16` claims two 8-byte slots while only `stdCompSize` is the sentinel, so APPNOTE §4.5.3 requires exactly `8 * 1 = 8` bytes; the trailing 8 bytes `0xDEADBEEFCAFEBABE` are attacker-chosen slack that a lenient parser silently discards. `parseZip64Extra` enforces `fpos == fieldEnd` after the three conditional reads — sibling of `zip64-eocd64-bad-recsize.zip` at a different layer of the same parser-differential attack class) | #1785 | other (ZIP64 consistency) |
 
 ## Required Maintenance Rule

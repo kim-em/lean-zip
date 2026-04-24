@@ -335,6 +335,23 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             unless (eocd64VersionMadeBy &&& 0xFF) ≤ 63 do
               throw (IO.userError
                 s!"zip: ZIP64 EOCD64 versionMadeBy spec-version byte too high (versionMadeBy={eocd64VersionMadeBy}, spec-version={eocd64VersionMadeBy &&& 0xFF}, max supported 63)")
+            -- EOCD64 `versionNeededToExtract` upper-bound (APPNOTE §4.4.3.2).
+            -- The field declares the minimum ZIP spec version needed to
+            -- interpret the EOCD64 record.  APPNOTE 6.3.10 tops out at
+            -- spec version 6.3 = encoded `63`; any higher value is
+            -- beyond the defined spec — either attacker-smuggled
+            -- beyond-spec metadata or a parser-differential smuggling
+            -- vector against strict readers.  Writer-side at
+            -- `Zip/Archive.lean:150` hard-codes `45` (EOCD64 requires
+            -- ZIP64 support, §4.4.3.2), so `45 ≤ 63` holds trivially.
+            -- Upper-bound sibling of the lower-bound `≥ 45` check
+            -- (issue #1758); the two bounds close the EOCD64
+            -- `versionNeededToExtract` dimension.  Archive-level
+            -- sibling of the per-entry CD +6 upper bound (PR #1807).
+            let eocd64VersionNeeded := Binary.readUInt16LE data (bufPos + 14)
+            unless eocd64VersionNeeded ≤ 63 do
+              throw (IO.userError
+                s!"zip: ZIP64 EOCD64 versionNeededToExtract too high (versionNeededToExtract={eocd64VersionNeeded}, max supported 63)")
             cdSize := (Binary.readUInt64LE data (bufPos + 40)).toNat
             cdOffset := (Binary.readUInt64LE data (bufPos + 48)).toNat
             totalEntries := (Binary.readUInt64LE data (bufPos + 32)).toNat
