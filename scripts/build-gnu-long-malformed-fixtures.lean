@@ -18,6 +18,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/gnu-longname-no-terminator.tar
 - testdata/tar/malformed/gnu-longname-invalid-utf8.tar
 - testdata/tar/malformed/gnu-longlink-truncated.tar
+- testdata/tar/malformed/gnu-longname-nul-in-name.tar
 -/
 
 /-- Build the 512-byte UStar header for a GNU long-name / long-link
@@ -85,6 +86,37 @@ def buildGnuLonglinkTruncated : IO ByteArray := do
     ByteArray.mk (Array.replicate 100 (0x61 : UInt8))
   return hdr ++ truncPayload
 
+/-- Fixture 5: gnu-longname-nul-in-name.tar
+    Long-name payload is `"evil.txt\x00.tar"` (13 bytes, NUL in middle)
+    followed by a single NUL terminator (size = 14). `stripTrailingNuls`
+    strips the terminator; the interior NUL remains. The new NUL-byte
+    guard at `forEntries` must reject the payload before
+    `String.fromUTF8?` / `Binary.fromLatin1` runs — POSIX `open` would
+    truncate `"evil.txt\x00.tar"` to `"evil.txt"` on extract while
+    `Tar.list` callers see the full NUL-embedded string (classic
+    parser-differential / filesystem-truncation smuggle).
+
+    A trailing regular-file entry (`size := 0`, `path := "_"`) is
+    appended so the fixture exercises the override application path
+    fully — but the guard fires on the long-name pseudo-entry itself,
+    so the trailing entry is only reached by the no-guard regression
+    baseline. -/
+def buildGnuLongnameNulInName : IO ByteArray := do
+  -- 13 bytes: "evil.txt" (8) ++ 0x00 ++ ".tar" (4); then 0x00 terminator.
+  let payload : ByteArray := ByteArray.mk #[
+    0x65, 0x76, 0x69, 0x6C, 0x2E, 0x74, 0x78, 0x74,   -- "evil.txt"
+    0x00,                                             -- embedded NUL
+    0x2E, 0x74, 0x61, 0x72,                           -- ".tar"
+    0x00]                                             -- trailing NUL
+  let lnHdr  ← buildLongPseudoHeader Tar.typeGnuLongName 14
+  let lnPad  := Tar.paddingFor 14   -- 498 bytes
+  let regHdr ← Tar.buildHeader
+    { path     := "_"
+      size     := 0
+      mode     := 0o644
+      typeflag := Tar.typeRegular }
+  return lnHdr ++ payload ++ Binary.zeros lnPad ++ regHdr
+
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/malformed"
   IO.FS.writeBinFile (outDir / "gnu-longname-truncated.tar")
@@ -95,4 +127,6 @@ def main : IO Unit := do
     (← buildGnuLongnameInvalidUtf8)
   IO.FS.writeBinFile (outDir / "gnu-longlink-truncated.tar")
     (← buildGnuLonglinkTruncated)
-  IO.println "Built 4 malformed GNU long-name/long-link fixtures under testdata/tar/malformed/."
+  IO.FS.writeBinFile (outDir / "gnu-longname-nul-in-name.tar")
+    (← buildGnuLongnameNulInName)
+  IO.println "Built 5 malformed GNU long-name/long-link fixtures under testdata/tar/malformed/."
