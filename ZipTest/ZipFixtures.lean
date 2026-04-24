@@ -372,6 +372,26 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract eocdDisknumPath eocdDisknumExtractDir)
     "EOCD disk-number mismatch"
 
+  -- eocd-numentries-thisdisk-mismatch.zip: 122-byte stored ZIP whose EOCD
+  -- declares `numEntriesThisDisk=2` while `totalEntries=1` and exactly one
+  -- CD entry is present.  This is the sibling of
+  -- `eocd-numentries-mismatch.zip`: that fixture targets the
+  -- `totalEntries` vs. parsed-CD count, this one targets the
+  -- EOCD-internal agreement between the two entry-count fields.
+  -- `parseCentralDir` rejects with `EOCD numEntriesThisDisk mismatch`
+  -- before the (passing) `totalEntries` check at the tail.  Generated
+  -- by `scripts/build-cd-lh-mismatch.py`.
+  let eocdNumEntriesThisDiskData ←
+    readFixture "zip/malformed/eocd-numentries-thisdisk-mismatch.zip"
+  let eocdNumEntriesThisDiskPath ←
+    writeFixtureTmp "eocd-numentries-thisdisk-mismatch.zip" eocdNumEntriesThisDiskData
+  let eocdNumEntriesThisDiskExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-eocd-numentries-thisdisk-mismatch-extract"
+  IO.FS.createDirAll eocdNumEntriesThisDiskExtractDir
+  assertThrows "ZIP malformed (eocd-numentries-thisdisk-mismatch.zip)"
+    (Archive.extract eocdNumEntriesThisDiskPath eocdNumEntriesThisDiskExtractDir)
+    "EOCD numEntriesThisDisk mismatch"
+
   -- === ZIP security fixtures ===
 
   let zipSlipData ← readFixture "zip/security/zip-slip.zip"
@@ -401,6 +421,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "cd-lh-version-mismatch.zip",
              "eocd-numentries-mismatch.zip",
              "eocd-disknum-mismatch.zip",
+             "eocd-numentries-thisdisk-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-bad-crc-extract", "/tmp/lean-zip-fixture-bad-method-extract",
@@ -415,6 +436,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-cd-lh-version-mismatch-extract",
              "/tmp/lean-zip-fixture-eocd-numentries-mismatch-extract",
              "/tmp/lean-zip-fixture-eocd-disknum-mismatch-extract",
+             "/tmp/lean-zip-fixture-eocd-numentries-thisdisk-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "ZIP fixture tests: OK"

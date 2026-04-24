@@ -227,14 +227,16 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
 /-- Find the EOCD record in a (possibly tail-) buffer.
     `baseOffset` is the file-absolute byte offset where `data` starts (0 for full file).
     Returns
-    `(eocdPos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts)`
-    where cdOffset/cdSize are file-absolute, totalEntries is the EOCD-advertised
-    CD entry count, and the two disk-number fields are read from the standard
-    EOCD and overridden by the ZIP64 EOCD64 block when present. lean-zip writes
-    single-disk archives only, so both disk-number fields are expected to be `0`;
-    they are threaded through for a consistency check in `parseCentralDir`. -/
+    `(eocdPos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
+     numEntriesThisDisk)` where cdOffset/cdSize are file-absolute, totalEntries is
+    the EOCD-advertised CD entry count, the two disk-number fields carry the
+    single-disk invariant, and `numEntriesThisDisk` is the sibling entry-count
+    field. All fields are read from the standard EOCD and overridden by the
+    ZIP64 EOCD64 block when present. lean-zip writes single-disk archives only,
+    so `numEntriesThisDisk` is expected to equal `totalEntries`; the pair is
+    threaded through for a consistency check in `parseCentralDir`. -/
 private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
-    : Option (Nat × Nat × Nat × Nat × Nat × Nat) := Id.run do
+    : Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat) := Id.run do
   -- Find standard EOCD
   if data.size < 22 then return none
   let mut eocdPos : Option Nat := none
@@ -253,6 +255,7 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
   let mut totalEntries := (Binary.readUInt16LE data (pos + 10)).toNat
   let mut numberOfThisDisk := (Binary.readUInt16LE data (pos + 4)).toNat
   let mut diskWhereCDStarts := (Binary.readUInt16LE data (pos + 6)).toNat
+  let mut numEntriesThisDisk := (Binary.readUInt16LE data (pos + 8)).toNat
   -- Check for ZIP64 EOCD Locator (20 bytes before standard EOCD)
   if pos >= 20 then
     if Binary.readUInt32LE data (pos - 20) == sigLocator64 then
@@ -267,7 +270,9 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             totalEntries := (Binary.readUInt64LE data (bufPos + 32)).toNat
             numberOfThisDisk := (Binary.readUInt32LE data (bufPos + 16)).toNat
             diskWhereCDStarts := (Binary.readUInt32LE data (bufPos + 20)).toNat
-  return some (pos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts)
+            numEntriesThisDisk := (Binary.readUInt64LE data (bufPos + 24)).toNat
+  return some (pos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
+    numEntriesThisDisk)
 
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
     Only reads fields whose standard values are 0xFFFFFFFF. Returns `none` if a required field
@@ -309,7 +314,8 @@ private def parseZip64Extra (extraData : ByteArray) (stdUncomp stdComp stdOffset
 
 /-- Parse central directory entries from a ZIP file. -/
 private def parseCentralDir (data : ByteArray)
-    (cdOffset cdSize declaredEntries numberOfThisDisk diskWhereCDStarts : Nat)
+    (cdOffset cdSize declaredEntries numberOfThisDisk diskWhereCDStarts
+      entriesThisDisk : Nat)
     : IO (Array Entry) := do
   -- EOCD disk-number sanity: lean-zip supports single-disk archives only.
   -- Writer-side confirmation: both fields are hard-coded to 0 (see the
@@ -321,6 +327,16 @@ private def parseCentralDir (data : ByteArray)
   unless numberOfThisDisk == 0 && diskWhereCDStarts == 0 do
     throw (IO.userError
       s!"zip: EOCD disk-number mismatch (numberOfThisDisk={numberOfThisDisk}, diskWhereCDStarts={diskWhereCDStarts}); lean-zip supports single-disk archives only")
+  -- EOCD entry-count sanity: `numEntriesThisDisk` and `totalEntries` must
+  -- agree on single-disk archives (the only shape lean-zip supports).
+  -- Writer-side confirmation: both fields receive the same `numEntries`
+  -- at the EOCD/ZIP64 write sites (see Zip/Archive.lean:146-147 and
+  -- :160-161). Treat `declaredEntries` (post-ZIP64-override `totalEntries`)
+  -- as authoritative and report `entriesThisDisk` as the disagreement,
+  -- matching the direction of the sibling `totalEntries` check below.
+  unless entriesThisDisk == declaredEntries do
+    throw (IO.userError
+      s!"zip: EOCD numEntriesThisDisk mismatch (this-disk={entriesThisDisk}, total={declaredEntries})")
   let mut entries : Array Entry := #[]
   let mut pos := cdOffset
   let cdEnd := cdOffset + cdSize
@@ -557,7 +573,8 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   let tailStart := fileSize - tailSize
   Handle.seek h tailStart.toUInt64
   let tail ← readExact h tailSize "EOCD tail"
-  let some (_, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts) :=
+  let some (_, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
+      numEntriesThisDisk) :=
       findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
   unless cdOffset + cdSize <= fileSize do
@@ -568,6 +585,7 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   Handle.seek h cdOffset.toUInt64
   let cdBuf ← readExact h cdSize "central directory"
   parseCentralDir cdBuf 0 cdSize totalEntries numberOfThisDisk diskWhereCDStarts
+    numEntriesThisDisk
 
 /-- Read an entry's decompressed data from a file handle by seeking to its local header.
     `maxEntrySize` limits decompressed entry size; `0` means no limit on the FFI
