@@ -55,7 +55,8 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
     )
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
-            cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0):
+            cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
+            version_made_by=20):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -68,10 +69,21 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # sits at file offset 0; only
     # `cd-entry-localoffset-past-cdstart.zip` exercises the non-default
     # branch.
+    # `version_made_by` defaults to `0x0014` (= `20`: upper byte `0`
+    # host-OS DOS per APPNOTE §4.4.2.2, lower byte `20` = spec version
+    # 2.0).  The default is load-bearing: it preserves byte-identity of
+    # the existing fixtures, whose SHA-256s are recorded in progress
+    # entries.  lean-zip's actual writer at Zip/Archive.lean:117 emits
+    # `0x0314` (UNIX host-OS upper byte), but matching the historical
+    # test-fixture value here is the more important invariant — the
+    # lower-byte guard being added treats any value ≤ 63 as valid, so
+    # both `0x0014` and `0x0314` pass.  Only
+    # `cd-entry-versionmadeby-too-high.zip` exercises the non-default
+    # branch.
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
-        20,          # version made by
+        version_made_by,  # version made by (CD offset 4, UInt16)
         version,     # version needed
         0,           # flags
         method,      # compression method
@@ -122,6 +134,7 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_mod_time=0, cd_mod_date=0,
           cd_disk_number_start=0,
           cd_local_hdr_offset=0,
+          cd_version_made_by=20,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
@@ -130,7 +143,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
-                 local_hdr_offset=cd_local_hdr_offset)
+                 local_hdr_offset=cd_local_hdr_offset,
+                 version_made_by=cd_version_made_by)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -299,4 +313,25 @@ write(
     os.path.join(OUT_DIR, "cd-entry-localoffset-past-cdstart.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_local_hdr_offset=50,
+)
+# CD-parse per-entry `versionMadeBy` lower-byte upper-bound anomaly: the CD
+# entry's `versionMadeBy` field at CD+4 is `0x03FF` (upper byte `3` = UNIX
+# host-OS per APPNOTE §4.4.2.2, lower byte `255` = spec version 25.5 —
+# beyond any defined APPNOTE version; APPNOTE 6.3.10 tops out at lower
+# byte `63` = spec version 6.3).  `parseCentralDir` rejects at CD parse
+# time with `"versionMadeBy spec-version byte out of range"` before the
+# sibling CD+6 `versionNeeded` read, so the CD+4 fault is reported
+# before any CD+6 anomaly would be.  LH has no `versionMadeBy` field
+# (APPNOTE §4.3.7 — LH starts with signature + `versionNeededToExtract`),
+# so this is a single-side writer-invariant check like
+# `cd-entry-disknum-mismatch.zip`.  All other CD/LH fields are internally
+# consistent (stock hello.txt stored entry, versionNeeded=20, method=0,
+# no ZIP64) so no sibling guard fires first.  Companion to
+# `cd-version-needed-too-high.zip` (CD+6 `versionNeeded > 45`): together
+# the two fixtures pin the two version-byte fields at CD+4 and CD+6 to
+# APPNOTE-defined ranges and close the version-byte smuggling dimension.
+write(
+    os.path.join(OUT_DIR, "cd-entry-versionmadeby-too-high.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    cd_version_made_by=0x03FF,
 )

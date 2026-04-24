@@ -476,6 +476,26 @@ private def parseCentralDir (data : ByteArray)
   while pos + 46 <= cdEnd do
     let sig := Binary.readUInt32LE data pos
     if sig != sigCentral then break
+    -- APPNOTE §4.4.2.2: `versionMadeBy`'s lower byte encodes the ZIP spec
+    -- version in decimal-coded form (20 = 2.0, 45 = 4.5, 63 = 6.3).
+    -- APPNOTE 6.3.10 tops out at spec version 6.3 = lower byte 63. Any
+    -- higher value is beyond the defined spec — either attacker-smuggled
+    -- attribution data or a parser-differential vector against readers
+    -- that sanity-check this byte. Reject at CD parse time. Writer-side:
+    -- `writeCentralHeader` around Zip/Archive.lean:117 emits
+    -- `3 * 256 + (if z64 then 45 else 20)`, so lean-zip-produced archives
+    -- never exceed lower-byte 45. The upper byte (host-OS) is left
+    -- unchecked — real archives carry host-OS bytes with more variance
+    -- and a separate follow-up can tighten that dimension after interop
+    -- sampling. The name-resolution block has not yet run at this early
+    -- position, so the error message cannot interpolate the entry name;
+    -- use the CD offset `pos` instead, consistent with the sibling
+    -- `diskNumberStart` error message below.
+    let versionMadeBy := Binary.readUInt16LE data (pos + 4)
+    let versionMadeByLow := versionMadeBy &&& 0xFF
+    unless versionMadeByLow ≤ 63 do
+      throw (IO.userError
+        s!"zip: CD entry versionMadeBy spec-version byte out of range (versionMadeBy={versionMadeBy}, low byte={versionMadeByLow}) for entry at CD offset {pos}; APPNOTE §4.4.2.2 caps the lower byte at 63 (spec version 6.3)")
     let versionNeeded := Binary.readUInt16LE data (pos + 6)
     let flags := Binary.readUInt16LE data (pos + 8)
     let method := Binary.readUInt16LE data (pos + 10)
