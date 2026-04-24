@@ -227,7 +227,7 @@ Summary — what this pattern catches and what it does not:
     (single-disk archives must have them equal; writer-side at
     [Zip/Archive.lean:146-147](/home/kim/lean-zip/Zip/Archive.lean:146)
     and :160-161)
-  - ZIP64 EOCD Locator disk-number consistency check — PR #1754
+  - ZIP64 EOCD Locator disk-number consistency check — PR #1755
     (`testdata/zip/malformed/zip64-locator-multidisk.zip`) rejects
     archives whose locator advertises `diskWithZip64EOCD ≠ 0` or
     `totalDisks ≠ 1`; sibling of the standard-EOCD disk-number check
@@ -641,7 +641,7 @@ to be silently skipped.
 | [testdata/zip/malformed/oversized-zip64-compressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-zip64-compressed-size.zip) | 134 B | `assertSpanInFile` for the compressed payload at [Zip/Archive.lean:649](/home/kim/lean-zip/Zip/Archive.lean:649) — *"local data span"* (ZIP64 extra resolves an exabyte-scale `compressedSize`) | #1543 | oversized allocation |
 | [testdata/zip/malformed/oversized-zip64-uncompressed-size.zip](/home/kim/lean-zip/testdata/zip/malformed/oversized-zip64-uncompressed-size.zip) | 134 B | Strict LH ZIP64-extra parse at [Zip/Archive.lean:661](/home/kim/lean-zip/Zip/Archive.lean:661) — *"truncated ZIP64 local extra field"* (CD claims `uncompressedSize = 0xFFFFFFFF` but LH omits the ZIP64 block) | #1544 | oversized allocation |
 | [testdata/zip/malformed/too-short.zip](/home/kim/lean-zip/testdata/zip/malformed/too-short.zip) | 10 B | EOCD-scan failure at [Zip/Archive.lean:593](/home/kim/lean-zip/Zip/Archive.lean:593) — *"cannot find end of central directory"* | `481e562` | other (framing) |
-| [testdata/zip/malformed/zip64-locator-multidisk.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-locator-multidisk.zip) | 242 B | ZIP64 EOCD Locator disk-number consistency check at [Zip/Archive.lean:602](/home/kim/lean-zip/Zip/Archive.lean:602) — *"ZIP64 EOCD locator disk-number mismatch"* (locator's `totalDisks=2`; APPNOTE §4.3.15 pins single-disk archives to `diskWithZip64EOCD=0` and `totalDisks=1`, distinct from the standard-EOCD disk-number fields covered by `eocd-disknum-mismatch.zip`) | #1754 | other (ZIP64 consistency) |
+| [testdata/zip/malformed/zip64-locator-multidisk.zip](/home/kim/lean-zip/testdata/zip/malformed/zip64-locator-multidisk.zip) | 242 B | ZIP64 EOCD Locator disk-number consistency check at [Zip/Archive.lean:602](/home/kim/lean-zip/Zip/Archive.lean:602) — *"ZIP64 EOCD locator disk-number mismatch"* (locator's `totalDisks=2`; APPNOTE §4.3.15 pins single-disk archives to `diskWithZip64EOCD=0` and `totalDisks=1`, distinct from the standard-EOCD disk-number fields covered by `eocd-disknum-mismatch.zip`) | #1755 | other (ZIP64 consistency) |
 
 ## Required Maintenance Rule
 
