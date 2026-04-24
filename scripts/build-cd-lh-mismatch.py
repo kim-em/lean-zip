@@ -24,6 +24,7 @@ Outputs:
 - testdata/zip/malformed/cd-bad-method-early.zip
 - testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip
 - testdata/zip/malformed/cd-patched-data-flag.zip
+- testdata/zip/malformed/cd-nul-in-name.zip
 """
 import os, struct, zlib
 
@@ -35,7 +36,8 @@ N = len(NAME)
 P = len(PAYLOAD)
 
 def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
-            lh_mod_time=0, lh_mod_date=0, lh_flags=0):
+            lh_mod_time=0, lh_mod_date=0, lh_flags=0,
+            name_bytes=None):
     # PKZIP local file header (30 bytes).
     # `lh_mod_time` / `lh_mod_date` default to `0` — preserving
     # byte-identity of fixtures produced before the modtime/date
@@ -45,6 +47,13 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
     # fixture whose LH flag word is zero.  Only
     # `cd-patched-data-flag.zip` exercises the non-default branch
     # (mirroring `cd_flags` on both sides to isolate the new guard).
+    # `name_bytes` defaults to `None`, meaning "derive from the module
+    # constant `NAME`".  The default preserves byte-identity of every
+    # existing fixture (only `cd-nul-in-name.zip` passes a custom value
+    # with embedded NUL).  The derived length is written into the
+    # `name length` UInt16 slot, so a caller-supplied `name_bytes` is
+    # free to differ in length from `NAME`.
+    nb = NAME if name_bytes is None else name_bytes
     return struct.pack(
         "<IHHHHHIIIHH",
         0x04034b50,  # signature
@@ -56,13 +65,13 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
         crc,
         comp_size,   # compressed size
         uncomp_size, # uncompressed size
-        N,           # file name length
+        len(nb),     # file name length
         0,           # extra field length
     )
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
             cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
-            internal_attrs=0, cd_flags=0):
+            internal_attrs=0, cd_flags=0, name_bytes=None):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -83,6 +92,11 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # `cd_flags` defaults to `0`; the default is load-bearing for every
     # fixture whose CD flag word is zero.  Only
     # `cd-patched-data-flag.zip` exercises the non-default branch.
+    # `name_bytes` defaults to `None`, meaning "derive from the module
+    # constant `NAME`".  Parallel to the same kwarg on `make_lh`:
+    # preserves byte-identity of every existing fixture; only
+    # `cd-nul-in-name.zip` passes a custom value with embedded NUL.
+    nb = NAME if name_bytes is None else name_bytes
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
@@ -95,7 +109,7 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
         CRC,
         comp_size,
         uncomp_size,
-        N,           # name length
+        len(nb),     # name length
         0,           # extra length
         0,           # comment length
         disk_number_start,  # disk number start (CD offset 34, UInt16)
@@ -139,19 +153,27 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_local_hdr_offset=0,
           cd_internal_attrs=0,
           lh_flags=0, cd_flags=0,
+          name_bytes=None,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
+    # `name_bytes` defaults to `None`, meaning "derive from the module
+    # constant `NAME`".  The default preserves byte-identity of every
+    # existing fixture (only `cd-nul-in-name.zip` exercises the non-default
+    # branch with `b"a\x00b.txt"`).  Both the LH and CD use the same
+    # `name_bytes`, keeping the CD/LH name-bytes consistency invariant
+    # intact when issue #1722's guard lands.
+    nb = NAME if name_bytes is None else name_bytes
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
                  lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date,
-                 lh_flags=lh_flags)
-    lhe = lh + NAME + PAYLOAD
+                 lh_flags=lh_flags, name_bytes=name_bytes)
+    lhe = lh + nb + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
                  local_hdr_offset=cd_local_hdr_offset,
                  internal_attrs=cd_internal_attrs,
-                 cd_flags=cd_flags)
-    cde = cd + NAME
+                 cd_flags=cd_flags, name_bytes=name_bytes)
+    cde = cd + nb
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
                      num_this_disk=eocd_num_this_disk,
@@ -360,4 +382,31 @@ write(
     os.path.join(OUT_DIR, "cd-patched-data-flag.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_flags=0x0020, cd_flags=0x0020,
+)
+# CD-parse entry-name NUL-byte anomaly: both CD and LH carry the raw name
+# bytes `b"a\x00b.txt"` (7 bytes, NUL at index 1).  APPNOTE §4.4.17
+# defines the filename field but says nothing about permissible byte
+# values; a NUL byte in the name is a classic parser-differential /
+# filesystem-truncation smuggling vector — POSIX `open`/`stat` and many
+# runtime layers treat `evil.txt\x00.zip` as `evil.txt`, while
+# `Archive.list` callers and strict peer readers see the full
+# NUL-embedded string.  lean-zip's pre-fix behaviour was: `Archive.list`
+# returned an `Entry` with the NUL-containing `path` verbatim (the
+# decoded `String` preserves U+0000 via both `String.fromUTF8?` and
+# `Binary.fromLatin1`), and `Archive.extract` with the default
+# `Binary.isPathSafe` passed the NUL-containing path into
+# `IO.FS.writeBinFile` where the POSIX `open` layer truncates at NUL —
+# depositing the extracted file at the short-form prefix, not the
+# smuggled full form.  `parseCentralDir` now rejects at CD parse time
+# with `"CD entry name contains NUL byte"` — guarding on the raw
+# `ByteArray` before UTF-8 decode so the error message never
+# re-introduces NUL into logs, and so both the UTF-8 and Latin-1
+# decode branches are closed uniformly.  LH and CD name bytes match
+# byte-for-byte, keeping the CD/LH name-bytes consistency invariant
+# (issue #1722) intact.  The short 7-byte name minimises fixture size
+# while still being plausibly path-like (`a`, NUL, `b.txt`).
+write(
+    os.path.join(OUT_DIR, "cd-nul-in-name.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    name_bytes=b"a\x00b.txt",
 )
