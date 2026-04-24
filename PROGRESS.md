@@ -37,7 +37,7 @@ Per-session details are in `progress/`.
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 - **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
 - **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
-- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1836): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826, paired with per-entry CD `versionMadeBy > 63` issue #1812 / PR #1820 still in flight at batch close); 34 fixtures in `testdata/zip/malformed/` (was 28 at #1803, 22 at #1770, 12 at #1721)
+- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1868): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining, in-flight PR #1725); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); CD-parse filename-validation trio completed in the post-#1843 wave (`cd-nul-in-name` #1831, `cd-path-unsafe` #1840, `cd-empty-name` #1848); CD-parse mathematical-invariant family second column closed (`uncompSize == 0 → crc == 0` #1857, sibling of stored-method size invariant #1773); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826) and companion `versionNeededToExtract ≤ 63` upper bound closed (#1852), together with the earlier `versionNeededToExtract ≥ 45` lower bound (issue #1758 / in-flight PR #1764) closing the EOCD64 version-field two-sided-bound dimensions (per-entry CD `versionMadeBy > 63` remains in-flight PR #1820); ZIP64-trailer archive-layout invariants trio closed (per-entry `localOffset + 30 ≤ cdOffset` #1813, ZIP64 record `eocd64Offset + 56 ≤ locatorPos` #1856, archive `cdOffset + cdSize ≤ eocdPos` in-flight PR #1809); cross-format NUL-byte closure in Tar (GNU long-name / long-link #1865 + PAX record key/value #1866) plus ZIP CD-layer (#1831) spans all three code-guarded user-supplied string-field layers (ustar base `name` / `linkname` is structurally NUL-safe by construction); 39 fixtures in `testdata/zip/malformed/` (was 34 at #1843, 28 at #1803, 22 at #1770, 12 at #1721); 16 fixtures in `testdata/tar/malformed/` (was 14 at #1843)
 
 ## Milestones
 
@@ -2707,6 +2707,65 @@ summarize's *Current State* bullet recorded — #1801's
 `cd-bad-method-early.zip` landed 10 min before #1803 and was
 outside the prior summarize's 12-PR scope, so its fixture was
 omitted from the tally but was present in the tree.
+
+**14-PR batch (Apr 24): Track E CD-parse filename-validation trio + ZIP64 EOCD64 archive-layout / version-field bounds closure + Tar cross-format NUL-byte closure + inventory drift-tooling progression (summarize #1869):**
+
+Fourteen PRs merged in the ~3-hour window between summarize #1843
+(merge commit `bb2f514`, 17:10:20Z 2026-04-24) and PR #1868 (merge
+commit `33275aa`, 20:24:21Z 2026-04-24). Spanning four dominant
+themes — CD-parse filename-validation trio closure, ZIP64 EOCD64
+archive-layout and version-field two-sided-bound invariants, Tar
+cross-format NUL-byte smuggling closure, and a terminating one-shot
+→ sweep → detector progression on inventory drift — the wave
+consolidates three adjacent audit axes that had been expanding in
+parallel across the prior three waves. No spec file touched;
+`grep -rc sorry Zip/` stayed at 0 throughout. Source edits landed
+only in `Zip/Archive.lean` (1113 → 1253 LOC, +140 from five new
+CD-parse and EOCD64 checks) and `Zip/Tar.lean` (+two NUL-byte
+guards at the GNU-long-name and PAX-record layers), plus
+`ZipTest/ZipFixtures.lean` + `ZipTest/TarFixtures.lean` fixture
+assertions. The filename-validation trio closes the "smuggled
+name" attack class at CD parse across three distinguishable forms
+(NUL-embedded #1831, zero-length #1848, path-unsafe #1840). The
+CD-parse mathematical-invariant family adds its second column —
+`uncompSize == 0 → crc == 0` (#1857), sibling of the stored-method
+size invariant #1773. The ZIP64 EOCD64 archive-layout invariants
+trio closes at three granularities: per-entry (#1813, prior wave),
+archive (#1809, in-flight), ZIP64 record (#1856); the EOCD64 version-
+field pair `versionMadeBy ≤ 63` (#1826, prior wave) + `versionNeededToExtract ≤ 63`
+(#1852) closes the two-sided upper bounds at archive level. The
+Tar NUL-byte closures — GNU long-name / long-link (#1865) and PAX
+record key/value (#1866) — combined with the ZIP CD-layer #1831
+span all three code-guarded user-supplied string-field layers
+(ustar base `name` / `linkname` is structurally NUL-safe by
+construction). Inventory drift: #1850 (one-shot misattribution
+fix) → #1867 (one-shot placeholder-PR and inverted-range sweep) →
+#1868 (automated warnings-only detector for both drift shapes),
+a deliberate terminating progression at this layer — the next
+drifts of these two shapes will be caught by CI rather than
+discovered by cross-check during review. Paired-review cadence
+tightened noticeably: three in-wave pairs landed with a median
+latency of ~1 h 17 min (vs. ~2 h 37 min tail in the prior wave) as
+the queue drained faster than new reviews arrived. Type mix across
+the 14 PRs: feature 7 / paired-review 4 / inventory 3. Fixtures in
+`testdata/zip/malformed/` grew from 34 to 39 (+5: `cd-path-unsafe.zip`,
+`cd-empty-name.zip`, `zip64-eocd64-versionneeded-too-high.zip`,
+`zip64-eocd64-overlap-locator.zip`, `cd-empty-entry-crc-nonzero.zip`);
+fixtures in `testdata/tar/malformed/` grew from 14 to 16 (+2:
+`gnu-longname-nul-in-name.tar`, `pax-path-nul-in-value.tar`). At
+wave close: 11 PRs in the repair queue (all Track E CD-parse
+cascades from the rapid `Archive.lean` edits across this + prior
+two waves), `feature` queue empty, `review` queue at 2 (#1862
+EOCD64-layout paired-review, #1863 empty-entry-CRC paired-review).
+Toolchain `v4.29.1`.
+
+Note: the issue body's title said "~13 PRs" but the actual post-
+#1843 window contains 14 — PR #1840 (CD path-unsafe, merged 12 min
+after #1843) was in-window but not tallied by the planner; it is
+included in this summary under the filename-validation trio framing.
+See the progress entry's *Wave scope and PR-count note* for the
+full accounting. Full progress file:
+[progress/20260424T203421Z_90d1e22c-summarize-post-1843.md](progress/20260424T203421Z_90d1e22c-summarize-post-1843.md).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
