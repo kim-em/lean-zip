@@ -16,6 +16,7 @@ Outputs:
 - testdata/zip/malformed/cd-extra-overrun-datasize.zip
 - testdata/zip/malformed/cd-zip64-extra-duplicate.zip
 - testdata/zip/malformed/lh-zip64-extra-duplicate.zip
+- testdata/zip/malformed/cd-zip64-entry-version-low.zip
 """
 import os, struct, zlib
 
@@ -326,4 +327,72 @@ write_dup_fixture(
 write_dup_fixture(
     os.path.join(OUT_DIR, "lh-zip64-extra-duplicate.zip"),
     dup_in_cd=False, dup_in_lh=True,
+)
+
+
+# === Per-entry ZIP64 versionNeeded lower-bound fixture (issue #1805) ===
+#
+# APPNOTE §4.4.3.2: any CD entry that uses ZIP64 fields (i.e. one of
+# `compressedSize` / `uncompressedSize` / `localOffset` carries the
+# `0xFFFFFFFF` sentinel, forcing ZIP64 resolution via the 0x0001 extra
+# block) must declare `versionNeededToExtract ≥ 45`.  lean-zip's new
+# per-entry lower-bound check in `parseCentralDir` rejects a
+# `versionNeeded = 20` (the APPNOTE default for non-ZIP64 stored
+# entries) paired with a ZIP64 sentinel — a capability-smuggle where
+# the entry claims "I only need basic-ZIP support" while using the
+# post-v4.5 ZIP64 field layout.  Sibling of the archive-level EOCD64
+# `versionNeededToExtract ≥ 45` check (PR #1764, issue #1758) and the
+# per-entry upper-bound check (PR #1807, issue #1798).
+
+
+def make_lh_version_low():
+    # Local header with `stdCompSize = 0xFFFFFFFF` ZIP64 sentinel and
+    # `versionNeeded = 20` (the APPNOTE §4.4.3.2 default for non-ZIP64
+    # stored entries — the attack value).  `extraLen = 12` matches the
+    # size of the single-slot ZIP64 extra block below.
+    return struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034b50, 20, 0, 0, 0, 0,
+        CRC, SENTINEL_32, P, N, 12,
+    )
+
+
+def make_cd_version_low():
+    # CD entry with `stdCompSize = 0xFFFFFFFF`, `stdUncompSize = 6`,
+    # `stdOffset = 0` — only one slot forces ZIP64 so the 0x0001 block
+    # carries exactly one 8-byte UInt64 (`dataSize = 8`, matching
+    # PR #1785's exactness invariant so that guard does not fire first).
+    # `versionNeeded = 20` — the attack value.
+    return struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014b50, 20, 20, 0, 0, 0, 0,
+        CRC, SENTINEL_32, P, N, 12, 0, 0, 0, 0, 0,
+    )
+
+
+def make_zip64_extra_comp_only(comp):
+    """Single 0x0001 block carrying just the 8-byte compSize field — the
+    layout `parseZip64Extra` expects when only `stdCompSize` is at
+    sentinel.  `dataSize = 8 = 8 * N` for N = 1."""
+    return struct.pack("<HHQ", 0x0001, 8, comp)
+
+
+def write_version_low_fixture(path):
+    extra = make_zip64_extra_comp_only(P)
+    lh = make_lh_version_low()
+    lhe = lh + NAME + extra + PAYLOAD
+    cd = make_cd_version_low()
+    cde = cd + NAME + extra
+    eocd = make_eocd(
+        cd_size=len(cde), cd_offset=len(lhe),
+        total_entries=1, entries_this_disk=1,
+        this_disk=0, disk_cd=0,
+    )
+    with open(path, "wb") as f:
+        f.write(lhe + cde + eocd)
+    print(f"wrote {path} ({os.path.getsize(path)} bytes)")
+
+
+write_version_low_fixture(
+    os.path.join(OUT_DIR, "cd-zip64-entry-version-low.zip"),
 )

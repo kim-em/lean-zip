@@ -529,6 +529,28 @@ private def parseCentralDir (data : ByteArray)
     unless versionNeeded ≤ 45 do
       throw (IO.userError
         s!"zip: unsupported versionNeededToExtract ({versionNeeded}) for {name} at CD offset {pos}; lean-zip supports values up to 45 (ZIP64)")
+    -- APPNOTE §4.4.3.2: any CD entry that uses ZIP64 fields (i.e. one
+    -- of compressedSize/uncompressedSize/localOffset is the 0xFFFFFFFF
+    -- sentinel and the resolved value comes from the 0x0001 extra
+    -- block) must declare `versionNeededToExtract ≥ 45` — 45 is the
+    -- ZIP version that unlocks ZIP64 field layout.  Sibling of the
+    -- archive-level EOCD64 `versionNeededToExtract ≥ 45` check (PR
+    -- #1764) and the per-entry upper bound just above (PR #1807).  The
+    -- predicate reuses the **same sentinel condition** as the ZIP64-
+    -- resolution gate below so the two agree on "this entry uses
+    -- ZIP64".  Writer is trivially compliant: `writeLocalHeader` and
+    -- `writeCentralHeader` emit `if z64 then 45 else 20` with
+    -- `z64 := needsZip64 entry`, exactly matching the sentinel
+    -- predicate.  Placed before the ZIP64 resolution block so a
+    -- crafted archive with `versionNeeded = 20` and a well-formed
+    -- 0x0001 extra block is rejected with precise attribution rather
+    -- than passing `parseZip64Extra` and proceeding.
+    let usesZip64 :=
+      stdCompSize == val32Max || stdUncompSize == val32Max ||
+      stdOffset == val32Max
+    if usesZip64 && versionNeeded < 45 then
+      throw (IO.userError
+        s!"zip: ZIP64 entry with versionNeededToExtract {versionNeeded} < 45 for {name} at CD offset {pos}")
     -- APPNOTE §4.4.5: the compression `method` field is a plain UInt16
     -- with no sentinel-gating, so the allowlist check is safe to run
     -- pre-ZIP64-resolution. lean-zip implements only method 0 (stored)
