@@ -17,6 +17,7 @@ Outputs:
 - testdata/zip/malformed/cd-lh-crc-mismatch.zip
 - testdata/zip/malformed/cd-lh-version-mismatch.zip
 - testdata/zip/malformed/eocd-disknum-mismatch.zip
+- testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip
 """
 import os, struct, zlib
 
@@ -67,18 +68,27 @@ def make_cd(method, comp_size, uncomp_size, version=20):
         0,           # local header offset
     )
 
-def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0):
+def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0,
+              entries_this_disk=None, total_entries=1):
     # `disk_start` / `num_this_disk` default to 0 (single-disk).  The
     # defaults are load-bearing: they preserve byte-identity of the
     # CD/LH fixtures below, whose SHA-256s are recorded in progress
     # entries.  Only `eocd-disknum-mismatch.zip` exercises the
     # non-default branch.
+    # `entries_this_disk` defaults to `total_entries` so the
+    # `numEntriesThisDisk` field equals `totalEntries` for single-disk
+    # archives — preserving byte-identity of the existing fixtures.
+    # Only `eocd-numentries-thisdisk-mismatch.zip` exercises the
+    # non-default branch.
+    if entries_this_disk is None:
+        entries_this_disk = total_entries
     return struct.pack(
         "<IHHHHIIH",
         0x06054b50,  # signature
         num_this_disk,  # disk number (EOCD pos+4, UInt16)
         disk_start,     # disk where CD starts (EOCD pos+6, UInt16)
-        1, 1,        # entries on disk, total entries
+        entries_this_disk,  # entries on disk (EOCD pos+8, UInt16)
+        total_entries,      # total entries     (EOCD pos+10, UInt16)
         cd_size,
         cd_offset,
         0,           # comment length
@@ -87,14 +97,17 @@ def make_eocd(cd_size, cd_offset, *, disk_start=0, num_this_disk=0):
 def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           lh_uncomp=P, cd_uncomp=P, lh_crc=CRC,
           lh_version=20, cd_version=20,
-          eocd_disk_start=0, eocd_num_this_disk=0):
+          eocd_disk_start=0, eocd_num_this_disk=0,
+          eocd_entries_this_disk=None, eocd_total_entries=1):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
-                     num_this_disk=eocd_num_this_disk)
+                     num_this_disk=eocd_num_this_disk,
+                     entries_this_disk=eocd_entries_this_disk,
+                     total_entries=eocd_total_entries)
     with open(path, "wb") as f:
         f.write(lhe + cde + eocd)
     print(f"wrote {path} ({os.path.getsize(path)} bytes)")
@@ -152,4 +165,15 @@ write(
     os.path.join(OUT_DIR, "eocd-disknum-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     eocd_disk_start=1,
+)
+# EOCD entry-count anomaly: `numEntriesThisDisk=2` while `totalEntries=1`.
+# Single-disk archives must have both fields equal (writer-side at
+# Zip/Archive.lean:146-147, :160-161).  The CD itself contains one
+# entry, so the `totalEntries` check would pass (1 == 1); only the
+# `numEntriesThisDisk` sibling disagrees.  Companion to
+# `eocd-numentries-mismatch.zip` (which fires the `totalEntries` check).
+write(
+    os.path.join(OUT_DIR, "eocd-numentries-thisdisk-mismatch.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    eocd_entries_this_disk=2, eocd_total_entries=1,
 )
