@@ -23,6 +23,8 @@ one makes the test brittle to message rewrites.
 | Whole-archive bomb | `Zip/Archive.lean:677`, `Zip/Tar.lean:677` (`extract` `maxTotalSize`) | `zip:`/`tar: total extracted size (…) exceeds whole-archive limit (…)` | `"exceeds whole-archive limit"` |
 | Archive ZIP64 span check | `Zip/Archive.lean:428-429` | `Archive: local data span for <name> (…)` | `"local data span"` |
 | Archive CD/LH consistency | `Zip/Archive.lean` | `mismatch between CD and local header (<field>)` | `"mismatch between CD and local header"` |
+| Archive CD/EOCD totalEntries | `Zip/Archive.lean` (`parseCentralDir` tail) | `zip: EOCD totalEntries mismatch (EOCD=<n>, parsed=<m>)` | `"EOCD totalEntries mismatch"` |
+| Archive CD/EOCD disk-number | `Zip/Archive.lean` (`parseCentralDir` head) | `zip: EOCD disk-number mismatch (numberOfThisDisk=<n>, diskWhereCDStarts=<m>); lean-zip supports single-disk archives only` | `"EOCD disk-number mismatch"` |
 | Archive LH ZIP64 parse | `Zip/Archive.lean` | `truncated ZIP64 local extra field` | `"truncated ZIP64 local extra field"` |
 | Tar per-entry bomb | `Zip/Tar.lean:565-566` | `Tar: entry <name> exceeds limit (…)` | `"exceeds limit"` |
 | Tar header pseudo-entry cap | `Zip/Tar.lean:223` | `tar: header entry size (…) exceeds maximum header size (…)` | `"exceeds maximum header size"` |
