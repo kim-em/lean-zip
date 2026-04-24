@@ -486,6 +486,19 @@ private def parseCentralDir (data : ByteArray)
   unless entries.size == declaredEntries do
     throw (IO.userError
       s!"zip: EOCD totalEntries mismatch (EOCD={declaredEntries}, parsed={entries.size})")
+  -- CD-walk tail check: after the entry count matches `declaredEntries`, the
+  -- walk cursor must be exactly at `cdEnd`.  The `while pos + 46 <= cdEnd`
+  -- loop and the `sig != sigCentral` break both accept up to 45 trailing
+  -- bytes (and, on a bad signature, up to `cdEnd - pos`) inside the declared
+  -- CD region — a parser-differential smuggling vector.  Strict equality
+  -- here rejects any tail garbage inside the declared CD region.  Writer-
+  -- side confirmation: the CD emitter at `:108-138` writes `46 + nameLen +
+  -- extraLen + commentLen` bytes per entry with no padding, so lean-zip's
+  -- own output satisfies `pos == cdEnd`.  Placed after the count check so a
+  -- count mismatch still takes priority (more informative error).
+  unless pos == cdEnd do
+    throw (IO.userError
+      s!"zip: CD trailing bytes past last entry ({cdEnd - pos} bytes unused inside CD region starting at offset {cdOffset}, size {cdSize})")
   return entries
 
 /-- Check that a read span `[offset, offset + length)` lies entirely within a

@@ -20,6 +20,7 @@ Outputs:
 - testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip
 - testdata/zip/malformed/cd-entry-disknum-mismatch.zip
 - testdata/zip/malformed/cd-lh-modtime-mismatch.zip
+- testdata/zip/malformed/cd-trailing-garbage.zip
 """
 import os, struct, zlib
 
@@ -115,14 +116,21 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_mod_time=0, cd_mod_date=0,
           cd_disk_number_start=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
-          eocd_entries_this_disk=None, eocd_total_entries=1):
+          eocd_entries_this_disk=None, eocd_total_entries=1,
+          cd_trailing_garbage=b""):
+    # `cd_trailing_garbage` defaults to `b""` — preserving byte-identity
+    # of the CD/LH and EOCD fixtures above.  The CD region's declared
+    # `cd_size` is bumped by `len(cd_trailing_garbage)` so the EOCD
+    # claims the bytes sit inside the CD region; `cd_offset` and
+    # `total_entries` are unchanged.  Only
+    # `cd-trailing-garbage.zip` exercises the non-default branch.
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
                  lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date)
-    cde = cd + NAME
+    cde = cd + NAME + cd_trailing_garbage
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
                      num_this_disk=eocd_num_this_disk,
@@ -219,4 +227,18 @@ write(
     os.path.join(OUT_DIR, "cd-lh-modtime-mismatch.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     lh_mod_time=0x1234,
+)
+# CD trailing-garbage anomaly: 7 bytes of `b"GARBAGE"` padding are
+# inserted between the last CD entry and the EOCD, and the EOCD's
+# `cdSize` field is bumped by 7 to claim the bytes sit inside the
+# declared CD region.  `cdOffset` and `totalEntries` are unchanged,
+# so the reader's `entries.size == declaredEntries` check at
+# `parseCentralDir` tail still passes (1 == 1); only the subsequent
+# `pos == cdEnd` check fires.  Analog of the EOCD-comment
+# trailing-garbage check (companion fixture `eocd-comment-trailing-
+# garbage.zip`, PR #1743), but for the central-directory region.
+write(
+    os.path.join(OUT_DIR, "cd-trailing-garbage.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    cd_trailing_garbage=b"GARBAGE",
 )
