@@ -401,6 +401,18 @@ private def parseCentralDir (data : ByteArray)
     let nameLen := (Binary.readUInt16LE data (pos + 28)).toNat
     let extraLen := (Binary.readUInt16LE data (pos + 30)).toNat
     let commentLen := (Binary.readUInt16LE data (pos + 32)).toNat
+    -- Per-entry disk-number sanity: lean-zip supports single-disk archives
+    -- only, so each CD entry's `diskNumberStart` (APPNOTE §4.4.11) must be
+    -- `0`. Writer-side confirmation: the 46-byte CD header is
+    -- `Binary.zeros`-initialised and `pos + 34` is never overwritten (see
+    -- the "disk number start (34)" comment at the writer site around
+    -- Zip/Archive.lean:121). Reject early — this is a metadata-only
+    -- dimension and a parser-differential smuggling vector. Mirrors the
+    -- archive-level EOCD disk-number check above.
+    let diskNumberStart := Binary.readUInt16LE data (pos + 34)
+    unless diskNumberStart == 0 do
+      throw (IO.userError
+        s!"zip: CD entry diskNumberStart mismatch (diskNumberStart={diskNumberStart}) for entry at CD offset {pos}; lean-zip supports single-disk archives only")
     let entryEnd := pos + 46 + nameLen + extraLen + commentLen
     if entryEnd > cdEnd then
       throw (IO.userError "zip: central directory entry extends past end of central directory")
