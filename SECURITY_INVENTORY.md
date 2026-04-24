@@ -200,7 +200,7 @@ Summary — what this pattern catches and what it does not:
     migrated to the helpers in PR #1626 (Track E P5.3). No residual
     sites currently identified at this layer.
   - CD-vs-EOCD comment-length consistency not yet checked — PR #1733
-    landed the `totalEntries` dimension of this category and PR #FIXME
+    landed the `totalEntries` dimension of this category and PR #1742
     the disk-number dimension; the trailing comment-length field
     remains silently accepted. Trailing bytes past
     `EOCD.commentLen` are not cross-checked against the file tail,
@@ -215,7 +215,7 @@ Summary — what this pattern catches and what it does not:
   - CD-vs-EOCD `totalEntries` consistency check — PR #1733
     (`testdata/zip/malformed/eocd-numentries-mismatch.zip`) rejects
     EOCD-declared count ≠ parsed CD entry count
-  - EOCD disk-number consistency check — PR #FIXME
+  - EOCD disk-number consistency check — PR #1742
     (`testdata/zip/malformed/eocd-disknum-mismatch.zip`) rejects
     any archive with nonzero `numberOfThisDisk` or `diskWhereCDStarts`
     (post-ZIP64-override); lean-zip supports single-disk archives only
@@ -617,7 +617,7 @@ to be silently skipped.
 | [testdata/zip/malformed/cd-lh-uncompsize-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-uncompsize-mismatch.zip) | 122 B | CD/LH `uncompressedSize` consistency check at [Zip/Archive.lean:658](/home/kim/lean-zip/Zip/Archive.lean:658) — *"uncompressedSize mismatch between CD and local header"* (LH uncomp differs from CD; both stored, compressed sizes match so earlier guards do not fire first) | #1728 | other (CD/LH consistency) |
 | [testdata/zip/malformed/cd-lh-version-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-version-mismatch.zip) | 122 B | CD/LH `versionNeededToExtract` downgrade check at [Zip/Archive.lean:650](/home/kim/lean-zip/Zip/Archive.lean:650) — *"LH versionNeededToExtract (…) exceeds CD versionNeededToExtract (…)"* (LH claims higher version than CD — a capability-smuggle; CD > LH is legitimate per Go/Python ZIP64 producers and is allowed) | #1736 | other (CD/LH consistency) |
 | [testdata/zip/malformed/cd-past-eof.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-past-eof.zip) | 22 B | `cdOffset + cdSize ≤ fileSize` check at [Zip/Archive.lean:564](/home/kim/lean-zip/Zip/Archive.lean:564) — *"central directory extends beyond file"* | `481e562` | oversized allocation |
-| [testdata/zip/malformed/eocd-disknum-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-disknum-mismatch.zip) | 122 B | CD-vs-EOCD disk-number consistency check at [Zip/Archive.lean:323](/home/kim/lean-zip/Zip/Archive.lean:323) — *"EOCD disk-number mismatch"* (standard EOCD `diskWhereCDStarts=1`; lean-zip supports single-disk archives only, so any nonzero value in either disk-number field is rejected post-ZIP64-override) | #FIXME | other (CD/EOCD consistency) |
+| [testdata/zip/malformed/eocd-disknum-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-disknum-mismatch.zip) | 122 B | CD-vs-EOCD disk-number consistency check at [Zip/Archive.lean:323](/home/kim/lean-zip/Zip/Archive.lean:323) — *"EOCD disk-number mismatch"* (standard EOCD `diskWhereCDStarts=1`; lean-zip supports single-disk archives only, so any nonzero value in either disk-number field is rejected post-ZIP64-override) | #1742 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/eocd-numentries-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-numentries-mismatch.zip) | 122 B | CD-vs-EOCD `totalEntries` consistency check at [Zip/Archive.lean:377](/home/kim/lean-zip/Zip/Archive.lean:377) — *"EOCD totalEntries mismatch"* (EOCD declares 2 entries, CD has 1 — parser's trailing-signature loop would silently accept the short list without this guard) | #1733 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/invalid-utf8-with-flag.zip](/home/kim/lean-zip/testdata/zip/malformed/invalid-utf8-with-flag.zip) | 120 B | UTF-8-flagged entry name strict parse at [Zip/Archive.lean:349](/home/kim/lean-zip/Zip/Archive.lean:349) — *"invalid UTF-8 in entry name (UTF-8 flag set)"* | `481e562` | partial-decoder panic |
 | [testdata/zip/malformed/no-eocd.zip](/home/kim/lean-zip/testdata/zip/malformed/no-eocd.zip) | 44 B | EOCD-scan failure at [Zip/Archive.lean:562](/home/kim/lean-zip/Zip/Archive.lean:562) — *"cannot find end of central directory"* | `481e562` | other (framing) |
