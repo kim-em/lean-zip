@@ -542,6 +542,21 @@ private def parseCentralDir (data : ByteArray)
       throw (IO.userError "zip: central directory entry extends past end of central directory")
     let stdOffset := Binary.readUInt32LE data (pos + 42)
     let nameBytes := data.extract (pos + 46) (pos + 46 + nameLen)
+    -- APPNOTE §4.4.17 `file name`: a NUL byte (0x00) in a filename is a
+    -- classic parser-differential / filesystem-truncation smuggling vector
+    -- — POSIX `open`/`stat` and many runtime layers treat `evil.txt\x00.zip`
+    -- as `evil.txt`, while `Archive.list` callers and strict peer readers
+    -- see the full NUL-embedded string. The decoded `name` reaches
+    -- `entry.path`, `Archive.list`, `Archive.extract`, and (via
+    -- `Binary.isPathSafe`) extract-time filtering — none of which reject
+    -- NUL today. Guard on the raw `ByteArray` before UTF-8 decode so the
+    -- error message never re-introduces NUL into logs, and so both the
+    -- UTF-8 and Latin-1 decode branches are closed uniformly. Writer-side
+    -- at Zip/Archive.lean:84 and :110 inherits the invariant from
+    -- caller-supplied `entry.path` (no enforcement at emit time).
+    if (nameBytes.findIdx? (· == 0)).isSome then
+      throw (IO.userError
+        s!"zip: CD entry name contains NUL byte at CD offset {pos}")
     let name ←
       if flags &&& 0x0800 != 0 then
         -- UTF-8 flag set: validate UTF-8 strictly
