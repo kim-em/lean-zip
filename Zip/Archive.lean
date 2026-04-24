@@ -228,15 +228,22 @@ partial def createFromDir (outputPath : System.FilePath) (dir : System.FilePath)
     `baseOffset` is the file-absolute byte offset where `data` starts (0 for full file).
     Returns
     `(eocdPos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
-     numEntriesThisDisk)` where cdOffset/cdSize are file-absolute, totalEntries is
-    the EOCD-advertised CD entry count, the two disk-number fields carry the
-    single-disk invariant, and `numEntriesThisDisk` is the sibling entry-count
-    field. All fields are read from the standard EOCD and overridden by the
-    ZIP64 EOCD64 block when present. lean-zip writes single-disk archives only,
-    so `numEntriesThisDisk` is expected to equal `totalEntries`; the pair is
-    threaded through for a consistency check in `parseCentralDir`. -/
+     numEntriesThisDisk, locatorDisk, locatorTotals)` where cdOffset/cdSize are
+    file-absolute, totalEntries is the EOCD-advertised CD entry count, the two
+    disk-number fields carry the single-disk invariant, and `numEntriesThisDisk`
+    is the sibling entry-count field. All of those are read from the standard
+    EOCD and overridden by the ZIP64 EOCD64 block when present. lean-zip writes
+    single-disk archives only, so `numEntriesThisDisk` is expected to equal
+    `totalEntries`; the pair is threaded through for a consistency check in
+    `parseCentralDir`. The final pair `(locatorDisk, locatorTotals)` carries
+    the ZIP64 EOCD Locator's own `diskWithZip64EOCD` / `totalDisks` fields
+    (APPNOTE §4.3.15); these are distinct from the standard-EOCD / EOCD64
+    disk-number fields and catch a separate single-disk-claim smuggling
+    vector. When the locator is absent, they default to their single-disk
+    sentinel values `(0, 1)` so the `listFromHandle` consistency check passes
+    trivially for non-ZIP64 archives. -/
 private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
-    : Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat) := Id.run do
+    : Option (Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat) := Id.run do
   -- Find standard EOCD
   if data.size < 22 then return none
   let mut eocdPos : Option Nat := none
@@ -256,9 +263,16 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
   let mut numberOfThisDisk := (Binary.readUInt16LE data (pos + 4)).toNat
   let mut diskWhereCDStarts := (Binary.readUInt16LE data (pos + 6)).toNat
   let mut numEntriesThisDisk := (Binary.readUInt16LE data (pos + 8)).toNat
+  -- ZIP64 EOCD Locator disk-number fields default to the single-disk
+  -- sentinel values so the `listFromHandle` consistency check is a no-op
+  -- for archives without a ZIP64 Locator.
+  let mut locatorDisk : Nat := 0
+  let mut locatorTotals : Nat := 1
   -- Check for ZIP64 EOCD Locator (20 bytes before standard EOCD)
   if pos >= 20 then
     if Binary.readUInt32LE data (pos - 20) == sigLocator64 then
+      locatorDisk := (Binary.readUInt32LE data (pos - 16)).toNat
+      locatorTotals := (Binary.readUInt32LE data (pos - 4)).toNat
       let eocd64Offset := (Binary.readUInt64LE data (pos - 12)).toNat
       -- Convert file-absolute offset to buffer-relative
       if eocd64Offset >= baseOffset then
@@ -272,7 +286,7 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             diskWhereCDStarts := (Binary.readUInt32LE data (bufPos + 20)).toNat
             numEntriesThisDisk := (Binary.readUInt64LE data (bufPos + 24)).toNat
   return some (pos, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
-    numEntriesThisDisk)
+    numEntriesThisDisk, locatorDisk, locatorTotals)
 
 /-- Parse a ZIP64 extra field from extra data, returning (uncompressedSize, compressedSize, offset).
     Only reads fields whose standard values are 0xFFFFFFFF. Returns `none` if a required field
@@ -574,9 +588,18 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   Handle.seek h tailStart.toUInt64
   let tail ← readExact h tailSize "EOCD tail"
   let some (_, cdOffset, cdSize, totalEntries, numberOfThisDisk, diskWhereCDStarts,
-      numEntriesThisDisk) :=
+      numEntriesThisDisk, locatorDisk, locatorTotals) :=
       findEndOfCentralDir tail tailStart
     | throw (IO.userError "zip: cannot find end of central directory")
+  -- ZIP64 EOCD Locator single-disk invariant (APPNOTE §4.3.15): when the
+  -- locator is present, `diskWithZip64EOCD` must be 0 and `totalDisks` must
+  -- be 1.  When the locator is absent, `findEndOfCentralDir` returns the
+  -- sentinel pair `(0, 1)` and this check is trivially satisfied.  This is
+  -- the ZIP64-Locator sibling of the standard-EOCD disk-number check in
+  -- `parseCentralDir`; both must pass for a single-disk archive.
+  unless locatorDisk == 0 && locatorTotals == 1 do
+    throw (IO.userError
+      s!"zip: ZIP64 EOCD locator disk-number mismatch (diskWithZip64EOCD={locatorDisk}, totalDisks={locatorTotals})")
   unless cdOffset + cdSize <= fileSize do
     throw (IO.userError "zip: central directory extends beyond file")
   if maxCentralDirSize > 0 && cdSize > maxCentralDirSize then
