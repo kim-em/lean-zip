@@ -572,6 +572,18 @@ private def parseCentralDir (data : ByteArray)
     unless method == 0 ∨ method == 8 do
       throw (IO.userError
         s!"zip: unsupported compression method {method} for {name} (lean-zip supports method 0 (stored) and method 8 (deflate))")
+    -- APPNOTE §4.4.4 bit 5: compressed patched data. lean-zip has zero
+    -- support for PKWARE's proprietary binary-delta format (§4.6);
+    -- the writer never sets this bit (`writeCentralHeader` emits `0x0800`
+    -- only, bit 11 UTF-8 names) and no reader path interprets it.
+    -- Crafted archives with bit 5 set are silently extracted as if the
+    -- payload were plain Deflate/stored data — a parser-differential
+    -- smuggling vector. Reject at CD parse time to close the dimension
+    -- on both `list` and `extract` paths. Mask-equality form matches the
+    -- `0xFFF7` bit-3-masking convention in `readEntryData`.
+    unless flags &&& 0x0020 == 0 do
+      throw (IO.userError
+        s!"zip: CD entry patched-data flag bit 5 set (flags={flags}) for {name} at CD offset {pos}; lean-zip does not support APPNOTE §4.4.4 compressed patched data")
     -- Structural check runs unconditionally (APPNOTE §4.5) so the
     -- no-ZIP64-sentinel path also rejects extra-data whose sub-field
     -- declared `dataSize` overruns the blob. Without this, a malformed

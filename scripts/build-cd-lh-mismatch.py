@@ -23,6 +23,7 @@ Outputs:
 - testdata/zip/malformed/cd-stored-size-mismatch.zip
 - testdata/zip/malformed/cd-bad-method-early.zip
 - testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip
+- testdata/zip/malformed/cd-patched-data-flag.zip
 """
 import os, struct, zlib
 
@@ -34,17 +35,21 @@ N = len(NAME)
 P = len(PAYLOAD)
 
 def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
-            lh_mod_time=0, lh_mod_date=0):
+            lh_mod_time=0, lh_mod_date=0, lh_flags=0):
     # PKZIP local file header (30 bytes).
     # `lh_mod_time` / `lh_mod_date` default to `0` — preserving
     # byte-identity of fixtures produced before the modtime/date
     # kwargs were threaded through.  Only
     # `cd-lh-modtime-mismatch.zip` exercises the non-default branch.
+    # `lh_flags` defaults to `0`; the default is load-bearing for every
+    # fixture whose LH flag word is zero.  Only
+    # `cd-patched-data-flag.zip` exercises the non-default branch
+    # (mirroring `cd_flags` on both sides to isolate the new guard).
     return struct.pack(
         "<IHHHHHIIIHH",
         0x04034b50,  # signature
         version,     # version needed
-        0,           # flags
+        lh_flags,    # flags
         method,      # compression method
         lh_mod_time, # mod time
         lh_mod_date, # mod date
@@ -57,7 +62,7 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
             cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
-            internal_attrs=0):
+            internal_attrs=0, cd_flags=0):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -75,12 +80,15 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # header).  The default is load-bearing: only
     # `cd-entry-internal-attrs-reserved.zip` exercises the non-default
     # branch (a reserved-bit value outside the bit-0 text-flag allowance).
+    # `cd_flags` defaults to `0`; the default is load-bearing for every
+    # fixture whose CD flag word is zero.  Only
+    # `cd-patched-data-flag.zip` exercises the non-default branch.
     return struct.pack(
         "<IHHHHHHIIIHHHHHII",
         0x02014b50,  # signature
         20,          # version made by
         version,     # version needed
-        0,           # flags
+        cd_flags,    # flags
         method,      # compression method
         cd_mod_time, # mod time
         cd_mod_date, # mod date
@@ -130,16 +138,19 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_disk_number_start=0,
           cd_local_hdr_offset=0,
           cd_internal_attrs=0,
+          lh_flags=0, cd_flags=0,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1):
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
-                 lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date)
+                 lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date,
+                 lh_flags=lh_flags)
     lhe = lh + NAME + PAYLOAD
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
                  local_hdr_offset=cd_local_hdr_offset,
-                 internal_attrs=cd_internal_attrs)
+                 internal_attrs=cd_internal_attrs,
+                 cd_flags=cd_flags)
     cde = cd + NAME
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -328,4 +339,25 @@ write(
     os.path.join(OUT_DIR, "cd-entry-internal-attrs-reserved.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_internal_attrs=0x0080,
+)
+# CD-parse general-purpose flag bit-5 (compressed patched data) anomaly:
+# both CD and LH advertise `flags = 0x0020` (bit 5 only).  APPNOTE §4.4.4
+# bit 5 means "file is compressed patched data" — PKWARE's proprietary
+# binary-delta layout (§4.6).  lean-zip implements neither creation nor
+# extraction of patched-data files; the writer emits `flags = 0x0800`
+# (bit 11 UTF-8 names) only.  A crafted archive with bit 5 set is
+# currently silently accepted as if the payload were plain Deflate/stored
+# data — a parser-differential smuggling vector.  `parseCentralDir`
+# rejects at CD parse time with
+# `"patched-data flag bit 5 set"`, before any payload decode.  Mirroring
+# `lh_flags = cd_flags = 0x0020` is load-bearing so the CD-vs-LH
+# bit-3-masked flags check (PR #1715) does not fire first
+# (`0x0020 &&& 0xFFF7 = 0x0020` on both sides).  Sibling of the
+# encryption-related bit 0/6/13 family (issue #1762, in-flight PR #1771)
+# and the other CD-parse flag-field guards; together they close the
+# unimplemented-feature flag-bit dimension at the CD-parse layer.
+write(
+    os.path.join(OUT_DIR, "cd-patched-data-flag.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_flags=0x0020, cd_flags=0x0020,
 )
