@@ -26,12 +26,7 @@ def crc32 (init : UInt32 := 0) (data : ByteArray) : UInt32 :=
 
 /-! ## Proof infrastructure -/
 
-theorem table_size : table.size = 256 := Array.size_ofFn ..
-
-/-- CRC linearity: `crcBit` distributes over XOR when the extra term has bit 0 = 0. -/
-theorem crcBit_xor_high (a b : UInt32) (ha : a &&& 1 = 0) :
-    Spec.crcBit (a ^^^ b) = (a >>> 1) ^^^ Spec.crcBit b := by
-  simp only [Spec.crcBit, Spec.POLY]; bv_decide
+private theorem table_size : table.size = 256 := Array.size_ofFn ..
 
 /-- `UInt32.ofNat byte.toNat` is a zero-extension from 8 to 32 bits. -/
 private theorem UInt32_ofNat_UInt8_toNat (byte : UInt8) :
