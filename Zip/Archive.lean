@@ -384,6 +384,10 @@ private def parseZip64Extra (extraData : ByteArray) (stdUncomp stdComp stdOffset
       if stdOffset == val32Max then
         if fpos + 8 > fieldEnd then return none
         localOff := Binary.readUInt64LE extraData fpos
+        fpos := fpos + 8
+      -- APPNOTE §4.5.3: `dataSize` is exactly `8 * N` where N counts
+      -- the sentinel-gated 32-bit fields; slack is a smuggling vector.
+      if fpos != fieldEnd then return none
       break
     epos := epos + 4 + dataSize
   -- If any field needs ZIP64 but the extra field wasn't found, fail
@@ -467,7 +471,7 @@ private def parseCentralDir (data : ByteArray)
       if stdCompSize == val32Max || stdUncompSize == val32Max || stdOffset == val32Max then
         match parseZip64Extra extraData stdUncompSize stdCompSize stdOffset with
         | some v => pure v
-        | none => throw (IO.userError s!"zip: truncated ZIP64 extra field for {name}")
+        | none => throw (IO.userError s!"zip: malformed ZIP64 extra field for {name}")
       else
         pure (stdUncompSize.toUInt64, stdCompSize.toUInt64, stdOffset.toUInt64)
     -- APPNOTE §4.4.5: method 0 ("stored") means no compression, so
