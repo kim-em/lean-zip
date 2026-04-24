@@ -439,10 +439,16 @@ private def parseZip64Extra (extraData : ByteArray) (stdUncomp stdComp stdOffset
     return none
   return some (uncompSize, compSize, localOff)
 
-/-- Parse central directory entries from a ZIP file. -/
+/-- Parse central directory entries from a ZIP file.
+
+    `cdOffset`/`cdSize` locate the CD inside `data` — for `listFromHandle`,
+    `data` holds only the CD bytes and `cdOffset = 0`. `cdFileOffset` is
+    the CD's position in the *source file*, which the per-entry
+    `localOffset + 30 ≤ cdFileOffset` archive-layout guard compares
+    against. -/
 private def parseCentralDir (data : ByteArray)
     (cdOffset cdSize declaredEntries numberOfThisDisk diskWhereCDStarts
-      entriesThisDisk : Nat)
+      entriesThisDisk cdFileOffset : Nat)
     : IO (Array Entry) := do
   -- EOCD disk-number sanity: lean-zip supports single-disk archives only.
   -- Writer-side confirmation: both fields are hard-coded to 0 (see the
@@ -569,6 +575,29 @@ private def parseCentralDir (data : ByteArray)
         | none => throw (IO.userError s!"zip: malformed ZIP64 extra field for {name}")
       else
         pure (stdUncompSize.toUInt64, stdCompSize.toUInt64, stdOffset.toUInt64)
+    -- Archive-layout invariant at the per-entry granularity: every
+    -- entry's local header (LH signature + 30-byte fixed header,
+    -- APPNOTE §4.3.7) must be readable strictly before the CD start.
+    -- APPNOTE §4.3.6 pins the layout as `[LH+data]* [CD] [EOCD]`; the
+    -- sibling archive-level guard (`cdOffset + cdSize ≤ eocdPos`, see
+    -- `cd-extends-past-eocd.zip`) closes the macro invariant, and this
+    -- check closes the micro invariant where an entry's `localOffset`
+    -- claims a position inside or past the CD region. Writer-side
+    -- confirmation: every `writeLocalHeader` call in `create` precedes
+    -- the CD block, so `localOffset + 30 ≤ cdOffset` is universally
+    -- true for legitimate archives. Placed after ZIP64 resolution so
+    -- the resolved `UInt64` `localOff` is checked (the sentinel
+    -- `0xFFFFFFFF` would otherwise spuriously fire here for legitimate
+    -- ZIP64 archives). `Archive.list` benefits most — without this
+    -- guard the late `readEntryData` signature check
+    -- (`"bad local header signature"`) is the only gate, and only on
+    -- the extract path, leaving a parser-differential window open for
+    -- `Archive.list`. Asymmetric-subtraction shape mirrors `SpanInFile`
+    -- below to avoid `UInt64` wrap on crafted very-large `localOff`.
+    let cdFileOff := cdFileOffset.toUInt64
+    unless localOff ≤ cdFileOff ∧ 30 ≤ cdFileOff - localOff do
+      throw (IO.userError
+        s!"zip: entry local offset overlaps central directory for {name} (localOffset={localOff}, cdOffset={cdFileOffset})")
     -- APPNOTE §4.4.5: method 0 ("stored") means no compression, so
     -- `compressedSize == uncompressedSize` is a tautological invariant.
     -- The writer emits equal values for stored entries; crafted archives
@@ -794,7 +823,7 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   Handle.seek h cdOffset.toUInt64
   let cdBuf ← readExact h cdSize "central directory"
   parseCentralDir cdBuf 0 cdSize totalEntries numberOfThisDisk diskWhereCDStarts
-    numEntriesThisDisk
+    numEntriesThisDisk cdOffset
 
 /-- Read an entry's decompressed data from a file handle by seeking to its local header.
     `maxEntrySize` limits decompressed entry size; `0` means no limit on the FFI
