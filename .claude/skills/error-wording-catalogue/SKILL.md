@@ -24,6 +24,7 @@ one makes the test brittle to message rewrites.
 | Archive ZIP64 span check | `Zip/Archive.lean:428-429` | `Archive: local data span for <name> (…)` | `"local data span"` |
 | Archive CD/LH consistency | `Zip/Archive.lean` | `mismatch between CD and local header (<field>)` | `"mismatch between CD and local header"` |
 | Archive CD stored-method size invariant | `Zip/Archive.lean` (`parseCentralDir`, post-ZIP64-resolution) | `zip: stored-method size mismatch for <name> (method=0, compressedSize=<C>, uncompressedSize=<U>)` | `"stored-method size mismatch"` |
+| Archive CD compression-method allowlist | `Zip/Archive.lean` (`parseCentralDir`, pre-ZIP64-resolution, after `name` decode) | `zip: unsupported compression method <method> for <name> (lean-zip supports method 0 (stored) and method 8 (deflate))` | `"unsupported compression method"` (distinct from the late `"unsupported method"` dispatch in `readEntryData` — see precedence note below) |
 | Archive CD/LH lastModTime/Date | `Zip/Archive.lean` (`readEntryData`, ungated — fires even when bit 3 data-descriptor is set) | `zip: lastModTime/Date mismatch between CD and local header for <label> (CD time=<Tcd>, date=<Dcd>; LH time=<Tlh>, date=<Dlh>)` | `"lastModTime/Date mismatch"` |
 | Archive CD/EOCD totalEntries | `Zip/Archive.lean` (`parseCentralDir` tail) | `zip: EOCD totalEntries mismatch (EOCD=<n>, parsed=<m>)` | `"EOCD totalEntries mismatch"` |
 | Archive CD/EOCD disk-number | `Zip/Archive.lean` (`parseCentralDir` head) | `zip: EOCD disk-number mismatch (numberOfThisDisk=<n>, diskWhereCDStarts=<m>); lean-zip supports single-disk archives only` | `"EOCD disk-number mismatch"` |
@@ -109,6 +110,23 @@ Knowing the order matters for picking the right substring:
   you need a regression that still exercises the later span or
   ZIP64-truncation checks, use method=8 (deflate) with the oversized
   claim so the stored-method check does not fire.
+- **`Archive.extract` on an archive whose CD `method` is outside
+  `{0, 8}`**: the `parseCentralDir` compression-method allowlist
+  (`"unsupported compression method"`, added in PR #1797) fires
+  pre-ZIP64-resolution and shadows the late `readEntryData`
+  `"unsupported method"` dispatch for all CD-parseable archives.
+  `bad-method.zip` (CD/LH method=14) and `cd-bad-method-early.zip`
+  (CD/LH method=6) both trip the new substring; the late
+  `"unsupported method"` throw is preserved as defense-in-depth
+  but is unreachable via the public API today. If you need a
+  regression that still exercises the late dispatch, you would
+  need to bypass `parseCentralDir` — currently impossible from the
+  public API. Substring discipline: match
+  `"unsupported compression method"` (the new wording, with the
+  word "compression"); the bare `"unsupported method"` substring
+  also matches the new message (it's a substring of the new
+  wording), but tests should prefer the more specific form so a
+  future split between the two layers stays distinguishable.
 - **`Tar.extract` on an archive-slip symlink**: the unsafe-symlink
   reject fires before `Handle.createSymlink`. Match
   `"unsafe symlink"`. See #1555.

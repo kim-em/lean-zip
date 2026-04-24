@@ -94,9 +94,35 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   let badMethodPath ← writeFixtureTmp "bad-method.zip" badMethodData
   let badMethodExtractDir : System.FilePath := "/tmp/lean-zip-fixture-bad-method-extract"
   IO.FS.createDirAll badMethodExtractDir
+  -- This fixture has CD/LH method=14 (LZMA), outside lean-zip's `{0, 8}`
+  -- allowlist. `parseCentralDir` now rejects at CD parse time (PR #1791)
+  -- with `"unsupported compression method"`, earlier than the late
+  -- `"unsupported method"` dispatch in `readEntryData` that historically
+  -- caught the fault. The late guard remains in place as
+  -- defense-in-depth (unreachable for CD-parseable archives via the
+  -- public API). Companion to `cd-bad-method-early.zip` (CD/LH method=6,
+  -- imploded), which trips the same CD-parse guard with a distinct
+  -- value for paired-review attribution.
   assertThrows "ZIP malformed (bad-method.zip)"
     (Archive.extract badMethodPath badMethodExtractDir)
-    "unsupported method"
+    "unsupported compression method"
+
+  -- cd-bad-method-early.zip: 122-byte archive with CD/LH method=6
+  -- (imploded — deprecated in PKZIP 2.0, 1993). Rejected at CD parse
+  -- time by `parseCentralDir`'s allowlist guard with
+  -- `"unsupported compression method"`. Companion to `bad-method.zip`
+  -- (CD/LH method=14, LZMA): both fixtures trip the same guard, but
+  -- distinct method values let the paired-review distinguish which
+  -- fixture fired. Built deterministically by
+  -- `scripts/build-cd-lh-mismatch.py`.
+  let cdBadMethodEarlyData ← readFixture "zip/malformed/cd-bad-method-early.zip"
+  let cdBadMethodEarlyPath ← writeFixtureTmp "cd-bad-method-early.zip" cdBadMethodEarlyData
+  let cdBadMethodEarlyExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-bad-method-early-extract"
+  IO.FS.createDirAll cdBadMethodEarlyExtractDir
+  assertThrows "ZIP malformed (cd-bad-method-early.zip)"
+    (Archive.extract cdBadMethodEarlyPath cdBadMethodEarlyExtractDir)
+    "unsupported compression method"
 
   -- oversized-compressed-size.zip: 122-byte archive whose entry's
   -- central-directory `compressedSize` claims 2 MiB of payload. The local
@@ -624,6 +650,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "eocd-numentries-thisdisk-mismatch.zip",
              "cd-entry-disknum-mismatch.zip",
              "cd-stored-size-mismatch.zip",
+             "cd-bad-method-early.zip",
              "eocd-zip64-override-nosentinel.zip",
              "zip64-eocd64-bad-recsize.zip",
              "zip64-extra-oversized-datasize.zip",
@@ -648,6 +675,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-eocd-numentries-thisdisk-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-entry-disknum-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-stored-size-mismatch-extract",
+             "/tmp/lean-zip-fixture-cd-bad-method-early-extract",
              "/tmp/lean-zip-fixture-eocd-zip64-override-nosentinel-extract",
              "/tmp/lean-zip-fixture-zip64-eocd64-bad-recsize-extract",
              "/tmp/lean-zip-fixture-zip64-extra-oversized-datasize-extract",
