@@ -302,6 +302,35 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
     (Archive.extract cdLhCrcPath cdLhCrcExtractDir)
     "crc32 mismatch between CD and local header"
 
+  -- cd-lh-version-mismatch.zip: 122-byte stored ZIP whose LH advertises
+  -- `versionNeededToExtract=45` while the CD advertises `20`.  The CD/LH
+  -- `versionNeededToExtract` check is deliberately **one-sided** — `LH > CD`
+  -- is a capability-smuggle (LH claims "ZIP64 features required" while a
+  -- reader that feature-gates on CD sees `20` and proceeds); the converse
+  -- (`CD > LH`) is **legitimate** per Go's `archive/zip` and CPython's
+  -- `zipfile` when LH sizes fit in 32 bits, as exercised by
+  -- `testdata/zip/interop/go-zip64.zip` (LH=20, CD=45).
+  -- `Archive.extract` must reject this fixture with an
+  -- `LH versionNeededToExtract` error.
+  -- Regenerate (if ever lost): see `make_lh` / `make_cd` in
+  -- `scripts/build-cd-lh-mismatch.py` or this 2026 inline recipe:
+  --   python3 -c 'import struct,zlib; p=b"hello\n"; n=b"hello.txt"
+  --   c=zlib.crc32(p); CD_V,LH_V=20,45
+  --   lh=struct.pack("<IHHHHHIIIHH",0x04034b50,LH_V,0,0,0,0,c,len(p),len(p),len(n),0)
+  --   cd=struct.pack("<IHHHHHHIIIHHHHHII",0x02014b50,20,CD_V,0,0,0,0,c,len(p),len(p),
+  --       len(n),0,0,0,0,0,0)
+  --   lhe=lh+n+p; cde=cd+n
+  --   eocd=struct.pack("<IHHHHIIH",0x06054b50,0,0,1,1,len(cde),len(lhe),0)
+  --   open("cd-lh-version-mismatch.zip","wb").write(lhe+cde+eocd)'
+  let cdLhVersionData ← readFixture "zip/malformed/cd-lh-version-mismatch.zip"
+  let cdLhVersionPath ← writeFixtureTmp "cd-lh-version-mismatch.zip" cdLhVersionData
+  let cdLhVersionExtractDir : System.FilePath :=
+    "/tmp/lean-zip-fixture-cd-lh-version-mismatch-extract"
+  IO.FS.createDirAll cdLhVersionExtractDir
+  assertThrows "ZIP malformed (cd-lh-version-mismatch.zip)"
+    (Archive.extract cdLhVersionPath cdLhVersionExtractDir)
+    "LH versionNeededToExtract"
+
   -- eocd-numentries-mismatch.zip: 122-byte stored ZIP whose EOCD declares
   -- totalEntries=2 while only one CD entry is actually present.  This is a
   -- CD-vs-EOCD anomaly (orthogonal to the CD/LH consistency family above):
@@ -354,6 +383,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "cd-lh-method-mismatch.zip", "cd-lh-size-mismatch.zip",
              "cd-lh-flags-mismatch.zip",
              "cd-lh-uncompsize-mismatch.zip", "cd-lh-crc-mismatch.zip",
+             "cd-lh-version-mismatch.zip",
              "eocd-numentries-mismatch.zip",
              "zip-slip.zip", "absolute-path.zip"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
@@ -366,6 +396,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-cd-lh-flags-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-uncompsize-mismatch-extract",
              "/tmp/lean-zip-fixture-cd-lh-crc-mismatch-extract",
+             "/tmp/lean-zip-fixture-cd-lh-version-mismatch-extract",
              "/tmp/lean-zip-fixture-eocd-numentries-mismatch-extract",
              "/tmp/lean-zip-fixture-zip-slip-extract", "/tmp/lean-zip-fixture-abs-path-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }

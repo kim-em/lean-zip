@@ -34,6 +34,12 @@ structure Entry where
   -- `readEntryData` can enforce CD/LH flags consistency (bit 11 UTF-8 name,
   -- etc.). Writers ignore this field and emit a fixed `0x0800` flag word.
   flags            : UInt16 := 0
+  -- CD-side `versionNeededToExtract` field (APPNOTE §4.4.3.2),
+  -- preserved for CD-vs-LH consistency checking.  Writers ignore this
+  -- field and emit a fixed value (`20` for non-ZIP64, `45` for ZIP64);
+  -- the check in `readEntryData` only rejects LH claiming a higher
+  -- version than CD.
+  versionNeeded    : UInt16 := 0
   deriving Repr, Inhabited
 
 /-- Check if an entry needs ZIP64 extra fields. -/
@@ -301,6 +307,7 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize declaredEntries 
   while pos + 46 <= cdEnd do
     let sig := Binary.readUInt32LE data pos
     if sig != sigCentral then break
+    let versionNeeded := Binary.readUInt16LE data (pos + 6)
     let flags := Binary.readUInt16LE data (pos + 8)
     let method := Binary.readUInt16LE data (pos + 10)
     let crc := Binary.readUInt32LE data (pos + 16)
@@ -342,6 +349,7 @@ private def parseCentralDir (data : ByteArray) (cdOffset cdSize declaredEntries 
       method := method
       localOffset := localOff
       flags := flags
+      versionNeeded := versionNeeded
     }
     pos := pos + 46 + nameLen + extraLen + commentLen
   unless entries.size == declaredEntries do
@@ -556,8 +564,10 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   unless Binary.readUInt32LE localHdr 0 == sigLocal do
     throw (IO.userError s!"zip: bad local header signature for {label}")
   -- Parse the remaining local-header fields for CD/LH consistency checks.
-  -- Offsets per PKZIP APPNOTE Appendix D: 6=flags, 8=method, 14=crc,
-  -- 18=stdLocalCompSize, 22=stdLocalUncompSize, 26=nameLen, 28=extraLen.
+  -- Offsets per PKZIP APPNOTE Appendix D: 4=versionNeeded, 6=flags,
+  -- 8=method, 14=crc, 18=stdLocalCompSize, 22=stdLocalUncompSize,
+  -- 26=nameLen, 28=extraLen.
+  let localVersion := Binary.readUInt16LE localHdr 4
   let localFlags := Binary.readUInt16LE localHdr 6
   let localMethod := Binary.readUInt16LE localHdr 8
   let localCrc := Binary.readUInt32LE localHdr 14
@@ -607,6 +617,16 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
   unless (localFlags &&& dataDescriptorBitMask) == (entry.flags &&& dataDescriptorBitMask) do
     throw (IO.userError
       s!"zip: flags mismatch between CD and local header for {label} (CD={entry.flags}, LH={localFlags})")
+  -- One-sided CD/LH versionNeededToExtract check.  Rejects LH claiming a
+  -- higher version than CD (a capability-smuggle vector — e.g. LH=45
+  -- "ZIP64 features required" alongside CD=20, bypassing readers that
+  -- feature-gate on the CD).  The converse (CD > LH) is legitimate: Go's
+  -- `archive/zip` and CPython's `zipfile` emit ZIP64 archives whose LH
+  -- sizes fit in 32 bits with `LH.versionNeeded=20` while the CD carries
+  -- a ZIP64 size extra with `CD.versionNeeded=45`.
+  unless localVersion ≤ entry.versionNeeded do
+    throw (IO.userError
+      s!"zip: LH versionNeededToExtract ({localVersion}) exceeds CD versionNeededToExtract ({entry.versionNeeded}) for {label}")
   let usesDataDescriptor := (localFlags &&& 0x0008) != 0
   unless usesDataDescriptor do
     unless localCompSize == entry.compressedSize do
