@@ -434,6 +434,20 @@ def buildPaxEntry (paxData : ByteArray) (entryPath : String) : IO ByteArray := d
   let computed := computeChecksum block
   return storedChksum == computed.toUInt64
 
+/-- Scan `len` bytes starting at `offset` for an interior NUL — i.e. a NUL
+    byte (`0x00`) followed somewhere later in the field by any non-NUL byte.
+    Trailing NUL padding is permitted (it terminates the C-style field), so
+    a leading run of meaningful bytes followed by NUL padding returns `false`;
+    only a NUL with non-NUL payload after it counts as smuggling. -/
+private def hasInteriorNul (block : ByteArray) (offset len : Nat) : Bool := Id.run do
+  let mut sawNul := false
+  for hi : i in [:len] do
+    if h : offset + i < block.size then
+      let b := block[offset + i]'(by omega)
+      if b == 0 then sawNul := true
+      else if sawNul then return true
+  return false
+
 /-- Parse a 512-byte header block into an Entry. Returns `none` for zero blocks.
     Validates magic and checksum; throws on malformed headers. -/
 def parseHeader (block : ByteArray) : IO (Option Entry) := do
@@ -457,6 +471,34 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
   let magic := Binary.readString block hdrMagic.1 hdrMagic.2
   unless magic == "ustar" || magic == "ustar " do
     throw (IO.userError s!"tar: unsupported format (magic: {magic})")
+  -- Reject UStar string fields (`name`, `linkname`, `prefix`) carrying a NUL
+  -- byte followed by any non-NUL byte. `Binary.readString` is NUL-terminated
+  -- and would silently truncate a smuggled `"evil.txt\x00.pdf"` payload to
+  -- `"evil.txt"`, exposing a parser-differential / filesystem-truncation
+  -- vector: `Tar.list` callers route on the short prefix while POSIX
+  -- `open(2)` / `symlink(2)` truncates at the same NUL on `Tar.extract`,
+  -- yet strict peer parsers (GNU tar, BSD tar, libarchive) preserve the
+  -- full raw bytes or reject the header. Sibling guards: the ZIP CD-parse
+  -- name guard at `Zip/Archive.lean` (PR #1831, *"CD entry name contains
+  -- NUL byte"*); the GNU long-name / long-link guards in `forEntries`
+  -- (PR #1865, *"GNU long-name contains NUL byte"* /
+  -- *"GNU long-link contains NUL byte"*); and the PAX `keyBytes` /
+  -- `valueBytes` silent-skip in `parsePaxRecords` (PR #1866). Three
+  -- distinct error substrings keep attribution per-field. The guards run
+  -- after the checksum + magic checks (so header integrity is confirmed
+  -- first) and before any `Binary.readString` call on these three fields.
+  -- Writer-side at `buildHeader` (`hdr := writeField hdr hdrName.1
+  -- (Binary.writeString name hdrName.2)` and the `hdrLinkname` / `hdrPrefix`
+  -- siblings) uses `Binary.writeString`, which is NUL-padding-only — no
+  -- interior NUL can be emitted unless `entry.path` / `entry.linkname`
+  -- carries a literal `\x00` codepoint, so the guard never fires on
+  -- legitimate archives produced by `Tar.create`.
+  if hasInteriorNul block hdrName.1 hdrName.2 then
+    throw (IO.userError "tar: UStar name contains NUL byte")
+  if hasInteriorNul block hdrLinkname.1 hdrLinkname.2 then
+    throw (IO.userError "tar: UStar linkname contains NUL byte")
+  if hasInteriorNul block hdrPrefix.1 hdrPrefix.2 then
+    throw (IO.userError "tar: UStar prefix contains NUL byte")
   let name := Binary.readString block hdrName.1 hdrName.2
   let pfx := Binary.readString block hdrPrefix.1 hdrPrefix.2
   let fullPath := if pfx.isEmpty then name else pfx ++ "/" ++ name

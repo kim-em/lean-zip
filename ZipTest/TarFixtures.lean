@@ -179,6 +179,24 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       pure ())
     "GNU long-name contains NUL byte"
 
+  -- NUL-byte smuggle in UStar `name` field: must be rejected by the
+  -- new `hasInteriorNul` guard in `parseHeader` before
+  -- `Binary.readString` truncates the payload at the embedded NUL.
+  -- The `linkname` (offset 157) and `prefix` (offset 345) arms share
+  -- the same guard and the same `Binary.readString` truncation path,
+  -- so they are covered by symmetric code review rather than dedicated
+  -- fixtures (matching the PR #1865 long-link policy). Closes the
+  -- UStar layer of the smuggled-NUL attack class — sibling of
+  -- PR #1831 (ZIP CD), PR #1865 (GNU long-name / long-link), and
+  -- PR #1866 (PAX key/value).
+  let ustarNameNulData ← readFixture "tar/malformed/ustar-name-nul-in-name.tar"
+  let ustarNameNulPath ← writeFixtureTmp "ustar-name-nul-in-name.tar" ustarNameNulData
+  assertThrows "TAR malformed (ustar-name-nul-in-name.tar)"
+    (IO.FS.withFile ustarNameNulPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "UStar name contains NUL byte"
+
   -- Non-throwing variants: payloads with no trailing NUL and with
   -- invalid UTF-8 must each apply a predictable name to the next entry.
   let gnuLnNoTermData ← readFixture "tar/malformed/gnu-longname-no-terminator.tar"
@@ -302,6 +320,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-inconsistent-length.tar", "pax-path-nul-in-value.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
+             "ustar-name-nul-in-name.tar",
              "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",
