@@ -33,7 +33,9 @@ one makes the test brittle to message rewrites.
 | Archive ZIP64 EOCD64 record-size | `Zip/Archive.lean` (`findEndOfCentralDir` ZIP64 branch) | `zip: ZIP64 EOCD64 record-size mismatch (size=<n>, expected 44 for v1 EOCD64)` | `"ZIP64 EOCD64 record-size mismatch"` |
 | Archive CD ZIP64 extra-field parse | `Zip/Archive.lean` (`parseCentralDir`, `parseZip64Extra` caller) | `zip: malformed ZIP64 extra field for <name>` | `"malformed ZIP64 extra field"` |
 | Archive CD/LH extra-data sub-field structural check | `Zip/Archive.lean` (`validateExtraFieldStructure`, unconditionally in `parseCentralDir` / `readEntryData` before any ZIP64-sentinel guard) | CD: `zip: malformed extra field for <name>`; LH: `zip: malformed local extra field for <label>` | CD: `"malformed extra field"`; LH: `"malformed local extra field"` (both distinct from `"malformed ZIP64 extra field"`, which fires only when a sentinel is set and the inner `0x0001` block is malformed) |
+| Archive CD ZIP64 duplicate extra-block | `Zip/Archive.lean` (`parseCentralDir`, `hasDuplicateZip64Extra` guard before `parseZip64Extra` call) | `zip: duplicate ZIP64 extra field for <name>` | `"duplicate ZIP64 extra field"` |
 | Archive LH ZIP64 parse | `Zip/Archive.lean` | `truncated ZIP64 local extra field` | `"truncated ZIP64 local extra field"` |
+| Archive LH ZIP64 duplicate extra-block | `Zip/Archive.lean` (`readEntryData`, `hasDuplicateZip64Extra` guard before `parseZip64Extra` call) | `zip: duplicate ZIP64 local extra field for <label>` | `"duplicate ZIP64 local extra field"` |
 | Tar per-entry bomb | `Zip/Tar.lean:565-566` | `Tar: entry <name> exceeds limit (…)` | `"exceeds limit"` |
 | Tar header pseudo-entry cap | `Zip/Tar.lean:223` | `tar: header entry size (…) exceeds maximum header size (…)` | `"exceeds maximum header size"` |
 | Tar unsafe path | `Zip/Tar.lean` (via `Binary.isPathSafe`) | `Tar: unsafe path <name>` | `"unsafe path"` |

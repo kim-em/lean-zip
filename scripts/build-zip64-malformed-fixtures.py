@@ -14,6 +14,8 @@ Outputs:
 - testdata/zip/malformed/zip64-eocd64-bad-recsize.zip
 - testdata/zip/malformed/zip64-extra-oversized-datasize.zip
 - testdata/zip/malformed/cd-extra-overrun-datasize.zip
+- testdata/zip/malformed/cd-zip64-extra-duplicate.zip
+- testdata/zip/malformed/lh-zip64-extra-duplicate.zip
 """
 import os, struct, zlib
 
@@ -236,4 +238,92 @@ def write_cd_extra_overrun_fixture(path):
 
 write_cd_extra_overrun_fixture(
     os.path.join(OUT_DIR, "cd-extra-overrun-datasize.zip"),
+)
+
+
+# === Duplicate-ZIP64-extra fixtures (issue #1781) =====================
+#
+# APPNOTE §4.5 forbids more than one instance of any registered extra-field
+# header ID per entry's extra-data area.  Two ZIP64 (headerId `0x0001`)
+# blocks with different sentinel-resolved sizes/offsets are a parser-
+# differential smuggling vector: a "first-wins" reader (lean-zip pre-fix)
+# and a "last-wins" reader disagree on the resolved values for the same
+# bytes.  These fixtures emit single-entry archives whose `stdUncompSize`
+# is the ZIP64 sentinel (`0xFFFFFFFF`) — exercising the duplicate-detect
+# guard at the CD parse site (`cd-...`) and the LH read site (`lh-...`).
+
+
+def make_lh_uncomp_sentinel(comp_size, extra_len):
+    """Local header with `stdUncompSize = 0xFFFFFFFF` so the LH ZIP64
+    parse path is reached.  `extra_len` is the byte length of the extra
+    block that follows the name."""
+    return struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034b50, 45, 0, 0, 0, 0,
+        CRC, comp_size, SENTINEL_32, N, extra_len,
+    )
+
+
+def make_cd_uncomp_sentinel(comp_size, extra_len):
+    """CD entry with `stdUncompSize = 0xFFFFFFFF` so the CD ZIP64 parse
+    path is reached.  `extra_len` is the byte length of the extra block
+    that follows the name in the CD entry."""
+    return struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014b50, (3 << 8) | 45, 45, 0, 0, 0, 0,
+        CRC, comp_size, SENTINEL_32, N, extra_len, 0, 0, 0, 0, 0,
+    )
+
+
+def make_zip64_extra_uncomp_only(uncomp):
+    """Single 0x0001 block carrying just the 8-byte uncompSize field —
+    the layout `parseZip64Extra` expects when only `stdUncompSize` is at
+    sentinel.  `dataSize = 8 = 8 * N` for N = 1."""
+    return struct.pack("<HHQ", 0x0001, 8, uncomp)
+
+
+def make_zip64_extra_duplicate_uncomp(uncomp1, uncomp2):
+    """Two 0x0001 blocks, each carrying an 8-byte uncompSize.  APPNOTE
+    §4.5 rejects this; lean-zip's `hasDuplicateZip64Extra` returns true."""
+    return (
+        struct.pack("<HHQ", 0x0001, 8, uncomp1)
+        + struct.pack("<HHQ", 0x0001, 8, uncomp2)
+    )
+
+
+def write_dup_fixture(path, *, dup_in_cd, dup_in_lh):
+    """Write a single-entry archive whose CD and/or LH extra-data carries
+    duplicate 0x0001 blocks.  Either flag (or both) selects which parse
+    site trips the new guard; the other side carries a single valid
+    0x0001 so its parser-differential layer is well-formed."""
+    cd_extra = (make_zip64_extra_duplicate_uncomp(P, P + 100)
+                if dup_in_cd else make_zip64_extra_uncomp_only(P))
+    lh_extra = (make_zip64_extra_duplicate_uncomp(P, P + 100)
+                if dup_in_lh else make_zip64_extra_uncomp_only(P))
+    lh = make_lh_uncomp_sentinel(P, len(lh_extra))
+    lhe = lh + NAME + lh_extra + PAYLOAD
+    cd = make_cd_uncomp_sentinel(P, len(cd_extra))
+    cde = cd + NAME + cd_extra
+    eocd = make_eocd(
+        cd_size=len(cde), cd_offset=len(lhe),
+        total_entries=1, entries_this_disk=1,
+        this_disk=0, disk_cd=0,
+    )
+    with open(path, "wb") as f:
+        f.write(lhe + cde + eocd)
+    print(f"wrote {path} ({os.path.getsize(path)} bytes)")
+
+
+# CD-side: CD has duplicate 0x0001; LH has a single valid 0x0001 so the
+# error attributes the fault to the CD parse site (which fires first).
+write_dup_fixture(
+    os.path.join(OUT_DIR, "cd-zip64-extra-duplicate.zip"),
+    dup_in_cd=True, dup_in_lh=False,
+)
+# LH-side: CD has a single valid 0x0001 so CD parse passes; LH has the
+# duplicate so the LH read-site guard (with the `local extra` wording)
+# fires.
+write_dup_fixture(
+    os.path.join(OUT_DIR, "lh-zip64-extra-duplicate.zip"),
+    dup_in_cd=False, dup_in_lh=True,
 )
