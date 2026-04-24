@@ -37,6 +37,7 @@ Per-session details are in `progress/`.
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 - **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
 - **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
+- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1765): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 6 / 7 per-entry CD/LH dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32 — name-bytes remaining); 21 fixtures in `testdata/zip/malformed/` (was 12 at #1721)
 
 ## Milestones
 
@@ -2368,6 +2369,62 @@ and `ZipTest/BoundedReadTest.lean` from #1608); `testdata/` fixture
 counts 11 / 14 / 6 (the +2 in `testdata/tar/malformed/` is from
 pre-batch PR #1597 — it merged 03:43Z but was outside the prior
 summarize's stated scope); toolchain `v4.29.1`.
+
+**16-PR batch (Apr 22–24): Track E CD/EOCD and CD/LH dimension closure (summarize #1765):**
+
+Sixteen PRs merged across three threads in the window between
+summarize #1721 (merge commit `8766ba9`, 23:26Z 2026-04-22) and
+PR #1761 (merge commit `b1d38d5`, 05:52Z 2026-04-24). No spec
+file touched; `grep -rc sorry Zip/` stayed at 0.
+
+*Track E feature PRs (8).* #1728 (CD/LH uncompsize + crc fixtures,
+closing the per-entry sextet), #1733 (EOCD `totalEntries`
+consistency), #1736 (CD/LH `versionNeededToExtract` one-sided
+LH ≤ CD), #1742 (EOCD disk-number — both fields == 0 post-ZIP64-
+override), #1752 (EOCD-internal `numEntriesThisDisk` vs.
+`totalEntries`; extends `findEndOfCentralDir` tuple 6 → 7), #1754
+(ZIP64/standard-EOCD override sentinel, six-field "sentinel ∨
+numeric match" check; lifts `findEndOfCentralDir`'s outer
+container from `Option` to `IO (Option …)`), #1759 (per-entry CD
+`diskNumberStart` §4.4.11 sibling of #1742), #1761 (ZIP64 EOCD64
+self-declared `size of record` field sanity == 44). Five
+archive-level EOCD dimensions landed this wave; coverage 1 / 9
+→ 6 / 9 closed. The `SECURITY_INVENTORY.md` CD-vs-EOCD *Missing
+work* bullet (line 202) is now down to comment-length only
+(tracked by in-flight repair PR #1743 / issue #1739).
+
+*Paired-review PRs (6).* #1741 (reviews #1728), #1747 (reviews
+#1733), #1748 (reviews #1736), #1753 (reviews #1742), #1760
+(reviews #1752). #1737 is a standalone post-ladder proof-quality
+audit of `Zip/Native/Crc32.lean` (−5 LOC, zero statement change),
+not paired with an in-wave feature PR. Median paired-review
+latency for the five feature pairs: 51 min (inside the meditate
+#1651 §4 ≤ 1-hour target; the #1728 → #1741 pair at 228 min is
+the sole outlier, crossing the overnight window between the
+opening housekeeping PRs and the main wave's 03:11Z
+resumption).
+
+*Housekeeping / infra (2).* #1724 names `0xFFF7` as the private
+constant `dataDescriptorBitMask` in `Zip/Archive.lean` (no
+behavior change; readability refactor of the CD/LH flags check
+added by #1715). #1727 sweeps `SECURITY_INVENTORY.md`'s CD/LH
+region to reconcile the throw-message-line vs. `unless`-line
+citation convention.
+
+*Scope discipline.* The only source changes this wave touched
+`Zip/Archive.lean` (+147 LOC from the five archive-level checks
+and #1759's per-entry check; #1724 refactor is LOC-neutral) and
+`Zip/Native/Crc32.lean` (−5 LOC from #1737). `Zip/Spec/` stayed
+at 42 × 21,067 LOC with zero edits. `ZipTest/ZipFixtures.lean`
+grew +219 LOC from nine new fixture/assert blocks. Fixtures in
+`testdata/zip/malformed/` grew from 12 to 21 (nine new); tar
+fixture counts (14 / 6) unchanged.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged); 0 runtime
+`]!` across `Zip/Native/` and `Zip/*.lean` (unchanged);
+`bash scripts/check-inventory-links.sh` → `errors=0, warnings=34`
+(34 line-anchor warnings inherited from the five-Archive-edit
+stack; the fixture-path and cross-reference gates stay clean).
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
