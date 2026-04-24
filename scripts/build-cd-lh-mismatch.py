@@ -25,6 +25,7 @@ Outputs:
 - testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip
 - testdata/zip/malformed/cd-patched-data-flag.zip
 - testdata/zip/malformed/cd-nul-in-name.zip
+- testdata/zip/malformed/cd-path-unsafe.zip
 """
 import os, struct, zlib
 
@@ -409,4 +410,33 @@ write(
     os.path.join(OUT_DIR, "cd-nul-in-name.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     name_bytes=b"a\x00b.txt",
+)
+# CD-parse entry-name path-unsafe anomaly: both CD and LH carry the raw name
+# bytes `b"../evil.txt"` (11 bytes — a classic `..`-traversal archive-slip
+# smuggle).  `Binary.isPathSafe` (shared with the Tar extractor and the ZIP
+# extract-time check) rejects `..` as a component.  Pre-PR, `Archive.list`
+# returned the `Entry` with the unsafe `path = "../evil.txt"` verbatim
+# (the decoded `String` preserves the component structure), exposing the
+# full smuggled form to callers who routed on `entry.path` before any
+# filesystem I/O — the extract-time `Binary.isPathSafe` calls in
+# `Archive.extract` at Zip/Archive.lean:1070 / :1074 caught only the
+# extract path.  `parseCentralDir` now rejects at CD parse time with
+# `"CD entry has unsafe path"`, closing both `Archive.list` and
+# `Archive.extract` dimensions simultaneously.  The 11-byte name is 2
+# bytes longer than the default `b"hello.txt"` (9 bytes) so the file
+# shifts by +4 from the baseline 118-byte fixture (+2 for each of CD
+# name bytes and LH name bytes); no other fixture depends on
+# byte-identity with this fixture.  LH and CD name bytes match
+# byte-for-byte, keeping the CD/LH name-bytes consistency invariant
+# (issue #1722) intact.  Sibling of `cd-nul-in-name.zip` (PR #1831): the
+# NUL-byte fixture closes the byte-content dimension of filename
+# smuggling; this fixture closes the path-shape dimension.  The choice
+# of `..` over `/abs/path`, `a\evil.txt`, or `C:/Windows/...` is
+# arbitrary among the five `isPathSafe`-rejected shapes — `..` is the
+# canonical archive-slip vector cited by APPNOTE-era security
+# literature and by the tar-side `tar-slip.tar` companion fixture.
+write(
+    os.path.join(OUT_DIR, "cd-path-unsafe.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    name_bytes=b"../evil.txt",
 )
