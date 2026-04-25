@@ -19,6 +19,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/pax-invalid-utf8-value.tar
 - testdata/tar/malformed/pax-inconsistent-length.tar
 - testdata/tar/malformed/pax-path-nul-in-value.tar
+- testdata/tar/malformed/pax-duplicate-path.tar
 -/
 
 /-- Build a fixture whose PAX header carries `paxData` (verbatim),
@@ -93,6 +94,21 @@ def fixtureInconsistentLength : ByteArray :=
 def fixturePathNulInValue : ByteArray :=
   "14 path=a".toUTF8 ++ ByteArray.mk #[0x00] ++ "b/c\n".toUTF8
 
+/-- PAX data with two well-formed `path=` records — a parser-differential
+    smuggling vector where a lenient (first-wins) reader takes
+    `"safe.txt"` while a strict (last-wins, APPNOTE-silent on order)
+    reader takes `"../etc/passwd"`. `parsePaxRecords` must reject at
+    parse time with an error containing `"duplicate"` so that neither
+    listing nor extract callers see a divergence from any peer parser.
+    Record 1: `"17 path=safe.txt\n"` —
+      2 (digits `"17"`) + 1 (space) + 4 (`"path"`) + 1 (`"="`)
+      + 8 (`"safe.txt"`) + 1 (newline) = 17 ✓.
+    Record 2: `"22 path=../etc/passwd\n"` —
+      2 (digits `"22"`) + 1 (space) + 4 (`"path"`) + 1 (`"="`)
+      + 13 (`"../etc/passwd"`) + 1 (newline) = 22 ✓. -/
+def fixtureDuplicatePath : ByteArray :=
+  "17 path=safe.txt\n22 path=../etc/passwd\n".toUTF8
+
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/malformed"
   buildPaxMalformedFixture fixtureOversizedLength (outDir / "pax-oversized-length.tar")
@@ -101,4 +117,5 @@ def main : IO Unit := do
   buildPaxMalformedFixture fixtureInvalidUtf8Value (outDir / "pax-invalid-utf8-value.tar")
   buildPaxMalformedFixture fixtureInconsistentLength (outDir / "pax-inconsistent-length.tar")
   buildPaxMalformedFixture fixturePathNulInValue (outDir / "pax-path-nul-in-value.tar")
-  IO.println "Built 6 malformed PAX fixtures under testdata/tar/malformed/."
+  buildPaxMalformedFixture fixtureDuplicatePath (outDir / "pax-duplicate-path.tar")
+  IO.println "Built 7 malformed PAX fixtures under testdata/tar/malformed/."

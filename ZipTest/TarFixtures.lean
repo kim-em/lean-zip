@@ -149,6 +149,24 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     unless entries[0]!.path == "hello.txt" do
       throw (IO.userError s!"TAR malformed ({fixture}): expected regular entry 'hello.txt', got '{entries[0]!.path}'")
 
+  -- Duplicate-key smuggle in PAX extended header: two `path=` records
+  -- (`safe.txt` then `../etc/passwd`) must be rejected by the new
+  -- `parsePaxRecords` duplicate-key guard, closing the last
+  -- parser-differential dimension on the PAX-record validation surface
+  -- (sibling of PR #1866's NUL-byte key/value silent-skip on the same
+  -- loop). POSIX SUSv4 §pax leaves record order unspecified, so a
+  -- lenient (first-wins) reader would take `"safe.txt"` while a strict
+  -- (last-wins) reader would take `"../etc/passwd"` — rejecting at
+  -- parse time ensures neither listing nor extract callers diverge
+  -- from any peer parser on this input.
+  let paxDupData ← readFixture "tar/malformed/pax-duplicate-path.tar"
+  let paxDupPath ← writeFixtureTmp "pax-duplicate-path.tar" paxDupData
+  assertThrows "TAR malformed (pax-duplicate-path.tar)"
+    (IO.FS.withFile paxDupPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "duplicate"
+
   -- === TAR malformed GNU long-name / long-link fixtures ===
   -- Truncated long-name and long-link payloads must surface as a clean
   -- end-of-archive error rather than a panic.
@@ -318,6 +336,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-oversized-length.tar", "pax-truncated-record.tar",
              "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
              "pax-inconsistent-length.tar", "pax-path-nul-in-value.tar",
+             "pax-duplicate-path.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
              "ustar-name-nul-in-name.tar",
