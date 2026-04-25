@@ -989,7 +989,7 @@ Summary — what this pattern catches and what it does not:
     offending record and continues), PR #1899 hard-rejects — the
     `.error` return is rethrown unconditionally by `forEntries`'s
     `typePaxExtended` branch at
-    [Zip/Tar.lean:669](/home/kim/lean-zip/Zip/Tar.lean:669) via
+    [Zip/Tar.lean:691](/home/kim/lean-zip/Zip/Tar.lean:691) via
     `throw (IO.userError msg)`. Error wording *"tar: PAX extended
     header has duplicate {key.quote} record"* uses `String.quote`
     attribution on the duplicate key. Closes the parser-differential
