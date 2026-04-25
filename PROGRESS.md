@@ -4014,6 +4014,219 @@ events). `bash scripts/check-inventory-links.sh` exits 0 with
 PRs cleared most remaining stale citations on the
 narrative-paragraph and row-table sides). Toolchain `v4.29.1`.
 
+**12-PR batch (Apr 25): post-#2168 wave — fourth consecutive maintenance-only wave of the post-#1928 closure arc; pure inventory-anchor refresh / heuristic-suppression wave (no terminal closures, no Track E feature work, no source / test / fixture changes) covering five distinct inventory-section sub-classes (standalone audit sections / Recommended-policy narrative paragraphs / Local guard intro + table parenthetical / Minimized Reproducer Corpus rows / drift-detector heuristic suppressions) (summarize #2191):**
+
+Twelve PRs merged in the ~1h 33min window between PR #2170
+(19:35:10Z 2026-04-25) and PR #2190 (21:08:32Z 2026-04-25),
+opening immediately after PR #2168 (the prior summarize wave PR)
+merged at 19:32:20Z. The wave is structurally a **pivot off the
+shift-class axis** that organized the prior three pure-doc waves
+(post-#1989 / post-#2074 / post-#2110): where those waves split
+their PRs by line-shift magnitude (CD-parse-guard +43-67 /
+Archive late-section +25-225 / PAX-UStar parser-growth +16-23 /
+Tar parser-growth +95-117 / writer-side ±4-6), the post-#2168
+wave instead splits its 12 PRs across **five inventory-section
+sub-classes** — the structural sections of `SECURITY_INVENTORY.md`
+that the anchors live in, rather than the line-shift magnitudes
+on the source side. The 12 PRs split as: 3 standalone-audit-section
+refreshes (lines 1126 / 1140 / 1156), 3 Recommended-policy
+narrative-paragraph refreshes (lines 296 / 515 / 630), 2 Local
+guard sub-section refreshes (intro paragraph at line 1285 +
+row-1302 parenthetical), 2 Minimized Reproducer Corpus refreshes
+(rows 1411 / 1413 — UStar interior-NUL fixture rows), and 2
+drift-detector heuristic suppressions (rows 1309 / 1310 —
+`readEntryData` and `skipEntryData` per-chunk-cap body anchors).
+There is **no terminal closure** in this wave; the post-#1928
+Tar interior-NUL closure arc remains structurally complete,
+and the planner-side activity continues to be anchor maintenance.
+Source code (`Zip/`, `c/`, `testdata/`) was not touched by any
+of the 12 PRs; `grep -rcF sorry Zip/` stayed at 0 throughout.
+
+*Inventory: standalone-audit-section sub-class (3 PRs) — the
+`SECURITY_INVENTORY.md` standalone audit sections at lines 1126
+/ 1140 / 1156 (sections 1 / 2 / 3 of the audit checklist), pinning
+the def-line anchor precedent for those sections.*
+
+- **#2172 (19:39Z) — line 1126**: section 1 *"ZIP metadata to
+  `Handle.read`"* (`Zip/Archive.lean:491 → :980`, +489 from
+  cumulative parser-growth + Archive late-section wave); first
+  standalone-audit-section anchor refresh, sets the def-line
+  precedent.
+- **#2174 (19:53Z) — line 1140**: section 2 *"Tar UTF-8 partial
+  functions"* (`Zip/Tar.lean:246 → :317`, +71 from
+  post-#1899/#1944/#1957/#1979 Tar parser growth wave plus
+  `hasInteriorNul` helper insertion); `splitPath` def line.
+- **#2177 (20:19Z) — line 1156**: section 3 *"Unlimited
+  decompression knobs"* (`Zip/Archive.lean:783 → :1233`, +450
+  from cumulative Archive late-section growth wave);
+  `Archive.extract` def line; closes the audit-section trio
+  (sections 1 / 2 / 3 all on the def-line anchor precedent).
+
+*Inventory: Recommended-policy narrative-paragraph sub-class (3
+PRs) — narrative-paragraph refreshes that restore fixture-cite ↔
+narrative-cite agreement on three distinct guard sites.*
+
+- **#2171 (19:37Z) — line 296**: ZIP64 EOCD64 `versionMadeBy`
+  upper-bound throw (`Zip/Archive.lean:337 → :363`, +26 from
+  later-landing throw inside `findEndOfCentralDir`); corrected
+  replacement for issue #2152 (which misattributed to the
+  adjacent record-size paragraph).
+- **#2181 (20:32Z) — line 515**:
+  `cd-entry-localoffset-past-cdstart` per-entry archive-layout
+  invariant (`Zip/Archive.lean:728 → :771`, +43 from
+  CD-parse-guard insertion wave); restores fixture-cite ↔
+  narrative-cite agreement for PR #1813.
+- **#2182 (20:35Z) — line 630**: `cd-entry-internal-attrs-reserved`
+  CD-entry `internalFileAttributes` reserved-bits check
+  (`Zip/Archive.lean:567 → :612`, +45 from CD-parse-guard
+  insertion wave); per-row split sibling of issue #2077 (corpus
+  row 1429 cite, repair-queue PR #2083) — narrative-paragraph
+  cite at line 630 vs. corpus row at line 1429 are structurally
+  isolated.
+
+*Inventory: Local guard sub-section sub-class (2 PRs) — intro
+paragraph creator-side `h.read` exclusion + row-1302
+parenthetical bare-text re-anchor.*
+
+- **#2170 (19:35Z) — line 1285**: Local guard intro paragraph
+  creator-side `h.read` exclusion (`Zip/Tar.lean:466 → :599`,
+  +133 from post-#1899/#1944/#1957/#1979 Tar parser growth wave
+  plus `hasInteriorNul` helper insertion).
+- **#2178 (20:21Z) — row 1302 parenthetical**: bare-text
+  re-anchor *"(inner s.read at line 695)"* → *"(line 1000)"*
+  (+305 from helper-block reordering below `parseCentralDir`);
+  structurally isolated from sibling Local guard table rows in
+  repair-queue PRs #2073 / #2081 / #2060 / #1959.
+
+*Inventory: Minimized Reproducer Corpus sub-class (2 PRs) — the
+UStar interior-NUL fixture rows 1411 and 1413 (sibling-deferral
+follow-ups to the in-#2110-wave PRs #2155 / #2156).*
+
+- **#2186 (20:54Z) — row 1411**:
+  `testdata/tar/malformed/ustar-linkname-nul-in-name.tar`
+  mixed-form 2-anchor sweep — markdown-link prefix-arm
+  parenthetical (`Zip/Tar.lean:519 → :535`) + bare-text *"name
+  slot at line 515"* → *"line 531"* (+16 from `hasInteriorNul`
+  uname/gname-arm insertion wave); sibling-deferral pattern from
+  PR #2155 (issue #1955).
+- **#2187 (20:56Z) — row 1413**:
+  `testdata/tar/malformed/ustar-prefix-nul-in-name.tar` bare-text
+  3-anchor sweep — *"lines 515 / 517 / 519"* → *"lines 531 / 533
+  / 535"* inside per-slot family-closure clause
+  (linker-undetected drift, +16 shift); sibling-deferral pattern
+  from PR #2156 (which explicitly took the markdown-link form
+  only).
+
+*Inventory: drift-detector heuristic-suppression sub-class (2
+PRs) — first body-anchor table-row variant of the drift-detector
+pattern previously seen on `SECURITY_INVENTORY.md:1176-1178`.*
+
+- **#2188 (20:59Z) — row 1309**: `readEntryData` per-chunk-cap
+  body anchor (`Zip/Tar.lean:256` / :267 inside while loop, def
+  at :249 outside the ±2 window); 1-line single-anchor doc-only
+  sweep matching `SECURITY_INVENTORY.md:1176-1178` precedent —
+  first body-anchor table-row variant of the drift-detector
+  pattern.
+- **#2190 (21:08Z) — row 1310**: `skipEntryData` per-chunk-cap
+  body anchor (`Zip/Tar.lean:634` inside while loop, def at :630
+  outside the ±2 window); immediate sibling of #2188 — same
+  root-cause class.
+
+*Wave-character callout.* This is the **fourth consecutive
+maintenance-only wave** of the post-#1928 closure arc (post-#1989
+35 PRs → post-#2074 12 PRs → post-#2110 26 PRs → post-#2168 12
+PRs) and the **shortest of the four** (joint with post-#2074 at
+12 PRs each). All 12 PRs are inventory re-anchor or
+heuristic-suppression PRs — no fixtures, no Track E feature, no
+`Zip/` source edits, no skill landing, no Recent-wins bullet, no
+paired-review entry. The wave's structural character (5
+inventory-section sub-classes vs. the prior wave's 5 line-shift
+sub-classes) reflects a deliberate **axis pivot**: prior waves
+cleared the bulk of the +43-67 / +111 / +49 / +95-117 shift
+clusters along the line-shift axis on a smaller number of
+inventory sections, and the post-#2168 wave instead spans **five
+different structural sections** of `SECURITY_INVENTORY.md`
+(audit sections / narrative paragraphs / Local guard / corpus
+rows / drift-detector comments) on a smaller number of
+line-shift magnitudes. Group 1 (standalone-audit) closes the
+audit-section trio at lines 1126 / 1140 / 1156, pinning the
+def-line anchor precedent for those sections (planner-queued
+issues #2165 / #2166 / #2167 from the prior wave). Group 5
+(drift-detector) **opens the body-anchor table-row sub-pattern**
+of the drift-detector heuristic-suppression class — the prior
+applications (`SECURITY_INVENTORY.md:1176-1178`) were narrative
+paragraphs, but the row 1309 / 1310 sweeps extend the pattern
+to table rows where the cited body-line anchor is inside a
+while loop with the def line outside the ±2 quoted-substring
+window. With 14 inventory-link warnings remaining at wave close
+(down from the prior wave's 18), the maintenance saturation arc
+is in its terminal phase — the residual warnings trace
+exclusively to in-flight repair-queue PRs and a handful of
+trailing in-source line-content heuristic mismatches.
+
+*Repair queue snapshot at wave close.* 19 PRs in conflict + 1
+failing CI per `coordination list-pr-repair` at issue #2191
+creation time (#2144 / #2092 / #2083 / #2081 / #2073 / #2060 /
+#2035 / #2013 / #2006 / #1959 / #1909 / #1825 / #1820 / #1814 /
+#1809 / #1802 / #1777 / #1771 / #1764 + failed-CI #1876). The
+queue is structurally unchanged from prior wave close — no net
+new entrants this wave because the 12 PRs landed across 5
+different inventory sections without colliding with the existing
+repair-queue clusters (the row 1411 / 1413 sweeps in group 4
+are sibling-deferral follow-ups to in-#2110-wave PRs, *not*
+sibling-row repair PRs). The 5 oldest entries (#1725 / #1743 /
+#1755 / #1764 / #1771) trace back to the Track E CD-parse
+cascade that predates the post-#1928 closure arc.
+
+*Post-issue-creation tail (out of wave scope).* Per the
+post-issue-creation tail deferral pattern in
+`.claude/skills/summarize-flow/SKILL.md`, any PRs that land
+between issue #2191's 21:24:00Z creation and this wave PR's
+submission are deferred to the next wave block. At the moment
+this wave PR is submitted, **PRs #2192 (drift-detector row 1402
+suppression) and #2197 (drift-detector row 1066 suppression)**
+have merged after the wave's terminal PR #2190 (21:08:32Z) —
+both at PR-create timestamps strictly after issue creation
+(#2192 created 21:27:58Z, merged 21:29:05Z; #2197 created
+21:45:05Z, merged 21:46:16Z). These two are the queued
+continuation of group 5 (drift-detector heuristic suppressions,
+siblings of #2188 / #2190 — issues #2185 / #2189 mentioned in
+the issue body as the queued continuation) and are **out of
+wave scope** per the issue-body-as-source-of-truth invariant;
+they will appear in the next wave block. Four additional
+inventory issues were also created post-issue (#2193 / #2194 /
+#2195 / #2196 — FFI Decompression Limit Inventory cluster rows
+1177 / 1179 / 1180 / 1181 covering Gzip.decompress /
+decompressStream / decompressFile + RawDeflate.decompressStream),
+and remain unclaimed at wave-PR submission; their PRs (when
+landed) will likewise appear in the next wave block.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/`
+and `Zip/*.lean` (unchanged — no source edits this wave).
+Fixtures in `testdata/zip/malformed/` unchanged at 47; fixtures
+in `testdata/tar/malformed/` unchanged at 24. Spec-line counts
+unchanged (no `Zip/Spec/` PRs). Type mix across the 12 PRs:
+inventory 12 / non-inventory 0 — ratio 100% inventory (fourth
+consecutive 100% wave; prior wave was also 100%, post-#1989
+wave was ~94%). At wave close: repair queue at 20 PRs (19
+merge-conflicts + 1 failed-CI on PR #1876, structurally
+unchanged from prior wave close at 23 PRs net of any
+intra-wave queue shifts on the prior wave's seed set);
+`feature` queue at 2 unclaimed inventory issues at issue-#2191
+creation (#2185 row 1402 drift-detector / #2189 row 1066
+drift-detector — both queued separately as the post-#2188 /
+#2190 continuation; both subsequently claimed and merged in
+the post-issue-creation tail as PRs #2192 / #2197); `review`
+queue empty (no closure events). `bash
+scripts/check-inventory-links.sh` exits 0 with 14 warnings
+(down from the prior wave's 18 as the 12 re-anchor /
+heuristic-suppression PRs cleared further stale citations
+across all 5 inventory-section classes — the 4 reduction is
+attributable to the 2 drift-detector suppressions plus the 2
+narrative/audit-section refreshes that fell within the
+pre-existing warning set). Toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
