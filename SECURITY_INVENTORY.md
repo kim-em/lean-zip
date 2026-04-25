@@ -934,8 +934,10 @@ Summary — what this pattern catches and what it does not:
     *"UStar gname contains NUL byte"* (offset 297, 32 B). Closes
     the UStar layer of the smuggled-NUL attack class — sibling of
     PR #1831 (ZIP CD entry name, *"CD entry name contains NUL byte"*),
-    PR #1865 (GNU long-name / long-link, *"GNU long-name contains NUL
-    byte"* / *"GNU long-link contains NUL byte"*), and PR #1866 (PAX
+    PRs #1865 (long-name slot, `gnu-longname-nul-in-name.tar`) /
+    #1953 (long-link slot, `gnu-longlink-nul-in-link.tar`) (GNU
+    long-name / long-link, *"GNU long-name contains NUL byte"* /
+    *"GNU long-link contains NUL byte"*), and PR #1866 (PAX
     `keyBytes` / `valueBytes` silent-skip in `parsePaxRecords`). The
     UStar interior-NUL family is **fully closed 5/5** — the 3-slot
     filesystem-reaching arm (`name` / `linkname` / `prefix`) plus the
@@ -946,6 +948,36 @@ Summary — what this pattern catches and what it does not:
     `Tar.list` caller routing on `entry.uname` / `entry.gname` for a
     trust decision and seeing only the truncated prefix while peer
     parsers preserve the full bytes.
+  - GNU long-name / long-link interior-NUL rejection in `forEntries`
+    — PR #1865 (both guards in `forEntries`'s `typeGnuLongName` /
+    `typeGnuLongLink` arms; long-name regression fixture
+    `testdata/tar/malformed/gnu-longname-nul-in-name.tar`) +
+    per-slot long-link follow-up
+    (`testdata/tar/malformed/gnu-longlink-nul-in-link.tar`,
+    PR #1953). Two error substrings keep per-slot attribution —
+    *"GNU long-name contains NUL byte"* (typeflag `'L'` arm at
+    [Zip/Tar.lean:667](/home/kim/lean-zip/Zip/Tar.lean:667)) and
+    *"GNU long-link contains NUL byte"* (typeflag `'K'` arm at
+    [Zip/Tar.lean:679](/home/kim/lean-zip/Zip/Tar.lean:679)).
+    `forEntries` runs `findIdx? (· == 0)` on the raw `ByteArray`
+    payload after `stripTrailingNuls` and before
+    `String.fromUTF8?` / `Binary.fromLatin1`, so neither decode
+    branch can re-introduce NUL into the error message. The
+    GNU long-name / long-link interior-NUL family is
+    **fully closed 2/2** — long-name slot (PR #1865,
+    `gnu-longname-nul-in-name.tar`) + long-link slot (PR #1953,
+    `gnu-longlink-nul-in-link.tar`). Sibling of PRs #1880 / #1934
+    / #1937 / #1944 / #1957 (UStar interior-NUL family fully
+    closed 5/5), PR #1831 (ZIP CD entry name NUL-byte rejection),
+    and PR #1866 (PAX `keyBytes` / `valueBytes` silent-skip in
+    `parsePaxRecords`). lean-zip's tar writer does not emit GNU
+    long-name / long-link pseudo-entries (`Tar.create` always
+    emits UStar-or-PAX-extended-header for paths exceeding the
+    UStar 100/155-byte limits), so neither guard ever fires on
+    legitimate archives produced by `Tar.create`. The guards
+    exist to reject crafted malformed archives fed to `Tar.list`
+    / `Tar.extract` — the fixtures are the only way to trigger
+    them.
   - PAX extended-header duplicate-key rejection in `parsePaxRecords` —
     PR #1899
     (`testdata/tar/malformed/pax-duplicate-path.tar`).
