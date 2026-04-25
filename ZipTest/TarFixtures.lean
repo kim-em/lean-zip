@@ -430,7 +430,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-duplicate-path.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
-             "gnu-longlink-nul-in-link.tar",
+             "gnu-longname-nul-in-name.tar", "gnu-longlink-nul-in-link.tar",
              "ustar-name-nul-in-name.tar",
              "ustar-linkname-nul-in-name.tar",
              "ustar-prefix-nul-in-name.tar",
