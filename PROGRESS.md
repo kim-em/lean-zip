@@ -3786,6 +3786,234 @@ exits 0 with 27 warnings (down from the prior wave's 40 as
 the 12 re-anchor PRs cleared most remaining stale citations).
 Toolchain `v4.29.1`.
 
+**26-PR batch (Apr 25): post-#2110 wave — third consecutive maintenance-only wave of the post-#1928 closure arc; pure inventory-anchor refresh wave (no terminal closures, no Track E feature work, no source code) covering five distinct shift sub-classes (CD-parse-guard +43-67 / Archive late-section +25-225 / PAX-UStar parser-growth +16-23 / Tar parser-growth +95-117 / writer-side ±4-6) plus a multi-anchor narrative-paragraph cluster (3 PRs); longest pure-doc inventory wave to date (summarize #2168):**
+
+Twenty-six PRs merged in the ~2h 47min window between PR #2111
+(16:28:07Z 2026-04-25) and PR #2164 (19:15:16Z 2026-04-25),
+opening immediately after PR #2110 (the prior summarize wave
+PR) merged at 16:25:20Z. The wave is structurally a **breadth
+expansion** of the prior post-#2074 wave: where the 12-PR
+post-#2074 wave concentrated on three narrow shift classes
+(CD-parse-guard +43-45, Archive late-section +111, ZIP64-extra
++49), the post-#2110 wave reaches across **five distinct shift
+classes** plus a multi-anchor narrative-paragraph cluster of
+three PRs that consolidate sibling-deferral chains within a
+single paragraph. The 26 PRs split as: 6 CD-parse-guard +43-67
+PRs, 7 Archive late-section +25-225 PRs (including a notable
++225 outlier on the row-478 stored-method size invariant
+narrative paragraph), 6 PAX/UStar parser-growth +1-23 PRs, 2
+Tar parser-growth +95-117 PRs, 2 writer-side ±4-6 PRs, and 3
+multi-anchor narrative-paragraph sweeps — including PR #2154's
+**first 5-anchor in-row sweep** in the inventory family (the
+`cd-path-unsafe` narrative paragraph). There is **no terminal
+closure** in this wave; the post-#1928 Tar interior-NUL
+closure arc remains structurally complete (terminal at PR
+#1979 in the post-#1971 wave), and the planner-side activity
+continues to be anchor maintenance. Source code (`Zip/`,
+`c/`, `testdata/`) was not touched by any of the 26 PRs;
+`grep -rcF sorry Zip/` stayed at 0 throughout.
+
+*Inventory: CD-parse-guard +43-67 sub-class (6 PRs) — the
+`Zip/Archive.lean` CD-parse late-arm guards on the +43, +44,
++45, and +67 fine-grained tail of the CD-parse-guard wave.*
+
+- **#2114 (16:40Z) — row 1441**: `cd-path-unsafe.zip` row-table
+  primary cell (`:631 → :676`, +45).
+- **#2120 (16:55Z) — line 652**: `cd-patched-data-flag.zip`
+  narrative-paragraph follow-up to PR #2104's row-table update
+  (`:682 → :725`, +43).
+- **#2121 (17:00Z) — line 677**: `cd-nul-in-name.zip`
+  narrative-paragraph follow-up to PR #2105's row-table update
+  (`:589 → :632`, +43).
+- **#2137 (17:47Z) — line 486**: CD-entry compression-method
+  allowlist narrative paragraph (`:668 → :713`, +45;
+  prose-paragraph follow-up to PR #2053's row-1424 row-table
+  update).
+- **#2146 (18:14Z) — line 478**: `cd-empty-name.zip`
+  narrative-paragraph dual-anchor (`:535 → :578`, +43; `:570
+  → :614`, +44).
+- **#2161 (19:03Z) — line 414**: ZIP64-extra dataSize
+  exactness narrative (`:428 → :495`, +67 — fine-grained tail
+  of the CD-parse-guard wave on the `parseZip64Extra` arm).
+
+*Inventory: Archive late-section +25-225 sub-class (7 PRs) —
+the `Zip/Archive.lean` late-section guards that took +25, +111,
+or +225 shifts in the post-#2110 cumulative wave.*
+
+- **#2111 (16:28Z) — row 1426**:
+  `cd-empty-entry-crc-nonzero.zip` row-table trailing cite
+  `'CRC32 mismatch'` throw (`:1088 → :1199`, +111).
+- **#2122 (17:02Z) — line 491**: CD-parse method allowlist
+  narrative `'unsupported method'` throw (`:1083 → :1194`,
+  +111).
+- **#2129 (17:24Z) — row 1441**: `cd-path-unsafe.zip` row-table
+  trailing dual-anchor on the extract-time `Binary.isPathSafe`
+  call sites (`:1133 → :1244`; `:1107 → :1248`).
+- **#2131 (17:30Z) — line 478**: stored-method size invariant
+  narrative `'size mismatch'` throw (`:976 → :1201`, +225 —
+  broadest single-anchor shift in the wave).
+- **#2132 (17:33Z) — line 529**: `localOffset+30 ≤ cdOffset`
+  narrative `'bad local header signature'` throw (`:970 →
+  :1081`, +111).
+- **#2133 (17:35Z) — line 814**: empty-entry CRC invariant
+  narrative `'CRC32 mismatch'` throw (`:1088 → :1199`, +111).
+- **#2162 (19:07Z) — line 347**: ZIP64 EOCD64 overlap-locator
+  narrative `'ZIP64 EOCD64 record overlaps locator'` throw
+  (`:306 → :331`, +25 — small tail of the Archive late-section
+  shift on a paragraph that fell outside the +111 cluster).
+
+*Inventory: PAX/UStar parser-growth +1-23 sub-class (6 PRs) —
+the `Zip/Tar.lean` PAX and UStar parser guards that took small
+shifts (+1, +16, +20, +22, +23) from the post-#1899 / post-#1944
+PAX-NUL-guard insertion wave.*
+
+- **#2115 (16:46Z) — row 1407**: `pax-path-nul-in-value.tar`
+  `parsePaxRecords` keyBytes NUL guard (`:122 → :145`, +23).
+- **#2130 (17:28Z) — row 1402**: `pax-inconsistent-length.tar`
+  dual-anchor splitting collapsed citations across distinct
+  guard sites (`:118 → :121` eqPos scan loop; `:118 → :126`
+  silent-skip guard).
+- **#2138 (17:50Z) — line 992**: PAX duplicate-key narrative
+  `forEntries typePaxExtended` rethrow (`:669 → :691`, +22).
+- **#2145 (18:11Z) — row 1400**: `pax-duplicate-path.tar`
+  dual-anchor (`:147 → :148` parsePaxRecords duplicate-key
+  guard; `:669 → :691` forEntries rethrow, +22).
+- **#2155 (18:39Z) — row 1411**: `ustar-linkname-nul-in-name.tar`
+  dual-anchor (`:517 → :533` linkname throw; `:515 → :531`
+  name-arm guard reference, +16).
+- **#2156 (18:42Z) — row 1413**: `ustar-prefix-nul-in-name.tar`
+  triple-anchor (`:519 → :535` prefix throw; `:515 → :531`
+  name-arm guard; `:522 → :542` `pfx ++ "/" ++ name`
+  combination, +16/+16/+20).
+
+*Inventory: Tar parser-growth +95-117 sub-class (2 PRs) — the
+`Zip/Tar.lean` Tar.extract-side guards that took +95 / +97 /
++117 shifts on the `Binary.isPathSafe` rejection sites and the
+per-chunk skipEntryData cap.*
+
+- **#2123 (17:05Z) — rows 1415 / 1419 / 1420**:
+  `testdata/tar/security/{backslash-slip,tar-absolute,tar-slip}.tar`
+  three-row same-anchor sweep (`:639 → :756`, +117).
+- **#2139 (17:54Z) — row 1310**: `skipEntryData` row trailing
+  dual-anchor (`:539 → :634`, +95 per-chunk cap; `:661 → :758`,
+  +97 Tar.extract maxEntrySize check).
+
+*Inventory: writer-side ±4-6 sub-class (2 PRs) — the small
+writer-side shift class on `Zip/Archive.lean` writer-internal
+hard-coded constants and `Checksum.crc32` call sites.*
+
+- **#2153 (18:33Z) — line 853**: `cd-deflate-zero-compsize.zip`
+  writer-side `Checksum.crc32 0 fileData` call (`:195 → :189`,
+  -6).
+- **#2164 (19:15Z) — line 328**: `zip64-eocd64-versionneeded`
+  writer-side hard-coded `45` for `versionNeededToExtract`
+  inside `writeEndRecords` (`:150 → :154`, +4).
+
+*Inventory: Multi-anchor narrative-paragraph sweeps (3 PRs) —
+in-row consolidation of sibling-deferral chains that mix
+multiple shift classes within a single paragraph.*
+
+- **#2147 (18:17Z) — line 794**: `cd-empty-entry-crc-nonzero.zip`
+  triple-anchor (`:794 → :820` parse-time throw, +26 CD-parse-
+  guard; `:195 → :189` ×2 writer-side `Checksum.crc32` call,
+  -6 writer-side; mixes CD-parse with writer-side classes).
+- **#2154 (18:36Z) — line 706-740**: `cd-path-unsafe.zip`
+  **5-anchor sweep** (`:631 → :676`, `:651 → :696`, `:1133 →
+  :1244`, `:1107 → :1248`, `:1131 → :1242`; first 5-anchor
+  in-row consolidation in the inventory family, mixing
+  CD-parse-guard with Archive late-section).
+- **#2157 (18:44Z) — line 419-446**: duplicate ZIP64 (headerId
+  `0x0001`) extra-block rejection narrative — triple-anchor
+  with non-uniform shifts (`:406 → :449` +43 helper def;
+  `:693 → :742` +49 CD-side caller; `:983 → :1123` +140 LH-side
+  caller; mixes three shift classes in one PR).
+
+*Inventory-table coverage summary at wave close.*
+
+| Inventory sub-track                                       | Coverage state at wave close                                                                                                                                        |
+|-----------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| *Recommended policy* narrative paragraphs                 | 14 of 26 wave PRs landed here; sibling narrative paragraphs at lines 296 / 328 (writer-side closed in-wave by #2164) / 347 (closed in-wave by #2162) / 414 (closed in-wave by #2161) form the cluster, with line 296 (versionMadeBy upper-bound) outstanding via planner-queued #2163. |
+| *Minimized Reproducer Corpus* zip block (rows 1426-1465)  | 4 of 26 wave PRs landed primary cells (#2111, #2114); sibling rows 1429 / 1447 still pending in repair-queue PRs #2083 / #2092 / #2144.                              |
+| *Minimized Reproducer Corpus* tar block (rows 1393-1420)  | 6 of 26 wave PRs landed here (#2115, #2123, #2130, #2145, #2155, #2156); UStar interior-NUL row 1412 outstanding via repair-queue PR #2144 (terminal 6-anchor sweep). |
+| *Local guard inventory for `Handle.read` / `Stream.read`* | Trailing-anchor row 1310 closed by #2139; rows 1304 / 1307 / 1311 still pending in repair-queue PRs #2073 / #2081 / #2060.                                          |
+| Standalone audit sections (lines 1126 / 1140 / 1156)      | All three queued at wave close as planner-issues #2165 / #2166 / #2167; not landed in-wave.                                                                          |
+| Other sub-tracks                                          | Untouched this wave (Decompression Limit Inventory cluster rows 1192-1195 still in repair-queue PR #2035; intro-paragraph creator-side `h.read` row 1285 queued as #2160). |
+
+*Wave-character callout.* This is the **third consecutive
+maintenance-only wave** of the post-#1928 closure arc, and the
+**longest pure-doc inventory-anchor refresh wave to date** (26
+PRs vs. the prior post-#2074 wave's 12, the broad-stroke
+post-#1989 wave's 35, the post-#1971 wave's 11, and the
+post-#1964 wave's 15). All 26 PRs are inventory re-anchor
+PRs — no fixtures, no Track E feature, no `Zip/` source edits,
+no skill landing, no Recent-wins bullet, no paired-review
+entry. The wave's broader shift-class character (5 sub-classes
+plus the multi-anchor cluster vs. the prior wave's 3
+sub-classes) reflects the natural saturation pattern: the
+prior wave cleared the bulk of the +43-45 / +111 / +49
+clusters on the row-table side, and the post-#2110 wave
+reaches across to the narrative-paragraph side (16 of 26 PRs
+edit `Recommended policy` narrative paragraphs vs. row-table
+primary cells), with PR #2154's **first 5-anchor in-row
+sweep** marking a deliberate consolidation of sibling-deferral
+chains within a single paragraph. With 18 inventory-link
+warnings remaining at wave close (down from the prior wave's
+27 and the post-#1971 wave's 104), the maintenance saturation
+arc is in its terminal phase — the residual 18 warnings trace
+exclusively to the in-flight repair-queue PRs and a handful of
+trailing in-source line-content heuristic mismatches.
+
+*Repair queue snapshot at wave close.* 23 PRs in
+conflict / failing CI per `coordination list-pr-repair` (22
+merge-conflicts + 1 failed CI on PR #1876). The queue grew by
+1 net entrant since the prior wave close (PR #2144, the row
+1412 6-anchor terminal sweep that conflicted on the same
+`SECURITY_INVENTORY.md` cluster as the in-wave row 1411 / 1413
+sweeps PRs #2155 / #2156 — the same **inventory conflict tax**
+the prior wave flagged). The 5 oldest entries (#1725 / #1743 /
+#1755 / #1764 / #1771) trace back to the Track E CD-parse
+cascade that predates the post-#1928 closure arc; the recent
+entries (#2092 / #2083 / #2081 / #2073 / #2060 / #2035 / #2144)
+are sibling-row inventory PRs that conflicted with in-wave
+landings on the same `SECURITY_INVENTORY.md` clusters.
+
+*Post-issue-creation tail (out of wave scope).* Per the
+post-issue-creation tail deferral pattern in
+`.claude/skills/summarize-flow/SKILL.md`, any PRs that land
+between issue #2168's 19:22:20Z creation and this wave PR's
+submission are deferred to the next wave block. At the moment
+issue #2168 was claimed (19:25Z), **no PRs had merged after
+the wave's terminal PR #2164 (19:15:16Z)** — the
+post-issue-creation tail is **empty**. The wave's scope is
+**frozen at the 26 PRs the issue body enumerates** with no
+deferrals required. The unclaimed planner queue at issue
+#2168's creation listed six additional inventory issues for
+the next wave seed (#2160 row 1285 creator-side `h.read`
+intro-paragraph; #2163 line 296 ZIP64 EOCD64 versionMadeBy
+narrative; #2165 / #2166 / #2167 the three standalone
+audit-section refreshes at lines 1126 / 1140 / 1156; sibling
+narrative-paragraph re-anchor at line 296 deferred from #2161
+/ #2164's wave PRs); their PRs (when landed) will appear in
+the next wave block.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/`
+and `Zip/*.lean` (unchanged — no source edits this wave).
+Fixtures in `testdata/zip/malformed/` unchanged at 47;
+fixtures in `testdata/tar/malformed/` unchanged at 24.
+Spec-line counts unchanged (no `Zip/Spec/` PRs). Type mix
+across the 26 PRs: inventory 26 / non-inventory 0 — ratio
+100% inventory (third consecutive 100% wave; prior wave was
+also 100%, post-#1989 wave was ~94%). At wave close: repair
+queue at 23 PRs (up from 22 at prior wave close — net +1 from
+PR #2144); `feature` queue at 6 unclaimed inventory issues
+(#2160 / #2163 / #2165 / #2166 / #2167 plus the planner-queued
+sibling line-296 deferral); `review` queue empty (no closure
+events). `bash scripts/check-inventory-links.sh` exits 0 with
+18 warnings (down from the prior wave's 27 as the 26 re-anchor
+PRs cleared most remaining stale citations on the
+narrative-paragraph and row-table sides). Toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
