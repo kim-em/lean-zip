@@ -1193,9 +1193,9 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:651) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all regular-file entries; directories and symlinks contribute zero. |
 | [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:779) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
 | [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:779) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:848) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:848) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
-| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:851) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:945) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:945) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
+| [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:948) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
 
 ### Known inconsistencies
 
