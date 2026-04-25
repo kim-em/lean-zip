@@ -198,6 +198,33 @@ write_fixture(
     os.path.join(OUT_DIR, "eocd-zip64-override-diskcd-mismatch.zip"),
     disk_cd=99,
 )
+# Per-slot sibling of the `cdOffset` / `cdSize` / `totalEntries` /
+# `diskWhereCDStarts`-slot fixtures above: the standard EOCD carries a
+# real `entries_this_disk=99` (a UInt16 value that is neither the
+# APPNOTE §4.3.16 sentinel `0xFFFF` nor numerically equal to the ZIP64
+# override of `1`, the actual archive's per-disk entry count).  All
+# other slots stay at their sentinels so the relaxed sentinel arm
+# passes for `cdSize` / `cdOffset` / `totalEntries` / `numberOfThisDisk` /
+# `diskWhereCDStarts`, and the `numEntriesThisDisk` sub-check at
+# [Zip/Archive.lean:411] is the one that trips.  Closes the per-slot
+# `numEntriesThisDisk` regression coverage of the 6-field EOCD ZIP64-
+# override mismatch family at the override-arm (line 411).  Distinct
+# from the EOCD-internal `numEntriesThisDisk` vs. `totalEntries`
+# consistency guard covered by `eocd-numentries-thisdisk-mismatch.zip`
+# (PR #1752): the same field name appears in two distinct guards, and
+# this fixture pins only the override-arm.  Construction note:
+# `total_entries` stays at `SENTINEL_16` (default) so the line-402
+# `totalEntries` override sub-check passes on its sentinel branch
+# *before* the line-411 sub-check is reached; setting
+# `total_entries=99` instead would trip line 402 first because
+# standard `99` matches neither the sentinel nor the ZIP64
+# `totalEntries=1`.  The downstream EOCD-internal consistency check
+# (post-ZIP64-override) compares resolved values, so it is unreachable
+# here — the override sub-check at line 411 fires first.
+write_fixture(
+    os.path.join(OUT_DIR, "eocd-zip64-override-entriesthisdisk-mismatch.zip"),
+    entries_this_disk=99,
+)
 # EOCD64 `size of this record` field (APPNOTE §4.3.14) carries the
 # value `0` instead of the expected `44` for a v1 EOCD64.  Standard
 # EOCD keeps the sentinel layout so the ZIP64-override sentinel check
