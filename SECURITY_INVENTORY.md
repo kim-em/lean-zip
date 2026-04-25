@@ -526,7 +526,7 @@ Summary — what this pattern catches and what it does not:
     successfully and `Entry`-routing callers treated the metadata as
     trustworthy; only the extract path's late LH-signature check
     (`"bad local header signature"` at
-    [Zip/Archive.lean:970](/home/kim/lean-zip/Zip/Archive.lean:970))
+    [Zip/Archive.lean:1081](/home/kim/lean-zip/Zip/Archive.lean:1081))
     caught a subset of the construction (and could be defeated by a
     carefully chosen overlap where the CD bytes happened to match
     `sigLocal`). Uses the asymmetric `SpanInFile`-shaped subtraction
