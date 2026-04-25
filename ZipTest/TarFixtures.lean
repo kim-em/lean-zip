@@ -283,6 +283,29 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       pure ())
     "UStar uname contains NUL byte"
 
+  -- NUL-byte smuggle in UStar `gname` field: must be rejected by the
+  -- 5th-slot `hasInteriorNul` guard in `parseHeader`, the second
+  -- defense-in-depth extension closing the 5-slot UStar interior-NUL
+  -- family (3-slot filesystem-reaching arm `name` / `linkname` /
+  -- `prefix` plus 2-slot defense-in-depth arm `uname` / `gname`). The
+  -- fixture's `path` is `"safe"` (no NUL) and `linkname` / `prefix` /
+  -- `uname` are clean so none of the four earlier arms can fire first
+  -- — attribution pins on the `gname` arm. Substring includes
+  -- `"gname"` to keep per-slot distinction (the bare `"UStar"` prefix
+  -- would also match the `name` / `linkname` / `prefix` / `uname`
+  -- arms). Like `uname`, `gname` does not reach the filesystem in
+  -- `Tar.extract` — the guard is defense-in-depth against a
+  -- `Tar.list` caller routing on `entry.gname` for a trust decision
+  -- and seeing only the truncated prefix while peer parsers preserve
+  -- the full bytes.
+  let ustarGnameNulData ← readFixture "tar/malformed/ustar-gname-nul-in-gname.tar"
+  let ustarGnameNulPath ← writeFixtureTmp "ustar-gname-nul-in-gname.tar" ustarGnameNulData
+  assertThrows "TAR malformed (ustar-gname-nul-in-gname.tar)"
+    (IO.FS.withFile ustarGnameNulPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "UStar gname contains NUL byte"
+
   -- Non-throwing variants: payloads with no trailing NUL and with
   -- invalid UTF-8 must each apply a predictable name to the next entry.
   let gnuLnNoTermData ← readFixture "tar/malformed/gnu-longname-no-terminator.tar"
@@ -412,6 +435,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "ustar-linkname-nul-in-name.tar",
              "ustar-prefix-nul-in-name.tar",
              "ustar-uname-nul-in-uname.tar",
+             "ustar-gname-nul-in-gname.tar",
              "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",

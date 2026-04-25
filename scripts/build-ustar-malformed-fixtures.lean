@@ -3,16 +3,16 @@ import Zip
 /-! Build malformed UStar header regression fixtures for Track E.
 
 Each fixture is a minimal UStar tar archive whose first entry is a
-regular-file header carrying a smuggled NUL byte in one of the four
-guarded UStar string fields (`name`, `linkname`, `prefix`, `uname`).
-The `Tar.parseHeader` `hasInteriorNul` guard at `Zip/Tar.lean` rejects
-on the raw 512-byte block before any `Binary.readString` call, so none
-of the four fields can leak its NUL-truncated form into `Tar.list` /
-`Tar.extract` callers. The four fixtures together pin the per-slot
-guards (`name` / `linkname` / `prefix` / `uname`) — closing the
-filesystem-reaching 3-slot family and extending coverage to the 4th
-(`uname`) defense-in-depth slot. The `gname` slot is the final
-(5-slot) sibling deferred to a follow-up planner cycle.
+regular-file header carrying a smuggled NUL byte in one of the five
+guarded UStar string fields (`name`, `linkname`, `prefix`, `uname`,
+`gname`). The `Tar.parseHeader` `hasInteriorNul` guard at `Zip/Tar.lean`
+rejects on the raw 512-byte block before any `Binary.readString` call,
+so none of the five fields can leak its NUL-truncated form into
+`Tar.list` / `Tar.extract` callers. The five fixtures together pin the
+per-slot guards (`name` / `linkname` / `prefix` / `uname` / `gname`) —
+closing the 5-slot UStar interior-NUL family (3-slot
+filesystem-reaching arm `name` / `linkname` / `prefix` plus 2-slot
+defense-in-depth arm `uname` / `gname`).
 
 Run once at development time:
 
@@ -23,6 +23,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/ustar-linkname-nul-in-name.tar
 - testdata/tar/malformed/ustar-prefix-nul-in-name.tar
 - testdata/tar/malformed/ustar-uname-nul-in-uname.tar
+- testdata/tar/malformed/ustar-gname-nul-in-gname.tar
 -/
 
 /-- Fixture: ustar-name-nul-in-name.tar
@@ -133,6 +134,39 @@ def buildUstarUnameNulInUname : IO ByteArray := do
   let endOfArchive := Binary.zeros 1024
   return hdr ++ endOfArchive
 
+/-- Fixture: ustar-gname-nul-in-gname.tar
+    UStar header for a zero-byte regular file whose `gname` field at
+    offset 297 carries `"trusted\x00rogue"` (12 bytes: an embedded NUL
+    after `"trusted"`, then `"rogue"` smuggled past the NUL terminator).
+    `Tar.buildHeader` routes through `Binary.writeString`, which copies
+    each UTF-8 byte of `entry.gname` verbatim — including U+0000 — and
+    pads the remaining 20 bytes with NUL. The new `Tar.parseHeader`
+    guard rejects on the raw block before `Binary.readString` would
+    otherwise truncate the payload to `"trusted"` (the parser-
+    differential smuggle vector for any caller routing on
+    `entry.gname` for a trust decision). The `path` is `"safe"` so the
+    `name`-arm guard at the start of the five-slot chain cannot fire
+    first — attribution pins on the `gname` arm specifically. The
+    `linkname`, `prefix`, and `uname` slots are clean for the same
+    reason. Two trailing zero blocks (1024 B) form a well-formed
+    end-of-archive matching the per-slot sibling fixtures. Per-slot
+    family closure: the closed 3-slot filesystem-reaching family
+    (`ustar-name-nul-in-name.tar` / `ustar-linkname-nul-in-name.tar` /
+    `ustar-prefix-nul-in-name.tar`) covers offsets 0 / 157 / 345; the
+    4th-slot defense-in-depth `ustar-uname-nul-in-uname.tar` covers
+    offset 265 / 32 B; this fixture covers offset 297 / 32 B (the
+    5th and final slot). With this fixture, the 5-slot UStar
+    interior-NUL family is fully pinned per-slot. -/
+def buildUstarGnameNulInGname : IO ByteArray := do
+  let hdr ← Tar.buildHeader
+    { path     := "safe"
+      gname    := "trusted\x00rogue"
+      size     := 0
+      mode     := 0o644
+      typeflag := Tar.typeRegular }
+  let endOfArchive := Binary.zeros 1024
+  return hdr ++ endOfArchive
+
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/malformed"
   IO.FS.writeBinFile (outDir / "ustar-name-nul-in-name.tar")
@@ -143,4 +177,6 @@ def main : IO Unit := do
     (← buildUstarPrefixNulInName)
   IO.FS.writeBinFile (outDir / "ustar-uname-nul-in-uname.tar")
     (← buildUstarUnameNulInUname)
-  IO.println "Built 4 malformed UStar fixtures under testdata/tar/malformed/."
+  IO.FS.writeBinFile (outDir / "ustar-gname-nul-in-gname.tar")
+    (← buildUstarGnameNulInGname)
+  IO.println "Built 5 malformed UStar fixtures under testdata/tar/malformed/."
