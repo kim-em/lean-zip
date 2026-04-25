@@ -162,6 +162,23 @@ write_fixture(
     os.path.join(OUT_DIR, "eocd-zip64-override-cdsize-mismatch.zip"),
     cd_size=99,
 )
+# Per-slot sibling of the `cdOffset`/`cdSize`-slot fixtures above: the
+# standard EOCD carries a real `totalEntries=99` (a UInt16 value that
+# is neither the APPNOTE §4.3.16 sentinel `0xFFFF` nor numerically
+# equal to the ZIP64 override of `1`, the actual archive's entry
+# count).  All other slots stay at their sentinels so the relaxed
+# sentinel arm passes for `cdSize` / `cdOffset` / `numberOfThisDisk` /
+# `diskWhereCDStarts` / `numEntriesThisDisk`, and the `totalEntries`
+# sub-check at [Zip/Archive.lean:402] is the one that trips.  Closes
+# the per-slot `totalEntries` regression coverage of the 6-field EOCD
+# ZIP64-override mismatch family — `totalEntries` is a particularly
+# notable smuggling vector because it controls the entry-iteration
+# loop of the CD walker, so a relaxed reader that trusts a smuggled
+# value walks more or fewer CD entries than the strict reader.
+write_fixture(
+    os.path.join(OUT_DIR, "eocd-zip64-override-totalentries-mismatch.zip"),
+    total_entries=99,
+)
 # EOCD64 `size of this record` field (APPNOTE §4.3.14) carries the
 # value `0` instead of the expected `44` for a v1 EOCD64.  Standard
 # EOCD keeps the sentinel layout so the ZIP64-override sentinel check
