@@ -1,5 +1,12 @@
 # Track C2: Fuel Usage Audit
 
+**Status:** COMPLETE — Track C2 Fuel Elimination closed 2026-03-02; see
+`PROGRESS.md:217` "Track C2: Fuel Elimination (complete, Mar 2)". This
+document is preserved as a historical record of the conversion-order
+audit; the cited source lines reflect the pre-conversion layout and have
+not been refreshed because the functions have since been re-laid-out and
+(in some cases) lifted out of `where` clauses to support `termination_by`.
+
 ## Overview
 
 This document inventories all fuel-based recursion in the spec and native
