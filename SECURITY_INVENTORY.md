@@ -1137,7 +1137,7 @@ Regression fixtures live under `testdata/tar/security/`:
 
 ### 2. Tar UTF-8 partial functions
 
-- File: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:246)
+- File: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:317)
 - Concern:
   - `String.fromUTF8!` is partial and should not be reachable from
     attacker-controlled invalid bytes without prior validation
