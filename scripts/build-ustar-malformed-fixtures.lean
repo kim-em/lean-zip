@@ -3,14 +3,16 @@ import Zip
 /-! Build malformed UStar header regression fixtures for Track E.
 
 Each fixture is a minimal UStar tar archive whose first entry is a
-regular-file header carrying a smuggled NUL byte in one of the three
-UStar string fields (`name`, `linkname`, `prefix`). The
-`Tar.parseHeader` `hasInteriorNul` guard at `Zip/Tar.lean` rejects on
-the raw 512-byte block before any `Binary.readString` call, so none of
-the three fields can leak its NUL-truncated form into `Tar.list` /
-`Tar.extract` callers. The three fixtures together pin the per-slot
-guards at lines 515 / 517 / 519 — closing the 3-slot UStar
-interior-NUL family.
+regular-file header carrying a smuggled NUL byte in one of the four
+guarded UStar string fields (`name`, `linkname`, `prefix`, `uname`).
+The `Tar.parseHeader` `hasInteriorNul` guard at `Zip/Tar.lean` rejects
+on the raw 512-byte block before any `Binary.readString` call, so none
+of the four fields can leak its NUL-truncated form into `Tar.list` /
+`Tar.extract` callers. The four fixtures together pin the per-slot
+guards (`name` / `linkname` / `prefix` / `uname`) — closing the
+filesystem-reaching 3-slot family and extending coverage to the 4th
+(`uname`) defense-in-depth slot. The `gname` slot is the final
+(5-slot) sibling deferred to a follow-up planner cycle.
 
 Run once at development time:
 
@@ -20,6 +22,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/ustar-name-nul-in-name.tar
 - testdata/tar/malformed/ustar-linkname-nul-in-name.tar
 - testdata/tar/malformed/ustar-prefix-nul-in-name.tar
+- testdata/tar/malformed/ustar-uname-nul-in-uname.tar
 -/
 
 /-- Fixture: ustar-name-nul-in-name.tar
@@ -98,6 +101,38 @@ def buildUstarPrefixNulInName : IO ByteArray := do
   let endOfArchive := Binary.zeros 1024
   return hdr ++ endOfArchive
 
+/-- Fixture: ustar-uname-nul-in-uname.tar
+    UStar header for a zero-byte regular file whose `uname` field at
+    offset 265 carries `"trusted\x00rogue"` (12 bytes: an embedded NUL
+    after `"trusted"`, then `"rogue"` smuggled past the NUL terminator).
+    `Tar.buildHeader` routes through `Binary.writeString`, which copies
+    each UTF-8 byte of `entry.uname` verbatim — including U+0000 — and
+    pads the remaining 20 bytes with NUL. The new `Tar.parseHeader`
+    guard rejects on the raw block before `Binary.readString` would
+    otherwise truncate the payload to `"trusted"` (the parser-
+    differential smuggle vector for any caller routing on
+    `entry.uname` for a trust decision). The `path` is `"safe"` so
+    the `name`-arm guard at the start of the four-slot chain cannot
+    fire first — attribution pins on the `uname` arm specifically.
+    The `linkname` and `prefix` slots are clean for the same reason.
+    Two trailing zero blocks (1024 B) form a well-formed end-of-archive
+    matching the per-slot sibling fixtures. Per-slot family extension:
+    the closed 3-slot filesystem-reaching family
+    (`ustar-name-nul-in-name.tar` / `ustar-linkname-nul-in-name.tar` /
+    `ustar-prefix-nul-in-name.tar`) covers offsets 0 / 157 / 345; this
+    fixture covers offset 265 / 32 B (the 4th slot). The `gname` slot
+    at offset 297 / 32 B is the final (5-slot) sibling deferred to a
+    follow-up planner cycle. -/
+def buildUstarUnameNulInUname : IO ByteArray := do
+  let hdr ← Tar.buildHeader
+    { path     := "safe"
+      uname    := "trusted\x00rogue"
+      size     := 0
+      mode     := 0o644
+      typeflag := Tar.typeRegular }
+  let endOfArchive := Binary.zeros 1024
+  return hdr ++ endOfArchive
+
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/malformed"
   IO.FS.writeBinFile (outDir / "ustar-name-nul-in-name.tar")
@@ -106,4 +141,6 @@ def main : IO Unit := do
     (← buildUstarLinknameNulInName)
   IO.FS.writeBinFile (outDir / "ustar-prefix-nul-in-name.tar")
     (← buildUstarPrefixNulInName)
-  IO.println "Built 3 malformed UStar fixtures under testdata/tar/malformed/."
+  IO.FS.writeBinFile (outDir / "ustar-uname-nul-in-uname.tar")
+    (← buildUstarUnameNulInUname)
+  IO.println "Built 4 malformed UStar fixtures under testdata/tar/malformed/."
