@@ -238,10 +238,13 @@ Summary — what this pattern catches and what it does not:
     and :170-171)
   - ZIP64/standard-EOCD override sentinel check — PR #1745
     (`testdata/zip/malformed/eocd-zip64-override-nosentinel.zip` —
-    `cdOffset` slot at [Zip/Archive.lean:399](/home/kim/lean-zip/Zip/Archive.lean:399))
-    and PR #1900
+    `cdOffset` slot at [Zip/Archive.lean:399](/home/kim/lean-zip/Zip/Archive.lean:399)),
+    PR #1900
     (`testdata/zip/malformed/eocd-zip64-override-cdsize-mismatch.zip` —
-    `cdSize` slot at [Zip/Archive.lean:396](/home/kim/lean-zip/Zip/Archive.lean:396))
+    `cdSize` slot at [Zip/Archive.lean:396](/home/kim/lean-zip/Zip/Archive.lean:396)),
+    and PR #1901
+    (`testdata/zip/malformed/eocd-zip64-override-totalentries-mismatch.zip` —
+    `totalEntries` slot at [Zip/Archive.lean:402](/home/kim/lean-zip/Zip/Archive.lean:402))
     reject archives where the standard EOCD carries a real value
     instead of the APPNOTE §4.3.16 sentinel (`0xFFFFFFFF` / `0xFFFF`)
     in any of `cdSize`/`cdOffset`/`totalEntries`/`numberOfThisDisk`/
@@ -253,14 +256,13 @@ Summary — what this pattern catches and what it does not:
     `testdata/zip/interop/go-zip64.zip`). Closes the
     parser-differential smuggling vector where one reader trusts the
     standard EOCD and another trusts the ZIP64 override. Per-slot
-    regression coverage so far pins the `cdOffset` and `cdSize` slots;
-    the remaining four slots — `totalEntries` (line 402),
+    regression coverage so far pins the `cdOffset`, `cdSize`, and
+    `totalEntries` slots; the remaining three slots —
     `numberOfThisDisk` (line 405), `diskWhereCDStarts` (line 408),
     `numEntriesThisDisk` (line 411) — share the same throw shape and
     are covered by symmetric code review pending dedicated per-slot
-    fixtures (sibling issues #1901 / #1902 cover `totalEntries` /
-    `numberOfThisDisk`; the remaining two slots are tracked for
-    future sibling fixtures)
+    fixtures (sibling issue #1902 covers `numberOfThisDisk`; the
+    remaining two slots are tracked for future sibling fixtures)
   - ZIP64 EOCD64 self-declared record-size check — PR #1761
     (`testdata/zip/malformed/zip64-eocd64-bad-recsize.zip`) rejects
     archives whose EOCD64 `size of this record` field (APPNOTE §4.3.14,
@@ -1259,6 +1261,7 @@ to be silently skipped.
 | [testdata/zip/malformed/eocd-numentries-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-numentries-mismatch.zip) | 122 B | CD-vs-EOCD `totalEntries` consistency check at [Zip/Archive.lean:759](/home/kim/lean-zip/Zip/Archive.lean:759) — *"EOCD totalEntries mismatch"* (EOCD declares 2 entries, CD has 1 — parser's trailing-signature loop would silently accept the short list without this guard) | #1733 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-numentries-thisdisk-mismatch.zip) | 122 B | EOCD-internal `numEntriesThisDisk` vs. `totalEntries` consistency check at [Zip/Archive.lean:484](/home/kim/lean-zip/Zip/Archive.lean:484) — *"EOCD numEntriesThisDisk mismatch"* (`numEntriesThisDisk=2`, `totalEntries=1`; single-disk archives must have the sibling EOCD entry-count fields equal, and the writer emits them at the same value) | #1752 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/eocd-zip64-override-cdsize-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-zip64-override-cdsize-mismatch.zip) | 198 B | ZIP64/standard-EOCD override sentinel check — `cdSize` slot at [Zip/Archive.lean:396](/home/kim/lean-zip/Zip/Archive.lean:396) — *"EOCD ZIP64-override mismatch"* (standard-EOCD `cdSize=99`, ZIP64 `cdSize=55`; standard value is neither the APPNOTE §4.3.16 sentinel `0xFFFFFFFF` nor a numeric match with the ZIP64 override. All other override slots remain at their sentinels so the relaxed sentinel arm passes for `cdOffset` (line 399), `totalEntries` (line 402), `numberOfThisDisk` (line 405), `diskWhereCDStarts` (line 408), `numEntriesThisDisk` (line 411), and the `cdSize` sub-check at line 396 is the one that trips. Per-slot sibling of `eocd-zip64-override-nosentinel.zip` (PR #1745, `cdOffset` slot at line 399) at the 6-field EOCD ZIP64-override mismatch family — the per-slot fixtures pin attribution to one specific override-slot guard rather than the family-wide check) | #1900 | other (ZIP64 consistency) |
+| [testdata/zip/malformed/eocd-zip64-override-totalentries-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-zip64-override-totalentries-mismatch.zip) | 198 B | ZIP64/standard-EOCD override sentinel check — `totalEntries` slot at [Zip/Archive.lean:402](/home/kim/lean-zip/Zip/Archive.lean:402) — *"EOCD ZIP64-override mismatch"* (standard-EOCD `totalEntries=99`, ZIP64 `totalEntries=1`; standard value is neither the APPNOTE §4.3.16 sentinel `0xFFFF` nor a numeric match with the ZIP64 override. All other override slots remain at their sentinels so the relaxed sentinel arm passes for `cdSize` (line 396), `cdOffset` (line 399), `numberOfThisDisk` (line 405), `diskWhereCDStarts` (line 408), `numEntriesThisDisk` (line 411), and the `totalEntries` sub-check at line 402 is the one that trips. `totalEntries` is a particularly notable smuggling vector because it controls the entry-iteration loop of the CD walker — a relaxed reader that trusts a smuggled value walks more or fewer CD entries than the strict reader, opening entry-injection / entry-hiding attacks. Per-slot sibling of `eocd-zip64-override-nosentinel.zip` (PR #1745, `cdOffset` slot at line 399) and `eocd-zip64-override-cdsize-mismatch.zip` (PR #1900, `cdSize` slot at line 396) at the 6-field EOCD ZIP64-override mismatch family — the per-slot fixtures pin attribution to one specific override-slot guard rather than the family-wide check) | #1901 | other (ZIP64 consistency) |
 | [testdata/zip/malformed/eocd-zip64-override-nosentinel.zip](/home/kim/lean-zip/testdata/zip/malformed/eocd-zip64-override-nosentinel.zip) | 198 B | ZIP64/standard-EOCD override sentinel check at [Zip/Archive.lean:355](/home/kim/lean-zip/Zip/Archive.lean:355) — *"EOCD ZIP64-override mismatch"* (standard-EOCD `cdOffset=42`, ZIP64 `cdOffset=45`; standard value is neither the APPNOTE §4.3.16 sentinel `0xFFFFFFFF` nor a numeric match with the ZIP64 override — a parser-differential smuggling vector) | #1745 | other (ZIP64 consistency) |
 | [testdata/zip/malformed/invalid-utf8-with-flag.zip](/home/kim/lean-zip/testdata/zip/malformed/invalid-utf8-with-flag.zip) | 120 B | UTF-8-flagged entry name strict parse at [Zip/Archive.lean:595](/home/kim/lean-zip/Zip/Archive.lean:595) — *"invalid UTF-8 in entry name (UTF-8 flag set)"* | `481e562` | partial-decoder panic |
 | [testdata/zip/malformed/lh-zip64-extra-duplicate.zip](/home/kim/lean-zip/testdata/zip/malformed/lh-zip64-extra-duplicate.zip) | 158 B | LH-side duplicate ZIP64 extra-block guard at [Zip/Archive.lean:1013](/home/kim/lean-zip/Zip/Archive.lean:1013) — *"duplicate ZIP64 local extra field"* (CD entry has a single valid `headerId == 0x0001` block so CD parse passes; LH carries two 0x0001 blocks with `uncompSize` payloads `6` and `106`. `hasDuplicateZip64Extra` fires inside `readEntryData` before any CD/LH consistency check. Sibling of `cd-zip64-extra-duplicate.zip` — the two distinct error wordings keep attribution between the parse layers loud under future refactors) | #1793 | other (ZIP64 consistency) |
