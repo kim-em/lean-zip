@@ -181,8 +181,8 @@ Targets:
 
 Targets:
 
-- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:341)
-- [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:169)
+- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1024)
+- [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:308)
 
 - [x] Introduce proof-friendly helper functions for bounded reads and
   validated spans.
