@@ -28,6 +28,7 @@ Outputs:
 - testdata/zip/malformed/cd-path-unsafe.zip
 - testdata/zip/malformed/cd-deflate-zero-compsize.zip
 - testdata/zip/malformed/cd-bad-lh-signature.zip
+- testdata/zip/malformed/cd-entry-past-cdend.zip
 """
 import os, struct, zlib
 
@@ -79,7 +80,8 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
 
 def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
             cd_mod_time=0, cd_mod_date=0, local_hdr_offset=0,
-            internal_attrs=0, cd_flags=0, name_bytes=None, cd_crc=None):
+            internal_attrs=0, cd_flags=0, name_bytes=None, cd_crc=None,
+            comment_length=0):
     # PKZIP central-directory file header (46 bytes).
     # `disk_number_start` defaults to 0 (single-disk).  The default is
     # load-bearing: it preserves byte-identity of the existing fixtures.
@@ -111,6 +113,14 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
     # `cd-empty-entry-crc-nonzero.zip` exercises the non-default
     # branch (`cd_crc=0xDEADBEEF` alongside `cd_uncomp=0` — the
     # empty-entry CRC invariant violation).
+    # `comment_length` defaults to `0` (APPNOTE §4.4.10 `file comment
+    # length` matching the absent comment payload — lean-zip's writer
+    # never emits a CD entry comment).  The default is load-bearing:
+    # it preserves byte-identity of every existing fixture.  Only
+    # `cd-entry-past-cdend.zip` exercises the non-default branch — a
+    # crafted comment_length whose declared 16-byte size pushes
+    # `46 + nameLen + extraLen + commentLen` past the EOCD-declared
+    # `cdEnd` without any matching comment bytes physically present.
     nb = NAME if name_bytes is None else name_bytes
     cc = CRC if cd_crc is None else cd_crc
     return struct.pack(
@@ -127,7 +137,7 @@ def make_cd(method, comp_size, uncomp_size, version=20, disk_number_start=0,
         uncomp_size,
         len(nb),     # name length
         0,           # extra length
-        0,           # comment length
+        comment_length,  # comment length
         disk_number_start,  # disk number start (CD offset 34, UInt16)
         internal_attrs,     # internal attrs   (CD offset 36, UInt16)
         0,           # external attrs
@@ -172,7 +182,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           name_bytes=None, payload=None,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1,
-          lh_signature=0x04034b50):
+          lh_signature=0x04034b50,
+          cd_comment_length=0):
     # `name_bytes` defaults to `None`, meaning "derive from the module
     # constant `NAME`".  The default preserves byte-identity of every
     # existing fixture (only `cd-nul-in-name.zip` exercises the non-default
@@ -200,7 +211,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
                  cd_mod_time=cd_mod_time, cd_mod_date=cd_mod_date,
                  local_hdr_offset=cd_local_hdr_offset,
                  internal_attrs=cd_internal_attrs,
-                 cd_flags=cd_flags, name_bytes=name_bytes, cd_crc=cd_crc)
+                 cd_flags=cd_flags, name_bytes=name_bytes, cd_crc=cd_crc,
+                 comment_length=cd_comment_length)
     cde = cd + nb
     eocd = make_eocd(len(cde), len(lhe),
                      disk_start=eocd_disk_start,
@@ -597,4 +609,45 @@ write(
     lh_comp=0, cd_comp=0, lh_uncomp=42, cd_uncomp=42,
     lh_crc=0, cd_crc=0,
     payload=b"",
+)
+# CD-parse per-entry footprint-overrun anomaly: the CD entry's declared
+# `commentLen` field at CD +32 (UInt16) is set to `16` while the physical
+# CD bytes carry no comment payload — the EOCD's `cdSize` is the natural
+# `len(cde) = 46 + 9 = 55` (header + name only).  At CD parse time
+# `entryEnd = pos + 46 + nameLen + extraLen + commentLen
+#            = 45 + 46 + 9 + 0 + 16 = 116` — strictly past
+# `cdEnd = cdOffset + cdSize = 45 + 55 = 100`.  `parseCentralDir`
+# rejects with `"central directory entry extends past end of central
+# directory"` at [Zip/Archive.lean:615](/home/kim/lean-zip/Zip/Archive.lean:615) —
+# the per-entry footprint guard.  All earlier CD-parse guards pass: the
+# loop entry condition `pos + 46 ≤ cdEnd` (91 ≤ 100) holds, the CD
+# signature matches, `nameLen=9 > 0`, `diskNumberStart=0`,
+# `internalAttrs=0`, so the :615 guard is the first one that fires
+# — deterministic attribution.  All other CD/LH fields are internally
+# consistent (stock hello.txt stored entry, versionNeeded=20, method=0,
+# no ZIP64); LH and CD match byte-for-byte on every cross-checked field.
+# The fixture is regression coverage for an existing guard (no new code
+# in `parseCentralDir` lands with this fixture).  Companion to the
+# in-flight `cd-trailing-garbage.zip` (PR #1777, trailing bytes AFTER
+# the last entry inside `[lastEntryEnd, cdEnd)`) and
+# `cd-extends-past-eocd.zip` (PR #1809, archive-level
+# `cdOffset + cdSize ≤ eocdPos`): the trio closes the three CD-region
+# overrun shapes — per-entry footprint past `cdEnd`, trailing garbage
+# inside the declared region, and macro `cdSize` past EOCD.  Pre-PR
+# (and absent the :615 guard), `Archive.list` would attempt to read
+# the `nameBytes` slice at `[pos + 46, pos + 46 + nameLen)` which
+# remains inside the buffer (45+46+9=100 ≤ 100), but with crafted
+# field-length combinations a lenient parser could overread into
+# the EOCD bytes — a parser-differential smuggling vector closed by
+# the existing :615 fence.  File layout:
+#   LH (30 B) + name (9 B) + payload (6 B) = 45 B;
+#   CD (46 B) + name (9 B) = 55 B;
+#   EOCD (22 B); total 122 B.
+# Sentinel `commentLen=16` chosen as a canonical "obviously crafted"
+# overrun — any positive value satisfying
+# `46 + nameLen + extraLen + commentLen > cdSize` fires the same guard.
+write(
+    os.path.join(OUT_DIR, "cd-entry-past-cdend.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    cd_comment_length=16,
 )
