@@ -489,39 +489,44 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
   let magic := Binary.readString block hdrMagic.1 hdrMagic.2
   unless magic == "ustar" || magic == "ustar " do
     throw (IO.userError s!"tar: unsupported format (magic: {magic})")
-  -- Reject UStar string fields (`name`, `linkname`, `prefix`, `uname`)
-  -- carrying a NUL byte followed by any non-NUL byte. `Binary.readString`
-  -- is NUL-terminated and would silently truncate a smuggled
-  -- `"evil.txt\x00.pdf"` payload to `"evil.txt"`, exposing a
+  -- Reject UStar string fields (`name`, `linkname`, `prefix`, `uname`,
+  -- `gname`) carrying a NUL byte followed by any non-NUL byte.
+  -- `Binary.readString` is NUL-terminated and would silently truncate a
+  -- smuggled `"evil.txt\x00.pdf"` payload to `"evil.txt"`, exposing a
   -- parser-differential / filesystem-truncation vector: `Tar.list`
   -- callers route on the short prefix while POSIX `open(2)` /
   -- `symlink(2)` truncates at the same NUL on `Tar.extract`, yet strict
   -- peer parsers (GNU tar, BSD tar, libarchive) preserve the full raw
-  -- bytes or reject the header. The `uname` guard is defense-in-depth:
-  -- the field is exposed via `Entry.uname` to `Tar.list` callers (a
-  -- caller routing on it for a trust decision sees only the truncated
-  -- prefix while peer parsers preserve the full bytes), but it does not
-  -- itself reach the filesystem in `Tar.extract`. Sibling guards: the
-  -- ZIP CD-parse name guard at `Zip/Archive.lean` (PR #1831, *"CD entry
-  -- name contains NUL byte"*); the GNU long-name / long-link guards in
-  -- `forEntries` (PR #1865, *"GNU long-name contains NUL byte"* /
-  -- *"GNU long-link contains NUL byte"*); and the PAX `keyBytes` /
-  -- `valueBytes` silent-skip in `parsePaxRecords` (PR #1866). Four
-  -- distinct error substrings keep attribution per-field. Per-slot
-  -- fixture coverage: `ustar-name-nul-in-name.tar` (PR #1880),
+  -- bytes or reject the header. The `uname` and `gname` guards are
+  -- defense-in-depth: the fields are exposed via `Entry.uname` /
+  -- `Entry.gname` to `Tar.list` callers (a caller routing on either for
+  -- a trust decision sees only the truncated prefix while peer parsers
+  -- preserve the full bytes), but neither itself reaches the filesystem
+  -- in `Tar.extract`. Sibling guards: the ZIP CD-parse name guard at
+  -- `Zip/Archive.lean` (PR #1831, *"CD entry name contains NUL byte"*);
+  -- the GNU long-name / long-link guards in `forEntries` (PR #1865,
+  -- *"GNU long-name contains NUL byte"* / *"GNU long-link contains NUL
+  -- byte"*); and the PAX `keyBytes` / `valueBytes` silent-skip in
+  -- `parsePaxRecords` (PR #1866). Five distinct error substrings keep
+  -- attribution per-field. Per-slot fixture coverage:
+  -- `ustar-name-nul-in-name.tar` (PR #1880),
   -- `ustar-linkname-nul-in-name.tar` (PR #1934), and
   -- `ustar-prefix-nul-in-name.tar` (PR #1937) closed the 3-slot
-  -- filesystem-reaching family; this PR adds `uname` (4-slot family)
-  -- with `ustar-uname-nul-in-uname.tar`. The `gname` slot is the final
-  -- (5-slot) sibling deferred to a follow-up planner cycle. The guards
-  -- run after the checksum + magic checks (so header integrity is
-  -- confirmed first) and before any `Binary.readString` call on these
-  -- four fields, in source-position order. Writer-side at `buildHeader`
-  -- (`hdrName` / `hdrLinkname` / `hdrPrefix` / `hdrUname`) uses
-  -- `Binary.writeString`, which is NUL-padding-only — no interior NUL
-  -- can be emitted unless `entry.path` / `entry.linkname` /
-  -- `entry.uname` carries a literal `\x00` codepoint, so the guards
-  -- never fire on legitimate archives produced by `Tar.create`.
+  -- filesystem-reaching family; PR #1944 added the 4th-slot `uname`
+  -- defense-in-depth fixture `ustar-uname-nul-in-uname.tar`; this PR
+  -- adds the 5th-and-final `gname` defense-in-depth fixture
+  -- `ustar-gname-nul-in-gname.tar`, closing the 5-slot UStar
+  -- interior-NUL family (3-slot filesystem-reaching arm
+  -- `name`/`linkname`/`prefix` plus 2-slot defense-in-depth arm
+  -- `uname`/`gname`). The guards run after the checksum + magic checks
+  -- (so header integrity is confirmed first) and before any
+  -- `Binary.readString` call on these five fields, in source-position
+  -- order. Writer-side at `buildHeader` (`hdrName` / `hdrLinkname` /
+  -- `hdrPrefix` / `hdrUname` / `hdrGname`) uses `Binary.writeString`,
+  -- which is NUL-padding-only — no interior NUL can be emitted unless
+  -- `entry.path` / `entry.linkname` / `entry.uname` / `entry.gname`
+  -- carries a literal `\x00` codepoint, so the guards never fire on
+  -- legitimate archives produced by `Tar.create`.
   if hasInteriorNul block hdrName.1 hdrName.2 then
     throw (IO.userError "tar: UStar name contains NUL byte")
   if hasInteriorNul block hdrLinkname.1 hdrLinkname.2 then
@@ -530,6 +535,8 @@ def parseHeader (block : ByteArray) : IO (Option Entry) := do
     throw (IO.userError "tar: UStar prefix contains NUL byte")
   if hasInteriorNul block hdrUname.1 hdrUname.2 then
     throw (IO.userError "tar: UStar uname contains NUL byte")
+  if hasInteriorNul block hdrGname.1 hdrGname.2 then
+    throw (IO.userError "tar: UStar gname contains NUL byte")
   let name := Binary.readString block hdrName.1 hdrName.2
   let pfx := Binary.readString block hdrPrefix.1 hdrPrefix.2
   let fullPath := if pfx.isEmpty then name else pfx ++ "/" ++ name
