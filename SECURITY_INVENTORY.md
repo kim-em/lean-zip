@@ -1282,7 +1282,7 @@ upstream-runtime risk for each site — it is the behaviour that would
 surface if the caller bypassed the guard.
 
 The creator-side `h.read` in `Zip/Tar.lean` `create` at
-[Zip/Tar.lean:466](/home/kim/lean-zip/Zip/Tar.lean:466) is **not**
+[Zip/Tar.lean:599](/home/kim/lean-zip/Zip/Tar.lean:599) is **not**
 listed: it reads local files chosen by the caller (the archive author),
 not untrusted archive bytes, so it falls outside this inventory's
 scope.
