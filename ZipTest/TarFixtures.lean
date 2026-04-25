@@ -201,12 +201,12 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   -- new `hasInteriorNul` guard in `parseHeader` before
   -- `Binary.readString` truncates the payload at the embedded NUL.
   -- The `linkname` (offset 157) and `prefix` (offset 345) arms share
-  -- the same guard and the same `Binary.readString` truncation path,
-  -- so they are covered by symmetric code review rather than dedicated
-  -- fixtures (matching the PR #1865 long-link policy). Closes the
-  -- UStar layer of the smuggled-NUL attack class — sibling of
-  -- PR #1831 (ZIP CD), PR #1865 (GNU long-name / long-link), and
-  -- PR #1866 (PAX key/value).
+  -- the same guard and the same `Binary.readString` truncation path;
+  -- the `linkname` arm is now pinned by the dedicated sibling fixture
+  -- below, while the `prefix` arm remains covered by symmetric code
+  -- review. Closes the UStar layer of the smuggled-NUL attack class
+  -- — sibling of PR #1831 (ZIP CD), PR #1865 (GNU long-name /
+  -- long-link), and PR #1866 (PAX key/value).
   let ustarNameNulData ← readFixture "tar/malformed/ustar-name-nul-in-name.tar"
   let ustarNameNulPath ← writeFixtureTmp "ustar-name-nul-in-name.tar" ustarNameNulData
   assertThrows "TAR malformed (ustar-name-nul-in-name.tar)"
@@ -214,6 +214,21 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       let _ ← Tar.list (IO.FS.Stream.ofHandle h)
       pure ())
     "UStar name contains NUL byte"
+
+  -- NUL-byte smuggle in UStar `linkname` field: must be rejected by
+  -- the `hasInteriorNul` guard in `parseHeader` at line 517, the
+  -- middle of the three-slot per-field arm. The fixture's `path` is
+  -- `"safe"` (no NUL) so the `name`-arm guard at line 515 cannot
+  -- fire first — attribution pins on the `linkname` arm. Substring
+  -- includes `"linkname"` to keep per-slot distinction (the bare
+  -- `"UStar"` prefix would also match the `name` and `prefix` arms).
+  let ustarLnNulData ← readFixture "tar/malformed/ustar-linkname-nul-in-name.tar"
+  let ustarLnNulPath ← writeFixtureTmp "ustar-linkname-nul-in-name.tar" ustarLnNulData
+  assertThrows "TAR malformed (ustar-linkname-nul-in-name.tar)"
+    (IO.FS.withFile ustarLnNulPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "UStar linkname contains NUL byte"
 
   -- Non-throwing variants: payloads with no trailing NUL and with
   -- invalid UTF-8 must each apply a predictable name to the next entry.
@@ -340,6 +355,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
              "ustar-name-nul-in-name.tar",
+             "ustar-linkname-nul-in-name.tar",
              "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",

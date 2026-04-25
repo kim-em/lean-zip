@@ -16,6 +16,7 @@ Run once at development time:
 
 Output (byte-deterministic):
 - testdata/tar/malformed/ustar-name-nul-in-name.tar
+- testdata/tar/malformed/ustar-linkname-nul-in-name.tar
 -/
 
 /-- Fixture: ustar-name-nul-in-name.tar
@@ -28,12 +29,8 @@ Output (byte-deterministic):
     `Tar.parseHeader` guard rejects on the raw block before
     `Binary.readString` would otherwise truncate the payload to
     `"evil.txt"` (the parser-differential / filesystem-truncation
-    smuggle vector). The `linkname` (offset 157) and `prefix`
-    (offset 345) arms share the same `hasInteriorNul` helper and the
-    same `Binary.readString` truncation path, so they are covered by
-    symmetric code review rather than dedicated fixtures (matching the
-    PR #1865 long-link policy). Two trailing zero blocks (1024 B) form
-    a well-formed end-of-archive that strict peer parsers accept; the
+    smuggle vector). Two trailing zero blocks (1024 B) form a
+    well-formed end-of-archive that strict peer parsers accept; the
     guard fires during header parse, so the trailing blocks are only
     exercised by the no-guard regression baseline. -/
 def buildUstarNameNulInName : IO ByteArray := do
@@ -45,8 +42,33 @@ def buildUstarNameNulInName : IO ByteArray := do
   let endOfArchive := Binary.zeros 1024
   return hdr ++ endOfArchive
 
+/-- Fixture: ustar-linkname-nul-in-name.tar
+    UStar header for a zero-byte regular file whose `linkname` field
+    at offset 157 carries `"evil.lnk\x00.tar"` (13 bytes: an embedded
+    NUL after `"evil.lnk"`, then `".tar"` smuggled past the NUL
+    terminator). `Tar.buildHeader` routes through `Binary.writeString`,
+    which copies each UTF-8 byte verbatim — including U+0000 — and
+    pads the remaining 87 bytes with NUL. The `Tar.parseHeader` guard
+    at line 517 rejects on the raw block before `Binary.readString`
+    would otherwise truncate the linkname to `"evil.lnk"`. The `path`
+    is `"safe"` so the `name`-arm guard at line 515 cannot fire first
+    — attribution pins on the `linkname` arm specifically. Two
+    trailing zero blocks (1024 B) form a well-formed end-of-archive
+    matching the `name`-slot sibling fixture. -/
+def buildUstarLinknameNulInName : IO ByteArray := do
+  let hdr ← Tar.buildHeader
+    { path     := "safe"
+      linkname := "evil.lnk\x00.tar"
+      size     := 0
+      mode     := 0o644
+      typeflag := Tar.typeRegular }
+  let endOfArchive := Binary.zeros 1024
+  return hdr ++ endOfArchive
+
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/malformed"
   IO.FS.writeBinFile (outDir / "ustar-name-nul-in-name.tar")
     (← buildUstarNameNulInName)
-  IO.println "Built 1 malformed UStar fixture under testdata/tar/malformed/."
+  IO.FS.writeBinFile (outDir / "ustar-linkname-nul-in-name.tar")
+    (← buildUstarLinknameNulInName)
+  IO.println "Built 2 malformed UStar fixtures under testdata/tar/malformed/."
