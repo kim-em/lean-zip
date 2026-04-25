@@ -674,7 +674,7 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/cd-nul-in-name.zip`) rejects CD entries
     whose raw name bytes contain a NUL (`0x00`) byte at
     `parseCentralDir` time
-    ([Zip/Archive.lean:589](/home/kim/lean-zip/Zip/Archive.lean:589)),
+    ([Zip/Archive.lean:632](/home/kim/lean-zip/Zip/Archive.lean:632)),
     before the UTF-8 decode at
     [Zip/Archive.lean:633-643](/home/kim/lean-zip/Zip/Archive.lean:633).
     A NUL byte in the filename is a classic parser-differential /
