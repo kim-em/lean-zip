@@ -411,7 +411,7 @@ Summary — what this pattern catches and what it does not:
     (the pre-PR lean-zip) silently discards the slack after the first
     `N * 8` bytes, while a strict parser rejects the archive.
     `parseZip64Extra` now asserts `fpos == fieldEnd` after the three
-    conditional reads (Zip/Archive.lean:428). Sibling of the outer
+    conditional reads ([Zip/Archive.lean:495](/home/kim/lean-zip/Zip/Archive.lean:495)). Sibling of the outer
     `zip64-eocd64-bad-recsize.zip` record-size check (same
     parser-differential attack class, different layer); writer-side at
     [Zip/Archive.lean:73-80](/home/kim/lean-zip/Zip/Archive.lean:73)
