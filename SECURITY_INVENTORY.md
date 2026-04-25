@@ -293,7 +293,7 @@ Summary — what this pattern catches and what it does not:
     rejects archives whose EOCD64 `versionMadeBy` field (APPNOTE
     §4.4.2.1 / §4.4.2.2, at `bufPos + 12`) carries a lower byte greater
     than `63` (spec version 6.3) at `findEndOfCentralDir` time
-    ([Zip/Archive.lean:337](/home/kim/lean-zip/Zip/Archive.lean:337)).
+    ([Zip/Archive.lean:363](/home/kim/lean-zip/Zip/Archive.lean:363)).
     The low byte of `versionMadeBy` is the "version of the ZIP
     specification" in decimal-coded form (APPNOTE-defined values 1.0
     through 6.3, encoded `10`..`63`); any higher value is either a
