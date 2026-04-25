@@ -567,6 +567,50 @@ Summary — what this pattern catches and what it does not:
     `Archive.extract` cannot silently lose the guard. Choice of
     `0xCAFEBABE` is canonical "obviously crafted" UInt32 — any 4-byte
     sequence ≠ `50 4b 03 04` fires the same guard
+  - Per-entry `entryEnd > cdEnd` footprint guard regression coverage —
+    PR #N
+    (`testdata/zip/malformed/cd-entry-past-cdend.zip`) pins the existing
+    `parseCentralDir` per-entry footprint check at
+    [Zip/Archive.lean:615](/home/kim/lean-zip/Zip/Archive.lean:615)
+    — *"central directory entry extends past end of central directory"*
+    — for archives whose declared field-length triple
+    `(nameLen, extraLen, commentLen)` makes the CD entry's claimed
+    footprint `46 + nameLen + extraLen + commentLen` exceed the
+    EOCD-declared `cdEnd = cdOffset + cdSize`. 122-byte single-entry
+    stored `hello.txt` fixture (LH at file offset 0, CD at offset 45,
+    EOCD at offset 100) where the sole CD entry's `commentLen` field at
+    CD +32 (UInt16) is `16` while no comment payload is physically
+    present — `cdSize = 55` (header + name only). At parse time
+    `entryEnd = 45 + 46 + 9 + 0 + 16 = 116 > cdEnd = 100`, firing the
+    :615 guard before any name decode. All earlier CD-parse guards pass
+    (loop entry `pos + 46 ≤ cdEnd` (91 ≤ 100), CD signature match,
+    `nameLen = 9 > 0`, `diskNumberStart = 0`, `internalAttrs = 0`) so
+    attribution pins to the footprint guard rather than a sibling
+    early-reject. Fixture-only regression coverage (no new guard code,
+    no new error wording, no caller / signature change) — pattern
+    matches PRs #1761 / #1889 (`zip64-eocd64-bad-recsize.zip` /
+    `zip64-eocd64-v2-record.zip` at the EOCD64 record-size guard) and
+    #1903 (`cd-bad-lh-signature.zip` at the late LH-signature guard).
+    Companion to in-flight `cd-trailing-garbage.zip` (issue #1775,
+    trailing bytes AFTER the last entry inside `[lastEntryEnd, cdEnd)`)
+    and `cd-extends-past-eocd.zip` (issue #1799, archive-level
+    `cdOffset + cdSize ≤ eocdPos`) — the trio closes the three
+    CD-region overrun shapes: per-entry footprint past `cdEnd`
+    (this fixture), trailing garbage inside the declared region
+    (#1775), and macro `cdSize` past EOCD (#1799). Pins the
+    paired-review precedence chain alongside
+    `cd-entry-localoffset-past-cdstart.zip` (PR #1813, per-entry
+    `localOffset + 30 ≤ cdOffset`) and `cd-bad-lh-signature.zip`
+    (PR #1903, late LH-signature guard) — together the trio fixes all
+    three precedence levels of the local-offset → local-header
+    validation chain at CD-parse + late-extract so future refactors
+    of `parseCentralDir` cannot silently regress the per-entry
+    footprint fence. Sentinel `commentLen = 16` is canonical
+    "obviously crafted" overrun — any positive value satisfying
+    `46 + nameLen + extraLen + commentLen > cdSize` fires the same
+    guard. Interop pre-flight over
+    `testdata/zip/{interop,malformed}/*.zip` returned zero hits before
+    landing
   - CD-entry `internalFileAttributes` reserved-bits check — PR #1819
     (`testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip`)
     rejects CD entries whose APPNOTE §4.4.10 `internalFileAttributes`
@@ -1246,6 +1290,7 @@ to be silently skipped.
 | [testdata/zip/malformed/cd-entry-disknum-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-disknum-mismatch.zip) | 122 B | CD per-entry `diskNumberStart` consistency check at [Zip/Archive.lean:549](/home/kim/lean-zip/Zip/Archive.lean:549) — *"CD entry diskNumberStart mismatch"* (CD entry's APPNOTE §4.4.11 disk-number field at offset +34 is `7`; lean-zip supports single-disk archives only, so any nonzero value is rejected. Per-entry counterpart to `eocd-disknum-mismatch.zip` which covers the archive-level EOCD disk-number fields) | #1759 | other (CD/EOCD consistency) |
 | [testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-internal-attrs-reserved.zip) | 122 B | CD per-entry `internalFileAttributes` reserved-bits check at [Zip/Archive.lean:567](/home/kim/lean-zip/Zip/Archive.lean:567) — *"internalAttrs reserved bits set"* (CD entry's APPNOTE §4.4.10 field at offset +36 carries `0x0080` — bit 7 set, reserved; only bit 0 "apparent ASCII/text data" is defined in version 1.0, bits 1-2 are PKWARE-reserved, bits 3-15 unused. Guard `internalAttrs &&& 0xFFFE == 0` preserves Info-ZIP bit-0 interop while rejecting smuggled reserved-bit values. Contiguous writer-zero `UInt16` sibling of `cd-entry-disknum-mismatch.zip` (CD +34): `parseCentralDir` reads both fields in order and both guards fire pre-ZIP64-resolution, before the `entryEnd > cdEnd` span check) | #1819 | other (CD writer-invariant) |
 | [testdata/zip/malformed/cd-entry-localoffset-past-cdstart.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-localoffset-past-cdstart.zip) | 122 B | CD-entry `localOffset + 30 ≤ cdOffset` archive-layout invariant check at [Zip/Archive.lean:728](/home/kim/lean-zip/Zip/Archive.lean:728) — *"entry local offset overlaps central directory"* (LH+data at file offset 0 length 45, CD starts at offset 45, and the CD entry's `localOffset` field at CD +42 claims `50` — past `cdOffset - 30 = 15`, so the 30-byte fixed LH header cannot be read strictly before the CD region as APPNOTE §4.3.6 requires. Per-entry micro-shape sibling of the archive-level `cdOffset + cdSize ≤ eocdPos` macro-shape guard; pre-PR `Archive.list` had no gate at all, and only the extract path's late LH-signature check caught a subset of the construction) | #1813 | other (archive-layout invariant) |
+| [testdata/zip/malformed/cd-entry-past-cdend.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-past-cdend.zip) | 122 B | Per-entry `entryEnd > cdEnd` footprint guard regression coverage at [Zip/Archive.lean:615](/home/kim/lean-zip/Zip/Archive.lean:615) — *"central directory entry extends past end of central directory"* (122-byte single-entry stored `hello.txt` archive — LH at file offset 0, CD at offset 45, EOCD at offset 100 — where the sole CD entry's `commentLen` field at CD +32 (UInt16) is `16` while no comment payload is physically present, so `cdSize = 55` (header + name only). At parse time `entryEnd = 45 + 46 + 9 + 0 + 16 = 116 > cdEnd = 100`, firing the per-entry footprint guard before any name decode. All earlier CD-parse guards pass (loop entry `pos + 46 ≤ cdEnd` (91 ≤ 100), CD signature match, `nameLen = 9 > 0`, `diskNumberStart = 0`, `internalAttrs = 0`) so attribution pins to the footprint guard rather than a sibling early-reject. Fixture-only regression coverage (no new guard code, no new error wording, no caller / signature change) — pattern matches PRs #1761 / #1889 (`zip64-eocd64-bad-recsize.zip` / `zip64-eocd64-v2-record.zip`) and #1903 (`cd-bad-lh-signature.zip`). Companion to in-flight `cd-trailing-garbage.zip` (issue #1775, trailing bytes inside `[lastEntryEnd, cdEnd)`) and `cd-extends-past-eocd.zip` (issue #1799, archive-level `cdOffset + cdSize ≤ eocdPos`) — together the trio closes the three CD-region overrun shapes. Pins the paired-review precedence chain alongside `cd-entry-localoffset-past-cdstart.zip` (PR #1813) and `cd-bad-lh-signature.zip` (PR #1903) so future refactors of `parseCentralDir` cannot silently regress the per-entry footprint fence. Sentinel `commentLen = 16` is canonical "obviously crafted" overrun — any positive value satisfying `46 + nameLen + extraLen + commentLen > cdSize` fires the same guard) | #N | other (CD-region overrun regression) |
 | [testdata/zip/malformed/cd-extra-overrun-datasize.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-extra-overrun-datasize.zip) | 138 B | CD/LH extra-data sub-field structural check at [Zip/Archive.lean:690](/home/kim/lean-zip/Zip/Archive.lean:690) — *"malformed extra field"* (CD/LH extra-data carries a single sub-field with `headerId=0x5455` extended-timestamp but declared `dataSize=0xFF` while only 4 payload bytes remain; no ZIP64 sentinel is set so pre-PR `parseCentralDir` skipped `parseZip64Extra` entirely and the anomaly was entirely invisible. `validateExtraFieldStructure` runs unconditionally on the extra-data blob before the sentinel guard at both the CD and LH sites (mirror assertion at [Zip/Archive.lean:1006](/home/kim/lean-zip/Zip/Archive.lean:1006) — *"malformed local extra field"*). Outer-sub-field sibling of `zip64-extra-oversized-datasize.zip` at the inner-0x0001 layer of the same APPNOTE §4.5 extra-data smuggling class) | #1788 | other (ZIP64 consistency) |
 | [testdata/zip/malformed/cd-lh-crc-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-crc-mismatch.zip) | 122 B | CD/LH `crc32` consistency check at [Zip/Archive.lean:1067](/home/kim/lean-zip/Zip/Archive.lean:1067) — *"crc32 mismatch between CD and local header"* (LH crc differs from CD; both stored, sizes match so earlier guards do not fire first) | #1728 | other (CD/LH consistency) |
 | [testdata/zip/malformed/cd-lh-flags-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-flags-mismatch.zip) | 122 B | CD/LH flags-consistency check (bit-3-masked) at [Zip/Archive.lean:1036](/home/kim/lean-zip/Zip/Archive.lean:1036) — *"flags mismatch between CD and local header"* (CD sets bit 11 UTF-8-name, LH clears it — a known ZIP-smuggling vector) | #1715 | other (CD/LH consistency) |
