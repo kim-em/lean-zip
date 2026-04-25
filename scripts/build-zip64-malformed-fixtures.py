@@ -162,6 +162,32 @@ write_fixture(
     os.path.join(OUT_DIR, "eocd-zip64-override-cdsize-mismatch.zip"),
     cd_size=99,
 )
+# Per-slot sibling of the `cdOffset`- and `cdSize`-slot fixtures above:
+# the standard EOCD carries a real `numberOfThisDisk` (99 — chosen so it
+# numerically disagrees with the ZIP64 value of `0`, avoiding the
+# "numeric match" relaxation the reader applies to accommodate Go's
+# `archive/zip` producer behaviour, which emits real zeros in the
+# standard EOCD's disk-number fields when ZIP64 is used; see
+# `testdata/zip/interop/go-zip64.zip`).  All other slots stay at their
+# sentinels so the relaxed sentinel arm passes for `cdSize` /
+# `cdOffset` / `totalEntries` / `diskWhereCDStarts` /
+# `numEntriesThisDisk`, and the `numberOfThisDisk` sub-check at
+# [Zip/Archive.lean:405] is the one that trips.  Disk-number smuggling
+# is a distinct attack class: a `numberOfThisDisk` disagreement between
+# standard EOCD and ZIP64 EOCD64 lets an attacker craft an archive that
+# one reader interprets as "single-disk normal archive" and another as
+# "this is part of a multi-disk archive set" — opening multi-disk
+# dispatch attacks against tools that branch on disk number.  The
+# downstream EOCD-level disk-number sanity check at
+# [Zip/Archive.lean:521] (`numberOfThisDisk == 0 && diskWhereCDStarts
+# == 0`) cannot be reached when the ZIP64-override sub-check at line
+# 405 fires first; this fixture exercises the upstream override-mismatch
+# arm specifically.  Closes the per-slot `numberOfThisDisk` regression
+# coverage of the 6-field EOCD ZIP64-override mismatch family.
+write_fixture(
+    os.path.join(OUT_DIR, "eocd-zip64-override-thisdisk-mismatch.zip"),
+    this_disk=99,
+)
 # EOCD64 `size of this record` field (APPNOTE §4.3.14) carries the
 # value `0` instead of the expected `44` for a v1 EOCD64.  Standard
 # EOCD keeps the sentinel layout so the ZIP64-override sentinel check
