@@ -149,6 +149,19 @@ write_fixture(
     os.path.join(OUT_DIR, "eocd-zip64-override-nosentinel.zip"),
     cd_offset=42,
 )
+# Per-slot sibling of the `cdOffset`-slot fixture above: the standard
+# EOCD carries a real `cdSize` (99 bytes — chosen so it numerically
+# disagrees with the ZIP64 value of `len(cde) = 55`, avoiding the
+# "numeric match" relaxation).  All other slots stay at their sentinels
+# so the relaxed sentinel arm passes for `cdOffset` / `totalEntries` /
+# `numberOfThisDisk` / `diskWhereCDStarts` / `numEntriesThisDisk`, and
+# the `cdSize` sub-check at [Zip/Archive.lean:396] is the one that
+# trips.  Closes the per-slot `cdSize` regression coverage of the
+# 6-field EOCD ZIP64-override mismatch family.
+write_fixture(
+    os.path.join(OUT_DIR, "eocd-zip64-override-cdsize-mismatch.zip"),
+    cd_size=99,
+)
 # EOCD64 `size of this record` field (APPNOTE §4.3.14) carries the
 # value `0` instead of the expected `44` for a v1 EOCD64.  Standard
 # EOCD keeps the sentinel layout so the ZIP64-override sentinel check
