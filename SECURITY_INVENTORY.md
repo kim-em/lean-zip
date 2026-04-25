@@ -749,10 +749,10 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/cd-empty-name.zip`) rejects CD entries
     whose `nameLen` field at CD +28 (APPNOTE §4.4.10) is `0` at
     `parseCentralDir` time
-    ([Zip/Archive.lean:535](/home/kim/lean-zip/Zip/Archive.lean:535)),
+    ([Zip/Archive.lean:578](/home/kim/lean-zip/Zip/Archive.lean:578)),
     immediately after the `nameLen` read and before the
     `entryEnd > cdEnd` overrun check at
-    [Zip/Archive.lean:570](/home/kim/lean-zip/Zip/Archive.lean:570)
+    [Zip/Archive.lean:614](/home/kim/lean-zip/Zip/Archive.lean:614)
     and the sibling NUL-byte / path-safety filename guards. Every
     legitimate ZIP entry — file or directory — has at least one byte
     of name, so `nameLen == 0` is structurally pathological and a
