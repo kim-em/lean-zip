@@ -344,7 +344,7 @@ Summary — what this pattern catches and what it does not:
     rejects archives whose Locator-declared `eocd64Offset` plus the
     56-byte v1 EOCD64 record reaches into or past the Locator at
     `findEndOfCentralDir` time
-    ([Zip/Archive.lean:306](/home/kim/lean-zip/Zip/Archive.lean:306)).
+    ([Zip/Archive.lean:331](/home/kim/lean-zip/Zip/Archive.lean:331)).
     APPNOTE §4.3.6 pins the ZIP64 trailer layout as `[CD] [EOCD64]
     [Locator] [EOCD]`, so a legitimate archive satisfies
     `eocd64Offset + 56 ≤ locatorPos = eocdPos - 20` — the EOCD64
