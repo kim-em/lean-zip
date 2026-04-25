@@ -996,6 +996,70 @@ Summary — what this pattern catches and what it does not:
     *duplicate-key* dimension on `parsePaxRecords` complementary to
     PR #1866's NUL-byte silent-skip; together the two close both
     parser-differential dimensions on the PAX-record decode pipeline.
+  - PAX extended-header value-side NUL-byte silent-skip in
+    `parsePaxRecords` — PR #1866 (`path` slot,
+    `testdata/tar/malformed/pax-path-nul-in-value.tar`) +
+    per-slot `linkpath` follow-up
+    (`testdata/tar/malformed/pax-linkpath-nul-in-value.tar`,
+    PR #1979). `parsePaxRecords` runs
+    `findIdx? (· == 0)` on the raw `keyBytes` / `valueBytes`
+    slices at
+    [Zip/Tar.lean:145](/home/kim/lean-zip/Zip/Tar.lean:145)
+    (`keyBytes`) and
+    [Zip/Tar.lean:146](/home/kim/lean-zip/Zip/Tar.lean:146)
+    (`valueBytes`) after `String.fromUTF8?` accepts the bytes
+    (which permits U+0000 as valid UTF-8) and before the
+    duplicate-key check pushes onto the records array. Records
+    that fail this guard are dropped silently, matching the
+    invalid-UTF-8 precedent on the same loop, *not* hard-rejected
+    like PR #1899's duplicate-key guard at
+    [Zip/Tar.lean:147](/home/kim/lean-zip/Zip/Tar.lean:147).
+    Ordering inside `parsePaxRecords` is UTF-8 decode → raw-byte
+    NUL guard → duplicate-key check → push; the silent-skip
+    happens at the raw-byte NUL stage on `keyBytes` / `valueBytes`
+    before `Binary.fromLatin1` would re-decode on the
+    `applyPaxOverrides` side. The companion `applyPaxOverrides`
+    case-arms at
+    [Zip/Tar.lean:161](/home/kim/lean-zip/Zip/Tar.lean:161)
+    (`"path"` → `entry.path`) and
+    [Zip/Tar.lean:162](/home/kim/lean-zip/Zip/Tar.lean:162)
+    (`"linkpath"` → `entry.linkname`) are the smuggle targets
+    the silent-skip prevents from firing — pre-guard, an
+    attacker-controlled record `path=a\x00b/c` would land as
+    `entry.path = "a\x00b/c"` (POSIX `open` truncates at NUL on
+    `Tar.extract` while `Tar.list` callers see the full embedded
+    string), and `linkpath=a\x00b/c` would land as
+    `entry.linkname = "a\x00b/c"` (POSIX `symlink` truncates
+    similarly on the symlink path). The PAX value-side override
+    family is **fully closed 2/2** — `path` slot (PR #1866,
+    `pax-path-nul-in-value.tar`) + `linkpath` slot (PR #1979,
+    `pax-linkpath-nul-in-value.tar`). Terminal closure of the
+    third per-slot Tar interior-NUL family in the post-#1928
+    wave (after the 5-slot UStar family closed at PR #1957 and
+    the 2-slot GNU long-name / long-link family closed at
+    PR #1953); together the three terminal closures complete the
+    "smuggled NUL in any user-supplied string field" attack
+    class across the entire Tar parsing surface (UStar + GNU +
+    PAX). Sibling of PRs #1880 / #1934 / #1937 / #1944 / #1957
+    (UStar interior-NUL family fully closed 5/5), PRs #1865 /
+    #1953 (GNU long-name / long-link family fully closed 2/2),
+    PR #1899 (PAX duplicate-key, complementary
+    parser-differential dimension on the same `parsePaxRecords`
+    loop), and PR #1831 (ZIP CD entry name NUL-byte rejection).
+    lean-zip's tar writer does not emit PAX extended headers
+    (`Tar.create` always emits UStar-or-PAX-extended-header for
+    paths exceeding the UStar 100/155-byte limits, but never the
+    value-side override records that this guard fires on), so
+    neither slot of the guard ever fires on legitimate archives
+    produced by `Tar.create` — the guards exist to reject crafted
+    malformed archives fed to `Tar.list` / `Tar.extract`, and the
+    fixtures are the only way to trigger them. The companion
+    `keyBytes` arm at
+    [Zip/Tar.lean:145](/home/kim/lean-zip/Zip/Tar.lean:145) is
+    defense-in-depth (no known-key string in `applyPaxOverrides`'s
+    case match contains `\x00`, so a NUL-bearing key would
+    already be dropped at the case match) and is left for a
+    future per-arm extension.
 
 #### Symlink/hardlink extraction policy
 
