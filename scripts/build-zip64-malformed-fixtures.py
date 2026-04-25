@@ -179,6 +179,25 @@ write_fixture(
     os.path.join(OUT_DIR, "eocd-zip64-override-totalentries-mismatch.zip"),
     total_entries=99,
 )
+# Per-slot sibling of the `cdOffset` / `cdSize` / `totalEntries`-slot
+# fixtures above: the standard EOCD carries a real `diskWhereCDStarts=99`
+# (a UInt16 value that is neither the APPNOTE §4.3.16 sentinel `0xFFFF`
+# nor numerically equal to the ZIP64 override of `0`, the actual
+# single-disk archive's CD-disk number).  All other slots stay at their
+# sentinels so the relaxed sentinel arm passes for `cdSize` / `cdOffset` /
+# `totalEntries` / `numberOfThisDisk` / `numEntriesThisDisk`, and the
+# `diskWhereCDStarts` sub-check at [Zip/Archive.lean:408] is the one
+# that trips.  Closes the per-slot `diskWhereCDStarts` regression
+# coverage of the 6-field EOCD ZIP64-override mismatch family —
+# `diskWhereCDStarts` is the cross-disk dispatch dual of the
+# `numberOfThisDisk` smuggling vector: standard EOCD declares "the CD
+# lives on disk N" while the ZIP64 EOCD64 declares "the CD lives on
+# disk M", letting an attacker present two different archives to two
+# different parsers from the same byte sequence.
+write_fixture(
+    os.path.join(OUT_DIR, "eocd-zip64-override-diskcd-mismatch.zip"),
+    disk_cd=99,
+)
 # EOCD64 `size of this record` field (APPNOTE §4.3.14) carries the
 # value `0` instead of the expected `44` for a v1 EOCD64.  Standard
 # EOCD keeps the sentinel layout so the ZIP64-override sentinel check
