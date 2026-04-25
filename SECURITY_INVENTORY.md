@@ -931,6 +931,24 @@ Summary — what this pattern catches and what it does not:
     `Binary.readString` truncation path as the `name` arm, so they
     are covered by symmetric code review rather than dedicated
     fixtures (matching the PR #1865 long-link policy).
+  - PAX extended-header duplicate-key rejection in `parsePaxRecords` —
+    PR #1899
+    (`testdata/tar/malformed/pax-duplicate-path.tar`).
+    Ordering inside `parsePaxRecords`: UTF-8 decode → raw-byte NUL
+    guard → duplicate-key check → push, so the duplicate-key branch
+    at [Zip/Tar.lean:147](/home/kim/lean-zip/Zip/Tar.lean:147) only
+    fires on records that already passed the UTF-8 and NUL filters.
+    Unlike PR #1866 (PAX NUL-byte silent-skip, which drops the
+    offending record and continues), PR #1899 hard-rejects — the
+    `.error` return is rethrown unconditionally by `forEntries`'s
+    `typePaxExtended` branch at
+    [Zip/Tar.lean:669](/home/kim/lean-zip/Zip/Tar.lean:669) via
+    `throw (IO.userError msg)`. Error wording *"tar: PAX extended
+    header has duplicate {key.quote} record"* uses `String.quote`
+    attribution on the duplicate key. Closes the parser-differential
+    *duplicate-key* dimension on `parsePaxRecords` complementary to
+    PR #1866's NUL-byte silent-skip; together the two close both
+    parser-differential dimensions on the PAX-record decode pipeline.
 
 #### Symlink/hardlink extraction policy
 
@@ -1267,6 +1285,7 @@ to be silently skipped.
 | [testdata/tar/malformed/gnu-longname-oversized-size.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-oversized-size.tar) | 512 B | `readEntryData` `maxHeaderSize` cap at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) — *"exceeds maximum header size"* (header `size ≈ 8 GiB`, default cap `8 MiB`) | #1597 | oversized allocation |
 | [testdata/tar/malformed/gnu-longname-truncated.tar](/home/kim/lean-zip/testdata/tar/malformed/gnu-longname-truncated.tar) | 612 B | `readEntryData` short-read at [Zip/Tar.lean:230](/home/kim/lean-zip/Zip/Tar.lean:230) — *"unexpected end of archive reading entry data"* | #1546 | partial-decoder panic |
 | [testdata/tar/malformed/no-magic.tar](/home/kim/lean-zip/testdata/tar/malformed/no-magic.tar) | 2048 B | Tar magic check at [Zip/Tar.lean:448](/home/kim/lean-zip/Zip/Tar.lean:448) — *"unsupported format"* | `481e562` | other (header validation) |
+| [testdata/tar/malformed/pax-duplicate-path.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-duplicate-path.tar) | 2048 B | `parsePaxRecords` duplicate-key guard at [Zip/Tar.lean:147](/home/kim/lean-zip/Zip/Tar.lean:147) — *"tar: PAX extended header has duplicate {key.quote} record"* (ordering inside `parsePaxRecords`: UTF-8 decode → raw-byte NUL guard → duplicate-key check → push, so the duplicate-key branch only fires on records that already passed the UTF-8 and NUL filters. Unlike the sibling PR #1866 PAX NUL-byte silent-skip further below — which drops the offending record and continues — PR #1899 hard-rejects by writing `err := some …` and `break`ing the record loop; the `.error` return is rethrown unconditionally by the sole production caller at [Zip/Tar.lean:669](/home/kim/lean-zip/Zip/Tar.lean:669) inside `forEntries`'s `typePaxExtended` branch via `throw (IO.userError msg)`. `String.quote` on the duplicate key pins attribution in logs without leaking NUL or control bytes. Attack class: PAX records allow duplicate keys syntactically, and `applyPaxOverrides`'s default last-wins-silent policy leaves the smuggle exploitable unless the parser rejects duplicates structurally — a crafted second `path=` record would otherwise override the first, enabling parser-differential attacks where strict peer parsers (which reject or use first-wins) disagree with lean-zip. Closes the parser-differential *duplicate-key* dimension on `parsePaxRecords` complementary to PR #1866's NUL-byte silent-skip; together the two close both parser-differential dimensions on the PAX-record decode pipeline. Writer-side has no invariant to record — lean-zip's tar writer does not emit PAX extended headers) | #1899 | archive-slip |
 | [testdata/tar/malformed/pax-extended-oversized-size.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-extended-oversized-size.tar) | 512 B | `readEntryData` `maxHeaderSize` cap at [Zip/Tar.lean:222](/home/kim/lean-zip/Zip/Tar.lean:222) — *"exceeds maximum header size"* (PAX header `size ≈ 8 GiB`, default cap `8 MiB`) | #1597 | oversized allocation |
 | [testdata/tar/malformed/pax-inconsistent-length.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-inconsistent-length.tar) | 2048 B | `parsePaxRecords` silent-skip when no `=` is found before the declared record end (scan at [Zip/Tar.lean:79](/home/kim/lean-zip/Zip/Tar.lean:79); record dropped at [Zip/Tar.lean:79](/home/kim/lean-zip/Zip/Tar.lean:79)) | #1545 | partial-decoder panic |
 | [testdata/tar/malformed/pax-invalid-utf8-key.tar](/home/kim/lean-zip/testdata/tar/malformed/pax-invalid-utf8-key.tar) | 2048 B | `parsePaxRecords` `String.fromUTF8?` guard on key/value at [Zip/Tar.lean:122](/home/kim/lean-zip/Zip/Tar.lean:122) (record dropped, no panic) | #1545 | partial-decoder panic |
