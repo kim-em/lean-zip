@@ -811,7 +811,7 @@ Summary — what this pattern catches and what it does not:
     while strict peer parsers or CRC-cross-checking callers rejected.
     Pre-PR, `Archive.extract` caught the mismatch only post-extraction
     via the `"CRC32 mismatch"` guard at
-    [Zip/Archive.lean:1088](/home/kim/lean-zip/Zip/Archive.lean:1088),
+    [Zip/Archive.lean:1199](/home/kim/lean-zip/Zip/Archive.lean:1199),
     after the I/O work had been performed; `Archive.list` had no gate
     at all. Placed after the stored-method size invariant so the
     resolved `uncompSize : UInt64` is the value checked (rather than
