@@ -1063,7 +1063,7 @@ Summary — what this pattern catches and what it does not:
 
 #### Symlink/hardlink extraction policy
 
-`Tar.extract` (in [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:748))
+`Tar.extract` (in [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:748)) <!-- drift-detector: :748 is the def line of `partial def extract` inside `namespace Tar`; the prose-style quote `Tar.extract` never appears in the ±2 window. Cite is correct, heuristic is namespace-prefix limited. -->
 applies a fixed per-typeflag policy:
 
 - `typeRegular` ('0') and `typeDirectory` ('5') — written under
