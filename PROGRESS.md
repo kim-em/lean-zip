@@ -2972,6 +2972,166 @@ per-slot fixtures (#1929 linkname slot, #1930 prefix slot, both
 filed at 03:32Z); `review` queue at 1 (#1924, paired-review for
 #1922). Toolchain `v4.29.1`.
 
+**15-PR batch (Apr 25): Track E terminal closure of the 5-slot UStar interior-NUL family + terminal closure of the 2-slot GNU long-name / long-link family + first defense-in-depth-extension family closure in Track E history (summarize #1964):**
+
+Fifteen PRs merged in the ~3-hour 39-min window between summarize
+#1931 (merge commit `b4ec7ce`, 03:40:09Z 2026-04-25) and PR #1963
+(merge commit `154c1f5`, 07:31:44Z 2026-04-25). The wave's
+organising theme: **two terminal per-slot fixture-family closures
+landing in near-simultaneous bursts on the same day**, plus the
+**first defense-in-depth extension** of any per-slot fixture
+family in Track E history. The 5-slot UStar interior-NUL family
+opened by PR #1880 (`name` slot, post-#1869 wave) extended through
+the 3-slot filesystem-reaching arm (`linkname` PR #1934, `prefix`
+PR #1937 — terminal of the 3-slot arm) and then crossed into a
+new structural mode: the 4th `uname` slot (PR #1944) is
+**defense-in-depth** because the field does not flow into
+`Tar.extract`'s filesystem operations — it is exposed only via
+`Tar.list`'s `entry.uname` for callers routing on a trust
+decision. PR #1957 (`gname` slot) closes the 5-slot family at 5/5
+slots; together with PR #1944 the 2-slot defense-in-depth arm
+(`uname` / `gname`) joins the closed 3-slot filesystem-reaching
+arm as one fully-closed 5-slot family. Concurrently, the 2-slot
+GNU long-name / long-link interior-NUL family — opened by PR
+#1865 (long-name slot, post-#1843 wave) which already added both
+guards in source — closes its per-slot fixture asymmetry at PR
+#1953 (long-link slot), reaching 2/2 closure ~30 min before the
+5-slot UStar family closes at PR #1957. No spec file touched;
+`grep -rc sorry Zip/` stayed at 0 throughout. Source edits landed
+only in `Zip/Tar.lean` (per-slot UStar interior-NUL guards
+extending the 3-slot `forEntries` block to 5 slots), plus
+`ZipTest/TarFixtures.lean` fixture assertions, four
+`SECURITY_INVENTORY.md` placeholder-PR substitution sweeps, and
+one error-wording-catalogue skill row registration.
+
+*Track E feature PRs (5): per-slot UStar interior-NUL family closure (#1934 / #1937 / #1944 / #1957) + per-slot GNU long-link interior-NUL fixture (#1953).*
+
+- **#1934 — explicit per-slot fixture
+  `ustar-linkname-nul-in-name.tar` for the `linkname` slot.**
+  Second slot in the 5-slot UStar interior-NUL family (sibling of
+  PR #1880 `name` slot which opened the family).
+- **#1937 — explicit per-slot fixture
+  `ustar-prefix-nul-in-name.tar` for the `prefix` slot.** Third
+  slot — closes the 3-slot filesystem-reaching arm at 3/3 slots.
+  First fully-closed-on-master per-slot family of the post-#1928
+  wave (paired-reviewed by PR #1947 as the *terminal-closure*
+  paired-review for the 3-slot arm).
+- **#1944 — extends the UStar interior-NUL guard to the `uname`
+  slot + `ustar-uname-nul-in-uname.tar` fixture.** **First
+  defense-in-depth extension** in Track E history: the `uname`
+  field is a user-attestation string that does **not** flow into
+  `Tar.extract`'s filesystem operations, so the 4th-slot guard
+  narrows the attack surface from filesystem archive-slip (the
+  3-slot arm's class) to parser-differential `Tar.list` smuggling
+  on a caller routing on `entry.uname` for a trust decision.
+- **#1953 — explicit per-slot fixture
+  `gnu-longlink-nul-in-link.tar` for the GNU long-link slot
+  (closes 2-slot family at 2/2).** Companion to PR #1865's
+  long-name slot fixture — both guards already existed in source
+  from PR #1865, so this PR is fixture-only, closing the per-slot
+  fixture asymmetry PR #1865 left behind.
+- **#1957 — per-slot UStar `gname` interior-NUL guard +
+  `ustar-gname-nul-in-gname.tar` fixture.** 5th-and-final slot of
+  the UStar family — terminal closure of the 5-slot family
+  (3-slot filesystem-reaching arm `name` / `linkname` / `prefix`
+  + 2-slot defense-in-depth arm `uname` / `gname`). Mirrors PR
+  #1944's defense-in-depth structure.
+
+*Per-slot family closures and extensions (post-#1931 wave):*
+
+| Family                                               | Slot count | Closure / extension state at end of wave                                                  |
+|------------------------------------------------------|------------|-------------------------------------------------------------------------------------------|
+| UStar interior-NUL fs-reaching arm                   | 3          | 3/3 closed at PR #1937 (this wave — terminal of the 3-slot arm)                           |
+| UStar interior-NUL with `uname` (defense-in-depth)   | 4          | 4/4 landed at PR #1944 (this wave — **first defense-in-depth extension** in Track E history) |
+| UStar interior-NUL with `gname` (final)              | 5          | 5/5 closed at PR #1957 (this wave — terminal of the 5-slot family)                        |
+| GNU long-name / long-link                            | 2          | 2/2 closed at PR #1953 (this wave — terminal; sibling of PR #1865 long-name)              |
+| EOCD ZIP64-override mismatch                         | 6          | 5/6; gated on PR #1909 in repair queue (issue #1902 — carried into post-#1931 wave)       |
+| PAX path / linkpath NUL                              | 2          | 1/2; `path` covered by PR #1866; `linkpath` gated on unclaimed issue #1855                |
+
+The defense-in-depth distinction is structurally novel for Track E:
+the `uname` and `gname` fields are user-attestation strings (not
+filesystem-routing strings) that strict peer parsers preserve at
+full fidelity but lean-zip's `Binary.readString` would silently
+truncate at an interior NUL without the new guards. The 5-slot
+UStar interior-NUL family is the **uniquely** structured family
+in Track E so far — all earlier per-slot families had every slot
+reaching the filesystem (or, for the EOCD ZIP64-override family,
+every slot mathematically homologous). Future per-slot families
+that mix filesystem-reaching with defense-in-depth slots can
+reuse this wave's family-closure-vs-extension framing.
+
+*Paired-review PRs (5).* #1940 reviews #1934 (linkname slot,
+in-wave at 35 min), #1947 reviews #1937 (prefix slot — terminal
+of 3-slot arm, in-wave at 1 h 9 min — labeled the *first
+fully-closed-on-master per-slot family of the post-#1928 wave*),
+#1951 reviews #1944 (uname slot — **first defense-in-depth-
+extension paired-review** in Track E history, in-wave at 53 min),
+#1962 reviews #1953 (long-link slot — terminal of 2-slot GNU
+family, in-wave at 49 min), #1963 reviews #1957 (gname slot —
+terminal of 5-slot UStar family, in-wave at 40 min). All five
+in-wave feature PRs have an in-wave matching paired-review entry,
+extending the post-#1904 wave's tightening cluster trend (median
+~49 min vs. post-#1904's median ~1 h 31 min): every closure event
+now triggers a paired-review issue exactly once, and the
+paired-review queue drains within an hour of the closure. PR
+#1932 (paired-review for PR #1922 `numEntriesThisDisk` slot, the
+last unpaired feature from the post-#1904 wave) landed at the
+start of this wave (~12min into the window); count it as the
+prior-wave carryover that flushed the post-#1904 paired-review
+queue to zero.
+
+*Inventory placeholder-PR substitution sweeps (3).*
+
+- **#1941 — three-row sweep** (`SECURITY_INVENTORY.md` placeholder
+  rows for #1903, #1921, #1922 — post-#1904 follow-up).
+- **#1949 — four-row sweep** (placeholder rows for #1903, #1921,
+  #1934, #1937 — sibling of PR #1941, extending coverage to the
+  two newly-landed UStar interior-NUL fixtures).
+- **#1958 — one-row sweep** (placeholder row for #1944's
+  `ustar-uname-nul-in-uname.tar` at line 1314 — post-#1944
+  one-shot).
+
+*Skill registration (1).* PR #1948 — error-wording-catalogue rows
+for the tar interior-NUL family + PAX duplicate-key (#1899). The
+out-of-scope follow-up to PR #1880's paired-review surfaced as a
+discrete skill PR; registers the per-slot error-substring family
+in the catalogue so future tests can pick the right match string
+the first time.
+
+*Out-of-scope cleanup queued at wave close.* Issue #1956
+(cleanup-list registration for PR #1865's `gnu-longname-nul-in-name.tar`)
+and issue #1960 (post-#1953 + post-#1957 inventory sweep — closes
+two `#N` placeholders for `gnu-longlink-nul-in-link.tar` →
+#1953 and `ustar-gname-nul-in-gname.tar` → #1957) were queued at
+wave close; both landed in the post-#1963 follow-up window as PR
+#1967 and PR #1968 respectively, so they will appear in the next
+wave block.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/` and
+`Zip/*.lean` (unchanged). Fixtures in `testdata/zip/malformed/`
+unchanged at 47 (no ZIP fixtures landed this wave); fixtures in
+`testdata/tar/malformed/` grew from 18 to 23 (+5: the four
+UStar interior-NUL slot fixtures `ustar-linkname-nul-in-name.tar`,
+`ustar-prefix-nul-in-name.tar`, `ustar-uname-nul-in-uname.tar`,
+`ustar-gname-nul-in-gname.tar`, plus the GNU long-link slot
+`gnu-longlink-nul-in-link.tar`). Type mix across the 15 PRs:
+feature 5 / paired-review 5 (in-wave) + 1 (carryover #1932) /
+inventory 3 / skill 1 — call it 5 / 6 / 3 / 1 if folding the
+carryover paired-review in, or 5 / 5 / 3 / 1 + 1 carryover. At
+wave close: repair queue at 14 PRs (12 carryover Track E CD-parse
+cascades from prior waves plus #1909 numberOfThisDisk per-slot
+fixture, plus the new #1959 prior-wave inventory line-anchor sweep
+that entered the queue with merge-conflict status); `feature`
+queue empty (all post-#1928 per-slot fixture issues — #1929 /
+#1930 / #1942 / #1945 / #1946 — landed via PRs #1934, #1937,
+#1944, #1953, #1957 by wave close); `review` queue empty (all
+in-wave paired-reviews landed; #1924 paired-review for #1922
+landed as PR #1932 at the start of this wave). `lake build` clean
+(191 jobs); `lake exe test` all green; `bash scripts/check-inventory-links.sh`
+exits 0 with 104 warnings (pre-existing line-anchor drift).
+Toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
