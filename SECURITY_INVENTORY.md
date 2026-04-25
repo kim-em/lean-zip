@@ -707,11 +707,11 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/cd-path-unsafe.zip`) rejects CD entries
     whose decoded `name` is path-unsafe per `Binary.isPathSafe` at
     `parseCentralDir` time
-    ([Zip/Archive.lean:631](/home/kim/lean-zip/Zip/Archive.lean:631)),
+    ([Zip/Archive.lean:676](/home/kim/lean-zip/Zip/Archive.lean:676)),
     immediately after the UTF-8 / Latin-1 decode block at
     [Zip/Archive.lean:633-643](/home/kim/lean-zip/Zip/Archive.lean:633)
     and before the `versionNeeded` upper-bound at
-    [Zip/Archive.lean:651](/home/kim/lean-zip/Zip/Archive.lean:651).
+    [Zip/Archive.lean:696](/home/kim/lean-zip/Zip/Archive.lean:696).
     `Binary.isPathSafe` (canonical lean-zip-common path-safety filter,
     shared with the Tar extract path) rejects absolute paths (`/`
     prefix), `\` anywhere, `..`/`.` components, empty components (from
@@ -721,11 +721,11 @@ Summary — what this pattern catches and what it does not:
     unsafe `path` verbatim — exposing the full smuggled form to
     callers who route on `entry.path` before any filesystem I/O. The
     extract-time `Binary.isPathSafe` calls at
-    [Zip/Archive.lean:1133](/home/kim/lean-zip/Zip/Archive.lean:1133)
-    and :1107 remain in place as defense-in-depth but are now
+    [Zip/Archive.lean:1244](/home/kim/lean-zip/Zip/Archive.lean:1244)
+    and :1248 remain in place as defense-in-depth but are now
     unreachable for CD-parseable archives via the public API. Mirrors
     the trailing-slash carve-out at
-    [Zip/Archive.lean:1131](/home/kim/lean-zip/Zip/Archive.lean:1131)
+    [Zip/Archive.lean:1242](/home/kim/lean-zip/Zip/Archive.lean:1242)
     (directory entries end with `"/"`, checked on the slash-stripped
     form) so legitimate directory entries are not tripped. Quotes the
     name via `String.quote` so control bytes from the smuggled name
