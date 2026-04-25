@@ -488,7 +488,7 @@ Summary — what this pattern catches and what it does not:
     pre-ZIP64-resolution because `method` is a plain `UInt16` field
     with no sentinel-gating (APPNOTE §4.4.5). Pre-PR, only
     `Archive.extract`'s late `"unsupported method"` dispatch in
-    `readEntryData` (`"unsupported method"` throw at [Zip/Archive.lean:1083](/home/kim/lean-zip/Zip/Archive.lean:1083))
+    `readEntryData` (`"unsupported method"` throw at [Zip/Archive.lean:1194](/home/kim/lean-zip/Zip/Archive.lean:1194))
     caught crafted archives advertising method 6 (imploded), 12
     (bzip2), 14 (LZMA), 93 (Zstd), etc. — `Archive.list` was entirely
     blind to the anomaly, and a caller routing on `Entry.method` to
