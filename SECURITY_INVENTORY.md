@@ -248,7 +248,7 @@ Summary — what this pattern catches and what it does not:
     PR #1911
     (`testdata/zip/malformed/eocd-zip64-override-diskcd-mismatch.zip` —
     `diskWhereCDStarts` slot at [Zip/Archive.lean:408](/home/kim/lean-zip/Zip/Archive.lean:408)),
-    and this PR
+    and PR #1922
     (`testdata/zip/malformed/eocd-zip64-override-entriesthisdisk-mismatch.zip` —
     `numEntriesThisDisk` slot at [Zip/Archive.lean:411](/home/kim/lean-zip/Zip/Archive.lean:411))
     reject archives where the standard EOCD carries a real value
@@ -535,7 +535,7 @@ Summary — what this pattern catches and what it does not:
     checked, not the `0xFFFFFFFF` sentinel. Net-new dimension
     observed during the CD-parse archive-layout-invariant coverage
     sweep
-  - Late LH-signature guard regression coverage — PR #N
+  - Late LH-signature guard regression coverage — PR #1903
     (`testdata/zip/malformed/cd-bad-lh-signature.zip`) pins the
     `Archive.extract` defense-in-depth catch at
     [Zip/Archive.lean:1081](/home/kim/lean-zip/Zip/Archive.lean:1081)
@@ -570,7 +570,7 @@ Summary — what this pattern catches and what it does not:
     `0xCAFEBABE` is canonical "obviously crafted" UInt32 — any 4-byte
     sequence ≠ `50 4b 03 04` fires the same guard
   - Per-entry `entryEnd > cdEnd` footprint guard regression coverage —
-    PR #N
+    PR #1921
     (`testdata/zip/malformed/cd-entry-past-cdend.zip`) pins the existing
     `parseCentralDir` per-entry footprint check at
     [Zip/Archive.lean:615](/home/kim/lean-zip/Zip/Archive.lean:615)
