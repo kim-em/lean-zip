@@ -1288,11 +1288,11 @@ not untrusted archive bytes, so it falls outside this inventory's
 scope.
 
 Trust-boundary callers reach the actual `.read` primitive via
-`readExact` ([Zip/Archive.lean:869](/home/kim/lean-zip/Zip/Archive.lean:869),
-[Zip/Tar.lean:189](/home/kim/lean-zip/Zip/Tar.lean:189)),
-`readExactStream` ([Zip/Archive.lean:883](/home/kim/lean-zip/Zip/Archive.lean:883)),
-`readEntryData` ([Zip/Tar.lean:220](/home/kim/lean-zip/Zip/Tar.lean:220)),
-`skipEntryData` ([Zip/Tar.lean:539](/home/kim/lean-zip/Zip/Tar.lean:539)),
+`readExact` ([Zip/Archive.lean:980](/home/kim/lean-zip/Zip/Archive.lean:980),
+[Zip/Tar.lean:218](/home/kim/lean-zip/Zip/Tar.lean:218)),
+`readExactStream` ([Zip/Archive.lean:994](/home/kim/lean-zip/Zip/Archive.lean:994)),
+`readEntryData` ([Zip/Tar.lean:249](/home/kim/lean-zip/Zip/Tar.lean:249)),
+`skipEntryData` ([Zip/Tar.lean:630](/home/kim/lean-zip/Zip/Tar.lean:630)),
 or open-coded read loops. Each row below names the call site that
 drives an `n`-byte read; the `readExact`-family helpers themselves
 perform a `Nat → USize` roundtrip check before every `Handle.read`.
