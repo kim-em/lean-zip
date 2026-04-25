@@ -37,7 +37,7 @@ Per-session details are in `progress/`.
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 - **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
 - **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
-- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1868): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining, in-flight PR #1725); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); CD-parse filename-validation trio completed in the post-#1843 wave (`cd-nul-in-name` #1831, `cd-path-unsafe` #1840, `cd-empty-name` #1848); CD-parse mathematical-invariant family second column closed (`uncompSize == 0 → crc == 0` #1857, sibling of stored-method size invariant #1773) and third column closed (`compSize == 0 → uncompSize == 0` #1886, method-agnostic — closes the method=8 gap relative to #1773 / #1857); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826) and companion `versionNeededToExtract ≤ 63` upper bound closed (#1852), together with the earlier `versionNeededToExtract ≥ 45` lower bound (issue #1758 / in-flight PR #1764) closing the EOCD64 version-field two-sided-bound dimensions (per-entry CD `versionMadeBy > 63` remains in-flight PR #1820); ZIP64-trailer archive-layout invariants trio closed (per-entry `localOffset + 30 ≤ cdOffset` #1813, ZIP64 record `eocd64Offset + 56 ≤ locatorPos` #1856, archive `cdOffset + cdSize ≤ eocdPos` in-flight PR #1809); cross-format NUL-byte closure in Tar (UStar base `name` / `linkname` / `prefix` #1880 + GNU long-name / long-link #1865 + PAX record key/value #1866) plus ZIP CD-layer (#1831) spans all four user-supplied string-field layers, every one now carrying an explicit code guard (UStar layer was previously structurally NUL-safe by construction; #1880 added an explicit code guard so the closure is uniform); 41 fixtures in `testdata/zip/malformed/` (was 39 at #1869, 34 at #1843, 28 at #1803, 22 at #1770, 12 at #1721); 17 fixtures in `testdata/tar/malformed/` (was 16 at #1869, 14 at #1843)
+- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1868): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining, in-flight PR #1725); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); CD-parse filename-validation trio completed in the post-#1843 wave (`cd-nul-in-name` #1831, `cd-path-unsafe` #1840, `cd-empty-name` #1848); CD-parse mathematical-invariant family second column closed (`uncompSize == 0 → crc == 0` #1857, sibling of stored-method size invariant #1773) and third column closed (`compSize == 0 → uncompSize == 0` #1886, method-agnostic — closes the method=8 gap relative to #1773 / #1857); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826) and companion `versionNeededToExtract ≤ 63` upper bound closed (#1852), together with the earlier `versionNeededToExtract ≥ 45` lower bound (issue #1758 / in-flight PR #1764) closing the EOCD64 version-field two-sided-bound dimensions (per-entry CD `versionMadeBy > 63` remains in-flight PR #1820); ZIP64-trailer archive-layout invariants trio closed (per-entry `localOffset + 30 ≤ cdOffset` #1813, ZIP64 record `eocd64Offset + 56 ≤ locatorPos` #1856, archive `cdOffset + cdSize ≤ eocdPos` in-flight PR #1809); cross-format NUL-byte closure in Tar (UStar base `name` / `linkname` / `prefix` #1880 + GNU long-name / long-link #1865 + PAX record key/value #1866) plus ZIP CD-layer (#1831) spans all four user-supplied string-field layers, every one now carrying an explicit code guard (UStar layer was previously structurally NUL-safe by construction; #1880 added an explicit code guard so the closure is uniform); per-slot ZIP64-override family (opened post-#1718 by #1745 with the `cdOffset` slot) closed at 5 of 6 slots in the post-#1904 wave (`cdSize` #1905, `totalEntries` #1908, `diskWhereCDStarts` #1911, `numEntriesThisDisk` #1922; only `numberOfThisDisk` outstanding via in-flight PR #1909); local-offset → local-header validation chain (per-entry CD-parse) closed as a complete three-level trio in the post-#1904 wave (level-1 `cd-entry-localoffset-past-cdstart` #1813, level-2 `cd-entry-past-cdend` #1921, level-3 `cd-bad-lh-signature` #1903); PAX-record decode surface closed at both parser-differential dimensions (NUL-byte rejection #1866 + duplicate-key rejection #1899); 47 fixtures in `testdata/zip/malformed/` (was 41 at #1894, 39 at #1869, 34 at #1843, 28 at #1803, 22 at #1770, 12 at #1721); 18 fixtures in `testdata/tar/malformed/` (was 17 at #1894, 16 at #1869, 14 at #1843)
 
 ## Milestones
 
@@ -2845,6 +2845,132 @@ grew from 39 to 41 (+2: `cd-deflate-zero-compsize.zip`,
 grew from 16 to 17 (+1: `ustar-name-nul-in-name.tar`). Type mix
 across the 10 PRs: feature 3 / paired-review 6 / inventory 1.
 Toolchain `v4.29.1`.
+
+**15-PR batch (Apr 24–25): Track E per-slot ZIP64-override family closure (4/5) + local-offset→LH validation trio completion + PAX duplicate-key closure + paired-review batch (summarize #1927):**
+
+Fifteen PRs merged in the ~3-hour 32-min window between summarize
+#1894 (merge commit `1bb9465`, 00:30:23Z 2026-04-25) and PR #1926
+(merge commit `f7d1100`, 03:07:43Z 2026-04-25); the lower bound
+includes four stragglers (#1896, #1897, #1899, #1903) that merged
+in the 67-min window between PR #1893 — the last PR captured in
+the #1894 summarize body — and #1904 itself merging, so the
+authoritative pre-wave anchor is summarize #1894 even though four
+of the wave's PRs predate it by clock time. The wave's organising
+theme: **closure of two Track E sibling-trio families on the same
+day**. The per-slot ZIP64-override family opened by #1745 (cdOffset
+slot, post-#1718 wave) closes 4 of its 5 remaining slots in a
+single ~2-hour cadence (cdSize / totalEntries / diskWhereCDStarts
+/ numEntriesThisDisk), leaving only the `numberOfThisDisk` slot
+outstanding via in-flight PR #1909; and the local-offset →
+local-header validation trio opened by #1813 (level-1
+cd-entry-localoffset-past-cdstart, post-#1803 wave) closes its
+level-2 (#1921 cd-entry-past-cdend, the existing `entryEnd > cdEnd`
+guard at `Zip/Archive.lean:614-615`) and level-3 (#1903
+cd-bad-lh-signature, the late LH-signature guard at
+`Zip/Archive.lean:1081`) levels, so all three precedence layers
+now have explicit fixture coverage. Separately, #1899 closes the
+second parser-differential dimension on PAX-record decode
+(duplicate-key rejection in `parsePaxRecords`, companion to the
+prior #1866 NUL-byte closure on the same surface). No spec file
+touched; `grep -rc sorry Zip/` stayed at 0 throughout. Source edits
+landed in `Zip/Archive.lean` (per-slot ZIP64-override fixture
+assertions), `Zip/Tar.lean` (+one duplicate-key guard at the PAX
+layer), `ZipTest/ZipFixtures.lean` + `ZipTest/TarFixtures.lean`
+fixture assertions, and `SECURITY_INVENTORY.md` (placeholder-PR
+substitutions and post-merge bookkeeping).
+
+*Track E feature PRs (6): per-slot ZIP64-override family closure
+(4/5).*
+
+- **#1905 — explicit per-slot fixture
+  `eocd-zip64-override-cdsize-mismatch.zip` for the `cdSize`
+  slot.** Second slot in the 6-slot per-slot ZIP64-override family
+  (sibling of #1745 `cdOffset` slot which opened the family).
+- **#1908 — explicit per-slot fixture
+  `eocd-zip64-override-totalentries-mismatch.zip` for the
+  `totalEntries` slot.** Third slot.
+- **#1911 — explicit per-slot fixture
+  `eocd-zip64-override-diskcd-mismatch.zip` for the
+  `diskWhereCDStarts` slot.** Fourth slot.
+- **#1922 — explicit per-slot fixture
+  `eocd-zip64-override-entriesthisdisk-mismatch.zip` for the
+  `numEntriesThisDisk` slot.** Fifth slot. After this PR only the
+  `numberOfThisDisk` slot remains; tracked by issue #1902 with
+  PR #1909 currently in the repair queue (merge-conflict at wave
+  close).
+
+*Track E feature PRs continued: local-offset → local-header
+validation trio completion (level-2 + level-3).*
+
+- **#1903 — level-3: explicit fixture `cd-bad-lh-signature.zip`
+  for the late LH-signature guard at `Zip/Archive.lean:1081`.**
+  Probes the third precedence layer of the local-offset → LH
+  chain; the prior two levels were #1813 (level-1
+  `cd-entry-localoffset-past-cdstart`, post-#1803 wave) and
+  #1921 (level-2, this wave).
+- **#1921 — level-2: explicit per-entry CD-overrun fixture
+  `cd-entry-past-cdend.zip` for the existing `entryEnd > cdEnd`
+  guard at `Zip/Archive.lean:614-615`.** With #1903 + #1813 this
+  closes the trio so all three precedence layers (local-offset
+  bound, CD-end overrun, LH-signature mismatch) carry explicit
+  per-entry fixtures.
+
+*Track E feature PRs continued: PAX duplicate-key closure.*
+
+- **#1899 — Tar PAX duplicate-key rejection in `parsePaxRecords`
+  + `pax-duplicate-path.tar` fixture.** Closes the second
+  parser-differential dimension on the PAX-record decode surface
+  (companion to #1866 NUL-byte rejection on the same
+  `parsePaxRecords` surface). After this PR both parser-differential
+  dimensions on PAX records are closed (NUL-byte smuggling
+  #1866 + duplicate-key first-wins-vs-last-wins #1899).
+
+*Inventory placeholder-PR substitution sweeps (2).*
+
+- **#1896 — substitute two `#N` placeholder-PR rows in
+  `SECURITY_INVENTORY.md`** (`:766 → #1880`, `:1128 → #1880`)
+  post-#1880 one-shot bookkeeping.
+- **#1897 — substitute five `#N` placeholder-PR occurrences**
+  (`:261 → #1889`, `:740 / :777 / :1191 → #1886`, `:1223 → #1889`)
+  post-#1886/#1889 one-shot sweep. Note: subsequent #1928
+  (post-wave) added the `pax-duplicate-path.tar` corpus row +
+  Tar Parser/Extractor recent-wins bullet that PR #1899 had
+  itself omitted — see the next wave for that follow-up.
+
+*Paired-review PRs (6).* #1913 reviews #1899 (PAX duplicate-key,
+in-wave at 1 h 34 min), #1914 reviews #1903 (level-3 LH-signature
+fixture, in-wave at 1 h 31 min), #1919 reviews #1905
+(`cdSize` per-slot fixture, in-wave at 1 h 29 min), #1920 reviews
+#1908 (`totalEntries` per-slot fixture, in-wave at 1 h 27 min),
+#1925 reviews #1911 (`diskWhereCDStarts` per-slot fixture, in-wave
+at 1 h 39 min), #1926 reviews #1921 (level-2 CD-overrun fixture,
+in-wave at 38 min). Five of six in-wave pairs landed inside ~1 h
+40 min — the cluster median tightens vs. the post-#1869 wave's
+in-wave triplet (~25 min) only because the per-slot family's
+review pairs spaced themselves out across the family's ~2-hour
+landing cadence rather than catching up at the end. Every in-wave
+feature PR has a matching review entry except #1922 (numEntriesThisDisk
+per-slot fixture, paired-review carried into the next wave as
+issue #1924 in the unclaimed `review` queue at wave close).
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/` and
+`Zip/*.lean` (unchanged). Fixtures in `testdata/zip/malformed/`
+grew from 41 to 47 (+6: `cd-bad-lh-signature.zip`,
+`cd-entry-past-cdend.zip`,
+`eocd-zip64-override-cdsize-mismatch.zip`,
+`eocd-zip64-override-totalentries-mismatch.zip`,
+`eocd-zip64-override-diskcd-mismatch.zip`,
+`eocd-zip64-override-entriesthisdisk-mismatch.zip`); fixtures in
+`testdata/tar/malformed/` grew from 17 to 18 (+1:
+`pax-duplicate-path.tar`). Type mix across the 15 PRs: feature 7 /
+paired-review 6 / inventory 2. At wave close: 13 PRs in the repair
+queue (12 carryover Track E CD-parse cascades from prior waves
+plus #1909 numberOfThisDisk per-slot fixture freshly entered the
+queue this wave); `feature` queue has 2 unclaimed UStar interior-NUL
+per-slot fixtures (#1929 linkname slot, #1930 prefix slot, both
+filed at 03:32Z); `review` queue at 1 (#1924, paired-review for
+#1922). Toolchain `v4.29.1`.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
