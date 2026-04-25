@@ -325,7 +325,7 @@ Summary — what this pattern catches and what it does not:
     to interpret the EOCD64 record; any higher value is either a
     forward-looking extension lean-zip does not support or a crafted
     smuggle against strict readers. Writer-side at
-    [Zip/Archive.lean:150](/home/kim/lean-zip/Zip/Archive.lean:150)
+    [Zip/Archive.lean:154](/home/kim/lean-zip/Zip/Archive.lean:154)
     hard-codes `45` (EOCD64 requires ZIP64 support, §4.4.3.2), so the
     bound `45 ≤ 63` holds trivially for every lean-zip-produced
     archive. Upper-bound sibling of the lower-bound `≥ 45` check
