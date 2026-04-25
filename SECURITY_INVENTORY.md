@@ -1189,10 +1189,10 @@ source. The corresponding checklist item is Priority 2 items 1–2 in
 | [Archive.extract](/home/kim/lean-zip/Zip/Archive.lean:1122) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all entries; intended as a second line of defence against many-small-entries bombs. |
 | [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:1167) | `maxCentralDirSize : Nat` | `67108864` (64 MiB) | no limit | CD allocation cap. |
 | [Archive.extractFile](/home/kim/lean-zip/Zip/Archive.lean:1167) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited (FFI backend only; native inflate rejects `0`) | per-entry cap. |
-| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:651) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:651](/home/kim/lean-zip/Zip/Tar.lean:651)). |
-| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:651) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all regular-file entries; directories and symlinks contribute zero. |
-| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:779) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
-| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:779) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:748) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry byte cap, applied via header `e.size` before any I/O (see [Zip/Tar.lean:748](/home/kim/lean-zip/Zip/Tar.lean:748)). |
+| [Tar.extract](/home/kim/lean-zip/Zip/Tar.lean:748) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | running sum across all regular-file entries; directories and symlinks contribute zero. |
+| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:876) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. Outer gzip decode is streaming via `Gzip.InflateState`; no per-stream output cap. |
+| [Tar.extractTarGz](/home/kim/lean-zip/Zip/Tar.lean:876) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
 | [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:848) | `maxEntrySize : UInt64` | `1 * 1024^3` (1 GiB) | pass `0` for unlimited | per-entry cap. |
 | [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:848) | `maxTotalSize : UInt64` | `0` | no whole-archive cap | forwarded to inner `Tar.extract`. |
 | [Tar.extractTarGzNative](/home/kim/lean-zip/Zip/Tar.lean:851) | `maxOutputSize : Nat` | `256 * 1024^2` (256 MiB) | hard cap at 0 bytes (explicit) | whole-archive tar-buffer cap for the outer native gzip decode. |
