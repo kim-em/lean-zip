@@ -475,7 +475,7 @@ Summary — what this pattern catches and what it does not:
     catches intra-CD invariant violation with no CD/LH divergence. Also
     makes the anomaly visible to `Archive.list`, which never reaches the
     late post-decode `"size mismatch"` guard at
-    [Zip/Archive.lean:976](/home/kim/lean-zip/Zip/Archive.lean:976).
+    [Zip/Archive.lean:1201](/home/kim/lean-zip/Zip/Archive.lean:1201).
     Net-new dimension observed during the CD-parse guard coverage
     sweep — the *Missing work* block had not previously flagged the
     stored-method invariant
