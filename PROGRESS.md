@@ -3132,6 +3132,215 @@ landed as PR #1932 at the start of this wave). `lake build` clean
 exits 0 with 104 warnings (pre-existing line-anchor drift).
 Toolchain `v4.29.1`.
 
+**11-PR batch (Apr 25): Track E third terminal closure of the post-#1928 wave at PR #1979 (2-slot PAX value-side override family at 2/2 — last unclosed Tar interior-NUL family) + post-closure cadence (paired-review + inventory row tightenings + Recent-wins bullet sequencing + skill updates) (summarize #1989):**
+
+Eleven PRs merged in the ~2-hour 34-min window between PR #1967
+(merge commit `c2786e1`, 07:45:32Z 2026-04-25) and PR #1988 (merge
+commit `8f63bac`, 10:19:43Z 2026-04-25). The window opens ~40 min
+*before* the prior summarize PR #1971 (merged 08:24:42Z) submitted:
+the three post-issue-creation tail PRs from the prior wave landed at
+07:45–08:08Z, after issue #1964's 07:38Z creation but before
+#1971's 08:24Z merge — explicitly deferred to this wave per
+[`progress/20260425T082152Z_1f65eccf-summarize-post-1931.md`](progress/20260425T082152Z_1f65eccf-summarize-post-1931.md)
+(line 46). The wave's organising theme is the **third terminal
+closure** of the post-#1928 per-slot Tar interior-NUL family arc:
+PR #1979 closes the 2-slot PAX value-side override family
+(`path` / `linkpath`) at 2/2 by adding the per-slot `linkpath`
+regression fixture `pax-linkpath-nul-in-value.tar` (the symmetric
+`valueBytes`-arm guard already existed in source from PR #1866's
+`(keyBytes` / `valueBytes`) raw-NUL guard at `parsePaxRecords`,
+paired with PR #1866's `path`-slot fixture
+`pax-path-nul-in-value.tar`). With this closure, all three named
+per-slot Tar interior-NUL families flagged by PR #1971's wave-block
+remaining-work list are terminally closed and paired-reviewed:
+
+1. 5-slot UStar interior-NUL family — terminal at PR #1957 / paired-review #1963 (prior wave).
+2. 2-slot GNU long-name / long-link — terminal at PR #1953 / paired-review #1962 (prior wave).
+3. 2-slot PAX value-side override (path / linkpath) — terminal at PR #1979 / paired-review #1986 (this wave).
+
+PR #1986 completes the **paired-review trio** (#1962 / #1963 /
+#1986 reviewing #1953 / #1957 / #1979 respectively). The wave is
+otherwise post-closure cleanup: three inventory row tightenings
+(#1985, #1987, #1988), one Recent-wins bullet add for the
+*second* terminal closure of the post-#1928 wave (#1978 GNU
+long-name / long-link, sequenced ahead of the still-pending PAX
+value-side bullet which remains queued under issue #1983 at wave
+close), and two skill updates (#1973 `malformed-fixture-builder`
+per-slot printable-prefix discipline; #1975
+`inventory-reconciliation` terminal-closure tightening cadence).
+Source edits were minimal: only the new
+`testdata/tar/malformed/pax-linkpath-nul-in-value.tar` fixture and a
+matching `ZipTest/TarFixtures.lean` builder + assertion entry from
+PR #1979; `Zip/Tar.lean` itself was not touched by any wave PR.
+`grep -rc sorry Zip/` stayed at 0 throughout.
+
+*Tail-deferred from prior wave (3): PRs landed between issue #1964's
+07:38Z creation and PR #1971's 08:24Z merge.*
+
+- **#1967 (07:45Z) — test cleanup**: register
+  `gnu-longname-nul-in-name.tar` in `ZipTest/TarFixtures.lean`'s
+  cleanup-list array (one-line follow-up to PR #1865's missing
+  cleanup-list registration; closes issue #1956).
+- **#1968 (07:50Z) — inventory two-row placeholder sweep**:
+  substitute `#N` PR-refs in `SECURITY_INVENTORY.md` for
+  `gnu-longlink-nul-in-link.tar` → #1953 and
+  `ustar-gname-nul-in-gname.tar` → #1957 (terminal closure of the
+  post-#1928 placeholder set per the prior wave block's tracking;
+  closes issue #1960).
+- **#1969 (08:07Z) — `error-wording-catalogue` skill refresh**:
+  credit PR #1957 on the UStar interior-NUL row and PR #1953 on
+  the GNU long-name / long-link row, retire stale "deferred to
+  follow-up planner cycle issue #1946" and "in flight via per-slot
+  family-extension issue #1945" clauses, add the defense-in-depth
+  annotation noting `uname` / `gname` do not reach `Tar.extract`.
+
+*Per-slot fixture terminal closure (1): PR #1979 — third terminal
+closure of the post-#1928 wave; sibling of pre-wave PR #1866 path
+slot.*
+
+- **#1979 (09:36Z) — explicit per-slot fixture
+  `pax-linkpath-nul-in-value.tar` for the PAX `linkpath` slot
+  (closes 2-slot PAX value-side override family at 2/2).** Sibling
+  of PR #1866 (`path` slot, pre-wave) which added both arms of the
+  `(keyBytes` / `valueBytes`) raw-NUL guard at `parsePaxRecords` in
+  one source landing but emitted only the `path` fixture. PR #1979
+  closes the per-slot fixture asymmetry — fixture-only PR (no
+  source change), structurally parallel to PR #1953 (GNU long-link
+  slot, prior wave) which closed the GNU 2-slot family at 2/2 with
+  the same fixture-only shape. **Third terminal closure of the
+  post-#1928 wave** after PRs #1957 (5-slot UStar) and #1953
+  (2-slot GNU long-name / long-link); the PAX value-side override
+  family was the **last** Tar interior-NUL family flagged by PR
+  #1971's remaining-work list, and its closure terminates the
+  post-#1928 Tar interior-NUL closure arc.
+
+*Per-slot family closures (post-#1971 wave):*
+
+| Family                                               | Slot count | Closure state at end of wave                                                              |
+|------------------------------------------------------|------------|-------------------------------------------------------------------------------------------|
+| UStar interior-NUL family                            | 5          | 5/5 closed at PR #1957 (prior wave — terminal)                                            |
+| GNU long-name / long-link                            | 2          | 2/2 closed at PR #1953 (prior wave — terminal)                                            |
+| PAX value-side override (path / linkpath)            | 2          | **2/2 closed at PR #1979 (this wave — terminal; sibling of PR #1866 path slot)**          |
+| EOCD ZIP64-override mismatch                         | 6          | 5/6; gated on PR #1909 in repair queue (carried over from prior wave, merge-conflict status)|
+
+With the PAX value-side family's closure, all three named per-slot
+Tar interior-NUL families flagged by PR #1971's wave-block
+remaining-work list are terminally closed; the only remaining
+in-flight per-slot family at wave close is the EOCD ZIP64-override
+mismatch (5/6, gated on PR #1909's `numberOfThisDisk` slot, still
+in the repair queue with merge-conflict status as it has been
+since the prior wave).
+
+*Paired-review (1).* PR #1986 reviews #1979 (PAX `linkpath` slot —
+terminal closure of the 2-slot PAX value-side override family,
+in-wave at 35 min) — the **third terminal-closure paired-review**
+in the post-#1928 wave arc, completing the paired-review trio
+(#1962 / #1963 / #1986 for #1953 / #1957 / #1979 respectively).
+At wave close the `review` queue is empty.
+
+*Recent-wins bullet add (1).* PR #1978 — adds a
+`SECURITY_INVENTORY.md` Recent-wins bullet under Tar
+Parser/Extractor for the GNU long-name / long-link interior-NUL
+family closure (PRs #1865 + #1953); the **second terminal-closure
+bullet** of the post-#1928 wave after the existing UStar bullet.
+Also tightens the UStar bullet's sibling-of paragraph to credit the
+per-slot long-link slot (PR #1953). The third terminal-closure
+bullet (post-#1979 PAX value-side) remains queued under issue
+#1983 at wave close and is deferred to the next wave per the
+post-issue-creation tail deferral pattern (and explicitly is **not
+yet landed** at the moment of issue #1989's creation at 10:23Z).
+
+*Inventory row tightenings (3).*
+
+- **#1985 — `gnu-longname-nul-in-name.tar` row tightening** at
+  `SECURITY_INVENTORY.md:1300`: credit PR #1953 long-link slot
+  fixture (retire stale "covered by symmetric code review rather
+  than a dedicated fixture" clause), retire stale "PAX
+  path/linkpath NUL-byte coverage is the sibling issue #1855"
+  clause (#1855 was closed by PR #1866 for the `path` arm; the
+  `linkpath` arm is separately tracked), re-anchor stale
+  `Zip/Tar.lean:588` line citation to current master `:672`.
+- **#1987 — placeholder-PR substitution sweep** (one-row): row
+  1341 (`pax-linkpath-nul-in-value.tar`) `#N` → `#1979`. Closes
+  the post-merge inventory-sweep deferral flagged in
+  [`progress/20260425T093345Z_78e1378b-feature-1976.md`](progress/20260425T093345Z_78e1378b-feature-1976.md).
+  Sibling shape of post-#1928 placeholder-sweep precedents PR
+  #1958 / PR #1968 / PR #1949.
+- **#1988 — `pax-path-nul-in-value.tar` row tightening** at
+  `SECURITY_INVENTORY.md:1343`: per-slot family-closure annotation
+  crediting the 2-slot PAX value-side override family closure 2/2
+  (PR #1866 path slot + PR #1979 linkpath slot); tightens the
+  trailing 'trio' sibling-of paragraph from three families to four
+  (ZIP CD name + GNU 2/2 + UStar 5/5 + PAX 2/2 — now including
+  the PAX value-side family).
+
+*Skill updates (2).*
+
+- **#1973 — `malformed-fixture-builder` per-slot printable-prefix
+  discipline section.** Encodes slot-identity in the smuggled
+  value's printable ASCII prefix (post-#1928 wave examples:
+  `evil.txt` / `evil.lnk` / `badpfx` / `trusted` / `safe.lnk` —
+  including the `.lnk` extension as a novel slot-identity marker
+  for link-typed slots from PR #1953); documents the trailing-NUL
+  invariant for interior-NUL fixtures (last byte must be non-NUL or
+  `stripTrailingNuls` would erase the interior NUL the test
+  intends); documents the writer-side override-hook pattern
+  (`pathOverride`-style for transformed slots like `prefix`'s
+  `splitPath`, no override needed for verbatim-written slots like
+  `linkname` / `uname` / `gname`).
+- **#1975 — `inventory-reconciliation` terminal-closure tightening
+  cadence + per-slot fixture-naming asymmetry.** Codifies the
+  post-#1928 wave's 5-step #1880 → #1934 → #1937 → #1944 → #1957
+  precedent (terminal closure → paired-review → inventory row
+  tightening → Recent-wins bullet → placeholder sweep). Independent
+  of in-flight #1966 `malformed-fixture-builder` skill update —
+  different skill file, different cadence layer.
+
+*Post-#1928 wave audit-trail callout.* The post-#1928 Tar
+interior-NUL closure arc is structurally complete: all three named
+per-slot Tar interior-NUL families flagged by the post-#1931 wave
+block are now terminally closed *and* paired-reviewed (PR #1986
+completes the paired-review trio for the third closure). The
+post-closure cadence (paired-review + inventory row tightening +
+Recent-wins bullet + skill updates) continues into the next wave
+only for the queued PAX Recent-wins bullet (issue #1983) and the
+post-issue-creation tail deferral skill (issue #1984).
+
+*Post-issue-creation tail (out of wave scope).* No PRs for issue
+#1983 (PAX Recent-wins bullet — third terminal-closure bullet of
+the post-#1928 wave; sibling shape of PR #1978) or issue #1984
+(skill: codify the post-issue-creation tail deferral pattern in a
+tracked `.claude/skills/` file) had landed at the moment of issue
+#1989's creation (2026-04-25T10:23Z); both were in the unclaimed
+`feature` queue. Per the post-issue-creation tail deferral pattern,
+any PRs that land between this issue's creation and the wave PR's
+submission will be deferred to the next wave block; this wave's
+scope is frozen at the 11 PRs enumerated above per the
+issue-body-as-source-of-truth invariant.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/` and
+`Zip/*.lean` (unchanged). Fixtures in `testdata/zip/malformed/`
+unchanged at 47 (no ZIP fixtures landed this wave); fixtures in
+`testdata/tar/malformed/` grew from 23 to 24 (+1:
+`pax-linkpath-nul-in-value.tar` from PR #1979). Type mix across
+the 11 PRs: feature 1 (#1979) / paired-review 1 (#1986) /
+inventory 4 (#1968 + #1985 + #1987 + #1988) / Recent-wins bullet 1
+(#1978) / skill 3 (#1969 + #1973 + #1975) / test cleanup 1
+(#1967). The character is **wave-cleanup** rather than
+wave-headline: the wave carries one terminal closure plus the
+post-closure follow-on cadence (inventory tightening, paired-review,
+skill refinements), in contrast to PR #1971's wave which carried
+two terminal closures + one defense-in-depth-extension first. At
+wave close: repair queue at 14 PRs (unchanged from prior wave —
+no new entrants, no salvages); `feature` queue at 2 (issue #1983
+PAX Recent-wins bullet, issue #1984 skill); `review` queue empty
+(PR #1986 drained the post-#1979 paired-review entry within 35 min
+of merge). `lake build` clean (191 jobs); `lake exe test` all
+green; `bash scripts/check-inventory-links.sh` exits 0 with 104
+warnings (pre-existing line-anchor drift, unchanged from prior
+wave). Toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
