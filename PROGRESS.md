@@ -37,7 +37,7 @@ Per-session details are in `progress/`.
   [`SECURITY_INVENTORY.md`](SECURITY_INVENTORY.md)
 - **Track E *Recommended policy* block**: fully Executed (items 1–6, post-#1710 on 2026-04-22); *Missing work* reads "Residual gaps: none currently open at this layer"
 - **Checksum characterizing-property ladders**: Adler-32 closed end-to-end (last rung `_combine` in #1698); CRC32 closed at the concrete-shape terminus `_pair` (#1701); `_replicate*` / `_combine` for CRC32 require GF(2)[x] algebra (out of scope)
-- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1868): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining, in-flight PR #1725); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); CD-parse filename-validation trio completed in the post-#1843 wave (`cd-nul-in-name` #1831, `cd-path-unsafe` #1840, `cd-empty-name` #1848); CD-parse mathematical-invariant family second column closed (`uncompSize == 0 → crc == 0` #1857, sibling of stored-method size invariant #1773); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826) and companion `versionNeededToExtract ≤ 63` upper bound closed (#1852), together with the earlier `versionNeededToExtract ≥ 45` lower bound (issue #1758 / in-flight PR #1764) closing the EOCD64 version-field two-sided-bound dimensions (per-entry CD `versionMadeBy > 63` remains in-flight PR #1820); ZIP64-trailer archive-layout invariants trio closed (per-entry `localOffset + 30 ≤ cdOffset` #1813, ZIP64 record `eocd64Offset + 56 ≤ locatorPos` #1856, archive `cdOffset + cdSize ≤ eocdPos` in-flight PR #1809); cross-format NUL-byte closure in Tar (GNU long-name / long-link #1865 + PAX record key/value #1866) plus ZIP CD-layer (#1831) spans all three code-guarded user-supplied string-field layers (ustar base `name` / `linkname` is structurally NUL-safe by construction); 39 fixtures in `testdata/zip/malformed/` (was 34 at #1843, 28 at #1803, 22 at #1770, 12 at #1721); 16 fixtures in `testdata/tar/malformed/` (was 14 at #1843)
+- **Track E CD/EOCD + CD/LH boundary-check coverage** (post-#1868): 6 / 9 archive-level EOCD consistency dimensions closed (`totalEntries`, disk-number, `numEntriesThisDisk`, ZIP64/standard-EOCD override sentinel, per-entry CD `diskNumberStart`, ZIP64 EOCD64 record-size); 7 / 8 per-entry CD/LH consistency dimensions closed (method, flags, version, compressedSize, uncompressedSize, crc32, lastModTime/Date — name-bytes remaining, in-flight PR #1725); ZIP64 extra-field layout-smuggling class closed at the CD/LH boundary (inner-0x0001 `dataSize` exactness #1785 + outer sub-field structural walk #1788 + duplicate-block rejection #1793); intra-CD stored-method (`method=0`) size-invariant closed (#1773); CD-parse per-entry field validations closed in the post-#1803 wave (`versionNeededToExtract > 45` upper bound #1807, `localOffset + 30 ≤ cdOffset` archive-layout micro-invariant #1813, `internalFileAttributes` reserved bits #1819, GPF bit-5 patched-data #1824, name NUL-byte #1831); CD-parse filename-validation trio completed in the post-#1843 wave (`cd-nul-in-name` #1831, `cd-path-unsafe` #1840, `cd-empty-name` #1848); CD-parse mathematical-invariant family second column closed (`uncompSize == 0 → crc == 0` #1857, sibling of stored-method size invariant #1773) and third column closed (`compSize == 0 → uncompSize == 0` #1886, method-agnostic — closes the method=8 gap relative to #1773 / #1857); archive-level EOCD64 `versionMadeBy` spec-version upper bound closed (#1826) and companion `versionNeededToExtract ≤ 63` upper bound closed (#1852), together with the earlier `versionNeededToExtract ≥ 45` lower bound (issue #1758 / in-flight PR #1764) closing the EOCD64 version-field two-sided-bound dimensions (per-entry CD `versionMadeBy > 63` remains in-flight PR #1820); ZIP64-trailer archive-layout invariants trio closed (per-entry `localOffset + 30 ≤ cdOffset` #1813, ZIP64 record `eocd64Offset + 56 ≤ locatorPos` #1856, archive `cdOffset + cdSize ≤ eocdPos` in-flight PR #1809); cross-format NUL-byte closure in Tar (UStar base `name` / `linkname` / `prefix` #1880 + GNU long-name / long-link #1865 + PAX record key/value #1866) plus ZIP CD-layer (#1831) spans all four user-supplied string-field layers, every one now carrying an explicit code guard (UStar layer was previously structurally NUL-safe by construction; #1880 added an explicit code guard so the closure is uniform); 41 fixtures in `testdata/zip/malformed/` (was 39 at #1869, 34 at #1843, 28 at #1803, 22 at #1770, 12 at #1721); 17 fixtures in `testdata/tar/malformed/` (was 16 at #1869, 14 at #1843)
 
 ## Milestones
 
@@ -2766,6 +2766,85 @@ included in this summary under the filename-validation trio framing.
 See the progress entry's *Wave scope and PR-count note* for the
 full accounting. Full progress file:
 [progress/20260424T203421Z_90d1e22c-summarize-post-1843.md](progress/20260424T203421Z_90d1e22c-summarize-post-1843.md).
+
+**10-PR batch (Apr 24): Track E CD-parse math-invariant family column 3 + ZIP64 EOCD64 v2-record explicit-shape fixture + Tar UStar header NUL closure (summarize #1894):**
+
+Ten PRs merged in the ~2-hour 43-min window between summarize
+#1869 (merge commit `233fe98`, 20:40:48Z 2026-04-24) and PR #1893
+(merge commit `9200042`, 23:23:56Z 2026-04-24). The wave's
+organising theme is the simultaneous closure of three Track E
+sub-stories that the post-#1843 summarize had flagged as in-flight
+or follow-up gaps: the CD-parse mathematical-invariant family
+second column extends to method=8 with an explicit `compSize == 0
+→ uncompSize == 0` invariant (closing the deflate gap in the
+#1773 / #1857 family), the ZIP64 EOCD64 v2-record sentinel gets
+explicit fixture coverage against APPNOTE §4.3.14.2 strong-encryption
+extensions, and the cross-format NUL-byte closure extends to
+UStar's last user-supplied string-field layer — converting `name`
+/ `linkname` / `prefix` from *structurally NUL-safe by construction*
+to *explicitly code-guarded*. No spec file touched;
+`grep -rc sorry Zip/` stayed at 0 throughout.
+
+*Track E feature PRs (3).*
+
+- **#1886 — CD-parse `compSize == 0 ∧ uncompSize > 0` rejection.**
+  Method-agnostic mathematical invariant at `parseCentralDir`,
+  rejecting CD entries that promise non-empty uncompressed output
+  from empty compressed input. Closes the method=8 gap in the
+  CD-parse mathematical-invariant family — siblings #1773 (stored-
+  method `compSize == uncompSize`) and #1857 (`uncompSize == 0 →
+  crc == 0`) covered the prior two columns. Fixture:
+  `cd-deflate-zero-compsize.zip`.
+- **#1880 — Tar UStar header NUL-byte rejection.** Adds explicit
+  `0x00`-byte rejection on `name` / `linkname` / `prefix` of the
+  plain ustar 100-byte fields, converting the layer from
+  structurally-NUL-safe-by-construction to explicitly code-guarded.
+  Together with #1865 (Tar GNU long-name / long-link), #1866 (Tar
+  PAX record key/value), and #1831 (ZIP CD entry name) this completes
+  *all four* user-supplied string-field layers carrying explicit
+  NUL-byte code guards across both the ZIP and Tar parsers. Fixture:
+  `ustar-name-nul-in-name.tar`.
+- **#1889 — explicit v2-shape ZIP64 EOCD64 record fixture.** Adds
+  `zip64-eocd64-v2-record.zip` as regression coverage for the
+  existing PR #1761 record-size guard (`size of record == 44`) against
+  APPNOTE §4.3.14.2 strong-encryption v2 EOCD64 extensions. Closes
+  the v2-record-coverage gap flagged in the post-#1843 progress
+  entry's *Follow-up planning hooks* — the guard already exists in
+  code but had no positive-rejection fixture pinning it.
+
+*Paired-review PRs (6).* #1874 reviews #1856 (EOCD64 archive-layout
+invariant, prior-wave carryover at 1 h 54 min), #1875 reviews
+#1857 (empty-entry CRC, prior-wave carryover at 1 h 50 min), #1882
+reviews #1866 (Tar PAX NUL, prior-wave carryover at 1 h 46 min),
+#1884 reviews #1880 (Tar UStar NUL, in-wave at 29 min), #1890
+reviews #1886 (CD-parse column 3, in-wave at 23 min), #1893
+reviews #1889 (EOCD64 v2 fixture, in-wave at 23 min). The three
+in-wave pairs all landed inside 30 min — the tightest cluster in
+the Track E wave series so far — while the three carryover pairs
+drained the post-#1843 paired-review backlog at ~1 h 50 min each.
+Every in-wave feature PR has a matching review entry; the
+prior-wave #1865 paired-review remains in flight as PR #1876 (CI
+failed, in the repair queue at wave close), but #1856 / #1857 /
+#1866 — three of the four prior-wave unpaired features the
+post-#1843 progress entry's *What remains* section flagged — are
+all paired by the end of this wave.
+
+*Inventory bookkeeping (1).* #1881 substitutes three `#N`
+placeholder-PR rows in `SECURITY_INVENTORY.md` (`:641 → #1848`,
+`:683 → #1857`, `:1106 → #1866`) — the one-shot follow-up the
+post-#1843 progress entry's *What remains* section anticipated,
+closing the three drifts the post-#1843 #1868 detector flagged
+that #1867's sweep could not substitute (because their feature PRs
+hadn't yet merged at #1867's drafting time).
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/` and
+`Zip/*.lean` (unchanged). Fixtures in `testdata/zip/malformed/`
+grew from 39 to 41 (+2: `cd-deflate-zero-compsize.zip`,
+`zip64-eocd64-v2-record.zip`); fixtures in `testdata/tar/malformed/`
+grew from 16 to 17 (+1: `ustar-name-nul-in-name.tar`). Type mix
+across the 10 PRs: feature 3 / paired-review 6 / inventory 1.
+Toolchain `v4.29.1`.
 
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
