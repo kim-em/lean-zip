@@ -140,6 +140,68 @@ Sources of nondeterminism to avoid:
 - Random UUIDs or PIDs: never embed runtime values.
 - `IO.currTime` / `IO.FS.metadata`: never read filesystem state.
 
+## Per-slot printable-prefix discipline (interior-NUL fixtures)
+
+Per-slot fixtures that smuggle an interior NUL into a fixed-width
+header field should use a **slot-distinct printable ASCII prefix**.
+That prefix is what a parser-differential caller would see if
+`Binary.fromLatin1` (or its reader equivalent) truncated at the
+NUL — making it slot-distinct encodes slot-identity for human
+readers of `xxd` diffs.
+
+Accumulated post-#1928 wave examples (sources:
+`scripts/build-ustar-malformed-fixtures.lean` and
+`scripts/build-gnu-long-malformed-fixtures.lean`):
+
+| Family | Slot | Fixture | Smuggled value | Prefix | PR |
+|--------|------|---------|----------------|--------|----|
+| UStar interior-NUL | name      | `ustar-name-nul-in-name.tar`     | `"evil.txt\x00.tar"`      | `evil.txt` | #1880 |
+| UStar interior-NUL | linkname  | `ustar-linkname-nul-in-name.tar` | `"evil.lnk\x00.tar"`      | `evil.lnk` | #1934 |
+| UStar interior-NUL | prefix    | `ustar-prefix-nul-in-name.tar`   | `"badpfx\x00bad"`         | `badpfx`   | #1937 |
+| UStar interior-NUL | uname     | `ustar-uname-nul-in-uname.tar`   | `"trusted\x00rogue"`      | `trusted`  | #1944 |
+| UStar interior-NUL | gname     | `ustar-gname-nul-in-gname.tar`   | `"trusted\x00rogue"`      | `trusted`  | #1957 |
+| GNU long-name      | long-name | `gnu-longname-nul-in-name.tar`   | `"evil.txt\x00.tar"`      | `evil.txt` | #1865 |
+| GNU long-name      | long-link | `gnu-longlink-nul-in-link.tar`   | `"safe.lnk\x00rogue.tar"` | `safe.lnk` | #1953 |
+
+Cross-cutting rules:
+
+1. **`.lnk` filename-extension marks link-typed slots** (PR #1953).
+   Both link-typed fixtures — UStar `linkname` (`evil.lnk\x00.tar`)
+   and GNU `long-link` (`safe.lnk\x00rogue.tar`) — use `.lnk` to
+   encode "this fixture probes a link-typed slot". Prose /
+   trust-rhetoric prefixes (`trusted`, `safe`, `badpfx`) cover the
+   non-link slots; `.txt` covers regular-file `name`.
+2. **trailing-NUL invariant.** The smuggled value's last byte must
+   be **non-NUL** — otherwise `stripTrailingNuls` (GNU long-name
+   path) or the `findIdx? (· == 0)` interior-NUL guard's input
+   invariant (UStar path) would erase the interior NUL the test
+   intends. Observed in PR #1953's `"safe.lnk\x00rogue.tar"` (last
+   byte `r`).
+
+### Writer-side override hooks
+
+The builder needs an injection path only for header fields whose
+value is **transformed** by the writer:
+
+- **Transformed slot → `Option`-typed override.** The UStar
+  `prefix` slot is auto-derived from `entry.path` via `splitPath`
+  inside `Tar.buildHeader`; the builder threads a
+  `pathOverride : Option (String × String)` and bypasses
+  `splitPath` when `some`. This is the **only** override hook in
+  `Tar.buildHeader` today — see
+  `scripts/build-ustar-malformed-fixtures.lean`'s
+  `buildUstarPrefixNulInName` for the canonical use.
+- **Verbatim-written slot → use the first-class entry field.**
+  `linkname`, `uname`, `gname` are copied byte-for-byte by
+  `Binary.writeString`, which accepts arbitrary bytes including
+  interior NULs. Set `entry.linkname` / `entry.uname` /
+  `entry.gname` directly — no override needed. PRs #1934 / #1944 /
+  #1957 followed this pattern despite early planning notes
+  proposing parallel `linknameOverride` / `unameOverride` /
+  `gnameOverride` hooks; see the post-#1944 paired-review §E.7.g
+  and post-#1957 feature-progress *Patterns / decisions* for the
+  rationale.
+
 ## Assertion-writing pattern
 
 The test in `ZipTest/*Fixtures.lean` is the other half of the fixture.
