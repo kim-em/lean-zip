@@ -134,14 +134,19 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   -- Each fixture pairs a malformed PAX extended header with a regular
   -- "hello.txt" entry. Existing guards in `parsePaxRecords` silently
   -- skip the PAX block; listing should return just the regular entry.
-  -- `pax-path-nul-in-value.tar` specifically exercises the NUL-byte
-  -- guard — the smuggled `path=a\x00b/c` override must NOT reach
-  -- `applyPaxOverrides`, so `entry.path` stays as the regular header's
-  -- declared `"hello.txt"` rather than the NUL-truncation target `"a"`.
+  -- `pax-path-nul-in-value.tar` (PR #1866, `path` slot) and
+  -- `pax-linkpath-nul-in-value.tar` (this PR, `linkpath` slot) together
+  -- close the 2-slot PAX value-side override family at 2/2 — both
+  -- exercise the NUL-byte guard on `valueBytes` so neither smuggled
+  -- override reaches `applyPaxOverrides`. The `path` arm is verified
+  -- by the loop's `entries[0]!.path == "hello.txt"` assertion; the
+  -- `linkpath` arm requires an additional per-slot check on
+  -- `entries[0]!.linkname` (added immediately after the loop).
   for fixture in #["pax-oversized-length.tar", "pax-truncated-record.tar",
                     "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
                     "pax-inconsistent-length.tar",
-                    "pax-path-nul-in-value.tar"] do
+                    "pax-path-nul-in-value.tar",
+                    "pax-linkpath-nul-in-value.tar"] do
     let paxData ← readFixture s!"tar/malformed/{fixture}"
     let paxPath ← writeFixtureTmp fixture paxData
     let entries ← IO.FS.withFile paxPath .read fun h =>
@@ -150,6 +155,21 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       throw (IO.userError s!"TAR malformed ({fixture}): expected 1 entry, got {entries.size}")
     unless entries[0]!.path == "hello.txt" do
       throw (IO.userError s!"TAR malformed ({fixture}): expected regular entry 'hello.txt', got '{entries[0]!.path}'")
+
+  -- Per-slot assertion for pax-linkpath-nul-in-value.tar:
+  -- the linkpath= override must have been dropped, so the trailing
+  -- regular-file entry's linkname stays at "" (its declared default
+  -- for typeRegular). Without the guard, entry.linkname would be
+  -- "a\x00b/c" — a symlink(2) truncation smuggle vector. The loop's
+  -- `path == "hello.txt"` check alone does not prove that the
+  -- `linkpath` override was dropped, since `path` would also be
+  -- unaffected by an unrelated `linkpath` override.
+  let linkpathData ← readFixture "tar/malformed/pax-linkpath-nul-in-value.tar"
+  let linkpathPath ← writeFixtureTmp "pax-linkpath-nul-in-value.tar" linkpathData
+  let linkpathEntries ← IO.FS.withFile linkpathPath .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless linkpathEntries[0]!.linkname == "" do
+    throw (IO.userError s!"pax-linkpath-nul-in-value.tar: expected linkname='', got {linkpathEntries[0]!.linkname.quote}")
 
   -- Duplicate-key smuggle in PAX extended header: two `path=` records
   -- (`safe.txt` then `../etc/passwd`) must be rejected by the new
@@ -426,7 +446,9 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
              "pax-oversized-length.tar", "pax-truncated-record.tar",
              "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
-             "pax-inconsistent-length.tar", "pax-path-nul-in-value.tar",
+             "pax-inconsistent-length.tar",
+             "pax-linkpath-nul-in-value.tar",
+             "pax-path-nul-in-value.tar",
              "pax-duplicate-path.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
