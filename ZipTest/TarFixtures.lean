@@ -199,6 +199,19 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       pure ())
     "GNU long-name contains NUL byte"
 
+  -- NUL-byte smuggle in GNU long-link payload: per-slot sibling of
+  -- the long-name fixture above, covering the long-link arm of the
+  -- 2-slot forEntries interior-NUL guard. Substring includes
+  -- `"long-link"` to keep per-slot distinction — the bare
+  -- `"GNU long-"` prefix would also match the long-name arm.
+  let gnuLkNulData ← readFixture "tar/malformed/gnu-longlink-nul-in-link.tar"
+  let gnuLkNulPath ← writeFixtureTmp "gnu-longlink-nul-in-link.tar" gnuLkNulData
+  assertThrows "TAR malformed (gnu-longlink-nul-in-link.tar)"
+    (IO.FS.withFile gnuLkNulPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "GNU long-link contains NUL byte"
+
   -- NUL-byte smuggle in UStar `name` field: must be rejected by the
   -- `hasInteriorNul` guard in `parseHeader` before
   -- `Binary.readString` truncates the payload at the embedded NUL.
@@ -394,6 +407,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-duplicate-path.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",
+             "gnu-longlink-nul-in-link.tar",
              "ustar-name-nul-in-name.tar",
              "ustar-linkname-nul-in-name.tar",
              "ustar-prefix-nul-in-name.tar",
