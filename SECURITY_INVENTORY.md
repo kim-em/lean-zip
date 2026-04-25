@@ -850,7 +850,7 @@ Summary — what this pattern catches and what it does not:
     impossible regardless of method — a universal mathematical
     invariant every correct writer (Info-ZIP, Go `archive/zip`, CPython
     `zipfile`, 7-Zip, lean-zip's own `create` at
-    [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195))
+    [Zip/Archive.lean:189](/home/kim/lean-zip/Zip/Archive.lean:189))
     obeys. Pre-PR, the sibling stored-method guard (PR #1773) caught
     this shape only when `method == 0` (via the `compSize == uncompSize`
     equality mismatch), leaving `method == 8` entries with this shape
