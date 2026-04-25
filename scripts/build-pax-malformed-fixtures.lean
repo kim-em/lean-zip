@@ -19,6 +19,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/pax-invalid-utf8-value.tar
 - testdata/tar/malformed/pax-inconsistent-length.tar
 - testdata/tar/malformed/pax-path-nul-in-value.tar
+- testdata/tar/malformed/pax-linkpath-nul-in-value.tar
 - testdata/tar/malformed/pax-duplicate-path.tar
 -/
 
@@ -94,6 +95,21 @@ def fixtureInconsistentLength : ByteArray :=
 def fixturePathNulInValue : ByteArray :=
   "14 path=a".toUTF8 ++ ByteArray.mk #[0x00] ++ "b/c\n".toUTF8
 
+/-- PAX record `"18 linkpath=a\x00b/c\n"` — a `linkpath` override whose
+    value carries an embedded NUL byte. Without the NUL guard on
+    `valueBytes` at [Zip/Tar.lean:146] the override would reach
+    `applyPaxOverrides` and set `entry.linkname := "a\x00b/c"` — a
+    `symlink(2)` truncation smuggle that POSIX `symlink` reduces to
+    `"a"` while `Tar.list` callers see the full embedded string.
+    Per-slot sibling of `fixturePathNulInValue` covering the `linkpath`
+    slot of the 2-slot value-side override family at
+    [Zip/Tar.lean:161-162]. With the guard, the record is silently
+    dropped and the follow-on regular-file entry's `linkname` stays at
+    its default `""`. Record size 18 = 2 digit-prefix + 1 space
+    + 8 `"linkpath"` + 1 `"="` + 5 `"a\x00b/c"` + 1 newline. -/
+def fixtureLinkpathNulInValue : ByteArray :=
+  "18 linkpath=a".toUTF8 ++ ByteArray.mk #[0x00] ++ "b/c\n".toUTF8
+
 /-- PAX data with two well-formed `path=` records — a parser-differential
     smuggling vector where a lenient (first-wins) reader takes
     `"safe.txt"` while a strict (last-wins, APPNOTE-silent on order)
@@ -117,5 +133,6 @@ def main : IO Unit := do
   buildPaxMalformedFixture fixtureInvalidUtf8Value (outDir / "pax-invalid-utf8-value.tar")
   buildPaxMalformedFixture fixtureInconsistentLength (outDir / "pax-inconsistent-length.tar")
   buildPaxMalformedFixture fixturePathNulInValue (outDir / "pax-path-nul-in-value.tar")
+  buildPaxMalformedFixture fixtureLinkpathNulInValue (outDir / "pax-linkpath-nul-in-value.tar")
   buildPaxMalformedFixture fixtureDuplicatePath (outDir / "pax-duplicate-path.tar")
-  IO.println "Built 7 malformed PAX fixtures under testdata/tar/malformed/."
+  IO.println "Built 8 malformed PAX fixtures under testdata/tar/malformed/."
