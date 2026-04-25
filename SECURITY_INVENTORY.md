@@ -483,7 +483,7 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/cd-bad-method-early.zip`) rejects CD
     entries whose `method` field is outside lean-zip's `{0, 8}`
     allowlist (`0` = stored, `8` = deflate) at `parseCentralDir` time
-    ([Zip/Archive.lean:668](/home/kim/lean-zip/Zip/Archive.lean:668)),
+    ([Zip/Archive.lean:713](/home/kim/lean-zip/Zip/Archive.lean:713)),
     before the ZIP64 extra resolution. The check is safe to run
     pre-ZIP64-resolution because `method` is a plain `UInt16` field
     with no sentinel-gating (APPNOTE §4.4.5). Pre-PR, only
