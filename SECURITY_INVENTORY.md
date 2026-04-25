@@ -627,7 +627,7 @@ Summary — what this pattern catches and what it does not:
     as `0x0001`; `go-zip64.zip`, `latin1-name.zip`, `utf8-flag.zip`
     use `0x0000`; no interop fixture sets any reserved bit).
     `parseCentralDir` fires the guard at
-    [Zip/Archive.lean:567](/home/kim/lean-zip/Zip/Archive.lean:567),
+    [Zip/Archive.lean:612](/home/kim/lean-zip/Zip/Archive.lean:612),
     immediately after the `diskNumberStart` check and before the
     `entryEnd > cdEnd` span check. Writer-side at
     [Zip/Archive.lean:131](/home/kim/lean-zip/Zip/Archive.lean:131)
