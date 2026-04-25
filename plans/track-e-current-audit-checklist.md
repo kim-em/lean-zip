@@ -79,7 +79,7 @@ Targets:
 - [Zip/Basic.lean](/home/kim/lean-zip/Zip/Basic.lean:1)
 - [Zip/Gzip.lean](/home/kim/lean-zip/Zip/Gzip.lean:1)
 - [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean:1)
-- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:432)
+- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1233)
 
 - [x] Inventory every public API where `0 = no limit`.
   (See *"Decompression Limit Inventory"* in
