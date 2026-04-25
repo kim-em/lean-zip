@@ -27,6 +27,7 @@ Outputs:
 - testdata/zip/malformed/cd-nul-in-name.zip
 - testdata/zip/malformed/cd-path-unsafe.zip
 - testdata/zip/malformed/cd-deflate-zero-compsize.zip
+- testdata/zip/malformed/cd-bad-lh-signature.zip
 """
 import os, struct, zlib
 
@@ -39,7 +40,7 @@ P = len(PAYLOAD)
 
 def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
             lh_mod_time=0, lh_mod_date=0, lh_flags=0,
-            name_bytes=None):
+            name_bytes=None, lh_signature=0x04034b50):
     # PKZIP local file header (30 bytes).
     # `lh_mod_time` / `lh_mod_date` default to `0` — preserving
     # byte-identity of fixtures produced before the modtime/date
@@ -55,10 +56,15 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
     # with embedded NUL).  The derived length is written into the
     # `name length` UInt16 slot, so a caller-supplied `name_bytes` is
     # free to differ in length from `NAME`.
+    # `lh_signature` defaults to `0x04034b50` (`sigLocal` per APPNOTE
+    # §4.3.7).  The default is load-bearing for every existing fixture;
+    # only `cd-bad-lh-signature.zip` exercises the non-default branch
+    # (`0xCAFEBABE`) to trip the late LH-signature guard at
+    # Zip/Archive.lean:1081.
     nb = NAME if name_bytes is None else name_bytes
     return struct.pack(
         "<IHHHHHIIIHH",
-        0x04034b50,  # signature
+        lh_signature,  # signature
         version,     # version needed
         lh_flags,    # flags
         method,      # compression method
@@ -165,7 +171,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           lh_flags=0, cd_flags=0,
           name_bytes=None, payload=None,
           eocd_disk_start=0, eocd_num_this_disk=0,
-          eocd_entries_this_disk=None, eocd_total_entries=1):
+          eocd_entries_this_disk=None, eocd_total_entries=1,
+          lh_signature=0x04034b50):
     # `name_bytes` defaults to `None`, meaning "derive from the module
     # constant `NAME`".  The default preserves byte-identity of every
     # existing fixture (only `cd-nul-in-name.zip` exercises the non-default
@@ -185,7 +192,8 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
     pl = PAYLOAD if payload is None else payload
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
                  lh_mod_time=lh_mod_time, lh_mod_date=lh_mod_date,
-                 lh_flags=lh_flags, name_bytes=name_bytes)
+                 lh_flags=lh_flags, name_bytes=name_bytes,
+                 lh_signature=lh_signature)
     lhe = lh + nb + pl
     cd = make_cd(cd_method, cd_comp, cd_uncomp, version=cd_version,
                  disk_number_start=cd_disk_number_start,
@@ -361,6 +369,36 @@ write(
     os.path.join(OUT_DIR, "cd-entry-localoffset-past-cdstart.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_local_hdr_offset=50,
+)
+# Late LH-signature guard regression fixture: a stock single-entry stored
+# `hello.txt` archive (LH at file offset 0, CD at offset 45, EOCD at offset
+# 100; total 122 B) where the LH's first 4 bytes are overwritten with
+# `0xCAFEBABE` (LE: `BE BA FE CA`) instead of the APPNOTE §4.3.7
+# `sigLocal = 0x04034b50`.  All CD-parse guards pass (CD itself is
+# byte-identical to the stock `hello.txt` baseline; `localOffset = 0`,
+# `localOffset + 30 = 30 ≤ cdOffset = 45`, `entryEnd = 45 ≤ cdEnd = 100`,
+# method ∈ {0, 8}, `compSize == uncompSize` for stored, etc.) and
+# `assertSpanInFile` / `readBoundedSpanFromHandle` clear the LH span
+# (30 B at offset 0 ≤ fileSize 122).  The 4-byte mismatch trips the late
+# guard at Zip/Archive.lean:1081 — *"bad local header signature for {label}"*
+# — which is `Archive.extract`'s defense-in-depth catch for archives that
+# slip past every CD-parse and span guard.  `Archive.list` never reads
+# the LH and lists the fixture cleanly; only `Archive.extract` throws,
+# pinning the precedence story.  Sibling of
+# `cd-entry-localoffset-past-cdstart.zip` (PR #1813, fires the per-entry
+# `localOffset + 30 ≤ cdOffset` CD-parse guard before the LH read) and
+# `cd-entry-past-cdend.zip` (in-flight issue #1885, fires the `entryEnd > cdEnd`
+# CD-parse guard before the LH read): together the trio pins all three
+# precedence levels of the local-offset → local-header validation chain
+# at CD-parse + late-extract, ensuring future refactors of
+# `Archive.extract` cannot silently drop the late LH-signature guard.
+# The non-default `lh_signature=0xCAFEBABE` is the only deviation from
+# the baseline; choice of `0xCAFEBABE` is canonical "obviously crafted"
+# UInt32 — any 4-byte sequence ≠ `50 4b 03 04` fires the same guard.
+write(
+    os.path.join(OUT_DIR, "cd-bad-lh-signature.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    lh_signature=0xCAFEBABE,
 )
 # CD-entry `internalFileAttributes` reserved-bits anomaly (APPNOTE §4.4.10):
 # the CD entry's internal-attrs field at CD +36 (UInt16) carries `0x0080`
