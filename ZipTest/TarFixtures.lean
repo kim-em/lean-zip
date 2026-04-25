@@ -248,6 +248,28 @@ def ZipTest.TarFixtures.tests : IO Unit := do
       pure ())
     "UStar prefix contains NUL byte"
 
+  -- NUL-byte smuggle in UStar `uname` field: must be rejected by the
+  -- 4th-slot `hasInteriorNul` guard in `parseHeader`, the
+  -- defense-in-depth extension of the closed 3-slot
+  -- `name`/`linkname`/`prefix` family. The fixture's `path` is `"safe"`
+  -- (no NUL) and `linkname`/`prefix` are clean so none of the three
+  -- earlier arms can fire first — attribution pins on the `uname` arm.
+  -- Substring includes `"uname"` to keep per-slot distinction (the bare
+  -- `"UStar"` prefix would also match the `name` / `linkname` /
+  -- `prefix` arms). Unlike the 3-slot family, `uname` does not reach
+  -- the filesystem in `Tar.extract` — the guard is defense-in-depth
+  -- against a `Tar.list` caller routing on `entry.uname` for a trust
+  -- decision and seeing only the truncated prefix while peer parsers
+  -- preserve the full bytes. The `gname` slot is the final (5-slot)
+  -- sibling deferred to a follow-up planner cycle.
+  let ustarUnameNulData ← readFixture "tar/malformed/ustar-uname-nul-in-uname.tar"
+  let ustarUnameNulPath ← writeFixtureTmp "ustar-uname-nul-in-uname.tar" ustarUnameNulData
+  assertThrows "TAR malformed (ustar-uname-nul-in-uname.tar)"
+    (IO.FS.withFile ustarUnameNulPath .read fun h => do
+      let _ ← Tar.list (IO.FS.Stream.ofHandle h)
+      pure ())
+    "UStar uname contains NUL byte"
+
   -- Non-throwing variants: payloads with no trailing NUL and with
   -- invalid UTF-8 must each apply a predictable name to the next entry.
   let gnuLnNoTermData ← readFixture "tar/malformed/gnu-longname-no-terminator.tar"
@@ -375,6 +397,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "ustar-name-nul-in-name.tar",
              "ustar-linkname-nul-in-name.tar",
              "ustar-prefix-nul-in-name.tar",
+             "ustar-uname-nul-in-uname.tar",
              "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",
