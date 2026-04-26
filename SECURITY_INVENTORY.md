@@ -276,7 +276,7 @@ Summary — what this pattern catches and what it does not:
     offsets from a hard-coded 56-byte layout; a stricter parser that
     trusts the self-declared length would read past or short of that,
     yielding a parser-differential smuggling vector (writer-side at
-    [Zip/Archive.lean:142](/home/kim/lean-zip/Zip/Archive.lean:142)
+    [Zip/Archive.lean:152](/home/kim/lean-zip/Zip/Archive.lean:152)
     hard-codes `44`). Additional regression coverage from PR #1889
     (`testdata/zip/malformed/zip64-eocd64-v2-record.zip`) pins the
     rejection behaviour against the APPNOTE §4.3.14.2 v2 shape: an
