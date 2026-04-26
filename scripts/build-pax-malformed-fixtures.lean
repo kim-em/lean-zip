@@ -85,7 +85,7 @@ def fixtureInconsistentLength : ByteArray :=
 /-- PAX record `"14 path=a\x00b/c\n"` — a `path` override whose value
     carries an embedded NUL byte. `String.fromUTF8?` accepts U+0000 as
     valid UTF-8, so without the NUL guard on `keyBytes` / `valueBytes`
-    at [Zip/Tar.lean:122] the override would reach `applyPaxOverrides`
+    at [Zip/Tar.lean:145] the override would reach `applyPaxOverrides`
     and set `entry.path := "a\x00b/c"` — a filesystem-truncation smuggle
     that POSIX `open` reduces to `a`. With the guard, the record is
     silently dropped (matching the existing invalid-UTF-8 precedent)
