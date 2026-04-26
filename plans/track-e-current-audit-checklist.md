@@ -181,7 +181,7 @@ Targets:
 
 Targets:
 
-- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1024)
+- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1049)
 - [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:308)
 
 - [x] Introduce proof-friendly helper functions for bounded reads and
