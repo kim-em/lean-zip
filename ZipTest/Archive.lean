@@ -83,7 +83,7 @@ def ZipTest.Archive.tests : IO Unit := do
       throw (IO.userError s!"zip: CD size limit wrong error: {e}")
 
   -- maxEntrySize bomb regression: an uncompressedSize larger than the limit
-  -- must be rejected before any decompression happens (Zip/Archive.lean:1072-1074).
+  -- must be rejected before any decompression happens (Zip/Archive.lean:1099-1101).
   let bombSrcDir : System.FilePath := "/tmp/lean-zlib-zip-bomb-src"
   let bombZipPath : System.FilePath := "/tmp/lean-zlib-zip-bomb.zip"
   let bombExtractDir : System.FilePath := "/tmp/lean-zlib-zip-bomb-extract"
