@@ -432,9 +432,9 @@ Summary — what this pattern catches and what it does not:
     [Zip/Archive.lean:449](/home/kim/lean-zip/Zip/Archive.lean:449)
     walks the TLV structure once and is invoked by both the CD-side
     caller in `parseCentralDir`
-    ([Zip/Archive.lean:742](/home/kim/lean-zip/Zip/Archive.lean:742))
+    ([Zip/Archive.lean:767](/home/kim/lean-zip/Zip/Archive.lean:767))
     and the LH-side caller in `readEntryData`
-    ([Zip/Archive.lean:1123](/home/kim/lean-zip/Zip/Archive.lean:1123))
+    ([Zip/Archive.lean:1148](/home/kim/lean-zip/Zip/Archive.lean:1148))
     before `parseZip64Extra` is called. The two error wordings
     (`"duplicate ZIP64 extra field"` vs `"duplicate ZIP64 local extra
     field"`) keep attribution distinct between layers. Sibling of the
