@@ -792,7 +792,7 @@ private def parseCentralDir (data : ByteArray)
     -- universal mathematical invariant — every correct writer
     -- (Info-ZIP, Go `archive/zip`, CPython `zipfile`, 7-Zip,
     -- lean-zip's own `create` at
-    -- [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195)
+    -- [Zip/Archive.lean:189](/home/kim/lean-zip/Zip/Archive.lean:189)
     -- which emits `Checksum.crc32 0 fileData`) obeys it. Crafted
     -- archives carrying `uncompSize = 0` alongside any nonzero CRC
     -- are structurally malformed and a parser-differential smuggle
@@ -830,7 +830,7 @@ private def parseCentralDir (data : ByteArray)
     -- impossible for a well-formed ZIP entry regardless of method — a
     -- universal mathematical invariant every correct writer (Info-ZIP,
     -- Go `archive/zip`, CPython `zipfile`, 7-Zip, lean-zip's own
-    -- `create` at [Zip/Archive.lean:195](/home/kim/lean-zip/Zip/Archive.lean:195)
+    -- `create` at [Zip/Archive.lean:189](/home/kim/lean-zip/Zip/Archive.lean:189)
     -- which emits `Checksum.crc32` + deflate/stored payload) obeys.
     -- This is the third column of the per-entry mathematical-invariant
     -- family at CD parse: the sibling stored-method guard above catches
