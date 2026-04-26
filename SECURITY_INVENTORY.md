@@ -512,7 +512,7 @@ Summary — what this pattern catches and what it does not:
     rejects CD entries whose resolved `localOffset` plus the 30-byte
     fixed LH header (APPNOTE §4.3.7) reaches into or past the CD
     region at `parseCentralDir` time
-    ([Zip/Archive.lean:771](/home/kim/lean-zip/Zip/Archive.lean:771)).
+    ([Zip/Archive.lean:796](/home/kim/lean-zip/Zip/Archive.lean:796)).
     APPNOTE §4.3.6 pins the archive layout as `[LH+data]* [CD]
     [EOCD]`, so every entry's LH must be readable strictly before the
     CD start; writer-side at
