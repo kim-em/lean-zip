@@ -603,7 +603,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- `Entry.crc32` verbatim — callers routing on `entry.crc32` saw the
   -- smuggled value) and `Archive.extract` (pre-PR caught the mismatch
   -- only post-extraction via the `"CRC32 mismatch"` guard at
-  -- Zip/Archive.lean:1088, after any I/O work had been performed)
+  -- Zip/Archive.lean:1199, after any I/O work had been performed)
   -- dimensions simultaneously.  Sibling of PR #1773 (stored-method
   -- size invariant) at the CD-parse mathematical-invariant family:
   -- #1773 closes the `compSize == uncompSize` column; this fixture
@@ -669,7 +669,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- with the unsafe `path = "../evil.txt"` verbatim (exposing the
   -- full smuggled form to callers that route on `entry.path` before
   -- any filesystem I/O).  The extract-time `Binary.isPathSafe` calls
-  -- at Zip/Archive.lean:1070 / :1074 remain in place as defense-in-
+  -- at Zip/Archive.lean:1244 / :1248 remain in place as defense-in-
   -- depth but are now unreachable for CD-parseable archives via the
   -- public API.  LH and CD name bytes match byte-for-byte, keeping
   -- the CD/LH name-bytes consistency invariant (issue #1722) intact.
