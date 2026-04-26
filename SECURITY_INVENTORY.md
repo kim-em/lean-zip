@@ -1164,7 +1164,7 @@ Regression fixtures live under `testdata/tar/security/`:
 
 ### 1. ZIP metadata to `Handle.read`
 
-- File: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:980)
+- File: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1005)
 - Concern:
   - `readExact` itself guards `Nat -> USize`, but callers still need proof
     or validation that attacker-controlled sizes are file-bounded before reading
