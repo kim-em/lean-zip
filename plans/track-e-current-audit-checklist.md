@@ -83,11 +83,11 @@ Targets:
 
 - [x] Inventory every public API where `0 = no limit`.
   (See *"Decompression Limit Inventory"* in
-  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:151).)
+  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:1162).)
 - [x] Decide which APIs should keep that behavior and which should expose
   safer extraction defaults.
   (Proposed direction in the *"Recommended policy"* subsection of
-  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:151);
+  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:1205);
   final numbers and signature changes are deferred to follow-up issues
   so this inventory stays doc-only.)
 - [x] Add decompression-bomb tests for:
