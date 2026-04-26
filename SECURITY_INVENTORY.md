@@ -526,7 +526,7 @@ Summary — what this pattern catches and what it does not:
     successfully and `Entry`-routing callers treated the metadata as
     trustworthy; only the extract path's late LH-signature check
     (`"bad local header signature"` at
-    [Zip/Archive.lean:1081](/home/kim/lean-zip/Zip/Archive.lean:1081))
+    [Zip/Archive.lean:1106](/home/kim/lean-zip/Zip/Archive.lean:1106))
     caught a subset of the construction (and could be defeated by a
     carefully chosen overlap where the CD bytes happened to match
     `sigLocal`). Uses the asymmetric `SpanInFile`-shaped subtraction
@@ -538,7 +538,7 @@ Summary — what this pattern catches and what it does not:
   - Late LH-signature guard regression coverage — PR #1903
     (`testdata/zip/malformed/cd-bad-lh-signature.zip`) pins the
     `Archive.extract` defense-in-depth catch at
-    [Zip/Archive.lean:1081](/home/kim/lean-zip/Zip/Archive.lean:1081)
+    [Zip/Archive.lean:1106](/home/kim/lean-zip/Zip/Archive.lean:1106)
     — *"bad local header signature for {label}"* — for archives whose
     CD parses cleanly but whose LH magic at `entry.localOffset` is not
     `0x04034b50` (`sigLocal`, APPNOTE §4.3.7). 122-byte single-entry
