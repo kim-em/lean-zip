@@ -398,8 +398,8 @@ Summary — what this pattern catches and what it does not:
     extra-data smuggling class (siblings of the inner-0x0001
     `zip64-extra-oversized-datasize.zip` `dataSize` exactness check).
     Writer side is well-formed by construction at
-    [Zip/Archive.lean:66-71](/home/kim/lean-zip/Zip/Archive.lean:66)
-    (LH) and :74-80 (CD): both paths emit either a single well-formed
+    [Zip/Archive.lean:66](/home/kim/lean-zip/Zip/Archive.lean:66)
+    (LH) and :74 (CD): both paths emit either a single well-formed
     0x0001 block or zero extra-data
   - ZIP64 per-entry extra-field `dataSize` exactness check — PR #1785
     (`testdata/zip/malformed/zip64-extra-oversized-datasize.zip`)
@@ -414,8 +414,8 @@ Summary — what this pattern catches and what it does not:
     conditional reads ([Zip/Archive.lean:495](/home/kim/lean-zip/Zip/Archive.lean:495)). Sibling of the outer
     `zip64-eocd64-bad-recsize.zip` record-size check (same
     parser-differential attack class, different layer); writer-side at
-    [Zip/Archive.lean:73-80](/home/kim/lean-zip/Zip/Archive.lean:73)
-    (CD) and :65-71 (LH) both emit exactly `N * 8` bytes of data
+    [Zip/Archive.lean:74](/home/kim/lean-zip/Zip/Archive.lean:74)
+    (CD) and :66 (LH) both emit exactly `N * 8` bytes of data
   - duplicate ZIP64 (`headerId 0x0001`) extra-block rejection — PR #1793
     (`testdata/zip/malformed/cd-zip64-extra-duplicate.zip` and
     `testdata/zip/malformed/lh-zip64-extra-duplicate.zip`) rejects CD
@@ -441,8 +441,8 @@ Summary — what this pattern catches and what it does not:
     sub-field `dataSize` exactness check (PR #1785) — together they
     close the ZIP64 extra-field layout-smuggling attack class at the
     CD/LH boundary; writer-side `writeZip64ExtraCentral`
-    ([Zip/Archive.lean:73-80](/home/kim/lean-zip/Zip/Archive.lean:73))
-    and `writeZip64ExtraLocal` (:66-71) emit at most one 0x0001 block
+    ([Zip/Archive.lean:74](/home/kim/lean-zip/Zip/Archive.lean:74))
+    and `writeZip64ExtraLocal` (:66) emit at most one 0x0001 block
     per entry, so the new guard never fires on legitimate archives
   - CD-vs-LH `versionNeededToExtract` downgrade check — PR #1736
     (`testdata/zip/malformed/cd-lh-version-mismatch.zip`) rejects LH
