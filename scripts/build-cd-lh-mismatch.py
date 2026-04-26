@@ -62,7 +62,7 @@ def make_lh(method, comp_size, uncomp_size, crc=CRC, version=20,
     # §4.3.7).  The default is load-bearing for every existing fixture;
     # only `cd-bad-lh-signature.zip` exercises the non-default branch
     # (`0xCAFEBABE`) to trip the late LH-signature guard at
-    # Zip/Archive.lean:1081.
+    # Zip/Archive.lean:1106.
     nb = NAME if name_bytes is None else name_bytes
     return struct.pack(
         "<IHHHHHIIIHH",
@@ -298,7 +298,7 @@ write(
 )
 # EOCD entry-count anomaly: `numEntriesThisDisk=2` while `totalEntries=1`.
 # Single-disk archives must have both fields equal (writer-side at
-# Zip/Archive.lean:146-147, :160-161).  The CD itself contains one
+# Zip/Archive.lean:170-171).  The CD itself contains one
 # entry, so the `totalEntries` check would pass (1 == 1); only the
 # `numEntriesThisDisk` sibling disagrees.  Companion to
 # `eocd-numentries-mismatch.zip` (which fires the `totalEntries` check).
@@ -411,7 +411,7 @@ write(
 # method ∈ {0, 8}, `compSize == uncompSize` for stored, etc.) and
 # `assertSpanInFile` / `readBoundedSpanFromHandle` clear the LH span
 # (30 B at offset 0 ≤ fileSize 122).  The 4-byte mismatch trips the late
-# guard at Zip/Archive.lean:1081 — *"bad local header signature for {label}"*
+# guard at Zip/Archive.lean:1106 — *"bad local header signature for {label}"*
 # — which is `Archive.extract`'s defense-in-depth catch for archives that
 # slip past every CD-parse and span guard.  `Archive.list` never reads
 # the LH and lists the fixture cleanly; only `Archive.extract` throws,
@@ -507,7 +507,7 @@ write(
 # (the decoded `String` preserves the component structure), exposing the
 # full smuggled form to callers who routed on `entry.path` before any
 # filesystem I/O — the extract-time `Binary.isPathSafe` calls in
-# `Archive.extract` at Zip/Archive.lean:1070 / :1074 caught only the
+# `Archive.extract` at Zip/Archive.lean:1269 / :1273 caught only the
 # extract path.  `parseCentralDir` now rejects at CD parse time with
 # `"CD entry has unsafe path"`, closing both `Archive.list` and
 # `Archive.extract` dimensions simultaneously.  The 11-byte name is 2
@@ -583,7 +583,7 @@ write(
 # CRC into `Entry.crc32` verbatim (callers routing on `entry.crc32`
 # saw the smuggled value) and `Archive.extract` caught the mismatch
 # only post-extraction via the `"CRC32 mismatch"` guard at
-# Zip/Archive.lean:1088 — after any I/O work had been performed.
+# Zip/Archive.lean:1224 — after any I/O work had been performed.
 write(
     os.path.join(OUT_DIR, "cd-empty-entry-crc-nonzero.zip"),
     lh_method=0, cd_method=0,
@@ -691,7 +691,7 @@ write(
 # fixture maximally close to a legitimate archive in every other
 # respect.  Both LH and CD flag words match (`flag_bits_override =
 # 0x0880` sets both sides) so the CD-vs-LH bit-3-masked flags
-# consistency check (PR #1715, Zip/Archive.lean:1147) does not fire
+# consistency check (PR #1715, Zip/Archive.lean:1172) does not fire
 # first; matching is load-bearing.  `parseCentralDir` rejects at CD
 # parse time pre-ZIP64-resolution with
 # `"flags reserved bits set"`, immediately after the method allowlist
