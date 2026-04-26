@@ -135,7 +135,7 @@ def ZipTest.Tar.tests : IO Unit := do
   unless nestedGz == "Nested file content here." do throw (IO.userError s!"tar.gz extract nested: {nestedGz}")
 
   -- maxEntrySize bomb regression: a tar entry whose declared size exceeds
-  -- the limit must be rejected before any payload is read (Zip/Tar.lean:565-566).
+  -- the limit must be rejected before any payload is read (Zip/Tar.lean:758-759).
   let bombSrcDir : System.FilePath := "/tmp/lean-zip-tar-bomb-src"
   let bombTarPath : System.FilePath := "/tmp/lean-zip-tar-bomb.tar"
   let bombExtractDir : System.FilePath := "/tmp/lean-zip-tar-bomb-extract"
