@@ -649,7 +649,7 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/cd-patched-data-flag.zip`) rejects CD
     entries whose flag-word has APPNOTE §4.4.4 bit 5 set at
     `parseCentralDir` time
-    ([Zip/Archive.lean:725](/home/kim/lean-zip/Zip/Archive.lean:725)),
+    ([Zip/Archive.lean:748](/home/kim/lean-zip/Zip/Archive.lean:748)),
     pre-ZIP64-resolution. lean-zip implements neither creation nor
     extraction of PKWARE's proprietary compressed-patched-data
     format (§4.6); the writer emits `flags = 0x0800` (bit 11 UTF-8
