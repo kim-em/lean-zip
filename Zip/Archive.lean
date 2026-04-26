@@ -652,11 +652,11 @@ private def parseCentralDir (data : ByteArray)
     -- the unsafe `path` verbatim — exposing the full smuggled form
     -- to callers who route on `entry.path` before any filesystem
     -- I/O. The extract-time `Binary.isPathSafe` calls in
-    -- `Archive.extract` (around Zip/Archive.lean:1070 and :1074)
+    -- `Archive.extract` (around Zip/Archive.lean:1244 and :1248)
     -- remain in place as defense-in-depth — unreachable for
     -- CD-parseable archives via the public API, but kept for the
     -- precedence-shift story. Mirror the trailing-slash carve-out
-    -- at Zip/Archive.lean:1068: directory entries end with `"/"`
+    -- at Zip/Archive.lean:1242: directory entries end with `"/"`
     -- and `isPathSafe` is checked on the slash-stripped form, so
     -- legitimate directory entries (including the empty-component
     -- case produced by stripping `"/"`) are not tripped. Run on the
@@ -802,7 +802,7 @@ private def parseCentralDir (data : ByteArray)
     -- parsers or CRC-cross-checking callers reject. Pre-PR,
     -- `Archive.extract` caught the mismatch only post-extraction
     -- via the `"CRC32 mismatch"` guard at
-    -- [Zip/Archive.lean:1088](/home/kim/lean-zip/Zip/Archive.lean:1088),
+    -- [Zip/Archive.lean:1199](/home/kim/lean-zip/Zip/Archive.lean:1199),
     -- after any I/O work had been performed; `Archive.list` had no
     -- gate at all. Placed after the stored-method size invariant
     -- so `uncompSize : UInt64` is the resolved value (post-ZIP64)
