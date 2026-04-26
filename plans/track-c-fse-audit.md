@@ -1,5 +1,17 @@
 # Track C1: Fuel-Dependent Bounds Audit
 
+**Status:** MOVED — All Zstd code moved to
+https://github.com/kim-em/lean-zstd on 2026-03-27 (#1487; see
+`PROGRESS.md:28`). The files this audit references
+(`Zip/Native/Fse.lean`, `Zip/Spec/Fse.lean`) no longer exist in
+lean-zip. This document is preserved as a historical record of
+the pre-split FSE fuel-conversion-order audit; the cited line
+anchors (`Native/Fse.lean:58-69`, `:98-122`, `:389-434`,
+`Spec/Fse.lean:112`) refer to the pre-split lean-zip layout and
+have not been refreshed because the Zstd subsystem now lives in
+a separate repository with its own conversion plans. Continued
+FSE / Zstd work happens in lean-zstd, not here.
+
 ## Summary
 
 Only **one file** in the entire Zstd codebase uses fuel: `Zip/Native/Fse.lean`.
