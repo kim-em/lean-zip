@@ -335,7 +335,7 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             -- equal `SizeOfFixedFields + SizeOfVariableData - 12`, i.e.
             -- `44` (56 fixed bytes minus the 12 bytes of signature +
             -- size field).  Writer-side confirmation:
-            -- `Zip/Archive.lean:142` hard-codes `44`.  A non-44 value is
+            -- `Zip/Archive.lean:152` hard-codes `44`.  A non-44 value is
             -- a parser-differential smuggling vector: lean-zip uses the
             -- fixed 56-byte layout, while a stricter parser trusts the
             -- self-declared length and reads past or short of that.
@@ -368,7 +368,7 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             -- beyond the defined spec — either attacker-smuggled
             -- beyond-spec metadata or a parser-differential smuggling
             -- vector against strict readers.  Writer-side at
-            -- `Zip/Archive.lean:150` hard-codes `45` (EOCD64 requires
+            -- `Zip/Archive.lean:154` hard-codes `45` (EOCD64 requires
             -- ZIP64 support, §4.4.3.2), so `45 ≤ 63` holds trivially.
             -- Upper-bound sibling of the lower-bound `≥ 45` check
             -- (issue #1758); the two bounds close the EOCD64
@@ -514,7 +514,7 @@ private def parseCentralDir (data : ByteArray)
   -- EOCD disk-number sanity: lean-zip supports single-disk archives only.
   -- Writer-side confirmation: both fields are hard-coded to 0 (see the
   -- "disk number" comments at the ZIP64 and standard EOCD write sites
-  -- around Zip/Archive.lean:145 and :158). The reader rejects nonzero
+  -- around Zip/Archive.lean:155 and :168). The reader rejects nonzero
   -- values here — post-ZIP64-override — to close the cross-disk
   -- smuggling vector. The two fields are checked together and both
   -- values are reported to make attribution deterministic.
@@ -524,8 +524,8 @@ private def parseCentralDir (data : ByteArray)
   -- EOCD entry-count sanity: `numEntriesThisDisk` and `totalEntries` must
   -- agree on single-disk archives (the only shape lean-zip supports).
   -- Writer-side confirmation: both fields receive the same `numEntries`
-  -- at the EOCD/ZIP64 write sites (see Zip/Archive.lean:146-147 and
-  -- :160-161). Treat `declaredEntries` (post-ZIP64-override `totalEntries`)
+  -- at the EOCD/ZIP64 write sites (see Zip/Archive.lean:156-157 and
+  -- :170-171). Treat `declaredEntries` (post-ZIP64-override `totalEntries`)
   -- as authoritative and report `entriesThisDisk` as the disagreement,
   -- matching the direction of the sibling `totalEntries` check below.
   unless entriesThisDisk == declaredEntries do
@@ -583,7 +583,7 @@ private def parseCentralDir (data : ByteArray)
     -- `0`. Writer-side confirmation: the 46-byte CD header is
     -- `Binary.zeros`-initialised and `pos + 34` is never overwritten (see
     -- the "disk number start (34)" comment at the writer site around
-    -- Zip/Archive.lean:121). Reject early — this is a metadata-only
+    -- Zip/Archive.lean:131). Reject early — this is a metadata-only
     -- dimension and a parser-differential smuggling vector. Mirrors the
     -- archive-level EOCD disk-number check above.
     let diskNumberStart := Binary.readUInt16LE data (pos + 34)
