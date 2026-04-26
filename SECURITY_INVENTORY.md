@@ -354,7 +354,7 @@ Summary — what this pattern catches and what it does not:
     tail of the EOCD64 record — classic parser-differential /
     layout-smuggling vector where a strict peer reader rejects and
     lean-zip accepts. Writer-side at
-    [Zip/Archive.lean:148-164](/home/kim/lean-zip/Zip/Archive.lean:148)
+    [Zip/Archive.lean:148-176](/home/kim/lean-zip/Zip/Archive.lean:148)
     emits the three records contiguously in APPNOTE order, so the
     invariant holds trivially for every lean-zip-produced archive.
     Buffer-relative form `bufPos + 56 ≤ pos - 20` matches the
