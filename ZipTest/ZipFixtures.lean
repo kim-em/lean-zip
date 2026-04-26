@@ -635,7 +635,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- `Entry.crc32` verbatim — callers routing on `entry.crc32` saw the
   -- smuggled value) and `Archive.extract` (pre-PR caught the mismatch
   -- only post-extraction via the `"CRC32 mismatch"` guard at
-  -- Zip/Archive.lean:1199, after any I/O work had been performed)
+  -- Zip/Archive.lean:1224, after any I/O work had been performed)
   -- dimensions simultaneously.  Sibling of PR #1773 (stored-method
   -- size invariant) at the CD-parse mathematical-invariant family:
   -- #1773 closes the `compSize == uncompSize` column; this fixture
