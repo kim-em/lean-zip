@@ -711,6 +711,31 @@ private def parseCentralDir (data : ByteArray)
     unless method == 0 ∨ method == 8 do
       throw (IO.userError
         s!"zip: unsupported compression method {method} for {name} (lean-zip supports method 0 (stored) and method 8 (deflate))")
+    -- APPNOTE §4.4.4 reserved/unused general-purpose flag bits: bits
+    -- 7, 8, 9, 10 are documented as "Currently unused"; bit 12 is
+    -- "Reserved by PKWARE for enhanced compression"; bits 14, 15 are
+    -- "Reserved by PKWARE". Together these seven bits form the mask
+    -- `0xD780` (`0b1101_0111_1000_0000`). lean-zip's writer emits the
+    -- flag word literally as `0x0800` at
+    -- [Zip/Archive.lean:91](/home/kim/lean-zip/Zip/Archive.lean:91)
+    -- (LH) and :118 (CD), so the invariant `flags &&& 0xD780 == 0`
+    -- holds for every lean-zip-produced archive independent of method,
+    -- size, or ZIP64. A crafted archive with any of these bits set is
+    -- either smuggling metadata a lenient parser silently trusts, or a
+    -- parser-differential vector where a strict peer reader disagrees.
+    -- Bits 1 and 2 are *compression-option* bits per APPNOTE §4.4.4
+    -- (normal/maximum/fast/superfast for method 8; EOS marker for
+    -- method 14; etc.) — real-world producers (Info-ZIP, 7-Zip)
+    -- legitimately set these on `method == 8` payloads, so they are
+    -- explicitly out of scope here; this mask is disjoint from the
+    -- unsupported-feature mask `0x2071` (bits 0/4/5/6/13) covered by
+    -- the per-bit guards below and by the in-flight feature-bit
+    -- series. Placed immediately after the method allowlist and before
+    -- the per-feature-bit checks (bit 5 patched-data, etc.) so error-
+    -- message precedence is method → reserved-mask → per-feature-bit.
+    unless flags &&& 0xD780 == 0 do
+      throw (IO.userError
+        s!"zip: CD entry flags reserved bits set (flags={flags}) for {name} at CD offset {pos}; APPNOTE §4.4.4 bits 7,8,9,10,12,14,15 are reserved/unused and lean-zip rejects archives that set any of them")
     -- APPNOTE §4.4.4 bit 5: compressed patched data. lean-zip has zero
     -- support for PKWARE's proprietary binary-delta format (§4.6);
     -- the writer never sets this bit (`writeCentralHeader` emits `0x0800`
