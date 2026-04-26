@@ -831,7 +831,7 @@ Summary — what this pattern catches and what it does not:
     (`testdata/zip/malformed/cd-empty-entry-crc-nonzero.zip`) rejects
     CD entries whose `uncompressedSize == 0` with any nonzero `crc32`
     at `parseCentralDir` time
-    ([Zip/Archive.lean:820](/home/kim/lean-zip/Zip/Archive.lean:820)),
+    ([Zip/Archive.lean:845](/home/kim/lean-zip/Zip/Archive.lean:845)),
     post-ZIP64-resolution, after the stored-method size invariant.
     APPNOTE §4.4.7 defines the CRC32 field as the ANSI-CRC-32 of the
     uncompressed payload; the empty byte string has CRC32 `0x00000000`
