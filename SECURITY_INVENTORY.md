@@ -456,8 +456,8 @@ Summary — what this pattern catches and what it does not:
     the timestamp fields are not legitimately zeroed by the
     data-descriptor bit. Closes the last CD/LH header-metadata
     smuggling dimension; writer-side at
-    [Zip/Archive.lean:93-94](/home/kim/lean-zip/Zip/Archive.lean:93)
-    (LH) and :120-121 (CD) both emit `defaultDosTime` /
+    [Zip/Archive.lean:83](/home/kim/lean-zip/Zip/Archive.lean:83)
+    (LH) and :109 (CD) both emit `defaultDosTime` /
     `defaultDosDate` via the shared constants at
     [Zip/Archive.lean:62-63](/home/kim/lean-zip/Zip/Archive.lean:62).
     Net-new dimension observed during the CD/LH header-metadata
