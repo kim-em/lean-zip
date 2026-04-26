@@ -800,7 +800,7 @@ def ZipTest.ZipFixtures.tests : IO Unit := do
   -- `compSize == uncompSize`, etc.) and `assertSpanInFile` /
   -- `readBoundedSpanFromHandle` clear the LH span (30 B at offset 0 ≤
   -- fileSize 122).  The 4-byte mismatch trips the late LH-signature
-  -- guard at [Zip/Archive.lean:1081](/home/kim/lean-zip/Zip/Archive.lean:1081)
+  -- guard at [Zip/Archive.lean:1106](/home/kim/lean-zip/Zip/Archive.lean:1106)
   -- — *"bad local header signature for {label}"* — which is
   -- `Archive.extract`'s defense-in-depth catch for archives that slip
   -- past every CD-parse and span guard.  `Archive.list` never reads the
