@@ -319,7 +319,7 @@ private def findEndOfCentralDir (data : ByteArray) (baseOffset : Nat := 0)
             -- at line 304 only bounds the record against `data.size`
             -- and therefore remains in place as defense-in-depth but is
             -- strictly weaker than this layout invariant.  Writer-side
-            -- at `Zip/Archive.lean:141-164` emits the three records
+            -- at `Zip/Archive.lean:141-177` emits the three records
             -- contiguously in APPNOTE order, so the invariant holds
             -- trivially for every lean-zip-produced archive.
             -- Archive-level macro sibling: `cdOffset + cdSize ≤ eocdPos`
