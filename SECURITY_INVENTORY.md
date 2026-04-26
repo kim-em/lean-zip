@@ -516,7 +516,7 @@ Summary — what this pattern catches and what it does not:
     APPNOTE §4.3.6 pins the archive layout as `[LH+data]* [CD]
     [EOCD]`, so every entry's LH must be readable strictly before the
     CD start; writer-side at
-    [Zip/Archive.lean:192](/home/kim/lean-zip/Zip/Archive.lean:192)
+    [Zip/Archive.lean:204](/home/kim/lean-zip/Zip/Archive.lean:204)
     emits all LH bytes before the CD block, so the invariant is
     universal for legitimate archives. Per-entry micro-shape sibling
     of the archive-level macro-shape `cdOffset + cdSize ≤ eocdPos`
