@@ -56,9 +56,9 @@ def buildUstarNameNulInName : IO ByteArray := do
     terminator). `Tar.buildHeader` routes through `Binary.writeString`,
     which copies each UTF-8 byte verbatim — including U+0000 — and
     pads the remaining 87 bytes with NUL. The `Tar.parseHeader` guard
-    at line 517 rejects on the raw block before `Binary.readString`
+    at line 533 rejects on the raw block before `Binary.readString`
     would otherwise truncate the linkname to `"evil.lnk"`. The `path`
-    is `"safe"` so the `name`-arm guard at line 515 cannot fire first
+    is `"safe"` so the `name`-arm guard at line 531 cannot fire first
     — attribution pins on the `linkname` arm specifically. Two
     trailing zero blocks (1024 B) form a well-formed end-of-archive
     matching the `name`-slot sibling fixture. -/
@@ -82,13 +82,13 @@ def buildUstarLinknameNulInName : IO ByteArray := do
     [Zip/Tar.lean:389], bypassing the auto-`splitPath` logic.
     `Binary.writeString` copies UTF-8 bytes verbatim — including
     U+0000 — and pads the remaining 145 bytes with NUL. The
-    `Tar.parseHeader` guard at line 519 rejects on the raw block
+    `Tar.parseHeader` guard at line 535 rejects on the raw block
     before `Binary.readString` would otherwise truncate the prefix
     to `"badpfx"`, after which `pfx ++ "/" ++ name` at
-    [Zip/Tar.lean:522] would yield `"badpfx/name.txt"` (parser
+    [Zip/Tar.lean:542] would yield `"badpfx/name.txt"` (parser
     sees short form) while POSIX `open(2)` truncates at the same
     NUL on `Tar.extract`. The `name` slot carries the clean
-    `"name.txt"` so the `name`-arm guard at line 515 cannot fire
+    `"name.txt"` so the `name`-arm guard at line 531 cannot fire
     first — attribution pins on the `prefix` arm specifically.
     Two trailing zero blocks (1024 B) match the sibling fixtures'
     well-formed end-of-archive. -/
