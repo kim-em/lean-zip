@@ -670,6 +670,46 @@ Summary — what this pattern catches and what it does not:
     carry `flag_bits ∈ {0x0000, 0x0800}` (no bit 5). Net-new
     dimension observed during the CD-parse flag-field coverage
     sweep
+  - CD-entry general-purpose flag reserved/unused-bits rejection —
+    PR #2237
+    (`testdata/zip/malformed/cd-flags-reserved-bits.zip`) rejects CD
+    entries whose flag-word has any APPNOTE §4.4.4 reserved-or-unused
+    bit set: bits 7, 8, 9, 10 ("Currently unused"), bit 12 ("Reserved
+    by PKWARE for enhanced compression"), and bits 14, 15 ("Reserved
+    by PKWARE"). Together these seven bits form the mask `0xD780`
+    (`0b1101_0111_1000_0000`). `parseCentralDir` fires the guard at
+    [Zip/Archive.lean:738](/home/kim/lean-zip/Zip/Archive.lean:738),
+    immediately after the method allowlist (PR #1801) and before the
+    per-feature-bit checks (bit 5 patched-data at
+    [Zip/Archive.lean:750](/home/kim/lean-zip/Zip/Archive.lean:750);
+    other bits via the in-flight per-bit series). Writer-side at
+    [Zip/Archive.lean:91](/home/kim/lean-zip/Zip/Archive.lean:91)
+    (LH) and :118 (CD) emits the flag word literally as `0x0800` (bit
+    11 UTF-8 names) only, so the invariant `flags &&& 0xD780 == 0`
+    holds for every lean-zip-produced archive independent of method,
+    size, or ZIP64. Pre-PR, `Archive.list` and `Archive.extract` both
+    silently accepted any reserved-bit value — a caller routing on
+    `Entry` metadata would treat the smuggled bits as trustworthy,
+    and a strict peer reader would disagree on parse success.
+    Mask-equality form (`flags &&& 0xD780 == 0`) matches the existing
+    `0xFFF7` bit-3-masking and `0x0020` bit-5 conventions already in
+    place. Bits 1 and 2 (compression-option per APPNOTE §4.4.4 —
+    Info-ZIP / 7-Zip legitimately set them on `method == 8` payloads)
+    are explicitly out of scope; the mask `0xD780` is disjoint from
+    the unsupported-feature mask `0x2071` (bits 0/4/5/6/13) covered
+    by PR #1824 (bit 5, already landed) and the in-flight per-bit
+    feature series (issues #1762, #1817, #1818). With PR #1819's
+    `0xFFFE` `internalAttrs` mask, PR #2237's `0xD780` `flags`
+    reserved-mask and the bit-5 `0x0020` flags-mask, the writer-zero
+    single-`UInt16` column and the reserved/unsupported flag-bits
+    columns sit as a contiguous CD-parse early-reject block. Sibling
+    of PR #1824 (bit 5 patched-data, single-bit) at the same CD+8
+    `flags` field — distinct mask, distinct error substring
+    (`"flags reserved bits set"` vs.
+    `"patched-data flag bit 5 set"`). Interop pre-flight over
+    `testdata/zip/{interop,malformed}/*.zip` returned zero hits for
+    `flags & 0xD780 != 0` before landing — no legitimate archive in
+    the corpus sets any of the seven reserved/unused bits
   - CD-entry name NUL-byte rejection — PR #1831
     (`testdata/zip/malformed/cd-nul-in-name.zip`) rejects CD entries
     whose raw name bytes contain a NUL (`0x00`) byte at
@@ -1430,6 +1470,7 @@ to be silently skipped.
 | [testdata/zip/malformed/cd-entry-localoffset-past-cdstart.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-localoffset-past-cdstart.zip) | 122 B | CD-entry `localOffset + 30 ≤ cdOffset` archive-layout invariant check at [Zip/Archive.lean:771](/home/kim/lean-zip/Zip/Archive.lean:771) — *"entry local offset overlaps central directory"* (LH+data at file offset 0 length 45, CD starts at offset 45, and the CD entry's `localOffset` field at CD +42 claims `50` — past `cdOffset - 30 = 15`, so the 30-byte fixed LH header cannot be read strictly before the CD region as APPNOTE §4.3.6 requires. Per-entry micro-shape sibling of the archive-level `cdOffset + cdSize ≤ eocdPos` macro-shape guard; pre-PR `Archive.list` had no gate at all, and only the extract path's late LH-signature check caught a subset of the construction) | #1813 | other (archive-layout invariant) |
 | [testdata/zip/malformed/cd-entry-past-cdend.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-entry-past-cdend.zip) | 122 B | Per-entry `entryEnd > cdEnd` footprint guard regression coverage at [Zip/Archive.lean:615](/home/kim/lean-zip/Zip/Archive.lean:615) — *"central directory entry extends past end of central directory"* (122-byte single-entry stored `hello.txt` archive — LH at file offset 0, CD at offset 45, EOCD at offset 100 — where the sole CD entry's `commentLen` field at CD +32 (UInt16) is `16` while no comment payload is physically present, so `cdSize = 55` (header + name only). At parse time `entryEnd = 45 + 46 + 9 + 0 + 16 = 116 > cdEnd = 100`, firing the per-entry footprint guard before any name decode. All earlier CD-parse guards pass (loop entry `pos + 46 ≤ cdEnd` (91 ≤ 100), CD signature match, `nameLen = 9 > 0`, `diskNumberStart = 0`, `internalAttrs = 0`) so attribution pins to the footprint guard rather than a sibling early-reject. Fixture-only regression coverage (no new guard code, no new error wording, no caller / signature change) — pattern matches PRs #1761 / #1889 (`zip64-eocd64-bad-recsize.zip` / `zip64-eocd64-v2-record.zip`) and #1903 (`cd-bad-lh-signature.zip`). Companion to in-flight `cd-trailing-garbage.zip` (issue #1775, trailing bytes inside `[lastEntryEnd, cdEnd)`) and `cd-extends-past-eocd.zip` (issue #1799, archive-level `cdOffset + cdSize ≤ eocdPos`) — together the trio closes the three CD-region overrun shapes. Pins the paired-review precedence chain alongside `cd-entry-localoffset-past-cdstart.zip` (PR #1813) and `cd-bad-lh-signature.zip` (PR #1903) so future refactors of `parseCentralDir` cannot silently regress the per-entry footprint fence. Sentinel `commentLen = 16` is canonical "obviously crafted" overrun — any positive value satisfying `46 + nameLen + extraLen + commentLen > cdSize` fires the same guard) | #1921 | other (CD-region overrun regression) |
 | [testdata/zip/malformed/cd-extra-overrun-datasize.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-extra-overrun-datasize.zip) | 138 B | CD/LH extra-data sub-field structural check at [Zip/Archive.lean:739](/home/kim/lean-zip/Zip/Archive.lean:739) — *"malformed extra field"* (CD/LH extra-data carries a single sub-field with `headerId=0x5455` extended-timestamp but declared `dataSize=0xFF` while only 4 payload bytes remain; no ZIP64 sentinel is set so pre-PR `parseCentralDir` skipped `parseZip64Extra` entirely and the anomaly was entirely invisible. `validateExtraFieldStructure` runs unconditionally on the extra-data blob before the sentinel guard at both the CD and LH sites (mirror assertion at [Zip/Archive.lean:1117](/home/kim/lean-zip/Zip/Archive.lean:1117) — *"malformed local extra field"*). Outer-sub-field sibling of `zip64-extra-oversized-datasize.zip` at the inner-0x0001 layer of the same APPNOTE §4.5 extra-data smuggling class) | #1788 | other (ZIP64 consistency) |
+| [testdata/zip/malformed/cd-flags-reserved-bits.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-flags-reserved-bits.zip) | 122 B | CD-entry general-purpose flag reserved/unused-bits rejection at [Zip/Archive.lean:738](/home/kim/lean-zip/Zip/Archive.lean:738) — *"flags reserved bits set"* (CD and LH both advertise `flags = 0x0880` — bit 11 UTF-8 names plus bit 7 reserved-bit smuggle. APPNOTE §4.4.4 documents bits 7, 8, 9, 10 as "Currently unused", bit 12 as "Reserved by PKWARE for enhanced compression", and bits 14, 15 as "Reserved by PKWARE"; together these seven bits form the mask `0xD780` (`0b1101_0111_1000_0000`). lean-zip's writer emits the flag word literally as `0x0800` at [Zip/Archive.lean:91](/home/kim/lean-zip/Zip/Archive.lean:91) (LH) and :118 (CD) so `flags &&& 0xD780 == 0` holds for every lean-zip-produced archive independent of method, size, or ZIP64. `parseCentralDir` rejects at CD parse time pre-ZIP64-resolution, immediately after the method allowlist (PR #1801) and before the per-feature-bit checks (bit 5 patched-data at [Zip/Archive.lean:750](/home/kim/lean-zip/Zip/Archive.lean:750)). Bit 7 (`0x0080`) is the smallest reserved-bit smuggle; pairing it with bit 11 keeps the UTF-8-name guard happy so the new reserved-bits guard is unambiguously the one that fires. Both LH and CD flag words match (`flag_bits_override = 0x0880` sets both sides) so the CD-vs-LH bit-3-masked flags check (PR #1715, [Zip/Archive.lean:1147](/home/kim/lean-zip/Zip/Archive.lean:1147)) does not fire first. Sibling of `cd-patched-data-flag.zip` (PR #1824, bit 5, single-bit `flags = 0x0020`) at the same CD+8 `flags` field — distinct mask, distinct error substring (`"flags reserved bits set"` vs. `"patched-data flag bit 5 set"`). Bits 1 and 2 (compression-option per APPNOTE §4.4.4 — Info-ZIP / 7-Zip legitimately set them on `method == 8` payloads) are explicitly out of scope; the mask `0xD780` is disjoint from the unsupported-feature mask `0x2071` (bits 0/4/5/6/13). Interop pre-flight over `testdata/zip/{interop,malformed}/*.zip` returned zero hits for `flags & 0xD780 != 0` before landing) | #2237 | other (flag-bit validation) |
 | [testdata/zip/malformed/cd-lh-crc-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-crc-mismatch.zip) | 122 B | CD/LH `crc32` consistency check at [Zip/Archive.lean:1178](/home/kim/lean-zip/Zip/Archive.lean:1178) — *"crc32 mismatch between CD and local header"* (LH crc differs from CD; both stored, sizes match so earlier guards do not fire first) | #1728 | other (CD/LH consistency) |
 | [testdata/zip/malformed/cd-lh-flags-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-flags-mismatch.zip) | 122 B | CD/LH flags-consistency check (bit-3-masked) at [Zip/Archive.lean:1147](/home/kim/lean-zip/Zip/Archive.lean:1147) — *"flags mismatch between CD and local header"* (CD sets bit 11 UTF-8-name, LH clears it — a known ZIP-smuggling vector) | #1715 | other (CD/LH consistency) |
 | [testdata/zip/malformed/cd-lh-method-mismatch.zip](/home/kim/lean-zip/testdata/zip/malformed/cd-lh-method-mismatch.zip) | 122 B | CD/LH method-consistency check at [Zip/Archive.lean:1138](/home/kim/lean-zip/Zip/Archive.lean:1138) — *"method mismatch between CD and local header"* | #1554 | other (CD/LH consistency) |

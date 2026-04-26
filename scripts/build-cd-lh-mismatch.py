@@ -29,6 +29,7 @@ Outputs:
 - testdata/zip/malformed/cd-deflate-zero-compsize.zip
 - testdata/zip/malformed/cd-bad-lh-signature.zip
 - testdata/zip/malformed/cd-entry-past-cdend.zip
+- testdata/zip/malformed/cd-flags-reserved-bits.zip
 """
 import os, struct, zlib
 
@@ -178,7 +179,7 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
           cd_disk_number_start=0,
           cd_local_hdr_offset=0,
           cd_internal_attrs=0,
-          lh_flags=0, cd_flags=0,
+          lh_flags=0, cd_flags=0, flag_bits_override=None,
           name_bytes=None, payload=None,
           eocd_disk_start=0, eocd_num_this_disk=0,
           eocd_entries_this_disk=None, eocd_total_entries=1,
@@ -199,6 +200,24 @@ def write(path, *, lh_method, cd_method, lh_comp, cd_comp,
     # `cd_crc` defaults to `None` (→ module-level `CRC`).  Plumbed to
     # `make_cd` for the empty-entry CRC invariant; see the `make_cd`
     # docstring.
+    # `flag_bits_override` defaults to `None`, meaning "use the
+    # per-side `lh_flags` / `cd_flags` kwargs verbatim".  When a
+    # non-`None` value is supplied it overrides both sides to the same
+    # value — convenience for fixtures whose attack surface requires
+    # the LH and CD flag words to agree byte-for-byte (so the CD/LH
+    # bit-3-masked flags-consistency check, PR #1715, does not fire
+    # first).  Only `cd-flags-reserved-bits.zip` exercises the
+    # non-default branch (`flag_bits_override=0x0880` — bit 11 UTF-8
+    # plus bit 7 reserved-bit smuggle).  Sibling of `cd_flags=0x0020,
+    # lh_flags=0x0020` on `cd-patched-data-flag.zip`, which uses the
+    # per-side kwargs directly; both forms produce identical bytes
+    # given matching values.  Default `None` preserves byte-identity
+    # of every existing `cd-*.zip` / `lh-*.zip` fixture (verified via
+    # `sha256sum` compare pre-/post-change in the landing PR's
+    # progress entry).
+    if flag_bits_override is not None:
+        lh_flags = flag_bits_override
+        cd_flags = flag_bits_override
     nb = NAME if name_bytes is None else name_bytes
     pl = PAYLOAD if payload is None else payload
     lh = make_lh(lh_method, lh_comp, lh_uncomp, crc=lh_crc, version=lh_version,
@@ -650,4 +669,46 @@ write(
     os.path.join(OUT_DIR, "cd-entry-past-cdend.zip"),
     lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
     cd_comment_length=16,
+)
+# CD-parse general-purpose flag reserved/unused bits anomaly: both CD
+# and LH advertise `flags = 0x0880` — bit 11 (UTF-8 names) plus bit 7
+# (APPNOTE §4.4.4 "Currently unused").  APPNOTE §4.4.4 documents bits
+# 7, 8, 9, 10 as "Currently unused", bit 12 as "Reserved by PKWARE for
+# enhanced compression", and bits 14, 15 as "Reserved by PKWARE";
+# together these seven bits form the mask `0xD780`
+# (`0b1101_0111_1000_0000`).  lean-zip's writer emits the flag word
+# literally as `0x0800` at Zip/Archive.lean:91 (LH) and :118 (CD), so
+# the invariant `flags & 0xD780 == 0` holds for every lean-zip-produced
+# archive independent of method, size, or ZIP64.  A crafted archive
+# with any of these bits set is either smuggling metadata a lenient
+# parser silently trusts, or a parser-differential vector where a
+# strict peer reader disagrees.  Bit 7 is the smallest reserved-bit
+# smuggle (`0x0080`), and pairing it with bit 11 (`0x0800` UTF-8
+# names) keeps the UTF-8-name guard at Zip/Archive.lean:634 happy so
+# the new reserved-bits guard is unambiguously the one that fires —
+# without bit 11, the encoded name would still pass (the fixture name
+# is ASCII), but matching the writer-side bit-11 emission keeps the
+# fixture maximally close to a legitimate archive in every other
+# respect.  Both LH and CD flag words match (`flag_bits_override =
+# 0x0880` sets both sides) so the CD-vs-LH bit-3-masked flags
+# consistency check (PR #1715, Zip/Archive.lean:1147) does not fire
+# first; matching is load-bearing.  `parseCentralDir` rejects at CD
+# parse time pre-ZIP64-resolution with
+# `"flags reserved bits set"`, immediately after the method allowlist
+# and before the per-feature-bit checks (bit 5 patched-data, etc.).
+# Sibling of `cd-patched-data-flag.zip` (PR #1824, bit 5) and of the
+# in-flight per-bit feature series (issue #1762 bits 0/6/13, issue
+# #1817 bit 5 already-landed, issue #1818 bit 4): together with this
+# fixture the seven-bit reserved-mask `0xD780` and the per-bit
+# unsupported-feature mask `0x2071` cover 12 of the 16 flag bits, with
+# bit 3 (data descriptor, inspected) and bit 11 (UTF-8, inspected)
+# accepted and bits 1-2 (compression option) explicitly out of scope
+# per APPNOTE §4.4.4 (Info-ZIP / 7-Zip legitimately set them on
+# `method == 8` payloads).  Interop pre-flight over
+# `testdata/zip/{interop,malformed}/*.zip` returned zero hits for
+# `flags & 0xD780 != 0` before landing.
+write(
+    os.path.join(OUT_DIR, "cd-flags-reserved-bits.zip"),
+    lh_method=0, cd_method=0, lh_comp=P, cd_comp=P,
+    flag_bits_override=0x0880,
 )
