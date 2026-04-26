@@ -1191,7 +1191,7 @@ Regression fixtures live under `testdata/tar/security/`:
 
 - Files:
   - [Zip/Basic.lean](/home/kim/lean-zip/Zip/Basic.lean:9)
-  - [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1233)
+  - [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1258)
 - Concern:
   - `0 = no limit` is convenient but weak as a default for hostile inputs
 - Needed:
