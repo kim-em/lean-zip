@@ -1328,9 +1328,9 @@ not untrusted archive bytes, so it falls outside this inventory's
 scope.
 
 Trust-boundary callers reach the actual `.read` primitive via
-`readExact` ([Zip/Archive.lean:980](/home/kim/lean-zip/Zip/Archive.lean:980),
+`readExact` ([Zip/Archive.lean:1005](/home/kim/lean-zip/Zip/Archive.lean:1005),
 [Zip/Tar.lean:218](/home/kim/lean-zip/Zip/Tar.lean:218)),
-`readExactStream` ([Zip/Archive.lean:994](/home/kim/lean-zip/Zip/Archive.lean:994)),
+`readExactStream` ([Zip/Archive.lean:1019](/home/kim/lean-zip/Zip/Archive.lean:1019)),
 `readEntryData` ([Zip/Tar.lean:249](/home/kim/lean-zip/Zip/Tar.lean:249)),
 `skipEntryData` ([Zip/Tar.lean:630](/home/kim/lean-zip/Zip/Tar.lean:630)),
 or open-coded read loops. Each row below names the call site that
