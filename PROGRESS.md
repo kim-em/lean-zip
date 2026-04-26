@@ -4227,6 +4227,199 @@ attributable to the 2 drift-detector suppressions plus the 2
 narrative/audit-section refreshes that fell within the
 pre-existing warning set). Toolchain `v4.29.1`.
 
+**12-PR batch (Apr 25 – Apr 26): post-#2198 wave — fifth consecutive maintenance-only wave of the post-#1928 closure arc; pure inventory-anchor refresh / historical-banner wave (no terminal closures, no Track E feature work, no source / test / fixture changes) covering five distinct sub-classes (FFI cluster def-line refresh / audit-checklist anchor refresh / historical+MOVED banners / Archive.extract guard-cluster sibling-cluster trio) (summarize #2227):**
+
+Twelve PRs merged in the ~2h 22min window between PR #2199
+(21:57:22Z 2026-04-25) and PR #2224 (00:19:29Z 2026-04-26),
+opening immediately after PR #2198 (the prior summarize wave PR)
+merged at 22:11Z. The wave is structurally a continuation of the
+prior wave's **inventory-section axis** (anchor-class structural
+groupings rather than line-shift magnitude), with one new
+sub-pattern added (the **Archive.extract guard-cluster
+sibling-cluster trio** in group 4) and one new banner variant
+introduced (the **MOVED** banner in #2221, distinct from the
+historical-COMPLETE banner of #2214 / #2209). The 12 PRs split
+across **five sub-classes**: 4 FFI cluster def-line refreshes
+(rows 1177 / 1179 / 1180 + row-1177 test-cite tail), 3
+audit-checklist anchor refreshes (Priority 2 + Priority 5
+sweeps), 2 historical / MOVED banners (c2-fuel-audit /
+c-fse-audit), 3 Archive.extract guard-cluster sibling-cluster
+trio entries (across `ZipTest/Archive.lean+ZipTest/Tar.lean`,
+`ZipTest/ZipFixtures.lean`, and `Zip/Archive.lean` self-cites),
+and (folded into class 2) one cross-link refresh in #2220.
+There is **no terminal closure** in this wave; the post-#1928
+Tar interior-NUL closure arc remains structurally complete, and
+planner-side activity continues to be anchor maintenance.
+Source code (`Zip/`, `c/`, `testdata/`) was not touched by any
+of the 12 PRs; `grep -rcF sorry Zip/` stayed at 0 throughout.
+
+*Inventory: FFI cluster def-line refresh sub-class (4 PRs) — the
+Decompression Limit Inventory rows 1177 / 1179 / 1180 +
+row-1177 test-cite tail, all four pinning the convention "cite
+the `(opaque|partial def|def)` decl line, not the `@[extern]`
+attr or docstring above it"; closes 4 of 6 FFI-cluster rows
+opened at the previous wave's #2199 cite-precedent (sibling
+rows 1178 + 1181 remain in the repair queue as PRs #2204 /
+#2208).*
+
+- **#2199 (21:57Z) — row 1177**: `Zip/Gzip.lean:16 → :17`
+  (`Gzip.decompress` (FFI) `opaque decompress` decl, +1 shift,
+  linker-undetected drift convention pin); single-anchor.
+- **#2200 (21:59Z) — row 1179**: `Zip/Gzip.lean:83 → :86`
+  (`Gzip.decompressStream` (FFI) `partial def decompressStream`
+  decl, +3 shift); single-anchor.
+- **#2203 (22:31Z) — row 1180**: `Zip/Gzip.lean:123 → :129`
+  (`Gzip.decompressFile` (FFI) `def decompressFile` decl, +6
+  shift; largest of the four FFI shifts); single-anchor.
+- **#2207 (22:42Z) — row 1177 test-cite**: `ZipTest/Gzip.lean:18-23
+  → :26-31` (row 1177 bomb-limit regression-test cite, +8 shift);
+  test-side single-cite tail of the FFI cluster.
+
+*Inventory: audit-checklist anchor refresh sub-class (3 PRs) —
+`plans/track-e-current-audit-checklist.md` Priority 2 + Priority
+5 anchor sweeps to current master; doc-only, file not scanned by
+`check-inventory-links.sh` so the drift was linker-undetected.*
+
+- **#2210 (23:13Z) — line 82**: `Zip/Archive.lean:432 → :1233`
+  (Priority 2 `Archive.extract` def line); doc-only single-anchor.
+- **#2212 (23:26Z) — lines 184-185**: `Zip/Archive.lean:341 →
+  :1024` (`readBoundedSpanFromHandle` def) and `Zip/Tar.lean:169
+  → :308` (`readBoundedEntryData` def); 2-anchor doc.
+- **#2220 (00:02Z) — Priority 2 cross-link**:
+  `SECURITY_INVENTORY.md` self-link `:151 → :1162` + `:1205`
+  cross-link refresh on the audit-checklist Priority 2 block;
+  2-anchor doc (cross-link variant of the audit-checklist
+  refresh sub-class).
+
+*Inventory: historical / MOVED banner sub-class (2 PRs) —
+life-cycle Status annotation on closed/moved tracks; #2221
+introduces the **MOVED** banner variant (cross-repo split rather
+than in-repo closure), distinct from #2214's historical-COMPLETE
+precedent (and from the prior wave's #2209 historical-COMPLETE
+precedent).*
+
+- **#2214 (23:45Z) — track-c2-fuel-audit**: historical-Status
+  banner (Track C2 closed Mar 2 per PROGRESS.md:217); annotation
+  preserves 6 stale source line anchors as a pre-WF-conversion
+  code-layout snapshot per the file's "Conversion Order"
+  section's historical value.
+- **#2221 (00:05Z) — track-c-fse-audit**: **MOVED**-Status banner
+  (Zstd subsystem moved to `lean-zstd` 2026-03-27 per
+  PROGRESS.md:28 / PR #1487; cited `Native/Fse.lean` +
+  `Spec/Fse.lean` no longer exist in lean-zip); annotation
+  preserves the 4 bare-text source line anchors as a pre-split
+  layout snapshot. **First MOVED banner variant in the closure
+  arc** — distinct from the in-repo COMPLETE pattern of #2214 /
+  #2209.
+
+*Inventory: Archive.extract guard-cluster sibling-cluster trio
+sub-class (3 PRs) — same Archive.extract guard subjects
+(maxEntrySize bomb-check + CRC32-mismatch + Binary.isPathSafe +
+trailing-slash carve-out) refreshed across three different files
+in close succession (00:09 / 00:14 / 00:19Z, 10-minute window).
+The sibling-cluster trio precedent matches the post-#2168
+group-1 trio #2172 / #2174 / #2177 noted in the previous
+summarize.*
+
+- **#2222 (00:09Z) — 2-file 2-anchor sibling cluster**:
+  `ZipTest/Archive.lean:86` (`Zip/Archive.lean:408-410 →
+  :1072-1074`, maxEntrySize bomb-check guard, +664 shift) and
+  `ZipTest/Tar.lean:138` (`Zip/Tar.lean:565-566 → :758-759`, tar
+  maxEntrySize bomb-check, +193 shift); first entry of the trio.
+- **#2223 (00:14Z) — 1-file 3-anchor**: `ZipTest/ZipFixtures.lean
+  :606 / :672` (`Zip/Archive.lean:1088 → :1199` CRC32-mismatch
+  throw, and `:1070 / :1074 → :1244 / :1248` Binary.isPathSafe in
+  Archive.extract); second entry of the trio.
+- **#2224 (00:19Z) — 1-file 4-anchor sweep**: `Zip/Archive.lean`
+  self-cites `:655 / :659 / :805 → :1244 / :1248 / :1242 /
+  :1199` (CRC32-mismatch + Binary.isPathSafe + trailing-slash
+  carve-out + extract-guard explainer comments) across three
+  CD-parse explainer paragraphs; terminal entry of the trio.
+
+*Wave-character callout.* This is the **fifth consecutive
+maintenance-only wave** of the post-#1928 closure arc (post-#1989
+35 PRs → post-#2074 12 PRs → post-#2110 26 PRs → post-#2168 12
+PRs → post-#2198 12 PRs) and ties post-#2168 / post-#2074 as the
+joint shortest of the five at 12 PRs each. All 12 PRs are
+inventory re-anchor or historical-banner PRs — no fixtures, no
+Track E feature, no `Zip/` source edits, no skill landing, no
+Recent-wins bullet, no paired-review entry. The wave's
+structural character (5 sub-classes axis-pivoted to anchor-class
+structural groupings rather than line-shift magnitudes)
+continues the prior wave's inventory-section axis and adds two
+new sub-patterns: (a) the **Archive.extract guard-cluster
+sibling-cluster trio** in group 4 (#2222 / #2223 / #2224 in a
+10-minute window — three different file types covering the same
+guard cluster), matching the post-#2168 group-1 trio precedent
+(#2172 / #2174 / #2177 covering the audit-section trio), and
+(b) the **MOVED** banner variant in #2221 (cross-repo split
+banner, distinct from the in-repo historical-COMPLETE pattern of
+#2214 / #2209). With 13 inventory-link warnings remaining at
+wave close (down from the prior wave's 14), the maintenance
+saturation arc continues in its terminal phase.
+
+*Repair queue snapshot at wave close.* 25 PRs in
+conflict / failing CI per `coordination list-pr-repair` at issue
+#2227 creation time (24 merge-conflicts + 1 failed-CI on PR
+#1876). The queue grew by 5 net entrants since the prior wave
+close at 20 — three of these are the FFI-cluster sibling-row
+PRs that conflicted with in-wave landings on the Decompression
+Limit Inventory cluster (#2204 row 1181 / #2208 row 1178), and
+the remaining additions trace to ongoing inventory-conflict tax
+on prior in-flight inventory PRs. The 5 oldest entries
+(#1725 / #1743 / #1755 / #1764 / #1771) trace back to the Track
+E CD-parse cascade that predates the post-#1928 closure arc.
+
+*Post-issue-creation tail (out of wave scope).* Per the
+post-issue-creation tail deferral pattern in
+`.claude/skills/summarize-flow/SKILL.md`, any PRs that land
+between issue #2227's 00:37:25Z creation and this wave PR's
+submission are deferred to the next wave block. Two PRs are
+out-of-wave at submission time:
+
+- **PR #2226** (merged 00:36:11Z) — `Archive.create` writer-site
+  `Checksum.crc32` self-cite refresh (`:795` and `:833` both
+  citing `Zip/Archive.lean:195`, now at `:189`; -6 line shift).
+  Landed ~74s before issue creation, in the brief gap between
+  the planner's enumeration snapshot and issue submission, so
+  was not included in the body's "Wave PRs (12)" list.
+- **PR #2228** (merged 00:48:57Z) — `writeEndRecords` +
+  `writeCentralHeader` writer-site cite cluster (7-anchor
+  self-cite sweep, +10 shift from documentation/comment
+  expansion in the writer docstring and section headers). Proper
+  post-issue-creation tail per the skill.
+
+Both are out of wave scope per the issue-body-as-source-of-truth
+invariant and will appear in the next wave block, absorbed at
+the start of that body's deliverables enumeration. Three
+additional inventory issues (#2229 / #2230 / #2231 — three
+narrative-paragraph re-anchors at lines 279 / 357 / 652 of
+`SECURITY_INVENTORY.md`) were created post-issue at 01:00Z and
+remain unclaimed at wave-PR submission; their PRs (when landed)
+will likewise appear in the next wave block. Issue #2225 (the
+`writeEndRecords` body-range self-cite issue at 00:26Z, before
+issue creation) was already in the planner-queued backlog at
+issue #2227's creation time and was not included in the wave
+because no PR for it had landed.
+
+Quality metrics: 0 sorries across `Zip/` (unchanged — none of
+these PRs touched proofs); 0 runtime `]!` across `Zip/Native/`
+and `Zip/*.lean` (unchanged — no source edits this wave).
+Fixtures in `testdata/zip/malformed/` unchanged at 47; fixtures
+in `testdata/tar/malformed/` unchanged at 24. Spec-line counts
+unchanged (no `Zip/Spec/` PRs). Type mix across the 12 PRs:
+inventory 12 / non-inventory 0 — ratio 100% inventory (**fifth
+consecutive 100% wave**). At wave close: repair queue at 25 PRs
+(24 merge-conflicts + 1 failed-CI on PR #1876, +5 net since
+prior wave close); `feature` queue at 4 unclaimed inventory
+issues at issue-#2227 submission time (#2225 + #2229 + #2230 +
+#2231 — three of these created post-issue at 01:00Z); `review`
+queue empty (no closure events). `bash
+scripts/check-inventory-links.sh` exits 0 with 13 warnings (down
+from the prior wave's 14 as the 12 re-anchor / banner PRs
+cleared a further stale narrative/audit-section citation).
+Toolchain `v4.29.1`.
+
 ### Infrastructure
 - Multi-agent coordination via `pod` with worktree-per-session isolation
 - GitHub-based coordination (agent-plan issues, auto-merge PRs)
