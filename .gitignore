@@ -6,3 +6,5 @@
 /worktrees
 __pycache__/
 /.claude/.pod-checksums
+/plans/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*.md
+/.codex

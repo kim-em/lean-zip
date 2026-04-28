@@ -2,3 +2,5 @@ agents/
 pod.log
 claim-history.*
 claude-config/
+cleanup.lock
+target
