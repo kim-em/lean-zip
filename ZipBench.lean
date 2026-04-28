@@ -10,6 +10,7 @@ Operations:
   deflate        — native DEFLATE compression (fixed Huffman)
   deflate-lazy   — native DEFLATE compression (lazy matching)
   deflate-ffi    — zlib FFI compression
+  compress-zopfli — zopfli FFI raw-deflate compression (quality ceiling, slow)
   gzip           — native gzip decompression
   gzip-ffi       — zlib FFI gzip decompression
   zlib           — native zlib decompression
@@ -54,26 +55,54 @@ def mkPrngData (size : Nat) : ByteArray := Id.run do
     result := result.push (state &&& 0xFF).toUInt8
   return result
 
+/-- Pseudo-text: cycles through common English words with spaces and newlines.
+    Same shape as `ZipTest.Helpers.mkTextData` (deflate-friendly redundancy). -/
+def mkTextData (size : Nat) : ByteArray := Id.run do
+  let words := #["the", "of", "and", "to", "in", "a", "is", "that", "for", "it",
+                  "was", "on", "are", "be", "with", "as", "at", "this", "have", "from",
+                  "or", "by", "not", "but", "what", "all", "were", "when", "we", "there",
+                  "can", "an", "your", "which", "their", "if", "do", "will", "each", "how"]
+  let mut result := ByteArray.empty
+  let mut col : Nat := 0
+  let mut wi : Nat := 0
+  while result.size < size do
+    let word := words[wi % words.size]!
+    wi := wi + 1
+    if col > 0 then
+      if col + 1 + word.length > 72 then
+        result := result.push 0x0A
+        col := 0
+      else
+        result := result.push 0x20
+        col := col + 1
+    for c in word.toUTF8 do
+      if result.size < size then
+        result := result.push c
+    col := col + word.length
+  return result.extract 0 size
+
 def generateData (pattern : String) (size : Nat) : IO ByteArray :=
   match pattern with
   | "constant" => pure (mkConstantData size)
   | "cyclic"   => pure (mkCyclicData size)
   | "prng"     => pure (mkPrngData size)
+  | "text"     => pure (mkTextData size)
   | other      => throw (IO.userError s!"unknown pattern: {other}")
 
 def main (args : List String) : IO Unit := do
   match args with
-  | [op, sizeStr, pattern] => run op sizeStr pattern 6
+  | [op, sizeStr, pattern] => run op sizeStr pattern none
   | [op, sizeStr, pattern, levelStr] =>
     match levelStr.toNat? with
-    | some level => run op sizeStr pattern level
+    | some level => run op sizeStr pattern (some level)
     | none => usage
   | _ => usage
 where
   usage := throw (IO.userError
-    "usage: bench <operation> <size> <constant|cyclic|prng> [level]")
-  run (op sizeStr pattern : String) (level : Nat) : IO Unit := do
+    "usage: bench <operation> <size> <constant|cyclic|prng|text> [level]")
+  run (op sizeStr pattern : String) (levelOpt : Option Nat) : IO Unit := do
     let some size := sizeStr.toNat? | usage
+    let level := levelOpt.getD 6
     let data ← generateData pattern size
     match op with
     -- Decompression benchmarks (compress with FFI first, then decompress)
@@ -114,6 +143,16 @@ where
     | "deflate-ffi" =>
       let _ ← RawDeflate.compress data level.toUInt8
       pure ()
+    | "compress-zopfli" =>
+      let iterations := levelOpt.getD 15
+      -- Zopfli is intentionally ~100× zlib level 9. Cap by default at 64KB
+      -- so a stray bench run does not stall the harness; gate larger sizes
+      -- behind ZOPFLI_FORCE=1.
+      if size > 65536 ∧ (← IO.getEnv "ZOPFLI_FORCE") ≠ some "1" then
+        throw (IO.userError
+          s!"compress-zopfli: input size {size} exceeds 64KB cap; set ZOPFLI_FORCE=1 to override")
+      let compressed ← Zopfli.compress data iterations.toUInt32
+      IO.println compressed.size
     -- Checksum benchmarks
     | "crc32" =>
       let _ := Crc32.Native.crc32 0 data
