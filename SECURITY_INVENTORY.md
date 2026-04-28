@@ -1549,6 +1549,10 @@ added, this file must be updated in the same change set with:
 
 Run `bash scripts/check-inventory-links.sh` after any change touching
 `Zip/**`, `ZipTest/**`, `testdata/**`, or this file, and resolve any
-hard-failure errors before merging. The script also emits advisory
-warnings when a cited line number may have drifted relative to the
-quoted error-substring prose — treat these as hints, not blockers.
+hard-failure errors before merging. The script verifies fixture-path
+existence (hard failure) and flags unresolved placeholder PR
+references — `#TBD`, `#N`, `#XXX`, `#NNN`, or the phrase "<!-- drift-detector: literal documentation of placeholder tokens, not a placeholder itself -->this PR" (advisory warning). The
+line-anchor freshness passes were retired by PR #2353 (closing
+#2345); cite by stable identifier (function name, theorem name,
+fixture filename, section header) so the audit trail does not drift
+with line shifts.
