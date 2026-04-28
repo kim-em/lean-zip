@@ -1,0 +1,18 @@
+[package]
+name = "miniz_oxide_shim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "C-ABI shim around miniz_oxide for the lean-zip Track D comparator (RFC 1951 raw DEFLATE)."
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+miniz_oxide = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

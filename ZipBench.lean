@@ -7,9 +7,11 @@ Usage:
 Operations:
   inflate        — native DEFLATE decompression
   inflate-ffi    — zlib FFI decompression
+  inflate-miniz  — miniz_oxide (Rust) DEFLATE decompression (Track D)
   deflate        — native DEFLATE compression (fixed Huffman)
   deflate-lazy   — native DEFLATE compression (lazy matching)
   deflate-ffi    — zlib FFI compression
+  compress-miniz — miniz_oxide (Rust) DEFLATE compression (Track D)
   gzip           — native gzip decompression
   gzip-ffi       — zlib FFI gzip decompression
   zlib           — native zlib decompression
@@ -19,7 +21,7 @@ Operations:
   adler32        — native Adler-32
   adler32-ffi    — zlib FFI Adler-32
 
-Patterns:   constant, cyclic, prng
+Patterns:   constant, cyclic, prng, text
 Level:      0-9 (default 6, only for compression/inflate)
 
 Examples:
@@ -54,11 +56,39 @@ def mkPrngData (size : Nat) : ByteArray := Id.run do
     result := result.push (state &&& 0xFF).toUInt8
   return result
 
+/-- Pseudo-text payload (cycled common English words wrapped to ~72 cols).
+    Mirrors `ZipTest.Helpers.mkTextData` so bench measurements match the
+    Track D ratio-vs-zopfli setup. -/
+def mkTextData (size : Nat) : ByteArray := Id.run do
+  let words := #["the", "of", "and", "to", "in", "a", "is", "that", "for", "it",
+                  "was", "on", "are", "be", "with", "as", "at", "this", "have", "from",
+                  "or", "by", "not", "but", "what", "all", "were", "when", "we", "there",
+                  "can", "an", "your", "which", "their", "if", "do", "will", "each", "how"]
+  let mut result := ByteArray.empty
+  let mut col : Nat := 0
+  let mut wi : Nat := 0
+  while result.size < size do
+    let word := words[wi % words.size]!
+    wi := wi + 1
+    if col > 0 then
+      if col + 1 + word.length > 72 then
+        result := result.push 0x0A  -- newline
+        col := 0
+      else
+        result := result.push 0x20  -- space
+        col := col + 1
+    for c in word.toUTF8 do
+      if result.size < size then
+        result := result.push c
+    col := col + word.length
+  return result.extract 0 size
+
 def generateData (pattern : String) (size : Nat) : IO ByteArray :=
   match pattern with
   | "constant" => pure (mkConstantData size)
   | "cyclic"   => pure (mkCyclicData size)
   | "prng"     => pure (mkPrngData size)
+  | "text"     => pure (mkTextData size)
   | other      => throw (IO.userError s!"unknown pattern: {other}")
 
 def main (args : List String) : IO Unit := do
@@ -71,7 +101,7 @@ def main (args : List String) : IO Unit := do
   | _ => usage
 where
   usage := throw (IO.userError
-    "usage: bench <operation> <size> <constant|cyclic|prng> [level]")
+    "usage: bench <operation> <size> <constant|cyclic|prng|text> [level]")
   run (op sizeStr pattern : String) (level : Nat) : IO Unit := do
     let some size := sizeStr.toNat? | usage
     let data ← generateData pattern size
@@ -85,6 +115,10 @@ where
     | "inflate-ffi" =>
       let compressed ← RawDeflate.compress data level.toUInt8
       let _ ← RawDeflate.decompress compressed
+      pure ()
+    | "inflate-miniz" =>
+      let compressed ← RawDeflate.compress data level.toUInt8
+      let _ ← MinizOxide.decompress compressed
       pure ()
     | "gzip" =>
       let compressed ← Gzip.compress data level.toUInt8
@@ -113,6 +147,9 @@ where
       pure ()
     | "deflate-ffi" =>
       let _ ← RawDeflate.compress data level.toUInt8
+      pure ()
+    | "compress-miniz" =>
+      let _ ← MinizOxide.compress data level.toUInt8
       pure ()
     -- Checksum benchmarks
     | "crc32" =>
