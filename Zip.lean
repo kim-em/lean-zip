@@ -2,6 +2,7 @@ import Zip.Basic
 import Zip.Gzip
 import Zip.Checksum
 import Zip.RawDeflate
+import Zip.Libdeflate
 import Zip.Tar
 import Zip.Archive
 import Zip.Spec.Adler32
