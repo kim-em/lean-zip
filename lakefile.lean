@@ -146,7 +146,11 @@ input_file miniz_oxide_ffi.c where
 target miniz_oxide_ffi.o pkg : FilePath := do
   let srcJob ← miniz_oxide_ffi.c.fetch
   let oFile := pkg.buildDir / "c" / "miniz_oxide_ffi.o"
-  let cflags := if (← minizRustLib.pathExists) then #["-DHAVE_MINIZ_OXIDE"] else #[]
+  -- Mirror `minizOxideEnabled` so the C shim's `-DHAVE_MINIZ_OXIDE`
+  -- decision matches the link step in `linkFlags`. Without this, a
+  -- `MINIZ_OXIDE_DISABLE=1` rebuild would compile the shim expecting
+  -- the Rust symbols but link without them.
+  let cflags := if (← minizOxideEnabled) then #["-DHAVE_MINIZ_OXIDE"] else #[]
   let weakArgs := #["-I", (← getLeanIncludeDir).toString] ++ cflags
   let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
   buildO oFile srcJob weakArgs hardArgs "cc"

@@ -11,6 +11,10 @@ For Zstandard (zstd) support, see [lean-zstd](https://github.com/kim-em/lean-zst
 - Lean 4 (tested with v4.20.0 through v4.29.0-rc1)
 - zlib development headers (`zlib-dev`, `zlib1g-dev`, or equivalent)
 - `pkg-config` (for header discovery on NixOS and similar)
+- Optional: `cargo` + `rustc` to build the Track D `miniz_oxide`
+  comparator. When unavailable, `lake build` still succeeds and the
+  `MinizOxide.*` FFI wrappers raise `IO.userError` at runtime.
+  See [BENCH.md](BENCH.md) for the comparator-toolchain matrix.
 
 On NixOS (or any system where zlib isn't in the default library path),
 the project includes a `shell.nix` that provides all C dependencies:

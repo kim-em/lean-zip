@@ -2,6 +2,7 @@ import ZipTest.BenchHelpers
 import ZipTest.Zlib
 import ZipTest.Gzip
 import ZipTest.RawDeflate
+import ZipTest.MinizOxide
 import ZipTest.Checksum
 import ZipTest.Binary
 import ZipTest.Tar
@@ -28,6 +29,7 @@ def main : IO Unit := do
   ZipTest.Zlib.tests
   ZipTest.Gzip.tests
   ZipTest.RawDeflate.tests
+  ZipTest.MinizOxide.tests
   ZipTest.Checksum.tests
   ZipTest.Binary.tests
   ZipTest.Tar.tests
