@@ -3,5 +3,6 @@ pkgs.mkShell {
   buildInputs = [
     pkgs.pkg-config
     pkgs.zlib
+    pkgs.zopfli
   ];
 }
