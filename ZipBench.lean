@@ -7,9 +7,11 @@ Usage:
 Operations:
   inflate        — native DEFLATE decompression
   inflate-ffi    — zlib FFI decompression
+  inflate-libdeflate — libdeflate FFI decompression
   deflate        — native DEFLATE compression (fixed Huffman)
   deflate-lazy   — native DEFLATE compression (lazy matching)
   deflate-ffi    — zlib FFI compression
+  compress-libdeflate — libdeflate FFI compression
   gzip           — native gzip decompression
   gzip-ffi       — zlib FFI gzip decompression
   zlib           — native zlib decompression
@@ -113,6 +115,13 @@ where
       pure ()
     | "deflate-ffi" =>
       let _ ← RawDeflate.compress data level.toUInt8
+      pure ()
+    | "compress-libdeflate" =>
+      let _ ← Libdeflate.compress data level.toUInt8
+      pure ()
+    | "inflate-libdeflate" =>
+      let compressed ← Libdeflate.compress data level.toUInt8
+      let _ ← Libdeflate.decompress compressed
       pure ()
     -- Checksum benchmarks
     | "crc32" =>
