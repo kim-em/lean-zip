@@ -2,12 +2,12 @@
 
 **Status:** MOVED — All Zstd code moved to
 https://github.com/kim-em/lean-zstd on 2026-03-27 (#1487; see
-`PROGRESS.md:28`). The files this audit references
+`PROGRESS.md`). The files this audit references
 (`Zip/Native/Fse.lean`, `Zip/Spec/Fse.lean`) no longer exist in
 lean-zip. This document is preserved as a historical record of
 the pre-split FSE fuel-conversion-order audit; the cited line
-anchors (`Native/Fse.lean:58-69`, `:98-122`, `:389-434`,
-`Spec/Fse.lean:112`) refer to the pre-split lean-zip layout and
+anchors (`Native/Fse.lean`, `:98-122`, `:389-434`,
+`Spec/Fse.lean`) refer to the pre-split lean-zip layout and
 have not been refreshed because the Zstd subsystem now lives in
 a separate repository with its own conversion plans. Continued
 FSE / Zstd work happens in lean-zstd, not here.
@@ -26,7 +26,7 @@ prove properties of the native fuel-based functions via `induction fuel`.
 
 ## Fuel-Parameterized Functions
 
-### 1. `decodeZeroRepeats` (Native/Fse.lean:58-69)
+### 1. `decodeZeroRepeats` (Native/Fse.lean)
 
 ```
 def decodeZeroRepeats (br : BitReader) (probs : Array Int32)
@@ -53,7 +53,7 @@ proofs for this already exist in Spec/Fse.lean (see
 **Fuel bound**: Called with fuel = 1000 (line 111). Actual iterations
 bounded by bitstream length / 2.
 
-### 2. `decodeFseLoop` (Native/Fse.lean:98-122)
+### 2. `decodeFseLoop` (Native/Fse.lean)
 
 ```
 def decodeFseLoop (br : BitReader) (remaining : Nat) (probs : Array Int32)
@@ -79,7 +79,7 @@ On each iteration:
 
 **Conversion difficulty**: **Moderate-Hard**. The tricky case is prob == 0:
 we need to prove that `decodeZeroRepeats` strictly increases `symbolNum`.
-The existing `decodeZeroRepeats_cellCount` theorem (Spec/Fse.lean:112)
+The existing `decodeZeroRepeats_cellCount` theorem (Spec/Fse.lean)
 proves `cellCount probs' - cellCount probs = sym' - sym`, which is
 related but not exactly the inequality needed. A new lemma
 `decodeZeroRepeats_sym_gt` (sym' > sym on success) would be needed.
@@ -87,7 +87,7 @@ related but not exactly the inequality needed. A new lemma
 **Fuel bound**: Called with fuel = 10000 (line 140). Actual iterations
 bounded by `remaining + maxSymbols`.
 
-### 3. `decodeFseSymbolsAll` (Native/Fse.lean:389-434)
+### 3. `decodeFseSymbolsAll` (Native/Fse.lean)
 
 ```
 def decodeFseSymbolsAll (table : FseTable) (br : BackwardBitReader)

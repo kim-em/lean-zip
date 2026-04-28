@@ -6,7 +6,7 @@ parallel with proof work.
 
 ## Priority 0: ZIP unchecked-size and local-span audit
 
-Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
+Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean)
 
 - [x] Add a helper that validates `entry.localOffset`, local header size,
   `nameLen`, `extraLen`, and `compressedSize` against actual file size
@@ -38,7 +38,7 @@ Target file: [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1)
 
 ## Priority 1: Tar partial-decoder audit
 
-Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
+Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean)
 
 - [x] Enumerate all `String.fromUTF8!` callsites reachable from untrusted
   tar bytes and replace them with validated or failure-returning paths
@@ -76,18 +76,18 @@ Target file: [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:1)
 
 Targets:
 
-- [Zip/Basic.lean](/home/kim/lean-zip/Zip/Basic.lean:1)
-- [Zip/Gzip.lean](/home/kim/lean-zip/Zip/Gzip.lean:1)
-- [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean:1)
-- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1258)
+- [Zip/Basic.lean](/home/kim/lean-zip/Zip/Basic.lean)
+- [Zip/Gzip.lean](/home/kim/lean-zip/Zip/Gzip.lean)
+- [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean)
+- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean)
 
 - [x] Inventory every public API where `0 = no limit`.
   (See *"Decompression Limit Inventory"* in
-  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:1162).)
+  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md).)
 - [x] Decide which APIs should keep that behavior and which should expose
   safer extraction defaults.
   (Proposed direction in the *"Recommended policy"* subsection of
-  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:1205);
+  [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md);
   final numbers and signature changes are deferred to follow-up issues
   so this inventory stays doc-only.)
 - [x] Add decompression-bomb tests for:
@@ -100,7 +100,7 @@ Targets:
 
 ## Priority 3: FFI adversarial validation
 
-Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c:1)
+Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c)
 
 - [x] Add a dedicated sanitizer script or documented invocation for
   building/running the FFI paths under ASan and UBSan.
@@ -133,7 +133,7 @@ Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c:1)
 - [x] Audit all `malloc`/`realloc`/buffer-growth sites after each substantial
   C change.
   (Initial snapshot landed: see
-  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:59)
+  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md)
   § *"Allocation site audit (`c/zlib_ffi.c`)"* for the current row-per-
   call-site table. The re-audit-on-change obligation remains — this
   item tracks the invariant, not a one-time snapshot.
@@ -145,14 +145,14 @@ Target file: [c/zlib_ffi.c](/home/kim/lean-zip/c/zlib_ffi.c:1)
 
 Targets:
 
-- [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
-- [PLAN.md](/home/kim/lean-zip/PLAN.md:1)
+- [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md)
+- [PLAN.md](/home/kim/lean-zip/PLAN.md)
 
 - [x] Keep the Lean runtime allocation/read issue tracked here until
   upstream fix status is confirmed and local regression coverage exists.
   (Landed by the PR closing issue #1582: new *"Upstream tracking"*
   sub-block in
-  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
+  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md)
   § *"Lean Runtime"* records the report, the current upstream status
   (*"no upstream link yet — local tracking only"*, dated 2026-04-22),
   and the local regression coverage — ZIP64 oversized-size fixtures
@@ -162,7 +162,7 @@ Targets:
 - [x] Add minimized reproducer references once they are checked into the repo
   or linked from issues.
   (Landed by this PR: new *"Minimized Reproducer Corpus"* section in
-  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
+  [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md)
   tabulates all 31 fixtures under `testdata/zip/malformed/`,
   `testdata/tar/malformed/`, and `testdata/tar/security/` with the
   guard they exercise, their first-landing PR (or `481e562` for
@@ -171,7 +171,7 @@ Targets:
   decompression bomb, other}` class tag.)
 - [x] Record which callsites have been guarded locally to avoid depending on
   runtime behavior for adversarial size rejection.
-  (See [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md:1)
+  (See [`SECURITY_INVENTORY.md`](/home/kim/lean-zip/SECURITY_INVENTORY.md)
   § *"Local guard inventory for `Handle.read` and `Stream.read`"* for
   the per-site audit of the `Zip/Archive.lean` and `Zip/Tar.lean` read
   surface, with explicit rows for each `readExact`, `readEntryData`,
@@ -181,8 +181,8 @@ Targets:
 
 Targets:
 
-- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean:1049)
-- [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean:308)
+- [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean)
+- [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean)
 
 - [x] Introduce proof-friendly helper functions for bounded reads and
   validated spans.

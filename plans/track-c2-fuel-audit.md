@@ -1,7 +1,7 @@
 # Track C2: Fuel Usage Audit
 
 **Status:** COMPLETE — Track C2 Fuel Elimination closed 2026-03-02; see
-`PROGRESS.md:217` "Track C2: Fuel Elimination (complete, Mar 2)". This
+`PROGRESS.md` "Track C2: Fuel Elimination (complete, Mar 2)". This
 document is preserved as a historical record of the conversion-order
 audit; the cited source lines reflect the pre-conversion layout and have
 not been refreshed because the functions have since been re-laid-out and
@@ -19,7 +19,7 @@ proposes a conversion order.
 
 | Field | Value |
 |-------|-------|
-| **File** | `Zip/Spec/Deflate.lean:186` |
+| **File** | `Zip/Spec/Deflate.lean` |
 | **Signature** | `decodeSymbols (litLengths distLengths : List Nat) (bits : List Bool) (fuel : Nat := 1e18)` |
 | **Bounds** | One Huffman symbol per recursion step |
 | **Fuel callees** | None (leaf) |
@@ -31,7 +31,7 @@ proposes a conversion order.
 
 | Field | Value |
 |-------|-------|
-| **File** | `Zip/Spec/Deflate.lean:337` (nested `where` in `decodeDynamicTables`) |
+| **File** | `Zip/Spec/Deflate.lean` (nested `where` in `decodeDynamicTables`) |
 | **Signature** | `decodeCLSymbols (clTable) (totalCodes : Nat) (acc : List Nat) (bits : List Bool) : Nat → Option (...)` |
 | **Bounds** | One CL symbol per recursion step |
 | **Fuel callees** | None (leaf) |
@@ -43,7 +43,7 @@ proposes a conversion order.
 
 | Field | Value |
 |-------|-------|
-| **File** | `Zip/Spec/Deflate.lean:379` (`go`), `402` (`goR`) |
+| **File** | `Zip/Spec/Deflate.lean` (`go`), `402` (`goR`) |
 | **Signature** | `go (bits : List Bool) (acc : List UInt8) : Nat → Option (List UInt8)` |
 | **Bounds** | One DEFLATE block per recursion step |
 | **Fuel callees** | `decodeSymbols` (uses default fuel, independent), `decodeDynamicTables` (contains `decodeCLSymbols`) |
@@ -57,7 +57,7 @@ proposes a conversion order.
 
 | Field | Value |
 |-------|-------|
-| **File** | `Zip/Native/Inflate.lean:175` |
+| **File** | `Zip/Native/Inflate.lean` |
 | **Signature** | `decodeCLSymbols (clTree : HuffTree) (br : BitReader) (codeLengths : Array UInt8) (idx totalCodes : Nat) (fuel : Nat)` |
 | **Bounds** | One CL symbol per step |
 | **Fuel callees** | None (leaf) |
@@ -68,7 +68,7 @@ proposes a conversion order.
 
 | Field | Value |
 |-------|-------|
-| **File** | `Zip/Native/Inflate.lean:253` |
+| **File** | `Zip/Native/Inflate.lean` |
 | **Signature** | `go (br : BitReader) (output : ByteArray) : Nat → Except String (ByteArray × BitReader)` |
 | **Bounds** | One symbol per step |
 | **Fuel callees** | None (leaf) |
@@ -79,7 +79,7 @@ proposes a conversion order.
 
 | Field | Value |
 |-------|-------|
-| **File** | `Zip/Native/Inflate.lean:288` |
+| **File** | `Zip/Native/Inflate.lean` |
 | **Signature** | `inflateLoop (br : BitReader) (output : ByteArray) (fixedLit fixedDist : HuffTree) (maxOutputSize : Nat) : Nat → Except String (ByteArray × Nat)` |
 | **Bounds** | One block per step |
 | **Fuel callees** | `decodeHuffman` (uses default fuel, independent) |
@@ -92,11 +92,11 @@ These native-layer functions already use `termination_by` — no conversion need
 
 | Function | File | Measure |
 |----------|------|---------|
-| `HuffTree.insertLoop` | `Native/Inflate.lean:46` | `lengths.size - start` |
-| `fillEntries` | `Native/Inflate.lean:154` | `count` |
-| `readCLCodeLengths` | `Native/Inflate.lean:162` | `numCodeLen - i` |
-| `copyLoop` | `Native/Inflate.lean:140` | `length - k` |
-| `bitsToBytes.go` | `Spec/Deflate.lean:239` | `bits.length` |
+| `HuffTree.insertLoop` | `Native/Inflate.lean` | `lengths.size - start` |
+| `fillEntries` | `Native/Inflate.lean` | `count` |
+| `readCLCodeLengths` | `Native/Inflate.lean` | `numCodeLen - i` |
+| `copyLoop` | `Native/Inflate.lean` | `length - k` |
+| `bitsToBytes.go` | `Spec/Deflate.lean` | `bits.length` |
 
 ## Fuel Flow Graph
 
