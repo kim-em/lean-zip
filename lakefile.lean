@@ -81,13 +81,16 @@ def zlibLinkFlags : IO (Array String) := do
     primary working path on NixOS. We always include `-lm` because libzopfli
     references `log` from libm.
 
-    We pass `-Wl,--allow-shlib-undefined` because Lean's bundled toolchain
-    ships an old glibc (only `log@GLIBC_2.2.5`) while a Nix-built libzopfli
-    links against `log@GLIBC_2.29`. The strict default of `ld.lld`
+    On Linux we pass `-Wl,--allow-shlib-undefined` because Lean's bundled
+    toolchain ships an old glibc (only `log@GLIBC_2.2.5`) while a Nix-built
+    libzopfli links against `log@GLIBC_2.29`. The strict default of `ld.lld`
     (`--no-allow-shlib-undefined`) refuses such links even though the
-    dynamic loader resolves the symbol at runtime via libzopfli's RUNPATH. -/
+    dynamic loader resolves the symbol at runtime via libzopfli's RUNPATH.
+    macOS's ld64 does not recognize the flag, and the issue does not arise
+    there — Homebrew's libzopfli links against the same libSystem the Lean
+    toolchain uses. -/
 def zopfliLinkFlags : IO (Array String) := do
-  let lazyFlag := #["-Wl,--allow-shlib-undefined"]
+  let lazyFlag := if Platform.isOSX then #[] else #["-Wl,--allow-shlib-undefined"]
   if let some flags := (← IO.getEnv "ZOPFLI_LDFLAGS") then
     return splitFlags flags.trimAscii.toString
   let zopfliFlags ← pkgConfig "zopfli" "--libs"
