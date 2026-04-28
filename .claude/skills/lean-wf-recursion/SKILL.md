@@ -36,7 +36,7 @@ split
 ```
 
 After `unfold`, use `split` to case-analyze the exposed `if`/`match`.
-See `Zip/Spec/DeflateDynamicFreqs.lean:29`.
+See `Zip/Spec/DeflateDynamicFreqs.lean`.
 
 ### `rw [f.eq_1]` — Precise Rewriting
 
@@ -49,7 +49,7 @@ rw [kraftSumFrom.eq_1]
 exact if_neg (by omega)
 ```
 
-See `Zip/Spec/HuffmanKraft.lean:74`.
+See `Zip/Spec/HuffmanKraft.lean`.
 
 **Multiple equation lemmas:** When `f` pattern-matches on constructors,
 Lean generates `f.eq_1`, `f.eq_2`, etc. — one per match arm. Choose the
@@ -146,7 +146,7 @@ theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
     ...
 ```
 
-See `Zip/Spec/Deflate.lean:585`.
+See `Zip/Spec/Deflate.lean`.
 
 **Key points:**
 - `generalizing acc` when the function has accumulator-style parameters
@@ -196,7 +196,7 @@ where
 
 **Why:** `omega` cannot derive `br'.data.size = br.data.size` without
 invariant lemmas. Making `dataSize` a fixed parameter avoids this
-dependency entirely. See `Zip/Native/Inflate.lean:261`.
+dependency entirely. See `Zip/Native/Inflate.lean`.
 
 ## Dependent `if` Guards and `dif_pos`/`dif_neg`
 
@@ -231,7 +231,7 @@ have hlen : (restBits ++ rest).length < (symBits ++ restBits ++ rest).length := 
 rw [dif_pos hlen]
 ```
 
-See `Zip/Spec/DeflateEncode.lean:543` and `Zip/Spec/DeflateSuffix.lean:142`.
+See `Zip/Spec/DeflateEncode.lean` and `Zip/Spec/DeflateSuffix.lean`.
 
 ### `split at h` for `if` in Hypotheses
 
@@ -247,7 +247,7 @@ split at ht
 ```
 
 This replaces the old `guard` + `by_cases` pattern from fuel-based code.
-See `Zip/Spec/LZ77NativeCorrect.lean:335`.
+See `Zip/Spec/LZ77NativeCorrect.lean`.
 
 ## `↓reduceIte` Limitation with Bool-to-Prop
 
@@ -380,7 +380,7 @@ exact ⟨hblen, ih bits'.length (hlen ▸ hblen) bits' acc' result rfl hgo⟩
 **Don't try:** `dif_pos`, `rw`, or `simp only` with the guard hypothesis —
 the conjunction is not a `dite`, it's already been simplified past that.
 
-See `Zip/Spec/DeflateSuffix.lean:498` (`decode_go_suffix` proof).
+See `Zip/Spec/DeflateSuffix.lean` (`decode_go_suffix` proof).
 
 ## Non-Advancement Guard Pattern
 

@@ -45,8 +45,8 @@ Every rung that's landed has the same three parts:
 
 | Ladder   | Bridge lemma                                                                | Location                                               |
 |----------|-----------------------------------------------------------------------------|--------------------------------------------------------|
-| Adler-32 | `Native.updateBytes_eq_updateList`                                          | `Zip/Native/Adler32.lean:25`                           |
-| CRC32    | `Native.updateBytes_eq_updateList` + `Spec.crcByteTable_mkTable_eq_crcByte` | `Zip/Native/Crc32.lean:82` + `Zip/Spec/Crc32.lean:145` |
+| Adler-32 | `Native.updateBytes_eq_updateList`                                          | `Zip/Native/Adler32.lean`                           |
+| CRC32    | `Native.updateBytes_eq_updateList` + `Spec.crcByteTable_mkTable_eq_crcByte` | `Zip/Native/Crc32.lean` + `Zip/Spec/Crc32.lean` |
 
 The Native bridge proof is almost always
 
@@ -75,7 +75,7 @@ Closed forms with a gate (`hn : n < 65521`,
 
 Canonical examples:
 
-- **`Spec.checksum_replicate_zero`** (`Zip/Spec/Adler32.lean:209`)
+- **`Spec.checksum_replicate_zero`** (`Zip/Spec/Adler32.lean`)
   uses
 
   ```lean
@@ -89,7 +89,7 @@ Canonical examples:
 
   Free starting state `k`; induct on `m`; instantiate at `k = 0`.
 
-- **`Spec.checksum_replicate`** (`Zip/Spec/Adler32.lean:241`) raises
+- **`Spec.checksum_replicate`** (`Zip/Spec/Adler32.lean`) raises
   the bar — the strengthened invariant is
 
   ```lean
@@ -113,7 +113,7 @@ the strengthened lemma and carry it through the inductive step.
 flat. `Spec.checksum_combine` introduces five Spec-level
 `let`-bindings (`a1`, `a2`, `b1`, `b2`, `n`) to keep the equation
 readable, while the user-facing `Native.adler32_combine_eq_concat`
-(`Zip/Native/Adler32.lean:124`) is projection-free:
+(`Zip/Native/Adler32.lean`) is projection-free:
 
 ```lean
 theorem adler32_combine_eq_concat (xs ys : ByteArray) :
@@ -158,17 +158,17 @@ consumer** materialises. Don't pre-promote.
 Existing promotions (triggered by the second consumer, not the
 first):
 
-- `Spec.mkTable_size` (`Zip/Spec/Crc32.lean:99`) — promoted to
+- `Spec.mkTable_size` (`Zip/Spec/Crc32.lean`) — promoted to
   non-private when `Native.crc32_singleton` needed it in addition
   to `Spec.checksum_singleton`.
-- `Spec.xor_ff_byte_lt_mkTable_size` (`Zip/Spec/Crc32.lean:103`) —
+- `Spec.xor_ff_byte_lt_mkTable_size` (`Zip/Spec/Crc32.lean`) —
   same trigger; promoted on first cross-file use.
 - `Spec.crcByteTable_mkTable_eq_crcByte`
-  (`Zip/Spec/Crc32.lean:145`) — promoted in the `_pair` wave when a
+  (`Zip/Spec/Crc32.lean`) — promoted in the `_pair` wave when a
   second call site appeared.
 
 Good counter-example: `Spec.pack_toNat_of_bounds`
-(`Zip/Spec/Adler32.lean:108`) — used by every Adler-32 rung proof
+(`Zip/Spec/Adler32.lean`) — used by every Adler-32 rung proof
 but **stays `private`** because all consumers live in the same
 file. Visibility is about cross-file need, not call count.
 
@@ -211,8 +211,8 @@ design; do not open that scope mid-ladder.
 
 | Role          | Symbol                      | File:line                    |
 |---------------|-----------------------------|------------------------------|
-| Spec identity | `Spec.checksum_singleton`   | `Zip/Spec/Adler32.lean:162`  |
-| Native bridge | `Native.adler32_singleton`  | `Zip/Native/Adler32.lean:47` |
+| Spec identity | `Spec.checksum_singleton`   | `Zip/Spec/Adler32.lean`  |
+| Native bridge | `Native.adler32_singleton`  | `Zip/Native/Adler32.lean` |
 
 Spec proof: unfold `checksum` / `updateList` / `updateByte` on a
 one-element list, use `pack_toNat_of_bounds` to push the packing
@@ -223,8 +223,8 @@ unfold `adler32`, use the bridge lemma, `exact` the Spec identity.
 
 | Role          | Symbol                     | File:line                    |
 |---------------|----------------------------|------------------------------|
-| Spec identity | `Spec.checksum_replicate`  | `Zip/Spec/Adler32.lean:241`  |
-| Native bridge | `Native.adler32_replicate` | `Zip/Native/Adler32.lean:81` |
+| Spec identity | `Spec.checksum_replicate`  | `Zip/Spec/Adler32.lean`  |
+| Native bridge | `Native.adler32_replicate` | `Zip/Native/Adler32.lean` |
 
 Demonstrates the strengthened-invariant pattern above. Joint
 hypotheses `hA, hB` on the public statement; Spec proof lifts to a
@@ -235,9 +235,9 @@ induction premises. Native bridge remains ~9 LOC.
 
 | Role           | Symbol                             | File:line                     |
 |----------------|------------------------------------|-------------------------------|
-| Spec identity  | `Spec.checksum_combine`            | `Zip/Spec/Adler32.lean:461`   |
-| Native def     | `Native.adler32_combine`           | `Zip/Native/Adler32.lean:114` |
-| Native theorem | `Native.adler32_combine_eq_concat` | `Zip/Native/Adler32.lean:124` |
+| Spec identity  | `Spec.checksum_combine`            | `Zip/Spec/Adler32.lean`   |
+| Native def     | `Native.adler32_combine`           | `Zip/Native/Adler32.lean` |
+| Native theorem | `Native.adler32_combine_eq_concat` | `Zip/Native/Adler32.lean` |
 
 Illustrates the let-binding placement rule — the Spec theorem uses
 five `let`-bindings, the Native API is flat. Note the shape change:
@@ -252,8 +252,8 @@ plumbing, just more of it.
 
 | Role          | Symbol                | File:line                   |
 |---------------|-----------------------|-----------------------------|
-| Spec identity | `Spec.checksum_pair`  | `Zip/Spec/Crc32.lean:191`   |
-| Native bridge | `Native.crc32_pair`   | `Zip/Native/Crc32.lean:115` |
+| Spec identity | `Spec.checksum_pair`  | `Zip/Spec/Crc32.lean`   |
+| Native bridge | `Native.crc32_pair`   | `Zip/Native/Crc32.lean` |
 
 Uses both bridge lemmas (`crcByteTable_mkTable_eq_crcByte` +
 `updateBytes_eq_updateList`) because CRC32 has a separate

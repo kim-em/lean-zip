@@ -1,6 +1,6 @@
 ---
 name: inventory-reconciliation
-description: Use when landing a PR that closes a numbered item in `SECURITY_INVENTORY.md` *Recommended policy* or *Missing work*, or when threading a new parameter through public APIs with a deferred default flip. Covers the one-PR-per-bullet cadence, the *Executed past-tense one-liner* phrasing, and when to use the half-closed two-step.
+description: Use when landing a PR that closes a numbered item in `SECURITY_INVENTORY.md` *Recommended policy* or *Missing work*, or when threading a new parameter through public APIs with a deferred default flip. Covers the *Executed past-tense one-liner* phrasing and when to use the half-closed two-step.
 allowed-tools: Read, Bash, Grep
 ---
 
@@ -9,21 +9,39 @@ allowed-tools: Read, Bash, Grep
 Patterns for executing `SECURITY_INVENTORY.md` *Recommended
 policy* and *Missing work* bullets as individual PRs.
 
-## One PR per bullet
+## Anchor-refresh PRs are forbidden (issue #2345)
 
-**Rule**: each numbered *Recommended policy* item (and each
-bulleted *Missing work* item) lands as its own PR. Do not
-batch two items into one PR.
+**Do not create — and do not claim — any issue or PR whose only
+output is a line-number anchor refresh (e.g. *"re-anchor stale
+`Zip/Foo.lean:N` to `:M`"*, *"tighten range cite to def-line"*,
+*"refresh stale source-line cites"*) in `SECURITY_INVENTORY.md`,
+`.claude/skills/**/*.md`, or `plans/**/*.md`.**
 
-**Cost of violation**: `scripts/check-inventory-links.sh`
-warnings cannot be attributed to a single executing PR, and the
-post-merge line-anchor drift compounds. Plus the planner loses
-the bullet-to-PR-number 1:1 mapping in PROGRESS.md.
+Markdown files in this project no longer track source-line
+numbers. Citations use stable identifiers (function name,
+theorem name, fixture filename, section header) which do not
+shift with line edits.
+
+**Worker action**: if you encounter such an issue, post a
+comment linking to issue #2345 and run
+`coordination skip <N> "anchor-refresh PR forbidden by #2345"`.
+
+**Planner action**: refuse to create such an issue. Do not
+generate work whose entire diff is integer changes in markdown
+links.
+
+## One bullet per PR (semantic only)
+
+When a PR *executes* a numbered *Recommended policy* item or a
+*Missing work* bullet, it lands as its own PR — do not bundle
+two unrelated bullets into one PR. This is about preserving the
+bullet-to-PR-number 1:1 mapping in `PROGRESS.md`, not about
+guarding link-checker warnings (which no longer exist for
+line-anchor drift).
 
 **Precedent**: Rec. 1/2/3/4/5 landed as five PRs in the
 2026-04-22 audit-completion wave (#1617, #1618, #1623, #1630,
-#1631). The prior wave's P2.4 docstring split (#1573, #1586,
-#1594) is the earlier analogue.
+#1631).
 
 ## The *Executed — …* past-tense one-liner
 
@@ -35,10 +53,9 @@ the same PR) from future-tense to past-tense:
 - **After**: `- [x] **Rec. 5 executed**: native-side default
   raised to 1 GiB in #1617; see that PR for caller impact.`
 
-Keep the `- [x]` checkbox (for `scripts/check-inventory-links.sh`
-compatibility). Keep the rec. number (`**Rec. 5 executed**`) so
-the planner can cross-reference. One sentence on caller impact
-with a PR-number link.
+Keep the `- [x]` checkbox. Keep the rec. number
+(`**Rec. 5 executed**`) so the planner can cross-reference. One
+sentence on caller impact with a PR-number link.
 
 ## Half-closed two-step
 
@@ -65,18 +82,6 @@ param-add PR goes up.
 **Precedent**: #1610 (half-closed, default `0`) → #1631
 (default-flip) was the 2026-04-22 Rec. 2 execution. #1630 is
 the counter-example (new param, no callers, one-step).
-
-## Line-anchor drift
-
-Every inventory-touching PR should run
-`scripts/check-inventory-links.sh` before PR creation. If the
-warning count increases, cite the new warnings in the PR body
-(they may be legitimate — e.g., if the PR moves an `IO.userError`
-emission site).
-
-The drift detector's warning baseline is *"non-zero and
-growing slowly"*. Do not block on it unless the warnings point
-to a genuine `grep`-to-line mismatch.
 
 ## Single author per wave
 
@@ -155,14 +160,14 @@ open.
   guard** (all slots throw the same error wording family,
   differing only in slot-name suffix), and
 - The fixture wave proceeds **one slot per PR** (per the
-  *one-PR-per-bullet* cadence above), and
+  *one-bullet-per-PR* cadence above), and
 - The **slot count is known up front** (so terminal closure has a
   well-defined endpoint).
 
 **When it is not**:
 
-- One-shot bookkeeping PRs (placeholder substitutions, line-anchor
-  re-anchoring, PR-number sweeps) — these touch the inventory but
+- One-shot bookkeeping PRs (placeholder substitutions,
+  PR-number sweeps) — these touch the inventory but
   do not tighten a carve-out.
 - Paired-review entries — these record observations on a landed
   PR; they do not modify the carve-out.
@@ -233,10 +238,8 @@ complementary angles: this skill is for the *inventory-row
 companion* of the naming choice; `malformed-fixture-builder` is
 for the *builder script structure* that produces the fixture.
 
-Origin: paired-review #1963 §E.8.e and §E.8.f
-([progress/20260425T072229Z_3a21da69-paired-review-1957.md:782-810](/home/kim/lean-zip/progress/20260425T072229Z_3a21da69-paired-review-1957.md))
-flagged both observations after the post-#1928 wave's terminal
-closure.
+Origin: paired-review #1963 §E.8.e and §E.8.f flagged both
+observations after the post-#1928 wave's terminal closure.
 
 ## Scope — what this skill does not cover
 

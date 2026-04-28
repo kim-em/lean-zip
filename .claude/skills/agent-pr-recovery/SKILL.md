@@ -187,8 +187,8 @@ If the actual count is 0 or very different from the issue, use
 In addition to counts, the following issue-body claims go stale quickly
 and should be re-checked against current master before starting:
 
-- **Line numbers in referenced files.** `Zip/Archive.lean:477` or
-  `Zip/Tar.lean:537` style pointers silently drift when unrelated PRs
+- **Line numbers in referenced files.** `Zip/Archive.lean` or
+  `Zip/Tar.lean` style pointers silently drift when unrelated PRs
   add or remove lines. Grep the referenced symbol (`readEntryData`,
   `extractTarGzNative`, etc.) instead of trusting the line number. The
   Track E inventory PR (#1556, session `ef6bd988`) explicitly noted:

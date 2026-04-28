@@ -51,7 +51,7 @@ use `exfalso; bv_decide` to close the goal. The SAT solver recognizes that
 **Common pattern — `if x == 0 then a else b = c` on `UInt32`:**
 prefer `bv_decide`. It handles the case-split inline without manual
 `by_cases`. Precedent: the `raw_eq` helper inside `crc32_append` at
-[`Zip/Native/Crc32.lean:103`](../../../Zip/Native/Crc32.lean) folds
+[`Zip/Native/Crc32.lean`](../../../Zip/Native/Crc32.lean) folds
 the post-init zero-check into a single XOR via one `bv_decide`.
 
 ## UInt8→UInt32 Conversion for `bv_decide`
@@ -117,7 +117,7 @@ the project's first user; CRC32 could adopt it on its next
 refactor.
 
 The concrete `UInt32`-specific instance lives as a `private`
-helper at [`Zip/Spec/Adler32.lean:108`](../../../Zip/Spec/Adler32.lean) —
+helper at [`Zip/Spec/Adler32.lean`](../../../Zip/Spec/Adler32.lean) —
 `pack_toNat_of_bounds {a b : Nat} (ha : a < 65536) (hb : b < 65536) :`
 `(pack (a, b)).toNat = a + b * 65536`. Promote it to a public
 `Nat`-level lemma the next time a third caller needs it.

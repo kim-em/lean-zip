@@ -87,7 +87,7 @@ between the post-#1931 and post-#1971 waves on 2026-04-25:
   wave block kept the 15-PR enumeration as written in the
   issue body and explicitly **deferred** #1967 / #1968 /
   #1969 to the next wave, with the rationale recorded at
-  [`progress/20260425T082152Z_1f65eccf-summarize-post-1931.md:46-51`](/home/kim/lean-zip/progress/20260425T082152Z_1f65eccf-summarize-post-1931.md).
+  [`progress/20260425T082152Z_1f65eccf-summarize-post-1931.md`](/home/kim/lean-zip/progress/20260425T082152Z_1f65eccf-summarize-post-1931.md).
 - **PR [#1990](https://github.com/kim-em/lean-zip/pull/1990)**
   (next wave, post-#1971) absorbed the three tail PRs at the
   start of its 11-PR enumeration. The wave-count audit-trail
@@ -110,7 +110,7 @@ the start of its enumeration, e.g.:
 
 > *Tail-deferred from prior wave (PRs #N1, #N2, #N3 — landed
 > 07:45–08:08Z, deferred by PR #M per
-> `progress/.../...md:46-51`).*
+> `progress/.../...md` (search for "tail-deferred" header)).*
 
 Both halves of the deferral are PR-numbered and timestamped,
 so the audit trail closes without any silent scope expansion.
