@@ -301,7 +301,6 @@ theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
         by_cases hi8 : i < 8
         · rw [List.getElem_append_left (by simp only [List.length_ofFn]; exact hi8)]
           simp only [List.getElem_ofFn, show i < (b :: rest).length from by omega, ↓reduceDIte]
-          rfl
         · rw [List.getElem_append_right (by simp only [List.length_ofFn]; omega)]
           simp only [List.length_ofFn]
           have hih := ih _ (drop8_cons_length_lt b rest) ((b :: rest).drop 8) rfl

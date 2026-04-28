@@ -14,27 +14,51 @@ known gaps that sit outside the formally verified codec core.
 
 ### Lean Runtime: `ByteArray`, scalar-array allocation, `IO`
 
-- Status: `upstream-risk`
+- Status: `guarded-locally` (was `upstream-risk` while
+  https://github.com/leanprover/lean4/issues/13388 was open; closed by
+  https://github.com/leanprover/lean4/pull/13392, released in v4.30.0-rc2;
+  the project's `lean-toolchain` is now pinned at v4.30.0-rc2 or later)
 - Why trusted: all Lean code ultimately relies on runtime allocation and
   `IO` primitives for `ByteArray`, `Handle.read`, and stream operations.
-- Current local guardrails:
+- Current local guardrails (kept as defense-in-depth even after the
+  upstream fix; see *"Re-evaluation after v4.30.0-rc2"* below):
   - `Zip/Archive.lean` checks `n.toUSize.toNat == n` before `Handle.read`
   - `Zip/Archive.lean` checks file-bounds for central directory before reading it
   - native inflate APIs carry explicit `maxOutputSize` bounds
-- Known concern:
-  - crafted oversized reads can become runtime-allocation hazards if
-    unchecked sizes reach `Handle.read`
+- Known concern (historical):
+  - crafted oversized reads triggered a heap-buffer overflow in the
+    runtime's `lean_io_prim_handle_read` allocation path. Closed in
+    v4.30.0-rc2 by adding checked arithmetic on every relevant
+    allocation site so overflow now throws OOM instead of corrupting
+    the heap.
 - Upstream tracking:
-  - Report: no upstream link yet — local tracking only. The April 2026
-    report against Lean runtime allocation/read paths is recorded in
-    this repository (see *"Current local guardrails"* above and
-    *"Local guard inventory for `Handle.read` and `Stream.read`"*
-    below) but has not yet been filed as a leanprover/lean4 issue.
-  - Status: not yet reported upstream (as of 2026-04-22). An honest
-    search of `progress/`, the lean-zip issue tracker, and
-    leanprover/lean4 (`allocation`, `ByteArray`, `Handle.read`
-    queries) did not find a matching upstream issue. Re-triage
-    required once one is filed.
+  - Bug report: https://github.com/leanprover/lean4/issues/13388 —
+    *"Buffer overflow in `lean_io_prim_handle_read`"*, filed
+    2026-04-13 by @kiranandcode with a 4-line MWE reproducing under
+    valgrind. The bug surfaced via Kiran Gopinathan's fuzzing of
+    lean-zip — see https://kirancodes.me/posts/log-who-watches-the-watchers.html
+  - Fix: https://github.com/leanprover/lean4/pull/13392 — *"fix: file
+    read buffer overflow"*, merged 2026-04-13 by @hargoniX. Adds
+    checked arithmetic on all relevant allocation paths in
+    `lean_io_prim_handle_read`; overflow now throws OOM instead of a
+    heap overflow.
+  - Release: https://github.com/leanprover/lean4/releases/tag/v4.30.0-rc2
+    (2026-04-17). The project's `lean-toolchain` is now pinned at this
+    version (see the file at the repo root).
+  - Status: closed upstream and consumed by this repository.
+- Re-evaluation after v4.30.0-rc2: the local `Nat → USize` roundtrip
+  check (`n.toUSize.toNat == n`) was authored as a workaround for the
+  upstream truncation hazard. Now that overflow throws OOM instead of
+  corrupting memory, the check is no longer load-bearing for memory
+  safety, but it is kept as defense-in-depth because (a) it produces a
+  named, catchable error before allocation rather than a late OOM,
+  (b) it is a no-op on 64-bit platforms and a meaningful guard on any
+  future 32-bit `USize` target, and (c) the cost is negligible. The
+  `assertSpanInFile` checks, `maxCentralDirSize` / `maxEntrySize` caps,
+  CD-vs-LH consistency checks, and native `maxOutputSize` caps were
+  never compensating for the runtime bug — they bound metadata-driven
+  allocation against bombs and are unaffected by the upstream fix. No
+  guardrails are dropped by this bump.
   - Local regression coverage (fixtures + assertion sites that guard
     this attack surface today):
     - `testdata/zip/malformed/oversized-compressed-size.zip` —
@@ -74,10 +98,15 @@ known gaps that sit outside the formally verified codec core.
     - see *"Local guard inventory for `Handle.read` and `Stream.read`"*
       below for the per-site audit of what protections are currently in
       place
-  - file or link the upstream Lean runtime issue so the *"Report"* and
-    *"Status"* fields in *"Upstream tracking"* above can be updated
-    with a concrete target
+  - re-run the original fuzz harness from
+    https://kirancodes.me/posts/log-who-watches-the-watchers.html
+    against current master on v4.30.0-rc2 to confirm closure of the
+    runtime buffer-overflow class
 - Recent wins:
+  - upstream `lean_io_prim_handle_read` buffer-overflow fix consumed
+    via the v4.30.0-rc2 toolchain bump — closes the previous
+    `upstream-risk` status; no local guardrails dropped (see
+    *"Re-evaluation after v4.30.0-rc2"* above)
   - oversized ZIP64 compressed-size fixture — PR #1543
     (`testdata/zip/malformed/oversized-zip64-compressed-size.zip`)
   - oversized ZIP64 uncompressed-size fixture — PR #1544
@@ -1317,9 +1346,13 @@ Per-callsite audit of every `Handle.read`, `Stream.read`, and
 `Zip/Archive.lean` and `Zip/Tar.lean`. This documents which guards
 **already run before** each read, so a reader does not have to trace
 back through the source to confirm that every metadata-driven read is
-protected. The *"Failure mode"* column states the residual
-upstream-runtime risk for each site — it is the behaviour that would
-surface if the caller bypassed the guard.
+protected. The *"Failure mode"* column states the behaviour that would
+surface if the caller bypassed the guard. Since v4.30.0-rc2 the
+runtime's own `lean_io_prim_handle_read` does checked arithmetic on
+allocation paths and raises OOM on overflow rather than corrupting the
+heap, so the local guards primarily exist to surface a clean,
+catchable error before allocation rather than to prevent memory
+corruption.
 
 The creator-side `h.read` in `Zip/Tar.lean` `create` at
 [Zip/Tar.lean:599](/home/kim/lean-zip/Zip/Tar.lean:599) is **not**
