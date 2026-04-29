@@ -811,9 +811,9 @@ Summary — what this pattern catches and what it does not:
     Info-ZIP / 7-Zip legitimately set them on `method == 8` payloads)
     are explicitly out of scope; the mask `0xD780` is disjoint from
     the unsupported-feature mask `0x2071` (bits 0/4/5/6/13) covered
-    by PR #1824 (bit 5, already landed) and the in-flight per-bit
-    feature series (issues #1762, #1817, #1818). With PR #1819's
-    `0xFFFE` `internalAttrs` mask, PR #2237's `0xD780` `flags`
+    by PR #1824 (bit 5, already landed; closed #1817) and the
+    in-flight per-bit feature series (issues #1762, #1818). With
+    PR #1819's `0xFFFE` `internalAttrs` mask, PR #2237's `0xD780` `flags`
     reserved-mask and the bit-5 `0x0020` flags-mask, the writer-zero
     single-`UInt16` column and the reserved/unsupported flag-bits
     columns sit as a contiguous CD-parse early-reject block. Sibling
