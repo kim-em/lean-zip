@@ -265,7 +265,7 @@ Summary — what this pattern catches and what it does not:
     sibling fuzz / sanitizer recipe above.
 - Recent wins:
   - **`MinizOxide.compress` level argument now clamped to 0–9** in
-    PR #TBD-VERIFY-PR — the public `compress` is a thin wrapper that
+    PR #2378 — the public `compress` is a thin wrapper that
     clamps `level` via `if level > 9 then 9 else level` before
     delegating to a `private opaque compressUnsafe` extern; smoke
     tests assert levels 9, 10, and 255 produce byte-identical
