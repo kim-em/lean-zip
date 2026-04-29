@@ -172,3 +172,6 @@ lean_exe bench where
 
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
+
+lean_exe fuzz_handle_read where
+  root := `ZipFuzzHandleRead

@@ -98,11 +98,24 @@ known gaps that sit outside the formally verified codec core.
     - see *"Local guard inventory for `Handle.read` and `Stream.read`"*
       below for the per-site audit of what protections are currently in
       place
-  - re-run the original fuzz harness from
-    https://kirancodes.me/posts/log-who-watches-the-watchers.html
-    against current master on v4.30.0-rc2 to confirm closure of the
-    runtime buffer-overflow class
 - Recent wins:
+  - ✅ in-repo deterministic `Handle.read` regression harness
+    ([`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean)
+    / [`ZipFuzzHandleRead.lean`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
+    / [`scripts/fuzz-handle-read.sh`](/home/kim/lean-zip/scripts/fuzz-handle-read.sh))
+    — *Executed by PR #2385* (no findings under v4.30.0-rc2;
+    replaces the blog-post AFL harness as the forward-looking
+    regression artefact for the `lean_io_prim_handle_read` class).
+    Drives `Archive.list / extract`, `Tar.list / extract`,
+    `Tar.extractTarGz / extractTarGzNative`,
+    `Gzip.decompressStream / decompressFile`, and
+    `RawDeflate.decompressStream` with deterministic xorshift-seeded
+    pathological inputs at sizes {0, 1, 16, 512, 8192, 65536, 131072}
+    and chunk sizes {1, 7, 31, 127, 65535, 65536, 65537}. `lake exe
+    test` runs a 100-iteration fixed-seed smoke check; the
+    `fuzz_handle_read` lake executable takes a wall-clock budget
+    (default 30 s, override via CLI arg or
+    `LEAN_ZIP_FUZZ_HANDLE_READ_SECONDS`).
   - upstream `lean_io_prim_handle_read` buffer-overflow fix consumed
     via the v4.30.0-rc2 toolchain bump — closes the previous
     `upstream-risk` status; no local guardrails dropped (see
