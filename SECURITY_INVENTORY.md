@@ -280,7 +280,7 @@ Summary — what this pattern catches and what it does not:
     needed before `MinizOxide.compress` / `MinizOxide.decompress`
     leave bench-only scope. Scaffolded as
     [`scripts/sanitize-rust-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
-    in PR #TBD-VERIFY-PR (paragraph above under *Current local
+    in PR #2383 (paragraph above under *Current local
     guardrails*); the recipe body is TODO, deferred to a sibling
     follow-up issue when a Linux + nightly-Rust worker host is
     available.
