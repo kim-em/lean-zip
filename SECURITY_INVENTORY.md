@@ -191,6 +191,92 @@ Summary — what this pattern catches and what it does not:
   2. The streaming entry points (`lean_gzip_deflate_push`, `lean_gzip_deflate_finish`, `lean_gzip_inflate_push`) accept no output-size parameter at all. Their per-call output buffer is bounded only by `grow_buffer`'s `SIZE_MAX/2` guard; whole-archive bounding is the caller's problem.
   3. zlib's own internal allocations (`inflateInit2` / `deflateInit2` stream state, Huffman tables, sliding window) are made via zlib's `zalloc` (default `malloc`). They are not enumerated here — they live inside zlib itself and sit under the "upstream-risk" portion of this entry's trust status.
 
+### miniz_oxide via Rust
+
+- Components:
+  [c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c),
+  [rust/miniz_oxide_shim/](/home/kim/lean-zip/rust/miniz_oxide_shim/),
+  [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean)
+- Status: `guarded-locally`
+- Why trusted: an opt-in pure-Rust DEFLATE implementation
+  (`miniz_oxide` v0.8) exposed through a `staticlib` Cargo crate
+  (`rust/miniz_oxide_shim/`) and a thin C-ABI shim
+  (`c/miniz_oxide_ffi.c`). Used by the Track D bench harness as a
+  runtime/ratio comparator alongside zlib, libdeflate, and zopfli (see
+  [BENCH.md](/home/kim/lean-zip/BENCH.md) for the toolchain matrix).
+  `lake build` auto-detects `cargo` on `PATH` and links
+  `libminiz_oxide_shim.a` when present; the `MINIZ_OXIDE_DISABLE=1`
+  build-time knob and a stub-fallback path keep `lake build` working
+  on minimal toolchains. The public `MinizOxide.compress` /
+  `MinizOxide.decompress` Lean APIs run miniz_oxide on whole-buffer
+  inputs and would process attacker-controlled bytes if a downstream
+  caller wired them into a non-bench codepath. The only callers today
+  are [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean) (the
+  `compress-miniz` / `inflate-miniz` operations) and the smoke tests
+  in
+  [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean);
+  the module is **not** part of the verified DEFLATE pipeline.
+- Current local guardrails:
+  - opt-in by default: build skipped when `cargo` is absent or
+    `MINIZ_OXIDE_DISABLE=1` is set; the C shim falls back to an
+    `IO.userError` containing `"miniz_oxide: not built with Rust
+    support"`, which the smoke tests in
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    treat as a clean skip
+  - `MinizOxide.decompress` carries a `maxDecompressedSize` cap
+    (default 1 GiB; pass `0` to opt into bomb-unsafe unlimited mode);
+    overruns raise `IO.userError` containing `"exceeds limit"`,
+    matching the wording family used by `RawDeflate.decompress` so
+    callers can dispatch on a single substring
+  - the Rust shim is built with `panic = "abort"` so panics inside
+    `miniz_oxide` cannot unwind across the FFI boundary
+  - the shim allocates output as `Box<[u8]>` and exposes
+    `lean_miniz_oxide_free` so the Lean side never frees a
+    Rust-allocated buffer through libc `free`, avoiding any
+    Rust-allocator vs. libc-allocator mismatch
+  - the Lean side copies the shim's output into a fresh
+    `lean_alloc_sarray` buffer in `c/miniz_oxide_ffi.c` and then calls
+    `lean_miniz_oxide_free`, so the Rust-allocated buffer is released
+    on every successful return
+- Missing work:
+  - **No fuzz / ASan / UBSan recipe currently covers the Rust crate
+    or its C-ABI shim.** The existing
+    [`scripts/sanitize-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-ffi.sh)
+    and
+    [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh)
+    recipes target `c/zlib_ffi.c` and the FFI inflate decoders only;
+    they do not exercise `c/miniz_oxide_ffi.c` or the
+    `libminiz_oxide_shim.a` static library. A sibling recipe is
+    needed before `MinizOxide.compress` / `MinizOxide.decompress`
+    leave bench-only scope. Sketch: build the Rust crate under
+    `RUSTFLAGS="-Zsanitizer=address"` (nightly Rust) and link the
+    sanitised static lib into the existing fuzz-inflate driver so
+    miniz_oxide-decompressed buffers flow through the same xorshift
+    payload generator as the zlib path.
+  - **No upstream-tracking entry pinning the `miniz_oxide` crate
+    version against a known-good audit.** The crate is reputable but
+    is consumed transitively through `cargo` and inherits whatever
+    Rust / `miniz_oxide` versions are on the build host;
+    `Cargo.lock` records the resolved version but is not currently
+    treated as a security-critical artefact in this inventory.
+  - **`MinizOxide.compress` does not clamp the level argument.** The
+    Lean signature accepts a `UInt8` and the docstring documents an
+    intended 0–9 cap, but neither the Lean wrapper nor the C/Rust
+    shim enforces it; out-of-range values are passed through to
+    `miniz_oxide::deflate::compress_to_vec`. Bench callers always
+    pass 0–9, but a downstream caller wiring this API into a
+    non-bench codepath should wrap with their own clamp.
+  - **If a downstream caller wires `MinizOxide.compress` /
+    `MinizOxide.decompress` into a non-bench codepath, this row's
+    `guarded-locally` status must be re-evaluated** alongside the
+    sibling fuzz / sanitizer recipe above.
+- Recent wins:
+  - Track D Phase 0c initial wiring — PR #2356
+    (`Zip/MinizOxide.lean`, `c/miniz_oxide_ffi.c`,
+    `rust/miniz_oxide_shim/` static-lib Cargo crate, `BENCH.md`
+    comparator-toolchain matrix, smoke tests with disabled-toolchain
+    skip path)
+
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
 - Status: `proved-in-repo`
