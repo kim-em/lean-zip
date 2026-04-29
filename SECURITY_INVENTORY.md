@@ -276,6 +276,84 @@ Summary — what this pattern catches and what it does not:
     `rust/miniz_oxide_shim/` static-lib Cargo crate, `BENCH.md`
     comparator-toolchain matrix, smoke tests with disabled-toolchain
     skip path)
+- Paired review of PR #2356 (Track D Phase 0c initial wiring):
+  - **Design fidelity.** The merged PR satisfies every enumerated
+    deliverable from the closing human-oversight directive #2349:
+    (1) the `rust/miniz_oxide_shim/` `staticlib` Cargo crate with C-ABI
+    surface (`lean_miniz_oxide_compress` / `lean_miniz_oxide_decompress`
+    / `lean_miniz_oxide_free` at
+    [rust/miniz_oxide_shim/src/lib.rs](/home/kim/lean-zip/rust/miniz_oxide_shim/src/lib.rs));
+    (2) the thin C shim
+    [c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c);
+    (3) the Lean module
+    [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean)
+    paralleling [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean);
+    (4) `lakefile.lean` cargo-detection + `MINIZ_OXIDE_DISABLE` /
+    `MINIZ_OXIDE_LDFLAGS` knobs (paralleling `ZLIB_LDFLAGS`);
+    (5) [shell.nix](/home/kim/lean-zip/shell.nix) adds `pkgs.cargo` /
+    `pkgs.rustc`; (6) `compress-miniz` / `inflate-miniz` operations in
+    [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean); (7) smoke tests
+    in
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    covering miniz↔miniz, miniz→zlib, zlib→miniz, level-0 stored,
+    empty input, and the `maxDecompressedSize` cap; (8) a comparator
+    toolchain matrix in [BENCH.md](/home/kim/lean-zip/BENCH.md).
+  - **Allocator-mismatch verification.** The Rust shim allocates output
+    via `compress_to_vec` / `decompress_to_vec_with_limit`, converts
+    the `Vec<u8>` to `Box<[u8]>` via `into_boxed_slice`, and hands the
+    raw pointer + length to the caller through `Box::into_raw`. The
+    matching `lean_miniz_oxide_free` reconstructs `Box::from_raw` on
+    `slice::from_raw_parts_mut(ptr, len)` so the buffer is released
+    through the Rust global allocator — never through libc `free`. On
+    the Lean side, [c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c)
+    copies the Rust-allocated bytes into a fresh `lean_alloc_sarray`
+    buffer with a guarded `if (out_len > 0) memcpy(...)` (so the empty
+    case is well-defined) and then immediately calls
+    `lean_miniz_oxide_free(out, out_len)` on every successful path.
+    No Lean-side codepath takes ownership of the Rust pointer, and
+    `lean_alloc_sarray` panics on OOM rather than returning `NULL`, so
+    there is no allocation-failure window in which the Rust buffer
+    would leak. Round-trip is symmetric and exact.
+  - **`panic = "abort"` invariant.** The Cargo `[profile.release]`
+    block at
+    [rust/miniz_oxide_shim/Cargo.toml](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.toml)
+    declares `panic = "abort"` (alongside `lto = "thin"`,
+    `codegen-units = 1`, `opt-level = 3`). With abort-on-panic the
+    Rust runtime cannot unwind across the C ABI boundary; every
+    `unsafe extern "C"` entry point in `src/lib.rs` is also annotated
+    `#![deny(unsafe_op_in_unsafe_fn)]`, so the unsafe slice / pointer
+    operations are explicitly scoped. The shim takes care to validate
+    `out_ptr.is_null()` / `out_len.is_null()` and the
+    `input.is_null() && input_len != 0` corner before constructing any
+    slice.
+  - **Build-skip path.** `lakefile.lean`'s `minizOxideEnabled` check
+    short-circuits on `MINIZ_OXIDE_DISABLE=1`, then on
+    `MINIZ_OXIDE_LDFLAGS`, and otherwise probes `cargo --version`. The
+    `miniz_oxide_ffi.o` target only adds `-DHAVE_MINIZ_OXIDE` when
+    that check passes — keeping the C compilation decision and the
+    link decision in lockstep, so `MINIZ_OXIDE_DISABLE=1` rebuilds
+    cannot end up with a shim that references symbols that the link
+    step omits. When `HAVE_MINIZ_OXIDE` is absent, both `*_ffi`
+    entry points return `mk_io_error(MINIZ_DISABLED_MSG)` with the
+    exact substring `"miniz_oxide: not built with Rust support"`.
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)'s
+    `withMiniz` helper matches that substring and emits a noisy skip
+    line so CI on minimal toolchains (no cargo) keeps passing —
+    confirmed locally on the cargo-enabled toolchain by the
+    `MinizOxide tests: OK` line in `lake exe test` output (full build
+    + test passes at the post-merge tree at `8ec9f44`).
+  - **Bench-only scope.** A `MinizOxide\.(compress|decompress)` grep
+    across the tree returns call sites only in
+    [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean) and
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean).
+    [Zip.lean](/home/kim/lean-zip/Zip.lean) does `import Zip.MinizOxide`
+    so the namespace is on the public surface, but no other `Zip/`
+    source consumes either function — `MinizOxide.compress` /
+    `MinizOxide.decompress` remain off the verified DEFLATE pipeline.
+    No non-bench caller appears, so this paired review surfaces no
+    new follow-up issues. The two pre-existing Missing-work bullets
+    above (sanitizer recipe; `Cargo.lock` upstream-tracking pin) are
+    already separately tracked.
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
