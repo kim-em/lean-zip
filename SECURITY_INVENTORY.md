@@ -498,6 +498,122 @@ Summary — what this pattern catches and what it does not:
     [scripts/check-inventory-links.sh](/home/kim/lean-zip/scripts/check-inventory-links.sh)
     pass (d). Substituted in the same paired-review PR (one-line
     bookkeeping fix; see commit log for the substitution rationale).
+- Paired review of PR #2378 (`MinizOxide.compress` level clamp):
+  - **Design fidelity vs. issue #2374.** The merged PR satisfies all
+    four enumerated deliverables from the closing issue:
+    (1) the *preferred* Lean-side clamp shape — the public
+    `compress` is rewritten as a thin wrapper that clamps `level`
+    via `if level > 9 then 9 else level` before delegating to a
+    `private opaque compressUnsafe` extern at
+    [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean);
+    (2) three smoke tests at levels 9, 10, and 255 in
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    asserting byte-identical compressed output (the issue asked for
+    2–3, the PR landed exactly 3); (3) the inventory bullet flip from
+    *Missing work* to *Recent wins* citing PR #2378; (4) the
+    docstring on the public `compress` rewritten to accurately
+    describe the clamp ("values above 9 are clamped to 9 before
+    forwarding to the Rust shim"). The merged tree touches only
+    `Zip/MinizOxide.lean`, `ZipTest/MinizOxide.lean`, and
+    `SECURITY_INVENTORY.md` — the C shim
+    ([c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c))
+    and the Rust crate
+    ([rust/miniz_oxide_shim/](/home/kim/lean-zip/rust/miniz_oxide_shim/))
+    are untouched, so the clamp is purely a Lean-layer wrapper and
+    the FFI symbol `lean_miniz_oxide_compress_ffi` is preserved.
+  - **`compressUnsafe` / `compress` split design.** The extern is
+    `private opaque compressUnsafe (data : @& ByteArray) (level :
+    UInt8) : IO ByteArray` (no default level — the wrapper supplies
+    it), with a docstring that explicitly notes out-of-range values
+    reach miniz_oxide unchanged and directs callers to use
+    `compress` instead. The public `compress` carries the
+    user-facing default (`level : UInt8 := 6`) and the clamp
+    expression `compressUnsafe data (if level > 9 then 9 else
+    level)`. The previous false-claim docstring phrasing *"we cap
+    callers to 0–9 here to match the rest of the bench"* (which
+    held in PR #2371's snapshot but never matched any layer's
+    behaviour) is fully removed; no residual misleading wording
+    survives in the merged tree. The
+    `compressUnsafe`-private/`compress`-public split keeps the
+    unclamped escape hatch module-internal — bench callers that
+    want to probe out-of-range levels deliberately would have to
+    weaken the `private` qualifier in source, making the unclamped
+    path explicitly out of the public contract.
+  - **Smoke-test observability.** (a) The three new assertions sit
+    inside the existing `withMiniz "compress(big)"` skip-guard at
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    so the `MINIZ_OXIDE_DISABLE=1` / missing-cargo path keeps
+    skipping cleanly via the `"miniz_oxide: not built with Rust
+    support"` substring match. (b) The payload is `prng = mkPrngData
+    4096`, the deterministic xorshift32 PRNG payload (default seed
+    `2463534242`) used throughout
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    and sibling bench-comparison tests; a future reviewer can
+    reproduce the expected byte sequence purely from
+    [ZipTest/Helpers.lean](/home/kim/lean-zip/ZipTest/Helpers.lean)
+    without rebuilding the PRNG harness. (c) The byte-identical
+    assertions `mzLevel10.beq mzLevel9` and `mzLevel255.beq
+    mzLevel9` are sharp witnesses of the clamp: without it,
+    `level=10` reaches `miniz_oxide::deflate::compress_to_vec` and
+    produces level-10 output (distinct from level-9 on the PRNG
+    payload), and `level=255` silently wraps to level 0 (stored
+    blocks) which is again byte-different from level 9. The PRNG
+    payload was deliberately chosen over the constant or cyclic
+    fixtures because its compressibility differs across adjacent
+    levels (the dictionary does not saturate at any non-trivial
+    level), so adjacent-level outputs are observably distinct on
+    the unclamped path. The test fails closed if either the Lean
+    wrapper or a future C/Rust-shim rewrite drops the clamp.
+  - **Inventory cross-link integrity.** The Missing-work →
+    Recent-wins bullet flip at *miniz_oxide via Rust* removes the
+    *"`MinizOxide.compress` does not clamp the level argument"*
+    bullet and adds a corresponding *Recent wins* entry titled
+    *"`MinizOxide.compress` level argument now clamped to 0–9"*.
+    The bullet shape matches the
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    *Executed past-tense one-liner* convention (executed past-tense
+    title; closing-PR cross-link; paragraph on caller impact). The
+    PR cross-link uses the merged number `#2378` directly — no
+    `#TBD-VERIFY-PR` <!-- drift-detector: prose mention of the placeholder token in a paired-review finding, not a stale placeholder --> placeholder leaked through (the same
+    substitution discipline that PR #2382 missed and the sibling
+    paired-review surfaced as a one-line bookkeeping fix). The
+    architectural *"If a downstream caller wires …"* re-evaluation
+    bullet is correctly retained under *Missing work* — it is a
+    standing reminder, not a closeable gap. Confirmed
+    [scripts/check-inventory-links.sh](/home/kim/lean-zip/scripts/check-inventory-links.sh)
+    reports `errors=0, warnings=0` against this paired-review
+    branch's tree. Soft observation, not blocking: the merged
+    Recent-wins bullet does not include the explicit *"Closes the
+    …"* sentence that the sibling PR #2382 Cargo.lock Recent-wins
+    bullet ended with — the skill text does not strictly mandate
+    that sentence (only the post-hoc reading in PR #2382's
+    paired-review listed it as a fourth element), so this is
+    cross-bullet drift inside the same subsection rather than a
+    convention violation, and a future inventory edit can fold in a
+    one-line addition cheaply.
+  - **Pattern reusability.** The `private opaque …Unsafe` extern +
+    thin `def` clamp wrapper is the **first instance in this
+    codebase** — a `grep -r "private opaque" Zip/` returns only
+    [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean),
+    and `grep -r "Unsafe\|private opaque" .claude/skills/` returns
+    nothing. The pattern is documented only in the docstring on
+    `compressUnsafe` itself ("Use `compress` instead — it clamps
+    `level` to the documented 0–9 range before calling this
+    function") and on the public `compress` wrapper. The pattern is
+    plausibly recurrent for any future TCB-boundary clamp where the
+    Lean signature must enforce a tighter range than the underlying
+    FFI accepts (the issue body specifically called out future
+    `decompress` size limits as a likely candidate, though the
+    current `MinizOxide.decompress` already enforces its
+    `maxDecompressedSize` cap inside the Rust shim's
+    `decompress_to_vec_with_limit`, not via a Lean-side wrapper).
+    Decision: at N=1 site the pattern is sufficiently
+    self-explanatory at the call site that lifting it into a skill
+    would be premature abstraction — the existing docstrings carry
+    enough context for a future reader. If a second site adopts
+    the same shape, that PR is the right point to extract a skill
+    entry; this paired-review surfaces no follow-up issue for skill
+    extraction today.
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
