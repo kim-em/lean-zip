@@ -135,18 +135,23 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   -- "hello.txt" entry. Existing guards in `parsePaxRecords` silently
   -- skip the PAX block; listing should return just the regular entry.
   -- `pax-path-nul-in-value.tar` (PR #1866, `path` slot) and
-  -- `pax-linkpath-nul-in-value.tar` (this PR, `linkpath` slot) together
-  -- close the 2-slot PAX value-side override family at 2/2 — both
-  -- exercise the NUL-byte guard on `valueBytes` so neither smuggled
-  -- override reaches `applyPaxOverrides`. The `path` arm is verified
-  -- by the loop's `entries[0]!.path == "hello.txt"` assertion; the
-  -- `linkpath` arm requires an additional per-slot check on
+  -- `pax-linkpath-nul-in-value.tar` (PR #1979, `linkpath` slot)
+  -- exercise the NUL-byte guard on `valueBytes`;
+  -- `pax-nul-in-key.tar` (this PR, `keyBytes` arm) closes the
+  -- third per-arm position of `parsePaxRecords`'s NUL-byte guard
+  -- family at 3/3 (1 keyBytes + 2 valueBytes). The keyBytes arm is
+  -- defense-in-depth — `applyPaxOverrides`'s case match drops any
+  -- NUL-bearing key regardless of the guard — so the loop's
+  -- `entries[0]!.path == "hello.txt"` assertion is sufficient for
+  -- the keyBytes fixture; no per-slot follow-up needed. The
+  -- `linkpath` arm still requires an additional per-slot check on
   -- `entries[0]!.linkname` (added immediately after the loop).
   for fixture in #["pax-oversized-length.tar", "pax-truncated-record.tar",
                     "pax-invalid-utf8-key.tar", "pax-invalid-utf8-value.tar",
                     "pax-inconsistent-length.tar",
                     "pax-path-nul-in-value.tar",
-                    "pax-linkpath-nul-in-value.tar"] do
+                    "pax-linkpath-nul-in-value.tar",
+                    "pax-nul-in-key.tar"] do
     let paxData ← readFixture s!"tar/malformed/{fixture}"
     let paxPath ← writeFixtureTmp fixture paxData
     let entries ← IO.FS.withFile paxPath .read fun h =>
@@ -449,6 +454,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "pax-inconsistent-length.tar",
              "pax-linkpath-nul-in-value.tar",
              "pax-path-nul-in-value.tar",
+             "pax-nul-in-key.tar",
              "pax-duplicate-path.tar",
              "gnu-longname-truncated.tar", "gnu-longlink-truncated.tar",
              "gnu-longname-no-terminator.tar", "gnu-longname-invalid-utf8.tar",

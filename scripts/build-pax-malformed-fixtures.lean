@@ -20,6 +20,7 @@ Output (byte-deterministic):
 - testdata/tar/malformed/pax-inconsistent-length.tar
 - testdata/tar/malformed/pax-path-nul-in-value.tar
 - testdata/tar/malformed/pax-linkpath-nul-in-value.tar
+- testdata/tar/malformed/pax-nul-in-key.tar
 - testdata/tar/malformed/pax-duplicate-path.tar
 -/
 
@@ -110,6 +111,23 @@ def fixturePathNulInValue : ByteArray :=
 def fixtureLinkpathNulInValue : ByteArray :=
   "18 linkpath=a".toUTF8 ++ ByteArray.mk #[0x00] ++ "b/c\n".toUTF8
 
+/-- PAX record `"8 a\x00b=v\n"` — a record whose KEY carries an embedded
+    NUL byte. `String.fromUTF8?` accepts U+0000 as valid UTF-8, so without
+    the NUL guard on `keyBytes` at `parsePaxRecords` the record would
+    reach `applyPaxOverrides`, where the case match on `key` only
+    handles the fixed string set `{"path", "linkpath", "size", "mtime",
+    "uid", "gid", "uname", "gname"}` and silently drops a NUL-bearing
+    key. The guard is therefore defense-in-depth: the keyBytes arm
+    closes the third per-arm position of `parsePaxRecords`'s NUL family
+    (3/3 = 1 keyBytes + 2 valueBytes), pinning the guard's existence so
+    a future fallback like a prefix-match for namespace-style keys would
+    not silently re-open the smuggle. Sibling pattern: the UStar `gname`
+    slot (PR #1957) — same fixture-only, defense-in-depth, family-closing
+    shape. Record size 8 = 1 digit-prefix `"8"` + 1 space + 3 key
+    `"a\x00b"` (incl. NUL) + 1 `"="` + 1 value `"v"` + 1 newline. -/
+def fixtureKeyNulInKey : ByteArray :=
+  "8 a".toUTF8 ++ ByteArray.mk #[0x00] ++ "b=v\n".toUTF8
+
 /-- PAX data with two well-formed `path=` records — a parser-differential
     smuggling vector where a lenient (first-wins) reader takes
     `"safe.txt"` while a strict (last-wins, APPNOTE-silent on order)
@@ -134,5 +152,6 @@ def main : IO Unit := do
   buildPaxMalformedFixture fixtureInconsistentLength (outDir / "pax-inconsistent-length.tar")
   buildPaxMalformedFixture fixturePathNulInValue (outDir / "pax-path-nul-in-value.tar")
   buildPaxMalformedFixture fixtureLinkpathNulInValue (outDir / "pax-linkpath-nul-in-value.tar")
+  buildPaxMalformedFixture fixtureKeyNulInKey (outDir / "pax-nul-in-key.tar")
   buildPaxMalformedFixture fixtureDuplicatePath (outDir / "pax-duplicate-path.tar")
-  IO.println "Built 8 malformed PAX fixtures under testdata/tar/malformed/."
+  IO.println "Built 9 malformed PAX fixtures under testdata/tar/malformed/."
