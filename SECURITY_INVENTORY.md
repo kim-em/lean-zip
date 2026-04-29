@@ -572,7 +572,10 @@ Summary — what this pattern catches and what it does not:
     current snapshot line matches the regex exactly, and the
     snapshot-line shape is owned by the same inventory subsection
     that the script reads, so drift between the two is already
-    bounded by the same PR.
+    bounded by the same PR. *Superseded by PR #2396 (paired-review
+    subsection below): the follow-up landed as the Option-A explicit
+    `parser regex mismatch` WARNING, and the parser-fail-open path no
+    longer presents as a blank-`expected:` DRIFT.*
   - **Sibling design parity vs. `scripts/check-c-allocations.sh`.**
     Both scripts: `set -u` (no `-e` — the script never aborts on a
     non-zero subshell exit, so a single missing input never fails
@@ -862,6 +865,140 @@ Summary — what this pattern catches and what it does not:
     builds on. The follow-up is a separate `agent-plan` `feature` issue
     so it appears in `coordination list-unclaimed --label feature` and
     can be claimed by the next Linux + nightly-Rust worker host.
+- Paired review of PR #2396 (Cargo.lock drift-detector parser tightening):
+  - **Design fidelity vs. issue #2388.** The merged PR satisfies all
+    four enumerated deliverables from the closing issue:
+    (1) **Option A landed** — the closing issue offered Option A
+    (explicit `parser regex mismatch` WARNING) or Option B (loosen
+    the sed regex to accept whitespace variation), and called Option
+    A *preferred* because it makes parse failures observably distinct
+    from real version drift; the merged tree adopts Option A
+    (`scripts/check-cargo-lock.sh`, the new guard block immediately
+    after the two `sed -nE` extractions) and Option B is not present
+    in the diff;
+    (2) **advisory `exit 0` semantics preserved on every path** —
+    confirmed by reading the script top-to-bottom: every `exit`
+    statement in `scripts/check-cargo-lock.sh` is `exit 0` (the
+    `--help` block, the `LOCK`/`INVENTORY` not-found guards, the
+    no-snapshot-line `WARNING` block, the new parser-mismatch
+    `WARNING` block, and the final `exit 0` after the
+    matches/DRIFT branch); no path raises a non-zero exit, matching
+    the *trip wire, not a fence* docstring framing inherited from
+    sibling [scripts/check-c-allocations.sh](/home/kim/lean-zip/scripts/check-c-allocations.sh);
+    (3) **existing `WARNING — no "Snapshot as of …" line found`
+    path preserved** — the `if [ -z "$snap_line" ]` block is
+    unchanged and still emits the original *"no `Snapshot as of …`
+    line found"* diagnostic, so the no-line failure mode and the
+    new parser-mismatch failure mode remain distinct (different
+    diagnostics, different code paths);
+    (4) **new docstring smoke test added covering the
+    parser-mismatch path** — the original single-bullet *"manual
+    smoke test"* docstring at `scripts/check-cargo-lock.sh:28-31`
+    was reshaped into a two-numbered-bullet *"manual smoke tests"*
+    block at `scripts/check-cargo-lock.sh:28-37`, with bullet (1)
+    preserving the original drift-detection recipe and bullet (2)
+    introducing the new parser-mismatch recipe (replace the single
+    space between the closing backtick and the version triple with
+    two spaces; expect a *"parser regex mismatch"* WARNING block
+    followed by exit 0; revert).
+  - **Parser-guard behaviour.** Reproduced the four manual smoke
+    tests the author documented in commit e39bf1c against the
+    post-merge tree at `652a14d`:
+    (a) clean tree → *"`rust/miniz_oxide_shim/Cargo.lock` matches
+    snapshot (miniz_oxide 0.8.9, adler2 2.0.1)"* + exit 0 — pass;
+    (b) extra-whitespace edit (snapshot line set to
+    ``` `miniz_oxide`  0.8.9, `adler2` 2.0.1 ``` with two spaces
+    between the closing backtick and `0.8.9`) →
+    *"WARNING — snapshot line found in SECURITY_INVENTORY.md but
+    could not extract miniz_oxide / adler2 versions (parser regex
+    mismatch — check whitespace / punctuation in the snapshot
+    line)"* followed by *"snapshot line: …"* echoing the offending
+    line + exit 0 — pass;
+    (c) wrong-version edit (snapshot line set to
+    ``` `miniz_oxide` 9.9.9, `adler2` 2.0.1 ```) →
+    *"DRIFT … expected: miniz_oxide 9.9.9, adler2 2.0.1 / current:
+    miniz_oxide 0.8.9, adler2 2.0.1"* + exit 0 — pass (DRIFT path
+    still distinguishes from parser-mismatch path; non-blank
+    `expected:` field as before);
+    (d) revert → *"matches snapshot"* + exit 0; `git diff
+    SECURITY_INVENTORY.md` clean — pass.
+    The commit message claims the WARNING block now echoes the
+    offending snapshot line underneath the diagnostic
+    (`echo "  snapshot line: $snap_line"`); confirmed against the
+    actual output in (b) above. None of the four paths regress.
+  - **Docstring smoke-test reshape.** The reshape from a single
+    bullet to two numbered bullets at
+    `scripts/check-cargo-lock.sh:28-37` is faithful to the new
+    behaviour: bullet (1) (drift detection) describes the wrong-
+    version recipe and matches the (c) reproduction above; bullet
+    (2) (parser-mismatch diagnostic) describes the extra-whitespace
+    recipe and matches the (b) reproduction above. Wording
+    inspected against the script body — the *"replace the single
+    space between the closing backtick and the version triple with
+    two spaces"* phrasing in bullet (2) is unambiguous and produces
+    the documented *"parser regex mismatch"* WARNING when followed
+    verbatim. The two bullets each end with *"then revert"*,
+    preserving the *"runnable from repo root with no environment
+    setup"* convention also enforced by sibling
+    [scripts/check-c-allocations.sh](/home/kim/lean-zip/scripts/check-c-allocations.sh)
+    (which has no parsing and therefore no second bullet to add).
+    No follow-up filed.
+  - **Sibling design parity vs. `scripts/check-c-allocations.sh`
+    (post-tightening).** Both scripts remain advisory drift
+    detectors with the shared idiom catalogued in the PR #2382
+    paired-review's *Sibling design parity* bullet (`set -u`,
+    `--help` flag, *"run from repo root"* guard, single
+    WARNING/DRIFT block, advisory `exit 0` on every path,
+    *"trip wire, not a fence"* docstring framing). The
+    parser-guard tightening is a `check-cargo-lock.sh`-only
+    addition, not a divergence from `check-c-allocations.sh` —
+    `check-cargo-lock.sh` has a `sed -nE` parser to guard,
+    `check-c-allocations.sh` has only a `grep -cE` integer count
+    and no parsing, so a *"distinguish parser-fail from real
+    drift"* idiom is structurally not applicable to the integer-
+    count script. The divergence is principled (the script with
+    a parser carries a parser-guard; the script without a parser
+    carries none) and no propagation to `check-c-allocations.sh`
+    is needed today. **Cross-script convention worth pinning,**
+    in soft form: any *future* drift detector that parses the
+    inventory (rather than counting matches) inherits the
+    Option-A obligation from PR #2396 — distinguish parser-fail
+    from real drift via an explicit *"could not parse"* WARNING
+    that exits 0 without falling through into the real-drift
+    code path. At N=1 parser-bearing drift detector
+    (`check-cargo-lock.sh`) the convention is sufficiently
+    self-explanatory in the Option-A guard block itself; if a
+    second parser-bearing drift detector appears (e.g. a future
+    `scripts/check-rust-toolchain.sh` parsing `rust-toolchain.toml`
+    against an inventory-snapshotted version), that is the right
+    point to extract the convention into
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    or a sibling skill. This paired-review surfaces no follow-up
+    issue for the convention extraction today.
+  - **Issue → PR loop closure semantics.** PR #2396 is the
+    follow-up PR for paired-review #2384's parser-fail-open
+    finding (originally surfaced in the *Snapshot-string parsing
+    fidelity* bullet of the *Paired review of PR #2382* subsection
+    above, where the failure mode was characterised as
+    *"loud-but-unfriendly rather than silent"*). The post-#2396
+    tree mitigates that failure mode: the parser-mismatch path
+    now emits an explicit `parser regex mismatch` WARNING with
+    the offending snapshot line echoed underneath, instead of
+    falling through into the DRIFT branch with blank `expected:`
+    fields. The original *Paired review of PR #2382* subsection
+    is left intact as a historical record of the audit at the
+    time, with a one-line *"superseded by PR #2396"* trailer
+    appended to the *Snapshot-string parsing fidelity* bullet
+    pointing forward to this paired-review subsection. Rationale
+    for the trailer-only edit (option iii from issue #2397's
+    deliverable 5): preserves the audit trail (the historical
+    paired-review remains the record of what the parser
+    fail-open looked like before PR #2396) while making the
+    closure visible without requiring readers to scroll between
+    subsections. This paired-review surfaces no new follow-up
+    issues — the parser-fail-open finding is closed, and the
+    cross-script convention extraction is deferred until a
+    second parser-bearing drift detector appears.
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
