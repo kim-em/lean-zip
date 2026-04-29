@@ -10,13 +10,21 @@
 
 namespace MinizOxide
 
-/-- Compress data using miniz_oxide raw DEFLATE (no zlib header / trailer).
-    `level` is the standard DEFLATE level 0–10 that miniz_oxide accepts; we
-    cap callers to 0–9 here to match the rest of the bench. Raises
-    `IO.userError` containing `"miniz_oxide: not built with Rust support"`
-    when the comparator toolchain was unavailable at build time. -/
+/-- Underlying FFI extern for `compress`. Forwards `level` unchanged to the
+    Rust shim, which silently treats out-of-range values as level 0 / level
+    10. Use `compress` instead — it clamps `level` to the documented 0–9
+    range before calling this function. -/
 @[extern "lean_miniz_oxide_compress_ffi"]
-opaque compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray
+private opaque compressUnsafe (data : @& ByteArray) (level : UInt8) : IO ByteArray
+
+/-- Compress data using miniz_oxide raw DEFLATE (no zlib header / trailer).
+    `level` is the standard DEFLATE level; values above 9 are clamped to 9
+    before forwarding to the Rust shim, matching the documented 0–9 range
+    used by the rest of the bench. Raises `IO.userError` containing
+    `"miniz_oxide: not built with Rust support"` when the comparator
+    toolchain was unavailable at build time. -/
+def compress (data : @& ByteArray) (level : UInt8 := 6) : IO ByteArray :=
+  compressUnsafe data (if level > 9 then 9 else level)
 
 /-- Decompress raw DEFLATE data using miniz_oxide.
     `maxDecompressedSize` caps the output (default 1 GiB; pass `0` to opt

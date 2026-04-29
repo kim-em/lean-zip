@@ -63,6 +63,15 @@ def tests : IO Unit := do
     let backConst0 ← MinizOxide.decompress mzConst0
     assert! backConst0.beq constant
 
+    -- Level clamp: values above 9 must be clamped to 9 before reaching
+    -- the Rust shim (otherwise miniz_oxide silently treats them as 0 or
+    -- 10). All three of these must produce byte-identical output.
+    let mzLevel9   ← MinizOxide.compress prng 9
+    let mzLevel10  ← MinizOxide.compress prng 10
+    let mzLevel255 ← MinizOxide.compress prng 255
+    assert! mzLevel10.beq mzLevel9
+    assert! mzLevel255.beq mzLevel9
+
     -- Empty input roundtrip.
     let mzEmpty ← MinizOxide.compress ByteArray.empty
     let backEmpty ← MinizOxide.decompress mzEmpty
