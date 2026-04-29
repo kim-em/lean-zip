@@ -59,6 +59,13 @@ sentence on caller impact with a PR-number link.
 
 ## Half-closed two-step
 
+There are two two-step shapes; both keep the inventory honest
+during the half-closed window. Pick by what the closing PR is
+splitting — a *parameter* (API surface) or a *scaffold* (artefact
+shell with a deferred body).
+
+### Parameter variant (parameter-add + default-flip)
+
 Use a *two-step* (parameter-add PR + default-flip PR) when:
 
 - The parameter is *new to a public API* but the existing
@@ -82,6 +89,55 @@ param-add PR goes up.
 **Precedent**: #1610 (half-closed, default `0`) → #1631
 (default-flip) was the 2026-04-22 Rec. 2 execution. #1630 is
 the counter-example (new param, no callers, one-step).
+
+### Scaffold variant (scaffold + body fill-in)
+
+Use a *two-step* (scaffold PR + body fill-in PR) when:
+
+- The artefact has a host / toolchain prerequisite that not
+  every worker host satisfies (e.g. nightly Rust, Linux-only
+  sanitizer runtime, GPU, network credentials).
+- The skeleton can be **structurally complete** (env-guard +
+  usage block + Missing-work forward-pointer) on any host,
+  with the body deferred to a host-gated follow-up.
+- A load-bearing env-guard is the right way to signal "host
+  ineligible" cleanly (exit code distinct from "skeleton not
+  yet implemented" — see PR #2383's two disjoint exit-2 vs
+  exit-1 diagnostics).
+
+Use a *one-step* when:
+
+- The recipe body is self-contained and runnable on the worker
+  host minting the PR.
+- No host-gating is needed.
+
+**Between-step discipline**: during the half-closed window:
+
+- The *Missing work* bullet is **edited in place** with a
+  forward-pointer to the new artefact (NOT flipped to *Recent
+  wins* yet — the body is still TODO). The `- [ ]` checkbox
+  stays unchecked.
+- A sibling *Current local guardrails* bullet records the
+  half-state with a *"scaffolded but not yet executed"*
+  qualifier so a future reader of either bullet can tell that
+  the work is *partially executed*.
+- The body fill-in is tracked as a separate `agent-plan`
+  `feature` issue, filed at the same time as the scaffold PR
+  goes up (or by the paired-review of the scaffold PR,
+  whichever comes first).
+- The follow-up issue carries a host-gating preamble naming
+  the toolchain prerequisite and the macOS-style `coordination
+  skip` pattern from #2366 / #2369, so worker hosts that
+  cannot satisfy the prerequisite release the claim cleanly
+  without churning the queue.
+
+**Precedent**: PR #2383 (scaffold —
+`scripts/sanitize-rust-ffi.sh` skeleton + Sanitizer recipe
+inventory paragraph) → issue #2392 (body fill-in) is the
+2026-04-29 Track E miniz_oxide TCB execution. The parameter
+variant (#1610 → #1631) remains canonical for *parameter*
+splits; this variant is for *artefact-shell* splits and
+lives alongside it.
 
 ## Single author per wave
 
