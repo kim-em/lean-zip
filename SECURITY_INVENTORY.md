@@ -238,6 +238,23 @@ Summary — what this pattern catches and what it does not:
     `lean_alloc_sarray` buffer in `c/miniz_oxide_ffi.c` and then calls
     `lean_miniz_oxide_free`, so the Rust-allocated buffer is released
     on every successful return
+  - **`Cargo.lock` is tracked and treated as security-critical.**
+    [`rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.lock)
+    pins the resolved versions of `miniz_oxide` and its transitive
+    dependencies (`adler2`) along with their registry checksums. The
+    caret-range declaration in
+    [`rust/miniz_oxide_shim/Cargo.toml`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.toml)
+    is intentionally narrowed by the lockfile to a specific
+    build-reproducible set.
+    Snapshot as of 2026-04-29: `miniz_oxide` 0.8.9, `adler2` 2.0.1.
+    Any change to these resolved versions requires re-evaluating the
+    *Why trusted* paragraph above and updating this snapshot. Drift
+    is surfaced advisorily by
+    [`scripts/check-cargo-lock.sh`](/home/kim/lean-zip/scripts/check-cargo-lock.sh)
+    (modelled on
+    [`scripts/check-c-allocations.sh`](/home/kim/lean-zip/scripts/check-c-allocations.sh)),
+    intended to be run before opening a PR that touches
+    `rust/miniz_oxide_shim/`.
 - Missing work:
   - **No fuzz / ASan / UBSan recipe currently covers the Rust crate
     or its C-ABI shim.** The existing
@@ -253,17 +270,23 @@ Summary — what this pattern catches and what it does not:
     sanitised static lib into the existing fuzz-inflate driver so
     miniz_oxide-decompressed buffers flow through the same xorshift
     payload generator as the zlib path.
-  - **No upstream-tracking entry pinning the `miniz_oxide` crate
-    version against a known-good audit.** The crate is reputable but
-    is consumed transitively through `cargo` and inherits whatever
-    Rust / `miniz_oxide` versions are on the build host;
-    `Cargo.lock` records the resolved version but is not currently
-    treated as a security-critical artefact in this inventory.
   - **If a downstream caller wires `MinizOxide.compress` /
     `MinizOxide.decompress` into a non-bench codepath, this row's
     `guarded-locally` status must be re-evaluated** alongside the
     sibling fuzz / sanitizer recipe above.
 - Recent wins:
+  - **`Cargo.lock` is now treated as a security-critical artefact** in
+    PR #TBD-VERIFY-PR — the
+    [`rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.lock)
+    snapshot (`miniz_oxide` 0.8.9, `adler2` 2.0.1) is recorded under
+    *Current local guardrails* above, and a new advisory drift
+    detector
+    [`scripts/check-cargo-lock.sh`](/home/kim/lean-zip/scripts/check-cargo-lock.sh)
+    (modelled on
+    [`scripts/check-c-allocations.sh`](/home/kim/lean-zip/scripts/check-c-allocations.sh))
+    flags resolved-version churn at PR-review time. Closes the
+    *"No upstream-tracking entry pinning the `miniz_oxide` crate
+    version"* Missing-work bullet.
   - **`MinizOxide.compress` level argument now clamped to 0–9** in
     PR #2378 — the public `compress` is a thin wrapper that
     clamps `level` via `if level > 9 then 9 else level` before
