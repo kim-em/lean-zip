@@ -25,10 +25,16 @@
 # Requirements: pure POSIX shell + standard text tools (grep, awk,
 # sed). No Cargo or Rust toolchain required.
 #
-# Manual smoke test: temporarily edit the *Snapshot as of …* line in
-# SECURITY_INVENTORY.md to mention an obviously wrong version (e.g.
-# `miniz_oxide` 9.9.9), re-run this script, expect a single WARNING
-# block followed by exit 0, then revert the edit.
+# Manual smoke tests:
+#   1. Drift detection: temporarily edit the *Snapshot as of …* line in
+#      SECURITY_INVENTORY.md to mention an obviously wrong version
+#      (e.g. `miniz_oxide` 9.9.9), re-run this script, expect a single
+#      DRIFT WARNING block followed by exit 0, then revert the edit.
+#   2. Parser-mismatch diagnostic: temporarily replace the single space
+#      between the closing backtick and the version triple with two
+#      spaces (e.g. ``` `miniz_oxide`  0.8.9 ```), re-run this script,
+#      expect a *parser regex mismatch* WARNING block followed by
+#      exit 0 (not a blank-`expected:` DRIFT block), then revert.
 
 set -u
 
@@ -90,6 +96,17 @@ fi
 
 expected_miniz=$(printf '%s\n' "$snap_line" | sed -nE 's/.*\`miniz_oxide\` ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
 expected_adler=$(printf '%s\n' "$snap_line" | sed -nE 's/.*\`adler2\` ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
+
+# Surface parser failure as an explicit diagnostic instead of letting it
+# masquerade as a real version drift with blank `expected:` fields. The
+# sed regexes above require exactly one space between the closing
+# backtick and the version triple; whitespace or punctuation variations
+# in the snapshot line silently produce empty captures.
+if [ -z "$expected_miniz" ] || [ -z "$expected_adler" ]; then
+    echo "check-cargo-lock.sh: WARNING — snapshot line found in $INVENTORY but could not extract miniz_oxide / adler2 versions (parser regex mismatch — check whitespace / punctuation in the snapshot line)."
+    echo "  snapshot line: $snap_line"
+    exit 0
+fi
 
 if [ "$current_miniz" = "$expected_miniz" ] && [ "$current_adler" = "$expected_adler" ]; then
     echo "check-cargo-lock.sh: $LOCK matches snapshot (miniz_oxide $current_miniz, adler2 $current_adler)."
