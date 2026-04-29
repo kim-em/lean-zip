@@ -1001,6 +1001,142 @@ Summary — what this pattern catches and what it does not:
     issues — the parser-fail-open finding is closed, and the
     cross-script convention extraction is deferred until a
     second parser-bearing drift detector appears.
+- Paired review of PR #2399 (skill codification — `Half-closed two-step` *Scaffold variant* sub-section):
+  - **Design fidelity vs. issue #2393.** The merged PR satisfies all
+    three numbered deliverables from the closing issue: (1) the new
+    *Scaffold variant (scaffold + body fill-in)* sub-section under
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    *Half-closed two-step* names the host/toolchain prerequisite
+    motivator (nightly Rust, Linux-only sanitizer runtime, GPU,
+    network credentials) and the env-guard-as-host-gate idiom
+    explicitly, including the disjoint exit-2 ("host ineligible")
+    vs exit-1 ("skeleton not yet implemented") diagnostic split
+    surfaced by PR #2383's paired-review; (2) the section-intro
+    paragraph (*"There are two two-step shapes; both keep the
+    inventory honest during the half-closed window …"*) explicitly
+    frames *parameter* vs *scaffold* as the discriminator, so a
+    future reader landing on the `## Half-closed two-step` heading
+    finds the variant-selection guidance before either sub-section
+    body; (3) the optional one-line back-pointer in
+    [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md)
+    PR #2383 paired-review *Inventory partial-flip / forward-pointer
+    phrasing* sub-bullet was added as a footnote-style trailing
+    parenthetical, not a structural rewrite of the existing prose.
+    The *Between-step discipline* bullets in the new sub-section
+    cover the four discipline points enumerated in the issue body
+    (in-place edit of *Missing work* bullet with the `- [ ]`
+    checkbox unchecked, sibling *Current local guardrails*
+    *"scaffolded but not yet executed"* qualifier, separate
+    `agent-plan` `feature` follow-up issue, host-gating preamble
+    citing the `coordination skip` macOS pattern from #2366 / #2369).
+    No deliverable is missing or partially present.
+  - **Sub-heading restructure — verbatim preservation of the
+    parameter variant.** The pre-#2399 *Half-closed two-step*
+    section was a single flat body covering the parameter-add /
+    default-flip shape (precedent #1610 → #1631). PR #2399's diff
+    is purely additive: 56 added lines, 0 deletions. The original
+    parameter content (the four *"Use a two-step … when:"* bullets,
+    the two *"Use a one-step … when:"* bullets, the *Between-step
+    discipline* paragraph re-phrasing the bullet as *"half-closed by
+    #N (parameter added, default still 0). Flip tracked as #M."* <!-- drift-detector: verbatim quote of the SKILL.md parameter-variant placeholder template, not a stale placeholder -->,
+    and the *"#1610 → #1631"* precedent line with the #1630 one-step
+    counter-example) is preserved word-for-word under the new
+    `### Parameter variant (parameter-add + default-flip)`
+    sub-heading; no prose was lost or silently reworded. The
+    `## Half-closed two-step` H2 anchor is unchanged, so the
+    cross-reference from `summarize-flow`'s sibling-skill comment
+    ("shares the issue-body-as-source-of-truth invariant via its
+    *Half-closed two-step* section") still resolves correctly. The
+    section now carries a one-paragraph H2-level intro followed by
+    two sibling H3 sub-sections of comparable length (~25 lines
+    each), avoiding any one variant drowning the other.
+  - **Back-pointer fidelity (post-#2401 tree).** The
+    [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md)
+    PR #2383 paired-review *Inventory partial-flip / forward-pointer
+    phrasing* sub-bullet's trailing parenthetical reads, post-#2401
+    cleanup, *"see
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    Scaffold variant sub-section, landed in PR #2399 closing
+    #2393"* (the surrounding parens belong to the back-pointer's
+    framing parenthetical, not the quote). Three audit checks pass: (i) the *"Scaffold variant"*
+    name matches the merged SKILL.md sub-heading exactly (no
+    *"scaffold + body fill-in"* mismatch with the parenthetical
+    qualifier on the heading); (ii) the qualifier reads as
+    *Executed past-tense one-liner*-shaped — *"landed in PR #2399
+    closing #2393"* — without the pre-#2401 *"once the follow-up
+    #2393 lands"* future-tense fragment; (iii) the back-pointer
+    cites the variant by sub-section name rather than by a line
+    number, so a future `## Half-closed two-step` reflow that
+    re-orders the two H3 sub-sections (or extends them with a
+    third variant) does not falsify the back-pointer — consistent
+    with the
+    [#2353](https://github.com/kim-em/lean-zip/pull/2353) decision
+    to stop tracking line-number anchors in inventory and skill
+    files.
+  - **Cross-references in the new sub-section.** All four numbered
+    cites in the *Scaffold variant* sub-section resolve to real
+    artefacts with the role the prose claims:
+    [PR #2383](https://github.com/kim-em/lean-zip/pull/2383) is
+    MERGED 2026-04-29 with title *"feat: scaffold
+    `scripts/sanitize-rust-ffi.sh` skeleton + sibling 'Sanitizer
+    recipe' inventory paragraph (Missing-work bullet 1)"* (the
+    cited scaffold precedent);
+    [issue #2392](https://github.com/kim-em/lean-zip/issues/2392) is
+    OPEN with `agent-plan` + `feature` labels and a *"⚠️ Platform
+    requirement: Linux + nightly Rust"* preamble carrying the
+    macOS-skip recipe verbatim (the cited body fill-in follow-up,
+    matching the *"separate `agent-plan` `feature` issue"* phrasing
+    in the *Between-step discipline*);
+    [issue #2366](https://github.com/kim-em/lean-zip/issues/2366)
+    is OPEN with the same `agent-plan` + `feature` labels (the
+    sibling `sanitize-ffi.sh` re-run, also Linux-host-gated,
+    cited as the macOS-skip preamble pattern source); and
+    [PR #2369](https://github.com/kim-em/lean-zip/pull/2369) is
+    CLOSED-as-merged (the original *"Re-run Kiran's fuzz harness on
+    v4.30.0-rc2"* execution that established the
+    `coordination skip` macOS pattern). No ghost references; the
+    `#2366 / #2369` pairing in the SKILL.md prose correctly
+    represents *"open Linux-gated follow-up + closed precedent
+    that established the skip pattern"*.
+  - **Post-merge cleanup observation — PR #2401 as a *post-#2399
+    cleanup* micro-PR class.** PR #2399 went up with the back-pointer
+    in pre-merge future-tense form (*"once the follow-up #2393
+    lands"*), made necessary because the back-pointer was authored
+    inside the same diff as the sub-section it pointed at and the
+    closing-PR self-reference was therefore unknown until merge.
+    [PR #2401](https://github.com/kim-em/lean-zip/pull/2401)
+    (closing #2400) followed nine minutes after PR #2399's merge as
+    a single-line stale-qualifier substitution (*"once the
+    follow-up #2393 lands"* → *"landed in PR #2399 closing
+    #2393"*); diff is one line in
+    [SECURITY_INVENTORY.md](/home/kim/lean-zip/SECURITY_INVENTORY.md)
+    plus a progress entry. Observation worth recording: the
+    *Scaffold variant* between-step discipline currently does not
+    explicitly call out the *"if the back-pointer carries a
+    pre-merge future-tense qualifier, file a one-line trailing
+    cleanup PR after merge to flip it to past-tense"* pattern as a
+    cadence step. The pattern is a strict subset of the existing
+    *Executed past-tense one-liner* shape (it just defers the
+    flip from the closing PR to a trailing cleanup PR by
+    necessity), and at N=1 instance (#2399 → #2401) it is not
+    obviously a worth-codifying cadence step versus a
+    once-off. Per the issue's *"do NOT modify SKILL.md from
+    inside this paired-review entry"* discipline, no SKILL.md
+    edit is filed here; if a second instance of the same
+    pre-merge-future-tense → trailing-cleanup-PR pattern appears
+    on a future *Scaffold variant* PR, that is the right
+    triggering point to mint a follow-up extending the
+    *Between-step discipline* with an explicit *"trailing
+    cleanup PR for forward-pointer back-references"* bullet.
+  - **Follow-up gaps.** No gaps surface. The audit confirms the
+    codification is faithful to issue #2393, the parameter-variant
+    content is preserved verbatim under the new H3 sub-heading, the
+    back-pointer is in steady-state past-tense form on the
+    post-#2401 tree, and all four cross-references resolve to real
+    artefacts with the cited role. The *post-#2399 cleanup* observation
+    is logged as a deferred-cadence-extension candidate but does not
+    warrant a follow-up issue at N=1. This paired-review surfaces no
+    follow-up issues.
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
