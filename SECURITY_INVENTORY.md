@@ -276,7 +276,7 @@ Summary — what this pattern catches and what it does not:
     sibling fuzz / sanitizer recipe above.
 - Recent wins:
   - **`Cargo.lock` is now treated as a security-critical artefact** in
-    PR #TBD-VERIFY-PR — the
+    PR #2382 — the
     [`rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.lock)
     snapshot (`miniz_oxide` 0.8.9, `adler2` 2.0.1) is recorded under
     *Current local guardrails* above, and a new advisory drift
