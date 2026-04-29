@@ -255,6 +255,19 @@ Summary — what this pattern catches and what it does not:
     [`scripts/check-c-allocations.sh`](/home/kim/lean-zip/scripts/check-c-allocations.sh)),
     intended to be run before opening a PR that touches
     `rust/miniz_oxide_shim/`.
+  - **Sanitizer recipe scaffolded but not yet executed.**
+    [`scripts/sanitize-rust-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
+    documents the intended ASan recipe for `c/miniz_oxide_ffi.c` +
+    `libminiz_oxide_shim.a`: nightly Rust +
+    `RUSTFLAGS="-Zsanitizer=address"` +
+    `cargo +nightly build --release` of `rust/miniz_oxide_shim`,
+    linked into a small Lean driver that exercises the
+    `MinizOxide.compress` / `MinizOxide.decompress` smoke-test
+    inputs. The body is currently TODO; the script's environment
+    guard exits 2 when nightly Rust is unavailable, so it can be
+    safely invoked on any host without producing a misleading
+    "pass". The first actual run will be queued as a follow-up
+    issue when a Linux + nightly-Rust worker host is available.
 - Missing work:
   - **No fuzz / ASan / UBSan recipe currently covers the Rust crate
     or its C-ABI shim.** The existing
@@ -265,11 +278,12 @@ Summary — what this pattern catches and what it does not:
     they do not exercise `c/miniz_oxide_ffi.c` or the
     `libminiz_oxide_shim.a` static library. A sibling recipe is
     needed before `MinizOxide.compress` / `MinizOxide.decompress`
-    leave bench-only scope. Sketch: build the Rust crate under
-    `RUSTFLAGS="-Zsanitizer=address"` (nightly Rust) and link the
-    sanitised static lib into the existing fuzz-inflate driver so
-    miniz_oxide-decompressed buffers flow through the same xorshift
-    payload generator as the zlib path.
+    leave bench-only scope. Scaffolded as
+    [`scripts/sanitize-rust-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
+    in PR #2383 (paragraph above under *Current local
+    guardrails*); the recipe body is TODO, deferred to a sibling
+    follow-up issue when a Linux + nightly-Rust worker host is
+    available.
   - **If a downstream caller wires `MinizOxide.compress` /
     `MinizOxide.decompress` into a non-bench codepath, this row's
     `guarded-locally` status must be re-evaluated** alongside the
