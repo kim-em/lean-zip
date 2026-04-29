@@ -524,6 +524,135 @@ Summary — what this pattern catches and what it does not:
     new follow-up issues. The two pre-existing Missing-work bullets
     above (sanitizer recipe; `Cargo.lock` upstream-tracking pin) are
     already separately tracked.
+- Paired review of PR #2371 (`miniz_oxide via Rust` TCB subsection —
+  Option 1 / classification execution):
+  - **Decision-execution fidelity vs. issue #2362.** Issue #2362
+    explicitly offered three options: (1) add a new
+    `### miniz_oxide via Rust` subsection alongside `### zlib via C FFI`,
+    (2) document under the existing zlib row as a sub-paragraph, or
+    (3) decide it is out of scope as bench-only and add a carve-out
+    note in *Required Maintenance Rule* instead. PR #2371's title
+    declares *"Option 1, decided in this PR"* <!-- drift-detector: verbatim quote of PR #2371's title phrase, not a stale placeholder --> — confirmed by the
+    merged tree at commit `19f4588d` (+86 SECURITY_INVENTORY.md lines
+    / +95 progress entry lines, no other files touched): the new
+    `### miniz_oxide via Rust` H3 subsection sits between
+    `### zlib via C FFI` and `### Zip.Native.Inflate and verified
+    DEFLATE core`, in the canonical full-shape (Components / Status /
+    Why trusted / Current local guardrails / Missing work / Recent
+    wins) that mirrors the surrounding TCB rows. The decision
+    rationale is co-located in
+    [progress/20260429T022926Z_7db2dbf3.md](/home/kim/lean-zip/progress/20260429T022926Z_7db2dbf3.md)
+    *## Rationale* (four bullets: public-surface argument; one-entry-
+    per-FFI-helper precedent; *Required Maintenance Rule* alignment;
+    `guarded-locally` status accuracy) with explicit reasons for
+    rejecting Options 2 and 3. The "decided in this PR" <!-- drift-detector: re-quote of PR #2371's title phrase from the bullet above, not a stale placeholder --> framing is
+    faithful — the rationale is not deferred to a separate decision-only
+    commit, and the audit's deferred *"structural rework"* scope is
+    discharged in a single PR rather than split across decision +
+    execution.
+  - **TCB classification accuracy.** The Status tag `guarded-locally`
+    matches the *## Status Labels* definition at the top of the
+    inventory (*"not fully proved, but protected by explicit checks
+    and limits"*) — the subsection's *Current local guardrails*
+    bullets enumerate five concrete checks/limits (opt-in build with
+    stub fallback; `maxDecompressedSize` cap with `"exceeds limit"`
+    wording family; `panic = "abort"` Rust shim; `Box<[u8]>` +
+    `lean_miniz_oxide_free` allocator-mismatch avoidance;
+    `lean_alloc_sarray` copy-and-free on every successful return) and
+    the *Why trusted* paragraph correctly identifies all four trust-
+    boundary layers (Rust toolchain → `rust/miniz_oxide_shim/`
+    `staticlib` Cargo crate → `c/miniz_oxide_ffi.c` C-ABI shim →
+    `Zip/MinizOxide.lean` Lean wrappers). The bench-only scope claim
+    is faithful: a fresh `MinizOxide\.(compress|decompress)` grep
+    across the tree returns code call sites only in
+    [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean) (the
+    `compress-miniz` / `inflate-miniz` operations) and
+    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    (the smoke-test driver). [Zip.lean](/home/kim/lean-zip/Zip.lean)
+    does `import Zip.MinizOxide` so the namespace is on the public
+    surface, but no other `Zip/` source consumes either function —
+    the *"not part of the verified DEFLATE pipeline"* assertion in
+    the *Why trusted* paragraph is observably true and matches the
+    grep finding independently confirmed by the PR #2356 paired-review
+    *Bench-only scope* bullet above.
+  - **Sibling cross-reference layering.** The post-#2371 subsection
+    received three subsequent sibling-PR augmentations that the
+    sibling paired-reviews accurately attribute back to their own
+    closing PRs rather than to PR #2371: (i) PR #2378 (level clamp)
+    moved the *"`MinizOxide.compress` does not clamp the level
+    argument"* bullet from *Missing work* to *Recent wins* citing
+    `#2378`; (ii) PR #2382 (Cargo.lock drift detector) removed the
+    *"No upstream-tracking entry pinning the `miniz_oxide` crate
+    version"* Missing-work bullet, added the *"`Cargo.lock` is
+    tracked and treated as security-critical"* *Current local
+    guardrails* bullet (with the *"Snapshot as of 2026-04-29:
+    `miniz_oxide` 0.8.9, `adler2` 2.0.1"* line and the
+    [scripts/check-cargo-lock.sh](/home/kim/lean-zip/scripts/check-cargo-lock.sh)
+    cross-link), and a *Recent wins* counterpart citing `#2382`;
+    (iii) PR #2383 (sanitizer recipe scaffold) edited the original
+    *"No fuzz / ASan / UBSan recipe …"* Missing-work bullet in place
+    (replacing the *"Sketch: …"* sentence with a forward-pointer to
+    the new
+    [scripts/sanitize-rust-ffi.sh](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
+    citing `#2383`) and added a sibling *"Sanitizer recipe scaffolded
+    but not yet executed"* *Current local guardrails* bullet. PR #2371's
+    original contribution is therefore the *Components / Status / Why
+    trusted* prose, the four original *Current local guardrails*
+    bullets (opt-in build / `maxDecompressedSize` / `panic = "abort"`
+    / allocator-mismatch + `lean_alloc_sarray` copy), the four
+    original *Missing work* bullets (since-flipped or since-edited),
+    and the single Track D Phase 0c initial wiring *Recent wins*
+    bullet. No mis-attribution surfaces — the sibling paired-reviews
+    correctly layer their claims on top of the PR #2371 foundation
+    without re-claiming any of its content.
+  - **Allocator-mismatch / `panic = "abort"` claim coverage.** PR
+    #2371's *Current local guardrails* bullets at the *"the Rust
+    shim is built with `panic = "abort"` …"* / *"the shim allocates
+    output as `Box<[u8]>` …"* / *"the Lean side copies the shim's
+    output into a fresh `lean_alloc_sarray` …"* triple summarize the
+    Rust-allocator vs. libc-allocator boundary in inventory prose.
+    The PR #2356 paired-review *Allocator-mismatch verification* and
+    *`panic = "abort"` invariant* bullets (above, in this same
+    subsection) cover the same invariants in audit detail
+    (`compress_to_vec` / `decompress_to_vec_with_limit` allocation
+    path; `Box::into_raw` / `Box::from_raw` symmetry across the FFI
+    boundary; `lean_alloc_sarray` panic-on-OOM eliminating any
+    allocation-failure window in which the Rust buffer would leak;
+    `#![deny(unsafe_op_in_unsafe_fn)]` annotation on every
+    `unsafe extern "C"` entry point). No drift between PR #2371's
+    inventory prose and the PR #2356 paired-review's audit findings —
+    the inventory summary is a faithful one-paragraph distillation
+    that does not re-derive the audit and does not contradict it.
+  - **`Status Labels` / cross-reference parity.** The inventory's
+    *## Status Labels* section is a flat four-bullet list (
+    `proved-in-repo` / `guarded-locally` / `tested-only` /
+    `upstream-risk`) and does not maintain a TCB-subsection
+    table-of-contents — there is no separate index of TCB rows to
+    keep in sync. The *## Trusted Computing Base* H2 simply contains
+    four `### `-level subsections in document order (Lean Runtime →
+    zlib via C FFI → miniz_oxide via Rust → Zip.Native.Inflate);
+    PR #2371's insertion immediately after `### zlib via C FFI` is
+    the natural append point per the *one-entry-per-FFI-helper
+    precedent* recorded in the progress entry. No drift surfaces;
+    no cross-reference index needs updating.
+  - **Audit cluster terminal-closure status.** This paired-review is
+    the *fourth and final* sibling paired-review of the post-#2358
+    audit cluster. The four sibling PRs (#2371 the foundational TCB
+    subsection; #2378 level clamp; #2382 Cargo.lock drift detector;
+    #2383 sanitize-rust-ffi.sh skeleton) all landed on 2026-04-29
+    within a six-hour window (02:31Z–08:13Z merge timestamps), and
+    their paired-reviews now all exist (#2377 for #2356 the parent
+    Phase 0c wiring; #2389 for #2382; #2390 for #2378; #2394 for
+    #2383; *this entry* for #2371). The audit cluster's
+    review-cadence dimension is now closed. The only audit-cluster
+    residual is open issue #2392 (Linux + nightly-Rust-host-gated
+    sanitizer recipe body fill-in), which is not a review-cadence
+    task — it is the deferred body fill-in that PR #2383's *Scaffold
+    variant* of the *Half-closed two-step* (per the
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    *Scaffold variant* sub-section landed in PR #2399) intentionally
+    parked for a Linux-host worker. This paired-review surfaces no
+    new follow-up issues.
 - Paired review of PR #2382 (Cargo.lock drift detector + lockfile-as-TCB claim):
   - **Design fidelity vs. issue #2376.** The merged PR satisfies all
     four enumerated deliverables from the closing issue:
