@@ -2077,6 +2077,129 @@ Summary — what this pattern catches and what it does not:
     PR #2405 (`pax-nul-in-key.tar`); the `parsePaxRecords`
     NUL-byte guard family is therefore **fully closed 3/3**
     (1 keyBytes + 2 valueBytes).
+- Paired review of PR #2405 (`pax-nul-in-key.tar` fixture —
+  `parsePaxRecords` NUL-byte guard family terminal closure 3/3):
+  - **Family-closure fidelity.** The 1 + 2 = 3 math is internally
+    consistent and faithful to the merged tree.
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) `parsePaxRecords`
+    carries exactly two `findIdx? (· == 0)` NUL-byte guards joined by
+    `&&` — one on `keyBytes`, one on `valueBytes` — so the arm-level
+    accounting is *1 keyBytes arm + 1 valueBytes arm = 2 arms*. The
+    fixture-level accounting tracks per-slot pinning of each
+    filesystem-reaching smuggle target: `pax-nul-in-key.tar` (PR #2405)
+    pins the keyBytes arm; `pax-path-nul-in-value.tar` (PR #1866) and
+    `pax-linkpath-nul-in-value.tar` (PR #1979) pin the two
+    filesystem-reaching slots of the valueBytes arm via their
+    `applyPaxOverrides` targets (`"path"` → `entry.path`, `"linkpath"`
+    → `entry.linkname`). The valueBytes guard fires regardless of
+    which key the value is paired with — there is no per-slot variant
+    of the guard itself; the 2-slot count is *override-target*
+    granularity, not *guard* granularity. No fourth or fifth
+    `findIdx? (· == 0)` call exists in `parsePaxRecords`, so the
+    *fully closed 3/3* claim is faithful at the guard level. Sibling
+    valueBytes overrides exist for non-string slots (`"size"`,
+    `"mtime"`, `"uid"`, `"gid"` — number-parsed, NUL would fail digit
+    parsing) and for two defense-in-depth string slots (`"uname"`,
+    `"gname"` — value-side parallels of UStar `uname` / `gname`); the
+    inventory's *2-slot* framing is explicitly *filesystem-reaching*
+    so those defense-in-depth value-side slots are out of scope by
+    construction. Recording the scoping convention here so a future
+    reader audit-tracing the *3/3* claim does not re-discover the
+    `"uname"` / `"gname"` value-side parallels and misread them as a
+    missing 4th / 5th slot: they are not slots of *this* family by the
+    inventory's filesystem-reaching framing.
+  - **Reproducer Corpus row prose fidelity.** The new
+    `pax-nul-in-key.tar` row carries the four required elements:
+    (i) cites the closing PR #2405 in the rightmost PR column —
+    correct (the table has a closing-PR column and a category column,
+    not a closing-issue column, so the issue body's *"closing
+    issue (#2404) in the rightmost columns"* phrasing is slightly
+    imprecise; #2404 is recorded in the closing PR's body, not the
+    row); (ii) names the assertion shape as a *positive regression*
+    explicitly and cites the adversarial check (*"verified
+    adversarially by temporarily disabling the keyBytes arm and
+    confirming the loop assertion still passes"*) — matches the
+    sibling `pax-linkpath-nul-in-value.tar` row's *positive
+    regression* prose; (iii) names the fixture as the **terminal
+    closure** of the `parsePaxRecords` NUL-byte guard family at 3/3
+    and cites both valueBytes-slot siblings (PR #1866 / PR #1979) by
+    fixture name and PR number; (iv) uses stable
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) anchors only — no
+    `line N` references — consistent with the
+    [#2353](https://github.com/kim-em/lean-zip/pull/2353) decision to
+    drop line-number anchors in inventory files.
+  - **Sibling-row deferral-drop fidelity.** The
+    `pax-linkpath-nul-in-value.tar` row's edit is a clean
+    *Half-closed two-step* completion under the *Scaffold variant*
+    shape codified in PR #2399 / paired-reviewed in PR #2403. The
+    pre-existing trailing *"left for a future per-arm extension"*
+    fragment is removed cleanly (no orphan punctuation, no
+    half-finished sentence; the substitution lands inside the same
+    `(...)` parenthetical without breaking sentence boundaries). The
+    replacement reads as steady-state past-tense — *"is closed by
+    `pax-nul-in-key.tar` (PR #2405); the `parsePaxRecords` NUL-byte
+    guard family is therefore **fully closed 3/3** (1 keyBytes +
+    2 valueBytes)"* — mirroring PR #2401's post-#2399 cleanup style.
+    The body of the sibling row is otherwise unchanged. The same
+    in-place substitution lands a second time in the parent
+    `Recent wins` paragraph (the 2014–2078 bullet covering the PAX
+    value-side NUL family) — so both occurrences of the deferral
+    phrase on master are flipped together rather than leaving a
+    half-flipped tree.
+  - **Defense-in-depth phrasing.** The new row classifies the
+    keyBytes guard as *defense-in-depth* explicitly and explains the
+    downstream reason (*"no known-key string contains `\x00`, so
+    `applyPaxOverrides`'s case match would already drop the record
+    without it"*). The adversarial check from
+    [progress/20260429T204753Z_f5ad77c6_pax-nul-in-key-fixture.md](/home/kim/lean-zip/progress/20260429T204753Z_f5ad77c6_pax-nul-in-key-fixture.md)
+    is cited inline as the operational evidence for the
+    defense-in-depth claim — temporarily disabling the keyBytes arm,
+    re-running the test, and confirming the loop assertion still
+    passes. The phrasing also names the future-fallback risk (*"a
+    future fallback like a prefix-match for namespace-style keys
+    would silently re-open the smuggle"*) so the audit trail is
+    explicit about *why* the guard exists despite the case match
+    already dropping NUL-bearing keys today.
+  - **Same-pattern precedent.** The new row cites
+    [PR #1957](https://github.com/kim-em/lean-zip/pull/1957) (UStar
+    `gname` slot, terminal closure of the 5-slot UStar interior-NUL
+    family) as the *fixture-only, defense-in-depth, family-closing*
+    template. The cite resolves to a real role-equivalent row:
+    PR #1957's `ustar-gname-nul-in-gname.tar` Reproducer Corpus row
+    in this same inventory carries the same structural shape — a
+    positive-regression-style assertion (the bare `"UStar"` prefix is
+    explicitly distinguished by the `"gname"`-bearing substring, so
+    the test pins on the gname arm specifically), an explicit
+    family-closure claim (*"5-slot UStar interior-NUL family is
+    **fully closed 5/5**"*), and a defense-in-depth phrase
+    (*"`gname` does not reach the filesystem in `Tar.extract` — the
+    guard is defense-in-depth at the `Tar.list` layer"*). The
+    structural parallel between the two rows is exact: PR #1957's
+    `gname` slot is to UStar what PR #2405's `keyBytes` arm is to
+    `parsePaxRecords` — a fixture pinning a guard whose single-arm
+    removal alone would not surface as a regression because a
+    downstream guard (UStar's `Binary.readString` truncation for
+    `gname`; `applyPaxOverrides`'s case match for `keyBytes`) already
+    drops the smuggled value. The precedent cite is faithful, not a
+    ghost reference.
+  - **Follow-up gaps.** None surface. The audit confirms all five
+    dimensions: the family-closure math is internally consistent and
+    matches the source-level guard count (2 guards, 3 per-slot
+    fixtures); the new Reproducer Corpus row carries the required
+    prose elements; the sibling-row deferral-drop is a clean
+    in-place substitution per the *Scaffold variant* shape; the
+    defense-in-depth phrasing names both the *why* and the
+    *future-fallback risk*; and the PR #1957 precedent cite resolves
+    to a real role-equivalent row. The only audit-relevant
+    observation worth recording is the scoping convention noted in
+    *Family-closure fidelity*: the value-side `"uname"` / `"gname"`
+    overrides in `applyPaxOverrides` exist as defense-in-depth
+    parallels of UStar `uname` / `gname`, but the inventory's
+    *filesystem-reaching* framing for the 2-slot value-side family
+    excludes them by construction. Whether to extend the value-side
+    family with per-slot defense-in-depth fixtures for those two
+    slots is a separate scoping decision, not a closure gap; this
+    paired-review surfaces no follow-up issue for it.
 
 #### Symlink/hardlink extraction policy
 
