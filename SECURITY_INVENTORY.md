@@ -850,7 +850,7 @@ Summary — what this pattern catches and what it does not:
     section with this *"scaffold + body"* variant so future
     inventory edits of the same shape have a reusable template (see
     [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
-    *Scaffold variant* sub-section once the follow-up #2393 lands).
+    *Scaffold variant* sub-section, landed in PR #2399 closing #2393).
   - **Deferred-body follow-up issue.** PR #2383 left an inline
     follow-up draft as a comment on the PR (rather than minting an
     issue, per the original #2379 deliverable 3 phrasing *"do **not**
