@@ -259,18 +259,17 @@ Summary — what this pattern catches and what it does not:
     Rust / `miniz_oxide` versions are on the build host;
     `Cargo.lock` records the resolved version but is not currently
     treated as a security-critical artefact in this inventory.
-  - **`MinizOxide.compress` does not clamp the level argument.** The
-    Lean signature accepts a `UInt8` and the docstring documents an
-    intended 0–9 cap, but neither the Lean wrapper nor the C/Rust
-    shim enforces it; out-of-range values are passed through to
-    `miniz_oxide::deflate::compress_to_vec`. Bench callers always
-    pass 0–9, but a downstream caller wiring this API into a
-    non-bench codepath should wrap with their own clamp.
   - **If a downstream caller wires `MinizOxide.compress` /
     `MinizOxide.decompress` into a non-bench codepath, this row's
     `guarded-locally` status must be re-evaluated** alongside the
     sibling fuzz / sanitizer recipe above.
 - Recent wins:
+  - **`MinizOxide.compress` level argument now clamped to 0–9** in
+    PR #2378 — the public `compress` is a thin wrapper that
+    clamps `level` via `if level > 9 then 9 else level` before
+    delegating to a `private opaque compressUnsafe` extern; smoke
+    tests assert levels 9, 10, and 255 produce byte-identical
+    compressed output, confirming the clamp is observable end-to-end.
   - Track D Phase 0c initial wiring — PR #2356
     (`Zip/MinizOxide.lean`, `c/miniz_oxide_ffi.c`,
     `rust/miniz_oxide_shim/` static-lib Cargo crate, `BENCH.md`
