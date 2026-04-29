@@ -103,7 +103,7 @@ known gaps that sit outside the formally verified codec core.
     ([`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean)
     / [`ZipFuzzHandleRead.lean`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
     / [`scripts/fuzz-handle-read.sh`](/home/kim/lean-zip/scripts/fuzz-handle-read.sh))
-    — *Executed by PR #TBD-VERIFY-PR* (no findings under v4.30.0-rc2;
+    — *Executed by PR #2385* (no findings under v4.30.0-rc2;
     replaces the blog-post AFL harness as the forward-looking
     regression artefact for the `lean_io_prim_handle_read` class).
     Drives `Archive.list / extract`, `Tar.list / extract`,
