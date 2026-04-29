@@ -403,6 +403,101 @@ Summary — what this pattern catches and what it does not:
     new follow-up issues. The two pre-existing Missing-work bullets
     above (sanitizer recipe; `Cargo.lock` upstream-tracking pin) are
     already separately tracked.
+- Paired review of PR #2382 (Cargo.lock drift detector + lockfile-as-TCB claim):
+  - **Design fidelity vs. issue #2376.** The merged PR satisfies all
+    four enumerated deliverables from the closing issue:
+    (1) the *"`Cargo.lock` is tracked and treated as security-critical"*
+    bullet under the *Current local guardrails* list of the
+    *miniz_oxide via Rust* subsection, with the
+    *"Snapshot as of 2026-04-29: `miniz_oxide` 0.8.9, `adler2` 2.0.1"*
+    line spelt out;
+    (2) the new advisory drift detector at
+    [scripts/check-cargo-lock.sh](/home/kim/lean-zip/scripts/check-cargo-lock.sh),
+    a 104-line POSIX-shell script with an `awk`-based `[[package]]`
+    block parser, a `grep`-based snapshot-line extractor, and an
+    advisory-only `exit 0` semantics matching
+    [scripts/check-c-allocations.sh](/home/kim/lean-zip/scripts/check-c-allocations.sh);
+    (3) the script's docstring documents the recipe
+    *"Run before opening a PR that touches `rust/miniz_oxide_shim/`"*
+    (issue #2376 deliverable 3 explicitly accepts a header recipe in
+    place of a top-level dispatcher), and the script is intentionally
+    not wired into `scripts/check-inventory-links.sh` — keeping
+    inventory-link checks separate from upstream-version drift checks
+    matches the existing `check-c-allocations.sh` separation;
+    (4) the *"No upstream-tracking entry pinning the `miniz_oxide`
+    crate version"* Missing-work bullet was removed and a Recent-wins
+    counterpart added, citing PR #2382 by its merged number (post the
+    placeholder substitution surfaced by this paired review — see
+    *Missing-work-bullet flip semantics* below).
+  - **Snapshot-string parsing fidelity.** The script greps for the
+    literal regex `Snapshot as of [0-9]{4}-[0-9]{2}-[0-9]{2}: \`miniz_oxide\``
+    in `SECURITY_INVENTORY.md`, then sed-extracts the version triple
+    via `\`miniz_oxide\` ([0-9]+\.[0-9]+\.[0-9]+)`. Confirmed
+    fail-loud-on-missing-line: when the snapshot line is absent the
+    script emits a `WARNING — no "Snapshot as of …" line found` and
+    exits 0, never silently treating the lockfile as drifted (verified
+    by deleting the line and re-running). Failure mode under
+    *malformed* snapshot lines (extra whitespace between backtick and
+    version, or alternate punctuation between the two version
+    triples) is sed regex non-match → empty `expected_miniz` /
+    `expected_adler` → mismatch against current → DRIFT report with
+    blank `expected:` fields. The DRIFT report is loud (visible in
+    `git diff` and PR-review output) and the blank fields make the
+    parser failure obviously distinct from a real version drift, so
+    the failure is loud-but-unfriendly rather than silent. A
+    follow-up issue is filed for tightening the parser to either
+    accept reasonable whitespace variation or emit an explicit
+    *"could not parse snapshot line"* diagnostic; not blocking — the
+    current snapshot line matches the regex exactly, and the
+    snapshot-line shape is owned by the same inventory subsection
+    that the script reads, so drift between the two is already
+    bounded by the same PR.
+  - **Sibling design parity vs. `scripts/check-c-allocations.sh`.**
+    Both scripts: `set -u` (no `-e` — the script never aborts on a
+    non-zero subshell exit, so a single missing input never fails
+    the advisory pass); `--help` / `-h` long-form flag emitting a
+    multi-line `cat <<EOF` usage block; explicit
+    *"run from repo root"* check (`if [ ! -f "$LOCK" ]`); single
+    `WARNING`/`DRIFT` block on mismatch; advisory `exit 0` on every
+    path; pure POSIX shell + standard text tools (no Cargo / Rust
+    toolchain); both annotated as a *"trip wire, not a fence"* /
+    *"not wired into CI"* in the docstring. Divergence: the new
+    script defends two filesystem inputs
+    (`rust/miniz_oxide_shim/Cargo.lock` and `SECURITY_INVENTORY.md`)
+    rather than one (`c/zlib_ffi.c`), so it has two
+    `[ ! -f "$X" ]` guards instead of one; this is intentional and
+    follows from the artefact shape (drift detector compares two
+    files). No accidental divergence worth tightening.
+  - **Manual smoke test reproduction.** Reproduced the
+    docstring-documented smoke test
+    (`scripts/check-cargo-lock.sh:28-31`): edited the
+    *"Snapshot as of 2026-04-29: `miniz_oxide` 0.8.9"* line to
+    *"`miniz_oxide` 9.9.9"*, ran the script, observed a single
+    `DRIFT` block reading `expected: miniz_oxide 9.9.9, adler2 2.0.1`
+    / `current: miniz_oxide 0.8.9, adler2 2.0.1` followed by exit
+    code 0, then reverted the edit. Post-revert the script reports
+    *"matches snapshot (miniz_oxide 0.8.9, adler2 2.0.1)"* and
+    `git diff SECURITY_INVENTORY.md` is clean. The smoke test
+    behaves exactly as the docstring claims.
+  - **Missing-work-bullet flip semantics.** The merged inventory
+    edit removed the *"No upstream-tracking entry pinning the
+    `miniz_oxide` crate version against a known-good audit"*
+    Missing-work bullet and added a corresponding Recent-wins
+    bullet titled *"`Cargo.lock` is now treated as a
+    security-critical artefact"*. The bullet shape matches the
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    *Executed past-tense one-liner* convention (executed past-tense
+    title; closing-PR cross-link; one paragraph on caller impact;
+    explicit *"Closes the …"* sentence). However, the merged
+    bullet's PR cross-link was left as the literal placeholder
+    `#TBD-VERIFY-PR` <!-- drift-detector: prose mention of the placeholder token in a paired-review finding, not a stale placeholder --> rather than substituted with the merged number
+    `#2382` — a missed post-merge cleanup pass. Sibling Recent-wins
+    entries for PR #2383 (commit 5dafd9c) and PR #2385 (commit
+    fcfddc8) followed the substitution discipline; PR #2382 missed
+    it. The placeholder was independently flagged by
+    [scripts/check-inventory-links.sh](/home/kim/lean-zip/scripts/check-inventory-links.sh)
+    pass (d). Substituted in the same paired-review PR (one-line
+    bookkeeping fix; see commit log for the substitution rationale).
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
