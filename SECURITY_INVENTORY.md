@@ -126,6 +126,127 @@ known gaps that sit outside the formally verified codec core.
     (`testdata/zip/malformed/oversized-zip64-uncompressed-size.zip`)
     — together these close the previous *"add regression fixtures for
     oversized ZIP64 size claims"* Missing-work bullet
+- Paired review of PR #2385 (in-repo deterministic `Handle.read` /
+  `Stream.read` regression harness):
+  - **Design fidelity vs. issue #2380 / fallback path #2381.** The
+    merged PR satisfies all four enumerated deliverables from the
+    closing issue:
+    (1) [`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean)
+    is the deterministic xorshift-seeded driver mirroring
+    [`ZipTest/FuzzInflate.lean`](/home/kim/lean-zip/ZipTest/FuzzInflate.lean)'s
+    shape (same inlined 64-bit xorshift PRNG, same wall-clock budget
+    helper signatures, same `tryRead` filter that propagates every
+    `IO.Error` variant other than `.userError`);
+    (2) [`ZipFuzzHandleRead.lean`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
+    + [`scripts/fuzz-handle-read.sh`](/home/kim/lean-zip/scripts/fuzz-handle-read.sh)
+    are the sibling top-level driver and wrapper script analogous to
+    [`ZipFuzzInflate.lean`](/home/kim/lean-zip/ZipFuzzInflate.lean)
+    + [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh);
+    (3) the four pathological-input families from #2380 deliverable 3
+    (read-size-vs-buffer-length mismatches, zero-length reads,
+    oversized declared sizes, streaming reads across realloc-grown
+    buffers) are all realised in `oneIteration` via the
+    `sizeClasses` / `chunkSizes` / `outputCapClasses` rotations and
+    the `withEocdSignature` / `withGzipMagic` / `withUstarMagic`
+    parser-progress helpers;
+    (4) the *Missing-work* bullet flip is in place — the *Recent
+    wins* one-liner above cites PR #2385 directly (no unsubstituted
+    placeholder-PR token remains; the post-PR substitution
+    discipline from
+    [`progress/`](/home/kim/lean-zip/progress/)`20260428T122256Z_293ae374_anchor-refresh-closeout.md`
+    was followed). The fallback-path narrative captured in
+    [`progress/`](/home/kim/lean-zip/progress/)`20260429T072930Z_b53169b1_kiran-fuzz-rerun-fallback.md`
+    (#2369 → #2380 hand-off) and
+    [`progress/`](/home/kim/lean-zip/progress/)`20260429T083420Z_907e1428_fuzz-handle-read.md`
+    (#2380 closeout) is consistent with the merged tree.
+  - **Call-site coverage.** Every archive-side untrusted-bytes
+    `Handle.read` / `Stream.read` call site enumerated in #2380 is
+    transitively driven by an entry point in `oneIteration`:
+    `Archive.list` / `Archive.extract` reach
+    [Zip/Archive.lean](/home/kim/lean-zip/Zip/Archive.lean) `readExact`
+    (line 1011) and `readBoundedSpanFromHandle` (`readExact` again
+    via the helper) for EOCD tail, central-directory, local-header,
+    name-extra, and compressed-data spans;
+    `Tar.list` / `Tar.extract` over the `byteArrayReadStream` +
+    `fragmentingStream` wrapper reach
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) `readExact`
+    (line 218 / `input.read` line 222), the `readEntryData` payload
+    + padding reads (lines 257 / 267), the `skipEntryData` loop
+    (line 635), the `Tar.extract` regular-file payload + padding
+    reads (lines 781 / 792), and the 512-byte block read (line 656);
+    `Tar.extractTarGz` adds the `tarStream` wrapper's
+    `inStream.read 65536` (line 890); `Gzip.decompressStream`
+    (driven twice — once on bare random bytes and once on
+    `withGzipMagic`-prefixed bytes) reaches the streaming
+    [Zip/Gzip.lean](/home/kim/lean-zip/Zip/Gzip.lean) `input.read 65536`
+    sites at lines 68 and 102; `RawDeflate.decompressStream`
+    reaches the
+    [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean)
+    `input.read 65536` sites at lines 40 and 73;
+    `Gzip.decompressFile` exercises the file-handle gzip path. The
+    creator-side `h.read` in `Tar.create`
+    ([Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) line 599) is
+    correctly **out of scope** — it reads caller-chosen source files
+    rather than untrusted archive bytes and is excluded from the
+    *Local guard inventory* below for the same reason.
+  - **Determinism + reproducibility.** The 64-bit xorshift PRNG
+    (`xorshift64`, lines 79–84 of
+    [`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean))
+    is inlined with no external randomness dependency, and every
+    PRNG-consuming helper threads the state explicitly; a fixed
+    `(seed, iterations)` pair therefore produces the same exact
+    inputs on every run. The size grid `#[0, 1, 16, 512, 8192,
+    65536, 131072]` (line 60–61) and chunk-size grid `#[1, 7, 31,
+    127, 65535, 65536, 65537]` (line 66–67) match the *Recent
+    wins* description above byte-for-byte. The `lake exe test`
+    smoke run is a 100-iteration `runFuzz` invocation at fixed
+    seed `0xdeadc0de` (line 362 — `tests` has no PRNG-time entropy
+    source, so a flake from non-deterministic seeding is impossible);
+    re-running `lake exe test` on the post-merge tree
+    re-confirmed `FuzzHandleRead tests (seed=0xdeadc0de) ... 100
+    iterations completed` followed by `All tests passed!` with no
+    diagnostics.
+  - **Wall-clock-budget mode.** The standalone
+    [`fuzz_handle_read`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
+    lake executable accepts a wall-clock budget via either
+    positional CLI arg or `LEAN_ZIP_FUZZ_HANDLE_READ_SECONDS`
+    environment variable (default 30 s). The precedence — CLI
+    first, then env, then default — matches the sibling
+    [`fuzz_inflate`](/home/kim/lean-zip/ZipFuzzInflate.lean) recipe
+    line-for-line (`getEnvNatOr "LEAN_ZIP_FUZZ_HANDLE_READ_SECONDS"
+    30` mirrors `getEnvNatOr "LEAN_ZIP_FUZZ_SECONDS" 30`). A 5 s
+    smoke invocation (`bash scripts/fuzz-handle-read.sh 5`) on the
+    post-merge tree completed 4 940 iterations and exited 0 with
+    output `[fuzz-handle-read] OK`. The seed defaults to
+    `0xc0ffeec0ffeec0ff` (overridable via
+    `LEAN_ZIP_FUZZ_HANDLE_READ_SEED`), distinct from the
+    `lake exe test` smoke seed `0xdeadc0de` so the budgeted run
+    explores a different deterministic input series than the CI
+    smoke set.
+  - **Inventory cross-link integrity.** The *Recent wins* bullet
+    above cites PR #2385 directly (the placeholder-PR token used
+    pre-merge has been substituted), and the *Missing-work* →
+    *Recent-wins* flip follows the
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    *Executed past-tense one-liner* convention (✅ + brief noun
+    phrase, *Executed by PR #2385*, parenthetical findings
+    statement).
+    [`scripts/check-inventory-links.sh`](/home/kim/lean-zip/scripts/check-inventory-links.sh)
+    on the post-merge tree reports `errors=0, warnings=0` (78
+    unique fixture paths checked, 8 placeholder-PR occurrences —
+    none of which is the PR #2385 entry). No follow-up cross-link
+    bookkeeping issue is required.
+  - **Findings statement.** No new findings under v4.30.0-rc2.
+    Re-confirmed by (a) the 100-iteration `lake exe test` smoke
+    run (clean), and (b) the 5 s `scripts/fuzz-handle-read.sh 5`
+    run on the worker host (4 940 iterations, exit 0). The harness
+    rejects exactly one `IO.Error` variant — `.userError` — as the
+    expected malformed-input failure mode; any panic, segfault,
+    sanitizer trap, or non-`userError` `IO.Error` would surface as
+    a non-zero exit. None did. The *Recent wins* bullet's
+    *"no findings under v4.30.0-rc2"* claim is therefore
+    validated by post-merge re-run, not just by the original
+    pre-merge author run.
 
 ### zlib via C FFI
 
