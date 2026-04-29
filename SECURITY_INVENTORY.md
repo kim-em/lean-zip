@@ -614,6 +614,133 @@ Summary — what this pattern catches and what it does not:
     the same shape, that PR is the right point to extract a skill
     entry; this paired-review surfaces no follow-up issue for skill
     extraction today.
+- Paired review of PR #2383 (`scripts/sanitize-rust-ffi.sh` skeleton + Sanitizer recipe inventory paragraph):
+  - **Design fidelity vs. issue #2379.** The merged PR satisfies all
+    three enumerated deliverables from the closing issue, honouring
+    the explicit *"scaffolding only, NOT actual ASan running"* scope
+    qualifier:
+    (1) the new
+    [scripts/sanitize-rust-ffi.sh](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
+    is a 156-line POSIX-shell script paralleling
+    [scripts/sanitize-ffi.sh](/home/kim/lean-zip/scripts/sanitize-ffi.sh)
+    in shape — header comment block describing scope (`c/miniz_oxide_ffi.c` +
+    `libminiz_oxide_shim.a` only; explicitly not `c/zlib_ffi.c` and not
+    the Lean runtime), `usage()` block describing the intended
+    nightly-Rust + `RUSTFLAGS="-Zsanitizer=address"` recipe, an
+    environment guard at the top of `main` checking for `cargo` and
+    `cargo +nightly --version`, a body block that is a single TODO-marked
+    `exit 1` with a clear "skeleton" message, and the standard
+    `set -euo pipefail` / `usage()` / `--help` conventions; the
+    script is marked executable (`-rwxr-xr-x`); UBSan is explicitly noted
+    as future scope in both the header comment and `usage()`;
+    (2) the new
+    *"Sanitizer recipe scaffolded but not yet executed"* bullet under
+    *miniz_oxide via Rust → Current local guardrails* spells out
+    the intended ASan recipe shape, links the new script, and records
+    the deferred-body status with the env-guard contract;
+    (3) Missing-work bullet 1 was edited (not deleted) — the original
+    *"Sketch: build the Rust crate under `RUSTFLAGS="-Zsanitizer=address"`
+    …"* sentence was replaced with a forward-pointer
+    *"Scaffolded as `scripts/sanitize-rust-ffi.sh` in PR #2383
+    (paragraph above under *Current local guardrails*); the recipe
+    body is TODO, deferred to a sibling follow-up issue …"*. The
+    bullet correctly remains open (not flipped to *Recent wins*),
+    matching the *"scaffolding only"* scope qualifier. The PR
+    cross-link uses the merged number `#2383` directly with no
+    `#TBD-VERIFY-PR` <!-- drift-detector: prose mention of the placeholder token in a paired-review finding, not a stale placeholder --> placeholder leaked through (matching the
+    sibling PR #2378 substitution discipline; PR #2382 missed it
+    and the sibling paired-review #2384 picked it up as a one-line
+    bookkeeping fix).
+  - **Environment-guard semantics.** Reproduced the four guard
+    contracts on this macOS host (no nightly Rust available):
+    (a) `bash scripts/sanitize-rust-ffi.sh` exits **2** (not 0, not
+    1) with the *"nightly Rust toolchain not available"* diagnostic,
+    matching the
+    [scripts/sanitize-ffi.sh](/home/kim/lean-zip/scripts/sanitize-ffi.sh)
+    *"cc could not locate libasan.so / libubsan.so"* exit-2 convention,
+    so the two scripts compose with a shared "environment not met →
+    code 2" idiom. (b) The guard runs **before** any Lake / cargo
+    invocation: arg parsing → lakefile root check → `command -v cargo`
+    → `cargo +nightly --version` → echo nightly version → TODO body.
+    No FS state is touched on the env-guard exit path — confirmed
+    by reading the script top-to-bottom; the guard's only side
+    effects are the stderr diagnostic prints. (c) The
+    stderr/stdout messaging clearly distinguishes "host ineligible"
+    from "skeleton not yet implemented": the env-guard exit-2
+    diagnostic is *"error: nightly Rust toolchain not available."*
+    plus a `rustup toolchain install nightly` hint, while the
+    post-guard exit-1 path emits *"error: sanitize-rust-ffi.sh
+    recipe body is TODO."* with a forward-pointer to the inventory
+    Missing-work bullet — the two diagnostics are wholly disjoint
+    and a future operator cannot mistake one for the other. (d) The
+    `cargo not found` and `cargo +nightly missing` paths are split
+    into two separate `if` blocks with two separate diagnostics
+    (rather than one combined check), so the operator can tell from
+    the message which of the two prerequisites is missing — a small
+    UX win over a single combined check that says "one of these two
+    things is wrong".
+  - **Sibling design parity vs. `scripts/sanitize-ffi.sh`.** Both
+    scripts: `#!/usr/bin/env bash` with `set -euo pipefail`; a `usage()`
+    function emitted via `cat <<'EOF'`; identical `case "${1:-}"` arg
+    parser handling `-h|--help` / empty / unknown (with the unknown
+    branch printing usage to stderr and exiting 2); the same
+    *"run from the project root (lakefile.lean not found)"* check
+    with exit 2; an environment-probe block that exits 2 cleanly
+    when toolchain prerequisites are absent; an explicit
+    *"Exit codes:"* table in the `usage()` block. Intentional
+    divergence (different toolchain → different probe shape):
+    `sanitize-ffi.sh` probes for `pkg-config` + `zlib` + GCC's
+    `libasan.so` / `libubsan.so`, while `sanitize-rust-ffi.sh`
+    probes for `cargo` + nightly Rust; `sanitize-ffi.sh`
+    re-execs under `nix-shell` when zlib is missing on host while
+    `sanitize-rust-ffi.sh` does not (no nix-shell handles nightly
+    Rust in this project's `shell.nix`); `sanitize-ffi.sh`'s body
+    is filled in (full Lake build + LD_PRELOAD test invocation)
+    while `sanitize-rust-ffi.sh`'s body is the deferred TODO. No
+    accidental divergence worth tightening — the new script is a
+    structurally honest scaffold of the precedent recipe shape, with
+    each divergence traceable to a toolchain-shape difference.
+  - **Inventory partial-flip / forward-pointer phrasing — new
+    variant of the *Half-closed two-step*.** The
+    [.claude/skills/inventory-reconciliation/SKILL.md](/home/kim/lean-zip/.claude/skills/inventory-reconciliation/SKILL.md)
+    *Half-closed two-step* section currently covers a single shape:
+    *parameter-add PR + default-flip PR* (precedent: #1610 → #1631).
+    PR #2383 is a different two-step shape — *scaffold (skeleton
+    script + inventory bullet) + body fill-in* — that the skill does
+    not yet name. The shape's distinguishing features are
+    (i) the closing PR introduces a load-bearing env-guard so the
+    skeleton is safe to run on any host but produces no false "pass",
+    (ii) the *Missing work* bullet is **edited in place rather than
+    flipped** — the original "Sketch: …" sentence is replaced with
+    a forward-pointer to the new scaffold, leaving the bullet's
+    `- [ ]` checkbox intact, and (iii) a sibling guardrail bullet
+    captures the half-state under *Current local guardrails* with
+    a *"scaffolded but not yet executed"* qualifier. The phrasing
+    is unambiguous: a future reader of either bullet can tell that
+    the work is *partially executed* (scaffolded, not run), and the
+    forward-pointer identifies both the new artefact and the deferred
+    follow-up scope. Confirmed
+    [scripts/check-inventory-links.sh](/home/kim/lean-zip/scripts/check-inventory-links.sh)
+    reports `errors=0, warnings=0` against the post-merge tree. A
+    follow-up is filed to extend the *Half-closed two-step* skill
+    section with this *"scaffold + body"* variant so future
+    inventory edits of the same shape have a reusable template.
+  - **Deferred-body follow-up issue.** PR #2383 left an inline
+    follow-up draft as a comment on the PR (rather than minting an
+    issue, per the original #2379 deliverable 3 phrasing *"do **not**
+    call `coordination plan`"*). This paired-review supersedes that
+    deferral by minting the standalone follow-up issue directly, since
+    the draft body is already self-contained and ready to claim. The
+    new follow-up records: the host-gating requirement (Linux + nightly
+    Rust); the precise script-body sketch from issue #2379 (cargo
+    +nightly build + MINIZ_OXIDE_LDFLAGS surface + lake -R clean/build
+    + Lean smoke driver under ASAN_OPTIONS); the macOS-host skip
+    pattern mirroring #2366 / #2369; out-of-scope for the linking-into
+    `scripts/fuzz-inflate.sh` extension (which is the *third* sibling
+    issue); a forward-pointer back to PR #2383 as the scaffold it
+    builds on. The follow-up is a separate `agent-plan` `feature` issue
+    so it appears in `coordination list-unclaimed --label feature` and
+    can be claimed by the next Linux + nightly-Rust worker host.
 
 ### `Zip.Native.Inflate` and verified DEFLATE core
 
