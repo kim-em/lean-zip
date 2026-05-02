@@ -100,6 +100,27 @@ exercising the `Tar.extract` per-typeflag policy:
   GNU-typeflag sub-ladder distinct from the POSIX UStar `'0'`–`'7'`
   range. Together with the five POSIX UStar siblings the family
   pins nine distinct typeflag values against the shared fallback.
+* `tar-longnames-skipped.tar` — `typeflag == 0x4E` (GNU `'N'`,
+  LF_NAMES old-long-name extension, deprecated precursor to the
+  modern `'L'` / `'K'` long-name encoding), `linkname == ""`, `path
+  == "longnames-entry"`. `Tar.extract` must silently skip the entry;
+  lean-zip's strict `==` chain does not match `'N'` against the typed
+  branches, and `forEntries`'s inner dispatch recognises only the
+  modern `'L'` / `'K'` long-name typeflags (and the PAX `'x'` / `'g'`
+  pair) — `'N'` is *not* aliased to `'L'` despite being the
+  historical precursor of the same long-name extension family — so
+  the entry falls through to the `else` arm and no filesystem entry
+  is created. The header path / linkname is never interpreted as a
+  name-rewrite directive for subsequent entries (a peer-parser-
+  differential smuggling vector that the silent-skip policy closes).
+  Fifth GNU-typeflag sibling of the silent-skip `else` fallback
+  family alongside `tar-volumeheader-skipped.tar` (typeflag `'V'`),
+  `tar-multivol-skipped.tar` (typeflag `'M'`),
+  `tar-sparse-skipped.tar` (typeflag `'S'`), and
+  `tar-incremental-skipped.tar` (typeflag `'D'`), extending the
+  GNU-typeflag sub-ladder distinct from the POSIX UStar `'0'`–`'7'`
+  range. Together with the five POSIX UStar siblings the family
+  pins ten distinct typeflag values against the shared fallback.
 
 Run once at development time:
 
@@ -116,6 +137,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-multivol-skipped.tar
 - testdata/tar/security/tar-sparse-skipped.tar
 - testdata/tar/security/tar-incremental-skipped.tar
+- testdata/tar/security/tar-longnames-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -220,4 +242,30 @@ def main : IO Unit := do
   -- the fixture geometry uniform with the other GNU siblings.
   buildZeroSizeFixture "incremental-entry" "" 0x44
     (outDir / "tar-incremental-skipped.tar")
-  IO.println "Built 10 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- GNU typeflag 'N' (0x4E) = LF_NAMES old-long-name extension, the
+  -- deprecated precursor to the modern 'L' / 'K' long-name encoding.
+  -- Fifth GNU-typeflag sibling of the silent-skip `else` fallback
+  -- family (sub-ladder distinct from the POSIX UStar '0'–'7' range
+  -- above); no constant in `Tar` namespace. GNU tar emitted 'N' for
+  -- entries whose names did not fit into the 100-byte UStar `name`
+  -- field: the entry payload carried a list of filenames that a peer
+  -- parser was expected to apply to the entries that follow. The
+  -- format predates PAX ('x') and the modern GNU 'L'/'K' headers,
+  -- and is considered obsolete in current GNU tar but is still
+  -- recognised by `bsdtar` / `libarchive` in lenient mode. A
+  -- malicious archive could ship an 'N' entry whose payload encodes
+  -- a list of filenames containing `../etc/passwd` or absolute
+  -- paths, expecting a lenient extractor to apply those names to
+  -- the next regular-file entry (parser-differential archive-slip
+  -- via deprecated long-name rewriting). lean-zip's strict `==`
+  -- chain rejects 'N' and silent-skips, never interpreting the
+  -- payload as a name-rewrite directive — `forEntries` recognises
+  -- only the modern 'L' / 'K' (and PAX 'x' / 'g') long-name
+  -- typeflags; 'N' is *not* aliased to 'L'. The fixture
+  -- intentionally ships a zero-byte body with no filename listing:
+  -- the silent-skip policy applies regardless of payload shape, and
+  -- a zero-byte body keeps the fixture geometry uniform with the
+  -- other GNU siblings.
+  buildZeroSizeFixture "longnames-entry" "" 0x4E
+    (outDir / "tar-longnames-skipped.tar")
+  IO.println "Built 11 per-typeflag-policy security fixtures under testdata/tar/security/."
