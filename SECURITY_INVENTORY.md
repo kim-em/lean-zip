@@ -2997,7 +2997,7 @@ Summary — what this pattern catches and what it does not:
     follow-up issue is filed by this paired-review.
 - Paired review of PR #2425 (`tar-contiguous-skipped.tar` fixture —
   per-typeflag silent-skip family extension 4 → 5; this paired-review
-  landed in PR #TBD-VERIFY-PR <!-- drift-detector: half-closed paired-review placeholder, substituted to the real PR number on the worker branch before merge --> closing #2432):
+  landed in PR #2433 closing #2432):
   PR #2425 (squash commit `76727f6ace`, merged 2026-05-02T15:13:09Z,
   closes #2420) extends the `Tar.extract` silent-skip `else` fallback
   family from four to five sibling fixtures. The commit adds a
