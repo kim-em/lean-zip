@@ -2760,7 +2760,7 @@ Summary — what this pattern catches and what it does not:
 
 - Paired review of PR #2422 (`tar-blockdev-skipped.tar` fixture —
   per-typeflag silent-skip family extension 3 → 4; this paired-review
-  landed in PR #TBD-VERIFY-PR closing #2423):
+  landed in PR #2427 closing #2423):
   PR #2422 (squash commit `5f87adf42f`, merged 2026-05-02T14:00:54Z,
   closes #2416) extends the `Tar.extract` silent-skip `else` fallback
   family from three to four sibling fixtures. The commit adds a
