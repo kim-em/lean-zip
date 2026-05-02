@@ -2547,7 +2547,7 @@ Summary — what this pattern catches and what it does not:
     follow-up issue is filed by this paired-review.
 - Paired review of PR #2417 (`tar-chardev-skipped.tar` fixture —
   per-typeflag silent-skip family extension 2 → 3; this paired-review
-  landed in PR #TBD-VERIFY-PR closing #2418):
+  landed in PR #2421 closing #2418):
   PR #2417 (squash commit `4ff06db564`, merged 2026-05-02T13:03:33Z,
   closes #2415) extends the `Tar.extract` silent-skip `else` fallback
   family from two to three sibling fixtures. The commit adds a
