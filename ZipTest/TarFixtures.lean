@@ -722,6 +722,55 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   unless inListed[0]!.typeflag == 0x44 do
     throw (IO.userError s!"tar-incremental-skipped.tar: expected Tar.list typeflag = 0x44, got {inListed[0]!.typeflag}")
 
+  -- tar-longnames-skipped.tar: typeflag 'N' (GNU LF_NAMES old-long-name
+  -- extension, 0x4E). Policy: silent skip — no filesystem entry created,
+  -- so the extract dir must remain empty. This pins the silent-skip
+  -- policy's GNU long-names-old arm as the **fifth GNU-typeflag**
+  -- sibling alongside tar-volumeheader-skipped.tar (typeflag 'V', 0x56),
+  -- tar-multivol-skipped.tar (typeflag 'M', 0x4D),
+  -- tar-sparse-skipped.tar (typeflag 'S', 0x53), and
+  -- tar-incremental-skipped.tar (typeflag 'D', 0x44), extending the
+  -- GNU-typeflag sub-ladder distinct from the POSIX UStar '0'–'7'
+  -- numeric range covered by hardlink-outside.tar (typeflag '1'),
+  -- tar-fifo-skipped.tar (typeflag '6'), tar-chardev-skipped.tar
+  -- (typeflag '3'), tar-blockdev-skipped.tar (typeflag '4'), and
+  -- tar-contiguous-skipped.tar (typeflag '7'); together the ten pin
+  -- ten distinct typeflag values against the shared `else` fallback
+  -- in `Tar.extract`. The strict-vs-lenient distinction is the
+  -- security-relevant policy choice this fixture pins: 'N' is the
+  -- deprecated precursor to the modern 'L'/'K' long-name encoding —
+  -- a malicious archive could ship an 'N' entry whose payload encodes
+  -- a list of filenames containing `../etc/passwd` or absolute paths,
+  -- expecting a lenient extractor to apply those names to the next
+  -- regular-file entry (parser-differential archive-slip via deprecated
+  -- long-name rewriting) — lean-zip's policy of *never* materialising
+  -- 'N' entries and never interpreting the payload as a name-rewrite
+  -- directive is the correct conservative choice. `forEntries`
+  -- recognises only the modern 'L'/'K' (and PAX 'x'/'g') long-name
+  -- typeflags; 'N' is *not* aliased to 'L'. The optional `Tar.list`
+  -- assertion below confirms the entry is preserved through `list`
+  -- with `typeflag = 0x4E` even though `extract` skips it, pinning
+  -- the callers-routing-on-typeflag invariant.
+  let lnNamesData ← readFixture "tar/security/tar-longnames-skipped.tar"
+  let lnNamesPath ← writeFixtureTmp "tar-longnames-skipped.tar" lnNamesData
+  let lnNamesExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-longnames-skipped-extract"
+  if ← lnNamesExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", lnNamesExtract.toString] }
+  IO.FS.createDirAll lnNamesExtract
+  IO.FS.withFile lnNamesPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) lnNamesExtract
+  let lnNamesEntries ← lnNamesExtract.readDir
+  unless lnNamesEntries.isEmpty do
+    let names := lnNamesEntries.map (·.fileName)
+    throw (IO.userError s!"tar-longnames-skipped.tar: extract dir should be empty, got {names}")
+  let lnNamesListed ← IO.FS.withFile lnNamesPath .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless lnNamesListed.size == 1 do
+    throw (IO.userError s!"tar-longnames-skipped.tar: expected 1 entry from Tar.list, got {lnNamesListed.size}")
+  unless lnNamesListed[0]!.typeflag == 0x4E do
+    throw (IO.userError s!"tar-longnames-skipped.tar: expected Tar.list typeflag = 0x4E, got {lnNamesListed[0]!.typeflag}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -749,7 +798,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "tar-volumeheader-skipped.tar",
              "tar-multivol-skipped.tar",
              "tar-sparse-skipped.tar",
-             "tar-incremental-skipped.tar"] do
+             "tar-incremental-skipped.tar",
+             "tar-longnames-skipped.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
@@ -763,6 +813,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-tar-volumeheader-skipped-extract",
              "/tmp/lean-zip-fixture-tar-multivol-skipped-extract",
              "/tmp/lean-zip-fixture-tar-sparse-skipped-extract",
-             "/tmp/lean-zip-fixture-tar-incremental-skipped-extract"] do
+             "/tmp/lean-zip-fixture-tar-incremental-skipped-extract",
+             "/tmp/lean-zip-fixture-tar-longnames-skipped-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"
