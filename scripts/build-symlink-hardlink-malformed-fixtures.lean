@@ -87,6 +87,19 @@ exercising the `Tar.extract` per-typeflag policy:
   GNU-typeflag sub-ladder distinct from the POSIX UStar `'0'`–`'7'`
   range. Together with the five POSIX UStar siblings the family
   pins eight distinct typeflag values against the shared fallback.
+* `tar-incremental-skipped.tar` — `typeflag == 0x44` (GNU `'D'`,
+  directory-dump for incremental backups), `linkname == ""`, `path
+  == "incremental-entry"`. `Tar.extract` must silently skip the
+  entry; lean-zip's strict `==` chain does not match `'D'` against
+  the typed branches, so the entry falls through to the `else` arm
+  and no filesystem entry is created. Fourth GNU-typeflag sibling of
+  the silent-skip `else` fallback family alongside
+  `tar-volumeheader-skipped.tar` (typeflag `'V'`),
+  `tar-multivol-skipped.tar` (typeflag `'M'`), and
+  `tar-sparse-skipped.tar` (typeflag `'S'`), extending the
+  GNU-typeflag sub-ladder distinct from the POSIX UStar `'0'`–`'7'`
+  range. Together with the five POSIX UStar siblings the family
+  pins nine distinct typeflag values against the shared fallback.
 
 Run once at development time:
 
@@ -102,6 +115,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-volumeheader-skipped.tar
 - testdata/tar/security/tar-multivol-skipped.tar
 - testdata/tar/security/tar-sparse-skipped.tar
+- testdata/tar/security/tar-incremental-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -185,4 +199,25 @@ def main : IO Unit := do
   -- uniform with the other GNU siblings.
   buildZeroSizeFixture "sparse-entry" "" 0x53
     (outDir / "tar-sparse-skipped.tar")
-  IO.println "Built 9 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- GNU typeflag 'D' (0x44) = directory-dump for incremental backups.
+  -- Fourth GNU-typeflag sibling of the silent-skip `else` fallback family
+  -- (sub-ladder distinct from the POSIX UStar '0'–'7' range above); no
+  -- constant in `Tar` namespace. GNU tar emits 'D' for directory dumps in
+  -- incremental backup archives (`-G` / `--listed-incremental`): each
+  -- directory is recorded as a 'D' entry whose payload is a
+  -- NUL-separated listing of the directory's contents at backup time
+  -- (with leading 'Y'/'N' markers indicating whether each entry is
+  -- included in this incremental). A malicious archive could ship a
+  -- 'D' entry with a crafted directory-listing payload that an
+  -- incremental-aware extractor would interpret as instructions to
+  -- delete files outside `outDir` (the GNU incremental format allows
+  -- the listing to mark files for *removal* during restore), expecting
+  -- a lenient extractor to honour those removal cues. lean-zip's
+  -- strict `==` chain rejects 'D' and silent-skips, never interpreting
+  -- the listing payload at all. The fixture intentionally ships a
+  -- zero-byte body with no incremental listing: the silent-skip policy
+  -- applies regardless of payload shape, and a zero-byte body keeps
+  -- the fixture geometry uniform with the other GNU siblings.
+  buildZeroSizeFixture "incremental-entry" "" 0x44
+    (outDir / "tar-incremental-skipped.tar")
+  IO.println "Built 10 per-typeflag-policy security fixtures under testdata/tar/security/."
