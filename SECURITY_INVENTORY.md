@@ -2331,7 +2331,7 @@ Summary — what this pattern catches and what it does not:
     paired-review surfaces no follow-up issue for it.
 - Paired review of PR #2413 (`tar-fifo-skipped.tar` fixture —
   per-typeflag silent-skip family extension 1 → 2; this paired-review
-  landed in PR #TBD-VERIFY-PR closing #2414):
+  landed in PR #2419 closing #2414):
   PR #2413 (squash commit `cafab42374`, merged 2026-05-02T01:08:37Z,
   closes #2412) extends the `Tar.extract` silent-skip `else` fallback
   family from one to two sibling fixtures. The commit adds a
