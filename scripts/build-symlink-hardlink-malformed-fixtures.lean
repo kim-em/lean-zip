@@ -28,6 +28,14 @@ exercising the `Tar.extract` per-typeflag policy:
   (typeflag `'1'`) and `tar-fifo-skipped.tar` (typeflag `'6'`); together
   the three pin three distinct typeflag values against the shared
   fallback.
+* `tar-blockdev-skipped.tar` — `typeflag == 0x34` (POSIX UStar `'4'`,
+  block device), `linkname == ""`, `path == "blockdev-entry"`.
+  `Tar.extract` must silently skip the entry; no block-device node is
+  materialised, so the extract dir remains empty.  Fourth sibling of
+  the silent-skip `else` fallback family alongside `hardlink-outside.tar`
+  (typeflag `'1'`), `tar-fifo-skipped.tar` (typeflag `'6'`), and
+  `tar-chardev-skipped.tar` (typeflag `'3'`); together the four pin
+  four distinct typeflag values against the shared fallback.
 
 Run once at development time:
 
@@ -38,6 +46,7 @@ Output (byte-deterministic):
 - testdata/tar/security/hardlink-outside.tar
 - testdata/tar/security/tar-fifo-skipped.tar
 - testdata/tar/security/tar-chardev-skipped.tar
+- testdata/tar/security/tar-blockdev-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -73,4 +82,9 @@ def main : IO Unit := do
   -- `Tar` namespace.
   buildZeroSizeFixture "chardev-entry" "" 0x33
     (outDir / "tar-chardev-skipped.tar")
-  IO.println "Built 4 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- POSIX UStar typeflag '4' (0x34) = block special device. Same
+  -- silent-skip `else` fallback as the FIFO and chardev arms above; no
+  -- constant in `Tar` namespace.
+  buildZeroSizeFixture "blockdev-entry" "" 0x34
+    (outDir / "tar-blockdev-skipped.tar")
+  IO.println "Built 5 per-typeflag-policy security fixtures under testdata/tar/security/."
