@@ -20,6 +20,14 @@ exercising the `Tar.extract` per-typeflag policy:
   typeflag values against the shared fallback, so a future refactor
   cannot drop one arm without breaking at least one of the two
   fixtures.
+* `tar-chardev-skipped.tar` — `typeflag == 0x33` (POSIX UStar `'3'`,
+  character device), `linkname == ""`, `path == "chardev-entry"`.
+  `Tar.extract` must silently skip the entry; no character-device node
+  is materialised, so the extract dir remains empty.  Third sibling of
+  the silent-skip `else` fallback family alongside `hardlink-outside.tar`
+  (typeflag `'1'`) and `tar-fifo-skipped.tar` (typeflag `'6'`); together
+  the three pin three distinct typeflag values against the shared
+  fallback.
 
 Run once at development time:
 
@@ -29,6 +37,7 @@ Output (byte-deterministic):
 - testdata/tar/security/symlink-absolute.tar
 - testdata/tar/security/hardlink-outside.tar
 - testdata/tar/security/tar-fifo-skipped.tar
+- testdata/tar/security/tar-chardev-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -59,4 +68,9 @@ def main : IO Unit := do
   -- alongside any other unsupported typeflag.
   buildZeroSizeFixture "fifo-entry" "" 0x36
     (outDir / "tar-fifo-skipped.tar")
-  IO.println "Built 3 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- POSIX UStar typeflag '3' (0x33) = character special device. Same
+  -- silent-skip `else` fallback as the FIFO arm above; no constant in
+  -- `Tar` namespace.
+  buildZeroSizeFixture "chardev-entry" "" 0x33
+    (outDir / "tar-chardev-skipped.tar")
+  IO.println "Built 4 per-typeflag-policy security fixtures under testdata/tar/security/."
