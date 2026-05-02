@@ -47,6 +47,21 @@ exercising the `Tar.extract` per-typeflag policy:
   `tar-blockdev-skipped.tar` (typeflag `'4'`); together the five pin
   five distinct typeflag values against the shared fallback, fully
   fixturing the POSIX UStar `'0'`–`'7'` numeric range.
+* `tar-volumeheader-skipped.tar` — `typeflag == 0x56` (GNU `'V'`,
+  multi-volume archive label marker), `linkname == ""`, `path ==
+  "volume-label-entry"`. `Tar.extract` must silently skip the entry;
+  lean-zip's strict `==` chain does not match `'V'` against the typed
+  branches, so the entry falls through to the `else` arm and no
+  filesystem entry is created. First GNU-typeflag sibling of the
+  silent-skip `else` fallback family alongside the POSIX UStar
+  siblings `hardlink-outside.tar` (typeflag `'1'`), `tar-fifo-skipped.tar`
+  (typeflag `'6'`), `tar-chardev-skipped.tar` (typeflag `'3'`),
+  `tar-blockdev-skipped.tar` (typeflag `'4'`), and
+  `tar-contiguous-skipped.tar` (typeflag `'7'`); together the six pin
+  six distinct typeflag values against the shared fallback, spanning
+  the POSIX UStar `'1'`/`'3'`/`'4'`/`'6'`/`'7'` numeric range and the
+  GNU-typeflag `'V'` extension (a sub-ladder distinct from the POSIX
+  UStar `'0'`–`'7'` range).
 
 Run once at development time:
 
@@ -59,6 +74,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-chardev-skipped.tar
 - testdata/tar/security/tar-blockdev-skipped.tar
 - testdata/tar/security/tar-contiguous-skipped.tar
+- testdata/tar/security/tar-volumeheader-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -106,4 +122,12 @@ def main : IO Unit := do
   -- lenient peer extractors do.
   buildZeroSizeFixture "contiguous-entry" "" 0x37
     (outDir / "tar-contiguous-skipped.tar")
-  IO.println "Built 6 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- GNU typeflag 'V' (0x56) = multi-volume archive label marker. First
+  -- GNU-typeflag sibling of the silent-skip `else` fallback family
+  -- (sub-ladder distinct from the POSIX UStar '0'–'7' range above); no
+  -- constant in `Tar` namespace. The path "volume-label-entry" reads as
+  -- a synthetic GNU volume label without colliding with the device-node
+  -- naming pattern used by the chardev / blockdev / FIFO arms.
+  buildZeroSizeFixture "volume-label-entry" "" 0x56
+    (outDir / "tar-volumeheader-skipped.tar")
+  IO.println "Built 7 per-typeflag-policy security fixtures under testdata/tar/security/."
