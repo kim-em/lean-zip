@@ -1,7 +1,6 @@
 import Zip
 
-/-! Build symlink/hardlink archive-slip regression fixtures for Track E
-    Priority 1.
+/-! Build per-typeflag-policy regression fixtures for Track E Priority 1.
 
 Each fixture is a minimal one-entry UStar tar archive with `size == 0`,
 exercising the `Tar.extract` per-typeflag policy:
@@ -13,6 +12,14 @@ exercising the `Tar.extract` per-typeflag policy:
   "../outside"`, `path == "entry"`.  `Tar.extract` must silently skip
   the entry; no file named `outside` may appear next to the extract
   directory.
+* `tar-fifo-skipped.tar` — `typeflag == 0x36` (POSIX UStar `'6'`,
+  FIFO), `linkname == ""`, `path == "fifo-entry"`.  `Tar.extract` must
+  silently skip the entry; no FIFO is materialised, so the extract dir
+  remains empty.  Sibling of `hardlink-outside.tar` for the silent-skip
+  `else` fallback in `Tar.extract`: together they pin two distinct
+  typeflag values against the shared fallback, so a future refactor
+  cannot drop one arm without breaking at least one of the two
+  fixtures.
 
 Run once at development time:
 
@@ -21,6 +28,7 @@ Run once at development time:
 Output (byte-deterministic):
 - testdata/tar/security/symlink-absolute.tar
 - testdata/tar/security/hardlink-outside.tar
+- testdata/tar/security/tar-fifo-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -45,4 +53,10 @@ def main : IO Unit := do
     (outDir / "symlink-absolute.tar")
   buildZeroSizeFixture "entry" "../outside" Tar.typeHardlink
     (outDir / "hardlink-outside.tar")
-  IO.println "Built 2 symlink/hardlink security fixtures under testdata/tar/security/."
+  -- POSIX UStar typeflag '6' (0x36) = FIFO. No constant in `Tar`
+  -- namespace because FIFOs are not a recognised typeflag — they fall
+  -- through to the silent-skip `else` fallback in `Tar.extract`
+  -- alongside any other unsupported typeflag.
+  buildZeroSizeFixture "fifo-entry" "" 0x36
+    (outDir / "tar-fifo-skipped.tar")
+  IO.println "Built 3 per-typeflag-policy security fixtures under testdata/tar/security/."
