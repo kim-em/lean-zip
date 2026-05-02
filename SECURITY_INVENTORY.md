@@ -2545,6 +2545,218 @@ Summary — what this pattern catches and what it does not:
     benefit also falls); any future per-typeflag fixture should earn
     its own paired-review entry on the established cadence. No new
     follow-up issue is filed by this paired-review.
+- Paired review of PR #2417 (`tar-chardev-skipped.tar` fixture —
+  per-typeflag silent-skip family extension 2 → 3; this paired-review
+  landed in PR #TBD-VERIFY-PR closing #2418):
+  PR #2417 (squash commit `4ff06db564`, merged 2026-05-02T13:03:33Z,
+  closes #2415) extends the `Tar.extract` silent-skip `else` fallback
+  family from two to three sibling fixtures. The commit adds a
+  512-byte single-block UStar fixture
+  `testdata/tar/security/tar-chardev-skipped.tar` (SHA-256
+  `d87742fb3d85ff0a4e15c161d6ae8c3430702e52dd58c56d7fcacd39adb7593e`)
+  for typeflag `'3'` (POSIX UStar character special device, `0x33`); a
+  fourth `buildZeroSizeFixture` call in
+  [scripts/build-symlink-hardlink-malformed-fixtures.lean](/home/kim/lean-zip/scripts/build-symlink-hardlink-malformed-fixtures.lean)
+  producing it deterministically; a new test arm in
+  [ZipTest/TarFixtures.lean](/home/kim/lean-zip/ZipTest/TarFixtures.lean)
+  immediately after the existing `tar-fifo-skipped.tar` arm, asserting
+  the extract directory is empty after extraction (mirroring the
+  `tar-fifo-skipped.tar` arm shape); a new Reproducer Corpus row in
+  this inventory; and a *Symlink/hardlink extraction policy* fixture
+  enumeration entry. No spec change, no production-code change, no new
+  typeflag constant in the `Tar` namespace, no caller / signature
+  change.
+  - **Family-extension claim fidelity (2 → 3 fixtures).** The 2 → 3
+    extension math is faithful to the merged tree. PR #2417 is the
+    third per-typeflag fixture in the silent-skip family; siblings
+    `hardlink-outside.tar` (PR #1555, typeflag `'1'`) and
+    `tar-fifo-skipped.tar` (PR #2413, typeflag `'6'`) are the first
+    two. The trio pins three distinct typeflag values (`0x31`, `0x36`,
+    and `0x33`) against the shared `else` fallback at
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) (`partial def
+    extract`'s tail `else` arm, after the `typeDirectory` /
+    `typeRegular` / `typeSymlink` cases). All three fixtures have
+    `size = 0` and route through the same
+    `skipEntryData input e.size` no-op call in the `else` body, so the
+    structural pin remains the *existence* of the `else` arm rather
+    than the *behaviour* of any per-typeflag dispatch — a future
+    refactor that drops the fallback for any one arm would fire the
+    corresponding fixture. The originating PR #1555 set the silent-skip
+    precedent at 1/N; PR #2413 added the second pin at 2/N
+    (paired-reviewed in the immediately preceding entry); PR #2417 now
+    extends to 3/N. Sibling-cluster precedent: the UStar interior-NUL
+    family went 1 → 4 across PRs #1934 / #1937 / #1944 before
+    terminal-closing at 5/5 in PR #1957 — the silent-skip family is
+    one step further along that ladder than at the PR #2413
+    paired-review snapshot, and remains open-ended (typeflags `'4'`
+    block device and `'7'` contiguous file are the next candidates).
+  - **Fixture-builder rename-vs-extend choice.** The worker chose
+    *extend in place*, matching the PR #2413 worker's earlier choice
+    on the same script. The script path
+    [scripts/build-symlink-hardlink-malformed-fixtures.lean](/home/kim/lean-zip/scripts/build-symlink-hardlink-malformed-fixtures.lean)
+    stays stable; the module docstring's *Output (byte-deterministic)*
+    list now enumerates four output files (added
+    `testdata/tar/security/tar-chardev-skipped.tar` as the fourth
+    line) and the per-typeflag enumeration block in the docstring
+    body adds a fourth bulleted entry for the chardev arm with its
+    typeflag `0x33`, `path = "chardev-entry"`, empty linkname, and
+    silent-skip `else` fallback semantics — phrased *"Third sibling of
+    the silent-skip `else` fallback family alongside
+    `hardlink-outside.tar` (typeflag `'1'`) and `tar-fifo-skipped.tar`
+    (typeflag `'6'`); together the three pin three distinct typeflag
+    values against the shared fallback."* The build summary line at
+    `main`'s tail prints *"Built 4 per-typeflag-policy security
+    fixtures under testdata/tar/security/."* — the count moved from
+    `3` (PR #2413 era) to `4` correctly. The extend-in-place choice
+    matches the docstring framing (*"per-typeflag-policy regression
+    fixtures"* — agnostic to typeflag count) and keeps the rename
+    churn at zero across the family extension. Worker-recorded
+    rationale in
+    [progress/20260502T130010Z_61ee8b41.md](/home/kim/lean-zip/progress/20260502T130010Z_61ee8b41.md)
+    documents the path-disambiguation choice (*"The path
+    `\"chardev-entry\"` is unambiguous against the existing `\"entry\"`
+    / `\"fifo-entry\"`"*) — the per-fixture path naming convention
+    matches the FIFO arm's `"fifo-entry"` pattern, so cross-arm
+    confusion at extraction time is impossible.
+  - **Reproducer Corpus row prose fidelity.** The new
+    `tar-chardev-skipped.tar` row carries the seven required elements:
+    (i) typeflag value `0x33` and the POSIX UStar `'3'` glyph (cited
+    together in the row's opening clause); (ii) POSIX semantics
+    *"character special device"* with the POSIX.1-1988 IEEE Std 1003.1
+    §10 citation; (iii) silent-skip `else` branch, with explicit
+    reference to `Tar.extract`'s tail `else` arm and the
+    `skipEntryData` no-op on `e.size = 0`; (iv) sibling fixture
+    cross-references to both `hardlink-outside.tar` (typeflag `'1'`)
+    *and* `tar-fifo-skipped.tar` (typeflag `'6'`) — the row correctly
+    names two siblings rather than one, reflecting the 2 → 3 extension;
+    (v) the family-extension claim phrased as *"Per-typeflag
+    silent-skip family extension"* with the *"trio together pins three
+    distinct typeflag values against the shared fallback"*
+    defense-in-depth framing; (vi) the writer-side caveat
+    (*"`Tar.create`'s caller-API only accepts paths and never invokes
+    `Tar.buildHeader` with a non-`'0'`/`'5'` typeflag, so legitimate
+    archives produced by the lean-zip writer never carry typeflag
+    `'3'`"*) — confirmed by reading
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) (`Tar.create`
+    builds entries via `walkFiles` with `typeflag := if isDir then
+    typeDirectory else typeRegular`, identical to the PR #2413
+    paired-review's same audit on the FIFO arm); (vii) only stable
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) anchors — no `:N`
+    line-number suffixes, consistent with the
+    [PR #2353](https://github.com/kim-em/lean-zip/pull/2353) decision.
+    **Convention-done-correctly note:** unlike the PR #2413
+    paired-review, which had to substitute `#TBD-VERIFY-PR` <!-- drift-detector: prose mention of the placeholder token in a paired-review finding, not a stale placeholder --> → `#2413`
+    inline because the PR #2413 worker missed the post-`gh pr create`
+    closing-PR substitution step, the PR #2417 worker performed the
+    closing-PR substitution on the worker branch before merge — the
+    merged row's closing-PR column already cites `#2417` (verified via
+    `git blame` on line 2926 pointing at PR #2417's merge commit
+    `4ff06db564`). This paired-review records that as the
+    self-correction of the substitution-slip pattern surfaced in the
+    PR #2413 paired-review's *Reproducer Corpus row prose fidelity*
+    bullet — the convention is now back on track for future
+    per-typeflag siblings.
+  - **Adversarial check.** The adversarial check is recorded in
+    [progress/20260502T130010Z_61ee8b41.md](/home/kim/lean-zip/progress/20260502T130010Z_61ee8b41.md)
+    *## Adversarial check*: temporarily wrapping the `else` body in
+    `if e.typeflag == typeHardlink || e.typeflag == 0x36 then
+    skipEntryData input e.size else throw (IO.userError s!"adversarial:
+    unexpected typeflag {e.typeflag.toNat}")` left
+    `hardlink-outside.tar` and `tar-fifo-skipped.tar` passing while
+    `tar-chardev-skipped.tar` fired with `uncaught exception:
+    adversarial: unexpected typeflag 51` (`0x33 = 51`). The
+    disable-revert was clean — *"The `Zip/Tar.lean` change has been
+    reverted in the worktree (`git diff Zip/Tar.lean` is clean)"* —
+    and the post-revert `git diff` cleanliness is independently
+    confirmable from the merged tree (PR #2417's diff at
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) shows zero lines
+    changed). The adversarial-check pattern extends the PR #2413
+    paired-review's *Adversarial check* bullet shape: PR #2413's
+    wrapper spared the single hardlink arm to confirm one new fixture
+    fired in isolation; PR #2417's wrapper spares *two* arms
+    (`typeHardlink` and `0x36`) to confirm only the third
+    (`tar-chardev-skipped.tar`) fires. The cross-PR pattern is now
+    *"spare all-but-the-new-arm and confirm the new fixture fires"*,
+    which scales to N+1 fixtures by adding one more spare to the
+    wrapper's disjunction. The convention is established for future
+    per-typeflag siblings (typeflag `'4'`, `'7'`).
+  - **Sibling-fixture audit independence.** The three extract
+    directories `/tmp/lean-zip-fixture-hardlink-outside-extract`,
+    `/tmp/lean-zip-fixture-tar-fifo-skipped-extract`, and
+    `/tmp/lean-zip-fixture-tar-chardev-skipped-extract` are distinct
+    paths and each test arm independently `rm -rf`s + recreates its
+    own directory before extracting (per the cleanup-then-create
+    pattern at
+    [ZipTest/TarFixtures.lean](/home/kim/lean-zip/ZipTest/TarFixtures.lean)).
+    The cleanup loop at the end of the test bundle includes all three
+    directory paths in its `rm -rf` list, and the per-fixture file
+    list (`writeFixtureTmp` outputs under `/tmp/lean-zip-fixture-*`)
+    includes all three of `hardlink-outside.tar`,
+    `tar-fifo-skipped.tar`, and `tar-chardev-skipped.tar`. No shared
+    mutable state across the three arms — re-running the test suite
+    against any subset of arms produces the same result because each
+    arm reads its own fixture, writes to its own extract directory,
+    and asserts on its own `readDir` result. Both the
+    `hardlink-outside.tar` and `tar-fifo-skipped.tar` test arms
+    continue to pass after the new arm is added (independently
+    confirmed by `lake exe test` on the merged tree: *"TAR fixture
+    tests: OK"*). The three-arm independence is the structural
+    prerequisite for the family-extension claim: a future refactor
+    that breaks one arm's silent-skip behaviour cannot accidentally
+    pass because of mutable state propagated from another arm.
+  - **Stable-cite discipline.** The new Reproducer Corpus row uses
+    only stable identifiers — function names (`Tar.extract`,
+    `skipEntryData`, `Tar.forEntries`, `Tar.buildHeader`,
+    `Tar.create`) and fixture filenames (`tar-chardev-skipped.tar`,
+    `tar-fifo-skipped.tar`, `hardlink-outside.tar`). No `line N` or
+    `:N` suffixes appear anywhere in the row, consistent with the
+    [PR #2353](https://github.com/kim-em/lean-zip/pull/2353) decision
+    to drop line-number anchors. Cross-reference cites resolve to real
+    artefacts: PR #2413 / PR #1555 are both real merged PRs with the
+    cited fixtures and policies. The
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) anchor is repeated
+    rather than aliased, matching the inventory's house style. `bash
+    scripts/check-inventory-links.sh` reports `errors=0, warnings=2`
+    on the merged tree — the two warnings are *"this PR"* <!-- drift-detector: prose discussion of the placeholder phrase in a paired-review finding, not a stale placeholder --> prose
+    mentions in the `tar-fifo-skipped.tar` and `tar-chardev-skipped.tar`
+    rows' adversarial-check phrasing (*"verified by adversarial check
+    during this PR"* <!-- drift-detector: quote of the adversarial-check phrasing in a paired-review finding, not a stale placeholder -->), inherited from PR #2413 and PR #2417
+    respectively. These are the same two warnings recorded in the
+    PR #2413 paired-review's *Stable-cite discipline* bullet — the
+    count is unchanged across this paired-review (no new warnings
+    introduced). Suppressing them would require `<!-- drift-detector:
+    ... -->` opt-out comments per the PR #2371 paired-review pattern;
+    this paired-review continues to defer the opt-outs (matching the
+    PR #2413 paired-review's deferral) — the prose mentions are not
+    stale placeholders, and a future inventory-cleanup PR could batch
+    the opt-outs across the silent-skip family rows for warning-count
+    cleanliness.
+  - **Follow-up gaps.** None surface that warrant a separate issue.
+    The audit confirms all six required dimensions: the
+    family-extension math (2 → 3) is internally consistent and
+    source-level verified; the rename-vs-extend choice matches the
+    docstring's per-typeflag enumeration and the PR #2413 worker's
+    earlier choice on the same script; the Reproducer Corpus row
+    carries all seven required elements with the closing-PR
+    substitution done correctly on the worker branch (no inline
+    fix-up needed, unlike PR #2413); the adversarial check is recorded
+    in the progress entry with a clean post-revert diff and extends
+    the PR #2413 wrapper convention to N=2 spared arms; the
+    three-arm test bundle is structurally independent; the stable-cite
+    discipline holds with the warning-count unchanged at 2.
+    The next family-extension candidates after PR #2417 (typeflag
+    `'3'`, character device) are typeflag `'4'` (POSIX UStar block
+    special device, `0x34` — already queued as
+    [issue #2416](https://github.com/kim-em/lean-zip/issues/2416)) and
+    typeflag `'7'` (POSIX UStar contiguous file, `0x37`); naming them
+    without committing to specific issue numbers, matching the PR
+    #2371 / PR #2407 / PR #2413 paired-review entries' close-out
+    style. The silent-skip family remains open-ended (every additional
+    per-typeflag arm fires the same `else` fallback in `Tar.extract`,
+    so the marginal fixture cost falls but the marginal regression
+    benefit also falls); any future per-typeflag fixture should earn
+    its own paired-review entry on the established cadence. No new
+    follow-up issue is filed by this paired-review.
 
 #### Symlink/hardlink extraction policy
 
