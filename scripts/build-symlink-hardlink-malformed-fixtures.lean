@@ -76,6 +76,17 @@ exercising the `Tar.extract` per-typeflag policy:
   (typeflag `'3'`), `tar-blockdev-skipped.tar` (typeflag `'4'`), and
   `tar-contiguous-skipped.tar` (typeflag `'7'`)) the family pins
   seven distinct typeflag values against the shared fallback.
+* `tar-sparse-skipped.tar` — `typeflag == 0x53` (GNU `'S'`, sparse
+  file), `linkname == ""`, `path == "sparse-entry"`. `Tar.extract`
+  must silently skip the entry; lean-zip's strict `==` chain does
+  not match `'S'` against the typed branches, so the entry falls
+  through to the `else` arm and no filesystem entry is created.
+  Third GNU-typeflag sibling of the silent-skip `else` fallback
+  family alongside `tar-volumeheader-skipped.tar` (typeflag `'V'`)
+  and `tar-multivol-skipped.tar` (typeflag `'M'`), extending the
+  GNU-typeflag sub-ladder distinct from the POSIX UStar `'0'`–`'7'`
+  range. Together with the five POSIX UStar siblings the family
+  pins eight distinct typeflag values against the shared fallback.
 
 Run once at development time:
 
@@ -90,6 +101,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-contiguous-skipped.tar
 - testdata/tar/security/tar-volumeheader-skipped.tar
 - testdata/tar/security/tar-multivol-skipped.tar
+- testdata/tar/security/tar-sparse-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -156,4 +168,21 @@ def main : IO Unit := do
   -- `==` chain rejects 'M' and silent-skips.
   buildZeroSizeFixture "multivol-entry" "" 0x4D
     (outDir / "tar-multivol-skipped.tar")
-  IO.println "Built 8 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- GNU typeflag 'S' (0x53) = sparse file. Third GNU-typeflag sibling
+  -- of the silent-skip `else` fallback family (sub-ladder distinct from
+  -- the POSIX UStar '0'–'7' range above); no constant in `Tar`
+  -- namespace. GNU tar emits 'S' for files stored in GNU's sparse
+  -- format: the header carries `path` / `mode` / `mtime` as for a
+  -- regular file, but the payload encodes a sparse map instead of raw
+  -- file bytes — a malicious archive could ship a 'S' entry with a
+  -- crafted sparse map declaring zero-fill segments that overlap or
+  -- exceed the entry's declared `size`, expecting a lenient extractor
+  -- to allocate a large output file (zero-fill amplification) or
+  -- miscompute the payload offset. lean-zip's strict `==` chain rejects
+  -- 'S' and silent-skips. The fixture intentionally ships a zero-byte
+  -- body with no sparse map: the silent-skip policy applies regardless
+  -- of payload shape, and a zero-byte body keeps the fixture geometry
+  -- uniform with the other GNU siblings.
+  buildZeroSizeFixture "sparse-entry" "" 0x53
+    (outDir / "tar-sparse-skipped.tar")
+  IO.println "Built 9 per-typeflag-policy security fixtures under testdata/tar/security/."
