@@ -36,6 +36,17 @@ exercising the `Tar.extract` per-typeflag policy:
   (typeflag `'1'`), `tar-fifo-skipped.tar` (typeflag `'6'`), and
   `tar-chardev-skipped.tar` (typeflag `'3'`); together the four pin
   four distinct typeflag values against the shared fallback.
+* `tar-contiguous-skipped.tar` — `typeflag == 0x37` (POSIX UStar `'7'`,
+  contiguous file), `linkname == ""`, `path == "contiguous-entry"`.
+  `Tar.extract` must silently skip the entry; lean-zip's strict `==`
+  chain rejects `'7'` rather than aliasing it to `'0'` (regular file)
+  as some lenient peer extractors do, so the extract dir remains empty.
+  Fifth sibling of the silent-skip `else` fallback family alongside
+  `hardlink-outside.tar` (typeflag `'1'`), `tar-fifo-skipped.tar`
+  (typeflag `'6'`), `tar-chardev-skipped.tar` (typeflag `'3'`), and
+  `tar-blockdev-skipped.tar` (typeflag `'4'`); together the five pin
+  five distinct typeflag values against the shared fallback, fully
+  fixturing the POSIX UStar `'0'`–`'7'` numeric range.
 
 Run once at development time:
 
@@ -47,6 +58,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-fifo-skipped.tar
 - testdata/tar/security/tar-chardev-skipped.tar
 - testdata/tar/security/tar-blockdev-skipped.tar
+- testdata/tar/security/tar-contiguous-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -87,4 +99,11 @@ def main : IO Unit := do
   -- constant in `Tar` namespace.
   buildZeroSizeFixture "blockdev-entry" "" 0x34
     (outDir / "tar-blockdev-skipped.tar")
-  IO.println "Built 5 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- POSIX UStar typeflag '7' (0x37) = contiguous file. Same silent-skip
+  -- `else` fallback as the FIFO / chardev / blockdev arms above; no
+  -- constant in `Tar` namespace. lean-zip's strict `==` chain rejects
+  -- `'7'` rather than aliasing it to `'0'` (regular file) as some
+  -- lenient peer extractors do.
+  buildZeroSizeFixture "contiguous-entry" "" 0x37
+    (outDir / "tar-contiguous-skipped.tar")
+  IO.println "Built 6 per-typeflag-policy security fixtures under testdata/tar/security/."
