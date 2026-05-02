@@ -510,6 +510,35 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     let names := bdEntries.map (·.fileName)
     throw (IO.userError s!"tar-blockdev-skipped.tar: extract dir should be empty, got {names}")
 
+  -- tar-contiguous-skipped.tar: typeflag '7' (POSIX UStar contiguous
+  -- file). Policy: silent skip — no filesystem entry created, so the
+  -- extract dir must remain empty. This pins the silent-skip policy's
+  -- contiguous-file arm as a fifth sibling alongside
+  -- hardlink-outside.tar (typeflag '1'), tar-fifo-skipped.tar
+  -- (typeflag '6'), tar-chardev-skipped.tar (typeflag '3'), and
+  -- tar-blockdev-skipped.tar (typeflag '4'); together they pin five
+  -- distinct typeflag values against the shared `else` fallback in
+  -- `Tar.extract`. The strict-vs-lenient choice — lean-zip rejects '7'
+  -- rather than aliasing it to '0' (regular file) as some lenient peer
+  -- extractors do — is the security-relevant behaviour this fixture
+  -- pins. With this fixture landing, the POSIX UStar '0'–'7' numeric
+  -- range is fully fixtured (every value '0' through '7' has either a
+  -- typed branch in `Tar.extract` or a silent-skip regression
+  -- fixture).
+  let cgData ← readFixture "tar/security/tar-contiguous-skipped.tar"
+  let cgPath ← writeFixtureTmp "tar-contiguous-skipped.tar" cgData
+  let cgExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-contiguous-skipped-extract"
+  if ← cgExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", cgExtract.toString] }
+  IO.FS.createDirAll cgExtract
+  IO.FS.withFile cgPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) cgExtract
+  let cgEntries ← cgExtract.readDir
+  unless cgEntries.isEmpty do
+    let names := cgEntries.map (·.fileName)
+    throw (IO.userError s!"tar-contiguous-skipped.tar: extract dir should be empty, got {names}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -532,7 +561,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",
              "hardlink-outside.tar", "tar-fifo-skipped.tar",
-             "tar-chardev-skipped.tar", "tar-blockdev-skipped.tar"] do
+             "tar-chardev-skipped.tar", "tar-blockdev-skipped.tar",
+             "tar-contiguous-skipped.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
@@ -541,6 +571,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-hardlink-outside-extract",
              "/tmp/lean-zip-fixture-tar-fifo-skipped-extract",
              "/tmp/lean-zip-fixture-tar-chardev-skipped-extract",
-             "/tmp/lean-zip-fixture-tar-blockdev-skipped-extract"] do
+             "/tmp/lean-zip-fixture-tar-blockdev-skipped-extract",
+             "/tmp/lean-zip-fixture-tar-contiguous-skipped-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"
