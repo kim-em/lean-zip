@@ -467,6 +467,27 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     let names := fifoEntries.map (·.fileName)
     throw (IO.userError s!"tar-fifo-skipped.tar: extract dir should be empty, got {names}")
 
+  -- tar-chardev-skipped.tar: typeflag '3' (POSIX UStar character
+  -- device). Policy: silent skip — no filesystem entry created, so
+  -- the extract dir must remain empty. This pins the silent-skip
+  -- policy's character-device arm as a third sibling alongside
+  -- hardlink-outside.tar (typeflag '1') and tar-fifo-skipped.tar
+  -- (typeflag '6'); together they pin three distinct typeflag
+  -- values against the shared `else` fallback in `Tar.extract`.
+  let cdData ← readFixture "tar/security/tar-chardev-skipped.tar"
+  let cdPath ← writeFixtureTmp "tar-chardev-skipped.tar" cdData
+  let cdExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-chardev-skipped-extract"
+  if ← cdExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", cdExtract.toString] }
+  IO.FS.createDirAll cdExtract
+  IO.FS.withFile cdPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) cdExtract
+  let cdEntries ← cdExtract.readDir
+  unless cdEntries.isEmpty do
+    let names := cdEntries.map (·.fileName)
+    throw (IO.userError s!"tar-chardev-skipped.tar: extract dir should be empty, got {names}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -488,13 +509,15 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "gnu-longname-oversized-size.tar", "pax-extended-oversized-size.tar",
              "tar-slip.tar", "tar-absolute.tar", "symlink-slip.tar",
              "backslash-slip.tar", "symlink-absolute.tar",
-             "hardlink-outside.tar", "tar-fifo-skipped.tar"] do
+             "hardlink-outside.tar", "tar-fifo-skipped.tar",
+             "tar-chardev-skipped.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
              "/tmp/lean-zip-fixture-backslash-slip-extract",
              "/tmp/lean-zip-fixture-symlink-abs-extract",
              "/tmp/lean-zip-fixture-hardlink-outside-extract",
-             "/tmp/lean-zip-fixture-tar-fifo-skipped-extract"] do
+             "/tmp/lean-zip-fixture-tar-fifo-skipped-extract",
+             "/tmp/lean-zip-fixture-tar-chardev-skipped-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"
