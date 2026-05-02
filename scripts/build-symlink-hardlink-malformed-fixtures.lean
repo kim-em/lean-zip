@@ -62,6 +62,20 @@ exercising the `Tar.extract` per-typeflag policy:
   the POSIX UStar `'1'`/`'3'`/`'4'`/`'6'`/`'7'` numeric range and the
   GNU-typeflag `'V'` extension (a sub-ladder distinct from the POSIX
   UStar `'0'`–`'7'` range).
+* `tar-multivol-skipped.tar` — `typeflag == 0x4D` (GNU `'M'`,
+  multi-volume continuation marker), `linkname == ""`, `path ==
+  "multivol-entry"`. `Tar.extract` must silently skip the entry;
+  lean-zip's strict `==` chain does not match `'M'` against the typed
+  branches, so the entry falls through to the `else` arm and no
+  filesystem entry is created. Second GNU-typeflag sibling of the
+  silent-skip `else` fallback family alongside `tar-volumeheader-skipped.tar`
+  (typeflag `'V'`), extending the GNU-typeflag sub-ladder distinct
+  from the POSIX UStar `'0'`–`'7'` range. Together with the five
+  POSIX UStar siblings (`hardlink-outside.tar` (typeflag `'1'`),
+  `tar-fifo-skipped.tar` (typeflag `'6'`), `tar-chardev-skipped.tar`
+  (typeflag `'3'`), `tar-blockdev-skipped.tar` (typeflag `'4'`), and
+  `tar-contiguous-skipped.tar` (typeflag `'7'`)) the family pins
+  seven distinct typeflag values against the shared fallback.
 
 Run once at development time:
 
@@ -75,6 +89,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-blockdev-skipped.tar
 - testdata/tar/security/tar-contiguous-skipped.tar
 - testdata/tar/security/tar-volumeheader-skipped.tar
+- testdata/tar/security/tar-multivol-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -130,4 +145,15 @@ def main : IO Unit := do
   -- naming pattern used by the chardev / blockdev / FIFO arms.
   buildZeroSizeFixture "volume-label-entry" "" 0x56
     (outDir / "tar-volumeheader-skipped.tar")
-  IO.println "Built 7 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- GNU typeflag 'M' (0x4D) = multi-volume continuation marker. Second
+  -- GNU-typeflag sibling of the silent-skip `else` fallback family
+  -- (sub-ladder distinct from the POSIX UStar '0'–'7' range above);
+  -- no constant in `Tar` namespace. GNU tar emits 'M' as the first
+  -- record of a continuation volume in a multi-volume archive — a
+  -- malicious single-volume archive could ship a top-level 'M' entry
+  -- with crafted `path` / `size` fields, expecting a lenient extractor
+  -- to materialise the marker as a regular file. lean-zip's strict
+  -- `==` chain rejects 'M' and silent-skips.
+  buildZeroSizeFixture "multivol-entry" "" 0x4D
+    (outDir / "tar-multivol-skipped.tar")
+  IO.println "Built 8 per-typeflag-policy security fixtures under testdata/tar/security/."

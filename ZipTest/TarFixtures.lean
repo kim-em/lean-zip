@@ -581,6 +581,51 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   unless vhListed[0]!.typeflag == 0x56 do
     throw (IO.userError s!"tar-volumeheader-skipped.tar: expected Tar.list typeflag = 0x56, got {vhListed[0]!.typeflag}")
 
+  -- tar-multivol-skipped.tar: typeflag 'M' (GNU multi-volume continuation
+  -- marker, 0x4D). Policy: silent skip — no filesystem entry created, so
+  -- the extract dir must remain empty. This pins the silent-skip policy's
+  -- GNU multi-volume-continuation arm as the **second GNU-typeflag**
+  -- sibling alongside tar-volumeheader-skipped.tar (typeflag 'V', 0x56),
+  -- extending the GNU-typeflag sub-ladder distinct from the POSIX UStar
+  -- '0'–'7' numeric range covered by hardlink-outside.tar (typeflag '1'),
+  -- tar-fifo-skipped.tar (typeflag '6'), tar-chardev-skipped.tar
+  -- (typeflag '3'), tar-blockdev-skipped.tar (typeflag '4'), and
+  -- tar-contiguous-skipped.tar (typeflag '7'); together the seven pin
+  -- seven distinct typeflag values against the shared `else` fallback in
+  -- `Tar.extract`. The strict-vs-lenient distinction is the
+  -- security-relevant policy choice this fixture pins: a malicious
+  -- single-volume archive could ship a 'M' entry as a top-level record
+  -- (without a preceding multi-volume context) with a crafted `path`
+  -- field (e.g. "../../../etc/passwd") and a non-zero `size` declaring a
+  -- fake "remaining payload", expecting a lenient extractor to
+  -- materialise the marker as a regular file — lean-zip's policy of
+  -- never materialising 'M' entries (regardless of `path` / declared
+  -- `size` / actual payload) is the correct conservative choice. The
+  -- 'M' typeflag is otherwise interpreted purely as a multi-volume
+  -- continuation cue in GNU tar's multi-volume workflow. The optional
+  -- `Tar.list` assertion below confirms the entry is preserved through
+  -- `list` with `typeflag = 0x4D` even though `extract` skips it,
+  -- pinning the callers-routing-on-typeflag invariant.
+  let mvData ← readFixture "tar/security/tar-multivol-skipped.tar"
+  let mvPath ← writeFixtureTmp "tar-multivol-skipped.tar" mvData
+  let mvExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-multivol-skipped-extract"
+  if ← mvExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", mvExtract.toString] }
+  IO.FS.createDirAll mvExtract
+  IO.FS.withFile mvPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) mvExtract
+  let mvEntries ← mvExtract.readDir
+  unless mvEntries.isEmpty do
+    let names := mvEntries.map (·.fileName)
+    throw (IO.userError s!"tar-multivol-skipped.tar: extract dir should be empty, got {names}")
+  let mvListed ← IO.FS.withFile mvPath .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless mvListed.size == 1 do
+    throw (IO.userError s!"tar-multivol-skipped.tar: expected 1 entry from Tar.list, got {mvListed.size}")
+  unless mvListed[0]!.typeflag == 0x4D do
+    throw (IO.userError s!"tar-multivol-skipped.tar: expected Tar.list typeflag = 0x4D, got {mvListed[0]!.typeflag}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -605,7 +650,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "hardlink-outside.tar", "tar-fifo-skipped.tar",
              "tar-chardev-skipped.tar", "tar-blockdev-skipped.tar",
              "tar-contiguous-skipped.tar",
-             "tar-volumeheader-skipped.tar"] do
+             "tar-volumeheader-skipped.tar",
+             "tar-multivol-skipped.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
@@ -616,6 +662,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-tar-chardev-skipped-extract",
              "/tmp/lean-zip-fixture-tar-blockdev-skipped-extract",
              "/tmp/lean-zip-fixture-tar-contiguous-skipped-extract",
-             "/tmp/lean-zip-fixture-tar-volumeheader-skipped-extract"] do
+             "/tmp/lean-zip-fixture-tar-volumeheader-skipped-extract",
+             "/tmp/lean-zip-fixture-tar-multivol-skipped-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"
