@@ -3295,7 +3295,7 @@ Summary — what this pattern catches and what it does not:
   per-typeflag silent-skip family extension 5 → 6, first GNU-typeflag
   arm opening the GNU sub-ladder distinct from the now-capped POSIX
   UStar `'1'`–`'7'` numeric range; this paired-review landed in
-  PR #TBD-VERIFY-PR closing #2435): <!-- drift-detector: half-closed paired-review placeholder, substituted to the real PR number on the worker branch before merge -->
+  PR #2441 closing #2435):
   PR #2428 (squash commit `371647bb9d`, merged 2026-05-02T15:43Z,
   closes #2424) extends the `Tar.extract` silent-skip `else` fallback
   family from five to six sibling fixtures and **opens the
