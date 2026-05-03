@@ -3641,6 +3641,340 @@ Summary — what this pattern catches and what it does not:
     on the established cadence. No new follow-up issue is filed
     by this paired-review.
 
+- Paired review of PR #2431 (`tar-multivol-skipped.tar` fixture —
+  per-typeflag silent-skip family extension 6 → 7, second
+  GNU-typeflag arm extending the GNU sub-ladder opened by PR #2428;
+  this paired-review landed in PR #2443 closing #2436):
+  PR #2431 (squash commit `1a95969`, merged 2026-05-02T18:38Z,
+  closes #2426) extends the `Tar.extract` silent-skip `else`
+  fallback family from six to seven sibling fixtures, **extending
+  the GNU-typeflag sub-ladder** opened by PR #2428 to two arms.
+  The commit adds a 512-byte single-block UStar fixture
+  `testdata/tar/security/tar-multivol-skipped.tar` (SHA-256
+  `fb2cbbbeefcc59a0a4d5be02f00d9aaee143d4174e54a2c11163ba651e2b2e1d`)
+  for typeflag `'M'` (GNU multi-volume continuation marker, `0x4D`);
+  an eighth `buildZeroSizeFixture` call in
+  [scripts/build-symlink-hardlink-malformed-fixtures.lean](/home/kim/lean-zip/scripts/build-symlink-hardlink-malformed-fixtures.lean)
+  producing it deterministically; a new test arm in
+  [ZipTest/TarFixtures.lean](/home/kim/lean-zip/ZipTest/TarFixtures.lean)
+  immediately after the existing `tar-volumeheader-skipped.tar`
+  arm, asserting the extract directory is empty after extraction
+  *and* preserving the entry through `Tar.list` with `typeflag =
+  0x4D` (the optional `Tar.list` typeflag-preservation assertion
+  inherits the **arm-specific extension** introduced by the PR
+  #2428 paired-review's volume-header arm and continues the new
+  convention into the GNU sub-ladder); a new Reproducer Corpus row
+  in this inventory; and a *Symlink/hardlink extraction policy*
+  fixture-enumeration entry. No spec change, no production-code
+  change, no new typeflag constant in the `Tar` namespace, no
+  caller / signature change.
+  - **Sub-ladder-extension claim fidelity (6 → 7 fixtures, second
+    GNU arm).** The 6 → 7 extension math is faithful to the merged
+    tree. PR #2431 is the seventh per-typeflag fixture in the
+    silent-skip family and the **second GNU-typeflag arm**,
+    extending the GNU sub-ladder opened by PR #2428 (`'V'`,
+    `0x56`). The five POSIX UStar siblings are
+    `hardlink-outside.tar` (PR #1555, typeflag `'1'`, `0x31`),
+    `tar-fifo-skipped.tar` (PR #2413, typeflag `'6'`, `0x36`),
+    `tar-chardev-skipped.tar` (PR #2417, typeflag `'3'`, `0x33`),
+    `tar-blockdev-skipped.tar` (PR #2422, typeflag `'4'`, `0x34`),
+    and `tar-contiguous-skipped.tar` (PR #2425, typeflag `'7'`,
+    `0x37`); the GNU `'V'` arm at `0x56` was added by PR #2428;
+    the new GNU `'M'` arm at `0x4D` is added by PR #2431. The
+    septet pins seven distinct typeflag values
+    (`0x31` / `0x36` / `0x33` / `0x34` / `0x37` / `0x56` / `0x4D`)
+    against the shared `else` fallback at
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) (`partial def
+    extract`'s tail `else` arm, after the `typeDirectory` /
+    `typeRegular` / `typeSymlink` cases). All seven fixtures have
+    `size = 0` and route through the same `skipEntryData input
+    e.size` no-op call in the `else` body, so the structural pin
+    remains the *existence* of the `else` arm rather than the
+    *behaviour* of any per-typeflag dispatch — a future refactor
+    that drops the fallback for any one arm would fire the
+    corresponding fixture. The originating PR #1555 set the
+    silent-skip precedent at 1/N; PR #2413 added 2/N (paired-reviewed
+    in PR #2419, 1 → 2); PR #2417 added 3/N (paired-reviewed in
+    PR #2421, 2 → 3); PR #2422 added 4/N (paired-reviewed in
+    PR #2427, 3 → 4); PR #2425 added 5/N (paired-reviewed in
+    PR #2433, 4 → 5, last POSIX UStar arm); PR #2428 added 6/N
+    (paired-reviewed in PR #2441, 5 → 6, first GNU-typeflag arm
+    opening the GNU sub-ladder); PR #2431 now extends to 7/N as
+    the **second GNU-typeflag arm** extending the GNU sub-ladder.
+    The POSIX UStar `'1'`–`'7'` numeric range remains closed
+    (PR #2425 / PR #2433 framing), and the GNU sub-ladder is now
+    a two-arm structure (`'V'` / `'M'`). The natural next region
+    is the rest of the GNU-typeflag sub-ladder; the in-flight GNU
+    candidates `'S'` (sparse file, `0x53`, issue #2429 — closed
+    by PR #2434 since landed) and `'D'` (directory-dump for
+    incremental backups, `0x44`, issue #2430 — closed by PR #2437
+    since landed) are named without committing to specific
+    paired-review PR numbers, matching the PR #2421 / PR #2427 /
+    PR #2433 / PR #2441 paired-review entries' close-out style.
+  - **Fixture-builder rename-vs-extend choice.** The worker chose
+    *extend in place* on
+    [scripts/build-symlink-hardlink-malformed-fixtures.lean](/home/kim/lean-zip/scripts/build-symlink-hardlink-malformed-fixtures.lean),
+    matching the PR #2413 / PR #2417 / PR #2422 / PR #2425 /
+    PR #2428 workers' earlier choices on the same script. The
+    script path stays stable; the module docstring's *Output
+    (byte-deterministic)* list at PR #2431 land time enumerated
+    eight output files (the seven pre-PR-#2431 outputs plus the
+    new `testdata/tar/security/tar-multivol-skipped.tar` line) and
+    the per-typeflag enumeration block in the docstring body added
+    a seventh bulleted entry for the multi-volume arm with its
+    typeflag `0x4D`, `path = "multivol-entry"`, empty linkname,
+    and silent-skip `else` fallback semantics — phrased *"Second
+    GNU-typeflag sibling of the silent-skip `else` fallback family
+    alongside `tar-volumeheader-skipped.tar` (typeflag `'V'`),
+    extending the GNU-typeflag sub-ladder distinct from the POSIX
+    UStar `'0'`–`'7'` range. Together with the five POSIX UStar
+    siblings ... the family pins seven distinct typeflag values
+    against the shared fallback."* The build summary line at
+    `main`'s tail at PR #2431 land time printed *"Built 8
+    per-typeflag-policy security fixtures under
+    testdata/tar/security/."* — the count moved from `7` (PR #2428
+    era) to `8` correctly. (Subsequent landings PR #2434 / PR #2437
+    / PR #2439 have since advanced the count to `11` on today's
+    master tree, but the PR #2431 land-time count of `8` is what
+    this paired-review audits.) The extend-in-place choice keeps
+    the rename churn at zero across the family extension. The
+    worker's chosen path field `multivol-entry` matches the issue
+    body's *"`path = "multivol-entry"` (or worker's chosen path;
+    verify against the merged tree)"* invitation and reads as a
+    natural multi-volume continuation entry path; this is
+    consistent with the GNU tar info node `(tar)Multi-Volume
+    Archives` framing where `'M'` records lead the second-and-
+    subsequent volumes of a split file. Worker-recorded rationale
+    in
+    [progress/20260502T183734Z_db8c7be8_tar-multivol-skipped-fixture.md](/home/kim/lean-zip/progress/20260502T183734Z_db8c7be8_tar-multivol-skipped-fixture.md)
+    documents the extend-in-place choice and the per-fixture path
+    `"multivol-entry"`.
+  - **Reproducer Corpus row prose fidelity.** The new
+    `tar-multivol-skipped.tar` row carries the seven required
+    elements: (i) typeflag value `0x4D` and the GNU `'M'` glyph
+    cited together in the row's opening clause; (ii) GNU
+    semantics *"GNU multi-volume continuation marker"* with a
+    GNU tar info node `(tar)Multi-Volume Archives` citation
+    (faithful to the GNU tar info structure for the multi-volume
+    workflow — the `'V'` arm cites `(tar)Standard` for the
+    typeflag table; the `'M'` arm cites the multi-volume node
+    for the runtime mechanism, an arm-specific citation choice
+    that mirrors the volume-header / multi-volume distinction);
+    (iii) silent-skip `else` branch, with explicit reference to
+    `Tar.extract`'s tail `else` arm and the `skipEntryData` no-op
+    on `e.size = 0`; (iv) sibling fixture cross-references to all
+    five POSIX UStar prior arms `hardlink-outside.tar` (typeflag
+    `'1'`), `tar-fifo-skipped.tar` (typeflag `'6'`),
+    `tar-chardev-skipped.tar` (typeflag `'3'`),
+    `tar-blockdev-skipped.tar` (typeflag `'4'`),
+    `tar-contiguous-skipped.tar` (typeflag `'7'`), and the
+    PR #2428 GNU `'V'` sibling `tar-volumeheader-skipped.tar` —
+    the row correctly names six siblings (five POSIX UStar + one
+    GNU), reflecting the 6 → 7 extension; (v) the family-extension
+    claim phrased as *"Per-typeflag silent-skip family extension:
+    this is the **second GNU-typeflag** sibling, extending the
+    GNU-typeflag sub-ladder distinct from the POSIX UStar
+    `'0'`–`'7'` range"* with the *"the seven together pin seven
+    distinct typeflag values against the shared fallback"*
+    defense-in-depth framing; (vi) the writer-side caveat
+    (*"`Tar.create`'s caller-API only accepts paths and never
+    invokes `Tar.buildHeader` with a non-`'0'`/`'5'` typeflag, so
+    legitimate archives produced by the lean-zip writer never
+    carry typeflag `'M'`"*) — confirmed by reading
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) (`Tar.create`
+    builds entries via `walkFiles` with `typeflag := if isDir
+    then typeDirectory else typeRegular`, identical to the
+    PR #2413 / PR #2417 / PR #2422 / PR #2425 / PR #2428
+    paired-reviews' same audit on the prior arms); (vii) only
+    stable [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean)
+    anchors — no `:N` line-number suffixes, consistent with the
+    [PR #2353](https://github.com/kim-em/lean-zip/pull/2353)
+    decision. The multi-volume-continuation arm's framing is the
+    *cross-volume-splicing-out-of-TCB* / *`realsize`/offset
+    metadata is attacker-controlled* rationale (lean-zip does
+    not implement multi-volume archive assembly — each `.tar`
+    file is treated as a single self-contained archive — and a
+    `'M'` entry in single-volume context has no meaningful
+    semantics), with the additional strict-vs-lenient angle (a
+    malicious single-volume archive could ship a `'M'` entry as
+    a top-level record without a preceding multi-volume context,
+    with a crafted `path` field e.g. `"../../../etc/passwd"` and
+    a non-zero `size` declaring a fake "remaining payload",
+    expecting a lenient extractor to materialise the marker as a
+    regular file — lean-zip's policy of *never* materialising
+    `'M'` entries regardless of `path` / declared `size` /
+    actual payload is the correct conservative choice). This is
+    the arm-specific extension that distinguishes the
+    multi-volume-continuation row's prose from the volume-header
+    row — both share the multi-volume-out-of-TCB rationale, but
+    the `'M'` arm carries the additional *cross-volume-splicing*
+    attack surface (the `realsize`/offset metadata in legitimate
+    multi-volume `'M'` entries is attacker-controlled and would
+    direct payload writes to arbitrary offsets in a target file
+    if honoured), absent from the `'V'` arm (which is a
+    single-volume-only-by-design label marker). The seven
+    arm-specific paragraphs (chardev / blockdev / FIFO /
+    contiguous / volume-header / multi-volume) remain
+    independently informative — none subsumes the others — which
+    remains the right shape for a per-typeflag fixture family.
+    The Reproducer Corpus row's closing-PR column on the merged
+    tree cites `#2431` (verified via `git blame` on the row
+    pointing at PR #2431's merge commit `1a95969`); the worker
+    performed the closing-PR substitution
+    `#TBD-VERIFY-PR` → `#2431` <!-- drift-detector: prose mention of the placeholder substitution in a paired-review finding, not a stale placeholder --> on the worker branch
+    pre-merge, matching the PR #2417 / PR #2422 / PR #2425 /
+    PR #2428 self-correction precedent.
+  - **Adversarial-check fidelity.** The adversarial check is
+    recorded in
+    [progress/20260502T183734Z_db8c7be8_tar-multivol-skipped-fixture.md](/home/kim/lean-zip/progress/20260502T183734Z_db8c7be8_tar-multivol-skipped-fixture.md)
+    *## Adversarial check*: temporarily wrapping the `else` body
+    in `if e.typeflag == typeHardlink || e.typeflag == 0x36 ||
+    e.typeflag == 0x33 || e.typeflag == 0x34 || e.typeflag == 0x37
+    || e.typeflag == 0x56 then skipEntryData input e.size else
+    throw (IO.userError s!"adversarial: unexpected typeflag
+    {e.typeflag}")` left `hardlink-outside.tar`,
+    `tar-fifo-skipped.tar`, `tar-chardev-skipped.tar`,
+    `tar-blockdev-skipped.tar`, `tar-contiguous-skipped.tar`, and
+    `tar-volumeheader-skipped.tar` passing while
+    `tar-multivol-skipped.tar` fired with `uncaught exception:
+    adversarial: unexpected typeflag 77` (`0x4D = 77`, matching
+    ASCII `'M'`). The `0x4D` ↔ ASCII `'M'` ↔ decimal `77` mapping
+    in the adversarial-check parenthetical is internally
+    consistent (`0x4D` hex = `77` decimal = ASCII codepoint of
+    the glyph `'M'`). The wrapper expression preserves all six
+    prior siblings' arms (`'1'` / `'6'` / `'3'` / `'4'` / `'7'` /
+    `'V'`) and exposes only the `'M'` arm — extending the *"spare
+    all-but-the-new-arm and confirm the new fixture fires"*
+    convention to N=6 spared arms (PR #2413's wrapper spared one
+    arm, PR #2417's two, PR #2422's three, PR #2425's four,
+    PR #2428's five, and PR #2431's six). Each new fixture's
+    wrapper extends the disjunction by one already-fixtured
+    typeflag, scaling cleanly to N+1 fixtures by adding one more
+    spare. The disable-revert was clean — the post-revert
+    `git diff Zip/Tar.lean` is empty in the worker's merged
+    commit (PR #2431's diff at
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) shows zero
+    lines changed). The convention now scales further into the
+    GNU sub-ladder: the next sibling PR #2434 (`'S'` sparse,
+    `0x53`, decimal `83`) wrapper would spare seven arms (`'1'`,
+    `'6'`, `'3'`, `'4'`, `'7'`, `'V'`, and `'M'`); the
+    convention is established and continues into the GNU
+    sub-ladder's further extensions (PR #2434 / PR #2437 /
+    PR #2439 since landed, each carrying the same
+    spare-prior-and-fire-this-arm shape).
+  - **Test-arm placement.** The new test arm in
+    [ZipTest/TarFixtures.lean](/home/kim/lean-zip/ZipTest/TarFixtures.lean)
+    is placed at the tail of the silent-skip cluster at PR #2431
+    land time (immediately after the `tar-volumeheader-skipped.tar`
+    arm), matching the chronological-by-PR-merge-order convention
+    the family has followed since PR #1555. At PR #2431 land time
+    the file order was `'1'` → `'6'` → `'3'` → `'4'` → `'7'` →
+    `'V'` → `'M'`, mirroring the PR-merge sequence #1555 → #2413
+    → #2417 → #2422 → #2425 → #2428 → #2431. The chronological
+    house style preserves this order in today's master tree
+    despite an alphabetical reorder being available
+    (`tar-c...skipped` < `tar-f...skipped` < `tar-m...skipped` <
+    `tar-v...skipped` would have churned the volume-header arm
+    inward), matching the PR #2433 / PR #2441 paired-reviews'
+    same finding for prior arms. The arm asserts the extract
+    directory is empty after `Tar.extract` (mirroring the FIFO /
+    chardev / blockdev / contiguous / volume-header arm shapes)
+    **and** preserves the entry through `Tar.list` with
+    `mvListed[0]!.typeflag == 0x4D` and `mvListed.size == 1` —
+    inheriting the optional `Tar.list` typeflag-preservation
+    assertion introduced by the volume-header arm at PR #2428.
+    This is now an established convention for the GNU sub-ladder
+    rather than a per-arm extension: PR #2434 / PR #2437 /
+    PR #2439 each carry the same `XListed[0]!.typeflag == 0xNN`
+    assertion shape, confirming the convention's load-bearing
+    status. The assertion-shape inheritance is faithful to the
+    issue body's deliverable 5 (*"asserts the extract directory
+    is empty after extraction (mirroring the FIFO / chardev /
+    blockdev / contiguous / volume-header arm shapes — verify the
+    assertion structure matches)"*) — the empty-extract-dir
+    assertion is preserved unchanged; the worker preserved the
+    `Tar.list` assertion as an additive arm-specific extension
+    rather than substituting for the empty-extract-dir check. The
+    arm uses a distinct extract directory
+    `/tmp/lean-zip-fixture-tar-multivol-skipped-extract`
+    (independent from the six prior arms' extract directories) and
+    is registered in both cleanup loops (per-fixture file-list
+    `writeFixtureTmp` outputs and the per-directory `rm -rf`
+    list), so re-running the test suite remains hermetic across
+    the family extension. No shared mutable state across the seven
+    arms. The six prior test arms continue to pass after the new
+    arm is added (independently confirmed by `lake exe test` on
+    the merged tree: *"TAR fixture tests: OK"*).
+  - **Stable-cite discipline.** The new Reproducer Corpus row uses
+    only stable identifiers — function names (`Tar.extract`,
+    `skipEntryData`, `Tar.forEntries`, `Tar.list`,
+    `Tar.buildHeader`, `Tar.create`) and fixture filenames
+    (`tar-multivol-skipped.tar`, `tar-volumeheader-skipped.tar`,
+    `tar-contiguous-skipped.tar`, `tar-blockdev-skipped.tar`,
+    `tar-chardev-skipped.tar`, `tar-fifo-skipped.tar`,
+    `hardlink-outside.tar`). No `line N` or `:N` suffixes appear
+    anywhere in the row, consistent with the
+    [PR #2353](https://github.com/kim-em/lean-zip/pull/2353)
+    decision to drop line-number anchors. Cross-reference cites
+    resolve to real artefacts: PR #2428 / PR #2425 / PR #2422 /
+    PR #2417 / PR #2413 / PR #1555 are all real merged PRs with
+    the cited fixtures and policies. The
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) anchor is
+    repeated rather than aliased, matching the inventory's house
+    style. `bash scripts/check-inventory-links.sh` reports
+    `errors=0, warnings=9` on the master tree this paired-review
+    branches from (one warning per silent-skip fixture row,
+    inherited from the PR #2413 row template — added rows from
+    PR #2428 / PR #2431 / PR #2434 / PR #2437 / PR #2439 each kept
+    the *during this PR* <!-- drift-detector: prose discussion of the placeholder phrase in a paired-review finding, not a stale placeholder --> phrasing without
+    `<!-- drift-detector: -->` opt-outs, deferred to a future
+    inventory-cleanup PR per the PR #2433 paired-review's
+    deferral). This paired-review introduces no new placeholder
+    regression and adds zero warnings — the `#TBD-VERIFY-PR` <!-- drift-detector: prose discussion of the placeholder token in a paired-review finding, not a stale placeholder -->
+    placeholder in the paired-review header line is wrapped in a
+    `<!-- drift-detector: half-closed paired-review placeholder,
+    substituted to the real PR number on the worker branch before
+    merge -->` opt-out comment so it does not register as a stale
+    placeholder. Suppressing the row-level warnings would still
+    require additional `<!-- drift-detector: ... -->` opt-out
+    comments per the PR #2371 paired-review pattern; this
+    paired-review continues to defer the opt-outs (matching the
+    PR #2413 / PR #2417 / PR #2422 / PR #2425 / PR #2433 /
+    PR #2441 paired-review deferrals).
+  - **Ladder-progression close-out.** The per-typeflag silent-skip
+    family ladder now stands at: PR #1555 (1/N, typeflag `'1'`
+    hardlink — predates per-PR paired-review cadence), PR #2413
+    (2/N, typeflag `'6'` FIFO — paired-review PR #2419), PR #2417
+    (3/N, typeflag `'3'` character device — paired-review PR
+    #2421), PR #2422 (4/N, typeflag `'4'` block device —
+    paired-review PR #2427), PR #2425 (5/N, typeflag `'7'`
+    contiguous file — paired-review PR #2433, last POSIX UStar
+    arm), PR #2428 (6/N, typeflag `'V'` GNU multi-volume archive
+    label marker — paired-review PR #2441, first GNU-typeflag
+    arm opening the GNU sub-ladder), and PR #2431 (7/N, typeflag
+    `'M'` GNU multi-volume continuation marker — this
+    paired-review, **second GNU-typeflag arm extending the GNU
+    sub-ladder**). With PR #2431 landing, **the GNU-typeflag
+    sub-ladder grew to two arms** (`'V'` / `'M'`) beyond the
+    now-capped POSIX UStar `'1'`–`'7'` numeric range. The
+    silent-skip family remains open-ended (every additional
+    per-typeflag arm fires the same `else` fallback in
+    `Tar.extract`, so the marginal fixture cost falls but the
+    marginal regression benefit also falls); PR #2431 extends the
+    GNU sub-ladder opened by PR #2428 to two arms, with the
+    in-flight `'S'` (PR #2434, paired-review issue #2440 in
+    flight) and `'D'` (PR #2437, paired-review issue #2442 in
+    flight) candidates — and the just-landed `'N'` arm (PR #2439,
+    paired-review pending) — the natural next region (and
+    possible future arms `'X'` Solaris extended attribute, `'A'`
+    Solaris ACL, once the shortlist exhausts). The paired-review
+    for PR #2434 / PR #2437 / PR #2439 (and any further
+    GNU-typeflag siblings) is a separate follow-up, not in scope
+    here — each paired-review is per-PR per the established
+    cadence. Any future per-typeflag fixture should earn its own
+    paired-review entry on the established cadence. No new
+    follow-up issue is filed by this paired-review.
+
 #### Symlink/hardlink extraction policy
 
 `Tar.extract` (in [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean))
