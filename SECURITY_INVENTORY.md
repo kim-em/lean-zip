@@ -3644,7 +3644,7 @@ Summary — what this pattern catches and what it does not:
 - Paired review of PR #2431 (`tar-multivol-skipped.tar` fixture —
   per-typeflag silent-skip family extension 6 → 7, second
   GNU-typeflag arm extending the GNU sub-ladder opened by PR #2428;
-  this paired-review landed in PR #TBD-VERIFY-PR <!-- drift-detector: half-closed paired-review placeholder, substituted to the real PR number on the worker branch before merge --> closing #2436):
+  this paired-review landed in PR #2443 closing #2436):
   PR #2431 (squash commit `1a95969`, merged 2026-05-02T18:38Z,
   closes #2426) extends the `Tar.extract` silent-skip `else`
   fallback family from six to seven sibling fixtures, **extending
