@@ -771,6 +771,40 @@ def ZipTest.TarFixtures.tests : IO Unit := do
   unless lnNamesListed[0]!.typeflag == 0x4E do
     throw (IO.userError s!"tar-longnames-skipped.tar: expected Tar.list typeflag = 0x4E, got {lnNamesListed[0]!.typeflag}")
 
+  -- tar-mixed-skipped.tar: three-entry archive (regular before.txt →
+  -- typeflag '6' FIFO silent-skip → regular after.txt). Sibling-class
+  -- fixture (not an eleventh per-typeflag arm) covering the post-skip
+  -- *extract-continuation* invariant that none of the ten single-entry
+  -- per-typeflag silent-skip siblings exercises: that the `else` branch's
+  -- `skipEntryData input e.size` call leaves the input stream positioned
+  -- exactly at the next 512-byte block boundary so a subsequent
+  -- regular-file entry still extracts cleanly. A regression that broke
+  -- `skipEntryData` by, say, advancing the stream by `e.size` bytes
+  -- without padding to a 512-byte block boundary would not fire any of
+  -- the existing ten fixtures (each ends at EOF after the skipped entry)
+  -- but would silently corrupt the offset of any following entry — this
+  -- arm asserts both content and count: extraction yields *exactly* two
+  -- files (`before.txt` and `after.txt`) with the declared payloads.
+  let mixedData ← readFixture "tar/security/tar-mixed-skipped.tar"
+  let mixedPath ← writeFixtureTmp "tar-mixed-skipped.tar" mixedData
+  let mixedExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-mixed-skipped-extract"
+  if ← mixedExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", mixedExtract.toString] }
+  IO.FS.createDirAll mixedExtract
+  IO.FS.withFile mixedPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) mixedExtract
+  let mixedBefore ← IO.FS.readFile (mixedExtract / "before.txt")
+  unless mixedBefore == "BEFORE\n" do
+    throw (IO.userError s!"tar-mixed-skipped.tar: before.txt content mismatch: {repr mixedBefore}")
+  let mixedAfter ← IO.FS.readFile (mixedExtract / "after.txt")
+  unless mixedAfter == "AFTER\n" do
+    throw (IO.userError s!"tar-mixed-skipped.tar: after.txt content mismatch: {repr mixedAfter}")
+  let mixedEntries ← mixedExtract.readDir
+  unless mixedEntries.size == 2 do
+    let names := mixedEntries.map (·.fileName)
+    throw (IO.userError s!"tar-mixed-skipped.tar: expected exactly 2 files in extract dir, got {mixedEntries.size}: {names}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -799,7 +833,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "tar-multivol-skipped.tar",
              "tar-sparse-skipped.tar",
              "tar-incremental-skipped.tar",
-             "tar-longnames-skipped.tar"] do
+             "tar-longnames-skipped.tar",
+             "tar-mixed-skipped.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
@@ -814,6 +849,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-tar-multivol-skipped-extract",
              "/tmp/lean-zip-fixture-tar-sparse-skipped-extract",
              "/tmp/lean-zip-fixture-tar-incremental-skipped-extract",
-             "/tmp/lean-zip-fixture-tar-longnames-skipped-extract"] do
+             "/tmp/lean-zip-fixture-tar-longnames-skipped-extract",
+             "/tmp/lean-zip-fixture-tar-mixed-skipped-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"
