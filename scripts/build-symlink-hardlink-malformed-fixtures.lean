@@ -174,6 +174,48 @@ exercising the `Tar.extract` per-typeflag policy:
   1 payload block) = 6 × 512 = 3072 bytes. No trailing zero
   blocks (`Tar.forEntries` terminates on the short read at
   EOF, matching the per-typeflag fixture geometry).
+* `tar-skipped-padded.tar` — three-entry archive:
+  `before.txt` (typeflag `'0'`, regular, payload `"BEFORE\n"`,
+  size 7) → `fifo-entry` (typeflag `'6'` = `0x36`, POSIX UStar
+  FIFO, empty linkname, size 100, 100-byte payload of repeating
+  ASCII `'X'` (`0x58`) bytes followed by `paddingFor 100 == 412`
+  zero bytes to round up to the next 512-byte block boundary,
+  silently skipped) → `after.txt` (typeflag `'0'`, regular,
+  payload `"AFTER\n"`, size 6). Third sibling-class fixture
+  alongside `tar-mixed-skipped.tar` (`size == 0`) and
+  `tar-skipped-payload.tar` (`size == 512`, multiple of 512),
+  but with a *non-multiple-of-512* declared payload on the
+  silent-skipped middle entry — exercising the `paddingFor`
+  round-up arithmetic at `Zip/Tar.lean`'s `paddingFor` definition
+  inside the `skipEntryData input e.size` data-advance summation
+  `let dataSize := size.toNat + paddingFor size` for `size mod
+  512 ≠ 0`. The twelve preceding silent-skip fixtures (the ten
+  per-typeflag arms + the two sibling-class entries) all use
+  `size == 0` or `size == 512` (a multiple of 512) on the
+  skipped entry, so `paddingFor size` evaluates to `0` for every
+  preceding fixture regardless of any `paddingFor` bug. A
+  regression that, say, returned `0` unconditionally from
+  `paddingFor` would not fire any of the twelve preceding
+  fixtures (each multiple-of-512 input degenerates the buggy
+  branch) but would silently corrupt the offset of any entry
+  following a non-multiple-of-512-payload skipped entry —
+  `skipEntryData` would consume only the `size.toNat` bytes
+  without the `paddingFor`-supplied 412 zero bytes, leaving the
+  stream positioned 412 bytes inside the `after.txt` header. The
+  fixture pins both content (`before.txt` + `after.txt` payloads
+  materialise verbatim) and count (extract dir contains exactly
+  two files). Typeflag `'6'` is reused to mirror
+  `tar-fifo-skipped.tar`, `tar-mixed-skipped.tar`, and
+  `tar-skipped-payload.tar` — pins the same `else` arm without
+  introducing a new typeflag value. Geometry: `before.txt` 2
+  blocks (header + 1 payload block) + `fifo-entry` 2 blocks
+  (header + 100-byte payload + 412-byte zero padding together
+  fill exactly one 512-byte block) + `after.txt` 2 blocks
+  (header + 1 payload block) = 6 × 512 = 3072 bytes, matching
+  `tar-skipped-payload.tar`'s on-disk size despite the smaller
+  declared payload. No trailing zero blocks (`Tar.forEntries`
+  terminates on the short read at EOF, matching the per-typeflag
+  fixture geometry).
 
 Run once at development time:
 
@@ -193,6 +235,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-longnames-skipped.tar
 - testdata/tar/security/tar-mixed-skipped.tar
 - testdata/tar/security/tar-skipped-payload.tar
+- testdata/tar/security/tar-skipped-padded.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -273,6 +316,39 @@ def buildSkippedPayloadFixture (outPath : System.FilePath) : IO Unit := do
   let fifoPayload := Binary.zeros 512
   let after ← buildRegularEntry "after.txt" "AFTER\n".toUTF8
   IO.FS.writeBinFile outPath (before ++ fifoHdr ++ fifoPayload ++ after)
+
+/-- Build the `tar-skipped-padded.tar` three-entry fixture: a regular
+    `before.txt` → silently-skipped FIFO `fifo-entry` (typeflag `'6'`)
+    with a *non-multiple-of-512* declared payload (size 100, 100 ASCII
+    `'X'` (`0x58`) bytes + 412 zero-byte padding to round up to the
+    next 512-byte block boundary) → regular `after.txt`. Pins the
+    `Tar.extract` *padding-round-up arithmetic* of the silent-skip
+    `else` branch's `skipEntryData input e.size` call for non-multiple-
+    of-512 `e.size` — the path that the twelve existing silent-skip
+    fixtures (ten per-typeflag arms + `tar-mixed-skipped.tar` +
+    `tar-skipped-payload.tar`) do not exercise (each preceding fixture
+    has `size == 0` or `size == 512`, so `paddingFor size` evaluates to
+    `0` regardless of any `paddingFor` regression). The middle FIFO
+    carries 100 ASCII `'X'` bytes followed by 412 zero bytes (totalling
+    one 512-byte block); the silent-skip policy applies regardless of
+    payload contents. Total size: 6 × 512 = 3072 bytes (one
+    header+payload pair for each of the three entries; the middle
+    entry's payload + padding together fill exactly one 512-byte
+    block, matching `tar-skipped-payload.tar`'s on-disk total). No
+    trailing zero blocks (`Tar.forEntries` terminates on the short
+    read at EOF, matching the per-typeflag fixture geometry). -/
+def buildPaddedSkippedFixture (outPath : System.FilePath) : IO Unit := do
+  let before ← buildRegularEntry "before.txt" "BEFORE\n".toUTF8
+  let fifoEntry : Tar.Entry :=
+    { path     := "fifo-entry"
+      size     := 100
+      mode     := 0o644
+      typeflag := 0x36 }
+  let fifoHdr ← Tar.buildHeader fifoEntry
+  let fifoPayload : ByteArray := ByteArray.mk (Array.replicate 100 (0x58 : UInt8))
+  let fifoPad := Binary.zeros (Tar.paddingFor 100)
+  let after ← buildRegularEntry "after.txt" "AFTER\n".toUTF8
+  IO.FS.writeBinFile outPath (before ++ fifoHdr ++ fifoPayload ++ fifoPad ++ after)
 
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/security"
@@ -416,4 +492,22 @@ def main : IO Unit := do
   -- `after.txt`, which the test catches via the extract-dir size == 2
   -- assertion.
   buildSkippedPayloadFixture (outDir / "tar-skipped-payload.tar")
-  IO.println "Built 13 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- Sibling-class fixture (third after `tar-mixed-skipped.tar` and
+  -- `tar-skipped-payload.tar`): a three-entry archive with a
+  -- silent-skipped middle entry whose declared `size` is *non-multiple
+  -- of 512* (typeflag '6' FIFO, size 100, 100-byte 'X' payload + 412
+  -- zero bytes of padding). Pins the `else` branch's `skipEntryData
+  -- input e.size` `paddingFor` round-up arithmetic for non-multiple-
+  -- of-512 `e.size` — a path that none of the twelve preceding
+  -- silent-skip fixtures (ten per-typeflag arms + the two sibling-class
+  -- entries) exercises (each has `size == 0` or `size == 512`, so
+  -- `paddingFor size` evaluates to `0` regardless of bug). A
+  -- regression that broke `paddingFor` by, say, returning `0`
+  -- unconditionally would leave the stream positioned 412 bytes inside
+  -- the `after.txt` header — caught by the extract-dir size == 2
+  -- assertion (the misskipped 412 zero bytes plus the first 100 bytes
+  -- of `after.txt`'s header would parse as a header with a bogus
+  -- checksum and `forEntries` would surface a header-parse error
+  -- before extracting `after.txt`).
+  buildPaddedSkippedFixture (outDir / "tar-skipped-padded.tar")
+  IO.println "Built 14 per-typeflag-policy security fixtures under testdata/tar/security/."
