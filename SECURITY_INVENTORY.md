@@ -3979,7 +3979,7 @@ Summary — what this pattern catches and what it does not:
   per-typeflag silent-skip family extension 7 → 8, third
   GNU-typeflag arm extending the GNU sub-ladder opened by PR #2428
   and extended by PR #2431; this paired-review landed in
-  PR #TBD-VERIFY-PR closing #2440 <!-- drift-detector: half-closed paired-review placeholder, substituted to the real PR number on the worker branch before merge -->):
+  PR #2444 closing #2440):
   PR #2434 (squash commit `e37d0267`, merged 2026-05-02T19:12Z,
   closes #2429) extends the `Tar.extract` silent-skip `else`
   fallback family from seven to eight sibling fixtures, **extending
