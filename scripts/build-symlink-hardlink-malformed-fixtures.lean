@@ -121,6 +121,25 @@ exercising the `Tar.extract` per-typeflag policy:
   GNU-typeflag sub-ladder distinct from the POSIX UStar `'0'`–`'7'`
   range. Together with the five POSIX UStar siblings the family
   pins ten distinct typeflag values against the shared fallback.
+* `tar-mixed-skipped.tar` — three-entry archive:
+  `before.txt` (typeflag `'0'`, regular, payload `"BEFORE\n"`,
+  size 7) → `fifo-entry` (typeflag `'6'` = `0x36`, POSIX UStar
+  FIFO, empty linkname, size 0, silently skipped) → `after.txt`
+  (typeflag `'0'`, regular, payload `"AFTER\n"`, size 6).
+  `Tar.extract` must materialise *both* `before.txt` and
+  `after.txt` with their declared payloads after the middle FIFO
+  entry is silent-skipped — pinning the `else` branch's
+  `skipEntryData input e.size` call's *extract-continuation*
+  invariant: that the call leaves the input stream positioned
+  exactly at the next 512-byte block boundary so a subsequent
+  regular-file entry still extracts cleanly. Sibling-class
+  fixture (not an eleventh per-typeflag arm) covering the
+  post-skip stream-position invariant that none of the ten
+  per-typeflag siblings (each single-entry, terminating at EOF
+  after the skipped entry) currently exercises. Typeflag `'6'`
+  is reused for the middle entry to mirror
+  `tar-fifo-skipped.tar` — pins the same `else` arm without
+  introducing a new typeflag value.
 
 Run once at development time:
 
@@ -138,6 +157,7 @@ Output (byte-deterministic):
 - testdata/tar/security/tar-sparse-skipped.tar
 - testdata/tar/security/tar-incremental-skipped.tar
 - testdata/tar/security/tar-longnames-skipped.tar
+- testdata/tar/security/tar-mixed-skipped.tar
 -/
 
 /-- Build a single-entry UStar archive with `size == 0`. The output is
@@ -155,6 +175,43 @@ def buildZeroSizeFixture
       typeflag := typeflag }
   let hdr ← Tar.buildHeader entry
   IO.FS.writeBinFile outPath hdr
+
+/-- Build a regular-file entry block-pair (header + payload + NUL padding to
+    the next 512-byte boundary). Used by `buildMixedFixture` for the
+    `before.txt` / `after.txt` regular-file entries that bracket a
+    silently-skipped middle entry. -/
+def buildRegularEntry
+    (path : String) (payload : ByteArray) : IO ByteArray := do
+  let entry : Tar.Entry :=
+    { path     := path
+      size     := payload.size.toUInt64
+      mode     := 0o644
+      typeflag := Tar.typeRegular }
+  let hdr ← Tar.buildHeader entry
+  let pad := Tar.paddingFor entry.size
+  return hdr ++ payload ++ Binary.zeros pad
+
+/-- Build the `tar-mixed-skipped.tar` three-entry fixture: a regular
+    `before.txt` → silently-skipped FIFO `fifo-entry` (typeflag `'6'`)
+    → regular `after.txt`. Pins the `Tar.extract` *extract-continuation*
+    invariant — that the silent-skip `else` branch's `skipEntryData`
+    call leaves the input stream positioned exactly at the next
+    512-byte block boundary so the subsequent regular-file entry
+    still extracts cleanly. Total size: 5 × 512 = 2560 bytes (one
+    header+payload pair for each regular entry, one bare header for
+    the FIFO). No trailing zero blocks (`Tar.forEntries` terminates
+    on the short read at EOF, matching the per-typeflag fixture
+    geometry). -/
+def buildMixedFixture (outPath : System.FilePath) : IO Unit := do
+  let before ← buildRegularEntry "before.txt" "BEFORE\n".toUTF8
+  let fifoEntry : Tar.Entry :=
+    { path     := "fifo-entry"
+      size     := 0
+      mode     := 0o644
+      typeflag := 0x36 }
+  let fifoHdr ← Tar.buildHeader fifoEntry
+  let after ← buildRegularEntry "after.txt" "AFTER\n".toUTF8
+  IO.FS.writeBinFile outPath (before ++ fifoHdr ++ after)
 
 def main : IO Unit := do
   let outDir : System.FilePath := "testdata/tar/security"
@@ -268,4 +325,19 @@ def main : IO Unit := do
   -- other GNU siblings.
   buildZeroSizeFixture "longnames-entry" "" 0x4E
     (outDir / "tar-longnames-skipped.tar")
-  IO.println "Built 11 per-typeflag-policy security fixtures under testdata/tar/security/."
+  -- Sibling-class fixture (not an eleventh per-typeflag arm): a
+  -- three-entry archive interleaving a silently-skipped middle entry
+  -- (typeflag '6' FIFO, mirroring `tar-fifo-skipped.tar`) between two
+  -- regular files. Pins the `Tar.extract` *extract-continuation*
+  -- invariant that none of the ten single-entry per-typeflag siblings
+  -- exercises: that the `else` branch's `skipEntryData input e.size`
+  -- call leaves the input stream positioned exactly at the next
+  -- 512-byte block boundary so a subsequent regular-file entry still
+  -- extracts cleanly. A regression that broke `skipEntryData` by, say,
+  -- advancing the stream by `e.size` bytes without padding to a
+  -- 512-byte block boundary would not fire any of the existing ten
+  -- fixtures (each ends at EOF after the skipped entry) but would
+  -- silently corrupt the offset of any following entry — this fixture
+  -- closes that detection gap.
+  buildMixedFixture (outDir / "tar-mixed-skipped.tar")
+  IO.println "Built 12 per-typeflag-policy security fixtures under testdata/tar/security/."
