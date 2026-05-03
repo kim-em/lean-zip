@@ -5521,7 +5521,7 @@ Regression fixtures live under `testdata/tar/security/`:
   `tar-skipped-payload.tar`, and `size mod 512 ≠ 0`
   (sub-block payload + non-zero padding round-up) by this
   fixture — the three together pin both summands of
-  `let dataSize := size.toNat + paddingFor size` (PR #TBD-VERIFY-PR).
+  `let dataSize := size.toNat + paddingFor size` (PR #2457).
 
 ### Gzip/Zlib/Raw DEFLATE Public APIs
 
