@@ -5382,6 +5382,61 @@ Regression fixtures live under `testdata/tar/security/`:
   identical (`forEntries` is shared) but a separate fixture for
   `Tar.list` is not required — the new arm exercises
   `Tar.extract` only.
+- `tar-skipped-payload.tar` — three-entry archive interleaving a
+  silently-skipped middle entry with a *non-zero* declared
+  payload between two regular files: `before.txt` (typeflag
+  `'0'`, payload `"BEFORE\n"`) → `fifo-entry` (typeflag `'6'` =
+  `0x36`, POSIX UStar FIFO, declared `size == 512`, all-zero
+  512-byte payload, silently skipped) → `after.txt` (typeflag
+  `'0'`, payload `"AFTER\n"`); extraction must materialise
+  *both* `before.txt` and `after.txt` with their declared
+  payloads after the middle FIFO entry's header *and* its
+  declared 512-byte payload are consumed by `skipEntryData`.
+  Second sibling-class fixture alongside `tar-mixed-skipped.tar`
+  (PR #2449, the first sibling-class entry that pinned the
+  *extract-continuation* invariant for a `size == 0` skip),
+  covering the *data-advance arithmetic* of the silent-skip
+  `else` branch's `skipEntryData input e.size` call for non-zero
+  `e.size` — the path that the eleven existing all-`size == 0`
+  silent-skip fixtures (the ten per-typeflag arms PR
+  #1555/#2413/#2417/#2422/#2425/#2428/#2431/#2434/#2437/#2439 +
+  the first sibling-class `tar-mixed-skipped.tar` PR #2449) do
+  not exercise. A regression that broke `skipEntryData` by
+  ignoring `e.size` and advancing only by the trailing 512-byte
+  header padding would not fire any of the eleven existing
+  fixtures (all `size == 0`, so `skipEntryData input 0`
+  degenerates to a no-op modulo the header padding) but would
+  silently corrupt the offset of any entry following a skipped
+  non-zero-payload entry — `skipEntryData` would leave the
+  stream positioned at the start of the FIFO payload, the next
+  `readExact` would consume 512 zero bytes, `parseHeader` would
+  interpret the zero block as end-of-archive, and `forEntries`
+  would terminate without extracting `after.txt`. This fixture
+  closes that detection gap. Typeflag `'6'` is reused for the
+  middle entry to mirror `tar-fifo-skipped.tar` and
+  `tar-mixed-skipped.tar` — pins the same `else` arm without
+  introducing a new typeflag value. Total fixture size: 6 × 512
+  = 3072 bytes (one header + one payload block for each of the
+  three entries). No trailing zero blocks (`Tar.forEntries`
+  terminates on the short read at EOF, matching the
+  per-typeflag fixture geometry). Built by the same script.
+  Adversarial check (temporarily replace the `else` arm's
+  `skipEntryData input e.size` with `skipEntryData input 0`,
+  i.e. ignore the declared payload size) confirmed the fixture
+  independently fires the data-advance invariant with `no such
+  file or directory` at
+  `/tmp/lean-zip-fixture-tar-skipped-payload-extract/after.txt`
+  (the misskipped 512 zero bytes parse as an end-of-archive
+  marker, terminating `forEntries` before the `after.txt`
+  header is read), while all eleven preceding silent-skip
+  siblings (the ten per-typeflag arms + `tar-mixed-skipped.tar`)
+  still pass — each has `size == 0` for its skipped entry, so
+  `skipEntryData input 0` is the actual production behaviour
+  for them. The fixture pins data advance for `Tar.extract`
+  only; `Tar.list`'s data-advance invariant is structurally
+  identical (`forEntries` is shared) but a separate fixture
+  for `Tar.list` is not required — the new arm exercises
+  `Tar.extract` only.
 
 ### Gzip/Zlib/Raw DEFLATE Public APIs
 
