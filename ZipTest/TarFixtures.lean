@@ -843,6 +843,46 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     let names := skippedPayloadEntries.map (·.fileName)
     throw (IO.userError s!"tar-skipped-payload.tar: expected exactly 2 files in extract dir, got {skippedPayloadEntries.size}: {names}")
 
+  -- tar-skipped-padded.tar: three-entry archive (regular before.txt →
+  -- typeflag '6' FIFO with non-multiple-of-512 size 100 + 412-byte zero
+  -- padding silent-skip → regular after.txt). Third sibling-class fixture
+  -- alongside `tar-mixed-skipped.tar` and `tar-skipped-payload.tar`, but
+  -- with a *non-multiple-of-512* declared payload on the silent-skipped
+  -- middle entry — pinning the *padding round-up arithmetic* of the
+  -- silent-skip `else` branch's `skipEntryData input e.size` call's
+  -- `paddingFor` summand for `size mod 512 ≠ 0`. The twelve existing
+  -- silent-skip fixtures (the ten per-typeflag arms +
+  -- `tar-mixed-skipped.tar` (size 0) + `tar-skipped-payload.tar` (size
+  -- 512, multiple of 512)) all use sizes for which `paddingFor` evaluates
+  -- to `0`, so a regression that broke `paddingFor` by, say, returning
+  -- `0` unconditionally would not fire any of the twelve preceding
+  -- fixtures but would silently corrupt the offset of any entry following
+  -- a non-multiple-of-512 silent-skipped payload — `skipEntryData` would
+  -- consume only the 100 declared bytes without the 412-byte padding,
+  -- leaving the stream positioned 412 bytes inside the `after.txt`
+  -- header, and the subsequent `forEntries` `readExact 512` would parse a
+  -- header straddling the `after.txt` header / payload boundary with a
+  -- bogus checksum. Caught by the extract-dir size == 2 assertion below.
+  let skippedPaddedData ← readFixture "tar/security/tar-skipped-padded.tar"
+  let skippedPaddedPath ← writeFixtureTmp "tar-skipped-padded.tar" skippedPaddedData
+  let skippedPaddedExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-skipped-padded-extract"
+  if ← skippedPaddedExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", skippedPaddedExtract.toString] }
+  IO.FS.createDirAll skippedPaddedExtract
+  IO.FS.withFile skippedPaddedPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) skippedPaddedExtract
+  let skippedPaddedBefore ← IO.FS.readFile (skippedPaddedExtract / "before.txt")
+  unless skippedPaddedBefore == "BEFORE\n" do
+    throw (IO.userError s!"tar-skipped-padded.tar: before.txt content mismatch: {repr skippedPaddedBefore}")
+  let skippedPaddedAfter ← IO.FS.readFile (skippedPaddedExtract / "after.txt")
+  unless skippedPaddedAfter == "AFTER\n" do
+    throw (IO.userError s!"tar-skipped-padded.tar: after.txt content mismatch: {repr skippedPaddedAfter}")
+  let skippedPaddedEntries ← skippedPaddedExtract.readDir
+  unless skippedPaddedEntries.size == 2 do
+    let names := skippedPaddedEntries.map (·.fileName)
+    throw (IO.userError s!"tar-skipped-padded.tar: expected exactly 2 files in extract dir, got {skippedPaddedEntries.size}: {names}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -873,7 +913,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "tar-incremental-skipped.tar",
              "tar-longnames-skipped.tar",
              "tar-mixed-skipped.tar",
-             "tar-skipped-payload.tar"] do
+             "tar-skipped-payload.tar",
+             "tar-skipped-padded.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
@@ -890,6 +931,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-tar-incremental-skipped-extract",
              "/tmp/lean-zip-fixture-tar-longnames-skipped-extract",
              "/tmp/lean-zip-fixture-tar-mixed-skipped-extract",
-             "/tmp/lean-zip-fixture-tar-skipped-payload-extract"] do
+             "/tmp/lean-zip-fixture-tar-skipped-payload-extract",
+             "/tmp/lean-zip-fixture-tar-skipped-padded-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"

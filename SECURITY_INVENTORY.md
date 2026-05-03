@@ -5437,6 +5437,91 @@ Regression fixtures live under `testdata/tar/security/`:
   identical (`forEntries` is shared) but a separate fixture
   for `Tar.list` is not required — the new arm exercises
   `Tar.extract` only.
+- `tar-skipped-padded.tar` — three-entry archive interleaving a
+  silently-skipped middle entry with a *non-multiple-of-512*
+  declared payload between two regular files: `before.txt`
+  (typeflag `'0'`, payload `"BEFORE\n"`) → `fifo-entry`
+  (typeflag `'6'` = `0x36`, POSIX UStar FIFO, declared `size ==
+  100`, 100-byte payload of repeating ASCII `'X'` (`0x58`) bytes
+  followed by `paddingFor 100 == 412` zero bytes to round up to
+  the next 512-byte block boundary, silently skipped) →
+  `after.txt` (typeflag `'0'`, payload `"AFTER\n"`); extraction
+  must materialise *both* `before.txt` and `after.txt` with
+  their declared payloads after the middle FIFO entry's header,
+  its 100-byte declared payload, *and* its 412-byte zero-padding
+  round-up are consumed by `skipEntryData`. Third sibling-class
+  fixture alongside `tar-mixed-skipped.tar` (PR #2449,
+  `size == 0` extract-continuation invariant) and
+  `tar-skipped-payload.tar` (PR #2454, `size == 512` data-advance
+  arithmetic for a multiple-of-512 declared payload), covering
+  the *padding round-up arithmetic* of the silent-skip `else`
+  branch's `skipEntryData input e.size` call's
+  `let dataSize := size.toNat + paddingFor size` summation for
+  non-multiple-of-512 `e.size` — the only `skipEntryData`
+  arithmetic path that the twelve preceding silent-skip fixtures
+  (the ten per-typeflag arms PR
+  #1555/#2413/#2417/#2422/#2425/#2428/#2431/#2434/#2437/#2439 +
+  the two sibling-class entries `tar-mixed-skipped.tar` PR #2449
+  and `tar-skipped-payload.tar` PR #2454) do not exercise. Each
+  preceding fixture has `size == 0` or `size == 512` for its
+  skipped entry, so `paddingFor size` evaluates to `0`
+  regardless of any `paddingFor` regression. A regression that
+  broke `paddingFor` by, say, returning `0` unconditionally
+  would not fire any of the twelve preceding fixtures (each
+  multiple-of-512 input degenerates the buggy branch to the
+  same `dataSize == size.toNat` computation as the correct
+  one) but would silently corrupt the offset of any entry
+  following a non-multiple-of-512-payload skipped entry —
+  `skipEntryData` would consume only the 100 declared bytes
+  without the 412-byte padding round-up, leaving the stream
+  positioned 412 bytes inside the `after.txt` header at offset
+  0x664; the subsequent `forEntries` `readExact 512` would
+  parse a 512-byte block straddling the padding-zero region and
+  the `after.txt` header / payload boundary as a header whose
+  checksum cannot match. This fixture closes that detection
+  gap. Typeflag `'6'` is reused for the middle entry to mirror
+  `tar-fifo-skipped.tar`, `tar-mixed-skipped.tar`, and
+  `tar-skipped-payload.tar` — pins the same `else` arm without
+  introducing a new typeflag value. Total fixture size: 6 × 512
+  = 3072 bytes (one header + one payload-and-padding block for
+  each of the three entries; the middle FIFO's 100-byte payload
+  + 412-byte zero padding together fill exactly one 512-byte
+  block, matching `tar-skipped-payload.tar`'s on-disk size
+  despite the smaller declared payload). No trailing zero
+  blocks (`Tar.forEntries` terminates on the short read at
+  EOF, matching the per-typeflag fixture geometry). Built by
+  the same script (`scripts/build-symlink-hardlink-malformed-fixtures.lean`).
+  Adversarial check (temporarily replace the `else` arm's
+  `skipEntryData input e.size`'s
+  `let dataSize := size.toNat + paddingFor size` with
+  `let dataSize := size.toNat`, i.e. drop the padding round-up
+  summand) confirmed the fixture independently fires the
+  padding round-up invariant with `tar: header checksum
+  mismatch` (the 412-byte under-skip leaves the stream 412
+  bytes inside the `after.txt` header, and the next
+  `readExact 512` block straddles the padding region and the
+  `after.txt` header — checksum verification on that
+  straddled block fails), while the twelve preceding
+  silent-skip siblings (the ten per-typeflag arms +
+  `tar-mixed-skipped.tar` + `tar-skipped-payload.tar`) still
+  pass — each has `paddingFor size == 0` for its skipped
+  entry's declared `size`, so the `+ paddingFor size` summand
+  is `0` in both the correct and the perturbed code, and the
+  perturbation is invisible to them. `git diff Zip/Tar.lean`
+  is empty post-revert. The fixture pins padding round-up for
+  `Tar.extract` only; `Tar.list`'s padding round-up invariant
+  is structurally identical (`forEntries` is shared) but a
+  separate fixture for `Tar.list` is not required — the new
+  arm exercises `Tar.extract` only. Together with the two
+  preceding sibling-class entries, the silent-skip family's
+  `skipEntryData` arithmetic surface is now fixtured at every
+  load-bearing input shape: `size == 0` (no payload, no
+  padding) by `tar-mixed-skipped.tar`, `size mod 512 == 0`
+  with `size > 0` (full-block payload, no padding) by
+  `tar-skipped-payload.tar`, and `size mod 512 ≠ 0`
+  (sub-block payload + non-zero padding round-up) by this
+  fixture — the three together pin both summands of
+  `let dataSize := size.toNat + paddingFor size` (PR #TBD-VERIFY-PR).
 
 ### Gzip/Zlib/Raw DEFLATE Public APIs
 
