@@ -805,6 +805,44 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     let names := mixedEntries.map (·.fileName)
     throw (IO.userError s!"tar-mixed-skipped.tar: expected exactly 2 files in extract dir, got {mixedEntries.size}: {names}")
 
+  -- tar-skipped-payload.tar: three-entry archive (regular before.txt →
+  -- typeflag '6' FIFO with non-zero size 512 silent-skip → regular
+  -- after.txt). Second sibling-class fixture alongside
+  -- `tar-mixed-skipped.tar`, but with a non-zero declared payload on
+  -- the silent-skipped middle entry — pinning the *data-advance
+  -- arithmetic* of the silent-skip `else` branch's `skipEntryData
+  -- input e.size` call for non-zero `e.size`. The eleven existing
+  -- silent-skip fixtures (the ten per-typeflag arms and
+  -- `tar-mixed-skipped.tar`) all use `size == 0` for the skipped
+  -- entry, so `skipEntryData input 0` is a no-op except for the
+  -- trailing 512-byte alignment after the header. A regression that
+  -- broke `skipEntryData` by ignoring `e.size` and advancing only by
+  -- the header padding would leave the stream positioned at the start
+  -- of the FIFO payload; the next `readExact` would consume 512 zero
+  -- bytes, `parseHeader` would interpret the zero block as
+  -- end-of-archive, and `forEntries` would terminate without
+  -- extracting `after.txt` — caught by the extract-dir size == 2
+  -- assertion below.
+  let skippedPayloadData ← readFixture "tar/security/tar-skipped-payload.tar"
+  let skippedPayloadPath ← writeFixtureTmp "tar-skipped-payload.tar" skippedPayloadData
+  let skippedPayloadExtract : System.FilePath :=
+    "/tmp/lean-zip-fixture-tar-skipped-payload-extract"
+  if ← skippedPayloadExtract.pathExists then
+    let _ ← IO.Process.run { cmd := "rm", args := #["-rf", skippedPayloadExtract.toString] }
+  IO.FS.createDirAll skippedPayloadExtract
+  IO.FS.withFile skippedPayloadPath .read fun h =>
+    Tar.extract (IO.FS.Stream.ofHandle h) skippedPayloadExtract
+  let skippedPayloadBefore ← IO.FS.readFile (skippedPayloadExtract / "before.txt")
+  unless skippedPayloadBefore == "BEFORE\n" do
+    throw (IO.userError s!"tar-skipped-payload.tar: before.txt content mismatch: {repr skippedPayloadBefore}")
+  let skippedPayloadAfter ← IO.FS.readFile (skippedPayloadExtract / "after.txt")
+  unless skippedPayloadAfter == "AFTER\n" do
+    throw (IO.userError s!"tar-skipped-payload.tar: after.txt content mismatch: {repr skippedPayloadAfter}")
+  let skippedPayloadEntries ← skippedPayloadExtract.readDir
+  unless skippedPayloadEntries.size == 2 do
+    let names := skippedPayloadEntries.map (·.fileName)
+    throw (IO.userError s!"tar-skipped-payload.tar: expected exactly 2 files in extract dir, got {skippedPayloadEntries.size}: {names}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
@@ -834,7 +872,8 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "tar-sparse-skipped.tar",
              "tar-incremental-skipped.tar",
              "tar-longnames-skipped.tar",
-             "tar-mixed-skipped.tar"] do
+             "tar-mixed-skipped.tar",
+             "tar-skipped-payload.tar"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-f", s!"/tmp/lean-zip-fixture-{f}"] }
   for d in #["/tmp/lean-zip-fixture-truncated-tar-extract", "/tmp/lean-zip-fixture-tar-slip-extract",
              "/tmp/lean-zip-fixture-tar-abs-extract", "/tmp/lean-zip-fixture-symlink-slip-extract",
@@ -850,6 +889,7 @@ def ZipTest.TarFixtures.tests : IO Unit := do
              "/tmp/lean-zip-fixture-tar-sparse-skipped-extract",
              "/tmp/lean-zip-fixture-tar-incremental-skipped-extract",
              "/tmp/lean-zip-fixture-tar-longnames-skipped-extract",
-             "/tmp/lean-zip-fixture-tar-mixed-skipped-extract"] do
+             "/tmp/lean-zip-fixture-tar-mixed-skipped-extract",
+             "/tmp/lean-zip-fixture-tar-skipped-payload-extract"] do
     let _ ← IO.Process.run { cmd := "rm", args := #["-rf", d] }
   IO.println "TAR fixture tests: OK"
