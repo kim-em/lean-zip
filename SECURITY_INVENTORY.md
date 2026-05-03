@@ -5393,6 +5393,310 @@ Summary — what this pattern catches and what it does not:
     long-name-prefixed silent-skip entry; no such issue is in
     flight. No new follow-up issue is filed by this
     paired-review.
+- Paired review of PR #2454 (`tar-skipped-payload.tar` fixture —
+  sibling-class silent-skip family extension 1 → 2; **second
+  sibling-class entry** of the silent-skip family, pinning the
+  `Tar.extract` *data-advance arithmetic* of the silent-skip
+  `else` branch's `skipEntryData input e.size` call for non-zero
+  `e.size`; sibling paired-review of #2450 / PR #2459 which
+  opened the sibling-class sub-category for the
+  `tar-mixed-skipped.tar` extract-continuation invariant; this
+  paired-review landed in PR <!-- drift-detector: half-closed paired-review placeholder, substituted to the real PR number on the worker branch before merge --> #TBD-VERIFY-PR closing #2455):
+  PR #2454 (squash commit `0fbcfb9`, merged 2026-05-03, closes
+  #2452) extends the **sibling-class sub-category** of the
+  `Tar.extract` silent-skip `else` fallback family from one
+  entry to two — distinct from the ten-arm per-typeflag ladder
+  closed at PR #2439 (`'N'`, fifth and final GNU-typeflag arm)
+  and from the sibling-class sub-category opener at PR #2449
+  (`tar-mixed-skipped.tar`, the first sibling-class entry that
+  pinned the *extract-continuation* invariant for a `size == 0`
+  skip; paired-reviewed in PR #2459 closing #2450). The commit
+  adds a three-entry UStar fixture
+  `testdata/tar/security/tar-skipped-payload.tar` (SHA-256
+  `2d32429ac507e5b321ba71b179e289878320989ed0d4fa05aeb752bdcddf92a4`,
+  total size 6 × 512 = 3072 bytes) interleaving a
+  silently-skipped middle FIFO entry (`typeflag '6' = 0x36`)
+  with a **non-zero** declared payload (`size == 512`, all-zero
+  512-byte payload) between two regular files (`before.txt`
+  carrying `"BEFORE\n"`, `after.txt` carrying `"AFTER\n"`); one
+  new helper definition (`buildSkippedPayloadFixture` for the
+  three-entry composition with a non-zero-payload middle entry)
+  plus a new top-level call in
+  [scripts/build-symlink-hardlink-malformed-fixtures.lean](/home/kim/lean-zip/scripts/build-symlink-hardlink-malformed-fixtures.lean)
+  producing it deterministically; a new test arm in
+  [ZipTest/TarFixtures.lean](/home/kim/lean-zip/ZipTest/TarFixtures.lean)
+  immediately after the existing `tar-mixed-skipped.tar` arm,
+  asserting both regular files materialise *with the correct
+  declared payloads* (`before.txt = "BEFORE\n"`,
+  `after.txt = "AFTER\n"`) **and** that the extract directory
+  contains exactly two entries; a new Reproducer Corpus row in
+  this inventory; and a *Symlink/hardlink extraction policy*
+  fixture-enumeration entry. No spec change, no production-code
+  change, no new typeflag constant in the `Tar` namespace, no
+  caller / signature change.
+  - **Data-advance-vs-extract-continuation invariant framing
+    fidelity.** The inventory row prose explicitly names the
+    *data-advance arithmetic* invariant the fixture pins —
+    advancing the input stream by `e.size` bytes (and the
+    trailing zero padding that rounds `e.size` up to the next
+    512-byte boundary, which for `e.size == 512` is `0` bytes)
+    before the next header read. The Reproducer Corpus row uses
+    the precise phrase *"data-advance arithmetic of the
+    silent-skip `else` branch's `skipEntryData input e.size`
+    call for non-zero `e.size`"*, and the regression-class
+    description traces the full failure path (a regression that
+    drops the `e.size` advance leaves the stream at the start of
+    the FIFO payload → next `readExact` consumes 512 zero bytes
+    → `parseHeader` interprets the zero block as
+    end-of-archive → `forEntries` terminates without extracting
+    `after.txt`). The row is *not* phrased as a replacement for
+    or extension of the *extract-continuation* invariant pinned
+    by `tar-mixed-skipped.tar` (PR #2449) — both invariants live
+    under the silent-skip `else` branch but are independently
+    regression-detectable: a regression dropping the `e.size`
+    advance fires only on this fixture; a regression dropping
+    the trailing 512-byte alignment after the header fires only
+    on `tar-mixed-skipped.tar`. The two are complementary
+    load-bearing properties of the same `skipEntryData` call,
+    and each fixture pins exactly one. The row's
+    cross-references to the eleven all-`size == 0` precedents
+    correctly enumerate them: ten per-typeflag arms (POSIX UStar
+    `hardlink-outside.tar` `'1'` PR #1555, `tar-fifo-skipped.tar`
+    `'6'` PR #2413, `tar-chardev-skipped.tar` `'3'` PR #2417,
+    `tar-blockdev-skipped.tar` `'4'` PR #2422,
+    `tar-contiguous-skipped.tar` `'7'` PR #2425, plus GNU
+    `tar-volumeheader-skipped.tar` `'V'` PR #2428,
+    `tar-multivol-skipped.tar` `'M'` PR #2431,
+    `tar-sparse-skipped.tar` `'S'` PR #2434,
+    `tar-incremental-skipped.tar` `'D'` PR #2437,
+    `tar-longnames-skipped.tar` `'N'` PR #2439) plus the first
+    sibling-class `tar-mixed-skipped.tar` PR #2449. None of the
+    eleven exercises the data-advance path: each either has
+    `size == 0` (so `skipEntryData input 0` degenerates to a
+    no-op modulo header padding) or is single-entry (so an
+    off-by-one in `skipEntryData` falls into the `forEntries`
+    short-read at EOF and is silently absorbed). The row sits
+    in the silent-skip enumeration block under
+    *Symlink/hardlink extraction policy*, ordered immediately
+    after `tar-mixed-skipped.tar` (per the sibling-class
+    progression: extract-continuation first, data-advance
+    second). Typeflag `'6'` is reused for the middle entry to
+    mirror `tar-fifo-skipped.tar` and `tar-mixed-skipped.tar` —
+    pins the same `else` arm without introducing a new typeflag
+    value, consistent with the PR #2449 framing convention.
+  - **Three-entry geometry + payload-content + narrowed-scope
+    fidelity.** Verified directly on the merged tree: `stat`
+    reports 3072 bytes (= 6 × 512), and `shasum -a 256` reports
+    `2d32429ac507e5b321ba71b179e289878320989ed0d4fa05aeb752bdcddf92a4`.
+    The geometry decomposes as: one 512-byte header + one
+    512-byte payload block for `before.txt` (typeflag `'0'`,
+    payload `"BEFORE\n"` size 7, padded with 505 NUL bytes) =
+    1024 bytes; one 512-byte header + one 512-byte all-zero
+    payload block for the FIFO middle entry (typeflag `'6'`,
+    `path = "fifo-entry"`, empty linkname, `size = 512`,
+    declared 512-byte all-zero payload) = 1024 bytes; one
+    512-byte header + one 512-byte payload block for
+    `after.txt` (typeflag `'0'`, payload `"AFTER\n"` size 6,
+    padded with 506 NUL bytes) = 1024 bytes; total 3072 bytes.
+    No trailing zero blocks (`Tar.forEntries` terminates on the
+    short read at EOF, matching the per-typeflag fixture
+    geometry). The test arm in
+    [ZipTest/TarFixtures.lean](/home/kim/lean-zip/ZipTest/TarFixtures.lean)
+    asserts *both* the contents (`before.txt = "BEFORE\n"`,
+    `after.txt = "AFTER\n"` — each compared via `IO.FS.readFile`
+    + `unless` byte-equality) and the count (extract dir
+    contains *exactly* two entries via
+    `skippedPayloadExtract.readDir` + `entries.size == 2`). The
+    contents-and-count combination is what distinguishes a
+    data-advance regression from a benign skip: a data-advance
+    regression manifests as a missing `after.txt` (the
+    misskipped 512 zero bytes parse as an end-of-archive marker,
+    terminating `forEntries` before `after.txt`'s header is
+    read), so the test fires with `no such file or directory`
+    at the assertion site rather than a contents mismatch. The
+    worker chose `size == 512` (a multiple of 512, so
+    `paddingFor 512 == 0` and the round-up arithmetic is *not*
+    exercised) instead of the issue spec's recommended
+    `size == 1024` — this is a parsimony choice (single payload
+    block is the minimum to test non-zero data-advance) and
+    legitimate (either size exercises the same data-advance code
+    path), but it narrows the fixture's scope: the `paddingFor`
+    round-up arithmetic for non-multiples of 512
+    (`paddingFor 100 == 412`, `paddingFor 513 == 511`, etc.)
+    remains uncovered by *this* fixture. The worker's session
+    log explicitly records the reasoning (the issue body's
+    *Verification* clause specified `wc -c | grep 3072`, which
+    pins the 6-block layout, while the *Deliverables §1* clause
+    mentioned `size == 1024`; the two were inconsistent and the
+    worker resolved the inconsistency in favour of the
+    verification clause — a 1024-byte payload would yield
+    7 × 512 = 3584 bytes and fail the `wc -c` check). This
+    narrowing is documented up-front rather than as a discovered
+    gap. The `paddingFor` round-up arithmetic gap has since been
+    closed by the now-merged third sibling-class entry
+    `tar-skipped-padded.tar` (PR #2457, three-entry archive with
+    middle FIFO `size == 100` + 412-byte zero padding, paired-
+    review #2458 in flight at file time of this entry) — the
+    sibling-class sub-category now holds three entries closing
+    the three arithmetic shapes of `skipEntryData input e.size`:
+    `size == 0` (PR #2449), `size > 0 ∧ size mod 512 == 0`
+    (PR #2454, *this paired-review's target*), and
+    `size > 0 ∧ size mod 512 ≠ 0` (PR #2457). No new follow-up
+    issue is filed by this paired-review for the `paddingFor`
+    gap (already closed by PR #2457).
+  - **Adversarial-check fidelity.** The adversarial check is
+    recorded in the PR #2454 worker branch's progress entry
+    [progress/20260503T014703Z_d6722843.md](/home/kim/lean-zip/progress/20260503T014703Z_d6722843.md):
+    temporarily replacing the `else` body's
+    `skipEntryData input e.size` with `skipEntryData input 0`
+    (drop the declared payload advance) caused the new arm to
+    fire with `uncaught exception: no such file or directory
+    (error code: 4294967294) file:
+    /tmp/lean-zip-fixture-tar-skipped-payload-extract/after.txt`,
+    while all eleven preceding silent-skip siblings (the ten
+    per-typeflag arms and `tar-mixed-skipped.tar`) still passed
+    — each has `size == 0` for its skipped entry, so
+    `skipEntryData input 0` is the actual production behaviour
+    for them and the perturbation is invisible to them. The
+    error symptom matches the expected propagation: the
+    perturbed skip leaves the input stream positioned at the
+    start of the FIFO payload (offset `0x600`); the next
+    `forEntries` `readExact 512` consumes the 512 zero payload
+    bytes, `parseHeader` interprets the all-zero block as the
+    POSIX UStar end-of-archive marker (a 512-byte all-zero
+    block), and `forEntries` terminates without reading
+    `after.txt`'s header — so the test arm's
+    `IO.FS.readFile (skippedPayloadExtract / "after.txt")`
+    fires with `no such file or directory`
+    rather than a contents mismatch. The mutation was reverted
+    before commit; the post-revert
+    `git diff Zip/Tar.lean` is empty in the merged commit
+    `0fbcfb9` (PR #2454's diff at
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) shows zero
+    lines changed). The chosen perturbation
+    (`skipEntryData input 0`) is the most direct way to
+    exercise the data-advance invariant — it isolates the
+    `e.size` contribution from the `paddingFor` contribution
+    by zeroing the size argument entirely, which is
+    semantically distinct from the production behaviour for any
+    non-zero-`e.size` entry. A weaker perturbation like
+    `skipEntryData input (e.size - 1)` would risk coincidental
+    compensation by the round-up arithmetic for the chosen
+    `size == 512` (where `paddingFor 511 == 1` would absorb the
+    off-by-one); the chosen perturbation is regression-class-
+    canonical (it directly drops the entire data-advance
+    contribution) and avoids that compensation hazard. The
+    adversarial-check shape from the PR #2449 sibling-class
+    opener (perturbing `e.size + 1` to detect a checksum
+    mismatch) and the new shape here (perturbing `e.size → 0`
+    to detect a missing-file error) are complementary failure
+    modes — the PR #2449 shape exercises the alignment
+    boundary, the PR #2454 shape exercises the size-magnitude
+    contribution. The two shapes together pin the
+    `skipEntryData` invariant against both shape classes of
+    arithmetic regression.
+  - **Reproducer Corpus row prose fidelity.** The new
+    `tar-skipped-payload.tar` row is inserted in the
+    *Symlink/hardlink extraction policy* fixture-enumeration
+    block immediately after `tar-mixed-skipped.tar` (the first
+    sibling-class entry from PR #2449) and before
+    `tar-skipped-padded.tar` (the third sibling-class entry
+    from PR #2457). The row carries: (i) the three-entry
+    geometry enumerated explicitly (`before.txt` typeflag `'0'`
+    payload `"BEFORE\n"`, `fifo-entry` typeflag `'6' = 0x36`
+    declared `size == 512` with all-zero 512-byte payload,
+    `after.txt` typeflag `'0'` payload `"AFTER\n"`) with total
+    size `6 × 512 = 3072 bytes`; (ii) the explicit
+    *data-advance arithmetic* invariant phrasing — both as the
+    fixture's load-bearing claim and as the regression-class
+    description (an `e.size`-vs-zero off-by-one would be
+    silently absorbed by the eleven all-`size == 0`
+    predecessors but caught by this fixture); (iii) the
+    *second sibling-class fixture alongside `tar-mixed-skipped.tar`*
+    framing with cross-references to the ten per-typeflag
+    siblings + first sibling-class predecessor; (iv) the
+    *contents and count* test-arm description, distinguishing
+    what each assertion catches (count catches a missing
+    `after.txt`; content catches a `before.txt`/`after.txt`
+    payload corruption); (v) the past-tense adversarial-check
+    clause carrying the perturbation (`skipEntryData input 0`)
+    and the resulting failure symptom (`no such file or
+    directory` at the `after.txt` assertion site) — past tense
+    avoids the `during this PR` <!-- drift-detector: prose discussion of the placeholder phrase in a paired-review finding, not a stale placeholder --> placeholder phrasing that the
+    drift-detector flags, so no inline marker is required
+    (consistent with the post-#2453 cleanup convention for
+    past-tense adversarial-check attribution clauses); (vi)
+    the `Tar.list` symmetry caveat (`Tar.list`'s data-advance
+    invariant is structurally identical because `forEntries`
+    is shared, so a separate fixture for `Tar.list` is not
+    required); (vii) only stable
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) anchors —
+    no `:N` line-number suffixes, consistent with the
+    [PR #2353](https://github.com/kim-em/lean-zip/pull/2353)
+    decision. The closing-PR column resolves to `#2454` on the
+    merged tree (verified via `git log --format='%h %s' 0fbcfb9`
+    pointing at the PR #2454 squash commit).
+  - **Stable-cite discipline.** The new Reproducer Corpus row
+    and the new *Symlink/hardlink extraction policy*
+    fixture-enumeration bullet use only stable identifiers —
+    function names (`Tar.extract`, `Tar.forEntries`,
+    `Tar.buildHeader`, `Tar.create`, `skipEntryData`,
+    `Binary.zeros`, `Tar.paddingFor`, `parseHeader`,
+    `readExact`) and fixture filenames (the ten per-typeflag
+    siblings plus `tar-mixed-skipped.tar` plus the new
+    `tar-skipped-payload.tar`). No `line N` or `:N` suffixes
+    appear anywhere in the new prose, consistent with the
+    [PR #2353](https://github.com/kim-em/lean-zip/pull/2353)
+    decision to drop line-number anchors. Cross-reference cites
+    resolve to real artefacts: PR #1555 / PR #2413 / PR #2417 /
+    PR #2422 / PR #2425 / PR #2428 / PR #2431 / PR #2434 /
+    PR #2437 / PR #2439 / PR #2449 / PR #2459 are all real
+    merged PRs with the cited fixtures and policies; PR #2457
+    (the third sibling-class entry) is also merged; the
+    in-flight #2458 paired-review for PR #2457 is not yet
+    landed but is referenced as in-flight rather than as a
+    completed PR. The
+    [Zip/Tar.lean](/home/kim/lean-zip/Zip/Tar.lean) anchor is
+    repeated rather than aliased, matching the inventory's
+    house style. `bash scripts/check-inventory-links.sh`
+    reports `errors=0` on the worker branch this paired-review
+    lands on. This paired-review introduces no new placeholder
+    regression — the `#TBD-VERIFY-PR` <!-- drift-detector: prose discussion of the placeholder token in a paired-review finding, not a stale placeholder -->
+    placeholder in the paired-review header line is wrapped in
+    a `<!-- drift-detector: half-closed paired-review placeholder,
+    substituted to the real PR number on the worker branch
+    before merge -->` opt-out comment so it does not register
+    as a stale placeholder.
+  - **Sub-category-extension close-out.** PR #2454 extends the
+    **sibling-class** sub-category of the silent-skip family
+    from one entry (PR #2449's `tar-mixed-skipped.tar`,
+    extract-continuation invariant) to two entries by adding
+    the data-advance arithmetic invariant for non-zero
+    `e.size`. The sibling-class sub-category remains
+    structurally distinct from the per-typeflag sub-category
+    (which itself splits into the now-capped POSIX UStar
+    `'1'`–`'7'` numeric range and the now-closed GNU-typeflag
+    five-arm sub-ladder `'V'` / `'M'` / `'S'` / `'D'` /
+    `'N'`). The two sibling-class entries pin distinct
+    arithmetic paths of the same `skipEntryData input e.size`
+    call: PR #2449 pins the `size == 0` path (header padding
+    only, no payload advance) and PR #2454 pins the
+    `size > 0 ∧ size mod 512 == 0` path (full-block payload
+    advance, no padding round-up). Together with the now-merged
+    third entry `tar-skipped-padded.tar` (PR #2457,
+    `size > 0 ∧ size mod 512 ≠ 0`, payload + padding round-up;
+    paired-review #2458 in flight at file time of this entry),
+    the trio closes the three arithmetic shapes of
+    `skipEntryData input e.size` — `size == 0`, multiple of
+    512, non-multiple of 512 — at every load-bearing input
+    shape. No further sibling-class arithmetic candidate is
+    queued; the trio fully covers the `skipEntryData`
+    arithmetic axis. Future sibling-class extensions (if any)
+    would pin a non-arithmetic invariant such as `Tar.list`
+    continuation across a silent-skip entry or
+    extract-continuation under a long-name-prefixed
+    silent-skip entry; no such issue is in flight. No new
+    follow-up issue is filed by this paired-review.
 
 #### Symlink/hardlink extraction policy
 
