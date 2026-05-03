@@ -805,6 +805,36 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     let names := mixedEntries.map (·.fileName)
     throw (IO.userError s!"tar-mixed-skipped.tar: expected exactly 2 files in extract dir, got {mixedEntries.size}: {names}")
 
+  -- tar-mixed-skipped.tar: defense-in-depth `Tar.list` continuation arm,
+  -- reusing the same fixture bytes as the `Tar.extract` arm above (no new
+  -- fixture file). `Tar.list` and `Tar.extract` share `forEntries` today,
+  -- so any continuation regression in `forEntries` would fire both arms;
+  -- this arm pins the post-skip stream-position invariant explicitly so a
+  -- hypothetical future `Tar.list` refactor that decouples from the shared
+  -- `forEntries` (e.g., for performance, lazy iteration, or different error
+  -- reporting) cannot silently break continuation. `Tar.list` differs from
+  -- `Tar.extract` in observable effect: it returns *all* three headers
+  -- including the silently-skipped middle entry, so the assertions check
+  -- per-entry `path` / `typeflag` / `size` rather than extract-dir state.
+  let mixedListed ← IO.FS.withFile mixedPath .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless mixedListed.size == 3 do
+    throw (IO.userError s!"tar-mixed-skipped.tar: expected 3 entries from Tar.list, got {mixedListed.size}")
+  unless mixedListed[0]!.path == "before.txt" do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 0 path mismatch: {mixedListed[0]!.path}")
+  unless mixedListed[0]!.typeflag == 0x30 do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 0 typeflag mismatch: {mixedListed[0]!.typeflag}")
+  unless mixedListed[1]!.path == "fifo-entry" do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 1 path mismatch: {mixedListed[1]!.path}")
+  unless mixedListed[1]!.typeflag == 0x36 do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 1 typeflag mismatch: {mixedListed[1]!.typeflag}")
+  unless mixedListed[1]!.size == 0 do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 1 size mismatch: {mixedListed[1]!.size}")
+  unless mixedListed[2]!.path == "after.txt" do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 2 path mismatch: {mixedListed[2]!.path}")
+  unless mixedListed[2]!.typeflag == 0x30 do
+    throw (IO.userError s!"tar-mixed-skipped.tar: Tar.list entry 2 typeflag mismatch: {mixedListed[2]!.typeflag}")
+
   -- tar-skipped-payload.tar: three-entry archive (regular before.txt →
   -- typeflag '6' FIFO with non-zero size 512 silent-skip → regular
   -- after.txt). Second sibling-class fixture alongside
