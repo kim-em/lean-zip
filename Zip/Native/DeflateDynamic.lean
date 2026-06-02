@@ -271,17 +271,18 @@ def pickSmaller (a b : ByteArray) : ByteArray :=
   if a.size < b.size then a else b
 
 /-- The compressed-block dispatch (no stored fallback): level 1 = fixed Huffman,
-    2-4 = lazy LZ77, 5+ = dynamic Huffman. At levels ≥ 5 it keeps the smaller of
-    a plain fixed-Huffman block and the dynamic-Huffman block, so dynamic's
-    tree-description overhead never makes the output larger than fixed. -/
+    2-4 = lazy LZ77, 5+ = lazy LZ77 + dynamic Huffman. At levels ≥ 5 it keeps the
+    smaller of a plain fixed-Huffman block and the dynamic-Huffman block, so
+    dynamic's tree-description overhead never makes the output larger than fixed. -/
 def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
   if level == 1 then deflateFixedIter data
   else if level < 5 then deflateLazyIter data
   else
-    -- Share one matcher pass between the fixed and dynamic encoders: the two
-    -- token streams are identical, so running `lz77GreedyIter` twice is pure
-    -- waste. Lean shares the `let`, so the matcher runs once.
-    let tokens := lz77GreedyIter data
+    -- At high levels use the lazy matcher (better matches → better ratio, closing
+    -- the text-compression gap vs. zlib) and share its single token pass between
+    -- the fixed and dynamic encoders: the two streams are identical, so running
+    -- the matcher twice would be pure waste. Lean shares the `let`, so it runs once.
+    let tokens := lz77LazyIter data
     pickSmaller (deflateFixedBlock data tokens) (deflateDynamicBlock data tokens)
 
 /-- Unified raw DEFLATE compression dispatch.

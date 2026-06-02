@@ -21,9 +21,18 @@ private theorem getElem!_le_of_forall_mem_le (l : List Nat) (i n : Nat)
     (hi : i < l.length) (h : ∀ x ∈ l, x ≤ n) : l[i]! ≤ n := by
   rw [getElem!_pos l i hi]; exact h _ (List.getElem_mem hi)
 
-/-- `deflateDynamic` produces a bytestream whose bits correspond to the
-    spec-level dynamic Huffman encoding, plus padding to byte alignment. -/
-theorem deflateDynamic_spec (data : ByteArray) :
+/-- `deflateDynamicBlock` produces a bytestream whose bits correspond to the
+    spec-level dynamic Huffman encoding of the given LZ77 tokens, plus padding to
+    byte alignment. Generalized over the token array: its only hypotheses are the
+    per-token encodability bound (supplied by any matcher's `_encodable` lemma) and
+    that an empty input yields no tokens. `deflateDynamic_spec` below is the
+    `lz77GreedyIter` instance. -/
+theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
+    (htok_enc : ∀ t ∈ tokens.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
+    (hempty : data.size = 0 → tokens = #[]) :
     ∃ (litLens distLens : List Nat) (headerBits symBits : List Bool),
       Huffman.Spec.ValidLengths litLens 15 ∧
       Huffman.Spec.ValidLengths distLens 15 ∧
@@ -32,14 +41,13 @@ theorem deflateDynamic_spec (data : ByteArray) :
       (∀ x ∈ litLens, x ≤ 15) ∧ (∀ x ∈ distLens, x ≤ 15) ∧
       Deflate.Spec.encodeDynamicTrees litLens distLens = some headerBits ∧
       Deflate.Spec.encodeSymbols litLens distLens
-        (tokensToSymbols (lz77Greedy data 32768)) = some symBits ∧
-      Deflate.Spec.bytesToBits (deflateDynamic data) =
+        (tokensToSymbols tokens) = some symBits ∧
+      Deflate.Spec.bytesToBits (deflateDynamicBlock data tokens) =
         [true, false, true] ++ headerBits ++ symBits ++
         List.replicate
           ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8)
           false := by
-  -- Extract the intermediate values from deflateDynamic
-  let tokens := lz77Greedy data 32768
+  -- Extract the intermediate values from deflateDynamicBlock
   let litFreqs := (tokenFreqs tokens).1
   let distFreqs := (tokenFreqs tokens).2
   let litFreqPairs := freqsToPairs litFreqs
@@ -166,7 +174,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
     cases hs with
     | inl hmapped =>
       obtain ⟨t, ht_mem, ht_eq⟩ := hmapped
-      have hbounds := lz77Greedy_encodable data 32768 (by omega) (by omega) t ht_mem
+      have hbounds := htok_enc t ht_mem
       subst ht_eq
       cases t with
       | literal b =>
@@ -368,24 +376,24 @@ theorem deflateDynamic_spec (data : ByteArray) :
           (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2 hwf_emit hlen256_le
         -- Chain all the bits
         rw [hemit, hbw_hdr, hbw2_bits] at hbw_eob
-        -- Show deflateDynamic data equals the flushed writer
-        have hdef : deflateDynamic data =
+        -- Show deflateDynamicBlock data tokens equals the flushed writer.
+        -- `deflateDynamicBlock` opens with `let (litFreqs, distFreqs) := tokenFreqs tokens`,
+        -- so a bare `split` would hit that tuple match first; reframe the goal as the
+        -- (definitionally equal) `data.size == 0` branch directly via `show`.
+        have hdef : deflateDynamicBlock data tokens =
             (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush := by
-          unfold deflateDynamic deflateDynamicBlock
-          simp only [lz77GreedyIter_eq_lz77Greedy]
+          show (if (data.size == 0) = true
+                then (bw3.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush
+                else (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush)
+                = (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush
           split
           · rename_i hzero
             rw [beq_iff_eq] at hzero
-            have htok_empty : tokens = #[] := by
-              simp only [tokens, lz77Greedy]
-              rw [if_pos (show data.size < 3 by omega)]
-              show (lz77Greedy.trailing data 0).toArray = #[]
-              unfold lz77Greedy.trailing
-              rw [dif_neg (show ¬(0 < data.size) by omega)]
+            have htok_empty : tokens = #[] := hempty hzero
             have hemit_id : bw4 = bw3 := by
               show emitTokensWithCodes bw3 tokens litCodes distCodes hlit_size hdist_size 0 = bw3
               rw [htok_empty]; unfold emitTokensWithCodes; rfl
-            rw [hemit_id]; rfl
+            rw [hemit_id]
           · rfl
         rw [hdef]
         have hflush := BitWriter.flush_toBits _ hwf_eob
@@ -413,13 +421,51 @@ theorem deflateDynamic_spec (data : ByteArray) :
         rw [hbits_eq] at htoBits_len
         omega
 
-/-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
-    codes then decompressing recovers the original data. Generalized to any
-    `maxOutputSize` large enough to hold the input. -/
-theorem inflate_deflateDynamic (data : ByteArray)
+/-- `deflateDynamic` (greedy LZ77 + dynamic Huffman) produces a bytestream whose
+    bits correspond to the spec-level dynamic Huffman encoding, plus padding to
+    byte alignment. The `lz77GreedyIter` instance of `deflateDynamicBlock_spec`. -/
+theorem deflateDynamic_spec (data : ByteArray) :
+    ∃ (litLens distLens : List Nat) (headerBits symBits : List Bool),
+      Huffman.Spec.ValidLengths litLens 15 ∧
+      Huffman.Spec.ValidLengths distLens 15 ∧
+      litLens.length ≥ 257 ∧ litLens.length ≤ 288 ∧
+      distLens.length ≥ 1 ∧ distLens.length ≤ 32 ∧
+      (∀ x ∈ litLens, x ≤ 15) ∧ (∀ x ∈ distLens, x ≤ 15) ∧
+      Deflate.Spec.encodeDynamicTrees litLens distLens = some headerBits ∧
+      Deflate.Spec.encodeSymbols litLens distLens
+        (tokensToSymbols (lz77Greedy data 32768)) = some symBits ∧
+      Deflate.Spec.bytesToBits (deflateDynamic data) =
+        [true, false, true] ++ headerBits ++ symBits ++
+        List.replicate
+          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8)
+          false := by
+  rw [show lz77Greedy data 32768 = lz77GreedyIter data from
+        (lz77GreedyIter_eq_lz77Greedy data 32768).symm]
+  exact deflateDynamicBlock_spec data (lz77GreedyIter data)
+    (fun t ht => lz77Greedy_encodable data 32768 (by omega) (by omega) t
+      (by rwa [lz77GreedyIter_eq_lz77Greedy] at ht))
+    (fun hzero => by
+      rw [lz77GreedyIter_eq_lz77Greedy]
+      simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
+      have htrail : lz77Greedy.trailing data 0 = [] := by
+        unfold lz77Greedy.trailing
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
+      simp only [htrail])
+
+/-- Roundtrip for a dynamic Huffman block over an arbitrary token stream:
+    compressing with `deflateDynamicBlock` then decompressing recovers the input,
+    given the per-token encodability bound, the empty-input fact, and that the
+    tokens resolve back to the data. Generalized over the token array. -/
+theorem inflate_deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token)
+    (htok_enc : ∀ t ∈ tokens.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
+    (hempty : data.size = 0 → tokens = #[])
+    (hresolve : Deflate.Spec.resolveLZ77 (tokensToSymbols tokens) [] = some data.data.toList)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamic data) maxOutputSize = .ok data := by
-  have hspec := deflateDynamic_spec data
+    Zip.Native.Inflate.inflate (deflateDynamicBlock data tokens) maxOutputSize = .ok data := by
+  have hspec := deflateDynamicBlock_spec data tokens htok_enc hempty
   match hspec with
   | ⟨litLens, distLens, headerBits, symBits, hv_lit, hv_dist,
       hlitLen_lo, hlitLen_hi, hdistLen_lo, hdistLen_hi,
@@ -433,7 +479,7 @@ theorem inflate_deflateDynamic (data : ByteArray)
       hlit_bound hdist_bound
       ⟨hlitLen_lo, hlitLen_hi⟩ ⟨hdistLen_lo, hdistLen_hi⟩
       hv_lit hv_dist henc_trees
-    have hdec_padded : Deflate.Spec.decode (Deflate.Spec.bytesToBits (deflateDynamic data)) =
+    have hdec_padded : Deflate.Spec.decode (Deflate.Spec.bytesToBits (deflateDynamicBlock data tokens)) =
         some data.data.toList := by
       rw [hbits]
       let padding := List.replicate
@@ -442,16 +488,37 @@ theorem inflate_deflateDynamic (data : ByteArray)
           some (litLens, distLens, symBits ++ padding) := by
         rw [List.append_assoc]; exact hheader
       exact Deflate.Spec.encodeDynamic_decode_append
-        (tokensToSymbols (lz77Greedy data 32768)) data.data.toList
+        (tokensToSymbols tokens) data.data.toList
         litLens distLens headerBits symBits padding
         hv_lit hv_dist
         hheader'
         henc_syms
-        (lz77Greedy_resolves data 32768 (by omega))
+        hresolve
         (tokensToSymbols_validSymbolList _)
     have hlen : data.data.toList.length ≤ maxOutputSize := by
       simp only [Array.length_toList, ByteArray.size_data]; omega
     rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
-    exact inflate_complete (deflateDynamic data) data.data.toList maxOutputSize hlen hdec_padded
+    exact inflate_complete (deflateDynamicBlock data tokens) data.data.toList maxOutputSize hlen hdec_padded
+
+/-- Native Level 5 roundtrip: compressing with greedy LZ77 + dynamic Huffman
+    codes then decompressing recovers the original data. The `lz77GreedyIter`
+    instance of `inflate_deflateDynamicBlock`. Generalized to any `maxOutputSize`
+    large enough to hold the input. -/
+theorem inflate_deflateDynamic (data : ByteArray)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateDynamic data) maxOutputSize = .ok data := by
+  unfold deflateDynamic
+  exact inflate_deflateDynamicBlock data (lz77GreedyIter data)
+    (fun t ht => lz77Greedy_encodable data 32768 (by omega) (by omega) t
+      (by rwa [lz77GreedyIter_eq_lz77Greedy] at ht))
+    (fun hzero => by
+      rw [lz77GreedyIter_eq_lz77Greedy]
+      simp only [lz77Greedy, show data.size < 3 from by omega, ↓reduceIte]
+      have htrail : lz77Greedy.trailing data 0 = [] := by
+        unfold lz77Greedy.trailing
+        simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
+      simp only [htrail])
+    (by rw [lz77GreedyIter_eq_lz77Greedy]; exact lz77Greedy_resolves data 32768 (by omega))
+    maxOutputSize hsize
 
 end Zip.Native.Deflate
