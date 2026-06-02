@@ -26,7 +26,7 @@ open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
     This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
     `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
-    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   split
