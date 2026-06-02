@@ -258,12 +258,24 @@ def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
 
 open Zip.Spec.DeflateStoredCorrect (deflateStoredPure)
 
-/-- Unified raw DEFLATE compression dispatch.
-    Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman. -/
-def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
-  if level == 0 then deflateStoredPure data
-  else if level == 1 then deflateFixedIter data
+/-- The compressed-block dispatch (no stored fallback): level 1 = fixed Huffman,
+    2-4 = lazy LZ77, 5+ = dynamic Huffman. -/
+def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
+  if level == 1 then deflateFixedIter data
   else if level < 5 then deflateLazyIter data
   else deflateDynamic data
+
+/-- Pick the smaller of two encodings by byte length (ties keep `b`). -/
+def pickSmaller (a b : ByteArray) : ByteArray :=
+  if a.size < b.size then a else b
+
+/-- Unified raw DEFLATE compression dispatch.
+    Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman.
+    For levels ≥ 1 it falls back to a stored block whenever that is smaller than
+    the compressed output, so incompressible input never expands — the result is
+    never larger than `deflateStoredPure data`. -/
+def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
+  if level == 0 then deflateStoredPure data
+  else pickSmaller (deflateStoredPure data) (deflateCompressed data level)
 
 end Zip.Native.Deflate

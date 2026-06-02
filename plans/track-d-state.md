@@ -27,15 +27,14 @@ moves the numbers.
 - **Compression throughput**: native ≈ 10 MB/s vs zlib/miniz ≈ 500 MB/s and
   libdeflate ≈ 1 GB/s — a ~50–100× gap. This is the headline problem.
 - **Compression ratio (text)**: native trails zlib and the zopfli floor.
-- **Incompressible input (prng)**: native *expands* small inputs to ~1.05×
-  while zlib/miniz stay ≈ 1.0 — no stored-block fallback.
+- ~~**Incompressible input (prng)**: native expands small inputs~~ — **closed by
+  D-1** (stored-block fallback); native now matches zlib (≈ 1.005 at 1 KiB).
 - **Decompression**: competitive (hundreds of MB/s, same order as zlib).
 
 ## Backlog (ranked: impact × tractability)
 
 | ID | Dimension | Candidate | Why / expected effect | Provability |
 |----|-----------|-----------|-----------------------|-------------|
-| D-1 | ratio | **Stored-block fallback**: emit a stored block when the compressed output would be larger than the input | Fixes the prng expansion (1.05× → ≈1.0); matches zlib. Small, self-contained. | High — stored block roundtrips to input by existing framing lemmas. |
 | D-2 | runtime | **Profile native `deflateRaw`** to find the dominant cost (allocation, `ByteArray.push` growth, List↔Array conversions, linear LZ77 scan) | Prerequisite for D-3/D-6; turns "10 MB/s" into a named bottleneck. | n/a (measurement). |
 | D-3 | runtime | **Hash-chain LZ77 match finder** (genN+1) replacing the linear scan | Likely the dominant compression-speed fix; biggest single runtime win. | Med — prove match-validity equivalence to the linear matcher. |
 | D-4 | ratio | **Stronger lazy matching / longer match search** | Close the text-ratio gap toward zlib. | Med — still produces a valid token stream (BB1). |
@@ -44,8 +43,9 @@ moves the numbers.
 
 ## Landed
 
-_(none yet — this dashboard is the Track D baseline; subsequent rows record
-each optimization's measured delta.)_
+| ID | Change | Measured delta | Proof |
+|----|--------|----------------|-------|
+| D-1 | **Stored-block fallback** — `deflateRaw` now returns `pickSmaller (deflateStoredPure data) (deflateCompressed data level)` for levels ≥ 1, so the output is never larger than a stored block. | prng ratio at 1 KiB **1.058 → 1.005** (1083 → 1029 B), exact parity with zlib; 4 KiB 1.012 → 1.001; compressible data unchanged (`pickSmaller` keeps the compressed form). Runtime unaffected. | `inflate_deflateRaw` / `deflateRaw_pad` / `deflateRaw_goR_pad` re-proved via the new `deflateCompressed_*` lemmas + `inflate_deflateStoredPure`; 0 sorries. The result is provably never larger than `deflateStoredPure data`, so the change can never regress ratio. |
 
 ## Orchestration hook (optional, not yet wired)
 

@@ -49,8 +49,10 @@ without dominating wall-clock.
 - **Compression is the gap**: native deflate is roughly an order of magnitude
   slower than zlib/miniz_oxide across every pattern and size.
 - **Ratio** is close to the references on highly-compressible data, but native
-  leaves measurable ground on `text` and has worse small-input overhead on
-  incompressible (`prng`) data.
+  leaves measurable ground on `text`. (The small-input expansion on
+  incompressible `prng` data is fixed — see D-1 in
+  [`../plans/track-d-state.md`](../plans/track-d-state.md) — native now matches
+  zlib there.)
 
 These observations drive the optimization backlog in
 [`../plans/track-d-state.md`](../plans/track-d-state.md).
