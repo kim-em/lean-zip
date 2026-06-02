@@ -417,7 +417,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
     codes then decompressing recovers the original data. Generalized to any
     `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateDynamic (data : ByteArray)
-    (maxOutputSize : Nat) (hsize : data.size < maxOutputSize) :
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     Zip.Native.Inflate.inflate (deflateDynamic data) maxOutputSize = .ok data := by
   have hspec := deflateDynamic_spec data
   match hspec with
