@@ -16,11 +16,17 @@ The measurement matrix is [`ZipBenchReport.lean`](ZipBenchReport.lean)
 |--------------|-------|------------------------------------------|--------------------------|---------------------------|
 | zlib         | A     | system zlib + headers (`pkg-config`)     | required                 | n/a (load-bearing)        |
 | miniz_oxide  | 0c    | `cargo` + `rustc` (Rust ≥ 1.74)          | auto-on if cargo on PATH | `MINIZ_OXIDE_DISABLE=1`   |
-| libdeflate   | 0a    | system `libdeflate` (separate issue)     | tracked separately       | n/a                       |
-| zopfli       | 0b    | `zopfli` CLI / library (separate issue)  | tracked separately       | n/a                       |
+| libdeflate   | 0a    | system `libdeflate` (headers+lib)        | auto-on if header found  | `LIBDEFLATE_DISABLE=1`    |
+| zopfli       | 0b    | system `zopfli` (headers+lib)            | auto-on if header found  | `ZOPFLI_DISABLE=1`        |
 
-Only the miniz_oxide column is in scope for this file; the other rows
-are placeholders so the matrix is complete when phases 0a/0b land.
+libdeflate and zopfli are plain C libraries linked directly (no Rust shim):
+the lakefile auto-probes `<libdeflate.h>` / `<zopfli.h>` with the C compiler
+and, when found, compiles the shims with `-DHAVE_LIBDEFLATE` / `-DHAVE_ZOPFLI`
+and links `-ldeflate` / `-lzopfli`. When absent, the shims fall back to
+`IO.userError` stubs (substrings `"libdeflate: not built with"` /
+`"zopfli: not built with"`), so `lake build` still works. Set
+`LIBDEFLATE_LDFLAGS` / `ZOPFLI_LDFLAGS` to override the link flags. On NixOS the
+libraries come from `pkgs.libdeflate` / `pkgs.zopfli` in `shell.nix`.
 
 ## miniz_oxide (Track D Phase 0c)
 

@@ -153,29 +153,32 @@ def sizes : List Nat := [1024, 4096, 16384, 65536, 262144, 1048576]
 def levels : List Nat := [1, 6, 9]
 def reps : Nat := 5
 
-/-- Run one compressor over the whole pattern×size×level grid. `compress`
-    returns the compressed bytes (for ratio); `decompress?` optionally times a
-    decoder on a canonical raw-deflate stream. -/
+/-- Run one compressor over the pattern×size×level grid. `compress` returns the
+    compressed bytes (for ratio); `decompress?` optionally times a decoder on a
+    canonical raw-deflate stream. `theSizes`/`theLevels`/`theReps` let slow
+    ratio-ceiling compressors (zopfli) run a reduced grid. -/
 def runCompressor
     (name : String)
     (compress : ByteArray → Nat → IO ByteArray)
-    (decompress? : Option (ByteArray → IO ByteArray)) : IO (List Row) := do
+    (decompress? : Option (ByteArray → IO ByteArray))
+    (theSizes : List Nat := sizes) (theLevels : List Nat := levels)
+    (theReps : Nat := reps) : IO (List Row) := do
   let mut rows : List Row := []
   for pat in patterns do
-    for size in sizes do
+    for size in theSizes do
       let data := generateData pat size
-      for level in levels do
+      for level in theLevels do
         let compressed ← compress data level
         let outSize := compressed.size
         let ratio := outSize.toFloat / (max size 1).toFloat
-        let cNs ← measureNs size reps (compress data level >>= sink)
+        let cNs ← measureNs size theReps (compress data level >>= sink)
         -- Decompress timing uses a canonical zlib-FFI raw-deflate stream so all
         -- decoders are measured on identical, format-correct input.
         let dMBps ← match decompress? with
           | none => pure none
           | some dec => do
             let ref ← RawDeflate.compress data level.toUInt8
-            let dNs ← measureNs size reps (dec ref >>= sink)
+            let dNs ← measureNs size theReps (dec ref >>= sink)
             pure (mbps size dNs)
         rows := { compressor := name, pattern := pat, size := size, level := level,
                   outSize := outSize, ratio := ratio,
@@ -200,6 +203,13 @@ def zlibCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
 def minizCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
   MinizOxide.compress data level.toUInt8
 
+def libdeflateCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
+  Libdeflate.compress data level.toUInt8
+
+/-- zopfli is level-less; ignore the level and use its default iteration count. -/
+def zopfliCompress (data : ByteArray) (_level : Nat) : IO ByteArray :=
+  Zopfli.compress data 0
+
 /-! ## Meta + main -/
 
 def shell (cmd : String) (args : List String) : IO String := do
@@ -215,7 +225,13 @@ def main (args : List String) : IO Unit := do
   let nativeRows ← runCompressor "native" nativeCompress (some nativeDecompress)
   let zlibRows   ← runCompressor "zlib"   zlibCompress   (some RawDeflate.decompress)
   let minizRows  ← runCompressor "miniz_oxide" minizCompress (some MinizOxide.decompress)
-  let rows := nativeRows ++ zlibRows ++ minizRows
+  let libdeflRows ← runCompressor "libdeflate" libdeflateCompress (some Libdeflate.decompress)
+  -- zopfli is the ratio ceiling: compress-only, very slow, level-less. Run a
+  -- reduced grid (one nominal level, capped size, single rep) so it appears on
+  -- the ratio graphs without dominating wall-clock.
+  let zopfliRows ← runCompressor "zopfli" zopfliCompress none
+                     (theSizes := sizes.filter (· ≤ 262144)) (theLevels := [6]) (theReps := 1)
+  let rows := nativeRows ++ zlibRows ++ minizRows ++ libdeflRows ++ zopfliRows
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]

@@ -21,8 +21,12 @@ throughput is a **median-of-5 snapshot of the machine recorded in the JSON
 | `native` | lean-zip pure-Lean DEFLATE | the thing we are improving |
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
-| `libdeflate` | libdeflate (FFI) | optimized C, the speed bar *(landing next)* |
-| `zopfli` | zopfli (FFI) | maximum-ratio ceiling *(landing next)* |
+| `libdeflate` | libdeflate (FFI) | optimized C — the runtime speed bar |
+| `zopfli` | zopfli (FFI) | maximum-ratio ceiling (compress-only, slow) |
+
+zopfli runs a reduced grid (one level, capped at 256 KiB, single rep): it is the
+ratio *floor*, not a throughput contender, so it appears on the ratio graphs
+without dominating wall-clock.
 
 ## Graphs
 

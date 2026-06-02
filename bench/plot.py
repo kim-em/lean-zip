@@ -52,6 +52,22 @@ def present_compressors(results):
     return [c for c in COMPRESSORS if c[0] in have]
 
 
+def series_style(key, colour):
+    """native is the subject — draw it solid and on top; references as hollow
+    rings so coincident points (common on compressible data) stay visible."""
+    native = key == "native"
+    return dict(
+        color=colour,
+        linewidth=2.0 if native else 1.3,
+        markersize=7 if native else 5,
+        markerfacecolor=colour if native else "none",
+        markeredgecolor=colour,
+        markeredgewidth=1.3,
+        zorder=10 if native else 4,
+        alpha=1.0 if native else 0.95,
+    )
+
+
 def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
     """One 2x2 figure (subplot per pattern): metric vs input size, line per
     compressor, at SIZE_LEVEL. Log x; log y iff logy."""
@@ -64,8 +80,8 @@ def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
             xs = [r["size"] for r in rs if r.get(metric) is not None]
             ys = [r[metric] for r in rs if r.get(metric) is not None]
             if xs:
-                ax.plot(xs, ys, marker=marker, color=colour, label=label,
-                        linewidth=1.6, markersize=5)
+                ax.plot(xs, ys, marker=marker, label=label,
+                        **series_style(key, colour))
         ax.set_xscale("log", base=2)
         if logy:
             ax.set_yscale("log")
@@ -93,8 +109,8 @@ def ratio_by_level(results, meta, outfile):
             xs = [r["level"] for r in rs]
             ys = [r["ratio"] for r in rs]
             if xs:
-                ax.plot(xs, ys, marker=marker, color=colour, label=label,
-                        linewidth=1.6, markersize=5)
+                ax.plot(xs, ys, marker=marker, label=label,
+                        **series_style(key, colour))
         ax.set_title(f"{pat} data", fontsize=10)
         ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
         ax.set_xlabel("compression level")
