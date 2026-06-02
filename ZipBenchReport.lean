@@ -65,12 +65,38 @@ def mkTextData (size : Nat) : ByteArray := Id.run do
     col := col + word.length
   return result.extract 0 size
 
+/-- Non-periodic English-like text: words drawn pseudo-randomly (not in fixed
+    order like `mkTextData`). The fixed-order `text` pattern compresses into a
+    few very long matches, so its decompression is dominated by the LZ77 copy
+    loop and barely touches Huffman symbol decoding. Random word order produces
+    many short, varied matches and frequent literals, so decompression is
+    **Huffman-decode-bound** — the regime the fast-bits table decoder targets. -/
+def mkWordsData (size : Nat) : ByteArray := Id.run do
+  let words := #["the", "of", "and", "to", "in", "a", "is", "that", "for", "it",
+                  "was", "on", "are", "be", "with", "as", "at", "this", "have", "from",
+                  "or", "by", "not", "but", "what", "all", "were", "when", "we", "there",
+                  "can", "an", "your", "which", "their", "if", "do", "will", "each", "how"]
+  let mut result := ByteArray.empty
+  let mut state : UInt64 := 0x9e3779b97f4a7c15
+  while result.size < size do
+    state := state ^^^ (state <<< 13)
+    state := state ^^^ (state >>> 7)
+    state := state ^^^ (state <<< 17)
+    let word := words[state.toNat % words.size]!
+    for c in word.toUTF8 do
+      if result.size < size then
+        result := result.push c
+    if result.size < size then
+      result := result.push 0x20
+  return result.extract 0 size
+
 def generateData (pattern : String) (size : Nat) : ByteArray :=
   match pattern with
   | "constant" => mkConstantData size
   | "cyclic"   => mkCyclicData size
   | "prng"     => mkPrngData size
   | "text"     => mkTextData size
+  | "words"    => mkWordsData size
   | _          => mkPrngData size
 
 /-! ## Timing -/
@@ -148,7 +174,7 @@ def Row.toJson (r : Row) : String :=
 
 /-! ## Matrix -/
 
-def patterns : List String := ["constant", "cyclic", "prng", "text"]
+def patterns : List String := ["constant", "cyclic", "prng", "text", "words"]
 def sizes : List Nat := [1024, 4096, 16384, 65536, 262144, 1048576]
 def levels : List Nat := [1, 6, 9]
 def reps : Nat := 5

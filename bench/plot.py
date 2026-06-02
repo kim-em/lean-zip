@@ -24,9 +24,16 @@ COMPRESSORS = [
     ("libdeflate",  "libdeflate",        "#9467bd", "D"),
     ("zopfli",      "zopfli",            "#ff7f0e", "v"),
 ]
-PATTERNS = ["constant", "cyclic", "prng", "text"]
+PATTERNS = ["constant", "cyclic", "prng", "text", "words"]
 SIZE_LEVEL = 6     # level used for the size-sweep figures
 LEVEL_SIZE = 65536  # size used for the ratio-vs-level figure
+
+
+def _grid(n):
+    """Rows/cols for an n-panel grid: 2 columns until 4 panels, then 3."""
+    cols = 2 if n <= 4 else 3
+    rows = (n + cols - 1) // cols
+    return rows, cols
 
 
 def load(path):
@@ -71,7 +78,8 @@ def series_style(key, colour):
 def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
     """One 2x2 figure (subplot per pattern): metric vs input size, line per
     compressor, at SIZE_LEVEL. Log x; log y iff logy."""
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True)
+    rows, cols = _grid(len(PATTERNS))
+    fig, axes = plt.subplots(rows, cols, figsize=(5.5 * cols, 4 * rows), sharex=True)
     comps = present_compressors(results)
     for ax, pat in zip(axes.flat, PATTERNS):
         for key, label, colour, marker in comps:
@@ -89,6 +97,8 @@ def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
         ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
         ax.set_xlabel("input size (bytes)")
         ax.set_ylabel(ylabel)
+    for ax in axes.flat[len(PATTERNS):]:
+        ax.set_visible(False)
     axes.flat[0].legend(fontsize=8, loc="best")
     fig.suptitle(f"{title}  (level {SIZE_LEVEL})", fontsize=13, fontweight="bold")
     fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
@@ -100,7 +110,8 @@ def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
 
 def ratio_by_level(results, meta, outfile):
     """Compression ratio vs level at LEVEL_SIZE, subplot per pattern."""
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True)
+    rows, cols = _grid(len(PATTERNS))
+    fig, axes = plt.subplots(rows, cols, figsize=(5.5 * cols, 4 * rows), sharex=True)
     comps = present_compressors(results)
     for ax, pat in zip(axes.flat, PATTERNS):
         for key, label, colour, marker in comps:
@@ -115,6 +126,8 @@ def ratio_by_level(results, meta, outfile):
         ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
         ax.set_xlabel("compression level")
         ax.set_ylabel("ratio (compressed / original)")
+    for ax in axes.flat[len(PATTERNS):]:
+        ax.set_visible(False)
     axes.flat[0].legend(fontsize=8, loc="best")
     fig.suptitle(f"Compression ratio vs level  ({LEVEL_SIZE} bytes; lower is better)",
                  fontsize=13, fontweight="bold")
