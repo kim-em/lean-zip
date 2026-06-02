@@ -1038,3 +1038,36 @@ local macro "unfold_except" : tactic =>
 - `scoped elab` — requires importing `Lean.Elab.Tactic`
 - Docstring before `set_option ... in` — parse error
 - `section; set_option hygiene false; scoped macro ...` inside namespace — parse error
+
+## Proving over a size-then-emit dispatch (`let` sharing + lazy `if`)
+
+The DEFLATE dispatch (`deflateRaw`/`deflateCompressed`) shares work via `let`
+then selects with a lazy `if` over expensive blocks:
+`let tokens := …; let f := tokenFreqs tokens; … if size₁ < size₂ then blockA else blockB`.
+Proving `inflate/_pad/_goR` over these has four non-obvious gotchas (each cost a
+build cycle):
+
+- **`split` can't see the `if` under `let`s.** Expose it with `dsimp only []`
+  (zeta-reduces the lets), **not `simp only []`** — `simp only []` also rewrites
+  the block terms, so a later `rw [show deflateFixedBlock data (lz77LazyIter data)
+  = deflateLazy data from …]` fails with "did not find pattern".
+- **`split` fires on the *innermost / first-occurring* `if`.** A nested
+  `if storedSize < (if fixedBytes < dynBytes then …) then stored else
+  if fixedBytes < dynBytes then fixed else dyn` splits on `fixedBytes < dynBytes`
+  first, giving 2×2 leaves (stored, fixed, stored, dyn). Use `split <;> split`
+  and order the four `exact`s accordingly — don't assume the outer `if` splits
+  first.
+- **Bump `maxRecDepth`.** `split`ting the nested size condition forces the
+  elaborator to whnf it; `set_option maxRecDepth 8000 in` before the theorem.
+- **Mark cheap cost-model defs `@[irreducible]`.** A size helper that folds over
+  `List.range 286` will blow `maxRecDepth` when `split`/whnf unfolds it.
+  Irreducibility blocks elaborator unfolding only — the kernel and compiled code
+  still evaluate it, so `decide` and runtime conformance tests are unaffected.
+
+For a size-then-emit refactor, **no size-correctness theorem is needed**: the
+roundtrip/pad lemmas hold for whichever block is chosen, so the proofs just
+`split` and reuse the per-block lemmas. A block emitted from precomputed values
+(e.g. `deflateDynamicBlockCore data tokens lens.1 lens.2 _ _`) is definitionally
+equal to the original (`deflateDynamicBlock data tokens`), so the existing
+lemmas close it by `exact` via defeq. Pin the *empirical* byte-identity (that the
+size models reproduce the old selection) with a conformance test, not a proof.
