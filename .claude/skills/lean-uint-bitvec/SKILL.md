@@ -64,6 +64,36 @@ show UInt32.ofBitVec (... bitvec expr ...) = UInt32.ofBitVec (...)
 congr 1; bv_decide
 ```
 
+## Per-bit `testBit` goals over a *variable* index
+
+For a goal like `(reverse16 x).toNat.testBit j = x.toNat.testBit (15 - j)` with
+`j : Nat`, `hj : j < 16` (bit permutations, swap networks, masks):
+
+1. **Bridge `Nat.testBit` → `BitVec.getLsbD`** so `bv_decide` can see it.
+   For any `UInt{8,16,32,64}` value, `x.toNat = x.toBitVec.toNat` holds by `rfl`,
+   and `BitVec.testBit_toNat : v.toNat.testBit i = v.getLsbD i` is also `rfl`:
+   ```lean
+   rw [show (reverse16 x).toNat = (reverse16 x).toBitVec.toNat from rfl,
+       show x.toNat = x.toBitVec.toNat from rfl,
+       BitVec.testBit_toNat, BitVec.testBit_toNat]
+   simp only [reverse16]   -- unfold the def so bv_decide sees the bit ops
+   ```
+2. **Enumerate the bounded index by hand — `interval_cases`/`omega`-split are
+   Mathlib and NOT available here.** Use an explicit exhaustive `match` on the
+   value + its bound, with an arithmetic-contradiction catch-all:
+   ```lean
+   match j, hj with
+   | 0, _ | 1, _ | 2, _ | 3, _ | 4, _ | 5, _ | 6, _ | 7, _
+   | 8, _ | 9, _ | 10, _ | 11, _ | 12, _ | 13, _ | 14, _ | 15, _ => bv_decide
+   | _ + 16, h => omega
+   ```
+   Each concrete `j` makes `getLsbD j` / `15 - j` literal, which `bv_decide`
+   closes; `omega` discharges the impossible `_ + 16 < 16` arm.
+
+Likewise `norm_num` is unavailable: prove `2^a < 2^b` with
+`Nat.pow_lt_pow_right (by omega) (by omega)` and `n < 2^64`-style bounds with
+`Nat.lt_of_le_of_lt h (by decide)` (the kernel evaluates `2^64` fine).
+
 ## `generalize` Before `bv_decide` for Shared Subexpressions
 
 When `bv_decide` fails with "spurious counterexample" because it abstracts the same
