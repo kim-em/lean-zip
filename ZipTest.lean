@@ -20,6 +20,7 @@ import ZipTest.NativeGzip
 import ZipTest.NativeIntegration
 import ZipTest.NativeScale
 import ZipTest.NativeDeflate
+import ZipTest.SizeHelpers
 import ZipTest.NativeCompressBench
 import ZipTest.Benchmark
 import ZipTest.FuzzInflate
@@ -50,6 +51,7 @@ def main : IO Unit := do
   ZipTest.NativeIntegration.tests
   ZipTest.NativeScale.tests
   ZipTest.NativeDeflate.tests
+  ZipTest.SizeHelpers.tests
   ZipTest.NativeCompressBench.tests
   ZipTest.Benchmark.tests
   ZipTest.FuzzInflate.tests
