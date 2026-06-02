@@ -187,6 +187,24 @@ def runCompressor
   IO.eprintln s!" {name} done"
   return rows.reverse
 
+/-- Ratio-only rows (no timing) for a compressor across `theLevels` at one size —
+    used to populate the ratio-vs-level plot densely (every DEFLATE level) without
+    paying the median-of-N timing cost at every level. `levelSize` matches the
+    plotter's `LEVEL_SIZE`. -/
+def levelSize : Nat := 65536
+def runRatioLevels (name : String) (compress : ByteArray → Nat → IO ByteArray)
+    (theLevels : List Nat) : IO (List Row) := do
+  let mut rows : List Row := []
+  for pat in patterns do
+    let data := generateData pat levelSize
+    for level in theLevels do
+      let compressed ← compress data level
+      rows := { compressor := name, pattern := pat, size := levelSize, level := level,
+                outSize := compressed.size,
+                ratio := compressed.size.toFloat / (max levelSize 1).toFloat,
+                compressMBps := none, decompressMBps := none } :: rows
+  return rows.reverse
+
 /-! ## Compressor adapters -/
 
 def nativeCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
@@ -231,7 +249,16 @@ def main (args : List String) : IO Unit := do
   -- the ratio graphs without dominating wall-clock.
   let zopfliRows ← runCompressor "zopfli" zopfliCompress none
                      (theSizes := sizes.filter (· ≤ 262144)) (theLevels := [6]) (theReps := 1)
+  -- Dense ratio-vs-level data: fill the levels the timed matrix skips (it only
+  -- times 1/6/9) with cheap ratio-only rows, so the ratio-by-level plot shows
+  -- every DEFLATE level. zopfli is level-less, so it stays a single point.
+  let gapLevels := [2, 3, 4, 5, 7, 8]
+  let nativeGap ← runRatioLevels "native" nativeCompress gapLevels
+  let zlibGap   ← runRatioLevels "zlib" zlibCompress gapLevels
+  let minizGap  ← runRatioLevels "miniz_oxide" minizCompress gapLevels
+  let libGap    ← runRatioLevels "libdeflate" libdeflateCompress gapLevels
   let rows := nativeRows ++ zlibRows ++ minizRows ++ libdeflRows ++ zopfliRows
+              ++ nativeGap ++ zlibGap ++ minizGap ++ libGap
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]
