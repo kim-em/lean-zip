@@ -371,7 +371,7 @@ theorem deflateDynamic_spec (data : ByteArray) :
         -- Show deflateDynamic data equals the flushed writer
         have hdef : deflateDynamic data =
             (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush := by
-          unfold deflateDynamic
+          unfold deflateDynamic deflateDynamicBlock
           simp only [lz77GreedyIter_eq_lz77Greedy]
           split
           · rename_i hzero
