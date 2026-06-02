@@ -204,10 +204,13 @@ def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
 where
   hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
       (h : pos + 2 < data.size) : Nat :=
-    let a := (data[pos]'(by omega)).toNat
-    let b := (data[pos + 1]'(by omega)).toNat
-    let c := (data[pos + 2]'(by omega)).toNat
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+    -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
+    -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
+    -- same index, so `hash3_eq` stays `rfl` and the `< hashSize` bound holds.
+    let a := (data[pos]'(by omega)).toUInt32
+    let b := (data[pos + 1]'(by omega)).toUInt32
+    let c := (data[pos + 2]'(by omega)).toUInt32
+    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
@@ -297,10 +300,13 @@ def lz77GreedyIter (data : ByteArray) (windowSize : Nat := 32768) :
 where
   hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
       (h : pos + 2 < data.size) : Nat :=
-    let a := (data[pos]'(by omega)).toNat
-    let b := (data[pos + 1]'(by omega)).toNat
-    let c := (data[pos + 2]'(by omega)).toNat
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+    -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
+    -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
+    -- same index, so `hash3_eq` stays `rfl` and the `< hashSize` bound holds.
+    let a := (data[pos]'(by omega)).toUInt32
+    let b := (data[pos + 1]'(by omega)).toUInt32
+    let c := (data[pos + 2]'(by omega)).toUInt32
+    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
@@ -447,10 +453,13 @@ def lz77Lazy (data : ByteArray) (windowSize : Nat := 32768) :
 where
   hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
       (h : pos + 2 < data.size) : Nat :=
-    let a := (data[pos]'(by omega)).toNat
-    let b := (data[pos + 1]'(by omega)).toNat
-    let c := (data[pos + 2]'(by omega)).toNat
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)) % hashSize)
+    -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
+    -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
+    -- same index, so `hash3_eq` stays `rfl` and the `< hashSize` bound holds.
+    let a := (data[pos]'(by omega)).toUInt32
+    let b := (data[pos + 1]'(by omega)).toUInt32
+    let c := (data[pos + 2]'(by omega)).toUInt32
+    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
