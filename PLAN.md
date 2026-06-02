@@ -509,6 +509,26 @@ decompression always terminates (each iteration consumes at least one
 bit), and compression always terminates (each step advances at least one
 byte in the input).
 
+A roundtrip theorem involves two bounds that must be kept distinct. The
+decoder's output-size cap is a permanent zip-bomb guard — a configurable
+security control (see Track E and the resource-safety policy), not a proof
+artifact. The fuel bound is the proof artifact this track eliminates.
+
+Because the cap is a security control rather than a proof artifact, the
+roundtrip theorem is stated *parametrically* in it: the theorem quantifies
+over the cap and assumes only that the input fits under it. The cap is an
+argument to the decoder, and its default value never appears as a constant
+in the theorem statement.
+
+```
+∀ (maxOutputSize : Nat) (data : ByteArray) (level : Fin 10),
+  data.size ≤ maxOutputSize →
+  inflate (deflate data level) maxOutputSize = .ok data
+```
+
+The same parametric form covers the DEFLATE, gzip, and zlib roundtrips —
+each framing layer passes the cap through to the underlying inflate.
+
 This track has two stages:
 
 **C1: Raise bounds to huge.** If the fuel is computed from `data.size`,
@@ -521,10 +541,13 @@ well-founded recursion on a decreasing measure (remaining input length
 for decompression, remaining unprocessed bytes for compression). This
 requires restructuring the recursive functions so that Lean's termination
 checker can verify progress. The result is a roundtrip theorem with no
-size restriction at all:
+fuel-imposed size restriction — only the decoder's output cap remains, as
+a parameter:
 
 ```
-∀ (data : ByteArray) (level : Fin 10), inflate (deflate data level) = .ok data
+∀ (maxOutputSize : Nat) (data : ByteArray) (level : Fin 10),
+  data.size ≤ maxOutputSize →
+  inflate (deflate data level) maxOutputSize = .ok data
 ```
 
 C2 is a significant redesign of the proof-friendly spec functions.
@@ -676,7 +699,7 @@ This includes:
   operations
 - C FFI allocation and formatting helpers
 - external libraries such as zlib
-- parser modules that are currently tested/hardened but not formally proved
+- parser modules that are tested/hardened but not formally proved
 
 For each trusted component, track one of:
 
