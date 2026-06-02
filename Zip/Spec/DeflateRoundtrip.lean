@@ -32,7 +32,11 @@ theorem inflate_deflateCompressed (data : ByteArray) (level : UInt8)
   · exact inflate_deflateFixedIter data _ (by omega)
   · split
     · exact inflate_deflateLazyIter data _ hsize
-    · unfold pickSmaller
+    · -- Levels 5+: shared token stream is defeq to the old independent-matcher form.
+      rw [show (let tokens := lz77GreedyIter data;
+            pickSmaller (deflateFixedBlock data tokens) (deflateDynamicBlock data tokens))
+            = pickSmaller (deflateFixedIter data) (deflateDynamic data) from rfl]
+      unfold pickSmaller
       split
       · exact inflate_deflateFixedIter data _ (by omega)
       · exact inflate_deflateDynamic data _ (by omega)
@@ -70,7 +74,12 @@ theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
       obtain ⟨bits, _, hbytes⟩ := deflateLazy_spec data
       exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
         hbytes, by simp only [List.length_replicate]; omega⟩
-    · -- Levels 5+: smaller of fixed / dynamic Huffman
+    · -- Levels 5+: smaller of fixed / dynamic Huffman over a shared token stream.
+      -- The shared `let` is defeq to the old independent-matcher form, so convert
+      -- back and reuse the D-1b proofs verbatim.
+      rw [show (let tokens := lz77GreedyIter data;
+            pickSmaller (deflateFixedBlock data tokens) (deflateDynamicBlock data tokens))
+            = pickSmaller (deflateFixedIter data) (deflateDynamic data) from rfl]
       unfold pickSmaller
       split
       · -- fixed Huffman (iterative LZ77)
@@ -156,7 +165,12 @@ theorem deflateCompressed_goR_pad (data : ByteArray) (level : UInt8) :
             henc_syms (lz77Lazy_resolves data 32768 (by omega))
             (tokensToSymbols_validSymbolList _)
         · simp only [padding, List.length_replicate]; omega
-    · -- Levels 5+: smaller of fixed / dynamic Huffman
+    · -- Levels 5+: smaller of fixed / dynamic Huffman over a shared token stream.
+      -- The shared `let` is defeq to the old independent-matcher form, so convert
+      -- back and reuse the D-1b proofs verbatim.
+      rw [show (let tokens := lz77GreedyIter data;
+            pickSmaller (deflateFixedBlock data tokens) (deflateDynamicBlock data tokens))
+            = pickSmaller (deflateFixedIter data) (deflateDynamic data) from rfl]
       unfold pickSmaller
       split
       · -- fixed Huffman (iterative LZ77)
