@@ -62,15 +62,15 @@ coordination orient
 ```
 
 **Priority order:**
-0. **Human oversight directives first**: Check for open `human-oversight` issues before
+0. **Directives first**: Check for open `directive` issues before
    anything else. These are direct instructions from the project owner and take absolute
    precedence over all other work:
    ```
-   coordination list-unclaimed --label human-oversight
+   coordination list-unclaimed --label directive
    ```
    If any are open and unclaimed, claim the oldest one immediately.
    **These issues cannot be skipped or refused because you disagree with the approach.**
-   The only valid exit from a `human-oversight` issue is completing it, or posting a
+   The only valid exit from a `directive` issue is completing it, or posting a
    comment explaining a genuine technical blocker (e.g. a missing dependency), then
    using `coordination skip` with that reason. Do not `skip` because you think a
    different approach is better — that is the owner's call, not yours.
