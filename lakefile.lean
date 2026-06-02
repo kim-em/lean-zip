@@ -11,6 +11,20 @@ def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
   if out.exitCode != 0 then return #[]
   return splitFlags out.stdout.trimAscii.toString
 
+/-- Probe whether the C compiler can resolve `#include <header>` (using the
+    ambient include paths, e.g. nix-shell's `NIX_CFLAGS_COMPILE`). Used to
+    auto-detect optional Track D comparator libraries. Returns `false` on any
+    error so a missing library never breaks `lake build`. -/
+def cHeaderProbe (header : String) : IO Bool := do
+  let probe : FilePath := ⟨"/tmp/lean-zip-probe-" ++ header.replace "/" "-" ++ ".c"⟩
+  let src := "#include <" ++ header ++ ">\nint main(void) { return 0; }\n"
+  try
+    IO.FS.writeFile probe src
+    let out ← IO.Process.output { cmd := "cc", args := #["-fsyntax-only", probe.toString] }
+    try IO.FS.removeFile probe catch _ => pure ()
+    return out.exitCode == 0
+  catch _ => return false
+
 /-- Run `xcrun --show-sdk-path` and return the SDK path on Apple platforms. -/
 def macSdkPath : IO (Option FilePath) := do
   let out ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
@@ -100,9 +114,44 @@ def buildMinizOxideRust : IO Bool := do
     return false
   return true
 
-/-- Compose the full `moreLinkArgs` list — zlib first, then miniz_oxide
-    when enabled. We run cargo here so that the resulting `.a` exists by
-    the time Lake links the test/bench executables. -/
+/-! ### libdeflate / zopfli comparators (Track D reference comparators)
+
+Both are plain C libraries (no Rust shim). The C shims at `c/libdeflate_ffi.c`
+and `c/zopfli_ffi.c` are always compiled — gated on `HAVE_LIBDEFLATE` /
+`HAVE_ZOPFLI` — falling back to `IO.userError` stubs when the library is absent,
+so plain `lake build` still works. `*_DISABLE=1` opts out; `*_LDFLAGS` overrides
+the link flags; otherwise the header is auto-probed. -/
+
+/-- Enable libdeflate iff `LIBDEFLATE_DISABLE` is unset and either
+    `LIBDEFLATE_LDFLAGS` is set or `<libdeflate.h>` is resolvable. -/
+def libdeflateEnabled : IO Bool := do
+  if (← IO.getEnv "LIBDEFLATE_DISABLE").isSome then return false
+  if (← IO.getEnv "LIBDEFLATE_LDFLAGS").isSome then return true
+  cHeaderProbe "libdeflate.h"
+
+/-- Enable zopfli iff `ZOPFLI_DISABLE` is unset and either `ZOPFLI_LDFLAGS` is
+    set or `<zopfli.h>` is resolvable. -/
+def zopfliEnabled : IO Bool := do
+  if (← IO.getEnv "ZOPFLI_DISABLE").isSome then return false
+  if (← IO.getEnv "ZOPFLI_LDFLAGS").isSome then return true
+  cHeaderProbe "zopfli.h"
+
+/-- Link flags for a system C library: an explicit `<NAME>_LDFLAGS` override, or
+    the nix `-L` paths plus matching `-rpath` (Lake links with the Lean
+    toolchain clang, which does not inject nix's runtime search paths, so the
+    store dirs must be baked in as rpath) plus `-l<lib>`. -/
+def sysLibLinkFlags (envVar lib : String) : IO (Array String) := do
+  if let some explicit := (← IO.getEnv envVar) then
+    return splitFlags explicit.trimAscii.toString
+  let lpaths ← nixLdLibPaths
+  let rpaths := lpaths.filterMap fun s =>
+    if s.startsWith "-L" then some ("-Wl,-rpath," ++ s.drop 2) else none
+  return lpaths ++ rpaths ++ #["-l" ++ lib]
+
+/-- Compose the full `moreLinkArgs` list — zlib first, then the Track D
+    comparators (miniz_oxide, libdeflate, zopfli) when enabled. We run cargo
+    here so that the resulting `.a` exists by the time Lake links the
+    test/bench executables. -/
 def linkFlags : IO (Array String) := do
   let mut args ← zlibLinkFlags
   if (← minizOxideEnabled) then
@@ -111,6 +160,15 @@ def linkFlags : IO (Array String) := do
     else if (← buildMinizOxideRust) then
       args := args ++ #[s!"-L{(minizRustLib.parent.getD ".").toString}",
                         "-lminiz_oxide_shim"]
+  if (← libdeflateEnabled) then
+    args := args ++ (← sysLibLinkFlags "LIBDEFLATE_LDFLAGS" "deflate")
+  if (← zopfliEnabled) then
+    -- libzopfli.so references `log` from libm but leaves it for the executable
+    -- to provide. Force libm into the exe's NEEDED (defeating `--as-needed`)
+    -- and relax lld's `--no-allow-shlib-undefined` so the link succeeds.
+    args := args ++ (← sysLibLinkFlags "ZOPFLI_LDFLAGS" "zopfli")
+            ++ #["-Wl,--no-as-needed", "-lm", "-Wl,--as-needed",
+                 "-Wl,--allow-shlib-undefined"]
   return args
 
 package «lean-zip» where
@@ -160,6 +218,42 @@ extern_lib libminiz_oxide_ffi pkg := do
   let name := nameToStaticLib "miniz_oxide_ffi"
   buildStaticLib (pkg.staticLibDir / name) #[ffiO]
 
+-- libdeflate FFI (Track D comparator)
+input_file libdeflate_ffi.c where
+  path := "c" / "libdeflate_ffi.c"
+  text := true
+
+target libdeflate_ffi.o pkg : FilePath := do
+  let srcJob ← libdeflate_ffi.c.fetch
+  let oFile := pkg.buildDir / "c" / "libdeflate_ffi.o"
+  let cflags := if (← libdeflateEnabled) then #["-DHAVE_LIBDEFLATE"] else #[]
+  let weakArgs := #["-I", (← getLeanIncludeDir).toString] ++ cflags
+  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  buildO oFile srcJob weakArgs hardArgs "cc"
+
+extern_lib liblibdeflate_ffi pkg := do
+  let ffiO ← libdeflate_ffi.o.fetch
+  let name := nameToStaticLib "libdeflate_ffi"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
+-- zopfli FFI (Track D comparator)
+input_file zopfli_ffi.c where
+  path := "c" / "zopfli_ffi.c"
+  text := true
+
+target zopfli_ffi.o pkg : FilePath := do
+  let srcJob ← zopfli_ffi.c.fetch
+  let oFile := pkg.buildDir / "c" / "zopfli_ffi.o"
+  let cflags := if (← zopfliEnabled) then #["-DHAVE_ZOPFLI"] else #[]
+  let weakArgs := #["-I", (← getLeanIncludeDir).toString] ++ cflags
+  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  buildO oFile srcJob weakArgs hardArgs "cc"
+
+extern_lib libzopfli_ffi pkg := do
+  let ffiO ← zopfli_ffi.o.fetch
+  let name := nameToStaticLib "zopfli_ffi"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
 lean_lib ZipTest where
   globs := #[.submodules `ZipTest]
 
@@ -169,6 +263,9 @@ lean_exe test where
 
 lean_exe bench where
   root := `ZipBench
+
+lean_exe «bench-report» where
+  root := `ZipBenchReport
 
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
