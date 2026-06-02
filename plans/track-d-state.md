@@ -26,7 +26,15 @@ moves the numbers.
 4. Implement via **generational refinement**: new definition `genN+1`, prove
    `genN+1 = genN` (or component equivalence), transfer the roundtrip theorem.
 5. Re-bench; update this file (move the item to *Landed*, record the delta) and
-   commit the refreshed graphs.
+   commit the refreshed graphs. **A/B-ing a runtime swap** (e.g. toggling an
+   `@[implemented_by]` fast path on/off)? The same memoisation trap as step 2
+   bites: a loop-invariant pure call like `Inflate.inflate compressed` is
+   hoisted/CSE'd and timed once, so an ad-hoc `for _ in [:reps] do match
+   Inflate.inflate compressed` reports ~0 or random inflated ratios. Either run
+   the decoder as a **re-executed IO action** per rep (wrap as `fun b => match
+   … | .ok o => pure o`, then `acc := acc + (← dec ref >>= sink)` — what
+   `bench-report`'s `measureNs` does), or just read the delta off `bench-report`
+   itself rather than a throwaway driver.
 
 ## Measured gaps (snapshot: see `bench/results/latest.json` meta)
 
