@@ -204,24 +204,29 @@ private theorem deflateDynamic.distCodes_size (distLens : List Nat)
     (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size = 30 := by
   rw [canonicalCodes_size, Array.size_map, List.size_toArray, hlen]
 
-/-- Write a dynamic Huffman DEFLATE block from precomputed LZ77 tokens.
-    Produces a single DEFLATE block with BFINAL=1, BTYPE=10. Factored out of
-    `deflateDynamic` so a caller that already has the token stream (e.g. the
-    `deflateCompressed` fixed/dynamic comparison) can avoid re-running the
-    matcher. -/
-def deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
-  let (litFreqs, distFreqs) := tokenFreqs tokens
-  -- Convert frequencies to (symbol, freq) pairs
-  let litFreqPairs := freqsToPairs litFreqs
-  let distFreqPairs := freqsToPairs distFreqs
-  -- Compute code lengths
-  let litLens := Huffman.Spec.computeCodeLengths litFreqPairs 286 15
-  let distLens := Huffman.Spec.computeCodeLengths distFreqPairs 30 15
-  -- Ensure at least one non-zero distance code (RFC 1951 requirement)
-  let distLens :=
-    if distLens.all (· == 0) then distLens.set 0 1
-    else distLens
-  -- Build canonical codes from computed lengths
+/-- The dynamic-Huffman code lengths chosen for the tokens summarised by
+    `(litFreqs, distFreqs)`: `computeCodeLengths` over each alphabet, with the
+    RFC 1951 fixup that forces at least one non-zero distance code. Shared by the
+    block emitter (`deflateDynamicBlock`) and the size-then-emit dispatch so both
+    select identical trees from a single computation. -/
+def dynamicCodeLengths (litFreqs distFreqs : Array Nat) : List Nat × List Nat :=
+  let litLens := Huffman.Spec.computeCodeLengths (freqsToPairs litFreqs) 286 15
+  let distLens := Huffman.Spec.computeCodeLengths (freqsToPairs distFreqs) 30 15
+  let distLens := if distLens.all (· == 0) then distLens.set 0 1 else distLens
+  (litLens, distLens)
+
+/-- Emit a dynamic Huffman DEFLATE block from precomputed LZ77 tokens **and**
+    precomputed lit/len and distance code lengths (with their length invariants).
+    Produces a single DEFLATE block with BFINAL=1, BTYPE=10.
+
+    Split out of `deflateDynamicBlock` so the size-then-emit dispatch can size the
+    block from the same `litLens`/`distLens` it later emits with, instead of
+    recomputing the code lengths (`computeCodeLengths` over the 286/30 alphabets)
+    a second time. -/
+def deflateDynamicBlockCore (data : ByteArray) (tokens : Array LZ77Token)
+    (litLens distLens : List Nat)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) : ByteArray :=
+  -- Build canonical codes from the given lengths
   let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
   let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
   -- Write block header: BFINAL=1, BTYPE=10 (dynamic Huffman)
@@ -230,33 +235,51 @@ def deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArra
   let bw := bw.writeBits 2 2  -- BTYPE = 10
   -- Write dynamic tree header
   let bw := writeDynamicHeader bw litLens distLens
-  -- Size invariants: `litCodes.size = 286` and `distCodes.size = 30`,
-  -- discharged via `canonicalCodes_size` + `computeCodeLengths_length`
-  -- and the fact that the distance fixup preserves length.
+  -- Size invariants from `canonicalCodes_size` + the length hypotheses.
   have hlit_size : litCodes.size ≥ 286 := by
-    show (canonicalCodes _).size ≥ 286
-    rw [deflateDynamic.litCodes_size]; omega
+    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
   have hdist_size : distCodes.size ≥ 30 := by
-    have hdl : List.length distLens = 30 := by
-      show List.length (if _ then _ else _) = 30
-      split
-      · rw [List.length_set]
-        exact Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
-      · exact Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
-    show (canonicalCodes _).size ≥ 30
-    rw [deflateDynamic.distCodes_size distLens hdl]; omega
-  -- Write tokens. `litCodes` has size 286 (via `canonicalCodes_size`),
-  -- so index 256 is in bounds for the end-of-block symbol.
+    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have h256 : 256 < litCodes.size := by
+    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  -- Write tokens, then the end-of-block symbol (256, in bounds via `h256`).
   if data.size == 0 then
     -- Empty: just write end-of-block
-    let (code, len) := litCodes[256]'(deflateDynamic.lit256_lt litFreqPairs)
+    let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
   else
     let bw := emitTokensWithCodes bw tokens litCodes distCodes hlit_size hdist_size 0
-    let (code, len) := litCodes[256]'(deflateDynamic.lit256_lt litFreqPairs)
+    let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
+
+/-- The dynamic-Huffman code lengths chosen for the tokens summarised by
+    `(litFreqs, distFreqs)` have the standard lengths: 286 lit/len, 30 distance. -/
+theorem dynamicCodeLengths_length (litFreqs distFreqs : Array Nat) :
+    (dynamicCodeLengths litFreqs distFreqs).1.length = 286 ∧
+    (dynamicCodeLengths litFreqs distFreqs).2.length = 30 := by
+  refine ⟨Huffman.Spec.computeCodeLengths_length _ 286 15, ?_⟩
+  show List.length (if _ then _ else _) = 30
+  split
+  · rw [List.length_set]; exact Huffman.Spec.computeCodeLengths_length _ 30 15
+  · exact Huffman.Spec.computeCodeLengths_length _ 30 15
+
+/-- Write a dynamic Huffman DEFLATE block from precomputed LZ77 tokens.
+    Produces a single DEFLATE block with BFINAL=1, BTYPE=10. Factored out of
+    `deflateDynamic` so a caller that already has the token stream (e.g. the
+    `deflateCompressed` fixed/dynamic comparison) can avoid re-running the
+    matcher. Computes the code lengths (`dynamicCodeLengths`) then delegates to
+    `deflateDynamicBlockCore`. -/
+def deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
+  let (litFreqs, distFreqs) := tokenFreqs tokens
+  let lens := dynamicCodeLengths litFreqs distFreqs
+  deflateDynamicBlockCore data tokens lens.1 lens.2
+    (dynamicCodeLengths_length litFreqs distFreqs).1
+    (dynamicCodeLengths_length litFreqs distFreqs).2
 
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. Thin wrapper over
@@ -312,15 +335,6 @@ def symbolBitCount (litFreqs distFreqs litLens distLens : Array Nat) : Nat :=
 def fixedBlockBytes (litFreqs distFreqs : Array Nat) : Nat :=
   (3 + symbolBitCount litFreqs distFreqs fixedLitLenNat fixedDistLenNat + 7) / 8
 
-/-- The dynamic-Huffman code lengths chosen for the tokens summarised by
-    `(litFreqs, distFreqs)`. Mirrors the computation inside `deflateDynamicBlock`
-    so sizing and emission select identical trees. -/
-def dynamicCodeLengths (litFreqs distFreqs : Array Nat) : List Nat × List Nat :=
-  let litLens := Huffman.Spec.computeCodeLengths (freqsToPairs litFreqs) 286 15
-  let distLens := Huffman.Spec.computeCodeLengths (freqsToPairs distFreqs) 30 15
-  let distLens := if distLens.all (· == 0) then distLens.set 0 1 else distLens
-  (litLens, distLens)
-
 /-- Byte size of `deflateDynamicBlock data tokens`. The tree-header bit count is
     obtained by running `writeDynamicHeader` into an empty writer (cheap — RLE
     over ~316 code lengths) and reading its `bitLength`; the symbol body is the
@@ -354,7 +368,10 @@ def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
     let lens := dynamicCodeLengths f.1 f.2
     if fixedBlockBytes f.1 f.2 < dynBlockBytes f.1 f.2 lens.1 lens.2
     then deflateFixedBlock data tokens
-    else deflateDynamicBlock data tokens
+    -- Reuse the sized `lens` for emission (= `deflateDynamicBlock data tokens`,
+    -- but without recomputing the code lengths).
+    else deflateDynamicBlockCore data tokens lens.1 lens.2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
 /-- Unified raw DEFLATE compression dispatch.
     Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman.
@@ -377,6 +394,9 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     let stored := deflateStoredPure data
     if stored.size < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then stored
     else if fixedBytes < dynBytes then deflateFixedBlock data tokens
-    else deflateDynamicBlock data tokens
+    -- Reuse the sized `lens` for emission (= `deflateDynamicBlock data tokens`,
+    -- but without recomputing the code lengths).
+    else deflateDynamicBlockCore data tokens lens.1 lens.2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
 end Zip.Native.Deflate
