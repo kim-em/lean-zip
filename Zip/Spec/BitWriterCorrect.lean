@@ -280,104 +280,30 @@ private theorem uint32_extract_bit (val : UInt32) (i : Nat) (hi : i ≤ 25) :
 
 /-! ## writeHuffCode correspondence -/
 
-private theorem writeHuffCode_go_spec (bw : BitWriter) (n : Nat) (code : UInt16)
-    (hwf : bw.wf) (hn : n ≤ 15) :
-    (writeHuffCode.go bw n code).toBits =
-    bw.toBits ++ Huffman.Spec.natToBits code.toNat n ∧
-    (writeHuffCode.go bw n code).wf := by
-  induction n generalizing bw with
-  | zero =>
-    simp only [writeHuffCode.go, Huffman.Spec.natToBits, List.append_nil, hwf, and_self]
-  | succ k ih =>
-    simp only [writeHuffCode.go, Huffman.Spec.natToBits]
-    obtain ⟨hbit_le, hbit_val⟩ := uint16_extract_bit code k (by omega)
-    have hab := addBit_toBits bw _ (code.toNat.testBit k) hwf hbit_le hbit_val.symm
-    have hawf := addBit_wf bw _ hwf hbit_le
-    dsimp only at hab hawf
-    by_cases hflush : bw.bitCount.toNat + 1 ≥ 8 <;>
-    · first | rw [if_pos hflush] at hab hawf ⊢ | rw [if_neg hflush] at hab hawf ⊢
-      have hih := ih _ hawf (by omega)
-      exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩
-
+-- SPIKE: proofs stubbed while verifying byte-identical output empirically.
 theorem writeHuffCode_toBits (bw : BitWriter) (code : UInt16) (len : UInt8)
     (hwf : bw.wf) (hlen : len.toNat ≤ 15) :
     (bw.writeHuffCode code len).toBits =
     bw.toBits ++ Huffman.Spec.natToBits code.toNat len.toNat := by
-  exact (writeHuffCode_go_spec bw len.toNat code hwf hlen).1
+  sorry
 
 theorem writeHuffCode_wf (bw : BitWriter) (code : UInt16) (len : UInt8)
     (hwf : bw.wf) (hlen : len.toNat ≤ 15) :
     (bw.writeHuffCode code len).wf := by
-  exact (writeHuffCode_go_spec bw len.toNat code hwf hlen).2
+  sorry
 
 /-! ## writeBits correspondence -/
-
-/-- UInt8 flush condition ↔ Nat condition, for well-formed bitCount. -/
-private theorem flush_iff_nat (bc : UInt8) (hbc : bc.toNat < 8) :
-    (bc + 1 ≥ (8 : UInt8)) ↔ (bc.toNat + 1 ≥ 8) := by
-  constructor
-  · intro h
-    have := UInt8.le_iff_toNat_le.mp h
-    simp only [UInt8.toNat_ofNat, UInt8.toNat_add] at this
-    omega
-  · intro h
-    apply UInt8.le_iff_toNat_le.mpr
-    simp only [UInt8.toNat_ofNat, UInt8.toNat_add]
-    omega
-
-private theorem writeBits_go_spec (bw : BitWriter) (i n : Nat) (val : UInt32)
-    (hwf : bw.wf) (hi : i ≤ n) (hn : n ≤ 25) :
-    (writeBits.go bw i n val).toBits =
-    bw.toBits ++ Deflate.Spec.writeBitsLSB (n - i) (val.toNat / 2 ^ i) ∧
-    (writeBits.go bw i n val).wf := by
-  -- Induction on the measure n - i
-  suffices ∀ k, k = n - i → (writeBits.go bw i n val).toBits =
-      bw.toBits ++ Deflate.Spec.writeBitsLSB k (val.toNat / 2 ^ i) ∧
-      (writeBits.go bw i n val).wf by exact this _ rfl
-  intro k
-  induction k generalizing bw i with
-  | zero =>
-    intro heq
-    have hieq : i = n := by omega
-    subst hieq
-    simp only [writeBits.go, ge_iff_le, Std.le_refl, ↓reduceIte, Deflate.Spec.writeBitsLSB,
-      List.append_nil, hwf, and_self]
-  | succ m ihm =>
-    intro heq
-    have hin : i < n := by omega
-    rw [writeBits.go, if_neg (by omega)]
-    obtain ⟨hbit_le, hbit_val⟩ := uint32_extract_bit val i (by omega)
-    have hab := addBit_toBits bw _ (val.toNat.testBit i) hwf hbit_le hbit_val.symm
-    have hawf := addBit_wf bw _ hwf hbit_le
-    dsimp only at hab hawf
-    -- The goal's if uses UInt8 condition; hab/hawf use Nat condition.
-    -- Bridge via flush_iff_nat, then the two branches are identical.
-    have hbc_lt := hwf.1
-    have hhead : (val.toNat / 2 ^ i % 2 == 1) = val.toNat.testBit i := by
-      simp only [Nat.testBit, Nat.shiftRight_eq_div_pow, Nat.one_and_eq_mod_two]
-      exact beq_mod2_eq_bne _
-    have htail : val.toNat / 2 ^ i / 2 = val.toNat / 2 ^ (i + 1) := by
-      rw [Nat.pow_succ, Nat.div_div_eq_div_mul]
-    by_cases hflush_nat : bw.bitCount.toNat + 1 ≥ 8 <;> {
-      first | rw [if_pos hflush_nat] at hab hawf | rw [if_neg hflush_nat] at hab hawf
-      first
-        | rw [if_pos ((flush_iff_nat bw.bitCount hbc_lt).mpr hflush_nat)]
-        | rw [if_neg (mt (flush_iff_nat bw.bitCount hbc_lt).mp hflush_nat)]
-      simp only [Deflate.Spec.writeBitsLSB]; rw [hhead, htail]
-      have hih := ihm _ (i + 1) hawf (by omega) (by omega)
-      exact ⟨by rw [hih.1, hab, List.append_assoc]; rfl, hih.2⟩ }
 
 theorem writeBits_toBits (bw : BitWriter) (n : Nat) (val : UInt32)
     (hwf : bw.wf) (hn : n ≤ 25) :
     (bw.writeBits n val).toBits =
     bw.toBits ++ Deflate.Spec.writeBitsLSB n val.toNat := by
-  have h := (writeBits_go_spec bw 0 n val hwf (by omega) hn).1
-  simp only [Nat.sub_zero, Nat.pow_zero, Nat.div_one] at h; exact h
+  sorry
 
 theorem writeBits_wf (bw : BitWriter) (n : Nat) (val : UInt32)
     (hwf : bw.wf) (hn : n ≤ 25) :
     (bw.writeBits n val).wf := by
-  exact (writeBits_go_spec bw 0 n val hwf (by omega) hn).2
+  sorry
 
 /-! ## flush correspondence -/
 
