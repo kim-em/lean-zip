@@ -170,6 +170,9 @@ lean_exe test where
 lean_exe bench where
   root := `ZipBench
 
+lean_exe «bench-report» where
+  root := `ZipBenchReport
+
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
 
