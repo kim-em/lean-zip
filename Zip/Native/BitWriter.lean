@@ -46,7 +46,7 @@ def flushAcc (data : ByteArray) (acc : UInt64) : Nat → BitWriter
     bits already in `bitBuf`, OR-ed into a 64-bit accumulator, then whole
     bytes are flushed. -/
 def writeBits (bw : BitWriter) (n : Nat) (val : UInt32) : BitWriter :=
-  let masked : UInt64 := val.toUInt64 &&& ((1 <<< n.toUInt64) - 1)
+  let masked : UInt64 := val.toUInt64 % (1 <<< n.toUInt64)
   let acc : UInt64 := bw.bitBuf.toUInt64 ||| (masked <<< bw.bitCount.toUInt64)
   flushAcc bw.data acc (bw.bitCount.toNat + n)
 
