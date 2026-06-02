@@ -25,6 +25,7 @@ import ZipTest.Benchmark
 import ZipTest.FuzzInflate
 import ZipTest.FuzzHandleRead
 import ZipTest.BoundedReadTest
+import ZipTest.InflateTable
 
 def main : IO Unit := do
   unless ← System.FilePath.pathExists "testdata" do
@@ -46,6 +47,7 @@ def main : IO Unit := do
   ZipTest.Utf8Fixtures.tests
   ZipTest.NativeChecksum.tests
   ZipTest.NativeInflate.tests
+  ZipTest.InflateTable.tests
   ZipTest.NativeGzip.tests
   ZipTest.NativeIntegration.tests
   ZipTest.NativeScale.tests
