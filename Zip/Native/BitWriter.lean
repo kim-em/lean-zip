@@ -22,15 +22,15 @@ namespace BitWriter
 
 def empty : BitWriter := ⟨.empty, 0, 0⟩
 
-/-- Flush whole bytes out of a wide accumulator `acc` holding `total` valid
-    low bits, LSB-first. Pushes `total / 8` bytes to `data`; the remaining
-    `total % 8` bits become the new partial byte. -/
 /-- Total number of bits written so far: 8 per fully flushed byte in `data`
     plus the `bitCount` bits held in the partial byte. Used by the DEFLATE
     compressor to size a block (`⌈bitLength/8⌉` bytes after `flush`) without
     materialising it. -/
 def bitLength (bw : BitWriter) : Nat := bw.data.size * 8 + bw.bitCount.toNat
 
+/-- Flush whole bytes out of a wide accumulator `acc` holding `total` valid
+    low bits, LSB-first. Pushes `total / 8` bytes to `data`; the remaining
+    `total % 8` bits become the new partial byte. -/
 def flushAcc (data : ByteArray) (acc : UInt64) : Nat → BitWriter
   | total =>
     if total ≥ 8 then
