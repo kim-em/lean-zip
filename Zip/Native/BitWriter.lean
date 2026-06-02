@@ -16,6 +16,12 @@ namespace BitWriter
 
 def empty : BitWriter := ⟨.empty, 0, 0⟩
 
+/-- Total number of bits written so far: 8 per fully flushed byte in `data`
+    plus the `bitCount` bits held in the partial byte. Used by the DEFLATE
+    compressor to size a block (`⌈bitLength/8⌉` bytes after `flush`) without
+    materialising it. -/
+def bitLength (bw : BitWriter) : Nat := bw.data.size * 8 + bw.bitCount.toNat
+
 /-- Write `n` bits (n ≤ 25) from `val`, LSB first.
     Fixed-width fields in DEFLATE are packed LSB-first. -/
 def writeBits (bw : BitWriter) (n : Nat) (val : UInt32) : BitWriter :=
