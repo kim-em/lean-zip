@@ -15,7 +15,13 @@ moves the numbers.
 
 1. `bench/run.sh` → refresh the dashboard.
 2. Profile the dominant cost (Lean profiler) or diff the ratio gap vs the
-   reference that wins on that input.
+   reference that wins on that input. **Profiling a compiled driver? Beat Lean's
+   laziness twice or every phase reads ~0:** (a) a loop-invariant pure result is
+   computed once then the thunk is *memoised* — perturb the input one byte per
+   rep; (b) `let v := f x` in a `do`-block is *lazy*, so the work lands at the
+   later use *outside* your `t0..t1` window — force `v` (and each phase's forced
+   input) through an IO-sequenced branch (e.g. `if v % p == k then pure 1 else
+   pure 0`) inside the timed region. Keep the driver out of the committed tree.
 3. Pick the top unstarted candidate below.
 4. Implement via **generational refinement**: new definition `genN+1`, prove
    `genN+1 = genN` (or component equivalence), transfer the roundtrip theorem.
