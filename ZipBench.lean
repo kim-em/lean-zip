@@ -1,4 +1,5 @@
 import Zip
+import Zip.Native.InflateBuf
 /-! Benchmark driver for hyperfine.
 
 Usage:
@@ -112,6 +113,66 @@ where
       match Zip.Native.Inflate.inflate compressed with
       | .ok _ => pure ()
       | .error e => throw (IO.userError e)
+    | "inflate-buf" =>
+      let compressed ← RawDeflate.compress data level.toUInt8
+      match Zip.Native.InflateBuf.inflate compressed with
+      | .ok _ => pure ()
+      | .error e => throw (IO.userError e)
+    | "decode-ab" =>
+      -- Build DISTINCT compressed inputs (perturb one byte per rep, on a COPY so
+      -- shared `data` is never mutated) to defeat hoisting/memoisation.
+      let nin := 16
+      let mut inputs : Array ByteArray := #[]
+      for i in [0:nin] do
+        let d := if data.size == 0 then data else
+          (data.extract 0 data.size).set! (i % data.size) (data[i % data.size]!.toNat.toUInt8 ^^^ 1)
+        inputs := inputs.push (← RawDeflate.compress d level.toUInt8)
+      let dec1 := Zip.Native.Inflate.inflate
+      let dec2 := Zip.Native.InflateBuf.inflate
+      let sink (acc : UInt64) (r : Except String ByteArray) : IO UInt64 :=
+        match r with
+        | .ok x => pure (acc + x.size.toUInt64 + (if x.size > 0 then x[0]!.toUInt64 else 0))
+        | .error e => throw (IO.userError e)
+      -- warm
+      let mut w : UInt64 := 0
+      for _ in [0:3] do for c in inputs do w ← sink w (dec1 c); w ← sink w (dec2 c)
+      if w == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      -- Interleave ref/buf at single-decode granularity, alternating order by round
+      -- parity, summing each side's nanos. Fine-grained alternation cancels drift.
+      let rounds := 80
+      let mut refTot : Nat := 0
+      let mut bufTot : Nat := 0
+      let mut acc : UInt64 := 0
+      for round in [0:rounds] do
+        for c in inputs do
+          if round % 2 == 0 then
+            let a ← IO.monoNanosNow
+            acc ← sink acc (dec1 c)
+            let b ← IO.monoNanosNow
+            acc ← sink acc (dec2 c)
+            let e ← IO.monoNanosNow
+            refTot := refTot + (b - a); bufTot := bufTot + (e - b)
+          else
+            let a ← IO.monoNanosNow
+            acc ← sink acc (dec2 c)
+            let b ← IO.monoNanosNow
+            acc ← sink acc (dec1 c)
+            let e ← IO.monoNanosNow
+            bufTot := bufTot + (b - a); refTot := refTot + (e - b)
+      if acc == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      let n := (rounds * nin).toFloat
+      let mbps (tot : Nat) : Float := (data.size.toFloat * n) / (tot.toFloat / 1.0e9) / 1.0e6
+      IO.println s!"size={data.size} {pattern} lvl={level}: ref={mbps refTot |>.toString.take 7} MB/s  buf={mbps bufTot |>.toString.take 7} MB/s  speedup={(refTot.toFloat/bufTot.toFloat).toString.take 5}x"
+    | "inflate-buf-check" =>
+      let compressed ← RawDeflate.compress data level.toUInt8
+      let a := Zip.Native.Inflate.inflate compressed
+      let b := Zip.Native.InflateBuf.inflate compressed
+      match a, b with
+      | .ok x, .ok y =>
+        if x == y && x == data then IO.println s!"OK size={data.size} lvl={level}"
+        else throw (IO.userError s!"MISMATCH buf.size={y.size} ref.size={x.size} orig={data.size}")
+      | .error e, _ => throw (IO.userError s!"ref inflate failed: {e}")
+      | _, .error e => throw (IO.userError s!"buf inflate failed: {e}")
     | "inflate-ffi" =>
       let compressed ← RawDeflate.compress data level.toUInt8
       let _ ← RawDeflate.decompress compressed
