@@ -16,6 +16,28 @@ namespace Zip.Native
 
 open ZipCommon (BitReader)
 
+/-- Allocation-light `BitReader.readBits`: thread the cursor `(pos, bitOff)` as
+    unboxed `Nat`s and build the `BitReader` struct **once** at the end, instead
+    of allocating a fresh `BitReader` (+ `Except`/pair) on every bit as the
+    `readBit`-looping `BitReader.readBits` does. Same per-bit byte reads, but a
+    whole `n`-bit field now costs O(1) heap allocations instead of O(n). Proven
+    equal to `BitReader.readBits` (`readBitsFast_eq`); used on the hot
+    extra-bits path in `decodeHuffmanFast`. -/
+def readBitsFast (br : BitReader) (n : Nat) : Except String (UInt32 × BitReader) :=
+  go br.pos br.bitOff 0 0 n
+where
+  go (pos bitOff : Nat) (acc : UInt32) (shift : Nat) :
+      Nat → Except String (UInt32 × BitReader)
+    | 0 => .ok (acc, { br with pos := pos, bitOff := bitOff })
+    | k + 1 =>
+      if pos ≥ br.data.size then .error "BitReader: unexpected end of input"
+      else
+        let bit : UInt32 := ((br.data[pos]!.toUInt32 >>> bitOff.toUInt32) &&& 1)
+        if bitOff + 1 ≥ 8 then
+          go (pos + 1) 0 (acc ||| (bit <<< shift.toUInt32)) (shift + 1) k
+        else
+          go pos (bitOff + 1) (acc ||| (bit <<< shift.toUInt32)) (shift + 1) k
+
 /-- A Huffman tree for decoding DEFLATE symbols.
     Leaf holds a symbol value; Node branches on 0 (left) vs 1 (right). -/
 inductive HuffTree where
@@ -437,7 +459,7 @@ where
       else
       let base := lengthBase[idx]
       let extra := lengthExtra[idx]'(by simp [lengthExtra_size, lengthBase_size] at h ⊢; omega)
-      let (extraBits, br₂) ← br₁.readBits extra.toNat
+      let (extraBits, br₂) ← readBitsFast br₁ extra.toNat
       let length := base.toNat + extraBits.toNat
       let (distSym, br₃) ← distTree.decodeWithTable distTable br₂
       let dIdx := distSym.toNat
@@ -446,7 +468,7 @@ where
       else
       let dBase := distBase[dIdx]
       let dExtra := distExtra[dIdx]'(by simp [distExtra_size, distBase_size] at h ⊢; omega)
-      let (dExtraBits, br₄) ← br₃.readBits dExtra.toNat
+      let (dExtraBits, br₄) ← readBitsFast br₃ dExtra.toNat
       let distance := dBase.toNat + dExtraBits.toNat
       if hd0 : distance = 0 then
         throw s!"Inflate: zero back-reference distance"

@@ -1,5 +1,6 @@
 import Zip.Spec.BitstreamCorrect
 import Zip.Spec.HuffmanCorrect
+import Zip.Spec.ReadBitsFastCorrect
 
 /-!
 # Table-driven Huffman decode: equivalence to the tree walk
@@ -400,6 +401,7 @@ namespace Zip.Native.Inflate
 open ZipCommon (BitReader)
 
 set_option maxRecDepth 4096 in
+set_option maxHeartbeats 1000000 in
 /-- **Loop lemma.** The table-driven block loop equals the canonical
     `decodeHuffman`: the two `.go` recursions have identical structure once each
     `decodeWithTable` is rewritten to `decode` via `decodeWithTable_eq`. By
@@ -439,7 +441,8 @@ theorem decodeHuffmanFast_eq (br : BitReader) (output : ByteArray)
         · -- length/distance
           split
           · rfl
-          · cases hext : br₁.readBits _ with
+          · rw [readBitsFast_eq br₁]
+            cases hext : br₁.readBits _ with
             | error e => rfl
             | ok pe =>
               obtain ⟨extraBits, br₂⟩ := pe
@@ -452,7 +455,8 @@ theorem decodeHuffmanFast_eq (br : BitReader) (output : ByteArray)
                 dsimp only [Except.bind]
                 split
                 · rfl
-                · cases hdext : br₃.readBits _ with
+                · rw [readBitsFast_eq br₃]
+                  cases hdext : br₃.readBits _ with
                   | error e => rfl
                   | ok pde =>
                     obtain ⟨dExtraBits, br₄⟩ := pde
