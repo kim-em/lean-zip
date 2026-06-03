@@ -596,6 +596,40 @@ theorem inflate_deflateFixedIter (data : ByteArray)
   rw [lz77GreedyIter_eq_lz77Greedy]
   exact inflate_deflateFixed data maxOutputSize hsize
 
+open Deflate.Spec in
+/-- Generic fixed-Huffman block roundtrip: for *any* token stream that resolves
+    to `data` and whose references are within bounds, `deflateFixedBlock`
+    roundtrips. The fixed-branch twin of `inflate_deflateDynamicBlock`, used by
+    the level-≥5 dispatch for arbitrary matcher tokens. -/
+theorem inflate_deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token)
+    (henc : ∀ t ∈ tokens.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
+    (hempty : data.size = 0 → tokens = #[])
+    (hresolve : resolveLZ77 (tokensToSymbols tokens) [] = some data.data.toList)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateFixedBlock data tokens) maxOutputSize = .ok data :=
+  inflate_of_encodeFixed_spec (deflateFixedBlock data tokens) data (tokensToSymbols tokens)
+    maxOutputSize hsize hresolve (tokensToSymbols_validSymbolList _)
+    (deflateFixedBlock_spec data tokens
+      (encodeSymbols_isSome_of_all _ _ _ (tokensToSymbols_encodable_of tokens henc)) hempty)
+
+open Deflate.Spec in
+/-- `deflateFixedBlock_spec` taking per-token reference bounds (the inlined
+    encodability predicate), rather than the raw `encodeSymbols` success. -/
+theorem deflateFixedBlock_spec_of (data : ByteArray) (tokens : Array LZ77Token)
+    (henc : ∀ t ∈ tokens.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
+    (hempty : data.size = 0 → tokens = #[]) :
+    ∃ bits, encodeFixed (tokensToSymbols tokens) = some bits ∧
+      bytesToBits (deflateFixedBlock data tokens) =
+        bits ++ List.replicate ((8 - bits.length % 8) % 8) false :=
+  deflateFixedBlock_spec data tokens
+    (encodeSymbols_isSome_of_all _ _ _ (tokensToSymbols_encodable_of tokens henc)) hempty
+
 /-- `deflateLazy` produces a bytestream whose bits are the spec-level
     fixed Huffman encoding of the lazy LZ77 tokens. -/
 theorem deflateLazy_spec (data : ByteArray) :

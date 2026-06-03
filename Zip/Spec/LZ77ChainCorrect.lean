@@ -214,4 +214,14 @@ theorem lz77ChainIter_encodable (data : ByteArray) (maxChain windowSize : Nat)
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_encodable data maxChain windowSize hw hws
 
+/-- The chain matcher emits no tokens on empty input. -/
+theorem lz77ChainIter_empty (data : ByteArray) (maxChain windowSize : Nat)
+    (hzero : data.size = 0) : lz77ChainIter data maxChain windowSize = #[] := by
+  rw [lz77ChainIter_eq_lz77Chain]
+  simp only [lz77Chain, show data.size < 3 from by omega, ↓reduceIte]
+  have htrail : lz77Greedy.trailing data 0 = [] := by
+    unfold lz77Greedy.trailing
+    simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte]
+  rw [htrail]
+
 end Zip.Native.Deflate
