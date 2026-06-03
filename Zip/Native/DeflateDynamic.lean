@@ -351,19 +351,25 @@ def dynBlockBytes (litFreqs distFreqs : Array Nat) (litLens distLens : List Nat)
 -- and the `SizeHelpers` conformance tests are unaffected.
 attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes
 
+/-- Hash-chain search depth at each compression level (levels ≥ 5). More depth
+    finds longer matches (better ratio) at higher cost; level scaling is refined
+    in a follow-up (#2494). -/
+def chainDepth (level : UInt8) : Nat :=
+  if level ≤ 6 then 128 else if level ≤ 8 then 256 else 512
+
 /-- The compressed-block dispatch (no stored fallback): level 1 = fixed Huffman,
-    2-4 = lazy LZ77, 5+ = lazy LZ77 + dynamic Huffman. At levels ≥ 5 it sizes the
-    fixed and dynamic blocks from a single shared token pass and emits only the
-    smaller (strict `<`, keeping dynamic on a tie — the old `pickSmaller`
+    2-4 = lazy LZ77, 5+ = hash-chain LZ77 + dynamic Huffman. At levels ≥ 5 it
+    sizes the fixed and dynamic blocks from a single shared token pass and emits
+    only the smaller (strict `<`, keeping dynamic on a tie — the old `pickSmaller`
     tie-break), so the loser's symbol emission is skipped entirely. -/
 def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
   if level == 1 then deflateFixedIter data
   else if level < 5 then deflateLazyIter data
   else
-    -- At high levels use the lazy matcher (better matches → better ratio, closing
-    -- the text-compression gap vs. zlib). One token pass feeds the size of both
+    -- At high levels use the hash-chain matcher (longer matches → better ratio,
+    -- reaching C-reference parity on text). One token pass feeds the size of both
     -- candidates; the `let`s keep the matcher and frequency count running once.
-    let tokens := lz77LazyIter data
+    let tokens := lz77ChainIter data (chainDepth level)
     let f := tokenFreqs tokens
     let lens := dynamicCodeLengths f.1 f.2
     if fixedBlockBytes f.1 f.2 < dynBlockBytes f.1 f.2 lens.1 lens.2
@@ -386,7 +392,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if level < 5 then pickSmaller (deflateStoredPure data) (deflateCompressed data level)
   else
-    let tokens := lz77LazyIter data
+    let tokens := lz77ChainIter data (chainDepth level)
     let f := tokenFreqs tokens
     let lens := dynamicCodeLengths f.1 f.2
     let fixedBytes := fixedBlockBytes f.1 f.2
