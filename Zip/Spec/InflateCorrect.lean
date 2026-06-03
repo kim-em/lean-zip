@@ -1,4 +1,5 @@
 import Zip.Spec.DynamicTreesComplete
+import Zip.Spec.InflateTable
 
 /-!
 # DEFLATE Stream-Level Correctness
@@ -529,7 +530,10 @@ theorem inflateLoop_correct (br : ZipCommon.BitReader)
         split at h
         · simp only [reduceCtorEq] at h
         · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
-          -- Unfold decodeHuffman to get decodeHuffman.go
+          -- The loop runs the table-driven fast path; rewrite to the canonical
+          -- spec via the proven equality, then unfold to `decodeHuffman.go`.
+          rw [Zip.Native.Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist
+            maxOutputSize] at hdh
           unfold Zip.Native.Inflate.decodeHuffman at hdh
           -- Apply decodeHuffman_correct with fixed tables
           have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
@@ -592,7 +596,10 @@ theorem inflateLoop_correct (br : ZipCommon.BitReader)
           split at h
           · simp only [reduceCtorEq] at h
           · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
-            -- Unfold decodeHuffman to get decodeHuffman.go
+            -- The loop runs the table-driven fast path; rewrite to the canonical
+            -- spec via the proven equality, then unfold to `decodeHuffman.go`.
+            rw [Zip.Native.Inflate.decodeHuffmanFast_eq br₃ output litTree distTree
+              maxOutputSize] at hdh
             unfold Zip.Native.Inflate.decodeHuffman at hdh
             -- Apply decodeHuffman_correct with dynamic tables
             have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=

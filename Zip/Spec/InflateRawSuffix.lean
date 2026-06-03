@@ -515,7 +515,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             rw [decodeStored_append br₂ suffix _ _ out' br' hds]; dsimp only []
             bfinal_suffix_dispatch
         · -- btype = 1: fixed Huffman
-          simp only [Inflate.decodeHuffman] at h ⊢
+          simp only [Inflate.decodeHuffmanFast_eq, Inflate.decodeHuffman] at h ⊢
           cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂.data.size br₂ output with
           | error e => simp only [hdh] at h; exact nomatch h
           | ok v =>
@@ -530,7 +530,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
           | ok v =>
             obtain ⟨litT, distT, br₃⟩ := v; simp only [hdt] at h
             rw [decodeDynamicTrees_append br₂ suffix litT distT br₃ hdt]; dsimp only []
-            simp only [Inflate.decodeHuffman] at h ⊢
+            simp only [Inflate.decodeHuffmanFast_eq, Inflate.decodeHuffman] at h ⊢
             cases hdh : Inflate.decodeHuffman.go litT distT maxOut br₃.data.size br₃ output with
             | error e => simp only [hdh] at h; exact nomatch h
             | ok v₂ =>

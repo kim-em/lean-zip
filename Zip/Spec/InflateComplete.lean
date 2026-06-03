@@ -353,7 +353,10 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 refine ⟨br'.alignToByte.pos, ?_⟩
                 rw [Zip.Native.Inflate.inflateLoop.eq_1]
                 simp only [bind, Except.bind,
-                  hrb_bf, hrb_bt, hdh_native,
+                  hrb_bf, hrb_bt,
+                  Zip.Native.Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist
+                    maxOutputSize,
+                  hdh_native,
                   show Nat.toUInt32 1 = (1 : UInt32) from rfl]
                 have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
                 simp only [hbf_u32, ↓reduceIte, pure, Except.pure]
@@ -400,7 +403,10 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   refine ⟨endPos, ?_⟩
                   rw [Zip.Native.Inflate.inflateLoop.eq_1]
                   simp only [bind, Except.bind,
-                    hrb_bf, hrb_bt, hdh_native,
+                    hrb_bf, hrb_bt,
+                    Zip.Native.Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist
+                      maxOutputSize,
+                    hdh_native,
                     show Nat.toUInt32 1 = (1 : UInt32) from rfl]
                   have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
                     bfinal_val hval_bf hbf_ne1
@@ -466,7 +472,10 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   refine ⟨br'.alignToByte.pos, ?_⟩
                   rw [Zip.Native.Inflate.inflateLoop.eq_1]
                   simp only [bind, Except.bind,
-                    hrb_bf, hrb_bt, hdt_nat, hdh_native,
+                    hrb_bf, hrb_bt, hdt_nat,
+                    Zip.Native.Inflate.decodeHuffmanFast_eq br₃ output litTree distTree
+                      maxOutputSize,
+                    hdh_native,
                     show Nat.toUInt32 2 = (2 : UInt32) from rfl]
                   have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
                   simp only [hbf_u32, ↓reduceIte, pure, Except.pure]
@@ -510,7 +519,10 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                     refine ⟨endPos, ?_⟩
                     rw [Zip.Native.Inflate.inflateLoop.eq_1]
                     simp only [bind, Except.bind,
-                      hrb_bf, hrb_bt, hdt_nat, hdh_native,
+                      hrb_bf, hrb_bt, hdt_nat,
+                      Zip.Native.Inflate.decodeHuffmanFast_eq br₃ output litTree distTree
+                        maxOutputSize,
+                      hdh_native,
                       show Nat.toUInt32 2 = (2 : UInt32) from rfl]
                     have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
                       bfinal_val hval_bf hbf_ne1

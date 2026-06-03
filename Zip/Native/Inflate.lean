@@ -102,6 +102,75 @@ where
         let (bit, br') ← br.readBit
         if bit == 0 then go z br' (n + 1) else go o br' (n + 1)
 
+/-! ## Table-driven fast decode (RFC 1951, "fast bits")
+
+The bit-by-bit tree walk in `decode` descends one node per bit. The standard
+DEFLATE speedup is a **lookup table**: peek `fastBits` bits and read the
+`(symbol, codeLen)` directly from a `2^fastBits`-entry table, then consume
+`codeLen` bits in one step. Codes longer than `fastBits` (rare; DEFLATE allows
+up to 15) fall back to the tree walk. `decode` stays the canonical spec;
+`decodeWithTable` is *proven equal* to it (`Zip.Spec.InflateTable`,
+`decodeWithTable_eq`) and the fast block loop `decodeHuffmanFast` is proven
+equal to `decodeHuffman` — there is no `@[implemented_by]` trust gap. -/
+
+/-- Number of bits the fast decode table indexes on (the common "fast bits"). -/
+def fastBits : Nat := 9
+
+/-- Walk `tree` using the low bits of `idx` (LSB first, matching `readBit`),
+    for up to `fastBits` steps. Returns `(symbol, codeLen)` if a leaf is reached
+    within `fastBits` bits, or `(0, 0)` (a sentinel meaning "fall back to the
+    tree walk") for the `empty` slot or a code longer than `fastBits`. -/
+def tableEntry (tree : HuffTree) (idx : Nat) : UInt16 × UInt8 :=
+  go tree idx 0
+where
+  go (t : HuffTree) (bits depth : Nat) : UInt16 × UInt8 :=
+    match t with
+    | .leaf s => (s, depth.toUInt8)
+    | .empty => (0, 0)
+    | .node z o =>
+      if depth ≥ fastBits then (0, 0)
+      else if bits % 2 == 0 then go z (bits / 2) (depth + 1)
+      else go o (bits / 2) (depth + 1)
+
+/-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds the
+    `(symbol, codeLen)` reached by walking `tree` on the bits of `i`. Built once
+    per Huffman tree; cheap relative to the symbols decoded with it. -/
+def buildTable (tree : HuffTree) : Array (UInt16 × UInt8) :=
+  Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) => tableEntry tree i.val)
+
+/-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
+def bitsAvail (br : BitReader) : Nat :=
+  if br.pos ≥ br.data.size then 0 else (br.data.size - br.pos) * 8 - br.bitOff
+
+/-- Peek the next `fastBits` bits at `(pos, bitOff)`, LSB-first, without
+    consuming. Bytes past the end of the stream read as zero; the caller uses
+    `bitsAvail` to decide whether the looked-up code actually fits. -/
+def peekFast (br : BitReader) : UInt32 :=
+  let b0 : UInt32 := if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else 0
+  let b1 : UInt32 := if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toUInt32 else 0
+  ((b0 ||| (b1 <<< 8)) >>> br.bitOff.toUInt32) &&& 0x1FF
+
+/-- Table-driven single-symbol decode. Peeks `fastBits` bits, reads the
+    `(symbol, codeLen)` from `table`, and consumes `codeLen` bits in one step.
+    Falls back to the canonical `decode` tree walk for long codes (sentinel
+    `codeLen = 0`) and when fewer than `codeLen` bits remain. Proven equal to
+    `decode` when `table = buildTable tree` (`Zip.Spec.InflateTable`). -/
+def decodeWithTable (tree : HuffTree) (table : Array (UInt16 × UInt8))
+    (br : BitReader) : Except String (UInt16 × BitReader) :=
+  -- `bitOff ≥ 8` is unreachable for a well-formed reader (every `readBit`
+  -- leaves `bitOff < 8`); the guard makes the equality with `decode`
+  -- unconditional, so the proof transfer needs no side conditions.
+  if br.bitOff ≥ 8 then tree.decode br
+  else
+    let idx := (peekFast br).toNat
+    let entry := table[idx]!
+    let len := entry.2.toNat
+    if len == 0 || len > bitsAvail br then
+      tree.decode br
+    else
+      let total := br.bitOff + len
+      .ok (entry.1, { br with pos := br.pos + total / 8, bitOff := total % 8 })
+
 end HuffTree
 
 namespace Inflate
@@ -333,6 +402,71 @@ where
   termination_by dataSize * 8 - br.bitPos
   decreasing_by all_goals omega
 
+/-- Table-driven variant of `decodeHuffman`: identical to it except the two
+    Huffman symbol decodes go through `decodeWithTable` (fast-bits lookup table)
+    instead of the bit-by-bit `HuffTree.decode` walk. The literal/length and
+    distance tables are built once, up front, then reused for every symbol in
+    the block. Proven equal to `decodeHuffman` symbol-by-symbol through
+    `HuffTree.decodeWithTable_eq` (see `decodeHuffmanFast_eq`); the bit-by-bit
+    walk stays the canonical spec, so every existing inflate correctness proof
+    transfers with a single rewrite. -/
+protected def decodeHuffmanFast (br : BitReader) (output : ByteArray)
+    (litTree distTree : HuffTree) (maxOutputSize : Nat)
+    : Except String (ByteArray × BitReader) :=
+  go litTree.buildTable distTree.buildTable br.data.size br output
+where
+  go (litTable distTable : Array (UInt16 × UInt8))
+      (dataSize : Nat) (br : BitReader) (output : ByteArray)
+      : Except String (ByteArray × BitReader) := do
+    let (sym, br₁) ← litTree.decodeWithTable litTable br
+    if sym < 256 then
+      if output.size ≥ maxOutputSize then
+        throw "Inflate: output exceeds maximum size"
+      else if _h₁ : br₁.bitPos ≤ br.bitPos then
+        throw "Inflate: no progress in Huffman decode"
+      else if _h₂ : dataSize * 8 < br₁.bitPos then
+        throw "Inflate: bit position out of range"
+      else
+        go litTable distTable dataSize br₁ (output.push sym.toUInt8)
+    else if sym == 256 then
+      .ok (output, br₁)
+    else
+      let idx := sym.toNat - 257
+      if h : idx ≥ lengthBase.size then
+        throw s!"Inflate: invalid length code {sym}"
+      else
+      let base := lengthBase[idx]
+      let extra := lengthExtra[idx]'(by simp [lengthExtra_size, lengthBase_size] at h ⊢; omega)
+      let (extraBits, br₂) ← br₁.readBits extra.toNat
+      let length := base.toNat + extraBits.toNat
+      let (distSym, br₃) ← distTree.decodeWithTable distTable br₂
+      let dIdx := distSym.toNat
+      if h : dIdx ≥ distBase.size then
+        throw s!"Inflate: invalid distance code {distSym}"
+      else
+      let dBase := distBase[dIdx]
+      let dExtra := distExtra[dIdx]'(by simp [distExtra_size, distBase_size] at h ⊢; omega)
+      let (dExtraBits, br₄) ← br₃.readBits dExtra.toNat
+      let distance := dBase.toNat + dExtraBits.toNat
+      if hd0 : distance = 0 then
+        throw s!"Inflate: zero back-reference distance"
+      else if hds : distance > output.size then
+        throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+      else if output.size + length > maxOutputSize then
+        throw "Inflate: output exceeds maximum size"
+      else
+      let start := output.size - distance
+      let out := copyLoop output start distance 0 length
+        (by omega) (by omega)
+      if _h₁ : br₄.bitPos ≤ br.bitPos then
+        throw "Inflate: no progress in Huffman decode"
+      else if _h₂ : dataSize * 8 < br₄.bitPos then
+        throw "Inflate: bit position out of range"
+      else
+        go litTable distTable dataSize br₄ out
+  termination_by dataSize * 8 - br.bitPos
+  decreasing_by all_goals omega
+
 /-- Block loop for DEFLATE decompression. Decodes blocks until a final block
     is seen. Uses well-founded recursion on the remaining bits in the stream. -/
 def inflateLoop (br : BitReader) (output : ByteArray)
@@ -342,10 +476,10 @@ def inflateLoop (br : BitReader) (output : ByteArray)
     let (btype, br₂) ← br₁.readBits 2
     let (output', br') ← match btype with
       | 0 => Inflate.decodeStored br₂ output maxOutputSize
-      | 1 => Inflate.decodeHuffman br₂ output fixedLit fixedDist maxOutputSize
+      | 1 => Inflate.decodeHuffmanFast br₂ output fixedLit fixedDist maxOutputSize
       | 2 => do
         let (litTree, distTree, br₃) ← decodeDynamicTrees br₂
-        Inflate.decodeHuffman br₃ output litTree distTree maxOutputSize
+        Inflate.decodeHuffmanFast br₃ output litTree distTree maxOutputSize
       | _ => throw s!"Inflate: reserved block type {btype}"
     if bfinal == 1 then
       let aligned := br'.alignToByte
