@@ -371,10 +371,10 @@ private theorem ba_getElem!_eq_toList (ba : ByteArray) (j : Nat) (hj : j < ba.si
   show ba.data[j] = ba.data.toList[j]
   rw [Array.getElem_toList]
 
-/-- Generalized loop invariant for `copyLoop`. After running from index
-    `k`, the result has the original buffer contents plus `List.ofFn` of
-    the remaining elements. -/
-private theorem copyLoop_spec (output : ByteArray) (start distance : Nat)
+/-- Generalized loop invariant for `copyLoopGo` (the per-byte worker). After
+    running from index `k`, the result has the original buffer contents plus
+    `List.ofFn` of the remaining elements. -/
+private theorem copyLoopGo_spec (output : ByteArray) (start distance : Nat)
     (k length : Nat) (buf : ByteArray)
     (hd_pos : distance > 0)
     (hstart : start + distance ≤ output.size)
@@ -384,12 +384,12 @@ private theorem copyLoop_spec (output : ByteArray) (start distance : Nat)
     (hbuf_data : buf.data.toList = output.data.toList ++
       List.ofFn (fun (i : Fin k) =>
         output.data.toList[start + (i.val % distance)]!)) :
-    (Zip.Native.Inflate.copyLoop buf start distance k length hd_pos
+    (Zip.Native.Inflate.copyLoopGo buf start distance k length hd_pos
       (by omega)).data.toList =
       output.data.toList ++
       List.ofFn (fun (i : Fin length) =>
         output.data.toList[start + (i.val % distance)]!) := by
-  unfold Zip.Native.Inflate.copyLoop
+  unfold Zip.Native.Inflate.copyLoopGo
   split
   · rename_i hk_lt
     have hmod_lt : k % distance < distance := Nat.mod_lt k hd_pos
@@ -398,7 +398,7 @@ private theorem copyLoop_spec (output : ByteArray) (start distance : Nat)
     have hnew_eq : buf[start + (k % distance)]! = output[start + (k % distance)]! :=
       hbuf_prefix _ hidx_lt
     -- hd_pos is auto-unified by apply
-    apply copyLoop_spec output start distance (k + 1) length
+    apply copyLoopGo_spec output start distance (k + 1) length
     · exact hstart
     · omega
     · simp only [ByteArray.size_push]; omega
@@ -418,8 +418,30 @@ private theorem copyLoop_spec (output : ByteArray) (start distance : Nat)
     subst hk_eq
     exact hbuf_data
 
+/-- The contiguous slice `[start, start+length)` of a `ByteArray`, as a list,
+    is exactly `List.ofFn` of its elements. The element lemma behind the
+    non-overlapping fast path of `copyLoop`. -/
+private theorem extract_data_toList_ofFn (buf : ByteArray) (start length : Nat)
+    (h : start + length ≤ buf.size) :
+    (buf.extract start (start + length)).data.toList =
+      List.ofFn (fun i : Fin length => buf.data.toList[start + i.val]!) := by
+  have hlen : buf.data.toList.length = buf.size := by
+    simp only [Array.length_toList, ByteArray.size_data]
+  apply List.ext_getElem
+  · rw [ByteArray.data_extract, Array.toList_extract, List.length_take, List.length_drop,
+        List.length_ofFn]
+    omega
+  · intro i h1 h2
+    simp only [List.length_ofFn] at h2
+    simp only [ByteArray.data_extract, Array.toList_extract, List.getElem_take,
+      List.getElem_drop, List.getElem_ofFn]
+    rw [getElem!_pos buf.data.toList (start + i) (by omega)]
+
 /-- The native copy loop produces the same result as the spec's `List.ofFn`
-    for LZ77 back-references. -/
+    for LZ77 back-references. `copyLoop` dispatches: the non-overlapping case
+    (`length ≤ distance`) is the contiguous slice `[start, start+length)`
+    (`extract`+`append`); the overlapping case falls back to the per-byte
+    `copyLoopGo`. Both yield the same `List.ofFn` characterization. -/
 theorem copyLoop_eq_ofFn
     (output : ByteArray) (length distance : Nat)
     (hd_pos : distance > 0) (hd_le : distance ≤ output.size) :
@@ -429,8 +451,24 @@ theorem copyLoop_eq_ofFn
       List.ofFn (fun (i : Fin length) =>
         output.data.toList[(output.size - distance) +
           (i.val % distance)]!) := by
-  exact copyLoop_spec output (output.size - distance) distance 0 length output
-    hd_pos (by omega) (Nat.zero_le _) rfl (fun _ _ => rfl) (by simp only [List.ofFn_zero, List.append_nil])
+  unfold Zip.Native.Inflate.copyLoop
+  split
+  · -- non-overlapping: `output ++ output.extract start (start + length)`
+    rename_i hcond
+    obtain ⟨_, hle⟩ := hcond
+    rw [ByteArray.data_append, Array.toList_append,
+        extract_data_toList_ofFn output (output.size - distance) length (by omega)]
+    have hfg :
+        (fun i : Fin length => output.data.toList[(output.size - distance) + i.val]!)
+      = (fun i : Fin length => output.data.toList[(output.size - distance) + i.val % distance]!) := by
+      funext i
+      have := i.isLt
+      rw [Nat.mod_eq_of_lt (by omega)]
+    rw [hfg]
+  · -- overlapping fallback: per-byte `copyLoopGo`
+    exact copyLoopGo_spec output (output.size - distance) distance 0 length output
+      hd_pos (by omega) (Nat.zero_le _) rfl (fun _ _ => rfl)
+      (by simp only [List.ofFn_zero, List.append_nil])
 
 /-- Codewords in `allCodes` tables are nonempty. -/
 theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
