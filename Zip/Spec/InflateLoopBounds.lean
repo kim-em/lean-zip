@@ -102,6 +102,7 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
         · -- btype = 1: fixed Huffman
           split at h; · exact nomatch h
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
+            rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut] at hdh
             have ⟨hd, hp, hl⟩ := decodeHuffman_inv fixedLit fixedDist br₂ br' output out'
               maxOut hdh hpos₂ hple₂
             exact post_block br' out' (hd.trans (hd₂.trans hd₁)) hp hl h
@@ -111,6 +112,7 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
             have ⟨hd₃, hpos₃, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litT distT hdt hpos₂ hple₂
             split at h; · exact nomatch h
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
+              rw [Inflate.decodeHuffmanFast_eq br₃ output litT distT maxOut] at hdh
               unfold Inflate.decodeHuffman at hdh
               have ⟨hd, hp, hl⟩ := decodeHuffman_go_inv litT distT br₃ br' output out'
                 maxOut _ hdh hpos₃ hple₃
@@ -235,6 +237,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
         · -- btype = 1: fixed Huffman
           split at h; · exact nomatch h
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
+            rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut] at hdh
             unfold Inflate.decodeHuffman at hdh
             have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
               decodeHuffman_correct
@@ -292,6 +295,7 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
             have ⟨hd₃, _, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litTree distTree hdt hpos₂ hple₂
             split at h; · exact nomatch h
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
+              rw [Inflate.decodeHuffmanFast_eq br₃ output litTree distTree maxOut] at hdh
               unfold Inflate.decodeHuffman at hdh
               have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
                 decodeHuffman_correct litLens distLens
