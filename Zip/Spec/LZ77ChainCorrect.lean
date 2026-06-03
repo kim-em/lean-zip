@@ -37,10 +37,14 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
       have hcm := lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm
       by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
       · simp only [hml, ↓reduceIte]
-        exact ih (prev[cand]!) _ _
-          (Or.inr ⟨hc.1, hc.2, hcand, fun i hi => (hcm.1 i hi).symm, hcm.2⟩)
+        split
+        · exact Or.inr ⟨hc.1, hc.2, hcand, fun i hi => (hcm.1 i hi).symm, hcm.2⟩
+        · exact ih (prev[cand]!) _ _
+            (Or.inr ⟨hc.1, hc.2, hcand, fun i hi => (hcm.1 i hi).symm, hcm.2⟩)
       · simp only [hml, ↓reduceIte]
-        exact ih (prev[cand]!) _ _ hb
+        split
+        · exact hb
+        · exact ih (prev[cand]!) _ _ hb
     · exact hb
 
 /-- `lz77Chain.mainLoop` produces a valid decomposition from `pos`. Mirrors

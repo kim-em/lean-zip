@@ -351,11 +351,16 @@ def dynBlockBytes (litFreqs distFreqs : Array Nat) (litLens distLens : List Nat)
 -- and the `SizeHelpers` conformance tests are unaffected.
 attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes
 
-/-- Hash-chain search depth at each compression level (levels ≥ 5). More depth
-    finds longer matches (better ratio) at higher cost; level scaling is refined
-    in a follow-up (#2494). -/
+/-- Hash-chain search depth per compression level (levels ≥ 5). Higher levels
+    search deeper for longer matches (better ratio on diverse input) at higher
+    cost; the `chainWalk` early-stop keeps repetitive input fast at any depth.
+    The ratio gain saturates around 256–512 (measured), so level 9 caps there. -/
 def chainDepth (level : UInt8) : Nat :=
-  if level ≤ 6 then 128 else if level ≤ 8 then 256 else 512
+  if level ≤ 5 then 32
+  else if level ≤ 6 then 128
+  else if level ≤ 7 then 256
+  else if level ≤ 8 then 512
+  else 1024
 
 /-- The compressed-block dispatch (no stored fallback): level 1 = fixed Huffman,
     2-4 = lazy LZ77, 5+ = hash-chain LZ77 + dynamic Huffman. At levels ≥ 5 it

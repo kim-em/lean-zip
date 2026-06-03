@@ -415,7 +415,11 @@ where
       have hcand : cand + maxLen ≤ data.size := by omega
       let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
       let (bl, bp) := if ml > bestLen then (ml, cand) else (bestLen, bestPos)
-      chainWalk data prev windowSize pos maxLen hpm (prev[cand]!) (fuel - 1) bl bp
+      -- Early stop: a match of the maximum possible length cannot be beaten, so
+      -- stop walking the chain. Provably zero ratio loss; on repetitive input
+      -- (matches reach `maxLen` immediately) this restores near-greedy speed.
+      if bl ≥ maxLen then (bl, bp)
+      else chainWalk data prev windowSize pos maxLen hpm (prev[cand]!) (fuel - 1) bl bp
     else (bestLen, bestPos)
   termination_by fuel
   decreasing_by omega
