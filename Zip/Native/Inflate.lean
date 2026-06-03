@@ -236,19 +236,38 @@ def distExtra : Array UInt8 := #[
 @[simp] theorem distBase_size : distBase.size = 30 := by decide
 @[simp] theorem distExtra_size : distExtra.size = 30 := by decide
 
-/-- Copy `length` bytes from `buf` starting at `start`, repeating every
-    `distance` bytes (LZ77 back-reference copy with wrap-around).
-    Defined as explicit recursion for proof tractability. -/
-def copyLoop (buf : ByteArray) (start distance : Nat)
+/-- The per-byte back-reference copy worker: copy `length` bytes from `buf`
+    starting at `start`, repeating every `distance` bytes (LZ77 copy with
+    wrap-around). Defined as explicit recursion for proof tractability; this is
+    the reference semantics that `copyLoop` dispatches to. -/
+def copyLoopGo (buf : ByteArray) (start distance : Nat)
     (k length : Nat)
     (hd_pos : distance > 0 := by omega) (hsd : start + distance ≤ buf.size := by omega) : ByteArray :=
   if k < length then
     have hidx : start + (k % distance) < buf.size := by
       have := Nat.mod_lt k hd_pos; omega
-    copyLoop (buf.push buf[start + (k % distance)]) start distance (k + 1) length
+    copyLoopGo (buf.push buf[start + (k % distance)]) start distance (k + 1) length
       hd_pos (by simp [ByteArray.size_push]; omega)
   else buf
 termination_by length - k
+
+/-- Copy `length` bytes from `buf` starting at `start`, repeating every
+    `distance` bytes (LZ77 back-reference copy).
+
+    For the common **non-overlapping** back-reference (`k = 0 ∧ length ≤ distance`)
+    every index `start + (k % distance)` is just `start + k`, so the whole copy is
+    the contiguous slice `[start, start + length)` — one `extract` + one `append`
+    (a `memcpy`) instead of `length` per-byte `push`es / bounds-checks / modular
+    indices. Otherwise (overlapping / RLE, or a partial `k`) it falls back to the
+    per-byte `copyLoopGo`. Proven equal to `copyLoopGo` via `copyLoop_eq_ofFn`,
+    so every decode correctness proof is unaffected. -/
+def copyLoop (buf : ByteArray) (start distance : Nat)
+    (k length : Nat)
+    (hd_pos : distance > 0 := by omega) (hsd : start + distance ≤ buf.size := by omega) : ByteArray :=
+  if k = 0 ∧ length ≤ distance then
+    buf ++ buf.extract start (start + length)
+  else
+    copyLoopGo buf start distance k length hd_pos hsd
 
 -- Code length alphabet order for dynamic Huffman (RFC 1951 §3.2.7)
 def codeLengthOrder : Array Nat := #[
