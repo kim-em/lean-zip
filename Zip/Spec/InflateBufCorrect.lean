@@ -965,3 +965,33 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                                   exact ih_ld sym hidx extraBits distSym hdidx dExtraBits br₄
                                     hd0 hds hp1 hp2 pos1 bb4 c4 hbc5 hbo5 hbd5
 
+
+/-! ## Tree-depth bound from `fromLengths` -/
+
+/-- `insert.go` keeps every leaf within depth `D` when the code length `n ≤ D`. -/
+theorem insert_go_depthLE (code : UInt32) (symbol : UInt16) :
+    ∀ (n D : Nat) (t : HuffTree), treeDepthLE t D → n ≤ D →
+      treeDepthLE (HuffTree.insert.go code symbol t n) D := by
+  intro n
+  induction n with
+  | zero => intro D t _ _; exact True.intro
+  | succ n ih =>
+    intro D t hT hn
+    obtain ⟨D', rfl⟩ : ∃ D', D = D' + 1 := ⟨D - 1, by omega⟩
+    cases t with
+    | leaf s => exact True.intro
+    | empty =>
+      change treeDepthLE (if ((code >>> n.toUInt32) &&& 1) == 0
+        then .node (HuffTree.insert.go code symbol .empty n) .empty
+        else .node .empty (HuffTree.insert.go code symbol .empty n)) (D' + 1)
+      by_cases hbit : ((code >>> n.toUInt32) &&& 1) == 0
+      · rw [if_pos hbit]; exact ⟨ih D' .empty True.intro (by omega), True.intro⟩
+      · rw [if_neg hbit]; exact ⟨True.intro, ih D' .empty True.intro (by omega)⟩
+    | node z o =>
+      obtain ⟨hz, ho⟩ := hT
+      change treeDepthLE (if ((code >>> n.toUInt32) &&& 1) == 0
+        then .node (HuffTree.insert.go code symbol z n) o
+        else .node z (HuffTree.insert.go code symbol o n)) (D' + 1)
+      by_cases hbit : ((code >>> n.toUInt32) &&& 1) == 0
+      · rw [if_pos hbit]; exact ⟨ih D' z hz (by omega), ho⟩
+      · rw [if_neg hbit]; exact ⟨hz, ih D' o ho (by omega)⟩
