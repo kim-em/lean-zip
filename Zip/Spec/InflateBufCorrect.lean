@@ -377,4 +377,140 @@ theorem peek_eq_refilled {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf
           (by rw [UInt64.toNat_and]; exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)) h2j)
       rw [hb, Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (peekFast_lt br) h2j)]
 
+/-- The low buffer bit, as a `Bool` test, is the negation of the stream bit. -/
+theorem low_bit_eq {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data bitpos pos bitBuf cnt) (hcnt : 0 < cnt) :
+    (bitBuf &&& 1 == 0) = !streamBit data bitpos := by
+  have hbit := h.bits 0 hcnt
+  rw [Nat.add_zero, Nat.testBit_zero] at hbit
+  have hand : (bitBuf &&& 1).toNat = bitBuf.toNat % 2 := by
+    rw [UInt64.toNat_and, show (1 : UInt64).toNat = 1 from rfl, Nat.and_one_is_mod]
+  have hlt : bitBuf.toNat % 2 < 2 := Nat.mod_lt _ (by decide)
+  rcases hs : streamBit data bitpos with _ | _ <;> rw [hs] at hbit <;> simp only [decide_eq_true_eq,
+      decide_eq_false_iff_not] at hbit
+  · have hm : bitBuf.toNat % 2 = 0 := by omega
+    have h0 : bitBuf &&& 1 = 0 := by
+      have : (bitBuf &&& 1).toNat = (0 : UInt64).toNat := by rw [hand, hm]; rfl
+      exact UInt64.toNat_inj.mp this
+    simp [h0]
+  · have h1 : bitBuf &&& 1 = 1 := by
+      have : (bitBuf &&& 1).toNat = (1 : UInt64).toNat := by rw [hand, hbit]; rfl
+      exact UInt64.toNat_inj.mp this
+    simp [h1]
+
+/-- **`walkTree` corresponds to `decode.go`.** Under the buffer invariant and the
+    maintainable side condition `pos = data.size ∨ 21 < depth + cnt` (either the
+    input is exhausted — so the buffer's `cnt = 0` coincides with reader EOF — or
+    there are enough buffered bits to outrun the depth-20 guard), the wide-buffer
+    tree walk and the reader's tree walk agree: same symbol/error, and on success
+    the resulting buffer corresponds to the advanced reader. -/
+theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
+    ∀ {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt depth : Nat},
+    BufCorr data br.bitPos pos bitBuf cnt → br.bitOff < 8 → br.data = data →
+    (pos = data.size ∨ 21 < depth + cnt) →
+    (∀ s br', HuffTree.decode.go t br depth = .ok (s, br') →
+        ∃ bb c used, walkTree t bitBuf cnt depth = .ok (s, bb, c, used)
+          ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8)
+    ∧ (∀ e, HuffTree.decode.go t br depth = .error e → walkTree t bitBuf cnt depth = .error e) := by
+  induction t with
+  | leaf s =>
+    intro br pos bitBuf cnt depth h hwf hdata _
+    refine ⟨?_, ?_⟩
+    · intro s' br' hgo
+      simp only [HuffTree.decode.go, Except.ok.injEq, Prod.mk.injEq] at hgo
+      obtain ⟨rfl, rfl⟩ := hgo
+      exact ⟨bitBuf, cnt, 0, by simp only [walkTree], h, hdata, hwf⟩
+    · intro e hgo; simp [HuffTree.decode.go] at hgo
+  | empty =>
+    intro br pos bitBuf cnt depth _ _ _ _
+    refine ⟨?_, ?_⟩
+    · intro s' br' hgo; simp [HuffTree.decode.go] at hgo
+    · intro e hgo
+      simp only [HuffTree.decode.go, Except.error.injEq] at hgo
+      simp only [walkTree, ← hgo]
+  | node z o ihz iho =>
+    intro br pos bitBuf cnt depth h hwf hdata hinv
+    by_cases hd : depth > 20
+    · refine ⟨fun s' br' hgo => by simp [HuffTree.decode.go, hd] at hgo, ?_⟩
+      intro e hgo
+      simp only [HuffTree.decode.go, hd, if_true, Except.error.injEq] at hgo
+      simp only [walkTree, hd, if_true, ← hgo]
+    · by_cases hcnt : 0 < cnt
+      · -- read one bit; both follow the same stream bit
+        have hbp : br.bitPos < data.size * 8 := by have := h.span; have := h.posLe; omega
+        have htb : br.toBits = streamBit data br.bitPos :: br.toBits.tail := by
+          have h0 := toBits_getElem? (br := br) (i := 0) (by rw [hdata]; simpa using hbp)
+          rw [hdata] at h0
+          cases hbl : br.toBits with
+          | nil => rw [hbl] at h0; simp at h0
+          | cons a l =>
+            rw [hbl] at h0
+            simp only [List.getElem?_cons_zero, Option.some_inj, Nat.add_zero] at h0
+            simp only [List.tail_cons]; rw [h0]
+        obtain ⟨br', hrb, _, hwf', _⟩ :=
+          Deflate.Correctness.readBit_complete br (streamBit data br.bitPos) br.toBits.tail hwf htb
+        have hbpe : br'.bitPos = br.bitPos + 1 :=
+          ZipCommon.readBit_bitPos_eq br br' _ hrb hwf
+        have hbdata : br'.data = data := (ZipCommon.readBit_data_eq br br' _ hrb).trans hdata
+        -- buffer after consuming 1 bit corresponds to br'
+        have hcc : BufCorr data br'.bitPos pos (bitBuf >>> 1) (cnt - 1) := by
+          rw [hbpe, show (bitBuf >>> 1 : UInt64) = bitBuf >>> (1 : Nat).toUInt64 from by rfl]
+          exact consume_corr h hcnt (by decide)
+        have hsubinv : pos = data.size ∨ 21 < (depth + 1) + (cnt - 1) := by
+          rcases hinv with h' | h'
+          · exact Or.inl h'
+          · exact Or.inr (by omega)
+        -- the chosen subtree is the same on both sides
+        have hbranch : (bitBuf &&& 1 == 0) = !streamBit data br.bitPos := low_bit_eq h hcnt
+        have hcne : ¬ cnt = 0 := by omega
+        rcases hs : streamBit data br.bitPos with _ | _
+        · -- stream bit 0: both descend into `z`
+          have hgs : HuffTree.decode.go (HuffTree.node z o) br depth
+              = HuffTree.decode.go z br' (depth + 1) := by
+            rw [HuffTree.decode.go, if_neg hd, hrb]; simp [bind, Except.bind, hs]
+          have hsub : (if bitBuf &&& 1 == 0 then z else o) = z := by
+            simp [show (bitBuf &&& 1 == 0) = true from by simp [hbranch, hs]]
+          refine ⟨fun s' br'' hgo => ?_, fun e hgo => ?_⟩
+          · rw [hgs] at hgo
+            obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2⟩ := (ihz hcc hwf' hbdata hsubinv).1 s' br'' hgo
+            refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2⟩
+            rw [walkTree, if_neg hd, if_neg hcne, hsub]; simp [hwt]
+          · rw [hgs] at hgo
+            rw [walkTree, if_neg hd, if_neg hcne, hsub]
+            simp [(ihz hcc hwf' hbdata hsubinv).2 e hgo]
+        · -- stream bit 1: both descend into `o`
+          have hgs : HuffTree.decode.go (HuffTree.node z o) br depth
+              = HuffTree.decode.go o br' (depth + 1) := by
+            rw [HuffTree.decode.go, if_neg hd, hrb]; simp [bind, Except.bind, hs]
+          have hsub : (if bitBuf &&& 1 == 0 then z else o) = o := by
+            simp [show (bitBuf &&& 1 == 0) = false from by simp [hbranch, hs]]
+          refine ⟨fun s' br'' hgo => ?_, fun e hgo => ?_⟩
+          · rw [hgs] at hgo
+            obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2⟩ := (iho hcc hwf' hbdata hsubinv).1 s' br'' hgo
+            refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2⟩
+            rw [walkTree, if_neg hd, if_neg hcne, hsub]; simp [hwt]
+          · rw [hgs] at hgo
+            rw [walkTree, if_neg hd, if_neg hcne, hsub]
+            simp [(iho hcc hwf' hbdata hsubinv).2 e hgo]
+      · -- cnt = 0 → end of input (the EOF disjunct of the invariant must hold)
+        have hc0 : cnt = 0 := by omega
+        have hpos : pos = data.size := by
+          rcases hinv with h' | h'
+          · exact h'
+          · omega
+        have hge : br.data.size ≤ br.pos := by
+          have hsp := h.span; have hb : br.bitPos = br.pos * 8 + br.bitOff := rfl
+          rw [hdata]; omega
+        have hrbe : br.readBit = .error "BitReader: unexpected end of input" := by
+          simp only [ZipCommon.BitReader.readBit, show br.pos ≥ br.data.size from hge, if_true]
+        refine ⟨?_, ?_⟩
+        · intro s' br' hgo
+          rw [HuffTree.decode.go, if_neg hd, hrbe] at hgo
+          simp [bind, Except.bind] at hgo
+        · intro e hgo
+          rw [HuffTree.decode.go, if_neg hd, hrbe] at hgo
+          simp only [bind, Except.bind] at hgo
+          have he : "BitReader: unexpected end of input" = e := by injection hgo
+          rw [walkTree, if_neg hd, if_pos hc0, he]
+
 end Zip.Native.InflateBuf

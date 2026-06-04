@@ -30,18 +30,20 @@ termination_by data.size - pos
 decreasing_by simp_wf; omega
 
 /-- Bit-by-bit tree walk over the buffer (fallback for codes longer than the
-    9-bit table or near end-of-input). Returns the symbol, the remaining buffer,
+    9-bit table or near end-of-input). Mirrors `HuffTree.decode.go` exactly
+    (same `depth > 20` guard, same error strings), so it is provably equal;
+    `depth` is the tree-walk depth. Returns the symbol, the remaining buffer,
     and the number of bits consumed. -/
-def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt : Nat) :
+def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt depth : Nat) :
     Except String (UInt16 × UInt64 × Nat × Nat) :=
   match t with
   | .leaf s => .ok (s, bitBuf, cnt, 0)
   | .empty => .error "Inflate: invalid Huffman code"
   | .node z o =>
-    if cnt = 0 then .error "BitReader: unexpected end of input"
+    if depth > 20 then .error "Inflate: Huffman decode exceeded max depth"
+    else if cnt = 0 then .error "BitReader: unexpected end of input"
     else
-      let sub := if bitBuf &&& 1 == 0 then z else o
-      match walkTree sub (bitBuf >>> 1) (cnt - 1) with
+      match walkTree (if bitBuf &&& 1 == 0 then z else o) (bitBuf >>> 1) (cnt - 1) (depth + 1) with
       | .error e => .error e
       | .ok (s, bb, c, used) => .ok (s, bb, c, used + 1)
 
@@ -53,7 +55,7 @@ def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt : Nat) :
   let idx := (bitBuf &&& 0x1FF).toNat
   let entry := table[idx]!
   let len := entry.2.toNat
-  if len == 0 || len > cnt then walkTree tree bitBuf cnt
+  if len == 0 || len > cnt then walkTree tree bitBuf cnt 0
   else .ok (entry.1, bitBuf >>> len.toUInt64, cnt - len, len)
 
 /-- Read `n` (≤ cnt) bits LSB-first from the buffer without refilling. -/
