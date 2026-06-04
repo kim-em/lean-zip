@@ -1049,3 +1049,60 @@ theorem fromLengths_depthLE {lengths : Array UInt8} {maxBits : Nat} {tree : Huff
       have hi2 := (Array.any_eq_false.mp hf) i hi
       simp only [decide_eq_true_eq, gt_iff_lt, Nat.not_lt] at hi2
       exact hi2
+
+/-! ## The wide-buffer decoder equals the reference -/
+
+open Inflate in
+/-- **`decodeHuffmanFastBuf` = `decodeHuffmanFast`** for depth-≤15 trees and a
+    well-formed reader (`bitOff < 8`, not past end of input). -/
+theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
+    (litTree distTree : HuffTree) (maxOut : Nat)
+    (hldep : treeDepthLE litTree 15) (hddep : treeDepthLE distTree 15)
+    (hwf : br.bitOff < 8) (hbp : br.bitPos ≤ br.data.size * 8) :
+    InflateBuf.decodeHuffmanFastBuf br output litTree distTree maxOut
+      = Inflate.decodeHuffmanFast br output litTree distTree maxOut := by
+  have hbpe : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  have hposle : br.pos ≤ br.data.size := by omega
+  have hbc0 : BufCorr br.data (br.pos * 8) br.pos 0 0 :=
+    ⟨by omega, hposle, by omega, by simp, fun j hj => absurd hj (Nat.not_lt_zero j)⟩
+  rcases hrf : refill br.data br.pos 0 0 with ⟨pos0, bitBuf0, cnt0⟩
+  obtain ⟨hbc1, hr1⟩ := refill_corr hbc0 hrf
+  have hboff : br.bitOff ≤ cnt0 := by
+    rcases hr1 with h56 | hpe
+    · omega
+    · have hs := hbc1.span; rw [hpe] at hs; omega
+  have hbc2 : BufCorr br.data br.bitPos pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) :=
+    consume_corr hbc1 hboff (by omega)
+  have hco := go_corr litTree distTree maxOut br.data.size hldep hddep br output pos0
+    (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) hbc2 hwf rfl
+  unfold InflateBuf.decodeHuffmanFastBuf Inflate.decodeHuffmanFast
+  rw [hrf]
+  dsimp only []
+  simp only [BitReader.bitPos] at hco
+  cases hgoB : InflateBuf.go litTree.buildTable distTree.buildTable br.data litTree distTree maxOut
+      br.data.size pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) (br.pos * 8 + br.bitOff) output with
+  | error eB =>
+    cases hgoA : Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable
+        distTree.buildTable br.data.size br output with
+    | error eA =>
+      rw [hgoA, hgoB] at hco; simp only [bind, Except.bind]; exact congrArg Except.error hco.symm
+    | ok pA => rw [hgoA, hgoB] at hco; exact absurd hco (by simp)
+  | ok pB =>
+    obtain ⟨out2, pos', bitBuf', cnt', bitpos'⟩ := pB
+    cases hgoA : Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable
+        distTree.buildTable br.data.size br output with
+    | error eA => rw [hgoA, hgoB] at hco; exact absurd hco (by simp)
+    | ok pA =>
+      obtain ⟨out1, br'⟩ := pA
+      rw [hgoA, hgoB] at hco
+      obtain ⟨hout, hbc', hbd', hbo', hbpos'⟩ := hco
+      simp only [bind, Except.bind, Except.ok.injEq, Prod.mk.injEq]
+      refine ⟨hout.symm, ?_⟩
+      -- the reconstructed reader equals br' (endbit = br'.bitPos, then byte/bit split)
+      have hspan := hbc'.span
+      have hend : pos' * 8 - cnt' = br'.bitPos := by simp only [BitReader.bitPos] at hspan ⊢; omega
+      have hp : (pos' * 8 - cnt') / 8 = br'.pos := by
+        rw [hend]; show (br'.pos * 8 + br'.bitOff) / 8 = br'.pos; omega
+      have ho : (pos' * 8 - cnt') % 8 = br'.bitOff := by
+        rw [hend]; show (br'.pos * 8 + br'.bitOff) % 8 = br'.bitOff; omega
+      rw [hbd'.symm, hp, ho]
