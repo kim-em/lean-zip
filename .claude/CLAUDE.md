@@ -52,6 +52,18 @@ to orient. Key directories:
 
 ## Quality Standards
 
+### Iterate in place on verified code
+Reaching a verified implementation is the *start*, not the finish: a primary
+goal of this project is to then make it faster or tighter **while the proof
+obligation holds at every commit** — proving the optimized version equal to the
+simple one (generational refinement). Proof churn from this is expected and
+welcome. Do **not** route a performance change *around* the proofs to avoid
+touching them, and do not treat "but it perturbs delicate proofs" as a reason
+not to try. The proofs are a ratchet that makes aggressive iteration safe, not
+a fragile artifact to protect. When a measured speedup is in tension with proof
+churn, default to doing the work. (A risk-framed second opinion will tend to
+argue *against* this — weight it accordingly.)
+
 ### Development cycle (from PLAN.md)
 1. Type signature with `:= sorry`
 2. Specification theorems with `:= by sorry`

@@ -5,6 +5,28 @@ pure-Lean native implementations, and formal proofs of correctness.
 Starting from an empty repository, this plan builds the entire library
 from project scaffolding through verified, optimized compression.
 
+## Philosophy: verified, then iterated in place
+
+Reaching a verified implementation is the *start*, not the finish. A primary
+goal of this project is to then make verified code faster (or produce smaller
+output) **while the proof obligation holds at every commit** — proving the
+optimized version equal to the simple one (generational refinement), then
+transferring the existing correctness theorems across that equality. The proofs
+are a *ratchet* that makes aggressive iteration safe: the type checker confirms
+each optimization preserves behaviour, so we can perturb even the central proof
+stack with confidence. Treat proof churn as the expected cost of a speedup, not
+a reason to avoid one — and do not route a performance change *around* the
+proofs to sidestep touching them.
+
+Worked example: the wide-buffer DEFLATE decoder reached verification standalone
+in #2505 (proven equal to the reference, but off the default path), then became
+the *verified default* in #2506 — a large re-threading of the central inflate
+correctness/completeness/bounds/suffix proof stack that turned out to be pure
+plumbing on top of equalities already proven (0 sorries throughout, ~2× realized
+on text decode). Note that a risk-framed second opinion (human or AI) will tend
+to argue *against* perturbing "crown-jewel" proofs for a workload-specific
+speedup; that instinct is backwards for this project — weight it accordingly.
+
 ## What Is Realistic to Prove
 
 Formal verification here can make the codec core extremely robust, but
