@@ -273,4 +273,108 @@ theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : 
     rw [hbp]; exact consume_corr h hn hn64
   · exact (ZipCommon.readBits_data_eq br br' n val hread).trans hdata
 
+/-- The buffer's 9-bit table index, bit by bit: the stream bit while `j < cnt`,
+    else 0 (works for any `cnt`, unlike `mask_testBit`). -/
+theorem peek9_buf_testBit {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data bitpos pos bitBuf cnt) (j : Nat) (hj : j < 9) :
+    (bitBuf &&& 0x1FF).toNat.testBit j = if j < cnt then streamBit data (bitpos + j) else false := by
+  rw [UInt64.toNat_and, show (0x1FF : UInt64).toNat = 2 ^ 9 - 1 from by decide,
+    Nat.and_two_pow_sub_one_eq_mod, Nat.testBit_mod_two_pow]
+  simp only [hj, decide_true, Bool.true_and]
+  split
+  · exact h.bits j ‹_›
+  · exact Nat.testBit_lt_two_pow
+      (Nat.lt_of_lt_of_le h.high (Nat.pow_le_pow_right (by omega) (by omega)))
+
+open HuffTree in
+/-- **`peekFast` past end-of-stream reads 0.** The mirror of `peekFast_testBit`
+    for bit positions at or beyond `data.size * 8`: the contributing byte is out
+    of range, so the bit is 0. -/
+theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (hj : j < 9)
+    (hge : br.data.size * 8 ≤ br.pos * 8 + br.bitOff + j) :
+    (peekFast br).toNat.testBit j = false := by
+  have hmask : (0x1FF : UInt32).toNat.testBit j = true := by
+    rw [show (0x1FF : UInt32).toNat = 2 ^ 9 - 1 from by decide, Nat.testBit_two_pow_sub_one]
+    simp only [decide_eq_true_eq]; omega
+  have hshift : br.bitOff.toUInt32.toNat % 32 = br.bitOff := by
+    simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat, Nat.reducePow]; omega
+  have hb0eq : (if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else (0 : UInt32)).toNat
+      = (if br.pos < br.data.size then br.data[br.pos]!.toNat else 0) := by
+    split
+    · rw [UInt8.toNat_toUInt32]
+    · rfl
+  have hb1eq : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toUInt32 else (0 : UInt32)).toNat
+      = (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0) := by
+    split
+    · rw [UInt8.toNat_toUInt32]
+    · rfl
+  have hb1lt : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0) < 256 := by
+    split
+    · have := UInt8.toNat_lt br.data[br.pos + 1]!; omega
+    · decide
+  have hb0lt : (if br.pos < br.data.size then br.data[br.pos]!.toNat else 0) < 256 := by
+    split
+    · have := UInt8.toNat_lt br.data[br.pos]!; omega
+    · decide
+  -- byte-out-of-range facts, derived while the context still has plain `br.bitOff`
+  have hbyte : (br.bitOff + j < 8 → br.data.size ≤ br.pos)
+      ∧ (8 ≤ br.bitOff + j → br.data.size ≤ br.pos + 1) := by
+    constructor <;> intro h8 <;> omega
+  unfold peekFast
+  rw [UInt32.toNat_and, Nat.testBit_and, UInt32.toNat_shiftRight, Nat.testBit_shiftRight,
+    hmask, Bool.and_true, hshift, UInt32.toNat_or, Nat.testBit_or, hb0eq,
+    UInt32.toNat_shiftLeft, show (8 : UInt32).toNat % 32 = 8 from by decide, hb1eq,
+    Nat.mod_eq_of_lt (by rw [Nat.shiftLeft_eq, show (2 : Nat) ^ 8 = 256 from by decide,
+      show (2 : Nat) ^ 32 = 4294967296 from by decide]; omega),
+    Nat.testBit_shiftLeft]
+  by_cases hlo : br.bitOff + j < 8
+  · -- byte `pos` holds the bit, but it is out of range (pos ≥ size); `b1<<8` vanishes
+    rw [if_neg (Nat.not_lt.mpr (hbyte.1 hlo)),
+      show decide (br.bitOff + j ≥ 8) = false from by
+        simp only [decide_eq_false_iff_not]; exact Nat.not_le.mpr hlo]
+    simp
+  · -- `b0`'s bit is past its 8-bit width (false); byte `pos+1` is out of range
+    have h8 : 8 ≤ br.bitOff + j := Nat.not_lt.mp hlo
+    have h256 : (256 : Nat) ≤ 2 ^ (br.bitOff + j) := by
+      calc (256 : Nat) = 2 ^ 8 := by decide
+        _ ≤ 2 ^ (br.bitOff + j) := Nat.pow_le_pow_right (by omega) h8
+    rw [show (if br.pos < br.data.size then br.data[br.pos]!.toNat else 0).testBit (br.bitOff + j) = false from
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hb0lt h256),
+      if_neg (Nat.not_lt.mpr (hbyte.2 h8))]
+    simp
+
+open HuffTree in
+/-- **9-bit table peek = `peekFast`, including end-of-stream.** Under the
+    post-`refill` condition (`56 < cnt`, i.e. ≥ 9 bits, or input exhausted),
+    the wide-buffer index equals `peekFast`'s — matching even the zero-padded
+    high bits past the end of the stream. -/
+theorem peek_eq_refilled {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
+    (hr : 56 < cnt ∨ pos = data.size) :
+    (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := by
+  rcases hr with hc | hpos
+  · exact peek_eq h hwf hdata (by omega)
+  · have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
+    have hds : br.data.size = data.size := by rw [hdata]
+    have hsp := h.span
+    apply Nat.eq_of_testBit_eq
+    intro j
+    by_cases hj9 : j < 9
+    · rw [peek9_buf_testBit h j hj9]
+      split
+      · rename_i hjc
+        have hin : br.pos * 8 + br.bitOff + j < br.data.size * 8 := by omega
+        rw [peekFast_testBit br j hwf (by simp only [fastBits]; omega) hin]
+        simp only [streamBit, ← hbp, hdata]
+      · rename_i hjc
+        have hge : br.data.size * 8 ≤ br.pos * 8 + br.bitOff + j := by omega
+        rw [peekFast_testBit_eof br j hwf hj9 hge]
+    · have h2j : (512 : Nat) ≤ 2 ^ j := by
+        calc (512 : Nat) = 2 ^ 9 := by decide
+          _ ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega)
+      have hb : (bitBuf &&& 0x1FF).toNat.testBit j = false :=
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le
+          (by rw [UInt64.toNat_and]; exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)) h2j)
+      rw [hb, Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (peekFast_lt br) h2j)]
+
 end Zip.Native.InflateBuf
