@@ -290,7 +290,7 @@ theorem alignToByte_toBits (br : ZipCommon.BitReader)
 
 /-- Reading `n` bits from `testBit` values (LSB first) reconstructs the
     original value. Key building block for byte-level read correspondence. -/
-private theorem readBitsLSB_testBit (m n : Nat) (hm : m < 2 ^ n) (rest : List Bool) :
+theorem readBitsLSB_testBit (m n : Nat) (hm : m < 2 ^ n) (rest : List Bool) :
     Deflate.Spec.readBitsLSB n
       ((List.ofFn (n := n) fun (i : Fin n) => m.testBit i.val) ++ rest) =
       some (m, rest) := by
