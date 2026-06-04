@@ -307,37 +307,49 @@ theorem readBits_go_error : ∀ (k : Nat) (br : BitReader) (acc : UInt32) (shift
       exact ih br1 _ _ hwf1 (by rw [hbp1, hdata1]; have : br.bitPos = br.pos*8+br.bitOff := rfl; omega)
         (by rw [hbp1, hdata1]; omega)
 
-/-- **`takeBits` corresponds to `readBits`, totally.** Same value on success, the same
-    end-of-input error otherwise — given either enough buffered bits or true EOF (so the
-    buffer's `cnt` equals the reader's available bits). -/
+/-- **`takeBits` corresponds to `readBits`, totally.** On a successful read the value
+    and advanced state match; an end-of-input error transfers — given either enough
+    buffered bits or true EOF (so the buffer's `cnt` equals the reader's available bits).
+    Stated as two implications (like `walkTree_corr`) so it composes with `cases` on the
+    read result without a match-motive rewrite. -/
 theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
     {n : Nat} (hr : n ≤ cnt ∨ pos = data.size) (hn32 : n ≤ 32) (hn64 : n < 64) :
-    match br.readBits n, takeBits bitBuf cnt n with
-    | .error e1, .error e2 => e1 = e2
-    | .ok (val, br'), .ok (v, bb, c') =>
-        val.toNat = v ∧ BufCorr data br'.bitPos pos bb c' ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c' = cnt - n
-    | _, _ => False := by
+    (∀ val br', br.readBits n = .ok (val, br') →
+        ∃ v bb c', takeBits bitBuf cnt n = .ok (v, bb, c') ∧ val.toNat = v
+          ∧ BufCorr data br'.bitPos pos bb c' ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c' = cnt - n)
+    ∧ (∀ e, br.readBits n = .error e → takeBits bitBuf cnt n = .error e) := by
   have hsp := h.span; have hple := h.posLe
   have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
   have hds : br.data.size = data.size := by rw [hdata]
   have hle : br.bitPos ≤ data.size * 8 := by omega
-  unfold takeBits
   by_cases hnc : n > cnt
   · -- EOF (else `hr` gives n ≤ cnt): both sides hit end of input
-    rw [if_pos hnc]
     have hpos : pos = data.size := hr.resolve_left (by omega)
     subst hpos
-    rw [BitReader.readBits, readBits_go_error n br 0 0 hwf (by rw [hds]; omega) (by rw [hds]; omega)]
-  · rw [if_neg hnc]
+    have herr : br.readBits n = .error "BitReader: unexpected end of input" := by
+      rw [BitReader.readBits]
+      exact readBits_go_error n br 0 0 hwf (by rw [hds]; omega) (by rw [hds]; omega)
+    have htk : takeBits bitBuf cnt n = .error "BitReader: unexpected end of input" := by
+      unfold takeBits; rw [if_pos hnc]
+    refine ⟨fun val br' h' => by rw [herr] at h'; exact absurd h' (by simp), fun e h' => ?_⟩
+    rw [herr] at h'
+    have he : "BitReader: unexpected end of input" = e := by injection h'
+    rw [htk, he]
+  · -- enough bits: both succeed
     have hn : n ≤ cnt := by omega
-    obtain ⟨val, br', hread⟩ := readBits_go_avail n br 0 0 hwf (by rw [hds]; omega)
-    rw [show br.readBits n = BitReader.readBits.go br 0 0 n from rfl, hread]
-    have hbpe : br'.bitPos = br.bitPos + n := ZipCommon.readBits_bitPos_eq br br' n val hread hwf
-    refine ⟨takeBits_value h hwf hdata hn hn32 hn64 hread, ?_, ?_,
-      readBits_bitOff_lt hread hwf, rfl⟩
-    · rw [hbpe]; exact consume_corr h hn hn64
-    · exact (ZipCommon.readBits_data_eq br br' n val hread).trans hdata
+    have htk : takeBits bitBuf cnt n
+        = .ok ((bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat, bitBuf >>> n.toUInt64, cnt - n) := by
+      unfold takeBits; rw [if_neg hnc]
+    refine ⟨fun val br' h' => ?_, fun e h' => ?_⟩
+    · refine ⟨_, _, _, htk, takeBits_value h hwf hdata hn hn32 hn64 h', ?_, ?_,
+        readBits_bitOff_lt h' hwf, rfl⟩
+      · have hbpe : br'.bitPos = br.bitPos + n := ZipCommon.readBits_bitPos_eq br br' n val h' hwf
+        rw [hbpe]; exact consume_corr h hn hn64
+      · exact (ZipCommon.readBits_data_eq br br' n val h').trans hdata
+    · obtain ⟨val, br', hok⟩ := readBits_go_avail n br 0 0 hwf (by rw [hds]; omega)
+      rw [show br.readBits n = BitReader.readBits.go br 0 0 n from rfl, hok] at h'
+      exact absurd h' (by simp)
 
 /-- The buffer's 9-bit table index, bit by bit: the stream bit while `j < cnt`,
     else 0 (works for any `cnt`, unlike `mask_testBit`). -/
@@ -798,21 +810,20 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
       cases hds2 : decodeSym litTree litTree.buildTable bitBuf1 cnt1 with
       | error e2 => rw [hdwt, hds2] at hsy; simp at hsy
       | ok p2 =>
-        obtain ⟨sym2, bb, c, used⟩ := p2
+        obtain ⟨symB, bb, c, used⟩ := p2
         rw [hdwt, hds2] at hsy
         obtain ⟨hsym, hbc2, hbd2, hbo2, hcle, hcons⟩ := hsy
-        -- Bridge sym/sym2 via `hsym` on the small proof terms only; never `subst`
-        -- (substituting into the giant inlined body forces an expensive whnf).
-        -- key: the buffer's tracked position equals br₁.bitPos (uses c ≤ cnt1)
+        -- Unify A's `sym` with B's `sym` here, while the goal is still opaque (so
+        -- `subst` is cheap and there are no proof-carrying `arr[sym]'h` to break).
+        -- Each leaf unfolds the bodies only after all its inner `cases` are done.
+        subst hsym
         have hkey : br.bitPos + (cnt1 - c) = br₁.bitPos := by
           have := hbc1.span; have := hbc2.span; omega
-        -- Shared unfold+reduce incantation, applied per-leaf (so the inner `cases`
-        -- below run while the goal is still opaque and cheap to `kabstract`).
         by_cases hlt : sym < 256
-        · -- literal: align B's tracked bitpos with br₁.bitPos so both guards match
+        · -- literal
           rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
           dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-          rw [if_pos hlt, if_pos (show sym2 < 256 from hsym ▸ hlt), hkey]
+          rw [if_pos hlt, if_pos hlt, hkey]
           by_cases hmax : output.size ≥ maxOut
           · rw [if_pos hmax, if_pos hmax]
           · rw [if_neg hmax, if_neg hmax]
@@ -822,23 +833,39 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
               by_cases hp2 : dataSize * 8 < br₁.bitPos
               · rw [dif_pos hp2, dif_pos hp2]
               · rw [dif_neg hp2, dif_neg hp2]
-                rw [← hsym]
                 exact ih_lit sym br₁ hp1 hp2 pos1 bb c hbc2 hbo2 hbd2
         · by_cases hs256 : (sym == 256) = true
           · -- end of block: both return the current state
             rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
             dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-            rw [if_neg hlt, if_neg (show ¬ sym2 < 256 from hsym ▸ hlt),
-              if_pos hs256, if_pos (show (sym2 == 256) = true from hsym ▸ hs256), hkey]
+            rw [if_neg hlt, if_neg hlt, if_pos hs256, if_pos hs256, hkey]
             exact ⟨rfl, hbc2, hbd2, hbo2, rfl⟩
           · by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
             · -- invalid length code: both throw the same message
               rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
               dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-              rw [if_neg hlt, if_neg (show ¬ sym2 < 256 from hsym ▸ hlt),
-                if_neg hs256, if_neg (show ¬ (sym2 == 256) = true from hsym ▸ hs256),
-                dif_pos hidx, dif_pos (show sym2.toNat - 257 ≥ Inflate.lengthBase.size from hsym ▸ hidx),
-                hsym]
+              rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_pos hidx, dif_pos hidx]
             · -- valid length/distance back-reference
-              sorry
+              have hN1 : sym.toNat - 257 < Inflate.lengthExtra.size := by
+                rw [Inflate.lengthExtra_size]; simp only [Inflate.lengthBase_size] at hidx; omega
+              have hext5 : (Inflate.lengthExtra[sym.toNat - 257]'hN1).toNat ≤ 5 := by
+                have hb : ∀ i : Fin 29, (Inflate.lengthExtra[i.val]!).toNat ≤ 5 := by decide
+                have hh := hb ⟨sym.toNat - 257, by rw [← Inflate.lengthExtra_size]; exact hN1⟩
+                rwa [getElem!_pos] at hh
+              have hbud_e : (Inflate.lengthExtra[sym.toNat - 257]'hN1).toNat ≤ c ∨ pos1 = data.size := by
+                rcases hr1 with h56 | hp
+                · exact Or.inl (by omega)
+                · exact Or.inr hp
+              have htc_e := takeBits_corr hbc2 hbo2 hbd2 hbud_e (by omega) (by omega)
+              cases hXe : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]'hN1).toNat with
+              | error e1 =>
+                have hYe := htc_e.2 e1 hXe
+                rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+                rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                  readBitsFast_eq br₁, hXe, hYe]
+              | ok pe =>
+                obtain ⟨extraBits, br₂⟩ := pe
+                obtain ⟨eb, bb2, c2, hYe, hval_e, hbc3, hbd3, hbo3, hc2eq⟩ := htc_e.1 extraBits br₂ hXe
+                sorry
 
