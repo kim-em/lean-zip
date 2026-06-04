@@ -1,5 +1,6 @@
 import Zip.Spec.DynamicTreesComplete
 import Zip.Spec.InflateTable
+import Zip.Spec.InflateBufCorrect
 
 /-!
 # DEFLATE Stream-Level Correctness
@@ -533,7 +534,12 @@ theorem inflateLoop_correct (br : ZipCommon.BitReader)
           -- The loop runs the table-driven fast path; rewrite to the canonical
           -- spec via the proven equality, then unfold to `decodeHuffman.go`.
           rw [Zip.Native.Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist
-            maxOutputSize] at hdh
+            maxOutputSize (Zip.Native.InflateBuf.fromLengths_depthLE hflit)
+            (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hwf₂
+            (by
+              have hple₂ := Deflate.Correctness.readBits_pos_le br₁ 2 _ br₂ (by omega) hbt
+              simp only [ZipCommon.BitReader.bitPos]
+              rcases hpos₂ with h' | h' <;> omega)] at hdh
           unfold Zip.Native.Inflate.decodeHuffman at hdh
           -- Apply decodeHuffman_correct with fixed tables
           have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
@@ -599,7 +605,13 @@ theorem inflateLoop_correct (br : ZipCommon.BitReader)
             -- The loop runs the table-driven fast path; rewrite to the canonical
             -- spec via the proven equality, then unfold to `decodeHuffman.go`.
             rw [Zip.Native.Inflate.decodeHuffmanFast_eq br₃ output litTree distTree
-              maxOutputSize] at hdh
+              maxOutputSize (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).1
+              (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).2 hwf₃
+              (by
+                have hple₂ := Deflate.Correctness.readBits_pos_le br₁ 2 _ br₂ (by omega) hbt
+                have hple₃ := (Zip.Native.decodeDynamicTrees_inv br₂ br₃ litTree distTree hdt hpos₂ hple₂).2.2
+                simp only [ZipCommon.BitReader.bitPos]
+                rcases hpos₃ with h' | h' <;> omega)] at hdh
             unfold Zip.Native.Inflate.decodeHuffman at hdh
             -- Apply decodeHuffman_correct with dynamic tables
             have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=

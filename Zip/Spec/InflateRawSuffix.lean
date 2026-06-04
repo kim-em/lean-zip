@@ -477,6 +477,8 @@ local macro "bfinal_suffix_dispatch" : tactic =>
 private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
     (output : ByteArray) (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat)
     (result : ByteArray) (endPos : Nat)
+    (hflit : HuffTree.fromLengths Inflate.fixedLitLengths = .ok fixedLit)
+    (hfdist : HuffTree.fromLengths Inflate.fixedDistLengths = .ok fixedDist)
     (h : Inflate.inflateLoop br output fixedLit fixedDist maxOut dataSize =
       .ok (result, endPos)) :
     Inflate.inflateLoop (brAppend br suffix) output fixedLit fixedDist maxOut dataSize =
@@ -515,7 +517,19 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             rw [decodeStored_append br₂ suffix _ _ out' br' hds]; dsimp only []
             bfinal_suffix_dispatch
         · -- btype = 1: fixed Huffman
-          simp only [Inflate.decodeHuffmanFast_eq, Inflate.decodeHuffman] at h ⊢
+          -- `decodeHuffmanFast` is the buffered decoder; rewrite both the
+          -- original (in `h`) and the appended (in the goal) reader to the spec
+          -- decoder via the conditional equality, then unfold to `.go`.
+          have hbo₂ := Zip.Native.InflateBuf.readBits_bitOff_lt_pos (by omega) hbt
+          have hbp₂ := Deflate.Correctness.readBits_bitPos_le br₁ 2 _ br₂ (by omega) hbt
+          rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut
+            (Zip.Native.InflateBuf.fromLengths_depthLE hflit)
+            (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hbo₂ hbp₂] at h
+          rw [Inflate.decodeHuffmanFast_eq (brAppend br₂ suffix) output fixedLit fixedDist maxOut
+            (Zip.Native.InflateBuf.fromLengths_depthLE hflit)
+            (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hbo₂
+            (by simp only [ZipCommon.BitReader.bitPos, ByteArray.size_append]; omega)]
+          simp only [Inflate.decodeHuffman] at h ⊢
           cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂.data.size br₂ output with
           | error e => simp only [hdh] at h; exact nomatch h
           | ok v =>
@@ -530,7 +544,24 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
           | ok v =>
             obtain ⟨litT, distT, br₃⟩ := v; simp only [hdt] at h
             rw [decodeDynamicTrees_append br₂ suffix litT distT br₃ hdt]; dsimp only []
-            simp only [Inflate.decodeHuffmanFast_eq, Inflate.decodeHuffman] at h ⊢
+            -- well-formedness facts for `br₃` (output of `decodeDynamicTrees`)
+            have hbo₂ := Zip.Native.InflateBuf.readBits_bitOff_lt_pos (by omega) hbt
+            have hbp₂ := Deflate.Correctness.readBits_bitPos_le br₁ 2 _ br₂ (by omega) hbt
+            have hple₂ := Deflate.Correctness.readBits_pos_le br₁ 2 _ br₂ (by omega) hbt
+            have hdisj₂ : br₂.bitOff = 0 ∨ br₂.pos < br₂.data.size := by omega
+            obtain ⟨_, hdisj₃, hple₃⟩ :=
+              Zip.Native.decodeDynamicTrees_inv br₂ br₃ litT distT hdt hdisj₂ hple₂
+            have hbo₃ := Zip.Native.InflateBuf.decodeDynamicTrees_bitOff_pres hbo₂ hdt
+            have hbp₃ : br₃.pos * 8 + br₃.bitOff ≤ br₃.data.size * 8 := by
+              rcases hdisj₃ with h' | h' <;> omega
+            rw [Inflate.decodeHuffmanFast_eq br₃ output litT distT maxOut
+              (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).1
+              (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).2 hbo₃ hbp₃] at h
+            rw [Inflate.decodeHuffmanFast_eq (brAppend br₃ suffix) output litT distT maxOut
+              (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).1
+              (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).2 hbo₃
+              (by simp only [ZipCommon.BitReader.bitPos, ByteArray.size_append]; omega)]
+            simp only [Inflate.decodeHuffman] at h ⊢
             cases hdh : Inflate.decodeHuffman.go litT distT maxOut br₃.data.size br₃ output with
             | error e => simp only [hdh] at h; exact nomatch h
             | ok v₂ =>
@@ -559,7 +590,7 @@ theorem inflateRaw_append_suffix (data suffix : ByteArray) (startPos maxOut : Na
       simp only [hfdist] at h
       -- h has dataSize = data.size, goal has dataSize = (data ++ suffix).size
       have h' := inflateLoop_append_suffix ⟨data, startPos, 0⟩ suffix .empty
-        fixedLit fixedDist maxOut data.size result endPos h
+        fixedLit fixedDist maxOut data.size result endPos hflit hfdist h
       exact Deflate.Correctness.inflateLoop_fuel_le
         ⟨data ++ suffix, startPos, 0⟩ .empty fixedLit fixedDist maxOut
         data.size (data ++ suffix).size (result, endPos)
