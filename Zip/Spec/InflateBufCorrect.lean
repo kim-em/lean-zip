@@ -350,7 +350,7 @@ open HuffTree in
     high bits past the end of the stream. -/
 theorem peek_eq_refilled {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
-    (hr : 56 < cnt ∨ pos = data.size) :
+    (hr : 8 < cnt ∨ pos = data.size) :
     (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := by
   rcases hr with hc | hpos
   · exact peek_eq h hwf hdata (by omega)
@@ -397,6 +397,82 @@ theorem low_bit_eq {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt 
       have : (bitBuf &&& 1).toNat = (1 : UInt64).toNat := by rw [hand, hbit]; rfl
       exact UInt64.toNat_inj.mp this
     simp [h1]
+
+/-- All of `t`'s leaves lie at depth ≤ `d`, so a bit-walk reaches a leaf (or the
+    `empty` sentinel) within `d` steps. Trees from `fromLengths` with valid
+    DEFLATE code lengths (≤ 15) satisfy `treeDepthLE t 15`. -/
+def treeDepthLE : HuffTree → Nat → Prop
+  | .leaf _, _ => True
+  | .empty, _ => True
+  | .node _ _, 0 => False
+  | .node z o, d + 1 => treeDepthLE z d ∧ treeDepthLE o d
+
+/-- A successful `walkTree` consumes exactly `used` of the buffer's `cnt` bits. -/
+theorem walkTree_consumed (t : HuffTree) :
+    ∀ {bitBuf : UInt64} {cnt depth : Nat} {s bb c used},
+    walkTree t bitBuf cnt depth = .ok (s, bb, c, used) → c + used = cnt := by
+  induction t with
+  | leaf s' =>
+    intro bitBuf cnt depth s bb c used h
+    simp only [walkTree, Except.ok.injEq, Prod.mk.injEq] at h; omega
+  | empty => intro bitBuf cnt depth s bb c used h; simp only [walkTree] at h; exact absurd h (by simp)
+  | node z o ihz iho =>
+    intro bitBuf cnt depth s bb c used h
+    rw [walkTree] at h
+    by_cases hd : depth > 20
+    · rw [if_pos hd] at h; exact absurd h (by simp)
+    · rw [if_neg hd] at h
+      by_cases hc0 : cnt = 0
+      · rw [if_pos hc0] at h; exact absurd h (by simp)
+      · rw [if_neg hc0] at h
+        cases hrec : walkTree (if bitBuf &&& 1 == 0 then z else o) (bitBuf >>> 1) (cnt - 1) (depth + 1) with
+        | error e => rw [hrec] at h; exact absurd h (by simp)
+        | ok p =>
+          obtain ⟨s', b', c', u'⟩ := p
+          rw [hrec] at h
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, _, hc, hused⟩ := h
+          subst hc; subst hused
+          have hrc : c' + u' = cnt - 1 := by
+            by_cases hbit : (bitBuf &&& 1 == 0) = true
+            · rw [if_pos hbit] at hrec; exact ihz hrec
+            · rw [if_neg hbit] at hrec; exact iho hrec
+          omega
+
+/-- A successful `walkTree` on a depth-≤`D` tree consumes at most `D` bits. -/
+theorem walkTree_used_le (t : HuffTree) :
+    ∀ {bitBuf : UInt64} {cnt depth D : Nat} {s bb c used},
+    walkTree t bitBuf cnt depth = .ok (s, bb, c, used) → treeDepthLE t D → used ≤ D := by
+  induction t with
+  | leaf s' =>
+    intro bitBuf cnt depth D s bb c used h _
+    simp only [walkTree, Except.ok.injEq, Prod.mk.injEq] at h; omega
+  | empty => intro bitBuf cnt depth D s bb c used h _; simp only [walkTree] at h; exact absurd h (by simp)
+  | node z o ihz iho =>
+    intro bitBuf cnt depth D s bb c used h hD
+    rw [walkTree] at h
+    by_cases hd : depth > 20
+    · rw [if_pos hd] at h; exact absurd h (by simp)
+    · rw [if_neg hd] at h
+      by_cases hc0 : cnt = 0
+      · rw [if_pos hc0] at h; exact absurd h (by simp)
+      · rw [if_neg hc0] at h
+        cases hrec : walkTree (if bitBuf &&& 1 == 0 then z else o) (bitBuf >>> 1) (cnt - 1) (depth + 1) with
+        | error e => rw [hrec] at h; exact absurd h (by simp)
+        | ok p =>
+          obtain ⟨s', b', c', u'⟩ := p
+          rw [hrec] at h
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨_, _, _, hused⟩ := h
+          subst hused
+          -- depth-≤D node: D = D'+1 with both subtrees depth ≤ D'
+          match D, hD with
+          | D' + 1, ⟨hz, ho⟩ =>
+            have hu' : u' ≤ D' := by
+              by_cases hbit : (bitBuf &&& 1 == 0) = true
+              · rw [if_pos hbit] at hrec; exact ihz hrec hz
+              · rw [if_neg hbit] at hrec; exact iho hrec ho
+            omega
 
 /-- **`walkTree` corresponds to `decode.go`.** Under the buffer invariant and the
     maintainable side condition `pos = data.size ∨ 21 < depth + cnt` (either the
@@ -520,12 +596,13 @@ open HuffTree in
 theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
     {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
-    (hr : 56 < cnt ∨ pos = data.size)
-    (hlen : (table[(bitBuf &&& 0x1FF).toNat]!).2.toNat ≤ 9) :
+    (hr : 21 < cnt ∨ pos = data.size)
+    (hlen : (table[(bitBuf &&& 0x1FF).toNat]!).2.toNat ≤ 9) (hdep : treeDepthLE tree 15) :
     match HuffTree.decodeWithTable tree table br, decodeSym tree table bitBuf cnt with
     | .error e1, .error e2 => e1 = e2
     | .ok (s1, br'), .ok (s2, bb, c, used) =>
-        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c ≤ cnt
+        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8
+          ∧ c ≤ cnt ∧ cnt - c ≤ 15
     | _, _ => False := by
   have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
   have hsp := h.span; have hple := h.posLe
@@ -536,7 +613,8 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
     by_cases hpe : br.pos ≥ br.data.size
     · rw [if_pos hpe]; exact ⟨by omega, fun _ => by omega⟩
     · rw [if_neg hpe]; exact ⟨by omega, fun hh => by subst hh; omega⟩
-  have hidx : (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := peek_eq_refilled h hwf hdata hr
+  have hidx : (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat :=
+    peek_eq_refilled h hwf hdata (hr.imp (fun hc => by omega) id)
   rw [hidx] at hlen
   unfold HuffTree.decodeWithTable decodeSym
   rw [if_neg (show ¬ br.bitOff ≥ 8 from by omega), hidx]
@@ -560,14 +638,16 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
     rcases hgo : HuffTree.decode.go tree br 0 with _ | ⟨s1, br'⟩
     · rw [hwc.2 _ hgo]
     · obtain ⟨bb, c, used, hwt, hbc, hbd, hbo, hle⟩ := hwc.1 s1 br' hgo
-      rw [hwt]; exact ⟨rfl, hbc, hbd, hbo, hle⟩
+      have hcons := walkTree_consumed tree hwt
+      have huse := walkTree_used_le tree hwt hdep
+      rw [hwt]; exact ⟨rfl, hbc, hbd, hbo, hle, by omega⟩
   · -- table hit
     rw [if_neg (by rw [hgd]; exact hg), if_neg hg]
     simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or, Nat.not_lt] at hg
     obtain ⟨hne, hle⟩ := hg
     have hcc := consume_corr h hle (show entry.2.toNat < 64 from by omega)
     have hbpe : ({ br with pos := br.pos + (br.bitOff + entry.2.toNat) / 8, bitOff := (br.bitOff + entry.2.toNat) % 8 } : BitReader).bitPos = br.bitPos + entry.2.toNat := by simp only [BitReader.bitPos]; omega
-    exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide), Nat.sub_le cnt _⟩
+    exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide), Nat.sub_le cnt _, by omega⟩
 
 /-- Every `buildTable` entry's code length is at most `fastBits = 9`
     (the table walk stops at `fastBits`, or returns the `0` sentinel). -/
@@ -594,13 +674,14 @@ theorem buf_idx_lt (bitBuf : UInt64) : (bitBuf &&& 0x1FF).toNat < 2 ^ HuffTree.f
 theorem decodeSym_corr' (tree : HuffTree)
     {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
-    (hr : 56 < cnt ∨ pos = data.size) :
+    (hr : 21 < cnt ∨ pos = data.size) (hdep : treeDepthLE tree 15) :
     match HuffTree.decodeWithTable tree tree.buildTable br, decodeSym tree tree.buildTable bitBuf cnt with
     | .error e1, .error e2 => e1 = e2
     | .ok (s1, br'), .ok (s2, bb, c, used) =>
-        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c ≤ cnt
+        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8
+          ∧ c ≤ cnt ∧ cnt - c ≤ 15
     | _, _ => False :=
-  decodeSym_corr tree tree.buildTable h hwf hdata hr (buildTable_codeLen_le tree _ (buf_idx_lt bitBuf))
+  decodeSym_corr tree tree.buildTable h hwf hdata hr (buildTable_codeLen_le tree _ (buf_idx_lt bitBuf)) hdep
 
 set_option maxRecDepth 4000 in
 open HuffTree in
@@ -608,7 +689,8 @@ open HuffTree in
     equals `Inflate.decodeHuffmanFast.go`: same output/error, and on success the
     final buffer corresponds to the final reader. `go` refills internally, so the
     only precondition is the buffer invariant. -/
-theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : ByteArray} :
+theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : ByteArray}
+    (hldep : treeDepthLE litTree 15) (hddep : treeDepthLE distTree 15) :
     ∀ (br : BitReader) (output : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat),
     BufCorr data br.bitPos pos bitBuf cnt → br.bitOff < 8 → br.data = data →
     match Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable distTree.buildTable
@@ -629,7 +711,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
     rcases hrf : refill data pos bitBuf cnt with ⟨pos1, bitBuf1, cnt1⟩
     obtain ⟨hbc1, hr1⟩ := refill_corr hbc hrf
     -- decodeSym ↔ decodeWithTable (literal symbol)
-    have hsy := decodeSym_corr' litTree hbc1 hwf hdata hr1
+    have hsy := decodeSym_corr' litTree hbc1 hwf hdata (hr1.imp (fun h => by omega) id) hldep
     -- Split on the symbol decode BEFORE unfolding the loop bodies: while `go` is
     -- still an opaque application the goal contains no `decodeWithTable`/`decodeSym`
     -- subterm, so the `cases` does no `kabstract` over the giant inlined body. We
@@ -652,7 +734,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
       | ok p2 =>
         obtain ⟨sym2, bb, c, used⟩ := p2
         rw [hdwt, hds2] at hsy
-        obtain ⟨hsym, hbc2, hbd2, hbo2, hcle⟩ := hsy
+        obtain ⟨hsym, hbc2, hbd2, hbo2, hcle, hcons⟩ := hsy
         -- Bridge sym/sym2 via `hsym` on the small proof terms only; never `subst`
         -- (substituting into the giant inlined body forces an expensive whnf).
         -- key: the buffer's tracked position equals br₁.bitPos (uses c ≤ cnt1)
