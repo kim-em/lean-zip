@@ -1164,3 +1164,144 @@ theorem readBits_bitOff_lt_pos {br br' : BitReader} {n : Nat} {v : UInt32} (hn :
     (h : br.readBits n = .ok (v, br')) : br'.bitOff < 8 := by
   obtain ⟨m, rfl⟩ : ∃ m, n = m + 1 := ⟨n - 1, by omega⟩
   exact readBits_go_bitOff_lt_pos m br 0 0 v br' h
+
+/-- `HuffTree.decode.go` preserves `bitOff < 8`. -/
+theorem decode_go_bitOff_pres : ∀ (t : HuffTree) (br : BitReader) (depth : Nat) (s : UInt16) (br' : BitReader),
+    br.bitOff < 8 → HuffTree.decode.go t br depth = .ok (s, br') → br'.bitOff < 8 := by
+  intro t
+  induction t with
+  | leaf s =>
+    intro br depth s' br' hbo h
+    simp only [HuffTree.decode.go, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h; exact hbo
+  | empty => intro br depth s' br' hbo h; simp [HuffTree.decode.go] at h
+  | node z o ihz iho =>
+    intro br depth s' br' hbo h
+    rw [HuffTree.decode.go] at h
+    by_cases hd : depth > 20
+    · rw [if_pos hd] at h; simp at h
+    · rw [if_neg hd] at h
+      cases hrb : br.readBit with
+      | error e => rw [hrb] at h; simp [bind, Except.bind] at h
+      | ok p =>
+        obtain ⟨bit, br1⟩ := p
+        rw [hrb] at h
+        simp only [bind, Except.bind] at h
+        have hbo1 : br1.bitOff < 8 := ZipCommon.readBit_bitOff_lt br br1 bit hrb
+        by_cases hbit : (bit == 0) = true
+        · rw [if_pos hbit] at h; exact ihz br1 _ s' br' hbo1 h
+        · rw [if_neg hbit] at h; exact iho br1 _ s' br' hbo1 h
+
+theorem decode_bitOff_pres {tree : HuffTree} {br br' : BitReader} {s : UInt16}
+    (hbo : br.bitOff < 8) (h : tree.decode br = .ok (s, br')) : br'.bitOff < 8 :=
+  decode_go_bitOff_pres tree br 0 s br' hbo h
+
+/-- `readCLCodeLengths` preserves `bitOff < 8`. -/
+theorem readCLCodeLengths_bitOff_pres (numCodeLen : Nat) :
+    ∀ (br : BitReader) (cl : Array UInt8) (i : Nat) (cl' : Array UInt8) (br' : BitReader),
+      br.bitOff < 8 → Inflate.readCLCodeLengths br cl i numCodeLen = .ok (cl', br') → br'.bitOff < 8 := by
+  intro br cl i
+  induction br, cl, i using Inflate.readCLCodeLengths.induct (numCodeLen := numCodeLen) with
+  | case1 br cl i hlt h_i ih =>
+    intro cl' br' hbo h
+    rw [Inflate.readCLCodeLengths, if_pos hlt, dif_pos h_i] at h
+    simp only [bind, Except.bind] at h
+    cases hrb : br.readBits 3 with
+    | error e => rw [hrb] at h; simp at h
+    | ok p =>
+      obtain ⟨v, br1⟩ := p
+      rw [hrb] at h; simp only [] at h
+      exact ih v br1 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
+  | case2 br cl i hlt h_ni =>
+    intro cl' br' hbo h
+    rw [Inflate.readCLCodeLengths, if_pos hlt, dif_neg h_ni] at h; simp at h
+  | case3 br cl i hni =>
+    intro cl' br' hbo h
+    rw [Inflate.readCLCodeLengths, if_neg hni, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h; exact hbo
+
+/-- `decodeCLSymbols` preserves `bitOff < 8`. -/
+theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
+    ∀ (br : BitReader) (cl : Array UInt8) (idx : Nat) (cl' : Array UInt8) (br' : BitReader),
+      br.bitOff < 8 → Inflate.decodeCLSymbols clTree br cl idx totalCodes = .ok (cl', br') →
+      br'.bitOff < 8 := by
+  intro br cl idx
+  induction br, cl, idx using Inflate.decodeCLSymbols.induct (totalCodes := totalCodes) with
+  | case1 br cl idx hge =>
+    intro cl' br' hbo h
+    rw [Inflate.decodeCLSymbols, if_pos hge, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h; exact hbo
+  | case2 br cl idx hge ih_set ih16 ih17 ih18 =>
+    intro cl' br' hbo h
+    rw [Inflate.decodeCLSymbols, if_neg hge] at h
+    simp only [bind, Except.bind] at h
+    cases hdec : clTree.decode br with
+    | error e => rw [hdec] at h; simp at h
+    | ok p =>
+      obtain ⟨sym, br1⟩ := p
+      rw [hdec] at h; simp only [] at h
+      have hbo1 : br1.bitOff < 8 := decode_bitOff_pres hbo hdec
+      by_cases hs16 : sym < 16
+      · rw [if_pos hs16] at h; exact ih_set sym br1 cl' br' hbo1 h
+      · rw [if_neg hs16] at h
+        by_cases he16 : (sym == 16) = true
+        · rw [if_pos he16] at h
+          by_cases hi0 : (idx == 0) = true
+          · rw [if_pos hi0] at h; simp [bind, Except.bind] at h
+          · rw [if_neg hi0] at h; simp only [bind, Except.bind, pure, Except.pure] at h
+            by_cases hcl : idx - 1 < cl.size
+            · rw [dif_pos hcl] at h
+              cases hrb : br1.readBits 2 with
+              | error e => rw [hrb] at h; simp at h
+              | ok q =>
+                obtain ⟨rep, br2⟩ := q; rw [hrb] at h; simp only [] at h
+                split at h
+                · simp at h
+                · exact ih16 hcl rep br2 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
+            · rw [dif_neg hcl] at h; simp at h
+        · rw [if_neg he16] at h
+          by_cases he17 : (sym == 17) = true
+          · rw [if_pos he17] at h
+            cases hrb : br1.readBits 3 with
+            | error e => rw [hrb] at h; simp at h
+            | ok q =>
+              obtain ⟨rep, br2⟩ := q; rw [hrb] at h; simp only [] at h
+              split at h
+              · simp at h
+              · exact ih17 rep br2 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
+          · rw [if_neg he17] at h
+            by_cases he18 : (sym == 18) = true
+            · rw [if_pos he18] at h
+              cases hrb : br1.readBits 7 with
+              | error e => rw [hrb] at h; simp at h
+              | ok q =>
+                obtain ⟨rep, br2⟩ := q; rw [hrb] at h; simp only [] at h
+                split at h
+                · simp at h
+                · exact ih18 rep br2 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
+            · rw [if_neg he18] at h; simp at h
+
+/-- `decodeDynamicTrees` preserves `bitOff < 8`. -/
+theorem decodeDynamicTrees_bitOff_pres {br : BitReader} {litTree distTree : HuffTree} {br' : BitReader}
+    (hbo : br.bitOff < 8) (h : Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br')) :
+    br'.bitOff < 8 := by
+  have bind_ok : ∀ {α β : Type} (e : Except String α) (f : α → Except String β) (r : β),
+      (e >>= f) = .ok r → ∃ a, e = .ok a ∧ f a = .ok r := by
+    intro α β e f r he
+    cases e with
+    | error e => simp [bind, Except.bind] at he
+    | ok a => exact ⟨a, rfl, by simpa only [bind, Except.bind] using he⟩
+  unfold Inflate.decodeDynamicTrees at h
+  obtain ⟨⟨_, br1⟩, h1, h⟩ := bind_ok _ _ _ h
+  obtain ⟨⟨_, br2⟩, h2, h⟩ := bind_ok _ _ _ h
+  obtain ⟨⟨_, br3⟩, h3, h⟩ := bind_ok _ _ _ h
+  obtain ⟨⟨_, br4⟩, h4, h⟩ := bind_ok _ _ _ h
+  obtain ⟨clTree, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨⟨_, br5⟩, h6, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨_, _, rfl⟩ := h
+  have hb3 := readBits_bitOff_lt_pos (by omega) h3
+  have hb4 := readCLCodeLengths_bitOff_pres _ br3 _ _ _ _ hb3 h4
+  exact decodeCLSymbols_bitOff_pres clTree _ br4 _ _ _ _ hb4 h6
