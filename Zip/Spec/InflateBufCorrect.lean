@@ -995,3 +995,57 @@ theorem insert_go_depthLE (code : UInt32) (symbol : UInt16) :
       by_cases hbit : ((code >>> n.toUInt32) &&& 1) == 0
       · rw [if_pos hbit]; exact ⟨ih D' z hz (by omega), ho⟩
       · rw [if_neg hbit]; exact ⟨hz, ih D' o ho (by omega)⟩
+
+/-- `insert` keeps every leaf within depth `D` (code length `len ≤ D`). -/
+theorem insert_depthLE {t : HuffTree} {D : Nat} (code : UInt32) (len : Nat) (symbol : UInt16)
+    (hT : treeDepthLE t D) (hlen : len ≤ D) : treeDepthLE (t.insert code len symbol) D :=
+  insert_go_depthLE code symbol len D t hT hlen
+
+/-- `insertLoop` preserves the depth bound when every code length is `≤ maxBits`. -/
+theorem insertLoop_depthLE (lengths : Array UInt8) (maxBits : Nat)
+    (hlen : ∀ i (h : i < lengths.size), (lengths[i]'h).toNat ≤ maxBits) :
+    ∀ (nextCode : Array UInt32) (start : Nat) (tree : HuffTree), treeDepthLE tree maxBits →
+      treeDepthLE (HuffTree.insertLoop lengths nextCode start tree).1 maxBits := by
+  intro nextCode start tree
+  induction nextCode, start, tree using HuffTree.insertLoop.induct (lengths := lengths) with
+  | case1 nextCode start tree h len hpos hsz c tree' nextCode' ih =>
+    intro hT
+    rw [HuffTree.insertLoop, dif_pos h, if_pos hpos, dif_pos hsz]
+    exact ih (insert_depthLE _ _ _ hT (hlen start h))
+  | case2 nextCode start tree h len hpos hsz ih =>
+    intro hT
+    rw [HuffTree.insertLoop, dif_pos h, if_pos hpos, dif_neg hsz]
+    exact ih hT
+  | case3 nextCode start tree h len hpos ih =>
+    intro hT
+    rw [HuffTree.insertLoop, dif_pos h, if_neg hpos]
+    exact ih hT
+  | case4 nextCode start tree h =>
+    intro hT
+    rw [HuffTree.insertLoop, dif_neg h]
+    exact hT
+
+/-- The canonical tree built from `≤ maxBits` code lengths has depth `≤ maxBits`. -/
+theorem fromLengthsTree_depthLE (lengths : Array UInt8) (maxBits : Nat)
+    (hlen : ∀ i (h : i < lengths.size), (lengths[i]'h).toNat ≤ maxBits) :
+    treeDepthLE (HuffTree.fromLengthsTree lengths maxBits) maxBits := by
+  unfold HuffTree.fromLengthsTree
+  exact insertLoop_depthLE lengths maxBits hlen _ 0 .empty True.intro
+
+/-- A validated `fromLengths` tree has depth `≤ maxBits`. -/
+theorem fromLengths_depthLE {lengths : Array UInt8} {maxBits : Nat} {tree : HuffTree}
+    (h : HuffTree.fromLengths lengths maxBits = .ok tree) : treeDepthLE tree maxBits := by
+  unfold HuffTree.fromLengths at h
+  simp only [] at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i hany
+    split at h
+    · exact absurd h (by simp)
+    · simp only [Except.ok.injEq] at h
+      subst h
+      refine fromLengthsTree_depthLE lengths maxBits (fun i hi => ?_)
+      have hf : lengths.any (fun l => decide (l.toNat > maxBits)) = false := by simpa using hany
+      have hi2 := (Array.any_eq_false.mp hf) i hi
+      simp only [decide_eq_true_eq, gt_iff_lt, Nat.not_lt] at hi2
+      exact hi2
