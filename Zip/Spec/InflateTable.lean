@@ -8,7 +8,7 @@ import Zip.Spec.ReadBitsFastCorrect
 `HuffTree.decodeWithTable (buildTable tree)` (the fast-bits lookup decoder,
 `Zip/Native/Inflate.lean`) is proven **equal** to the canonical bit-by-bit
 `HuffTree.decode` tree walk — same symbol, same consumed `BitReader`, same
-error behaviour. From that single-symbol lemma, `decodeHuffmanFast` (which the
+error behaviour. From that single-symbol lemma, `decodeHuffmanFastBR` (which the
 block loop runs) is proven equal to `decodeHuffman` (the canonical spec), so
 every existing inflate correctness proof transfers with one rewrite. There is
 no `@[implemented_by]` trust gap: the fast path is on the verified route.
@@ -406,13 +406,13 @@ set_option maxHeartbeats 1000000 in
     `decodeHuffman`: the two `.go` recursions have identical structure once each
     `decodeWithTable` is rewritten to `decode` via `decodeWithTable_eq`. By
     functional induction on `decodeHuffman.go`. -/
-theorem decodeHuffmanFast_eq (br : BitReader) (output : ByteArray)
+theorem decodeHuffmanFastBR_eq (br : BitReader) (output : ByteArray)
     (litTree distTree : HuffTree) (maxOut : Nat) :
-    Inflate.decodeHuffmanFast br output litTree distTree maxOut
+    Inflate.decodeHuffmanFastBR br output litTree distTree maxOut
       = Inflate.decodeHuffman br output litTree distTree maxOut := by
-  unfold Inflate.decodeHuffmanFast Inflate.decodeHuffman
+  unfold Inflate.decodeHuffmanFastBR Inflate.decodeHuffman
   suffices H : ∀ (dataSize : Nat) (br : BitReader) (output : ByteArray),
-      Inflate.decodeHuffmanFast.go litTree distTree maxOut
+      Inflate.decodeHuffmanFastBR.go litTree distTree maxOut
           litTree.buildTable distTree.buildTable dataSize br output
         = Inflate.decodeHuffman.go litTree distTree maxOut dataSize br output by
     exact H br.data.size br output
@@ -420,7 +420,7 @@ theorem decodeHuffmanFast_eq (br : BitReader) (output : ByteArray)
   induction br, output using
       Inflate.decodeHuffman.go.induct (maxOutputSize := maxOut) (dataSize := dataSize) with
   | _ br output ih_lit ih_ld =>
-    unfold Inflate.decodeHuffmanFast.go Inflate.decodeHuffman.go
+    unfold Inflate.decodeHuffmanFastBR.go Inflate.decodeHuffman.go
     rw [HuffTree.decodeWithTable_eq litTree br]
     cases hlit : litTree.decode br with
     | error e => rfl

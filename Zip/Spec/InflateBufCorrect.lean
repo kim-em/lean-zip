@@ -7,7 +7,7 @@ import Zip.Native.InflateBuf
 
 `Zip.Native.InflateBuf.decodeHuffmanFastBuf` threads the bit cursor as scalars
 `(pos, bitBuf : UInt64, cnt)` and is proven **equal** to the canonical
-`Inflate.decodeHuffmanFast` (which threads a `BitReader`), so the verified
+`Inflate.decodeHuffmanFastBR` (which threads a `BitReader`), so the verified
 `inflate` can adopt the faster reader with no trust gap.
 
 The bridge is the buffer invariant `BufCorr`: `bitBuf` holds `cnt` valid low
@@ -765,14 +765,14 @@ theorem decodeSym_corr' (tree : HuffTree)
 set_option maxRecDepth 4000 in
 open HuffTree in
 /-- **The block loop corresponds.** The wide-buffer Huffman symbol loop `go`
-    equals `Inflate.decodeHuffmanFast.go`: same output/error, and on success the
+    equals `Inflate.decodeHuffmanFastBR.go`: same output/error, and on success the
     final buffer corresponds to the final reader. `go` refills internally, so the
     only precondition is the buffer invariant. -/
 theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : ByteArray}
     (hldep : treeDepthLE litTree 15) (hddep : treeDepthLE distTree 15) :
     ∀ (br : BitReader) (output : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat),
     BufCorr data br.bitPos pos bitBuf cnt → br.bitOff < 8 → br.data = data →
-    match Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable distTree.buildTable
+    match Inflate.decodeHuffmanFastBR.go litTree distTree maxOut litTree.buildTable distTree.buildTable
             dataSize br output,
           go litTree.buildTable distTree.buildTable data litTree distTree maxOut dataSize pos bitBuf cnt
             br.bitPos output with
@@ -782,7 +782,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
           ∧ bitpos' = br'.bitPos
     | _, _ => False := by
   intro br output
-  induction br, output using Inflate.decodeHuffmanFast.go.induct
+  induction br, output using Inflate.decodeHuffmanFastBR.go.induct
       (maxOutputSize := maxOut) (dataSize := dataSize) with
   | _ br output ih_lit ih_ld =>
     intro pos bitBuf cnt hbc hwf hdata
@@ -800,7 +800,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
       cases hds2 : decodeSym litTree litTree.buildTable bitBuf1 cnt1 with
       | error e2 =>
         rw [hdwt, hds2] at hsy
-        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+        rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
         dsimp only []
         rw [hdwt, hds2]
         dsimp only [bind, Except.bind]
@@ -822,7 +822,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
           have := hbc1.span; have := hbc2.span; omega
         by_cases hlt : sym < 256
         · -- literal
-          rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+          rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
           dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
           rw [if_pos hlt, if_pos hlt, hkey]
           by_cases hmax : output.size ≥ maxOut
@@ -837,13 +837,13 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                 exact ih_lit sym br₁ hp1 hp2 pos1 bb c hbc2 hbo2 hbd2
         · by_cases hs256 : (sym == 256) = true
           · -- end of block: both return the current state
-            rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+            rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
             dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
             rw [if_neg hlt, if_neg hlt, if_pos hs256, if_pos hs256, hkey]
             exact ⟨rfl, hbc2, hbd2, hbo2, rfl⟩
           · by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
             · -- invalid length code: both throw the same message
-              rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+              rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
               dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
               rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_pos hidx, dif_pos hidx]
             · -- valid length/distance back-reference
@@ -861,7 +861,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
               cases hXe : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]'hN1).toNat with
               | error e1 =>
                 have hYe := htc_e.2 e1 hXe
-                rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                 dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
                 rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
                   readBitsFast_eq br₁, hXe, hYe]
@@ -880,7 +880,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                   cases hYd : decodeSym distTree distTree.buildTable bb2 c2 with
                   | error e2 =>
                     rw [hXd, hYd] at htd
-                    rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                    rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                     dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
                     rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
                       readBitsFast_eq br₁, hXe, hYe]
@@ -899,7 +899,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                     subst hdsym
                     by_cases hdidx : distSym.toNat ≥ Inflate.distBase.size
                     · -- invalid distance code: both throw the same message
-                      rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                      rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                       dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
                       rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
                         readBitsFast_eq br₁, hXe, hYe]
@@ -920,7 +920,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                       cases hXde : br₃.readBits (Inflate.distExtra[distSym.toNat]'hdN3).toNat with
                       | error e1 =>
                         have hYde := htc_de.2 e1 hXde
-                        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                        rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                         dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
                         rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
                           readBitsFast_eq br₁, hXe, hYe]
@@ -934,7 +934,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                         -- final reader position after the whole back-reference
                         have hkey4 : br.bitPos + (cnt1 - c4) = br₄.bitPos := by
                           have := hbc1.span; have := hbc5.span; omega
-                        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                        rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                         dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
                         rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
                           readBitsFast_eq br₁, hXe, hYe]
@@ -1061,7 +1061,7 @@ theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
     (hldep : treeDepthLE litTree 15) (hddep : treeDepthLE distTree 15)
     (hwf : br.bitOff < 8) (hbp : br.bitPos ≤ br.data.size * 8) :
     InflateBuf.decodeHuffmanFastBuf br output litTree distTree maxOut
-      = Inflate.decodeHuffmanFast br output litTree distTree maxOut := by
+      = Inflate.decodeHuffmanFastBR br output litTree distTree maxOut := by
   have hbpe : br.bitPos = br.pos * 8 + br.bitOff := rfl
   have hposle : br.pos ≤ br.data.size := by omega
   have hbc0 : BufCorr br.data (br.pos * 8) br.pos 0 0 :=
@@ -1076,21 +1076,21 @@ theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
     consume_corr hbc1 hboff (by omega)
   have hco := go_corr litTree distTree maxOut br.data.size hldep hddep br output pos0
     (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) hbc2 hwf rfl
-  unfold InflateBuf.decodeHuffmanFastBuf Inflate.decodeHuffmanFast
+  unfold InflateBuf.decodeHuffmanFastBuf Inflate.decodeHuffmanFastBR
   rw [hrf]
   dsimp only []
   simp only [BitReader.bitPos] at hco
   cases hgoB : InflateBuf.go litTree.buildTable distTree.buildTable br.data litTree distTree maxOut
       br.data.size pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) (br.pos * 8 + br.bitOff) output with
   | error eB =>
-    cases hgoA : Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable
+    cases hgoA : Inflate.decodeHuffmanFastBR.go litTree distTree maxOut litTree.buildTable
         distTree.buildTable br.data.size br output with
     | error eA =>
       rw [hgoA, hgoB] at hco; simp only [bind, Except.bind]; exact congrArg Except.error hco.symm
     | ok pA => rw [hgoA, hgoB] at hco; exact absurd hco (by simp)
   | ok pB =>
     obtain ⟨out2, pos', bitBuf', cnt', bitpos'⟩ := pB
-    cases hgoA : Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable
+    cases hgoA : Inflate.decodeHuffmanFastBR.go litTree distTree maxOut litTree.buildTable
         distTree.buildTable br.data.size br output with
     | error eA => rw [hgoA, hgoB] at hco; exact absurd hco (by simp)
     | ok pA =>
@@ -1307,6 +1307,35 @@ theorem decodeDynamicTrees_bitOff_pres {br : BitReader} {litTree distTree : Huff
   have hb4 := readCLCodeLengths_bitOff_pres _ br3 _ _ _ _ hb3 h4
   exact decodeCLSymbols_bitOff_pres clTree _ br4 _ _ _ _ hb4 h6
 
+end Zip.Native.InflateBuf
+
+namespace Zip.Native.Inflate
+open ZipCommon (BitReader)
+
+/-- **`decodeHuffmanFast` = `decodeHuffman`** (the canonical spec), for depth-≤15
+    trees and a well-formed reader. The default fast decoder delegates to the
+    wide-buffer `InflateBuf.decodeHuffmanFastBuf`, which equals the BitReader
+    reference `decodeHuffmanFastBR` (`decodeHuffmanFastBuf_eq`), which equals
+    `decodeHuffman` (`decodeHuffmanFastBR_eq`). Every inflate correctness proof
+    transfers through this single (conditional) rewrite — the conditions
+    (tree depth ≤ 15, well-formed reader) hold at every call site, discharged
+    via `fromLengths_depthLE` / `decodeDynamicTrees_depthLE` and the reader
+    invariant suite. -/
+theorem decodeHuffmanFast_eq (br : BitReader) (output : ByteArray)
+    (litTree distTree : HuffTree) (maxOut : Nat)
+    (hldep : InflateBuf.treeDepthLE litTree 15) (hddep : InflateBuf.treeDepthLE distTree 15)
+    (hwf : br.bitOff < 8) (hbp : br.bitPos ≤ br.data.size * 8) :
+    Inflate.decodeHuffmanFast br output litTree distTree maxOut
+      = Inflate.decodeHuffman br output litTree distTree maxOut := by
+  show InflateBuf.decodeHuffmanFastBuf br output litTree distTree maxOut = _
+  rw [InflateBuf.decodeHuffmanFastBuf_eq br output litTree distTree maxOut hldep hddep hwf hbp]
+  exact Inflate.decodeHuffmanFastBR_eq br output litTree distTree maxOut
+
+end Zip.Native.Inflate
+
+namespace Zip.Native.InflateBuf
+open ZipCommon (BitReader)
+
 /-- Bind congruence: equal-on-success continuations give equal binds. -/
 theorem except_bind_congr {α β : Type} {e : Except String α} {f g : α → Except String β}
     (h : ∀ a, e = .ok a → f a = g a) : (e >>= f) = (e >>= g) := by
@@ -1337,24 +1366,14 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
       rw [hd₂, (ZipCommon.readBits_data_eq br br₁ 1 bfinal hrb1)]; exact hds
     have hwf₂ : br₂.bitPos ≤ br₂.data.size * 8 := by
       simp only [ZipCommon.BitReader.bitPos]; rcases hp₂ with h | h <;> omega
+    -- `Inflate.decodeHuffmanFast` *is* the buffered decoder (delegation), so the
+    -- two loop bodies use defeq decoders; the bridge is now `rfl`.
     have h1 : InflateBuf.decodeHuffmanFastBuf br₂ output fixedLit fixedDist maxOut
-        = Inflate.decodeHuffmanFast br₂ output fixedLit fixedDist maxOut :=
-      decodeHuffmanFastBuf_eq br₂ output fixedLit fixedDist maxOut hldep hddep hbo₂ hwf₂
+        = Inflate.decodeHuffmanFast br₂ output fixedLit fixedDist maxOut := rfl
     have h2 : (Inflate.decodeDynamicTrees br₂ >>= fun (l, d, br₃) =>
           InflateBuf.decodeHuffmanFastBuf br₃ output l d maxOut)
         = (Inflate.decodeDynamicTrees br₂ >>= fun (l, d, br₃) =>
-          Inflate.decodeHuffmanFast br₃ output l d maxOut) := by
-      cases hdt : Inflate.decodeDynamicTrees br₂ with
-      | error e => simp [bind, Except.bind, hdt]
-      | ok p =>
-        obtain ⟨l, d, br₃⟩ := p
-        simp only [hdt, bind, Except.bind]
-        obtain ⟨hld, hdd⟩ := decodeDynamicTrees_depthLE hdt
-        obtain ⟨hd3, hp3, hl3⟩ := Zip.Native.decodeDynamicTrees_inv br₂ br₃ l d hdt hp₂ hl₂
-        have hbo3 := decodeDynamicTrees_bitOff_pres hbo₂ hdt
-        have hwf3 : br₃.bitPos ≤ br₃.data.size * 8 := by
-          simp only [ZipCommon.BitReader.bitPos]; rcases hp3 with h | h <;> omega
-        exact decodeHuffmanFastBuf_eq br₃ output l d maxOut hld hdd hbo3 hwf3
+          Inflate.decodeHuffmanFast br₃ output l d maxOut) := rfl
     have hinv : ∀ (o' : ByteArray) (br' : BitReader),
         (match btype with
           | 0 => Inflate.decodeStored br₂ output maxOut
@@ -1368,7 +1387,8 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
       · obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeStored_inv br₂ br' output o' maxOut h
         exact ⟨hp', hl', by rw [hd']; exact hdata₂⟩
       · have hhf' : Inflate.decodeHuffman br₂ output fixedLit fixedDist maxOut = .ok (o', br') := by
-          rw [← Inflate.decodeHuffmanFast_eq]; exact h
+          rw [← Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut hldep hddep hbo₂ hwf₂]
+          exact h
         obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv fixedLit fixedDist br₂ br' output o' maxOut hhf' hp₂ hl₂
         exact ⟨hp', hl', by rw [hd']; exact hdata₂⟩
       · simp only [bind, Except.bind] at h
@@ -1379,8 +1399,12 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
           rw [hdt] at h; simp only [] at h
           obtain ⟨hd3, hp3, hl3⟩ := Zip.Native.decodeDynamicTrees_inv br₂ br₃ l d hdt hp₂ hl₂
           have hd3' : br₃.data.size = dataSize := by rw [hd3]; exact hdata₂
+          obtain ⟨hld, hdd⟩ := decodeDynamicTrees_depthLE hdt
+          have hbo3 := decodeDynamicTrees_bitOff_pres hbo₂ hdt
+          have hwf3 : br₃.bitPos ≤ br₃.data.size * 8 := by
+            simp only [ZipCommon.BitReader.bitPos]; rcases hp3 with h' | h' <;> omega
           have hhf' : Inflate.decodeHuffman br₃ output l d maxOut = .ok (o', br') := by
-            rw [← Inflate.decodeHuffmanFast_eq]; exact h
+            rw [← Inflate.decodeHuffmanFast_eq br₃ output l d maxOut hld hdd hbo3 hwf3]; exact h
           obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv l d br₃ br' output o' maxOut hhf' hp3 hl3
           exact ⟨hp', hl', by rw [hd']; exact hd3'⟩
       · exact nomatch h
@@ -1431,13 +1455,14 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
         have hbo3 := decodeDynamicTrees_bitOff_pres hbo₂ hdt
         have hwf3 : br₃.bitPos ≤ br₃.data.size * 8 := by
           simp only [ZipCommon.BitReader.bitPos]; rcases hp3 with h | h <;> omega
-        rw [decodeHuffmanFastBuf_eq br₃ output l d maxOut hld hdd hbo3 hwf3]
+        rw [show InflateBuf.decodeHuffmanFastBuf br₃ output l d maxOut
+              = Inflate.decodeHuffmanFast br₃ output l d maxOut from rfl]
         cases hhf : Inflate.decodeHuffmanFast br₃ output l d maxOut with
         | error e => rfl
         | ok q =>
           obtain ⟨o', br'⟩ := q
           have hhf' : Inflate.decodeHuffman br₃ output l d maxOut = .ok (o', br') := by
-            rw [← Inflate.decodeHuffmanFast_eq]; exact hhf
+            rw [← Inflate.decodeHuffmanFast_eq br₃ output l d maxOut hld hdd hbo3 hwf3]; exact hhf
           obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv l d br₃ br' output o' maxOut hhf' hp3 hl3
           simp only [hhf]; exact tail o' br' hp' hl' (by rw [hd', hd3]; exact hdata₂)
     · simp only [bind, Except.bind]

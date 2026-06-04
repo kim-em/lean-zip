@@ -355,7 +355,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                 simp only [bind, Except.bind,
                   hrb_bf, hrb_bt,
                   Zip.Native.Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist
-                    maxOutputSize,
+                    maxOutputSize (Zip.Native.InflateBuf.fromLengths_depthLE hflit) (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hwf₂ (by simp only [ZipCommon.BitReader.bitPos]; rcases hpos₂ with h' | h' <;> omega),
                   hdh_native,
                   show Nat.toUInt32 1 = (1 : UInt32) from rfl]
                 have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
@@ -405,7 +405,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   simp only [bind, Except.bind,
                     hrb_bf, hrb_bt,
                     Zip.Native.Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist
-                      maxOutputSize,
+                      maxOutputSize (Zip.Native.InflateBuf.fromLengths_depthLE hflit) (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hwf₂ (by simp only [ZipCommon.BitReader.bitPos]; rcases hpos₂ with h' | h' <;> omega),
                     hdh_native,
                     show Nat.toUInt32 1 = (1 : UInt32) from rfl]
                   have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false
@@ -474,7 +474,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                   simp only [bind, Except.bind,
                     hrb_bf, hrb_bt, hdt_nat,
                     Zip.Native.Inflate.decodeHuffmanFast_eq br₃ output litTree distTree
-                      maxOutputSize,
+                      maxOutputSize (Zip.Native.InflateBuf.fromLengths_depthLE hflit_d) (Zip.Native.InflateBuf.fromLengths_depthLE hfdist_d) hwf₃ (by simp only [ZipCommon.BitReader.bitPos]; rcases hpos₃ with h' | h' <;> omega),
                     hdh_native,
                     show Nat.toUInt32 2 = (2 : UInt32) from rfl]
                   have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_true bfinal_val hval_bf hbf1
@@ -521,7 +521,7 @@ theorem inflateLoop_complete (br : ZipCommon.BitReader)
                     simp only [bind, Except.bind,
                       hrb_bf, hrb_bt, hdt_nat,
                       Zip.Native.Inflate.decodeHuffmanFast_eq br₃ output litTree distTree
-                        maxOutputSize,
+                        maxOutputSize (Zip.Native.InflateBuf.fromLengths_depthLE hflit_d) (Zip.Native.InflateBuf.fromLengths_depthLE hfdist_d) hwf₃ (by simp only [ZipCommon.BitReader.bitPos]; rcases hpos₃ with h' | h' <;> omega),
                       hdh_native,
                       show Nat.toUInt32 2 = (2 : UInt32) from rfl]
                     have hbf_u32 := Deflate.Correctness.nat_beq_to_uint32_eq_false

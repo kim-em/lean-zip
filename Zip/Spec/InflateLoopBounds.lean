@@ -33,6 +33,8 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
     (result : ByteArray) (endPos : Nat)
     (hpos : br.bitOff = 0 ∨ br.pos < br.data.size)
     (hple : br.pos ≤ br.data.size)
+    (hflit : HuffTree.fromLengths Inflate.fixedLitLengths = .ok fixedLit)
+    (hfdist : HuffTree.fromLengths Inflate.fixedDistLengths = .ok fixedDist)
     (h : Inflate.inflateLoop br output fixedLit fixedDist maxOut dataSize =
       .ok (result, endPos)) :
     endPos ≤ br.data.size := by
@@ -102,7 +104,13 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
         · -- btype = 1: fixed Huffman
           split at h; · exact nomatch h
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
-            rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut] at hdh
+            rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut
+              (Zip.Native.InflateBuf.fromLengths_depthLE hflit)
+              (Zip.Native.InflateBuf.fromLengths_depthLE hfdist)
+              (Zip.Native.InflateBuf.readBits_bitOff_lt_pos (by omega) hbt)
+              (by
+                have hbo₂ := Zip.Native.InflateBuf.readBits_bitOff_lt_pos (by omega) hbt
+                simp only [ZipCommon.BitReader.bitPos]; rcases hpos₂ with h' | h' <;> omega)] at hdh
             have ⟨hd, hp, hl⟩ := decodeHuffman_inv fixedLit fixedDist br₂ br' output out'
               maxOut hdh hpos₂ hple₂
             exact post_block br' out' (hd.trans (hd₂.trans hd₁)) hp hl h
@@ -112,7 +120,15 @@ theorem inflateLoop_endPos_le (br : BitReader) (output : ByteArray)
             have ⟨hd₃, hpos₃, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litT distT hdt hpos₂ hple₂
             split at h; · exact nomatch h
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
-              rw [Inflate.decodeHuffmanFast_eq br₃ output litT distT maxOut] at hdh
+              rw [Inflate.decodeHuffmanFast_eq br₃ output litT distT maxOut
+                (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).1
+                (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).2
+                (Zip.Native.InflateBuf.decodeDynamicTrees_bitOff_pres
+                  (Zip.Native.InflateBuf.readBits_bitOff_lt_pos (by omega) hbt) hdt)
+                (by
+                  have hbo₃ := Zip.Native.InflateBuf.decodeDynamicTrees_bitOff_pres
+                    (Zip.Native.InflateBuf.readBits_bitOff_lt_pos (by omega) hbt) hdt
+                  simp only [ZipCommon.BitReader.bitPos]; rcases hpos₃ with h' | h' <;> omega)] at hdh
               unfold Inflate.decodeHuffman at hdh
               have ⟨hd, hp, hl⟩ := decodeHuffman_go_inv litT distT br₃ br' output out'
                 maxOut _ hdh hpos₃ hple₃
@@ -237,7 +253,10 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
         · -- btype = 1: fixed Huffman
           split at h; · exact nomatch h
           · rename_i v hdh; obtain ⟨out', br'⟩ := v; simp only [] at hdh h
-            rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut] at hdh
+            rw [Inflate.decodeHuffmanFast_eq br₂ output fixedLit fixedDist maxOut
+              (Zip.Native.InflateBuf.fromLengths_depthLE hflit)
+              (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hwf₂
+              (by simp only [ZipCommon.BitReader.bitPos]; rcases hpos₂ with h' | h' <;> omega)] at hdh
             unfold Inflate.decodeHuffman at hdh
             have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
               decodeHuffman_correct
@@ -295,7 +314,10 @@ private theorem inflateLoop_to_goR (br : BitReader) (output : ByteArray)
             have ⟨hd₃, _, hple₃⟩ := decodeDynamicTrees_inv br₂ br₃ litTree distTree hdt hpos₂ hple₂
             split at h; · exact nomatch h
             · rename_i v₂ hdh; obtain ⟨out', br'⟩ := v₂; simp only [] at hdh h
-              rw [Inflate.decodeHuffmanFast_eq br₃ output litTree distTree maxOut] at hdh
+              rw [Inflate.decodeHuffmanFast_eq br₃ output litTree distTree maxOut
+                (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).1
+                (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).2 hwf₃
+                (by simp only [ZipCommon.BitReader.bitPos]; rcases hpos₃ with h' | h' <;> omega)] at hdh
               unfold Inflate.decodeHuffman at hdh
               have ⟨syms, rest, hspec_ds, hresolve, hrest, hwf', hpos'⟩ :=
                 decodeHuffman_correct litLens distLens
@@ -417,7 +439,7 @@ theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
             BitReader.readBits, BitReader.readBits.go, hfail] at h
           exact nomatch h
       exact inflateLoop_endPos_le ⟨data, startPos, 0⟩ .empty fixedLit fixedDist
-        maxOut data.size result endPos (Or.inl rfl) hple h
+        maxOut data.size result endPos (Or.inl rfl) hple hflit hfdist h
 
 /-! ## alignToByte lower bound from short remaining bits -/
 

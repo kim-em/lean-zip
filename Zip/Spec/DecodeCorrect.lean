@@ -263,6 +263,108 @@ theorem readBits_pos_inv (br : ZipCommon.BitReader)
   simp only [ZipCommon.BitReader.readBits] at h
   exact readBits_go_pos_inv br 0 0 n val br' hwf hpos h
 
+/-- A successful `readBit` leaves `pos ≤ data.size`: reading requires a current
+    byte (`pos < size`), after which `pos` is unchanged or advanced by one. -/
+private theorem readBit_pos_le (br : ZipCommon.BitReader)
+    (bit : UInt32) (br' : ZipCommon.BitReader)
+    (h : br.readBit = .ok (bit, br')) : br'.pos ≤ br'.data.size := by
+  simp only [ZipCommon.BitReader.readBit] at h
+  split at h
+  · exact nomatch h
+  · rename_i hpos
+    split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    · obtain ⟨_, rfl⟩ := h; dsimp only; omega
+    · obtain ⟨_, rfl⟩ := h; dsimp only; omega
+
+/-- `readBits.go` keeps `pos ≤ data.size` (preserved from the incoming reader;
+    each `readBit` step re-establishes it unconditionally on success). -/
+private theorem readBits_go_pos_le (br : ZipCommon.BitReader)
+    (acc : UInt32) (shift k : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
+    (hple : br.pos ≤ br.data.size)
+    (h : ZipCommon.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    br'.pos ≤ br'.data.size := by
+  induction k generalizing br acc shift with
+  | zero =>
+    simp only [ZipCommon.BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hple
+  | succ k ih =>
+    simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind] at h
+    cases hrd : br.readBit with
+    | error e => simp only [hrd] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrd] at h
+      exact ih br₁ _ _ (readBit_pos_le br bit br₁ hrd) h
+
+/-- A successful `readBits` of at least one bit leaves `pos ≤ data.size`. -/
+theorem readBits_pos_le (br : ZipCommon.BitReader)
+    (n : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
+    (hn : 1 ≤ n) (h : br.readBits n = .ok (val, br')) :
+    br'.pos ≤ br'.data.size := by
+  simp only [ZipCommon.BitReader.readBits] at h
+  cases n with
+  | zero => omega
+  | succ m =>
+    simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind] at h
+    cases hrd : br.readBit with
+    | error e => simp only [hrd] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrd] at h
+      exact readBits_go_pos_le br₁ _ _ m val br' (readBit_pos_le br bit br₁ hrd) h
+
+/-- A successful `readBit` leaves `bitPos ≤ data.size * 8`: it reads from the
+    current byte (`pos < size`), leaving `pos` mid-byte or advanced to `≤ size`
+    with `bitOff = 0`. -/
+private theorem readBit_bitPos_le (br : ZipCommon.BitReader)
+    (bit : UInt32) (br' : ZipCommon.BitReader)
+    (h : br.readBit = .ok (bit, br')) :
+    br'.pos * 8 + br'.bitOff ≤ br'.data.size * 8 := by
+  simp only [ZipCommon.BitReader.readBit] at h
+  split at h
+  · exact nomatch h
+  · rename_i hpos
+    split at h <;> simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    · obtain ⟨_, rfl⟩ := h; dsimp only; omega
+    · obtain ⟨_, rfl⟩ := h; dsimp only; omega
+
+/-- `readBits.go` keeps `bitPos ≤ data.size * 8` (each `readBit` step
+    re-establishes it unconditionally on success). -/
+private theorem readBits_go_bitPos_le (br : ZipCommon.BitReader)
+    (acc : UInt32) (shift k : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
+    (hb : br.pos * 8 + br.bitOff ≤ br.data.size * 8)
+    (h : ZipCommon.BitReader.readBits.go br acc shift k = .ok (val, br')) :
+    br'.pos * 8 + br'.bitOff ≤ br'.data.size * 8 := by
+  induction k generalizing br acc shift with
+  | zero =>
+    simp only [ZipCommon.BitReader.readBits.go] at h
+    obtain ⟨_, rfl⟩ := Except.ok.inj h; exact hb
+  | succ k ih =>
+    simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind] at h
+    cases hrd : br.readBit with
+    | error e => simp only [hrd] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrd] at h
+      exact ih br₁ _ _ (readBit_bitPos_le br bit br₁ hrd) h
+
+/-- A successful `readBits` of at least one bit leaves `bitPos ≤ data.size * 8`. -/
+theorem readBits_bitPos_le (br : ZipCommon.BitReader)
+    (n : Nat) (val : UInt32) (br' : ZipCommon.BitReader)
+    (hn : 1 ≤ n) (h : br.readBits n = .ok (val, br')) :
+    br'.pos * 8 + br'.bitOff ≤ br'.data.size * 8 := by
+  simp only [ZipCommon.BitReader.readBits] at h
+  cases n with
+  | zero => omega
+  | succ m =>
+    simp only [ZipCommon.BitReader.readBits.go, bind, Except.bind] at h
+    cases hrd : br.readBit with
+    | error e => simp only [hrd] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrd] at h
+      exact readBits_go_bitPos_le br₁ _ _ m val br' (readBit_bitPos_le br bit br₁ hrd) h
+
 /-- `HuffTree.decode.go` preserves the position invariant. -/
 private theorem decode_go_pos_inv (tree : Zip.Native.HuffTree)
     (br : ZipCommon.BitReader) (n : Nat) (sym : UInt16)
