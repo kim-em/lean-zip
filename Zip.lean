@@ -45,6 +45,8 @@ import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.DeflateFixedTables
 import Zip.Spec.EmitTokensCorrect
 import Zip.Spec.DeflateFixedCorrect
+import Zip.Spec.InflateBufCorrect
+import Zip.Spec.InflateBufRoundtrip
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.DeflateDynamicEmit
 import Zip.Spec.DeflateDynamicHeader

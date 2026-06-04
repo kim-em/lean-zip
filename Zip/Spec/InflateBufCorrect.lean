@@ -1314,7 +1314,6 @@ theorem except_bind_congr {α β : Type} {e : Except String α} {f g : α → Ex
   | error e => rfl
   | ok a => simp only [bind, Except.bind]; exact h a rfl
 
-set_option maxHeartbeats 800000 in
 /-- **The block loop corresponds.** `inflateLoopBuf` equals `inflateLoop`. -/
 theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat)
     (hldep : treeDepthLE fixedLit 15) (hddep : treeDepthLE fixedDist 15) :
@@ -1442,3 +1441,19 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
           obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv l d br₃ br' output o' maxOut hhf' hp3 hl3
           simp only [hhf]; exact tail o' br' hp' hl' (by rw [hd', hd3]; exact hdata₂)
     · simp only [bind, Except.bind]
+
+/-- **`InflateBuf.inflate` equals the verified `Inflate.inflate`.** The wide-buffer
+    decoder is a drop-in replacement with no trust gap. -/
+theorem inflate_eq (data : ByteArray) (maxOut : Nat) :
+    InflateBuf.inflate data maxOut = Inflate.inflate data maxOut := by
+  unfold InflateBuf.inflate Inflate.inflate Inflate.inflateRaw
+  cases hfl : HuffTree.fromLengths Inflate.fixedLitLengths with
+  | error e => simp only [hfl, bind, Except.bind]
+  | ok fixedLit =>
+    cases hfd : HuffTree.fromLengths Inflate.fixedDistLengths with
+    | error e => simp only [hfl, hfd, bind, Except.bind]
+    | ok fixedDist =>
+      simp only [hfl, hfd, bind, Except.bind]
+      rw [inflateLoopBuf_eq fixedLit fixedDist maxOut data.size
+        (fromLengths_depthLE hfl) (fromLengths_depthLE hfd)
+        { data := data, pos := 0, bitOff := 0 } .empty (Or.inl rfl) (Nat.zero_le _) rfl]
