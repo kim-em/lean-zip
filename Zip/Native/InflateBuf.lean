@@ -109,7 +109,7 @@ def go (litTable distTable : Array (UInt16 × UInt8))
             let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
             let (dExtraBits, bitBuf, cnt) ← takeBits bitBuf cnt dExtra.toNat
             let distance := dBase.toNat + dExtraBits
-            if h0 : distance = 0 then throw "Inflate: zero back-reference distance"
+            if h0 : distance = 0 then throw s!"Inflate: zero back-reference distance"
             else if hds : distance > output.size then
               throw s!"Inflate: distance {distance} exceeds output size {output.size}"
             else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"

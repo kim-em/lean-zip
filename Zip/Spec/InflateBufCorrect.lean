@@ -867,5 +867,101 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
               | ok pe =>
                 obtain ⟨extraBits, br₂⟩ := pe
                 obtain ⟨eb, bb2, c2, hYe, hval_e, hbc3, hbd3, hbo3, hc2eq⟩ := htc_e.1 extraBits br₂ hXe
-                sorry
+                subst hval_e
+                -- distance symbol decode (enough bits left after lit+lenExtra, or EOF)
+                have hbud_d : 21 < c2 ∨ pos1 = data.size := by
+                  rcases hr1 with h56 | hp
+                  · exact Or.inl (by omega)
+                  · exact Or.inr hp
+                have htd := decodeSym_corr' distTree hbc3 hbo3 hbd3 hbud_d hddep
+                cases hXd : distTree.decodeWithTable distTree.buildTable br₂ with
+                | error e1 =>
+                  cases hYd : decodeSym distTree distTree.buildTable bb2 c2 with
+                  | error e2 =>
+                    rw [hXd, hYd] at htd
+                    rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                    dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+                    rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                      readBitsFast_eq br₁, hXe, hYe]
+                    dsimp only [bind, Except.bind]
+                    rw [hXd, hYd]
+                    exact htd
+                  | ok q => rw [hXd, hYd] at htd; exact absurd htd (by simp)
+                | ok pd =>
+                  obtain ⟨distSym, br₃⟩ := pd
+                  cases hYd : decodeSym distTree distTree.buildTable bb2 c2 with
+                  | error e2 => rw [hXd, hYd] at htd; exact absurd htd (by simp)
+                  | ok q =>
+                    obtain ⟨dsymB, bb3, c3, dused⟩ := q
+                    rw [hXd, hYd] at htd
+                    obtain ⟨hdsym, hbc4, hbd4, hbo4, hc3le, hc3cons⟩ := htd
+                    subst hdsym
+                    by_cases hdidx : distSym.toNat ≥ Inflate.distBase.size
+                    · -- invalid distance code: both throw the same message
+                      rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                      dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+                      rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                        readBitsFast_eq br₁, hXe, hYe]
+                      dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
+                      rw [dif_pos hdidx, dif_pos hdidx]
+                    · -- valid distance: read distance-extra bits
+                      have hdN3 : distSym.toNat < Inflate.distExtra.size := by
+                        rw [Inflate.distExtra_size]; simp only [Inflate.distBase_size] at hdidx; omega
+                      have hde13 : (Inflate.distExtra[distSym.toNat]'hdN3).toNat ≤ 13 := by
+                        have hb : ∀ i : Fin 30, (Inflate.distExtra[i.val]!).toNat ≤ 13 := by decide
+                        have hh := hb ⟨distSym.toNat, by rw [← Inflate.distExtra_size]; exact hdN3⟩
+                        rwa [getElem!_pos] at hh
+                      have hbud_de : (Inflate.distExtra[distSym.toNat]'hdN3).toNat ≤ c3 ∨ pos1 = data.size := by
+                        rcases hr1 with h56 | hp
+                        · exact Or.inl (by omega)
+                        · exact Or.inr hp
+                      have htc_de := takeBits_corr hbc4 hbo4 hbd4 hbud_de (by omega) (by omega)
+                      cases hXde : br₃.readBits (Inflate.distExtra[distSym.toNat]'hdN3).toNat with
+                      | error e1 =>
+                        have hYde := htc_de.2 e1 hXde
+                        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                        dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+                        rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                          readBitsFast_eq br₁, hXe, hYe]
+                        dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
+                        rw [dif_neg hdidx, dif_neg hdidx, readBitsFast_eq br₃, hXde, hYde]
+                      | ok pde =>
+                        obtain ⟨dExtraBits, br₄⟩ := pde
+                        obtain ⟨deb, bb4, c4, hYde, hval_de, hbc5, hbd5, hbo5, hc4eq⟩ :=
+                          htc_de.1 dExtraBits br₄ hXde
+                        subst hval_de
+                        -- final reader position after the whole back-reference
+                        have hkey4 : br.bitPos + (cnt1 - c4) = br₄.bitPos := by
+                          have := hbc1.span; have := hbc5.span; omega
+                        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+                        dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+                        rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                          readBitsFast_eq br₁, hXe, hYe]
+                        dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
+                        rw [dif_neg hdidx, dif_neg hdidx, readBitsFast_eq br₃, hXde, hYde]
+                        dsimp only [bind, Except.bind]
+                        -- distance/length now share the same expression on both sides
+                        by_cases hd0 : (Inflate.distBase[distSym.toNat]'(Nat.not_le.mp hdidx)).toNat + dExtraBits.toNat = 0
+                        · rw [dif_pos hd0, dif_pos hd0]
+                        · rw [dif_neg hd0, dif_neg hd0]
+                          by_cases hds : (Inflate.distBase[distSym.toNat]'(Nat.not_le.mp hdidx)).toNat + dExtraBits.toNat > output.size
+                          · rw [dif_pos hds, dif_pos hds]
+                          · rw [dif_neg hds, dif_neg hds]
+                            by_cases hmax2 : output.size + ((Inflate.lengthBase[sym.toNat - 257]'(Nat.not_le.mp hidx)).toNat + extraBits.toNat) > maxOut
+                            · rw [if_pos hmax2, if_pos hmax2]
+                            · rw [if_neg hmax2, if_neg hmax2]
+                              -- progress guards: A uses br₄.bitPos, B uses the tracked bitpos (= it by hkey4)
+                              by_cases hp1 : br₄.bitPos ≤ br.bitPos
+                              · rw [dif_pos hp1,
+                                  dif_pos (show br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
+                              · rw [dif_neg hp1,
+                                  dif_neg (show ¬ br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
+                                by_cases hp2 : dataSize * 8 < br₄.bitPos
+                                · rw [dif_pos hp2,
+                                    dif_pos (show dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
+                                · rw [dif_neg hp2,
+                                    dif_neg (show ¬ dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
+                                  simp only [hkey4]
+                                  exact ih_ld sym hidx extraBits distSym hdidx dExtraBits br₄
+                                    hd0 hds hp1 hp2 pos1 bb4 c4 hbc5 hbo5 hbd5
 
