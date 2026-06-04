@@ -58,10 +58,14 @@ def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt depth : Nat) :
   if len == 0 || len > cnt then walkTree tree bitBuf cnt 0
   else .ok (entry.1, bitBuf >>> len.toUInt64, cnt - len, len)
 
-/-- Read `n` (≤ cnt) bits LSB-first from the buffer without refilling. -/
-@[inline] def takeBits (bitBuf : UInt64) (cnt n : Nat) : Nat × UInt64 × Nat :=
-  let v := (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat
-  (v, bitBuf >>> n.toUInt64, cnt - n)
+/-- Read `n` bits LSB-first from the buffer without refilling. Errors (like
+    `readBitsFast`) when the buffer holds fewer than `n` bits — for a refilled
+    buffer this only fires at true end-of-input on a truncated stream. -/
+@[inline] def takeBits (bitBuf : UInt64) (cnt n : Nat) : Except String (Nat × UInt64 × Nat) :=
+  if n > cnt then .error "BitReader: unexpected end of input"
+  else
+    let v := (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat
+    .ok (v, bitBuf >>> n.toUInt64, cnt - n)
 
 set_option maxRecDepth 4096 in
 /-- Wide-buffer Huffman symbol loop (mirrors `Inflate.decodeHuffmanFast.go`).
@@ -93,7 +97,7 @@ def go (litTable distTable : Array (UInt16 × UInt8))
       else
         let base := Inflate.lengthBase[idx]
         let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
-        let (extraBits, bitBuf, cnt) := takeBits bitBuf cnt extra.toNat
+        let (extraBits, bitBuf, cnt) ← takeBits bitBuf cnt extra.toNat
         let length := base.toNat + extraBits
         match decodeSym distTree distTable bitBuf cnt with
         | .error e => .error e
@@ -103,7 +107,7 @@ def go (litTable distTable : Array (UInt16 × UInt8))
           else
             let dBase := Inflate.distBase[dIdx]
             let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
-            let (dExtraBits, bitBuf, cnt) := takeBits bitBuf cnt dExtra.toNat
+            let (dExtraBits, bitBuf, cnt) ← takeBits bitBuf cnt dExtra.toNat
             let distance := dBase.toNat + dExtraBits
             if h0 : distance = 0 then throw "Inflate: zero back-reference distance"
             else if hds : distance > output.size then

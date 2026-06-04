@@ -205,7 +205,7 @@ theorem takeBits_value {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf :
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
     {n : Nat} (hn : n ≤ cnt) (hn32 : n ≤ 32) (hn64 : n < 64)
     {val : UInt32} {br' : BitReader} (hread : br.readBits n = .ok (val, br')) :
-    val.toNat = (takeBits bitBuf cnt n).1 := by
+    val.toNat = (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat := by
   have hmlt0 : (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat < 2 ^ n := mask_lt hn64
   have hmb0 : ∀ i, i < n →
       (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat.testBit i = streamBit data (br.bitPos + i) :=
@@ -258,20 +258,86 @@ theorem readBits_bitOff_lt {br br' : BitReader} {n : Nat} {val : UInt32}
   unfold BitReader.readBits at h
   exact readBits_go_bitOff_lt br br' 0 0 n val hwf h
 
-/-- **`takeBits` corresponds to `readBits`.** Same value, and the resulting buffer
-    corresponds to the advanced reader (which stays well-formed). -/
+/-- A single `readBit` succeeds while in bounds, advancing the bit position by 1. -/
+theorem readBit_ok_of_inbounds (br : BitReader) (hwf : br.bitOff < 8) (hin : br.pos < br.data.size) :
+    ∃ bit br', br.readBit = .ok (bit, br') ∧ br'.bitPos = br.bitPos + 1
+      ∧ br'.bitOff < 8 ∧ br'.data = br.data := by
+  have hb : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  unfold BitReader.readBit
+  rw [if_neg (by omega)]
+  by_cases ho : br.bitOff + 1 ≥ 8
+  · rw [if_pos ho]
+    refine ⟨_, _, rfl, ?_, by show (0 : Nat) < 8; decide, rfl⟩
+    show (br.pos + 1) * 8 + 0 = br.bitPos + 1
+    omega
+  · rw [if_neg ho]
+    refine ⟨_, _, rfl, ?_, by show br.bitOff + 1 < 8; omega, rfl⟩
+    show br.pos * 8 + (br.bitOff + 1) = br.bitPos + 1
+    omega
+
+/-- `readBits.go` succeeds when the reader has at least `k` bits left. -/
+theorem readBits_go_avail : ∀ (k : Nat) (br : BitReader) (acc : UInt32) (shift : Nat), br.bitOff < 8 →
+    br.bitPos + k ≤ br.data.size * 8 → ∃ val br', BitReader.readBits.go br acc shift k = .ok (val, br') := by
+  intro k
+  induction k with
+  | zero => intro br acc shift _ _; exact ⟨acc, br, rfl⟩
+  | succ k ih =>
+    intro br acc shift hwf hb
+    have hin : br.pos < br.data.size := by
+      have : br.bitPos = br.pos * 8 + br.bitOff := rfl; omega
+    obtain ⟨bit, br1, hrb1, hbp1, hwf1, hdata1⟩ := readBit_ok_of_inbounds br hwf hin
+    simp only [BitReader.readBits.go, bind, Except.bind, hrb1]
+    exact ih br1 _ _ hwf1 (by rw [hbp1, hdata1]; omega)
+
+/-- `readBits.go` errors (with the standard message) when fewer than `k` bits remain. -/
+theorem readBits_go_error : ∀ (k : Nat) (br : BitReader) (acc : UInt32) (shift : Nat), br.bitOff < 8 →
+    br.bitPos ≤ br.data.size * 8 → br.data.size * 8 < br.bitPos + k →
+    BitReader.readBits.go br acc shift k = .error "BitReader: unexpected end of input" := by
+  intro k
+  induction k with
+  | zero => intro br acc shift _ hle hlt; omega
+  | succ k ih =>
+    intro br acc shift hwf hle hlt
+    simp only [BitReader.readBits.go, bind, Except.bind]
+    by_cases hpos : br.pos ≥ br.data.size
+    · rw [show br.readBit = .error "BitReader: unexpected end of input" from by
+        unfold BitReader.readBit; rw [if_pos hpos]]
+    · obtain ⟨bit, br1, hrb1, hbp1, hwf1, hdata1⟩ := readBit_ok_of_inbounds br hwf (by omega)
+      rw [hrb1]; simp only []
+      exact ih br1 _ _ hwf1 (by rw [hbp1, hdata1]; have : br.bitPos = br.pos*8+br.bitOff := rfl; omega)
+        (by rw [hbp1, hdata1]; omega)
+
+/-- **`takeBits` corresponds to `readBits`, totally.** Same value on success, the same
+    end-of-input error otherwise — given either enough buffered bits or true EOF (so the
+    buffer's `cnt` equals the reader's available bits). -/
 theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
-    {n : Nat} (hn : n ≤ cnt) (hn32 : n ≤ 32) (hn64 : n < 64)
-    {val : UInt32} {br' : BitReader} (hread : br.readBits n = .ok (val, br')) :
-    val.toNat = (takeBits bitBuf cnt n).1
-    ∧ BufCorr data br'.bitPos pos (takeBits bitBuf cnt n).2.1 (takeBits bitBuf cnt n).2.2
-    ∧ br'.data = data ∧ br'.bitOff < 8 := by
-  refine ⟨takeBits_value h hwf hdata hn hn32 hn64 hread, ?_, ?_, readBits_bitOff_lt hread hwf⟩
-  · have hbp : br'.bitPos = br.bitPos + n := ZipCommon.readBits_bitPos_eq br br' n val hread hwf
-    show BufCorr data br'.bitPos pos (bitBuf >>> n.toUInt64) (cnt - n)
-    rw [hbp]; exact consume_corr h hn hn64
-  · exact (ZipCommon.readBits_data_eq br br' n val hread).trans hdata
+    {n : Nat} (hr : n ≤ cnt ∨ pos = data.size) (hn32 : n ≤ 32) (hn64 : n < 64) :
+    match br.readBits n, takeBits bitBuf cnt n with
+    | .error e1, .error e2 => e1 = e2
+    | .ok (val, br'), .ok (v, bb, c') =>
+        val.toNat = v ∧ BufCorr data br'.bitPos pos bb c' ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c' ≤ cnt
+    | _, _ => False := by
+  have hsp := h.span; have hple := h.posLe
+  have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  have hds : br.data.size = data.size := by rw [hdata]
+  have hle : br.bitPos ≤ data.size * 8 := by omega
+  unfold takeBits
+  by_cases hnc : n > cnt
+  · -- EOF (else `hr` gives n ≤ cnt): both sides hit end of input
+    rw [if_pos hnc]
+    have hpos : pos = data.size := hr.resolve_left (by omega)
+    subst hpos
+    rw [BitReader.readBits, readBits_go_error n br 0 0 hwf (by rw [hds]; omega) (by rw [hds]; omega)]
+  · rw [if_neg hnc]
+    have hn : n ≤ cnt := by omega
+    obtain ⟨val, br', hread⟩ := readBits_go_avail n br 0 0 hwf (by rw [hds]; omega)
+    rw [show br.readBits n = BitReader.readBits.go br 0 0 n from rfl, hread]
+    have hbpe : br'.bitPos = br.bitPos + n := ZipCommon.readBits_bitPos_eq br br' n val hread hwf
+    refine ⟨takeBits_value h hwf hdata hn hn32 hn64 hread, ?_, ?_,
+      readBits_bitOff_lt hread hwf, Nat.sub_le cnt n⟩
+    · rw [hbpe]; exact consume_corr h hn hn64
+    · exact (ZipCommon.readBits_data_eq br br' n val hread).trans hdata
 
 /-- The buffer's 9-bit table index, bit by bit: the stream bit while `j < cnt`,
     else 0 (works for any `cnt`, unlike `mask_testBit`). -/
