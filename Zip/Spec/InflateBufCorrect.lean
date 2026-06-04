@@ -1106,3 +1106,61 @@ theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
       have ho : (pos' * 8 - cnt') % 8 = br'.bitOff := by
         rw [hend]; show (br'.pos * 8 + br'.bitOff) % 8 = br'.bitOff; omega
       rw [hbd'.symm, hp, ho]
+
+/-- The trees from `decodeDynamicTrees` have depth ≤ 15 (built by `fromLengths 15`). -/
+theorem decodeDynamicTrees_depthLE {br : BitReader} {litTree distTree : HuffTree} {br' : BitReader}
+    (h : Inflate.decodeDynamicTrees br = .ok (litTree, distTree, br')) :
+    treeDepthLE litTree 15 ∧ treeDepthLE distTree 15 := by
+  have bind_ok : ∀ {α β : Type} (e : Except String α) (f : α → Except String β) (r : β),
+      (e >>= f) = .ok r → ∃ a, e = .ok a ∧ f a = .ok r := by
+    intro α β e f r he
+    cases e with
+    | error e => simp [bind, Except.bind] at he
+    | ok a => exact ⟨a, rfl, by simpa only [bind, Except.bind] using he⟩
+  unfold Inflate.decodeDynamicTrees at h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨_, _, h⟩ := bind_ok _ _ _ h
+  obtain ⟨litT, hlit, h⟩ := bind_ok _ _ _ h
+  obtain ⟨distT, hdist, h⟩ := bind_ok _ _ _ h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl, _⟩ := h
+  exact ⟨fromLengths_depthLE hlit, fromLengths_depthLE hdist⟩
+
+/-! ## The block loop and `inflate` equal the reference -/
+
+/-- Any successful read of `≥ 1` bit leaves the reader byte-aligned-or-less
+    (`bitOff < 8`), regardless of the starting offset. -/
+theorem readBits_go_bitOff_lt_pos : ∀ (n : Nat) (br : BitReader) (acc : UInt32) (shift : Nat)
+    (v : UInt32) (br' : BitReader),
+    BitReader.readBits.go br acc shift (n + 1) = .ok (v, br') → br'.bitOff < 8 := by
+  intro n
+  induction n with
+  | zero =>
+    intro br acc shift v br' h
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => rw [hrb] at h; simp at h
+    | ok p =>
+      obtain ⟨bit, br1⟩ := p
+      rw [hrb] at h
+      simp only [BitReader.readBits.go, Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, rfl⟩ := h
+      exact ZipCommon.readBit_bitOff_lt br br1 bit hrb
+  | succ n ih =>
+    intro br acc shift v br' h
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => rw [hrb] at h; simp at h
+    | ok p =>
+      obtain ⟨bit, br1⟩ := p
+      rw [hrb] at h
+      exact ih br1 _ _ v br' h
+
+theorem readBits_bitOff_lt_pos {br br' : BitReader} {n : Nat} {v : UInt32} (hn : 0 < n)
+    (h : br.readBits n = .ok (v, br')) : br'.bitOff < 8 := by
+  obtain ⟨m, rfl⟩ : ∃ m, n = m + 1 := ⟨n - 1, by omega⟩
+  exact readBits_go_bitOff_lt_pos m br 0 0 v br' h
