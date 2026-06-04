@@ -132,4 +132,64 @@ theorem consume_corr {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cn
     have he : bitpos + (k + j) = bitpos + k + j := by omega
     rw [UInt64.toNat_shiftRight, hkmod, Nat.testBit_shiftRight, h.bits (k + j) hidx, he]
 
+/-- The low-`n`-bit mask `(1<<<n)-1` has Nat value `2^n - 1` (for `n < 64`). -/
+theorem mask_toNat {n : Nat} (hn : n < 64) :
+    ((1 <<< n.toUInt64) - 1 : UInt64).toNat = 2 ^ n - 1 := by
+  have hnm : n.toUInt64.toNat % 64 = n := by simp [Nat.toUInt64, UInt64.toNat_ofNat]; omega
+  have hpow : 2 ^ n < 2 ^ 64 := Nat.pow_lt_pow_right (by omega) hn
+  have h1 : (1 <<< n.toUInt64 : UInt64).toNat = 2 ^ n := by
+    rw [UInt64.toNat_shiftLeft, UInt64.toNat_one, hnm, Nat.shiftLeft_eq, Nat.one_mul,
+      Nat.mod_eq_of_lt hpow]
+  have hle : (1 : UInt64) ≤ 1 <<< n.toUInt64 := by
+    rw [UInt64.le_iff_toNat_le, UInt64.toNat_one, h1]; exact Nat.two_pow_pos n
+  rw [UInt64.toNat_sub_of_le _ _ hle, h1, UInt64.toNat_one]
+
+/-- The buffer's low-`n`-bit field (`j < n ≤ cnt`, `n < 64`) matches the stream. -/
+theorem mask_testBit {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data bitpos pos bitBuf cnt) {n : Nat} (hn : n ≤ cnt) (hn64 : n < 64)
+    {j : Nat} (hj : j < n) :
+    (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat.testBit j = streamBit data (bitpos + j) := by
+  rw [UInt64.toNat_and, mask_toNat hn64, Nat.and_two_pow_sub_one_eq_mod, Nat.testBit_mod_two_pow]
+  simp only [hj, decide_true, Bool.true_and]
+  exact h.bits j (by omega)
+
+/-- The masked field is `< 2^n`. -/
+theorem mask_lt {bitBuf : UInt64} {n : Nat} (hn64 : n < 64) :
+    (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat < 2 ^ n := by
+  rw [UInt64.toNat_and, mask_toNat hn64, Nat.and_two_pow_sub_one_eq_mod]
+  exact Nat.mod_lt _ (Nat.two_pow_pos n)
+
+open HuffTree in
+/-- `peekFast` is `(_ &&& 0x1FF)`, so its value is `< 512`. -/
+theorem peekFast_lt (br : BitReader) : (peekFast br).toNat < 512 := by
+  simp only [peekFast, UInt32.toNat_and]
+  exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
+
+open HuffTree in
+/-- **9-bit table peek matches `peekFast`** when the buffer holds ≥ 9 bits (the
+    common, non-EOF case). Both index the same 9 stream bits at the cursor. -/
+theorem peek_eq {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
+    (hcnt : 9 ≤ cnt) :
+    (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := by
+  have h9 : (0x1FF : UInt64) = (1 <<< (9 : Nat).toUInt64) - 1 := by decide
+  have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  apply Nat.eq_of_testBit_eq
+  intro j
+  by_cases hj9 : j < 9
+  · have hbuf : (bitBuf &&& 0x1FF).toNat.testBit j = streamBit data (br.bitPos + j) := by
+      rw [h9]; exact mask_testBit h (by omega) (by omega) hj9
+    have hin : br.pos * 8 + br.bitOff + j < br.data.size * 8 := by
+      have hs := h.span; have hp := h.posLe; rw [hdata, ← hbp]; omega
+    rw [hbuf, peekFast_testBit br j hwf (by simp only [fastBits]; omega) hin]
+    simp only [streamBit, ← hbp, hdata]
+  · have h2j : (512 : Nat) ≤ 2 ^ j := by
+      calc (512 : Nat) = 2 ^ 9 := by decide
+        _ ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega)
+    have hbuf : (bitBuf &&& 0x1FF).toNat.testBit j = false := by
+      apply Nat.testBit_lt_two_pow
+      rw [h9]; exact Nat.lt_of_lt_of_le (mask_lt (by omega)) (by
+        calc (2 : Nat) ^ 9 ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega))
+    rw [hbuf, Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (peekFast_lt br) h2j)]
+
 end Zip.Native.InflateBuf
