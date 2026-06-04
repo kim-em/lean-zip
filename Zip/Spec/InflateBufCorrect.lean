@@ -112,4 +112,24 @@ theorem refill_corr {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt
 termination_by data.size - pos
 decreasing_by simp_wf; omega
 
+/-- Consuming `k` (< 64) bits shifts the buffer right by `k` and advances the
+    cursor by `k`. The dual of `refill_step`; used by the initial align,
+    `takeBits`, and `decodeSym`. -/
+theorem consume_corr {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data bitpos pos bitBuf cnt) {k : Nat} (hk : k ≤ cnt) (hk64 : k < 64) :
+    BufCorr data (bitpos + k) pos (bitBuf >>> k.toUInt64) (cnt - k) := by
+  have hkmod : k.toUInt64.toNat % 64 = k := by simp [Nat.toUInt64, UInt64.toNat_ofNat]; omega
+  refine ⟨by have := h.span; omega, h.posLe, by have := h.cntLe; omega, ?_, ?_⟩
+  · -- high: (bitBuf >>> k).toNat < 2^(cnt-k)
+    rw [UInt64.toNat_shiftRight, hkmod, Nat.shiftRight_eq_div_pow]
+    apply Nat.div_lt_of_lt_mul
+    rw [Nat.mul_comm, ← Nat.pow_add]
+    have hck : cnt - k + k = cnt := by omega
+    rw [hck]; exact h.high
+  · -- bits shift down by k
+    intro j hj
+    have hidx : k + j < cnt := by omega
+    have he : bitpos + (k + j) = bitpos + k + j := by omega
+    rw [UInt64.toNat_shiftRight, hkmod, Nat.testBit_shiftRight, h.bits (k + j) hidx, he]
+
 end Zip.Native.InflateBuf
