@@ -513,4 +513,60 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
           have he : "BitReader: unexpected end of input" = e := by injection hgo
           rw [walkTree, if_neg hd, if_pos hc0, he]
 
+open HuffTree in
+/-- **`decodeSym` corresponds to `HuffTree.decodeWithTable`.** Same symbol/error,
+    and on success the resulting buffer corresponds to the advanced reader. The
+    table code length is bounded by `fastBits` (true for `buildTable`). -/
+theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
+    {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
+    (hr : 56 < cnt ∨ pos = data.size)
+    (hlen : (table[(bitBuf &&& 0x1FF).toNat]!).2.toNat ≤ 9) :
+    match HuffTree.decodeWithTable tree table br, decodeSym tree table bitBuf cnt with
+    | .error e1, .error e2 => e1 = e2
+    | .ok (s1, br'), .ok (s2, bb, c, used) =>
+        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8
+    | _, _ => False := by
+  have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  have hsp := h.span; have hple := h.posLe
+  have hds : br.data.size = data.size := by rw [hdata]
+  -- `cnt ≤ bitsAvail`, with equality when the input is exhausted
+  have hav : cnt ≤ HuffTree.bitsAvail br ∧ (pos = data.size → cnt = HuffTree.bitsAvail br) := by
+    unfold HuffTree.bitsAvail
+    by_cases hpe : br.pos ≥ br.data.size
+    · rw [if_pos hpe]; exact ⟨by omega, fun _ => by omega⟩
+    · rw [if_neg hpe]; exact ⟨by omega, fun hh => by subst hh; omega⟩
+  have hidx : (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := peek_eq_refilled h hwf hdata hr
+  rw [hidx] at hlen
+  unfold HuffTree.decodeWithTable decodeSym
+  rw [if_neg (show ¬ br.bitOff ≥ 8 from by omega), hidx]
+  simp only []
+  generalize hentry : table[(peekFast br).toNat]! = entry at hlen ⊢
+  -- the two guards have the same truth value (cnt vs bitsAvail, with len ≤ 9)
+  have hgd : (entry.2.toNat == 0 || decide (entry.2.toNat > HuffTree.bitsAvail br))
+           = (entry.2.toNat == 0 || decide (entry.2.toNat > cnt)) := by
+    rcases hr with hc | hpe
+    · have h1 : ¬ entry.2.toNat > HuffTree.bitsAvail br := by have := hav.1; omega
+      have h2 : ¬ entry.2.toNat > cnt := by omega
+      simp [h1, h2]
+    · rw [hav.2 hpe]
+  by_cases hg : (entry.2.toNat == 0 || decide (entry.2.toNat > cnt)) = true
+  · -- fallback: walkTree ↔ decode
+    rw [if_pos (hgd.trans hg), if_pos hg, HuffTree.decode]
+    have hwc := walkTree_corr (depth := 0) tree h hwf hdata (by
+      rcases hr with hc | hpe
+      · exact Or.inr (by omega)
+      · exact Or.inl hpe)
+    rcases hgo : HuffTree.decode.go tree br 0 with _ | ⟨s1, br'⟩
+    · rw [hwc.2 _ hgo]
+    · obtain ⟨bb, c, used, hwt, hbc, hbd, hbo⟩ := hwc.1 s1 br' hgo
+      rw [hwt]; exact ⟨rfl, hbc, hbd, hbo⟩
+  · -- table hit
+    rw [if_neg (by rw [hgd]; exact hg), if_neg hg]
+    simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or, Nat.not_lt] at hg
+    obtain ⟨hne, hle⟩ := hg
+    have hcc := consume_corr h hle (show entry.2.toNat < 64 from by omega)
+    have hbpe : ({ br with pos := br.pos + (br.bitOff + entry.2.toNat) / 8, bitOff := (br.bitOff + entry.2.toNat) % 8 } : BitReader).bitPos = br.bitPos + entry.2.toNat := by simp only [BitReader.bitPos]; omega
+    exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide)⟩
+
 end Zip.Native.InflateBuf
