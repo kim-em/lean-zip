@@ -539,11 +539,72 @@ private theorem extract_data_toList_ofFn (buf : ByteArray) (start length : Nat)
       List.getElem_drop, List.getElem_ofFn]
     rw [getElem!_pos buf.data.toList (start + i) (by omega)]
 
+/-- Element access into a `ByteArray` extract: slot `m` of `[start, start+len)`
+    is `buf[start + m]`. -/
+private theorem extract_getElem! (buf : ByteArray) (start m len : Nat)
+    (h : start + len ≤ buf.size) (hm : m < len) :
+    (buf.extract start (start + len)).data.toList[m]! = buf.data.toList[start + m]! := by
+  rw [extract_data_toList_ofFn buf start len h,
+      getElem!_pos _ m (by rw [List.length_ofFn]; exact hm), List.getElem_ofFn]
+
+/-- Indexing a self-append is periodic: for `j < 2 * seed.size`,
+    `(seed ++ seed)[j] = seed[j % seed.size]`. -/
+private theorem append_self_getElem! (seed : ByteArray) (j : Nat)
+    (hs : 0 < seed.size) (hj : j < seed.size + seed.size) :
+    (seed ++ seed).data.toList[j]! = seed.data.toList[j % seed.size]! := by
+  have hlen : seed.data.toList.length = seed.size := by
+    simp only [Array.length_toList, ByteArray.size_data]
+  rw [ByteArray.data_append, Array.toList_append]
+  by_cases hj1 : j < seed.size
+  · rw [getElem!_pos _ j (by rw [List.length_append, hlen]; omega),
+        List.getElem_append_left (by rw [hlen]; exact hj1),
+        Nat.mod_eq_of_lt hj1, getElem!_pos _ j (by rw [hlen]; exact hj1)]
+  · rw [getElem!_pos _ j (by rw [List.length_append, hlen]; omega),
+        List.getElem_append_right (by rw [hlen]; omega)]
+    have hmod : j % seed.size = j - seed.size := by
+      rw [Nat.mod_eq_sub_mod (by omega), Nat.mod_eq_of_lt (by omega)]
+    rw [hmod, getElem!_pos _ (j - seed.size) (by rw [hlen]; omega)]
+    congr 1 <;> rw [hlen]
+
+/-- `fillDouble` always produces at least `length` bytes (it doubles until it
+    reaches `length`, given a non-empty seed). -/
+private theorem fillDouble_size_ge (seed : ByteArray) (length : Nat) :
+    0 < seed.size → length ≤ (Zip.Native.Inflate.fillDouble seed length).size := by
+  fun_induction Zip.Native.Inflate.fillDouble seed length with
+  | case1 seed hbase =>
+    intro hs
+    rcases hbase with h | h
+    · exact h
+    · omega
+  | case2 seed hstep ih =>
+    intro _
+    exact ih (by simp only [ByteArray.size_append]; omega)
+
+/-- `fillDouble` is the periodic extension of `seed`: slot `i` is
+    `seed[i % seed.size]`. The doubling preserves the period because
+    `seed.size` divides the running size at every step. -/
+private theorem fillDouble_get (seed : ByteArray) (length : Nat) :
+    ∀ i, i < (Zip.Native.Inflate.fillDouble seed length).size →
+      (Zip.Native.Inflate.fillDouble seed length).data.toList[i]! =
+        seed.data.toList[i % seed.size]! := by
+  fun_induction Zip.Native.Inflate.fillDouble seed length with
+  | case1 seed hbase =>
+    intro i hi
+    rw [Nat.mod_eq_of_lt hi]
+  | case2 seed hstep ih =>
+    intro i hi
+    have hpos : 0 < seed.size := by simp only [not_or] at hstep; omega
+    have hsz2 : (seed ++ seed).size = seed.size + seed.size := by rw [ByteArray.size_append]
+    rw [ih i hi, hsz2,
+        append_self_getElem! seed (i % (seed.size + seed.size)) hpos (Nat.mod_lt i (by omega)),
+        Nat.mod_mod_of_dvd i ⟨2, by omega⟩]
+
 /-- The native copy loop produces the same result as the spec's `List.ofFn`
     for LZ77 back-references. `copyLoop` dispatches: the non-overlapping case
     (`length ≤ distance`) is the contiguous slice `[start, start+length)`
-    (`extract`+`append`); the overlapping case falls back to the per-byte
-    `copyLoopGo`. Both yield the same `List.ofFn` characterization. -/
+    (`extract`+`append`); the overlapping case is the periodic extension built by
+    `fillDouble`; a partial `k ≠ 0` falls back to the per-byte `copyLoopGo`. All
+    yield the same `List.ofFn` characterization. -/
 theorem copyLoop_eq_ofFn
     (output : ByteArray) (length distance : Nat)
     (hd_pos : distance > 0) (hd_le : distance ≤ output.size) :
@@ -567,10 +628,35 @@ theorem copyLoop_eq_ofFn
       have := i.isLt
       rw [Nat.mod_eq_of_lt (by omega)]
     rw [hfg]
-  · -- overlapping fallback: per-byte `copyLoopGo`
-    exact copyLoopGo_spec output (output.size - distance) distance 0 length output
-      hd_pos (by omega) (Nat.zero_le _) rfl (fun _ _ => rfl)
-      (by simp only [List.ofFn_zero, List.append_nil])
+  · -- else: split the nested `if k = 0`
+    split
+    · -- overlapping (k = 0, length > distance): `fillDouble` periodic extension
+      have hseed_size :
+          (output.extract (output.size - distance) (output.size - distance + distance)).size
+            = distance := by
+        rw [ByteArray.size_extract]; omega
+      have hge : length ≤ (Zip.Native.Inflate.fillDouble
+          (output.extract (output.size - distance) (output.size - distance + distance)) length).size :=
+        fillDouble_size_ge _ _ (by rw [hseed_size]; exact hd_pos)
+      rw [ByteArray.data_append, Array.toList_append]
+      congr 1
+      have hext := extract_data_toList_ofFn (Zip.Native.Inflate.fillDouble
+        (output.extract (output.size - distance) (output.size - distance + distance)) length)
+        0 length (by omega)
+      simp only [Nat.zero_add] at hext
+      rw [hext]
+      apply congrArg
+      funext i
+      rw [fillDouble_get
+            (output.extract (output.size - distance) (output.size - distance + distance)) length
+            i.val (by have := i.isLt; omega),
+          hseed_size]
+      exact extract_getElem! output (output.size - distance) (i.val % distance) distance
+        (by omega) (Nat.mod_lt i.val hd_pos)
+    · -- partial (k ≠ 0): per-byte `copyLoopGo`
+      exact copyLoopGo_spec output (output.size - distance) distance 0 length output
+        hd_pos (by omega) (Nat.zero_le _) rfl (fun _ _ => rfl)
+        (by simp only [List.ofFn_zero, List.append_nil])
 
 /-- Codewords in `allCodes` tables are nonempty. -/
 theorem specTable_cw_nonempty (lengths : List Nat) (maxBits : Nat) :
