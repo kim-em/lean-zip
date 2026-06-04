@@ -316,7 +316,7 @@ theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : 
     match br.readBits n, takeBits bitBuf cnt n with
     | .error e1, .error e2 => e1 = e2
     | .ok (val, br'), .ok (v, bb, c') =>
-        val.toNat = v ∧ BufCorr data br'.bitPos pos bb c' ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c' ≤ cnt
+        val.toNat = v ∧ BufCorr data br'.bitPos pos bb c' ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c' = cnt - n
     | _, _ => False := by
   have hsp := h.span; have hple := h.posLe
   have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
@@ -335,7 +335,7 @@ theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : 
     rw [show br.readBits n = BitReader.readBits.go br 0 0 n from rfl, hread]
     have hbpe : br'.bitPos = br.bitPos + n := ZipCommon.readBits_bitPos_eq br br' n val hread hwf
     refine ⟨takeBits_value h hwf hdata hn hn32 hn64 hread, ?_, ?_,
-      readBits_bitOff_lt hread hwf, Nat.sub_le cnt n⟩
+      readBits_bitOff_lt hread hwf, rfl⟩
     · rw [hbpe]; exact consume_corr h hn hn64
     · exact (ZipCommon.readBits_data_eq br br' n val hread).trans hdata
 
@@ -806,12 +806,12 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
         -- key: the buffer's tracked position equals br₁.bitPos (uses c ≤ cnt1)
         have hkey : br.bitPos + (cnt1 - c) = br₁.bitPos := by
           have := hbc1.span; have := hbc2.span; omega
-        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
-        dsimp only []
-        rw [hdwt, hds2]
-        dsimp only [bind, Except.bind]
+        -- Shared unfold+reduce incantation, applied per-leaf (so the inner `cases`
+        -- below run while the goal is still opaque and cheap to `kabstract`).
         by_cases hlt : sym < 256
         · -- literal: align B's tracked bitpos with br₁.bitPos so both guards match
+          rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+          dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
           rw [if_pos hlt, if_pos (show sym2 < 256 from hsym ▸ hlt), hkey]
           by_cases hmax : output.size ≥ maxOut
           · rw [if_pos hmax, if_pos hmax]
@@ -824,6 +824,21 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
               · rw [dif_neg hp2, dif_neg hp2]
                 rw [← hsym]
                 exact ih_lit sym br₁ hp1 hp2 pos1 bb c hbc2 hbo2 hbd2
-        · -- end-of-block (256) or length/distance
-          sorry
+        · by_cases hs256 : (sym == 256) = true
+          · -- end of block: both return the current state
+            rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+            dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+            rw [if_neg hlt, if_neg (show ¬ sym2 < 256 from hsym ▸ hlt),
+              if_pos hs256, if_pos (show (sym2 == 256) = true from hsym ▸ hs256), hkey]
+            exact ⟨rfl, hbc2, hbd2, hbo2, rfl⟩
+          · by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
+            · -- invalid length code: both throw the same message
+              rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+              dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
+              rw [if_neg hlt, if_neg (show ¬ sym2 < 256 from hsym ▸ hlt),
+                if_neg hs256, if_neg (show ¬ (sym2 == 256) = true from hsym ▸ hs256),
+                dif_pos hidx, dif_pos (show sym2.toNat - 257 ≥ Inflate.lengthBase.size from hsym ▸ hidx),
+                hsym]
+            · -- valid length/distance back-reference
+              sorry
 
