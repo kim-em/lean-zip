@@ -569,4 +569,25 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
     have hbpe : ({ br with pos := br.pos + (br.bitOff + entry.2.toNat) / 8, bitOff := (br.bitOff + entry.2.toNat) % 8 } : BitReader).bitPos = br.bitPos + entry.2.toNat := by simp only [BitReader.bitPos]; omega
     exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide)⟩
 
+/-- Every `buildTable` entry's code length is at most `fastBits = 9`
+    (the table walk stops at `fastBits`, or returns the `0` sentinel). -/
+theorem buildTable_codeLen_le (tree : HuffTree) (idx : Nat) (hidx : idx < 2 ^ HuffTree.fastBits) :
+    (tree.buildTable[idx]!).2.toNat ≤ 9 := by
+  have htab : tree.buildTable[idx]! = HuffTree.tableEntry tree idx := by
+    simp only [HuffTree.buildTable]
+    rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
+  rw [htab, HuffTree.tableEntry]
+  rcases hg : HuffTree.tableEntry.go tree idx 0 with ⟨sym, lenB⟩
+  show lenB.toNat ≤ 9
+  by_cases hp : 0 < lenB.toNat
+  · have := HuffTree.tableEntry_go_len_le tree idx 0 sym lenB hg (by simp [HuffTree.fastBits]) hp
+    simp only [HuffTree.fastBits] at this; omega
+  · omega
+
+/-- The 9-bit buffer index is `< 2^fastBits`. -/
+theorem buf_idx_lt (bitBuf : UInt64) : (bitBuf &&& 0x1FF).toNat < 2 ^ HuffTree.fastBits := by
+  simp only [HuffTree.fastBits]
+  rw [UInt64.toNat_and]
+  exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
+
 end Zip.Native.InflateBuf
