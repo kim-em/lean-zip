@@ -410,7 +410,7 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
     (pos = data.size ∨ 21 < depth + cnt) →
     (∀ s br', HuffTree.decode.go t br depth = .ok (s, br') →
         ∃ bb c used, walkTree t bitBuf cnt depth = .ok (s, bb, c, used)
-          ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8)
+          ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c ≤ cnt)
     ∧ (∀ e, HuffTree.decode.go t br depth = .error e → walkTree t bitBuf cnt depth = .error e) := by
   induction t with
   | leaf s =>
@@ -419,7 +419,7 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
     · intro s' br' hgo
       simp only [HuffTree.decode.go, Except.ok.injEq, Prod.mk.injEq] at hgo
       obtain ⟨rfl, rfl⟩ := hgo
-      exact ⟨bitBuf, cnt, 0, by simp only [walkTree], h, hdata, hwf⟩
+      exact ⟨bitBuf, cnt, 0, by simp only [walkTree], h, hdata, hwf, Nat.le_refl cnt⟩
     · intro e hgo; simp [HuffTree.decode.go] at hgo
   | empty =>
     intro br pos bitBuf cnt depth _ _ _ _
@@ -472,8 +472,8 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
             simp [show (bitBuf &&& 1 == 0) = true from by simp [hbranch, hs]]
           refine ⟨fun s' br'' hgo => ?_, fun e hgo => ?_⟩
           · rw [hgs] at hgo
-            obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2⟩ := (ihz hcc hwf' hbdata hsubinv).1 s' br'' hgo
-            refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2⟩
+            obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2, hle2⟩ := (ihz hcc hwf' hbdata hsubinv).1 s' br'' hgo
+            refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2, by omega⟩
             rw [walkTree, if_neg hd, if_neg hcne, hsub]; simp [hwt]
           · rw [hgs] at hgo
             rw [walkTree, if_neg hd, if_neg hcne, hsub]
@@ -486,8 +486,8 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
             simp [show (bitBuf &&& 1 == 0) = false from by simp [hbranch, hs]]
           refine ⟨fun s' br'' hgo => ?_, fun e hgo => ?_⟩
           · rw [hgs] at hgo
-            obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2⟩ := (iho hcc hwf' hbdata hsubinv).1 s' br'' hgo
-            refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2⟩
+            obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2, hle2⟩ := (iho hcc hwf' hbdata hsubinv).1 s' br'' hgo
+            refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2, by omega⟩
             rw [walkTree, if_neg hd, if_neg hcne, hsub]; simp [hwt]
           · rw [hgs] at hgo
             rw [walkTree, if_neg hd, if_neg hcne, hsub]
@@ -525,7 +525,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
     match HuffTree.decodeWithTable tree table br, decodeSym tree table bitBuf cnt with
     | .error e1, .error e2 => e1 = e2
     | .ok (s1, br'), .ok (s2, bb, c, used) =>
-        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8
+        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c ≤ cnt
     | _, _ => False := by
   have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
   have hsp := h.span; have hple := h.posLe
@@ -559,15 +559,15 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
       · exact Or.inl hpe)
     rcases hgo : HuffTree.decode.go tree br 0 with _ | ⟨s1, br'⟩
     · rw [hwc.2 _ hgo]
-    · obtain ⟨bb, c, used, hwt, hbc, hbd, hbo⟩ := hwc.1 s1 br' hgo
-      rw [hwt]; exact ⟨rfl, hbc, hbd, hbo⟩
+    · obtain ⟨bb, c, used, hwt, hbc, hbd, hbo, hle⟩ := hwc.1 s1 br' hgo
+      rw [hwt]; exact ⟨rfl, hbc, hbd, hbo, hle⟩
   · -- table hit
     rw [if_neg (by rw [hgd]; exact hg), if_neg hg]
     simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or, Nat.not_lt] at hg
     obtain ⟨hne, hle⟩ := hg
     have hcc := consume_corr h hle (show entry.2.toNat < 64 from by omega)
     have hbpe : ({ br with pos := br.pos + (br.bitOff + entry.2.toNat) / 8, bitOff := (br.bitOff + entry.2.toNat) % 8 } : BitReader).bitPos = br.bitPos + entry.2.toNat := by simp only [BitReader.bitPos]; omega
-    exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide)⟩
+    exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide), Nat.sub_le cnt _⟩
 
 /-- Every `buildTable` entry's code length is at most `fastBits = 9`
     (the table walk stops at `fastBits`, or returns the `0` sentinel). -/
@@ -590,4 +590,92 @@ theorem buf_idx_lt (bitBuf : UInt64) : (bitBuf &&& 0x1FF).toNat < 2 ^ HuffTree.f
   rw [UInt64.toNat_and]
   exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
 
-end Zip.Native.InflateBuf
+/-- `decodeSym_corr` specialized to a `buildTable` (discharges `hlen`). -/
+theorem decodeSym_corr' (tree : HuffTree)
+    {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
+    (hr : 56 < cnt ∨ pos = data.size) :
+    match HuffTree.decodeWithTable tree tree.buildTable br, decodeSym tree tree.buildTable bitBuf cnt with
+    | .error e1, .error e2 => e1 = e2
+    | .ok (s1, br'), .ok (s2, bb, c, used) =>
+        s1 = s2 ∧ BufCorr data br'.bitPos pos bb c ∧ br'.data = data ∧ br'.bitOff < 8 ∧ c ≤ cnt
+    | _, _ => False :=
+  decodeSym_corr tree tree.buildTable h hwf hdata hr (buildTable_codeLen_le tree _ (buf_idx_lt bitBuf))
+
+set_option maxRecDepth 4000 in
+open HuffTree in
+/-- **The block loop corresponds.** The wide-buffer Huffman symbol loop `go`
+    equals `Inflate.decodeHuffmanFast.go`: same output/error, and on success the
+    final buffer corresponds to the final reader. `go` refills internally, so the
+    only precondition is the buffer invariant. -/
+theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : ByteArray} :
+    ∀ (br : BitReader) (output : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat),
+    BufCorr data br.bitPos pos bitBuf cnt → br.bitOff < 8 → br.data = data →
+    match Inflate.decodeHuffmanFast.go litTree distTree maxOut litTree.buildTable distTree.buildTable
+            dataSize br output,
+          go litTree.buildTable distTree.buildTable data litTree distTree maxOut dataSize pos bitBuf cnt
+            br.bitPos output with
+    | .error e1, .error e2 => e1 = e2
+    | .ok (out1, br'), .ok (out2, _pos', bitBuf', cnt', bitpos') =>
+        out1 = out2 ∧ BufCorr data br'.bitPos _pos' bitBuf' cnt' ∧ br'.data = data ∧ br'.bitOff < 8
+          ∧ bitpos' = br'.bitPos
+    | _, _ => False := by
+  intro br output
+  induction br, output using Inflate.decodeHuffmanFast.go.induct
+      (maxOutputSize := maxOut) (dataSize := dataSize) with
+  | _ br output ih_lit ih_ld =>
+    intro pos bitBuf cnt hbc hwf hdata
+    -- refill (`InflateBuf.go` refills internally; relate it to the buffer invariant)
+    rcases hrf : refill data pos bitBuf cnt with ⟨pos1, bitBuf1, cnt1⟩
+    obtain ⟨hbc1, hr1⟩ := refill_corr hbc hrf
+    -- decodeSym ↔ decodeWithTable (literal symbol)
+    have hsy := decodeSym_corr' litTree hbc1 hwf hdata hr1
+    -- Split on the symbol decode BEFORE unfolding the loop bodies: while `go` is
+    -- still an opaque application the goal contains no `decodeWithTable`/`decodeSym`
+    -- subterm, so the `cases` does no `kabstract` over the giant inlined body. We
+    -- unfold and reduce with targeted `rw` inside each branch instead.
+    cases hdwt : litTree.decodeWithTable litTree.buildTable br with
+    | error e1 =>
+      cases hds2 : decodeSym litTree litTree.buildTable bitBuf1 cnt1 with
+      | error e2 =>
+        rw [hdwt, hds2] at hsy
+        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+        dsimp only []
+        rw [hdwt, hds2]
+        dsimp only [bind, Except.bind]
+        exact hsy
+      | ok p2 => rw [hdwt, hds2] at hsy; simp at hsy
+    | ok p1 =>
+      obtain ⟨sym, br₁⟩ := p1
+      cases hds2 : decodeSym litTree litTree.buildTable bitBuf1 cnt1 with
+      | error e2 => rw [hdwt, hds2] at hsy; simp at hsy
+      | ok p2 =>
+        obtain ⟨sym2, bb, c, used⟩ := p2
+        rw [hdwt, hds2] at hsy
+        obtain ⟨hsym, hbc2, hbd2, hbo2, hcle⟩ := hsy
+        -- Bridge sym/sym2 via `hsym` on the small proof terms only; never `subst`
+        -- (substituting into the giant inlined body forces an expensive whnf).
+        -- key: the buffer's tracked position equals br₁.bitPos (uses c ≤ cnt1)
+        have hkey : br.bitPos + (cnt1 - c) = br₁.bitPos := by
+          have := hbc1.span; have := hbc2.span; omega
+        rw [Inflate.decodeHuffmanFast.go, InflateBuf.go, hrf]
+        dsimp only []
+        rw [hdwt, hds2]
+        dsimp only [bind, Except.bind]
+        by_cases hlt : sym < 256
+        · -- literal: align B's tracked bitpos with br₁.bitPos so both guards match
+          rw [if_pos hlt, if_pos (show sym2 < 256 from hsym ▸ hlt), hkey]
+          by_cases hmax : output.size ≥ maxOut
+          · rw [if_pos hmax, if_pos hmax]
+          · rw [if_neg hmax, if_neg hmax]
+            by_cases hp1 : br₁.bitPos ≤ br.bitPos
+            · rw [dif_pos hp1, dif_pos hp1]
+            · rw [dif_neg hp1, dif_neg hp1]
+              by_cases hp2 : dataSize * 8 < br₁.bitPos
+              · rw [dif_pos hp2, dif_pos hp2]
+              · rw [dif_neg hp2, dif_neg hp2]
+                rw [← hsym]
+                exact ih_lit sym br₁ hp1 hp2 pos1 bb c hbc2 hbo2 hbd2
+        · -- end-of-block (256) or length/distance
+          sorry
+
