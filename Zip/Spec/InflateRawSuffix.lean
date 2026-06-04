@@ -528,7 +528,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
           rw [Inflate.decodeHuffmanFast_eq (brAppend br₂ suffix) output fixedLit fixedDist maxOut
             (Zip.Native.InflateBuf.fromLengths_depthLE hflit)
             (Zip.Native.InflateBuf.fromLengths_depthLE hfdist) hbo₂
-            (by simp only [ZipCommon.BitReader.bitPos, brAppend, ByteArray.size_append]; omega)]
+            (by simp only [ZipCommon.BitReader.bitPos, ByteArray.size_append]; omega)]
           simp only [Inflate.decodeHuffman] at h ⊢
           cases hdh : Inflate.decodeHuffman.go fixedLit fixedDist maxOut br₂.data.size br₂ output with
           | error e => simp only [hdh] at h; exact nomatch h
@@ -560,7 +560,7 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
             rw [Inflate.decodeHuffmanFast_eq (brAppend br₃ suffix) output litT distT maxOut
               (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).1
               (Zip.Native.InflateBuf.decodeDynamicTrees_depthLE hdt).2 hbo₃
-              (by simp only [ZipCommon.BitReader.bitPos, brAppend, ByteArray.size_append]; omega)]
+              (by simp only [ZipCommon.BitReader.bitPos, ByteArray.size_append]; omega)]
             simp only [Inflate.decodeHuffman] at h ⊢
             cases hdh : Inflate.decodeHuffman.go litT distT maxOut br₃.data.size br₃ output with
             | error e => simp only [hdh] at h; exact nomatch h
