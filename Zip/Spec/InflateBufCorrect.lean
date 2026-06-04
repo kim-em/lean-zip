@@ -192,4 +192,85 @@ theorem peek_eq {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64
         calc (2 : Nat) ^ 9 ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega))
     rw [hbuf, Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (peekFast_lt br) h2j)]
 
+/-- A `BitReader`'s bit-list view is the stream from its cursor. -/
+theorem toBits_getElem? {br : BitReader} {i : Nat} (hi : br.bitPos + i < br.data.size * 8) :
+    br.toBits[i]? = some (streamBit br.data (br.bitPos + i)) := by
+  rw [BitReader.toBits, List.getElem?_drop,
+    HuffTree.bytesToBits_getElem? br.data (br.pos * 8 + br.bitOff + i) hi]
+  simp only [streamBit, BitReader.bitPos]
+
+/-- **`takeBits` value = `readBits` value.** The wide-buffer low-`n`-bit field
+    equals the value the spec reader reads. -/
+theorem takeBits_value {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
+    {n : Nat} (hn : n ≤ cnt) (hn32 : n ≤ 32) (hn64 : n < 64)
+    {val : UInt32} {br' : BitReader} (hread : br.readBits n = .ok (val, br')) :
+    val.toNat = (takeBits bitBuf cnt n).1 := by
+  have hmlt0 : (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat < 2 ^ n := mask_lt hn64
+  have hmb0 : ∀ i, i < n →
+      (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat.testBit i = streamBit data (br.bitPos + i) :=
+    fun i hi => mask_testBit h hn hn64 hi
+  show val.toNat = (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat
+  generalize hm : (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat = m at hmlt0 hmb0 ⊢
+  have hbound : br.bitPos + n ≤ data.size * 8 := by
+    have := h.span; have := h.posLe; omega
+  have hlen : br.toBits.length = br.data.size * 8 - br.bitPos := by
+    rw [BitReader.toBits, List.length_drop, Deflate.Spec.bytesToBits_length]; rfl
+  -- the first n bits of `br.toBits` are the bits of `m`
+  have htake : br.toBits.take n = List.ofFn (fun i : Fin n => m.testBit i.val) := by
+    apply List.ext_getElem
+    · rw [List.length_take, List.length_ofFn, hlen, hdata]; omega
+    · intro i h1 h2
+      rw [List.length_take] at h1
+      rw [List.getElem_take, List.getElem_ofFn]
+      have hi : br.bitPos + i < br.data.size * 8 := by rw [hdata]; omega
+      have hgi := toBits_getElem? (br := br) (i := i) hi
+      rw [List.getElem?_eq_getElem (by omega)] at hgi
+      rw [Option.some_inj.mp hgi, hdata]
+      exact (hmb0 i (by omega)).symm
+  have hsplit : br.toBits = List.ofFn (fun i : Fin n => m.testBit i.val) ++ br.toBits.drop n := by
+    rw [← htake, List.take_append_drop]
+  have hlsb : Deflate.Spec.readBitsLSB n br.toBits = some (m, br.toBits.drop n) := by
+    have h0 := Deflate.Correctness.readBitsLSB_testBit m n hmlt0 (br.toBits.drop n)
+    rw [← hsplit] at h0; exact h0
+  obtain ⟨rest, htb, _⟩ := Deflate.Correctness.readBits_toBits br n val br' hwf hn32 hread
+  rw [hlsb] at htb
+  exact (congrArg Prod.fst (Option.some_inj.mp htb)).symm
+
+/-- `readBits.go` preserves `bitOff < 8`. -/
+theorem readBits_go_bitOff_lt (br br' : BitReader) (acc : UInt32) (shift n : Nat) (val : UInt32)
+    (hwf : br.bitOff < 8)
+    (h : BitReader.readBits.go br acc shift n = .ok (val, br')) : br'.bitOff < 8 := by
+  induction n generalizing br acc shift with
+  | zero => simp only [BitReader.readBits.go] at h; obtain ⟨_, rfl⟩ := h; exact hwf
+  | succ n ih =>
+    simp only [BitReader.readBits.go, bind, Except.bind] at h
+    cases hrb : br.readBit with
+    | error e => simp only [hrb] at h; exact nomatch h
+    | ok p =>
+      obtain ⟨bit, br₁⟩ := p
+      simp only [hrb] at h
+      exact ih br₁ _ _ (ZipCommon.readBit_bitOff_lt br br₁ bit hrb) h
+
+/-- `readBits` preserves `bitOff < 8`. -/
+theorem readBits_bitOff_lt {br br' : BitReader} {n : Nat} {val : UInt32}
+    (h : br.readBits n = .ok (val, br')) (hwf : br.bitOff < 8) : br'.bitOff < 8 := by
+  unfold BitReader.readBits at h
+  exact readBits_go_bitOff_lt br br' 0 0 n val hwf h
+
+/-- **`takeBits` corresponds to `readBits`.** Same value, and the resulting buffer
+    corresponds to the advanced reader (which stays well-formed). -/
+theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
+    {n : Nat} (hn : n ≤ cnt) (hn32 : n ≤ 32) (hn64 : n < 64)
+    {val : UInt32} {br' : BitReader} (hread : br.readBits n = .ok (val, br')) :
+    val.toNat = (takeBits bitBuf cnt n).1
+    ∧ BufCorr data br'.bitPos pos (takeBits bitBuf cnt n).2.1 (takeBits bitBuf cnt n).2.2
+    ∧ br'.data = data ∧ br'.bitOff < 8 := by
+  refine ⟨takeBits_value h hwf hdata hn hn32 hn64 hread, ?_, ?_, readBits_bitOff_lt hread hwf⟩
+  · have hbp : br'.bitPos = br.bitPos + n := ZipCommon.readBits_bitPos_eq br br' n val hread hwf
+    show BufCorr data br'.bitPos pos (bitBuf >>> n.toUInt64) (cnt - n)
+    rw [hbp]; exact consume_corr h hn hn64
+  · exact (ZipCommon.readBits_data_eq br br' n val hread).trans hdata
+
 end Zip.Native.InflateBuf
