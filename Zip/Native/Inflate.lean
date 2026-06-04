@@ -251,6 +251,22 @@ def copyLoopGo (buf : ByteArray) (start distance : Nat)
   else buf
 termination_by length - k
 
+/-- Periodic extension of a non-empty `seed` window to at least `length` bytes by
+    repeated doubling — each step is a `ByteArray` append (a `memcpy`), so the
+    whole fill is `O(log (length / seed.size))` memcpys. `seed` is the
+    `distance`-byte back-reference window; doubling it preserves the period
+    (`seed.size` always divides the running size), so slot `i` of the result is
+    `seed[i % seed.size]`. Used by `copyLoop` for overlapping LZ77
+    back-references (`distance < length`, e.g. RLE), where a per-byte copy
+    otherwise dominates decode of highly repetitive data. -/
+def fillDouble (seed : ByteArray) (length : Nat) : ByteArray :=
+  if seed.size ≥ length ∨ seed.size = 0 then seed
+  else fillDouble (seed ++ seed) length
+termination_by length - seed.size
+decreasing_by
+  simp only [ByteArray.size_append]
+  omega
+
 /-- Copy `length` bytes from `buf` starting at `start`, repeating every
     `distance` bytes (LZ77 back-reference copy).
 
@@ -258,14 +274,19 @@ termination_by length - k
     every index `start + (k % distance)` is just `start + k`, so the whole copy is
     the contiguous slice `[start, start + length)` — one `extract` + one `append`
     (a `memcpy`) instead of `length` per-byte `push`es / bounds-checks / modular
-    indices. Otherwise (overlapping / RLE, or a partial `k`) it falls back to the
-    per-byte `copyLoopGo`. Proven equal to `copyLoopGo` via `copyLoop_eq_ofFn`,
-    so every decode correctness proof is unaffected. -/
+    indices. For an **overlapping** back-reference (`k = 0 ∧ length > distance`,
+    the RLE case) the copy is the periodic extension of the `distance`-byte window,
+    built by `fillDouble` (a handful of memcpys) instead of `length` per-byte
+    `push`es. A partial copy (`k ≠ 0`, never produced by the decoders) falls back
+    to the per-byte `copyLoopGo`. All three are proven equal to `copyLoopGo` via
+    `copyLoop_eq_ofFn`, so every decode correctness proof is unaffected. -/
 def copyLoop (buf : ByteArray) (start distance : Nat)
     (k length : Nat)
     (hd_pos : distance > 0 := by omega) (hsd : start + distance ≤ buf.size := by omega) : ByteArray :=
   if k = 0 ∧ length ≤ distance then
     buf ++ buf.extract start (start + length)
+  else if k = 0 then
+    buf ++ (fillDouble (buf.extract start (start + distance)) length).extract 0 length
   else
     copyLoopGo buf start distance k length hd_pos hsd
 
