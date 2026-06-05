@@ -176,7 +176,7 @@ def Row.toJson (r : Row) : String :=
 
 def patterns : List String := ["constant", "cyclic", "prng", "text", "words"]
 def sizes : List Nat := [1024, 4096, 16384, 65536, 262144, 1048576]
-def levels : List Nat := [1, 3, 6, 9]
+def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 def reps : Nat := 5
 
 /-- Run one compressor over the pattern×size×level grid. `compress` returns the
@@ -262,8 +262,20 @@ def shell (cmd : String) (args : List String) : IO String := do
     pure (out.replace "\n" "")
   catch _ => pure "unknown"
 
-def main (args : List String) : IO Unit := do
-  let outPath := args.head?.getD "bench/results/latest.json"
+/-- Write the exact bytes of every `pattern × size` payload to
+    `dir/<pattern>_<size>.bin`, so external-language comparators (Go, Zig, OCaml,
+    JS) compress byte-identical input and their ratios line up with the native
+    rows. Keeps the pattern generators in one place (here) rather than
+    reimplemented per language. -/
+def dumpPayloads (dir : String) : IO Unit := do
+  IO.FS.createDirAll dir
+  for pat in patterns do
+    for size in sizes do
+      let data := generateData pat size
+      IO.FS.writeBinFile (System.FilePath.mk dir / s!"{pat}_{size}.bin") data
+  IO.eprintln s!"Dumped {patterns.length * sizes.length} payloads → {dir}"
+
+def runReport (outPath : String) : IO Unit := do
   IO.eprintln "Running Track D benchmark matrix (native vs references)…"
 
   let nativeRows ← runCompressor "native" nativeCompress (some nativeDecompress)
@@ -275,16 +287,11 @@ def main (args : List String) : IO Unit := do
   -- the ratio graphs without dominating wall-clock.
   let zopfliRows ← runCompressor "zopfli" zopfliCompress none
                      (theSizes := sizes.filter (· ≤ 262144)) (theLevels := [6]) (theReps := 1)
-  -- Dense ratio-vs-level data: fill the levels the timed matrix skips (it only
-  -- times 1/6/9) with cheap ratio-only rows, so the ratio-by-level plot shows
-  -- every DEFLATE level. zopfli is level-less, so it stays a single point.
-  let gapLevels := [2, 3, 4, 5, 7, 8]
-  let nativeGap ← runRatioLevels "native" nativeCompress gapLevels
-  let zlibGap   ← runRatioLevels "zlib" zlibCompress gapLevels
-  let minizGap  ← runRatioLevels "miniz_oxide" minizCompress gapLevels
-  let libGap    ← runRatioLevels "libdeflate" libdeflateCompress gapLevels
+  -- The timed matrix now covers every DEFLATE level (1–9) at every size, so the
+  -- ratio-by-level plot reads its dense per-level data straight from the timed
+  -- rows — no separate ratio-only gap fill is needed. zopfli stays a single
+  -- (level-less) point.
   let rows := nativeRows ++ zlibRows ++ minizRows ++ libdeflRows ++ zopfliRows
-              ++ nativeGap ++ zlibGap ++ minizGap ++ libGap
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]
@@ -308,3 +315,8 @@ def main (args : List String) : IO Unit := do
     IO.FS.createDirAll parent
   IO.FS.writeFile outPath json
   IO.eprintln s!"Wrote {rows.length} rows → {outPath}"
+
+def main (args : List String) : IO Unit := do
+  match args with
+  | ["--dump-payloads", dir] => dumpPayloads dir
+  | _ => runReport (args.head?.getD "bench/results/latest.json")

@@ -17,12 +17,18 @@ matplotlib.use("svg")
 import matplotlib.pyplot as plt
 
 # Fixed plot order so colours/markers are stable across regenerations.
+# C / SIMD references and the pure-Lean subject, plus language-native peers
+# (Go / JS / Zig / OCaml) — the honest comparison group for a pure-Lean codec.
 COMPRESSORS = [
     ("native",      "lean-zip (native)", "#d62728", "o"),
     ("zlib",        "zlib",              "#1f77b4", "s"),
     ("miniz_oxide", "miniz_oxide",       "#2ca02c", "^"),
     ("libdeflate",  "libdeflate",        "#9467bd", "D"),
     ("zopfli",      "zopfli",            "#ff7f0e", "v"),
+    ("go",          "Go compress/flate", "#8c564b", "P"),
+    ("js",          "JS fflate",         "#e377c2", "X"),
+    ("zig",         "Zig std.flate",     "#bcbd22", "*"),
+    ("ocaml",       "OCaml decompress",  "#17becf", "h"),
 ]
 PATTERNS = ["constant", "cyclic", "prng", "text"]
 SIZE_LEVEL = 6     # level used for the size-sweep figures
@@ -68,14 +74,14 @@ def series_style(key, colour):
     )
 
 
-def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
+def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy, level=SIZE_LEVEL):
     """One 2x2 figure (subplot per pattern): metric vs input size, line per
-    compressor, at SIZE_LEVEL. Log x; log y iff logy."""
+    compressor, at `level`. Log x; log y iff logy."""
     fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True)
     comps = present_compressors(results)
     for ax, pat in zip(axes.flat, PATTERNS):
         for key, label, colour, marker in comps:
-            rs = sorted(rows_for(results, key, pat, level=SIZE_LEVEL),
+            rs = sorted(rows_for(results, key, pat, level=level),
                         key=lambda r: r["size"])
             xs = [r["size"] for r in rs if r.get(metric) is not None]
             ys = [r[metric] for r in rs if r.get(metric) is not None]
@@ -90,12 +96,18 @@ def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy):
         ax.set_xlabel("input size (bytes)")
         ax.set_ylabel(ylabel)
     axes.flat[0].legend(fontsize=8, loc="best")
-    fig.suptitle(f"{title}  (level {SIZE_LEVEL})", fontsize=13, fontweight="bold")
+    fig.suptitle(f"{title}  (level {level})", fontsize=13, fontweight="bold")
     fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
     fig.tight_layout(rect=(0, 0.02, 1, 0.97))
     fig.savefig(outfile)
     plt.close(fig)
     print(f"wrote {outfile}")
+
+
+def timed_levels(results, metric="compress_mbps"):
+    """Levels that actually carry timing data, sorted — drives the per-level
+    chart set so it follows whatever the report timed (e.g. [1,6,9] or [1..9])."""
+    return sorted({r["level"] for r in results if r.get(metric) is not None})
 
 
 def ratio_by_level(results, meta, outfile):
@@ -139,12 +151,22 @@ def main():
     doc = load(results_path)
     results, meta = doc["results"], doc.get("meta", {})
 
+    # Canonical level-6 figures (stable filenames for the README embeds).
     size_sweep(results, meta, "compress_mbps", "throughput (MB/s)",
                "Compression throughput vs input size",
                graphs_dir / "compress_throughput.svg", logy=True)
     size_sweep(results, meta, "decompress_mbps", "throughput (MB/s)",
                "Decompression throughput vs input size",
                graphs_dir / "decompress_throughput.svg", logy=True)
+    # One throughput figure per timed level (e.g. compress_throughput_L1.svg …).
+    for lvl in timed_levels(results, "compress_mbps"):
+        size_sweep(results, meta, "compress_mbps", "throughput (MB/s)",
+                   "Compression throughput vs input size",
+                   graphs_dir / f"compress_throughput_L{lvl}.svg", logy=True, level=lvl)
+    for lvl in timed_levels(results, "decompress_mbps"):
+        size_sweep(results, meta, "decompress_mbps", "throughput (MB/s)",
+                   "Decompression throughput vs input size",
+                   graphs_dir / f"decompress_throughput_L{lvl}.svg", logy=True, level=lvl)
     size_sweep(results, meta, "ratio", "ratio (compressed / original)",
                "Compression ratio vs input size",
                graphs_dir / "compression_ratio.svg", logy=False)
