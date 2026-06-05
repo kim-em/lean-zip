@@ -1,0 +1,10 @@
+{
+  "name": "lean-zip-bench-js",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure-JS (fflate) DEFLATE comparator for the lean-zip Track D dashboard",
+  "dependencies": {
+    "fflate": "^0.8.2"
+  }
+}
