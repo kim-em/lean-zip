@@ -176,7 +176,7 @@ def Row.toJson (r : Row) : String :=
 
 def patterns : List String := ["constant", "cyclic", "prng", "text", "words"]
 def sizes : List Nat := [1024, 4096, 16384, 65536, 262144, 1048576]
-def levels : List Nat := [1, 6, 9]
+def levels : List Nat := [1, 3, 6, 9]
 def reps : Nat := 5
 
 /-- Run one compressor over the pattern×size×level grid. `compress` returns the
