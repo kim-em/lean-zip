@@ -27,20 +27,20 @@ open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
     The three contracts (`cEnc`/`cEmpty`/`cRes`) are what `inflate_deflateFixedBlock`
     / `inflate_deflateDynamicBlock` / their `_spec`s consume. -/
 private theorem cEnc (data : ByteArray) (level : UInt8) :
-    ∀ t ∈ (lz77ChainIter data (chainDepth level)).toList,
+    ∀ t ∈ (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 :=
-  lz77ChainIter_encodable data (chainDepth level) 32768 (by omega) (by omega)
+  lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level) (by omega) (by omega)
 
 private theorem cEmpty (data : ByteArray) (level : UInt8) (hz : data.size = 0) :
-    lz77ChainIter data (chainDepth level) = #[] :=
-  lz77ChainIter_empty data (chainDepth level) 32768 hz
+    lz77ChainIter data (chainDepth level) 32768 (insertCap level) = #[] :=
+  lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
 
 private theorem cRes (data : ByteArray) (level : UInt8) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainIter data (chainDepth level))) [] =
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainIter data (chainDepth level) 32768 (insertCap level))) [] =
       some data.data.toList :=
-  lz77ChainIter_resolves data (chainDepth level) 32768 (by omega)
+  lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
 
 /-- Roundtrip for the compressed-block dispatch (`deflateCompressed`), i.e. the
     `deflateRaw` cases without the stored-block fallback. -/
@@ -48,18 +48,13 @@ theorem inflate_deflateCompressed (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     Zip.Native.Inflate.inflate (deflateCompressed data level) maxOutputSize = .ok data := by
   unfold deflateCompressed
+  dsimp only []
   split
-  · exact inflate_deflateFixedIter data _ (by omega)
-  · split
-    · exact inflate_deflateLazyIter data _ hsize
-    · -- Levels 5+: one lazy token pass sizes both candidates; emit only the winner.
-      dsimp only []
-      split
-      · exact inflate_deflateFixedBlock data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ (by omega)
-      · exact inflate_deflateDynamicBlock data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz)
-          (cRes data level) _ (by omega)
+  · exact inflate_deflateFixedBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ (by omega)
+  · exact inflate_deflateDynamicBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      (cEnc data level) (fun hz => cEmpty data level hz)
+      (cRes data level) _ (by omega)
 
 set_option maxRecDepth 8000 in
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
@@ -75,24 +70,18 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
   unfold deflateRaw
   split
   · exact inflate_deflateStoredPure data _ (by omega)
-  · split
-    · -- Levels 1-4: stored fallback vs. one compressed block.
-      unfold pickSmaller
-      split
-      · exact inflate_deflateStoredPure data _ (by omega)
-      · exact inflate_deflateCompressed data level maxOutputSize hsize
-    · -- Levels 5+: stored / fixed / dynamic all sized; emit only the winner.
-      -- The outer `split` fires on `fixedBytes < dynBytes`, then each side on the
-      -- stored-vs-compressed comparison.
-      dsimp only []
-      split <;> split
-      · exact inflate_deflateStoredPure data _ hsize
-      · exact inflate_deflateFixedBlock data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize
-      · exact inflate_deflateStoredPure data _ hsize
-      · exact inflate_deflateDynamicBlock data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz)
-          (cRes data level) _ hsize
+  · -- Levels ≥ 1: stored / fixed / dynamic all sized from one chain token pass.
+    -- The outer `split` fires on `fixedBytes < dynBytes`, then each side on the
+    -- stored-vs-compressed comparison.
+    dsimp only []
+    split <;> split
+    · exact inflate_deflateStoredPure data _ hsize
+    · exact inflate_deflateFixedBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize
+    · exact inflate_deflateStoredPure data _ hsize
+    · exact inflate_deflateDynamicBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz)
+        (cRes data level) _ hsize
 
 /-- Padding decomposition for the compressed-block dispatch. -/
 theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
@@ -100,33 +89,20 @@ theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
       Deflate.Spec.bytesToBits (deflateCompressed data level) = contentBits ++ padding ∧
       padding.length < 8 := by
   unfold deflateCompressed
+  dsimp only []
   split
-  · -- Level 1: fixed Huffman (iterative LZ77)
-    rw [deflateFixedIter, lz77GreedyIter_eq_lz77Greedy]
-    obtain ⟨bits, _, hbytes⟩ := deflateFixed_spec data
+  · -- fixed Huffman over the chain token stream
+    obtain ⟨bits, _, hbytes⟩ := deflateFixedBlock_spec_of data
+      (lz77ChainIter data (chainDepth level) 32768 (insertCap level)) (cEnc data level) (fun hz => cEmpty data level hz)
     exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
       hbytes, by simp only [List.length_replicate]; omega⟩
-  · split
-    · -- Levels 2-4: lazy LZ77 + fixed Huffman (iterative)
-      rw [deflateLazyIter_eq_deflateLazy]
-      obtain ⟨bits, _, hbytes⟩ := deflateLazy_spec data
-      exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
-        hbytes, by simp only [List.length_replicate]; omega⟩
-    · -- Levels 5+: smaller of fixed / dynamic Huffman over a shared lazy token stream.
-      dsimp only []
-      split
-      · -- fixed Huffman over lazy tokens (= deflateLazyIter)
-        obtain ⟨bits, _, hbytes⟩ := deflateFixedBlock_spec_of data
-          (lz77ChainIter data (chainDepth level)) (cEnc data level) (fun hz => cEmpty data level hz)
-        exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
-          hbytes, by simp only [List.length_replicate]; omega⟩
-      · -- dynamic Huffman over lazy tokens
-        obtain ⟨_, _, headerBits, symBits, _, _, _, _, _, _, _, _, _, _, hbytes⟩ :=
-          deflateDynamicBlock_spec data (lz77ChainIter data (chainDepth level))
-            (cEnc data level) (fun hz => cEmpty data level hz)
-        exact ⟨[true, false, true] ++ headerBits ++ symBits,
-          List.replicate ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false,
-          hbytes, by simp only [List.length_replicate]; omega⟩
+  · -- dynamic Huffman over the chain token stream
+    obtain ⟨_, _, headerBits, symBits, _, _, _, _, _, _, _, _, _, _, hbytes⟩ :=
+      deflateDynamicBlock_spec data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz)
+    exact ⟨[true, false, true] ++ headerBits ++ symBits,
+      List.replicate ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false,
+      hbytes, by simp only [List.length_replicate]; omega⟩
 
 set_option maxRecDepth 8000 in
 /-- The output of `deflateRaw` decomposes into content bits plus short padding.
@@ -141,45 +117,37 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
   · -- Level 0: stored blocks — all byte-aligned, padding = []
     exact ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
       [], by simp only [List.append_nil], by decide⟩
-  · split
-    · -- Levels 1-4: stored fallback vs. one compressed block.
-      unfold pickSmaller
-      split
-      · -- stored-block fallback chosen — byte-aligned, padding = []
-        exact ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
-          [], by simp only [List.append_nil], by decide⟩
-      · exact deflateCompressed_pad data level
-    · -- Levels 5+: stored / fixed / dynamic sized; emit only the winner.
-      -- The outer `split` fires on `fixedBytes < dynBytes`, then each side on the
-      -- stored-vs-compressed comparison (stored appears in both).
-      dsimp only []
-      have hstored : ∃ (contentBits padding : List Bool),
-          Deflate.Spec.bytesToBits
-              (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data) = contentBits ++ padding ∧
-            padding.length < 8 :=
-        ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
-          [], by simp only [List.append_nil], by decide⟩
-      have hfixed : ∃ (contentBits padding : List Bool),
-          Deflate.Spec.bytesToBits (deflateFixedBlock data (lz77ChainIter data (chainDepth level))) =
-            contentBits ++ padding ∧ padding.length < 8 := by
-        obtain ⟨bits, _, hbytes⟩ := deflateFixedBlock_spec_of data
-          (lz77ChainIter data (chainDepth level)) (cEnc data level) (fun hz => cEmpty data level hz)
-        exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
-          hbytes, by simp only [List.length_replicate]; omega⟩
-      have hdyn : ∃ (contentBits padding : List Bool),
-          Deflate.Spec.bytesToBits (deflateDynamicBlock data (lz77ChainIter data (chainDepth level))) =
-            contentBits ++ padding ∧ padding.length < 8 := by
-        obtain ⟨_, _, headerBits, symBits, _, _, _, _, _, _, _, _, _, _, hbytes⟩ :=
-          deflateDynamicBlock_spec data (lz77ChainIter data (chainDepth level))
-            (cEnc data level) (fun hz => cEmpty data level hz)
-        exact ⟨[true, false, true] ++ headerBits ++ symBits,
-          List.replicate ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false,
-          hbytes, by simp only [List.length_replicate]; omega⟩
-      split <;> split
-      · exact hstored
-      · exact hfixed
-      · exact hstored
-      · exact hdyn
+  · -- Levels ≥ 1: stored / fixed / dynamic sized; emit only the winner.
+    -- The outer `split` fires on `fixedBytes < dynBytes`, then each side on the
+    -- stored-vs-compressed comparison (stored appears in both).
+    dsimp only []
+    have hstored : ∃ (contentBits padding : List Bool),
+        Deflate.Spec.bytesToBits
+            (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data) = contentBits ++ padding ∧
+          padding.length < 8 :=
+      ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
+        [], by simp only [List.append_nil], by decide⟩
+    have hfixed : ∃ (contentBits padding : List Bool),
+        Deflate.Spec.bytesToBits (deflateFixedBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))) =
+          contentBits ++ padding ∧ padding.length < 8 := by
+      obtain ⟨bits, _, hbytes⟩ := deflateFixedBlock_spec_of data
+        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)) (cEnc data level) (fun hz => cEmpty data level hz)
+      exact ⟨bits, List.replicate ((8 - bits.length % 8) % 8) false,
+        hbytes, by simp only [List.length_replicate]; omega⟩
+    have hdyn : ∃ (contentBits padding : List Bool),
+        Deflate.Spec.bytesToBits (deflateDynamicBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))) =
+          contentBits ++ padding ∧ padding.length < 8 := by
+      obtain ⟨_, _, headerBits, symBits, _, _, _, _, _, _, _, _, _, _, hbytes⟩ :=
+        deflateDynamicBlock_spec data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+          (cEnc data level) (fun hz => cEmpty data level hz)
+      exact ⟨[true, false, true] ++ headerBits ++ symBits,
+        List.replicate ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false,
+        hbytes, by simp only [List.length_replicate]; omega⟩
+    split <;> split
+    · exact hstored
+    · exact hfixed
+    · exact hstored
+    · exact hdyn
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
     the level 2-4 path and the level ≥ 5 fixed candidate (both `= deflateLazy`). -/
@@ -281,42 +249,14 @@ theorem deflateCompressed_goR_pad (data : ByteArray) (level : UInt8) :
       Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits (deflateCompressed data level)) []
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateCompressed
+  dsimp only []
   split
-  · -- Level 1: fixed Huffman (iterative LZ77)
-    rw [deflateFixedIter, lz77GreedyIter_eq_lz77Greedy, ← deflateFixed]
-    obtain ⟨bits_enc, henc_fixed, hbytes⟩ := deflateFixed_spec data
-    simp only [Deflate.Spec.encodeFixed] at henc_fixed
-    cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
-        Deflate.Spec.fixedDistLengths
-        (tokensToSymbols (lz77Greedy data)) with
-    | none => exact nomatch (henc_syms ▸ henc_fixed)
-    | some allBits =>
-      simp only [henc_syms, bind, Option.bind, pure, Pure.pure] at henc_fixed
-      have hbits_eq : bits_enc = [true, true, false] ++ allBits :=
-        (Option.some.inj henc_fixed).symm
-      subst hbits_eq
-      rw [hbytes]
-      let padding := List.replicate
-        ((8 - ([true, true, false] ++ allBits).length % 8) % 8) false
-      refine ⟨padding, ?_, ?_⟩
-      · exact Deflate.Spec.encodeFixed_goR_rest
-          (tokensToSymbols (lz77Greedy data)) data.data.toList allBits padding
-          henc_syms (lz77Greedy_resolves data 32768 (by omega))
-          (tokensToSymbols_validSymbolList _)
-      · simp only [padding, List.length_replicate]; omega
-  · split
-    · -- Levels 2-4: lazy LZ77 + fixed Huffman (iterative)
-      rw [deflateLazyIter_eq_deflateLazy]
-      exact deflateLazy_goR_pad data
-    · -- Levels 5+: smaller of fixed / dynamic Huffman over a shared lazy token stream.
-      dsimp only []
-      split
-      · -- fixed Huffman over lazy tokens (= deflateLazyIter)
-        exact deflateFixedBlock_goR_pad data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
-      · -- dynamic Huffman over chain tokens
-        exact deflateDynamicBlock_goR_pad data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
+  · -- fixed Huffman over the chain token stream
+    exact deflateFixedBlock_goR_pad data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
+  · -- dynamic Huffman over the chain token stream
+    exact deflateDynamicBlock_goR_pad data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
 
 set_option maxRecDepth 8000 in
 /-- For the encoder's output, `decode.goR` returns a short remaining (< 8 bits).
@@ -330,28 +270,19 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
     exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
-  · split
-    · -- Levels 1-4: stored fallback vs. one compressed block.
-      unfold pickSmaller
-      split
-      · -- stored-block fallback chosen — byte-aligned, remaining = []
-        exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
-      · exact deflateCompressed_goR_pad data level
-    · -- Levels 5+: stored / fixed / dynamic sized; emit only the winner.
-      -- The outer `split` fires on `fixedBytes < dynBytes`, then each side on the
-      -- stored-vs-compressed comparison (stored appears in both).
-      dsimp only []
-      have hfixed : ∃ remaining,
-          Deflate.Spec.decode.goR
-              (Deflate.Spec.bytesToBits (deflateFixedBlock data (lz77ChainIter data (chainDepth level)))) []
-            = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
-        exact deflateFixedBlock_goR_pad data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
-      split <;> split
-      · exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
-      · exact hfixed
-      · exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
-      · exact deflateDynamicBlock_goR_pad data (lz77ChainIter data (chainDepth level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
+  · -- Levels ≥ 1: stored / fixed / dynamic sized; emit only the winner.
+    dsimp only []
+    have hfixed : ∃ remaining,
+        Deflate.Spec.decode.goR
+            (Deflate.Spec.bytesToBits (deflateFixedBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level)))) []
+          = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+      exact deflateFixedBlock_goR_pad data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
+    split <;> split
+    · exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
+    · exact hfixed
+    · exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
+    · exact deflateDynamicBlock_goR_pad data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
 
 end Zip.Native.Deflate
