@@ -356,48 +356,54 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes
     cost; the `chainWalk` early-stop keeps repetitive input fast at any depth.
     The ratio gain saturates around 256–512 (measured), so level 9 caps there. -/
 def chainDepth (level : UInt8) : Nat :=
-  if level ≤ 5 then 32
+  if level ≤ 1 then 8
+  else if level ≤ 2 then 16
+  else if level ≤ 3 then 32
+  else if level ≤ 4 then 48
+  else if level ≤ 5 then 64
   else if level ≤ 6 then 128
   else if level ≤ 7 then 256
   else if level ≤ 8 then 512
   else 1024
 
-/-- The compressed-block dispatch (no stored fallback): level 1 = fixed Huffman,
-    2-4 = lazy LZ77, 5+ = hash-chain LZ77 + dynamic Huffman. At levels ≥ 5 it
-    sizes the fixed and dynamic blocks from a single shared token pass and emits
-    only the smaller (strict `<`, keeping dynamic on a tie — the old `pickSmaller`
-    tie-break), so the loser's symbol emission is skipped entirely. -/
+/-- Per-level interior-insertion cap (zlib's `deflate_fast`/`deflate_slow` split):
+    fast levels (1–3) defer most interior `updateHashes` insertions for speed at a
+    ratio cost; levels ≥ 4 insert every position (best ratio). A `cap` below ~16
+    is counterproductive end-to-end — the worse ratio inflates the token count and
+    the Huffman encode dominates — so the fastest level uses `cap = 16`. The chain
+    is a heuristic, so any cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
+def insertCap (level : UInt8) : Nat :=
+  if level ≤ 1 then 16
+  else if level ≤ 2 then 32
+  else if level ≤ 3 then 64
+  else 1000000000
+
+/-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
+    hash-chain matcher with the level's search depth (`chainDepth`) and interior
+    insertion cap (`insertCap`): low levels defer insertion + search shallowly
+    (fast, lower ratio), high levels insert everything + search deeply (slower,
+    best ratio). One shared token pass sizes the fixed and dynamic blocks and
+    emits only the smaller (strict `<`, dynamic on a tie). -/
 def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
-  if level == 1 then deflateFixedIter data
-  else if level < 5 then deflateLazyIter data
-  else
-    -- At high levels use the hash-chain matcher (longer matches → better ratio,
-    -- reaching C-reference parity on text). One token pass feeds the size of both
-    -- candidates; the `let`s keep the matcher and frequency count running once.
-    let tokens := lz77ChainIter data (chainDepth level)
-    let f := tokenFreqs tokens
-    let lens := dynamicCodeLengths f.1 f.2
-    if fixedBlockBytes f.1 f.2 < dynBlockBytes f.1 f.2 lens.1 lens.2
-    then deflateFixedBlock data tokens
-    -- Reuse the sized `lens` for emission (= `deflateDynamicBlock data tokens`,
-    -- but without recomputing the code lengths).
-    else deflateDynamicBlockCore data tokens lens.1 lens.2
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+  let tokens := lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+  let f := tokenFreqs tokens
+  let lens := dynamicCodeLengths f.1 f.2
+  if fixedBlockBytes f.1 f.2 < dynBlockBytes f.1 f.2 lens.1 lens.2
+  then deflateFixedBlock data tokens
+  -- Reuse the sized `lens` for emission (= `deflateDynamicBlock data tokens`,
+  -- but without recomputing the code lengths).
+  else deflateDynamicBlockCore data tokens lens.1 lens.2
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
-/-- Unified raw DEFLATE compression dispatch.
-    Level 0 = stored, 1 = fixed Huffman, 2-4 = lazy LZ77, 5+ = dynamic Huffman.
-    For levels ≥ 1 it falls back to a stored block whenever that is smaller than
-    the compressed output, so incompressible input never expands — the result is
-    never larger than `deflateStoredPure data`.
-
-    At levels ≥ 5 the stored/fixed/dynamic candidates are all *sized* from one
-    shared token pass and only the winner is emitted, so incompressible input
-    (where stored wins) skips both expensive Huffman emissions. -/
+/-- Unified raw DEFLATE compression dispatch. Level 0 = stored; every level ≥ 1
+    runs the hash-chain matcher with per-level `(chainDepth, insertCap)` (a zlib-style
+    speed/ratio ladder) and falls back to a stored block whenever that is smaller,
+    so incompressible input never expands. The stored/fixed/dynamic candidates are
+    all *sized* from one shared token pass and only the winner is emitted. -/
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
-  else if level < 5 then pickSmaller (deflateStoredPure data) (deflateCompressed data level)
   else
-    let tokens := lz77ChainIter data (chainDepth level)
+    let tokens := lz77ChainIter data (chainDepth level) 32768 (insertCap level)
     let f := tokenFreqs tokens
     let lens := dynamicCodeLengths f.1 f.2
     let fixedBytes := fixedBlockBytes f.1 f.2

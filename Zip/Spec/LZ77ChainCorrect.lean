@@ -51,9 +51,9 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
     `lz77Greedy.mainLoop_valid`; the reference case uses `chainWalk_spec` (which
     holds for *any* `prev` array) in place of the inline single-probe match. -/
 theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (hw : windowSize > 0) :
+    (hashTable prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) :
     ValidDecomp data pos
-      (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos) := by
+      (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap) := by
   unfold lz77Chain.mainLoop
   split
   · rename_i hlt
@@ -72,30 +72,30 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
           · intro i hi
             rw [Nat.sub_sub_self (Nat.le_of_lt hQ.1)]
             exact hQ.2.2.2.1 i hi
-          · exact lz77Chain_mainLoop_valid _ _ _ _ _ _ _ hw
+          · exact lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ hw
       · exact .literal (by omega) (getElem!_pos data pos (by omega))
-          (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ hw)
+          (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ hw)
     · exact .literal (by omega) (getElem!_pos data pos (by omega))
-        (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ hw)
+        (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 decreasing_by all_goals omega
 
 /-- `lz77Chain` produces a valid decomposition of the input data. -/
-theorem lz77Chain_valid (data : ByteArray) (maxChain windowSize : Nat)
+theorem lz77Chain_valid (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) :
-    ValidDecomp data 0 (lz77Chain data maxChain windowSize).toList := by
+    ValidDecomp data 0 (lz77Chain data maxChain windowSize insertCap).toList := by
   simp only [lz77Chain]
   split
   · simp only; exact trailing_valid data 0
-  · simp only; exact lz77Chain_mainLoop_valid data windowSize 65536 maxChain _ _ 0 hw
+  · simp only; exact lz77Chain_mainLoop_valid data windowSize 65536 maxChain _ _ 0 insertCap hw
 
 /-- Resolving the LZ77 tokens produced by `lz77Chain` recovers the original data. -/
-theorem lz77Chain_resolves (data : ByteArray) (maxChain windowSize : Nat)
+theorem lz77Chain_resolves (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77Chain data maxChain windowSize)) [] =
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77Chain data maxChain windowSize insertCap)) [] =
       some data.data.toList :=
-  validDecomp_resolves data _ (lz77Chain_valid data maxChain windowSize hw)
+  validDecomp_resolves data _ (lz77Chain_valid data maxChain windowSize insertCap hw)
 
 /-! ## Encodability -/
 
@@ -107,8 +107,8 @@ private def Enc (t : LZ77Token) : Prop :=
   | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768
 
 theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos, Enc t := by
+    (hashTable prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    ∀ t ∈ lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap, Enc t := by
   unfold lz77Chain.mainLoop
   split
   · rename_i hlt
@@ -126,15 +126,15 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
         · intro t ht
           cases ht with
           | head => exact ⟨hge, by omega, by omega, by omega⟩
-          | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ hw hws t h
+          | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ hw hws t h
       · intro t ht
         cases ht with
         | head => trivial
-        | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ hw hws t h
+        | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ hw hws t h
     · intro t ht
       cases ht with
       | head => trivial
-      | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ hw hws t h
+      | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ hw hws t h
   · intro t ht
     -- `trailing` emits only literals
     exact trailing_encodable data pos t ht
@@ -142,9 +142,9 @@ termination_by data.size - pos
 decreasing_by all_goals omega
 
 /-- Every token `lz77Chain` emits satisfies the encoder bounds. -/
-theorem lz77Chain_encodable (data : ByteArray) (maxChain windowSize : Nat)
+theorem lz77Chain_encodable (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ (lz77Chain data maxChain windowSize).toList,
+    ∀ t ∈ (lz77Chain data maxChain windowSize insertCap).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
@@ -153,7 +153,7 @@ theorem lz77Chain_encodable (data : ByteArray) (maxChain windowSize : Nat)
   · intro t ht; simp only [List.toList_toArray] at ht
     exact trailing_encodable data 0 t ht
   · intro t ht; simp only [List.toList_toArray] at ht
-    exact lz77Chain_mainLoop_encodable data windowSize 65536 maxChain _ _ 0 hw hws t ht
+    exact lz77Chain_mainLoop_encodable data windowSize 65536 maxChain _ _ 0 insertCap hw hws t ht
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 
@@ -171,10 +171,10 @@ private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Toke
 /-- The iterative chain `mainLoop` is the accumulator form of the recursive one.
     The `chainWalk`/`updateHashes` helpers are shared, so the only difference is
     push vs. cons at each emission. -/
-private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxChain : Nat)
+private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
     (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainIter.mainLoop data windowSize hashSize maxChain hashTable prev pos acc =
-    acc ++ (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos).toArray := by
+    lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos acc =
+    acc ++ (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIter.mainLoop lz77Chain.mainLoop
@@ -192,35 +192,35 @@ private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxCha
       exact trailing_eq data pos acc
 
 /-- `lz77ChainIter` produces exactly the same tokens as `lz77Chain`. -/
-theorem lz77ChainIter_eq_lz77Chain (data : ByteArray) (maxChain windowSize : Nat) :
-    lz77ChainIter data maxChain windowSize = lz77Chain data maxChain windowSize := by
+theorem lz77ChainIter_eq_lz77Chain (data : ByteArray) (maxChain windowSize insertCap : Nat) :
+    lz77ChainIter data maxChain windowSize insertCap = lz77Chain data maxChain windowSize insertCap := by
   unfold lz77ChainIter lz77Chain
   split
   · rw [trailing_eq]; simp only [List.append_toArray, List.nil_append]
   · rw [mainLoop_eq_chain]; simp only [List.append_toArray, List.nil_append]
 
-theorem lz77ChainIter_valid (data : ByteArray) (maxChain windowSize : Nat)
+theorem lz77ChainIter_valid (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) :
-    ValidDecomp data 0 (lz77ChainIter data maxChain windowSize).toList := by
-  rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_valid data maxChain windowSize hw
+    ValidDecomp data 0 (lz77ChainIter data maxChain windowSize insertCap).toList := by
+  rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_valid data maxChain windowSize insertCap hw
 
-theorem lz77ChainIter_resolves (data : ByteArray) (maxChain windowSize : Nat)
+theorem lz77ChainIter_resolves (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainIter data maxChain windowSize)) [] =
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainIter data maxChain windowSize insertCap)) [] =
       some data.data.toList := by
-  rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_resolves data maxChain windowSize hw
+  rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_resolves data maxChain windowSize insertCap hw
 
-theorem lz77ChainIter_encodable (data : ByteArray) (maxChain windowSize : Nat)
+theorem lz77ChainIter_encodable (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ (lz77ChainIter data maxChain windowSize).toList,
+    ∀ t ∈ (lz77ChainIter data maxChain windowSize insertCap).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
-  rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_encodable data maxChain windowSize hw hws
+  rw [lz77ChainIter_eq_lz77Chain]; exact lz77Chain_encodable data maxChain windowSize insertCap hw hws
 
 /-- The chain matcher emits no tokens on empty input. -/
-theorem lz77ChainIter_empty (data : ByteArray) (maxChain windowSize : Nat)
-    (hzero : data.size = 0) : lz77ChainIter data maxChain windowSize = #[] := by
+theorem lz77ChainIter_empty (data : ByteArray) (maxChain windowSize insertCap : Nat)
+    (hzero : data.size = 0) : lz77ChainIter data maxChain windowSize insertCap = #[] := by
   rw [lz77ChainIter_eq_lz77Chain]
   simp only [lz77Chain, show data.size < 3 from by omega, ↓reduceIte]
   have htrail : lz77Greedy.trailing data 0 = [] := by

@@ -396,14 +396,15 @@ where
     position), so an unset chain link fails the `cand < pos` guard and stops the
     walk — no separate validity bitmap needed. Reuses `lz77Greedy`'s
     `hash3`/`countMatch`/`trailing` helpers (and their proofs). -/
-def lz77Chain (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768) :
+def lz77Chain (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
     Array LZ77Token :=
   if data.size < 3 then
     (lz77Greedy.trailing data 0).toArray
   else
     let hashSize := 65536
     (mainLoop data windowSize hashSize maxChain
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0).toArray
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0 insertCap).toArray
 where
   /-- Walk the `prev` chain up to `fuel` steps from `cand`, keeping the longest
       in-window match `(bestLen, bestPos)`. Stops at the first out-of-window or
@@ -423,22 +424,26 @@ where
     else (bestLen, bestPos)
   termination_by fuel
   decreasing_by omega
-  /-- Insert positions `pos+1 .. pos+matchLen-1` into the chains so later matches
-      can reach them: `prev[p] := head[bucket]`, then `head[bucket] := p`. -/
+  /-- Insert positions `pos+1 .. pos+min(matchLen-1, insertCap)` into the chains so
+      later matches can reach them: `prev[p] := head[bucket]`, then `head[bucket] := p`.
+      `insertCap` bounds the interior insertions per match — a small cap (fast levels)
+      defers most of this work for speed at a ratio cost; a large cap inserts every
+      position (best ratio). The chain is a heuristic, so any cap stays correct. -/
   updateHashes (data : ByteArray) (hashSize : Nat)
-      (hashTable prev : Array Nat) (pos j matchLen : Nat) : Array Nat × Array Nat :=
-    if j < matchLen then
+      (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat) : Array Nat × Array Nat :=
+    if j < matchLen ∧ j ≤ insertCap then
       if h : pos + j + 2 < data.size then
         let hsh := lz77Greedy.hash3 data (pos + j) hashSize h
         let head := hashTable[hsh]!
         updateHashes data hashSize (hashTable.set! hsh (pos + j)) (prev.set! (pos + j) head)
-          pos (j + 1) matchLen
+          pos (j + 1) matchLen insertCap
       else
-        updateHashes data hashSize hashTable prev pos (j + 1) matchLen
+        updateHashes data hashSize hashTable prev pos (j + 1) matchLen insertCap
     else (hashTable, prev)
   termination_by matchLen - j
+  decreasing_by all_goals omega
   mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
-      (hashTable prev : Array Nat) (pos : Nat) : List LZ77Token :=
+      (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := hashTable[h]!
@@ -451,15 +456,15 @@ where
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
-          let (hashTable, prev) := updateHashes data hashSize hashTable prev pos 1 matchLen
+          let (hashTable, prev) := updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
           .reference matchLen (pos - matchPos) ::
-            mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen)
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
         else
           .literal (data[pos]'(by omega)) ::
-            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1)
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
       else
         .literal (data[pos]'(by omega)) ::
-          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1)
+          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
     else
       lz77Greedy.trailing data pos
   termination_by data.size - pos
@@ -470,16 +475,17 @@ where
     `lz77Chain`'s `chainWalk`/`updateHashes` (which accumulate into arrays, not
     tokens) and `lz77GreedyIter.trailing`; only the token-emitting `mainLoop`
     differs (push vs. cons). Proven equal to `lz77Chain` in `LZ77ChainCorrect`. -/
-def lz77ChainIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768) :
+def lz77ChainIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
     Array LZ77Token :=
   if data.size < 3 then
     lz77GreedyIter.trailing data 0 #[]
   else
     let hashSize := 65536
-    mainLoop data windowSize hashSize maxChain
+    mainLoop data windowSize hashSize maxChain insertCap
       (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
 where
-  mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
       (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
@@ -494,14 +500,15 @@ where
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
-          let (hashTable, prev) := lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen
-          mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen)
+          let (hashTable, prev) :=
+            lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
             (acc.push (.reference matchLen (pos - matchPos)))
         else
-          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1)
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
             (acc.push (.literal (data[pos]'(by omega))))
       else
-        mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1)
+        mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
           (acc.push (.literal (data[pos]'(by omega))))
     else
       lz77GreedyIter.trailing data pos acc
