@@ -202,7 +202,7 @@ def lz77Greedy (data : ByteArray) (windowSize : Nat := 32768) :
     (mainLoop data windowSize hashSize
       (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
 where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
+  @[inline] hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
       (h : pos + 2 < data.size) : Nat :=
     -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
     -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
@@ -298,7 +298,7 @@ def lz77GreedyIter (data : ByteArray) (windowSize : Nat := 32768) :
     mainLoop data windowSize hashSize
       (.replicate hashSize 0) (.replicate hashSize false) 0 #[]
 where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
+  @[inline] hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
       (h : pos + 2 < data.size) : Nat :=
     -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
     -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
@@ -583,7 +583,7 @@ def lz77Lazy (data : ByteArray) (windowSize : Nat := 32768) :
     (mainLoop data windowSize hashSize
       (.replicate hashSize 0) (.replicate hashSize false) 0).toArray
 where
-  hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
+  @[inline] hash3 (data : ByteArray) (pos : Nat) (hashSize : Nat)
       (h : pos + 2 < data.size) : Nat :=
     -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
     -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
