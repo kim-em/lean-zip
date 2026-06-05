@@ -45,6 +45,45 @@ def deflateStoredPure (data : ByteArray) (pos : Nat := 0) : ByteArray :=
 termination_by data.size - pos
 decreasing_by omega
 
+/-- Byte size of `deflateStoredPure data pos` *without materializing it*: each
+    stored block is a 5-byte header plus its ≤65535 data bytes, so the total is
+    computable in O(⌈remaining/65535⌉) steps (~16 for 1 MiB) instead of building
+    and discarding the whole block. Used by the `deflateRaw` dispatch to size the
+    stored candidate cheaply; `storedBlockBytes_eq` proves it agrees with the
+    materialized `.size`, so the fixed/dynamic/stored selection is byte-identical. -/
+def storedBlockBytes (data : ByteArray) (pos : Nat := 0) : Nat :=
+  if pos + min (data.size - pos) 65535 ≥ data.size then 5 + min (data.size - pos) 65535
+  else (5 + min (data.size - pos) 65535) +
+    storedBlockBytes data (pos + min (data.size - pos) 65535)
+termination_by data.size - pos
+decreasing_by omega
+
+/-- `storedBlockBytes` computes exactly the size of the materialized stored
+    encoding. Lets the dispatch size the stored candidate without building it. -/
+theorem storedBlockBytes_eq (data : ByteArray) (pos : Nat) :
+    storedBlockBytes data pos = (deflateStoredPure data pos).size := by
+  fun_induction storedBlockBytes data pos with
+  | case1 pos hge =>
+    rw [deflateStoredPure]
+    simp only [hge, ↓reduceDIte, ByteArray.size_append, ByteArray.size_extract]
+    have hhdr : (ByteArray.mk #[(0x01 : UInt8),
+        ((min (data.size - pos) 65535).toUInt16 &&& 0xFF).toUInt8,
+        (((min (data.size - pos) 65535).toUInt16 >>> 8) &&& 0xFF).toUInt8,
+        (((min (data.size - pos) 65535).toUInt16 ^^^ 0xFFFF) &&& 0xFF).toUInt8,
+        ((((min (data.size - pos) 65535).toUInt16 ^^^ 0xFFFF) >>> 8) &&& 0xFF).toUInt8]).size
+        = 5 := rfl
+    rw [hhdr]; omega
+  | case2 pos hlt ih =>
+    rw [deflateStoredPure]
+    simp only [hlt, ↓reduceDIte, ByteArray.size_append, ByteArray.size_extract, ← ih]
+    have hhdr : (ByteArray.mk #[(0x00 : UInt8),
+        ((min (data.size - pos) 65535).toUInt16 &&& 0xFF).toUInt8,
+        (((min (data.size - pos) 65535).toUInt16 >>> 8) &&& 0xFF).toUInt8,
+        (((min (data.size - pos) 65535).toUInt16 ^^^ 0xFFFF) &&& 0xFF).toUInt8,
+        ((((min (data.size - pos) 65535).toUInt16 ^^^ 0xFFFF) >>> 8) &&& 0xFF).toUInt8]).size
+        = 5 := rfl
+    rw [hhdr]; omega
+
 /-! ## fromLengths succeeds on fixed codes
 
 Array.any is opaque to the kernel evaluator, so we rewrite through List.any
