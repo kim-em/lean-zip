@@ -287,7 +287,7 @@ def deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArra
 def deflateDynamic (data : ByteArray) (windowSize : Nat := 32768) : ByteArray :=
   deflateDynamicBlock data (lz77GreedyIter data windowSize)
 
-open Zip.Spec.DeflateStoredCorrect (deflateStoredPure)
+open Zip.Spec.DeflateStoredCorrect (deflateStoredPure storedBlockBytes storedBlockBytes_eq)
 
 /-- Pick the smaller of two encodings by byte length (ties keep `b`). -/
 def pickSmaller (a b : ByteArray) : ByteArray :=
@@ -408,8 +408,12 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     let lens := dynamicCodeLengths f.1 f.2
     let fixedBytes := fixedBlockBytes f.1 f.2
     let dynBytes := dynBlockBytes f.1 f.2 lens.1 lens.2
-    let stored := deflateStoredPure data
-    if stored.size < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then stored
+    -- Size the stored candidate in O(⌈|data|/65535⌉) via `storedBlockBytes`
+    -- (= `(deflateStoredPure data).size`, `storedBlockBytes_eq`) and *only*
+    -- materialize the ~|data|-byte stored block when it actually wins — otherwise
+    -- every compressible input paid to build and discard a full-size copy.
+    let storedBytes := storedBlockBytes data
+    if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlock data tokens
     -- Reuse the sized `lens` for emission (= `deflateDynamicBlock data tokens`,
     -- but without recomputing the code lengths).
