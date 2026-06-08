@@ -34,6 +34,11 @@ PATTERNS = ["constant", "cyclic", "prng", "text"]
 SIZE_LEVEL = 6     # level used for the size-sweep figures
 LEVEL_SIZE = 65536  # size used for the ratio-vs-level figure
 
+# Real corpora rendered as per-file grouped-bar charts (their files are
+# single-size, so the synthetic size-sweep figures don't apply).
+CORPORA = ["canterbury"]
+CORPUS_LEVEL = 6   # representative level for the per-file corpus bars
+
 
 def load(path):
     with open(path) as f:
@@ -137,6 +142,59 @@ def ratio_by_level(results, meta, outfile):
     print(f"wrote {outfile}")
 
 
+def corpus_patterns(results, corpus):
+    """Sorted `<corpus>/<file>` patterns present in the results."""
+    pref = corpus + "/"
+    return sorted({r["pattern"] for r in results if r["pattern"].startswith(pref)})
+
+
+def corpus_bars(results, meta, corpus, metric, ylabel, title, outfile, *,
+                logy, level=CORPUS_LEVEL):
+    """Per-file grouped bar chart for one real corpus: one x-tick per file, one
+    bar per compressor, at a representative level. Real-corpus files are
+    single-size, so this replaces the synthetic size-sweep view."""
+    pats = corpus_patterns(results, corpus)
+    if not pats:
+        return
+    def val(key, pat):
+        rs = rows_for(results, key, pat, level=level)
+        return rs[0].get(metric) if rs else None
+    comps = [c for c in present_compressors(results)
+             if any(val(c[0], p) is not None for p in pats)]
+    if not comps:
+        return
+    n = len(comps)
+    width = 0.8 / n
+    xs = list(range(len(pats)))
+    fig, ax = plt.subplots(figsize=(max(11, len(pats) * 1.1), 6))
+    for i, (key, label, colour, _marker) in enumerate(comps):
+        pos, ys = [], []
+        for x, p in zip(xs, pats):
+            y = val(key, p)
+            if y is not None:
+                pos.append(x + (i - (n - 1) / 2) * width)
+                ys.append(y)
+        ax.bar(pos, ys, width=width, label=label, color=colour,
+               edgecolor="black" if key == "native" else colour,
+               linewidth=0.8 if key == "native" else 0.4,
+               zorder=10 if key == "native" else 4)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([p.split("/", 1)[1] for p in pats],
+                       rotation=45, ha="right", fontsize=8)
+    if logy:
+        ax.set_yscale("log")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, axis="y", which="both", linewidth=0.4, alpha=0.6)
+    ax.legend(fontsize=8, ncol=2, loc="best")
+    fig.suptitle(f"{title}  ({corpus}, level {level})",
+                 fontsize=13, fontweight="bold")
+    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.97))
+    fig.savefig(outfile)
+    plt.close(fig)
+    print(f"wrote {outfile}")
+
+
 def _provenance(meta):
     return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
             f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
@@ -171,6 +229,18 @@ def main():
                "Compression ratio vs input size",
                graphs_dir / "compression_ratio.svg", logy=False)
     ratio_by_level(results, meta, graphs_dir / "ratio_by_level.svg")
+
+    # Real-corpus per-file bar charts (single-size files ⇒ no size sweep).
+    for corpus in CORPORA:
+        corpus_bars(results, meta, corpus, "compress_mbps", "throughput (MB/s)",
+                    "Compression throughput per file",
+                    graphs_dir / f"{corpus}_compress_throughput.svg", logy=True)
+        corpus_bars(results, meta, corpus, "decompress_mbps", "throughput (MB/s)",
+                    "Decompression throughput per file",
+                    graphs_dir / f"{corpus}_decompress_throughput.svg", logy=True)
+        corpus_bars(results, meta, corpus, "ratio", "ratio (compressed / original)",
+                    "Compression ratio per file",
+                    graphs_dir / f"{corpus}_ratio.svg", logy=False)
 
 
 if __name__ == "__main__":
