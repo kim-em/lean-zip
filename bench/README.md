@@ -81,59 +81,35 @@ already-compressed file (a JPEG/PDF) — never synthetic noise.
 
 ## Graphs
 
-Charts are corpus-generic: each corpus gets its own set, and the per-level set
-follows whatever levels the report timed. Filenames:
+Each corpus gets a layered, corpus-generic set (a new corpus slots in with no
+code change). The **headline is the speed-vs-ratio Pareto scatter**: x = ratio
+(← smaller is better), y = speed (MB/s, log), and each codec is *one line tracing
+its levels*, so the whole speed/ratio tradeoff reads at a glance — top-left (fast
+*and* small) is best, and a dominated codec sits to the lower-right. Two
+complements give precise numbers and per-file detail:
 
-- `<corpus>_compress_throughput.svg`, `_decompress_throughput.svg`, `_ratio.svg`
-  — per-file grouped bars at level 6 (one x-tick per file, one bar per
-  compressor); the stable filenames embedded below.
-- `<corpus>_<metric>_L<n>.svg` — the same grouped bars at each timed level n.
-- `<corpus>_<metric>_vs_level.svg` — aggregate line chart, geomean over the
-  corpus files, one line per compressor, across levels.
+- `<corpus>_compress_pareto.svg` / `_decompress_pareto.svg` — **headline**: speed
+  vs ratio, codecs as level-curves (replaces the whole per-level bar set).
+- `<corpus>_summary.svg` — colour-graded geomean table (ratio / compress /
+  decompress per codec, level 6), sorted by speed.
+- `<corpus>_ratio_heatmap.svg` / `_compress_heatmap.svg` — per file, relative to
+  zlib (red = worse), showing *where* a codec wins or loses without 100 bars.
 
-### Canterbury corpus (real data, per file, level 6)
+### Canterbury corpus (11 small files, levels 1–9)
 
-![canterbury compression throughput](graphs/canterbury_compress_throughput.svg)
-![canterbury decompression throughput](graphs/canterbury_decompress_throughput.svg)
-![canterbury compression ratio](graphs/canterbury_ratio.svg)
+![canterbury compression speed vs ratio](graphs/canterbury_compress_pareto.svg)
+![canterbury decompression speed vs ratio](graphs/canterbury_decompress_pareto.svg)
+![canterbury summary table](graphs/canterbury_summary.svg)
+![canterbury ratio vs zlib per file](graphs/canterbury_ratio_heatmap.svg)
+![canterbury compress speed vs zlib per file](graphs/canterbury_compress_heatmap.svg)
 
-### Canterbury — aggregate vs level (geomean over files)
+### Silesia corpus (12 large files, levels 1/6/9)
 
-![canterbury compression throughput vs level](graphs/canterbury_compress_throughput_vs_level.svg)
-![canterbury decompression throughput vs level](graphs/canterbury_decompress_throughput_vs_level.svg)
-![canterbury compression ratio vs level](graphs/canterbury_ratio_vs_level.svg)
-
-Per-level per-file bars (one figure each, levels 1–9):
-compress
-[L1](graphs/canterbury_compress_throughput_L1.svg) ·
-[L2](graphs/canterbury_compress_throughput_L2.svg) ·
-[L3](graphs/canterbury_compress_throughput_L3.svg) ·
-[L4](graphs/canterbury_compress_throughput_L4.svg) ·
-[L5](graphs/canterbury_compress_throughput_L5.svg) ·
-[L6](graphs/canterbury_compress_throughput_L6.svg) ·
-[L7](graphs/canterbury_compress_throughput_L7.svg) ·
-[L8](graphs/canterbury_compress_throughput_L8.svg) ·
-[L9](graphs/canterbury_compress_throughput_L9.svg);
-decompress
-[L1](graphs/canterbury_decompress_throughput_L1.svg) ·
-[L2](graphs/canterbury_decompress_throughput_L2.svg) ·
-[L3](graphs/canterbury_decompress_throughput_L3.svg) ·
-[L4](graphs/canterbury_decompress_throughput_L4.svg) ·
-[L5](graphs/canterbury_decompress_throughput_L5.svg) ·
-[L6](graphs/canterbury_decompress_throughput_L6.svg) ·
-[L7](graphs/canterbury_decompress_throughput_L7.svg) ·
-[L8](graphs/canterbury_decompress_throughput_L8.svg) ·
-[L9](graphs/canterbury_decompress_throughput_L9.svg);
-ratio
-[L1](graphs/canterbury_ratio_L1.svg) ·
-[L2](graphs/canterbury_ratio_L2.svg) ·
-[L3](graphs/canterbury_ratio_L3.svg) ·
-[L4](graphs/canterbury_ratio_L4.svg) ·
-[L5](graphs/canterbury_ratio_L5.svg) ·
-[L6](graphs/canterbury_ratio_L6.svg) ·
-[L7](graphs/canterbury_ratio_L7.svg) ·
-[L8](graphs/canterbury_ratio_L8.svg) ·
-[L9](graphs/canterbury_ratio_L9.svg).
+![silesia compression speed vs ratio](graphs/silesia_compress_pareto.svg)
+![silesia decompression speed vs ratio](graphs/silesia_decompress_pareto.svg)
+![silesia summary table](graphs/silesia_summary.svg)
+![silesia ratio vs zlib per file](graphs/silesia_ratio_heatmap.svg)
+![silesia compress speed vs zlib per file](graphs/silesia_compress_heatmap.svg)
 
 ## What the current snapshot shows
 
@@ -153,8 +129,10 @@ ratio
   `native`. lean-zip is in the pack and at the back, but the distance to the
   *other pure-language* codecs is a small single-digit factor, not the
   order-of-magnitude that the C+SIMD ceiling alone suggests.
-- **Decompression** is competitive — native inflate runs in the hundreds of
-  MB/s, the same order as zlib.
+- **Decompression is behind too on real data** — native ~94 MB/s vs zlib ~692
+  (≈7×) on Canterbury, ~100 vs ~365 (≈4×) on Silesia. (The earlier "competitive"
+  read came from the synthetic match-heavy text, which decoded as near-pure
+  memcpy; real, literal-heavy data exposes the per-symbol Huffman decode path.)
 
 These observations drive the optimization backlog in
 [`../plans/track-d-state.md`](../plans/track-d-state.md).

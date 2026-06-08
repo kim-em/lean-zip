@@ -113,87 +113,61 @@ def _provenance(meta):
             "throughput = median snapshot; ratio is deterministic")
 
 
-def corpus_bars(results, meta, corpus, metric, ylabel, title, outfile, *,
-                logy, level=CORPUS_LEVEL):
-    """Per-file grouped bar chart for one real corpus: one x-tick per file, one
-    bar per compressor, at a single level. Real-corpus files are single-size, so
-    grouped bars (not a size sweep) are the right view."""
+def _level_points(results, corpus, key, speed_metric):
+    """[(level, geomean ratio, geomean speed)] for one compressor over the corpus
+    files — the points of its speed-vs-ratio curve."""
+    pats = corpus_patterns(results, corpus)
+    levels = sorted({r["level"] for p in pats for r in rows_for(results, key, p)})
+    pts = []
+    for lvl in levels:
+        ratios = [rows_for(results, key, p, level=lvl)[0]["ratio"]
+                  for p in pats if rows_for(results, key, p, level=lvl)
+                  and rows_for(results, key, p, level=lvl)[0].get("ratio") is not None]
+        speeds = [rows_for(results, key, p, level=lvl)[0][speed_metric]
+                  for p in pats if rows_for(results, key, p, level=lvl)
+                  and rows_for(results, key, p, level=lvl)[0].get(speed_metric) is not None]
+        gr, gs = geomean(ratios), geomean(speeds)
+        if gr and gs:
+            pts.append((lvl, gr, gs))
+    return pts
+
+
+def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outfile):
+    """Headline view: speed vs ratio. x = compression ratio (smaller = better,
+    left), y = speed (MB/s, log). Each compressor is one line tracing its levels,
+    so the whole speed/ratio tradeoff and the Pareto frontier read at a glance —
+    top-left is ideal, a dominated codec sits to the lower-right. Collapses the
+    per-level chart set into a single figure."""
     pats = corpus_patterns(results, corpus)
     if not pats:
         return
-    def val(key, pat):
-        rs = rows_for(results, key, pat, level=level)
-        return rs[0].get(metric) if rs else None
-    comps = [c for c in present_compressors(results)
-             if any(val(c[0], p) is not None for p in pats)]
-    if not comps:
-        return
-    n = len(comps)
-    width = 0.8 / n
-    xs = list(range(len(pats)))
-    fig, ax = plt.subplots(figsize=(max(11, len(pats) * 1.1), 6))
-    for i, (key, label, colour, _marker) in enumerate(comps):
-        pos, ys = [], []
-        for x, p in zip(xs, pats):
-            y = val(key, p)
-            if y is not None:
-                pos.append(x + (i - (n - 1) / 2) * width)
-                ys.append(y)
-        ax.bar(pos, ys, width=width, label=label, color=colour,
-               edgecolor="black" if key == "native" else colour,
-               linewidth=0.8 if key == "native" else 0.4,
-               zorder=10 if key == "native" else 4)
-    ax.set_xticks(xs)
-    ax.set_xticklabels([p.split("/", 1)[1] for p in pats],
-                       rotation=45, ha="right", fontsize=8)
-    if logy:
-        ax.set_yscale("log")
-    ax.set_ylabel(ylabel)
-    ax.grid(True, axis="y", which="both", linewidth=0.4, alpha=0.6)
-    ax.legend(fontsize=8, ncol=2, loc="best")
-    fig.suptitle(f"{title}  ({corpus}, level {level})",
-                 fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
-    fig.tight_layout(rect=(0, 0.03, 1, 0.97))
-    fig.savefig(outfile)
-    plt.close(fig)
-    print(f"wrote {outfile}")
-
-
-def corpus_vs_level(results, meta, corpus, metric, ylabel, title, outfile, *, logy):
-    """Aggregate line chart: metric (geomean over the corpus files) vs level,
-    one line per compressor. The headline shape of the corpus across levels."""
-    pats = corpus_patterns(results, corpus)
-    levels = corpus_levels(results, corpus, metric)
-    if not pats or not levels:
-        return
-    fig, ax = plt.subplots(figsize=(9, 6))
+    fig, ax = plt.subplots(figsize=(9, 6.5))
     plotted = False
     for key, label, colour, marker in present_compressors(results):
-        xs, ys = [], []
-        for lvl in levels:
-            vals = []
-            for p in pats:
-                rs = rows_for(results, key, p, level=lvl)
-                if rs and rs[0].get(metric) is not None:
-                    vals.append(rs[0][metric])
-            g = geomean(vals)
-            if g is not None:
-                xs.append(lvl)
-                ys.append(g)
-        if xs:
-            ax.plot(xs, ys, marker=marker, label=label, **series_style(key, colour))
-            plotted = True
+        pts = _level_points(results, corpus, key, speed_metric)
+        if not pts:
+            continue
+        xs = [p[1] for p in pts]
+        ys = [p[2] for p in pts]
+        ax.plot(xs, ys, marker=marker, label=label, **series_style(key, colour))
+        # Mark the level sweep direction on the subject's curve only (avoid clutter).
+        if key == "native" and len(pts) > 1:
+            for idx in (0, -1):
+                ax.annotate(f"L{pts[idx][0]}", (xs[idx], ys[idx]),
+                            textcoords="offset points", xytext=(5, 5),
+                            fontsize=7, color=colour, fontweight="bold")
+        plotted = True
     if not plotted:
         plt.close(fig)
         return
-    if logy:
-        ax.set_yscale("log")
-    ax.set_xlabel("compression level")
-    ax.set_ylabel(ylabel)
+    ax.set_yscale("log")
+    ax.set_xlabel("compression ratio   (compressed / original  —  ← smaller is better)")
+    ax.set_ylabel(speed_label + "   (MB/s, log)")
     ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
     ax.legend(fontsize=8, ncol=2, loc="best")
-    fig.suptitle(f"{title}  ({corpus}, geomean over files)",
+    ax.text(0.015, 0.985, "↖ fast & small = best", transform=ax.transAxes,
+            fontsize=10, va="top", color="#2a8a3a", fontweight="bold")
+    fig.suptitle(f"{title}  ({corpus} — geomean over {len(pats)} files; line = level sweep)",
                  fontsize=13, fontweight="bold")
     fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
     fig.tight_layout(rect=(0, 0.03, 1, 0.97))
@@ -202,15 +176,127 @@ def corpus_vs_level(results, meta, corpus, metric, ylabel, title, outfile, *, lo
     print(f"wrote {outfile}")
 
 
-# (metric key, ylabel, title, filename stem, log y-axis)
-THROUGHPUT_FIGS = [
-    ("compress_mbps",   "throughput (MB/s)", "Compression throughput per file",
-     "compress_throughput", True),
-    ("decompress_mbps", "throughput (MB/s)", "Decompression throughput per file",
-     "decompress_throughput", True),
-    ("ratio", "ratio (compressed / original)", "Compression ratio per file",
-     "ratio", False),
-]
+def _geomean_at(results, corpus, key, metric, level):
+    pats = corpus_patterns(results, corpus)
+    vals = [rows_for(results, key, p, level=level)[0][metric]
+            for p in pats if rows_for(results, key, p, level=level)
+            and rows_for(results, key, p, level=level)[0].get(metric) is not None]
+    return geomean(vals)
+
+
+# (metric key, header, format, higher-is-better)
+_SUMMARY_COLS = [("ratio", "ratio", "{:.3f}", False),
+                 ("compress_mbps", "compress MB/s", "{:.0f}", True),
+                 ("decompress_mbps", "decompress MB/s", "{:.0f}", True)]
+
+
+def summary_table(results, meta, corpus, outfile, level=CORPUS_LEVEL):
+    """Precise complement to the scatter: a colour-graded table of the geomean
+    ratio / compress / decompress per codec at one level, sorted by speed."""
+    rows = []
+    for key, label, colour, _ in present_compressors(results):
+        vals = [_geomean_at(results, corpus, key, m, level) for m, _, _, _ in _SUMMARY_COLS]
+        if any(v is not None for v in vals):
+            rows.append((key, label, vals))
+    if not rows:
+        return
+    rows.sort(key=lambda r: (r[2][1] is None, -(r[2][1] or 0)))
+    cmap = matplotlib.colormaps["RdYlGn"]
+    ranges = []
+    for j, _ in enumerate(_SUMMARY_COLS):
+        vs = [r[2][j] for r in rows if r[2][j] is not None]
+        ranges.append((min(vs), max(vs)))
+
+    def colour_of(j, v):
+        if v is None:
+            return "#f2f2f2"
+        lo, hi = ranges[j]
+        t = 0.5 if hi == lo else (v - lo) / (hi - lo)
+        good = t if _SUMMARY_COLS[j][3] else 1 - t      # 1 = best
+        return cmap(0.15 + 0.7 * good)
+
+    ncol = 1 + len(_SUMMARY_COLS)
+    nrow = len(rows) + 1
+    fig, ax = plt.subplots(figsize=(7.5, 0.45 * nrow + 0.8))
+    ax.axis("off")
+    ax.set_xlim(0, ncol)
+    ax.set_ylim(0, nrow)
+    headers = ["codec"] + [h for _, h, _, _ in _SUMMARY_COLS]
+    for j, h in enumerate(headers):
+        ax.text(j + 0.5, nrow - 0.5, h, ha="center", va="center",
+                fontweight="bold", fontsize=9)
+    for i, (key, label, vals) in enumerate(rows):
+        y = nrow - 1.5 - i
+        bold = "bold" if key == "native" else "normal"
+        ax.text(0.5, y, label, ha="center", va="center", fontsize=8, fontweight=bold)
+        for j, v in enumerate(vals):
+            ax.add_patch(plt.Rectangle((j + 1, y - 0.5), 1, 1,
+                                       facecolor=colour_of(j, v), edgecolor="white"))
+            txt = "—" if v is None else _SUMMARY_COLS[j][2].format(v)
+            ax.text(j + 1.5, y, txt, ha="center", va="center", fontsize=8, fontweight=bold)
+    fig.suptitle(f"{corpus} — geomean over files, level {level}",
+                 fontsize=13, fontweight="bold")
+    fig.text(0.5, 0.01, _provenance(meta), ha="center", fontsize=7, color="#555")
+    fig.savefig(outfile, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {outfile}")
+
+
+def relative_heatmap(results, meta, corpus, metric, title, outfile, *,
+                     higher_better, level=CORPUS_LEVEL, baseline="zlib"):
+    """Per-file detail without 100 bars: rows = codecs, cols = files, cell =
+    metric relative to `baseline` (e.g. +24% bigger than zlib). Diverging colours
+    so 'worse than baseline' reads red at a glance, showing *where* a codec
+    falls down (e.g. native's big-text ratio band)."""
+    import numpy as np
+    pats = corpus_patterns(results, corpus)
+    files = [p.split("/", 1)[1] for p in pats]
+
+    def val(key, p):
+        rs = rows_for(results, key, p, level=level)
+        return rs[0].get(metric) if rs else None
+
+    M, labels = [], []
+    for key, label, colour, _ in present_compressors(results):
+        if key == baseline:
+            continue
+        row, any_v = [], False
+        for p in pats:
+            v, b = val(key, p), val(baseline, p)
+            if v is not None and b:
+                row.append(v / b - 1.0)
+                any_v = True
+            else:
+                row.append(np.nan)
+        if any_v:
+            M.append(row)
+            labels.append(label)
+    if not M:
+        return
+    M = np.array(M)
+    vmax = float(np.nanmax(np.abs(M))) or 0.01
+    # higher_better: positive (faster) = green; ratio: positive (bigger) = red.
+    cmap = "RdYlGn" if higher_better else "RdYlGn_r"
+    fig, ax = plt.subplots(figsize=(max(8, len(files) * 0.75), 0.5 * len(labels) + 1.6))
+    im = ax.imshow(M, cmap=cmap, vmin=-vmax, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(len(files)))
+    ax.set_xticklabels(files, rotation=45, ha="right", fontsize=8)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, fontsize=8)
+    for i in range(len(labels)):
+        for j in range(len(files)):
+            if not np.isnan(M[i, j]):
+                ax.text(j, i, f"{M[i, j] * 100:+.0f}", ha="center", va="center",
+                        fontsize=6.5, color="black")
+    fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02,
+                 label=f"% vs {baseline} ({'higher=faster' if higher_better else 'higher=bigger'})")
+    fig.suptitle(f"{title}  ({corpus}, level {level}, relative to {baseline})",
+                 fontsize=12, fontweight="bold")
+    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.96))
+    fig.savefig(outfile)
+    plt.close(fig)
+    print(f"wrote {outfile}")
 
 
 def main():
@@ -227,20 +313,20 @@ def main():
         return
 
     for corpus in corpora:
-        for metric, ylabel, title, stem, logy in THROUGHPUT_FIGS:
-            # Canonical level-6 per-file bars (stable filenames for README embeds).
-            corpus_bars(results, meta, corpus, metric, ylabel, title,
-                        graphs_dir / f"{corpus}_{stem}.svg", logy=logy)
-            # One per-file bar chart per timed level: <corpus>_<stem>_L<n>.svg.
-            for lvl in corpus_levels(results, corpus, metric):
-                corpus_bars(results, meta, corpus, metric, ylabel, title,
-                            graphs_dir / f"{corpus}_{stem}_L{lvl}.svg",
-                            logy=logy, level=lvl)
-            # Aggregate (geomean over files) vs level.
-            vs_label = ylabel + (", geomean" if metric != "ratio" else " (geomean)")
-            vs_title = title.replace("per file", "vs level")
-            corpus_vs_level(results, meta, corpus, metric, vs_label, vs_title,
-                            graphs_dir / f"{corpus}_{stem}_vs_level.svg", logy=logy)
+        # Headline: speed-vs-ratio Pareto scatters (codecs as level-curves).
+        pareto_scatter(results, meta, corpus, "compress_mbps", "compression speed",
+                       "Compression speed vs ratio",
+                       graphs_dir / f"{corpus}_compress_pareto.svg")
+        pareto_scatter(results, meta, corpus, "decompress_mbps", "decompression speed",
+                       "Decompression speed vs ratio",
+                       graphs_dir / f"{corpus}_decompress_pareto.svg")
+        # Precise: colour-graded geomean summary table.
+        summary_table(results, meta, corpus, graphs_dir / f"{corpus}_summary.svg")
+        # Per-file detail: relative-to-zlib heatmaps (ratio + compress speed).
+        relative_heatmap(results, meta, corpus, "ratio", "Compression ratio vs zlib",
+                         graphs_dir / f"{corpus}_ratio_heatmap.svg", higher_better=False)
+        relative_heatmap(results, meta, corpus, "compress_mbps", "Compression speed vs zlib",
+                         graphs_dir / f"{corpus}_compress_heatmap.svg", higher_better=True)
 
 
 if __name__ == "__main__":
