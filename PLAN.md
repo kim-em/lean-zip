@@ -614,6 +614,46 @@ see where we stand:
 
 These tools are first-class deliverables, not afterthoughts.
 
+**Representative workloads — real corpora.** The synthetic patterns
+(constant, cyclic, prng, pseudo-text) are useful for isolating specific
+behaviours, but they are not representative of real data, and no
+credible performance story can rest on them alone (the pseudo-text
+pattern in particular is pathologically compressible). The benchmark
+must therefore also run on the standard compression corpora used in the
+literature:
+
+- **Canterbury corpus** (~2.8 MB, 11 files: English text, HTML, C and
+  Lisp source, an Excel spreadsheet, a fax bitmap, a man page, a SPARC
+  binary). Small enough to commit to the repository and run at every
+  level on every regeneration — the proof-of-concept for real-data
+  benchmarking and the network-free CI baseline.
+- **Silesia corpus** (~211 MB, 12 files: prose, UNIX binaries, an HTML
+  dictionary, a source tarball, XML, databases, medical images, a DLL).
+  The modern standard that zstd, brotli, and lzma all report against —
+  this is what makes the dashboard publishable and directly comparable
+  to the wider compression literature.
+
+Integration constraints:
+
+- Benchmark Silesia's **individual files**, not the 211 MB
+  concatenation: `itersFor` would otherwise collapse to a single
+  iteration and the high-level passes would dominate wall-clock.
+  Per-file rows also yield per-file-type curves.
+- **Cap zopfli** on the large corpora — it is level-less and ~100×
+  slower than zlib, so restrict it to the small files (or skip it on
+  Silesia) to keep it from dominating the matrix.
+- **Do not commit the large corpus bytes.** Silesia (~67 MB zipped) and
+  any future enwik* files are fetched on demand into a gitignored
+  `bench/corpora/` cache by a small `fetch_corpora.sh`, verified by
+  recorded SHA-256 checksums. Canterbury (~2.8 MB) may be committed so
+  CI needs no network.
+- The primary Silesia host (`sun.aei.polsl.pl`) is unreliable; fetch
+  from a pinned GitHub mirror. Canterbury: `corpus.canterbury.ac.nz`.
+
+The real-corpus rows extend the existing synthetic ones (they do not
+replace them): synthetic patterns isolate behaviours, real corpora
+substantiate the headline numbers.
+
 **Methodology:**
 
 1. **Benchmark** runtime and compression quality against reference
