@@ -2,133 +2,61 @@ import Zip
 /-! # Track D benchmark report (JSON emitter)
 
 Runs the full compress/decompress matrix — native lean-zip vs each reference
-implementation — across data patterns × sizes × levels, measuring **compression
-ratio** (deterministic) and **throughput** (median-of-N MB/s), and emits a JSON
-document consumed by `bench/plot.py` to render the log-scale SVG dashboard.
+implementation — over the **real compression corpora** (Canterbury, Silesia, …)
+across every DEFLATE level, measuring **compression ratio** (deterministic) and
+**throughput** (median-of-N MB/s), and emits a JSON document consumed by
+`bench/plot.py` to render the SVG dashboard.
+
+Synthetic data is gone: the pseudo-prose pattern was pathologically
+compressible (200:1) and its decode read ~3800 MB/s versus ~106 MB/s on real
+prose in the *same* run, so it misled on every axis. Only the committed corpora
+are timed now (see `bench/corpora/`).
 
 Usage:
   lake exe bench-report [output.json]      # default: bench/results/latest.json
 
 This is the measurement half of the Track D dashboard; see `bench/run.sh` for
 the one-command regenerate (report → plot) flow and `BENCH.md` for the rendered
-dashboard. The data generators mirror `ZipBench.lean` (the hyperfine driver) so
-the two measurement paths see identical inputs.
+dashboard.
 -/
 
-/-! ## Data generators (mirror `ZipBench.lean`) -/
+/-! ## Real corpora (committed corpus cache)
 
-def mkConstantData (size : Nat) : ByteArray := Id.run do
-  let mut result := ByteArray.empty
-  for _ in [:size] do
-    result := result.push 0x42
-  return result
-
-def mkCyclicData (size : Nat) : ByteArray := Id.run do
-  let pattern : Array UInt8 := #[0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-                                   0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]
-  let mut result := ByteArray.empty
-  for i in [:size] do
-    result := result.push pattern[i % 16]!
-  return result
-
-def mkPrngData (size : Nat) : ByteArray := Id.run do
-  let mut state : UInt32 := 2463534242
-  let mut result := ByteArray.empty
-  for _ in [:size] do
-    state := state ^^^ (state <<< 13)
-    state := state ^^^ (state >>> 17)
-    state := state ^^^ (state <<< 5)
-    result := result.push (state &&& 0xFF).toUInt8
-  return result
-
-def mkTextData (size : Nat) : ByteArray := Id.run do
-  let words := #["the", "of", "and", "to", "in", "a", "is", "that", "for", "it",
-                  "was", "on", "are", "be", "with", "as", "at", "this", "have", "from",
-                  "or", "by", "not", "but", "what", "all", "were", "when", "we", "there",
-                  "can", "an", "your", "which", "their", "if", "do", "will", "each", "how"]
-  let mut result := ByteArray.empty
-  let mut col : Nat := 0
-  let mut wi : Nat := 0
-  while result.size < size do
-    let word := words[wi % words.size]!
-    wi := wi + 1
-    if col > 0 then
-      if col + 1 + word.length > 72 then
-        result := result.push 0x0A
-        col := 0
-      else
-        result := result.push 0x20
-        col := col + 1
-    for c in word.toUTF8 do
-      if result.size < size then
-        result := result.push c
-    col := col + word.length
-  return result.extract 0 size
-
-/-- Non-periodic English-like text: words drawn pseudo-randomly (not in fixed
-    order like `mkTextData`). The fixed-order `text` pattern compresses into a
-    few very long matches, so its decompression is dominated by the LZ77 copy
-    loop and barely touches Huffman symbol decoding. Random word order produces
-    many short, varied matches and frequent literals, so decompression is
-    **Huffman-decode-bound** — the regime the fast-bits table decoder targets. -/
-def mkWordsData (size : Nat) : ByteArray := Id.run do
-  let words := #["the", "of", "and", "to", "in", "a", "is", "that", "for", "it",
-                  "was", "on", "are", "be", "with", "as", "at", "this", "have", "from",
-                  "or", "by", "not", "but", "what", "all", "were", "when", "we", "there",
-                  "can", "an", "your", "which", "their", "if", "do", "will", "each", "how"]
-  let mut result := ByteArray.empty
-  let mut state : UInt64 := 0x9e3779b97f4a7c15
-  while result.size < size do
-    state := state ^^^ (state <<< 13)
-    state := state ^^^ (state >>> 7)
-    state := state ^^^ (state <<< 17)
-    let word := words[state.toNat % words.size]!
-    for c in word.toUTF8 do
-      if result.size < size then
-        result := result.push c
-    if result.size < size then
-      result := result.push 0x20
-  return result.extract 0 size
-
-def generateData (pattern : String) (size : Nat) : ByteArray :=
-  match pattern with
-  | "constant" => mkConstantData size
-  | "cyclic"   => mkCyclicData size
-  | "prng"     => mkPrngData size
-  | "text"     => mkTextData size
-  | "words"    => mkWordsData size
-  | _          => mkPrngData size
-
-/-! ## Real corpora (committed Canterbury cache)
-
-The synthetic patterns isolate behaviours but are not representative of real
-data (the pseudo-text pattern is pathologically compressible). The Canterbury
-corpus (11 files, ~2.8 MB) is committed under `bench/corpora/canterbury/`
-(materialized by `bench/fetch_corpora.sh`, verified against recorded SHA-256),
-so it runs at every level on every regeneration with no network. Each file is a
-single-size workload tagged `canterbury/<file>`. -/
+Each subdirectory of `bench/corpora/` is a corpus, and every file inside it is a
+single-size workload tagged `<corpus>/<file>`. The Canterbury corpus (11 files,
+~2.8 MB) is committed (materialized by `bench/fetch_corpora.sh`, verified against
+recorded SHA-256), so it runs at every level on every regeneration with no
+network. New corpora (e.g. Silesia) are discovered automatically once their
+files land — nothing here hard-codes Canterbury. -/
 
 def corporaDir : String := "bench/corpora"
 
-/-- The standard Canterbury corpus files (in `cantrbry.tar.gz` order). -/
-def canterburyFiles : List String :=
-  ["alice29.txt", "asyoulik.txt", "cp.html", "fields.c", "grammar.lsp",
-   "kennedy.xls", "lcet10.txt", "plrabn12.txt", "ptt5", "sum", "xargs.1"]
-
-/-- Load a committed corpus as `(pattern, bytes)` workloads, where `pattern` is
-    `"<corpus>/<file>"`. Files that are absent (cache not materialized) are
-    skipped with a warning, so the dashboard degrades gracefully. -/
-def loadCorpus (corpus : String) (files : List String) :
-    IO (List (String × ByteArray)) := do
-  let dir := System.FilePath.mk corporaDir / corpus
-  let mut out : List (String × ByteArray) := []
-  for f in files do
-    let path := dir / f
-    if ← path.pathExists then
-      let bytes ← IO.FS.readBinFile path
-      out := (s!"{corpus}/{f}", bytes) :: out
-    else
-      IO.eprintln s!"  corpus file missing (run bench/fetch_corpora.sh): {path}"
+/-- Discover every committed corpus under `corporaDir`. Returns one
+    `(corpus, workloads)` entry per subdirectory, where each workload is
+    `("<corpus>/<file>", bytes)`. Corpora and their files are sorted by name for
+    deterministic output. Absent corpora dir ⇒ empty list (dashboard degrades
+    gracefully); new corpora slot in with no code change. -/
+def loadCorpora : IO (List (String × List (String × ByteArray))) := do
+  let root := System.FilePath.mk corporaDir
+  unless ← root.pathExists do
+    IO.eprintln s!"  no corpora dir (run bench/fetch_corpora.sh): {root}"
+    return []
+  let entries ← root.readDir
+  let dirs := (entries.map (·.path)).qsort (fun a b => a.toString < b.toString)
+  let mut out : List (String × List (String × ByteArray)) := []
+  for dir in dirs do
+    if ← dir.isDir then
+      let corpus := dir.fileName.getD ""
+      let files ← dir.readDir
+      let paths := (files.map (·.path)).qsort (fun a b => a.toString < b.toString)
+      let mut workloads : List (String × ByteArray) := []
+      for path in paths do
+        unless ← path.isDir do
+          let bytes ← IO.FS.readBinFile path
+          let name := path.fileName.getD ""
+          workloads := (s!"{corpus}/{name}", bytes) :: workloads
+      unless workloads.isEmpty do
+        out := (corpus, workloads.reverse) :: out
   return out.reverse
 
 /-! ## Timing -/
@@ -206,15 +134,12 @@ def Row.toJson (r : Row) : String :=
 
 /-! ## Matrix -/
 
-def patterns : List String := ["constant", "cyclic", "prng", "text", "words"]
-def sizes : List Nat := [1024, 4096, 16384, 65536, 262144, 1048576]
 def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 def reps : Nat := 5
 
 /-- Run one compressor over a list of `(pattern, bytes)` workloads × levels,
     timing compress (and optionally decompress on a canonical raw-deflate
-    stream). The size of each row is the workload's byte length — so this serves
-    both the synthetic grid (`generateData`) and the real-corpus files. -/
+    stream). The size of each row is the workload's byte length. -/
 def runWorkloads
     (name : String)
     (workloads : List (String × ByteArray))
@@ -242,37 +167,6 @@ def runWorkloads
                 compressMBps := mbps size cNs, decompressMBps := dMBps } :: rows
     IO.eprint "."  -- progress
   IO.eprintln s!" {name} done"
-  return rows.reverse
-
-/-- Run one compressor over the synthetic pattern×size×level grid. `theSizes`/
-    `theLevels`/`theReps` let slow ratio-ceiling compressors (zopfli) run a
-    reduced grid. -/
-def runCompressor
-    (name : String)
-    (compress : ByteArray → Nat → IO ByteArray)
-    (decompress? : Option (ByteArray → IO ByteArray))
-    (theSizes : List Nat := sizes) (theLevels : List Nat := levels)
-    (theReps : Nat := reps) : IO (List Row) := do
-  let workloads := patterns.flatMap fun pat =>
-    theSizes.map fun size => (pat, generateData pat size)
-  runWorkloads name workloads compress decompress? theLevels theReps
-
-/-- Ratio-only rows (no timing) for a compressor across `theLevels` at one size —
-    used to populate the ratio-vs-level plot densely (every DEFLATE level) without
-    paying the median-of-N timing cost at every level. `levelSize` matches the
-    plotter's `LEVEL_SIZE`. -/
-def levelSize : Nat := 65536
-def runRatioLevels (name : String) (compress : ByteArray → Nat → IO ByteArray)
-    (theLevels : List Nat) : IO (List Row) := do
-  let mut rows : List Row := []
-  for pat in patterns do
-    let data := generateData pat levelSize
-    for level in theLevels do
-      let compressed ← compress data level
-      rows := { compressor := name, pattern := pat, size := levelSize, level := level,
-                outSize := compressed.size,
-                ratio := compressed.size.toFloat / (max levelSize 1).toFloat,
-                compressMBps := none, decompressMBps := none } :: rows
   return rows.reverse
 
 /-! ## Compressor adapters -/
@@ -306,63 +200,42 @@ def shell (cmd : String) (args : List String) : IO String := do
     pure (out.replace "\n" "")
   catch _ => pure "unknown"
 
-/-- Write the exact bytes of every `pattern × size` payload to
-    `dir/<pattern>_<size>.bin`, so external-language comparators (Go, Zig, OCaml,
+/-- Write the exact bytes of every real-corpus payload to a per-corpus subdir as
+    `dir/<corpus>/<file>.bin`, so external-language comparators (Go, Zig, OCaml,
     JS) compress byte-identical input and their ratios line up with the native
-    rows. Keeps the pattern generators in one place (here) rather than
-    reimplemented per language. -/
+    rows. `run_external.py` reconstructs the `<corpus>/<file>` pattern from the
+    path. -/
 def dumpPayloads (dir : String) : IO Unit := do
   IO.FS.createDirAll dir
-  for pat in patterns do
-    for size in sizes do
-      let data := generateData pat size
-      IO.FS.writeBinFile (System.FilePath.mk dir / s!"{pat}_{size}.bin") data
-  IO.eprintln s!"Dumped {patterns.length * sizes.length} synthetic payloads → {dir}"
-  -- Real-corpus payloads go in a per-corpus subdir as `<file>.bin`, so
-  -- `run_external.py` reconstructs the `<corpus>/<file>` pattern from the path
-  -- and feeds the comparators byte-identical corpus bytes.
-  let corpus ← loadCorpus "canterbury" canterburyFiles
-  unless corpus.isEmpty do
-    let sub := System.FilePath.mk dir / "canterbury"
+  let corpora ← loadCorpora
+  for (corpus, files) in corpora do
+    let sub := System.FilePath.mk dir / corpus
     IO.FS.createDirAll sub
-    for (pat, data) in corpus do
-      let file := pat.drop "canterbury/".length
+    for (pat, data) in files do
+      let file := pat.drop (corpus.length + 1)  -- strip "<corpus>/"
       IO.FS.writeBinFile (sub / s!"{file}.bin") data
-    IO.eprintln s!"Dumped {corpus.length} canterbury payloads → {sub}"
+    IO.eprintln s!"Dumped {files.length} {corpus} payloads → {sub}"
 
 def runReport (outPath : String) : IO Unit := do
-  IO.eprintln "Running Track D benchmark matrix (native vs references)…"
+  IO.eprintln "Running Track D benchmark matrix (native vs references) on real corpora…"
 
-  let nativeRows ← runCompressor "native" nativeCompress (some nativeDecompress)
-  let zlibRows   ← runCompressor "zlib"   zlibCompress   (some RawDeflate.decompress)
-  let minizRows  ← runCompressor "miniz_oxide" minizCompress (some MinizOxide.decompress)
-  let libdeflRows ← runCompressor "libdeflate" libdeflateCompress (some Libdeflate.decompress)
-  -- zopfli is the ratio ceiling: compress-only, very slow, level-less. Run a
-  -- reduced grid (one nominal level, capped size, single rep) so it appears on
-  -- the ratio graphs without dominating wall-clock.
-  let zopfliRows ← runCompressor "zopfli" zopfliCompress none
-                     (theSizes := sizes.filter (· ≤ 262144)) (theLevels := [6]) (theReps := 1)
-  -- The timed matrix now covers every DEFLATE level (1–9) at every size, so the
-  -- ratio-by-level plot reads its dense per-level data straight from the timed
-  -- rows — no separate ratio-only gap fill is needed. zopfli stays a single
-  -- (level-less) point.
-  let syntheticRows := nativeRows ++ zlibRows ++ minizRows ++ libdeflRows ++ zopfliRows
-
-  -- Real-corpus rows: the same timing matrix over the committed Canterbury files
-  -- (one single-size workload per file), so the dashboard rests on representative
-  -- data, not only the synthetic patterns. Canterbury is small (~2.8 MB), so the
-  -- C/Rust references and zopfli all run at every level alongside native.
-  let corpus ← loadCorpus "canterbury" canterburyFiles
-  let corpusRows ← if corpus.isEmpty then pure [] else do
-    IO.eprintln s!"Running Canterbury corpus matrix ({corpus.length} files)…"
-    let cn ← runWorkloads "native"      corpus nativeCompress     (some nativeDecompress)
-    let cz ← runWorkloads "zlib"        corpus zlibCompress       (some RawDeflate.decompress)
-    let cm ← runWorkloads "miniz_oxide" corpus minizCompress      (some MinizOxide.decompress)
-    let cl ← runWorkloads "libdeflate"  corpus libdeflateCompress (some Libdeflate.decompress)
-    let czo ← runWorkloads "zopfli"     corpus zopfliCompress     none (theLevels := [6]) (theReps := 1)
-    pure (cn ++ cz ++ cm ++ cl ++ czo)
-
-  let rows := syntheticRows ++ corpusRows
+  -- Real-corpus rows only: the same timing matrix over every committed corpus
+  -- (one single-size workload per file), so the dashboard rests entirely on
+  -- representative data. zopfli is the ratio ceiling (compress-only, very slow,
+  -- level-less) — run at one nominal level / single rep so it appears on the
+  -- ratio graphs without dominating wall-clock.
+  let corpora ← loadCorpora
+  if corpora.isEmpty then
+    IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
+  let mut rows : List Row := []
+  for (corpus, files) in corpora do
+    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files)…"
+    let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)
+    let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress)
+    let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress)
+    let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress)
+    let czo ← runWorkloads "zopfli"     files zopfliCompress     none (theLevels := [6]) (theReps := 1)
+    rows := rows ++ cn ++ cz ++ cm ++ cl ++ czo
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]

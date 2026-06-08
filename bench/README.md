@@ -1,8 +1,14 @@
 # Track D — benchmark dashboard
 
 Native lean-zip vs. reference implementations, on **compression ratio** and
-**throughput**, across data patterns × sizes × levels. The graphs use log scales
-and are regenerated from committed data by a single command.
+**throughput**, over the **real compression corpora** across every DEFLATE
+level. The graphs are regenerated from committed data by a single command.
+
+> **Real corpora only.** Synthetic patterns were removed (see
+> [`../plans/track-d-state.md`](../plans/track-d-state.md), D-18): the pseudo-prose
+> pattern was pathologically compressible (200:1) and its decode read ~3800 MB/s
+> versus ~106 MB/s on real prose in the *same* run, so it flattered native on
+> every axis. The headline numbers now rest entirely on representative data.
 
 ```
 bench/run.sh        # build + run the matrix, build + run the comparators, render the SVGs
@@ -48,89 +54,99 @@ unavailable is skipped, so the dashboard degrades gracefully.
 
 ## Workloads
 
-Two workload families, both swept over levels 1–9:
+The **real compression corpora** from the literature, swept over levels 1–9.
+Each corpus is a subdirectory of [`corpora/`](corpora); every file in it is one
+single-size workload tagged `<corpus>/<file>`, and the harness discovers corpora
+by directory (nothing hard-codes Canterbury — a new corpus slots in once its
+files land).
 
-- **Synthetic patterns** (`constant`, `cyclic`, `prng`, `text`, `words`) ×
-  sizes 1 KiB–1 MiB — isolate specific behaviours, but are *not* representative
-  of real data (the pseudo-text pattern is pathologically compressible).
-- **Real corpora** — the standard compression corpora from the literature, so
-  the headline numbers rest on representative data. The first is the
-  **Canterbury corpus** (11 files, ~2.8 MB: English text, HTML, C and Lisp
+- **Canterbury corpus** (11 files, ~2.8 MB: English text, HTML, C and Lisp
   source, an Excel spreadsheet, a fax bitmap, a man page, a SPARC binary),
   committed under [`corpora/canterbury/`](corpora/canterbury) (materialized by
   [`fetch_corpora.sh`](fetch_corpora.sh), verified against recorded SHA-256), so
-  CI needs no network. Each file is one single-size workload tagged
-  `canterbury/<file>`; zopfli runs at level 6 (small corpus). Larger corpora
-  (e.g. Silesia) are fetched on demand into a gitignored cache, never committed.
+  CI needs no network. zopfli runs at level 6 only (small corpus, slow).
+- Larger corpora (e.g. **Silesia**) are fetched on demand into a gitignored
+  cache; their rows slot into the same per-level charts automatically.
+
+The synthetic `prng` pattern used to be the only incompressible workload; its
+replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,
+`x-ray`, `ooffice`). A near-1.0-ratio point, if wanted, comes from a real
+already-compressed file (a JPEG/PDF) — never synthetic noise.
 
 ## Graphs
 
-### Compression throughput vs input size (level 6)
-![compression throughput](graphs/compress_throughput.svg)
+Charts are corpus-generic: each corpus gets its own set, and the per-level set
+follows whatever levels the report timed. Filenames:
 
-Per-level set (one figure each, levels 1–9):
-[L1](graphs/compress_throughput_L1.svg) ·
-[L2](graphs/compress_throughput_L2.svg) ·
-[L3](graphs/compress_throughput_L3.svg) ·
-[L4](graphs/compress_throughput_L4.svg) ·
-[L5](graphs/compress_throughput_L5.svg) ·
-[L6](graphs/compress_throughput_L6.svg) ·
-[L7](graphs/compress_throughput_L7.svg) ·
-[L8](graphs/compress_throughput_L8.svg) ·
-[L9](graphs/compress_throughput_L9.svg)
-
-### Decompression throughput vs input size (level 6)
-![decompression throughput](graphs/decompress_throughput.svg)
-
-Per-level set:
-[L1](graphs/decompress_throughput_L1.svg) ·
-[L2](graphs/decompress_throughput_L2.svg) ·
-[L3](graphs/decompress_throughput_L3.svg) ·
-[L4](graphs/decompress_throughput_L4.svg) ·
-[L5](graphs/decompress_throughput_L5.svg) ·
-[L6](graphs/decompress_throughput_L6.svg) ·
-[L7](graphs/decompress_throughput_L7.svg) ·
-[L8](graphs/decompress_throughput_L8.svg) ·
-[L9](graphs/decompress_throughput_L9.svg)
-
-### Compression ratio vs input size
-![compression ratio](graphs/compression_ratio.svg)
-
-### Compression ratio vs level
-![ratio by level](graphs/ratio_by_level.svg)
+- `<corpus>_compress_throughput.svg`, `_decompress_throughput.svg`, `_ratio.svg`
+  — per-file grouped bars at level 6 (one x-tick per file, one bar per
+  compressor); the stable filenames embedded below.
+- `<corpus>_<metric>_L<n>.svg` — the same grouped bars at each timed level n.
+- `<corpus>_<metric>_vs_level.svg` — aggregate line chart, geomean over the
+  corpus files, one line per compressor, across levels.
 
 ### Canterbury corpus (real data, per file, level 6)
-
-Per-file grouped bars over the committed Canterbury corpus — the
-representative-data counterpart to the synthetic size sweeps above.
 
 ![canterbury compression throughput](graphs/canterbury_compress_throughput.svg)
 ![canterbury decompression throughput](graphs/canterbury_decompress_throughput.svg)
 ![canterbury compression ratio](graphs/canterbury_ratio.svg)
 
+### Canterbury — aggregate vs level (geomean over files)
+
+![canterbury compression throughput vs level](graphs/canterbury_compress_throughput_vs_level.svg)
+![canterbury decompression throughput vs level](graphs/canterbury_decompress_throughput_vs_level.svg)
+![canterbury compression ratio vs level](graphs/canterbury_ratio_vs_level.svg)
+
+Per-level per-file bars (one figure each, levels 1–9):
+compress
+[L1](graphs/canterbury_compress_throughput_L1.svg) ·
+[L2](graphs/canterbury_compress_throughput_L2.svg) ·
+[L3](graphs/canterbury_compress_throughput_L3.svg) ·
+[L4](graphs/canterbury_compress_throughput_L4.svg) ·
+[L5](graphs/canterbury_compress_throughput_L5.svg) ·
+[L6](graphs/canterbury_compress_throughput_L6.svg) ·
+[L7](graphs/canterbury_compress_throughput_L7.svg) ·
+[L8](graphs/canterbury_compress_throughput_L8.svg) ·
+[L9](graphs/canterbury_compress_throughput_L9.svg);
+decompress
+[L1](graphs/canterbury_decompress_throughput_L1.svg) ·
+[L2](graphs/canterbury_decompress_throughput_L2.svg) ·
+[L3](graphs/canterbury_decompress_throughput_L3.svg) ·
+[L4](graphs/canterbury_decompress_throughput_L4.svg) ·
+[L5](graphs/canterbury_decompress_throughput_L5.svg) ·
+[L6](graphs/canterbury_decompress_throughput_L6.svg) ·
+[L7](graphs/canterbury_decompress_throughput_L7.svg) ·
+[L8](graphs/canterbury_decompress_throughput_L8.svg) ·
+[L9](graphs/canterbury_decompress_throughput_L9.svg);
+ratio
+[L1](graphs/canterbury_ratio_L1.svg) ·
+[L2](graphs/canterbury_ratio_L2.svg) ·
+[L3](graphs/canterbury_ratio_L3.svg) ·
+[L4](graphs/canterbury_ratio_L4.svg) ·
+[L5](graphs/canterbury_ratio_L5.svg) ·
+[L6](graphs/canterbury_ratio_L6.svg) ·
+[L7](graphs/canterbury_ratio_L7.svg) ·
+[L8](graphs/canterbury_ratio_L8.svg) ·
+[L9](graphs/canterbury_ratio_L9.svg).
+
 ## What the current snapshot shows
 
-> **Read the synthetic and real-corpus rows together.** The synthetic patterns
-> isolate behaviours but flatter native (the `text` pattern collapses to a few
-> long matches ⇒ reference-parity ratio and ~100 MB/s); the Canterbury corpus is
-> the honest headline. On real data (level 6, geomean over 11 files) native is
-> the **worst real codec on all three axes** — ratio 0.323 (zlib 0.299), compress
-> 10 MB/s (zlib 55), decompress 92 MB/s (zlib 696) — with the ratio gap **largest
-> on big prose** (`plrabn12` +30%, `lcet10` +24% vs zlib). Those two findings
-> drive the Track D backlog.
+> On real data (Canterbury, level 6, geomean over 11 files) native is the
+> **worst real codec on all three axes** — ratio 0.323 (zlib 0.299), compress
+> 10 MB/s (zlib 55), decompress 92 MB/s (zlib 696) — with the ratio gap
+> **largest on big prose** (`plrabn12` +30%, `lcet10` +24% vs zlib). Those two
+> findings drive the Track D backlog.
 
-- **Ratio is at parity *on the synthetic patterns*.** On the pathologically
-  compressible `text`/`cyclic` data native deflate matches the C/Rust references
-  byte-for-byte (and is *better* at the fastest levels on `text`). But that
-  parity does **not** survive on real data — see the Canterbury rows above.
-  The language-native peers land within a hair on synthetic; only OCaml
-  `decompress` gives up a little ratio (different LZ77/Huffman).
+- **Ratio.** Native trails every real codec; the gap is small on
+  short/structured files but large on big prose (`plrabn12.txt` 0.525 vs zlib's
+  0.405). The language-native peers land within a hair; only OCaml `decompress`
+  gives up a little ratio (different LZ77/Huffman). zopfli is the floor (0.279).
 - **Compression speed is the gap — but it's a language-native gap, not a chasm.**
-  At ratio parity, throughput stratifies by implementation maturity: libdeflate
-  (C+SIMD) on top, then Zig / miniz_oxide, then Go / zlib, then the JIT'd JS,
-  then OCaml, then `native`. lean-zip is in the pack and at the back, but the
-  distance to the *other pure-language* codecs is a small single-digit factor,
-  not the order-of-magnitude that the C+SIMD ceiling alone suggests.
+  Throughput stratifies by implementation maturity: libdeflate (C+SIMD) on top,
+  then Zig / miniz_oxide, then Go / zlib, then the JIT'd JS, then OCaml, then
+  `native`. lean-zip is in the pack and at the back, but the distance to the
+  *other pure-language* codecs is a small single-digit factor, not the
+  order-of-magnitude that the C+SIMD ceiling alone suggests.
 - **Decompression** is competitive — native inflate runs in the hundreds of
   MB/s, the same order as zlib.
 

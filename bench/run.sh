@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate the Track D benchmark dashboard end to end:
 #   1. build + run the matrix    → bench/results/latest.json  (lake exe bench-report)
-#   2. dump the exact payloads    → bench/payloads/*.bin
+#   2. dump the exact payloads    → bench/payloads/<corpus>/*.bin
 #   3. build + run the external-language comparators (Go / JS / Zig / OCaml),
 #      merging their rows into the same JSON
 #   4. render the log-scale SVGs  → bench/graphs/*.svg          (bench/plot.py)
@@ -28,10 +28,10 @@ if [ ! -d bench/corpora/canterbury ]; then
   bash bench/fetch_corpora.sh canterbury
 fi
 
-# 1 + 2. Lean matrix and payload dump (project shell). The matrix now covers the
-#    Canterbury corpus files (pattern "canterbury/<file>") in addition to the
-#    synthetic patterns; --dump-payloads writes the corpus bytes under
-#    bench/payloads/canterbury/ for the external comparators.
+# 1 + 2. Lean matrix and payload dump (project shell). The matrix times the real
+#    corpus files only (pattern "<corpus>/<file>", e.g. "canterbury/alice29.txt");
+#    --dump-payloads writes the corpus bytes under bench/payloads/<corpus>/ for the
+#    external comparators.
 in_project_shell "lake build bench-report \
   && lake env .lake/build/bin/bench-report $OUT \
   && lake env .lake/build/bin/bench-report --dump-payloads bench/payloads"
