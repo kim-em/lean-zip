@@ -42,21 +42,33 @@ def runnable(cmd):
     return shutil.which(head) is not None
 
 
-def parse_payload_name(p: Path):
-    # "<pattern>_<size>.bin"  (pattern may itself contain no underscore here)
-    stem = p.stem
-    pat, _, size = stem.rpartition("_")
-    return pat, int(size)
+def discover_payloads(payloads_dir):
+    """Yield (path, pattern, size) for every benchmark payload.
+
+    Two layouts coexist in the dump dir (see ZipBenchReport.dumpPayloads):
+      * flat synthetic files  "<pattern>_<size>.bin"  -> pattern, size from name
+      * real-corpus files in a per-corpus subdir "<corpus>/<file>.bin"
+        -> pattern "<corpus>/<file>", size = byte length
+    Both reconstruct the exact `pattern` string used by the native rows, so the
+    external rows line up in the dashboard."""
+    pdir = Path(payloads_dir)
+    items = []
+    for payload in sorted(pdir.glob("*.bin")):
+        pat, _, size = payload.stem.rpartition("_")
+        items.append((payload, pat, int(size)))
+    for sub in sorted(p for p in pdir.iterdir() if p.is_dir()):
+        for payload in sorted(sub.glob("*.bin")):
+            items.append((payload, f"{sub.name}/{payload.stem}", payload.stat().st_size))
+    return items
 
 
-def collect(key, payloads_dir):
+def collect(key, payloads):
     label, cmd, levels = COMPARATORS[key]
     if not runnable(cmd):
         print(f"  skip {key} ({label}): {cmd[0]} not found", file=sys.stderr)
         return None
     rows = []
-    for payload in sorted(Path(payloads_dir).glob("*.bin")):
-        pat, size = parse_payload_name(payload)
+    for payload, pat, size in payloads:
         for level in levels:
             try:
                 out = subprocess.run(cmd + [str(payload), str(level)],
@@ -87,9 +99,11 @@ def main():
     doc = json.loads(results_path.read_text())
     results = doc["results"]
 
+    payloads = discover_payloads(payloads_dir)
+
     added = {}
     for key in keys:
-        rows = collect(key, payloads_dir)
+        rows = collect(key, payloads)
         if rows is not None:
             added[key] = rows
 

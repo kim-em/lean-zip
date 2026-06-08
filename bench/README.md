@@ -46,6 +46,23 @@ zopfli runs a reduced grid (one level, capped at 256 KiB, single rep): it is the
 ratio *floor*, not a throughput contender. A comparator whose toolchain is
 unavailable is skipped, so the dashboard degrades gracefully.
 
+## Workloads
+
+Two workload families, both swept over levels 1–9:
+
+- **Synthetic patterns** (`constant`, `cyclic`, `prng`, `text`, `words`) ×
+  sizes 1 KiB–1 MiB — isolate specific behaviours, but are *not* representative
+  of real data (the pseudo-text pattern is pathologically compressible).
+- **Real corpora** — the standard compression corpora from the literature, so
+  the headline numbers rest on representative data. The first is the
+  **Canterbury corpus** (11 files, ~2.8 MB: English text, HTML, C and Lisp
+  source, an Excel spreadsheet, a fax bitmap, a man page, a SPARC binary),
+  committed under [`corpora/canterbury/`](corpora/canterbury) (materialized by
+  [`fetch_corpora.sh`](fetch_corpora.sh), verified against recorded SHA-256), so
+  CI needs no network. Each file is one single-size workload tagged
+  `canterbury/<file>`; zopfli runs at level 6 (small corpus). Larger corpora
+  (e.g. Silesia) are fetched on demand into a gitignored cache, never committed.
+
 ## Graphs
 
 ### Compression throughput vs input size (level 6)
@@ -82,12 +99,32 @@ Per-level set:
 ### Compression ratio vs level
 ![ratio by level](graphs/ratio_by_level.svg)
 
+### Canterbury corpus (real data, per file, level 6)
+
+Per-file grouped bars over the committed Canterbury corpus — the
+representative-data counterpart to the synthetic size sweeps above.
+
+![canterbury compression throughput](graphs/canterbury_compress_throughput.svg)
+![canterbury decompression throughput](graphs/canterbury_decompress_throughput.svg)
+![canterbury compression ratio](graphs/canterbury_ratio.svg)
+
 ## What the current snapshot shows
 
-- **Ratio is at parity.** On compressible data native deflate matches the C/Rust
-  references byte-for-byte (and is *better* than every implementation at the
-  fastest levels on `text`). The language-native peers land within a hair; only
-  OCaml `decompress` gives up a little ratio (different LZ77/Huffman).
+> **Read the synthetic and real-corpus rows together.** The synthetic patterns
+> isolate behaviours but flatter native (the `text` pattern collapses to a few
+> long matches ⇒ reference-parity ratio and ~100 MB/s); the Canterbury corpus is
+> the honest headline. On real data (level 6, geomean over 11 files) native is
+> the **worst real codec on all three axes** — ratio 0.323 (zlib 0.299), compress
+> 10 MB/s (zlib 55), decompress 92 MB/s (zlib 696) — with the ratio gap **largest
+> on big prose** (`plrabn12` +30%, `lcet10` +24% vs zlib). Those two findings
+> drive the Track D backlog.
+
+- **Ratio is at parity *on the synthetic patterns*.** On the pathologically
+  compressible `text`/`cyclic` data native deflate matches the C/Rust references
+  byte-for-byte (and is *better* at the fastest levels on `text`). But that
+  parity does **not** survive on real data — see the Canterbury rows above.
+  The language-native peers land within a hair on synthetic; only OCaml
+  `decompress` gives up a little ratio (different LZ77/Huffman).
 - **Compression speed is the gap — but it's a language-native gap, not a chasm.**
   At ratio parity, throughput stratifies by implementation maturity: libdeflate
   (C+SIMD) on top, then Zig / miniz_oxide, then Go / zlib, then the JIT'd JS,

@@ -99,6 +99,38 @@ def generateData (pattern : String) (size : Nat) : ByteArray :=
   | "words"    => mkWordsData size
   | _          => mkPrngData size
 
+/-! ## Real corpora (committed Canterbury cache)
+
+The synthetic patterns isolate behaviours but are not representative of real
+data (the pseudo-text pattern is pathologically compressible). The Canterbury
+corpus (11 files, ~2.8 MB) is committed under `bench/corpora/canterbury/`
+(materialized by `bench/fetch_corpora.sh`, verified against recorded SHA-256),
+so it runs at every level on every regeneration with no network. Each file is a
+single-size workload tagged `canterbury/<file>`. -/
+
+def corporaDir : String := "bench/corpora"
+
+/-- The standard Canterbury corpus files (in `cantrbry.tar.gz` order). -/
+def canterburyFiles : List String :=
+  ["alice29.txt", "asyoulik.txt", "cp.html", "fields.c", "grammar.lsp",
+   "kennedy.xls", "lcet10.txt", "plrabn12.txt", "ptt5", "sum", "xargs.1"]
+
+/-- Load a committed corpus as `(pattern, bytes)` workloads, where `pattern` is
+    `"<corpus>/<file>"`. Files that are absent (cache not materialized) are
+    skipped with a warning, so the dashboard degrades gracefully. -/
+def loadCorpus (corpus : String) (files : List String) :
+    IO (List (String × ByteArray)) := do
+  let dir := System.FilePath.mk corporaDir / corpus
+  let mut out : List (String × ByteArray) := []
+  for f in files do
+    let path := dir / f
+    if ← path.pathExists then
+      let bytes ← IO.FS.readBinFile path
+      out := (s!"{corpus}/{f}", bytes) :: out
+    else
+      IO.eprintln s!"  corpus file missing (run bench/fetch_corpora.sh): {path}"
+  return out.reverse
+
 /-! ## Timing -/
 
 /-- Force a `ByteArray` value and return a quantity derived from it, so the
@@ -179,39 +211,51 @@ def sizes : List Nat := [1024, 4096, 16384, 65536, 262144, 1048576]
 def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 def reps : Nat := 5
 
-/-- Run one compressor over the pattern×size×level grid. `compress` returns the
-    compressed bytes (for ratio); `decompress?` optionally times a decoder on a
-    canonical raw-deflate stream. `theSizes`/`theLevels`/`theReps` let slow
-    ratio-ceiling compressors (zopfli) run a reduced grid. -/
+/-- Run one compressor over a list of `(pattern, bytes)` workloads × levels,
+    timing compress (and optionally decompress on a canonical raw-deflate
+    stream). The size of each row is the workload's byte length — so this serves
+    both the synthetic grid (`generateData`) and the real-corpus files. -/
+def runWorkloads
+    (name : String)
+    (workloads : List (String × ByteArray))
+    (compress : ByteArray → Nat → IO ByteArray)
+    (decompress? : Option (ByteArray → IO ByteArray))
+    (theLevels : List Nat := levels) (theReps : Nat := reps) : IO (List Row) := do
+  let mut rows : List Row := []
+  for (pat, data) in workloads do
+    let size := data.size
+    for level in theLevels do
+      let compressed ← compress data level
+      let outSize := compressed.size
+      let ratio := outSize.toFloat / (max size 1).toFloat
+      let cNs ← measureNs size theReps (compress data level >>= sink)
+      -- Decompress timing uses a canonical zlib-FFI raw-deflate stream so all
+      -- decoders are measured on identical, format-correct input.
+      let dMBps ← match decompress? with
+        | none => pure none
+        | some dec => do
+          let ref ← RawDeflate.compress data level.toUInt8
+          let dNs ← measureNs size theReps (dec ref >>= sink)
+          pure (mbps size dNs)
+      rows := { compressor := name, pattern := pat, size := size, level := level,
+                outSize := outSize, ratio := ratio,
+                compressMBps := mbps size cNs, decompressMBps := dMBps } :: rows
+    IO.eprint "."  -- progress
+  IO.eprintln s!" {name} done"
+  return rows.reverse
+
+/-- Run one compressor over the synthetic pattern×size×level grid. `theSizes`/
+    `theLevels`/`theReps` let slow ratio-ceiling compressors (zopfli) run a
+    reduced grid. -/
 def runCompressor
     (name : String)
     (compress : ByteArray → Nat → IO ByteArray)
     (decompress? : Option (ByteArray → IO ByteArray))
     (theSizes : List Nat := sizes) (theLevels : List Nat := levels)
     (theReps : Nat := reps) : IO (List Row) := do
-  let mut rows : List Row := []
-  for pat in patterns do
-    for size in theSizes do
-      let data := generateData pat size
-      for level in theLevels do
-        let compressed ← compress data level
-        let outSize := compressed.size
-        let ratio := outSize.toFloat / (max size 1).toFloat
-        let cNs ← measureNs size theReps (compress data level >>= sink)
-        -- Decompress timing uses a canonical zlib-FFI raw-deflate stream so all
-        -- decoders are measured on identical, format-correct input.
-        let dMBps ← match decompress? with
-          | none => pure none
-          | some dec => do
-            let ref ← RawDeflate.compress data level.toUInt8
-            let dNs ← measureNs size theReps (dec ref >>= sink)
-            pure (mbps size dNs)
-        rows := { compressor := name, pattern := pat, size := size, level := level,
-                  outSize := outSize, ratio := ratio,
-                  compressMBps := mbps size cNs, decompressMBps := dMBps } :: rows
-      IO.eprint "."  -- progress
-  IO.eprintln s!" {name} done"
-  return rows.reverse
+  let workloads := patterns.flatMap fun pat =>
+    theSizes.map fun size => (pat, generateData pat size)
+  runWorkloads name workloads compress decompress? theLevels theReps
 
 /-- Ratio-only rows (no timing) for a compressor across `theLevels` at one size —
     used to populate the ratio-vs-level plot densely (every DEFLATE level) without
@@ -273,7 +317,18 @@ def dumpPayloads (dir : String) : IO Unit := do
     for size in sizes do
       let data := generateData pat size
       IO.FS.writeBinFile (System.FilePath.mk dir / s!"{pat}_{size}.bin") data
-  IO.eprintln s!"Dumped {patterns.length * sizes.length} payloads → {dir}"
+  IO.eprintln s!"Dumped {patterns.length * sizes.length} synthetic payloads → {dir}"
+  -- Real-corpus payloads go in a per-corpus subdir as `<file>.bin`, so
+  -- `run_external.py` reconstructs the `<corpus>/<file>` pattern from the path
+  -- and feeds the comparators byte-identical corpus bytes.
+  let corpus ← loadCorpus "canterbury" canterburyFiles
+  unless corpus.isEmpty do
+    let sub := System.FilePath.mk dir / "canterbury"
+    IO.FS.createDirAll sub
+    for (pat, data) in corpus do
+      let file := pat.drop "canterbury/".length
+      IO.FS.writeBinFile (sub / s!"{file}.bin") data
+    IO.eprintln s!"Dumped {corpus.length} canterbury payloads → {sub}"
 
 def runReport (outPath : String) : IO Unit := do
   IO.eprintln "Running Track D benchmark matrix (native vs references)…"
@@ -291,7 +346,23 @@ def runReport (outPath : String) : IO Unit := do
   -- ratio-by-level plot reads its dense per-level data straight from the timed
   -- rows — no separate ratio-only gap fill is needed. zopfli stays a single
   -- (level-less) point.
-  let rows := nativeRows ++ zlibRows ++ minizRows ++ libdeflRows ++ zopfliRows
+  let syntheticRows := nativeRows ++ zlibRows ++ minizRows ++ libdeflRows ++ zopfliRows
+
+  -- Real-corpus rows: the same timing matrix over the committed Canterbury files
+  -- (one single-size workload per file), so the dashboard rests on representative
+  -- data, not only the synthetic patterns. Canterbury is small (~2.8 MB), so the
+  -- C/Rust references and zopfli all run at every level alongside native.
+  let corpus ← loadCorpus "canterbury" canterburyFiles
+  let corpusRows ← if corpus.isEmpty then pure [] else do
+    IO.eprintln s!"Running Canterbury corpus matrix ({corpus.length} files)…"
+    let cn ← runWorkloads "native"      corpus nativeCompress     (some nativeDecompress)
+    let cz ← runWorkloads "zlib"        corpus zlibCompress       (some RawDeflate.decompress)
+    let cm ← runWorkloads "miniz_oxide" corpus minizCompress      (some MinizOxide.decompress)
+    let cl ← runWorkloads "libdeflate"  corpus libdeflateCompress (some Libdeflate.decompress)
+    let czo ← runWorkloads "zopfli"     corpus zopfliCompress     none (theLevels := [6]) (theReps := 1)
+    pure (cn ++ cz ++ cm ++ cl ++ czo)
+
+  let rows := syntheticRows ++ corpusRows
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]

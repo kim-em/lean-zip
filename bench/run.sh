@@ -22,7 +22,16 @@ in_project_shell() {
   if [ -n "${IN_NIX_SHELL:-}" ]; then bash -c "$1"; else nix-shell --run "$1"; fi
 }
 
-# 1 + 2. Lean matrix and payload dump (project shell).
+# 0. Materialize the real corpora. Canterbury is committed, so this is a no-op
+#    checksum re-verify in CI; it re-fetches only if the cache is missing.
+if [ ! -d bench/corpora/canterbury ]; then
+  bash bench/fetch_corpora.sh canterbury
+fi
+
+# 1 + 2. Lean matrix and payload dump (project shell). The matrix now covers the
+#    Canterbury corpus files (pattern "canterbury/<file>") in addition to the
+#    synthetic patterns; --dump-payloads writes the corpus bytes under
+#    bench/payloads/canterbury/ for the external comparators.
 in_project_shell "lake build bench-report \
   && lake env .lake/build/bin/bench-report $OUT \
   && lake env .lake/build/bin/bench-report --dump-payloads bench/payloads"
