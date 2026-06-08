@@ -229,12 +229,21 @@ def runReport (outPath : String) : IO Unit := do
     IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
   let mut rows : List Row := []
   for (corpus, files) in corpora do
-    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files)…"
-    let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)
-    let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress)
-    let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress)
-    let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress)
-    let czo ← runWorkloads "zopfli"     files zopfliCompress     none (theLevels := [6]) (theReps := 1)
+    -- Large corpora (Silesia, ~200 MB) use a reduced matrix so the run stays
+    -- tractable: the three representative levels and a single timing pass
+    -- (variance is low on big files), and zopfli — level-less and ~100× slower
+    -- than zlib — is skipped entirely. Small corpora (Canterbury) keep the full
+    -- 9-level / median-of-`reps` matrix plus the zopfli ratio-ceiling point.
+    let big := corpus == "silesia"
+    let lvls := if big then [1, 6, 9] else levels
+    let rps  := if big then 1 else reps
+    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, levels {lvls}, reps {rps})…"
+    let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)     (theLevels := lvls) (theReps := rps)
+    let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress) (theLevels := lvls) (theReps := rps)
+    let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress) (theLevels := lvls) (theReps := rps)
+    let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress) (theLevels := lvls) (theReps := rps)
+    let czo ← if big then pure [] else
+      runWorkloads "zopfli" files zopfliCompress none (theLevels := [6]) (theReps := 1)
     rows := rows ++ cn ++ cz ++ cm ++ cl ++ czo
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]

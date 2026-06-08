@@ -65,8 +65,14 @@ files land).
   committed under [`corpora/canterbury/`](corpora/canterbury) (materialized by
   [`fetch_corpora.sh`](fetch_corpora.sh), verified against recorded SHA-256), so
   CI needs no network. zopfli runs at level 6 only (small corpus, slow).
-- Larger corpora (e.g. **Silesia**) are fetched on demand into a gitignored
-  cache; their rows slot into the same per-level charts automatically.
+- **Silesia corpus** (12 files, ~202 MB: prose, UNIX binaries, an HTML
+  dictionary, a source tarball, XML, databases, medical images, a DLL) — the
+  modern standard zstd/brotli/lzma report against. Fetched on demand into a
+  gitignored cache (`fetch_corpora.sh silesia`, pinned GitHub mirror,
+  SHA-256-verified); its rows slot into the same per-level charts automatically.
+  Because it is ~70× larger than Canterbury, it runs a **reduced matrix** —
+  levels [1, 6, 9], a single timing pass, zopfli skipped — so the regeneration
+  stays tractable.
 
 The synthetic `prng` pattern used to be the only incompressible workload; its
 replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,

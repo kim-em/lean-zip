@@ -27,6 +27,10 @@ in_project_shell() {
 if [ ! -d bench/corpora/canterbury ]; then
   bash bench/fetch_corpora.sh canterbury
 fi
+# Silesia (~202 MB, gitignored) is fetched on demand; skip if already present.
+if [ ! -d bench/corpora/silesia ] || [ -z "$(ls -A bench/corpora/silesia 2>/dev/null)" ]; then
+  bash bench/fetch_corpora.sh silesia
+fi
 
 # 1 + 2. Lean matrix and payload dump (project shell). The matrix times the real
 #    corpus files only (pattern "<corpus>/<file>", e.g. "canterbury/alice29.txt");

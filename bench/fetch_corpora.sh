@@ -45,12 +45,52 @@ fetch_canterbury() {
   echo "[canterbury] ok — 11 files in $dest verified against recorded SHA-256"
 }
 
+# Silesia (~202 MB unzipped, 12 files) — the modern publishable standard, NOT
+# committed (gitignored). Each file is a separate .zip on a pinned GitHub mirror
+# (the primary host sun.aei.polsl.pl is unreliable); we fetch, unzip, and verify
+# the unzipped bytes against the recorded SHA-256.
+SILESIA_BASE="https://raw.githubusercontent.com/MiloszKrajewski/SilesiaCorpus/master"
+read -r -d '' SILESIA_SHA256 <<'EOF' || true
+b24c37886142e11d0ee687db6ab06f936207aa7f2ea1fd1d9a36763c7a507e6a  dickens
+657fc3764b0c75ac9de9623125705831ebbfbe08fed248df73bc2dc66e2a963b  mozilla
+68637ed52e3e4860174ed2dc0840ac77d5f1a60abbcb13770d5754e3774d53e6  mr
+fc63a31770947b8c2062d3b19ca94c00485a232bb91b502021948fee983e1635  nci
+e7ee013880d34dd5208283d0d3d91b07f442e067454276095ded14f322a656eb  ooffice
+60f027179302ca3ad87c58ac90b6be72ec23588aaa7a3b7fe8ecc0f11def3fa3  osdb
+0eac0114a3dfe6e2ee1f345a0f79d653cb26c3bc9f0ed79238af4933422b7578  reymont
+93ba07bc44d8267789c1d911992f40b089ffa2140b4a160fac11ccae9a40e7b2  samba
+c2d0ea2cc59d4c21b7fe43a71499342a00cbe530a1d5548770e91ecd6214adcc  sao
+6a68f69b26daf09f9dd84f7470368553194a0b294fcfa80f1604efb11143a383  webster
+7de9fce1405dc44ae5e6813ed21cd5751e761bd4265655a005d39b9685d1c9ad  x-ray
+0e82e54e695c1938e4193448022543845b33020c8be6bf3bf3ead2224903e08c  xml
+EOF
+
+fetch_silesia() {
+  local dest="$CORPORA_DIR/silesia"
+  mkdir -p "$dest"
+  echo "[silesia] fetching 12 files from $SILESIA_BASE"
+  local f
+  for f in dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml; do
+    if [ ! -f "$dest/$f" ]; then
+      curl -sSL --fail --max-time 300 -o "$dest/$f.zip" "$SILESIA_BASE/$f.zip"
+      # unzip via python3 (avoids an `unzip` dependency)
+      python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+        "$dest/$f.zip" "$dest"
+      rm -f "$dest/$f.zip"
+    fi
+  done
+  ( cd "$dest" && printf '%s\n' "$SILESIA_SHA256" | sha256sum --check --quiet )
+  echo "[silesia] ok — 12 files in $dest verified against recorded SHA-256"
+}
+
 main() {
   mkdir -p "$CORPORA_DIR"
   local which="${1:-all}"
   case "$which" in
-    canterbury|all) fetch_canterbury ;;
-    *) echo "unknown corpus: $which (known: canterbury)" >&2; exit 2 ;;
+    canterbury) fetch_canterbury ;;
+    silesia)    fetch_silesia ;;
+    all)        fetch_canterbury; fetch_silesia ;;
+    *) echo "unknown corpus: $which (known: canterbury, silesia, all)" >&2; exit 2 ;;
   esac
 }
 
