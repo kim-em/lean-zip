@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Render the Track D benchmark JSON into log-scale SVG graphs.
+"""Render the Track D benchmark JSON into SVG graphs.
 
 Reads bench/results/latest.json (produced by `lake exe bench-report`) and writes
 SVG figures under bench/graphs/. Compares native lean-zip against each reference
-implementation on compression ratio and on compress/decompress throughput.
+implementation on compression ratio and on compress/decompress throughput, over
+the **real corpora** only (synthetic patterns were removed — they misled on
+every axis).
+
+The plotting is corpus-generic: every `<corpus>/<file>` prefix present in the
+data becomes its own chart set, so a new corpus (e.g. Silesia) slots in with no
+code change.
 
 Run via `bench/run.sh`, or directly:
     python bench/plot.py [results.json] [graphs_dir]
 """
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -30,14 +37,10 @@ COMPRESSORS = [
     ("zig",         "Zig std.flate",     "#bcbd22", "*"),
     ("ocaml",       "OCaml decompress",  "#17becf", "h"),
 ]
-PATTERNS = ["constant", "cyclic", "prng", "text"]
-SIZE_LEVEL = 6     # level used for the size-sweep figures
-LEVEL_SIZE = 65536  # size used for the ratio-vs-level figure
 
-# Real corpora rendered as per-file grouped-bar charts (their files are
-# single-size, so the synthetic size-sweep figures don't apply).
-CORPORA = ["canterbury"]
-CORPUS_LEVEL = 6   # representative level for the per-file corpus bars
+# Representative level for the per-file corpus bars carrying the stable
+# (README-embedded) filenames; the per-level set covers every timed level.
+CORPUS_LEVEL = 6
 
 
 def load(path):
@@ -45,14 +48,12 @@ def load(path):
         return json.load(f)
 
 
-def rows_for(results, compressor, pattern, *, level=None, size=None):
+def rows_for(results, compressor, pattern, *, level=None):
     out = []
     for r in results:
         if r["compressor"] != compressor or r["pattern"] != pattern:
             continue
         if level is not None and r["level"] != level:
-            continue
-        if size is not None and r["size"] != size:
             continue
         out.append(r)
     return out
@@ -63,9 +64,36 @@ def present_compressors(results):
     return [c for c in COMPRESSORS if c[0] in have]
 
 
+def corpora_in(results):
+    """Corpus names present in the data, from `<corpus>/<file>` patterns."""
+    return sorted({r["pattern"].split("/", 1)[0]
+                   for r in results if "/" in r["pattern"]})
+
+
+def corpus_patterns(results, corpus):
+    """Sorted `<corpus>/<file>` patterns present in the results."""
+    pref = corpus + "/"
+    return sorted({r["pattern"] for r in results if r["pattern"].startswith(pref)})
+
+
+def corpus_levels(results, corpus, metric):
+    """Levels for which `corpus` carries `metric` data, sorted — drives the
+    per-level chart set so it follows whatever the report timed."""
+    pref = corpus + "/"
+    return sorted({r["level"] for r in results
+                   if r["pattern"].startswith(pref) and r.get(metric) is not None})
+
+
+def geomean(xs):
+    xs = [x for x in xs if x and x > 0]
+    if not xs:
+        return None
+    return math.exp(sum(math.log(x) for x in xs) / len(xs))
+
+
 def series_style(key, colour):
     """native is the subject — draw it solid and on top; references as hollow
-    rings so coincident points (common on compressible data) stay visible."""
+    rings so coincident points stay visible."""
     native = key == "native"
     return dict(
         color=colour,
@@ -79,80 +107,17 @@ def series_style(key, colour):
     )
 
 
-def size_sweep(results, meta, metric, ylabel, title, outfile, *, logy, level=SIZE_LEVEL):
-    """One 2x2 figure (subplot per pattern): metric vs input size, line per
-    compressor, at `level`. Log x; log y iff logy."""
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True)
-    comps = present_compressors(results)
-    for ax, pat in zip(axes.flat, PATTERNS):
-        for key, label, colour, marker in comps:
-            rs = sorted(rows_for(results, key, pat, level=level),
-                        key=lambda r: r["size"])
-            xs = [r["size"] for r in rs if r.get(metric) is not None]
-            ys = [r[metric] for r in rs if r.get(metric) is not None]
-            if xs:
-                ax.plot(xs, ys, marker=marker, label=label,
-                        **series_style(key, colour))
-        ax.set_xscale("log", base=2)
-        if logy:
-            ax.set_yscale("log")
-        ax.set_title(f"{pat} data", fontsize=10)
-        ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
-        ax.set_xlabel("input size (bytes)")
-        ax.set_ylabel(ylabel)
-    axes.flat[0].legend(fontsize=8, loc="best")
-    fig.suptitle(f"{title}  (level {level})", fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
-    fig.tight_layout(rect=(0, 0.02, 1, 0.97))
-    fig.savefig(outfile)
-    plt.close(fig)
-    print(f"wrote {outfile}")
-
-
-def timed_levels(results, metric="compress_mbps"):
-    """Levels that actually carry timing data, sorted — drives the per-level
-    chart set so it follows whatever the report timed (e.g. [1,6,9] or [1..9])."""
-    return sorted({r["level"] for r in results if r.get(metric) is not None})
-
-
-def ratio_by_level(results, meta, outfile):
-    """Compression ratio vs level at LEVEL_SIZE, subplot per pattern."""
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), sharex=True)
-    comps = present_compressors(results)
-    for ax, pat in zip(axes.flat, PATTERNS):
-        for key, label, colour, marker in comps:
-            rs = sorted(rows_for(results, key, pat, size=LEVEL_SIZE),
-                        key=lambda r: r["level"])
-            xs = [r["level"] for r in rs]
-            ys = [r["ratio"] for r in rs]
-            if xs:
-                ax.plot(xs, ys, marker=marker, label=label,
-                        **series_style(key, colour))
-        ax.set_title(f"{pat} data", fontsize=10)
-        ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
-        ax.set_xlabel("compression level")
-        ax.set_ylabel("ratio (compressed / original)")
-    axes.flat[0].legend(fontsize=8, loc="best")
-    fig.suptitle(f"Compression ratio vs level  ({LEVEL_SIZE} bytes; lower is better)",
-                 fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
-    fig.tight_layout(rect=(0, 0.02, 1, 0.97))
-    fig.savefig(outfile)
-    plt.close(fig)
-    print(f"wrote {outfile}")
-
-
-def corpus_patterns(results, corpus):
-    """Sorted `<corpus>/<file>` patterns present in the results."""
-    pref = corpus + "/"
-    return sorted({r["pattern"] for r in results if r["pattern"].startswith(pref)})
+def _provenance(meta):
+    return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
+            f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
+            "throughput = median snapshot; ratio is deterministic")
 
 
 def corpus_bars(results, meta, corpus, metric, ylabel, title, outfile, *,
                 logy, level=CORPUS_LEVEL):
     """Per-file grouped bar chart for one real corpus: one x-tick per file, one
-    bar per compressor, at a representative level. Real-corpus files are
-    single-size, so this replaces the synthetic size-sweep view."""
+    bar per compressor, at a single level. Real-corpus files are single-size, so
+    grouped bars (not a size sweep) are the right view."""
     pats = corpus_patterns(results, corpus)
     if not pats:
         return
@@ -195,10 +160,57 @@ def corpus_bars(results, meta, corpus, metric, ylabel, title, outfile, *,
     print(f"wrote {outfile}")
 
 
-def _provenance(meta):
-    return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
-            f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
-            "throughput = median snapshot; ratio is deterministic")
+def corpus_vs_level(results, meta, corpus, metric, ylabel, title, outfile, *, logy):
+    """Aggregate line chart: metric (geomean over the corpus files) vs level,
+    one line per compressor. The headline shape of the corpus across levels."""
+    pats = corpus_patterns(results, corpus)
+    levels = corpus_levels(results, corpus, metric)
+    if not pats or not levels:
+        return
+    fig, ax = plt.subplots(figsize=(9, 6))
+    plotted = False
+    for key, label, colour, marker in present_compressors(results):
+        xs, ys = [], []
+        for lvl in levels:
+            vals = []
+            for p in pats:
+                rs = rows_for(results, key, p, level=lvl)
+                if rs and rs[0].get(metric) is not None:
+                    vals.append(rs[0][metric])
+            g = geomean(vals)
+            if g is not None:
+                xs.append(lvl)
+                ys.append(g)
+        if xs:
+            ax.plot(xs, ys, marker=marker, label=label, **series_style(key, colour))
+            plotted = True
+    if not plotted:
+        plt.close(fig)
+        return
+    if logy:
+        ax.set_yscale("log")
+    ax.set_xlabel("compression level")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
+    ax.legend(fontsize=8, ncol=2, loc="best")
+    fig.suptitle(f"{title}  ({corpus}, geomean over files)",
+                 fontsize=13, fontweight="bold")
+    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.97))
+    fig.savefig(outfile)
+    plt.close(fig)
+    print(f"wrote {outfile}")
+
+
+# (metric key, ylabel, title, filename stem, log y-axis)
+THROUGHPUT_FIGS = [
+    ("compress_mbps",   "throughput (MB/s)", "Compression throughput per file",
+     "compress_throughput", True),
+    ("decompress_mbps", "throughput (MB/s)", "Decompression throughput per file",
+     "decompress_throughput", True),
+    ("ratio", "ratio (compressed / original)", "Compression ratio per file",
+     "ratio", False),
+]
 
 
 def main():
@@ -209,38 +221,26 @@ def main():
     doc = load(results_path)
     results, meta = doc["results"], doc.get("meta", {})
 
-    # Canonical level-6 figures (stable filenames for the README embeds).
-    size_sweep(results, meta, "compress_mbps", "throughput (MB/s)",
-               "Compression throughput vs input size",
-               graphs_dir / "compress_throughput.svg", logy=True)
-    size_sweep(results, meta, "decompress_mbps", "throughput (MB/s)",
-               "Decompression throughput vs input size",
-               graphs_dir / "decompress_throughput.svg", logy=True)
-    # One throughput figure per timed level (e.g. compress_throughput_L1.svg …).
-    for lvl in timed_levels(results, "compress_mbps"):
-        size_sweep(results, meta, "compress_mbps", "throughput (MB/s)",
-                   "Compression throughput vs input size",
-                   graphs_dir / f"compress_throughput_L{lvl}.svg", logy=True, level=lvl)
-    for lvl in timed_levels(results, "decompress_mbps"):
-        size_sweep(results, meta, "decompress_mbps", "throughput (MB/s)",
-                   "Decompression throughput vs input size",
-                   graphs_dir / f"decompress_throughput_L{lvl}.svg", logy=True, level=lvl)
-    size_sweep(results, meta, "ratio", "ratio (compressed / original)",
-               "Compression ratio vs input size",
-               graphs_dir / "compression_ratio.svg", logy=False)
-    ratio_by_level(results, meta, graphs_dir / "ratio_by_level.svg")
+    corpora = corpora_in(results)
+    if not corpora:
+        print("no real-corpus rows found; nothing to plot", file=sys.stderr)
+        return
 
-    # Real-corpus per-file bar charts (single-size files ⇒ no size sweep).
-    for corpus in CORPORA:
-        corpus_bars(results, meta, corpus, "compress_mbps", "throughput (MB/s)",
-                    "Compression throughput per file",
-                    graphs_dir / f"{corpus}_compress_throughput.svg", logy=True)
-        corpus_bars(results, meta, corpus, "decompress_mbps", "throughput (MB/s)",
-                    "Decompression throughput per file",
-                    graphs_dir / f"{corpus}_decompress_throughput.svg", logy=True)
-        corpus_bars(results, meta, corpus, "ratio", "ratio (compressed / original)",
-                    "Compression ratio per file",
-                    graphs_dir / f"{corpus}_ratio.svg", logy=False)
+    for corpus in corpora:
+        for metric, ylabel, title, stem, logy in THROUGHPUT_FIGS:
+            # Canonical level-6 per-file bars (stable filenames for README embeds).
+            corpus_bars(results, meta, corpus, metric, ylabel, title,
+                        graphs_dir / f"{corpus}_{stem}.svg", logy=logy)
+            # One per-file bar chart per timed level: <corpus>_<stem>_L<n>.svg.
+            for lvl in corpus_levels(results, corpus, metric):
+                corpus_bars(results, meta, corpus, metric, ylabel, title,
+                            graphs_dir / f"{corpus}_{stem}_L{lvl}.svg",
+                            logy=logy, level=lvl)
+            # Aggregate (geomean over files) vs level.
+            vs_label = ylabel + (", geomean" if metric != "ratio" else " (geomean)")
+            vs_title = title.replace("per file", "vs level")
+            corpus_vs_level(results, meta, corpus, metric, vs_label, vs_title,
+                            graphs_dir / f"{corpus}_{stem}_vs_level.svg", logy=logy)
 
 
 if __name__ == "__main__":
