@@ -98,15 +98,81 @@ def fixKraftList (lengths : List Nat) (maxBits : Nat) : List Nat :=
   if kraftSum (lengths.filter (· != 0)) maxBits ≤ 2 ^ maxBits then lengths
   else lengths.map fun l => if l == 0 then 0 else maxBits
 
+/-! ## Proper length-limiting (zlib `gen_bitlen`, not the flat fallback)
+
+The naive "cap each depth at `maxBits`, and if that breaks the Kraft inequality
+flatten *every* code to `maxBits`" is catastrophic: a Huffman tree whose natural
+depth exceeds the limit by even one bit collapses to a uniform `maxBits`-bit
+code, which is worse than fixed Huffman — so the encoder silently falls back to a
+fixed block, giving up 20–30% on every large file. Instead we redistribute the
+overflow the way zlib's `gen_bitlen` does: cap, then repair the small Kraft
+overflow by moving leaves through the `bl_count` histogram, and assign the
+resulting lengths to symbols by decreasing frequency.
+
+These functions are *heuristics* — they decide only how many codes get each
+length. `fixKraftList` still wraps the result, so validity (`ValidLengths`) is
+guaranteed regardless, and they carry no proof obligation; the only properties
+the proofs use are structural (every produced length is in `[1, maxBits]`, and
+every symbol receives one), which the `zip`+padding shape below makes immediate. -/
+
+/-- Histogram of code lengths after capping each natural depth at `maxBits`. -/
+def cappedBlCount (depths : List (Nat × Nat)) (maxBits : Nat) : Array Nat := Id.run do
+  let mut bl : Array Nat := Array.replicate (maxBits + 2) 0
+  for p in depths do
+    let dc := min p.2 maxBits
+    bl := bl.set! dc ((bl.getD dc 0) + 1)
+  return bl
+
+/-- How many natural code lengths exceed `maxBits` — the overflow to repair. -/
+def overflowCount (depths : List (Nat × Nat)) (maxBits : Nat) : Nat :=
+  (depths.filter (fun p => decide (p.2 > maxBits))).length
+
+/-- Largest length `≤ start` with a positive count in `bl` (0 if none). -/
+def findBelow (bl : Array Nat) (start : Nat) : Nat :=
+  if start = 0 then 0
+  else if bl.getD start 0 > 0 then start
+  else findBelow bl (start - 1)
+termination_by start
+
+/-- Repair a capped `bl_count` so the code is complete (Kraft-exact) within
+    `maxBits`: pull one leaf up from the shallowest available depth and push the
+    overflowing pair down to `maxBits` (zlib `gen_bitlen`). Heuristic only. -/
+def repairBl (bl : Array Nat) (overflow maxBits : Nat) : Array Nat :=
+  if overflow < 2 then bl
+  else
+    let bits := findBelow bl (maxBits - 1)
+    let bl := ((bl.set! bits ((bl.getD bits 0) - 1)).set! (bits + 1)
+                ((bl.getD (bits + 1) 0) + 2)).set! maxBits ((bl.getD maxBits 0) - 1)
+    repairBl bl (overflow - 2) maxBits
+termination_by overflow
+
+/-- The multiset of code lengths a `bl_count` histogram describes, ascending:
+    `bl.getD l 0` copies of each `l ∈ [1, maxBits]`. Every element is in
+    `[1, maxBits]` by construction (the only fact the proofs need). -/
+def expandBl (bl : Array Nat) (maxBits : Nat) : List Nat :=
+  (List.range maxBits).flatMap (fun i => List.replicate (bl.getD (i + 1) 0) (i + 1))
+
+/-- Proper length-limited Huffman lengths as `(symbol, length)` pairs: build the
+    tree, cap+repair its depths into a complete `≤ maxBits` code, and hand the
+    lengths to symbols by decreasing frequency (most frequent → shortest). The
+    `maxBits` padding guarantees every symbol gets a length even if the heuristic
+    repair under-produces; on the common path only the real lengths are used. -/
+def limitedPairs (nonzero : List (Nat × Nat)) (maxBits : Nat) : List (Nat × Nat) :=
+  let leaves := (nonzero.map fun p => BuildTree.leaf p.2 p.1).mergeSort
+                  (fun a b => a.weight ≤ b.weight)
+  let depths := (buildHuffmanTree leaves).depths
+  let bl := repairBl (cappedBlCount depths maxBits) (overflowCount depths maxBits) maxBits
+  let symsByFreq := (nonzero.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1)
+  symsByFreq.zip (expandBl bl maxBits ++ List.replicate symsByFreq.length maxBits)
+
 /-- Compute Huffman code lengths from symbol frequencies.
     `freqs` is a list of (symbol, frequency) pairs.
     Returns a list of length `numSymbols` where index `i` is the code length
     for symbol `i` (0 means the symbol has no codeword).
 
-    Code lengths are capped at `maxBits`, and if the resulting Kraft sum
-    exceeds `2^maxBits`, all non-zero codes are set to `maxBits` as a
-    fallback. For typical DEFLATE inputs (≤ 286 symbols, maxBits=15),
-    the optimal tree depth is well under 15, so the fallback never activates. -/
+    Multi-symbol inputs use proper length-limiting (`limitedPairs`); the result
+    is wrapped in `fixKraftList`, which guarantees the Kraft inequality (and hence
+    `ValidLengths`) even if the heuristic repair ever leaves a residual overflow. -/
 def computeCodeLengths (freqs : List (Nat × Nat)) (numSymbols : Nat)
     (maxBits : Nat := 15) : List Nat :=
   let nonzero := freqs.filter (fun (_, f) => f > 0)
@@ -115,13 +181,7 @@ def computeCodeLengths (freqs : List (Nat × Nat)) (numSymbols : Nat)
     let (sym, _) := nonzero.head!
     assignLengths [(sym, 1)] numSymbols
   else
-    let leaves := (nonzero.map fun (sym, freq) => BuildTree.leaf freq sym)
-      |>.mergeSort (fun a b => a.weight ≤ b.weight)
-    let tree := buildHuffmanTree leaves
-    let depths := tree.depths
-    -- Cap at maxBits, then fix Kraft inequality if needed
-    let capped := depths.map fun (s, d) => (s, min d maxBits)
-    fixKraftList (assignLengths capped numSymbols) maxBits
+    fixKraftList (assignLengths (limitedPairs nonzero maxBits) numSymbols) maxBits
 
 /-! ## Properties -/
 
@@ -366,12 +426,60 @@ theorem fixKraftList_bounded (lengths : List Nat) (maxBits : Nat)
     obtain ⟨a, _, rfl⟩ := hl
     split <;> omega
 
+/-! ## `limitedPairs` structural properties
+
+Only two facts about `limitedPairs` reach the proofs, and both are independent of
+the (heuristic) `bl_count` repair: every produced length lies in `[1, maxBits]`,
+and every symbol of the (frequency-sorted) input receives a pair. They follow
+from the `zip`-with-padded-`expandBl` shape. -/
+
+/-- Every length `expandBl` produces is in `[1, maxBits]`. -/
+theorem expandBl_mem_range (bl : Array Nat) (maxBits : Nat) :
+    ∀ l ∈ expandBl bl maxBits, 1 ≤ l ∧ l ≤ maxBits := by
+  intro l hl
+  simp only [expandBl, List.mem_flatMap] at hl
+  obtain ⟨i, hi, hl'⟩ := hl
+  rw [List.mem_replicate] at hl'
+  rw [List.mem_range] at hi
+  omega
+
+/-- Every length in a `limitedPairs` pair is in `[1, maxBits]`. -/
+theorem limitedPairs_mem_range (nz : List (Nat × Nat)) (maxBits : Nat) (hmb : maxBits ≥ 1) :
+    ∀ p ∈ limitedPairs nz maxBits, 1 ≤ p.2 ∧ p.2 ≤ maxBits := by
+  intro p hp
+  simp only [limitedPairs] at hp
+  obtain ⟨_, h2⟩ := List.of_mem_zip hp
+  rw [List.mem_append] at h2
+  cases h2 with
+  | inl h => exact expandBl_mem_range _ _ p.2 h
+  | inr h => rw [List.mem_replicate] at h; omega
+
+/-- The first components of `limitedPairs` are exactly the frequency-sorted
+    symbols (the padding makes the right list long enough to cover them all). -/
+theorem limitedPairs_map_fst (nz : List (Nat × Nat)) (maxBits : Nat) :
+    (limitedPairs nz maxBits).map Prod.fst
+      = (nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1) := by
+  simp only [limitedPairs]
+  apply List.map_fst_zip
+  rw [List.length_append, List.length_replicate]
+  omega
+
+/-- Every symbol with a nonzero frequency receives a pair in `limitedPairs`. -/
+theorem limitedPairs_covers (nz : List (Nat × Nat)) (maxBits s : Nat)
+    (hs : s ∈ nz.map (·.1)) : ∃ p ∈ limitedPairs nz maxBits, p.1 = s := by
+  have hs' : s ∈ (limitedPairs nz maxBits).map Prod.fst := by
+    rw [limitedPairs_map_fst]
+    exact ((List.mergeSort_perm nz _).map (·.1)).mem_iff.mpr hs
+  rw [List.mem_map] at hs'
+  obtain ⟨p, hp, hps⟩ := hs'
+  exact ⟨p, hp, hps⟩
+
 /-! ## computeCodeLengths properties -/
 
-/-- All computed code lengths are ≤ maxBits. This holds because
-    single-symbol codes use length 1 ≤ maxBits, and multi-symbol depths
-    are capped with `min d maxBits` before assignment, then fixed by
-    `fixKraftList` (which only replaces non-zero values with `maxBits`). -/
+/-- All computed code lengths are ≤ maxBits: single-symbol codes use length 1,
+    and multi-symbol lengths come from `limitedPairs` (all in `[1, maxBits]`),
+    then pass through `fixKraftList` (which preserves the ≤ `maxBits` bound). -/
+
 theorem computeCodeLengths_bounded (freqs : List (Nat × Nat)) (n maxBits : Nat)
     (hmb : maxBits > 0) :
     ∀ l ∈ computeCodeLengths freqs n maxBits, l ≤ maxBits := by
@@ -387,9 +495,7 @@ theorem computeCodeLengths_bounded (freqs : List (Nat × Nat)) (n maxBits : Nat)
     · apply fixKraftList_bounded
       apply assignLengths_bounded
       intro p hp
-      simp only [List.mem_map] at hp
-      obtain ⟨⟨s', d'⟩, _, rfl⟩ := hp
-      exact Nat.min_le_right d' maxBits
+      exact (limitedPairs_mem_range _ maxBits hmb p hp).2
 
 /-- The computed code lengths satisfy `ValidLengths`.
 
@@ -642,49 +748,15 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
       (fun q hq _ => by simp only [List.mem_cons, List.mem_nil_iff, or_false] at hq; subst hq; omega)
       ⟨(s, 1), List.Mem.head _, rfl⟩
     omega
-  · -- Multiple nonzero frequencies
-    rename_i hlen_ne1
-    -- Abbreviate the computation
-    let sorted := (nz.map fun (sym, freq) => BuildTree.leaf freq sym)
-      |>.mergeSort (fun a b => a.weight ≤ b.weight)
-    let tree := buildHuffmanTree sorted
-    -- sorted has ≥ 2 elements
-    have hnz_ge2 : nz.length ≥ 2 := by
-      have : nz.length > 0 := List.length_pos_of_mem hs_nz
-      have : nz.length ≠ 1 := fun h => hlen_ne1 (by rw [h]; decide)
-      omega
-    have hsorted_ge2 : sorted.length ≥ 2 := by
-      simp only [sorted, List.length_mergeSort, List.length_map]; exact hnz_ge2
-    -- fixKraftList preserves nonzero
+  · -- Multiple nonzero frequencies — proper length-limiting via `limitedPairs`.
+    -- `fixKraftList` preserves nonzero, and `s` gets a pair (it is a nonzero
+    -- symbol, hence in the frequency-sorted list) with a length ≥ 1 (every
+    -- `limitedPairs` length is in `[1, maxBits]`).
     apply fixKraftList_nonzero _ _ hmb s
     · rw [assignLengths_length]; exact hs
-    · -- s appears as a leaf in sorted
-      have hs_in_mapped : BuildTree.leaf p.2 s ∈
-          nz.map (fun (sym, freq) => BuildTree.leaf freq sym) := by
-        simp only [List.mem_map]
-        exact ⟨p, hs_nz, by rw [← hps]⟩
-      have hs_in_sorted : BuildTree.leaf p.2 s ∈ sorted :=
-        List.mem_mergeSort.mpr hs_in_mapped
-      -- s appears in tree's depths
-      have hs_leaf : ∃ t ∈ sorted, ∃ w, t = BuildTree.leaf w s :=
-        ⟨_, hs_in_sorted, p.2, rfl⟩
-      obtain ⟨d, hd_mem⟩ := buildHuffmanTree_leaf_in_depths sorted s hs_leaf
-      -- d ≥ 1 (because sorted has ≥ 2 elements)
-      have hd_ge : d ≥ 1 := buildHuffmanTree_depths_ge_one sorted hsorted_ge2 (s, d) hd_mem
-      -- (s, min d maxBits) ∈ capped, with min d maxBits > 0
-      have hs_capped : (s, min d maxBits) ∈
-          tree.depths.map (fun (s, d) => (s, min d maxBits)) := by
-        simp only [List.mem_map]; exact ⟨(s, d), hd_mem, rfl⟩
-      have := assignLengths_pos
-        (tree.depths.map (fun (s, d) => (s, min d maxBits)))
-        numSymbols s hs
-        (fun q hq heqs => by
-          simp only [List.mem_map] at hq
-          obtain ⟨⟨s', d'⟩, hq_mem, rfl⟩ := hq
-          have hd'_ge : d' ≥ 1 := buildHuffmanTree_depths_ge_one sorted hsorted_ge2 (s', d') hq_mem
-          show min d' maxBits > 0
-          omega)
-        ⟨(s, min d maxBits), hs_capped, rfl⟩
-      exact Nat.pos_iff_ne_zero.mp this
+    · have hpos := assignLengths_pos (limitedPairs nz maxBits) numSymbols s hs
+        (fun q hq _ => by have := (limitedPairs_mem_range nz maxBits hmb q hq).1; omega)
+        (limitedPairs_covers nz maxBits s (List.mem_map.mpr ⟨p, hs_nz, hps⟩))
+      exact Nat.pos_iff_ne_zero.mp hpos
 
 end Huffman.Spec
