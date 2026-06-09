@@ -453,6 +453,61 @@ def deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8) 
     correctness or regression concern). -/
 def splitChunkSize : Nat := 32768
 
+/-! ## Cross-block (shared-window) block-split dynamic compression
+
+Unlike the self-contained variant, this matches the **whole** input *once* with
+the full 32 KiB window (`lz77ChainIter`), producing one token stream whose
+back-references are valid against the running output, then **partitions that
+token stream** by token count into per-block groups. Each group is re-Huffman
+coded with its own dynamic tree; references freely cross block boundaries
+(RFC 1951 §3.2), so this recovers the cross-chunk matches the self-contained
+split discards — the lever for the text-ratio gap. `pickSmaller` gates it so it
+can never regress. -/
+
+/-- Emit one shared-window dynamic block for a *slice* `group` of the
+    whole-stream token array onto `bw` (`BFINAL = isFinal`). The whole (non-empty)
+    `data` is passed only to satisfy `emitDynBlock`'s empty-input guard, so the
+    group's tokens are always emitted; the Huffman trees fit `group`'s own
+    frequencies. -/
+def emitSharedBlock (bw : BitWriter) (data : ByteArray) (group : Array LZ77Token)
+    (isFinal : Bool) : BitWriter :=
+  let f := tokenFreqs group
+  let lens := dynamicCodeLengths f.1 f.2
+  emitDynBlock bw data group lens.1 lens.2
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 isFinal
+
+/-- Emit the shared-window block sequence for the whole-stream token array `toks`
+    from token index `pos`, one block per `tokChunk` tokens (the last carries
+    `BFINAL`). Well-founded on the remaining token count so the roundtrip can
+    induct through it. -/
+def emitSharedBlocks (data : ByteArray) (toks : Array LZ77Token) (tokChunk : Nat)
+    (pos : Nat) (bw : BitWriter) : BitWriter :=
+  let step := max tokChunk 1
+  let j := min (pos + step) toks.size
+  let bw := emitSharedBlock bw data (toks.extract pos j) (decide (j ≥ toks.size))
+  if j ≥ toks.size then bw
+  else emitSharedBlocks data toks tokChunk j bw
+termination_by toks.size - pos
+decreasing_by simp_all only [Nat.not_le]; omega
+
+/-- Token-group size for cross-block splitting in `deflateRaw`: number of LZ77
+    tokens per block. A pure ratio knob (`pickSmaller` guards regression); 4096
+    is the measured optimum on text (smaller groups are dominated by per-block
+    header overhead, larger ones by coarser local-statistics tracking). -/
+def sharedTokChunk : Nat := 4096
+
+/-- Cross-block (shared-window) block-split dynamic compression. Matches the
+    whole input once, then partitions the token stream into `tokChunk`-token
+    blocks. See `emitSharedBlock`. -/
+def deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt8) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    (emitSharedBlocks data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      tokChunk 0 BitWriter.empty).flush
+
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
     insertion cap (`insertCap`): low levels defer insertion + search shallowly
@@ -490,18 +545,22 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     let storedBytes := storedBlockBytes data
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlock data tokens
-    -- Dynamic Huffman. At the max-compression tiers (level ≥ 7) also try the
-    -- self-contained block-split stream (per-chunk Huffman trees, fresh window
-    -- per chunk) and emit whichever is smaller. `pickSmaller` guarantees we never
-    -- regress below the single block — splitting only ever wins (it helps inputs
-    -- whose statistics vary locally, e.g. structured binary; on text the lost
-    -- cross-chunk matches make the single block win, and we keep it). The default
-    -- level 6 stays single-block so it pays no extra compress time. Both branches
-    -- are roundtrip-verified.
+    -- Dynamic Huffman. At the max-compression tiers (level ≥ 7) also try two
+    -- block-split streams and emit the smallest of all three candidates:
+    --   * self-contained split — per-chunk Huffman trees, fresh window per chunk
+    --     (wins on locally-varying statistics, e.g. structured binary);
+    --   * cross-block (shared-window) split — one whole-file match pass, token
+    --     stream partitioned per block, references cross block boundaries (wins on
+    --     text, where the self-contained split loses cross-chunk matches).
+    -- `pickSmaller` guarantees we never regress below the single block — splitting
+    -- only ever wins. The default level 6 stays single-block so it pays no extra
+    -- compress time. All branches are roundtrip-verified.
     else
       let single := deflateDynamicBlockCore data tokens lens.1 lens.2
         (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
-      if 7 ≤ level then pickSmaller single (deflateDynamicBlocksSC data splitChunkSize level)
+      if 7 ≤ level then
+        pickSmaller (pickSmaller single (deflateDynamicBlocksSC data splitChunkSize level))
+          (deflateDynamicBlocksShared data sharedTokChunk level)
       else single
 
 end Zip.Native.Deflate

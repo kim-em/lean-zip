@@ -220,6 +220,284 @@ theorem emitChunkBlocks_decodeR (data : ByteArray) (chunkSize : Nat) (level : UI
           extract_data_append data pos (min (pos + max chunkSize 1) data.size) data.size
             (by omega) hjle]
 
+/-! ## Cross-block (shared-window) block-split roundtrip
+
+`deflateDynamicBlocksShared` matches the whole input *once* (full 32 KiB window),
+then partitions the single token stream into per-block groups whose
+back-references may reach into earlier blocks. Unlike the self-contained fold,
+the per-tail output is *acc-dependent*, so the fold threads the concrete
+accumulated output and supplies each block an acc-threaded resolve fact, peeled
+off the whole-stream resolve via `resolveLZ77_append_eobFree`. -/
+
+set_option maxHeartbeats 800000 in
+/-- One shared-window block: its bits append to `bw`, it preserves `wf`, and given
+    the acc-threaded resolve `resolveLZ77 (tokensToSymbols group) accOut = some out`,
+    `decode.go`/`decode.goR` consume it — returning `out` (final) or continuing on
+    the trailing bits from `out` (non-final). -/
+theorem emitSharedBlock_decode (data : ByteArray) (group : Array LZ77Token)
+    (bw : BitWriter) (hbw : bw.wf) (isFinal : Bool) (hdata : data.size ≠ 0)
+    (hgenc : ∀ t ∈ group.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
+    (accOut out : List UInt8)
+    (hres : Deflate.Spec.resolveLZ77 (tokensToSymbols group) accOut = some out) :
+    ∃ blockBits,
+      (emitSharedBlock bw data group isFinal).toBits = bw.toBits ++ blockBits ∧
+      (emitSharedBlock bw data group isFinal).wf ∧
+      (∀ (rest : List Bool),
+        Deflate.Spec.decode.go (blockBits ++ rest) accOut =
+          if isFinal then some out else Deflate.Spec.decode.go rest out) ∧
+      (∀ (rest : List Bool),
+        Deflate.Spec.decode.goR (blockBits ++ rest) accOut =
+          if isFinal then some (out, rest) else Deflate.Spec.decode.goR rest out) := by
+  obtain ⟨litLens, distLens, headerBits, symBits, _hll, _hdl, hlv, hdv,
+      hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+    emitDynBlock_spec bw hbw data group hgenc (fun hz => absurd hz hdata) isFinal
+  have hvalid := tokensToSymbols_validSymbolList group
+  refine ⟨[isFinal, false, true] ++ headerBits ++ symBits, ?_, ?_, ?_, ?_⟩
+  · simp only [emitSharedBlock]; rw [htoBits]; simp only [List.append_assoc]
+  · simp only [emitSharedBlock]; exact hwf
+  · intro rest
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables
+      litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+    rw [← List.append_assoc] at hheader
+    cases isFinal
+    · simp only [Bool.false_eq_true, if_false]
+      exact Deflate.Spec.decode_go_dynBlock_nonfinal_acc _ out accOut litLens distLens
+        headerBits symBits rest hlv hdv hheader hsyms hres hvalid
+    · simp only [if_true]
+      exact Deflate.Spec.decode_go_dynBlock_final_acc _ out accOut litLens distLens
+        headerBits symBits rest hlv hdv hheader hsyms hres hvalid
+  · intro rest
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables
+      litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+    rw [← List.append_assoc] at hheader
+    cases isFinal
+    · simp only [Bool.false_eq_true, if_false]
+      exact Deflate.Spec.decode_goR_dynBlock_nonfinal_acc _ out accOut litLens distLens
+        headerBits symBits rest hlv hdv hheader hsyms hres hvalid
+    · simp only [if_true]
+      exact Deflate.Spec.decode_goR_dynBlock_final_acc _ out accOut litLens distLens
+        headerBits symBits rest hlv hdv hheader hsyms hres hvalid
+
+/-- Membership in an extracted token array's `toList` is membership in the whole. -/
+private theorem mem_extract_toList {α} (a : Array α) (s e : Nat) (x : α)
+    (h : x ∈ (a.extract s e).toList) : x ∈ a.toList := by
+  rw [Array.toList_extract, List.extract_eq_take_drop] at h
+  exact List.mem_of_mem_drop (List.mem_of_mem_take h)
+
+/-- Decode fold over the shared-window blocks: from token index `pos < toks.size`,
+    with `accOut` the output of blocks `0..pos` and the residual resolve fact
+    `resolveLZ77 (drop pos of the mapped tokens) accOut = some wholeOut`, the bits
+    emitted by `emitSharedBlocks` (with `bw`'s bits stripped as `B`) decode — from
+    `accOut` — to `wholeOut`. The last block is final, so it returns regardless of
+    the trailing `tail`. -/
+theorem emitSharedBlocks_decode (data : ByteArray) (toks : Array LZ77Token) (tokChunk : Nat)
+    (hdata : data.size ≠ 0)
+    (henc : ∀ t ∈ toks.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) :
+    ∀ (fuel pos : Nat) (accOut wholeOut : List UInt8) (bw : BitWriter),
+      toks.size - pos ≤ fuel → pos < toks.size → bw.wf →
+      Deflate.Spec.resolveLZ77 ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos) accOut =
+        some wholeOut →
+      ∃ B, (emitSharedBlocks data toks tokChunk pos bw).toBits = bw.toBits ++ B ∧
+        (emitSharedBlocks data toks tokChunk pos bw).wf ∧
+        ∀ (tail : List Bool),
+          Deflate.Spec.decode.go (B ++ tail) accOut = some wholeOut := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos accOut wholeOut bw hf hpos _ _; omega
+  | succ fuel ih =>
+    intro pos accOut wholeOut bw hf hpos hbw hres
+    have hjle : min (pos + max tokChunk 1) toks.size ≤ toks.size := Nat.min_le_right _ _
+    have hstep1 : 1 ≤ max tokChunk 1 := Nat.le_max_right _ _
+    have hjgt : pos < min (pos + max tokChunk 1) toks.size := by simp only [Nat.lt_min]; omega
+    have hMfree : ∀ s ∈ toks.toList.map LZ77Token.toLZ77Symbol,
+        s ≠ Deflate.Spec.LZ77Symbol.endOfBlock := mem_map_toLZ77Symbol_ne_endOfBlock toks.toList
+    have hgmfree : ∀ s ∈ ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+        (min (pos + max tokChunk 1) toks.size - pos), s ≠ Deflate.Spec.LZ77Symbol.endOfBlock :=
+      fun s hs => hMfree s (List.mem_of_mem_drop (List.mem_of_mem_take hs))
+    -- Split the residual at the partition point.
+    have hsplit : (toks.toList.map LZ77Token.toLZ77Symbol).drop pos =
+        ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+          (min (pos + max tokChunk 1) toks.size - pos)
+        ++ (toks.toList.map LZ77Token.toLZ77Symbol).drop (min (pos + max tokChunk 1) toks.size) := by
+      conv => lhs; rw [← List.take_append_drop (min (pos + max tokChunk 1) toks.size - pos)
+        ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos)]
+      rw [List.drop_drop, show pos + (min (pos + max tokChunk 1) toks.size - pos)
+        = min (pos + max tokChunk 1) toks.size from by omega]
+    rw [hsplit, Deflate.Spec.resolveLZ77_append_eobFree _ _ accOut hgmfree] at hres
+    -- Peel off the block's resolve and the recursive residual.
+    obtain ⟨out', hout'1, hout'2⟩ :
+        ∃ out', Deflate.Spec.resolveLZ77 (((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+            (min (pos + max tokChunk 1) toks.size - pos)) accOut = some out' ∧
+          Deflate.Spec.resolveLZ77 ((toks.toList.map LZ77Token.toLZ77Symbol).drop
+            (min (pos + max tokChunk 1) toks.size)) out' = some wholeOut := by
+      cases hgm : Deflate.Spec.resolveLZ77 (((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+          (min (pos + max tokChunk 1) toks.size - pos)) accOut with
+      | none => rw [hgm] at hres; simp only [Option.bind_none, reduceCtorEq] at hres
+      | some o => rw [hgm] at hres; exact ⟨o, rfl, hres⟩
+    -- The block's symbol list resolves against `accOut` to `out'`.
+    have htts : tokensToSymbols (toks.extract pos (min (pos + max tokChunk 1) toks.size)) =
+        ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+          (min (pos + max tokChunk 1) toks.size - pos)
+        ++ [Deflate.Spec.LZ77Symbol.endOfBlock] := by
+      unfold tokensToSymbols
+      congr 1
+      simp only [Array.toList_extract, List.extract_eq_take_drop, List.map_take, List.map_drop]
+    have hblockres : Deflate.Spec.resolveLZ77
+        (tokensToSymbols (toks.extract pos (min (pos + max tokChunk 1) toks.size))) accOut =
+        some out' := by
+      rw [htts, Deflate.Spec.resolveLZ77_eobFree_eob _ accOut hgmfree]; exact hout'1
+    obtain ⟨blockBits, htoBits, hwfblk, hdecblk, _⟩ :=
+      emitSharedBlock_decode data (toks.extract pos (min (pos + max tokChunk 1) toks.size)) bw hbw
+        (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size)) hdata
+        (fun t ht => henc t (mem_extract_toList toks pos _ t ht)) accOut out' hblockres
+    by_cases hend : min (pos + max tokChunk 1) toks.size ≥ toks.size
+    · -- Final block: j = toks.size, so the residual forces `out' = wholeOut`.
+      have hjeq : min (pos + max tokChunk 1) toks.size = toks.size := by omega
+      have hdropnil : (toks.toList.map LZ77Token.toLZ77Symbol).drop
+          (min (pos + max tokChunk 1) toks.size) = [] := by
+        rw [hjeq, show toks.size = (toks.toList.map LZ77Token.toLZ77Symbol).length from by
+          rw [List.length_map, Array.length_toList], List.drop_length]
+      have hwo : out' = wholeOut := by
+        rw [hdropnil, Deflate.Spec.resolveLZ77_nil, Option.some.injEq] at hout'2; exact hout'2
+      have hstep : emitSharedBlocks data toks tokChunk pos bw =
+          emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
+            (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size)) := by
+        conv => lhs; unfold emitSharedBlocks
+        simp only [if_pos hend]
+      refine ⟨blockBits, ?_, ?_, ?_⟩
+      · rw [hstep]; exact htoBits
+      · rw [hstep]; exact hwfblk
+      · intro tail
+        have hd := hdecblk tail
+        rw [if_pos (decide_eq_true hend)] at hd
+        rw [hd, hwo]
+    · -- Non-final block: recurse on the next token group.
+      have hbw' : (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
+          (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))).wf := hwfblk
+      have hstep : emitSharedBlocks data toks tokChunk pos bw =
+          emitSharedBlocks data toks tokChunk (min (pos + max tokChunk 1) toks.size)
+            (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
+              (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))) := by
+        conv => lhs; unfold emitSharedBlocks
+        simp only [if_neg hend]
+      obtain ⟨B', htoBits', hwf', hdec'⟩ :=
+        ih (min (pos + max tokChunk 1) toks.size) out' wholeOut _ (by omega) (by omega) hbw' hout'2
+      refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
+      · rw [hstep, htoBits', htoBits, List.append_assoc]
+      · rw [hstep]; exact hwf'
+      · intro tail
+        rw [List.append_assoc]
+        have hd := hdecblk (B' ++ tail)
+        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [hd]; exact hdec' tail
+
+/-- `decode.goR` variant of `emitSharedBlocks_decode`: the remaining bits after
+    decoding all shared blocks are exactly the trailing `tail`. -/
+theorem emitSharedBlocks_decodeR (data : ByteArray) (toks : Array LZ77Token) (tokChunk : Nat)
+    (hdata : data.size ≠ 0)
+    (henc : ∀ t ∈ toks.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) :
+    ∀ (fuel pos : Nat) (accOut wholeOut : List UInt8) (bw : BitWriter),
+      toks.size - pos ≤ fuel → pos < toks.size → bw.wf →
+      Deflate.Spec.resolveLZ77 ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos) accOut =
+        some wholeOut →
+      ∃ B, (emitSharedBlocks data toks tokChunk pos bw).toBits = bw.toBits ++ B ∧
+        (emitSharedBlocks data toks tokChunk pos bw).wf ∧
+        ∀ (tail : List Bool),
+          Deflate.Spec.decode.goR (B ++ tail) accOut = some (wholeOut, tail) := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos accOut wholeOut bw hf hpos _ _; omega
+  | succ fuel ih =>
+    intro pos accOut wholeOut bw hf hpos hbw hres
+    have hjle : min (pos + max tokChunk 1) toks.size ≤ toks.size := Nat.min_le_right _ _
+    have hstep1 : 1 ≤ max tokChunk 1 := Nat.le_max_right _ _
+    have hjgt : pos < min (pos + max tokChunk 1) toks.size := by simp only [Nat.lt_min]; omega
+    have hMfree : ∀ s ∈ toks.toList.map LZ77Token.toLZ77Symbol,
+        s ≠ Deflate.Spec.LZ77Symbol.endOfBlock := mem_map_toLZ77Symbol_ne_endOfBlock toks.toList
+    have hgmfree : ∀ s ∈ ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+        (min (pos + max tokChunk 1) toks.size - pos), s ≠ Deflate.Spec.LZ77Symbol.endOfBlock :=
+      fun s hs => hMfree s (List.mem_of_mem_drop (List.mem_of_mem_take hs))
+    have hsplit : (toks.toList.map LZ77Token.toLZ77Symbol).drop pos =
+        ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+          (min (pos + max tokChunk 1) toks.size - pos)
+        ++ (toks.toList.map LZ77Token.toLZ77Symbol).drop (min (pos + max tokChunk 1) toks.size) := by
+      conv => lhs; rw [← List.take_append_drop (min (pos + max tokChunk 1) toks.size - pos)
+        ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos)]
+      rw [List.drop_drop, show pos + (min (pos + max tokChunk 1) toks.size - pos)
+        = min (pos + max tokChunk 1) toks.size from by omega]
+    rw [hsplit, Deflate.Spec.resolveLZ77_append_eobFree _ _ accOut hgmfree] at hres
+    obtain ⟨out', hout'1, hout'2⟩ :
+        ∃ out', Deflate.Spec.resolveLZ77 (((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+            (min (pos + max tokChunk 1) toks.size - pos)) accOut = some out' ∧
+          Deflate.Spec.resolveLZ77 ((toks.toList.map LZ77Token.toLZ77Symbol).drop
+            (min (pos + max tokChunk 1) toks.size)) out' = some wholeOut := by
+      cases hgm : Deflate.Spec.resolveLZ77 (((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+          (min (pos + max tokChunk 1) toks.size - pos)) accOut with
+      | none => rw [hgm] at hres; simp only [Option.bind_none, reduceCtorEq] at hres
+      | some o => rw [hgm] at hres; exact ⟨o, rfl, hres⟩
+    have htts : tokensToSymbols (toks.extract pos (min (pos + max tokChunk 1) toks.size)) =
+        ((toks.toList.map LZ77Token.toLZ77Symbol).drop pos).take
+          (min (pos + max tokChunk 1) toks.size - pos)
+        ++ [Deflate.Spec.LZ77Symbol.endOfBlock] := by
+      unfold tokensToSymbols
+      congr 1
+      simp only [Array.toList_extract, List.extract_eq_take_drop, List.map_take, List.map_drop]
+    have hblockres : Deflate.Spec.resolveLZ77
+        (tokensToSymbols (toks.extract pos (min (pos + max tokChunk 1) toks.size))) accOut =
+        some out' := by
+      rw [htts, Deflate.Spec.resolveLZ77_eobFree_eob _ accOut hgmfree]; exact hout'1
+    obtain ⟨blockBits, htoBits, hwfblk, _, hdecblk⟩ :=
+      emitSharedBlock_decode data (toks.extract pos (min (pos + max tokChunk 1) toks.size)) bw hbw
+        (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size)) hdata
+        (fun t ht => henc t (mem_extract_toList toks pos _ t ht)) accOut out' hblockres
+    by_cases hend : min (pos + max tokChunk 1) toks.size ≥ toks.size
+    · have hjeq : min (pos + max tokChunk 1) toks.size = toks.size := by omega
+      have hdropnil : (toks.toList.map LZ77Token.toLZ77Symbol).drop
+          (min (pos + max tokChunk 1) toks.size) = [] := by
+        rw [hjeq, show toks.size = (toks.toList.map LZ77Token.toLZ77Symbol).length from by
+          rw [List.length_map, Array.length_toList], List.drop_length]
+      have hwo : out' = wholeOut := by
+        rw [hdropnil, Deflate.Spec.resolveLZ77_nil, Option.some.injEq] at hout'2; exact hout'2
+      have hstep : emitSharedBlocks data toks tokChunk pos bw =
+          emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
+            (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size)) := by
+        conv => lhs; unfold emitSharedBlocks
+        simp only [if_pos hend]
+      refine ⟨blockBits, ?_, ?_, ?_⟩
+      · rw [hstep]; exact htoBits
+      · rw [hstep]; exact hwfblk
+      · intro tail
+        have hd := hdecblk tail
+        rw [if_pos (decide_eq_true hend)] at hd
+        rw [hd, hwo]
+    · have hbw' : (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
+          (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))).wf := hwfblk
+      have hstep : emitSharedBlocks data toks tokChunk pos bw =
+          emitSharedBlocks data toks tokChunk (min (pos + max tokChunk 1) toks.size)
+            (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
+              (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))) := by
+        conv => lhs; unfold emitSharedBlocks
+        simp only [if_neg hend]
+      obtain ⟨B', htoBits', hwf', hdec'⟩ :=
+        ih (min (pos + max tokChunk 1) toks.size) out' wholeOut _ (by omega) (by omega) hbw' hout'2
+      refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
+      · rw [hstep, htoBits', htoBits, List.append_assoc]
+      · rw [hstep]; exact hwf'
+      · intro tail
+        rw [List.append_assoc]
+        have hd := hdecblk (B' ++ tail)
+        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [hd]; exact hdec' tail
+
 /-- Block-splitting roundtrip: decoding the self-contained chunk-block stream
     reproduces the input. The empty input is a single final block; otherwise the
     chunk-block fold (`emitChunkBlocks_decode`) reconstructs `data[0:]`. -/
@@ -357,6 +635,176 @@ theorem deflateDynamicBlocksSC_pad (data : ByteArray) (chunkSize : Nat) (level :
     obtain ⟨B, _, hwf, _⟩ :=
       emitChunkBlocks_decode data chunkSize level data.size 0 BitWriter.empty
         (by omega) hpos BitWriter.empty_wf
+    exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
+
+/-! ## Cross-block (shared-window) top-level roundtrip -/
+
+/-- Common facts for the `data.size > 0` branch of the shared-window theorems:
+    the whole-stream token list is non-empty and its mapped form resolves (from
+    `[]`, drop 0) to the input. Derived from `lz77ChainIter_resolves`. -/
+private theorem deflateDynamicBlocksShared_facts (data : ByteArray) (level : UInt8)
+    (hpos : 0 < data.size) :
+    (∀ t ∈ (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList,
+        match t with
+        | .literal _ => True
+        | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) ∧
+      0 < (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size ∧
+      Deflate.Spec.resolveLZ77
+        (((lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList.map
+          LZ77Token.toLZ77Symbol).drop 0) [] = some data.data.toList := by
+  have henc := lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
+    (by omega) (by omega)
+  have hwhole := lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  have hMfree := mem_map_toLZ77Symbol_ne_endOfBlock
+    (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList
+  have hM : Deflate.Spec.resolveLZ77
+      ((lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList.map
+        LZ77Token.toLZ77Symbol) [] = some data.data.toList := by
+    simp only [tokensToSymbols] at hwhole
+    rwa [Deflate.Spec.resolveLZ77_eobFree_eob _ [] hMfree] at hwhole
+  refine ⟨henc, ?_, ?_⟩
+  · rcases Nat.eq_zero_or_pos
+      (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size with h0 | h0
+    · exfalso
+      have hnil : (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList = [] :=
+        List.eq_nil_of_length_eq_zero (by rw [Array.length_toList]; omega)
+      rw [hnil, List.map_nil, Deflate.Spec.resolveLZ77_nil, Option.some.injEq] at hM
+      have hl := congrArg List.length hM
+      simp only [List.length_nil, Array.length_toList, ByteArray.size_data] at hl
+      omega
+    · exact h0
+  · rw [List.drop_zero]; exact hM
+
+/-- Cross-block roundtrip: decoding the shared-window block stream reproduces the
+    input. The empty input is a single final block; otherwise the shared-window
+    fold (`emitSharedBlocks_decode`), seeded by `lz77ChainIter_resolves`,
+    reconstructs the input. -/
+theorem decode_deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt8) :
+    Deflate.Spec.decode
+      (Deflate.Spec.bytesToBits (deflateDynamicBlocksShared data tokChunk level)) =
+      some data.data.toList := by
+  unfold deflateDynamicBlocksShared
+  split
+  · -- data.size = 0: one final block over the empty token list (as in SC).
+    rename_i hz
+    rw [beq_iff_eq] at hz
+    obtain ⟨litLens, distLens, headerBits, symBits, _, _, hlv, hdv,
+        hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables litLens distLens headerBits
+      (symBits ++ List.replicate
+        ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+      hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+    rw [← List.append_assoc] at hheader
+    have hres : Deflate.Spec.resolveLZ77 (tokensToSymbols #[]) [] = some data.data.toList := by
+      have he : data.data.toList = [] :=
+        List.eq_nil_of_length_eq_zero (by simp only [Array.length_toList, ByteArray.size_data, hz])
+      rw [he]; rfl
+    exact Deflate.Spec.encodeDynamic_decode_append (tokensToSymbols #[]) data.data.toList
+      litLens distLens headerBits symBits _ hlv hdv hheader hsyms hres
+      (tokensToSymbols_validSymbolList _)
+  · -- data.size > 0: the shared-window fold.
+    rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksShared_facts data level hpos
+    obtain ⟨B, htoBits, hwf, hdec⟩ :=
+      emitSharedBlocks_decode data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        tokChunk (by omega) henc
+        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size 0 []
+        data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    exact hdec (List.replicate ((8 - B.length % 8) % 8) false)
+
+/-- Cross-block roundtrip: inflating `deflateDynamicBlocksShared` recovers the
+    input, for any `maxOutputSize` large enough to hold it. -/
+theorem inflate_deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt8)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateDynamicBlocksShared data tokChunk level) maxOutputSize =
+      .ok data := by
+  have hlen : data.data.toList.length ≤ maxOutputSize := by
+    simp only [Array.length_toList, ByteArray.size_data]; omega
+  rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
+  exact inflate_complete (deflateDynamicBlocksShared data tokChunk level) data.data.toList
+    maxOutputSize hlen (decode_deflateDynamicBlocksShared data tokChunk level)
+
+/-- The `decode.goR` of `deflateDynamicBlocksShared` returns the input and short
+    (< 8-bit) trailing padding — needed to show the native decoder consumes all
+    of the deflated bytes. -/
+theorem deflateDynamicBlocksShared_goR_pad (data : ByteArray) (tokChunk : Nat) (level : UInt8) :
+    ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateDynamicBlocksShared data tokChunk level)) []
+        = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+  unfold deflateDynamicBlocksShared
+  split
+  · -- data.size = 0
+    rename_i hz
+    rw [beq_iff_eq] at hz
+    obtain ⟨litLens, distLens, headerBits, symBits, _, _, hlv, hdv,
+        hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    refine ⟨List.replicate
+      ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false, ?_, ?_⟩
+    · have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables litLens distLens headerBits
+        (symBits ++ List.replicate
+          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+        hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+      rw [← List.append_assoc] at hheader
+      have hres : Deflate.Spec.resolveLZ77 (tokensToSymbols #[]) [] = some data.data.toList := by
+        have he : data.data.toList = [] :=
+          List.eq_nil_of_length_eq_zero (by simp only [Array.length_toList, ByteArray.size_data, hz])
+        rw [he]; rfl
+      exact Deflate.Spec.encodeDynamic_goR_rest (tokensToSymbols #[]) data.data.toList
+        litLens distLens headerBits symBits _ hlv hdv hheader hsyms hres
+        (tokensToSymbols_validSymbolList _)
+    · simp only [List.length_replicate]; omega
+  · -- data.size > 0
+    rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksShared_facts data level hpos
+    obtain ⟨B, htoBits, hwf, hdec⟩ :=
+      emitSharedBlocks_decodeR data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        tokChunk (by omega) henc
+        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size 0 []
+        data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    refine ⟨List.replicate ((8 - B.length % 8) % 8) false, hdec _, ?_⟩
+    simp only [List.length_replicate]; omega
+
+/-- The output of `deflateDynamicBlocksShared` decomposes into content bits plus
+    short (< 8-bit) padding. -/
+theorem deflateDynamicBlocksShared_pad (data : ByteArray) (tokChunk : Nat) (level : UInt8) :
+    ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateDynamicBlocksShared data tokChunk level) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+  unfold deflateDynamicBlocksShared
+  split
+  · obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
+  · rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksShared_facts data level hpos
+    obtain ⟨B, _, hwf, _⟩ :=
+      emitSharedBlocks_decode data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        tokChunk (by omega) henc
+        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size 0 []
+        data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
 
 end Zip.Native.Deflate

@@ -99,8 +99,10 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
         (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
         (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize
       split
-      · exact inflate_pickSmaller _ _ data maxOutputSize hsingle
-          (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize)
+      · exact inflate_pickSmaller _ _ data maxOutputSize
+          (inflate_pickSmaller _ _ data maxOutputSize hsingle
+            (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize))
+          (inflate_deflateDynamicBlocksShared data sharedTokChunk level _ hsize)
       · exact hsingle
 
 /-- Padding decomposition for the compressed-block dispatch. -/
@@ -171,7 +173,12 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       · exact pickSmaller_bytesToBits
           (P := fun bits => ∃ (contentBits padding : List Bool),
             bits = contentBits ++ padding ∧ padding.length < 8)
-          _ _ hdyn (deflateDynamicBlocksSC_pad data splitChunkSize level)
+          _ _
+          (pickSmaller_bytesToBits
+            (P := fun bits => ∃ (contentBits padding : List Bool),
+              bits = contentBits ++ padding ∧ padding.length < 8)
+            _ _ hdyn (deflateDynamicBlocksSC_pad data splitChunkSize level))
+          (deflateDynamicBlocksShared_pad data sharedTokChunk level)
       · exact hdyn
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
@@ -315,7 +322,13 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           (P := fun bits => ∃ remaining,
             Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
               remaining.length < 8)
-          _ _ hsingle (deflateDynamicBlocksSC_goR_pad data splitChunkSize level)
+          _ _
+          (pickSmaller_bytesToBits
+            (P := fun bits => ∃ remaining,
+              Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                remaining.length < 8)
+            _ _ hsingle (deflateDynamicBlocksSC_goR_pad data splitChunkSize level))
+          (deflateDynamicBlocksShared_goR_pad data sharedTokChunk level)
       · exact hsingle
 
 end Zip.Native.Deflate
