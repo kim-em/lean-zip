@@ -229,13 +229,13 @@ def runReport (outPath : String) : IO Unit := do
     IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
   let mut rows : List Row := []
   for (corpus, files) in corpora do
-    -- Large corpora (Silesia, ~200 MB) use a reduced matrix so the run stays
-    -- tractable: the three representative levels and a single timing pass
-    -- (variance is low on big files), and zopfli — level-less and ~100× slower
-    -- than zlib — is skipped entirely. Small corpora (Canterbury) keep the full
-    -- 9-level / median-of-`reps` matrix plus the zopfli ratio-ceiling point.
+    -- Every corpus is timed at all 9 levels (so the speed-vs-ratio scatter shows
+    -- the full level sweep). Large corpora (Silesia, ~200 MB) use a single timing
+    -- pass — variance is low on big files — and skip zopfli (level-less and ~100×
+    -- slower than zlib), to keep the run tractable; small corpora (Canterbury)
+    -- keep the median-of-`reps` matrix plus the zopfli ratio-ceiling point.
     let big := corpus == "silesia"
-    let lvls := if big then [1, 6, 9] else levels
+    let lvls := levels
     let rps  := if big then 1 else reps
     IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, levels {lvls}, reps {rps})…"
     let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)     (theLevels := lvls) (theReps := rps)
