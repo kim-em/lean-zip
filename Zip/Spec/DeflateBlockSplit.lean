@@ -58,4 +58,90 @@ theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
       exact Deflate.Spec.decode_go_dynBlock_final _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
 
+/-- `M.take p ++ (M.drop p).take q = M.take (p + q)` — a contiguous prefix split. -/
+private theorem take_append_take_drop {α} : ∀ (p : Nat) (M : List α) (q : Nat),
+    M.take p ++ (M.drop p).take q = M.take (p + q) := by
+  intro p
+  induction p with
+  | zero => intro M q; simp
+  | succ p ih =>
+    intro M q
+    cases M with
+    | nil => simp
+    | cons a M' =>
+      rw [List.take_succ_cons, List.drop_succ_cons, List.cons_append, ih M' q,
+        show p + 1 + q = (p + q) + 1 from by omega, List.take_succ_cons]
+
+/-- Two adjacent chunks of a byte array concatenate to the spanning chunk. -/
+private theorem extract_data_append (data : ByteArray) (a b c : Nat)
+    (hab : a ≤ b) (hbc : b ≤ c) :
+    (data.extract a b).data.toList ++ (data.extract b c).data.toList =
+      (data.extract a c).data.toList := by
+  simp only [ByteArray.data_extract, Array.toList_extract, List.extract_eq_take_drop]
+  rw [show data.data.toList.drop b = (data.data.toList.drop a).drop (b - a) by
+        rw [List.drop_drop]; congr 1; omega,
+      show c - a = (b - a) + (c - b) by omega,
+      take_append_take_drop]
+
+/-- Decode fold over the self-contained chunk blocks: from `pos < data.size`,
+    the bits emitted by `emitChunkBlocks` (with `bw`'s bits stripped as `B`)
+    decode — appended to any `acc` — to the remaining input `data[pos:]`. The
+    last block is final so it returns regardless of the trailing `tail`. -/
+theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UInt8) :
+    ∀ (fuel pos : Nat) (bw : BitWriter), data.size - pos ≤ fuel → pos < data.size → bw.wf →
+      ∃ B, (emitChunkBlocks data chunkSize level pos bw).toBits = bw.toBits ++ B ∧
+        (emitChunkBlocks data chunkSize level pos bw).wf ∧
+        ∀ (acc : List UInt8) (tail : List Bool),
+          Deflate.Spec.decode.go (B ++ tail) acc =
+            some (acc ++ (data.extract pos data.size).data.toList) := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos bw hf hpos _; omega
+  | succ fuel ih =>
+    intro pos bw hf hpos hbw
+    obtain ⟨blockBits, htoBits, hwfblk, hdecblk⟩ :=
+      emitChunkBlock_decode data pos (min (pos + max chunkSize 1) data.size) level bw hbw
+        (decide (min (pos + max chunkSize 1) data.size ≥ data.size))
+    have hjle : min (pos + max chunkSize 1) data.size ≤ data.size := Nat.min_le_right _ _
+    have hstep1 : 1 ≤ max chunkSize 1 := Nat.le_max_right _ _
+    have hjgt : pos < min (pos + max chunkSize 1) data.size := by
+      simp only [Nat.lt_min]; omega
+    by_cases hend : min (pos + max chunkSize 1) data.size ≥ data.size
+    · -- Final block: j = data.size.
+      have hjeq : min (pos + max chunkSize 1) data.size = data.size := by omega
+      have hstep : emitChunkBlocks data chunkSize level pos bw =
+          emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
+            (decide (min (pos + max chunkSize 1) data.size ≥ data.size)) := by
+        conv => lhs; unfold emitChunkBlocks
+        simp only [if_pos hend]
+      refine ⟨blockBits, ?_, ?_, ?_⟩
+      · rw [hstep]; exact htoBits
+      · rw [hstep]; exact hwfblk
+      · intro acc tail
+        have hd := hdecblk acc tail
+        rw [if_pos (decide_eq_true hend), hjeq] at hd
+        exact hd
+    · -- Non-final block: recurse on the next chunk.
+      have hbw' : (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
+          (decide (min (pos + max chunkSize 1) data.size ≥ data.size))).wf := hwfblk
+      have hstep : emitChunkBlocks data chunkSize level pos bw =
+          emitChunkBlocks data chunkSize level (min (pos + max chunkSize 1) data.size)
+            (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
+              (decide (min (pos + max chunkSize 1) data.size ≥ data.size))) := by
+        conv => lhs; unfold emitChunkBlocks
+        simp only [if_neg hend]
+      obtain ⟨B', htoBits', hwf', hdec'⟩ :=
+        ih (min (pos + max chunkSize 1) data.size) _ (by omega) (by omega) hbw'
+      refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
+      · rw [hstep, htoBits', htoBits, List.append_assoc]
+      · rw [hstep]; exact hwf'
+      · intro acc tail
+        rw [List.append_assoc]
+        have hd := hdecblk acc (B' ++ tail)
+        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [hd, hdec' (acc ++ (data.extract pos (min (pos + max chunkSize 1) data.size)).data.toList) tail,
+          List.append_assoc,
+          extract_data_append data pos (min (pos + max chunkSize 1) data.size) data.size
+            (by omega) hjle]
+
 end Zip.Native.Deflate
