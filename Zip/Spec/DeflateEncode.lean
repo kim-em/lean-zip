@@ -738,7 +738,7 @@ theorem decode_go_dynBlock_nonfinal (syms : List LZ77Symbol) (chunk acc : List U
     (hvalid : ValidSymbolList syms) :
     decode.go ([false, false, true] ++ headerBits ++ symBits ++ rest) acc =
         decode.go rest (acc ++ chunk) := by
-  conv_lhs => unfold decode.go
+  conv => lhs; unfold decode.go
   simp only [List.cons_append, readBitsLSB_1_false, bind, Option.bind]
   simp only [readBitsLSB_2_false_true]
   simp only [List.nil_append]
@@ -751,10 +751,9 @@ theorem decode_go_dynBlock_nonfinal (syms : List LZ77Symbol) (chunk acc : List U
     have h := resolveLZ77_shift syms acc [] chunk hresolve
     rwa [List.append_nil] at h
   simp only [hres]
-  have hlen : rest.length <
-      ([false, false, true] ++ headerBits ++ symBits ++ rest).length := by
-    simp only [List.length_append, List.length_cons, List.length_nil]
-    omega
-  rw [dif_pos hlen]
+  rw [if_neg (by decide)]
+  rw [dif_pos (show rest.length <
+      (false :: false :: true :: (headerBits ++ symBits ++ rest)).length by
+    simp only [List.length_cons, List.length_append]; omega)]
 
 end Deflate.Spec
