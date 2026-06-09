@@ -404,6 +404,16 @@ def insertCap (level : UInt8) : Nat :=
   else if level ≤ 3 then 64
   else 1000000000
 
+/-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
+    greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
+    lazy variant, which improves ratio at equal window/chain depth. Both share the
+    same `(chainDepth, insertCap)` ladder and satisfy the same encoder contracts
+    (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the choice is
+    transparent to the roundtrip proof. -/
+def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
+  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level)
+  else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+
 /-! ## Self-contained block-split dynamic compression
 
 Split `data` into `chunkSize`-byte chunks, match each chunk independently (fresh
