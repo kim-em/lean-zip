@@ -451,8 +451,10 @@ termination_by data.size - pos
 The proof follows the lazy mainLoop case structure. Helper for the recurring
 "reference at pos with the first match" pattern. -/
 
-/-- Common proof step: reference at pos with a proved countMatch. -/
-private theorem lazyRef_at_pos (data : ByteArray) (pos matchPos matchLen : Nat)
+/-- Common proof step: reference at pos with a proved countMatch. Reused by the
+    chain-lazy matcher's validity proof (`LZ77ChainLazyCorrect`), sourcing the
+    match hypothesis from `chainWalk_spec` instead of `countMatch_matches`. -/
+theorem lazyRef_at_pos (data : ByteArray) (pos matchPos matchLen : Nat)
     (hmp_lt : matchPos < pos)
     (hge : matchLen ≥ 3) (hle : pos + matchLen ≤ data.size)
     (hcm : ∀ i, i < matchLen → data[pos + i]! = data[matchPos + i]!)
