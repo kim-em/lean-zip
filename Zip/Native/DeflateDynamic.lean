@@ -446,6 +446,13 @@ def deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8) 
   else
     (emitChunkBlocks data chunkSize level 0 BitWriter.empty).flush
 
+/-- Chunk size for block splitting in `deflateRaw`: each ~32 KiB run gets its own
+    dynamic Huffman tree and a fresh match window. Large enough to keep per-block
+    header overhead negligible, small enough to let the trees track local
+    statistics. `pickSmaller` makes the exact value a pure ratio knob (never a
+    correctness or regression concern). -/
+def splitChunkSize : Nat := 32768
+
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
     insertion cap (`insertCap`): low levels defer insertion + search shallowly
@@ -483,9 +490,14 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     let storedBytes := storedBlockBytes data
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlock data tokens
-    -- Reuse the sized `lens` for emission (= `deflateDynamicBlock data tokens`,
-    -- but without recomputing the code lengths).
-    else deflateDynamicBlockCore data tokens lens.1 lens.2
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    -- Dynamic Huffman. Emit the smaller of the single whole-file block and the
+    -- self-contained block-split stream (per-chunk Huffman trees, fresh window
+    -- per chunk). `pickSmaller` guarantees we never regress below the single
+    -- block — splitting only ever wins, never loses (small inputs collapse to a
+    -- single chunk = the single block). Both branches are roundtrip-verified.
+    else pickSmaller
+      (deflateDynamicBlockCore data tokens lens.1 lens.2
+        (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2)
+      (deflateDynamicBlocksSC data splitChunkSize level)
 
 end Zip.Native.Deflate

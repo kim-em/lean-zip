@@ -1,4 +1,6 @@
-import Zip.Spec.DeflateRoundtrip
+import Zip.Spec.DeflateFixedCorrect
+import Zip.Spec.DeflateDynamicCorrect
+import Zip.Spec.LZ77ChainCorrect
 
 /-!
 # Self-contained block-splitting roundtrip
@@ -335,5 +337,26 @@ theorem deflateDynamicBlocksSC_goR_pad (data : ByteArray) (chunkSize : Nat) (lev
       rw [List.nil_append, hwhole] at hthis
       exact hthis
     · simp only [List.length_replicate]; omega
+
+/-- The output of `deflateDynamicBlocksSC` decomposes into content bits plus
+    short (< 8-bit) padding — the block-split analogue of `deflateCompressed_pad`. -/
+theorem deflateDynamicBlocksSC_pad (data : ByteArray) (chunkSize : Nat) (level : UInt8) :
+    ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateDynamicBlocksSC data chunkSize level) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+  unfold deflateDynamicBlocksSC
+  split
+  · obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
+  · rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨B, _, hwf, _⟩ :=
+      emitChunkBlocks_decode data chunkSize level data.size 0 BitWriter.empty
+        (by omega) hpos BitWriter.empty_wf
+    exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
 
 end Zip.Native.Deflate
