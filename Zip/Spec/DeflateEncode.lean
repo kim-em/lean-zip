@@ -756,4 +756,63 @@ theorem decode_go_dynBlock_nonfinal (syms : List LZ77Symbol) (chunk acc : List U
       (false :: false :: true :: (headerBits ++ symBits ++ rest)).length by
     simp only [List.length_cons, List.length_append]; omega)]
 
+/-- `decode.goR` on a *final* dynamic block from `acc`: appends the chunk and
+    returns the trailing bits `rest` as the remaining. -/
+theorem decode_goR_dynBlock_final (syms : List LZ77Symbol) (chunk acc : List UInt8)
+    (litLens distLens : List Nat) (headerBits symBits rest : List Bool)
+    (hv_lit : Huffman.Spec.ValidLengths litLens 15)
+    (hv_dist : Huffman.Spec.ValidLengths distLens 15)
+    (hheader : decodeDynamicTables (headerBits ++ symBits ++ rest) =
+        some (litLens, distLens, symBits ++ rest))
+    (henc : encodeSymbols litLens distLens syms = some symBits)
+    (hresolve : resolveLZ77 syms [] = some chunk)
+    (hvalid : ValidSymbolList syms) :
+    decode.goR ([true, false, true] ++ headerBits ++ symBits ++ rest) acc =
+        some (acc ++ chunk, rest) := by
+  unfold decode.goR
+  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
+  simp only [readBitsLSB_2_false_true]
+  simp only [List.nil_append]
+  rw [hheader]; dsimp only
+  have hdec : decodeSymbols litLens distLens (symBits ++ rest) = some (syms, rest) :=
+    encodeSymbols_decodeSymbols litLens distLens syms symBits rest
+      henc hv_lit hv_dist hvalid
+  rw [hdec]
+  have hres : resolveLZ77 syms acc = some (acc ++ chunk) := by
+    have h := resolveLZ77_shift syms acc [] chunk hresolve
+    rwa [List.append_nil] at h
+  simp only [hres]
+  exact if_pos rfl
+
+/-- `decode.goR` on a *non-final* dynamic block from `acc`: appends the chunk and
+    continues on the trailing bits. -/
+theorem decode_goR_dynBlock_nonfinal (syms : List LZ77Symbol) (chunk acc : List UInt8)
+    (litLens distLens : List Nat) (headerBits symBits rest : List Bool)
+    (hv_lit : Huffman.Spec.ValidLengths litLens 15)
+    (hv_dist : Huffman.Spec.ValidLengths distLens 15)
+    (hheader : decodeDynamicTables (headerBits ++ symBits ++ rest) =
+        some (litLens, distLens, symBits ++ rest))
+    (henc : encodeSymbols litLens distLens syms = some symBits)
+    (hresolve : resolveLZ77 syms [] = some chunk)
+    (hvalid : ValidSymbolList syms) :
+    decode.goR ([false, false, true] ++ headerBits ++ symBits ++ rest) acc =
+        decode.goR rest (acc ++ chunk) := by
+  conv => lhs; unfold decode.goR
+  simp only [List.cons_append, readBitsLSB_1_false, bind, Option.bind]
+  simp only [readBitsLSB_2_false_true]
+  simp only [List.nil_append]
+  rw [hheader]; dsimp only
+  have hdec : decodeSymbols litLens distLens (symBits ++ rest) = some (syms, rest) :=
+    encodeSymbols_decodeSymbols litLens distLens syms symBits rest
+      henc hv_lit hv_dist hvalid
+  rw [hdec]
+  have hres : resolveLZ77 syms acc = some (acc ++ chunk) := by
+    have h := resolveLZ77_shift syms acc [] chunk hresolve
+    rwa [List.append_nil] at h
+  simp only [hres]
+  rw [if_neg (by decide)]
+  rw [dif_pos (show rest.length <
+      (false :: false :: true :: (headerBits ++ symBits ++ rest)).length by
+    simp only [List.length_cons, List.length_append]; omega)]
+
 end Deflate.Spec

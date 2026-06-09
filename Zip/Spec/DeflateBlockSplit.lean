@@ -15,18 +15,23 @@ namespace Zip.Native.Deflate
 
 open Deflate.Spec (decode)
 
+set_option maxHeartbeats 800000 in
 /-- One self-contained chunk block: its bits append to `bw`, it preserves `wf`,
-    and `decode.go` consumes it — appending the chunk's bytes and either returning
-    (final block) or continuing on the trailing bits (non-final block). -/
+    and `decode.go`/`decode.goR` consume it — appending the chunk's bytes and
+    either returning (final block) or continuing on the trailing bits. -/
 theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
     (bw : BitWriter) (hbw : bw.wf) (isFinal : Bool) :
     ∃ blockBits,
       (emitChunkBlock bw data pos j level isFinal).toBits = bw.toBits ++ blockBits ∧
       (emitChunkBlock bw data pos j level isFinal).wf ∧
-      ∀ (acc : List UInt8) (rest : List Bool),
+      (∀ (acc : List UInt8) (rest : List Bool),
         Deflate.Spec.decode.go (blockBits ++ rest) acc =
           if isFinal then some (acc ++ (data.extract pos j).data.toList)
-          else Deflate.Spec.decode.go rest (acc ++ (data.extract pos j).data.toList) := by
+          else Deflate.Spec.decode.go rest (acc ++ (data.extract pos j).data.toList)) ∧
+      (∀ (acc : List UInt8) (rest : List Bool),
+        Deflate.Spec.decode.goR (blockBits ++ rest) acc =
+          if isFinal then some (acc ++ (data.extract pos j).data.toList, rest)
+          else Deflate.Spec.decode.goR rest (acc ++ (data.extract pos j).data.toList)) := by
   obtain ⟨litLens, distLens, headerBits, symBits, _hll, _hdl, hlv, hdv,
       hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
     emitDynBlock_spec bw hbw (data.extract pos j)
@@ -35,27 +40,39 @@ theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
         (by omega) (by omega))
       (fun hz => lz77ChainIter_empty (data.extract pos j) (chainDepth level) 32768 (insertCap level) hz)
       isFinal
-  refine ⟨[isFinal, false, true] ++ headerBits ++ symBits, ?_, ?_, ?_⟩
+  have hresolve := lz77ChainIter_resolves (data.extract pos j)
+    (chainDepth level) 32768 (insertCap level) (by omega)
+  have hvalid := tokensToSymbols_validSymbolList
+    (lz77ChainIter (data.extract pos j) (chainDepth level) 32768 (insertCap level))
+  refine ⟨[isFinal, false, true] ++ headerBits ++ symBits, ?_, ?_, ?_, ?_⟩
   · -- toBits
     simp only [emitChunkBlock]
     rw [htoBits]; simp only [List.append_assoc]
   · -- wf
     simp only [emitChunkBlock]; exact hwf
-  · -- decode
+  · -- decode.go
     intro acc rest
     have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables
       litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
     rw [← List.append_assoc] at hheader
-    have hresolve := lz77ChainIter_resolves (data.extract pos j)
-      (chainDepth level) 32768 (insertCap level) (by omega)
-    have hvalid := tokensToSymbols_validSymbolList
-      (lz77ChainIter (data.extract pos j) (chainDepth level) 32768 (insertCap level))
     cases isFinal
     · simp only [Bool.false_eq_true, if_false]
       exact Deflate.Spec.decode_go_dynBlock_nonfinal _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
     · simp only [if_true]
       exact Deflate.Spec.decode_go_dynBlock_final _ _ acc litLens distLens
+        headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
+  · -- decode.goR
+    intro acc rest
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables
+      litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+    rw [← List.append_assoc] at hheader
+    cases isFinal
+    · simp only [Bool.false_eq_true, if_false]
+      exact Deflate.Spec.decode_goR_dynBlock_nonfinal _ _ acc litLens distLens
+        headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
+    · simp only [if_true]
+      exact Deflate.Spec.decode_goR_dynBlock_final _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
 
 /-- `M.take p ++ (M.drop p).take q = M.take (p + q)` — a contiguous prefix split. -/
@@ -99,7 +116,7 @@ theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UIn
   | zero => intro pos bw hf hpos _; omega
   | succ fuel ih =>
     intro pos bw hf hpos hbw
-    obtain ⟨blockBits, htoBits, hwfblk, hdecblk⟩ :=
+    obtain ⟨blockBits, htoBits, hwfblk, hdecblk, _⟩ :=
       emitChunkBlock_decode data pos (min (pos + max chunkSize 1) data.size) level bw hbw
         (decide (min (pos + max chunkSize 1) data.size ≥ data.size))
     have hjle : min (pos + max chunkSize 1) data.size ≤ data.size := Nat.min_le_right _ _
@@ -123,6 +140,63 @@ theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UIn
         exact hd
     · -- Non-final block: recurse on the next chunk.
       have hbw' : (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
+          (decide (min (pos + max chunkSize 1) data.size ≥ data.size))).wf := hwfblk
+      have hstep : emitChunkBlocks data chunkSize level pos bw =
+          emitChunkBlocks data chunkSize level (min (pos + max chunkSize 1) data.size)
+            (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
+              (decide (min (pos + max chunkSize 1) data.size ≥ data.size))) := by
+        conv => lhs; unfold emitChunkBlocks
+        simp only [if_neg hend]
+      obtain ⟨B', htoBits', hwf', hdec'⟩ :=
+        ih (min (pos + max chunkSize 1) data.size) _ (by omega) (by omega) hbw'
+      refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
+      · rw [hstep, htoBits', htoBits, List.append_assoc]
+      · rw [hstep]; exact hwf'
+      · intro acc tail
+        rw [List.append_assoc]
+        have hd := hdecblk acc (B' ++ tail)
+        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [hd, hdec' (acc ++ (data.extract pos (min (pos + max chunkSize 1) data.size)).data.toList) tail,
+          List.append_assoc,
+          extract_data_append data pos (min (pos + max chunkSize 1) data.size) data.size
+            (by omega) hjle]
+
+/-- `decode.goR` variant of `emitChunkBlocks_decode`: the remaining bits after
+    decoding all chunk blocks are exactly the trailing `tail`. -/
+theorem emitChunkBlocks_decodeR (data : ByteArray) (chunkSize : Nat) (level : UInt8) :
+    ∀ (fuel pos : Nat) (bw : BitWriter), data.size - pos ≤ fuel → pos < data.size → bw.wf →
+      ∃ B, (emitChunkBlocks data chunkSize level pos bw).toBits = bw.toBits ++ B ∧
+        (emitChunkBlocks data chunkSize level pos bw).wf ∧
+        ∀ (acc : List UInt8) (tail : List Bool),
+          Deflate.Spec.decode.goR (B ++ tail) acc =
+            some (acc ++ (data.extract pos data.size).data.toList, tail) := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos bw hf hpos _; omega
+  | succ fuel ih =>
+    intro pos bw hf hpos hbw
+    obtain ⟨blockBits, htoBits, hwfblk, _, hdecblk⟩ :=
+      emitChunkBlock_decode data pos (min (pos + max chunkSize 1) data.size) level bw hbw
+        (decide (min (pos + max chunkSize 1) data.size ≥ data.size))
+    have hjle : min (pos + max chunkSize 1) data.size ≤ data.size := Nat.min_le_right _ _
+    have hstep1 : 1 ≤ max chunkSize 1 := Nat.le_max_right _ _
+    have hjgt : pos < min (pos + max chunkSize 1) data.size := by
+      simp only [Nat.lt_min]; omega
+    by_cases hend : min (pos + max chunkSize 1) data.size ≥ data.size
+    · have hjeq : min (pos + max chunkSize 1) data.size = data.size := by omega
+      have hstep : emitChunkBlocks data chunkSize level pos bw =
+          emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
+            (decide (min (pos + max chunkSize 1) data.size ≥ data.size)) := by
+        conv => lhs; unfold emitChunkBlocks
+        simp only [if_pos hend]
+      refine ⟨blockBits, ?_, ?_, ?_⟩
+      · rw [hstep]; exact htoBits
+      · rw [hstep]; exact hwfblk
+      · intro acc tail
+        have hd := hdecblk acc tail
+        rw [if_pos (decide_eq_true hend), hjeq] at hd
+        exact hd
+    · have hbw' : (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
           (decide (min (pos + max chunkSize 1) data.size ≥ data.size))).wf := hwfblk
       have hstep : emitChunkBlocks data chunkSize level pos bw =
           emitChunkBlocks data chunkSize level (min (pos + max chunkSize 1) data.size)
@@ -205,5 +279,61 @@ theorem inflate_deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (lev
   rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
   exact inflate_complete (deflateDynamicBlocksSC data chunkSize level) data.data.toList
     maxOutputSize hlen (decode_deflateDynamicBlocksSC data chunkSize level)
+
+/-- The `decode.goR` of `deflateDynamicBlocksSC` returns the input and short
+    (< 8-bit) trailing padding — the block-split analogue of
+    `deflateDynamicBlock_goR_pad`, needed to show the native decoder consumes all
+    of the deflated bytes. -/
+theorem deflateDynamicBlocksSC_goR_pad (data : ByteArray) (chunkSize : Nat) (level : UInt8) :
+    ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateDynamicBlocksSC data chunkSize level)) []
+        = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+  unfold deflateDynamicBlocksSC
+  split
+  · -- data.size = 0
+    rename_i hz
+    rw [beq_iff_eq] at hz
+    obtain ⟨litLens, distLens, headerBits, symBits, _, _, hlv, hdv,
+        hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    refine ⟨List.replicate
+      ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false, ?_, ?_⟩
+    · have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables litLens distLens headerBits
+        (symBits ++ List.replicate
+          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+        hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+      rw [← List.append_assoc] at hheader
+      have hres : Deflate.Spec.resolveLZ77 (tokensToSymbols #[]) [] = some data.data.toList := by
+        have he : data.data.toList = [] :=
+          List.eq_nil_of_length_eq_zero (by simp only [Array.length_toList, ByteArray.size_data, hz])
+        rw [he]; rfl
+      exact Deflate.Spec.encodeDynamic_goR_rest (tokensToSymbols #[]) data.data.toList
+        litLens distLens headerBits symBits _ hlv hdv hheader hsyms hres
+        (tokensToSymbols_validSymbolList _)
+    · simp only [List.length_replicate]; omega
+  · -- data.size > 0
+    rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨B, htoBits, hwf, hdec⟩ :=
+      emitChunkBlocks_decodeR data chunkSize level data.size 0 BitWriter.empty
+        (by omega) hpos BitWriter.empty_wf
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    refine ⟨List.replicate ((8 - B.length % 8) % 8) false, ?_, ?_⟩
+    · have hthis := hdec [] (List.replicate ((8 - B.length % 8) % 8) false)
+      have hwhole : (data.extract 0 data.size).data.toList = data.data.toList := by
+        simp only [ByteArray.data_extract, Array.toList_extract, List.extract_eq_take_drop,
+          Nat.sub_zero, List.drop_zero]
+        rw [show data.size = data.data.toList.length from by
+          rw [Array.length_toList, ByteArray.size_data], List.take_length]
+      rw [List.nil_append, hwhole] at hthis
+      exact hthis
+    · simp only [List.length_replicate]; omega
 
 end Zip.Native.Deflate
