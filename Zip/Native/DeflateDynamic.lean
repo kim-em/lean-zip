@@ -428,7 +428,7 @@ most of the ratio a single whole-file tree leaves on large/heterogeneous inputs.
 def emitChunkBlock (bw : BitWriter) (data : ByteArray) (pos j : Nat) (level : UInt8)
     (isFinal : Bool) : BitWriter :=
   let chunk := data.extract pos j
-  let toks := lz77ChainIter chunk (chainDepth level) 32768 (insertCap level)
+  let toks := lzMatch chunk level
   let f := tokenFreqs toks
   let lens := dynamicCodeLengths f.1 f.2
   emitDynBlock bw chunk toks lens.1 lens.2
@@ -470,7 +470,7 @@ def splitChunkSize : Nat := 32768
     best ratio). One shared token pass sizes the fixed and dynamic blocks and
     emits only the smaller (strict `<`, dynamic on a tie). -/
 def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
-  let tokens := lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+  let tokens := lzMatch data level
   let f := tokenFreqs tokens
   let lens := dynamicCodeLengths f.1 f.2
   if fixedBlockBytes f.1 f.2 < dynBlockBytes f.1 f.2 lens.1 lens.2
@@ -488,7 +488,7 @@ def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else
-    let tokens := lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+    let tokens := lzMatch data level
     let f := tokenFreqs tokens
     let lens := dynamicCodeLengths f.1 f.2
     let fixedBytes := fixedBlockBytes f.1 f.2

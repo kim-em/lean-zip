@@ -73,15 +73,13 @@ theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
   obtain ⟨litLens, distLens, headerBits, symBits, _hll, _hdl, hlv, hdv,
       hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
     emitDynBlock_spec bw hbw (data.extract pos j)
-      (lz77ChainIter (data.extract pos j) (chainDepth level) 32768 (insertCap level))
-      (lz77ChainIter_encodable (data.extract pos j) (chainDepth level) 32768 (insertCap level)
-        (by omega) (by omega))
-      (fun hz => lz77ChainIter_empty (data.extract pos j) (chainDepth level) 32768 (insertCap level) hz)
+      (lzMatch (data.extract pos j) level)
+      (lzMatch_encodable (data.extract pos j) level)
+      (fun hz => lzMatch_empty (data.extract pos j) level hz)
       isFinal
-  have hresolve := lz77ChainIter_resolves (data.extract pos j)
-    (chainDepth level) 32768 (insertCap level) (by omega)
+  have hresolve := lzMatch_resolves (data.extract pos j) level
   have hvalid := tokensToSymbols_validSymbolList
-    (lz77ChainIter (data.extract pos j) (chainDepth level) 32768 (insertCap level))
+    (lzMatch (data.extract pos j) level)
   refine ⟨[isFinal, false, true] ++ headerBits ++ symBits, ?_, ?_, ?_, ?_⟩
   · -- toBits
     simp only [emitChunkBlock]
