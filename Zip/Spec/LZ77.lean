@@ -124,7 +124,59 @@ theorem resolveLZ77_extends (syms : List LZ77Symbol) (acc output : List UInt8)
       · have := ih _ h
         exact List.IsPrefix.trans (List.prefix_append _ _) this
 
-/-! ## LZ77 matching (greedy encoder) -/
+/-- `(acc ++ win)[acc.length + k]! = win[k]!`. -/
+private theorem getElem!_append_add (acc win : List UInt8) (k : Nat) :
+    (acc ++ win)[acc.length + k]! = win[k]! := by
+  rw [List.getElem!_eq_getElem?_getD, List.getElem!_eq_getElem?_getD,
+    List.getElem?_append_right (by omega)]
+  congr 2; omega
+
+/-- The bytes a valid back-reference copies depend only on the last `dist` bytes
+    of the window, so when `dist ≤ win.length` they are unchanged by prepending
+    `acc`. -/
+private theorem resolveLZ77_copied_shift (acc win : List UInt8) (len dist : Nat)
+    (hd : dist ≤ win.length) :
+    (List.ofFn fun (i : Fin len) =>
+        (acc ++ win)[((acc ++ win).length - dist) + (i.val % dist)]!)
+      = (List.ofFn fun (i : Fin len) => win[(win.length - dist) + (i.val % dist)]!) := by
+  apply List.ext_getElem (by simp)
+  intro i h1 h2
+  simp only [List.getElem_ofFn, List.length_append]
+  rw [show acc.length + win.length - dist + (i % dist)
+        = acc.length + (win.length - dist + (i % dist)) from by omega]
+  exact getElem!_append_add acc win _
+
+/-- Window shift: if `syms` resolve from window `win` to `out`, they resolve
+    from `acc ++ win` to `acc ++ out`. A reference that succeeds from `win`
+    has distance ≤ the bytes produced so far, so prepending `acc` never changes
+    which bytes it copies — self-containedness comes for free from success. This
+    is what makes self-contained blocks compose. -/
+theorem resolveLZ77_shift (syms : List LZ77Symbol) :
+    ∀ (acc win out : List UInt8),
+      resolveLZ77 syms win = some out →
+      resolveLZ77 syms (acc ++ win) = some (acc ++ out) := by
+  induction syms with
+  | nil => intro acc win out h; simp only [resolveLZ77, Option.some.injEq] at h ⊢; rw [h]
+  | cons sym rest ih =>
+    intro acc win out h
+    cases sym with
+    | literal b =>
+      rw [resolveLZ77_literal] at h ⊢
+      have := ih acc (win ++ [b]) out h
+      rwa [← List.append_assoc] at this
+    | endOfBlock => simp only [resolveLZ77_endOfBlock, Option.some.injEq] at h ⊢; rw [h]
+    | reference len dist =>
+      have hd0 : dist ≠ 0 := by
+        intro h0; subst h0; rw [resolveLZ77_reference_dist_zero] at h; simp at h
+      have hdle : dist ≤ win.length := by
+        rcases Nat.lt_or_ge win.length dist with hgt | hle
+        · rw [resolveLZ77_reference_dist_too_large len dist rest win hgt] at h; simp at h
+        · exact hle
+      have hdle' : dist ≤ (acc ++ win).length := by simp only [List.length_append]; omega
+      rw [resolveLZ77_reference_valid len dist rest win hd0 hdle] at h
+      rw [resolveLZ77_reference_valid len dist rest (acc ++ win) hd0 hdle']
+      simp only [resolveLZ77_copied_shift acc win len dist hdle, List.append_assoc] at h ⊢
+      exact ih acc _ out h
 
 /-- Count consecutive matching bytes at position `pos` with source at
     distance `dist` back, using DEFLATE's overlapping-copy semantics.

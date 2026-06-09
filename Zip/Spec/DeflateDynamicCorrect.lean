@@ -21,19 +21,26 @@ private theorem getElem!_le_of_forall_mem_le (l : List Nat) (i n : Nat)
     (hi : i < l.length) (h : ∀ x ∈ l, x ≤ n) : l[i]! ≤ n := by
   rw [getElem!_pos l i hi]; exact h _ (List.getElem_mem hi)
 
-/-- `deflateDynamicBlock` produces a bytestream whose bits correspond to the
-    spec-level dynamic Huffman encoding of the given LZ77 tokens, plus padding to
-    byte alignment. Generalized over the token array: its only hypotheses are the
-    per-token encodability bound (supplied by any matcher's `_encodable` lemma) and
-    that an empty input yields no tokens. `deflateDynamic_spec` below is the
-    `lz77GreedyIter` instance. -/
-theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
+/-- The lit/len and distance code lengths a block uses for `tokens`. -/
+abbrev dynLens (tokens : Array LZ77Token) : List Nat × List Nat :=
+  dynamicCodeLengths (tokenFreqs tokens).1 (tokenFreqs tokens).2
+
+/-- `emitDynBlock` (one dynamic block onto a running writer, `BFINAL = isFinal`,
+    no flush) produces `bw`'s bits followed by the block: the `BFINAL` bit, the
+    `BTYPE = 10` bits `[false, true]`, the spec dynamic-tree header, and the
+    encoded symbols. It also preserves `BitWriter.wf`. The whole-block flushed
+    `deflateDynamicBlock_spec` is the `(empty, true)` corollary below. Hypotheses:
+    the per-token encodability bound (any matcher's `_encodable` lemma) and that
+    empty input yields no tokens. -/
+theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
+    (data : ByteArray) (tokens : Array LZ77Token)
     (htok_enc : ∀ t ∈ tokens.toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
-    (hempty : data.size = 0 → tokens = #[]) :
+    (hempty : data.size = 0 → tokens = #[]) (isFinal : Bool) :
     ∃ (litLens distLens : List Nat) (headerBits symBits : List Bool),
+      litLens = (dynLens tokens).1 ∧ distLens = (dynLens tokens).2 ∧
       Huffman.Spec.ValidLengths litLens 15 ∧
       Huffman.Spec.ValidLengths distLens 15 ∧
       litLens.length ≥ 257 ∧ litLens.length ≤ 288 ∧
@@ -42,11 +49,15 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
       Deflate.Spec.encodeDynamicTrees litLens distLens = some headerBits ∧
       Deflate.Spec.encodeSymbols litLens distLens
         (tokensToSymbols tokens) = some symBits ∧
-      Deflate.Spec.bytesToBits (deflateDynamicBlock data tokens) =
-        [true, false, true] ++ headerBits ++ symBits ++
-        List.replicate
-          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8)
-          false := by
+      (emitDynBlock bw data tokens (dynLens tokens).1 (dynLens tokens).2
+          (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).1
+          (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).2
+          isFinal).toBits =
+        bw.toBits ++ [isFinal, false, true] ++ headerBits ++ symBits ∧
+      (emitDynBlock bw data tokens (dynLens tokens).1 (dynLens tokens).2
+          (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).1
+          (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).2
+          isFinal).wf := by
   -- Extract the intermediate values from deflateDynamicBlock
   let litFreqs := (tokenFreqs tokens).1
   let distFreqs := (tokenFreqs tokens).2
@@ -283,11 +294,6 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         (tokensToSymbols tokens) with
     | none => exact nomatch henc_syms ▸ henc_syms_some
     | some symBits =>
-      refine ⟨litLens, distLens, headerBits, symBits,
-        hlit_valid, hdist_valid,
-        by omega, by omega, by omega, by omega,
-        hlit_bound, hdist_bound,
-        henc_trees, henc_syms, ?_⟩
       -- bytesToBits decomposition
       -- Split symBits into tokBits ++ eobBits
       have htoks_eq : tokensToSymbols tokens =
@@ -339,20 +345,20 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
           (by simp only [Deflate.Spec.encodeLitLen] at henc_eob; rwa [hlit_roundtrip])
         have h256_lt : 256 < litCodes.size := by rw [hlit_codes_size]; omega
         rw [getElem!_pos litCodes 256 h256_lt] at heob_cw heob_len
-        -- BitWriter chain
-        have hwf0 := BitWriter.empty_wf
-        have hwf1 := BitWriter.writeBits_wf _ 1 1 hwf0 (by omega)
+        -- Pre-flush BitWriter chain from `bw` with BFINAL = isFinal.
+        have hwf1 := BitWriter.writeBits_wf bw 1 (if isFinal then 1 else 0) hbw (by omega)
         have hwf2 := BitWriter.writeBits_wf _ 2 2 hwf1 (by omega)
-        -- Header bits: [true, false, true]
-        have hbw2_bits : (BitWriter.empty.writeBits 1 1 |>.writeBits 2 2).toBits =
-            [true, false, true] := by
-          have h1 := BitWriter.writeBits_toBits _ 1 1 hwf0 (by omega)
-          have h2 := BitWriter.writeBits_toBits _ 2 2 hwf1 (by omega)
-          rw [BitWriter.empty_toBits] at h1
-          simp only [List.nil_append] at h1
-          rw [h1] at h2; exact h2
+        -- Header bits: [isFinal, false, true]
+        have hbw01_bits : (bw.writeBits 1 (if isFinal then 1 else 0) |>.writeBits 2 2).toBits =
+            bw.toBits ++ [isFinal, false, true] := by
+          have h1 := BitWriter.writeBits_toBits bw 1 (if isFinal then 1 else 0) hbw (by omega)
+          have h2 := BitWriter.writeBits_toBits (bw.writeBits 1 (if isFinal then 1 else 0))
+            2 2 hwf1 (by omega)
+          rw [h1] at h2
+          rw [h2, List.append_assoc]
+          cases isFinal <;> rfl
         -- writeDynamicHeader
-        let bw2 := BitWriter.empty.writeBits 1 1 |>.writeBits 2 2
+        let bw2 := bw.writeBits 1 (if isFinal then 1 else 0) |>.writeBits 2 2
         have hwf_hdr := writeDynamicHeader_wf bw2 litLens distLens hwf2 hlit_bound hdist_bound
         have hbw_hdr := writeDynamicHeader_spec bw2 litLens distLens headerBits hwf2
           hlit_bound hdist_bound ⟨by omega, by omega⟩ ⟨by omega, by omega⟩ henc_trees
@@ -375,17 +381,14 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         have hbw_eob := BitWriter.writeHuffCode_toBits bw4
           (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2 hwf_emit hlen256_le
         -- Chain all the bits
-        rw [hemit, hbw_hdr, hbw2_bits] at hbw_eob
-        -- Show deflateDynamicBlock data tokens equals the flushed writer.
-        -- `deflateDynamicBlock` opens with `let (litFreqs, distFreqs) := tokenFreqs tokens`,
-        -- so a bare `split` would hit that tuple match first; reframe the goal as the
-        -- (definitionally equal) `data.size == 0` branch directly via `show`.
-        have hdef : deflateDynamicBlock data tokens =
-            (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush := by
-          show (if (data.size == 0) = true
-                then (bw3.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush
-                else (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush)
-                = (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).flush
+        rw [hemit, hbw_hdr, hbw01_bits] at hbw_eob
+        -- `emitDynBlock bw … isFinal = bw4.writeHuffCode EOB`: the `data.size = 0`
+        -- branch collapses `bw4` to `bw3` since `tokens = #[]`, so both agree.
+        have hdef : emitDynBlock bw data tokens litLens distLens hlit_len hdist_len isFinal =
+            bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2 := by
+          show (if (data.size == 0) = true then bw3 else bw4).writeHuffCode
+                (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2 =
+              bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2
           split
           · rename_i hzero
             rw [beq_iff_eq] at hzero
@@ -395,31 +398,79 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
               rw [htok_empty]; unfold emitTokensWithCodes; rfl
             rw [hemit_id]
           · rfl
-        rw [hdef]
-        have hflush := BitWriter.flush_toBits _ hwf_eob
-        -- The bits decomposition
-        have hbits_eq : (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).toBits =
-            [true, false, true] ++ headerBits ++ symBits := by
-          rw [hbw_eob, hsymBits_eq, heob_eq, heob_cw]
+        have htoBits :
+            (emitDynBlock bw data tokens litLens distLens hlit_len hdist_len isFinal).toBits =
+            bw.toBits ++ [isFinal, false, true] ++ headerBits ++ symBits := by
+          rw [hdef, hbw_eob, hsymBits_eq, heob_eq, heob_cw]
           simp only [List.append_assoc]
-        rw [hflush, hbits_eq]
-        -- Align the bitCount % 8
-        suffices hmod : (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).bitCount.toNat % 8 =
-            ([true, false, true] ++ headerBits ++ symBits).length % 8 by
-          simp only [hmod]
-        have htoBits_len : (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).toBits.length =
-            (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).data.data.toList.length * 8 +
-            (bw4.writeHuffCode (litCodes[256]'h256_lt).1 (litCodes[256]'h256_lt).2).bitCount.toNat := by
-          simp only [BitWriter.toBits, List.length_append, List.length_flatMap,
-            Deflate.Spec.bytesToBits.byteToBits_length, List.length_map, List.length_range]
-          have hsum : ∀ (l : List UInt8),
-              (l.map (fun _ => 8)).sum = l.length * 8 := by
-            intro l; induction l with
-            | nil => rfl
-            | cons _ _ ih => simp only [List.map_cons, List.sum_cons, List.length_cons, ih]; omega
-          rw [hsum]
-        rw [hbits_eq] at htoBits_len
-        omega
+        have hwf_blk :
+            (emitDynBlock bw data tokens litLens distLens hlit_len hdist_len isFinal).wf := by
+          rw [hdef]; exact hwf_eob
+        exact ⟨litLens, distLens, headerBits, symBits, rfl, rfl,
+          hlit_valid, hdist_valid, by omega, by omega, by omega, by omega,
+          hlit_bound, hdist_bound, henc_trees, henc_syms, htoBits, hwf_blk⟩
+
+/-- Flushing a `wf` writer pads its bits up to the next byte boundary, where the
+    pad count is computed from the bit length (not the internal `bitCount`). -/
+theorem flush_toBits_aligned (bw : BitWriter) (hwf : bw.wf) :
+    Deflate.Spec.bytesToBits bw.flush =
+      bw.toBits ++ List.replicate ((8 - bw.toBits.length % 8) % 8) false := by
+  rw [BitWriter.flush_toBits _ hwf]
+  have hlen : bw.toBits.length = bw.data.data.toList.length * 8 + bw.bitCount.toNat := by
+    simp only [BitWriter.toBits, List.length_append, List.length_flatMap,
+      Deflate.Spec.bytesToBits.byteToBits_length, List.length_map, List.length_range]
+    have hsum : ∀ (l : List UInt8), (l.map (fun _ => 8)).sum = l.length * 8 := by
+      intro l; induction l with
+      | nil => rfl
+      | cons _ _ ih => simp only [List.map_cons, List.sum_cons, List.length_cons, ih]; omega
+    rw [hsum]
+  have hbc : bw.bitCount.toNat < 8 := hwf.1
+  congr 2
+  omega
+
+/-- `deflateDynamicBlock` produces a bytestream whose bits correspond to the
+    spec-level dynamic Huffman encoding of the given LZ77 tokens, plus padding to
+    byte alignment. The whole-block `(empty, BFINAL = true)` flushed corollary of
+    `emitDynBlock_spec`. -/
+theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
+    (htok_enc : ∀ t ∈ tokens.toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768)
+    (hempty : data.size = 0 → tokens = #[]) :
+    ∃ (litLens distLens : List Nat) (headerBits symBits : List Bool),
+      Huffman.Spec.ValidLengths litLens 15 ∧
+      Huffman.Spec.ValidLengths distLens 15 ∧
+      litLens.length ≥ 257 ∧ litLens.length ≤ 288 ∧
+      distLens.length ≥ 1 ∧ distLens.length ≤ 32 ∧
+      (∀ x ∈ litLens, x ≤ 15) ∧ (∀ x ∈ distLens, x ≤ 15) ∧
+      Deflate.Spec.encodeDynamicTrees litLens distLens = some headerBits ∧
+      Deflate.Spec.encodeSymbols litLens distLens
+        (tokensToSymbols tokens) = some symBits ∧
+      Deflate.Spec.bytesToBits (deflateDynamicBlock data tokens) =
+        [true, false, true] ++ headerBits ++ symBits ++
+        List.replicate
+          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8)
+          false := by
+  obtain ⟨litLens, distLens, headerBits, symBits, _hll, _hdl, hlv, hdv,
+      hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+    emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data tokens htok_enc hempty true
+  refine ⟨litLens, distLens, headerBits, symBits, hlv, hdv, hge1, hle1, hge2, hle2,
+    hb1, hb2, htrees, hsyms, ?_⟩
+  rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+  -- deflateDynamicBlock = (emitDynBlock empty … true).flush  (collapse the
+  -- outer/inner `data.size = 0` split; both reduce to the same writer).
+  have heq : deflateDynamicBlock data tokens =
+      (emitDynBlock BitWriter.empty data tokens (dynLens tokens).1 (dynLens tokens).2
+        (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).1
+        (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).2 true).flush := by
+    show deflateDynamicBlockCore data tokens (dynLens tokens).1 (dynLens tokens).2
+        (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).1
+        (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).2 = _
+    unfold deflateDynamicBlockCore emitDynBlock
+    cases hz : data.size == 0 <;>
+      simp only [hz, Bool.false_eq_true, ↓reduceIte] <;> rfl
+  rw [heq, flush_toBits_aligned _ hwf, htoBits]
 
 /-- `deflateDynamic` (greedy LZ77 + dynamic Huffman) produces a bytestream whose
     bits correspond to the spec-level dynamic Huffman encoding, plus padding to

@@ -684,4 +684,77 @@ theorem encodeDynamic_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
   simp only [hresolve]
   exact if_pos rfl
 
+private theorem readBitsLSB_1_false (rest : List Bool) :
+    readBitsLSB 1 (false :: rest) = some (0, rest) := by
+  simp only [readBitsLSB, bind, Option.bind, pure, Pure.pure,
+    Bool.false_eq_true, ↓reduceIte]
+
+/-! ## Multi-block dynamic decode lemmas
+
+`decode.go` consuming one self-contained dynamic block from an arbitrary
+accumulator `acc`. Self-containedness (`resolveLZ77 syms [] = some chunk`)
+lets `resolveLZ77_shift` lift the resolve to `resolveLZ77 syms acc =
+some (acc ++ chunk)`, so the block's bytes simply append to `acc`. These
+compose into the block-splitting roundtrip. -/
+
+/-- `decode.go` on a *final* (`BFINAL = 1`) dynamic block from accumulator `acc`
+    appends the block's chunk and returns. -/
+theorem decode_go_dynBlock_final (syms : List LZ77Symbol) (chunk acc : List UInt8)
+    (litLens distLens : List Nat) (headerBits symBits rest : List Bool)
+    (hv_lit : Huffman.Spec.ValidLengths litLens 15)
+    (hv_dist : Huffman.Spec.ValidLengths distLens 15)
+    (hheader : decodeDynamicTables (headerBits ++ symBits ++ rest) =
+        some (litLens, distLens, symBits ++ rest))
+    (henc : encodeSymbols litLens distLens syms = some symBits)
+    (hresolve : resolveLZ77 syms [] = some chunk)
+    (hvalid : ValidSymbolList syms) :
+    decode.go ([true, false, true] ++ headerBits ++ symBits ++ rest) acc =
+        some (acc ++ chunk) := by
+  unfold decode.go
+  simp only [List.cons_append, readBitsLSB_1_true, bind, Option.bind]
+  simp only [readBitsLSB_2_false_true]
+  simp only [List.nil_append]
+  rw [hheader]; dsimp only
+  have hdec : decodeSymbols litLens distLens (symBits ++ rest) = some (syms, rest) :=
+    encodeSymbols_decodeSymbols litLens distLens syms symBits rest
+      henc hv_lit hv_dist hvalid
+  rw [hdec]
+  have hres : resolveLZ77 syms acc = some (acc ++ chunk) := by
+    have h := resolveLZ77_shift syms acc [] chunk hresolve
+    rwa [List.append_nil] at h
+  simp only [hres]
+  exact if_pos rfl
+
+/-- `decode.go` on a *non-final* (`BFINAL = 0`) dynamic block from accumulator
+    `acc` appends the block's chunk and continues on the trailing bits. -/
+theorem decode_go_dynBlock_nonfinal (syms : List LZ77Symbol) (chunk acc : List UInt8)
+    (litLens distLens : List Nat) (headerBits symBits rest : List Bool)
+    (hv_lit : Huffman.Spec.ValidLengths litLens 15)
+    (hv_dist : Huffman.Spec.ValidLengths distLens 15)
+    (hheader : decodeDynamicTables (headerBits ++ symBits ++ rest) =
+        some (litLens, distLens, symBits ++ rest))
+    (henc : encodeSymbols litLens distLens syms = some symBits)
+    (hresolve : resolveLZ77 syms [] = some chunk)
+    (hvalid : ValidSymbolList syms) :
+    decode.go ([false, false, true] ++ headerBits ++ symBits ++ rest) acc =
+        decode.go rest (acc ++ chunk) := by
+  conv_lhs => unfold decode.go
+  simp only [List.cons_append, readBitsLSB_1_false, bind, Option.bind]
+  simp only [readBitsLSB_2_false_true]
+  simp only [List.nil_append]
+  rw [hheader]; dsimp only
+  have hdec : decodeSymbols litLens distLens (symBits ++ rest) = some (syms, rest) :=
+    encodeSymbols_decodeSymbols litLens distLens syms symBits rest
+      henc hv_lit hv_dist hvalid
+  rw [hdec]
+  have hres : resolveLZ77 syms acc = some (acc ++ chunk) := by
+    have h := resolveLZ77_shift syms acc [] chunk hresolve
+    rwa [List.append_nil] at h
+  simp only [hres]
+  have hlen : rest.length <
+      ([false, false, true] ++ headerBits ++ symBits ++ rest).length := by
+    simp only [List.length_append, List.length_cons, List.length_nil]
+    omega
+  rw [dif_pos hlen]
+
 end Deflate.Spec
