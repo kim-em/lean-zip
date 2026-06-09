@@ -314,4 +314,35 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   | .ok result => assert! result == largeCyclic
   | .error e => throw (IO.userError s!"deflateRaw(1) 256KB roundtrip failed: {e}")
 
+  -- Lazy chain matcher (zlib deflate_slow): levels ≥ 4 dispatch to lz77ChainLazyIter.
+  -- lz77ChainLazyIter must equal the recursive lz77ChainLazy (the Array==List bridge).
+  for (name, data) in [("empty", ByteArray.empty), ("single", singleByte),
+                        ("hello", helloBytes), ("big", big),
+                        ("constant1K", mkConstantData 1024),
+                        ("cyclic1K", mkCyclicData 1024),
+                        ("prng1K", mkPrngData 1024),
+                        ("text4K", mkTextData 4096)] do
+    let iterTokens := Zip.Native.Deflate.lz77ChainLazyIter data 64
+    let recTokens := Zip.Native.Deflate.lz77ChainLazy data 64
+    unless iterTokens == recTokens do
+      throw (IO.userError s!"lz77ChainLazyIter vs lz77ChainLazy mismatch on {name}: \
+        {iterTokens.size} vs {recTokens.size} tokens")
+
+  -- deflateRaw at every lazy level (4–9) → native inflate AND FFI decompress, on
+  -- varied shapes incl. edge cases. Exercises the lazy path end to end.
+  let lazyShapes : List (String × ByteArray) :=
+    [("empty", ByteArray.empty), ("single", singleByte), ("hello", helloBytes),
+     ("text64K", mkTextData 65536), ("cyclic128K", mkCyclicData 131072),
+     ("prng64K", mkPrngData 65536), ("const100K", mkConstantData 100000)]
+  for level in [4, 5, 6, 7, 8, 9] do
+    for (name, data) in lazyShapes do
+      let raw := Zip.Native.Deflate.deflateRaw data level.toUInt8
+      match Zip.Native.Inflate.inflate raw with
+      | .ok result => unless result == data do
+          throw (IO.userError s!"deflateRaw({level})→native inflate mismatch on {name}")
+      | .error e => throw (IO.userError s!"deflateRaw({level})→native inflate failed on {name}: {e}")
+      let ffi ← RawDeflate.decompress raw
+      unless ffi == data do
+        throw (IO.userError s!"deflateRaw({level})→FFI inflate mismatch on {name}")
+
   IO.println "  NativeDeflate tests passed."
