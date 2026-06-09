@@ -281,6 +281,32 @@ def deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArra
     (dynamicCodeLengths_length litFreqs distFreqs).1
     (dynamicCodeLengths_length litFreqs distFreqs).2
 
+/-- Emit one dynamic Huffman block into an existing `BitWriter` (no flush), with
+    `BFINAL = isFinal`. Same body as `deflateDynamicBlockCore` but bit-packed onto
+    a running writer so a sequence of blocks shares the bitstream. -/
+def emitDynBlock (bw : BitWriter) (data : ByteArray) (tokens : Array LZ77Token)
+    (litLens distLens : List Nat)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
+    (isFinal : Bool) : BitWriter :=
+  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
+  let bw := bw.writeBits 1 (if isFinal then 1 else 0)  -- BFINAL (1 bit)
+  let bw := bw.writeBits 2 2                            -- BTYPE = 10 (dynamic)
+  let bw := writeDynamicHeader bw litLens distLens
+  have hlit_size : litCodes.size ≥ 286 := by
+    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have h256 : 256 < litCodes.size := by
+    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  let bw := if data.size == 0 then bw
+            else emitTokensWithCodes bw tokens litCodes distCodes hlit_size hdist_size 0
+  let (code, len) := litCodes[256]'h256
+  bw.writeHuffCode code len
+
 /-- Compress data using dynamic Huffman codes and greedy LZ77 (Level 5).
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. Thin wrapper over
     `deflateDynamicBlock` that runs the greedy matcher first. -/
@@ -377,6 +403,48 @@ def insertCap (level : UInt8) : Nat :=
   else if level ≤ 2 then 32
   else if level ≤ 3 then 64
   else 1000000000
+
+/-! ## Self-contained block-split dynamic compression
+
+Split `data` into `chunkSize`-byte chunks, match each chunk independently (fresh
+32 KiB window, so its back-references stay within the chunk), and emit one dynamic
+block per chunk — each with its own frequency-fit Huffman trees, `BFINAL` only on
+the last — packed onto one bitstream. Because every block references only its own
+chunk, the blocks decode independently and compose; the per-block trees recover
+most of the ratio a single whole-file tree leaves on large/heterogeneous inputs. -/
+
+/-- Emit one self-contained dynamic block for the chunk `data[pos, j)` onto `bw`
+    (`BFINAL = isFinal`), matching the chunk in isolation. -/
+def emitChunkBlock (bw : BitWriter) (data : ByteArray) (pos j : Nat) (level : UInt8)
+    (isFinal : Bool) : BitWriter :=
+  let chunk := data.extract pos j
+  let toks := lz77ChainIter chunk (chainDepth level) 32768 (insertCap level)
+  let f := tokenFreqs toks
+  let lens := dynamicCodeLengths f.1 f.2
+  emitDynBlock bw chunk toks lens.1 lens.2
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 isFinal
+
+/-- Emit the block sequence for `data` from `pos` onward, one block per
+    `chunkSize`-byte chunk (the last carries `BFINAL`). Well-founded on the
+    remaining bytes so the roundtrip can induct through it. -/
+def emitChunkBlocks (data : ByteArray) (chunkSize : Nat) (level : UInt8)
+    (pos : Nat) (bw : BitWriter) : BitWriter :=
+  let step := max chunkSize 1
+  let j := min (pos + step) data.size
+  let bw := emitChunkBlock bw data pos j level (decide (j ≥ data.size))
+  if j ≥ data.size then bw
+  else emitChunkBlocks data chunkSize level j bw
+termination_by data.size - pos
+decreasing_by simp_all only [Nat.not_le]; omega
+
+/-- Self-contained block-split dynamic compression. See `emitChunkBlock`. -/
+def deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    (emitChunkBlocks data chunkSize level 0 BitWriter.empty).flush
 
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
