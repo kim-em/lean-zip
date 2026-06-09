@@ -490,14 +490,18 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     let storedBytes := storedBlockBytes data
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlock data tokens
-    -- Dynamic Huffman. Emit the smaller of the single whole-file block and the
+    -- Dynamic Huffman. At the max-compression tiers (level ≥ 7) also try the
     -- self-contained block-split stream (per-chunk Huffman trees, fresh window
-    -- per chunk). `pickSmaller` guarantees we never regress below the single
-    -- block — splitting only ever wins, never loses (small inputs collapse to a
-    -- single chunk = the single block). Both branches are roundtrip-verified.
-    else pickSmaller
-      (deflateDynamicBlockCore data tokens lens.1 lens.2
-        (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2)
-      (deflateDynamicBlocksSC data splitChunkSize level)
+    -- per chunk) and emit whichever is smaller. `pickSmaller` guarantees we never
+    -- regress below the single block — splitting only ever wins (it helps inputs
+    -- whose statistics vary locally, e.g. structured binary; on text the lost
+    -- cross-chunk matches make the single block win, and we keep it). The default
+    -- level 6 stays single-block so it pays no extra compress time. Both branches
+    -- are roundtrip-verified.
+    else
+      let single := deflateDynamicBlockCore data tokens lens.1 lens.2
+        (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+      if 7 ≤ level then pickSmaller single (deflateDynamicBlocksSC data splitChunkSize level)
+      else single
 
 end Zip.Native.Deflate

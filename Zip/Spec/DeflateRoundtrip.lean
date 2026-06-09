@@ -94,10 +94,14 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     · exact inflate_deflateFixedBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
         (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize
     · exact inflate_deflateStoredPure data _ hsize
-    · exact inflate_pickSmaller _ _ data maxOutputSize
-        (inflate_deflateDynamicBlock data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize)
-        (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize)
+    · -- Dynamic: `if 7 ≤ level then pickSmaller single split else single`.
+      have hsingle := inflate_deflateDynamicBlock data
+        (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize
+      split
+      · exact inflate_pickSmaller _ _ data maxOutputSize hsingle
+          (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize)
+      · exact hsingle
 
 /-- Padding decomposition for the compressed-block dispatch. -/
 theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
@@ -163,10 +167,12 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     · exact hstored
     · exact hfixed
     · exact hstored
-    · exact pickSmaller_bytesToBits
-        (P := fun bits => ∃ (contentBits padding : List Bool),
-          bits = contentBits ++ padding ∧ padding.length < 8)
-        _ _ hdyn (deflateDynamicBlocksSC_pad data splitChunkSize level)
+    · split
+      · exact pickSmaller_bytesToBits
+          (P := fun bits => ∃ (contentBits padding : List Bool),
+            bits = contentBits ++ padding ∧ padding.length < 8)
+          _ _ hdyn (deflateDynamicBlocksSC_pad data splitChunkSize level)
+      · exact hdyn
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
     the level 2-4 path and the level ≥ 5 fixed candidate (both `= deflateLazy`). -/
@@ -301,13 +307,15 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     · exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
     · exact hfixed
     · exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
-    · exact pickSmaller_bytesToBits
-        (P := fun bits => ∃ remaining,
-          Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-            remaining.length < 8)
-        _ _
-        (deflateDynamicBlock_goR_pad data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
-          (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level))
-        (deflateDynamicBlocksSC_goR_pad data splitChunkSize level)
+    · have hsingle := deflateDynamicBlock_goR_pad data
+        (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+        (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level)
+      split
+      · exact pickSmaller_bytesToBits
+          (P := fun bits => ∃ remaining,
+            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+              remaining.length < 8)
+          _ _ hsingle (deflateDynamicBlocksSC_goR_pad data splitChunkSize level)
+      · exact hsingle
 
 end Zip.Native.Deflate
