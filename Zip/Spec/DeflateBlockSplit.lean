@@ -144,4 +144,66 @@ theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UIn
           extract_data_append data pos (min (pos + max chunkSize 1) data.size) data.size
             (by omega) hjle]
 
+/-- Block-splitting roundtrip: decoding the self-contained chunk-block stream
+    reproduces the input. The empty input is a single final block; otherwise the
+    chunk-block fold (`emitChunkBlocks_decode`) reconstructs `data[0:]`. -/
+theorem decode_deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8) :
+    Deflate.Spec.decode
+      (Deflate.Spec.bytesToBits (deflateDynamicBlocksSC data chunkSize level)) =
+      some data.data.toList := by
+  unfold deflateDynamicBlocksSC
+  split
+  · -- data.size = 0: one final block over the empty token list.
+    rename_i hz
+    rw [beq_iff_eq] at hz
+    obtain ⟨litLens, distLens, headerBits, symBits, _, _, hlv, hdv,
+        hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables litLens distLens headerBits
+      (symBits ++ List.replicate
+        ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+      hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+    rw [← List.append_assoc] at hheader
+    have hres : Deflate.Spec.resolveLZ77 (tokensToSymbols #[]) [] = some data.data.toList := by
+      have he : data.data.toList = [] :=
+        List.eq_nil_of_length_eq_zero (by simp only [Array.length_toList, ByteArray.size_data, hz])
+      rw [he]; rfl
+    exact Deflate.Spec.encodeDynamic_decode_append (tokensToSymbols #[]) data.data.toList
+      litLens distLens headerBits symBits _ hlv hdv hheader hsyms hres
+      (tokensToSymbols_validSymbolList _)
+  · -- data.size > 0: the chunk-block fold.
+    rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨B, htoBits, hwf, hdec⟩ :=
+      emitChunkBlocks_decode data chunkSize level data.size 0 BitWriter.empty
+        (by omega) hpos BitWriter.empty_wf
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    have hthis := hdec [] (List.replicate ((8 - B.length % 8) % 8) false)
+    rw [List.nil_append] at hthis
+    have hwhole : (data.extract 0 data.size).data.toList = data.data.toList := by
+      simp only [ByteArray.data_extract, Array.toList_extract, List.extract_eq_take_drop,
+        Nat.sub_zero, List.drop_zero]
+      rw [show data.size = data.data.toList.length from by
+        rw [Array.length_toList, ByteArray.size_data], List.take_length]
+    rw [hwhole] at hthis
+    exact hthis
+
+/-- Block-splitting roundtrip: inflating `deflateDynamicBlocksSC` recovers the
+    input, for any `maxOutputSize` large enough to hold it. -/
+theorem inflate_deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    Zip.Native.Inflate.inflate (deflateDynamicBlocksSC data chunkSize level) maxOutputSize =
+      .ok data := by
+  have hlen : data.data.toList.length ≤ maxOutputSize := by
+    simp only [Array.length_toList, ByteArray.size_data]; omega
+  rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
+  exact inflate_complete (deflateDynamicBlocksSC data chunkSize level) data.data.toList
+    maxOutputSize hlen (decode_deflateDynamicBlocksSC data chunkSize level)
+
 end Zip.Native.Deflate
