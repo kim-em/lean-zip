@@ -62,15 +62,6 @@ def discover_payloads(payloads_dir):
     return items
 
 
-def levels_for(pat, default_levels):
-    """Large corpora (Silesia) are timed at the same reduced level set the native
-    matrix uses (ZipBenchReport.runReport), so the comparator rows line up and the
-    run stays bounded; everything else keeps the full level set."""
-    if pat.startswith("silesia/"):
-        return [1, 6, 9]
-    return default_levels
-
-
 def collect(key, payloads):
     label, cmd, levels = COMPARATORS[key]
     if not runnable(cmd):
@@ -78,7 +69,7 @@ def collect(key, payloads):
         return None
     rows = []
     for payload, pat, size in payloads:
-        for level in levels_for(pat, levels):
+        for level in levels:
             try:
                 out = subprocess.run(cmd + [str(payload), str(level)],
                                      capture_output=True, text=True, check=True)

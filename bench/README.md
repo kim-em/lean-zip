@@ -88,8 +88,10 @@ its levels*, so the whole speed/ratio tradeoff reads at a glance — top-left (f
 *and* small) is best, and a dominated codec sits to the lower-right. Two
 complements give precise numbers and per-file detail:
 
-- `<corpus>_compress_pareto.svg` / `_decompress_pareto.svg` — **headline**: speed
-  vs ratio, codecs as level-curves (replaces the whole per-level bar set).
+- `<corpus>_compress_pareto.svg` — **headline**: compression speed vs ratio,
+  codecs as level-curves (replaces the whole per-level bar set). (Decode speed
+  doesn't trade off against the compression ratio, so there's no decode scatter;
+  decode throughput is in the summary table.)
 - `<corpus>_summary.svg` — colour-graded geomean table (ratio / compress /
   decompress per codec, level 6), sorted by speed.
 - `<corpus>_ratio_heatmap.svg` / `_compress_heatmap.svg` — per file, relative to
@@ -98,7 +100,6 @@ complements give precise numbers and per-file detail:
 ### Canterbury corpus (11 small files, levels 1–9)
 
 ![canterbury compression speed vs ratio](graphs/canterbury_compress_pareto.svg)
-![canterbury decompression speed vs ratio](graphs/canterbury_decompress_pareto.svg)
 ![canterbury summary table](graphs/canterbury_summary.svg)
 ![canterbury ratio vs zlib per file](graphs/canterbury_ratio_heatmap.svg)
 ![canterbury compress speed vs zlib per file](graphs/canterbury_compress_heatmap.svg)

@@ -313,13 +313,13 @@ def main():
         return
 
     for corpus in corpora:
-        # Headline: speed-vs-ratio Pareto scatters (codecs as level-curves).
+        # Headline: compression speed vs ratio (codecs as level-curves). Decode
+        # speed doesn't trade off against the compression ratio, so there is no
+        # frontier to read on a decode scatter — decode throughput lives in the
+        # summary table's `decompress MB/s` column instead.
         pareto_scatter(results, meta, corpus, "compress_mbps", "compression speed",
                        "Compression speed vs ratio",
                        graphs_dir / f"{corpus}_compress_pareto.svg")
-        pareto_scatter(results, meta, corpus, "decompress_mbps", "decompression speed",
-                       "Decompression speed vs ratio",
-                       graphs_dir / f"{corpus}_decompress_pareto.svg")
         # Precise: colour-graded geomean summary table.
         summary_table(results, meta, corpus, graphs_dir / f"{corpus}_summary.svg")
         # Per-file detail: relative-to-zlib heatmaps (ratio + compress speed).
