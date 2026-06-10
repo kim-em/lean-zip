@@ -517,10 +517,20 @@ where
 
 /-- Lazy (one-byte-lookahead, zlib `deflate_slow`-style) variant of `lz77Chain`.
     At each position it finds the best chain match `M` at `pos`; before emitting it
-    runs a *second* `chainWalk` at `pos+1` for `M'`. If `len M' > len M` it emits a
-    literal at `pos` and defers to `M'` (advancing to `pos+1+len M'`); otherwise it
-    emits `M` (advancing to `pos+len M`). Match-finding stays opaque to correctness
-    — `chainWalk_spec` holds for *any* chain state, so validity is re-established at
+    runs a *second* `chainWalk` at `pos+1` for `M'`. It defers — emits a literal at
+    `pos` and takes `M'` (advancing to `pos+1+len M'`) — only when `M'` is **both
+    longer and no farther** than `M` (`len M' > len M ∧ dist M' ≤ dist M`); otherwise
+    it emits `M` (advancing to `pos+len M`). The distance guard is the key to the
+    ratio win: a length-only deferral takes longer-but-farther matches whose extra
+    distance bits cost more than they save, which *regresses* large text badly
+    (measured: plrabn12/lcet10 up to +22%); guarding on distance keeps only the
+    beneficial deferrals (Canterbury levels 4–9: −5.2% vs greedy). It is not a
+    global optimum — `lcet10` at the shallow levels 4–5 still loses ~19% to a
+    Huffman-distribution effect no *local* deferral rule captures (that needs the
+    cost-model parse of #2526 part 2).
+
+    Match-finding stays opaque to correctness — `chainWalk_spec` holds for *any*
+    chain state and *any* deferral predicate, so validity is re-established at
     emission exactly as for `lz77Chain`. `pos+1` is intentionally *not* inserted
     before the lookahead walk (you cannot match a position against itself; matches
     zlib, and is correctness-irrelevant). Reuses `lz77Chain`'s `chainWalk`/
@@ -549,7 +559,7 @@ where
         lz77Chain.chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
-          -- Lazy: probe pos+1 for a longer match
+          -- Lazy: probe pos+1 for a longer, no-farther match (distance-guarded deferral)
           if h3lt : pos + 3 < data.size then
             let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
             let head2 := hashTable[h2]!
@@ -557,9 +567,9 @@ where
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
             let (matchLen2, matchPos2) :=
               lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
-            if matchLen2 > matchLen then
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
               if hle2 : pos + 1 + matchLen2 ≤ data.size then
-                -- Better match at pos+1: emit literal at pos + reference at pos+1
+                -- Longer & no-farther match at pos+1: emit literal at pos + reference at pos+1
                 have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen2 insertCap
@@ -632,7 +642,7 @@ where
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
             let (matchLen2, matchPos2) :=
               lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
-            if matchLen2 > matchLen then
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
               if hle2 : pos + 1 + matchLen2 ≤ data.size then
                 have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                 let (hashTable, prev) :=
