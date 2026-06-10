@@ -178,6 +178,55 @@ theorem resolveLZ77_shift (syms : List LZ77Symbol) :
       simp only [resolveLZ77_copied_shift acc win len dist hdle, List.append_assoc] at h ⊢
       exact ih acc _ out h
 
+/-- Fold-composition of `resolveLZ77` over a symbol-list append, when the prefix
+    `a` contains no `endOfBlock`: resolving `a ++ b` is resolving `a`, then
+    resolving `b` from the resulting accumulator. `resolveLZ77` is a left fold
+    except for `endOfBlock` (early stop) and reference-failure (`none`); excluding
+    `endOfBlock` from `a` makes it compose cleanly. Resolving `a` never inspects
+    `b`, and a back-reference in `b` simply indexes the accumulator (which already
+    holds `a`'s output), so boundary-crossing references are handled for free.
+    This is what lets a single match pass be partitioned into per-block token
+    groups whose references cross block boundaries. -/
+theorem resolveLZ77_append_eobFree : ∀ (a b : List LZ77Symbol) (acc : List UInt8),
+    (∀ s ∈ a, s ≠ .endOfBlock) →
+    resolveLZ77 (a ++ b) acc = (resolveLZ77 a acc).bind (fun out => resolveLZ77 b out)
+  | [], b, acc, _ => by
+    simp only [List.nil_append, resolveLZ77_nil]; rfl
+  | s :: rest, b, acc, ha => by
+    have ha' : ∀ s ∈ rest, s ≠ .endOfBlock := fun s hs => ha s (List.mem_cons_of_mem _ hs)
+    cases s with
+    | literal c =>
+      simp only [List.cons_append, resolveLZ77_literal]
+      exact resolveLZ77_append_eobFree rest b (acc ++ [c]) ha'
+    | endOfBlock => exact absurd rfl (ha _ List.mem_cons_self)
+    | reference len dist =>
+      by_cases hd0 : dist = 0
+      · subst hd0
+        rw [List.cons_append, resolveLZ77_reference_dist_zero len (rest ++ b) acc,
+          resolveLZ77_reference_dist_zero len rest acc]
+        rfl
+      · by_cases hdle : dist ≤ acc.length
+        · rw [List.cons_append,
+            resolveLZ77_reference_valid len dist (rest ++ b) acc hd0 hdle,
+            resolveLZ77_reference_valid len dist rest acc hd0 hdle]
+          dsimp only
+          exact resolveLZ77_append_eobFree rest b _ ha'
+        · rw [List.cons_append,
+            resolveLZ77_reference_dist_too_large len dist (rest ++ b) acc (by omega),
+            resolveLZ77_reference_dist_too_large len dist rest acc (by omega)]
+          rfl
+
+/-- Terminal `endOfBlock` is a no-op after an `endOfBlock`-free list: resolving
+    `g ++ [endOfBlock]` equals resolving `g`. A corollary of
+    `resolveLZ77_append_eobFree` (since `resolveLZ77 [endOfBlock] out = some out`).
+    Bridges the whole-stream resolve fact (one trailing `endOfBlock`) to each
+    block's `tokensToSymbols group = groupMapped ++ [endOfBlock]`. -/
+theorem resolveLZ77_eobFree_eob (g : List LZ77Symbol) (acc : List UInt8)
+    (hg : ∀ s ∈ g, s ≠ .endOfBlock) :
+    resolveLZ77 (g ++ [.endOfBlock]) acc = resolveLZ77 g acc := by
+  rw [resolveLZ77_append_eobFree g [.endOfBlock] acc hg]
+  cases resolveLZ77 g acc <;> rfl
+
 /-- Count consecutive matching bytes at position `pos` with source at
     distance `dist` back, using DEFLATE's overlapping-copy semantics.
     Returns 0 if `dist > pos` or `dist = 0`. -/
