@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "date": "2026-06-10T13:20:10Z",
+    "machine": "Linux chungus x86_64",
+    "git_commit": "118a98e",
+    "toolchain": "leanprover/lean4:v4.30.0-rc2",
+    "frozen": true,
+    "note": "FROZEN zopfli ratio ceiling — do NOT regenerate. zopfli is compress-only, level-less and ~100x slower than zlib; level=6 is nominal and compress_mbps is a single-rep artifact, not a benchmark. ratio/out_size are deterministic. Regenerate only if the corpora change: lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json"
+  },
+  "results": [
+    {"compressor": "zopfli", "pattern": "canterbury/alice29.txt", "size": 152089, "level": 6, "out_size": 51455, "ratio": 0.338300, "compress_mbps": 0.670000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/asyoulik.txt", "size": 125179, "level": 6, "out_size": 46328, "ratio": 0.370100, "compress_mbps": 0.410000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/cp.html", "size": 24603, "level": 6, "out_size": 7697, "ratio": 0.312800, "compress_mbps": 0.650000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/fields.c", "size": 11150, "level": 6, "out_size": 3002, "ratio": 0.269200, "compress_mbps": 0.560000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/grammar.lsp", "size": 3721, "level": 6, "out_size": 1179, "ratio": 0.316900, "compress_mbps": 0.070000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/kennedy.xls", "size": 1029744, "level": 6, "out_size": 176105, "ratio": 0.171000, "compress_mbps": 0.250000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/lcet10.txt", "size": 426754, "level": 6, "out_size": 137229, "ratio": 0.321600, "compress_mbps": 0.770000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/plrabn12.txt", "size": 481861, "level": 6, "out_size": 184475, "ratio": 0.382800, "compress_mbps": 0.750000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/ptt5", "size": 513216, "level": 6, "out_size": 48558, "ratio": 0.094600, "compress_mbps": 0.370000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/sum", "size": 38240, "level": 6, "out_size": 11587, "ratio": 0.303000, "compress_mbps": 0.050000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "canterbury/xargs.1", "size": 4227, "level": 6, "out_size": 1688, "ratio": 0.399300, "compress_mbps": 0.700000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/dickens", "size": 10192446, "level": 6, "out_size": 3673380, "ratio": 0.360400, "compress_mbps": 0.740000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/mozilla", "size": 51220480, "level": 6, "out_size": 18317341, "ratio": 0.357600, "compress_mbps": 0.550000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/mr", "size": 9970564, "level": 6, "out_size": 3450225, "ratio": 0.346000, "compress_mbps": 0.470000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/nci", "size": 33553445, "level": 6, "out_size": 2740598, "ratio": 0.081700, "compress_mbps": 0.120000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/ooffice", "size": 6152192, "level": 6, "out_size": 2992113, "ratio": 0.486300, "compress_mbps": 0.680000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/osdb", "size": 10085684, "level": 6, "out_size": 3607217, "ratio": 0.357700, "compress_mbps": 1.320000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/reymont", "size": 6627202, "level": 6, "out_size": 1691994, "ratio": 0.255300, "compress_mbps": 0.530000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/samba", "size": 21606400, "level": 6, "out_size": 5107588, "ratio": 0.236400, "compress_mbps": 0.580000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/sao", "size": 7251944, "level": 6, "out_size": 5242394, "ratio": 0.722900, "compress_mbps": 0.790000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/webster", "size": 41458703, "level": 6, "out_size": 11518290, "ratio": 0.277800, "compress_mbps": 0.760000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/x-ray", "size": 8474240, "level": 6, "out_size": 5744697, "ratio": 0.677900, "compress_mbps": 1.280000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "silesia/xml", "size": 5345280, "level": 6, "out_size": 627169, "ratio": 0.117300, "compress_mbps": 0.400000, "decompress_mbps": null}
+  ]
+}
