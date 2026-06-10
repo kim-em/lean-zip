@@ -267,6 +267,9 @@ lean_exe bench where
 lean_exe «bench-report» where
   root := `ZipBenchReport
 
+lean_exe «ratio-sweep» where
+  root := `ZipRatioSweep
+
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
 
