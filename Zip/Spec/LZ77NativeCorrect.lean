@@ -16,6 +16,21 @@ def LZ77Token.toLZ77Symbol : LZ77Token → Deflate.Spec.LZ77Symbol
 def tokensToSymbols (tokens : Array LZ77Token) : List Deflate.Spec.LZ77Symbol :=
   tokens.toList.map LZ77Token.toLZ77Symbol ++ [.endOfBlock]
 
+/-- `toLZ77Symbol` never produces an `endOfBlock` symbol (it maps literals to
+    literals and references to references). -/
+theorem toLZ77Symbol_ne_endOfBlock (t : LZ77Token) :
+    LZ77Token.toLZ77Symbol t ≠ Deflate.Spec.LZ77Symbol.endOfBlock := by
+  cases t <;> simp only [LZ77Token.toLZ77Symbol, ne_eq, reduceCtorEq, not_false_eq_true]
+
+/-- A list of mapped tokens contains no `endOfBlock` — the hypothesis the
+    `endOfBlock`-free fold-composition lemmas require for each per-block group. -/
+theorem mem_map_toLZ77Symbol_ne_endOfBlock (toks : List LZ77Token) :
+    ∀ s ∈ toks.map LZ77Token.toLZ77Symbol, s ≠ Deflate.Spec.LZ77Symbol.endOfBlock := by
+  intro s hs
+  rw [List.mem_map] at hs
+  obtain ⟨t, _, rfl⟩ := hs
+  exact toLZ77Symbol_ne_endOfBlock t
+
 /-! ## countMatch correctness -/
 
 /-- The inner `go` loop of `countMatch` counts consecutive matching bytes

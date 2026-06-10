@@ -345,4 +345,43 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       unless ffi == data do
         throw (IO.userError s!"deflateRaw({level})→FFI inflate mismatch on {name}")
 
+  -- Cross-block (shared-window) block splitting: deflateDynamicBlocksShared runs
+  -- one whole-file match pass (full window) and partitions the token stream into
+  -- per-block groups whose back-references cross block boundaries. Verify the
+  -- roundtrip via both native and FFI inflate, across token-group sizes (small
+  -- tokChunk forces many blocks and genuine cross-block references).
+  let textRepeat := String.toUTF8 (String.join (List.replicate 300
+    "the quick brown fox jumps over the lazy dog. "))
+  for (name, data) in [("empty", ByteArray.empty), ("single", singleByte),
+                        ("hello", helloBytes), ("big", big),
+                        ("text", textRepeat), ("cyclic16K", mkCyclicData 16384)] do
+    for tokChunk in [4, 256, 8192] do
+      let shared := Zip.Native.Deflate.deflateDynamicBlocksShared data tokChunk 9
+      match Zip.Native.Inflate.inflate shared with
+      | .ok result => unless result == data do
+          throw (IO.userError s!"deflateDynamicBlocksShared→native inflate mismatch on {name} (tokChunk={tokChunk})")
+      | .error e => throw (IO.userError s!"deflateDynamicBlocksShared→native inflate failed on {name} (tokChunk={tokChunk}): {e}")
+      let decomp ← RawDeflate.decompress shared
+      unless decomp == data do
+        throw (IO.userError s!"deflateDynamicBlocksShared→FFI inflate mismatch on {name} (tokChunk={tokChunk})")
+
+  -- Stress the many-block cross-reference path: one token per block on a highly
+  -- repetitive input, so almost every block references earlier blocks' output.
+  let sharedTiny := Zip.Native.Deflate.deflateDynamicBlocksShared textRepeat 1 9
+  match Zip.Native.Inflate.inflate sharedTiny with
+  | .ok result => unless result == textRepeat do
+      throw (IO.userError "deflateDynamicBlocksShared(tokChunk=1)→inflate mismatch on text")
+  | .error e => throw (IO.userError s!"deflateDynamicBlocksShared(tokChunk=1)→inflate failed: {e}")
+
+  -- deflateRaw at the max-compression tiers (≥ 7) now considers the shared-window
+  -- split via pickSmaller; verify roundtrip on text and large inputs.
+  for level in [7, 8, 9] do
+    for (name, data) in [("text", textRepeat), ("256K-cyclic", largeCyclic),
+                          ("256K-prng", mkPrngData 262144)] do
+      let raw := Zip.Native.Deflate.deflateRaw data level.toUInt8
+      match Zip.Native.Inflate.inflate raw with
+      | .ok result => unless result == data do
+          throw (IO.userError s!"deflateRaw({level})→inflate mismatch on {name}")
+      | .error e => throw (IO.userError s!"deflateRaw({level})→inflate failed on {name}: {e}")
+
   IO.println "  NativeDeflate tests passed."
