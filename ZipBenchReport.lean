@@ -221,9 +221,7 @@ def runReport (outPath : String) : IO Unit := do
 
   -- Real-corpus rows only: the same timing matrix over every committed corpus
   -- (one single-size workload per file), so the dashboard rests entirely on
-  -- representative data. zopfli is the ratio ceiling (compress-only, very slow,
-  -- level-less) — run at one nominal level / single rep so it appears on the
-  -- ratio graphs without dominating wall-clock.
+  -- representative data.
   let corpora ← loadCorpora
   if corpora.isEmpty then
     IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
@@ -231,9 +229,13 @@ def runReport (outPath : String) : IO Unit := do
   for (corpus, files) in corpora do
     -- Every corpus is timed at all 9 levels (so the speed-vs-ratio scatter shows
     -- the full level sweep). Large corpora (Silesia, ~200 MB) use a single timing
-    -- pass — variance is low on big files — and skip zopfli (level-less and ~100×
-    -- slower than zlib), to keep the run tractable; small corpora (Canterbury)
-    -- keep the median-of-`reps` matrix plus the zopfli ratio-ceiling point.
+    -- pass — variance is low on big files — to keep the run tractable; small
+    -- corpora (Canterbury) keep the median-of-`reps` matrix.
+    --
+    -- zopfli is intentionally not benchmarked here: it is compress-only and
+    -- ~100× slower than zlib (default iteration count), so even at one
+    -- level/rep it dominated the wall-clock of the whole matrix. Its FFI binding
+    -- (`zopfliCompress`) is kept for ad-hoc ratio-ceiling checks.
     let big := corpus == "silesia"
     let lvls := levels
     let rps  := if big then 1 else reps
@@ -242,9 +244,7 @@ def runReport (outPath : String) : IO Unit := do
     let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress) (theLevels := lvls) (theReps := rps)
     let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress) (theLevels := lvls) (theReps := rps)
     let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress) (theLevels := lvls) (theReps := rps)
-    let czo ← if big then pure [] else
-      runWorkloads "zopfli" files zopfliCompress none (theLevels := [6]) (theReps := 1)
-    rows := rows ++ cn ++ cz ++ cm ++ cl ++ czo
+    rows := rows ++ cn ++ cz ++ cm ++ cl
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]

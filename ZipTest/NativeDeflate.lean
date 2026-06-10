@@ -365,6 +365,68 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       unless decomp == data do
         throw (IO.userError s!"deflateDynamicBlocksShared→FFI inflate mismatch on {name} (tokChunk={tokChunk})")
 
+  -- Cut-list shared-window splitting: deflateDynamicBlocksSharedAt clamps every
+  -- cut to (pos, toks.size], so ANY selector — empty, all-zero, out-of-range,
+  -- non-monotone, or exactly-at-the-end — must yield a valid partition. Verify
+  -- the roundtrip via both native and FFI inflate for adversarial cut lists.
+  let adversarialChoosers : List (String × (Array Zip.Native.Deflate.LZ77Token → List Nat)) :=
+    [("empty", fun _ => []),
+     ("zeros", fun _ => [0, 0, 0]),
+     ("huge", fun _ => [1000000000]),
+     ("nonmonotone", fun _ => [5, 3, 7]),
+     ("atEnd", fun toks => [toks.size]),
+     ("mixed", fun _ => [0, 7, 7, 100000])]
+  for (name, data) in [("empty", ByteArray.empty), ("hello", helloBytes), ("big", big),
+                        ("text", textRepeat), ("cyclic16K", mkCyclicData 16384)] do
+    for (cname, choose) in adversarialChoosers do
+      let sharedAt := Zip.Native.Deflate.deflateDynamicBlocksSharedAt data choose 9
+      match Zip.Native.Inflate.inflate sharedAt with
+      | .ok result => unless result == data do
+          throw (IO.userError s!"deflateDynamicBlocksSharedAt→native inflate mismatch on {name} (cuts={cname})")
+      | .error e => throw (IO.userError s!"deflateDynamicBlocksSharedAt→native inflate failed on {name} (cuts={cname}): {e}")
+      let decomp ← RawDeflate.decompress sharedAt
+      unless decomp == data do
+        throw (IO.userError s!"deflateDynamicBlocksSharedAt→FFI inflate mismatch on {name} (cuts={cname})")
+
+  -- Regression: text followed by PRNG bytes in one dynamic block used to drive
+  -- the length-limiter's bl_count repair into losing leaves (chained stale
+  -- `set!` reads) and under-repairing (overflow-pair counting vs actual Kraft
+  -- excess), so `fixKraftList` flattened the CL tree to a uniform 7-bit code —
+  -- incomplete, which zlib's inflate rejects ("invalid code lengths set") even
+  -- though our native inflate tolerates it. Pin zlib (FFI) interop at the
+  -- default and max levels.
+  let textPrng := textRepeat ++ mkPrngData 4096
+  for level in [6, 9] do
+    let out := Zip.Native.Deflate.deflateRaw textPrng level.toUInt8
+    let decomp ← RawDeflate.decompress out
+    unless decomp == textPrng do
+      throw (IO.userError s!"deflateRaw({level}) text+prng→FFI inflate mismatch")
+
+  -- Entropy-divergence splitting (#2528): on a heterogeneous input whose symbol
+  -- statistics shift (prose, then PRNG bytes, then cyclic binary — each well
+  -- above the splitMinBlockBytes floor), the heuristic must propose at least one
+  -- cut, and the arbitrated shared-window stream must roundtrip via both
+  -- inflate implementations.
+  let hetero := String.toUTF8 (String.join (List.replicate 1600
+    "the quick brown fox jumps over the lazy dog. "))
+    ++ mkPrngData 65536 ++ mkCyclicData 65536
+  let heteroToks := Zip.Native.Deflate.lzMatch hetero 9
+  let heteroCuts := Zip.Native.Deflate.chooseSplitsHeuristic heteroToks
+  unless heteroCuts.length ≥ 1 do
+    throw (IO.userError s!"chooseSplitsHeuristic found no cuts on heterogeneous input \
+      ({heteroToks.size} tokens)")
+  for (name, data) in [("hetero", hetero), ("text", textRepeat),
+                        ("cyclic16K", mkCyclicData 16384), ("empty", ByteArray.empty)] do
+    let arb := Zip.Native.Deflate.deflateDynamicBlocksSharedAt data
+      Zip.Native.Deflate.chooseSplitsArbitrated 9
+    match Zip.Native.Inflate.inflate arb with
+    | .ok result => unless result == data do
+        throw (IO.userError s!"arbitrated shared split→native inflate mismatch on {name}")
+    | .error e => throw (IO.userError s!"arbitrated shared split→native inflate failed on {name}: {e}")
+    let decomp ← RawDeflate.decompress arb
+    unless decomp == data do
+      throw (IO.userError s!"arbitrated shared split→FFI inflate mismatch on {name}")
+
   -- Stress the many-block cross-reference path: one token per block on a highly
   -- repetitive input, so almost every block references earlier blocks' output.
   let sharedTiny := Zip.Native.Deflate.deflateDynamicBlocksShared textRepeat 1 9

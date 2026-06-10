@@ -20,8 +20,10 @@ This composes:
 - `inflate_deflateRawBase` — the stored / fixed / dynamic base, in turn built
   from `inflate_deflateStoredPure`, `inflate_deflateFixedBlock`,
   `inflate_deflateDynamicBlock`
-- `inflate_deflateDynamicBlocksSC` / `inflate_deflateDynamicBlocksShared` — the
-  two block-split candidates (`Zip/Spec/DeflateBlockSplit.lean`)
+- `inflate_deflateDynamicBlocksSC` / `inflate_deflateDynamicBlocksSharedAt` — the
+  two block-split candidates (`Zip/Spec/DeflateBlockSplit.lean`); the shared-window
+  candidate holds for any boundary selector, so the entropy-divergence partition
+  (`chooseSplitsArbitrated`, #2528) needs no proof of its own
 - `inflate_pickSmaller` — selecting the smaller of two roundtripping candidates
 -/
 
@@ -115,7 +117,7 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
         (inflate_deflateRawBase data level _ hsize)
         (inflate_pickSmaller _ _ data maxOutputSize
           (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize)
-          (inflate_deflateDynamicBlocksShared data sharedTokChunk level _ hsize))
+          (inflate_deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level _ hsize))
     · exact inflate_deflateRawBase data level _ hsize
 
 /-- Padding decomposition for the compressed-block dispatch. -/
@@ -198,7 +200,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
           (P := fun bits => ∃ (contentBits padding : List Bool),
             bits = contentBits ++ padding ∧ padding.length < 8)
           _ _ (deflateDynamicBlocksSC_pad data splitChunkSize level)
-          (deflateDynamicBlocksShared_pad data sharedTokChunk level))
+          (deflateDynamicBlocksSharedAt_pad data chooseSplitsArbitrated level))
     · exact deflateRawBase_pad data level
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
@@ -354,7 +356,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
             Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
               remaining.length < 8)
           _ _ (deflateDynamicBlocksSC_goR_pad data splitChunkSize level)
-          (deflateDynamicBlocksShared_goR_pad data sharedTokChunk level))
+          (deflateDynamicBlocksSharedAt_goR_pad data chooseSplitsArbitrated level))
     · exact deflateRawBase_goR_pad data level
 
 end Zip.Native.Deflate
