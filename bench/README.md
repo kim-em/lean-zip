@@ -33,7 +33,7 @@ implementations (no SIMD/asm, or GC'd, or JIT'd) — not just the C + SIMD ceili
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
 | `libdeflate` | libdeflate (FFI) | optimized C + SIMD — the runtime speed bar |
-| `zopfli` | zopfli (FFI) | maximum-ratio ceiling (compress-only, slow) |
+| `zopfli` | zopfli (FFI) | maximum-ratio ceiling — **frozen** (see below); never in the routine matrix |
 
 **Language-native peers** (each a self-verifying CLI under
 [`comparators/`](comparators), built by
@@ -48,9 +48,21 @@ vs uncompressed bytes — and run over byte-identical dumped payloads):
 | `zig` | Zig stdlib `std.compress.flate` (0.14.1) | pure Zig; **levels 1–3 not implemented upstream** → mapped to the fastest real level, so L1–L4 coincide. 0.15's encoder is an unimplemented `@panic("TODO")`, hence 0.14.1. |
 | `ocaml` | [`decompress`](https://github.com/mirage/decompress) (mirage) | pure OCaml, MirageOS pedigree; slightly different LZ77/Huffman ⇒ a hair worse ratio |
 
-zopfli runs a reduced grid (one level, capped at 256 KiB, single rep): it is the
-ratio *floor*, not a throughput contender. A comparator whose toolchain is
-unavailable is skipped, so the dashboard degrades gracefully.
+zopfli is the maximum-ratio reference, but it is compress-only, level-less, and
+~100× slower than zlib — at default iteration count it dominated the wall-clock
+of the whole matrix. So it is **not** part of the routine `bench-report` run.
+Instead it is a **frozen artifact**, [`results/zopfli-ceiling.json`](results/zopfli-ceiling.json),
+generated once and overlaid on the ratio graphs by [`plot.py`](plot.py):
+
+```
+# One-time only — do NOT run on every regeneration (very slow). Re-run solely
+# if the corpora themselves change:
+lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json
+```
+
+Its `ratio`/`out_size` are deterministic (the meaningful signal); its single-rep
+`compress_mbps` is an artifact, not a benchmark. A language-native comparator
+whose toolchain is unavailable is skipped, so the dashboard degrades gracefully.
 
 ## Workloads
 
@@ -64,15 +76,14 @@ files land).
   source, an Excel spreadsheet, a fax bitmap, a man page, a SPARC binary),
   committed under [`corpora/canterbury/`](corpora/canterbury) (materialized by
   [`fetch_corpora.sh`](fetch_corpora.sh), verified against recorded SHA-256), so
-  CI needs no network. zopfli runs at level 6 only (small corpus, slow).
+  CI needs no network.
 - **Silesia corpus** (12 files, ~202 MB: prose, UNIX binaries, an HTML
   dictionary, a source tarball, XML, databases, medical images, a DLL) — the
   modern standard zstd/brotli/lzma report against. Fetched on demand into a
   gitignored cache (`fetch_corpora.sh silesia`, pinned GitHub mirror,
   SHA-256-verified); its rows slot into the same per-level charts automatically.
   Because it is ~70× larger than Canterbury, it runs a **reduced matrix** —
-  levels [1, 6, 9], a single timing pass, zopfli skipped — so the regeneration
-  stays tractable.
+  a single timing pass — so the regeneration stays tractable.
 
 The synthetic `prng` pattern used to be the only incompressible workload; its
 replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,
