@@ -572,7 +572,7 @@ where
                 -- Longer & no-farther match at pos+1: emit literal at pos + reference at pos+1
                 have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                 let (hashTable, prev) :=
-                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen2 insertCap
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
                 .literal (data[pos]'(by omega)) ::
                   .reference matchLen2 (pos + 1 - matchPos2) ::
                   mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1 + matchLen2) insertCap
@@ -646,7 +646,7 @@ where
               if hle2 : pos + 1 + matchLen2 ≤ data.size then
                 have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                 let (hashTable, prev) :=
-                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen2 insertCap
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
                 mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1 + matchLen2)
                   (acc.push (.literal (data[pos]'(by omega))) |>.push
                     (.reference matchLen2 (pos + 1 - matchPos2)))
