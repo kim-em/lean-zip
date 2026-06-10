@@ -1,5 +1,6 @@
 import ZipTest.Helpers
 import Zip.Native.DeflateParse
+import Zip.Native.DeflateDynamic
 import Zip.Native.Inflate
 
 /-! Tests for the near-optimal parsing support (#2496): candidate cache and
@@ -154,6 +155,39 @@ def tests : IO Unit := do
   IO.println s!"    alice29.txt single-block: optimal {sizeOpt} vs lazy-9 {sizeLazy}"
   unless sizeOpt < sizeLazy do
     throw (IO.userError s!"ratio canary: optimal {sizeOpt} ≥ lazy-9 {sizeLazy}")
+
+  -- Level-9 dispatch: the optimal candidate joins via pickSmaller. Verify
+  -- the full deflateRaw output through the native (verified) decoder AND the
+  -- zlib FFI (cross-implementation conformance), and that level 9 improves
+  -- on level 8 on real text (the whole point of the feature).
+  for (label, payload) in [("alice", alice), ("text", mkTextData 65536),
+      ("prng", mkPrngData 65536), ("constant", mkConstantData 65536),
+      ("cyclic", mkCyclicData 65536), ("tiny", ByteArray.mk #[1, 2, 3])] do
+    let out := deflateRaw payload 9
+    match Zip.Native.Inflate.inflate out with
+    | .ok r =>
+      unless r == payload do
+        throw (IO.userError s!"deflateRaw-9 {label}: native roundtrip mismatch")
+    | .error e => throw (IO.userError s!"deflateRaw-9 {label}: inflate failed: {e}")
+    let ffi ← RawDeflate.decompress out
+    unless ffi == payload do
+      throw (IO.userError s!"deflateRaw-9 {label}: FFI conformance mismatch")
+  let raw9 := (deflateRaw alice 9).size
+  let raw8 := (deflateRaw alice 8).size
+  IO.println s!"    alice29.txt deflateRaw: level 9 {raw9} vs level 8 {raw8}"
+  unless raw9 < raw8 do
+    throw (IO.userError s!"deflateRaw: level 9 {raw9} did not beat level 8 {raw8}")
+  -- Incompressible input must still fall back to the stored block.
+  let prng := mkPrngData 65536
+  unless (deflateRaw prng 9).size ≤ prng.size + 600 do
+    throw (IO.userError "deflateRaw-9: incompressible input expanded past stored bound")
+  -- Inputs above the memory gate skip the optimal candidate but roundtrip.
+  let big := mkConstantData (optimalMaxSize + 1)
+  match Zip.Native.Inflate.inflate (deflateRaw big 9) (big.size + 1) with
+  | .ok r =>
+    unless r == big do
+      throw (IO.userError "deflateRaw-9 above-gate: roundtrip mismatch")
+  | .error e => throw (IO.userError s!"deflateRaw-9 above-gate: inflate failed: {e}")
 
   IO.println "  OptimalParse tests passed"
 

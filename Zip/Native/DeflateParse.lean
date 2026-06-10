@@ -1,5 +1,5 @@
 import Zip.Native.Deflate
-import Zip.Native.DeflateDynamic
+import Zip.Native.DeflateFreqs
 
 /-!
   Near-optimal LZ parsing support (#2496), part 1: the per-position

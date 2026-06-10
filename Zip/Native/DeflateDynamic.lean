@@ -1,4 +1,6 @@
 import Zip.Native.Deflate
+import Zip.Native.DeflateFreqs
+import Zip.Native.DeflateParse
 import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.EmitTokensCorrect
@@ -54,66 +56,6 @@ def emitTokensWithCodes (bw : BitWriter) (tokens : Array LZ77Token)
   else bw
 termination_by tokens.size - i
 
-/-- Count symbol frequencies from LZ77 tokens.
-    Returns `(litLenFreqs, distFreqs)` where:
-    - `litLenFreqs` has 286 entries (symbols 0–285)
-    - `distFreqs` has 30 entries (distance codes 0–29)
-    Always includes end-of-block (symbol 256) with frequency 1. -/
-def tokenFreqs (tokens : Array LZ77Token) : Array Nat × Array Nat :=
-  let litLenFreqs := Array.replicate 286 0
-  let distFreqs := Array.replicate 30 0
-  -- Always count end-of-block
-  let litLenFreqs := litLenFreqs.set! 256 1
-  go tokens litLenFreqs distFreqs
-    (by show ((Array.replicate 286 0).set! 256 1).size = 286
-        rw [Array.size_set!, Array.size_replicate])
-    (by show (Array.replicate 30 0).size = 30
-        rw [Array.size_replicate]) 0
-where
-  go (tokens : Array LZ77Token) (litLenFreqs distFreqs : Array Nat)
-      (hlit : litLenFreqs.size = 286) (hdist : distFreqs.size = 30)
-      (i : Nat) : Array Nat × Array Nat :=
-    if h : i < tokens.size then
-      match tokens[i] with
-      | .literal b =>
-        let idx := b.toNat
-        have hidx : idx < litLenFreqs.size := by
-          have := UInt8.toNat_lt b; omega
-        let litLenFreqs' := litLenFreqs.set! idx (litLenFreqs[idx] + 1)
-        go tokens litLenFreqs' distFreqs
-          (by simp [litLenFreqs', hlit]) hdist (i + 1)
-      | .reference length distance =>
-        match hflc : findLengthCode length with
-        | none =>
-          match hfdc : findDistCode distance with
-          | none => go tokens litLenFreqs distFreqs hlit hdist (i + 1)
-          | some (dIdx, _, _) =>
-            have hd : dIdx < distFreqs.size := by
-              have := nativeFindDistCode_idx_bound _ _ _ _ hfdc; omega
-            let distFreqs' := distFreqs.set! dIdx (distFreqs[dIdx] + 1)
-            go tokens litLenFreqs distFreqs' hlit
-              (by show (distFreqs.set! dIdx (distFreqs[dIdx] + 1)).size = 30
-                  rw [Array.size_set!]; exact hdist)
-              (i + 1)
-        | some (lIdx, _, _) =>
-          have hsym : lIdx + 257 < litLenFreqs.size := by
-            have := nativeFindLengthCode_idx_bound _ _ _ _ hflc; omega
-          let litLenFreqs' := litLenFreqs.set! (lIdx + 257) (litLenFreqs[lIdx + 257] + 1)
-          have hlit' : litLenFreqs'.size = 286 := by
-            show (litLenFreqs.set! (lIdx + 257) (litLenFreqs[lIdx + 257] + 1)).size = 286
-            rw [Array.size_set!]; exact hlit
-          match hfdc : findDistCode distance with
-          | none => go tokens litLenFreqs' distFreqs hlit' hdist (i + 1)
-          | some (dIdx, _, _) =>
-            have hd : dIdx < distFreqs.size := by
-              have := nativeFindDistCode_idx_bound _ _ _ _ hfdc; omega
-            let distFreqs' := distFreqs.set! dIdx (distFreqs[dIdx] + 1)
-            go tokens litLenFreqs' distFreqs' hlit'
-              (by show (distFreqs.set! dIdx (distFreqs[dIdx] + 1)).size = 30
-                  rw [Array.size_set!]; exact hdist)
-              (i + 1)
-    else (litLenFreqs, distFreqs)
-  termination_by tokens.size - i
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
@@ -176,11 +118,6 @@ where
       else
         writeCLEntries bw clCodes rest hcl
 
-/-- Build the `(symbol, freq)` pair list for a frequency array. -/
-def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
-  (List.range freqs.size).pmap
-    (fun i (h : i < freqs.size) => (i, freqs[i]'h))
-    (fun _ hi => List.mem_range.mp hi)
 
 /-- Helper: `canonicalCodes` of lit/len code lengths produced by
     `computeCodeLengths _ 286 15` has size exactly 286. -/
@@ -204,16 +141,6 @@ private theorem deflateDynamic.distCodes_size (distLens : List Nat)
     (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size = 30 := by
   rw [canonicalCodes_size, Array.size_map, List.size_toArray, hlen]
 
-/-- The dynamic-Huffman code lengths chosen for the tokens summarised by
-    `(litFreqs, distFreqs)`: `computeCodeLengths` over each alphabet, with the
-    RFC 1951 fixup that forces at least one non-zero distance code. Shared by the
-    block emitter (`deflateDynamicBlock`) and the size-then-emit dispatch so both
-    select identical trees from a single computation. -/
-def dynamicCodeLengths (litFreqs distFreqs : Array Nat) : List Nat × List Nat :=
-  let litLens := Huffman.Spec.computeCodeLengths (freqsToPairs litFreqs) 286 15
-  let distLens := Huffman.Spec.computeCodeLengths (freqsToPairs distFreqs) 30 15
-  let distLens := if distLens.all (· == 0) then distLens.set 0 1 else distLens
-  (litLens, distLens)
 
 /-- Emit a dynamic Huffman DEFLATE block from precomputed LZ77 tokens **and**
     precomputed lit/len and distance code lengths (with their length invariants).
@@ -257,16 +184,6 @@ def deflateDynamicBlockCore (data : ByteArray) (tokens : Array LZ77Token)
     let bw := bw.writeHuffCode code len
     bw.flush
 
-/-- The dynamic-Huffman code lengths chosen for the tokens summarised by
-    `(litFreqs, distFreqs)` have the standard lengths: 286 lit/len, 30 distance. -/
-theorem dynamicCodeLengths_length (litFreqs distFreqs : Array Nat) :
-    (dynamicCodeLengths litFreqs distFreqs).1.length = 286 ∧
-    (dynamicCodeLengths litFreqs distFreqs).2.length = 30 := by
-  refine ⟨Huffman.Spec.computeCodeLengths_length _ 286 15, ?_⟩
-  show List.length (if _ then _ else _) = 30
-  split
-  · rw [List.length_set]; exact Huffman.Spec.computeCodeLengths_length _ 30 15
-  · exact Huffman.Spec.computeCodeLengths_length _ 30 15
 
 /-- Write a dynamic Huffman DEFLATE block from precomputed LZ77 tokens.
     Produces a single DEFLATE block with BFINAL=1, BTYPE=10. Factored out of
@@ -555,6 +472,27 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
   else deflateDynamicBlockCore data tokens lens.1 lens.2
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
+/-! ## Near-optimal candidate (level 9) -/
+
+/-- Input-size gate for the near-optimal candidate: the DP keeps roughly
+    16 bytes of transient state per input byte (global choice arrays plus the
+    per-region candidate cache), so very large inputs stay on the plain
+    level-9 path. A pure dispatch knob — `pickSmaller` composes either way —
+    to be raised once peak memory is measured on large corpora. -/
+def optimalMaxSize : Nat := 16777216
+
+/-- Cross-block (shared-window) block-split dynamic compression over the
+    **near-optimal** token stream: like `deflateDynamicBlocksShared`, but the
+    tokens come from the cost-model DP parser (`lz77OptimalIter`) instead of
+    the greedy/lazy matcher. See `Zip.Native.DeflateParse`. -/
+def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    (emitSharedBlocks data (lz77OptimalIter data) tokChunk 0 BitWriter.empty).flush
+
 /-- Unified raw DEFLATE compression dispatch. Level 0 = stored; level ≥ 1 runs the
     single-block cost-model dispatch (`deflateRawBase`). At the max-compression
     tiers (level ≥ 7) two block-split streams are also tried, and the smallest of
@@ -564,6 +502,10 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
       * cross-block (shared-window) split — one whole-file match pass, token stream
         partitioned per block, references cross block boundaries (wins on large
         text, where the self-contained split loses cross-chunk matches).
+    At level 9 (and within the `optimalMaxSize` memory gate) a fourth candidate
+    joins: the cross-block stream over the **near-optimal** cost-model DP parse
+    (`deflateDynamicBlocksOptimal`), which chooses the globally cheapest token
+    sequence under an estimated bit cost instead of the locally longest match.
     The splits are first-class candidates compared against the whole base via
     `pickSmaller`, *not* nested inside the dynamic branch: on large heterogeneous
     inputs a single dynamic tree loses to fixed Huffman, so a base-internal gate
@@ -574,9 +516,16 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if 7 ≤ level then
-    pickSmaller (deflateRawBase data level)
-      (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-        (deflateDynamicBlocksShared data sharedTokChunk level))
+    if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
+      pickSmaller
+        (pickSmaller (deflateRawBase data level)
+          (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
+            (deflateDynamicBlocksShared data sharedTokChunk level)))
+        (deflateDynamicBlocksOptimal data sharedTokChunk)
+    else
+      pickSmaller (deflateRawBase data level)
+        (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
+          (deflateDynamicBlocksShared data sharedTokChunk level))
   else deflateRawBase data level
 
 end Zip.Native.Deflate
