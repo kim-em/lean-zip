@@ -1,5 +1,6 @@
 import ZipTest.Helpers
 import Zip.Native.DeflateParse
+import Zip.Native.Inflate
 
 /-! Tests for the near-optimal parsing support (#2496): candidate cache and
     cost model. The cache and cost tables are pure heuristics (they never
@@ -44,6 +45,38 @@ private def checkCache (data : ByteArray) : IO Unit := do
           unless data[j + i]! == data[j - dist + i]! do
             throw (IO.userError s!"cache: byte mismatch at pos {j} slot {k} offset {i}")
         prevLen := len
+
+/-- Reference LZ77 resolution (byte-at-a-time copy, overlapping matches
+    repeat naturally). -/
+private def resolveTokens (label : String) (tokens : Array LZ77Token) :
+    IO ByteArray := do
+  let mut out := ByteArray.empty
+  for t in tokens do
+    match t with
+    | .literal b => out := out.push b
+    | .reference len dist =>
+      unless 1 ≤ dist ∧ dist ≤ out.size do
+        throw (IO.userError s!"{label}: bad dist {dist} at out size {out.size}")
+      unless 3 ≤ len ∧ len ≤ 258 do
+        throw (IO.userError s!"{label}: bad len {len}")
+      for _ in [0:len] do
+        out := out.push out[out.size - dist]!
+  return out
+
+/-- Full pipeline check for the optimal parser on one input: token stream
+    resolves back to the data, and a dynamic Huffman block built from it
+    inflates back to the data (native verified decoder). -/
+private def checkParse (label : String) (data : ByteArray) : IO Unit := do
+  let toks := lz77OptimalIter data
+  let back ← resolveTokens label toks
+  unless back == data do
+    throw (IO.userError s!"{label}: token resolution mismatch ({back.size} vs {data.size})")
+  let blk := deflateDynamicBlock data toks
+  match Zip.Native.Inflate.inflate blk with
+  | .ok r =>
+    unless r == data do
+      throw (IO.userError s!"{label}: dynamic block roundtrip mismatch")
+  | .error e => throw (IO.userError s!"{label}: inflate failed: {e}")
 
 def tests : IO Unit := do
   IO.println "  OptimalParse tests..."
@@ -91,6 +124,36 @@ def tests : IO Unit := do
   assert! flit[97]! < flit[99]!
   for c in flit do assert! c ≥ 1
   assert! flen[3]! ≥ 1 && fdist[1]! ≥ 1
+
+  -- Full parser: token resolution + dynamic-block roundtrip.
+  checkParse "empty" ByteArray.empty
+  checkParse "one" (ByteArray.mk #[42])
+  checkParse "two" (ByteArray.mk #[42, 42])
+  checkParse "three" (ByteArray.mk #[7, 7, 7])
+  checkParse "hello" ("hello hello hello, world world!".toUTF8)
+  checkParse "constant" (mkConstantData 1024)        -- dist-1 overlapping 258s
+  checkParse "cyclic" (mkCyclicData 4096)
+  checkParse "prng" (mkPrngData 4096)                -- incompressible: literals
+  checkParse "text64k" (mkTextData 65536)
+  -- Region boundary: sizes regionSize − 1 / exact / + 1, and matches that
+  -- want to cross the boundary (cyclic data spanning multiple regions).
+  checkParse "region-1" (mkConstantData (optRegionSize - 1))
+  checkParse "region" (mkConstantData optRegionSize)
+  checkParse "region+1" (mkConstantData (optRegionSize + 1))
+  checkParse "region-cross" (mkCyclicData (optRegionSize + 1000))
+  -- Adversarial perf shape: large all-equal input (early-stop + niceLen)
+  -- across several regions.
+  checkParse "constant-2M" (mkConstantData 2000000)
+
+  -- Ratio canary on real text (catches cost-model degeneration, which all
+  -- proofs would happily certify): the optimal parse must beat the level-9
+  -- lazy/greedy parse when both are emitted as a single dynamic block.
+  let alice ← IO.FS.readBinFile "bench/corpora/canterbury/alice29.txt"
+  let sizeOpt := (deflateDynamicBlock alice (lz77OptimalIter alice)).size
+  let sizeLazy := (deflateDynamicBlock alice (lzMatch alice 9)).size
+  IO.println s!"    alice29.txt single-block: optimal {sizeOpt} vs lazy-9 {sizeLazy}"
+  unless sizeOpt < sizeLazy do
+    throw (IO.userError s!"ratio canary: optimal {sizeOpt} ≥ lazy-9 {sizeLazy}")
 
   IO.println "  OptimalParse tests passed"
 

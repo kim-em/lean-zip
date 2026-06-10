@@ -191,4 +191,220 @@ def fittedCostTables (tokens : Array LZ77Token) :
   let lens := dynamicCodeLengths f.1 f.2
   mkCostTables lens.1.toArray lens.2.toArray
 
+/-! ## Backward DP
+
+Per region `[base, base + r)`: `cost[i]` (region-local, size `r + 259`)
+estimates the bits to encode `data[base + i ..]`; the choice arrays `chLen`/
+`chDist` (global, absolute positions, default `(1, 0)` = literal) record the
+arg-min. The tail entries `cost[r ..r + 258]` are seeded with a baseline
+per-byte estimate — never 0, which would price the region end as "free" and
+bias every parse near the boundary — so matches may extend up to 258 bytes
+past the region end (the emitter just skips the next region's prefix). -/
+
+/-- Average literal bit cost (rounded up) under a cost table: the baseline
+    used to price bytes beyond the DP region end. -/
+def avgLitBits (litCost : Array Nat) : Nat :=
+  (litCost.foldl (· + ·) 0 + 255) / 256
+
+/-- Seed the 259 tail entries: `cost[r + j] = j * perByte`. -/
+def seedTailCosts (cost : Array Nat) (r perByte j : Nat) : Array Nat :=
+  if j < 259 then seedTailCosts (cost.set! (r + j) (j * perByte)) r perByte (j + 1)
+  else cost
+termination_by 259 - j
+decreasing_by omega
+
+/-- Evaluate one candidate at the length-code lower boundaries inside
+    `(prevLen, len)` (its covered interval, exclusive of `len` which the
+    caller already evaluated): truncating a match to a boundary can buy a
+    cheaper length code or a better continuation. `(bestC, bestL, bestD)`
+    is the running arg-min. -/
+def scanBounds (lenCost distCost cost : Array Nat) (i dist prevLen len s : Nat)
+    (bestC bestL bestD : Nat) : Nat × Nat × Nat :=
+  if h : s < Inflate.lengthBase.size then
+    let b := Inflate.lengthBase[s].toNat
+    if prevLen < b ∧ b < len then
+      let c := lenCost[b]! + distCost[dist]! + cost[i + b]!
+      if c < bestC then
+        scanBounds lenCost distCost cost i dist prevLen len (s + 1) c b dist
+      else
+        scanBounds lenCost distCost cost i dist prevLen len (s + 1) bestC bestL bestD
+    else
+      scanBounds lenCost distCost cost i dist prevLen len (s + 1) bestC bestL bestD
+  else (bestC, bestL, bestD)
+termination_by Inflate.lengthBase.size - s
+decreasing_by all_goals omega
+
+/-- Scan the candidate slots of region-local position `i` (cache block at
+    `slotBase`), evaluating each candidate at its full length and at the
+    length-code boundaries of its covered interval. Slots hold strictly
+    increasing lengths; a zero length terminates the block. -/
+def scanCands (cacheLens cacheDists lenCost distCost cost : Array Nat)
+    (slotBase i slots k prevLen : Nat) (bestC bestL bestD : Nat) : Nat × Nat × Nat :=
+  if _h : k < slots then
+    let len := cacheLens[slotBase + k]!
+    if len = 0 then (bestC, bestL, bestD)
+    else
+      let dist := cacheDists[slotBase + k]!
+      let cFull := lenCost[len]! + distCost[dist]! + cost[i + len]!
+      let (bestC, bestL, bestD) :=
+        if cFull < bestC then (cFull, len, dist) else (bestC, bestL, bestD)
+      let (bestC, bestL, bestD) :=
+        scanBounds lenCost distCost cost i dist prevLen len 0 bestC bestL bestD
+      scanCands cacheLens cacheDists lenCost distCost cost slotBase i slots
+        (k + 1) len bestC bestL bestD
+  else (bestC, bestL, bestD)
+termination_by slots - k
+decreasing_by all_goals omega
+
+/-- Backward DP fill for region `[base, base + r)`: process region-local
+    index `i - 1` down to 0, choosing literal vs the best cached candidate
+    and recording the choice at the *absolute* position in `chLen`/`chDist`.
+    Heuristic only — the emitter re-verifies everything. -/
+def fillRegion (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost : Array Nat)
+    (i : Nat) (cost chLen chDist : Array Nat) :
+    Array Nat × Array Nat :=
+  if i = 0 then (chLen, chDist)
+  else
+    let idx := i - 1
+    let pos := base + idx
+    let lit := litCost[(data[pos]!).toNat]! + cost[idx + 1]!
+    let (bc, bl, bd) := scanCands cacheLens cacheDists lenCost distCost cost
+      (slots * idx) idx slots 0 0 lit 1 0
+    let cost := cost.set! idx bc
+    let chLen := chLen.set! pos bl
+    let chDist := chDist.set! pos bd
+    fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
+      idx cost chLen chDist
+termination_by i
+decreasing_by omega
+
+/-- Collect the region's parse implied by the current choice arrays (used to
+    refit the cost model between DP rounds). Heuristic walk — no guards. -/
+def collectRegionTokens (data : ByteArray) (chLen chDist : Array Nat)
+    (bound pos : Nat) (acc : Array LZ77Token) : Array LZ77Token :=
+  if h : pos < bound ∧ pos < data.size then
+    let len := chLen[pos]!
+    if hl : 3 ≤ len then
+      collectRegionTokens data chLen chDist bound (pos + len)
+        (acc.push (.reference len (chDist[pos]!)))
+    else
+      collectRegionTokens data chLen chDist bound (pos + 1)
+        (acc.push (.literal data[pos]!))
+  else acc
+termination_by bound - pos
+decreasing_by all_goals omega
+
+/-- Run the candidate-cache + two-round DP over one region and write its
+    choices. Round 1 prices with the static tables; round 2 refits to the
+    region's own round-1 parse. Returns the updated chain state and choice
+    arrays. -/
+def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
+    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat) :
+    Array Nat × Array Nat × Array Nat × Array Nat :=
+  let (cacheLens, cacheDists, hashTable, prev) := buildCache data hashTable prev
+    depth slots base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
+  -- round 1: static cost model
+  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
+  let (chLen, chDist) := fillRegion data base r slots cacheLens cacheDists
+    slit slen sdist r cost chLen chDist
+  -- round 2: refit to this region's round-1 parse
+  let toks := collectRegionTokens data chLen chDist (base + r) base #[]
+  let (flit, flen, fdist) := fittedCostTables toks
+  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits flit) 0
+  let (chLen, chDist) := fillRegion data base r slots cacheLens cacheDists
+    flit flen fdist r cost chLen chDist
+  (hashTable, prev, chLen, chDist)
+
+/-- Region driver for `computeChoices`: regions advance by
+    `min regionSize (data.size - base)` bytes; the hash-chain state persists
+    across regions (cross-region distances are legal and wanted). -/
+def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
+    (slit slen sdist : Array Nat) (hashTable prev : Array Nat) (base : Nat)
+    (chLen chDist : Array Nat) : Array Nat × Array Nat :=
+  if hb : base < data.size ∧ 0 < regionSize then
+    let r := min regionSize (data.size - base)
+    have hdec : data.size - (base + r) < data.size - base := by omega
+    let (hashTable, prev, chLen, chDist) := fillRegionRounds data depth slots base r
+      slit slen sdist hashTable prev chLen chDist
+    computeChoicesLoop data depth slots regionSize slit slen sdist hashTable prev
+      (base + r) chLen chDist
+  else (chLen, chDist)
+termination_by data.size - base
+decreasing_by omega
+
+/-- Compute the global DP choice arrays for the whole input: per region,
+    build the candidate cache and run the two-round backward DP. Defaults
+    `(1, 0)` = literal everywhere, so unfilled entries are always safe.
+    Heuristic only: consumed by the re-verifying emitter `optimalEmit`. -/
+def computeChoices (data : ByteArray) : Array Nat × Array Nat :=
+  let (slit, slen, sdist) := staticCostTables
+  computeChoicesLoop data optChainDepth optCacheSlots optRegionSize slit slen sdist
+    (Array.replicate 65536 data.size) (Array.replicate data.size data.size)
+    0 (Array.replicate data.size 1) (Array.replicate data.size 0)
+
+/-! ## Token emission (the proof-bearing boundary)
+
+The choice arrays are *untrusted*: `optimalEmit` re-establishes validity for
+every match it emits — the same guards `lz77Chain.mainLoop` uses plus a fresh
+`countMatch` confirming the stored length — and falls back to a literal
+otherwise (never fires for choices the DP actually wrote). The `ValidDecomp`
+and encodability proofs in `Zip.Spec.LZ77OptimalCorrect` are stated for
+**arbitrary** `chLen`/`chDist`, so nothing about the DP enters them. -/
+
+/-- Emit tokens for `data[pos ..]` from the choice arrays, re-verifying every
+    match. List-cons version for proofs; `optimalEmitIter` is the runtime
+    twin (proven equal in `LZ77OptimalCorrect`). -/
+def optimalEmit (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat) :
+    List LZ77Token :=
+  if hpos : pos < data.size then
+    let len := chLen[pos]!
+    let dist := chDist[pos]!
+    if hg : 3 ≤ len ∧ len ≤ 258 ∧ pos + len ≤ data.size ∧
+        1 ≤ dist ∧ dist ≤ pos ∧ dist ≤ 32768 then
+      have h1 : (pos - dist) + len ≤ data.size := by omega
+      if hml : lz77Greedy.countMatch data (pos - dist) pos len h1 hg.2.2.1 = len then
+        .reference len dist :: optimalEmit data chLen chDist (pos + len)
+      else
+        .literal (data[pos]'hpos) :: optimalEmit data chLen chDist (pos + 1)
+    else
+      .literal (data[pos]'hpos) :: optimalEmit data chLen chDist (pos + 1)
+  else []
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- Iterative (tail-recursive, `Array`-accumulating) twin of `optimalEmit`.
+    Same output (`optimalEmitIter_eq` in `LZ77OptimalCorrect`); does not
+    overflow the stack on large inputs. -/
+def optimalEmitIter (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat)
+    (acc : Array LZ77Token) : Array LZ77Token :=
+  if hpos : pos < data.size then
+    let len := chLen[pos]!
+    let dist := chDist[pos]!
+    if hg : 3 ≤ len ∧ len ≤ 258 ∧ pos + len ≤ data.size ∧
+        1 ≤ dist ∧ dist ≤ pos ∧ dist ≤ 32768 then
+      have h1 : (pos - dist) + len ≤ data.size := by omega
+      if hml : lz77Greedy.countMatch data (pos - dist) pos len h1 hg.2.2.1 = len then
+        optimalEmitIter data chLen chDist (pos + len) (acc.push (.reference len dist))
+      else
+        optimalEmitIter data chLen chDist (pos + 1) (acc.push (.literal (data[pos]'hpos)))
+    else
+      optimalEmitIter data chLen chDist (pos + 1) (acc.push (.literal (data[pos]'hpos)))
+  else acc
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- Near-optimal LZ77 parse: cost-model backward DP over the candidate
+    cache, then re-verified emission. List-backed reference version (the
+    proofs' subject); `lz77OptimalIter` is the runtime entry point. -/
+def lz77Optimal (data : ByteArray) : Array LZ77Token :=
+  let (chLen, chDist) := computeChoices data
+  (optimalEmit data chLen chDist 0).toArray
+
+/-- Runtime entry point: same tokens as `lz77Optimal` (proven in
+    `LZ77OptimalCorrect`), tail-recursive emission. -/
+def lz77OptimalIter (data : ByteArray) : Array LZ77Token :=
+  let (chLen, chDist) := computeChoices data
+  optimalEmitIter data chLen chDist 0 #[]
+
 end Zip.Native.Deflate
