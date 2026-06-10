@@ -90,6 +90,56 @@ def tests : IO Unit := do
       unless back.beq data do
         throw (IO.userError s!"deflateRaw(6) roundtrip mismatch on {name}")
     | .error e => throw (IO.userError s!"deflateRaw(6) inflate failed on {name}: {e}")
+
+  -- 3. Shared-window partition cost model (`sharedPartitionBits`) equals the
+  -- emitted bit length of `emitSharedBlocksAt` for the same cuts — the invariant
+  -- that makes `chooseSplitsArbitrated`'s never-worse-than-fixed-cadence
+  -- guarantee trustworthy. Checked across adversarial, fixed-cadence, and
+  -- heuristic cut lists; the flushed byte size must be ⌈bits/8⌉.
+  for (name, data) in samples do
+    if data.size > 0 then
+      let toks := lzMatch data 9
+      let cutsLists : List (String × List Nat) :=
+        [ ("empty", []),
+          ("zeros", [0, 0, 0]),
+          ("huge", [1000000000]),
+          ("nonmonotone", [5, 3, 7]),
+          ("fixed", fixedCadenceCuts sharedTokChunk toks.size),
+          ("fixed-tiny", fixedCadenceCuts 3 toks.size),
+          ("heuristic", chooseSplitsHeuristic toks) ]
+      for (cname, cuts) in cutsLists do
+        let modelBits := sharedPartitionBits toks cuts 0
+        let bw := emitSharedBlocksAt data toks cuts 0 Zip.Native.BitWriter.empty
+        unless modelBits == bw.bitLength do
+          throw (IO.userError
+            s!"sharedPartitionBits mismatch on {name}/{cname}: \
+               model={modelBits} emitted={bw.bitLength}")
+        unless bw.flush.size == (modelBits + 7) / 8 do
+          throw (IO.userError
+            s!"flushed size mismatch on {name}/{cname}: \
+               bytes={bw.flush.size} bits={modelBits}")
+      -- 4. Arbitration never sizes worse than the fixed cadence, and the emitted
+      -- shared candidate never exceeds the old fixed-cadence emitter's output.
+      let fixedCuts := fixedCadenceCuts sharedTokChunk toks.size
+      let arbCuts := chooseSplitsArbitrated toks
+      unless sharedPartitionBits toks arbCuts 0 ≤ sharedPartitionBits toks fixedCuts 0 do
+        throw (IO.userError s!"chooseSplitsArbitrated sized worse than fixed on {name}")
+      let arbOut := deflateDynamicBlocksSharedAt data chooseSplitsArbitrated 9
+      let fixedOut := deflateDynamicBlocksShared data sharedTokChunk 9
+      unless arbOut.size ≤ fixedOut.size do
+        throw (IO.userError
+          s!"arbitrated shared output larger than fixed on {name}: \
+             {arbOut.size} > {fixedOut.size}")
+    -- 5. The cut-list emitter with fixed-cadence cuts is byte-identical to the
+    -- fixed-cadence emitter (also covers the empty input, where both emit the
+    -- single final block).
+    let viaCuts := deflateDynamicBlocksSharedAt data
+      (fun toks => fixedCadenceCuts sharedTokChunk toks.size) 9
+    let viaChunk := deflateDynamicBlocksShared data sharedTokChunk 9
+    unless viaCuts.beq viaChunk do
+      throw (IO.userError
+        s!"fixedCadenceCuts not byte-identical to fixed-cadence emitter on {name}: \
+           {viaCuts.size} vs {viaChunk.size}")
   IO.println "  SizeHelpers tests passed."
 
 end ZipTest.SizeHelpers

@@ -402,6 +402,31 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     unless decomp == textPrng do
       throw (IO.userError s!"deflateRaw({level}) text+prng→FFI inflate mismatch")
 
+  -- Entropy-divergence splitting (#2528): on a heterogeneous input whose symbol
+  -- statistics shift (prose, then PRNG bytes, then cyclic binary — each well
+  -- above the splitMinBlockBytes floor), the heuristic must propose at least one
+  -- cut, and the arbitrated shared-window stream must roundtrip via both
+  -- inflate implementations.
+  let hetero := String.toUTF8 (String.join (List.replicate 1600
+    "the quick brown fox jumps over the lazy dog. "))
+    ++ mkPrngData 65536 ++ mkCyclicData 65536
+  let heteroToks := Zip.Native.Deflate.lzMatch hetero 9
+  let heteroCuts := Zip.Native.Deflate.chooseSplitsHeuristic heteroToks
+  unless heteroCuts.length ≥ 1 do
+    throw (IO.userError s!"chooseSplitsHeuristic found no cuts on heterogeneous input \
+      ({heteroToks.size} tokens)")
+  for (name, data) in [("hetero", hetero), ("text", textRepeat),
+                        ("cyclic16K", mkCyclicData 16384), ("empty", ByteArray.empty)] do
+    let arb := Zip.Native.Deflate.deflateDynamicBlocksSharedAt data
+      Zip.Native.Deflate.chooseSplitsArbitrated 9
+    match Zip.Native.Inflate.inflate arb with
+    | .ok result => unless result == data do
+        throw (IO.userError s!"arbitrated shared split→native inflate mismatch on {name}")
+    | .error e => throw (IO.userError s!"arbitrated shared split→native inflate failed on {name}: {e}")
+    let decomp ← RawDeflate.decompress arb
+    unless decomp == data do
+      throw (IO.userError s!"arbitrated shared split→FFI inflate mismatch on {name}")
+
   -- Stress the many-block cross-reference path: one token per block on a highly
   -- repetitive input, so almost every block references earlier blocks' output.
   let sharedTiny := Zip.Native.Deflate.deflateDynamicBlocksShared textRepeat 1 9
