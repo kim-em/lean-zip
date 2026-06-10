@@ -518,6 +518,39 @@ def deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt
     (emitSharedBlocks data (lzMatch data level)
       tokChunk 0 BitWriter.empty).flush
 
+/-- Emit shared-window blocks at explicit cut points: each element of `cuts` is
+    an absolute token index ending the current block. Every cut is clamped to
+    `(pos, toks.size]`, so **any** cuts list — empty, non-monotone, or out of
+    range — yields a valid total partition; an empty list emits one final block
+    of the rest. The clamping is what keeps the boundary *heuristic* free of
+    proof obligations: the roundtrip holds for an arbitrary partition. -/
+def emitSharedBlocksAt (data : ByteArray) (toks : Array LZ77Token) (cuts : List Nat)
+    (pos : Nat) (bw : BitWriter) : BitWriter :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let bw := emitSharedBlock bw data (toks.extract pos j) (decide (j ≥ toks.size))
+  if j ≥ toks.size then bw
+  else emitSharedBlocksAt data toks cuts.tail j bw
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- Cross-block (shared-window) block-split dynamic compression with the
+    partition chosen by `choose`: like `deflateDynamicBlocksShared`, but the
+    per-block token groups come from the cut list `choose toks` instead of a
+    fixed cadence. The roundtrip holds for any `choose` (the emitter clamps
+    every cut), so the selector is a pure ratio heuristic. -/
+def deflateDynamicBlocksSharedAt (data : ByteArray)
+    (choose : Array LZ77Token → List Nat) (level : UInt8) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    let toks := lzMatch data level
+    (emitSharedBlocksAt data toks (choose toks) 0 BitWriter.empty).flush
+
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
     insertion cap (`insertCap`): low levels defer insertion + search shallowly

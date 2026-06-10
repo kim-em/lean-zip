@@ -365,6 +365,29 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       unless decomp == data do
         throw (IO.userError s!"deflateDynamicBlocksShared→FFI inflate mismatch on {name} (tokChunk={tokChunk})")
 
+  -- Cut-list shared-window splitting: deflateDynamicBlocksSharedAt clamps every
+  -- cut to (pos, toks.size], so ANY selector — empty, all-zero, out-of-range,
+  -- non-monotone, or exactly-at-the-end — must yield a valid partition. Verify
+  -- the roundtrip via both native and FFI inflate for adversarial cut lists.
+  let adversarialChoosers : List (String × (Array Zip.Native.Deflate.LZ77Token → List Nat)) :=
+    [("empty", fun _ => []),
+     ("zeros", fun _ => [0, 0, 0]),
+     ("huge", fun _ => [1000000000]),
+     ("nonmonotone", fun _ => [5, 3, 7]),
+     ("atEnd", fun toks => [toks.size]),
+     ("mixed", fun _ => [0, 7, 7, 100000])]
+  for (name, data) in [("empty", ByteArray.empty), ("hello", helloBytes), ("big", big),
+                        ("text", textRepeat), ("cyclic16K", mkCyclicData 16384)] do
+    for (cname, choose) in adversarialChoosers do
+      let sharedAt := Zip.Native.Deflate.deflateDynamicBlocksSharedAt data choose 9
+      match Zip.Native.Inflate.inflate sharedAt with
+      | .ok result => unless result == data do
+          throw (IO.userError s!"deflateDynamicBlocksSharedAt→native inflate mismatch on {name} (cuts={cname})")
+      | .error e => throw (IO.userError s!"deflateDynamicBlocksSharedAt→native inflate failed on {name} (cuts={cname}): {e}")
+      let decomp ← RawDeflate.decompress sharedAt
+      unless decomp == data do
+        throw (IO.userError s!"deflateDynamicBlocksSharedAt→FFI inflate mismatch on {name} (cuts={cname})")
+
   -- Stress the many-block cross-reference path: one token per block on a highly
   -- repetitive input, so almost every block references earlier blocks' output.
   let sharedTiny := Zip.Native.Deflate.deflateDynamicBlocksShared textRepeat 1 9
