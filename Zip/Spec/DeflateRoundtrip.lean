@@ -9,15 +9,20 @@ import Zip.Spec.DeflateBlockSplit
 Proves the unified roundtrip theorem for `deflateRaw`:
 `inflate (deflateRaw data level) = .ok data`.
 
-`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean` and selects the
-compression strategy based on level (0 = stored, 1 = fixed Huffman,
-2-4 = lazy LZ77 + fixed, 5+ = dynamic Huffman).
+`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is a stored
+block; level ≥ 1 runs the single-block cost-model dispatch `deflateRawBase`
+(stored / fixed / dynamic, all sized from one hash-chain token pass, emitting
+only the smallest); and level ≥ 7 additionally compares two block-split streams
+(self-contained #2524 and cross-block shared-window #2525) against that base via
+`pickSmaller`, so the split is a first-class candidate that can only ever win.
 
-This composes the per-level roundtrip theorems:
-- `inflate_deflateStoredPure` (Level 0)
-- `inflate_deflateFixed` (Level 1)
-- `inflate_deflateLazyIter` (Levels 2-4)
-- `inflate_deflateDynamic` (Levels 5+)
+This composes:
+- `inflate_deflateRawBase` — the stored / fixed / dynamic base, in turn built
+  from `inflate_deflateStoredPure`, `inflate_deflateFixedBlock`,
+  `inflate_deflateDynamicBlock`
+- `inflate_deflateDynamicBlocksSC` / `inflate_deflateDynamicBlocksShared` — the
+  two block-split candidates (`Zip/Spec/DeflateBlockSplit.lean`)
+- `inflate_pickSmaller` — selecting the smaller of two roundtripping candidates
 -/
 
 namespace Zip.Native.Deflate
