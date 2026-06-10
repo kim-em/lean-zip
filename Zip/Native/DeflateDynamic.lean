@@ -456,12 +456,17 @@ def deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8) 
   else
     (emitChunkBlocks data chunkSize level 0 BitWriter.empty).flush
 
-/-- Chunk size for block splitting in `deflateRaw`: each ~32 KiB run gets its own
+/-- Chunk size for block splitting in `deflateRaw`: each ~16 KiB run gets its own
     dynamic Huffman tree and a fresh match window. Large enough to keep per-block
     header overhead negligible, small enough to let the trees track local
     statistics. `pickSmaller` makes the exact value a pure ratio knob (never a
-    correctness or regression concern). -/
-def splitChunkSize : Nat := 32768
+    correctness or regression concern). 16384 is the joint optimum with
+    `sharedTokChunk` of a Canterbury + Silesia sweep at levels 7–9 (#2529, `lake
+    exe ratio-sweep`). The joint framing matters: in isolation ever-larger chunks
+    sized smaller (less window loss), but `deflateRaw` deploys this variant only
+    on the files where it beats the cross-block split, and there 16384 won at
+    every level. -/
+def splitChunkSize : Nat := 16384
 
 /-! ## Cross-block (shared-window) block-split dynamic compression
 
@@ -501,10 +506,14 @@ termination_by toks.size - pos
 decreasing_by simp_all only [Nat.not_le]; omega
 
 /-- Token-group size for cross-block splitting in `deflateRaw`: number of LZ77
-    tokens per block. A pure ratio knob (`pickSmaller` guards regression); 4096
-    is the measured optimum on text (smaller groups are dominated by per-block
-    header overhead, larger ones by coarser local-statistics tracking). -/
-def sharedTokChunk : Nat := 4096
+    tokens per block. A pure ratio knob (`pickSmaller` guards regression); 8192
+    is the joint optimum with `splitChunkSize` of a Canterbury + Silesia sweep at
+    levels 7–9 (#2529, `lake exe ratio-sweep`) — the same value at every level,
+    so a single global default suffices. Smaller groups are dominated by
+    per-block header overhead, larger ones by coarser local-statistics tracking;
+    the curve is shallow around the optimum (8192 beat 16384 by ~0.015% of
+    corpus total) but moving off the prior single-sample 4096 was worth ~0.19%. -/
+def sharedTokChunk : Nat := 8192
 
 /-- Cross-block (shared-window) block-split dynamic compression. Matches the
     whole input once, then partitions the token stream into `tokChunk`-token
