@@ -404,6 +404,16 @@ def insertCap (level : UInt8) : Nat :=
   else if level ≤ 3 then 64
   else 1000000000
 
+/-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
+    greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
+    lazy variant, which improves ratio at equal window/chain depth. Both share the
+    same `(chainDepth, insertCap)` ladder and satisfy the same encoder contracts
+    (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the choice is
+    transparent to the roundtrip proof. -/
+def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
+  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level)
+  else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+
 /-! ## Self-contained block-split dynamic compression
 
 Split `data` into `chunkSize`-byte chunks, match each chunk independently (fresh
@@ -418,7 +428,7 @@ most of the ratio a single whole-file tree leaves on large/heterogeneous inputs.
 def emitChunkBlock (bw : BitWriter) (data : ByteArray) (pos j : Nat) (level : UInt8)
     (isFinal : Bool) : BitWriter :=
   let chunk := data.extract pos j
-  let toks := lz77ChainIter chunk (chainDepth level) 32768 (insertCap level)
+  let toks := lzMatch chunk level
   let f := tokenFreqs toks
   let lens := dynamicCodeLengths f.1 f.2
   emitDynBlock bw chunk toks lens.1 lens.2
@@ -505,7 +515,7 @@ def deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt
     (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
       (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
   else
-    (emitSharedBlocks data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+    (emitSharedBlocks data (lzMatch data level)
       tokChunk 0 BitWriter.empty).flush
 
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
@@ -515,7 +525,7 @@ def deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt
     best ratio). One shared token pass sizes the fixed and dynamic blocks and
     emits only the smaller (strict `<`, dynamic on a tie). -/
 def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
-  let tokens := lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+  let tokens := lzMatch data level
   let f := tokenFreqs tokens
   let lens := dynamicCodeLengths f.1 f.2
   if fixedBlockBytes f.1 f.2 < dynBlockBytes f.1 f.2 lens.1 lens.2
@@ -530,7 +540,7 @@ def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
     a stored block whenever that is smaller, so incompressible input never expands.
     This is the base candidate that the block-split streams are compared against. -/
 def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
-  let tokens := lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+  let tokens := lzMatch data level
   let f := tokenFreqs tokens
   let lens := dynamicCodeLengths f.1 f.2
   let fixedBytes := fixedBlockBytes f.1 f.2

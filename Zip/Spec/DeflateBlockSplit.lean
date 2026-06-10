@@ -1,6 +1,7 @@
 import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.LZ77ChainCorrect
+import Zip.Spec.LZ77ChainLazyCorrect
 
 /-!
 # Self-contained block-splitting roundtrip
@@ -16,6 +17,41 @@ whole input. This file proves `inflate (deflateDynamicBlocksSC …) = .ok data`.
 namespace Zip.Native.Deflate
 
 open Deflate.Spec (decode)
+
+/-! ## Matcher-selector contracts
+
+The three contracts the dynamic encoder consumes, lifted to the level-dispatched
+`lzMatch` by casing on `4 ≤ level` and applying the lazy (`lz77ChainLazyIter_*`) or
+greedy (`lz77ChainIter_*`) version. Both arms are line-for-line parallel because
+the two matchers share contract signatures. Consumed here and in `DeflateRoundtrip`,
+so the `7 ≤ level`/`4 ≤ level` split lives in exactly one place. -/
+
+theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
+    ∀ t ∈ (lzMatch data level).toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold lzMatch
+  split
+  · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level)
+      (by omega) (by omega)
+  · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
+      (by omega) (by omega)
+
+theorem lzMatch_empty (data : ByteArray) (level : UInt8) (hz : data.size = 0) :
+    lzMatch data level = #[] := by
+  unfold lzMatch
+  split
+  · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) hz
+  · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
+
+theorem lzMatch_resolves (data : ByteArray) (level : UInt8) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lzMatch data level)) [] =
+      some data.data.toList := by
+  unfold lzMatch
+  split
+  · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
 
 set_option maxHeartbeats 800000 in
 /-- One self-contained chunk block: its bits append to `bw`, it preserves `wf`,
@@ -37,15 +73,13 @@ theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
   obtain ⟨litLens, distLens, headerBits, symBits, _hll, _hdl, hlv, hdv,
       hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
     emitDynBlock_spec bw hbw (data.extract pos j)
-      (lz77ChainIter (data.extract pos j) (chainDepth level) 32768 (insertCap level))
-      (lz77ChainIter_encodable (data.extract pos j) (chainDepth level) 32768 (insertCap level)
-        (by omega) (by omega))
-      (fun hz => lz77ChainIter_empty (data.extract pos j) (chainDepth level) 32768 (insertCap level) hz)
+      (lzMatch (data.extract pos j) level)
+      (lzMatch_encodable (data.extract pos j) level)
+      (fun hz => lzMatch_empty (data.extract pos j) level hz)
       isFinal
-  have hresolve := lz77ChainIter_resolves (data.extract pos j)
-    (chainDepth level) 32768 (insertCap level) (by omega)
+  have hresolve := lzMatch_resolves (data.extract pos j) level
   have hvalid := tokensToSymbols_validSymbolList
-    (lz77ChainIter (data.extract pos j) (chainDepth level) 32768 (insertCap level))
+    (lzMatch (data.extract pos j) level)
   refine ⟨[isFinal, false, true] ++ headerBits ++ symBits, ?_, ?_, ?_, ?_⟩
   · -- toBits
     simp only [emitChunkBlock]
@@ -641,32 +675,31 @@ theorem deflateDynamicBlocksSC_pad (data : ByteArray) (chunkSize : Nat) (level :
 
 /-- Common facts for the `data.size > 0` branch of the shared-window theorems:
     the whole-stream token list is non-empty and its mapped form resolves (from
-    `[]`, drop 0) to the input. Derived from `lz77ChainIter_resolves`. -/
+    `[]`, drop 0) to the input. Derived from `lzMatch_resolves`. -/
 private theorem deflateDynamicBlocksShared_facts (data : ByteArray) (level : UInt8)
     (hpos : 0 < data.size) :
-    (∀ t ∈ (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList,
+    (∀ t ∈ (lzMatch data level).toList,
         match t with
         | .literal _ => True
         | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) ∧
-      0 < (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size ∧
+      0 < (lzMatch data level).size ∧
       Deflate.Spec.resolveLZ77
-        (((lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList.map
+        (((lzMatch data level).toList.map
           LZ77Token.toLZ77Symbol).drop 0) [] = some data.data.toList := by
-  have henc := lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
-    (by omega) (by omega)
-  have hwhole := lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  have henc := lzMatch_encodable data level
+  have hwhole := lzMatch_resolves data level
   have hMfree := mem_map_toLZ77Symbol_ne_endOfBlock
-    (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList
+    (lzMatch data level).toList
   have hM : Deflate.Spec.resolveLZ77
-      ((lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList.map
+      ((lzMatch data level).toList.map
         LZ77Token.toLZ77Symbol) [] = some data.data.toList := by
     simp only [tokensToSymbols] at hwhole
     rwa [Deflate.Spec.resolveLZ77_eobFree_eob _ [] hMfree] at hwhole
   refine ⟨henc, ?_, ?_⟩
   · rcases Nat.eq_zero_or_pos
-      (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size with h0 | h0
+      (lzMatch data level).size with h0 | h0
     · exfalso
-      have hnil : (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).toList = [] :=
+      have hnil : (lzMatch data level).toList = [] :=
         List.eq_nil_of_length_eq_zero (by rw [Array.length_toList]; omega)
       rw [hnil, List.map_nil, Deflate.Spec.resolveLZ77_nil, Option.some.injEq] at hM
       have hl := congrArg List.length hM
@@ -677,7 +710,7 @@ private theorem deflateDynamicBlocksShared_facts (data : ByteArray) (level : UIn
 
 /-- Cross-block roundtrip: decoding the shared-window block stream reproduces the
     input. The empty input is a single final block; otherwise the shared-window
-    fold (`emitSharedBlocks_decode`), seeded by `lz77ChainIter_resolves`,
+    fold (`emitSharedBlocks_decode`), seeded by `lzMatch_resolves`,
     reconstructs the input. -/
 theorem decode_deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt8) :
     Deflate.Spec.decode
@@ -713,9 +746,9 @@ theorem decode_deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (l
       · exact h
     obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksShared_facts data level hpos
     obtain ⟨B, htoBits, hwf, hdec⟩ :=
-      emitSharedBlocks_decode data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      emitSharedBlocks_decode data (lzMatch data level)
         tokChunk (by omega) henc
-        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size 0 []
+        (lzMatch data level).size 0 []
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     rw [BitWriter.empty_toBits, List.nil_append] at htoBits
     rw [flush_toBits_aligned _ hwf, htoBits]
@@ -774,9 +807,9 @@ theorem deflateDynamicBlocksShared_goR_pad (data : ByteArray) (tokChunk : Nat) (
       · exact h
     obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksShared_facts data level hpos
     obtain ⟨B, htoBits, hwf, hdec⟩ :=
-      emitSharedBlocks_decodeR data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      emitSharedBlocks_decodeR data (lzMatch data level)
         tokChunk (by omega) henc
-        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size 0 []
+        (lzMatch data level).size 0 []
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     rw [BitWriter.empty_toBits, List.nil_append] at htoBits
     rw [flush_toBits_aligned _ hwf, htoBits]
@@ -801,9 +834,9 @@ theorem deflateDynamicBlocksShared_pad (data : ByteArray) (tokChunk : Nat) (leve
       · exact h
     obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksShared_facts data level hpos
     obtain ⟨B, _, hwf, _⟩ :=
-      emitSharedBlocks_decode data (lz77ChainIter data (chainDepth level) 32768 (insertCap level))
+      emitSharedBlocks_decode data (lzMatch data level)
         tokChunk (by omega) henc
-        (lz77ChainIter data (chainDepth level) 32768 (insertCap level)).size 0 []
+        (lzMatch data level).size 0 []
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
 

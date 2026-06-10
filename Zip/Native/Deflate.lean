@@ -515,6 +515,168 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- Lazy (one-byte-lookahead, zlib `deflate_slow`-style) variant of `lz77Chain`.
+    At each position it finds the best chain match `M` at `pos`; before emitting it
+    runs a *second* `chainWalk` at `pos+1` for `M'`. It defers — emits a literal at
+    `pos` and takes `M'` (advancing to `pos+1+len M'`) — only when `M'` is **both
+    longer and no farther** than `M` (`len M' > len M ∧ dist M' ≤ dist M`); otherwise
+    it emits `M` (advancing to `pos+len M`). The distance guard is the key to the
+    ratio win: a length-only deferral takes longer-but-farther matches whose extra
+    distance bits cost more than they save, which *regresses* large text badly
+    (measured: plrabn12/lcet10 up to +22%); guarding on distance keeps only the
+    beneficial deferrals (Canterbury levels 4–9: −5.2% vs greedy). It is not a
+    global optimum — `lcet10` at the shallow levels 4–5 still loses ~19% to a
+    Huffman-distribution effect no *local* deferral rule captures (that needs the
+    cost-model parse of #2526 part 2).
+
+    Match-finding stays opaque to correctness — `chainWalk_spec` holds for *any*
+    chain state and *any* deferral predicate, so validity is re-established at
+    emission exactly as for `lz77Chain`. `pos+1` is intentionally *not* inserted
+    before the lookahead walk (you cannot match a position against itself; matches
+    zlib, and is correctness-irrelevant). Reuses `lz77Chain`'s `chainWalk`/
+    `updateHashes` and `lz77Greedy.trailing`. Equal-quality contracts proven in
+    `LZ77ChainLazyCorrect`. -/
+def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    (lz77Greedy.trailing data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize hashSize maxChain
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0 insertCap).toArray
+where
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
+      (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let head := hashTable[h]!
+      let hashTable := hashTable.set! h pos
+      let prev := prev.set! pos head
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        lz77Chain.chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          -- Lazy: probe pos+1 for a longer, no-farther match (distance-guarded deferral)
+          if h3lt : pos + 3 < data.size then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := hashTable[h2]!
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let (matchLen2, matchPos2) :=
+              lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                -- Longer & no-farther match at pos+1: emit literal at pos + reference at pos+1
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                .literal (data[pos]'(by omega)) ::
+                  .reference matchLen2 (pos + 1 - matchPos2) ::
+                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1 + matchLen2) insertCap
+              else
+                -- matchLen2 spills past data: keep match at pos
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+                .reference matchLen (pos - matchPos) ::
+                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+            else
+              -- No better match at pos+1: keep match at pos
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let (hashTable, prev) :=
+                lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+              .reference matchLen (pos - matchPos) ::
+                mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+          else
+            -- Near end of data: keep match at pos
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            .reference matchLen (pos - matchPos) ::
+              mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+        else
+          .literal (data[pos]'(by omega)) ::
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
+      else
+        .literal (data[pos]'(by omega)) ::
+          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
+    else
+      lz77Greedy.trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- Iterative (tail-recursive, `Array`-accumulating) version of `lz77ChainLazy`.
+    Same output, no stack overflow on large inputs. Reuses `lz77Chain`'s
+    `chainWalk`/`updateHashes` and `lz77GreedyIter.trailing`; only the
+    token-emitting `mainLoop` differs (push vs. cons). Proven equal to
+    `lz77ChainLazy` in `LZ77ChainLazyCorrect`. -/
+def lz77ChainLazyIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    lz77GreedyIter.trailing data 0 #[]
+  else
+    let hashSize := 65536
+    mainLoop data windowSize hashSize maxChain insertCap
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+where
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
+      (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+      Array LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let head := hashTable[h]!
+      let hashTable := hashTable.set! h pos
+      let prev := prev.set! pos head
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        lz77Chain.chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          if h3lt : pos + 3 < data.size then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := hashTable[h2]!
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let (matchLen2, matchPos2) :=
+              lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1 + matchLen2)
+                  (acc.push (.literal (data[pos]'(by omega))) |>.push
+                    (.reference matchLen2 (pos + 1 - matchPos2)))
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+                mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+                  (acc.push (.reference matchLen (pos - matchPos)))
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let (hashTable, prev) :=
+                lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+              mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+                (acc.push (.reference matchLen (pos - matchPos)))
+          else
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+              (acc.push (.reference matchLen (pos - matchPos)))
+        else
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+            (acc.push (.literal (data[pos]'(by omega))))
+      else
+        mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+          (acc.push (.literal (data[pos]'(by omega))))
+    else
+      lz77GreedyIter.trailing data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
   if h : i < tokens.size then
