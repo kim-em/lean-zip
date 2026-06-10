@@ -9,15 +9,18 @@ import Zip.Spec.DeflateBlockSplit
 Proves the unified roundtrip theorem for `deflateRaw`:
 `inflate (deflateRaw data level) = .ok data`.
 
-`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean` and selects the
-compression strategy based on level (0 = stored, 1 = fixed Huffman,
-2-4 = lazy LZ77 + fixed, 5+ = dynamic Huffman).
+`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is a stored
+block; every level ≥ 1 runs the hash-chain matcher via `lzMatch` (greedy at 1–3,
+lazy at ≥ 4), sizes the stored / fixed-Huffman / dynamic-Huffman candidates from
+one token pass, and emits the smallest — with the self-contained block split also
+tried at levels ≥ 7. The token stream is opaque to the proof: it is consumed only
+through the `cEnc`/`cEmpty`/`cRes` contracts (which delegate to the `lzMatch_*`
+trio), so the same composition covers both the greedy and lazy matchers.
 
-This composes the per-level roundtrip theorems:
-- `inflate_deflateStoredPure` (Level 0)
-- `inflate_deflateFixed` (Level 1)
-- `inflate_deflateLazyIter` (Levels 2-4)
-- `inflate_deflateDynamic` (Levels 5+)
+This composes the per-strategy roundtrip theorems:
+- `inflate_deflateStoredPure` (stored block, and the incompressible fallback)
+- `inflate_deflateFixedBlock` (fixed-Huffman candidate)
+- `inflate_deflateDynamicBlock` / `inflate_deflateDynamicBlocksSC` (dynamic, split)
 -/
 
 namespace Zip.Native.Deflate
