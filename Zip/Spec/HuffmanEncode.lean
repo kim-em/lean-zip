@@ -123,10 +123,6 @@ def cappedBlCount (depths : List (Nat × Nat)) (maxBits : Nat) : Array Nat := Id
     bl := bl.set! dc ((bl.getD dc 0) + 1)
   return bl
 
-/-- How many natural code lengths exceed `maxBits` — the overflow to repair. -/
-def overflowCount (depths : List (Nat × Nat)) (maxBits : Nat) : Nat :=
-  (depths.filter (fun p => decide (p.2 > maxBits))).length
-
 /-- Largest length `≤ start` with a positive count in `bl` (0 if none). -/
 def findBelow (bl : Array Nat) (start : Nat) : Nat :=
   if start = 0 then 0
@@ -134,17 +130,36 @@ def findBelow (bl : Array Nat) (start : Nat) : Nat :=
   else findBelow bl (start - 1)
 termination_by start
 
+/-- Kraft sum of a `bl_count` histogram in units of `2^-maxBits`:
+    `Σ_l bl[l]·2^(maxBits−l)` over `l ∈ [1, maxBits]`. A complete code sums to
+    exactly `2^maxBits`; a capped histogram exceeds it by the overflow the
+    repair must remove. -/
+def blKraft (bl : Array Nat) (maxBits : Nat) : Nat :=
+  (List.range maxBits).foldl (fun acc i => acc + bl.getD (i + 1) 0 * 2 ^ (maxBits - (i + 1))) 0
+
 /-- Repair a capped `bl_count` so the code is complete (Kraft-exact) within
-    `maxBits`: pull one leaf up from the shallowest available depth and push the
-    overflowing pair down to `maxBits` (zlib `gen_bitlen`). Heuristic only. -/
-def repairBl (bl : Array Nat) (overflow maxBits : Nat) : Array Nat :=
-  if overflow < 2 then bl
-  else
+    `maxBits` (zlib `gen_bitlen`'s move): take the deepest depth `bits` below
+    `maxBits` with a leaf, move that leaf to `bits+1` and pair it with an
+    overflow leaf pulled up from `maxBits`. Each step lowers the Kraft sum by
+    exactly 1 (in `2^-maxBits` units) and preserves the leaf count, so calling
+    it with `excess = blKraft bl maxBits − 2^maxBits` lands exactly on a
+    complete code. The updates must be sequential `set!`s on the current
+    array: when `bits + 1 = maxBits` the `+2` and `−1` compose on the same
+    entry (a chained read of the *original* array here used to overwrite the
+    increment, silently dropping leaves and forcing the flat
+    `fixKraftList` fallback — emitting incomplete codes that zlib's inflate
+    rejects). Heuristic only. -/
+def repairBl (bl : Array Nat) (excess maxBits : Nat) : Array Nat :=
+  match excess with
+  | 0 => bl
+  | e + 1 =>
     let bits := findBelow bl (maxBits - 1)
-    let bl := ((bl.set! bits ((bl.getD bits 0) - 1)).set! (bits + 1)
-                ((bl.getD (bits + 1) 0) + 2)).set! maxBits ((bl.getD maxBits 0) - 1)
-    repairBl bl (overflow - 2) maxBits
-termination_by overflow
+    if bits == 0 then bl  -- defensive: unreachable while over-subscribed
+    else
+      let bl := bl.set! bits ((bl.getD bits 0) - 1)
+      let bl := bl.set! (bits + 1) ((bl.getD (bits + 1) 0) + 2)
+      let bl := bl.set! maxBits ((bl.getD maxBits 0) - 1)
+      repairBl bl e maxBits
 
 /-- The multiset of code lengths a `bl_count` histogram describes, ascending:
     `bl.getD l 0` copies of each `l ∈ [1, maxBits]`. Every element is in
@@ -161,7 +176,8 @@ def limitedPairs (nonzero : List (Nat × Nat)) (maxBits : Nat) : List (Nat × Na
   let leaves := (nonzero.map fun p => BuildTree.leaf p.2 p.1).mergeSort
                   (fun a b => a.weight ≤ b.weight)
   let depths := (buildHuffmanTree leaves).depths
-  let bl := repairBl (cappedBlCount depths maxBits) (overflowCount depths maxBits) maxBits
+  let capped := cappedBlCount depths maxBits
+  let bl := repairBl capped (blKraft capped maxBits - 2 ^ maxBits) maxBits
   let symsByFreq := (nonzero.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1)
   symsByFreq.zip (expandBl bl maxBits ++ List.replicate symsByFreq.length maxBits)
 

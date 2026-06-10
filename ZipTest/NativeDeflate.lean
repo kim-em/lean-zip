@@ -388,6 +388,20 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       unless decomp == data do
         throw (IO.userError s!"deflateDynamicBlocksSharedAt→FFI inflate mismatch on {name} (cuts={cname})")
 
+  -- Regression: text followed by PRNG bytes in one dynamic block used to drive
+  -- the length-limiter's bl_count repair into losing leaves (chained stale
+  -- `set!` reads) and under-repairing (overflow-pair counting vs actual Kraft
+  -- excess), so `fixKraftList` flattened the CL tree to a uniform 7-bit code —
+  -- incomplete, which zlib's inflate rejects ("invalid code lengths set") even
+  -- though our native inflate tolerates it. Pin zlib (FFI) interop at the
+  -- default and max levels.
+  let textPrng := textRepeat ++ mkPrngData 4096
+  for level in [6, 9] do
+    let out := Zip.Native.Deflate.deflateRaw textPrng level.toUInt8
+    let decomp ← RawDeflate.decompress out
+    unless decomp == textPrng do
+      throw (IO.userError s!"deflateRaw({level}) text+prng→FFI inflate mismatch")
+
   -- Stress the many-block cross-reference path: one token per block on a highly
   -- repetitive input, so almost every block references earlier blocks' output.
   let sharedTiny := Zip.Native.Deflate.deflateDynamicBlocksShared textRepeat 1 9
