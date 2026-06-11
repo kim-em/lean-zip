@@ -155,6 +155,79 @@ theorem lz77Chain_encodable (data : ByteArray) (maxChain windowSize insertCap : 
   · intro t ht; simp only [List.toList_toArray] at ht
     exact lz77Chain_mainLoop_encodable data windowSize 65536 maxChain _ _ 0 insertCap hw hws t ht
 
+/-! ## Proven-bounds matcher equivalences (Wave 2d)
+
+`chainWalkFast`/`updateHashesFast` are the proven-bounds copies that the
+iterative matchers run in their hot loops; each is provably equal to the
+panic-checked reference helper. The `*Guarded` wrappers add one runtime
+size check and fall back to the reference, so they share the reference's
+signature and equal it. The iterative-vs-recursive equivalence proofs below
+rewrite the guarded wrappers back to the reference helpers and then proceed
+exactly as before the conversion. -/
+
+/-- The proven-bounds chain walk computes the same `(bestLen, bestPos)` as the
+    panic-checked reference walk: the bodies differ only in how `prev[cand]` is
+    accessed (`'h` vs `!`), and `getElem!_pos` bridges the two. -/
+theorem chainWalkFast_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (cand fuel bestLen bestPos : Nat) :
+    chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos =
+      lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos := by
+  induction fuel generalizing cand bestLen bestPos with
+  | zero => rw [chainWalkFast, lz77Chain.chainWalk]; simp only [↓reduceIte]
+  | succ k ih =>
+    rw [chainWalkFast, lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0)),
+      if_neg (by omega : ¬ (k + 1 = 0))]
+    by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+    · simp only [dif_pos hc, Nat.add_sub_cancel, ih]
+      rw [getElem!_pos prev cand (by omega)]
+    · simp only [dif_neg hc]
+
+/-- One runtime guard collapses to the reference walk. -/
+theorem chainWalkGuarded_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) :
+    chainWalkGuarded data prev windowSize pos maxLen hpm cand fuel bestLen bestPos =
+      lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos := by
+  unfold chainWalkGuarded
+  split
+  · exact chainWalkFast_eq ..
+  · rfl
+
+/-- The proven-bounds hash-insertion loop computes the same arrays as the
+    panic-checked reference: the bodies differ only in how `hashTable[hsh]` is
+    accessed, bridged by `getElem!_pos`. -/
+theorem updateHashesFast_eq (data : ByteArray) (hashSize : Nat)
+    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat)
+    (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size) :
+    updateHashesFast data hashSize hashTable prev pos j matchLen insertCap hhs hht =
+      lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap := by
+  induction hn : matchLen - j using Nat.strongRecOn generalizing j hashTable prev hht with
+  | _ n ih =>
+    unfold updateHashesFast lz77Chain.updateHashes
+    by_cases hcond : j < matchLen ∧ j ≤ insertCap
+    · rw [if_pos hcond, if_pos hcond]
+      by_cases hd : pos + j + 2 < data.size
+      · rw [dif_pos hd, dif_pos hd]
+        have hb : lz77Greedy.hash3 data (pos + j) hashSize hd < hashTable.size := by
+          have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
+          omega
+        simp only [getElem!_pos hashTable (lz77Greedy.hash3 data (pos + j) hashSize hd) hb]
+        exact ih _ (by omega) _ _ _ (by simpa using hht) rfl
+      · rw [dif_neg hd, dif_neg hd]
+        exact ih _ (by omega) _ _ _ hht rfl
+    · rw [if_neg hcond, if_neg hcond]
+
+/-- One runtime guard collapses to the reference insertion. -/
+theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
+    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat) :
+    updateHashesGuarded data hashSize hashTable prev pos j matchLen insertCap =
+      lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap := by
+  unfold updateHashesGuarded
+  split
+  · exact updateHashesFast_eq ..
+  · rfl
+
 /-! ## Iterative version: equivalence + transferred contracts -/
 
 /-- The accumulator `trailing` is the array form of the recursive one. -/
@@ -178,6 +251,7 @@ private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxCha
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIter.mainLoop lz77Chain.mainLoop
+    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split

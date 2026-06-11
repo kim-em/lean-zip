@@ -93,6 +93,46 @@ def processBlock (data : ByteArray) (pos : Nat) (hpos : pos + 3 ≤ data.size) :
 When the caller has already verified `pos + 3 ≤ data.size`, passing it
 as a hypothesis avoids re-checking at every access site.
 
+## Pattern: Generational guarded wrapper (when threading would cascade)
+
+Caller propagation works only if you can add the size hypothesis to the
+callers too. When the function is a **shared helper whose correctness proofs
+are stated for an *arbitrary* array** (no size hypothesis — common for
+heuristic state like a hash table / `prev` chain / DP cost arrays that
+"never enter the proof"), adding a hypothesis in-place cascades it into every
+one of those proofs (`mainLoop_valid`, `_encodable`, …) and breaks them.
+
+Instead, do generational refinement with a **guarded wrapper** — three pieces:
+
+```lean
+-- 1. Proven-bounds copy: identical body, []! → [], takes the size hypothesis.
+def fooFast (... ) (hps : pos ≤ prev.size) (...) := ... prev[cand]'(by omega) ...
+
+-- 2. Wrapper with the ORIGINAL signature: one runtime check per OUTER
+--    iteration establishes the invariant; fall back to the panic-checked
+--    reference when it can't be shown (the fallback is unreachable at runtime).
+@[inline] def fooGuarded (...) (... no hps ...) :=
+  if hps : pos ≤ prev.size then fooFast ... hps ... else foo ...   -- `foo` = reference
+
+-- 3. Equivalence (in the Spec file): wrapper = reference, by `split`.
+theorem fooFast_eq    ... : fooFast ... = foo ... := by induction ...   -- bridge []'h ↔ []! per step
+theorem fooGuarded_eq ... : fooGuarded ... = foo ... := by unfold fooGuarded; split; · exact fooFast_eq ..; · rfl
+```
+
+The runtime (iterative) functions call `fooGuarded`; the reference functions
+and **all** their proofs stay untouched. Each iter-vs-reference equivalence
+proof gains just one line near the top: `simp only [fooGuarded_eq, ...]`
+rewrites the wrappers back to the reference, then the proof proceeds verbatim.
+The one outer-loop check is amortised over the whole inner loop, so the
+inner accesses are statically unchecked. This is the house style
+(`track-d-state.md` step 4; the `lz77Chain` matcher conversion, Wave 2d).
+
+In `fooFast_eq` (a fuel/measure induction), the only per-step difference is
+`prev[cand]'h` vs `prev[cand]!`; bridge with `getElem!_pos` (see pitfall 10),
+then `simp only [Nat.add_sub_cancel, ih]` closes the recursion. If `fooFast`
+carries a size hypothesis whose type mentions an array you induct on, include
+it in `generalizing` (e.g. `generalizing j hashTable prev hht`).
+
 ## Tactics for Bounds Proofs
 
 - **`omega`**: The primary workhorse. Solves linear arithmetic over `Nat`
@@ -269,6 +309,24 @@ def deflateDynamic ... :=
 Hiding the combinator behind a function symbol stops the unfolder
 cold. Expect to see this when a spec that was `rfl` before a
 proven-bounds conversion now reports `maximum recursion depth`.
+
+### 10. `let`-bound index blocks `rw [getElem!_pos]`
+
+When bridging `a[i]'h` ↔ `a[i]!` in a `*Fast_eq` proof, the index is usually
+a `let`/`have`-bound local from the unfolded body (`let hsh := hash3 …; …
+a[hsh]!`). `rw [getElem!_pos a hsh h]` **fails to fire** — you must spell the
+index as the *unfolded expression* (`hash3 …`), which doesn't syntactically
+match the bound `hsh`. Fix: fold it into a `simp only`, whose default `zeta`
+inlines the `let` first, then the rewrite matches:
+
+```lean
+-- rw [getElem!_pos hashTable hsh hb]            -- ✗ `hsh` is let-bound, no match
+simp only [getElem!_pos hashTable (hash3 data (pos+j) hashSize hd) hb]  -- ✓ zeta then rewrite
+```
+
+The bound `hb : index < a.size` is typically `hash3 … < hashSize ≤ a.size`,
+i.e. `Nat.mod_lt _ hpos` (hash3's body is `_ % hashSize`) chained by `omega`
+with the `hashSize ≤ a.size` invariant.
 
 ## Checklist for Conversion
 
