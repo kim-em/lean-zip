@@ -373,12 +373,17 @@ def deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8) 
   else
     (emitChunkBlocks data chunkSize level 0 BitWriter.empty).flush
 
-/-- Chunk size for block splitting in `deflateRaw`: each ~32 KiB run gets its own
+/-- Chunk size for block splitting in `deflateRaw`: each ~16 KiB run gets its own
     dynamic Huffman tree and a fresh match window. Large enough to keep per-block
     header overhead negligible, small enough to let the trees track local
     statistics. `pickSmaller` makes the exact value a pure ratio knob (never a
-    correctness or regression concern). -/
-def splitChunkSize : Nat := 32768
+    correctness or regression concern). 16384 is the joint optimum with
+    `sharedTokChunk` of a Canterbury + Silesia sweep at levels 7–9 (#2529, `lake
+    exe ratio-sweep`). The joint framing matters: in isolation ever-larger chunks
+    sized smaller (less window loss), but `deflateRaw` deploys this variant only
+    on the files where it beats the cross-block split, and there 16384 won at
+    every level. -/
+def splitChunkSize : Nat := 16384
 
 /-! ## Cross-block (shared-window) block-split dynamic compression
 
@@ -418,10 +423,14 @@ termination_by toks.size - pos
 decreasing_by simp_all only [Nat.not_le]; omega
 
 /-- Token-group size for cross-block splitting in `deflateRaw`: number of LZ77
-    tokens per block. A pure ratio knob (`pickSmaller` guards regression); 4096
-    is the measured optimum on text (smaller groups are dominated by per-block
-    header overhead, larger ones by coarser local-statistics tracking). -/
-def sharedTokChunk : Nat := 4096
+    tokens per block. A pure ratio knob (`pickSmaller` guards regression); 8192
+    is the joint optimum with `splitChunkSize` of a Canterbury + Silesia sweep at
+    levels 7–9 (#2529, `lake exe ratio-sweep`) — the same value at every level,
+    so a single global default suffices. Smaller groups are dominated by
+    per-block header overhead, larger ones by coarser local-statistics tracking;
+    the curve is shallow around the optimum (8192 beat 16384 by ~0.015% of
+    corpus total) but moving off the prior single-sample 4096 was worth ~0.19%. -/
+def sharedTokChunk : Nat := 8192
 
 /-- Cross-block (shared-window) block-split dynamic compression. Matches the
     whole input once, then partitions the token stream into `tokChunk`-token
@@ -434,6 +443,206 @@ def deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt
   else
     (emitSharedBlocks data (lzMatch data level)
       tokChunk 0 BitWriter.empty).flush
+
+/-- Emit shared-window blocks at explicit cut points: each element of `cuts` is
+    an absolute token index ending the current block. Every cut is clamped to
+    `(pos, toks.size]`, so **any** cuts list — empty, non-monotone, or out of
+    range — yields a valid total partition; an empty list emits one final block
+    of the rest. The clamping is what keeps the boundary *heuristic* free of
+    proof obligations: the roundtrip holds for an arbitrary partition. -/
+def emitSharedBlocksAt (data : ByteArray) (toks : Array LZ77Token) (cuts : List Nat)
+    (pos : Nat) (bw : BitWriter) : BitWriter :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let bw := emitSharedBlock bw data (toks.extract pos j) (decide (j ≥ toks.size))
+  if j ≥ toks.size then bw
+  else emitSharedBlocksAt data toks cuts.tail j bw
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- Cross-block (shared-window) block-split dynamic compression with the
+    partition chosen by `choose`: like `deflateDynamicBlocksShared`, but the
+    per-block token groups come from the cut list `choose toks` instead of a
+    fixed cadence. The roundtrip holds for any `choose` (the emitter clamps
+    every cut), so the selector is a pure ratio heuristic. -/
+def deflateDynamicBlocksSharedAt (data : ByteArray)
+    (choose : Array LZ77Token → List Nat) (level : UInt8) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    let toks := lzMatch data level
+    (emitSharedBlocksAt data toks (choose toks) 0 BitWriter.empty).flush
+
+/-! ## Entropy-divergence boundary heuristic (libdeflate-style)
+
+Instead of cutting the shared-window token stream at a fixed cadence, walk it
+once and close a block where the symbol statistics *shift*: maintain a coarse
+observation histogram for the block so far and one for a recent window, and cut
+when the scaled distribution delta exceeds a threshold (libdeflate
+`deflate_compress.c`, `observe_literal`/`observe_match`/`do_end_block_check`).
+Every constant below is a pure ratio knob: the emitter clamps arbitrary cuts,
+so none of this carries proof obligations, and `chooseSplitsArbitrated` sizes
+the result against the fixed cadence in exact bits so the heuristic can never
+regress the shared-window candidate. -/
+
+/-- Number of literal observation classes (libdeflate
+    `NUM_LITERAL_OBSERVATION_TYPES`): literals are bucketed by bits 7,6,0 —
+    a cheap proxy separating case/digit/punctuation regimes. -/
+def splitNumLiteralClasses : Nat := 8
+
+/-- Total observation classes (libdeflate `NUM_OBSERVATION_TYPES`): 8 literal
+    classes plus 2 match classes (short/long). -/
+def splitNumClasses : Nat := 10
+
+/-- New observations between divergence checks (libdeflate
+    `NUM_OBSERVATIONS_PER_BLOCK_CHECK`): the recent-window size in tokens. -/
+def splitCheckTokens : Nat := 512
+
+/-- Floor on block *output* bytes, and on bytes remaining after a cut
+    (libdeflate `MIN_BLOCK_LENGTH`): per-block tree headers stop paying for
+    themselves below this, per the #2527 `sharedTokChunk` sweep. -/
+def splitMinBlockBytes : Nat := 10000
+
+/-- Unconditional cut ceiling on block output bytes (libdeflate
+    `SOFT_MAX_BLOCK_LENGTH`): even statistically-uniform runs get a fresh tree
+    at this scale, bounding how stale the code lengths can grow. -/
+def splitSoftMaxBlockBytes : Nat := 300000
+
+/-- Divergence threshold numerator/denominator (libdeflate's `200/512`): cut
+    when the sum of absolute probability deltas reaches ~39%. -/
+def splitCutoffNum : Nat := 200
+/-- See `splitCutoffNum`. -/
+def splitCutoffDen : Nat := 512
+
+/-- Length bias divisor (libdeflate's `block_length / 4096` term): longer
+    blocks cut progressively easier, since a fresh tree amortizes better. -/
+def splitBiasBytes : Nat := 4096
+
+/-- Observation class of a token (libdeflate `observe_literal`/`observe_match`):
+    literals map to 0–7 by bits 7,6,0; matches map to 8 (length < 9) or 9. -/
+@[inline] def splitTokenClass : LZ77Token → Nat
+  | .literal b => (((b >>> 5) &&& 6) ||| (b &&& 1)).toNat
+  | .reference len _ => splitNumLiteralClasses + (if len ≥ 9 then 1 else 0)
+
+/-- Output bytes a token contributes: 1 for a literal, the match length for a
+    reference. -/
+@[inline] def splitTokenBytes : LZ77Token → Nat
+  | .literal _ => 1
+  | .reference len _ => len
+
+/-- The divergence test (libdeflate `do_end_block_check`): cut when
+    `Σᵢ |new[i]·oldTot − old[i]·newTot| + (blockBytes/splitBiasBytes)·oldTot`
+    reaches `newTot·splitCutoffNum/splitCutoffDen·oldTot` — i.e. the recent
+    window's class distribution differs from the block-so-far distribution by
+    at least ~39% probability mass (less for long blocks). Integer-only; the
+    caller guarantees `oldTot > 0`. libdeflate additionally inflates the cutoff
+    for blocks under `MIN_BLOCK_LENGTH`, but our caller (like libdeflate's
+    `ready_to_check_block`) never checks such blocks, so that branch is omitted
+    as dead code. -/
+def splitEndBlockCheck (old : Array Nat) (oldTot : Nat) (new : Array Nat) (newTot : Nat)
+    (blockBytes : Nat) : Bool := Id.run do
+  let mut delta := 0
+  for i in [0:splitNumClasses] do
+    let a := new.getD i 0 * oldTot
+    let b := old.getD i 0 * newTot
+    delta := delta + (if a ≥ b then a - b else b - a)
+  let cutoff := newTot * splitCutoffNum / splitCutoffDen * oldTot
+  return delta + (blockBytes / splitBiasBytes) * oldTot ≥ cutoff
+
+/-- Entropy-divergence cut points for the shared-window token stream: one pass
+    over `toks`, accumulating per-class observation counts. Block-so-far
+    (`old`) and recent-window (`new`) histograms are compared every
+    `splitCheckTokens` tokens once the block and the remaining input are both
+    at least `splitMinBlockBytes` output bytes; on divergence the block is cut
+    at the next token boundary, otherwise the window merges into `old`. Blocks
+    are force-cut at `splitSoftMaxBlockBytes`. Byte floor/ceiling are enforced
+    per-token (a single 512-token window can span ~132 KB of output via long
+    matches, so checking them only at window boundaries could overshoot). -/
+def chooseSplitsHeuristic (toks : Array LZ77Token) : List Nat := Id.run do
+  let mut totalBytes := 0
+  for t in toks do
+    totalBytes := totalBytes + splitTokenBytes t
+  let mut old : Array Nat := Array.replicate splitNumClasses 0
+  let mut oldTot := 0
+  let mut new : Array Nat := Array.replicate splitNumClasses 0
+  let mut newTot := 0
+  let mut blockBytes := 0
+  let mut doneBytes := 0
+  let mut cuts : Array Nat := #[]
+  for h : i in [0:toks.size] do
+    let t := toks[i]
+    let c := splitTokenClass t
+    new := new.set! c (new.getD c 0 + 1)
+    newTot := newTot + 1
+    blockBytes := blockBytes + splitTokenBytes t
+    doneBytes := doneBytes + splitTokenBytes t
+    if blockBytes ≥ splitMinBlockBytes && totalBytes - doneBytes ≥ splitMinBlockBytes then
+      let cut :=
+        blockBytes ≥ splitSoftMaxBlockBytes ||
+        (newTot ≥ splitCheckTokens && oldTot > 0 &&
+          splitEndBlockCheck old oldTot new newTot blockBytes)
+      if cut then
+        cuts := cuts.push (i + 1)
+        old := Array.replicate splitNumClasses 0
+        oldTot := 0
+        new := Array.replicate splitNumClasses 0
+        newTot := 0
+        blockBytes := 0
+      else if newTot ≥ splitCheckTokens then
+        for j in [0:splitNumClasses] do
+          old := old.set! j (old.getD j 0 + new.getD j 0)
+        oldTot := oldTot + newTot
+        new := Array.replicate splitNumClasses 0
+        newTot := 0
+  return cuts.toList
+
+/-- The cut list equivalent to `emitSharedBlocks`'s fixed cadence: multiples of
+    `max tokChunk 1` strictly below `n`. `emitSharedBlocksAt … (fixedCadenceCuts
+    tokChunk toks.size)` emits byte-for-byte what `emitSharedBlocks … tokChunk`
+    emits (pinned by a conformance test). -/
+def fixedCadenceCuts (tokChunk n : Nat) : List Nat :=
+  let step := max tokChunk 1
+  (List.range ((n + step - 1) / step)).filterMap fun k =>
+    if k == 0 then none else some (k * step)
+
+/-- Exact bit size of the shared-window block stream `emitSharedBlocksAt` would
+    emit for this partition, without emitting: per group, `3` header bits plus
+    the dynamic-tree header (sized by running `writeDynamicHeader` into an
+    empty writer, as `dynBlockBytes` does) plus the freq·codeLen dot product
+    (`symbolBitCount`, which includes the end-of-block symbol). Mirrors the
+    emitter's grouping exactly — same clamped cut `j`, same final-block test —
+    so `(emitSharedBlocksAt …).bitLength` equals this sum (pinned by a
+    `SizeHelpers` conformance test; the flushed byte size is `⌈bits/8⌉`). -/
+def sharedPartitionBits (toks : Array LZ77Token) (cuts : List Nat) (pos : Nat) : Nat :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqs (toks.extract pos j)
+  let lens := dynamicCodeLengths f.1 f.2
+  let blockBits := 3 + (writeDynamicHeader BitWriter.empty lens.1 lens.2).bitLength
+    + symbolBitCount f.1 f.2 lens.1.toArray lens.2.toArray
+  if j ≥ toks.size then blockBits
+  else blockBits + sharedPartitionBits toks cuts.tail j
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- Cost-model arbitration between the entropy-divergence cuts and the fixed
+    `sharedTokChunk` cadence: size both partitions in exact unflushed bits and
+    keep the smaller, **ties → fixed**. Since the emitted stream is one final
+    flush of exactly those bits (byte size `⌈bits/8⌉`), heuristic bits ≤ fixed
+    bits implies the emitted candidate never exceeds the old fixed-cadence one
+    — any observed regression is a `sharedPartitionBits` conformance bug, not
+    rounding. The sizing costs two extra `O(tokens)` passes; the matcher still
+    dominates at the levels that use this. -/
+def chooseSplitsArbitrated (toks : Array LZ77Token) : List Nat :=
+  let h := chooseSplitsHeuristic toks
+  let f := fixedCadenceCuts sharedTokChunk toks.size
+  if sharedPartitionBits toks h 0 < sharedPartitionBits toks f 0 then h else f
 
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
@@ -501,7 +710,11 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
         (wins on locally-varying statistics, e.g. structured binary);
       * cross-block (shared-window) split — one whole-file match pass, token stream
         partitioned per block, references cross block boundaries (wins on large
-        text, where the self-contained split loses cross-chunk matches).
+        text, where the self-contained split loses cross-chunk matches). The
+        partition comes from the entropy-divergence heuristic arbitrated in
+        exact bits against the fixed `sharedTokChunk` cadence
+        (`chooseSplitsArbitrated`), so it cuts where the symbol statistics
+        shift and never sizes worse than the fixed cadence.
     At level 9 (and within the `optimalMaxSize` memory gate) a fourth candidate
     joins: the cross-block stream over the **near-optimal** cost-model DP parse
     (`deflateDynamicBlocksOptimal`), which chooses the globally cheapest token
@@ -520,12 +733,12 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       pickSmaller
         (pickSmaller (deflateRawBase data level)
           (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-            (deflateDynamicBlocksShared data sharedTokChunk level)))
+            (deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level)))
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
       pickSmaller (deflateRawBase data level)
         (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-          (deflateDynamicBlocksShared data sharedTokChunk level))
+          (deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level))
   else deflateRawBase data level
 
 end Zip.Native.Deflate
