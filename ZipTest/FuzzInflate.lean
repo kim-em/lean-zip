@@ -268,15 +268,228 @@ def runFuzzUntil (seed : UInt64) (deadlineMs : Nat)
     count := count + 1
   return count
 
+/-! ## Encoder-side conformance fuzz
+
+The inflate fuzz above only ever round-trips the native decoder against
+itself or feeds random bytes to the FFI. Neither can see an *encoder*
+bug where native `deflateRaw` emits a stream the native inflate happily
+accepts but zlib rejects — the `repairBl` length-limiter regression was
+exactly this shape (incomplete CL / lit-len code sets that native
+inflate tolerates and zlib does not). The two entries below close that
+gap: a compress→FFI-decompress round-trip, and a differential
+strictness census over bit-flipped dynamic-block headers. -/
+
+/-- Input size classes for the encoder-side fuzz. Capped well below the
+    inflate harness's 64 KiB because every payload is compressed at a
+    sampled level (including the optimal-parse level 9), which is far
+    costlier than a decode. -/
+private def compressSizeClasses : Array Nat :=
+  #[0, 1, 13, 200, 2048, 16384]
+
+/-- Levels sampled by the compress→FFI fuzz. Spans stored (0), the fast
+    greedy/lazy band, and the optimal parser (9) — the riskiest emit
+    path and the one the upcoming matcher surgery will churn. -/
+private def compressLevels : Array UInt8 :=
+  #[0, 1, 4, 6, 7, 8, 9]
+
+/-- Generate a fuzz payload of compressibility `cls` (`0`: random /
+    incompressible — the encoder falls back to a stored block; `1`: small
+    alphabet; `2`: long runs; `3`: repeated motif + sparse noise). Classes
+    1–3 deliberately carry structure the encoder turns into fixed/dynamic
+    Huffman blocks, so the header-emit logic — the surface the `repairBl`
+    bug lived on — actually runs. Returns the payload and updated PRNG
+    state. -/
+private def genPayloadCls (state : UInt64) (n : Nat) (cls : Nat) :
+    ByteArray × UInt64 := Id.run do
+  let mut s := xorshift64 state
+  let alpha := 3 + (s >>> 16).toNat % 12     -- 3..14 distinct values (class 1)
+  let motifLen := 3 + (s >>> 24).toNat % 24  -- 3..26 byte motif (class 3)
+  let mut out := ByteArray.empty
+  for i in [:n] do
+    s := xorshift64 s
+    let b : UInt8 :=
+      match cls % 4 with
+      | 0 => (s &&& 0xFF).toUInt8                  -- random / incompressible
+      | 1 => (s.toNat % alpha).toUInt8            -- small alphabet → dynamic Huffman
+      | 2 => ((i / 31 + s.toNat % 3) % 11).toUInt8 -- long runs → RLE-friendly
+      | _ =>                                      -- repeated motif + sparse noise
+        if s.toNat % 16 == 0 then (s &&& 0xFF).toUInt8
+        else ((i % motifLen) * 31 % 256).toUInt8
+    out := out.push b
+  return (out, s)
+
+/-- Generate a fuzz payload whose compressibility class is PRNG-picked
+    across all four classes. Used by the compress→FFI fuzz, which wants
+    the stored-fallback path exercised alongside the Huffman paths. -/
+private def genPayload (state : UInt64) (n : Nat) : ByteArray × UInt64 :=
+  genPayloadCls state n (xorshift64 state).toNat
+
+/-- One compress→FFI-decompress iteration: build a payload, compress it
+    with native `deflateRaw` at a sampled level, decompress through the
+    zlib FFI, and assert byte equality. A mismatch means the native
+    encoder produced a stream zlib decodes differently (or rejects) — the
+    cross-implementation bug class native-only round-trips can't see. -/
+private def oneCompressIter (state : UInt64) : IO UInt64 := do
+  let s0 := xorshift64 state
+  let size := pick compressSizeClasses s0
+  let (payload, s1) := genPayload s0 size
+  let s2 := xorshift64 s1
+  let level := pick compressLevels s2
+  let compressed := Zip.Native.Deflate.deflateRaw payload level
+  let decompressed ← RawDeflate.decompress compressed defaultMaxOutput.toUInt64
+  unless decompressed == payload do
+    throw (IO.userError
+      s!"[compress-fuzz] level={level} size={size}: FFI decode mismatch \
+         (got {decompressed.size}B, want {size}B)")
+  return s2
+
+/-- Run `iterations` compress→FFI-decompress fuzz iterations from `seed`. -/
+def runCompressFuzz (seed : UInt64) (iterations : Nat) : IO Unit := do
+  let mut state := if seed = 0 then 0x5eed1234abcd1234 else seed
+  for _ in [:iterations] do
+    state ← oneCompressIter state
+
+/-! ### Differential strictness census
+
+Take a *valid* dynamic-block stream the native encoder produced (so it
+round-trips through both decoders by construction), flip one bit inside
+its header region (BTYPE intact; HLIT/HDIST/HCLEN/CL-code-lengths and the
+start of the lit-len length sequence), then ask both decoders to decode
+the mutation. The verdicts are tallied into four buckets. The only
+*failure* is a both-accept-but-disagree result (silent corruption);
+native-accepts/FFI-rejects is the known strictness gap and is recorded,
+not failed, so the count can inform whether tightening native inflate is
+worth a follow-up. -/
+
+/-- Header-region width (bytes from the block start) the differential
+    fuzz flips bits within. ~12 bytes covers the 3-bit block header, the
+    HLIT/HDIST/HCLEN fields, the up-to-19 3-bit CL code lengths, and the
+    first few CL-encoded lit-len lengths. -/
+private def diffHeaderBytes : Nat := 12
+
+/-- Size classes for the differential fuzz. Biased upward — tiny inputs
+    compress to a fixed-Huffman or stored block (the encoder's
+    `pickSmaller` picks the smallest), so the base stream has to be large
+    enough that a *dynamic* block wins and there is a header to mutate. -/
+private def diffSizeClasses : Array Nat :=
+  #[300, 800, 2000, 4096, 9000]
+
+/-- Running tally of native-vs-FFI verdicts over mutated streams. -/
+private structure Census where
+  nativeAcceptFFIReject : Nat := 0
+  nativeRejectFFIAccept : Nat := 0
+  bothAccept : Nat := 0
+  bothReject : Nat := 0
+  mutated : Nat := 0
+  skipped : Nat := 0   -- payload didn't compress to a dynamic block
+deriving Inhabited
+
+/-- Flip bit `bitIndex` (LSB-first within each byte, matching DEFLATE's
+    bit order) of `data`. Out-of-range indices return `data` unchanged. -/
+private def flipBit (data : ByteArray) (bitIndex : Nat) : ByteArray :=
+  let byteIdx := bitIndex / 8
+  if byteIdx < data.size then
+    let mask : UInt8 := (1 : UInt8) <<< (UInt8.ofNat (bitIndex % 8))
+    data.set! byteIdx (data[byteIdx]! ^^^ mask)
+  else data
+
+/-- Decode `data` through the zlib FFI, mapping the `userError` the FFI
+    raises on a malformed stream into an `Except` so the caller can
+    compare verdicts uniformly. Non-`userError` exceptions re-raise (see
+    `tryFFI`). -/
+private def ffiVerdict (data : ByteArray) : IO (Except Unit ByteArray) := do
+  try
+    let b ← RawDeflate.decompress data defaultMaxOutput.toUInt64
+    return .ok b
+  catch e =>
+    match e with
+    | .userError _ => return .error ()
+    | _ => throw e
+
+/-- One differential iteration. Builds a guaranteed-valid dynamic block
+    via `deflateRaw … 9`, skips inputs that compressed to a non-dynamic
+    block (BTYPE ≠ 2), mutates one header bit, and folds the verdict into
+    `c`. Returns the updated PRNG state and census. -/
+private def oneDiffIter (state : UInt64) (c : Census) : IO (UInt64 × Census) := do
+  let s0 := xorshift64 state
+  let size := pick diffSizeClasses s0
+  -- Compressible payload (classes 1–3 only): force structure so level 9
+  -- emits a dynamic block rather than a stored/fixed fallback.
+  let cls := 1 + s0.toNat % 3
+  let (payload, s1) := genPayloadCls s0 size cls
+  let stream := Zip.Native.Deflate.deflateRaw payload 9
+  -- BTYPE lives in bits 1–2 of the first byte (LSB-first); 2 == dynamic.
+  let isDynamic := stream.size > 0 && ((stream[0]! >>> 1) &&& 3) == 2
+  if !isDynamic then
+    return (s1, { c with skipped := c.skipped + 1 })
+  -- The base stream is the verified encoder's output, so it must
+  -- round-trip through both decoders — assert it as extra conformance.
+  match Zip.Native.Inflate.inflate stream defaultMaxOutput with
+  | .error e => throw (IO.userError s!"[diff-fuzz] base native inflate failed: {e}")
+  | .ok r =>
+    unless r == payload do
+      throw (IO.userError "[diff-fuzz] base native round-trip mismatch")
+  let baseFFI ← RawDeflate.decompress stream defaultMaxOutput.toUInt64
+  unless baseFFI == payload do
+    throw (IO.userError "[diff-fuzz] base FFI round-trip mismatch")
+  -- Flip one bit in the header region, leaving BFINAL/BTYPE (bits 0–2)
+  -- intact so the mutation stays a dynamic-header mutation.
+  let s2 := xorshift64 s1
+  let span := min (diffHeaderBytes * 8) (stream.size * 8)
+  if span ≤ 3 then
+    return (s2, { c with skipped := c.skipped + 1 })
+  let bitIdx := 3 + s2.toNat % (span - 3)
+  let mutated := flipBit stream bitIdx
+  let nativeRes := Zip.Native.Inflate.inflate mutated defaultMaxOutput
+  let ffiRes ← ffiVerdict mutated
+  let c := { c with mutated := c.mutated + 1 }
+  match nativeRes, ffiRes with
+  | .ok nb, .ok fb =>
+    unless nb == fb do
+      throw (IO.userError
+        s!"[diff-fuzz] CORRUPTION: native and FFI both accept the mutated \
+           stream but disagree (bit {bitIdx}, native {nb.size}B vs FFI {fb.size}B)")
+    return (s2, { c with bothAccept := c.bothAccept + 1 })
+  | .ok _, .error _ =>
+    return (s2, { c with nativeAcceptFFIReject := c.nativeAcceptFFIReject + 1 })
+  | .error _, .ok _ =>
+    return (s2, { c with nativeRejectFFIAccept := c.nativeRejectFFIAccept + 1 })
+  | .error _, .error _ =>
+    return (s2, { c with bothReject := c.bothReject + 1 })
+
+/-- Run `iterations` differential header-mutation iterations from `seed`,
+    returning the accumulated census. -/
+def runDiffFuzz (seed : UInt64) (iterations : Nat) : IO Census := do
+  let mut state := if seed = 0 then 0xd1ff5eed0badf00d else seed
+  let mut c : Census := {}
+  for _ in [:iterations] do
+    let (s, c') ← oneDiffIter state c
+    state := s
+    c := c'
+  return c
+
 /-- Smoke test: fixed-seed 1000-iteration run invoked from `lake exe
     test`. Iteration count is bounded to keep CI runtime reasonable
     (~100 ms at ~100 μs/iteration). Prints the seed up front so a
     future CI failure log carries enough information to reproduce
-    locally. -/
+    locally.
+
+    Also drives the two encoder-side fuzz entries (compress→FFI
+    round-trip and the differential header-mutation census), each ≥ 256
+    iterations, and prints the native-vs-FFI verdict census so a CI log
+    (and the PR description) carries the strictness-gap count. -/
 def tests : IO Unit := do
   let seed : UInt64 := 0xdeadbeef
   IO.println s!"  FuzzInflate tests (seed=0x{String.ofList (Nat.toDigits 16 seed.toNat)})..."
   runFuzz seed 1000
   IO.println "    1000 iterations completed"
+  runCompressFuzz 0xc0ffee 256
+  IO.println "    256 compress→FFI iterations completed"
+  let census ← runDiffFuzz 0xfeedface 256
+  IO.println s!"    256 differential header-mutation iterations completed \
+    ({census.mutated} mutated, {census.skipped} skipped non-dynamic)"
+  IO.println s!"    census: both-accept {census.bothAccept}, both-reject \
+    {census.bothReject}, native-accept/FFI-reject {census.nativeAcceptFFIReject}, \
+    native-reject/FFI-accept {census.nativeRejectFFIAccept}"
 
 end ZipTest.FuzzInflate
