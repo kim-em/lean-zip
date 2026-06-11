@@ -54,7 +54,48 @@ moves the numbers.
 
 | ID | Dimension | Candidate | Why / expected effect | Provability |
 |----|-----------|-----------|-----------------------|-------------|
-| D-2 | runtime | **Profile native `deflateRaw`** to find the dominant cost (allocation, `ByteArray.push` growth, List↔Array conversions, linear LZ77 scan) | Prerequisite for D-3/D-6; turns "10 MB/s" into a named bottleneck. | n/a (measurement). |
+| — | — | *(backlog empty — the performance-pivot waves below are the active queue)* | | |
+
+## Wave-0 phase profile (D-2, closed 2026-06-11)
+
+Per-phase ms, `deflateRaw` (this machine; alice29.txt 152 KB / dickens 10.2 MB;
+input perturbed per rep, IO-forced phases). `emit` = single dynamic block incl.
+its internal freqs+lens recompute; candidates timed independently.
+
+alice29.txt:
+| lvl | match | freqs | emit | base | SC | SharedAt | optimal | full | MB/s | dec MB/s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 4.7 | 2.1 | 5.4 | 10.3 | | | | 10.4 | 14.7 | 106 |
+| 6 | 23.4 | 1.8 | 4.7 | 28.2 | | | | 28.0 | 5.4 | 110 |
+| 7 | 26.9 | 1.9 | 4.8 | 31.5 | 19.5 | 37.3 | | 88.7 | 1.7 | 114 |
+| 9 | 30.4 | 1.9 | 4.8 | 35.2 | 19.8 | 40.8 | 161.0 | 254.4 | 0.6 | 105 |
+
+dickens:
+| lvl | match | freqs | emit | base | SC | SharedAt | optimal | full | MB/s | dec MB/s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 390 | 162 | 393 | 755 | | | | 749 | 13.6 | 97 |
+| 6 | 1733 | 136 | 344 | 2064 | | | | 2062 | 4.9 | 113 |
+| 7 | 2013 | 138 | 347 | 2335 | 1312 | 2696 | | 6329 | 1.6 | 111 |
+| 9 | 2156 | 139 | 355 | 2493 | 1314 | 2854 | 10086 | 16591 | 0.6 | 101 |
+
+**Named bottlenecks (in priority order):**
+1. **Matcher is 83–84% of the base path at L6** (and the lazy step at L4 costs
+   ~2× over L3) — hash-chain maintenance + search; the Wave-3 matcher-state
+   representation target.
+2. **The L≥7 dispatch redundancy is exactly the cliff**: L7 = base + SC +
+   SharedAt run end-to-end, each redoing the full matcher (SharedAt = matcher
+   + ~0.7 s cut-arbitration/emit on dickens). One shared token pass + SC
+   demoted to L9 ⇒ L7 ≈ matcher + two emit tails ≈ 2.1× immediately; the
+   remaining gap to ~5 MB/s needs the freqs/sizing dedup inside the
+   candidates (each candidate re-runs `tokenFreqs` over the same stream).
+3. **At L1–3 the emit side is ~half the time** (dickens L1: matcher 52%,
+   freqs 21%, emit ~27%) — `tokenFreqs` + `emitTokensWithCodes` are the
+   fflate-goal lever, not just the matcher.
+4. **Optimal DP = 61% of L9** (10.1 s/10 MB ≈ 1 MB/s parser throughput) —
+   acceptable for the max tier; cache-build chain walk dominates within it.
+5. **Decode is already 97–118 MB/s** on these files — the OCaml goal (≥120)
+   needs only ~1.1–1.25×: targeted tail fixes, not a wave.
+
 
 ## Landed
 
