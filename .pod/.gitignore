@@ -4,3 +4,10 @@ claim-history.*
 claude-config/
 cleanup.lock
 target
+gh-access.log
+gh-cache/
+provenance-cache/
+issue-state-cache.json
+security-cache.json
+tui-cache.json
+housekeeping.*
