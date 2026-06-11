@@ -198,6 +198,7 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
+    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       -- Branch tree: hge / hle / h3lt / (matchLen2 > matchLen) / hle2
