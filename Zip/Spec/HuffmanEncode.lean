@@ -168,6 +168,12 @@ def repairBl (bl : Array Nat) (excess maxBits : Nat) : Array Nat :=
 def expandBl (bl : Array Nat) (maxBits : Nat) : List Nat :=
   (List.range maxBits).flatMap (fun i => List.replicate (bl.getD (i + 1) 0) (i + 1))
 
+/-- Total number of codewords a `bl_count` histogram describes: `Σ_l bl[l]` over
+    `l ∈ [1, maxBits]`. This is the length of `expandBl` (see `expandBl_length`); the
+    repair preserves it, so it equals the leaf count of the source Huffman tree. -/
+def blCountSum (bl : Array Nat) (maxBits : Nat) : Nat :=
+  (List.range maxBits).foldl (fun acc i => acc + bl.getD (i + 1) 0) 0
+
 /-- Proper length-limited Huffman lengths as `(symbol, length)` pairs: build the
     tree, cap+repair its depths into a complete `≤ maxBits` code, and hand the
     lengths to symbols by decreasing frequency (most frequent → shortest). The
@@ -388,6 +394,33 @@ private theorem kraftSum_flatMap_replicate (bl : Array Nat) (maxBits : Nat) (is 
 theorem expandBl_kraft (bl : Array Nat) (maxBits : Nat) :
     kraftSum (expandBl bl maxBits) maxBits = blKraft bl maxBits :=
   kraftSum_flatMap_replicate bl maxBits (List.range maxBits)
+
+/-- `kraftSum` depends only on the *multiset* of depths: a permutation of the depth
+    list leaves the Kraft sum unchanged. The code `limitedPairs` hands to symbols is a
+    permutation of `expandBl`, so this is what lets the histogram-level Kraft equality
+    transfer to the per-symbol length list. -/
+theorem kraftSum_perm {l₁ l₂ : List Nat} (h : l₁.Perm l₂) (D : Nat) :
+    kraftSum l₁ D = kraftSum l₂ D := by
+  simp only [kraftSum]
+  exact h.foldl_eq' (fun _ _ _ _ z => by omega) 0
+
+/-- Length of the histogram-expanded length list over an arbitrary index list `is`,
+    matching the `kraftSum_flatMap_replicate` shape. -/
+private theorem length_flatMap_replicate (bl : Array Nat) (is : List Nat) :
+    (is.flatMap (fun i => List.replicate (bl.getD (i + 1) 0) (i + 1))).length
+      = is.foldl (fun acc i => acc + bl.getD (i + 1) 0) 0 := by
+  induction is with
+  | nil => simp only [List.flatMap_nil, List.length_nil, List.foldl_nil]
+  | cons x xs ih =>
+    rw [List.flatMap_cons, List.length_append, List.length_replicate, ih,
+      List.foldl_cons, Nat.zero_add, ← List.foldl_add_init]
+
+/-- The number of lengths `expandBl` emits is exactly the histogram leaf count
+    `blCountSum`. Together with `repairBl` preserving `blCountSum`, this pins the
+    emitted code to the same number of symbols the source tree had. -/
+theorem expandBl_length (bl : Array Nat) (maxBits : Nat) :
+    (expandBl bl maxBits).length = blCountSum bl maxBits :=
+  length_flatMap_replicate bl (List.range maxBits)
 
 /-- A `BuildTree` rooted at depth `d` has its Kraft sum (relative to any `D ≥ max depth`)
     equal to `2^(D - d)`. This is the fundamental property of binary trees:
