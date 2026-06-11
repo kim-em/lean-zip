@@ -467,15 +467,22 @@ decreasing_by
     per-block token groups come from the cut list `choose toks` instead of a
     fixed cadence. The roundtrip holds for any `choose` (the emitter clamps
     every cut), so the selector is a pure ratio heuristic. -/
-def deflateDynamicBlocksSharedAt (data : ByteArray)
-    (choose : Array LZ77Token → List Nat) (level : UInt8) : ByteArray :=
+def deflateDynamicBlocksSharedAtTokens (data : ByteArray) (toks : Array LZ77Token)
+    (choose : Array LZ77Token → List Nat) : ByteArray :=
   if data.size == 0 then
     let f := tokenFreqs #[]
     (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
       (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
   else
-    let toks := lzMatch data level
     (emitSharedBlocksAt data toks (choose toks) 0 BitWriter.empty).flush
+
+/-- `deflateDynamicBlocksSharedAtTokens` over this level's `lzMatch` stream.
+    Kept as a definitional wrapper so the level-9 dispatch can share one
+    matcher pass across candidates (Wave 1): the spec lemmas are stated about
+    this wrapper and see through it by `rfl`. -/
+def deflateDynamicBlocksSharedAt (data : ByteArray)
+    (choose : Array LZ77Token → List Nat) (level : UInt8) : ByteArray :=
+  deflateDynamicBlocksSharedAtTokens data (lzMatch data level) choose
 
 /-! ## Entropy-divergence boundary heuristic (libdeflate-style)
 
@@ -665,8 +672,7 @@ def deflateCompressed (data : ByteArray) (level : UInt8) : ByteArray :=
     all *sized* from one shared token pass, emitting only the winner. Falls back to
     a stored block whenever that is smaller, so incompressible input never expands.
     This is the base candidate that the block-split streams are compared against. -/
-def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
-  let tokens := lzMatch data level
+def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
   let f := tokenFreqs tokens
   let lens := dynamicCodeLengths f.1 f.2
   let fixedBytes := fixedBlockBytes f.1 f.2
@@ -680,6 +686,19 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
   else if fixedBytes < dynBytes then deflateFixedBlock data tokens
   else deflateDynamicBlockCore data tokens lens.1 lens.2
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+
+/-- `deflateRawBaseTokens` over this level's `lzMatch` stream (definitional
+    wrapper; see `deflateDynamicBlocksSharedAt`). -/
+def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
+  deflateRawBaseTokens data (lzMatch data level)
+
+theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
+    deflateRawBaseTokens data (lzMatch data level) = deflateRawBase data level := rfl
+
+theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
+    (choose : Array LZ77Token → List Nat) (level : UInt8) :
+    deflateDynamicBlocksSharedAtTokens data (lzMatch data level) choose =
+      deflateDynamicBlocksSharedAt data choose level := rfl
 
 /-! ## Near-optimal candidate (level 9) -/
 
@@ -729,16 +748,20 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if 7 ≤ level then
+    -- One matcher pass shared by the base and shared-split candidates (the
+    -- matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
+    let tokens := lzMatch data level
     if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
       pickSmaller
-        (pickSmaller (deflateRawBase data level)
+        (pickSmaller (deflateRawBaseTokens data tokens)
           (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-            (deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level)))
+            (deflateDynamicBlocksSharedAtTokens data tokens chooseSplitsArbitrated)))
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
-      pickSmaller (deflateRawBase data level)
-        (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-          (deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level))
+      -- The self-contained split is demoted to level 9: it wins on exactly
+      -- one corpus file while paying a full per-chunk match pass.
+      pickSmaller (deflateRawBaseTokens data tokens)
+        (deflateDynamicBlocksSharedAtTokens data tokens chooseSplitsArbitrated)
   else deflateRawBase data level
 
 end Zip.Native.Deflate

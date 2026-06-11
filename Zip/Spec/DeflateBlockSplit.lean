@@ -1093,7 +1093,7 @@ theorem decode_deflateDynamicBlocksSharedAt (data : ByteArray)
     Deflate.Spec.decode
       (Deflate.Spec.bytesToBits (deflateDynamicBlocksSharedAt data choose level)) =
       some data.data.toList := by
-  unfold deflateDynamicBlocksSharedAt
+  unfold deflateDynamicBlocksSharedAt deflateDynamicBlocksSharedAtTokens
   split
   · -- data.size = 0: one final block over the empty token list (as in SC).
     rename_i hz
@@ -1155,7 +1155,7 @@ theorem deflateDynamicBlocksSharedAt_goR_pad (data : ByteArray)
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (deflateDynamicBlocksSharedAt data choose level)) []
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
-  unfold deflateDynamicBlocksSharedAt
+  unfold deflateDynamicBlocksSharedAt deflateDynamicBlocksSharedAtTokens
   split
   · -- data.size = 0
     rename_i hz
@@ -1206,7 +1206,7 @@ theorem deflateDynamicBlocksSharedAt_pad (data : ByteArray)
     ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateDynamicBlocksSharedAt data choose level) =
         contentBits ++ padding ∧ padding.length < 8 := by
-  unfold deflateDynamicBlocksSharedAt
+  unfold deflateDynamicBlocksSharedAt deflateDynamicBlocksSharedAtTokens
   split
   · obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, hwf⟩ :=
       emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
