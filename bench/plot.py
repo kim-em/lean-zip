@@ -307,6 +307,16 @@ def main():
     doc = load(results_path)
     results, meta = doc["results"], doc.get("meta", {})
 
+    # Overlay the FROZEN zopfli ratio ceiling, generated once via
+    # `bench-report --zopfli-ceiling` and never recomputed by the routine matrix
+    # (zopfli is ~100x slower than zlib — see bench/README.md). zopfli is the
+    # best-achievable-ratio reference; its ratio/out_size are deterministic (its
+    # single-rep speed is indicative only).
+    ceiling_path = results_path.parent / "zopfli-ceiling.json"
+    if ceiling_path.exists():
+        ceiling = load(ceiling_path)["results"]
+        results = [r for r in results if r["compressor"] != "zopfli"] + ceiling
+
     corpora = corpora_in(results)
     if not corpora:
         print("no real-corpus rows found; nothing to plot", file=sys.stderr)

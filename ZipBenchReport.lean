@@ -269,7 +269,51 @@ def runReport (outPath : String) : IO Unit := do
   IO.FS.writeFile outPath json
   IO.eprintln s!"Wrote {rows.length} rows → {outPath}"
 
+/-- One-shot zopfli ratio-ceiling run over every corpus. zopfli is compress-only,
+    level-less, and ~100× slower than zlib (default iteration count), so it is
+    deliberately NOT part of the routine `runReport` matrix. This writes a FROZEN
+    snapshot of the best-achievable ratio per file; the dashboard overlays it
+    (see `bench/plot.py`) without ever recomputing it. Do not regenerate unless
+    the corpora themselves change — see `bench/README.md`. -/
+def runZopfliCeiling (outPath : String) : IO Unit := do
+  IO.eprintln "Running ONE-TIME zopfli ratio ceiling over all corpora (slow — frozen artifact)…"
+  let corpora ← loadCorpora
+  if corpora.isEmpty then
+    IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
+  let mut rows : List Row := []
+  for (corpus, files) in corpora do
+    IO.eprintln s!"  zopfli {corpus} ({files.length} files)…"
+    -- ratio only (zopfli is level-less; level 6 is nominal, single rep — the
+    -- compress_mbps column is an artifact, not a benchmark).
+    let cz ← runWorkloads "zopfli" files zopfliCompress none (theLevels := [6]) (theReps := 1)
+    rows := rows ++ cz
+  let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
+  let machine ← shell "uname" ["-mns"]
+  let commit ← shell "git" ["rev-parse", "--short", "HEAD"]
+  let toolchain ← shell "cat" ["lean-toolchain"]
+  let body := String.intercalate ",\n" (rows.map Row.toJson)
+  let json :=
+    "{\n" ++
+    "  \"meta\": {\n" ++
+    s!"    \"date\": \"{date}\",\n" ++
+    s!"    \"machine\": \"{machine}\",\n" ++
+    s!"    \"git_commit\": \"{commit}\",\n" ++
+    s!"    \"toolchain\": \"{toolchain}\",\n" ++
+    "    \"frozen\": true,\n" ++
+    "    \"note\": \"FROZEN zopfli ratio ceiling — do NOT regenerate. zopfli is " ++
+    "compress-only, level-less and ~100x slower than zlib; level=6 is nominal and " ++
+    "compress_mbps is a single-rep artifact, not a benchmark. ratio/out_size are " ++
+    "deterministic. Regenerate only if the corpora change: lake env " ++
+    ".lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json\"\n" ++
+    "  },\n" ++
+    "  \"results\": [\n" ++ body ++ "\n  ]\n}\n"
+  if let some parent := (System.FilePath.mk outPath).parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeFile outPath json
+  IO.eprintln s!"Wrote {rows.length} zopfli rows → {outPath}"
+
 def main (args : List String) : IO Unit := do
   match args with
   | ["--dump-payloads", dir] => dumpPayloads dir
+  | ["--zopfli-ceiling", out] => runZopfliCeiling out
   | _ => runReport (args.head?.getD "bench/results/latest.json")
