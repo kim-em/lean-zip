@@ -696,13 +696,34 @@ def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArr
   else deflateDynamicBlockCore data tokens lens.1 lens.2
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
-/-- `deflateRawBaseTokens` over this level's `lzMatch` stream (definitional
-    wrapper; see `deflateDynamicBlocksSharedAt`). -/
-def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
-  deflateRawBaseTokens data (lzMatch data level)
+/-- `deflateRawBaseTokens` over a *packed* token stream (Wave 3b stage B):
+    the frequency pass runs natively on the packed words (`tokenFreqsP`), and
+    the boxed tokens are materialized (`unpackTok`) only on the emit branches
+    — the stored branch never unpacks. Equal to
+    `deflateRawBaseTokens data (ptokens.map unpackTok)` via `tokenFreqsP_eq`;
+    `deflateRawBaseTokens` stays as the boxed reference implementation
+    (conformance-tested in `ZipTest/PackedTokens.lean`). -/
+def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
+  let f := tokenFreqsP ptokens
+  let lens := dynamicCodeLengths f.1 f.2
+  let fixedBytes := fixedBlockBytes f.1 f.2
+  let dynBytes := dynBlockBytes f.1 f.2 lens.1 lens.2
+  let storedBytes := storedBlockBytes data
+  if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
+  else if fixedBytes < dynBytes then deflateFixedBlock data (ptokens.map unpackTok)
+  else deflateDynamicBlockCore data (ptokens.map unpackTok) lens.1 lens.2
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
-theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
-    deflateRawBaseTokens data (lzMatch data level) = deflateRawBase data level := rfl
+/-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
+    (definitional wrapper, `deflateRawBaseP_def`). Equal to the boxed
+    `deflateRawBaseTokens data (lzMatch data level)` — that equation is
+    `deflateRawBase_def`, proven in `Zip/Spec/LZ77PackedCorrect.lean` via
+    `tokenFreqsP_eq` + `lzMatchP_map`. -/
+def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
+  deflateRawBaseP data (lzMatchP data level)
+
+theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
+    deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
 theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     (choose : Array LZ77Token → List Nat) (level : UInt8) :
@@ -760,20 +781,24 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if 7 ≤ level then
-    -- One matcher pass shared by the base and shared-split candidates (the
-    -- matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
-    let tokens := lzMatch data level
+    -- One *packed* matcher pass shared by the base and shared-split candidates
+    -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
+    -- The base candidate consumes the packed words directly; the shared-split
+    -- candidate unpacks once (stage C/D push packed further down).
+    let ptokens := lzMatchP data level
     if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
       pickSmaller
-        (pickSmaller (deflateRawBaseTokens data tokens)
+        (pickSmaller (deflateRawBaseP data ptokens)
           (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-            (deflateDynamicBlocksSharedAtTokens data tokens chooseSplitsArbitrated)))
+            (deflateDynamicBlocksSharedAtTokens data (ptokens.map unpackTok)
+              chooseSplitsArbitrated)))
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
       -- The self-contained split is demoted to level 9: it wins on exactly
       -- one corpus file while paying a full per-chunk match pass.
-      pickSmaller (deflateRawBaseTokens data tokens)
-        (deflateDynamicBlocksSharedAtTokens data tokens chooseSplitsArbitrated)
+      pickSmaller (deflateRawBaseP data ptokens)
+        (deflateDynamicBlocksSharedAtTokens data (ptokens.map unpackTok)
+          chooseSplitsArbitrated)
   else deflateRawBase data level
 
 end Zip.Native.Deflate
