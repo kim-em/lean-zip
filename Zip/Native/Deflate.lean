@@ -565,7 +565,9 @@ where
     statically; the fallback keeps the original panic-checked operations and is
     dead in practice — `hashTable`/`prev` sizes are fixed at allocation.
     Provably equal to the panic-checked sequence (`headInsertGuarded_eq` in
-    `LZ77ChainCorrect`). -/
+    `LZ77ChainCorrect`). Superseded in the mainLoops by `headProbeGuarded` +
+    two `guardedSet`s (Wave 5 de-boxing — this tuple return allocated a heap
+    constructor per position); kept with its `_eq` lemma. -/
 @[inline] def headInsertGuarded (hashTable prev : Array Nat) (h pos : Nat) :
     Nat × Array Nat × Array Nat :=
   if hg : h < hashTable.size ∧ pos < prev.size then
@@ -581,6 +583,15 @@ where
     (`headProbeGuarded_eq` in `LZ77ChainCorrect`). -/
 @[inline] def headProbeGuarded (hashTable : Array Nat) (h : Nat) : Nat :=
   if hb : h < hashTable.size then hashTable[h]'hb else hashTable[h]!
+
+/-- Single guarded array write (Wave 5 de-boxing): one runtime bounds check,
+    panic-checked fallback (dead in practice — the matcher arrays have fixed
+    size). Provably equal to `a.set! i v` (`guardedSet_eq` in
+    `LZ77ChainCorrect`). The mainLoops do their per-position head insertion as
+    `headProbeGuarded` + two `guardedSet`s — three single-value steps in place
+    of `headInsertGuarded`'s tuple, so nothing is heap-allocated per position. -/
+@[inline] def guardedSet (a : Array Nat) (i v : Nat) : Array Nat :=
+  if h : i < a.size then a.set i v h else a.set! i v
 
 /-- Greedy LZ77 with bounded-depth hash chains: at each position, walk the
     `prev` chain from the bucket head up to `maxChain` candidates and keep the
@@ -645,11 +656,14 @@ where
       (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let (matchLen, matchPos) :=
-        chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let m := chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let matchLen := m.1
+      let matchPos := m.2
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
@@ -682,8 +696,10 @@ wrappers establish that hypothesis with one runtime comparison per *outer*
 iteration (amortised over the whole inner loop) and fall back to the original
 panic-checked function when it cannot be shown — so they share the original's
 exact signature and are provably equal to it (`*Guarded_eq` in
-`LZ77ChainCorrect`). The iterative matchers call the wrappers; the recursive
-reference versions and all their proofs are untouched. -/
+`LZ77ChainCorrect`). The recursive reference versions and all their proofs are
+untouched. Wave 5 de-boxing: the iterative matchers call
+`chainWalkGuardedPacked` (the same walk with the result pair packed into one
+small `Nat`) instead of `chainWalkGuarded`, which stays as the proof bridge. -/
 
 /-- Proven-bounds copy of `lz77Chain.chainWalk`: `prev[cand]` is in range because
     the walk guard gives `cand < pos` and `hps : pos ≤ prev.size`. -/
@@ -712,6 +728,43 @@ decreasing_by omega
     chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos
   else
     lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos
+
+/-- Packed-result copy of `chainWalkFast` (Wave 5 de-boxing): the identical
+    walk, but the `(bestLen, bestPos)` accumulator is carried and returned as
+    the single small `Nat` `bestPos * 512 + bestLen`, so the per-position hot
+    call allocates no pair constructor (and no per-step `(bl, bp)` pair
+    either). `bestLen` never exceeds `maxLen`, which every call site clamps to
+    `min 258 _ < 512`, so the call sites decode exactly with `% 512` / `/ 512`
+    (`chainWalkGuardedPacked_mod`/`_div` in `LZ77ChainCorrect`, via the
+    lockstep equality `chainWalkPacked_eq`). -/
+def chainWalkPacked (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (cand fuel bestLen bestPos : Nat) : Nat :=
+  if fuel = 0 then bestPos * 512 + bestLen
+  else if hc : cand < pos ∧ pos - cand ≤ windowSize then
+    have hcand : cand + maxLen ≤ data.size := by omega
+    let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
+    let bl := if ml > bestLen then ml else bestLen
+    let bp := if ml > bestLen then cand else bestPos
+    if bl ≥ maxLen then bp * 512 + bl
+    else chainWalkPacked data prev windowSize pos maxLen hpm hps
+      (prev[cand]'(by omega)) (fuel - 1) bl bp
+  else bestPos * 512 + bestLen
+termination_by fuel
+decreasing_by omega
+
+/-- One runtime `pos ≤ prev.size` check guards the whole `chainWalkPacked`
+    inner loop; the (unreachable) fallback packs the reference walk's pair, so
+    this equals `bestPos * 512 + bestLen` of `lz77Chain.chainWalk`
+    (`chainWalkGuardedPacked_eq`). -/
+@[inline] def chainWalkGuardedPacked (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) : Nat :=
+  if hps : pos ≤ prev.size then
+    chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos
+  else
+    let p := lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos
+    p.2 * 512 + p.1
 
 /-- Proven-bounds copy of `lz77Chain.updateHashes`: the bucket index `hsh` is
     `< hashSize ≤ hashTable.size`, so `hashTable[hsh]` needs no runtime check. -/
@@ -763,11 +816,14 @@ where
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let (matchLen, matchPos) :=
-        chainWalkGuarded data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
@@ -821,11 +877,14 @@ where
       (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let (matchLen, matchPos) :=
-        lz77Chain.chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let m := lz77Chain.chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let matchLen := m.1
+      let matchPos := m.2
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           -- Lazy: probe pos+1 for a longer, no-farther match (distance-guarded deferral)
@@ -834,8 +893,10 @@ where
             let head2 := headProbeGuarded hashTable h2
             let maxLen2 := min 258 (data.size - (pos + 1))
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
-            let (matchLen2, matchPos2) :=
+            let m2 :=
               lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            let matchLen2 := m2.1
+            let matchPos2 := m2.2
             if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
               if hle2 : pos + 1 + matchLen2 ≤ data.size then
                 -- Longer & no-farther match at pos+1: emit literal at pos + reference at pos+1
@@ -895,11 +956,14 @@ where
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let (matchLen, matchPos) :=
-        chainWalkGuarded data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           if h3lt : pos + 3 < data.size then
@@ -907,8 +971,10 @@ where
             let head2 := headProbeGuarded hashTable h2
             let maxLen2 := min 258 (data.size - (pos + 1))
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
-            let (matchLen2, matchPos2) :=
-              chainWalkGuarded data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            let r2 :=
+              chainWalkGuardedPacked data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            let matchLen2 := r2 % 512
+            let matchPos2 := r2 / 512
             if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
               if hle2 : pos + 1 + matchLen2 ≤ data.size then
                 have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
@@ -980,11 +1046,14 @@ where
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let (matchLen, matchPos) :=
-        chainWalkGuarded data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
@@ -1021,11 +1090,14 @@ where
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let (matchLen, matchPos) :=
-        chainWalkGuarded data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           if h3lt : pos + 3 < data.size then
@@ -1033,8 +1105,10 @@ where
             let head2 := headProbeGuarded hashTable h2
             let maxLen2 := min 258 (data.size - (pos + 1))
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
-            let (matchLen2, matchPos2) :=
-              chainWalkGuarded data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            let r2 :=
+              chainWalkGuardedPacked data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            let matchLen2 := r2 % 512
+            let matchPos2 := r2 / 512
             if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
               if hle2 : pos + 1 + matchLen2 ≤ data.size then
                 have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
