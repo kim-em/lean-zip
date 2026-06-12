@@ -74,13 +74,13 @@ proves the loop equal to `emitTokensWithCodes` over the boxed view. -/
     fallbacks, so the equality proof aligns branch-for-branch). -/
 @[inline] def emitRefWithCodesP (bw : BitWriter)
     (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32) : BitWriter :=
-  match findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) with
+  match findLengthCodeFast (((w >>> 16) &&& 0x7FFF).toNat) with
   | some (idx, extraCount, extraVal) =>
     if hlitlt : idx + 257 < litCodes.size then
       let (code, len) := litCodes[idx + 257]
       let bw := bw.writeHuffCode code len
       let bw := bw.writeBits extraCount extraVal
-      match findDistCode ((w &&& 0xFFFF).toNat) with
+      match findDistCodeFast ((w &&& 0xFFFF).toNat) with
       | some (dIdx, dExtraCount, dExtraVal) =>
         if hdistlt : dIdx < distCodes.size then
           let (dCode, dLen) := distCodes[dIdx]

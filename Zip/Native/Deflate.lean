@@ -187,6 +187,120 @@ private theorem findDistCode_idx_lt {dist dIdx dExtraN : Nat} {dExtraV : UInt32}
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) : dIdx < 30 :=
   findTableCode_go_idx_lt h
 
+/-! ## Dense length/distance code tables (Wave 5.0)
+
+`findLengthCode`/`findDistCode` are linear searches through the RFC 1951
+base tables, run once or twice per reference token by the frequency pass
+and both packed emitters — measured at ~14% of level-1 attributable
+samples (track-d W5.P1). `lenCodeTab`/`distCodeTab` precompute every
+answer into dense tables indexed by the value itself (length 0–258,
+distance 0–32768), packing the `(idx, extraBits, extraVal)` triple into
+one `UInt32` (`packCode`: idx bits 0–7, extraBits bits 8–15, extraVal
+bits 16–31 — the widest field is the distance extraVal ≤ 32768 < 2^16…
+in fact < 2^14, but 16 bits are free). `findLengthCodeFast`/
+`findDistCodeFast` read the table for in-range values and fall back to
+the linear search out of range, and are proven **equal** to the linear
+searches (`findLengthCodeFast_eq`/`findDistCodeFast_eq`), so the hot
+consumers (`bumpRef*FreqP`, `emitRefFixedP`, `emitRefWithCodesP`) swap
+them in with no statement changes anywhere; the boxed reference paths
+stay on the linear search (they are the spec subjects). The tables are
+built *by* the linear search at module initialization (259 + 32769
+probes, one-time), which keeps the equality proofs small: the only
+content fact needed is `getElem`-of-`map`-of-`range`, never an
+evaluation of the table. Caution (WF landmine, see
+`Zip/Native/DeflateFreqs.lean`): never let `whnf`/`decide` evaluate the
+table terms — the builder applies `findLengthCode` (a `WellFounded` fix)
+259/32769 times. -/
+
+/-- `findTableCode.go` never fails when started in range. -/
+private theorem findTableCode_go_isSome {baseTable : Array UInt16} {extraTable : Array UInt8}
+    {value i : Nat} {hsize : baseTable.size ≤ extraTable.size} (hi : i < baseTable.size) :
+    (findTableCode.go baseTable extraTable value i hsize).isSome := by
+  unfold findTableCode.go
+  split
+  · split
+    · simp
+    · exact findTableCode_go_isSome (by omega)
+  · simp only [hi, ↓reduceDIte, Option.isSome_some]
+termination_by baseTable.size - i
+
+/-- The fields `findTableCode.go` returns: `extraN` is the extra-table entry
+    at the returned index and `extraV` the offset of `value` past its base. -/
+private theorem findTableCode_go_fields {baseTable : Array UInt16} {extraTable : Array UInt8}
+    {value i idx extraN : Nat} {extraV : UInt32} {hsize : baseTable.size ≤ extraTable.size}
+    (h : findTableCode.go baseTable extraTable value i hsize = some (idx, extraN, extraV)) :
+    extraN = (extraTable[idx]!).toNat ∧
+    extraV = (value - (baseTable[idx]!).toNat).toUInt32 := by
+  unfold findTableCode.go at h
+  split at h
+  · split at h
+    · simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨h1, h2, h3⟩ := h
+      subst h1
+      rw [getElem!_pos extraTable i (by omega), getElem!_pos baseTable i (by omega)]
+      exact ⟨h2.symm, h3.symm⟩
+    · exact findTableCode_go_fields h
+  · split at h
+    · rename_i h2lt
+      simp only [Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨h1, h2, h3⟩ := h
+      subst h1
+      rw [getElem!_pos extraTable i (by omega), getElem!_pos baseTable i h2lt]
+      exact ⟨h2.symm, h3.symm⟩
+    · exact nomatch h
+termination_by baseTable.size - i
+
+/-- `findLengthCode` always succeeds (the base table is non-empty and the
+    search is clamped, RFC 1951 §3.2.5). -/
+private theorem findLengthCode_isSome (len : Nat) : (findLengthCode len).isSome :=
+  findTableCode_go_isSome (by rw [Inflate.lengthBase_size]; omega)
+
+/-- `findDistCode` always succeeds. -/
+private theorem findDistCode_isSome (dist : Nat) : (findDistCode dist).isSome :=
+  findTableCode_go_isSome (by rw [Inflate.distBase_size]; omega)
+
+/-- Dense length-code table: entry `len` (0–258) is `findLengthCode len`,
+    memoizing the linear search. Entries are shared read-only values, so a
+    table read costs one array access (no per-call allocation). -/
+def lenCodeTab : Array (Option (Nat × Nat × UInt32)) :=
+  (Array.range 259).map findLengthCode
+
+/-- Dense distance-code table: entry `dist` (0–32768) is `findDistCode dist`. -/
+def distCodeTab : Array (Option (Nat × Nat × UInt32)) :=
+  (Array.range 32769).map findDistCode
+
+@[simp] theorem lenCodeTab_size : lenCodeTab.size = 259 := by
+  simp only [lenCodeTab, Array.size_map, Array.size_range]
+
+@[simp] theorem distCodeTab_size : distCodeTab.size = 32769 := by
+  simp only [distCodeTab, Array.size_map, Array.size_range]
+
+/-- Table-backed `findLengthCode`: one dense-array read for lengths 0–258,
+    the linear search beyond (unreachable for encodable tokens). -/
+@[inline] def findLengthCodeFast (length : Nat) : Option (Nat × Nat × UInt32) :=
+  if h : length < 259 then lenCodeTab[length]'(lenCodeTab_size ▸ h)
+  else findLengthCode length
+
+/-- Table-backed `findDistCode`: one dense-array read for distances 0–32768,
+    the linear search beyond. -/
+@[inline] def findDistCodeFast (dist : Nat) : Option (Nat × Nat × UInt32) :=
+  if h : dist < 32769 then distCodeTab[dist]'(distCodeTab_size ▸ h)
+  else findDistCode dist
+
+theorem findLengthCodeFast_eq (length : Nat) :
+    findLengthCodeFast length = findLengthCode length := by
+  unfold findLengthCodeFast
+  split
+  · simp only [lenCodeTab, Array.getElem_map, Array.getElem_range]
+  · rfl
+
+theorem findDistCodeFast_eq (dist : Nat) :
+    findDistCodeFast dist = findDistCode dist := by
+  unfold findDistCodeFast
+  split
+  · simp only [distCodeTab, Array.getElem_map, Array.getElem_range]
+  · rfl
+
 inductive LZ77Token where
   | literal : UInt8 → LZ77Token
   | reference : (length : Nat) → (distance : Nat) → LZ77Token
@@ -1007,13 +1121,13 @@ time. Do not inline `emitRefFixedP` back into `emitTokensP`.
     reference arm (including its dead-code `else` fallbacks, so the equality
     proof in `Zip/Spec/EmitPackedCorrect.lean` aligns branch-for-branch). -/
 @[inline] def emitRefFixedP (bw : BitWriter) (w : UInt32) : BitWriter :=
-  match findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) with
+  match findLengthCodeFast (((w >>> 16) &&& 0x7FFF).toNat) with
   | some (idx, extraCount, extraVal) =>
     if hlit : idx + 257 < fixedLitCodes.size then
       let (code, len) := fixedLitCodes[idx + 257]
       let bw := bw.writeHuffCode code len
       let bw := bw.writeBits extraCount extraVal
-      match findDistCode ((w &&& 0xFFFF).toNat) with
+      match findDistCodeFast ((w &&& 0xFFFF).toNat) with
       | some (dIdx, dExtraCount, dExtraVal) =>
         if hdist : dIdx < fixedDistCodes.size then
           let (dCode, dLen) := fixedDistCodes[dIdx]
