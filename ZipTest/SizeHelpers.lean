@@ -140,6 +140,20 @@ def tests : IO Unit := do
       throw (IO.userError
         s!"fixedCadenceCuts not byte-identical to fixed-cadence emitter on {name}: \
            {viaCuts.size} vs {viaChunk.size}")
+    -- 6. The sized-tree pipeline (Wave 5, #2552) is byte-identical to the
+    -- reference arbitrated candidate, and the fused sizing pass agrees with
+    -- `sharedPartitionBits` (both proved in `Zip/Spec/DeflateBlockSplit.lean`;
+    -- this pins the compiled code).
+    let toks9 := lzMatch data 9
+    let sizedOut := deflateDynamicBlocksSharedSized data toks9
+    let refOut := deflateDynamicBlocksSharedAtTokens data toks9 chooseSplitsArbitrated
+    unless sizedOut.beq refOut do
+      throw (IO.userError
+        s!"deflateDynamicBlocksSharedSized not byte-identical on {name}: \
+           {sizedOut.size} vs {refOut.size}")
+    let arbCuts := chooseSplitsArbitrated toks9
+    unless (sharedPartitionSized toks9 arbCuts 0).1 == sharedPartitionBits toks9 arbCuts 0 do
+      throw (IO.userError s!"sharedPartitionSized bits mismatch on {name}")
   IO.println "  SizeHelpers tests passed."
 
 end ZipTest.SizeHelpers

@@ -113,7 +113,8 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   dsimp only []
-  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedAt_def]
+  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedSized_eq,
+    deflateDynamicBlocksSharedAt_def]
   split
   · exact inflate_deflateStoredPure data _ (by omega)
   · split
@@ -199,7 +200,8 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       padding.length < 8 := by
   unfold deflateRaw
   dsimp only []
-  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedAt_def]
+  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedSized_eq,
+    deflateDynamicBlocksSharedAt_def]
   split
   · -- Level 0: stored blocks — all byte-aligned, padding = []
     exact ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
@@ -368,7 +370,8 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateRaw
   dsimp only []
-  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedAt_def]
+  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedSized_eq,
+    deflateDynamicBlocksSharedAt_def]
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
     exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩

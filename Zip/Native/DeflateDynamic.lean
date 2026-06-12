@@ -751,6 +751,106 @@ def chooseSplitsArbitrated (toks : Array LZ77Token) : List Nat :=
   let f := fixedCadenceCuts sharedTokChunk toks.size
   if sharedPartitionBits toks h 0 < sharedPartitionBits toks f 0 then h else f
 
+/-! ## Sized-tree reuse for the winning partition (Wave 5, #2552)
+
+`chooseSplitsArbitrated` already builds every block's Huffman trees
+(`dynamicCodeLengths` over `tokenFreqs` of the group) while *sizing* the two
+candidate partitions; `emitSharedBlocksAt` then rebuilt the same trees a third
+time for the winning partition at emission. The variants below return the cuts
+*together with* the winner's per-block sized trees and feed them to a
+tree-taking emitter, so emission never re-runs the frequency pass or the
+Huffman build. `emitSharedBlocksAt` stays as the reference emitter:
+`deflateDynamicBlocksSharedSized_eq` (`Zip/Spec/DeflateBlockSplit.lean`) proves
+the sized pipeline byte-identical, so the spec quadruple is untouched. -/
+
+/-- A per-block pair of code-length lists carrying the alphabet-size facts the
+    emitter needs (286 lit/len, 30 distance) — what `dynamicCodeLengths`
+    produces, bundled with `dynamicCodeLengths_length`. -/
+def SizedTrees : Type :=
+  {p : List Nat × List Nat // p.1.length = 286 ∧ p.2.length = 30}
+
+/-- The sized trees `dynamicCodeLengths` selects for the given frequencies. -/
+@[inline] def sizedTrees (litFreqs distFreqs : Array Nat) : SizedTrees :=
+  ⟨dynamicCodeLengths litFreqs distFreqs,
+    (dynamicCodeLengths_length litFreqs distFreqs).1,
+    (dynamicCodeLengths_length litFreqs distFreqs).2⟩
+
+/-- The sized trees of the empty token group: the (never-reached) `headD`
+    default in `emitSharedBlocksAtSized` — the trees list produced by
+    `sharedPartitionSized` always covers every emitted block. -/
+def emptySizedTrees : SizedTrees :=
+  sizedTrees (tokenFreqs #[]).1 (tokenFreqs #[]).2
+
+/-- `sharedPartitionBits` fused with tree collection: walk the partition once,
+    returning the exact bit size **together with** each block's sized trees, so
+    the winning partition's emission can reuse them instead of re-running
+    `tokenFreqs` + `dynamicCodeLengths` per block. Component 1 is exactly
+    `sharedPartitionBits` (`sharedPartitionSized_fst`); component 2's entries
+    are definitionally `dynamicCodeLengths (tokenFreqs group)` of the emitter's
+    groups (`emitSharedBlocksAtSized_eq`). -/
+def sharedPartitionSized (toks : Array LZ77Token) (cuts : List Nat) (pos : Nat) :
+    Nat × List SizedTrees :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqs (toks.extract pos j)
+  let t := sizedTrees f.1 f.2
+  let blockBits := 3 + (writeDynamicHeader BitWriter.empty t.val.1 t.val.2).bitLength
+    + symbolBitCount f.1 f.2 t.val.1.toArray t.val.2.toArray
+  if j ≥ toks.size then (blockBits, [t])
+  else
+    let rest := sharedPartitionSized toks cuts.tail j
+    (blockBits + rest.1, t :: rest.2)
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- Tree-taking twin of `emitSharedBlocksAt`: same clamped cut points, but each
+    block's `(litLens, distLens)` come from the `trees` list (in lockstep with
+    `cuts`) instead of being recomputed from the group. Byte-identical to
+    `emitSharedBlocksAt` when `trees` is the sizing pass's output
+    (`emitSharedBlocksAtSized_eq`). -/
+def emitSharedBlocksAtSized (data : ByteArray) (toks : Array LZ77Token) (cuts : List Nat)
+    (trees : List SizedTrees) (pos : Nat) (bw : BitWriter) : BitWriter :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let t := trees.headD emptySizedTrees
+  let bw := emitDynBlock bw data (toks.extract pos j) t.val.1 t.val.2
+    t.property.1 t.property.2 (decide (j ≥ toks.size))
+  if j ≥ toks.size then bw
+  else emitSharedBlocksAtSized data toks cuts.tail trees.tail j bw
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- `chooseSplitsArbitrated` returning the winning cuts **with** the winner's
+    per-block sized trees (component 1 is exactly `chooseSplitsArbitrated` —
+    via `sharedPartitionSized_fst`, see `deflateDynamicBlocksSharedSized_eq`).
+    The sizing of both candidates is inherent to arbitration; only the third
+    (emission-time) tree pass is avoidable, and the returned trees are what
+    avoid it. -/
+def chooseSplitsArbitratedSized (toks : Array LZ77Token) : List Nat × List SizedTrees :=
+  let h := chooseSplitsHeuristic toks
+  let f := fixedCadenceCuts sharedTokChunk toks.size
+  let sh := sharedPartitionSized toks h 0
+  let sf := sharedPartitionSized toks f 0
+  if sh.1 < sf.1 then (h, sh.2) else (f, sf.2)
+
+/-- The arbitrated shared-window candidate with sized-tree reuse: byte-identical
+    to `deflateDynamicBlocksSharedAtTokens data toks chooseSplitsArbitrated`
+    (`deflateDynamicBlocksSharedSized_eq`), but the winning partition's
+    per-block `tokenFreqs` + `dynamicCodeLengths` run once (during sizing)
+    instead of twice. -/
+def deflateDynamicBlocksSharedSized (data : ByteArray) (toks : Array LZ77Token) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    let c := chooseSplitsArbitratedSized toks
+    (emitSharedBlocksAtSized data toks c.1 c.2 0 BitWriter.empty).flush
+
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
     insertion cap (`insertCap`): low levels defer insertion + search shallowly
@@ -859,7 +959,10 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
         partition comes from the entropy-divergence heuristic arbitrated in
         exact bits against the fixed `sharedTokChunk` cadence
         (`chooseSplitsArbitrated`), so it cuts where the symbol statistics
-        shift and never sizes worse than the fixed cadence.
+        shift and never sizes worse than the fixed cadence; emission reuses
+        the winner's per-block trees from the sizing pass
+        (`deflateDynamicBlocksSharedSized`, = the reference candidate by
+        `deflateDynamicBlocksSharedSized_eq`).
     At level 9 (and within the `optimalMaxSize` memory gate) a fourth candidate
     joins: the cross-block stream over the **near-optimal** cost-model DP parse
     (`deflateDynamicBlocksOptimal`), which chooses the globally cheapest token
@@ -884,15 +987,13 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       pickSmaller
         (pickSmaller (deflateRawBaseP data ptokens)
           (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-            (deflateDynamicBlocksSharedAtTokens data (ptokens.map unpackTok)
-              chooseSplitsArbitrated)))
+            (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))))
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
       -- The self-contained split is demoted to level 9: it wins on exactly
       -- one corpus file while paying a full per-chunk match pass.
       pickSmaller (deflateRawBaseP data ptokens)
-        (deflateDynamicBlocksSharedAtTokens data (ptokens.map unpackTok)
-          chooseSplitsArbitrated)
+        (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))
   else deflateRawBase data level
 
 end Zip.Native.Deflate
