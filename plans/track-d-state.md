@@ -86,6 +86,21 @@ deployed single-block path) found no configuration faster than current within
 depth: 0.60× time, +1.14% ratio). Null result recorded; the levels' speed
 budget must come from Wave-3 representation work, not knob tuning.
 
+**Wave-3a verdict (2026-06-12): UInt32 chain-state representation — measured
+negative, abandoned.** A UInt32-pure kernel microbenchmark predicted 1.12–1.13×
+(and USize 0.78× — rejected outright), but the full matcher with
+`Array UInt32` state + UInt32 guards measures *slower* than the deployed
+proven-bounds `Array Nat` shape (alice29 matcher ms: L1 6.1 vs 4.87, L4 17.5
+vs 16.2, L6 23.7 vs 22.7), and eliminating every hot-loop Nat↔UInt32
+conversion moved ≤2% (`UInt32.ofNat` is an inline unbox in this toolchain —
+conversions were never the cost). Branch `perf/3a-uint32-chain` preserved
+unmerged (full direct-contract proofs + a token-for-token identity test gate,
+reusable if the toolchain's codegen changes). Conclusion: knob tuning (#2541)
+AND state-representation tuning are now both exhausted — the matcher's
+remaining costs are structural (per-token allocation, RC traffic, the
+ByteArray byte loop), i.e. Wave 3b (packed token stream) and Wave 5 (fused
+phases) are the live levers.
+
 **Named bottlenecks (in priority order):**
 1. **Matcher is 83–84% of the base path at L6** (and the lazy step at L4 costs
    ~2× over L3) — hash-chain maintenance + search; the Wave-3 matcher-state
