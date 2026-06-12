@@ -323,13 +323,21 @@ def insertCap (level : UInt8) : Nat :=
 
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
     greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
-    lazy variant, which improves ratio at equal window/chain depth. Both share the
-    same `(chainDepth, insertCap)` ladder and satisfy the same encoder contracts
-    (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the choice is
-    transparent to the roundtrip proof. -/
+    lazy variant, which improves ratio at equal window/chain depth. Inputs whose
+    positions fit `UInt32` (with room for the `0xFFFFFFFF` sentinel — a runtime
+    width check, everything below 4 GiB in practice) take the 32-bit chain-state
+    kernels (`lz77ChainIter32`/`lz77ChainLazyIter32`, measured 1.12–1.13× on the
+    insertion-dominated kernel); wider inputs keep the `Nat` path. All four arms
+    share the same `(chainDepth, insertCap)` ladder and satisfy the same encoder
+    contracts (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so
+    the choice is transparent to the roundtrip proof. -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level)
-  else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
+  if data.size < UInt32.size - 1 then
+    if 4 ≤ level then lz77ChainLazyIter32 data (chainDepth level) 32768 (insertCap level)
+    else lz77ChainIter32 data (chainDepth level) 32768 (insertCap level)
+  else
+    if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level)
+    else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
 
 /-! ## Self-contained block-split dynamic compression
 

@@ -2,6 +2,7 @@ import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
+import Zip.Spec.LZ77Chain32Correct
 import Zip.Spec.LZ77OptimalCorrect
 
 /-!
@@ -22,10 +23,11 @@ open Deflate.Spec (decode)
 /-! ## Matcher-selector contracts
 
 The three contracts the dynamic encoder consumes, lifted to the level-dispatched
-`lzMatch` by casing on `4 ≤ level` and applying the lazy (`lz77ChainLazyIter_*`) or
-greedy (`lz77ChainIter_*`) version. Both arms are line-for-line parallel because
-the two matchers share contract signatures. Consumed here and in `DeflateRoundtrip`,
-so the `7 ≤ level`/`4 ≤ level` split lives in exactly one place. -/
+`lzMatch` by casing on the width check (`data.size < UInt32.size - 1`, choosing
+the 32-bit or `Nat` chain state) and on `4 ≤ level` (lazy vs greedy), applying
+the matching `lz77Chain{Lazy,}Iter{32,}_*` contract. All four arms are
+line-for-line parallel because the matchers share contract signatures. Consumed
+here and in `DeflateRoundtrip`, so the dispatch split lives in exactly one place. -/
 
 theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
     ∀ t ∈ (lzMatch data level).toList,
@@ -34,25 +36,39 @@ theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   unfold lzMatch
   split
-  · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level)
-      (by omega) (by omega)
-  · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
-      (by omega) (by omega)
+  · split
+    · exact lz77ChainLazyIter32_encodable data (chainDepth level) 32768 (insertCap level)
+        (by omega) (by omega)
+    · exact lz77ChainIter32_encodable data (chainDepth level) 32768 (insertCap level)
+        (by omega) (by omega)
+  · split
+    · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level)
+        (by omega) (by omega)
+    · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
+        (by omega) (by omega)
 
 theorem lzMatch_empty (data : ByteArray) (level : UInt8) (hz : data.size = 0) :
     lzMatch data level = #[] := by
   unfold lzMatch
   split
-  · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) hz
-  · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
+  · split
+    · exact lz77ChainLazyIter32_empty data (chainDepth level) 32768 (insertCap level) hz
+    · exact lz77ChainIter32_empty data (chainDepth level) 32768 (insertCap level) hz
+  · split
+    · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) hz
+    · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
 
 theorem lzMatch_resolves (data : ByteArray) (level : UInt8) :
     Deflate.Spec.resolveLZ77 (tokensToSymbols (lzMatch data level)) [] =
       some data.data.toList := by
   unfold lzMatch
   split
-  · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
-  · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  · split
+    · exact lz77ChainLazyIter32_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+    · exact lz77ChainIter32_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  · split
+    · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+    · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
 
 set_option maxHeartbeats 800000 in
 /-- One self-contained chunk block: its bits append to `bw`, it preserves `wf`,

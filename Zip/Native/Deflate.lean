@@ -769,6 +769,405 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-! ### 32-bit chain-state matcher kernels (Wave 3 Step 2)
+
+The chain state (`hashTable`/`prev`) stores byte positions, which fit in
+`UInt32` for any input below 4 GiB. Storing them as `Array UInt32` (unboxed
+scalar arrays) instead of `Array Nat` and doing the walk-guard arithmetic in
+`UInt32` was measured at 1.12–1.13× on the insertion-dominated kernel
+(`USize` was measured *slower* — do not switch these to `USize`).
+
+These are line-by-line twins of the proven-bounds Nat kernels above
+(`chainWalkFast`/`updateHashesFast`/`headInsertGuarded`): the sentinel
+`0xFFFFFFFF` plays the role `data.size` plays in the Nat kernels — any
+candidate `cand` with `cand ≥ pos32` (including the sentinel) fails the walk
+guard `cand < pos32`, so unset links stop the walk with no validity bitmap.
+Positions convert to `Nat` (`.toNat`) only at the existing byte-comparison
+`lz77Greedy.countMatch`, whose bounds proofs follow from the `UInt32` guard
+via the `toNat` bridge lemmas. The contracts (`ValidDecomp`, encodability,
+`resolveLZ77`) are proven *directly* for the 32-bit mainLoops in
+`LZ77Chain32Correct` — validity comes from the emission-time `countMatch` +
+guards, never from the chain-state contents, so no cross-type array
+correspondence is needed. -/
+
+/-- 32-bit twin of `headInsertGuarded`: read the old head of bucket `h`, point
+    the bucket at `pos` (stored as `pos.toUInt32`), and link `prev[pos]` to the
+    old head, all under one runtime bounds check. The fallback keeps the
+    panic-checked operations and is dead in practice — `hashTable`/`prev` sizes
+    are fixed at allocation. Rewritten to the panic-checked triple by
+    `headInsertGuarded32_eq` in `LZ77Chain32Correct`. -/
+@[inline] def headInsertGuarded32 (hashTable prev : Array UInt32) (h pos : Nat)
+    (pos32 : UInt32) (_hp32 : pos32 = pos.toUInt32) :
+    UInt32 × Array UInt32 × Array UInt32 :=
+  if hg : h < hashTable.size ∧ pos < prev.size then
+    let head := hashTable[h]'hg.1
+    (head, hashTable.set h pos32 hg.1, prev.set pos head hg.2)
+  else
+    let head := hashTable[h]!
+    (head, hashTable.set! h pos32, prev.set! pos head)
+
+/-- 32-bit twin of `headProbeGuarded` (the lazy matcher's lookahead probe):
+    one runtime bounds check, panic-checked fallback (dead in practice).
+    Rewritten to `hashTable[h]!` by `headProbeGuarded32_eq`. -/
+@[inline] def headProbeGuarded32 (hashTable : Array UInt32) (h : Nat) : UInt32 :=
+  if hb : h < hashTable.size then hashTable[h]'hb else hashTable[h]!
+
+/-- 32-bit twin of `chainWalkFast`: the chain links and the walk-guard
+    arithmetic (`cand < pos32 ∧ pos32 - cand ≤ windowSize`) are `UInt32`;
+    `cand` converts to `Nat` only for the byte comparison `countMatch`, whose
+    bounds proof `cand.toNat < pos` follows from the guard via
+    `UInt32.lt_iff_toNat_lt` and the faithfulness hypothesis
+    `hp32 : pos32.toNat = pos`. `prev[cand.toNat]` is in range because the
+    guard gives `cand.toNat < pos` and `hps : pos ≤ prev.size`. -/
+def chainWalkFast32 (data : ByteArray) (prev : Array UInt32) (windowSize : UInt32)
+    (pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (pos32 : UInt32) (hp32 : pos32.toNat = pos)
+    (cand : UInt32) (fuel bestLen bestPos : Nat) : Nat × Nat :=
+  if fuel = 0 then (bestLen, bestPos)
+  else if hc : cand < pos32 ∧ pos32 - cand ≤ windowSize then
+    have hcn : cand.toNat < pos := by
+      have h1 := UInt32.lt_iff_toNat_lt.mp hc.1; omega
+    have hcand : cand.toNat + maxLen ≤ data.size := by omega
+    let candN := cand.toNat
+    let ml := lz77Greedy.countMatch data candN pos maxLen hcand hpm
+    let (bl, bp) := if ml > bestLen then (ml, candN) else (bestLen, bestPos)
+    if bl ≥ maxLen then (bl, bp)
+    else chainWalkFast32 data prev windowSize pos maxLen hpm hps pos32 hp32
+      (prev[candN]'(Nat.lt_of_lt_of_le hcn hps)) (fuel - 1) bl bp
+  else (bestLen, bestPos)
+termination_by fuel
+decreasing_by omega
+
+/-- One runtime `pos ≤ prev.size ∧ pos < UInt32.size` check guards the whole
+    `chainWalkFast32` inner loop and makes the incrementally-threaded `pos32`
+    (`= pos.toUInt32` by hypothesis, so no per-position conversion) faithful.
+    The fallback (dead in practice: `prev` is sized to the input and `lzMatch`
+    dispatches to the 32-bit path only below the `UInt32` width) walks zero
+    steps and returns the running best — sound because the chain walk is a pure
+    match-finding heuristic, and `chainWalkGuarded32_spec` holds for it via its
+    invariant. -/
+@[inline] def chainWalkGuarded32 (data : ByteArray) (prev : Array UInt32)
+    (windowSize : UInt32) (pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (pos32 : UInt32) (hp32 : pos32 = pos.toUInt32)
+    (cand : UInt32) (fuel bestLen bestPos : Nat) : Nat × Nat :=
+  if hg : pos ≤ prev.size ∧ pos < UInt32.size then
+    chainWalkFast32 data prev windowSize pos maxLen hpm hg.1
+      pos32 (by simp [hp32, Nat.toUInt32, Nat.mod_eq_of_lt hg.2])
+      cand fuel bestLen bestPos
+  else
+    (bestLen, bestPos)
+
+/-- 32-bit twin of `updateHashesFast`: identical insertion loop, with positions
+    stored as the incrementally-threaded `pj32` (`= (pos + j).toUInt32` by
+    hypothesis, so no per-step conversion). The bucket index `hsh` is
+    `< hashSize ≤ hashTable.size`, so `hashTable[hsh]` needs no runtime check. -/
+def updateHashesFast32 (data : ByteArray) (hashSize : Nat)
+    (hashTable prev : Array UInt32) (pos j matchLen insertCap : Nat)
+    (pj32 : UInt32) (hpj : pj32 = (pos + j).toUInt32)
+    (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size) : Array UInt32 × Array UInt32 :=
+  if j < matchLen ∧ j ≤ insertCap then
+    if h : pos + j + 2 < data.size then
+      let hsh := lz77Greedy.hash3 data (pos + j) hashSize h
+      have hb : hsh < hashTable.size := by
+        have : hsh < hashSize := Nat.mod_lt _ hhs
+        omega
+      let head := hashTable[hsh]'hb
+      updateHashesFast32 data hashSize (hashTable.set! hsh pj32)
+        (prev.set! (pos + j) head) pos (j + 1) matchLen insertCap
+        (pj32 + 1) (by rw [hpj, ← Nat.add_assoc]; exact (UInt32.ofNat_add (pos + j) 1).symm)
+        hhs (by simpa using hht)
+    else
+      updateHashesFast32 data hashSize hashTable prev pos (j + 1) matchLen insertCap
+        (pj32 + 1) (by rw [hpj, ← Nat.add_assoc]; exact (UInt32.ofNat_add (pos + j) 1).symm)
+        hhs hht
+  else (hashTable, prev)
+termination_by matchLen - j
+decreasing_by all_goals omega
+
+/-- One runtime `0 < hashSize ∧ hashSize ≤ hashTable.size` check guards the
+    whole `updateHashesFast32` insertion loop. The fallback (dead in practice:
+    `hashTable` is allocated at exactly `hashSize`) skips the insertions —
+    sound because the chain state is a pure heuristic that never enters the
+    correctness proofs. -/
+@[inline] def updateHashesGuarded32 (data : ByteArray) (hashSize : Nat)
+    (hashTable prev : Array UInt32) (pos j matchLen insertCap : Nat)
+    (pj32 : UInt32) (hpj : pj32 = (pos + j).toUInt32) :
+    Array UInt32 × Array UInt32 :=
+  if hu : 0 < hashSize ∧ hashSize ≤ hashTable.size then
+    updateHashesFast32 data hashSize hashTable prev pos j matchLen insertCap pj32 hpj hu.1 hu.2
+  else
+    (hashTable, prev)
+
+/-- List-form spec subject for the 32-bit greedy chain matcher (the same role
+    `lz77Chain` plays for `lz77ChainIter`): not a runtime entry point —
+    `LZ77Chain32Correct` proves the encoder contracts on this recursive
+    cons-emitting form and transfers them to `lz77ChainIter32` via the usual
+    accumulator equivalence. Shares the guarded 32-bit helpers with the
+    iterative version, so the equivalence is push-vs-cons only. -/
+def lz77Chain32 (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    (lz77Greedy.trailing data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize.toUInt32 hashSize maxChain
+      (.replicate hashSize 0xFFFFFFFF) (.replicate data.size 0xFFFFFFFF) 0 insertCap 0 rfl).toArray
+where
+  mainLoop (data : ByteArray) (windowSize : UInt32) (hashSize maxChain : Nat)
+      (hashTable prev : Array UInt32) (pos insertCap : Nat)
+      (pos32 : UInt32) (hp32 : pos32 = pos.toUInt32) : List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let (head, hashTable, prev) := headInsertGuarded32 hashTable prev h pos pos32 hp32
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        chainWalkGuarded32 data prev windowSize pos maxLen hmaxLenP pos32 hp32 head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let (hashTable, prev) :=
+            updateHashesGuarded32 data hashSize hashTable prev pos 1 matchLen insertCap
+              (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+          .reference matchLen (pos - matchPos) ::
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+              (pos32 + matchLen.toUInt32) (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+        else
+          .literal (data[pos]'(by omega)) ::
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
+              (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+      else
+        .literal (data[pos]'(by omega)) ::
+          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
+            (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+    else
+      lz77Greedy.trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- 32-bit chain-state twin of `lz77ChainIter`: same signature, same token
+    emission structure (`.reference matchLen (pos - matchPos)` with `Nat`
+    fields), but the chain state lives in `Array UInt32` (sentinel
+    `0xFFFFFFFF`) and the walk guard runs in `UInt32`. Proven equal to
+    `lz77Chain32` (the contracts' subject) in `LZ77Chain32Correct`;
+    token-for-token agreement with `lz77ChainIter` is checked empirically in
+    `ZipTest.Chain32`. -/
+def lz77ChainIter32 (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    lz77GreedyIter.trailing data 0 #[]
+  else
+    let hashSize := 65536
+    mainLoop data windowSize.toUInt32 hashSize maxChain insertCap
+      (.replicate hashSize 0xFFFFFFFF) (.replicate data.size 0xFFFFFFFF) 0 #[] 0 rfl
+where
+  mainLoop (data : ByteArray) (windowSize : UInt32) (hashSize maxChain insertCap : Nat)
+      (hashTable prev : Array UInt32) (pos : Nat) (acc : Array LZ77Token)
+      (pos32 : UInt32) (hp32 : pos32 = pos.toUInt32) :
+      Array LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let (head, hashTable, prev) := headInsertGuarded32 hashTable prev h pos pos32 hp32
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        chainWalkGuarded32 data prev windowSize pos maxLen hmaxLenP pos32 hp32 head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let (hashTable, prev) :=
+            updateHashesGuarded32 data hashSize hashTable prev pos 1 matchLen insertCap
+              (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+            (acc.push (.reference matchLen (pos - matchPos)))
+            (pos32 + matchLen.toUInt32) (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+        else
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+            (acc.push (.literal (data[pos]'(by omega))))
+            (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+      else
+        mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+          (acc.push (.literal (data[pos]'(by omega))))
+          (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+    else
+      lz77GreedyIter.trailing data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- List-form spec subject for the 32-bit lazy chain matcher (the same role
+    `lz77ChainLazy` plays for `lz77ChainLazyIter`): not a runtime entry point —
+    `LZ77Chain32Correct` proves the encoder contracts on this recursive
+    cons-emitting form and transfers them to `lz77ChainLazyIter32`. -/
+def lz77ChainLazy32 (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    (lz77Greedy.trailing data 0).toArray
+  else
+    let hashSize := 65536
+    (mainLoop data windowSize.toUInt32 hashSize maxChain
+      (.replicate hashSize 0xFFFFFFFF) (.replicate data.size 0xFFFFFFFF) 0 insertCap 0 rfl).toArray
+where
+  mainLoop (data : ByteArray) (windowSize : UInt32) (hashSize maxChain : Nat)
+      (hashTable prev : Array UInt32) (pos insertCap : Nat)
+      (pos32 : UInt32) (hp32 : pos32 = pos.toUInt32) : List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let (head, hashTable, prev) := headInsertGuarded32 hashTable prev h pos pos32 hp32
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        chainWalkGuarded32 data prev windowSize pos maxLen hmaxLenP pos32 hp32 head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          -- Lazy: probe pos+1 for a longer, no-farther match (distance-guarded deferral)
+          if h3lt : pos + 3 < data.size then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := headProbeGuarded32 hashTable h2
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let (matchLen2, matchPos2) :=
+              chainWalkGuarded32 data prev windowSize (pos + 1) maxLen2 hmaxLen2P
+                (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm) head2 maxChain 0 0
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                -- Longer & no-farther match at pos+1: emit literal at pos + reference at pos+1
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  updateHashesGuarded32 data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                    (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+                .literal (data[pos]'(by omega)) ::
+                  .reference matchLen2 (pos + 1 - matchPos2) ::
+                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1 + matchLen2) insertCap
+                    (pos32 + 1 + matchLen2.toUInt32)
+                    (by rw [hp32]; simp [Nat.toUInt32, UInt32.ofNat_add])
+              else
+                -- matchLen2 spills past data: keep match at pos
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  updateHashesGuarded32 data hashSize hashTable prev pos 1 matchLen insertCap
+                    (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+                .reference matchLen (pos - matchPos) ::
+                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+                    (pos32 + matchLen.toUInt32)
+                    (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+            else
+              -- No better match at pos+1: keep match at pos
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let (hashTable, prev) :=
+                updateHashesGuarded32 data hashSize hashTable prev pos 1 matchLen insertCap
+                  (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+              .reference matchLen (pos - matchPos) ::
+                mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+                  (pos32 + matchLen.toUInt32)
+                  (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+          else
+            -- Near end of data: keep match at pos
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            .reference matchLen (pos - matchPos) ::
+              mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap
+                (pos32 + matchLen.toUInt32)
+                (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+        else
+          .literal (data[pos]'(by omega)) ::
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
+              (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+      else
+        .literal (data[pos]'(by omega)) ::
+          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap
+            (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+    else
+      lz77Greedy.trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- 32-bit chain-state twin of `lz77ChainLazyIter`: same signature, same
+    branch structure and token emission as the Nat version (distance-guarded
+    one-byte-lookahead deferral), with `Array UInt32` chain state and `UInt32`
+    walk guards. Proven equal to `lz77ChainLazy32` (the contracts' subject)
+    in `LZ77Chain32Correct`; token-for-token agreement checked empirically in
+    `ZipTest.Chain32`. -/
+def lz77ChainLazyIter32 (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array LZ77Token :=
+  if data.size < 3 then
+    lz77GreedyIter.trailing data 0 #[]
+  else
+    let hashSize := 65536
+    mainLoop data windowSize.toUInt32 hashSize maxChain insertCap
+      (.replicate hashSize 0xFFFFFFFF) (.replicate data.size 0xFFFFFFFF) 0 #[] 0 rfl
+where
+  mainLoop (data : ByteArray) (windowSize : UInt32) (hashSize maxChain insertCap : Nat)
+      (hashTable prev : Array UInt32) (pos : Nat) (acc : Array LZ77Token)
+      (pos32 : UInt32) (hp32 : pos32 = pos.toUInt32) :
+      Array LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let (head, hashTable, prev) := headInsertGuarded32 hashTable prev h pos pos32 hp32
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        chainWalkGuarded32 data prev windowSize pos maxLen hmaxLenP pos32 hp32 head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          if h3lt : pos + 3 < data.size then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := headProbeGuarded32 hashTable h2
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let (matchLen2, matchPos2) :=
+              chainWalkGuarded32 data prev windowSize (pos + 1) maxLen2 hmaxLen2P
+                (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm) head2 maxChain 0 0
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  updateHashesGuarded32 data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                    (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+                mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1 + matchLen2)
+                  (acc.push (.literal (data[pos]'(by omega))) |>.push
+                    (.reference matchLen2 (pos + 1 - matchPos2)))
+                  (pos32 + 1 + matchLen2.toUInt32)
+                  (by rw [hp32]; simp [Nat.toUInt32, UInt32.ofNat_add])
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  updateHashesGuarded32 data hashSize hashTable prev pos 1 matchLen insertCap
+                    (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+                mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+                  (acc.push (.reference matchLen (pos - matchPos)))
+                  (pos32 + matchLen.toUInt32)
+                  (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let (hashTable, prev) :=
+                updateHashesGuarded32 data hashSize hashTable prev pos 1 matchLen insertCap
+                  (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+              mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+                (acc.push (.reference matchLen (pos - matchPos)))
+                (pos32 + matchLen.toUInt32)
+                (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+          else
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+              (acc.push (.reference matchLen (pos - matchPos)))
+              (pos32 + matchLen.toUInt32)
+              (by rw [hp32]; exact (UInt32.ofNat_add pos matchLen).symm)
+        else
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+            (acc.push (.literal (data[pos]'(by omega))))
+            (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+      else
+        mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+          (acc.push (.literal (data[pos]'(by omega))))
+          (pos32 + 1) (by rw [hp32]; exact (UInt32.ofNat_add pos 1).symm)
+    else
+      lz77GreedyIter.trailing data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
   if h : i < tokens.size then
