@@ -91,6 +91,53 @@ def chainWalkAll (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
 termination_by fuel
 decreasing_by all_goals omega
 
+/-- Proven-bounds copy of `chainWalkAll` (Wave 3 Step 0.1, same generational
+    pattern as `chainWalkFast`/`updateHashesFast` in `Deflate.lean`):
+    `prev[cand]` is in range because the walk guard gives `cand < pos` and
+    `hps : pos ≤ prev.size`; the slot writes are in range because the slot
+    guard gives `k < optCacheSlots` and `hsl`/`hsd` bound the whole slot
+    block. Once established, the three hypotheses discharge every access in
+    the loop statically. -/
+def chainWalkAllFast (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat)
+    (lens dists : Array Nat) (hps : pos ≤ prev.size)
+    (hsl : slotBase + optCacheSlots ≤ lens.size)
+    (hsd : slotBase + optCacheSlots ≤ dists.size) : Array Nat × Array Nat :=
+  if fuel = 0 then (lens, dists)
+  else if hk : optCacheSlots ≤ k then (lens, dists)
+  else if hc : cand < pos ∧ pos - cand ≤ 32768 then
+    have hcand : cand + maxLen ≤ data.size := by omega
+    let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
+    if 3 ≤ ml ∧ bestLen < ml then
+      have hbl : slotBase + k < lens.size := by omega
+      have hbd : slotBase + k < dists.size := by omega
+      if min optNiceLen maxLen ≤ ml then
+        (lens.set (slotBase + k) ml hbl, dists.set (slotBase + k) (pos - cand) hbd)
+      else chainWalkAllFast data prev pos maxLen hpm (prev[cand]'(by omega)) (fuel - 1) ml (k + 1)
+        slotBase (lens.set (slotBase + k) ml hbl) (dists.set (slotBase + k) (pos - cand) hbd)
+        hps (by simpa using hsl) (by simpa using hsd)
+    else
+      chainWalkAllFast data prev pos maxLen hpm (prev[cand]'(by omega)) (fuel - 1) bestLen k
+        slotBase lens dists hps hsl hsd
+  else (lens, dists)
+termination_by fuel
+decreasing_by all_goals omega
+
+/-- One runtime check (`pos ≤ prev.size` plus the slot block fitting in
+    `lens`/`dists`) guards the whole `chainWalkAllFast` walk; the fallback is
+    the original panic-checked `chainWalkAll` (unreachable in practice —
+    `buildCache` callers size `prev` to the input and the cache arrays to
+    `slots * r`), so the wrapper is value-identical to `chainWalkAll`. -/
+@[inline] def chainWalkAllGuarded (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat)
+    (lens dists : Array Nat) : Array Nat × Array Nat :=
+  if hg : pos ≤ prev.size ∧ slotBase + optCacheSlots ≤ lens.size ∧
+      slotBase + optCacheSlots ≤ dists.size then
+    chainWalkAllFast data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
+      hg.1 hg.2.1 hg.2.2
+  else
+    chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
+
 /-- Build the candidate cache for region `[base, base + r)`: at **every**
     position (the DP can land anywhere, so none may be skipped) insert the
     position into the hash chains and record its candidate frontier.
@@ -109,12 +156,10 @@ def buildCache (data : ByteArray) (hashTable prev : Array Nat) (depth slots base
     let pos := base + j
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos 65536 hlt
-      let head := hashTable[h]!
-      let hashTable := hashTable.set! h pos
-      let prev := prev.set! pos head
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
       let maxLen := min 258 (data.size - pos)
       have hpm : pos + maxLen ≤ data.size := by omega
-      let (lens, dists) := chainWalkAll data prev pos maxLen hpm head depth
+      let (lens, dists) := chainWalkAllGuarded data prev pos maxLen hpm head depth
         0 0 (slots * j) lens dists
       buildCache data hashTable prev depth slots base r (j + 1) lens dists
     else
