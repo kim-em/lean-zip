@@ -101,6 +101,40 @@ remaining costs are structural (per-token allocation, RC traffic, the
 ByteArray byte loop), i.e. Wave 3b (packed token stream) and Wave 5 (fused
 phases) are the live levers.
 
+**W5.P1 comparative component profile (2026-06-12, perf, alice29, per-compressor
+windows, normalized to compressor-attributable samples; nix/Lean startup noise
+excluded; miniz attribution degraded — inline monolith):**
+
+| compressor | matcher | runtime/mem | code-lookup | emit | tree | dp/freqs |
+|---|---|---|---|---|---|---|
+| native L1 | 24.9 | **32.2** | **13.8** | 5.0 | 4.4 | 1.6 |
+| native L6 | 58.3 | 20.3 | 5.1 | — | 1.2 | — |
+| native L9 | 44.9 | 21.6 | 3.9 | — | 2.4 | 11.3 |
+| zlib L1 | 48.5 | 14.9¹ | — | 14.4 | 1.5 | — |
+| zlib L6 | 74.3 | 10.1¹ | — | 4.0 | 0.7 | — |
+| libdeflate L6 | (in emit²) | 13.8¹ | — | 63.8 | 2.8 | — |
+
+¹ includes the Lean harness's own RC around the FFI call. ² libdeflate's
+matcher is fast enough that vectorized bit-packing dominates its profile.
+
+**What it flags (re-ranking Wave 5):**
+1. **Allocation/RC is native's #1 fast-end anomaly** (32% at L1 vs zlib's
+   ≤15% incl. harness). Prime suspect found by reading the hot helpers: the
+   #2548/#2551 `Guarded` helpers return boxed tuples per position
+   (`headInsertGuarded : Nat × Array × Array`, `chainWalk* : Nat × Nat`) —
+   a heap pair every byte. New profile-backed iso-ratio lead (and a likely
+   explanation for why the 3a UInt32 change couldn't show: alloc dominated).
+2. **`findTableCode` linear search confirmed at 13.8% of L1** (5.1% L6,
+   3.9% L9) — W5.0's dense tables promoted from suspect to certainty.
+3. **T2 feasibility check passes**: matcher-only throughput at L1 =
+   15.2 / 0.249 ≈ **61 MB/s** — the ~39 MB/s fast-tier target is reachable
+   purely by shedding overhead (73% of L1 is non-matcher), before any
+   matcher knob trades.
+4. zlib's own matcher is ~6× faster per matcher-second (L6: 53/0.743 ≈ 71
+   vs native 6.9/0.583 ≈ 12 MB/s-equivalent) — the per-byte C-vs-Lean gap
+   is real and not closable by overhead work; the fast tier's win comes
+   from the other 73%, not from beating C at matching.
+
 **Named bottlenecks (in priority order):**
 1. **Matcher is 83–84% of the base path at L6** (and the lazy step at L4 costs
    ~2× over L3) — hash-chain maintenance + search; the Wave-3 matcher-state
