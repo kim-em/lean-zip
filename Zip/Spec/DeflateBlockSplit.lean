@@ -1393,4 +1393,105 @@ theorem deflateDynamicBlocksOptimal_pad (data : ByteArray) (tokChunk : Nat) :
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
 
+/-! ## Sized-tree emitter equality (Wave 5, #2552)
+
+`deflateDynamicBlocksSharedSized` reuses the per-block Huffman trees the
+arbitration sizing pass already built, instead of letting `emitSharedBlocksAt`
+rebuild them at emission. The lemmas below prove the sized pipeline
+byte-identical to the reference
+`deflateDynamicBlocksSharedAtTokens … chooseSplitsArbitrated`, so the
+`deflateDynamicBlocksSharedAt` quadruple above transfers by a rewrite in
+`DeflateRoundtrip` — no statement changes. Each equality is one unfolding step
+per block on both sides: the trees the sizing pass stores are *definitionally*
+`dynamicCodeLengths (tokenFreqs group)` of the same group the reference
+emitter recomputes, so no bit-level reasoning is involved. -/
+
+/-- Component 1 of `sharedPartitionSized` is exactly `sharedPartitionBits`
+    (fuel-quantified form for the induction). -/
+private theorem sharedPartitionSized_fst_fuel (toks : Array LZ77Token) :
+    ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat),
+      (sharedPartitionSized toks cuts pos).1 = sharedPartitionBits toks cuts pos := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts
+    conv => lhs; unfold sharedPartitionSized
+    conv => rhs; unfold sharedPartitionBits
+    by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
+    · simp only [if_pos hend, sizedTrees]
+    · simp only [if_neg hend, sizedTrees]
+      rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega)]
+
+/-- Component 1 of `sharedPartitionSized` is exactly `sharedPartitionBits`. -/
+theorem sharedPartitionSized_fst (toks : Array LZ77Token) (cuts : List Nat) (pos : Nat) :
+    (sharedPartitionSized toks cuts pos).1 = sharedPartitionBits toks cuts pos :=
+  sharedPartitionSized_fst_fuel toks (toks.size - pos + 1) pos (by omega) cuts
+
+/-- The tree-taking emitter over the sizing pass's trees equals the reference
+    emitter (fuel-quantified form): the stored trees are definitionally the
+    `dynamicCodeLengths (tokenFreqs group)` the reference recomputes. -/
+private theorem emitSharedBlocksAtSized_eq_fuel (data : ByteArray) (toks : Array LZ77Token) :
+    ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtSized data toks cuts (sharedPartitionSized toks cuts pos).2 pos bw
+        = emitSharedBlocksAt data toks cuts pos bw := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts bw
+    by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
+    · have hsnd : (sharedPartitionSized toks cuts pos).2 =
+          [sizedTrees
+            (tokenFreqs (toks.extract pos
+              (min (max (cuts.headD toks.size) (pos + 1)) toks.size))).1
+            (tokenFreqs (toks.extract pos
+              (min (max (cuts.headD toks.size) (pos + 1)) toks.size))).2] := by
+        conv => lhs; unfold sharedPartitionSized
+        simp only [if_pos hend]
+      rw [hsnd]
+      conv => lhs; unfold emitSharedBlocksAtSized
+      conv => rhs; unfold emitSharedBlocksAt
+      simp only [if_pos hend, List.headD_cons, emitSharedBlock, sizedTrees]
+    · have hsnd : (sharedPartitionSized toks cuts pos).2 =
+          sizedTrees
+            (tokenFreqs (toks.extract pos
+              (min (max (cuts.headD toks.size) (pos + 1)) toks.size))).1
+            (tokenFreqs (toks.extract pos
+              (min (max (cuts.headD toks.size) (pos + 1)) toks.size))).2 ::
+          (sharedPartitionSized toks cuts.tail
+            (min (max (cuts.headD toks.size) (pos + 1)) toks.size)).2 := by
+        conv => lhs; unfold sharedPartitionSized
+        simp only [if_neg hend]
+      rw [hsnd]
+      conv => lhs; unfold emitSharedBlocksAtSized
+      conv => rhs; unfold emitSharedBlocksAt
+      simp only [if_neg hend, List.headD_cons, List.tail_cons, emitSharedBlock, sizedTrees]
+      exact ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail _
+
+/-- The tree-taking emitter over the sizing pass's trees equals the reference
+    emitter, for any cut list and start position. -/
+theorem emitSharedBlocksAtSized_eq (data : ByteArray) (toks : Array LZ77Token)
+    (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
+    emitSharedBlocksAtSized data toks cuts (sharedPartitionSized toks cuts pos).2 pos bw
+      = emitSharedBlocksAt data toks cuts pos bw :=
+  emitSharedBlocksAtSized_eq_fuel data toks (toks.size - pos + 1) pos (by omega) cuts bw
+
+/-- The sized-tree shared-window candidate is byte-identical to the reference
+    arbitrated candidate: `deflateRaw`'s level ≥ 7 branches and the roundtrip
+    proofs see the old `deflateDynamicBlocksSharedAtTokens … chooseSplitsArbitrated`
+    through this rewrite. -/
+theorem deflateDynamicBlocksSharedSized_eq (data : ByteArray) (toks : Array LZ77Token) :
+    deflateDynamicBlocksSharedSized data toks =
+      deflateDynamicBlocksSharedAtTokens data toks chooseSplitsArbitrated := by
+  unfold deflateDynamicBlocksSharedSized deflateDynamicBlocksSharedAtTokens
+  split
+  · rfl
+  · simp only [chooseSplitsArbitratedSized, chooseSplitsArbitrated,
+      sharedPartitionSized_fst]
+    by_cases hlt : sharedPartitionBits toks (chooseSplitsHeuristic toks) 0 <
+        sharedPartitionBits toks (fixedCadenceCuts sharedTokChunk toks.size) 0
+    · simp only [if_pos hlt, emitSharedBlocksAtSized_eq]
+    · simp only [if_neg hlt, emitSharedBlocksAtSized_eq]
+
 end Zip.Native.Deflate
