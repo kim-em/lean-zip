@@ -1,6 +1,7 @@
 import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.LZ77ChainCorrect
+import Zip.Spec.LZ77PackedCorrect
 import Zip.Spec.DeflateBlockSplit
 
 /-!
@@ -88,7 +89,8 @@ set_option maxRecDepth 8000 in
 theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     Zip.Native.Inflate.inflate (deflateRawBase data level) maxOutputSize = .ok data := by
-  unfold deflateRawBase deflateRawBaseTokens
+  rw [← deflateRawBase_def]
+  unfold deflateRawBaseTokens
   dsimp only []
   -- stored / fixed / dynamic, sized from one chain token pass. The outer `split`
   -- fires on `fixedBytes < dynBytes`, then each side on the stored comparison.
@@ -111,7 +113,7 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   dsimp only []
-  rw [deflateRawBase_def, deflateDynamicBlocksSharedAt_def]
+  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedAt_def]
   split
   · exact inflate_deflateStoredPure data _ (by omega)
   · split
@@ -155,7 +157,8 @@ theorem deflateRawBase_pad (data : ByteArray) (level : UInt8) :
     ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawBase data level) = contentBits ++ padding ∧
       padding.length < 8 := by
-  unfold deflateRawBase deflateRawBaseTokens
+  rw [← deflateRawBase_def]
+  unfold deflateRawBaseTokens
   dsimp only []
   -- stored / fixed / dynamic sized; emit only the winner. The outer `split` fires
   -- on `fixedBytes < dynBytes`, then each side on the stored comparison.
@@ -196,7 +199,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       padding.length < 8 := by
   unfold deflateRaw
   dsimp only []
-  rw [deflateRawBase_def, deflateDynamicBlocksSharedAt_def]
+  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedAt_def]
   split
   · -- Level 0: stored blocks — all byte-aligned, padding = []
     exact ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
@@ -339,7 +342,8 @@ private theorem deflateRawBase_goR_pad (data : ByteArray) (level : UInt8) :
     ∃ remaining,
       Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits (deflateRawBase data level)) []
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
-  unfold deflateRawBase deflateRawBaseTokens
+  rw [← deflateRawBase_def]
+  unfold deflateRawBaseTokens
   dsimp only []
   have hfixed : ∃ remaining,
       Deflate.Spec.decode.goR
@@ -364,7 +368,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateRaw
   dsimp only []
-  rw [deflateRawBase_def, deflateDynamicBlocksSharedAt_def]
+  rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedAt_def]
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
     exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
