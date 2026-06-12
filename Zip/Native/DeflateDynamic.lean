@@ -702,12 +702,15 @@ theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
 
 /-! ## Near-optimal candidate (level 9) -/
 
-/-- Input-size gate for the near-optimal candidate: the DP keeps roughly
-    16 bytes of transient state per input byte (global choice arrays plus the
-    per-region candidate cache), so very large inputs stay on the plain
-    level-9 path. A pure dispatch knob — `pickSmaller` composes either way —
-    to be raised once peak memory is measured on large corpora. -/
-def optimalMaxSize : Nat := 16777216
+/-- Input-size gate for the near-optimal candidate. Measured (#2537, GNU
+    time MaxRSS of the ungated candidate on silesia/mozilla slices): 793 MB
+    peak at 16 MiB input, 1.73 GB at 52 MiB — ≈27 B of transient state per
+    input byte marginal (global choice arrays + per-region cache + token
+    stream) over the process baseline. 64 MiB covers every Silesia file at a
+    projected ~2.1 GB peak, acceptable for the max-effort tier; truly huge
+    inputs still fall back to the plain level-9 path. A pure dispatch knob —
+    `pickSmaller` composes either way. -/
+def optimalMaxSize : Nat := 67108864
 
 /-- Cross-block (shared-window) block-split dynamic compression over the
     **near-optimal** token stream: like `deflateDynamicBlocksShared`, but the
