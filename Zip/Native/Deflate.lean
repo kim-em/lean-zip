@@ -383,6 +383,30 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- Per-position chain-head insertion with one runtime bounds check (Wave 3
+    Step 0.2, same pattern as `chainWalkGuarded`/`updateHashesGuarded` below):
+    read the old head of bucket `h`, point the bucket at `pos`, and link
+    `prev[pos]` to the old head. The single guard discharges all three accesses
+    statically; the fallback keeps the original panic-checked operations and is
+    dead in practice — `hashTable`/`prev` sizes are fixed at allocation.
+    Provably equal to the panic-checked sequence (`headInsertGuarded_eq` in
+    `LZ77ChainCorrect`). -/
+@[inline] def headInsertGuarded (hashTable prev : Array Nat) (h pos : Nat) :
+    Nat × Array Nat × Array Nat :=
+  if hg : h < hashTable.size ∧ pos < prev.size then
+    let head := hashTable[h]'hg.1
+    (head, hashTable.set h pos hg.1, prev.set pos head hg.2)
+  else
+    let head := hashTable[h]!
+    (head, hashTable.set! h pos, prev.set! pos head)
+
+/-- Single guarded chain-head probe (for the lazy matcher's lookahead position,
+    which reads a bucket head without inserting): one runtime bounds check,
+    panic-checked fallback (dead in practice). Provably equal to `hashTable[h]!`
+    (`headProbeGuarded_eq` in `LZ77ChainCorrect`). -/
+@[inline] def headProbeGuarded (hashTable : Array Nat) (h : Nat) : Nat :=
+  if hb : h < hashTable.size then hashTable[h]'hb else hashTable[h]!
+
 /-- Greedy LZ77 with bounded-depth hash chains: at each position, walk the
     `prev` chain from the bucket head up to `maxChain` candidates and keep the
     longest in-window match. This finds far longer matches than the single-probe
@@ -446,9 +470,7 @@ where
       (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let head := hashTable[h]!
-      let hashTable := hashTable.set! h pos
-      let prev := prev.set! pos head
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let (matchLen, matchPos) :=
@@ -566,9 +588,7 @@ where
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let head := hashTable[h]!
-      let hashTable := hashTable.set! h pos
-      let prev := prev.set! pos head
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let (matchLen, matchPos) :=
@@ -626,9 +646,7 @@ where
       (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let head := hashTable[h]!
-      let hashTable := hashTable.set! h pos
-      let prev := prev.set! pos head
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let (matchLen, matchPos) :=
@@ -638,7 +656,7 @@ where
           -- Lazy: probe pos+1 for a longer, no-farther match (distance-guarded deferral)
           if h3lt : pos + 3 < data.size then
             let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
-            let head2 := hashTable[h2]!
+            let head2 := headProbeGuarded hashTable h2
             let maxLen2 := min 258 (data.size - (pos + 1))
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
             let (matchLen2, matchPos2) :=
@@ -702,9 +720,7 @@ where
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
-      let head := hashTable[h]!
-      let hashTable := hashTable.set! h pos
-      let prev := prev.set! pos head
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let (matchLen, matchPos) :=
@@ -713,7 +729,7 @@ where
         if hle : pos + matchLen ≤ data.size then
           if h3lt : pos + 3 < data.size then
             let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
-            let head2 := hashTable[h2]!
+            let head2 := headProbeGuarded hashTable h2
             let maxLen2 := min 258 (data.size - (pos + 1))
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
             let (matchLen2, matchPos2) :=
