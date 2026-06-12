@@ -38,7 +38,7 @@ private theorem emitRefFixedP_none (bw : BitWriter) (w : UInt32)
     (h : findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) = none) :
     emitRefFixedP bw w = bw := by
   unfold emitRefFixedP
-  simp only [h]
+  simp only [findLengthCodeFast_eq, h]
 
 /-- `emitRefFixedP` when the length code is out of table bounds (dead code,
     kept branch-for-branch with the boxed emitter): no-op. -/
@@ -47,7 +47,7 @@ private theorem emitRefFixedP_oob (bw : BitWriter) (w : UInt32) (idx en : Nat) (
     (hl : ¬ idx + 257 < fixedLitCodes.size) :
     emitRefFixedP bw w = bw := by
   unfold emitRefFixedP
-  simp only [hflc, hl, ↓reduceDIte]
+  simp only [findLengthCodeFast_eq, hflc, hl, ↓reduceDIte]
 
 /-- `emitRefFixedP` when the distance field has no distance code: only the
     length code and its extra bits are written. -/
@@ -59,7 +59,7 @@ private theorem emitRefFixedP_distNone (bw : BitWriter) (w : UInt32) (idx en : N
       (bw.writeHuffCode (fixedLitCodes[idx + 257]).1 (fixedLitCodes[idx + 257]).2).writeBits
         en ev := by
   unfold emitRefFixedP
-  simp only [hflc, hl, ↓reduceDIte, hfdc]
+  simp only [findLengthCodeFast_eq, findDistCodeFast_eq, hflc, hl, ↓reduceDIte, hfdc]
   rfl
 
 /-- `emitRefFixedP` when the distance code is out of table bounds (dead
@@ -74,7 +74,7 @@ private theorem emitRefFixedP_distOob (bw : BitWriter) (w : UInt32) (idx en : Na
       (bw.writeHuffCode (fixedLitCodes[idx + 257]).1 (fixedLitCodes[idx + 257]).2).writeBits
         en ev := by
   unfold emitRefFixedP
-  simp only [hflc, hl, ↓reduceDIte, hfdc, hd]
+  simp only [findLengthCodeFast_eq, findDistCodeFast_eq, hflc, hl, ↓reduceDIte, hfdc, hd]
   rfl
 
 /-- `emitRefFixedP` on the full path: length code + extra bits, then distance
@@ -90,7 +90,7 @@ private theorem emitRefFixedP_distSome (bw : BitWriter) (w : UInt32) (idx en : N
           en ev).writeHuffCode (fixedDistCodes[dIdx]).1 (fixedDistCodes[dIdx]).2).writeBits
         den dev) := by
   unfold emitRefFixedP
-  simp only [hflc, hl, ↓reduceDIte, hfdc, hd]
+  simp only [findLengthCodeFast_eq, findDistCodeFast_eq, hflc, hl, ↓reduceDIte, hfdc, hd]
   rfl
 
 /-! ## The packed fixed-code emitter equals the boxed one -/
@@ -142,7 +142,7 @@ private theorem emitRefWithCodesP_none (bw : BitWriter)
     (h : findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) = none) :
     emitRefWithCodesP bw litCodes distCodes w = bw := by
   unfold emitRefWithCodesP
-  simp only [h]
+  simp only [findLengthCodeFast_eq, h]
 
 /-- `emitRefWithCodesP` when the length code is out of table bounds (dead
     code under the callers' `hlit`): no-op. -/
@@ -152,7 +152,7 @@ private theorem emitRefWithCodesP_oob (bw : BitWriter)
     (hl : ¬ idx + 257 < litCodes.size) :
     emitRefWithCodesP bw litCodes distCodes w = bw := by
   unfold emitRefWithCodesP
-  simp only [hflc, hl, ↓reduceDIte]
+  simp only [findLengthCodeFast_eq, hflc, hl, ↓reduceDIte]
 
 /-- `emitRefWithCodesP` when the distance field has no distance code: only
     the length code and its extra bits are written. -/
@@ -164,7 +164,7 @@ private theorem emitRefWithCodesP_distNone (bw : BitWriter)
     emitRefWithCodesP bw litCodes distCodes w =
       (bw.writeHuffCode (litCodes[idx + 257]).1 (litCodes[idx + 257]).2).writeBits en ev := by
   unfold emitRefWithCodesP
-  simp only [hflc, hl, ↓reduceDIte, hfdc]
+  simp only [findLengthCodeFast_eq, findDistCodeFast_eq, hflc, hl, ↓reduceDIte, hfdc]
   rfl
 
 /-- `emitRefWithCodesP` when the distance code is out of table bounds (dead
@@ -180,7 +180,7 @@ private theorem emitRefWithCodesP_distOob (bw : BitWriter)
     emitRefWithCodesP bw litCodes distCodes w =
       (bw.writeHuffCode (litCodes[idx + 257]).1 (litCodes[idx + 257]).2).writeBits en ev := by
   unfold emitRefWithCodesP
-  simp only [hflc, hl, ↓reduceDIte, hfdc, hd]
+  simp only [findLengthCodeFast_eq, findDistCodeFast_eq, hflc, hl, ↓reduceDIte, hfdc, hd]
   rfl
 
 /-- `emitRefWithCodesP` on the full path: length code + extra bits, then
@@ -196,7 +196,7 @@ private theorem emitRefWithCodesP_distSome (bw : BitWriter)
       ((((bw.writeHuffCode (litCodes[idx + 257]).1 (litCodes[idx + 257]).2).writeBits
           en ev).writeHuffCode (distCodes[dIdx]).1 (distCodes[dIdx]).2).writeBits den dev) := by
   unfold emitRefWithCodesP
-  simp only [hflc, hl, ↓reduceDIte, hfdc, hd]
+  simp only [findLengthCodeFast_eq, findDistCodeFast_eq, hflc, hl, ↓reduceDIte, hfdc, hd]
   rfl
 
 /-! ## The packed dynamic-code emitter equals the boxed one -/

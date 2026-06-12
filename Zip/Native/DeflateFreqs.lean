@@ -113,11 +113,12 @@ That shape is load-bearing twice over:
     length code, exactly `tokenFreqs.go`'s reference arm (lit/len half). -/
 @[inline] def bumpRefLitFreqP (litLenFreqs : {a : Array Nat // a.size = 286}) (w : UInt32) :
     {a : Array Nat // a.size = 286} :=
-  match hflc : findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) with
+  match hflc : findLengthCodeFast (((w >>> 16) &&& 0x7FFF).toNat) with
   | none => litLenFreqs
   | some (lIdx, _, _) =>
     have hsym : lIdx + 257 < litLenFreqs.val.size := by
-      have := nativeFindLengthCode_idx_bound _ _ _ _ hflc
+      have := nativeFindLengthCode_idx_bound _ _ _ _
+        ((findLengthCodeFast_eq _).symm.trans hflc)
       have := litLenFreqs.property; omega
     ⟨litLenFreqs.val.set! (lIdx + 257) (litLenFreqs.val[lIdx + 257] + 1),
       by rw [Array.size_set!]; exact litLenFreqs.property⟩
@@ -127,11 +128,12 @@ That shape is load-bearing twice over:
     code, exactly `tokenFreqs.go`'s reference arm (distance half). -/
 @[inline] def bumpRefDistFreqP (distFreqs : {a : Array Nat // a.size = 30}) (w : UInt32) :
     {a : Array Nat // a.size = 30} :=
-  match hfdc : findDistCode ((w &&& 0xFFFF).toNat) with
+  match hfdc : findDistCodeFast ((w &&& 0xFFFF).toNat) with
   | none => distFreqs
   | some (dIdx, _, _) =>
     have hd : dIdx < distFreqs.val.size := by
-      have := nativeFindDistCode_idx_bound _ _ _ _ hfdc
+      have := nativeFindDistCode_idx_bound _ _ _ _
+        ((findDistCodeFast_eq _).symm.trans hfdc)
       have := distFreqs.property; omega
     ⟨distFreqs.val.set! dIdx (distFreqs.val[dIdx] + 1),
       by rw [Array.size_set!]; exact distFreqs.property⟩
@@ -164,7 +166,7 @@ private theorem bumpRefLitFreqP_none (lf : {a : Array Nat // a.size = 286}) (w :
   split
   · rfl
   · rename_i heq
-    rw [h] at heq
+    rw [findLengthCodeFast_eq, h] at heq
     cases heq
 
 /-- `bumpRefLitFreqP` when the length field finds code `lIdx`: bump symbol
@@ -180,10 +182,10 @@ private theorem bumpRefLitFreqP_some (lf : {a : Array Nat // a.size = 286}) (w :
   unfold bumpRefLitFreqP
   split
   · rename_i heq
-    rw [h] at heq
+    rw [findLengthCodeFast_eq, h] at heq
     cases heq
   · rename_i lIdx' en' ev' heq
-    rw [h] at heq
+    rw [findLengthCodeFast_eq, h] at heq
     simp only [Option.some.injEq, Prod.mk.injEq] at heq
     obtain ⟨rfl, rfl, rfl⟩ := heq
     rfl
@@ -196,7 +198,7 @@ private theorem bumpRefDistFreqP_none (df : {a : Array Nat // a.size = 30}) (w :
   split
   · rfl
   · rename_i heq
-    rw [h] at heq
+    rw [findDistCodeFast_eq, h] at heq
     cases heq
 
 /-- `bumpRefDistFreqP` when the distance field finds code `dIdx`: bump it. -/
@@ -211,10 +213,10 @@ private theorem bumpRefDistFreqP_some (df : {a : Array Nat // a.size = 30}) (w :
   unfold bumpRefDistFreqP
   split
   · rename_i heq
-    rw [h] at heq
+    rw [findDistCodeFast_eq, h] at heq
     cases heq
   · rename_i dIdx' en' ev' heq
-    rw [h] at heq
+    rw [findDistCodeFast_eq, h] at heq
     simp only [Option.some.injEq, Prod.mk.injEq] at heq
     obtain ⟨rfl, rfl, rfl⟩ := heq
     rfl
