@@ -985,6 +985,62 @@ def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter
   else bw
 termination_by tokens.size - i
 
+/-! ## Packed-token fixed-code emission (Wave 3b stage C)
+
+`emitTokensP` walks the `packTok`-encoded `UInt32` stream directly, so the
+fixed-code emit path never materializes boxed `LZ77Token`s. The reference
+arm lives in the non-recursive helper `emitRefFixedP`, whose field reads
+and `findLengthCode`/`findDistCode` matches are the *exact* bit expressions
+of `unpackTok`'s reference view; the loop body contains only a plain helper
+application. As with `tokenFreqsP` (see the landmine note in
+`Zip/Native/DeflateFreqs.lean`), that shape is load-bearing: a match
+scrutinee over `findLengthCode` applied to a stuck bit-extracted word in a
+well-founded-recursion body sends definition-time `whnf` into
+`findTableCode`'s `WellFounded` fix, which does not terminate in practical
+time. Do not inline `emitRefFixedP` back into `emitTokensP`.
+`Zip/Spec/EmitPackedCorrect.lean` proves
+`emitTokensP bw ws i = emitTokens bw (ws.map unpackTok) i`. -/
+
+/-- Emit one packed *reference* token (tag bit set) as fixed Huffman codes:
+    decode the length/distance fields with `unpackTok`'s bit expressions and
+    write exactly the `writeHuffCode`/`writeBits` sequence of `emitTokens`'s
+    reference arm (including its dead-code `else` fallbacks, so the equality
+    proof in `Zip/Spec/EmitPackedCorrect.lean` aligns branch-for-branch). -/
+@[inline] def emitRefFixedP (bw : BitWriter) (w : UInt32) : BitWriter :=
+  match findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) with
+  | some (idx, extraCount, extraVal) =>
+    if hlit : idx + 257 < fixedLitCodes.size then
+      let (code, len) := fixedLitCodes[idx + 257]
+      let bw := bw.writeHuffCode code len
+      let bw := bw.writeBits extraCount extraVal
+      match findDistCode ((w &&& 0xFFFF).toNat) with
+      | some (dIdx, dExtraCount, dExtraVal) =>
+        if hdist : dIdx < fixedDistCodes.size then
+          let (dCode, dLen) := fixedDistCodes[dIdx]
+          let bw := bw.writeHuffCode dCode dLen
+          bw.writeBits dExtraCount dExtraVal
+        else bw
+      | none => bw
+    else bw
+  | none => bw
+
+/-- Packed-token form of `emitTokens`: emit the packed `UInt32` stream as
+    fixed Huffman codes. Literals (tag bit clear) read the byte field
+    directly; references go through `emitRefFixedP`. Equal to `emitTokens`
+    over the boxed view for every word array (`emitTokensP_eq`). -/
+def emitTokensP (bw : BitWriter) (tokens : Array UInt32) (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens[i]
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have : w.toUInt8.toNat < fixedLitCodes.size := by
+        have := UInt8.toNat_lt w.toUInt8; rw [Deflate.fixedLitCodes_size]; omega
+      let (code, len) := fixedLitCodes[w.toUInt8.toNat]
+      emitTokensP (bw.writeHuffCode code len) tokens (i + 1)
+    else
+      emitTokensP (emitRefFixedP bw w) tokens (i + 1)
+  else bw
+termination_by tokens.size - i
+
 /-- Write a fixed Huffman DEFLATE block from LZ77 tokens. -/
 def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
   let bw := BitWriter.empty
@@ -997,6 +1053,26 @@ def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray 
     bw.flush
   else
     let bw := emitTokens bw tokens 0
+    let (code, len) := fixedLitCodes[256]
+    let bw := bw.writeHuffCode code len
+    bw.flush
+
+/-- Packed-token form of `deflateFixedBlock` (Wave 3b stage C): write a
+    fixed Huffman DEFLATE block directly from the packed `UInt32` stream —
+    same body with `emitTokensP` in place of `emitTokens`. Equal to
+    `deflateFixedBlock` over the boxed view (`deflateFixedBlockP_eq` in
+    `Zip/Spec/EmitPackedCorrect.lean`). -/
+def deflateFixedBlockP (data : ByteArray) (tokens : Array UInt32) : ByteArray :=
+  let bw := BitWriter.empty
+  let bw := bw.writeBits 1 1  -- BFINAL
+  let bw := bw.writeBits 2 1  -- BTYPE = 01
+  have h256 : 256 < fixedLitCodes.size := by rw [Deflate.fixedLitCodes_size]; omega
+  if data.size == 0 then
+    let (code, len) := fixedLitCodes[256]
+    let bw := bw.writeHuffCode code len
+    bw.flush
+  else
+    let bw := emitTokensP bw tokens 0
     let (code, len) := fixedLitCodes[256]
     let bw := bw.writeHuffCode code len
     bw.flush

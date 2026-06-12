@@ -56,6 +56,64 @@ def emitTokensWithCodes (bw : BitWriter) (tokens : Array LZ77Token)
   else bw
 termination_by tokens.size - i
 
+/-! ## Packed-token dynamic-code emission (Wave 3b stage C)
+
+`emitTokensWithCodesP` walks the `packTok`-encoded `UInt32` stream directly,
+so the dynamic emit path never materializes boxed `LZ77Token`s. As with
+`emitTokensP`/`emitRefFixedP` (`Zip/Native/Deflate.lean`) and `tokenFreqsP`
+(see the landmine note in `Zip/Native/DeflateFreqs.lean`), the reference arm
+— a match scrutinee over `findLengthCode` applied to a stuck bit-extracted
+word — must live in the non-recursive helper `emitRefWithCodesP`, never
+inline in the well-founded loop body. `Zip/Spec/EmitPackedCorrect.lean`
+proves the loop equal to `emitTokensWithCodes` over the boxed view. -/
+
+/-- Emit one packed *reference* token (tag bit set) with the given Huffman
+    codes: decode the length/distance fields with `unpackTok`'s bit
+    expressions and write exactly the `writeHuffCode`/`writeBits` sequence of
+    `emitTokensWithCodes`'s reference arm (including its dead-code `else`
+    fallbacks, so the equality proof aligns branch-for-branch). -/
+@[inline] def emitRefWithCodesP (bw : BitWriter)
+    (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32) : BitWriter :=
+  match findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) with
+  | some (idx, extraCount, extraVal) =>
+    if hlitlt : idx + 257 < litCodes.size then
+      let (code, len) := litCodes[idx + 257]
+      let bw := bw.writeHuffCode code len
+      let bw := bw.writeBits extraCount extraVal
+      match findDistCode ((w &&& 0xFFFF).toNat) with
+      | some (dIdx, dExtraCount, dExtraVal) =>
+        if hdistlt : dIdx < distCodes.size then
+          let (dCode, dLen) := distCodes[dIdx]
+          let bw := bw.writeHuffCode dCode dLen
+          bw.writeBits dExtraCount dExtraVal
+        else bw
+      | none => bw
+    else bw
+  | none => bw
+
+/-- Packed-token form of `emitTokensWithCodes` (same `hlit`/`hdist` size
+    hypotheses): emit the packed `UInt32` stream with the given lit/len and
+    distance Huffman codes. Literals (tag bit clear) read the byte field
+    directly; references go through `emitRefWithCodesP`. Equal to
+    `emitTokensWithCodes` over the boxed view for every word array
+    (`emitTokensWithCodesP_eq`). -/
+def emitTokensWithCodesP (bw : BitWriter) (tokens : Array UInt32)
+    (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlit : litCodes.size ≥ 286) (hdist : distCodes.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens[i]
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have : w.toUInt8.toNat < litCodes.size := by
+        have := UInt8.toNat_lt w.toUInt8; omega
+      let (code, len) := litCodes[w.toUInt8.toNat]
+      emitTokensWithCodesP (bw.writeHuffCode code len) tokens litCodes distCodes hlit hdist (i + 1)
+    else
+      emitTokensWithCodesP (emitRefWithCodesP bw litCodes distCodes w) tokens litCodes distCodes
+        hlit hdist (i + 1)
+  else bw
+termination_by tokens.size - i
+
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
@@ -180,6 +238,39 @@ def deflateDynamicBlockCore (data : ByteArray) (tokens : Array LZ77Token)
     bw.flush
   else
     let bw := emitTokensWithCodes bw tokens litCodes distCodes hlit_size hdist_size 0
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+
+/-- Packed-token form of `deflateDynamicBlockCore` (Wave 3b stage C): emit a
+    dynamic Huffman block directly from the packed `UInt32` stream — same
+    body with `emitTokensWithCodesP` in place of `emitTokensWithCodes`.
+    Equal to `deflateDynamicBlockCore` over the boxed view
+    (`deflateDynamicBlockCoreP_eq` in `Zip/Spec/EmitPackedCorrect.lean`). -/
+def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
+    (litLens distLens : List Nat)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) : ByteArray :=
+  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
+  let bw := BitWriter.empty
+  let bw := bw.writeBits 1 1  -- BFINAL
+  let bw := bw.writeBits 2 2  -- BTYPE = 10
+  let bw := writeDynamicHeader bw litLens distLens
+  have hlit_size : litCodes.size ≥ 286 := by
+    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have h256 : 256 < litCodes.size := by
+    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  if data.size == 0 then
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+  else
+    let bw := emitTokensWithCodesP bw tokens litCodes distCodes hlit_size hdist_size 0
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -696,11 +787,13 @@ def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArr
   else deflateDynamicBlockCore data tokens lens.1 lens.2
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
-/-- `deflateRawBaseTokens` over a *packed* token stream (Wave 3b stage B):
+/-- `deflateRawBaseTokens` over a *packed* token stream (Wave 3b stages B+C):
     the frequency pass runs natively on the packed words (`tokenFreqsP`), and
-    the boxed tokens are materialized (`unpackTok`) only on the emit branches
-    — the stored branch never unpacks. Equal to
-    `deflateRawBaseTokens data (ptokens.map unpackTok)` via `tokenFreqsP_eq`;
+    the emit branches consume the packed words directly
+    (`deflateFixedBlockP`/`deflateDynamicBlockCoreP`) — no branch ever
+    materializes boxed tokens. Equal to
+    `deflateRawBaseTokens data (ptokens.map unpackTok)` via `tokenFreqsP_eq`
+    and the packed-emitter equalities (`Zip/Spec/EmitPackedCorrect.lean`);
     `deflateRawBaseTokens` stays as the boxed reference implementation
     (conformance-tested in `ZipTest/PackedTokens.lean`). -/
 def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
@@ -710,8 +803,8 @@ def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
   let dynBytes := dynBlockBytes f.1 f.2 lens.1 lens.2
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
-  else if fixedBytes < dynBytes then deflateFixedBlock data (ptokens.map unpackTok)
-  else deflateDynamicBlockCore data (ptokens.map unpackTok) lens.1 lens.2
+  else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+  else deflateDynamicBlockCoreP data ptokens lens.1 lens.2
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
 /-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
@@ -783,8 +876,9 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   else if 7 ≤ level then
     -- One *packed* matcher pass shared by the base and shared-split candidates
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
-    -- The base candidate consumes the packed words directly; the shared-split
-    -- candidate unpacks once (stage C/D push packed further down).
+    -- The base candidate consumes the packed words end-to-end (freqs *and*
+    -- emit, stage C); the shared-split candidate still unpacks once (stage D
+    -- moves it onto packed words).
     let ptokens := lzMatchP data level
     if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
       pickSmaller
