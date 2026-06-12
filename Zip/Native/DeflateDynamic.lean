@@ -331,6 +331,15 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
   if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
 
+/-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
+    dispatch over the packed matcher twins, producing one unboxed `UInt32`
+    per token instead of a boxed `LZ77Token`. The boxed view recovers
+    `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
+    downstream consumers still run on `lzMatch` — stage B moves them here. -/
+def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
+  if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level)
+  else lz77ChainIterP data (chainDepth level) 32768 (insertCap level)
+
 /-! ## Self-contained block-split dynamic compression
 
 Split `data` into `chunkSize`-byte chunks, match each chunk independently (fresh

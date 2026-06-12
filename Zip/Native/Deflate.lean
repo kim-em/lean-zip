@@ -1,5 +1,6 @@
 import Zip.Native.BitWriter
 import Zip.Native.Inflate
+import Std.Tactic.BVDecide
 
 /-!
   Pure Lean DEFLATE compressor.
@@ -190,6 +191,66 @@ inductive LZ77Token where
   | literal : UInt8 → LZ77Token
   | reference : (length : Nat) → (distance : Nat) → LZ77Token
   deriving BEq, Inhabited
+
+/-! ## Packed tokens (Wave 3b)
+
+Every `LZ77Token` push in the matcher hot loops allocates a boxed
+constructor cell. `packTok` encodes a token in one unboxed `UInt32` instead:
+literals are the byte value (tag bit 31 clear); references set bit 31 and
+carry the length in bits 16–30 and the distance in bits 0–15. The field
+split is forced by the DEFLATE ranges: `dist ≤ 32768 = 2^15` needs 16 bits
+exactly (32768 itself does not fit in 15), so the distance owns bits 0–15
+and the length (`≤ 258 < 2^15`) sits at bit 16 with 15 bits of room below
+the tag. `unpackTok` is the boxed *spec-level view* of a packed token;
+`unpackTok_packTok` shows the view recovers every encodable token, which is
+what lets `Zip/Spec/LZ77PackedCorrect.lean` prove the packed matcher twins
+(`lz77ChainIterP`/`lz77ChainLazyIterP`) equal to the boxed matchers viewed
+through `unpackTok`. -/
+
+/-- Pack a token into one `UInt32`: literal `b` ↦ `b`; reference ↦
+    `1<<<31 ||| len<<<16 ||| dist`. Lossless on encodable tokens
+    (`unpackTok_packTok`). -/
+@[inline] def packTok : LZ77Token → UInt32
+  | .literal b => b.toUInt32
+  | .reference len dist => ((1 : UInt32) <<< 31) ||| (len.toUInt32 <<< 16) ||| dist.toUInt32
+
+/-- Boxed view of a packed token (left inverse of `packTok` on encodable
+    tokens: `unpackTok_packTok`). -/
+@[inline] def unpackTok (w : UInt32) : LZ77Token :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then
+    .literal w.toUInt8
+  else
+    .reference ((w >>> 16) &&& 0x7FFF).toNat (w &&& 0xFFFF).toNat
+
+/-- `unpackTok` recovers every token within the encoder bounds (literals
+    unconditionally; references with `3 ≤ len ≤ 258`, `1 ≤ dist ≤ 32768` —
+    exactly the `Enc` predicate of the matcher encodability theorems). The
+    bit-level facts are discharged by `bv_decide` after `generalize`-ing the
+    `Nat → UInt32` casts into variables carrying their `≤` bounds. -/
+theorem unpackTok_packTok (t : LZ77Token)
+    (h : match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) :
+    unpackTok (packTok t) = t := by
+  match t with
+  | .literal b =>
+    have h1 : (b.toUInt32 &&& ((1 : UInt32) <<< 31)) = 0 := by bv_decide
+    have h2 : b.toUInt32.toUInt8 = b := by bv_decide
+    simp [unpackTok, packTok, h1, h2]
+  | .reference len dist =>
+    obtain ⟨_, h258, h1d, h32768⟩ := h
+    have hl : len.toUInt32.toNat = len := by simp [Nat.toUInt32]; omega
+    have hd : dist.toUInt32.toNat = dist := by simp [Nat.toUInt32]; omega
+    simp only [packTok, unpackTok]
+    generalize len.toUInt32 = l at hl
+    generalize dist.toUInt32 = d at hd
+    have hlu : l ≤ 258 := by rw [UInt32.le_iff_toNat_le]; show l.toNat ≤ 258; omega
+    have hdu : d ≤ 32768 := by rw [UInt32.le_iff_toNat_le]; show d.toNat ≤ 32768; omega
+    have hcond : ¬((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& ((1 : UInt32) <<< 31)) = 0 := by
+      bv_decide
+    have hlen : ((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) >>> 16) &&& 0x7FFF = l := by bv_decide
+    have hdist : (((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& 0xFFFF = d := by bv_decide
+    rw [if_neg hcond, hlen, hdist, hl, hd]
 
 /-- Simple hash-based greedy LZ77 matcher.
     Scans input left-to-right, emitting literals or back-references. -/
@@ -766,6 +827,132 @@ where
           (acc.push (.literal (data[pos]'(by omega))))
     else
       lz77GreedyIter.trailing data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-! ## Packed-token matcher twins (Wave 3b stage A)
+
+`lz77ChainIterP`/`lz77ChainLazyIterP` are copies of the iterative matchers
+whose accumulator holds `packTok`-encoded `UInt32`s instead of boxed
+`LZ77Token`s. The chain state (`hashTable`/`prev : Array Nat`) is untouched
+(the Wave-3a verdict: a `UInt32` chain state measured slower); only the
+emission side changes, and each push is literally `packTok` of the token the
+boxed loop pushes, so `Zip/Spec/LZ77PackedCorrect.lean` proves them equal to
+`(·.map packTok)` of the boxed matchers by lockstep induction. -/
+
+/-- Packed-token form of `lz77GreedyIter.trailing`: pushes
+    `packTok (.literal _)` for each remaining byte. -/
+def trailingP (data : ByteArray) (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+  if h : pos < data.size then
+    trailingP data (pos + 1) (acc.push (packTok (.literal data[pos])))
+  else acc
+termination_by data.size - pos
+
+/-- Packed-token twin of `lz77ChainIter` (greedy hash-chain matcher):
+    identical control flow and chain state, `Array UInt32` accumulator.
+    Equal to `(lz77ChainIter ..).map packTok` (`lz77ChainIterP_eq`). -/
+def lz77ChainIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array UInt32 :=
+  if data.size < 3 then
+    trailingP data 0 #[]
+  else
+    let hashSize := 65536
+    mainLoop data windowSize hashSize maxChain insertCap
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+where
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
+      (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
+      Array UInt32 :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        chainWalkGuarded data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let (hashTable, prev) :=
+            updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+            (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+            (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      trailingP data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- Packed-token twin of `lz77ChainLazyIter` (lazy one-byte-lookahead matcher):
+    identical control flow and chain state, `Array UInt32` accumulator.
+    Equal to `(lz77ChainLazyIter ..).map packTok` (`lz77ChainLazyIterP_eq`). -/
+def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) :
+    Array UInt32 :=
+  if data.size < 3 then
+    trailingP data 0 #[]
+  else
+    let hashSize := 65536
+    mainLoop data windowSize hashSize maxChain insertCap
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+where
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
+      (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
+      Array UInt32 :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let (matchLen, matchPos) :=
+        chainWalkGuarded data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          if h3lt : pos + 3 < data.size then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := headProbeGuarded hashTable h2
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let (matchLen2, matchPos2) :=
+              chainWalkGuarded data prev windowSize (pos + 1) maxLen2 hmaxLen2P head2 maxChain 0 0
+            if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  updateHashesGuarded data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1 + matchLen2)
+                  (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
+                    (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
+                mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+                  (acc.push (packTok (.reference matchLen (pos - matchPos))))
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let (hashTable, prev) :=
+                updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
+              mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+                (acc.push (packTok (.reference matchLen (pos - matchPos))))
+          else
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + matchLen)
+              (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+            (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        mainLoop data windowSize hashSize maxChain insertCap hashTable prev (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      trailingP data pos acc
   termination_by data.size - pos
   decreasing_by all_goals omega
 

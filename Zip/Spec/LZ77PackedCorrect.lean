@@ -1,0 +1,168 @@
+import Zip.Spec.LZ77ChainCorrect
+import Zip.Spec.LZ77ChainLazyCorrect
+import Zip.Native.DeflateDynamic
+
+/-!
+# Correctness of the packed-token matcher twins (Wave 3b stage A)
+
+`lz77ChainIterP`/`lz77ChainLazyIterP` are the iterative matchers with a
+`packTok`-encoded `Array UInt32` accumulator in place of the boxed
+`Array LZ77Token`. This file proves the boxed view recovers the boxed
+matchers exactly:
+
+    (lz77ChainIterP data mc ws ic).map unpackTok = lz77ChainIter data mc ws ic
+
+(and the lazy twin, and the `lzMatch`/`lzMatchP` dispatch pair).
+
+The proof goes through the *pack* direction first: a lockstep accumulator
+induction (the `mainLoop_eq_chain` shape) shows each packed loop equals
+`(·.map packTok)` of its boxed twin — every push site is literally
+`packTok` of the boxed push, so `Array.map_push` commutes the map through
+each push with **no** side conditions, and the chain state never enters the
+argument. The `unpackTok` view theorems then follow by composing with
+`unpackTok_packTok`, whose encodability hypotheses (`3 ≤ len ≤ 258`,
+`1 ≤ dist ≤ 32768`) are discharged *wholesale* by the existing
+`lz77ChainIter_encodable`/`lz77ChainLazyIter_encodable` theorems — no replay
+of the `chainWalk_spec` emission-guard analysis is needed.
+-/
+
+namespace Zip.Native.Deflate
+
+open Zip.Native.Deflate (lz77ChainIter lz77ChainLazyIter lz77ChainIterP lz77ChainLazyIterP)
+
+/-! ## Pack direction: lockstep accumulator inductions -/
+
+/-- `trailingP` is the packed image of the boxed trailing-literals loop. -/
+private theorem trailingP_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
+    trailingP data pos (acc.map packTok) =
+      (lz77GreedyIter.trailing data pos acc).map packTok := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
+  | _ n ih =>
+    unfold trailingP lz77GreedyIter.trailing
+    by_cases hp : pos < data.size
+    · simp only [hp, ↓reduceDIte]
+      rw [← Array.map_push, ih _ (by omega) _ _ rfl]
+    · simp only [hp, ↓reduceDIte]
+
+/-- The packed greedy `mainLoop` is the packed image of the boxed one:
+    identical control flow and chain state, `packTok` at each push. -/
+private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
+    (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos
+        (acc.map packTok) =
+      (lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos
+        acc).map packTok := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+  | _ n ih =>
+    unfold lz77ChainIterP.mainLoop lz77ChainIter.mainLoop
+    by_cases hlt : pos + 2 < data.size
+    · simp only [hlt, ↓reduceDIte]
+      split
+      · split
+        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+    · simp only [hlt, ↓reduceDIte]
+      exact trailingP_eq data pos acc
+
+/-- `lz77ChainIterP` produces exactly the `packTok` image of `lz77ChainIter`. -/
+theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap : Nat) :
+    lz77ChainIterP data maxChain windowSize insertCap =
+      (lz77ChainIter data maxChain windowSize insertCap).map packTok := by
+  unfold lz77ChainIterP lz77ChainIter
+  split
+  · simpa using trailingP_eq data 0 #[]
+  · simpa using mainLoopP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
+
+/-- The packed lazy `mainLoop` is the packed image of the boxed one (two
+    pushes in the deferral arm). -/
+private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
+    (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos
+        (acc.map packTok) =
+      (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos
+        acc).map packTok := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+  | _ n ih =>
+    unfold lz77ChainLazyIterP.mainLoop lz77ChainLazyIter.mainLoop
+    by_cases hlt : pos + 2 < data.size
+    · simp only [hlt, ↓reduceDIte]
+      -- Branch tree: hge / hle / h3lt / deferral / hle2
+      split
+      · split
+        · split
+          · split
+            · split
+              · -- deferral arm: literal + reference, two pushes
+                rw [← Array.map_push, ← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+              · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+            · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+          · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+    · simp only [hlt, ↓reduceDIte]
+      exact trailingP_eq data pos acc
+
+/-- `lz77ChainLazyIterP` produces exactly the `packTok` image of
+    `lz77ChainLazyIter`. -/
+theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap : Nat) :
+    lz77ChainLazyIterP data maxChain windowSize insertCap =
+      (lz77ChainLazyIter data maxChain windowSize insertCap).map packTok := by
+  unfold lz77ChainLazyIterP lz77ChainLazyIter
+  split
+  · simpa using trailingP_eq data 0 #[]
+  · simpa using mainLoopLazyP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
+
+/-! ## View direction: the boxed view recovers the boxed matchers
+
+`unpackTok_packTok` needs the encoder bounds on each token, which the
+existing encodability theorems provide for the whole stream. -/
+
+/-- The boxed view of the packed greedy matcher is the boxed greedy matcher. -/
+theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap : Nat)
+    (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    (lz77ChainIterP data maxChain windowSize insertCap).map unpackTok =
+      lz77ChainIter data maxChain windowSize insertCap := by
+  have henc := lz77ChainIter_encodable data maxChain windowSize insertCap hw hws
+  rw [lz77ChainIterP_eq, Array.map_map]
+  have hcongr : Array.map (unpackTok ∘ packTok) (lz77ChainIter data maxChain windowSize insertCap) =
+      Array.map id (lz77ChainIter data maxChain windowSize insertCap) :=
+    Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa using ht))
+  rw [hcongr, Array.map_id]
+
+/-- The boxed view of the packed lazy matcher is the boxed lazy matcher. -/
+theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap : Nat)
+    (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    (lz77ChainLazyIterP data maxChain windowSize insertCap).map unpackTok =
+      lz77ChainLazyIter data maxChain windowSize insertCap := by
+  have henc := lz77ChainLazyIter_encodable data maxChain windowSize insertCap hw hws
+  rw [lz77ChainLazyIterP_eq, Array.map_map]
+  have hcongr : Array.map (unpackTok ∘ packTok)
+        (lz77ChainLazyIter data maxChain windowSize insertCap) =
+      Array.map id (lz77ChainLazyIter data maxChain windowSize insertCap) :=
+    Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa using ht))
+  rw [hcongr, Array.map_id]
+
+/-! ## Dispatch boundary -/
+
+/-- `lzMatchP` is the `packTok` image of `lzMatch` at every level. -/
+theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
+    lzMatchP data level = (lzMatch data level).map packTok := by
+  unfold lzMatchP lzMatch
+  split
+  · exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level)
+  · exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level)
+
+/-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
+    stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
+    this equation. -/
+theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
+    (lzMatchP data level).map unpackTok = lzMatch data level := by
+  unfold lzMatchP lzMatch
+  split
+  · exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level)
+      (by omega) (by omega)
+  · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level)
+      (by omega) (by omega)
+
+end Zip.Native.Deflate
