@@ -47,12 +47,13 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
         · exact ih (prev[cand]!) _ _ hb
     · exact hb
 
-/-! ## Guarded per-position head insertion (Wave 3 Step 0.2)
+/-! ## Guarded per-position head insertion (Wave 3 Step 0.2, Wave 5 de-boxing)
 
 The mainLoops perform their per-position chain-head insertion (and, in the
-lazy variants, the lookahead head probe) through `headInsertGuarded`/
-`headProbeGuarded`, which trade the panic-checked `[..]!`/`set!` operations
-for one runtime bounds check. The lemmas below rewrite them back to the
+lazy variants, the lookahead head probe) through `headProbeGuarded` + two
+`guardedSet`s — single-value steps that trade the panic-checked `[..]!`/`set!`
+operations for one runtime bounds check each without allocating
+`headInsertGuarded`'s result tuple. The lemmas below rewrite them back to the
 original panic-checked operations, so every proof that unfolds a mainLoop
 proceeds exactly as before the conversion. -/
 
@@ -78,6 +79,15 @@ theorem headProbeGuarded_eq (hashTable : Array Nat) (h : Nat) :
   · rename_i hb; exact (getElem!_pos hashTable h hb).symm
   · rfl
 
+/-- The guarded single write computes exactly the panic-checked write. -/
+theorem guardedSet_eq (a : Array Nat) (i v : Nat) :
+    guardedSet a i v = a.set! i v := by
+  unfold guardedSet
+  split
+  · rename_i hb
+    simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dif_pos hb]
+  · rfl
+
 /-- `lz77Chain.mainLoop` produces a valid decomposition from `pos`. Mirrors
     `lz77Greedy.mainLoop_valid`; the reference case uses `chainWalk_spec` (which
     holds for *any* `prev` array) in place of the inline single-probe match. -/
@@ -89,7 +99,7 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
   split
   · rename_i hlt
     dsimp only
-    simp only [headInsertGuarded_eq]
+    simp only [headProbeGuarded_eq, guardedSet_eq]
     have hspec := chainWalk_spec data
       (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
@@ -145,7 +155,7 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
   split
   · rename_i hlt
     dsimp only
-    simp only [headInsertGuarded_eq]
+    simp only [headProbeGuarded_eq, guardedSet_eq]
     have hspec := chainWalk_spec data
       (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
@@ -227,6 +237,91 @@ theorem chainWalkGuarded_eq (data : ByteArray) (prev : Array Nat)
   · exact chainWalkFast_eq ..
   · rfl
 
+/-! ## Packed chain walk (Wave 5 de-boxing)
+
+`chainWalkPacked` carries and returns the `(bestLen, bestPos)` accumulator as
+the single small `Nat` `bestPos * 512 + bestLen` so the hot per-position call
+allocates no pair. `chainWalkPacked_eq` is the lockstep equality with
+`chainWalkFast`; since the walk's best length never exceeds `maxLen`
+(`chainWalk_fst_le`, from `chainWalk_spec`) and every matcher call site clamps
+`maxLen` to `min 258 _ < 512`, the `_mod`/`_div` lemmas decode the packed
+result back to the reference walk's components exactly. The iterative-vs-
+recursive mainLoop proofs rewrite with the decode lemmas (side condition
+discharged by `min258_le_511`) and then proceed exactly as before. -/
+
+/-- The packed walk computes exactly the packed image of the proven-bounds
+    walk: identical control flow, with the pair accumulator carried as
+    `bestPos * 512 + bestLen` at every step. -/
+theorem chainWalkPacked_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (cand fuel bestLen bestPos : Nat) :
+    chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos =
+      (chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos).2 * 512 +
+        (chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos).1 := by
+  induction fuel generalizing cand bestLen bestPos with
+  | zero => rw [chainWalkPacked, chainWalkFast]; simp only [↓reduceIte]
+  | succ k ih =>
+    rw [chainWalkPacked, chainWalkFast, if_neg (by omega : ¬ (k + 1 = 0)),
+      if_neg (by omega : ¬ (k + 1 = 0))]
+    by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+    · have hcand : cand + maxLen ≤ data.size := by omega
+      simp only [dif_pos hc, Nat.add_sub_cancel]
+      by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+      · by_cases hb : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ maxLen
+        · simp only [hml, hb, ↓reduceIte]
+        · simp only [hml, hb, ↓reduceIte, ih]
+      · by_cases hb : bestLen ≥ maxLen
+        · simp only [hml, hb, ↓reduceIte]
+        · simp only [hml, hb, ↓reduceIte, ih]
+    · simp only [dif_neg hc]
+
+/-- One runtime guard collapses the packed walk to the packed image of the
+    reference walk. -/
+theorem chainWalkGuardedPacked_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen hpm cand fuel bestLen bestPos =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos).2 * 512 +
+        (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos).1 := by
+  unfold chainWalkGuardedPacked
+  split
+  · rw [chainWalkPacked_eq, chainWalkFast_eq]
+  · rfl
+
+/-- From a zero-initialised best length, the reference walk's best length
+    never exceeds `maxLen` (specialisation of `chainWalk_spec`). -/
+theorem chainWalk_fst_le (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat) :
+    (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel 0 0).1 ≤ maxLen := by
+  obtain h0 | hQ := chainWalk_spec data prev windowSize pos maxLen hpm cand fuel 0 0 (Or.inl rfl)
+  · omega
+  · exact hQ.2.2.2.2
+
+/-- Decode the packed walk's best length: with `maxLen < 512` the low bits are
+    exactly the reference walk's `bestLen`. -/
+theorem chainWalkGuardedPacked_mod (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat)
+    (hml : maxLen ≤ 511) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen hpm cand fuel 0 0 % 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel 0 0).1 := by
+  rw [chainWalkGuardedPacked_eq]
+  have h := chainWalk_fst_le data prev windowSize pos maxLen hpm cand fuel
+  omega
+
+/-- Decode the packed walk's best position (the high bits). -/
+theorem chainWalkGuardedPacked_div (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat)
+    (hml : maxLen ≤ 511) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen hpm cand fuel 0 0 / 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel 0 0).2 := by
+  rw [chainWalkGuardedPacked_eq]
+  have h := chainWalk_fst_le data prev windowSize pos maxLen hpm cand fuel
+  omega
+
+/-- Every matcher call site clamps `maxLen` to `min 258 _`; this discharges
+    the `maxLen ≤ 511` side condition when `simp` applies the decode lemmas. -/
+theorem min258_le_511 (x : Nat) : min 258 x ≤ 511 := by omega
+
 /-- The proven-bounds hash-insertion loop computes the same arrays as the
     panic-checked reference: the bodies differ only in how `hashTable[hsh]` is
     accessed, bridged by `getElem!_pos`. -/
@@ -284,7 +379,8 @@ private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxCha
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIter.mainLoop lz77Chain.mainLoop
-    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq, headInsertGuarded_eq]
+    simp only [chainWalkGuardedPacked_mod, chainWalkGuardedPacked_div, min258_le_511,
+      updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split

@@ -156,7 +156,9 @@ def buildCache (data : ByteArray) (hashTable prev : Array Nat) (depth slots base
     let pos := base + j
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos 65536 hlt
-      let (head, hashTable, prev) := headInsertGuarded hashTable prev h pos
+      let head := headProbeGuarded hashTable h
+      let hashTable := guardedSet hashTable h pos
+      let prev := guardedSet prev pos head
       let maxLen := min 258 (data.size - pos)
       have hpm : pos + maxLen ≤ data.size := by omega
       let (lens, dists) := chainWalkAllGuarded data prev pos maxLen hpm head depth
