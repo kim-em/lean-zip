@@ -78,6 +78,14 @@ dickens:
 | 7 | 2013 | 138 | 347 | 2335 | 1312 | 2696 | | 6329 | 1.6 | 111 |
 | 9 | 2156 | 139 | 355 | 2493 | 1314 | 2854 | 10086 | 16591 | 0.6 | 101 |
 
+**Ladder re-sweep verdict (Wave 2e, #2541, post-limiter-fix + post-#2548):**
+the `chainDepth`/`insertCap` ladder is already on the speed/ratio frontier at
+every level — a ×2-step sweep over Canterbury (12 configs/level, dedup-clean,
+deployed single-block path) found no configuration faster than current within
++0.1% geomean ratio; every faster config costs ≥ 0.7% ratio (e.g. L6 at half
+depth: 0.60× time, +1.14% ratio). Null result recorded; the levels' speed
+budget must come from Wave-3 representation work, not knob tuning.
+
 **Named bottlenecks (in priority order):**
 1. **Matcher is 83–84% of the base path at L6** (and the lazy step at L4 costs
    ~2× over L3) — hash-chain maintenance + search; the Wave-3 matcher-state
