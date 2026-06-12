@@ -1,5 +1,6 @@
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
+import Zip.Spec.EmitPackedCorrect
 import Zip.Native.DeflateDynamic
 
 /-!
@@ -165,22 +166,25 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
   · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level)
       (by omega) (by omega)
 
-/-! ## Stage B: the packed base candidate equals the boxed one
+/-! ## Stages B+C: the packed base candidate equals the boxed one
 
 `deflateRawBase` is now *defined* as `deflateRawBaseP data (lzMatchP data
-level)` (packed frequency pass, unpack only at the emit boundary). The
-equation below recovers the boxed formulation — same statement as the old
-definitional `deflateRawBase_def`, now proven from `tokenFreqsP_eq` (the
-packed histogram is the boxed one over the `unpackTok` view) and
-`lzMatchP_map` (the view of the packed stream is `lzMatch`). The three
-`deflateRawBase` spec lemmas in `Zip/Spec/DeflateRoundtrip.lean` keep their
-statements and rewrite through this equation. -/
+level)` (packed frequency pass *and* packed emit — no unpack anywhere on
+the base path). The equation below recovers the boxed formulation — same
+statement as the old definitional `deflateRawBase_def`, now proven from
+`tokenFreqsP_eq` (the packed histogram is the boxed one over the
+`unpackTok` view), the stage-C packed-emitter equalities
+(`deflateFixedBlockP_eq`/`deflateDynamicBlockCoreP_eq`,
+`Zip/Spec/EmitPackedCorrect.lean`) and `lzMatchP_map` (the view of the
+packed stream is `lzMatch`). The three `deflateRawBase` spec lemmas in
+`Zip/Spec/DeflateRoundtrip.lean` keep their statements and rewrite through
+this equation. -/
 
 /-- The boxed base dispatch over `lzMatch` is the (packed-pipeline)
     `deflateRawBase`. -/
 theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseTokens data (lzMatch data level) = deflateRawBase data level := by
   unfold deflateRawBase deflateRawBaseP deflateRawBaseTokens
-  simp only [tokenFreqsP_eq, lzMatchP_map]
+  simp only [deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
 
 end Zip.Native.Deflate

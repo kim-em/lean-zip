@@ -44,6 +44,36 @@ private def checkBaseP (label : String) (data : ByteArray) : IO Unit := do
         s!"{label} level {level}: deflateRawBaseP ({packed.size} bytes) ≠ \
            deflateRawBaseTokens ({boxed.size} bytes)")
 
+/-- Stage C gate: the packed single-block cores must be byte-identical to
+    the boxed ones over the same token stream — `deflateFixedBlockP` against
+    `deflateFixedBlock` and `deflateDynamicBlockCoreP` against
+    `deflateDynamicBlockCore`, fed this level's `lzMatchP` stream and its
+    boxed view. The theorems `deflateFixedBlockP_eq` /
+    `deflateDynamicBlockCoreP_eq` (`Zip/Spec/EmitPackedCorrect.lean`) prove
+    the equalities; this test keeps the compiled packed emitters
+    (`emitTokensP`/`emitTokensWithCodesP` and their opaque reference-arm
+    helpers) honest against them. -/
+private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
+  for level in [(1 : UInt8), 4, 6, 9] do
+    let ptoks := lzMatchP data level
+    let toks := ptoks.map unpackTok
+    let fixedP := deflateFixedBlockP data ptoks
+    let fixedB := deflateFixedBlock data toks
+    unless fixedP == fixedB do
+      throw (IO.userError
+        s!"{label} level {level}: deflateFixedBlockP ({fixedP.size} bytes) ≠ \
+           deflateFixedBlock ({fixedB.size} bytes)")
+    let f := tokenFreqs toks
+    let lens := dynamicCodeLengths f.1 f.2
+    let dynP := deflateDynamicBlockCoreP data ptoks lens.1 lens.2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    let dynB := deflateDynamicBlockCore data toks lens.1 lens.2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    unless dynP == dynB do
+      throw (IO.userError
+        s!"{label} level {level}: deflateDynamicBlockCoreP ({dynP.size} bytes) ≠ \
+           deflateDynamicBlockCore ({dynB.size} bytes)")
+
 def tests : IO Unit := do
   IO.println "  PackedTokens tests..."
   let alice ← IO.FS.readBinFile "bench/corpora/canterbury/alice29.txt"
@@ -65,6 +95,15 @@ def tests : IO Unit := do
   checkBaseP "size1" (ByteArray.mk #[42])
   checkBaseP "size2" (ByteArray.mk #[42, 42])
   checkBaseP "size3" (ByteArray.mk #[7, 7, 7])
+  checkCoresP "alice29" alice
+  checkCoresP "text64k" (mkTextData 65536)
+  checkCoresP "cyclic64k" (mkCyclicData 65536)
+  checkCoresP "prng64k" (mkPrngData 65536)
+  checkCoresP "constant64k" (mkConstantData 65536)
+  checkCoresP "size0" ByteArray.empty
+  checkCoresP "size1" (ByteArray.mk #[42])
+  checkCoresP "size2" (ByteArray.mk #[42, 42])
+  checkCoresP "size3" (ByteArray.mk #[7, 7, 7])
   IO.println "  PackedTokens tests passed"
 
 end ZipTest.PackedTokens
