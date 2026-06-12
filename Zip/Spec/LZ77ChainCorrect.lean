@@ -47,6 +47,37 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
         · exact ih (prev[cand]!) _ _ hb
     · exact hb
 
+/-! ## Guarded per-position head insertion (Wave 3 Step 0.2)
+
+The mainLoops perform their per-position chain-head insertion (and, in the
+lazy variants, the lookahead head probe) through `headInsertGuarded`/
+`headProbeGuarded`, which trade the panic-checked `[..]!`/`set!` operations
+for one runtime bounds check. The lemmas below rewrite them back to the
+original panic-checked operations, so every proof that unfolds a mainLoop
+proceeds exactly as before the conversion. -/
+
+/-- The guarded head insertion computes exactly the panic-checked triple:
+    in bounds, `getElem!_pos` and `setIfInBounds_def` bridge `[..]'h`/`set`
+    to `[..]!`/`set!`; out of bounds, the fallback *is* the panic-checked
+    sequence. -/
+theorem headInsertGuarded_eq (hashTable prev : Array Nat) (h pos : Nat) :
+    headInsertGuarded hashTable prev h pos =
+      (hashTable[h]!, hashTable.set! h pos, prev.set! pos hashTable[h]!) := by
+  unfold headInsertGuarded
+  split
+  · rename_i hg
+    simp only [getElem!_pos hashTable h hg.1, Array.set!_eq_setIfInBounds,
+      Array.setIfInBounds_def, dif_pos hg.1, dif_pos hg.2]
+  · rfl
+
+/-- The guarded head probe computes exactly the panic-checked read. -/
+theorem headProbeGuarded_eq (hashTable : Array Nat) (h : Nat) :
+    headProbeGuarded hashTable h = hashTable[h]! := by
+  unfold headProbeGuarded
+  split
+  · rename_i hb; exact (getElem!_pos hashTable h hb).symm
+  · rfl
+
 /-- `lz77Chain.mainLoop` produces a valid decomposition from `pos`. Mirrors
     `lz77Greedy.mainLoop_valid`; the reference case uses `chainWalk_spec` (which
     holds for *any* `prev` array) in place of the inline single-probe match. -/
@@ -58,6 +89,7 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
   split
   · rename_i hlt
     dsimp only
+    simp only [headInsertGuarded_eq]
     have hspec := chainWalk_spec data
       (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
@@ -113,6 +145,7 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
   split
   · rename_i hlt
     dsimp only
+    simp only [headInsertGuarded_eq]
     have hspec := chainWalk_spec data
       (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
@@ -251,7 +284,7 @@ private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxCha
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIter.mainLoop lz77Chain.mainLoop
-    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq]
+    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq, headInsertGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split

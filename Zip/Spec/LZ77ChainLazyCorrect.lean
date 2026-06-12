@@ -32,6 +32,7 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
   split
   · rename_i hlt
     dsimp only
+    simp only [headInsertGuarded_eq, headProbeGuarded_eq]
     have hspec := chainWalk_spec data
       (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
@@ -105,6 +106,7 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
   split
   · rename_i hlt
     dsimp only
+    simp only [headInsertGuarded_eq, headProbeGuarded_eq]
     have hspec := chainWalk_spec data
       (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
@@ -198,7 +200,8 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
-    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq]
+    simp only [chainWalkGuarded_eq, updateHashesGuarded_eq, headInsertGuarded_eq,
+      headProbeGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       -- Branch tree: hge / hle / h3lt / (matchLen2 > matchLen) / hle2
