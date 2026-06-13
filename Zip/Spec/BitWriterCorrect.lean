@@ -481,7 +481,7 @@ private theorem flushAcc_or (data : ByteArray) (acc more : UInt64) (s : UInt64)
     have hcomb_nat : (acc ||| (more <<< s)).toNat = acc.toNat ||| (more.toNat <<< total) := by
       rw [UInt64.toNat_or, uint64_shiftLeft_toNat more s total k hs hmore (by omega)]
     have hcomb_lt : (acc ||| (more <<< s)).toNat < 2 ^ (total + k) := by
-      rw [hcomb_nat, Nat.add_comm total k]
+      rw [hcomb_nat]
       exact or_shiftLeft_lt acc.toNat more.toNat total k hacc hmore
     by_cases hge : total ≥ 8
     · -- Both the combined drain and the prefix drain push a byte; recurse.
@@ -489,7 +489,6 @@ private theorem flushAcc_or (data : ByteArray) (acc more : UInt64) (s : UInt64)
       have hlow : (acc ||| (more <<< s)).toUInt8 = acc.toUInt8 := by
         apply UInt8.toNat_inj.mp
         rw [UInt64.toNat_toUInt8, UInt64.toNat_toUInt8, hcomb_nat,
-          show (2 ^ 8 : Nat) = 2 ^ 8 from rfl,
           or_shiftLeft_mod_two_pow_eight acc.toNat more.toNat total hge]
       have hsm : (s - 8).toNat = total - 8 := by
         rw [UInt64.toNat_sub_of_le, hs, show (8 : UInt64).toNat = 8 from by decide]
@@ -639,8 +638,7 @@ theorem writeFour_eq (bw : BitWriter) (c1 : UInt16) (l1 : UInt8) (n2 : Nat) (v2 
   have hstep1 : bw.writeHuffCode c1 l1 = flushAcc bw.data A1 (bw.bitCount.toNat + l1.toNat) := rfl
   -- peel field 2 via flushAcc_or
   have hor2 := flushAcc_or bw.data A1 mask2 (bc + l1.toUInt64)
-    (bw.bitCount.toNat + l1.toNat) n2 hp1 hA1lt
-    (Nat.lt_of_le_of_lt (Nat.mod_le _ _) hmask2v) (by omega)
+    (bw.bitCount.toNat + l1.toNat) n2 hp1 hA1lt hmask2v (by omega)
   have hstep2 : (bw.writeHuffCode c1 l1).writeBits n2 v2
       = flushAcc bw.data A2 (bw.bitCount.toNat + l1.toNat + n2) := by
     show (flushAcc bw.data A1 (bw.bitCount.toNat + l1.toNat)).writeBits n2 v2 = _
@@ -655,8 +653,7 @@ theorem writeFour_eq (bw : BitWriter) (c1 : UInt16) (l1 : UInt8) (n2 : Nat) (v2 
     rw [writeHuffCode]; exact (hor3).symm
   -- peel field 4 via flushAcc_or
   have hor4 := flushAcc_or bw.data A3 mask4 (bc + l1.toUInt64 + n2.toUInt64 + l3.toUInt64)
-    (bw.bitCount.toNat + l1.toNat + n2 + l3.toNat) n4 hp3 hA3lt
-    (Nat.lt_of_le_of_lt (Nat.mod_le _ _) hmask4v) (by omega)
+    (bw.bitCount.toNat + l1.toNat + n2 + l3.toNat) n4 hp3 hA3lt hmask4v (by omega)
   have hstep4 : ((((bw.writeHuffCode c1 l1).writeBits n2 v2).writeHuffCode c3 l3).writeBits n4 v4)
       = flushAcc bw.data (A3 ||| (mask4 <<< (bc + l1.toUInt64 + n2.toUInt64 + l3.toUInt64)))
           (bw.bitCount.toNat + l1.toNat + n2 + l3.toNat + n4) := by
