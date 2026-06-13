@@ -1824,6 +1824,51 @@ private theorem assignLengths_zip_expandBl_perm (syms : List Nat) (bl : Array Na
   rw [filter_ne_zero_replicate, List.nil_append, hsnd] at happly
   exact happly
 
+/-- **Kraft-exact length list from a Huffman tree.** For a tree whose depths are all `≥ 1`
+    and fit in `2^maxBits`, capping + repairing its histogram and handing the resulting
+    `expandBl` lengths to distinct in-range symbols (with unused padding) gives a length
+    list whose nonzero Kraft sum is exactly `2^maxBits` — a complete code. Internalizes the
+    histogram completeness (`cappedBlCount_repairBl_complete`) and leaf-count preservation
+    (`repairBl_count`) so the caller need only supply the symbol-side facts. -/
+private theorem assignLengths_zip_tree_kraft (syms : List Nat) (t : BuildTree)
+    (maxBits numSymbols : Nat) (hmb : 1 ≤ maxBits)
+    (hrange : ∀ s ∈ syms, s < numSymbols) (hnodup : syms.Nodup)
+    (hpos : ∀ p ∈ t.depths 0, 1 ≤ p.2)
+    (hn : (t.depths 0).length ≤ 2 ^ maxBits)
+    (hsyms_len : syms.length = (t.depths 0).length) :
+    kraftSum ((assignLengths (syms.zip (expandBl
+        (repairBl (cappedBlCount (t.depths 0) maxBits)
+          (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits
+        ++ List.replicate syms.length maxBits)) numSymbols).filter (· != 0)) maxBits
+      = 2 ^ maxBits := by
+  have hsize : maxBits < (cappedBlCount (t.depths 0) maxBits).size := by
+    rw [cappedBlCount, cappedBlCountAux_size, Array.size_replicate]; omega
+  have hfeas := cappedBlCount_feas t maxBits hmb hpos
+  have hleaf := cappedBlCount_leaf t maxBits hmb hpos hn
+  have hge := cappedBlCount_ge t maxBits hmb hpos
+  -- the repaired histogram is a complete code …
+  have hbl_complete := cappedBlCount_repairBl_complete t maxBits hmb hpos hn
+  -- … and it has the same leaf count as the tree
+  have hcap_count : blCountSum (cappedBlCount (t.depths 0) maxBits) maxBits = (t.depths 0).length := by
+    rw [cappedBlCount, cappedBlCountAux_count maxBits hmb (t.depths 0)
+        (Array.replicate (maxBits + 2) 0) (by rw [Array.size_replicate]; omega) hpos]
+    have hz : blCountSum (Array.replicate (maxBits + 2) 0) maxBits = 0 := by
+      rw [blCount_eq_from, blCountFrom_zero _ maxBits 1 (fun i _ _ => replicate_getD_zero _ i)]
+    rw [hz, Nat.zero_add]
+  have hbl_count : blCountSum (repairBl (cappedBlCount (t.depths 0) maxBits)
+      (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits
+      = (t.depths 0).length := by
+    rw [repairBl_count (cappedBlCount (t.depths 0) maxBits) maxBits hmb hsize hfeas hleaf hge,
+      hcap_count]
+  have hbridge_len : syms.length = blCountSum (repairBl (cappedBlCount (t.depths 0) maxBits)
+      (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits :=
+    hsyms_len.trans hbl_count.symm
+  have hperm := assignLengths_zip_expandBl_perm syms
+    (repairBl (cappedBlCount (t.depths 0) maxBits)
+      (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits)
+    maxBits numSymbols hrange hnodup hbridge_len
+  rw [kraftSum_perm hperm, expandBl_kraft, hbl_complete]
+
 /-- If symbol `s` appears with nonzero frequency in `freqs` and `s < numSymbols`,
     then `(computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0`.
     Requires `maxBits > 0`. -/
@@ -1875,5 +1920,140 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
         (fun q hq _ => by have := (limitedPairs_mem_range nz maxBits hmb q hq).1; omega)
         (limitedPairs_covers nz maxBits s (List.mem_map.mpr ⟨p, hs_nz, hps⟩))
       exact Nat.pos_iff_ne_zero.mp hpos
+
+/-! ## computeCodeLengths completeness (gold-standard property of #2536)
+
+The bridge half: the multi-symbol `computeCodeLengths` hot path produces a *complete*
+code — its nonzero Kraft sum is exactly `2^maxBits`, the equality (not just `≤`) that
+zlib's inflate requires. Combined with `computeCodeLengths_valid` (the `≤` half), this
+rules out the incomplete-code regression (D-20) by construction, independent of tests. -/
+
+/-- A `Nodup` list of naturals all `< n` has length `≤ n` (pigeonhole, by erasing `m` at
+    each `n = m+1` step). -/
+private theorem nodup_lt_length_le : ∀ (n : Nat) (l : List Nat), l.Nodup →
+    (∀ x ∈ l, x < n) → l.length ≤ n := by
+  intro n
+  induction n with
+  | zero =>
+    intro l _ hlt
+    cases l with
+    | nil => simp
+    | cons x _ => exact absurd (hlt x (List.mem_cons_self ..)) (by omega)
+  | succ m ih =>
+    intro l hnd hlt
+    by_cases hm : m ∈ l
+    · have hnd' : (l.erase m).Nodup := hnd.erase m
+      have hlt' : ∀ x ∈ l.erase m, x < m := by
+        intro x hx
+        have hxl : x ∈ l := List.mem_of_mem_erase hx
+        have hxne : x ≠ m := fun he => (hnd.not_mem_erase) (he ▸ hx)
+        have := hlt x hxl; omega
+      have hlen := ih (l.erase m) hnd' hlt'
+      have hlenerase : (l.erase m).length = l.length - 1 := List.length_erase_of_mem hm
+      have hpos : 0 < l.length := List.length_pos_of_mem hm
+      omega
+    · exact Nat.le_succ_of_le (ih l hnd (fun x hx => by
+        have hxne : x ≠ m := fun he => hm (he ▸ hx)
+        have := hlt x hx; omega))
+
+/-- **The multi-symbol length list (pre-`fixKraftList`) is a complete code.** For `≥ 2`
+    distinct in-range nonzero symbols fitting in `2^maxBits`, the lengths `limitedPairs`
+    hands out have nonzero Kraft sum *exactly* `2^maxBits`. The proof transfers the
+    histogram-level Kraft equality (`assignLengths_zip_tree_kraft`) through the symbol
+    assignment. -/
+private theorem assignLengths_limitedPairs_kraft (nz : List (Nat × Nat))
+    (numSymbols maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (h2 : 2 ≤ nz.length) (hle : nz.length ≤ 2 ^ maxBits)
+    (hnodup : (nz.map (·.1)).Nodup) (hrange : ∀ p ∈ nz, p.1 < numSymbols) :
+    kraftSum ((assignLengths (limitedPairs nz maxBits) numSymbols).filter (· != 0)) maxBits
+      = 2 ^ maxBits := by
+  have hnz_ne : nz ≠ [] := by intro hc; rw [hc, List.length_nil] at h2; omega
+  -- Frequency-sorted symbol list and its facts.
+  have hsyms_perm : (((nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1))).Perm (nz.map (·.1)) :=
+    (List.mergeSort_perm nz _).map (·.1)
+  have hsyms_len : ((nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1)).length = nz.length := by
+    rw [hsyms_perm.length_eq, List.length_map]
+  have hsyms_nodup : ((nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1)).Nodup :=
+    hsyms_perm.nodup_iff.mpr hnodup
+  have hsyms_range : ∀ s ∈ (nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1), s < numSymbols := by
+    intro s hs
+    have hs' : s ∈ nz.map (·.1) := hsyms_perm.mem_iff.mp hs
+    rw [List.mem_map] at hs'
+    obtain ⟨p, hp, rfl⟩ := hs'
+    exact hrange p hp
+  -- Leaf count of the Huffman tree equals `nz.length`.
+  have hleaf_count : ((buildHuffmanTree ((nz.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort
+      (fun a b => a.weight ≤ b.weight))).depths 0).length = nz.length :=
+    huffman_leaf_count nz (fun a b => a.weight ≤ b.weight) hnz_ne
+  have hleaves2 : 2 ≤ ((nz.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort
+      (fun a b => a.weight ≤ b.weight)).length := by
+    rw [(List.mergeSort_perm _ _).length_eq, List.length_map]; omega
+  -- Unfold `limitedPairs` so unification fills the symbol list and tree from the concrete zip.
+  simp only [limitedPairs]
+  exact assignLengths_zip_tree_kraft _ _ maxBits numSymbols hmb hsyms_range hsyms_nodup
+    (fun p hp => buildHuffmanTree_depths_ge_one _ hleaves2 p hp)
+    (by rw [hleaf_count]; exact hle)
+    (by rw [hsyms_len, hleaf_count])
+
+/-- **`fixKraftList` is the identity on the multi-symbol `computeCodeLengths` output.** Its
+    overflow branch is *proven dead*: the length-limited histogram is already a complete code,
+    so the Kraft-inequality guard always passes. Deliverable 2 of #2536's bridge half. -/
+theorem fixKraftList_limitedPairs_id (nz : List (Nat × Nat)) (numSymbols maxBits : Nat)
+    (hmb : 1 ≤ maxBits) (h2 : 2 ≤ nz.length) (hle : nz.length ≤ 2 ^ maxBits)
+    (hnodup : (nz.map (·.1)).Nodup) (hrange : ∀ p ∈ nz, p.1 < numSymbols) :
+    fixKraftList (assignLengths (limitedPairs nz maxBits) numSymbols) maxBits
+      = assignLengths (limitedPairs nz maxBits) numSymbols := by
+  simp only [fixKraftList]
+  rw [if_pos (Nat.le_of_eq
+    (assignLengths_limitedPairs_kraft nz numSymbols maxBits hmb h2 hle hnodup hrange))]
+
+/-- **`computeCodeLengths` completeness.** For frequencies with at least two distinct
+    nonzero-frequency symbols, all `< numSymbols`, with `numSymbols ≤ 2^maxBits`, the
+    computed code lengths have nonzero Kraft sum *exactly* `2^maxBits`: a complete code.
+
+    The `≥ 2`-symbol hypothesis is essential and marks the RFC 1951 boundary: a single
+    symbol short-circuits to length 1, giving `kraftSum = 2^(maxBits−1) ≠ 2^maxBits` (the
+    known incomplete-code exception that inflate accepts only as a special case). Mirrors
+    `computeCodeLengths_valid`, which proves the companion `≤` half. -/
+theorem computeCodeLengths_complete (freqs : List (Nat × Nat)) (numSymbols maxBits : Nat)
+    (hmb : 0 < maxBits) (hn : numSymbols ≤ 2 ^ maxBits)
+    (hnodup : (freqs.map (·.1)).Nodup)
+    (hrange : ∀ p ∈ freqs, p.1 < numSymbols)
+    (h2 : 2 ≤ (freqs.filter (fun x => decide (x.2 > 0))).length) :
+    kraftSum ((computeCodeLengths freqs numSymbols maxBits).filter (· != 0)) maxBits
+      = 2 ^ maxBits := by
+  -- Facts about the nonzero-frequency sublist.
+  have hnz_range : ∀ p ∈ freqs.filter (fun x => decide (x.2 > 0)), p.1 < numSymbols :=
+    fun p hp => hrange p (List.mem_filter.mp hp).1
+  have hnz_nodup : ((freqs.filter (fun x => decide (x.2 > 0))).map (·.1)).Nodup :=
+    List.Nodup.sublist ((List.filter_sublist (l := freqs)).map (·.1)) hnodup
+  have hle : (freqs.filter (fun x => decide (x.2 > 0))).length ≤ 2 ^ maxBits := by
+    have hbound := nodup_lt_length_le numSymbols _ hnz_nodup
+      (fun s hs => by rw [List.mem_map] at hs; obtain ⟨p, hp, rfl⟩ := hs; exact hnz_range p hp)
+    rw [List.length_map] at hbound; omega
+  -- Take the multi-symbol branch.
+  simp only [computeCodeLengths]
+  have hne : ¬(freqs.filter (fun x => decide (x.2 > 0))).isEmpty := by
+    intro h; rw [List.isEmpty_iff_length_eq_zero] at h; omega
+  rw [if_neg hne]
+  split
+  · rename_i hlen1; simp only [beq_iff_eq] at hlen1; omega
+  · -- Abstract the nonzero list as `nz`; reduce hypotheses accordingly.
+    generalize hnzdef : freqs.filter (fun x => decide (x.2 > 0)) = nz
+    rw [hnzdef] at hnz_range hnz_nodup hle h2
+    have hkraft := assignLengths_limitedPairs_kraft nz numSymbols maxBits hmb h2 hle hnz_nodup
+      hnz_range
+    -- `fixKraftList` is the identity here (its overflow branch is proven dead).
+    simp only [fixKraftList]
+    rw [if_pos (Nat.le_of_eq hkraft)]
+    exact hkraft
+
+/-- Non-vacuity check: the completeness hypotheses are satisfiable on a concrete DEFLATE-shaped
+    input (three distinct symbols `< 3`, two with nonzero frequency, `3 ≤ 2^15`), so the
+    completeness conclusion `kraftSum … = 2^15` is genuinely available, not vacuous. -/
+example : kraftSum ((computeCodeLengths [(0, 3), (1, 2), (2, 0)] 3 15).filter (· != 0)) 15
+    = 2 ^ 15 :=
+  computeCodeLengths_complete [(0, 3), (1, 2), (2, 0)] 3 15 (by decide) (by decide)
+    (by decide) (by decide) (by decide)
 
 end Huffman.Spec
