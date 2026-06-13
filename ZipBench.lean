@@ -13,6 +13,9 @@ Operations:
   deflate-lazy   — native DEFLATE compression (lazy matching)
   deflate-ffi    — zlib FFI compression
   compress-miniz — miniz_oxide (Rust) DEFLATE compression (Track D)
+  compress-zopfli — zopfli max-ratio DEFLATE compression (Track D ceiling;
+                    level slot = numiterations, default 15; 64KB size cap,
+                    override with ZOPFLI_BENCH_ALLOW_LARGE=1; prints output size)
   gzip           — native gzip decompression
   gzip-ffi       — zlib FFI gzip decompression
   zlib           — native zlib decompression
@@ -94,7 +97,8 @@ def generateData (pattern : String) (size : Nat) : IO ByteArray :=
 
 def main (args : List String) : IO Unit := do
   match args with
-  | [op, sizeStr, pattern] => run op sizeStr pattern 6
+  -- zopfli's level slot is `numiterations` (default 15); every other op uses 6.
+  | [op, sizeStr, pattern] => run op sizeStr pattern (if op == "compress-zopfli" then 15 else 6)
   | [op, sizeStr, pattern, levelStr] =>
     match levelStr.toNat? with
     | some level => run op sizeStr pattern level
@@ -212,6 +216,18 @@ where
     | "compress-miniz" =>
       let _ ← MinizOxide.compress data level.toUInt8
       pure ()
+    | "compress-zopfli" =>
+      -- zopfli is the Track D ratio *ceiling*: compress-only, ~100x slower than
+      -- zlib. `level` is reused as zopfli's `numiterations` knob (default 15).
+      -- Single calls can take many seconds, so cap default runs at 64KB and gate
+      -- larger inputs behind ZOPFLI_BENCH_ALLOW_LARGE. Print the output size so
+      -- the result is observable as a ratio-ceiling figure, not just a timing.
+      if size > 65536 && !(← IO.getEnv "ZOPFLI_BENCH_ALLOW_LARGE").isSome then
+        throw (IO.userError s!"compress-zopfli: size {size} exceeds the 64KB cap; \
+          set ZOPFLI_BENCH_ALLOW_LARGE=1 to override (zopfli is intentionally very slow)")
+      let z ← Zopfli.compress data level.toUInt32
+      IO.println s!"compress-zopfli size={data.size} pattern={pattern} iters={level} \
+        → {z.size} bytes"
     -- Checksum benchmarks
     | "crc32" =>
       let _ := Crc32.Native.crc32 0 data

@@ -45,6 +45,15 @@ def tests : IO Unit := do
     | .error e => throw (IO.userError s!"native inflate rejected zopfli(iter=50): {e}")
     assert! z50.size ≤ z15.size
 
+    -- Sanity: on 4KB of real-ish text the ratio ceiling must beat zlib level 9.
+    -- If a build silently linked a non-zopfli fallback, zopfli would no longer
+    -- dominate zlib-9 and this would catch it. The output must also roundtrip.
+    let text := mkTextData 4096
+    let zt ← Zopfli.compress text
+    let z9 ← RawDeflate.compress text 9
+    assert! zt.size ≤ z9.size
+    roundtrips "text" text
+
     IO.println "Zopfli tests: OK"
 
 end ZipTest.Zopfli
