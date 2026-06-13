@@ -9,10 +9,12 @@ Operations:
   inflate        — native DEFLATE decompression
   inflate-ffi    — zlib FFI decompression
   inflate-miniz  — miniz_oxide (Rust) DEFLATE decompression (Track D)
+  inflate-libdeflate — libdeflate (C) DEFLATE decompression (Track D)
   deflate        — native DEFLATE compression (fixed Huffman)
   deflate-lazy   — native DEFLATE compression (lazy matching)
   deflate-ffi    — zlib FFI compression
   compress-miniz — miniz_oxide (Rust) DEFLATE compression (Track D)
+  compress-libdeflate — libdeflate (C) DEFLATE compression (Track D)
   gzip           — native gzip decompression
   gzip-ffi       — zlib FFI gzip decompression
   zlib           — native zlib decompression
@@ -181,6 +183,10 @@ where
       let compressed ← RawDeflate.compress data level.toUInt8
       let _ ← MinizOxide.decompress compressed
       pure ()
+    | "inflate-libdeflate" =>
+      let compressed ← Libdeflate.compress data level.toUInt8
+      let _ ← Libdeflate.decompress compressed
+      pure ()
     | "gzip" =>
       let compressed ← Gzip.compress data level.toUInt8
       match Zip.Native.GzipDecode.decompress compressed with
@@ -211,6 +217,9 @@ where
       pure ()
     | "compress-miniz" =>
       let _ ← MinizOxide.compress data level.toUInt8
+      pure ()
+    | "compress-libdeflate" =>
+      let _ ← Libdeflate.compress data level.toUInt8
       pure ()
     -- Checksum benchmarks
     | "crc32" =>
