@@ -909,6 +909,76 @@ theorem repairBl_complete (bl : Array Nat) (maxBits : Nat) (hmb : 1 ≤ maxBits)
     blKraft (repairBl bl (blKraft bl maxBits - 2 ^ maxBits) maxBits) maxBits = 2 ^ maxBits :=
   repairBl_loop maxBits hmb (blKraft bl maxBits - 2 ^ maxBits) bl hsize hfeas hleaf (by omega)
 
+/-- **Leaf-count preservation through the repair loop.** Under the same invariants that
+    make `repairBl_loop` go (per-prefix feasibility, leaf-count fit, over-subscription),
+    every iteration is a well-defined `repairStep`, which preserves `blCountSum`; so the
+    whole loop leaves the total leaf count unchanged. This pins the number of codewords
+    `repairBl` emits to the number it started with — needed to show the `expandBl` of the
+    repaired histogram has exactly as many lengths as there are symbols. -/
+theorem repairBl_count_loop (maxBits : Nat) (hmb : 1 ≤ maxBits) :
+    ∀ (excess : Nat) (bl : Array Nat),
+      maxBits < bl.size →
+      (∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b) →
+      blCountSum bl maxBits ≤ 2 ^ maxBits →
+      blKraft bl maxBits = 2 ^ maxBits + excess →
+      blCountSum (repairBl bl excess maxBits) maxBits = blCountSum bl maxBits := by
+  intro excess
+  induction excess with
+  | zero =>
+    intro bl _ _ _ _
+    simp only [repairBl]
+  | succ e ih =>
+    intro bl hsize hfeas hleaf hconserv
+    have hpos_top : 1 ≤ bl.getD maxBits 0 := by
+      have hscale := blKraftFrom_scale bl maxBits 1 hmb
+      rw [if_pos hmb] at hscale
+      rw [blKraft_eq_from] at hconserv
+      have hfeasm := hfeas (maxBits - 1) (by omega)
+      have hpoweq : 2 * 2 ^ (maxBits - 1) = 2 ^ maxBits := by
+        obtain ⟨k, rfl⟩ : ∃ k, maxBits = k + 1 := ⟨maxBits - 1, by omega⟩
+        rw [Nat.add_sub_cancel, Nat.pow_succ, Nat.mul_comm]
+      omega
+    have hbne : findBelow bl (maxBits - 1) ≠ 0 := by
+      intro hzero
+      have hallzero := findBelow_zero bl (maxBits - 1) hzero
+      have hpz : blKraft bl maxBits = bl.getD maxBits 0 := by
+        rw [blKraft_eq_from]
+        exact blKraftFrom_prefix_zero bl maxBits 1 (by omega)
+          (fun k hk1 hkM => hallzero k hk1 (by omega))
+      have hge : bl.getD maxBits 0 ≤ blCountSum bl maxBits := by
+        rw [blCount_eq_from]
+        exact blCountFrom_ge_term bl maxBits maxBits 1 (by omega) (Nat.le_refl _)
+      omega
+    obtain ⟨hb1, hble, hposb⟩ := findBelow_pos bl (maxBits - 1) hbne
+    rw [repairBl]
+    split
+    · rename_i hh
+      simp only [beq_iff_eq] at hh
+      exact absurd hh hbne
+    · have hstep := repairStep_count bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega) hsize
+        hposb hpos_top
+      rw [ih (repairStep bl (findBelow bl (maxBits - 1)) maxBits)
+          (by simp only [repairStep, Array.size_set!]; exact hsize)
+          (fun b hb => Nat.le_trans
+            (repairStep_feas bl (findBelow bl (maxBits - 1)) maxBits b hb1 hsize hposb hb)
+            (hfeas b hb))
+          (by rw [hstep]; exact hleaf)
+          (by have hk := repairStep_kraft bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega)
+                hsize hposb hpos_top; omega)]
+      exact hstep
+
+/-- **`repairBl` preserves the leaf count.** Running the repair for exactly the excess
+    leaves `blCountSum` unchanged. Wrapper over `repairBl_count_loop` mirroring the shape
+    of `repairBl_complete`. -/
+theorem repairBl_count (bl : Array Nat) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hsize : maxBits < bl.size)
+    (hfeas : ∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b)
+    (hleaf : blCountSum bl maxBits ≤ 2 ^ maxBits)
+    (hge : 2 ^ maxBits ≤ blKraft bl maxBits) :
+    blCountSum (repairBl bl (blKraft bl maxBits - 2 ^ maxBits) maxBits) maxBits
+      = blCountSum bl maxBits :=
+  repairBl_count_loop maxBits hmb (blKraft bl maxBits - 2 ^ maxBits) bl hsize hfeas hleaf (by omega)
+
 /-- A `BuildTree` rooted at depth `d` has its Kraft sum (relative to any `D ≥ max depth`)
     equal to `2^(D - d)`. This is the fundamental property of binary trees:
     the leaves partition the code space exactly. -/
@@ -1534,6 +1604,271 @@ private theorem buildHuffmanTree_leaf_in_depths (ts : List BuildTree) (sym : Nat
   have hsym : t.HasSym sym := ht_eq ▸ .leaf w sym
   exact (buildHuffmanTree_HasSym ts sym ⟨t, ht_mem, hsym⟩).in_depths 0
 
+/-! ## `buildHuffmanTree` leaf count
+
+The number of `(symbol, depth)` pairs the tree emits (`depths.length`) is exactly the
+number of input leaves: merging combines subtrees but never creates or drops leaves. This
+is what equates `nonzero.length` with `blCountSum (repaired histogram)`, so the `expandBl`
+of the repaired histogram is the same length as the symbol list `limitedPairs` zips it
+with (the padding is then provably unused). -/
+
+/-- `depths.length` (the leaf count) is independent of the starting depth. -/
+private theorem BuildTree.depths_length_eq (t : BuildTree) (d d' : Nat) :
+    (t.depths d).length = (t.depths d').length := by
+  match t with
+  | .leaf _ _ => rfl
+  | .node _ l r =>
+    simp only [depths, List.length_append]
+    rw [l.depths_length_eq (d + 1) (d' + 1), r.depths_length_eq (d + 1) (d' + 1)]
+
+/-- `insertByWeight` preserves the total leaf count of the list (it only moves a tree). -/
+private theorem insertByWeight_depths_sum (t : BuildTree) (xs : List BuildTree) :
+    ((insertByWeight t xs).map (fun u => (u.depths 0).length)).sum
+      = (t.depths 0).length + (xs.map (fun u => (u.depths 0).length)).sum := by
+  induction xs with
+  | nil => simp only [insertByWeight, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+  | cons x xs ih =>
+    simp only [insertByWeight]
+    split
+    · simp only [List.map_cons, List.sum_cons]
+    · simp only [List.map_cons, List.sum_cons, ih]; omega
+
+/-- `buildHuffmanTree`'s output has as many leaves as the inputs had in total. -/
+private theorem buildHuffmanTree_depths_length (ts : List BuildTree) (h : ts ≠ []) :
+    ((buildHuffmanTree ts).depths 0).length
+      = (ts.map (fun u => (u.depths 0).length)).sum := by
+  match ts with
+  | [] => exact absurd rfl h
+  | [t] =>
+    simp only [buildHuffmanTree, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
+      Nat.add_zero]
+  | t1 :: t2 :: rest =>
+    simp only [buildHuffmanTree]
+    have hne : insertByWeight (BuildTree.node (t1.weight + t2.weight) t1 t2) rest ≠ [] := by
+      intro hc; have := insertByWeight_length (BuildTree.node (t1.weight + t2.weight) t1 t2) rest
+      rw [hc, List.length_nil] at this; omega
+    rw [buildHuffmanTree_depths_length _ hne, insertByWeight_depths_sum]
+    simp only [BuildTree.depths, List.length_append, List.map_cons, List.sum_cons]
+    rw [BuildTree.depths_length_eq t1 1 0, BuildTree.depths_length_eq t2 1 0]
+    omega
+termination_by ts.length
+decreasing_by simp only [insertByWeight_length, List.length_cons]; omega
+
+/-- Mapping `(u.depths 0).length` over a list of *leaf* trees gives all ones. -/
+private theorem sum_map_one {α : Type} (L : List α) : (L.map (fun _ => 1)).sum = L.length := by
+  induction L with
+  | nil => rfl
+  | cons x xs ih => simp only [List.map_cons, List.sum_cons, List.length_cons, ih]; omega
+
+/-- **Leaf count of the Huffman tree built from a frequency list.** Sorting the leaves
+    and merging them preserves their number, so the tree emits exactly one `(symbol, depth)`
+    pair per input frequency entry. -/
+private theorem huffman_leaf_count (l : List (Nat × Nat))
+    (cmp : BuildTree → BuildTree → Bool) (hl : l ≠ []) :
+    ((buildHuffmanTree ((l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp)).depths 0).length
+      = l.length := by
+  have hperm : ((l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp).Perm
+      (l.map (fun p => BuildTree.leaf p.2 p.1)) := List.mergeSort_perm _ _
+  have hne : (l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp ≠ [] := by
+    intro hc
+    have := hperm.length_eq
+    rw [hc, List.length_nil, List.length_map] at this
+    exact hl (List.eq_nil_of_length_eq_zero this.symm)
+  rw [buildHuffmanTree_depths_length _ hne]
+  have hf : ∀ u ∈ (l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp,
+      (u.depths 0).length = (fun _ => 1) u := by
+    intro u hu
+    have : u ∈ l.map (fun p => BuildTree.leaf p.2 p.1) := hperm.mem_iff.mp hu
+    rw [List.mem_map] at this
+    obtain ⟨p, _, rfl⟩ := this
+    rfl
+  rw [List.map_congr_left hf, sum_map_one, hperm.length_eq, List.length_map]
+
+/-! ## `assignLengths` as a permutation of its lengths
+
+The final ingredient: filtering the nonzero entries of `assignLengths (syms.zip lens) n`
+yields a *permutation* of `lens`, provided the symbols are distinct, in range, and the
+lengths are all positive. Each `set` lands at a fresh position (distinctness), turning a
+`0` into a positive value, so the filtered multiset gains exactly one copy of each length.
+This transfers the histogram-level Kraft equality to the per-symbol length list. -/
+
+/-- `set` at a different index leaves `getElem!` unchanged (Nat lists). -/
+private theorem getElem!_set_ne_nat (l : List Nat) (i j v : Nat) (h : i ≠ j) :
+    (l.set i v)[j]! = l[j]! := by
+  by_cases hj : j < l.length
+  · rw [getElem!_pos (l.set i v) j (by rw [List.length_set]; exact hj), getElem!_pos l j hj,
+      List.getElem_set_ne h]
+  · rw [getElem!_neg (l.set i v) j (by rw [List.length_set]; omega), getElem!_neg l j (by omega)]
+
+/-- Setting a currently-zero position to a positive value adds exactly that value to the
+    nonzero-filtered list (up to permutation). -/
+private theorem filter_set_perm (l : List Nat) (i v : Nat)
+    (hi : i < l.length) (hz : l[i]! = 0) (hv : v ≠ 0) :
+    ((l.set i v).filter (· != 0)).Perm ((l.filter (· != 0)) ++ [v]) := by
+  induction l generalizing i with
+  | nil => simp only [List.length_nil] at hi; omega
+  | cons x xs ih =>
+    cases i with
+    | zero =>
+      have hx : x = 0 := by simpa using hz
+      subst hx
+      simp only [List.set_cons_zero, List.filter_cons, bne_self_eq_false, Bool.false_eq_true,
+        ↓reduceIte]
+      rw [if_pos (by simpa using hv)]
+      rw [← List.singleton_append]
+      exact List.perm_append_comm
+    | succ j =>
+      have hj : j < xs.length := by simpa using hi
+      have hz' : xs[j]! = 0 := by simpa using hz
+      have ihj := ih j hj hz'
+      rw [List.set_cons_succ]
+      simp only [List.filter_cons]
+      by_cases hx0 : (x != 0) = true
+      · rw [if_pos hx0, if_pos hx0, List.cons_append]
+        exact ihj.cons x
+      · rw [if_neg hx0, if_neg hx0]
+        exact ihj
+
+/-- **Filtering `assignLengths` recovers the length multiset.** Folding `set` over distinct,
+    in-range symbol positions (starting from an all-zero accumulator state at those positions)
+    yields, after dropping zeros, a permutation of the assigned lengths. -/
+private theorem foldl_set_filter_perm (ps : List (Nat × Nat)) (acc : List Nat)
+    (hlen : ∀ p ∈ ps, p.1 < acc.length)
+    (hpos : ∀ p ∈ ps, 0 < p.2)
+    (hnodup : (ps.map (·.1)).Nodup)
+    (hzero : ∀ p ∈ ps, acc[p.1]! = 0) :
+    ((ps.foldl (fun acc (p : Nat × Nat) =>
+        if p.1 < acc.length then acc.set p.1 p.2 else acc) acc).filter (· != 0)).Perm
+      ((acc.filter (· != 0)) ++ ps.map (·.2)) := by
+  induction ps generalizing acc with
+  | nil => simp only [List.foldl_nil, List.map_nil, List.append_nil]; exact List.Perm.refl _
+  | cons p ps ih =>
+    simp only [List.map_cons] at hnodup
+    obtain ⟨hnotin, hnd⟩ := List.nodup_cons.mp hnodup
+    simp only [List.foldl_cons]
+    have hp_len : p.1 < acc.length := hlen p (List.mem_cons_self ..)
+    rw [if_pos hp_len]
+    have hp_zero : acc[p.1]! = 0 := hzero p (List.mem_cons_self ..)
+    have hp_pos : 0 < p.2 := hpos p (List.mem_cons_self ..)
+    have hlen' : ∀ q ∈ ps, q.1 < (acc.set p.1 p.2).length := by
+      intro q hq; rw [List.length_set]; exact hlen q (List.mem_cons_of_mem _ hq)
+    have hzero' : ∀ q ∈ ps, (acc.set p.1 p.2)[q.1]! = 0 := by
+      intro q hq
+      have hqne : p.1 ≠ q.1 := by
+        intro he; exact hnotin (he ▸ List.mem_map.mpr ⟨q, hq, rfl⟩)
+      rw [getElem!_set_ne_nat acc p.1 q.1 p.2 hqne]
+      exact hzero q (List.mem_cons_of_mem _ hq)
+    have key := ih (acc.set p.1 p.2) hlen'
+      (fun q hq => hpos q (List.mem_cons_of_mem _ hq)) hnd hzero'
+    have hset := filter_set_perm acc p.1 p.2 hp_len hp_zero (by omega)
+    refine key.trans ((hset.append_right _).trans ?_)
+    have heq : (acc.filter (· != 0) ++ [p.2]) ++ ps.map (·.2)
+        = acc.filter (· != 0) ++ (p :: ps).map (·.2) := by
+      simp only [List.map_cons, List.append_assoc, List.singleton_append]
+    rw [heq]
+
+/-- Zipping a list with a longer-than-needed second list and taking second components
+    recovers the relevant prefix: extra trailing elements of the right list are dropped. -/
+private theorem zip_append_map_snd {α β : Type} (l1 : List α) (l2 l3 : List β)
+    (h : l1.length ≤ l2.length) :
+    ((l1.zip (l2 ++ l3)).map (·.2)) = l2.take l1.length := by
+  induction l1 generalizing l2 with
+  | nil => simp only [List.zip_nil_left, List.map_nil, List.length_nil, List.take_zero]
+  | cons x xs ih =>
+    cases l2 with
+    | nil => simp only [List.length_nil, List.length_cons] at h; omega
+    | cons y ys =>
+      simp only [List.cons_append, List.zip_cons_cons, List.map_cons, List.length_cons,
+        List.take_succ_cons]
+      rw [ih ys (by simp only [List.length_cons] at h; omega)]
+
+/-- An all-zero `List.replicate` reads `0` at every index (in- or out-of-bounds). -/
+private theorem replicate_zero_getElem (n i : Nat) : (List.replicate n (0 : Nat))[i]! = 0 := by
+  by_cases h : i < n
+  · rw [getElem!_pos _ i (by rw [List.length_replicate]; exact h)]
+    simp only [List.getElem_replicate]
+  · rw [getElem!_neg _ i (by rw [List.length_replicate]; omega)]; rfl
+
+/-- **`assignLengths` of the `limitedPairs` zip recovers `expandBl` (up to permutation).**
+    Folding `set` over the frequency-sorted, distinct, in-range symbols paired with the
+    repaired histogram's expanded lengths (plus unused padding) and dropping zeros yields a
+    permutation of `expandBl bl`. The padding is provably unused: `|syms| = |expandBl bl|`. -/
+private theorem assignLengths_zip_expandBl_perm (syms : List Nat) (bl : Array Nat)
+    (maxBits numSymbols : Nat)
+    (hrange : ∀ s ∈ syms, s < numSymbols)
+    (hnodup : syms.Nodup)
+    (hlen : syms.length = blCountSum bl maxBits) :
+    ((assignLengths (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits))
+        numSymbols).filter (· != 0)).Perm (expandBl bl maxBits) := by
+  have hexp_len : (expandBl bl maxBits).length = syms.length := by
+    rw [expandBl_length, hlen]
+  have hsnd : (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits)).map (·.2)
+      = expandBl bl maxBits := by
+    rw [zip_append_map_snd syms (expandBl bl maxBits) (List.replicate syms.length maxBits)
+        (by omega), ← hexp_len, List.take_length]
+  have hfst : (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits)).map (·.1)
+      = syms := by
+    apply List.map_fst_zip
+    rw [List.length_append, List.length_replicate]; omega
+  have hmem_fst : ∀ p ∈ syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits),
+      p.1 ∈ syms := fun p hp => hfst ▸ List.mem_map_of_mem hp
+  have hmem_snd : ∀ p ∈ syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits),
+      p.2 ∈ expandBl bl maxBits := fun p hp => hsnd ▸ List.mem_map_of_mem hp
+  have happly := foldl_set_filter_perm
+    (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits))
+    (List.replicate numSymbols 0)
+    (fun p hp => by rw [List.length_replicate]; exact hrange p.1 (hmem_fst p hp))
+    (fun p hp => (expandBl_mem_range bl maxBits p.2 (hmem_snd p hp)).1)
+    (by rw [hfst]; exact hnodup)
+    (fun p _ => replicate_zero_getElem numSymbols p.1)
+  rw [filter_ne_zero_replicate, List.nil_append, hsnd] at happly
+  exact happly
+
+/-- **Kraft-exact length list from a Huffman tree.** For a tree whose depths are all `≥ 1`
+    and fit in `2^maxBits`, capping + repairing its histogram and handing the resulting
+    `expandBl` lengths to distinct in-range symbols (with unused padding) gives a length
+    list whose nonzero Kraft sum is exactly `2^maxBits` — a complete code. Internalizes the
+    histogram completeness (`cappedBlCount_repairBl_complete`) and leaf-count preservation
+    (`repairBl_count`) so the caller need only supply the symbol-side facts. -/
+private theorem assignLengths_zip_tree_kraft (syms : List Nat) (t : BuildTree)
+    (maxBits numSymbols : Nat) (hmb : 1 ≤ maxBits)
+    (hrange : ∀ s ∈ syms, s < numSymbols) (hnodup : syms.Nodup)
+    (hpos : ∀ p ∈ t.depths 0, 1 ≤ p.2)
+    (hn : (t.depths 0).length ≤ 2 ^ maxBits)
+    (hsyms_len : syms.length = (t.depths 0).length) :
+    kraftSum ((assignLengths (syms.zip (expandBl
+        (repairBl (cappedBlCount (t.depths 0) maxBits)
+          (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits
+        ++ List.replicate syms.length maxBits)) numSymbols).filter (· != 0)) maxBits
+      = 2 ^ maxBits := by
+  have hsize : maxBits < (cappedBlCount (t.depths 0) maxBits).size := by
+    rw [cappedBlCount, cappedBlCountAux_size, Array.size_replicate]; omega
+  have hfeas := cappedBlCount_feas t maxBits hmb hpos
+  have hleaf := cappedBlCount_leaf t maxBits hmb hpos hn
+  have hge := cappedBlCount_ge t maxBits hmb hpos
+  -- the repaired histogram is a complete code …
+  have hbl_complete := cappedBlCount_repairBl_complete t maxBits hmb hpos hn
+  -- … and it has the same leaf count as the tree
+  have hcap_count : blCountSum (cappedBlCount (t.depths 0) maxBits) maxBits = (t.depths 0).length := by
+    rw [cappedBlCount, cappedBlCountAux_count maxBits hmb (t.depths 0)
+        (Array.replicate (maxBits + 2) 0) (by rw [Array.size_replicate]; omega) hpos]
+    have hz : blCountSum (Array.replicate (maxBits + 2) 0) maxBits = 0 := by
+      rw [blCount_eq_from, blCountFrom_zero _ maxBits 1 (fun i _ _ => replicate_getD_zero _ i)]
+    rw [hz, Nat.zero_add]
+  have hbl_count : blCountSum (repairBl (cappedBlCount (t.depths 0) maxBits)
+      (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits
+      = (t.depths 0).length := by
+    rw [repairBl_count (cappedBlCount (t.depths 0) maxBits) maxBits hmb hsize hfeas hleaf hge,
+      hcap_count]
+  have hbridge_len : syms.length = blCountSum (repairBl (cappedBlCount (t.depths 0) maxBits)
+      (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits :=
+    hsyms_len.trans hbl_count.symm
+  have hperm := assignLengths_zip_expandBl_perm syms
+    (repairBl (cappedBlCount (t.depths 0) maxBits)
+      (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits)
+    maxBits numSymbols hrange hnodup hbridge_len
+  rw [kraftSum_perm hperm, expandBl_kraft, hbl_complete]
+
 /-- If symbol `s` appears with nonzero frequency in `freqs` and `s < numSymbols`,
     then `(computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0`.
     Requires `maxBits > 0`. -/
@@ -1585,5 +1920,140 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
         (fun q hq _ => by have := (limitedPairs_mem_range nz maxBits hmb q hq).1; omega)
         (limitedPairs_covers nz maxBits s (List.mem_map.mpr ⟨p, hs_nz, hps⟩))
       exact Nat.pos_iff_ne_zero.mp hpos
+
+/-! ## computeCodeLengths completeness (gold-standard property of #2536)
+
+The bridge half: the multi-symbol `computeCodeLengths` hot path produces a *complete*
+code — its nonzero Kraft sum is exactly `2^maxBits`, the equality (not just `≤`) that
+zlib's inflate requires. Combined with `computeCodeLengths_valid` (the `≤` half), this
+rules out the incomplete-code regression (D-20) by construction, independent of tests. -/
+
+/-- A `Nodup` list of naturals all `< n` has length `≤ n` (pigeonhole, by erasing `m` at
+    each `n = m+1` step). -/
+private theorem nodup_lt_length_le : ∀ (n : Nat) (l : List Nat), l.Nodup →
+    (∀ x ∈ l, x < n) → l.length ≤ n := by
+  intro n
+  induction n with
+  | zero =>
+    intro l _ hlt
+    cases l with
+    | nil => simp
+    | cons x _ => exact absurd (hlt x (List.mem_cons_self ..)) (by omega)
+  | succ m ih =>
+    intro l hnd hlt
+    by_cases hm : m ∈ l
+    · have hnd' : (l.erase m).Nodup := hnd.erase m
+      have hlt' : ∀ x ∈ l.erase m, x < m := by
+        intro x hx
+        have hxl : x ∈ l := List.mem_of_mem_erase hx
+        have hxne : x ≠ m := fun he => (hnd.not_mem_erase) (he ▸ hx)
+        have := hlt x hxl; omega
+      have hlen := ih (l.erase m) hnd' hlt'
+      have hlenerase : (l.erase m).length = l.length - 1 := List.length_erase_of_mem hm
+      have hpos : 0 < l.length := List.length_pos_of_mem hm
+      omega
+    · exact Nat.le_succ_of_le (ih l hnd (fun x hx => by
+        have hxne : x ≠ m := fun he => hm (he ▸ hx)
+        have := hlt x hx; omega))
+
+/-- **The multi-symbol length list (pre-`fixKraftList`) is a complete code.** For `≥ 2`
+    distinct in-range nonzero symbols fitting in `2^maxBits`, the lengths `limitedPairs`
+    hands out have nonzero Kraft sum *exactly* `2^maxBits`. The proof transfers the
+    histogram-level Kraft equality (`assignLengths_zip_tree_kraft`) through the symbol
+    assignment. -/
+private theorem assignLengths_limitedPairs_kraft (nz : List (Nat × Nat))
+    (numSymbols maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (h2 : 2 ≤ nz.length) (hle : nz.length ≤ 2 ^ maxBits)
+    (hnodup : (nz.map (·.1)).Nodup) (hrange : ∀ p ∈ nz, p.1 < numSymbols) :
+    kraftSum ((assignLengths (limitedPairs nz maxBits) numSymbols).filter (· != 0)) maxBits
+      = 2 ^ maxBits := by
+  have hnz_ne : nz ≠ [] := by intro hc; rw [hc, List.length_nil] at h2; omega
+  -- Frequency-sorted symbol list and its facts.
+  have hsyms_perm : (((nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1))).Perm (nz.map (·.1)) :=
+    (List.mergeSort_perm nz _).map (·.1)
+  have hsyms_len : ((nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1)).length = nz.length := by
+    rw [hsyms_perm.length_eq, List.length_map]
+  have hsyms_nodup : ((nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1)).Nodup :=
+    hsyms_perm.nodup_iff.mpr hnodup
+  have hsyms_range : ∀ s ∈ (nz.mergeSort (fun a b => b.2 ≤ a.2)).map (·.1), s < numSymbols := by
+    intro s hs
+    have hs' : s ∈ nz.map (·.1) := hsyms_perm.mem_iff.mp hs
+    rw [List.mem_map] at hs'
+    obtain ⟨p, hp, rfl⟩ := hs'
+    exact hrange p hp
+  -- Leaf count of the Huffman tree equals `nz.length`.
+  have hleaf_count : ((buildHuffmanTree ((nz.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort
+      (fun a b => a.weight ≤ b.weight))).depths 0).length = nz.length :=
+    huffman_leaf_count nz (fun a b => a.weight ≤ b.weight) hnz_ne
+  have hleaves2 : 2 ≤ ((nz.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort
+      (fun a b => a.weight ≤ b.weight)).length := by
+    rw [(List.mergeSort_perm _ _).length_eq, List.length_map]; omega
+  -- Unfold `limitedPairs` so unification fills the symbol list and tree from the concrete zip.
+  simp only [limitedPairs]
+  exact assignLengths_zip_tree_kraft _ _ maxBits numSymbols hmb hsyms_range hsyms_nodup
+    (fun p hp => buildHuffmanTree_depths_ge_one _ hleaves2 p hp)
+    (by rw [hleaf_count]; exact hle)
+    (by rw [hsyms_len, hleaf_count])
+
+/-- **`fixKraftList` is the identity on the multi-symbol `computeCodeLengths` output.** Its
+    overflow branch is *proven dead*: the length-limited histogram is already a complete code,
+    so the Kraft-inequality guard always passes. Deliverable 2 of #2536's bridge half. -/
+theorem fixKraftList_limitedPairs_id (nz : List (Nat × Nat)) (numSymbols maxBits : Nat)
+    (hmb : 1 ≤ maxBits) (h2 : 2 ≤ nz.length) (hle : nz.length ≤ 2 ^ maxBits)
+    (hnodup : (nz.map (·.1)).Nodup) (hrange : ∀ p ∈ nz, p.1 < numSymbols) :
+    fixKraftList (assignLengths (limitedPairs nz maxBits) numSymbols) maxBits
+      = assignLengths (limitedPairs nz maxBits) numSymbols := by
+  simp only [fixKraftList]
+  rw [if_pos (Nat.le_of_eq
+    (assignLengths_limitedPairs_kraft nz numSymbols maxBits hmb h2 hle hnodup hrange))]
+
+/-- **`computeCodeLengths` completeness.** For frequencies with at least two distinct
+    nonzero-frequency symbols, all `< numSymbols`, with `numSymbols ≤ 2^maxBits`, the
+    computed code lengths have nonzero Kraft sum *exactly* `2^maxBits`: a complete code.
+
+    The `≥ 2`-symbol hypothesis is essential and marks the RFC 1951 boundary: a single
+    symbol short-circuits to length 1, giving `kraftSum = 2^(maxBits−1) ≠ 2^maxBits` (the
+    known incomplete-code exception that inflate accepts only as a special case). Mirrors
+    `computeCodeLengths_valid`, which proves the companion `≤` half. -/
+theorem computeCodeLengths_complete (freqs : List (Nat × Nat)) (numSymbols maxBits : Nat)
+    (hmb : 0 < maxBits) (hn : numSymbols ≤ 2 ^ maxBits)
+    (hnodup : (freqs.map (·.1)).Nodup)
+    (hrange : ∀ p ∈ freqs, p.1 < numSymbols)
+    (h2 : 2 ≤ (freqs.filter (fun x => decide (x.2 > 0))).length) :
+    kraftSum ((computeCodeLengths freqs numSymbols maxBits).filter (· != 0)) maxBits
+      = 2 ^ maxBits := by
+  -- Facts about the nonzero-frequency sublist.
+  have hnz_range : ∀ p ∈ freqs.filter (fun x => decide (x.2 > 0)), p.1 < numSymbols :=
+    fun p hp => hrange p (List.mem_filter.mp hp).1
+  have hnz_nodup : ((freqs.filter (fun x => decide (x.2 > 0))).map (·.1)).Nodup :=
+    List.Nodup.sublist ((List.filter_sublist (l := freqs)).map (·.1)) hnodup
+  have hle : (freqs.filter (fun x => decide (x.2 > 0))).length ≤ 2 ^ maxBits := by
+    have hbound := nodup_lt_length_le numSymbols _ hnz_nodup
+      (fun s hs => by rw [List.mem_map] at hs; obtain ⟨p, hp, rfl⟩ := hs; exact hnz_range p hp)
+    rw [List.length_map] at hbound; omega
+  -- Take the multi-symbol branch.
+  simp only [computeCodeLengths]
+  have hne : ¬(freqs.filter (fun x => decide (x.2 > 0))).isEmpty := by
+    intro h; rw [List.isEmpty_iff_length_eq_zero] at h; omega
+  rw [if_neg hne]
+  split
+  · rename_i hlen1; simp only [beq_iff_eq] at hlen1; omega
+  · -- Abstract the nonzero list as `nz`; reduce hypotheses accordingly.
+    generalize hnzdef : freqs.filter (fun x => decide (x.2 > 0)) = nz
+    rw [hnzdef] at hnz_range hnz_nodup hle h2
+    have hkraft := assignLengths_limitedPairs_kraft nz numSymbols maxBits hmb h2 hle hnz_nodup
+      hnz_range
+    -- `fixKraftList` is the identity here (its overflow branch is proven dead).
+    simp only [fixKraftList]
+    rw [if_pos (Nat.le_of_eq hkraft)]
+    exact hkraft
+
+/-- Non-vacuity check: the completeness hypotheses are satisfiable on a concrete DEFLATE-shaped
+    input (three distinct symbols `< 3`, two with nonzero frequency, `3 ≤ 2^15`), so the
+    completeness conclusion `kraftSum … = 2^15` is genuinely available, not vacuous. -/
+example : kraftSum ((computeCodeLengths [(0, 3), (1, 2), (2, 0)] 3 15).filter (· != 0)) 15
+    = 2 ^ 15 :=
+  computeCodeLengths_complete [(0, 3), (1, 2), (2, 0)] 3 15 (by decide) (by decide)
+    (by decide) (by decide) (by decide)
 
 end Huffman.Spec
