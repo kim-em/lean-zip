@@ -909,6 +909,76 @@ theorem repairBl_complete (bl : Array Nat) (maxBits : Nat) (hmb : 1 ≤ maxBits)
     blKraft (repairBl bl (blKraft bl maxBits - 2 ^ maxBits) maxBits) maxBits = 2 ^ maxBits :=
   repairBl_loop maxBits hmb (blKraft bl maxBits - 2 ^ maxBits) bl hsize hfeas hleaf (by omega)
 
+/-- **Leaf-count preservation through the repair loop.** Under the same invariants that
+    make `repairBl_loop` go (per-prefix feasibility, leaf-count fit, over-subscription),
+    every iteration is a well-defined `repairStep`, which preserves `blCountSum`; so the
+    whole loop leaves the total leaf count unchanged. This pins the number of codewords
+    `repairBl` emits to the number it started with — needed to show the `expandBl` of the
+    repaired histogram has exactly as many lengths as there are symbols. -/
+theorem repairBl_count_loop (maxBits : Nat) (hmb : 1 ≤ maxBits) :
+    ∀ (excess : Nat) (bl : Array Nat),
+      maxBits < bl.size →
+      (∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b) →
+      blCountSum bl maxBits ≤ 2 ^ maxBits →
+      blKraft bl maxBits = 2 ^ maxBits + excess →
+      blCountSum (repairBl bl excess maxBits) maxBits = blCountSum bl maxBits := by
+  intro excess
+  induction excess with
+  | zero =>
+    intro bl _ _ _ _
+    simp only [repairBl]
+  | succ e ih =>
+    intro bl hsize hfeas hleaf hconserv
+    have hpos_top : 1 ≤ bl.getD maxBits 0 := by
+      have hscale := blKraftFrom_scale bl maxBits 1 hmb
+      rw [if_pos hmb] at hscale
+      rw [blKraft_eq_from] at hconserv
+      have hfeasm := hfeas (maxBits - 1) (by omega)
+      have hpoweq : 2 * 2 ^ (maxBits - 1) = 2 ^ maxBits := by
+        obtain ⟨k, rfl⟩ : ∃ k, maxBits = k + 1 := ⟨maxBits - 1, by omega⟩
+        rw [Nat.add_sub_cancel, Nat.pow_succ, Nat.mul_comm]
+      omega
+    have hbne : findBelow bl (maxBits - 1) ≠ 0 := by
+      intro hzero
+      have hallzero := findBelow_zero bl (maxBits - 1) hzero
+      have hpz : blKraft bl maxBits = bl.getD maxBits 0 := by
+        rw [blKraft_eq_from]
+        exact blKraftFrom_prefix_zero bl maxBits 1 (by omega)
+          (fun k hk1 hkM => hallzero k hk1 (by omega))
+      have hge : bl.getD maxBits 0 ≤ blCountSum bl maxBits := by
+        rw [blCount_eq_from]
+        exact blCountFrom_ge_term bl maxBits maxBits 1 (by omega) (Nat.le_refl _)
+      omega
+    obtain ⟨hb1, hble, hposb⟩ := findBelow_pos bl (maxBits - 1) hbne
+    rw [repairBl]
+    split
+    · rename_i hh
+      simp only [beq_iff_eq] at hh
+      exact absurd hh hbne
+    · have hstep := repairStep_count bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega) hsize
+        hposb hpos_top
+      rw [ih (repairStep bl (findBelow bl (maxBits - 1)) maxBits)
+          (by simp only [repairStep, Array.size_set!]; exact hsize)
+          (fun b hb => Nat.le_trans
+            (repairStep_feas bl (findBelow bl (maxBits - 1)) maxBits b hb1 hsize hposb hb)
+            (hfeas b hb))
+          (by rw [hstep]; exact hleaf)
+          (by have hk := repairStep_kraft bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega)
+                hsize hposb hpos_top; omega)]
+      exact hstep
+
+/-- **`repairBl` preserves the leaf count.** Running the repair for exactly the excess
+    leaves `blCountSum` unchanged. Wrapper over `repairBl_count_loop` mirroring the shape
+    of `repairBl_complete`. -/
+theorem repairBl_count (bl : Array Nat) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hsize : maxBits < bl.size)
+    (hfeas : ∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b)
+    (hleaf : blCountSum bl maxBits ≤ 2 ^ maxBits)
+    (hge : 2 ^ maxBits ≤ blKraft bl maxBits) :
+    blCountSum (repairBl bl (blKraft bl maxBits - 2 ^ maxBits) maxBits) maxBits
+      = blCountSum bl maxBits :=
+  repairBl_count_loop maxBits hmb (blKraft bl maxBits - 2 ^ maxBits) bl hsize hfeas hleaf (by omega)
+
 /-- A `BuildTree` rooted at depth `d` has its Kraft sum (relative to any `D ≥ max depth`)
     equal to `2^(D - d)`. This is the fundamental property of binary trees:
     the leaves partition the code space exactly. -/
@@ -1533,6 +1603,86 @@ private theorem buildHuffmanTree_leaf_in_depths (ts : List BuildTree) (sym : Nat
   obtain ⟨t, ht_mem, w, ht_eq⟩ := hmem
   have hsym : t.HasSym sym := ht_eq ▸ .leaf w sym
   exact (buildHuffmanTree_HasSym ts sym ⟨t, ht_mem, hsym⟩).in_depths 0
+
+/-! ## `buildHuffmanTree` leaf count
+
+The number of `(symbol, depth)` pairs the tree emits (`depths.length`) is exactly the
+number of input leaves: merging combines subtrees but never creates or drops leaves. This
+is what equates `nonzero.length` with `blCountSum (repaired histogram)`, so the `expandBl`
+of the repaired histogram is the same length as the symbol list `limitedPairs` zips it
+with (the padding is then provably unused). -/
+
+/-- `depths.length` (the leaf count) is independent of the starting depth. -/
+private theorem BuildTree.depths_length_eq (t : BuildTree) (d d' : Nat) :
+    (t.depths d).length = (t.depths d').length := by
+  match t with
+  | .leaf _ _ => rfl
+  | .node _ l r =>
+    simp only [depths, List.length_append]
+    rw [l.depths_length_eq (d + 1) (d' + 1), r.depths_length_eq (d + 1) (d' + 1)]
+
+/-- `insertByWeight` preserves the total leaf count of the list (it only moves a tree). -/
+private theorem insertByWeight_depths_sum (t : BuildTree) (xs : List BuildTree) :
+    ((insertByWeight t xs).map (fun u => (u.depths 0).length)).sum
+      = (t.depths 0).length + (xs.map (fun u => (u.depths 0).length)).sum := by
+  induction xs with
+  | nil => simp only [insertByWeight, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+  | cons x xs ih =>
+    simp only [insertByWeight]
+    split
+    · simp only [List.map_cons, List.sum_cons]
+    · simp only [List.map_cons, List.sum_cons, ih]; omega
+
+/-- `buildHuffmanTree`'s output has as many leaves as the inputs had in total. -/
+private theorem buildHuffmanTree_depths_length (ts : List BuildTree) (h : ts ≠ []) :
+    ((buildHuffmanTree ts).depths 0).length
+      = (ts.map (fun u => (u.depths 0).length)).sum := by
+  match ts with
+  | [] => exact absurd rfl h
+  | [t] =>
+    simp only [buildHuffmanTree, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
+      Nat.add_zero]
+  | t1 :: t2 :: rest =>
+    simp only [buildHuffmanTree]
+    have hne : insertByWeight (BuildTree.node (t1.weight + t2.weight) t1 t2) rest ≠ [] := by
+      intro hc; have := insertByWeight_length (BuildTree.node (t1.weight + t2.weight) t1 t2) rest
+      rw [hc, List.length_nil] at this; omega
+    rw [buildHuffmanTree_depths_length _ hne, insertByWeight_depths_sum]
+    simp only [BuildTree.depths, List.length_append, List.map_cons, List.sum_cons]
+    rw [BuildTree.depths_length_eq t1 1 0, BuildTree.depths_length_eq t2 1 0]
+    omega
+termination_by ts.length
+decreasing_by simp only [insertByWeight_length, List.length_cons]; omega
+
+/-- Mapping `(u.depths 0).length` over a list of *leaf* trees gives all ones. -/
+private theorem sum_map_one {α : Type} (L : List α) : (L.map (fun _ => 1)).sum = L.length := by
+  induction L with
+  | nil => rfl
+  | cons x xs ih => simp only [List.map_cons, List.sum_cons, List.length_cons, ih]; omega
+
+/-- **Leaf count of the Huffman tree built from a frequency list.** Sorting the leaves
+    and merging them preserves their number, so the tree emits exactly one `(symbol, depth)`
+    pair per input frequency entry. -/
+private theorem huffman_leaf_count (l : List (Nat × Nat))
+    (cmp : BuildTree → BuildTree → Bool) (hl : l ≠ []) :
+    ((buildHuffmanTree ((l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp)).depths 0).length
+      = l.length := by
+  have hperm : ((l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp).Perm
+      (l.map (fun p => BuildTree.leaf p.2 p.1)) := List.mergeSort_perm _ _
+  have hne : (l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp ≠ [] := by
+    intro hc
+    have := hperm.length_eq
+    rw [hc, List.length_nil, List.length_map] at this
+    exact hl (List.eq_nil_of_length_eq_zero this.symm)
+  rw [buildHuffmanTree_depths_length _ hne]
+  have hf : ∀ u ∈ (l.map (fun p => BuildTree.leaf p.2 p.1)).mergeSort cmp,
+      (u.depths 0).length = (fun _ => 1) u := by
+    intro u hu
+    have : u ∈ l.map (fun p => BuildTree.leaf p.2 p.1) := hperm.mem_iff.mp hu
+    rw [List.mem_map] at this
+    obtain ⟨p, _, rfl⟩ := this
+    rfl
+  rw [List.map_congr_left hf, sum_map_one, hperm.length_eq, List.length_map]
 
 /-- If symbol `s` appears with nonzero frequency in `freqs` and `s < numSymbols`,
     then `(computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0`.
