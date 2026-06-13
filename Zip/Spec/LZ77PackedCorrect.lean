@@ -73,7 +73,7 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap : Na
   unfold lz77ChainIterP lz77ChainIter
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
-  · simpa only [List.map_toArray, List.map_nil] using
+  · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
       mainLoopP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
 
 /-- The packed lazy `mainLoop` is the packed image of the boxed one (two
@@ -113,7 +113,7 @@ theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap 
   unfold lz77ChainLazyIterP lz77ChainLazyIter
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
-  · simpa only [List.map_toArray, List.map_nil] using
+  · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
       mainLoopLazyP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
 
 /-! ## View direction: the boxed view recovers the boxed matchers
