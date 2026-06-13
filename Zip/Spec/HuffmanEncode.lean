@@ -830,6 +830,79 @@ theorem repairStep_feas (bl : Array Nat) (bits maxBits b : Nat)
     rw [← hB, blKraftFrom_set_above A b (bits + 1) (A.getD (bits + 1) 0 + 2) 1 (by omega),
       ← hA, blKraftFrom_set_above bl b bits (bl.getD bits 0 - 1) 1 (by omega)]
 
+/-- **Loop core.** While `blKraft` exceeds `2^maxBits` by `excess`, `repairBl`
+    drives it down to exactly `2^maxBits`. Induction on `excess`: each iteration
+    is well-defined (a leaf below `maxBits` exists — else feasibility at `maxBits−1`
+    and the leaf-count bound force `blKraft ≤ 2^maxBits`), and `repairStep`
+    conserves `blKraft − 1` while re-establishing both invariants. -/
+theorem repairBl_loop (maxBits : Nat) (hmb : 1 ≤ maxBits) :
+    ∀ (excess : Nat) (bl : Array Nat),
+      maxBits < bl.size →
+      (∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b) →
+      blCountSum bl maxBits ≤ 2 ^ maxBits →
+      blKraft bl maxBits = 2 ^ maxBits + excess →
+      blKraft (repairBl bl excess maxBits) maxBits = 2 ^ maxBits := by
+  intro excess
+  induction excess with
+  | zero =>
+    intro bl _ _ _ hconserv
+    simp only [repairBl]
+    omega
+  | succ e ih =>
+    intro bl hsize hfeas hleaf hconserv
+    -- Step 2a: while over-subscribed, the top level `maxBits` holds a leaf.
+    have hpos_top : 1 ≤ bl.getD maxBits 0 := by
+      have hscale := blKraftFrom_scale bl maxBits 1 hmb
+      rw [if_pos hmb] at hscale
+      rw [blKraft_eq_from] at hconserv
+      have hfeasm := hfeas (maxBits - 1) (by omega)
+      have hpoweq : 2 * 2 ^ (maxBits - 1) = 2 ^ maxBits := by
+        obtain ⟨k, rfl⟩ : ∃ k, maxBits = k + 1 := ⟨maxBits - 1, by omega⟩
+        rw [Nat.add_sub_cancel, Nat.pow_succ, Nat.mul_comm]
+      omega
+    -- Step 2b: a leaf below `maxBits` exists, so `findBelow` is well-defined.
+    have hbne : findBelow bl (maxBits - 1) ≠ 0 := by
+      intro hzero
+      have hallzero := findBelow_zero bl (maxBits - 1) hzero
+      have hpz : blKraft bl maxBits = bl.getD maxBits 0 := by
+        rw [blKraft_eq_from]
+        exact blKraftFrom_prefix_zero bl maxBits 1 (by omega)
+          (fun k hk1 hkM => hallzero k hk1 (by omega))
+      have hge : bl.getD maxBits 0 ≤ blCountSum bl maxBits := by
+        rw [blCount_eq_from]
+        exact blCountFrom_ge_term bl maxBits maxBits 1 (by omega) (Nat.le_refl _)
+      omega
+    obtain ⟨hb1, hble, hposb⟩ := findBelow_pos bl (maxBits - 1) hbne
+    rw [repairBl]
+    split
+    · rename_i hh
+      simp only [beq_iff_eq] at hh
+      exact absurd hh hbne
+    · apply ih (repairStep bl (findBelow bl (maxBits - 1)) maxBits)
+      · simp only [repairStep, Array.size_set!]; exact hsize
+      · exact fun b hb => Nat.le_trans
+          (repairStep_feas bl (findBelow bl (maxBits - 1)) maxBits b hb1 hsize hposb hb)
+          (hfeas b hb)
+      · rw [repairStep_count bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega) hsize hposb
+          hpos_top]
+        exact hleaf
+      · have hk := repairStep_kraft bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega) hsize
+          hposb hpos_top
+        omega
+
+/-- **`repairBl` completeness (histogram core of #2536).** From a capped,
+    per-prefix feasible, over-subscribed `bl_count` whose leaf count fits in
+    `2^maxBits`, `repairBl` (run for exactly the excess) yields a complete
+    (Kraft-exact) length-limited code: `blKraft = 2^maxBits`. This rules out the
+    zlib-rejected-incomplete-code bug class (D-20) at the histogram level. -/
+theorem repairBl_complete (bl : Array Nat) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hsize : maxBits < bl.size)
+    (hfeas : ∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b)
+    (hleaf : blCountSum bl maxBits ≤ 2 ^ maxBits)
+    (hge : 2 ^ maxBits ≤ blKraft bl maxBits) :
+    blKraft (repairBl bl (blKraft bl maxBits - 2 ^ maxBits) maxBits) maxBits = 2 ^ maxBits :=
+  repairBl_loop maxBits hmb (blKraft bl maxBits - 2 ^ maxBits) bl hsize hfeas hleaf (by omega)
+
 /-- A `BuildTree` rooted at depth `d` has its Kraft sum (relative to any `D ≥ max depth`)
     equal to `2^(D - d)`. This is the fundamental property of binary trees:
     the leaves partition the code space exactly. -/
