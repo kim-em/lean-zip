@@ -6534,7 +6534,15 @@ Regression fixtures live under `testdata/tar/security/`:
   `Tar.extract` only; `Tar.list`'s padding round-up invariant
   is structurally identical (`forEntries` is shared) but a
   separate fixture for `Tar.list` is not required — the new
-  arm exercises `Tar.extract` only. Together with the two
+  arm exercises `Tar.extract` only. Subsequently extended by a
+  defense-in-depth `Tar.list`-side test arm reusing the same
+  fixture bytes (no new fixture file): the `Tar.list`
+  padding-round-up continuation invariant is now explicitly
+  pinned in addition to the `Tar.extract` invariant, so a
+  hypothetical future `Tar.list` refactor that decouples from
+  the shared `forEntries` (e.g., for performance, lazy
+  iteration, or different error reporting) cannot silently
+  break the padding round-up. Together with the two
   preceding sibling-class entries, the silent-skip family's
   `skipEntryData` arithmetic surface is now fixtured at every
   load-bearing input shape: `size == 0` (no payload, no

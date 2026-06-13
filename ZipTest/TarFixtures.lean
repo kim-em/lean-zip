@@ -913,6 +913,41 @@ def ZipTest.TarFixtures.tests : IO Unit := do
     let names := skippedPaddedEntries.map (·.fileName)
     throw (IO.userError s!"tar-skipped-padded.tar: expected exactly 2 files in extract dir, got {skippedPaddedEntries.size}: {names}")
 
+  -- tar-skipped-padded.tar: defense-in-depth `Tar.list` continuation arm,
+  -- reusing the same fixture bytes as the `Tar.extract` arm above (no new
+  -- fixture file). `Tar.list` and `Tar.extract` share `forEntries` today,
+  -- so any continuation regression in `forEntries` would fire both arms;
+  -- this arm pins the post-skip stream-position invariant explicitly so a
+  -- hypothetical future `Tar.list` refactor that decouples from the shared
+  -- `forEntries` cannot silently break continuation. The distinguishing
+  -- property of this fixture is the *non-multiple-of-512* middle payload
+  -- (size 100 + 412-byte zero padding): a `Tar.list`-only regression that
+  -- broke `paddingFor` (e.g., returned `0` unconditionally) would consume
+  -- only the 100 declared bytes without the 412-byte padding, leaving the
+  -- stream positioned 412 bytes inside the `after.txt` header, so
+  -- `forEntries` would parse a straddled header with a bogus checksum
+  -- rather than returning a clean third entry. `Tar.list` returns *all*
+  -- three headers including the silently-skipped middle entry, so the
+  -- assertions check per-entry `path` / `typeflag` / `size`.
+  let skippedPaddedListed ← IO.FS.withFile skippedPaddedPath .read fun h =>
+    Tar.list (IO.FS.Stream.ofHandle h)
+  unless skippedPaddedListed.size == 3 do
+    throw (IO.userError s!"tar-skipped-padded.tar: expected 3 entries from Tar.list, got {skippedPaddedListed.size}")
+  unless skippedPaddedListed[0]!.path == "before.txt" do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 0 path mismatch: {skippedPaddedListed[0]!.path}")
+  unless skippedPaddedListed[0]!.typeflag == 0x30 do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 0 typeflag mismatch: {skippedPaddedListed[0]!.typeflag}")
+  unless skippedPaddedListed[1]!.path == "fifo-entry" do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 1 path mismatch: {skippedPaddedListed[1]!.path}")
+  unless skippedPaddedListed[1]!.typeflag == 0x36 do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 1 typeflag mismatch: {skippedPaddedListed[1]!.typeflag}")
+  unless skippedPaddedListed[1]!.size == 100 do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 1 size mismatch: {skippedPaddedListed[1]!.size}")
+  unless skippedPaddedListed[2]!.path == "after.txt" do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 2 path mismatch: {skippedPaddedListed[2]!.path}")
+  unless skippedPaddedListed[2]!.typeflag == 0x30 do
+    throw (IO.userError s!"tar-skipped-padded.tar: Tar.list entry 2 typeflag mismatch: {skippedPaddedListed[2]!.typeflag}")
+
   -- Clean up temp files
   for f in #["go-ustar.tar", "go-gnu.tar", "go-pax.tar", "system-tar.tar",
              "gnu-longname.tar", "truncated.tar", "bad-checksum.tar", "no-magic.tar",
