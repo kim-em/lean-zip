@@ -1039,7 +1039,8 @@ def lz77ChainIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3276
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0
+      (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
       (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
@@ -1083,7 +1084,8 @@ def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+      (.replicate hashSize data.size) (.replicate data.size data.size) 0
+      (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
       (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
