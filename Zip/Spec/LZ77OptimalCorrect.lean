@@ -31,6 +31,12 @@ theorem optimalEmit_valid (data : ByteArray) (chLen chDist : Array Nat) (pos : N
   split
   · rename_i hpos
     dsimp only
+    -- The literal fallback is shared by both the guard-fail and
+    -- countMatch-fail branches; bind it once.
+    have hlit : ValidDecomp data pos
+        (.literal (data[pos]'hpos) :: optimalEmit data chLen chDist (pos + 1)) :=
+      .literal hpos (getElem!_pos data pos hpos)
+        (optimalEmit_valid data chLen chDist (pos + 1))
     split
     · rename_i hg
       split
@@ -41,10 +47,8 @@ theorem optimalEmit_valid (data : ByteArray) (chLen chDist : Array Nat) (pos : N
             chLen[pos]! (by omega) hg.2.2.1
           exact (hcm.1 i (by omega)).symm
         · exact optimalEmit_valid data chLen chDist (pos + chLen[pos]!)
-      · exact .literal hpos (getElem!_pos data pos hpos)
-          (optimalEmit_valid data chLen chDist (pos + 1))
-    · exact .literal hpos (getElem!_pos data pos hpos)
-        (optimalEmit_valid data chLen chDist (pos + 1))
+      · exact hlit
+    · exact hlit
   · exact .done (by omega)
 termination_by data.size - pos
 decreasing_by all_goals omega
@@ -60,21 +64,15 @@ theorem optimalEmit_encodable (data : ByteArray) (chLen chDist : Array Nat) (pos
   split
   · rename_i hpos
     dsimp only
+    -- Each branch is a cons whose tail is handled by the IH; only the head
+    -- differs (reference bounds off the guard, or a trivial literal).
     split
     · rename_i hg
       split
-      · intro t ht
-        cases ht with
-        | head => exact ⟨hg.1, hg.2.1, hg.2.2.2.1, hg.2.2.2.2.2⟩
-        | tail _ h => exact optimalEmit_encodable data chLen chDist _ t h
-      · intro t ht
-        cases ht with
-        | head => trivial
-        | tail _ h => exact optimalEmit_encodable data chLen chDist _ t h
-    · intro t ht
-      cases ht with
-      | head => trivial
-      | tail _ h => exact optimalEmit_encodable data chLen chDist _ t h
+      · exact List.forall_mem_cons.2 ⟨⟨hg.1, hg.2.1, hg.2.2.2.1, hg.2.2.2.2.2⟩,
+          optimalEmit_encodable data chLen chDist _⟩
+      · exact List.forall_mem_cons.2 ⟨trivial, optimalEmit_encodable data chLen chDist _⟩
+    · exact List.forall_mem_cons.2 ⟨trivial, optimalEmit_encodable data chLen chDist _⟩
   · intro t ht; cases ht
 termination_by data.size - pos
 decreasing_by all_goals omega
