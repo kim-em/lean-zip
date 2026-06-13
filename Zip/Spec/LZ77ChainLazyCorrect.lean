@@ -178,18 +178,6 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 
-/-- The accumulator `trailing` is the array form of the recursive one. (Local copy
-    of `LZ77ChainCorrect`'s `private trailing_eq`.) -/
-private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
-    lz77GreedyIter.trailing data pos acc = acc ++ (lz77Greedy.trailing data pos).toArray := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
-  | _ n ih =>
-    unfold lz77GreedyIter.trailing lz77Greedy.trailing
-    by_cases hp : pos < data.size
-    · simp only [hp, ↓reduceDIte]
-      rw [ih _ (by omega) _ _ rfl, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-    · simp only [hp, ↓reduceDIte, List.toArray, Array.append_empty]
-
 /-- The iterative lazy chain `mainLoop` is the accumulator form of the recursive
     one — identical branch structure, push vs. cons at each emission (two pushes in
     the lookahead arm). -/

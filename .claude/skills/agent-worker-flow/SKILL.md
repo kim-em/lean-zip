@@ -280,6 +280,14 @@ Build and test the project. Compare quality metrics with the starting values.
 Review your diff: `git diff <starting-commit>..HEAD`.
 Use `/second-opinion` if available.
 
+**Link-error gotcha (lean-zip):** if `lake exe test` fails in a bare shell with
+`ld.lld: error: undefined symbol: ZopfliCompress` / `libdeflate_*` /
+`lean_miniz_oxide_*`, this is the comparator-lib link path (Track D), not your
+change — re-run under `nix-shell --run "lake build && lake exe test"`. A
+proof-only Spec edit cannot cause these. `lake build Zip` (library target alone)
+still succeeds in a bare shell, so use it as a quick sanity check before
+reaching for nix-shell.
+
 ## Step 7: Publish
 
 Write a progress entry to `progress/<UTC-timestamp>_<UUID-prefix>.md`:
