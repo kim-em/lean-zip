@@ -1684,6 +1684,89 @@ private theorem huffman_leaf_count (l : List (Nat × Nat))
     rfl
   rw [List.map_congr_left hf, sum_map_one, hperm.length_eq, List.length_map]
 
+/-! ## `assignLengths` as a permutation of its lengths
+
+The final ingredient: filtering the nonzero entries of `assignLengths (syms.zip lens) n`
+yields a *permutation* of `lens`, provided the symbols are distinct, in range, and the
+lengths are all positive. Each `set` lands at a fresh position (distinctness), turning a
+`0` into a positive value, so the filtered multiset gains exactly one copy of each length.
+This transfers the histogram-level Kraft equality to the per-symbol length list. -/
+
+/-- `set` at a different index leaves `getElem!` unchanged (Nat lists). -/
+private theorem getElem!_set_ne_nat (l : List Nat) (i j v : Nat) (h : i ≠ j) :
+    (l.set i v)[j]! = l[j]! := by
+  by_cases hj : j < l.length
+  · rw [getElem!_pos (l.set i v) j (by rw [List.length_set]; exact hj), getElem!_pos l j hj,
+      List.getElem_set_ne h]
+  · rw [getElem!_neg (l.set i v) j (by rw [List.length_set]; omega), getElem!_neg l j (by omega)]
+
+/-- Setting a currently-zero position to a positive value adds exactly that value to the
+    nonzero-filtered list (up to permutation). -/
+private theorem filter_set_perm (l : List Nat) (i v : Nat)
+    (hi : i < l.length) (hz : l[i]! = 0) (hv : v ≠ 0) :
+    ((l.set i v).filter (· != 0)).Perm ((l.filter (· != 0)) ++ [v]) := by
+  induction l generalizing i with
+  | nil => simp only [List.length_nil] at hi; omega
+  | cons x xs ih =>
+    cases i with
+    | zero =>
+      have hx : x = 0 := by simpa using hz
+      subst hx
+      simp only [List.set_cons_zero, List.filter_cons, bne_self_eq_false, Bool.false_eq_true,
+        ↓reduceIte]
+      rw [if_pos (by simpa using hv)]
+      rw [← List.singleton_append]
+      exact List.perm_append_comm
+    | succ j =>
+      have hj : j < xs.length := by simpa using hi
+      have hz' : xs[j]! = 0 := by simpa using hz
+      have ihj := ih j hj hz'
+      rw [List.set_cons_succ]
+      simp only [List.filter_cons]
+      by_cases hx0 : (x != 0) = true
+      · rw [if_pos hx0, if_pos hx0, List.cons_append]
+        exact ihj.cons x
+      · rw [if_neg hx0, if_neg hx0]
+        exact ihj
+
+/-- **Filtering `assignLengths` recovers the length multiset.** Folding `set` over distinct,
+    in-range symbol positions (starting from an all-zero accumulator state at those positions)
+    yields, after dropping zeros, a permutation of the assigned lengths. -/
+private theorem foldl_set_filter_perm (ps : List (Nat × Nat)) (acc : List Nat)
+    (hlen : ∀ p ∈ ps, p.1 < acc.length)
+    (hpos : ∀ p ∈ ps, 0 < p.2)
+    (hnodup : (ps.map (·.1)).Nodup)
+    (hzero : ∀ p ∈ ps, acc[p.1]! = 0) :
+    ((ps.foldl (fun acc (p : Nat × Nat) =>
+        if p.1 < acc.length then acc.set p.1 p.2 else acc) acc).filter (· != 0)).Perm
+      ((acc.filter (· != 0)) ++ ps.map (·.2)) := by
+  induction ps generalizing acc with
+  | nil => simp only [List.foldl_nil, List.map_nil, List.append_nil]; exact List.Perm.refl _
+  | cons p ps ih =>
+    simp only [List.map_cons] at hnodup
+    obtain ⟨hnotin, hnd⟩ := List.nodup_cons.mp hnodup
+    simp only [List.foldl_cons]
+    have hp_len : p.1 < acc.length := hlen p (List.mem_cons_self ..)
+    rw [if_pos hp_len]
+    have hp_zero : acc[p.1]! = 0 := hzero p (List.mem_cons_self ..)
+    have hp_pos : 0 < p.2 := hpos p (List.mem_cons_self ..)
+    have hlen' : ∀ q ∈ ps, q.1 < (acc.set p.1 p.2).length := by
+      intro q hq; rw [List.length_set]; exact hlen q (List.mem_cons_of_mem _ hq)
+    have hzero' : ∀ q ∈ ps, (acc.set p.1 p.2)[q.1]! = 0 := by
+      intro q hq
+      have hqne : p.1 ≠ q.1 := by
+        intro he; exact hnotin (he ▸ List.mem_map.mpr ⟨q, hq, rfl⟩)
+      rw [getElem!_set_ne_nat acc p.1 q.1 p.2 hqne]
+      exact hzero q (List.mem_cons_of_mem _ hq)
+    have key := ih (acc.set p.1 p.2) hlen'
+      (fun q hq => hpos q (List.mem_cons_of_mem _ hq)) hnd hzero'
+    have hset := filter_set_perm acc p.1 p.2 hp_len hp_zero (by omega)
+    refine key.trans ((hset.append_right _).trans ?_)
+    have heq : (acc.filter (· != 0) ++ [p.2]) ++ ps.map (·.2)
+        = acc.filter (· != 0) ++ (p :: ps).map (·.2) := by
+      simp only [List.map_cons, List.append_assoc, List.singleton_append]
+    rw [heq]
+
 /-- If symbol `s` appears with nonzero frequency in `freqs` and `s < numSymbols`,
     then `(computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0`.
     Requires `maxBits > 0`. -/
