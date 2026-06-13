@@ -117,13 +117,19 @@ guaranteed regardless, and they carry no proof obligation; the only properties
 the proofs use are structural (every produced length is in `[1, maxBits]`, and
 every symbol receives one), which the `zip`+padding shape below makes immediate. -/
 
-/-- Histogram of code lengths after capping each natural depth at `maxBits`. -/
-def cappedBlCount (depths : List (Nat × Nat)) (maxBits : Nat) : Array Nat := Id.run do
-  let mut bl : Array Nat := Array.replicate (maxBits + 2) 0
-  for p in depths do
+/-- Histogram fold underlying `cappedBlCount`: process the remaining `(sym, depth)`
+    pairs into the accumulator `bl`, incrementing the capped-depth bucket for each.
+    Structural recursion (over the loop body of the original `for`) so invariants can
+    be proved by induction on `depths` — see CLAUDE.md "Opaque loop functions". -/
+def cappedBlCountAux (maxBits : Nat) : List (Nat × Nat) → Array Nat → Array Nat
+  | [], bl => bl
+  | p :: rest, bl =>
     let dc := min p.2 maxBits
-    bl := bl.set! dc ((bl.getD dc 0) + 1)
-  return bl
+    cappedBlCountAux maxBits rest (bl.set! dc ((bl.getD dc 0) + 1))
+
+/-- Histogram of code lengths after capping each natural depth at `maxBits`. -/
+def cappedBlCount (depths : List (Nat × Nat)) (maxBits : Nat) : Array Nat :=
+  cappedBlCountAux maxBits depths (Array.replicate (maxBits + 2) 0)
 
 /-- Largest length `≤ start` with a positive count in `bl` (0 if none). -/
 def findBelow (bl : Array Nat) (start : Nat) : Nat :=
