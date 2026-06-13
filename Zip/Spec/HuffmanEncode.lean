@@ -793,6 +793,43 @@ theorem repairStep_count (bl : Array Nat) (bits maxBits : Nat)
   have e3 := blCount_set_dec B maxBits maxBits (by omega) (Nat.le_refl _) (by rw [hBsz]; omega) hposM2
   omega
 
+/-- **Feasibility preservation.** A well-defined `repairStep` never increases any
+    prefix Kraft sum `blKraftFrom · b 1` for `b < maxBits`: below `bits` nothing
+    moves; at `b = bits` the `−1` removes `2^(b−bits)`; for `bits+1 ≤ b < maxBits`
+    the `+2` at `bits+1` exactly replaces the `−1` at `bits`; and the `−1` at
+    `maxBits` lies above the prefix entirely. -/
+theorem repairStep_feas (bl : Array Nat) (bits maxBits b : Nat)
+    (hb1 : 1 ≤ bits) (hsize : maxBits < bl.size)
+    (hposb : 1 ≤ bl.getD bits 0) (hbmax : b < maxBits) :
+    blKraftFrom (repairStep bl bits maxBits) b 1 ≤ blKraftFrom bl b 1 := by
+  simp only [repairStep]
+  generalize hA : bl.set! bits (bl.getD bits 0 - 1) = A
+  generalize hB : A.set! (bits + 1) (A.getD (bits + 1) 0 + 2) = B
+  have hAsz : A.size = bl.size := by rw [← hA, Array.size_set!]
+  have hBsz : B.size = bl.size := by rw [← hB, Array.size_set!, hAsz]
+  -- the `−1` at `maxBits` is above the prefix level `b`
+  rw [blKraftFrom_set_above B b maxBits (B.getD maxBits 0 - 1) 1 hbmax]
+  by_cases hcase1 : bits ≤ b
+  · -- the `−1` at `bits` lowers the prefix by `2^(b−bits)` (normalization level `b`)
+    have eA := blKraft_set_dec bl b bits hb1 hcase1 (by omega) hposb
+    rw [hA] at eA
+    simp only [blKraft_eq_from] at eA
+    by_cases hcase2 : bits + 1 ≤ b
+    · -- the `+2` at `bits+1` raises it back by `2·2^(b−bits−1) = 2^(b−bits)`
+      have eB := blKraft_set_inc2 A b (bits + 1) (by omega) hcase2 (by rw [hAsz]; omega)
+      rw [hB] at eB
+      simp only [blKraft_eq_from] at eB
+      have hvw : 2 * 2 ^ (b - (bits + 1)) = 2 ^ (b - bits) := by
+        rw [show b - bits = (b - (bits + 1)) + 1 by omega, Nat.pow_succ, Nat.mul_comm]
+      rw [eB, hvw]
+      exact Nat.le_of_eq eA
+    · -- `b = bits`: the `+2` at `bits+1` is above the prefix
+      rw [← hB, blKraftFrom_set_above A b (bits + 1) (A.getD (bits + 1) 0 + 2) 1 (by omega)]
+      exact Nat.le.intro eA
+  · apply Nat.le_of_eq
+    rw [← hB, blKraftFrom_set_above A b (bits + 1) (A.getD (bits + 1) 0 + 2) 1 (by omega),
+      ← hA, blKraftFrom_set_above bl b bits (bl.getD bits 0 - 1) 1 (by omega)]
+
 /-- A `BuildTree` rooted at depth `d` has its Kraft sum (relative to any `D ≥ max depth`)
     equal to `2^(D - d)`. This is the fundamental property of binary trees:
     the leaves partition the code space exactly. -/
