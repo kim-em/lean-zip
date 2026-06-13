@@ -20,16 +20,17 @@ Repair sessions have exactly two terminal outcomes:
    bounded number of failed attempts. This removes `has-pr` from the linked
    issue and adds `replan`, so a fresh plan can be produced.
 
-**There is no escalation to `human-oversight`.** Complex conflicts become
-re-implementations via `replan`, not human tickets. If verification keeps
-failing, abandon.
+**Repair sessions do not author `directive` issues.** The `directive`
+label flows top-down from the project owner; it is not a place agents
+escalate to. Complex conflicts become re-implementations via `replan`,
+not human tickets. If verification keeps failing, abandon.
 
 ## Coordination Commands
 
 | Command | Purpose |
 |---|---|
 | `coordination list-pr-repair` | Read-only list of PRs needing repair, priority-ordered (`conflict` > `failed` > `stuck`). No label writes. |
-| `coordination claim-pr-repair N` | Adds `repair-claimed` label + comment; 30 min cooldown. Fails if already claimed. |
+| `coordination claim-pr-repair N` | Adds `repair-claimed` label + comment, races detected via a short re-read. Fails if already claimed or another session won the race. |
 | `coordination mark-pr-salvaged N` | Clears `repair-claimed`, comments salvage summary. Call after a successful push. |
 | `coordination close-pr-unsalvageable N "reason"` | Closes PR, adds `unsalvageable`, removes `has-pr` on linked issue, adds `replan`. |
 
@@ -50,8 +51,8 @@ PR number out of `#<num> [<reason>] <title>` and claim it:
 coordination claim-pr-repair <pr-number>
 ```
 
-If the claim output says the PR was claimed by another session in the last
-30 minutes, move to the next candidate. If all candidates are claimed,
+If the claim output says the PR is already `repair-claimed` or you lost
+the race, move to the next candidate. If all candidates are claimed,
 exit — another dispatch will handle the work later.
 
 ## Step 2: Check Out the PR Branch
@@ -139,7 +140,7 @@ computed on demand by `list-pr-repair`; a label would drift out of sync.
 
 - Open new issues (except as part of a `replan` comment if genuinely
   helpful context).
-- Escalate to `human-oversight`.
+- Author a `directive` to escalate (directives are owner-issued only).
 - Keep trying the same fix with minor variations past the 3-cycle budget.
 - Fight healthy in-progress CI (the stuck threshold already filters for
   checks past the configured age).
