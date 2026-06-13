@@ -161,6 +161,47 @@ theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
       some p.1.data.toList
     exact hdec
 
+/-! ## Framing endPos exactness -/
+
+/-- For a stream decomposed as `header ++ deflateRaw data level ++ trailer` with
+    `header.size = H`, native `inflateRaw` starting at `H` consumes exactly the
+    embedded DEFLATE stream: it returns the original `data` and ends at
+    `H + (deflateRaw data level).size`, ignoring the trailing bytes.
+
+    This is the shared core of the gzip (H = 10) and zlib (H = 2) roundtrip
+    capstones — the endPos-exactness derivation that would otherwise be
+    duplicated in each. -/
+theorem inflateRaw_framing (data : ByteArray) (level : UInt8) (maxOutputSize : Nat)
+    (header trailer : ByteArray) (H : Nat) (hhsz : header.size = H)
+    (hdata_le : data.data.toList.length ≤ maxOutputSize)
+    (hspec_go : Deflate.Spec.decode.go
+      (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] =
+      some data.data.toList) :
+    Inflate.inflateRaw (header ++ Deflate.deflateRaw data level ++ trailer) H maxOutputSize =
+      .ok (⟨⟨data.data.toList⟩⟩, H + (Deflate.deflateRaw data level).size) := by
+  -- Spec decode on (header ++ deflated) at offset H, via prefix drop
+  have hspec_hd : Deflate.Spec.decode.go
+      ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (H * 8))
+      [] = some data.data.toList := by
+    rw [show H * 8 = header.size * 8 from by omega,
+      bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
+    exact hspec_go
+  obtain ⟨endPos', hinflRaw'⟩ :=
+    inflateRaw_complete (header ++ Deflate.deflateRaw data level) H _
+      data.data.toList hdata_le hspec_hd
+  -- endPos' is exactly the size of (header ++ deflated)
+  have hep_exact : endPos' = (header ++ Deflate.deflateRaw data level).size := by
+    have h' : Inflate.inflateRaw (header ++ Deflate.deflateRaw data level)
+        header.size maxOutputSize = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
+      rw [hhsz]; exact hinflRaw'
+    exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
+      hspec_go (Deflate.deflateRaw_goR_pad data level) hdata_le
+  -- Suffix invariance extends the result to the full stream with trailer
+  rw [show H + (Deflate.deflateRaw data level).size
+      = (header ++ Deflate.deflateRaw data level).size from by
+        rw [ByteArray.size_append, hhsz], ← hep_exact]
+  exact inflateRaw_append_suffix _ trailer H _ _ _ hinflRaw'
+
 /-! ## Gzip roundtrip -/
 
 /-- Gzip roundtrip: decompressing the output of compress returns the original data.
@@ -177,80 +218,34 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
       (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] =
       some data.data.toList :=
     inflate_to_spec_decode _ data maxOutputSize hinfl
-  -- Suffix invariance: spec decode ignores trailer bits after the DEFLATE stream
-  have hspec_compressed : ∀ (header trailer : ByteArray) (hh : header.size = 10),
-      Deflate.Spec.decode.go
-        ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level ++ trailer)).drop
-          (10 * 8)) [] = some data.data.toList := by
-    intro header trailer hh
-    rw [show 10 * 8 = header.size * 8 from by omega,
-        bytesToBits_drop_prefix_three]
-    exact Deflate.Spec.decode_go_suffix _ _ [] _
-      (by rw [Deflate.Spec.bytesToBits_length]; omega)
-      hspec_go
   -- Use data.size bound to get result.length ≤ maxOutputSize
   have hdata_le : data.data.toList.length ≤ maxOutputSize := by
     simp only [Array.length_toList, ByteArray.size_data]; omega
-  -- Spec decode on compressed bits at offset 10 (via compress_eq decomposition)
-  have hspec_at10 : Deflate.Spec.decode.go
-      ((Deflate.Spec.bytesToBits (GzipEncode.compress data level)).drop (10 * 8))
-      [] = some data.data.toList := by
-    obtain ⟨header, trailer, hhsz, _, hceq⟩ := GzipEncode.compress_eq data level
-    rw [hceq]
-    exact hspec_compressed header trailer hhsz
-  -- Apply inflateRaw_complete to get native inflateRaw at offset 10
-  obtain ⟨endPos, hinflRaw⟩ :=
-    inflateRaw_complete _ 10 _ data.data.toList hdata_le hspec_at10
   -- compressed size ≥ 18 (from compress = 10 + deflated + 8)
   have hcsz18 : ¬ (GzipEncode.compress data level).size < 18 := by
     rw [GzipEncode.compress_size]; omega
-  -- Tight endPos bound: endPos + 8 ≤ compressed.size
-  -- Strategy: run inflateRaw on (header ++ deflated) without trailer, get endPos' ≤ its size.
-  -- Then inflateRaw_append_suffix shows the full compressed data gives the same endPos.
-  obtain ⟨header, trailer, hhsz, htsz, hceq⟩ := GzipEncode.compress_eq data level
-  -- Spec decode on (header ++ deflated) at offset 10
-  have hspec_hd : Deflate.Spec.decode.go
-      ((Deflate.Spec.bytesToBits (header ++ Deflate.deflateRaw data level)).drop (10 * 8))
-      [] = some data.data.toList := by
-    rw [show 10 * 8 = header.size * 8 from by omega,
-      bytesToBits_append, ← Deflate.Spec.bytesToBits_length header, List.drop_left]
-    exact hspec_go
-  -- Apply inflateRaw_complete on (header ++ deflated) to get endPos' and tight bound
-  obtain ⟨endPos', hinflRaw'⟩ :=
-    inflateRaw_complete (header ++ Deflate.deflateRaw data level) 10 _
-      data.data.toList hdata_le hspec_hd
-  -- By suffix invariance, inflateRaw on (header ++ deflated) ++ trailer gives same endPos'
-  have hinflRaw'' : Inflate.inflateRaw ((header ++ Deflate.deflateRaw data level) ++ trailer)
-      10 maxOutputSize = .ok (⟨⟨data.data.toList⟩⟩, endPos') :=
-    inflateRaw_append_suffix _ trailer 10 _ _ _ hinflRaw'
-  rw [hceq.symm] at hinflRaw''
-  -- endPos' = endPos by injectivity
-  have hep_eq : endPos = endPos' := by
-    have := hinflRaw.symm.trans hinflRaw''
-    simp only [Except.ok.injEq, Prod.mk.injEq] at this
-    exact this.2
-  -- endPos exactness: endPos = (header ++ deflated).size
-  have hep_exact : endPos' = (header ++ Deflate.deflateRaw data level).size := by
-    have h' : Inflate.inflateRaw (header ++ Deflate.deflateRaw data level)
-        header.size maxOutputSize = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
-      rw [hhsz]; exact hinflRaw'
-    exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
-      hspec_go (Deflate.deflateRaw_goR_pad data level) hdata_le
-  have hep_val : endPos = 10 + (Deflate.deflateRaw data level).size := by
-    rw [hep_eq, hep_exact, ByteArray.size_append, hhsz]
-  have hendPos8 : ¬ (endPos + 8 > (GzipEncode.compress data level).size) := by
-    rw [hep_val, hceq]; simp only [ByteArray.size_append, htsz, hhsz]; omega
+  -- Native inflate at offset 10 consumes exactly the DEFLATE stream (framing lemma)
+  obtain ⟨header, trailer, hhsz, _, hceq⟩ := GzipEncode.compress_eq data level
+  have hinflRaw : Inflate.inflateRaw (GzipEncode.compress data level) 10 maxOutputSize =
+      .ok (⟨⟨data.data.toList⟩⟩, 10 + (Deflate.deflateRaw data level).size) := by
+    rw [hceq]
+    exact inflateRaw_framing data level maxOutputSize header trailer 10 hhsz hdata_le hspec_go
+  have hendPos8 : ¬ (10 + (Deflate.deflateRaw data level).size + 8 >
+      (GzipEncode.compress data level).size) := by
+    rw [GzipEncode.compress_size]; omega
   have hba_eq : (⟨⟨data.data.toList⟩⟩ : ByteArray) = data := by
     simp only [Array.toArray_toList]
-  -- CRC32 trailer match: use endPos = 10 + deflated.size to read trailer bytes
+  -- CRC32 trailer match: the trailer at 10 + deflated.size reads crc32 0 data
   have hcrc : (Crc32.Native.crc32 0 data ==
-    Binary.readUInt32LE (GzipEncode.compress data level) endPos) = true := by
-    rw [hep_val, GzipEncode.compress_crc32]
+    Binary.readUInt32LE (GzipEncode.compress data level)
+      (10 + (Deflate.deflateRaw data level).size)) = true := by
+    rw [GzipEncode.compress_crc32]
     simp only [BEq.beq, decide_true]
   -- ISIZE trailer match
   have hisize : (data.size.toUInt32 ==
-    Binary.readUInt32LE (GzipEncode.compress data level) (endPos + 4)) = true := by
-    rw [hep_val, GzipEncode.compress_isize]
+    Binary.readUInt32LE (GzipEncode.compress data level)
+      (10 + (Deflate.deflateRaw data level).size + 4)) = true := by
+    rw [GzipEncode.compress_isize]
     simp only [BEq.beq, Nat.toUInt32_eq, decide_true]
   set_option maxRecDepth 8192 in
   simp (config := { decide := true }) only [GzipDecode.decompressSingle,
