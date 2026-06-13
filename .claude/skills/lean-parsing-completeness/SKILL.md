@@ -37,6 +37,23 @@ theorem parseHeader_ok_elim (data : ByteArray) (pos : Nat) (result pos' : ...)
 
 Both follow the same core proof technique.
 
+> **Scoping warning — tightening native rejection breaks flavour 1.**
+> Before adding a native guard that rejects inputs the *spec still accepts*
+> (a Track E "match zlib strictness" task, e.g. incomplete-Huffman-code or
+> symbol-count rejection in `decodeDynamicTrees`), check the flavour-1
+> chain first: `*_complete` theorems prove *spec-accepts ⟹ native-accepts*,
+> so a stricter native decoder makes them **false**, and every commit must
+> still build green. The fix is to tighten the **spec** to reject the same
+> inputs — which for DEFLATE dynamic headers bottoms out at proving the
+> *encoder* emits codes the tightened spec accepts (completeness:
+> `kraftSum = 2^maxBits`, `computeCodeLengths_complete`, **#2536**, incl.
+> the RFC single-/empty-distance-code exception). The spec
+> `decodeDynamicTables` guards only on `ValidLengths` = Kraft **≤**, so it
+> accepts incomplete codes; no completeness fact is threaded through
+> `deflateDynamicBlock_spec` yet. Until that lands, such a tightening
+> cannot land green — `skip` with a `depends-on: #2536` note rather than
+> weakening a proven roundtrip theorem with an unproven hypothesis.
+
 ## Core Proof Technique
 
 ### Step 1: Unfold the parsing function
