@@ -24,6 +24,7 @@ import Zip.Spec.BitstreamCorrect
 import Zip.Spec.BitstreamComplete
 import Zip.Spec.BitstreamWriteCorrect
 import Zip.Spec.BitWriterCorrect
+import Zip.Spec.BlockSizeModel
 import Zip.Spec.HuffmanCorrect
 import Zip.Spec.HuffmanCorrectLoop
 import Zip.Spec.InflateTable
