@@ -1767,6 +1767,63 @@ private theorem foldl_set_filter_perm (ps : List (Nat × Nat)) (acc : List Nat)
       simp only [List.map_cons, List.append_assoc, List.singleton_append]
     rw [heq]
 
+/-- Zipping a list with a longer-than-needed second list and taking second components
+    recovers the relevant prefix: extra trailing elements of the right list are dropped. -/
+private theorem zip_append_map_snd {α β : Type} (l1 : List α) (l2 l3 : List β)
+    (h : l1.length ≤ l2.length) :
+    ((l1.zip (l2 ++ l3)).map (·.2)) = l2.take l1.length := by
+  induction l1 generalizing l2 with
+  | nil => simp only [List.zip_nil_left, List.map_nil, List.length_nil, List.take_zero]
+  | cons x xs ih =>
+    cases l2 with
+    | nil => simp only [List.length_nil, List.length_cons] at h; omega
+    | cons y ys =>
+      simp only [List.cons_append, List.zip_cons_cons, List.map_cons, List.length_cons,
+        List.take_succ_cons]
+      rw [ih ys (by simp only [List.length_cons] at h; omega)]
+
+/-- An all-zero `List.replicate` reads `0` at every index (in- or out-of-bounds). -/
+private theorem replicate_zero_getElem (n i : Nat) : (List.replicate n (0 : Nat))[i]! = 0 := by
+  by_cases h : i < n
+  · rw [getElem!_pos _ i (by rw [List.length_replicate]; exact h)]
+    simp only [List.getElem_replicate]
+  · rw [getElem!_neg _ i (by rw [List.length_replicate]; omega)]; rfl
+
+/-- **`assignLengths` of the `limitedPairs` zip recovers `expandBl` (up to permutation).**
+    Folding `set` over the frequency-sorted, distinct, in-range symbols paired with the
+    repaired histogram's expanded lengths (plus unused padding) and dropping zeros yields a
+    permutation of `expandBl bl`. The padding is provably unused: `|syms| = |expandBl bl|`. -/
+private theorem assignLengths_zip_expandBl_perm (syms : List Nat) (bl : Array Nat)
+    (maxBits numSymbols : Nat)
+    (hrange : ∀ s ∈ syms, s < numSymbols)
+    (hnodup : syms.Nodup)
+    (hlen : syms.length = blCountSum bl maxBits) :
+    ((assignLengths (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits))
+        numSymbols).filter (· != 0)).Perm (expandBl bl maxBits) := by
+  have hexp_len : (expandBl bl maxBits).length = syms.length := by
+    rw [expandBl_length, hlen]
+  have hsnd : (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits)).map (·.2)
+      = expandBl bl maxBits := by
+    rw [zip_append_map_snd syms (expandBl bl maxBits) (List.replicate syms.length maxBits)
+        (by omega), ← hexp_len, List.take_length]
+  have hfst : (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits)).map (·.1)
+      = syms := by
+    apply List.map_fst_zip
+    rw [List.length_append, List.length_replicate]; omega
+  have hmem_fst : ∀ p ∈ syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits),
+      p.1 ∈ syms := fun p hp => hfst ▸ List.mem_map_of_mem hp
+  have hmem_snd : ∀ p ∈ syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits),
+      p.2 ∈ expandBl bl maxBits := fun p hp => hsnd ▸ List.mem_map_of_mem hp
+  have happly := foldl_set_filter_perm
+    (syms.zip (expandBl bl maxBits ++ List.replicate syms.length maxBits))
+    (List.replicate numSymbols 0)
+    (fun p hp => by rw [List.length_replicate]; exact hrange p.1 (hmem_fst p hp))
+    (fun p hp => (expandBl_mem_range bl maxBits p.2 (hmem_snd p hp)).1)
+    (by rw [hfst]; exact hnodup)
+    (fun p _ => replicate_zero_getElem numSymbols p.1)
+  rw [filter_ne_zero_replicate, List.nil_append, hsnd] at happly
+  exact happly
+
 /-- If symbol `s` appears with nonzero frequency in `freqs` and `s < numSymbols`,
     then `(computeCodeLengths freqs numSymbols maxBits)[s]! ≠ 0`.
     Requires `maxBits > 0`. -/
