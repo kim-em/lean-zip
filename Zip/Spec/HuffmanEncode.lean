@@ -117,13 +117,19 @@ guaranteed regardless, and they carry no proof obligation; the only properties
 the proofs use are structural (every produced length is in `[1, maxBits]`, and
 every symbol receives one), which the `zip`+padding shape below makes immediate. -/
 
-/-- Histogram of code lengths after capping each natural depth at `maxBits`. -/
-def cappedBlCount (depths : List (Nat × Nat)) (maxBits : Nat) : Array Nat := Id.run do
-  let mut bl : Array Nat := Array.replicate (maxBits + 2) 0
-  for p in depths do
+/-- Histogram fold underlying `cappedBlCount`: process the remaining `(sym, depth)`
+    pairs into the accumulator `bl`, incrementing the capped-depth bucket for each.
+    Structural recursion (over the loop body of the original `for`) so invariants can
+    be proved by induction on `depths` — see CLAUDE.md "Opaque loop functions". -/
+def cappedBlCountAux (maxBits : Nat) : List (Nat × Nat) → Array Nat → Array Nat
+  | [], bl => bl
+  | p :: rest, bl =>
     let dc := min p.2 maxBits
-    bl := bl.set! dc ((bl.getD dc 0) + 1)
-  return bl
+    cappedBlCountAux maxBits rest (bl.set! dc ((bl.getD dc 0) + 1))
+
+/-- Histogram of code lengths after capping each natural depth at `maxBits`. -/
+def cappedBlCount (depths : List (Nat × Nat)) (maxBits : Nat) : Array Nat :=
+  cappedBlCountAux maxBits depths (Array.replicate (maxBits + 2) 0)
 
 /-- Largest length `≤ start` with a positive count in `bl` (0 if none). -/
 def findBelow (bl : Array Nat) (start : Nat) : Nat :=
@@ -927,6 +933,263 @@ theorem BuildTree.kraft_eq (t : BuildTree) (d D : Nat)
     have hpD : p.2 ≤ D := hlD p hp
     rw [show D - d = (D - (d + 1)) + 1 from by omega, Nat.pow_succ]
     omega
+
+/-! ## Capped histogram invariants (feasibility + leaf count from the source tree, #2565)
+
+The three hypotheses `repairBl_complete` demands of its starting histogram —
+per-prefix Kraft feasibility, leaf-count fit, and over-subscription — hold for the
+*actual* histogram `cappedBlCount t.depths maxBits` of a Huffman tree `t`. The bridge
+is to characterize each histogram quantity as a sum over the depth list, then bound
+those list sums by induction on the binary tree (capping moves leaves *up*, which can
+only lower a prefix sum and only raise the total). -/
+
+/-- Size of the capped histogram is the accumulator's size (the fold only `set!`s). -/
+theorem cappedBlCountAux_size (maxBits : Nat) (ds : List (Nat × Nat)) (bl : Array Nat) :
+    (cappedBlCountAux maxBits ds bl).size = bl.size := by
+  induction ds generalizing bl with
+  | nil => rfl
+  | cons p rest ih => rw [cappedBlCountAux]; rw [ih]; rw [Array.size_set!]
+
+/-- The all-zero replicate reads `0` at every index (in- or out-of-bounds). -/
+private theorem replicate_getD_zero (n i : Nat) : (Array.replicate n (0 : Nat)).getD i 0 = 0 := by
+  rw [getD0_eq_getElem!]
+  by_cases h : i < n
+  · rw [getElem!_pos _ i (by rw [Array.size_replicate]; exact h), Array.getElem_replicate]
+  · rw [getElem!_neg _ i (by rw [Array.size_replicate]; omega)]; rfl
+
+/-- If every level in `[b, maxBits]` is empty, the prefix Kraft sum from `b` is `0`. -/
+private theorem blKraftFrom_zero (bl : Array Nat) (M b : Nat)
+    (h : ∀ i, b ≤ i → i ≤ M → bl.getD i 0 = 0) : blKraftFrom bl M b = 0 := by
+  if hb : b > M then
+    rw [blKraftFrom_gt _ _ _ hb]
+  else
+    rw [blKraftFrom_unfold bl M b (by omega), h b (Nat.le_refl _) (by omega), Nat.zero_mul,
+      Nat.zero_add, blKraftFrom_zero bl M (b + 1) (fun i hi hiM => h i (by omega) hiM)]
+termination_by M + 1 - b
+decreasing_by omega
+
+/-- If every level in `[b, maxBits]` is empty, the prefix leaf count from `b` is `0`. -/
+private theorem blCountFrom_zero (bl : Array Nat) (M b : Nat)
+    (h : ∀ i, b ≤ i → i ≤ M → bl.getD i 0 = 0) : blCountFrom bl M b = 0 := by
+  if hb : b > M then
+    rw [blCountFrom_gt _ _ _ hb]
+  else
+    rw [blCountFrom_unfold bl M b (by omega), h b (Nat.le_refl _) (by omega), Nat.zero_add,
+      blCountFrom_zero bl M (b + 1) (fun i hi hiM => h i (by omega) hiM)]
+termination_by M + 1 - b
+decreasing_by omega
+
+/-- `set!`ing strictly below the start level `b` leaves `blKraftFrom · b` unchanged. -/
+private theorem blKraftFrom_set_below (bl : Array Nat) (M l v b : Nat) (h : l < b) :
+    blKraftFrom (bl.set! l v) M b = blKraftFrom bl M b := by
+  if hb : b > M then
+    rw [blKraftFrom_gt _ _ _ hb, blKraftFrom_gt _ _ _ hb]
+  else
+    rw [blKraftFrom_unfold _ M b (by omega), blKraftFrom_unfold bl M b (by omega),
+      getD0_set!_ne bl l b v (by omega), blKraftFrom_set_below bl M l v (b + 1) (by omega)]
+termination_by M + 1 - b
+decreasing_by omega
+
+/-- Incrementing the leaf count at an occupied-or-empty level `l ∈ [1, ·]` raises the
+    prefix Kraft sum from level 1 by `2^(M−l)` when `l ≤ M`, and not at all when `l > M`. -/
+private theorem blKraftFrom_set_inc (bl : Array Nat) (M l : Nat)
+    (hl1 : 1 ≤ l) (hsz : l < bl.size) :
+    blKraftFrom (bl.set! l (bl.getD l 0 + 1)) M 1
+      = blKraftFrom bl M 1 + (if l ≤ M then 2 ^ (M - l) else 0) := by
+  by_cases hlM : l ≤ M
+  · have hset := blKraftFrom_set bl M l (bl.getD l 0 + 1) 1 hsz hlM
+    rw [if_pos hl1, if_pos hl1] at hset
+    rw [if_pos hlM]
+    have : (bl.getD l 0 + 1) * 2 ^ (M - l) = bl.getD l 0 * 2 ^ (M - l) + 2 ^ (M - l) := by
+      rw [Nat.add_mul, Nat.one_mul]
+    omega
+  · rw [blKraftFrom_set_above bl M l (bl.getD l 0 + 1) 1 (by omega), if_neg hlM, Nat.add_zero]
+
+/-- Incrementing an in-range level's count by one raises `blCountSum` by one. -/
+private theorem blCount_set_inc (bl : Array Nat) (maxBits l : Nat)
+    (hl1 : 1 ≤ l) (hlM : l ≤ maxBits) (hsz : l < bl.size) :
+    blCountSum (bl.set! l (bl.getD l 0 + 1)) maxBits = blCountSum bl maxBits + 1 := by
+  rw [blCount_eq_from, blCount_eq_from]
+  have hset := blCountFrom_set bl maxBits l (bl.getD l 0 + 1) 1 hsz hlM
+  rw [if_pos hl1, if_pos hl1] at hset
+  omega
+
+/-- List-level Kraft sum of a depth list against normalization `M`, after capping each
+    depth at `maxBits`: `Σ_p [min p.2 maxBits ≤ M] · 2^(M − min p.2 maxBits)`. This is what
+    `blKraftFrom (cappedBlCount …) M 1` evaluates to (see `cappedBlCountAux_kraftFrom`). -/
+def cappedKraftSum (maxBits M : Nat) : List (Nat × Nat) → Nat
+  | [] => 0
+  | p :: rest =>
+    (if min p.2 maxBits ≤ M then 2 ^ (M - min p.2 maxBits) else 0)
+      + cappedKraftSum maxBits M rest
+
+theorem cappedKraftSum_append (maxBits M : Nat) (xs ys : List (Nat × Nat)) :
+    cappedKraftSum maxBits M (xs ++ ys)
+      = cappedKraftSum maxBits M xs + cappedKraftSum maxBits M ys := by
+  induction xs with
+  | nil => rw [List.nil_append, cappedKraftSum, Nat.zero_add]
+  | cons p rest ih => rw [List.cons_append, cappedKraftSum, cappedKraftSum, ih, Nat.add_assoc]
+
+/-- A depth list all of whose capped depths sit strictly above `M` contributes nothing
+    to the level-`M` prefix Kraft sum. -/
+private theorem cappedKraftSum_zero_of_above (maxBits M : Nat) (ds : List (Nat × Nat))
+    (h : ∀ p ∈ ds, M < min p.2 maxBits) : cappedKraftSum maxBits M ds = 0 := by
+  induction ds with
+  | nil => rfl
+  | cons p rest ih =>
+    rw [cappedKraftSum, if_neg (by have := h p (List.mem_cons_self ..); omega),
+      ih (fun q hq => h q (List.mem_cons_of_mem _ hq))]
+
+/-- **Binary-tree prefix-Kraft feasibility.** For any level `b < maxBits`, the level-`b`
+    prefix Kraft sum of a tree's (capped) depth list is at most `2^(b−d)`, where `d` is
+    the root depth. Capping only moves leaves *up* past `maxBits`, and those leaves sit
+    above any prefix `b < maxBits`, so they never contribute — the bound is the ordinary
+    binary-tree prefix inequality. -/
+theorem cappedKraftSum_tree_le (t : BuildTree) (maxBits b : Nat) (hbm : b < maxBits) :
+    ∀ d, cappedKraftSum maxBits b (t.depths d) ≤ 2 ^ (b - d) := by
+  induction t with
+  | leaf w s =>
+    intro d
+    rw [BuildTree.depths, cappedKraftSum, cappedKraftSum]
+    by_cases hc : min d maxBits ≤ b
+    · rcases Nat.lt_or_ge d maxBits with hlt | hge
+      · rw [Nat.min_eq_left (Nat.le_of_lt hlt)] at hc ⊢
+        rw [if_pos hc, Nat.add_zero]; exact Nat.le_refl _
+      · rw [Nat.min_eq_right hge] at hc; omega
+    · rw [if_neg hc, Nat.zero_add]; exact Nat.zero_le _
+  | node w l r ihl ihr =>
+    intro d
+    rw [BuildTree.depths, cappedKraftSum_append]
+    have hl := ihl (d + 1)
+    have hr := ihr (d + 1)
+    by_cases hd : d < b
+    · have hpow : 2 ^ (b - (d + 1)) + 2 ^ (b - (d + 1)) = 2 ^ (b - d) := by
+        rw [show b - d = (b - (d + 1)) + 1 by omega, Nat.pow_succ]; omega
+      omega
+    · have hz : ∀ s : BuildTree, cappedKraftSum maxBits b (s.depths (d + 1)) = 0 := fun s =>
+        cappedKraftSum_zero_of_above maxBits b _ (fun p hp => by
+          have hge := s.depths_ge (d + 1) p hp
+          rcases Nat.le_total p.2 maxBits with hle | hle
+          · rw [Nat.min_eq_left hle]; omega
+          · rw [Nat.min_eq_right hle]; omega)
+      rw [hz l, hz r]; exact Nat.zero_le _
+
+/-- **Total capped Kraft mass is at least `2^maxBits`.** Capping moves leaves up, which
+    can only *raise* the total Kraft sum, and a complete binary tree's uncapped mass is
+    already `2^(maxBits−d)` at root depth `d`. At the root this gives `blKraft ≥ 2^maxBits`,
+    i.e. the over-subscription `repairBl_complete` needs (`hge`). -/
+theorem cappedKraftSum_tree_ge (t : BuildTree) (maxBits : Nat) :
+    ∀ d, 2 ^ (maxBits - d) ≤ cappedKraftSum maxBits maxBits (t.depths d) := by
+  induction t with
+  | leaf w s =>
+    intro d
+    rw [BuildTree.depths, cappedKraftSum, cappedKraftSum, if_pos (Nat.min_le_right d maxBits),
+      Nat.add_zero]
+    have := Nat.min_le_left d maxBits
+    exact Nat.pow_le_pow_right (by omega) (by omega)
+  | node w l r ihl ihr =>
+    intro d
+    rw [BuildTree.depths, cappedKraftSum_append]
+    have hl := ihl (d + 1)
+    have hr := ihr (d + 1)
+    have hpow : 2 ^ (maxBits - d) ≤ 2 ^ (maxBits - (d + 1)) + 2 ^ (maxBits - (d + 1)) := by
+      have h1 : 2 ^ (maxBits - d) ≤ 2 ^ ((maxBits - (d + 1)) + 1) :=
+        Nat.pow_le_pow_right (by omega) (by omega)
+      rw [Nat.pow_succ] at h1; omega
+    omega
+
+/-- The capped histogram's level-`M` prefix Kraft sum equals the depth-list sum
+    `cappedKraftSum` (started from the all-zero accumulator). Induction on the depth list
+    via the per-step `+1` accounting (`blKraftFrom_set_inc`). Requires depths `≥ 1` so that
+    every increment lands at a level `≥ 1` (a depth-0 leaf would sit in bucket 0, outside
+    the Kraft sum). -/
+theorem cappedBlCountAux_kraftFrom (maxBits M : Nat) (hmb : 1 ≤ maxBits) :
+    ∀ (ds : List (Nat × Nat)) (bl : Array Nat),
+      maxBits < bl.size → (∀ p ∈ ds, 1 ≤ p.2) →
+      blKraftFrom (cappedBlCountAux maxBits ds bl) M 1
+        = blKraftFrom bl M 1 + cappedKraftSum maxBits M ds := by
+  intro ds
+  induction ds with
+  | nil => intro bl _ _; rw [cappedBlCountAux, cappedKraftSum, Nat.add_zero]
+  | cons p rest ih =>
+    intro bl hsz hpos
+    simp only [cappedBlCountAux, cappedKraftSum]
+    have hp1 : 1 ≤ p.2 := hpos p (List.mem_cons_self ..)
+    have hdc1 : 1 ≤ min p.2 maxBits := Nat.le_min.mpr ⟨hp1, hmb⟩
+    have hdcsz : min p.2 maxBits < bl.size := by have := Nat.min_le_right p.2 maxBits; omega
+    rw [ih _ (by rw [Array.size_set!]; exact hsz) (fun q hq => hpos q (List.mem_cons_of_mem _ hq)),
+      blKraftFrom_set_inc bl M (min p.2 maxBits) hdc1 hdcsz]
+    omega
+
+/-- The capped histogram's total leaf count equals the number of depths (each in-range
+    increment raises `blCountSum` by one). -/
+theorem cappedBlCountAux_count (maxBits : Nat) (hmb : 1 ≤ maxBits) :
+    ∀ (ds : List (Nat × Nat)) (bl : Array Nat),
+      maxBits < bl.size → (∀ p ∈ ds, 1 ≤ p.2) →
+      blCountSum (cappedBlCountAux maxBits ds bl) maxBits
+        = blCountSum bl maxBits + ds.length := by
+  intro ds
+  induction ds with
+  | nil => intro bl _ _; rw [cappedBlCountAux, List.length_nil, Nat.add_zero]
+  | cons p rest ih =>
+    intro bl hsz hpos
+    simp only [cappedBlCountAux]
+    have hp1 : 1 ≤ p.2 := hpos p (List.mem_cons_self ..)
+    have hdc1 : 1 ≤ min p.2 maxBits := Nat.le_min.mpr ⟨hp1, hmb⟩
+    have hdcM : min p.2 maxBits ≤ maxBits := Nat.min_le_right p.2 maxBits
+    have hdcsz : min p.2 maxBits < bl.size := by omega
+    rw [ih _ (by rw [Array.size_set!]; exact hsz) (fun q hq => hpos q (List.mem_cons_of_mem _ hq)),
+      blCount_set_inc bl maxBits (min p.2 maxBits) hdc1 hdcM hdcsz, List.length_cons]
+    omega
+
+/-- **Feasibility invariant (`hfeas`).** Every level-`b` prefix (`b < maxBits`) of the
+    capped histogram of a Huffman tree satisfies the Kraft inequality `≤ 2^b`. -/
+theorem cappedBlCount_feas (t : BuildTree) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hpos : ∀ p ∈ t.depths 0, 1 ≤ p.2) :
+    ∀ b, b < maxBits → blKraftFrom (cappedBlCount (t.depths 0) maxBits) b 1 ≤ 2 ^ b := by
+  intro b hb
+  rw [cappedBlCount, cappedBlCountAux_kraftFrom maxBits b hmb (t.depths 0)
+      (Array.replicate (maxBits + 2) 0) (by rw [Array.size_replicate]; omega) hpos,
+    blKraftFrom_zero _ b 1 (fun i _ _ => replicate_getD_zero _ i), Nat.zero_add]
+  have := cappedKraftSum_tree_le t maxBits b hb 0
+  rwa [Nat.sub_zero] at this
+
+/-- **Leaf-count invariant (`hleaf`).** The capped histogram's leaf count is the symbol
+    count `(t.depths 0).length`, which fits in `2^maxBits` for the DEFLATE alphabet. -/
+theorem cappedBlCount_leaf (t : BuildTree) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hpos : ∀ p ∈ t.depths 0, 1 ≤ p.2) (hn : (t.depths 0).length ≤ 2 ^ maxBits) :
+    blCountSum (cappedBlCount (t.depths 0) maxBits) maxBits ≤ 2 ^ maxBits := by
+  rw [cappedBlCount, cappedBlCountAux_count maxBits hmb (t.depths 0)
+      (Array.replicate (maxBits + 2) 0) (by rw [Array.size_replicate]; omega) hpos]
+  have hz : blCountSum (Array.replicate (maxBits + 2) 0) maxBits = 0 := by
+    rw [blCount_eq_from, blCountFrom_zero _ maxBits 1 (fun i _ _ => replicate_getD_zero _ i)]
+  rw [hz, Nat.zero_add]; exact hn
+
+/-- **Over-subscription invariant (`hge`).** The capped histogram's total Kraft mass is at
+    least `2^maxBits` — capping a Huffman tree never under-subscribes the code space. -/
+theorem cappedBlCount_ge (t : BuildTree) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hpos : ∀ p ∈ t.depths 0, 1 ≤ p.2) :
+    2 ^ maxBits ≤ blKraft (cappedBlCount (t.depths 0) maxBits) maxBits := by
+  rw [blKraft_eq_from, cappedBlCount, cappedBlCountAux_kraftFrom maxBits maxBits hmb (t.depths 0)
+      (Array.replicate (maxBits + 2) 0) (by rw [Array.size_replicate]; omega) hpos,
+    blKraftFrom_zero _ maxBits 1 (fun i _ _ => replicate_getD_zero _ i), Nat.zero_add]
+  have := cappedKraftSum_tree_ge t maxBits 0
+  rwa [Nat.sub_zero] at this
+
+/-- **Capped histogram is repaired to a complete code (#2565 → #2536).** Discharging all
+    three `repairBl_complete` hypotheses for the *actual* histogram of a Huffman tree `t`
+    (depths `≥ 1`, fitting the alphabet): running `repairBl` for exactly the excess yields a
+    Kraft-exact length-limited code within `maxBits`. -/
+theorem cappedBlCount_repairBl_complete (t : BuildTree) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hpos : ∀ p ∈ t.depths 0, 1 ≤ p.2) (hn : (t.depths 0).length ≤ 2 ^ maxBits) :
+    blKraft (repairBl (cappedBlCount (t.depths 0) maxBits)
+        (blKraft (cappedBlCount (t.depths 0) maxBits) maxBits - 2 ^ maxBits) maxBits) maxBits
+      = 2 ^ maxBits :=
+  repairBl_complete _ maxBits hmb
+    (by rw [cappedBlCount, cappedBlCountAux_size, Array.size_replicate]; omega)
+    (cappedBlCount_feas t maxBits hmb hpos)
+    (cappedBlCount_leaf t maxBits hmb hpos hn)
+    (cappedBlCount_ge t maxBits hmb hpos)
 
 /-! ## Kraft fixup properties -/
 
