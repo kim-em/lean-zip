@@ -72,8 +72,9 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap : Na
       (lz77ChainIter data maxChain windowSize insertCap).map packTok := by
   unfold lz77ChainIterP lz77ChainIter
   split
-  · simpa using trailingP_eq data 0 #[]
-  · simpa using mainLoopP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
+  · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
+  · simpa only [List.map_toArray, List.map_nil] using
+      mainLoopP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
 
 /-- The packed lazy `mainLoop` is the packed image of the boxed one (two
     pushes in the deferral arm). -/
@@ -111,8 +112,9 @@ theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap 
       (lz77ChainLazyIter data maxChain windowSize insertCap).map packTok := by
   unfold lz77ChainLazyIterP lz77ChainLazyIter
   split
-  · simpa using trailingP_eq data 0 #[]
-  · simpa using mainLoopLazyP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
+  · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
+  · simpa only [List.map_toArray, List.map_nil] using
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap _ _ 0 #[]
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 
@@ -128,7 +130,7 @@ theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap : N
   rw [lz77ChainIterP_eq, Array.map_map]
   have hcongr : Array.map (unpackTok ∘ packTok) (lz77ChainIter data maxChain windowSize insertCap) =
       Array.map id (lz77ChainIter data maxChain windowSize insertCap) :=
-    Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa using ht))
+    Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa only [Array.mem_toList_iff] using ht))
   rw [hcongr, Array.map_id]
 
 /-- The boxed view of the packed lazy matcher is the boxed lazy matcher. -/
@@ -141,7 +143,7 @@ theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap
   have hcongr : Array.map (unpackTok ∘ packTok)
         (lz77ChainLazyIter data maxChain windowSize insertCap) =
       Array.map id (lz77ChainLazyIter data maxChain windowSize insertCap) :=
-    Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa using ht))
+    Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa only [Array.mem_toList_iff] using ht))
   rw [hcongr, Array.map_id]
 
 /-! ## Dispatch boundary -/
