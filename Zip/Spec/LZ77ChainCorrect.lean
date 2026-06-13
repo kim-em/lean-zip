@@ -193,9 +193,9 @@ theorem lz77Chain_encodable (data : ByteArray) (maxChain windowSize insertCap : 
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   simp only [lz77Chain]
   split
-  · intro t ht; simp only [List.toList_toArray] at ht
+  · intro t ht
     exact trailing_encodable data 0 t ht
-  · intro t ht; simp only [List.toList_toArray] at ht
+  · intro t ht
     exact lz77Chain_mainLoop_encodable data windowSize 65536 maxChain _ _ 0 insertCap hw hws t ht
 
 /-! ## Proven-bounds matcher equivalences (Wave 2d)
@@ -341,7 +341,8 @@ theorem updateHashesFast_eq (data : ByteArray) (hashSize : Nat)
           have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
           omega
         simp only [getElem!_pos hashTable (lz77Greedy.hash3 data (pos + j) hashSize hd) hb]
-        exact ih _ (by omega) _ _ _ (by simpa using hht) rfl
+        exact ih _ (by omega) _ _ _
+          (by simpa only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds] using hht) rfl
       · rw [dif_neg hd, dif_neg hd]
         exact ih _ (by omega) _ _ _ hht rfl
     · rw [if_neg hcond, if_neg hcond]
@@ -358,8 +359,10 @@ theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 
-/-- The accumulator `trailing` is the array form of the recursive one. -/
-private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
+/-- The accumulator `trailing` is the array form of the recursive one. Shared by
+    `LZ77ChainLazyCorrect` (which imports this file) so the lazy iterative proof
+    reuses it rather than carrying its own copy. -/
+theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
     lz77GreedyIter.trailing data pos acc = acc ++ (lz77Greedy.trailing data pos).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
   | _ n ih =>
