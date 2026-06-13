@@ -468,6 +468,187 @@ def runDiffFuzz (seed : UInt64) (iterations : Nat) : IO Census := do
     c := c'
   return c
 
+/-! ### Structural-garbage decode census
+
+A second decode-side census, complementary to `runDiffFuzz`. Where
+`runDiffFuzz` perturbs a *single bit of a valid dynamic header*, this
+target feeds inputs that are not mutations of a valid block at all:
+truncated streams, concatenated gzip members (with a possibly-truncated
+final member), and uniformly-random byte streams. For each input both
+the native decoder and the zlib FFI are asked to decode, and the
+verdicts are tallied into a `DecodeCensus`.
+
+The contract mirrors `runDiffFuzz`: the only *failure* is silent
+corruption (both decoders accept but return different bytes); a
+native-accept/FFI-reject is recorded, not failed (it is the standing
+strictness gap, narrowed — never widened — by the decode-strictness
+work). The harness never panics and never loops past `maxOutputSize`
+because every native entry point is total and budget-capped. -/
+
+/-- Running tally of native-vs-FFI verdicts over structural-garbage
+    inputs. Same four verdict buckets as `Census`, without the
+    header-mutation-specific `mutated`/`skipped` counters. -/
+private structure DecodeCensus where
+  nativeAcceptFFIReject : Nat := 0
+  nativeRejectFFIAccept : Nat := 0
+  bothAccept : Nat := 0
+  bothReject : Nat := 0
+  total : Nat := 0
+deriving Inhabited
+
+/-- One-line tally summary for the test log / PR description. -/
+private def DecodeCensus.summary (c : DecodeCensus) : String :=
+  s!"both-accept {c.bothAccept}, both-reject {c.bothReject}, \
+     native-accept/FFI-reject {c.nativeAcceptFFIReject}, \
+     native-reject/FFI-accept {c.nativeRejectFFIAccept} (of {c.total})"
+
+/-- Decode `data` through the zlib gzip FFI, mapping the malformed-stream
+    `userError` into an `Except` (mirrors `ffiVerdict`, which targets the
+    raw-deflate FFI). Non-`userError` exceptions re-raise. -/
+private def gzipFFIVerdict (data : ByteArray) : IO (Except Unit ByteArray) := do
+  try
+    let b ← Gzip.decompress data defaultMaxOutput.toUInt64
+    return .ok b
+  catch e =>
+    match e with
+    | .userError _ => return .error ()
+    | _ => throw e
+
+/-- Fold one (native, FFI) verdict pair into `c`. The single failure mode
+    is silent corruption — both decoders accept but disagree byte-for-byte;
+    every other combination is a recorded census bucket. `label` and the
+    running `total` identify the offending iteration in a failure log. -/
+private def foldVerdict (label : String) (native : Except String ByteArray)
+    (ffi : Except Unit ByteArray) (c : DecodeCensus) : IO DecodeCensus := do
+  let c := { c with total := c.total + 1 }
+  match native, ffi with
+  | .ok nb, .ok fb =>
+    unless nb == fb do
+      throw (IO.userError
+        s!"[{label}] CORRUPTION: native and FFI both accept (iter {c.total}) but \
+           disagree (native {nb.size}B vs FFI {fb.size}B)")
+    return { c with bothAccept := c.bothAccept + 1 }
+  | .ok _, .error _ =>
+    return { c with nativeAcceptFFIReject := c.nativeAcceptFFIReject + 1 }
+  | .error _, .ok _ =>
+    return { c with nativeRejectFFIAccept := c.nativeRejectFFIAccept + 1 }
+  | .error _, .error _ =>
+    return { c with bothReject := c.bothReject + 1 }
+
+/-- Payload sizes for the structural-garbage classes. Kept modest (≤ 2 KiB)
+    so that even level-9 optimal-parse compression of every base stream
+    stays cheap across the iteration budget. -/
+private def decodeSizeClasses : Array Nat :=
+  #[64, 200, 800, 2048]
+
+/-- One truncated-stream iteration. Compresses a structured payload to a
+    valid raw-DEFLATE stream, then cuts it at a uniformly-random byte
+    offset in `[0, size)` (always strictly shorter; because DEFLATE blocks
+    are bit-packed, a byte cut lands mid-block, exercising bit-granular
+    truncation too). Native inflate must return an `Except` — never panic,
+    never run past `maxOutputSize`. -/
+private def oneTruncIter (state : UInt64) (c : DecodeCensus) :
+    IO (UInt64 × DecodeCensus) := do
+  let s0 := xorshift64 state
+  let size := pick decodeSizeClasses s0
+  -- classes 1–3 carry structure → a real Huffman block to truncate.
+  let cls := 1 + s0.toNat % 3
+  let (payload, s1) := genPayloadCls s0 size cls
+  let s2 := xorshift64 s1
+  let level := pick compressLevels s2
+  let stream := Zip.Native.Deflate.deflateRaw payload level
+  let s3 := xorshift64 s2
+  if stream.size == 0 then
+    return (s3, c)
+  let cut := s3.toNat % stream.size
+  let truncated := stream.extract 0 cut
+  let native := Zip.Native.Inflate.inflate truncated defaultMaxOutput
+  let ffi ← ffiVerdict truncated
+  let c ← foldVerdict "trunc-deflate" native ffi c
+  return (s3, c)
+
+/-- One concatenated-gzip-member iteration. Builds `1..4` back-to-back
+    gzip members (each an FFI-compressed structured payload), then with
+    probability ½ truncates the concatenation at a random offset. When
+    untruncated, both decoders must accept and reproduce the concatenated
+    payloads (native gzip's documented multi-member behaviour); when
+    truncated, the verdict is folded into the census (native ⊆ FFI, no
+    silent corruption). -/
+private def oneConcatIter (state : UInt64) (c : DecodeCensus) :
+    IO (UInt64 × DecodeCensus) := do
+  let s0 := xorshift64 state
+  let nMembers := 1 + s0.toNat % 4
+  let mut s := s0
+  let mut concat := ByteArray.empty
+  let mut expected := ByteArray.empty
+  for _ in [:nMembers] do
+    s := xorshift64 s
+    let size := pick decodeSizeClasses s
+    let cls := s.toNat % 4
+    let (payload, s') := genPayloadCls s size cls
+    s := xorshift64 s'
+    let level := pick compressLevels s
+    let member ← Gzip.compress payload level
+    concat := concat ++ member
+    expected := expected ++ payload
+  let s1 := xorshift64 s
+  let doTruncate := s1.toNat % 2 == 0 && concat.size > 0
+  if !doTruncate then
+    -- Valid concatenated stream: both decoders must round-trip it.
+    match Zip.Native.GzipDecode.decompress concat defaultMaxOutput with
+    | .error e => throw (IO.userError s!"[concat-gzip] native rejected a valid \
+        {nMembers}-member stream: {e}")
+    | .ok nb =>
+      unless nb == expected do
+        throw (IO.userError "[concat-gzip] native multi-member round-trip mismatch")
+    let fb ← Gzip.decompress concat defaultMaxOutput.toUInt64
+    unless fb == expected do
+      throw (IO.userError "[concat-gzip] FFI multi-member round-trip mismatch")
+    return (s1, { c with total := c.total + 1, bothAccept := c.bothAccept + 1 })
+  let stream := concat.extract 0 (s1.toNat % concat.size)
+  let native := Zip.Native.GzipDecode.decompress stream defaultMaxOutput
+  let ffi ← gzipFFIVerdict stream
+  let c ← foldVerdict "concat-gzip-trunc" native ffi c
+  return (s1, c)
+
+/-- One uniformly-random-byte-stream iteration. Feeds pure noise to native
+    raw inflate as a smoke layer: it must terminate with an error (or, on
+    the rare valid stored-block prefix, agree with the FFI byte-for-byte) —
+    never panic, never disagree silently. -/
+private def oneRandomIter (state : UInt64) (c : DecodeCensus) :
+    IO (UInt64 × DecodeCensus) := do
+  let s0 := xorshift64 state
+  let size := pick decodeSizeClasses s0
+  let (data, s1) := genBytes s0 size
+  let native := Zip.Native.Inflate.inflate data defaultMaxOutput
+  let ffi ← ffiVerdict data
+  let c ← foldVerdict "random-deflate" native ffi c
+  return (s1, c)
+
+/-- Run `iterations` of each structural-garbage class (truncated raw
+    DEFLATE, concatenated gzip members, random byte streams) from
+    independent sub-seeds derived from `seed`, printing a per-class tally.
+    Deterministic: a fixed `(seed, iterations)` reproduces every input and
+    every census exactly. -/
+def runDecodeFuzz (seed : UInt64) (iterations : Nat) : IO Unit := do
+  let base := if seed = 0 then 0x0dec0de0fab1e5 else seed
+  let runClass (start : UInt64)
+      (step : UInt64 → DecodeCensus → IO (UInt64 × DecodeCensus)) :
+      IO DecodeCensus := do
+    let mut state := start
+    let mut c : DecodeCensus := {}
+    for _ in [:iterations] do
+      let (s, c') ← step state c
+      state := s
+      c := c'
+    return c
+  let cTrunc ← runClass base oneTruncIter
+  let cConcat ← runClass (xorshift64 base) oneConcatIter
+  let cRandom ← runClass (xorshift64 (xorshift64 base)) oneRandomIter
+  IO.println s!"    decode-fuzz truncated:     {cTrunc.summary}"
+  IO.println s!"    decode-fuzz concat-gzip:   {cConcat.summary}"
+  IO.println s!"    decode-fuzz random-stream: {cRandom.summary}"
+
 /-- Smoke test: fixed-seed 1000-iteration run invoked from `lake exe
     test`. Iteration count is bounded to keep CI runtime reasonable
     (~100 ms at ~100 μs/iteration). Prints the seed up front so a
@@ -491,5 +672,7 @@ def tests : IO Unit := do
   IO.println s!"    census: both-accept {census.bothAccept}, both-reject \
     {census.bothReject}, native-accept/FFI-reject {census.nativeAcceptFFIReject}, \
     native-reject/FFI-accept {census.nativeRejectFFIAccept}"
+  runDecodeFuzz 0xc0deba5e 256
+  IO.println "    256×3 structural-garbage decode iterations completed"
 
 end ZipTest.FuzzInflate
