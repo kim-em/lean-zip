@@ -492,6 +492,20 @@ With:
 rw [(Prod.mk.inj (Option.some.inj (h₁.symm.trans h₂))).2]; exact hfinal
 ```
 
+**`List.forall_mem_cons` for `∀ t ∈ cons, P` membership proofs**: When a
+proof of `∀ t ∈ (x :: rest), P t` is written as
+`intro t ht; cases ht with | head => …headProof… | tail _ h => …IH…`,
+and this block repeats across several `split` branches (the IH `tail` arm
+identical, only the `head` differing), collapse each branch to:
+```lean
+exact List.forall_mem_cons.2 ⟨headProof, recursiveCall …⟩
+```
+`List.forall_mem_cons : (∀ x ∈ a :: l, p x) ↔ p a ∧ ∀ x ∈ l, p x`. This is
+the idiomatic shape for the matcher-family `∀ t ∈ tokens, encodable t`
+proofs (greedy/lazy/chain/optimal in `LZ77*Correct.lean`), turning a 3-line
+`cases` block into one line per branch (discovered reviewing
+`LZ77OptimalCorrect.lean`, #2576).
+
 ## Phase 3c: Proof Compression
 
 After bare-simp cleanup, look for opportunities to shorten proofs
