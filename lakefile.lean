@@ -275,3 +275,18 @@ lean_exe fuzz_inflate where
 
 lean_exe fuzz_handle_read where
   root := `ZipFuzzHandleRead
+
+lean_exe profile where
+  root := `ProfileMain
+
+lean_exe «gate-probe» where
+  root := `GateProbe
+
+lean_exe «ladder-sweep» where
+  root := `LadderSweep
+
+lean_exe «kernel-bench» where
+  root := `KernelBench
+
+lean_exe «perf-probe» where
+  root := `PerfProbe

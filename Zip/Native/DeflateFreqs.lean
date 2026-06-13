@@ -296,4 +296,20 @@ theorem dynamicCodeLengths_length (litFreqs distFreqs : Array Nat) :
   · rw [List.length_set]; exact Huffman.Spec.computeCodeLengths_length _ 30 15
   · exact Huffman.Spec.computeCodeLengths_length _ 30 15
 
+/-- The dynamic-Huffman code lengths are all ≤ 15 (`computeCodeLengths` caps at
+    `maxBits = 15`; the RFC 1951 distance fixup only sets a length to `1`). -/
+theorem dynamicCodeLengths_le_15 (litFreqs distFreqs : Array Nat) :
+    (∀ x ∈ (dynamicCodeLengths litFreqs distFreqs).1, x ≤ 15) ∧
+    (∀ x ∈ (dynamicCodeLengths litFreqs distFreqs).2, x ≤ 15) := by
+  refine ⟨Huffman.Spec.computeCodeLengths_bounded _ 286 15 (by omega), ?_⟩
+  show ∀ x ∈ (if _ then _ else _), x ≤ 15
+  have hbase := Huffman.Spec.computeCodeLengths_bounded
+    (freqsToPairs distFreqs) 30 15 (by omega)
+  split
+  · intro x hx
+    rcases List.mem_or_eq_of_mem_set hx with hx1 | hx2
+    · exact hbase x hx1
+    · omega
+  · exact hbase
+
 end Zip.Native.Deflate

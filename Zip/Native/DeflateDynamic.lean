@@ -78,16 +78,14 @@ proves the loop equal to `emitTokensWithCodes` over the boxed view. -/
   | some (idx, extraCount, extraVal) =>
     if hlitlt : idx + 257 < litCodes.size then
       let (code, len) := litCodes[idx + 257]
-      let bw := bw.writeHuffCode code len
-      let bw := bw.writeBits extraCount extraVal
+      let bwLen := (bw.writeHuffCode code len).writeBits extraCount extraVal
       match findDistCodeFast ((w &&& 0xFFFF).toNat) with
       | some (dIdx, dExtraCount, dExtraVal) =>
         if hdistlt : dIdx < distCodes.size then
           let (dCode, dLen) := distCodes[dIdx]
-          let bw := bw.writeHuffCode dCode dLen
-          bw.writeBits dExtraCount dExtraVal
-        else bw
-      | none => bw
+          bw.writeFour code len extraCount extraVal dCode dLen dExtraCount dExtraVal
+        else bwLen
+      | none => bwLen
     else bw
   | none => bw
 

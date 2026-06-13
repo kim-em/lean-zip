@@ -419,13 +419,13 @@ private theorem fixedDistLengths_le_15 (j : Nat) (hj : j < Inflate.fixedDistLeng
 
 /-- All entries in `fixedLitCodes` have code length ≤ 15.
     Proof: the fixed Huffman table uses lengths 7, 8, 9 (all ≤ 15). -/
-private theorem fixedLitCodes_snd_le (i : Nat) (h : i < fixedLitCodes.size) :
+theorem fixedLitCodes_snd_le (i : Nat) (h : i < fixedLitCodes.size) :
     fixedLitCodes[i]!.2.toNat ≤ 15 :=
   canonicalCodes_snd_le Inflate.fixedLitLengths 15 fixedLitLengths_le_15 i h
 
 /-- All entries in `fixedDistCodes` have code length ≤ 15.
     Proof: the fixed distance table uses uniform length 5. -/
-private theorem fixedDistCodes_snd_le (i : Nat) (h : i < fixedDistCodes.size) :
+theorem fixedDistCodes_snd_le (i : Nat) (h : i < fixedDistCodes.size) :
     fixedDistCodes[i]!.2.toNat ≤ 15 :=
   canonicalCodes_snd_le Inflate.fixedDistLengths 15 fixedDistLengths_le_15 i h
 

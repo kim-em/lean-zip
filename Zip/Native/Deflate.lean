@@ -1199,16 +1199,14 @@ time. Do not inline `emitRefFixedP` back into `emitTokensP`.
   | some (idx, extraCount, extraVal) =>
     if hlit : idx + 257 < fixedLitCodes.size then
       let (code, len) := fixedLitCodes[idx + 257]
-      let bw := bw.writeHuffCode code len
-      let bw := bw.writeBits extraCount extraVal
+      let bwLen := (bw.writeHuffCode code len).writeBits extraCount extraVal
       match findDistCodeFast ((w &&& 0xFFFF).toNat) with
       | some (dIdx, dExtraCount, dExtraVal) =>
         if hdist : dIdx < fixedDistCodes.size then
           let (dCode, dLen) := fixedDistCodes[dIdx]
-          let bw := bw.writeHuffCode dCode dLen
-          bw.writeBits dExtraCount dExtraVal
-        else bw
-      | none => bw
+          bw.writeFour code len extraCount extraVal dCode dLen dExtraCount dExtraVal
+        else bwLen
+      | none => bwLen
     else bw
   | none => bw
 

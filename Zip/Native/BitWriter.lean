@@ -71,6 +71,32 @@ def writeHuffCode (bw : BitWriter) (code : UInt16) (len : UInt8) : BitWriter :=
   let acc : UInt64 := bw.bitBuf.toUInt64 ||| (rev <<< bw.bitCount.toUInt64)
   flushAcc bw.data acc (bw.bitCount.toNat + len.toNat)
 
+/-- Emit one DEFLATE reference token (length code + length extra bits +
+    distance code + distance extra bits) in a single wide-word pack.
+
+    The four fields — a Huffman code `(c1, l1)` reversed MSB-first, fixed extra
+    bits `(n2, v2)` LSB-first, a Huffman code `(c3, l3)` reversed, and fixed
+    extra bits `(n4, v4)` LSB-first — are merged into one `UInt64` accumulator
+    and drained once, instead of four separate `writeHuffCode`/`writeBits`
+    calls. RFC 1951 bounds keep the total under 64 bits: `bitCount ≤ 7`,
+    `l1, l3 ≤ 15`, `n2 ≤ 5`, `n4 ≤ 13`, so `7+15+5+15+13 = 55 < 64`.
+
+    Byte-identical to the four-call chain (`writeFour_eq`). -/
+def writeFour (bw : BitWriter) (c1 : UInt16) (l1 : UInt8) (n2 : Nat) (v2 : UInt32)
+    (c3 : UInt16) (l3 : UInt8) (n4 : Nat) (v4 : UInt32) : BitWriter :=
+  let bc : UInt64 := bw.bitCount.toUInt64
+  let rev1 : UInt64 := (reverse16 c1).toUInt64 >>> (16 - l1.toUInt64)
+  let mask2 : UInt64 := v2.toUInt64 % (1 <<< n2.toUInt64)
+  let rev3 : UInt64 := (reverse16 c3).toUInt64 >>> (16 - l3.toUInt64)
+  let mask4 : UInt64 := v4.toUInt64 % (1 <<< n4.toUInt64)
+  let acc : UInt64 :=
+    bw.bitBuf.toUInt64
+      ||| (rev1 <<< bc)
+      ||| (mask2 <<< (bc + l1.toUInt64))
+      ||| (rev3 <<< (bc + l1.toUInt64 + n2.toUInt64))
+      ||| (mask4 <<< (bc + l1.toUInt64 + n2.toUInt64 + l3.toUInt64))
+  flushAcc bw.data acc (bw.bitCount.toNat + l1.toNat + n2 + l3.toNat + n4)
+
 /-- Flush any partial byte (pad with zeros). Returns the final ByteArray. -/
 def flush (bw : BitWriter) : ByteArray :=
   if bw.bitCount > 0 then bw.data.push bw.bitBuf

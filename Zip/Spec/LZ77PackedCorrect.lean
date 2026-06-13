@@ -185,6 +185,11 @@ this equation. -/
 theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseTokens data (lzMatch data level) = deflateRawBase data level := by
   unfold deflateRawBase deflateRawBaseP deflateRawBaseTokens
-  simp only [deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
+  -- the dynamic code lengths are all ≤ 15, discharging `deflateDynamicBlockCoreP_eq`'s
+  -- new side conditions for whichever frequency arrays the dispatch selects.
+  simp only [deflateFixedBlockP_eq,
+    deflateDynamicBlockCoreP_eq _ _ _ _ _ _
+      (dynamicCodeLengths_le_15 _ _).1 (dynamicCodeLengths_le_15 _ _).2,
+    tokenFreqsP_eq, lzMatchP_map]
 
 end Zip.Native.Deflate
