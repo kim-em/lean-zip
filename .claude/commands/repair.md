@@ -21,8 +21,8 @@ Claim the top one:
 coordination claim-pr-repair <pr-number>
 ```
 
-If the claim output says the PR was claimed by another session in the last
-30 minutes, skip it and try the next one. If every candidate is claimed,
+If the claim output says the PR is already `repair-claimed` or you lost
+the race, skip it and try the next one. If every candidate is claimed,
 exit — a fresh dispatch will handle the work later.
 
 ## Two Outcomes, No Escalation
@@ -41,9 +41,10 @@ Repair has exactly two terminal states:
    This closes the PR, removes `has-pr` from the linked issue, and adds
    `replan` so the planner will produce a fresh approach.
 
-**Do not escalate to `human-oversight`.** The fix-or-abandon rule is
-non-negotiable: complex conflicts become re-implementations via `replan`,
-not human tickets.
+**Do not escalate by inventing a `directive`.** The `directive` label
+flows top-down from the project owner; agents do not author directives.
+The fix-or-abandon rule is non-negotiable: complex conflicts become
+re-implementations via `replan`, not human tickets.
 
 See the `pr-repair-flow` skill for retry budget, verification rules, and
 examples.
