@@ -579,6 +579,330 @@ theorem repairStep_kraft (bl : Array Nat) (bits maxBits : Nat)
     rw [show maxBits - bits = (maxBits - (bits + 1)) + 1 from by omega, Nat.pow_succ, Nat.mul_comm]
   omega
 
+/-! ## `repairBl` completeness: loop core (#2536)
+
+The histogram-level completeness theorem: starting from a capped, feasible,
+over-subscribed `bl_count`, `repairBl` lands exactly on a complete (Kraft-exact)
+code within `maxBits`. The proof is a loop induction on the `excess`, using
+`repairStep_kraft` for conservation and re-establishing two invariants at each
+step: per-prefix Kraft *feasibility* (`blKraftFrom bl b 1 ≤ 2^b` for `b < maxBits`)
+and *leaf-count* (`blCountSum bl maxBits ≤ 2^maxBits`). The supporting lemmas
+below mirror the `blKraftFrom` infrastructure for `blCountSum`, characterize
+`findBelow`, and give the prefix-Kraft set/scale identities the invariants need. -/
+
+/-- `findBelow` returns 0 only when every level in `[1, start]` is empty. -/
+theorem findBelow_zero (bl : Array Nat) (start : Nat) (h : findBelow bl start = 0) :
+    ∀ k, 1 ≤ k → k ≤ start → bl.getD k 0 = 0 := by
+  induction start with
+  | zero => intro k hk1 hk0; omega
+  | succ s ih =>
+    rw [findBelow, if_neg (by omega)] at h
+    split at h
+    · omega
+    · rename_i hnpos
+      rw [Nat.add_sub_cancel] at h
+      intro k hk1 hk
+      rcases (by omega : k = s + 1 ∨ k ≤ s) with heq | hle
+      · subst heq; omega
+      · exact ih h k hk1 hle
+
+/-- When `findBelow` is non-zero it points at an occupied level in `[1, start]`. -/
+theorem findBelow_pos (bl : Array Nat) (start : Nat) (h : findBelow bl start ≠ 0) :
+    1 ≤ findBelow bl start ∧ findBelow bl start ≤ start ∧ 1 ≤ bl.getD (findBelow bl start) 0 := by
+  induction start with
+  | zero => exact absurd (by rw [findBelow]; exact if_pos rfl) h
+  | succ s ih =>
+    rw [findBelow, if_neg (by omega)]
+    rw [findBelow, if_neg (by omega)] at h
+    split at h
+    · rename_i hpos
+      rw [if_pos hpos]
+      exact ⟨by omega, Nat.le_refl _, hpos⟩
+    · rename_i hnpos
+      rw [if_neg hnpos, Nat.add_sub_cancel]
+      rw [Nat.add_sub_cancel] at h
+      obtain ⟨h1, h2, h3⟩ := ih h
+      exact ⟨h1, Nat.le_succ_of_le h2, h3⟩
+
+/-- Setting a position strictly above the normalization level `maxBits` does not
+    change `blKraftFrom` (every summed cell is at a level `≤ maxBits < l`). -/
+theorem blKraftFrom_set_above (bl : Array Nat) (maxBits l v b : Nat) (h : maxBits < l) :
+    blKraftFrom (bl.set! l v) maxBits b = blKraftFrom bl maxBits b := by
+  if hb : b > maxBits then
+    rw [blKraftFrom_gt _ _ _ hb, blKraftFrom_gt _ _ _ hb]
+  else
+    rw [blKraftFrom_unfold _ maxBits b (by omega), blKraftFrom_unfold bl maxBits b (by omega),
+      getD0_set!_ne bl l b v (by omega), blKraftFrom_set_above bl maxBits l v (b + 1) h]
+termination_by maxBits + 1 - b
+decreasing_by omega
+
+/-- If every level in `[b, maxBits)` is empty, the prefix Kraft sum from `b`
+    collapses to just the top term `bl.getD maxBits 0`. -/
+theorem blKraftFrom_prefix_zero (bl : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits)
+    (hz : ∀ k, b ≤ k → k < maxBits → bl.getD k 0 = 0) :
+    blKraftFrom bl maxBits b = bl.getD maxBits 0 := by
+  rw [blKraftFrom_unfold bl maxBits b hb]
+  rcases (by omega : b = maxBits ∨ b < maxBits) with heq | hlt
+  · rw [blKraftFrom_gt bl maxBits (b + 1) (by omega), heq, Nat.sub_self, Nat.pow_zero]
+    omega
+  · rw [hz b (Nat.le_refl b) hlt, Nat.zero_mul, Nat.zero_add]
+    exact blKraftFrom_prefix_zero bl maxBits (b + 1) (by omega) (fun k hk hkM => hz k (by omega) hkM)
+termination_by maxBits + 1 - b
+decreasing_by omega
+
+/-- Peel-top scaling: the prefix Kraft sum at normalization `m` is twice the one at
+    `m−1` plus the (now unit-weight) top term `bl.getD m 0`. Uses `2·2^((m−1)−l) =
+    2^(m−l)` for the levels below `m`. -/
+theorem blKraftFrom_scale (bl : Array Nat) (m b : Nat) (hm : 1 ≤ m) :
+    blKraftFrom bl m b = 2 * blKraftFrom bl (m - 1) b + (if b ≤ m then bl.getD m 0 else 0) := by
+  if hb : b > m then
+    rw [blKraftFrom_gt bl m b hb, blKraftFrom_gt bl (m - 1) b (by omega), if_neg (by omega)]
+  else
+    have hbm : b ≤ m := by omega
+    rw [blKraftFrom_unfold bl m b hbm, if_pos hbm]
+    have ih := blKraftFrom_scale bl m (b + 1) hm
+    rcases (by omega : b = m ∨ b < m) with heq | hlt
+    · subst heq
+      rw [blKraftFrom_gt bl b (b + 1) (by omega), blKraftFrom_gt bl (b - 1) b (by omega),
+        Nat.sub_self, Nat.pow_zero]
+      omega
+    · rw [if_pos (show b + 1 ≤ m by omega)] at ih
+      rw [blKraftFrom_unfold bl (m - 1) b (by omega)]
+      have hpow : 2 ^ (m - b) = 2 * 2 ^ ((m - 1) - b) := by
+        rw [show m - b = ((m - 1) - b) + 1 by omega, Nat.pow_succ, Nat.mul_comm]
+      rw [ih, hpow, Nat.mul_add, Nat.mul_left_comm]
+      omega
+termination_by m + 1 - b
+decreasing_by omega
+
+/-! ### `blCountSum` infrastructure (leaf-count invariant)
+
+`blCountFrom` is to `blCountSum` what `blKraftFrom` is to `blKraft`: a recursive
+prefix sum (here unit weights) that `set!`/induction proofs can reason about. -/
+
+/-- Recursive prefix leaf-count: `Σ_{i=b}^{maxBits} bl.getD i 0`. -/
+def blCountFrom (bl : Array Nat) (maxBits b : Nat) : Nat :=
+  if b > maxBits then 0
+  else bl.getD b 0 + blCountFrom bl maxBits (b + 1)
+termination_by maxBits + 1 - b
+decreasing_by omega
+
+theorem blCountFrom_unfold (bl : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits) :
+    blCountFrom bl maxBits b = bl.getD b 0 + blCountFrom bl maxBits (b + 1) := by
+  rw [blCountFrom]; exact if_neg (by omega)
+
+theorem blCountFrom_gt (bl : Array Nat) (maxBits b : Nat) (hb : b > maxBits) :
+    blCountFrom bl maxBits b = 0 := by
+  rw [blCountFrom]; exact if_pos hb
+
+private theorem blCountFrom_eq_aux (bl : Array Nat) (maxBits : Nat) :
+    ∀ j, j ≤ maxBits →
+      (List.range j).foldl (fun acc i => acc + bl.getD (i + 1) 0) 0
+        + blCountFrom bl maxBits (j + 1) = blCountFrom bl maxBits 1 := by
+  intro j
+  induction j with
+  | zero => intro _; simp only [List.range_zero, List.foldl_nil, Nat.zero_add]
+  | succ k ih =>
+    intro hk
+    rw [List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil,
+      Nat.add_assoc, ← blCountFrom_unfold bl maxBits (k + 1) (by omega)]
+    exact ih (by omega)
+
+/-- `blCountSum` equals the recursive `blCountFrom` started at level 1. -/
+theorem blCount_eq_from (bl : Array Nat) (maxBits : Nat) :
+    blCountSum bl maxBits = blCountFrom bl maxBits 1 := by
+  have h := blCountFrom_eq_aux bl maxBits maxBits (Nat.le_refl _)
+  rw [blCountFrom_gt bl maxBits (maxBits + 1) (by omega), Nat.add_zero] at h
+  rw [blCountSum]; exact h
+
+/-- A single `set!` at level `l` shifts `blCountFrom` additively (only at `b ≤ l`). -/
+theorem blCountFrom_set (bl : Array Nat) (maxBits l v b : Nat)
+    (hl : l < bl.size) (hlM : l ≤ maxBits) :
+    blCountFrom (bl.set! l v) maxBits b + (if b ≤ l then bl.getD l 0 else 0)
+      = blCountFrom bl maxBits b + (if b ≤ l then v else 0) := by
+  if hb : b > maxBits then
+    rw [blCountFrom_gt _ _ _ hb, blCountFrom_gt _ _ _ hb, if_neg (by omega), if_neg (by omega)]
+  else
+    have hbM : b ≤ maxBits := by omega
+    rw [blCountFrom_unfold (bl.set! l v) maxBits b hbM, blCountFrom_unfold bl maxBits b hbM]
+    have ih := blCountFrom_set bl maxBits l v (b + 1) hl hlM
+    if hbl : b = l then
+      subst hbl
+      rw [if_neg (show ¬ b + 1 ≤ b from by omega), if_neg (show ¬ b + 1 ≤ b from by omega)] at ih
+      rw [getD0_set!_self bl b v hl, if_pos (Nat.le_refl b), if_pos (Nat.le_refl b)]
+      omega
+    else
+      rw [getD0_set!_ne bl l b v hbl]
+      by_cases hlt : b ≤ l
+      · rw [if_pos hlt, if_pos hlt]
+        rw [if_pos (show b + 1 ≤ l from by omega), if_pos (show b + 1 ≤ l from by omega)] at ih
+        omega
+      · rw [if_neg hlt, if_neg hlt]
+        rw [if_neg (show ¬ b + 1 ≤ l from by omega), if_neg (show ¬ b + 1 ≤ l from by omega)] at ih
+        omega
+termination_by maxBits + 1 - b
+decreasing_by omega
+
+/-- Decrementing an occupied level lowers `blCountSum` by 1. -/
+theorem blCount_set_dec (bl : Array Nat) (maxBits l : Nat)
+    (hl1 : 1 ≤ l) (hlM : l ≤ maxBits) (hsz : l < bl.size) (hpos : 1 ≤ bl.getD l 0) :
+    blCountSum (bl.set! l (bl.getD l 0 - 1)) maxBits + 1 = blCountSum bl maxBits := by
+  rw [blCount_eq_from, blCount_eq_from]
+  have hset := blCountFrom_set bl maxBits l (bl.getD l 0 - 1) 1 hsz hlM
+  rw [if_pos hl1, if_pos hl1] at hset
+  omega
+
+/-- Adding two leaves at level `l` raises `blCountSum` by 2. -/
+theorem blCount_set_inc2 (bl : Array Nat) (maxBits l : Nat)
+    (hl1 : 1 ≤ l) (hlM : l ≤ maxBits) (hsz : l < bl.size) :
+    blCountSum (bl.set! l (bl.getD l 0 + 2)) maxBits = blCountSum bl maxBits + 2 := by
+  rw [blCount_eq_from, blCount_eq_from]
+  have hset := blCountFrom_set bl maxBits l (bl.getD l 0 + 2) 1 hsz hlM
+  rw [if_pos hl1, if_pos hl1] at hset
+  omega
+
+/-- Any single level's count is bounded by the total leaf count. -/
+theorem blCountFrom_ge_term (bl : Array Nat) (maxBits l b : Nat) (hbl : b ≤ l) (hlM : l ≤ maxBits) :
+    bl.getD l 0 ≤ blCountFrom bl maxBits b := by
+  rw [blCountFrom_unfold bl maxBits b (by omega)]
+  rcases (by omega : b = l ∨ b < l) with heq | hlt
+  · subst heq; exact Nat.le_add_right _ _
+  · have ih := blCountFrom_ge_term bl maxBits l (b + 1) hlt hlM
+    omega
+termination_by maxBits + 1 - b
+decreasing_by omega
+
+/-- **Leaf-count preservation.** One well-defined `repairStep` leaves `blCountSum`
+    unchanged (net `−1 + 2 − 1 = 0`). -/
+theorem repairStep_count (bl : Array Nat) (bits maxBits : Nat)
+    (hb1 : 1 ≤ bits) (hbM : bits + 1 ≤ maxBits) (hsize : maxBits < bl.size)
+    (hposb : 1 ≤ bl.getD bits 0) (hposM : 1 ≤ bl.getD maxBits 0) :
+    blCountSum (repairStep bl bits maxBits) maxBits = blCountSum bl maxBits := by
+  simp only [repairStep]
+  have e1 := blCount_set_dec bl maxBits bits hb1 (by omega) (by omega) hposb
+  generalize hA : bl.set! bits (bl.getD bits 0 - 1) = A at e1 ⊢
+  have hAsz : A.size = bl.size := by rw [← hA, Array.size_set!]
+  have e2 := blCount_set_inc2 A maxBits (bits + 1) (by omega) hbM (by rw [hAsz]; omega)
+  have hposM2 : 1 ≤ (A.set! (bits + 1) (A.getD (bits + 1) 0 + 2)).getD maxBits 0 := by
+    by_cases halias : bits + 1 = maxBits
+    · rw [halias, getD0_set!_self A maxBits _ (by rw [hAsz]; omega)]; omega
+    · rw [getD0_set!_ne A (bits + 1) maxBits _ (Ne.symm halias), ← hA,
+        getD0_set!_ne bl bits maxBits _ (by omega)]; exact hposM
+  generalize hB : A.set! (bits + 1) (A.getD (bits + 1) 0 + 2) = B at e2 hposM2 ⊢
+  have hBsz : B.size = bl.size := by rw [← hB, Array.size_set!, hAsz]
+  have e3 := blCount_set_dec B maxBits maxBits (by omega) (Nat.le_refl _) (by rw [hBsz]; omega) hposM2
+  omega
+
+/-- **Feasibility preservation.** A well-defined `repairStep` never increases any
+    prefix Kraft sum `blKraftFrom · b 1` for `b < maxBits`: below `bits` nothing
+    moves; at `b = bits` the `−1` removes `2^(b−bits)`; for `bits+1 ≤ b < maxBits`
+    the `+2` at `bits+1` exactly replaces the `−1` at `bits`; and the `−1` at
+    `maxBits` lies above the prefix entirely. -/
+theorem repairStep_feas (bl : Array Nat) (bits maxBits b : Nat)
+    (hb1 : 1 ≤ bits) (hsize : maxBits < bl.size)
+    (hposb : 1 ≤ bl.getD bits 0) (hbmax : b < maxBits) :
+    blKraftFrom (repairStep bl bits maxBits) b 1 ≤ blKraftFrom bl b 1 := by
+  simp only [repairStep]
+  generalize hA : bl.set! bits (bl.getD bits 0 - 1) = A
+  generalize hB : A.set! (bits + 1) (A.getD (bits + 1) 0 + 2) = B
+  have hAsz : A.size = bl.size := by rw [← hA, Array.size_set!]
+  have hBsz : B.size = bl.size := by rw [← hB, Array.size_set!, hAsz]
+  -- the `−1` at `maxBits` is above the prefix level `b`
+  rw [blKraftFrom_set_above B b maxBits (B.getD maxBits 0 - 1) 1 hbmax]
+  by_cases hcase1 : bits ≤ b
+  · -- the `−1` at `bits` lowers the prefix by `2^(b−bits)` (normalization level `b`)
+    have eA := blKraft_set_dec bl b bits hb1 hcase1 (by omega) hposb
+    rw [hA] at eA
+    simp only [blKraft_eq_from] at eA
+    by_cases hcase2 : bits + 1 ≤ b
+    · -- the `+2` at `bits+1` raises it back by `2·2^(b−bits−1) = 2^(b−bits)`
+      have eB := blKraft_set_inc2 A b (bits + 1) (by omega) hcase2 (by rw [hAsz]; omega)
+      rw [hB] at eB
+      simp only [blKraft_eq_from] at eB
+      have hvw : 2 * 2 ^ (b - (bits + 1)) = 2 ^ (b - bits) := by
+        rw [show b - bits = (b - (bits + 1)) + 1 by omega, Nat.pow_succ, Nat.mul_comm]
+      rw [eB, hvw]
+      exact Nat.le_of_eq eA
+    · -- `b = bits`: the `+2` at `bits+1` is above the prefix
+      rw [← hB, blKraftFrom_set_above A b (bits + 1) (A.getD (bits + 1) 0 + 2) 1 (by omega)]
+      exact Nat.le.intro eA
+  · apply Nat.le_of_eq
+    rw [← hB, blKraftFrom_set_above A b (bits + 1) (A.getD (bits + 1) 0 + 2) 1 (by omega),
+      ← hA, blKraftFrom_set_above bl b bits (bl.getD bits 0 - 1) 1 (by omega)]
+
+/-- **Loop core.** While `blKraft` exceeds `2^maxBits` by `excess`, `repairBl`
+    drives it down to exactly `2^maxBits`. Induction on `excess`: each iteration
+    is well-defined (a leaf below `maxBits` exists — else feasibility at `maxBits−1`
+    and the leaf-count bound force `blKraft ≤ 2^maxBits`), and `repairStep`
+    conserves `blKraft − 1` while re-establishing both invariants. -/
+theorem repairBl_loop (maxBits : Nat) (hmb : 1 ≤ maxBits) :
+    ∀ (excess : Nat) (bl : Array Nat),
+      maxBits < bl.size →
+      (∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b) →
+      blCountSum bl maxBits ≤ 2 ^ maxBits →
+      blKraft bl maxBits = 2 ^ maxBits + excess →
+      blKraft (repairBl bl excess maxBits) maxBits = 2 ^ maxBits := by
+  intro excess
+  induction excess with
+  | zero =>
+    intro bl _ _ _ hconserv
+    simp only [repairBl]
+    omega
+  | succ e ih =>
+    intro bl hsize hfeas hleaf hconserv
+    -- Step 2a: while over-subscribed, the top level `maxBits` holds a leaf.
+    have hpos_top : 1 ≤ bl.getD maxBits 0 := by
+      have hscale := blKraftFrom_scale bl maxBits 1 hmb
+      rw [if_pos hmb] at hscale
+      rw [blKraft_eq_from] at hconserv
+      have hfeasm := hfeas (maxBits - 1) (by omega)
+      have hpoweq : 2 * 2 ^ (maxBits - 1) = 2 ^ maxBits := by
+        obtain ⟨k, rfl⟩ : ∃ k, maxBits = k + 1 := ⟨maxBits - 1, by omega⟩
+        rw [Nat.add_sub_cancel, Nat.pow_succ, Nat.mul_comm]
+      omega
+    -- Step 2b: a leaf below `maxBits` exists, so `findBelow` is well-defined.
+    have hbne : findBelow bl (maxBits - 1) ≠ 0 := by
+      intro hzero
+      have hallzero := findBelow_zero bl (maxBits - 1) hzero
+      have hpz : blKraft bl maxBits = bl.getD maxBits 0 := by
+        rw [blKraft_eq_from]
+        exact blKraftFrom_prefix_zero bl maxBits 1 (by omega)
+          (fun k hk1 hkM => hallzero k hk1 (by omega))
+      have hge : bl.getD maxBits 0 ≤ blCountSum bl maxBits := by
+        rw [blCount_eq_from]
+        exact blCountFrom_ge_term bl maxBits maxBits 1 (by omega) (Nat.le_refl _)
+      omega
+    obtain ⟨hb1, hble, hposb⟩ := findBelow_pos bl (maxBits - 1) hbne
+    rw [repairBl]
+    split
+    · rename_i hh
+      simp only [beq_iff_eq] at hh
+      exact absurd hh hbne
+    · apply ih (repairStep bl (findBelow bl (maxBits - 1)) maxBits)
+      · simp only [repairStep, Array.size_set!]; exact hsize
+      · exact fun b hb => Nat.le_trans
+          (repairStep_feas bl (findBelow bl (maxBits - 1)) maxBits b hb1 hsize hposb hb)
+          (hfeas b hb)
+      · rw [repairStep_count bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega) hsize hposb
+          hpos_top]
+        exact hleaf
+      · have hk := repairStep_kraft bl (findBelow bl (maxBits - 1)) maxBits hb1 (by omega) hsize
+          hposb hpos_top
+        omega
+
+/-- **`repairBl` completeness (histogram core of #2536).** From a capped,
+    per-prefix feasible, over-subscribed `bl_count` whose leaf count fits in
+    `2^maxBits`, `repairBl` (run for exactly the excess) yields a complete
+    (Kraft-exact) length-limited code: `blKraft = 2^maxBits`. This rules out the
+    zlib-rejected-incomplete-code bug class (D-20) at the histogram level. -/
+theorem repairBl_complete (bl : Array Nat) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hsize : maxBits < bl.size)
+    (hfeas : ∀ b, b < maxBits → blKraftFrom bl b 1 ≤ 2 ^ b)
+    (hleaf : blCountSum bl maxBits ≤ 2 ^ maxBits)
+    (hge : 2 ^ maxBits ≤ blKraft bl maxBits) :
+    blKraft (repairBl bl (blKraft bl maxBits - 2 ^ maxBits) maxBits) maxBits = 2 ^ maxBits :=
+  repairBl_loop maxBits hmb (blKraft bl maxBits - 2 ^ maxBits) bl hsize hfeas hleaf (by omega)
+
 /-- A `BuildTree` rooted at depth `d` has its Kraft sum (relative to any `D ≥ max depth`)
     equal to `2^(D - d)`. This is the fundamental property of binary trees:
     the leaves partition the code space exactly. -/

@@ -881,6 +881,18 @@ Key lemmas:
 This pattern appears in Zstd offset decoding (`decodeOffsetValue`) and FSE
 table size proofs where `tableSize = 1 <<< accuracyLog`.
 
+**Sidestep `omega` when the goal is `X ≤ X + 2^k` shaped.** A common Kraft-sum
+case: you have an equation `eA : X + 2^k = Y` (the net effect of a `set!`) and
+want `X ≤ Y`. `omega` *fails* here — after lifting `2^k` to `ℤ` it loses
+`2^k ≥ 0`, so the residual `2^k ≤ -1` looks satisfiable. Two fixes:
+- establish `have : 1 ≤ 2 ^ k := Nat.one_le_two_pow` (or `0 ≤ ...`) *before*
+  `omega`, per above; or
+- skip `omega` entirely with the raw Nat lemma: `exact Nat.le.intro eA`
+  (`n + k = m → n ≤ m`), or `Nat.le_of_eq eA` when it's an equality after
+  rewriting. Cleaner than feeding omega positivity facts for every power.
+
+This bit `repairStep_feas`/`repairBl_loop` in `Zip/Spec/HuffmanEncode.lean`.
+
 ### `simp only [Nat.shiftLeft_eq]` Fails to Match `<<<` in Hypotheses
 
 When `<<<` appears in hypotheses (e.g. from function unfolding), `simp only
