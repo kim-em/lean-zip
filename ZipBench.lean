@@ -92,7 +92,11 @@ def generateData (pattern : String) (size : Nat) : IO ByteArray :=
   | "cyclic"   => pure (mkCyclicData size)
   | "prng"     => pure (mkPrngData size)
   | "text"     => pure (mkTextData size)
-  | other      => throw (IO.userError s!"unknown pattern: {other}")
+  -- "@<path>": read a real corpus file (size arg ignored). Synthetic generators
+  -- (esp. `text`) are degenerate for matcher measurement — use real data here.
+  | p          =>
+    if p.startsWith "@" then IO.FS.readBinFile (p.drop 1).toString
+    else throw (IO.userError s!"unknown pattern: {p}")
 
 def main (args : List String) : IO Unit := do
   match args with
@@ -221,6 +225,64 @@ where
     | "compress-libdeflate" =>
       let _ ← Libdeflate.compress data level.toUInt8
       pure ()
+    -- P0 diagnostic: separate the one-time dense-table CAF build (paid on the
+    -- first distance lookup of the process) from steady-state per-call cost.
+    -- Builds `nin` distinct inputs (perturb one byte) to defeat CSE/memoisation,
+    -- times each `deflateRaw` at `level`, and reports first-call vs mean-of-rest.
+    | "profile-raw" =>
+      let nin := 64
+      let reps := 60
+      let mut inputs : Array ByteArray := #[]
+      for i in [0:nin] do
+        let d := if data.size == 0 then data else
+          (data.extract 0 data.size).set! (i % data.size) (data[i % data.size]!.toNat.toUInt8 ^^^ 1)
+        inputs := inputs.push d
+      -- Force the result through IO so each compression is fully evaluated
+      -- *between* the timestamps (a pure `let` would defer evaluation past `b`).
+      let sink (x : ByteArray) : IO UInt64 :=
+        pure (x.size.toUInt64 + (if x.size > 0 then x[0]!.toUInt64 else 0))
+      let mut acc : UInt64 := 0
+      let mut times : Array Nat := #[]
+      for c in inputs do
+        let a ← IO.monoNanosNow
+        acc := acc + (← sink (Zip.Native.Deflate.deflateRaw c level.toUInt8))
+        let b ← IO.monoNanosNow
+        times := times.push (b - a)
+      -- Extra unmeasured passes for profiler sample volume (steady state only).
+      for _ in [0:reps] do
+        for c in inputs do
+          acc := acc + (← sink (Zip.Native.Deflate.deflateRaw c level.toUInt8))
+      if acc == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      let first := times[0]!
+      let rest := times.toList.drop 1
+      let restMean := (rest.foldl (· + ·) 0).toFloat / rest.length.toFloat
+      IO.println s!"size={data.size} lvl={level}: first={first}ns restMean={restMean.toString.take 9}ns ratio={(first.toFloat/restMean).toString.take 5}x"
+    -- P1 gate 2: match-length histogram of the packed matcher stream at `level`.
+    -- A reference token has bit 31 set; length sits in bits 16..30. Reports the
+    -- literal/reference split and how many references have ≥8 bytes of runway
+    -- (the threshold below which word-at-a-time compare cannot pay).
+    | "match-hist" =>
+      let ptoks := Zip.Native.Deflate.lzMatchP data level.toUInt8
+      let mut lits : Nat := 0
+      let mut refs : Nat := 0
+      let mut totLen : Nat := 0
+      let mut ge8 : Nat := 0
+      let mut ge16 : Nat := 0
+      let mut buckets : Array Nat := Array.replicate 9 0  -- len 3..10 then 11+
+      for w in ptoks do
+        if w &&& ((1 : UInt32) <<< 31) == 0 then
+          lits := lits + 1
+        else
+          let len := ((w >>> 16) &&& 0x7FFF).toNat
+          refs := refs + 1
+          totLen := totLen + len
+          if len ≥ 8 then ge8 := ge8 + 1
+          if len ≥ 16 then ge16 := ge16 + 1
+          let b := if len ≤ 10 then len - 3 else 8
+          buckets := buckets.set! b (buckets[b]! + 1)
+      let refsF := if refs == 0 then 1.0 else refs.toFloat
+      IO.println s!"size={data.size} lvl={level}: lits={lits} refs={refs} avgLen={(totLen.toFloat/refsF).toString.take 5} ge8={ge8}({(100.0*ge8.toFloat/refsF).toString.take 4}%) ge16={ge16}({(100.0*ge16.toFloat/refsF).toString.take 4}%)"
+      IO.println s!"  len-buckets [3,4,5,6,7,8,9,10,11+]: {buckets.toList}"
     -- Checksum benchmarks
     | "crc32" =>
       let _ := Crc32.Native.crc32 0 data

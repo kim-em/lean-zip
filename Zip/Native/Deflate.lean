@@ -301,6 +301,22 @@ theorem findDistCodeFast_eq (dist : Nat) :
   · simp only [distCodeTab, Array.getElem_map, Array.getElem_range]
   · rfl
 
+/-! ## USize-addressability helpers (Wave 7 P1a)
+
+The matcher's `countMatch` byte-compare loop runs in `USize` (one machine
+word add + `ByteArray.uget`, no boxed-`Nat` arithmetic or reference-count
+traffic per byte — see `lz77Greedy.goU`). These two lemmas bridge `USize`
+indexing back to `Nat` `getElem` so the fast loop is proven equal to the
+original `Nat` loop (`goU_eq`). -/
+
+/-- A `Nat` below `USize.size` round-trips through `USize` unchanged. -/
+theorem toUSize_toNat_of_lt {n : Nat} (h : n < USize.size) : n.toUSize.toNat = n := by
+  simp only [Nat.toUSize]; exact Nat.mod_eq_of_lt h
+
+/-- `ByteArray.uget` at `i` is `getElem` at `i.toNat` (definitional). -/
+theorem uget_eq_getElem (data : ByteArray) (i : USize) (h : i.toNat < data.size) :
+    data.uget i h = data[i.toNat]'h := rfl
+
 inductive LZ77Token where
   | literal : UInt8 → LZ77Token
   | reference : (length : Nat) → (distance : Nat) → LZ77Token
@@ -388,7 +404,16 @@ where
     ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
-    go data p1 p2 0 maxLen h1 h2
+    -- P1a: when the buffer is `USize`-addressable (always true at runtime; the
+    -- check is one `USize` round-trip, no bignum), run the unboxed `USize` loop
+    -- `goU` — proven equal to the `Nat` `go` by `goU_eq`. Else fall back to `go`.
+    if hg : data.size.toUSize.toNat = data.size then
+      have hsz : data.size < USize.size := by
+        rw [← hg]; exact USize.toNat_lt_two_pow_numBits _
+      (goU data p1.toUSize p2.toUSize 0 maxLen.toUSize hsz
+        (by rw [toUSize_toNat_of_lt (by omega), toUSize_toNat_of_lt (by omega)]; omega)
+        (by rw [toUSize_toNat_of_lt (by omega), toUSize_toNat_of_lt (by omega)]; omega)).toNat
+    else go data p1 p2 0 maxLen h1 h2
   go (data : ByteArray) (p1 p2 i maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     if hi : i < maxLen then
@@ -397,6 +422,30 @@ where
       else i
     else i
   termination_by maxLen - i
+  goU (data : ByteArray) (p1 p2 i maxLen : USize)
+      (hsz : data.size < USize.size)
+      (h1 : p1.toNat + maxLen.toNat ≤ data.size)
+      (h2 : p2.toNat + maxLen.toNat ≤ data.size) : USize :=
+    if hlt : i < maxLen then
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      have him : i.toNat < maxLen.toNat := USize.lt_iff_toNat_lt.mp hlt
+      have e1 : (p1 + i).toNat = p1.toNat + i.toNat := by
+        rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+      have e2 : (p2 + i).toNat = p2.toNat + i.toNat := by
+        rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+      have hb1 : (p1 + i).toNat < data.size := by omega
+      have hb2 : (p2 + i).toNat < data.size := by omega
+      if data.uget (p1 + i) hb1 == data.uget (p2 + i) hb2 then
+        goU data p1 p2 (i + 1) maxLen hsz h1 h2
+      else i
+    else i
+  termination_by maxLen.toNat - i.toNat
+  decreasing_by
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have him : i.toNat < maxLen.toNat := USize.lt_iff_toNat_lt.mp hlt
+    have e : (i + 1).toNat = i.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt; omega
+    omega
   trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
     if h : pos < data.size then
       .literal (data[pos]'h) :: trailing data (pos + 1)

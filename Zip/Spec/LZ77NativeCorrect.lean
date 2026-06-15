@@ -60,13 +60,58 @@ theorem lz77Greedy.go_matches (data : ByteArray) (p1 p2 i maxLen : Nat)
   · exact ⟨fun j hj hjn => by omega, by omega, by omega⟩
 termination_by maxLen - i
 
+/-- P1a: the unboxed `USize` byte-compare loop computes the same count as the
+    `Nat` loop `go`, whenever the buffer is `USize`-addressable. The `goU`
+    bound arguments are proof-irrelevant, so any valid witnesses unify. -/
+theorem lz77Greedy.goU_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
+    (hsz : data.size < USize.size)
+    (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size)
+    (hile : i ≤ maxLen)
+    (hu1 : p1.toUSize.toNat + maxLen.toUSize.toNat ≤ data.size)
+    (hu2 : p2.toUSize.toNat + maxLen.toUSize.toNat ≤ data.size) :
+    (lz77Greedy.goU data p1.toUSize p2.toUSize i.toUSize maxLen.toUSize hsz hu1 hu2).toNat
+      = lz77Greedy.go data p1 p2 i maxLen h1 h2 := by
+  have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+  have hp1 : p1.toUSize.toNat = p1 := toUSize_toNat_of_lt (by omega)
+  have hp2 : p2.toUSize.toNat = p2 := toUSize_toNat_of_lt (by omega)
+  have hmax : maxLen.toUSize.toNat = maxLen := toUSize_toNat_of_lt (by omega)
+  have hi : i.toUSize.toNat = i := toUSize_toNat_of_lt (by omega)
+  rw [lz77Greedy.goU, lz77Greedy.go]
+  by_cases hlt : i < maxLen
+  · have hltU : i.toUSize < maxLen.toUSize := USize.lt_iff_toNat_lt.mpr (by omega)
+    rw [dif_pos hlt, dif_pos hltU]
+    have hadd1 : (p1.toUSize + i.toUSize).toNat = p1 + i := by
+      rw [USize.toNat_add, hp1, hi]; apply Nat.mod_eq_of_lt; omega
+    have hadd2 : (p2.toUSize + i.toUSize).toNat = p2 + i := by
+      rw [USize.toNat_add, hp2, hi]; apply Nat.mod_eq_of_lt; omega
+    simp only [uget_eq_getElem, hadd1, hadd2]
+    by_cases heq : data[p1 + i] == data[p2 + i]
+    · rw [if_pos heq, if_pos heq]
+      have hi1 : (i + 1).toUSize = i.toUSize + 1 := by
+        apply USize.toNat_inj.mp
+        rw [USize.toNat_add, USize.toNat_one, hi, toUSize_toNat_of_lt (by omega)]
+        symm; apply Nat.mod_eq_of_lt; omega
+      rw [← hi1]
+      exact lz77Greedy.goU_eq data p1 p2 (i + 1) maxLen hsz h1 h2 (by omega) hu1 hu2
+    · rw [if_neg heq, if_neg heq, hi]
+  · rw [dif_neg hlt,
+        dif_neg (by rw [USize.lt_iff_toNat_lt]; omega : ¬ i.toUSize < maxLen.toUSize), hi]
+termination_by maxLen - i
+
 /-- `countMatch` returns a count of consecutive matching bytes starting from
     position 0, with all counted positions verified equal. -/
 theorem lz77Greedy.countMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat)
     (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) :
     let n := lz77Greedy.countMatch data p1 p2 maxLen h1 h2
     (∀ j, j < n → data[p1 + j]! = data[p2 + j]!) ∧ n ≤ maxLen := by
-  simp only [lz77Greedy.countMatch]
+  have hgo : lz77Greedy.countMatch data p1 p2 maxLen h1 h2
+      = lz77Greedy.go data p1 p2 0 maxLen h1 h2 := by
+    rw [lz77Greedy.countMatch]
+    split
+    · rename_i hg
+      exact lz77Greedy.goU_eq data p1 p2 0 maxLen _ h1 h2 (by omega) _ _
+    · rfl
+  simp only [hgo]
   have h := lz77Greedy.go_matches data p1 p2 0 maxLen h1 h2 (by omega)
   exact ⟨fun j hj => h.1 j (by omega) hj, h.2.2⟩
 
