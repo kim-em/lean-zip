@@ -257,6 +257,35 @@ where
       let rest := times.toList.drop 1
       let restMean := (rest.foldl (· + ·) 0).toFloat / rest.length.toFloat
       IO.println s!"size={data.size} lvl={level}: first={first}ns restMean={restMean.toString.take 9}ns ratio={(first.toFloat/restMean).toString.take 5}x"
+    -- Pareto measurement for matcher-policy experiments: steady-state compress
+    -- throughput (MB/s) AND output size (compression ratio), both axes from one
+    -- run. Builds distinct inputs (perturb one byte) to defeat CSE/memoisation.
+    | "compress-pareto" =>
+      let nin := 4
+      let reps := 12
+      let mut inputs : Array ByteArray := #[]
+      for i in [0:nin] do
+        let d := if data.size == 0 then data else
+          (data.extract 0 data.size).set! (i % data.size) (data[i % data.size]!.toNat.toUInt8 ^^^ 1)
+        inputs := inputs.push d
+      let sink (x : ByteArray) : IO UInt64 :=
+        pure (x.size.toUInt64 + (if x.size > 0 then x[0]!.toUInt64 else 0))
+      let mut acc : UInt64 := 0
+      -- warm
+      for c in inputs do acc := acc + (← sink (Zip.Native.Deflate.deflateRaw c level.toUInt8))
+      let outSize := (Zip.Native.Deflate.deflateRaw (inputs[0]!) level.toUInt8).size
+      let mut tot : Nat := 0
+      for _ in [0:reps] do
+        for c in inputs do
+          let a ← IO.monoNanosNow
+          acc := acc + (← sink (Zip.Native.Deflate.deflateRaw c level.toUInt8))
+          let b ← IO.monoNanosNow
+          tot := tot + (b - a)
+      if acc == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      let n := (reps * nin).toFloat
+      let mbps : Float := (data.size.toFloat * n) / (tot.toFloat / 1.0e9) / 1.0e6
+      let ratio : Float := 100.0 * outSize.toFloat / data.size.toFloat
+      IO.println s!"size={data.size} lvl={level}: {mbps.toString.take 7} MB/s  out={outSize} ratio={ratio.toString.take 5}%"
     -- P1 gate 2: match-length histogram of the packed matcher stream at `level`.
     -- A reference token has bit 31 set; length sits in bits 16..30. Reports the
     -- literal/reference split and how many references have ≥8 bytes of runway
@@ -268,6 +297,9 @@ where
       let mut totLen : Nat := 0
       let mut ge8 : Nat := 0
       let mut ge16 : Nat := 0
+      let mut ge32 : Nat := 0
+      let mut ge64 : Nat := 0
+      let mut ge128 : Nat := 0
       let mut buckets : Array Nat := Array.replicate 9 0  -- len 3..10 then 11+
       for w in ptoks do
         if w &&& ((1 : UInt32) <<< 31) == 0 then
@@ -278,10 +310,15 @@ where
           totLen := totLen + len
           if len ≥ 8 then ge8 := ge8 + 1
           if len ≥ 16 then ge16 := ge16 + 1
+          if len ≥ 32 then ge32 := ge32 + 1
+          if len ≥ 64 then ge64 := ge64 + 1
+          if len ≥ 128 then ge128 := ge128 + 1
           let b := if len ≤ 10 then len - 3 else 8
           buckets := buckets.set! b (buckets[b]! + 1)
       let refsF := if refs == 0 then 1.0 else refs.toFloat
-      IO.println s!"size={data.size} lvl={level}: lits={lits} refs={refs} avgLen={(totLen.toFloat/refsF).toString.take 5} ge8={ge8}({(100.0*ge8.toFloat/refsF).toString.take 4}%) ge16={ge16}({(100.0*ge16.toFloat/refsF).toString.take 4}%)"
+      let pct (n : Nat) := (100.0*n.toFloat/refsF).toString.take 4
+      IO.println s!"size={data.size} lvl={level}: lits={lits} refs={refs} avgLen={(totLen.toFloat/refsF).toString.take 5} ge8={ge8}({pct ge8}%) ge16={ge16}({pct ge16}%)"
+      IO.println s!"  nice-thresholds: ge32={ge32}({pct ge32}%) ge64={ge64}({pct ge64}%) ge128={ge128}({pct ge128}%)"
       IO.println s!"  len-buckets [3,4,5,6,7,8,9,10,11+]: {buckets.toList}"
     -- Checksum benchmarks
     | "crc32" =>

@@ -249,6 +249,19 @@ result back to the reference walk's components exactly. The iterative-vs-
 recursive mainLoop proofs rewrite with the decode lemmas (side condition
 discharged by `min258_le_511`) and then proceed exactly as before. -/
 
+/-- Contrapositive of `countMatch_matches`: if the byte at offset `k` mismatches,
+    the match cannot reach length `k`, so `countMatch ≤ k`. This is what makes the
+    `chainWalkPacked` prefilter output-preserving — a candidate whose byte at the
+    current best length differs cannot beat it, so skipping its full compare loses
+    nothing. -/
+theorem countMatch_le_of_byte_ne (data : ByteArray) (cand pos maxLen : Nat)
+    (hcand : cand + maxLen ≤ data.size) (hpm : pos + maxLen ≤ data.size)
+    (k : Nat) (hne : data[cand + k]! ≠ data[pos + k]!) :
+    lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ k := by
+  rcases Nat.lt_or_ge k (lz77Greedy.countMatch data cand pos maxLen hcand hpm) with h | h
+  · exact absurd ((lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).1 k h) hne
+  · exact h
+
 /-- The packed walk computes exactly the packed image of the proven-bounds
     walk: identical control flow, with the pair accumulator carried as
     `bestPos * 512 + bestLen` at every step. -/
@@ -266,13 +279,37 @@ theorem chainWalkPacked_eq (data : ByteArray) (prev : Array Nat)
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
     · have hcand : cand + maxLen ≤ data.size := by omega
       simp only [dif_pos hc, Nat.add_sub_cancel]
-      by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
-      · by_cases hb : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ maxLen
-        · simp only [hml, hb, ↓reduceIte]
-        · simp only [hml, hb, ↓reduceIte, ih]
-      · by_cases hb : bestLen ≥ maxLen
-        · simp only [hml, hb, ↓reduceIte]
-        · simp only [hml, hb, ↓reduceIte, ih]
+      -- The prefilter `skip` only fires when the byte at offset `bestLen`
+      -- mismatches; then `countMatch ≤ bestLen` (contrapositive of
+      -- `countMatch_matches`), so the un-prefiltered `chainWalkFast` does not
+      -- update either and recurses with `(bestLen, bestPos)` — same as the skip.
+      by_cases hbl : bestLen < maxLen
+      · simp only [dif_pos hbl]
+        by_cases hbyte : data[cand + bestLen]'(by omega) = data[pos + bestLen]'(by omega)
+        · -- bytes equal → skip = false → the full-compare path
+          rw [hbyte]
+          simp only [bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]
+          by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+          · by_cases hb : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ maxLen
+            · simp only [hml, hb, ↓reduceIte]
+            · simp only [hml, hb, ↓reduceIte, ih]
+          · by_cases hb : bestLen ≥ maxLen
+            · simp only [hml, hb, ↓reduceIte]
+            · simp only [hml, hb, ↓reduceIte, ih]
+        · -- bytes differ → skip = true → both sides recurse with (bestLen, bestPos)
+          have hne! : data[cand + bestLen]! ≠ data[pos + bestLen]! := by
+            rw [getElem!_pos data (cand + bestLen) (by omega),
+              getElem!_pos data (pos + bestLen) (by omega)]
+            exact hbyte
+          have hle := countMatch_le_of_byte_ne data cand pos maxLen hcand hpm bestLen hne!
+          simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, Nat.not_lt.mpr hle,
+            Nat.not_le.mpr hbl, ih]
+      · -- bestLen ≥ maxLen → skip = false; countMatch ≤ maxLen ≤ bestLen, no update
+        simp only [dif_neg hbl, Bool.false_eq_true, ↓reduceIte]
+        have hle : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ bestLen :=
+          Nat.le_trans (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+            (Nat.le_of_not_lt hbl)
+        simp only [Nat.not_lt.mpr hle, ge_iff_le, Nat.le_of_not_lt hbl, ↓reduceIte]
     · simp only [dif_neg hc]
 
 /-- One runtime guard collapses the packed walk to the packed image of the
