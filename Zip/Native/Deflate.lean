@@ -401,7 +401,9 @@ where
     let a := (data[pos]'(by omega)).toUInt32
     let b := (data[pos + 1]'(by omega)).toUInt32
     let c := (data[pos + 2]'(by omega)).toUInt32
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
+    let d := if h3 : pos + 3 < data.size then (data[pos + 3]'h3).toUInt32 else 0
+    let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    (((word * 2654435761) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     -- P1a: when the buffer is `USize`-addressable (always true at runtime; the
@@ -530,7 +532,9 @@ where
     let a := (data[pos]'(by omega)).toUInt32
     let b := (data[pos + 1]'(by omega)).toUInt32
     let c := (data[pos + 2]'(by omega)).toUInt32
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
+    let d := if h3 : pos + 3 < data.size then (data[pos + 3]'h3).toUInt32 else 0
+    let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    (((word * 2654435761) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
@@ -1392,7 +1396,9 @@ where
     let a := (data[pos]'(by omega)).toUInt32
     let b := (data[pos + 1]'(by omega)).toUInt32
     let c := (data[pos + 2]'(by omega)).toUInt32
-    ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
+    let d := if h3 : pos + 3 < data.size then (data[pos + 3]'h3).toUInt32 else 0
+    let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    (((word * 2654435761) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
