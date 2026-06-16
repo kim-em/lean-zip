@@ -412,6 +412,14 @@ def insertCap (level : UInt8) : Nat :=
   else if level ≤ 3 then 64
   else 1000000000
 
+/-- Lazy `good_match` threshold (zlib-style): the lazy matcher skips the
+    one-byte-lookahead probe once the first match is at least this long, since a
+    long first match is rarely improved by deferral. Lower → more gating (faster,
+    slightly worse ratio). `259 > 258` disables gating. SPIKE: uniform 8. -/
+def goodMatch (level : UInt8) : Nat :=
+  if level ≤ 6 then 8
+  else 259
+
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
     greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
     lazy variant, which improves ratio at equal window/chain depth. Both share the
@@ -419,7 +427,7 @@ def insertCap (level : UInt8) : Nat :=
     (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the choice is
     transparent to the roundtrip proof. -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level)
+  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -428,7 +436,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
-  if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level)
+  if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level) (goodMatch level)
   else lz77ChainIterP data (chainDepth level) 32768 (insertCap level)
 
 /-! ## Self-contained block-split dynamic compression
