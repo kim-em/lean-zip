@@ -792,15 +792,26 @@ def chainWalkPacked (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen
   if fuel = 0 then bestPos * 512 + bestLen
   else if hc : cand < pos ∧ pos - cand ≤ windowSize then
     have hcand : cand + maxLen ≤ data.size := by omega
-    let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
-    let bl := if ml > bestLen then ml else bestLen
-    let bp := if ml > bestLen then cand else bestPos
-    if bl ≥ maxLen then bp * 512 + bl
-    else chainWalkPacked data prev windowSize pos maxLen hpm hps
-      (prev[cand]'(by omega)) (fuel - 1) bl bp
+    -- Match prefilter (zlib `scan_end`): a candidate can only *beat* the current
+    -- best length if its byte at offset `bestLen` matches the one at `pos`;
+    -- otherwise `countMatch ≤ bestLen` and the update test `ml > bestLen` fails,
+    -- so the full compare is wasted. Skipping it is output-preserving.
+    let skip : Bool := if hbl : bestLen < maxLen then
+        data[cand + bestLen]'(by omega) != data[pos + bestLen]'(by omega)
+      else false
+    if skip then
+      chainWalkPacked data prev windowSize pos maxLen hpm hps
+        (prev[cand]'(by omega)) (fuel - 1) bestLen bestPos
+    else
+      let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
+      let bl := if ml > bestLen then ml else bestLen
+      let bp := if ml > bestLen then cand else bestPos
+      if bl ≥ maxLen then bp * 512 + bl
+      else chainWalkPacked data prev windowSize pos maxLen hpm hps
+        (prev[cand]'(by omega)) (fuel - 1) bl bp
   else bestPos * 512 + bestLen
 termination_by fuel
-decreasing_by omega
+decreasing_by all_goals omega
 
 /-- One runtime `pos ≤ prev.size` check guards the whole `chainWalkPacked`
     inner loop; the (unreachable) fallback packs the reference walk's pair, so
