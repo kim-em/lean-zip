@@ -216,8 +216,10 @@ def dumpPayloads (dir : String) : IO Unit := do
       IO.FS.writeBinFile (sub / s!"{file}.bin") data
     IO.eprintln s!"Dumped {files.length} {corpus} payloads → {sub}"
 
-def runReport (outPath : String) : IO Unit := do
-  IO.eprintln "Running Track D benchmark matrix (native vs references) on real corpora…"
+def runReport (outPath : String) (nativeOnly : Bool := false)
+    (levelOverride : Option (List Nat) := none) : IO Unit := do
+  IO.eprintln s!"Running Track D benchmark matrix ({if nativeOnly then "native ONLY" else "native vs references"}\
+{match levelOverride with | some ls => s!", levels {ls}" | none => ""}) on real corpora…"
 
   -- Real-corpus rows only: the same timing matrix over every committed corpus
   -- (one single-size workload per file), so the dashboard rests entirely on
@@ -237,14 +239,21 @@ def runReport (outPath : String) : IO Unit := do
     -- level/rep it dominated the wall-clock of the whole matrix. Its FFI binding
     -- (`zopfliCompress`) is kept for ad-hoc ratio-ceiling checks.
     let big := corpus == "silesia"
-    let lvls := levels
+    let lvls := levelOverride.getD levels
     let rps  := if big then 1 else reps
     IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, levels {lvls}, reps {rps})…"
     let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)     (theLevels := lvls) (theReps := rps)
-    let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress) (theLevels := lvls) (theReps := rps)
-    let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress) (theLevels := lvls) (theReps := rps)
-    let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress) (theLevels := lvls) (theReps := rps)
-    rows := rows ++ cn ++ cz ++ cm ++ cl
+    -- `--native-only`: skip the reference compressors. Their ratios are
+    -- deterministic and their MB/s drift <~3% run-to-run (measured), so a Lean-only
+    -- change reuses the prior dashboard's reference rows (spliced in post-hoc by
+    -- bench/run.sh) instead of paying to re-measure them.
+    if nativeOnly then
+      rows := rows ++ cn
+    else
+      let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress) (theLevels := lvls) (theReps := rps)
+      let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress) (theLevels := lvls) (theReps := rps)
+      let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress) (theLevels := lvls) (theReps := rps)
+      rows := rows ++ cn ++ cz ++ cm ++ cl
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]
@@ -316,4 +325,10 @@ def main (args : List String) : IO Unit := do
   match args with
   | ["--dump-payloads", dir] => dumpPayloads dir
   | ["--zopfli-ceiling", out] => runZopfliCeiling out
+  | ["--native-only", out] => runReport out (nativeOnly := true)
+  | ["--native-only", out, lvlCsv] =>
+    -- e.g. "1,2,3,4,5,6,7,8" to skip the slow optimal-parse L9 when a Lean change
+    -- does not touch the L9 path; the dashboard splice keeps the prior L9 + reference rows.
+    let lvls := (lvlCsv.splitOn ",").filterMap (·.trim.toNat?)
+    runReport out (nativeOnly := true) (levelOverride := some lvls)
   | _ => runReport (args.head?.getD "bench/results/latest.json")
