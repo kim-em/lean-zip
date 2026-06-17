@@ -652,6 +652,71 @@ def go (litTable distTable : Array (UInt16 × UInt8))
 termination_by dataSize * 8 - bitpos
 decreasing_by all_goals omega
 
+set_option maxRecDepth 4096 in
+/-- Fused-refill variant of `go`: the `refill` byte-loading loop is unrolled
+    into the recursion (the `cnt ≤ 56 ∧ pos < data.size` branch loads one byte
+    and self-recurses), so the whole decoder compiles to a single tail-recursive
+    `goto` loop with `bitBuf` in a register and **no per-token `refill` tuple**.
+    Decode branches are byte-for-byte the bodies of `go` (same guards, same
+    errors), so `goFused = go` (`Zip.Spec.InflateBufCorrect.goFused_eq_go`); it
+    is the production hot path. `(dataSize*8 - bitpos, data.size - pos)`
+    decreases lexicographically: refill steps shrink `data.size - pos` (first
+    component fixed since `bitpos` is unchanged), decode steps shrink
+    `dataSize*8 - bitpos` via the progress guards. See #2637. -/
+def goFused (litTable distTable : Array (UInt16 × UInt8))
+    (data : ByteArray) (litTree distTree : HuffTree) (maxOut dataSize : Nat)
+    (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray) :
+    Except String (ByteArray × Nat × UInt64 × Nat × Nat) := do
+  if hrc : cnt ≤ 56 ∧ pos < data.size then
+    goFused litTable distTable data litTree distTree maxOut dataSize
+      (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) bitpos output
+  else
+  let cnt0 := cnt
+  match decodeSym litTree litTable bitBuf cnt with
+  | .error e => .error e
+  | .ok (sym, bitBuf, cnt, _used) =>
+    if sym < 256 then
+      if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+      else if _h₁ : bitpos + (cnt0 - cnt) ≤ bitpos then throw "Inflate: no progress in Huffman decode"
+      else if _h₂ : dataSize * 8 < bitpos + (cnt0 - cnt) then throw "Inflate: bit position out of range"
+      else
+        goFused litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt (bitpos + (cnt0 - cnt)) (output.push sym.toUInt8)
+    else if sym == 256 then
+      .ok (output, pos, bitBuf, cnt, bitpos + (cnt0 - cnt))
+    else
+      let idx := sym.toNat - 257
+      if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+      else
+        let base := Inflate.lengthBase[idx]
+        let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
+        let (extraBits, bitBuf, cnt) ← takeBits bitBuf cnt extra.toNat
+        let length := base.toNat + extraBits
+        match decodeSym distTree distTable bitBuf cnt with
+        | .error e => .error e
+        | .ok (distSym, bitBuf, cnt, _dused) =>
+          let dIdx := distSym.toNat
+          if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+          else
+            let dBase := Inflate.distBase[dIdx]
+            let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
+            let (dExtraBits, bitBuf, cnt) ← takeBits bitBuf cnt dExtra.toNat
+            let distance := dBase.toNat + dExtraBits
+            if h0 : distance = 0 then throw s!"Inflate: zero back-reference distance"
+            else if hds : distance > output.size then
+              throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+            else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"
+            else if _h₁ : bitpos + (cnt0 - cnt) ≤ bitpos then throw "Inflate: no progress in Huffman decode"
+            else if _h₂ : dataSize * 8 < bitpos + (cnt0 - cnt) then throw "Inflate: bit position out of range"
+            else
+              let out := Inflate.copyLoop output (output.size - distance) distance 0 length
+                (by omega) (by omega)
+              goFused litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt (bitpos + (cnt0 - cnt)) out
+termination_by (dataSize * 8 - bitpos, data.size - pos)
+decreasing_by
+  · exact Prod.Lex.right _ (by omega)
+  · exact Prod.Lex.left _ _ (by omega)
+  · exact Prod.Lex.left _ _ (by omega)
+
 /-- Wide-buffer replacement for `Inflate.decodeHuffmanFastBR`: convert the
     `BitReader` to a scalar buffer, run the loop, convert back. -/
 def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
@@ -665,7 +730,7 @@ def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
   let cnt := cnt - br.bitOff
   let bitpos := br.pos * 8 + br.bitOff
   let (out, pos', bitBuf', cnt', _bitpos') ←
-    go litTable distTable br.data litTree distTree maxOut br.data.size pos bitBuf cnt bitpos output
+    goFused litTable distTable br.data litTree distTree maxOut br.data.size pos bitBuf cnt bitpos output
   let _ := bitBuf'
   let endbit := pos' * 8 - cnt'
   .ok (out, { data := br.data, pos := endbit / 8, bitOff := endbit % 8 })
