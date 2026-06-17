@@ -134,3 +134,20 @@ for corpus in corpora(AFTER):
                      if find(AFTER, "native", p, lvl)])
         if a and b and r:
             print(f"{lvl:>3} {r:>7.3f} {b:>9.1f} {a:>9.1f} {a/b:>7.2f}x")
+
+# Baseline sanity: the largest before/after ratio difference over every measured
+# (pattern, level). An output-neutral PR (dispatch/escape, re-timed loop) MUST
+# read 0.000000 here — a nonzero value means the BEFORE baseline is wrong (a
+# stale-branch leak; recheck SKILL.md step 4) or the change is not output-neutral.
+bkey = {(r["compressor"], r["pattern"], r["level"]): r for r in BEFORE}
+worst, worst_at = 0.0, None
+for r in AFTER:
+    b = bkey.get((r["compressor"], r["pattern"], r["level"]))
+    if b and r.get("ratio") is not None and b.get("ratio") is not None:
+        d = abs(r["ratio"] - b["ratio"])
+        if d > worst:
+            worst, worst_at = d, (r["pattern"], r["level"])
+print(f"\nmax |Δratio| (before vs after) = {worst:.6f}"
+      + (f"  at {worst_at[0]} L{worst_at[1]}" if worst_at and worst > 0 else "")
+      + ("   [output-neutral: OK]" if worst == 0
+         else "   [ratio changed — intended for a parse change; a stale-baseline leak otherwise]"))
