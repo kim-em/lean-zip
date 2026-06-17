@@ -1051,6 +1051,122 @@ theorem fromLengths_depthLE {lengths : Array UInt8} {maxBits : Nat} {tree : Huff
       simp only [decide_eq_true_eq, gt_iff_lt, Nat.not_lt] at hi2
       exact hi2
 
+/-! ## The fused-refill loop equals the reference loop -/
+
+/-- One refill step is invariant for `go`: since `go` begins by refilling and
+    uses only the refilled `(pos,bitBuf,cnt)`, advancing the cursor by one byte
+    (exactly when the refill loop would) does not change `go`'s result. The
+    workhorse for `goFused_eq_go`. -/
+theorem go_refill_step (litTable distTable : Array (UInt16 × UInt8)) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut dataSize : Nat)
+    (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray)
+    (hrc : cnt ≤ 56 ∧ pos < data.size) :
+    go litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt bitpos output
+    = go litTable distTable data litTree distTree maxOut dataSize
+        (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) bitpos output := by
+  have hr : refill data pos bitBuf cnt
+      = refill data (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) := by
+    rw [refill, if_pos hrc]
+  rw [go, go, hr]
+
+set_option maxHeartbeats 1000000 in
+set_option maxRecDepth 8000 in
+/-- **The fused-refill decoder equals the reference decoder.** `goFused` unrolls
+    `refill` into its own recursion (one byte per step) so it compiles to a single
+    allocation-free `goto` loop; this proves it computes exactly what `go` does.
+    Proof by functional induction on `goFused`: refill steps fold away via
+    `go_refill_step`, and each decode branch is byte-identical to `go`'s body once
+    the leading `refill` (a no-op here, `¬(cnt ≤ 56 ∧ pos < size)`) is discharged.
+    See #2637. -/
+theorem goFused_eq_go (litTable distTable : Array (UInt16 × UInt8)) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut dataSize : Nat) :
+    ∀ (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray),
+    goFused litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt bitpos output
+    = go litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt bitpos output := by
+  intro pos bitBuf cnt bitpos output
+  induction pos, bitBuf, cnt, bitpos, output using goFused.induct
+    (litTable := litTable) (data := data) (litTree := litTree) (maxOut := maxOut)
+    (dataSize := dataSize) with
+  | case1 pos bitBuf cnt bitpos output hrc ih =>
+      rw [goFused, dif_pos hrc, ih,
+        go_refill_step litTable distTable data litTree distTree maxOut dataSize
+          pos bitBuf cnt bitpos output hrc]
+  | case2 pos bitBuf cnt bitpos output hrc e hde =>
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde]
+  | case3 pos bitBuf cnt bitpos output hrc s bb c used hde hsym hmax =>
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_pos hsym, if_pos hmax]
+  | case4 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 =>
+      have h1c : bitpos + (cnt - c) ≤ bitpos := h1
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_pos h1c]
+  | case5 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 h2 =>
+      have h1c : ¬ bitpos + (cnt - c) ≤ bitpos := h1
+      have h2c : dataSize * 8 < bitpos + (cnt - c) := h2
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_neg h1c, dif_pos h2c]
+  | case6 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 h2 ih =>
+      have h1c : ¬ bitpos + (cnt - c) ≤ bitpos := h1
+      have h2c : ¬ dataSize * 8 < bitpos + (cnt - c) := h2
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_neg h1c, dif_neg h2c]
+      exact ih
+  | case7 pos bitBuf cnt bitpos output hrc s bb c used hde hsym heob =>
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_neg hsym, if_pos heob]
+  | case8 pos bitBuf cnt bitpos output hrc s bb c used hde hns hneob idx hidx =>
+      have hidxc : s.toNat - 257 ≥ Inflate.lengthBase.size := hidx
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_neg hns, if_neg hneob, dif_pos hidxc]
+  | case9 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hns hneob idx hh base ih =>
+      have hhc : ¬ s.toNat - 257 ≥ Inflate.lengthBase.size := hh
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      simp only [show cnt0 = cnt from rfl] at ih
+      have hext_lt : s.toNat - 257 < Inflate.lengthExtra.size := by
+        simp only [Inflate.lengthExtra_size]
+        simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hhc; omega
+      rw [goFused, dif_neg hrc, go, hrid]
+      simp only [hde, if_neg hns, if_neg hneob, dif_neg hhc]
+      cases hex : InflateBuf.takeBits bb c (Inflate.lengthExtra[s.toNat - 257]'hext_lt).toNat with
+      | error e => rfl
+      | ok pe =>
+          obtain ⟨eb, bb2, c2⟩ := pe
+          simp only [bind, Except.bind]
+          cases hdd : decodeSym distTree distTable bb2 c2 with
+          | error e => rfl
+          | ok pd =>
+              obtain ⟨distSym, bb3, c3, dused⟩ := pd
+              simp only []
+              split
+              · rfl
+              · rename_i hdi
+                have hdext_lt : distSym.toNat < Inflate.distExtra.size := by
+                  simp only [Inflate.distExtra_size]
+                  simp only [Inflate.distBase_size, ge_iff_le, Nat.not_le] at hdi; omega
+                cases hex2 : InflateBuf.takeBits bb3 c3 (Inflate.distExtra[distSym.toNat]'hdext_lt).toNat with
+                | error e => rfl
+                | ok pd2 =>
+                    obtain ⟨deb, bb4, c4⟩ := pd2
+                    simp only []
+                    -- Both sides are now byte-identical except the final recursive
+                    -- call. Split the five back-reference guards (distance = 0,
+                    -- distance > output.size, output overflow > maxOut, no-progress,
+                    -- bit-position out of range); every guarded `throw` branch closes
+                    -- by `rfl` (both sides throw the same message), leaving the single
+                    -- recursive `copyLoop` branch, discharged by the inductive
+                    -- hypothesis (the guard proofs come from the `split`s).
+                    repeat' (first | rfl | split)
+                    exact ih eb distSym hdi deb bb4 c4 (by assumption) (by assumption)
+                      (by assumption) (by assumption)
+
 /-! ## The wide-buffer decoder equals the reference -/
 
 open Inflate in
@@ -1079,6 +1195,8 @@ theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
   unfold InflateBuf.decodeHuffmanFastBuf Inflate.decodeHuffmanFastBR
   rw [hrf]
   dsimp only []
+  -- the production decoder runs the fused-refill loop `goFused`, equal to `go`
+  rw [goFused_eq_go]
   simp only [BitReader.bitPos] at hco
   cases hgoB : InflateBuf.go litTree.buildTable distTree.buildTable br.data litTree distTree maxOut
       br.data.size pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) (br.pos * 8 + br.bitOff) output with
