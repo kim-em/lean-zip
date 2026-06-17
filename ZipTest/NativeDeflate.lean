@@ -6,6 +6,7 @@ import Zip.Native.Inflate
 /-! Tests for native DEFLATE: stored, fixed Huffman, dynamic Huffman, and lazy matching modes
     with cross-implementation verification against FFI inflate. -/
 
+set_option maxRecDepth 4000 in
 def ZipTest.NativeDeflate.tests : IO Unit := do
   IO.println "  NativeDeflate tests..."
   let big ← mkTestData
@@ -271,6 +272,71 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     match Zip.Native.Inflate.inflate rawSingle with
     | .ok result => assert! result == singleByte
     | .error e => throw (IO.userError s!"deflateRaw({level})→inflate failed on single byte: {e}")
+
+  -- Incompressible pre-scan: classification of the escape heuristic. All sample
+  -- inputs are ≥ the 1 MiB size gate so the repeat/entropy tests are actually
+  -- exercised (smaller inputs short-circuit on size alone). Random bytes must be
+  -- detected; compressible or restricted inputs (text, base64-style alphabet,
+  -- repeated blocks, all-zeros) and inputs below the gate must NOT be.
+  let prngBig := mkPrngData (2 * 1024 * 1024)
+  assert! Zip.Native.Deflate.incompressiblePrescan prngBig
+  assert! Zip.Native.Deflate.incompressiblePrescan (mkPrngData Zip.Native.Deflate.prescanMinSize)
+  assert! !Zip.Native.Deflate.incompressiblePrescan (mkPrngData (Zip.Native.Deflate.prescanMinSize - 1))
+  assert! !Zip.Native.Deflate.incompressiblePrescan (mkTextData (2 * 1024 * 1024))
+  assert! !Zip.Native.Deflate.incompressiblePrescan (mkConstantData (2 * 1024 * 1024))
+  -- Repetition the matcher can actually use (period ≤ 32 KiB window) must NOT be
+  -- flagged, even when the repeated bytes are themselves high-entropy: a fixed
+  -- random block tiled to >1 MiB compresses to a few percent but its within-region
+  -- 4-grams all recur.
+  let block8k := mkPrngData 8192
+  let repeated8k : ByteArray := Id.run do
+    let mut r := ByteArray.empty
+    for _ in [:160] do r := r ++ block8k       -- 8 KiB period, 1.25 MiB total
+    return r
+  assert! !Zip.Native.Deflate.incompressiblePrescan repeated8k
+  let block16k := mkPrngData 16384
+  let repeated16k : ByteArray := Id.run do
+    let mut r := ByteArray.empty
+    for _ in [:80] do r := r ++ block16k       -- 16 KiB period, 1.25 MiB total
+    return r
+  assert! !Zip.Native.Deflate.incompressiblePrescan repeated16k
+  let base64Alpha := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toUTF8
+  let base64ish : ByteArray := Id.run do
+    let mut st : UInt32 := 99
+    let mut r := ByteArray.empty
+    for _ in [:2 * 1024 * 1024] do
+      st := st ^^^ (st <<< 13); st := st ^^^ (st >>> 17); st := st ^^^ (st <<< 5)
+      r := r.push base64Alpha[(st.toNat % 64)]!
+    return r
+  assert! !Zip.Native.Deflate.incompressiblePrescan base64ish  -- entropy ≈ 6 bits/byte
+
+  -- Blind-spot regression (Codex review): a file that is only ~half random must
+  -- NOT be flagged — the spread sample regions land on the compressible part.
+  let randHalf := mkPrngData (768 * 1024)
+  let zerosHalf := mkConstantData (768 * 1024)
+  let textHalf := mkTextData (768 * 1024)
+  assert! !Zip.Native.Deflate.incompressiblePrescan (zerosHalf ++ randHalf)  -- compressible head
+  assert! !Zip.Native.Deflate.incompressiblePrescan (randHalf ++ zerosHalf)  -- compressible tail (last region)
+  assert! !Zip.Native.Deflate.incompressiblePrescan (randHalf ++ textHalf)   -- compressible tail
+  -- Interleaved: alternate 4 KiB random / 4 KiB zeros — every region spans both.
+  let interleaved : ByteArray := Id.run do
+    let mut r := ByteArray.empty
+    for k in [:160] do
+      r := r ++ (mkPrngData 4096 (k.toUInt32 + 1)) ++ mkConstantData 4096
+    return r
+  assert! !Zip.Native.Deflate.incompressiblePrescan interleaved
+
+  -- The pre-scan only ever routes to a stored block, so deflateRaw stays a
+  -- roundtrip for incompressible input at every level — and the heuristic input
+  -- must decompress back to itself via both native and FFI inflate.
+  for level in [1, 3, 6, 7, 9] do
+    let rawPrng := Zip.Native.Deflate.deflateRaw prngBig level.toUInt8
+    match Zip.Native.Inflate.inflate rawPrng with
+    | .ok result => unless result == prngBig do
+        throw (IO.userError s!"deflateRaw({level})→inflate mismatch on incompressible 1MB")
+    | .error e => throw (IO.userError s!"deflateRaw({level})→inflate failed on incompressible 1MB: {e}")
+    let decompFFI ← RawDeflate.decompress rawPrng
+    assert! decompFFI == prngBig
 
   -- Iterative LZ77 conformance tests
 
