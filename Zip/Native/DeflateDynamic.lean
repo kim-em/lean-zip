@@ -74,22 +74,20 @@ proves the loop equal to `emitTokensWithCodes` over the boxed view. -/
     fallbacks, so the equality proof aligns branch-for-branch). -/
 @[inline] def emitRefWithCodesP (bw : BitWriter)
     (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32) : BitWriter :=
-  match findLengthCodeFast (((w >>> 16) &&& 0x7FFF).toNat) with
-  | some (idx, extraCount, extraVal) =>
-    if hlitlt : idx + 257 < litCodes.size then
-      let (code, len) := litCodes[idx + 257]
-      let bw := bw.writeHuffCode code len
-      let bw := bw.writeBits extraCount extraVal
-      match findDistCodeFast ((w &&& 0xFFFF).toNat) with
-      | some (dIdx, dExtraCount, dExtraVal) =>
-        if hdistlt : dIdx < distCodes.size then
-          let (dCode, dLen) := distCodes[dIdx]
-          let bw := bw.writeHuffCode dCode dLen
-          bw.writeBits dExtraCount dExtraVal
-        else bw
-      | none => bw
+  let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+  let idx := codeIdx lw
+  if hlitlt : idx + 257 < litCodes.size then
+    let (code, len) := litCodes[idx + 257]
+    let bw := bw.writeHuffCode code len
+    let bw := bw.writeBits (codeExtra lw) (codeVal lw)
+    let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+    let dIdx := codeIdx dw
+    if hdistlt : dIdx < distCodes.size then
+      let (dCode, dLen) := distCodes[dIdx]
+      let bw := bw.writeHuffCode dCode dLen
+      bw.writeBits (codeExtra dw) (codeVal dw)
     else bw
-  | none => bw
+  else bw
 
 /-- Packed-token form of `emitTokensWithCodes` (same `hlit`/`hdist` size
     hypotheses): emit the packed `UInt32` stream with the given lit/len and

@@ -314,6 +314,104 @@ theorem nativeFindDistCode_extraN_bound (dist dIdx dExtraN : Nat) (dExtraV : UIn
   have : ∀ j : Fin 30, Inflate.distExtra[j.val]!.toNat ≤ 13 := by decide
   exact this ⟨dIdx, hidx⟩
 
+/-! ## Packed code-word recovery (#2623)
+
+The de-boxed consumers read `lenCodeWord`/`distCodeWord` (one `Array UInt32`
+read) and recover `(idx, extraBits, extraVal)` with `codeIdx`/`codeExtra`/
+`codeVal`. These lemmas transfer each accessor through
+`lenCodeWord_eq`/`distCodeWord_eq` (the table equals `packCode ∘ find*Code`)
+and the `*_packCode` round-trips (`Zip/Native/Deflate.lean`), supplying the
+field bounds from `nativeFind*_idx_bound`/`_extraN_bound`/`_extraV_bound`. The
+consumers' characterization lemmas then have the *same statements* as before. -/
+
+/-- `findLengthCode`'s extra-bits value fits in 16 bits when the length does
+    (the length consumers feed a 15-bit field, so the hypothesis always holds). -/
+theorem nativeFindLengthCode_extraV_bound (len idx extraN : Nat) (extraV : UInt32)
+    (hlen : len < 65536) (h : findLengthCode len = some (idx, extraN, extraV)) :
+    extraV < 65536 := by
+  rw [(findTableCode_go_fields h).2, UInt32.lt_iff_toNat_lt]
+  have e1 : (len - (Inflate.lengthBase[idx]!).toNat).toUInt32.toNat
+          = len - (Inflate.lengthBase[idx]!).toNat := by simp [Nat.toUInt32]; omega
+  have e2 : (65536 : UInt32).toNat = 65536 := by decide
+  omega
+
+/-- `findDistCode`'s extra-bits value fits in 16 bits when the distance does
+    (the distance consumers feed a 16-bit field, so the hypothesis always holds). -/
+theorem nativeFindDistCode_extraV_bound (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
+    (hdist : dist < 65536) (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
+    dExtraV < 65536 := by
+  rw [(findTableCode_go_fields h).2, UInt32.lt_iff_toNat_lt]
+  have e1 : (dist - (Inflate.distBase[dIdx]!).toNat).toUInt32.toNat
+          = dist - (Inflate.distBase[dIdx]!).toNat := by simp [Nat.toUInt32]; omega
+  have e2 : (65536 : UInt32).toNat = 65536 := by decide
+  omega
+
+/-- Packed length lookup recovers the code index. -/
+theorem codeIdx_lenCodeWord (len idx extraN : Nat) (extraV : UInt32)
+    (h : findLengthCode len = some (idx, extraN, extraV)) :
+    codeIdx (lenCodeWord len) = idx := by
+  rw [lenCodeWord_eq, h]
+  exact codeIdx_packCode idx extraN extraV
+    (by have := nativeFindLengthCode_idx_bound _ _ _ _ h; omega)
+
+/-- Packed length lookup recovers the extra-bits count. -/
+theorem codeExtra_lenCodeWord (len idx extraN : Nat) (extraV : UInt32)
+    (h : findLengthCode len = some (idx, extraN, extraV)) :
+    codeExtra (lenCodeWord len) = extraN := by
+  rw [lenCodeWord_eq, h]
+  exact codeExtra_packCode idx extraN extraV
+    (by have := nativeFindLengthCode_idx_bound _ _ _ _ h; omega)
+    (by have := nativeFindLengthCode_extraN_bound _ _ _ _ h; omega)
+
+/-- Packed length lookup recovers the extra-bits value (15-bit field). -/
+theorem codeVal_lenCodeWord (len idx extraN : Nat) (extraV : UInt32)
+    (hlen : len < 65536) (h : findLengthCode len = some (idx, extraN, extraV)) :
+    codeVal (lenCodeWord len) = extraV := by
+  rw [lenCodeWord_eq, h]
+  exact codeVal_packCode idx extraN extraV
+    (by have := nativeFindLengthCode_idx_bound _ _ _ _ h; omega)
+    (by have := nativeFindLengthCode_extraN_bound _ _ _ _ h; omega)
+    (nativeFindLengthCode_extraV_bound _ _ _ _ hlen h)
+
+/-- Packed distance lookup recovers the code index. -/
+theorem codeIdx_distCodeWord (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
+    (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
+    codeIdx (distCodeWord dist) = dIdx := by
+  rw [distCodeWord_eq, h]
+  exact codeIdx_packCode dIdx dExtraN dExtraV
+    (by have := nativeFindDistCode_idx_bound _ _ _ _ h; omega)
+
+/-- Packed distance lookup recovers the extra-bits count. -/
+theorem codeExtra_distCodeWord (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
+    (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
+    codeExtra (distCodeWord dist) = dExtraN := by
+  rw [distCodeWord_eq, h]
+  exact codeExtra_packCode dIdx dExtraN dExtraV
+    (by have := nativeFindDistCode_idx_bound _ _ _ _ h; omega)
+    (by have := nativeFindDistCode_extraN_bound _ _ _ _ h; omega)
+
+/-- Packed distance lookup recovers the extra-bits value (16-bit field). -/
+theorem codeVal_distCodeWord (dist dIdx dExtraN : Nat) (dExtraV : UInt32)
+    (hdist : dist < 65536) (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) :
+    codeVal (distCodeWord dist) = dExtraV := by
+  rw [distCodeWord_eq, h]
+  exact codeVal_packCode dIdx dExtraN dExtraV
+    (by have := nativeFindDistCode_idx_bound _ _ _ _ h; omega)
+    (by have := nativeFindDistCode_extraN_bound _ _ _ _ h; omega)
+    (nativeFindDistCode_extraV_bound _ _ _ _ hdist h)
+
+/-- The length field `unpackTok` reads (15 bits) is below 2^16. -/
+theorem lenField_lt (w : UInt32) : ((w >>> 16) &&& 0x7FFF).toNat < 65536 := by
+  have h1 : ((w >>> 16) &&& 0x7FFF) < (65536 : UInt32) := by bv_decide
+  have h2 : (65536 : UInt32).toNat = 65536 := by decide
+  have := UInt32.lt_iff_toNat_lt.mp h1; omega
+
+/-- The distance field `unpackTok` reads (16 bits) is below 2^16. -/
+theorem distField_lt (w : UInt32) : (w &&& 0xFFFF).toNat < 65536 := by
+  have h1 : (w &&& 0xFFFF) < (65536 : UInt32) := by bv_decide
+  have h2 : (65536 : UInt32).toNat = 65536 := by decide
+  have := UInt32.lt_iff_toNat_lt.mp h1; omega
+
 /-- `canonicalCodes` preserves the array size. -/
 theorem canonicalCodes_size (lengths : Array UInt8) (maxBits : Nat := 15) :
     (canonicalCodes lengths maxBits).size = lengths.size := by

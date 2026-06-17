@@ -113,30 +113,30 @@ That shape is load-bearing twice over:
     length code, exactly `tokenFreqs.go`'s reference arm (lit/len half). -/
 @[inline] def bumpRefLitFreqP (litLenFreqs : {a : Array Nat // a.size = 286}) (w : UInt32) :
     {a : Array Nat // a.size = 286} :=
-  match hflc : findLengthCodeFast (((w >>> 16) &&& 0x7FFF).toNat) with
-  | none => litLenFreqs
-  | some (lIdx, _, _) =>
-    have hsym : lIdx + 257 < litLenFreqs.val.size := by
-      have := nativeFindLengthCode_idx_bound _ _ _ _
-        ((findLengthCodeFast_eq _).symm.trans hflc)
-      have := litLenFreqs.property; omega
-    ⟨litLenFreqs.val.set! (lIdx + 257) (litLenFreqs.val[lIdx + 257] + 1),
-      by rw [Array.size_set!]; exact litLenFreqs.property⟩
+  let lIdx := codeIdx (lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat))
+  have hsym : lIdx + 257 < litLenFreqs.val.size := by
+    obtain ⟨⟨i, e, v⟩, he⟩ := Option.isSome_iff_exists.mp
+      (findLengthCode_isSome (((w >>> 16) &&& 0x7FFF).toNat))
+    have hli : lIdx = i := codeIdx_lenCodeWord _ _ _ _ he
+    have := nativeFindLengthCode_idx_bound _ _ _ _ he
+    have := litLenFreqs.property; omega
+  ⟨litLenFreqs.val.set! (lIdx + 257) (litLenFreqs.val[lIdx + 257] + 1),
+    by rw [Array.size_set!]; exact litLenFreqs.property⟩
 
 /-- Bump the distance histogram for one packed reference token: decode the
     distance field with `unpackTok`'s bit expression and count its distance
     code, exactly `tokenFreqs.go`'s reference arm (distance half). -/
 @[inline] def bumpRefDistFreqP (distFreqs : {a : Array Nat // a.size = 30}) (w : UInt32) :
     {a : Array Nat // a.size = 30} :=
-  match hfdc : findDistCodeFast ((w &&& 0xFFFF).toNat) with
-  | none => distFreqs
-  | some (dIdx, _, _) =>
-    have hd : dIdx < distFreqs.val.size := by
-      have := nativeFindDistCode_idx_bound _ _ _ _
-        ((findDistCodeFast_eq _).symm.trans hfdc)
-      have := distFreqs.property; omega
-    ⟨distFreqs.val.set! dIdx (distFreqs.val[dIdx] + 1),
-      by rw [Array.size_set!]; exact distFreqs.property⟩
+  let dIdx := codeIdx (distCodeWord ((w &&& 0xFFFF).toNat))
+  have hd : dIdx < distFreqs.val.size := by
+    obtain ⟨⟨i, e, v⟩, he⟩ := Option.isSome_iff_exists.mp
+      (findDistCode_isSome ((w &&& 0xFFFF).toNat))
+    have hdi : dIdx = i := codeIdx_distCodeWord _ _ _ _ he
+    have := nativeFindDistCode_idx_bound _ _ _ _ he
+    have := distFreqs.property; omega
+  ⟨distFreqs.val.set! dIdx (distFreqs.val[dIdx] + 1),
+    by rw [Array.size_set!]; exact distFreqs.property⟩
 
 /-- Packed-token form of `tokenFreqs`: the same histogram (286 lit/len
     entries, 30 distance entries, end-of-block pre-counted) computed from the
@@ -162,12 +162,8 @@ where
 private theorem bumpRefLitFreqP_none (lf : {a : Array Nat // a.size = 286}) (w : UInt32)
     (h : findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) = none) :
     bumpRefLitFreqP lf w = lf := by
-  unfold bumpRefLitFreqP
-  split
-  · rfl
-  · rename_i heq
-    rw [findLengthCodeFast_eq, h] at heq
-    cases heq
+  have hsome := findLengthCode_isSome (((w >>> 16) &&& 0x7FFF).toNat)
+  rw [h] at hsome; simp at hsome
 
 /-- `bumpRefLitFreqP` when the length field finds code `lIdx`: bump symbol
     `lIdx + 257`. -/
@@ -179,27 +175,16 @@ private theorem bumpRefLitFreqP_some (lf : {a : Array Nat // a.size = 286}) (w :
           have := nativeFindLengthCode_idx_bound _ _ _ _ h
           have := lf.property; omega) + 1),
         by rw [Array.size_set!]; exact lf.property⟩ := by
-  unfold bumpRefLitFreqP
-  split
-  · rename_i heq
-    rw [findLengthCodeFast_eq, h] at heq
-    cases heq
-  · rename_i lIdx' en' ev' heq
-    rw [findLengthCodeFast_eq, h] at heq
-    simp only [Option.some.injEq, Prod.mk.injEq] at heq
-    obtain ⟨rfl, rfl, rfl⟩ := heq
-    rfl
+  have hli : codeIdx (lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)) = lIdx :=
+    codeIdx_lenCodeWord _ _ _ _ h
+  simp only [bumpRefLitFreqP, hli]
 
 /-- `bumpRefDistFreqP` when the distance field has no distance code: no-op. -/
 private theorem bumpRefDistFreqP_none (df : {a : Array Nat // a.size = 30}) (w : UInt32)
     (h : findDistCode ((w &&& 0xFFFF).toNat) = none) :
     bumpRefDistFreqP df w = df := by
-  unfold bumpRefDistFreqP
-  split
-  · rfl
-  · rename_i heq
-    rw [findDistCodeFast_eq, h] at heq
-    cases heq
+  have hsome := findDistCode_isSome ((w &&& 0xFFFF).toNat)
+  rw [h] at hsome; simp at hsome
 
 /-- `bumpRefDistFreqP` when the distance field finds code `dIdx`: bump it. -/
 private theorem bumpRefDistFreqP_some (df : {a : Array Nat // a.size = 30}) (w : UInt32)
@@ -210,16 +195,9 @@ private theorem bumpRefDistFreqP_some (df : {a : Array Nat // a.size = 30}) (w :
           have := nativeFindDistCode_idx_bound _ _ _ _ h
           have := df.property; omega) + 1),
         by rw [Array.size_set!]; exact df.property⟩ := by
-  unfold bumpRefDistFreqP
-  split
-  · rename_i heq
-    rw [findDistCodeFast_eq, h] at heq
-    cases heq
-  · rename_i dIdx' en' ev' heq
-    rw [findDistCodeFast_eq, h] at heq
-    simp only [Option.some.injEq, Prod.mk.injEq] at heq
-    obtain ⟨rfl, rfl, rfl⟩ := heq
-    rfl
+  have hdi : codeIdx (distCodeWord ((w &&& 0xFFFF).toNat)) = dIdx :=
+    codeIdx_distCodeWord _ _ _ _ h
+  simp only [bumpRefDistFreqP, hdi]
 
 /-- The packed histogram loop is the boxed one over the `unpackTok` view:
     lockstep induction. Per word, the tag-bit test reduces both sides into
