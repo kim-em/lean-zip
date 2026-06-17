@@ -177,6 +177,94 @@ where
         writeCLEntries bw clCodes rest hcl
 
 
+/-! ## Header-plan reuse across sizing and emit (#2627)
+
+`writeDynamicHeader` does its expensive work *before* touching the `BitWriter`:
+RLE-encoding the ~316 concatenated code lengths, building the CL Huffman tree
+(`computeCodeLengths` over the 19-symbol alphabet), and laying out its canonical
+codes. The single-block dispatch (`deflateRawBaseP`) ran all of that **twice** —
+once to *size* the dynamic candidate (`dynBlockBytes`, header bits into an empty
+writer) and again to *emit* it (`deflateDynamicBlockCoreP`). Measured at ~17 µs
+per call, that duplicated build was 7–12% of a small-file level-6 compress.
+
+`dynHeaderCodes` isolates the BitWriter-independent build into a reusable plan;
+`writeDynamicHeaderWith` writes a header from a precomputed plan. The dispatch
+computes the plan once and threads it to both the sizer (`dynBlockBytesWith`)
+and the emitter (`deflateDynamicBlockCorePWith`). `writeDynamicHeader` and its
+spec (`writeDynamicHeader_spec`/`_wf`) stay as the reference; the plan path is
+proved equal to it (`writeDynamicHeaderWith_dynHeaderCodes`), so the size models
+and roundtrip are byte-identical. -/
+
+/-- The BitWriter-independent part of a dynamic-tree header: the CL canonical
+    codes, the RLE entries over the concatenated code lengths, the CL code
+    lengths, and `numCodeLen` (HCLEN + 4). Exactly the values `writeDynamicHeader`
+    computes in its Steps 1–4. -/
+structure DynHeaderPlan where
+  /-- CL Huffman canonical codes (`(code, bitLength)` per symbol), size ≥ 19. -/
+  clCodes : Array (UInt16 × UInt8)
+  /-- RLE entries `(symbol, extra)` for the concatenated lit/len ++ dist lengths. -/
+  clEntries : List (Nat × Nat)
+  /-- CL code lengths (19 entries). -/
+  clLens : List Nat
+  /-- Number of CL code lengths written (HCLEN + 4), `computeHCLEN clLens`. -/
+  numCodeLen : Nat
+
+/-- Build the `DynHeaderPlan` for the given lit/len and distance code lengths.
+    This is the duplicated work that `dynBlockBytes` (sizing) and
+    `deflateDynamicBlockCore` (emit) each used to redo; the dispatch now runs it
+    once. The body is exactly Steps 1–4 of `writeDynamicHeader`. -/
+def dynHeaderCodes (litLens distLens : List Nat) : DynHeaderPlan :=
+  let allLens := litLens ++ distLens
+  let clEntries := Deflate.Spec.rlEncodeLengths allLens
+  let clFreqs := Deflate.Spec.clSymbolFreqs clEntries
+  let clFreqPairs := (List.range clFreqs.length).map fun i => (i, clFreqs.getD i 0)
+  let clLens := Huffman.Spec.computeCodeLengths clFreqPairs 19 7
+  let clLengthsArr : Array UInt8 := clLens.toArray.map Nat.toUInt8
+  let clCodes := canonicalCodes clLengthsArr 7
+  let numCodeLen := Deflate.Spec.computeHCLEN clLens
+  { clCodes, clEntries, clLens, numCodeLen }
+
+/-- `dynHeaderCodes` produces exactly 19 CL canonical codes. -/
+theorem dynHeaderCodes_clCodes_size (litLens distLens : List Nat) :
+    (dynHeaderCodes litLens distLens).clCodes.size = 19 := by
+  unfold dynHeaderCodes
+  simp only
+  rw [canonicalCodes_size _ 7, Array.size_map, List.size_toArray,
+    Huffman.Spec.computeCodeLengths_length]
+
+/-- Write a dynamic Huffman tree header from a precomputed `DynHeaderPlan`
+    (Steps 5–7 of `writeDynamicHeader`): HLIT/HDIST/HCLEN, then the CL code
+    lengths in permutation order, then the RLE entries via the CL codes. The
+    `hcl` size witness is the (phantom, proof-irrelevant) one `writeCLEntries`
+    threads.
+
+    **Invariant**: `p` must be `dynHeaderCodes litLens distLens` — only then does
+    the header match the lengths (and equal `writeDynamicHeader bw litLens distLens`,
+    by `writeDynamicHeaderWith_dynHeaderCodes`). Passing an unrelated plan writes a
+    header for the *plan's* lengths, not `litLens`/`distLens`. The dispatch builds
+    the plan from exactly these lengths; this is not a general-purpose writer. -/
+def writeDynamicHeaderWith (bw : BitWriter) (litLens distLens : List Nat)
+    (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19) : BitWriter :=
+  let hlit := litLens.length - 257
+  let hdist := distLens.length - 1
+  let hclen := p.numCodeLen - 4
+  let bw := bw.writeBits 5 hlit.toUInt32
+  let bw := bw.writeBits 5 hdist.toUInt32
+  let bw := bw.writeBits 4 hclen.toUInt32
+  let bw := writeDynamicHeader.writeCLLengths bw p.clLens p.numCodeLen 0
+  writeDynamicHeader.writeCLEntries bw p.clCodes p.clEntries hcl
+
+/-- The plan path agrees with `writeDynamicHeader`: writing from
+    `dynHeaderCodes litLens distLens` reproduces `writeDynamicHeader` bit-for-bit
+    (the `hcl` witness is irrelevant, as `writeCLEntries` re-checks bounds). -/
+theorem writeDynamicHeaderWith_dynHeaderCodes (bw : BitWriter) (litLens distLens : List Nat)
+    (hcl : (dynHeaderCodes litLens distLens).clCodes.size ≥ 19) :
+    writeDynamicHeaderWith bw litLens distLens (dynHeaderCodes litLens distLens) hcl =
+      writeDynamicHeader bw litLens distLens := by
+  unfold writeDynamicHeaderWith writeDynamicHeader dynHeaderCodes
+  rfl
+
+
 /-- Helper: `canonicalCodes` of lit/len code lengths produced by
     `computeCodeLengths _ 286 15` has size exactly 286. -/
 private theorem deflateDynamic.litCodes_size (litFreqPairs : List (Nat × Nat)) :
@@ -274,6 +362,56 @@ def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
+
+/-- `deflateDynamicBlockCoreP` with the dynamic-tree header taken from a
+    precomputed `DynHeaderPlan` (#2627): identical to `deflateDynamicBlockCoreP`
+    except the header write reuses the plan instead of rebuilding the CL tree.
+    The dispatch (`deflateRawBaseP`) passes the same plan it sized with, so the
+    expensive `dynHeaderCodes` build runs once per block instead of twice.
+
+    **Invariant** (as for `writeDynamicHeaderWith`): `p` must be
+    `dynHeaderCodes litLens distLens`; only then is the output
+    `deflateDynamicBlockCoreP data tokens litLens distLens` (proved by
+    `deflateDynamicBlockCorePWith_dynHeaderCodes`). -/
+def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
+    (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) : ByteArray :=
+  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
+  let bw := BitWriter.empty
+  let bw := bw.writeBits 1 1  -- BFINAL
+  let bw := bw.writeBits 2 2  -- BTYPE = 10
+  let bw := writeDynamicHeaderWith bw litLens distLens p hcl
+  have hlit_size : litCodes.size ≥ 286 := by
+    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have h256 : 256 < litCodes.size := by
+    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  if data.size == 0 then
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+  else
+    let bw := emitTokensWithCodesP bw tokens litCodes distCodes hlit_size hdist_size 0
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+
+/-- The plan-taking emitter with the canonical plan equals the original packed
+    emitter: the only difference is the header write, bridged by
+    `writeDynamicHeaderWith_dynHeaderCodes`. -/
+theorem deflateDynamicBlockCorePWith_dynHeaderCodes (data : ByteArray) (tokens : Array UInt32)
+    (litLens distLens : List Nat) (hcl : (dynHeaderCodes litLens distLens).clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) :
+    deflateDynamicBlockCorePWith data tokens litLens distLens (dynHeaderCodes litLens distLens)
+        hcl hlit hdist =
+      deflateDynamicBlockCoreP data tokens litLens distLens hlit hdist := by
+  unfold deflateDynamicBlockCorePWith deflateDynamicBlockCoreP
+  simp only [writeDynamicHeaderWith_dynHeaderCodes]
 
 
 /-- Write a dynamic Huffman DEFLATE block from precomputed LZ77 tokens.
@@ -378,12 +516,36 @@ def dynBlockBytes (litFreqs distFreqs : Array Nat) (litLens distLens : List Nat)
   let headerBits := (writeDynamicHeader BitWriter.empty litLens distLens).bitLength
   (3 + headerBits + symbolBitCount litFreqs distFreqs litLens.toArray distLens.toArray + 7) / 8
 
+/-- `dynBlockBytes` with the tree-header bits taken from a precomputed
+    `DynHeaderPlan` (#2627): the header bit count comes from writing the plan into
+    an empty writer rather than rebuilding the CL tree. The dispatch sizes and
+    emits the dynamic candidate from one shared plan.
+
+    **Invariant** (as for `writeDynamicHeaderWith`): `p` must be
+    `dynHeaderCodes litLens distLens`; only then does this equal
+    `dynBlockBytes litFreqs distFreqs litLens distLens`
+    (proved by `dynBlockBytesWith_dynHeaderCodes`). -/
+def dynBlockBytesWith (litFreqs distFreqs : Array Nat) (litLens distLens : List Nat)
+    (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19) : Nat :=
+  let headerBits := (writeDynamicHeaderWith BitWriter.empty litLens distLens p hcl).bitLength
+  (3 + headerBits + symbolBitCount litFreqs distFreqs litLens.toArray distLens.toArray + 7) / 8
+
+/-- The plan-taking sizer with the canonical plan equals `dynBlockBytes`. Proved
+    before the `irreducible` attribute so both unfold; bridged by
+    `writeDynamicHeaderWith_dynHeaderCodes`. -/
+theorem dynBlockBytesWith_dynHeaderCodes (litFreqs distFreqs : Array Nat) (litLens distLens : List Nat)
+    (hcl : (dynHeaderCodes litLens distLens).clCodes.size ≥ 19) :
+    dynBlockBytesWith litFreqs distFreqs litLens distLens (dynHeaderCodes litLens distLens) hcl =
+      dynBlockBytes litFreqs distFreqs litLens distLens := by
+  unfold dynBlockBytesWith dynBlockBytes
+  rw [writeDynamicHeaderWith_dynHeaderCodes]
+
 -- The size helpers are opaque cost models: the dispatch only ever compares them.
 -- Marking them irreducible keeps the elaborator from unfolding the 286-element
 -- `symbolBitCount` fold while `split`ting the selection `if` (which would exceed
 -- `maxRecDepth`); the kernel and compiled code still evaluate them, so `decide`
 -- and the `SizeHelpers` conformance tests are unaffected.
-attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes
+attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockBytesWith
 
 /-- Hash-chain search depth per compression level (levels ≥ 5). Higher levels
     search deeper for longer matches (better ratio on diverse input) at higher
@@ -903,16 +1065,25 @@ def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArr
     `deflateRawBaseTokens data (ptokens.map unpackTok)` via `tokenFreqsP_eq`
     and the packed-emitter equalities (`Zip/Spec/EmitPackedCorrect.lean`);
     `deflateRawBaseTokens` stays as the boxed reference implementation
-    (conformance-tested in `ZipTest/PackedTokens.lean`). -/
+    (conformance-tested in `ZipTest/PackedTokens.lean`).
+
+    The dynamic-tree header plan (`dynHeaderCodes`) is built **once** and reused
+    for both sizing (`dynBlockBytesWith`) and emit (`deflateDynamicBlockCorePWith`)
+    rather than rebuilt in each — the #2627 dedup; equal to the un-deduped form by
+    `dynBlockBytesWith_dynHeaderCodes` / `deflateDynamicBlockCorePWith_dynHeaderCodes`
+    (used in `deflateRawBase_def`). -/
 def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
   let f := tokenFreqsP ptokens
   let lens := dynamicCodeLengths f.1 f.2
+  let plan := dynHeaderCodes lens.1 lens.2
+  have hcl : plan.clCodes.size ≥ 19 :=
+    Nat.le_of_eq (dynHeaderCodes_clCodes_size lens.1 lens.2).symm
   let fixedBytes := fixedBlockBytes f.1 f.2
-  let dynBytes := dynBlockBytes f.1 f.2 lens.1 lens.2
+  let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
   else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
-  else deflateDynamicBlockCoreP data ptokens lens.1 lens.2
+  else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
 /-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
