@@ -191,6 +191,10 @@ this equation. -/
 theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseTokens data (lzMatch data level) = deflateRawBase data level := by
   unfold deflateRawBase deflateRawBaseP deflateRawBaseTokens
-  simp only [deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
+  -- The packed dispatch shares one `dynHeaderCodes` plan across sizing and emit
+  -- (#2627); collapse the plan-taking variants back to the un-deduped forms, then
+  -- finish with the boxed/packed emitter and frequency equalities.
+  simp only [dynBlockBytesWith_dynHeaderCodes, deflateDynamicBlockCorePWith_dynHeaderCodes,
+    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
 
 end Zip.Native.Deflate
