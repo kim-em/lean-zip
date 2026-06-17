@@ -79,8 +79,13 @@ def chainWalkAll (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
     have hcand : cand + maxLen ≤ data.size := by omega
     -- Prefilter (#2622): mirror of `chainWalkAllFast` — skip the compare when the
     -- byte at offset `bestLen` mismatches (the candidate can't beat `bestLen`).
-    let skip : Bool := if bestLen < maxLen then
-        data[cand + bestLen]! != data[pos + bestLen]! else false
+    -- The byte reads are proven-bounds (`bestLen < maxLen` plus `hcand`/`hpm`);
+    -- the chain reads below stay panic-checked because this is the fallback
+    -- reference, invoked by `chainWalkAllGuarded` precisely when the
+    -- `pos ≤ prev.size` invariant cannot be established (the proven-bounds hot
+    -- path is `chainWalkAllFast`).
+    let skip : Bool := if hbl : bestLen < maxLen then
+        data[cand + bestLen]'(by omega) != data[pos + bestLen]'(by omega) else false
     if skip then
       chainWalkAll data prev pos maxLen hpm (prev[cand]!) (fuel - 1) bestLen k slotBase lens dists
     else
@@ -212,33 +217,59 @@ decreasing_by omega
     to `table.size`), each costing
     `costOfLen codeLens[symOffset + i] + extra[i]` bits. -/
 def fillCostSlots (base : Array UInt16) (extra : Array UInt8) (codeLens : Array Nat)
-    (symOffset : Nat) (table : Array Nat) (i : Nat) : Array Nat :=
+    (symOffset : Nat) (table : Array Nat) (i : Nat)
+    (hext : base.size ≤ extra.size) (hcl : symOffset + base.size ≤ codeLens.size) :
+    Array Nat :=
   if h : i < base.size then
     let lo := base[i].toNat
     let hi := if h1 : i + 1 < base.size then base[i + 1].toNat else table.size
-    let c := costOfLen codeLens[symOffset + i]! + extra[i]!.toNat
-    fillCostSlots base extra codeLens symOffset (fillCostRange table lo hi c) (i + 1)
+    let c := costOfLen (codeLens[symOffset + i]'(by omega)) + (extra[i]'(by omega)).toNat
+    fillCostSlots base extra codeLens symOffset (fillCostRange table lo hi c) (i + 1) hext hcl
   else table
 termination_by base.size - i
+decreasing_by omega
+
+/-- Fill the 256-entry literal cost table: `table[b] = costOfLen lens[b]`. -/
+private def litCostLoop (lens table : Array Nat) (b : Nat) (hlen : 256 ≤ lens.size) :
+    Array Nat :=
+  if hb : b < 256 then
+    litCostLoop lens (table.set! b (costOfLen (lens[b]'(by omega)))) (b + 1) hlen
+  else table
+termination_by 256 - b
+decreasing_by omega
+
+/-- `litCostLoop` only `set!`s, so it preserves the table size. -/
+private theorem litCostLoop_size (lens table : Array Nat) (b : Nat) (hlen : 256 ≤ lens.size) :
+    (litCostLoop lens table b hlen).size = table.size := by
+  unfold litCostLoop
+  by_cases hb : b < 256
+  · simp only [hb, ↓reduceDIte]; rw [litCostLoop_size]; simp
+  · simp only [hb, ↓reduceDIte]
+termination_by 256 - b
 decreasing_by omega
 
 /-- Build the three dense cost tables from lit/len and distance code-length
     arrays (286 and 30 entries; longer is fine — fixed-Huffman tables have
     288/32). -/
-def mkCostTables (litLens distLens : Array Nat) :
+def mkCostTables (litLens distLens : Array Nat)
+    (hlit : 257 + Inflate.lengthBase.size ≤ litLens.size)
+    (hdist : Inflate.distBase.size ≤ distLens.size) :
     Array Nat × Array Nat × Array Nat :=
-  let litCost := litLoop litLens (Array.replicate 256 0) 0
+  let litCost := litCostLoop litLens (Array.replicate 256 0) 0
+    (by have := Inflate.lengthBase_size; omega)
   let lenCost := fillCostSlots Inflate.lengthBase Inflate.lengthExtra litLens 257
-    (Array.replicate 259 badCost) 0
+    (Array.replicate 259 badCost) 0 (by simp) hlit
   let distCost := fillCostSlots Inflate.distBase Inflate.distExtra distLens 0
-    (Array.replicate 32769 badCost) 0
+    (Array.replicate 32769 badCost) 0 (by simp) (by omega)
   (litCost, lenCost, distCost)
-where
-  litLoop (lens table : Array Nat) (b : Nat) : Array Nat :=
-    if b < 256 then litLoop lens (table.set! b (costOfLen lens[b]!)) (b + 1)
-    else table
-  termination_by 256 - b
-  decreasing_by omega
+
+/-- The literal cost table has exactly 256 entries (one per byte value). -/
+private theorem mkCostTables_fst_size (litLens distLens : Array Nat)
+    (hlit : 257 + Inflate.lengthBase.size ≤ litLens.size)
+    (hdist : Inflate.distBase.size ≤ distLens.size) :
+    (mkCostTables litLens distLens hlit hdist).1.size = 256 := by
+  unfold mkCostTables
+  simp only [litCostLoop_size, Array.size_replicate]
 
 /-- Round-1 (static) cost model: fixed-Huffman code lengths (RFC 1951
     §3.2.6) — libdeflate's seeding choice. No dependence on a prior parse,
@@ -246,6 +277,10 @@ where
 def staticCostTables : Array Nat × Array Nat × Array Nat :=
   mkCostTables (Inflate.fixedLitLengths.map (·.toNat))
     (Inflate.fixedDistLengths.map (·.toNat))
+    (by simp only [Array.size_map, Inflate.fixedLitLengths, Array.size_append,
+      Array.size_replicate, Inflate.lengthBase_size]; omega)
+    (by simp only [Array.size_map, Inflate.fixedDistLengths,
+      Array.size_replicate, Inflate.distBase_size]; omega)
 
 /-- Cost tables fitted to a token stream: histogram (`tokenFreqs`) →
     length-limited Huffman code lengths (`dynamicCodeLengths`) → dense
@@ -258,7 +293,21 @@ def fittedCostTables (tokens : Array LZ77Token) :
   -- histogram for the DP's valid matches (`unpackTok ∘ packTok = id`).
   let f := tokenFreqsP (tokens.map packTok)
   let lens := dynamicCodeLengths f.1 f.2
+  have hlitsz : lens.1.toArray.size = 286 := by
+    rw [List.size_toArray]; exact (dynamicCodeLengths_length f.1 f.2).1
+  have hdistsz : lens.2.toArray.size = 30 := by
+    rw [List.size_toArray]; exact (dynamicCodeLengths_length f.1 f.2).2
   mkCostTables lens.1.toArray lens.2.toArray
+    (by rw [hlitsz]; have := Inflate.lengthBase_size; omega)
+    (by rw [hdistsz]; have := Inflate.distBase_size; omega)
+
+/-- Both cost-table builders produce a 256-entry literal table. -/
+private theorem staticCostTables_fst_size : staticCostTables.1.size = 256 := by
+  unfold staticCostTables; rw [mkCostTables_fst_size]
+
+private theorem fittedCostTables_fst_size (tokens : Array LZ77Token) :
+    (fittedCostTables tokens).1.size = 256 := by
+  unfold fittedCostTables; rw [mkCostTables_fst_size]
 
 /-! ## Backward DP
 
@@ -282,6 +331,17 @@ def seedTailCosts (cost : Array Nat) (r perByte j : Nat) : Array Nat :=
 termination_by 259 - j
 decreasing_by omega
 
+/-- `seedTailCosts` only `set!`s, so it preserves the cost-array size. -/
+private theorem seedTailCosts_size (cost : Array Nat) (r perByte j : Nat) :
+    (seedTailCosts cost r perByte j).size = cost.size := by
+  unfold seedTailCosts
+  by_cases hj : j < 259
+  · simp only [hj, ↓reduceIte]
+    rw [seedTailCosts_size]; simp
+  · simp only [hj, ↓reduceIte]
+termination_by 259 - j
+decreasing_by omega
+
 /-- Evaluate one candidate at the length-code lower boundaries inside
     `(prevLen, len)` (its covered interval, exclusive of `len` which the
     caller already evaluated): truncating a match to a boundary can buy a
@@ -292,6 +352,10 @@ def scanBounds (lenCost distCost cost : Array Nat) (i dist prevLen len s : Nat)
   if h : s < Inflate.lengthBase.size then
     let b := Inflate.lengthBase[s].toNat
     if prevLen < b ∧ b < len then
+      -- These three reads stay panic-checked: the indices (`b` a length-base
+      -- value, `dist` a cached distance, `i + b` a cost-array offset) are
+      -- heuristic cache/table values whose bounds would require cache-content
+      -- invariants the design deliberately keeps out of the proof boundary.
       let c := lenCost[b]! + distCost[dist]! + cost[i + b]!
       if c < bestC then
         scanBounds lenCost distCost cost i dist prevLen len (s + 1) c b dist
@@ -310,10 +374,17 @@ decreasing_by all_goals omega
 def scanCands (cacheLens cacheDists lenCost distCost cost : Array Nat)
     (slotBase i slots k prevLen : Nat) (bestC bestL bestD : Nat) : Nat × Nat × Nat :=
   if _h : k < slots then
+    -- The two cache-slot reads are structurally in range (`k < slots`, and the
+    -- block `[slotBase, slotBase + slots)` fits the cache), but discharging that
+    -- needs a length-preservation chain for the heuristic cache builder
+    -- (`buildCache` → `chainWalkAllGuarded`), orthogonal to this conversion, so
+    -- they stay panic-checked.
     let len := cacheLens[slotBase + k]!
     if len = 0 then (bestC, bestL, bestD)
     else
       let dist := cacheDists[slotBase + k]!
+      -- Same as `scanBounds`: `len`/`dist` are cached values and `i + len` a
+      -- cost-array offset — heuristic indices with no proven bound.
       let cFull := lenCost[len]! + distCost[dist]! + cost[i + len]!
       let (bestC, bestL, bestD) :=
         if cFull < bestC then (cFull, len, dist) else (bestC, bestL, bestD)
@@ -331,35 +402,66 @@ decreasing_by all_goals omega
     Heuristic only — the emitter re-verifies everything. -/
 def fillRegion (data : ByteArray) (base r slots : Nat)
     (cacheLens cacheDists litCost lenCost distCost : Array Nat)
-    (i : Nat) (cost chLen chDist : Array Nat) :
+    (i : Nat) (cost chLen chDist : Array Nat)
+    (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) :
     Array Nat × Array Nat :=
-  if i = 0 then (chLen, chDist)
+  if h0 : i = 0 then (chLen, chDist)
   else
     let idx := i - 1
     let pos := base + idx
-    let lit := litCost[(data[pos]!).toNat]! + cost[idx + 1]!
+    let byte := data[pos]'(by omega)
+    let lit := litCost[byte.toNat]'(by have := UInt8.toNat_lt byte; omega) + cost[idx + 1]'(by omega)
     let (bc, bl, bd) := scanCands cacheLens cacheDists lenCost distCost cost
       (slots * idx) idx slots 0 0 lit 1 0
-    let cost := cost.set! idx bc
     let chLen := chLen.set! pos bl
     let chDist := chDist.set! pos bd
     fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
-      idx cost chLen chDist
+      idx (cost.set! idx bc) chLen chDist hr hlit
+      (by simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds]; exact hcost) (by omega)
+termination_by i
+decreasing_by omega
+
+/-- `fillRegion` only `set!`s `chLen`/`chDist`, so it preserves their sizes. -/
+private theorem fillRegion_fst_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost : Array Nat) (i : Nat)
+    (cost chLen chDist : Array Nat) (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) :
+    (fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
+      i cost chLen chDist hr hlit hcost hir).1.size = chLen.size := by
+  unfold fillRegion
+  by_cases h0 : i = 0
+  · simp only [h0, ↓reduceDIte]
+  · simp only [h0, ↓reduceDIte]; rw [fillRegion_fst_size]; simp
+termination_by i
+decreasing_by omega
+
+private theorem fillRegion_snd_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost : Array Nat) (i : Nat)
+    (cost chLen chDist : Array Nat) (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) :
+    (fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
+      i cost chLen chDist hr hlit hcost hir).2.size = chDist.size := by
+  unfold fillRegion
+  by_cases h0 : i = 0
+  · simp only [h0, ↓reduceDIte]
+  · simp only [h0, ↓reduceDIte]; rw [fillRegion_snd_size]; simp
 termination_by i
 decreasing_by omega
 
 /-- Collect the region's parse implied by the current choice arrays (used to
     refit the cost model between DP rounds). Heuristic walk — no guards. -/
 def collectRegionTokens (data : ByteArray) (chLen chDist : Array Nat)
-    (bound pos : Nat) (acc : Array LZ77Token) : Array LZ77Token :=
+    (bound pos : Nat) (acc : Array LZ77Token)
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) : Array LZ77Token :=
   if h : pos < bound ∧ pos < data.size then
-    let len := chLen[pos]!
+    let len := chLen[pos]'(by omega)
     if hl : 3 ≤ len then
       collectRegionTokens data chLen chDist bound (pos + len)
-        (acc.push (.reference len (chDist[pos]!)))
+        (acc.push (.reference len (chDist[pos]'(by omega)))) hchL hchD
     else
       collectRegionTokens data chLen chDist bound (pos + 1)
-        (acc.push (.literal data[pos]!))
+        (acc.push (.literal (data[pos]'(by omega)))) hchL hchD
   else acc
 termination_by bound - pos
 decreasing_by all_goals omega
@@ -369,48 +471,108 @@ decreasing_by all_goals omega
     region's own round-1 parse. Returns the updated chain state and choice
     arrays. -/
 def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
-    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat) :
+    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat)
+    (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
     Array Nat × Array Nat × Array Nat × Array Nat :=
-  let (cacheLens, cacheDists, hashTable, prev) := buildCache data hashTable prev
+  let cache := buildCache data hashTable prev
     depth slots base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
+  let cacheLens := cache.1
+  let cacheDists := cache.2.1
+  let hashTable := cache.2.2.1
+  let prev := cache.2.2.2
   -- round 1: static cost model
   let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
-  let (chLen, chDist) := fillRegion data base r slots cacheLens cacheDists
-    slit slen sdist r cost chLen chDist
+  have hcost1 : r + 259 ≤ cost.size := by
+    show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0).size
+    rw [seedTailCosts_size, Array.size_replicate]; omega
+  let res1 := fillRegion data base r slots cacheLens cacheDists
+    slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r)
+  have hchL1 : data.size ≤ res1.1.size :=
+    Nat.le_trans hchL (Nat.le_of_eq (fillRegion_fst_size data base r slots cacheLens cacheDists
+      slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r)).symm)
+  have hchD1 : data.size ≤ res1.2.size :=
+    Nat.le_trans hchD (Nat.le_of_eq (fillRegion_snd_size data base r slots cacheLens cacheDists
+      slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r)).symm)
   -- round 2: refit to this region's round-1 parse
-  let toks := collectRegionTokens data chLen chDist (base + r) base #[]
-  let (flit, flen, fdist) := fittedCostTables toks
-  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits flit) 0
-  let (chLen, chDist) := fillRegion data base r slots cacheLens cacheDists
-    flit flen fdist r cost chLen chDist
-  (hashTable, prev, chLen, chDist)
+  let toks := collectRegionTokens data res1.1 res1.2 (base + r) base #[] hchL1 hchD1
+  let fitted := fittedCostTables toks
+  have hflit : 256 ≤ fitted.1.size := Nat.le_of_eq (fittedCostTables_fst_size toks).symm
+  let cost2 := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0
+  have hcost2 : r + 259 ≤ cost2.size := by
+    show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0).size
+    rw [seedTailCosts_size, Array.size_replicate]; omega
+  let res2 := fillRegion data base r slots cacheLens cacheDists
+    fitted.1 fitted.2.1 fitted.2.2 r cost2 res1.1 res1.2 hr hflit hcost2 (Nat.le_refl r)
+  (hashTable, prev, res2.1, res2.2)
+
+/-- `fillRegionRounds` only `set!`s the choice arrays, so it preserves their
+    sizes (both DP rounds go through `fillRegion`). -/
+private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots base r : Nat)
+    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat)
+    (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
+    (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
+      hr hslit hchL hchD).2.2.1.size = chLen.size := by
+  unfold fillRegionRounds
+  simp only [fillRegion_fst_size]
+
+private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots base r : Nat)
+    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat)
+    (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
+    (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
+      hr hslit hchL hchD).2.2.2.size = chDist.size := by
+  unfold fillRegionRounds
+  simp only [fillRegion_snd_size]
 
 /-- Region driver for `computeChoices`: regions advance by
     `min regionSize (data.size - base)` bytes; the hash-chain state persists
-    across regions (cross-region distances are legal and wanted). -/
-def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
+    across regions (cross-region distances are legal and wanted).
+
+    Recurses on explicit `fuel` (structural) rather than `data.size - base`
+    (well-founded): the per-region proof `hr : base + r ≤ data.size` passed to
+    `fillRegionRounds` depends on the recursion variable `base`, which makes the
+    well-founded elaborator try to reduce the `fillRegionRounds` scrutinee and
+    diverge. With `fuel = data.size` (≥ the region count, since each region
+    advances `base` by `r ≥ 1`) the guard always fails before fuel runs out, so
+    the result is identical to the unfueled loop. Marked `private`: the fuel
+    parameter is a footgun (too little fuel silently yields a partial fill), so
+    only `computeChoices` (which passes `data.size`) may call it. -/
+private def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
     (slit slen sdist : Array Nat) (hashTable prev : Array Nat) (base : Nat)
-    (chLen chDist : Array Nat) : Array Nat × Array Nat :=
-  if hb : base < data.size ∧ 0 < regionSize then
-    let r := min regionSize (data.size - base)
-    have hdec : data.size - (base + r) < data.size - base := by omega
-    let (hashTable, prev, chLen, chDist) := fillRegionRounds data depth slots base r
-      slit slen sdist hashTable prev chLen chDist
-    computeChoicesLoop data depth slots regionSize slit slen sdist hashTable prev
-      (base + r) chLen chDist
-  else (chLen, chDist)
-termination_by data.size - base
-decreasing_by omega
+    (chLen chDist : Array Nat) (hslit : 256 ≤ slit.size)
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (fuel : Nat) :
+    Array Nat × Array Nat :=
+  match fuel with
+  | 0 => (chLen, chDist)
+  | fuel + 1 =>
+    if hb : base < data.size ∧ 0 < regionSize then
+      let r := min regionSize (data.size - base)
+      have hr : base + r ≤ data.size := by omega
+      let result := fillRegionRounds data depth slots base r
+        slit slen sdist hashTable prev chLen chDist hr hslit hchL hchD
+      have hchL' : data.size ≤ result.2.2.1.size := Nat.le_trans hchL
+        (Nat.le_of_eq (fillRegionRounds_chLen_size data depth slots base r slit slen sdist
+          hashTable prev chLen chDist hr hslit hchL hchD).symm)
+      have hchD' : data.size ≤ result.2.2.2.size := Nat.le_trans hchD
+        (Nat.le_of_eq (fillRegionRounds_chDist_size data depth slots base r slit slen sdist
+          hashTable prev chLen chDist hr hslit hchL hchD).symm)
+      computeChoicesLoop data depth slots regionSize slit slen sdist result.1 result.2.1
+        (base + r) result.2.2.1 result.2.2.2 hslit hchL' hchD' fuel
+    else (chLen, chDist)
 
 /-- Compute the global DP choice arrays for the whole input: per region,
     build the candidate cache and run the two-round backward DP. Defaults
     `(1, 0)` = literal everywhere, so unfilled entries are always safe.
     Heuristic only: consumed by the re-verifying emitter `optimalEmit`. -/
 def computeChoices (data : ByteArray) : Array Nat × Array Nat :=
-  let (slit, slen, sdist) := staticCostTables
-  computeChoicesLoop data optChainDepth optCacheSlots optRegionSize slit slen sdist
+  let st := staticCostTables
+  computeChoicesLoop data optChainDepth optCacheSlots optRegionSize st.1 st.2.1 st.2.2
     (Array.replicate 65536 data.size) (Array.replicate data.size data.size)
     0 (Array.replicate data.size 1) (Array.replicate data.size 0)
+    (by have h : st.1.size = 256 := staticCostTables_fst_size; omega)
+    (by simp) (by simp) data.size
 
 /-! ## Token emission (the proof-bearing boundary)
 
@@ -427,6 +589,10 @@ and encodability proofs in `Zip.Spec.LZ77OptimalCorrect` are stated for
 def optimalEmit (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat) :
     List LZ77Token :=
   if hpos : pos < data.size then
+    -- `chLen`/`chDist` are *arbitrary* choice arrays here (the correctness
+    -- theorems in `LZ77OptimalCorrect` quantify over them with no size
+    -- hypothesis), so there is no `pos < chLen.size` to capture: these reads
+    -- stay panic-checked by design. The emitted token is re-verified below.
     let len := chLen[pos]!
     let dist := chDist[pos]!
     if hg : 3 ≤ len ∧ len ≤ 258 ∧ pos + len ≤ data.size ∧
@@ -448,6 +614,8 @@ decreasing_by all_goals omega
 def optimalEmitIter (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat)
     (acc : Array LZ77Token) : Array LZ77Token :=
   if hpos : pos < data.size then
+    -- As in `optimalEmit`: arbitrary choice arrays, so these reads stay
+    -- panic-checked; the emitted token is re-verified below.
     let len := chLen[pos]!
     let dist := chDist[pos]!
     if hg : 3 ≤ len ∧ len ≤ 258 ∧ pos + len ≤ data.size ∧
