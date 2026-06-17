@@ -187,30 +187,40 @@ private theorem findDistCode_idx_lt {dist dIdx dExtraN : Nat} {dExtraV : UInt32}
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) : dIdx < 30 :=
   findTableCode_go_idx_lt h
 
-/-! ## Dense length/distance code tables (Wave 5.0)
+/-! ## Dense length/distance code tables (Wave 5.0, packed #2623)
 
 `findLengthCode`/`findDistCode` are linear searches through the RFC 1951
 base tables, run once or twice per reference token by the frequency pass
 and both packed emitters — measured at ~14% of level-1 attributable
-samples (track-d W5.P1). `lenCodeTab`/`distCodeTab` precompute every
-answer into dense tables indexed by the value itself (length 0–258,
-distance 0–32768), packing the `(idx, extraBits, extraVal)` triple into
-one `UInt32` (`packCode`: idx bits 0–7, extraBits bits 8–15, extraVal
-bits 16–31 — the widest field is the distance extraVal ≤ 32768 < 2^16…
-in fact < 2^14, but 16 bits are free). `findLengthCodeFast`/
-`findDistCodeFast` read the table for in-range values and fall back to
-the linear search out of range, and are proven **equal** to the linear
-searches (`findLengthCodeFast_eq`/`findDistCodeFast_eq`), so the hot
-consumers (`bumpRef*FreqP`, `emitRefFixedP`, `emitRefWithCodesP`) swap
-them in with no statement changes anywhere; the boxed reference paths
-stay on the linear search (they are the spec subjects). The tables are
-built *by* the linear search at module initialization (259 + 32769
-probes, one-time), which keeps the equality proofs small: the only
-content fact needed is `getElem`-of-`map`-of-`range`, never an
-evaluation of the table. Caution (WF landmine, see
-`Zip/Native/DeflateFreqs.lean`): never let `whnf`/`decide` evaluate the
-table terms — the builder applies `findLengthCode` (a `WellFounded` fix)
-259/32769 times. -/
+samples (track-d W5.P1). `lenCodeWordTab`/`distCodeWordTab` precompute
+every answer into dense tables indexed by the value itself (length 0–258,
+distance 0–32768).
+
+The original dense tables (Wave 5.0) stored a boxed
+`Option (Nat × Nat × UInt32)` per entry, so each lookup was a pointer
+chase (`fget` → `obj_tag` → two `ctor_get`s + reference-count traffic).
+#2623 packs the `(idx, extraBits, extraVal)` triple into one `UInt32`
+(`packCode`: idx bits 0–7 (`< 29`), extraBits bits 8–15 (`≤ 13`),
+extraVal bits 16–31 — length extra `< 2^5`, distance extra `< 2^13`, both
+well within 16 bits) stored in an `Array UInt32`, so a lookup is one
+array read + a `UInt32` unbox + a couple of masks, with **no** boxed
+chase. The field accessors `codeIdx`/`codeExtra`/`codeVal` recover the
+triple. `findLengthCode`/`findDistCode` always succeed
+(`findLengthCode_isSome`/`findDistCode_isSome`), so the in-range table
+never holds `none`; `packCode none = 0` only covers the unreachable
+out-of-range fallback.
+
+`lenCodeWord`/`distCodeWord` read the packed table for in-range values
+and pack the linear-search result otherwise; they are proven **equal** to
+`packCode ∘ find*Code` (`lenCodeWord_eq`/`distCodeWord_eq`), the only
+content fact being `getElem`-of-`map`-of-`range`, never an evaluation of
+the table. The hot consumers (`bumpRef*FreqP`, `emitRefFixedP`,
+`emitRefWithCodesP`) read the packed word and bit-extract; the boxed
+reference paths stay on the linear search (they are the spec subjects).
+Caution (WF landmine, see `Zip/Native/DeflateFreqs.lean`): never let
+`whnf`/`decide` evaluate the table terms — the builder applies
+`findLengthCode` (a `WellFounded` fix) 259/32769 times at module
+initialization. -/
 
 /-- `findTableCode.go` never fails when started in range. -/
 private theorem findTableCode_go_isSome {baseTable : Array UInt16} {extraTable : Array UInt8}
@@ -226,7 +236,7 @@ termination_by baseTable.size - i
 
 /-- The fields `findTableCode.go` returns: `extraN` is the extra-table entry
     at the returned index and `extraV` the offset of `value` past its base. -/
-private theorem findTableCode_go_fields {baseTable : Array UInt16} {extraTable : Array UInt8}
+theorem findTableCode_go_fields {baseTable : Array UInt16} {extraTable : Array UInt8}
     {value i idx extraN : Nat} {extraV : UInt32} {hsize : baseTable.size ≤ extraTable.size}
     (h : findTableCode.go baseTable extraTable value i hsize = some (idx, extraN, extraV)) :
     extraN = (extraTable[idx]!).toNat ∧
@@ -252,54 +262,104 @@ termination_by baseTable.size - i
 
 /-- `findLengthCode` always succeeds (the base table is non-empty and the
     search is clamped, RFC 1951 §3.2.5). -/
-private theorem findLengthCode_isSome (len : Nat) : (findLengthCode len).isSome :=
+theorem findLengthCode_isSome (len : Nat) : (findLengthCode len).isSome :=
   findTableCode_go_isSome (by rw [Inflate.lengthBase_size]; omega)
 
 /-- `findDistCode` always succeeds. -/
-private theorem findDistCode_isSome (dist : Nat) : (findDistCode dist).isSome :=
+theorem findDistCode_isSome (dist : Nat) : (findDistCode dist).isSome :=
   findTableCode_go_isSome (by rw [Inflate.distBase_size]; omega)
 
-/-- Dense length-code table: entry `len` (0–258) is `findLengthCode len`,
-    memoizing the linear search. Entries are shared read-only values, so a
-    table read costs one array access (no per-call allocation). -/
-def lenCodeTab : Array (Option (Nat × Nat × UInt32)) :=
-  (Array.range 259).map findLengthCode
+/-- Pack a `(idx, extraBits, extraVal)` triple into one `UInt32`:
+    `idx | extraBits <<< 8 | extraVal <<< 16`. `none` (unreachable in range)
+    packs to `0`. -/
+@[inline] def packCode : Option (Nat × Nat × UInt32) → UInt32
+  | none => 0
+  | some (idx, extra, val) => idx.toUInt32 ||| (extra.toUInt32 <<< 8) ||| (val <<< 16)
 
-/-- Dense distance-code table: entry `dist` (0–32768) is `findDistCode dist`. -/
-def distCodeTab : Array (Option (Nat × Nat × UInt32)) :=
-  (Array.range 32769).map findDistCode
+/-- Code-index field of a packed word (bits 0–7). -/
+@[inline] def codeIdx (w : UInt32) : Nat := (w &&& 0xFF).toNat
+/-- Extra-bits-count field of a packed word (bits 8–15). -/
+@[inline] def codeExtra (w : UInt32) : Nat := ((w >>> 8) &&& 0xFF).toNat
+/-- Extra-bits-value field of a packed word (bits 16–31). -/
+@[inline] def codeVal (w : UInt32) : UInt32 := w >>> 16
 
-@[simp] theorem lenCodeTab_size : lenCodeTab.size = 259 := by
-  simp only [lenCodeTab, Array.size_map, Array.size_range]
+/-- Packed length-code table: entry `len` (0–258) is `packCode (findLengthCode len)`. -/
+def lenCodeWordTab : Array UInt32 :=
+  (Array.range 259).map (fun len => packCode (findLengthCode len))
 
-@[simp] theorem distCodeTab_size : distCodeTab.size = 32769 := by
-  simp only [distCodeTab, Array.size_map, Array.size_range]
+/-- Packed distance-code table: entry `dist` (0–32768) is `packCode (findDistCode dist)`. -/
+def distCodeWordTab : Array UInt32 :=
+  (Array.range 32769).map (fun dist => packCode (findDistCode dist))
 
-/-- Table-backed `findLengthCode`: one dense-array read for lengths 0–258,
-    the linear search beyond (unreachable for encodable tokens). -/
-@[inline] def findLengthCodeFast (length : Nat) : Option (Nat × Nat × UInt32) :=
-  if h : length < 259 then lenCodeTab[length]'(lenCodeTab_size ▸ h)
-  else findLengthCode length
+@[simp] theorem lenCodeWordTab_size : lenCodeWordTab.size = 259 := by
+  simp only [lenCodeWordTab, Array.size_map, Array.size_range]
 
-/-- Table-backed `findDistCode`: one dense-array read for distances 0–32768,
-    the linear search beyond. -/
-@[inline] def findDistCodeFast (dist : Nat) : Option (Nat × Nat × UInt32) :=
-  if h : dist < 32769 then distCodeTab[dist]'(distCodeTab_size ▸ h)
-  else findDistCode dist
+@[simp] theorem distCodeWordTab_size : distCodeWordTab.size = 32769 := by
+  simp only [distCodeWordTab, Array.size_map, Array.size_range]
 
-theorem findLengthCodeFast_eq (length : Nat) :
-    findLengthCodeFast length = findLengthCode length := by
-  unfold findLengthCodeFast
+/-- Table-backed packed length code: one `Array UInt32` read for lengths
+    0–258, the packed linear search beyond. -/
+@[inline] def lenCodeWord (length : Nat) : UInt32 :=
+  if h : length < 259 then lenCodeWordTab[length]'(lenCodeWordTab_size ▸ h)
+  else packCode (findLengthCode length)
+
+/-- Table-backed packed distance code: one `Array UInt32` read for distances
+    0–32768, the packed linear search beyond. -/
+@[inline] def distCodeWord (dist : Nat) : UInt32 :=
+  if h : dist < 32769 then distCodeWordTab[dist]'(distCodeWordTab_size ▸ h)
+  else packCode (findDistCode dist)
+
+theorem lenCodeWord_eq (length : Nat) :
+    lenCodeWord length = packCode (findLengthCode length) := by
+  unfold lenCodeWord
   split
-  · simp only [lenCodeTab, Array.getElem_map, Array.getElem_range]
+  · simp only [lenCodeWordTab, Array.getElem_map, Array.getElem_range]
   · rfl
 
-theorem findDistCodeFast_eq (dist : Nat) :
-    findDistCodeFast dist = findDistCode dist := by
-  unfold findDistCodeFast
+theorem distCodeWord_eq (dist : Nat) :
+    distCodeWord dist = packCode (findDistCode dist) := by
+  unfold distCodeWord
   split
-  · simp only [distCodeTab, Array.getElem_map, Array.getElem_range]
+  · simp only [distCodeWordTab, Array.getElem_map, Array.getElem_range]
   · rfl
+
+/-- `codeIdx` recovers the index from a packed `some` triple (`idx < 256`). -/
+theorem codeIdx_packCode (idx extra : Nat) (val : UInt32)
+    (hidx : idx < 256) : codeIdx (packCode (some (idx, extra, val))) = idx := by
+  simp only [codeIdx, packCode]
+  have hi : idx.toUInt32.toNat = idx := by simp [Nat.toUInt32]; omega
+  have hil : idx.toUInt32 < 256 := by rw [UInt32.lt_iff_toNat_lt, hi]; exact hidx
+  generalize idx.toUInt32 = i at hi hil ⊢
+  generalize extra.toUInt32 = e
+  rw [← hi]; congr 1
+  bv_decide
+
+/-- `codeExtra` recovers the extra-bit count (`extra < 256`, `idx < 256`). -/
+theorem codeExtra_packCode (idx extra : Nat) (val : UInt32)
+    (hidx : idx < 256) (hextra : extra < 256) :
+    codeExtra (packCode (some (idx, extra, val))) = extra := by
+  simp only [codeExtra, packCode]
+  have hi : idx.toUInt32.toNat = idx := by simp [Nat.toUInt32]; omega
+  have he : extra.toUInt32.toNat = extra := by simp [Nat.toUInt32]; omega
+  have hil : idx.toUInt32 < 256 := by rw [UInt32.lt_iff_toNat_lt, hi]; exact hidx
+  have hel : extra.toUInt32 < 256 := by rw [UInt32.lt_iff_toNat_lt, he]; exact hextra
+  generalize idx.toUInt32 = i at hil ⊢
+  generalize extra.toUInt32 = e at he hel ⊢
+  rw [← he]; congr 1
+  bv_decide
+
+/-- `codeVal` recovers the extra-bit value (`val < 2^16`, `extra < 256`, `idx < 256`). -/
+theorem codeVal_packCode (idx extra : Nat) (val : UInt32)
+    (hidx : idx < 256) (hextra : extra < 256) (hval : val < 65536) :
+    codeVal (packCode (some (idx, extra, val))) = val := by
+  simp only [codeVal, packCode]
+  have hi : idx.toUInt32.toNat = idx := by simp [Nat.toUInt32]; omega
+  have he : extra.toUInt32.toNat = extra := by simp [Nat.toUInt32]; omega
+  have hil : idx.toUInt32 < 256 := by rw [UInt32.lt_iff_toNat_lt, hi]; exact hidx
+  have hel : extra.toUInt32 < 256 := by rw [UInt32.lt_iff_toNat_lt, he]; exact hextra
+  generalize idx.toUInt32 = i at hil ⊢
+  generalize extra.toUInt32 = e at hel ⊢
+  bv_decide
 
 /-! ## USize-addressability helpers (Wave 7 P1a)
 
@@ -1295,22 +1355,20 @@ time. Do not inline `emitRefFixedP` back into `emitTokensP`.
     reference arm (including its dead-code `else` fallbacks, so the equality
     proof in `Zip/Spec/EmitPackedCorrect.lean` aligns branch-for-branch). -/
 @[inline] def emitRefFixedP (bw : BitWriter) (w : UInt32) : BitWriter :=
-  match findLengthCodeFast (((w >>> 16) &&& 0x7FFF).toNat) with
-  | some (idx, extraCount, extraVal) =>
-    if hlit : idx + 257 < fixedLitCodes.size then
-      let (code, len) := fixedLitCodes[idx + 257]
-      let bw := bw.writeHuffCode code len
-      let bw := bw.writeBits extraCount extraVal
-      match findDistCodeFast ((w &&& 0xFFFF).toNat) with
-      | some (dIdx, dExtraCount, dExtraVal) =>
-        if hdist : dIdx < fixedDistCodes.size then
-          let (dCode, dLen) := fixedDistCodes[dIdx]
-          let bw := bw.writeHuffCode dCode dLen
-          bw.writeBits dExtraCount dExtraVal
-        else bw
-      | none => bw
+  let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+  let idx := codeIdx lw
+  if hlit : idx + 257 < fixedLitCodes.size then
+    let (code, len) := fixedLitCodes[idx + 257]
+    let bw := bw.writeHuffCode code len
+    let bw := bw.writeBits (codeExtra lw) (codeVal lw)
+    let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+    let dIdx := codeIdx dw
+    if hdist : dIdx < fixedDistCodes.size then
+      let (dCode, dLen) := fixedDistCodes[dIdx]
+      let bw := bw.writeHuffCode dCode dLen
+      bw.writeBits (codeExtra dw) (codeVal dw)
     else bw
-  | none => bw
+  else bw
 
 /-- Packed-token form of `emitTokens`: emit the packed `UInt32` stream as
     fixed Huffman codes. Literals (tag bit clear) read the byte field
