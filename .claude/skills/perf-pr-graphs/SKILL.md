@@ -65,34 +65,40 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    when you only care about decode). For a **compress** PR, keep all 9 levels —
    L9 is usually the point.
 
-4. **Measure BEFORE** (the branch's native path *without this PR's commits*),
-   without disturbing the branch. **Baseline against the branch's merge-base with
-   master — NOT `origin/master` directly.** If the branch is behind master,
-   swapping in `origin/master`'s files pulls in *unrelated* perf commits that
-   touched the same files, so "before" ends up faster (or slower) for reasons that
-   have nothing to do with this PR, and the graph shows a phantom regression. The
-   merge-base is the exact point the branch diverged, so swapping its files
-   isolates only this PR's changes.
+4. **Measure BEFORE** (the branch's native path *without this PR's commits*).
+   **Build it in a throwaway worktree checked out at the branch's merge-base with
+   master — NOT at `origin/master`, and NOT by swapping files in place.**
 
-   First check how stale the branch is, then swap in the merge-base versions of
-   only the files this PR changed:
+   Why the merge-base: if the branch is behind master, `origin/master` contains
+   *unrelated* perf commits; any that touched a file this PR also touches would
+   leak into "before", making it faster (or slower) for reasons that have nothing
+   to do with the PR — a phantom regression on the speed curve. The merge-base is
+   the exact point the branch diverged, so it is master-minus-the-PR with no
+   extra commits.
+
+   Why a worktree and not `git checkout <base> -- <files>`: the in-place swap
+   forces you to guess "which files did the PR change" (miss a support module,
+   build file, generated table, or a rename/delete and "before" is a hybrid that
+   compiles HEAD code against base code), and it leaves the main worktree's build
+   artifacts in a stale state afterwards. A clean worktree at `$base` is the whole
+   tree at the divergence point — no guessing, no contamination:
    ```
    git fetch origin -q
    base=$(git merge-base origin/master HEAD)
    behind=$(git rev-list --count HEAD..origin/master)
    [ "$behind" -gt 0 ] && echo "NOTE: branch is $behind commits behind master; \
-baselining against merge-base ${base:0:8} (NOT origin/master) so unrelated \
-commits don't leak into 'before'."
-   # files this PR changed, relative to the divergence point:
-   git diff --name-only "$base"...HEAD
-   # swap ONLY those to their merge-base version, e.g.:
-   git checkout "$base" -- Zip/Native/Inflate.lean Zip/Spec/InflateBufCorrect.lean
-   lake build bench-report
-   lake env .lake/build/bin/bench-report --native-only /tmp/perf_before.json   # same level list as step 3
-   git checkout HEAD -- Zip/Native/Inflate.lean Zip/Spec/InflateBufCorrect.lean # restore branch
+baselining BEFORE at merge-base ${base:0:8} (not origin/master) so unrelated \
+commits don't leak in."
+   tmp="/tmp/perf-before-${base:0:8}"
+   git worktree add --detach "$tmp" "$base"
+   ( cd "$tmp" && lake build bench-report \
+       && lake env .lake/build/bin/bench-report --native-only /tmp/perf_before.json )  # same level list as step 3
+   git worktree remove --force "$tmp"
    ```
-   Always restore with `git checkout HEAD -- <files>` and confirm `git status` is
-   clean afterwards. (For a single-commit PR, `$base` and `HEAD~1` coincide.)
+   `bench-report` stamps the JSON `meta.git_commit` from the worktree's HEAD, so
+   `/tmp/perf_before.json`'s commit should equal `$base` — the plotter prints it
+   (step 6) for you to confirm. On NixOS the inner `cd` changes the nix-shell
+   working dir; run the whole `( … )` inside one `nix-shell --run "…"`.
 
 5. **Sanity-check before plotting.** Two independent checks — they catch
    different failures, so read both:
@@ -102,14 +108,16 @@ commits don't leak into 'before'."
      change is not output-neutral after all (or, rarely, the two runs saw
      different corpora). A PR that *intends* to change the parse (better ratio)
      shows a nonzero Δratio — that is the point; confirm it moves the right way.
-   - **Baseline correctness (the staleness guard from step 4).** Note that
-     `max |Δratio|` does **not** catch a stale-branch baseline: if "before" leaked
-     in an unrelated perf commit that touched the same files, both still produce
-     identical output, so Δratio stays `0.000000` while the *speed* curve is
-     silently wrong (this is the classic phantom regression — "before" looks
-     faster than "after" for reasons unrelated to the PR). The only defence is
-     step 4's `behind` check: if the branch was behind master and you baselined
-     against `origin/master` instead of the merge-base, redo step 4.
+   - **Baseline correctness.** `max |Δratio|` does **not** catch a stale-branch
+     baseline: if "before" leaked in an unrelated perf commit that touched the
+     same files, both still produce identical output, so Δratio stays `0.000000`
+     while the *speed* curve is silently wrong (the classic phantom regression —
+     "before" looks faster than "after" for reasons unrelated to the PR). The
+     defences are the merge-base worktree (step 4, which makes a hybrid tree
+     impossible) plus the commit/coverage line the plotter prints: confirm
+     BEFORE's `meta.git_commit` equals `$base` and that before/after cover the
+     same `(pattern, level)` rows. If BEFORE's commit is `origin/master` rather
+     than the merge-base, redo step 4.
 
 6. **Plot** (other-language curves are reused from `latest.json`, never
    re-measured). The graphs are a report artifact — write them to the gitignored
@@ -120,7 +128,9 @@ commits don't leak into 'before'."
      bench/results/latest.json /tmp
    ```
    This writes `/tmp/perf_before_after_<metric>_<corpus>.{svg,png}` and prints the
-   per-level before/after geomean table plus `max |Δratio|`.
+   before/after `meta` (machine + git_commit of each run), a row-coverage line
+   (any `(pattern, level)` present in one run but not the other), the per-level
+   before/after geomean table, and `max |Δratio|`.
 
 7. **Show Kim and wait.** Read the PNGs back so they render, present the
    before/after geomean tables and the per-corpus speedup, and **stop for Kim's
