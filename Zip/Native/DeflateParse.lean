@@ -156,6 +156,18 @@ decreasing_by all_goals omega
   else
     chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
 
+/-- 3-byte chain hash for the L9 candidate cache. The optimal parser maximises
+    *ratio*, so it must see every candidate — including length-3 matches. The
+    L1-L8 matchers switched to a 4-byte hash for speed (#2620), which drops
+    positions that share only a 3-byte prefix; on binary that measurably hurt the
+    L9 parse (x-ray +7.4%, ooffice +3.5% ratio). So the cache keeps the original
+    3-byte hash. Heuristic — opaque to correctness (the cache never enters a proof). -/
+@[inline] def hash3opt (data : ByteArray) (pos hashSize : Nat) (h : pos + 2 < data.size) : Nat :=
+  let a := (data[pos]'(by omega)).toUInt32
+  let b := (data[pos + 1]'(by omega)).toUInt32
+  let c := (data[pos + 2]'(by omega)).toUInt32
+  ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
+
 /-- Build the candidate cache for region `[base, base + r)`: at **every**
     position (the DP can land anywhere, so none may be skipped) insert the
     position into the hash chains and record its candidate frontier.
@@ -173,7 +185,7 @@ def buildCache (data : ByteArray) (hashTable prev : Array Nat) (depth slots base
   if hj : j < r then
     let pos := base + j
     if hlt : pos + 2 < data.size then
-      let h := lz77Greedy.hash3 data pos 65536 hlt
+      let h := hash3opt data pos 65536 hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev pos head
