@@ -187,30 +187,40 @@ private theorem findDistCode_idx_lt {dist dIdx dExtraN : Nat} {dExtraV : UInt32}
     (h : findDistCode dist = some (dIdx, dExtraN, dExtraV)) : dIdx < 30 :=
   findTableCode_go_idx_lt h
 
-/-! ## Dense length/distance code tables (Wave 5.0)
+/-! ## Dense length/distance code tables (Wave 5.0, packed #2623)
 
 `findLengthCode`/`findDistCode` are linear searches through the RFC 1951
 base tables, run once or twice per reference token by the frequency pass
 and both packed emitters — measured at ~14% of level-1 attributable
-samples (track-d W5.P1). `lenCodeTab`/`distCodeTab` precompute every
-answer into dense tables indexed by the value itself (length 0–258,
-distance 0–32768), packing the `(idx, extraBits, extraVal)` triple into
-one `UInt32` (`packCode`: idx bits 0–7, extraBits bits 8–15, extraVal
-bits 16–31 — the widest field is the distance extraVal ≤ 32768 < 2^16…
-in fact < 2^14, but 16 bits are free). `findLengthCodeFast`/
-`findDistCodeFast` read the table for in-range values and fall back to
-the linear search out of range, and are proven **equal** to the linear
-searches (`findLengthCodeFast_eq`/`findDistCodeFast_eq`), so the hot
-consumers (`bumpRef*FreqP`, `emitRefFixedP`, `emitRefWithCodesP`) swap
-them in with no statement changes anywhere; the boxed reference paths
-stay on the linear search (they are the spec subjects). The tables are
-built *by* the linear search at module initialization (259 + 32769
-probes, one-time), which keeps the equality proofs small: the only
-content fact needed is `getElem`-of-`map`-of-`range`, never an
-evaluation of the table. Caution (WF landmine, see
-`Zip/Native/DeflateFreqs.lean`): never let `whnf`/`decide` evaluate the
-table terms — the builder applies `findLengthCode` (a `WellFounded` fix)
-259/32769 times. -/
+samples (track-d W5.P1). `lenCodeWordTab`/`distCodeWordTab` precompute
+every answer into dense tables indexed by the value itself (length 0–258,
+distance 0–32768).
+
+The original dense tables (Wave 5.0) stored a boxed
+`Option (Nat × Nat × UInt32)` per entry, so each lookup was a pointer
+chase (`fget` → `obj_tag` → two `ctor_get`s + reference-count traffic).
+#2623 packs the `(idx, extraBits, extraVal)` triple into one `UInt32`
+(`packCode`: idx bits 0–7 (`< 29`), extraBits bits 8–15 (`≤ 13`),
+extraVal bits 16–31 — length extra `< 2^5`, distance extra `< 2^13`, both
+well within 16 bits) stored in an `Array UInt32`, so a lookup is one
+array read + a `UInt32` unbox + a couple of masks, with **no** boxed
+chase. The field accessors `codeIdx`/`codeExtra`/`codeVal` recover the
+triple. `findLengthCode`/`findDistCode` always succeed
+(`findLengthCode_isSome`/`findDistCode_isSome`), so the in-range table
+never holds `none`; `packCode none = 0` only covers the unreachable
+out-of-range fallback.
+
+`lenCodeWord`/`distCodeWord` read the packed table for in-range values
+and pack the linear-search result otherwise; they are proven **equal** to
+`packCode ∘ find*Code` (`lenCodeWord_eq`/`distCodeWord_eq`), the only
+content fact being `getElem`-of-`map`-of-`range`, never an evaluation of
+the table. The hot consumers (`bumpRef*FreqP`, `emitRefFixedP`,
+`emitRefWithCodesP`) read the packed word and bit-extract; the boxed
+reference paths stay on the linear search (they are the spec subjects).
+Caution (WF landmine, see `Zip/Native/DeflateFreqs.lean`): never let
+`whnf`/`decide` evaluate the table terms — the builder applies
+`findLengthCode` (a `WellFounded` fix) 259/32769 times at module
+initialization. -/
 
 /-- `findTableCode.go` never fails when started in range. -/
 private theorem findTableCode_go_isSome {baseTable : Array UInt16} {extraTable : Array UInt8}
@@ -258,72 +268,6 @@ theorem findLengthCode_isSome (len : Nat) : (findLengthCode len).isSome :=
 /-- `findDistCode` always succeeds. -/
 theorem findDistCode_isSome (dist : Nat) : (findDistCode dist).isSome :=
   findTableCode_go_isSome (by rw [Inflate.distBase_size]; omega)
-
-/-- Dense length-code table: entry `len` (0–258) is `findLengthCode len`,
-    memoizing the linear search. Entries are shared read-only values, so a
-    table read costs one array access (no per-call allocation). -/
-def lenCodeTab : Array (Option (Nat × Nat × UInt32)) :=
-  (Array.range 259).map findLengthCode
-
-/-- Dense distance-code table: entry `dist` (0–32768) is `findDistCode dist`. -/
-def distCodeTab : Array (Option (Nat × Nat × UInt32)) :=
-  (Array.range 32769).map findDistCode
-
-@[simp] theorem lenCodeTab_size : lenCodeTab.size = 259 := by
-  simp only [lenCodeTab, Array.size_map, Array.size_range]
-
-@[simp] theorem distCodeTab_size : distCodeTab.size = 32769 := by
-  simp only [distCodeTab, Array.size_map, Array.size_range]
-
-/-- Table-backed `findLengthCode`: one dense-array read for lengths 0–258,
-    the linear search beyond (unreachable for encodable tokens). -/
-@[inline] def findLengthCodeFast (length : Nat) : Option (Nat × Nat × UInt32) :=
-  if h : length < 259 then lenCodeTab[length]'(lenCodeTab_size ▸ h)
-  else findLengthCode length
-
-/-- Table-backed `findDistCode`: one dense-array read for distances 0–32768,
-    the linear search beyond. -/
-@[inline] def findDistCodeFast (dist : Nat) : Option (Nat × Nat × UInt32) :=
-  if h : dist < 32769 then distCodeTab[dist]'(distCodeTab_size ▸ h)
-  else findDistCode dist
-
-theorem findLengthCodeFast_eq (length : Nat) :
-    findLengthCodeFast length = findLengthCode length := by
-  unfold findLengthCodeFast
-  split
-  · simp only [lenCodeTab, Array.getElem_map, Array.getElem_range]
-  · rfl
-
-theorem findDistCodeFast_eq (dist : Nat) :
-    findDistCodeFast dist = findDistCode dist := by
-  unfold findDistCodeFast
-  split
-  · simp only [distCodeTab, Array.getElem_map, Array.getElem_range]
-  · rfl
-
-/-! ## Packed scalar code tables (#2623)
-
-The dense tables above store `Option (Nat × Nat × UInt32)`: every lookup is a
-boxed `Option`/tuple/`Nat` pointer chase (`fget` → `obj_tag` → two
-`ctor_get`s + reference-count traffic). The three hot consumers
-(`bumpRef*FreqP`, `emitRefFixedP`, `emitRefWithCodesP`) read the *same* entry
-on every reference token, so de-boxing the read helps all three at once.
-
-`packCode` packs the `(idx, extraBits, extraVal)` triple into one `UInt32`:
-`idx` in bits 0–7 (`idx < 29`), `extraBits` in bits 8–15 (`≤ 13`), `extraVal`
-in bits 16–31 (length extra `< 2^5`, distance extra `< 2^13`, both well within
-16 bits). `findLengthCode`/`findDistCode` always succeed (`*_isSome`), so the
-in-range table never holds `none`; `packCode none = 0` only covers the
-unreachable out-of-range fallback. `lenCodeWord`/`distCodeWord` read the packed
-table for in-range values and pack the linear-search result otherwise; they are
-proven **equal** to `packCode ∘ find*Code` (`lenCodeWord_eq`/`distCodeWord_eq`),
-and the field accessors `codeIdx`/`codeExtra`/`codeVal` recover the triple
-(`codeIdx_packCode`/…). The consumers swap their `Option`-matching for one
-`Array UInt32` read + a couple of `UInt32` masks — no boxed chase — while
-their characterization lemmas keep the *same statements*, so every downstream
-loop equality (`tokenFreqsP_eq`, `emitTokensP_eq`, …) is untouched. As with the
-boxed tables, the builder applies the `WellFounded` search 259/32769 times at
-init; never let `whnf`/`decide` evaluate the table terms. -/
 
 /-- Pack a `(idx, extraBits, extraVal)` triple into one `UInt32`:
     `idx | extraBits <<< 8 | extraVal <<< 16`. `none` (unreachable in range)
