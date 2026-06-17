@@ -77,6 +77,13 @@ def chainWalkAll (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
   else if optCacheSlots ≤ k then (lens, dists)
   else if hc : cand < pos ∧ pos - cand ≤ 32768 then
     have hcand : cand + maxLen ≤ data.size := by omega
+    -- Prefilter (#2622): mirror of `chainWalkAllFast` — skip the compare when the
+    -- byte at offset `bestLen` mismatches (the candidate can't beat `bestLen`).
+    let skip : Bool := if bestLen < maxLen then
+        data[cand + bestLen]! != data[pos + bestLen]! else false
+    if skip then
+      chainWalkAll data prev pos maxLen hpm (prev[cand]!) (fuel - 1) bestLen k slotBase lens dists
+    else
     let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
     if 3 ≤ ml ∧ bestLen < ml then
       let lens := lens.set! (slotBase + k) ml
@@ -107,6 +114,17 @@ def chainWalkAllFast (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
   else if hk : optCacheSlots ≤ k then (lens, dists)
   else if hc : cand < pos ∧ pos - cand ≤ 32768 then
     have hcand : cand + maxLen ≤ data.size := by omega
+    -- Prefilter (#2622): a candidate is recorded only if it beats `bestLen`; if its
+    -- byte at offset `bestLen` mismatches it cannot (`countMatch ≤ bestLen`), so skip
+    -- the compare. The cache is heuristic (opaque to correctness), and this is also
+    -- output-preserving — the same candidate set is recorded.
+    let skip : Bool := if hbl : bestLen < maxLen then
+        data[cand + bestLen]'(by omega) != data[pos + bestLen]'(by omega)
+      else false
+    if skip then
+      chainWalkAllFast data prev pos maxLen hpm (prev[cand]'(by omega)) (fuel - 1) bestLen k
+        slotBase lens dists hps hsl hsd
+    else
     let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
     if 3 ≤ ml ∧ bestLen < ml then
       have hbl : slotBase + k < lens.size := by omega
@@ -234,7 +252,11 @@ def staticCostTables : Array Nat × Array Nat × Array Nat :=
     tables. Used for DP rounds after the first. -/
 def fittedCostTables (tokens : Array LZ77Token) :
     Array Nat × Array Nat × Array Nat :=
-  let f := tokenFreqs tokens
+  -- Dense histogram (#2622): pack the tokens (cheap bit-ops, no code lookup) and use
+  -- the O(1) dense-table `tokenFreqsP` instead of the boxed `tokenFreqs`, whose
+  -- `findLengthCode`/`findDistCode` are the *linear* search (6.9% of L9). Same
+  -- histogram for the DP's valid matches (`unpackTok ∘ packTok = id`).
+  let f := tokenFreqsP (tokens.map packTok)
   let lens := dynamicCodeLengths f.1 f.2
   mkCostTables lens.1.toArray lens.2.toArray
 
