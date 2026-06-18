@@ -185,11 +185,23 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    Kim's go-ahead before merging.** State the metric, the machine, and any caveat
    (machine mismatch, levels skipped, ratio shift on a compress change, a noisy
    AFTER run). Quote the numeric speedup — the y-axis is log, so trust the table
-   for the *magnitude* and the picture for the *positioning*. **Canterbury is
-   measured median-of-5 and is the row set to read for a speed verdict; Silesia is
-   single-pass (`reps=1`), so its per-file MB/s carries ±30%+ run-to-run noise
-   even on byte-identical code — use it for ratio and coverage, not for a fine
-   speed delta.**
+   for the *magnitude* and the picture for the *positioning*.
+
+   **Silesia is the corpus that matters most — weight it above Canterbury for the
+   merge decision.** Silesia is large real-world data (10–50 MB files); Canterbury
+   is small synthetic files (≤1 MB). They **can and do disagree**, because the
+   decode-table access pattern is cache-bound: a change can help on Silesia's
+   large hot-loop files while hurting tiny Canterbury files that fit in cache
+   regardless (issue #2650's de-box measured **−4.5% Canterbury but +5.8%
+   Silesia** — a real split, not noise). **A Silesia win outweighs a Canterbury
+   loss.** Do NOT read Canterbury alone and call it the verdict.
+
+   The catch: Canterbury is median-of-5 (low per-run noise) but unrepresentative;
+   Silesia is single-pass (`reps=1`), so a *single* Silesia run carries ±30%+
+   run-to-run noise and a lone graph cannot resolve a single-digit-% delta on it.
+   When the Silesia delta is small or borderline — exactly when the merge decision
+   hinges on it — do the controlled interleaved measurement below instead of
+   trusting one pass or a cross-session graph.
 
 8. **Always post the graphs as a PR comment — then give Kim the link.** This step
    is compulsory, not "also if convenient": every qualifying PR gets a PR comment
@@ -226,6 +238,38 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    Pin the raw URL to the pushed commit SHA (`${gsha}`), not a branch name, so the
    image keeps rendering even if the branch is later updated or deleted. Confirm
    the PR branch's own `git status` is still clean afterward (step 6 footgun).
+
+## Resolving a small or borderline delta (controlled interleaved measurement)
+
+The routine graph (steps 1–8) compares a fresh AFTER against the recorded
+`latest.json` BEFORE — a *cross-session* comparison whose noise floor is a few
+percent, which is fine for visible wins but **cannot** settle a single-digit-%
+delta (and single-pass Silesia adds ±30% on top). When the merge decision hinges
+on a small delta — especially on Silesia — measure both sides **back-to-back in
+one session** so common-mode noise (background load, turbo, thermal) cancels:
+
+- Build a BEFORE binary at the branch merge-base (`git worktree add --detach
+  /tmp/before $(git merge-base origin/master HEAD)` then `lake build bench-report`
+  in it). The AFTER binary is the PR branch's.
+- Run the two binaries **alternately, N times** (≥5 pairs), each pinned to one
+  core (`taskset -c <core>`). Consecutive AFTER/BEFORE runs then see near-identical
+  machine state, so their *ratio* is robust even on a busy machine — the paired
+  ratio + its 95% CI is the verdict, not any single run.
+- **Run BOTH binaries from the MAIN worktree's directory.** Silesia is gitignored
+  and fetched only into the main worktree, so the merge-base worktree has *only*
+  committed Canterbury — running the BEFORE binary from there silently measures
+  Canterbury while AFTER measures Silesia, and the two never overlap. (The
+  `meta.git_commit` stamp follows the CWD, not the binary, so distinguish the two
+  by output filename, not by the stamp.)
+- To get **Silesia** rows, set Canterbury aside (`mv bench/corpora/canterbury …`)
+  so the matrix is fast enough to repeat; restore it after (a `trap` on EXIT).
+  L9's optimal-parse *compress* on 203 MB is minutes/run — measure L9 with fewer
+  pairs, or skip it if 1–8 already settles the sign (decode delta was uniform
+  across levels in #2650).
+- Aggregate paired: for each `(file, level, pair)` take `after/before`, then the
+  geomean and a 95% CI on the log-ratios. CI excluding 1.0 → real; spanning 1.0 →
+  genuinely within noise. This is what turned #2650's "−3% but maybe noise" into a
+  firm "−4.5% Canterbury / +5.8% Silesia".
 
 ## Notes
 
