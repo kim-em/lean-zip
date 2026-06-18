@@ -6,454 +6,141 @@ allowed-tools: Read, Bash, Grep, Glob
 
 # Proof Review Checklist
 
-Mechanical cleanup steps for Lean proof quality reviews. Follow this
-checklist in order for each file.
+Mechanical cleanup steps for Lean proof quality reviews. Follow in order, one file at a time, building after each batch of changes.
+
+Bare `simp`/`simp_all` elimination is largely done codebase-wide; new files still need it. With those clean, prioritize: dead `have` bindings, single-use private theorems, proof compression (`grind`/`<;>`/macros/helpers), and `sorry` elimination.
 
 ## Phase 0: Verify Issue Accuracy
 
-**Before starting work**, verify the issue's bare simp counts against
-the actual master state. Issue descriptions go stale when other PRs
-clean the same or overlapping files.
+Before starting, verify the issue's claimed counts against the actual master state — issue descriptions go stale when overlapping PRs touch the same files.
 
 ```bash
-# Accurate bare simp grep (excludes simp only, simp_all, simp?, simp_wf, etc.)
+# Bare simp (excludes simp only, simp_all, simp?, simp_wf, dsimp, etc.)
 grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
-
-# Also check for bare simpa (simpa without 'only' is just as fragile as bare simp)
+# Bare simpa — uses the full simp database too; the simp\b grep misses it
 grep -n 'simpa\b' File.lean | grep -v 'simpa only\|simpa?'
 ```
 
-**Note**: bare `simpa` (without `only`) uses the full simp database,
-just like bare `simp`. Issue descriptions often miss these because the
-grep pattern `simp\b` doesn't match `simpa`. Always check both.
+If the real count differs sharply from the issue (e.g. issue says 61, master has 0), the file was already cleaned. `coordination skip` and move on.
 
-If the actual count differs significantly from the issue (e.g., issue
-says 61 but master has 0), the file was already cleaned by another PR.
-Use `coordination skip` and move on — don't waste time investigating.
+## Phase 1: Mechanical Cleanup (always safe)
 
-## Phase 1: Metrics (Before)
+- **Merge consecutive `rw`**: `rw [ha] at h; rw [hb] at h` → `rw [ha, hb] at h`.
+- **Merge consecutive `simp only`** (same target only): `simp only [ha] at h; simp only [hb] at h` → `simp only [ha, hb] at h`. Caveat: `simp only` applies all lemmas simultaneously — if the first call creates redexes the second depends on, merging changes the result. Build after merging.
+- **Remove dead `have` bindings**: but `omega`/`simp` read the whole local context implicitly, so a "dead" `have` may be feeding them. Build after each removal.
+- **Simplify `obtain`**: `obtain ⟨a, b⟩ := h; rw [a]; rw [b]` → `obtain ⟨rfl, rfl⟩ := h`.
+- **Extract lemmas (≥3 rule)**: extract only when the pattern appears 3+ times, or 2 times at 6+ lines each. Don't extract short patterns, parameterized-differently sites, or clear inline sequences. Use `private theorem`/`private lemma`.
 
-Record starting metrics before making any changes:
+## Phase 2: Bare `simp` → `simp only`
 
-```bash
-# Bare simp count (the primary quality metric — use the accurate grep from Phase 0)
-grep -n 'simp\b' File.lean | grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+`simp [X]` is NOT `simp only [X]` (bare uses the whole `@[simp]` database plus `X`). Never mechanically search-and-replace.
 
-# Bare simpa count
-grep -n 'simpa\b' File.lean | grep -v 'simpa only\|simpa?'
-```
+**Batch-then-apply** (the key efficiency move for files with 10+ bare simps):
+1. Convert ALL bare `simp` to `simp?` at once, build ONCE — yields every `Try this:` suggestion in one pass.
+2. Collect the suggested `simp only [...]` replacements.
+3. Apply 3-5 at a time, building after each batch (suggestions are computed independently, so some fail in combination).
 
-Expected reduction targets by file size:
-- Small files (<200 lines): 80-95% bare simp elimination
-- Medium files (200-500 lines): 70-90% bare simp elimination
-- Large files (500+ lines): 60-80% bare simp elimination
-- Files heavy in monadic chains: 50-70% (many are legitimately resistant)
+This turns a 20-bare-simp file from ~20 build cycles into 2-3.
 
-## Phase 2: Mechanical Cleanup
+**Per-simp decision tree:**
 
-These steps are safe and should always be applied:
-
-### 2a. Merge consecutive `rw` calls
-
-```lean
--- Before
-rw [ha] at h
-rw [hb] at h
-
--- After
-rw [ha, hb] at h
-```
-
-### 2b. Merge consecutive `simp only` calls
-
-```lean
--- Before
-simp only [ha] at h
-simp only [hb] at h
-
--- After
-simp only [ha, hb] at h
-```
-
-**Caveats**:
-- Only merge when both target the same location (`at h` or `at ⊢`).
-  Don't merge `simp only [ha] at h` with `simp only [hb]` (different targets).
-- Don't merge when the first call unfolds definitions that create new
-  redexes for the second call's lemmas. `simp only` applies all lemmas
-  simultaneously, not sequentially — so merging two calls that depend on
-  ordering (e.g. first unfolds `UInt32` terms, second normalizes
-  `List.append_assoc`) will change the simplification result and break
-  downstream proofs. Always build after attempting a merge.
-
-### 2c. Remove dead `have` bindings
-
-Search for `have` bindings whose names never appear later in the proof.
-
-**WARNING**: `omega` and `simp` use the entire local context implicitly.
-A `have` that appears unused may be feeding `omega`. Always build after
-each removal to verify. See the `lean-simp-tactics` skill section on
-"`have` Bindings That Look Unused but Feed `omega`/`simp`".
-
-### 2d. Check for extractable lemmas
-
-**Extraction heuristic (≥3 rule):** Only extract a helper when:
-- The pattern appears **3+ times** in the file, OR
-- It appears **2 times** AND each instance is **6+ lines** (significant
-  savings)
-
-**Don't extract** when:
-- Only 2 call sites with short patterns (<5 lines each)
-- The pattern is parameterized differently at each site (different
-  tables, different types) — extraction adds complexity without reuse
-- The "pattern" is just a common tactic sequence that reads clearly
-  inline (e.g., `rw [h]; omega`)
-
-When extracting, use `private theorem` or `private lemma` to keep the
-helper local to the file.
-
-### 2e. Simplify `obtain` patterns
-
-```lean
--- Before
-obtain ⟨a, b⟩ := h
-rw [a]; rw [b]
-
--- After
-obtain ⟨rfl, rfl⟩ := h
-```
-
-## Phase 3: Bare `simp` Decision Tree
-
-For each bare `simp` (without `only`), follow this decision tree.
-
-**Batch discovery, sequential application.** For files with many bare
-simps (10+), the most efficient workflow is:
-
-1. **Batch discovery**: Convert ALL bare `simp` calls to `simp?`
-   simultaneously, then build ONCE. This produces all `Try this:`
-   suggestions in a single build pass — vastly more efficient than
-   converting one at a time.
-2. **Collect suggestions**: Read all info messages and note the
-   suggested `simp only [...]` replacements.
-3. **Apply in small batches**: Replace 3-5 at a time, building after
-   each batch to verify. Some suggestions may not work in combination
-   (simp? suggestions are computed independently).
-
-This batch-then-apply approach was discovered in the bare simp campaign
-and typically reduces a 20-bare-simp file in 2-3 build cycles instead
-of 20.
-
-**Important**: `simp [X]` is NOT equivalent to `simp only [X]` — bare
-`simp` uses the entire `@[simp]` lemma database plus `X`, while
-`simp only [X]` uses ONLY `X`. Never do a mechanical search-and-replace.
-
-### Step 1: Try `simp?`
-
-Replace `simp` (or `simp [X]`) with `simp?` (or `simp? [X]`), build,
-and read the `Try this:` info message to get the minimal lemma set.
-If it produces a `simp only [...]` that works, use it.
-
-### Step 2: Try `simp only []` or `dsimp only`
-
-If `simp?` fails or produces an unwieldy list:
-
-**`simp only []`** (empty argument list) handles:
-- Match/iota reduction when scrutinee is a constructor
-- After `split`/`match` chains where the goal has unreduced matches
-- Replaces `simp only [htok]` when linter flags the argument as unused
-
-**`dsimp only`** handles:
-- `letFun` reduction
-- Beta reduction
-- `bind`/`Option.bind` reduction (when scrutinee is known)
-
-Try `simp only []` first for match reduction; use `dsimp only` for
-definitional reductions like `letFun` and monadic bind.
-
-### Step 3: Try a targeted replacement
-
-Based on what the `simp` is doing:
+1. **`simp?`** → use the `Try this:` `simp only [...]` if it works.
+2. **`simp only []`** (empty list) for match/iota reduction (constructor scrutinee, after `split`/`match` chains, or when the lone arg is flagged unused). **`dsimp only`** for definitional reductions: `letFun`, beta, `bind`/`Option.bind` with known scrutinee. Prefer `dsimp only` when `simp only []` only reduces let-bindings/projections.
+3. **Targeted replacement** by intent:
 
 | Pattern | Replacement |
 |---------|-------------|
-| `simp at h` closing `error = ok` | `exact nomatch h` |
-| `simp at h` closing `none = some` | `exact nomatch h` |
-| `simp [hx]` then contradiction | `exact nomatch (hx ▸ h)` (one step) or `simp only [hx] at h; exact nomatch h` (two steps) |
-| `\| none => simp [hvar] at hspec` (Option case) | `\| none => exact nomatch (hvar ▸ hspec)` |
-| `\| error e => simp [hvar] at h` (Except case) | `\| error e => exact nomatch (hvar ▸ h)` |
-| (**caveat**: `nomatch (▸)` maxRecDepth) | After unfolding large definitions (e.g. `inflateRaw`), `▸` may hit `maxRecDepth`. Keep the two-step `simp only [h] at h; exact absurd h nofun` for those cases. |
-| `simp at hmem` closing `x ∈ []` | `exact nomatch hmem` (NOT `absurd hmem (List.not_mem_nil _)` — `List.not_mem_nil` has type `False` not `¬(x ∈ [])`) |
-| `simp at h` closing `[].length ≥ 2` | `simp only [List.length_nil] at h; omega` (`omega` alone can't reduce `[].length`; same for `[_].length`, use `List.length_cons`) |
+| `simp at h` closing `error = ok` / `none = some` | `exact nomatch h` |
+| `simp [hx]` then contradiction | `exact nomatch (hx ▸ h)` or two-step `simp only [hx] at h; exact nomatch h` |
+| Option case `\| none => simp [hvar] at hspec` | `\| none => exact nomatch (hvar ▸ hspec)` |
+| Except case `\| error e => simp [hvar] at h` | `\| error e => exact nomatch (hvar ▸ h)` |
+| `nomatch (▸)` hits `maxRecDepth` after unfolding a big def (e.g. `inflateRaw`) | Keep two-step `simp only [h] at h; exact absurd h nofun` |
+| `simp at hmem` closing `x ∈ []` | `exact nomatch hmem` (NOT `List.not_mem_nil` — its type is `False`, not `¬(x ∈ [])`) |
+| `simp at h` closing `[].length ≥ 2` | `simp only [List.length_nil] at h; omega` (omega can't reduce `[].length`; use `List.length_cons` for `[_]`) |
 | `simp [bind, Option.bind]` | `dsimp only [bind, Option.bind]` |
 | `simp [hx, bind, Option.bind]` | `rw [hx]; dsimp only [bind, Option.bind]` |
-| `simp only []` | Keep — match iota reduction |
 | `simp [Prod.mk.injEq]` | `simp only [Except.ok.injEq, Prod.mk.injEq]` |
-| `simp; omega` (array size preservation) | `rw [Array.size_set!]; omega` or `rw [Array.size_replicate]; omega` |
+| `simp; omega` (array size) | `rw [Array.size_set!]; omega` or `rw [Array.size_replicate]; omega` |
 | `simp at h` (negated comparison) | `simp only [ge_iff_le, Nat.not_le] at h` or `simp only [gt_iff_lt, Nat.not_lt] at h` |
 | `simp_all` (beq→eq + close) | `simp only [beq_iff_eq] at h; exact h` |
-| `by simp` (struct field = literal) | `by show <literal_eq>; omega` or `Or.inl rfl` or `rfl` |
-| `simp [Spec.readBitsLSB, ...]` (Option do-notation) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
-| `simp [hpos0, hpos1]` (getElem!/getElem) | `simp only [getElem!_pos, hpos0, hpos1, ...]` |
-| `simp` after `split` on Bool `if` | `split <;> rfl` |
-| `simp [Nat.toUInt32]; omega` | `simp only [Nat.toUInt32, UInt32.toNat_ofNat', Nat.reducePow, Nat.reduceDvd, Nat.mod_mod_of_dvd, ...]; omega` |
-| `simp (config := { decide := true }) only [...]` | Keep — needed for concrete evaluation + targeted lemma application (e.g. BFINAL flags) |
-| `have : T.size = N := by decide` then `omega` | Keep — table size computation via kernel |
-| `simp [Spec.readBitsLSB, ...]` (Option do-notation) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
+| `by simp` (struct field = literal) | `by show <literal_eq>; omega`, `Or.inl rfl`, or `rfl` |
+| `simp [Spec.readBitsLSB, ...]` (Option do) | `simp only [Spec.readBitsLSB, ..., Option.pure_def, Option.bind_eq_bind, Option.bind_some]` |
 | `simp [hpos]` with `getElem!` | `simp only [getElem!_pos, hpos, ...]` — bridges `data[i]!` to `data[i]` |
+| `simp` after `split` on Bool `if` | `split <;> rfl` |
 | `simp at h` (double negation) | `exact Decidable.of_not_not h` or `simp only [not_not] at h` |
+| `List.reduceReplicate` + `length_cons` + `length_nil` chain | `List.length_replicate` |
 
-### Step 4: Accept bare simp with comment
+4. **Accept with comment** if 1-3 fail — e.g. `-- bare simp: N-level Option.bind chain`, `-- bare simp: concrete bit computation`, `-- bare simp: BitVec normalization`.
 
-If steps 1-3 all fail, the `simp` falls into a resistant category.
-Add a justifying comment from this table:
+**`simp?` daggers**: if a suggestion contains `✝` names (e.g. `UInt32.reduceEq✝`) it's unparseable. For hypothesis-rewrite / case-split daggers, use `grind`; for concrete UInt `BEq`/reduction daggers, prefer `decide` or explicit `cases` (see lean-simp-tactics).
 
-| Category | Comment |
-|----------|---------|
-| Deep Option.bind chain | `-- bare simp: N-level Option.bind chain` |
-| Concrete bit computation | `-- bare simp: concrete bit computation` |
-| BitVec normalization | `-- bare simp: BitVec normalization` |
-| Length mismatch bridging | `-- bare simp: bridges List.length_append` |
-| Complex `if`/`dite` with arithmetic | `-- bare simp: dite with arithmetic bridging` |
+## Phase 2a: Bare `simpa`
 
-## Phase 3a: Bare `simpa` Conversion
+`simpa` = `simp` + `assumption`. Convert via `simpa?` → `simpa only [...]`. `simpa only []` (empty) is valid structural reduction + assumption — don't flag it.
 
-Bare `simpa` (without `only`) uses the full simp database, just like
-bare `simp`. The `simpa` tactic is `simp` + `assumption`, so
-`simpa using term` applies `simp` to both the goal and `term`, then
-checks if they match.
+## Phase 2b: `simp_all`
 
-**Conversion**: Replace `simpa` with `simpa?`, build, and use the
-suggested `simpa only [...]`.
+Powerful (rewrites all hypotheses + goal) but fragile. Convert via `simp_all?`.
 
-**Common patterns**:
+| `simp_all` usage | Replacement |
+|------------------|-------------|
+| Option/Prod destructuring | `simp_all only [Option.some.injEq, Prod.mk.injEq]` |
+| after `beq` hypothesis | `simp only [beq_iff_eq] at *; exact h` or `simp_all only [beq_iff_eq]` |
+| termination proof | `simp_all only [<specific_lemma>]; omega` |
+| Bool→Prop `(x == 0) = false` | `have hne := beq_eq_false_iff_ne.mpr hx0` (hx0 : x ≠ 0) — no simp-db dependency |
+| reducing known `if` branch | `rw [if_pos h]` / `rw [if_neg h] at hsize` |
+| `simp_all [beq_iff_eq]` for arithmetic contradiction | `simp only [beq_iff_eq] at *; omega` |
 
-| `simpa` usage | Targeted replacement |
-|---------------|---------------------|
-| `simpa using term` (Bool decide) | `simpa only [gt_iff_lt, decide_eq_true_eq, Nat.not_lt] using term` |
-| `simpa using size_theorem` | `simpa only [Array.size_replicate] using size_theorem` |
+Injection kit: `Option.some.injEq`, `Prod.mk.injEq`, `Except.ok.injEq` (plus `obtain ⟨rfl, rfl⟩ := h`) replace most monadic `simp_all`.
 
-**Note**: `simpa only []` (empty list) is valid and common — it does
-structural reduction + `assumption`. Don't flag it as bare.
+Resistance ladder: `simp_all?` → `grind` (handles the same hyp-rewrite + case-split class via a different mechanism) → `simp only [...] at *; omega` / per-hypothesis → accept `simp_all only [...]` best-effort.
 
-## Phase 3b: `simp_all` Conversion
+## Phase 3: Proof Compression
 
-`simp_all` is a separate concern from bare `simp`. It applies `simp` to
-all hypotheses and the goal simultaneously, which is powerful but fragile
-(sensitive to lemma database changes).
+Shorten proofs without changing statements.
 
-### `simp_all` → `simp_all only [...]`
+### `grind` for deeply nested monadic case-splitting
+Use when a proof needs 4+ nested `split at h` over monadic error/ok branches (3+ sequential `bind`s). Do NOT use where `omega`, `simp only`, or one `split` suffices — it's a sledgehammer.
 
-Replace bare `simp_all` with targeted variants using `simp_all?`:
-
-1. Replace `simp_all` with `simp_all?`, build, read the suggestion
-2. Apply the suggested `simp_all only [...]`
-
-### Common `simp_all` replacement patterns
-
-| `simp_all` usage | Targeted replacement |
-|------------------|---------------------|
-| `simp_all` closing Option/Prod destructuring | `simp_all only [Option.some.injEq, Prod.mk.injEq]` |
-| `simp_all` after `beq` hypothesis | `simp only [beq_iff_eq] at *; exact h` or `simp_all only [beq_iff_eq]` |
-| `simp_all` in termination proof | `simp_all only [countRun_le_length]; omega` — make the specific lemma explicit |
-| `simp_all` for Bool-to-Prop conversion | `simp_all only [beq_eq_false_iff_ne]` or use `beq_eq_false_iff_ne.mpr hx0` |
-| `simp_all` reducing `if` in hypothesis | `rw [if_pos h]` / `rw [if_neg h] at hsize` — use `if_pos`/`if_neg` lemmas directly when `simp_all` is just reducing a conditional whose branch is known |
-| `simp_all [beq_iff_eq]` for contradiction | `simp only [beq_iff_eq] at *; omega` — when the goal is arithmetic contradiction after BEq→Prop conversion |
-
-### Injection lemma kit for Option/Prod
-
-When `simp_all` handles Option/Prod destructuring, the targeted replacements are:
-
-- **`Option.some.injEq`**: reduces `Option.some a = Option.some b` to `a = b`
-- **`Prod.mk.injEq`**: reduces `(a, b) = (c, d)` to `a = c ∧ b = d`
-- **`Except.ok.injEq`**: reduces `Except.ok a = Except.ok b` to `a = b`
-
-These three lemmas replace the majority of `simp_all` calls in monadic
-proof contexts. Combined with `obtain ⟨rfl, rfl⟩ := h`, they eliminate
-the need for `simp_all` in most injection scenarios.
-
-### `beq_eq_false_iff_ne.mpr` for Bool-to-Prop
-
-When `simp_all` is used to convert `(x == 0) = false` to `x ≠ 0`,
-the targeted replacement is:
-
+### Tactic chaining `<;>` and `all_goals`
 ```lean
--- Before (bare simp_all):
-simp_all [beq_iff_eq]
-
--- After (direct):
-have hne := beq_eq_false_iff_ne.mpr hx0  -- hx0 : x ≠ 0
+split at h; next => exact nomatch h   -- collapse per-branch error closers
+all_goals omega                        -- one closer for many goals
 ```
 
-This is more explicit and doesn't depend on the simp lemma database.
-
-### When `simp_all?` fails: use `grind`
-
-If `simp_all?` doesn't produce a usable suggestion (e.g., when `simp_all`
-is handling deeply nested case-splitting across multiple hypotheses), try
-`grind` as a replacement. `grind` handles the same class of problems as
-`simp_all` (hypothesis rewriting + case splitting) but through a different
-mechanism. This was discovered in the Fse.lean review (PR #909) where
-`simp_all only [...]` blocked on hypothesis rewriting side effects but
-`grind` closed the goal directly.
-
-**Decision tree for `simp_all` resistance**:
-1. Try `simp_all?` → use suggestion if it works
-2. Try `grind` → use if it closes the goal
-3. Try decomposition: `simp only [...] at *; omega` or per-hypothesis targeting
-4. Accept `simp_all only [...]` with best-effort lemma list
-
-### Campaign status
-
-Both bare `simp` and bare `simp_all` campaigns are complete across the
-entire codebase as of 2026-03-08. New code should maintain zero bare
-`simp` and zero bare `simp_all`. The batch-then-apply workflow from
-Phase 3 was the key efficiency breakthrough, reducing per-file review
-time from ~20 build cycles to 2-3.
-
-### Post-campaign: next review targets
-
-With bare simp/simp_all elimination complete, future review sessions
-should focus on (in priority order):
-
-1. **Dead hypotheses**: `have` bindings whose names never appear in
-   later tactics (but verify they're not implicitly used by `omega`
-   or `simp` — see Phase 2c above)
-2. **Redundant lemmas**: Private theorems used only once, or theorems
-   whose statement is a trivial consequence of another
-3. **Proof compression**: Multi-line proofs that could be shortened
-   via `grind`, tactic chaining (`<;>`), or helper extraction
-4. **`sorry` elimination**: Track E content theorems with remaining
-   `sorry` placeholders
-5. **Consistency**: Ensure naming conventions match across similar
-   theorem families (e.g., all position-advancement theorems use
-   `_pos_gt` suffix consistently)
-
-### Review campaign completion status (2026-03-12)
-
-**DEFLATE write-side** — all audited:
-BitstreamWriteCorrect, BitWriterCorrect, DeflateDynamicHeader,
-DeflateDynamicEmit, DeflateDynamicCorrect, DeflateDynamicFreqs,
-DeflateEncode, DeflateEncodeProps,
-DeflateEncodeDynamic, DeflateEncodeDynamicProps, HuffmanEncode,
-HuffmanEncodeCorrect, DynamicTreesCorrect, DynamicTreesComplete,
-GzipCorrect, ZlibCorrect, DeflateRoundtrip
-
-**DEFLATE read-side** — all audited:
-BitstreamCorrect, BitstreamComplete, DecodeCorrect, DecodeComplete,
-InflateCorrect, InflateComplete, InflateLoopBounds, InflateRawSuffix,
-HuffmanCorrect, HuffmanCorrectLoop, DeflateSuffix,
-DeflateStoredCorrect, DeflateFixedCorrect,
-LZ77NativeCorrect, EmitTokensCorrect
-
-**Foundational / cross-cutting** — all audited:
-BinaryCorrect, BitReaderInvariant
-
-**Checksum + Huffman base** — all audited:
-Adler32, Crc32, Huffman, DeflateFixedTables
-
-**Zstd spec files — review in progress** (2026-03-12):
-Zstd.lean foundational sections (PR #1359 merged), Fse.lean (in progress),
-ZstdFrame.lean (in progress), ZstdHuffman.lean (done), ZstdSequence.lean (done)
-
-**Remaining unaudited spec files** (for future review sessions):
-HuffmanKraft, HuffmanTheorems,
-LZ77, LZ77Lazy,
-XxHash (4 intentional sorries, special status),
-Deflate.lean, Zstd.lean remaining sections (~lines 1017-6280)
-
-### Patterns discovered during the review campaign
-
-**UInt8-to-Nat `have` for omega**: When `split` gives UInt8 comparison
-hypotheses (e.g., `hlen_pos : sym.len > 0` where `sym.len : UInt8`),
-`omega` cannot reduce the UInt8 comparison. A `have hlen_pos_nat :
-sym.len.toNat > 0 := by ...` is NOT dead — it's an intentional type
-annotation that provides the Nat version `omega` needs. Don't remove.
-
-**`exact nomatch (h ▸ h)` limitation**: This concise error-branch
-closer hits `maxRecDepth` after unfolding large definitions (e.g.,
-`inflateRaw`). For those cases, retain the two-step pattern:
-`simp only [h] at h; exact absurd h nofun`.
-
-**Stale counts in issues**: Always verify the issue's bare simp counts
-against master before starting. Multiple agents may clean the same
-files in overlapping sessions. Use `coordination skip` if the file is
-already clean.
-
-**`show ... from` wrappers**: After `simp only` unfolds let-bindings,
-`show T from h` wrappers become redundant when `h` already has type `T`.
-Remove these to reduce noise.
-
-**`repeat (first | closer | split)` — the most impactful compression
-pattern from the review campaign.** When all branches of a nested
-`split` produce the same closer (or a small set of closers), this
-one-liner replaces arbitrarily deep nested case-split blocks.
-
-How it works: `repeat` applies to the first goal. `first` tries the
-closer; if it succeeds, that goal is closed and `repeat` moves to the
-next goal from `split`. If the closer fails, `split` generates new
-sub-goals, and `repeat` continues.
-
-Common variants:
+### `repeat (first | closer | split)` — highest-impact pattern
+Replaces arbitrarily deep nested `split` blocks where branches share a closer. `repeat` works on the first goal: `first` tries the closer (closes goal → next goal) else `split` generates sub-goals and `repeat` continues.
 
 ```lean
--- Existential witnesses (GzipCorrect/ZlibCorrect compress theorems)
-repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)
-
--- Decidable goals (ZlibCorrect)
-repeat (first | decide | split)
-
--- With lemma application in witness (ZlibCorrect trailer)
-repeat (first | exact ⟨_, _, rfl, rfl, rfl, Binary.readUInt32BE_bytes _⟩ | split)
-
--- Guard contradictions in RFC parsing (Zstd.lean parseFrameHeader)
+repeat (first | exact ⟨_, _, rfl, rfl, rfl⟩ | split)            -- existential witnesses
+repeat (first | decide | split)                                  -- decidable goals
 repeat (first | contradiction | (simp only [...] at hsize; omega) | (split at hres))
-
--- Recursive function validation (LZ77Lazy)
-repeat (first | exact matchLZ77.go_validSymbolList data _ windowSize | split)
-
--- Constructor existential (Fse.lean highBitPos)
-repeat (first | exact ⟨_, rfl⟩ | split)
+repeat (first | exact ⟨_, rfl⟩ | split)                          -- constructor existential
 ```
 
-**Ordering rule**: Put the closer BEFORE `split` in the `first` list.
-For multiple closers, put the most permissive last. **`nomatch` must
-come LAST** because it gives hard errors (not tactic failures) on
-satisfiable types — `first` cannot catch hard errors.
+**Ordering rule**: closer BEFORE `split`; most permissive closer last. **`nomatch` must come LAST** — it raises a *hard error* (not a tactic failure) on satisfiable types like `Except.ok x = Except.ok y`, and `first` cannot catch hard errors.
 
-**`simp_all?` produces inaccessible lemma names**: When `simp_all?`
-suggests a replacement containing dagger names like `UInt32.reduceEq✝`
-(with the `✝` suffix), the suggestion is unusable — Lean cannot parse
-the dagger character in `simp only [...]`. Use `grind` as a drop-in
-replacement in these cases. This was discovered in the Zstd.lean
-foundational review (PR #1359) for `parseBlockHeader_blockType_eq`.
+```lean
+-- WRONG: nomatch's hard error blocks the obtain branch
+split at h <;> first | exact nomatch h | (obtain ⟨rfl, rfl⟩ := h; rfl)
+-- RIGHT: gracefully-failing pattern first, nomatch as fallback
+split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
+```
 
-**`dsimp only` for definitional-only reductions**: When `simp only []`
-(empty list) appears and only reduces let-bindings or struct projections,
-prefer `dsimp only` — it's more precise and never unfolds non-definitional
-lemmas. This refinement was applied across 6 call sites in
-BitReaderInvariant/BitWriterCorrect during the review campaign.
+### `List.forall_mem_cons` for `∀ t ∈ cons, P` membership
+When `intro t ht; cases ht with | head => …headProof… | tail _ h => …IH…` repeats across `split` branches (identical `tail` arm), collapse each to:
+```lean
+exact List.forall_mem_cons.2 ⟨headProof, recursiveCall …⟩
+```
+`List.forall_mem_cons : (∀ x ∈ a :: l, p x) ↔ p a ∧ ∀ x ∈ l, p x`. Idiomatic for matcher-family `∀ t ∈ tokens, encodable t` proofs.
 
-**`List.length_replicate` over expansion**: Replace verbose
-`List.reduceReplicate` + `List.length_cons` + `List.length_nil` chains
-with direct `List.length_replicate`.
-
-**`brAppend` `bitPos` equality for `omega`**: When `brAppend` (an
-`abbrev` preserving `pos` and `bitOff`) is used, `omega` cannot see
-that `(brAppend br suffix).bitPos = br.bitPos` because `bitPos` is a
-`def`. The anonymous `have : (brAppend br suffix).bitPos = br.bitPos
-:= rfl` is NOT dead — it provides the equality that `omega` needs.
-
-**Tactic macro hygiene**: `set_option hygiene false` local tactic
-macros CAN capture names introduced by `obtain` destructuring (e.g.,
-`bfinal` from `obtain ⟨bfinal, br₁⟩ := p`). This is useful for DRYing
-repeated tactic blocks — see `bfinal_suffix_dispatch` in
-`InflateRawSuffix.lean` which captures `bfinal`, `br'`, `out'`, `h`,
-`ih` from the surrounding proof context.
-
-**Tactic macro quotation syntax**: When extracting repeated tactic
-blocks into `local macro "name" : tactic`, the `·` (bullet/focus dot)
-syntax does NOT work inside `\`(tactic| ...)` quotations. Use `next =>`
-instead. Wrap the entire tactic in parentheses to parse correctly:
+### Local tactic macros for repeated patterns (3+ uses)
+```lean
+set_option hygiene false in
+local macro "unfold_except" : tactic =>
+  `(tactic| simp only [bind, Except.bind, pure, Except.pure] at h)
+```
+`set_option hygiene false` lets the macro capture surrounding names by name (e.g. `h`, or `bfinal`/`br'`/`out'`/`ih` destructured by `obtain` in the enclosing proof). Always scope `local`. Inside `` `(tactic| …) `` quotations the `·` focus dot does NOT parse — use `next =>` and wrap the whole body in parens:
 ```lean
 set_option hygiene false in
 local macro "my_tactic" : tactic =>
@@ -463,231 +150,55 @@ local macro "my_tactic" : tactic =>
     next => tactic_for_false))
 ```
 
-**`show T; omega` for structure projections**: `omega` cannot reduce
-structure projections (e.g., `(BitReader.mk data startPos 0).bitOff`).
-Use `show 0 < 8; omega` to explicitly narrow the goal before calling
-`omega`. Do NOT simplify to `by omega` — it will fail.
-
-**`obtain/subst/constructor` → `obtain/exact` compression**: Replace:
-```lean
-obtain ⟨hval, hbr'⟩ := h
-subst hbr'; constructor
-· exact hval
-· rfl
-```
-With the more concise one-liner:
-```lean
-obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
-```
-
-**Multi-step injection → single expression**: Replace:
-```lean
-have : some (a, b) = some (a, c) := h₁.symm.trans h₂
-have heq := Option.some.inj this
-have : b = c := (Prod.mk.inj heq).2
-rw [this]; exact hfinal
-```
-With:
-```lean
-rw [(Prod.mk.inj (Option.some.inj (h₁.symm.trans h₂))).2]; exact hfinal
-```
-
-**`List.forall_mem_cons` for `∀ t ∈ cons, P` membership proofs**: When a
-proof of `∀ t ∈ (x :: rest), P t` is written as
-`intro t ht; cases ht with | head => …headProof… | tail _ h => …IH…`,
-and this block repeats across several `split` branches (the IH `tail` arm
-identical, only the `head` differing), collapse each branch to:
-```lean
-exact List.forall_mem_cons.2 ⟨headProof, recursiveCall …⟩
-```
-`List.forall_mem_cons : (∀ x ∈ a :: l, p x) ↔ p a ∧ ∀ x ∈ l, p x`. This is
-the idiomatic shape for the matcher-family `∀ t ∈ tokens, encodable t`
-proofs (greedy/lazy/chain/optimal in `LZ77*Correct.lean`), turning a 3-line
-`cases` block into one line per branch (discovered reviewing
-`LZ77OptimalCorrect.lean`, #2576).
-
-## Phase 3c: Proof Compression
-
-After bare-simp cleanup, look for opportunities to shorten proofs
-without changing theorem statements. Discovered across PRs #885, #886,
-#900, #908:
-
-### `grind` for deeply nested monadic case-splitting
-
-When a proof requires 4+ nested `split at h` blocks to handle monadic
-branches, `grind` often closes the goal in one step. This is the
-correct use case for `grind` — deeply nested case-splitting where
-manual `split` would produce 20+ lines.
-
-**When to use**: Monadic chains with 3+ sequential `bind` operations
-where each has error/ok branches.
-
-**When NOT to use**: Simple goals where `omega`, `simp only`, or a
-single `split` suffices. `grind` is a sledgehammer — don't use it for
-nails.
-
-### Tactic chaining with `<;>`
-
-Compress repeated case-handling patterns:
-
-```lean
--- Before (6 lines per error branch, 8 branches = 48 lines)
-split at h
-· exact nomatch h
-split at h
-· exact nomatch h
-...
-
--- After (2 lines for all 8 branches)
-split at h; next => exact nomatch h
-split at h; next => exact nomatch h
-```
-
-Or for multiple identical closers:
-
-```lean
--- Before
-· omega
-· omega
-· omega
-
--- After (all three goals)
-all_goals omega
-```
-
-**`nomatch` ordering in `first` chains**: `exact nomatch h` produces a
-hard error (not a tactic failure) when `h` has a satisfiable type (e.g.,
-`Except.ok x = Except.ok y`). Since `first` cannot catch hard errors,
-`nomatch` must come LAST in any `first` chain:
-
-```lean
--- WRONG: nomatch gives hard error on valid equations, blocks the obtain branch
-split at h <;> first | exact nomatch h | (obtain ⟨rfl, rfl⟩ := h; rfl)
-
--- RIGHT: try success pattern first (fails gracefully), nomatch as fallback
-split at h <;> first | (obtain ⟨rfl, rfl⟩ := h; rfl) | exact nomatch h
-```
-
-### Local tactic macros for repeated patterns
-
-When a proof pattern repeats 3+ times in a file, extract a local
-tactic macro:
-
-```lean
-set_option hygiene false in
-local macro "unfold_except" : tactic =>
-  `(tactic| simp only [bind, Except.bind, pure, Except.pure] at h)
-```
-
-**Note**: `set_option hygiene false` is needed to capture `h` by name.
-Always scope as `local` to avoid global pollution.
-
 ### Helper lemma extraction
+When 3+ proofs share the same monadic unfold → split errors → extract fact pattern, hoist a `private theorem foo_elim (h : foo x = .ok (a, b)) : subCallA x = .ok r ∧ … := by …` once; each downstream proof shrinks to 2-3 lines.
 
-When 3+ proofs share the same monadic unfolding pattern (unfold →
-case-split errors → extract key fact), extract a private helper:
+### Concise compressions
+- `obtain ⟨hval, hbr'⟩ := h; subst hbr'; constructor · exact hval · rfl` → `obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩`
+- Multi-step injection chains → single expression, e.g. `rw [(Prod.mk.inj (Option.some.inj (h₁.symm.trans h₂))).2]; exact hfinal`
+- Drop redundant `show T from h` wrappers after `simp only` unfolds let-bindings (when `h : T` already).
 
-```lean
-private theorem myFunction_elim ...
-    (h : myFunction x = .ok (a, b)) :
-    subCallA x = .ok intermediateResult ∧ ... := by
-  -- 13 lines of monadic unfolding, done once
-```
-
-Each downstream proof then becomes 2-3 lines instead of 13.
-
-### Dead code removal
-
-Search for unused private theorems and helper definitions:
+### Dead / duplicate code
 ```bash
-# Find private theorem definitions
-grep -n 'private theorem\|private def' File.lean
-# For each, check if it's referenced elsewhere in the file
-grep -n 'theoremName' File.lean
+grep -n 'private theorem\|private def' File.lean   # then grep each name for other uses
+grep -n 'theorem TheoremName' File.lean            # duplicate decls (parallel agents) break the build
 ```
-
-Remove unreferenced private definitions.
-
-### Duplicate theorem declarations
-
-When multiple PRs add the same theorem (common with parallel agent
-sessions), the file won't build. Check for duplicates:
-```bash
-grep -n 'theorem TheoremName' File.lean
-```
+Remove unreferenced private definitions and unnecessary `termination_by`/`decreasing_by` (only after verifying the build).
 
 ### Large block deletion (50+ lines)
+Don't use Edit (exact-match is error-prone over large spans). Use:
+```bash
+head -n N File.lean > /tmp/F.lean && mv /tmp/F.lean File.lean   # tail deletion
+sed 'M,Nd'  File.lean > /tmp/F.lean && mv /tmp/F.lean File.lean   # middle deletion
+```
+Verify with `wc -l` and `tail -5`.
 
-**Do NOT use the Edit tool to delete large blocks** (50+ lines). The
-Edit tool requires exact `old_string` matching, which is error-prone
-for large spans and wastes context tokens. Instead:
+## Phase 4: Type-bridging `have`s that look dead but aren't
 
-- **Tail deletion** (removing everything after line N):
-  ```bash
-  head -n N File.lean > /tmp/File_truncated.lean && mv /tmp/File_truncated.lean File.lean
-  ```
-- **Middle deletion** (removing lines M through N):
-  ```bash
-  sed 'M,Nd' File.lean > /tmp/File_trimmed.lean && mv /tmp/File_trimmed.lean File.lean
-  ```
+These are intentional and must NOT be removed:
+- **UInt8/UInt-to-Nat**: `have hlen_pos_nat : sym.len.toNat > 0 := …` — `omega` can't reduce a UInt8 comparison; the `.toNat` version is what it needs.
+- **`brAppend` bitPos equality**: `have : (brAppend br suffix).bitPos = br.bitPos := rfl` — `omega` can't see through `bitPos` (a `def`) that `brAppend` (an `abbrev`) preserves `pos`/`bitOff`.
+- **`show ...; omega` for structure projections**: `omega` can't reduce `(BitReader.mk data startPos 0).bitOff`; narrow first with `show 0 < 8; omega`. Do NOT reduce to plain `by omega`.
 
-Always verify the result with `wc -l` and `tail -5` after truncation.
+## Phase 5: Linter Compliance
 
-### Unused `termination_by` / `decreasing_by` clauses
+- **Unused simp args** (`bind`, `Option.bind`, `Except.bind`, `letFun` contribute only via dsimp): use the `rw + dsimp` pattern (see `lean-monad-proofs`).
+- **`↓reduceIte` flagged**: after `simp only [hf]`, iota handles `if true/false`; drop it.
+- **`Option.some.injEq` flagged**: replace `simp only [Option.some.injEq]` with `obtain rfl := Option.some.inj h`.
 
-When Lean can infer termination automatically, explicit
-`termination_by` and `decreasing_by` clauses are unnecessary. Remove
-them to reduce noise, but only after verifying the file still builds.
+## Phase 6: Verification
 
-## Phase 4: Linter Compliance
+1. `lake build Module.Name`.
+2. Re-run the Phase 0 greps; compare counts.
+3. Verify no `sorry` introduced and no `maxRecDepth` increase (regression signal).
+4. If the PR changes a public-API signature default literal (`max…Size := N`), add an `example … rfl` probe by the docstring pinning the literal — silent on success, loud on drift.
 
-Check for linter warnings on the cleaned-up proofs:
+## Phase 7: Commit
 
-### Unused simp arguments
-
-The linter flags `bind`, `Option.bind`, `Except.bind`, `letFun` as
-unused in `simp only` calls because they contribute only via dsimp.
-Replace with the `rw + dsimp` pattern (see `lean-monad-proofs` skill).
-
-### `↓reduceIte` flagged as unused
-
-After `simp only [hf]`, iota reduction handles `if true/false`
-automatically. Remove `↓reduceIte` if the linter flags it.
-
-### `Option.some.injEq` flagged as unused
-
-Replace `simp only [Option.some.injEq]` with explicit
-`obtain rfl := Option.some.inj h`.
-
-## Phase 5: Verification
-
-After all changes:
-
-1. Build the file: `lake build Module.Name`
-2. Compare metrics:
-   ```bash
-   # Same grep commands as Phase 1
-   ```
-3. Verify no sorry introduced
-4. Verify no `maxRecDepth` increased (indicates a regression)
-
-Additionally, when the PR touches a public-API signature default:
-
-- [ ] If this PR changes a function-signature default literal
-      (e.g., `max…Size := N`), add an `example ... rfl` probe next to
-      the docstring that pins the exact literal value. Silent on
-      success, loud on drift. Pattern from #1617 / #1623 / #1631.
-
-## Phase 6: Commit
-
-One commit per file reviewed. Use prefix `refactor:` with a summary:
+One commit per file, prefix `refactor:`, with metrics in the body:
 ```
 refactor: replace bare simp with simp only in FileName.lean
-```
 
-Include metrics in the commit body:
-```
 Bare simp: 45 → 12 (73% reduction)
-Remaining 12: 8 Option.bind chains, 2 readBitsLSB computations,
-2 BitVec normalizations
+Remaining 12: 8 Option.bind chains, 2 readBitsLSB, 2 BitVec normalizations
 ```

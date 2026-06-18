@@ -16,19 +16,15 @@ Use `generalize` to unify shared subexpressions first (see below).
 
 ### When to Reach for `bv_decide`
 
-Use `bv_decide` as the **final step** when the goal is purely about bit-level operations
-on UInt8/UInt16/UInt32/UInt64/BitVec:
+Use `bv_decide` as the **final step** when the goal is purely bit-level on
+UInt8/16/32/64/BitVec:
 
 1. **Byte read/write roundtrips**: `readUInt32LE (writeUInt32LE val) 0 = val` —
-   first `simp only` to normalize getElem!/set! calls, then `bv_decide` to close
-   the bit reconstruction.
-
-2. **Bit extraction/reconstruction**: goals like
+   `simp only` to normalize getElem!/set! first, then `bv_decide`.
+2. **Bit extraction/reconstruction**:
    `((v &&& 0xFF).toUInt8).toUInt16 ||| (((v >>> 8) &&& 0xFF).toUInt8).toUInt16 <<< 8 = v`
-
-3. **After `generalize`**: when data comes from `ByteArray` indexing, use
-   `generalize data[pos].toUInt32 = x` to abstract concrete array access into
-   a BitVec variable, then `bv_decide` reasons about the variable.
+3. **After `generalize`**: for `ByteArray` indexing, `generalize data[pos].toUInt32 = x`
+   to abstract array access into a BitVec variable, then `bv_decide`.
 
 ### `bv_decide` vs `bv_omega` vs `decide_cbv`
 
@@ -131,26 +127,19 @@ value) equals `x + y * 2 ^ n`. The library lemma is
 `Nat.two_pow_add_eq_or_of_lt`; for `BitVec` / `UInt*` use the
 bitwidth-aware equivalent.
 
-A reusable `Nat`-level helper for two-nibble packs:
+A reusable `Nat`-level helper for two-nibble packs (use whenever a checksum,
+packed header, or bitfield adds lower bits into a higher-bit container):
 
 ```lean
-lemma pack_toNat_of_bounds {x y : Nat} {n : Nat}
-    (hx : x < 2 ^ n) :
+lemma pack_toNat_of_bounds {x y n : Nat} (hx : x < 2 ^ n) :
     (y <<< n ||| x) = y * 2 ^ n + x := by
-  rw [Nat.two_pow_add_eq_or_of_lt hx]
-  ring
+  rw [Nat.two_pow_add_eq_or_of_lt hx]; grind  -- `ring` is unavailable (no Mathlib); `grind` subsumes it
 ```
 
-Use this whenever a checksum, packed header, or bitfield adds
-lower bits into a higher-bit container. Adler-32 (PR #1641) is
-the project's first user; CRC32 could adopt it on its next
-refactor.
-
-The concrete `UInt32`-specific instance lives as a `private`
-helper at [`Zip/Spec/Adler32.lean`](../../../Zip/Spec/Adler32.lean) —
-`pack_toNat_of_bounds {a b : Nat} (ha : a < 65536) (hb : b < 65536) :`
-`(pack (a, b)).toNat = a + b * 65536`. Promote it to a public
-`Nat`-level lemma the next time a third caller needs it.
+The `UInt32`-specific instance lives as a `private` helper in
+[`Zip/Spec/Adler32.lean`](../../../Zip/Spec/Adler32.lean):
+`pack_toNat_of_bounds (ha : a < 65536) (hb : b < 65536) : (pack (a, b)).toNat = a + b * 65536`.
+Promote to a public `Nat`-level lemma when a third caller needs it.
 
 ## UInt32 Bit Operations → `Nat.testBit`
 

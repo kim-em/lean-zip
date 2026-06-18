@@ -18,51 +18,40 @@ no other worker session has.
 
 ## Post-issue-creation tail deferral
 
-**Headline rule**: when writing a summarize-wave PR, PRs that
-land **between the planner's issue-creation timestamp and the
-wave-block PR's submission timestamp** are **out of wave
-scope**. The wave block stays faithful to the issue body's
-deliverables enumeration; tail PRs are flagged in a *"What
-remains (for the next summarize)"* sub-section of the wave
-block and queued for the next wave block.
+**Rule**: PRs that land **between the planner's issue-creation
+timestamp and the wave-block PR's submission timestamp** are
+**out of wave scope**. The wave block stays faithful to the
+issue body's deliverables enumeration; tail PRs are flagged in
+a *"What remains (for the next summarize)"* sub-section and
+queued for the next wave block.
 
-**Rationale — issue-body-as-source-of-truth invariant**: the
-issue body is the contract between the planner and the
-summarize-worker. The deliverables enumeration in the body
-fixes both the wave's PR list and its title's PR-count number.
-Expanding scope retroactively (silently absorbing tail PRs)
-breaks that contract: the wave-count audit-trail becomes
-non-reproducible (a future reader cannot tell from the issue
-alone which PRs the wave block will end up covering), and the
-title's stated count drifts from the body's enumeration. The
-inventory-reconciliation skill's
-[*Half-closed two-step*](../inventory-reconciliation/SKILL.md)
-section is the cross-skill analogue of the same invariant for
-parameter-flip workstreams.
+**Why — issue-body-as-source-of-truth invariant**: the issue
+body is the contract between planner and summarize-worker. Its
+deliverables enumeration fixes both the wave's PR list and its
+title's PR-count number. Silently absorbing tail PRs breaks
+that contract: the audit trail becomes non-reproducible (a
+reader cannot tell from the issue alone which PRs the wave
+covers) and the title's count drifts from the body. (The
+cross-skill analogue is inventory-reconciliation's
+[*Half-closed two-step*](../inventory-reconciliation/SKILL.md).)
 
 **Mechanism** — the wave block should:
 
-- close the issue's enumerated PR list at the issue-creation
-  timestamp's last in-flight PR (i.e. the tail of the body's
-  enumeration as written, not the tail of `git log` at
-  PR-submission time);
-- call out tail PRs by number in a *"What remains (for the
-  next summarize)"* paragraph that names each tail PR and the
-  rationale (typically *"queued-at-wave-close cleanup landed
-  after issue creation"* or *"meditate skill update landed
-  after issue creation"*);
-- leave the tail PRs' wave assignment to the next planner —
-  the next wave's planning-issue body includes them in the
-  *next* wave's enumeration, with the tail PRs absorbed at the
-  start of that body's deliverables list.
+- close the enumerated PR list at the tail of the body's
+  enumeration **as written**, not the tail of `git log` at
+  PR-submission time;
+- call out each tail PR by number with a rationale (typically
+  *"queued-at-wave-close cleanup landed after issue creation"*
+  or *"meditate skill update landed after issue creation"*) in
+  the *"What remains (for the next summarize)"* paragraph;
+- leave the tail PRs' wave assignment to the next planner,
+  who absorbs them at the start of the next wave's enumeration.
 
-**Boundary**: this pattern applies only to the *summarize*
-workflow. Feature/review/repair/meditate issues have single-PR
-scope and no wave aggregation, so there is no tail to defer.
-(For those workflows, the analogous "scope creep" failure mode
-is adding unrelated changes to a single-issue PR, which is
-already covered by the project's PR-scope rule in
-`~/.claude/CLAUDE.md`.)
+**Boundary**: summarize-only. Feature/review/repair/meditate
+issues have single-PR scope and no wave aggregation, so there
+is no tail to defer; their analogous failure mode (unrelated
+changes in a single-issue PR) is the PR-scope rule in
+`~/.claude/CLAUDE.md`.
 
 ## Worked precedent — post-#1931 wave (issue #1964 → PR #1971 → PR #1990)
 
@@ -126,22 +115,11 @@ Apply post-issue-creation tail deferral when **all** of:
 - the new PRs would, if absorbed, change the wave's PR-count
   number or its enumeration shape.
 
-If the new PRs were already in the issue body's enumeration
-(e.g. an in-flight PR the issue lists as expected), they
-belong in the wave — they are not "tail" PRs, just
-late-merging in-scope PRs. The deferral pattern applies only
-to PRs the issue body did **not** anticipate.
-
-## When it is not — single-issue worker PRs
-
-Feature, review, repair, and meditate issues all have
-single-PR scope. There is no enumeration of a fixed PR list,
-so no tail to defer. If unrelated changes accumulate during a
-single-issue session, the correct response is the project's
-PR-scope rule: *create a new branch and PR rather than
-expanding the current one*. This is documented in
-`~/.claude/CLAUDE.md` under "PR Scope" and is **not** the
-same pattern as wave-tail deferral.
+PRs already in the issue body's enumeration (e.g. an in-flight
+PR the issue lists as expected) are not "tail" PRs, just
+late-merging in-scope PRs — they belong in the wave. The
+deferral pattern applies only to PRs the issue body did
+**not** anticipate.
 
 ## Cross-references
 
@@ -149,11 +127,8 @@ same pattern as wave-tail deferral.
   generic claim/branch/verify/publish lifecycle that wraps
   every summarize session. Read first.
 - [`inventory-reconciliation`](../inventory-reconciliation/SKILL.md)
-  — *Half-closed two-step* section. The same
-  issue-body-as-source-of-truth invariant motivates that
-  pattern (the param-add issue's body fixes the param shape;
-  the flip lands as a separately-issued PR rather than being
-  silently absorbed into the param-add PR).
+  — *Half-closed two-step* section; same
+  issue-body-as-source-of-truth invariant.
 
 ## Scope — what this skill does not cover
 

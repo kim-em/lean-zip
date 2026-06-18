@@ -7,9 +7,8 @@ allowed-tools: Read, Bash, Grep
 # Error-Wording Catalogue (lean-zip)
 
 Project-local reference for choosing the `msg.contains "..."`
-substring when asserting a failure path. The project has several
-error-wording families; picking the wrong one fails CI with
-confusing "unexpected error" output, and picking an over-specific
+substring when asserting a failure path. Picking the wrong one fails CI with
+confusing "unexpected error" output; picking an over-specific
 one makes the test brittle to message rewrites.
 
 ## Canonical substrings by subsystem

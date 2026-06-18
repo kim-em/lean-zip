@@ -6,512 +6,182 @@ allowed-tools: Read, Bash, Grep, Glob
 
 # Agent PR Recovery
 
-Patterns for recovering agent PRs that have merge conflicts, failing CI,
-or stale branches — common in high-cadence multi-agent workflows.
+Assumes `agent-worker-flow` (claim/branch/verify/publish lifecycle). This skill
+adds only the patterns specific to *recovering* conflicted, stale, or
+superseded PRs.
 
-## Diagnosing a Conflicted PR
+## Salvage vs. Redo vs. Close
 
-Before attempting a fix, understand what happened:
+- **Salvage** (cherry-pick onto fresh master) when: 1-2 focused content commits,
+  still valid against master, conflict is mechanical.
+- **Redo from scratch** when: many accumulated commits, target file heavily
+  changed on master since the PR, or the work overlaps already-merged changes.
+- **Close** when another PR already accomplished the goal, or the approach was
+  wrong and the issue needs replanning:
+  ```bash
+  coordination close-pr N "Superseded by PR #M which already cleaned this file"
+  ```
 
-```bash
-# What commits does this PR contain?
-gh api repos/OWNER/REPO/pulls/N/commits --jq '.[].sha[:8] + " " + (.[].commit.message | split("\n")[0])'
-
-# What files are in conflict?
-git fetch origin pull/N/head:pr-N
-git merge-base master pr-N | xargs git diff --name-only master...pr-N
-
-# Was the PR's work already done by another PR?
-# Check if the target files are clean on master
-grep -n 'simp\b' Zip/Spec/TargetFile.lean | grep -v 'simp only\|simp_all\|simp?'
-```
-
-## Decision: Salvage vs. Redo
-
-**Salvage** (cherry-pick rebase) when:
-- The PR has 1-2 content commits with clear, focused changes
-- The changes are still valid against current master
-- The conflict is mechanical (import changes, nearby line edits)
-
-**Redo from scratch** when:
-- The PR has accumulated many commits (5+) from a long-running session
-- The target file has been substantially changed on master since the PR
-- The PR's changes overlap with already-merged work (e.g., bare simps
-  already cleaned by a different PR)
-
-**Close without replacement** when:
-- Another PR already accomplished the same goal
-- The PR's approach was wrong and the issue needs replanning
-
-```bash
-# Close a superseded PR
-coordination close-pr N "Superseded by PR #M which already cleaned this file"
-```
-
-## Check for Existing PRs on Your Branch
-
-**Before resetting or force-pushing any branch**, check if an open PR
-already uses it:
-
-```bash
-# Check if the current branch has an open PR
-gh pr list --head agent/<session-id> --json number,title --jq '.[] | "#\(.number) \(.title)"'
-```
-
-If an open PR exists on your branch from a previous session:
-- **Do NOT reset or force-push** — you'll destroy that PR's content
-- **Create a new branch** with a suffix (e.g., `agent/<session-id>-fix`)
-- Push and create your PR on the new branch
-
-This is common when worktrees are reused across sessions: the branch
-name `agent/<session-id>` may already be taken by a PR from the
-previous session in the same worktree.
-
-## Manual Insertion: The Primary Strategy for Spec Files
+## Spec Files: Skip Straight to Manual Insertion
 
 **Cherry-pick and rebase always fail on `Zip/Spec/Zstd.lean` and
-`Zip/Spec/ZstdFrame.lean`.** Across 8+ sessions, the same sequence plays out:
-
-1. Agent tries `git cherry-pick` or `git rebase`
-2. It produces 6-12 conflict hunks (additive theorems in the same section)
-3. Agent aborts
-4. Agent falls back to manual insertion
-
-**Skip directly to manual insertion for spec files.** The cherry-pick attempt
-wastes time and never succeeds because multiple agents append theorems to
-the same section markers.
-
-### Manual Insertion Pattern
+`Zip/Spec/ZstdFrame.lean`.** Multiple agents append additive theorems to the
+same section markers, producing 6-12 conflict hunks every time. The cherry-pick
+attempt wastes time and never succeeds — go directly to manual insertion.
 
 ```bash
-# 1. Read the conflicting PR's content (theorems to preserve)
-gh api repos/OWNER/REPO/pulls/N/commits \
-  --jq '.[].sha[:8] + " " + (.[].commit.message | split("\n")[0])'
-# Then read the actual diff to extract the theorem text:
+# 1. Extract the theorem text to preserve
 gh pr diff N
 
-# 2. Create a fresh branch from current master
+# 2. Fresh branch from master
 git checkout -b agent/<session-id> origin/master
 
-# 3. Manually insert the theorems into the correct section
-#    Find the section header: /-! ## decompressBlocksWF two-block ... -/
-#    Add theorems at the end of that section, before the next section header
+# 3. Manually insert theorems at the END of the correct section, before the
+#    next /-! ## ... -/ section header. The theorems are ALWAYS additive (new
+#    defs/theorems, no edits to existing ones), so resolution is always
+#    "keep master + insert new theorems in the right section."
 
-# 4. Build to verify
-lake build Zip.Spec.Zstd   # or Zip.Spec.ZstdFrame
-
-# 5. Commit, push, create PR
+# 4. Verify the affected module only
+lake build Zip.Spec.Zstd      # or Zip.Spec.ZstdFrame
 ```
 
-**Key**: The theorems are always additive (new definitions/theorems, no
-modifications to existing ones). So the conflict resolution is always
-"keep master + insert new theorems in the right section."
+## Cherry-Pick (non-spec files)
 
-### Conflict Metrics (as of 2026-03-12)
-
-Of the last 30 merged PRs:
-- 4 (13%) required conflict resolution
-- 9 (30%) of closed PRs were abandoned (many due to conflicts)
-- Every conflict was in `Zstd.lean` or `ZstdFrame.lean`
-
-## Cherry-Pick Rebase Pattern
-
-The most reliable recovery pattern for PRs with merge conflicts on
-**non-spec files** (for spec files, use manual insertion above):
+For non-spec files, cherry-pick the content commit(s) onto fresh master rather
+than rebasing the old branch — feature branches accumulate CI retries and
+fixups; cherry-picking only the meaningful commits yields a cleaner PR.
 
 ```bash
-# 1. Identify the content commit(s) — skip merge commits, CI fixes, etc.
 gh api repos/OWNER/REPO/pulls/N/commits \
-  --jq '.[].sha[:8] + " " + (.[].commit.message | split("\n")[0])'
-
-# 2. Create a fresh branch from current master
+  --jq '.[].sha[:8] + " " + (.[].commit.message | split("\n")[0])'   # find content commit(s)
 git checkout -b agent/<session-id> master
-
-# 3. Cherry-pick only the content commit(s)
 git cherry-pick <commit-sha>
-
-# 4. If cherry-pick has conflicts, resolve them
-#    Key: understand what master changed (see global CLAUDE.md merge conflict rules)
-git diff --name-only --diff-filter=U  # list conflicted files
-
-# 5. Build and verify
+git diff --name-only --diff-filter=U    # conflicted files, if any
 lake build ModuleName
-
-# 6. Push and create new PR, closing the old issue
-git push -u origin agent/<session-id>
-coordination create-pr <issue-number>
 ```
 
-**Why cherry-pick instead of rebase?** Feature branches often accumulate
-unrelated commits (CI retries, fixups, intermediate states). Cherry-picking
-only the meaningful commits produces a cleaner PR. Rebasing preserves all
-commits, including noise.
+## Verify Conflict Scope Before Rebasing a Fix-PR
 
-## Detecting Stale/Superseded PRs
-
-When multiple agents work on related files, PRs can become redundant:
+"Fix PR #N" issue bodies routinely undercount conflicting files (master may
+have merged a sibling branch since the issue was written). Treat the live state
+as source of truth, not the issue:
 
 ```bash
-# Check if target file is already clean on master
-# (e.g., for a bare simp review PR)
-git show master:Zip/Spec/TargetFile.lean | grep -c 'simp\b' | ...
+gh pr view N --json mergeable,mergeStateStatus,files \
+  --jq '{mergeable, mergeStateStatus, files: [.files[].path]}'
 
-# Compare PR's changes against current master
-git diff master...pr-N -- Zip/Spec/TargetFile.lean
+git fetch origin
+git checkout pr-N
+git rebase origin/master            # let it report conflicts
+git diff --name-only --diff-filter=U   # authoritative conflict list
+git rebase --abort                  # clean up before committing elsewhere
 ```
 
-Signs a PR is superseded:
-- The diff against master is empty or trivial
-- The target file's metrics are already at/below the PR's target
-- Another merged PR's commit message mentions the same file
+The `--diff-filter=U` list is authoritative.
 
-## Stale Issue Counts
+## Re-verify Stale Issue Details
 
-Issue descriptions contain metrics at time of creation (e.g., "61 bare
-simps in InflateCorrect.lean"). These go stale quickly when:
-- Other PRs clean the same file
-- The planner's grep was inaccurate (counted `simp only` as bare simp)
+Issue bodies snapshot metrics and source pointers at creation time; both drift.
+Re-check against current master before working — none of these warrant a `skip`
+on their own; just fix in your commit and note it in the progress entry.
 
-**Always verify before starting work:**
-```bash
-# Accurate bare simp count
-grep -n 'simp\b' Zip/Spec/File.lean | \
-  grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
-```
+- **Bare-simp counts.** Use the word-boundary pattern, not `grep -c 'simp[^_]'`
+  (which inflates counts 10-100x by matching `simp only`/`simpa`):
+  ```bash
+  grep -n 'simp\b' Zip/Spec/File.lean | \
+    grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
+  ```
+  If the real count is 0 or far from the issue's claim, `coordination skip`.
+- **Line numbers** in referenced files drift — grep the symbol
+  (`readEntryData`, `extractTarGzNative`) instead of trusting line numbers.
+- **Function signatures** quoted in issues are often paraphrased — confirm with
+  `rg "def <name>" Zip/`.
+- **Test file / fixture paths** — `ls ZipTest/*.lean`; the file is often
+  `ZipFixtures.lean`, not the `Fixtures.lean` the issue names.
+- **Error substrings** — probe the test with a sentinel like `<<PROBE>>` to
+  surface the real message rather than trusting the quoted one.
 
-If the actual count is 0 or very different from the issue, use
-`coordination skip` with an explanation.
+## Detecting Superseded PRs
 
-### Also verify source-anchored details, not just metrics
+Signs a PR's work was already done by another:
+- `git diff master...pr-N -- path` is empty or trivial.
+- The target file's metrics are already at/below the PR's target.
+- A recently merged PR's commit message mentions the same file.
 
-In addition to counts, the following issue-body claims go stale quickly
-and should be re-checked against current master before starting:
+## Preventing Conflict Cascades
 
-- **Line numbers in referenced files.** `Zip/Archive.lean` or
-  `Zip/Tar.lean` style pointers silently drift when unrelated PRs
-  add or remove lines. Grep the referenced symbol (`readEntryData`,
-  `extractTarGzNative`, etc.) instead of trusting the line number. The
-  Track E inventory PR (#1556, session `ef6bd988`) explicitly noted:
-  *"The issue cited some stale line numbers in `Zip/Archive.lean` and
-  `Zip/Tar.lean` (written against a slightly earlier tree)."*
-- **Function signatures quoted verbatim.** Issue bodies sometimes
-  paraphrase an API (e.g., `Tar.extractGz` with a hypothetical
-  `(ByteArray, ...)` signature when the actual function is
-  `Tar.extractTarGzNative` taking a `System.FilePath`). See #1561.
-  When the signature matters, `rg "def <name>" Zip/` confirms the
-  real shape in one second.
-- **Which test file / fixture directory.** Issue bodies sometimes say
-  "add to `ZipTest/Fixtures.lean`" when the file is actually
-  `ZipTest/ZipFixtures.lean`. `ls ZipTest/*.lean` at claim time is
-  faster than chasing a stale filename.
-- **Which error substring fires.** Don't trust the issue body's
-  quoted error message — probe the test with a sentinel substring
-  like `<<PROBE>>` to surface the real one. A new check in an
-  earlier PR may have pre-empted the original failure path (see
-  #1554 / `oversized-zip64-uncompressed-size.zip`).
+When several agents touch the same large file, a recovery PR can itself develop
+conflicts — original PR → recovery → recovery again.
 
-None of these are reasons to `skip` the issue — just silent tax
-you pay once per task. Adjust in your own commit, note in the
-progress entry, and move on.
-
-## Verifying the Full Conflict Scope on Fix-PR Issues
-
-"Fix PR #N" issues often list *one* conflicting file when the
-real rebase touches several. #1547 (the fix-PR for #1544) said
-"only `plans/track-e-current-audit-checklist.md` will conflict"
-but the rebase hit three conflict regions across two files
-because master had merged the sibling #1543 branch (which also
-edited `ZipTest/ZipFixtures.lean`) in the meantime. The
-resolution was mechanical — keep both fixture blocks, extend
-both cleanup loops — but the worker had to re-diagnose on the
-fly.
-
-**Before starting a rebase**, run these checks and treat them
-as the source of truth, not the issue body:
-
-    # What does GitHub think the conflict state is right now?
-    gh pr view N --json mergeable,mergeStateStatus,files \
-      --jq '{mergeable, mergeStateStatus, files: [.files[].path]}'
-
-    # What does a local rebase preview show?
-    git fetch origin
-    git checkout pr-N                           # PR's head branch
-    git rebase --abort 2>/dev/null || true      # reset any prior rebase
-    git rebase origin/master                    # let it report conflicts
-    git diff --name-only --diff-filter=U        # the actual conflict list
-    git rebase --abort                          # clean up before you commit
-
-The file list from `--diff-filter=U` is authoritative. Use it,
-not the plan.
-
-**Planner guidance**: when writing a "Fix PR #N" issue, run the
-same `gh pr view --json mergeable,files` + local rebase preview
-at plan time. List *every* conflicting file in the issue body,
-with a one-liner on the expected resolution. The cost is one
-command and one paragraph; the benefit is the worker doesn't
-re-run the diagnostic from a confused state.
-
-## Avoiding the Recovery-of-Recovery Anti-Pattern
-
-A recovery PR can itself develop merge conflicts, creating a cascade:
-original PR → recovery issue → recovery PR → conflicts again. This
-happened with PRs #565→#568→#577 and #549→#558→#561.
-
-**Root cause**: Multiple agents modify the same large file (e.g.,
-ZstdFrame.lean at 1059 lines) concurrently. Each merge to master
-invalidates all outstanding PRs touching that file.
-
-**Prevention rules for recovery workers:**
-
-1. **Rebase immediately before pushing**: After cherry-picking or
-   resolving conflicts, always `git fetch origin && git rebase
-   origin/master` right before `git push`. Even if you just created
-   the branch minutes ago, another PR may have merged in the interim.
-
-2. **Check for pending PRs on the same files**: Before starting
-   recovery work, check if other open PRs touch the same files:
+1. **Rebase immediately before pushing**: `git fetch origin && git rebase
+   origin/master` right before `git push`, even if the branch is minutes old.
+2. **Check for pending PRs on the same files** before starting; if another PR
+   touches the same hot file and is closer to merging, let it land first:
    ```bash
-   # List files in the PR you're recovering
-   gh pr view N --json files --jq '.files[].path'
-   # Check open PRs for overlapping files
-   gh pr list --json number,title,files --jq '.[] | select(.files | map(.path) | any(. == "Zip/Native/ZstdFrame.lean")) | "\(.number) \(.title)"'
+   gh pr list --json number,title,files \
+     --jq '.[] | select(.files | map(.path) | any(. == "Zip/Native/ZstdFrame.lean")) | "\(.number) \(.title)"'
    ```
-   If another PR modifies the same hot file and is closer to merging,
-   let that one land first.
-
-3. **Never chain recoveries**: If your recovery PR develops conflicts,
-   do NOT create another recovery issue. Instead, the next worker who
-   picks up the original issue should redo the work from scratch on
+3. **Never chain recoveries**: if your recovery PR conflicts, do NOT open a
+   second recovery issue — the next worker redoes the work from scratch on
    current master. Two levels of recovery means the approach is wrong.
+4. **Flag hot files for splitting** in your progress entry when a file >500
+   lines causes repeated conflicts.
 
-4. **Flag hot files for splitting**: If a file over 500 lines causes
-   repeated conflicts across multiple PRs, note this in your progress
-   entry. Splitting the file should be prioritized over further feature
-   work on it.
+### File splits are the worst cascade source
 
-## Preventing Conflict Cascades from File Splits
-
-File-splitting PRs (refactoring one large file into multiple smaller files)
-are the most destructive source of conflict cascades. Every in-flight PR
-touching the original file becomes invalid after the split merges.
-
-### Case Study: ZstdFrame.lean (March 2026)
-
-`ZstdFrame.lean` was 1059 lines modified by 5+ concurrent agents. When
-the file-split PR (#599) merged, it invalidated all outstanding PRs
-touching that file:
-- 4 PRs developed conflicts and had to be closed
-- 2 recovery issues became stale
-- 2 triage sessions were consumed just cleaning up labels and issues
-
-Total cost: ~3 full agent sessions spent on cleanup instead of feature work.
-
-### Pre-Merge Checklist for File Splits
-
-Before merging a PR that splits or renames files:
+A PR that splits/renames a large file invalidates every in-flight PR touching
+it. Before merging such a PR, list affected open PRs and pick a strategy:
 
 ```bash
-# 1. List all open PRs touching files being split
 gh pr list --state open --json number,title,files \
   --jq '.[] | select(.files | map(.path) | any(test("OriginalFile"))) | "\(.number) \(.title)"'
-
-# 2. If in-flight PRs exist, choose a strategy:
 ```
 
-**Strategy A — Split first, rebase immediately** (preferred when split
-is blocking multiple future PRs):
-1. Merge the split PR
-2. Immediately rebase each in-flight PR onto the new master
-3. Fix the import paths in each rebased PR
-4. This should be a single coordinated session, not separate issues
-
-**Strategy B — Wait for in-flight PRs to land** (preferred when only
-1-2 PRs are in flight and close to merging):
-1. Let in-flight PRs merge first
-2. Then merge the split PR
-3. No cascading conflicts
-
-**Strategy C — Coordinate via `depends-on`** (preferred for planners):
-1. Create the split issue
-2. Add `depends-on: #split-issue` to all future issues touching the file
-3. `coordination check-blocked` prevents new work until the split lands
-
-### Key Rule for Planners
-
-**Never create concurrent issues targeting the same file as a pending
-file split.** If a split is planned or in progress, all new issues that
-would touch the original file should use `depends-on:` to wait for the
-split.
+- **Split first, rebase in-flight PRs immediately** (one coordinated session) —
+  preferred when the split unblocks many future PRs.
+- **Wait for in-flight PRs to land, then split** — preferred when only 1-2 PRs
+  are in flight and near merge.
+- **Planners**: never create concurrent issues targeting a file with a pending
+  split; chain them with `depends-on:`.
 
 ## Hot File Tracking
 
-Track files that cause repeated merge conflicts across multiple PRs.
-As of 2026-03-12, the known hot files are:
+Files that cause repeated merge conflicts. Update this table when a file
+crosses the threshold.
 
-| File | Size | Conflict PRs | Status |
-|------|------|-------------|--------|
-| `Zip/Spec/Zstd.lean` | ~6280 lines | #982, #988, #989, #1006, #1009, #1014, #1015, #1034, #1060, #1063, #1213, #1264, #1280, #1281, #1287 | **Critical** — 6.3× the 1000-line threshold. Every two-block completeness theorem at block/frame level appends here. Has 19 major sections organized by block-type pair. Split urgently needed. |
-| `Zip/Spec/ZstdFrame.lean` | ~2600 lines | #1063, #1188, #1253, #1257, #1263, #1279, #1295 | **Critical** — 2.6× threshold. API-level `decompressZstd` completeness theorems accumulating. Every API-level two-block theorem lands here, causing conflicts with every parallel Track E agent. |
+| File | Size | Status |
+|------|------|--------|
+| `Zip/Spec/Zstd.lean` | ~6280 lines | **Critical** — every block/frame two-block completeness theorem appends here; 19 sections by block-type pair. Split urgently needed. |
+| `Zip/Spec/ZstdFrame.lean` | ~2600 lines | **Critical** — every API-level `decompressZstd` two-block theorem lands here, conflicting with parallel Track E agents. |
 
-### Mitigation strategies for hot files
+Mitigation for hot files: serialize with `depends-on:`, keep additions
+append-only at end of file, minimize branch lifetime (claim/implement/push/PR
+in one session), and propose a split when a file >800 lines hits 3+ conflicts
+in a batch and has natural section boundaries.
 
-1. **Serialize work**: Use `depends-on:` to prevent concurrent issues
-   that both modify the hot file. The planner should check open PRs
-   before creating new issues targeting it.
-2. **Append-only sections**: Structure theorems so new additions go at
-   the end of the file. Concurrent appends cause fewer conflicts than
-   interleaved edits.
-3. **Consider splitting when conflicts are chronic**: If 3+ consecutive
-   batches require conflict fixes for the same file, it should be split.
-   For `Zstd.lean`, potential split: block-level theorems vs frame-level
-   theorems vs composition theorems.
-4. **Quick turnaround**: For hot files, minimize branch lifetime. Claim,
-   implement, push, and PR in one session. Don't let branches sit.
+## Merge Order for Mutually-Conflicting PRs
 
-### When to propose a file split
+When PRs conflict with each other (not just master): independent/new-file PRs
+in any order; foundation (validation a PR depends on) before consumers;
+smallest diff first among semantically independent PRs to minimize others'
+rebase work.
 
-Flag a file for splitting in your progress entry when:
-- It exceeds 800 lines AND
-- 3+ PRs in the current batch had conflicts on it AND
-- The file has natural section boundaries (different theorem families)
+## Progress Entry as a Ride-Along PR
 
-## Merge Order for Concurrent Conflicting PRs
+A small rebase-fix PR that also wants its own `progress/` entry should be a
+*split PR*: (a) the rebase PR (feature commits + conflict resolution) lands
+first, then (b) a one-file `doc: progress entry for #N rebase fix` PR. Empirically
+the split path wins; committing the progress entry before pushing the rebase
+only beats auto-merge in a ~30-second window (rebase commit already staged, push
+within seconds), so plan for the split. Budget one ride-along PR per non-trivial
+rebase fix. Do **not** amend an auto-merged commit after the fact —
+`--force-with-lease` is pointless once the branch is deleted upstream.
 
-When multiple PRs conflict with each other (not just with master),
-merge order matters:
+## Fresh-worktree build: `lake build -R`
 
-1. **Independent PRs first**: PRs that only add new files or touch
-   non-overlapping code can merge in any order.
-2. **Foundation before consumers**: If PR A provides validation that
-   PR B's code depends on, merge A first.
-3. **Smallest diff first**: When semantically independent, merge the
-   PR with fewer changed lines to minimize rebase work for others.
-
-**Example from Track E**: PR #591 (new spec files only) should merge
-before PR #561 (validation) before PR #577 (wiring that uses
-validation). Each step reduces the rebase burden for the next.
-
-## Rapid Merge Cadence Mitigation
-
-When 8+ PRs merge in a single day, feature branches fall behind quickly.
-Patterns that help:
-
-1. **Short-lived branches**: Claim, implement, PR, done. Don't accumulate
-   changes over multiple build cycles on a single branch.
-2. **Targeted builds**: Build only the affected module (`lake build Module`)
-   rather than full project. Submit and let CI do the full build.
-3. **Rebase before push**: Always `git fetch origin && git rebase origin/master`
-   before pushing, even if you just created the branch minutes ago.
-4. **Don't fix conflicts on old PRs**: If a PR has conflicts, cherry-pick
-   the content to a new branch rather than trying to rebase the old one.
-
-## Guidance for Planners
-
-To prevent conflict cascades at the planning stage:
-
-1. **Avoid concurrent issues targeting the same file**: If an open issue
-   already modifies `Zip/Spec/Zstd.lean` or `Zip/Spec/ZstdFrame.lean`,
-   don't create another issue that also modifies it. Use `depends-on:`
-   to serialize them.
-2. **Split large files first**: Files over 500 lines that are actively
-   being modified by multiple agents should be split before further
-   feature work. Create a splitting issue with higher priority.
-3. **Check open PRs before planning**: Run `coordination orient` and
-   note which files have open PRs. New issues should avoid those files
-   unless they depend on the PR landing first.
-4. **Verify issue metrics before creating review issues**: Stale metrics
-   waste agent time. Before creating a review issue that claims "N bare
-   simps in File.lean", verify the count on current master:
-   ```bash
-   grep -n 'simp\b' Zip/Spec/File.lean | \
-     grep -v 'simp only\|simp_all\|simp?\|simp_wf\|dsimp\|simp_rfl\|simp (config'
-   ```
-   **CRITICAL**: Do NOT use `grep -c 'simp[^_]'` — this pattern matches
-   `simp only`, `simpa`, and other non-bare variants, inflating counts
-   by 10-100x. This was the single largest source of wasted effort in
-   the review campaign: 6+ sessions independently discovered their
-   assigned files had 0 bare simps despite the issue claiming 40-70.
-   Always use the `\b` word-boundary pattern above, then exclude
-   `simp only` explicitly.
-
-   Three review agents in the last batch found their assigned bare-simp
-   cleanup was already done by prior PRs. They adapted by doing deeper
-   quality audits, but the planning was wasted.
-
-
-## Auto-merge race: the ride-along ladder
-
-When a small rebase-fix PR also wants its own `progress/` entry, the
-routine shape is a *split PR* — two PRs in sequence: (a) the rebase
-PR (feature commits + conflict resolution), then (b) a one-file
-ride-along PR carrying just the progress entry. Together with the
-upstream feature merge, these form the *ride-along ladder*:
-
-> *feature PR merges → rebase-fix PR merges → progress-entry PR
-> merges.*
-
-**Split-PR is the primary path, not a fallback.** The post-#1569
-and post-#1646 audit waves both confirmed this empirically:
-
-- **PR #1577 / #1581** (post-#1569): auto-merge landed the rebased
-  CI on `agent/b87e52f8` before the progress entry could be tacked
-  onto the same branch. Session `0eaa9a61`.
-- **PR #1590 / #1592** (post-#1569): mirror of the above for the
-  Minimized Reproducer Corpus rebase. Session `452d633a`.
-- **PRs #1622, #1624, #1632** (post-#1646): three of three
-  rebase-fix PRs in this wave used the split-PR path. The
-  progress-entry-first path did not win once.
-
-### When progress-entry-first is still viable
-
-Committing the progress entry *before* pushing the rebase only beats
-auto-merge in the narrow ~30-second window between `git push` and
-the first CI status firing. Use it only when:
-
-- The rebase commit is already staged when you write the progress
-  entry (no further investigation needed), and
-- You can push within seconds of the progress-entry commit landing
-  on the local branch.
-
-Outside that window, plan for the split.
-
-### Submitting the ride-along PR
-
-After the rebased feature PR has merged, submit a one-file
-"doc: progress entry for #<N> rebase fix" PR targeting the same
-issue. Size: one commit, one file under `progress/`; merge latency
-is negligible. This doubles as a visible institutional-memory entry
-the next planner can read.
-
-### Dispatcher budgeting
-
-One rebase-fix issue normally spawns one ride-along PR. When
-estimating dispatcher load for a wave with `k` non-trivial rebase
-fixes, budget for `k` ride-along PRs in addition to the rebase PRs
-themselves.
-
-### Anti-pattern: amending after auto-merge
-
-Do **not** try to amend the auto-merged commit after the fact —
-`--force-with-lease` is pointless once the branch has been deleted
-upstream, and reopening the PR to push to a new branch under the
-same issue creates churn.
-
-## Fresh-worktree `lake build` needs `-R`
-
-When a pod worktree has been idle across a toolchain pin change, the
-first `lake build` in that worktree can fail with:
-
-    compiled configuration is invalid
-
-This is not the same as the `.lake/` stale-link-flags issue covered
-in the project CLAUDE.md — it is a *configuration* rebuild, not a
-*link-args* rebuild. The fix is:
+If a worktree has been idle across a toolchain pin change, the first build can
+fail with `compiled configuration is invalid`. This is a *configuration*
+rebuild, distinct from the `.lake/` stale-link-flags issue in the project
+CLAUDE.md. Fix:
 
     nix-shell --run "lake build -R"
-
-(`-R` forces reconfigure.) The session `0eaa9a61` friction note
-recommended escalating this to the project CLAUDE.md's NixOS
-section; that change is out of scope for agents (CLAUDE.md is
-off-limits) but the skill documents it so the next worker doesn't
-burn a build cycle on it.

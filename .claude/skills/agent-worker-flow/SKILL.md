@@ -43,17 +43,15 @@ Issues marked `replan` (by skip, partial completion, or worker-led
 decomposition) are handled by the next planner. Issues with `has-pr` are
 excluded from `list-unclaimed` and `queue-depth`.
 
-**Never apply `has-pr` manually.** The label is set automatically by
-`coordination create-pr` (full path) and cleared by GitHub's auto-close
-on merge of a `Closes #N` PR. Hand-applying it desynchronises the label
-from any actual PR — when the supposed PR closes or merges without
-`Closes #N`, the issue stays `has-pr` forever and is silently excluded
-from the work queue. If you want to "park" an issue while sub-issues
-do the work, use `coordination add-dep <parent> <sub>` for each
-sub-issue: the parent becomes `blocked`, and `check-blocked` auto-clears
-the label when all subs close. The orphan-label housekeeping cycle
-(`check-has-pr`, `check-blocked`) auto-removes mis-applied labels and
-posts an audit comment on the issue.
+**Never apply `has-pr` manually.** It is set by `coordination create-pr`
+and cleared by GitHub's auto-close on merge of a `Closes #N` PR.
+Hand-applying it desynchronises the label: if the supposed PR closes or
+merges without `Closes #N`, the issue stays `has-pr` forever and is
+silently excluded from the work queue. To "park" an issue while sub-issues
+do the work, use `coordination add-dep <parent> <sub>` for each sub-issue:
+the parent becomes `blocked`, and `check-blocked` clears it when all subs
+close. The housekeeping cycle (`check-has-pr`, `check-blocked`) auto-removes
+mis-applied labels and posts an audit comment.
 
 **Partial completion**: worker uses `--partial` → label swaps to
 `replan`. A planner creates a new issue for remaining work, then closes
@@ -61,15 +59,12 @@ the `replan` issue with a link to the new one.
 
 **Worker-led decomposition**: if the claimed issue is too large for one
 session, worker creates sub-issues and `coordination skip`s the parent
-with a `Decomposed into #X, #Y` breadcrumb comment. The next planner
-either closes the parent (sub-issues fully cover it) or narrows it to the
-residual scope. See "Assess Scope" (Step 4b) for the full procedure.
+with a `Decomposed into #X, #Y` breadcrumb comment. See Step 4b.
 
-**Dependencies**: Issues can declare `depends-on: #N` in their body.
-`coordination plan` auto-adds the `blocked` label if any dependency is
-open. `check-blocked` (run by `pod` each loop) removes `blocked` when
-all dependencies close. Blocked issues are excluded from
-`list-unclaimed` and `queue-depth`.
+**Dependencies**: issues can declare `depends-on: #N` in their body.
+`coordination plan` auto-adds `blocked` if any dependency is open;
+`check-blocked` (run by `pod` each loop) removes it when all close.
+Blocked issues are excluded from `list-unclaimed` and `queue-depth`.
 
 **Branch naming**: `agent/<first-8-chars-of-UUID>`
 **Plan files**: `plans/<UUID-prefix>.md`
@@ -82,23 +77,20 @@ coordination orient
 ```
 
 **Priority order:**
-0. **Directives first**: Check for open `directive` issues before anything else.
-   These are direct instructions from the project owner — work flowing *down* from
-   the human, not work awaiting human attention — and take absolute precedence over
-   all other work:
+0. **Directives first**: check for open `directive` issues before anything
+   else. These are direct instructions from the project owner and take
+   absolute precedence over all other work:
    ```
    coordination list-unclaimed --label directive
    ```
-   If any are open and unclaimed, claim the oldest one immediately.
-   **Directives cannot be skipped or refused because you disagree with the approach.**
-   The valid exits from a `directive` are (a) completing the deliverables and
-   **closing the issue yourself**, (b) opening a partial PR and noting the
-   remaining scope so a successor can pick it up, or (c) posting a comment
-   explaining a genuine technical blocker (e.g. a missing dependency) and
-   `coordination skip` with that reason. Do **not** leave a directive open
-   with a "for owner closure" note — if the deliverables are in, close it.
-   Do not `skip` because you think a different approach is better — that is
-   the owner's call, not yours.
+   If any are open and unclaimed, claim the oldest immediately.
+   **Directives cannot be skipped or refused because you disagree with the
+   approach** — that is the owner's call. The valid exits are (a) completing
+   the deliverables and **closing the issue yourself**, (b) opening a partial
+   PR noting remaining scope, or (c) posting a comment explaining a genuine
+   technical blocker (e.g. a missing dependency) and `coordination skip` with
+   that reason. Do **not** leave a directive open with a "for owner closure"
+   note — if the deliverables are in, close it.
 1. **Oldest unclaimed issue** of your type:
    ```
    coordination list-unclaimed --label <your-label>
@@ -171,13 +163,12 @@ in a single session. Warning signs it doesn't:
 - The work naturally splits into independent sub-lemmas or sub-tasks
 - Difficulty feels higher than the issue says
 
-If the issue is too large, **decomposing it into smaller sub-issues is a
-normal success path**, not a failure mode. You have the freshest codebase
-context and can usually scope sub-tasks more accurately than a planner could
-in advance. A good decomposition is more valuable than a failed heroic
-attempt — and far better than overrunning the session trying to salvage it.
+Decomposing into smaller sub-issues is a **normal success path**, not a
+failure mode — better than a failed heroic attempt or overrunning the
+session. You have the freshest context and can scope sub-tasks more
+accurately than a planner could in advance.
 
-You may decompose when any of these is true:
+Decompose when any of these holds:
 - the claimed issue is too large for one session,
 - the work naturally splits into independent sub-tasks,
 - you can write self-contained successor issues without further investigation.
@@ -218,11 +209,10 @@ The planner's next replan-triage cycle picks the parent up and either
 closes it (if the sub-issues fully cover it) or narrows the body to the
 residual scope (if not).
 
-After decomposing, you have two options:
+After decomposing, either:
 
-1. **Continue on one of the sub-issues**: claim it via `coordination claim`,
-   then return to Step 2 with the sub-issue. Common case when the parent
-   was just two work items glued together.
+1. **Continue on a sub-issue**: claim it via `coordination claim`, then
+   return to Step 2. Common when the parent was two work items glued together.
 2. **Stop and exit**: if you've used most of your session orienting, write a
    brief progress entry and exit. The next worker will claim a sub-issue.
 

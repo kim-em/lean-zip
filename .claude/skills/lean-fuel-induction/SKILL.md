@@ -6,53 +6,50 @@ allowed-tools: Read, Bash, Grep
 
 # Lean 4 Fuel Induction and Loop Invariant Patterns
 
+For generic `termination_by` / `decreasing_by` / `f.induct` / single-step
+unfolding (`rw [f.eq_1]`) mechanics, see the `lean-wf-recursion` skill. This
+file covers the fuel-specific and project-specific patterns.
+
 ## Avoid `forIn` on `Range` in Proofs
 
-`forIn [:n]` uses `Std.Legacy.Range.forIn'` with a well-founded recursion `loop✝`
-that CANNOT be unfolded by name. `with_unfolding_all rfl` only works for concrete
-values (`:= [:0]`, `[:1]`) not symbolic `n`.
+`for i in [:n]` compiles to `Std.Legacy.Range.forIn'` with a well-founded
+`loop✝` that CANNOT be unfolded by name. `with_unfolding_all rfl` only works
+for concrete bounds (`[:0]`, `[:1]`), not symbolic `n`. `while` loops are the
+same (`Lean.Loop.forIn`'s `loop✝`).
 
-If you need to prove properties of a `for i in [:n]` loop, replace it with explicit
-recursion (see `copyLoop` in `Inflate.lean`).
+If you must prove a property of such a loop, refactor it to explicit/WF
+recursion (see `copyLoop` in `Inflate.lean`). Discover this early — do not
+burn iterations trying to unfold `forIn`.
 
-## Fuel Independence Proof Pattern
+## Fuel Independence
 
-For fuel-based recursive functions:
-`f x (fuel + 1) = some result → ∀ k, f x (fuel + k) = some result`
+`f x (fuel + 1) = some r → ∀ k, f x (fuel + k) = some r`. Induct on fuel:
 
-Use induction on fuel with:
-1. `conv => lhs; rw [show n+1+k = (n+k)+1 from by omega]` before `unfold f at h ⊢`
-   so both sides unfold at the same successor level
-2. `cases` on each non-recursive operation
-3. `ih` for recursive calls
+1. `conv => lhs; rw [show n+1+k = (n+k)+1 from by omega]` before
+   `unfold f at h ⊢`, so both sides unfold at the same successor level.
+2. `cases` on each non-recursive operation; `ih` for recursive calls.
+3. For `if` in `h`, use `rw [if_pos/if_neg]`, NOT `simp [cond]` — simp strips
+   `some`/`pure` wrappers.
+4. For `guard` in do-blocks, `by_cases` the condition then
+   `simp only [guard, hcond, ↓reduceIte]`. The guard is `Alternative.guard`,
+   NOT `Option.guard`.
 
-For `if` reduction in `h`, use `rw [if_pos/if_neg]` NOT `simp [cond]` — simp
-over-simplifies (strips `some`/`pure` wrappers).
+## copyLoop-Style Loop Invariants
 
-For `guard` in do-blocks, use `by_cases` on the condition then:
-```lean
-simp only [guard, hcond, ↓reduceIte]
-```
-The guard uses `Alternative.guard`, NOT `Option.guard`.
+For `copyLoop buf start distance k length`, prove a generalized invariant by WF
+induction carrying the full buffer state:
+1. State the invariant relating `buf` to the original `output`.
+2. Base case `k = length`: `copyLoop` returns `buf`, use hypothesis.
+3. Step: `buf.push x` satisfies the invariant for `k+1`.
 
-## Loop Invariant Proof Pattern
+Key lemmas: `push_getElem_lt` (push preserves earlier elements),
+`push_data_toList` (`(buf.push b).data.toList = buf.data.toList ++ [b]`),
+`List.ofFn_succ_last` (snoc decomposition of `List.ofFn`).
 
-For recursive functions like `copyLoop buf start distance k length`, prove a
-generalized invariant by well-founded induction carrying the full buffer state:
-1. State the invariant relating `buf` to the original `output`
-2. Base case: `k = length`, `copyLoop` returns `buf`, use hypothesis
-3. Inductive step: show `buf.push x` satisfies the invariant for `k+1`
+## Bundled Invariant Lemmas for Stateful Chains
 
-Key lemmas:
-- `push_getElem_lt` — push preserves earlier elements
-- `push_data_toList` — `(buf.push b).data.toList = buf.data.toList ++ [b]`
-- `List.ofFn_succ_last` — snoc decomposition of `List.ofFn`
-
-## Combined Invariant Lemma Pattern for BitReader/State Operations
-
-When proving that a chain of operations on a stateful type (like `BitReader`) preserves
-multiple properties (data equality, position bound, position invariant), bundle all into
-a single `∧` return rather than proving each separately:
+When a chain of operations on a stateful type (e.g. `BitReader`) must preserve
+several properties at once, return a single `∧` rather than separate lemmas:
 
 ```lean
 private theorem op_inv (br br' : BitReader) ...
@@ -64,258 +61,168 @@ private theorem op_inv (br br' : BitReader) ...
     br'.pos ≤ br'.data.size
 ```
 
-Chain with: `have ⟨hd₁, hpos₁, hple₁⟩ := op_inv ...`
-then `exact ⟨hd'.trans hd₁, hpos', hple'⟩`.
+Chain: `have ⟨hd₁, hpos₁, hple₁⟩ := op_inv ...` then
+`exact ⟨hd'.trans hd₁, hpos', hple'⟩`. See `GzipCorrect.lean`
+(`readBit_inv` … `decode_inv`).
 
-This avoids 3× boilerplate and makes chaining across multiple operations clean.
-See `GzipCorrect.lean` for examples (`readBit_inv` through `decode_inv`).
+### Threading through long call chains
 
-### Threading Invariants Through Long Call Chains
-
-For proofs like `inflateLoop_endPos_le` that must thread invariants through
-5+ sequential monadic operations, the pattern is:
+For `inflateLoop_endPos_le`-style proofs through 5+ sequential ops:
 
 ```lean
--- Each operation produces updated state + invariants
 have ⟨hd₁, hpos₁, hple₁⟩ := readBits_inv br br₁ _ _ h_readBits hpos hple
 have ⟨hd₂, hpos₂, hple₂⟩ := decode_inv tree br₁ br₂ _ h_decode hpos₁ hple₁
 have ⟨hd₃, hpos₃, hple₃⟩ := readBits_inv br₂ br₃ _ _ h_readBits₂ hpos₂ hple₂
--- ...
--- At the end, compose data equalities:
+-- compose data equalities right-to-left:
 exact ⟨hd_final.trans (hd₃.trans (hd₂.trans hd₁)), hpos_final, hple_final⟩
 ```
 
-**Key points:**
-- Each `_inv` lemma takes the **output invariants** from the previous operation as input
-- Data equality chains compose right-to-left via `.trans`: `hd₃.trans (hd₂.trans hd₁)`
-  proves `br₃.data = br.data` from `br₃.data = br₂.data`, `br₂.data = br₁.data`,
-  `br₁.data = br.data`
-- For recursive calls (induction step), pass the final state's invariants to `ih`,
-  then `.trans` the recursive result with the accumulated chain
+- Each `_inv` takes the previous op's **output** invariants as input.
+- Data equalities compose via `.trans` right-to-left.
+- For recursive (induction) steps, pass the final state's invariants to `ih`,
+  then `.trans` the recursive result with the accumulated chain.
 
-### Deeply Nested Multi-Path Case Splits
+### Multi-path case splits
 
-When a function branches based on a decoded symbol (e.g., literal vs end-of-block vs
-length-distance), the invariant proof must cover all paths:
+When a function branches on a decoded symbol (literal / end-of-block /
+length-distance), cover every path:
 
 ```lean
 split at h
-· -- Path 1 (e.g., literal byte)
+· -- literal byte
   have ⟨hd', hp', hl'⟩ := ih br₁ _ h hpos₁ hple₁
   exact ⟨hd'.trans hd₁, hp', hl'⟩
 · split at h
-  · -- Path 2 (e.g., end of block) — state unchanged
+  · -- end of block — state unchanged
     simp only [Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨_, rfl⟩ := h
     exact ⟨hd₁, hpos₁, hple₁⟩
-  · -- Path 3 (e.g., length+distance) — chain through more operations
-    -- ... extract sub-operations, chain their _inv results ...
+  · -- length+distance — chain more operations
     exact ⟨hd'.trans (hd₄.trans (hd₃.trans (hd₂.trans hd₁))), hp', hl'⟩
 ```
 
-The error path for each sub-operation is handled by `simp [h_op] at h` which
-derives a contradiction from `.error = .ok`.
+Each sub-op's error path closes via `simp [h_op] at h` (`.error = .ok`
+contradiction).
+
+## Suffix/Append vs Fuel-Independence Proofs
+
+The two differ in how `simp only` interacts with hypothesis and goal:
+
+- **Fuel-independence**: `simp only [hds] at h ⊢` processes both at once (same
+  call in `h` and `⊢`).
+- **Suffix/append**: `h` has `f bits`, `⊢` has `f (bits ++ suffix)` —
+  `simp only [hds]` won't match the goal.
+
+Suffix/append pattern:
+1. `simp only [hds, bind, Option.bind] at h` — process hypothesis.
+2. `rw [f_append ...]` — transform the goal.
+3. `simp only [bind, Option.bind]` — reduce `Option.bind (some _) (fun _ => _)`.
+
+For `if` on both sides: `by_cases hcond : condition` then
+`rw [if_pos/if_neg hcond] at h ⊢`. Note: `split at h ⊢` (multiple targets) is
+NOT supported — use `by_cases`.
+
+### Except suffix invariance: avoid spurious simp/dsimp
+
+In `f (brAppend br suffix) = ... brAppend br' suffix` proofs, two false patterns
+waste iterations:
+- After `cases hx : pure_func args | ok val =>`: `cases` already reduces the
+  goal's `match` for `.ok`. Apply `simp only [hx]` to `h` only, not `⊢`.
+- After `rw [if_neg hcond] at h ⊢`: the `if` is fully reduced; a following
+  `simp only [pure, Except.pure]` / `dsimp` usually makes no progress.
+
+Rule: start minimal, add `dsimp`/`simp` only when the build shows the goal is
+unreduced.
 
 ## `termination_by` Proofs vs `Nat.strongRecOn`
 
-When proving properties about a function defined with `termination_by expr`,
-prefer defining the theorem with the same `termination_by` + `decreasing_by`
-and making recursive calls directly, over using `Nat.strongRecOn`:
+When proving about a `termination_by expr` function, prefer giving the theorem
+the same `termination_by` + `decreasing_by` and making recursive calls directly:
 
 ```lean
--- Good: matches the function's own recursion structure
 private theorem f_property (data : ByteArray) (pos : Nat) (hpos : pos ≤ data.size) :
     P (f data pos) := by
   by_cases h : base_case
-  · ... -- base case
-  · have h_rec := f_property data (pos + step) (by omega)  -- recursive call
+  · ...
+  · have h_rec := f_property data (pos + step) (by omega)
     ...
   termination_by data.size - pos
   decreasing_by omega
 ```
 
-`Nat.strongRecOn` creates an induction variable `n` separate from the actual
-measure `data.size - pos`. This causes two problems:
-1. The induction hypothesis involves elaborating the full recursive term,
-   hitting `maxRecDepth` on complex functions
-2. The final arithmetic goals have `n` instead of `data.size - pos`, requiring
-   explicit `subst` or `have : n = data.size - pos`
+`Nat.strongRecOn` introduces an induction variable `n` separate from the measure
+`data.size - pos`, which (1) elaborates the full recursive term → `maxRecDepth`
+blowups, and (2) leaves `n` instead of the measure in arithmetic goals, forcing
+`subst`. Direct `termination_by` keeps the measure concrete.
 
-Direct `termination_by` avoids both issues since `data.size - pos` stays
-concrete throughout the proof.
+## `maxRecDepth` / `maxHeartbeats` Tuning
 
-## Suffix/Append Proofs vs Fuel-Independence Proofs
+After proofs work, shrink these to the minimum — speeds compilation, catches
+stray unfolding.
+1. Start at whatever works (e.g. 4096 / 4,000,000).
+2. Try halving (2048 / 2,000,000).
+3. Table-correspondence lemmas (non-recursive simp chains) often work at 512.
+4. Non-recursive proofs often need no `set_option` — remove it entirely first.
 
-In fuel-independence proofs, `simp only [hds] at h ⊢` processes both hypothesis
-and goal simultaneously (same function call in both).
+By proof type:
+- Recursive monadic chain (5+ ops): `maxRecDepth 2048` or `4096`.
+- Single unfold + case split: `maxRecDepth 512` or default.
+- Pure `simp` / `omega`: none.
 
-In suffix/append proofs, `h` has `f bits` while `⊢` has `f (bits ++ suffix)` —
-`simp only [hds]` won't match the goal.
+## Opaque Loop Catalog and WF-Refactoring Priority (Zip/Native/)
 
-**Pattern:**
-1. `simp only [hds, bind, Option.bind] at h` — process the hypothesis
-2. `rw [f_append ...] at ⊢` — transform the goal
-3. `simp only [bind, Option.bind]` — reduce `Option.bind (some (...)) (fun ...)` in goal
+A *generic* `Range.forIn` invariant lemma is impractical: the `forIn` wrapper's
+hidden `loop✝` can't be named/unfolded, a generic invariant would parameterize
+over monad/body/accumulator, and every loop here has a different state shape.
+**Use per-function WF refactoring** for loops needing spec proofs; leave the
+rest opaque.
 
-For `if` branches appearing in both sides, use `by_cases hcond : condition`
-then `rw [if_pos/if_neg hcond] at h ⊢`.
+### Priority 1 — needs WF refactoring (blocks sorry proofs)
 
-Note: `split at h ⊢` (multiple targets) is NOT supported — use `by_cases` instead.
+| Function | File | Loop | Blocking theorem |
+|----------|------|------|------------------|
+| `buildFseTable` (fill loops) | Fse.lean | 4× `for [:n]` + `while` | `buildFseTable_cells_size` (sorry) |
+| `decompressZstd` | ZstdFrame.lean | `while pos < data.size` | top-level decompression specs |
 
-## Except Suffix Invariance: When `dsimp`/`simp` Is Unnecessary
-
-In Except monad suffix proofs (`f (brAppend br suffix) = ... brAppend br' suffix`),
-two common false patterns waste build iterations:
-
-1. **After `cases hx : pure_func args | ok val =>`**: The `cases` already
-   reduces the goal's `match` for the `.ok` branch. Do NOT `simp only [hx] at ⊢`
-   — only apply to `h`. Use `simp only [hx] at h; dsimp only [] at h ⊢` if
-   needed, or just `simp only [hx] at h`.
-
-2. **After `rw [if_neg hcond] at h ⊢`**: The `if` expression is fully reduced.
-   A subsequent `simp only [pure, Except.pure] at h ⊢` or `dsimp only [] at h ⊢`
-   often makes no progress. Only add these if the goal still contains unreduced
-   `pure`/`Except.pure` wrappers — check by building first without them.
-
-**Rule of thumb**: Start minimal (just `rw [if_neg hcond] at h ⊢` then the next
-operation), add `dsimp`/`simp` only when the build tells you the goal isn't reduced.
-
-## `maxRecDepth` and `maxHeartbeats` Reduction
-
-After getting proofs to work, reduce `maxRecDepth` and `maxHeartbeats` to the
-minimum needed. This speeds up compilation and catches unnecessary unfolding.
-
-**Protocol:**
-1. Start with whatever value makes the proof work (e.g., 4096 / 4,000,000)
-2. Try halving: 2048 / 2,000,000
-3. Table correspondence lemmas (non-recursive `simp` chains) often work at 512
-4. Non-recursive proofs may not need any `set_option` at all
-
-**Common values by proof type:**
-- Recursive monadic chain (5+ operations): `maxRecDepth 2048` or `4096`
-- Single unfold + case split: `maxRecDepth 512` or default
-- Pure `simp` / `omega` proofs: no `set_option` needed
-
-Always test by removing the `set_option` entirely first — it may no longer be
-needed after proof cleanup.
-
-## Single-Step Unfolding of WF-Recursive Definitions
-
-When proving properties about a well-founded recursive function `f`, you often
-need to unfold exactly one level of `f` in the goal without recursively unfolding
-all occurrences.
-
-**Problem:** `unfold f` and `delta f` unfold ALL occurrences of `f`, including
-recursive calls in the body. For recursive functions like `encodeStored`, this
-produces enormous goals or infinite unfolding. `simp only [f, ...]` loops for
-the same reason. `conv => unfold f` is invalid inside `conv` blocks.
-
-**Solution:** Use `rw [f.eq_1]` — Lean 4 auto-generates an equation lemma
-`f.eq_1` for every definition. It rewrites exactly one application of `f`.
-
-```lean
--- BAD: unfolds encodeStored everywhere, including recursive calls
-unfold encodeStored
-
--- BAD: loops because encodeStored appears in its own body
-simp only [encodeStored, ...]
-
--- GOOD: rewrites exactly one occurrence
-rw [encodeStored.eq_1]
-```
-
-**When to use a standalone lemma:** If `rw [f.eq_1]` produces a goal too large
-to work with directly (many `if`/`match` branches), prove a specialized lemma
-that unfolds `f` under specific conditions:
-
-```lean
-private theorem f_case2 (xs : List α) (h : ¬(xs.length ≤ N)) :
-    f xs = ... body for this case ... := by
-  rw [f.eq_1]
-  simp only [h, ↓reduceIte, ...]
-```
-
-Then `rw [f_case2 _ h]` in the main proof. This was essential for
-`encodeStored_non_final` where `unfold encodeStored` was unusable.
-
-**Also beware `let` bindings:** If `f` uses `let x := ...; body`, trying to
-rewrite with `← f` to fold back won't work because `rw` can't match through
-`let` bindings. Use a standalone lemma instead.
-
-## Opaque Loop Catalog and Refactoring Priority (Zip/Native/)
-
-This catalog covers every function using opaque loop constructs (`while`,
-`for ... in [:n]`, `forIn`) in `Zip/Native/`. For each, it assesses
-whether WF refactoring is needed for spec proofs.
-
-### Recommendation: Per-function WF refactoring over generic `Range.forIn`
-
-A generic `Range.forIn` invariant lemma (analogous to `List.foldl_*`) is
-theoretically possible but impractical:
-- The `forIn` wrapper involves `Std.Legacy.Range.forIn'` with a hidden
-  `loop✝` that can't be named or unfolded
-- A generic invariant would need to parameterize over the monad, body,
-  and accumulator, making it very complex to apply
-- Each loop in this codebase has different state shapes and invariants
-
-**Continue with per-function WF refactoring** for loops that need spec proofs.
-Leave opaque loops that don't need unfolding.
-
-### Priority 1: Needs WF refactoring (blocking sorry proofs)
-
-| Function | File | Loop | State vars | Blocking theorem |
-|----------|------|------|-----------|-----------------|
-| `buildFseTable` (fill loops) | Fse.lean | 4× `for ... in [:n]` + `while` | 5+ | `buildFseTable_cells_size` (sorry) |
-| `decompressZstd` | ZstdFrame.lean | `while pos < data.size` | 2 | Top-level decompression specs |
-
-### Priority 2: Would benefit from WF but not urgently blocking
-
-| Function | File | Loop | State vars | Notes |
-|----------|------|------|-----------|-------|
-| `decodeSequences` | ZstdSequence.lean | `for i in [:numSeq]` | 4+ | Interleaved FSE decoding; complex state |
-| `xxHash64` (stripe loop) | XxHash.lean | `while pos < stripeEnd` | 5 | Blocked by UInt64 kernel eval anyway |
-| `decodeHuffmanStream` | ZstdHuffman.lean | `for _ in [:count]` | 2 | No spec theorems yet |
-
-### Priority 3: Probably leave as-is
+### Priority 2 — would benefit, not urgent
 
 | Function | File | Loop | Notes |
 |----------|------|------|-------|
-| `parseHuffmanWeightsDirect` | ZstdHuffman.lean | `for i in [:n]` | Simple accumulation, no spec needs unfolding |
-| `weightsToMaxBits` (weight sum) | ZstdHuffman.lean | `for w in weights` | Summation — already has WF alt (`findMaxBitsWF`) |
-| `buildZstdHuffmanTable` (count/fill) | ZstdHuffman.lean | 4× `for` | Complex but `tableSize` theorem needs only the fill loops |
-| `parseHuffmanTreeDescriptor` (trim) | ZstdHuffman.lean | `while` | Trailing-zero trim, no spec impact |
-| `decodeFseSymbols` | Fse.lean | `for i in [:count]` | No spec theorems needed |
-| `decodeFseSymbolsAll` | Fse.lean | `for _ in [:fuel]` | Fuel-bounded, no spec impact |
-| `Gzip.decompress` (member loop) | Gzip.lean | `for _ in [:1000]` | Bounded member loop, specs don't unfold it |
-| `deflateStored` | Deflate.lean | `while` | Compression, not spec'd |
+| `decodeSequences` | ZstdSequence.lean | `for [:numSeq]` | interleaved FSE decoding; complex state |
+| `xxHash64` (stripe loop) | XxHash.lean | `while pos < stripeEnd` | blocked by UInt64 kernel eval anyway |
+| `decodeHuffmanStream` | ZstdHuffman.lean | `for [:count]` | no spec theorems yet |
 
-### Already refactored (WF-friendly)
+### Priority 3 — probably leave as-is
 
-These functions already use explicit recursion or well-founded recursion:
-- `findMaxBitsWF` (ZstdHuffman.lean) — WF replacement for `weightsToMaxBits`
-- `decompressBlocksWF` (ZstdFrame.lean) — WF replacement for multi-block frame decompression (PR #667)
-- `copyBytes`, `copyMatch`, `executeSequences.loop` (ZstdSequence.lean) — explicit recursion with spec proofs
-- `processRemaining8`, `processRemaining1` (XxHash.lean) — WF recursion
-- `decodeFseLoop` (Fse.lean) — fuel-based with equation lemmas and spec proofs
-- `pushZeros`, `decodeZeroRepeats` (Fse.lean) — explicit recursion
+| Function | File | Notes |
+|----------|------|-------|
+| `parseHuffmanWeightsDirect` | ZstdHuffman.lean | simple accumulation, no spec unfold |
+| `weightsToMaxBits` | ZstdHuffman.lean | summation — has WF alt `findMaxBitsWF` |
+| `buildZstdHuffmanTable` | ZstdHuffman.lean | `tableSize` theorem needs only fill loops |
+| `parseHuffmanTreeDescriptor` (trim) | ZstdHuffman.lean | trailing-zero trim, no spec impact |
+| `decodeFseSymbols` / `decodeFseSymbolsAll` | Fse.lean | no/no-impact spec theorems |
+| `Gzip.decompress` (member loop) | Gzip.lean | bounded `[:1000]`, specs don't unfold it |
+| `deflateStored` | Deflate.lean | compression, not spec'd |
 
-### Refactoring effort estimates
+### Already WF-friendly
 
-- **buildFseTable**: High effort. 4 loops with different state shapes.
-  Consider refactoring only the specific loops that `cells_size` needs
-  (the fill loops at lines 128-143, 166-174), not all 4.
-- **decompressZstd**: Low effort. Simple position-advancing loop. But
-  depends on `decompressFrame` which depends on `decompressBlocks`
-  (now refactored).
-- **decodeSequences**: High effort. Interleaved FSE state transitions
-  with conditional updates. 4+ state variables with complex
-  interdependencies.
+`findMaxBitsWF`, `decompressBlocksWF` (ZstdFrame), `copyBytes` / `copyMatch` /
+`executeSequences.loop` (ZstdSequence), `processRemaining8` / `processRemaining1`
+(XxHash), `decodeFseLoop` (fuel + equation lemmas + spec), `pushZeros` /
+`decodeZeroRepeats` (Fse).
+
+### Effort estimates
+
+- **buildFseTable**: high — 4 loops, different state shapes. Refactor only the
+  fill loops `cells_size` needs, not all 4.
+- **decompressZstd**: low — simple position-advancing loop; depends on
+  `decompressFrame` → `decompressBlocks` (now refactored).
+- **decodeSequences**: high — interleaved FSE transitions, 4+ interdependent
+  state vars.
 
 ## Cross-References
 
-- **WF recursion patterns**: `lean-wf-recursion` skill — for well-founded
-  recursion (`termination_by`, `f.induct`, `unfold` vs `rw [f.eq_1]`,
-  dependent `if` guards with `dif_pos`/`dif_neg`, fuel-to-WF migration)
-- **Roundtrip proofs**: `lean-roundtrip-proofs` skill — for suffix invariance
-  chains (_append lemmas), goR (decode-with-remaining), and accumulator
-  equivalence patterns
+- `lean-wf-recursion` — `termination_by`, `f.induct`, `rw [f.eq_1]` single-step
+  unfolding, dependent `if` guards (`dif_pos`/`dif_neg`), fuel-to-WF migration.
+- `lean-roundtrip-proofs` — suffix invariance chains (`_append` lemmas), goR
+  (decode-with-remaining), accumulator equivalence.

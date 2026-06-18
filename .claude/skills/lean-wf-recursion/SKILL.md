@@ -1,527 +1,253 @@
 ---
 name: lean-wf-recursion
-description: Use when Lean 4 proofs involve well-founded recursion, termination_by, f.induct functional induction, WF function unfolding, or converting fuel-based functions to WF recursion.
+description: Use when Lean 4 proofs involve well-founded recursion, termination_by, f.induct functional induction, unfolding WF functions, or converting fuel-based functions to WF recursion.
 allowed-tools: Read, Bash, Grep
 ---
 
 # Lean 4 Well-Founded Recursion Proof Patterns
 
-## Unfolding WF Functions
+## `simp only [f]` loops on WF functions
 
-WF recursive functions have special unfolding behavior. The wrong
-tactic will loop or produce unusable goals.
+Never `simp only [f]` for a WF function: simp rewrites `f` inside its own body, which always contains a recursive call to `f`, so it never reaches a fixpoint. Use `unfold f` or `rw [f.eq_1]` instead.
 
-### The Three Strategies
+## `unfold f` — default single-level unfold
 
-| Tactic | Behavior | When to Use |
-|--------|----------|-------------|
-| `unfold f` | Single-level unfold of `f` | Default choice for WF functions |
-| `rw [f.eq_1]` | Rewrites one application via equation lemma | When `unfold` is too aggressive or inside `conv` |
-| `simp only [f]` | **FORBIDDEN** — loops on WF functions | Never for WF functions |
-
-**Why `simp only [f]` loops:** simp repeatedly rewrites `f` in its own
-body. For WF functions, the body always contains recursive calls to `f`,
-so simp never reaches a fixpoint.
-
-### `unfold` — The Default
+Exposes guard conditions; follow with `split` to case-analyze the exposed `if`/`match`.
 
 ```lean
--- Exposes guard conditions for split/cases
 unfold tokenFreqs.go
 split
 · -- guard satisfied: i < tokens.size
-  ...
-· -- guard failed: ¬(i < tokens.size)
-  exact ⟨hlit, hdist⟩
+· -- guard failed
 ```
 
-After `unfold`, use `split` to case-analyze the exposed `if`/`match`.
-See `Zip/Spec/DeflateDynamicFreqs.lean`.
+`unfold f` expands ALL occurrences (including recursive calls). See `Zip/Spec/DeflateDynamicFreqs.lean`.
 
-### `rw [f.eq_1]` — Precise Rewriting
+## `rw [f.eq_1]` — rewrite exactly one application
 
-When `unfold` unfolds ALL occurrences (including recursive calls you
-want to keep opaque), use the auto-generated equation lemma instead:
+Use when `unfold` is too aggressive or when you need it inside `conv`. When `f` matches on constructors, Lean generates `f.eq_1`, `f.eq_2`, ... (one per arm) — pick the one for your case. The `.eq_1` name is not guaranteed to exist.
 
 ```lean
--- Rewrites exactly one occurrence of kraftSumFrom
 rw [kraftSumFrom.eq_1]
 exact if_neg (by omega)
 ```
 
 See `Zip/Spec/HuffmanKraft.lean`.
 
-**Multiple equation lemmas:** When `f` pattern-matches on constructors,
-Lean generates `f.eq_1`, `f.eq_2`, etc. — one per match arm. Choose the
-equation matching your case.
+## Step theorems: unfold only one side of `f a = f b`
 
-### Step Theorems: Unfolding Only One Side
+`unfold f` expands BOTH sides. Three ways to unfold the LHS only:
 
-When proving `f old_args = f new_args` (step/continuation theorems),
-`unfold f` expands BOTH sides. Solutions:
+1. `rw [f.eq_1]` — only if the equation lemma name exists.
+2. `rw [show f args = _ from by unfold f; rfl]` — universally works; unfolds `f` in a local proof, `rfl` closes `body = body`, the result rewrites only the first match.
+3. `generalize heq : f b = rhs` to make the RHS opaque, then `unfold f` hits the LHS alone.
 
-1. **`rw [f.eq_1]`** — rewrites only the first match. But the equation
-   lemma name varies and may not exist as `.eq_1`.
-
-2. **`rw [show f args = _ from by unfold f; rfl]`** — universally works.
-   This unfolds `f` inside a local proof, then `rfl` closes `body = body`,
-   producing an equation that `rw` applies to the first match only.
-
-After the LHS is unfolded and simplified through guards, the residual
-may have minor elaboration differences (e.g., `match x with` vs
-`match x, h with` where `h` is ignored). Close with:
+After unfolding through guards, residual elaboration differences (`match x with` vs `match x, h with`) close with:
 
 ```lean
 congr 1
 cases x <;> rfl
 ```
 
-**Example** (`decompressBlocksWF` step theorem):
+`generalize` form:
+
 ```lean
-  rw [show decompressBlocksWF data off ... = _ from by
-    unfold decompressBlocksWF; rfl]
-  simp only [hoff, ↓reduceDIte, hparse, ..., hnotlast, hadv]
-  congr 1
-  cases huffTree <;> rfl
+theorem f_step (h1 ...) (h2 ...) : f x₁ = f x₂ := by
+  generalize heq : f x₂ = rhs     -- RHS becomes opaque
+  unfold f                          -- unfolds LHS only
+  simp only [h1, h2, ↓reduceDIte, ↓reduceIte,
+    bind, Except.bind, pure, Except.pure, Bool.false_eq_true]
+  exact heq
 ```
 
-### Standalone Case Lemmas
+Why other approaches fail: `unfold` is not available inside `conv`; `Eq.trans` with a metavariable leaves `?mid` unsynthesized. See `Zip/Spec/Zstd.lean` (`decompressBlocksWF_raw_step`, `_rle_step`) and `Zip/Spec/Deflate.lean` (`decompressBlocksWF` step theorem).
 
-When `rw [f.eq_1]` produces a goal too large to work with (many
-`if`/`match` branches), prove a specialized lemma:
+## Standalone case lemma when `rw [f.eq_1]` goal is too big
 
 ```lean
 private theorem f_case2 (xs : List α) (h : ¬(xs.length ≤ N)) :
-    f xs = ... body for this case ... := by
+    f xs = ... body ... := by
   rw [f.eq_1]
   simp only [h, ↓reduceIte, ...]
 ```
 
-Then `rw [f_case2 _ h]` in the main proof. Used for `encodeStored_non_final`
-in `Zip/Spec/Deflate.lean`.
+Then `rw [f_case2 _ h]`. See `encodeStored_non_final` in `Zip/Spec/Deflate.lean`.
 
-### `generalize` — Unfolding Only One Side of an Equality
+## Functional induction with `f.induct`
 
-When proving `f args₁ = f args₂` (step theorems), `unfold f` rewrites
-BOTH sides. To unfold only the LHS, use `generalize` to hide the RHS:
+Every WF function `f` gets an auto-generated `f.induct` whose cases match the recursion. Fails to generate if `f`'s termination proof uses `sorry`.
 
 ```lean
-theorem f_step (h1 ...) (h2 ...) :
-    f x₁ = f x₂ := by
-  generalize heq : f x₂ = rhs     -- RHS becomes opaque variable
-  unfold f                          -- only unfolds LHS (RHS is just 'rhs')
-  simp only [h1, h2, ..., ↓reduceDIte, ↓reduceIte,
-    bind, Except.bind, pure, Except.pure, Bool.false_eq_true]
-  exact heq                        -- goal is now: f x₂ = rhs
+induction data using encodeStored.induct generalizing acc with
+| case1 data hle => unfold encodeStored; simp only [hle, ↓reduceIte]; ...
+| case2 data hgt rest ih => ...
 ```
 
-**Why other approaches fail:**
-- `conv_lhs => unfold f` — `unfold` is not available inside `conv` blocks
-- `Eq.trans` with metavariable — `simp` may leave `?mid` unsynthesized
-- `conv_lhs => rw [f.eq_1]` — works in principle but equation lemma
-  name may vary
+- `generalizing acc` for accumulator parameters.
+- `ih` is the hypothesis for recursive calls.
 
-**When to use**: Step theorems for WF functions (e.g., proving that a
-parser loop with a non-last block recurses with updated arguments).
+Alternative: a theorem with the same `termination_by` + `decreasing_by`. Use `f.induct` for complex branching (no measure duplication); use matching `termination_by` for simple functions (see `lean-fuel-induction`). See `Zip/Spec/Deflate.lean`.
 
-See `Zip/Spec/Zstd.lean`: `decompressBlocksWF_raw_step`,
-`decompressBlocksWF_rle_step`.
+## Termination measures
 
-## Functional Induction with `f.induct`
+| Measure | Used for |
+|---------|----------|
+| `tokens.size - i` | array traversal |
+| `xs.length` | list consumption |
+| `dataSize * 8 - br.bitPos` | bit-stream decoding |
+| `totalCodes - acc.length` | bounded accumulator growth |
 
-For every WF-recursive function `f`, Lean auto-generates an induction
-principle `f.induct` whose cases match the recursion structure.
+### `dataSize` parameter pattern
 
-```lean
-theorem encodeStored_go (data : List UInt8) (acc : List UInt8) :
-    decode.go (encodeStored data) acc = some (acc ++ data) := by
-  induction data using encodeStored.induct generalizing acc with
-  | case1 data hle =>
-    -- Base case: data.length ≤ 65535
-    unfold encodeStored
-    simp only [hle, ↓reduceIte]
-    ...
-  | case2 data hgt rest ih =>
-    -- Recursive case: data.length > 65535
-    ...
-```
-
-See `Zip/Spec/Deflate.lean`.
-
-**Key points:**
-- `generalizing acc` when the function has accumulator-style parameters
-- Each case name matches the recursive structure
-- `ih` is the induction hypothesis for recursive calls
-- `f.induct` fails to generate if `f`'s termination proof uses `sorry`
-
-### `f.induct` vs Matching `termination_by`
-
-Two ways to do induction matching a WF function:
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| `induction ... using f.induct` | Cases match `f` exactly; no duplication | Need to learn case names |
-| Theorem with same `termination_by` | Familiar; direct recursive calls | Duplicates termination proof |
-
-Both work. Use `f.induct` when the function has complex branching;
-use matching `termination_by` for simpler functions where duplicating
-the measure is trivial. See `lean-fuel-induction` skill for the
-`termination_by` approach.
-
-## Termination Measures
-
-Common measures in this codebase:
-
-| Measure | Example | Used For |
-|---------|---------|----------|
-| `array.size - i` | `termination_by tokens.size - i` | Array traversal loops |
-| `list.length` | `termination_by xs => xs.length` | List consumption |
-| `dataSize * 8 - br.bitPos` | Bit stream decoding | Functions that consume bits |
-| `totalCodes - acc.length` | `termination_by totalCodes - acc.length` | Bounded accumulator growth |
-
-### The `dataSize` Parameter Pattern
-
-For functions that consume a bit stream, pass `br.data.size` as an
-explicit `dataSize` parameter rather than using `br.data.size` directly:
+For bit-stream consumers, pass `br.data.size` as a fixed `dataSize` parameter rather than referencing `br.data.size` directly. `omega` cannot derive `br'.data.size = br.data.size` without invariant lemmas; a fixed parameter avoids the dependency.
 
 ```lean
-def decodeHuffman (br : BitReader) ... :=
-  go br.data.size br output    -- capture data.size once
-where
-  go (dataSize : Nat) (br : BitReader) ... :=
-    ...
-    go dataSize br₁ ...        -- pass through unchanged
+def decodeHuffman (br : BitReader) ... := go br.data.size br output
+where go (dataSize : Nat) (br : BitReader) ... :=
+  ... go dataSize br₁ ...
   termination_by dataSize * 8 - br.bitPos
 ```
 
-**Why:** `omega` cannot derive `br'.data.size = br.data.size` without
-invariant lemmas. Making `dataSize` a fixed parameter avoids this
-dependency entirely. See `Zip/Native/Inflate.lean`.
+See `Zip/Native/Inflate.lean`.
 
-## Dependent `if` Guards and `dif_pos`/`dif_neg`
+## Dependent `if` guards: `dif_pos` / `dif_neg`
 
-WF functions often use dependent `if` to bind proof witnesses:
+WF functions use dependent `if` to bind the termination witness:
 
 ```lean
-if _h : bits'.length < bits.length then
-  decodeSymbols ... bits' ...   -- _h proves termination
-else
-  none
+if _h : bits'.length < bits.length then decodeSymbols ... bits' ... else none
 ```
 
-### Resolving Guards in Proofs
-
-Use `dif_pos`/`dif_neg` to select branches of dependent `if`:
+Select branches in proofs:
 
 ```lean
--- In hypothesis: prove guard is true, then simplify
 by_cases hlt : bits'.length < bits.length
-· simp only [dif_pos hlt] at h
-  ...
-· simp only [dif_neg hlt] at h
-  ...
+· simp only [dif_pos hlt] at h ...
+· simp only [dif_neg hlt] at h ...
 ```
 
-Or when you can prove the guard directly:
+Or prove the guard and `rw [dif_pos hlen]`. See `Zip/Spec/DeflateEncode.lean`, `Zip/Spec/DeflateSuffix.lean`.
 
-```lean
-have hlen : (restBits ++ rest).length < (symBits ++ restBits ++ rest).length := by
-  have hpos := encodeLitLen_nonempty ...
-  simp [List.length_append]; omega
-rw [dif_pos hlen]
-```
+## `split at h` for `if` in a hypothesis
 
-See `Zip/Spec/DeflateEncode.lean` and `Zip/Spec/DeflateSuffix.lean`.
-
-### `split at h` for `if` in Hypotheses
-
-When a hypothesis contains an `if` from a WF function, `split at h`
-case-analyzes it directly:
+When a hypothesis contains an `if` from a WF function, `split at h` case-analyzes it directly (replaces the old `guard` + `by_cases`):
 
 ```lean
 split at ht
-· -- guard satisfied branch
-  simp at ht; ...
-· -- guard failed branch
-  simp at ht; ...
+· simp at ht; ...   -- guard satisfied
+· simp at ht; ...   -- guard failed
 ```
 
-This replaces the old `guard` + `by_cases` pattern from fuel-based code.
 See `Zip/Spec/LZ77NativeCorrect.lean`.
 
-## `↓reduceIte` Limitation with Bool-to-Prop
+## `↓reduceIte` fails on `if (false = true)`
 
-`↓reduceIte` reduces `if True/False then ...` but NOT `if (false = true) then ...`.
-
-The `false = true` form arises when a Bool equality becomes a Prop via
-coercion. Fix with explicit `if_neg`:
+`↓reduceIte` reduces `if True/False` (Prop literals) but NOT `if (boolExpr = true)`, which arises when a Bool equality coerces to Prop. Resolve explicitly:
 
 ```lean
--- BAD: ↓reduceIte cannot reduce this
-simp only [↓reduceIte]  -- no progress on `if (false = true) then ...`
-
--- GOOD: resolve the Prop explicitly
 simp only [if_neg (show ¬(false = true) from nofun)]
 ```
 
-More generally:
-- `↓reduceIte` works on: `if True`, `if False` (Prop literals)
-- `↓reduceIte` fails on: `if (boolExpr = true)` until `= true` is resolved
-- After `rw [if_pos h]` or `rw [if_neg h]`, the `if` is fully eliminated
+After `rw [if_pos h]` / `if_neg h` the `if` is fully eliminated.
 
-## WF Compatibility: `do`/`guard` vs Explicit `if`/`match`
+## WF compatibility: replace `do`/`guard` with explicit `if`/`match`
 
-The termination checker cannot extract guard conditions from `do`
-notation. Replace monadic guards with explicit `if`/`match`:
+The termination checker cannot extract guards from `do` notation. Replace:
 
 ```lean
--- BAD: termination checker can't see the guard
-do
-  guard (acc.length > 0)
-  ...
-
--- GOOD: guard condition is visible to the termination checker
-if acc.length == 0 then none
-else ...
+-- BAD
+do guard (acc.length > 0); ...
+-- GOOD
+if acc.length == 0 then none else ...
 ```
 
-This was required for `decodeCLSymbols` and `decodeSymbols` WF conversions.
+Required for `decodeCLSymbols`, `decodeSymbols`.
 
-### Dependent `if` Hypotheses and `do` Early-Throw
+### `do` early-throw does not bind the negated guard
 
-In `do` notation, `if cond then throw ...` (without explicit `else`)
-does NOT bind the negated condition as a named hypothesis. This means
-termination proofs later in the block cannot reference the guard:
+`if cond then throw ...` (no explicit `else`) in `do` does NOT keep the negated condition in scope through later monadic binds, so later termination proofs cannot reference it. Use a top-level dependent `if`/`else do`:
 
 ```lean
--- BAD: hoff is NOT available later in the do block
-def f ... := do
-  if hoff : data.size ≤ off then
-    throw "error"
-  -- hoff is lost through monadic bindings (← desugaring)
-  ...
-  have : data.size - newOff < data.size - off := by omega  -- FAILS
-
--- GOOD: hoff survives as the else branch's hypothesis
+-- GOOD: hoff : ¬(data.size ≤ off) stays in scope
 def f ... :=
-  if hoff : data.size ≤ off then
-    .error "error"
+  if hoff : data.size ≤ off then .error "error"
   else do
-    -- hoff : ¬(data.size ≤ off) is in scope throughout
     ...
-    have : data.size - newOff < data.size - off := by omega  -- WORKS
+    have : data.size - newOff < data.size - off := by omega   -- WORKS
 ```
 
-This was required for `decompressBlocksWF` in `ZstdFrame.lean`.
+Required for `decompressBlocksWF` in `ZstdFrame.lean`.
 
-## Fuel-to-WF Migration Checklist
+## Non-advancement guard pattern
 
-When converting a fuel-based function to well-founded recursion:
-
-### Function Changes
-1. Remove the `fuel : Nat` parameter
-2. Replace `fuel + 1` pattern matches with actual termination guards
-3. Add `termination_by measure` and `decreasing_by` clauses
-4. Replace `do`/`guard` with explicit `if h : cond` (dependent if) so
-   the termination checker can see the guards
-
-### Proof Changes
-1. Replace `induction fuel` with either:
-   - `induction args using f.induct` (preferred for complex branching)
-   - Same `termination_by` + `decreasing_by` on the theorem (simpler cases)
-2. Fuel-independence proofs (`f x (fuel + 1) = some r → ∀ k, f x (fuel + k) = some r`)
-   become unnecessary — delete them
-3. Replace `simp only [f]` with `unfold f` (WF functions loop under `simp`)
-4. Replace `guard`/`by_cases` patterns with `split at h` or `by_cases` + `dif_pos`/`dif_neg`
-
-### Common Pitfalls During Migration
-- **Sorry count increases temporarily**: Converting the function breaks
-  all downstream proofs. Patch with `sorry` and fix incrementally.
-- **`simp only [f]` loops**: The most common mistake. Always use `unfold f`
-  or `rw [f.eq_1]` for WF functions.
-- **`omega` can't see data invariants**: Use the `dataSize` parameter
-  pattern (above) to avoid needing `br.data.size` invariants in `omega`.
-
-### Termination Obligations: `omega` Usually Suffices
-
-With the non-advancement guard pattern (see above), termination
-obligations are almost always closable by `omega`. The pattern
-produces goals like:
-
-```
-h : ¬(afterPos ≤ pos)
-⊢ data.size - afterPos < data.size - pos
-```
-
-These are pure linear arithmetic — `omega` handles them directly.
-No custom `decreasing_by` blocks are needed. If `omega` fails, check
-whether the measure involves non-linear terms (multiplication,
-exponentiation) — those require auxiliary `have` lemmas to linearize.
-
-## WF Goal Shape: Conjunction with Guard
-
-When proving properties of WF functions using `Nat.strongRecOn` (rather
-than `f.induct`), `simp` on the non-final recursive branch may produce
-a **conjunction** goal rather than a plain function application:
-
-```lean
-⊢ bits'.length < bits.length ∧ decode.go (bits' ++ suffix) acc' = some result
-```
-
-This happens because Lean's WF recursion elaboration bundles the
-termination proof with the recursive call. The left conjunct is the WF
-guard, the right is the actual property.
-
-**Fix:** Supply both parts explicitly:
-```lean
-exact ⟨hblen, ih bits'.length (hlen ▸ hblen) bits' acc' result rfl hgo⟩
-```
-
-**Don't try:** `dif_pos`, `rw`, or `simp only` with the guard hypothesis —
-the conjunction is not a `dite`, it's already been simplified past that.
-
-See `Zip/Spec/DeflateSuffix.lean` (`decode_go_suffix` proof).
-
-## Non-Advancement Guard Pattern
-
-WF-recursive parsers often need to prove that sub-operations advance
-the position. Rather than proving advancement inline, use a **guard +
-throw** pattern that makes the termination proof trivial:
+Make termination self-contained: guard that a sub-operation advanced, throwing if not. The guard's `else` hypothesis discharges the measure by `omega` — no inline advancement proof, no `decreasing_by`.
 
 ```lean
 def decompressZstdWF (data : ByteArray) (pos : Nat) (output : ByteArray) :
     Except String ByteArray :=
-  if hpos : pos ≥ data.size then
-    return output
+  if hpos : pos ≥ data.size then return output
   else do
     let (content, afterFrame) ← decompressFrame data pos
-    if hadv : afterFrame ≤ pos then
-      throw "frame did not advance position"
+    if hadv : afterFrame ≤ pos then throw "frame did not advance position"
     else
       have : data.size - afterFrame < data.size - pos := by omega
       decompressZstdWF data afterFrame (output ++ content)
 termination_by data.size - pos
 ```
 
-**Key insight**: The guard `if hadv : afterFrame ≤ pos then throw`
-creates a named hypothesis. In the `else` branch, `hadv` gives
-`¬(afterFrame ≤ pos)`, and `omega` closes the termination obligation
-`data.size - afterFrame < data.size - pos`.
+Use when: the advancement proof exists but is complex to inline; you want termination independent of that proof; multiple recursive paths each need their own guard. The per-parser `_pos_gt` theorems (`lean-zstd-spec-pattern`) prove the guard never fires, but the WF function does not depend on them. Same pattern: `decompressBlocksWF` (`ZstdFrame.lean`) with `parseBlockHeader` + `decodeBlock`.
 
-**When to use this pattern**:
-- The sub-operation's position-advancement proof exists but is complex
-  to inline
-- You want the WF function to be valid even without the
-  position-advancement theorem (the guard makes it self-contained)
-- Multiple recursive paths exist (skippable frames vs standard frames
-  in `decompressZstdWF`) and each needs its own guard
+### Termination obligations are usually `omega`
 
-**Cross-reference**: The per-parser `_pos_gt` theorems
-(see `lean-zstd-spec-pattern` skill, "Position-Advancement Proofs")
-prove that the guard never fires in practice, but the WF function
-doesn't depend on those proofs for termination.
+The guard pattern produces goals like `h : ¬(afterPos ≤ pos) ⊢ data.size - afterPos < data.size - pos` — pure linear arithmetic. If `omega` fails, the measure has non-linear terms (multiplication/exponentiation) needing auxiliary `have` lemmas to linearize.
 
-**Earlier example**: `decompressBlocksWF` in `ZstdFrame.lean` uses the
-same pattern with `parseBlockHeader` + `decodeBlock`, where the guard
-checks that the block processing advanced the byte offset.
+## WF goal shape: conjunction with guard
 
-## Multi-State While Loops (decompressBlocks Pattern)
-
-Some `while` loops thread many state variables through iterations:
+With `Nat.strongRecOn` (not `f.induct`), `simp` on a non-final recursive branch may yield a conjunction (left = WF guard, right = property) rather than a plain application:
 
 ```lean
--- decompressBlocks threads 5 variables:
-while !done do
-  let (hdr, off') ← parseBlockHeader data off
-  let (blockOutput, off'') ← decodeBlock data off' hdr prevHuffTree prevFseTables
-  output := output ++ blockOutput
-  prevHuffTree := updatedTree
-  prevFseTables := updatedTables
-  offsetHistory := updatedHistory
-  off := off''
-  done := hdr.isLastBlock
+⊢ bits'.length < bits.length ∧ decode.go (bits' ++ suffix) acc' = some result
 ```
 
-### WF refactoring pattern
-
-Convert `while !done` to explicit recursion with all state as parameters:
+Supply both parts; it is not a `dite`, so `dif_pos`/`rw`/`simp` with the guard will not help:
 
 ```lean
-def decompressBlocksWF (data : ByteArray) (off : Nat)
-    (output : ByteArray) (prevHuffTree : Option HuffmanTree)
-    (prevFseTables : Option FseTables) (offsetHistory : OffsetHistory) :
-    Except Error (ByteArray × Nat) :=
+exact ⟨hblen, ih bits'.length (hlen ▸ hblen) bits' acc' result rfl hgo⟩
+```
+
+See `Zip/Spec/DeflateSuffix.lean` (`decode_go_suffix`).
+
+## Multi-state `while` loops → explicit recursion
+
+A `while !done` loop that threads many state vars (output, prevHuffTree, prevFseTables, offsetHistory, off) converts to recursion with all state as parameters:
+
+```lean
+def decompressBlocksWF (data : ByteArray) (off : Nat) (output : ByteArray)
+    (prevHuffTree : Option HuffmanTree) (prevFseTables : Option FseTables)
+    (offsetHistory : OffsetHistory) : Except Error (ByteArray × Nat) :=
   let hdr ← parseBlockHeader data off
   let (blockOutput, off', tree', tables', hist') ← decodeBlock ...
-  if hdr.isLastBlock then
-    .ok (output ++ blockOutput, off')
-  else
-    decompressBlocksWF data off' (output ++ blockOutput) tree' tables' hist'
+  if hdr.isLastBlock then .ok (output ++ blockOutput, off')
+  else decompressBlocksWF data off' (output ++ blockOutput) tree' tables' hist'
 termination_by data.size - off
 ```
 
-### Key considerations
+- Measure `data.size - off`; need a lemma that the sub-ops advance `off`.
+- `isLastBlock` is the base case, not a termination argument; only `data.size - off` decreasing matters.
+- In `Except`, errors short-circuit; only the `.ok` path shows decreasing.
+- For 5+ state fields, bundle into a structure to keep the signature and `f.induct` cases readable.
 
-1. **Termination measure**: Usually `data.size - off` where `off`
-   advances each iteration. Need a lemma that `parseBlockHeader` and
-   `decodeBlock` advance `off` (i.e., `off' > off`).
+Refactor only when a spec theorem must unfold the loop body or its invariant involves per-iteration state. If the theorem only concerns the return type or error conditions, leave the `while` loop and treat the function as opaque. (Note: `forIn` loops from `while`/`for ... in [:n]` use auto-generated `loop✝` functions that CANNOT be unfolded — refactor to WF recursion early if you need to reason through them.)
 
-2. **Implicit termination**: The original `while` loop terminates because
-   `hdr.isLastBlock` is eventually true OR `off` exceeds `data.size`. For
-   WF recursion, only `data.size - off` decreasing is needed (the
-   `isLastBlock` case is the base case, not a termination argument).
+## Explicit `match` over `do` for proof targets
 
-3. **Error short-circuits**: In Except monad, errors terminate the
-   recursion naturally. Only the `.ok` path needs to show decreasing.
-
-4. **State bundling**: If the state tuple is large (5+ fields), consider
-   a structure:
-   ```lean
-   structure DecompressState where
-     output : ByteArray
-     huffTree : Option HuffmanTree
-     fseTables : Option FseTables
-     offsetHistory : OffsetHistory
-   ```
-   This keeps the function signature manageable and makes `f.induct`
-   cases more readable.
-
-### When NOT to refactor
-
-Not every `while` loop needs WF conversion. Only refactor when:
-- A spec theorem needs to unfold the loop body (e.g., proving output
-  size equals content size through block accumulation)
-- The loop invariant involves state that changes each iteration
-
-If the only spec theorem is about the function's return type or error
-conditions (not loop-internal state), leave the `while` loop and prove
-the theorem by treating the function as opaque.
-
-## Proof Style: Explicit Match vs `do` Notation in WF Functions
-
-**For WF functions intended as proof targets, prefer explicit `match` over
-`do` notation for monadic operations.** `do` notation desugars to `Bind.bind`
-which requires careful `simp only [bind, Bind.bind, Except.bind]` to unfold
-in proofs. After `dite` splits or `let` bindings, `simp only [bind, ...]`
-often fails because the bind isn't at the top level.
-
-Explicit `match` makes `split at h` predictable — each error/ok branch is
-directly visible in the unfolded goal.
+`do` desugars to `Bind.bind`, which needs `simp only [bind, Bind.bind, Except.bind]` to unfold — and that often fails after `dite` splits or `let` bindings when the bind is not top-level. Explicit `match` makes `split at h` predictable: each error/ok branch is directly visible.
 
 ```lean
--- BAD for proofs: do notation with deeply nested binds
-else do
-  let (a, br) ← f1 br
-  if h : cond then
-    let (b, br) ← f2 br   -- bind hidden inside dite branch
-    ...
-  else throw ...
-
--- GOOD for proofs: explicit match, every branch visible
-else
-  match f1 br with
-  | .error e => .error e
-  | .ok (a, br) =>
+-- GOOD: every branch visible
+match f1 br with
+| .error e => .error e
+| .ok (a, br) =>
   if h : cond then
     match f2 br with
     | .error e => .error e
@@ -529,103 +255,63 @@ else
   else .error ...
 ```
 
-**Exception:** `do` notation is fine for simple tail-position binds
-(1-2 levels of nesting), as in `decodeFseSymbolsWF.loop`. For deeply
-nested functions (3+ interleaved states like sequence decoding), always
-use explicit match.
+Exception: `do` is fine for 1-2 tail-position binds (e.g. `decodeFseSymbolsWF.loop`). For 3+ interleaved states (sequence decoding), use explicit match. After `unfold` on a recursive function, use `dsimp only [bind, Except.bind]` (see `lean-monad-proofs`).
 
-**Helper extraction:** When the function body has 10+ nested matches,
-extract a helper (e.g., `decodeOneSequence`) to reduce nesting depth.
-The helper can use `do` notation since you don't need to unfold it in
-the main proof — only the loop's structure matters.
+## Fuel-to-WF conversion template
 
-## WF Conversion Template: Step-by-Step
+### Phase 1: function
 
-This section provides a concrete workflow for converting a fuel-based function
-to well-founded recursion and building its spec theorems. Distilled from 4 WF
-conversions in a single batch (PRs #929, #930, #943, #951).
-
-### Phase 1: Function Conversion
-
-**Step 1: Identify the recursion structure.**
-
-Determine the decreasing measure:
-- Counter-based (`remaining : Nat`): structural recursion via `match`, no
-  `termination_by` needed
-- Position-based (`data.size - pos`): needs `termination_by` + guard
-- Custom measure: needs `termination_by` + `decreasing_by` proof
-
-**Step 2: Remove fuel, add measure.**
+1. **Pick the measure** by recursion structure:
+   - counter (`remaining : Nat`) → structural recursion via `match`, no `termination_by`
+   - position (`data.size - pos`) → `termination_by` + guard
+   - custom → `termination_by` + `decreasing_by`
+2. **Remove fuel, add measure**; replace `fuel + 1` matches with real guards.
 
 ```lean
--- BEFORE (fuel-based):
-def decode (fuel : Nat) (data : ByteArray) (pos : Nat) ... :=
-  match fuel with
-  | 0 => .error "out of fuel"
-  | fuel + 1 => ...
-
--- AFTER (counter-based, structural):
-def decodeWF (data : ByteArray) (br : BackwardBitReader)
-    (count : Nat) (acc : ByteArray) :=
+-- BEFORE
+def decode (fuel : Nat) ... := match fuel with | 0 => .error "out of fuel" | fuel+1 => ...
+-- AFTER (counter-based, structural)
+def decodeWF (data : ByteArray) (br : BackwardBitReader) (count : Nat) (acc : ByteArray) :=
   match count with
   | 0 => .ok (acc, br)
-  | n + 1 => do
-    let (sym, br') ← decodeSymbol br
-    decodeWF data br' n (acc.push sym)
+  | n + 1 => do let (sym, br') ← decodeSymbol br; decodeWF data br' n (acc.push sym)
 ```
 
-**Step 3: Replace `do`/`guard` with explicit `if`/`match`.**
-
-For proof-friendliness, use explicit `match` instead of `do`-notation when
-the function body has 3+ sequential monadic operations. For 1-2 simple
-binds, `do` notation is fine.
-
-**Step 4: Extract helpers if nesting exceeds ~10 levels.**
-
-When the loop body has 10+ levels of nested `match`/`if` (common in
-decoders that interleave multiple FSE tables), extract the per-iteration
-logic as a `private def` helper:
+3. **Replace `do`/`guard` with explicit `if`/`match`** when 3+ sequential monadic ops.
+4. **Extract a per-iteration helper** if nesting exceeds ~10 levels (the helper may use `do` freely since proofs only unfold the loop structure):
 
 ```lean
--- Helper: processes ONE iteration (not recursive)
-private def decodeOneStep (tables : Tables) (br : BackwardBitReader)
-    (state : Nat) :
-    Except String (Result × BackwardBitReader × StateUpdate) := do
-  let cell := tables.cells[state]!
-  let (extra, br') ← br.readBits cell.numBits.toNat
-  ...
-
--- Main loop: structural recursion on counter
-def decodeWF.loop (tables : Tables) (br : BackwardBitReader)
-    (state : Nat) (remaining : Nat) (acc : Array UInt8) :=
+private def decodeOneStep (...) : Except String (...) := do ...
+def decodeWF.loop (tables : Tables) (br : BackwardBitReader) (state remaining : Nat) (acc : Array UInt8) :=
   match remaining with
   | 0 => .ok (acc, br)
   | n + 1 =>
     match decodeOneStep tables br state with
     | .error e => .error e
-    | .ok (result, br', stateUpdate) =>
-      decodeWF.loop tables br' stateUpdate.newState n (acc.push result)
+    | .ok (result, br', stateUpdate) => decodeWF.loop tables br' stateUpdate.newState n (acc.push result)
 ```
 
-**Benefit**: The helper can use `do` notation freely since proofs only
-need to unfold the loop structure, not the helper body.
+| Nesting | Action |
+|---------|--------|
+| ≤ 5 | inline |
+| 6-10 | extract if proofs get unwieldy |
+| > 10 | always extract |
 
-### Phase 2: Size Theorem
+Signs you need extraction: `split at h` yields 4+ unreduced `match`/`if` layers, or the same error-branch dismissal repeats 5+ times.
 
-The standard size theorem follows this template:
+### Phase 2: size theorem
+
+Induct on the counter; `simp only` to unfold one level; `cases` on sub-ops; `nomatch` for error branches; `omega` to close.
 
 ```lean
-theorem decodeWF_size
-    {br br' : BackwardBitReader} {count : Nat} {acc result : ByteArray}
-    (h : decodeWF br count acc = .ok (result, br')) :
-    result.size = acc.size + count := by
+theorem decodeWF_size {br br'} {count} {acc result}
+    (h : decodeWF br count acc = .ok (result, br')) : result.size = acc.size + count := by
   induction count generalizing br acc with
   | zero =>
     simp only [decodeWF, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, _⟩ := h; omega
   | succ n ih =>
     simp only [decodeWF, bind, Except.bind] at h
-    -- Case-split on the sub-operation
     cases hsub : subOperation br with
     | error => simp only [hsub] at h; exact nomatch h
     | ok v =>
@@ -635,40 +321,21 @@ theorem decodeWF_size
       simp only [ByteArray.size_push] at this; omega
 ```
 
-**Key pattern**: Induction on the counter, with `simp only` to unfold
-one level, `cases` on sub-operations, `nomatch` for error branches,
-and `omega` for arithmetic closure.
+### Phase 3: downstream proof repair
 
-### Phase 3: Downstream Proof Repair
+1. Patch everything with `sorry` to get a compiling codebase.
+2. Fix one at a time, simplest first (size theorems).
+3. Replace `simp only [f]` with `unfold f`.
+4. Replace `induction fuel` with `induction count generalizing ...` (or `induction ... using f.induct`).
+5. Delete fuel-independence proofs (`f x (fuel+1) = some r → ∀ k, f x (fuel+k) = some r`) — no longer needed.
+6. Replace `guard`/`by_cases` with `split at h` or `by_cases` + `dif_pos`/`dif_neg`.
+7. `omega` can't see data invariants → use the `dataSize` parameter pattern.
 
-After converting a function, all existing proofs that unfold it will break.
+## Cross-references
 
-1. **Patch everything with `sorry`** first to get a compiling codebase
-2. **Fix proofs one at a time**, starting with the simplest (size theorems)
-3. **Replace `simp only [f]`** with `unfold f` (WF functions loop under `simp`)
-4. **Replace `induction fuel`** with `induction count generalizing ...`
-5. **Delete fuel-independence proofs** — they're no longer needed
-
-### Helper Extraction Decision
-
-| Nesting depth | Recommendation |
-|---------------|---------------|
-| ≤ 5 levels | Inline — the function body is manageable |
-| 6-10 levels | Judgement call — extract if proofs are getting unwieldy |
-| > 10 levels | **Always extract** — 12+ nested splits become intractable |
-
-**Signs you need extraction**: When `split at h` produces goals with 4+ layers
-of unreduced `match`/`if`, or when the same error-branch dismissal pattern
-repeats more than 5 times in a single proof.
-
-## Cross-References
-
-- **Fuel-based patterns**: `lean-fuel-induction` skill (for functions still using fuel)
-- **Roundtrip proofs with WF functions**: `lean-roundtrip-proofs` skill
-- **`↓reduceIte` and Bool/Prop**: `lean-simp-tactics` skill
-- **Monad unfolding after `unfold`**: `lean-monad-proofs` skill
-  (use `dsimp only [bind, Except.bind]` after `unfold` on recursive functions)
-- **Size/content theorems for WF helpers**: `lean-zstd-spec-pattern` skill,
-  "Size and Content Theorems for WF Helper Functions"
-- **Content characterization**: `lean-content-preservation` skill,
-  "Content Characterization Patterns"
+- `lean-fuel-induction` — functions still using fuel
+- `lean-roundtrip-proofs` — roundtrip proofs with WF functions
+- `lean-simp-tactics` — `↓reduceIte` and Bool/Prop
+- `lean-monad-proofs` — monad unfolding after `unfold` (`dsimp only [bind, Except.bind]`)
+- `lean-zstd-spec-pattern` — size/content theorems for WF helpers; position-advancement proofs
+- `lean-content-preservation` — content characterization patterns

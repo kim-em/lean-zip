@@ -6,10 +6,9 @@ allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 
 # PR Repair Flow for Pod Repair Agents
 
-This skill covers the workflow used by `/repair` sessions. Repair agents
-work on PRs, not on feature issues. Their job is to salvage unhealthy PRs
-(merge conflicts, failed CI, stuck CI) or close them cleanly when salvage
-is not worth doing.
+`/repair` sessions work on PRs, not feature issues. The job is to salvage
+unhealthy PRs (merge conflicts, failed CI, stuck CI) or close them cleanly
+when salvage is not worth doing.
 
 ## Core Principle: Fix or Abandon
 

@@ -69,19 +69,17 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    **Build it in a throwaway worktree checked out at the branch's merge-base with
    master — NOT at `origin/master`, and NOT by swapping files in place.**
 
-   Why the merge-base: if the branch is behind master, `origin/master` contains
-   *unrelated* perf commits; any that touched a file this PR also touches would
-   leak into "before", making it faster (or slower) for reasons that have nothing
-   to do with the PR — a phantom regression on the speed curve. The merge-base is
-   the exact point the branch diverged, so it is master-minus-the-PR with no
-   extra commits.
+   Why the merge-base, not `origin/master`: if the branch is behind master,
+   `origin/master` carries *unrelated* perf commits; any touching a file this PR
+   also touches leak into "before" — a phantom regression on the speed curve. The
+   merge-base is the exact divergence point: master-minus-the-PR with no extra
+   commits.
 
-   Why a worktree and not `git checkout <base> -- <files>`: the in-place swap
-   forces you to guess "which files did the PR change" (miss a support module,
-   build file, generated table, or a rename/delete and "before" is a hybrid that
-   compiles HEAD code against base code), and it leaves the main worktree's build
-   artifacts in a stale state afterwards. A clean worktree at `$base` is the whole
-   tree at the divergence point — no guessing, no contamination:
+   Why a worktree, not `git checkout <base> -- <files>`: the in-place swap forces
+   you to guess which files the PR changed (miss a support module, build file,
+   generated table, or rename/delete and "before" is a hybrid of HEAD code against
+   base code), and leaves the main worktree's build artifacts stale. A clean
+   worktree at `$base` is the whole tree at the divergence point:
    ```
    git fetch origin -q
    base=$(git merge-base origin/master HEAD)
