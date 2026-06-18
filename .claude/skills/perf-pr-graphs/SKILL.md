@@ -142,6 +142,38 @@ commits don't leak in."
    carries ±30%+ run-to-run noise even on byte-identical code — use it for ratio
    and coverage, not for a fine speed delta.**
 
+8. **Also post the graphs as a PR comment.** The PNGs otherwise live only in
+   `/tmp` — so a session Kim was not watching (or that she reads later) leaves
+   her nothing to look at. Make the artifact durable and async-visible by
+   embedding the before/after PNGs in a `gh pr comment`, alongside the geomean
+   table and the metric/machine/caveat line from step 7. This is in addition to
+   the interactive show-and-wait, not a replacement for it.
+
+   `gh` cannot attach images to a comment directly, and the PNGs must **not** be
+   committed to the perf PR (step 6 keeps them out of the diff) or to `master`.
+   Host them on a dedicated throwaway branch and link the raw URLs — the same
+   pattern issue #2634's close comment used:
+   ```
+   pr=<N>; sha=$(git rev-parse HEAD)
+   branch="perf-graphs/pr-${pr}"
+   # commit ONLY the PNGs onto a scratch branch, off the PR and off master
+   git switch -c "$branch" 2>/dev/null || git switch "$branch"
+   mkdir -p perf-graphs && cp /tmp/perf_before_after_*.png perf-graphs/
+   git add perf-graphs && git commit -q -m "perf graphs for PR #${pr}"
+   git push -u origin "$branch" -q
+   gsha=$(git rev-parse HEAD)
+   git switch -  # back to the PR branch; leave its diff untouched
+   raw="https://raw.githubusercontent.com/kim-em/lean-zip/${gsha}/perf-graphs"
+   gh pr comment "$pr" --body "Before/after \`<metric>\` (machine \`<m>\`; <caveat>):
+
+   ![compress pareto](${raw}/perf_before_after_compress_mbps_silesia.png)
+
+   <geomean table>"
+   ```
+   Pin the raw URL to the pushed commit SHA (`${gsha}`), not a branch name, so the
+   image keeps rendering even if the branch is later updated or deleted. Confirm
+   the PR branch's own `git status` is still clean afterward (step 6 footgun).
+
 ## Notes
 
 - `bench-report --native-only [levels]` lives in `ZipBenchReport.lean`; the plot
