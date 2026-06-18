@@ -762,7 +762,7 @@ def goFusedP (litTable distTable : HuffTree.DecodeTable)
         (output.push litTable.syms[(bitBuf &&& 0x1FF).toNat]!.toUInt8)
   else
   let cnt0 := cnt
-  match hds0 : decodeSym litTree litTable bitBuf cnt with
+  match decodeSym litTree litTable bitBuf cnt with
   | .error e => .error e
   | .ok (sym, bitBuf, cnt, _used) =>
     if sym < 256 then
@@ -778,7 +778,7 @@ def goFusedP (litTable distTable : HuffTree.DecodeTable)
         let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
         let (extraBits, bitBuf, cnt) ← takeBits bitBuf cnt extra.toNat
         let length := base.toNat + extraBits
-        match hds1 : decodeSym distTree distTable bitBuf cnt with
+        match decodeSym distTree distTable bitBuf cnt with
         | .error e => .error e
         | .ok (distSym, bitBuf, cnt, _dused) =>
           let dIdx := distSym.toNat
@@ -817,9 +817,11 @@ def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
   -- align: drop the bitOff bits already consumed in the first byte
   let bitBuf := bitBuf >>> br.bitOff.toUInt64
   let cnt := cnt - br.bitOff
-  let bitpos := br.pos * 8 + br.bitOff
-  let (out, pos', bitBuf', cnt', _bitpos') ←
-    goFused litTable distTable br.data litTree distTree maxOut br.data.size pos bitBuf cnt bitpos output
+  -- `goFusedP` is the guard-light loop: no threaded `bitpos`, no provably-dead
+  -- out-of-range guard, and the common literal decoded inline. Proven equal to
+  -- `goFused` (`Zip.Spec.InflateBufCorrect.goFusedP_eq`), hence to the reference.
+  let (out, pos', bitBuf', cnt') ←
+    goFusedP litTable distTable br.data litTree distTree maxOut pos bitBuf cnt output
   let _ := bitBuf'
   let endbit := pos' * 8 - cnt'
   .ok (out, { data := br.data, pos := endbit / 8, bitOff := endbit % 8 })
