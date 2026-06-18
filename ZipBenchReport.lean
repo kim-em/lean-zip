@@ -144,7 +144,7 @@ def runWorkloads
     (name : String)
     (workloads : List (String × ByteArray))
     (compress : ByteArray → Nat → IO ByteArray)
-    (decompress? : Option (ByteArray → IO ByteArray))
+    (decompress? : Option (ByteArray → Nat → IO ByteArray))
     (theLevels : List Nat := levels) (theReps : Nat := reps) : IO (List Row) := do
   let mut rows : List Row := []
   for (pat, data) in workloads do
@@ -160,7 +160,11 @@ def runWorkloads
         | none => pure none
         | some dec => do
           let ref ← RawDeflate.compress data level.toUInt8
-          let dNs ← measureNs size theReps (dec ref >>= sink)
+          -- The decompressed size is known here; pass it so the native decoder
+          -- pre-sizes its output buffer, matching the production ZIP/gzip path
+          -- where the uncompressed size comes from the archive metadata. The FFI
+          -- reference decoders ignore it.
+          let dNs ← measureNs size theReps (dec ref size >>= sink)
           pure (mbps size dNs)
       rows := { compressor := name, pattern := pat, size := size, level := level,
                 outSize := outSize, ratio := ratio,
@@ -174,8 +178,8 @@ def runWorkloads
 def nativeCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
   pure (Zip.Native.Deflate.deflateRaw data level.toUInt8)
 
-def nativeDecompress (data : ByteArray) : IO ByteArray :=
-  match Zip.Native.Inflate.inflate data with
+def nativeDecompress (data : ByteArray) (origSize : Nat) : IO ByteArray :=
+  match Zip.Native.Inflate.inflate data (sizeHint := origSize) with
   | .ok b => pure b
   | .error e => throw (IO.userError e)
 
@@ -250,9 +254,9 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     if nativeOnly then
       rows := rows ++ cn
     else
-      let cz ← runWorkloads "zlib"        files zlibCompress       (some RawDeflate.decompress) (theLevels := lvls) (theReps := rps)
-      let cm ← runWorkloads "miniz_oxide" files minizCompress      (some MinizOxide.decompress) (theLevels := lvls) (theReps := rps)
-      let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some Libdeflate.decompress) (theLevels := lvls) (theReps := rps)
+      let cz ← runWorkloads "zlib"        files zlibCompress       (some fun d _ => RawDeflate.decompress d) (theLevels := lvls) (theReps := rps)
+      let cm ← runWorkloads "miniz_oxide" files minizCompress      (some fun d _ => MinizOxide.decompress d) (theLevels := lvls) (theReps := rps)
+      let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some fun d _ => Libdeflate.decompress d) (theLevels := lvls) (theReps := rps)
       rows := rows ++ cn ++ cz ++ cm ++ cl
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
@@ -321,8 +325,65 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
   IO.FS.writeFile outPath json
   IO.eprintln s!"Wrote {rows.length} zopfli rows → {outPath}"
 
+/-- Decode `ref`, optionally pre-sizing the output to `hint` (`0` = no hint).
+    `@[noinline]` keeps the pure `inflate` call from being hoisted out of the
+    timed loop (it is otherwise loop-invariant), so each timed call really decodes. -/
+@[noinline] def decodeForAB (ref : ByteArray) (hint : Nat) : IO Nat := do
+  match Zip.Native.Inflate.inflate ref (sizeHint := hint) with
+  | .ok b => sink b
+  | .error e => throw (IO.userError e)
+
+/-- Paired, interleaved decode A/B: native decode WITH the output-size hint vs
+    WITHOUT it, measured back-to-back per file so machine-load common-mode noise
+    cancels. Reports per-corpus geomean speedup (no-hint time / hint time) with a
+    95% CI on the log-ratios. Robust on a busy shared machine; pin with `taskset -c`.
+    This is a diagnostic, not part of the dashboard matrix. -/
+def runPresizeAB (pairs : Nat := 12) : IO Unit := do
+  let corpora ← loadCorpora
+  IO.println s!"Paired decode A/B (no-hint time / hint time), {pairs} pairs/file, level 6:"
+  for (corpus, files) in corpora do
+    let mut logs : List Float := []
+    let mut noMBs : List Float := []
+    let mut yesMBs : List Float := []
+    for (_pat, data) in files do
+      let size := data.size
+      let ref ← RawDeflate.compress data 6
+      let _ ← decodeForAB ref 0; let _ ← decodeForAB ref size  -- warm
+      for p in [:pairs] do
+        let (nNs, yNs) ←
+          if p % 2 == 0 then
+            let a ← timePerOp 1 (decodeForAB ref 0)
+            let b ← timePerOp 1 (decodeForAB ref size)
+            pure (a, b)
+          else
+            let b ← timePerOp 1 (decodeForAB ref size)
+            let a ← timePerOp 1 (decodeForAB ref 0)
+            pure (a, b)
+        if nNs > 0 && yNs > 0 then
+          logs := Float.log (nNs.toFloat / yNs.toFloat) :: logs
+          let mb (ns : Nat) : Float := (size.toFloat / (1024.0 * 1024.0)) / (ns.toFloat / 1.0e9)
+          noMBs := mb nNs :: noMBs
+          yesMBs := mb yNs :: yesMBs
+    let n := logs.length
+    if n == 0 then
+      IO.println s!"  {corpus}: no data"
+    else
+      let nf := n.toFloat
+      let mean := (logs.foldl (· + ·) 0.0) / nf
+      let var := (logs.foldl (fun a x => a + (x - mean) * (x - mean)) 0.0) / (max (nf - 1.0) 1.0)
+      let std := Float.sqrt var
+      let hw := 1.96 * std / Float.sqrt nf
+      let sp := Float.exp mean
+      let lo := Float.exp (mean - hw)
+      let hi := Float.exp (mean + hw)
+      let avg (xs : List Float) : Float := (xs.foldl (· + ·) 0.0) / xs.length.toFloat
+      IO.println s!"  {corpus} (n={n}): speedup={round4 sp}x  95% CI [{round4 lo}, {round4 hi}]  \
+nohint={round2 (avg noMBs)} MB/s  presize={round2 (avg yesMBs)} MB/s"
+
 def main (args : List String) : IO Unit := do
   match args with
+  | ["--presize-ab"] => runPresizeAB
+  | ["--presize-ab", nStr] => runPresizeAB ((nStr.toNat?).getD 12)
   | ["--dump-payloads", dir] => dumpPayloads dir
   | ["--zopfli-ceiling", out] => runZopfliCeiling out
   | ["--native-only", out] => runReport out (nativeOnly := true)
