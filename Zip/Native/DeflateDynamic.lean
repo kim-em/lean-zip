@@ -1124,6 +1124,141 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
   else
     (emitSharedBlocks data (lz77OptimalIter data) tokChunk 0 BitWriter.empty).flush
 
+/-! ## Incompressible pre-scan
+
+`deflateRaw` already falls back to a stored block whenever every compressed
+candidate is larger — but it only learns this *after* paying the full hash-chain
+match pass (and, at level 9, the optimal-parse DP), which is essentially the
+whole compress cost and finds almost nothing on incompressible input. Measured
+(`bench compress-pareto`, 4 MiB PRNG): level 9 runs at ≈2.5 MB/s, all of it
+wasted before the stored fallback. The pre-scan reads up to ≈128 KiB of bounded
+sample and, when the input is unambiguously incompressible, routes straight to
+`deflateStoredPure` so the matcher never runs; a compressible file fails the
+first sampled region and falls through to the normal path almost immediately. -/
+
+/-- Minimum input size for the incompressible pre-scan to engage. The pre-scan's
+    fixed cost (one presence-table allocation + a region scan) is only worth paying
+    when the matcher it might skip is the dominant cost, i.e. on large inputs; below
+    1 MiB the matcher is cheap enough that the scan would be net overhead on the
+    common compressible file, so small inputs always take the normal path. This is
+    why the gate leaves the Canterbury/Silesia dashboard untouched — every corpus
+    file is either compressible or under the size gate. -/
+def prescanMinSize : Nat := 1048576
+
+/-- Number of contiguous sample regions the pre-scan reads, spread end to end
+    across the input (first at offset 0, last ending at `n`). A region that looks
+    even slightly compressible short-circuits the whole scan, so a normal
+    compressible file pays for at most the first region. -/
+def prescanRegions : Nat := 4
+
+/-- Bytes per sample region. Each region is scanned *contiguously* and every
+    consecutive 4-gram is inserted, so repetition is detected densely the way the
+    matcher itself finds matches. At 32 KiB a region spans two of the common
+    page/block sizes (4/8/16 KiB), so a repeated block surfaces as a wall of
+    4-gram collisions. ≤`prescanRegions · prescanRegionBytes` (128 KiB) bytes are
+    scanned, independent of input size. -/
+def prescanRegionBytes : Nat := 32768
+
+/-- log2 of the per-region 4-gram presence-table size (2^20 slots). Sized so that,
+    over the ≈32 K 4-grams of one region, the false-collision rate of genuinely
+    random input is ≈1.6% (`S²/2·tableSize`) — half the repeat gate, so random data
+    reads as "no repeats" with a comfortable margin while keeping the per-region
+    allocation small. -/
+def prescanTableBits : Nat := 20
+
+/-- Order-0 entropy (bits/byte) of a 256-bucket byte histogram with `total`
+    samples; `0` when `total = 0`. Pulled out so the per-region gate can call it
+    without an inline fold. -/
+def histEntropy (hist : Array Nat) (total : Nat) : Float := Id.run do
+  if total == 0 then return 0.0
+  let t := total.toFloat
+  let mut e : Float := 0.0
+  for c in hist do
+    if c != 0 then
+      let pr := c.toFloat / t
+      e := e - pr * Float.log2 pr
+  return e
+
+/-- Cheap bounded test for *genuinely* incompressible input (already-compressed,
+    encrypted, or random bytes), where the full match pass is wasted work before
+    `deflateRaw`'s stored fallback. Scans up to `prescanRegions` contiguous regions
+    spread across the input (cost independent of input size) and returns `true`
+    only when *every* region is BOTH
+
+    * near-maximal order-0 entropy (≈8 bits/byte), so Huffman coding cannot shrink
+      it; and
+    * free of recurring 4-grams, so the matcher would find no usable LZ77 match
+      (its 32 KiB window fits inside a region, so any match it could make shows up
+      here as a collision).
+
+    The moment a region fails either test the scan stops and returns `false`, so a
+    compressible file is rejected after one region and never pays the full sample.
+    Requiring both signals on every region keeps the gate conservative: text (low
+    entropy), base64 and other restricted alphabets (entropy ≈ 6), run-length-y
+    binary, and repeated-block data (dense within-region 4-gram repeats) all bail
+    out. Self-similar data whose period exceeds the 32 KiB window (e.g. `R ++ R`
+    for a 512 KiB `R`) is genuinely incompressible by DEFLATE and is correctly
+    stored. The 4-gram table is a single-hash presence filter, so its false
+    collisions only ever *raise* the measured repeat count — they bias toward the
+    (safe) compressed path, never toward storing.
+
+    The result is opaque to correctness: a `true` only routes to
+    `deflateStoredPure`, which is valid for every input, so a false positive costs
+    ratio (a stored compressible block) but never correctness. -/
+def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
+  if data.size < prescanMinSize then
+    return false
+  let n := data.size
+  let tableSize := 1 <<< prescanTableBits
+  let shift : UInt32 := (32 - prescanTableBits).toUInt32
+  let regBytes := min prescanRegionBytes n
+  -- `span` is the last legal region start (so a region never runs past `n`).
+  -- `r * span / (prescanRegions - 1)` puts the first region at 0 and the last at
+  -- `span` (ending exactly at `n`); regions overlap harmlessly when `n` is small.
+  let span := n - regBytes
+  for r in [0:prescanRegions] do
+    let start := if prescanRegions ≤ 1 then 0 else min ((r * span) / (prescanRegions - 1)) span
+    let stop := min (start + regBytes) n
+    -- Cheap test first: the byte histogram needs no big table, so most
+    -- compressible data (text/source/html — low order-0 entropy) bails here, after
+    -- a single histogram pass and before the per-region table is ever allocated.
+    let mut hist : Array Nat := Array.replicate 256 0
+    let mut bytesSeen : Nat := 0
+    for i in [start:stop] do
+      let b := data[i]!.toNat
+      hist := hist.set! b (hist[b]! + 1)
+      bytesSeen := bytesSeen + 1
+    -- (1) High entropy: order-0 entropy ≥ 7.6 bits/byte (random ≈ 7.99). A region
+    --     too short to judge (`bytesSeen = 0`) also bails to the safe path.
+    if bytesSeen == 0 || histEntropy hist bytesSeen < 7.6 then
+      return false
+    -- (2) No repeats: a high-entropy region might still be repeated-block data the
+    --     matcher could compress, so insert every 4-gram into a fresh presence
+    --     table (window-sized region ⇒ any matcher-usable repeat collides here) and
+    --     require collisions < 3.125% of sampled 4-grams (`*32 < sampled`).
+    --     Genuinely random input sits at ≈1.6% (table false collisions only).
+    let mut table : Array UInt8 := Array.replicate tableSize 0
+    let mut sampled : Nat := 0       -- 4-grams hashed in this region
+    let mut collisions : Nat := 0    -- 4-grams hitting an already-seen slot
+    let mut p := start
+    while p + 3 < stop do
+      let a := data[p]!.toUInt32
+      let b := data[p+1]!.toUInt32
+      let c := data[p+2]!.toUInt32
+      let d := data[p+3]!.toUInt32
+      let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+      let idx := ((word * 2654435761) >>> shift).toNat
+      if table[idx]! != 0 then
+        collisions := collisions + 1
+      else
+        table := table.set! idx 1
+      sampled := sampled + 1
+      p := p + 1
+    if sampled == 0 || collisions * 32 ≥ sampled then
+      return false
+  -- Every region looked incompressible.
+  return true
+
 /-- Unified raw DEFLATE compression dispatch. Level 0 = stored; level ≥ 1 runs the
     single-block cost-model dispatch (`deflateRawBase`). At the max-compression
     tiers (level ≥ 7) two block-split streams are also tried, and the smallest of
@@ -1150,9 +1285,18 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
     would never reach the split even though it wins by 15–19%. `pickSmaller`
     guarantees we never regress below the base; the default level 6 stays
     single-block so it pays no extra compress time. All branches are
-    roundtrip-verified. -/
+    roundtrip-verified.
+
+    Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
+    short-circuited on the first compressible region) and, on unambiguously
+    incompressible input, dispatches straight to `deflateStoredPure` — skipping the
+    match pass entirely (the bulk of compress time, ≈2.5 MB/s at level 9 on random
+    data) for a result the cost model would have chosen anyway. The gate is
+    conservative (see `incompressiblePrescan`) and opaque to correctness: it only
+    ever selects the already-proven stored block. -/
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
+  else if incompressiblePrescan data then deflateStoredPure data
   else if 7 ≤ level then
     -- One *packed* matcher pass shared by the base and shared-split candidates
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).

@@ -105,8 +105,9 @@ theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
 
 /-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
     This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
-    `maxOutputSize` large enough to hold the input. The stored-block fallback
-    (for incompressible input) is covered by `deflateRawBase`; the level-≥7
+    `maxOutputSize` large enough to hold the input. The incompressible pre-scan
+    and the level-0 path both dispatch to `deflateStoredPure` directly; the
+    cost-model stored fallback is covered by `deflateRawBase`; the level-≥7
     block-split candidates are covered by the `pickSmaller` cases. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
@@ -117,19 +118,22 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     deflateDynamicBlocksSharedAt_def]
   split
   · exact inflate_deflateStoredPure data _ (by omega)
+  -- The incompressible pre-scan routes straight to the same stored block.
   · split
+    · exact inflate_deflateStoredPure data _ (by omega)
     · split
-      · exact inflate_pickSmaller _ _ data maxOutputSize
-          (inflate_pickSmaller _ _ data maxOutputSize
-            (inflate_deflateRawBase data level _ hsize)
+      · split
+        · exact inflate_pickSmaller _ _ data maxOutputSize
             (inflate_pickSmaller _ _ data maxOutputSize
-              (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize)
-              (inflate_deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level _ hsize)))
-          (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
-      · exact inflate_pickSmaller _ _ data maxOutputSize
-          (inflate_deflateRawBase data level _ hsize)
-          (inflate_deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level _ hsize)
-    · exact inflate_deflateRawBase data level _ hsize
+              (inflate_deflateRawBase data level _ hsize)
+              (inflate_pickSmaller _ _ data maxOutputSize
+                (inflate_deflateDynamicBlocksSC data splitChunkSize level _ hsize)
+                (inflate_deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level _ hsize)))
+            (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
+        · exact inflate_pickSmaller _ _ data maxOutputSize
+            (inflate_deflateRawBase data level _ hsize)
+            (inflate_deflateDynamicBlocksSharedAt data chooseSplitsArbitrated level _ hsize)
+      · exact inflate_deflateRawBase data level _ hsize
 
 /-- Padding decomposition for the compressed-block dispatch. -/
 theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
@@ -202,32 +206,39 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
   dsimp only []
   rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedSized_eq,
     deflateDynamicBlocksSharedAt_def]
+  have hstored : ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data)
+        = contentBits ++ padding ∧ padding.length < 8 :=
+    ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
+      [], by simp only [List.append_nil], by decide⟩
   split
   · -- Level 0: stored blocks — all byte-aligned, padding = []
-    exact ⟨Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data),
-      [], by simp only [List.append_nil], by decide⟩
+    exact hstored
+  -- The incompressible pre-scan routes to the same stored block.
   · split
+    · exact hstored
     · split
-      · exact pickSmaller_bytesToBits
-          (P := fun bits => ∃ (contentBits padding : List Bool),
-            bits = contentBits ++ padding ∧ padding.length < 8)
-          _ _
-          (pickSmaller_bytesToBits
+      · split
+        · exact pickSmaller_bytesToBits
             (P := fun bits => ∃ (contentBits padding : List Bool),
               bits = contentBits ++ padding ∧ padding.length < 8)
-            _ _ (deflateRawBase_pad data level)
+            _ _
             (pickSmaller_bytesToBits
               (P := fun bits => ∃ (contentBits padding : List Bool),
                 bits = contentBits ++ padding ∧ padding.length < 8)
-              _ _ (deflateDynamicBlocksSC_pad data splitChunkSize level)
-              (deflateDynamicBlocksSharedAt_pad data chooseSplitsArbitrated level)))
-          (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
-      · exact pickSmaller_bytesToBits
-          (P := fun bits => ∃ (contentBits padding : List Bool),
-            bits = contentBits ++ padding ∧ padding.length < 8)
-          _ _ (deflateRawBase_pad data level)
-          (deflateDynamicBlocksSharedAt_pad data chooseSplitsArbitrated level)
-    · exact deflateRawBase_pad data level
+              _ _ (deflateRawBase_pad data level)
+              (pickSmaller_bytesToBits
+                (P := fun bits => ∃ (contentBits padding : List Bool),
+                  bits = contentBits ++ padding ∧ padding.length < 8)
+                _ _ (deflateDynamicBlocksSC_pad data splitChunkSize level)
+                (deflateDynamicBlocksSharedAt_pad data chooseSplitsArbitrated level)))
+            (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
+        · exact pickSmaller_bytesToBits
+            (P := fun bits => ∃ (contentBits padding : List Bool),
+              bits = contentBits ++ padding ∧ padding.length < 8)
+            _ _ (deflateRawBase_pad data level)
+            (deflateDynamicBlocksSharedAt_pad data chooseSplitsArbitrated level)
+      · exact deflateRawBase_pad data level
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
     the level 2-4 path and the level ≥ 5 fixed candidate (both `= deflateLazy`). -/
@@ -372,34 +383,42 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
   dsimp only []
   rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedSized_eq,
     deflateDynamicBlocksSharedAt_def]
+  have hstored : ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data)) []
+        = some (data.data.toList, remaining) ∧ remaining.length < 8 :=
+    ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
-    exact ⟨[], Deflate.Spec.deflateStoredPure_goR data, by decide⟩
+    exact hstored
+  -- The incompressible pre-scan routes to the same stored block.
   · split
+    · exact hstored
     · split
-      · exact pickSmaller_bytesToBits
-          (P := fun bits => ∃ remaining,
-            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-              remaining.length < 8)
-          _ _
-          (pickSmaller_bytesToBits
+      · split
+        · exact pickSmaller_bytesToBits
             (P := fun bits => ∃ remaining,
               Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
                 remaining.length < 8)
-            _ _ (deflateRawBase_goR_pad data level)
+            _ _
             (pickSmaller_bytesToBits
               (P := fun bits => ∃ remaining,
                 Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
                   remaining.length < 8)
-              _ _ (deflateDynamicBlocksSC_goR_pad data splitChunkSize level)
-              (deflateDynamicBlocksSharedAt_goR_pad data chooseSplitsArbitrated level)))
-          (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
-      · exact pickSmaller_bytesToBits
-          (P := fun bits => ∃ remaining,
-            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-              remaining.length < 8)
-          _ _ (deflateRawBase_goR_pad data level)
-          (deflateDynamicBlocksSharedAt_goR_pad data chooseSplitsArbitrated level)
-    · exact deflateRawBase_goR_pad data level
+              _ _ (deflateRawBase_goR_pad data level)
+              (pickSmaller_bytesToBits
+                (P := fun bits => ∃ remaining,
+                  Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                    remaining.length < 8)
+                _ _ (deflateDynamicBlocksSC_goR_pad data splitChunkSize level)
+                (deflateDynamicBlocksSharedAt_goR_pad data chooseSplitsArbitrated level)))
+            (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
+        · exact pickSmaller_bytesToBits
+            (P := fun bits => ∃ remaining,
+              Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                remaining.length < 8)
+            _ _ (deflateRawBase_goR_pad data level)
+            (deflateDynamicBlocksSharedAt_goR_pad data chooseSplitsArbitrated level)
+      · exact deflateRawBase_goR_pad data level
 
 end Zip.Native.Deflate
