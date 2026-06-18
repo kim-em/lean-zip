@@ -1212,7 +1212,17 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         -- output", unlike the FFI path where `0` means unlimited. Callers
         -- that opt into `maxEntrySize := 0` for unlimited FFI decompression
         -- therefore get an immediate rejection on the native backend.
-        match Zip.Native.Inflate.inflate compData maxEntrySize.toNat with
+        --
+        -- Pre-size the output buffer to the entry's declared uncompressed size,
+        -- removing the doubling reallocations of a buffer grown one literal at a
+        -- time. `uncompressedSize` is untrusted ZIP metadata, so cap the hint to a
+        -- multiple of the compressed bytes already in RAM: DEFLATE's maximum ratio
+        -- is ~1032:1, so this never truncates a hint for a valid stream, but stops
+        -- a tiny malicious entry from forcing a huge speculative allocation. The
+        -- hint is a capacity hint only — never affecting the bytes produced or the
+        -- `maxEntrySize` bomb guard.
+        let sizeHint := min entry.uncompressedSize.toNat (compData.size * 1100)
+        match Zip.Native.Inflate.inflate compData maxEntrySize.toNat (sizeHint := sizeHint) with
         | .ok data => pure data
         | .error msg => throw (IO.userError s!"zip: native inflate failed for {label}: {msg}")
       else RawDeflate.decompress compData maxEntrySize

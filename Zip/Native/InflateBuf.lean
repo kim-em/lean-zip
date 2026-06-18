@@ -41,13 +41,17 @@ def inflateLoopBuf (br : BitReader) (output : ByteArray)
 termination_by dataSize * 8 - br.bitPos
 decreasing_by all_goals omega
 
-/-- Wide-buffer `inflate` (entry point). -/
-def inflate (data : ByteArray) (maxOut : Nat := 1024 * 1024 * 1024) :
+/-- Wide-buffer `inflate` (entry point). `sizeHint` pre-reserves output capacity
+    when the decompressed size is known (`0`, the default, reserves nothing); it is
+    a capacity hint only, so `InflateBuf.inflate = Inflate.inflate` is unaffected. -/
+def inflate (data : ByteArray) (maxOut : Nat := 1024 * 1024 * 1024)
+    (sizeHint : Nat := 0) :
     Except String ByteArray := do
   let br : BitReader := { data, pos := 0, bitOff := 0 }
   let fixedLit ← HuffTree.fromLengths Inflate.fixedLitLengths
   let fixedDist ← HuffTree.fromLengths Inflate.fixedDistLengths
-  let (output, _) ← inflateLoopBuf br .empty fixedLit fixedDist maxOut data.size
+  let (output, _) ← inflateLoopBuf br (ByteArray.emptyWithCapacity sizeHint)
+    fixedLit fixedDist maxOut data.size
   return output
 
 end InflateBuf

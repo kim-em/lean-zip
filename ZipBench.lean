@@ -116,12 +116,14 @@ where
     -- Decompression benchmarks (compress with FFI first, then decompress)
     | "inflate" =>
       let compressed ← RawDeflate.compress data level.toUInt8
-      match Zip.Native.Inflate.inflate compressed with
+      -- The decompressed size is known here (we just compressed `data`), so pass it
+      -- as `sizeHint` to pre-size the output buffer and skip the doubling reallocs.
+      match Zip.Native.Inflate.inflate compressed (sizeHint := data.size) with
       | .ok _ => pure ()
       | .error e => throw (IO.userError e)
     | "inflate-buf" =>
       let compressed ← RawDeflate.compress data level.toUInt8
-      match Zip.Native.InflateBuf.inflate compressed with
+      match Zip.Native.InflateBuf.inflate compressed (sizeHint := data.size) with
       | .ok _ => pure ()
       | .error e => throw (IO.userError e)
     | "decode-ab" =>
@@ -133,8 +135,8 @@ where
         let d := if data.size == 0 then data else
           (data.extract 0 data.size).set! (i % data.size) (data[i % data.size]!.toNat.toUInt8 ^^^ 1)
         inputs := inputs.push (← RawDeflate.compress d level.toUInt8)
-      let dec1 := Zip.Native.Inflate.inflate
-      let dec2 := Zip.Native.InflateBuf.inflate
+      let dec1 := fun c => Zip.Native.Inflate.inflate c (sizeHint := data.size)
+      let dec2 := fun c => Zip.Native.InflateBuf.inflate c (sizeHint := data.size)
       let sink (acc : UInt64) (r : Except String ByteArray) : IO UInt64 :=
         match r with
         | .ok x => pure (acc + x.size.toUInt64 + (if x.size > 0 then x[0]!.toUInt64 else 0))
