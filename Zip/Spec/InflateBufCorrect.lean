@@ -672,11 +672,11 @@ open HuffTree in
 /-- **`decodeSym` corresponds to `HuffTree.decodeWithTable`.** Same symbol/error,
     and on success the resulting buffer corresponds to the advanced reader. The
     table code length is bounded by `fastBits` (true for `buildTable`). -/
-theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
+theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
     {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
     (hr : 21 < cnt ∨ pos = data.size)
-    (hlen : (table[(bitBuf &&& 0x1FF).toNat]!).2.toNat ≤ 9) (hdep : treeDepthLE tree 15) :
+    (hlen : (table.lens[(bitBuf &&& 0x1FF).toNat]!).toNat ≤ 9) (hdep : treeDepthLE tree 15) :
     match HuffTree.decodeWithTable tree table br, decodeSym tree table bitBuf cnt with
     | .error e1, .error e2 => e1 = e2
     | .ok (s1, br'), .ok (s2, bb, c, used) =>
@@ -698,16 +698,18 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
   unfold HuffTree.decodeWithTable decodeSym
   rw [if_neg (show ¬ br.bitOff ≥ 8 from by omega), hidx]
   simp only []
-  generalize hentry : table[(peekFast br).toNat]! = entry at hlen ⊢
+  -- generalize the two parallel reads (the de-boxed table splits sym/len)
+  generalize hlenv : table.lens[(peekFast br).toNat]! = lenB at hlen ⊢
+  generalize hsymv : table.syms[(peekFast br).toNat]! = symV
   -- the two guards have the same truth value (cnt vs bitsAvail, with len ≤ 9)
-  have hgd : (entry.2.toNat == 0 || decide (entry.2.toNat > HuffTree.bitsAvail br))
-           = (entry.2.toNat == 0 || decide (entry.2.toNat > cnt)) := by
+  have hgd : (lenB.toNat == 0 || decide (lenB.toNat > HuffTree.bitsAvail br))
+           = (lenB.toNat == 0 || decide (lenB.toNat > cnt)) := by
     rcases hr with hc | hpe
-    · have h1 : ¬ entry.2.toNat > HuffTree.bitsAvail br := by have := hav.1; omega
-      have h2 : ¬ entry.2.toNat > cnt := by omega
+    · have h1 : ¬ lenB.toNat > HuffTree.bitsAvail br := by have := hav.1; omega
+      have h2 : ¬ lenB.toNat > cnt := by omega
       simp [h1, h2]
     · rw [hav.2 hpe]
-  by_cases hg : (entry.2.toNat == 0 || decide (entry.2.toNat > cnt)) = true
+  by_cases hg : (lenB.toNat == 0 || decide (lenB.toNat > cnt)) = true
   · -- fallback: walkTree ↔ decode
     rw [if_pos (hgd.trans hg), if_pos hg, HuffTree.decode]
     have hwc := walkTree_corr (depth := 0) tree h hwf hdata (by
@@ -724,18 +726,15 @@ theorem decodeSym_corr (tree : HuffTree) (table : Array (UInt16 × UInt8))
     rw [if_neg (by rw [hgd]; exact hg), if_neg hg]
     simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or, Nat.not_lt] at hg
     obtain ⟨hne, hle⟩ := hg
-    have hcc := consume_corr h hle (show entry.2.toNat < 64 from by omega)
-    have hbpe : ({ br with pos := br.pos + (br.bitOff + entry.2.toNat) / 8, bitOff := (br.bitOff + entry.2.toNat) % 8 } : BitReader).bitPos = br.bitPos + entry.2.toNat := by simp only [BitReader.bitPos]; omega
+    have hcc := consume_corr h hle (show lenB.toNat < 64 from by omega)
+    have hbpe : ({ br with pos := br.pos + (br.bitOff + lenB.toNat) / 8, bitOff := (br.bitOff + lenB.toNat) % 8 } : BitReader).bitPos = br.bitPos + lenB.toNat := by simp only [BitReader.bitPos]; omega
     exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide), Nat.sub_le cnt _, by omega⟩
 
 /-- Every `buildTable` entry's code length is at most `fastBits = 9`
     (the table walk stops at `fastBits`, or returns the `0` sentinel). -/
 theorem buildTable_codeLen_le (tree : HuffTree) (idx : Nat) (hidx : idx < 2 ^ HuffTree.fastBits) :
-    (tree.buildTable[idx]!).2.toNat ≤ 9 := by
-  have htab : tree.buildTable[idx]! = HuffTree.tableEntry tree idx := by
-    simp only [HuffTree.buildTable]
-    rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
-  rw [htab, HuffTree.tableEntry]
+    (tree.buildTable.lens[idx]!).toNat ≤ 9 := by
+  rw [HuffTree.buildTable_lens_getElem tree idx hidx, HuffTree.tableEntry]
   rcases hg : HuffTree.tableEntry.go tree idx 0 with ⟨sym, lenB⟩
   show lenB.toNat ≤ 9
   by_cases hp : 0 < lenB.toNat
@@ -1057,7 +1056,7 @@ theorem fromLengths_depthLE {lengths : Array UInt8} {maxBits : Nat} {tree : Huff
     uses only the refilled `(pos,bitBuf,cnt)`, advancing the cursor by one byte
     (exactly when the refill loop would) does not change `go`'s result. The
     workhorse for `goFused_eq_go`. -/
-theorem go_refill_step (litTable distTable : Array (UInt16 × UInt8)) (data : ByteArray)
+theorem go_refill_step (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
     (litTree distTree : HuffTree) (maxOut dataSize : Nat)
     (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray)
     (hrc : cnt ≤ 56 ∧ pos < data.size) :
@@ -1078,7 +1077,7 @@ set_option maxRecDepth 8000 in
     `go_refill_step`, and each decode branch is byte-identical to `go`'s body once
     the leading `refill` (a no-op here, `¬(cnt ≤ 56 ∧ pos < size)`) is discharged.
     See #2637. -/
-theorem goFused_eq_go (litTable distTable : Array (UInt16 × UInt8)) (data : ByteArray)
+theorem goFused_eq_go (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
     (litTree distTree : HuffTree) (maxOut dataSize : Nat) :
     ∀ (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray),
     goFused litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt bitpos output

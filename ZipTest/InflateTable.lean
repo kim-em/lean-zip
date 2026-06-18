@@ -75,7 +75,7 @@ private def sameResult (a b : Except String (UInt16 × BitReader)) : Bool :=
 
 /-- Run the table decoder and the tree-walk decoder over `tree` from every bit
     offset of `data`, returning a mismatch description on the first divergence. -/
-private def checkStream (label : String) (tree : HuffTree) (table : Array (UInt16 × UInt8))
+private def checkStream (label : String) (tree : HuffTree) (table : HuffTree.DecodeTable)
     (data : ByteArray) : Option String := Id.run do
   for startPos in [:data.size] do
     for bitOff in [:8] do

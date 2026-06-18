@@ -328,6 +328,23 @@ theorem advReader_eq (br br' : BitReader) (k : Nat)
   · dsimp only []; omega
   · exact hwf'
 
+/-- The symbol array of `buildTable` at a valid index is the first component of
+    `tableEntry` — the de-boxed table splits the `(sym, len)` pair into two
+    parallel scalar arrays, so each field projects back through `Array.getElem_ofFn`. -/
+theorem buildTable_syms_getElem (tree : HuffTree) (idx : Nat)
+    (hidx : idx < 2 ^ fastBits) :
+    (tree.buildTable).syms[idx]! = (tableEntry tree idx).1 := by
+  simp only [HuffTree.buildTable]
+  rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
+
+/-- The length array of `buildTable` at a valid index is the second component of
+    `tableEntry`. -/
+theorem buildTable_lens_getElem (tree : HuffTree) (idx : Nat)
+    (hidx : idx < 2 ^ fastBits) :
+    (tree.buildTable).lens[idx]! = (tableEntry tree idx).2 := by
+  simp only [HuffTree.buildTable]
+  rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
+
 set_option maxRecDepth 4096 in
 /-- **Symbol lemma.** The table-driven single-symbol decode built from `tree`
     agrees with the canonical tree walk, as a full `Except` result (same symbol
@@ -341,12 +358,13 @@ theorem decodeWithTable_eq (tree : HuffTree) (br : BitReader) :
     rw [UInt32.toNat_and]
     simp only [fastBits]
     exact Nat.and_lt_two_pow _ (by decide)
-  have htab : (tree.buildTable)[(peekFast br).toNat]! = tableEntry tree (peekFast br).toNat := by
-    unfold HuffTree.buildTable
-    rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
+  have hlens : (tree.buildTable).lens[(peekFast br).toNat]!
+      = (tableEntry tree (peekFast br).toNat).2 := buildTable_lens_getElem tree _ hidx
+  have hsyms : (tree.buildTable).syms[(peekFast br).toNat]!
+      = (tableEntry tree (peekFast br).toNat).1 := buildTable_syms_getElem tree _ hidx
   unfold HuffTree.decodeWithTable
   simp only []
-  rw [htab]
+  rw [hlens, hsyms]
   -- destructure the table entry into opaque `sym`, `lenB`
   generalize hentry : tableEntry tree (peekFast br).toNat = entry
   obtain ⟨sym, lenB⟩ := entry
