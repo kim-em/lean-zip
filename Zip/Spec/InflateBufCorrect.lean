@@ -1586,8 +1586,8 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
 
 /-- **`InflateBuf.inflate` equals the verified `Inflate.inflate`.** The wide-buffer
     decoder is a drop-in replacement with no trust gap. -/
-theorem inflate_eq (data : ByteArray) (maxOut : Nat) :
-    InflateBuf.inflate data maxOut = Inflate.inflate data maxOut := by
+theorem inflate_eq (data : ByteArray) (maxOut : Nat) (sizeHint : Nat := 0) :
+    InflateBuf.inflate data maxOut sizeHint = Inflate.inflate data maxOut sizeHint := by
   unfold InflateBuf.inflate Inflate.inflate Inflate.inflateRaw
   cases hfl : HuffTree.fromLengths Inflate.fixedLitLengths with
   | error e => simp only [hfl, bind, Except.bind]
@@ -1598,4 +1598,5 @@ theorem inflate_eq (data : ByteArray) (maxOut : Nat) :
       simp only [hfl, hfd, bind, Except.bind]
       rw [inflateLoopBuf_eq fixedLit fixedDist maxOut data.size
         (fromLengths_depthLE hfl) (fromLengths_depthLE hfd)
-        { data := data, pos := 0, bitOff := 0 } .empty (Or.inl rfl) (Nat.zero_le _) rfl]
+        { data := data, pos := 0, bitOff := 0 } (ByteArray.emptyWithCapacity sizeHint)
+        (Or.inl rfl) (Nat.zero_le _) rfl]

@@ -340,7 +340,7 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
   -- Unfold inflate: it calls inflateRaw then discards endPos
   simp only [Inflate.inflate, bind, Except.bind]
   -- Unfold inflateRaw
-  simp only [Inflate.inflateRaw, bind, Except.bind]
+  simp only [Inflate.inflateRaw, ByteArray.emptyWithCapacity_eq_empty, bind, Except.bind]
   -- Build fixed Huffman trees (computationally verified to succeed)
   obtain ⟨fixedLit, hflit⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
   obtain ⟨fixedDist, hfdist⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
