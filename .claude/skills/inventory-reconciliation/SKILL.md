@@ -154,9 +154,8 @@ shared guard (e.g. the post-#1928 UStar interior-NUL family — five
 slots `name`/`linkname`/`prefix`/`uname`/`gname`, all under the
 same `containsNul` reject), each per-slot landing **rewrites the
 same bullet's residual-coverage carve-out**, shrinking the
-residual-statement by exactly one slot. The carve-out is the
-written record of "what's left"; tightening it on every land keeps
-the bullet honest as the family closes.
+residual-statement by exactly one slot — keeping the bullet honest
+as the family closes.
 
 **Per-step shape**: each PR in the wave touches exactly one bullet
 in `SECURITY_INVENTORY.md` *Recent wins* — the bullet for the
@@ -280,19 +279,12 @@ literally the `name` field, but the *arm* is filesystem-reaching
 
 **Smuggle-target invariant**: the suffix encodes the field that
 **actually receives** the smuggled NUL byte in the on-disk
-header, which is exactly the field a legitimate end-user archive
-writer would target if they were trying to hide content in this
-slot. The convention keeps the fixture filename diagnostic of the
-attack surface, not just the slot name.
+header — the attack surface, not just the slot name.
 
 Cross-reference: `malformed-fixture-builder` covers the
-*builder-script* side of the same asymmetry — the
-`pathOverride` hook (filesystem-reaching arm) versus the
-verbatim-write pattern with no override (defense-in-depth arm).
-The two skills document the same per-slot wave from
-complementary angles: this skill is for the *inventory-row
-companion* of the naming choice; `malformed-fixture-builder` is
-for the *builder script structure* that produces the fixture.
+*builder-script* side of the same asymmetry — the `pathOverride`
+hook (filesystem-reaching arm) versus the verbatim-write pattern
+with no override (defense-in-depth arm).
 
 Origin: paired-review #1963 §E.8.e and §E.8.f flagged both
 observations after the post-#1928 wave's terminal closure.

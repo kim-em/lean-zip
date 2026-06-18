@@ -1,227 +1,95 @@
 ---
 name: lean-zstd-spec-pattern
-description: Use when creating or extending Zstd specification files in Zip/Spec/. Covers the standard file structure, naming conventions, predicate design, and proof difficulty scoping for Zstd validity predicates.
+description: Use when creating or extending Zstd specification files in Zip/Spec/ (Fse.lean, Zstd.lean, ZstdHuffman.lean, ZstdSequence.lean, ZstdFrame.lean). Covers file structure, naming conventions, predicate/Decidable design, position-advancement theorems, table-validity composition, two-block matrix, and frame-level lifting.
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 ---
 
 # Zstd Spec File Creation Pattern
 
-Patterns distilled from creating `Zip/Spec/Fse.lean`, `Zip/Spec/Zstd.lean`,
-`Zip/Spec/ZstdHuffman.lean`, and `Zip/Spec/ZstdSequence.lean` across 8+ PRs.
+Files: `Zip/Spec/Fse.lean`, `Zip/Spec/Zstd.lean`, `Zip/Spec/ZstdHuffman.lean`,
+`Zip/Spec/ZstdSequence.lean`, `Zip/Spec/ZstdFrame.lean`.
 
-## Standard File Structure
-
-Every Zstd spec file follows this skeleton:
+## File Skeleton
 
 ```lean
-import Zip.Native.X           -- Import the implementation types
+import Zip.Native.X           -- the implementation types (exactly one Native module)
 
 /-!
 # Title (RFC 8878 §N.N)
-
-Brief description of what this module specifies.
-
-The specification is structured in layers:
-1. **Layer one**: ...
-2. **Layer two**: ...
-3. **Layer three**: ...
-
+Layers: 1. helper computations  2. validity predicates  3. correctness theorems.
 All predicates have `Decidable` instances for use with `decide`.
 -/
 
 namespace Zstd.Spec.ModuleName
+open Zip.Native (Type1 Type2)        -- open only what's needed
 
-open Zip.Native (Type1 Type2)    -- Open only what's needed
-
-/-! ## Helper computations -/
-
--- Pure functions used by predicates (e.g. weightSum, cellCount)
-
-/-! ## Validity predicates -/
-
--- Predicates with Decidable instances
-
-/-! ## Correctness theorems -/
-
--- Theorems connecting implementation functions to predicates
--- (some proven, some sorry)
-
-/-! ## Concrete validation examples -/
-
--- `by decide` tests on specific inputs
+/-! ## Helper computations -/      -- pure fns: weightSum, cellCount
+/-! ## Validity predicates -/      -- predicates + Decidable instances
+/-! ## Correctness theorems -/     -- impl fn ↔ predicate
+/-! ## Concrete validation examples -/   -- `by decide` on specific inputs
 
 end Zstd.Spec.ModuleName
 ```
+
+After creating: add `import Zip.Spec.NewModule` to `Zip.lean`; verify with
+`lake build Zip.Spec.NewModule`.
 
 ## Naming Conventions
 
 | Kind | Pattern | Examples |
 |------|---------|---------|
-| Validity predicate | `Valid*` | `ValidWeights`, `ValidDistribution`, `ValidFseTable`, `ValidBlockHeader` |
+| Validity predicate | `Valid*` | `ValidWeights`, `ValidFseTable`, `ValidBlockHeader` |
 | Boolean predicate | `is*` / `valid*` (lowercase) | `isPow2`, `validMagic`, `isSkippableMagic` |
-| Characterization theorem | `*_iff` | `isPow2_iff` |
-| Bound theorem | `*_pos`, `*_le`, `*_ge` | `decodeFseDistribution_accuracyLog_ge`, `buildZstdHuffmanTable_maxBits_pos` |
-| Size/structural theorem | `*_tableSize`, `*_size` | `buildZstdHuffmanTable_tableSize` |
-| Concrete example | descriptive name | `weightSum_empty`, `kraft_two_ones`, `predefined_litLen_valid` |
-| Completeness predicate | `*Complete` | `KraftComplete` |
+| Characterization | `*_iff` | `isPow2_iff` |
+| Bound | `*_pos`, `*_le`, `*_ge` | `buildZstdHuffmanTable_maxBits_pos` |
+| Size/structural | `*_tableSize`, `*_size` | `buildZstdHuffmanTable_tableSize` |
+| Completeness | `*Complete` | `KraftComplete` |
 | Helper computation | camelCase noun | `weightSum`, `cellCount` |
+| Concrete example | descriptive | `predefined_litLen_valid` |
 
 ## Predicate Design
 
-### Always include `Decidable` instances
-
-Every predicate must have a `Decidable` instance so concrete examples
-can be proved by `decide`:
+Structure multi-property predicates as flat conjunctions `_ ∧ _ ∧ _` (not nested
+structures), so `inferInstanceAs` synthesizes `Decidable` directly. Lean handles
+conjunctions, disjunctions, quantifiers over `Fin`, and arithmetic comparisons.
 
 ```lean
 def ValidWeights (weights : Array UInt8) : Prop :=
-  weights.size >= 1 /\
-  (exists i : Fin weights.size, weights[i].toNat > 0) /\
-  (forall i : Fin weights.size, weights[i].toNat <= 13)
+  weights.size >= 1 ∧
+  (∃ i : Fin weights.size, weights[i].toNat > 0) ∧
+  (∀ i : Fin weights.size, weights[i].toNat <= 13)
 
 instance {weights : Array UInt8} : Decidable (ValidWeights weights) :=
-  inferInstanceAs (Decidable (_ /\ _ /\ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 ```
 
-The `inferInstanceAs` pattern works because Lean can synthesize
-`Decidable` for conjunctions, disjunctions, quantifiers over `Fin`,
-and basic arithmetic comparisons automatically.
-
-### Structure predicates as conjunctions
-
-Use `_ /\ _ /\ _` for multi-property predicates rather than nested
-structures. This lets `inferInstanceAs (Decidable (_ /\ _ /\ _))` work
-directly.
-
-### Import only the implementation module
-
-Each spec file imports exactly one `Zip.Native.*` module and uses
-`open Zip.Native (...)` to bring in only the needed types. Don't import
-other spec files unless there's a genuine dependency.
-
-## Proof Difficulty Scoping
-
-### Prove immediately (with `decide`, `rfl`, or simple case analysis)
-
-- Concrete validation examples on specific inputs
-- `rfl` for definitional equalities (e.g., `weightSum_eq_inline`)
-- `decide` for finite predicate checking (e.g., `predefined_litLen_valid`)
-- Simple case splits on small enums (e.g., `parseBlockHeader_type_ne_reserved`)
-
-### Defer with `sorry` (document what technique is needed)
-
-- **Monadic unfolding** of functions with 20+ lines of `if`/`match` —
-  see `lean-monad-proofs` skill for the `by_cases` + `rw [if_pos/if_neg]`
-  pattern
-- **Loop invariant reasoning** over `while` or `for` loops with mutable
-  state (e.g., `decodeFseDistribution_sum_correct`)
-- **Fold induction** over `Array.foldl` accumulation
-  (e.g., `weightSum_pos_of_exists_nonzero`)
-- **Bitwise arithmetic** properties like `isPow2_iff` requiring
-  `Nat.land` reasoning
-
-Add a docstring to each sorry'd theorem explaining why it's deferred
-and what proof strategy is expected.
-
-### Intermediate: monadic guard proofs
-
-Proofs about early guards in monadic functions (e.g., "if the function
-succeeds, then condition X holds") are tractable with the patterns in
-`lean-monad-proofs`:
-- Unfold the function
-- `cases` on each monadic operation
-- `exact nomatch h` for error branches
-- `simp only [Except.ok.injEq, Prod.mk.injEq]` to extract equalities
-- Close with `omega` or `rfl`
-
-These are worth attempting in the same session that creates the spec file,
-especially for bound theorems (`*_ge`, `*_le`).
-
-## Registering New Spec Files
-
-After creating a new spec file, register it in the project's import tree:
-1. Add `import Zip.Spec.NewModule` to `Zip.lean`
-2. Verify with `lake build Zip.Spec.NewModule`
-
-## Worked Example: Creating a New Spec File
-
-When creating `Zip/Spec/ZstdFoo.lean`:
-
-1. Read the implementation (`Zip/Native/ZstdFoo.lean`) to identify:
-   - Key types and structures
-   - Validation checks (guards, bounds, invariants)
-   - Constants from RFC sections
-
-2. Design predicates around the validation checks — each guard in the
-   implementation suggests a predicate
-
-3. Write concrete examples using known-good inputs (from tests or
-   predefined tables)
-
-4. Attempt guard proofs for the simplest theorems (bound checks)
-
-5. Leave loop/fold theorems as `sorry` with docstrings
+Every predicate needs a `Decidable` instance or concrete examples can't `decide`.
 
 ## Theorem Statement Validation
 
-**Before investing proof effort, validate theorem statements with concrete
-examples.** Two false theorems were discovered and corrected during this
-project (`parseBlockHeader_blockSize_le` in PR #639, `weightsToMaxBits_valid`
-in PR #622). Both cost multiple sessions of wasted proof attempts before
-counterexamples were found.
+Validate statements with `#eval`/`decide` on known-good and boundary inputs
+BEFORE proving — false theorems cost multiple wasted sessions to discover.
+Check what the code *enforces*, not what the RFC recommends: a parser reading a
+21-bit field enforces `value < 2^21`, NOT `value ≤ 128*1024`. If a statement is
+false, weaken to what's provable (e.g. `blockSize < 2^21`; `∃ i, weights[i] > 0`
+instead of universal) and comment the original intent.
 
-### Validation checklist
+## Proof Difficulty Scoping
 
-1. **`#eval` on concrete inputs**: Test the theorem's conclusion on 2-3
-   known-good inputs (from test vectors or RFC examples):
-   ```lean
-   -- Before proving: parseHeader returns blockSize ≤ 128*1024
-   #eval do
-     let input := ByteArray.mk #[0x21, 0x00, 0x00]  -- known test vector
-     let hdr ← parseBlockHeader input 0
-     return hdr.blockSize ≤ 128 * 1024  -- true? or false?
-   ```
+Prove now: concrete examples (`decide`), definitional equalities (`rfl`), small
+enum case splits, monadic guard bound theorems (`*_ge`/`*_le`). Defer with a
+docstring naming the technique: loop-invariant reasoning, `Array.foldl` fold
+induction, bitwise arithmetic (`Nat.land`). Stating the predicate + theorem is
+the deliverable for a spec-creation session; loop proofs deserve their own.
 
-2. **`decide` on small instances**: For predicates with `Decidable` instances,
-   test on boundary cases:
-   ```lean
-   #eval decide (ValidWeights #[1, 2, 0, 3])  -- should be true
-   #eval decide (ValidWeights #[0, 0, 0])      -- should be false
-   ```
+## Size/Content Theorems for WF Helpers
 
-3. **Check what the implementation actually enforces**: Read the implementation
-   code carefully. A parser that reads a 21-bit field does NOT enforce
-   `value ≤ 128*1024` — it only enforces `value < 2^21`. The theorem
-   should match what the code does, not what the RFC recommends.
+`copyBytes`/`copyMatch` (WF recursion, terminating on `count` or `length-k`)
+follow a 3-theorem pattern, all proved by induction matching the recursion:
 
-4. **Boundary cases**: Test at the edges of claimed bounds:
-   - Maximum-size inputs
-   - All-zero inputs
-   - Inputs that trigger error paths
-
-### When to weaken a theorem
-
-If validation reveals the theorem is false, **weaken it to what's actually
-provable** rather than abandoning it:
-- `blockSize ≤ 128*1024` → `blockSize < 2^21` (what the parser enforces)
-- `weight > 0` → `∃ i, weights[i] > 0` (existence, not universality)
-
-Document the weakening with a comment explaining the original intent and
-why it was too strong.
-
-## Size and Content Theorems for WF Helper Functions
-
-Functions like `copyBytes` and `copyMatch` use well-founded recursion
-(termination by `count` or `length - k`). Their spec theorems follow a
-consistent 3-theorem pattern:
-
-1. **Size theorem**: `f_size` — output size equals input size + amount copied
-2. **Preservation theorem**: `f_getElem_lt` — existing bytes are unchanged
-3. **Content theorem**: `f_getElem_ge` — new bytes have expected values
-
-### Proof structure
-
-All three use **induction matching the WF recursion**:
+1. `f_size` — output size = input size + amount copied
+2. `f_getElem_lt` — existing bytes unchanged (preservation)
+3. `f_getElem_ge` — new bytes have expected values (content)
 
 ```lean
 theorem copyBytes_size (dst src : ByteArray) (srcPos count : Nat) :
@@ -229,365 +97,129 @@ theorem copyBytes_size (dst src : ByteArray) (srcPos count : Nat) :
   induction count generalizing dst srcPos with
   | zero => simp [copyBytes]
   | succ n ih =>
-    rw [copyBytes.eq_1]               -- one-level unfold via equation lemma
+    rw [copyBytes.eq_1]               -- one-level unfold; never `simp only [f]` (loops)
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
     rw [ih, ByteArray.size_push]; omega
 ```
 
-Key patterns:
-- **`rw [f.eq_1]`** for one-level unfold (never `simp only [f]` — it loops)
-- **`generalizing dst srcPos`** when the function modifies these per step
-- **Size lemmas compose**: `rw [copyMatch_size, copyBytes_size] at this; omega`
-  chains through multiple operations in loop invariant proofs
+- `generalizing dst srcPos` when the function mutates these per step.
+- Size lemmas compose: `rw [copyMatch_size, copyBytes_size] at this; omega`.
+- Content: non-overlapping `copyMatch` (`offset ≥ length`) reads from the
+  original buffer at a fixed position; overlapping (`offset < length`) reads from
+  the *growing* buffer — thread `(hprefix : ∀ i, i < buf.size → b[i]! = buf[i]!)`.
 
-### Content theorems: non-overlapping vs overlapping
+## Table Lookup via `rcases` Case Split
 
-Non-overlapping `copyMatch` (`offset ≥ length`) is straightforward: each
-new byte reads from the original buffer at a fixed position.
-
-Overlapping `copyMatch` (`offset < length`) requires tracking that each
-new byte reads from the *growing* buffer, creating a repeating pattern.
-The proof threads a `hprefix` invariant through the induction:
-```lean
-(hprefix : ∀ i, i < buf.size → b[i]! = buf[i]!)
-```
-
-## Table Correctness via `rcases` Case Split
-
-For proving properties about lookup tables (`litLenExtraBits`,
-`matchLenExtraBits`, offset baseline tables), the standard approach is:
+For lookup-table properties (`litLenExtraBits`, `matchLenExtraBits`, offset
+baselines): eliminate the `dite`/bounds check, then `rcases` the code into N+1
+arms (N valid + 1 impossible), close each with `rfl` or `omega`.
 
 ```lean
-theorem decodeLitLenValue_small (code : Nat) (extraBits : UInt32) (h : code ≤ 15) :
-    decodeLitLenValue code extraBits = .ok (code + extraBits.toNat) := by
-  have hlt : code < litLenExtraBits.size := by simp only [litLenExtraBits_size]; omega
-  unfold decodeLitLenValue
-  simp only [hlt, ↓reduceDIte]
-  rcases code with _ | _ | _ | _ | _ | _ | _ | _ |
-                   _ | _ | _ | _ | _ | _ | _ | _ | _
-  all_goals first | omega | rfl
+have hlt : code < litLenExtraBits.size := by simp only [litLenExtraBits_size]; omega
+unfold decodeLitLenValue
+simp only [hlt, ↓reduceDIte]
+rcases code with _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _ | _
+all_goals first | omega | rfl
 ```
 
-**Pattern**: Eliminate `dite`/bounds check → `rcases` into N+1 arms
-(N valid + 1 impossible) → close each with `rfl` or `omega`.
+Scales to ~50 entries (tested 32-entry match-length table); beyond that build
+times balloon.
 
-**Scaling**: This works for tables up to ~50 entries (tested with 32-entry
-match length table). Beyond that, build times may become excessive.
+## Branch-Heavy Functions (`resolveOffset` pattern)
 
-## Exhaustive Case Analysis for Branch-Heavy Functions
+Functions branching on multiple conditions benefit from exhaustive `rcases`:
+- Inline `show` proofs feed conditions to `simp only` without a `have`:
+  `simp only [resolveOffset, show ¬(N > 3) from by omega, ↓reduceIte]`.
+- `↓reduceIte` reduces `if true/false`; `split` handles inner `if litLen > 0`.
+- For `ValidOffsetHistory` preservation across branches:
+  `refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega` (bare `simp` reduces
+  `#[a,b,c][0]!` etc.; `omega` closes arithmetic).
 
-Functions like `resolveOffset` that branch on multiple conditions
-(rawOffset value × literalLength zero/nonzero) benefit from exhaustive
-`rcases` decomposition:
+**Array-literal access exemption**: for `#[a,b,c][i]!` with a known literal and
+concrete index, bare `simp` is acceptable (`simp only` needs position-varying
+`Array.getElem!_eq_getD`/`getD`/`get_push_lt/eq`/`List.get` lemmas and emits
+linter warnings). Comment: `-- bare simp: array literal access`.
 
-```lean
-rcases rawOffset with _ | _ | _ | _ | n
-· omega  -- rawOffset = 0, impossible
-· -- rawOffset = 1
-  simp only [resolveOffset, show ¬(1 > 3) from by omega,
-    show litLen > 0 from hlit, ↓reduceIte]
-  exact h0pos
-· -- rawOffset = 2 ...
-· -- rawOffset = 3 ...
-· -- rawOffset = n + 4 > 3
-  simp only [resolveOffset, show n + 4 > 3 from by omega, ↓reduceIte]
-  omega
-```
+## Loop Invariants via Equation-Lemma Matching
 
-**Key techniques**:
-- **Inline `show` proofs**: `show ¬(N > 3) from by omega` provides the
-  condition directly to `simp only` without a separate `have`
-- **`↓reduceIte`**: reduces `if true/false then A else B` after the
-  condition is resolved
-- **`split` for inner branches**: after resolving the outer condition,
-  `split` handles `if litLen > 0 then ... else ...` cleanly
-
-For ValidOffsetHistory preservation through each branch:
-```lean
-refine ⟨rfl, ?_, ?_, ?_⟩ <;> simp <;> omega
-```
-This handles all three positivity goals at once. The bare `simp` reduces
-`#[a, b, c][0]!` etc., and `omega` closes the arithmetic.
-
-**Array literal access exemption**: When the goal involves `#[a,b,c][i]!`
-for a *known* array literal with *concrete* index, bare `simp` is
-acceptable — `simp only` requires listing `Array.getElem!_eq_getD`,
-`Array.getD`, `Array.get_push_lt/eq`, and `List.get` lemmas that vary
-by position and produce linter warnings. Add comment:
-`-- bare simp: array literal access`
-
-## Loop Invariant Theorems via Equation Lemma Matching
-
-For WF-recursive loop functions like `executeSequences.loop`, the loop
-invariant proof matches the function's equation lemmas:
-
-```lean
-theorem executeSequences_loop_inv (seqs : List ZstdSequence) ... := by
-  induction seqs generalizing output history litPos with
-  | nil =>
-    rw [executeSequences.loop.eq_1] at h  -- base case equation
-    simp at h; obtain ⟨rfl, _, rfl⟩ := h; ...
-  | cons seq rest ih =>
-    rw [executeSequences.loop.eq_2] at h  -- recursive case equation
-    split at h  -- split on first guard
-    · simp at h  -- error branch: contradiction
-    · ...
-      split at h  -- next guard
-      dsimp only [letFun] at h  -- reduce letFun between splits
-      split at h; · simp at h  -- error
-      · ...
-        have ⟨ih_size, ih_le, ih_bound⟩ := ih _ _ _ hlp' h
-        rw [copyMatch_size, copyBytes_size] at ih_size  -- compose sizes
-```
-
-**Key patterns**:
-- **`rw [f.eq_N]` not `unfold f`**: equation lemmas target specific cases
-- **`dsimp only [letFun]`** between `split at h` steps: Lean inserts
-  `letFun` wrappers that block further `split`
-- **`simp at h` for error branches**: closes `Except.error = Except.ok`
-  contradictions (or use `exact nomatch h`)
-- **Compose size lemmas**: chain `rw [f_size, g_size]` in the hypothesis
-  before using `omega`
+WF-recursive loops (`executeSequences.loop`) prove invariants by matching the
+function's equation lemmas:
+- `rw [f.eq_N] at h` (not `unfold f`) — equation lemmas target specific cases
+  (`.eq_1` base, `.eq_2` recursive).
+- `dsimp only [letFun] at h` between `split at h` steps — Lean inserts `letFun`
+  wrappers that block further `split`.
+- `simp at h` (or `exact nomatch h`) closes `Except.error = Except.ok` branches.
+- Compose size lemmas in the hypothesis before `omega`:
+  `rw [copyMatch_size, copyBytes_size] at ih_size`.
 
 ## Position-Advancement Proofs
 
-Parser functions in `Except` monad return `(result, pos')`. Proving
-`pos' > pos` (or `pos' = pos + k`) is the standard way to establish
-that a parser consumes input, which feeds WF termination obligations.
+Parsers in `Except` return `(result, pos')`. Proving advancement feeds WF
+termination obligations (`termination_by data.size - pos`).
 
-### Naming convention: `_pos_gt` vs `_pos_ge` vs `_pos_eq` vs `_le_size`
+| Suffix | Meaning | When |
+|--------|---------|------|
+| `_pos_eq` | `pos' = pos + k` (exact) | parser reads a fixed byte count (`parseBlockHeader` reads 3) |
+| `_pos_gt` | `pos' > pos` (strict) | reads ≥1 byte, count varies (`decompressFrame`) |
+| `_pos_ge` | `pos' ≥ pos` (weak) | some branches don't advance (`resolveSingleFseTable` `repeat` mode → `pos' = pos`) |
+| `_le_size` | `pos' ≤ data.size` | returned position within bounds (feeds `getElem` preconditions) |
+| `_pos_bounded` | `pos' ≤ pos + k` | upper-bound complement to `_pos_gt` |
 
-Choose the suffix based on the tightest bound you can prove:
-
-| Suffix | Meaning | When to use |
-|--------|---------|-------------|
-| `_pos_eq` | `pos' = pos + k` (exact) | Parser reads a fixed number of bytes (e.g., `parseBlockHeader` always reads 3) |
-| `_pos_gt` | `pos' > pos` (strict) | Parser reads at least 1 byte but exact count varies (e.g., `decompressFrame`) |
-| `_pos_ge` | `pos' ≥ pos` (weak) | Some branches don't advance (e.g., `resolveSingleFseTable` with `repeat` mode returns `pos' = pos`) |
-| `_le_size` | `pos' ≤ data.size` | Returned position stays within data bounds (feeds `getElem` preconditions) |
-| `_pos_bounded` | `pos' ≤ pos + k` | Upper bound complement to `_pos_gt` (together give tight range) |
-
-**Prefer the tightest bound**: `_pos_eq` > `_pos_gt` > `_pos_ge`. Stricter bounds
-are more useful for callers (exact bounds compose better than inequalities).
-
-**Deriving weaker from stronger**: A `_pos_eq` theorem trivially implies `_pos_gt`
-and `_pos_ge` via `omega`. A `_pos_gt` implies `_pos_ge`. Don't prove both unless
-callers specifically need the weaker form for API compatibility.
-
-### Standard proof template
+Prefer the tightest: `_pos_eq` > `_pos_gt` > `_pos_ge`. `_pos_eq` implies the
+others via `omega`; don't prove weaker forms unless a caller needs them.
 
 ```lean
-theorem myParser_pos_gt (data : ByteArray) (pos : Nat)
-    (result : ResultType) (pos' : Nat)
-    (h : myParser data pos = .ok (result, pos')) :
-    pos' > pos := by
-  -- 1. Unfold and reduce monadic plumbing
-  simp only [myParser, bind, Except.bind, pure, Except.pure] at h
-  -- 2. Case-split each guard/branch
-  split at h
-  · exact nomatch h          -- error branch
-  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨-, rfl⟩ := h     -- extract pos' = pos + k
-    omega
+-- standard template
+simp only [myParser, bind, Except.bind, pure, Except.pure] at h
+split at h
+· exact nomatch h                                   -- error branch
+· simp only [Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨-, rfl⟩ := h; omega                        -- extract pos' = pos + k
 ```
 
-### Multi-branch functions: prove a range, derive components
+**Multi-branch**: prove the conjunction `pos < pos' ∧ pos' ≤ pos + k` in a
+`private` helper, then derive `_pos_gt := (...).1` and `_pos_bounded := (...).2`
+to avoid duplicating case analysis.
 
-When a function has N branches that each advance by different amounts,
-prove the conjunction in a private helper and derive separate theorems:
+**Composition** (A calls B then C): at each bind, `cases hB : B data pos`,
+dismiss error with `nomatch`, `obtain` the ok result, invoke `B_pos_gt` as a
+`have`; after all binds, `omega`/`grind` chains the inequalities. Used by
+`decompressFrame_pos_gt` (composes `parseFrameHeader_pos_gt` then
+`decompressBlocksWF_pos_gt`).
 
-```lean
-private theorem myParser_pos_range ... (h : ...) :
-    pos < pos' ∧ pos' ≤ pos + 4 := by
-  simp only [myParser, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  split at h
-  · exact nomatch h
-  · split at h
-    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨-, -, rfl⟩ := h; omega
-    · -- ... repeat for each branch
-      sorry
+**Mode-dispatched** (`resolveSingleFseTable`): per-mode theorems —
+`predefined` `pos'=pos`, `rle` `pos'=pos+1`, `repeat` `pos'=pos`, `fseCompressed`
+`pos'≥pos+1`. fseCompressed is hardest: `BitReader` byte-alignment
+`if br'.bitOff == 0 then br'.pos else br'.pos+1` forces a `by_cases`/`split` on
+`bitOff` plus a lemma about `decodeFseDistribution` advancing the bit position.
 
-theorem myParser_pos_gt ... (h : ...) : pos' > pos :=
-  (myParser_pos_range ... h).1
+**`_le_size`** is mechanical: parsers guard `if pos + n > data.size then throw`;
+the success-path guard negation gives `pos + n ≤ data.size`, and `_pos_eq` gives
+`pos' = pos + n`. Prove `_pos_eq` first, derive `_le_size` and `_pos_gt` as
+corollaries. Established: `parseBlockHeader_le_size`, `decompressRawBlock_le_size`,
+`decompressRLEBlock_le_size`, `skipSkippableFrame_le_size`,
+`parseFrameHeader_le_size` (multi-branch), `parseSequencesHeader_le_size`.
 
-theorem myParser_pos_bounded ... (h : ...) : pos' ≤ pos + 4 :=
-  (myParser_pos_range ... h).2
+**Bitwise value bounds**: convert UInt ops to Nat via bridges
+(`UInt32.toNat_or`, `UInt32.toNat_shiftLeft`, `Nat.shiftLeft_eq`), apply the Nat
+bound (`Nat.and_le_right`, `Nat.or_lt_two_pow`), close with `omega`. Appears in
+`parseCompressedLiteralsHeader_regen_bound`, `readBits_value_lt_pow2`.
+
+## Table Validity Composition (four-layer chain)
+
+```
+Per-cell properties (symbol_lt, numBits_le, cells_size)
+  → ValidFseTable composition (buildFseTable_valid, buildRleFseTable_valid)
+  → Predefined validity (buildPredefinedFseTables_*_valid)
+  → Resolver validity (resolveSingleFseTable_*_valid)
+  → Composed validity (resolveSequenceFseTables_valid)
 ```
 
-This avoids duplicating the case analysis across two separate proofs.
-
-### Composing position-advancing functions
-
-When function A calls B then C sequentially, compose their position
-specs rather than re-unfolding both:
+Predicate is a flat conjunction; compose the validity theorem from per-conjunct
+theorems:
 
 ```lean
-theorem composed_pos_gt ... := by
-  -- Extract intermediate position from monadic chain
-  cases hB : B data pos with
-  | error => simp only [hB] at h; exact nomatch h
-  | ok val =>
-    obtain ⟨resultB, posB⟩ := val
-    simp only [hB] at h; dsimp only [bind, Except.bind] at h
-    -- Use B's spec
-    have hB_gt := B_pos_gt ... hB
-    -- Continue with C
-    cases hC : C data posB with
-    | error => simp only [hC] at h; exact nomatch h
-    | ok val =>
-      have hC_gt := C_pos_gt ... hC
-      omega
-```
-
-### Worked composition example: `decompressFrame_pos_gt`
-
-`decompressFrame` calls `parseFrameHeader` then `decompressBlocksWF`. Rather
-than re-unfolding both functions, compose their position specs:
-
-```lean
-theorem decompressFrame_pos_gt ... (h : decompressFrame data pos = .ok (output, pos')) :
-    pos' > pos := by
-  unfold decompressFrame at h
-  cases hph : parseFrameHeader data pos with
-  | error e => simp only [hph, bind, Except.bind] at h; exact nomatch h
-  | ok val =>
-    obtain ⟨header, afterHeader⟩ := val
-    have hgt1 := parseFrameHeader_pos_gt _ _ _ _ hph    -- afterHeader > pos
-    simp only [hph, bind, Except.bind, pure, Except.pure] at h
-    ...
-    cases hdb : decompressBlocksWF data afterHeader ... with
-    | error e => simp only [hdb] at h; exact nomatch h
-    | ok val2 =>
-      obtain ⟨content, afterBlocks⟩ := val2
-      have hgt2 := decompressBlocksWF_pos_gt _ _ _ _ _ _ _ _ _ hdb  -- afterBlocks > afterHeader
-      ...  -- omega closes: pos' ≥ afterBlocks > afterHeader > pos
-```
-
-**Pattern**: At each monadic bind, case-split on the sub-call, dismiss error
-with `nomatch`, extract the ok result, and invoke the sub-call's `_pos_gt`
-theorem as a `have`. After all binds are processed, `omega` (or `grind`)
-chains the inequalities.
-
-### Mode-dispatched functions (`resolveSingleFseTable` pattern)
-
-Functions like `resolveSingleFseTable` that dispatch on a compression
-mode enum (predefined/RLE/repeat/fseCompressed) need per-mode theorems:
-
-| Mode | Position change | Proof sketch |
-|------|----------------|--------------|
-| `predefined` | `pos' = pos` | Direct — returns `(buildFromPredefined ..., pos)` |
-| `rle` | `pos' = pos + 1` | Reads one byte for symbol |
-| `repeat` | `pos' = pos` | Returns `(prevTable, pos)` |
-| `fseCompressed` | `pos' ≥ pos + 1` | Calls `decodeFseDistribution` + byte-alignment |
-
-Each theorem uses the same structure:
-1. `simp only [resolveSingleFseTable, bind, Except.bind, pure, Except.pure] at h`
-2. `split at h` to match the mode
-3. Close impossible branches with `exact nomatch h`
-4. Extract position from `Except.ok.injEq, Prod.mk.injEq`
-
-The fseCompressed case is harder because it involves `BitReader`
-byte-alignment: `if br'.bitOff == 0 then br'.pos else br'.pos + 1`.
-This introduces a `by_cases` or `split` on `bitOff` and requires a
-separate lemma about `decodeFseDistribution` advancing the bit position.
-
-### Position specs feed WF termination
-
-These position-advancement theorems are not standalone — they serve as
-building blocks for `termination_by data.size - pos` obligations in
-WF-recursive functions like `decompressBlocksWF` and `decompressZstdWF`.
-The chain is:
-
-1. Per-parser `_pos_gt` theorems prove strict advancement
-2. WF function adds guard `if hadv : afterPos ≤ pos then throw`
-3. Guard gives `¬(afterPos ≤ pos)`, combined with `_pos_gt` gives
-   `afterPos > pos`, which proves `data.size - afterPos < data.size - pos`
-4. `omega` closes the termination obligation
-
-See `lean-wf-recursion` skill, "Non-Advancement Guard Pattern".
-
-### `_le_size` proofs: position stays within data bounds
-
-The `_le_size` theorems prove that a parser's returned position doesn't exceed
-`data.size`. These feed `getElem` preconditions when subsequent code accesses
-`data[pos']`.
-
-**Standard template** (completely mechanical):
-
-```lean
-theorem myParser_le_size (data : ByteArray) (pos : Nat)
-    (result : ResultType) (pos' : Nat)
-    (h : myParser data pos = .ok (result, pos')) :
-    pos' ≤ data.size := by
-  -- Option A: derive from _pos_eq + guard negation
-  have hpos := myParser_pos_eq data pos result pos' h
-  unfold myParser at h
-  split at h
-  · exact nomatch h                -- error: guard `pos + k > data.size` held
-  · subst hpos; omega              -- success: guard failed, so pos + k ≤ data.size
-  -- Option B: derive directly from _pos_eq + _pos_gt when available
-  -- have hpe := myParser_pos_eq ... h
-  -- have hgt := myParser_pos_gt ... h   -- only if the function also has _pos_gt
-  -- omega
-```
-
-**The key insight**: parser functions check `if pos + n > data.size then throw`
-as a guard. On the success path, the guard's negation gives `pos + n ≤ data.size`,
-and since `pos' = pos + n` (from `_pos_eq`), we get `pos' ≤ data.size`.
-
-**Layering**: prove `_pos_eq` first (exact value), then derive both `_pos_gt` and
-`_le_size` as trivial corollaries. This avoids duplicating the unfolding work.
-
-**Established `_le_size` theorems**:
-- `parseBlockHeader_le_size` — derives from `_pos_eq`, unfold + nomatch + omega
-- `decompressRawBlock_le_size` — same pattern
-- `decompressRLEBlock_le_size` — same pattern
-- `skipSkippableFrame_le_size` — same pattern
-- `parseFrameHeader_le_size` — multi-branch, uses `_pos_eq` per branch
-- `parseSequencesHeader_le_size` — multi-branch with 1/2/3-byte encodings
-
-### Bitwise bound lemmas for value specs
-
-When proving bounds on parsed values that use bitmask operations:
-
-| Lemma | Use case |
-|-------|----------|
-| `Nat.and_le_right` | `x &&& mask ≤ mask` — bitmask extracts at most `mask` |
-| `Nat.or_lt_two_pow` | `x ||| y < 2^n` when both `x < 2^n` and `y < 2^n` |
-| `UInt32.toNat_or` | Bridge `(a ||| b).toNat = a.toNat ||| b.toNat` |
-| `UInt32.toNat_shiftLeft` | Bridge `(a <<< n).toNat` |
-| `Nat.shiftLeft_eq` | `x <<< n = x * 2^n` |
-
-These appear in `parseCompressedLiteralsHeader_regen_bound` and
-`readBits_value_lt_pow2`. The pattern is: convert UInt operations to
-Nat via bridge lemmas, apply the Nat bound lemma, close with `omega`.
-
-## Table Validity Composition
-
-Build functions like `buildFseTable` and `buildZstdHuffmanTable` produce
-tables that satisfy structural validity predicates (`ValidFseTable`,
-`ValidHuffmanTable`). Validity proofs compose from per-property theorems.
-
-### Validity predicate pattern
-
-```lean
-def ValidHuffmanTable (table : Array HuffmanCell) (maxBits : Nat) : Prop :=
-  table.size = 1 <<< maxBits ∧
-  (∀ i : Fin table.size, table[i].numBits ≤ maxBits) ∧
-  (∀ i : Fin table.size, table[i].symbol.toNat ≤ 255)
-
-instance : Decidable (ValidHuffmanTable table maxBits) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
-```
-
-### Composition theorem
-
-Prove each conjunct separately, then compose:
-
-```lean
-theorem buildZstdHuffmanTable_valid (weights : Array UInt8)
-    (result : ZstdHuffmanTable)
+theorem buildZstdHuffmanTable_valid (weights) (result)
     (h : buildZstdHuffmanTable weights = .ok result) :
     ValidHuffmanTable result.table result.maxBits :=
   ⟨buildZstdHuffmanTable_tableSize weights result h,
@@ -595,230 +227,49 @@ theorem buildZstdHuffmanTable_valid (weights : Array UInt8)
    fun i => Nat.lt_succ_iff.mp (UInt8.toNat_lt result.table[i].symbol)⟩
 ```
 
-### Per-property proof patterns
+Per-property proofs: `_tableSize` — induction on build loop tracking
+`Array.size_set!`; bound preservation (`_numBits_le`, `_symbol_lt`) — per `set!`
+via `Array.getElem_set!` case analysis (just-set value vs untouched → IH).
+Factor the `if idx = i then ... else ...` split into a reusable helper
+(`huffman_set!_preserves_forall`) to avoid duplication across property proofs.
 
-**Size/tableSize** (`_tableSize`): unfold + induction on build loop,
-tracking `Array.size_set!` through each step.
+**Layer preconditions**:
+- `buildFseTable_valid` needs `0 < probs.size`: cells default to `symbol = 0`;
+  empty `probs` leaves `symbol.toNat < probs.size` as `0 < 0` (unprovable).
+  Required by `buildFseTable_valid` and `_symbol_lt`, NOT `_numBits_le`.
+- `buildRleFseTable_valid` (al=0, 1 cell) needs `symbol.toNat < numSymbols`;
+  the cell has `numBits = 0`, proved by `decide`.
+- Predefined tables discharge `hpos` by `decide`: `_litLen_valid` (al=6, 36),
+  `_matchLen_valid` (al=6, 53), `_offset_valid` (al=5, 29). Extract the build
+  call from the bind chain via `Except.bind_eq_ok'`, then `buildFseTable_valid`.
+- Resolver dispatches on mode: `predefined`→predefined validity,
+  `rle`→`buildRleFseTable_valid` (prove `symbol < maxSymbols`),
+  `repeat`→caller's hypothesis (prior block's table), `fseCompressed`→
+  `buildFseTable_valid` after existential-extracting the decoded distribution.
 
-**Bound preservation** (`_numBits_le`, `_symbol_lt`): prove for each
-`set!` operation using `Array.getElem_set!` case analysis — either the
-element was just set (prove for the new value) or it was untouched (use
-the induction hypothesis).
-
-**Generic property preservation through `set!`**: When a loop sets array
-entries, extract a helper lemma:
-```lean
-theorem huffman_set!_preserves_forall (table : Array HuffmanCell)
-    (P : HuffmanCell → Prop) (hall : ∀ i : Fin table.size, P table[i])
-    (idx : Nat) (cell : HuffmanCell) (hcell : P cell)
-    (hsz : (table.set! idx cell).size = table.size) :
-    ∀ i : Fin (table.set! idx cell).size, P (table.set! idx cell)[i]
-```
-This factors out the `if idx = i then ... else ...` case split and
-avoids duplicating it across multiple property proofs.
-
-### ValidOffsetHistory threading
-
-For offset history validity through loops (`executeSequences.loop`),
-prove per-step preservation:
-
-1. **Per-mode theorems**: `resolveOffset_gt3_valid`, `resolveOffset_repeat_valid`
-2. **Unified theorem**: `resolveOffset_valid` combining all modes
-3. **Loop invariant**: `executeSequences_loop_history_valid` threading
-   `ValidOffsetHistory` through the list induction
-
-Use `validOffsetHistory_mk3` to handle the common case of 3-element
-arrays: `ValidOffsetHistory #[a, b, c]` when `a > 0 ∧ b > 0 ∧ c > 0`.
-
-### Table Validity Chain: Builder → Predefined → Resolver → Composed
-
-The Zstd pipeline propagates table validity through a composition chain.
-The full chain, established across PRs #884, #902, #911, #919:
-
-```
-Per-cell properties (symbol_lt, numBits_le, cells_size)
-  → ValidFseTable composition (buildFseTable_valid, buildRleFseTable_valid)
-  → Predefined table validity (buildPredefinedFseTables_*_valid)
-  → Resolver validity (resolveSingleFseTable_*_valid)
-  → Composed validity (resolveSequenceFseTables_valid)
-```
-
-#### Layer 1: `buildFseTable_valid`
-
-The generic builder composes three per-property theorems:
-
-```lean
-theorem buildFseTable_valid (probs : Array Int32) (al : Nat)
-    (table : FseTable) (h : buildFseTable probs al = .ok table)
-    (hpos : 0 < probs.size) :
-    ValidFseTable table.cells al probs.size :=
-  ⟨buildFseTable_cells_size probs al table h,
-   fun i => buildFseTable_symbol_lt probs al table h hpos i,
-   fun i => buildFseTable_numBits_le probs al table h i⟩
-```
-
-**The `0 < probs.size` precondition**: FSE table cells initialize with
-`symbol = 0`. If `probs` is empty, no symbol gets positive probability,
-all cells remain at default, and `symbol.toNat < probs.size` becomes
-`0 < 0` — unprovable. Real distributions always have at least one symbol.
-This precondition appears in `buildFseTable_valid` and
-`buildFseTable_symbol_lt` but NOT in `buildFseTable_numBits_le` (numBits
-bounds are independent of distribution size).
-
-#### Layer 2: `buildRleFseTable_valid`
-
-RLE tables have accuracy log 0 (1 cell) and need a `symbol < numSymbols`
-precondition instead of `0 < probs.size`:
-
-```lean
-theorem buildRleFseTable_valid (symbol : UInt8) (numSymbols : Nat)
-    (hsym : symbol.toNat < numSymbols) :
-    Zstd.Spec.Fse.ValidFseTable (buildRleFseTable symbol).cells 0 numSymbols
-```
-
-The single cell has `numBits = 0`, proved by `decide` on `0.toNat ≤ 0`.
-
-#### Layer 3: `buildPredefinedFseTables_*_valid`
-
-Predefined tables have concrete distributions — `hpos` is discharged
-by `decide`:
-
-```lean
--- Proof pattern: extract the build call from the bind chain, apply buildFseTable_valid
-theorem buildPredefinedFseTables_litLen_valid (ll ml of : FseTable)
-    (h : buildPredefinedFseTables = .ok (ll, ml, of)) :
-    ValidFseTable ll.cells 6 36 := by
-  simp only [buildPredefinedFseTables] at h
-  obtain ⟨ll', hll, h⟩ := Except.bind_eq_ok' h
-  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h    -- skip matchLen build
-  obtain ⟨_, _, h⟩ := Except.bind_eq_ok' h    -- skip offset build
-  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-  obtain ⟨rfl, _, _⟩ := h
-  exact buildFseTable_valid _ _ _ hll (by decide)
-```
-
-Three variants: `_litLen_valid` (al=6, 36 symbols), `_matchLen_valid`
-(al=6, 53 symbols), `_offset_valid` (al=5, 29 symbols).
-
-#### Layer 4: `resolveSingleFseTable_*_valid`
-
-The resolver dispatches on compression mode. Each mode applies the
-appropriate builder's validity theorem:
-
-| Mode | Validity source | Key proof step |
-|------|----------------|----------------|
-| `predefined` | `buildPredefinedFseTables_*_valid` | Extract predefined build from monadic chain |
-| `rle` | `buildRleFseTable_valid` | Extract symbol from `data[pos]!`, prove `symbol < maxSymbols` |
-| `repeat` | Caller's hypothesis | Previous table assumed valid from prior block |
-| `fseCompressed` | `buildFseTable_valid` | Extract `decodeFseDistribution` result, prove `0 < probs.size` |
-
-The fseCompressed case requires an existential extraction: the decoded
-distribution is not directly available, so the proof must extract it
-from the monadic chain.
-
-#### Layer 5: `resolveSequenceFseTables_valid`
-
-Composes three `resolveSingleFseTable_*_valid` calls (literal-length,
-offset, match-length) by threading position and validity through the
-bind chain.
-
-#### Theorem naming in the chain
-
-Follow the pattern `function_property`:
-- `buildFseTable_cells_size`, `buildFseTable_symbol_lt`, `buildFseTable_numBits_le`
-- `buildFseTable_valid` (composition)
-- `buildPredefinedFseTables_litLen_valid` (specialization)
-- `resolveSingleFseTable_predefined_valid` (mode-specific)
-- `resolveSequenceFseTables_valid` (top-level)
+**ValidOffsetHistory threading**: per-mode (`resolveOffset_gt3_valid`,
+`resolveOffset_repeat_valid`) → unified `resolveOffset_valid` → loop invariant
+`executeSequences_loop_history_valid` over the list induction. Use
+`validOffsetHistory_mk3` for the common 3-element case.
 
 ## Frame-Level Composition
 
-The frame loop `decompressZstdWF` uses well-founded recursion
-(`termination_by data.size - pos`). Frame-level theorems compose
-bottom-up from single-frame to multi-frame results.
+Frame loop `decompressZstdWF` uses WF recursion. Hierarchy:
+`decompressZstdWF_base` → `_single_standard_frame` → `_single_skippable_frame`
+→ `_skip_then_standard` → `_standard_then_standard`.
 
-### WF-level theorem hierarchy
+Single-frame proof: unfold; discharge `pos < data.size` guard from `hsize`+omega;
+rewrite magic via `hmagic`; rewrite frame via `hframe`; simplify advancement via
+`hadv`; apply `_base` when `pos' ≥ data.size`. Multi-frame theorems chain
+linearly — unfold to the dispatch, simplify, apply the single-frame theorem at
+the new position, threading `output` and `pos`.
 
-Established across PRs #887, #901, #912:
+Magic: skippable range `[0x184D2A50, 0x184D2A5F]` uses two bounds hypotheses
+(`≥ lo`, `≤ hi`) + `decide_eq_true` for the `Bool.and`; standard `0xFD2FB528`
+via `parseFrameHeader_magic`.
 
-```
-decompressZstdWF_base (base case: pos ≥ data.size → return output)
-  → decompressZstdWF_single_standard_frame
-  → decompressZstdWF_single_skippable_frame
-  → decompressZstdWF_skip_then_standard
-  → decompressZstdWF_standard_then_standard
-```
-
-### Single-frame theorem pattern
-
-```lean
-theorem decompressZstdWF_single_standard_frame (data : ByteArray)
-    (pos : Nat) (output content : ByteArray) (pos' : Nat)
-    (hsize : data.size ≥ pos + 4)
-    (hmagic : Binary.readUInt32LE data pos = Zip.Native.zstdMagic)
-    (hframe : Zip.Native.decompressFrame data pos = .ok (content, pos'))
-    (hadv : pos' > pos)
-    (hdone : pos' ≥ data.size) :
-    Zip.Native.decompressZstdWF data pos output = .ok (output ++ content)
-```
-
-**Proof structure**:
-1. Unfold `decompressZstdWF`
-2. Discharge guard `pos < data.size` using `hsize` and `omega`
-3. Rewrite magic number match using `hmagic`
-4. Rewrite frame decompression using `hframe`
-5. Simplify advancement check using `hadv`
-6. Apply `decompressZstdWF_base` since `pos' ≥ data.size`
-
-### Multi-frame composition pattern
-
-Multi-frame theorems compose by applying single-frame theorems:
-
-```lean
-theorem decompressZstdWF_skip_then_standard (data : ByteArray)
-    (pos : Nat) (output content : ByteArray) (skipPos framePos : Nat)
-    -- skippable frame hypotheses
-    (hmagic_lo : Binary.readUInt32LE data pos ≥ 0x184D2A50)
-    (hmagic_hi : Binary.readUInt32LE data pos ≤ 0x184D2A5F)
-    (hskip : Zip.Native.skipSkippableFrame data pos = .ok skipPos)
-    (hskip_adv : skipPos > pos)
-    -- standard frame hypotheses
-    (hmagic2 : Binary.readUInt32LE data skipPos = Zip.Native.zstdMagic)
-    (hframe : Zip.Native.decompressFrame data skipPos = .ok (content, framePos))
-    (hframe_adv : framePos > skipPos)
-    (hdone : framePos ≥ data.size) :
-    Zip.Native.decompressZstdWF data pos output = .ok (output ++ content)
-```
-
-**Key technique**: Unfold to the skippable dispatch, simplify, then
-directly apply `decompressZstdWF_single_standard_frame` at the new
-position `skipPos`. Multi-frame theorems chain linearly — each step
-passes `output` and `pos` to the next.
-
-### Magic number handling
-
-- **Skippable range** `[0x184D2A50, 0x184D2A5F]`: Two separate bounds
-  hypotheses (`≥ lo` and `≤ hi`), combined with `decide_eq_true` to
-  discharge the `Bool.and` condition
-- **Standard magic** `0xFD2FB528`: Simple equality from
-  `parseFrameHeader_magic`
-
-### API-level lifting pattern (WF → public API)
-
-API theorems wrap WF theorems with `pos=0` and `output=ByteArray.empty`:
-
-```lean
-theorem decompressZstd_single_frame (data : ByteArray)
-    (content : ByteArray) (pos' : Nat)
-    (hframe : decompressFrame data 0 = .ok (content, pos'))
-    (hend : pos' ≥ data.size) :
-    decompressZstd data = .ok content
-```
-
-**The `parseFrameHeader` existence extraction pattern**: API theorems
-need to establish preconditions (magic number, size bounds) that are
-implicit in the WF theorem. Extract them from the successful
-`decompressFrame` call:
+**API lifting (WF → public)**: wrap with `pos=0`, `output=ByteArray.empty`.
+Extract implicit preconditions from the successful `decompressFrame`:
 
 ```lean
 have ⟨hdr, afterHdr, hph⟩ : ∃ hdr afterHdr,
@@ -829,213 +280,102 @@ have ⟨hdr, afterHdr, hph⟩ : ∃ hdr afterHdr,
   | ok val => exact ⟨val.1, val.2, rfl⟩
 ```
 
-Then use `parseFrameHeader_magic` on `hph` to get the magic number,
-`parseFrameHeader_le_size` for size bounds, and `decompressFrame_pos_gt`
-for advancement. The final simplification is
-`ByteArray.empty_append content` (or `ByteArray.empty ++ content = content`).
+Then `parseFrameHeader_magic`/`_le_size` and `decompressFrame_pos_gt`; finish
+with `ByteArray.empty_append content`.
 
-### WF-level induction theorems
+WF-level induction theorems (`_output_size_ge`, `_prefix`) use
+`induction pos, output using decompressZstdWF.induct (data := data) generalizing result`
+with three cases: base (`_base`), error (contradict `.ok`), main (dispatch on
+magic, apply IH per branch).
 
-Monotonicity (`decompressZstdWF_output_size_ge`) and prefix preservation
-(`decompressZstdWF_prefix`) use the custom induction principle:
+## Two-Block Composition Matrix
 
-```lean
-induction pos, output using decompressZstdWF.induct (data := data) generalizing result
-```
+Proves `decompressBlocksWF` on a two-block frame yields
+`output ++ block1 ++ block2`. A 4×4 matrix over block types (raw, RLE,
+compressed-literals/numSeq=0, compressed-sequences/numSeq>0). Enumerated, not
+parameterized: the four types are too heterogeneous (raw/RLE pass state through;
+comp-literals updates Huffman only; comp-sequences updates Huffman + FSE +
+offset history) for a clean generic dependent-type theorem.
 
-Three cases: base case (apply `decompressZstdWF_base`), error (contradict
-`.ok`), main case (dispatch on magic, apply IH for both skippable and
-standard branches).
-
-## Two-Block Composition Template
-
-Two-block composition theorems prove that `decompressBlocksWF` applied
-to a frame with two blocks yields `output ++ block1 ++ block2`. These
-fill a 4×4 matrix (raw, RLE, compressed-literals, compressed-sequences).
-
-### Why enumeration, not parameterization
-
-The four block types are too heterogeneous for a generic theorem:
-- **Raw/RLE**: No state updates (Huffman table, FSE tables, offset history
-  pass through unchanged)
-- **Compressed-literals (numSeq=0)**: Updates Huffman table, no sequence
-  execution, no history update
-- **Compressed-sequences (numSeq>0)**: Updates Huffman table, FSE tables,
-  offset history — full state threading
-
-A generic `decompressBlocksWF_two_blocks` would need a dependent type
-parameter that selects different decompression functions, state updates,
-and preconditions per block type. The resulting theorem statement would
-be harder to read and use than 16 concrete instances.
-
-### The mechanical pattern
-
-Every two-block theorem has exactly this structure:
+Each theorem's proof is always two `rw` calls — a step theorem (non-last block)
+plus a single-block theorem (last block); the hard work lives in those, not the
+composition:
 
 ```lean
-theorem decompressBlocksWF_typeA_then_typeB (data : ByteArray) (off : Nat)
-    (windowSize : UInt64) (output : ByteArray)
-    (prevHuff : Option Zip.Native.ZstdHuffmanTable)
-    (prevFse : Zip.Native.PrevFseTables) (history : Array Nat)
-    -- Block 1 variables (type A, non-last)
-    (hdr1 : Zip.Native.ZstdBlockHeader) (afterHdr1 : Nat)
-    (block1 : ByteArray) (afterBlock1 : Nat)
-    -- Block 2 variables (type B, last)
-    (hdr2 : Zip.Native.ZstdBlockHeader) (afterHdr2 : Nat)
-    (block2 : ByteArray) (afterBlock2 : Nat)
-    -- Block 1 hypotheses (always the same structure)
-    (hoff1 : ¬ data.size ≤ off)
-    (hparse1 : Zip.Native.parseBlockHeader data off = .ok (hdr1, afterHdr1))
-    (hbs1 : ¬ hdr1.blockSize > 131072)
-    (hws1 : ¬ (windowSize > 0 && hdr1.blockSize.toUInt64 > windowSize))
-    (htype1 : hdr1.blockType = .typeA)                    -- ← varies
-    (hdecomp1 : decompressTypeA ... = .ok (block1, ...))  -- ← varies
-    (hnotlast1 : hdr1.lastBlock = false)
-    (hadv1 : ¬ afterBlock1 ≤ off)
-    -- Block 2 hypotheses (same structure, different type)
-    (hoff2 : ¬ data.size ≤ afterBlock1)
-    (hparse2 : Zip.Native.parseBlockHeader data afterBlock1 = .ok (hdr2, afterHdr2))
-    (hbs2 : ¬ hdr2.blockSize > 131072)
-    (hws2 : ¬ (windowSize > 0 && hdr2.blockSize.toUInt64 > windowSize))
-    (htype2 : hdr2.blockType = .typeB)                    -- ← varies
-    (hdecomp2 : decompressTypeB ... = .ok (block2, ...))  -- ← varies
-    (hlast2 : hdr2.lastBlock = true) :
-    Zip.Native.decompressBlocksWF data off windowSize output prevHuff prevFse history
-      = .ok (output ++ block1 ++ block2, afterBlock2) := by
-  rw [decompressBlocksWF_typeA_step ...]   -- step theorem for block 1
-  rw [decompressBlocksWF_single_typeB ...] -- single-block theorem for block 2
+rw [decompressBlocksWF_typeA_step ...]    -- block 1 (non-last)
+rw [decompressBlocksWF_single_typeB ...]  -- block 2 (last)
 ```
 
-**The proof is always two `rw` calls.** The hard work is in the step and
-single-block theorems, not in the composition.
+Prerequisites for a new cell `typeA_then_typeB`: `decompressBlocksWF_typeA_step`
+and `decompressBlocksWF_single_typeB`. Compressed-block hypothesis lists run 60+
+because of state threading (Huffman `huffTree1`→block2, FSE `fseTables1`, offset
+`history1`, window over `output ++ block1`).
 
-### Prerequisites for a new cell
+### Huffman `if let` dependent-match alpha-equivalence workaround
 
-Before proving a two-block composition `typeA_then_typeB`, you need:
-1. `decompressBlocksWF_typeA_step` — the step theorem for block type A
-   (non-last block advances to the next iteration)
-2. `decompressBlocksWF_single_typeB` — the single-block theorem for type B
-   (last block produces final output)
+When block 2 is compressed, `hlit2` references
+`(if let some ht := huffTree1 then some ht else prevHuff)`. Lean elaborates this
+`if let` as a dependent match capturing `hlit1` as an extra discriminant; the
+step theorem's output builds its own match with different bound-variable names,
+producing an alpha-equivalence mismatch the kernel rejects. Mandatory fix for
+compressed+compressed cells:
 
-Both follow the patterns in the `lean-wf-recursion` skill (step theorems)
-and the "Frame-Level Composition" section above.
-
-### Compressed block state threading
-
-For compressed blocks, the hypothesis list is longer because of state:
-- **Huffman table**: `huffTree1` produced by block 1 feeds block 2
-- **FSE tables**: `fseTables1` threaded through (updated for sequences)
-- **Offset history**: `history1` produced by block 1's sequences feeds block 2
-- **Window**: Block 2's window includes `output ++ block1` (accumulated output)
-
-The theorem statement for compressed-sequence pairs can exceed 60
-hypotheses. This is expected — the theorem captures all state threading
-that `decompressBlocksWF` performs internally.
-
-### Huffman table `if let` dependent-match workaround
-
-When block 2 is compressed, `hlit2` references the updated Huffman table
-`(if let some ht := huffTree1 then some ht else prevHuff)`. Lean
-elaborates this `if let` as a dependent match that captures `hlit1` as
-an extra discriminant. The step theorem's output creates its OWN match
-with different bound variable names, causing an alpha-equivalence
-mismatch that Lean's kernel rejects.
-
-**The fix (mandatory for compressed+compressed two-block theorems):**
-
-1. **`subst hpos_eq1`** immediately after `obtain` — eliminates
-   `afterHdr1`, so `hlit1` is never rewritten (no `hlit1'`). This
-   keeps the discriminant IDENTITY consistent.
-
-2. **`cases huffTree1`** after `rw [step_theorem]` — reduces the
-   `if let` match entirely in both the goal and `hlit2`, bypassing
-   the alpha-equivalence issue.
+1. `subst hpos_eq1` immediately after `obtain` — eliminates `afterHdr1` so
+   `hlit1` is never rewritten (no `hlit1'`), keeping the discriminant identity
+   consistent.
+2. After `rw [step_theorem]`, `cases huffTree1` — fully reduces the `if let`
+   match in both goal and `hlit2`, bypassing the mismatch.
 
 ```lean
--- After rw [step_theorem ... hlit1 ...]:
--- DON'T: exact single_block_theorem ... hlit2   -- alpha mismatch!
--- DO:
-cases huffTree1 <;>
-  exact single_block_theorem ... hlit2            -- match reduced, works!
+-- DON'T: exact single_block_theorem ... hlit2   -- alpha mismatch
+cases huffTree1 <;> exact single_block_theorem ... hlit2
 ```
 
-**When this matters:** Only when block 2 is compressed (has `hlit2`
-referencing the Huffman table update from block 1). Raw/RLE block 2
-theorems don't have this issue since they lack `hlit2`.
-
-### Two-block matrix completion status (2026-03-12)
-
-The 4×4 two-block matrix (raw, RLE, comp_zero_seq, comp_sequences) is
-**complete at all three levels**: block, frame, and API. All 16 cells
-are proved and merged. This milestone validates the step-theorem
-approach and the `frame_from_blocks` macro for mechanical lifting.
+Only needed when block 2 is compressed (has `hlit2`); raw/RLE block-2 theorems
+lack it. The 4×4 matrix is complete at all three levels (block, frame, API).
 
 ### Scaling beyond two blocks: WellFormedBlocks induction
 
-The two-block matrix characterizes frame output for exactly two blocks.
-For N-block frames (N ≥ 3), the approach is **induction via a
-`WellFormedBlocks` predicate**, not N-block enumeration:
-
-1. Define a `WellFormedBlocks` inductive predicate that captures what
-   it means for a byte sequence to contain a valid sequence of Zstd
-   blocks (each block parses correctly, non-last blocks have
-   `lastBlock = false`, the final block has `lastBlock = true`)
-2. Prove that `decompressBlocksWF` succeeds on any input satisfying
-   `WellFormedBlocks` — by induction on the predicate
-3. Each inductive case uses the corresponding step theorem (raw_step,
-   rle_step, compressed_step) plus the inductive hypothesis
-
-**Why a predicate, not enumeration:** 16 cells for 2-block, 64 for
-3-block, 256 for 4-block — enumeration grows as 4^N. The inductive
-predicate handles arbitrary N with a single theorem.
-
-**Key design decisions:**
-- The predicate should be parameterized by block type (raw/RLE/compressed)
-  at each step, not by the specific block content
-- State threading (Huffman tables, FSE tables, offset history) must be
-  part of the inductive predicate's hypotheses
-- The base case is `lastBlock = true` (single-block succeeds theorems)
-- The inductive step is `lastBlock = false` (step theorems)
-
-See `lean-content-preservation` skill for the content-level induction
-pattern and issue #1360 for the implementation plan.
+Do NOT start 3-block enumeration (grows as 4^N). Define a `WellFormedBlocks`
+inductive predicate (each block parses; non-last have `lastBlock = false`; final
+has `lastBlock = true`), parameterized by block *type* at each step (not
+content), carrying state threading in its hypotheses. Prove `decompressBlocksWF`
+succeeds on any `WellFormedBlocks` input by induction: base case `lastBlock=true`
+(single-block-succeeds theorems), step `lastBlock=false` (step theorems + IH).
+See `lean-content-preservation` skill.
 
 ## Content Pipeline: Block → Frame → API Lifting
 
-The content pipeline lifts block-level theorems through three layers.
-This pattern has been applied 20+ times and is highly mechanical.
+Three layers; highly mechanical.
 
-### Layer 1: Block-level (`decompressBlocksWF_*`)
+- **Block** (`decompressBlocksWF_*`, in `Zip/Spec/Zstd.lean`): hardest — WF
+  unfolding, state threading, block-type decompression.
+- **Frame** (`decompressFrame_*_content`, in `Zip/Spec/Zstd.lean`): proof is
+  (1) establish position bound, (2) invoke the block-level theorem as `hblocks`,
+  (3) `frame_from_blocks`.
+- **API** (`decompressZstd_*_content`, in `Zip/Spec/ZstdFrame.lean`): apply the
+  frame-level theorem, then `decompressZstd_single_standard_frame_content`
+  (finishing with `ByteArray.empty_append`).
 
-Block-level theorems live in `Zip/Spec/Zstd.lean` and prove what
-`decompressBlocksWF` returns for specific block type combinations.
-These are the hardest theorems — they involve WF unfolding, state
-threading, and block-type-specific decompression logic.
+### `frame_from_blocks` macro
 
-### Layer 2: Frame-level (`decompressFrame_*_content`)
-
-Frame-level theorems live in `Zip/Spec/Zstd.lean` and prove what
-`decompressFrame` returns. They use the `frame_from_blocks` local
-tactic macro, which mechanically handles the `decompressFrame` →
-`decompressBlocks` → `decompressBlocksWF` unfolding chain.
-
-#### The `frame_from_blocks` macro
-
-This 19-line tactic (defined near the top of `Zstd.lean`) is used
-by ~20 frame-level theorems:
+A ~19-line `local macro` near the top of `Zstd.lean`, used by ~20 frame-level
+theorems. Assumes context has `hframe` (frame result), `hh` (frame header parse),
+`hblocks` (block-level result). Mechanically handles the `decompressFrame` →
+`decompressBlocks` → `decompressBlocksWF` unfolding chain:
 
 ```lean
 local macro "frame_from_blocks" : tactic =>
   `(tactic| (
     unfold Zip.Native.decompressFrame at hframe
     dsimp only [Bind.bind, Except.bind] at hframe
-    rw [hh] at hframe                              -- plug in frame header
+    rw [hh] at hframe                              -- frame header
     simp only [pure, Except.pure] at hframe
     split at hframe                                 -- dictionary check
     · split at hframe                               -- window size check
       · exact nomatch hframe
       · unfold Zip.Native.decompressBlocks at hframe
-        rw [hblocks] at hframe                      -- plug in block-level result
+        rw [hblocks] at hframe                      -- block-level result
         simp only [ByteArray.empty_append] at hframe
         grind
     · unfold Zip.Native.decompressBlocks at hframe
@@ -1044,107 +384,30 @@ local macro "frame_from_blocks" : tactic =>
       grind))
 ```
 
-**What it assumes:** The proof context has `hframe` (frame result),
-`hh` (frame header parse result), and `hblocks` (block-level result).
+### File organization (both files past 1000 lines, chronic merge conflicts)
 
-#### Frame-level theorem pattern
-
-```lean
-theorem decompressFrame_typeA_then_typeB_content (data : ByteArray) (pos : Nat)
-    (output : ByteArray) (pos' : Nat)
-    (header : Zip.Native.ZstdFrameHeader) (afterHeader : Nat)
-    -- block hypotheses...
-    (hframe : Zip.Native.decompressFrame data pos = .ok (output, pos'))
-    (hh : Zip.Native.parseFrameHeader data pos = .ok (header, afterHeader))
-    ... :
-    output = block1 ++ block2 := by
-  have hoff := parseBlockHeader_data_not_le ...
-  have hblocks := decompressBlocksWF_typeA_then_typeB ...  -- block-level theorem
-  frame_from_blocks                                        -- mechanical lifting
-```
-
-**Key**: The proof is always: (1) establish position bound, (2) invoke
-block-level theorem, (3) `frame_from_blocks`. The block-level theorem
-does the heavy lifting.
-
-### Layer 3: API-level (`decompressZstd_*_content`)
-
-API-level theorems live in `Zip/Spec/ZstdFrame.lean` and prove what
-`decompressZstd` returns. The proof applies the frame-level theorem
-then uses `decompressZstd_single_frame` or similar:
-
-```lean
-theorem decompressZstd_typeA_then_typeB_content (data : ByteArray)
-    -- All hypotheses from frame-level, plus:
-    (hskip : ¬ Zip.Native.isSkippableFrame data 0)
-    (hmagic : Zip.Native.isStandardFrame data 0) :
-    Zip.Native.decompressZstd data = .ok (block1 ++ block2) := by
-  -- Apply the single-frame lifting theorem
-  exact decompressZstd_single_standard_frame_content data 0 ByteArray.empty
-    (block1 ++ block2) ...
-    (by rw [ByteArray.empty_append]; exact decompressFrame_typeA_then_typeB_content ...)
-```
-
-### When to stop enumerating
-
-The two-block matrix (4×4 = 16 cells) is **complete at all levels**
-as of 2026-03-12. The next step is the WellFormedBlocks induction
-predicate for N-block generalization. Do NOT start 3-block enumeration
-(64 cells). See `lean-content-preservation` skill.
-
-### File organization for content theorems
-
-| Layer | File | Current size |
-|-------|------|-------------|
-| Block | `Zip/Spec/Zstd.lean` | ~6280 lines (**critical — needs split**) |
-| Frame | `Zip/Spec/Zstd.lean` | (same file) |
-| API | `Zip/Spec/ZstdFrame.lean` | ~2600 lines (**needs split**) |
-
-Both files are well past the 1000-line threshold and cause chronic
-merge conflicts (see `agent-pr-recovery` skill). `Zstd.lean` should
-be split into block-level vs frame-level vs composition theorems.
-`ZstdFrame.lean` should separate API-level succeeds from content
-theorems.
+| Layer | File | Size |
+|-------|------|------|
+| Block + Frame | `Zip/Spec/Zstd.lean` | ~6280 lines (needs split into block / frame / composition) |
+| API | `Zip/Spec/ZstdFrame.lean` | ~2600 lines (separate API-succeeds from content) |
 
 ## Anti-Patterns
 
-- **Don't restate the implementation**: `f x = fImpl x` proves nothing.
-  Predicates should express properties (bounds, invariants, structural
-  constraints) independently of implementation details.
-
-- **Don't skip Decidable instances**: Every predicate needs one. Without
-  it, concrete examples can't be proved by `decide`.
-
-- **Don't attempt loop proofs in a spec creation session**: These are
-  genuinely hard and deserve their own focused session. Creating the
-  predicate and stating the theorem is the deliverable.
-
-- **Don't forget the module docstring**: Each spec file begins with
-  `/-! ... -/` describing the RFC section, the specification layers,
-  and what predicates are defined.
-
-- **Don't validate theorem statements by attempting proof only**: Use
-  `#eval` on concrete inputs first to catch false statements early.
-  Three false theorems were discovered during this project, each
-  costing multiple sessions. See "Theorem Statement Validation" above.
+- Don't restate the implementation (`f x = fImpl x`); predicates express
+  bounds/invariants/structure independent of implementation.
+- Don't skip `Decidable` instances — concrete examples need `decide`.
+- Don't attempt loop proofs in a spec-creation session; the predicate + stated
+  theorem is the deliverable.
+- Don't omit the module `/-! ... -/` docstring (RFC section, layers, predicates).
+- Don't validate statements by proof attempts alone — `#eval`/`decide` first.
 
 ## Cross-References
 
-- **WF recursion patterns** (unfolding, `f.induct`, termination measures):
-  `lean-wf-recursion` skill
-- **Non-advancement guard for WF termination**:
-  `lean-wf-recursion` skill, "Non-Advancement Guard Pattern"
-- **Monadic unfolding** (`Except.bind` chains, `nomatch` for contradictions):
-  `lean-monad-proofs` skill
-- **Bool-to-Prop bridging** (`beq_iff_eq`, `Bool.and_eq_true`):
-  `lean-monad-proofs` skill, "`eq_of_beq` for BEq-to-Eq Conversion"
-- **Array literal indexing** (`rcases` + `rfl`/`omega`):
-  `lean-simp-tactics` skill, "Array Literal Indexing After `rcases` Case Split"
-- **`1 <<< n` and `2^n`** in offset decoding proofs:
-  `lean-simp-tactics` skill, "`omega` Cannot Handle Exponentiation"
-- **Auto-generated dagger lemmas** (`UInt32.reduceBEq✝`):
-  `lean-simp-tactics` skill, "Dagger Lemmas" — use `decide` or `show ... from by decide`
-- **Content preservation** (`_getElem_lt`, `_prefix` proofs):
-  `lean-content-preservation` skill
-- **Proof quality review** (bare simp conversion, dead code, helper extraction):
-  `proof-review-checklist` skill
+- WF recursion (unfolding, `f.induct`, termination, Non-Advancement Guard):
+  `lean-wf-recursion`
+- Monadic unfolding (`Except.bind` chains, `nomatch`), Bool↔Prop bridging:
+  `lean-monad-proofs`
+- Array-literal indexing, `1 <<< n`/`2^n`, dagger lemmas (`UInt32.reduceBEq✝` →
+  `decide`): `lean-simp-tactics`
+- Content preservation (`_getElem_lt`, `_prefix`): `lean-content-preservation`
+- Proof cleanup (bare-simp conversion, helper extraction): `proof-review-checklist`

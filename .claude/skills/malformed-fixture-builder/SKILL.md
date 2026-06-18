@@ -6,10 +6,10 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 
 # Malformed-Fixture Builder (Track E)
 
-This skill captures the conventions that converged across the Track E
-security-audit fixture cluster (PRs #1543, #1544, #1545, #1546, #1554,
-#1555). Use it whenever an issue asks you to add a new malformed
-archive fixture, archive-slip fixture, or CD/LH mismatch fixture.
+Conventions converged across the Track E security-audit fixture
+cluster (PRs #1543, #1544, #1545, #1546, #1554, #1555). Use whenever
+an issue asks for a new malformed archive, archive-slip, or CD/LH
+mismatch fixture.
 
 ## Layout
 
@@ -108,13 +108,10 @@ compressed/uncompressed claims), use:
 
     0x1000000000000000  -- = 2^60 bytes ≈ 1.15 EiB
 
-Rationale (from #1543's progress entry): *"using a named power of two
-at exabyte scale makes the intent obvious in future hex-diffs."* Any
-value exceeding `fileSize - headerBytes` fires the same span check,
-but a canonical sentinel keeps the intent readable.
-
-Use this same value in sibling fixtures (#1544 mirrored #1543
-verbatim) so cross-fixture hex-diffs are minimal.
+Any value exceeding `fileSize - headerBytes` fires the same span
+check, but this canonical sentinel keeps the intent readable in
+hex-diffs. Use the same value in sibling fixtures (#1544 mirrored
+#1543 verbatim) so cross-fixture hex-diffs are minimal.
 
 ## Determinism checklist
 
@@ -143,11 +140,10 @@ Sources of nondeterminism to avoid:
 ## Per-slot printable-prefix discipline (interior-NUL fixtures)
 
 Per-slot fixtures that smuggle an interior NUL into a fixed-width
-header field should use a **slot-distinct printable ASCII prefix**.
-That prefix is what a parser-differential caller would see if
-`Binary.fromLatin1` (or its reader equivalent) truncated at the
-NUL — making it slot-distinct encodes slot-identity for human
-readers of `xxd` diffs.
+header field should use a **slot-distinct printable ASCII prefix** —
+what a parser-differential caller would see if `Binary.fromLatin1`
+(or its reader equivalent) truncated at the NUL, encoding
+slot-identity for readers of `xxd` diffs.
 
 Accumulated post-#1928 wave examples (sources:
 `scripts/build-ustar-malformed-fixtures.lean` and

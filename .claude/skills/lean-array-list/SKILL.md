@@ -42,8 +42,7 @@ exact getElem?_pos arr i h  -- proves arr[i]? = some arr[i]
 
 ## `getElem!_def` + `getElem?_eq_some_iff` for Panic-Indexed Array Proofs
 
-When proving properties about `arr[idx]!` (panic-indexed access), unfold
-with `getElem!_def` and case-split on whether the index is in bounds:
+For `arr[idx]!`, unfold with `getElem!_def` and case-split on in-bounds:
 
 ```lean
 simp only [getElem!_def]
@@ -80,10 +79,9 @@ the anonymous hypothesis retains the Fin.val form and omega still sees two disti
 variables. Always use the annotated form.
 
 **Deeper mismatch — `GetElem` vs `getInternal`**: After `unfold f at h`, the goal
-may use `Array.getInternal` (the raw internal accessor) while a helper lemma uses
-`arr[i]'hi` (the `GetElem` typeclass). Even with type annotation, `omega` treats
-these as distinct expressions. The fix is `exact` with `Nat.le_trans` (or similar)
-instead of `omega`, since `exact` does full definitional unification:
+may use `Array.getInternal` while a helper lemma uses `arr[i]'hi` (`GetElem`). Even
+with type annotation, `omega` treats these as distinct. Fix: use `exact` with
+`Nat.le_trans` (or similar) instead of `omega` — `exact` does definitional unification:
 
 ```lean
 -- BAD: omega can't unify GetElem-based and getInternal-based array access
@@ -264,37 +262,26 @@ Then use `rw [getD_set!]; split` instead of manual unfolding.
 
 ## Singleton Array Fin Elimination
 
-When proving properties about `arr[i]` where `arr` has exactly 1 element and
-`i : Fin arr.size`, direct `rw`/`simp` on the index fails due to dependent types
-(the bound proof depends on `i`). The solution:
+For `arr[i]` with `arr` size 1 and `i : Fin arr.size`, `rw`/`simp` on the index
+fails (the bound proof depends on `i`). Use `Fin.ext (by omega)` + `subst` to
+eliminate `i`, then `show` matches the concrete value:
 
 ```lean
--- arr has size 1 (by rfl or existing theorem)
-have hsz : arr.size = 1 := rfl
--- Construct a Fin with a compatible proof term, prove equality via Fin.ext
+have hsz : arr.size = 1 := rfl  -- by rfl or existing theorem
 have : i = ⟨0, hsz ▸ Nat.zero_lt_one⟩ := Fin.ext (by omega)
--- subst eliminates i entirely, enabling definitional reduction
-subst this
--- Now arr[⟨0, _⟩] reduces and `show`/`change` can match the concrete value
+subst this  -- now arr[⟨0, _⟩] reduces
 show someConcreteValue
 ```
 
-**Why other approaches fail:**
-- `rw [show i.val = 0 from ...]` on `arr[i]` hits dependent type errors
-- `simp only [Array.getElem_singleton]` needs Nat indexing, not Fin
-- `Fin.getElem_fin` doesn't exist in this toolchain
-- `change`/`show` before subst can't reduce `arr[i]` with abstract `i`
-
-**The pattern**: `Fin.ext (by omega)` + `subst` is the reliable way to
-eliminate a Fin index in a singleton array. The `hsz ▸ Nat.zero_lt_one`
-constructs a proof term that `subst` can handle.
+`hsz ▸ Nat.zero_lt_one` builds a proof term `subst` can handle. Approaches that
+fail: `rw [show i.val = 0 ...]` (dependent type errors), `Array.getElem_singleton`
+(needs Nat index, not Fin), `Fin.getElem_fin` (doesn't exist here), `show`/`change`
+before `subst` (can't reduce `arr[i]` with abstract `i`).
 
 ## Build Missing API, Don't Work Around It
 
-If a proof is blocked by missing lemmas for standard types (ByteArray, Array, List,
-UInt32, etc.), add the missing lemma to `ZipForStd/` in the appropriate namespace.
-For example, if `ByteArray.foldl_toList` is missing, add it in
-`ZipForStd/ByteArray.lean` in the `ByteArray` namespace. These lemmas are candidates
-for upstreaming to Lean's standard library — write them as if they belonged there.
-Don't use workarounds like going through `.data.data.foldl` when the right fix is a
-proper API lemma.
+If a proof is blocked by a missing lemma for a standard type (ByteArray, Array,
+List, UInt32, ...), add it to `ZipForStd/` in the matching namespace (e.g. a
+missing `ByteArray.foldl_toList` goes in `ZipForStd/ByteArray.lean`). Write it as
+upstream-quality — these are candidates for Lean's stdlib. Don't route around the
+gap (e.g. via `.data.data.foldl`) when a proper API lemma is the right fix.

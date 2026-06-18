@@ -6,64 +6,62 @@ allowed-tools: Bash, Read, Glob, Grep, Edit, Write
 
 # Proven-Bounds Data Access in Lean 4
 
-Converting `xs[i]!` (runtime bounds check, panics on out-of-bounds) to
-`xs[i]` (statically proven bounds) by ensuring `i < xs.size` is in scope.
+Convert `xs[i]!` (runtime check, panics out-of-bounds) to `xs[i]`
+(statically proven) by getting `i < xs.size` into scope.
+
+Conversion in brief:
+- Find each `]!` site; trace where its index bound comes from (a guard, a
+  caller hypothesis, or arithmetic via `omega`).
+- Add `if h :` guards / propagate caller hypotheses, then swap `]!` → `]`.
+- Refactor `for`/`while` to well-founded recursion if you need the bound in a
+  proof (opaque `loop✝` can't be unfolded).
+- Repair affected spec proofs (see pitfall: spec repair).
+- Don't convert speculatively: only when the function is on the proof path and
+  the bound is straightforward. Mechanical conversion of every `]!` is not
+  always worth the complexity.
 
 ## Core Pattern: Guard Capture with `if h :`
 
-The fundamental technique: use `if h : condition then` to bind a proof.
+Use `if h : condition then` to bind a proof of the condition.
 
 ```lean
--- BEFORE (runtime check)
-let val := data[pos]!
-
--- AFTER (proven bounds)
+-- BEFORE: let val := data[pos]!
 if h : pos < data.size then
-  let val := data[pos]  -- h : pos < data.size is in scope
+  let val := data[pos]        -- h : pos < data.size in scope
 else
   throw "out of bounds"
 ```
 
-The colon in `if h :` is critical — plain `if h` captures a `Bool`, not
-a `Prop` proof. Only `if h :` (decidable proposition) gives a usable
-hypothesis.
+The colon is critical: plain `if h` captures a `Bool`, not a `Prop` proof.
+Only `if h :` (decidable proposition) gives a usable hypothesis.
 
-## Pattern: Nested Guards in Except Monads
-
-Chain multiple bounds checks, each capturing its own hypothesis:
+Nest guards in `Except` monads, each capturing its own hypothesis:
 
 ```lean
 if h1 : code < table1.size then
   let v1 := table1[code]
   if h2 : idx < table2.size then
-    let v2 := table2[idx]
-    -- both h1 and h2 in scope
+    let v2 := table2[idx]     -- both h1 and h2 in scope
   else throw "table2 out of range"
 else throw "table1 out of range"
 ```
 
-## Pattern: Loop Bound Capture with `for h : i in`
-
-Use `h :` in `for` loops to capture the loop index bound:
+## Loop Bound Capture: `for h : i in`
 
 ```lean
 for h : i in [:data.size] do
-  let byte := data[i]  -- h : i < data.size in scope
+  let byte := data[i]         -- h : i < data.size in scope
 ```
 
 Without `h :`, the loop variable has no proof attached.
 
-## Pattern: Well-Founded Recursion Replacement
+## Well-Founded Recursion Replacement
 
-`while` and `for` loops generate opaque `loop✝` functions that cannot be
-unfolded in proofs. Replace with explicit recursion:
+`while`/`for` generate opaque `loop✝` functions that cannot be unfolded in
+proofs. Replace with explicit recursion; the guard does double duty as bounds
+proof and termination measure:
 
 ```lean
--- BEFORE (opaque loop)
-for i in [:n] do
-  result := result.push data[pos + i]!
-
--- AFTER (proof-friendly recursion)
 def copyLoop (data : ByteArray) (pos count : Nat) (dst : ByteArray)
     (i : Nat) : ByteArray :=
   if hi : i < count then
@@ -74,226 +72,160 @@ def copyLoop (data : ByteArray) (pos count : Nat) (dst : ByteArray)
 termination_by count - i
 ```
 
-The guard `hi : i < count` provides both the bounds proof and the
-termination measure (`count - i` decreases).
+## Caller Propagation of Size Invariants
 
-## Pattern: Caller Propagation of Size Invariants
-
-When a function receives data whose size is constrained by the caller,
-thread the proof through:
+When the caller has already verified the size, thread the proof in as a
+parameter rather than re-checking at every access:
 
 ```lean
--- Function signature includes size constraint
-def processBlock (data : ByteArray) (pos : Nat) (hpos : pos + 3 ≤ data.size) : ... :=
+def processBlock (data : ByteArray) (pos : Nat) (hpos : pos + 3 ≤ data.size) :=
   let byte0 := data[pos]      -- by omega (from hpos)
-  let byte1 := data[pos + 1]  -- by omega (from hpos)
-  let byte2 := data[pos + 2]  -- by omega (from hpos)
+  let byte1 := data[pos + 1]  -- by omega
+  let byte2 := data[pos + 2]  -- by omega
 ```
 
-When the caller has already verified `pos + 3 ≤ data.size`, passing it
-as a hypothesis avoids re-checking at every access site.
+## Generational Guarded Wrapper (when threading would cascade)
 
-## Pattern: Generational guarded wrapper (when threading would cascade)
+Caller propagation only works if you can add the hypothesis to the callers
+too. When the function is a **shared helper whose correctness proofs are
+stated for an *arbitrary* array** (no size hypothesis — common for heuristic
+state like a hash table / `prev` chain / DP cost arrays that "never enter the
+proof"), adding a hypothesis in-place cascades it into every such proof
+(`mainLoop_valid`, `_encodable`, …) and breaks them.
 
-Caller propagation works only if you can add the size hypothesis to the
-callers too. When the function is a **shared helper whose correctness proofs
-are stated for an *arbitrary* array** (no size hypothesis — common for
-heuristic state like a hash table / `prev` chain / DP cost arrays that
-"never enter the proof"), adding a hypothesis in-place cascades it into every
-one of those proofs (`mainLoop_valid`, `_encodable`, …) and breaks them.
-
-Instead, do generational refinement with a **guarded wrapper** — three pieces:
+Instead do generational refinement with a guarded wrapper, three pieces:
 
 ```lean
 -- 1. Proven-bounds copy: identical body, []! → [], takes the size hypothesis.
-def fooFast (... ) (hps : pos ≤ prev.size) (...) := ... prev[cand]'(by omega) ...
+def fooFast (...) (hps : pos ≤ prev.size) (...) := ... prev[cand]'(by omega) ...
 
 -- 2. Wrapper with the ORIGINAL signature: one runtime check per OUTER
 --    iteration establishes the invariant; fall back to the panic-checked
---    reference when it can't be shown (the fallback is unreachable at runtime).
+--    reference when it can't be shown (fallback is unreachable at runtime).
 @[inline] def fooGuarded (...) (... no hps ...) :=
   if hps : pos ≤ prev.size then fooFast ... hps ... else foo ...   -- `foo` = reference
 
 -- 3. Equivalence (in the Spec file): wrapper = reference, by `split`.
-theorem fooFast_eq    ... : fooFast ... = foo ... := by induction ...   -- bridge []'h ↔ []! per step
-theorem fooGuarded_eq ... : fooGuarded ... = foo ... := by unfold fooGuarded; split; · exact fooFast_eq ..; · rfl
+theorem fooFast_eq    ... : fooFast ... = foo ... := by induction ...
+theorem fooGuarded_eq ... : fooGuarded ... = foo ... := by
+  unfold fooGuarded; split; · exact fooFast_eq ..; · rfl
 ```
 
-The runtime (iterative) functions call `fooGuarded`; the reference functions
-and **all** their proofs stay untouched. Each iter-vs-reference equivalence
-proof gains just one line near the top: `simp only [fooGuarded_eq, ...]`
-rewrites the wrappers back to the reference, then the proof proceeds verbatim.
-The one outer-loop check is amortised over the whole inner loop, so the
-inner accesses are statically unchecked. This is the house style
-(`track-d-state.md` step 4; the `lz77Chain` matcher conversion, Wave 2d).
+Runtime (iterative) functions call `fooGuarded`; the reference functions and
+**all** their proofs stay untouched. Each iter-vs-reference equivalence proof
+gains one line near the top — `simp only [fooGuarded_eq, ...]` rewrites the
+wrappers back to the reference, then proceeds verbatim. The single outer-loop
+check is amortised over the whole inner loop, so inner accesses are statically
+unchecked.
 
-In `fooFast_eq` (a fuel/measure induction), the only per-step difference is
-`prev[cand]'h` vs `prev[cand]!`; bridge with `getElem!_pos` (see pitfall 10),
-then `simp only [Nat.add_sub_cancel, ih]` closes the recursion. If `fooFast`
-carries a size hypothesis whose type mentions an array you induct on, include
-it in `generalizing` (e.g. `generalizing j hashTable prev hht`).
+In `fooFast_eq` (a fuel/measure induction) the only per-step difference is
+`prev[cand]'h` vs `prev[cand]!`; bridge with `getElem!_pos` (see pitfall
+below), then `simp only [Nat.add_sub_cancel, ih]` closes the recursion. If
+`fooFast` carries a size hypothesis whose type mentions an array you induct on,
+include it in `generalizing` (e.g. `generalizing j hashTable prev hht`).
 
-## Tactics for Bounds Proofs
+## Bounds Tactics
 
-- **`omega`**: The primary workhorse. Solves linear arithmetic over `Nat`
-  including `i < xs.size` goals when `h : i < xs.size` or similar is in
-  scope. Also handles `pos + k < data.size` from `hpos : pos + n ≤ data.size`
-  when `k < n`.
-- **`Nat.lt_of_lt_of_le`**: When you have `h1 : i < n` and `h2 : n ≤ m`,
-  conclude `i < m`. Usually `omega` handles this automatically.
-- **`Array.size_set`**: After `arr.set i v`, the size is unchanged:
-  `(arr.set i v).size = arr.size`. Useful when proving bounds through
-  array mutations.
+`omega` is the workhorse: it solves `i < xs.size` from a matching guard, and
+`pos + k < data.size` from `hpos : pos + n ≤ data.size` when `k < n`. After
+`arr.set i v`, `Array.size_set` gives `(arr.set i v).size = arr.size` for
+reasoning through mutations.
 
-## Common Pitfalls
+## Pitfalls
 
-### 1. `]!` on derived indices
-
-```lean
-if h : i < lengths.size then
-  let len := lengths[i]         -- proven bounds (good)
-  let code := nextCode[len]!    -- still needs ! (len is a value, not bounded by h)
-```
-
-The guard `h : i < lengths.size` only proves bounds for `lengths`, not
-for `nextCode`. To prove `nextCode[len]`, you need a separate
+### `]!` on derived indices
+A guard `h : i < lengths.size` proves bounds only for `lengths`. A read
+`nextCode[len]` (where `len := lengths[i]`) needs a separate
 `len < nextCode.size` proof.
 
-### 2. `.set!` vs `[]` asymmetry
+### `.set!` vs `[]` asymmetry
+`Array.set!` / `ByteArray.set!` silently no-op out-of-bounds and never need
+proofs. Only read access (`[]`) requires them.
 
-`Array.set!` and `ByteArray.set!` silently no-op on out-of-bounds.
-They never need bounds proofs. Only read access (`[]`) requires proofs.
+### UInt conversion opacity
+`data[pos.toNat]` where `pos : UInt32` — the `.toNat` is opaque to `omega`.
+You may need `have : pos.toNat < data.size := by omega` (given a known
+`pos < data.size.toUInt32`).
 
-### 3. UInt conversion opacity
-
-`data[pos.toNat]` where `pos : UInt32` — the `.toNat` conversion makes
-the index opaque to `omega`. You may need:
+### Do-notation guard: no `¬cond` after a bare `if h : ... then throw`
 ```lean
-have : pos.toNat < data.size := by omega  -- if pos < data.size.toUInt32 is known
-```
-
-### 4. Termination and bounds are intertwined
-
-The same guard often serves double duty:
-```lean
-if h : pos < data.size then
-  -- h proves data[pos] is valid
-  -- h also proves data.size - (pos + 1) < data.size - pos (for termination)
-  recurse (pos + 1)
-termination_by data.size - pos
-decreasing_by omega  -- uses h
-```
-
-### 5. Don't convert speculatively
-
-Only convert `]!` to `]` when:
-- The function is on the proof path (needs verification)
-- The bounds proof is straightforward (guard already exists or `omega` suffices)
-- The change doesn't require restructuring the entire function
-
-Mechanical conversion of every `]!` is not always worth the complexity.
-
-### 6. Spec proof repair after conversion
-
-Converting `]!` to `]` changes the term structure, breaking existing proofs:
-
-- **`ite` → `dite`**: `if h : cond` desugars to `dite`, not `ite`. Replace
-  `if_pos`/`if_neg` with `dif_pos`/`dif_neg`, and `↓reduceIte` with
-  `dite_false`/`dite_true` in simp calls.
-- **`getElem!_pos` bridge**: Spec proofs that reference `data[pos]!` can be
-  updated using `rw [getElem!_pos data pos (by omega)]` to rewrite
-  hypotheses to match the new `data[pos]'(proof)` term.
-- **`dite` closure bloat**: `dite` generates larger closure terms than `ite`,
-  which can cause `simp only` to exceed step limits. If this happens,
-  try `unfold` + `split` instead of `simp only [functionName, ...]`.
-- **`forIn` loop body term matching**: Spec proofs using
-  `forIn_range_always_ok'` require exact syntactic matching of the loop
-  body closure. Changing `data[i]!` to `data[i]'(proof)` inside a loop
-  creates a different closure that won't match. You may need to update
-  the `suffices` block or refactor to well-founded recursion.
-
-### 7. Do-notation guard caveat
-
-In do-notation, `if h : cond then throw "err"` does NOT make `¬cond`
-available in the continuation after the `if`. You must use an explicit
-`else` branch:
-```lean
--- WRONG: ¬cond NOT available after this
+-- WRONG: h is NOT in scope below
 if h : cond then throw "err"
-let x := ...  -- h is not in scope here
-
--- RIGHT: ¬cond available in else branch
-if h : cond then
-  throw "err"
-else
-  let x := ...  -- h : ¬cond is in scope
+let x := ...
+-- RIGHT: ¬cond available in else
+if h : cond then throw "err"
+else let x := ...
 ```
 
-### 8. `unless` rebinds `mut` variables, dropping bounds
-
-Pitfall #7 covered how `if h : cond then throw` leaves no `¬cond` in
-scope afterwards. `unless` has the same flavour and an extra sting:
-even when its body doesn't touch a `mut` variable, the elaborator
-threads the `mut`-state through it and emits a fresh binding in the
-continuation. Any bound you captured on that variable earlier in the
-block is no longer attached to the `pos` you see after the `unless`.
+### `unless` rebinds `mut` variables, dropping bounds
+Even when its body doesn't touch a `mut` variable, the elaborator threads the
+`mut`-state through `unless` and emits a fresh binding in the continuation.
+Any bound captured earlier is no longer attached to the `pos` you see after.
 
 ```lean
--- WRONG: hHdr bounds the `pos` at the `if`, but after the first
--- `unless`, `pos` is a fresh `Nat` — hHdr no longer helps the
--- `data[pos + 1]` access below.
+-- WRONG: after the first `unless`, `pos` is a fresh Nat — hHdr no longer helps
 if hHdr : pos + 10 ≤ data.size then
   let id1 := data[pos]
   unless id1 == 0x1f do return result
   let id2 := data[pos + 1]   -- bound unprovable: `pos` was rebound
 ```
 
-Remedy: **read every byte you need from the array before any
-control-flow branch that may rebind the `mut`**, then branch on the
-captured values:
+Remedy: read every byte you need **before** any control-flow branch that may
+rebind the `mut`, then branch on the captured values:
 
 ```lean
--- RIGHT: all reads happen while hHdr is alive
 if hHdr : pos + 10 ≤ data.size then
   let id1 := data[pos]
   let id2 := data[pos + 1]
   let cm  := data[pos + 2]
-  let flg := data[pos + 3]
   unless id1 == 0x1f && id2 == 0x8b do return result
   unless cm == 8 do throw "unsupported"
   pos := pos + 10
-  ...
 ```
 
-Symptom to look for: a `data[pos + k]` failing with a bounds goal
-that `omega` can't close, even though an earlier `if h : pos + N ≤
-data.size` should cover it. Scan upward for the first `unless` (or
-`if ... then throw` without an `else`) and hoist the reads above it.
+Symptom: a `data[pos + k]` failing a bounds goal `omega` can't close, despite
+an earlier `if h : pos + N ≤ data.size`. Scan upward for the first `unless` (or
+`if ... then throw` without `else`) and hoist the reads above it.
 
-### 9. `List.pmap` and other `@[expose]` combinators break `rfl` specs
+### Termination and bounds intertwine
+One guard often serves both:
+```lean
+if h : pos < data.size then recurse (pos + 1)
+termination_by data.size - pos
+decreasing_by omega   -- uses h
+```
 
-When a native function is used inside a spec whose final step is
-`rfl` (common for algorithmic-correspondence specs), inlining an
-`@[expose]` combinator like `List.pmap` can trigger `maximum
-recursion depth has been reached` during elaboration. `@[expose]`
-makes the definition eagerly unfold on both sides of the equality,
-and the kernel recurses through the `pmap` skeleton on each side
-simultaneously.
+### Spec proof repair after conversion
+Converting `]!` → `]` changes term structure and breaks existing proofs:
+- **`ite` → `dite`**: `if h : cond` desugars to `dite`. Replace
+  `if_pos`/`if_neg` with `dif_pos`/`dif_neg`, and `↓reduceIte` with
+  `dite_false`/`dite_true`.
+- **`getElem!_pos` bridge**: rewrite `data[pos]!` references with
+  `rw [getElem!_pos data pos (by omega)]` to match the new `data[pos]'(proof)`.
+- **`dite` closure bloat**: `dite` makes larger closures than `ite`, which can
+  push `simp only` past step limits. Try `unfold` + `split` instead of
+  `simp only [functionName, ...]`.
+- **`forIn` loop body matching**: `forIn_range_always_ok'` needs exact
+  syntactic match of the body closure. Changing `data[i]!` to `data[i]'(proof)`
+  inside a loop yields a different closure that won't match — update the
+  `suffices` block or refactor to well-founded recursion.
+
+### `@[expose]` combinators (e.g. `List.pmap`) break `rfl` specs
+Inlining an `@[expose]` combinator like `List.pmap` inside a def whose spec
+ends in `rfl` can trigger `maximum recursion depth has been reached` during
+elaboration: `@[expose]` eagerly unfolds on both sides of the equality and the
+kernel recurses through the `pmap` skeleton on each side simultaneously.
 
 ```lean
--- Inline pmap inside a def whose spec ends in `rfl`:
 def deflateDynamic ... :=
   let litFreqPairs :=
     (List.range litFreqs.size).pmap
       (fun i (h : i < litFreqs.size) => (i, litFreqs[i]'h)) ...
-  ...
-
-example : deflateDynamic data = ... := by
-  unfold deflateDynamic; rfl   -- BOOM: maximum recursion depth
+example : deflateDynamic data = ... := by unfold deflateDynamic; rfl  -- BOOM
 ```
 
-Remedy: wrap the `pmap` call in a named helper so the elaborator
-does not recurse into its body on both sides of the `rfl`:
+Remedy: hide the `pmap` behind a named helper so the unfolder doesn't recurse
+into its body on both sides:
 
 ```lean
 def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
@@ -301,43 +233,24 @@ def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
     (fun i (h : i < freqs.size) => (i, freqs[i]'h))
     (fun _ hi => List.mem_range.mp hi)
 
-def deflateDynamic ... :=
-  let litFreqPairs := freqsToPairs litFreqs
-  ...
+def deflateDynamic ... := let litFreqPairs := freqsToPairs litFreqs; ...
 ```
 
-Hiding the combinator behind a function symbol stops the unfolder
-cold. Expect to see this when a spec that was `rfl` before a
-proven-bounds conversion now reports `maximum recursion depth`.
+Expect this when a spec that was `rfl` before conversion now reports `maximum
+recursion depth`.
 
-### 10. `let`-bound index blocks `rw [getElem!_pos]`
-
-When bridging `a[i]'h` ↔ `a[i]!` in a `*Fast_eq` proof, the index is usually
-a `let`/`have`-bound local from the unfolded body (`let hsh := hash3 …; …
-a[hsh]!`). `rw [getElem!_pos a hsh h]` **fails to fire** — you must spell the
-index as the *unfolded expression* (`hash3 …`), which doesn't syntactically
-match the bound `hsh`. Fix: fold it into a `simp only`, whose default `zeta`
-inlines the `let` first, then the rewrite matches:
+### `let`-bound index blocks `rw [getElem!_pos]`
+When bridging `a[i]'h` ↔ `a[i]!` in a `*Fast_eq` proof, the index is usually a
+`let`/`have`-bound local from the unfolded body (`let hsh := hash3 …; a[hsh]!`).
+`rw [getElem!_pos a hsh h]` **fails to fire** — it wants the unfolded
+expression (`hash3 …`), which doesn't match the bound `hsh`. Fold it into a
+`simp only`, whose default `zeta` inlines the `let` first:
 
 ```lean
 -- rw [getElem!_pos hashTable hsh hb]            -- ✗ `hsh` is let-bound, no match
-simp only [getElem!_pos hashTable (hash3 data (pos+j) hashSize hd) hb]  -- ✓ zeta then rewrite
+simp only [getElem!_pos hashTable (hash3 data (pos+j) hashSize hd) hb]  -- ✓
 ```
 
 The bound `hb : index < a.size` is typically `hash3 … < hashSize ≤ a.size`,
 i.e. `Nat.mod_lt _ hpos` (hash3's body is `_ % hashSize`) chained by `omega`
 with the `hashSize ≤ a.size` invariant.
-
-## Checklist for Conversion
-
-1. Identify all `]!` sites in the target function
-2. For each site, determine where the index bound comes from:
-   - Direct guard (`if h : i < xs.size`)
-   - Caller invariant (function parameter)
-   - Arithmetic from other bounds (`omega`)
-3. Add `if h :` guards or propagate caller hypotheses as needed
-4. Replace `]!` with `]` — Lean will check the proof is in scope
-5. If the function uses `for`/`while`, consider refactoring to
-   well-founded recursion (see Pattern above)
-6. Check for existing spec proofs and plan repair (see pitfall 6)
-7. Build and verify: `lake build <module>`

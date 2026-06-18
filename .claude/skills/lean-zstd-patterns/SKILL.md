@@ -26,8 +26,8 @@ file if the module is genuinely independent (like XXH64 was).
 
 ## Backward Bitstream (MSB-First)
 
-Zstd's ANS coding reads bits **MSB-first** from a backward stream — the
-opposite of DEFLATE's LSB-first `BitReader`. Key differences:
+Zstd's ANS coding reads bits **MSB-first** from a backward stream — opposite of
+DEFLATE's LSB-first `BitReader`:
 
 | Property | DEFLATE `BitReader` | Zstd `BackwardBitReader` |
 |----------|--------------------|-----------------------|
@@ -190,52 +190,23 @@ for odd symbol counts.
 
 ### `Id.run do` for Pure Mutable State
 
-For algorithms with mutable accumulators in non-monadic contexts:
-
-```lean
-def processRemaining (acc : UInt64) (data : ByteArray) (off len : Nat) : UInt64 := Id.run do
-  let mut h := acc
-  let mut pos := off
-  -- loop body using h and pos
-  return h
-```
-
-Used in XXH64 (`processRemaining`) and elsewhere. Avoids wrapping
-everything in `IO` or `Except` when no errors are possible.
+For mutable accumulators in non-monadic contexts (used in XXH64 `processRemaining`),
+`Id.run do` with `let mut` avoids wrapping in `IO`/`Except` when no errors are possible.
 
 ### `Inhabited` Instead of `Repr` for ByteArray-Containing Structs
 
-`ByteArray` does not derive `Repr`. For structs containing `ByteArray`,
-use `Inhabited` for default values:
-
-```lean
-structure BackwardBitReader where
-  data : ByteArray
-  ...
-  deriving Inhabited  -- NOT Repr
-```
+`ByteArray` does not derive `Repr`. Structs containing it must `deriving Inhabited`,
+NOT `Repr` (e.g. `BackwardBitReader`).
 
 ### Inductive Types for Fixed Enumerations
 
-Use inductives rather than numeric encoding for type safety:
+Use inductives, not numeric encoding, for block types and the RFC 8878 2-bit
+compression modes — gives match exhaustiveness, prevents invalid values propagating:
 
 ```lean
-inductive ZstdBlockType where
-  | raw | rle | compressed | reserved
+inductive ZstdBlockType where | raw | rle | compressed | reserved
   deriving Repr, BEq
-```
-
-This gives pattern matching exhaustiveness and prevents invalid values
-from propagating silently.
-
-### Compression Mode Enum Pattern
-
-RFC 8878 defines compression modes as 2-bit values. Parse with a
-helper function returning the enum:
-
-```lean
-inductive SequenceCompressionMode where
-  | predefined | rle | fseCompressed | repeat
+inductive SequenceCompressionMode where | predefined | rle | fseCompressed | repeat
   deriving Repr, BEq
 ```
 

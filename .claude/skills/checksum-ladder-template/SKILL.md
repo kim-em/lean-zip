@@ -9,8 +9,8 @@ allowed-tools: Read, Edit, Write, Bash, Grep, Glob
 A ladder is a family of closed-form theorems for a checksum, each
 rung characterizing the checksum on a more interesting byte pattern
 (empty → singleton → pair → replicate → combine). Once a ladder
-reaches three data points the shape stabilises — this skill records
-that shape so new rungs can be landed without re-deriving it.
+reaches three data points the shape stabilises; this skill records
+that shape so new rungs land without re-deriving it.
 
 Seven in-tree examples across two ladders:
 
@@ -18,10 +18,6 @@ Seven in-tree examples across two ladders:
 |-----------|------------------------------------------------------------------------------|
 | Adler-32  | `_empty`, `_singleton`, `_pair`, `_replicate_zero`, `_replicate`, `_combine` |
 | CRC32     | `_empty`, `_singleton`, `_pair`                                              |
-
-Trigger this skill when writing any new rung on one of those
-ladders, extending to a new checksum, or reviewing a PR that adds
-one.
 
 ## The Three-Part Shape
 

@@ -8,9 +8,8 @@ allowed-tools: Read, Bash, Grep
 
 ## Suffix Invariance (_append Lemmas)
 
-Suffix invariance proves that appending extra bits to decoder input doesn't
-affect the decoded result — the decoder processes only its content and leaves
-trailing bits untouched.
+Appending extra bits to decoder input doesn't affect the result — the decoder
+processes only its content and leaves trailing bits untouched.
 
 ### Lemma Shape
 
@@ -71,16 +70,10 @@ theorem f_append (bits suffix : List Bool) ... :
 
 ## goR: Decode-With-Remaining Pattern
 
-`goR` is a variant of the decoder's recursive `go` function that returns both
-the decoded result AND the remaining (unconsumed) bits.
-
-### When to Use
-
-Use `goR` when you need to prove properties about what the decoder leaves behind
-after processing — especially for:
-- Padding extraction (how many bits remain after decoding)
-- Framing proofs (gzip/zlib wrappers need to know where content ends)
-- Byte-alignment proofs (remaining bits must be < 8 for byte boundary)
+`goR` is a variant of the decoder's recursive `go` that returns both the decoded
+result AND the remaining (unconsumed) bits. Use it to prove properties about what
+the decoder leaves behind: padding extraction (bits remaining), framing proofs
+(gzip/zlib need where content ends), byte-alignment (remaining bits < 8).
 
 ### Definition Pattern
 
@@ -127,9 +120,8 @@ theorem decode_goR_fst ... :
 
 ## Padding Extraction Pattern
 
-After encoding, the bitstream must be byte-aligned. The padding proof shows
-that the encoder's output decomposes as `contentBits ++ padding` where
-`padding.length < 8`.
+The encoder's output must be byte-aligned: it decomposes as `contentBits ++ padding`
+with `padding.length < 8`.
 
 ### Structure
 
@@ -160,7 +152,8 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
 
 ## Composing Per-Level Roundtrips
 
-The top-level roundtrip theorem composes per-level proofs:
+The top-level roundtrip composes per-level proofs: unfold the encoder, `split` on
+level/strategy, `exact` to each per-level theorem (passing size bounds via `by omega`).
 
 ```lean
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
@@ -175,12 +168,6 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
       · exact inflate_deflateLazy data hsize
       · exact inflate_deflateDynamic data (by omega)
 ```
-
-### Pattern
-
-1. **Unfold** the top-level encoder
-2. **Split** on compression level/strategy
-3. **Exact** to per-level roundtrip theorem, passing size bounds via `by omega`
 
 ### Per-Level Roundtrip Structure
 
@@ -198,8 +185,7 @@ inflate_complete: bit-to-byte alignment → original data recovered
 
 ## Iterative/Recursive Equivalence (Accumulator Pattern)
 
-When an optimized iterative version uses an accumulator, prove equivalence
-with the recursive version.
+To prove an optimized accumulator-based iterative version equals the recursive one:
 
 ### Lemma Shape
 
