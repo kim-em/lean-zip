@@ -1068,6 +1068,21 @@ theorem go_refill_step (litTable distTable : HuffTree.DecodeTable) (data : ByteA
     rw [refill, if_pos hrc]
   rw [go, go, hr]
 
+/-- A short literal (`len ≠ 0`, `len ≤ cnt`) is decoded by `decodeSym` exactly as the
+    inline table read does it — near-definitional, the else branch of `decodeSym`. -/
+theorem decodeSym_inline (tree : HuffTree) (table : HuffTree.DecodeTable)
+    (bitBuf : UInt64) (cnt : Nat)
+    (h0 : table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0)
+    (hle : table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt) :
+    decodeSym tree table bitBuf cnt =
+      .ok (table.syms[(bitBuf &&& 0x1FF).toNat]!,
+        bitBuf >>> (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUInt64,
+        cnt - table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat,
+        table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat) := by
+  unfold decodeSym
+  simp only []
+  rw [if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
+
 set_option maxHeartbeats 1000000 in
 set_option maxRecDepth 8000 in
 /-- **The fused-refill decoder equals the reference decoder.** `goFused` unrolls
