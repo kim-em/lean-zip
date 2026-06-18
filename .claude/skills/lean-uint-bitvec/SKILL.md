@@ -133,7 +133,7 @@ packed header, or bitfield adds lower bits into a higher-bit container):
 ```lean
 lemma pack_toNat_of_bounds {x y n : Nat} (hx : x < 2 ^ n) :
     (y <<< n ||| x) = y * 2 ^ n + x := by
-  rw [Nat.two_pow_add_eq_or_of_lt hx]; ring
+  rw [Nat.two_pow_add_eq_or_of_lt hx]; grind  -- `ring` is unavailable (no Mathlib); `grind` subsumes it
 ```
 
 The `UInt32`-specific instance lives as a `private` helper in

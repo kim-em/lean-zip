@@ -72,7 +72,7 @@ This turns a 20-bare-simp file from ~20 build cycles into 2-3.
 
 4. **Accept with comment** if 1-3 fail — e.g. `-- bare simp: N-level Option.bind chain`, `-- bare simp: concrete bit computation`, `-- bare simp: BitVec normalization`.
 
-**`simp?` daggers**: if a suggestion contains `✝` names (e.g. `UInt32.reduceEq✝`) it's unparseable — use `grind` instead.
+**`simp?` daggers**: if a suggestion contains `✝` names (e.g. `UInt32.reduceEq✝`) it's unparseable. For hypothesis-rewrite / case-split daggers, use `grind`; for concrete UInt `BEq`/reduction daggers, prefer `decide` or explicit `cases` (see lean-simp-tactics).
 
 ## Phase 2a: Bare `simpa`
 

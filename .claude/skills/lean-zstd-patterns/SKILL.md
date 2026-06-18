@@ -6,8 +6,7 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 
 # Zstd Implementation Patterns (RFC 8878)
 
-Patterns distilled from 11+ Track E feature sessions implementing the Zstd
-decompression pipeline in `Zip/Native/`.
+Patterns for implementing the Zstd decompression pipeline in `Zip/Native/`.
 
 ## File Layout
 
@@ -209,6 +208,11 @@ inductive ZstdBlockType where | raw | rle | compressed | reserved
 inductive SequenceCompressionMode where | predefined | rle | fseCompressed | repeat
   deriving Repr, BEq
 ```
+
+`repeat` is a tactic keyword, so pattern matching on `SequenceCompressionMode.repeat`
+must escape it with guillemets — `| «repeat» =>`, not `| repeat =>` (the latter is
+parsed as the tactic and errors with `unexpected token 'repeat'`). Same applies to any
+constructor whose name clashes with a keyword (`do`, `return`, `match`, `let`, ...).
 
 ### Error Messages with RFC Section References
 

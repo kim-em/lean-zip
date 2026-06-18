@@ -205,7 +205,7 @@ corollaries. Established: `parseBlockHeader_le_size`, `decompressRawBlock_le_siz
 bound (`Nat.and_le_right`, `Nat.or_lt_two_pow`), close with `omega`. Appears in
 `parseCompressedLiteralsHeader_regen_bound`, `readBits_value_lt_pow2`.
 
-## Table Validity Composition (four-layer chain)
+## Table Validity Composition (five-layer chain)
 
 ```
 Per-cell properties (symbol_lt, numBits_le, cells_size)
