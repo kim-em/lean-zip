@@ -1089,6 +1089,14 @@ private def listFromHandle (h : IO.FS.Handle) (maxCentralDirSize : Nat := 671088
   parseCentralDir cdBuf 0 cdSize totalEntries numberOfThisDisk diskWhereCDStarts
     numEntriesThisDisk cdOffset
 
+/-- Hard ceiling (64 MiB) on the speculative output-buffer reservation made from an
+    entry's *untrusted* declared uncompressed size when decoding with the native
+    backend. This is the safety property for the pre-size hint: no matter what an
+    entry claims, the native decoder never reserves more than this up front. Entries
+    larger than the cap keep a few of their buffer doublings; correctness is
+    unaffected (the hint is a capacity hint only). See `readEntryData`. -/
+def nativePresizeCap : Nat := 64 * 1024 * 1024
+
 /-- Read an entry's decompressed data from a file handle by seeking to its local header.
     `maxEntrySize` limits decompressed entry size; `0` means no limit on the FFI
     backend. Both public extractors default `maxEntrySize` to `1 GiB` and
@@ -1215,13 +1223,19 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         --
         -- Pre-size the output buffer to the entry's declared uncompressed size,
         -- removing the doubling reallocations of a buffer grown one literal at a
-        -- time. `uncompressedSize` is untrusted ZIP metadata, so cap the hint to a
-        -- multiple of the compressed bytes already in RAM: DEFLATE's maximum ratio
-        -- is ~1032:1, so this never truncates a hint for a valid stream, but stops
-        -- a tiny malicious entry from forcing a huge speculative allocation. The
-        -- hint is a capacity hint only — never affecting the bytes produced or the
-        -- `maxEntrySize` bomb guard.
-        let sizeHint := min entry.uncompressedSize.toNat (compData.size * 1100)
+        -- time. The hint is a capacity hint only — it never affects the bytes
+        -- produced or the `maxEntrySize` bomb guard (`Inflate.inflate_sizeHint_eq`).
+        -- `uncompressedSize` is untrusted ZIP metadata, so the speculative
+        -- allocation is bounded by three guards, no one of which a malicious entry
+        -- controls: (a) `nativePresizeCap`, a fixed absolute ceiling, is the real
+        -- safety property — worst-case reserve stays bounded regardless of the
+        -- claimed size; (b) `maxEntrySize`, the output budget, so a `0` (reject-all)
+        -- or small cap reserves nothing beyond what the decoder would accept; and
+        -- (c) `compData.size * 1100`, a heuristic ratio bound (DEFLATE's maximum is
+        -- ~1032:1) that trims the hint for small entries. Large legitimate entries
+        -- above `nativePresizeCap` simply keep a few of their doublings.
+        let sizeHint := min (min entry.uncompressedSize.toNat maxEntrySize.toNat)
+          (min (compData.size * 1100) nativePresizeCap)
         match Zip.Native.Inflate.inflate compData maxEntrySize.toNat (sizeHint := sizeHint) with
         | .ok data => pure data
         | .error msg => throw (IO.userError s!"zip: native inflate failed for {label}: {msg}")

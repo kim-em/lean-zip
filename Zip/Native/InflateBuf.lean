@@ -54,5 +54,12 @@ def inflate (data : ByteArray) (maxOut : Nat := 1024 * 1024 * 1024)
     fixedLit fixedDist maxOut data.size
   return output
 
+/-- The output capacity hint is computationally inert: `inflate` with any `sizeHint`
+    equals `inflate` with the default `0` (`ByteArray.emptyWithCapacity n` reduces to
+    `{ data := Array.empty }` for every `n`). -/
+@[simp] theorem inflate_sizeHint_eq (data : ByteArray) (maxOut sizeHint : Nat) :
+    inflate data maxOut sizeHint = inflate data maxOut :=
+  rfl
+
 end InflateBuf
 end Zip.Native

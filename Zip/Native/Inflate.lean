@@ -832,5 +832,21 @@ def inflate (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
   let (output, _) ← inflateRaw data 0 maxOutputSize sizeHint
   return output
 
+/-- The output capacity hint is computationally inert: `inflateRaw` with any
+    `sizeHint` equals `inflateRaw` with the default `sizeHint := 0`, because
+    `ByteArray.emptyWithCapacity n` reduces to `{ data := Array.empty }` for every
+    `n` (capacity is a runtime-only allocation hint). So every theorem proved about
+    the `sizeHint := 0` form — correctness, suffix invariance, end-position bounds —
+    transfers verbatim to any hinted call (e.g. the ZIP decoder's). -/
+@[simp] theorem inflateRaw_sizeHint_eq (data : ByteArray) (startPos maxOutputSize sizeHint : Nat) :
+    inflateRaw data startPos maxOutputSize sizeHint = inflateRaw data startPos maxOutputSize :=
+  rfl
+
+/-- `inflate` with any `sizeHint` equals `inflate` with the default `0`; see
+    `inflateRaw_sizeHint_eq`. -/
+@[simp] theorem inflate_sizeHint_eq (data : ByteArray) (maxOutputSize sizeHint : Nat) :
+    inflate data maxOutputSize sizeHint = inflate data maxOutputSize :=
+  rfl
+
 end Inflate
 end Zip.Native
