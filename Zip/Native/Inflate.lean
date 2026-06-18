@@ -154,11 +154,29 @@ where
       else if bits % 2 == 0 then go z (bits / 2) (depth + 1)
       else go o (bits / 2) (depth + 1)
 
+/-- A de-boxed fast-decode table: the `(symbol, codeLen)` of each slot split into
+    two parallel scalar arrays. Storing `Array (UInt16 × UInt8)` boxes every slot
+    as a heap pair, so each per-symbol read pointer-chases through `lean_ctor_get`
+    twice; the split keeps each field in a scalar array (`lean_array_fget` +
+    `unbox`, no chase), which is the de-box of #2650.
+
+    Two scalar arrays rather than one packed `UInt32` word: extracting the high
+    field of a packed word needs a shift, and the well-founded recursions `go` /
+    `goFused` would force that shift to weak head normal form during equation
+    compilation and loop on `Nat.div`. A plain array read stays stuck under
+    `whnf`, so the split keeps both the de-box and the proofs. -/
+structure DecodeTable where
+  syms : Array UInt16
+  lens : Array UInt8
+
 /-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds the
-    `(symbol, codeLen)` reached by walking `tree` on the bits of `i`. Built once
-    per Huffman tree; cheap relative to the symbols decoded with it. -/
-def buildTable (tree : HuffTree) : Array (UInt16 × UInt8) :=
-  Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) => tableEntry tree i.val)
+    `(symbol, codeLen)` reached by walking `tree` on the bits of `i`, with the two
+    fields split into the parallel scalar arrays of `DecodeTable` so each
+    per-symbol read is a de-boxed scalar load instead of a heap-pair pointer-chase.
+    Built once per Huffman tree; cheap relative to the symbols decoded with it. -/
+def buildTable (tree : HuffTree) : DecodeTable where
+  syms := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) => (tableEntry tree i.val).1)
+  lens := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) => (tableEntry tree i.val).2)
 
 /-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
 def bitsAvail (br : BitReader) : Nat :=
@@ -177,7 +195,7 @@ def peekFast (br : BitReader) : UInt32 :=
     Falls back to the canonical `decode` tree walk for long codes (sentinel
     `codeLen = 0`) and when fewer than `codeLen` bits remain. Proven equal to
     `decode` when `table = buildTable tree` (`Zip.Spec.InflateTable`). -/
-def decodeWithTable (tree : HuffTree) (table : Array (UInt16 × UInt8))
+def decodeWithTable (tree : HuffTree) (table : DecodeTable)
     (br : BitReader) : Except String (UInt16 × BitReader) :=
   -- `bitOff ≥ 8` is unreachable for a well-formed reader (every `readBit`
   -- leaves `bitOff < 8`); the guard makes the equality with `decode`
@@ -185,13 +203,12 @@ def decodeWithTable (tree : HuffTree) (table : Array (UInt16 × UInt8))
   if br.bitOff ≥ 8 then tree.decode br
   else
     let idx := (peekFast br).toNat
-    let entry := table[idx]!
-    let len := entry.2.toNat
+    let len := table.lens[idx]!.toNat
     if len == 0 || len > bitsAvail br then
       tree.decode br
     else
       let total := br.bitOff + len
-      .ok (entry.1, { br with pos := br.pos + total / 8, bitOff := total % 8 })
+      .ok (table.syms[idx]!, { br with pos := br.pos + total / 8, bitOff := total % 8 })
 
 end HuffTree
 
@@ -481,7 +498,7 @@ protected def decodeHuffmanFastBR (br : BitReader) (output : ByteArray)
     : Except String (ByteArray × BitReader) :=
   go litTree.buildTable distTree.buildTable br.data.size br output
 where
-  go (litTable distTable : Array (UInt16 × UInt8))
+  go (litTable distTable : HuffTree.DecodeTable)
       (dataSize : Nat) (br : BitReader) (output : ByteArray)
       : Except String (ByteArray × BitReader) := do
     let (sym, br₁) ← litTree.decodeWithTable litTable br
@@ -580,13 +597,12 @@ def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt depth : Nat) :
 /-- Decode one Huffman symbol from the (refilled) buffer via the 9-bit table,
     falling back to the tree walk for long codes / near EOF. Returns the symbol,
     remaining buffer state, and bits consumed. -/
-@[inline] def decodeSym (tree : HuffTree) (table : Array (UInt16 × UInt8))
+@[inline] def decodeSym (tree : HuffTree) (table : HuffTree.DecodeTable)
     (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
   let idx := (bitBuf &&& 0x1FF).toNat
-  let entry := table[idx]!
-  let len := entry.2.toNat
+  let len := table.lens[idx]!.toNat
   if len == 0 || len > cnt then walkTree tree bitBuf cnt 0
-  else .ok (entry.1, bitBuf >>> len.toUInt64, cnt - len, len)
+  else .ok (table.syms[idx]!, bitBuf >>> len.toUInt64, cnt - len, len)
 
 /-- Read `n` bits LSB-first from the buffer without refilling. Errors (like
     `readBitsFast`) when the buffer holds fewer than `n` bits — for a refilled
@@ -601,7 +617,7 @@ set_option maxRecDepth 4096 in
 /-- Wide-buffer Huffman symbol loop (mirrors `Inflate.decodeHuffmanFastBR.go`).
     `bitpos` is the stream bit position (`= pos*8 - cnt` under the buffer
     invariant); it carries the well-founded measure and the progress guards. -/
-def go (litTable distTable : Array (UInt16 × UInt8))
+def go (litTable distTable : HuffTree.DecodeTable)
     (data : ByteArray) (litTree distTree : HuffTree) (maxOut dataSize : Nat)
     (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray) :
     Except String (ByteArray × Nat × UInt64 × Nat × Nat) := do
@@ -663,7 +679,7 @@ set_option maxRecDepth 4096 in
     decreases lexicographically: refill steps shrink `data.size - pos` (first
     component fixed since `bitpos` is unchanged), decode steps shrink
     `dataSize*8 - bitpos` via the progress guards. See #2637. -/
-def goFused (litTable distTable : Array (UInt16 × UInt8))
+def goFused (litTable distTable : HuffTree.DecodeTable)
     (data : ByteArray) (litTree distTree : HuffTree) (maxOut dataSize : Nat)
     (pos : Nat) (bitBuf : UInt64) (cnt bitpos : Nat) (output : ByteArray) :
     Except String (ByteArray × Nat × UInt64 × Nat × Nat) := do
