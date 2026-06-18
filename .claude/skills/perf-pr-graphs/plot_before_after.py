@@ -18,9 +18,10 @@ Usage:
   latest.json defaults to bench/results/latest.json
   outdir      defaults to /tmp (report artifact — keep it out of the tree)
 
-The before/after jsons are the native rows from `bench-report --native-only`.
-BEFORE is measured at the branch's merge-base with master (a throwaway worktree),
-AFTER on the PR branch; see SKILL.md step 4 for why merge-base and not master.
+AFTER is the native rows from `bench-report --native-only` on the PR branch.
+BEFORE is the committed dashboard `bench/results/latest.json` (its native rows);
+master keeps it current, so no merge-base rebuild — see SKILL.md step 4, and run
+its freshness guard so the snapshot is not stale relative to the merge-base.
 """
 import json, math, sys
 from pathlib import Path
@@ -47,7 +48,7 @@ def _meta1(doc):
     return f"machine={m.get('machine','?')} commit={m.get('git_commit','?')}"
 
 # Provenance: what is actually being compared. The user must confirm BEFORE's
-# commit is the branch merge-base (not origin/master) — see SKILL.md step 4.
+# commit is bench/results/latest.json's; confirm it is not stale — see SKILL.md step 4.
 print(f"BEFORE: {_meta1(BEFORE_DOC)}")
 print(f"AFTER : {_meta1(AFTER_DOC)}")
 print(f"refs  : {_meta1(LATEST_DOC)}  (reused, not re-measured)")
@@ -167,9 +168,9 @@ if only_b or only_a:
 # native rows. An output-neutral PR (dispatch/escape, re-timed loop, proof-side
 # refactor) MUST read 0.000000; a nonzero value means output changed (intended
 # for a parse change, a bug otherwise) or the two runs saw different corpora.
-# NOTE: this does NOT validate baseline freshness — a stale-branch BEFORE has
+# NOTE: this does NOT validate baseline freshness — a stale latest.json BEFORE has
 # identical output, so Δratio stays 0 while the speed curve is silently wrong
-# (confirm BEFORE's commit == merge-base above).
+# (run SKILL.md step 4's freshness guard: no native commit after BEFORE's commit).
 bratio = {(r["pattern"], r["level"]): r["ratio"]
           for r in BEFORE if r["compressor"] == "native" and r.get("ratio") is not None}
 worst, worst_at = 0.0, None
