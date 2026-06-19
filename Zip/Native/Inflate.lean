@@ -733,6 +733,79 @@ decreasing_by
   · exact Prod.Lex.left _ _ (by omega)
   · exact Prod.Lex.left _ _ (by omega)
 
+/-! ## EXPERIMENT: provable-shape guard-light decoder (measure the landable win)
+
+`goFusedP` is the shape a *proven* version would have: no `bitpos` parameter
+(it equals `pos*8 - cnt`, so the termination measure is
+`((data.size - pos)*8 + cnt, data.size - pos)` over `pos`/`cnt` already threaded),
+no out-of-range guard (provably dead under `pos ≤ data.size`), and the common
+literal decoded inline (its `llen ≠ 0` check already guarantees ≥1 bit, so that
+path needs no progress guard either). Only the non-literal `decodeSym` path keeps
+a cheap `cnt`-based no-progress guard. `partial` here just to measure; the real
+PR proves termination from the measure above. -/
+def goFusedP (litTable distTable : HuffTree.DecodeTable)
+    (data : ByteArray) (litTree distTree : HuffTree) (maxOut : Nat)
+    (pos : Nat) (bitBuf : UInt64) (cnt : Nat) (output : ByteArray) :
+    Except String (ByteArray × Nat × UInt64 × Nat) := do
+  if hrc : cnt ≤ 56 ∧ pos < data.size then
+    goFusedP litTable distTable data litTree distTree maxOut
+      (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
+  else
+  if hlit : litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
+      ∧ litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt
+      ∧ litTable.syms[(bitBuf &&& 0x1FF).toNat]! < 256 then
+    if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+    else
+      goFusedP litTable distTable data litTree distTree maxOut pos
+        (bitBuf >>> (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUInt64)
+        (cnt - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat)
+        (output.push litTable.syms[(bitBuf &&& 0x1FF).toNat]!.toUInt8)
+  else
+  let cnt0 := cnt
+  match decodeSym litTree litTable bitBuf cnt with
+  | .error e => .error e
+  | .ok (sym, bitBuf, cnt, _used) =>
+    if sym < 256 then
+      if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+      else if hnp : cnt0 ≤ cnt then throw "Inflate: no progress in Huffman decode"
+      else goFusedP litTable distTable data litTree distTree maxOut pos bitBuf cnt (output.push sym.toUInt8)
+    else if sym == 256 then .ok (output, pos, bitBuf, cnt)
+    else
+      let idx := sym.toNat - 257
+      if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+      else
+        let base := Inflate.lengthBase[idx]
+        let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
+        let (extraBits, bitBuf, cnt) ← takeBits bitBuf cnt extra.toNat
+        let length := base.toNat + extraBits
+        match decodeSym distTree distTable bitBuf cnt with
+        | .error e => .error e
+        | .ok (distSym, bitBuf, cnt, _dused) =>
+          let dIdx := distSym.toNat
+          if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+          else
+            let dBase := Inflate.distBase[dIdx]
+            let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
+            let (dExtraBits, bitBuf, cnt) ← takeBits bitBuf cnt dExtra.toNat
+            let distance := dBase.toNat + dExtraBits
+            if h0 : distance = 0 then throw s!"Inflate: zero back-reference distance"
+            else if hds : distance > output.size then
+              throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+            else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"
+            else if hnp : cnt0 ≤ cnt then throw "Inflate: no progress in Huffman decode"
+            else
+              let out := Inflate.copyLoop output (output.size - distance) distance 0 length (by omega) (by omega)
+              goFusedP litTable distTable data litTree distTree maxOut pos bitBuf cnt out
+  termination_by (data.size - pos) * 9 + cnt
+  decreasing_by
+    · -- refill: pos < data.size, so (size-pos)*9 drops by 9 while cnt rises 8 → net −1
+      obtain ⟨_, hp⟩ := hrc; omega
+    · -- inline literal: cnt drops by llen ≥ 1
+      obtain ⟨hne, hle, _⟩ := hlit; omega
+    · -- decodeSym literal: cnt < cnt0 from the no-progress guard
+      omega
+    · -- match: cnt < cnt0 from the no-progress guard
+      omega
 /-- Wide-buffer replacement for `Inflate.decodeHuffmanFastBR`: convert the
     `BitReader` to a scalar buffer, run the loop, convert back. -/
 def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
@@ -744,9 +817,11 @@ def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
   -- align: drop the bitOff bits already consumed in the first byte
   let bitBuf := bitBuf >>> br.bitOff.toUInt64
   let cnt := cnt - br.bitOff
-  let bitpos := br.pos * 8 + br.bitOff
-  let (out, pos', bitBuf', cnt', _bitpos') ←
-    goFused litTable distTable br.data litTree distTree maxOut br.data.size pos bitBuf cnt bitpos output
+  -- `goFusedP` is the guard-light loop: no threaded `bitpos`, no provably-dead
+  -- out-of-range guard, and the common literal decoded inline. Proven equal to
+  -- `goFused` (`Zip.Spec.InflateBufCorrect.goFusedP_eq`), hence to the reference.
+  let (out, pos', bitBuf', cnt') ←
+    goFusedP litTable distTable br.data litTree distTree maxOut pos bitBuf cnt output
   let _ := bitBuf'
   let endbit := pos' * 8 - cnt'
   .ok (out, { data := br.data, pos := endbit / 8, bitOff := endbit % 8 })
