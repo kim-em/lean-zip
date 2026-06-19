@@ -1083,6 +1083,18 @@ theorem decodeSym_inline (tree : HuffTree) (table : HuffTree.DecodeTable)
   simp only []
   rw [if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
 
+/-- `decodeSym` never increases the bit count: the remaining `cnt` only shrinks.
+    Both arms qualify — the table read consumes `len` bits, the tree-walk fallback
+    consumes `used` (`walkTree_consumed`). Used to bound the loop's `cnt` below
+    `USize.size` so the unboxed `goFusedPU` round-trips `cnt` exactly. -/
+theorem decodeSym_cnt_le (tree : HuffTree) (table : HuffTree.DecodeTable) (bitBuf : UInt64)
+    (cnt : Nat) {s : UInt16} {bb : UInt64} {c used : Nat}
+    (h : InflateBuf.decodeSym tree table bitBuf cnt = .ok (s, bb, c, used)) : c ≤ cnt := by
+  simp only [InflateBuf.decodeSym] at h
+  split at h
+  · have := InflateBuf.walkTree_consumed tree h; omega
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+
 set_option maxHeartbeats 2000000 in
 set_option maxRecDepth 8000 in
 /-- **The guard-light decoder `goFusedP` equals the production `goFused`** (with
@@ -1298,6 +1310,179 @@ theorem goFused_eq_go (litTable distTable : HuffTree.DecodeTable) (data : ByteAr
                     exact ih eb distSym hdi deb bb4 c4 (by assumption) (by assumption)
                       (by assumption) (by assumption)
 
+set_option maxHeartbeats 4000000 in
+set_option maxRecDepth 8000 in
+/-- **The unboxed `goFusedPU` equals the boxed-`Nat` `goFusedP`** (with `pos`/`cnt`
+    projected back to `Nat`). Under buffer addressability `data.size < USize.size`
+    and `pos.toNat ≤ data.size`, the two loops compute the same output/pos/bitBuf/cnt:
+    the refill and inline-literal arithmetic carry over by the `toNat` add/sub
+    bridges, the `USize` byte read agrees with `getElem!` (`uget_eq_getElem!`), and
+    the back-reference / long-code path runs the very same `Nat` `decodeSym` /
+    `takeBits`, so only the final `cnt` round-trips (`decodeSym_cnt_le` /
+    the no-progress guard keep it below `USize.size`). Proof by functional
+    induction on `goFusedPU`. -/
+theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut : Nat) (hsz : data.size < USize.size) :
+    ∀ (pos : USize) (bitBuf : UInt64) (cnt : USize) (output : ByteArray),
+    pos.toNat ≤ data.size →
+    Except.map (fun x => (x.1, x.2.1.toNat, x.2.2.1, x.2.2.2.toNat))
+        (InflateBuf.goFusedPU litTable distTable data litTree distTree maxOut pos bitBuf cnt hsz output)
+      = InflateBuf.goFusedP litTable distTable data litTree distTree maxOut pos.toNat bitBuf cnt.toNat output := by
+  intro pos bitBuf cnt output
+  induction pos, bitBuf, cnt, output using InflateBuf.goFusedPU.induct
+    (litTable := litTable) (data := data) (litTree := litTree)
+    (maxOut := maxOut) (hsz := hsz) with
+  | case1 pos bitBuf cnt output hrc ih =>
+      intro hpos
+      have hgN := (InflateBuf.refillGuard_usize data pos cnt hsz).mp hrc
+      have hpn : pos.toNat < data.size := hgN.2
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have h8 : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have e1 : (pos + 1).toNat = pos.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+        exact USize.size_eq_two_pow ▸ (show pos.toNat + 1 < USize.size by omega)
+      have e2 : (cnt + 8).toNat = cnt.toNat + 8 := by
+        rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
+      rw [InflateBuf.goFusedPU, dif_pos hrc, InflateBuf.goFusedP, dif_pos hgN,
+          ih (by rw [e1]; omega), e1, e2,
+          InflateBuf.uget_eq_getElem! data pos hpn, InflateBuf.usize_toUInt64_toNat]
+  | case2 pos bitBuf cnt output hrc hlit hmax =>
+      intro hpos
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos hlit, if_pos hmax,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_pos ((InflateBuf.litGuard_usize litTable bitBuf cnt).mp hlit), if_pos hmax]
+      rfl
+  | case3 pos bitBuf cnt output hrc hlit hmax ih =>
+      intro hpos
+      obtain ⟨hl0, hl1, hl2⟩ := hlit
+      have hlen : (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize.toNat
+          = litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat :=
+        InflateBuf.toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
+      have hsub : (cnt - (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize).toNat
+          = cnt.toNat - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat := by
+        rw [USize.toNat_sub_of_le _ _ hl1, hlen]
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_pos ((InflateBuf.litGuard_usize litTable bitBuf cnt).mp ⟨hl0, hl1, hl2⟩), if_neg hmax,
+          ih hpos, hsub]
+  | case4 pos bitBuf cnt output hrc hlit e hde =>
+      intro hpos
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, Except.map]
+  | case5 pos bitBuf cnt output hrc hlit sym bb c used hde hsym hmax =>
+      intro hpos
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, if_pos hsym, if_pos hmax]
+      rfl
+  | case6 pos bitBuf cnt output hrc hlit cnt0 sym bb c used hde hsym hmax hnp =>
+      intro hpos
+      have hnp' : cnt.toNat ≤ c := hnp
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_pos hnp']
+      rfl
+  | case7 pos bitBuf cnt output hrc hlit cnt0 sym bb c used hde hsym hmax hnp ih =>
+      intro hpos
+      have hnp' : ¬ cnt.toNat ≤ c := hnp
+      have hcle : c ≤ cnt.toNat := decodeSym_cnt_le litTree litTable bitBuf cnt.toNat hde
+      have hcrt : c.toUSize.toNat = c :=
+        InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_neg hnp']
+      rw [ih hpos, hcrt]
+  | case8 pos bitBuf cnt output hrc hlit sym bb c used hde hsym heob =>
+      intro hpos
+      have hcle : c ≤ cnt.toNat := decodeSym_cnt_le litTree litTable bitBuf cnt.toNat hde
+      have hcrt : c.toUSize.toNat = c :=
+        InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, if_neg hsym, if_pos heob, Except.map, hcrt]
+  | case9 pos bitBuf cnt output hrc hlit sym bb c used hde hsym hneob idx hidx =>
+      intro hpos
+      have hidxc : sym.toNat - 257 ≥ Inflate.lengthBase.size := hidx
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, if_neg hsym, if_neg hneob, dif_pos hidxc]
+      rfl
+  | case10 pos bitBuf cnt output hrc hlit cnt0 sym bb c used hde hsym hneob idx hh base ih =>
+      intro hpos
+      have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
+      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
+          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+      cases hex : InflateBuf.takeBits bb c
+          (Inflate.lengthExtra[sym.toNat - 257]'(by
+            simp only [Inflate.lengthExtra_size]
+            simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hhc; omega)).toNat with
+      | error e => rfl
+      | ok pe =>
+          obtain ⟨eb, bb2, c2⟩ := pe
+          simp only [bind, Except.bind]
+          cases hdd : InflateBuf.decodeSym distTree distTable bb2 c2 with
+          | error e => rfl
+          | ok pd =>
+              obtain ⟨distSym, bb3, c3, dused⟩ := pd
+              simp only []
+              split
+              · rfl
+              · rename_i hdi
+                cases hex2 : InflateBuf.takeBits bb3 c3
+                    (Inflate.distExtra[distSym.toNat]'(by
+                      simp only [Inflate.distExtra_size]
+                      simp only [Inflate.distBase_size, ge_iff_le, Nat.not_le] at hdi; omega)).toNat with
+                | error e => rfl
+                | ok pd2 =>
+                    obtain ⟨deb, bb4, c4⟩ := pd2
+                    simp only [bind, Except.bind]
+                    have hc4le : c4 ≤ cnt.toNat := by
+                      have h1 := InflateBuf.takeBits_le bb c _ hex
+                      have h2 := decodeSym_cnt_le distTree distTable bb2 c2 hdd
+                      have h3 := InflateBuf.takeBits_le bb3 c3 _ hex2
+                      have h0 := decodeSym_cnt_le litTree litTable bitBuf cnt.toNat hde
+                      omega
+                    have hc4rt : c4.toUSize.toNat = c4 :=
+                      InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hc4le cnt.toNat_lt_two_pow_numBits)
+                    repeat' (first | rfl | split)
+                    all_goals exact (ih eb distSym hdi deb bb4 c4 (by assumption) (by assumption)
+                      (by assumption) hpos).trans (by rw [hc4rt])
+
+/-- **The addressability dispatch collapses to the boxed loop.** When the buffer is
+    `USize`-addressable, `goFusedPDispatch` runs `goFusedPU` and projects the result;
+    `goFusedPU_eq` plus the `pos`/`cnt` round-trips (`pos ≤ data.size < USize.size`,
+    `cnt ≤ 64 < USize.size`) recover exactly `goFusedP`. The fallback branch is
+    `goFusedP` already, so the dispatch equals `goFusedP` unconditionally (given the
+    bounds the loop always satisfies). -/
+theorem goFusedPDispatch_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut : Nat)
+    (pos : Nat) (bitBuf : UInt64) (cnt : Nat) (output : ByteArray)
+    (hpos : pos ≤ data.size) (hcnt : cnt ≤ 64) :
+    InflateBuf.goFusedPDispatch litTable distTable data litTree distTree maxOut pos bitBuf cnt output
+      = InflateBuf.goFusedP litTable distTable data litTree distTree maxOut pos bitBuf cnt output := by
+  unfold InflateBuf.goFusedPDispatch
+  split
+  · rename_i hsz
+    have hsz' : data.size < USize.size := by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+    have hcsz : cnt < USize.size := Nat.lt_of_le_of_lt hcnt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    rw [goFusedPU_eq litTable distTable data litTree distTree maxOut hsz'
+          pos.toUSize bitBuf cnt.toUSize output
+          (by rw [InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hpos hsz')]; exact hpos),
+        InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hpos hsz'),
+        InflateBuf.toUSize_toNat_of_lt hcsz]
+  · rfl
+
 /-! ## The wide-buffer decoder equals the reference -/
 
 open Inflate in
@@ -1326,6 +1511,10 @@ theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
   unfold InflateBuf.decodeHuffmanFastBuf Inflate.decodeHuffmanFastBR
   rw [hrf]
   dsimp only []
+  -- collapse the USize-addressability dispatch to the boxed `goFusedP` (the loop's
+  -- `pos`/`cnt` always satisfy the `≤ data.size` / `≤ 64` bounds, via `BufCorr`)
+  rw [goFusedPDispatch_eq litTree.buildTable distTree.buildTable br.data litTree distTree maxOut pos0
+        (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) output hbc2.posLe hbc2.cntLe]
   -- the production decoder runs the guard-light loop `goFusedP`, equal (with
   -- `bitpos` projected away) to `goFused`, which equals `go`
   rw [goFusedP_eq litTree.buildTable distTree.buildTable br.data litTree distTree maxOut pos0
