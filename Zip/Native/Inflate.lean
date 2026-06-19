@@ -566,6 +566,51 @@ it with no trust gap (no `@[extern]`, no `@[implemented_by]`).
 namespace InflateBuf
 open ZipCommon (BitReader)
 
+/-! ## USize-addressability bridge lemmas (#2652)
+
+The production symbol loop `goFusedPU` threads the byte cursor `pos` and the
+bit count `cnt` as raw `USize` words. These two lemmas bridge `USize` indexing
+and round-tripping back to `Nat` `getElem`, so the unboxed loop is proven equal
+to the boxed-`Nat` loop `goFusedP` (`goFusedPU_eq`). -/
+
+/-- A `Nat` below `USize.size` round-trips through `USize` unchanged. -/
+theorem toUSize_toNat_of_lt {n : Nat} (h : n < USize.size) : n.toUSize.toNat = n := by
+  simp only [Nat.toUSize_eq]; exact USize.toNat_ofNat_of_lt' h
+
+/-- `ByteArray.uget` at `i` is `getElem` at `i.toNat` (definitional). -/
+theorem uget_eq_getElem (data : ByteArray) (i : USize) (h : i.toNat < data.size) :
+    data.uget i h = data[i.toNat]'h := rfl
+
+/-- `ByteArray.uget` agrees with the panicking `getElem!` in bounds. -/
+theorem uget_eq_getElem! (data : ByteArray) (i : USize) (h : i.toNat < data.size) :
+    data.uget i h = data[i.toNat]! := by
+  rw [uget_eq_getElem]; exact (getElem!_pos data i.toNat h).symm
+
+/-- The `USize→UInt64` conversion factors through `Nat` (both keep `toNat`). -/
+theorem usize_toUInt64_toNat (c : USize) : c.toUInt64 = c.toNat.toUInt64 := by
+  apply UInt64.toNat.inj
+  rw [USize.toNat_toUInt64, Nat.toUInt64_eq, UInt64.toNat_ofNat']
+  exact (Nat.mod_eq_of_lt c.toNat_lt).symm
+
+/-- The fused refill guard read in `USize` matches the `Nat` guard once the buffer
+    is `USize`-addressable. -/
+theorem refillGuard_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size < USize.size) :
+    (cnt ≤ (56 : USize) ∧ pos < data.size.toUSize)
+      ↔ (cnt.toNat ≤ 56 ∧ pos.toNat < data.size) := by
+  rw [USize.le_iff_toNat_le, USize.lt_iff_toNat_lt, toUSize_toNat_of_lt hsz,
+      USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+
+/-- The inline-literal guard read in `USize` matches the `Nat` guard (the length
+    field round-trips since it is a `UInt8`). -/
+theorem litGuard_usize (table : HuffTree.DecodeTable) (bitBuf : UInt64) (cnt : USize) :
+    (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
+        ∧ (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize ≤ cnt
+        ∧ table.syms[(bitBuf &&& 0x1FF).toNat]! < 256)
+      ↔ (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
+        ∧ table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt.toNat
+        ∧ table.syms[(bitBuf &&& 0x1FF).toNat]! < 256) := by
+  rw [USize.le_iff_toNat_le, toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)]
+
 /-- Load whole bytes into the high end of `bitBuf` until it holds > 56 bits or
     the input is exhausted. Preserves the consumed bit position `pos*8 - cnt`. -/
 @[specialize] def refill (data : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat) :
@@ -612,6 +657,14 @@ def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt depth : Nat) :
   else
     let v := (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat
     .ok (v, bitBuf >>> n.toUInt64, cnt - n)
+
+/-- `takeBits` never increases the bit count. -/
+theorem takeBits_le (bitBuf : UInt64) (cnt n : Nat) {v : Nat} {bb : UInt64} {c : Nat}
+    (h : takeBits bitBuf cnt n = .ok (v, bb, c)) : c ≤ cnt := by
+  unfold takeBits at h
+  split at h
+  · exact absurd h (by simp)
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
 
 set_option maxRecDepth 4096 in
 /-- Wide-buffer Huffman symbol loop (mirrors `Inflate.decodeHuffmanFastBR.go`).
@@ -806,6 +859,144 @@ def goFusedP (litTable distTable : HuffTree.DecodeTable)
       omega
     · -- match: cnt < cnt0 from the no-progress guard
       omega
+set_option maxRecDepth 4096 in
+/-- USize-threaded twin of `goFusedP`: carries the byte cursor `pos` and the bit
+    count `cnt` as raw `USize` words, so the per-symbol refill (`pos+1`, `cnt+8`)
+    and the inline-literal consume (`cnt - len`) compile to machine adds/subs with
+    no boxed-`Nat` arithmetic or `lean_dec` traffic; the refill byte read uses
+    `ByteArray.uget` (an unchecked `size_t` index). Only the rarer back-reference /
+    long-code path round-trips `cnt` through `Nat` to reuse `decodeSym`/`takeBits`
+    unchanged. Proven equal to `goFusedP` (`goFusedPU_eq`) under buffer
+    addressability `data.size < USize.size`, hence to the reference decoder.
+    Termination measure mirrors `goFusedP`'s `(data.size - pos)*9 + cnt`, read
+    through `toNat`; the branch guards (`cnt ≤ 56`, `len ≤ cnt`, the no-progress
+    check) supply the no-overflow facts, so the only proof argument is `hsz`. -/
+def goFusedPU (litTable distTable : HuffTree.DecodeTable)
+    (data : ByteArray) (litTree distTree : HuffTree) (maxOut : Nat)
+    (pos : USize) (bitBuf : UInt64) (cnt : USize)
+    (hsz : data.size < USize.size) (output : ByteArray) :
+    Except String (ByteArray × USize × UInt64 × USize) := do
+  if hrc : cnt ≤ 56 ∧ pos < data.size.toUSize then
+    goFusedPU litTable distTable data litTree distTree maxOut
+      (pos + 1)
+      (bitBuf ||| ((data.uget pos (by
+          have h := USize.lt_iff_toNat_lt.mp hrc.2
+          rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
+      (cnt + 8) hsz output
+  else
+  if hlit : litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
+      ∧ (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize ≤ cnt
+      ∧ litTable.syms[(bitBuf &&& 0x1FF).toNat]! < 256 then
+    if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+    else
+      goFusedPU litTable distTable data litTree distTree maxOut pos
+        (bitBuf >>> (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUInt64)
+        (cnt - (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize)
+        hsz
+        (output.push litTable.syms[(bitBuf &&& 0x1FF).toNat]!.toUInt8)
+  else
+  let cnt0 := cnt.toNat
+  match decodeSym litTree litTable bitBuf cnt.toNat with
+  | .error e => .error e
+  | .ok (sym, bitBuf, cnt', _used) =>
+    if sym < 256 then
+      if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+      else if hnp : cnt0 ≤ cnt' then throw "Inflate: no progress in Huffman decode"
+      else
+        goFusedPU litTable distTable data litTree distTree maxOut pos bitBuf
+          cnt'.toUSize hsz (output.push sym.toUInt8)
+    else if sym == 256 then .ok (output, pos, bitBuf, cnt'.toUSize)
+    else
+      let idx := sym.toNat - 257
+      if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+      else
+        let base := Inflate.lengthBase[idx]
+        let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
+        let (extraBits, bitBuf, cnt'') ← takeBits bitBuf cnt' extra.toNat
+        let length := base.toNat + extraBits
+        match decodeSym distTree distTable bitBuf cnt'' with
+        | .error e => .error e
+        | .ok (distSym, bitBuf, cnt3, _dused) =>
+          let dIdx := distSym.toNat
+          if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+          else
+            let dBase := Inflate.distBase[dIdx]
+            let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
+            let (dExtraBits, bitBuf, cnt4) ← takeBits bitBuf cnt3 dExtra.toNat
+            let distance := dBase.toNat + dExtraBits
+            if h0 : distance = 0 then throw s!"Inflate: zero back-reference distance"
+            else if hds : distance > output.size then
+              throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+            else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"
+            else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
+            else
+              let out := Inflate.copyLoop output (output.size - distance) distance 0 length (by omega) (by omega)
+              goFusedPU litTable distTable data litTree distTree maxOut pos bitBuf
+                cnt4.toUSize hsz out
+  termination_by (data.size - pos.toNat) * 9 + cnt.toNat
+  decreasing_by
+    · -- refill: pos < data.size, so (size - pos)*9 drops by 9 while cnt rises 8 → net −1
+      obtain ⟨hc, hp⟩ := hrc
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have hpn : pos.toNat < data.size := by
+        have h := USize.lt_iff_toNat_lt.mp hp; rwa [toUSize_toNat_of_lt hsz] at h
+      have hcn : cnt.toNat ≤ 56 := by
+        have h := USize.le_iff_toNat_le.mp hc
+        rwa [USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)] at h
+      have hpa : (pos + 1).toNat = pos.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+        have : pos.toNat + 1 < USize.size := by omega
+        exact USize.size_eq_two_pow ▸ this
+      have h8 : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hca : (cnt + 8).toNat = cnt.toNat + 8 := by
+        rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
+      rw [hpa, hca]; omega
+    · -- inline literal: cnt drops by len ≥ 1
+      obtain ⟨hne, hle, _⟩ := hlit
+      have hlen : (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize.toNat
+          = litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat :=
+        toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
+      have hsub : (cnt - (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize).toNat
+          = cnt.toNat - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat := by
+        rw [USize.toNat_sub_of_le _ _ hle, hlen]
+      have hlecnt : litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt.toNat :=
+        hlen ▸ USize.le_iff_toNat_le.mp hle
+      rw [hsub]; omega
+    · -- slow literal: cnt' < cnt0 = cnt.toNat from the no-progress guard
+      have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
+      have hb : cnt'.toUSize.toNat = cnt' := toUSize_toNat_of_lt (by omega)
+      rw [hb]; omega
+    · -- back-reference: cnt4 < cnt0 = cnt.toNat from the no-progress guard
+      have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
+      have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
+      rw [hb]; omega
+
+/-- The production symbol loop: when the input is `USize`-addressable (always true
+    at runtime — the check is one `USize` round-trip, no bignum compare), run the
+    unboxed `goFusedPU`, converting `pos`/`cnt` to `USize` at entry and back to `Nat`
+    at exit; otherwise fall back to the boxed-`Nat` `goFusedP`. The two agree
+    (`Zip.Spec.InflateBufCorrect.goFusedPDispatch_eq`), so the result is identical to
+    `goFusedP` and hence to the reference decoder.
+
+    Internal helper: the equivalence holds under the loop's entry invariants
+    `pos ≤ data.size` and `cnt ≤ 64` (a refilled buffer holds at most 64 bits),
+    which `decodeHuffmanFastBuf` always satisfies (they come from the `BufCorr`
+    carried into the loop). With `pos`/`cnt` outside those bounds the addressable
+    branch could `toUSize`-wrap, so this is not a general-purpose entry point. -/
+@[inline] def goFusedPDispatch (litTable distTable : HuffTree.DecodeTable)
+    (data : ByteArray) (litTree distTree : HuffTree) (maxOut : Nat)
+    (pos : Nat) (bitBuf : UInt64) (cnt : Nat) (output : ByteArray) :
+    Except String (ByteArray × Nat × UInt64 × Nat) :=
+  if hsz : data.size.toUSize.toNat = data.size then
+    Except.map (fun x => (x.1, x.2.1.toNat, x.2.2.1, x.2.2.2.toNat))
+      (goFusedPU litTable distTable data litTree distTree maxOut
+        pos.toUSize bitBuf cnt.toUSize
+        (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _) output)
+  else
+    goFusedP litTable distTable data litTree distTree maxOut pos bitBuf cnt output
+
 /-- Wide-buffer replacement for `Inflate.decodeHuffmanFastBR`: convert the
     `BitReader` to a scalar buffer, run the loop, convert back. -/
 def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
@@ -817,11 +1008,12 @@ def decodeHuffmanFastBuf (br : BitReader) (output : ByteArray)
   -- align: drop the bitOff bits already consumed in the first byte
   let bitBuf := bitBuf >>> br.bitOff.toUInt64
   let cnt := cnt - br.bitOff
-  -- `goFusedP` is the guard-light loop: no threaded `bitpos`, no provably-dead
-  -- out-of-range guard, and the common literal decoded inline. Proven equal to
-  -- `goFused` (`Zip.Spec.InflateBufCorrect.goFusedP_eq`), hence to the reference.
+  -- `goFusedPDispatch` runs the unboxed `goFusedPU` (USize `pos`/`cnt`) when the
+  -- input is addressable, else the boxed `goFusedP`. Both are the guard-light loop
+  -- (no threaded `bitpos`, no provably-dead out-of-range guard, common literal
+  -- inline), proven equal to `goFused` (`goFusedP_eq` / `goFusedPDispatch_eq`).
   let (out, pos', bitBuf', cnt') ←
-    goFusedP litTable distTable br.data litTree distTree maxOut pos bitBuf cnt output
+    goFusedPDispatch litTable distTable br.data litTree distTree maxOut pos bitBuf cnt output
   let _ := bitBuf'
   let endbit := pos' * 8 - cnt'
   .ok (out, { data := br.data, pos := endbit / 8, bitOff := endbit % 8 })
