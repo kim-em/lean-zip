@@ -113,6 +113,60 @@ theorem refill_corr {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt
 termination_by data.size - pos
 decreasing_by simp_wf; omega
 
+/-- **`BufCorr` determines the buffer.** Two valid buffers over the same stream at
+    the same `bitpos` holding the same number of bits hold the same word: the bits
+    below `cnt` are pinned to the stream and the bits at or above `cnt` are zero. -/
+theorem BufCorr.bitBuf_eq {data : ByteArray} {bitpos p1 p2 : Nat} {b1 b2 : UInt64} {c : Nat}
+    (h1 : BufCorr data bitpos p1 b1 c) (h2 : BufCorr data bitpos p2 b2 c) : b1 = b2 := by
+  apply UInt64.toNat_inj.mp
+  apply Nat.eq_of_testBit_eq
+  intro j
+  by_cases hj : j < c
+  · rw [h1.bits j hj, h2.bits j hj]
+  · rw [Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le h1.high
+          (Nat.pow_le_pow_right (by omega) (by omega))),
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le h2.high
+          (Nat.pow_le_pow_right (by omega) (by omega)))]
+
+/-- **A full buffer's bit count is fixed by the stream position.** When `refill`
+    stops (`56 < cnt` or the input is exhausted, `pos = size`), the resulting `cnt`
+    is determined by `bitpos` alone: `span` forces `cnt ≡ -bitpos (mod 8)`, so two
+    full buffers at the same `bitpos` carry the same number of bits (the unique
+    residue-respecting value in `(56, 64]`, or all the remaining bits at EOF). -/
+theorem BufCorr.cnt_eq_of_full {data : ByteArray} {bitpos p1 p2 : Nat} {b1 b2 : UInt64}
+    {c1 c2 : Nat}
+    (h1 : BufCorr data bitpos p1 b1 c1) (h2 : BufCorr data bitpos p2 b2 c2)
+    (hf1 : 56 < c1 ∨ p1 = data.size) (hf2 : 56 < c2 ∨ p2 = data.size) : c1 = c2 := by
+  have s1 := h1.span; have s2 := h2.span
+  have hl1 := h1.posLe; have hl2 := h2.posLe
+  have hc1 := h1.cntLe; have hc2 := h2.cntLe
+  -- `pᵢ * 8 = bitpos + cᵢ` makes `c1 - c2` a multiple of 8; the `(56,64]` / EOF
+  -- bounds pin it to zero. All four cases are linear, so `omega` discharges them.
+  rcases hf1 with h561 | he1 <;> rcases hf2 with h562 | he2 <;> omega
+
+/-- **Refill is canonical.** Two valid buffers over the same stream at the same
+    `bitpos` refill to the *same* `(pos, bitBuf, cnt)`: the refilled state is the
+    unique full buffer at `bitpos`. This is the key to decoding several symbols from
+    one refilled buffer while staying provably equal to the refill-per-symbol loop —
+    the optimized loop may carry a partially-drained buffer where the reference has
+    already topped up, but the next `refill` collapses both to the same state. -/
+theorem refill_canonical {data : ByteArray} {bitpos p1 p2 : Nat} {b1 b2 : UInt64} {c1 c2 : Nat}
+    (h1 : BufCorr data bitpos p1 b1 c1) (h2 : BufCorr data bitpos p2 b2 c2) :
+    refill data p1 b1 c1 = refill data p2 b2 c2 := by
+  cases hr1 : refill data p1 b1 c1 with
+  | mk rp1 rest1 =>
+  cases hr2 : refill data p2 b2 c2 with
+  | mk rp2 rest2 =>
+  obtain ⟨rb1, rc1⟩ := rest1
+  obtain ⟨rb2, rc2⟩ := rest2
+  obtain ⟨hb1, hful1⟩ := refill_corr h1 hr1
+  obtain ⟨hb2, hful2⟩ := refill_corr h2 hr2
+  have hc : rc1 = rc2 := BufCorr.cnt_eq_of_full hb1 hb2 hful1 hful2
+  subst hc
+  have hbb : rb1 = rb2 := BufCorr.bitBuf_eq hb1 hb2
+  have hp : rp1 = rp2 := by have := hb1.span; have := hb2.span; omega
+  rw [hp, hbb]
+
 /-- Consuming `k` (< 64) bits shifts the buffer right by `k` and advances the
     cursor by `k`. The dual of `refill_step`; used by the initial align,
     `takeBits`, and `decodeSym`. -/
@@ -1095,6 +1149,45 @@ theorem decodeSym_cnt_le (tree : HuffTree) (table : HuffTree.DecodeTable) (bitBu
   · have := InflateBuf.walkTree_consumed tree h; omega
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
 
+/-- **`goFused` absorbs a refill.** `goFused` begins each iteration by refilling, so
+    running it from `(pos, bitBuf, cnt)` is the same as running it from the
+    already-refilled `refill data pos bitBuf cnt`: the leading refill recursion of
+    `goFused` *is* `refill`. The bridge from `refill_canonical` to `goFused`. -/
+theorem goFused_absorb_refill (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut dataSize : Nat) (bitpos : Nat) (output : ByteArray)
+    (pos : Nat) (bitBuf : UInt64) (cnt : Nat) :
+    goFused litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt bitpos output
+    = goFused litTable distTable data litTree distTree maxOut dataSize
+        (refill data pos bitBuf cnt).1 (refill data pos bitBuf cnt).2.1
+        (refill data pos bitBuf cnt).2.2 bitpos output := by
+  rw [refill]
+  split
+  · rename_i hrc
+    rw [goFused, dif_pos hrc]
+    exact goFused_absorb_refill litTable distTable data litTree distTree maxOut dataSize bitpos output
+      (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8)
+  · rfl
+termination_by data.size - pos
+decreasing_by simp_wf; omega
+
+/-- **`goFused` depends only on the stream bit-position, not on how much is buffered.**
+    Two valid buffers over the same stream at the same `bitpos` drive `goFused` to the
+    same result, because `goFused` refills both to the canonical full buffer
+    (`refill_canonical`) before its first decode. This is what lets a loop decode
+    several symbols from one refilled buffer — leaving the buffer partially drained
+    where the refill-per-symbol reference has topped up — and still match it. -/
+theorem goFused_bufinv (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut dataSize : Nat) (bitpos : Nat) (output : ByteArray)
+    {p1 p2 : Nat} {b1 b2 : UInt64} {c1 c2 : Nat}
+    (h1 : BufCorr data bitpos p1 b1 c1) (h2 : BufCorr data bitpos p2 b2 c2) :
+    goFused litTable distTable data litTree distTree maxOut dataSize p1 b1 c1 bitpos output
+    = goFused litTable distTable data litTree distTree maxOut dataSize p2 b2 c2 bitpos output := by
+  rw [goFused_absorb_refill litTable distTable data litTree distTree maxOut dataSize bitpos output
+        p1 b1 c1,
+      goFused_absorb_refill litTable distTable data litTree distTree maxOut dataSize bitpos output
+        p2 b2 c2,
+      refill_canonical h1 h2]
+
 set_option maxHeartbeats 2000000 in
 set_option maxRecDepth 8000 in
 /-- **The guard-light decoder `goFusedP` equals the production `goFused`** (with
@@ -1211,6 +1304,23 @@ theorem goFusedP_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArra
                       | exact ih eb distSym hdi deb bb4 c4 (by assumption) (by assumption)
                           (by assumption) (bp + (cnt - c4)) (by omega) (by omega)
                       | (exfalso; omega)
+
+/-- **`goFusedP` depends only on the stream bit-position, not on the buffer fill.**
+    Transported from `goFused_bufinv` across `goFusedP_eq`: two valid buffers over the
+    same stream at the same `bitpos` drive `goFusedP` to the same result. The
+    `goFusedP`-level form of buffering invariance used to decode several literals from
+    one refilled buffer. -/
+theorem goFusedP_bufinv (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litTree distTree : HuffTree) (maxOut : Nat) (output : ByteArray)
+    {bitpos p1 p2 : Nat} {b1 b2 : UInt64} {c1 c2 : Nat}
+    (h1 : BufCorr data bitpos p1 b1 c1) (h2 : BufCorr data bitpos p2 b2 c2) :
+    goFusedP litTable distTable data litTree distTree maxOut p1 b1 c1 output
+    = goFusedP litTable distTable data litTree distTree maxOut p2 b2 c2 output := by
+  rw [goFusedP_eq litTable distTable data litTree distTree maxOut p1 b1 c1 output bitpos
+        h1.posLe h1.span,
+      goFusedP_eq litTable distTable data litTree distTree maxOut p2 b2 c2 output bitpos
+        h2.posLe h2.span,
+      goFused_bufinv litTable distTable data litTree distTree maxOut data.size bitpos output h1 h2]
 
 set_option maxHeartbeats 1000000 in
 set_option maxRecDepth 8000 in
