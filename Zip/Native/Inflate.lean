@@ -154,29 +154,90 @@ where
       else if bits % 2 == 0 then go z (bits / 2) (depth + 1)
       else go o (bits / 2) (depth + 1)
 
-/-- A de-boxed fast-decode table: the `(symbol, codeLen)` of each slot split into
-    two parallel scalar arrays. Storing `Array (UInt16 × UInt8)` boxes every slot
-    as a heap pair, so each per-symbol read pointer-chases through `lean_ctor_get`
-    twice; the split keeps each field in a scalar array (`lean_array_fget` +
-    `unbox`, no chase), which is the de-box of #2650.
+/-- Pack a slot's `(symbol, codeLen)` into one `UInt32` word: the codeword length
+    in the low byte (bits 0–7), the 16-bit symbol in bits 8–23. libdeflate-style
+    single-word entry (libdeflate also uses a `u32`). The source reads the slot
+    through `lenAt`/`symAt`, which name the same `packed[idx]!` element; the
+    compiler CSEs the shared read, so a per-symbol decode lowers to **one**
+    `lean_array_get` plus register shifts (verified in the generated C for the
+    fastloop literal path), rather than two reads into the parallel `syms`/`lens`
+    arrays of #2650 (which also touched two cache lines). Even without the CSE it
+    is two reads of one tagged-scalar array, never the old two-array / two-cache-
+    line shape.
 
-    Two scalar arrays rather than one packed `UInt32` word: extracting the high
-    field of a packed word needs a shift, and the well-founded recursions `go` /
-    `goFused` would force that shift to weak head normal form during equation
-    compilation and loop on `Nat.div`. A plain array read stays stuck under
-    `whnf`, so the split keeps both the de-box and the proofs. -/
+    **`UInt32`, not `UInt64`.** On a 64-bit target `lean_box_uint32` is a tagged
+    scalar stored inline in the array (no allocation), exactly like the old
+    `Array UInt8`/`Array UInt16`; `lean_box_uint64` instead heap-allocates a boxed
+    word per entry, so an `Array UInt64` would pointer-chase through `lean_ctor_get`
+    on every read — re-introducing the very boxing #2650 removed. A `UInt32` holds
+    len (8 bits) + symbol (16 bits) with room to spare.
+
+    **The length is the low byte deliberately.** Only the length flows into the
+    well-founded recursions' termination measure (`cnt - len`), and extracting it
+    must avoid a shift: a `>>>` on the stuck array read `packed[idx]!` forces
+    `Nat.shiftRight`/`Nat.div` during the equation compiler's `whnf`, which loops
+    on the opaque value — the #2650 hazard. The low byte extracts with `toUInt8`
+    (a width truncation, no `Nat.div`), so `unpackLen` stays inert under `whnf`.
+    The symbol uses a shift, but it never enters the measure, so its `whnf` is
+    never forced during termination checking. -/
+@[inline] def packEntry (sym : UInt16) (len : UInt8) : UInt32 :=
+  len.toUInt32 ||| (sym.toUInt32 <<< 8)
+
+/-- The symbol field (bits 8–23) of a packed entry. -/
+@[inline] def unpackSym (e : UInt32) : UInt16 := (e >>> 8).toUInt16
+
+/-- The codeword-length field (low byte) of a packed entry. Shift-free so it stays
+    inert under the `whnf` the well-founded recursions force (see `packEntry`). -/
+@[inline] def unpackLen (e : UInt32) : UInt8 := e.toUInt8
+
+/-- A de-boxed fast-decode table: each slot's `(symbol, codeLen)` packed into one
+    `UInt32` word (`packEntry`), stored in a single scalar `Array UInt32`. Storing
+    `Array (UInt16 × UInt8)` boxes every slot as a heap pair, so each per-symbol
+    read pointer-chases through `lean_ctor_get` twice; #2650 split the fields into
+    two parallel scalar arrays to de-box; this folds them back into one packed
+    word so a per-symbol read is a single `lean_array_fget` plus shifts (`symAt` /
+    `lenAt`) touching one tagged-scalar array / one cache line instead of two.
+
+    The only packed field on the well-founded recursions' termination measure is
+    the length, and `lenAt` extracts it shift-free (`toUInt8` of the low byte), so
+    it stays inert under the `whnf` those recursions force during equation
+    compilation — the `Nat.div` loop #2650 warned of (a `>>>` on the stuck
+    `packed[idx]!` reducing to `Nat.shiftRight`/`Nat.div`) does not fire. `symAt`
+    does shift, but the symbol never enters a measure, so its `whnf` is never
+    forced (see `packEntry`). The packed table is kept behind an equivalence to
+    the split projections
+    (`buildTable_lenAt` / `buildTable_symAt` recover `(tableEntry …).2` /
+    `(tableEntry …).1`), so every decode proof transfers. -/
 structure DecodeTable where
-  syms : Array UInt16
-  lens : Array UInt8
+  packed : Array UInt32
 
-/-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds the
-    `(symbol, codeLen)` reached by walking `tree` on the bits of `i`, with the two
-    fields split into the parallel scalar arrays of `DecodeTable` so each
-    per-symbol read is a de-boxed scalar load instead of a heap-pair pointer-chase.
+/-- The codeword length of slot `idx`: the low byte of the packed entry. One
+    scalar-array read plus a width truncation (no shift — see `packEntry` for why
+    the length is the low byte, so this stays inert under the well-founded
+    recursions' `whnf`). -/
+@[inline] def DecodeTable.lenAt (t : DecodeTable) (idx : Nat) : UInt8 :=
+  unpackLen t.packed[idx]!
+
+/-- The symbol of slot `idx`: bits 8–23 of the packed entry. One scalar-array read
+    plus a shift; the symbol never enters a termination measure, so the shift is
+    never `whnf`-forced. -/
+@[inline] def DecodeTable.symAt (t : DecodeTable) (idx : Nat) : UInt16 :=
+  unpackSym t.packed[idx]!
+
+theorem DecodeTable.lenAt_def (t : DecodeTable) (idx : Nat) :
+    t.lenAt idx = unpackLen t.packed[idx]! := rfl
+
+theorem DecodeTable.symAt_def (t : DecodeTable) (idx : Nat) :
+    t.symAt idx = unpackSym t.packed[idx]! := rfl
+
+/-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds
+    `packEntry sym codeLen` for the `(sym, codeLen)` reached by walking `tree` on
+    the bits of `i`, stored in a single packed scalar array so each per-symbol read
+    is one de-boxed `UInt32` load instead of two reads / a heap-pair pointer-chase.
     Built once per Huffman tree; cheap relative to the symbols decoded with it. -/
 def buildTable (tree : HuffTree) : DecodeTable where
-  syms := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) => (tableEntry tree i.val).1)
-  lens := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) => (tableEntry tree i.val).2)
+  packed := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) =>
+    packEntry (tableEntry tree i.val).1 (tableEntry tree i.val).2)
 
 /-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
 def bitsAvail (br : BitReader) : Nat :=
@@ -203,12 +264,12 @@ def decodeWithTable (tree : HuffTree) (table : DecodeTable)
   if br.bitOff ≥ 8 then tree.decode br
   else
     let idx := (peekFast br).toNat
-    let len := table.lens[idx]!.toNat
+    let len := (table.lenAt idx).toNat
     if len == 0 || len > bitsAvail br then
       tree.decode br
     else
       let total := br.bitOff + len
-      .ok (table.syms[idx]!, { br with pos := br.pos + total / 8, bitOff := total % 8 })
+      .ok (table.symAt idx, { br with pos := br.pos + total / 8, bitOff := total % 8 })
 
 end HuffTree
 
@@ -603,12 +664,12 @@ theorem refillGuard_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size 
 /-- The inline-literal guard read in `USize` matches the `Nat` guard (the length
     field round-trips since it is a `UInt8`). -/
 theorem litGuard_usize (table : HuffTree.DecodeTable) (bitBuf : UInt64) (cnt : USize) :
-    (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
-        ∧ (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize ≤ cnt
-        ∧ table.syms[(bitBuf &&& 0x1FF).toNat]! < 256)
-      ↔ (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
-        ∧ table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt.toNat
-        ∧ table.syms[(bitBuf &&& 0x1FF).toNat]! < 256) := by
+    ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+        ∧ ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize ≤ cnt
+        ∧ table.symAt (bitBuf &&& 0x1FF).toNat < 256)
+      ↔ ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+        ∧ (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt.toNat
+        ∧ table.symAt (bitBuf &&& 0x1FF).toNat < 256) := by
   rw [USize.le_iff_toNat_le, toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)]
 
 /-- Load whole bytes into the high end of `bitBuf` until it holds > 56 bits or
@@ -645,9 +706,9 @@ def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt depth : Nat) :
 @[inline] def decodeSym (tree : HuffTree) (table : HuffTree.DecodeTable)
     (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
   let idx := (bitBuf &&& 0x1FF).toNat
-  let len := table.lens[idx]!.toNat
+  let len := (table.lenAt idx).toNat
   if len == 0 || len > cnt then walkTree tree bitBuf cnt 0
-  else .ok (table.syms[idx]!, bitBuf >>> len.toUInt64, cnt - len, len)
+  else .ok (table.symAt idx, bitBuf >>> len.toUInt64, cnt - len, len)
 
 /-- Read `n` bits LSB-first from the buffer without refilling. Errors (like
     `readBitsFast`) when the buffer holds fewer than `n` bits — for a refilled
@@ -804,15 +865,15 @@ def goFusedP (litTable distTable : HuffTree.DecodeTable)
     goFusedP litTable distTable data litTree distTree maxOut
       (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
   else
-  if hlit : litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
-      ∧ litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt
-      ∧ litTable.syms[(bitBuf &&& 0x1FF).toNat]! < 256 then
+  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+      ∧ (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt
+      ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goFusedP litTable distTable data litTree distTree maxOut pos
-        (bitBuf >>> (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUInt64)
-        (cnt - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat)
-        (output.push litTable.syms[(bitBuf &&& 0x1FF).toNat]!.toUInt8)
+        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
+        (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)
+        (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8)
   else
   let cnt0 := cnt
   match decodeSym litTree litTable bitBuf cnt with
@@ -884,16 +945,16 @@ def goFusedPU (litTable distTable : HuffTree.DecodeTable)
           rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
       (cnt + 8) hsz output
   else
-  if hlit : litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0
-      ∧ (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize ≤ cnt
-      ∧ litTable.syms[(bitBuf &&& 0x1FF).toNat]! < 256 then
+  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+      ∧ ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize ≤ cnt
+      ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goFusedPU litTable distTable data litTree distTree maxOut pos
-        (bitBuf >>> (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUInt64)
-        (cnt - (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize)
+        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
+        (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize)
         hsz
-        (output.push litTable.syms[(bitBuf &&& 0x1FF).toNat]!.toUInt8)
+        (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8)
   else
   let cnt0 := cnt.toNat
   match decodeSym litTree litTable bitBuf cnt.toNat with
@@ -955,13 +1016,13 @@ def goFusedPU (litTable distTable : HuffTree.DecodeTable)
       rw [hpa, hca]; omega
     · -- inline literal: cnt drops by len ≥ 1
       obtain ⟨hne, hle, _⟩ := hlit
-      have hlen : (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize.toNat
-          = litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat :=
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
         toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize).toNat
-          = cnt.toNat - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat := by
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
         rw [USize.toNat_sub_of_le _ _ hle, hlen]
-      have hlecnt : litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt.toNat :=
+      have hlecnt : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt.toNat :=
         hlen ▸ USize.le_iff_toNat_le.mp hle
       rw [hsub]; omega
     · -- slow literal: cnt' < cnt0 = cnt.toNat from the no-progress guard
