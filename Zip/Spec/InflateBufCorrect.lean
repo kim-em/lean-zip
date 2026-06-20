@@ -730,7 +730,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
     {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
     (hr : 21 < cnt ∨ pos = data.size)
-    (hlen : (table.lens[(bitBuf &&& 0x1FF).toNat]!).toNat ≤ 9) (hdep : treeDepthLE tree 15) :
+    (hlen : (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ 9) (hdep : treeDepthLE tree 15) :
     match HuffTree.decodeWithTable tree table br, decodeSym tree table bitBuf cnt with
     | .error e1, .error e2 => e1 = e2
     | .ok (s1, br'), .ok (s2, bb, c, used) =>
@@ -752,9 +752,9 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
   unfold HuffTree.decodeWithTable decodeSym
   rw [if_neg (show ¬ br.bitOff ≥ 8 from by omega), hidx]
   simp only []
-  -- generalize the two parallel reads (the de-boxed table splits sym/len)
-  generalize hlenv : table.lens[(peekFast br).toNat]! = lenB at hlen ⊢
-  generalize hsymv : table.syms[(peekFast br).toNat]! = symV
+  -- generalize the packed table's len/sym projections of this slot
+  generalize hlenv : table.lenAt (peekFast br).toNat = lenB at hlen ⊢
+  generalize hsymv : table.symAt (peekFast br).toNat = symV
   -- the two guards have the same truth value (cnt vs bitsAvail, with len ≤ 9)
   have hgd : (lenB.toNat == 0 || decide (lenB.toNat > HuffTree.bitsAvail br))
            = (lenB.toNat == 0 || decide (lenB.toNat > cnt)) := by
@@ -787,8 +787,8 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
 /-- Every `buildTable` entry's code length is at most `fastBits = 9`
     (the table walk stops at `fastBits`, or returns the `0` sentinel). -/
 theorem buildTable_codeLen_le (tree : HuffTree) (idx : Nat) (hidx : idx < 2 ^ HuffTree.fastBits) :
-    (tree.buildTable.lens[idx]!).toNat ≤ 9 := by
-  rw [HuffTree.buildTable_lens_getElem tree idx hidx, HuffTree.tableEntry]
+    (tree.buildTable.lenAt idx).toNat ≤ 9 := by
+  rw [HuffTree.buildTable_lenAt tree idx hidx, HuffTree.tableEntry]
   rcases hg : HuffTree.tableEntry.go tree idx 0 with ⟨sym, lenB⟩
   show lenB.toNat ≤ 9
   by_cases hp : 0 < lenB.toNat
@@ -1126,13 +1126,13 @@ theorem go_refill_step (litTable distTable : HuffTree.DecodeTable) (data : ByteA
     inline table read does it — near-definitional, the else branch of `decodeSym`. -/
 theorem decodeSym_inline (tree : HuffTree) (table : HuffTree.DecodeTable)
     (bitBuf : UInt64) (cnt : Nat)
-    (h0 : table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≠ 0)
-    (hle : table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat ≤ cnt) :
+    (h0 : (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0)
+    (hle : (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt) :
     decodeSym tree table bitBuf cnt =
-      .ok (table.syms[(bitBuf &&& 0x1FF).toNat]!,
-        bitBuf >>> (table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUInt64,
-        cnt - table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat,
-        table.lens[(bitBuf &&& 0x1FF).toNat]!.toNat) := by
+      .ok (table.symAt (bitBuf &&& 0x1FF).toNat,
+        bitBuf >>> ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64,
+        cnt - (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat,
+        (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat) := by
   unfold decodeSym
   simp only []
   rw [if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
@@ -1226,11 +1226,11 @@ theorem goFusedP_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArra
           goFused, dif_neg hrc, decodeSym_inline litTree litTable bitBuf cnt hl0 hl1]
       simp only []
       rw [if_pos hl2, if_neg hmax,
-          dif_neg (show ¬ bp + (cnt - (cnt - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat)) ≤ bp by omega),
-          dif_neg (show ¬ data.size * 8 < bp + (cnt - (cnt - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat)) by
+          dif_neg (show ¬ bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)) ≤ bp by omega),
+          dif_neg (show ¬ data.size * 8 < bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)) by
             have : pos * 8 ≤ data.size * 8 := by omega
             omega)]
-      exact ih (bp + (cnt - (cnt - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat))) (by omega) (by omega)
+      exact ih (bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat))) (by omega) (by omega)
   | case4 pos bitBuf cnt output hrc hlit e hde =>
       intro bp hpos hbp
       rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
@@ -1467,11 +1467,11 @@ theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArr
   | case3 pos bitBuf cnt output hrc hlit hmax ih =>
       intro hpos
       obtain ⟨hl0, hl1, hl2⟩ := hlit
-      have hlen : (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize.toNat
-          = litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat :=
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
         InflateBuf.toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - (litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat).toUSize).toNat
-          = cnt.toNat - litTable.lens[(bitBuf &&& 0x1FF).toNat]!.toNat := by
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
         rw [USize.toNat_sub_of_le _ _ hl1, hlen]
       rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
           InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),

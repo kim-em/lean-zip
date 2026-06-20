@@ -328,22 +328,39 @@ theorem advReader_eq (br br' : BitReader) (k : Nat)
   · dsimp only []; omega
   · exact hwf'
 
-/-- The symbol array of `buildTable` at a valid index is the first component of
-    `tableEntry` — the de-boxed table splits the `(sym, len)` pair into two
-    parallel scalar arrays, so each field projects back through `Array.getElem_ofFn`. -/
-theorem buildTable_syms_getElem (tree : HuffTree) (idx : Nat)
+/-- `unpackSym` recovers the symbol packed by `packEntry` (the high field, bits
+    8–23, after shifting off the length byte). -/
+@[simp] theorem unpackSym_packEntry (sym : UInt16) (len : UInt8) :
+    unpackSym (packEntry sym len) = sym := by
+  simp only [unpackSym, packEntry]; bv_decide
+
+/-- `unpackLen` recovers the codeword length packed by `packEntry`. -/
+@[simp] theorem unpackLen_packEntry (sym : UInt16) (len : UInt8) :
+    unpackLen (packEntry sym len) = len := by
+  simp only [unpackLen, packEntry]; bv_decide
+
+/-- The packed entry of `buildTable` at a valid index is `packEntry` of the
+    `(sym, len)` reached by `tableEntry` — the single packed array projects back
+    through `Array.getElem_ofFn`. -/
+theorem buildTable_packed_getElem (tree : HuffTree) (idx : Nat)
     (hidx : idx < 2 ^ fastBits) :
-    (tree.buildTable).syms[idx]! = (tableEntry tree idx).1 := by
+    (tree.buildTable).packed[idx]! = packEntry (tableEntry tree idx).1 (tableEntry tree idx).2 := by
   simp only [HuffTree.buildTable]
   rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
 
-/-- The length array of `buildTable` at a valid index is the second component of
-    `tableEntry`. -/
-theorem buildTable_lens_getElem (tree : HuffTree) (idx : Nat)
+/-- The symbol of `buildTable` slot `idx` is the first component of `tableEntry` —
+    the packed table is kept behind this equivalence to the split projections. -/
+theorem buildTable_symAt (tree : HuffTree) (idx : Nat)
     (hidx : idx < 2 ^ fastBits) :
-    (tree.buildTable).lens[idx]! = (tableEntry tree idx).2 := by
-  simp only [HuffTree.buildTable]
-  rw [getElem!_pos _ _ (by rw [Array.size_ofFn]; exact hidx), Array.getElem_ofFn]
+    (tree.buildTable).symAt idx = (tableEntry tree idx).1 := by
+  rw [DecodeTable.symAt_def, buildTable_packed_getElem tree idx hidx, unpackSym_packEntry]
+
+/-- The codeword length of `buildTable` slot `idx` is the second component of
+    `tableEntry`. -/
+theorem buildTable_lenAt (tree : HuffTree) (idx : Nat)
+    (hidx : idx < 2 ^ fastBits) :
+    (tree.buildTable).lenAt idx = (tableEntry tree idx).2 := by
+  rw [DecodeTable.lenAt_def, buildTable_packed_getElem tree idx hidx, unpackLen_packEntry]
 
 set_option maxRecDepth 4096 in
 /-- **Symbol lemma.** The table-driven single-symbol decode built from `tree`
@@ -358,10 +375,10 @@ theorem decodeWithTable_eq (tree : HuffTree) (br : BitReader) :
     rw [UInt32.toNat_and]
     simp only [fastBits]
     exact Nat.and_lt_two_pow _ (by decide)
-  have hlens : (tree.buildTable).lens[(peekFast br).toNat]!
-      = (tableEntry tree (peekFast br).toNat).2 := buildTable_lens_getElem tree _ hidx
-  have hsyms : (tree.buildTable).syms[(peekFast br).toNat]!
-      = (tableEntry tree (peekFast br).toNat).1 := buildTable_syms_getElem tree _ hidx
+  have hlens : (tree.buildTable).lenAt (peekFast br).toNat
+      = (tableEntry tree (peekFast br).toNat).2 := buildTable_lenAt tree _ hidx
+  have hsyms : (tree.buildTable).symAt (peekFast br).toNat
+      = (tableEntry tree (peekFast br).toNat).1 := buildTable_symAt tree _ hidx
   unfold HuffTree.decodeWithTable
   simp only []
   rw [hlens, hsyms]
