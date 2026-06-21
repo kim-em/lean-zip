@@ -239,6 +239,85 @@ def buildTable (tree : HuffTree) : DecodeTable where
   packed := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) =>
     packEntry (tableEntry tree i.val).1 (tableEntry tree i.val).2)
 
+/-! ## Canonical O(n) table construction (libdeflate `build_decode_table`)
+
+`buildTable` walks `tree` once per slot — `O(2^fastBits · depth)` with a tree
+that itself costs an allocation per block. The libdeflate construction fills the
+table directly from the code lengths, with no tree: assign each symbol its
+canonical codeword (RFC 1951 §3.2.2, the same `nextCode` recurrence the tree
+build uses), then write that symbol's `(sym, len)` into every table slot whose
+low `len` bits are the codeword read LSB-first. A length-`len` codeword owns a
+contiguous arithmetic progression of `2^(fastBits - len)` slots at stride
+`2^len` starting from the bit-reversed codeword, so the whole fill is
+`O(num_syms + 2^fastBits)`.
+
+`buildCanonicalLoop` mirrors `HuffTree.insertLoop` step for step — same
+`nextCode` threading, same per-symbol code `c` — so the table it fills equals
+`buildTable (fromLengthsTree lengths)`: the two constructions assign identical
+codewords, and filling the slots of a codeword is the table-side image of
+inserting its leaf. The formal equality theorem (`buildTableCanonical_eq`) is the
+format-independent core of #2671 and lands in a follow-up — its supporting lemmas
+(bit-reversal, the `cwOf`/`bitReverse` slot bridge, the `fillSlots`
+characterization) are already in `Zip.Spec.InflateCanonical`, and a differential
+conformance test witnesses the equality at runtime across every code-length
+regime. The canonical build is not yet on the decode path, so there is no trust
+gap; wiring it in waits on the equality proof. -/
+
+/-- Reverse the low `n` bits of `x` (bit `j` of the result is bit `n-1-j` of `x`).
+    A length-`len` canonical codeword is written MSB-first into the bitstream, so
+    the decoder — which peeks LSB-first — sees `bitReverse code len 0`. -/
+def bitReverse (x : Nat) : Nat → Nat → Nat
+  | 0, acc => acc
+  | n + 1, acc => bitReverse (x / 2) n (acc * 2 + x % 2)
+
+/-- Write `entry` into the `count` slots `base, base + stride, …` of `packed`
+    (the slots one length-`len` codeword owns: `stride = 2^len`,
+    `count = 2^(fastBits - len)`). Linear in `count`; in-place when `packed` is
+    uniquely referenced. -/
+def fillSlots (packed : Array UInt32) (base stride count : Nat) (entry : UInt32) :
+    Array UInt32 :=
+  if count = 0 then packed
+  else fillSlots (packed.set! base entry) (base + stride) stride (count - 1) entry
+termination_by count
+
+/-- The canonical table-fill loop: for each symbol from `start`, look up its
+    canonical code `c = nextCode[len]` (advancing `nextCode[len]`, exactly as
+    `HuffTree.insertLoop` does), and — for codes that fit the `fastBits` window —
+    fill its slots. Codes longer than `fastBits` advance `nextCode` but fill no
+    slot (they reach the table as the sentinel `0`, the long-code fallback), and
+    `len = 0` symbols are skipped entirely. -/
+def buildCanonicalLoop (lengths : Array UInt8) (nextCode : Array UInt32)
+    (start : Nat) (packed : Array UInt32) : Array UInt32 :=
+  if h : start < lengths.size then
+    let len := lengths[start]
+    if hlen : 0 < len.toNat ∧ len.toNat < nextCode.size then
+      let c := nextCode[len.toNat]'hlen.2
+      let nextCode' := nextCode.set! len.toNat (c + 1)
+      if len.toNat ≤ fastBits then
+        let base := bitReverse c.toNat len.toNat 0
+        let packed' := fillSlots packed base (2 ^ len.toNat)
+          (2 ^ (fastBits - len.toNat)) (packEntry start.toUInt16 len)
+        buildCanonicalLoop lengths nextCode' (start + 1) packed'
+      else
+        buildCanonicalLoop lengths nextCode' (start + 1) packed
+    else
+      buildCanonicalLoop lengths nextCode (start + 1) packed
+  else packed
+termination_by lengths.size - start
+
+/-- Build the `2^fastBits`-entry decode table directly from the code lengths,
+    libdeflate-style — canonical fill, no Huffman tree, no per-slot tree walk.
+    Equal to `buildTable (fromLengthsTree lengths)` (formal theorem
+    `buildTableCanonical_eq` forthcoming; witnessed at runtime by the
+    `InflateTable` canonical conformance test), so once proven it is a drop-in for
+    the tree-built table with every decode proof transferring unchanged. -/
+def buildTableCanonical (lengths : Array UInt8) (maxBits : Nat := 15) : DecodeTable where
+  packed :=
+    let lsList := lengths.toList.map UInt8.toNat
+    let blCount := Huffman.Spec.countLengths lsList maxBits
+    let nextCode : Array UInt32 := (Huffman.Spec.nextCodes blCount maxBits).map (·.toUInt32)
+    buildCanonicalLoop lengths nextCode 0 (Array.replicate (2 ^ fastBits) (packEntry 0 0))
+
 /-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
 def bitsAvail (br : BitReader) : Nat :=
   if br.pos ≥ br.data.size then 0 else (br.data.size - br.pos) * 8 - br.bitOff

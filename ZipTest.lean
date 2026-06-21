@@ -50,6 +50,7 @@ def main : IO Unit := do
   ZipTest.NativeChecksum.tests
   ZipTest.NativeInflate.tests
   ZipTest.InflateTable.tests
+  ZipTest.InflateTable.canonicalTests
   ZipTest.NativeGzip.tests
   ZipTest.NativeIntegration.tests
   ZipTest.NativeScale.tests

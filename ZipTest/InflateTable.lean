@@ -107,4 +107,46 @@ def tests : IO Unit := do
       | none => checks := checks + 1
   IO.println s!"    {checks} (tree × stream) batches matched; tables={trees.size}"
 
+/-- The code-length vectors exercised by the canonical-build conformance check,
+    spanning every regime: short codes only, codes on the `fastBits` boundary,
+    codes past it (sentinel slots), a 1…15 mix, and the RFC fixed code lengths. -/
+private def lengthVectors : Array (String × Array UInt8) := Id.run do
+  let mut acc : Array (String × Array UInt8) := #[]
+  for d in [1, 4, 8, 9, 10, 12] do
+    acc := acc.push (s!"complete-{d}", completeLengths d)
+  acc := acc.push ("spine-1..15", spineLengths)
+  acc := acc.push ("fixed-lit", Zip.Native.Inflate.fixedLitLengths)
+  acc := acc.push ("fixed-dist", Zip.Native.Inflate.fixedDistLengths)
+  -- A sparse, irregular *incomplete* code (Kraft sum < 1, so some ≤ fastBits
+  -- slots stay sentinel) mixing short codes with one length-10 fallback code —
+  -- the realistic dynamic-block shape.
+  acc := acc.push ("sparse", #[3, 3, 2, 0, 4, 4, 0, 0, 2, 10, 10] ++ Array.replicate 5 (0 : UInt8))
+  return acc
+
+/-- Differential check: the canonical O(n) table build (`buildTableCanonical`)
+    produces the exact same packed table as the tree-built `buildTable`, for
+    every code-length regime. This is the runtime witness of the equality
+    `buildTableCanonical lengths = buildTable (fromLengthsTree lengths)` whose
+    formal proof (`buildTableCanonical_eq`) lands in a follow-up; its supporting
+    lemmas are already in `Zip.Spec.InflateCanonical`. -/
+def canonicalTests : IO Unit := do
+  IO.println "  InflateTable canonical-build tests (canonical fill vs tree build)..."
+  let mut checks : Nat := 0
+  for (label, lengths) in lengthVectors do
+    match HuffTree.fromLengths lengths 15 with
+    | .error e => throw (IO.userError s!"[{label}] fromLengths failed: {e}")
+    | .ok tree =>
+      let treeTable := tree.buildTable
+      let canonTable := HuffTree.buildTableCanonical lengths 15
+      unless treeTable.packed == canonTable.packed do
+        -- Report the first divergent slot for diagnosis.
+        let mut bad : Option Nat := none
+        for i in [:treeTable.packed.size] do
+          if bad.isNone && treeTable.packed[i]! != canonTable.packed[i]! then
+            bad := some i
+        throw (IO.userError
+          s!"[{label}] canonical table differs from tree table at slot {bad}")
+      checks := checks + 1
+  IO.println s!"    {checks} length vectors: canonical build matches tree build"
+
 end ZipTest.InflateTable
