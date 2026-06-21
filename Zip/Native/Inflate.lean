@@ -252,12 +252,16 @@ contiguous arithmetic progression of `2^(fastBits - len)` slots at stride
 `O(num_syms + 2^fastBits)`.
 
 `buildCanonicalLoop` mirrors `HuffTree.insertLoop` step for step — same
-`nextCode` threading, same per-symbol code `c` — so the table it fills is
-provably equal to `buildTable (fromLengthsTree lengths)` (`Zip.Spec.InflateTable`,
-`buildTableCanonical_eq`): the two constructions assign identical codewords, and
-filling the slots of a codeword is the table-side image of inserting its leaf.
-The proof is the format-independent core of #2671; the tree stays the spec, the
-canonical build is proven equal to it, so there is no trust gap. -/
+`nextCode` threading, same per-symbol code `c` — so the table it fills equals
+`buildTable (fromLengthsTree lengths)`: the two constructions assign identical
+codewords, and filling the slots of a codeword is the table-side image of
+inserting its leaf. The formal equality theorem (`buildTableCanonical_eq`) is the
+format-independent core of #2671 and lands in a follow-up — its supporting lemmas
+(bit-reversal, the `cwOf`/`bitReverse` slot bridge, the `fillSlots`
+characterization) are already in `Zip.Spec.InflateCanonical`, and a differential
+conformance test witnesses the equality at runtime across every code-length
+regime. The canonical build is not yet on the decode path, so there is no trust
+gap; wiring it in waits on the equality proof. -/
 
 /-- Reverse the low `n` bits of `x` (bit `j` of the result is bit `n-1-j` of `x`).
     A length-`len` canonical codeword is written MSB-first into the bitstream, so
@@ -303,9 +307,10 @@ termination_by lengths.size - start
 
 /-- Build the `2^fastBits`-entry decode table directly from the code lengths,
     libdeflate-style — canonical fill, no Huffman tree, no per-slot tree walk.
-    Proven equal to `buildTable (fromLengthsTree lengths)`
-    (`Zip.Spec.InflateTable.buildTableCanonical_eq`), so it is a drop-in for the
-    tree-built table with every decode proof transferring unchanged. -/
+    Equal to `buildTable (fromLengthsTree lengths)` (formal theorem
+    `buildTableCanonical_eq` forthcoming; witnessed at runtime by the
+    `InflateTable` canonical conformance test), so once proven it is a drop-in for
+    the tree-built table with every decode proof transferring unchanged. -/
 def buildTableCanonical (lengths : Array UInt8) (maxBits : Nat := 15) : DecodeTable where
   packed :=
     let lsList := lengths.toList.map UInt8.toNat

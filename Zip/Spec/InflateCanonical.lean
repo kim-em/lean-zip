@@ -6,20 +6,27 @@ import Zip.Spec.HuffmanCorrectLoop
 
 `HuffTree.buildTableCanonical lengths` fills the fast decode table directly from
 the code lengths (libdeflate `build_decode_table`): no Huffman tree, no per-slot
-tree walk. This file proves it equal to `buildTable (fromLengthsTree lengths)`,
-so the canonical build is a drop-in for the tree-built table and every decode
-proof transfers unchanged — there is no `@[implemented_by]` trust gap.
+tree walk. The goal is to prove it equal to `buildTable (fromLengthsTree lengths)`,
+so the canonical build becomes a drop-in for the tree-built table with every
+decode proof transferring unchanged and no `@[implemented_by]` trust gap.
 
-The proof runs `buildCanonicalLoop` in lockstep with `HuffTree.insertLoop`: the
-invariant is `packed = (buildTable tree).packed`, preserved step for step. Each
-symbol's fill (`fillSlots`) is the table-side image of inserting its leaf, and
-codes longer than `fastBits` change neither the tree's fast window nor the table.
+This file develops the format-independent **foundation** of that proof. The
+planned route (per #2671) characterizes each table slot by the canonical code
+table `allCodes`: slot `idx` holds `packEntry sym len` iff some `(sym, cw)` with
+`len = cw.length ≤ fastBits` and `cwOf idx len = cw` is in `allCodes`, else the
+sentinel `packEntry 0 0`. `buildTable`'s side follows from the existing
+`hasLeaf_of_tableEntry_go` / `fromLengths_leaf_spec` / `fromLengths_hasLeaf`
+bridge; the canonical loop's side from a table-local `nextCode` invariant. The
+final equality theorem (`buildTableCanonical_eq`) and the decode rewiring land in
+a follow-up; a differential conformance test already witnesses the equality at
+runtime.
 
-This file builds bottom-up:
+The foundation lemmas here, bottom-up:
 1. `bitReverse` arithmetic — the bit-reversed codeword indexes the fast table.
-2. `cwOf`/`bitReverse` bridge — slot `idx` lies on a codeword's path iff
-   `idx % 2^len` is the bit-reversed code.
-3. `fillSlots` — what the slot-fill writes and preserves.
+2. `cwOf`/`bitReverse` bridge (`cwOf_eq_iff_mod`) — slot `idx` lies on a
+   codeword's path iff `idx % 2^len` is the bit-reversed code.
+3. `fillSlots` — what the slot-fill writes (`fillSlots_getElem_eq`) and
+   preserves (`fillSlots_getElem_ne`, `fillSlots_size`).
 -/
 
 namespace Zip.Native.HuffTree
@@ -157,5 +164,56 @@ theorem cwOf_eq_iff_mod (idx c len : Nat) :
     simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
     rw [ih (packed.set! base entry) (base + stride)]
     simp
+
+/-- A slot not on the fill's arithmetic progression `{base + j·stride : j < count}`
+    keeps its old value. -/
+theorem fillSlots_getElem_ne (packed : Array UInt32) (base stride count idx : Nat)
+    (entry : UInt32) (h : ∀ j < count, idx ≠ base + j * stride) :
+    (fillSlots packed base stride count entry)[idx]! = packed[idx]! := by
+  induction count generalizing packed base with
+  | zero => simp [fillSlots]
+  | succ n ih =>
+    rw [fillSlots]
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih (packed.set! base entry) (base + stride) (by
+      intro j hj
+      have hne := h (j + 1) (by omega)
+      have e : base + (j + 1) * stride = base + stride + j * stride := by
+        rw [Nat.succ_mul]; omega
+      rw [e] at hne; exact hne)]
+    have hb : idx ≠ base := by have := h 0 (Nat.zero_lt_succ n); simpa using this
+    rw [Array.set!_eq_setIfInBounds]
+    by_cases hlt : idx < packed.size
+    · rw [getElem!_pos _ idx (by rw [Array.size_setIfInBounds]; exact hlt),
+          getElem!_pos _ idx hlt, Array.getElem_setIfInBounds hlt, if_neg (Ne.symm hb)]
+    · rw [getElem!_neg _ idx (by rw [Array.size_setIfInBounds]; exact hlt),
+          getElem!_neg _ idx hlt]
+
+/-- A slot on the fill's arithmetic progression `base + j·stride` (`j < count`,
+    in bounds) holds the fill value. -/
+theorem fillSlots_getElem_eq (packed : Array UInt32) (base stride count j : Nat)
+    (entry : UInt32) (hstride : 0 < stride) (hj : j < count)
+    (hbound : base + j * stride < packed.size) :
+    (fillSlots packed base stride count entry)[base + j * stride]! = entry := by
+  induction count generalizing packed base j with
+  | zero => omega
+  | succ n ih =>
+    rw [fillSlots]
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    match j with
+    | 0 =>
+      rw [show base + 0 * stride = base from by omega]
+      rw [fillSlots_getElem_ne (packed.set! base entry) (base + stride) stride n base entry
+        (fun k _ => by omega)]
+      have hbase : base < packed.size := by have := hbound; omega
+      rw [Array.set!_eq_setIfInBounds,
+          getElem!_pos _ base (by rw [Array.size_setIfInBounds]; exact hbase),
+          Array.getElem_setIfInBounds_self]
+    | j' + 1 =>
+      have e : base + (j' + 1) * stride = base + stride + j' * stride := by
+        rw [Nat.succ_mul]; omega
+      rw [e]
+      exact ih (packed.set! base entry) (base + stride) j' (by omega)
+        (by rw [Array.size_set!, ← e]; exact hbound)
 
 end Zip.Native.HuffTree

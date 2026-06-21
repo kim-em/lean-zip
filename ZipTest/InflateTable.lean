@@ -125,8 +125,10 @@ private def lengthVectors : Array (String × Array UInt8) := Id.run do
 
 /-- Differential check: the canonical O(n) table build (`buildTableCanonical`)
     produces the exact same packed table as the tree-built `buildTable`, for
-    every code-length regime. This is the runtime witness of the proven equality
-    `Zip.Spec.InflateTable.buildTableCanonical_eq`. -/
+    every code-length regime. This is the runtime witness of the equality
+    `buildTableCanonical lengths = buildTable (fromLengthsTree lengths)` whose
+    formal proof (`buildTableCanonical_eq`) lands in a follow-up; its supporting
+    lemmas are already in `Zip.Spec.InflateCanonical`. -/
 def canonicalTests : IO Unit := do
   IO.println "  InflateTable canonical-build tests (canonical fill vs tree build)..."
   let mut checks : Nat := 0
