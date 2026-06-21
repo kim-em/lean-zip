@@ -47,8 +47,9 @@ theorem codeFor_some (lsList : List Nat) (maxBits : Nat) (s : Nat)
   exact ⟨_, rfl⟩
 
 /-- NC invariant update: after incrementing `nextCode[len]`, the NC invariant
-    holds at `start + 1`. Shared by `insertLoop_forward` and `insertLoop_backward`. -/
-private theorem nc_invariant_step
+    holds at `start + 1`. Shared by `insertLoop_forward` and `insertLoop_backward`
+    (and the canonical table fill loop in `Zip.Spec.InflateCanonical`). -/
+theorem nc_invariant_step
     (lengths : Array UInt8) (nextCode : Array UInt32) (start : Nat)
     (lsList : List Nat) (maxBits : Nat)
     (blCount : Array Nat) (hblCount : blCount = Huffman.Spec.countLengths lsList maxBits)
@@ -90,8 +91,9 @@ private theorem nc_invariant_step
 
 /-- NC invariant skip: when `lsList[start] = 0`, the NC invariant at `start` implies
     the NC invariant at `start + 1` with the same `nextCode`. Shared by
-    `insertLoop_forward` and `insertLoop_backward`. -/
-private theorem nc_invariant_skip
+    `insertLoop_forward` and `insertLoop_backward`
+    (and the canonical table fill loop in `Zip.Spec.InflateCanonical`). -/
+theorem nc_invariant_skip
     (nextCode : Array UInt32) (start : Nat)
     (lsList : List Nat) (maxBits : Nat) (ncSpec : Array Nat)
     (hls_len : start < lsList.length)
