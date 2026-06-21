@@ -28,6 +28,7 @@ import Zip.Spec.BlockSizeModel
 import Zip.Spec.HuffmanCorrect
 import Zip.Spec.HuffmanCorrectLoop
 import Zip.Spec.InflateTable
+import Zip.Spec.InflateCanonical
 import Zip.Spec.HuffmanEncodeCorrect
 import Zip.Spec.DecodeCorrect
 import Zip.Spec.DecodeComplete
