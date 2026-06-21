@@ -599,6 +599,17 @@ private theorem fillDouble_get (seed : ByteArray) (length : Nat) :
         append_self_getElem! seed (i % (seed.size + seed.size)) hpos (Nat.mod_lt i (by omega)),
         Nat.mod_mod_of_dvd i ⟨2, by omega⟩]
 
+/-- Copying the `length`-byte prefix of a *distinct* array `fill` into `buf`'s
+    tail with one `copySlice` equals `buf ++ fill.extract 0 length`. Used to drop
+    the redundant trailing `extract` + `append` in `copyLoop`'s overlapping case:
+    because `fill` is not `buf`, there is no self-aliasing, so a single `copySlice`
+    (one `memcpy`) suffices. Holds for any `length` — the destination suffix is
+    empty because the write starts at `buf.size`. -/
+private theorem copySlice_prefix_eq_append {fill buf : ByteArray} {length : Nat} :
+    fill.copySlice 0 buf buf.size length false = buf ++ fill.extract 0 length := by
+  rw [ByteArray.copySlice_eq_append, ByteArray.extract_zero_size, Nat.zero_add,
+      ByteArray.size_data (a := buf), ByteArray.extract_add_left, ByteArray.append_empty]
+
 /-- The native copy loop produces the same result as the spec's `List.ofFn`
     for LZ77 back-references. `copyLoop` dispatches: the non-overlapping case
     (`length ≤ distance`) is the contiguous slice `[start, start+length)`
@@ -638,7 +649,7 @@ theorem copyLoop_eq_ofFn
       have hge : length ≤ (Zip.Native.Inflate.fillDouble
           (output.extract (output.size - distance) (output.size - distance + distance)) length).size :=
         fillDouble_size_ge _ _ (by rw [hseed_size]; exact hd_pos)
-      rw [ByteArray.data_append, Array.toList_append]
+      rw [copySlice_prefix_eq_append, ByteArray.data_append, Array.toList_append]
       congr 1
       have hext := extract_data_toList_ofFn (Zip.Native.Inflate.fillDouble
         (output.extract (output.size - distance) (output.size - distance + distance)) length)

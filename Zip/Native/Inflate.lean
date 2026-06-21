@@ -354,17 +354,20 @@ decreasing_by
     (a `memcpy`) instead of `length` per-byte `push`es / bounds-checks / modular
     indices. For an **overlapping** back-reference (`k = 0 ∧ length > distance`,
     the RLE case) the copy is the periodic extension of the `distance`-byte window,
-    built by `fillDouble` (a handful of memcpys) instead of `length` per-byte
-    `push`es. A partial copy (`k ≠ 0`, never produced by the decoders) falls back
-    to the per-byte `copyLoopGo`. All three are proven equal to `copyLoopGo` via
-    `copyLoop_eq_ofFn`, so every decode correctness proof is unaffected. -/
+    built by `fillDouble` (a handful of memcpys). The `length` bytes of that fill
+    are copied straight into `buf`'s tail with a single `copySlice` (one `memcpy`,
+    no trailing `extract` + `append`), since the fill is a distinct array so there
+    is no self-aliasing. A partial copy (`k ≠ 0`, never produced by the decoders)
+    falls back to the per-byte `copyLoopGo`. All three are proven equal to
+    `copyLoopGo` via `copyLoop_eq_ofFn`, so every decode correctness proof is
+    unaffected. -/
 def copyLoop (buf : ByteArray) (start distance : Nat)
     (k length : Nat)
     (hd_pos : distance > 0 := by omega) (hsd : start + distance ≤ buf.size := by omega) : ByteArray :=
   if k = 0 ∧ length ≤ distance then
     buf ++ buf.extract start (start + length)
   else if k = 0 then
-    buf ++ (fillDouble (buf.extract start (start + distance)) length).extract 0 length
+    (fillDouble (buf.extract start (start + distance)) length).copySlice 0 buf buf.size length false
   else
     copyLoopGo buf start distance k length hd_pos hsd
 
