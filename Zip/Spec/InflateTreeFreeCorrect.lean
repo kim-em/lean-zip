@@ -1429,28 +1429,6 @@ private theorem bindOk {α β : Type} {e : Except String α} {f : α → Except 
   | error e => simp [bind, Except.bind] at he
   | ok a => exact ⟨a, rfl, by simpa only [bind, Except.bind] using he⟩
 
-/-- **`decodeDynamicTrees` extraction.** A successful `decodeDynamicTrees` shares
-    its whole prefix with `decodeDynamicLengthsOnly`: it yields the same code-length
-    arrays and reader, and the two trees are `fromLengths` of those arrays. -/
-theorem decodeDynamicTrees_extract {br : BitReader} {litTree distTree : HuffTree} {br' : BitReader}
-    (h : decodeDynamicTrees br = .ok (litTree, distTree, br')) :
-    ∃ litLens distLens, decodeDynamicLengthsOnly br = .ok (litLens, distLens, br') ∧
-      HuffTree.fromLengths litLens 15 = .ok litTree ∧ HuffTree.fromLengths distLens 15 = .ok distTree := by
-  unfold decodeDynamicTrees at h
-  obtain ⟨a1, he1, h⟩ := bindOk h; obtain ⟨hlit, br1⟩ := a1
-  obtain ⟨a2, he2, h⟩ := bindOk h; obtain ⟨hdist, br2⟩ := a2
-  obtain ⟨a3, he3, h⟩ := bindOk h; obtain ⟨hclen, br3⟩ := a3
-  obtain ⟨a4, he4, h⟩ := bindOk h; obtain ⟨clLengths, br4⟩ := a4
-  obtain ⟨a5, he5, h⟩ := bindOk h
-  obtain ⟨a6, he6, h⟩ := bindOk h; obtain ⟨codeLengths, br6⟩ := a6
-  obtain ⟨lt', hlitT, h⟩ := bindOk h
-  obtain ⟨dt', hdistT, h⟩ := bindOk h
-  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-  obtain ⟨rfl, rfl, rfl⟩ := h
-  refine ⟨_, _, ?_, hlitT, hdistT⟩
-  unfold decodeDynamicLengthsOnly
-  simp [he1, he2, he3, he4, he5, he6, bind, Except.bind, pure, Except.pure]
-
 /-- A single `readBit` yields a value `< 2` (it is `(…) &&& 1`). -/
 theorem readBit_lt {br br' : BitReader} {bit : UInt32} (h : br.readBit = .ok (bit, br')) :
     bit.toNat < 2 := by
@@ -1511,5 +1489,38 @@ theorem readBits_go_lt : ∀ (n : Nat) (br : BitReader) (acc : UInt32) (shift : 
 theorem readBits_lt {br br' : BitReader} {n : Nat} {v : UInt32} (hn : n ≤ 32)
     (h : br.readBits n = .ok (v, br')) : v.toNat < 2 ^ n := by
   have := readBits_go_lt n br 0 0 v br' h (by simp) (by omega); simpa using this
+
+/-- **`decodeDynamicTrees` extraction.** A successful `decodeDynamicTrees` shares
+    its whole prefix with `decodeDynamicLengthsOnly`: it yields the same code-length
+    arrays and reader, the two trees are `fromLengths` of those arrays, and the
+    arrays fit `UInt16` (`hlit`/`hdist` are 5-bit, so `≤ 288`/`32`). -/
+theorem decodeDynamicTrees_extract {br : BitReader} {litTree distTree : HuffTree} {br' : BitReader}
+    (h : decodeDynamicTrees br = .ok (litTree, distTree, br')) :
+    ∃ litLens distLens, decodeDynamicLengthsOnly br = .ok (litLens, distLens, br') ∧
+      HuffTree.fromLengths litLens 15 = .ok litTree ∧ HuffTree.fromLengths distLens 15 = .ok distTree ∧
+      litLens.size ≤ UInt16.size ∧ distLens.size ≤ UInt16.size := by
+  unfold decodeDynamicTrees at h
+  obtain ⟨a1, he1, h⟩ := bindOk h; obtain ⟨hlit, br1⟩ := a1
+  obtain ⟨a2, he2, h⟩ := bindOk h; obtain ⟨hdist, br2⟩ := a2
+  obtain ⟨a3, he3, h⟩ := bindOk h; obtain ⟨hclen, br3⟩ := a3
+  obtain ⟨a4, he4, h⟩ := bindOk h; obtain ⟨clLengths, br4⟩ := a4
+  obtain ⟨a5, he5, h⟩ := bindOk h
+  obtain ⟨a6, he6, h⟩ := bindOk h; obtain ⟨codeLengths, br6⟩ := a6
+  obtain ⟨lt', hlitT, h⟩ := bindOk h
+  obtain ⟨dt', hdistT, h⟩ := bindOk h
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl, rfl⟩ := h
+  have hlitb : hlit.toNat < 32 := readBits_lt (n := 5) (by omega) he1
+  have hdistb : hdist.toNat < 32 := readBits_lt (n := 5) (by omega) he2
+  refine ⟨_, _, ?_, hlitT, hdistT, ?_, ?_⟩
+  · unfold decodeDynamicLengthsOnly
+    simp [he1, he2, he3, he4, he5, he6, bind, Except.bind, pure, Except.pure]
+  · rw [Array.size_extract]
+    exact Nat.le_trans (Nat.le_trans (Nat.sub_le _ _) (Nat.min_le_left _ _))
+      (Nat.le_trans (by omega : hlit.toNat + 257 ≤ 288) (by decide : 288 ≤ UInt16.size))
+  · rw [Array.size_extract]
+    exact Nat.le_trans (Nat.le_trans (Nat.sub_le _ _) (Nat.min_le_left _ _))
+      (Nat.le_trans (by omega : hlit.toNat + 257 + (hdist.toNat + 1) ≤ 320)
+        (by decide : 320 ≤ UInt16.size))
 
 end Zip.Native.Inflate
