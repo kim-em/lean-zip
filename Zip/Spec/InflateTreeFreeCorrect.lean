@@ -553,4 +553,126 @@ theorem natToBits_bitReverse (x k : Nat) :
       bitReverse_testBit x k (k - 1 - j) (by omega)]
   congr 1; omega
 
+/-- The low bit of the buffer as a `Nat`: `(buf &&& 1).toNat = buf.toNat % 2`. -/
+theorem and_one_toNat (buf : UInt64) : (buf &&& 1).toNat = buf.toNat % 2 := by
+  rw [UInt64.toNat_and, show (1 : UInt64).toNat = 1 from rfl, Nat.and_one_is_mod]
+
+/-- Shifting the buffer right by one bit halves its `Nat` value. -/
+theorem shr_one_toNat (buf : UInt64) : (buf >>> (1 : UInt64)).toNat = buf.toNat / 2 := by
+  rw [UInt64.toNat_shiftRight, show (1 : UInt64).toNat % 64 = 1 from rfl,
+      Nat.shiftRight_eq_div_pow, Nat.pow_one]
+
+/-- Single-shift composition: `(buf >>> 1) >>> m = buf >>> (m+1)` for `m+1 < 64`. -/
+theorem ushr_succ (buf : UInt64) (m : Nat) (hm : m + 1 < 64) :
+    (buf >>> (1 : UInt64)) >>> ((m : Nat).toUInt64) = buf >>> ((m + 1 : Nat).toUInt64) := by
+  apply UInt64.toNat_inj.mp
+  have hm' : (m : Nat).toUInt64.toNat % 64 = m := by
+    simp [Nat.toUInt64, UInt64.toNat_ofNat]; omega
+  have hm1' : (m + 1 : Nat).toUInt64.toNat % 64 = m + 1 := by
+    simp [Nat.toUInt64, UInt64.toNat_ofNat]; omega
+  rw [UInt64.toNat_shiftRight, UInt64.toNat_shiftRight, UInt64.toNat_shiftRight,
+      show (1 : UInt64).toNat % 64 = 1 from rfl, hm', hm1',
+      show m + 1 = 1 + m from by omega, Nat.shiftRight_add]
+
+/-- One accumulation step: reading the low bit `buf % 2` as the new MSB grows the
+    `(k+1)`-bit value by `code · 2^(k+1) + bitReverse buf (k+1)`. -/
+theorem accum_step (code buf k : Nat) :
+    code * 2 ^ (k + 1) + bitReverse buf (k + 1) 0
+      = (code * 2 + buf % 2) * 2 ^ k + bitReverse (buf / 2) k 0 := by
+  rw [bitReverse_succ, Nat.pow_succ, Nat.add_mul, Nat.mul_assoc, Nat.mul_comm 2 (2 ^ k),
+      Nat.mul_comm (buf % 2) (2 ^ k)]
+  omega
+
+/-! ## `walkCanonical` forward characterization
+
+`walkCanonical` reads the buffer LSB-first, accumulating `code := code*2 + bit`.
+A successful run consumes `used` bits forming the value `bitReverse buf.toNat
+used 0`, lands in length `used`'s canonical range, and returns the symbol whose
+codeword is `cwOf buf.toNat used`. The generalized `go` form carries the partial
+accumulator `code` (the bits read before this call). -/
+
+/-- Generalized `walkCanonical.go` success characterization, by fuel induction on
+    `maxBits + 1 - len`. -/
+theorem walkCanonical_go_ok (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hmb64 : maxBits < 64)
+    (ld : LongDecode) (hld : ld = buildLongDecode lengths maxBits) :
+    ∀ (fuel len code : Nat) (buf : UInt64) (cnt : Nat) (sym : UInt16) (bb : UInt64) (c used : Nat),
+      maxBits + 1 - len ≤ fuel → 1 ≤ len →
+      walkCanonical.go ld maxBits len code buf cnt = .ok (sym, bb, c, used) →
+      len ≤ used ∧ used ≤ maxBits ∧ used + 1 - len ≤ cnt ∧
+        bb = buf >>> ((used + 1 - len : Nat).toUInt64) ∧ c = cnt - (used + 1 - len) ∧
+        ∃ s, s < lengths.size ∧ sym = s.toUInt16 ∧ lengths[s]!.toNat = used ∧
+          Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+            = some (Huffman.Spec.natToBits
+                (code * 2 ^ (used + 1 - len) + bitReverse buf.toNat (used + 1 - len) 0) used) := by
+  subst hld
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro len code buf cnt sym bb c used hfuel hlen1 h
+    rw [walkCanonical.go, dif_pos (by omega : len > maxBits)] at h
+    exact absurd h (by simp)
+  | succ fuel ih =>
+    intro len code buf cnt sym bb c used hfuel hlen1 h
+    rw [walkCanonical.go] at h
+    by_cases hlen : len > maxBits
+    · rw [dif_pos hlen] at h; exact absurd h (by simp)
+    · rw [dif_neg hlen] at h
+      by_cases hcnt0 : cnt = 0
+      · rw [if_pos hcnt0] at h; exact absurd h (by simp)
+      · rw [if_neg hcnt0] at h
+        have h1u : (1 : Nat).toUInt64 = (1 : UInt64) := rfl
+        simp only [] at h
+        split at h
+        · -- matched at length `len`: used = len
+          rename_i hmatch
+          simp only [Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨hsym, hbb, hc, hused⟩ := h
+          subst hused
+          refine ⟨Nat.le_refl _, by omega, by omega, ?_, by omega, ?_⟩
+          · rw [← hbb, show len + 1 - len = 1 from by omega, h1u]
+          · rw [show len + 1 - len = 1 from by omega]
+            have hval : code * 2 ^ 1 + bitReverse buf.toNat 1 0
+                = code * 2 + (buf &&& 1).toNat := by
+              rw [and_one_toNat]; simp [bitReverse, Nat.pow_one]
+            rw [hval]
+            obtain ⟨s, hs, hlen_s, hcf, hsymlk⟩ :=
+              codeFor_of_value lengths maxBits hmb len (code * 2 + (buf &&& 1).toNat)
+                hlen1 (by omega) hmatch.1 hmatch.2
+            exact ⟨s, hs, hsym.symm.trans hsymlk, hlen_s, hcf⟩
+        · -- no match: recurse at len+1
+          rename_i hmatch
+          obtain ⟨hlu, humax, hcnt', hbb, hc, s, hs, hsym, hlen_s, hcf⟩ :=
+            ih (len + 1) (code * 2 + (buf &&& 1).toNat) (buf >>> 1) (cnt - 1) sym bb c used
+              (by omega) (by omega) h
+          have hexp : used + 1 - (len + 1) = used + 1 - len - 1 := by omega
+          have hsplit : used + 1 - len = (used + 1 - len - 1) + 1 := by omega
+          refine ⟨by omega, humax, by omega, ?_, by omega, s, hs, hsym, hlen_s, ?_⟩
+          · rw [hbb, hexp, ushr_succ buf (used + 1 - len - 1) (by omega),
+                show used + 1 - len - 1 + 1 = used + 1 - len from by omega]
+          · rw [hcf, hexp, Option.some.injEq]
+            congr 1
+            rw [and_one_toNat, shr_one_toNat, hsplit]
+            exact (accum_step code buf.toNat (used + 1 - len - 1)).symm
+
+/-- **`walkCanonical` success characterization.** A successful `walkCanonical`
+    consumes `used` bits (`1 ≤ used ≤ maxBits`, `used ≤ cnt`), advances the buffer
+    by `used`, and returns the symbol `s` whose canonical codeword is exactly the
+    `used`-bit window `cwOf buf.toNat used` the spec reads. -/
+theorem walkCanonical_ok_spec (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hmb64 : maxBits < 64) (buf : UInt64) (cnt : Nat) (sym : UInt16) (bb : UInt64) (c used : Nat)
+    (h : walkCanonical (buildLongDecode lengths maxBits) maxBits buf cnt = .ok (sym, bb, c, used)) :
+    1 ≤ used ∧ used ≤ maxBits ∧ used ≤ cnt ∧
+      bb = buf >>> (used : Nat).toUInt64 ∧ c = cnt - used ∧
+      ∃ s, s < lengths.size ∧ sym = s.toUInt16 ∧ lengths[s]!.toNat = used ∧
+        Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+          = some (cwOf buf.toNat used) := by
+  obtain ⟨hlu, humax, hcnt, hbb, hc, s, hs, hsym, hlen_s, hcf⟩ :=
+    walkCanonical_go_ok lengths maxBits hmb hmb64 _ rfl (maxBits + 1) 1 0 buf cnt sym bb c used
+      (by omega) (Nat.le_refl _) h
+  refine ⟨by omega, humax, by omega, ?_, by omega, s, hs, hsym, hlen_s, ?_⟩
+  · rw [hbb, show used + 1 - 1 = used from by omega]
+  · rw [hcf, Option.some.injEq, show used + 1 - 1 = used from by omega, Nat.zero_mul,
+        Nat.zero_add, natToBits_bitReverse]
+
 end Zip.Native.HuffTree
