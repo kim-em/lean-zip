@@ -1,4 +1,5 @@
 import Zip.Spec.InflateCanonical
+import Zip.Spec.InflateBufCorrect
 import Zip.Native.InflateTreeFree
 
 /-!
@@ -839,5 +840,87 @@ theorem walkCanonical_complete (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 
       rw [show L - (1 - 1) = L from by omega, Nat.zero_mul, Nat.zero_add, natToBits_bitReverse]
       exact hcf)
   rwa [show L - (1 - 1) = L from by omega] at h
+
+/-! ## `walkTree` success characterization (mirror of `walkCanonical`)
+
+`walkTree` and `walkCanonical` read the same `bitBuf`. To relate them I give
+`walkTree` the same kind of forward/backward characterization, then prove they
+succeed on exactly the same inputs (`walkCanonical_ok_iff_walkTree`). All in
+UInt64-land — no BitReader. -/
+
+open Zip.Native.InflateBuf (walkTree decodeSym)
+
+/-- `buf >>> (0 : Nat) = buf`. -/
+theorem ushr_zero (buf : UInt64) : buf >>> ((0 : Nat).toUInt64) = buf := by
+  apply UInt64.toNat_inj.mp
+  rw [UInt64.toNat_shiftRight, show (0 : Nat).toUInt64.toNat % 64 = 0 from by decide,
+      Nat.shiftRight_zero]
+
+/-- The `cwOf` head bit is `walkTree`'s branch test (`buf &&& 1 == 0` chooses the
+    left/`false` child). -/
+theorem cwOf_head_branch (buf : UInt64) :
+    (buf.toNat % 2 == 1) = !(buf &&& 1 == 0) := by
+  have hand : (buf &&& 1).toNat = buf.toNat % 2 := and_one_toNat buf
+  rcases (show buf.toNat % 2 = 0 ∨ buf.toNat % 2 = 1 from by omega) with hm | hm
+  · have h0 : buf &&& 1 = 0 := UInt64.toNat_inj.mp (by rw [hand, hm]; rfl)
+    rw [hm]; simp [h0]
+  · have h1 : buf &&& 1 = 1 := UInt64.toNat_inj.mp (by rw [hand, hm]; rfl)
+    rw [hm]; simp [h1]
+
+/-- **`walkTree` forward.** A successful `walkTree` reaches a leaf whose path is
+    the `used`-bit window `cwOf buf.toNat used`, advancing the buffer by `used`. -/
+theorem walkTree_ok_spec (t : HuffTree) :
+    ∀ (buf : UInt64) (cnt depth : Nat) (sym : UInt16) (bb : UInt64) (c used : Nat),
+      depth ≤ 21 → walkTree t buf cnt depth = .ok (sym, bb, c, used) →
+      Deflate.Correctness.TreeHasLeaf t (cwOf buf.toNat used) sym ∧
+        bb = buf >>> (used : Nat).toUInt64 ∧ depth + used ≤ 21 := by
+  induction t with
+  | leaf s =>
+    intro buf cnt depth sym bb c used hd h
+    simp only [walkTree, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl, _, rfl⟩ := h
+    exact ⟨by rw [show cwOf buf.toNat 0 = [] from rfl]; exact Deflate.Correctness.TreeHasLeaf.leaf,
+      (ushr_zero buf).symm, by omega⟩
+  | empty => intro buf cnt depth sym bb c used hd h; simp only [walkTree] at h; exact absurd h (by simp)
+  | node z o ihz iho =>
+    intro buf cnt depth sym bb c used hd h
+    rw [walkTree] at h
+    by_cases hdg : depth > 20
+    · rw [if_pos hdg] at h; exact absurd h (by simp)
+    · rw [if_neg hdg] at h
+      by_cases hcnt : cnt = 0
+      · rw [if_pos hcnt] at h; exact absurd h (by simp)
+      · rw [if_neg hcnt] at h
+        by_cases hb : (buf &&& 1 == 0) = true
+        · rw [if_pos hb] at h
+          cases hrec : walkTree z (buf >>> 1) (cnt - 1) (depth + 1) with
+          | error e => rw [hrec] at h; exact absurd h (by simp)
+          | ok r =>
+            obtain ⟨s', bb', c', u'⟩ := r
+            rw [hrec] at h
+            simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl, rfl, rfl⟩ := h
+            obtain ⟨hleaf, hbb, hdu⟩ := ihz (buf >>> 1) (cnt - 1) (depth + 1) s' bb' c' u'
+              (by omega) hrec
+            refine ⟨?_, ?_, by omega⟩
+            · rw [show cwOf buf.toNat (u' + 1) = false :: cwOf (buf >>> 1).toNat u' from by
+                  rw [cwOf, ← shr_one_toNat, cwOf_head_branch]; simp [hb]]
+              exact Deflate.Correctness.TreeHasLeaf.left hleaf
+            · rw [hbb, ushr_succ buf u' (by omega)]
+        · rw [if_neg hb] at h
+          cases hrec : walkTree o (buf >>> 1) (cnt - 1) (depth + 1) with
+          | error e => rw [hrec] at h; exact absurd h (by simp)
+          | ok r =>
+            obtain ⟨s', bb', c', u'⟩ := r
+            rw [hrec] at h
+            simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl, rfl, rfl⟩ := h
+            obtain ⟨hleaf, hbb, hdu⟩ := iho (buf >>> 1) (cnt - 1) (depth + 1) s' bb' c' u'
+              (by omega) hrec
+            refine ⟨?_, ?_, by omega⟩
+            · rw [show cwOf buf.toNat (u' + 1) = true :: cwOf (buf >>> 1).toNat u' from by
+                  rw [cwOf, ← shr_one_toNat, cwOf_head_branch]; simp [hb]]
+              exact Deflate.Correctness.TreeHasLeaf.right hleaf
+            · rw [hbb, ushr_succ buf u' (by omega)]
 
 end Zip.Native.HuffTree
