@@ -7,12 +7,12 @@ A DEFLATE Huffman decoder that builds **no** Huffman tree: the fast ≤9-bit cod
 go through the canonical 9-bit table (`buildTableCanonicalFast`), and the rare
 >9-bit codes go through a canonical bit-by-bit decode keyed off the per-length
 `count` / `firstCode` / sorted-symbol arrays — never a tree walk. This isolates
-the *build-phase* win (skip `fromLengths`/`insertLoop`) and lets us measure the
-end-to-end decode delta before investing in the formal proof.
+the *build-phase* win (skip `fromLengths`/`insertLoop`).
 
-Prototype only: `partial def` loops (no termination proof), `[i]!` indexing, and
-no correctness theorems. Validated by conformance against the verified
-`Inflate.inflate` on the real corpora; never on the trusted decode path.
+The decode loops are well-founded (`termination_by`, mirroring the verified
+`goFusedP`/`goFusedPU`/`inflateLoop`); the canonical structures and their
+correctness are proven in `Zip.Spec.InflateTreeFreeCorrect`, where the tree-free
+decoder is shown to accept exactly the inputs the verified tree decoder does.
 -/
 
 namespace Zip.Native
@@ -107,15 +107,15 @@ open Zip.Native.HuffTree (DecodeTable LongDecode decodeSymCanon)
 
 /-- Tree-free copy of `goFusedP`: same wide-buffer loop, with the canonical
     long-code fallback (`decodeSymCanon`) in place of the tree walk. -/
-partial def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
+def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
     (pos : Nat) (bitBuf : UInt64) (cnt : Nat) (output : ByteArray) :
     Except String (ByteArray × Nat × UInt64 × Nat) := do
-  if cnt ≤ 56 ∧ pos < data.size then
+  if hrc : cnt ≤ 56 ∧ pos < data.size then
     goTreeFree litTable distTable litLD distLD maxBits data maxOut
       (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
   else
-  if (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
       ∧ (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt
       ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
@@ -131,7 +131,7 @@ partial def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDe
   | .ok (sym, bitBuf, cnt, _used) =>
     if sym < 256 then
       if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
-      else if cnt0 ≤ cnt then throw "Inflate: no progress in Huffman decode"
+      else if hnp : cnt0 ≤ cnt then throw "Inflate: no progress in Huffman decode"
       else goTreeFree litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt (output.push sym.toUInt8)
     else if sym == 256 then .ok (output, pos, bitBuf, cnt)
     else
@@ -156,17 +156,23 @@ partial def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDe
             else if hds : distance > output.size then
               throw s!"Inflate: distance {distance} exceeds output size {output.size}"
             else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"
-            else if cnt0 ≤ cnt then throw "Inflate: no progress in Huffman decode"
+            else if hnp : cnt0 ≤ cnt then throw "Inflate: no progress in Huffman decode"
             else
               let out := Inflate.copyLoop output (output.size - distance) distance 0 length
                 (by omega) (by omega)
               goTreeFree litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt out
+  termination_by (data.size - pos) * 9 + cnt
+  decreasing_by
+    · obtain ⟨_, hp⟩ := hrc; omega
+    · obtain ⟨hne, hle, _⟩ := hlit; omega
+    · omega
+    · omega
 
 /-- USize-scalar copy of `goTreeFree` (mirrors `goFusedPU`): `pos`/`cnt` are
     unboxed `USize`, the refill uses `data.uget`. Same canonical long-code
     fallback. `partial` (prototype — the perf measurement needs only a runnable
     loop, not a termination proof). -/
-partial def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
+def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
     (pos : USize) (bitBuf : UInt64) (cnt : USize)
     (hsz : data.size < USize.size) (output : ByteArray) :
@@ -179,7 +185,7 @@ partial def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongD
           rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
       (cnt + 8) hsz output
   else
-  if (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
       ∧ ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize ≤ cnt
       ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
@@ -196,7 +202,7 @@ partial def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongD
   | .ok (sym, bitBuf, cnt', _used) =>
     if sym < 256 then
       if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
-      else if cnt0 ≤ cnt' then throw "Inflate: no progress in Huffman decode"
+      else if hnp : cnt0 ≤ cnt' then throw "Inflate: no progress in Huffman decode"
       else
         goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
           cnt'.toUSize hsz (output.push sym.toUInt8)
@@ -223,12 +229,47 @@ partial def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongD
             else if hds : distance > output.size then
               throw s!"Inflate: distance {distance} exceeds output size {output.size}"
             else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"
-            else if cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
+            else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
             else
               let out := Inflate.copyLoop output (output.size - distance) distance 0 length
                 (by omega) (by omega)
               goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
                 cnt4.toUSize hsz out
+  termination_by (data.size - pos.toNat) * 9 + cnt.toNat
+  decreasing_by
+    · obtain ⟨hc, hp⟩ := hrc
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have hpn : pos.toNat < data.size := by
+        have h := USize.lt_iff_toNat_lt.mp hp; rwa [toUSize_toNat_of_lt hsz] at h
+      have hcn : cnt.toNat ≤ 56 := by
+        have h := USize.le_iff_toNat_le.mp hc
+        rwa [USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)] at h
+      have hpa : (pos + 1).toNat = pos.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+        have : pos.toNat + 1 < USize.size := by omega
+        exact USize.size_eq_two_pow ▸ this
+      have h8 : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hca : (cnt + 8).toNat = cnt.toNat + 8 := by
+        rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
+      rw [hpa, hca]; omega
+    · obtain ⟨hne, hle, _⟩ := hlit
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
+        toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
+        rw [USize.toNat_sub_of_le _ _ hle, hlen]
+      have hlecnt : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt.toNat :=
+        hlen ▸ USize.le_iff_toNat_le.mp hle
+      rw [hsub]; omega
+    · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
+      have hb : cnt'.toUSize.toNat = cnt' := toUSize_toNat_of_lt (by omega)
+      rw [hb]; omega
+    · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
+      have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
+      rw [hb]; omega
 
 /-- Tree-free wide-buffer block decode: builds the fast tables canonically and
     the long-code tables, then runs the tree-free loop (no Huffman tree). Runs the
@@ -280,8 +321,10 @@ def decodeDynamicLengthsOnly (br : BitReader) :
   return (litLenLengths, distLengths, br)
 
 /-- Tree-free block loop (mirrors `inflateLoop`): fixed and dynamic Huffman blocks
-    decode through the canonical tree-free decoder; stored blocks unchanged. -/
-partial def inflateLoopTreeFree (br : BitReader) (output : ByteArray) (maxOut : Nat) :
+    decode through the canonical tree-free decoder; stored blocks unchanged. The
+    `bitPos`-advance and out-of-range guards supply the well-founded measure (same
+    as `inflateLoop`). -/
+def inflateLoopTreeFree (br : BitReader) (output : ByteArray) (maxOut dataSize : Nat) :
     Except String (ByteArray × Nat) := do
   let (bfinal, br₁) ← br.readBits 1
   let (btype, br₂) ← br₁.readBits 2
@@ -295,14 +338,21 @@ partial def inflateLoopTreeFree (br : BitReader) (output : ByteArray) (maxOut : 
   if bfinal == 1 then
     return (output', br'.alignToByte.pos)
   else
-    inflateLoopTreeFree br' output' maxOut
+    if _h₁ : br'.bitPos ≤ br.bitPos then
+      throw "Inflate: no progress in inflate loop"
+    else if _h₂ : dataSize * 8 < br'.bitPos then
+      throw "Inflate: bit position out of range"
+    else
+      inflateLoopTreeFree br' output' maxOut dataSize
+  termination_by dataSize * 8 - br.bitPos
+  decreasing_by all_goals omega
 
-/-- Tree-free `inflate` (prototype): no Huffman tree built anywhere on the decode
-    path. Conformance-checked against `Inflate.inflate`. -/
+/-- Tree-free `inflate` (no Huffman tree built anywhere on the decode path).
+    Conformance-checked against `Inflate.inflate`. -/
 def inflateTreeFree (data : ByteArray) (maxOut : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   let br : BitReader := { data, pos := 0, bitOff := 0 }
-  let (output, _) ← inflateLoopTreeFree br ByteArray.empty maxOut
+  let (output, _) ← inflateLoopTreeFree br ByteArray.empty maxOut data.size
   return output
 
 end Inflate
