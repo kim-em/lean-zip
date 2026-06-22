@@ -72,6 +72,12 @@ exactly the genuine canonical codewords.
    `cwOf_peekFast_eq_take` (`Zip/Spec/InflateTable.lean`) past the 9-bit window.
    With this + the two `walkCanonical` lemmas, `decodeSymCanon` matches the spec
    `decode.go`/`decodeWithTable` on success (and rejects iff the spec rejects).
+   **Import note:** `BufCorr`, `decodeSym_corr`, `walkTree_corr` all live in
+   `Zip/Spec/InflateBufCorrect.lean`, which `InflateTreeFreeCorrect` does NOT yet
+   import. The integration phase should `import Zip.Spec.InflateBufCorrect` (or do
+   the rewiring in a new file / in `InflateBufCorrect` itself). The `walkCanonical`
+   lemmas proven here are self-contained (only `InflateCanonical` + the tree-free
+   defs), so they import cleanly into wherever the loop work happens.
 1. **`walkCanonical_ok_spec`** (forward, DONE — see above):
    `walkCanonical (buildLongDecode lengths maxBits) maxBits bitBuf cnt =
    .ok (sym, bb, c, used)` ⟹ `1 ≤ used ≤ maxBits`, `used ≤ cnt`,
