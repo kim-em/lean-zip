@@ -44,6 +44,20 @@ tables coincide (`buildTableCanonicalFast_eq_buildTable`), both addressability
 dispatches collapse to the boxed loop, and the loops agree (threaded through the
 shared reconstruction via `bind_ok_iff`).
 
+## Update: `decodeDynamicTrees_extract` done; target is the FORWARD direction
+
+The full *iff* `inflateTreeFree ↔ inflate` is **false**: for invalid dynamic code
+lengths the verified path rejects (`fromLengths` Kraft check fails) but the
+tree-free path may accept (it builds canonical tables from the raw lengths). So
+the right top-level theorem is the **forward** direction
+`Inflate.inflate data = .ok out → Inflate.inflateTreeFree data = .ok out`
+(tree-free is a correct drop-in for every *successful* decode).
+
+`decodeDynamicTrees_extract` is now proven: a successful `decodeDynamicTrees`
+yields the same code-length arrays and reader as `decodeDynamicLengthsOnly`, with
+the trees being `fromLengths` of those arrays (peeling the shared prefix with a
+`bindOk` helper, then reconstructing `decodeDynamicLengthsOnly`).
+
 ## Remaining: the `inflate` top-level wrapper (one more layer)
 
 `decodeHuffmanFastBufTreeFree_ok_iff` is the substantive result. To lift it to
@@ -59,17 +73,30 @@ shared reconstruction via `bind_ok_iff`).
    gives `ValidLengths`, and `fromLengths_ok_of_valid` gives
    `lt = fromLengthsTree p.1 15`.
 
-2. **Block-loop correspondence** `inflateLoopTreeFree ok-iff inflateLoop`
-   (well-founded on `dataSize*8 - br.bitPos`, threading `br.bitOff < 8` and
-   `br.bitPos ≤ data.size*8`). Per block: btype 0 (`decodeStored`) identical;
-   btype 1 (fixed) uses `decodeHuffmanFastBufTreeFree_ok_iff` with the constant
-   `fixedLitLengths`/`fixedDistLengths` (valid, size ≤ `UInt16.size`); btype 2
-   (dynamic) uses (1) + `decodeHuffmanFastBufTreeFree_ok_iff`. `decodeHuffmanFast`
-   = `decodeHuffmanFastBuf` (delegation), and `fixedLit`/`fixedDist` in `inflateRaw`
-   are `fromLengthsTree fixedLitLengths 15` / `…distLengths…` (via
-   `fromLengths_ok_of_valid`). Reader invariant: `bitOff<8` is maintained by
-   `readBits`/the decoder reconstruction (`endbit % 8`); `bitPos` bound from the
-   loop's out-of-range guard.
+2. **Block-loop FORWARD correspondence** `inflateLoop ok → inflateLoopTreeFree ok`
+   (recursive theorem, well-founded on `data.size*8 - br.bitPos`; only hyp is
+   `br.data = data` — `readBits` re-establishes `bitOff<8` and the `bitPos` bound
+   each iteration). Extract via the `bindOk` helper. Per block (`cases btype`):
+   - btype 0 (`decodeStored`): the tree-free block call is *identical*; reuse
+     `decodeStored_inv` / `decodeStored_invariants` (`BitReaderInvariant.lean` /
+     `InflateCorrect.lean`) for `br'`'s invariants.
+   - btype 1 (fixed): `decodeHuffmanFast = decodeHuffmanFastBuf` (delegation,
+     `rfl`); the fixed trees are `fromLengthsTree fixedLitLengths 15` (from
+     `inflateRaw`'s `fromLengths fixedLitLengths` success → `fromLengths_valid` +
+     `fromLengths_ok_of_valid`); apply `decodeHuffmanFastBufTreeFree_ok_iff.mpr`
+     (constant `fixedLitLengths`/`fixedDistLengths` valid, size ≤ `UInt16.size`).
+   - btype 2 (dynamic): `decodeDynamicTrees_extract` + `fromLengths_valid` →
+     `ll`/`dl` valid; `decodeDynamicTrees_inv` + `decodeDynamicTrees_bitOff_pres`
+     for `br₃`'s invariants; apply `decodeHuffmanFastBufTreeFree_ok_iff.mpr`.
+   - btype ≥3: `throw`, so `inflateLoop = .error` contradicts the `.ok` hyp.
+
+   Block-reader hyps for `decodeHuffmanFastBufTreeFree_ok_iff` (`br₂`/`br₃`):
+   `data` via `readBits_data_eq`/`decodeDynamicTrees_inv`; `bitOff<8` via
+   `readBits_bitOff_lt_pos`/`decodeDynamicTrees_bitOff_pres`; `bitPos ≤ data.size*8`
+   via `readBits_bitPos_le` (or `pos ≤ data.size` ∧ `hpos` from the `_inv` lemmas).
+   **One new lemma needed**: `readBits n = .ok (v, _) → v.toNat < 2^n` (induction
+   over `readBits.go`), to bound the dynamic `ll.size = hlit.toNat + 257 ≤ 288 <
+   UInt16.size` (`Array.size_extract`, `decodeCLSymbols` size preservation).
 
 3. **`inflateTreeFree` ↔ `inflateRaw`**: `inflate = inflateRaw data 0 …`;
    `inflateRaw` builds the fixed trees then calls `inflateLoop`; `inflateTreeFree`
