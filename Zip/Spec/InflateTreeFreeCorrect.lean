@@ -1451,4 +1451,65 @@ theorem decodeDynamicTrees_extract {br : BitReader} {litTree distTree : HuffTree
   unfold decodeDynamicLengthsOnly
   simp [he1, he2, he3, he4, he5, he6, bind, Except.bind, pure, Except.pure]
 
+/-- A single `readBit` yields a value `< 2` (it is `(…) &&& 1`). -/
+theorem readBit_lt {br br' : BitReader} {bit : UInt32} (h : br.readBit = .ok (bit, br')) :
+    bit.toNat < 2 := by
+  unfold BitReader.readBit at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h <;>
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, _⟩ := h
+      rw [UInt32.toNat_and, show (1 : UInt32).toNat = 1 from rfl, Nat.and_one_is_mod]
+      omega
+
+/-- `readBits.go` accumulates `n` bits into positions `[shift, shift+n)`, so the
+    result stays below `2^(shift+n)` (for `shift+n ≤ 32`). -/
+theorem readBits_go_lt : ∀ (n : Nat) (br : BitReader) (acc : UInt32) (shift : Nat)
+    (v : UInt32) (br' : BitReader),
+    BitReader.readBits.go br acc shift n = .ok (v, br') →
+    acc.toNat < 2 ^ shift → shift + n ≤ 32 → v.toNat < 2 ^ (shift + n) := by
+  intro n
+  induction n with
+  | zero =>
+    intro br acc shift v br' h hacc _
+    simp only [BitReader.readBits.go, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h; simpa using hacc
+  | succ k ih =>
+    intro br acc shift v br' h hacc hle
+    rw [BitReader.readBits.go] at h
+    cases hrb : br.readBit with
+    | error e => rw [hrb] at h; simp only [bind, Except.bind] at h; exact absurd h (by simp)
+    | ok p =>
+      obtain ⟨bit, br1⟩ := p
+      rw [hrb] at h; simp only [bind, Except.bind] at h
+      have hbit : bit.toNat < 2 := readBit_lt hrb
+      have hsh : shift < 32 := by omega
+      have hshift : shift.toUInt32.toNat % 32 = shift := by
+        have h2 : shift.toUInt32.toNat = shift := by
+          simp only [Nat.toUInt32, UInt32.toNat_ofNat]; exact Nat.mod_eq_of_lt (by omega)
+        rw [h2, Nat.mod_eq_of_lt hsh]
+      have hnw : bit.toNat * 2 ^ shift < 2 ^ 32 := by
+        calc bit.toNat * 2 ^ shift < 2 * 2 ^ shift :=
+              (Nat.mul_lt_mul_right (Nat.two_pow_pos shift)).mpr hbit
+          _ = 2 ^ (shift + 1) := by rw [Nat.pow_succ, Nat.mul_comm]
+          _ ≤ 2 ^ 32 := Nat.pow_le_pow_right (by omega) (by omega)
+      have hsl : (bit <<< shift.toUInt32).toNat = bit.toNat * 2 ^ shift := by
+        rw [UInt32.toNat_shiftLeft, hshift, Nat.shiftLeft_eq, Nat.mod_eq_of_lt hnw]
+      have hacc' : (acc ||| (bit <<< shift.toUInt32)).toNat < 2 ^ (shift + 1) := by
+        rw [UInt32.toNat_or]
+        refine Nat.or_lt_two_pow
+          (Nat.lt_of_lt_of_le hacc (Nat.pow_le_pow_right (by omega) (by omega))) ?_
+        rw [hsl]
+        calc bit.toNat * 2 ^ shift < 2 * 2 ^ shift :=
+              (Nat.mul_lt_mul_right (Nat.two_pow_pos shift)).mpr hbit
+          _ = 2 ^ (shift + 1) := by rw [Nat.pow_succ, Nat.mul_comm]
+      have hv := ih br1 (acc ||| (bit <<< shift.toUInt32)) (shift + 1) v br' h hacc' (by omega)
+      rwa [show shift + 1 + k = shift + (k + 1) from by omega] at hv
+
+/-- `readBits n` returns a value `< 2^n` (for `n ≤ 32`). -/
+theorem readBits_lt {br br' : BitReader} {n : Nat} {v : UInt32} (hn : n ≤ 32)
+    (h : br.readBits n = .ok (v, br')) : v.toNat < 2 ^ n := by
+  have := readBits_go_lt n br 0 0 v br' h (by simp) (by omega); simpa using this
+
 end Zip.Native.Inflate
