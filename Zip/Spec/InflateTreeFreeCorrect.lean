@@ -675,4 +675,169 @@ theorem walkCanonical_ok_spec (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 �
   · rw [hcf, Option.some.injEq, show used + 1 - 1 = used from by omega, Nat.zero_mul,
         Nat.zero_add, natToBits_bitReverse]
 
+/-! ## `walkCanonical` completeness
+
+The converse of `walkCanonical_ok_spec`: if the buffer bits spell a genuine
+codeword (`codeFor s = cwOf buf.toNat L` for `L ≤ cnt`), `walkCanonical` succeeds
+returning `s` after `L` bits. Prefix-freeness guarantees it does not match at any
+shorter length first. -/
+
+/-- `natToBits val (w₁ + w₂)` splits into the high `w₁` bits then the low `w₂`.
+    Local copy of the `private` `Huffman.Spec.natToBits_append`. -/
+theorem natToBits_append (val w₁ w₂ : Nat) :
+    Huffman.Spec.natToBits val (w₁ + w₂)
+      = Huffman.Spec.natToBits (val / 2 ^ w₂) w₁ ++ Huffman.Spec.natToBits val w₂ := by
+  induction w₁ with
+  | zero => simp only [Nat.zero_add, Huffman.Spec.natToBits, List.nil_append]
+  | succ n ih =>
+    rw [Nat.add_right_comm]
+    simp only [Huffman.Spec.natToBits]
+    rw [ih, List.cons_append, ← Nat.testBit_div_two_pow]
+
+/-- Generalized completeness of `walkCanonical.go`, by fuel induction. `code`
+    (`< 2^(len-1)`) is the value of the `len-1` bits already read; the buffer's
+    next `L-(len-1)` bits complete symbol `s`'s length-`L` codeword. -/
+theorem walkCanonical_go_complete (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hmb64 : maxBits < 64)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (s L : Nat) (hL : L ≤ maxBits) :
+    ∀ (fuel len code : Nat) (buf : UInt64) (cnt : Nat),
+      maxBits + 1 - len ≤ fuel → 1 ≤ len → len ≤ L → L - (len - 1) ≤ cnt →
+      code < 2 ^ (len - 1) →
+      Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+        = some (Huffman.Spec.natToBits
+            (code * 2 ^ (L - (len - 1)) + bitReverse buf.toNat (L - (len - 1)) 0) L) →
+      walkCanonical.go (buildLongDecode lengths maxBits) maxBits len code buf cnt
+        = .ok (s.toUInt16, buf >>> ((L - (len - 1) : Nat).toUInt64), cnt - (L - (len - 1)), L) := by
+  intro fuel
+  induction fuel with
+  | zero => intro len code buf cnt hfuel hlen1 hlenL hcnt _ _; omega
+  | succ fuel ih =>
+    intro len code buf cnt hfuel hlen1 hlenL hcnt hcode hcf
+    have hlmax : len ≤ maxBits := by omega
+    have hlow : (buf &&& 1).toNat = buf.toNat % 2 := and_one_toNat buf
+    -- accumulation: the full codeword value, viewed one bit deeper
+    have hCVAL : code * 2 ^ (L - (len - 1)) + bitReverse buf.toNat (L - (len - 1)) 0
+        = (code * 2 + (buf &&& 1).toNat) * 2 ^ (L - len)
+          + bitReverse (buf.toNat / 2) (L - len) 0 := by
+      rw [hlow, show L - (len - 1) = (L - len) + 1 from by omega]
+      exact accum_step code buf.toNat (L - len)
+    rw [walkCanonical.go, dif_neg (by omega : ¬ len > maxBits), if_neg (by omega : ¬ cnt = 0)]
+    simp only []
+    have hc'_lt : code * 2 + (buf &&& 1).toNat < 2 ^ len := by
+      have hbit : (buf &&& 1).toNat < 2 := by rw [hlow]; omega
+      rw [show len = (len - 1) + 1 from by omega, Nat.pow_succ]; omega
+    by_cases hLlen : len = L
+    · -- final bit: the value lands in length-`L`'s range, returning `s`
+      subst hLlen
+      have hval : code * 2 ^ (len - (len - 1)) + bitReverse buf.toNat (len - (len - 1)) 0
+          = code * 2 + (buf &&& 1).toNat := by
+        rw [show len - (len - 1) = 1 from by omega, hlow]
+        simp [bitReverse, Nat.pow_one]
+      have hcf' : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+          = some (Huffman.Spec.natToBits (code * 2 + (buf &&& 1).toNat) len) := by rw [hcf, hval]
+      obtain ⟨hslen, hlenbnd, hcfval⟩ := Huffman.Spec.codeFor_spec hcf'
+      have hsize : s < lengths.size := by
+        rw [List.length_map, Array.length_toList] at hslen; exact hslen
+      have hsidx : (lengths.toList.map UInt8.toNat)[s]'hslen = lengths[s]!.toNat :=
+        map_toNat_getElem lengths s hsize
+      have hbnds := Huffman.Spec.codeFor_len_bounds (hsidx ▸ hlenbnd)
+      have hpos : 0 < lengths[s]!.toNat := Nat.pos_of_ne_zero hbnds.1
+      have hposm : lengths[s]!.toNat ≤ maxBits := hbnds.2
+      have hlen_eq : lengths[s]!.toNat = len := by
+        have := congrArg List.length hcfval
+        rw [Huffman.Spec.natToBits_length, Huffman.Spec.natToBits_length, hsidx] at this; omega
+      -- placed value `firstCode[len] + numEarlier` equals the read value
+      have hcfp := codeFor_placed lengths maxBits s hsize hpos hposm
+      rw [hlen_eq] at hcfp
+      have hfc_len : (Huffman.Spec.nextCodes
+            (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits)[len]!
+          = (buildLongDecode lengths maxBits).firstCode[len]! := by
+        show _ = (Huffman.Spec.nextCodes (countLengthsFast lengths maxBits) maxBits)[len]!
+        rw [countLengthsFast_eq]
+      have hcb := Huffman.Spec.code_value_bound (lengths.toList.map UInt8.toNat) maxBits s hv
+        hslen (hsidx ▸ hlenbnd)
+      rw [hsidx, hlen_eq] at hcb
+      have hceq : (buildLongDecode lengths maxBits).firstCode[len]! +
+          numEarlier (lengths.toList.map UInt8.toNat) len s = code * 2 + (buf &&& 1).toNat := by
+        have hinj := Huffman.Spec.natToBits_injective _ _ _ hcb hc'_lt
+          (hcfp.symm.trans hcf' |> Option.some.inj)
+        rw [← hfc_len]; exact hinj
+      have hnum_lt : numEarlier (lengths.toList.map UInt8.toNat) len s
+          < (buildLongDecode lengths maxBits).count[len]! := by
+        show _ < (countLengthsFast lengths maxBits)[len]!
+        rw [numEarlier_size_eq lengths maxBits len (by omega) hlmax]
+        exact numEarlier_lt_arr lengths s lengths.size len hsize hlen_eq hsize (Nat.le_refl _)
+      have hcond : (buildLongDecode lengths maxBits).firstCode[len]! ≤ code * 2 + (buf &&& 1).toNat ∧
+          code * 2 + (buf &&& 1).toNat < (buildLongDecode lengths maxBits).firstCode[len]!
+            + (buildLongDecode lengths maxBits).count[len]! := by omega
+      rw [if_pos hcond]
+      have hsymlk : (buildLongDecode lengths maxBits).symbols[
+          (buildLongDecode lengths maxBits).firstIndex[len]! +
+          (code * 2 + (buf &&& 1).toNat - (buildLongDecode lengths maxBits).firstCode[len]!)]!
+          = s.toUInt16 := by
+        rw [show code * 2 + (buf &&& 1).toNat - (buildLongDecode lengths maxBits).firstCode[len]!
+              = numEarlier (lengths.toList.map UInt8.toNat) len s from by omega]
+        have := buildLongDecode_placement lengths maxBits hmb s hsize hpos hposm
+        rwa [hlen_eq] at this
+      rw [hsymlk, show len - (len - 1) = 1 from by omega,
+          show ((1 : Nat).toUInt64) = (1 : UInt64) from rfl]
+    · -- len < L : no match here (prefix-free); recurse one bit deeper
+      have hltL : len < L := by omega
+      have hnomatch : ¬ ((buildLongDecode lengths maxBits).firstCode[len]! ≤ code * 2 + (buf &&& 1).toNat ∧
+          code * 2 + (buf &&& 1).toNat < (buildLongDecode lengths maxBits).firstCode[len]!
+            + (buildLongDecode lengths maxBits).count[len]!) := by
+        rintro hcond
+        obtain ⟨s', hs', hlen_s', hcf_s', _⟩ :=
+          codeFor_of_value lengths maxBits hmb len (code * 2 + (buf &&& 1).toNat)
+            (by omega) hlmax hcond.1 hcond.2
+        have hne : s' ≠ s := by
+          rintro rfl
+          have heq := hcf_s'.symm.trans hcf
+          rw [Option.some.injEq] at heq
+          have := congrArg List.length heq
+          rw [Huffman.Spec.natToBits_length, Huffman.Spec.natToBits_length] at this; omega
+        have hdiv : (code * 2 ^ (L - (len - 1)) + bitReverse buf.toNat (L - (len - 1)) 0)
+            / 2 ^ (L - len) = code * 2 + (buf &&& 1).toNat := by
+          rw [hCVAL, Nat.mul_comm (code * 2 + (buf &&& 1).toNat) (2 ^ (L - len)),
+              Nat.mul_add_div (Nat.two_pow_pos (L - len)),
+              Nat.div_eq_of_lt (bitReverse_lt _ _), Nat.add_zero]
+        have happ : Huffman.Spec.natToBits (code * 2 + (buf &&& 1).toNat) len
+            ++ Huffman.Spec.natToBits
+                (code * 2 ^ (L - (len - 1)) + bitReverse buf.toNat (L - (len - 1)) 0) (L - len)
+            = Huffman.Spec.natToBits
+                (code * 2 ^ (L - (len - 1)) + bitReverse buf.toNat (L - (len - 1)) 0) L := by
+          have e := natToBits_append
+            (code * 2 ^ (L - (len - 1)) + bitReverse buf.toNat (L - (len - 1)) 0) len (L - len)
+          rw [show len + (L - len) = L from by omega, hdiv] at e
+          exact e.symm
+        exact Huffman.Spec.canonical_prefix_free (lengths.toList.map UInt8.toNat) maxBits hv
+          s' s _ _ hcf_s' hcf hne ⟨_, happ⟩
+      rw [if_neg hnomatch]
+      have hexp : L - ((len + 1) - 1) = L - len := by omega
+      have hrec := ih (len + 1) (code * 2 + (buf &&& 1).toNat) (buf >>> 1) (cnt - 1)
+        (by omega) (by omega) (by omega) (by omega)
+        (by rw [show (len + 1) - 1 = len from by omega]; exact hc'_lt)
+        (by rw [hexp, hcf, hCVAL, shr_one_toNat])
+      rw [hrec, hexp, ushr_succ buf (L - len) (by omega),
+          show L - len + 1 = L - (len - 1) from by omega,
+          show cnt - 1 - (L - len) = cnt - (L - (len - 1)) from by omega]
+
+/-- **`walkCanonical` completeness.** If the buffer bits spell symbol `s`'s
+    canonical codeword (`codeFor s = cwOf buf.toNat L`, `L ≤ cnt`), `walkCanonical`
+    succeeds: it returns `s` after consuming exactly `L` bits. -/
+theorem walkCanonical_complete (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (hmb64 : maxBits < 64)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (s L : Nat) (hL1 : 1 ≤ L) (hL : L ≤ maxBits) (buf : UInt64) (cnt : Nat) (hcnt : L ≤ cnt)
+    (hcf : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+        = some (cwOf buf.toNat L)) :
+    walkCanonical (buildLongDecode lengths maxBits) maxBits buf cnt
+      = .ok (s.toUInt16, buf >>> (L : Nat).toUInt64, cnt - L, L) := by
+  have h := walkCanonical_go_complete lengths maxBits hmb hmb64 hv s L hL (maxBits + 1) 1 0 buf cnt
+    (by omega) (Nat.le_refl _) hL1 (by omega) (by simp) (by
+      rw [show L - (1 - 1) = L from by omega, Nat.zero_mul, Nat.zero_add, natToBits_bitReverse]
+      exact hcf)
+  rwa [show L - (1 - 1) = L from by omega] at h
+
 end Zip.Native.HuffTree
