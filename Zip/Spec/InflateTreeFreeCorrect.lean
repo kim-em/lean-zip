@@ -526,4 +526,31 @@ theorem codeFor_of_value (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ ma
     rw [hlen_s, hne] at hplace
     exact hplace
 
+/-! ## Bit bridges for the runtime `walkCanonical` accumulation
+
+`walkCanonical` accumulates a code value `code := code * 2 + (bitBuf &&& 1)`,
+reading the buffer LSB-first. After consuming `k` bits the value is
+`bitReverse bitBuf.toNat k 0`, whose `natToBits` is the codeword the spec reads
+(`cwOf bitBuf.toNat k`). These two arithmetic facts feed that induction. -/
+
+/-- One step of the bit reversal: `bitReverse x (k+1) 0` splits off the low bit
+    as the new high-order summand. -/
+theorem bitReverse_succ (x k : Nat) :
+    bitReverse x (k + 1) 0 = 2 ^ k * (x % 2) + bitReverse (x / 2) k 0 := by
+  simp only [bitReverse]
+  rw [bitReverse_acc, Nat.zero_mul, Nat.zero_add, Nat.mul_comm (x % 2) (2 ^ k)]
+
+/-- `natToBits` of a bit-reversed value is the `cwOf` window: both list the low
+    `k` bits of `x` in reading order. So `walkCanonical`'s accumulated value
+    `c = bitReverse bitBuf.toNat k 0` has `natToBits c k = cwOf bitBuf.toNat k`,
+    the exact codeword the canonical/tree spec consumes. -/
+theorem natToBits_bitReverse (x k : Nat) :
+    Huffman.Spec.natToBits (bitReverse x k 0) k = cwOf x k := by
+  apply List.ext_getElem (by rw [Huffman.Spec.natToBits_length, cwOf_length])
+  intro j h1 _
+  rw [Huffman.Spec.natToBits_length] at h1
+  rw [natToBits_getElem _ _ _ h1, cwOf_getElem x k j h1,
+      bitReverse_testBit x k (k - 1 - j) (by omega)]
+  congr 1; omega
+
 end Zip.Native.HuffTree
