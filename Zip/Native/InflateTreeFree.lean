@@ -30,41 +30,55 @@ structure LongDecode where
   firstIndex : Array Nat
   symbols : Array UInt16
 
-/-- Build the canonical long-code tables from code lengths in O(n + maxBits). -/
-def buildLongDecode (lengths : Array UInt8) (maxBits : Nat) : LongDecode := Id.run do
+/-- `firstIndex[len]` = number of positive-length symbols of length `< len`
+    (prefix sum of `count`). Well-founded form of the prototype loop. -/
+def buildFirstIndex (count : Array Nat) (maxBits : Nat) : Array Nat :=
+  go 1 0 (Array.replicate (maxBits + 2) 0)
+where
+  go (len idx : Nat) (fi : Array Nat) : Array Nat :=
+    if len > maxBits then fi
+    else go (len + 1) (idx + count[len]!) (fi.set! len idx)
+  termination_by maxBits + 1 - len
+  decreasing_by omega
+
+/-- Counting sort: place each positive-length symbol at `offset[len]` (starting
+    from `firstIndex`), so `symbols` lists symbols by `(length, symbol)`. -/
+def buildSymbols (lengths : Array UInt8) (maxBits total : Nat) (firstIndex : Array Nat) :
+    Array UInt16 :=
+  go 0 firstIndex (Array.replicate total 0)
+where
+  go (s : Nat) (offset : Array Nat) (symbols : Array UInt16) : Array UInt16 :=
+    if s ≥ lengths.size then symbols
+    else
+      let l := lengths[s]!.toNat
+      if 0 < l ∧ l ≤ maxBits then
+        go (s + 1) (offset.set! l (offset[l]! + 1)) (symbols.set! offset[l]! s.toUInt16)
+      else go (s + 1) offset symbols
+  termination_by lengths.size - s
+  decreasing_by all_goals omega
+
+/-- Build the canonical long-code tables from code lengths in O(n + maxBits).
+    `firstCode` is the canonical first-code-per-length recurrence (RFC 1951
+    §3.2.2), exactly `Huffman.Spec.nextCodes`; `firstIndex`/`symbols` are the
+    prefix-sum and counting-sort over the code lengths. -/
+def buildLongDecode (lengths : Array UInt8) (maxBits : Nat) : LongDecode :=
   let count := countLengthsFast lengths maxBits
-  -- firstCode[len] = (firstCode[len-1] + count[len-1]) * 2  (RFC 1951 §3.2.2)
-  let mut firstCode : Array Nat := Array.replicate (maxBits + 1) 0
-  let mut code : Nat := 0
-  for len in [1:maxBits + 1] do
-    code := (code + count[len - 1]!) * 2
-    firstCode := firstCode.set! len code
-  -- firstIndex[len] = number of positive-length symbols shorter than len
-  let mut firstIndex : Array Nat := Array.replicate (maxBits + 2) 0
-  let mut idx : Nat := 0
-  for len in [1:maxBits + 1] do
-    firstIndex := firstIndex.set! len idx
-    idx := idx + count[len]!
-  -- counting-sort symbols by (length, symbol)
-  let mut offset := firstIndex
-  let mut symbols : Array UInt16 := Array.replicate idx 0
-  for s in [0:lengths.size] do
-    let l := lengths[s]!.toNat
-    if 0 < l ∧ l ≤ maxBits then
-      symbols := symbols.set! offset[l]! s.toUInt16
-      offset := offset.set! l (offset[l]! + 1)
-  return { count, firstCode, firstIndex, symbols }
+  let firstCode := Huffman.Spec.nextCodes count maxBits
+  let firstIndex := buildFirstIndex count maxBits
+  let total := firstIndex[maxBits]! + count[maxBits]!
+  let symbols := buildSymbols lengths maxBits total firstIndex
+  { count, firstCode, firstIndex, symbols }
 
 /-- Canonical bit-by-bit long-code decode: read bits MSB-first, accumulate the
     code value, and return the symbol once the code lands in some length's
     canonical range. Tree-free replacement for `walkTree`. -/
-partial def walkCanonical (ld : LongDecode) (maxBits : Nat) (bitBuf : UInt64) (cnt : Nat) :
+def walkCanonical (ld : LongDecode) (maxBits : Nat) (bitBuf : UInt64) (cnt : Nat) :
     Except String (UInt16 × UInt64 × Nat × Nat) :=
   go 1 0 bitBuf cnt
 where
   go (len code : Nat) (bitBuf : UInt64) (cnt : Nat) :
       Except String (UInt16 × UInt64 × Nat × Nat) :=
-    if len > maxBits then .error "Inflate: invalid Huffman code"
+    if hlen : len > maxBits then .error "Inflate: invalid Huffman code"
     else if cnt = 0 then .error "BitReader: unexpected end of input"
     else
       let code := code * 2 + (bitBuf &&& 1).toNat
@@ -75,6 +89,8 @@ where
       if fc ≤ code ∧ code < fc + cl then
         .ok (ld.symbols[ld.firstIndex[len]! + (code - fc)]!, bitBuf, cnt, len)
       else go (len + 1) code bitBuf cnt
+  termination_by maxBits + 1 - len
+  decreasing_by omega
 
 /-- `decodeSym` with the canonical long-code fallback (no tree). -/
 @[inline] def decodeSymCanon (ld : LongDecode) (table : DecodeTable) (maxBits : Nat)
