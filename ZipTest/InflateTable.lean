@@ -147,6 +147,16 @@ def canonicalTests : IO Unit := do
         throw (IO.userError
           s!"[{label}] canonical table differs from tree table at slot {bad}")
       checks := checks + 1
-  IO.println s!"    {checks} length vectors: canonical build matches tree build"
+      -- The fast array-based build (no List allocation / WF recursion) must
+      -- produce the byte-identical packed table as the spec-function build.
+      let fastTable := HuffTree.buildTableCanonicalFast lengths 15
+      unless canonTable.packed == fastTable.packed do
+        let mut bad : Option Nat := none
+        for i in [:canonTable.packed.size] do
+          if bad.isNone && canonTable.packed[i]! != fastTable.packed[i]! then
+            bad := some i
+        throw (IO.userError
+          s!"[{label}] fast canonical table differs from spec canonical table at slot {bad}")
+  IO.println s!"    {checks} length vectors: canonical (spec + fast) build matches tree build"
 
 end ZipTest.InflateTable
