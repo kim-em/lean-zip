@@ -136,20 +136,20 @@ def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     else if sym == 256 then .ok (output, pos, bitBuf, cnt)
     else
       let idx := sym.toNat - 257
-      if idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+      if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
       else
-        let base := Inflate.lengthBase[idx]!
-        let extra := Inflate.lengthExtra[idx]!
+        let base := Inflate.lengthBase[idx]
+        let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
         let (extraBits, bitBuf, cnt) ← takeBits bitBuf cnt extra.toNat
         let length := base.toNat + extraBits
         match decodeSymCanon distLD distTable maxBits bitBuf cnt with
         | .error e => .error e
         | .ok (distSym, bitBuf, cnt, _dused) =>
           let dIdx := distSym.toNat
-          if dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+          if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
           else
-            let dBase := Inflate.distBase[dIdx]!
-            let dExtra := Inflate.distExtra[dIdx]!
+            let dBase := Inflate.distBase[dIdx]
+            let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
             let (dExtraBits, bitBuf, cnt) ← takeBits bitBuf cnt dExtra.toNat
             let distance := dBase.toNat + dExtraBits
             if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
@@ -168,10 +168,10 @@ def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     · omega
     · omega
 
+set_option maxRecDepth 4096 in
 /-- USize-scalar copy of `goTreeFree` (mirrors `goFusedPU`): `pos`/`cnt` are
-    unboxed `USize`, the refill uses `data.uget`. Same canonical long-code
-    fallback. `partial` (prototype — the perf measurement needs only a runnable
-    loop, not a termination proof). -/
+    unboxed `USize`, the refill uses `data.uget`; same canonical long-code
+    fallback. Well-founded (termination mirrors `goFusedPU`). -/
 def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
     (pos : USize) (bitBuf : UInt64) (cnt : USize)
@@ -209,20 +209,20 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     else if sym == 256 then .ok (output, pos, bitBuf, cnt'.toUSize)
     else
       let idx := sym.toNat - 257
-      if idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+      if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
       else
-        let base := Inflate.lengthBase[idx]!
-        let extra := Inflate.lengthExtra[idx]!
+        let base := Inflate.lengthBase[idx]
+        let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
         let (extraBits, bitBuf, cnt'') ← takeBits bitBuf cnt' extra.toNat
         let length := base.toNat + extraBits
         match decodeSymCanon distLD distTable maxBits bitBuf cnt'' with
         | .error e => .error e
         | .ok (distSym, bitBuf, cnt3, _dused) =>
           let dIdx := distSym.toNat
-          if dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+          if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
           else
-            let dBase := Inflate.distBase[dIdx]!
-            let dExtra := Inflate.distExtra[dIdx]!
+            let dBase := Inflate.distBase[dIdx]
+            let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
             let (dExtraBits, bitBuf, cnt4) ← takeBits bitBuf cnt3 dExtra.toNat
             let distance := dBase.toNat + dExtraBits
             if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
