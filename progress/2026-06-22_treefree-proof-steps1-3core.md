@@ -44,9 +44,35 @@ So the right target is `walkCanonical_ok_iff_walkTree` (success-equivalence) or
 the same (`buildTableCanonicalFast_eq` ∘ `buildTableCanonical_eq`, already
 merged), the loop integration reduces to that fallback correspondence.
 
-## Remaining work (runtime bridge + rewiring)
+## Update: `walkCanonical` fully characterized (both directions, UInt64-land)
 
-1. **`walkCanonical_ok_spec`** (forward, completable next):
+Since the original note, the runtime `walkCanonical` semantics are now **proven
+in full**, with no BitReader/BufCorr dependency:
+
+- **`walkCanonical_ok_spec`** (forward / soundness): a successful run consumes
+  `used` bits (`1 ≤ used ≤ maxBits`, `used ≤ cnt`), advances the buffer by `used`
+  (`bb = buf >>> used`, `c = cnt - used`), and returns the symbol whose canonical
+  codeword is exactly `cwOf buf.toNat used`. Fuel induction `walkCanonical_go_ok`
+  over the accumulated value `code·2^(used+1-len) + bitReverse buf.toNat …`.
+- **`walkCanonical_complete`** (backward / completeness): if `codeFor s =
+  cwOf buf.toNat L` with `L ≤ cnt`, the run succeeds returning `s` after `L`
+  bits. Fuel induction `walkCanonical_go_complete`; prefix-freeness
+  (`canonical_prefix_free`) blocks any early match at `len < L`.
+
+Supporting (all proven, no sorry): `accum_step`, `and_one_toNat`,
+`shr_one_toNat`, `ushr_succ`, `natToBits_append` (local copy of the private
+upstream lemma). This is the heart of step 3 — `walkCanonical` provably accepts
+exactly the genuine canonical codewords.
+
+## Remaining work (BufCorr bridge + rewiring)
+
+0. **Bridge `cwOf buf.toNat L = br.toBits.take L`** under `BufCorr` (`L ≤ cnt`):
+   `cwOf`'s `j`-th bit is `buf.toNat.testBit j`, and `BufCorr.bits` gives
+   `buf.toNat.testBit j = streamBit data (bitpos+j)` for `j < cnt`. Generalizes
+   `cwOf_peekFast_eq_take` (`Zip/Spec/InflateTable.lean`) past the 9-bit window.
+   With this + the two `walkCanonical` lemmas, `decodeSymCanon` matches the spec
+   `decode.go`/`decodeWithTable` on success (and rejects iff the spec rejects).
+1. **`walkCanonical_ok_spec`** (forward, DONE — see above):
    `walkCanonical (buildLongDecode lengths maxBits) maxBits bitBuf cnt =
    .ok (sym, bb, c, used)` ⟹ `1 ≤ used ≤ maxBits`, `used ≤ cnt`,
    `bb = bitBuf >>> used`, `c = cnt - used`, and `∃ s, sym = s.toUInt16 ∧
