@@ -1033,3 +1033,124 @@ theorem decodeSymCanon_ok_iff_decodeSym (lengths : Array UInt8) (maxBits : Nat)
   · exact Iff.rfl
 
 end Zip.Native.HuffTree
+
+namespace Zip.Native.InflateBuf
+open Zip.Native.HuffTree (buildLongDecode fromLengthsTree decodeSymCanon decodeSymCanon_ok_iff_decodeSym)
+
+/-- **Tree-free symbol loop ≈ verified symbol loop.** For valid lengths, the
+    tree-free wide-buffer loop and the verified `goFusedP` (with the proof-only
+    trees `fromLengthsTree`) succeed on exactly the same inputs with the same
+    result. The bodies are byte-identical except `decodeSymCanon` vs `decodeSym`,
+    which agree on success (`decodeSymCanon_ok_iff_decodeSym`); on a decode error
+    both loops reject. Recursive — its own `termination_by` provides the IH. -/
+theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
+    (litLengths distLengths : Array UInt8)
+    (hlv : Huffman.Spec.ValidLengths (litLengths.toList.map UInt8.toNat) 15)
+    (hlb : litLengths.size ≤ UInt16.size)
+    (hdv : Huffman.Spec.ValidLengths (distLengths.toList.map UInt8.toNat) 15)
+    (hdb : distLengths.size ≤ UInt16.size)
+    (data : ByteArray) (maxOut : Nat) (pos : Nat) (bitBuf : UInt64) (cnt : Nat)
+    (output : ByteArray) (r : ByteArray × Nat × UInt64 × Nat) :
+    goTreeFree litTable distTable (buildLongDecode litLengths 15) (buildLongDecode distLengths 15)
+        15 data maxOut pos bitBuf cnt output = .ok r ↔
+      goFusedP litTable distTable data (fromLengthsTree litLengths 15) (fromLengthsTree distLengths 15)
+        maxOut pos bitBuf cnt output = .ok r := by
+  have hlit_iff := fun (b : UInt64) (n : Nat) (x : UInt16 × UInt64 × Nat × Nat) =>
+    decodeSymCanon_ok_iff_decodeSym litLengths 15 (by omega) (by omega) hlv hlb litTable b n x
+  have hdist_iff := fun (b : UInt64) (n : Nat) (x : UInt16 × UInt64 × Nat × Nat) =>
+    decodeSymCanon_ok_iff_decodeSym distLengths 15 (by omega) (by omega) hdv hdb distTable b n x
+  rw [goTreeFree, goFusedP]
+  by_cases hrc : cnt ≤ 56 ∧ pos < data.size
+  · rw [dif_pos hrc, dif_pos hrc]
+    exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
+      data maxOut (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output r
+  · rw [dif_neg hrc, dif_neg hrc]
+    by_cases hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
+        ∧ (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt
+        ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256
+    · rw [dif_pos hlit, dif_pos hlit]
+      by_cases hout : output.size ≥ maxOut
+      · simp [hout]
+      · rw [if_neg hout, if_neg hout]
+        exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
+          data maxOut pos (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
+          (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)
+          (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8) r
+    · rw [dif_neg hlit, dif_neg hlit]
+      -- literal/length symbol decode
+      cases hdec : decodeSymCanon (buildLongDecode litLengths 15) litTable 15 bitBuf cnt with
+      | error e =>
+        cases hdec2 : decodeSym (fromLengthsTree litLengths 15) litTable bitBuf cnt with
+        | error e' => simp
+        | ok x => exact absurd ((hlit_iff bitBuf cnt x).mpr hdec2) (by rw [hdec]; simp)
+      | ok x =>
+        have hdec2 : decodeSym (fromLengthsTree litLengths 15) litTable bitBuf cnt = .ok x :=
+          (hlit_iff bitBuf cnt x).mp hdec
+        rw [hdec2]
+        obtain ⟨sym, bb, c, used⟩ := x
+        simp only []
+        by_cases hsym : sym < 256
+        · rw [if_pos hsym, if_pos hsym]
+          by_cases hout : output.size ≥ maxOut
+          · simp [hout]
+          · rw [if_neg hout, if_neg hout]
+            by_cases hnp : cnt ≤ c
+            · simp [hnp]
+            · rw [dif_neg hnp, dif_neg hnp]
+              exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
+                data maxOut pos bb c (output.push sym.toUInt8) r
+        · rw [if_neg hsym, if_neg hsym]
+          by_cases h256 : sym == 256
+          · rw [if_pos h256, if_pos h256]
+          · rw [if_neg h256, if_neg h256]
+            by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
+            · rw [dif_pos hidx, dif_pos hidx]
+            · rw [dif_neg hidx, dif_neg hidx]
+              cases htb : takeBits bb c (Inflate.lengthExtra[sym.toNat - 257]'(by
+                  simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at hidx ⊢; omega)).toNat with
+              | error e => simp [bind, Except.bind]
+              | ok y =>
+                obtain ⟨extraBits, bb2, c2⟩ := y
+                simp only [bind, Except.bind]
+                cases hdec3 : decodeSymCanon (buildLongDecode distLengths 15) distTable 15 bb2 c2 with
+                | error e =>
+                  cases hdec4 : decodeSym (fromLengthsTree distLengths 15) distTable bb2 c2 with
+                  | error e' => simp
+                  | ok z => exact absurd ((hdist_iff bb2 c2 z).mpr hdec4) (by rw [hdec3]; simp)
+                | ok z =>
+                  have hdec4 : decodeSym (fromLengthsTree distLengths 15) distTable bb2 c2 = .ok z :=
+                    (hdist_iff bb2 c2 z).mp hdec3
+                  rw [hdec4]
+                  obtain ⟨distSym, bb3, c3, dused⟩ := z
+                  simp only []
+                  by_cases hdidx : distSym.toNat ≥ Inflate.distBase.size
+                  · rw [dif_pos hdidx, dif_pos hdidx]
+                  · rw [dif_neg hdidx, dif_neg hdidx]
+                    cases htb2 : takeBits bb3 c3 (Inflate.distExtra[distSym.toNat]'(by
+                        simp [Inflate.distExtra_size, Inflate.distBase_size] at hdidx ⊢; omega)).toNat with
+                    | error e => simp [bind, Except.bind]
+                    | ok w =>
+                      obtain ⟨dExtraBits, bb4, c4⟩ := w
+                      simp only [bind, Except.bind]
+                      by_cases hz : Inflate.distBase[distSym.toNat].toNat + dExtraBits = 0
+                      · rw [dif_pos hz, dif_pos hz]
+                      · rw [dif_neg hz, dif_neg hz]
+                        by_cases hds : Inflate.distBase[distSym.toNat].toNat + dExtraBits > output.size
+                        · rw [dif_pos hds, dif_pos hds]
+                        · rw [dif_neg hds, dif_neg hds]
+                          by_cases hmo : output.size + (Inflate.lengthBase[sym.toNat - 257].toNat + extraBits) > maxOut
+                          · rw [if_pos hmo, if_pos hmo]
+                          · rw [if_neg hmo, if_neg hmo]
+                            by_cases hnp : cnt ≤ c4
+                            · rw [dif_pos hnp, dif_pos hnp]
+                            · rw [dif_neg hnp, dif_neg hnp]
+                              exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths
+                                hlv hlb hdv hdb data maxOut pos bb4 c4 _ r
+  termination_by (data.size - pos) * 9 + cnt
+  decreasing_by
+    all_goals first
+      | (obtain ⟨_, hp⟩ := hrc; omega)
+      | (obtain ⟨hne, hle, _⟩ := hlit; omega)
+      | omega
+
+end Zip.Native.InflateBuf
