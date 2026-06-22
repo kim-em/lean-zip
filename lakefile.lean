@@ -270,6 +270,9 @@ lean_exe «bench-report» where
 lean_exe «treefree-bench» where
   root := `ZipTreeFreeBench
 
+lean_exe «treefree-decode-bench» where
+  root := `ZipTreeFreeDecodeBench
+
 lean_exe «ratio-sweep» where
   root := `ZipRatioSweep
 
