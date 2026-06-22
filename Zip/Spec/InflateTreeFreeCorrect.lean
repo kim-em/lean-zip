@@ -923,4 +923,98 @@ theorem walkTree_ok_spec (t : HuffTree) :
               exact Deflate.Correctness.TreeHasLeaf.right hleaf
             · rw [hbb, ushr_succ buf u' (by omega)]
 
+/-- **`walkTree` completeness.** If the tree has a leaf `sym` on the path
+    `cwOf buf.toNat L` and the buffer has `≥ L` bits within the depth budget,
+    `walkTree` succeeds returning `sym` after `L` bits. -/
+theorem walkTree_complete (t : HuffTree) (cw : List Bool) (sym : UInt16)
+    (hleaf : Deflate.Correctness.TreeHasLeaf t cw sym) :
+    ∀ (buf : UInt64) (cnt depth : Nat),
+      cw = cwOf buf.toNat cw.length → cw.length ≤ cnt → depth + cw.length ≤ 21 →
+      walkTree t buf cnt depth
+        = .ok (sym, buf >>> (cw.length : Nat).toUInt64, cnt - cw.length, cw.length) := by
+  induction hleaf with
+  | leaf =>
+    intro buf cnt depth _ _ _
+    simp only [List.length_nil, Nat.sub_zero]
+    rw [walkTree, ushr_zero]
+  | @left z cw' s o hl ih =>
+    intro buf cnt depth hcweq hlen hdep
+    simp only [List.length_cons] at hlen hdep hcweq ⊢
+    rw [cwOf] at hcweq
+    have hhead : (buf.toNat % 2 == 1) = false := by
+      have := (List.cons.injEq _ _ _ _).mp hcweq; exact this.1.symm
+    have htail : cw' = cwOf (buf >>> 1).toNat cw'.length := by
+      have := (List.cons.injEq _ _ _ _).mp hcweq; rw [shr_one_toNat]; exact this.2
+    have hb : (buf &&& 1 == 0) = true := by
+      have := cwOf_head_branch buf; rw [hhead] at this; simpa using this.symm
+    rw [walkTree, if_neg (by omega : ¬ depth > 20), if_neg (by omega : ¬ cnt = 0), if_pos hb,
+        ih (buf >>> 1) (cnt - 1) (depth + 1) htail (by omega) (by omega),
+        ushr_succ buf cw'.length (by omega),
+        show cnt - 1 - cw'.length = cnt - (cw'.length + 1) from by omega]
+  | @right o cw' s z ho ih =>
+    intro buf cnt depth hcweq hlen hdep
+    simp only [List.length_cons] at hlen hdep hcweq ⊢
+    rw [cwOf] at hcweq
+    have hhead : (buf.toNat % 2 == 1) = true := by
+      have := (List.cons.injEq _ _ _ _).mp hcweq; exact this.1.symm
+    have htail : cw' = cwOf (buf >>> 1).toNat cw'.length := by
+      have := (List.cons.injEq _ _ _ _).mp hcweq; rw [shr_one_toNat]; exact this.2
+    have hb : (buf &&& 1 == 0) = false := by
+      have := cwOf_head_branch buf; rw [hhead] at this; simpa using this.symm
+    rw [walkTree, if_neg (by omega : ¬ depth > 20), if_neg (by omega : ¬ cnt = 0), if_neg (by simp [hb]),
+        ih (buf >>> 1) (cnt - 1) (depth + 1) htail (by omega) (by omega),
+        ushr_succ buf cw'.length (by omega),
+        show cnt - 1 - cw'.length = cnt - (cw'.length + 1) from by omega]
+
+/-- **`walkCanonical` and `walkTree` accept exactly the same inputs.** For valid
+    lengths, the canonical long-code decode and the tree walk over the same buffer
+    succeed on the same inputs with the *same* result — even though their error
+    strings may differ. This is the per-symbol bridge that lets the tree-free
+    decoder join the verified path. -/
+theorem walkCanonical_ok_iff_walkTree (lengths : Array UInt8) (maxBits : Nat)
+    (hmb : 1 ≤ maxBits) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size)
+    (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat) :
+    walkCanonical (buildLongDecode lengths maxBits) maxBits buf cnt = .ok r ↔
+      walkTree (fromLengthsTree lengths maxBits) buf cnt 0 = .ok r := by
+  obtain ⟨sym, bb, c, used⟩ := r
+  constructor
+  · intro h
+    obtain ⟨h1used, humax, hcnt, hbb, hc, s, hs, hsym, hlen_s, hcf⟩ :=
+      walkCanonical_ok_spec lengths maxBits hmb (by omega) buf cnt sym bb c used h
+    have hmem : (s, cwOf buf.toNat used)
+        ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits :=
+      (Huffman.Spec.allCodes_mem_iff _ maxBits s _).mpr
+        ⟨by rw [List.length_map, Array.length_toList]; exact hs, hcf⟩
+    have hleaf : Deflate.Correctness.TreeHasLeaf (fromLengthsTree lengths maxBits)
+        (cwOf buf.toNat used) s.toUInt16 :=
+      Deflate.Correctness.fromLengths_hasLeaf lengths maxBits (by omega) _
+        (fromLengths_ok_of_valid lengths maxBits hv) hv s _ hmem
+    have hwt := walkTree_complete (fromLengthsTree lengths maxBits) (cwOf buf.toNat used)
+      s.toUInt16 hleaf buf cnt 0 (by rw [cwOf_length]) (by rw [cwOf_length]; exact hcnt)
+      (by rw [cwOf_length]; omega)
+    rw [cwOf_length] at hwt
+    rw [hsym, hbb, hc]; exact hwt
+  · intro h
+    obtain ⟨hleaf, hbb, hdu⟩ :=
+      walkTree_ok_spec (fromLengthsTree lengths maxBits) buf cnt 0 sym bb c used (by omega) h
+    have hcons : c + used = cnt := InflateBuf.walkTree_consumed _ h
+    have hmem := Deflate.Correctness.fromLengths_leaf_spec lengths maxBits (by omega) _
+      (fromLengths_ok_of_valid lengths maxBits hv) hv hbound _ _ hleaf
+    rw [Huffman.Spec.allCodes_mem_iff] at hmem
+    obtain ⟨hsymlt, hcf⟩ := hmem
+    obtain ⟨_, hlenbnd, hcwval⟩ := Huffman.Spec.codeFor_spec hcf
+    have ⟨hpos, hposm⟩ := Huffman.Spec.codeFor_len_bounds hlenbnd
+    have hused_eq : (lengths.toList.map UInt8.toNat)[sym.toNat]'hsymlt = used := by
+      have := congrArg List.length hcwval
+      rw [Huffman.Spec.natToBits_length, cwOf_length] at this; omega
+    rw [hused_eq] at hpos hposm
+    have hwc := walkCanonical_complete lengths maxBits hmb (by omega) hv sym.toNat used
+      (by omega) hposm buf cnt (by omega) hcf
+    have hsymrt : sym.toNat.toUInt16 = sym := by
+      have : sym.toNat.toUInt16 = UInt16.ofNat sym.toNat := rfl
+      rw [this, UInt16.ofNat_toNat]
+    rw [hwc, hsymrt, ← hbb, show cnt - used = c from by omega]
+
 end Zip.Native.HuffTree
