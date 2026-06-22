@@ -318,6 +318,57 @@ def buildTableCanonical (lengths : Array UInt8) (maxBits : Nat := 15) : DecodeTa
     let nextCode : Array UInt32 := (Huffman.Spec.nextCodes blCount maxBits).map (·.toUInt32)
     buildCanonicalLoop lengths nextCode 0 (Array.replicate (2 ^ fastBits) (packEntry 0 0))
 
+/-! ### Fast array-based canonical build inputs
+
+`buildTableCanonical` routes the `nextCode` setup through the proof-oriented
+`Huffman.Spec.countLengths` / `nextCodes`, which allocate a `List` (`lengths.toList`)
+and run a well-founded recursion — heavier than the per-slot `tableEntry` walk it
+was meant to replace. `countLengthsFast` / `nextCodesFast` compute the same arrays
+directly over the `Array`, no `List` allocation, as the fast inputs to
+`buildCanonicalLoop`. `buildTableCanonicalFast` equals `buildTableCanonical`
+(witnessed by the `InflateTable` conformance test; formal
+`buildTableCanonicalFast_eq` is the next step), so it inherits
+`buildTableCanonical_eq`. -/
+
+/-- Code-length histogram over the `Array`, no `List` allocation: counts, for each
+    length `1..maxBits`, how many symbols carry it (length-0 / out-of-range
+    ignored). Fast form of `Huffman.Spec.countLengths`. -/
+def countLengthsFast (lengths : Array UInt8) (maxBits : Nat) : Array Nat :=
+  go lengths maxBits 0 (Array.replicate (maxBits + 1) 0)
+where
+  go (lengths : Array UInt8) (maxBits i : Nat) (count : Array Nat) : Array Nat :=
+    if h : i < lengths.size then
+      let ln := lengths[i].toNat
+      let count := if 0 < ln ∧ ln ≤ maxBits then count.set! ln (count[ln]! + 1) else count
+      go lengths maxBits (i + 1) count
+    else count
+  termination_by lengths.size - i
+
+/-- First canonical code per length (RFC 1951 §3.2.2 step 2), as a `UInt32` array
+    computed by a direct `1..maxBits` loop — fast form of
+    `(Huffman.Spec.nextCodes count maxBits).map (·.toUInt32)`. -/
+def nextCodesFast (count : Array Nat) (maxBits : Nat) : Array UInt32 :=
+  go count maxBits 1 0 (Array.replicate (maxBits + 1) 0)
+where
+  go (count : Array Nat) (maxBits bits code : Nat) (nc : Array UInt32) : Array UInt32 :=
+    if h : bits ≤ maxBits then
+      let code := (code + count[bits - 1]!) * 2
+      go count maxBits (bits + 1) code (nc.set! bits code.toUInt32)
+    else nc
+  termination_by maxBits + 1 - bits
+
+/-- Build the canonical decode table with the fast array-based `nextCode` setup
+    (`countLengthsFast` / `nextCodesFast`), avoiding the `List` allocation and
+    well-founded recursion of `buildTableCanonical`'s spec-function inputs. Equal
+    to `buildTableCanonical` — same `buildCanonicalLoop`, same `nextCode` array —
+    so it is a drop-in carrying `buildTableCanonical_eq` once the array/spec
+    equality is proven (witnessed now by the `InflateTable` conformance test). -/
+def buildTableCanonicalFast (lengths : Array UInt8) (maxBits : Nat := 15) : DecodeTable where
+  packed :=
+    let count := countLengthsFast lengths maxBits
+    let nextCode := nextCodesFast count maxBits
+    buildCanonicalLoop lengths nextCode 0 (Array.replicate (2 ^ fastBits) (packEntry 0 0))
+
 /-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
 def bitsAvail (br : BitReader) : Nat :=
   if br.pos ≥ br.data.size then 0 else (br.data.size - br.pos) * 8 - br.bitOff
