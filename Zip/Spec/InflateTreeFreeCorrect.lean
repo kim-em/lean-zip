@@ -442,4 +442,88 @@ theorem codeFor_placed (lengths : Array UInt8) (maxBits : Nat)
   rw [hcweq, hidx]
   rfl
 
+/-! ## Surjectivity: every value in a length's canonical range is a real codeword
+
+The error-soundness direction of the tree-free decoder needs the converse of
+`codeFor_placed`: if `walkCanonical` accepts a value `c` in length `len`'s range,
+that value is a genuine codeword (so the returned symbol is a real tree leaf).
+`numEarlier` reaches every value below the total count, so each range slot is
+filled. -/
+
+/-- `numEarlier xs len` is surjective onto `[0, numEarlier xs len N)`: every count
+    below the running total is hit at some earlier matching position. -/
+theorem numEarlier_surj (xs : List Nat) (len : Nat) :
+    ∀ N, N ≤ xs.length → ∀ j, j < numEarlier xs len N →
+      ∃ s, ∃ _ : s < xs.length, s < N ∧ xs[s] = len ∧ numEarlier xs len s = j := by
+  intro N
+  induction N with
+  | zero => intro _ j hj; simp only [numEarlier, List.take_zero, List.foldl_nil] at hj; omega
+  | succ k ih =>
+    intro hN j hj
+    have hk : k < xs.length := by omega
+    rw [numEarlier_succ xs len k hk] at hj
+    by_cases hxk : xs[k] = len
+    · rw [if_pos hxk] at hj
+      by_cases hjk : j < numEarlier xs len k
+      · obtain ⟨s, hs, hsk, hxs, hns⟩ := ih (by omega) j hjk
+        exact ⟨s, hs, by omega, hxs, hns⟩
+      · exact ⟨k, hk, by omega, hxk, by omega⟩
+    · rw [if_neg hxk, Nat.add_zero] at hj
+      obtain ⟨s, hs, hsk, hxs, hns⟩ := ih (by omega) j hj
+      exact ⟨s, hs, by omega, hxs, hns⟩
+
+/-- `numEarlier` surjectivity for the `Array UInt8` length vector, against the
+    fast histogram count. -/
+theorem numEarlier_surj_arr (lengths : Array UInt8) (maxBits len : Nat)
+    (hlen1 : 1 ≤ len) (hlenm : len ≤ maxBits)
+    (j : Nat) (hj : j < (countLengthsFast lengths maxBits)[len]!) :
+    ∃ s, s < lengths.size ∧ lengths[s]!.toNat = len ∧
+      numEarlier (lengths.toList.map UInt8.toNat) len s = j := by
+  rw [numEarlier_size_eq lengths maxBits len hlen1 hlenm] at hj
+  obtain ⟨s, hs, _, hxs, hns⟩ := numEarlier_surj (lengths.toList.map UInt8.toNat) len
+    lengths.size (Nat.le_of_eq (by rw [List.length_map, Array.length_toList])) j hj
+  have hssize : s < lengths.size := by rw [List.length_map, Array.length_toList] at hs; exact hs
+  exact ⟨s, hssize, by rw [← map_toNat_getElem lengths s hssize]; exact hxs, hns⟩
+
+/-- **Value → codeword (the `(←)` direction).** Any value `c` in length `len`'s
+    canonical range `[firstCode[len], firstCode[len] + count[len])` is the codeword
+    of a real symbol `s`, and `walkCanonical`'s lookup `symbols[firstIndex[len] +
+    (c - firstCode[len])]` returns exactly that `s`. This makes the tree-free
+    accept-set match the canonical code: no value matches that isn't a leaf. -/
+theorem codeFor_of_value (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (len c : Nat) (hlen1 : 1 ≤ len) (hlenm : len ≤ maxBits)
+    (hc_lo : (buildLongDecode lengths maxBits).firstCode[len]! ≤ c)
+    (hc_hi : c < (buildLongDecode lengths maxBits).firstCode[len]!
+        + (buildLongDecode lengths maxBits).count[len]!) :
+    ∃ s, s < lengths.size ∧ lengths[s]!.toNat = len ∧
+      Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+        = some (Huffman.Spec.natToBits c len) ∧
+      (buildLongDecode lengths maxBits).symbols[
+        (buildLongDecode lengths maxBits).firstIndex[len]! +
+        (c - (buildLongDecode lengths maxBits).firstCode[len]!)]! = s.toUInt16 := by
+  have hfc : (buildLongDecode lengths maxBits).firstCode
+      = Huffman.Spec.nextCodes
+          (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits := by
+    show Huffman.Spec.nextCodes (countLengthsFast lengths maxBits) maxBits = _
+    rw [countLengthsFast_eq]
+  have hcnt : (buildLongDecode lengths maxBits).count = countLengthsFast lengths maxBits := rfl
+  -- the offset of `c` within its length block reaches a real symbol
+  have hj_lt : c - (buildLongDecode lengths maxBits).firstCode[len]!
+      < (countLengthsFast lengths maxBits)[len]! := by rw [hcnt] at hc_hi; omega
+  obtain ⟨s, hssize, hlen_s, hne⟩ := numEarlier_surj_arr lengths maxBits len hlen1 hlenm
+    (c - (buildLongDecode lengths maxBits).firstCode[len]!) hj_lt
+  have h0 : 0 < lengths[s]!.toNat := by rw [hlen_s]; omega
+  have hm : lengths[s]!.toNat ≤ maxBits := by rw [hlen_s]; exact hlenm
+  have hfc_len : (Huffman.Spec.nextCodes
+        (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits)[len]!
+      = (buildLongDecode lengths maxBits).firstCode[len]! := by rw [hfc]
+  refine ⟨s, hssize, hlen_s, ?_, ?_⟩
+  · -- codeFor s = natToBits c len
+    rw [codeFor_placed lengths maxBits s hssize h0 hm, hlen_s, hne, hfc_len,
+        Nat.add_sub_cancel' hc_lo]
+  · -- symbols[firstIndex[len] + (c - firstCode[len])] = s
+    have hplace := buildLongDecode_placement lengths maxBits hmb s hssize h0 hm
+    rw [hlen_s, hne] at hplace
+    exact hplace
+
 end Zip.Native.HuffTree
