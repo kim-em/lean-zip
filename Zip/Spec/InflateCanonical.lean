@@ -751,4 +751,101 @@ theorem buildTableCanonical_eq (lengths : Array UInt8) (maxBits : Nat)
       exact buildTableCanonical_packed_getElem lengths maxBits hmb hv hbound i hi
   exact congrArg HuffTree.DecodeTable.mk hpacked
 
+/-! ## Fast array-based build = spec-function build
+
+`buildTableCanonicalFast` (the `List`-free, WF-recursion-free build) feeds
+`buildCanonicalLoop` the same `nextCode` array as `buildTableCanonical`, so the
+two packed tables are equal. Composed with `buildTableCanonical_eq`, the fast
+build is itself a verified drop-in for `buildTable`. -/
+
+/-- The fast `nextCode` loop computes the spec `nextCodes` array, mapped to
+    `UInt32`: both run the same `1..maxBits` recurrence, the fast one storing
+    `code.toUInt32` where the spec stores `code` then maps. -/
+theorem nextCodesFast_go_eq (count : Array Nat) (maxBits : Nat) :
+    ∀ (n bits code : Nat) (arr : Array Nat), maxBits + 1 - bits ≤ n →
+    HuffTree.nextCodesFast.go count maxBits bits code (arr.map (·.toUInt32))
+      = (Huffman.Spec.nextCodes.go count maxBits arr bits code).map (·.toUInt32) := by
+  intro n
+  induction n with
+  | zero =>
+    intro bits code arr hn
+    rw [HuffTree.nextCodesFast.go, Huffman.Spec.nextCodes.go,
+        dif_neg (show ¬ bits ≤ maxBits by omega), dif_pos (show bits > maxBits by omega)]
+  | succ n ih =>
+    intro bits code arr hn
+    rw [HuffTree.nextCodesFast.go, Huffman.Spec.nextCodes.go]
+    by_cases hb : bits ≤ maxBits
+    · rw [dif_pos hb, dif_neg (show ¬ bits > maxBits by omega)]
+      simp only []
+      rw [Array.set!_eq_setIfInBounds, Array.set!_eq_setIfInBounds,
+          ← Array.map_setIfInBounds]
+      exact ih (bits + 1) _ (arr.setIfInBounds bits _) (by omega)
+    · rw [dif_neg hb, dif_pos (show bits > maxBits by omega)]
+
+/-- The fast histogram equals the spec `countLengths` on the mapped lengths. -/
+theorem countLengthsFast_go_eq (lengths : Array UInt8) (maxBits : Nat) :
+    ∀ (n i : Nat) (count : Array Nat), lengths.size - i ≤ n →
+    HuffTree.countLengthsFast.go lengths maxBits i count
+      = ((lengths.toList.map UInt8.toNat).drop i).foldl
+          (fun acc len => if len == 0 || len > maxBits then acc else acc.set! len (acc[len]! + 1))
+          count := by
+  intro n
+  induction n with
+  | zero =>
+    intro i count hn
+    have hge : ¬ i < lengths.size := by omega
+    rw [HuffTree.countLengthsFast.go, dif_neg hge,
+        List.drop_eq_nil_of_le (by rw [List.length_map, Array.length_toList]; omega)]
+    rfl
+  | succ n ih =>
+    intro i count hn
+    by_cases hlt : i < lengths.size
+    · rw [HuffTree.countLengthsFast.go, dif_pos hlt]
+      have hidx : i < (lengths.toList.map UInt8.toNat).length := by
+        rw [List.length_map, Array.length_toList]; exact hlt
+      rw [List.drop_eq_getElem_cons hidx, List.foldl_cons]
+      have hget : (lengths.toList.map UInt8.toNat)[i] = lengths[i].toNat := by
+        rw [List.getElem_map, Array.getElem_toList]
+      rw [hget]
+      have hstep : (if lengths[i].toNat == 0 || lengths[i].toNat > maxBits then count
+          else count.set! lengths[i].toNat (count[lengths[i].toNat]! + 1))
+          = (if 0 < lengths[i].toNat ∧ lengths[i].toNat ≤ maxBits then
+              count.set! lengths[i].toNat (count[lengths[i].toNat]! + 1) else count) := by
+        by_cases hc : 0 < lengths[i].toNat ∧ lengths[i].toNat ≤ maxBits
+        · rw [if_pos hc, if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
+        · rw [if_neg hc, if_pos (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
+      rw [hstep]
+      exact ih (i + 1) _ (by omega)
+    · rw [HuffTree.countLengthsFast.go, dif_neg hlt,
+          List.drop_eq_nil_of_le (by rw [List.length_map, Array.length_toList]; omega)]
+      rfl
+
+/-- **`buildTableCanonicalFast_eq`.** The fast array-based canonical build equals
+    the spec-function canonical build — same `buildCanonicalLoop` over an equal
+    `nextCode` array. Composed with `buildTableCanonical_eq`, the fast build is a
+    verified drop-in for the tree-built table. -/
+theorem buildTableCanonicalFast_eq (lengths : Array UInt8) (maxBits : Nat) :
+    HuffTree.buildTableCanonicalFast lengths maxBits
+      = HuffTree.buildTableCanonical lengths maxBits := by
+  have hcount : HuffTree.countLengthsFast lengths maxBits
+      = Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits := by
+    rw [HuffTree.countLengthsFast,
+        countLengthsFast_go_eq lengths maxBits lengths.size 0 _ (by omega), List.drop_zero]
+    rfl
+  have hnext : HuffTree.nextCodesFast (HuffTree.countLengthsFast lengths maxBits) maxBits
+      = (Huffman.Spec.nextCodes
+          (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits).map
+          (·.toUInt32) := by
+    have hinit : (Array.replicate (maxBits + 1) (0 : UInt32))
+        = (Array.replicate (maxBits + 1) (0 : Nat)).map (·.toUInt32) := by
+      rw [Array.map_replicate]; rfl
+    rw [hcount, HuffTree.nextCodesFast, Huffman.Spec.nextCodes, hinit]
+    exact nextCodesFast_go_eq _ maxBits (maxBits + 1) 1 0 (Array.replicate (maxBits + 1) 0)
+      (by omega)
+  show HuffTree.DecodeTable.mk _ = HuffTree.DecodeTable.mk _
+  congr 1
+  show HuffTree.buildCanonicalLoop _ (HuffTree.nextCodesFast (HuffTree.countLengthsFast _ _) _) _ _
+     = HuffTree.buildCanonicalLoop _ _ _ _
+  rw [hnext]
+
 end Zip.Native.HuffTree
