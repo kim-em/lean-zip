@@ -1017,4 +1017,19 @@ theorem walkCanonical_ok_iff_walkTree (lengths : Array UInt8) (maxBits : Nat)
       rw [this, UInt16.ofNat_toNat]
     rw [hwc, hsymrt, ← hbb, show cnt - used = c from by omega]
 
+/-- **`decodeSymCanon` and `decodeSym` accept the same inputs.** They share the
+    9-bit table branch verbatim; the long-code fallback agrees by
+    `walkCanonical_ok_iff_walkTree`. -/
+theorem decodeSymCanon_ok_iff_decodeSym (lengths : Array UInt8) (maxBits : Nat)
+    (hmb : 1 ≤ maxBits) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size)
+    (table : DecodeTable) (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat) :
+    decodeSymCanon (buildLongDecode lengths maxBits) table maxBits buf cnt = .ok r ↔
+      decodeSym (fromLengthsTree lengths maxBits) table buf cnt = .ok r := by
+  simp only [decodeSymCanon, decodeSym]
+  split
+  · exact walkCanonical_ok_iff_walkTree lengths maxBits hmb hmb15 hv hbound buf cnt r
+  · exact Iff.rfl
+
 end Zip.Native.HuffTree
