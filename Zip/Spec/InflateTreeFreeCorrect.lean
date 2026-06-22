@@ -1,5 +1,6 @@
 import Zip.Spec.InflateCanonical
 import Zip.Spec.InflateBufCorrect
+import Zip.Spec.DynamicTreesCorrect
 import Zip.Native.InflateTreeFree
 
 /-!
@@ -1522,5 +1523,120 @@ theorem decodeDynamicTrees_extract {br : BitReader} {litTree distTree : HuffTree
     exact Nat.le_trans (Nat.le_trans (Nat.sub_le _ _) (Nat.min_le_left _ _))
       (Nat.le_trans (by omega : hlit.toNat + 257 + (hdist.toNat + 1) ≤ 320)
         (by decide : 320 ≤ UInt16.size))
+
+set_option maxRecDepth 4096 in
+open InflateBuf in
+/-- **Tree-free block loop forward.** If the verified `inflateLoop` (with the
+    proof-only fixed trees) succeeds, the tree-free `inflateLoopTreeFree` succeeds
+    with the same result. Stored blocks are identical; fixed/dynamic Huffman blocks
+    go through `decodeHuffmanFastBufTreeFree_ok_iff` (dynamic lengths valid via
+    `fromLengths_valid`, sizes bounded via `decodeDynamicTrees_extract`). The reader
+    invariant is re-established each iteration. -/
+theorem inflateLoopTreeFree_of_inflateLoop (data : ByteArray)
+    (hflv : Huffman.Spec.ValidLengths (fixedLitLengths.toList.map UInt8.toNat) 15)
+    (hflb : fixedLitLengths.size ≤ UInt16.size)
+    (hfdv : Huffman.Spec.ValidLengths (fixedDistLengths.toList.map UInt8.toNat) 15)
+    (hfdb : fixedDistLengths.size ≤ UInt16.size) (maxOut : Nat) :
+    ∀ (br : BitReader) (output : ByteArray),
+      (br.bitOff = 0 ∨ br.pos < br.data.size) → br.pos ≤ br.data.size → br.data.size = data.size →
+      ∀ r, inflateLoop br output (HuffTree.fromLengthsTree fixedLitLengths 15)
+            (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut data.size = .ok r →
+        inflateLoopTreeFree br output maxOut data.size = .ok r := by
+  intro br output
+  induction br, output using inflateLoop.induct (dataSize := data.size) with
+  | _ br output ih =>
+    intro hpos hple hds r h
+    rw [inflateLoop] at h
+    obtain ⟨p1, hrb1, h⟩ := bindOk h; obtain ⟨bfinal, br₁⟩ := p1; simp only [] at h
+    obtain ⟨p2, hrb2, h⟩ := bindOk h; obtain ⟨btype, br₂⟩ := p2; simp only [] at h
+    have hbo₂ : br₂.bitOff < 8 := readBits_bitOff_lt_pos (by omega) hrb2
+    obtain ⟨_, hp₁, hl₁⟩ := ZipCommon.readBits_inv br br₁ 1 bfinal hrb1 hpos hple
+    obtain ⟨hd₂, hp₂, hl₂⟩ := ZipCommon.readBits_inv br₁ br₂ 2 btype hrb2 hp₁ hl₁
+    have hdata₂ : br₂.data.size = data.size := by
+      rw [hd₂, ZipCommon.readBits_data_eq br br₁ 1 bfinal hrb1]; exact hds
+    have hwf₂ : br₂.bitPos ≤ br₂.data.size * 8 := by
+      simp only [ZipCommon.BitReader.bitPos]; rcases hp₂ with h' | h' <;> omega
+    have hldep := InflateBuf.fromLengths_depthLE (HuffTree.fromLengths_ok_of_valid fixedLitLengths 15 hflv)
+    have hddep := InflateBuf.fromLengths_depthLE (HuffTree.fromLengths_ok_of_valid fixedDistLengths 15 hfdv)
+    -- the tail (block result already fixed) is identical except the recursive call
+    have tailfwd : ∀ (o' : ByteArray) (br'' : BitReader),
+        (br''.bitOff = 0 ∨ br''.pos < br''.data.size) → br''.pos ≤ br''.data.size →
+        br''.data.size = data.size →
+        (if bfinal == 1 then pure (o', br''.alignToByte.pos)
+         else if _h : br''.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : data.size * 8 < br''.bitPos then throw "Inflate: bit position out of range"
+              else inflateLoop br'' o' (HuffTree.fromLengthsTree fixedLitLengths 15)
+                    (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut data.size) = .ok r →
+        (if bfinal == 1 then pure (o', br''.alignToByte.pos)
+         else if _h : br''.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : data.size * 8 < br''.bitPos then throw "Inflate: bit position out of range"
+              else inflateLoopTreeFree br'' o' maxOut data.size) = .ok r := by
+      intro o' br'' hp'' hl'' hd'' ht
+      by_cases hbf : (bfinal == 1) = true
+      · rw [if_pos hbf] at ht ⊢; exact ht
+      · rw [if_neg hbf] at ht ⊢
+        by_cases hg1 : br''.bitPos ≤ br.bitPos
+        · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
+        · rw [dif_neg hg1] at ht ⊢
+          by_cases hg2 : data.size * 8 < br''.bitPos
+          · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
+          · rw [dif_neg hg2] at ht ⊢
+            exact ih o' br'' hg1 hg2 hp'' hl'' hd'' r ht
+    rw [inflateLoopTreeFree]
+    simp only [hrb1, hrb2, bind, Except.bind]
+    have hbtv : btype = 0 ∨ btype = 1 ∨ btype = 2 ∨ btype = 3 := by
+      have hb4 : btype.toNat < 4 := readBits_lt (n := 2) (by omega) hrb2
+      rcases (show btype.toNat = 0 ∨ btype.toNat = 1 ∨ btype.toNat = 2 ∨ btype.toNat = 3 from by omega)
+        with h' | h' | h' | h'
+      · exact Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))
+      · exact Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl)))
+      · exact Or.inr (Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+      · exact Or.inr (Or.inr (Or.inr (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+    rcases hbtv with rfl | rfl | rfl | rfl
+    · -- stored block (identical)
+      obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeStored_inv br₂ br' output output' maxOut hblock
+      rw [hblock]; dsimp only [bind, Except.bind]
+      exact tailfwd output' br' hp' hl' (by rw [hd']; exact hdata₂) htail
+    · -- fixed Huffman block
+      obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      have htf := (decodeHuffmanFastBufTreeFree_ok_iff br₂ output fixedLitLengths fixedDistLengths
+        hflv hflb hfdv hfdb maxOut hbo₂ hwf₂ (output', br')).mpr hblock
+      have hhf' : Inflate.decodeHuffman br₂ output (HuffTree.fromLengthsTree fixedLitLengths 15)
+          (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut = .ok (output', br') := by
+        rw [← decodeHuffmanFast_eq br₂ output _ _ maxOut hldep hddep hbo₂ hwf₂]; exact hblock
+      obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv _ _ br₂ br' output output' maxOut hhf' hp₂ hl₂
+      rw [htf]; dsimp only [bind, Except.bind]
+      exact tailfwd output' br' hp' hl' (by rw [hd']; exact hdata₂) htail
+    · -- dynamic Huffman block
+      obtain ⟨pdt, hdt, h⟩ := bindOk h; obtain ⟨lt, dt, br₃⟩ := pdt; simp only [] at h
+      obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      obtain ⟨ll, dl, hlonly, hflt, hfdt, hllb, hdlb⟩ := decodeDynamicTrees_extract hdt
+      have hltv := Deflate.Correctness.fromLengths_valid ll 15 lt hflt
+      have hdlv := Deflate.Correctness.fromLengths_valid dl 15 dt hfdt
+      have hlteq : lt = HuffTree.fromLengthsTree ll 15 :=
+        Except.ok.inj (hflt.symm.trans (HuffTree.fromLengths_ok_of_valid ll 15 hltv))
+      have hdteq : dt = HuffTree.fromLengthsTree dl 15 :=
+        Except.ok.inj (hfdt.symm.trans (HuffTree.fromLengths_ok_of_valid dl 15 hdlv))
+      obtain ⟨hd3, hp3, hl3⟩ := Zip.Native.decodeDynamicTrees_inv br₂ br₃ lt dt hdt hp₂ hl₂
+      have hbo3 := InflateBuf.decodeDynamicTrees_bitOff_pres hbo₂ hdt
+      have hwf3 : br₃.bitPos ≤ br₃.data.size * 8 := by
+        simp only [ZipCommon.BitReader.bitPos]; rcases hp3 with h' | h' <;> omega
+      have hbuf : decodeHuffmanFastBuf br₃ output (HuffTree.fromLengthsTree ll 15)
+          (HuffTree.fromLengthsTree dl 15) maxOut = .ok (output', br') := by
+        rw [← hlteq, ← hdteq]; exact hblock
+      have htf := (decodeHuffmanFastBufTreeFree_ok_iff br₃ output ll dl hltv hllb hdlv hdlb
+        maxOut hbo3 hwf3 (output', br')).mpr hbuf
+      have hhf' : Inflate.decodeHuffman br₃ output lt dt maxOut = .ok (output', br') := by
+        rw [← decodeHuffmanFast_eq br₃ output lt dt maxOut
+          (InflateBuf.fromLengths_depthLE hflt) (InflateBuf.fromLengths_depthLE hfdt) hbo3 hwf3]
+        exact hblock
+      obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv lt dt br₃ br' output output' maxOut hhf' hp3 hl3
+      rw [hlonly]; dsimp only [bind, Except.bind]
+      rw [htf]; dsimp only [bind, Except.bind]
+      exact tailfwd output' br' hp' hl' (by rw [hd', hd3]; exact hdata₂) htail
+    · -- reserved block type 3
+      simp only [bind, Except.bind] at h
+      exact absurd h (by simp)
 
 end Zip.Native.Inflate
