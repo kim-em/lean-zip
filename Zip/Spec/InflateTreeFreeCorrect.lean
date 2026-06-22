@@ -366,4 +366,80 @@ theorem buildSymbols_placement
     (Array.size_replicate) (fun L _ _ => by simp [numEarlier]) (fun _ h _ _ => absurd h (by omega))
     s' hs' h0' hm'
 
+/-! ## `buildLongDecode` instantiation and `codeFor` correspondence -/
+
+/-- The fast histogram equals the spec `countLengths` on the mapped lengths.
+    (Local restatement of the `hcount` step inside `buildTableCanonicalFast_eq`.) -/
+theorem countLengthsFast_eq (lengths : Array UInt8) (maxBits : Nat) :
+    countLengthsFast lengths maxBits
+      = Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits := by
+  rw [countLengthsFast,
+      countLengthsFast_go_eq lengths maxBits lengths.size 0 _ (by omega), List.drop_zero]
+  rfl
+
+/-- `numEarlier` over the whole length vector is the spec `countLengths`. -/
+theorem numEarlier_size_eq (lengths : Array UInt8) (maxBits L : Nat)
+    (hL1 : 1 ≤ L) (hLm : L ≤ maxBits) :
+    (countLengthsFast lengths maxBits)[L]!
+      = numEarlier (lengths.toList.map UInt8.toNat) L lengths.size := by
+  rw [countLengthsFast_eq,
+      Huffman.Spec.countLengths_eq (lengths.toList.map UInt8.toNat) maxBits L (by omega) hLm]
+  unfold numEarlier
+  rw [List.take_of_length_le (by rw [List.length_map, Array.length_toList]; exact Nat.le_refl _)]
+
+/-- **Placement for `buildLongDecode`.** Symbol `s` of valid length lands at
+    `firstIndex[len] + numEarlier lsList len s` in the sorted `symbols` array. -/
+theorem buildLongDecode_placement (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤ maxBits)
+    (s : Nat) (hs : s < lengths.size)
+    (h0 : 0 < lengths[s]!.toNat) (hm : lengths[s]!.toNat ≤ maxBits) :
+    (buildLongDecode lengths maxBits).symbols[
+        (buildLongDecode lengths maxBits).firstIndex[lengths[s]!.toNat]! +
+        numEarlier (lengths.toList.map UInt8.toNat) lengths[s]!.toNat s]!
+      = s.toUInt16 := by
+  have hcount : ∀ L, 1 ≤ L → L ≤ maxBits →
+      (countLengthsFast lengths maxBits)[L]!
+        = numEarlier (lengths.toList.map UInt8.toNat) L lengths.size :=
+    fun L hL1 hLm => numEarlier_size_eq lengths maxBits L hL1 hLm
+  have hfi : ∀ L, 1 ≤ L → L ≤ maxBits →
+      (buildFirstIndex (countLengthsFast lengths maxBits) maxBits)[L]!
+        = psumCount (countLengthsFast lengths maxBits) (L - 1) :=
+    fun L hL1 hLm => buildFirstIndex_spec _ maxBits L hL1 hLm
+  have htotal :
+      (buildFirstIndex (countLengthsFast lengths maxBits) maxBits)[maxBits]!
+          + (countLengthsFast lengths maxBits)[maxBits]!
+        = psumCount (countLengthsFast lengths maxBits) maxBits := by
+    rw [buildFirstIndex_spec _ maxBits maxBits hmb (Nat.le_refl _),
+        ← psumCount_succ_pred _ maxBits hmb]
+  show (buildSymbols lengths maxBits _ (buildFirstIndex (countLengthsFast lengths maxBits) maxBits))[_]!
+      = s.toUInt16
+  exact buildSymbols_placement lengths maxBits _ (countLengthsFast lengths maxBits)
+    (buildFirstIndex (countLengthsFast lengths maxBits) maxBits) hfi hcount htotal
+    (buildFirstIndex_size _ maxBits) s hs h0 hm
+
+/-- **`codeFor` of a placed symbol.** The canonical codeword of symbol `s` (valid
+    length `len`) is `natToBits (firstCode[len] + numEarlier lsList len s) len`,
+    where `firstCode = nextCodes (countLengths lsList) maxBits`. This is the
+    arithmetic ↔ `codeFor` correspondence: `walkCanonical`'s accumulated value
+    `firstCode[len] + offset` selects exactly this symbol's codeword. -/
+theorem codeFor_placed (lengths : Array UInt8) (maxBits : Nat)
+    (s : Nat) (hs : s < lengths.size)
+    (h0 : 0 < lengths[s]!.toNat) (hm : lengths[s]!.toNat ≤ maxBits) :
+    Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+      = some (Huffman.Spec.natToBits
+          ((Huffman.Spec.nextCodes
+             (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits)
+             maxBits)[lengths[s]!.toNat]!
+           + numEarlier (lengths.toList.map UInt8.toNat) lengths[s]!.toNat s)
+          lengths[s]!.toNat) := by
+  obtain ⟨cw, hcw⟩ := Deflate.Correctness.codeFor_some (lengths.toList.map UInt8.toNat) maxBits s
+    (by rw [List.length_map, Array.length_toList]; exact hs)
+    (by rw [map_toNat_getElem lengths s hs]; omega)
+    (by rw [map_toNat_getElem lengths s hs]; exact hm)
+  rw [hcw]
+  obtain ⟨hs', hlen', hcweq⟩ := Huffman.Spec.codeFor_spec hcw
+  have hidx : (lengths.toList.map UInt8.toNat)[s]'hs' = lengths[s]!.toNat :=
+    map_toNat_getElem lengths s hs
+  rw [hcweq, hidx]
+  rfl
+
 end Zip.Native.HuffTree
