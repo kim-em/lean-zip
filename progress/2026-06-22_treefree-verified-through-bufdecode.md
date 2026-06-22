@@ -44,6 +44,33 @@ tables coincide (`buildTableCanonicalFast_eq_buildTable`), both addressability
 dispatches collapse to the boxed loop, and the loops agree (threaded through the
 shared reconstruction via `bind_ok_iff`).
 
+## COMPLETE: top-level `inflateTreeFree_of_inflate` proven (end to end)
+
+`Inflate.inflate data maxOut sizeHint = .ok out → Inflate.inflateTreeFree data
+maxOut = .ok out` — the tree-free decoder is a verified drop-in for the trusted
+`Inflate.inflate` on **every successful decode**, with the Huffman tree
+(`fromLengthsTree`) existing only in the proof and never built at runtime. No
+`sorry`; full build + all tests pass; registered in `Zip.lean` so CI checks it.
+
+The chain that closed it (all proven this session):
+- `readBit_lt` / `readBits_go_lt` / `readBits_lt` — a `readBits n` value bound
+  (`v.toNat < 2^n`) for the dynamic `ll.size ≤ UInt16.size` bound.
+- `decodeDynamicTrees_extract` — extended with `ll.size`/`dl.size ≤ UInt16.size`.
+- `inflateLoopTreeFree_of_inflateLoop` — block-loop forward correspondence,
+  by `inflateLoop.induct`, enumerating `btype ∈ {0,1,2,3}` (literal `UInt32`
+  matches reduce by defeq, so `rcases btype` then `bindOk` per branch), threading
+  the reader invariant via `readBits_inv` / `decodeStored_inv` /
+  `decodeDynamicTrees_inv` / `decodeDynamicTrees_bitOff_pres`, and a `tailfwd`
+  helper that handles `bfinal`/the two guards/recursion (via the induction IH).
+- `inflateTreeFree_of_inflate` — unfold `inflate`/`inflateRaw`, peel the `return`
+  wrapper then the two `fromLengths` builds (`fromLengths_valid` +
+  `fromLengths_ok_of_valid` give the fixed trees), bridge
+  `emptyWithCapacity sizeHint = empty`, apply the block-loop lemma.
+
+Key elaboration insight: the block's monadic bind is distributed *into* each
+`match btype` branch at elaboration time, so the block must be extracted *after*
+`rcases btype`, not before.
+
 ## Update: `decodeDynamicTrees_extract` done; target is the FORWARD direction
 
 The full *iff* `inflateTreeFree ↔ inflate` is **false**: for invalid dynamic code
