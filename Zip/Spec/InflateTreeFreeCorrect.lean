@@ -1639,4 +1639,34 @@ theorem inflateLoopTreeFree_of_inflateLoop (data : ByteArray)
       simp only [bind, Except.bind] at h
       exact absurd h (by simp)
 
+set_option maxRecDepth 4096 in
+/-- **Top-level forward correctness.** Whenever the verified `Inflate.inflate`
+    succeeds, the tree-free `Inflate.inflateTreeFree` produces the same bytes — so
+    the tree-free decoder (which never builds a Huffman tree at runtime) is a
+    correct drop-in for the trusted decoder on every successful decode. The fixed
+    Huffman trees exist only in the proof; `fromLengths fixedLitLengths` succeeding
+    inside `inflateRaw` supplies their validity. -/
+theorem inflateTreeFree_of_inflate (data : ByteArray) (maxOut sizeHint : Nat) {out : ByteArray}
+    (h : Inflate.inflate data maxOut sizeHint = .ok out) :
+    Inflate.inflateTreeFree data maxOut = .ok out := by
+  rw [Inflate.inflate, Inflate.inflateRaw] at h
+  simp only [bind, Except.bind] at h
+  obtain ⟨pr, hraw, hret⟩ := bindOk h; obtain ⟨output, restPos⟩ := pr
+  simp only [pure, Except.pure, Except.ok.injEq] at hret; subst hret
+  obtain ⟨fixedLit, hfl, hraw⟩ := bindOk hraw
+  obtain ⟨fixedDist, hfd, hloop⟩ := bindOk hraw
+  rw [show ByteArray.emptyWithCapacity sizeHint = ByteArray.empty from by
+    simp [ByteArray.emptyWithCapacity, ByteArray.empty]] at hloop
+  have hflv := Deflate.Correctness.fromLengths_valid fixedLitLengths 15 fixedLit hfl
+  have hfdv := Deflate.Correctness.fromLengths_valid fixedDistLengths 15 fixedDist hfd
+  have hfleq : fixedLit = HuffTree.fromLengthsTree fixedLitLengths 15 :=
+    Except.ok.inj (hfl.symm.trans (HuffTree.fromLengths_ok_of_valid fixedLitLengths 15 hflv))
+  have hfdeq : fixedDist = HuffTree.fromLengthsTree fixedDistLengths 15 :=
+    Except.ok.inj (hfd.symm.trans (HuffTree.fromLengths_ok_of_valid fixedDistLengths 15 hfdv))
+  have hbody := inflateLoopTreeFree_of_inflateLoop data hflv (by decide) hfdv (by decide) maxOut
+    { data, pos := 0, bitOff := 0 } ByteArray.empty (Or.inl rfl) (Nat.zero_le _) rfl
+    (output, restPos) (by rw [hfleq, hfdeq] at hloop; exact hloop)
+  rw [Inflate.inflateTreeFree]
+  simp only [hbody, bind, Except.bind, pure, Except.pure]
+
 end Zip.Native.Inflate
