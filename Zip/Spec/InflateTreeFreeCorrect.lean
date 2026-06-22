@@ -6,9 +6,14 @@ import Zip.Native.InflateTreeFree
 /-!
 # Tree-free canonical decode: correctness
 
-Proves the tree-free canonical decoder (`Zip.Native.InflateTreeFree`) decodes
-exactly like the Huffman tree walk, with the tree (`fromLengthsTree lengths`) as a
-**proof-only** object — never built at runtime. The chain, bottom-up:
+Proves that whenever the verified `Inflate.inflate` succeeds, the tree-free
+canonical decoder (`Zip.Native.InflateTreeFree`) produces identical output
+(`inflateTreeFree_of_inflate`), with the tree (`fromLengthsTree lengths`) as a
+**proof-only** object — never built at runtime. This is the forward direction:
+for *valid* code lengths the two decoders agree exactly (the internal
+`_ok_iff_` lemmas), but the full `iff` fails because the tree-free path accepts
+some malformed dynamic length sets that the tree path's `fromLengths` rejects.
+The chain, bottom-up:
 
 1. `buildFirstIndex` / `buildSymbols` structure invariants (counting sort places
    each symbol at `firstIndex[len] + offset`).

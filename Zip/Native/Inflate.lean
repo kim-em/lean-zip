@@ -326,8 +326,8 @@ and run a well-founded recursion — heavier than the per-slot `tableEntry` walk
 was meant to replace. `countLengthsFast` / `nextCodesFast` compute the same arrays
 directly over the `Array`, no `List` allocation, as the fast inputs to
 `buildCanonicalLoop`. `buildTableCanonicalFast` equals `buildTableCanonical`
-(witnessed by the `InflateTable` conformance test; formal
-`buildTableCanonicalFast_eq` is the next step), so it inherits
+(proven by `buildTableCanonicalFast_eq` in `Zip.Spec.InflateCanonical`, and
+witnessed by the `InflateTable` conformance test), so it inherits
 `buildTableCanonical_eq`. -/
 
 /-- Code-length histogram over the `Array`, no `List` allocation: counts, for each

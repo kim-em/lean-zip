@@ -11,8 +11,12 @@ the *build-phase* win (skip `fromLengths`/`insertLoop`).
 
 The decode loops are well-founded (`termination_by`, mirroring the verified
 `goFusedP`/`goFusedPU`/`inflateLoop`); the canonical structures and their
-correctness are proven in `Zip.Spec.InflateTreeFreeCorrect`, where the tree-free
-decoder is shown to accept exactly the inputs the verified tree decoder does.
+correctness are proven in `Zip.Spec.InflateTreeFreeCorrect`: whenever the
+verified decoder succeeds, this decoder produces identical output
+(`inflateTreeFree_of_inflate`). This is forward correctness, not an `iff` — on
+malformed dynamic code lengths the tree-free path is more lenient (it skips the
+lit/dist `fromLengths` Kraft check), so it accepts some inputs the tree path
+rejects. It must not replace the trusted decoder where strict rejection matters.
 -/
 
 namespace Zip.Native
