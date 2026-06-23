@@ -1259,9 +1259,9 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
   -- Every region looked incompressible.
   return true
 
-/-- Unified raw DEFLATE compression dispatch. Level 0 = stored; level ≥ 1 runs the
+/-- Unified raw DEFLATE compression dispatch. Level 0 = stored; levels 1–7 run the
     single-block cost-model dispatch (`deflateRawBase`). At the max-compression
-    tiers (level ≥ 7) two block-split streams are also tried, and the smallest of
+    tiers (level ≥ 8) two block-split streams are also tried, and the smallest of
     all candidates is emitted:
       * self-contained split — per-chunk Huffman trees, fresh window per chunk
         (wins on locally-varying statistics, e.g. structured binary);
@@ -1287,6 +1287,19 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     single-block so it pays no extra compress time. All branches are
     roundtrip-verified.
 
+    The split entry sits at level ≥ 8 (was ≥ 7): the single-block → split transition is
+    a hard ~2.5–3× compress-speed cliff (a second whole-file encode plus the partition
+    sizing), and levels 7 and 8 both paid it, landing coincident (they differed only in
+    chain depth, which saturates). Promoting level 7 to the *strongest single-block*
+    point (full lazy lookahead, chain depth 256) de-collapses the pair: level 7 fills the
+    empty band between level 6 and the split tier — on Canterbury outside the prior hull,
+    on Silesia a distinct Pareto-efficient point on it — while level 8 still emits the
+    split ratio level 7 used to carry (same candidate, deeper chain; empirically
+    equal-or-better on the measured corpora). The matcher knobs cannot separate the two
+    split levels (chain depth and the lazy gate are quality-for-speed tradeoffs that
+    trace one frontier); pushing the frontier itself out is the work of #2696 (chain
+    self-throttle) and #2638 (near-optimal parse). See #2698.
+
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
     incompressible input, dispatches straight to `deflateStoredPure` — skipping the
@@ -1297,7 +1310,7 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if incompressiblePrescan data then deflateStoredPure data
-  else if 7 ≤ level then
+  else if 8 ≤ level then
     -- One *packed* matcher pass shared by the base and shared-split candidates
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
     -- The base candidate consumes the packed words end-to-end (freqs *and*
@@ -1311,8 +1324,10 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
             (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))))
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
-      -- The self-contained split is demoted to level 9: it wins on exactly
-      -- one corpus file while paying a full per-chunk match pass.
+      -- Level 8: base vs cross-block split. The self-contained split is demoted to
+      -- level 9 (it wins on exactly one corpus file while paying a full per-chunk
+      -- match pass). Level 7 no longer enters here — it is the top single-block
+      -- point (see the dispatch docstring), so the split tier starts at level 8.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))
   else deflateRawBase data level
