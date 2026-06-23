@@ -1,4 +1,5 @@
 import Zip.Native.Inflate
+import Zip.Native.InflateTreeFree
 import Zip.Native.DeflateDynamic
 import Zip.Native.Crc32
 import Zip.Native.Adler32
@@ -34,8 +35,8 @@ termination_by data.size - pos
     non-empty output (the inner inflate guards compare
     `output.size + len > maxOutputSize`). The outer-loop guard raises an
     `Except` error containing `"Gzip: total output exceeds maximum size"`;
-    the inner per-member `Inflate.inflateRaw` call also enforces the bound
-    and may surface `"Inflate: output exceeds maximum size"` first.
+    the inner per-member `Inflate.inflateRaw` call also enforces the
+    bound and may surface `"Inflate: output exceeds maximum size"` first.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do

@@ -6,7 +6,7 @@ import Zip.Spec.DeflateFixedCorrect
 
 `InflateBuf.inflate` (the wide-buffer DEFLATE decompressor) inverts the native
 fixed-Huffman compressor `deflateFixed`, by transferring `Inflate`'s roundtrip
-theorem across the proven equality `InflateBuf.inflate = Inflate.inflate`.
+theorem across the proven equality `InflateBuf.inflate = Inflate.inflateReference`.
 -/
 
 namespace Zip.Native.InflateBuf

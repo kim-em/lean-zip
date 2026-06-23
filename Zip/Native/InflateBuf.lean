@@ -9,8 +9,10 @@ import Zip.Native.Inflate
   can call them. This file provides the *parallel* block loop and entry point
   (`inflateLoopBuf`, `InflateBuf.inflate`) built directly on the buffered decoder;
   `Zip.Spec.InflateBufCorrect` proves `inflateLoopBuf = Inflate.inflateLoop` and
-  `InflateBuf.inflate = Inflate.inflate`, which (now that `inflateLoop` itself runs
-  the buffered decoder) is essentially a sanity bridge between the two spellings.
+  `InflateBuf.inflate = Inflate.inflateReference` (the verified tree-building
+  reference, of which the production `Inflate.inflate` is the tree-free counterpart),
+  which (now that `inflateLoop` itself runs the buffered decoder) is essentially a
+  sanity bridge between the two spellings.
 -/
 
 namespace Zip.Native
@@ -43,7 +45,8 @@ decreasing_by all_goals omega
 
 /-- Wide-buffer `inflate` (entry point). `sizeHint` pre-reserves output capacity
     when the decompressed size is known (`0`, the default, reserves nothing); it is
-    a capacity hint only, so `InflateBuf.inflate = Inflate.inflate` is unaffected. -/
+    a capacity hint only, so `InflateBuf.inflate = Inflate.inflateReference` is
+    unaffected. -/
 def inflate (data : ByteArray) (maxOut : Nat := 1024 * 1024 * 1024)
     (sizeHint : Nat := 0) :
     Except String ByteArray := do

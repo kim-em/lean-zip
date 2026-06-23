@@ -2019,11 +2019,11 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
           simp only [hhf]; exact tail o' br' hp' hl' (by rw [hd', hd3]; exact hdata₂)
     · simp only [bind, Except.bind]
 
-/-- **`InflateBuf.inflate` equals the verified `Inflate.inflate`.** The wide-buffer
+/-- **`InflateBuf.inflate` equals the verified `Inflate.inflateReference`.** The wide-buffer
     decoder is a drop-in replacement with no trust gap. -/
 theorem inflate_eq (data : ByteArray) (maxOut : Nat) (sizeHint : Nat := 0) :
-    InflateBuf.inflate data maxOut sizeHint = Inflate.inflate data maxOut sizeHint := by
-  unfold InflateBuf.inflate Inflate.inflate Inflate.inflateRaw
+    InflateBuf.inflate data maxOut sizeHint = Inflate.inflateReference data maxOut sizeHint := by
+  unfold InflateBuf.inflate Inflate.inflateReference Inflate.inflateRawReference
   cases hfl : HuffTree.fromLengths Inflate.fixedLitLengths with
   | error e => simp only [hfl, bind, Except.bind]
   | ok fixedLit =>

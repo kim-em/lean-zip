@@ -110,6 +110,27 @@ def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     else
       .ok (fromLengthsTree lengths maxBits)
 
+/-- The code-length validity check that `fromLengths` performs, factored out so a
+    decoder that builds no tree (the canonical tree-free path) can reject exactly
+    the malformed length sets `fromLengths` rejects, with the same error messages:
+    `"Inflate: code length exceeds maximum"` for any length `> maxBits`, and
+    `"Inflate: oversubscribed Huffman code"` when the Kraft sum overflows. Computed
+    cheaply from the lengths alone — no tree, no `count` array, no insertion pass.
+    `fromLengths = (validateLengths …).map (fun _ => fromLengthsTree …)`
+    (`Zip.Spec.InflateTreeFreeCorrect.fromLengths_eq_validate`). -/
+def validateLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
+    Except String Unit :=
+  if lengths.any (fun l => l.toNat > maxBits) then
+    .error "Inflate: code length exceeds maximum"
+  else
+    let lsList := lengths.toList.map UInt8.toNat
+    let kraft := (lsList.filter (· != 0)).foldl
+      (fun acc l => acc + 2 ^ (maxBits - l)) 0
+    if kraft > 2 ^ maxBits then
+      .error "Inflate: oversubscribed Huffman code"
+    else
+      .ok ()
+
 /-- Decode one symbol from the bit reader using this Huffman tree. -/
 def decode (tree : HuffTree) (br : BitReader) :
     Except String (UInt16 × BitReader) :=
@@ -1265,7 +1286,7 @@ decreasing_by all_goals omega
     affects the produced bytes or the `maxOutputSize` bomb guard, so every inflate
     correctness proof transfers unchanged (`ByteArray.emptyWithCapacity n` is
     definitionally `{ data := Array.empty }` for every `n`). -/
-def inflateRaw (data : ByteArray) (startPos : Nat := 0)
+def inflateRawReference (data : ByteArray) (startPos : Nat := 0)
     (maxOutputSize : Nat := 1024 * 1024 * 1024) (sizeHint : Nat := 0) :
     Except String (ByteArray × Nat) := do
   let br : BitReader := { data, pos := startPos, bitOff := 0 }
@@ -1284,26 +1305,25 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
 
     `sizeHint` pre-reserves output capacity when the decompressed size is known;
     `0` (the default) reserves nothing. See `inflateRaw`. -/
-def inflate (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
+def inflateReference (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
     (sizeHint : Nat := 0) :
     Except String ByteArray := do
-  let (output, _) ← inflateRaw data 0 maxOutputSize sizeHint
+  let (output, _) ← inflateRawReference data 0 maxOutputSize sizeHint
   return output
 
-/-- The output capacity hint is computationally inert: `inflateRaw` with any
-    `sizeHint` equals `inflateRaw` with the default `sizeHint := 0`, because
+/-- The output capacity hint is computationally inert: `inflateRawReference` with any
+    `sizeHint` equals it with the default `sizeHint := 0`, because
     `ByteArray.emptyWithCapacity n` reduces to `{ data := Array.empty }` for every
-    `n` (capacity is a runtime-only allocation hint). So every theorem proved about
-    the `sizeHint := 0` form — correctness, suffix invariance, end-position bounds —
-    transfers verbatim to any hinted call (e.g. the ZIP decoder's). -/
-@[simp] theorem inflateRaw_sizeHint_eq (data : ByteArray) (startPos maxOutputSize sizeHint : Nat) :
-    inflateRaw data startPos maxOutputSize sizeHint = inflateRaw data startPos maxOutputSize :=
+    `n` (capacity is a runtime-only allocation hint). -/
+@[simp] theorem inflateRawReference_sizeHint_eq (data : ByteArray)
+    (startPos maxOutputSize sizeHint : Nat) :
+    inflateRawReference data startPos maxOutputSize sizeHint
+      = inflateRawReference data startPos maxOutputSize :=
   rfl
 
-/-- `inflate` with any `sizeHint` equals `inflate` with the default `0`; see
-    `inflateRaw_sizeHint_eq`. -/
-@[simp] theorem inflate_sizeHint_eq (data : ByteArray) (maxOutputSize sizeHint : Nat) :
-    inflate data maxOutputSize sizeHint = inflate data maxOutputSize :=
+/-- `inflateReference` with any `sizeHint` equals it with the default `0`. -/
+@[simp] theorem inflateReference_sizeHint_eq (data : ByteArray) (maxOutputSize sizeHint : Nat) :
+    inflateReference data maxOutputSize sizeHint = inflateReference data maxOutputSize :=
   rfl
 
 end Inflate

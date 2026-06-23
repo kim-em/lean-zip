@@ -37,7 +37,7 @@ def decompressSingle (data : ByteArray)
   unless flg == 0 do throw "Gzip: unsupported flags (single-member only)"
   -- Skip MTIME (4) + XFL (1) + OS (1) = 6 bytes at offset 4–9
   -- Inflate the DEFLATE stream starting at byte 10
-  let (decompressed, endPos) ← Inflate.inflateRaw data 10 maxOutputSize
+  let (decompressed, endPos) ← Inflate.inflateRawReference data 10 maxOutputSize
   -- Parse trailer at endPos: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
   if endPos + 8 > data.size then throw "Gzip: truncated trailer"
   let expectedCrc := Binary.readUInt32LE data endPos
@@ -143,12 +143,12 @@ theorem bytesToBits_drop_prefix_three (a b c : ByteArray) :
     `bytesToBits deflated`. -/
 theorem inflate_to_spec_decode (deflated : ByteArray) (result : ByteArray)
     (maxOutputSize : Nat)
-    (h : Inflate.inflate deflated maxOutputSize = .ok result) :
+    (h : Inflate.inflateReference deflated maxOutputSize = .ok result) :
     Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits deflated) [] =
       some result.data.toList := by
-  simp only [Inflate.inflate, bind, Except.bind] at h
-  cases hinf : Inflate.inflateRaw deflated 0 maxOutputSize with
+  simp only [Inflate.inflateReference, bind, Except.bind] at h
+  cases hinf : Inflate.inflateRawReference deflated 0 maxOutputSize with
   | error e => exact nomatch (hinf ▸ h)
   | ok p =>
     simp only [hinf, pure, Except.pure, Except.ok.injEq] at h
@@ -177,7 +177,7 @@ theorem inflateRaw_framing (data : ByteArray) (level : UInt8) (maxOutputSize : N
     (hspec_go : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] =
       some data.data.toList) :
-    Inflate.inflateRaw (header ++ Deflate.deflateRaw data level ++ trailer) H maxOutputSize =
+    Inflate.inflateRawReference (header ++ Deflate.deflateRaw data level ++ trailer) H maxOutputSize =
       .ok (⟨⟨data.data.toList⟩⟩, H + (Deflate.deflateRaw data level).size) := by
   -- Spec decode on (header ++ deflated) at offset H, via prefix drop
   have hspec_hd : Deflate.Spec.decode.go
@@ -191,7 +191,7 @@ theorem inflateRaw_framing (data : ByteArray) (level : UInt8) (maxOutputSize : N
       data.data.toList hdata_le hspec_hd
   -- endPos' is exactly the size of (header ++ deflated)
   have hep_exact : endPos' = (header ++ Deflate.deflateRaw data level).size := by
-    have h' : Inflate.inflateRaw (header ++ Deflate.deflateRaw data level)
+    have h' : Inflate.inflateRawReference (header ++ Deflate.deflateRaw data level)
         header.size maxOutputSize = .ok (⟨⟨data.data.toList⟩⟩, endPos') := by
       rw [hhsz]; exact hinflRaw'
     exact inflateRaw_endPos_eq header (Deflate.deflateRaw data level) _ _ _ h'
@@ -211,7 +211,7 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     GzipDecode.decompressSingle (GzipEncode.compress data level) maxOutputSize = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
-  have hinfl : Inflate.inflate (Deflate.deflateRaw data level) maxOutputSize = .ok data :=
+  have hinfl : Inflate.inflateReference (Deflate.deflateRaw data level) maxOutputSize = .ok data :=
     Deflate.inflate_deflateRaw data level _ hsize
   -- Spec decode on deflated
   have hspec_go : Deflate.Spec.decode.go
@@ -226,7 +226,7 @@ theorem gzip_decompressSingle_compress (data : ByteArray) (level : UInt8)
     rw [GzipEncode.compress_size]; omega
   -- Native inflate at offset 10 consumes exactly the DEFLATE stream (framing lemma)
   obtain ⟨header, trailer, hhsz, _, hceq⟩ := GzipEncode.compress_eq data level
-  have hinflRaw : Inflate.inflateRaw (GzipEncode.compress data level) 10 maxOutputSize =
+  have hinflRaw : Inflate.inflateRawReference (GzipEncode.compress data level) 10 maxOutputSize =
       .ok (⟨⟨data.data.toList⟩⟩, 10 + (Deflate.deflateRaw data level).size) := by
     rw [hceq]
     exact inflateRaw_framing data level maxOutputSize header trailer 10 hhsz hdata_le hspec_go

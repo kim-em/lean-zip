@@ -6,7 +6,7 @@ import Zip.Spec.InflateBufCorrect
 # DEFLATE Stream-Level Correctness
 
 Proves the main correctness theorem: the native pure-Lean DEFLATE
-decompressor (`Zip.Native.Inflate.inflateRaw`) agrees with the formal
+decompressor (`Zip.Native.Inflate.inflateRawReference`) agrees with the formal
 bitstream specification (`Deflate.Spec.decode`).
 
 This file handles the block loop (`inflateLoop_correct`) and the
@@ -659,13 +659,13 @@ theorem inflateLoop_correct (br : ZipCommon.BitReader)
     the formal specification also succeeds and produces the same output. -/
 theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
     (result : ByteArray) (endPos : Nat)
-    (h : Zip.Native.Inflate.inflateRaw data startPos maxOutputSize =
+    (h : Zip.Native.Inflate.inflateRawReference data startPos maxOutputSize =
       .ok (result, endPos)) :
     Deflate.Spec.decode
       ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) =
       some result.data.toList := by
   -- Unfold inflateRaw
-  simp only [Zip.Native.Inflate.inflateRaw, bind, Except.bind] at h
+  simp only [Zip.Native.Inflate.inflateRawReference, bind, Except.bind] at h
   -- Build fixed trees
   cases hflit : Zip.Native.HuffTree.fromLengths
       Zip.Native.Inflate.fixedLitLengths with
@@ -692,11 +692,11 @@ theorem inflate_correct (data : ByteArray) (startPos maxOutputSize : Nat)
     the spec `decode` applied to the full bitstream. -/
 theorem inflate_correct' (data : ByteArray) (maxOutputSize : Nat)
     (result : ByteArray)
-    (h : Zip.Native.Inflate.inflate data maxOutputSize = .ok result) :
+    (h : Zip.Native.Inflate.inflateReference data maxOutputSize = .ok result) :
     Deflate.Spec.decode (Deflate.Spec.bytesToBits data) =
       some result.data.toList := by
-  simp only [Zip.Native.Inflate.inflate, bind, Except.bind] at h
-  cases hinf : Zip.Native.Inflate.inflateRaw data 0 maxOutputSize with
+  simp only [Zip.Native.Inflate.inflateReference, bind, Except.bind] at h
+  cases hinf : Zip.Native.Inflate.inflateRawReference data 0 maxOutputSize with
   | error e => exact nomatch (hinf ▸ h)
   | ok p =>
     simp only [hinf, pure, Except.pure, Except.ok.injEq] at h

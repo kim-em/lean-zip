@@ -515,7 +515,7 @@ theorem inflate_deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token
     (hempty : data.size = 0 → tokens = #[])
     (hresolve : Deflate.Spec.resolveLZ77 (tokensToSymbols tokens) [] = some data.data.toList)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamicBlock data tokens) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlock data tokens) maxOutputSize = .ok data := by
   have hspec := deflateDynamicBlock_spec data tokens htok_enc hempty
   match hspec with
   | ⟨litLens, distLens, headerBits, symBits, hv_lit, hv_dist,
@@ -557,7 +557,7 @@ theorem inflate_deflateDynamicBlock (data : ByteArray) (tokens : Array LZ77Token
     large enough to hold the input. -/
 theorem inflate_deflateDynamic (data : ByteArray)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamic data) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateDynamic data) maxOutputSize = .ok data := by
   unfold deflateDynamic
   exact inflate_deflateDynamicBlock data (lz77GreedyIter data)
     (fun t ht => lz77Greedy_encodable data 32768 (by omega) (by omega) t

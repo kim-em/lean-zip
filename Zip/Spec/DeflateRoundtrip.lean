@@ -55,9 +55,9 @@ private theorem cRes (data : ByteArray) (level : UInt8) :
 set_option maxRecDepth 8000 in
 /-- `pickSmaller` of two byte arrays that both roundtrip also roundtrips. -/
 theorem inflate_pickSmaller (a b dataOut : ByteArray) (m : Nat)
-    (ha : Zip.Native.Inflate.inflate a m = .ok dataOut)
-    (hb : Zip.Native.Inflate.inflate b m = .ok dataOut) :
-    Zip.Native.Inflate.inflate (pickSmaller a b) m = .ok dataOut := by
+    (ha : Zip.Native.Inflate.inflateReference a m = .ok dataOut)
+    (hb : Zip.Native.Inflate.inflateReference b m = .ok dataOut) :
+    Zip.Native.Inflate.inflateReference (pickSmaller a b) m = .ok dataOut := by
   unfold pickSmaller; split <;> assumption
 
 /-- `pickSmaller` preserves any predicate on the bit stream both candidates meet. -/
@@ -70,7 +70,7 @@ theorem pickSmaller_bytesToBits {P : List Bool → Prop} (a b : ByteArray)
     `deflateRaw` cases without the stored-block fallback. -/
 theorem inflate_deflateCompressed (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateCompressed data level) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateCompressed data level) maxOutputSize = .ok data := by
   unfold deflateCompressed
   dsimp only []
   split
@@ -88,7 +88,7 @@ set_option maxRecDepth 8000 in
     elaborator to whnf the nested size comparison. -/
 theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateRawBase data level) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateRawBase data level) maxOutputSize = .ok data := by
   rw [← deflateRawBase_def]
   unfold deflateRawBaseTokens
   dsimp only []
@@ -111,7 +111,7 @@ theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
     block-split candidates are covered by the `pickSmaller` cases. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateRaw data level) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   dsimp only []
   rw [deflateRawBaseP_def, lzMatchP_map, deflateDynamicBlocksSharedSized_eq,
