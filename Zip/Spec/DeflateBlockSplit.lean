@@ -25,7 +25,7 @@ The three contracts the dynamic encoder consumes, lifted to the level-dispatched
 `lzMatch` by casing on `4 ≤ level` and applying the lazy (`lz77ChainLazyIter_*`) or
 greedy (`lz77ChainIter_*`) version. Both arms are line-for-line parallel because
 the two matchers share contract signatures. Consumed here and in `DeflateRoundtrip`,
-so the `7 ≤ level`/`4 ≤ level` split lives in exactly one place. -/
+so the `8 ≤ level`/`4 ≤ level` split lives in exactly one place. -/
 
 theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
     ∀ t ∈ (lzMatch data level).toList,
@@ -1478,7 +1478,7 @@ theorem emitSharedBlocksAtSized_eq (data : ByteArray) (toks : Array LZ77Token)
   emitSharedBlocksAtSized_eq_fuel data toks (toks.size - pos + 1) pos (by omega) cuts bw
 
 /-- The sized-tree shared-window candidate is byte-identical to the reference
-    arbitrated candidate: `deflateRaw`'s level ≥ 7 branches and the roundtrip
+    arbitrated candidate: `deflateRaw`'s level ≥ 8 branches and the roundtrip
     proofs see the old `deflateDynamicBlocksSharedAtTokens … chooseSplitsArbitrated`
     through this rewrite. -/
 theorem deflateDynamicBlocksSharedSized_eq (data : ByteArray) (toks : Array LZ77Token) :

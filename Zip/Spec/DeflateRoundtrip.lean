@@ -13,7 +13,7 @@ Proves the unified roundtrip theorem for `deflateRaw`:
 `deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is a stored
 block; level ≥ 1 runs the single-block cost-model dispatch `deflateRawBase`
 (stored / fixed / dynamic, all sized from one hash-chain token pass, emitting
-only the smallest); and level ≥ 7 additionally compares two block-split streams
+only the smallest); and level ≥ 8 additionally compares two block-split streams
 (self-contained #2524 and cross-block shared-window #2525) against that base via
 `pickSmaller`, so the split is a first-class candidate that can only ever win.
 
@@ -107,7 +107,7 @@ theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
     This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
-    cost-model stored fallback is covered by `deflateRawBase`; the level-≥7
+    cost-model stored fallback is covered by `deflateRawBase`; the level-≥8
     block-split candidates are covered by the `pickSmaller` cases. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
