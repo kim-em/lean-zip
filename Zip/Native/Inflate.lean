@@ -110,6 +110,27 @@ def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     else
       .ok (fromLengthsTree lengths maxBits)
 
+/-- The code-length validity check that `fromLengths` performs, factored out so a
+    decoder that builds no tree (the canonical tree-free path) can reject exactly
+    the malformed length sets `fromLengths` rejects, with the same error messages:
+    `"Inflate: code length exceeds maximum"` for any length `> maxBits`, and
+    `"Inflate: oversubscribed Huffman code"` when the Kraft sum overflows. Computed
+    cheaply from the lengths alone — no tree, no `count` array, no insertion pass.
+    `fromLengths = (validateLengths …).map (fun _ => fromLengthsTree …)`
+    (`Zip.Spec.InflateTreeFreeCorrect.fromLengths_eq_validate`). -/
+def validateLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
+    Except String Unit :=
+  if lengths.any (fun l => l.toNat > maxBits) then
+    .error "Inflate: code length exceeds maximum"
+  else
+    let lsList := lengths.toList.map UInt8.toNat
+    let kraft := (lsList.filter (· != 0)).foldl
+      (fun acc l => acc + 2 ^ (maxBits - l)) 0
+    if kraft > 2 ^ maxBits then
+      .error "Inflate: oversubscribed Huffman code"
+    else
+      .ok ()
+
 /-- Decode one symbol from the bit reader using this Huffman tree. -/
 def decode (tree : HuffTree) (br : BitReader) :
     Except String (UInt16 × BitReader) :=

@@ -3,6 +3,7 @@ import Zip.Checksum
 import ZipCommon.Handle
 import Zip.RawDeflate
 import Zip.Native.Inflate
+import Zip.Native.InflateTreeFree
 import Zip.Native.Crc32
 
 /-! ZIP archive construction and extraction: entry metadata, local/central headers,
@@ -1236,7 +1237,7 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         -- above `nativePresizeCap` simply keep a few of their doublings.
         let sizeHint := min (min entry.uncompressedSize.toNat maxEntrySize.toNat)
           (min (compData.size * 1100) nativePresizeCap)
-        match Zip.Native.Inflate.inflate compData maxEntrySize.toNat (sizeHint := sizeHint) with
+        match (Zip.Native.Inflate.inflateRawTreeFree compData 0 maxEntrySize.toNat sizeHint).map Prod.fst with
         | .ok data => pure data
         | .error msg => throw (IO.userError s!"zip: native inflate failed for {label}: {msg}")
       else RawDeflate.decompress compData maxEntrySize

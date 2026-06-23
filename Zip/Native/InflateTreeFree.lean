@@ -307,7 +307,14 @@ namespace Inflate
 /-- Like `decodeDynamicTrees`, but returns only the code-length vectors — it never
     builds the lit/dist Huffman trees (the whole point of the tree-free path). The
     small code-length tree (`clTree`, 19 symbols) is still built to decode the
-    length symbols. -/
+    length symbols.
+
+    The lit/dist length vectors are still run through `HuffTree.validateLengths`
+    (the `maxBits`/Kraft check `fromLengths` performs) so this rejects exactly the
+    malformed code-length sets `decodeDynamicTrees` rejects, with identical error
+    messages — closing the strictness gap the tree-free path would otherwise open
+    (`Zip.Spec.InflateTreeFreeCorrect.decodeDynamicLengthsOnly_iff_decodeDynamicTrees`).
+    The check is computable from the lengths alone — no tree is built. -/
 def decodeDynamicLengthsOnly (br : BitReader) :
     Except String (Array UInt8 × Array UInt8 × BitReader) := do
   let (hlit, br) ← br.readBits 5
@@ -322,6 +329,8 @@ def decodeDynamicLengthsOnly (br : BitReader) :
   let (codeLengths, br) ← decodeCLSymbols clTree br (.replicate totalCodes 0) 0 totalCodes
   let litLenLengths := codeLengths.extract 0 numLitLen
   let distLengths := codeLengths.extract numLitLen totalCodes
+  let _ ← HuffTree.validateLengths litLenLengths 15
+  let _ ← HuffTree.validateLengths distLengths 15
   return (litLenLengths, distLengths, br)
 
 /-- Tree-free block loop (mirrors `inflateLoop`): fixed and dynamic Huffman blocks
@@ -350,6 +359,18 @@ def inflateLoopTreeFree (br : BitReader) (output : ByteArray) (maxOut dataSize :
       inflateLoopTreeFree br' output' maxOut dataSize
   termination_by dataSize * 8 - br.bitPos
   decreasing_by all_goals omega
+
+/-- Tree-free `inflateRaw` (no Huffman tree built anywhere on the decode path):
+    the production fast-path counterpart of `Inflate.inflateRaw`, starting at byte
+    offset `startPos` and returning the byte-aligned position after the last block.
+    Builds no fixed Huffman trees (the tree-free loop reads `fixedLit/DistLengths`
+    directly). Proven accept-set equal to `Inflate.inflateRaw`
+    (`Zip.Spec.InflateTreeFreeCorrect.inflateRawTreeFree_ok_iff`). -/
+def inflateRawTreeFree (data : ByteArray) (startPos : Nat := 0)
+    (maxOut : Nat := 1024 * 1024 * 1024) (sizeHint : Nat := 0) :
+    Except String (ByteArray × Nat) := do
+  let br : BitReader := { data, pos := startPos, bitOff := 0 }
+  inflateLoopTreeFree br (ByteArray.emptyWithCapacity sizeHint) maxOut data.size
 
 /-- Tree-free `inflate` (no Huffman tree built anywhere on the decode path).
     Conformance-checked against `Inflate.inflate`. -/

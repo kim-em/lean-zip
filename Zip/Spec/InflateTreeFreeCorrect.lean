@@ -28,6 +28,59 @@ Reuses the `#2679` foundation: `nextCodes` / `countLengths` / `codeFor` /
 
 namespace Zip.Native.HuffTree
 
+/-! ## `validateLengths` ↔ `fromLengths` correspondence
+
+`validateLengths` is exactly the `maxBits`/Kraft check `fromLengths` runs before
+building the tree, factored out for the tree-free path. These lemmas certify that
+running `validateLengths` rejects (and accepts) precisely the length sets
+`fromLengths` does, with identical error messages — the foundation of closing the
+tree-free code-length validation gap. -/
+
+/-- `fromLengths` is `validateLengths` followed by the validation-free tree build:
+    they share the identical `maxBits`/Kraft `if`-cascade, so `fromLengths` errors
+    exactly when `validateLengths` errors, with the same message. -/
+theorem fromLengths_eq_validate (lengths : Array UInt8) (maxBits : Nat) :
+    fromLengths lengths maxBits
+      = (validateLengths lengths maxBits).map (fun _ => fromLengthsTree lengths maxBits) := by
+  unfold fromLengths validateLengths
+  by_cases h1 : lengths.any (fun l => l.toNat > maxBits) = true
+  · rw [if_pos h1, if_pos h1]; rfl
+  · rw [if_neg h1, if_neg h1]
+    by_cases h2 : ((lengths.toList.map UInt8.toNat).filter (· != 0)).foldl
+        (fun acc l => acc + 2 ^ (maxBits - l)) 0 > 2 ^ maxBits
+    · rw [if_pos h2, if_pos h2]; rfl
+    · rw [if_neg h2, if_neg h2]; rfl
+
+/-- `validateLengths` succeeds iff `fromLengths` succeeds (with the canonical tree). -/
+theorem validateLengths_ok_iff_fromLengths (lengths : Array UInt8) (maxBits : Nat) :
+    validateLengths lengths maxBits = .ok () ↔
+      fromLengths lengths maxBits = .ok (fromLengthsTree lengths maxBits) := by
+  rw [fromLengths_eq_validate]
+  cases h : validateLengths lengths maxBits with
+  | error e => simp [Except.map]
+  | ok u => cases u; simp [Except.map]
+
+/-- A successful `validateLengths` certifies `ValidLengths`. -/
+theorem validateLengths_valid {lengths : Array UInt8} {maxBits : Nat}
+    (h : validateLengths lengths maxBits = .ok ()) :
+    Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits :=
+  Deflate.Correctness.fromLengths_valid lengths maxBits _
+    ((validateLengths_ok_iff_fromLengths lengths maxBits).mp h)
+
+/-- `fromLengths` success yields `validateLengths` success. -/
+theorem validateLengths_of_fromLengths {lengths : Array UInt8} {maxBits : Nat} {t : HuffTree}
+    (h : fromLengths lengths maxBits = .ok t) : validateLengths lengths maxBits = .ok () := by
+  rw [fromLengths_eq_validate] at h
+  cases hv : validateLengths lengths maxBits with
+  | error e => rw [hv] at h; simp [Except.map] at h
+  | ok u => cases u; rfl
+
+/-- A failing `validateLengths` makes `fromLengths` fail with the same message. -/
+theorem fromLengths_error_of_validate {lengths : Array UInt8} {maxBits : Nat} {e : String}
+    (h : validateLengths lengths maxBits = .error e) :
+    fromLengths lengths maxBits = .error e := by
+  rw [fromLengths_eq_validate, h]; rfl
+
 /-! ## `buildFirstIndex` structure invariant -/
 
 /-- `psumCount count n = ∑_{k=1}^{n} count[k]!` — the cumulative symbol count
@@ -1520,7 +1573,49 @@ theorem decodeDynamicTrees_extract {br : BitReader} {litTree distTree : HuffTree
   have hdistb : hdist.toNat < 32 := readBits_lt (n := 5) (by omega) he2
   refine ⟨_, _, ?_, hlitT, hdistT, ?_, ?_⟩
   · unfold decodeDynamicLengthsOnly
-    simp [he1, he2, he3, he4, he5, he6, bind, Except.bind, pure, Except.pure]
+    simp [he1, he2, he3, he4, he5, he6,
+      HuffTree.validateLengths_of_fromLengths hlitT,
+      HuffTree.validateLengths_of_fromLengths hdistT,
+      bind, Except.bind, pure, Except.pure]
+  · rw [Array.size_extract]
+    exact Nat.le_trans (Nat.le_trans (Nat.sub_le _ _) (Nat.min_le_left _ _))
+      (Nat.le_trans (by omega : hlit.toNat + 257 ≤ 288) (by decide : 288 ≤ UInt16.size))
+  · rw [Array.size_extract]
+    exact Nat.le_trans (Nat.le_trans (Nat.sub_le _ _) (Nat.min_le_left _ _))
+      (Nat.le_trans (by omega : hlit.toNat + 257 + (hdist.toNat + 1) ≤ 320)
+        (by decide : 320 ≤ UInt16.size))
+
+/-- **`decodeDynamicLengthsOnly` → `decodeDynamicTrees`.** The converse of
+    `decodeDynamicTrees_extract`: once the tree-free length extractor's added
+    `validateLengths` check passes, the lengths are `ValidLengths`, so
+    `decodeDynamicTrees` rebuilds the canonical trees and succeeds with the same
+    reader. This is exactly what closing the code-length validation gap buys. -/
+theorem decodeDynamicTrees_of_lengthsOnly {br : BitReader} {litLens distLens : Array UInt8}
+    {br' : BitReader}
+    (h : decodeDynamicLengthsOnly br = .ok (litLens, distLens, br')) :
+    decodeDynamicTrees br
+        = .ok (HuffTree.fromLengthsTree litLens 15, HuffTree.fromLengthsTree distLens 15, br') ∧
+      Huffman.Spec.ValidLengths (litLens.toList.map UInt8.toNat) 15 ∧
+      Huffman.Spec.ValidLengths (distLens.toList.map UInt8.toNat) 15 ∧
+      litLens.size ≤ UInt16.size ∧ distLens.size ≤ UInt16.size := by
+  unfold decodeDynamicLengthsOnly at h
+  obtain ⟨a1, he1, h⟩ := bindOk h; obtain ⟨hlit, br1⟩ := a1
+  obtain ⟨a2, he2, h⟩ := bindOk h; obtain ⟨hdist, br2⟩ := a2
+  obtain ⟨a3, he3, h⟩ := bindOk h; obtain ⟨hclen, br3⟩ := a3
+  obtain ⟨a4, he4, h⟩ := bindOk h; obtain ⟨clLengths, br4⟩ := a4
+  obtain ⟨a5, he5, h⟩ := bindOk h
+  obtain ⟨a6, he6, h⟩ := bindOk h; obtain ⟨codeLengths, br6⟩ := a6
+  obtain ⟨u1, hv1, h⟩ := bindOk h; cases u1
+  obtain ⟨u2, hv2, h⟩ := bindOk h; cases u2
+  simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, rfl, rfl⟩ := h
+  have hlitb : hlit.toNat < 32 := readBits_lt (n := 5) (by omega) he1
+  have hdistb : hdist.toNat < 32 := readBits_lt (n := 5) (by omega) he2
+  have hflt := (HuffTree.validateLengths_ok_iff_fromLengths _ 15).mp hv1
+  have hfdt := (HuffTree.validateLengths_ok_iff_fromLengths _ 15).mp hv2
+  refine ⟨?_, HuffTree.validateLengths_valid hv1, HuffTree.validateLengths_valid hv2, ?_, ?_⟩
+  · unfold decodeDynamicTrees
+    simp [he1, he2, he3, he4, he5, he6, hflt, hfdt, bind, Except.bind, pure, Except.pure]
   · rw [Array.size_extract]
     exact Nat.le_trans (Nat.le_trans (Nat.sub_le _ _) (Nat.min_le_left _ _))
       (Nat.le_trans (by omega : hlit.toNat + 257 ≤ 288) (by decide : 288 ≤ UInt16.size))
@@ -1645,6 +1740,133 @@ theorem inflateLoopTreeFree_of_inflateLoop (data : ByteArray)
       exact absurd h (by simp)
 
 set_option maxRecDepth 4096 in
+open InflateBuf in
+/-- **Tree-free block loop backward.** With the code-length validation gap closed
+    (`decodeDynamicLengthsOnly` now runs the same `validateLengths` check
+    `decodeDynamicTrees` does), whenever the tree-free `inflateLoopTreeFree`
+    succeeds, the verified `inflateLoop` (with the proof-only fixed trees) succeeds
+    with the *same* result. Dynamic blocks rebuild via `decodeDynamicTrees_of_lengthsOnly`;
+    the block correspondence `decodeHuffmanFastBufTreeFree_ok_iff` is already an `iff`.
+    Together with `inflateLoopTreeFree_of_inflateLoop` this gives accept-set equality. -/
+theorem inflateLoop_of_inflateLoopTreeFree (data : ByteArray)
+    (hflv : Huffman.Spec.ValidLengths (fixedLitLengths.toList.map UInt8.toNat) 15)
+    (hflb : fixedLitLengths.size ≤ UInt16.size)
+    (hfdv : Huffman.Spec.ValidLengths (fixedDistLengths.toList.map UInt8.toNat) 15)
+    (hfdb : fixedDistLengths.size ≤ UInt16.size) (maxOut : Nat) :
+    ∀ (br : BitReader) (output : ByteArray),
+      (br.bitOff = 0 ∨ br.pos < br.data.size) → br.pos ≤ br.data.size → br.data.size = data.size →
+      ∀ r, inflateLoopTreeFree br output maxOut data.size = .ok r →
+        inflateLoop br output (HuffTree.fromLengthsTree fixedLitLengths 15)
+          (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut data.size = .ok r := by
+  intro br output
+  induction br, output using inflateLoopTreeFree.induct (dataSize := data.size) with
+  | _ br output ih =>
+    intro hpos hple hds r h
+    rw [inflateLoopTreeFree] at h
+    obtain ⟨p1, hrb1, h⟩ := bindOk h; obtain ⟨bfinal, br₁⟩ := p1; simp only [] at h
+    obtain ⟨p2, hrb2, h⟩ := bindOk h; obtain ⟨btype, br₂⟩ := p2; simp only [] at h
+    have hbo₂ : br₂.bitOff < 8 := readBits_bitOff_lt_pos (by omega) hrb2
+    obtain ⟨_, hp₁, hl₁⟩ := ZipCommon.readBits_inv br br₁ 1 bfinal hrb1 hpos hple
+    obtain ⟨hd₂, hp₂, hl₂⟩ := ZipCommon.readBits_inv br₁ br₂ 2 btype hrb2 hp₁ hl₁
+    have hdata₂ : br₂.data.size = data.size := by
+      rw [hd₂, ZipCommon.readBits_data_eq br br₁ 1 bfinal hrb1]; exact hds
+    have hwf₂ : br₂.bitPos ≤ br₂.data.size * 8 := by
+      simp only [ZipCommon.BitReader.bitPos]; rcases hp₂ with h' | h' <;> omega
+    have hldep := InflateBuf.fromLengths_depthLE (HuffTree.fromLengths_ok_of_valid fixedLitLengths 15 hflv)
+    have hddep := InflateBuf.fromLengths_depthLE (HuffTree.fromLengths_ok_of_valid fixedDistLengths 15 hfdv)
+    have tailbwd : ∀ (o' : ByteArray) (br'' : BitReader),
+        (br''.bitOff = 0 ∨ br''.pos < br''.data.size) → br''.pos ≤ br''.data.size →
+        br''.data.size = data.size →
+        (if bfinal == 1 then pure (o', br''.alignToByte.pos)
+         else if _h : br''.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : data.size * 8 < br''.bitPos then throw "Inflate: bit position out of range"
+              else inflateLoopTreeFree br'' o' maxOut data.size) = .ok r →
+        (if bfinal == 1 then pure (o', br''.alignToByte.pos)
+         else if _h : br''.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : data.size * 8 < br''.bitPos then throw "Inflate: bit position out of range"
+              else inflateLoop br'' o' (HuffTree.fromLengthsTree fixedLitLengths 15)
+                    (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut data.size) = .ok r := by
+      intro o' br'' hp'' hl'' hd'' ht
+      by_cases hbf : (bfinal == 1) = true
+      · rw [if_pos hbf] at ht ⊢; exact ht
+      · rw [if_neg hbf] at ht ⊢
+        by_cases hg1 : br''.bitPos ≤ br.bitPos
+        · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
+        · rw [dif_neg hg1] at ht ⊢
+          by_cases hg2 : data.size * 8 < br''.bitPos
+          · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
+          · rw [dif_neg hg2] at ht ⊢
+            exact ih o' br'' hg1 hg2 hp'' hl'' hd'' r ht
+    rw [inflateLoop]
+    simp only [hrb1, hrb2, bind, Except.bind]
+    have hbtv : btype = 0 ∨ btype = 1 ∨ btype = 2 ∨ btype = 3 := by
+      have hb4 : btype.toNat < 4 := readBits_lt (n := 2) (by omega) hrb2
+      rcases (show btype.toNat = 0 ∨ btype.toNat = 1 ∨ btype.toNat = 2 ∨ btype.toNat = 3 from by omega)
+        with h' | h' | h' | h'
+      · exact Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))
+      · exact Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl)))
+      · exact Or.inr (Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+      · exact Or.inr (Or.inr (Or.inr (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+    rcases hbtv with rfl | rfl | rfl | rfl
+    · -- stored block (identical)
+      obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeStored_inv br₂ br' output output' maxOut hblock
+      rw [hblock]; dsimp only [bind, Except.bind]
+      exact tailbwd output' br' hp' hl' (by rw [hd']; exact hdata₂) htail
+    · -- fixed Huffman block
+      obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      have hbuf := (decodeHuffmanFastBufTreeFree_ok_iff br₂ output fixedLitLengths fixedDistLengths
+        hflv hflb hfdv hfdb maxOut hbo₂ hwf₂ (output', br')).mp hblock
+      have hfast : Inflate.decodeHuffmanFast br₂ output (HuffTree.fromLengthsTree fixedLitLengths 15)
+          (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut = .ok (output', br') := hbuf
+      have hhf' : Inflate.decodeHuffman br₂ output (HuffTree.fromLengthsTree fixedLitLengths 15)
+          (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut = .ok (output', br') := by
+        rw [← decodeHuffmanFast_eq br₂ output _ _ maxOut hldep hddep hbo₂ hwf₂]; exact hfast
+      obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv _ _ br₂ br' output output' maxOut hhf' hp₂ hl₂
+      rw [hfast]; dsimp only [bind, Except.bind]
+      exact tailbwd output' br' hp' hl' (by rw [hd']; exact hdata₂) htail
+    · -- dynamic Huffman block
+      obtain ⟨pdt, hlonly, h⟩ := bindOk h; obtain ⟨ll, dl, br₃⟩ := pdt; simp only [] at h
+      obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      obtain ⟨hdt, hllv, hdlv, hllb, hdlb⟩ := decodeDynamicTrees_of_lengthsOnly hlonly
+      obtain ⟨hd3, hp3, hl3⟩ := Zip.Native.decodeDynamicTrees_inv br₂ br₃ _ _ hdt hp₂ hl₂
+      have hbo3 := InflateBuf.decodeDynamicTrees_bitOff_pres hbo₂ hdt
+      have hwf3 : br₃.bitPos ≤ br₃.data.size * 8 := by
+        simp only [ZipCommon.BitReader.bitPos]; rcases hp3 with h' | h' <;> omega
+      have hbuf := (decodeHuffmanFastBufTreeFree_ok_iff br₃ output ll dl hllv hllb hdlv hdlb
+        maxOut hbo3 hwf3 (output', br')).mp hblock
+      have hfast : Inflate.decodeHuffmanFast br₃ output (HuffTree.fromLengthsTree ll 15)
+          (HuffTree.fromLengthsTree dl 15) maxOut = .ok (output', br') := hbuf
+      have hhf' : Inflate.decodeHuffman br₃ output (HuffTree.fromLengthsTree ll 15)
+          (HuffTree.fromLengthsTree dl 15) maxOut = .ok (output', br') := by
+        rw [← decodeHuffmanFast_eq br₃ output _ _ maxOut
+          (InflateBuf.fromLengths_depthLE (HuffTree.fromLengths_ok_of_valid ll 15 hllv))
+          (InflateBuf.fromLengths_depthLE (HuffTree.fromLengths_ok_of_valid dl 15 hdlv)) hbo3 hwf3]
+        exact hfast
+      obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv _ _ br₃ br' output output' maxOut hhf' hp3 hl3
+      rw [hdt]; dsimp only [bind, Except.bind]
+      rw [hfast]; dsimp only [bind, Except.bind]
+      exact tailbwd output' br' hp' hl' (by rw [hd', hd3]; exact hdata₂) htail
+    · -- reserved block type 3
+      simp only [bind, Except.bind] at h
+      exact absurd h (by simp)
+
+/-- **Tree-free block loop ↔ verified block loop (accept set).** -/
+theorem inflateLoopTreeFree_ok_iff (data : ByteArray)
+    (hflv : Huffman.Spec.ValidLengths (fixedLitLengths.toList.map UInt8.toNat) 15)
+    (hflb : fixedLitLengths.size ≤ UInt16.size)
+    (hfdv : Huffman.Spec.ValidLengths (fixedDistLengths.toList.map UInt8.toNat) 15)
+    (hfdb : fixedDistLengths.size ≤ UInt16.size) (maxOut : Nat)
+    (br : BitReader) (output : ByteArray)
+    (hpos : br.bitOff = 0 ∨ br.pos < br.data.size) (hple : br.pos ≤ br.data.size)
+    (hds : br.data.size = data.size) (r : ByteArray × Nat) :
+    inflateLoopTreeFree br output maxOut data.size = .ok r ↔
+      inflateLoop br output (HuffTree.fromLengthsTree fixedLitLengths 15)
+        (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut data.size = .ok r :=
+  ⟨inflateLoop_of_inflateLoopTreeFree data hflv hflb hfdv hfdb maxOut br output hpos hple hds r,
+   inflateLoopTreeFree_of_inflateLoop data hflv hflb hfdv hfdb maxOut br output hpos hple hds r⟩
+
+set_option maxRecDepth 4096 in
 /-- **Top-level forward correctness.** Whenever the verified `Inflate.inflate`
     succeeds, the tree-free `Inflate.inflateTreeFree` produces the same bytes — so
     the tree-free decoder (which never builds a Huffman tree at runtime) is a
@@ -1673,5 +1895,83 @@ theorem inflateTreeFree_of_inflate (data : ByteArray) (maxOut sizeHint : Nat) {o
     (output, restPos) (by rw [hfleq, hfdeq] at hloop; exact hloop)
   rw [Inflate.inflateTreeFree]
   simp only [hbody, bind, Except.bind, pure, Except.pure]
+
+/-- The fixed lit/dist code lengths are valid (the `fromLengths` of the fixed
+    tables always succeeds), packaged for the bridge lemmas below. -/
+private theorem fixedLitLengths_valid' :
+    Huffman.Spec.ValidLengths (fixedLitLengths.toList.map UInt8.toNat) 15 := by
+  obtain ⟨fixedLit, hfl⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
+  exact Deflate.Correctness.fromLengths_valid fixedLitLengths 15 fixedLit hfl
+
+private theorem fixedDistLengths_valid' :
+    Huffman.Spec.ValidLengths (fixedDistLengths.toList.map UInt8.toNat) 15 := by
+  obtain ⟨fixedDist, hfd⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
+  exact Deflate.Correctness.fromLengths_valid fixedDistLengths 15 fixedDist hfd
+
+/-- `inflateRaw` is the fixed-tree-built block loop (the `fromLengths` of the fixed
+    code lengths always succeeds, yielding the canonical trees). The concrete
+    `fromLengthsTree` term stays opaque — never kernel-evaluated. -/
+theorem inflateRaw_eq_loop (data : ByteArray) (sp mo sh : Nat) :
+    Inflate.inflateRaw data sp mo sh
+      = Inflate.inflateLoop { data, pos := sp, bitOff := 0 } (ByteArray.emptyWithCapacity sh)
+          (HuffTree.fromLengthsTree fixedLitLengths 15) (HuffTree.fromLengthsTree fixedDistLengths 15)
+          mo data.size := by
+  rw [Inflate.inflateRaw,
+      HuffTree.fromLengths_ok_of_valid fixedLitLengths 15 fixedLitLengths_valid',
+      HuffTree.fromLengths_ok_of_valid fixedDistLengths 15 fixedDistLengths_valid']
+  rfl
+
+/-- `inflateRawTreeFree` is the tree-free block loop. -/
+theorem inflateRawTreeFree_eq_loop (data : ByteArray) (sp mo sh : Nat) :
+    Inflate.inflateRawTreeFree data sp mo sh
+      = Inflate.inflateLoopTreeFree { data, pos := sp, bitOff := 0 }
+          (ByteArray.emptyWithCapacity sh) mo data.size := rfl
+
+set_option maxRecDepth 4096 in
+/-- **Top-level backward correctness.** Whenever the tree-free decoder succeeds,
+    the verified `Inflate.inflate` succeeds with the same bytes. With the validation
+    gap closed this is the converse of `inflateTreeFree_of_inflate`, so the two
+    decoders accept exactly the same inputs (`native ⊆ FFI` is preserved). -/
+theorem inflate_of_inflateTreeFree (data : ByteArray) (maxOut : Nat) {out : ByteArray}
+    (h : Inflate.inflateTreeFree data maxOut = .ok out) :
+    Inflate.inflate data maxOut = .ok out := by
+  rw [Inflate.inflateTreeFree] at h
+  simp only [bind, Except.bind] at h
+  obtain ⟨pr, hloop, hret⟩ := bindOk h; obtain ⟨output, restPos⟩ := pr
+  simp only [pure, Except.pure, Except.ok.injEq] at hret; subst hret
+  have hbody := inflateLoop_of_inflateLoopTreeFree data fixedLitLengths_valid' (by decide)
+    fixedDistLengths_valid' (by decide) maxOut
+    { data, pos := 0, bitOff := 0 } ByteArray.empty (Or.inl rfl) (Nat.zero_le _) rfl
+    (output, restPos) hloop
+  -- fold the verified-decoder result back through `inflateRaw` without evaluating
+  -- the concrete fixed `fromLengthsTree` (kept opaque via `exact hbody`)
+  have hraw : Inflate.inflateRaw data 0 maxOut 0 = .ok (output, restPos) := by
+    rw [inflateRaw_eq_loop,
+        show ByteArray.emptyWithCapacity 0 = ByteArray.empty from by
+          simp [ByteArray.emptyWithCapacity, ByteArray.empty]]
+    exact hbody
+  rw [Inflate.inflate]
+  simp only [hraw, bind, Except.bind, pure, Except.pure]
+
+/-- **Top-level accept-set equality.** `inflateTreeFree` and `inflate` succeed on
+    exactly the same inputs with the same output. This is the bridge the production
+    switch rides on: any theorem about `inflate`'s success set transfers to the
+    tree-free decoder, and `native ⊆ FFI` is preserved. -/
+theorem inflateTreeFree_ok_iff (data : ByteArray) (maxOut : Nat) (out : ByteArray) :
+    Inflate.inflateTreeFree data maxOut = .ok out ↔ Inflate.inflate data maxOut = .ok out :=
+  ⟨inflate_of_inflateTreeFree data maxOut,
+   fun h => inflateTreeFree_of_inflate data maxOut 0 h⟩
+
+set_option maxRecDepth 4096 in
+/-- **`inflateRaw` accept-set equality.** For an in-bounds start position the
+    tree-free `inflateRawTreeFree` and verified `inflateRaw` succeed on exactly the
+    same inputs with the same output and end position. -/
+theorem inflateRawTreeFree_ok_iff (data : ByteArray) (sp mo sh : Nat)
+    (hle : sp ≤ data.size) (p : ByteArray × Nat) :
+    Inflate.inflateRawTreeFree data sp mo sh = .ok p ↔ Inflate.inflateRaw data sp mo sh = .ok p := by
+  rw [inflateRaw_eq_loop, inflateRawTreeFree_eq_loop]
+  exact inflateLoopTreeFree_ok_iff data fixedLitLengths_valid' (by decide)
+    fixedDistLengths_valid' (by decide) mo
+    { data, pos := sp, bitOff := 0 } (ByteArray.emptyWithCapacity sh) (Or.inl rfl) hle rfl p
 
 end Zip.Native.Inflate

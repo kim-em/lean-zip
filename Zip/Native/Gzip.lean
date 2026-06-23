@@ -1,4 +1,5 @@
 import Zip.Native.Inflate
+import Zip.Native.InflateTreeFree
 import Zip.Native.DeflateDynamic
 import Zip.Native.Crc32
 import Zip.Native.Adler32
@@ -78,7 +79,7 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
       if pos > data.size then throw "Gzip: header extends past end of input"
       -- Inflate (cap each member to remaining budget so total stays within maxOutputSize)
       let memberMax := maxOutputSize - result.size
-      let (decompressed, endPos) ← Inflate.inflateRaw data pos memberMax
+      let (decompressed, endPos) ← Inflate.inflateRawTreeFree data pos memberMax
       pos := endPos
       -- Parse trailer: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
       if pos + 8 > data.size then throw "Gzip: truncated trailer"
@@ -157,7 +158,7 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     if flg &&& 0x20 != 0 then
       throw "Zlib: preset dictionaries not supported"
     -- Inflate
-    let (decompressed, endPos) ← Inflate.inflateRaw data pos maxOutputSize
+    let (decompressed, endPos) ← Inflate.inflateRawTreeFree data pos maxOutputSize
     pos := endPos
     -- Parse trailer: Adler32 (4 bytes big-endian)
     if hT : pos + 4 ≤ data.size then
@@ -242,7 +243,7 @@ def decompressAuto (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024
   match detectFormat data with
   | .gzip => GzipDecode.decompress data maxOutputSize
   | .zlib => ZlibDecode.decompress data maxOutputSize
-  | .rawDeflate => Inflate.inflate data maxOutputSize
+  | .rawDeflate => Inflate.inflateTreeFree data maxOutputSize
 
 /-- Compress data with format selection.
     Default: gzip format, level 1 (fixed Huffman). -/
