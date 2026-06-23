@@ -751,8 +751,8 @@ theorem deflateStoredPure_size (data : ByteArray) :
 theorem inflate_deflateStoredPure (data : ByteArray)
     (maxOutputSize : Nat)
     (h : data.size ≤ maxOutputSize) :
-    Inflate.inflate (deflateStoredPure data) maxOutputSize = .ok data := by
-  simp only [Inflate.inflate, Inflate.inflateRaw, ByteArray.emptyWithCapacity_eq_empty,
+    Inflate.inflateReference (deflateStoredPure data) maxOutputSize = .ok data := by
+  simp only [Inflate.inflateReference, Inflate.inflateRawReference, ByteArray.emptyWithCapacity_eq_empty,
     bind, Except.bind]
   -- Handle fromLengths calls
   have ⟨fixedLit, hfl⟩ := fromLengths_fixedLit_ok

@@ -1,27 +1,27 @@
 import Zip.Native.Inflate
 
 /-!
-# Tree-free canonical decode (conformance/benchmark prototype)
+# Tree-free canonical decode — the production DEFLATE decoder
 
-A DEFLATE Huffman decoder that builds **no** Huffman tree: the fast ≤9-bit codes
-go through the canonical 9-bit table (`buildTableCanonicalFast`), and the rare
->9-bit codes go through a canonical bit-by-bit decode keyed off the per-length
-`count` / `firstCode` / sorted-symbol arrays — never a tree walk. This isolates
-the *build-phase* win (skip `fromLengths`/`insertLoop`).
+This file defines the **production** decoders `Inflate.inflate` / `inflateRaw`: a
+DEFLATE Huffman decode that builds **no** Huffman tree. The fast ≤9-bit codes go
+through the canonical 9-bit table (`buildTableCanonicalFast`), and the rare >9-bit
+codes go through a canonical bit-by-bit decode keyed off the per-length
+`count` / `firstCode` / sorted-symbol arrays — never a tree walk. This skips the
+`fromLengths`/`insertLoop` build entirely (the ~7% decode win).
 
 The decode loops are well-founded (`termination_by`, mirroring the verified
 `goFusedP`/`goFusedPU`/`inflateLoop`); the canonical structures and their
 correctness are proven in `Zip.Spec.InflateTreeFreeCorrect`.
 
 `decodeDynamicLengthsOnly` runs the same `HuffTree.validateLengths`
-(`maxBits`/Kraft) check `decodeDynamicTrees` does, so the tree-free path's
-accept-set is **exactly** the verified `Inflate.inflate`'s — proven as the
-two-sided `inflateTreeFree_ok_iff` (`inflateTreeFree data = .ok out ↔
-inflate data = .ok out`) and `inflateRawTreeFree_ok_iff`. The production
-decompression entry points (gzip/zlib/raw-deflate/ZIP) decode through this
-tree-free path; the accept-set equality guarantees the `native ⊆ FFI`
-posture is preserved. `Inflate.inflate`/`inflateRaw` remain as the verified
-reference the tree-free decoder is proven equal to.
+(`maxBits`/Kraft) check `decodeDynamicTrees` does, so the production decoder's
+accept-set is **exactly** the verified reference's
+(`Inflate.inflateReference` / `inflateRawReference`, in `Zip.Native.Inflate`) —
+proven as the two-sided `inflate_ok_iff_reference`
+(`inflate data = .ok out ↔ inflateReference data = .ok out`) and
+`inflateRaw_ok_iff_reference`. Every decode-correctness theorem about the
+reference therefore transfers, and the `native ⊆ FFI` posture is preserved.
 -/
 
 namespace Zip.Native
@@ -366,25 +366,42 @@ def inflateLoopTreeFree (br : BitReader) (output : ByteArray) (maxOut dataSize :
   termination_by dataSize * 8 - br.bitPos
   decreasing_by all_goals omega
 
-/-- Tree-free `inflateRaw` (no Huffman tree built anywhere on the decode path):
-    the production fast-path counterpart of `Inflate.inflateRaw`, starting at byte
-    offset `startPos` and returning the byte-aligned position after the last block.
-    Builds no fixed Huffman trees (the tree-free loop reads `fixedLit/DistLengths`
-    directly). Proven accept-set equal to `Inflate.inflateRaw`
-    (`Zip.Spec.InflateTreeFreeCorrect.inflateRawTreeFree_ok_iff`). -/
-def inflateRawTreeFree (data : ByteArray) (startPos : Nat := 0)
-    (maxOut : Nat := 1024 * 1024 * 1024) (sizeHint : Nat := 0) :
+/-- Inflate a raw DEFLATE stream starting at byte offset `startPos`, returning the
+    decompressed data and the byte-aligned position after the last block. **This is
+    the production decoder**: a tree-free canonical Huffman decode that builds no
+    Huffman tree anywhere on the decode path (the loop reads `fixedLit/DistLengths`
+    directly and decodes through the canonical table + `walkCanonical` fallback).
+    Proven accept-set equal to the verified reference `inflateRawReference`
+    (`Zip.Spec.InflateTreeFreeCorrect.inflateRaw_ok_iff_reference`), so every downstream
+    correctness theorem transfers. `maxOutputSize` (default 1 GiB) caps output;
+    `sizeHint` pre-reserves capacity (computationally inert — see
+    `inflateRaw_sizeHint_eq`). -/
+def inflateRaw (data : ByteArray) (startPos : Nat := 0)
+    (maxOutputSize : Nat := 1024 * 1024 * 1024) (sizeHint : Nat := 0) :
     Except String (ByteArray × Nat) := do
   let br : BitReader := { data, pos := startPos, bitOff := 0 }
-  inflateLoopTreeFree br (ByteArray.emptyWithCapacity sizeHint) maxOut data.size
+  inflateLoopTreeFree br (ByteArray.emptyWithCapacity sizeHint) maxOutputSize data.size
 
-/-- Tree-free `inflate` (no Huffman tree built anywhere on the decode path).
-    Conformance-checked against `Inflate.inflate`. -/
-def inflateTreeFree (data : ByteArray) (maxOut : Nat := 1024 * 1024 * 1024) :
+/-- Inflate a raw DEFLATE stream (whole buffer). **The production decoder** — the
+    tree-free counterpart of the reference `inflateReference`, proven accept-set
+    equal to it (`Zip.Spec.InflateTreeFreeCorrect.inflate_ok_iff_reference`). -/
+def inflate (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
+    (sizeHint : Nat := 0) :
     Except String ByteArray := do
-  let br : BitReader := { data, pos := 0, bitOff := 0 }
-  let (output, _) ← inflateLoopTreeFree br ByteArray.empty maxOut data.size
+  let (output, _) ← inflateRaw data 0 maxOutputSize sizeHint
   return output
+
+/-- The output capacity hint is computationally inert (`ByteArray.emptyWithCapacity n`
+    reduces to `{ data := Array.empty }` for every `n`). -/
+@[simp] theorem inflateRaw_sizeHint_eq (data : ByteArray)
+    (startPos maxOutputSize sizeHint : Nat) :
+    inflateRaw data startPos maxOutputSize sizeHint = inflateRaw data startPos maxOutputSize :=
+  rfl
+
+/-- `inflate` with any `sizeHint` equals it with the default `0`. -/
+@[simp] theorem inflate_sizeHint_eq (data : ByteArray) (maxOutputSize sizeHint : Nat) :
+    inflate data maxOutputSize sizeHint = inflate data maxOutputSize :=
+  rfl
 
 end Inflate
 end Zip.Native

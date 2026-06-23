@@ -33,7 +33,7 @@ def decompressSingle (data : ByteArray)
   unless cmf &&& 0x0F == 8 do throw "Zlib: unsupported compression method"
   unless cmf >>> 4 ≤ 7 do throw "Zlib: invalid window size"
   unless flg &&& 0x20 == 0 do throw "Zlib: preset dictionaries not supported"
-  let (decompressed, endPos) ← Inflate.inflateRaw data 2 maxOutputSize
+  let (decompressed, endPos) ← Inflate.inflateRawReference data 2 maxOutputSize
   if endPos + 4 > data.size then throw "Zlib: truncated trailer"
   let b0 := data[endPos]!.toUInt32
   let b1 := data[endPos + 1]!.toUInt32
@@ -148,7 +148,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     ZlibDecode.decompressSingle (ZlibEncode.compress data level) maxOutputSize = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
-  have hinfl : Inflate.inflate (Deflate.deflateRaw data level) maxOutputSize = .ok data :=
+  have hinfl : Inflate.inflateReference (Deflate.deflateRaw data level) maxOutputSize = .ok data :=
     Deflate.inflate_deflateRaw data level _ hsize
   -- Spec decode on deflated
   have hspec_go : Deflate.Spec.decode.go
@@ -163,7 +163,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     rw [ZlibEncode.compress_size]; omega
   -- Native inflate at offset 2 consumes exactly the DEFLATE stream (framing lemma)
   obtain ⟨header, trailer, hhsz, _, hceq⟩ := ZlibEncode.compress_eq data level
-  have hinflRaw : Inflate.inflateRaw (ZlibEncode.compress data level) 2 maxOutputSize =
+  have hinflRaw : Inflate.inflateRawReference (ZlibEncode.compress data level) 2 maxOutputSize =
       .ok (⟨⟨data.data.toList⟩⟩, 2 + (Deflate.deflateRaw data level).size) := by
     rw [hceq]
     exact inflateRaw_framing data level maxOutputSize header trailer 2 hhsz hdata_le hspec_go

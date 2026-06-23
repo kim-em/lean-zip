@@ -223,8 +223,8 @@ private def oneIteration (state : UInt64) : IO UInt64 := do
   tryFFI "Gzip.decompress" (Gzip.decompress input defaultMaxOutput.toUInt64)
   tryFFI "RawDeflate.decompress" (RawDeflate.decompress input defaultMaxOutput.toUInt64)
   -- Whole-buffer native paths.
-  tryNative "Zip.Native.Inflate.inflateTreeFree"
-    (Zip.Native.Inflate.inflateTreeFree input defaultMaxOutput)
+  tryNative "Zip.Native.Inflate.inflate"
+    (Zip.Native.Inflate.inflate input defaultMaxOutput)
   tryNative "Zip.Native.GzipDecode.decompress"
     (Zip.Native.GzipDecode.decompress input defaultMaxOutput)
   tryNative "Zip.Native.ZlibDecode.decompress"
@@ -424,7 +424,7 @@ private def oneDiffIter (state : UInt64) (c : Census) : IO (UInt64 × Census) :=
     return (s1, { c with skipped := c.skipped + 1 })
   -- The base stream is the verified encoder's output, so it must
   -- round-trip through both decoders — assert it as extra conformance.
-  match Zip.Native.Inflate.inflateTreeFree stream defaultMaxOutput with
+  match Zip.Native.Inflate.inflate stream defaultMaxOutput with
   | .error e => throw (IO.userError s!"[diff-fuzz] base native inflate failed: {e}")
   | .ok r =>
     unless r == payload do
@@ -440,7 +440,7 @@ private def oneDiffIter (state : UInt64) (c : Census) : IO (UInt64 × Census) :=
     return (s2, { c with skipped := c.skipped + 1 })
   let bitIdx := 3 + s2.toNat % (span - 3)
   let mutated := flipBit stream bitIdx
-  let nativeRes := Zip.Native.Inflate.inflateTreeFree mutated defaultMaxOutput
+  let nativeRes := Zip.Native.Inflate.inflate mutated defaultMaxOutput
   let ffiRes ← ffiVerdict mutated
   let c := { c with mutated := c.mutated + 1 }
   match nativeRes, ffiRes with
@@ -562,7 +562,7 @@ private def oneTruncIter (state : UInt64) (c : DecodeCensus) :
     return (s3, c)
   let cut := s3.toNat % stream.size
   let truncated := stream.extract 0 cut
-  let native := Zip.Native.Inflate.inflateTreeFree truncated defaultMaxOutput
+  let native := Zip.Native.Inflate.inflate truncated defaultMaxOutput
   let ffi ← ffiVerdict truncated
   let c ← foldVerdict "trunc-deflate" native ffi c
   return (s3, c)
@@ -620,7 +620,7 @@ private def oneRandomIter (state : UInt64) (c : DecodeCensus) :
   let s0 := xorshift64 state
   let size := pick decodeSizeClasses s0
   let (data, s1) := genBytes s0 size
-  let native := Zip.Native.Inflate.inflateTreeFree data defaultMaxOutput
+  let native := Zip.Native.Inflate.inflate data defaultMaxOutput
   let ffi ← ffiVerdict data
   let c ← foldVerdict "random-deflate" native ffi c
   return (s1, c)

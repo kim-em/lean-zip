@@ -6,14 +6,15 @@ import Zip.Native.InflateTreeFree
 /-!
 # Tree-free canonical decode: correctness
 
-Proves that the tree-free canonical decoder (`Zip.Native.InflateTreeFree`) has
-**exactly the same accept-set** as the verified `Inflate.inflate`, producing
+Proves that the production tree-free decoder (`Inflate.inflate` / `inflateRaw`,
+defined in `Zip.Native.InflateTreeFree`) has **exactly the same accept-set** as the
+verified reference (`Inflate.inflateReference` / `inflateRawReference`), producing
 identical output, with the tree (`fromLengthsTree lengths`) as a **proof-only**
 object — never built at runtime. The top-level statements are the two-sided
-`inflateTreeFree_ok_iff` (`inflateTreeFree data = .ok out ↔ inflate data = .ok
-out`) and `inflateRawTreeFree_ok_iff`, built from the forward direction
-(`inflateTreeFree_of_inflate`, present since #2681) and the backward direction
-(`inflate_of_inflateTreeFree`) the closed code-length validation gap enables:
+`inflate_ok_iff_reference` (`inflate data = .ok out ↔ inflateReference data = .ok
+out`) and `inflateRaw_ok_iff_reference`, built from the forward direction
+(`inflate_of_inflateReference`, present since #2681) and the backward direction
+(`inflateReference_of_inflate`) the closed code-length validation gap enables:
 `decodeDynamicLengthsOnly` now runs the same `validateLengths` (`maxBits`/Kraft)
 check `decodeDynamicTrees` does, so on malformed dynamic length sets both paths
 reject. The chain, bottom-up:
@@ -1872,17 +1873,48 @@ theorem inflateLoopTreeFree_ok_iff (data : ByteArray)
   ⟨inflateLoop_of_inflateLoopTreeFree data hflv hflb hfdv hfdb maxOut br output hpos hple hds r,
    inflateLoopTreeFree_of_inflateLoop data hflv hflb hfdv hfdb maxOut br output hpos hple hds r⟩
 
+/-- The fixed lit/dist code lengths are valid (the `fromLengths` of the fixed
+    tables always succeeds), packaged for the bridge lemmas below. -/
+private theorem fixedLitLengths_valid' :
+    Huffman.Spec.ValidLengths (fixedLitLengths.toList.map UInt8.toNat) 15 := by
+  obtain ⟨fixedLit, hfl⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
+  exact Deflate.Correctness.fromLengths_valid fixedLitLengths 15 fixedLit hfl
+
+private theorem fixedDistLengths_valid' :
+    Huffman.Spec.ValidLengths (fixedDistLengths.toList.map UInt8.toNat) 15 := by
+  obtain ⟨fixedDist, hfd⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
+  exact Deflate.Correctness.fromLengths_valid fixedDistLengths 15 fixedDist hfd
+
+/-- The verified reference `inflateRawReference` is the fixed-tree-built block loop
+    (the `fromLengths` of the fixed code lengths always succeeds, yielding the
+    canonical trees). The concrete `fromLengthsTree` term stays opaque. -/
+theorem inflateRawReference_eq_loop (data : ByteArray) (sp mo sh : Nat) :
+    Inflate.inflateRawReference data sp mo sh
+      = Inflate.inflateLoop { data, pos := sp, bitOff := 0 } (ByteArray.emptyWithCapacity sh)
+          (HuffTree.fromLengthsTree fixedLitLengths 15) (HuffTree.fromLengthsTree fixedDistLengths 15)
+          mo data.size := by
+  rw [Inflate.inflateRawReference,
+      HuffTree.fromLengths_ok_of_valid fixedLitLengths 15 fixedLitLengths_valid',
+      HuffTree.fromLengths_ok_of_valid fixedDistLengths 15 fixedDistLengths_valid']
+  rfl
+
+/-- The production `inflateRaw` is the tree-free block loop. -/
+theorem inflateRaw_eq_loop (data : ByteArray) (sp mo sh : Nat) :
+    Inflate.inflateRaw data sp mo sh
+      = Inflate.inflateLoopTreeFree { data, pos := sp, bitOff := 0 }
+          (ByteArray.emptyWithCapacity sh) mo data.size := rfl
+
 set_option maxRecDepth 4096 in
-/-- **Top-level forward correctness.** Whenever the verified `Inflate.inflate`
-    succeeds, the tree-free `Inflate.inflateTreeFree` produces the same bytes — so
+/-- **Top-level forward correctness.** Whenever the verified `Inflate.inflateReference`
+    succeeds, the tree-free `Inflate.inflate` produces the same bytes — so
     the tree-free decoder (which never builds a Huffman tree at runtime) is a
     correct drop-in for the trusted decoder on every successful decode. The fixed
     Huffman trees exist only in the proof; `fromLengths fixedLitLengths` succeeding
     inside `inflateRaw` supplies their validity. -/
-theorem inflateTreeFree_of_inflate (data : ByteArray) (maxOut sizeHint : Nat) {out : ByteArray}
-    (h : Inflate.inflate data maxOut sizeHint = .ok out) :
-    Inflate.inflateTreeFree data maxOut = .ok out := by
-  rw [Inflate.inflate, Inflate.inflateRaw] at h
+theorem inflate_of_inflateReference (data : ByteArray) (maxOut sizeHint : Nat) {out : ByteArray}
+    (h : Inflate.inflateReference data maxOut sizeHint = .ok out) :
+    Inflate.inflate data maxOut = .ok out := by
+  rw [Inflate.inflateReference, Inflate.inflateRawReference] at h
   simp only [bind, Except.bind] at h
   obtain ⟨pr, hraw, hret⟩ := bindOk h; obtain ⟨output, restPos⟩ := pr
   simp only [pure, Except.pure, Except.ok.injEq] at hret; subst hret
@@ -1899,49 +1931,24 @@ theorem inflateTreeFree_of_inflate (data : ByteArray) (maxOut sizeHint : Nat) {o
   have hbody := inflateLoopTreeFree_of_inflateLoop data hflv (by decide) hfdv (by decide) maxOut
     { data, pos := 0, bitOff := 0 } ByteArray.empty (Or.inl rfl) (Nat.zero_le _) rfl
     (output, restPos) (by rw [hfleq, hfdeq] at hloop; exact hloop)
-  rw [Inflate.inflateTreeFree]
-  simp only [hbody, bind, Except.bind, pure, Except.pure]
-
-/-- The fixed lit/dist code lengths are valid (the `fromLengths` of the fixed
-    tables always succeeds), packaged for the bridge lemmas below. -/
-private theorem fixedLitLengths_valid' :
-    Huffman.Spec.ValidLengths (fixedLitLengths.toList.map UInt8.toNat) 15 := by
-  obtain ⟨fixedLit, hfl⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
-  exact Deflate.Correctness.fromLengths_valid fixedLitLengths 15 fixedLit hfl
-
-private theorem fixedDistLengths_valid' :
-    Huffman.Spec.ValidLengths (fixedDistLengths.toList.map UInt8.toNat) 15 := by
-  obtain ⟨fixedDist, hfd⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
-  exact Deflate.Correctness.fromLengths_valid fixedDistLengths 15 fixedDist hfd
-
-/-- `inflateRaw` is the fixed-tree-built block loop (the `fromLengths` of the fixed
-    code lengths always succeeds, yielding the canonical trees). The concrete
-    `fromLengthsTree` term stays opaque — never kernel-evaluated. -/
-theorem inflateRaw_eq_loop (data : ByteArray) (sp mo sh : Nat) :
-    Inflate.inflateRaw data sp mo sh
-      = Inflate.inflateLoop { data, pos := sp, bitOff := 0 } (ByteArray.emptyWithCapacity sh)
-          (HuffTree.fromLengthsTree fixedLitLengths 15) (HuffTree.fromLengthsTree fixedDistLengths 15)
-          mo data.size := by
-  rw [Inflate.inflateRaw,
-      HuffTree.fromLengths_ok_of_valid fixedLitLengths 15 fixedLitLengths_valid',
-      HuffTree.fromLengths_ok_of_valid fixedDistLengths 15 fixedDistLengths_valid']
-  rfl
-
-/-- `inflateRawTreeFree` is the tree-free block loop. -/
-theorem inflateRawTreeFree_eq_loop (data : ByteArray) (sp mo sh : Nat) :
-    Inflate.inflateRawTreeFree data sp mo sh
-      = Inflate.inflateLoopTreeFree { data, pos := sp, bitOff := 0 }
-          (ByteArray.emptyWithCapacity sh) mo data.size := rfl
+  -- fold the tree-free loop result back through the production `inflateRaw`
+  have hrawp : Inflate.inflateRaw data 0 maxOut 0 = .ok (output, restPos) := by
+    rw [inflateRaw_eq_loop,
+        show ByteArray.emptyWithCapacity 0 = ByteArray.empty from by
+          simp [ByteArray.emptyWithCapacity, ByteArray.empty]]
+    exact hbody
+  rw [Inflate.inflate]
+  simp only [hrawp, bind, Except.bind, pure, Except.pure]
 
 set_option maxRecDepth 4096 in
 /-- **Top-level backward correctness.** Whenever the tree-free decoder succeeds,
-    the verified `Inflate.inflate` succeeds with the same bytes. With the validation
-    gap closed this is the converse of `inflateTreeFree_of_inflate`, so the two
+    the verified `Inflate.inflateReference` succeeds with the same bytes. With the validation
+    gap closed this is the converse of `inflate_of_inflateReference`, so the two
     decoders accept exactly the same inputs (`native ⊆ FFI` is preserved). -/
-theorem inflate_of_inflateTreeFree (data : ByteArray) (maxOut : Nat) {out : ByteArray}
-    (h : Inflate.inflateTreeFree data maxOut = .ok out) :
-    Inflate.inflate data maxOut = .ok out := by
-  rw [Inflate.inflateTreeFree] at h
+theorem inflateReference_of_inflate (data : ByteArray) (maxOut : Nat) {out : ByteArray}
+    (h : Inflate.inflate data maxOut = .ok out) :
+    Inflate.inflateReference data maxOut = .ok out := by
+  rw [Inflate.inflate] at h
   simp only [bind, Except.bind] at h
   obtain ⟨pr, hloop, hret⟩ := bindOk h; obtain ⟨output, restPos⟩ := pr
   simp only [pure, Except.pure, Except.ok.injEq] at hret; subst hret
@@ -1951,31 +1958,31 @@ theorem inflate_of_inflateTreeFree (data : ByteArray) (maxOut : Nat) {out : Byte
     (output, restPos) hloop
   -- fold the verified-decoder result back through `inflateRaw` without evaluating
   -- the concrete fixed `fromLengthsTree` (kept opaque via `exact hbody`)
-  have hraw : Inflate.inflateRaw data 0 maxOut 0 = .ok (output, restPos) := by
-    rw [inflateRaw_eq_loop,
+  have hraw : Inflate.inflateRawReference data 0 maxOut 0 = .ok (output, restPos) := by
+    rw [inflateRawReference_eq_loop,
         show ByteArray.emptyWithCapacity 0 = ByteArray.empty from by
           simp [ByteArray.emptyWithCapacity, ByteArray.empty]]
     exact hbody
-  rw [Inflate.inflate]
+  rw [Inflate.inflateReference]
   simp only [hraw, bind, Except.bind, pure, Except.pure]
 
 /-- **Top-level accept-set equality.** `inflateTreeFree` and `inflate` succeed on
     exactly the same inputs with the same output. This is the bridge the production
     switch rides on: any theorem about `inflate`'s success set transfers to the
     tree-free decoder, and `native ⊆ FFI` is preserved. -/
-theorem inflateTreeFree_ok_iff (data : ByteArray) (maxOut : Nat) (out : ByteArray) :
-    Inflate.inflateTreeFree data maxOut = .ok out ↔ Inflate.inflate data maxOut = .ok out :=
-  ⟨inflate_of_inflateTreeFree data maxOut,
-   fun h => inflateTreeFree_of_inflate data maxOut 0 h⟩
+theorem inflate_ok_iff_reference (data : ByteArray) (maxOut : Nat) (out : ByteArray) :
+    Inflate.inflate data maxOut = .ok out ↔ Inflate.inflateReference data maxOut = .ok out :=
+  ⟨inflateReference_of_inflate data maxOut,
+   fun h => inflate_of_inflateReference data maxOut 0 h⟩
 
 set_option maxRecDepth 4096 in
 /-- **`inflateRaw` accept-set equality.** For an in-bounds start position the
     tree-free `inflateRawTreeFree` and verified `inflateRaw` succeed on exactly the
     same inputs with the same output and end position. -/
-theorem inflateRawTreeFree_ok_iff (data : ByteArray) (sp mo sh : Nat)
+theorem inflateRaw_ok_iff_reference (data : ByteArray) (sp mo sh : Nat)
     (hle : sp ≤ data.size) (p : ByteArray × Nat) :
-    Inflate.inflateRawTreeFree data sp mo sh = .ok p ↔ Inflate.inflateRaw data sp mo sh = .ok p := by
-  rw [inflateRaw_eq_loop, inflateRawTreeFree_eq_loop]
+    Inflate.inflateRaw data sp mo sh = .ok p ↔ Inflate.inflateRawReference data sp mo sh = .ok p := by
+  rw [inflateRaw_eq_loop, inflateRawReference_eq_loop]
   exact inflateLoopTreeFree_ok_iff data fixedLitLengths_valid' (by decide)
     fixedDistLengths_valid' (by decide) mo
     { data, pos := sp, bitOff := 0 } (ByteArray.emptyWithCapacity sh) (Or.inl rfl) hle rfl p

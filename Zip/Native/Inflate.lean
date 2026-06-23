@@ -1286,7 +1286,7 @@ decreasing_by all_goals omega
     affects the produced bytes or the `maxOutputSize` bomb guard, so every inflate
     correctness proof transfers unchanged (`ByteArray.emptyWithCapacity n` is
     definitionally `{ data := Array.empty }` for every `n`). -/
-def inflateRaw (data : ByteArray) (startPos : Nat := 0)
+def inflateRawReference (data : ByteArray) (startPos : Nat := 0)
     (maxOutputSize : Nat := 1024 * 1024 * 1024) (sizeHint : Nat := 0) :
     Except String (ByteArray × Nat) := do
   let br : BitReader := { data, pos := startPos, bitOff := 0 }
@@ -1305,26 +1305,25 @@ def inflateRaw (data : ByteArray) (startPos : Nat := 0)
 
     `sizeHint` pre-reserves output capacity when the decompressed size is known;
     `0` (the default) reserves nothing. See `inflateRaw`. -/
-def inflate (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
+def inflateReference (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
     (sizeHint : Nat := 0) :
     Except String ByteArray := do
-  let (output, _) ← inflateRaw data 0 maxOutputSize sizeHint
+  let (output, _) ← inflateRawReference data 0 maxOutputSize sizeHint
   return output
 
-/-- The output capacity hint is computationally inert: `inflateRaw` with any
-    `sizeHint` equals `inflateRaw` with the default `sizeHint := 0`, because
+/-- The output capacity hint is computationally inert: `inflateRawReference` with any
+    `sizeHint` equals it with the default `sizeHint := 0`, because
     `ByteArray.emptyWithCapacity n` reduces to `{ data := Array.empty }` for every
-    `n` (capacity is a runtime-only allocation hint). So every theorem proved about
-    the `sizeHint := 0` form — correctness, suffix invariance, end-position bounds —
-    transfers verbatim to any hinted call (e.g. the ZIP decoder's). -/
-@[simp] theorem inflateRaw_sizeHint_eq (data : ByteArray) (startPos maxOutputSize sizeHint : Nat) :
-    inflateRaw data startPos maxOutputSize sizeHint = inflateRaw data startPos maxOutputSize :=
+    `n` (capacity is a runtime-only allocation hint). -/
+@[simp] theorem inflateRawReference_sizeHint_eq (data : ByteArray)
+    (startPos maxOutputSize sizeHint : Nat) :
+    inflateRawReference data startPos maxOutputSize sizeHint
+      = inflateRawReference data startPos maxOutputSize :=
   rfl
 
-/-- `inflate` with any `sizeHint` equals `inflate` with the default `0`; see
-    `inflateRaw_sizeHint_eq`. -/
-@[simp] theorem inflate_sizeHint_eq (data : ByteArray) (maxOutputSize sizeHint : Nat) :
-    inflate data maxOutputSize sizeHint = inflate data maxOutputSize :=
+/-- `inflateReference` with any `sizeHint` equals it with the default `0`. -/
+@[simp] theorem inflateReference_sizeHint_eq (data : ByteArray) (maxOutputSize sizeHint : Nat) :
+    inflateReference data maxOutputSize sizeHint = inflateReference data maxOutputSize :=
   rfl
 
 end Inflate

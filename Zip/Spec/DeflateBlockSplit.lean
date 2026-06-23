@@ -587,7 +587,7 @@ theorem decode_deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (leve
     input, for any `maxOutputSize` large enough to hold it. -/
 theorem inflate_deflateDynamicBlocksSC (data : ByteArray) (chunkSize : Nat) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamicBlocksSC data chunkSize level) maxOutputSize =
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksSC data chunkSize level) maxOutputSize =
       .ok data := by
   have hlen : data.data.toList.length ≤ maxOutputSize := by
     simp only [Array.length_toList, ByteArray.size_data]; omega
@@ -759,7 +759,7 @@ theorem decode_deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (l
     input, for any `maxOutputSize` large enough to hold it. -/
 theorem inflate_deflateDynamicBlocksShared (data : ByteArray) (tokChunk : Nat) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamicBlocksShared data tokChunk level) maxOutputSize =
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksShared data tokChunk level) maxOutputSize =
       .ok data := by
   have hlen : data.data.toList.length ≤ maxOutputSize := by
     simp only [Array.length_toList, ByteArray.size_data]; omega
@@ -1138,7 +1138,7 @@ theorem decode_deflateDynamicBlocksSharedAt (data : ByteArray)
 theorem inflate_deflateDynamicBlocksSharedAt (data : ByteArray)
     (choose : Array LZ77Token → List Nat) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamicBlocksSharedAt data choose level) maxOutputSize =
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksSharedAt data choose level) maxOutputSize =
       .ok data := by
   have hlen : data.data.toList.length ≤ maxOutputSize := by
     simp only [Array.length_toList, ByteArray.size_data]; omega
@@ -1312,7 +1312,7 @@ theorem decode_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) :
     recovers the input, for any `maxOutputSize` large enough to hold it. -/
 theorem inflate_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateDynamicBlocksOptimal data tokChunk) maxOutputSize =
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksOptimal data tokChunk) maxOutputSize =
       .ok data := by
   have hlen : data.data.toList.length ≤ maxOutputSize := by
     simp only [Array.length_toList, ByteArray.size_data]; omega

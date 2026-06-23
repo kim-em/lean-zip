@@ -35,7 +35,7 @@ termination_by data.size - pos
     non-empty output (the inner inflate guards compare
     `output.size + len > maxOutputSize`). The outer-loop guard raises an
     `Except` error containing `"Gzip: total output exceeds maximum size"`;
-    the inner per-member `Inflate.inflateRawTreeFree` call also enforces the
+    the inner per-member `Inflate.inflateRaw` call also enforces the
     bound and may surface `"Inflate: output exceeds maximum size"` first.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
@@ -79,7 +79,7 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
       if pos > data.size then throw "Gzip: header extends past end of input"
       -- Inflate (cap each member to remaining budget so total stays within maxOutputSize)
       let memberMax := maxOutputSize - result.size
-      let (decompressed, endPos) ← Inflate.inflateRawTreeFree data pos memberMax
+      let (decompressed, endPos) ← Inflate.inflateRaw data pos memberMax
       pos := endPos
       -- Parse trailer: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
       if pos + 8 > data.size then throw "Gzip: truncated trailer"
@@ -132,7 +132,7 @@ namespace ZlibDecode
     Returns the decompressed data.
 
     `maxOutputSize` (default 1 GiB) is forwarded to the inner
-    `Inflate.inflateRawTreeFree`; this layer adds no separate guard. Unlike the
+    `Inflate.inflateRaw`; this layer adds no separate guard. Unlike the
     FFI path, where `maxDecompressedSize := 0` means unlimited, here `0`
     rejects any non-empty output (the inflate guards compare
     `output.size + len > maxOutputSize`). Overflow raises an `Except`
@@ -158,7 +158,7 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     if flg &&& 0x20 != 0 then
       throw "Zlib: preset dictionaries not supported"
     -- Inflate
-    let (decompressed, endPos) ← Inflate.inflateRawTreeFree data pos maxOutputSize
+    let (decompressed, endPos) ← Inflate.inflateRaw data pos maxOutputSize
     pos := endPos
     -- Parse trailer: Adler32 (4 bytes big-endian)
     if hT : pos + 4 ≤ data.size then
@@ -230,7 +230,7 @@ def detectFormat (data : ByteArray) : CompressFormat :=
 /-- Decompress data by auto-detecting the format (gzip, zlib, or raw deflate).
 
     `maxOutputSize` (default 1 GiB) is forwarded to whichever of
-    `GzipDecode.decompress`, `ZlibDecode.decompress`, or `Inflate.inflateTreeFree`
+    `GzipDecode.decompress`, `ZlibDecode.decompress`, or `Inflate.inflate`
     the dispatch picks based on `detectFormat`. The surfaced error
     substring depends on the dispatch: `"Gzip: total output exceeds
     maximum size"` (gzip outer guard), or `"Inflate: output exceeds
@@ -243,7 +243,7 @@ def decompressAuto (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024
   match detectFormat data with
   | .gzip => GzipDecode.decompress data maxOutputSize
   | .zlib => ZlibDecode.decompress data maxOutputSize
-  | .rawDeflate => Inflate.inflateTreeFree data maxOutputSize
+  | .rawDeflate => Inflate.inflate data maxOutputSize
 
 /-- Compress data with format selection.
     Default: gzip format, level 1 (fixed Huffman). -/

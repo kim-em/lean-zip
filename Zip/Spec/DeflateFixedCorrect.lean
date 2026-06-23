@@ -335,12 +335,12 @@ theorem inflate_complete (bytes : ByteArray) (result : List UInt8)
     (maxOutputSize : Nat)
     (hsize : result.length ≤ maxOutputSize)
     (hdec : decode (bytesToBits bytes) = some result) :
-    Zip.Native.Inflate.inflate bytes maxOutputSize =
+    Zip.Native.Inflate.inflateReference bytes maxOutputSize =
     .ok ⟨⟨result⟩⟩ := by
   -- Unfold inflate: it calls inflateRaw then discards endPos
-  simp only [Inflate.inflate, bind, Except.bind]
+  simp only [Inflate.inflateReference, bind, Except.bind]
   -- Unfold inflateRaw
-  simp only [Inflate.inflateRaw, ByteArray.emptyWithCapacity_eq_empty, bind, Except.bind]
+  simp only [Inflate.inflateRawReference, ByteArray.emptyWithCapacity_eq_empty, bind, Except.bind]
   -- Build fixed Huffman trees (computationally verified to succeed)
   obtain ⟨fixedLit, hflit⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
   obtain ⟨fixedDist, hfdist⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
@@ -374,7 +374,7 @@ private theorem inflate_of_encodeFixed_spec (compressed data : ByteArray)
     (hspec : ∃ bits, Deflate.Spec.encodeFixed syms = some bits ∧
       Deflate.Spec.bytesToBits compressed = bits ++
         List.replicate ((8 - bits.length % 8) % 8) false) :
-    Zip.Native.Inflate.inflate compressed maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference compressed maxOutputSize = .ok data := by
   obtain ⟨bits_enc, henc_fixed, hbytes⟩ := hspec
   simp only [Deflate.Spec.encodeFixed] at henc_fixed
   cases henc_syms : Deflate.Spec.encodeSymbols Deflate.Spec.fixedLitLengths
@@ -401,7 +401,7 @@ private theorem inflate_of_encodeFixed_spec (compressed data : ByteArray)
     `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateFixed (data : ByteArray)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateFixed data) maxOutputSize = .ok data :=
+    Zip.Native.Inflate.inflateReference (deflateFixed data) maxOutputSize = .ok data :=
   inflate_of_encodeFixed_spec (deflateFixed data) data
     (tokensToSymbols (lz77Greedy data)) maxOutputSize hsize
     (lz77Greedy_resolves data 32768 (by omega))
@@ -599,7 +599,7 @@ theorem lz77GreedyIter_eq_lz77Greedy (data : ByteArray) (ws : Nat) :
     Follows from `lz77GreedyIter_eq_lz77Greedy` + `inflate_deflateFixed`. -/
 theorem inflate_deflateFixedIter (data : ByteArray)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateFixedIter data) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateFixedIter data) maxOutputSize = .ok data := by
   unfold deflateFixedIter
   rw [lz77GreedyIter_eq_lz77Greedy]
   exact inflate_deflateFixed data maxOutputSize hsize
@@ -617,7 +617,7 @@ theorem inflate_deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token)
     (hempty : data.size = 0 → tokens = #[])
     (hresolve : resolveLZ77 (tokensToSymbols tokens) [] = some data.data.toList)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateFixedBlock data tokens) maxOutputSize = .ok data :=
+    Zip.Native.Inflate.inflateReference (deflateFixedBlock data tokens) maxOutputSize = .ok data :=
   inflate_of_encodeFixed_spec (deflateFixedBlock data tokens) data (tokensToSymbols tokens)
     maxOutputSize hsize hresolve (tokensToSymbols_validSymbolList _)
     (deflateFixedBlock_spec data tokens
@@ -663,7 +663,7 @@ theorem deflateLazy_spec (data : ByteArray) :
     `maxOutputSize` large enough to hold the input. -/
 theorem inflate_deflateLazy (data : ByteArray)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateLazy data) maxOutputSize = .ok data :=
+    Zip.Native.Inflate.inflateReference (deflateLazy data) maxOutputSize = .ok data :=
   inflate_of_encodeFixed_spec (deflateLazy data) data
     (tokensToSymbols (lz77Lazy data)) maxOutputSize hsize
     (lz77Lazy_resolves data 32768 (by omega))
@@ -824,7 +824,7 @@ theorem deflateLazyIter_eq_deflateLazy (data : ByteArray) :
     Follows from `deflateLazyIter_eq_deflateLazy` + `inflate_deflateLazy`. -/
 theorem inflate_deflateLazyIter (data : ByteArray)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflate (deflateLazyIter data) maxOutputSize = .ok data := by
+    Zip.Native.Inflate.inflateReference (deflateLazyIter data) maxOutputSize = .ok data := by
   rw [deflateLazyIter_eq_deflateLazy]
   exact inflate_deflateLazy data maxOutputSize hsize
 

@@ -16,7 +16,7 @@ The specification is structured in layers:
 4. **Stream decode**: sequence of blocks terminated by a final block
 
 The key correctness theorem `inflate_correct` (in `Zip.Spec.InflateCorrect`)
-proves that `Zip.Native.Inflate.inflate` agrees with this specification.
+proves that `Zip.Native.Inflate.inflateReference` agrees with this specification.
 -/
 
 namespace Deflate.Spec
