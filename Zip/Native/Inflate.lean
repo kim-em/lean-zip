@@ -1,5 +1,6 @@
 import ZipCommon.Spec.BitReaderInvariant
 import Zip.Spec.Huffman
+import Zip.Native.CopyWithin
 
 /-!
   Pure Lean DEFLATE decompressor (RFC 1951).
@@ -523,9 +524,11 @@ decreasing_by
 
     For the common **non-overlapping** back-reference (`k = 0 ∧ length ≤ distance`)
     every index `start + (k % distance)` is just `start + k`, so the whole copy is
-    the contiguous slice `[start, start + length)` — one `extract` + one `append`
-    (a `memcpy`) instead of `length` per-byte `push`es / bounds-checks / modular
-    indices. For an **overlapping** back-reference (`k = 0 ∧ length > distance`,
+    the contiguous slice `[start, start + length)`, appended in a single pass by
+    `ByteArray.copyWithin` (one `memcpy`, no intermediate allocation — its
+    reference body is exactly `buf ++ buf.extract start (start + length)`) instead
+    of `length` per-byte `push`es / bounds-checks / modular indices. For an
+    **overlapping** back-reference (`k = 0 ∧ length > distance`,
     the RLE case) the copy is the periodic extension of the `distance`-byte window,
     built by `fillDouble` (a handful of memcpys) instead of `length` per-byte
     `push`es. A partial copy (`k ≠ 0`, never produced by the decoders) falls back
@@ -535,7 +538,7 @@ def copyLoop (buf : ByteArray) (start distance : Nat)
     (k length : Nat)
     (hd_pos : distance > 0 := by omega) (hsd : start + distance ≤ buf.size := by omega) : ByteArray :=
   if k = 0 ∧ length ≤ distance then
-    buf ++ buf.extract start (start + length)
+    buf.copyWithin start length
   else if k = 0 then
     buf ++ (fillDouble (buf.extract start (start + distance)) length).extract 0 length
   else

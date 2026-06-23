@@ -196,6 +196,24 @@ extern_lib libzlib_ffi pkg := do
   let name := nameToStaticLib "zlib_ffi"
   buildStaticLib (pkg.staticLibDir / name) #[ffiO]
 
+-- ByteArray.copyWithin primitive (project-local stopgap for lean#14158);
+-- no external library, always compiled.
+input_file copy_within_ffi.c where
+  path := "c" / "copy_within_ffi.c"
+  text := true
+
+target copy_within_ffi.o pkg : FilePath := do
+  let srcJob ← copy_within_ffi.c.fetch
+  let oFile := pkg.buildDir / "c" / "copy_within_ffi.o"
+  let weakArgs := #["-I", (← getLeanIncludeDir).toString]
+  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  buildO oFile srcJob weakArgs hardArgs "cc"
+
+extern_lib libcopy_within_ffi pkg := do
+  let ffiO ← copy_within_ffi.o.fetch
+  let name := nameToStaticLib "copy_within_ffi"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
 -- miniz_oxide FFI (Track D comparator)
 input_file miniz_oxide_ffi.c where
   path := "c" / "miniz_oxide_ffi.c"

@@ -616,10 +616,11 @@ theorem copyLoop_eq_ofFn
           (i.val % distance)]!) := by
   unfold Zip.Native.Inflate.copyLoop
   split
-  · -- non-overlapping: `output ++ output.extract start (start + length)`
+  · -- non-overlapping: `output.copyWithin start length`, whose reference body is
+    -- `output ++ output.extract start (start + length)`
     rename_i hcond
     obtain ⟨_, hle⟩ := hcond
-    rw [ByteArray.data_append, Array.toList_append,
+    rw [ByteArray.copyWithin, ByteArray.data_append, Array.toList_append,
         extract_data_toList_ofFn output (output.size - distance) length (by omega)]
     have hfg :
         (fun i : Fin length => output.data.toList[(output.size - distance) + i.val]!)
