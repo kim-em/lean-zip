@@ -1143,6 +1143,194 @@ theorem decodeSymCanon_ok_iff_decodeSym (lengths : Array UInt8) (maxBits : Nat)
   · exact walkCanonical_ok_iff_walkTree lengths maxBits hmb hmb15 hv hbound buf cnt r
   · exact Iff.rfl
 
+/-! ## Skipping the long-code build when no code exceeds the fast table
+
+`buildLongDecodeWithCount` shares one `countLengthsFast` pass with the table build
+and, when `hasLongCode` is false (no codeword longer than `fastBits`), skips the
+`buildSymbols` counting sort, returning an empty `symbols` array. The decoder still
+correctly matches the verified reference: with no long codeword the `walkCanonical`
+fallback is *dead* — every codeword resolves in the fast table — so the (empty)
+`symbols` array is never read. -/
+
+/-- `buildTableCanonicalFastWithCount` fed its own histogram is `buildTableCanonicalFast`. -/
+theorem buildTableCanonicalFastWithCount_eq (lengths : Array UInt8) (maxBits : Nat) :
+    buildTableCanonicalFastWithCount lengths (countLengthsFast lengths maxBits) maxBits
+      = buildTableCanonicalFast lengths maxBits := rfl
+
+/-- The `count` field of `buildLongDecodeWithCount` is the histogram it was given. -/
+theorem buildLongDecodeWithCount_count (lengths : Array UInt8) (count : Array Nat) (maxBits : Nat) :
+    (buildLongDecodeWithCount lengths count maxBits).count = count := by
+  unfold buildLongDecodeWithCount; split <;> rfl
+
+/-- The `firstCode` field of `buildLongDecodeWithCount` is `nextCodes` of the histogram. -/
+theorem buildLongDecodeWithCount_firstCode (lengths : Array UInt8) (count : Array Nat)
+    (maxBits : Nat) :
+    (buildLongDecodeWithCount lengths count maxBits).firstCode
+      = Huffman.Spec.nextCodes count maxBits := by
+  unfold buildLongDecodeWithCount; split <;> rfl
+
+/-- When some codeword exceeds the fast table, `buildLongDecodeWithCount` (sharing the
+    histogram) builds the full structures — exactly `buildLongDecode`. -/
+theorem buildLongDecodeWithCount_eq (lengths : Array UInt8) (maxBits : Nat)
+    (h : hasLongCode (countLengthsFast lengths maxBits) maxBits = true) :
+    buildLongDecodeWithCount lengths (countLengthsFast lengths maxBits) maxBits
+      = buildLongDecode lengths maxBits := by
+  unfold buildLongDecodeWithCount buildLongDecode; rw [if_pos h]
+
+/-- If a length `len ≤ maxBits` has a positive count, the `hasLongCode` scan from any
+    `start ≤ len` reports `true`. -/
+theorem hasLongCode_go_eq_true (count : Array Nat) (maxBits len : Nat)
+    (hlm : len ≤ maxBits) (hpos : 0 < count[len]!) :
+    ∀ start, start ≤ len → hasLongCode.go count maxBits start = true := by
+  intro start hsl
+  induction hk : (len - start) generalizing start with
+  | zero =>
+    have heq : start = len := by omega
+    subst heq
+    rw [hasLongCode.go, if_neg (by omega), if_pos hpos]
+  | succ k ih =>
+    rw [hasLongCode.go, if_neg (by omega : ¬ start > maxBits)]
+    by_cases hs : 0 < count[start]!
+    · rw [if_pos hs]
+    · rw [if_neg hs]; exact ih (start + 1) (by omega) (by omega)
+
+/-- A positive count at a length beyond `fastBits` makes `hasLongCode` true. -/
+theorem hasLongCode_eq_true_of_pos (count : Array Nat) (maxBits len : Nat)
+    (hfb : fastBits < len) (hlm : len ≤ maxBits) (hpos : 0 < count[len]!) :
+    hasLongCode count maxBits = true :=
+  hasLongCode_go_eq_true count maxBits len hlm hpos (fastBits + 1) (by omega)
+
+/-- **`walkCanonical` success depends only on `count`/`firstCode`.** Two long-code
+    structures agreeing on those fields succeed on exactly the same inputs (the
+    branch test reads only them; the symbol returned reads `symbols`/`firstIndex`). -/
+theorem walkCanonical_go_ok_of_count_eq (ld1 ld2 : LongDecode) (maxBits : Nat)
+    (hc : ld1.count = ld2.count) (hfc : ld1.firstCode = ld2.firstCode) :
+    ∀ (fuel len code : Nat) (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat),
+      maxBits + 1 - len ≤ fuel →
+      walkCanonical.go ld1 maxBits len code buf cnt = .ok r →
+      ∃ r', walkCanonical.go ld2 maxBits len code buf cnt = .ok r' := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro len code buf cnt r hf h
+    rw [walkCanonical.go, dif_pos (by omega)] at h; exact absurd h (by simp)
+  | succ fuel ih =>
+    intro len code buf cnt r hf h
+    rw [walkCanonical.go] at h ⊢
+    by_cases hlen : len > maxBits
+    · rw [dif_pos hlen] at h; exact absurd h (by simp)
+    · rw [dif_neg hlen] at h ⊢
+      by_cases hcnt : cnt = 0
+      · rw [if_pos hcnt] at h; exact absurd h (by simp)
+      · rw [if_neg hcnt] at h ⊢
+        simp only [] at h ⊢
+        rw [← hc, ← hfc]
+        by_cases hcond : ld1.firstCode[len]! ≤ code * 2 + (buf &&& 1).toNat
+            ∧ code * 2 + (buf &&& 1).toNat < ld1.firstCode[len]! + ld1.count[len]!
+        · rw [if_pos hcond]; exact ⟨_, rfl⟩
+        · rw [if_neg hcond] at h ⊢
+          exact ih (len + 1) (code * 2 + (buf &&& 1).toNat) (buf >>> 1) (cnt - 1) r (by omega) h
+
+/-- `walkCanonical` success depends only on `count`/`firstCode` (wrapper). -/
+theorem walkCanonical_ok_of_count_eq (ld1 ld2 : LongDecode) (maxBits : Nat)
+    (hc : ld1.count = ld2.count) (hfc : ld1.firstCode = ld2.firstCode)
+    (buf : UInt64) (cnt : Nat) {r : UInt16 × UInt64 × Nat × Nat}
+    (h : walkCanonical ld1 maxBits buf cnt = .ok r) :
+    ∃ r', walkCanonical ld2 maxBits buf cnt = .ok r' :=
+  walkCanonical_go_ok_of_count_eq ld1 ld2 maxBits hc hfc (maxBits + 1) 1 0 buf cnt r (by omega) h
+
+/-- **The long-code fallback is dead when no codeword exceeds the fast table.** With
+    `hasLongCode = false` every codeword has length `≤ fastBits`, so the fast table
+    holds it; when the table misses (length `0`) or has too few buffered bits, no
+    codeword can be spelled, so `walkCanonical` over the full long-code structures
+    fails. (The fast table's length at the buffer index equals the codeword length,
+    contradicting the fallback guard.) -/
+theorem walkCanonical_dead_of_no_long (lengths : Array UInt8)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (hlong : hasLongCode (countLengthsFast lengths 15) 15 = false)
+    (buf : UInt64) (cnt : Nat)
+    (hg : ((fromLengthsTree lengths 15).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat = 0
+        ∨ ((fromLengthsTree lengths 15).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat > cnt)
+    (r : UInt16 × UInt64 × Nat × Nat) :
+    walkCanonical (buildLongDecode lengths 15) 15 buf cnt ≠ .ok r := by
+  intro h
+  obtain ⟨sym, bb, c, used⟩ := r
+  obtain ⟨h1u, humax, hucnt, hbb, hc, s, hs, hsym, hlen_s, hcf⟩ :=
+    walkCanonical_ok_spec lengths 15 (by omega) (by omega) buf cnt sym bb c used h
+  -- `used` is some real symbol's length, so the histogram counts it
+  have hcount_pos : 0 < (countLengthsFast lengths 15)[used]! := by
+    rw [numEarlier_size_eq lengths 15 used h1u humax]
+    exact Nat.lt_of_le_of_lt (Nat.zero_le _)
+      (numEarlier_lt_arr lengths s lengths.size used hs hlen_s hs (Nat.le_refl _))
+  -- ¬hasLong ⇒ no codeword beyond the fast window, so `used ≤ fastBits`
+  have hufast : used ≤ fastBits := by
+    rcases Nat.lt_or_ge fastBits used with h | h
+    · exfalso
+      have := hasLongCode_eq_true_of_pos (countLengthsFast lengths 15) 15 used h humax hcount_pos
+      rw [hlong] at this; exact absurd this (by simp)
+    · exact h
+  have hle11 : used ≤ 11 := hufast
+  -- the tree has a leaf at this codeword
+  have hmem : (s, cwOf buf.toNat used)
+      ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) 15 :=
+    (Huffman.Spec.allCodes_mem_iff _ 15 s _).mpr
+      ⟨by rw [List.length_map, Array.length_toList]; exact hs, hcf⟩
+  have hleaf : Deflate.Correctness.TreeHasLeaf (fromLengthsTree lengths 15)
+      (cwOf buf.toNat used) s.toUInt16 :=
+    Deflate.Correctness.fromLengths_hasLeaf lengths 15 (by omega) _
+      (fromLengths_ok_of_valid lengths 15 hv) hv s _ hmem
+  -- restrict the codeword to the low `fastBits` bits the table indexes
+  have hand : (buf &&& 0x7FF).toNat = buf.toNat % 2 ^ 11 := by
+    rw [UInt64.toNat_and, show (0x7FF : UInt64).toNat = 2 ^ 11 - 1 from rfl,
+        Nat.and_two_pow_sub_one_eq_mod]
+  have hcweq : cwOf buf.toNat used = cwOf (buf &&& 0x7FF).toNat used := by
+    rw [hand, ← cwOf_mod buf.toNat used, ← cwOf_mod (buf.toNat % 2 ^ 11) used,
+        Nat.mod_mod_of_dvd buf.toNat (Nat.pow_dvd_pow 2 hle11)]
+  rw [hcweq, ← hsym] at hleaf
+  -- the fast table reads exactly this length
+  have hge : tableEntry.go (fromLengthsTree lengths 15) (buf &&& 0x7FF).toNat 0
+      = (sym, (0 + used).toUInt8) :=
+    tableEntry_go_of_hasLeaf (fromLengthsTree lengths 15) (buf &&& 0x7FF).toNat 0 used sym
+      hleaf (by simpa using hufast)
+  have hlenAt : ((fromLengthsTree lengths 15).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat = used := by
+    rw [buildTable_lenAt _ _ (InflateBuf.buf_idx_lt buf), tableEntry, hge]
+    simp only [Nat.zero_add, Nat.toUInt8, UInt8.ofNat, UInt8.toNat, BitVec.toNat_ofNat, Nat.reducePow]
+    omega
+  rw [hlenAt] at hg
+  omega
+
+/-- **`decodeSymCanon` over `buildLongDecodeWithCount` agrees with `decodeSym`.** The
+    histogram-sharing, `buildSymbols`-skipping long-code build still drives the
+    tree-free symbol decode to the same accept-set as the verified tree decode. When
+    a long code exists it is `buildLongDecode` (`decodeSymCanon_ok_iff_decodeSym`);
+    when none does, both fall back into a dead path that always fails. -/
+theorem decodeSymCanon_withCount_ok_iff_decodeSym (lengths : Array UInt8)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) 15)
+    (hbound : lengths.size ≤ UInt16.size)
+    (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat) :
+    decodeSymCanon (buildLongDecodeWithCount lengths (countLengthsFast lengths 15) 15)
+        (fromLengthsTree lengths 15).buildTable 15 buf cnt = .ok r ↔
+      decodeSym (fromLengthsTree lengths 15) (fromLengthsTree lengths 15).buildTable buf cnt
+        = .ok r := by
+  by_cases hlong : hasLongCode (countLengthsFast lengths 15) 15
+  · rw [buildLongDecodeWithCount_eq lengths 15 hlong]
+    exact decodeSymCanon_ok_iff_decodeSym lengths 15 (by omega) (by omega) hv hbound _ buf cnt r
+  · simp only [Bool.not_eq_true] at hlong
+    simp only [decodeSymCanon, decodeSym]
+    split
+    · rename_i hguard
+      simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hguard
+      constructor
+      · intro h
+        obtain ⟨r', hr'⟩ := walkCanonical_ok_of_count_eq _ (buildLongDecode lengths 15) 15
+          (buildLongDecodeWithCount_count _ _ _) (buildLongDecodeWithCount_firstCode _ _ _) buf cnt h
+        exact absurd hr' (walkCanonical_dead_of_no_long lengths hv hlong buf cnt hguard r')
+      · intro h
+        exact absurd ((walkCanonical_ok_iff_walkTree lengths 15 (by omega) (by omega) hv hbound
+            buf cnt r).mpr h)
+          (walkCanonical_dead_of_no_long lengths hv hlong buf cnt hguard r)
+    · exact Iff.rfl
+
 /-- A successful `walkCanonical` leaves at most `cnt` bits (it only consumes). -/
 theorem walkCanonical_go_cnt_le (ld : LongDecode) (maxBits : Nat) :
     ∀ (fuel len code : Nat) (buf : UInt64) (cnt : Nat) (sym : UInt16) (bb : UInt64) (c used : Nat),
@@ -1194,7 +1382,9 @@ end Zip.Native.HuffTree
 namespace Zip.Native.InflateBuf
 open ZipCommon (BitReader)
 open Zip.Native.HuffTree (buildLongDecode fromLengthsTree decodeSymCanon decodeSymCanon_ok_iff_decodeSym
-  buildTableCanonicalFast buildTableCanonicalFast_eq_buildTable)
+  buildTableCanonicalFast buildTableCanonicalFast_eq_buildTable
+  buildLongDecodeWithCount buildTableCanonicalFastWithCount buildTableCanonicalFastWithCount_eq
+  decodeSymCanon_withCount_ok_iff_decodeSym countLengthsFast)
 
 /-- If two `Except` values succeed on the same outputs, binding both with the same
     continuation preserves that (success-)equivalence. -/
@@ -1216,24 +1406,23 @@ theorem bind_ok_iff {α β : Type} {f g : Except String α} (h : ∀ x, f = .ok 
     both loops reject. Recursive — its own `termination_by` provides the IH. -/
 theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
     (litLengths distLengths : Array UInt8)
-    (hlv : Huffman.Spec.ValidLengths (litLengths.toList.map UInt8.toNat) 15)
-    (hlb : litLengths.size ≤ UInt16.size)
-    (hdv : Huffman.Spec.ValidLengths (distLengths.toList.map UInt8.toNat) 15)
-    (hdb : distLengths.size ≤ UInt16.size)
+    (litLD distLD : HuffTree.LongDecode)
+    (hlit_iff : ∀ (b : UInt64) (n : Nat) (x : UInt16 × UInt64 × Nat × Nat),
+      decodeSymCanon litLD litTable 15 b n = .ok x
+        ↔ decodeSym (fromLengthsTree litLengths 15) litTable b n = .ok x)
+    (hdist_iff : ∀ (b : UInt64) (n : Nat) (x : UInt16 × UInt64 × Nat × Nat),
+      decodeSymCanon distLD distTable 15 b n = .ok x
+        ↔ decodeSym (fromLengthsTree distLengths 15) distTable b n = .ok x)
     (data : ByteArray) (maxOut : Nat) (pos : Nat) (bitBuf : UInt64) (cnt : Nat)
     (output : ByteArray) (r : ByteArray × Nat × UInt64 × Nat) :
-    goTreeFree litTable distTable (buildLongDecode litLengths 15) (buildLongDecode distLengths 15)
+    goTreeFree litTable distTable litLD distLD
         15 data maxOut pos bitBuf cnt output = .ok r ↔
       goFusedP litTable distTable data (fromLengthsTree litLengths 15) (fromLengthsTree distLengths 15)
         maxOut pos bitBuf cnt output = .ok r := by
-  have hlit_iff := fun (b : UInt64) (n : Nat) (x : UInt16 × UInt64 × Nat × Nat) =>
-    decodeSymCanon_ok_iff_decodeSym litLengths 15 (by omega) (by omega) hlv hlb litTable b n x
-  have hdist_iff := fun (b : UInt64) (n : Nat) (x : UInt16 × UInt64 × Nat × Nat) =>
-    decodeSymCanon_ok_iff_decodeSym distLengths 15 (by omega) (by omega) hdv hdb distTable b n x
   rw [goTreeFree, goFusedP]
   by_cases hrc : cnt ≤ 56 ∧ pos < data.size
   · rw [dif_pos hrc, dif_pos hrc]
-    exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
+    exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
       data maxOut (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output r
   · rw [dif_neg hrc, dif_neg hrc]
     by_cases hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
@@ -1243,13 +1432,13 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
       by_cases hout : output.size ≥ maxOut
       · simp [hout]
       · rw [if_neg hout, if_neg hout]
-        exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
+        exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
           data maxOut pos (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
           (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)
           (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8) r
     · rw [dif_neg hlit, dif_neg hlit]
       -- literal/length symbol decode
-      cases hdec : decodeSymCanon (buildLongDecode litLengths 15) litTable 15 bitBuf cnt with
+      cases hdec : decodeSymCanon litLD litTable 15 bitBuf cnt with
       | error e =>
         cases hdec2 : decodeSym (fromLengthsTree litLengths 15) litTable bitBuf cnt with
         | error e' => simp
@@ -1268,7 +1457,7 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
             by_cases hnp : cnt ≤ c
             · simp [hnp]
             · rw [dif_neg hnp, dif_neg hnp]
-              exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
+              exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
                 data maxOut pos bb c (output.push sym.toUInt8) r
         · rw [if_neg hsym, if_neg hsym]
           by_cases h256 : sym == 256
@@ -1283,7 +1472,7 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
               | ok y =>
                 obtain ⟨extraBits, bb2, c2⟩ := y
                 simp only [bind, Except.bind]
-                cases hdec3 : decodeSymCanon (buildLongDecode distLengths 15) distTable 15 bb2 c2 with
+                cases hdec3 : decodeSymCanon distLD distTable 15 bb2 c2 with
                 | error e =>
                   cases hdec4 : decodeSym (fromLengthsTree distLengths 15) distTable bb2 c2 with
                   | error e' => simp
@@ -1315,8 +1504,8 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
                             by_cases hnp : cnt ≤ c4
                             · rw [dif_pos hnp, dif_pos hnp]
                             · rw [dif_neg hnp, dif_neg hnp]
-                              exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths
-                                hlv hlb hdv hdb data maxOut pos bb4 c4 _ r
+                              exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD
+                                hlit_iff hdist_iff data maxOut pos bb4 c4 _ r
   termination_by (data.size - pos) * 9 + cnt
   decreasing_by
     all_goals first
@@ -1483,9 +1672,11 @@ theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray
     decodeHuffmanFastBufTreeFree br output litLengths distLengths maxOut = .ok r ↔
       decodeHuffmanFastBuf br output (fromLengthsTree litLengths 15)
         (fromLengthsTree distLengths 15) maxOut = .ok r := by
-  have htlit : buildTableCanonicalFast litLengths 15 = (fromLengthsTree litLengths 15).buildTable :=
+  have htlit : buildTableCanonicalFastWithCount litLengths (countLengthsFast litLengths 15) 15
+      = (fromLengthsTree litLengths 15).buildTable :=
     buildTableCanonicalFast_eq_buildTable litLengths 15 (by omega) hlv hlb
-  have htdist : buildTableCanonicalFast distLengths 15 = (fromLengthsTree distLengths 15).buildTable :=
+  have htdist : buildTableCanonicalFastWithCount distLengths (countLengthsFast distLengths 15) 15
+      = (fromLengthsTree distLengths 15).buildTable :=
     buildTableCanonicalFast_eq_buildTable distLengths 15 (by omega) hdv hdb
   -- buffer invariant after the entry refill: gives the dispatch bounds
   have hbpe : br.bitPos = br.pos * 8 + br.bitOff := rfl
@@ -1516,16 +1707,25 @@ theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray
     have hcsz : (cnt0 - br.bitOff) < USize.size :=
       Nat.lt_of_le_of_lt hbc2.cntLe (Nat.lt_of_lt_of_le (by decide) USize.le_size)
     rw [goTreeFreeU_eq (fromLengthsTree litLengths 15).buildTable
-          (fromLengthsTree distLengths 15).buildTable br.data (buildLongDecode litLengths 15)
-          (buildLongDecode distLengths 15) 15 maxOut hsz' pos0.toUSize
-          (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize output
+          (fromLengthsTree distLengths 15).buildTable br.data
+          (buildLongDecodeWithCount litLengths (countLengthsFast litLengths 15) 15)
+          (buildLongDecodeWithCount distLengths (countLengthsFast distLengths 15) 15) 15 maxOut hsz'
+          pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize output
           (by rw [toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hbc2.posLe hsz')]; exact hbc2.posLe),
         toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hbc2.posLe hsz'), toUSize_toNat_of_lt hcsz]
     exact bind_ok_iff (fun x => goTreeFree_ok_iff_goFusedP (fromLengthsTree litLengths 15).buildTable
-      (fromLengthsTree distLengths 15).buildTable litLengths distLengths hlv hlb hdv hdb br.data maxOut
+      (fromLengthsTree distLengths 15).buildTable litLengths distLengths
+      (buildLongDecodeWithCount litLengths (countLengthsFast litLengths 15) 15)
+      (buildLongDecodeWithCount distLengths (countLengthsFast distLengths 15) 15)
+      (decodeSymCanon_withCount_ok_iff_decodeSym litLengths hlv hlb)
+      (decodeSymCanon_withCount_ok_iff_decodeSym distLengths hdv hdb) br.data maxOut
       pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) output x) _ r
   · exact bind_ok_iff (fun x => goTreeFree_ok_iff_goFusedP (fromLengthsTree litLengths 15).buildTable
-      (fromLengthsTree distLengths 15).buildTable litLengths distLengths hlv hlb hdv hdb br.data maxOut
+      (fromLengthsTree distLengths 15).buildTable litLengths distLengths
+      (buildLongDecodeWithCount litLengths (countLengthsFast litLengths 15) 15)
+      (buildLongDecodeWithCount distLengths (countLengthsFast distLengths 15) 15)
+      (decodeSymCanon_withCount_ok_iff_decodeSym litLengths hlv hlb)
+      (decodeSymCanon_withCount_ok_iff_decodeSym distLengths hdv hdb) br.data maxOut
       pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) output x) _ r
 
 end Zip.Native.InflateBuf

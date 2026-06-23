@@ -78,6 +78,38 @@ def buildLongDecode (lengths : Array UInt8) (maxBits : Nat) : LongDecode :=
   let symbols := buildSymbols lengths maxBits total firstIndex
   { count, firstCode, firstIndex, symbols }
 
+/-- Does any codeword exceed the `fastBits`-wide fast table — i.e. can the
+    `walkCanonical` long-code fallback ever fire productively? `count[len] > 0` for
+    some `fastBits < len ≤ maxBits`. When this is `false`, every codeword resolves
+    in the fast table, so the long-code counting sort (`buildSymbols`, allocating a
+    `total`-element array) is dead work. One pass over the small `count` array. -/
+def hasLongCode (count : Array Nat) (maxBits : Nat) : Bool :=
+  go count maxBits (fastBits + 1)
+where
+  go (count : Array Nat) (maxBits len : Nat) : Bool :=
+    if len > maxBits then false
+    else if count[len]! > 0 then true
+    else go count maxBits (len + 1)
+  termination_by maxBits + 1 - len
+
+/-- `buildLongDecode` sharing a precomputed length histogram, and skipping the
+    `buildSymbols` counting sort entirely when no codeword exceeds the fast table
+    (`hasLongCode count maxBits = false`). In that case `walkCanonical` is never
+    productive — every codeword resolves in the fast `fastBits`-bit table — so the
+    `total`-element `symbols` allocation is dead work and we leave it empty. When a
+    long code does exist this matches `buildLongDecode` exactly
+    (`buildLongDecodeWithCount_eq`). -/
+def buildLongDecodeWithCount (lengths : Array UInt8) (count : Array Nat) (maxBits : Nat) :
+    LongDecode :=
+  let firstCode := Huffman.Spec.nextCodes count maxBits
+  let firstIndex := buildFirstIndex count maxBits
+  if hasLongCode count maxBits then
+    let total := firstIndex[maxBits]! + count[maxBits]!
+    let symbols := buildSymbols lengths maxBits total firstIndex
+    { count, firstCode, firstIndex, symbols }
+  else
+    { count, firstCode, firstIndex, symbols := #[] }
+
 /-- Canonical bit-by-bit long-code decode: read bits MSB-first, accumulate the
     code value, and return the symbol once the code lands in some length's
     canonical range. Tree-free replacement for `walkTree`. -/
@@ -287,10 +319,12 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
 def decodeHuffmanFastBufTreeFree (br : BitReader) (output : ByteArray)
     (litLengths distLengths : Array UInt8) (maxOut : Nat) :
     Except String (ByteArray × BitReader) := do
-  let litTable := HuffTree.buildTableCanonicalFast litLengths 15
-  let distTable := HuffTree.buildTableCanonicalFast distLengths 15
-  let litLD := HuffTree.buildLongDecode litLengths 15
-  let distLD := HuffTree.buildLongDecode distLengths 15
+  let litCount := HuffTree.countLengthsFast litLengths 15
+  let distCount := HuffTree.countLengthsFast distLengths 15
+  let litTable := HuffTree.buildTableCanonicalFastWithCount litLengths litCount 15
+  let distTable := HuffTree.buildTableCanonicalFastWithCount distLengths distCount 15
+  let litLD := HuffTree.buildLongDecodeWithCount litLengths litCount 15
+  let distLD := HuffTree.buildLongDecodeWithCount distLengths distCount 15
   let (pos, bitBuf, cnt) := refill br.data br.pos 0 0
   let bitBuf := bitBuf >>> br.bitOff.toUInt64
   let cnt := cnt - br.bitOff
