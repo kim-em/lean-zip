@@ -64,37 +64,39 @@ protected def ncRec (blCount : Array Nat) : Nat → Nat
 
 /-- Partial Kraft sum from position `start` to `maxBits`:
     `∑_{i=start}^{maxBits} blCount[i]! * 2^(maxBits - i)`. -/
-private def kraftSumFrom (blCount : Array Nat) (maxBits b : Nat) : Nat :=
+protected def kraftSumFrom (blCount : Array Nat) (maxBits b : Nat) : Nat :=
   if b > maxBits then 0
-  else blCount[b]! * 2 ^ (maxBits - b) + kraftSumFrom blCount maxBits (b + 1)
+  else blCount[b]! * 2 ^ (maxBits - b) + Huffman.Spec.kraftSumFrom blCount maxBits (b + 1)
 termination_by maxBits + 1 - b
 
 /-! ## Conservation law: ncRec and kraftSumFrom -/
 
 /-- Unfolding lemma for `kraftSumFrom` when `b ≤ maxBits`. -/
-private theorem kraftSumFrom_unfold (blCount : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits) :
-    kraftSumFrom blCount maxBits b =
-      blCount[b]! * 2 ^ (maxBits - b) + kraftSumFrom blCount maxBits (b + 1) := by
-  rw [kraftSumFrom.eq_1]; exact if_neg (by omega)
+protected theorem kraftSumFrom_unfold (blCount : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits) :
+    Huffman.Spec.kraftSumFrom blCount maxBits b =
+      blCount[b]! * 2 ^ (maxBits - b) + Huffman.Spec.kraftSumFrom blCount maxBits (b + 1) := by
+  rw [Huffman.Spec.kraftSumFrom.eq_1]; exact if_neg (by omega)
 
 /-- `kraftSumFrom` past `maxBits` is zero. -/
-private theorem kraftSumFrom_gt (blCount : Array Nat) (maxBits b : Nat) (hb : b > maxBits) :
-    kraftSumFrom blCount maxBits b = 0 := by
-  rw [kraftSumFrom.eq_1]; exact if_pos hb
+protected theorem kraftSumFrom_gt (blCount : Array Nat) (maxBits b : Nat) (hb : b > maxBits) :
+    Huffman.Spec.kraftSumFrom blCount maxBits b = 0 := by
+  rw [Huffman.Spec.kraftSumFrom.eq_1]; exact if_pos hb
 
 /-- Conservation law: `ncRec b * 2^(maxBits-b) + kraftSumFrom b = kraftSumFrom 0`.
     The nextCodes recurrence preserves the total Kraft sum. -/
 private theorem ncRec_kraft_conservation (blCount : Array Nat) (maxBits b : Nat)
     (hb : b ≤ maxBits) :
-    Huffman.Spec.ncRec blCount b * 2 ^ (maxBits - b) + kraftSumFrom blCount maxBits b =
-      kraftSumFrom blCount maxBits 0 := by
+    Huffman.Spec.ncRec blCount b * 2 ^ (maxBits - b) +
+        Huffman.Spec.kraftSumFrom blCount maxBits b =
+      Huffman.Spec.kraftSumFrom blCount maxBits 0 := by
   induction b with
   | zero => simp only [Spec.ncRec, Nat.sub_zero, Nat.zero_mul, Nat.zero_add]
   | succ n ih =>
     have ih' := ih (by omega)
-    rw [kraftSumFrom_unfold blCount maxBits n (by omega)] at ih'
+    rw [Huffman.Spec.kraftSumFrom_unfold blCount maxBits n (by omega)] at ih'
     show (Huffman.Spec.ncRec blCount n + blCount[n]!) * 2 * 2 ^ (maxBits - (n + 1)) +
-      kraftSumFrom blCount maxBits (n + 1) = kraftSumFrom blCount maxBits 0
+      Huffman.Spec.kraftSumFrom blCount maxBits (n + 1) =
+        Huffman.Spec.kraftSumFrom blCount maxBits 0
     have : 2 * 2 ^ (maxBits - (n + 1)) = 2 ^ (maxBits - n) := by
       rw [show maxBits - n = (maxBits - (n + 1)) + 1 from by omega, Nat.pow_succ, Nat.mul_comm]
     rw [Nat.mul_assoc, this, Nat.add_mul]
@@ -196,14 +198,14 @@ protected theorem nextCodes_eq_ncRec (blCount : Array Nat) (maxBits b : Nat)
     from positions ≤ l, and doesn't affect positions > l. -/
 private theorem kraftSumFrom_incr (acc : Array Nat) (maxBits l b : Nat)
     (hl : l ≤ maxBits) (hsize : acc.size ≥ maxBits + 1) :
-    kraftSumFrom (acc.set! l (acc[l]! + 1)) maxBits b =
-      kraftSumFrom acc maxBits b + if b ≤ l then 2 ^ (maxBits - l) else 0 := by
+    Huffman.Spec.kraftSumFrom (acc.set! l (acc[l]! + 1)) maxBits b =
+      Huffman.Spec.kraftSumFrom acc maxBits b + if b ≤ l then 2 ^ (maxBits - l) else 0 := by
   if hb : b > maxBits then
-    simp only [Array.set!_eq_setIfInBounds, kraftSumFrom_gt _ _ _ hb,
+    simp only [Array.set!_eq_setIfInBounds, Huffman.Spec.kraftSumFrom_gt _ _ _ hb,
       show ¬(b ≤ l) from by omega, ↓reduceIte, Nat.add_zero]
   else
     have hb' : b ≤ maxBits := by omega
-    rw [kraftSumFrom_unfold _ _ _ hb', kraftSumFrom_unfold _ _ _ hb']
+    rw [Huffman.Spec.kraftSumFrom_unfold _ _ _ hb', Huffman.Spec.kraftSumFrom_unfold _ _ _ hb']
     if hbl : b = l then
       subst hbl
       rw [Array.getElem!_set!_self acc b _ (by omega)]
@@ -223,10 +225,10 @@ termination_by maxBits + 1 - b
 
 /-- `kraftSumFrom` over an all-zeros array is 0. -/
 private theorem kraftSumFrom_replicate (maxBits b : Nat) :
-    kraftSumFrom (Array.replicate (maxBits + 1) 0) maxBits b = 0 := by
-  if hb : b > maxBits then exact kraftSumFrom_gt _ _ _ hb
+    Huffman.Spec.kraftSumFrom (Array.replicate (maxBits + 1) 0) maxBits b = 0 := by
+  if hb : b > maxBits then exact Huffman.Spec.kraftSumFrom_gt _ _ _ hb
   else
-    rw [kraftSumFrom_unfold _ _ _ (by omega)]
+    rw [Huffman.Spec.kraftSumFrom_unfold _ _ _ (by omega)]
     simp only [Array.size_replicate, show b < maxBits + 1 from by omega, getElem!_pos,
       Array.getElem_replicate, Nat.zero_mul, kraftSumFrom_replicate maxBits (b + 1), Nat.add_zero]
 termination_by maxBits + 1 - b
@@ -243,48 +245,59 @@ protected theorem validLengths_cons {l : Nat} {ls : List Nat} {maxBits : Nat}
       rw [List.foldl_add_init] at hf; exact Nat.le_trans (Nat.le_add_left _ _) hf
     · exact hf
 
-/-- The full Kraft sum `kraftSumFrom 0` equals the Kraft sum in `ValidLengths`. -/
-private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
-    (hv : ValidLengths lengths maxBits) :
-    kraftSumFrom (countLengths lengths maxBits) maxBits 0 ≤ 2 ^ maxBits := by
+/-- The full Kraft sum `kraftSumFrom 0` over the `countLengths` histogram equals the
+    direct per-element Kraft fold over the non-zero lengths, whenever no length
+    exceeds `maxBits`. This is the identity that lets the tree-free `validateLengths`
+    compute its Kraft check from the per-length `count` array (an `O(maxBits)` fold,
+    no `List` allocation) instead of `fromLengths`' `lengths.toList`/`filter` list. -/
+protected theorem kraftSumFrom_zero_eq_foldl (lengths : List Nat) (maxBits : Nat)
+    (hle : ∀ l ∈ lengths, l ≤ maxBits) :
+    Huffman.Spec.kraftSumFrom (countLengths lengths maxBits) maxBits 0 =
+      (lengths.filter (· != 0)).foldl (fun acc l => acc + 2 ^ (maxBits - l)) 0 := by
   simp only [countLengths]
   suffices ∀ (acc : Array Nat), acc.size = maxBits + 1 →
-      kraftSumFrom (lengths.foldl (fun acc len =>
+      Huffman.Spec.kraftSumFrom (lengths.foldl (fun acc len =>
         if len == 0 || len > maxBits then acc
         else acc.set! len (acc[len]! + 1)) acc) maxBits 0 =
-      kraftSumFrom acc maxBits 0 +
+      Huffman.Spec.kraftSumFrom acc maxBits 0 +
       (lengths.filter (· != 0)).foldl (fun acc l => acc + 2 ^ (maxBits - l)) 0 by
     rw [this _ (Array.size_replicate ..)]
     rw [kraftSumFrom_replicate, Nat.zero_add]
-    exact hv.2
   intro acc hsize
   induction lengths generalizing acc with
   | nil => simp only [gt_iff_lt, Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq,
       Array.set!_eq_setIfInBounds, List.foldl_nil, List.filter_nil, Nat.add_zero]
   | cons l ls ih =>
-    have hv_ls := Huffman.Spec.validLengths_cons hv
+    have hle_ls : ∀ x ∈ ls, x ≤ maxBits := fun x hx => hle x (List.mem_cons_of_mem l hx)
     simp only [List.foldl_cons]
     split
     · rename_i hskip
-      rw [ih hv_ls acc hsize]
+      rw [ih hle_ls acc hsize]
       congr 1
       simp only [List.filter_cons]
       simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq] at hskip
       cases hskip with
       | inl h => simp only [h, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]
-      | inr h => exfalso; exact Nat.not_lt.mpr (hv.1 l List.mem_cons_self) h
+      | inr h => exact absurd (hle l List.mem_cons_self) (by omega)
     · rename_i hset
       simp only [Bool.or_eq_true, beq_iff_eq, not_or, decide_eq_true_eq] at hset
       have hl_ne : l ≠ 0 := hset.1
       have hl_le : l ≤ maxBits := by omega
       have hsize' : (acc.set! l (acc[l]! + 1)).size = maxBits + 1 := by
         rw [Array.size_set!]; exact hsize
-      rw [ih hv_ls (acc.set! l (acc[l]! + 1)) hsize',
+      rw [ih hle_ls (acc.set! l (acc[l]! + 1)) hsize',
           kraftSumFrom_incr acc maxBits l 0 hl_le (by omega)]
       simp only [Nat.zero_le, ite_true]
       rw [show (l :: ls).filter (· != 0) = l :: ls.filter (· != 0) from by
         simp only [bne_iff_ne, ne_eq, hl_ne, not_false_eq_true, List.filter_cons_of_pos],
         List.foldl_cons, Nat.zero_add, Nat.add_assoc, ← List.foldl_add_init]
+
+/-- The full Kraft sum `kraftSumFrom 0` equals the Kraft sum in `ValidLengths`. -/
+private theorem kraftSumFrom_eq_kraft_foldl (lengths : List Nat) (maxBits : Nat)
+    (hv : ValidLengths lengths maxBits) :
+    Huffman.Spec.kraftSumFrom (countLengths lengths maxBits) maxBits 0 ≤ 2 ^ maxBits := by
+  rw [Huffman.Spec.kraftSumFrom_zero_eq_foldl lengths maxBits (fun l hl => hv.1 l hl)]
+  exact hv.2
 
 /-- The ncRec recurrence at higher bit lengths bounds from below by
     scaling the value at a lower length:
@@ -311,13 +324,13 @@ protected theorem ncRec_shift (blCount : Array Nat) (b₁ b₂ : Nat) (h : b₁ 
     inequality holds for the full sum from 0. -/
 private theorem ncRec_bound (blCount : Array Nat) (maxBits b : Nat)
     (hb : b ≤ maxBits)
-    (hkraft : kraftSumFrom blCount maxBits 0 ≤ 2 ^ maxBits) :
+    (hkraft : Huffman.Spec.kraftSumFrom blCount maxBits 0 ≤ 2 ^ maxBits) :
     Huffman.Spec.ncRec blCount b + blCount[b]! ≤ 2 ^ b := by
   have hcons := ncRec_kraft_conservation blCount maxBits b hb
-  rw [kraftSumFrom_unfold blCount maxBits b hb] at hcons
+  rw [Huffman.Spec.kraftSumFrom_unfold blCount maxBits b hb] at hcons
   have h1 : (Huffman.Spec.ncRec blCount b + blCount[b]!) * 2 ^ (maxBits - b) ≤ 2 ^ maxBits := by
     have : (Huffman.Spec.ncRec blCount b + blCount[b]!) * 2 ^ (maxBits - b) ≤
-           kraftSumFrom blCount maxBits 0 := by rw [Nat.add_mul]; omega
+           Huffman.Spec.kraftSumFrom blCount maxBits 0 := by rw [Nat.add_mul]; omega
     omega
   rw [show 2 ^ maxBits = 2 ^ b * 2 ^ (maxBits - b) from by
     rw [← Nat.pow_add]; congr 1; omega] at h1

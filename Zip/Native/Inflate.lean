@@ -110,27 +110,6 @@ def fromLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     else
       .ok (fromLengthsTree lengths maxBits)
 
-/-- The code-length validity check that `fromLengths` performs, factored out so a
-    decoder that builds no tree (the canonical tree-free path) can reject exactly
-    the malformed length sets `fromLengths` rejects, with the same error messages:
-    `"Inflate: code length exceeds maximum"` for any length `> maxBits`, and
-    `"Inflate: oversubscribed Huffman code"` when the Kraft sum overflows. Computed
-    cheaply from the lengths alone — no tree, no `count` array, no insertion pass.
-    `fromLengths = (validateLengths …).map (fun _ => fromLengthsTree …)`
-    (`Zip.Spec.InflateTreeFreeCorrect.fromLengths_eq_validate`). -/
-def validateLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
-    Except String Unit :=
-  if lengths.any (fun l => l.toNat > maxBits) then
-    .error "Inflate: code length exceeds maximum"
-  else
-    let lsList := lengths.toList.map UInt8.toNat
-    let kraft := (lsList.filter (· != 0)).foldl
-      (fun acc l => acc + 2 ^ (maxBits - l)) 0
-    if kraft > 2 ^ maxBits then
-      .error "Inflate: oversubscribed Huffman code"
-    else
-      .ok ()
-
 /-- Decode one symbol from the bit reader using this Huffman tree. -/
 def decode (tree : HuffTree) (br : BitReader) :
     Except String (UInt16 × BitReader) :=
@@ -364,6 +343,43 @@ where
       go lengths maxBits (i + 1) count
     else count
   termination_by lengths.size - i
+
+/-- Kraft sum `∑_{len=0}^{maxBits} count[len] · 2^(maxBits − len)` over the
+    per-length histogram, by an `O(maxBits)` tail loop with **no allocation** —
+    `count` is the same array `buildTableCanonicalFast` already builds. (The `len=0`
+    term is zero for a `countLengthsFast` histogram, which never sets index 0, so it
+    contributes nothing while keeping the recurrence aligned with the spec's
+    `kraftSumFrom` from `0`.) The Kraft check `validateLengths` runs is then this
+    sum against `2^maxBits`, replacing the per-block `lengths.toList`/`filter`
+    `List` allocation `fromLengths` uses. -/
+def kraftSumFast (count : Array Nat) (maxBits : Nat) : Nat :=
+  go count maxBits 0 0
+where
+  go (count : Array Nat) (maxBits b acc : Nat) : Nat :=
+    if h : b ≤ maxBits then
+      go count maxBits (b + 1) (acc + count[b]! * 2 ^ (maxBits - b))
+    else acc
+  termination_by maxBits + 1 - b
+
+/-- The code-length validity check that `fromLengths` performs, factored out so a
+    decoder that builds no tree (the canonical tree-free path) can reject exactly
+    the malformed length sets `fromLengths` rejects, with the same error messages:
+    `"Inflate: code length exceeds maximum"` for any length `> maxBits`, and
+    `"Inflate: oversubscribed Huffman code"` when the Kraft sum overflows. The Kraft
+    sum is computed from the per-length `count` histogram (`countLengthsFast` —
+    the same array the canonical table build needs) via the allocation-free
+    `kraftSumFast`, rather than the per-block `List` (`lengths.toList`/`filter`)
+    `fromLengths` allocates; the over-bound check is a plain `Array.any`. No tree is
+    built. `fromLengths = (validateLengths …).map (fun _ => fromLengthsTree …)`
+    (`Zip.Spec.InflateTreeFreeCorrect.fromLengths_eq_validate`). -/
+def validateLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
+    Except String Unit :=
+  if lengths.any (fun l => l.toNat > maxBits) then
+    .error "Inflate: code length exceeds maximum"
+  else if kraftSumFast (countLengthsFast lengths maxBits) maxBits > 2 ^ maxBits then
+    .error "Inflate: oversubscribed Huffman code"
+  else
+    .ok ()
 
 /-- First canonical code per length (RFC 1951 §3.2.2 step 2), as a `UInt32` array
     computed by a direct `1..maxBits` loop — fast form of
