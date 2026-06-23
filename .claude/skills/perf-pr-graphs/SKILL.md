@@ -31,7 +31,7 @@ once the PR is green and before it merges:
    the PR that makes the change. A perf PR that does not also refresh the
    dashboard is incomplete.
 4. **Post** the graphs as a PR comment with the geomean table and caveats
-   (step 9). The `/tmp` PNGs are not durable; the PR comment is the artifact.
+   (step 9). The `$W` PNGs are not durable; the PR comment is the artifact.
 5. **Give Kim the link** to that PR comment in your reply, and stop for her
    go-ahead before merging.
 
@@ -51,7 +51,7 @@ optional nicety.
 The graphs show **native before vs after** on the real corpora (Canterbury +
 Silesia), overlaid on the existing other-language curves (zlib, miniz_oxide,
 libdeflate, Go, JS, Zig, OCaml) for context. The before/after **overlay** PNGs
-(`/tmp/perf_before_after_*`) are a report artifact — NOT committed; they live
+(`$W/perf_before_after_*`) are a report artifact — NOT committed; they live
 only in the PR comment. The **dashboard** (`bench/results/latest.json` and the
 routine `bench/graphs/*.svg`), by contrast, **is** refreshed and committed inside
 this same PR (step 8) — that is how the recorded BEFORE for the *next* perf PR
@@ -73,6 +73,23 @@ stays current.
 Run from the repo root. On NixOS wrap commands in `nix-shell --run "…"` (see the
 project `.claude/CLAUDE.md`); elsewhere run them directly.
 
+**First, make a private per-invocation work dir — never write the overlay
+artifacts to bare `/tmp`.** `chungus` (and any CI/dev box) is shared: several
+agents run *this same skill* at once, and fixed paths like `/tmp/perf_after.json`
+or `/tmp/perf_before_after_*.png` are then silently clobbered mid-run by another
+PR's benchmark. That produces a graph showing *a different PR's* numbers — a
+real failure that has shipped a wrong graph to a PR comment. So derive every
+overlay path (the before/after JSONs, the plot outdir, and the merge-base
+worktree) from a unique directory created up front:
+```
+W="$(mktemp -d "${TMPDIR:-/tmp}/perf-pr.XXXXXX")"   # e.g. /tmp/perf-pr.Ab3xZ9
+echo "$W"   # use this for every /tmp/perf_* path below; it is yours alone
+```
+Every `$W/perf_*.json`, `$W/perf_before_after_*`, and the `$W/before` worktree
+below is private to this run. Keep `bench/results/latest.json` and `bench/graphs`
+(the committed dashboard, step 8) on their real repo paths — only the *overlay*
+artifacts move into `$W`.
+
 1. **Confirm the machine matches the dashboard.** The overlay is only honest if
    you measure on the same machine the committed other-language numbers used:
    ```
@@ -92,12 +109,12 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
 3. **Measure AFTER** (the PR branch, already built):
    ```
    lake build bench-report
-   lake env .lake/build/bin/bench-report --native-only /tmp/perf_after.json
+   lake env .lake/build/bin/bench-report --native-only $W/perf_after.json
    ```
    `--native-only` records native `ratio`, `compress_mbps` and
    `decompress_mbps` and reuses nothing else. For a **decode-only** PR, append a
    level list that skips the slow L9 optimal-parse compress, e.g.
-   `… --native-only /tmp/perf_after.json 1,2,3,4,5,6,7,8` (decode is measured at
+   `… --native-only $W/perf_after.json 1,2,3,4,5,6,7,8` (decode is measured at
    every listed level; native L9 *compress* on 203 MB is minutes of pure waste
    when you only care about decode). For a **compress** PR, keep all 9 levels —
    L9 is usually the point.
@@ -114,7 +131,7 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    BEFORE copy *before* you overwrite it — snapshot the base-branch version to a
    scratch path and pass that to the plotter as BEFORE:
    ```
-   git show origin/master:bench/results/latest.json > /tmp/perf_before.json
+   git show origin/master:bench/results/latest.json > $W/perf_before.json
    ```
 
    **The invariant that makes this valid: `latest.json` must always reflect the
@@ -138,17 +155,17 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    [ -n "$stale" ] && echo "STALE latest.json (recorded at ${rec}); native commits since:" && echo "$stale"
    ```
    - **Empty → snapshot `git show origin/master:bench/results/latest.json >
-     /tmp/perf_before.json` and use that as BEFORE.** Its native rows already
+     $W/perf_before.json` and use that as BEFORE.** Its native rows already
      reflect the merge-base; nothing to rebuild. (Snapshot it rather than reading
      the working-tree file directly, since step 8 overwrites the working tree.)
    - **Non-empty → `latest.json` is stale** (older history that predates this
      in-PR-refresh policy). The refresh this PR does in step 8 *fixes* the
      invariant going forward, but it cannot reconstruct the merge-base BEFORE.
      Recover a correct BEFORE with a one-off merge-base build (`git worktree add
-     --detach /tmp/before $base && ( cd /tmp/before && lake build bench-report &&
-     lake env .lake/build/bin/bench-report --native-only /tmp/perf_before.json )`,
-     then `git worktree remove --force /tmp/before`) and pass
-     `/tmp/perf_before.json` as BEFORE.
+     --detach $W/before $base && ( cd $W/before && lake build bench-report &&
+     lake env .lake/build/bin/bench-report --native-only $W/perf_before.json )`,
+     then `git worktree remove --force $W/before`) and pass
+     `$W/perf_before.json` as BEFORE.
 
    **Cross-session caveat.** BEFORE (recorded earlier) and AFTER (measured now)
    are different sessions, so a small single-digit-% speed delta can be
@@ -176,16 +193,16 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
 
 6. **Plot** (other-language curves are reused from the base-branch snapshot,
    never re-measured). The overlay graphs are a report artifact — write them to
-   the gitignored `/tmp` so they can never be accidentally committed to the perf
-   PR: BEFORE is `/tmp/perf_before.json` (the base-branch `latest.json` snapshot
-   from step 4) — pass it twice, once as BEFORE and once as the reused
+   the private `$W` (outside the repo) so they can never be accidentally committed
+   to the perf PR: BEFORE is `$W/perf_before.json` (the base-branch `latest.json`
+   snapshot from step 4) — pass it twice, once as BEFORE and once as the reused
    other-language source:
    ```
    python3 .claude/skills/perf-pr-graphs/plot_before_after.py \
-     /tmp/perf_before.json /tmp/perf_after.json <compress_mbps|decompress_mbps> \
-     /tmp/perf_before.json /tmp
+     $W/perf_before.json $W/perf_after.json <compress_mbps|decompress_mbps> \
+     $W/perf_before.json $W
    ```
-   This writes `/tmp/perf_before_after_<metric>_<corpus>.{svg,png}` and prints the
+   This writes `$W/perf_before_after_<metric>_<corpus>.{svg,png}` and prints the
    before/after `meta` (machine + git_commit of each run), a row-coverage line
    (any `(pattern, level)` present in one run but not the other), the per-level
    before/after geomean table, and `max |Δratio|`.
@@ -202,8 +219,8 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    step 7.
    ```
    # render BOTH corpora as images and look at them — required, not optional
-   Read /tmp/perf_before_after_<metric>_canterbury.png
-   Read /tmp/perf_before_after_<metric>_silesia.png
+   Read $W/perf_before_after_<metric>_canterbury.png
+   Read $W/perf_before_after_<metric>_silesia.png
    ```
    Present the before/after geomean tables, the per-corpus speedup, **and your
    visual read of where native lands among the other languages**, then **stop for
@@ -235,7 +252,7 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    perf PR's own diff:
    ```
    nix-shell --run "python3 bench/merge_native.py bench/results/latest.json \
-     /tmp/perf_after.json bench/results/latest.json \
+     $W/perf_after.json bench/results/latest.json \
      && python bench/plot.py bench/results/latest.json bench/graphs"
    git add bench/results/latest.json bench/graphs
    git commit -m "bench: refresh dashboard for <this PR's change>"
@@ -259,7 +276,7 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    is compulsory, not "also if convenient": every qualifying PR gets a PR comment
    with the graphs, and your reply to Kim must contain the URL of that comment
    (`gh pr comment` prints it on success — capture it) so she can click straight
-   to it. The PNGs otherwise live only in `/tmp` — so a session Kim was not
+   to it. The PNGs otherwise live only in `$W` — so a session Kim was not
    watching (or that she reads later) leaves her nothing to look at. Make the
    artifact durable and async-visible by embedding the before/after PNGs in a
    `gh pr comment`, alongside the geomean table and the metric/machine/caveat line
@@ -275,7 +292,7 @@ project `.claude/CLAUDE.md`); elsewhere run them directly.
    branch="perf-graphs/pr-${pr}"
    # commit ONLY the PNGs onto a scratch branch, off the PR and off master
    git switch -c "$branch" 2>/dev/null || git switch "$branch"
-   mkdir -p perf-graphs && cp /tmp/perf_before_after_*.png perf-graphs/
+   mkdir -p perf-graphs && cp $W/perf_before_after_*.png perf-graphs/
    git add perf-graphs && git commit -q -m "perf graphs for PR #${pr}"
    git push -u origin "$branch" -q
    gsha=$(git rev-parse HEAD)
@@ -301,7 +318,7 @@ on a small delta — especially on Silesia — measure both sides **back-to-back
 one session** so common-mode noise (background load, turbo, thermal) cancels:
 
 - Build a BEFORE binary at the branch merge-base (`git worktree add --detach
-  /tmp/before $(git merge-base origin/master HEAD)` then `lake build bench-report`
+  $W/before $(git merge-base origin/master HEAD)` then `lake build bench-report`
   in it). The AFTER binary is the PR branch's.
 - Run the two binaries **alternately, N times** (≥5 pairs), each pinned to one
   core (`taskset -c <core>`). Consecutive AFTER/BEFORE runs then see near-identical
@@ -333,11 +350,11 @@ one session** so common-mode noise (background load, turbo, thermal) cancels:
   the ratio (curve moves right) may not be a net win. zopfli's frozen ratio
   ceiling is in `bench/results/zopfli-ceiling.json` if you want the best-ratio
   reference.
-- Keep the **overlay** jsons and PNGs (`/tmp/perf_before*.json`,
-  `/tmp/perf_after.json`, `/tmp/perf_before_after_*`) in `/tmp` — they are the
-  report artifact and must never enter the PR diff. The **dashboard**
+- Keep the **overlay** jsons and PNGs (`$W/perf_before*.json`,
+  `$W/perf_after.json`, `$W/perf_before_after_*`) in the private `$W` — they are
+  the report artifact and must never enter the PR diff. The **dashboard**
   (`bench/results/latest.json` + `bench/graphs/*.svg`) is the opposite: step 8
   commits it into this PR on purpose, so those *should* show up staged. Before
   finishing, confirm the only tree changes from the graph workflow are that
-  committed dashboard pair — no `/tmp` overlay PNG copied into `bench/graphs/`,
-  and (if you used the step-4 stale fallback) no leftover `git worktree`.
+  committed dashboard pair — no `$W` overlay PNG copied into `bench/graphs/`,
+  and (if you used the step-4 stale fallback) no leftover `$W/before` worktree.
