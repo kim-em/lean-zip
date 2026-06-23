@@ -1129,7 +1129,7 @@ theorem walkCanonical_ok_iff_walkTree (lengths : Array UInt8) (maxBits : Nat)
     rw [hwc, hsymrt, ← hbb, show cnt - used = c from by omega]
 
 /-- **`decodeSymCanon` and `decodeSym` accept the same inputs.** They share the
-    9-bit table branch verbatim; the long-code fallback agrees by
+    11-bit table branch verbatim; the long-code fallback agrees by
     `walkCanonical_ok_iff_walkTree`. -/
 theorem decodeSymCanon_ok_iff_decodeSym (lengths : Array UInt8) (maxBits : Nat)
     (hmb : 1 ≤ maxBits) (hmb15 : maxBits ≤ 15)
@@ -1236,17 +1236,17 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
     exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
       data maxOut (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output r
   · rw [dif_neg hrc, dif_neg hrc]
-    by_cases hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-        ∧ (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt
-        ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256
+    by_cases hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+        ∧ (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt
+        ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256
     · rw [dif_pos hlit, dif_pos hlit]
       by_cases hout : output.size ≥ maxOut
       · simp [hout]
       · rw [if_neg hout, if_neg hout]
         exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths hlv hlb hdv hdb
-          data maxOut pos (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
-          (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)
-          (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8) r
+          data maxOut pos (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
+          (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)
+          (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8) r
     · rw [dif_neg hlit, dif_neg hlit]
       -- literal/length symbol decode
       cases hdec : decodeSymCanon (buildLongDecode litLengths 15) litTable 15 bitBuf cnt with
@@ -1364,11 +1364,11 @@ theorem goTreeFreeU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteA
   | case3 pos bitBuf cnt output hrc hlit hmax ih =>
       intro hpos
       obtain ⟨hl0, hl1, hl2⟩ := hlit
-      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
-          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat :=
         toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
-          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat := by
         rw [USize.toNat_sub_of_le _ _ hl1, hlen]
       rw [goTreeFreeU, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
           goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),

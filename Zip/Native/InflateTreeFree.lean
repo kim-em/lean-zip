@@ -4,8 +4,8 @@ import Zip.Native.Inflate
 # Tree-free canonical decode — the production DEFLATE decoder
 
 This file defines the **production** decoders `Inflate.inflate` / `inflateRaw`: a
-DEFLATE Huffman decode that builds **no** Huffman tree. The fast ≤9-bit codes go
-through the canonical 9-bit table (`buildTableCanonicalFast`), and the rare >9-bit
+DEFLATE Huffman decode that builds **no** Huffman tree. The fast ≤11-bit codes go
+through the canonical 11-bit table (`buildTableCanonicalFast`), and the rare >11-bit
 codes go through a canonical bit-by-bit decode keyed off the per-length
 `count` / `firstCode` / sorted-symbol arrays — never a tree walk. This skips the
 `fromLengths`/`insertLoop` build entirely (the ~7% decode win).
@@ -29,7 +29,7 @@ open ZipCommon (BitReader)
 
 namespace HuffTree
 
-/-- Canonical long-code decode tables (for codes longer than the 9-bit window):
+/-- Canonical long-code decode tables (for codes longer than the 11-bit window):
     `count[len]` codes of each length, `firstCode[len]` the first canonical code
     of that length, `firstIndex[len]` the offset into `symbols` (symbols sorted by
     `(length, symbol)`). -/
@@ -104,7 +104,7 @@ where
 /-- `decodeSym` with the canonical long-code fallback (no tree). -/
 @[inline] def decodeSymCanon (ld : LongDecode) (table : DecodeTable) (maxBits : Nat)
     (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
-  let idx := (bitBuf &&& 0x1FF).toNat
+  let idx := (bitBuf &&& 0x7FF).toNat
   let len := (table.lenAt idx).toNat
   if len == 0 || len > cnt then walkCanonical ld maxBits bitBuf cnt
   else .ok (table.symAt idx, bitBuf >>> len.toUInt64, cnt - len, len)
@@ -124,15 +124,15 @@ def goTreeFree (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     goTreeFree litTable distTable litLD distLD maxBits data maxOut
       (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
   else
-  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-      ∧ (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt
-      ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
+  if hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+      ∧ (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt
+      ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goTreeFree litTable distTable litLD distLD maxBits data maxOut pos
-        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
-        (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)
-        (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8)
+        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
+        (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)
+        (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8)
   else
   let cnt0 := cnt
   match decodeSymCanon litLD litTable maxBits bitBuf cnt with
@@ -194,16 +194,16 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
           rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
       (cnt + 8) hsz output
   else
-  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-      ∧ ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize ≤ cnt
-      ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
+  if hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+      ∧ ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize ≤ cnt
+      ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos
-        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
-        (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize)
+        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
+        (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize)
         hsz
-        (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8)
+        (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8)
   else
   let cnt0 := cnt.toNat
   match decodeSymCanon litLD litTable maxBits bitBuf cnt.toNat with
@@ -264,13 +264,13 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
         rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
       rw [hpa, hca]; omega
     · obtain ⟨hne, hle, _⟩ := hlit
-      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
-          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat :=
         toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
-          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat := by
         rw [USize.toNat_sub_of_le _ _ hle, hlen]
-      have hlecnt : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt.toNat :=
+      have hlecnt : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt.toNat :=
         hlen ▸ USize.le_iff_toNat_le.mp hle
       rw [hsub]; omega
     · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits

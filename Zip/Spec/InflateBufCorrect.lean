@@ -215,36 +215,36 @@ theorem mask_lt {bitBuf : UInt64} {n : Nat} (hn64 : n < 64) :
   exact Nat.mod_lt _ (Nat.two_pow_pos n)
 
 open HuffTree in
-/-- `peekFast` is `(_ &&& 0x1FF)`, so its value is `< 512`. -/
-theorem peekFast_lt (br : BitReader) : (peekFast br).toNat < 512 := by
+/-- `peekFast` is `(_ &&& 0x7FF)`, so its value is `< 2048`. -/
+theorem peekFast_lt (br : BitReader) : (peekFast br).toNat < 2048 := by
   simp only [peekFast, UInt32.toNat_and]
   exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
 
 open HuffTree in
-/-- **9-bit table peek matches `peekFast`** when the buffer holds ≥ 9 bits (the
-    common, non-EOF case). Both index the same 9 stream bits at the cursor. -/
+/-- **11-bit table peek matches `peekFast`** when the buffer holds ≥ 11 bits (the
+    common, non-EOF case). Both index the same 11 stream bits at the cursor. -/
 theorem peek_eq {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
-    (hcnt : 9 ≤ cnt) :
-    (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := by
-  have h9 : (0x1FF : UInt64) = (1 <<< (9 : Nat).toUInt64) - 1 := by decide
+    (hcnt : 11 ≤ cnt) :
+    (bitBuf &&& 0x7FF).toNat = (peekFast br).toNat := by
+  have h9 : (0x7FF : UInt64) = (1 <<< (11 : Nat).toUInt64) - 1 := by decide
   have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
   apply Nat.eq_of_testBit_eq
   intro j
-  by_cases hj9 : j < 9
-  · have hbuf : (bitBuf &&& 0x1FF).toNat.testBit j = streamBit data (br.bitPos + j) := by
+  by_cases hj9 : j < 11
+  · have hbuf : (bitBuf &&& 0x7FF).toNat.testBit j = streamBit data (br.bitPos + j) := by
       rw [h9]; exact mask_testBit h (by omega) (by omega) hj9
     have hin : br.pos * 8 + br.bitOff + j < br.data.size * 8 := by
       have hs := h.span; have hp := h.posLe; rw [hdata, ← hbp]; omega
     rw [hbuf, peekFast_testBit br j hwf (by simp only [fastBits]; omega) hin]
     simp only [streamBit, ← hbp, hdata]
-  · have h2j : (512 : Nat) ≤ 2 ^ j := by
-      calc (512 : Nat) = 2 ^ 9 := by decide
+  · have h2j : (2048 : Nat) ≤ 2 ^ j := by
+      calc (2048 : Nat) = 2 ^ 11 := by decide
         _ ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega)
-    have hbuf : (bitBuf &&& 0x1FF).toNat.testBit j = false := by
+    have hbuf : (bitBuf &&& 0x7FF).toNat.testBit j = false := by
       apply Nat.testBit_lt_two_pow
       rw [h9]; exact Nat.lt_of_lt_of_le (mask_lt (by omega)) (by
-        calc (2 : Nat) ^ 9 ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega))
+        calc (2 : Nat) ^ 11 ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega))
     rw [hbuf, Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (peekFast_lt br) h2j)]
 
 /-- A `BitReader`'s bit-list view is the stream from its cursor. -/
@@ -406,12 +406,12 @@ theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : 
       rw [show br.readBits n = BitReader.readBits.go br 0 0 n from rfl, hok] at h'
       exact absurd h' (by simp)
 
-/-- The buffer's 9-bit table index, bit by bit: the stream bit while `j < cnt`,
+/-- The buffer's 11-bit table index, bit by bit: the stream bit while `j < cnt`,
     else 0 (works for any `cnt`, unlike `mask_testBit`). -/
-theorem peek9_buf_testBit {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt : Nat}
-    (h : BufCorr data bitpos pos bitBuf cnt) (j : Nat) (hj : j < 9) :
-    (bitBuf &&& 0x1FF).toNat.testBit j = if j < cnt then streamBit data (bitpos + j) else false := by
-  rw [UInt64.toNat_and, show (0x1FF : UInt64).toNat = 2 ^ 9 - 1 from by decide,
+theorem peek11_buf_testBit {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt : Nat}
+    (h : BufCorr data bitpos pos bitBuf cnt) (j : Nat) (hj : j < 11) :
+    (bitBuf &&& 0x7FF).toNat.testBit j = if j < cnt then streamBit data (bitpos + j) else false := by
+  rw [UInt64.toNat_and, show (0x7FF : UInt64).toNat = 2 ^ 11 - 1 from by decide,
     Nat.and_two_pow_sub_one_eq_mod, Nat.testBit_mod_two_pow]
   simp only [hj, decide_true, Bool.true_and]
   split
@@ -423,11 +423,11 @@ open HuffTree in
 /-- **`peekFast` past end-of-stream reads 0.** The mirror of `peekFast_testBit`
     for bit positions at or beyond `data.size * 8`: the contributing byte is out
     of range, so the bit is 0. -/
-theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (hj : j < 9)
+theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (hj : j < 11)
     (hge : br.data.size * 8 ≤ br.pos * 8 + br.bitOff + j) :
     (peekFast br).toNat.testBit j = false := by
-  have hmask : (0x1FF : UInt32).toNat.testBit j = true := by
-    rw [show (0x1FF : UInt32).toNat = 2 ^ 9 - 1 from by decide, Nat.testBit_two_pow_sub_one]
+  have hmask : (0x7FF : UInt32).toNat.testBit j = true := by
+    rw [show (0x7FF : UInt32).toNat = 2 ^ 11 - 1 from by decide, Nat.testBit_two_pow_sub_one]
     simp only [decide_eq_true_eq]; omega
   have hshift : br.bitOff.toUInt32.toNat % 32 = br.bitOff := by
     simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat, Nat.reducePow]; omega
@@ -441,6 +441,11 @@ theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (h
     split
     · rw [UInt8.toNat_toUInt32]
     · rfl
+  have hb2eq : (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toUInt32 else (0 : UInt32)).toNat
+      = (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toNat else 0) := by
+    split
+    · rw [UInt8.toNat_toUInt32]
+    · rfl
   have hb1lt : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0) < 256 := by
     split
     · have := UInt8.toNat_lt br.data[br.pos + 1]!; omega
@@ -449,42 +454,71 @@ theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (h
     split
     · have := UInt8.toNat_lt br.data[br.pos]!; omega
     · decide
+  have hb2lt : (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toNat else 0) < 256 := by
+    split
+    · have := UInt8.toNat_lt br.data[br.pos + 2]!; omega
+    · decide
   -- byte-out-of-range facts, derived while the context still has plain `br.bitOff`
   have hbyte : (br.bitOff + j < 8 → br.data.size ≤ br.pos)
-      ∧ (8 ≤ br.bitOff + j → br.data.size ≤ br.pos + 1) := by
-    constructor <;> intro h8 <;> omega
+      ∧ (8 ≤ br.bitOff + j → br.bitOff + j < 16 → br.data.size ≤ br.pos + 1)
+      ∧ (16 ≤ br.bitOff + j → br.data.size ≤ br.pos + 2) :=
+    ⟨fun _ => by omega, fun _ _ => by omega, fun _ => by omega⟩
   unfold peekFast
   rw [UInt32.toNat_and, Nat.testBit_and, UInt32.toNat_shiftRight, Nat.testBit_shiftRight,
-    hmask, Bool.and_true, hshift, UInt32.toNat_or, Nat.testBit_or, hb0eq,
+    hmask, Bool.and_true, hshift, UInt32.toNat_or, UInt32.toNat_or, Nat.testBit_or,
+    Nat.testBit_or, hb0eq,
     UInt32.toNat_shiftLeft, show (8 : UInt32).toNat % 32 = 8 from by decide, hb1eq,
     Nat.mod_eq_of_lt (by rw [Nat.shiftLeft_eq, show (2 : Nat) ^ 8 = 256 from by decide,
       show (2 : Nat) ^ 32 = 4294967296 from by decide]; omega),
-    Nat.testBit_shiftLeft]
+    UInt32.toNat_shiftLeft, show (16 : UInt32).toNat % 32 = 16 from by decide, hb2eq,
+    Nat.mod_eq_of_lt (by rw [Nat.shiftLeft_eq, show (2 : Nat) ^ 16 = 65536 from by decide,
+      show (2 : Nat) ^ 32 = 4294967296 from by decide]; omega),
+    Nat.testBit_shiftLeft, Nat.testBit_shiftLeft]
   by_cases hlo : br.bitOff + j < 8
-  · -- byte `pos` holds the bit, but it is out of range (pos ≥ size); `b1<<8` vanishes
-    rw [if_neg (Nat.not_lt.mpr (hbyte.1 hlo)),
-      show decide (br.bitOff + j ≥ 8) = false from by
-        simp only [decide_eq_false_iff_not]; exact Nat.not_le.mpr hlo]
-    simp
-  · -- `b0`'s bit is past its 8-bit width (false); byte `pos+1` is out of range
-    have h8 : 8 ≤ br.bitOff + j := Nat.not_lt.mp hlo
-    have h256 : (256 : Nat) ≤ 2 ^ (br.bitOff + j) := by
-      calc (256 : Nat) = 2 ^ 8 := by decide
-        _ ≤ 2 ^ (br.bitOff + j) := Nat.pow_le_pow_right (by omega) h8
-    rw [show (if br.pos < br.data.size then br.data[br.pos]!.toNat else 0).testBit (br.bitOff + j) = false from
-        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hb0lt h256),
-      if_neg (Nat.not_lt.mpr (hbyte.2 h8))]
-    simp
+  · -- byte `pos` holds the bit, but it is out of range (pos ≥ size); high bytes vanish
+    have e8 : decide (br.bitOff + j ≥ 8) = false := by simp only [decide_eq_false_iff_not]; omega
+    have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
+    rw [if_neg (Nat.not_lt.mpr (hbyte.1 hlo))]
+    simp only [e8, e16, Bool.false_and, Bool.or_false, Nat.zero_testBit]
+  · by_cases hmid : br.bitOff + j < 16
+    · -- byte `pos`'s bit is past its width; byte `pos+1` is out of range
+      have h8 : 8 ≤ br.bitOff + j := Nat.not_lt.mp hlo
+      have hb0f : (if br.pos < br.data.size then br.data[br.pos]!.toNat else 0).testBit
+            (br.bitOff + j) = false :=
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hb0lt (by
+          calc (256 : Nat) = 2 ^ 8 := by decide
+            _ ≤ 2 ^ (br.bitOff + j) := Nat.pow_le_pow_right (by omega) h8))
+      have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
+      have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
+      rw [if_neg (Nat.not_lt.mpr (hbyte.2.1 h8 hmid))]
+      simp only [hb0f, e8, e16, Bool.true_and, Bool.false_and, Bool.false_or, Bool.or_false,
+        Nat.zero_testBit]
+    · -- bytes `pos`, `pos+1` contribute no bit; byte `pos+2` is out of range
+      have h16 : 16 ≤ br.bitOff + j := Nat.not_lt.mp hmid
+      have hb0f : (if br.pos < br.data.size then br.data[br.pos]!.toNat else 0).testBit
+            (br.bitOff + j) = false :=
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hb0lt (by
+          calc (256 : Nat) = 2 ^ 8 := by decide
+            _ ≤ 2 ^ (br.bitOff + j) := Nat.pow_le_pow_right (by omega) (by omega)))
+      have hb1f : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0).testBit
+            (br.bitOff + j - 8) = false :=
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hb1lt (by
+          calc (256 : Nat) = 2 ^ 8 := by decide
+            _ ≤ 2 ^ (br.bitOff + j - 8) := Nat.pow_le_pow_right (by omega) (by omega)))
+      have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
+      have e16 : decide (br.bitOff + j ≥ 16) = true := by simp only [decide_eq_true_eq]; omega
+      rw [if_neg (Nat.not_lt.mpr (hbyte.2.2 h16))]
+      simp only [hb0f, hb1f, e8, e16, Bool.true_and, Bool.false_or, Nat.zero_testBit]
 
 open HuffTree in
-/-- **9-bit table peek = `peekFast`, including end-of-stream.** Under the
-    post-`refill` condition (`56 < cnt`, i.e. ≥ 9 bits, or input exhausted),
+/-- **11-bit table peek = `peekFast`, including end-of-stream.** Under the
+    post-`refill` condition (`56 < cnt`, i.e. ≥ 11 bits, or input exhausted),
     the wide-buffer index equals `peekFast`'s — matching even the zero-padded
     high bits past the end of the stream. -/
 theorem peek_eq_refilled {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
-    (hr : 8 < cnt ∨ pos = data.size) :
-    (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat := by
+    (hr : 10 < cnt ∨ pos = data.size) :
+    (bitBuf &&& 0x7FF).toNat = (peekFast br).toNat := by
   rcases hr with hc | hpos
   · exact peek_eq h hwf hdata (by omega)
   · have hbp : br.bitPos = br.pos * 8 + br.bitOff := rfl
@@ -492,8 +526,8 @@ theorem peek_eq_refilled {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf
     have hsp := h.span
     apply Nat.eq_of_testBit_eq
     intro j
-    by_cases hj9 : j < 9
-    · rw [peek9_buf_testBit h j hj9]
+    by_cases hj9 : j < 11
+    · rw [peek11_buf_testBit h j hj9]
       split
       · rename_i hjc
         have hin : br.pos * 8 + br.bitOff + j < br.data.size * 8 := by omega
@@ -502,10 +536,10 @@ theorem peek_eq_refilled {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf
       · rename_i hjc
         have hge : br.data.size * 8 ≤ br.pos * 8 + br.bitOff + j := by omega
         rw [peekFast_testBit_eof br j hwf hj9 hge]
-    · have h2j : (512 : Nat) ≤ 2 ^ j := by
-        calc (512 : Nat) = 2 ^ 9 := by decide
+    · have h2j : (2048 : Nat) ≤ 2 ^ j := by
+        calc (2048 : Nat) = 2 ^ 11 := by decide
           _ ≤ 2 ^ j := Nat.pow_le_pow_right (by omega) (by omega)
-      have hb : (bitBuf &&& 0x1FF).toNat.testBit j = false :=
+      have hb : (bitBuf &&& 0x7FF).toNat.testBit j = false :=
         Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le
           (by rw [UInt64.toNat_and]; exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)) h2j)
       rw [hb, Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (peekFast_lt br) h2j)]
@@ -730,7 +764,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
     {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : UInt64} {cnt : Nat}
     (h : BufCorr data br.bitPos pos bitBuf cnt) (hwf : br.bitOff < 8) (hdata : br.data = data)
     (hr : 21 < cnt ∨ pos = data.size)
-    (hlen : (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ 9) (hdep : treeDepthLE tree 15) :
+    (hlen : (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ 11) (hdep : treeDepthLE tree 15) :
     match HuffTree.decodeWithTable tree table br, decodeSym tree table bitBuf cnt with
     | .error e1, .error e2 => e1 = e2
     | .ok (s1, br'), .ok (s2, bb, c, used) =>
@@ -746,7 +780,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
     by_cases hpe : br.pos ≥ br.data.size
     · rw [if_pos hpe]; exact ⟨by omega, fun _ => by omega⟩
     · rw [if_neg hpe]; exact ⟨by omega, fun hh => by subst hh; omega⟩
-  have hidx : (bitBuf &&& 0x1FF).toNat = (peekFast br).toNat :=
+  have hidx : (bitBuf &&& 0x7FF).toNat = (peekFast br).toNat :=
     peek_eq_refilled h hwf hdata (hr.imp (fun hc => by omega) id)
   rw [hidx] at hlen
   unfold HuffTree.decodeWithTable decodeSym
@@ -755,7 +789,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
   -- generalize the packed table's len/sym projections of this slot
   generalize hlenv : table.lenAt (peekFast br).toNat = lenB at hlen ⊢
   generalize hsymv : table.symAt (peekFast br).toNat = symV
-  -- the two guards have the same truth value (cnt vs bitsAvail, with len ≤ 9)
+  -- the two guards have the same truth value (cnt vs bitsAvail, with len ≤ 11)
   have hgd : (lenB.toNat == 0 || decide (lenB.toNat > HuffTree.bitsAvail br))
            = (lenB.toNat == 0 || decide (lenB.toNat > cnt)) := by
     rcases hr with hc | hpe
@@ -784,20 +818,20 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
     have hbpe : ({ br with pos := br.pos + (br.bitOff + lenB.toNat) / 8, bitOff := (br.bitOff + lenB.toNat) % 8 } : BitReader).bitPos = br.bitPos + lenB.toNat := by simp only [BitReader.bitPos]; omega
     exact ⟨rfl, hbpe.symm ▸ hcc, hdata, Nat.mod_lt _ (by decide), Nat.sub_le cnt _, by omega⟩
 
-/-- Every `buildTable` entry's code length is at most `fastBits = 9`
+/-- Every `buildTable` entry's code length is at most `fastBits = 11`
     (the table walk stops at `fastBits`, or returns the `0` sentinel). -/
 theorem buildTable_codeLen_le (tree : HuffTree) (idx : Nat) (hidx : idx < 2 ^ HuffTree.fastBits) :
-    (tree.buildTable.lenAt idx).toNat ≤ 9 := by
+    (tree.buildTable.lenAt idx).toNat ≤ 11 := by
   rw [HuffTree.buildTable_lenAt tree idx hidx, HuffTree.tableEntry]
   rcases hg : HuffTree.tableEntry.go tree idx 0 with ⟨sym, lenB⟩
-  show lenB.toNat ≤ 9
+  show lenB.toNat ≤ 11
   by_cases hp : 0 < lenB.toNat
   · have := HuffTree.tableEntry_go_len_le tree idx 0 sym lenB hg (by simp [HuffTree.fastBits]) hp
     simp only [HuffTree.fastBits] at this; omega
   · omega
 
-/-- The 9-bit buffer index is `< 2^fastBits`. -/
-theorem buf_idx_lt (bitBuf : UInt64) : (bitBuf &&& 0x1FF).toNat < 2 ^ HuffTree.fastBits := by
+/-- The 11-bit buffer index is `< 2^fastBits`. -/
+theorem buf_idx_lt (bitBuf : UInt64) : (bitBuf &&& 0x7FF).toNat < 2 ^ HuffTree.fastBits := by
   simp only [HuffTree.fastBits]
   rw [UInt64.toNat_and]
   exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
@@ -821,13 +855,16 @@ open HuffTree in
     equals `Inflate.decodeHuffmanFastBR.go`: same output/error, and on success the
     final buffer corresponds to the final reader. `go` refills internally, so the
     only precondition is the buffer invariant. -/
-theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : ByteArray}
-    (hldep : treeDepthLE litTree 15) (hddep : treeDepthLE distTree 15) :
+theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.DecodeTable)
+    (maxOut dataSize : Nat) {data : ByteArray}
+    (hldep : treeDepthLE litTree 15) (hddep : treeDepthLE distTree 15)
+    (hlitlen : ∀ bb : UInt64, (litTable.lenAt (bb &&& 0x7FF).toNat).toNat ≤ 11)
+    (hdistlen : ∀ bb : UInt64, (distTable.lenAt (bb &&& 0x7FF).toNat).toNat ≤ 11) :
     ∀ (br : BitReader) (output : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat),
     BufCorr data br.bitPos pos bitBuf cnt → br.bitOff < 8 → br.data = data →
-    match Inflate.decodeHuffmanFastBR.go litTree distTree maxOut litTree.buildTable distTree.buildTable
+    match Inflate.decodeHuffmanFastBR.go litTree distTree maxOut litTable distTable
             dataSize br output,
-          go litTree.buildTable distTree.buildTable data litTree distTree maxOut dataSize pos bitBuf cnt
+          go litTable distTable data litTree distTree maxOut dataSize pos bitBuf cnt
             br.bitPos output with
     | .error e1, .error e2 => e1 = e2
     | .ok (out1, br'), .ok (out2, _pos', bitBuf', cnt', bitpos') =>
@@ -843,14 +880,15 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
     rcases hrf : refill data pos bitBuf cnt with ⟨pos1, bitBuf1, cnt1⟩
     obtain ⟨hbc1, hr1⟩ := refill_corr hbc hrf
     -- decodeSym ↔ decodeWithTable (literal symbol)
-    have hsy := decodeSym_corr' litTree hbc1 hwf hdata (hr1.imp (fun h => by omega) id) hldep
+    have hsy := decodeSym_corr litTree litTable hbc1 hwf hdata (hr1.imp (fun h => by omega) id)
+      (hlitlen _) hldep
     -- Split on the symbol decode BEFORE unfolding the loop bodies: while `go` is
     -- still an opaque application the goal contains no `decodeWithTable`/`decodeSym`
     -- subterm, so the `cases` does no `kabstract` over the giant inlined body. We
     -- unfold and reduce with targeted `rw` inside each branch instead.
-    cases hdwt : litTree.decodeWithTable litTree.buildTable br with
+    cases hdwt : litTree.decodeWithTable litTable br with
     | error e1 =>
-      cases hds2 : decodeSym litTree litTree.buildTable bitBuf1 cnt1 with
+      cases hds2 : decodeSym litTree litTable bitBuf1 cnt1 with
       | error e2 =>
         rw [hdwt, hds2] at hsy
         rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
@@ -861,7 +899,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
       | ok p2 => rw [hdwt, hds2] at hsy; simp at hsy
     | ok p1 =>
       obtain ⟨sym, br₁⟩ := p1
-      cases hds2 : decodeSym litTree litTree.buildTable bitBuf1 cnt1 with
+      cases hds2 : decodeSym litTree litTable bitBuf1 cnt1 with
       | error e2 => rw [hdwt, hds2] at hsy; simp at hsy
       | ok p2 =>
         obtain ⟨symB, bb, c, used⟩ := p2
@@ -927,10 +965,10 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                   rcases hr1 with h56 | hp
                   · exact Or.inl (by omega)
                   · exact Or.inr hp
-                have htd := decodeSym_corr' distTree hbc3 hbo3 hbd3 hbud_d hddep
-                cases hXd : distTree.decodeWithTable distTree.buildTable br₂ with
+                have htd := decodeSym_corr distTree distTable hbc3 hbo3 hbd3 hbud_d (hdistlen _) hddep
+                cases hXd : distTree.decodeWithTable distTable br₂ with
                 | error e1 =>
-                  cases hYd : decodeSym distTree distTree.buildTable bb2 c2 with
+                  cases hYd : decodeSym distTree distTable bb2 c2 with
                   | error e2 =>
                     rw [hXd, hYd] at htd
                     rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
@@ -943,7 +981,7 @@ theorem go_corr (litTree distTree : HuffTree) (maxOut dataSize : Nat) {data : By
                   | ok q => rw [hXd, hYd] at htd; exact absurd htd (by simp)
                 | ok pd =>
                   obtain ⟨distSym, br₃⟩ := pd
-                  cases hYd : decodeSym distTree distTree.buildTable bb2 c2 with
+                  cases hYd : decodeSym distTree distTable bb2 c2 with
                   | error e2 => rw [hXd, hYd] at htd; exact absurd htd (by simp)
                   | ok q =>
                     obtain ⟨dsymB, bb3, c3, dused⟩ := q
@@ -1126,13 +1164,13 @@ theorem go_refill_step (litTable distTable : HuffTree.DecodeTable) (data : ByteA
     inline table read does it — near-definitional, the else branch of `decodeSym`. -/
 theorem decodeSym_inline (tree : HuffTree) (table : HuffTree.DecodeTable)
     (bitBuf : UInt64) (cnt : Nat)
-    (h0 : (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0)
-    (hle : (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt) :
+    (h0 : (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0)
+    (hle : (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt) :
     decodeSym tree table bitBuf cnt =
-      .ok (table.symAt (bitBuf &&& 0x1FF).toNat,
-        bitBuf >>> ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64,
-        cnt - (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat,
-        (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat) := by
+      .ok (table.symAt (bitBuf &&& 0x7FF).toNat,
+        bitBuf >>> ((table.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64,
+        cnt - (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat,
+        (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat) := by
   unfold decodeSym
   simp only []
   rw [if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
@@ -1226,11 +1264,11 @@ theorem goFusedP_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArra
           goFused, dif_neg hrc, decodeSym_inline litTree litTable bitBuf cnt hl0 hl1]
       simp only []
       rw [if_pos hl2, if_neg hmax,
-          dif_neg (show ¬ bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)) ≤ bp by omega),
-          dif_neg (show ¬ data.size * 8 < bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)) by
+          dif_neg (show ¬ bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)) ≤ bp by omega),
+          dif_neg (show ¬ data.size * 8 < bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)) by
             have : pos * 8 ≤ data.size * 8 := by omega
             omega)]
-      exact ih (bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat))) (by omega) (by omega)
+      exact ih (bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat))) (by omega) (by omega)
   | case4 pos bitBuf cnt output hrc hlit e hde =>
       intro bp hpos hbp
       rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
@@ -1467,11 +1505,11 @@ theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArr
   | case3 pos bitBuf cnt output hrc hlit hmax ih =>
       intro hpos
       obtain ⟨hl0, hl1, hl2⟩ := hlit
-      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
-          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat :=
         InflateBuf.toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
-          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat := by
         rw [USize.toNat_sub_of_le _ _ hl1, hlen]
       rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
           InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
@@ -1616,7 +1654,9 @@ theorem decodeHuffmanFastBuf_eq (br : BitReader) (output : ByteArray)
     · have hs := hbc1.span; rw [hpe] at hs; omega
   have hbc2 : BufCorr br.data br.bitPos pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) :=
     consume_corr hbc1 hboff (by omega)
-  have hco := go_corr litTree distTree maxOut br.data.size hldep hddep br output pos0
+  have hco := go_corr litTree distTree litTree.buildTable distTree.buildTable maxOut br.data.size
+    hldep hddep (fun bb => buildTable_codeLen_le litTree _ (buf_idx_lt bb))
+    (fun bb => buildTable_codeLen_le distTree _ (buf_idx_lt bb)) br output pos0
     (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) hbc2 hwf rfl
   unfold InflateBuf.decodeHuffmanFastBuf Inflate.decodeHuffmanFastBR
   rw [hrf]
