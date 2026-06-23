@@ -179,7 +179,9 @@ def nativeCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
   pure (Zip.Native.Deflate.deflateRaw data level.toUInt8)
 
 def nativeDecompress (data : ByteArray) (origSize : Nat) : IO ByteArray :=
-  match Zip.Native.Inflate.inflate data (sizeHint := origSize) with
+  -- Measure the shipped production decode path (tree-free), with the same
+  -- output presizing as the production callers.
+  match (Zip.Native.Inflate.inflateRawTreeFree data (sizeHint := origSize)).map Prod.fst with
   | .ok b => pure b
   | .error e => throw (IO.userError e)
 
@@ -326,10 +328,11 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
   IO.eprintln s!"Wrote {rows.length} zopfli rows → {outPath}"
 
 /-- Decode `ref`, optionally pre-sizing the output to `hint` (`0` = no hint).
-    `@[noinline]` keeps the pure `inflate` call from being hoisted out of the
+    Measures the shipped production decode path (tree-free).
+    `@[noinline]` keeps the pure decode call from being hoisted out of the
     timed loop (it is otherwise loop-invariant), so each timed call really decodes. -/
 @[noinline] def decodeForAB (ref : ByteArray) (hint : Nat) : IO Nat := do
-  match Zip.Native.Inflate.inflate ref (sizeHint := hint) with
+  match (Zip.Native.Inflate.inflateRawTreeFree ref (sizeHint := hint)).map Prod.fst with
   | .ok b => sink b
   | .error e => throw (IO.userError e)
 
