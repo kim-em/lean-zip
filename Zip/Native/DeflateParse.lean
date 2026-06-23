@@ -82,22 +82,22 @@ def chainWalkAll (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
     -- The byte reads are proven-bounds (`bestLen < maxLen` plus `hcand`/`hpm`);
     -- the chain reads below stay panic-checked because this is the fallback
     -- reference, invoked by `chainWalkAllGuarded` precisely when the
-    -- `pos ≤ prev.size` invariant cannot be established (the proven-bounds hot
-    -- path is `chainWalkAllFast`).
+    -- `min chainWinSize data.size ≤ prev.size` invariant cannot be established (the
+    -- proven-bounds hot path is `chainWalkAllFast`).
     let skip : Bool := if hbl : bestLen < maxLen then
         data[cand + bestLen]'(by omega) != data[pos + bestLen]'(by omega) else false
     if skip then
-      chainWalkAll data prev pos maxLen hpm (prev[cand]!) (fuel - 1) bestLen k slotBase lens dists
+      chainWalkAll data prev pos maxLen hpm prev[cand &&& 0x7FFF]! (fuel - 1) bestLen k slotBase lens dists
     else
     let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
     if 3 ≤ ml ∧ bestLen < ml then
       let lens := lens.set! (slotBase + k) ml
       let dists := dists.set! (slotBase + k) (pos - cand)
       if min optNiceLen maxLen ≤ ml then (lens, dists)
-      else chainWalkAll data prev pos maxLen hpm (prev[cand]!) (fuel - 1) ml (k + 1)
+      else chainWalkAll data prev pos maxLen hpm prev[cand &&& 0x7FFF]! (fuel - 1) ml (k + 1)
         slotBase lens dists
     else
-      chainWalkAll data prev pos maxLen hpm (prev[cand]!) (fuel - 1) bestLen k
+      chainWalkAll data prev pos maxLen hpm prev[cand &&& 0x7FFF]! (fuel - 1) bestLen k
         slotBase lens dists
   else (lens, dists)
 termination_by fuel
@@ -105,14 +105,15 @@ decreasing_by all_goals omega
 
 /-- Proven-bounds copy of `chainWalkAll` (Wave 3 Step 0.1, same generational
     pattern as `chainWalkFast`/`updateHashesFast` in `Deflate.lean`):
-    `prev[cand]` is in range because the walk guard gives `cand < pos` and
-    `hps : pos ≤ prev.size`; the slot writes are in range because the slot
+    the circular `prev[cand &&& 0x7FFF]` is in range because the mask gives
+    `cand &&& 0x7FFF < chainWinSize` and `hps : min chainWinSize data.size ≤ prev.size`; the
+    slot writes are in range because the slot
     guard gives `k < optCacheSlots` and `hsl`/`hsd` bound the whole slot
     block. Once established, the three hypotheses discharge every access in
     the loop statically. -/
 def chainWalkAllFast (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
     (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat)
-    (lens dists : Array Nat) (hps : pos ≤ prev.size)
+    (lens dists : Array Nat) (hps : min chainWinSize data.size ≤ prev.size)
     (hsl : slotBase + optCacheSlots ≤ lens.size)
     (hsd : slotBase + optCacheSlots ≤ dists.size) : Array Nat × Array Nat :=
   if fuel = 0 then (lens, dists)
@@ -127,7 +128,7 @@ def chainWalkAllFast (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
         data[cand + bestLen]'(by omega) != data[pos + bestLen]'(by omega)
       else false
     if skip then
-      chainWalkAllFast data prev pos maxLen hpm (prev[cand]'(by omega)) (fuel - 1) bestLen k
+      chainWalkAllFast data prev pos maxLen hpm (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)) (fuel - 1) bestLen k
         slotBase lens dists hps hsl hsd
     else
     let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
@@ -136,25 +137,25 @@ def chainWalkAllFast (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
       have hbd : slotBase + k < dists.size := by omega
       if min optNiceLen maxLen ≤ ml then
         (lens.set (slotBase + k) ml hbl, dists.set (slotBase + k) (pos - cand) hbd)
-      else chainWalkAllFast data prev pos maxLen hpm (prev[cand]'(by omega)) (fuel - 1) ml (k + 1)
+      else chainWalkAllFast data prev pos maxLen hpm (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)) (fuel - 1) ml (k + 1)
         slotBase (lens.set (slotBase + k) ml hbl) (dists.set (slotBase + k) (pos - cand) hbd)
         hps (by simpa using hsl) (by simpa using hsd)
     else
-      chainWalkAllFast data prev pos maxLen hpm (prev[cand]'(by omega)) (fuel - 1) bestLen k
+      chainWalkAllFast data prev pos maxLen hpm (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)) (fuel - 1) bestLen k
         slotBase lens dists hps hsl hsd
   else (lens, dists)
 termination_by fuel
 decreasing_by all_goals omega
 
-/-- One runtime check (`pos ≤ prev.size` plus the slot block fitting in
+/-- One runtime check (`min chainWinSize data.size ≤ prev.size` plus the slot block fitting in
     `lens`/`dists`) guards the whole `chainWalkAllFast` walk; the fallback is
     the original panic-checked `chainWalkAll` (unreachable in practice —
-    `buildCache` callers size `prev` to the input and the cache arrays to
-    `slots * r`), so the wrapper is value-identical to `chainWalkAll`. -/
+    `buildCache` callers give `prev` the fixed 32768-entry ring and the cache
+    arrays `slots * r`), so the wrapper is value-identical to `chainWalkAll`. -/
 @[inline] def chainWalkAllGuarded (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
     (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat)
     (lens dists : Array Nat) : Array Nat × Array Nat :=
-  if hg : pos ≤ prev.size ∧ slotBase + optCacheSlots ≤ lens.size ∧
+  if hg : min chainWinSize data.size ≤ prev.size ∧ slotBase + optCacheSlots ≤ lens.size ∧
       slotBase + optCacheSlots ≤ dists.size then
     chainWalkAllFast data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
       hg.1 hg.2.1 hg.2.2
@@ -185,7 +186,8 @@ decreasing_by all_goals omega
     `optCacheSlots`): literal constants in the body make the well-founded
     elaboration attempt deep reduction of the `chainWalkAll` application and
     blow the recursion limit. -/
-def buildCache (data : ByteArray) (hashTable prev : Array Nat) (depth slots base r j : Nat)
+def buildCache (data : ByteArray) (hashTable : Array Nat) (prev : Array Nat)
+    (depth slots base r j : Nat)
     (lens dists : Array Nat) : Array Nat × Array Nat × Array Nat × Array Nat :=
   if hj : j < r then
     let pos := base + j
@@ -193,7 +195,7 @@ def buildCache (data : ByteArray) (hashTable prev : Array Nat) (depth slots base
       let h := hash3opt data pos 65536 hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hpm : pos + maxLen ≤ data.size := by omega
       let (lens, dists) := chainWalkAllGuarded data prev pos maxLen hpm head depth
@@ -483,7 +485,8 @@ decreasing_by all_goals omega
     region's own round-1 parse. Returns the updated chain state and choice
     arrays. -/
 def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
-    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
+    (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
     Array Nat × Array Nat × Array Nat × Array Nat :=
@@ -521,7 +524,8 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
 /-- `fillRegionRounds` only `set!`s the choice arrays, so it preserves their
     sizes (both DP rounds go through `fillRegion`). -/
 private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots base r : Nat)
-    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
+    (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
     (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
@@ -530,7 +534,8 @@ private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots base
   simp only [fillRegion_fst_size]
 
 private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots base r : Nat)
-    (slit slen sdist : Array Nat) (hashTable prev chLen chDist : Array Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
+    (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
     (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
@@ -552,7 +557,7 @@ private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots bas
     parameter is a footgun (too little fuel silently yields a partial fill), so
     only `computeChoices` (which passes `data.size`) may call it. -/
 private def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
-    (slit slen sdist : Array Nat) (hashTable prev : Array Nat) (base : Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat) (base : Nat)
     (chLen chDist : Array Nat) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (fuel : Nat) :
     Array Nat × Array Nat :=
@@ -581,7 +586,7 @@ private def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
 def computeChoices (data : ByteArray) : Array Nat × Array Nat :=
   let st := staticCostTables
   computeChoicesLoop data optChainDepth optCacheSlots optRegionSize st.1 st.2.1 st.2.2
-    (Array.replicate 65536 data.size) (Array.replicate data.size data.size)
+    (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
     0 (Array.replicate data.size 1) (Array.replicate data.size 0)
     (by have h : st.1.size = 256 := staticCostTables_fst_size; omega)
     (by simp) (by simp) data.size

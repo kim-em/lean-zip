@@ -48,7 +48,7 @@ private theorem trailingP_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Tok
 /-- The packed greedy `mainLoop` is the packed image of the boxed one:
     identical control flow and chain state, `packTok` at each push. -/
 private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
     lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos
         (acc.map packTok) =
       (lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos
@@ -80,7 +80,7 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap : Na
     (`matchLen < goodMatch`) is applied identically in both, so the branch tree
     stays in lockstep — one extra split versus the ungated proof. -/
 private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
     lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch hashTable prev pos
         (acc.map packTok) =
       (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch hashTable prev pos

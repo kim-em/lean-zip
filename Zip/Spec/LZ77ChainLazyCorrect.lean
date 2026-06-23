@@ -25,7 +25,7 @@ set_option backward.split false in
     reference cases use `chainWalk_spec` (at `pos`, and again at `pos+1` for the
     lookahead) exactly as `lz77Chain_mainLoop_valid` does for the single match. -/
 theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable prev : Array Nat) (pos insertCap goodMatch : Nat) (hw : windowSize > 0) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch : Nat) (hw : windowSize > 0) :
     ValidDecomp data pos
       (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch) := by
   unfold lz77ChainLazy.mainLoop
@@ -34,7 +34,7 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
     dsimp only
     simp only [headProbeGuarded_eq, guardedSet_eq]
     have hspec := chainWalk_spec data
-      (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
+      (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
     split
@@ -48,7 +48,7 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
             -- Lazy gate: matchLen < goodMatch runs the lookahead; otherwise emit M.
             split
             · have hspec2 := chainWalk_spec data
-                (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
+                (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
                 windowSize (pos + 1) (min 258 (data.size - (pos + 1))) (by omega)
                 (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)[
                   lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!
@@ -104,7 +104,7 @@ private def Enc (t : LZ77Token) : Prop :=
 
 set_option backward.split false in
 theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable prev : Array Nat) (pos insertCap goodMatch : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch, Enc t := by
   unfold lz77ChainLazy.mainLoop
   split
@@ -112,7 +112,7 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
     dsimp only
     simp only [headProbeGuarded_eq, guardedSet_eq]
     have hspec := chainWalk_spec data
-      (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
+      (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
     split
@@ -126,7 +126,7 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
             -- Lazy gate: matchLen < goodMatch runs the lookahead; otherwise emit M.
             split
             · have hspec2 := chainWalk_spec data
-                (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
+                (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
                 windowSize (pos + 1) (min 258 (data.size - (pos + 1))) (by omega)
                 (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)[
                   lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!
@@ -192,7 +192,7 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
     one — identical branch structure, push vs. cons at each emission (two pushes in
     the lookahead arm). -/
 private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
     lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch hashTable prev pos acc =
     acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
