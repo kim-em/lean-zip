@@ -674,21 +674,22 @@ where
 /-- Per-position chain-head insertion with one runtime bounds check (Wave 3
     Step 0.2, same pattern as `chainWalkGuarded`/`updateHashesGuarded` below):
     read the old head of bucket `h`, point the bucket at `pos`, and link
-    `prev[pos]` to the old head. The single guard discharges all three accesses
+    `prev[pos &&& 0x7FFF]` (the circular slot) to the old head. The single guard
+    discharges all three accesses
     statically; the fallback keeps the original panic-checked operations and is
     dead in practice — `hashTable`/`prev` sizes are fixed at allocation.
     Provably equal to the panic-checked sequence (`headInsertGuarded_eq` in
     `LZ77ChainCorrect`). Superseded in the mainLoops by `headProbeGuarded` +
     two `guardedSet`s (Wave 5 de-boxing — this tuple return allocated a heap
     constructor per position); kept with its `_eq` lemma. -/
-@[inline] def headInsertGuarded (hashTable prev : Array Nat) (h pos : Nat) :
+@[inline] def headInsertGuarded (hashTable : Array Nat) (prev : Array Nat) (h pos : Nat) :
     Nat × Array Nat × Array Nat :=
-  if hg : h < hashTable.size ∧ pos < prev.size then
+  if hg : h < hashTable.size ∧ (pos &&& 0x7FFF) < prev.size then
     let head := hashTable[h]'hg.1
-    (head, hashTable.set h pos hg.1, prev.set pos head hg.2)
+    (head, hashTable.set h pos hg.1, prev.set (pos &&& 0x7FFF) head hg.2)
   else
     let head := hashTable[h]!
-    (head, hashTable.set! h pos, prev.set! pos head)
+    (head, hashTable.set! h pos, prev.set! (pos &&& 0x7FFF) head)
 
 /-- Single guarded chain-head probe (for the lazy matcher's lookahead position,
     which reads a bucket head without inserting): one runtime bounds check,
@@ -703,8 +704,28 @@ where
     `LZ77ChainCorrect`). The mainLoops do their per-position head insertion as
     `headProbeGuarded` + two `guardedSet`s — three single-value steps in place
     of `headInsertGuarded`'s tuple, so nothing is heap-allocated per position. -/
-@[inline] def guardedSet (a : Array Nat) (i v : Nat) : Array Nat :=
+@[inline] def guardedSet {α : Type} (a : Array α) (i : Nat) (v : α) : Array α :=
   if h : i < a.size then a.set i v h else a.set! i v
+
+/-- The circular `prev`-buffer window: a fixed 32768-entry (= 32 KiB DEFLATE
+    window) ring of absolute positions, indexed by the low 15 bits of a
+    position (`pos &&& 0x7FFF`, zlib's scheme). Memory is O(window) not
+    O(filesize). With `windowSize ≤ 32768` the in-window guard
+    `pos - cand ≤ windowSize` discards any candidate a stale slot could surface,
+    and the one aliasing pair inside the window (`pos` and `pos - 32768`) only
+    perturbs the heuristic, never validity — the `prev` contents never enter
+    the proof (see `lz77Chain`). The ring stores absolute positions as `Nat`
+    (small values stay inline-unboxed, so no boxing or conversion in the hot
+    walk); only the shrink from O(filesize) to a window-sized ring matters for
+    speed (it fits L2), which is why this is a `Nat` ring rather than a de-boxed
+    `UInt32` one (the `UInt32` conversions measured as a net tax). -/
+def chainWinSize : Nat := 32768
+
+/-- A circular `prev`-buffer index `n &&& 0x7FFF` is always `< 32768`, so a
+    `chainWinSize`-entry buffer indexes every masked position in bounds. -/
+theorem winMask_lt (n : Nat) : (n &&& 0x7FFF) < chainWinSize := by
+  have := @Nat.and_le_right n 0x7FFF
+  unfold chainWinSize; omega
 
 /-- Greedy LZ77 with bounded-depth hash chains: at each position, walk the
     `prev` chain from the bucket head up to `maxChain` candidates and keep the
@@ -715,10 +736,22 @@ where
     re-established at the moment of emission by `countMatch` (verifies the bytes)
     plus the explicit `matchPos < pos` / `pos - matchPos ≤ windowSize` guards, so
     the `prev`/`hashTable` array contents never enter the correctness proof.
-    Buckets and `prev` are initialised to the sentinel `data.size` (≥ every real
+    `prev` is a fixed `chainWinSize` (32768 = 32 KiB window) circular buffer of
+    de-boxed `UInt32` absolute positions, indexed by `pos &&& 0x7FFF` (zlib's
+    scheme): memory is O(window) not O(filesize) and the buffer fits L2. Buckets
+    and `prev` are initialised to the sentinel `data.size` (≥ every real
     position), so an unset chain link fails the `cand < pos` guard and stops the
-    walk — no separate validity bitmap needed. Reuses `lz77Greedy`'s
-    `hash3`/`countMatch`/`trailing` helpers (and their proofs). -/
+    walk — no separate validity bitmap needed. Circular reuse stays sound: for
+    every candidate strictly inside the window (`pos - cand < 32768`) the slot
+    `cand &&& 0x7FFF` differs from `pos`'s own slot and from every other
+    in-window position's, so the link is exactly the full-size buffer's link;
+    a *stale* slot can only hold a position older than the window, discarded by
+    `pos - cand ≤ windowSize`; and at the exact boundary `cand = pos - 32768`
+    the slot was just overwritten by `pos`'s own insertion, so the read may
+    revisit the current bucket head or form a short cycle — harmless, because
+    the walk is fuel-bounded and `countMatch` + the window guard re-verify every
+    emitted match. Reuses `lz77Greedy`'s `hash3`/`countMatch`/`trailing` helpers
+    (and their proofs). -/
 def lz77Chain (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) :
     Array LZ77Token :=
@@ -727,11 +760,13 @@ def lz77Chain (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
   else
     let hashSize := 65536
     (mainLoop data windowSize hashSize maxChain
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0 insertCap).toArray
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 insertCap).toArray
 where
   /-- Walk the `prev` chain up to `fuel` steps from `cand`, keeping the longest
       in-window match `(bestLen, bestPos)`. Stops at the first out-of-window or
-      out-of-range link (`cand ≥ pos`, incl. the `data.size` sentinel). -/
+      out-of-range link (`cand ≥ pos`, incl. the `data.size` sentinel). `prev`
+      is the fixed-size circular ring indexed by `cand &&& 0x7FFF`; its contents
+      are a pure heuristic, so the windowing never enters the validity proof. -/
   chainWalk (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen : Nat)
       (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen bestPos : Nat) : Nat × Nat :=
     if fuel = 0 then (bestLen, bestPos)
@@ -743,7 +778,7 @@ where
       -- stop walking the chain. Provably zero ratio loss; on repetitive input
       -- (matches reach `maxLen` immediately) this restores near-greedy speed.
       if bl ≥ maxLen then (bl, bp)
-      else chainWalk data prev windowSize pos maxLen hpm (prev[cand]!) (fuel - 1) bl bp
+      else chainWalk data prev windowSize pos maxLen hpm prev[cand &&& 0x7FFF]! (fuel - 1) bl bp
     else (bestLen, bestPos)
   termination_by fuel
   decreasing_by omega
@@ -753,12 +788,13 @@ where
       defers most of this work for speed at a ratio cost; a large cap inserts every
       position (best ratio). The chain is a heuristic, so any cap stays correct. -/
   updateHashes (data : ByteArray) (hashSize : Nat)
-      (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat) : Array Nat × Array Nat :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat) :
+      Array Nat × Array Nat :=
     if j < matchLen ∧ j ≤ insertCap then
       if h : pos + j + 2 < data.size then
         let hsh := lz77Greedy.hash3 data (pos + j) hashSize h
         let head := hashTable[hsh]!
-        updateHashes data hashSize (hashTable.set! hsh (pos + j)) (prev.set! (pos + j) head)
+        updateHashes data hashSize (hashTable.set! hsh (pos + j)) (prev.set! ((pos + j) &&& 0x7FFF) head)
           pos (j + 1) matchLen insertCap
       else
         updateHashes data hashSize hashTable prev pos (j + 1) matchLen insertCap
@@ -766,12 +802,12 @@ where
   termination_by matchLen - j
   decreasing_by all_goals omega
   mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
-      (hashTable prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let m := chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
@@ -814,10 +850,11 @@ untouched. Wave 5 de-boxing: the iterative matchers call
 `chainWalkGuardedPacked` (the same walk with the result pair packed into one
 small `Nat`) instead of `chainWalkGuarded`, which stays as the proof bridge. -/
 
-/-- Proven-bounds copy of `lz77Chain.chainWalk`: `prev[cand]` is in range because
-    the walk guard gives `cand < pos` and `hps : pos ≤ prev.size`. -/
+/-- Proven-bounds copy of `lz77Chain.chainWalk`: the circular read
+    `prev[cand &&& 0x7FFF]` is in range because the mask gives
+    `cand &&& 0x7FFF < chainWinSize` (`winMask_lt`) and `hps : min chainWinSize data.size ≤ prev.size`. -/
 def chainWalkFast (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen : Nat)
-    (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (hpm : pos + maxLen ≤ data.size) (hps : min chainWinSize data.size ≤ prev.size)
     (cand fuel bestLen bestPos : Nat) : Nat × Nat :=
   if fuel = 0 then (bestLen, bestPos)
   else if hc : cand < pos ∧ pos - cand ≤ windowSize then
@@ -826,18 +863,18 @@ def chainWalkFast (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen :
     let (bl, bp) := if ml > bestLen then (ml, cand) else (bestLen, bestPos)
     if bl ≥ maxLen then (bl, bp)
     else chainWalkFast data prev windowSize pos maxLen hpm hps
-      (prev[cand]'(by omega)) (fuel - 1) bl bp
+      (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)) (fuel - 1) bl bp
   else (bestLen, bestPos)
 termination_by fuel
 decreasing_by omega
 
-/-- One runtime `pos ≤ prev.size` check guards the whole `chainWalkFast` inner
-    loop; the (unreachable, since `prev` is sized to the input) fallback is the
-    original panic-checked walk, so this equals `lz77Chain.chainWalk`. -/
+/-- One runtime `min chainWinSize data.size ≤ prev.size` check guards the whole `chainWalkFast`
+    inner loop; the (unreachable, since `prev` is the fixed 32768-entry ring)
+    fallback is the original panic-checked walk, so this equals `lz77Chain.chainWalk`. -/
 @[inline] def chainWalkGuarded (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat × Nat :=
-  if hps : pos ≤ prev.size then
+  if hps : min chainWinSize data.size ≤ prev.size then
     chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos
   else
     lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos
@@ -851,7 +888,7 @@ decreasing_by omega
     (`chainWalkGuardedPacked_mod`/`_div` in `LZ77ChainCorrect`, via the
     lockstep equality `chainWalkPacked_eq`). -/
 def chainWalkPacked (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen : Nat)
-    (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (hpm : pos + maxLen ≤ data.size) (hps : min chainWinSize data.size ≤ prev.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
   if fuel = 0 then bestPos * 512 + bestLen
   else if hc : cand < pos ∧ pos - cand ≤ windowSize then
@@ -865,26 +902,26 @@ def chainWalkPacked (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen
       else false
     if skip then
       chainWalkPacked data prev windowSize pos maxLen hpm hps
-        (prev[cand]'(by omega)) (fuel - 1) bestLen bestPos
+        (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)) (fuel - 1) bestLen bestPos
     else
       let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
       let bl := if ml > bestLen then ml else bestLen
       let bp := if ml > bestLen then cand else bestPos
       if bl ≥ maxLen then bp * 512 + bl
       else chainWalkPacked data prev windowSize pos maxLen hpm hps
-        (prev[cand]'(by omega)) (fuel - 1) bl bp
+        (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)) (fuel - 1) bl bp
   else bestPos * 512 + bestLen
 termination_by fuel
 decreasing_by all_goals omega
 
-/-- One runtime `pos ≤ prev.size` check guards the whole `chainWalkPacked`
+/-- One runtime `min chainWinSize data.size ≤ prev.size` check guards the whole `chainWalkPacked`
     inner loop; the (unreachable) fallback packs the reference walk's pair, so
     this equals `bestPos * 512 + bestLen` of `lz77Chain.chainWalk`
     (`chainWalkGuardedPacked_eq`). -/
 @[inline] def chainWalkGuardedPacked (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
-  if hps : pos ≤ prev.size then
+  if hps : min chainWinSize data.size ≤ prev.size then
     chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos
   else
     let p := lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos
@@ -893,7 +930,7 @@ decreasing_by all_goals omega
 /-- Proven-bounds copy of `lz77Chain.updateHashes`: the bucket index `hsh` is
     `< hashSize ≤ hashTable.size`, so `hashTable[hsh]` needs no runtime check. -/
 def updateHashesFast (data : ByteArray) (hashSize : Nat)
-    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat)
+    (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat)
     (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size) : Array Nat × Array Nat :=
   if j < matchLen ∧ j ≤ insertCap then
     if h : pos + j + 2 < data.size then
@@ -902,7 +939,7 @@ def updateHashesFast (data : ByteArray) (hashSize : Nat)
         have : hsh < hashSize := Nat.mod_lt _ hhs
         omega
       let head := hashTable[hsh]'hb
-      updateHashesFast data hashSize (hashTable.set! hsh (pos + j)) (prev.set! (pos + j) head)
+      updateHashesFast data hashSize (hashTable.set! hsh (pos + j)) (prev.set! ((pos + j) &&& 0x7FFF) head)
         pos (j + 1) matchLen insertCap hhs (by simpa using hht)
     else
       updateHashesFast data hashSize hashTable prev pos (j + 1) matchLen insertCap hhs hht
@@ -914,7 +951,8 @@ decreasing_by all_goals omega
     `updateHashesFast` insertion loop; the fallback is the original panic-checked
     insertion, so this equals `lz77Chain.updateHashes`. -/
 @[inline] def updateHashesGuarded (data : ByteArray) (hashSize : Nat)
-    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat) : Array Nat × Array Nat :=
+    (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat) :
+    Array Nat × Array Nat :=
   if hu : 0 < hashSize ∧ hashSize ≤ hashTable.size then
     updateHashesFast data hashSize hashTable prev pos j matchLen insertCap hu.1 hu.2
   else
@@ -933,16 +971,16 @@ def lz77ChainIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 #[]
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
-      (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
@@ -995,15 +1033,15 @@ def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768
   else
     let hashSize := 65536
     (mainLoop data windowSize hashSize maxChain
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0 insertCap goodMatch).toArray
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 insertCap goodMatch).toArray
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
-      (hashTable prev : Array Nat) (pos insertCap goodMatch : Nat) : List LZ77Token :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let m := lz77Chain.chainWalk data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
@@ -1083,16 +1121,16 @@ def lz77ChainLazyIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap goodMatch
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0 #[]
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 #[]
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch : Nat)
-      (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
@@ -1158,8 +1196,8 @@ where
 
 `lz77ChainIterP`/`lz77ChainLazyIterP` are copies of the iterative matchers
 whose accumulator holds `packTok`-encoded `UInt32`s instead of boxed
-`LZ77Token`s. The chain state (`hashTable`/`prev : Array Nat`) is untouched
-(the Wave-3a verdict: a `UInt32` chain state measured slower); only the
+`LZ77Token`s. The chain state (`hashTable`/`prev : Array Nat`)
+is identical to the boxed-token twins; only the
 emission side changes, and each push is literally `packTok` of the token the
 boxed loop pushes, so `Zip/Spec/LZ77PackedCorrect.lean` proves them equal to
 `(·.map packTok)` of the boxed matchers by lockstep induction. -/
@@ -1183,17 +1221,17 @@ def lz77ChainIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3276
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
       (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
-      (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0
@@ -1228,17 +1266,17 @@ def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap goodMatch
-      (.replicate hashSize data.size) (.replicate data.size data.size) 0
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
       (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch : Nat)
-      (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev pos head
+      let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPacked data prev windowSize pos maxLen hmaxLenP head maxChain 0 0

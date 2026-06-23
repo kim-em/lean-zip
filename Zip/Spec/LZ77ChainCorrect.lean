@@ -39,12 +39,12 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
       · simp only [hml, ↓reduceIte]
         split
         · exact Or.inr ⟨hc.1, hc.2, hcand, fun i hi => (hcm.1 i hi).symm, hcm.2⟩
-        · exact ih (prev[cand]!) _ _
+        · exact ih (prev[cand &&& 0x7FFF]!) _ _
             (Or.inr ⟨hc.1, hc.2, hcand, fun i hi => (hcm.1 i hi).symm, hcm.2⟩)
       · simp only [hml, ↓reduceIte]
         split
         · exact hb
-        · exact ih (prev[cand]!) _ _ hb
+        · exact ih (prev[cand &&& 0x7FFF]!) _ _ hb
     · exact hb
 
 /-! ## Guarded per-position head insertion (Wave 3 Step 0.2, Wave 5 de-boxing)
@@ -61,9 +61,9 @@ proceeds exactly as before the conversion. -/
     in bounds, `getElem!_pos` and `setIfInBounds_def` bridge `[..]'h`/`set`
     to `[..]!`/`set!`; out of bounds, the fallback *is* the panic-checked
     sequence. -/
-theorem headInsertGuarded_eq (hashTable prev : Array Nat) (h pos : Nat) :
+theorem headInsertGuarded_eq (hashTable : Array Nat) (prev : Array Nat) (h pos : Nat) :
     headInsertGuarded hashTable prev h pos =
-      (hashTable[h]!, hashTable.set! h pos, prev.set! pos hashTable[h]!) := by
+      (hashTable[h]!, hashTable.set! h pos, prev.set! (pos &&& 0x7FFF) hashTable[h]!) := by
   unfold headInsertGuarded
   split
   · rename_i hg
@@ -80,7 +80,7 @@ theorem headProbeGuarded_eq (hashTable : Array Nat) (h : Nat) :
   · rfl
 
 /-- The guarded single write computes exactly the panic-checked write. -/
-theorem guardedSet_eq (a : Array Nat) (i v : Nat) :
+theorem guardedSet_eq {α : Type} (a : Array α) (i : Nat) (v : α) :
     guardedSet a i v = a.set! i v := by
   unfold guardedSet
   split
@@ -92,7 +92,7 @@ theorem guardedSet_eq (a : Array Nat) (i v : Nat) :
     `lz77Greedy.mainLoop_valid`; the reference case uses `chainWalk_spec` (which
     holds for *any* `prev` array) in place of the inline single-probe match. -/
 theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) :
     ValidDecomp data pos
       (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap) := by
   unfold lz77Chain.mainLoop
@@ -101,7 +101,7 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
     dsimp only
     simp only [headProbeGuarded_eq, guardedSet_eq]
     have hspec := chainWalk_spec data
-      (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
+      (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
     split
@@ -149,7 +149,7 @@ private def Enc (t : LZ77Token) : Prop :=
   | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768
 
 theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap, Enc t := by
   unfold lz77Chain.mainLoop
   split
@@ -157,7 +157,7 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
     dsimp only
     simp only [headProbeGuarded_eq, guardedSet_eq]
     have hspec := chainWalk_spec data
-      (prev.set! pos hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
+      (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
     split
@@ -212,7 +212,7 @@ exactly as before the conversion. -/
     panic-checked reference walk: the bodies differ only in how `prev[cand]` is
     accessed (`'h` vs `!`), and `getElem!_pos` bridges the two. -/
 theorem chainWalkFast_eq (data : ByteArray) (prev : Array Nat)
-    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : min chainWinSize data.size ≤ prev.size)
     (cand fuel bestLen bestPos : Nat) :
     chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos =
       lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos := by
@@ -223,7 +223,7 @@ theorem chainWalkFast_eq (data : ByteArray) (prev : Array Nat)
       if_neg (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
     · simp only [dif_pos hc, Nat.add_sub_cancel, ih]
-      rw [getElem!_pos prev cand (by omega)]
+      rw [getElem!_pos prev (cand &&& 0x7FFF) (by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)]
     · simp only [dif_neg hc]
 
 /-- One runtime guard collapses to the reference walk. -/
@@ -266,7 +266,7 @@ theorem countMatch_le_of_byte_ne (data : ByteArray) (cand pos maxLen : Nat)
     walk: identical control flow, with the pair accumulator carried as
     `bestPos * 512 + bestLen` at every step. -/
 theorem chainWalkPacked_eq (data : ByteArray) (prev : Array Nat)
-    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : pos ≤ prev.size)
+    (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (hps : min chainWinSize data.size ≤ prev.size)
     (cand fuel bestLen bestPos : Nat) :
     chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos =
       (chainWalkFast data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos).2 * 512 +
@@ -363,7 +363,7 @@ theorem min258_le_511 (x : Nat) : min 258 x ≤ 511 := by omega
     panic-checked reference: the bodies differ only in how `hashTable[hsh]` is
     accessed, bridged by `getElem!_pos`. -/
 theorem updateHashesFast_eq (data : ByteArray) (hashSize : Nat)
-    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat)
+    (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat)
     (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size) :
     updateHashesFast data hashSize hashTable prev pos j matchLen insertCap hhs hht =
       lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap := by
@@ -386,7 +386,7 @@ theorem updateHashesFast_eq (data : ByteArray) (hashSize : Nat)
 
 /-- One runtime guard collapses to the reference insertion. -/
 theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
-    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat) :
     updateHashesGuarded data hashSize hashTable prev pos j matchLen insertCap =
       lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap := by
   unfold updateHashesGuarded
@@ -413,7 +413,7 @@ theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
     The `chainWalk`/`updateHashes` helpers are shared, so the only difference is
     push vs. cons at each emission. -/
 private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
     lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos acc =
     acc ++ (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
