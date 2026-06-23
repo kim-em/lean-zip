@@ -501,8 +501,9 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       throw (IO.userError "deflateDynamicBlocksShared(tokChunk=1)→inflate mismatch on text")
   | .error e => throw (IO.userError s!"deflateDynamicBlocksShared(tokChunk=1)→inflate failed: {e}")
 
-  -- deflateRaw at the max-compression tiers (≥ 7) now considers the shared-window
-  -- split via pickSmaller; verify roundtrip on text and large inputs.
+  -- deflateRaw at the max-compression tiers (≥ 8) considers the shared-window
+  -- split via pickSmaller; level 7 is the top single-block point (#2698). Verify
+  -- roundtrip across the single-block/split boundary on text and large inputs.
   for level in [7, 8, 9] do
     for (name, data) in [("text", textRepeat), ("256K-cyclic", largeCyclic),
                           ("256K-prng", mkPrngData 262144)] do

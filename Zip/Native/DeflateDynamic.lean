@@ -572,12 +572,19 @@ def insertCap (level : UInt8) : Nat :=
   else if level ≤ 3 then 64
   else 1000000000
 
-/-- Lazy `good_match` threshold (zlib-style): the lazy matcher skips the
-    one-byte-lookahead probe once the first match is at least this long, since a
-    long first match is rarely improved by deferral. Lower → more gating (faster,
-    slightly worse ratio). `259 > 258` disables gating. SPIKE: uniform 8. -/
+/-- Lazy `good_match` threshold (zlib-style, semantically zlib's `max_lazy_match`):
+    the lazy matcher skips the one-byte-lookahead probe once the first match is at
+    least this long, since a long first match is rarely improved by deferral.
+    Lower → more gating (faster, slightly worse ratio). `259 > 258` disables gating.
+
+    Graduated L4→L6 (8/16/32) so the lazy levels separate on the speed/ratio Pareto
+    by *probe fraction* — the cheapest per-ratio knob (chain depth saturates) — rather
+    than collapsing onto each other (#2698). L7 and up use full lazy lookahead (259).
+    Transparent to `lzMatch_{encodable,empty,resolves}` (proved ∀ goodMatch). -/
 def goodMatch (level : UInt8) : Nat :=
-  if level ≤ 6 then 8
+  if level ≤ 4 then 8
+  else if level ≤ 5 then 16
+  else if level ≤ 6 then 32
   else 259
 
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
@@ -1259,9 +1266,9 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
   -- Every region looked incompressible.
   return true
 
-/-- Unified raw DEFLATE compression dispatch. Level 0 = stored; level ≥ 1 runs the
+/-- Unified raw DEFLATE compression dispatch. Level 0 = stored; levels 1–7 run the
     single-block cost-model dispatch (`deflateRawBase`). At the max-compression
-    tiers (level ≥ 7) two block-split streams are also tried, and the smallest of
+    tiers (level ≥ 8) two block-split streams are also tried, and the smallest of
     all candidates is emitted:
       * self-contained split — per-chunk Huffman trees, fresh window per chunk
         (wins on locally-varying statistics, e.g. structured binary);
@@ -1287,6 +1294,16 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     single-block so it pays no extra compress time. All branches are
     roundtrip-verified.
 
+    The split entry sits at level ≥ 8 (was ≥ 7): the single-block → split transition is
+    a hard ~2.5–3× compress-speed cliff (a second whole-file encode plus the partition
+    sizing), so promoting level 7 to the *strongest single-block* point (full lazy
+    lookahead, chain depth 256) lands it in the empty Pareto band between level 6 and the
+    split tier instead of collapsing onto level 8 — both the L4–6 cluster and the L7/L8
+    coincidence then spread into seven distinct fast-tier points (#2698). The split
+    ratio that level 7 used to carry is still available at level 8 (same split
+    candidate, deeper chain) — empirically equal-or-better on the measured Canterbury
+    and Silesia corpora (deeper search is not a monotone ratio guarantee).
+
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
     incompressible input, dispatches straight to `deflateStoredPure` — skipping the
@@ -1297,7 +1314,7 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if incompressiblePrescan data then deflateStoredPure data
-  else if 7 ≤ level then
+  else if 8 ≤ level then
     -- One *packed* matcher pass shared by the base and shared-split candidates
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
     -- The base candidate consumes the packed words end-to-end (freqs *and*
@@ -1311,8 +1328,10 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
             (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))))
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
-      -- The self-contained split is demoted to level 9: it wins on exactly
-      -- one corpus file while paying a full per-chunk match pass.
+      -- Level 8: base vs cross-block split. The self-contained split is demoted to
+      -- level 9 (it wins on exactly one corpus file while paying a full per-chunk
+      -- match pass). Level 7 no longer enters here — it is the top single-block
+      -- point (see the dispatch docstring), so the split tier starts at level 8.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))
   else deflateRawBase data level
