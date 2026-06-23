@@ -11,12 +11,17 @@ the *build-phase* win (skip `fromLengths`/`insertLoop`).
 
 The decode loops are well-founded (`termination_by`, mirroring the verified
 `goFusedP`/`goFusedPU`/`inflateLoop`); the canonical structures and their
-correctness are proven in `Zip.Spec.InflateTreeFreeCorrect`: whenever the
-verified decoder succeeds, this decoder produces identical output
-(`inflateTreeFree_of_inflate`). This is forward correctness, not an `iff` — on
-malformed dynamic code lengths the tree-free path is more lenient (it skips the
-lit/dist `fromLengths` Kraft check), so it accepts some inputs the tree path
-rejects. It must not replace the trusted decoder where strict rejection matters.
+correctness are proven in `Zip.Spec.InflateTreeFreeCorrect`.
+
+`decodeDynamicLengthsOnly` runs the same `HuffTree.validateLengths`
+(`maxBits`/Kraft) check `decodeDynamicTrees` does, so the tree-free path's
+accept-set is **exactly** the verified `Inflate.inflate`'s — proven as the
+two-sided `inflateTreeFree_ok_iff` (`inflateTreeFree data = .ok out ↔
+inflate data = .ok out`) and `inflateRawTreeFree_ok_iff`. The production
+decompression entry points (gzip/zlib/raw-deflate/ZIP) decode through this
+tree-free path; the accept-set equality guarantees the `native ⊆ FFI`
+posture is preserved. `Inflate.inflate`/`inflateRaw` remain as the verified
+reference the tree-free decoder is proven equal to.
 -/
 
 namespace Zip.Native
@@ -313,8 +318,9 @@ namespace Inflate
     (the `maxBits`/Kraft check `fromLengths` performs) so this rejects exactly the
     malformed code-length sets `decodeDynamicTrees` rejects, with identical error
     messages — closing the strictness gap the tree-free path would otherwise open
-    (`Zip.Spec.InflateTreeFreeCorrect.decodeDynamicLengthsOnly_iff_decodeDynamicTrees`).
-    The check is computable from the lengths alone — no tree is built. -/
+    (`Zip.Spec.InflateTreeFreeCorrect.decodeDynamicTrees_of_lengthsOnly`, the
+    converse of `decodeDynamicTrees_extract`). The check is computable from the
+    lengths alone — no tree is built. -/
 def decodeDynamicLengthsOnly (br : BitReader) :
     Except String (Array UInt8 × Array UInt8 × BitReader) := do
   let (hlit, br) ← br.readBits 5

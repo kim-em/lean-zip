@@ -6,14 +6,20 @@ import Zip.Native.InflateTreeFree
 /-!
 # Tree-free canonical decode: correctness
 
-Proves that whenever the verified `Inflate.inflate` succeeds, the tree-free
-canonical decoder (`Zip.Native.InflateTreeFree`) produces identical output
-(`inflateTreeFree_of_inflate`), with the tree (`fromLengthsTree lengths`) as a
-**proof-only** object — never built at runtime. This is the forward direction:
-for *valid* code lengths the two decoders agree exactly (the internal
-`_ok_iff_` lemmas), but the full `iff` fails because the tree-free path accepts
-some malformed dynamic length sets that the tree path's `fromLengths` rejects.
-The chain, bottom-up:
+Proves that the tree-free canonical decoder (`Zip.Native.InflateTreeFree`) has
+**exactly the same accept-set** as the verified `Inflate.inflate`, producing
+identical output, with the tree (`fromLengthsTree lengths`) as a **proof-only**
+object — never built at runtime. The top-level statements are the two-sided
+`inflateTreeFree_ok_iff` (`inflateTreeFree data = .ok out ↔ inflate data = .ok
+out`) and `inflateRawTreeFree_ok_iff`, built from the forward direction
+(`inflateTreeFree_of_inflate`, present since #2681) and the backward direction
+(`inflate_of_inflateTreeFree`) the closed code-length validation gap enables:
+`decodeDynamicLengthsOnly` now runs the same `validateLengths` (`maxBits`/Kraft)
+check `decodeDynamicTrees` does, so on malformed dynamic length sets both paths
+reject. The chain, bottom-up:
+
+0. `validateLengths` ↔ `fromLengths` (`fromLengths_eq_validate`,
+   `validateLengths_ok_iff_fromLengths`) — the factored code-length check.
 
 1. `buildFirstIndex` / `buildSymbols` structure invariants (counting sort places
    each symbol at `firstIndex[len] + offset`).

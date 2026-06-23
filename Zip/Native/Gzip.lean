@@ -35,8 +35,8 @@ termination_by data.size - pos
     non-empty output (the inner inflate guards compare
     `output.size + len > maxOutputSize`). The outer-loop guard raises an
     `Except` error containing `"Gzip: total output exceeds maximum size"`;
-    the inner per-member `Inflate.inflateRaw` call also enforces the bound
-    and may surface `"Inflate: output exceeds maximum size"` first.
+    the inner per-member `Inflate.inflateRawTreeFree` call also enforces the
+    bound and may surface `"Inflate: output exceeds maximum size"` first.
     See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
@@ -132,7 +132,7 @@ namespace ZlibDecode
     Returns the decompressed data.
 
     `maxOutputSize` (default 1 GiB) is forwarded to the inner
-    `Inflate.inflateRaw`; this layer adds no separate guard. Unlike the
+    `Inflate.inflateRawTreeFree`; this layer adds no separate guard. Unlike the
     FFI path, where `maxDecompressedSize := 0` means unlimited, here `0`
     rejects any non-empty output (the inflate guards compare
     `output.size + len > maxOutputSize`). Overflow raises an `Except`
@@ -230,7 +230,7 @@ def detectFormat (data : ByteArray) : CompressFormat :=
 /-- Decompress data by auto-detecting the format (gzip, zlib, or raw deflate).
 
     `maxOutputSize` (default 1 GiB) is forwarded to whichever of
-    `GzipDecode.decompress`, `ZlibDecode.decompress`, or `Inflate.inflate`
+    `GzipDecode.decompress`, `ZlibDecode.decompress`, or `Inflate.inflateTreeFree`
     the dispatch picks based on `detectFormat`. The surfaced error
     substring depends on the dispatch: `"Gzip: total output exceeds
     maximum size"` (gzip outer guard), or `"Inflate: output exceeds

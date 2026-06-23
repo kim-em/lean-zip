@@ -223,7 +223,7 @@ private def oneIteration (state : UInt64) : IO UInt64 := do
   tryFFI "Gzip.decompress" (Gzip.decompress input defaultMaxOutput.toUInt64)
   tryFFI "RawDeflate.decompress" (RawDeflate.decompress input defaultMaxOutput.toUInt64)
   -- Whole-buffer native paths.
-  tryNative "Zip.Native.Inflate.inflate"
+  tryNative "Zip.Native.Inflate.inflateTreeFree"
     (Zip.Native.Inflate.inflateTreeFree input defaultMaxOutput)
   tryNative "Zip.Native.GzipDecode.decompress"
     (Zip.Native.GzipDecode.decompress input defaultMaxOutput)

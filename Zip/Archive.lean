@@ -1217,8 +1217,8 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
     if entry.method == 0 then pure compData
     else if entry.method == 8 then
       if useNative then
-        -- `Zip.Native.Inflate.inflate` treats `0` as "reject any non-empty
-        -- output", unlike the FFI path where `0` means unlimited. Callers
+        -- `Zip.Native.Inflate.inflateRawTreeFree` treats `0` as "reject any
+        -- non-empty output", unlike the FFI path where `0` means unlimited. Callers
         -- that opt into `maxEntrySize := 0` for unlimited FFI decompression
         -- therefore get an immediate rejection on the native backend.
         --
