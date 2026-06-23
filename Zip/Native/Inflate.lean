@@ -409,6 +409,17 @@ def buildTableCanonicalFast (lengths : Array UInt8) (maxBits : Nat := 15) : Deco
     let nextCode := nextCodesFast count maxBits
     buildCanonicalLoop lengths nextCode 0 (Array.replicate (2 ^ fastBits) (packEntry 0 0))
 
+/-- `buildTableCanonicalFast` taking a precomputed length histogram, so a per-block
+    decoder building both the fast table and the long-code structures can share a
+    single `countLengthsFast` pass over the length vector. Definitionally equal to
+    `buildTableCanonicalFast lengths maxBits` when `count = countLengthsFast lengths
+    maxBits` (`buildTableCanonicalFastWithCount_eq`). -/
+def buildTableCanonicalFastWithCount (lengths : Array UInt8) (count : Array Nat)
+    (maxBits : Nat := 15) : DecodeTable where
+  packed :=
+    let nextCode := nextCodesFast count maxBits
+    buildCanonicalLoop lengths nextCode 0 (Array.replicate (2 ^ fastBits) (packEntry 0 0))
+
 /-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
 def bitsAvail (br : BitReader) : Nat :=
   if br.pos ≥ br.data.size then 0 else (br.data.size - br.pos) * 8 - br.bitOff
