@@ -5,8 +5,8 @@ import Zip
 # End-to-end tree-free decode: conformance + benchmark
 
 Compresses each corpus file with the zlib FFI (a format-correct raw-deflate
-stream), then decodes it two ways — the verified `Inflate.inflate` (tree + table)
-and the prototype `Inflate.inflateTreeFree` (no Huffman tree) — asserts the two
+stream), then decodes it two ways — the verified reference `Inflate.inflateReference`
+(tree + table) and the production `Inflate.inflate` (tree-free) — asserts the two
 outputs are byte-identical to the original (conformance), and times both with a
 paired interleaved measurement (per-file geomean of after/before ratios), so
 common-mode machine noise cancels.
@@ -41,11 +41,11 @@ def timeDecode (decode : ByteArray → IO ByteArray) (input : ByteArray) : IO (N
   return (t1 - t0, out.size)
 
 def baselineDecode (input : ByteArray) (origSize : Nat) : IO ByteArray :=
-  match Inflate.inflate input (sizeHint := origSize) with
+  match Inflate.inflateReference input (sizeHint := origSize) with
   | .ok b => pure b | .error e => throw (IO.userError s!"baseline: {e}")
 
 def treeFreeDecode (input : ByteArray) : IO ByteArray :=
-  match Inflate.inflateTreeFree input with
+  match Inflate.inflate input with
   | .ok b => pure b | .error e => throw (IO.userError s!"treefree: {e}")
 
 /-- Geometric mean of a list of ratios (×1000 fixed-point for printing). -/

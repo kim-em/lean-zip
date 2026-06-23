@@ -577,9 +577,9 @@ private theorem inflateLoop_append_suffix (br : BitReader) (suffix : ByteArray)
     succeeds on data ++ suffix with the same result and endPos. -/
 theorem inflateRaw_append_suffix (data suffix : ByteArray) (startPos maxOut : Nat)
     (result : ByteArray) (endPos : Nat)
-    (h : Inflate.inflateRaw data startPos maxOut = .ok (result, endPos)) :
-    Inflate.inflateRaw (data ++ suffix) startPos maxOut = .ok (result, endPos) := by
-  simp only [Inflate.inflateRaw, bind, Except.bind] at h ⊢
+    (h : Inflate.inflateRawReference data startPos maxOut = .ok (result, endPos)) :
+    Inflate.inflateRawReference (data ++ suffix) startPos maxOut = .ok (result, endPos) := by
+  simp only [Inflate.inflateRawReference, bind, Except.bind] at h ⊢
   cases hflit : HuffTree.fromLengths Inflate.fixedLitLengths with
   | error e => simp only [hflit] at h; exact nomatch h
   | ok fixedLit =>

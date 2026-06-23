@@ -416,9 +416,9 @@ theorem inflateLoop_complete_ext (br : BitReader) (output : ByteArray)
 /-- After a successful `inflateRaw`, the returned endPos ≤ data.size. -/
 theorem inflateRaw_endPos_le (data : ByteArray) (startPos maxOut : Nat)
     (result : ByteArray) (endPos : Nat)
-    (h : Inflate.inflateRaw data startPos maxOut = .ok (result, endPos)) :
+    (h : Inflate.inflateRawReference data startPos maxOut = .ok (result, endPos)) :
     endPos ≤ data.size := by
-  simp only [Inflate.inflateRaw, bind, Except.bind] at h
+  simp only [Inflate.inflateRawReference, bind, Except.bind] at h
   cases hflit : HuffTree.fromLengths Inflate.fixedLitLengths with
   | error e => simp only [hflit] at h; exact nomatch h
   | ok fixedLit =>
@@ -481,7 +481,7 @@ private theorem alignToByte_pos_ge_of_toBits_short (br : BitReader)
     endPos = `(prefix ++ deflated).size` exactly. -/
 theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
     (maxOut : Nat) (result : ByteArray) (endPos : Nat)
-    (h : Inflate.inflateRaw (pfx ++ deflated) pfx.size maxOut =
+    (h : Inflate.inflateRawReference (pfx ++ deflated) pfx.size maxOut =
       .ok (result, endPos))
     (hspec : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits deflated) [] =
@@ -493,7 +493,7 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
     (hmax : result.data.toList.length ≤ maxOut) :
     endPos ≥ (pfx ++ deflated).size := by
   obtain ⟨pad_remaining, hgoR_pad, hpadlen⟩ := hpad
-  simp only [Inflate.inflateRaw, bind, Except.bind] at h
+  simp only [Inflate.inflateRawReference, bind, Except.bind] at h
   cases hflit : HuffTree.fromLengths Inflate.fixedLitLengths with
   | error e => simp only [hflit] at h; exact nomatch h
   | ok fixedLit =>
@@ -541,7 +541,7 @@ theorem inflateRaw_endPos_ge (pfx deflated : ByteArray)
 /-- endPos exactness: combining ≤ and ≥ gives equality. -/
 theorem inflateRaw_endPos_eq (pfx deflated : ByteArray)
     (maxOut : Nat) (result : ByteArray) (endPos : Nat)
-    (h : Inflate.inflateRaw (pfx ++ deflated) pfx.size maxOut =
+    (h : Inflate.inflateRawReference (pfx ++ deflated) pfx.size maxOut =
       .ok (result, endPos))
     (hspec : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits deflated) [] =
@@ -568,9 +568,9 @@ theorem inflateRaw_complete (data : ByteArray) (startPos maxOutputSize : Nat)
         ((Deflate.Spec.bytesToBits data).drop (startPos * 8)) [] =
         some result) :
     ∃ endPos,
-      Inflate.inflateRaw data startPos maxOutputSize =
+      Inflate.inflateRawReference data startPos maxOutputSize =
         .ok (⟨⟨result⟩⟩, endPos) := by
-  simp only [Inflate.inflateRaw, bind, Except.bind]
+  simp only [Inflate.inflateRawReference, bind, Except.bind]
   obtain ⟨fixedLit, hflit⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedLit_ok
   obtain ⟨fixedDist, hfdist⟩ := Zip.Spec.DeflateStoredCorrect.fromLengths_fixedDist_ok
   rw [hflit, hfdist]
