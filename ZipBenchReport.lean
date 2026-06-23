@@ -382,10 +382,87 @@ def runPresizeAB (pairs : Nat := 12) : IO Unit := do
       IO.println s!"  {corpus} (n={n}): speedup={round4 sp}x  95% CI [{round4 lo}, {round4 hi}]  \
 nohint={round2 (avg noMBs)} MB/s  presize={round2 (avg yesMBs)} MB/s"
 
+/-! ## Decode-density experiment
+
+The compress dashboard's headline is a *speed-vs-ratio Pareto* because each codec
+chooses its own ratio/speed tradeoff. Decompression has no such tradeoff: the
+input density is exogenous (a property of the stream, not the decoder's choice).
+The right decode chart is therefore **decode throughput vs input density**, with
+every decoder measured on *byte-identical* input — only possible because DEFLATE
+is one interoperable format. We fix the encoder to **libdeflate** (raw DEFLATE,
+the densest realistic streams, level range 1–12) and decode the identical streams
+with every decoder, plus a `memcpy` ceiling (the bandwidth bound on emitting the
+output bytes). The in-process decoders (native/zlib/miniz/libdeflate) are timed
+here; the external comparators decode the dumped streams via their `decode` mode
+(see `bench/decode_density.py`). Output rows reuse the `Row` schema with
+`compressor` holding the *decoder* name and `ratio` holding libdeflate's
+compression ratio (the x-axis). -/
+
+def decodeDensityLevels : List Nat := [1, 3, 6, 9, 12]
+
+/-- A memcpy of `data.size` bytes (a fresh full-range copy): the decode-speed
+    ceiling — no decoder can emit output faster than memory bandwidth. -/
+@[noinline] def memcpyBytes (data : ByteArray) : IO Nat :=
+  pure (data.extract 0 data.size).size
+
+def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
+  IO.eprintln "Running decode-density (fixed libdeflate input; native/zlib/miniz/libdeflate + memcpy) over silesia…"
+  let corpora ← loadCorpora
+  let mut rows : List Row := []
+  for (corpus, files) in corpora do
+    if corpus == "silesia" then
+      IO.FS.createDirAll (System.FilePath.mk streamsDir / corpus)
+      IO.eprintln s!"  silesia: {files.length} files × levels {decodeDensityLevels}"
+      for (pat, data) in files do
+        let size := data.size
+        let file := pat.drop (corpus.length + 1)
+        for level in decodeDensityLevels do
+          -- Fixed encoder: libdeflate raw DEFLATE. All decoders see these bytes.
+          let stream ← Libdeflate.compress data level.toUInt8
+          let outSize := stream.size
+          let ratio := round4 (outSize.toFloat / (max size 1).toFloat)
+          IO.FS.writeBinFile
+            (System.FilePath.mk streamsDir / corpus / s!"{file}_L{level}.deflate") stream
+          let mkRow (name : String) (d : Option Float) : Row :=
+            { compressor := name, pattern := pat, size := size, level := level,
+              outSize := outSize, ratio := ratio, compressMBps := none, decompressMBps := d }
+          let dn ← measureNs size reps (nativeDecompress stream size >>= sink)
+          let dz ← measureNs size reps (RawDeflate.decompress stream >>= sink)
+          let dm ← measureNs size reps (MinizOxide.decompress stream >>= sink)
+          let dl ← measureNs size reps (Libdeflate.decompress stream >>= sink)
+          let dc ← measureNs size reps (memcpyBytes data)
+          rows := rows ++
+            [ mkRow "native" (mbps size dn), mkRow "zlib" (mbps size dz),
+              mkRow "miniz_oxide" (mbps size dm), mkRow "libdeflate" (mbps size dl),
+              mkRow "memcpy" (mbps size dc) ]
+        IO.eprint "."
+      IO.eprintln " silesia decode-density done"
+  let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
+  let machine ← shell "uname" ["-mns"]
+  let commit ← shell "git" ["rev-parse", "--short", "HEAD"]
+  let toolchain ← shell "cat" ["lean-toolchain"]
+  let body := String.intercalate ",\n" (rows.map Row.toJson)
+  let json :=
+    "{\n" ++
+    "  \"meta\": {\n" ++
+    s!"    \"date\": \"{date}\",\n" ++
+    s!"    \"machine\": \"{machine}\",\n" ++
+    s!"    \"git_commit\": \"{commit}\",\n" ++
+    s!"    \"toolchain\": \"{toolchain}\",\n" ++
+    "    \"experiment\": \"decode-density: fixed libdeflate input, ratio = libdeflate compression ratio, " ++
+    "decompress_mbps = each decoder on identical streams; compressor field holds the decoder name\"\n" ++
+    "  },\n" ++
+    "  \"results\": [\n" ++ body ++ "\n  ]\n}\n"
+  if let some parent := (System.FilePath.mk outPath).parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeFile outPath json
+  IO.eprintln s!"Wrote {rows.length} decode-density rows → {outPath} (streams → {streamsDir})"
+
 def main (args : List String) : IO Unit := do
   match args with
   | ["--presize-ab"] => runPresizeAB
   | ["--presize-ab", nStr] => runPresizeAB ((nStr.toNat?).getD 12)
+  | ["--decode-density", out, streamsDir] => runDecodeDensity out streamsDir
   | ["--dump-payloads", dir] => dumpPayloads dir
   | ["--zopfli-ceiling", out] => runZopfliCeiling out
   | ["--native-only", out] => runReport out (nativeOnly := true)

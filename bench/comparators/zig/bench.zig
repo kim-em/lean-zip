@@ -64,13 +64,43 @@ fn mbps(size: usize, ns_per_op: u64) f64 {
         (@as(f64, @floatFromInt(ns_per_op)) / 1e9);
 }
 
+// Decode-only throughput on a provided raw-DEFLATE stream (fixed external
+// encoder), so every decoder is measured on byte-identical input. Throughput is
+// against the decoded (uncompressed) byte count.
+fn runDecode(alloc: std.mem.Allocator, path: []const u8) !void {
+    const comp = try std.fs.cwd().readFileAlloc(alloc, path, 1 << 30);
+    const out = try inflate(alloc, comp);
+    const size = out.len;
+    const iters = itersFor(size);
+    var dreps: [5]u64 = undefined;
+    for (&dreps) |*rep| {
+        var timer = try std.time.Timer.start();
+        var i: usize = 0;
+        while (i < iters) : (i += 1) {
+            const d = try inflate(alloc, comp);
+            sink +%= d.len;
+            alloc.free(d);
+        }
+        rep.* = timer.read() / @max(iters, 1);
+    }
+    const d_ns = median(&dreps);
+    if (sink == 0) std.debug.print("unreachable\n", .{});
+    var buf: [256]u8 = undefined;
+    const line = try std.fmt.bufPrint(&buf, "{{\"decompress_mbps\": {d:.2}, \"decoded_size\": {d}}}\n", .{ mbps(size, d_ns), size });
+    try std.io.getStdOut().writeAll(line);
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
     const args = try std.process.argsAlloc(alloc);
+    if (args.len == 3 and std.mem.eql(u8, args[1], "decode")) {
+        try runDecode(alloc, args[2]);
+        return;
+    }
     if (args.len != 3) {
-        std.debug.print("usage: bench-zig <payload.bin> <level>\n", .{});
+        std.debug.print("usage: bench-zig <payload.bin> <level>  |  bench-zig decode <stream.bin>\n", .{});
         std.process.exit(2);
     }
     const level = levelOf(try std.fmt.parseInt(u8, args[2], 10));

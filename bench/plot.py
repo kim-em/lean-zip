@@ -299,6 +299,131 @@ def relative_heatmap(results, meta, corpus, metric, title, outfile, *,
     print(f"wrote {outfile}")
 
 
+# Representative libdeflate level for the decode-density charts: one point per
+# file at a single encode level, so the x-spread is the cross-file content range
+# (text ~0.27 → incompressible ~0.9), not the narrow per-level range.
+DECODE_LEVEL = 6
+
+
+def _decoders_present(results, pref):
+    have = {r["compressor"] for r in results if r["pattern"].startswith(pref)}
+    return [k for (k, *_rest) in COMPRESSORS if k in have]
+
+
+def _decode_pts(results, pref, key, level):
+    return sorted((r["ratio"], r["decompress_mbps"]) for r in results
+                  if r["compressor"] == key and r["level"] == level
+                  and r["pattern"].startswith(pref)
+                  and r.get("ratio") and r.get("decompress_mbps"))
+
+
+def decode_density_plot(results, meta, corpus, outfile, level=DECODE_LEVEL):
+    """Per-file decode throughput vs input density — the decompression analogue of
+    the compress Pareto. Each file is compressed by the SAME encoder (libdeflate
+    L{level}); x = that file's compression ratio (wide: ~0.27 text → ~0.9
+    incompressible), y = decode MB/s (log). One point per (decoder, file) on
+    byte-identical input, so it isolates decoder speed AND shows content-dependence
+    (literal-heavy incompressible data vs match-heavy text). memcpy = the
+    memory-bandwidth ceiling. Not a Pareto: density is exogenous to the decoder, so
+    the highest band wins."""
+    pref = corpus + "/"
+    colour_of = {k: c for (k, _l, c, _m) in COMPRESSORS}
+    label_of = {k: l for (k, l, _c, _m) in COMPRESSORS}
+    marker_of = {k: m for (k, _l, _c, m) in COMPRESSORS}
+    decoders = _decoders_present(results, pref)
+    if not decoders:
+        return
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    plotted = False
+    for key in decoders:
+        pts = _decode_pts(results, pref, key, level)
+        if not pts:
+            continue
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        st = series_style(key, colour_of.get(key, "#888888"))
+        st["linewidth"] = 0  # true scatter: one marker per file, no connecting line
+        ax.plot(xs, ys, marker=marker_of.get(key, "o"), linestyle="none",
+                label=label_of.get(key, key), **st)
+        plotted = True
+    mc = [r["decompress_mbps"] for r in results if r["compressor"] == "memcpy"
+          and r["level"] == level and r["pattern"].startswith(pref) and r.get("decompress_mbps")]
+    if mc:
+        g = geomean(mc)
+        ax.axhline(g, linestyle="--", color="#777777", linewidth=1.4, zorder=2)
+        ax.text(0.995, g, f" memcpy ceiling ≈ {g/1000:.0f} GB/s",
+                transform=ax.get_yaxis_transform(), ha="right", va="bottom",
+                fontsize=8, color="#777777")
+        plotted = True
+    if not plotted:
+        plt.close(fig)
+        return
+    ax.set_yscale("log")
+    ax.set_xlabel(f"input compression ratio   (libdeflate L{level} per file  —  ← denser / more compressible)")
+    ax.set_ylabel("decompression throughput   (MB/s, log)")
+    ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
+    ax.legend(fontsize=8, ncol=2, loc="best")
+    ax.text(0.015, 0.985, "↑ faster = better", transform=ax.transAxes,
+            fontsize=10, va="top", color="#2a8a3a", fontweight="bold")
+    npat = len({r["pattern"] for r in results if r["pattern"].startswith(pref)})
+    fig.suptitle(f"Decode throughput vs input density  ({corpus} — {npat} files, one point each; "
+                 f"all decoders on identical libdeflate L{level} streams)",
+                 fontsize=12, fontweight="bold")
+    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.97))
+    fig.savefig(outfile)
+    plt.close(fig)
+    print(f"wrote {outfile}")
+
+
+def decode_ranking_plot(results, meta, corpus, outfile, level=DECODE_LEVEL):
+    """Decode throughput ranking (lollipop) on identical libdeflate L{level}
+    streams, geomean over the corpus files, log x. native is the subject; memcpy is
+    the bandwidth ceiling (its distance shows the headroom)."""
+    pref = corpus + "/"
+    colour_of = {k: c for (k, _l, c, _m) in COMPRESSORS}
+    label_of = {k: l for (k, l, _c, _m) in COMPRESSORS}
+
+    def gm_at(key):
+        return geomean([r["decompress_mbps"] for r in results
+                        if r["compressor"] == key and r["level"] == level
+                        and r["pattern"].startswith(pref) and r.get("decompress_mbps")])
+
+    vals = [(k, gm_at(k)) for k in _decoders_present(results, pref)]
+    vals = [(k, v) for k, v in vals if v]
+    if not vals:
+        return
+    vals.sort(key=lambda kv: kv[1])  # slowest at the bottom
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ys = list(range(len(vals)))
+    xmin = min(v for _, v in vals) * 0.8
+    ceiling = gm_at("memcpy")
+    for y, (k, v) in zip(ys, vals):
+        c = colour_of.get(k, "#888888")
+        is_native = k == "native"
+        ax.hlines(y, xmin, v, color=c, linewidth=2.4 if is_native else 1.3, alpha=0.9)
+        ax.plot(v, y, "o", color=c, markersize=10 if is_native else 6, zorder=5)
+        ax.text(v * 1.05, y, f"{v:.0f}", va="center", fontsize=8.5, color=c,
+                fontweight="bold" if is_native else "normal")
+    ax.set_yticks(ys)
+    ax.set_yticklabels([label_of.get(k, k) + ("  ◄ subject" if k == "native" else "")
+                        for k, _ in vals], fontsize=9)
+    ax.set_xscale("log")
+    if ceiling:
+        ax.axvline(ceiling, linestyle="--", color="#777777", linewidth=1.4)
+        ax.text(ceiling, len(vals) - 0.4, f"memcpy ≈ {ceiling/1000:.0f} GB/s ",
+                rotation=90, ha="right", va="top", fontsize=8, color="#777777")
+        ax.set_xlim(xmin, ceiling * 1.4)
+    ax.set_xlabel("decompression throughput   (MB/s, log)  —  geomean over files")
+    ax.grid(True, axis="x", which="both", linewidth=0.4, alpha=0.5)
+    fig.suptitle(f"Decode throughput ranking  ({corpus} — identical libdeflate L{level} streams)",
+                 fontsize=12, fontweight="bold")
+    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.96))
+    fig.savefig(outfile)
+    plt.close(fig)
+    print(f"wrote {outfile}")
+
+
 def main():
     results_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("bench/results/latest.json")
     graphs_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("bench/graphs")
@@ -337,6 +462,20 @@ def main():
                          graphs_dir / f"{corpus}_ratio_heatmap.svg", higher_better=False)
         relative_heatmap(results, meta, corpus, "compress_mbps", "Compression speed vs zlib",
                          graphs_dir / f"{corpus}_compress_heatmap.svg", higher_better=True)
+
+    # Decode-density charts (the decompression analogue of the compress Pareto),
+    # from the sibling decode_density.json: fixed libdeflate input, every decoder
+    # on byte-identical streams + memcpy ceiling. Two views: a per-file density
+    # scatter (the trend) and a ranking lollipop (the precise ordering).
+    dd_path = results_path.parent / "decode_density.json"
+    if dd_path.exists():
+        dd = load(dd_path)
+        dd_results, dd_meta = dd["results"], dd.get("meta", {})
+        for corpus in corpora_in(dd_results):
+            decode_density_plot(dd_results, dd_meta, corpus,
+                                graphs_dir / f"{corpus}_decode_density.svg")
+            decode_ranking_plot(dd_results, dd_meta, corpus,
+                                graphs_dir / f"{corpus}_decode_ranking.svg")
 
 
 if __name__ == "__main__":

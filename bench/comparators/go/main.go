@@ -93,9 +93,36 @@ func round2(f float64) float64 {
 	return float64(int64(f*100.0+0.5)) / 100.0
 }
 
+// runDecode times decode-only throughput on a provided raw-DEFLATE stream
+// (produced by a fixed external encoder, e.g. libdeflate), so every language's
+// decoder is measured on byte-identical input. Throughput is against the
+// *decoded* (uncompressed) byte count. Prints {"decompress_mbps":Y,"decoded_size":N}.
+func runDecode(path string) {
+	comp, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	out := inflate(comp)
+	size := len(out)
+	iters := itersFor(size)
+	dNs := medianNsPerOp(iters, func() int { return len(inflate(comp)) })
+	if sink == 0 {
+		fmt.Fprintln(os.Stderr, "unreachable")
+	}
+	j, _ := json.Marshal(map[string]any{
+		"decompress_mbps": round2(mbps(size, dNs)),
+		"decoded_size":    size,
+	})
+	fmt.Println(string(j))
+}
+
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "decode" {
+		runDecode(os.Args[2])
+		return
+	}
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: bench-go <payload.bin> <level>")
+		fmt.Fprintln(os.Stderr, "usage: bench-go <payload.bin> <level>  |  bench-go decode <stream.bin>")
 		os.Exit(2)
 	}
 	data, err := os.ReadFile(os.Args[1])

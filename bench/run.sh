@@ -69,9 +69,22 @@ bash bench/comparators/build_all.sh
 nix-shell -p nodejs python3 --run \
   "python3 bench/comparators/run_external.py bench/payloads $OUT"
 
-# 4. Render (project shell: python + matplotlib).
+# 3b. Decode-density experiment (the decompression analogue of the compress
+#    Pareto): fix the encoder to libdeflate, dump its raw-DEFLATE streams for
+#    Silesia at several levels, and time EVERY decoder on byte-identical input
+#    (in-process native/zlib/miniz/libdeflate + a memcpy ceiling on the Lean
+#    side, then the external comparators via their `decode` mode). Writes a
+#    sibling decode_density.json that plot.py renders as
+#    <corpus>_decode_density.svg.
+DD="bench/results/decode_density.json"
+in_project_shell "lake env .lake/build/bin/bench-report --decode-density $DD bench/payloads-deflate"
+nix-shell -p nodejs python3 --run \
+  "python3 bench/decode_density.py bench/payloads-deflate $DD"
+
+# 4. Render (project shell: python + matplotlib). plot.py auto-detects the
+#    sibling decode_density.json and emits the decode-density chart too.
 in_project_shell "python bench/plot.py $OUT bench/graphs"
 
 echo "Track D dashboard regenerated:"
-echo "  data   → $OUT"
+echo "  data   → $OUT  (+ decode_density.json)"
 echo "  graphs → bench/graphs/*.svg"

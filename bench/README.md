@@ -100,9 +100,13 @@ its levels*, so the whole speed/ratio tradeoff reads at a glance — top-left (f
 complements give precise numbers and per-file detail:
 
 - `<corpus>_compress_pareto.svg` — **headline**: compression speed vs ratio,
-  codecs as level-curves (replaces the whole per-level bar set). (Decode speed
-  doesn't trade off against the compression ratio, so there's no decode scatter;
-  decode throughput is in the summary table.)
+  codecs as level-curves (replaces the whole per-level bar set).
+- `<corpus>_decode_density.svg` + `<corpus>_decode_ranking.svg` — the
+  **decompression analogue** (see *Decoding* below): every decoder timed on
+  byte-identical libdeflate streams. The density chart is a per-file scatter
+  (x = that file's libdeflate ratio, y = decode MB/s); the ranking chart is the
+  precise lollipop ordering. Both carry the `memcpy` bandwidth ceiling. Not a
+  Pareto — input density is exogenous to the decoder, so the highest band wins.
 - `<corpus>_summary.svg` — colour-graded geomean table (ratio / compress /
   decompress per codec, level 6), sorted by speed.
 - `<corpus>_ratio_heatmap.svg` / `_compress_heatmap.svg` — per file, relative to
@@ -118,10 +122,50 @@ complements give precise numbers and per-file detail:
 ### Silesia corpus (12 large files, levels 1/6/9)
 
 ![silesia compression speed vs ratio](graphs/silesia_compress_pareto.svg)
-![silesia decompression speed vs ratio](graphs/silesia_decompress_pareto.svg)
+![silesia decode throughput vs input density](graphs/silesia_decode_density.svg)
+![silesia decode throughput ranking](graphs/silesia_decode_ranking.svg)
 ![silesia summary table](graphs/silesia_summary.svg)
 ![silesia ratio vs zlib per file](graphs/silesia_ratio_heatmap.svg)
 ![silesia compress speed vs zlib per file](graphs/silesia_compress_heatmap.svg)
+
+## Decoding (decode-density)
+
+The compress headline is a *speed-vs-ratio Pareto* because each codec chooses its
+own ratio/speed tradeoff. Decompression has no such tradeoff: the input density is
+**exogenous** — a property of the stream, not the decoder's choice. So the decode
+charts measure **decode throughput vs input density**, with every decoder on
+*byte-identical* input (only possible because DEFLATE is one interoperable format
+— you genuinely can feed one encoder's stream to every decoder). The fixed encoder
+is **libdeflate** (raw DEFLATE, the densest realistic streams); `memcpy` is the
+memory-bandwidth ceiling on emitting the output bytes. This is the rigorous way to
+isolate a decoder: an own-encoder scatter (the lzbench / Squash convention)
+confounds decoder speed with each encoder's ratio.
+
+Two views, both at a representative encode level (libdeflate L6):
+
+- **`<corpus>_decode_density.svg`** — per-file scatter: x = each file's
+  compression ratio (wide, from ~0.27 text to ~0.9 incompressible like `sao` /
+  `x-ray`), y = decode MB/s. Shows content-dependence — literal-heavy
+  incompressible data decodes differently than match-heavy text.
+- **`<corpus>_decode_ranking.svg`** — lollipop of geomean decode MB/s per decoder,
+  with the memcpy ceiling showing the headroom.
+
+Pipeline (wired into `bench/run.sh` step 3b):
+
+```
+# 1. dump libdeflate streams for Silesia + time the in-process decoders + memcpy
+lake env .lake/build/bin/bench-report --decode-density \
+  bench/results/decode_density.json bench/payloads-deflate
+# 2. time the external decoders (Go / JS / Zig / OCaml) on the same streams
+python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_density.json
+# 3. plot.py auto-detects decode_density.json → graphs/<corpus>_decode_{density,ranking}.svg
+```
+
+Each comparator gains a `decode <stream.deflate>` mode (alongside its existing
+`<payload> <level>` roundtrip mode) so it decodes a provided stream with the same
+median-of-5 / `itersFor` methodology as the Lean side. The streams under
+`bench/payloads-deflate/` are gitignored; `decode_density.json` is committed
+alongside `latest.json`.
 
 ## What the current snapshot shows
 
