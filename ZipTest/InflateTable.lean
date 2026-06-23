@@ -48,7 +48,7 @@ private def spineLengths : Array UInt8 :=
 /-- The trees exercised by the differential check, paired with a label. -/
 private def trees : Array (String × HuffTree) := Id.run do
   let mut acc : Array (String × HuffTree) := #[]
-  for d in [1, 4, 8, 9, 10, 12] do
+  for d in [1, 4, 8, 10, 11, 13] do
     match HuffTree.fromLengths (completeLengths d) 15 with
     | .ok t => acc := acc.push (s!"complete-{d}", t)
     | .error _ => pure ()
@@ -112,15 +112,15 @@ def tests : IO Unit := do
     codes past it (sentinel slots), a 1…15 mix, and the RFC fixed code lengths. -/
 private def lengthVectors : Array (String × Array UInt8) := Id.run do
   let mut acc : Array (String × Array UInt8) := #[]
-  for d in [1, 4, 8, 9, 10, 12] do
+  for d in [1, 4, 8, 10, 11, 13] do
     acc := acc.push (s!"complete-{d}", completeLengths d)
   acc := acc.push ("spine-1..15", spineLengths)
   acc := acc.push ("fixed-lit", Zip.Native.Inflate.fixedLitLengths)
   acc := acc.push ("fixed-dist", Zip.Native.Inflate.fixedDistLengths)
   -- A sparse, irregular *incomplete* code (Kraft sum < 1, so some ≤ fastBits
-  -- slots stay sentinel) mixing short codes with one length-10 fallback code —
+  -- slots stay sentinel) mixing short codes with one length-13 fallback code —
   -- the realistic dynamic-block shape.
-  acc := acc.push ("sparse", #[3, 3, 2, 0, 4, 4, 0, 0, 2, 10, 10] ++ Array.replicate 5 (0 : UInt8))
+  acc := acc.push ("sparse", #[3, 3, 2, 0, 4, 4, 0, 0, 2, 13, 13] ++ Array.replicate 5 (0 : UInt8))
   return acc
 
 /-- Differential check: the canonical O(n) table build (`buildTableCanonical`)

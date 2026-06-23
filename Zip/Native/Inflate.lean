@@ -135,8 +135,11 @@ up to 15) fall back to the tree walk. `decode` stays the canonical spec;
 `decodeWithTable_eq`) and the fast block loop `decodeHuffmanFast` is proven
 equal to `decodeHuffman` — there is no `@[implemented_by]` trust gap. -/
 
-/-- Number of bits the fast decode table indexes on (the common "fast bits"). -/
-def fastBits : Nat := 9
+/-- Number of bits the fast decode table indexes on (the common "fast bits").
+    Widened to libdeflate's `LITLEN_TABLEBITS = 11`: fewer codewords spill to the
+    slow/subtable path, and the canonical O(2^bits) table build (#2671) keeps the
+    wider table cheap to construct. -/
+def fastBits : Nat := 11
 
 /-- Walk `tree` using the low bits of `idx` (LSB first, matching `readBit`),
     for up to `fastBits` steps. Returns `(symbol, codeLen)` if a leaf is reached
@@ -411,12 +414,15 @@ def bitsAvail (br : BitReader) : Nat :=
   if br.pos ≥ br.data.size then 0 else (br.data.size - br.pos) * 8 - br.bitOff
 
 /-- Peek the next `fastBits` bits at `(pos, bitOff)`, LSB-first, without
-    consuming. Bytes past the end of the stream read as zero; the caller uses
-    `bitsAvail` to decide whether the looked-up code actually fits. -/
+    consuming. Reads 3 bytes: a `≤ 7`-bit `bitOff` plus the 11-bit window spans
+    bits `0 … 17`, so three bytes (bits `0 … 23`) always cover it. Bytes past the
+    end of the stream read as zero; the caller uses `bitsAvail` to decide whether
+    the looked-up code actually fits. -/
 def peekFast (br : BitReader) : UInt32 :=
   let b0 : UInt32 := if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else 0
   let b1 : UInt32 := if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toUInt32 else 0
-  ((b0 ||| (b1 <<< 8)) >>> br.bitOff.toUInt32) &&& 0x1FF
+  let b2 : UInt32 := if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toUInt32 else 0
+  ((b0 ||| (b1 <<< 8) ||| (b2 <<< 16)) >>> br.bitOff.toUInt32) &&& 0x7FF
 
 /-- Table-driven single-symbol decode. Peeks `fastBits` bits, reads the
     `(symbol, codeLen)` from `table`, and consumes `codeLen` bits in one step.
@@ -831,12 +837,12 @@ theorem refillGuard_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size 
 /-- The inline-literal guard read in `USize` matches the `Nat` guard (the length
     field round-trips since it is a `UInt8`). -/
 theorem litGuard_usize (table : HuffTree.DecodeTable) (bitBuf : UInt64) (cnt : USize) :
-    ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-        ∧ ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize ≤ cnt
-        ∧ table.symAt (bitBuf &&& 0x1FF).toNat < 256)
-      ↔ ((table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-        ∧ (table.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt.toNat
-        ∧ table.symAt (bitBuf &&& 0x1FF).toNat < 256) := by
+    ((table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+        ∧ ((table.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize ≤ cnt
+        ∧ table.symAt (bitBuf &&& 0x7FF).toNat < 256)
+      ↔ ((table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+        ∧ (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt.toNat
+        ∧ table.symAt (bitBuf &&& 0x7FF).toNat < 256) := by
   rw [USize.le_iff_toNat_le, toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)]
 
 /-- Load whole bytes into the high end of `bitBuf` until it holds > 56 bits or
@@ -850,7 +856,7 @@ termination_by data.size - pos
 decreasing_by simp_wf; omega
 
 /-- Bit-by-bit tree walk over the buffer (fallback for codes longer than the
-    9-bit table or near end-of-input). Mirrors `HuffTree.decode.go` exactly
+    11-bit table or near end-of-input). Mirrors `HuffTree.decode.go` exactly
     (same `depth > 20` guard, same error strings), so it is provably equal;
     `depth` is the tree-walk depth. Returns the symbol, the remaining buffer,
     and the number of bits consumed. -/
@@ -867,12 +873,12 @@ def walkTree (t : HuffTree) (bitBuf : UInt64) (cnt depth : Nat) :
       | .error e => .error e
       | .ok (s, bb, c, used) => .ok (s, bb, c, used + 1)
 
-/-- Decode one Huffman symbol from the (refilled) buffer via the 9-bit table,
+/-- Decode one Huffman symbol from the (refilled) buffer via the 11-bit table,
     falling back to the tree walk for long codes / near EOF. Returns the symbol,
     remaining buffer state, and bits consumed. -/
 @[inline] def decodeSym (tree : HuffTree) (table : HuffTree.DecodeTable)
     (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
-  let idx := (bitBuf &&& 0x1FF).toNat
+  let idx := (bitBuf &&& 0x7FF).toNat
   let len := (table.lenAt idx).toNat
   if len == 0 || len > cnt then walkTree tree bitBuf cnt 0
   else .ok (table.symAt idx, bitBuf >>> len.toUInt64, cnt - len, len)
@@ -1032,15 +1038,15 @@ def goFusedP (litTable distTable : HuffTree.DecodeTable)
     goFusedP litTable distTable data litTree distTree maxOut
       (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
   else
-  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-      ∧ (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt
-      ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
+  if hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+      ∧ (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt
+      ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goFusedP litTable distTable data litTree distTree maxOut pos
-        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
-        (cnt - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat)
-        (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8)
+        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
+        (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)
+        (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8)
   else
   let cnt0 := cnt
   match decodeSym litTree litTable bitBuf cnt with
@@ -1112,16 +1118,16 @@ def goFusedPU (litTable distTable : HuffTree.DecodeTable)
           rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
       (cnt + 8) hsz output
   else
-  if hlit : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≠ 0
-      ∧ ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize ≤ cnt
-      ∧ litTable.symAt (bitBuf &&& 0x1FF).toNat < 256 then
+  if hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+      ∧ ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize ≤ cnt
+      ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goFusedPU litTable distTable data litTree distTree maxOut pos
-        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUInt64)
-        (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize)
+        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
+        (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize)
         hsz
-        (output.push (litTable.symAt (bitBuf &&& 0x1FF).toNat).toUInt8)
+        (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8)
   else
   let cnt0 := cnt.toNat
   match decodeSym litTree litTable bitBuf cnt.toNat with
@@ -1183,13 +1189,13 @@ def goFusedPU (litTable distTable : HuffTree.DecodeTable)
       rw [hpa, hca]; omega
     · -- inline literal: cnt drops by len ≥ 1
       obtain ⟨hne, hle, _⟩ := hlit
-      have hlen : ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize.toNat
-          = (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat :=
+      have hlen : ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize.toNat
+          = (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat :=
         toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat).toUSize).toNat
-          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat := by
+      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize).toNat
+          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat := by
         rw [USize.toNat_sub_of_le _ _ hle, hlen]
-      have hlecnt : (litTable.lenAt (bitBuf &&& 0x1FF).toNat).toNat ≤ cnt.toNat :=
+      have hlecnt : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt.toNat :=
         hlen ▸ USize.le_iff_toNat_le.mp hle
       rw [hsub]; omega
     · -- slow literal: cnt' < cnt0 = cnt.toNat from the no-progress guard

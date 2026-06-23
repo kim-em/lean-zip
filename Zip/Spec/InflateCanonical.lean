@@ -724,7 +724,7 @@ theorem buildTableCanonical_packed_getElem (lengths : Array UInt8) (maxBits : Na
     rw [Huffman.Spec.allCodes_mem_iff] at hmem
     exact hmatch ⟨s, cw, hmem.2, hlen, hcw⟩
 
-set_option maxRecDepth 4096 in
+set_option maxRecDepth 16384 in
 /-- **`buildTableCanonical_eq`.** The canonical O(n) decode-table build equals the
     tree-built decode table, under the validity envelope. Drop-in: every decode
     proof transferring through `buildTable` transfers through the canonical build. -/

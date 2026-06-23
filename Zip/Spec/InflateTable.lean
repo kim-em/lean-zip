@@ -133,22 +133,22 @@ theorem peekFast_testBit (br : BitReader) (j : Nat)
         ((br.pos * 8 + br.bitOff + j) % 8) := by
   have hpos : br.pos < br.data.size := by omega
   simp only [fastBits] at hj
-  have hmask : (0x1FF : UInt32).toNat.testBit j = true := by
-    rw [show (0x1FF : UInt32).toNat = 2 ^ 9 - 1 from by decide, Nat.testBit_two_pow_sub_one]
+  have hmask : (0x7FF : UInt32).toNat.testBit j = true := by
+    rw [show (0x7FF : UInt32).toNat = 2 ^ 11 - 1 from by decide, Nat.testBit_two_pow_sub_one]
     simp only [decide_eq_true_eq]; omega
   have hshift : br.bitOff.toUInt32.toNat % 32 = br.bitOff := by
     simp only [Nat.toUInt32, UInt32.ofNat, UInt32.toNat, BitVec.toNat_ofNat, Nat.reducePow]
     omega
-  unfold peekFast
-  -- Reduce to a single-bit query on the 16-bit window `b0 ||| (b1 <<< 8)`.
-  rw [UInt32.toNat_and, Nat.testBit_and, UInt32.toNat_shiftRight, Nat.testBit_shiftRight,
-    hmask, Bool.and_true, hshift, UInt32.toNat_or, Nat.testBit_or,
-    show (if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else (0 : UInt32)).toNat
-        = br.data[br.pos]!.toNat from by rw [if_pos hpos, UInt8.toNat_toUInt32]]
-  -- The high byte `b1 <<< 8` (no UInt32 overflow: the value is < 2^16).
+  -- The two high bytes `b1 <<< 8` / `b2 <<< 16` (no UInt32 overflow: < 2^24).
   have hb1eq : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toUInt32
         else (0 : UInt32)).toNat
       = (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0) := by
+    split
+    · rw [UInt8.toNat_toUInt32]
+    · rfl
+  have hb2eq : (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toUInt32
+        else (0 : UInt32)).toNat
+      = (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toNat else 0) := by
     split
     · rw [UInt8.toNat_toUInt32]
     · rfl
@@ -156,24 +156,60 @@ theorem peekFast_testBit (br : BitReader) (j : Nat)
     split
     · have := UInt8.toNat_lt br.data[br.pos + 1]!; omega
     · decide
-  rw [UInt32.toNat_shiftLeft, show (8 : UInt32).toNat % 32 = 8 from by decide, hb1eq,
+  have hb2lt : (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toNat else 0) < 256 := by
+    split
+    · have := UInt8.toNat_lt br.data[br.pos + 2]!; omega
+    · decide
+  unfold peekFast
+  -- Reduce to a single-bit query on the 24-bit window `b0 ||| (b1 <<< 8) ||| (b2 <<< 16)`.
+  rw [UInt32.toNat_and, Nat.testBit_and, UInt32.toNat_shiftRight, Nat.testBit_shiftRight,
+    hmask, Bool.and_true, hshift, UInt32.toNat_or, UInt32.toNat_or, Nat.testBit_or,
+    Nat.testBit_or,
+    show (if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else (0 : UInt32)).toNat
+        = br.data[br.pos]!.toNat from by rw [if_pos hpos, UInt8.toNat_toUInt32],
+    UInt32.toNat_shiftLeft, show (8 : UInt32).toNat % 32 = 8 from by decide, hb1eq,
     Nat.mod_eq_of_lt (by rw [Nat.shiftLeft_eq, show (2 : Nat) ^ 8 = 256 from by decide,
       show (2 : Nat) ^ 32 = 4294967296 from by decide]; omega),
-    Nat.testBit_shiftLeft]
+    UInt32.toNat_shiftLeft, show (16 : UInt32).toNat % 32 = 16 from by decide, hb2eq,
+    Nat.mod_eq_of_lt (by rw [Nat.shiftLeft_eq, show (2 : Nat) ^ 16 = 65536 from by decide,
+      show (2 : Nat) ^ 32 = 4294967296 from by decide]; omega),
+    Nat.testBit_shiftLeft, Nat.testBit_shiftLeft]
   by_cases hlo : br.bitOff + j < 8
-  · -- low byte: the shift-left term vanishes; cursor stays in byte `pos`
-    rw [show (decide (br.bitOff + j ≥ 8)) = false from by
-        simp only [decide_eq_false_iff_not]; omega, Bool.false_and, Bool.or_false,
-      show (br.pos * 8 + br.bitOff + j) / 8 = br.pos from by omega,
-      show (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j from by omega]
-  · -- high byte: byte `pos`'s bit is past its width (false); use byte `pos+1`
-    rw [show br.data[br.pos]!.toNat.testBit (br.bitOff + j) = false from
+  · -- byte `pos`: both shift-left terms vanish
+    have e8 : decide (br.bitOff + j ≥ 8) = false := by simp only [decide_eq_false_iff_not]; omega
+    have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
+    have hdiv : (br.pos * 8 + br.bitOff + j) / 8 = br.pos := by omega
+    have hmod : (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j := by omega
+    simp only [e8, e16, Bool.false_and, Bool.or_false, hdiv, hmod]
+  · by_cases hmid : br.bitOff + j < 16
+    · -- byte `pos+1`: byte `pos`'s bit is past its width (false)
+      have hb0 : br.data[br.pos]!.toNat.testBit (br.bitOff + j) = false :=
         Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (UInt8.toNat_lt br.data[br.pos]!)
-          (Nat.pow_le_pow_right (by omega) (by omega))),
-      show (decide (br.bitOff + j ≥ 8)) = true from by simp only [decide_eq_true_eq]; omega,
-      Bool.true_and, Bool.false_or, if_pos (show br.pos + 1 < br.data.size from by omega),
-      show (br.pos * 8 + br.bitOff + j) / 8 = br.pos + 1 from by omega,
-      show (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j - 8 from by omega]
+          (Nat.pow_le_pow_right (by omega) (by omega)))
+      have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
+      have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
+      have hif1 : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0)
+          = br.data[br.pos + 1]!.toNat := if_pos (by omega)
+      have hdiv : (br.pos * 8 + br.bitOff + j) / 8 = br.pos + 1 := by omega
+      have hmod : (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j - 8 := by omega
+      simp only [hb0, e8, e16, Bool.true_and, Bool.false_and, Bool.false_or, Bool.or_false,
+        hif1, hdiv, hmod]
+    · -- byte `pos+2`: bytes `pos` and `pos+1` contribute no bit at this position
+      have hb0 : br.data[br.pos]!.toNat.testBit (br.bitOff + j) = false :=
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le (UInt8.toNat_lt br.data[br.pos]!)
+          (Nat.pow_le_pow_right (by omega) (by omega)))
+      have hb1 : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0).testBit
+            (br.bitOff + j - 8) = false :=
+        Nat.testBit_lt_two_pow (Nat.lt_of_lt_of_le hb1lt (by
+          calc (256 : Nat) = 2 ^ 8 := by decide
+            _ ≤ 2 ^ (br.bitOff + j - 8) := Nat.pow_le_pow_right (by omega) (by omega)))
+      have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
+      have e16 : decide (br.bitOff + j ≥ 16) = true := by simp only [decide_eq_true_eq]; omega
+      have hif2 : (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toNat else 0)
+          = br.data[br.pos + 2]!.toNat := if_pos (by omega)
+      have hdiv : (br.pos * 8 + br.bitOff + j) / 8 = br.pos + 2 := by omega
+      have hmod : (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j - 16 := by omega
+      simp only [hb0, hb1, e8, e16, Bool.true_and, Bool.false_or, hif2, hdiv, hmod]
 
 /-- **Codeword = stream prefix.** With `bitOff < 8`, `len ≤ fastBits`, and at
     least `len` bits available, the codeword read from the peeked bits is the
