@@ -63,9 +63,18 @@ stays current.
   compression change can move *both* the ratio and the speed, so the
   speed-vs-ratio Pareto frontier is the thing to read — does native shift up
   (faster at the same ratio) or right (worse ratio)?
-- **Decompression PR → `decompress_mbps`.** Decode speed does not trade off
-  against ratio, so this is just a throughput-vs-ratio scatter — still worth
-  showing, but less rich than the compress view.
+- **Decompression PR → the decode-density charts.** Decode speed does not trade
+  off against ratio, so there is no Pareto frontier; the decode view is the pair
+  of `bench/graphs/<corpus>_decode_density.svg` (per-file decode MB/s vs that
+  file's libdeflate ratio — the wide cross-file density range) and
+  `<corpus>_decode_ranking.svg` (the lollipop ordering, with the `memcpy`
+  bandwidth ceiling). These measure **every** decoder on byte-identical
+  libdeflate streams, so they place native against the field honestly. A decode
+  PR **must refresh these in-PR** (step 8) — the committed
+  `bench/results/decode_density.json` and both SVGs — just as a compress PR
+  refreshes `latest.json`. The before/after native delta still reads from the
+  `decompress_mbps` overlay (steps 3–7); the decode-density charts are the
+  committed dashboard half.
 - A PR touching both: produce both sets.
 
 ## Workflow
@@ -271,6 +280,25 @@ artifacts move into `$W`.
    external-comparator rebuild.) Pin to a free core so the committed numbers are
    not contention-depressed, and confirm `git status` shows only
    `bench/results/latest.json` and `bench/graphs/*.svg` changed by this step.
+
+   **For a decode (or both) PR, also refresh the decode-density dashboard.** The
+   `--native-only` splice above does NOT touch `decode_density.json` (it is a
+   separate fixed-libdeflate-input experiment, `run.sh` step 3b). Re-run that
+   pipeline so the committed decode charts reflect this PR's decoder, then commit
+   the JSON + both SVGs into the PR:
+   ```
+   nix-shell --run "lake env .lake/build/bin/bench-report --decode-density \
+     bench/results/decode_density.json bench/payloads-deflate"
+   nix-shell -p nodejs python3 --run \
+     "python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_density.json"
+   nix-shell --run "python bench/plot.py bench/results/latest.json bench/graphs"
+   git add bench/results/decode_density.json bench/graphs/*_decode_density.svg bench/graphs/*_decode_ranking.svg
+   ```
+   The Lean pass rewrites the in-process decoder rows (native/zlib/miniz/libdeflate
+   + memcpy) and `decode_density.py` re-adds the external rows; `plot.py`
+   auto-detects the sibling `decode_density.json` and re-renders both decode SVGs.
+   (Pin to a free core here too — `taskset -c <free-core>` — so the decode numbers
+   are not contention-depressed; the `payloads-deflate/` streams are gitignored.)
 
 9. **Always post the graphs as a PR comment — then give Kim the link.** This step
    is compulsory, not "also if convenient": every qualifying PR gets a PR comment

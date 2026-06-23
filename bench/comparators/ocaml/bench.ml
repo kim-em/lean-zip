@@ -158,9 +158,25 @@ let mbps size ns_per_op =
 
 let round2 f = float_of_int (int_of_float ((f *. 100.0) +. 0.5)) /. 100.0
 
+(* Decode-only throughput on a provided raw-DEFLATE stream (fixed external
+   encoder), so every decoder is measured on byte-identical input. Throughput is
+   against the decoded (uncompressed) byte count. *)
+let run_decode path =
+  let comp = read_file path in
+  let size = String.length (inflate comp) in
+  let iters = iters_for size in
+  let d_ns = median_ns_per_op iters (fun () -> String.length (inflate comp)) in
+  if !sink = 0 then prerr_endline "unreachable";
+  Printf.printf "{\"decompress_mbps\": %.2f, \"decoded_size\": %d}\n"
+    (round2 (mbps size d_ns)) size
+
 let () =
+  if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "decode" then begin
+    run_decode Sys.argv.(2);
+    exit 0
+  end;
   if Array.length Sys.argv <> 3 then begin
-    prerr_endline "usage: bench <payload.bin> <level>";
+    prerr_endline "usage: bench <payload.bin> <level>  |  bench decode <stream.bin>";
     exit 2
   end;
   let path = Sys.argv.(1) in

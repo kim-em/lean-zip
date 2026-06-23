@@ -39,10 +39,30 @@ function mbps(size, nsPerOp) {
   return Math.round(((size / (1024 * 1024)) / (nsPerOp / 1e9)) * 100) / 100;
 }
 
+// Decode-only throughput on a provided raw-DEFLATE stream (fixed external
+// encoder), so every decoder is measured on byte-identical input. Throughput is
+// against the decoded (uncompressed) byte count.
+function runDecode(path) {
+  const comp = new Uint8Array(readFileSync(path));
+  const size = inflateSync(comp).length;
+  const iters = itersFor(size);
+  const dNs = medianNsPerOp(iters, () => inflateSync(comp).length);
+  if (sink === 0) console.error("unreachable");
+  process.stdout.write(JSON.stringify({
+    decompress_mbps: mbps(size, dNs),
+    decoded_size: size,
+  }) + "\n");
+}
+
 function main() {
-  const [path, levelStr] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
+  if (argv.length === 2 && argv[0] === "decode") {
+    runDecode(argv[1]);
+    return;
+  }
+  const [path, levelStr] = argv;
   if (!path || levelStr === undefined) {
-    console.error("usage: node bench.mjs <payload.bin> <level>");
+    console.error("usage: node bench.mjs <payload.bin> <level>  |  node bench.mjs decode <stream.bin>");
     process.exit(2);
   }
   const data = new Uint8Array(readFileSync(path));
