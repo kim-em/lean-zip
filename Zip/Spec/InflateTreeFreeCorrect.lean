@@ -41,7 +41,61 @@ namespace Zip.Native.HuffTree
 building the tree, factored out for the tree-free path. These lemmas certify that
 running `validateLengths` rejects (and accepts) precisely the length sets
 `fromLengths` does, with identical error messages — the foundation of closing the
-tree-free code-length validation gap. -/
+tree-free code-length validation gap.
+
+`fromLengths` computes its Kraft sum over a per-block `lengths.toList`/`filter`
+`List`; `validateLengths` computes the same sum from the per-length `count`
+histogram (`countLengthsFast`, the array the canonical table build already needs)
+via the allocation-free `kraftSumFast`. `validate_kraft_eq` certifies the two Kraft
+computations agree on every length set with no over-bound length, so the check
+cascades stay identical. -/
+
+/-- The fast histogram equals the spec `countLengths` on the mapped lengths.
+    (Local restatement of the `hcount` step inside `buildTableCanonicalFast_eq`.) -/
+theorem countLengthsFast_eq (lengths : Array UInt8) (maxBits : Nat) :
+    countLengthsFast lengths maxBits
+      = Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits := by
+  rw [countLengthsFast,
+      countLengthsFast_go_eq lengths maxBits lengths.size 0 _ (by omega), List.drop_zero]
+  rfl
+
+/-- Accumulator invariant for `kraftSumFast.go`: the loop threads the running Kraft
+    sum, so it equals the accumulator plus the spec backward recurrence
+    `Huffman.Spec.kraftSumFrom` from the current index. -/
+theorem kraftSumFast_go_eq (count : Array Nat) (maxBits b acc : Nat) :
+    kraftSumFast.go count maxBits b acc = acc + Huffman.Spec.kraftSumFrom count maxBits b := by
+  rw [kraftSumFast.go]
+  if h : b ≤ maxBits then
+    rw [dif_pos h, kraftSumFast_go_eq count maxBits (b + 1) _,
+        Huffman.Spec.kraftSumFrom_unfold count maxBits b h]
+    omega
+  else
+    rw [dif_neg h, Huffman.Spec.kraftSumFrom_gt count maxBits b (by omega), Nat.add_zero]
+termination_by maxBits + 1 - b
+
+/-- `kraftSumFast` equals the spec backward Kraft recurrence from index `0`. -/
+theorem kraftSumFast_eq (count : Array Nat) (maxBits : Nat) :
+    kraftSumFast count maxBits = Huffman.Spec.kraftSumFrom count maxBits 0 := by
+  rw [kraftSumFast, kraftSumFast_go_eq, Nat.zero_add]
+
+/-- The allocation-free Kraft sum `validateLengths` computes from the `count`
+    histogram equals the per-element Kraft fold `fromLengths` computes over the
+    non-zero lengths, whenever no length exceeds `maxBits` (the over-bound case is
+    rejected first by the shared `Array.any` guard). -/
+theorem validate_kraft_eq (lengths : Array UInt8) (maxBits : Nat)
+    (h : ¬ (lengths.any (fun l => l.toNat > maxBits) = true)) :
+    kraftSumFast (countLengthsFast lengths maxBits) maxBits
+      = ((lengths.toList.map UInt8.toNat).filter (· != 0)).foldl
+          (fun acc l => acc + 2 ^ (maxBits - l)) 0 := by
+  rw [kraftSumFast_eq, countLengthsFast_eq]
+  refine Huffman.Spec.kraftSumFrom_zero_eq_foldl (lengths.toList.map UInt8.toNat) maxBits ?_
+  intro l hl
+  simp only [List.mem_map] at hl
+  obtain ⟨u, hu, rfl⟩ := hl
+  rw [Array.mem_toList_iff, Array.mem_iff_getElem] at hu
+  obtain ⟨i, hi, rfl⟩ := hu
+  rw [Bool.not_eq_true, Array.any_eq_false] at h
+  simpa only [gt_iff_lt, decide_eq_true_eq, Nat.not_lt] using h i hi
 
 /-- `fromLengths` is `validateLengths` followed by the validation-free tree build:
     they share the identical `maxBits`/Kraft `if`-cascade, so `fromLengths` errors
@@ -52,7 +106,7 @@ theorem fromLengths_eq_validate (lengths : Array UInt8) (maxBits : Nat) :
   unfold fromLengths validateLengths
   by_cases h1 : lengths.any (fun l => l.toNat > maxBits) = true
   · rw [if_pos h1, if_pos h1]; rfl
-  · rw [if_neg h1, if_neg h1]
+  · rw [if_neg h1, if_neg h1, validate_kraft_eq lengths maxBits h1]
     by_cases h2 : ((lengths.toList.map UInt8.toNat).filter (· != 0)).foldl
         (fun acc l => acc + 2 ^ (maxBits - l)) 0 > 2 ^ maxBits
     · rw [if_pos h2, if_pos h2]; rfl
@@ -434,15 +488,6 @@ theorem buildSymbols_placement
     s' hs' h0' hm'
 
 /-! ## `buildLongDecode` instantiation and `codeFor` correspondence -/
-
-/-- The fast histogram equals the spec `countLengths` on the mapped lengths.
-    (Local restatement of the `hcount` step inside `buildTableCanonicalFast_eq`.) -/
-theorem countLengthsFast_eq (lengths : Array UInt8) (maxBits : Nat) :
-    countLengthsFast lengths maxBits
-      = Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits := by
-  rw [countLengthsFast,
-      countLengthsFast_go_eq lengths maxBits lengths.size 0 _ (by omega), List.drop_zero]
-  rfl
 
 /-- `numEarlier` over the whole length vector is the spec `countLengths`. -/
 theorem numEarlier_size_eq (lengths : Array UInt8) (maxBits L : Nat)
