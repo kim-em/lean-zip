@@ -1,12 +1,20 @@
 ---
 name: perf-pr-graphs
-description: Produce before/after native speed-vs-ratio comparison graphs (against the other-language curves) and show them to Kim BEFORE merging. Use REQUIRED for any lean-zip performance PR (perf:/runtime/throughput change to compress or decode) once it is green and before it merges — Kim must see the graphs first. Most interesting for compression changes.
+description: Produce before/after native speed-vs-ratio comparison graphs (against the other-language curves), post them to the PR, and show them to Kim BEFORE merging. PROACTIVELY REQUIRED for any lean-zip performance PR (perf:/runtime/throughput change to compress or decode): the moment such a PR goes green, invoke this YOURSELF without being asked — generating and posting the graphs is part of finishing the PR, never a step that waits for Kim to request it. Do not report the PR as done, and do not merely offer to "produce them if she wants", until the graphs are generated and posted; only the merge itself waits for her go-ahead. Most interesting for compression changes.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
 # Pre-merge performance comparison graphs
 
 ## TL;DR — this is compulsory, in this exact order
+
+**Do this on your own initiative.** The moment a qualifying perf PR goes green,
+generating and posting these graphs is part of *finishing* it — not a follow-up
+you wait for Kim to request. Do **not** report the PR as done, and do **not** say
+"say the word and I'll produce the graphs" or otherwise treat generation as
+opt-in: just run steps 1–9. Kim having to ask for the graphs is the failure this
+skill exists to prevent. The *only* thing that waits for her is the merge itself
+(step 5) — everything before that you do unprompted.
 
 For **every** native-performance PR (see the trigger list below), you **must**,
 once the PR is green and before it merges:
