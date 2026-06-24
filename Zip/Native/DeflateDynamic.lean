@@ -548,12 +548,16 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
 /-- Hash-chain search depth per compression level (levels ≥ 5). Higher levels
     search deeper for longer matches (better ratio on diverse input) at higher
     cost; the `chainWalk` early-stop keeps repetitive input fast at any depth.
-    The ratio gain saturates around 256–512 (measured), so level 9 caps there. -/
+    The ratio gain saturates around 256–512 (measured), so level 9 caps there.
+
+    Level 4 uses depth 32 (was 48): with the graduated lazy-gate (see `goodMatch`)
+    it is the fast/loose anchor of the lazy tier, so a shallower chain there evens
+    the L3→L4→L5 ratio spread (#2710 D3). -/
 def chainDepth (level : UInt8) : Nat :=
   if level ≤ 1 then 8
   else if level ≤ 2 then 16
   else if level ≤ 3 then 32
-  else if level ≤ 4 then 48
+  else if level ≤ 4 then 32
   else if level ≤ 5 then 64
   else if level ≤ 6 then 128
   else if level ≤ 7 then 256
@@ -575,9 +579,19 @@ def insertCap (level : UInt8) : Nat :=
 /-- Lazy `good_match` threshold (zlib-style): the lazy matcher skips the
     one-byte-lookahead probe once the first match is at least this long, since a
     long first match is rarely improved by deferral. Lower → more gating (faster,
-    slightly worse ratio). `259 > 258` disables gating. SPIKE: uniform 8. -/
+    slightly worse ratio); `259 > 258` disables gating.
+
+    Graduated across the lazy tier (#2710) to de-bunch L4/5/6: at uniform `8` the
+    gate fired so eagerly that the chain-depth ladder (48/64/128) barely moved the
+    ratio, so the three levels clustered on the Pareto. Raising the threshold up
+    the ladder lets the one-byte lookahead (and the deeper chain) actually run, so
+    L5/L6 trade speed for ratio and spread apart; L7+ stays ungated (the top
+    single-block point). A pure heuristic — every `goodMatch` keeps the matcher
+    contracts (`lz77ChainLazyIter_resolves` holds ∀ goodMatch). -/
 def goodMatch (level : UInt8) : Nat :=
-  if level ≤ 6 then 8
+  if level ≤ 4 then 8
+  else if level ≤ 5 then 16
+  else if level ≤ 6 then 64
   else 259
 
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
