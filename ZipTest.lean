@@ -7,6 +7,7 @@ import ZipTest.Libdeflate
 import ZipTest.Zopfli
 import ZipTest.Checksum
 import ZipTest.Binary
+import ZipTest.Wide
 import ZipTest.Tar
 import ZipTest.Archive
 import ZipTest.ZipFixtures
@@ -40,6 +41,7 @@ def main : IO Unit := do
   ZipTest.Zopfli.tests
   ZipTest.Checksum.tests
   ZipTest.Binary.tests
+  ZipTest.Wide.tests
   ZipTest.Tar.tests
   ZipTest.Archive.tests
   ZipTest.ZipFixtures.tests
