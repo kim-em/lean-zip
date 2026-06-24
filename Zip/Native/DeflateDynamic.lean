@@ -1278,17 +1278,26 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     At level 9 (and within the `optimalMaxSize` memory gate) the dispatch switches
     to the **near-optimal** cost-model DP parse (`deflateDynamicBlocksOptimal`),
     which chooses the globally cheapest token sequence under an estimated bit cost
-    instead of the locally longest match. It is emitted as `pickSmaller(base,
-    optimal)`: the optimal parse wins outright on every Canterbury and Silesia file
-    (measured, #2640) — strictly smaller than base, the self-contained split, *and*
-    the shared-window split, including the binary `kennedy.xls` (the one file the
-    self-contained split wins at L7–L8, where optimal is not computed). So at L9 the
-    SC and shared candidates are dropped: each cost a full independent match/split
-    pass (~24% of L9 wall-clock together) for output `pickSmaller` always discarded.
-    `base` stays as a near-free safety floor (it reuses the already-computed
-    `ptokens`), so `pickSmaller(base, optimal)` never regresses below the lazy
-    baseline on any input. The split candidates remain at level 8, where optimal is
-    not computed.
+    instead of the locally longest match, grouped into blocks on the fixed
+    `sharedTokChunk` cadence. It is emitted as `pickSmaller(base, optimal)`. On the
+    Canterbury (11) and Silesia (12) corpora this fixed-cadence optimal candidate is
+    measured strictly smaller than base, the self-contained split, *and* the
+    arbitrated shared-window split on every file — including the binary
+    `kennedy.xls`, where the self-contained split is the best of the three
+    non-optimal candidates yet still loses to optimal — so `min(base, optimal) ==
+    min(base, SC, shared, optimal)` byte-for-byte across both corpora (#2640). On that measured evidence
+    the SC and shared candidates are dropped at L9: each costs a full independent
+    match/split pass (~24% of L9 wall-clock together) for output `pickSmaller`
+    always discarded. This is a measured speed/ratio tradeoff over those corpora,
+    **not** a proven dominance invariant: the optimal parse minimizes an estimated
+    per-token cost, not the final DEFLATE size across block partitions, so a
+    pathological input whose statistics shift badly against the 8192-token cadence
+    could in principle let an arbitrated split win. `base` stays as a near-free
+    safety floor (it reuses the already-computed `ptokens`), so the emitted
+    `pickSmaller(base, optimal)` is never worse than the lazy single-block baseline
+    on any input — the only residual risk is forfeiting a split-only win, which the
+    corpus gate found nowhere. The split candidates remain at level 8, where optimal
+    is not computed.
 
     The base-vs-split candidates are compared against the whole base via
     `pickSmaller`, *not* nested inside the dynamic branch: on large heterogeneous
@@ -1329,20 +1338,23 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- moves it onto packed words).
     let ptokens := lzMatchP data level
     if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
-      -- The optimal cost-model DP parse wins outright at level 9 on every
-      -- Canterbury and Silesia file (measured, #2640), so the self-contained
-      -- and shared-window split candidates are dead weight — a full
-      -- independent match/split pass each for output `pickSmaller` always
-      -- discards. Keep `base` (it reuses the already-computed `ptokens`, ~free)
-      -- as a safety floor and emit `pickSmaller(base, optimal)`: output ≤ both,
-      -- so we never regress below the lazy baseline on any input.
+      -- The fixed-cadence optimal candidate measured strictly smallest on every
+      -- Canterbury and Silesia file (#2640), so the self-contained and
+      -- shared-window split candidates — a full independent match/split pass each,
+      -- for output `pickSmaller` always discarded — are dropped here on that
+      -- measured evidence (see the dispatch docstring; this is a corpus-gated
+      -- speed/ratio tradeoff, not a proven dominance invariant). Keep `base` (it
+      -- reuses the already-computed `ptokens`, ~free) as a safety floor and emit
+      -- `pickSmaller(base, optimal)`: never worse than the lazy single-block
+      -- baseline on any input.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
-      -- Level 8: base vs cross-block split. The self-contained split is demoted to
-      -- level 9 (it wins on exactly one corpus file while paying a full per-chunk
-      -- match pass). Level 7 no longer enters here — it is the top single-block
-      -- point (see the dispatch docstring), so the split tier starts at level 8.
+      -- Level 8: base vs cross-block shared-window split. The self-contained split
+      -- is not a candidate here (nor at L9 since #2640): it pays a full per-chunk
+      -- match pass and never sized smallest on the measured corpora. Level 7 no
+      -- longer enters here — it is the top single-block point (see the dispatch
+      -- docstring), so the split tier starts at level 8.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))
   else deflateRawBase data level
