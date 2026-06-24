@@ -356,27 +356,44 @@ private theorem seedTailCosts_size (cost : Array Nat) (r perByte j : Nat) :
 termination_by 259 - j
 decreasing_by omega
 
+/-- `lengthBoundaryStart[v]` is the smallest length-code slot `s` with
+    `lengthBase[s] > v` (equivalently, the count of length bases `≤ v`),
+    `29` if none. `Inflate.lengthBase` is sorted ascending, so this is the
+    first slot a covered interval `(v, len)` can include — `scanBounds`
+    starts its scan here instead of from slot 0, skipping the boundaries that
+    cannot qualify. Indexed by the previous candidate length, `0..258`. -/
+def lengthBoundaryStart : Array Nat :=
+  Array.ofFn (n := 259) fun v =>
+    (Inflate.lengthBase.filter fun b => decide (b.toNat ≤ v.val)).size
+
 /-- Evaluate one candidate at the length-code lower boundaries inside
     `(prevLen, len)` (its covered interval, exclusive of `len` which the
     caller already evaluated): truncating a match to a boundary can buy a
     cheaper length code or a better continuation. `(bestC, bestL, bestD)`
-    is the running arg-min. -/
-def scanBounds (lenCost distCost cost : Array Nat) (i dist prevLen len s : Nat)
+    is the running arg-min.
+
+    The caller starts `s` at `lengthBoundaryStart[prevLen]`, the first slot
+    with `lengthBase[s] > prevLen`, so the lower bound `prevLen < b` already
+    holds for every slot scanned (`lengthBase` ascending). Only the upper
+    bound `b < len` is tested, and once it fails the scan stops — all later
+    slots have an even larger base. Same boundaries, same order, same
+    arg-min as a full `0..28` scan with the `prevLen < b ∧ b < len`
+    predicate, just without the iterations that cannot qualify. -/
+def scanBounds (lenCost distCost cost : Array Nat) (i dist len s : Nat)
     (bestC bestL bestD : Nat) : Nat × Nat × Nat :=
   if h : s < Inflate.lengthBase.size then
     let b := Inflate.lengthBase[s].toNat
-    if prevLen < b ∧ b < len then
+    if b < len then
       -- These three reads stay panic-checked: the indices (`b` a length-base
       -- value, `dist` a cached distance, `i + b` a cost-array offset) are
       -- heuristic cache/table values whose bounds would require cache-content
       -- invariants the design deliberately keeps out of the proof boundary.
       let c := lenCost[b]! + distCost[dist]! + cost[i + b]!
       if c < bestC then
-        scanBounds lenCost distCost cost i dist prevLen len (s + 1) c b dist
+        scanBounds lenCost distCost cost i dist len (s + 1) c b dist
       else
-        scanBounds lenCost distCost cost i dist prevLen len (s + 1) bestC bestL bestD
-    else
-      scanBounds lenCost distCost cost i dist prevLen len (s + 1) bestC bestL bestD
+        scanBounds lenCost distCost cost i dist len (s + 1) bestC bestL bestD
+    else (bestC, bestL, bestD)
   else (bestC, bestL, bestD)
 termination_by Inflate.lengthBase.size - s
 decreasing_by all_goals omega
@@ -402,8 +419,13 @@ def scanCands (cacheLens cacheDists lenCost distCost cost : Array Nat)
       let cFull := lenCost[len]! + distCost[dist]! + cost[i + len]!
       let (bestC, bestL, bestD) :=
         if cFull < bestC then (cFull, len, dist) else (bestC, bestL, bestD)
+      -- `lengthBoundaryStart[prevLen]!` stays panic-checked like the cache
+      -- reads above: `prevLen` is `0` or a prior cached `len`, both `≤ 258`
+      -- (matches are capped at the DEFLATE maximum), so it indexes the
+      -- 259-entry table in range — the same bound `lenCost[len]!` already
+      -- assumes for the current `len`.
       let (bestC, bestL, bestD) :=
-        scanBounds lenCost distCost cost i dist prevLen len 0 bestC bestL bestD
+        scanBounds lenCost distCost cost i dist len (lengthBoundaryStart[prevLen]!) bestC bestL bestD
       scanCands cacheLens cacheDists lenCost distCost cost slotBase i slots
         (k + 1) len bestC bestL bestD
   else (bestC, bestL, bestD)

@@ -116,6 +116,20 @@ def tests : IO Unit := do
   assert! distCost[5]! == 6        -- code 4 (5 bits) + 1 extra
   assert! distCost[32768]! == 18   -- code 29 (5 bits) + 13 extra
 
+  -- Direct-index boundary table (#2641): `scanBounds` starts its length-code
+  -- scan at `lengthBoundaryStart[prevLen]` and drops the `prevLen < b` test,
+  -- which is byte-identical only because `lengthBase` is sorted ascending.
+  -- Pin both invariants so a future reordering of `lengthBase` cannot
+  -- silently break the parse: `lengthBase` strictly ascending, and each table
+  -- entry equal to an independent "first slot whose base exceeds v" scan.
+  let lb := Zip.Native.Inflate.lengthBase
+  for s in [1:lb.size] do
+    assert! lb[s - 1]! < lb[s]!
+  assert! lengthBoundaryStart.size == 259
+  for v in [0:259] do
+    let firstGt := (lb.findIdx? (fun b => decide (v < b.toNat))).getD lb.size
+    assert! lengthBoundaryStart[v]! == firstGt
+
   -- Fitted tables: an unseen symbol costs the zero-frequency fallback, a
   -- frequent one costs its real (short) code, never 0 anywhere.
   let toks := #[LZ77Token.literal 97, .literal 97, .literal 97, .literal 98]
