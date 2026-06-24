@@ -214,6 +214,24 @@ extern_lib libcopy_within_ffi pkg := do
   let name := nameToStaticLib "copy_within_ffi"
   buildStaticLib (pkg.staticLibDir / name) #[ffiO]
 
+-- Word-sized little-endian ByteArray readers (project-local stopgap for
+-- lean#14053); no external library, always compiled.
+input_file bytearray_wide_ffi.c where
+  path := "c" / "bytearray_wide_ffi.c"
+  text := true
+
+target bytearray_wide_ffi.o pkg : FilePath := do
+  let srcJob ← bytearray_wide_ffi.c.fetch
+  let oFile := pkg.buildDir / "c" / "bytearray_wide_ffi.o"
+  let weakArgs := #["-I", (← getLeanIncludeDir).toString]
+  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  buildO oFile srcJob weakArgs hardArgs "cc"
+
+extern_lib libbytearray_wide_ffi pkg := do
+  let ffiO ← bytearray_wide_ffi.o.fetch
+  let name := nameToStaticLib "bytearray_wide_ffi"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
 -- miniz_oxide FFI (Track D comparator)
 input_file miniz_oxide_ffi.c where
   path := "c" / "miniz_oxide_ffi.c"

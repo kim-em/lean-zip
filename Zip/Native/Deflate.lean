@@ -1,5 +1,6 @@
 import Zip.Native.BitWriter
 import Zip.Native.Inflate
+import Zip.Native.Wide
 import Std.Tactic.BVDecide
 
 /-!
@@ -458,11 +459,28 @@ where
     -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
     -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
     -- same index, so `hash3_eq` stays `rfl` and the `< hashSize` bound holds.
-    let a := (data[pos]'(by omega)).toUInt32
-    let b := (data[pos + 1]'(by omega)).toUInt32
-    let c := (data[pos + 2]'(by omega)).toUInt32
-    let d := if h3 : pos + 3 < data.size then (data[pos + 3]'h3).toUInt32 else 0
-    let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    -- When the four hash bytes are in bounds and the buffer is `USize`-
+    -- addressable, read them as one wide load (`ugetUInt32LE`, #2706); its model
+    -- is exactly the `a ||| b<<<8 ||| c<<<16 ||| d<<<24` recombination, so the
+    -- hash value is identical and all three `hash3` variants stay defeq.
+    let word :=
+      if h4 : pos + 4 ≤ data.size then
+        if hsz : data.size.toUSize.toNat = data.size then
+          ByteArray.ugetUInt32LE data pos.toUSize (by
+            have hds : data.size < USize.size := by
+              rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+            rw [toUSize_toNat_of_lt (show pos < USize.size by omega)]; omega)
+        else
+          let a := (data[pos]'(by omega)).toUInt32
+          let b := (data[pos + 1]'(by omega)).toUInt32
+          let c := (data[pos + 2]'(by omega)).toUInt32
+          let d := (data[pos + 3]'(by omega)).toUInt32
+          a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+      else
+        let a := (data[pos]'(by omega)).toUInt32
+        let b := (data[pos + 1]'(by omega)).toUInt32
+        let c := (data[pos + 2]'(by omega)).toUInt32
+        a ||| (b <<< 8) ||| (c <<< 16)
     (((word * 2654435761) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
@@ -589,11 +607,28 @@ where
     -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
     -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
     -- same index, so `hash3_eq` stays `rfl` and the `< hashSize` bound holds.
-    let a := (data[pos]'(by omega)).toUInt32
-    let b := (data[pos + 1]'(by omega)).toUInt32
-    let c := (data[pos + 2]'(by omega)).toUInt32
-    let d := if h3 : pos + 3 < data.size then (data[pos + 3]'h3).toUInt32 else 0
-    let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    -- When the four hash bytes are in bounds and the buffer is `USize`-
+    -- addressable, read them as one wide load (`ugetUInt32LE`, #2706); its model
+    -- is exactly the `a ||| b<<<8 ||| c<<<16 ||| d<<<24` recombination, so the
+    -- hash value is identical and all three `hash3` variants stay defeq.
+    let word :=
+      if h4 : pos + 4 ≤ data.size then
+        if hsz : data.size.toUSize.toNat = data.size then
+          ByteArray.ugetUInt32LE data pos.toUSize (by
+            have hds : data.size < USize.size := by
+              rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+            rw [toUSize_toNat_of_lt (show pos < USize.size by omega)]; omega)
+        else
+          let a := (data[pos]'(by omega)).toUInt32
+          let b := (data[pos + 1]'(by omega)).toUInt32
+          let c := (data[pos + 2]'(by omega)).toUInt32
+          let d := (data[pos + 3]'(by omega)).toUInt32
+          a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+      else
+        let a := (data[pos]'(by omega)).toUInt32
+        let b := (data[pos + 1]'(by omega)).toUInt32
+        let c := (data[pos + 2]'(by omega)).toUInt32
+        a ||| (b <<< 8) ||| (c <<< 16)
     (((word * 2654435761) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
@@ -1489,11 +1524,28 @@ where
     -- Hash arithmetic in `UInt32` (single machine ops) rather than `Nat`
     -- (whose bitwise XOR/shift are slow); `.toNat % hashSize` keeps the exact
     -- same index, so `hash3_eq` stays `rfl` and the `< hashSize` bound holds.
-    let a := (data[pos]'(by omega)).toUInt32
-    let b := (data[pos + 1]'(by omega)).toUInt32
-    let c := (data[pos + 2]'(by omega)).toUInt32
-    let d := if h3 : pos + 3 < data.size then (data[pos + 3]'h3).toUInt32 else 0
-    let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    -- When the four hash bytes are in bounds and the buffer is `USize`-
+    -- addressable, read them as one wide load (`ugetUInt32LE`, #2706); its model
+    -- is exactly the `a ||| b<<<8 ||| c<<<16 ||| d<<<24` recombination, so the
+    -- hash value is identical and all three `hash3` variants stay defeq.
+    let word :=
+      if h4 : pos + 4 ≤ data.size then
+        if hsz : data.size.toUSize.toNat = data.size then
+          ByteArray.ugetUInt32LE data pos.toUSize (by
+            have hds : data.size < USize.size := by
+              rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+            rw [toUSize_toNat_of_lt (show pos < USize.size by omega)]; omega)
+        else
+          let a := (data[pos]'(by omega)).toUInt32
+          let b := (data[pos + 1]'(by omega)).toUInt32
+          let c := (data[pos + 2]'(by omega)).toUInt32
+          let d := (data[pos + 3]'(by omega)).toUInt32
+          a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+      else
+        let a := (data[pos]'(by omega)).toUInt32
+        let b := (data[pos + 1]'(by omega)).toUInt32
+        let c := (data[pos + 2]'(by omega)).toUInt32
+        a ||| (b <<< 8) ||| (c <<< 16)
     (((word * 2654435761) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
