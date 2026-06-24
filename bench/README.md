@@ -32,7 +32,7 @@ implementations (no SIMD/asm, or GC'd, or JIT'd) — not just the C + SIMD ceili
 | `native` | lean-zip pure-Lean DEFLATE | the thing we are improving |
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
-| `libdeflate` | libdeflate (FFI) | optimized C + SIMD — the runtime speed bar |
+| `libdeflate` | libdeflate (FFI) | optimized C + SIMD — the runtime speed bar; swept over its full **levels 1–12** (the others cap at 9), so its densest points (10–12) appear on the Pareto |
 | `zopfli` | zopfli (FFI) | maximum-ratio ceiling — **frozen** (see below); never in the routine matrix |
 
 **Language-native peers** (each a self-verifying CLI under
@@ -66,7 +66,8 @@ whose toolchain is unavailable is skipped, so the dashboard degrades gracefully.
 
 ## Workloads
 
-The **real compression corpora** from the literature, swept over levels 1–9.
+The **real compression corpora** from the literature, swept over levels 1–9
+(`libdeflate` over its full 1–12 — see *Compressors compared*).
 Each corpus is a subdirectory of [`corpora/`](corpora); every file in it is one
 single-size workload tagged `<corpus>/<file>`, and the harness discovers corpora
 by directory (nothing hard-codes Canterbury — a new corpus slots in once its
@@ -112,14 +113,14 @@ complements give precise numbers and per-file detail:
 - `<corpus>_ratio_heatmap.svg` / `_compress_heatmap.svg` — per file, relative to
   zlib (red = worse), showing *where* a codec wins or loses without 100 bars.
 
-### Canterbury corpus (11 small files, levels 1–9)
+### Canterbury corpus (11 small files, levels 1–9; libdeflate 1–12)
 
 ![canterbury compression speed vs ratio](graphs/canterbury_compress_pareto.svg)
 ![canterbury summary table](graphs/canterbury_summary.svg)
 ![canterbury ratio vs zlib per file](graphs/canterbury_ratio_heatmap.svg)
 ![canterbury compress speed vs zlib per file](graphs/canterbury_compress_heatmap.svg)
 
-### Silesia corpus (12 large files, levels 1/6/9)
+### Silesia corpus (12 large files, levels 1–9; libdeflate 1–12)
 
 ![silesia compression speed vs ratio](graphs/silesia_compress_pareto.svg)
 ![silesia decode throughput vs input density](graphs/silesia_decode_density.svg)
@@ -127,6 +128,36 @@ complements give precise numbers and per-file detail:
 ![silesia summary table](graphs/silesia_summary.svg)
 ![silesia ratio vs zlib per file](graphs/silesia_ratio_heatmap.svg)
 ![silesia compress speed vs zlib per file](graphs/silesia_compress_heatmap.svg)
+
+### Memory-bandwidth ceilings (recorded, not plotted)
+
+The two `memcpy`-class anchors bound what any DEFLATE codec could ever reach;
+both are **recorded here and deliberately kept off the Pareto** (each blows out a
+log axis by orders of magnitude):
+
+- **Compress ceiling ≈ 8.4 GB/s** — `deflateStored` (level 0: no match, no
+  Huffman) over Silesia, ratio 1.0. The compress fast-end anchor.
+- **Decode ceiling ≈ 40 GB/s** — output-side `memcpy` over Silesia (the decode
+  charts carry the per-corpus value as their top band).
+
+The gap from the level-0 compress ceiling (~8400 MB/s) to native level 1 (~51
+MB/s in the packed production path) is **~160×**, and it lives almost entirely in
+the **encode path** (Huffman sizing + token emit), not the matcher: a level-1
+knob sweep over the *boxed harness* path (a slower path used only for the sweep —
+hence its lower absolute ~27→30 MB/s) showed total throughput essentially flat as
+the hash-chain shallowed from depth 16 to 1, while ratio worsened. Match is not
+the wall; the encode path is.
+
+A natural follow-up — making level 1 a **fixed-Huffman-only fast emit** (skip the
+dynamic-tree construction) — was measured and *rejected*: in the packed
+production path it is a Pareto **regression on Silesia** (paired, same machine:
+~0.86–0.92× the speed at ratio 0.40–0.44 vs 0.347). This is consistent with the
+fixed block being looser, so the extra output bytes it writes cost more than the
+dynamic tree it skips — large files are emit-bound on *bytes written*, and the
+dynamic block is both tighter and faster there. (The win flips on small files —
+Canterbury +30–40% — where the dynamic-tree construction is a larger fraction of
+the work.) So a real fast-L1 corner needs a genuinely faster per-byte emit (a
+faster `BitWriter`), not a different block type; that is left as future work.
 
 ## Decoding (decode-density)
 
