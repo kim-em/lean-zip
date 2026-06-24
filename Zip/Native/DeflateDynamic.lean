@@ -1275,11 +1275,22 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
         the winner's per-block trees from the sizing pass
         (`deflateDynamicBlocksSharedSized`, = the reference candidate by
         `deflateDynamicBlocksSharedSized_eq`).
-    At level 9 (and within the `optimalMaxSize` memory gate) a fourth candidate
-    joins: the cross-block stream over the **near-optimal** cost-model DP parse
-    (`deflateDynamicBlocksOptimal`), which chooses the globally cheapest token
-    sequence under an estimated bit cost instead of the locally longest match.
-    The splits are first-class candidates compared against the whole base via
+    At level 9 (and within the `optimalMaxSize` memory gate) the dispatch switches
+    to the **near-optimal** cost-model DP parse (`deflateDynamicBlocksOptimal`),
+    which chooses the globally cheapest token sequence under an estimated bit cost
+    instead of the locally longest match. It is emitted as `pickSmaller(base,
+    optimal)`: the optimal parse wins outright on every Canterbury and Silesia file
+    (measured, #2640) — strictly smaller than base, the self-contained split, *and*
+    the shared-window split, including the binary `kennedy.xls` (the one file the
+    self-contained split wins at L7–L8, where optimal is not computed). So at L9 the
+    SC and shared candidates are dropped: each cost a full independent match/split
+    pass (~24% of L9 wall-clock together) for output `pickSmaller` always discarded.
+    `base` stays as a near-free safety floor (it reuses the already-computed
+    `ptokens`), so `pickSmaller(base, optimal)` never regresses below the lazy
+    baseline on any input. The split candidates remain at level 8, where optimal is
+    not computed.
+
+    The base-vs-split candidates are compared against the whole base via
     `pickSmaller`, *not* nested inside the dynamic branch: on large heterogeneous
     inputs a single dynamic tree loses to fixed Huffman, so a base-internal gate
     would never reach the split even though it wins by 15–19%. `pickSmaller`
@@ -1318,10 +1329,14 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- moves it onto packed words).
     let ptokens := lzMatchP data level
     if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
-      pickSmaller
-        (pickSmaller (deflateRawBaseP data ptokens)
-          (pickSmaller (deflateDynamicBlocksSC data splitChunkSize level)
-            (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))))
+      -- The optimal cost-model DP parse wins outright at level 9 on every
+      -- Canterbury and Silesia file (measured, #2640), so the self-contained
+      -- and shared-window split candidates are dead weight — a full
+      -- independent match/split pass each for output `pickSmaller` always
+      -- discards. Keep `base` (it reuses the already-computed `ptokens`, ~free)
+      -- as a safety floor and emit `pickSmaller(base, optimal)`: output ≤ both,
+      -- so we never regress below the lazy baseline on any input.
+      pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
       -- Level 8: base vs cross-block split. The self-contained split is demoted to
