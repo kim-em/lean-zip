@@ -982,14 +982,60 @@ def updateHashesFast (data : ByteArray) (hashSize : Nat)
 termination_by matchLen - j
 decreasing_by all_goals omega
 
+/-- `updateHashesFast` with the two hot per-insertion writes done via the
+    proven-bounds `Array.set` (no panic-bounds branch) instead of `set!`. The
+    bucket index `hsh < hashTable.size` (`hb`) and the chain mask `(pos+j) &&&
+    0x7FFF < chainWinSize ≤ prev.size` (`winMask_lt`/`Nat.and_le_left` + `hpv`)
+    are proven, so the bounds checks `set!` performs are wasted work. Proven
+    equal to `updateHashesFast` (`updateHashesFastU_eq`); the `min chainWinSize
+    data.size ≤ prev.size` guard is the same one `chainWalkGuardedPacked` carries
+    — always true for the production chain arrays (`prev` is the fixed
+    `min chainWinSize data.size`-entry ring), so it is a defensive guard, not
+    hot-path branching — established once per call by `updateHashesGuarded`. -/
+def updateHashesFastU (data : ByteArray) (hashSize : Nat)
+    (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat)
+    (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size)
+    (hpv : min chainWinSize data.size ≤ prev.size) : Array Nat × Array Nat :=
+  if j < matchLen ∧ j ≤ insertCap then
+    if h : pos + j + 2 < data.size then
+      let hsh := lz77Greedy.hash3 data (pos + j) hashSize h
+      have hb : hsh < hashTable.size := by
+        have : hsh < hashSize := Nat.mod_lt _ hhs
+        omega
+      have hmask : ((pos + j) &&& 0x7FFF) < prev.size := by
+        -- `h1`: mask `< chainWinSize` (covers `chainWinSize ≤ data.size`). `h2`:
+        -- mask `≤ pos+j < data.size` (covers the small-data `data.size <
+        -- chainWinSize` side). Together: mask `< min chainWinSize data.size ≤
+        -- prev.size`, even when `prev.size` is exactly that minimum.
+        have h1 := winMask_lt (pos + j)
+        have h2 := Nat.and_le_left (n := pos + j) (m := 0x7FFF)
+        simp only [chainWinSize] at h1 hpv; omega
+      let head := hashTable[hsh]'hb
+      updateHashesFastU data hashSize
+        (hashTable.set hsh (pos + j) hb)
+        (prev.set ((pos + j) &&& 0x7FFF) head hmask)
+        pos (j + 1) matchLen insertCap hhs
+        (by rw [Array.size_set]; exact hht) (by rw [Array.size_set]; exact hpv)
+    else
+      updateHashesFastU data hashSize hashTable prev pos (j + 1) matchLen insertCap hhs hht hpv
+  else (hashTable, prev)
+termination_by matchLen - j
+decreasing_by all_goals omega
+
 /-- One runtime `0 < hashSize ∧ hashSize ≤ hashTable.size` check guards the whole
     `updateHashesFast` insertion loop; the fallback is the original panic-checked
-    insertion, so this equals `lz77Chain.updateHashes`. -/
+    insertion, so this equals `lz77Chain.updateHashes`. The extra
+    `min chainWinSize data.size ≤ prev.size` check unlocks the proven-bounds-`set`
+    walk (`updateHashesFastU`); both other branches fall back to the `set!` walk
+    (`updateHashesFast`) / the reference insertion. -/
 @[inline] def updateHashesGuarded (data : ByteArray) (hashSize : Nat)
     (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat) :
     Array Nat × Array Nat :=
   if hu : 0 < hashSize ∧ hashSize ≤ hashTable.size then
-    updateHashesFast data hashSize hashTable prev pos j matchLen insertCap hu.1 hu.2
+    if hpv : min chainWinSize data.size ≤ prev.size then
+      updateHashesFastU data hashSize hashTable prev pos j matchLen insertCap hu.1 hu.2 hpv
+    else
+      updateHashesFast data hashSize hashTable prev pos j matchLen insertCap hu.1 hu.2
   else
     lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap
 
