@@ -50,7 +50,9 @@ optional nicety.
 
 The graphs show **native before vs after** on the real corpora (Canterbury +
 Silesia), overlaid on the existing other-language curves (zlib, miniz_oxide,
-libdeflate, Go, JS, Zig, OCaml) for context. The before/after **overlay** PNGs
+libdeflate, Go, JS, Zig, OCaml) for context. Native sweeps levels 1–9;
+`libdeflate` is swept 1–12 (its full range, the others cap at 9), so its
+curve carries the extra dense points 10–12. The before/after **overlay** PNGs
 (`$W/perf_before_after_*`) are a report artifact — NOT committed; they live
 only in the PR comment. The **dashboard** (`bench/results/latest.json` and the
 routine `bench/graphs/*.svg`), by contrast, **is** refreshed and committed inside
