@@ -135,6 +135,12 @@ def Row.toJson (r : Row) : String :=
 /-! ## Matrix -/
 
 def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+/-- libdeflate's full level range. Unlike zlib/miniz/native (capped at 9),
+    libdeflate exposes 1–12, and its densest points (10–12) are exactly the
+    ones the comparison Pareto needs from it — so it is swept to 12 here while
+    every other codec stays on the shared `levels`. -/
+def libdeflateLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 def reps : Nat := 5
 
 /-- Run one compressor over a list of `(pattern, bytes)` workloads × levels,
@@ -155,17 +161,25 @@ def runWorkloads
       let ratio := outSize.toFloat / (max size 1).toFloat
       let cNs ← measureNs size theReps (compress data level >>= sink)
       -- Decompress timing uses a canonical zlib-FFI raw-deflate stream so all
-      -- decoders are measured on identical, format-correct input.
+      -- decoders are measured on identical, format-correct input. That reference
+      -- is built by the zlib FFI, whose `deflateInit2` accepts only levels 0–9,
+      -- so a codec swept past 9 (libdeflate 10–12) has no faithful reference at
+      -- its own level: decode timing is **omitted** there rather than measured on
+      -- a mislabelled lower-level stream (and the dedicated decode-density
+      -- experiment covers those levels on real libdeflate streams anyway). This
+      -- also sidesteps the `deflateInit2: stream error` the extended levels raise.
       let dMBps ← match decompress? with
         | none => pure none
-        | some dec => do
-          let ref ← RawDeflate.compress data level.toUInt8
-          -- The decompressed size is known here; pass it so the native decoder
-          -- pre-sizes its output buffer, matching the production ZIP/gzip path
-          -- where the uncompressed size comes from the archive metadata. The FFI
-          -- reference decoders ignore it.
-          let dNs ← measureNs size theReps (dec ref size >>= sink)
-          pure (mbps size dNs)
+        | some dec =>
+          if level > 9 then pure none
+          else do
+            let ref ← RawDeflate.compress data level.toUInt8
+            -- The decompressed size is known here; pass it so the native decoder
+            -- pre-sizes its output buffer, matching the production ZIP/gzip path
+            -- where the uncompressed size comes from the archive metadata. The FFI
+            -- reference decoders ignore it.
+            let dNs ← measureNs size theReps (dec ref size >>= sink)
+            pure (mbps size dNs)
       rows := { compressor := name, pattern := pat, size := size, level := level,
                 outSize := outSize, ratio := ratio,
                 compressMBps := mbps size cNs, decompressMBps := dMBps } :: rows
@@ -257,7 +271,11 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     else
       let cz ← runWorkloads "zlib"        files zlibCompress       (some fun d _ => RawDeflate.decompress d) (theLevels := lvls) (theReps := rps)
       let cm ← runWorkloads "miniz_oxide" files minizCompress      (some fun d _ => MinizOxide.decompress d) (theLevels := lvls) (theReps := rps)
-      let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some fun d _ => Libdeflate.decompress d) (theLevels := lvls) (theReps := rps)
+      -- libdeflate sweeps 1–12 (its full range); the others cap at 9. A level
+      -- override (the native-only dashboard regen) is for the Lean codec, so
+      -- libdeflate keeps its own full list unless that override is in effect.
+      let llvls := match levelOverride with | some ls => ls | none => libdeflateLevels
+      let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some fun d _ => Libdeflate.decompress d) (theLevels := llvls) (theReps := rps)
       rows := rows ++ cn ++ cz ++ cm ++ cl
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
