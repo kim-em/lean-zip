@@ -762,6 +762,16 @@ theorem winMask_lt (n : Nat) : (n &&& 0x7FFF) < chainWinSize := by
   have := @Nat.and_le_right n 0x7FFF
   unfold chainWinSize; omega
 
+/-- `USize` form of `winMask_lt`: the masked `USize` index, viewed as a `Nat`,
+    is `< chainWinSize`. Bridges `USize.toNat_and` to the `Nat` mask bound so the
+    `USize` chain walk (`chainWalkPackedU`) indexes the ring in range. -/
+theorem winMaskU_lt (n : USize) : (n &&& 0x7FFF).toNat < chainWinSize := by
+  rw [USize.toNat_and]
+  have e7 : (0x7FFF : USize).toNat = 0x7FFF := USize.toNat_ofNat_of_lt_32 (by decide)
+  rw [e7]
+  have := Nat.and_le_right (n := n.toNat) (m := 0x7FFF)
+  unfold chainWinSize; omega
+
 /-- Greedy LZ77 with bounded-depth hash chains: at each position, walk the
     `prev` chain from the bucket head up to `maxChain` candidates and keep the
     longest in-window match. This finds far longer matches than the single-probe
@@ -949,15 +959,77 @@ def chainWalkPacked (data : ByteArray) (prev : Array Nat) (windowSize pos maxLen
 termination_by fuel
 decreasing_by all_goals omega
 
+/-- `USize` twin of `chainWalkPacked` (Wave 7 P1b): the per-chain-step window
+    check, byte prefilter, and chain mask run in raw `USize` (one `size_t` op
+    each + `uget`, no boxed-`Nat` arithmetic or per-temporary `lean_dec`), with
+    the loop accumulators `cand`/`pos`/`maxLen`/`bestLen`/`bestPos` carried as
+    `USize`. `fuel` stays `Nat` (the termination measure). The clamped window
+    `wU = (min windowSize data.size).toUSize` keeps the comparison `size_t`
+    without a `windowSize < USize.size` hypothesis — clamping is output
+    preserving, since a candidate with `cand < pos ≤ data.size` always satisfies
+    `pos - cand ≤ data.size`, so the `data.size` cap never rejects an in-window
+    candidate. The `countMatch` inner loop is already `USize` (`goU`); here the
+    arithmetic *around* it joins it. Proven equal to `chainWalkPacked`
+    (`chainWalkPackedU_eq`) under the invariant that every `prev` entry is
+    `≤ data.size`, which guarantees each chain link round-trips through `USize`
+    so the two walks stay in lockstep. -/
+def chainWalkPackedU (data : ByteArray) (prev : Array Nat) (posU maxLenU wU : USize)
+    (hsz : data.size < USize.size) (hpmU : posU.toNat + maxLenU.toNat ≤ data.size)
+    (hps : min chainWinSize data.size ≤ prev.size)
+    (candU : USize) (fuel : Nat) (bestLenU bestPosU : USize) : Nat :=
+  if fuel = 0 then bestPosU.toNat * 512 + bestLenU.toNat
+  else if hc : candU < posU ∧ posU - candU ≤ wU then
+    have hclt : candU.toNat < posU.toNat := USize.lt_iff_toNat_lt.mp hc.1
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hcand : candU.toNat + maxLenU.toNat ≤ data.size := by omega
+    let skip : Bool :=
+      if hbl : bestLenU < maxLenU then
+        have hbll : bestLenU.toNat < maxLenU.toNat := USize.lt_iff_toNat_lt.mp hbl
+        have ecb : (candU + bestLenU).toNat = candU.toNat + bestLenU.toNat := by
+          rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+        have epb : (posU + bestLenU).toNat = posU.toNat + bestLenU.toNat := by
+          rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+        data.uget (candU + bestLenU) (by omega) != data.uget (posU + bestLenU) (by omega)
+      else false
+    have hmask : (candU &&& 0x7FFF).toNat < prev.size := by
+      have hw := winMaskU_lt candU
+      have hle : (candU &&& 0x7FFF).toNat ≤ candU.toNat := by
+        rw [USize.toNat_and]; exact Nat.and_le_left
+      simp only [chainWinSize] at hw hps ⊢; omega
+    let nextCand := (prev[(candU &&& 0x7FFF).toNat]'hmask).toUSize
+    if skip then
+      chainWalkPackedU data prev posU maxLenU wU hsz hpmU hps nextCand (fuel - 1) bestLenU bestPosU
+    else
+      let ml := lz77Greedy.countMatch data candU.toNat posU.toNat maxLenU.toNat hcand hpmU
+      let blU := if ml.toUSize > bestLenU then ml.toUSize else bestLenU
+      let bpU := if ml.toUSize > bestLenU then candU else bestPosU
+      if blU ≥ maxLenU then bpU.toNat * 512 + blU.toNat
+      else chainWalkPackedU data prev posU maxLenU wU hsz hpmU hps nextCand (fuel - 1) blU bpU
+  else bestPosU.toNat * 512 + bestLenU.toNat
+termination_by fuel
+decreasing_by all_goals omega
+
 /-- One runtime `min chainWinSize data.size ≤ prev.size` check guards the whole `chainWalkPacked`
     inner loop; the (unreachable) fallback packs the reference walk's pair, so
     this equals `bestPos * 512 + bestLen` of `lz77Chain.chainWalk`
-    (`chainWalkGuardedPacked_eq`). -/
+    (`chainWalkGuardedPacked_eq`). When the buffer is `USize`-addressable (the
+    one-`USize`-round-trip check, true at runtime), dispatch to the unboxed
+    `USize` walk `chainWalkPackedU` (proven equal to `chainWalkPacked` under the
+    `prev`-entries-`≤ data.size` invariant); otherwise the `Nat` walk. -/
 @[inline] def chainWalkGuardedPacked (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
   if hps : min chainWinSize data.size ≤ prev.size then
-    chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos
+    if hsz : data.size.toUSize.toNat = data.size then
+      have hszU : data.size < USize.size := by
+        rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+      chainWalkPackedU data prev pos.toUSize maxLen.toUSize (min windowSize data.size).toUSize
+        hszU
+        (by rw [toUSize_toNat_of_lt (show pos < USize.size by omega),
+              toUSize_toNat_of_lt (show maxLen < USize.size by omega)]; exact hpm)
+        hps cand.toUSize fuel bestLen.toUSize bestPos.toUSize
+    else
+      chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos
   else
     let p := lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos
     p.2 * 512 + p.1
