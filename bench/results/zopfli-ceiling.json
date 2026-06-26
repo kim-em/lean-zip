@@ -1,8 +1,8 @@
 {
   "meta": {
-    "date": "2026-06-10T13:20:10Z",
+    "date": "2026-06-26T13:44:42Z",
     "machine": "Linux chungus x86_64",
-    "git_commit": "118a98e",
+    "git_commit": "831a8bb2",
     "toolchain": "leanprover/lean4:v4.30.0-rc2",
     "frozen": true,
     "note": "FROZEN zopfli ratio ceiling — do NOT regenerate. zopfli is compress-only, level-less and ~100x slower than zlib; level=6 is nominal and compress_mbps is a single-rep artifact, not a benchmark. ratio/out_size are deterministic. Regenerate only if the corpora change: lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json"
@@ -30,6 +30,7 @@
     {"compressor": "zopfli", "pattern": "silesia/sao", "size": 7251944, "level": 6, "out_size": 5242394, "ratio": 0.722900, "compress_mbps": 0.790000, "decompress_mbps": null},
     {"compressor": "zopfli", "pattern": "silesia/webster", "size": 41458703, "level": 6, "out_size": 11518290, "ratio": 0.277800, "compress_mbps": 0.760000, "decompress_mbps": null},
     {"compressor": "zopfli", "pattern": "silesia/x-ray", "size": 8474240, "level": 6, "out_size": 5744697, "ratio": 0.677900, "compress_mbps": 1.280000, "decompress_mbps": null},
-    {"compressor": "zopfli", "pattern": "silesia/xml", "size": 5345280, "level": 6, "out_size": 627169, "ratio": 0.117300, "compress_mbps": 0.400000, "decompress_mbps": null}
+    {"compressor": "zopfli", "pattern": "silesia/xml", "size": 5345280, "level": 6, "out_size": 627169, "ratio": 0.117300, "compress_mbps": 0.400000, "decompress_mbps": null},
+    {"compressor": "zopfli", "pattern": "enwik8_20m/enwik8", "size": 20000000, "level": 6, "out_size": 7064496, "ratio": 0.353200, "compress_mbps": 0.810000, "decompress_mbps": null}
   ]
 }

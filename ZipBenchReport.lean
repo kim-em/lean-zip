@@ -143,6 +143,13 @@ def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 def libdeflateLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 def reps : Nat := 5
 
+/-- A corpus whose total bytes exceed this runs a single timing pass instead of
+    median-of-`reps` (variance is low on big files, and `reps` passes over a
+    large corpus dominate the matrix wall-clock). Size-based rather than a name
+    list so any large corpus (Silesia ~200 MB, the enwik8 ~20 MB slice, …) is
+    detected automatically. -/
+def bigCorpusThreshold : Nat := 16 * 1024 * 1024
+
 /-- Run one compressor over a list of `(pattern, bytes)` workloads × levels,
     timing compress (and optionally decompress on a canonical raw-deflate
     stream). The size of each row is the workload's byte length. -/
@@ -249,15 +256,18 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
   let mut rows : List Row := []
   for (corpus, files) in corpora do
     -- Every corpus is timed at all 9 levels (so the speed-vs-ratio scatter shows
-    -- the full level sweep). Large corpora (Silesia, ~200 MB) use a single timing
-    -- pass — variance is low on big files — to keep the run tractable; small
-    -- corpora (Canterbury) keep the median-of-`reps` matrix.
+    -- the full level sweep). Large corpora (Silesia ~200 MB, enwik8 slice ~20 MB)
+    -- use a single timing pass — variance is low on big files — to keep the run
+    -- tractable; small corpora (Canterbury) keep the median-of-`reps` matrix. The
+    -- threshold is size-based, not a name list, so a new large corpus slots in
+    -- with no code change.
     --
     -- zopfli is intentionally not benchmarked here: it is compress-only and
     -- ~100× slower than zlib (default iteration count), so even at one
     -- level/rep it dominated the wall-clock of the whole matrix. Its FFI binding
     -- (`zopfliCompress`) is kept for ad-hoc ratio-ceiling checks.
-    let big := corpus == "silesia"
+    let totalBytes := files.foldl (fun a (_, b) => a + b.size) 0
+    let big := totalBytes > bigCorpusThreshold
     let lvls := levelOverride.getD levels
     let rps  := if big then 1 else reps
     IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, levels {lvls}, reps {rps})…"
@@ -301,17 +311,56 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
   IO.FS.writeFile outPath json
   IO.eprintln s!"Wrote {rows.length} rows → {outPath}"
 
-/-- One-shot zopfli ratio-ceiling run over every corpus. zopfli is compress-only,
-    level-less, and ~100× slower than zlib (default iteration count), so it is
-    deliberately NOT part of the routine `runReport` matrix. This writes a FROZEN
-    snapshot of the best-achievable ratio per file; the dashboard overlays it
-    (see `bench/plot.py`) without ever recomputing it. Do not regenerate unless
-    the corpora themselves change — see `bench/README.md`. -/
-def runZopfliCeiling (outPath : String) : IO Unit := do
-  IO.eprintln "Running ONE-TIME zopfli ratio ceiling over all corpora (slow — frozen artifact)…"
+/-- Existing zopfli-ceiling row objects from a prior frozen file, as raw
+    `    {...}` JSON strings, with any rows for `dropCorpus` removed. Each row in
+    the file is one line `{"compressor": …}` (optionally trailing-comma); we keep
+    them verbatim so a per-corpus regeneration never perturbs the other corpora's
+    deterministic rows. Missing file ⇒ no rows. -/
+def existingCeilingRows (path : String) (dropCorpus : String) : IO (List String) := do
+  unless ← System.FilePath.pathExists path do return []
+  let text ← IO.FS.readFile path
+  let dropTag := s!"\"pattern\": \"{dropCorpus}/"
+  let mut out : List String := []
+  for line in text.splitOn "\n" do
+    let t := line.trim
+    if t.startsWith "{\"compressor\"" then
+      let obj := if t.endsWith "," then t.dropRight 1 else t
+      unless (obj.splitOn dropTag).length > 1 do
+        out := ("    " ++ obj) :: out
+  return out.reverse
+
+/-- One-shot zopfli ratio-ceiling run. zopfli is compress-only, level-less, and
+    ~100× slower than zlib (default iteration count), so it is deliberately NOT
+    part of the routine `runReport` matrix. This writes a FROZEN snapshot of the
+    best-achievable ratio per file; the dashboard overlays it (see `bench/plot.py`)
+    without ever recomputing it.
+
+    `onlyCorpus` restricts the run to a single corpus and **merges** its fresh
+    rows into the existing `outPath`, keeping every other corpus's rows verbatim.
+    This is how a newly-added large corpus (e.g. the enwik8 slice) joins the
+    ceiling without paying to re-run zopfli on the ~200 MB Silesia files — those
+    take the better part of an hour and their ratios are already frozen. With
+    `onlyCorpus = none` the whole file is regenerated from scratch.
+    Regenerate only when the corpora themselves change — see `bench/README.md`. -/
+def runZopfliCeiling (outPath : String) (onlyCorpus : Option String := none) : IO Unit := do
+  match onlyCorpus with
+  | some c => IO.eprintln s!"Running zopfli ratio ceiling for corpus '{c}' only, merging into {outPath} (slow)…"
+  | none   => IO.eprintln "Running ONE-TIME zopfli ratio ceiling over all corpora (slow — frozen artifact)…"
   let corpora ← loadCorpora
-  if corpora.isEmpty then
-    IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
+  let corpora := match onlyCorpus with
+    | some c => corpora.filter (fun (e : String × List (String × ByteArray)) => e.1 == c)
+    | none   => corpora
+  -- Fail closed in merge mode: if the requested corpus is not materialized we
+  -- would otherwise drop its existing frozen rows and write zero replacements,
+  -- silently corrupting the ceiling. Abort instead (the file is untouched).
+  match onlyCorpus with
+  | some c =>
+    if corpora.isEmpty then
+      throw (IO.userError s!"corpus '{c}' not found under {corporaDir} — run bench/fetch_corpora.sh; \
+refusing to overwrite {outPath} (would drop its existing rows)")
+  | none =>
+    if corpora.isEmpty then
+      IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
   let mut rows : List Row := []
   for (corpus, files) in corpora do
     IO.eprintln s!"  zopfli {corpus} ({files.length} files)…"
@@ -319,11 +368,15 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
     -- compress_mbps column is an artifact, not a benchmark).
     let cz ← runWorkloads "zopfli" files zopfliCompress none (theLevels := [6]) (theReps := 1)
     rows := rows ++ cz
+  -- In merge mode, prepend the preserved rows for the other corpora (verbatim).
+  let keptRows ← match onlyCorpus with
+    | some c => existingCeilingRows outPath c
+    | none   => pure []
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]
   let commit ← shell "git" ["rev-parse", "--short", "HEAD"]
   let toolchain ← shell "cat" ["lean-toolchain"]
-  let body := String.intercalate ",\n" (rows.map Row.toJson)
+  let body := String.intercalate ",\n" (keptRows ++ rows.map Row.toJson)
   let json :=
     "{\n" ++
     "  \"meta\": {\n" ++
@@ -342,7 +395,7 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
   if let some parent := (System.FilePath.mk outPath).parent then
     IO.FS.createDirAll parent
   IO.FS.writeFile outPath json
-  IO.eprintln s!"Wrote {rows.length} zopfli rows → {outPath}"
+  IO.eprintln s!"Wrote {rows.length} fresh + {keptRows.length} preserved zopfli rows → {outPath}"
 
 /-- Decode `ref`, optionally pre-sizing the output to `hint` (`0` = no hint).
     `Inflate.inflate` is the shipped production decode path (tree-free).
@@ -483,6 +536,7 @@ def main (args : List String) : IO Unit := do
   | ["--decode-density", out, streamsDir] => runDecodeDensity out streamsDir
   | ["--dump-payloads", dir] => dumpPayloads dir
   | ["--zopfli-ceiling", out] => runZopfliCeiling out
+  | ["--zopfli-ceiling", out, corpus] => runZopfliCeiling out (onlyCorpus := some corpus)
   | ["--native-only", out] => runReport out (nativeOnly := true)
   | ["--native-only", out, lvlCsv] =>
     -- e.g. "1,2,3,4,5,6,7,8" to skip the slow optimal-parse L9 when a Lean change

@@ -58,6 +58,11 @@ generated once and overlaid on the ratio graphs by [`plot.py`](plot.py):
 # One-time only — do NOT run on every regeneration (very slow). Re-run solely
 # if the corpora themselves change:
 lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json
+
+# Or regenerate just ONE corpus and merge it into the frozen file, keeping every
+# other corpus's rows verbatim (how a newly-added corpus joins the ceiling without
+# re-running zopfli on the slow ~200 MB Silesia files):
+lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json enwik8_20m
 ```
 
 Its `ratio`/`out_size` are deterministic (the meaningful signal); its single-rep
@@ -85,6 +90,17 @@ files land).
   SHA-256-verified); its rows slot into the same per-level charts automatically.
   Because it is ~70× larger than Canterbury, it runs a **reduced matrix** —
   a single timing pass — so the regeneration stays tractable.
+- **enwik8 corpus** (`enwik8_20m`, 1 file, 20 MB: the first 20 MB of
+  [enwik8](http://mattmahoney.net/dc/textdata.html), the Large Text Compression
+  Benchmark / Hutter Prize corpus — homogeneous English Wikipedia prose). This is
+  the large pure-text regime zopfli was designed for and where near-optimal
+  parsing pays off most, so it is the reference for "is L9 strictly better ratio
+  than libdeflate, and how close to zopfli". Fetched on demand into a gitignored
+  cache (`fetch_corpora.sh enwik8`, official zip, SHA-256-verified). zopfli at
+  default iterations is ~100× slower than zlib, so the **first 20 MB slice** (not
+  the full 100 MB) is the pinned input — deterministic and SHA-pinned, recorded in
+  the corpus name `enwik8_20m` — which keeps the one-time zopfli ceiling pass
+  tractable. Like Silesia it runs the **reduced matrix** (single timing pass).
 
 The synthetic `prng` pattern used to be the only incompressible workload; its
 replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,
@@ -128,6 +144,16 @@ complements give precise numbers and per-file detail:
 ![silesia summary table](graphs/silesia_summary.svg)
 ![silesia ratio vs zlib per file](graphs/silesia_ratio_heatmap.svg)
 ![silesia compress speed vs zlib per file](graphs/silesia_compress_heatmap.svg)
+
+### enwik8 corpus (`enwik8_20m`, 20 MB large-text slice, levels 1–9; libdeflate 1–12)
+
+The zopfli ratio ceiling is overlaid on the Pareto and summary — this is the
+large pure-prose regime that judges L9 against zopfli on its home turf.
+
+![enwik8 compression speed vs ratio](graphs/enwik8_20m_compress_pareto.svg)
+![enwik8 summary table](graphs/enwik8_20m_summary.svg)
+![enwik8 ratio vs zlib per file](graphs/enwik8_20m_ratio_heatmap.svg)
+![enwik8 compress speed vs zlib per file](graphs/enwik8_20m_compress_heatmap.svg)
 
 ## Decoding (decode-density)
 
