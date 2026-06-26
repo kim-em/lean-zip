@@ -312,17 +312,162 @@ theorem chainWalkPacked_eq (data : ByteArray) (prev : Array Nat)
         simp only [Nat.not_lt.mpr hle, ge_iff_le, Nat.le_of_not_lt hbl, ↓reduceIte]
     · simp only [dif_neg hc]
 
+/-! ### USize chain walk (Wave 7 P1b)
+
+`chainWalkPackedU` is the unboxed `USize` twin of `chainWalkPacked`; under the
+invariant that every `prev` entry is `≤ data.size` (so each chain link
+round-trips through `USize`), it computes exactly `chainWalkPacked`. The window
+clamp `min windowSize data.size` makes the `USize` comparison need no
+`windowSize < USize.size` hypothesis: for an in-window candidate
+(`cand < pos ≤ data.size`) the `data.size` cap is slack, so the clamped check
+agrees with the `Nat` check `pos - cand ≤ windowSize`. -/
+
+/-- The `USize` chain walk equals the `Nat` packed walk, provided every `prev`
+    entry — read back as the next loop index — is `≤ data.size` (`hpb`), which
+    under the addressability bound `data.size < USize.size` (`hsz`) makes each
+    link round-trip through `USize`. The loop scalars (`cand`/`bestLen`/`bestPos`)
+    are likewise bounded by `data.size` so their `.toUSize` round-trips. -/
+theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen : Nat) (hsz : data.size < USize.size)
+    (hpm : pos + maxLen ≤ data.size) (hps : min chainWinSize data.size ≤ prev.size)
+    (hpb : ∀ i (h : i < prev.size), prev[i] ≤ data.size)
+    (cand fuel bestLen bestPos : Nat)
+    (hcb : cand ≤ data.size) (hlb : bestLen ≤ data.size) (hpbp : bestPos ≤ data.size) :
+    chainWalkPackedU data prev pos.toUSize maxLen.toUSize (min windowSize data.size).toUSize
+        hsz (by rw [toUSize_toNat_of_lt (show pos < USize.size by omega),
+              toUSize_toNat_of_lt (show maxLen < USize.size by omega)]; exact hpm)
+        hps cand.toUSize fuel bestLen.toUSize bestPos.toUSize =
+      chainWalkPacked data prev windowSize pos maxLen hpm hps cand fuel bestLen bestPos := by
+  have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+  have hposN : (pos.toUSize).toNat = pos := toUSize_toNat_of_lt (by omega)
+  have hmaxN : (maxLen.toUSize).toNat = maxLen := toUSize_toNat_of_lt (by omega)
+  have hwN : ((min windowSize data.size).toUSize).toNat = min windowSize data.size :=
+    toUSize_toNat_of_lt (by omega)
+  have e7 : (0x7FFF : USize).toNat = 0x7FFF := USize.toNat_ofNat_of_lt_32 (by decide)
+  induction fuel generalizing cand bestLen bestPos with
+  | zero =>
+    have hcandN : (cand.toUSize).toNat = cand := toUSize_toNat_of_lt (by omega)
+    have hbestlenN : (bestLen.toUSize).toNat = bestLen := toUSize_toNat_of_lt (by omega)
+    have hbestposN : (bestPos.toUSize).toNat = bestPos := toUSize_toNat_of_lt (by omega)
+    rw [chainWalkPackedU, chainWalkPacked]
+    simp only [↓reduceIte, hbestlenN, hbestposN]
+  | succ k ih =>
+    have hcandN : (cand.toUSize).toNat = cand := toUSize_toNat_of_lt (by omega)
+    have hbestlenN : (bestLen.toUSize).toNat = bestLen := toUSize_toNat_of_lt (by omega)
+    have hbestposN : (bestPos.toUSize).toNat = bestPos := toUSize_toNat_of_lt (by omega)
+    have hsub : cand < pos → (pos.toUSize - cand.toUSize).toNat = pos - cand := by
+      intro h
+      rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by rw [hcandN, hposN]; omega)),
+        hcandN, hposN]
+    have key : (cand.toUSize < pos.toUSize ∧
+          pos.toUSize - cand.toUSize ≤ (min windowSize data.size).toUSize)
+        ↔ (cand < pos ∧ pos - cand ≤ windowSize) := by
+      constructor
+      · rintro ⟨h1, h2⟩
+        have h1' : cand < pos := by
+          have := USize.lt_iff_toNat_lt.mp h1; rwa [hcandN, hposN] at this
+        refine ⟨h1', ?_⟩
+        have := USize.le_iff_toNat_le.mp h2
+        rw [hsub h1', hwN] at this; omega
+      · rintro ⟨h1, h2⟩
+        refine ⟨USize.lt_iff_toNat_lt.mpr (by rw [hcandN, hposN]; exact h1), ?_⟩
+        apply USize.le_iff_toNat_le.mpr
+        rw [hsub h1, hwN]; omega
+    rw [chainWalkPackedU, chainWalkPacked, if_neg (by omega : ¬ (k + 1 = 0)),
+      if_neg (by omega : ¬ (k + 1 = 0))]
+    by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+    · rw [dif_pos (key.mpr hc), dif_pos hc]
+      have hcandlt : cand < pos := hc.1
+      have hcand : cand + maxLen ≤ data.size := by omega
+      -- masked chain read: index and value bridge `USize` ↔ `Nat`
+      have hidxN : (cand.toUSize &&& 0x7FFF).toNat = cand &&& 0x7FFF := by
+        rw [USize.toNat_and, hcandN, e7]
+      simp only [hidxN, hcandN, hposN, hmaxN]
+      have hmask' : cand &&& 0x7FFF < prev.size := by
+        have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega
+      have he_le : prev[cand &&& 0x7FFF] ≤ data.size := hpb _ hmask'
+      -- prefilter byte loads bridge
+      have hbliff : (bestLen.toUSize < maxLen.toUSize) = (bestLen < maxLen) := by
+        simp only [USize.lt_iff_toNat_lt, hbestlenN, hmaxN]
+      by_cases hbl : bestLen < maxLen
+      · have haddc : (cand.toUSize + bestLen.toUSize).toNat = cand + bestLen := by
+          rw [USize.toNat_add, hcandN, hbestlenN]; apply Nat.mod_eq_of_lt; omega
+        have haddp : (pos.toUSize + bestLen.toUSize).toNat = pos + bestLen := by
+          rw [USize.toNat_add, hposN, hbestlenN]; apply Nat.mod_eq_of_lt; omega
+        simp only [hbliff, dif_pos hbl, uget_eq_getElem, haddc, haddp]
+        by_cases hbyte : data[cand + bestLen]'(by omega) = data[pos + bestLen]'(by omega)
+        · rw [hbyte]; simp only [bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]
+          have hmliff : (((lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize >
+              bestLen.toUSize)) = (lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen) := by
+            have hmle : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ maxLen :=
+              (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+            simp only [USize.lt_iff_toNat_lt, hbestlenN,
+              toUSize_toNat_of_lt (show lz77Greedy.countMatch data cand pos maxLen hcand hpm
+                < USize.size by omega)]
+          by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+          · have hmle : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ maxLen :=
+              (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+            have hmcb : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ data.size := by omega
+            have hmlN : ((lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize).toNat
+                = lz77Greedy.countMatch data cand pos maxLen hcand hpm :=
+              toUSize_toNat_of_lt (by omega)
+            simp only [hmliff, hml, ↓reduceIte]
+            by_cases hb : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ maxLen
+            · simp only [ge_iff_le, USize.le_iff_toNat_le, hmlN, hmaxN, hb, ↓reduceIte, hcandN]
+            · simp only [ge_iff_le, USize.le_iff_toNat_le, hmlN, hmaxN, hb, ↓reduceIte]
+              exact ih _ _ _ he_le hmcb hcb
+          · simp only [hmliff, hml, ↓reduceIte]
+            by_cases hb : bestLen ≥ maxLen
+            · simp only [ge_iff_le, USize.le_iff_toNat_le, hbestlenN, hmaxN, hb, ↓reduceIte,
+                hbestposN]
+            · simp only [ge_iff_le, USize.le_iff_toNat_le, hbestlenN, hmaxN, hb, ↓reduceIte]
+              exact ih _ _ _ he_le hlb hpbp
+        · have hne! : data[cand + bestLen]! ≠ data[pos + bestLen]! := by
+            rw [getElem!_pos data (cand + bestLen) (by omega),
+              getElem!_pos data (pos + bestLen) (by omega)]
+            exact hbyte
+          have hle := countMatch_le_of_byte_ne data cand pos maxLen hcand hpm bestLen hne!
+          simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, Nat.not_lt.mpr hle,
+            Nat.not_le.mpr hbl]
+          exact ih _ _ _ he_le hlb hpbp
+      · simp only [hbliff, dif_neg hbl, Bool.false_eq_true, ↓reduceIte]
+        have hle : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ bestLen :=
+          Nat.le_trans (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+            (Nat.le_of_not_lt hbl)
+        have hmliff : (((lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize >
+            bestLen.toUSize)) = (lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen) := by
+          have hmle : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ maxLen :=
+            (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+          simp only [USize.lt_iff_toNat_lt, hbestlenN,
+            toUSize_toNat_of_lt (show lz77Greedy.countMatch data cand pos maxLen hcand hpm
+              < USize.size by omega)]
+        simp only [hmliff, Nat.not_lt.mpr hle, ↓reduceIte, ge_iff_le, USize.le_iff_toNat_le,
+          hbestlenN, hmaxN, Nat.le_of_not_lt hbl, hbestlenN, hbestposN]
+    · rw [dif_neg (fun hh => hc (key.mp hh)), dif_neg hc]
+      simp only [hbestlenN, hbestposN]
+
 /-- One runtime guard collapses the packed walk to the packed image of the
-    reference walk. -/
+    reference walk. The `USize` dispatch (when the buffer is addressable) needs
+    the chain state bounded by `data.size`: every `prev` entry (`hpb`) and the
+    seed `cand`/`bestLen`/`bestPos` round-trip through `USize`. -/
 theorem chainWalkGuardedPacked_eq (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size)
-    (cand fuel bestLen bestPos : Nat) :
+    (cand fuel bestLen bestPos : Nat)
+    (hpb : ∀ i (h : i < prev.size), prev[i] ≤ data.size)
+    (hcb : cand ≤ data.size) (hlb : bestLen ≤ data.size) (hpbp : bestPos ≤ data.size) :
     chainWalkGuardedPacked data prev windowSize pos maxLen hpm cand fuel bestLen bestPos =
       (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos).2 * 512 +
         (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel bestLen bestPos).1 := by
   unfold chainWalkGuardedPacked
   split
-  · rw [chainWalkPacked_eq, chainWalkFast_eq]
+  · rename_i hps
+    split
+    · rename_i hsz
+      have hszU : data.size < USize.size := by
+        rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+      rw [chainWalkPackedU_eq (hpb := hpb) (hcb := hcb) (hlb := hlb) (hpbp := hpbp),
+        chainWalkPacked_eq, chainWalkFast_eq]
+    · rw [chainWalkPacked_eq, chainWalkFast_eq]
   · rfl
 
 /-- From a zero-initialised best length, the reference walk's best length
@@ -338,20 +483,24 @@ theorem chainWalk_fst_le (data : ByteArray) (prev : Array Nat)
     exactly the reference walk's `bestLen`. -/
 theorem chainWalkGuardedPacked_mod (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat)
-    (hml : maxLen ≤ 511) :
+    (hml : maxLen ≤ 511)
+    (hpb : ∀ i (h : i < prev.size), prev[i] ≤ data.size) (hcb : cand ≤ data.size) :
     chainWalkGuardedPacked data prev windowSize pos maxLen hpm cand fuel 0 0 % 512 =
       (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel 0 0).1 := by
-  rw [chainWalkGuardedPacked_eq]
+  rw [chainWalkGuardedPacked_eq (hpb := hpb) (hcb := hcb) (hlb := Nat.zero_le _)
+    (hpbp := Nat.zero_le _)]
   have h := chainWalk_fst_le data prev windowSize pos maxLen hpm cand fuel
   omega
 
 /-- Decode the packed walk's best position (the high bits). -/
 theorem chainWalkGuardedPacked_div (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat)
-    (hml : maxLen ≤ 511) :
+    (hml : maxLen ≤ 511)
+    (hpb : ∀ i (h : i < prev.size), prev[i] ≤ data.size) (hcb : cand ≤ data.size) :
     chainWalkGuardedPacked data prev windowSize pos maxLen hpm cand fuel 0 0 / 512 =
       (lz77Chain.chainWalk data prev windowSize pos maxLen hpm cand fuel 0 0).2 := by
-  rw [chainWalkGuardedPacked_eq]
+  rw [chainWalkGuardedPacked_eq (hpb := hpb) (hcb := hcb) (hlb := Nat.zero_le _)
+    (hpbp := Nat.zero_le _)]
   have h := chainWalk_fst_le data prev windowSize pos maxLen hpm cand fuel
   omega
 
@@ -434,6 +583,70 @@ theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
     · exact updateHashesFast_eq ..
   · rfl
 
+/-! ### `prev`/`hashTable` entries-`≤ data.size` invariant (Wave 7 P1b)
+
+The chain arrays start as `.replicate _ data.size` and are only ever written
+positions `≤ data.size` (or a previously-stored entry), so every entry stays
+`≤ data.size`. That is exactly the hypothesis the `USize` chain walk needs to
+round-trip each link (`chainWalkPackedU_eq`); threaded through the iterative
+mainLoops below it discharges the `chainWalkGuardedPacked_mod`/`_div` bound side
+conditions. -/
+
+/-- A `Nat` array all of whose entries are `≤ n` has every `getElem!` `≤ n`
+    (out-of-bounds reads return the `0` default). -/
+theorem getElem!_bounded {n : Nat} (a : Array Nat) (k : Nat)
+    (ha : ∀ i (h : i < a.size), a[i] ≤ n) : a[k]! ≤ n := by
+  by_cases hk : k < a.size
+  · rw [getElem!_pos a k hk]; exact ha k hk
+  · rw [getElem!_neg a k hk]; exact Nat.zero_le n
+
+/-- `set!` preserves the entries-`≤ n` invariant when the written value is `≤ n`. -/
+theorem set!_bounded {n : Nat} (a : Array Nat) (j v : Nat)
+    (ha : ∀ i (h : i < a.size), a[i] ≤ n) (hv : v ≤ n) :
+    ∀ i (h : i < (a.set! j v).size), (a.set! j v)[i] ≤ n := by
+  intro i hi
+  have hia : i < a.size := by
+    simpa only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds] using hi
+  simp only [Array.set!_eq_setIfInBounds, Array.getElem_setIfInBounds hia]
+  split
+  · exact hv
+  · exact ha i hia
+
+/-- `guardedSet` preserves the entries-`≤ n` invariant when the value is `≤ n`. -/
+theorem guardedSet_bounded {n : Nat} (a : Array Nat) (j v : Nat)
+    (ha : ∀ i (h : i < a.size), a[i] ≤ n) (hv : v ≤ n) :
+    ∀ i (h : i < (guardedSet a j v).size), (guardedSet a j v)[i] ≤ n := by
+  simp only [guardedSet_eq]; exact set!_bounded a j v ha hv
+
+/-- A guarded chain-head probe of a bounded table is `≤ n`. -/
+theorem headProbeGuarded_bounded {n : Nat} (a : Array Nat) (h : Nat)
+    (ha : ∀ i (hi : i < a.size), a[i] ≤ n) : headProbeGuarded a h ≤ n := by
+  rw [headProbeGuarded_eq]; exact getElem!_bounded a h ha
+
+/-- The reference hash-insertion loop preserves the entries-`≤ data.size`
+    invariant on both arrays: interior positions `pos + j` are inserted only when
+    `pos + j + 2 < data.size`, and `prev` only ever receives a previously-stored
+    (hence bounded) bucket head. -/
+theorem updateHashes_bounded (data : ByteArray) (hashSize : Nat)
+    (hashTable prev : Array Nat) (pos j matchLen insertCap : Nat)
+    (hht : ∀ i (h : i < hashTable.size), hashTable[i] ≤ data.size)
+    (hpv : ∀ i (h : i < prev.size), prev[i] ≤ data.size) :
+    (∀ i (h : i < (lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap).1.size),
+        (lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap).1[i] ≤ data.size) ∧
+    (∀ i (h : i < (lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap).2.size),
+        (lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap).2[i] ≤ data.size) := by
+  induction hn : matchLen - j using Nat.strongRecOn generalizing j hashTable prev with
+  | _ m ih =>
+    unfold lz77Chain.updateHashes
+    split
+    · split
+      · rename_i hd
+        exact ih _ (by omega) _ _ _
+          (set!_bounded _ _ _ hht (by omega))
+          (set!_bounded _ _ _ hpv (getElem!_bounded _ _ hht)) rfl
+      · exact ih _ (by omega) _ _ _ hht hpv rfl
+    · exact ⟨hht, hpv⟩
+
 /-! ## Iterative version: equivalence + transferred contracts -/
 
 /-- The accumulator `trailing` is the array form of the recursive one. Shared by
@@ -453,23 +666,35 @@ theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
     The `chainWalk`/`updateHashes` helpers are shared, so the only difference is
     push vs. cons at each emission. -/
 private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxChain insertCap : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token)
+    (hht : ∀ i (h : i < hashTable.size), hashTable[i] ≤ data.size)
+    (hpv : ∀ i (h : i < prev.size), prev[i] ≤ data.size) :
     lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap hashTable prev pos acc =
     acc ++ (lz77Chain.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIter.mainLoop lz77Chain.mainLoop
-    simp only [chainWalkGuardedPacked_mod, chainWalkGuardedPacked_div, min258_le_511,
-      updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
-    · simp only [hlt, ↓reduceDIte]
+    · -- entries-`≤ data.size` invariant on the per-position updated chain arrays
+      have head_le : headProbeGuarded hashTable (lz77Greedy.hash3 data pos hashSize hlt) ≤ data.size :=
+        headProbeGuarded_bounded _ _ hht
+      have hht1 := guardedSet_bounded hashTable (lz77Greedy.hash3 data pos hashSize hlt) pos hht
+        (by omega)
+      have hpv1 := guardedSet_bounded prev (pos &&& 0x7FFF)
+        (headProbeGuarded hashTable (lz77Greedy.hash3 data pos hashSize hlt)) hpv head_le
+      simp only [hlt, ↓reduceDIte]
+      rw [chainWalkGuardedPacked_mod (hml := min258_le_511 _) (hpb := hpv1) (hcb := head_le),
+        chainWalkGuardedPacked_div (hml := min258_le_511 _) (hpb := hpv1) (hcb := head_le)]
+      simp only [updateHashesGuarded_eq]
       split
       · split
-        · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+        · rw [ih _ (by omega) _ _ _ _
+            (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).1
+            (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).2 rfl,
+            List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+        · rw [ih _ (by omega) _ _ _ _ hht1 hpv1 rfl, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
-        · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-            ← Array.append_assoc, Array.push_eq_append]
-      · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+      · rw [ih _ (by omega) _ _ _ _ hht1 hpv1 rfl, List.toArray_cons,
           ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
       exact trailing_eq data pos acc
@@ -480,7 +705,8 @@ theorem lz77ChainIter_eq_lz77Chain (data : ByteArray) (maxChain windowSize inser
   unfold lz77ChainIter lz77Chain
   split
   · rw [trailing_eq]; simp only [List.append_toArray, List.nil_append]
-  · rw [mainLoop_eq_chain]; simp only [List.append_toArray, List.nil_append]
+  · rw [mainLoop_eq_chain (hht := by intro i h; simp) (hpv := by intro i h; simp)]
+    simp only [List.append_toArray, List.nil_append]
 
 theorem lz77ChainIter_valid (data : ByteArray) (maxChain windowSize insertCap : Nat)
     (hw : windowSize > 0) :

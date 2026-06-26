@@ -192,16 +192,26 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
     one — identical branch structure, push vs. cons at each emission (two pushes in
     the lookahead arm). -/
 private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token)
+    (hht : ∀ i (h : i < hashTable.size), hashTable[i] ≤ data.size)
+    (hpv : ∀ i (h : i < prev.size), prev[i] ≤ data.size) :
     lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch hashTable prev pos acc =
     acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
-    simp only [chainWalkGuardedPacked_mod, chainWalkGuardedPacked_div, min258_le_511,
-      updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
-    · simp only [hlt, ↓reduceDIte]
+    · -- entries-`≤ data.size` invariant on the per-position updated chain arrays
+      have head_le : headProbeGuarded hashTable (lz77Greedy.hash3 data pos hashSize hlt) ≤ data.size :=
+        headProbeGuarded_bounded _ _ hht
+      have hht1 := guardedSet_bounded hashTable (lz77Greedy.hash3 data pos hashSize hlt) pos hht
+        (by omega)
+      have hpv1 := guardedSet_bounded prev (pos &&& 0x7FFF)
+        (headProbeGuarded hashTable (lz77Greedy.hash3 data pos hashSize hlt)) hpv head_le
+      simp only [hlt, ↓reduceDIte]
+      rw [chainWalkGuardedPacked_mod (hml := min258_le_511 _) (hpb := hpv1) (hcb := head_le),
+        chainWalkGuardedPacked_div (hml := min258_le_511 _) (hpb := hpv1) (hcb := head_le)]
+      simp only [updateHashesGuarded_eq]
       -- Branch tree: hge / hle / h3lt / gate (matchLen < goodMatch) / (matchLen2 > matchLen) / hle2
       split
       · -- hge : matchLen ≥ 3
@@ -210,32 +220,44 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
           split
           · -- h3lt : pos + 3 < data.size
             split
-            · -- matchLen < goodMatch : lookahead
+            · -- matchLen < goodMatch : lookahead — second chain walk at pos+1
+              rw [chainWalkGuardedPacked_mod (hml := min258_le_511 _) (hpb := hpv1)
+                  (hcb := headProbeGuarded_bounded _ _ hht1),
+                chainWalkGuardedPacked_div (hml := min258_le_511 _) (hpb := hpv1)
+                  (hcb := headProbeGuarded_bounded _ _ hht1)]
               split
               · -- matchLen2 > matchLen
                 split
                 · -- hle2 : lookahead emits literal + reference(matchLen2), two pushes
-                  rw [ih _ (by omega) _ _ _ _ rfl,
+                  rw [ih _ (by omega) _ _ _ _
+                    (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).1
+                    (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).2 rfl,
                     Array.push_eq_append, Array.push_eq_append,
                     Array.append_assoc, Array.append_assoc,
                     ← List.toArray_cons, ← List.toArray_cons]
                 · -- ¬hle2 : reference(matchLen) at pos
-                  rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-                    ← Array.append_assoc, Array.push_eq_append]
+                  rw [ih _ (by omega) _ _ _ _
+                    (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).1
+                    (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).2 rfl,
+                    List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
               · -- matchLen2 ≤ matchLen : reference(matchLen) at pos
-                rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-                  ← Array.append_assoc, Array.push_eq_append]
+                rw [ih _ (by omega) _ _ _ _
+                  (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).1
+                  (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).2 rfl,
+                  List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
             · -- matchLen ≥ goodMatch (gated) : reference(matchLen) at pos
-              rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
-                ← Array.append_assoc, Array.push_eq_append]
+              rw [ih _ (by omega) _ _ _ _
+                (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).1
+                (updateHashes_bounded data hashSize _ _ pos 1 _ insertCap hht1 hpv1).2 rfl,
+                List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
           · -- ¬h3lt : reference(matchLen) at pos (near end)
-            rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+            rw [ih _ (by omega) _ _ _ _ hht1 hpv1 rfl, List.toArray_cons,
               ← Array.append_assoc, Array.push_eq_append]
         · -- ¬hle : literal
-          rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+          rw [ih _ (by omega) _ _ _ _ hht1 hpv1 rfl, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
       · -- ¬hge : literal
-        rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+        rw [ih _ (by omega) _ _ _ _ hht1 hpv1 rfl, List.toArray_cons,
           ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
       exact trailing_eq data pos acc
@@ -247,7 +269,8 @@ theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSi
   unfold lz77ChainLazyIter lz77ChainLazy
   split
   · rw [trailing_eq]; simp only [List.append_toArray, List.nil_append]
-  · rw [mainLoop_eq_chainLazy]; simp only [List.append_toArray, List.nil_append]
+  · rw [mainLoop_eq_chainLazy (hht := by intro i h; simp) (hpv := by intro i h; simp)]
+    simp only [List.append_toArray, List.nil_append]
 
 theorem lz77ChainLazyIter_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch : Nat)
     (hw : windowSize > 0) :
