@@ -384,6 +384,44 @@ theorem updateHashesFast_eq (data : ByteArray) (hashSize : Nat)
         exact ih _ (by omega) _ _ _ hht rfl
     · rw [if_neg hcond, if_neg hcond]
 
+/-- The `uset`-write insertion walk (`updateHashesFastU`) is the proven-bounds
+    `set!` walk: identical control flow, with the two writes' in-bounds `set`
+    collapsing to `set!` (`Array.set!_eq_setIfInBounds` + `dif_pos`) at each step. -/
+theorem updateHashesFastU_eq (data : ByteArray) (hashSize : Nat)
+    (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat)
+    (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size)
+    (hpv : min chainWinSize data.size ≤ prev.size) :
+    updateHashesFastU data hashSize hashTable prev pos j matchLen insertCap hhs hht hpv =
+      updateHashesFast data hashSize hashTable prev pos j matchLen insertCap hhs hht := by
+  induction hn : matchLen - j using Nat.strongRecOn generalizing j hashTable prev hht hpv with
+  | _ n ih =>
+    unfold updateHashesFastU updateHashesFast
+    by_cases hcond : j < matchLen ∧ j ≤ insertCap
+    · rw [if_pos hcond, if_pos hcond]
+      by_cases hd : pos + j + 2 < data.size
+      · rw [dif_pos hd, dif_pos hd]
+        have hb : lz77Greedy.hash3 data (pos + j) hashSize hd < hashTable.size := by
+          have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
+          omega
+        have hmask : ((pos + j) &&& 0x7FFF) < prev.size := by
+          have h1 := winMask_lt (pos + j)
+          have h2 := Nat.and_le_left (n := pos + j) (m := 0x7FFF)
+          simp only [chainWinSize] at h1 hpv; omega
+        have e1 : hashTable.set (lz77Greedy.hash3 data (pos + j) hashSize hd) (pos + j) hb
+            = hashTable.set! (lz77Greedy.hash3 data (pos + j) hashSize hd) (pos + j) := by
+          rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos hb]
+        have e2 : prev.set ((pos + j) &&& 0x7FFF)
+              (hashTable[lz77Greedy.hash3 data (pos + j) hashSize hd]'hb) hmask
+            = prev.set! ((pos + j) &&& 0x7FFF)
+              (hashTable[lz77Greedy.hash3 data (pos + j) hashSize hd]'hb) := by
+          rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos hmask]
+        simp only [e1, e2]
+        exact ih _ (by omega) _ _ _ (by rw [Array.size_set!]; exact hht)
+          (by rw [Array.size_set!]; exact hpv) rfl
+      · rw [dif_neg hd, dif_neg hd]
+        exact ih _ (by omega) _ _ _ hht hpv rfl
+    · rw [if_neg hcond, if_neg hcond]
+
 /-- One runtime guard collapses to the reference insertion. -/
 theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
     (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat) :
@@ -391,7 +429,9 @@ theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
       lz77Chain.updateHashes data hashSize hashTable prev pos j matchLen insertCap := by
   unfold updateHashesGuarded
   split
-  · exact updateHashesFast_eq ..
+  · split
+    · exact (updateHashesFastU_eq ..).trans (updateHashesFast_eq ..)
+    · exact updateHashesFast_eq ..
   · rfl
 
 /-! ## Iterative version: equivalence + transferred contracts -/
