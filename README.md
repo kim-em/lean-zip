@@ -257,10 +257,16 @@ FFI counterparts. See `lake exe bench` for the full list.
 
 ## Known limitations
 
-- **TOCTOU in extraction**: archive extraction creates parent directories then
-  writes files; a local attacker could replace a directory with a symlink
-  between these steps. Fixing this needs `openat()`/`O_NOFOLLOW`, which Lean's
-  stdlib doesn't expose.
+- **TOCTOU in extraction**: extraction validates every archived path (`..`
+  components, absolute paths, and unsafe symlink targets are all rejected), but
+  it creates parent directories and writes files in separate steps. A local
+  attacker with concurrent write access to the output tree could replace a
+  freshly-created directory with a symlink in that window and redirect a write
+  outside it. The threat model is therefore narrow: it requires an attacker who
+  can already write into the destination during extraction. Closing it fully
+  would need an `openat()`/`O_NOFOLLOW` component walk in C (not implemented). If
+  you extract untrusted archives into a location other processes can write to,
+  stage extraction in a private directory you control.
 - **Raw streaming primitives are unbounded**: whole-buffer decompression and
   the stream-piping helpers (`Gzip.decompressStream`, `RawDeflate.decompressStream`)
   enforce a `maxDecompressedSize` cap (default 1 GiB; pass `0` to opt into
