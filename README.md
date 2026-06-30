@@ -19,11 +19,14 @@ That theorem rests on the DEFLATE round-trip at the core,
 across ~32k lines of proof in [`Zip/Spec/`](Zip/Spec). There are no `sorry`s,
 and the proofs are re-checked from scratch on every commit.
 
+Astonishly, both the implementation, and the verification, are written entirely by loosely supervised AIs.
+Most of the supervision is simply through a [`PLAN.md`](PLAN.md), and workers iterating on that with no state management beside the Github repository.
+
 (lean-zip also ships thin FFI bindings to system zlib, for when you just want
 the C library directly, plus pure-Lean tar and ZIP archives. Jump to
 [Using it](#using-it).)
 
-## Verification turns performance into a free-for-all
+## Verification enables performance
 
 Here is the interesting part.
 
@@ -34,8 +37,8 @@ Here is the interesting part.
 wins. The full dashboard (decode benchmarks, per-file heatmaps, and methodology)
 is in [`bench/`](bench/README.md).*
 
-Once correctness is a *theorem*, you can be
-reckless about speed. Rewrite the hot loop, hand-roll the Huffman table walk,
+Once correctness is a *theorem*, you can ambitiously and aggressively optimize.
+Rewrite the hot loop, hand-roll the Huffman table walk,
 add a block-splitting heuristic, swap a clean fold for a word-at-a-time byte
 reader, and the obligation `inflate (deflate x) = x` either still holds or the
 build goes red. An optimization *cannot* quietly trade away correctness, because
@@ -46,13 +49,11 @@ That makes the optimization work safe to hand to a machine. Much of lean-zip,
 including essentially all of the performance work behind that graph, was
 written by coding agents working autonomously: each one claims an issue, works
 in its own git worktree, opens a pull request, and that PR cannot merge unless
-the round-trip proof still goes through. The proof is the ratchet. Aggressive,
-half-understood, "I'm not sure *why* this is faster but the benchmark says it
-is" changes are exactly the kind a verified codebase can accept without fear.
+the round-trip proof still goes through. The proof is the ratchet.
 
-And it works. With minimal human direction, the pure-Lean codec (`native` above)
-now, compared at matched compression ratio on the Silesia corpus (note the y-axis
-is log scale, so a vertical gap is a *multiplicative* speed factor):
+And it works. In the graph above, we see the performance of the pure-Lean codec (`native`).
+Note that the y-axies is a log scale, so a vertical gap is a *multiplicative* speed factor.
+Comparing at matched compression ratios, the Lean implementation:
 
 - **beats** the pure-OCaml [`decompress`](https://github.com/mirage/decompress)
   library outright: 2–3× faster at any given ratio, and it reaches ratios
