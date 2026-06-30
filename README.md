@@ -51,15 +51,18 @@ half-understood, "I'm not sure *why* this is faster but the benchmark says it
 is" changes are exactly the kind a verified codebase can accept without fear.
 
 And it works. With minimal human direction, the pure-Lean codec (`native` above)
-now, at its default level on the Silesia corpus:
+now, compared at matched compression ratio on the Silesia corpus (note the y-axis
+is log scale, so a vertical gap is a *multiplicative* speed factor):
 
 - **beats** the pure-OCaml [`decompress`](https://github.com/mirage/decompress)
-  library: across the practical range it is faster at a given ratio *and*
-  reaches ratios OCaml's encoder can't;
-- lands **within about 2× of Rust's miniz_oxide and C's zlib**, squarely among
-  the mature language-native implementations;
-- trails only hand-tuned **C + SIMD** (libdeflate), several times faster and the
-  realistic ceiling for this format.
+  library outright: 2–3× faster at any given ratio, and it reaches ratios
+  OCaml's encoder can't;
+- runs **within ~2× of Rust's miniz_oxide and C's zlib at its faster levels**,
+  widening to ~4× at the denser settings those codecs reach by default. The
+  high-compression end (levels 8–9) is where native is weakest and the current
+  optimization frontier sits;
+- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by the most, as
+  expected for the format.
 
 This codec started out far slower than everything else on the chart. The gap
 closed not through one clever human insight but through a long series of small,
