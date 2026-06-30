@@ -258,10 +258,12 @@ FFI counterparts. See `lake exe bench` for the full list.
   writes files; a local attacker could replace a directory with a symlink
   between these steps. Fixing this needs `openat()`/`O_NOFOLLOW`, which Lean's
   stdlib doesn't expose.
-- **No streaming output limit**: whole-buffer decompression accepts a
-  `max_output` cap, but the streaming API (`push`/`finish`) has no built-in
-  limit, so callers processing untrusted data should track total output
-  themselves.
+- **Raw streaming primitives are unbounded**: whole-buffer decompression and
+  the stream-piping helpers (`Gzip.decompressStream`, `RawDeflate.decompressStream`)
+  enforce a `maxDecompressedSize` cap (default 1 GiB; pass `0` to opt into
+  unlimited mode), but the low-level opaque FFI primitives `InflateState.push`
+  and `InflateState.finish` accept no limit, so callers building directly on
+  them must track total output themselves.
 
 ## License
 
