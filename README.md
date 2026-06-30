@@ -2,9 +2,11 @@
 
 **A formally verified zlib implementation in Lean 4.**
 
-lean-zip contains a from-scratch, pure-Lean DEFLATE encoder and decoder, and
-Lean's kernel checks that they are inverse to each other. Compression here is
-something the type checker has *proved* cannot silently corrupt your data:
+[`lean-zip`](https://github.com/kim-em/lean-zip)
+contains a pure-[Lean](https://lean-lang.org/) DEFLATE encoder and decoder, and
+Lean's kernel checks that they are inverse to each other.
+We've proved that compression can't corrupt your data, for every possible input,
+and this proof is certified by the Lean kernel:
 
 ```lean
 /-- Decompressing the output of `compress` returns the original data,
@@ -14,7 +16,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     ZlibDecode.decompressSingle (ZlibEncode.compress data level) maxOutputSize = .ok data
 ```
 
-That theorem rests on the DEFLATE round-trip at the core,
+This theorem rests on lower level theorems about the DEFLATE algorithm,
 `inflate (deflateRaw data level) = .ok data`, and on more than 1,100 theorems
 across ~32k lines of proof in [`Zip/Spec/`](Zip/Spec). There are no `sorry`s,
 and the proofs are re-checked from scratch on every commit.
@@ -32,7 +34,8 @@ Here is the interesting part.
 
 ![Silesia compression: speed vs ratio](bench/graphs/silesia_compress_pareto.svg)
 
-*Silesia corpus. x = compression ratio (← smaller is better), y = throughput
+*[Silesia](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) corpus.
+x = compression ratio (← smaller is better), y = throughput
 (MB/s, log scale); each line is one codec swept across its levels, so up-and-to-the-left
 wins. The full dashboard (decode benchmarks, per-file heatmaps, and methodology)
 is in [`bench/`](bench/README.md).*
