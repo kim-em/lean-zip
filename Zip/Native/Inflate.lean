@@ -31,9 +31,9 @@ where
       Nat → Except String (UInt32 × BitReader)
     | 0 => .ok (acc, { br with pos := pos, bitOff := bitOff })
     | k + 1 =>
-      if pos ≥ br.data.size then .error "BitReader: unexpected end of input"
+      if h : pos ≥ br.data.size then .error "BitReader: unexpected end of input"
       else
-        let bit : UInt32 := ((br.data[pos]!.toUInt32 >>> bitOff.toUInt32) &&& 1)
+        let bit : UInt32 := (((br.data[pos]'(by omega)).toUInt32 >>> bitOff.toUInt32) &&& 1)
         if bitOff + 1 ≥ 8 then
           go (pos + 1) 0 (acc ||| (bit <<< shift.toUInt32)) (shift + 1) k
         else
@@ -220,19 +220,27 @@ structure DecodeTable where
     the length is the low byte, so this stays inert under the well-founded
     recursions' `whnf`). -/
 @[inline] def DecodeTable.lenAt (t : DecodeTable) (idx : Nat) : UInt8 :=
-  unpackLen t.packed[idx]!
+  if h : idx < t.packed.size then unpackLen (t.packed[idx]'h) else 0
 
 /-- The symbol of slot `idx`: bits 8–23 of the packed entry. One scalar-array read
     plus a shift; the symbol never enters a termination measure, so the shift is
     never `whnf`-forced. -/
 @[inline] def DecodeTable.symAt (t : DecodeTable) (idx : Nat) : UInt16 :=
-  unpackSym t.packed[idx]!
+  if h : idx < t.packed.size then unpackSym (t.packed[idx]'h) else 0
 
 theorem DecodeTable.lenAt_def (t : DecodeTable) (idx : Nat) :
-    t.lenAt idx = unpackLen t.packed[idx]! := rfl
+    t.lenAt idx = unpackLen t.packed[idx]! := by
+  unfold DecodeTable.lenAt
+  split
+  · rw [getElem!_pos t.packed idx ‹_›]
+  · rw [getElem!_neg t.packed idx ‹_›]; rfl
 
 theorem DecodeTable.symAt_def (t : DecodeTable) (idx : Nat) :
-    t.symAt idx = unpackSym t.packed[idx]! := rfl
+    t.symAt idx = unpackSym t.packed[idx]! := by
+  unfold DecodeTable.symAt
+  split
+  · rw [getElem!_pos t.packed idx ‹_›]
+  · rw [getElem!_neg t.packed idx ‹_›]; rfl
 
 /-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds
     `packEntry sym codeLen` for the `(sym, codeLen)` reached by walking `tree` on
@@ -431,9 +439,9 @@ def bitsAvail (br : BitReader) : Nat :=
     end of the stream read as zero; the caller uses `bitsAvail` to decide whether
     the looked-up code actually fits. -/
 def peekFast (br : BitReader) : UInt32 :=
-  let b0 : UInt32 := if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else 0
-  let b1 : UInt32 := if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toUInt32 else 0
-  let b2 : UInt32 := if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toUInt32 else 0
+  let b0 : UInt32 := if h : br.pos < br.data.size then (br.data[br.pos]'h).toUInt32 else 0
+  let b1 : UInt32 := if h : br.pos + 1 < br.data.size then (br.data[br.pos + 1]'h).toUInt32 else 0
+  let b2 : UInt32 := if h : br.pos + 2 < br.data.size then (br.data[br.pos + 2]'h).toUInt32 else 0
   ((b0 ||| (b1 <<< 8) ||| (b2 <<< 16)) >>> br.bitOff.toUInt32) &&& 0x7FF
 
 /-- Table-driven single-symbol decode. Peeks `fastBits` bits, reads the
@@ -863,8 +871,8 @@ theorem litGuard_usize (table : HuffTree.DecodeTable) (bitBuf : UInt64) (cnt : U
     the input is exhausted. Preserves the consumed bit position `pos*8 - cnt`. -/
 @[specialize] def refill (data : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat) :
     Nat × UInt64 × Nat :=
-  if cnt ≤ 56 ∧ pos < data.size then
-    refill data (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8)
+  if h : cnt ≤ 56 ∧ pos < data.size then
+    refill data (pos + 1) (bitBuf ||| ((data[pos]'h.2).toUInt64 <<< cnt.toUInt64)) (cnt + 8)
   else (pos, bitBuf, cnt)
 termination_by data.size - pos
 decreasing_by simp_wf; omega
@@ -986,7 +994,7 @@ def goFused (litTable distTable : HuffTree.DecodeTable)
     Except String (ByteArray × Nat × UInt64 × Nat × Nat) := do
   if hrc : cnt ≤ 56 ∧ pos < data.size then
     goFused litTable distTable data litTree distTree maxOut dataSize
-      (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) bitpos output
+      (pos + 1) (bitBuf ||| ((data[pos]'hrc.2).toUInt64 <<< cnt.toUInt64)) (cnt + 8) bitpos output
   else
   let cnt0 := cnt
   match decodeSym litTree litTable bitBuf cnt with
@@ -1050,7 +1058,7 @@ def goFusedP (litTable distTable : HuffTree.DecodeTable)
     Except String (ByteArray × Nat × UInt64 × Nat) := do
   if hrc : cnt ≤ 56 ∧ pos < data.size then
     goFusedP litTable distTable data litTree distTree maxOut
-      (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
+      (pos + 1) (bitBuf ||| ((data[pos]'hrc.2).toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
   else
   if hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
       ∧ (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt

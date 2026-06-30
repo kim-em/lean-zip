@@ -101,6 +101,8 @@ theorem refill_corr {data : ByteArray} {bitpos pos : Nat} {bitBuf : UInt64} {cnt
   split at heq
   · rename_i hcond
     obtain ⟨hc, hp⟩ := hcond
+    -- `refill`'s body now reads `data[pos]'hp`; normalise back to `!` to match `refill_step`
+    rw [← getElem!_pos data pos hp] at heq
     exact refill_corr (refill_step h hc hp) heq
   · rename_i hcond
     obtain ⟨rfl, rfl, rfl⟩ := Prod.ext_iff.mp heq |>.imp id Prod.ext_iff.mp
@@ -217,7 +219,8 @@ theorem mask_lt {bitBuf : UInt64} {n : Nat} (hn64 : n < 64) :
 open HuffTree in
 /-- `peekFast` is `(_ &&& 0x7FF)`, so its value is `< 2048`. -/
 theorem peekFast_lt (br : BitReader) : (peekFast br).toNat < 2048 := by
-  simp only [peekFast, UInt32.toNat_and]
+  rw [peekFast_eq]
+  simp only [UInt32.toNat_and]
   exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
 
 open HuffTree in
@@ -463,7 +466,7 @@ theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (h
       ∧ (8 ≤ br.bitOff + j → br.bitOff + j < 16 → br.data.size ≤ br.pos + 1)
       ∧ (16 ≤ br.bitOff + j → br.data.size ≤ br.pos + 2) :=
     ⟨fun _ => by omega, fun _ _ => by omega, fun _ => by omega⟩
-  unfold peekFast
+  rw [peekFast_eq]
   rw [UInt32.toNat_and, Nat.testBit_and, UInt32.toNat_shiftRight, Nat.testBit_shiftRight,
     hmask, Bool.and_true, hshift, UInt32.toNat_or, UInt32.toNat_or, Nat.testBit_or,
     Nat.testBit_or, hb0eq,
@@ -1157,7 +1160,7 @@ theorem go_refill_step (litTable distTable : HuffTree.DecodeTable) (data : ByteA
         (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) bitpos output := by
   have hr : refill data pos bitBuf cnt
       = refill data (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) := by
-    rw [refill, if_pos hrc]
+    rw [refill, dif_pos hrc, getElem!_pos data pos hrc.2]
   rw [go, go, hr]
 
 /-- A short literal (`len ≠ 0`, `len ≤ cnt`) is decoded by `decodeSym` exactly as the
@@ -1201,7 +1204,7 @@ theorem goFused_absorb_refill (litTable distTable : HuffTree.DecodeTable) (data 
   rw [refill]
   split
   · rename_i hrc
-    rw [goFused, dif_pos hrc]
+    rw [goFused, dif_pos hrc, ← getElem!_pos data pos hrc.2]
     exact goFused_absorb_refill litTable distTable data litTree distTree maxOut dataSize bitpos output
       (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8)
   · rfl
@@ -1381,45 +1384,45 @@ theorem goFused_eq_go (litTable distTable : HuffTree.DecodeTable) (data : ByteAr
   | case1 pos bitBuf cnt bitpos output hrc ih =>
       rw [goFused, dif_pos hrc, ih,
         go_refill_step litTable distTable data litTree distTree maxOut dataSize
-          pos bitBuf cnt bitpos output hrc]
+          pos bitBuf cnt bitpos output hrc, getElem!_pos data pos hrc.2]
   | case2 pos bitBuf cnt bitpos output hrc e hde =>
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde]
   | case3 pos bitBuf cnt bitpos output hrc s bb c used hde hsym hmax =>
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde, if_pos hsym, if_pos hmax]
   | case4 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 =>
       have h1c : bitpos + (cnt - c) ≤ bitpos := h1
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde, if_pos hsym, if_neg hmax, dif_pos h1c]
   | case5 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 h2 =>
       have h1c : ¬ bitpos + (cnt - c) ≤ bitpos := h1
       have h2c : dataSize * 8 < bitpos + (cnt - c) := h2
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde, if_pos hsym, if_neg hmax, dif_neg h1c, dif_pos h2c]
   | case6 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 h2 ih =>
       have h1c : ¬ bitpos + (cnt - c) ≤ bitpos := h1
       have h2c : ¬ dataSize * 8 < bitpos + (cnt - c) := h2
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde, if_pos hsym, if_neg hmax, dif_neg h1c, dif_neg h2c]
       exact ih
   | case7 pos bitBuf cnt bitpos output hrc s bb c used hde hsym heob =>
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde, if_neg hsym, if_pos heob]
   | case8 pos bitBuf cnt bitpos output hrc s bb c used hde hns hneob idx hidx =>
       have hidxc : s.toNat - 257 ≥ Inflate.lengthBase.size := hidx
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       rw [goFused, dif_neg hrc, go, hrid]
       simp only [hde, if_neg hns, if_neg hneob, dif_pos hidxc]
   | case9 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hns hneob idx hh base ih =>
       have hhc : ¬ s.toNat - 257 ≥ Inflate.lengthBase.size := hh
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, if_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
       simp only [show cnt0 = cnt from rfl] at ih
       have hext_lt : s.toNat - 257 < Inflate.lengthExtra.size := by
         simp only [Inflate.lengthExtra_size]
@@ -1495,7 +1498,7 @@ theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArr
         rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
       rw [InflateBuf.goFusedPU, dif_pos hrc, InflateBuf.goFusedP, dif_pos hgN,
           ih (by rw [e1]; omega), e1, e2,
-          InflateBuf.uget_eq_getElem! data pos hpn, InflateBuf.usize_toUInt64_toNat]
+          InflateBuf.uget_eq_getElem data pos hpn, InflateBuf.usize_toUInt64_toNat]
   | case2 pos bitBuf cnt output hrc hlit hmax =>
       intro hpos
       rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos hlit, if_pos hmax,

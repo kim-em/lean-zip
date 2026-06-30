@@ -123,6 +123,28 @@ theorem bytesToBits_getElem? (data : ByteArray) (g : Nat) (hg : g < data.size * 
   rw [hgg] at hrest
   rw [← List.head?_drop, hrest, List.head?_cons, getElem!_pos data (g / 8) hq]
 
+/-- A proven-bounds byte read guarded by `i < data.size` equals the `!`-form ite:
+    bridges `peekFast`'s `dite`/`getElem` body back to the `ite`/`getElem!` shape
+    every `peekFast` proof below is written against. -/
+private theorem dite_getElem_toUInt32 (data : ByteArray) (i : Nat) :
+    (if h : i < data.size then (data[i]'h).toUInt32 else (0 : UInt32))
+      = (if i < data.size then data[i]!.toUInt32 else (0 : UInt32)) := by
+  by_cases h : i < data.size
+  · rw [dif_pos h, if_pos h, getElem!_pos data i h]
+  · rw [dif_neg h, if_neg h]
+
+/-- `peekFast` in `ite`/`getElem!` form. `peekFast` itself reads each byte with a
+    proven-bounds `dite` guard; this restates it with the panicking `!` reads so
+    the bit-correspondence proofs (which reason over the conditional bytes) keep
+    matching their `!`-based hypotheses. -/
+theorem peekFast_eq (br : BitReader) :
+    peekFast br =
+      ((((if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else 0)
+          ||| ((if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toUInt32 else 0) <<< 8)
+          ||| ((if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toUInt32 else 0) <<< 16))
+        >>> br.bitOff.toUInt32) &&& 0x7FF) := by
+  simp only [peekFast, dite_getElem_toUInt32]
+
 /-- **peekFast bit correspondence.** Below `fastBits`, with enough bits left,
     the `j`-th peeked bit equals the `j`-th bit of the stream from the cursor. -/
 theorem peekFast_testBit (br : BitReader) (j : Nat)
@@ -160,7 +182,7 @@ theorem peekFast_testBit (br : BitReader) (j : Nat)
     split
     · have := UInt8.toNat_lt br.data[br.pos + 2]!; omega
     · decide
-  unfold peekFast
+  rw [peekFast_eq]
   -- Reduce to a single-bit query on the 24-bit window `b0 ||| (b1 <<< 8) ||| (b2 <<< 16)`.
   rw [UInt32.toNat_and, Nat.testBit_and, UInt32.toNat_shiftRight, Nat.testBit_shiftRight,
     hmask, Bool.and_true, hshift, UInt32.toNat_or, UInt32.toNat_or, Nat.testBit_or,
@@ -407,7 +429,7 @@ set_option maxRecDepth 4096 in
 theorem decodeWithTable_eq (tree : HuffTree) (br : BitReader) :
     tree.decodeWithTable tree.buildTable br = tree.decode br := by
   have hidx : (peekFast br).toNat < 2 ^ fastBits := by
-    unfold peekFast
+    rw [peekFast_eq]
     rw [UInt32.toNat_and]
     simp only [fastBits]
     exact Nat.and_lt_two_pow _ (by decide)

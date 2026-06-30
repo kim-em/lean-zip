@@ -1421,7 +1421,9 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
         maxOut pos bitBuf cnt output = .ok r := by
   rw [goTreeFree, goFusedP]
   by_cases hrc : cnt ≤ 56 ∧ pos < data.size
-  · rw [dif_pos hrc, dif_pos hrc]
+  · -- `goFusedP`'s refill now reads `data[pos]'hrc.2`; normalise to `!` to match
+    -- `goTreeFree`'s (unchanged) `data[pos]!` refill read
+    rw [dif_pos hrc, dif_pos hrc, ← getElem!_pos data pos hrc.2]
     exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
       data maxOut (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output r
   · rw [dif_neg hrc, dif_neg hrc]
