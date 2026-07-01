@@ -592,6 +592,234 @@ def collectRegionTokens (data : ByteArray) (chLen chDist : Array Nat)
 termination_by bound - pos
 decreasing_by all_goals omega
 
+/-- Number of refit rounds in the exact crown's iterative squeeze, *after* the
+    static round 1. Zopfli's fixed-point heuristic (`ZopfliLZ77Optimal`) runs a
+    comparable ~15 iterations; with the exact bit-cost tables and kept-best
+    selection here fewer converge, so this is deliberately modest. Level-10 only
+    (the max-ratio crown) — speed is no object there but wall-clock still scales
+    linearly in this count, so it is a pure ratio/speed knob. -/
+def optSqueezeRounds : Nat := 8
+
+/-- Total DEFLATE symbol-bit cost of a token stream under a fitted cost model
+    (`litCost`/`lenCost`/`distCost` from `mkCostTables`, which already fold the
+    length- and distance-code extra bits into `lenCost`/`distCost`). This is the
+    data term of zopfli's `CalculateBlockSize`; the block header is excluded
+    because across squeeze iterations the alphabet is stable, so the data term is
+    what separates one parse from another. The table reads are panic-checked —
+    the cost is heuristic and opaque to correctness (the emitter re-verifies). -/
+def tokensCost (litCost lenCost distCost : Array Nat) (toks : Array LZ77Token) : Nat :=
+  toks.foldl (init := 0) fun acc t =>
+    match t with
+    | .literal b => acc + litCost[b.toNat]!
+    | .reference len dist => acc + lenCost[len]! + distCost[dist]!
+
+/-- Core of one squeeze round with the cost tables (`litCost`/`lenCost`/
+    `distCost`) and the seeded `cost` array taken as *opaque parameters*: run the
+    backward DP over the current parse and return the new parse together with its
+    score under its own fitted model. Splitting the tables out as parameters (rather than
+    computing them here) is the load-bearing choice — the `res`-size proofs below
+    reference `fillRegion` at these opaque locals, so elaboration cannot reduce
+    the big computed tables, which is what blew `squeezeStep` past 25 GB when the
+    tables were in-scope `let`s. Heuristic: opaque to correctness. -/
+def squeezeStepCore (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost cost curLen curDist : Array Nat)
+    (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size) (hcost : r + 259 ≤ cost.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    Array Nat × Array Nat × Nat :=
+  let res := fillRegion data base r slots cacheLens cacheDists
+    litCost lenCost distCost r cost curLen curDist hr hlit hcost (Nat.le_refl r) hcl hcd
+  have hresL : data.size ≤ res.1.size := Nat.le_trans hcurL
+    (Nat.le_of_eq (fillRegion_fst_size data base r slots cacheLens cacheDists
+      litCost lenCost distCost r cost curLen curDist hr hlit hcost
+      (Nat.le_refl r) hcl hcd).symm)
+  have hresD : data.size ≤ res.2.size := Nat.le_trans hcurD
+    (Nat.le_of_eq (fillRegion_snd_size data base r slots cacheLens cacheDists
+      litCost lenCost distCost r cost curLen curDist hr hlit hcost
+      (Nat.le_refl r) hcl hcd).symm)
+  -- Score the new parse under *its own* fitted model (zopfli's per-store
+  -- `CalculateBlockSize`): the codes that would actually encode this parse. This
+  -- is the same objective the round-1 seed uses (`cost1` in `fillRegionRounds`),
+  -- so `squeezeLoop`'s kept-best comparison is a single deterministic score
+  -- across all rounds — a later parse replaces the best only when it really is
+  -- cheaper under a consistent model, not merely under its predecessor's. The
+  -- fresh table build appears in no size proof, so it stays cheap to elaborate.
+  let toks2 := collectRegionTokens data res.1 res.2 (base + r) base #[] hresL hresD
+  let fitted2 := fittedCostTables toks2
+  let newCost := tokensCost fitted2.1 fitted2.2.1 fitted2.2.2 toks2
+  (res.1, res.2, newCost)
+
+/-- `squeezeStepCore`'s length component is a `fillRegion` output over the opaque
+    parameter tables, so it preserves the current parse's length-array size. -/
+private theorem squeezeStepCore_fst_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost cost curLen curDist : Array Nat)
+    (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size) (hcost : r + 259 ≤ cost.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    (squeezeStepCore data base r slots cacheLens cacheDists litCost lenCost distCost cost
+      curLen curDist hr hlit hcost hcurL hcurD hcl hcd).1.size = curLen.size := by
+  unfold squeezeStepCore
+  simp only [fillRegion_fst_size]
+
+/-- Distance twin of `squeezeStepCore_fst_size`. -/
+private theorem squeezeStepCore_snd_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost cost curLen curDist : Array Nat)
+    (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size) (hcost : r + 259 ≤ cost.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    (squeezeStepCore data base r slots cacheLens cacheDists litCost lenCost distCost cost
+      curLen curDist hr hlit hcost hcurL hcurD hcl hcd).2.1.size = curDist.size := by
+  unfold squeezeStepCore
+  simp only [fillRegion_snd_size]
+
+/-- One squeeze round over a region: refit the exact cost model to the current
+    parse (`curLen`/`curDist`) and hand the fitted tables to `squeezeStepCore`.
+    Computing the tables here but proving only the two *table*-size facts
+    (`hflit`/`hcost`, both cheap — the same proofs `fillRegionRounds` uses) keeps
+    this wrapper light; the expensive `res`-size proofs live in the core over
+    opaque parameters. Heuristic: opaque to correctness (the emitter re-verifies). -/
+def squeezeStep (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists curLen curDist : Array Nat)
+    (hr : base + r ≤ data.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    Array Nat × Array Nat × Nat :=
+  let toks := collectRegionTokens data curLen curDist (base + r) base #[] hcurL hcurD
+  let fitted := fittedCostTables toks
+  have hflit : 256 ≤ fitted.1.size := Nat.le_of_eq (fittedCostTables_fst_size toks).symm
+  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0
+  have hcost : r + 259 ≤ cost.size := by
+    show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0).size
+    rw [seedTailCosts_size, Array.size_replicate]; omega
+  squeezeStepCore data base r slots cacheLens cacheDists
+    fitted.1 fitted.2.1 fitted.2.2 cost curLen curDist hr hflit hcost hcurL hcurD hcl hcd
+
+/-- `squeezeStep`'s length component preserves the current parse's length-array
+    size, via `squeezeStepCore_fst_size` (the fitted tables stay opaque). -/
+private theorem squeezeStep_fst_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists curLen curDist : Array Nat)
+    (hr : base + r ≤ data.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    (squeezeStep data base r slots cacheLens cacheDists curLen curDist
+      hr hcurL hcurD hcl hcd).1.size = curLen.size := by
+  unfold squeezeStep
+  simp only [squeezeStepCore_fst_size]
+
+/-- Distance twin of `squeezeStep_fst_size`. -/
+private theorem squeezeStep_snd_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists curLen curDist : Array Nat)
+    (hr : base + r ≤ data.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    (squeezeStep data base r slots cacheLens cacheDists curLen curDist
+      hr hcurL hcurD hcl hcd).2.1.size = curDist.size := by
+  unfold squeezeStep
+  simp only [squeezeStepCore_snd_size]
+
+-- `squeezeStep` is opaque to `squeezeLoop`'s well-founded elaboration: keep it
+-- from being unfolded (and its cost tables re-inlined) when the recursion is
+-- packed. Its size facts are supplied by the two lemmas above.
+attribute [irreducible] squeezeStep
+
+/-- Iterative squeeze over one region (zopfli's "squeeze", kept-best variant).
+    Each round (`squeezeStep`) refits the exact cost model to the *current*
+    parse, re-runs the backward DP, and costs the resulting parse under that same
+    model; the choice arrays returned are the cheapest parse seen across all
+    rounds. Refitting always tracks the last round (to keep exploring, escaping
+    the fixed point's local minimum), while the *return value* is the best — so a
+    round that oscillates to a worse parse can never make the output worse than
+    round 1. `rounds` bounds the iterations. Heuristic: opaque to correctness. -/
+def squeezeLoop (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists : Array Nat)
+    (curLen curDist bestLen bestDist : Array Nat) (bestCost : Nat)
+    (hr : base + r ≤ data.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hbestL : data.size ≤ bestLen.size) (hbestD : data.size ≤ bestDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size)
+    (rounds : Nat) : Array Nat × Array Nat :=
+  match rounds with
+  | 0 => (bestLen, bestDist)
+  | rounds + 1 =>
+    let step := squeezeStep data base r slots cacheLens cacheDists curLen curDist
+      hr hcurL hcurD hcl hcd
+    have hL : data.size ≤ step.1.size := Nat.le_trans hcurL
+      (Nat.le_of_eq (squeezeStep_fst_size data base r slots cacheLens cacheDists
+        curLen curDist hr hcurL hcurD hcl hcd).symm)
+    have hD : data.size ≤ step.2.1.size := Nat.le_trans hcurD
+      (Nat.le_of_eq (squeezeStep_snd_size data base r slots cacheLens cacheDists
+        curLen curDist hr hcurL hcurD hcl hcd).symm)
+    if step.2.2 < bestCost then
+      squeezeLoop data base r slots cacheLens cacheDists step.1 step.2.1 step.1 step.2.1 step.2.2
+        hr hL hD hL hD hcl hcd rounds
+    else
+      squeezeLoop data base r slots cacheLens cacheDists step.1 step.2.1 bestLen bestDist bestCost
+        hr hL hD hbestL hbestD hcl hcd rounds
+termination_by rounds
+
+/-- `squeezeLoop` returns either an input array or a `squeezeStep` output, both
+    size-preserving, so its first component keeps the current parse's size (given
+    the best array starts as long as the current one). Recursive `rw`, mirroring
+    `squeezeStep_fst_size`. -/
+private theorem squeezeLoop_fst_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists : Array Nat)
+    (curLen curDist bestLen bestDist : Array Nat) (bestCost : Nat)
+    (hr : base + r ≤ data.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hbestL : data.size ≤ bestLen.size) (hbestD : data.size ≤ bestDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size)
+    (rounds : Nat)
+    (hbc : bestLen.size = curLen.size) (hbd : bestDist.size = curDist.size) :
+    (squeezeLoop data base r slots cacheLens cacheDists curLen curDist bestLen bestDist bestCost
+      hr hcurL hcurD hbestL hbestD hcl hcd rounds).1.size = curLen.size := by
+  cases rounds with
+  | zero => unfold squeezeLoop; exact hbc
+  | succ n =>
+    unfold squeezeLoop
+    by_cases h : (squeezeStep data base r slots cacheLens cacheDists curLen curDist
+        hr hcurL hcurD hcl hcd).2.2 < bestCost
+    · simp only [h, ↓reduceIte]
+      rw [squeezeLoop_fst_size]
+      · exact squeezeStep_fst_size ..
+      · rfl
+      · rfl
+    · simp only [h, ↓reduceIte]
+      rw [squeezeLoop_fst_size]
+      · exact squeezeStep_fst_size ..
+      · rw [squeezeStep_fst_size ..]; exact hbc
+      · rw [squeezeStep_snd_size ..]; exact hbd
+termination_by rounds
+
+/-- Second-component twin of `squeezeLoop_fst_size`. -/
+private theorem squeezeLoop_snd_size (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists : Array Nat)
+    (curLen curDist bestLen bestDist : Array Nat) (bestCost : Nat)
+    (hr : base + r ≤ data.size)
+    (hcurL : data.size ≤ curLen.size) (hcurD : data.size ≤ curDist.size)
+    (hbestL : data.size ≤ bestLen.size) (hbestD : data.size ≤ bestDist.size)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size)
+    (rounds : Nat)
+    (hbc : bestLen.size = curLen.size) (hbd : bestDist.size = curDist.size) :
+    (squeezeLoop data base r slots cacheLens cacheDists curLen curDist bestLen bestDist bestCost
+      hr hcurL hcurD hbestL hbestD hcl hcd rounds).2.size = curDist.size := by
+  cases rounds with
+  | zero => unfold squeezeLoop; exact hbd
+  | succ n =>
+    unfold squeezeLoop
+    by_cases h : (squeezeStep data base r slots cacheLens cacheDists curLen curDist
+        hr hcurL hcurD hcl hcd).2.2 < bestCost
+    · simp only [h, ↓reduceIte]
+      rw [squeezeLoop_snd_size]
+      · exact squeezeStep_snd_size ..
+      · rfl
+      · rfl
+    · simp only [h, ↓reduceIte]
+      rw [squeezeLoop_snd_size]
+      · exact squeezeStep_snd_size ..
+      · rw [squeezeStep_fst_size ..]; exact hbc
+      · rw [squeezeStep_snd_size ..]; exact hbd
+termination_by rounds
+
 /-- Run the candidate-cache + two-round DP over one region and write its
     choices. Round 1 prices with the static tables; round 2 refits to the
     region's own round-1 parse. Returns the updated chain state and choice
@@ -635,20 +863,19 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
   have hchD1 : data.size ≤ res1.2.size :=
     Nat.le_trans hchD (Nat.le_of_eq (fillRegion_snd_size data base r slots cacheLens cacheDists
       slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r) hcl hcd).symm)
-  -- round 2: refit to this region's round-1 parse
+  -- rounds 2..: iterative squeeze. Refit the exact cost model to the current
+  -- parse, re-run the DP, and keep the cheapest parse across rounds (zopfli's
+  -- squeeze, kept-best). Seeded with round 1's parse and its own-model cost so a
+  -- squeeze that never improves still returns round 1 unchanged.
   let toks := collectRegionTokens data res1.1 res1.2 (base + r) base #[] hchL1 hchD1
   let fitted := fittedCostTables toks
-  have hflit : 256 ≤ fitted.1.size := Nat.le_of_eq (fittedCostTables_fst_size toks).symm
-  let cost2 := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0
-  have hcost2 : r + 259 ≤ cost2.size := by
-    show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0).size
-    rw [seedTailCosts_size, Array.size_replicate]; omega
-  let res2 := fillRegion data base r slots cacheLens cacheDists
-    fitted.1 fitted.2.1 fitted.2.2 r cost2 res1.1 res1.2 hr hflit hcost2 (Nat.le_refl r) hcl hcd
-  (hashTable, prev, res2.1, res2.2)
+  let cost1 := tokensCost fitted.1 fitted.2.1 fitted.2.2 toks
+  let sq := squeezeLoop data base r slots cacheLens cacheDists
+    res1.1 res1.2 res1.1 res1.2 cost1 hr hchL1 hchD1 hchL1 hchD1 hcl hcd optSqueezeRounds
+  (hashTable, prev, sq.1, sq.2)
 
-/-- `fillRegionRounds` only `set!`s the choice arrays, so it preserves their
-    sizes (both DP rounds go through `fillRegion`). -/
+/-- `fillRegionRounds` only `set!`s the choice arrays (round 1 plus the squeeze
+    rounds, all through `fillRegion`), so it preserves their sizes. -/
 private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
     (chLen chDist : Array Nat)
@@ -657,7 +884,7 @@ private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots base
     (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
       hr hslit hchL hchD).2.2.1.size = chLen.size := by
   unfold fillRegionRounds
-  simp only [fillRegion_fst_size]
+  simp only [squeezeLoop_fst_size, fillRegion_fst_size]
 
 private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
@@ -667,7 +894,7 @@ private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots bas
     (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
       hr hslit hchL hchD).2.2.2.size = chDist.size := by
   unfold fillRegionRounds
-  simp only [fillRegion_snd_size]
+  simp only [squeezeLoop_snd_size, fillRegion_snd_size]
 
 /-- Region driver for `computeChoices`: regions advance by
     `min regionSize (data.size - base)` bytes; the hash-chain state persists
