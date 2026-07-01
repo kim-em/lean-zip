@@ -36,9 +36,12 @@ Here is the interesting part.
 
 *[Silesia](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) corpus.
 x = compression ratio (← smaller is better), y = throughput
-(MB/s, log scale); each line is one codec swept across its levels, so up-and-to-the-left
-wins. The full dashboard (decode benchmarks, per-file heatmaps, and methodology)
-is in [`bench/`](bench/README.md).*
+(MB/s, log scale); each codec's levels are joined by its *achievable mixing
+frontier* — the ratio/speed points reachable by blending two adjacent levels —
+so up-and-to-the-left wins and a comparison at a matched ratio is honest (a
+straight segment on this log axis would overstate the achievable speed; see
+[`bench/README.md`](bench/README.md)). The full dashboard (decode benchmarks,
+per-file heatmaps, and methodology) is in [`bench/`](bench/README.md).*
 
 Once correctness is a *theorem*, you can ambitiously and aggressively optimize.
 Rewrite the hot loop, hand-roll the Huffman table walk,

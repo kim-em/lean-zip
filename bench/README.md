@@ -95,10 +95,11 @@ already-compressed file (a JPEG/PDF) — never synthetic noise.
 
 Each corpus gets a layered, corpus-generic set (a new corpus slots in with no
 code change). The **headline is the speed-vs-ratio Pareto scatter**: x = ratio
-(← smaller is better), y = speed (MB/s, log), and each codec is *one line tracing
-its levels*, so the whole speed/ratio tradeoff reads at a glance — top-left (fast
-*and* small) is best, and a dominated codec sits to the lower-right. Two
-complements give precise numbers and per-file detail:
+(← smaller is better), y = speed (MB/s, log), and each codec is markers at its
+measured levels joined by the **achievable mixing frontier** between adjacent
+levels (see *Reading the Pareto* below), so the whole speed/ratio tradeoff reads
+at a glance — top-left (fast *and* small) is best, and a dominated codec sits to
+the lower-right. Two complements give precise numbers and per-file detail:
 
 - `<corpus>_compress_pareto.svg` — **headline**: compression speed vs ratio,
   codecs as level-curves (replaces the whole per-level bar set).
@@ -112,6 +113,53 @@ complements give precise numbers and per-file detail:
   decompress per codec, level 6), sorted by speed.
 - `<corpus>_ratio_heatmap.svg` / `_compress_heatmap.svg` — per file, relative to
   zlib (red = worse), showing *where* a codec wins or loses without 100 bars.
+
+### Reading the Pareto (the mixing frontier — read this before judging a new tier)
+
+The line between a codec's two adjacent levels is **not** a straight segment. It
+is the **mixing curve**: the operating points you can actually reach by
+compressing a byte-fraction `f` of the input at the higher level and `1-f` at the
+lower one (e.g. per block). That is the real achievable set between two settings
+(exact for a single file; the plotted points are per-file geomeans, so between
+two geomean dots the curve is a close proxy for the corpus-geomean achievable
+set), so it is the honest connector. It joins *adjacent levels* — it is not a
+computed global upper envelope, so read it per codec, per neighbouring pair.
+
+The geometry matters, and it is easy to get wrong:
+
+- **Ratio** is additive in bytes, so it is *linear* in `f`.
+- **Wall-clock time** is additive, so **1/throughput** is *linear* in `f` —
+  throughput itself is not. Throughput is a rate; you average rates by averaging
+  their reciprocals (time), never the rates directly.
+- Therefore the frontier is a straight line **only** in *(ratio, time-per-byte)*
+  space. On the *(ratio, MB/s)* axis it is a curve, and on the **log-MB/s axis
+  (what we plot) a straight level-to-level segment sags *above* the true
+  frontier** — it overstates the speed reachable at an intermediate ratio. The
+  plot draws the correct sagging curve (`_mix_curve` in `plot.py`); trust it, not
+  a ruler laid between two dots.
+
+**Consequence for judging incremental progress.** A new operating point is a
+genuine improvement — *outside our own frontier* — iff, at its compression ratio,
+it is **faster than blending the two bracketing levels** (i.e. it sits *above*
+the codec's mixing curve at that ratio). Equivalently: interpolate the two
+adjacent levels to the new point's ratio; if that mix is slower, the new point is
+a real Pareto gain. Judging "inside/outside" by eye against the straight segment
+on the log axis is wrong and will reject real wins — this bit us once (issue
+#2638 measurement). To check it numerically, compare in **seconds-per-MiB
+(`1/throughput`)**, not MB/s:
+
+    f       = (ratio_lo − ratio_new) / (ratio_lo − ratio_hi)   # 0 at lo … 1 at hi
+    t_mix   = (1 − f)/mbps_lo + f/mbps_hi                       # s per MiB of the mix
+    outside = (1/mbps_new) < t_mix                              # new point faster at equal ratio
+
+**This is a within-codec test, and it is the bar for "did we make progress".** It
+is *not* the same as beating the C+SIMD references. libdeflate and zopfli set the
+absolute ratio/speed *ceiling* (the reference band), not the bar for our own
+incremental work: a change that pushes a point outside *our* mixing curve is
+progress even while the references remain ahead. Do not gate our own Pareto
+improvements on catching a SIMD C codec. (Cross-codec comparison still matters —
+as context, and for justifying a *new tier's* external reason to exist — it just
+is not the pass/fail test for an incremental within-native gain.)
 
 ### Canterbury corpus (11 small files, levels 1–9; libdeflate 1–12)
 

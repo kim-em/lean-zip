@@ -132,12 +132,44 @@ def _level_points(results, corpus, key, speed_metric):
     return pts
 
 
+def _mix_curve(x0, y0, x1, y1, n=48):
+    """Operating points reachable by compressing a byte-fraction `f` of the input
+    at the higher-effort level and `1-f` at the lower one — the *achievable*
+    frontier between two adjacent levels, and the honest connector between them.
+
+    Ratio is additive in bytes, so it is linear in `f`; wall-clock time is
+    additive, so **1/throughput** is linear in `f` (throughput itself is not).
+    The frontier is therefore a straight line only in (ratio, time-per-byte)
+    space — NOT a straight segment on the (ratio, MB/s) axis, and emphatically
+    not on the log-MB/s axis, where a straight segment sags *above* the real
+    frontier and overstates the speed reachable at an intermediate ratio. A new
+    operating point is genuinely outside the frontier only if it sits above this
+    curve (faster at equal ratio), never merely above the straight segment.
+
+    Exact for a single workload; the dashboard points are per-file geomeans, so
+    between two geomean points this is the mixing curve of the aggregate (a close
+    proxy for, not literally, the corpus-geomean achievable set). See
+    bench/README.md ("Reading the Pareto")."""
+    if not (y0 > 0 and y1 > 0):          # 1/speed undefined — fall back to a segment
+        return [x0, x1], [y0, y1]
+    xs, ys = [], []
+    for i in range(n + 1):
+        f = i / n
+        xs.append((1.0 - f) * x0 + f * x1)
+        ys.append(1.0 / ((1.0 - f) / y0 + f / y1))
+    return xs, ys
+
+
 def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outfile):
     """Headline view: speed vs ratio. x = compression ratio (smaller = better,
-    left), y = speed (MB/s, log). Each compressor is one line tracing its levels,
-    so the whole speed/ratio tradeoff and the Pareto frontier read at a glance —
-    top-left is ideal, a dominated codec sits to the lower-right. Collapses the
-    per-level chart set into a single figure."""
+    left), y = speed (MB/s, log). Each compressor is markers at its measured
+    levels joined by the *mixing frontier* — the operating points reachable by
+    blending two adjacent levels (`_mix_curve`), which is the physically
+    achievable connector, unlike a straight segment on the log axis. So the whole
+    speed/ratio tradeoff and the achievable frontier read at a glance — top-left
+    is ideal; a point is outside a codec's frontier only if it sits above that
+    codec's mixing curve, not merely above the straight level-to-level segment.
+    Collapses the per-level chart set into a single figure."""
     pats = corpus_patterns(results, corpus)
     if not pats:
         return
@@ -147,9 +179,19 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
         pts = _level_points(results, corpus, key, speed_metric)
         if not pts:
             continue
+        style = series_style(key, colour)
         xs = [p[1] for p in pts]
         ys = [p[2] for p in pts]
-        ax.plot(xs, ys, marker=marker, label=label, **series_style(key, colour))
+        # Markers at the real (measured) level points carry the legend entry.
+        ax.plot(xs, ys, linestyle="none", marker=marker, label=label,
+                **{k: v for k, v in style.items() if k != "linewidth"})
+        # Connectors are the achievable mixing frontier between consecutive
+        # levels, not straight segments (see `_mix_curve`). A single-point series
+        # (e.g. the frozen zopfli ceiling) has no connector — just its marker.
+        for a in range(len(pts) - 1):
+            cx, cy = _mix_curve(xs[a], ys[a], xs[a + 1], ys[a + 1])
+            ax.plot(cx, cy, color=colour, linewidth=style["linewidth"],
+                    alpha=style["alpha"], zorder=style["zorder"])
         # Mark the level sweep direction on the subject's curve only (avoid clutter).
         if key == "native" and len(pts) > 1:
             for idx in (0, -1):
@@ -167,7 +209,7 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
     ax.legend(fontsize=8, ncol=2, loc="best")
     ax.text(0.015, 0.985, "↖ fast & small = best", transform=ax.transAxes,
             fontsize=10, va="top", color="#2a8a3a", fontweight="bold")
-    fig.suptitle(f"{title}  ({corpus} — geomean over {len(pats)} files; line = level sweep)",
+    fig.suptitle(f"{title}  ({corpus} — geomean over {len(pats)} files)",
                  fontsize=13, fontweight="bold")
     fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
     fig.tight_layout(rect=(0, 0.03, 1, 0.97))

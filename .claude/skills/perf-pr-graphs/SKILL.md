@@ -79,6 +79,51 @@ stays current.
   committed dashboard half.
 - A PR touching both: produce both sets.
 
+## Reading the frontier honestly (mixing curves — do not skip)
+
+When a compression change lands a **new operating point** (a new tier, a new
+level, a knob that trades ratio for speed), the question is "is it *outside* our
+current Pareto frontier — a genuine gain — or could we already reach it by
+blending existing levels?" Answer it correctly or you will reject real wins.
+
+The achievable set between two adjacent levels is the **mixing curve**: compress
+a byte-fraction `f` at the higher level and `1-f` at the lower (exact per file;
+on the geomean dashboard it is a close proxy between the two geomean points). On
+that curve:
+
+- **ratio** is additive in bytes → linear in `f`;
+- **time** is additive → **1/throughput** is linear in `f` (throughput is a
+  rate; average the reciprocals, never the MB/s directly).
+
+So the curve is straight only in *(ratio, seconds-per-MiB)*. On the
+**log-MB/s Pareto we plot, a straight segment between two level dots sags *above*
+the real frontier** and overstates the achievable speed. `bench/plot.py` now
+draws the correct sagging mixing curve between levels (`_mix_curve`); the naive
+straight segment is a lie. (This bit us on #2638: a new L9-fast point looked
+"below the L8–L9 line, therefore useless" on the log plot, but against the true
+mixing curve it was +18–41% faster at equal ratio — a real point.)
+
+**The test, numerically:** interpolate the two bracketing levels to the new
+point's ratio in *time-per-byte*, i.e.
+
+    f       = (ratio_lo − ratio_new) / (ratio_lo − ratio_hi)
+    t_mix   = (1−f)/mbps_lo + f/mbps_hi        # seconds per MiB of the mix
+    outside = (1/mbps_new) < t_mix             # new point is faster at equal ratio
+
+If `outside`, it is a genuine Pareto gain. Compare in **seconds-per-MiB
+(`1/throughput`)**, not MB/s, and never eyeball it against the straight log-axis
+segment.
+
+**This is a within-native test — the bar for *our* progress.** It is separate
+from the C+SIMD references: libdeflate/zopfli set the absolute ceiling (context),
+not the pass/fail bar. A change that moves a point outside *our own* mixing curve
+is progress even while libdeflate stays ahead on both axes; do **not** gate
+incremental work on beating a SIMD C codec. When you write up a perf PR (or an
+issue proposing one), frame "moves us outside our frontier / a new top-left
+point" against this mixing test, not against the reference ceiling. (Cross-codec
+standing still matters as context, and for justifying a *new tier's* external
+reason to exist — it is just not the test for an incremental within-native gain.)
+
 ## Workflow
 
 Run from the repo root. On NixOS wrap commands in `nix-shell --run "…"` (see the
