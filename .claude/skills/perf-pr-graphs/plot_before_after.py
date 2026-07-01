@@ -99,29 +99,55 @@ def curve(rows, comp, corpus):
             pts.append((gr, gs))
     return sorted(pts)
 
+def mix_curve(x0, y0, x1, y1, n=40):
+    """Achievable frontier between two adjacent levels: compress a byte-fraction
+    `f` at one and `1-f` at the other. Ratio is additive (linear in `f`); time is
+    additive so **1/throughput** is linear (throughput, a rate, is not). A
+    straight segment on the log-MB/s axis sags *above* this curve and overstates
+    the achievable speed — so connectors must use this, not a straight line. See
+    bench/README.md and this skill's 'Reading the frontier honestly'."""
+    if not (y0 > 0 and y1 > 0):          # 1/speed undefined — fall back to a segment
+        return [x0, x1], [y0, y1]
+    xs, ys = [], []
+    for i in range(n + 1):
+        f = i / n
+        xs.append((1 - f) * x0 + f * x1)
+        ys.append(1.0 / ((1 - f) / y0 + f / y1))
+    return xs, ys
+
+def plot_series(ax, pts, *, color, mk, lw, ms, label, ls="-", zorder=4,
+                alpha=0.9, hollow=False):
+    """Markers at measured levels joined by mixing-frontier connectors."""
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+    ax.plot(xs, ys, linestyle="none", marker=mk, ms=ms, color=color, zorder=zorder,
+            markerfacecolor=("none" if hollow else color), markeredgecolor=color,
+            label=label)
+    for a in range(len(pts) - 1):
+        cx, cy = mix_curve(xs[a], ys[a], xs[a + 1], ys[a + 1])
+        ax.plot(cx, cy, color=color, lw=lw, ls=ls, alpha=alpha, zorder=zorder)
+
 label_speed = "compression speed" if metric == "compress_mbps" else "decode throughput"
 
 for corpus in corpora(AFTER):
     fig, ax = plt.subplots(figsize=(10, 6.5))
-    # other-language context (reused), drawn as hollow rings underneath
+    # other-language context (reused), drawn as hollow rings underneath.
+    # Connectors are mixing frontiers (see `mix_curve`), not straight segments.
     for comp, lab, col, mk in REFS:
         pts = curve(LATEST, comp, corpus)
         if not pts:
             continue
-        ax.plot([p[0] for p in pts], [p[1] for p in pts], marker=mk, color=col,
-                lw=1.3, ms=5, alpha=0.9, zorder=4,
-                markerfacecolor="none", markeredgecolor=col, label=lab)
+        plot_series(ax, pts, color=col, mk=mk, lw=1.3, ms=5, zorder=4,
+                    hollow=True, label=lab)
     # native before (grey dashed) and after (solid red), on top
     pb = curve(BEFORE, "native", corpus)
     if pb:
-        ax.plot([p[0] for p in pb], [p[1] for p in pb], marker="o", color="#7f7f7f",
-                lw=2.2, ms=7, ls="--", zorder=11,
-                markerfacecolor="none", markeredgecolor="#7f7f7f",
-                label="lean-zip native — before")
+        plot_series(ax, pb, color="#7f7f7f", mk="o", lw=2.2, ms=7, ls="--",
+                    zorder=11, alpha=1.0, hollow=True,
+                    label="lean-zip native — before")
     pa = curve(AFTER, "native", corpus)
     if pa:
-        ax.plot([p[0] for p in pa], [p[1] for p in pa], marker="o", color="#d62728",
-                lw=2.6, ms=8, zorder=12, label="lean-zip native — AFTER")
+        plot_series(ax, pa, color="#d62728", mk="o", lw=2.6, ms=8, zorder=12,
+                    alpha=1.0, label="lean-zip native — AFTER")
     ax.set_yscale("log")
     ax.set_xlabel("compression ratio  (compressed / original — ← smaller = more compressed)")
     ax.set_ylabel(f"{label_speed}  (MB/s, log)")
