@@ -17256,6 +17256,396 @@
    "ratio": 0.1177,
    "compress_mbps": 4.73,
    "decompress_mbps": null
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 1,
+   "out_size": 7615928,
+   "ratio": 0.3808,
+   "compress_mbps": 38.76,
+   "decompress_mbps": 110.98
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 2,
+   "out_size": 7552010,
+   "ratio": 0.3776,
+   "compress_mbps": 36.45,
+   "decompress_mbps": 119.84
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 3,
+   "out_size": 7521233,
+   "ratio": 0.3761,
+   "compress_mbps": 34.62,
+   "decompress_mbps": 126.74
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 4,
+   "out_size": 7421130,
+   "ratio": 0.3711,
+   "compress_mbps": 28.21,
+   "decompress_mbps": 127.76
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 5,
+   "out_size": 7416933,
+   "ratio": 0.3708,
+   "compress_mbps": 27.63,
+   "decompress_mbps": 132.02
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 6,
+   "out_size": 7410362,
+   "ratio": 0.3705,
+   "compress_mbps": 26.92,
+   "decompress_mbps": 134.52
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 7,
+   "out_size": 7394844,
+   "ratio": 0.3697,
+   "compress_mbps": 23.27,
+   "decompress_mbps": 134.85
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 8,
+   "out_size": 7394453,
+   "ratio": 0.3697,
+   "compress_mbps": 8.35,
+   "decompress_mbps": 136.32
+  },
+  {
+   "compressor": "native",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 9,
+   "out_size": 7117522,
+   "ratio": 0.3559,
+   "compress_mbps": 2.09,
+   "decompress_mbps": 139.36
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 1,
+   "out_size": 8531194,
+   "ratio": 0.4266,
+   "compress_mbps": 111.84,
+   "decompress_mbps": 344.6
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 2,
+   "out_size": 8219632,
+   "ratio": 0.411,
+   "compress_mbps": 97.9,
+   "decompress_mbps": 357.49
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 3,
+   "out_size": 7978468,
+   "ratio": 0.3989,
+   "compress_mbps": 69.94,
+   "decompress_mbps": 376.13
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 4,
+   "out_size": 7669038,
+   "ratio": 0.3835,
+   "compress_mbps": 67.9,
+   "decompress_mbps": 379.22
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 5,
+   "out_size": 7446142,
+   "ratio": 0.3723,
+   "compress_mbps": 42.88,
+   "decompress_mbps": 369.87
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 6,
+   "out_size": 7379178,
+   "ratio": 0.369,
+   "compress_mbps": 28.76,
+   "decompress_mbps": 372.78
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 7,
+   "out_size": 7368345,
+   "ratio": 0.3684,
+   "compress_mbps": 25.48,
+   "decompress_mbps": 371.1
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 8,
+   "out_size": 7362936,
+   "ratio": 0.3681,
+   "compress_mbps": 22.98,
+   "decompress_mbps": 375.69
+  },
+  {
+   "compressor": "zlib",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 9,
+   "out_size": 7362907,
+   "ratio": 0.3681,
+   "compress_mbps": 22.94,
+   "decompress_mbps": 376.16
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 1,
+   "out_size": 9780791,
+   "ratio": 0.489,
+   "compress_mbps": 162.08,
+   "decompress_mbps": 329.84
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 2,
+   "out_size": 8182464,
+   "ratio": 0.4091,
+   "compress_mbps": 127.26,
+   "decompress_mbps": 364.03
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 3,
+   "out_size": 7634674,
+   "ratio": 0.3817,
+   "compress_mbps": 69.74,
+   "decompress_mbps": 420.76
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 4,
+   "out_size": 7530740,
+   "ratio": 0.3765,
+   "compress_mbps": 63.19,
+   "decompress_mbps": 420.36
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 5,
+   "out_size": 7441681,
+   "ratio": 0.3721,
+   "compress_mbps": 47.11,
+   "decompress_mbps": 415.85
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 6,
+   "out_size": 7370737,
+   "ratio": 0.3685,
+   "compress_mbps": 30.29,
+   "decompress_mbps": 424.32
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 7,
+   "out_size": 7361982,
+   "ratio": 0.3681,
+   "compress_mbps": 26.98,
+   "decompress_mbps": 423.9
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 8,
+   "out_size": 7359414,
+   "ratio": 0.368,
+   "compress_mbps": 25.37,
+   "decompress_mbps": 423.14
+  },
+  {
+   "compressor": "miniz_oxide",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 9,
+   "out_size": 7359347,
+   "ratio": 0.368,
+   "compress_mbps": 25.3,
+   "decompress_mbps": 423.46
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 1,
+   "out_size": 7898620,
+   "ratio": 0.3949,
+   "compress_mbps": 229.03,
+   "decompress_mbps": 733.82
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 2,
+   "out_size": 7715351,
+   "ratio": 0.3858,
+   "compress_mbps": 169.91,
+   "decompress_mbps": 787.89
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 3,
+   "out_size": 7625643,
+   "ratio": 0.3813,
+   "compress_mbps": 149.44,
+   "decompress_mbps": 810.23
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 4,
+   "out_size": 7594082,
+   "ratio": 0.3797,
+   "compress_mbps": 139.72,
+   "decompress_mbps": 739.64
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 5,
+   "out_size": 7428603,
+   "ratio": 0.3714,
+   "compress_mbps": 110.9,
+   "decompress_mbps": 722.54
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 6,
+   "out_size": 7388872,
+   "ratio": 0.3694,
+   "compress_mbps": 91.36,
+   "decompress_mbps": 735.49
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 7,
+   "out_size": 7371309,
+   "ratio": 0.3686,
+   "compress_mbps": 72.96,
+   "decompress_mbps": 734.55
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 8,
+   "out_size": 7320105,
+   "ratio": 0.366,
+   "compress_mbps": 50.25,
+   "decompress_mbps": 732.3
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 9,
+   "out_size": 7318266,
+   "ratio": 0.3659,
+   "compress_mbps": 46.71,
+   "decompress_mbps": 732.33
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 10,
+   "out_size": 7092809,
+   "ratio": 0.3546,
+   "compress_mbps": 13.73,
+   "decompress_mbps": null
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 11,
+   "out_size": 7089586,
+   "ratio": 0.3545,
+   "compress_mbps": 10.09,
+   "decompress_mbps": null
+  },
+  {
+   "compressor": "libdeflate",
+   "pattern": "enwik8_20m/enwik8",
+   "size": 20000000,
+   "level": 12,
+   "out_size": 7089712,
+   "ratio": 0.3545,
+   "compress_mbps": 8.61,
+   "decompress_mbps": null
   }
  ]
 }

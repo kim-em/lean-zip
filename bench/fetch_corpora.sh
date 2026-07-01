@@ -6,9 +6,10 @@
 #
 # Canterbury (~2.8 MB, 11 files) is committed to the repo, so CI needs no
 # network; running this script is only needed to re-materialize or update it.
-# Larger corpora (e.g. Silesia) are NOT committed and are fetched on demand
-# into this gitignored cache — see bench/.gitignore. Sources (PLAN.md §D):
+# Larger corpora (e.g. Silesia, enwik8) are NOT committed and are fetched on
+# demand into this gitignored cache — see bench/.gitignore. Sources (PLAN.md §D):
 #   Canterbury: https://corpus.canterbury.ac.nz/
+#   enwik8:     http://mattmahoney.net/dc/ (Large Text Compression Benchmark)
 set -euo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
@@ -83,14 +84,52 @@ fetch_silesia() {
   echo "[silesia] ok — 12 files in $dest verified against recorded SHA-256"
 }
 
+# enwik8 (first 100 MB of English Wikipedia, the Large Text Compression
+# Benchmark / Hutter Prize corpus) — the canonical large pure-prose file zopfli
+# was designed for. NOT committed (gitignored). We fetch the official zip, unzip,
+# and slice the deterministic **first 20 MB** as the corpus workload: zopfli at
+# default iterations is ~100x slower than zlib, so the full 100 MB one-time
+# ceiling run is impractical, while 20 MB of homogeneous prose is plenty
+# representative for the ratio question and keeps the one-time zopfli pass quick.
+# The slice (not the 100 MB original) is what is SHA-256-pinned and benchmarked,
+# hence the corpus name `enwik8_20m`.
+ENWIK8_URL="http://mattmahoney.net/dc/enwik8.zip"
+ENWIK8_SLICE_BYTES=20000000
+# SHA-256 of the unzipped 100 MB original (sanity-check on the download) and of
+# the first-20 MB slice (the pinned benchmark input).
+ENWIK8_FULL_SHA256="2b49720ec4d78c3c9fabaee6e4179a5e997302b3a70029f30f2d582218c024a8"
+ENWIK8_SLICE_SHA256="ab409e5aee762114c7a3336bbb1093cd64c4a3d81fd3e67510d61d3151c36091"
+
+fetch_enwik8() {
+  local dest="$CORPORA_DIR/enwik8_20m"
+  mkdir -p "$dest"
+  if [ -f "$dest/enwik8" ]; then
+    echo "[enwik8_20m] slice present — verifying"
+  else
+    echo "[enwik8_20m] fetching $ENWIK8_URL"
+    local tmp
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    curl -sSL --fail --max-time 600 -o "$tmp/enwik8.zip" "$ENWIK8_URL"
+    python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+      "$tmp/enwik8.zip" "$tmp"
+    # Verify the 100 MB original before slicing, then take the first 20 MB.
+    echo "$ENWIK8_FULL_SHA256  $tmp/enwik8" | sha256sum --check --quiet
+    head -c "$ENWIK8_SLICE_BYTES" "$tmp/enwik8" > "$dest/enwik8"
+  fi
+  echo "$ENWIK8_SLICE_SHA256  $dest/enwik8" | sha256sum --check --quiet
+  echo "[enwik8_20m] ok — first ${ENWIK8_SLICE_BYTES}-byte slice in $dest verified against recorded SHA-256"
+}
+
 main() {
   mkdir -p "$CORPORA_DIR"
   local which="${1:-all}"
   case "$which" in
     canterbury) fetch_canterbury ;;
     silesia)    fetch_silesia ;;
-    all)        fetch_canterbury; fetch_silesia ;;
-    *) echo "unknown corpus: $which (known: canterbury, silesia, all)" >&2; exit 2 ;;
+    enwik8)     fetch_enwik8 ;;
+    all)        fetch_canterbury; fetch_silesia; fetch_enwik8 ;;
+    *) echo "unknown corpus: $which (known: canterbury, silesia, enwik8, all)" >&2; exit 2 ;;
   esac
 }
 
