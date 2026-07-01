@@ -29,10 +29,10 @@ implementations (no SIMD/asm, or GC'd, or JIT'd) — not just the C + SIMD ceili
 
 | Key | Implementation | Role |
 |-----|----------------|------|
-| `native` | lean-zip pure-Lean DEFLATE | the thing we are improving |
+| `native` | lean-zip pure-Lean DEFLATE | the thing we are improving; swept **levels 1–10** — since #2638 level 9 is the L9-fast tier and level 10 is the exact-DP crown (always sweep through 10 so the crown stays on the Pareto) |
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
-| `libdeflate` | libdeflate (FFI) | optimized C + SIMD — the runtime speed bar; swept over its full **levels 1–12** (the others cap at 9), so its densest points (10–12) appear on the Pareto |
+| `libdeflate` | libdeflate (FFI) | optimized C + SIMD — the runtime speed bar; swept over its full **levels 1–12** (native caps at 10, the zlib/miniz FFI at 9), so its densest points (10–12) appear on the Pareto |
 | `zopfli` | zopfli (FFI) | maximum-ratio ceiling — **frozen** (see below); never in the routine matrix |
 
 **Language-native peers** (each a self-verifying CLI under
@@ -66,8 +66,9 @@ whose toolchain is unavailable is skipped, so the dashboard degrades gracefully.
 
 ## Workloads
 
-The **real compression corpora** from the literature, swept over levels 1–9
-(`libdeflate` over its full 1–12 — see *Compressors compared*).
+The **real compression corpora** from the literature, swept over native levels
+1–10 (the level-10 exact crown always included; the zlib/miniz FFI references cap
+at 9, `libdeflate` over its full 1–12 — see *Compressors compared*).
 Each corpus is a subdirectory of [`corpora/`](corpora); every file in it is one
 single-size workload tagged `<corpus>/<file>`, and the harness discovers corpora
 by directory (nothing hard-codes Canterbury — a new corpus slots in once its
@@ -161,14 +162,14 @@ improvements on catching a SIMD C codec. (Cross-codec comparison still matters �
 as context, and for justifying a *new tier's* external reason to exist — it just
 is not the pass/fail test for an incremental within-native gain.)
 
-### Canterbury corpus (11 small files, levels 1–9; libdeflate 1–12)
+### Canterbury corpus (11 small files, native levels 1–10; libdeflate 1–12)
 
 ![canterbury compression speed vs ratio](graphs/canterbury_compress_pareto.svg)
 ![canterbury summary table](graphs/canterbury_summary.svg)
 ![canterbury ratio vs zlib per file](graphs/canterbury_ratio_heatmap.svg)
 ![canterbury compress speed vs zlib per file](graphs/canterbury_compress_heatmap.svg)
 
-### Silesia corpus (12 large files, levels 1–9; libdeflate 1–12)
+### Silesia corpus (12 large files, native levels 1–10; libdeflate 1–12)
 
 ![silesia compression speed vs ratio](graphs/silesia_compress_pareto.svg)
 ![silesia decode throughput vs input density](graphs/silesia_decode_density.svg)

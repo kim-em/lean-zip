@@ -134,12 +134,22 @@ def Row.toJson (r : Row) : String :=
 
 /-! ## Matrix -/
 
+/-- Level range for the FFI reference codecs (zlib, miniz_oxide), whose
+    `deflateInit2` accepts only 0–9. -/
 def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-/-- libdeflate's full level range. Unlike zlib/miniz/native (capped at 9),
-    libdeflate exposes 1–12, and its densest points (10–12) are exactly the
-    ones the comparison Pareto needs from it — so it is swept to 12 here while
-    every other codec stays on the shared `levels`. -/
+/-- Native lean-zip's level range. Wider than the zlib/miniz FFI cap of 9: since
+    #2638, level 9 is the L9-fast approximate-optimal tier and **level 10 is the
+    exact-DP crown** (the max-ratio ceiling). The dashboard must always sweep
+    native through 10 so the crown stays on the Pareto — otherwise the headline
+    graph loses our best-ratio point. `runWorkloads` already omits the decode
+    timing for `level > 9` (no zlib-FFI raw-deflate reference exists there), so
+    the extra native point is compress-only, exactly like libdeflate 10–12. -/
+def nativeLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+/-- libdeflate's full level range. It exposes 1–12, and its densest points
+    (10–12) are exactly the ones the comparison Pareto needs from it — so it is
+    swept to 12 here while the FFI references cap at 9 and native caps at 10. -/
 def libdeflateLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 def reps : Nat := 5
 
@@ -258,10 +268,14 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     -- level/rep it dominated the wall-clock of the whole matrix. Its FFI binding
     -- (`zopfliCompress`) is kept for ad-hoc ratio-ceiling checks.
     let big := corpus == "silesia"
+    -- Native sweeps 1–10 (incl. the level-10 crown, #2638); the FFI references
+    -- (zlib/miniz) cap at 9. An explicit `levelOverride` (a native-only regen at
+    -- a chosen level list) applies to whichever codecs run.
+    let nlvls := levelOverride.getD nativeLevels
     let lvls := levelOverride.getD levels
     let rps  := if big then 1 else reps
-    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, levels {lvls}, reps {rps})…"
-    let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)     (theLevels := lvls) (theReps := rps)
+    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, native levels {nlvls}, reps {rps})…"
+    let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)     (theLevels := nlvls) (theReps := rps)
     -- `--native-only`: skip the reference compressors. Their ratios are
     -- deterministic and their MB/s drift <~3% run-to-run (measured), so a Lean-only
     -- change reuses the prior dashboard's reference rows (spliced in post-hoc by

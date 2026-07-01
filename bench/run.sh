@@ -26,11 +26,12 @@ in_project_shell() {
 # back over the existing dashboard, then re-plot. The reference compressors are
 # not re-measured — their ratio is deterministic and their MB/s drifts <~3%
 # run-to-run (verified across regens) — so this skips the ~2 h external-comparator
-# rebuild entirely. The dominant remaining cost is native's own optimal-parse L9
-# (~1 MB/s); pass a level list to skip it when the Lean change does not touch the
-# L9 path (the prior L9 rows are kept by the upsert merge).
-#   bench/run.sh --native-only                  # all 9 native levels (~14 min)
-#   bench/run.sh --native-only 1,2,3,4,5,6,7,8  # skip the slow L9 (~half the time)
+# rebuild entirely. The dominant remaining cost is native's own optimal-parse at
+# levels 9 (L9-fast) and 10 (exact crown, ~1 MB/s); pass a level list to skip
+# them when the Lean change does not touch that path (the prior rows are kept by
+# the upsert merge).
+#   bench/run.sh --native-only                  # all 10 native levels, incl. the L10 crown (~14 min)
+#   bench/run.sh --native-only 1,2,3,4,5,6,7,8  # skip the slow L9/L10 (~half the time)
 if [ "${1:-}" = "--native-only" ]; then
   [ -f "$OUT" ] || { echo "no existing $OUT to splice into — run a full bench/run.sh first" >&2; exit 1; }
   TMP="$(mktemp --suffix=.json)"
