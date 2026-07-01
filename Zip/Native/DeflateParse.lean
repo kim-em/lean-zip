@@ -162,6 +162,62 @@ decreasing_by all_goals omega
   else
     chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
 
+/-- `chainWalkAll` only `set!`s the cache arrays, so it preserves their sizes. -/
+private theorem chainWalkAll_fst_size (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat) (lens dists : Array Nat) :
+    (chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists).1.size =
+      lens.size := by
+  fun_induction chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists <;>
+    simp_all (config := { zetaDelta := true })
+
+private theorem chainWalkAll_snd_size (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat) (lens dists : Array Nat) :
+    (chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists).2.size =
+      dists.size := by
+  fun_induction chainWalkAll data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists <;>
+    simp_all (config := { zetaDelta := true })
+
+/-- `chainWalkAllFast` only `set`s the cache arrays, so it preserves their sizes. -/
+private theorem chainWalkAllFast_fst_size (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat) (lens dists : Array Nat)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsl : slotBase + optCacheSlots ≤ lens.size)
+    (hsd : slotBase + optCacheSlots ≤ dists.size) :
+    (chainWalkAllFast data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
+      hps hsl hsd).1.size = lens.size := by
+  fun_induction chainWalkAllFast data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
+    hps hsl hsd <;> simp_all (config := { zetaDelta := true }) [Array.size_set]
+
+private theorem chainWalkAllFast_snd_size (data : ByteArray) (prev : Array Nat) (pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat) (lens dists : Array Nat)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsl : slotBase + optCacheSlots ≤ lens.size)
+    (hsd : slotBase + optCacheSlots ≤ dists.size) :
+    (chainWalkAllFast data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
+      hps hsl hsd).2.size = dists.size := by
+  fun_induction chainWalkAllFast data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists
+    hps hsl hsd <;> simp_all (config := { zetaDelta := true }) [Array.size_set]
+
+/-- `chainWalkAllGuarded` dispatches to two size-preserving walks, so it too
+    preserves the cache-array sizes. -/
+private theorem chainWalkAllGuarded_fst_size (data : ByteArray) (prev : Array Nat)
+    (pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat)
+    (lens dists : Array Nat) :
+    (chainWalkAllGuarded data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists).1.size =
+      lens.size := by
+  unfold chainWalkAllGuarded
+  split
+  · exact chainWalkAllFast_fst_size ..
+  · exact chainWalkAll_fst_size ..
+
+private theorem chainWalkAllGuarded_snd_size (data : ByteArray) (prev : Array Nat)
+    (pos maxLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen k slotBase : Nat)
+    (lens dists : Array Nat) :
+    (chainWalkAllGuarded data prev pos maxLen hpm cand fuel bestLen k slotBase lens dists).2.size =
+      dists.size := by
+  unfold chainWalkAllGuarded
+  split
+  · exact chainWalkAllFast_snd_size ..
+  · exact chainWalkAll_snd_size ..
+
 /-- 3-byte chain hash for the L9 candidate cache. The optimal parser maximises
     *ratio*, so it must see every candidate — including length-3 matches. The
     L1-L8 matchers switched to a 4-byte hash for speed (#2620), which drops
@@ -198,14 +254,30 @@ def buildCache (data : ByteArray) (hashTable : Array Nat) (prev : Array Nat)
       let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hpm : pos + maxLen ≤ data.size := by omega
-      let (lens, dists) := chainWalkAllGuarded data prev pos maxLen hpm head depth
+      let cache := chainWalkAllGuarded data prev pos maxLen hpm head depth
         0 0 (slots * j) lens dists
-      buildCache data hashTable prev depth slots base r (j + 1) lens dists
+      buildCache data hashTable prev depth slots base r (j + 1) cache.1 cache.2
     else
       buildCache data hashTable prev depth slots base r (j + 1) lens dists
   else (lens, dists, hashTable, prev)
 termination_by r - j
 decreasing_by all_goals omega
+
+/-- `buildCache` only feeds the cache arrays through `chainWalkAllGuarded`
+    (size-preserving), so the returned `lens`/`dists` keep their input sizes.
+    This is the chain that lets `fillRegion`/`scanCands` read the cache slots
+    with proven bounds. -/
+private theorem buildCache_fst_size (data : ByteArray) (hashTable prev : Array Nat)
+    (depth slots base r j : Nat) (lens dists : Array Nat) :
+    (buildCache data hashTable prev depth slots base r j lens dists).1.size = lens.size := by
+  fun_induction buildCache data hashTable prev depth slots base r j lens dists <;>
+    simp_all (config := { zetaDelta := true }) [chainWalkAllGuarded_fst_size]
+
+private theorem buildCache_snd_fst_size (data : ByteArray) (hashTable prev : Array Nat)
+    (depth slots base r j : Nat) (lens dists : Array Nat) :
+    (buildCache data hashTable prev depth slots base r j lens dists).2.1.size = dists.size := by
+  fun_induction buildCache data hashTable prev depth slots base r j lens dists <;>
+    simp_all (config := { zetaDelta := true }) [chainWalkAllGuarded_snd_size]
 
 /-! ## Cost model
 
@@ -398,28 +470,33 @@ def scanBounds (lenCost distCost cost : Array Nat) (i dist len s : Nat)
 termination_by Inflate.lengthBase.size - s
 decreasing_by all_goals omega
 
+-- The dependent cache-size hypotheses deepen the well-founded elaboration past
+-- the default recursion limit (as for several defs in `Inflate.lean`).
+set_option maxRecDepth 4096 in
 /-- Scan the candidate slots of region-local position `i` (cache block at
     `slotBase`), evaluating each candidate at its full length and at the
     length-code boundaries of its covered interval. Slots hold strictly
-    increasing lengths; a zero length terminates the block. -/
+    increasing lengths; a zero length terminates the block.
+
+    The two cache-slot reads are proven in range: the slot guard gives
+    `k < slots` and `hcl`/`hcd` bound the whole slot block
+    `[slotBase, slotBase + slots)` inside the cache arrays (`buildCache`
+    sizes them `slots * r`; the bound is threaded from `fillRegion`). -/
 def scanCands (cacheLens cacheDists lenCost distCost cost : Array Nat)
-    (slotBase i slots k prevLen : Nat) (bestC bestL bestD : Nat) : Nat × Nat × Nat :=
+    (slotBase i slots k prevLen : Nat) (bestC bestL bestD : Nat)
+    (hcl : slotBase + slots ≤ cacheLens.size) (hcd : slotBase + slots ≤ cacheDists.size) :
+    Nat × Nat × Nat :=
   if _h : k < slots then
-    -- The two cache-slot reads are structurally in range (`k < slots`, and the
-    -- block `[slotBase, slotBase + slots)` fits the cache), but discharging that
-    -- needs a length-preservation chain for the heuristic cache builder
-    -- (`buildCache` → `chainWalkAllGuarded`), orthogonal to this conversion, so
-    -- they stay panic-checked.
-    let len := cacheLens[slotBase + k]!
+    let len := cacheLens[slotBase + k]'(by omega)
     if len = 0 then (bestC, bestL, bestD)
     else
-      let dist := cacheDists[slotBase + k]!
+      let dist := cacheDists[slotBase + k]'(by omega)
       -- Same as `scanBounds`: `len`/`dist` are cached values and `i + len` a
       -- cost-array offset — heuristic indices with no proven bound.
       let cFull := lenCost[len]! + distCost[dist]! + cost[i + len]!
       let (bestC, bestL, bestD) :=
         if cFull < bestC then (cFull, len, dist) else (bestC, bestL, bestD)
-      -- `lengthBoundaryStart[prevLen]!` stays panic-checked like the cache
+      -- `lengthBoundaryStart[prevLen]!` stays panic-checked like the value
       -- reads above: `prevLen` is `0` or a prior cached `len`, both `≤ 258`
       -- (matches are capped at the DEFLATE maximum), so it indexes the
       -- 259-entry table in range — the same bound `lenCost[len]!` already
@@ -427,11 +504,13 @@ def scanCands (cacheLens cacheDists lenCost distCost cost : Array Nat)
       let (bestC, bestL, bestD) :=
         scanBounds lenCost distCost cost i dist len (lengthBoundaryStart[prevLen]!) bestC bestL bestD
       scanCands cacheLens cacheDists lenCost distCost cost slotBase i slots
-        (k + 1) len bestC bestL bestD
+        (k + 1) len bestC bestL bestD hcl hcd
   else (bestC, bestL, bestD)
 termination_by slots - k
 decreasing_by all_goals omega
 
+-- As `scanCands`: the extra cache-size hypotheses deepen WF elaboration.
+set_option maxRecDepth 4096 in
 /-- Backward DP fill for region `[base, base + r)`: process region-local
     index `i - 1` down to 0, choosing literal vs the best cached candidate
     and recording the choice at the *absolute* position in `chLen`/`chDist`.
@@ -440,7 +519,8 @@ def fillRegion (data : ByteArray) (base r slots : Nat)
     (cacheLens cacheDists litCost lenCost distCost : Array Nat)
     (i : Nat) (cost chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
-    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) :
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
     Array Nat × Array Nat :=
   if h0 : i = 0 then (chLen, chDist)
   else
@@ -448,13 +528,21 @@ def fillRegion (data : ByteArray) (base r slots : Nat)
     let pos := base + idx
     let byte := data[pos]'(by omega)
     let lit := litCost[byte.toNat]'(by have := UInt8.toNat_lt byte; omega) + cost[idx + 1]'(by omega)
+    -- The candidate block `[slots * idx, slots * idx + slots)` fits the cache:
+    -- `idx + 1 ≤ r` gives `slots * (idx + 1) = slots * idx + slots ≤ slots * r`,
+    -- and `slots * r` bounds both arrays (`hcl`/`hcd`, threaded from the
+    -- `slots * r`-sized `buildCache`). `omega` then chains these linear facts.
+    have hidx : idx + 1 ≤ r := by omega
+    have hm := Nat.mul_le_mul (Nat.le_refl slots) hidx
+    have heq : slots * (idx + 1) = slots * idx + slots := Nat.mul_succ slots idx
     let (bc, bl, bd) := scanCands cacheLens cacheDists lenCost distCost cost
-      (slots * idx) idx slots 0 0 lit 1 0
+      (slots * idx) idx slots 0 0 lit 1 0 (by omega) (by omega)
     let chLen := chLen.set! pos bl
     let chDist := chDist.set! pos bd
     fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
       idx (cost.set! idx bc) chLen chDist hr hlit
       (by simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds]; exact hcost) (by omega)
+      hcl hcd
 termination_by i
 decreasing_by omega
 
@@ -462,9 +550,10 @@ decreasing_by omega
 private theorem fillRegion_fst_size (data : ByteArray) (base r slots : Nat)
     (cacheLens cacheDists litCost lenCost distCost : Array Nat) (i : Nat)
     (cost chLen chDist : Array Nat) (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
-    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) :
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
     (fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
-      i cost chLen chDist hr hlit hcost hir).1.size = chLen.size := by
+      i cost chLen chDist hr hlit hcost hir hcl hcd).1.size = chLen.size := by
   unfold fillRegion
   by_cases h0 : i = 0
   · simp only [h0, ↓reduceDIte]
@@ -475,9 +564,10 @@ decreasing_by omega
 private theorem fillRegion_snd_size (data : ByteArray) (base r slots : Nat)
     (cacheLens cacheDists litCost lenCost distCost : Array Nat) (i : Nat)
     (cost chLen chDist : Array Nat) (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
-    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) :
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
     (fillRegion data base r slots cacheLens cacheDists litCost lenCost distCost
-      i cost chLen chDist hr hlit hcost hir).2.size = chDist.size := by
+      i cost chLen chDist hr hlit hcost hir hcl hcd).2.size = chDist.size := by
   unfold fillRegion
   by_cases h0 : i = 0
   · simp only [h0, ↓reduceDIte]
@@ -516,6 +606,20 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
     depth slots base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
   let cacheLens := cache.1
   let cacheDists := cache.2.1
+  -- The cache arrays are built `slots * r`-sized and `buildCache` preserves
+  -- size, so the DP's cache-slot reads (in `scanCands`) are provably in range.
+  have hcl : slots * r ≤ cacheLens.size := by
+    have : cacheLens.size = slots * r := by
+      show (buildCache data hashTable prev depth slots base r 0
+        (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)).1.size = slots * r
+      rw [buildCache_fst_size, Array.size_replicate]
+    omega
+  have hcd : slots * r ≤ cacheDists.size := by
+    have : cacheDists.size = slots * r := by
+      show (buildCache data hashTable prev depth slots base r 0
+        (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)).2.1.size = slots * r
+      rw [buildCache_snd_fst_size, Array.size_replicate]
+    omega
   let hashTable := cache.2.2.1
   let prev := cache.2.2.2
   -- round 1: static cost model
@@ -524,13 +628,13 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
     show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0).size
     rw [seedTailCosts_size, Array.size_replicate]; omega
   let res1 := fillRegion data base r slots cacheLens cacheDists
-    slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r)
+    slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r) hcl hcd
   have hchL1 : data.size ≤ res1.1.size :=
     Nat.le_trans hchL (Nat.le_of_eq (fillRegion_fst_size data base r slots cacheLens cacheDists
-      slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r)).symm)
+      slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r) hcl hcd).symm)
   have hchD1 : data.size ≤ res1.2.size :=
     Nat.le_trans hchD (Nat.le_of_eq (fillRegion_snd_size data base r slots cacheLens cacheDists
-      slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r)).symm)
+      slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r) hcl hcd).symm)
   -- round 2: refit to this region's round-1 parse
   let toks := collectRegionTokens data res1.1 res1.2 (base + r) base #[] hchL1 hchD1
   let fitted := fittedCostTables toks
@@ -540,7 +644,7 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
     show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0).size
     rw [seedTailCosts_size, Array.size_replicate]; omega
   let res2 := fillRegion data base r slots cacheLens cacheDists
-    fitted.1 fitted.2.1 fitted.2.2 r cost2 res1.1 res1.2 hr hflit hcost2 (Nat.le_refl r)
+    fitted.1 fitted.2.1 fitted.2.2 r cost2 res1.1 res1.2 hr hflit hcost2 (Nat.le_refl r) hcl hcd
   (hashTable, prev, res2.1, res2.2)
 
 /-- `fillRegionRounds` only `set!`s the choice arrays, so it preserves their
