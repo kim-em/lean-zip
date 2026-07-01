@@ -164,4 +164,71 @@ theorem lz77OptimalIter_empty (data : ByteArray) (hzero : data.size = 0) :
     lz77OptimalIter data = #[] := by
   rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_empty data hzero
 
+/-! ## L9-fast parser contracts (#2638)
+
+`lz77OptimalFast` shares the *arbitrary*-choice-array emitter `optimalEmit` with
+`lz77Optimal`; only the (heuristic) choice arrays differ (`computeChoicesFast`).
+So every contract transfers verbatim — the proofs are byte-for-byte the exact
+ones with `computeChoicesFast` substituted, exactly as the file's opening note
+promises ("immune to any future tuning of the parser"). -/
+
+theorem lz77OptimalFastIter_eq_lz77OptimalFast (data : ByteArray) :
+    lz77OptimalFastIter data = lz77OptimalFast data := by
+  unfold lz77OptimalFastIter lz77OptimalFast
+  obtain ⟨chLen, chDist⟩ := computeChoicesFast data
+  dsimp only
+  rw [optimalEmitIter_eq_emit]
+  simp only [List.append_toArray, List.nil_append]
+
+theorem lz77OptimalFast_valid (data : ByteArray) :
+    ValidDecomp data 0 (lz77OptimalFast data).toList := by
+  unfold lz77OptimalFast
+  obtain ⟨chLen, chDist⟩ := computeChoicesFast data
+  dsimp only
+  exact optimalEmit_valid data chLen chDist 0
+
+theorem lz77OptimalFast_resolves (data : ByteArray) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalFast data)) [] =
+      some data.data.toList :=
+  validDecomp_resolves data _ (lz77OptimalFast_valid data)
+
+theorem lz77OptimalFast_encodable (data : ByteArray) :
+    ∀ t ∈ (lz77OptimalFast data).toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold lz77OptimalFast
+  obtain ⟨chLen, chDist⟩ := computeChoicesFast data
+  intro t ht
+  dsimp only at ht
+  exact optimalEmit_encodable data chLen chDist 0 t ht
+
+theorem lz77OptimalFast_empty (data : ByteArray) (hzero : data.size = 0) :
+    lz77OptimalFast data = #[] := by
+  unfold lz77OptimalFast
+  obtain ⟨chLen, chDist⟩ := computeChoicesFast data
+  dsimp only
+  unfold optimalEmit
+  simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte, List.toArray]
+
+theorem lz77OptimalFastIter_valid (data : ByteArray) :
+    ValidDecomp data 0 (lz77OptimalFastIter data).toList := by
+  rw [lz77OptimalFastIter_eq_lz77OptimalFast]; exact lz77OptimalFast_valid data
+
+theorem lz77OptimalFastIter_resolves (data : ByteArray) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalFastIter data)) [] =
+      some data.data.toList := by
+  rw [lz77OptimalFastIter_eq_lz77OptimalFast]; exact lz77OptimalFast_resolves data
+
+theorem lz77OptimalFastIter_encodable (data : ByteArray) :
+    ∀ t ∈ (lz77OptimalFastIter data).toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  rw [lz77OptimalFastIter_eq_lz77OptimalFast]; exact lz77OptimalFast_encodable data
+
+theorem lz77OptimalFastIter_empty (data : ByteArray) (hzero : data.size = 0) :
+    lz77OptimalFastIter data = #[] := by
+  rw [lz77OptimalFastIter_eq_lz77OptimalFast]; exact lz77OptimalFast_empty data hzero
+
 end Zip.Native.Deflate

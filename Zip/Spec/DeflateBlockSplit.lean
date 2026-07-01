@@ -1393,6 +1393,169 @@ theorem deflateDynamicBlocksOptimal_pad (data : ByteArray) (tokChunk : Nat) :
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
 
+/-! ## Cross-block split over the L9-fast parse (`deflateDynamicBlocksOptimalFast`, #2638)
+
+Byte-for-byte twin of the `deflateDynamicBlocksOptimal` quadruple above with the
+exact parser's contracts (`lz77OptimalIter_*`) replaced by the L9-fast parser's
+(`lz77OptimalFastIter_*`); the shared-window fold is already generic over the
+token array, so the proofs are identical modulo that substitution. -/
+
+private theorem deflateDynamicBlocksOptimalFast_facts (data : ByteArray)
+    (hpos : 0 < data.size) :
+    (∀ t ∈ (lz77OptimalFastIter data).toList,
+        match t with
+        | .literal _ => True
+        | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) ∧
+      0 < (lz77OptimalFastIter data).size ∧
+      Deflate.Spec.resolveLZ77
+        (((lz77OptimalFastIter data).toList.map
+          LZ77Token.toLZ77Symbol).drop 0) [] = some data.data.toList := by
+  have henc := lz77OptimalFastIter_encodable data
+  have hwhole := lz77OptimalFastIter_resolves data
+  have hMfree := mem_map_toLZ77Symbol_ne_endOfBlock
+    (lz77OptimalFastIter data).toList
+  have hM : Deflate.Spec.resolveLZ77
+      ((lz77OptimalFastIter data).toList.map
+        LZ77Token.toLZ77Symbol) [] = some data.data.toList := by
+    simp only [tokensToSymbols] at hwhole
+    rwa [Deflate.Spec.resolveLZ77_eobFree_eob _ [] hMfree] at hwhole
+  refine ⟨henc, ?_, ?_⟩
+  · rcases Nat.eq_zero_or_pos (lz77OptimalFastIter data).size with h0 | h0
+    · exfalso
+      have hnil : (lz77OptimalFastIter data).toList = [] :=
+        List.eq_nil_of_length_eq_zero (by rw [Array.length_toList]; omega)
+      rw [hnil, List.map_nil, Deflate.Spec.resolveLZ77_nil, Option.some.injEq] at hM
+      have hl := congrArg List.length hM
+      simp only [List.length_nil, Array.length_toList, ByteArray.size_data] at hl
+      omega
+    · exact h0
+  · rw [List.drop_zero]; exact hM
+
+/-- L9-fast cross-block roundtrip: decoding the block stream over the L9-fast
+    parse reproduces the input. -/
+theorem decode_deflateDynamicBlocksOptimalFast (data : ByteArray) (tokChunk : Nat) :
+    Deflate.Spec.decode
+      (Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimalFast data tokChunk)) =
+      some data.data.toList := by
+  unfold deflateDynamicBlocksOptimalFast
+  split
+  · rename_i hz
+    rw [beq_iff_eq] at hz
+    obtain ⟨litLens, distLens, headerBits, symBits, _, _, hlv, hdv,
+        hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables litLens distLens headerBits
+      (symBits ++ List.replicate
+        ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+      hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+    rw [← List.append_assoc] at hheader
+    have hres : Deflate.Spec.resolveLZ77 (tokensToSymbols #[]) [] = some data.data.toList := by
+      have he : data.data.toList = [] :=
+        List.eq_nil_of_length_eq_zero (by simp only [Array.length_toList, ByteArray.size_data, hz])
+      rw [he]; rfl
+    exact Deflate.Spec.encodeDynamic_decode_append (tokensToSymbols #[]) data.data.toList
+      litLens distLens headerBits symBits _ hlv hdv hheader hsyms hres
+      (tokensToSymbols_validSymbolList _)
+  · rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimalFast_facts data hpos
+    obtain ⟨B, htoBits, hwf, hdec⟩ :=
+      emitSharedBlocks_decode data (lz77OptimalFastIter data)
+        tokChunk (by omega) henc
+        (lz77OptimalFastIter data).size 0 []
+        data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    exact hdec (List.replicate ((8 - B.length % 8) % 8) false)
+
+/-- L9-fast cross-block roundtrip: inflating `deflateDynamicBlocksOptimalFast`
+    recovers the input, for any `maxOutputSize` large enough to hold it. -/
+theorem inflate_deflateDynamicBlocksOptimalFast (data : ByteArray) (tokChunk : Nat)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksOptimalFast data tokChunk) maxOutputSize =
+      .ok data := by
+  have hlen : data.data.toList.length ≤ maxOutputSize := by
+    simp only [Array.length_toList, ByteArray.size_data]; omega
+  rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
+  exact inflate_complete (deflateDynamicBlocksOptimalFast data tokChunk) data.data.toList
+    maxOutputSize hlen (decode_deflateDynamicBlocksOptimalFast data tokChunk)
+
+/-- The `decode.goR` of `deflateDynamicBlocksOptimalFast` returns the input and
+    short (< 8-bit) trailing padding. -/
+theorem deflateDynamicBlocksOptimalFast_goR_pad (data : ByteArray) (tokChunk : Nat) :
+    ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimalFast data tokChunk)) []
+        = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+  unfold deflateDynamicBlocksOptimalFast
+  split
+  · rename_i hz
+    rw [beq_iff_eq] at hz
+    obtain ⟨litLens, distLens, headerBits, symBits, _, _, hlv, hdv,
+        hge1, hle1, hge2, hle2, hb1, hb2, htrees, hsyms, htoBits, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    refine ⟨List.replicate
+      ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false, ?_, ?_⟩
+    · have hheader := Deflate.Spec.encodeDynamicTrees_decodeDynamicTables litLens distLens headerBits
+        (symBits ++ List.replicate
+          ((8 - ([true, false, true] ++ headerBits ++ symBits).length % 8) % 8) false)
+        hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
+      rw [← List.append_assoc] at hheader
+      have hres : Deflate.Spec.resolveLZ77 (tokensToSymbols #[]) [] = some data.data.toList := by
+        have he : data.data.toList = [] :=
+          List.eq_nil_of_length_eq_zero (by simp only [Array.length_toList, ByteArray.size_data, hz])
+        rw [he]; rfl
+      exact Deflate.Spec.encodeDynamic_goR_rest (tokensToSymbols #[]) data.data.toList
+        litLens distLens headerBits symBits _ hlv hdv hheader hsyms hres
+        (tokensToSymbols_validSymbolList _)
+    · simp only [List.length_replicate]; omega
+  · rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimalFast_facts data hpos
+    obtain ⟨B, htoBits, hwf, hdec⟩ :=
+      emitSharedBlocks_decodeR data (lz77OptimalFastIter data)
+        tokChunk (by omega) henc
+        (lz77OptimalFastIter data).size 0 []
+        data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
+    rw [BitWriter.empty_toBits, List.nil_append] at htoBits
+    rw [flush_toBits_aligned _ hwf, htoBits]
+    refine ⟨List.replicate ((8 - B.length % 8) % 8) false, hdec _, ?_⟩
+    simp only [List.length_replicate]; omega
+
+/-- The output of `deflateDynamicBlocksOptimalFast` decomposes into content bits
+    plus short (< 8-bit) padding. -/
+theorem deflateDynamicBlocksOptimalFast_pad (data : ByteArray) (tokChunk : Nat) :
+    ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimalFast data tokChunk) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+  unfold deflateDynamicBlocksOptimalFast
+  split
+  · obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, hwf⟩ :=
+      emitDynBlock_spec BitWriter.empty BitWriter.empty_wf data #[] (by simp) (fun _ => rfl) true
+    exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
+  · rename_i hz
+    have hpos : 0 < data.size := by
+      rcases Nat.eq_zero_or_pos data.size with h | h
+      · rw [h] at hz; simp at hz
+      · exact h
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimalFast_facts data hpos
+    obtain ⟨B, _, hwf, _⟩ :=
+      emitSharedBlocks_decode data (lz77OptimalFastIter data)
+        tokChunk (by omega) henc
+        (lz77OptimalFastIter data).size 0 []
+        data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
+    exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
+
 /-! ## Sized-tree emitter equality (Wave 5, #2552)
 
 `deflateDynamicBlocksSharedSized` reuses the per-block Huffman trees the
