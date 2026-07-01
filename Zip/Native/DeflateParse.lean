@@ -787,4 +787,143 @@ def lz77OptimalIter (data : ByteArray) : Array LZ77Token :=
   let (chLen, chDist) := computeChoices data
   optimalEmitIter data chLen chDist 0 #[]
 
+/-! ## L9-fast parser (#2638): a cheaper approximate-optimal parse
+
+The exact backward DP above stays the max-ratio crown (level 10). This is the
+*cheaper* tier deployed at level 9: three cost cuts, each a per-position saving,
+measured to land ~20% outside the L8↔L9 mixing frontier at near-crown ratio
+(Silesia, `lake exe l9-fast` sweep):
+
+* **single round** — no round-2 refit (one `fillRegion` pass, no region-token
+  collection / histogram / Huffman fit);
+* **no length-code boundary scan** — `scanCandsFast` prices each candidate only
+  at its full cached length, dropping the inner `scanBounds` truncation scan
+  (the largest single DP cost, #2622; the sweep confirmed keeping it costs more
+  speed than it buys ratio at every depth);
+* **shallower candidate cache** — `fastChainDepth < optChainDepth`, so the
+  `buildCache` chain walk (the dominant remaining cost) does ~4× less work.
+
+The choice-array format is byte-identical to the exact DP's, so the same
+re-verifying emitter (`optimalEmit`/`optimalEmitIter`) and the same
+arbitrary-choice-array validity proofs (`LZ77OptimalCorrect`) apply verbatim.
+Everything here is heuristic — opaque to correctness. -/
+
+/-- Candidate-cache chain-walk depth for the L9-fast tier. Lower than
+    `optChainDepth = 256`: the sweep's outside-the-frontier gain peaks at 64
+    (48 and 96 within a point), trading a little ratio for the ~4× cheaper cache
+    build. Pure ratio/speed knob. -/
+def fastChainDepth : Nat := 64
+
+/-- `scanCands` without the `scanBounds` length-code boundary scan: price each
+    candidate slot only at its full cached length. Slots hold strictly
+    increasing lengths; a zero length terminates the block. Cache reads stay
+    panic-checked (`[..]!`) exactly like the value reads in `scanBounds` — the
+    cache is heuristic and opaque to correctness. -/
+def scanCandsFast (cacheLens cacheDists lenCost distCost cost : Array Nat)
+    (slotBase i slots k : Nat) (bestC bestL bestD : Nat) : Nat × Nat × Nat :=
+  if _h : k < slots then
+    let len := cacheLens[slotBase + k]!
+    if len = 0 then (bestC, bestL, bestD)
+    else
+      let dist := cacheDists[slotBase + k]!
+      let cFull := lenCost[len]! + distCost[dist]! + cost[i + len]!
+      let (bestC, bestL, bestD) :=
+        if cFull < bestC then (cFull, len, dist) else (bestC, bestL, bestD)
+      scanCandsFast cacheLens cacheDists lenCost distCost cost slotBase i slots
+        (k + 1) bestC bestL bestD
+  else (bestC, bestL, bestD)
+termination_by slots - k
+decreasing_by omega
+
+/-- Backward DP fill using the bounds-free `scanCandsFast`. Same structure as
+    `fillRegion` (literal vs best cached candidate, choice recorded at the
+    absolute position), minus the cache-size hypotheses (the cache reads are
+    panic-checked in `scanCandsFast`). Heuristic only. -/
+def fillRegionFast (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost : Array Nat)
+    (i : Nat) (cost chLen chDist : Array Nat)
+    (hr : base + r ≤ data.size) (hlit : 256 ≤ litCost.size)
+    (hcost : r + 259 ≤ cost.size) (hir : i ≤ r) : Array Nat × Array Nat :=
+  if h0 : i = 0 then (chLen, chDist)
+  else
+    let idx := i - 1
+    let pos := base + idx
+    let byte := data[pos]'(by omega)
+    let lit := litCost[byte.toNat]'(by have := UInt8.toNat_lt byte; omega) + cost[idx + 1]'(by omega)
+    let (bc, bl, bd) := scanCandsFast cacheLens cacheDists lenCost distCost cost
+      (slots * idx) idx slots 0 lit 1 0
+    let chLen := chLen.set! pos bl
+    let chDist := chDist.set! pos bd
+    fillRegionFast data base r slots cacheLens cacheDists litCost lenCost distCost
+      idx (cost.set! idx bc) chLen chDist hr hlit
+      (by simp only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds]; exact hcost) (by omega)
+termination_by i
+decreasing_by omega
+
+/-- One region of the L9-fast parse: build the candidate cache (at `depth`) and
+    run a single static-cost backward DP over it. No round-2 refit. Returns the
+    threaded chain state and choice arrays. -/
+def fillRegionFastRound (data : ByteArray) (depth slots base r : Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
+    (chLen chDist : Array Nat)
+    (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size) :
+    Array Nat × Array Nat × Array Nat × Array Nat :=
+  let cache := buildCache data hashTable prev depth slots base r 0
+    (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
+  let cacheLens := cache.1
+  let cacheDists := cache.2.1
+  let hashTable := cache.2.2.1
+  let prev := cache.2.2.2
+  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
+  have hcost : r + 259 ≤ cost.size := by
+    show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0).size
+    rw [seedTailCosts_size, Array.size_replicate]; omega
+  let res := fillRegionFast data base r slots cacheLens cacheDists
+    slit slen sdist r cost chLen chDist hr hslit hcost (Nat.le_refl r)
+  (hashTable, prev, res.1, res.2)
+
+/-- Region driver for `computeChoicesFast` (fast twin of `computeChoicesLoop`).
+    No `chLen`/`chDist` size hypotheses are threaded: the single-round fill
+    never reads them back (no region-token collection), so only their `set!`s
+    matter. Fuel = `data.size` bounds the region count as in the exact loop. -/
+private def computeChoicesFastLoop (data : ByteArray) (depth slots regionSize : Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat) (base : Nat)
+    (chLen chDist : Array Nat) (hslit : 256 ≤ slit.size) (fuel : Nat) :
+    Array Nat × Array Nat :=
+  match fuel with
+  | 0 => (chLen, chDist)
+  | fuel + 1 =>
+    if hb : base < data.size ∧ 0 < regionSize then
+      let r := min regionSize (data.size - base)
+      have hr : base + r ≤ data.size := by omega
+      let result := fillRegionFastRound data depth slots base r
+        slit slen sdist hashTable prev chLen chDist hr hslit
+      computeChoicesFastLoop data depth slots regionSize slit slen sdist result.1 result.2.1
+        (base + r) result.2.2.1 result.2.2.2 hslit fuel
+    else (chLen, chDist)
+
+/-- L9-fast choice arrays: like `computeChoices` but the cheaper single-round,
+    bounds-free, shallow-cache DP. Defaults `(1, 0)` = literal everywhere.
+    Heuristic only — consumed by the re-verifying emitter. -/
+def computeChoicesFast (data : ByteArray) : Array Nat × Array Nat :=
+  let st := staticCostTables
+  computeChoicesFastLoop data fastChainDepth optCacheSlots optRegionSize st.1 st.2.1 st.2.2
+    (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
+    0 (Array.replicate data.size 1) (Array.replicate data.size 0)
+    (by have h : st.1.size = 256 := staticCostTables_fst_size; omega)
+    data.size
+
+/-- L9-fast parse (list-backed reference version, the proofs' subject); same
+    re-verifying emission as `lz77Optimal`. `lz77OptimalFastIter` is the runtime
+    entry point. -/
+def lz77OptimalFast (data : ByteArray) : Array LZ77Token :=
+  let (chLen, chDist) := computeChoicesFast data
+  (optimalEmit data chLen chDist 0).toArray
+
+/-- L9-fast runtime entry point: cheaper approximate-optimal parse, then the
+    same re-verifying tail-recursive emission as `lz77OptimalIter`. -/
+def lz77OptimalFastIter (data : ByteArray) : Array LZ77Token :=
+  let (chLen, chDist) := computeChoicesFast data
+  optimalEmitIter data chLen chDist 0 #[]
+
 end Zip.Native.Deflate

@@ -1107,9 +1107,11 @@ theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     peak at 16 MiB input, 1.73 GB at 52 MiB — ≈27 B of transient state per
     input byte marginal (global choice arrays + per-region cache + token
     stream) over the process baseline. 64 MiB covers every Silesia file at a
-    projected ~2.1 GB peak, acceptable for the max-effort tier; truly huge
-    inputs still fall back to the plain level-9 path. A pure dispatch knob —
-    `pickSmaller` composes either way. -/
+    projected ~2.1 GB peak, acceptable for the max-effort tiers (levels 9–10);
+    truly huge inputs still fall back to the split path. A pure dispatch knob —
+    `pickSmaller` composes either way. (The L9-fast candidate at level 9 has a
+    lower peak — shallower cache, single round — so the gate is conservative
+    there, but a single gate for both optimal tiers keeps the dispatch simple.) -/
 def optimalMaxSize : Nat := 67108864
 
 /-- Cross-block (shared-window) block-split dynamic compression over the
@@ -1123,6 +1125,20 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
       (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
   else
     (emitSharedBlocks data (lz77OptimalIter data) tokChunk 0 BitWriter.empty).flush
+
+/-- Cross-block split over the **L9-fast** approximate-optimal token stream
+    (`lz77OptimalFastIter`, #2638): identical to `deflateDynamicBlocksOptimal`
+    but the cheaper single-round, bounds-free, shallow-cache parser. The tokens
+    satisfy the same encoder contracts, so the roundtrip proof is the exact
+    twin (`decode_deflateDynamicBlocksOptimalFast` etc.). Deployed at level 9;
+    the exact crown moves to level 10. -/
+def deflateDynamicBlocksOptimalFast (data : ByteArray) (tokChunk : Nat) : ByteArray :=
+  if data.size == 0 then
+    let f := tokenFreqs #[]
+    (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
+  else
+    (emitSharedBlocks data (lz77OptimalFastIter data) tokChunk 0 BitWriter.empty).flush
 
 /-! ## Incompressible pre-scan
 
@@ -1259,10 +1275,20 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
   -- Every region looked incompressible.
   return true
 
-/-- Unified raw DEFLATE compression dispatch. Level 0 = stored; levels 1–7 run the
-    single-block cost-model dispatch (`deflateRawBase`). At the max-compression
-    tiers (level ≥ 8) two block-split streams are also tried, and the smallest of
-    all candidates is emitted:
+/-- Unified raw DEFLATE compression dispatch. The native level range is **0–10**
+    (wider than zlib's 0–9). Since #2638 the top of the ladder is:
+
+      * **level 9** — the **L9-fast** approximate-optimal parse (near-crown ratio,
+        ~2× faster); this is a change from the old level-9 = exact crown;
+      * **level ≥ 10** — the exact backward-DP **crown** (the max-ratio ceiling,
+        the former level-9 output); 11+ alias level 10.
+
+    So callers pinning `level = 9` for absolute best ratio should now pass 10.
+    (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
+
+    Level 0 = stored; levels 1–7 run the single-block cost-model dispatch
+    (`deflateRawBase`). At the max-compression tiers (level ≥ 8) two block-split
+    streams are also tried, and the smallest of all candidates is emitted:
       * self-contained split — per-chunk Huffman trees, fresh window per chunk
         (wins on locally-varying statistics, e.g. structured binary);
       * cross-block (shared-window) split — one whole-file match pass, token stream
@@ -1275,11 +1301,17 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
         the winner's per-block trees from the sizing pass
         (`deflateDynamicBlocksSharedSized`, = the reference candidate by
         `deflateDynamicBlocksSharedSized_eq`).
-    At level 9 (and within the `optimalMaxSize` memory gate) the dispatch switches
-    to the **near-optimal** cost-model DP parse (`deflateDynamicBlocksOptimal`),
-    which chooses the globally cheapest token sequence under an estimated bit cost
-    instead of the locally longest match, grouped into blocks on the fixed
-    `sharedTokChunk` cadence. It is emitted as `pickSmaller(base, optimal)`. On the
+    At levels 9 and 10 (and within the `optimalMaxSize` memory gate) the dispatch
+    switches to a cost-model DP parse (grouped into blocks on the fixed
+    `sharedTokChunk` cadence, emitted as `pickSmaller(base, optimal)`), choosing
+    the globally cheapest token sequence under an estimated bit cost instead of
+    the locally longest match. **Level 10** runs the exact backward-DP crown
+    (`deflateDynamicBlocksOptimal`) — the max-ratio ceiling. **Level 9** runs the
+    cheaper **L9-fast** approximate-optimal parse (`deflateDynamicBlocksOptimalFast`,
+    #2638): single round, no length-code boundary scan, shallower cache — near the
+    crown's ratio at ~2× its speed, measured ~20% outside the L8↔L9 mixing frontier
+    on Silesia (a genuine new Pareto point; L10 ≤ L9 < L8 in output size, L9 > L8 in
+    speed). On the
     Canterbury (11) and Silesia (12) corpora this fixed-cadence optimal candidate is
     measured strictly smaller than base, the self-contained split, *and* the
     arbitrated shared-window split on every file — including the binary
@@ -1337,24 +1369,30 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- emit, stage C); the shared-split candidate still unpacks once (stage D
     -- moves it onto packed words).
     let ptokens := lzMatchP data level
-    if 9 ≤ level ∧ data.size ≤ optimalMaxSize then
+    if level == 9 ∧ data.size ≤ optimalMaxSize then
+      -- Level 9 (#2638): the cheaper **L9-fast** approximate-optimal parse — near
+      -- the crown's ratio at ~2× its speed, measured ~20% outside the L8↔L9
+      -- mixing frontier on Silesia (a genuine new Pareto point). As with the
+      -- exact candidate below, the split candidates are dropped on measured
+      -- evidence; keep `base` (reuses `ptokens`, ~free) as the safety floor and
+      -- emit `pickSmaller(base, fast-optimal)`.
+      pickSmaller (deflateRawBaseP data ptokens)
+        (deflateDynamicBlocksOptimalFast data sharedTokChunk)
+    else if 10 ≤ level ∧ data.size ≤ optimalMaxSize then
+      -- Level ≥ 10: the exact backward-DP crown (the former level-9 behaviour,
+      -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
       -- The fixed-cadence optimal candidate measured strictly smallest on every
-      -- Canterbury and Silesia file (#2640), so the self-contained and
-      -- shared-window split candidates — a full independent match/split pass each,
-      -- for output `pickSmaller` always discarded — are dropped here on that
-      -- measured evidence (see the dispatch docstring; this is a corpus-gated
-      -- speed/ratio tradeoff, not a proven dominance invariant). Keep `base` (it
-      -- reuses the already-computed `ptokens`, ~free) as a safety floor and emit
-      -- `pickSmaller(base, optimal)`: never worse than the lazy single-block
-      -- baseline on any input.
+      -- Canterbury and Silesia file, so the split candidates are dropped here;
+      -- `pickSmaller(base, optimal)` is never worse than the lazy baseline.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
-      -- Level 8: base vs cross-block shared-window split. The self-contained split
-      -- is not a candidate here (nor at L9 since #2640): it pays a full per-chunk
-      -- match pass and never sized smallest on the measured corpora. Level 7 no
-      -- longer enters here — it is the top single-block point (see the dispatch
-      -- docstring), so the split tier starts at level 8.
+      -- Level 8 (and level 9/10 above the memory gate): base vs cross-block
+      -- shared-window split. The self-contained split is not a candidate here
+      -- (nor at L9/L10 since #2640): it pays a full per-chunk match pass and
+      -- never sized smallest on the measured corpora. Level 7 no longer enters
+      -- here — it is the top single-block point (see the dispatch docstring), so
+      -- the split tier starts at level 8.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksSharedSized data (ptokens.map unpackTok))
   else deflateRawBase data level

@@ -50,9 +50,12 @@ optional nicety.
 
 The graphs show **native before vs after** on the real corpora (Canterbury +
 Silesia), overlaid on the existing other-language curves (zlib, miniz_oxide,
-libdeflate, Go, JS, Zig, OCaml) for context. Native sweeps levels 1–9;
-`libdeflate` is swept 1–12 (its full range, the others cap at 9), so its
-curve carries the extra dense points 10–12. The before/after **overlay** PNGs
+libdeflate, Go, JS, Zig, OCaml) for context. Native sweeps levels **1–10** —
+since #2638 level 9 is the L9-fast tier and **level 10 is the exact-DP crown**;
+always include level 10 so the crown stays on the Pareto (drop it and the graph
+looks like an L9 ratio regression with no crown shown). `libdeflate` is swept
+1–12 (its full range; the zlib/miniz FFI cap at 9), so its curve carries the
+extra dense points 10–12. The before/after **overlay** PNGs
 (`$W/perf_before_after_*`) are a report artifact — NOT committed; they live
 only in the PR comment. The **dashboard** (`bench/results/latest.json` and the
 routine `bench/graphs/*.svg`), by contrast, **is** refreshed and committed inside
@@ -168,12 +171,14 @@ artifacts move into `$W`.
    lake env .lake/build/bin/bench-report --native-only $W/perf_after.json
    ```
    `--native-only` records native `ratio`, `compress_mbps` and
-   `decompress_mbps` and reuses nothing else. For a **decode-only** PR, append a
-   level list that skips the slow L9 optimal-parse compress, e.g.
+   `decompress_mbps` and reuses nothing else. Its default native sweep is **1–10**
+   (level 10 = the exact-DP crown). For a **decode-only** PR, append a level list
+   that skips the slow optimal-parse compress at 9 and 10, e.g.
    `… --native-only $W/perf_after.json 1,2,3,4,5,6,7,8` (decode is measured at
-   every listed level; native L9 *compress* on 203 MB is minutes of pure waste
-   when you only care about decode). For a **compress** PR, keep all 9 levels —
-   L9 is usually the point.
+   every listed level; native L9/L10 *compress* on 203 MB is minutes of pure
+   waste when you only care about decode). For a **compress** PR, keep all 10
+   native levels — **always include level 10, the crown** (L9/L10 are usually the
+   point).
 
 4. **BEFORE is the base branch's committed `bench/results/latest.json` — do NOT
    rebuild it.** Master already carries up-to-date native numbers:
@@ -314,10 +319,11 @@ artifacts move into `$W`.
    git commit -m "bench: refresh dashboard for <this PR's change>"
    ```
    `bench/results/latest.json` is the committed source of truth, so its native
-   rows must be **consistent across all 9 levels**. If step 3 measured only a
-   level subset (e.g. `1,2,3,4,5,6,7,8` for a decode PR), the spliced dashboard
-   would keep stale rows on the skipped levels — so for the dashboard refresh,
-   either measure all 9 levels, or run the full native-only path that does the
+   rows must be **consistent across all 10 native levels (1–10, crown included)**.
+   If step 3 measured only a level subset (e.g. `1,2,3,4,5,6,7,8` for a decode
+   PR), the spliced dashboard would keep stale rows on the skipped levels — so for
+   the dashboard refresh, either measure all 10 native levels, or run the full
+   native-only path that does the
    measure+merge+plot in one shot and records every level:
    ```
    nix-shell --run "taskset -c <free-core> bash bench/run.sh --native-only"

@@ -64,20 +64,21 @@ private def resolveTokens (label : String) (tokens : Array LZ77Token) :
         out := out.push out[out.size - dist]!
   return out
 
-/-- Full pipeline check for the optimal parser on one input: token stream
-    resolves back to the data, and a dynamic Huffman block built from it
-    inflates back to the data (native verified decoder). -/
+/-- Full pipeline check for **both** near-optimal parsers on one input (the
+    exact crown `lz77OptimalIter` and the L9-fast `lz77OptimalFastIter`, #2638):
+    each token stream resolves back to the data, and a dynamic Huffman block
+    built from it inflates back to the data (native verified decoder). -/
 private def checkParse (label : String) (data : ByteArray) : IO Unit := do
-  let toks := lz77OptimalIter data
-  let back ← resolveTokens label toks
-  unless back == data do
-    throw (IO.userError s!"{label}: token resolution mismatch ({back.size} vs {data.size})")
-  let blk := deflateDynamicBlock data toks
-  match Zip.Native.Inflate.inflate blk with
-  | .ok r =>
-    unless r == data do
-      throw (IO.userError s!"{label}: dynamic block roundtrip mismatch")
-  | .error e => throw (IO.userError s!"{label}: inflate failed: {e}")
+  for (pname, toks) in [("exact", lz77OptimalIter data), ("fast", lz77OptimalFastIter data)] do
+    let back ← resolveTokens s!"{label}-{pname}" toks
+    unless back == data do
+      throw (IO.userError s!"{label}-{pname}: token resolution mismatch ({back.size} vs {data.size})")
+    let blk := deflateDynamicBlock data toks
+    match Zip.Native.Inflate.inflate blk with
+    | .ok r =>
+      unless r == data do
+        throw (IO.userError s!"{label}-{pname}: dynamic block roundtrip mismatch")
+    | .error e => throw (IO.userError s!"{label}-{pname}: inflate failed: {e}")
 
 def tests : IO Unit := do
   IO.println "  OptimalParse tests..."
@@ -170,38 +171,46 @@ def tests : IO Unit := do
   unless sizeOpt < sizeLazy do
     throw (IO.userError s!"ratio canary: optimal {sizeOpt} ≥ lazy-9 {sizeLazy}")
 
-  -- Level-9 dispatch: the optimal candidate joins via pickSmaller. Verify
-  -- the full deflateRaw output through the native (verified) decoder AND the
-  -- zlib FFI (cross-implementation conformance), and that level 9 improves
-  -- on level 8 on real text (the whole point of the feature).
-  for (label, payload) in [("alice", alice), ("text", mkTextData 65536),
-      ("prng", mkPrngData 65536), ("constant", mkConstantData 65536),
-      ("cyclic", mkCyclicData 65536), ("tiny", ByteArray.mk #[1, 2, 3])] do
-    let out := deflateRaw payload 9
-    match Zip.Native.Inflate.inflate out with
-    | .ok r =>
-      unless r == payload do
-        throw (IO.userError s!"deflateRaw-9 {label}: native roundtrip mismatch")
-    | .error e => throw (IO.userError s!"deflateRaw-9 {label}: inflate failed: {e}")
-    let ffi ← RawDeflate.decompress out
-    unless ffi == payload do
-      throw (IO.userError s!"deflateRaw-9 {label}: FFI conformance mismatch")
+  -- Level 9 (L9-fast, #2638) and level 10 (exact-DP crown) dispatch: both
+  -- optimal candidates join via pickSmaller. Verify the full deflateRaw output
+  -- of each through the native (verified) decoder AND the zlib FFI
+  -- (cross-implementation conformance).
+  for lvl in [(9 : UInt8), 10] do
+    for (label, payload) in [("alice", alice), ("text", mkTextData 65536),
+        ("prng", mkPrngData 65536), ("constant", mkConstantData 65536),
+        ("cyclic", mkCyclicData 65536), ("tiny", ByteArray.mk #[1, 2, 3])] do
+      let out := deflateRaw payload lvl
+      match Zip.Native.Inflate.inflate out with
+      | .ok r =>
+        unless r == payload do
+          throw (IO.userError s!"deflateRaw-{lvl} {label}: native roundtrip mismatch")
+      | .error e => throw (IO.userError s!"deflateRaw-{lvl} {label}: inflate failed: {e}")
+      let ffi ← RawDeflate.decompress out
+      unless ffi == payload do
+        throw (IO.userError s!"deflateRaw-{lvl} {label}: FFI conformance mismatch")
+  -- Tier ordering on real text: the exact crown (10) is smallest, L9-fast (9)
+  -- sits between it and level 8 — a genuine intermediate tier (crown ≤ fast < L8).
+  let raw10 := (deflateRaw alice 10).size
   let raw9 := (deflateRaw alice 9).size
   let raw8 := (deflateRaw alice 8).size
-  IO.println s!"    alice29.txt deflateRaw: level 9 {raw9} vs level 8 {raw8}"
+  IO.println s!"    alice29.txt deflateRaw: L10 crown {raw10} ≤ L9-fast {raw9} < L8 {raw8}"
+  unless raw10 ≤ raw9 do
+    throw (IO.userError s!"deflateRaw: L10 crown {raw10} did not match/beat L9-fast {raw9}")
   unless raw9 < raw8 do
-    throw (IO.userError s!"deflateRaw: level 9 {raw9} did not beat level 8 {raw8}")
-  -- Incompressible input must still fall back to the stored block.
+    throw (IO.userError s!"deflateRaw: L9-fast {raw9} did not beat level 8 {raw8}")
+  -- Incompressible input must still fall back to the stored block (both tiers).
   let prng := mkPrngData 65536
   unless (deflateRaw prng 9).size ≤ prng.size + 600 do
     throw (IO.userError "deflateRaw-9: incompressible input expanded past stored bound")
-  -- Inputs above the memory gate skip the optimal candidate but roundtrip.
+  -- Inputs above the memory gate skip the optimal candidate but roundtrip
+  -- (both level 9 and level 10 fall through to the split path there).
   let big := mkConstantData (optimalMaxSize + 1)
-  match Zip.Native.Inflate.inflate (deflateRaw big 9) (big.size + 1) with
-  | .ok r =>
-    unless r == big do
-      throw (IO.userError "deflateRaw-9 above-gate: roundtrip mismatch")
-  | .error e => throw (IO.userError s!"deflateRaw-9 above-gate: inflate failed: {e}")
+  for lvl in [(9 : UInt8), 10] do
+    match Zip.Native.Inflate.inflate (deflateRaw big lvl) (big.size + 1) with
+    | .ok r =>
+      unless r == big do
+        throw (IO.userError s!"deflateRaw-{lvl} above-gate: roundtrip mismatch")
+    | .error e => throw (IO.userError s!"deflateRaw-{lvl} above-gate: inflate failed: {e}")
 
   IO.println "  OptimalParse tests passed"
 
