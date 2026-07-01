@@ -24,8 +24,11 @@ theorem readBitsFast_go_eq (br : BitReader) (pos bitOff : Nat) (acc : UInt32) (s
   | succ k ih =>
     rw [readBitsFast.go, BitReader.readBits.go, BitReader.readBit]
     by_cases hp : pos ≥ br.data.size
-    · simp only [hp, ↓reduceIte, bind, Except.bind]
-    · simp only [hp, ↓reduceIte]
+    · simp only [hp, ↓reduceIte, ↓reduceDIte, bind, Except.bind]
+    · -- the proven-bounds read `br.data[pos]` (native side) matches the `!`-form
+      -- read of `BitReader.readBit` once normalised back to `getElem!`
+      rw [getElem!_pos br.data pos (by omega)]
+      simp only [hp, ↓reduceIte, ↓reduceDIte]
       by_cases hb : bitOff + 1 ≥ 8
       · simp only [hb, ↓reduceIte, bind, Except.bind]
         exact ih (pos + 1) 0 _ _
