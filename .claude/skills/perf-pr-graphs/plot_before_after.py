@@ -6,8 +6,16 @@ native BEFORE vs native AFTER, overlaid on the existing other-language curves
 (reused from bench/results/latest.json — never re-measured). One chart per
 corpus. Also prints a per-level before/after geomean table to stdout.
 
+For a compression PR (`compress_mbps`) it also plots **zopfli** as a single
+field point (`bench/results/zopfli-ceiling.json`): one star at its geomean
+(ratio, speed). zopfli is level-less, so it is one operating point, not a curve.
+Its ratio is deterministic (the smallest DEFLATE anyone reaches on this corpus);
+its `compress_mbps` is a same-machine single-rep artifact (zopfli is ~100x slower
+than zlib), so the star's speed position is approximate. zopfli is compress-only
+(no decode row), so the star is skipped for `decompress_mbps`.
+
 Usage:
-  plot_before_after.py <before.json> <after.json> <metric> [latest.json] [outdir]
+  plot_before_after.py <before.json> <after.json> <metric> [latest.json] [outdir] [zopfli.json]
 
   metric : compress_mbps   (compression PRs — the interesting case: the
                             optimization can move BOTH ratio and speed, so the
@@ -17,6 +25,7 @@ Usage:
 
   latest.json defaults to bench/results/latest.json
   outdir      defaults to /tmp (report artifact — keep it out of the tree)
+  zopfli.json defaults to bench/results/zopfli-ceiling.json (skipped if absent)
 
 AFTER is the native rows from `bench-report --native-only` on the PR branch.
 BEFORE is the committed dashboard `bench/results/latest.json` (its native rows);
@@ -32,6 +41,7 @@ import matplotlib.pyplot as plt
 before_path, after_path, metric = sys.argv[1], sys.argv[2], sys.argv[3]
 latest_path = sys.argv[4] if len(sys.argv) > 4 else "bench/results/latest.json"
 outdir = Path(sys.argv[5] if len(sys.argv) > 5 else "/tmp")
+zopfli_path = sys.argv[6] if len(sys.argv) > 6 else "bench/results/zopfli-ceiling.json"
 assert metric in ("compress_mbps", "decompress_mbps"), f"bad metric {metric}"
 outdir.mkdir(parents=True, exist_ok=True)
 
@@ -42,6 +52,13 @@ AFTER  = AFTER_DOC["results"]
 LATEST_DOC = json.load(open(latest_path))
 LATEST = LATEST_DOC["results"]
 LMETA  = LATEST_DOC.get("meta", {})
+
+# Frozen zopfli point (compress-only, level-less). Deterministic ratio;
+# same-machine single-rep compress_mbps. Absent → the star is silently skipped.
+try:
+    ZOPFLI = json.load(open(zopfli_path)).get("results", [])
+except (FileNotFoundError, ValueError):
+    ZOPFLI = []
 
 def _meta1(doc):
     m = doc.get("meta", {})
@@ -99,6 +116,17 @@ def curve(rows, comp, corpus):
             pts.append((gr, gs))
     return sorted(pts)
 
+def zopfli_point(corpus):
+    """(geomean ratio, geomean compress_mbps) over the frozen zopfli rows for
+    this corpus, or None. Ratio is deterministic; the speed is a same-machine
+    single-rep artifact — used only to place the marker on the speed axis."""
+    rs = [r["ratio"] for r in ZOPFLI
+          if r["pattern"].startswith(corpus + "/") and r.get("ratio") is not None]
+    ss = [r["compress_mbps"] for r in ZOPFLI
+          if r["pattern"].startswith(corpus + "/") and r.get("compress_mbps")]
+    gr = geomean(rs)
+    return (gr, geomean(ss)) if gr else None
+
 def mix_curve(x0, y0, x1, y1, n=40):
     """Achievable frontier between two adjacent levels: compress a byte-fraction
     `f` at one and `1-f` at the other. Ratio is additive (linear in `f`); time is
@@ -148,6 +176,16 @@ for corpus in corpora(AFTER):
     if pa:
         plot_series(ax, pa, color="#d62728", mk="o", lw=2.6, ms=8, zorder=12,
                     alpha=1.0, label="lean-zip native — AFTER")
+    # zopfli as a single field point (compress metric only — no decode row).
+    # zopfli is level-less, so it is one star at its geomean (ratio, speed): the
+    # ratio is deterministic, the speed a same-machine single-rep artifact.
+    zp = zopfli_point(corpus) if metric == "compress_mbps" else None
+    if zp:
+        zr, zs = zp
+        if zs:
+            ax.plot([zr], [zs], marker="*", ms=15, color="#ff7f0e",
+                    markeredgecolor="#663d00", zorder=13,
+                    linestyle="none", label="zopfli (C)")
     ax.set_yscale("log")
     ax.set_xlabel("compression ratio  (compressed / original — ← smaller = more compressed)")
     ax.set_ylabel(f"{label_speed}  (MB/s, log)")
@@ -174,6 +212,11 @@ for corpus in corpora(AFTER):
                      if find(AFTER, "native", p, lvl)])
         if a and b and r:
             print(f"{lvl:>3} {r:>7.3f} {b:>9.1f} {a:>9.1f} {a/b:>7.2f}x")
+    zp = zopfli_point(corpus) if metric == "compress_mbps" else None
+    if zp:
+        zr, zs = zp
+        print(f"{'zop':>3} {zr:>7.3f} {'—':>9} {(f'{zs:.2f}' if zs else '—'):>9} "
+              f"{'(zopfli, 1-rep speed)':>8}")
 
 # Row coverage: before/after must cover the same native (pattern, level) keys,
 # else the comparison is over a partial intersection and every aggregate
