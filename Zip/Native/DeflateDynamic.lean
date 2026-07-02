@@ -603,7 +603,12 @@ def goodMatch (level : UInt8) : Nat :=
     lazy variant, which improves ratio at equal window/chain depth. Both share the
     same `(chainDepth, insertCap)` ladder and satisfy the same encoder contracts
     (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the choice is
-    transparent to the roundtrip proof. -/
+    transparent to the roundtrip proof.
+
+    The chainless 2-way-bucket matcher (`htMatchIter`, #2738) is *not* selected
+    here: a direct A/B measured it strictly worse than the depth-4 chain at L1 on
+    Canterbury — see the `htMatch` docstring in `Zip/Native/Deflate.lean` for the
+    frontier and why (L1 is emit-bound). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
   if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
