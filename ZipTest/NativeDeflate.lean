@@ -493,11 +493,12 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     unless decomp == data do
       throw (IO.userError s!"arbitrated shared split→FFI inflate mismatch on {name}")
 
-  -- Observation-divergence dispatch (#2737): levels 4–8 route through the
+  -- Observation-divergence dispatch (#2737): levels 6–8 route through the
   -- packed split candidate whenever the heuristic proposes cuts. On the
   -- heterogeneous input it must (assert, so this test really exercises the
   -- multi-block dispatch path), and the emitted stream must roundtrip via
-  -- both inflate implementations at every level in the band.
+  -- both inflate implementations across the mid-band (4–5 single-block,
+  -- 6–8 split).
   unless (Zip.Native.Deflate.chooseSplitsHeuristicP
       (Zip.Native.Deflate.lzMatchP hetero 6)).length ≥ 1 do
     throw (IO.userError "chooseSplitsHeuristicP found no cuts on heterogeneous input")

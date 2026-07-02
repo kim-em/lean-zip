@@ -13,7 +13,7 @@ Proves the unified roundtrip theorem for `deflateRaw`:
 `deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is a stored
 block; level ≥ 1 runs the single-block cost-model dispatch `deflateRawBase`
 (stored / fixed / dynamic, all sized from one hash-chain token pass, emitting
-only the smallest); levels 4–8 additionally compare the cross-block
+only the smallest); levels 6–8 additionally compare the cross-block
 shared-window split at the observation-divergence boundaries (#2737) against
 that base via `pickSmaller`, so the split is a first-class candidate that can
 only ever win; and levels 9/10 compare the near-optimal / exact-DP candidates
@@ -110,7 +110,7 @@ theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
     This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
-    cost-model stored fallback is covered by `deflateRawBase`; the level-4–8
+    cost-model stored fallback is covered by `deflateRawBase`; the level-6–8
     split and level-9/10 optimal candidates are covered by the `pickSmaller`
     cases. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
@@ -156,7 +156,7 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
             · -- level 8: obs candidate vs the emitted fixed-cadence partition
               exact inflate_pickSmaller _ _ data maxOutputSize hobs
                 (inflate_deflateDynamicBlocksSharedAt data _ level _ hsize)
-            · -- levels 4–7 (and 9/10 above the optimal-size gate)
+            · -- levels 6–7 (and 9/10 above the optimal-size gate)
               exact hobs
       · exact inflate_deflateRawBase data level _ hsize
 
@@ -281,7 +281,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                 (P := fun bits => ∃ (contentBits padding : List Bool),
                   bits = contentBits ++ padding ∧ padding.length < 8)
                 _ _ hobs (deflateDynamicBlocksSharedAt_pad data _ level)
-            · -- levels 4–7 (and 9/10 above the optimal-size gate)
+            · -- levels 6–7 (and 9/10 above the optimal-size gate)
               exact hobs
       · exact deflateRawBase_pad data level
 
@@ -483,7 +483,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                   Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
                     remaining.length < 8)
                 _ _ hobs (deflateDynamicBlocksSharedAt_goR_pad data _ level)
-            · -- levels 4–7 (and 9/10 above the optimal-size gate)
+            · -- levels 6–7 (and 9/10 above the optimal-size gate)
               exact hobs
       · exact deflateRawBase_goR_pad data level
 

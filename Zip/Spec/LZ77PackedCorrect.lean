@@ -287,7 +287,7 @@ theorem emitSharedBlocksAtP_eq (data : ByteArray) (ws : Array UInt32)
   emitSharedBlocksAtP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
 
 /-- The packed observation-divergence split candidate is byte-identical to the
-    boxed reference at the same (constant) cut list: `deflateRaw`'s level 4–8
+    boxed reference at the same (constant) cut list: `deflateRaw`'s level 6–8
     split branch and the roundtrip proofs see
     `deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` through this
     rewrite, and the `DeflateBlockSplit` theorems hold for any selector. -/
