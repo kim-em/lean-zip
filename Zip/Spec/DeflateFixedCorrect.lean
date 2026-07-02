@@ -439,13 +439,14 @@ private theorem countMatch_eq (data : ByteArray) (p1 p2 maxLen : Nat)
     (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) :
     lz77GreedyIter.countMatch data p1 p2 maxLen h1 h2 =
     lz77Greedy.countMatch data p1 p2 maxLen h1 h2 := by
-  -- P1a: `lz77Greedy.countMatch` now dispatches to the `USize` loop `goU`,
-  -- proven equal to `lz77Greedy.go` by `goU_eq`; both dite branches reduce to it.
+  -- P1a: `lz77Greedy.countMatch` now dispatches to the word-at-a-time `USize`
+  -- loop `goUW`, proven equal to `lz77Greedy.go` by `goUW_eq`; both dite branches
+  -- reduce to it.
   have hgo : lz77Greedy.countMatch data p1 p2 maxLen h1 h2
       = lz77Greedy.go data p1 p2 0 maxLen h1 h2 := by
     rw [lz77Greedy.countMatch]
     split
-    · exact lz77Greedy.goU_eq data p1 p2 0 maxLen _ h1 h2 (by omega) _ _
+    · exact lz77Greedy.goUW_eq data p1 p2 0 maxLen _ h1 h2 (by omega) _ _ (by simp)
     · rfl
   simp only [lz77GreedyIter.countMatch, hgo]
   exact go_eq data p1 p2 0 maxLen h1 h2
