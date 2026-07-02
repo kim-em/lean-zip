@@ -1479,9 +1479,12 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     exact-bits arbitration guarded the heuristic against sizing worse than
     the fixed `sharedTokChunk` cadence, but paid two extra boxed whole-stream
     sizing walks (`findTableCode` linear scans + boxed `tokenFreqs`, ~18% of
-    level-8 cycles) for it — a guard libdeflate does without. `pickSmaller`
-    against the base still bounds any heuristic misfire at the single-block
-    ratio.
+    level-8 cycles) for it. Instead, level 8 *emits* the fixed-cadence
+    partition as a third `pickSmaller` candidate: the min over emitted
+    candidates decides by the same quantity the sizing pass computed
+    (⌈bits/8⌉), so level 8 is never worse than the retired arbitration on
+    any input, and one packed emit pass is far cheaper than the two boxed
+    sizing walks it replaces.
 
     At levels 9 and 10 (and within the `optimalMaxSize` memory gate) the dispatch
     switches to a cost-model DP parse (grouped into blocks on the fixed
@@ -1567,11 +1570,27 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- No cuts ⇒ the split would be a single dynamic block the base already
       -- sizes, so skip the second emit entirely (every input under
       -- ~2·splitMinBlockBytes takes this path).
+      let base := deflateRawBaseP data ptokens
       let cuts := chooseSplitsHeuristicP ptokens
-      if cuts.isEmpty then deflateRawBaseP data ptokens
-      else
-        pickSmaller (deflateRawBaseP data ptokens)
-          (deflateDynamicBlocksSharedAtP data ptokens cuts)
+      let withObs :=
+        if cuts.isEmpty then base
+        else pickSmaller base (deflateDynamicBlocksSharedAtP data ptokens cuts)
+      if 8 ≤ level then
+        -- Max-ratio split tier: also *emit* the fixed-cadence partition and keep
+        -- the smallest. The old L8 arbitration picked between the heuristic and
+        -- cadence partitions by exact bit sizing; taking the min over the two
+        -- *emitted* candidates decides by the same quantity (⌈bits/8⌉), so this
+        -- is never worse than the retired sizing pass on any input — at the cost
+        -- of one extra packed emit pass instead of two boxed sizing walks.
+        -- Measured (Silesia): the divergence cuts alone lose only on sao
+        -- (+0.6pp, a statistically uniform star catalog the cadence handles
+        -- better); this candidate closes exactly that hole. L4–L7 skip it: they
+        -- had no split tier before, so there is nothing to not-regress, and the
+        -- divergence cuts already capture the mid-band win at one extra emit.
+        pickSmaller withObs
+          (deflateDynamicBlocksSharedAtP data ptokens
+            (fixedCadenceCuts sharedTokChunk ptokens.size))
+      else withObs
   else deflateRawBase data level
 
 end Zip.Native.Deflate
