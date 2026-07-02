@@ -1423,20 +1423,36 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
-/-! ## Chainless 2-way-bucket L1 matcher (libdeflate `ht_matchfinder` style)
+/-! ## Chainless 2-way-bucket matcher (libdeflate `ht_matchfinder` style)
 
-For the fast (level ≤ 1) corner, `htMatch` drops the hash *chain* walk
-(the chain walk was ~47% of L1 cycles, #2738) in favour of libdeflate's
-`ht_matchfinder` scheme: a single hash table with **two positions per bucket**
-(`tbl[2*h]` = most-recent, `tbl[2*h+1]` = second-most-recent), **minimum match
-length 4** (skips the marginal length-3 matches, which greedily cost more bits
-than the literals they replace), and an early-out once a probe reaches
-**`niceLen = 32`**. Per position it does at most two bounded `countMatch`
-probes (versus the chain's depth-4 fuel walk over a `prev` array) and one
-bucket rotation (`lru := mru; mru := pos`). After a match it inserts the
-interior positions into the 2-way table (`htInsert`, like libdeflate's skip)
-so they stay findable — this is what lets the depth-2 bucket beat the chain's
-ratio rather than lose to it.
+`htMatch` is the libdeflate `ht_matchfinder` scheme (#2738): a single hash
+table with **two positions per bucket** (`tbl[2*h]` = most-recent, `tbl[2*h+1]`
+= second-most-recent), **minimum match length 4** (skips the marginal length-3
+matches, which greedily cost more bits than the literals they replace), and an
+early-out once a probe reaches **`niceLen = 32`**. Per position it does at most
+two bounded `countMatch` probes (versus the chain's depth-4 fuel walk over a
+`prev` array) and one bucket rotation (`lru := mru; mru := pos`). After a match
+it inserts the interior positions into the 2-way table (`htInsert`, like
+libdeflate's skip, bounded by `htInsertCap`) so they stay findable.
+
+**Measured, and NOT selected for L1.** #2738's premise was that the chain walk
+being ~47% of L1 cycles made a cheaper matcher an easy speed win. A direct A/B
+(both binaries pinned to one core, back-to-back, Canterbury, native compress)
+refutes this — no `htInsertCap` beats the tuned depth-4 chain:
+
+      htInsertCap   L1 speed vs chain    L1 ratio vs chain
+      0 (fastest)   1.00x (flat)         +5.2% (worse)
+      2             0.92x (slower)       +1.7% (worse)
+      258 (best r)  0.73x (much slower)  −1.6% (better)
+
+Interior insertion buys ratio by spending work; the fastest point (no interior
+insertion) only *ties* the chain's speed while giving up 5% ratio. This
+confirms the earlier finding (#2726) that L1 is **emit-bound** — the token walk
++ `BitWriter` dominate, so shaving matcher microcost is diluted, and any ratio
+loss is paid back as extra emit work. So `lzMatch`/`lzMatchP` keep the chain at
+L1; `htMatch` stays as a formally-verified reference matcher so the finding is
+recorded in-tree and #2738 is not re-attempted blind. `htInsertCap = 258` is
+the ratio-competitive setting, kept as the documented default.
 
 Like the chain, the table is a pure *heuristic for finding* candidates:
 validity is re-established at emission by `countMatch` + the explicit

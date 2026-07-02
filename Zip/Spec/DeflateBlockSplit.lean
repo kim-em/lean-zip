@@ -3,7 +3,6 @@ import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
 import Zip.Spec.LZ77OptimalCorrect
-import Zip.Spec.HtMatchCorrect
 
 /-!
 # Self-contained block-splitting roundtrip
@@ -35,31 +34,25 @@ theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   unfold lzMatch
   split
-  · exact htMatchIter_encodable data 32768 (by omega) (by omega)
-  · split
-    · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level) (goodMatch level)
-        (by omega) (by omega)
-    · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
-        (by omega) (by omega)
+  · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+      (by omega) (by omega)
+  · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
+      (by omega) (by omega)
 
 theorem lzMatch_empty (data : ByteArray) (level : UInt8) (hz : data.size = 0) :
     lzMatch data level = #[] := by
   unfold lzMatch
   split
-  · exact htMatchIter_empty data 32768 hz
-  · split
-    · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) (goodMatch level) hz
-    · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
+  · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) (goodMatch level) hz
+  · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
 
 theorem lzMatch_resolves (data : ByteArray) (level : UInt8) :
     Deflate.Spec.resolveLZ77 (tokensToSymbols (lzMatch data level)) [] =
       some data.data.toList := by
   unfold lzMatch
   split
-  · exact htMatchIter_resolves data 32768 (by omega)
-  · split
-    · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (goodMatch level) (by omega)
-    · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (goodMatch level) (by omega)
+  · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
 
 set_option maxHeartbeats 800000 in
 /-- One self-contained chunk block: its bits append to `bw`, it preserves `wf`,
