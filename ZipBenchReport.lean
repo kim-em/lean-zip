@@ -140,12 +140,14 @@ def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 /-- Native lean-zip's level range. Wider than the zlib/miniz FFI cap of 9: since
     #2638, level 9 is the L9-fast approximate-optimal tier and **level 10 is the
-    exact-DP crown** (the max-ratio ceiling). The dashboard must always sweep
-    native through 10 so the crown stays on the Pareto — otherwise the headline
-    graph loses our best-ratio point. `runWorkloads` already omits the decode
-    timing for `level > 9` (no zlib-FFI raw-deflate reference exists there), so
-    the extra native point is compress-only, exactly like libdeflate 10–12. -/
-def nativeLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    exact-DP crown**; **level 11 adds the iterative kept-best squeeze on top of
+    the crown** (the max-ratio ceiling — speed no object). The dashboard must
+    always sweep native through 11 so both crown tiers stay on the Pareto —
+    otherwise the headline graph loses our best-ratio point. `runWorkloads`
+    already omits the decode timing for `level > 9` (no zlib-FFI raw-deflate
+    reference exists there), so the extra native points are compress-only,
+    exactly like libdeflate 10–12. -/
+def nativeLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 /-- libdeflate's full level range. It exposes 1–12, and its densest points
     (10–12) are exactly the ones the comparison Pareto needs from it — so it is
