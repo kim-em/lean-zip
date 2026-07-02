@@ -227,6 +227,13 @@ where
     | "compress-libdeflate" =>
       let _ ← Libdeflate.compress data level.toUInt8
       pure ()
+    -- One-shot native compressed size (deterministic; no timing loop). Used to
+    -- sweep ratio-only knobs cheaply across a whole corpus without paying the
+    -- `compress-pareto` warmup/rep cost. Prints `size out ratio%`.
+    | "csize" =>
+      let out := Zip.Native.Deflate.deflateRaw data level.toUInt8
+      let ratio : Float := 100.0 * out.size.toFloat / data.size.toFloat
+      IO.println s!"size={data.size} lvl={level}: out={out.size} ratio={ratio.toString.take 5}%"
     -- P0 diagnostic: separate the one-time dense-table CAF build (paid on the
     -- first distance lookup of the process) from steady-state per-call cost.
     -- Builds `nin` distinct inputs (perturb one byte) to defeat CSE/memoisation,

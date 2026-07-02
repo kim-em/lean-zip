@@ -18,7 +18,7 @@ open Zip.Native.Deflate
 private def cacheFor (data : ByteArray) : Array Nat × Array Nat :=
   let (lens, dists, _, _) := buildCache data
     (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
-    optChainDepth optCacheSlots 0 data.size 0
+    optChainDepth optCacheSlots optNiceSkip 0 data.size 0
     (Array.replicate (optCacheSlots * data.size) 0)
     (Array.replicate (optCacheSlots * data.size) 0)
   (lens, dists)
