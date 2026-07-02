@@ -486,8 +486,8 @@ where
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     -- P1a: when the buffer is `USize`-addressable (always true at runtime; the
     -- check is one `USize` round-trip, no bignum), run the unboxed word-at-a-time
-    -- loop `goUW` — proven equal to the byte loop `goU` (`goUW_eq_goU`), hence to
-    -- the `Nat` `go` (`goU_eq`). Else fall back to `go`.
+    -- loop `goUW` — proven equal to the `Nat` `go` (`goUW_eq`, which reuses the
+    -- byte loop's `goU_eq` for its fallback branches). Else fall back to `go`.
     if hg : data.size.toUSize.toNat = data.size then
       have hsz : data.size < USize.size := by
         rw [← hg]; exact USize.toNat_lt_two_pow_numBits _
@@ -538,7 +538,7 @@ where
     -- avoid `USize` overflow), load both 8-byte words and compare them in one op.
     -- On a full-word match, advance 8; otherwise hand off to the per-byte loop
     -- `goU`, which pinpoints the first mismatch within the window (and the same
-    -- `goU` finishes the < 8-byte tail). Proven equal to `goU` by `goUW_eq_goU`.
+    -- `goU` finishes the < 8-byte tail). Proven equal to `go` by `goUW_eq`.
     if h8 : (8 : USize) ≤ maxLen - i then
       have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
       have h8v : (8 : USize).toNat = 8 := by
@@ -567,7 +567,9 @@ where
     have h8v : (8 : USize).toNat = 8 := by
       rw [USize.toNat_ofNat]
       exact Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le (show 8 < 2 ^ 32 by omega) USize.le_size)
-    have h8n : i.toNat + 8 ≤ maxLen.toNat := by
+    -- `_h8n` (`i + 8 ≤ maxLen`) is consumed by the `omega`s below but never
+    -- named, so it carries an underscore to sidestep the unused-variable linter.
+    have _h8n : i.toNat + 8 ≤ maxLen.toNat := by
       have h := USize.le_iff_toNat_le.mp h8
       rw [USize.toNat_sub_of_le maxLen i hile, h8v] at h; omega
     have e : (i + 8).toNat = i.toNat + 8 := by
