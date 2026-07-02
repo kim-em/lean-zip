@@ -13,10 +13,16 @@
 #
 # Note: throughput numbers are a median-of-N snapshot of THIS machine; commit the
 # regenerated JSON + SVGs together, and record the machine in the dashboard.
+#
+# Every *measurement* step below runs through bench/pin_core.sh, which pins the
+# command (and its children) to the idlest single core — unpinned runs wander
+# across cores and pick up scheduler/turbo/contention noise that has been
+# mistaken for real perf deltas. Builds, merges, and plotting stay unpinned.
 set -euo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 OUT="bench/results/latest.json"
+PIN="bash bench/pin_core.sh"
 
 in_project_shell() {
   if [ -n "${IN_NIX_SHELL:-}" ]; then bash -c "$1"; else nix-shell --run "$1"; fi
@@ -36,7 +42,7 @@ if [ "${1:-}" = "--native-only" ]; then
   [ -f "$OUT" ] || { echo "no existing $OUT to splice into — run a full bench/run.sh first" >&2; exit 1; }
   TMP="$(mktemp --suffix=.json)"
   in_project_shell "lake build bench-report \
-    && lake env .lake/build/bin/bench-report --native-only $TMP ${2:-}"
+    && $PIN lake env .lake/build/bin/bench-report --native-only $TMP ${2:-}"
   in_project_shell "python3 bench/merge_native.py $OUT $TMP $OUT \
     && python bench/plot.py $OUT bench/graphs"
   rm -f "$TMP"
@@ -61,14 +67,16 @@ fi
 #    --dump-payloads writes the corpus bytes under bench/payloads/<corpus>/ for the
 #    external comparators.
 in_project_shell "lake build bench-report \
-  && lake env .lake/build/bin/bench-report $OUT \
+  && $PIN lake env .lake/build/bin/bench-report $OUT \
   && lake env .lake/build/bin/bench-report --dump-payloads bench/payloads"
 
 # 3. External-language comparators: build (own toolchains) then run + merge.
-#    node + python3 must be on PATH for the JS comparator and the driver.
+#    node + python3 must be on PATH for the JS comparator and the driver. The
+#    driver is pinned, so every comparator child inherits the single-core
+#    affinity and their rows are measured like the native ones.
 bash bench/comparators/build_all.sh
 nix-shell -p nodejs python3 --run \
-  "python3 bench/comparators/run_external.py bench/payloads $OUT"
+  "$PIN python3 bench/comparators/run_external.py bench/payloads $OUT"
 
 # 3b. Decode-density experiment (the decompression analogue of the compress
 #    Pareto): fix the encoder to libdeflate, dump its raw-DEFLATE streams for
@@ -78,9 +86,9 @@ nix-shell -p nodejs python3 --run \
 #    sibling decode_density.json that plot.py renders as
 #    <corpus>_decode_density.svg.
 DD="bench/results/decode_density.json"
-in_project_shell "lake env .lake/build/bin/bench-report --decode-density $DD bench/payloads-deflate"
+in_project_shell "$PIN lake env .lake/build/bin/bench-report --decode-density $DD bench/payloads-deflate"
 nix-shell -p nodejs python3 --run \
-  "python3 bench/decode_density.py bench/payloads-deflate $DD"
+  "$PIN python3 bench/decode_density.py bench/payloads-deflate $DD"
 
 # 4. Render (project shell: python + matplotlib). plot.py auto-detects the
 #    sibling decode_density.json and emits the decode-density chart too.

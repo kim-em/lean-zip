@@ -165,10 +165,12 @@ artifacts move into `$W`.
      || bash bench/fetch_corpora.sh silesia
    ```
 
-3. **Measure AFTER** (the PR branch, already built):
+3. **Measure AFTER** (the PR branch, already built). Route the measurement
+   through `bench/pin_core.sh`, which pins it (and all children) to the idlest
+   single core — never run a recorded measurement unpinned:
    ```
    lake build bench-report
-   lake env .lake/build/bin/bench-report --native-only $W/perf_after.json
+   bash bench/pin_core.sh lake env .lake/build/bin/bench-report --native-only $W/perf_after.json
    ```
    `--native-only` records native `ratio`, `compress_mbps` and
    `decompress_mbps` and reuses nothing else. Its default native sweep is **1–10**
@@ -224,7 +226,7 @@ artifacts move into `$W`.
      invariant going forward, but it cannot reconstruct the merge-base BEFORE.
      Recover a correct BEFORE with a one-off merge-base build (`git worktree add
      --detach $W/before $base && ( cd $W/before && lake build bench-report &&
-     lake env .lake/build/bin/bench-report --native-only $W/perf_before.json )`,
+     bash bench/pin_core.sh lake env .lake/build/bin/bench-report --native-only $W/perf_before.json )`,
      then `git worktree remove --force $W/before`) and pass
      `$W/perf_before.json` as BEFORE.
 
@@ -326,12 +328,13 @@ artifacts move into `$W`.
    native-only path that does the
    measure+merge+plot in one shot and records every level:
    ```
-   nix-shell --run "taskset -c <free-core> bash bench/run.sh --native-only"
+   nix-shell --run "bash bench/run.sh --native-only"
    git add bench/results/latest.json bench/graphs
    ```
    (`--native-only` reuses the reference-language rows — it does not pay the ~2 h
-   external-comparator rebuild.) Pin to a free core so the committed numbers are
-   not contention-depressed, and confirm `git status` shows only
+   external-comparator rebuild.) `bench/run.sh` pins every measurement step to
+   the idlest core itself (via `bench/pin_core.sh`), so the committed numbers are
+   not contention-depressed; confirm `git status` shows only
    `bench/results/latest.json` and `bench/graphs/*.svg` changed by this step.
 
    **For a decode (or both) PR, also refresh the decode-density dashboard.** The
@@ -340,18 +343,18 @@ artifacts move into `$W`.
    pipeline so the committed decode charts reflect this PR's decoder, then commit
    the JSON + both SVGs into the PR:
    ```
-   nix-shell --run "lake env .lake/build/bin/bench-report --decode-density \
+   nix-shell --run "bash bench/pin_core.sh lake env .lake/build/bin/bench-report --decode-density \
      bench/results/decode_density.json bench/payloads-deflate"
    nix-shell -p nodejs python3 --run \
-     "python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_density.json"
+     "bash bench/pin_core.sh python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_density.json"
    nix-shell --run "python bench/plot.py bench/results/latest.json bench/graphs"
    git add bench/results/decode_density.json bench/graphs/*_decode_density.svg bench/graphs/*_decode_ranking.svg
    ```
    The Lean pass rewrites the in-process decoder rows (native/zlib/miniz/libdeflate
    + memcpy) and `decode_density.py` re-adds the external rows; `plot.py`
    auto-detects the sibling `decode_density.json` and re-renders both decode SVGs.
-   (Pin to a free core here too — `taskset -c <free-core>` — so the decode numbers
-   are not contention-depressed; the `payloads-deflate/` streams are gitignored.)
+   (`bench/pin_core.sh` does the free-core pinning; the `payloads-deflate/`
+   streams are gitignored.)
 
 9. **Always post the graphs as a PR comment — then give Kim the link.** This step
    is compulsory, not "also if convenient": every qualifying PR gets a PR comment
@@ -402,7 +405,10 @@ one session** so common-mode noise (background load, turbo, thermal) cancels:
   $W/before $(git merge-base origin/master HEAD)` then `lake build bench-report`
   in it). The AFTER binary is the PR branch's.
 - Run the two binaries **alternately, N times** (≥5 pairs), each pinned to one
-  core (`taskset -c <core>`). Consecutive AFTER/BEFORE runs then see near-identical
+  core (`taskset -c <core>` — here use an explicit fixed core, the SAME one for
+  both sides, rather than `bench/pin_core.sh`, whose per-invocation idlest-core
+  choice could put the two sides on different cores). Consecutive AFTER/BEFORE
+  runs then see near-identical
   machine state, so their *ratio* is robust even on a busy machine — the paired
   ratio + its 95% CI is the verdict, not any single run.
 - **Run BOTH binaries from the MAIN worktree's directory.** Silesia is gitignored
