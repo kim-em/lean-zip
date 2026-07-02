@@ -485,14 +485,16 @@ where
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     -- P1a: when the buffer is `USize`-addressable (always true at runtime; the
-    -- check is one `USize` round-trip, no bignum), run the unboxed `USize` loop
-    -- `goU` — proven equal to the `Nat` `go` by `goU_eq`. Else fall back to `go`.
+    -- check is one `USize` round-trip, no bignum), run the unboxed word-at-a-time
+    -- loop `goUW` — proven equal to the byte loop `goU` (`goUW_eq_goU`), hence to
+    -- the `Nat` `go` (`goU_eq`). Else fall back to `go`.
     if hg : data.size.toUSize.toNat = data.size then
       have hsz : data.size < USize.size := by
         rw [← hg]; exact USize.toNat_lt_two_pow_numBits _
-      (goU data p1.toUSize p2.toUSize 0 maxLen.toUSize hsz
+      (goUW data p1.toUSize p2.toUSize 0 maxLen.toUSize hsz
         (by rw [toUSize_toNat_of_lt (by omega), toUSize_toNat_of_lt (by omega)]; omega)
-        (by rw [toUSize_toNat_of_lt (by omega), toUSize_toNat_of_lt (by omega)]; omega)).toNat
+        (by rw [toUSize_toNat_of_lt (by omega), toUSize_toNat_of_lt (by omega)]; omega)
+        (by simp)).toNat
     else go data p1 p2 0 maxLen h1 h2
   go (data : ByteArray) (p1 p2 i maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
@@ -525,6 +527,51 @@ where
     have him : i.toNat < maxLen.toNat := USize.lt_iff_toNat_lt.mp hlt
     have e : (i + 1).toNat = i.toNat + 1 := by
       rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt; omega
+    omega
+  goUW (data : ByteArray) (p1 p2 i maxLen : USize)
+      (hsz : data.size < USize.size)
+      (h1 : p1.toNat + maxLen.toNat ≤ data.size)
+      (h2 : p2.toNat + maxLen.toNat ≤ data.size)
+      (hile : i.toNat ≤ maxLen.toNat) : USize :=
+    -- Word-at-a-time match extension (libdeflate `matchfinder_common.h`): while a
+    -- full 8-byte window fits (`i + 8 ≤ maxLen`, computed as `8 ≤ maxLen - i` to
+    -- avoid `USize` overflow), load both 8-byte words and compare them in one op.
+    -- On a full-word match, advance 8; otherwise hand off to the per-byte loop
+    -- `goU`, which pinpoints the first mismatch within the window (and the same
+    -- `goU` finishes the < 8-byte tail). Proven equal to `goU` by `goUW_eq_goU`.
+    if h8 : (8 : USize) ≤ maxLen - i then
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      have h8v : (8 : USize).toNat = 8 := by
+        rw [USize.toNat_ofNat]
+        exact Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le (show 8 < 2 ^ 32 by omega) USize.le_size)
+      have h8n : i.toNat + 8 ≤ maxLen.toNat := by
+        have h := USize.le_iff_toNat_le.mp h8
+        rw [USize.toNat_sub_of_le maxLen i hile, h8v] at h; omega
+      have e1 : (p1 + i).toNat = p1.toNat + i.toNat := by
+        rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+      have e2 : (p2 + i).toNat = p2.toNat + i.toNat := by
+        rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+      have hw1 : (p1 + i).toNat + 8 ≤ data.size := by omega
+      have hw2 : (p2 + i).toNat + 8 ≤ data.size := by omega
+      if data.ugetUInt64LE (p1 + i) hw1 == data.ugetUInt64LE (p2 + i) hw2 then
+        have hile' : (i + 8).toNat ≤ maxLen.toNat := by
+          rw [USize.toNat_add, h8v, Nat.mod_eq_of_lt (by omega)]; omega
+        goUW data p1 p2 (i + 8) maxLen hsz h1 h2 hile'
+      else
+        goU data p1 p2 i maxLen hsz h1 h2
+    else
+      goU data p1 p2 i maxLen hsz h1 h2
+  termination_by maxLen.toNat - i.toNat
+  decreasing_by
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have h8v : (8 : USize).toNat = 8 := by
+      rw [USize.toNat_ofNat]
+      exact Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le (show 8 < 2 ^ 32 by omega) USize.le_size)
+    have h8n : i.toNat + 8 ≤ maxLen.toNat := by
+      have h := USize.le_iff_toNat_le.mp h8
+      rw [USize.toNat_sub_of_le maxLen i hile, h8v] at h; omega
+    have e : (i + 8).toNat = i.toNat + 8 := by
+      rw [USize.toNat_add, h8v, Nat.mod_eq_of_lt (by omega)]
     omega
   trailing (data : ByteArray) (pos : Nat) : List LZ77Token :=
     if h : pos < data.size then

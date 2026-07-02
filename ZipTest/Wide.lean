@@ -1,13 +1,13 @@
 import ZipTest.Helpers
 
-/-! Conformance tests for the word-sized `@[extern]` ByteArray reader
-    (`ByteArray.ugetUInt32LE`).
+/-! Conformance tests for the word-sized `@[extern]` ByteArray readers
+    (`ByteArray.ugetUInt32LE`, `ByteArray.ugetUInt64LE`).
 
     Each test compares the compiled `@[extern]` result (which runs the C in
     `c/bytearray_wide_ffi.c`) against a pure-Lean reference recombination of the
     same bytes — i.e. the `@[extern]`'s own reference body, but evaluated without
     the extern so the comparison validates the C against the model. We sweep all
-    in-bounds offsets (including the `off + 4 == size` boundary) over several
+    in-bounds offsets (including the `off + N == size` boundary) over several
     byte patterns. -/
 
 namespace ZipTest.Wide
@@ -30,6 +30,26 @@ partial def checkU32 (a : ByteArray) (off : USize := 0) : IO Unit := do
       throw (IO.userError s!"ugetUInt32LE mismatch at off {off.toNat}: got {got}, want {want}")
     checkU32 a (off + 1)
 
+/-- Pure-Lean reference for the little-endian `UInt64` load (no `@[extern]`). -/
+def refU64LE (a : ByteArray) (off : Nat) : UInt64 :=
+  a[off]!.toUInt64 |||
+  (a[off + 1]!.toUInt64 <<< 8) |||
+  (a[off + 2]!.toUInt64 <<< 16) |||
+  (a[off + 3]!.toUInt64 <<< 24) |||
+  (a[off + 4]!.toUInt64 <<< 32) |||
+  (a[off + 5]!.toUInt64 <<< 40) |||
+  (a[off + 6]!.toUInt64 <<< 48) |||
+  (a[off + 7]!.toUInt64 <<< 56)
+
+/-- Check every in-bounds 8-byte offset of `a`, extern vs reference. -/
+partial def checkU64 (a : ByteArray) (off : USize := 0) : IO Unit := do
+  if h : off.toNat + 8 ≤ a.size then
+    let got := ByteArray.ugetUInt64LE a off h
+    let want := refU64LE a off.toNat
+    unless got == want do
+      throw (IO.userError s!"ugetUInt64LE mismatch at off {off.toNat}: got {got}, want {want}")
+    checkU64 a (off + 1)
+
 /-- A spread of byte patterns: zeros, max bytes, ascending, descending, and a
     high-bit-set pattern (to catch sign-extension bugs in the recombination). -/
 def patterns : List ByteArray :=
@@ -41,13 +61,28 @@ def patterns : List ByteArray :=
     -- Exactly word-sized: hits only the `off + 4 == size` boundary.
     ByteArray.mk #[0xDE, 0xAD, 0xBE, 0xEF] ]
 
+/-- Byte patterns at least 8 wide, for the 64-bit reader (includes an exactly
+    8-byte array to hit the `off + 8 == size` boundary). -/
+def patterns64 : List ByteArray :=
+  [ ByteArray.mk (Array.replicate 20 0),
+    ByteArray.mk (Array.replicate 20 0xFF),
+    ByteArray.mk (Array.range 20 |>.map (·.toUInt8)),
+    ByteArray.mk (Array.range 20 |>.map (fun i => (19 - i).toUInt8)),
+    ByteArray.mk (Array.range 20 |>.map (fun i => (0x80 ||| i).toUInt8)),
+    ByteArray.mk #[0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01] ]
+
 def tests : IO Unit := do
   for a in patterns do
     checkU32 a
-  -- A direct spot-check of a known little-endian value.
+  for a in patterns64 do
+    checkU64 a
+  -- Direct spot-checks of known little-endian values.
   let a := ByteArray.mk #[0x78, 0x56, 0x34, 0x12]
   unless ByteArray.ugetUInt32LE a 0 (by decide) == 0x12345678 do
     throw (IO.userError "ugetUInt32LE spot-check failed")
+  let b := ByteArray.mk #[0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01]
+  unless ByteArray.ugetUInt64LE b 0 (by decide) == 0x0123456789ABCDEF do
+    throw (IO.userError "ugetUInt64LE spot-check failed")
   IO.println "Wide reader conformance tests: OK"
 
 end ZipTest.Wide
