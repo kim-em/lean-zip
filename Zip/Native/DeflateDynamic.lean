@@ -600,8 +600,9 @@ def goodMatch (level : UInt8) : Nat :=
 
 /-- The per-level LZ77 matcher: level ≤ 1 uses the chainless 2-way-bucket
     matcher (`htMatchIter`, libdeflate `ht_matchfinder` style, #2738) — two
-    bounded probes per position, min match 4, no chain walk or interior
-    insertion; levels 2–3 (`deflate_fast`) use the greedy hash-chain matcher;
+    bounded probes per position, min match 4, no chain walk (interior positions
+    are still inserted into the 2-way table); levels 2–3 (`deflate_fast`) use
+    the greedy hash-chain matcher;
     levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead lazy variant, which
     improves ratio at equal window/chain depth. All three satisfy the same
     encoder contracts (`lzMatch_{encodable,empty,resolves}` in

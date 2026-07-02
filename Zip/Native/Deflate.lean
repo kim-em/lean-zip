@@ -1425,15 +1425,18 @@ where
 
 /-! ## Chainless 2-way-bucket L1 matcher (libdeflate `ht_matchfinder` style)
 
-For the fast (level ≤ 1) corner, `htMatch` drops the hash *chain* entirely
-(the chain walk + interior-insertion loop were ~47% of L1 cycles, #2738) in
-favour of libdeflate's `ht_matchfinder` scheme: a single hash table with
-**two positions per bucket** (`tbl[2*h]` = most-recent, `tbl[2*h+1]` =
-second-most-recent), **minimum match length 4** (skips the marginal length-3
-matches), and an early-out once a probe reaches **`niceLen = 32`**. Per
-position it does at most two bounded `countMatch` probes and one bucket
-rotation (`lru := mru; mru := pos`) — no `prev` array, no fuel loop, no
-per-match interior insertion.
+For the fast (level ≤ 1) corner, `htMatch` drops the hash *chain* walk
+(the chain walk was ~47% of L1 cycles, #2738) in favour of libdeflate's
+`ht_matchfinder` scheme: a single hash table with **two positions per bucket**
+(`tbl[2*h]` = most-recent, `tbl[2*h+1]` = second-most-recent), **minimum match
+length 4** (skips the marginal length-3 matches, which greedily cost more bits
+than the literals they replace), and an early-out once a probe reaches
+**`niceLen = 32`**. Per position it does at most two bounded `countMatch`
+probes (versus the chain's depth-4 fuel walk over a `prev` array) and one
+bucket rotation (`lru := mru; mru := pos`). After a match it inserts the
+interior positions into the 2-way table (`htInsert`, like libdeflate's skip)
+so they stay findable — this is what lets the depth-2 bucket beat the chain's
+ratio rather than lose to it.
 
 Like the chain, the table is a pure *heuristic for finding* candidates:
 validity is re-established at emission by `countMatch` + the explicit
@@ -1444,6 +1447,17 @@ the sentinel `data.size` (≥ every real position), so an unset slot fails the
 proofs), `htMatchIter` (iterative boxed, `htMatchIter_eq_htMatch`) and
 `htMatchIterP` (packed, `htMatchIterP_eq`) are the greedy-matcher triple;
 correctness lives in `Zip/Spec/HtMatchCorrect.lean`. -/
+
+/-- Number of hash buckets for the chainless L1 matcher; the 2-way table holds
+    `2 * htHashSize` positions. A full 16-bit index (matching the chain
+    matcher's `hashSize`) keeps 4-gram collisions rare, so both bucket slots
+    tend to hold positions that actually share the hashed prefix. -/
+def htHashSize : Nat := 32768
+
+/-- `niceLen` early-out for the chainless L1 matcher: stop probing the second
+    bucket entry once the first already yields a match this long (libdeflate's
+    `nice_len` for its fast tier). -/
+def htNiceLen : Nat := 32
 
 /-- Consider one candidate position `cand` against the running best match
     `(bestLen, bestPos)`: when `cand` is a valid in-window backward position,
@@ -1468,6 +1482,34 @@ correctness lives in `Zip/Spec/HtMatchCorrect.lean`. -/
   if r0.1 ≥ niceLen then r0
   else htBest data windowSize pos maxLen hpm c1 r0.1 r0.2
 
+/-- Interior-insertion cap for the chainless L1 matcher: after emitting a match
+    of length `L` at `pos`, insert positions `pos+1 .. pos+min(L-1, cap)` into
+    the 2-way table so those interior positions stay findable by later matches.
+    libdeflate inserts skipped positions too; without it a depth-2 bucket loses
+    the matches the chain's interior insertion keeps (measured ~5% ratio). -/
+def htInsertCap : Nat := 258
+
+/-- Insert the interior positions of a just-emitted match into the 2-way table
+    (rotate each bucket: `lru := mru; mru := p`). The table is a pure heuristic
+    — its contents never enter any correctness proof — so this is an arbitrary
+    `Array Nat → Array Nat` used identically by all three matcher twins (no
+    bridge lemma needed). The `insertCap` bound keeps it from dominating on long
+    matches. -/
+def htInsert (data : ByteArray) (hashSize : Nat) (tbl : Array Nat)
+    (pos j matchLen insertCap : Nat) : Array Nat :=
+  if j < matchLen ∧ j ≤ insertCap then
+    if h : pos + j + 2 < data.size then
+      let hsh := lz77Greedy.hash3 data (pos + j) hashSize h
+      let mru := headProbeGuarded tbl (2 * hsh)
+      let tbl := guardedSet tbl (2 * hsh + 1) mru
+      let tbl := guardedSet tbl (2 * hsh) (pos + j)
+      htInsert data hashSize tbl pos (j + 1) matchLen insertCap
+    else
+      htInsert data hashSize tbl pos (j + 1) matchLen insertCap
+  else tbl
+termination_by matchLen - j
+decreasing_by all_goals omega
+
 /-- Recursive reference form of the chainless 2-way-bucket matcher (proofs
     only; `htMatchIter`/`htMatchIterP` are the stack-safe runtime twins).
     `hashSize` is the number of buckets, so the table holds `2 * hashSize`
@@ -1476,7 +1518,7 @@ def htMatch (data : ByteArray) (windowSize : Nat := 32768) : Array LZ77Token :=
   if data.size < 3 then
     (lz77Greedy.trailing data 0).toArray
   else
-    (mainLoop data windowSize 32768 32 (.replicate (2 * 32768) data.size) 0).toArray
+    (mainLoop data windowSize htHashSize htNiceLen (.replicate (2 * htHashSize) data.size) 0).toArray
 where
   mainLoop (data : ByteArray) (windowSize hashSize niceLen : Nat)
       (tbl : Array Nat) (pos : Nat) : List LZ77Token :=
@@ -1494,6 +1536,7 @@ where
       if hge : matchLen ≥ 4 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let tbl := htInsert data hashSize tbl pos 1 matchLen htInsertCap
           .reference matchLen (pos - matchPos) ::
             mainLoop data windowSize hashSize niceLen tbl (pos + matchLen)
         else
@@ -1516,7 +1559,7 @@ def htMatchIter (data : ByteArray) (windowSize : Nat := 32768) : Array LZ77Token
   if data.size < 3 then
     lz77GreedyIter.trailing data 0 #[]
   else
-    mainLoop data windowSize 32768 32 (.replicate (2 * 32768) data.size) 0 #[]
+    mainLoop data windowSize htHashSize htNiceLen (.replicate (2 * htHashSize) data.size) 0 #[]
 where
   mainLoop (data : ByteArray) (windowSize hashSize niceLen : Nat)
       (tbl : Array Nat) (pos : Nat) (acc : Array LZ77Token) : Array LZ77Token :=
@@ -1534,6 +1577,7 @@ where
       if hge : matchLen ≥ 4 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let tbl := htInsert data hashSize tbl pos 1 matchLen htInsertCap
           mainLoop data windowSize hashSize niceLen tbl (pos + matchLen)
             (acc.push (.reference matchLen (pos - matchPos)))
         else
@@ -1554,7 +1598,7 @@ def htMatchIterP (data : ByteArray) (windowSize : Nat := 32768) : Array UInt32 :
   if data.size < 3 then
     trailingP data 0 #[]
   else
-    mainLoop data windowSize 32768 32 (.replicate (2 * 32768) data.size) 0
+    mainLoop data windowSize htHashSize htNiceLen (.replicate (2 * htHashSize) data.size) 0
       (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize niceLen : Nat)
@@ -1573,6 +1617,7 @@ where
       if hge : matchLen ≥ 4 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let tbl := htInsert data hashSize tbl pos 1 matchLen htInsertCap
           mainLoop data windowSize hashSize niceLen tbl (pos + matchLen)
             (acc.push (packTok (.reference matchLen (pos - matchPos))))
         else

@@ -100,7 +100,7 @@ theorem htMatch_valid (data : ByteArray) (windowSize : Nat) (hw : windowSize > 0
   simp only [htMatch]
   split
   · simp only; exact trailing_valid data 0
-  · simp only; exact htMatch_mainLoop_valid data windowSize 32768 32 _ 0 hw
+  · simp only; exact htMatch_mainLoop_valid data windowSize htHashSize htNiceLen _ 0 hw
 
 /-- Resolving the LZ77 tokens produced by `htMatch` recovers the original data. -/
 theorem htMatch_resolves (data : ByteArray) (windowSize : Nat) (hw : windowSize > 0) :
@@ -160,7 +160,7 @@ theorem htMatch_encodable (data : ByteArray) (windowSize : Nat)
   simp only [htMatch]
   split
   · intro t ht; exact trailing_encodable data 0 t ht
-  · intro t ht; exact htMatch_mainLoop_encodable data windowSize 32768 32 _ 0 hw hws t ht
+  · intro t ht; exact htMatch_mainLoop_encodable data windowSize htHashSize htNiceLen _ 0 hw hws t ht
 
 /-- The chainless matcher emits no tokens on empty input. -/
 theorem htMatch_empty (data : ByteArray) (windowSize : Nat)
@@ -265,7 +265,7 @@ theorem htMatchIterP_eq (data : ByteArray) (windowSize : Nat) :
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      htMatchIterP_mainLoop_eq data windowSize 32768 32 _ 0 #[]
+      htMatchIterP_mainLoop_eq data windowSize htHashSize htNiceLen _ 0 #[]
 
 /-- The boxed view of the packed chainless matcher is the boxed matcher. -/
 theorem htMatchIterP_map (data : ByteArray) (windowSize : Nat)
