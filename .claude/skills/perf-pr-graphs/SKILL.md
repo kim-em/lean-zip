@@ -239,8 +239,21 @@ artifacts move into `$W`.
    builds — check `uptime` / `ps` first), and weight Canterbury's median-of-5
    over Silesia's single pass.
 
-5. **Sanity-check before plotting.** Two independent checks — they catch
-   different failures, so read both:
+5. **Sanity-check before plotting.** Three independent checks — they catch
+   different failures, so read all of them:
+   - **Binary health (untouched-code control).** Before believing any speed
+     delta, check the levels and metrics your PR does NOT touch: they must sit
+     near 1.0x vs BEFORE. A uniform depression on untouched code (e.g. every
+     decode row, or levels whose dispatch is unchanged) means the AFTER binary
+     itself is handicapped, not that the PR regressed — the known cause is a
+     stale `.lake` config (the project CLAUDE.md warning: `run_io` results like
+     `moreLinkArgs` are cached in `.lake` and survive `lake clean`; any
+     temporary lakefile edit or nix/bare shell switch can poison it). Fix with
+     `rm -rf .lake && lake build bench-report` and re-measure. This exact
+     failure produced a 2026-07 graph where untouched levels "slowed" 10-36%
+     and a real 1.4x win was nearly misread — the paired interleaved
+     *decompress* ratio (identical input, untouched decoder) was the
+     discriminator that exposed it.
    - **Output-neutrality (`max |Δratio|`, printed by the plotter).** A PR that
      does not change *output* (a dispatch/escape, a re-timed loop, a proof-side
      refactor) **must** show `max |Δratio| = 0.000000`. A nonzero value means the
