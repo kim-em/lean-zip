@@ -493,6 +493,25 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     unless decomp == data do
       throw (IO.userError s!"arbitrated shared split→FFI inflate mismatch on {name}")
 
+  -- Observation-divergence dispatch (#2737): levels 4–8 route through the
+  -- packed split candidate whenever the heuristic proposes cuts. On the
+  -- heterogeneous input it must (assert, so this test really exercises the
+  -- multi-block dispatch path), and the emitted stream must roundtrip via
+  -- both inflate implementations at every level in the band.
+  unless (Zip.Native.Deflate.chooseSplitsHeuristicP
+      (Zip.Native.Deflate.lzMatchP hetero 6)).length ≥ 1 do
+    throw (IO.userError "chooseSplitsHeuristicP found no cuts on heterogeneous input")
+  for level in [4, 5, 6, 7, 8] do
+    let out := Zip.Native.Deflate.deflateRaw hetero level.toUInt8
+    match Zip.Native.Inflate.inflate out with
+    | .ok result => unless result == hetero do
+        throw (IO.userError s!"deflateRaw({level}) obs-split→native inflate mismatch")
+    | .error e =>
+        throw (IO.userError s!"deflateRaw({level}) obs-split→native inflate failed: {e}")
+    let decomp ← RawDeflate.decompress out
+    unless decomp == hetero do
+      throw (IO.userError s!"deflateRaw({level}) obs-split→FFI inflate mismatch")
+
   -- Stress the many-block cross-reference path: one token per block on a highly
   -- repetitive input, so almost every block references earlier blocks' output.
   let sharedTiny := Zip.Native.Deflate.deflateDynamicBlocksShared textRepeat 1 9

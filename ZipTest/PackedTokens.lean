@@ -74,6 +74,32 @@ private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
         s!"{label} level {level}: deflateDynamicBlockCoreP ({dynP.size} bytes) ≠ \
            deflateDynamicBlockCore ({dynB.size} bytes)")
 
+/-- #2737 gate: the packed observation-divergence split pipeline must match
+    the boxed reference — `chooseSplitsHeuristicP` against
+    `chooseSplitsHeuristic` over the `unpackTok` view (cut-list equality), and
+    `deflateDynamicBlocksSharedAtP` against
+    `deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` (byte identity; the
+    theorem is `deflateDynamicBlocksSharedAtP_eq`,
+    `Zip/Spec/LZ77PackedCorrect.lean`) — at the heuristic's own cuts and at
+    adversarial cut lists (empty, non-monotone/out-of-range, all-ones), which
+    both emitters must clamp identically. -/
+private def checkSplitP (label : String) (data : ByteArray) : IO Unit := do
+  for level in [(4 : UInt8), 6, 8] do
+    let ptoks := lzMatchP data level
+    let toks := ptoks.map unpackTok
+    let cutsP := chooseSplitsHeuristicP ptoks
+    let cutsB := chooseSplitsHeuristic toks
+    unless cutsP == cutsB do
+      throw (IO.userError
+        s!"{label} level {level}: chooseSplitsHeuristicP {cutsP} ≠ boxed {cutsB}")
+    for cuts in [cutsP, ([] : List Nat), [0, 5, 3, 1000000000], [1]] do
+      let splitP := deflateDynamicBlocksSharedAtP data ptoks cuts
+      let splitB := deflateDynamicBlocksSharedAtTokens data toks (fun _ => cuts)
+      unless splitP == splitB do
+        throw (IO.userError
+          s!"{label} level {level}: deflateDynamicBlocksSharedAtP ({splitP.size} bytes) ≠ \
+             boxed reference ({splitB.size} bytes) at cuts {cuts}")
+
 def tests : IO Unit := do
   IO.println "  PackedTokens tests..."
   let alice ← IO.FS.readBinFile "bench/corpora/canterbury/alice29.txt"
@@ -104,6 +130,20 @@ def tests : IO Unit := do
   checkCoresP "size1" (ByteArray.mk #[42])
   checkCoresP "size2" (ByteArray.mk #[42, 42])
   checkCoresP "size3" (ByteArray.mk #[7, 7, 7])
+  -- #2737: packed split pipeline against the boxed reference. The
+  -- heterogeneous input's statistics shift well above the block-byte floor,
+  -- so the packed heuristic must propose at least one cut there (the
+  -- conformance check then covers a real multi-block partition, not just
+  -- the clamping edge cases).
+  let hetero := mkTextData 65536 ++ mkPrngData 65536 ++ mkCyclicData 65536
+  unless (chooseSplitsHeuristicP (lzMatchP hetero 6)).length ≥ 1 do
+    throw (IO.userError "chooseSplitsHeuristicP found no cuts on heterogeneous input")
+  checkSplitP "hetero192k" hetero
+  checkSplitP "alice29" alice
+  checkSplitP "text64k" (mkTextData 65536)
+  checkSplitP "prng64k" (mkPrngData 65536)
+  checkSplitP "size0" ByteArray.empty
+  checkSplitP "size1" (ByteArray.mk #[42])
   IO.println "  PackedTokens tests passed"
 
 end ZipTest.PackedTokens
