@@ -98,71 +98,73 @@ private theorem optimalEmitIter_eq_emit (data : ByteArray) (chLen chDist : Array
           ← Array.append_assoc, Array.push_eq_append]
     · simp only [hpos, ↓reduceDIte, List.toArray, Array.append_empty]
 
-/-- `lz77OptimalIter` produces exactly the same tokens as `lz77Optimal`. -/
-theorem lz77OptimalIter_eq_lz77Optimal (data : ByteArray) :
-    lz77OptimalIter data = lz77Optimal data := by
+/-- `lz77OptimalIter` produces exactly the same tokens as `lz77Optimal`.
+    Generic over the squeeze round count `sq` (the parser threads it opaquely
+    into `computeChoices`; the emitter is unaffected). -/
+theorem lz77OptimalIter_eq_lz77Optimal (data : ByteArray) (sq : Nat) :
+    lz77OptimalIter data sq = lz77Optimal data sq := by
   unfold lz77OptimalIter lz77Optimal
-  obtain ⟨chLen, chDist⟩ := computeChoices data
+  obtain ⟨chLen, chDist⟩ := computeChoices data sq
   dsimp only
   rw [optimalEmitIter_eq_emit]
   simp only [List.append_toArray, List.nil_append]
 
 /-- `lz77Optimal` produces a valid decomposition of the input data. -/
-theorem lz77Optimal_valid (data : ByteArray) :
-    ValidDecomp data 0 (lz77Optimal data).toList := by
+theorem lz77Optimal_valid (data : ByteArray) (sq : Nat) :
+    ValidDecomp data 0 (lz77Optimal data sq).toList := by
   unfold lz77Optimal
-  obtain ⟨chLen, chDist⟩ := computeChoices data
+  obtain ⟨chLen, chDist⟩ := computeChoices data sq
   dsimp only
   exact optimalEmit_valid data chLen chDist 0
 
 /-- Resolving the LZ77 tokens produced by `lz77Optimal` recovers the data. -/
-theorem lz77Optimal_resolves (data : ByteArray) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77Optimal data)) [] =
+theorem lz77Optimal_resolves (data : ByteArray) (sq : Nat) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77Optimal data sq)) [] =
       some data.data.toList :=
-  validDecomp_resolves data _ (lz77Optimal_valid data)
+  validDecomp_resolves data _ (lz77Optimal_valid data sq)
 
 /-- Every token `lz77Optimal` emits satisfies the encoder bounds. -/
-theorem lz77Optimal_encodable (data : ByteArray) :
-    ∀ t ∈ (lz77Optimal data).toList,
+theorem lz77Optimal_encodable (data : ByteArray) (sq : Nat) :
+    ∀ t ∈ (lz77Optimal data sq).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   unfold lz77Optimal
-  obtain ⟨chLen, chDist⟩ := computeChoices data
+  obtain ⟨chLen, chDist⟩ := computeChoices data sq
   intro t ht
   dsimp only at ht
   exact optimalEmit_encodable data chLen chDist 0 t ht
 
 /-- The optimal parser emits no tokens on empty input. -/
-theorem lz77Optimal_empty (data : ByteArray) (hzero : data.size = 0) :
-    lz77Optimal data = #[] := by
+theorem lz77Optimal_empty (data : ByteArray) (sq : Nat) (hzero : data.size = 0) :
+    lz77Optimal data sq = #[] := by
   unfold lz77Optimal
-  obtain ⟨chLen, chDist⟩ := computeChoices data
+  obtain ⟨chLen, chDist⟩ := computeChoices data sq
   dsimp only
   unfold optimalEmit
   simp only [show ¬(0 < data.size) from by omega, ↓reduceDIte, List.toArray]
 
 /-! ## Iterative-version contracts (the runtime entry point) -/
 
-theorem lz77OptimalIter_valid (data : ByteArray) :
-    ValidDecomp data 0 (lz77OptimalIter data).toList := by
-  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_valid data
+theorem lz77OptimalIter_valid (data : ByteArray) (sq : Nat) :
+    ValidDecomp data 0 (lz77OptimalIter data sq).toList := by
+  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_valid data sq
 
-theorem lz77OptimalIter_resolves (data : ByteArray) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalIter data)) [] =
+theorem lz77OptimalIter_resolves (data : ByteArray) (sq : Nat) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalIter data sq)) [] =
       some data.data.toList := by
-  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_resolves data
+  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_resolves data sq
 
-theorem lz77OptimalIter_encodable (data : ByteArray) :
-    ∀ t ∈ (lz77OptimalIter data).toList,
+theorem lz77OptimalIter_encodable (data : ByteArray) (sq : Nat) :
+    ∀ t ∈ (lz77OptimalIter data sq).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
-  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_encodable data
+  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_encodable data sq
 
-theorem lz77OptimalIter_empty (data : ByteArray) (hzero : data.size = 0) :
-    lz77OptimalIter data = #[] := by
-  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_empty data hzero
+theorem lz77OptimalIter_empty (data : ByteArray) (sq : Nat) (hzero : data.size = 0) :
+    lz77OptimalIter data sq = #[] := by
+  rw [lz77OptimalIter_eq_lz77Optimal]; exact lz77Optimal_empty data sq hzero
 
 /-! ## L9-fast parser contracts (#2638)
 

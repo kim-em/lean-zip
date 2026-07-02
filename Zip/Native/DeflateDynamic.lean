@@ -1117,14 +1117,18 @@ def optimalMaxSize : Nat := 67108864
 /-- Cross-block (shared-window) block-split dynamic compression over the
     **near-optimal** token stream: like `deflateDynamicBlocksShared`, but the
     tokens come from the cost-model DP parser (`lz77OptimalIter`) instead of
-    the greedy/lazy matcher. See `Zip.Native.DeflateParse`. -/
-def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray :=
+    the greedy/lazy matcher. See `Zip.Native.DeflateParse`. The `sq` parameter is
+    the extra iterative-squeeze round count of the DP parser: `sq = 0` is the
+    two-round exact crown (level 10); `sq > 0` adds `sq` kept-best squeeze rounds
+    (level 11). Both parses satisfy the same encoder contracts, so the roundtrip
+    proof (`decode_deflateDynamicBlocksOptimal` etc.) is generic over `sq`. -/
+def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) (sq : Nat := 0) : ByteArray :=
   if data.size == 0 then
     let f := tokenFreqs #[]
     (emitDynBlock BitWriter.empty data #[] (dynamicCodeLengths f.1 f.2).1 (dynamicCodeLengths f.1 f.2).2
       (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 true).flush
   else
-    (emitSharedBlocks data (lz77OptimalIter data) tokChunk 0 BitWriter.empty).flush
+    (emitSharedBlocks data (lz77OptimalIter data sq) tokChunk 0 BitWriter.empty).flush
 
 /-- Cross-block split over the **L9-fast** approximate-optimal token stream
     (`lz77OptimalFastIter`, #2638): identical to `deflateDynamicBlocksOptimal`
@@ -1378,14 +1382,23 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- emit `pickSmaller(base, fast-optimal)`.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksOptimalFast data sharedTokChunk)
-    else if 10 ≤ level ∧ data.size ≤ optimalMaxSize then
-      -- Level ≥ 10: the exact backward-DP crown (the former level-9 behaviour,
-      -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
-      -- The fixed-cadence optimal candidate measured strictly smallest on every
-      -- Canterbury and Silesia file, so the split candidates are dropped here;
-      -- `pickSmaller(base, optimal)` is never worse than the lazy baseline.
+    else if level == 10 ∧ data.size ≤ optimalMaxSize then
+      -- Level 10: the exact backward-DP crown (the former level-9 behaviour,
+      -- #2640) — the two-round exact-cost ceiling, kept reachable per the #2638
+      -- directive. The fixed-cadence optimal candidate measured strictly smallest
+      -- on every Canterbury and Silesia file, so the split candidates are dropped
+      -- here; `pickSmaller(base, optimal)` is never worse than the lazy baseline.
       pickSmaller (deflateRawBaseP data ptokens)
         (deflateDynamicBlocksOptimal data sharedTokChunk)
+    else if 11 ≤ level ∧ data.size ≤ optimalMaxSize then
+      -- Level 11: the iterative-squeeze crown — level 10's two-round parse
+      -- followed by `optSqueezeRounds` kept-best refit rounds (zopfli's squeeze).
+      -- A ratio bump of ~0.2-0.4% output bytes over level 10 at ~3x its compress
+      -- time (speed no object at the crown). Same encoder contracts as level 10
+      -- (the DP choice arrays only feed the re-verifying emitter), so the
+      -- roundtrip proof is the same, generic over the squeeze round count.
+      pickSmaller (deflateRawBaseP data ptokens)
+        (deflateDynamicBlocksOptimal data sharedTokChunk optSqueezeRounds)
     else
       -- Level 8 (and level 9/10 above the memory gate): base vs cross-block
       -- shared-window split. The self-contained split is not a candidate here

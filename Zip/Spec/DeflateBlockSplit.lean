@@ -1233,29 +1233,29 @@ matcher contracts (`lzMatch_*`) replaced by the optimal parser's
 (`lz77OptimalIter_*`); the shared-window fold (`emitSharedBlocks_decode`/
 `_decodeR`) is already generic over the token array. -/
 
-private theorem deflateDynamicBlocksOptimal_facts (data : ByteArray)
+private theorem deflateDynamicBlocksOptimal_facts (data : ByteArray) (sq : Nat)
     (hpos : 0 < data.size) :
-    (∀ t ∈ (lz77OptimalIter data).toList,
+    (∀ t ∈ (lz77OptimalIter data sq).toList,
         match t with
         | .literal _ => True
         | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768) ∧
-      0 < (lz77OptimalIter data).size ∧
+      0 < (lz77OptimalIter data sq).size ∧
       Deflate.Spec.resolveLZ77
-        (((lz77OptimalIter data).toList.map
+        (((lz77OptimalIter data sq).toList.map
           LZ77Token.toLZ77Symbol).drop 0) [] = some data.data.toList := by
-  have henc := lz77OptimalIter_encodable data
-  have hwhole := lz77OptimalIter_resolves data
+  have henc := lz77OptimalIter_encodable data sq
+  have hwhole := lz77OptimalIter_resolves data sq
   have hMfree := mem_map_toLZ77Symbol_ne_endOfBlock
-    (lz77OptimalIter data).toList
+    (lz77OptimalIter data sq).toList
   have hM : Deflate.Spec.resolveLZ77
-      ((lz77OptimalIter data).toList.map
+      ((lz77OptimalIter data sq).toList.map
         LZ77Token.toLZ77Symbol) [] = some data.data.toList := by
     simp only [tokensToSymbols] at hwhole
     rwa [Deflate.Spec.resolveLZ77_eobFree_eob _ [] hMfree] at hwhole
   refine ⟨henc, ?_, ?_⟩
-  · rcases Nat.eq_zero_or_pos (lz77OptimalIter data).size with h0 | h0
+  · rcases Nat.eq_zero_or_pos (lz77OptimalIter data sq).size with h0 | h0
     · exfalso
-      have hnil : (lz77OptimalIter data).toList = [] :=
+      have hnil : (lz77OptimalIter data sq).toList = [] :=
         List.eq_nil_of_length_eq_zero (by rw [Array.length_toList]; omega)
       rw [hnil, List.map_nil, Deflate.Spec.resolveLZ77_nil, Option.some.injEq] at hM
       have hl := congrArg List.length hM
@@ -1266,9 +1266,9 @@ private theorem deflateDynamicBlocksOptimal_facts (data : ByteArray)
 
 /-- Near-optimal cross-block roundtrip: decoding the block stream over the
     DP parse reproduces the input. -/
-theorem decode_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) :
+theorem decode_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) (sq : Nat) :
     Deflate.Spec.decode
-      (Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimal data tokChunk)) =
+      (Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimal data tokChunk sq)) =
       some data.data.toList := by
   unfold deflateDynamicBlocksOptimal
   split
@@ -1298,11 +1298,11 @@ theorem decode_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) :
       rcases Nat.eq_zero_or_pos data.size with h | h
       · rw [h] at hz; simp at hz
       · exact h
-    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimal_facts data hpos
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimal_facts data sq hpos
     obtain ⟨B, htoBits, hwf, hdec⟩ :=
-      emitSharedBlocks_decode data (lz77OptimalIter data)
+      emitSharedBlocks_decode data (lz77OptimalIter data sq)
         tokChunk (by omega) henc
-        (lz77OptimalIter data).size 0 []
+        (lz77OptimalIter data sq).size 0 []
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     rw [BitWriter.empty_toBits, List.nil_append] at htoBits
     rw [flush_toBits_aligned _ hwf, htoBits]
@@ -1310,22 +1310,22 @@ theorem decode_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) :
 
 /-- Near-optimal cross-block roundtrip: inflating `deflateDynamicBlocksOptimal`
     recovers the input, for any `maxOutputSize` large enough to hold it. -/
-theorem inflate_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat)
+theorem inflate_deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) (sq : Nat)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksOptimal data tokChunk) maxOutputSize =
+    Zip.Native.Inflate.inflateReference (deflateDynamicBlocksOptimal data tokChunk sq) maxOutputSize =
       .ok data := by
   have hlen : data.data.toList.length ≤ maxOutputSize := by
     simp only [Array.length_toList, ByteArray.size_data]; omega
   rw [← show ByteArray.mk ⟨data.data.toList⟩ = data from by simp only [Array.toArray_toList]]
-  exact inflate_complete (deflateDynamicBlocksOptimal data tokChunk) data.data.toList
-    maxOutputSize hlen (decode_deflateDynamicBlocksOptimal data tokChunk)
+  exact inflate_complete (deflateDynamicBlocksOptimal data tokChunk sq) data.data.toList
+    maxOutputSize hlen (decode_deflateDynamicBlocksOptimal data tokChunk sq)
 
 /-- The `decode.goR` of `deflateDynamicBlocksOptimal` returns the input and
     short (< 8-bit) trailing padding. -/
-theorem deflateDynamicBlocksOptimal_goR_pad (data : ByteArray) (tokChunk : Nat) :
+theorem deflateDynamicBlocksOptimal_goR_pad (data : ByteArray) (tokChunk : Nat) (sq : Nat) :
     ∃ remaining,
       Deflate.Spec.decode.goR
-          (Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimal data tokChunk)) []
+          (Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimal data tokChunk sq)) []
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateDynamicBlocksOptimal
   split
@@ -1358,11 +1358,11 @@ theorem deflateDynamicBlocksOptimal_goR_pad (data : ByteArray) (tokChunk : Nat) 
       rcases Nat.eq_zero_or_pos data.size with h | h
       · rw [h] at hz; simp at hz
       · exact h
-    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimal_facts data hpos
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimal_facts data sq hpos
     obtain ⟨B, htoBits, hwf, hdec⟩ :=
-      emitSharedBlocks_decodeR data (lz77OptimalIter data)
+      emitSharedBlocks_decodeR data (lz77OptimalIter data sq)
         tokChunk (by omega) henc
-        (lz77OptimalIter data).size 0 []
+        (lz77OptimalIter data sq).size 0 []
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     rw [BitWriter.empty_toBits, List.nil_append] at htoBits
     rw [flush_toBits_aligned _ hwf, htoBits]
@@ -1371,9 +1371,9 @@ theorem deflateDynamicBlocksOptimal_goR_pad (data : ByteArray) (tokChunk : Nat) 
 
 /-- The output of `deflateDynamicBlocksOptimal` decomposes into content bits
     plus short (< 8-bit) padding. -/
-theorem deflateDynamicBlocksOptimal_pad (data : ByteArray) (tokChunk : Nat) :
+theorem deflateDynamicBlocksOptimal_pad (data : ByteArray) (tokChunk : Nat) (sq : Nat) :
     ∃ (contentBits padding : List Bool),
-      Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimal data tokChunk) =
+      Deflate.Spec.bytesToBits (deflateDynamicBlocksOptimal data tokChunk sq) =
         contentBits ++ padding ∧ padding.length < 8 := by
   unfold deflateDynamicBlocksOptimal
   split
@@ -1385,11 +1385,11 @@ theorem deflateDynamicBlocksOptimal_pad (data : ByteArray) (tokChunk : Nat) :
       rcases Nat.eq_zero_or_pos data.size with h | h
       · rw [h] at hz; simp at hz
       · exact h
-    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimal_facts data hpos
+    obtain ⟨henc, htokpos, hres0⟩ := deflateDynamicBlocksOptimal_facts data sq hpos
     obtain ⟨B, _, hwf, _⟩ :=
-      emitSharedBlocks_decode data (lz77OptimalIter data)
+      emitSharedBlocks_decode data (lz77OptimalIter data sq)
         tokChunk (by omega) henc
-        (lz77OptimalIter data).size 0 []
+        (lz77OptimalIter data sq).size 0 []
         data.data.toList BitWriter.empty (by omega) htokpos BitWriter.empty_wf hres0
     exact ⟨_, _, flush_toBits_aligned _ hwf, by simp only [List.length_replicate]; omega⟩
 

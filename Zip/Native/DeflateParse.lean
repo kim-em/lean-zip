@@ -828,7 +828,8 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
     (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
-    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size)
+    (sq : Nat) :
     Array Nat × Array Nat × Array Nat × Array Nat :=
   let cache := buildCache data hashTable prev
     depth slots base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
@@ -863,16 +864,28 @@ def fillRegionRounds (data : ByteArray) (depth slots base r : Nat)
   have hchD1 : data.size ≤ res1.2.size :=
     Nat.le_trans hchD (Nat.le_of_eq (fillRegion_snd_size data base r slots cacheLens cacheDists
       slit slen sdist r cost chLen chDist hr hslit hcost1 (Nat.le_refl r) hcl hcd).symm)
-  -- rounds 2..: iterative squeeze. Refit the exact cost model to the current
-  -- parse, re-run the DP, and keep the cheapest parse across rounds (zopfli's
-  -- squeeze, kept-best). Seeded with round 1's parse and its own-model cost so a
-  -- squeeze that never improves still returns round 1 unchanged.
-  let toks := collectRegionTokens data res1.1 res1.2 (base + r) base #[] hchL1 hchD1
-  let fitted := fittedCostTables toks
-  let cost1 := tokensCost fitted.1 fitted.2.1 fitted.2.2 toks
-  let sq := squeezeLoop data base r slots cacheLens cacheDists
-    res1.1 res1.2 res1.1 res1.2 cost1 hr hchL1 hchD1 hchL1 hchD1 hcl hcd optSqueezeRounds
-  (hashTable, prev, sq.1, sq.2)
+  -- round 2 = one `squeezeStep` from round 1's parse (refit the exact cost model
+  -- to round 1 and re-run the DP). This is the level-10 crown's endpoint: `sq = 0`
+  -- returns it unchanged below, byte-identical to the former two-round crown.
+  -- Reusing `squeezeStep` keeps its computed cost tables opaque, so the round-2
+  -- size proof goes through the cheap `squeezeStep_*_size` lemmas — proving
+  -- `res2.1.size` directly over the *computed* fitted tables blows elaboration
+  -- past 25 GB (the same trap `squeezeStepCore` exists to avoid).
+  let step2 := squeezeStep data base r slots cacheLens cacheDists res1.1 res1.2
+    hr hchL1 hchD1 hcl hcd
+  have hL2 : data.size ≤ step2.1.size := Nat.le_trans hchL1
+    (Nat.le_of_eq (squeezeStep_fst_size data base r slots cacheLens cacheDists
+      res1.1 res1.2 hr hchL1 hchD1 hcl hcd).symm)
+  have hD2 : data.size ≤ step2.2.1.size := Nat.le_trans hchD1
+    (Nat.le_of_eq (squeezeStep_snd_size data base r slots cacheLens cacheDists
+      res1.1 res1.2 hr hchL1 hchD1 hcl hcd).symm)
+  -- rounds 3..: iterative squeeze from round 2's parse (the level-11 tier; `sq`
+  -- is the added kept-best round count, `optSqueezeRounds`). Seeded with round 2's
+  -- parse and its own-model score (`step2.2.2`), so `sq = 0` returns round 2
+  -- unchanged (= level 10) and `sq > 0` explores further (level 11).
+  let sqres := squeezeLoop data base r slots cacheLens cacheDists
+    step2.1 step2.2.1 step2.1 step2.2.1 step2.2.2 hr hL2 hD2 hL2 hD2 hcl hcd sq
+  (hashTable, prev, sqres.1, sqres.2)
 
 /-- `fillRegionRounds` only `set!`s the choice arrays (round 1 plus the squeeze
     rounds, all through `fillRegion`), so it preserves their sizes. -/
@@ -880,21 +893,21 @@ private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots base
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
     (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
-    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (sq : Nat) :
     (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
-      hr hslit hchL hchD).2.2.1.size = chLen.size := by
+      hr hslit hchL hchD sq).2.2.1.size = chLen.size := by
   unfold fillRegionRounds
-  simp only [squeezeLoop_fst_size, fillRegion_fst_size]
+  simp only [squeezeLoop_fst_size, squeezeStep_fst_size, fillRegion_fst_size]
 
 private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
     (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
-    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (sq : Nat) :
     (fillRegionRounds data depth slots base r slit slen sdist hashTable prev chLen chDist
-      hr hslit hchL hchD).2.2.2.size = chDist.size := by
+      hr hslit hchL hchD sq).2.2.2.size = chDist.size := by
   unfold fillRegionRounds
-  simp only [squeezeLoop_snd_size, fillRegion_snd_size]
+  simp only [squeezeLoop_snd_size, squeezeStep_snd_size, fillRegion_snd_size]
 
 /-- Region driver for `computeChoices`: regions advance by
     `min regionSize (data.size - base)` bytes; the hash-chain state persists
@@ -912,7 +925,7 @@ private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots bas
 private def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat) (base : Nat)
     (chLen chDist : Array Nat) (hslit : 256 ≤ slit.size)
-    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (fuel : Nat) :
+    (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (sq : Nat) (fuel : Nat) :
     Array Nat × Array Nat :=
   match fuel with
   | 0 => (chLen, chDist)
@@ -921,28 +934,28 @@ private def computeChoicesLoop (data : ByteArray) (depth slots regionSize : Nat)
       let r := min regionSize (data.size - base)
       have hr : base + r ≤ data.size := by omega
       let result := fillRegionRounds data depth slots base r
-        slit slen sdist hashTable prev chLen chDist hr hslit hchL hchD
+        slit slen sdist hashTable prev chLen chDist hr hslit hchL hchD sq
       have hchL' : data.size ≤ result.2.2.1.size := Nat.le_trans hchL
         (Nat.le_of_eq (fillRegionRounds_chLen_size data depth slots base r slit slen sdist
-          hashTable prev chLen chDist hr hslit hchL hchD).symm)
+          hashTable prev chLen chDist hr hslit hchL hchD sq).symm)
       have hchD' : data.size ≤ result.2.2.2.size := Nat.le_trans hchD
         (Nat.le_of_eq (fillRegionRounds_chDist_size data depth slots base r slit slen sdist
-          hashTable prev chLen chDist hr hslit hchL hchD).symm)
+          hashTable prev chLen chDist hr hslit hchL hchD sq).symm)
       computeChoicesLoop data depth slots regionSize slit slen sdist result.1 result.2.1
-        (base + r) result.2.2.1 result.2.2.2 hslit hchL' hchD' fuel
+        (base + r) result.2.2.1 result.2.2.2 hslit hchL' hchD' sq fuel
     else (chLen, chDist)
 
 /-- Compute the global DP choice arrays for the whole input: per region,
     build the candidate cache and run the two-round backward DP. Defaults
     `(1, 0)` = literal everywhere, so unfilled entries are always safe.
     Heuristic only: consumed by the re-verifying emitter `optimalEmit`. -/
-def computeChoices (data : ByteArray) : Array Nat × Array Nat :=
+def computeChoices (data : ByteArray) (sq : Nat := 0) : Array Nat × Array Nat :=
   let st := staticCostTables
   computeChoicesLoop data optChainDepth optCacheSlots optRegionSize st.1 st.2.1 st.2.2
     (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
     0 (Array.replicate data.size 1) (Array.replicate data.size 0)
     (by have h : st.1.size = 256 := staticCostTables_fst_size; omega)
-    (by simp) (by simp) data.size
+    (by simp) (by simp) sq data.size
 
 /-! ## Token emission (the proof-bearing boundary)
 
@@ -1004,14 +1017,14 @@ decreasing_by all_goals omega
 /-- Near-optimal LZ77 parse: cost-model backward DP over the candidate
     cache, then re-verified emission. List-backed reference version (the
     proofs' subject); `lz77OptimalIter` is the runtime entry point. -/
-def lz77Optimal (data : ByteArray) : Array LZ77Token :=
-  let (chLen, chDist) := computeChoices data
+def lz77Optimal (data : ByteArray) (sq : Nat := 0) : Array LZ77Token :=
+  let (chLen, chDist) := computeChoices data sq
   (optimalEmit data chLen chDist 0).toArray
 
 /-- Runtime entry point: same tokens as `lz77Optimal` (proven in
     `LZ77OptimalCorrect`), tail-recursive emission. -/
-def lz77OptimalIter (data : ByteArray) : Array LZ77Token :=
-  let (chLen, chDist) := computeChoices data
+def lz77OptimalIter (data : ByteArray) (sq : Nat := 0) : Array LZ77Token :=
+  let (chLen, chDist) := computeChoices data sq
   optimalEmitIter data chLen chDist 0 #[]
 
 /-! ## L9-fast parser (#2638): a cheaper approximate-optimal parse
