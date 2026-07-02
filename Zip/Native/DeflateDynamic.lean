@@ -548,9 +548,24 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
 /-- Hash-chain search depth per compression level (levels ≥ 5). Higher levels
     search deeper for longer matches (better ratio on diverse input) at higher
     cost; the `chainWalk` early-stop keeps repetitive input fast at any depth.
-    The ratio gain saturates around 256–512 (measured), so level 9 caps there. -/
+    The ratio gain saturates around 256–512 (measured), so level 9 caps there.
+
+    Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
+    `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
+    `ZipL1Attrib`/`ZipL1Sweep`) showed L1 is emit-bound — the token walk +
+    `BitWriter` dominate, and fixed-only emission is *not* materially faster than
+    the dynamic-arbitrated base while giving up 6.5–25% ratio, so fixed-only was
+    rejected. Shallowing the chain (8→4) alongside a lighter insert cap
+    (`insertCap`, 16→4) is the precedented fast policy that keeps the normal
+    stored/static/dynamic arbitration: +13% end-to-end MB/s on Silesia (56.4→63.9,
+    in-binary A/B on a quiet pinned core) at a +2.8% geomean-ratio cost
+    (0.347→0.356 — still *below* the 0.38–0.40 fast-band ceiling the issue targets,
+    so ratio headroom remains), every file same-or-faster, worst single-file ratio
+    regression +6.3%. A measured more aggressive point exists (`insertCap = 2`:
+    +18% e2e at ratio 0.361, worst file +8.6%) if the fast corner should trade
+    nearer the ceiling. -/
 def chainDepth (level : UInt8) : Nat :=
-  if level ≤ 1 then 8
+  if level ≤ 1 then 4
   else if level ≤ 2 then 16
   else if level ≤ 3 then 32
   else if level ≤ 4 then 48
@@ -562,12 +577,16 @@ def chainDepth (level : UInt8) : Nat :=
 
 /-- Per-level interior-insertion cap (zlib's `deflate_fast`/`deflate_slow` split):
     fast levels (1–3) defer most interior `updateHashes` insertions for speed at a
-    ratio cost; levels ≥ 4 insert every position (best ratio). A `cap` below ~16
-    is counterproductive end-to-end — the worse ratio inflates the token count and
-    the Huffman encode dominates — so the fastest level uses `cap = 16`. The chain
-    is a heuristic, so any cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
+    ratio cost; levels ≥ 4 insert every position (best ratio). Level 1 uses the
+    aggressive `deflate_fast` cap of `4` (#2726): a re-measured Silesia sweep
+    (`ZipL1Sweep`) showed the older `cap = 16` claim ("below ~16 is
+    counterproductive") no longer holds for the packed emit path — at chain depth
+    4, `cap = 4` is +8% end-to-end vs `cap = 16` because the interior-insertion
+    saving outweighs the slightly higher token count the worse ratio produces
+    (the emit walk is the bound, not the cap). The chain is a heuristic, so any
+    cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
 def insertCap (level : UInt8) : Nat :=
-  if level ≤ 1 then 16
+  if level ≤ 1 then 4
   else if level ≤ 2 then 32
   else if level ≤ 3 then 64
   else 1000000000
