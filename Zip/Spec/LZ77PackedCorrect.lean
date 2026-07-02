@@ -1,6 +1,7 @@
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
 import Zip.Spec.EmitPackedCorrect
+import Zip.Spec.HtMatchCorrect
 import Zip.Native.DeflateDynamic
 
 /-!
@@ -157,8 +158,10 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     lzMatchP data level = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
   split
-  · exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level)
-  · exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level)
+  · exact htMatchIterP_eq data 32768
+  · split
+    · exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+    · exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
     stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
@@ -167,10 +170,12 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
   split
-  · exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level)
-      (by omega) (by omega)
-  · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level)
-      (by omega) (by omega)
+  · exact htMatchIterP_map data 32768 (by omega) (by omega)
+  · split
+    · exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+        (by omega) (by omega)
+    · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level)
+        (by omega) (by omega)
 
 /-! ## Stages B+C: the packed base candidate equals the boxed one
 

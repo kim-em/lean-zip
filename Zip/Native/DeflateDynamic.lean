@@ -598,14 +598,17 @@ def goodMatch (level : UInt8) : Nat :=
   if level ≤ 6 then 8
   else 259
 
-/-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
-    greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
-    lazy variant, which improves ratio at equal window/chain depth. Both share the
-    same `(chainDepth, insertCap)` ladder and satisfy the same encoder contracts
-    (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the choice is
-    transparent to the roundtrip proof. -/
+/-- The per-level LZ77 matcher: level ≤ 1 uses the chainless 2-way-bucket
+    matcher (`htMatchIter`, libdeflate `ht_matchfinder` style, #2738) — two
+    bounded probes per position, min match 4, no chain walk or interior
+    insertion; levels 2–3 (`deflate_fast`) use the greedy hash-chain matcher;
+    levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead lazy variant, which
+    improves ratio at equal window/chain depth. All three satisfy the same
+    encoder contracts (`lzMatch_{encodable,empty,resolves}` in
+    `DeflateBlockSplit`), so the choice is transparent to the roundtrip proof. -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+  if level ≤ 1 then htMatchIter data 32768
+  else if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -614,7 +617,8 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
-  if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+  if level ≤ 1 then htMatchIterP data 32768
+  else if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level) (goodMatch level)
   else lz77ChainIterP data (chainDepth level) 32768 (insertCap level)
 
 /-! ## Self-contained block-split dynamic compression
