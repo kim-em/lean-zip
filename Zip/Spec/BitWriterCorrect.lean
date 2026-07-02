@@ -242,7 +242,7 @@ private theorem writeBits_spec (bw : BitWriter) (n : Nat) (val : UInt32)
   obtain ⟨hb, hw⟩ := flushAcc_spec bw.data _ (bw.bitCount.toNat + n) haccbound
   refine ⟨?_, ?_⟩
   · -- toBits
-    simp only [writeBits]
+    rw [writeBits_def]
     rw [hb, hacc_nat]
     simp only [toBits, List.append_assoc]
     congr 1
@@ -261,7 +261,7 @@ private theorem writeBits_spec (bw : BitWriter) (n : Nat) (val : UInt32)
       rw [Nat.add_comm i bw.bitCount.toNat,
         testBit_or_shiftLeft_above _ _ _ _ hbuf, Nat.testBit_mod_two_pow]
       simp only [hi, decide_true, Bool.true_and]
-  · simp only [writeBits]; exact hw
+  · rw [writeBits_def]; exact hw
 
 theorem writeBits_toBits (bw : BitWriter) (n : Nat) (val : UInt32)
     (hwf : bw.wf) (hn : n ≤ 25) :
@@ -356,7 +356,7 @@ private theorem writeHuffCode_spec (bw : BitWriter) (code : UInt16) (len : UInt8
     exact or_shiftLeft_lt bw.bitBuf.toNat _ bw.bitCount.toNat len.toNat hbuf hrev_lt
   obtain ⟨hb, hw⟩ := flushAcc_spec bw.data _ (bw.bitCount.toNat + len.toNat) haccbound
   refine ⟨?_, ?_⟩
-  · simp only [writeHuffCode]
+  · rw [writeHuffCode_def]
     rw [hb, hacc_nat]
     simp only [toBits, List.append_assoc]
     congr 1
@@ -375,7 +375,7 @@ private theorem writeHuffCode_spec (bw : BitWriter) (code : UInt16) (len : UInt8
       simp only [List.mem_range] at hi
       rw [Nat.add_comm i bw.bitCount.toNat, testBit_or_shiftLeft_above _ _ _ _ hbuf,
         hrev_bit i hi]
-  · simp only [writeHuffCode]; exact hw
+  · rw [writeHuffCode_def]; exact hw
 
 theorem writeHuffCode_toBits (bw : BitWriter) (code : UInt16) (len : UInt8)
     (hwf : bw.wf) (hlen : len.toNat ≤ 15) :
