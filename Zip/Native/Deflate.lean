@@ -1423,6 +1423,169 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-! ## Chainless 2-way-bucket L1 matcher (libdeflate `ht_matchfinder` style)
+
+For the fast (level ≤ 1) corner, `htMatch` drops the hash *chain* entirely
+(the chain walk + interior-insertion loop were ~47% of L1 cycles, #2738) in
+favour of libdeflate's `ht_matchfinder` scheme: a single hash table with
+**two positions per bucket** (`tbl[2*h]` = most-recent, `tbl[2*h+1]` =
+second-most-recent), **minimum match length 4** (skips the marginal length-3
+matches), and an early-out once a probe reaches **`niceLen = 32`**. Per
+position it does at most two bounded `countMatch` probes and one bucket
+rotation (`lru := mru; mru := pos`) — no `prev` array, no fuel loop, no
+per-match interior insertion.
+
+Like the chain, the table is a pure *heuristic for finding* candidates:
+validity is re-established at emission by `countMatch` + the explicit
+`cand < pos` / `pos - cand ≤ windowSize` window guards (in `htBest`), so the
+table contents never enter the correctness proof. Buckets are initialised to
+the sentinel `data.size` (≥ every real position), so an unset slot fails the
+`cand < pos` guard and contributes no match. `htMatch` (recursive, for
+proofs), `htMatchIter` (iterative boxed, `htMatchIter_eq_htMatch`) and
+`htMatchIterP` (packed, `htMatchIterP_eq`) are the greedy-matcher triple;
+correctness lives in `Zip/Spec/HtMatchCorrect.lean`. -/
+
+/-- Consider one candidate position `cand` against the running best match
+    `(bestLen, bestPos)`: when `cand` is a valid in-window backward position,
+    count its match length against `pos` and keep it if strictly longer. The
+    table is a heuristic, so this only ever refines the best toward a
+    `countMatch`-verified real match (`htBest_spec`). -/
+@[inline] def htBest (data : ByteArray) (windowSize pos maxLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand bestLen bestPos : Nat) : Nat × Nat :=
+  if hc : cand < pos ∧ pos - cand ≤ windowSize then
+    have hcand : cand + maxLen ≤ data.size := by omega
+    let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
+    if ml > bestLen then (ml, cand) else (bestLen, bestPos)
+  else (bestLen, bestPos)
+
+/-- Probe the two bucket entries `c0` (most-recent) then `c1`, keeping the
+    longer match; the `niceLen` early-out skips the second probe once the first
+    already reaches a "good enough" length. Returns `(bestLen, bestPos)` with
+    `bestLen = 0` when neither entry yields a match (`htProbe_spec`). -/
+@[inline] def htProbe (data : ByteArray) (windowSize pos maxLen niceLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (c0 c1 : Nat) : Nat × Nat :=
+  let r0 := htBest data windowSize pos maxLen hpm c0 0 0
+  if r0.1 ≥ niceLen then r0
+  else htBest data windowSize pos maxLen hpm c1 r0.1 r0.2
+
+/-- Recursive reference form of the chainless 2-way-bucket matcher (proofs
+    only; `htMatchIter`/`htMatchIterP` are the stack-safe runtime twins).
+    `hashSize` is the number of buckets, so the table holds `2 * hashSize`
+    positions. -/
+def htMatch (data : ByteArray) (windowSize : Nat := 32768) : Array LZ77Token :=
+  if data.size < 3 then
+    (lz77Greedy.trailing data 0).toArray
+  else
+    (mainLoop data windowSize 32768 32 (.replicate (2 * 32768) data.size) 0).toArray
+where
+  mainLoop (data : ByteArray) (windowSize hashSize niceLen : Nat)
+      (tbl : Array Nat) (pos : Nat) : List LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let c0 := tbl[2 * h]!
+      let c1 := tbl[2 * h + 1]!
+      let tbl := tbl.set! (2 * h + 1) c0
+      let tbl := tbl.set! (2 * h) pos
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let m := htProbe data windowSize pos maxLen niceLen hmaxLenP c0 c1
+      let matchLen := m.1
+      let matchPos := m.2
+      if hge : matchLen ≥ 4 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          .reference matchLen (pos - matchPos) ::
+            mainLoop data windowSize hashSize niceLen tbl (pos + matchLen)
+        else
+          .literal (data[pos]'(by omega)) ::
+            mainLoop data windowSize hashSize niceLen tbl (pos + 1)
+      else
+        .literal (data[pos]'(by omega)) ::
+          mainLoop data windowSize hashSize niceLen tbl (pos + 1)
+    else
+      lz77Greedy.trailing data pos
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- Iterative (tail-recursive, `Array`-accumulating) form of `htMatch`: same
+    output, stack-safe on large inputs. The hot per-position table reads/writes
+    go through `headProbeGuarded`/`guardedSet` (one runtime bounds check each,
+    provably equal to the panic-checked ops), so `htMatchIter_eq_htMatch`
+    rewrites them back and proceeds by the accumulator induction. -/
+def htMatchIter (data : ByteArray) (windowSize : Nat := 32768) : Array LZ77Token :=
+  if data.size < 3 then
+    lz77GreedyIter.trailing data 0 #[]
+  else
+    mainLoop data windowSize 32768 32 (.replicate (2 * 32768) data.size) 0 #[]
+where
+  mainLoop (data : ByteArray) (windowSize hashSize niceLen : Nat)
+      (tbl : Array Nat) (pos : Nat) (acc : Array LZ77Token) : Array LZ77Token :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let c0 := headProbeGuarded tbl (2 * h)
+      let c1 := headProbeGuarded tbl (2 * h + 1)
+      let tbl := guardedSet tbl (2 * h + 1) c0
+      let tbl := guardedSet tbl (2 * h) pos
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let m := htProbe data windowSize pos maxLen niceLen hmaxLenP c0 c1
+      let matchLen := m.1
+      let matchPos := m.2
+      if hge : matchLen ≥ 4 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          mainLoop data windowSize hashSize niceLen tbl (pos + matchLen)
+            (acc.push (.reference matchLen (pos - matchPos)))
+        else
+          mainLoop data windowSize hashSize niceLen tbl (pos + 1)
+            (acc.push (.literal (data[pos]'(by omega))))
+      else
+        mainLoop data windowSize hashSize niceLen tbl (pos + 1)
+          (acc.push (.literal (data[pos]'(by omega))))
+    else
+      lz77GreedyIter.trailing data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
+/-- Packed-token twin of `htMatchIter` (`Array UInt32` accumulator, `packTok`
+    at each push): identical control flow and table state. Equal to
+    `(htMatchIter ..).map packTok` (`htMatchIterP_eq`). -/
+def htMatchIterP (data : ByteArray) (windowSize : Nat := 32768) : Array UInt32 :=
+  if data.size < 3 then
+    trailingP data 0 #[]
+  else
+    mainLoop data windowSize 32768 32 (.replicate (2 * 32768) data.size) 0
+      (Array.emptyWithCapacity data.size)
+where
+  mainLoop (data : ByteArray) (windowSize hashSize niceLen : Nat)
+      (tbl : Array Nat) (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let c0 := headProbeGuarded tbl (2 * h)
+      let c1 := headProbeGuarded tbl (2 * h + 1)
+      let tbl := guardedSet tbl (2 * h + 1) c0
+      let tbl := guardedSet tbl (2 * h) pos
+      let maxLen := min 258 (data.size - pos)
+      have hmaxLenP : pos + maxLen ≤ data.size := by omega
+      let m := htProbe data windowSize pos maxLen niceLen hmaxLenP c0 c1
+      let matchLen := m.1
+      let matchPos := m.2
+      if hge : matchLen ≥ 4 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          mainLoop data windowSize hashSize niceLen tbl (pos + matchLen)
+            (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          mainLoop data windowSize hashSize niceLen tbl (pos + 1)
+            (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        mainLoop data windowSize hashSize niceLen tbl (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      trailingP data pos acc
+  termination_by data.size - pos
+  decreasing_by all_goals omega
+
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
   if h : i < tokens.size then
