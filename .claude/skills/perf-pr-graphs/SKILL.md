@@ -224,11 +224,13 @@ artifacts move into `$W`.
    - **Non-empty → `latest.json` is stale** (older history that predates this
      in-PR-refresh policy). The refresh this PR does in step 8 *fixes* the
      invariant going forward, but it cannot reconstruct the merge-base BEFORE.
-     Recover a correct BEFORE with a one-off merge-base build (`git worktree add
-     --detach $W/before $base && ( cd $W/before && lake build bench-report &&
-     bash bench/pin_core.sh lake env .lake/build/bin/bench-report --native-only $W/perf_before.json )`,
+     Recover a correct BEFORE with a one-off merge-base build (`R=$(pwd) &&
+     git worktree add --detach $W/before $base && ( cd $W/before &&
+     lake build bench-report && bash "$R/bench/pin_core.sh" lake env
+     .lake/build/bin/bench-report --native-only $W/perf_before.json )`,
      then `git worktree remove --force $W/before`) and pass
-     `$W/perf_before.json` as BEFORE.
+     `$W/perf_before.json` as BEFORE. Note `pin_core.sh` is taken from *this*
+     branch's checkout (`$R`): the merge base may predate it.
 
    **Cross-session caveat.** BEFORE (recorded earlier) and AFTER (measured now)
    are different sessions, so a small single-digit-% speed delta can be
