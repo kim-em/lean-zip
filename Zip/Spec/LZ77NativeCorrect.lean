@@ -144,6 +144,113 @@ theorem ByteArray.ugetUInt64LE_eq_bytes (data : ByteArray) (o1 o2 : USize)
   · exact e6
   · exact e7
 
+/-! ### Locating the first mismatching byte with count-trailing-zeros (#2736)
+
+On a word mismatch `goUW` returns `i + (ctz (w1 ^^^ w2) >>> 3)` — the first
+differing byte located directly from the trailing-zero count of the XOR, with no
+re-scan. These lemmas prove that offset is exactly the first index at which the
+two eight-byte windows disagree, so `go` (the per-byte loop) stops there too. The
+byte-level facts are `bv_decide` over the `ugetUInt64LE` recombination and
+`BitVec.ctz`. -/
+
+/-- `ctz x >>> 3` (the byte index of the lowest set bit) is below 8 for nonzero
+    `x`: `ctz x < 64`, and dividing by eight keeps it under eight. -/
+theorem BitVec.ctz_ushiftRight3_lt_eight (D : BitVec 64) (h : D ≠ 0#64) :
+    (BitVec.ctz D >>> 3#64).toNat < 8 := by
+  have h1 : (BitVec.ctz D).toNat < 64 := by
+    have hh := (BitVec.ctz_lt_iff_ne_zero (x := D)).mpr h
+    simpa [BitVec.lt_def] using hh
+  have h2 : (BitVec.ctz D >>> 3#64).toNat = (BitVec.ctz D).toNat >>> (3#64).toNat := by
+    simp [BitVec.toNat_ushiftRight]
+  have h3 : (3#64 : BitVec 64).toNat = 3 := by decide
+  rw [h2, h3, Nat.shiftRight_eq_div_pow]; omega
+
+/-- For the XOR `D` of two little-endian eight-byte recombinations, the byte index
+    `ctz D >>> 3` marks the first disagreement: every byte strictly before it
+    agrees (prefix conjuncts) and the byte at it differs (mismatch conjuncts).
+    Each component is a `bv_decide` bit-blast of `ctz`, the shift, and the
+    recombination. -/
+theorem UInt64.recomb8LE_ctz
+    (a0 a1 a2 a3 a4 a5 a6 a7 b0 b1 b2 b3 b4 b5 b6 b7 : UInt8) (D : BitVec 64)
+    (hD : D = ((a0.toUInt64 ||| a1.toUInt64 <<< 8 ||| a2.toUInt64 <<< 16 ||| a3.toUInt64 <<< 24 |||
+          a4.toUInt64 <<< 32 ||| a5.toUInt64 <<< 40 ||| a6.toUInt64 <<< 48 ||| a7.toUInt64 <<< 56) ^^^
+         (b0.toUInt64 ||| b1.toUInt64 <<< 8 ||| b2.toUInt64 <<< 16 ||| b3.toUInt64 <<< 24 |||
+          b4.toUInt64 <<< 32 ||| b5.toUInt64 <<< 40 ||| b6.toUInt64 <<< 48 ||| b7.toUInt64 <<< 56)).toBitVec) :
+    ((0#64) < BitVec.ctz D >>> 3#64 → a0 = b0) ∧ ((1#64) < BitVec.ctz D >>> 3#64 → a1 = b1) ∧
+    ((2#64) < BitVec.ctz D >>> 3#64 → a2 = b2) ∧ ((3#64) < BitVec.ctz D >>> 3#64 → a3 = b3) ∧
+    ((4#64) < BitVec.ctz D >>> 3#64 → a4 = b4) ∧ ((5#64) < BitVec.ctz D >>> 3#64 → a5 = b5) ∧
+    ((6#64) < BitVec.ctz D >>> 3#64 → a6 = b6) ∧
+    (BitVec.ctz D >>> 3#64 = 0#64 → a0 ≠ b0) ∧ (BitVec.ctz D >>> 3#64 = 1#64 → a1 ≠ b1) ∧
+    (BitVec.ctz D >>> 3#64 = 2#64 → a2 ≠ b2) ∧ (BitVec.ctz D >>> 3#64 = 3#64 → a3 ≠ b3) ∧
+    (BitVec.ctz D >>> 3#64 = 4#64 → a4 ≠ b4) ∧ (BitVec.ctz D >>> 3#64 = 5#64 → a5 ≠ b5) ∧
+    (BitVec.ctz D >>> 3#64 = 6#64 → a6 ≠ b6) ∧ (BitVec.ctz D >>> 3#64 = 7#64 → a7 ≠ b7) := by
+  subst hD
+  refine ⟨?_,?_,?_,?_,?_,?_,?_, ?_,?_,?_,?_,?_,?_,?_,?_⟩ <;> bv_decide
+
+/-- Cast a `Nat` `<` on `(ctz D >>> 3).toNat` to the `BitVec` order the
+    `recomb8LE_ctz` prefix conjuncts expect. -/
+theorem ctzD_lt_ofNat (D : BitVec 64) (m : Nat) (hm : m < 64)
+    (h : m < (BitVec.ctz D >>> 3#64).toNat) : (BitVec.ofNat 64 m) < BitVec.ctz D >>> 3#64 := by
+  rw [BitVec.lt_def, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by omega)]; exact h
+
+/-- Cast a `Nat` value of `(ctz D >>> 3).toNat` to the `BitVec` equation the
+    `recomb8LE_ctz` mismatch conjuncts expect. -/
+theorem ctzD_eq_ofNat (D : BitVec 64) (m : Nat) (hm : m < 64)
+    (h : (BitVec.ctz D >>> 3#64).toNat = m) : BitVec.ctz D >>> 3#64 = BitVec.ofNat 64 m := by
+  apply BitVec.eq_of_toNat_eq; rw [h, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (by omega)]
+
+set_option maxHeartbeats 1600000 in
+/-- The count-trailing-zeros offset `k = ctz (w1 ^^^ w2) >>> 3` of two differing
+    `ugetUInt64LE` words at `o1`, `o2` is the first mismatching byte: `k < 8`,
+    every byte before `k` agrees, and byte `k` differs. This is the correctness
+    core of `goUW`'s word-mismatch branch. -/
+theorem ByteArray.ugetUInt64LE_ctz_first_diff (data : ByteArray) (o1 o2 : USize)
+    (hw1 : o1.toNat + 8 ≤ data.size) (hw2 : o2.toNat + 8 ≤ data.size)
+    (hne : data.ugetUInt64LE o1 hw1 ≠ data.ugetUInt64LE o2 hw2)
+    (k : Nat)
+    (hk : k = (UInt64.ctz (data.ugetUInt64LE o1 hw1 ^^^ data.ugetUInt64LE o2 hw2) >>> 3).toNat) :
+    k < 8 ∧ (∀ j, j < k → data[o1.toNat + j]! = data[o2.toNat + j]!) ∧
+      data[o1.toNat + k]! ≠ data[o2.toNat + k]! := by
+  let D := (data.ugetUInt64LE o1 hw1 ^^^ data.ugetUInt64LE o2 hw2).toBitVec
+  have hDdef : D = (data.ugetUInt64LE o1 hw1 ^^^ data.ugetUInt64LE o2 hw2).toBitVec := rfl
+  have hkD : k = (BitVec.ctz D >>> 3#64).toNat := hk
+  have hDne : D ≠ 0#64 := by
+    rw [hDdef, ne_eq, ← UInt64.toBitVec_zero, UInt64.toBitVec_inj]
+    revert hne
+    generalize data.ugetUInt64LE o1 hw1 = x
+    generalize data.ugetUInt64LE o2 hw2 = y
+    intro hne; bv_decide
+  have hk8 : k < 8 := by rw [hkD]; exact BitVec.ctz_ushiftRight3_lt_eight D hDne
+  have hDrec := hDdef
+  simp only [ByteArray.ugetUInt64LE] at hDrec
+  have hfacts := UInt64.recomb8LE_ctz _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ D hDrec
+  obtain ⟨p0, p1, p2, p3, p4, p5, p6, m0, m1, m2, m3, m4, m5, m6, m7⟩ := hfacts
+  refine ⟨hk8, ?_, ?_⟩
+  · intro j hj
+    rw [getElem!_pos data (o1.toNat + j) (by omega), getElem!_pos data (o2.toNat + j) (by omega)]
+    have hjD : j < (BitVec.ctz D >>> 3#64).toNat := hkD ▸ hj
+    rcases (show j = 0 ∨ j = 1 ∨ j = 2 ∨ j = 3 ∨ j = 4 ∨ j = 5 ∨ j = 6 by omega) with
+      rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    · exact p0 (ctzD_lt_ofNat D 0 (by omega) hjD)
+    · exact p1 (ctzD_lt_ofNat D 1 (by omega) hjD)
+    · exact p2 (ctzD_lt_ofNat D 2 (by omega) hjD)
+    · exact p3 (ctzD_lt_ofNat D 3 (by omega) hjD)
+    · exact p4 (ctzD_lt_ofNat D 4 (by omega) hjD)
+    · exact p5 (ctzD_lt_ofNat D 5 (by omega) hjD)
+    · exact p6 (ctzD_lt_ofNat D 6 (by omega) hjD)
+  · have hkeq : (BitVec.ctz D >>> 3#64).toNat = k := hkD.symm
+    rcases (show k = 0 ∨ k = 1 ∨ k = 2 ∨ k = 3 ∨ k = 4 ∨ k = 5 ∨ k = 6 ∨ k = 7 by omega) with
+      rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+    all_goals rw [getElem!_pos data (o1.toNat + _) (by omega), getElem!_pos data (o2.toNat + _) (by omega)]
+    · exact m0 (ctzD_eq_ofNat D 0 (by omega) hkeq)
+    · exact m1 (ctzD_eq_ofNat D 1 (by omega) hkeq)
+    · exact m2 (ctzD_eq_ofNat D 2 (by omega) hkeq)
+    · exact m3 (ctzD_eq_ofNat D 3 (by omega) hkeq)
+    · exact m4 (ctzD_eq_ofNat D 4 (by omega) hkeq)
+    · exact m5 (ctzD_eq_ofNat D 5 (by omega) hkeq)
+    · exact m6 (ctzD_eq_ofNat D 6 (by omega) hkeq)
+    · exact m7 (ctzD_eq_ofNat D 7 (by omega) hkeq)
+
 /-- `go` advances by `n` whenever the next `n` byte pairs all match. Chaining
     this at `n = 8` is how a word match maps to eight per-byte steps. -/
 theorem lz77Greedy.go_advance (data : ByteArray) (p1 p2 maxLen n : Nat)
@@ -239,7 +346,66 @@ theorem lz77Greedy.goUW_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
         (i.toUSize + 8) ((i + 8).toUSize) hsz hu1 hu2 hA hB hi8, hadv]
       exact lz77Greedy.goUW_eq data p1 p2 (i + 8) maxLen hsz h1 h2 (by omega) hu1 hu2 hB
     · rw [if_neg hwe]
-      exact lz77Greedy.goU_eq data p1 p2 i maxLen hsz h1 h2 hile hu1 hu2
+      -- The two eight-byte words differ; `ugetUInt64LE_ctz_first_diff` locates the
+      -- first differing byte at `k = ctz (w1 ^^^ w2) >>> 3`, and `go` stops there.
+      have hne : data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+          ≠ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega) :=
+        fun h => hwe (by rw [h]; simp)
+      obtain ⟨hk8, hpre, hmis⟩ := ByteArray.ugetUInt64LE_ctz_first_diff data
+        (p1.toUSize + i.toUSize) (p2.toUSize + i.toUSize) (by omega) (by omega) hne _ rfl
+      -- re-index the byte facts from `oₙ.toNat + j` to `pₙ + i + j`
+      have hprep : ∀ j, j < (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+            ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat →
+          data[p1 + i + j]! = data[p2 + i + j]! := by
+        intro j hj; have := hpre j hj; rwa [hoff1, hoff2] at this
+      have hmisp : data[p1 + (i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+            ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)]!
+          ≠ data[p2 + (i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+            ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)]! := by
+        rw [show p1 + (i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+              ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)
+            = (p1.toUSize + i.toUSize).toNat + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+              ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat from by omega,
+          show p2 + (i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+              ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)
+            = (p2.toUSize + i.toUSize).toNat + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+              ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat from by omega]
+        exact hmis
+      -- prefix matches ⇒ `go` advances to `i + k`; byte `k` differs ⇒ it stops there
+      have hadv : lz77Greedy.go data p1 p2 i maxLen h1 h2
+          = lz77Greedy.go data p1 p2 (i + (UInt64.ctz
+              (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+                ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)
+              maxLen h1 h2 :=
+        lz77Greedy.go_advance data p1 p2 maxLen _ h1 h2 i (by omega) hprep
+      have hstop : lz77Greedy.go data p1 p2 (i + (UInt64.ctz
+            (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+              ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)
+            maxLen h1 h2
+          = i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+              ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat := by
+        rw [lz77Greedy.go, dif_pos (by omega)]
+        refine if_neg ?_
+        intro hc
+        apply hmisp
+        rw [getElem!_pos data (p1 + (i + (UInt64.ctz
+              (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+                ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)) (by omega),
+            getElem!_pos data (p2 + (i + (UInt64.ctz
+              (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+                ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat)) (by omega)]
+        exact beq_iff_eq.mp hc
+      show (i.toUSize + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+          ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toUSize).toNat
+        = lz77Greedy.go data p1 p2 i maxLen h1 h2
+      have hsz8 : 8 ≤ USize.size := Nat.le_of_lt (Nat.lt_of_lt_of_le (by omega : 8 < 2 ^ 32) USize.le_size)
+      have hXnb : (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+          ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat
+          < 2 ^ System.Platform.numBits := by rw [← hUS]; omega
+      have hik : i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
+          ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat < USize.size := by omega
+      rw [hadv, hstop, USize.toNat_add, hi, UInt64.toNat_toUSize, Nat.mod_eq_of_lt hXnb,
+        Nat.mod_eq_of_lt hik]
   · have hle : i.toUSize ≤ maxLen.toUSize :=
       USize.le_iff_toNat_le.mpr (by rw [hmax, hi]; omega)
     have h8U : ¬ (8 : USize) ≤ maxLen.toUSize - i.toUSize := by

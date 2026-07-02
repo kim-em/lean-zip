@@ -553,12 +553,18 @@ where
         rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
       have hw1 : (p1 + i).toNat + 8 ≤ data.size := by omega
       have hw2 : (p2 + i).toNat + 8 ≤ data.size := by omega
-      if data.ugetUInt64LE (p1 + i) hw1 == data.ugetUInt64LE (p2 + i) hw2 then
+      let w1 := data.ugetUInt64LE (p1 + i) hw1
+      let w2 := data.ugetUInt64LE (p2 + i) hw2
+      if w1 == w2 then
         have hile' : (i + 8).toNat ≤ maxLen.toNat := by
           rw [USize.toNat_add, h8v, Nat.mod_eq_of_lt (by omega)]; omega
         goUW data p1 p2 (i + 8) maxLen hsz h1 h2 hile'
       else
-        goU data p1 p2 i maxLen hsz h1 h2
+        -- Word mismatch: the first differing byte is at
+        -- `ctz (w1 XOR w2) >>> 3` within `[i, i+8)` (libdeflate
+        -- `matchfinder_common.h`). Return `i + that offset` directly — no
+        -- re-scan of the array. Proven equal to the byte loop in `goUW_eq`.
+        i + (UInt64.ctz (w1 ^^^ w2) >>> 3).toUSize
     else
       goU data p1 p2 i maxLen hsz h1 h2
   termination_by maxLen.toNat - i.toNat

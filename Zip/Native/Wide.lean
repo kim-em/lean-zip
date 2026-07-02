@@ -65,3 +65,12 @@ def ugetUInt64LE (a : @& ByteArray) (off : USize)
   ((a[off.toNat + 7]'(by omega)).toUInt64 <<< 56)
 
 end ByteArray
+
+/-- Count trailing zero bits of a `UInt64` (`__builtin_ctzll`, with the
+    zero case defined as 64 to match the reference body `BitVec.ctz`). The
+    match-extension loop uses `ctz (w1 ^^^ w2) >>> 3` as the little-endian byte
+    index of the first difference between two 8-byte words. The reference body
+    is the trusted specification of the `@[extern]`; the C compiles it to a
+    single `tzcnt`/`bsf`. -/
+@[extern "lean_zip_ctz64"]
+def UInt64.ctz (x : UInt64) : UInt64 := ⟨BitVec.ctz x.toBitVec⟩

@@ -52,3 +52,15 @@ LEAN_EXPORT uint64_t lean_zip_uget_u64le(b_lean_obj_arg a, size_t off) {
            ((uint64_t)p[4] << 32) | ((uint64_t)p[5] << 40) |
            ((uint64_t)p[6] << 48) | ((uint64_t)p[7] << 56);
 }
+
+/*
+ * lean_zip_ctz64 : UInt64 → UInt64  (count trailing zero bits)
+ *
+ * Used by the match-extension loop to locate the first mismatching byte from the
+ * XOR of two 8-byte words: `ctz(w1 ^ w2) >>> 3` is the little-endian byte index
+ * of the first difference. `__builtin_ctzll` is undefined at zero, so the zero
+ * case returns 64 to match the Lean reference body `BitVec.ctz` (its spec).
+ */
+LEAN_EXPORT uint64_t lean_zip_ctz64(uint64_t x) {
+    return x ? (uint64_t)__builtin_ctzll(x) : 64;
+}
