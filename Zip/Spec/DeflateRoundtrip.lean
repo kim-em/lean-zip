@@ -137,9 +137,11 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
               (inflate_deflateRawBase data level _ hsize)
               (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
           · split
-            · -- levels 4–8, no divergence cuts: base only (#2737)
+            · -- levels 4–8 (and 9/10 above the optimal-size gate), no divergence cuts:
+              -- base only (#2737)
               exact inflate_deflateRawBase data level _ hsize
-            · -- levels 4–8: observation-divergence split candidate (#2737); the
+            · -- levels 4–8 (and 9/10 above the optimal-size gate): observation-
+              -- divergence split candidate (#2737); the
               -- roundtrip holds for any cut selector.
               exact inflate_pickSmaller _ _ data maxOutputSize
                 (inflate_deflateRawBase data level _ hsize)
@@ -244,7 +246,8 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
               _ _ (deflateRawBase_pad data level)
               (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
           · split
-            · -- levels 4–8, no divergence cuts: base only (#2737)
+            · -- levels 4–8 (and 9/10 above the optimal-size gate), no divergence cuts:
+              -- base only (#2737)
               exact deflateRawBase_pad data level
             · exact pickSmaller_bytesToBits
                 (P := fun bits => ∃ (contentBits padding : List Bool),
@@ -425,7 +428,8 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
               _ _ (deflateRawBase_goR_pad data level)
               (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
           · split
-            · -- levels 4–8, no divergence cuts: base only (#2737)
+            · -- levels 4–8 (and 9/10 above the optimal-size gate), no divergence cuts:
+              -- base only (#2737)
               exact deflateRawBase_goR_pad data level
             · exact pickSmaller_bytesToBits
                 (P := fun bits => ∃ remaining,

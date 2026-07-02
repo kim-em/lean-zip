@@ -1158,7 +1158,11 @@ def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : Array UInt32)
 /-- Packed twin of `emitSharedBlocksAt`: emit shared-window blocks at explicit
     cut points directly from the packed token stream. Same clamping — every cut
     is forced into `(pos, toks.size]`, so **any** cuts list yields a valid total
-    partition and the boundary heuristic stays proof-free. -/
+    partition and the boundary heuristic stays proof-free. The clamping makes
+    arbitrary cuts correctness-safe, not performance-safe: a pathological list
+    (non-monotone, dense) degrades to one-token blocks, each paying a full tree
+    header. `deflateRaw` only ever feeds it `chooseSplitsHeuristicP`'s strictly
+    increasing, byte-floored cuts. -/
 def emitSharedBlocksAtP (data : ByteArray) (toks : Array UInt32) (cuts : List Nat)
     (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
