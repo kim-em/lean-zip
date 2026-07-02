@@ -24,6 +24,7 @@ import ZipTest.NativeDeflate
 import ZipTest.NativeCompressBench
 import ZipTest.Benchmark
 import ZipTest.FuzzInflate
+import ZipTest.FuzzCompress
 import ZipTest.FuzzHandleRead
 import ZipTest.BoundedReadTest
 import ZipTest.InflateTable
@@ -62,6 +63,7 @@ def main : IO Unit := do
   ZipTest.NativeCompressBench.tests
   ZipTest.Benchmark.tests
   ZipTest.FuzzInflate.tests
+  ZipTest.FuzzCompress.tests
   ZipTest.FuzzHandleRead.tests
   ZipTest.BoundedRead.tests
   IO.println "\nAll tests passed!"
