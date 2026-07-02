@@ -34,25 +34,25 @@ theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   unfold lzMatch
   split
-  · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+  · exact lz77ChainLazyIter_encodable data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level)
       (by omega) (by omega)
-  · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level)
+  · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level) (niceLen level)
       (by omega) (by omega)
 
 theorem lzMatch_empty (data : ByteArray) (level : UInt8) (hz : data.size = 0) :
     lzMatch data level = #[] := by
   unfold lzMatch
   split
-  · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) (goodMatch level) hz
-  · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) hz
+  · exact lz77ChainLazyIter_empty data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) hz
+  · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) (niceLen level) hz
 
 theorem lzMatch_resolves (data : ByteArray) (level : UInt8) :
     Deflate.Spec.resolveLZ77 (tokensToSymbols (lzMatch data level)) [] =
       some data.data.toList := by
   unfold lzMatch
   split
-  · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (goodMatch level) (by omega)
-  · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (by omega)
+  · exact lz77ChainLazyIter_resolves data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (by omega)
+  · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (niceLen level) (by omega)
 
 set_option maxHeartbeats 800000 in
 /-- One self-contained chunk block: its bits append to `bw`, it preserves `wf`,
