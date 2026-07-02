@@ -209,6 +209,25 @@ spec quadruple (`Zip/Spec/DeflateBlockSplit.lean`, quantified over an
 arbitrary selector) transfers by a rewrite — the packed heuristic
 `chooseSplitsHeuristicP` never appears in a proof. -/
 
+/-- The packed observation class is the boxed one over the `unpackTok` view —
+    unconditionally, for every word: both sides read exactly `unpackTok`'s
+    field expressions (`toUInt8` for literals, `(w >>> 16) &&& 0x7FFF` for the
+    match length), so the heuristic's bit tricks can never drift from the
+    packed-token layout. The `chooseSplitsHeuristicP` conformance test
+    (`ZipTest/PackedTokens.lean`) checks the full loop; this pins the
+    per-token classification. -/
+theorem splitTokenClassP_eq (w : UInt32) :
+    splitTokenClassP w = splitTokenClass (unpackTok w) := by
+  unfold splitTokenClassP splitTokenClass unpackTok
+  split <;> rfl
+
+/-- The packed per-token output-byte count is the boxed one over the
+    `unpackTok` view — unconditionally, for every word. -/
+theorem splitTokenBytesP_eq (w : UInt32) :
+    splitTokenBytesP w = splitTokenBytes (unpackTok w) := by
+  unfold splitTokenBytesP splitTokenBytes unpackTok
+  split <;> rfl
+
 /-- `Array.extract` commutes with `Array.map` (no core lemma at this
     toolchain): the group a packed emitter cuts out of the packed stream views
     to the group the boxed emitter cuts out of the boxed stream. -/
