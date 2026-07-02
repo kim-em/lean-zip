@@ -312,6 +312,12 @@ lean_exe «treefree-decode-bench» where
 lean_exe «ratio-sweep» where
   root := `ZipRatioSweep
 
+lean_exe «l1-attrib» where
+  root := `ZipL1Attrib
+
+lean_exe «l1-sweep» where
+  root := `ZipL1Sweep
+
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
 
