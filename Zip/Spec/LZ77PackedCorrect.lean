@@ -197,4 +197,88 @@ theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
   simp only [dynBlockBytesWith_dynHeaderCodes, deflateDynamicBlockCorePWith_dynHeaderCodes,
     deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
 
+/-! ## The packed shared-window split candidate equals the boxed one (#2737)
+
+`deflateDynamicBlocksSharedAtP` is the observation-divergence split candidate
+on packed tokens end-to-end: per block, `tokenFreqsP` for the trees and
+`emitTokensWithCodesP` (inside `emitDynBlockP`) for the emit. The equalities
+below recover the boxed reference
+`deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` for **every** word
+array and **every** cut list, so the whole `deflateDynamicBlocksSharedAt`
+spec quadruple (`Zip/Spec/DeflateBlockSplit.lean`, quantified over an
+arbitrary selector) transfers by a rewrite — the packed heuristic
+`chooseSplitsHeuristicP` never appears in a proof. -/
+
+/-- `Array.extract` commutes with `Array.map` (no core lemma at this
+    toolchain): the group a packed emitter cuts out of the packed stream views
+    to the group the boxed emitter cuts out of the boxed stream. -/
+private theorem extract_map {α β : Type} (f : α → β) (a : Array α) (s e : Nat) :
+    (a.map f).extract s e = (a.extract s e).map f := by
+  ext i hi₁ hi₂
+  · simp only [Array.size_extract, Array.size_map]
+  · simp only [Array.getElem_extract, Array.getElem_map]
+
+/-- The packed per-block emitter is the boxed one over the `unpackTok` view:
+    the bodies are identical up to `emitTokensWithCodesP_eq`. -/
+theorem emitDynBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
+    (litLens distLens : List Nat)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) (isFinal : Bool) :
+    emitDynBlockP bw data ws litLens distLens hlit hdist isFinal =
+      emitDynBlock bw data (ws.map unpackTok) litLens distLens hlit hdist isFinal := by
+  unfold emitDynBlockP emitDynBlock
+  simp only [emitTokensWithCodesP_eq]
+
+/-- The packed shared-window block emitter is the boxed one over the
+    `unpackTok` view: the trees agree by `tokenFreqsP_eq`, the emit by
+    `emitDynBlockP_eq`. -/
+theorem emitSharedBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
+    (isFinal : Bool) :
+    emitSharedBlockP bw data ws isFinal =
+      emitSharedBlock bw data (ws.map unpackTok) isFinal := by
+  unfold emitSharedBlockP emitSharedBlock
+  simp only [tokenFreqsP_eq, emitDynBlockP_eq]
+
+/-- The packed cut-list block fold is the boxed one over the `unpackTok` view
+    (fuel-quantified form for the induction): the map preserves size, so the
+    clamped cuts coincide, and each block agrees by `emitSharedBlockP_eq` +
+    `extract_map`. -/
+private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ws : Array UInt32) :
+    ∀ (fuel pos : Nat), ws.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtP data ws cuts pos bw =
+        emitSharedBlocksAt data (ws.map unpackTok) cuts pos bw := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts bw
+    conv => lhs; unfold emitSharedBlocksAtP
+    conv => rhs; unfold emitSharedBlocksAt
+    simp only [Array.size_map, emitSharedBlockP_eq, extract_map]
+    by_cases hend : min (max (cuts.headD ws.size) (pos + 1)) ws.size ≥ ws.size
+    · simp only [if_pos hend]
+    · simp only [if_neg hend]
+      exact ih (min (max (cuts.headD ws.size) (pos + 1)) ws.size) (by omega) cuts.tail _
+
+/-- The packed cut-list block fold is the boxed one over the `unpackTok` view,
+    for any cut list and start position. -/
+theorem emitSharedBlocksAtP_eq (data : ByteArray) (ws : Array UInt32)
+    (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
+    emitSharedBlocksAtP data ws cuts pos bw =
+      emitSharedBlocksAt data (ws.map unpackTok) cuts pos bw :=
+  emitSharedBlocksAtP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
+
+/-- The packed observation-divergence split candidate is byte-identical to the
+    boxed reference at the same (constant) cut list: `deflateRaw`'s level 4–8
+    split branch and the roundtrip proofs see
+    `deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` through this
+    rewrite, and the `DeflateBlockSplit` theorems hold for any selector. -/
+theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ws : Array UInt32)
+    (cuts : List Nat) :
+    deflateDynamicBlocksSharedAtP data ws cuts =
+      deflateDynamicBlocksSharedAtTokens data (ws.map unpackTok) (fun _ => cuts) := by
+  unfold deflateDynamicBlocksSharedAtP deflateDynamicBlocksSharedAtTokens
+  split
+  · rfl
+  · rw [emitSharedBlocksAtP_eq]
+
 end Zip.Native.Deflate
