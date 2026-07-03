@@ -232,6 +232,16 @@ artifacts move into `$W`.
      `$W/perf_before.json` as BEFORE. Note `pin_core.sh` is taken from *this*
      branch's checkout (`$R`): the merge base may predate it.
 
+     **Caveat — this is a cross-worktree comparison, valid only for a visible
+     delta.** BEFORE here is built in a throwaway `$W/before` worktree and AFTER
+     in the main worktree, and a binary built in a fresh worktree can run ~9%
+     off the byte-identical code built in a long-lived main worktree (stale
+     `.lake` link state). That ~9% environment gap swamps any small change, so if
+     the delta you care about is single-digit-%, do **not** trust this fallback's
+     absolute speed — use the self-controlled sandwich (below), which builds both
+     sides in the same worktree and carries a same-binary noise floor to expose
+     exactly this artifact.
+
    **Cross-session caveat.** BEFORE (recorded earlier) and AFTER (measured now)
    are different sessions, so a small single-digit-% speed delta can be
    cross-session / machine-load noise rather than the PR. Before reading a fine
@@ -320,7 +330,7 @@ artifacts move into `$W`.
    Silesia is single-pass (`reps=1`), so a *single* Silesia run carries ±30%+
    run-to-run noise and a lone graph cannot resolve a single-digit-% delta on it.
    When the Silesia delta is small or borderline — exactly when the merge decision
-   hinges on it — do the controlled interleaved measurement below instead of
+   hinges on it — do the self-controlled sandwich measurement below instead of
    trusting one pass or a cross-session graph.
 
 8. **Refresh the dashboard inside this PR and commit it.** This is compulsory and
@@ -407,40 +417,80 @@ artifacts move into `$W`.
    image keeps rendering even if the branch is later updated or deleted. Confirm
    the PR branch's own `git status` is still clean afterward (step 6 footgun).
 
-## Resolving a small or borderline delta (controlled interleaved measurement)
+## Resolving a small or borderline delta (self-controlled sandwich measurement)
 
 The routine graph (steps 1–9) compares a fresh AFTER against the base-branch
 `latest.json` BEFORE — a *cross-session* comparison whose noise floor is a few
 percent, which is fine for visible wins but **cannot** settle a single-digit-%
-delta (and single-pass Silesia adds ±30% on top). When the merge decision hinges
-on a small delta — especially on Silesia — measure both sides **back-to-back in
-one session** so common-mode noise (background load, turbo, thermal) cancels:
+delta (and single-pass Silesia adds ±30% on top). **Do not post a single-pass
+overlay as evidence for a sub-few-percent change** — its per-level scatter reads
+as regressions and wins that are pure noise (in #2735 the overlay showed the
+AFTER curve dipping below baseline at several levels; the real effect was
+neutral-to-+1.6%). When the merge decision hinges on a small delta, run the
+measurement below and present *it*, not the overlay.
 
-- Build a BEFORE binary at the branch merge-base (`git worktree add --detach
-  $W/before $(git merge-base origin/master HEAD)` then `lake build bench-report`
-  in it). The AFTER binary is the PR branch's.
-- Run the two binaries **alternately, N times** (≥5 pairs), each pinned to one
-  core (`taskset -c <core>` — here use an explicit fixed core, the SAME one for
-  both sides, rather than `bench/pin_core.sh`, whose per-invocation idlest-core
-  choice could put the two sides on different cores). Consecutive AFTER/BEFORE
-  runs then see near-identical
-  machine state, so their *ratio* is robust even on a busy machine — the paired
-  ratio + its 95% CI is the verdict, not any single run.
+The one rule that makes a small-delta measurement trustworthy: **carry a
+self-control**, i.e. measure something you *know* is zero in the same run, and
+throw the run out if that control is not zero. Two controls, use both:
+
+- **Same-binary noise floor.** Run one binary against *itself* under the
+  identical protocol; its "delta" is the measurement's own noise floor. A code
+  delta is only real if it clears this floor.
+- **Unchanged-code control levels.** Pick levels the change *cannot* affect (in
+  #2735, L1 and L8 keep `niceLen = 258`, so their code path is byte-identical).
+  After correcting for run drift they must read ≈0. **If a control level shows a
+  nonzero delta, the run measured the machine, not your code — discard it.** This
+  is the single check that would have caught every phantom result in #2735 (the
+  −9% and −15% "regressions" both showed the same offset on unchanged control
+  levels; that is the tell).
+
+The protocol that delivers both controls at once is the **sandwich**: for each
+rep, run BEFORE → AFTER → BEFORE back-to-back (`M1, X, M2`), pinned to one core.
+
+- `X / geomean(M1, M2)` is the AFTER effect with slow drift (turbo ramp,
+  thermal) cancelled by the bracketing BEFOREs — better than plain alternation,
+  which still leaks a first-vs-second-run (position) bias into the delta.
+- `M2 / M1` (two identical binaries, same spacing) is the noise floor for free.
+- The sandwich puts AFTER in the middle *every* rep, so it carries a fixed
+  position bias — read it off the control levels (their nonzero mean *is* that
+  bias) and subtract it to isolate the per-level code effect.
+- ≥4–5 reps; aggregate per `(file, level)` over log-ratios, geomean + 95% CI.
+  CI excluding 0 and clearing the floor → real; inside the floor band → neutral.
+  This is what turned #2735's overlay chaos into a firm "L2 +1.6%, L6 (target)
+  0.0%, no level regresses" on both corpora.
+
+Two environment hazards that silently corrupt the delta even with pinning — both
+bit #2735:
+
+- **Build both binaries in the SAME worktree.** A binary built in a fresh
+  worktree ran ~9% faster than the byte-identical code built in a long-lived
+  main worktree (stale `.lake` link state is the likely cause). So a BEFORE built
+  in a throwaway merge-base worktree vs an AFTER built in the main worktree
+  manufactures a ~9% phantom delta with *zero* code difference. Build BOTH sides
+  in the same directory: check out the merge-base, `lake build bench-report`, copy
+  the binary aside (`cp .lake/build/bin/bench-report $W/before_bin`), then check
+  out the branch and build AFTER in the *same* worktree. Never compare across
+  worktrees. (The same-binary noise floor above will expose it if you slip: a ~9%
+  "floor" means the two binaries were not built alike.)
+- **One exclusive core, nothing else benchmarking.** A concurrent bench on *any*
+  core (even a different one, even another agent's) injects
+  memory-bandwidth/frequency contention that a fixed core cannot cancel — in
+  #2735 a neighbouring-core Silesia job turned a neutral change into a −15% read.
+  Confirm no other `bench-report` is running (`pgrep bench-report`) before and
+  during the run, and use an explicit fixed core (not `bench/pin_core.sh`, whose
+  per-invocation idlest-core pick can move the two sides onto different cores).
+
 - **Run BOTH binaries from the MAIN worktree's directory.** Silesia is gitignored
-  and fetched only into the main worktree, so the merge-base worktree has *only*
+  and fetched only into the main worktree, so a merge-base worktree has *only*
   committed Canterbury — running the BEFORE binary from there silently measures
   Canterbury while AFTER measures Silesia, and the two never overlap. (The
   `meta.git_commit` stamp follows the CWD, not the binary, so distinguish the two
-  by output filename, not by the stamp.)
-- To get **Silesia** rows, set Canterbury aside (`mv bench/corpora/canterbury …`)
-  so the matrix is fast enough to repeat; restore it after (a `trap` on EXIT).
-  L9's optimal-parse *compress* on 203 MB is minutes/run — measure L9 with fewer
-  pairs, or skip it if 1–8 already settles the sign (decode delta was uniform
-  across levels in #2650).
-- Aggregate paired: for each `(file, level, pair)` take `after/before`, then the
-  geomean and a 95% CI on the log-ratios. CI excluding 1.0 → real; spanning 1.0 →
-  genuinely within noise. This is what turned #2650's "−3% but maybe noise" into a
-  firm "−4.5% Canterbury / +5.8% Silesia".
+  by output filename, not by the stamp.) For a **Silesia-only** matrix, point the
+  run at a corpora dir that contains only the `silesia` symlink (or `mv
+  bench/corpora/canterbury` aside and restore it via a `trap` on EXIT). L9's
+  optimal-parse *compress* on 203 MB is minutes/run — measure it with fewer reps,
+  or skip it if 1–8 settles the sign (decode delta was uniform across levels in
+  #2650).
 
 ## Notes
 
