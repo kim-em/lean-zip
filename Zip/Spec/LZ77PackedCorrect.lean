@@ -56,6 +56,7 @@ private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain in
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIterP.mainLoop lz77ChainIter.mainLoop
+    simp only [chainWalkGuardedPackedU_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split
@@ -88,6 +89,7 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainLazyIterP.mainLoop lz77ChainLazyIter.mainLoop
+    simp only [chainWalkGuardedPackedU_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       -- Branch tree: hge / hle / h3lt / gate / deferral / hle2
