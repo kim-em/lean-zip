@@ -13,9 +13,12 @@
   (`c/bytearray_wide_ffi.c`) to a single wide load. Replacing `hash3`'s four
   bounds-checked byte reads (four `uget` calls) with one `ugetUInt32LE` call is a
   measured ~+3.4% compress win (#2707) — the win is the call-count reduction, and
-  it pays because the read is a *fixed* 4 bytes. (The 8-byte `ugetUInt64LE`
-  reader was removed: its only intended consumer, the decode refill, tops up ~1
-  byte at a time, so the wide load was measured neutral there — #2630.)
+  it pays because the read is a *fixed* 4 bytes. The 8-byte `ugetUInt64LE`
+  reader (below) is the same scheme over eight bytes; it was once removed as
+  measured-neutral for the decode refill, which tops up ~1 byte at a time
+  (#2630), but the match-extension loop (`lz77Greedy.countMatch`, #2736) is a
+  different consumer: it reads runs of many bytes and compares eight per
+  iteration, so the wide load pays there.
 
   The offset is a `USize`, so a hot loop's index arithmetic stays unboxed (the
   point of mirroring lean#14053's `uget*` readers rather than lean#8165's
@@ -44,4 +47,30 @@ def ugetUInt32LE (a : @& ByteArray) (off : USize)
   ((a[off.toNat + 2]'(by omega)).toUInt32 <<< 16) |||
   ((a[off.toNat + 3]'(by omega)).toUInt32 <<< 24)
 
+/-- Load the little-endian `UInt64` at byte offset `off`. The reference body is
+    the eight-byte analog of `ugetUInt32LE`
+    `a[off] ||| a[off+1] <<< 8 ||| … ||| a[off+7] <<< 56`; it is the trusted
+    specification of the `@[extern]`, which the C reads in one wide load. The
+    match-extension loop compares two of these words per iteration. -/
+@[extern "lean_zip_uget_u64le"]
+def ugetUInt64LE (a : @& ByteArray) (off : USize)
+    (h : off.toNat + 8 ≤ a.size := by get_elem_tactic) : UInt64 :=
+  (a[off.toNat]'(by omega)).toUInt64 |||
+  ((a[off.toNat + 1]'(by omega)).toUInt64 <<< 8) |||
+  ((a[off.toNat + 2]'(by omega)).toUInt64 <<< 16) |||
+  ((a[off.toNat + 3]'(by omega)).toUInt64 <<< 24) |||
+  ((a[off.toNat + 4]'(by omega)).toUInt64 <<< 32) |||
+  ((a[off.toNat + 5]'(by omega)).toUInt64 <<< 40) |||
+  ((a[off.toNat + 6]'(by omega)).toUInt64 <<< 48) |||
+  ((a[off.toNat + 7]'(by omega)).toUInt64 <<< 56)
+
 end ByteArray
+
+/-- Count trailing zero bits of a `UInt64` (`__builtin_ctzll`, with the
+    zero case defined as 64 to match the reference body `BitVec.ctz`). The
+    match-extension loop uses `ctz (w1 ^^^ w2) >>> 3` as the little-endian byte
+    index of the first difference between two 8-byte words. The reference body
+    is the trusted specification of the `@[extern]`; the C compiles it to a
+    single `tzcnt`/`bsf`. -/
+@[extern "lean_zip_ctz64"]
+def UInt64.ctz (x : UInt64) : UInt64 := ⟨BitVec.ctz x.toBitVec⟩

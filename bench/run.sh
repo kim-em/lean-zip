@@ -13,19 +13,16 @@
 #
 # Note: throughput numbers are a median-of-N snapshot of THIS machine; commit the
 # regenerated JSON + SVGs together, and record the machine in the dashboard.
+#
+# Every *measurement* step below runs through bench/pin_core.sh, which pins the
+# command (and its children) to the idlest single core — unpinned runs wander
+# across cores and pick up scheduler/turbo/contention noise that has been
+# mistaken for real perf deltas. Builds, merges, and plotting stay unpinned.
 set -euo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 OUT="bench/results/latest.json"
-
-# Pin every *measurement* process to one CPU (#2739): unpinned runs migrate
-# between cores mid-sweep and pick up multi-MB/s run-to-run drift on a busy
-# box. Builds and plotting stay unpinned. Default: the last physical core
-# (on an SMT machine, core N pairs with hyperthread N + nproc/2, so this also
-# keeps the sibling of core 0 free). Override with BENCH_PIN=<cpu>, or
-# BENCH_PIN=none to disable (e.g. single-core CI runners).
-BENCH_PIN="${BENCH_PIN:-$(( $(nproc) / 2 - 1 ))}"
-if [ "$BENCH_PIN" = "none" ]; then PIN=""; else PIN="taskset -c $BENCH_PIN"; fi
+PIN="bash bench/pin_core.sh"
 
 in_project_shell() {
   if [ -n "${IN_NIX_SHELL:-}" ]; then bash -c "$1"; else nix-shell --run "$1"; fi
@@ -44,8 +41,8 @@ in_project_shell() {
 if [ "${1:-}" = "--native-only" ]; then
   [ -f "$OUT" ] || { echo "no existing $OUT to splice into — run a full bench/run.sh first" >&2; exit 1; }
   TMP="$(mktemp --suffix=.json)"
-  in_project_shell "lake build bench-report"
-  in_project_shell "$PIN lake env .lake/build/bin/bench-report --native-only $TMP ${2:-}"
+  in_project_shell "lake build bench-report \
+    && $PIN lake env .lake/build/bin/bench-report --native-only $TMP ${2:-}"
   in_project_shell "python3 bench/merge_native.py $OUT $TMP $OUT \
     && python bench/plot.py $OUT bench/graphs"
   rm -f "$TMP"
@@ -69,12 +66,14 @@ fi
 #    corpus files only (pattern "<corpus>/<file>", e.g. "canterbury/alice29.txt");
 #    --dump-payloads writes the corpus bytes under bench/payloads/<corpus>/ for the
 #    external comparators.
-in_project_shell "lake build bench-report"
-in_project_shell "$PIN lake env .lake/build/bin/bench-report $OUT"
-in_project_shell "lake env .lake/build/bin/bench-report --dump-payloads bench/payloads"
+in_project_shell "lake build bench-report \
+  && $PIN lake env .lake/build/bin/bench-report $OUT \
+  && lake env .lake/build/bin/bench-report --dump-payloads bench/payloads"
 
 # 3. External-language comparators: build (own toolchains) then run + merge.
-#    node + python3 must be on PATH for the JS comparator and the driver.
+#    node + python3 must be on PATH for the JS comparator and the driver. The
+#    driver is pinned, so every comparator child inherits the single-core
+#    affinity and their rows are measured like the native ones.
 bash bench/comparators/build_all.sh
 nix-shell -p nodejs python3 --run \
   "$PIN python3 bench/comparators/run_external.py bench/payloads $OUT"
