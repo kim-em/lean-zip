@@ -617,20 +617,30 @@ def goodMatch (level : UInt8) : Nat :=
 /-- Per-level `niceLen` cutoff (libdeflate `nice_match_length`, `deflate_compress.c`):
     the chain walk stops as soon as the best match reaches this length, since a
     match this long is already good enough — burning the rest of the depth budget
-    to lengthen it further rarely pays for itself. The ladder starts from
-    libdeflate's values (L2=10, L3=14, L4=30, L5=30, L6=65, L7=130, L8=L9=258).
-    Level 1 keeps `258` (no early-out) to leave the measured `deflate_fast` corner
-    (#2726) untouched — at chain depth 4 the walk is already short, so a cutoff
-    buys little there. `258` (the max match length, ≥ every `maxLen`) disables the
-    cutoff: the walk then stops only on the full-match / fuel condition, exactly as
-    before this knob existed. The cutoff never enters correctness — the chain is a
-    heuristic re-verified at emission — so any value keeps the encoder contracts. -/
+    to lengthen it further rarely pays for itself. L2/L3 keep libdeflate's values
+    (10/14, #2744); level 1 keeps `258` (no early-out) to leave the measured
+    `deflate_fast` corner (#2726) untouched — at chain depth 4 the walk is
+    already short, so a cutoff buys little there.
+
+    The mid-band values were re-gridded for the #2737 remapped ladder
+    (`mid-sweep --time`, Silesia): **L4 disables the cutoff** — at chain 64
+    with the lazy gate on, every `niceLen` value times identically (the gate
+    already skips the probes the cutoff would save) and lower cutoffs only
+    cost ratio (nl30 +11bp, nl65 +3.5bp corpus-total), so the early-out is a
+    pure loss there. L5/L6 (gate off) sit at the measured knee `65` (nl30
+    gains ~3% speed for +10bp — a poor trade; nl130/258 return ≤1bp for the
+    speed given up); L7's chain-256 walk earns `130`; L8 (the max split tier)
+    disables the cutoff — nl130 times within 1% but emits more bytes, and L8's
+    cadence guard promises old-L8 ratio parity. `258` (the max match length,
+    ≥ every `maxLen`) disables the cutoff: the walk then stops only on the
+    full-match / fuel condition, exactly as before this knob existed. The
+    cutoff never enters correctness — the chain is a heuristic re-verified at
+    emission — so any value keeps the encoder contracts. -/
 def niceLen (level : UInt8) : Nat :=
   if level ≤ 1 then 258
   else if level ≤ 2 then 10
   else if level ≤ 3 then 14
-  else if level ≤ 4 then 30
-  else if level ≤ 5 then 30
+  else if level ≤ 4 then 258
   else if level ≤ 6 then 65
   else if level ≤ 7 then 130
   else 258

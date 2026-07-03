@@ -53,26 +53,35 @@ structure TimedConfig where
   label : String
   chain : Nat
   gm : Nat
+  nl : Nat
   mode : Nat
 
-/-- The ladder candidates whose speed decides the L4–L8 assignment. -/
+/-- The ladder candidates whose speed decides the L4–L8 assignment. The
+    knob-selection round ran chain × gm at `nl = 258` (no early-out); the
+    `niceLen` round (post-#2744 rebase) grids the early-out cutoff for each
+    chosen ladder slot's config. -/
 def timedConfigs : List TimedConfig := [
-  ⟨"base-64-8",      64, 8,   0⟩,
-  ⟨"base-128-8",    128, 8,   0⟩,
-  ⟨"base-128-259",  128, 259, 0⟩,
-  ⟨"base-256-259",  256, 259, 0⟩,
-  ⟨"split-48-259",   48, 259, 1⟩,
-  ⟨"split-64-8",     64, 8,   1⟩,
-  ⟨"split-64-259",   64, 259, 1⟩,
-  ⟨"split-128-8",   128, 8,   1⟩,
-  ⟨"split-128-259", 128, 259, 1⟩,
-  ⟨"split-256-259", 256, 259, 1⟩,
-  ⟨"splitcad-512-259", 512, 259, 2⟩ ]
+  ⟨"L4:base-64-8-nl30",       64, 8,   30,  0⟩,
+  ⟨"L4:base-64-8-nl65",       64, 8,   65,  0⟩,
+  ⟨"L4:base-64-8-nl130",      64, 8,   130, 0⟩,
+  ⟨"L4:base-64-8-nl258",      64, 8,   258, 0⟩,
+  ⟨"L5:base-128-259-nl30",   128, 259, 30,  0⟩,
+  ⟨"L5:base-128-259-nl65",   128, 259, 65,  0⟩,
+  ⟨"L5:base-128-259-nl130",  128, 259, 130, 0⟩,
+  ⟨"L5:base-128-259-nl258",  128, 259, 258, 0⟩,
+  ⟨"L6:split-64-259-nl30",    64, 259, 30,  1⟩,
+  ⟨"L6:split-64-259-nl65",    64, 259, 65,  1⟩,
+  ⟨"L6:split-64-259-nl258",   64, 259, 258, 1⟩,
+  ⟨"L7:split-256-259-nl65",  256, 259, 65,  1⟩,
+  ⟨"L7:split-256-259-nl130", 256, 259, 130, 1⟩,
+  ⟨"L7:split-256-259-nl258", 256, 259, 258, 1⟩,
+  ⟨"L8:splitcad-512-259-nl130", 512, 259, 130, 2⟩,
+  ⟨"L8:splitcad-512-259-nl258", 512, 259, 258, 2⟩ ]
 
 /-- Compress `data` under one candidate config, returning the emitted size
     (consumed so the work is not dead-code-eliminated). -/
 def runConfig (cfg : TimedConfig) (data : ByteArray) : Nat :=
-  let ptoks := lz77ChainLazyIterP data cfg.chain 32768 1000000000 cfg.gm
+  let ptoks := lz77ChainLazyIterP data cfg.chain 32768 1000000000 cfg.gm cfg.nl
   let base := deflateRawBaseP data ptoks
   if cfg.mode == 0 then base.size
   else
