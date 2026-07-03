@@ -463,6 +463,18 @@ open Zip.Spec.DeflateStoredCorrect (deflateStoredPure storedBlockBytes storedBlo
 def pickSmaller (a b : ByteArray) : ByteArray :=
   if a.size < b.size then a else b
 
+/-- Lazy `pickSmaller` keyed on precomputed byte sizes: forces (emits) only the
+    winning candidate. When `sa = (a ()).size` and `sb = (b ()).size` this equals
+    `pickSmaller (a ()) (b ())` byte-for-byte (`a` wins iff strictly smaller, ties
+    keep `b`), but the losing candidate is never emitted — the whole point of
+    sizing every candidate before emitting any. Correctness of the byte-identity
+    (that `sa`/`sb` are the true emitted sizes) is pinned by the `SizeHelpers`
+    conformance tests, exactly as the single-block `fixedBlockBytes`/`dynBlockBytes`
+    dispatch is; the roundtrip theorems only need each candidate to decode. -/
+@[inline] def emitSmallerBy (sa : Nat) (a : Unit → ByteArray)
+    (sb : Nat) (b : Unit → ByteArray) : ByteArray :=
+  if sa < sb then a () else b ()
+
 /-! ## Sizing a block without emitting it
 
 A DEFLATE block's body is a *dot product* of symbol frequencies and code
@@ -1243,6 +1255,71 @@ def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : Array UInt32)
   else
     (emitSharedBlocksAtP data toks cuts 0 BitWriter.empty).flush
 
+/-- Packed twin of `sharedPartitionSized` (Wave 5, #2552): the exact unflushed
+    bit size of the shared-window partition **together with** each block's sized
+    trees, so the winning candidate's emission reuses them instead of rebuilding
+    `tokenFreqsP` + `dynamicCodeLengths` per block. Each group's frequencies come
+    from `tokenFreqsP` (dense packed tables); component 1 is the same
+    `3 + header + freq·codeLen` sum the packed emitter (`emitSharedBlocksAtP`)
+    flushes as `⌈bits/8⌉`, and component 2's entries are definitionally
+    `dynamicCodeLengths (tokenFreqsP group)` — exactly what `emitSharedBlockP`
+    would recompute (`emitSharedBlocksAtSizedP_eq`). This is what makes the
+    size-arbitrated dispatch (#2753) a net win: the per-block trees are built
+    **once**, during sizing, and the emit pass reuses them. -/
+def sharedPartitionSizedP (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
+    Nat × List SizedTrees :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqsP (toks.extract pos j)
+  let t := sizedTrees f.1 f.2
+  let blockBits := 3 + (writeDynamicHeader BitWriter.empty t.val.1 t.val.2).bitLength
+    + symbolBitCount f.1 f.2 t.val.1.toArray t.val.2.toArray
+  if j ≥ toks.size then (blockBits, [t])
+  else
+    let rest := sharedPartitionSizedP toks cuts.tail j
+    (blockBits + rest.1, t :: rest.2)
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- Tree-taking twin of `emitSharedBlocksAtP`: same clamped cut points, but each
+    block's `(litLens, distLens)` come from the `trees` list (in lockstep with
+    `cuts`) instead of being recomputed from the group via `tokenFreqsP` +
+    `dynamicCodeLengths`. Byte-identical to `emitSharedBlocksAtP` when `trees` is
+    `sharedPartitionSizedP`'s output (`emitSharedBlocksAtSizedP_eq`). -/
+def emitSharedBlocksAtSizedP (data : ByteArray) (toks : Array UInt32) (cuts : List Nat)
+    (trees : List SizedTrees) (pos : Nat) (bw : BitWriter) : BitWriter :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let t := trees.headD emptySizedTrees
+  let bw := emitDynBlockP bw data (toks.extract pos j) t.val.1 t.val.2
+    t.property.1 t.property.2 (decide (j ≥ toks.size))
+  if j ≥ toks.size then bw
+  else emitSharedBlocksAtSizedP data toks cuts.tail trees.tail j bw
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- The packed sized-tree split candidate: the flushed byte size of
+    `deflateDynamicBlocksSharedAtP data toks cuts` **paired with** a thunk that
+    emits it, reusing the per-block trees built during sizing (no second
+    frequency/Huffman pass). The emit thunk is byte-identical to the reference
+    `deflateDynamicBlocksSharedAtP` (`deflateDynamicBlocksSharedAtSizedP_emit`),
+    so its roundtrip transfers for **any** cut list; component 1 equals that
+    output's `.size` (`SizeHelpers` conformance). `deflateRaw` sizes every split
+    candidate this way and forces only the winner's thunk. -/
+def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : Array UInt32)
+    (cuts : List Nat) : Nat × (Unit → ByteArray) :=
+  if data.size == 0 then
+    let out := deflateDynamicBlocksSharedAtP data toks cuts
+    (out.size, fun _ => out)
+  else
+    let sp := sharedPartitionSizedP toks cuts 0
+    ((sp.1 + 7) / 8,
+      fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.2 0 BitWriter.empty).flush)
+
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
     insertion cap (`insertCap`): low levels defer insertion + search shallowly
@@ -1307,6 +1384,36 @@ def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
   else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
   else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+
+/-- The base candidate *sized and prepared* from one shared token pass: the
+    winner's flushed byte size (the same stored / fixed / dynamic comparison
+    `deflateRawBaseP` makes internally) **paired with** a thunk that emits it. The
+    frequencies, code lengths, and dynamic-tree plan are computed once and shared
+    between the size and the emit — so when the base wins, forcing the thunk pays
+    no second sizing pass. The thunk is definitionally `deflateRawBaseP data
+    ptokens` (`deflateRawBasePPrep_emit`) and component 1 equals its `.size`
+    (`SizeHelpers` conformance), so byte-identity to the emit-then-`pickSmaller`
+    dispatch is preserved. -/
+def deflateRawBasePPrep (data : ByteArray) (ptokens : Array UInt32) : Nat × (Unit → ByteArray) :=
+  let f := tokenFreqsP ptokens
+  let lens := dynamicCodeLengths f.1 f.2
+  let plan := dynHeaderCodes lens.1 lens.2
+  have hcl : plan.clCodes.size ≥ 19 :=
+    Nat.le_of_eq (dynHeaderCodes_clCodes_size lens.1 lens.2).symm
+  let fixedBytes := fixedBlockBytes f.1 f.2
+  let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
+  let storedBytes := storedBlockBytes data
+  ((if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then storedBytes
+    else if fixedBytes < dynBytes then fixedBytes else dynBytes),
+   fun _ =>
+    if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
+    else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+    else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2)
+
+/-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
+theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : Array UInt32) :
+    (deflateRawBasePPrep data ptokens).2 () = deflateRawBaseP data ptokens := rfl
 
 /-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
     (definitional wrapper, `deflateRawBaseP_def`). Equal to the boxed
@@ -1595,12 +1702,14 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     The split tier starts at level 6 (#2737; previously level ≥ 8, and before
     that ≥ 7 — see #2698 for that history): with the boundaries chosen by the
     cheap streaming heuristic and the whole split pipeline on packed tokens,
-    the split candidate's cost is one extra emit-speed pass over the token
-    stream (no sizing passes, no boxed tokens). Levels 4–5 stay single-block
-    on purpose — they carry the old mid-band's high-speed points (the split's
-    extra emit pass would push them off that territory), while levels 6–8
-    spend the same cycles on per-block trees instead of deeper chains.
-    Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
+    the candidates are **sized with their per-block trees captured**
+    (`deflateRawBasePPrep` / `deflateDynamicBlocksSharedAtSizedP`) and only the
+    winner is emitted (#2753), reusing the trees the sizing pass already built —
+    so exactly one emit pass runs instead of two (three at L8). Levels 4–5 stay
+    single-block on purpose — they carry the old mid-band's high-speed points
+    (even a size-only split pass would push them off that territory), while
+    levels 6–8 spend the same cycles on per-block trees instead of deeper
+    chains. Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
@@ -1637,31 +1746,48 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         (deflateDynamicBlocksOptimal data sharedTokChunk)
     else
       -- Levels 6–8 (and level 9/10 above the memory gate): base vs cross-block
-      -- shared-window split at the observation-divergence boundaries (#2737).
-      -- No cuts ⇒ the split would be a single dynamic block the base already
-      -- sizes, so skip the second emit entirely (every input under
-      -- ~2·splitMinBlockBytes takes this path).
-      let base := deflateRawBaseP data ptokens
+      -- shared-window split at the observation-divergence boundaries (#2737),
+      -- **size-arbitrated** (#2753). Every candidate is *prepared* — sized to its
+      -- flushed byte count with its per-block trees captured (`deflateRawBasePPrep`
+      -- for the base, `deflateDynamicBlocksSharedAtSizedP` for each cut list) — and
+      -- only the winner is emitted, reusing the trees the sizing pass already
+      -- built, instead of emitting every candidate and discarding all but the
+      -- smallest via `pickSmaller`. `emitSmallerBy` selects by the same ⌈bits/8⌉
+      -- byte counts the emitted blocks flush (pinned by the `SizeHelpers`
+      -- conformance tests), so the winner and its bytes are identical to the
+      -- retired two/three-emit dispatch. The tree capture is what makes this a net
+      -- win: sizing a dynamic block otherwise costs a full frequency + Huffman
+      -- pass, so without reuse "size all + emit winner" would not beat "emit all"
+      -- (measured — Silesia L6-L7 +5-12% with reuse). No cuts ⇒ the split would be
+      -- a single dynamic block the base already sizes, so skip it entirely (every
+      -- input under ~2·splitMinBlockBytes takes this path).
+      let basePrep := deflateRawBasePPrep data ptokens
       let cuts := chooseSplitsHeuristicP ptokens
-      let withObs :=
-        if cuts.isEmpty then base
-        else pickSmaller base (deflateDynamicBlocksSharedAtP data ptokens cuts)
+      -- `withObs`: the base, or the size-arbitrated smaller of base and the
+      -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
+      -- the split, matching `pickSmaller`), so the loser's captured per-block
+      -- trees are dropped now rather than held live through the L8 sizing below.
+      -- The winner's emit thunk stays unforced until the final selection.
+      let withObs : Nat × (Unit → ByteArray) :=
+        if cuts.isEmpty then basePrep
+        else
+          let obsPrep := deflateDynamicBlocksSharedAtSizedP data ptokens cuts
+          if basePrep.1 < obsPrep.1 then basePrep else obsPrep
       if 8 ≤ level then
-        -- Max-ratio split tier: also *emit* the fixed-cadence partition and keep
-        -- the smallest. The old L8 arbitration picked between the heuristic and
-        -- cadence partitions by exact bit sizing; taking the min over the two
-        -- *emitted* candidates decides by the same quantity (⌈bits/8⌉), so this
-        -- is never worse than the retired sizing pass on any input — at the cost
-        -- of one extra packed emit pass instead of two boxed sizing walks.
+        -- Max-ratio split tier: also arbitrate the fixed-cadence partition. The
+        -- old L8 arbitration picked between the heuristic and cadence partitions
+        -- by exact bit sizing; deciding by the sized ⌈bits/8⌉ of the two split
+        -- candidates plus the base is that same quantity — never worse than the
+        -- retired sizing pass on any input, now at *one* emit instead of three.
         -- Measured (Silesia): the divergence cuts alone lose only on sao
         -- (+0.6pp, a statistically uniform star catalog the cadence handles
         -- better); this candidate closes exactly that hole. L4–L7 skip it: they
         -- had no split tier before, so there is nothing to not-regress, and the
-        -- divergence cuts already capture the mid-band win at one extra emit.
-        pickSmaller withObs
-          (deflateDynamicBlocksSharedAtP data ptokens
-            (fixedCadenceCuts sharedTokChunk ptokens.size))
-      else withObs
+        -- divergence cuts already capture the mid-band win.
+        let fixedPrep := deflateDynamicBlocksSharedAtSizedP data ptokens
+          (fixedCadenceCuts sharedTokChunk ptokens.size)
+        emitSmallerBy withObs.1 withObs.2 fixedPrep.1 fixedPrep.2
+      else withObs.2 ()
   else deflateRawBase data level
 
 end Zip.Native.Deflate

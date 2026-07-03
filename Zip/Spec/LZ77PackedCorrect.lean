@@ -300,4 +300,76 @@ theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ws : Array UInt32)
   · rfl
   · rw [emitSharedBlocksAtP_eq]
 
+/-! ## The packed sized-tree split candidate reuses trees (Wave 5 → #2753)
+
+`emitSharedBlocksAtSizedP`, fed the trees `sharedPartitionSizedP` builds while
+sizing, emits byte-for-byte what `emitSharedBlocksAtP` emits recomputing them —
+the packed twin of `emitSharedBlocksAtSized_eq`. Each block's trees are
+`sizedTrees (tokenFreqsP group) = dynamicCodeLengths (tokenFreqsP group)`, which
+is exactly what `emitSharedBlockP` recomputes; the `emitDynBlockP` calls then
+coincide (the alphabet-size proofs are proof-irrelevant). -/
+
+/-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
+    reference packed emitter (fuel-quantified form for the induction). -/
+private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ws : Array UInt32) :
+    ∀ (fuel pos : Nat), ws.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts pos).2 pos bw
+        = emitSharedBlocksAtP data ws cuts pos bw := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts bw
+    by_cases hend : min (max (cuts.headD ws.size) (pos + 1)) ws.size ≥ ws.size
+    · have hsnd : (sharedPartitionSizedP ws cuts pos).2 =
+          [sizedTrees (tokenFreqsP (ws.extract pos
+            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).1
+            (tokenFreqsP (ws.extract pos
+            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).2] := by
+        conv => lhs; unfold sharedPartitionSizedP
+        simp only [if_pos hend]
+      rw [hsnd]
+      conv => lhs; unfold emitSharedBlocksAtSizedP
+      conv => rhs; unfold emitSharedBlocksAtP
+      simp only [if_pos hend, List.headD_cons, emitSharedBlockP, sizedTrees]
+    · have hsnd : (sharedPartitionSizedP ws cuts pos).2 =
+          sizedTrees (tokenFreqsP (ws.extract pos
+            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).1
+            (tokenFreqsP (ws.extract pos
+            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).2 ::
+          (sharedPartitionSizedP ws cuts.tail
+            (min (max (cuts.headD ws.size) (pos + 1)) ws.size)).2 := by
+        conv => lhs; unfold sharedPartitionSizedP
+        simp only [if_neg hend]
+      rw [hsnd]
+      conv => lhs; unfold emitSharedBlocksAtSizedP
+      conv => rhs; unfold emitSharedBlocksAtP
+      simp only [if_neg hend, List.headD_cons, List.tail_cons, emitSharedBlockP, sizedTrees]
+      exact ih (min (max (cuts.headD ws.size) (pos + 1)) ws.size) (by omega) cuts.tail _
+
+/-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
+    reference packed emitter, for any cut list and start position. -/
+theorem emitSharedBlocksAtSizedP_eq (data : ByteArray) (ws : Array UInt32)
+    (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
+    emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts pos).2 pos bw
+      = emitSharedBlocksAtP data ws cuts pos bw :=
+  emitSharedBlocksAtSizedP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
+
+/-- The packed sized-tree split candidate's emit thunk is byte-identical to the
+    reference `deflateDynamicBlocksSharedAtP`: the roundtrip and padding theorems
+    transfer through this, exactly as for the un-sized packed candidate. -/
+theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ws : Array UInt32)
+    (cuts : List Nat) :
+    (deflateDynamicBlocksSharedAtSizedP data ws cuts).2 () =
+      deflateDynamicBlocksSharedAtP data ws cuts := by
+  unfold deflateDynamicBlocksSharedAtSizedP
+  split
+  · rfl
+  · rename_i h
+    show (emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts 0).2 0
+      BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ws cuts
+    rw [emitSharedBlocksAtSizedP_eq]
+    unfold deflateDynamicBlocksSharedAtP
+    rw [if_neg h]
+
 end Zip.Native.Deflate
