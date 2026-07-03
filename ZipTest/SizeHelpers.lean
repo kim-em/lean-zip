@@ -154,6 +154,61 @@ def tests : IO Unit := do
     let arbCuts := chooseSplitsArbitrated toks9
     unless (sharedPartitionSized toks9 arbCuts 0).1 == sharedPartitionBits toks9 arbCuts 0 do
       throw (IO.userError s!"sharedPartitionSized bits mismatch on {name}")
+
+  -- 7. Size-arbitrated split dispatch with sized-tree reuse (#2753): each
+  -- candidate is *prepared* — the winner's flushed byte size paired with an
+  -- emit thunk that reuses the trees built during sizing. The prepared sizes
+  -- must equal the emitted `.size` (so the arbitration decides by the true
+  -- flushed byte counts), the emit thunks must be byte-identical to the
+  -- reference emitters (`deflateRawBaseP` / `deflateDynamicBlocksSharedAtP`,
+  -- proven — this pins the compiled code), and the new emit-only-the-winner
+  -- `deflateRaw` at levels 6/7/8 must be byte-identical to the retired
+  -- emit-every-candidate dispatch.
+  for (name, data) in samples do
+    for level in [(6 : UInt8), 7, 8] do
+      let ptokens := lzMatchP data level
+      -- 7a. base prep: size == emitted size, thunk == reference emit
+      let basePrep := deflateRawBasePPrep data ptokens
+      let baseEmit := deflateRawBaseP data ptokens
+      unless basePrep.1 == baseEmit.size do
+        throw (IO.userError
+          s!"deflateRawBasePPrep size mismatch on {name}@L{level}: model={basePrep.1} emit={baseEmit.size}")
+      unless (basePrep.2 ()).beq baseEmit do
+        throw (IO.userError s!"deflateRawBasePPrep emit not byte-identical on {name}@L{level}")
+      -- 7b. split prep: size == emitted size and thunk == reference emit, over
+      -- diverse cut lists (the tree-reuse emit must match the recompute emit)
+      if data.size > 0 then
+        let cutsLists : List (String × List Nat) :=
+          [ ("heuristic", chooseSplitsHeuristicP ptokens),
+            ("fixed", fixedCadenceCuts sharedTokChunk ptokens.size),
+            ("empty", []),
+            ("nonmonotone", [5, 3, 7]),
+            ("huge", [1000000000]) ]
+        for (cname, cuts) in cutsLists do
+          let splitPrep := deflateDynamicBlocksSharedAtSizedP data ptokens cuts
+          let splitEmit := deflateDynamicBlocksSharedAtP data ptokens cuts
+          unless splitPrep.1 == splitEmit.size do
+            throw (IO.userError
+              s!"deflateDynamicBlocksSharedAtSizedP size mismatch on {name}@L{level}/{cname}: \
+                 model={splitPrep.1} emit={splitEmit.size}")
+          unless (splitPrep.2 ()).beq splitEmit do
+            throw (IO.userError
+              s!"deflateDynamicBlocksSharedAtSizedP emit not byte-identical on {name}@L{level}/{cname}")
+      -- 7c. the size-arbitrated dispatch is byte-identical to the old
+      -- emit-every-candidate one (`pickSmaller` over emitted blocks).
+      let base := deflateRawBaseP data ptokens
+      let cuts := chooseSplitsHeuristicP ptokens
+      let withObs := if cuts.isEmpty then base
+        else pickSmaller base (deflateDynamicBlocksSharedAtP data ptokens cuts)
+      let refOut := if 8 ≤ level then
+          pickSmaller withObs (deflateDynamicBlocksSharedAtP data ptokens
+            (fixedCadenceCuts sharedTokChunk ptokens.size))
+        else withObs
+      let newOut := deflateRaw data level
+      unless newOut.beq refOut do
+        throw (IO.userError
+          s!"deflateRaw(L{level}) not byte-identical to emit-all reference on {name}: \
+             new.size={newOut.size} ref.size={refOut.size}")
   IO.println "  SizeHelpers tests passed."
 
 end ZipTest.SizeHelpers
