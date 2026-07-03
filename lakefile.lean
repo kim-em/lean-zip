@@ -318,6 +318,9 @@ lean_exe «l1-attrib» where
 lean_exe «l1-sweep» where
   root := `ZipL1Sweep
 
+lean_exe «mid-sweep» where
+  root := `ZipMidSweep
+
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
 
