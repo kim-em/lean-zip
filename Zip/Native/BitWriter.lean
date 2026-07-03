@@ -66,6 +66,13 @@ def dropBytes (acc : UInt64) : Nat → UInt64
   | 0 => acc
   | k + 1 => dropBytes (acc >>> 8) k
 
+/-- A `Nat` `≤ 8` survives the `toUSize` round-trip on every platform —
+    discharges `pushUInt64LE`'s `k ≤ 8` side condition in `flushBytesWide`
+    and its correctness proof. -/
+private theorem toUSize_toNat_of_le_8 {k : Nat} (h : k ≤ 8) : k.toUSize.toNat = k := by
+  rw [Nat.toUSize_eq]
+  exact USize.toNat_ofNat_of_lt' (Nat.lt_of_le_of_lt h (by cases USize.size_eq <;> omega))
+
 /-- `flushBytes` through the wide store: one `pushUInt64LE` call (an 8-byte
     store into capacity slack plus a size bump, `c/bytearray_wide_ffi.c`)
     replaces the `k`-iteration per-byte push loop. The writers always take
@@ -75,9 +82,7 @@ def dropBytes (acc : UInt64) : Nat → UInt64
     trace (`lake exe wide-store-bench`, issue #2631 step 0). -/
 @[inline] def flushBytesWide (data : ByteArray) (acc : UInt64) (k : Nat) : ByteArray :=
   if h : k ≤ 8 then
-    data.pushUInt64LE acc k.toUSize
-      (by rw [Nat.toUSize_eq]; exact Nat.le_trans (Nat.le_of_eq (USize.toNat_ofNat_of_lt'
-        (Nat.lt_of_le_of_lt h (by cases USize.size_eq <;> omega)))) h)
+    data.pushUInt64LE acc k.toUSize (by rw [toUSize_toNat_of_le_8 h]; exact h)
   else
     flushBytes data acc k
 
@@ -98,8 +103,7 @@ theorem flushBytesWide_eq (data : ByteArray) (acc : UInt64) (k : Nat) :
   next h =>
     rw [ByteArray.pushUInt64LE, pushLEBytes_eq_flushBytes]
     congr 1
-    rw [Nat.toUSize_eq]
-    exact USize.toNat_ofNat_of_lt' (Nat.lt_of_le_of_lt h (by cases USize.size_eq <;> omega))
+    exact toUSize_toNat_of_le_8 h
   next => rfl
 
 /-- `flushAcc` is the split pair `flushBytes`/`dropBytes`: the byte pushes

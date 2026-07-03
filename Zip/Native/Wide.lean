@@ -1,5 +1,6 @@
 /-!
-  Word-sized little-endian `ByteArray` load for the DEFLATE hash hot loop.
+  Word-sized little-endian `ByteArray` loads and stores for the DEFLATE
+  hot loops.
 
   `ByteArray.ugetUInt32LE a off` reads a 4-byte little-endian word starting at
   byte `off` of `a`. The reference body — and the trusted specification of the
