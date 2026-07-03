@@ -99,7 +99,9 @@ LEAN_EXPORT lean_obj_res lean_zip_uset_u64le(lean_obj_arg a, size_t off, uint64_
  */
 LEAN_EXPORT lean_obj_res lean_zip_push_u64le(lean_obj_arg a, uint64_t v, size_t k) {
     size_t sz = lean_sarray_size(a);
-    if (lean_is_exclusive(a) && sz + 8 <= lean_sarray_capacity(a)) {
+    /* cap - sz cannot underflow (size <= capacity is a sarray invariant), and
+     * the subtraction form cannot overflow the way `sz + 8` in principle could. */
+    if (lean_is_exclusive(a) && lean_sarray_capacity(a) - sz >= 8) {
         uint8_t *p = lean_sarray_cptr(a) + sz;
         p[0] = (uint8_t)(v);
         p[1] = (uint8_t)(v >> 8);

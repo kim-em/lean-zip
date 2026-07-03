@@ -152,19 +152,17 @@ partial def checkPush64 (a : ByteArray) (k : Nat := 0) : IO Unit := do
     checkPush64 a (k + 1)
 
 /-- Exercise the exclusive-array paths of `pushUInt64LE`: a chain of pushes
-    onto an unshared array (byte-push fallback while capacity is tight, wide
-    fast path once push-doubling leaves ≥ 8 bytes of slack), checked against
-    the same chain of reference pushes. -/
-partial def checkPush64Exclusive (k : Nat := 0)
-    (got : ByteArray := ByteArray.mk #[0xAA])  -- ByteArray.mk: capacity = size
-    (want : ByteArray := ByteArray.mk #[0xAA])
+    onto an unshared array (`got` and `want` are constructed independently at
+    the call site, so `got` reaches the extern with refcount 1), checked
+    against the same chain of reference pushes. -/
+partial def checkPush64Exclusive (got want : ByteArray) (k : Nat := 0)
     (v : UInt64 := 0x0123456789ABCDEF) : IO Unit := do
   if h : k ≤ 8 then
     let got' := ByteArray.pushUInt64LE got v k.toUSize (toUSize_toNat_le_8 h)
     let want' := refPush64LE want v k
     unless got' == want' do
       throw (IO.userError s!"pushUInt64LE exclusive-chain mismatch at k {k}")
-    checkPush64Exclusive (k + 1) got' want'
+    checkPush64Exclusive got' want' (k + 1)
       (v * 6364136223846793005 + 1442695040888963407)
 
 def tests : IO Unit := do
@@ -177,7 +175,13 @@ def tests : IO Unit := do
   checkUset64Exclusive
   for a in [ByteArray.empty] ++ patterns64 do
     checkPush64 a
-  checkPush64Exclusive
+  -- capacity-tight seed (ByteArray.mk: capacity = size): byte-push fallback
+  -- runs until push growth leaves slack
+  checkPush64Exclusive (ByteArray.mk #[0xAA]) (ByteArray.mk #[0xAA])
+  -- slack seed: ≥ 8 spare bytes throughout the whole chain (final size 37
+  -- ≤ 64 - 8), so the wide-store fast path is guaranteed on every call
+  checkPush64Exclusive ((ByteArray.emptyWithCapacity 64).push 0xAA)
+    ((ByteArray.emptyWithCapacity 64).push 0xAA)
   -- Direct spot-checks of known little-endian byte placement.
   let z := ByteArray.mk #[0, 0, 0, 0, 0, 0, 0, 0, 0xAA]
   let stored := ByteArray.usetUInt64LE z 0 0x0123456789ABCDEF (by decide)

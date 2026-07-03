@@ -76,7 +76,10 @@ protected theorem size_set (a : ByteArray) (i : Nat) (v : UInt8) (h : i < a.size
     byte — is the trusted specification of the `@[extern]`; the C
     (`lean_zip_uset_u64le`) performs it as one wide store, in place when the
     array is exclusive. Writer analog of `ugetUInt64LE` (issue #2631); the
-    caller's in-bounds proof means the C does no bounds check. -/
+    caller's in-bounds proof means the C does no bounds check. Not yet on a
+    production path: it exists for the pre-sized-cursor / deferred-accumulator
+    writer designs (bench variants C/D in `ZipWideStoreBench`, the measured
+    2.5× follow-up ceiling) — the production flush uses `pushUInt64LE`. -/
 @[extern "lean_zip_uset_u64le"]
 def usetUInt64LE (a : ByteArray) (off : USize) (v : UInt64)
     (h : off.toNat + 8 ≤ a.size := by get_elem_tactic) : ByteArray :=
