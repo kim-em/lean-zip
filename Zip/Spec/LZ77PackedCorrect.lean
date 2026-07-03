@@ -1,6 +1,7 @@
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
 import Zip.Spec.EmitPackedCorrect
+import Zip.Spec.HtMatchCorrect
 import Zip.Native.DeflateDynamic
 
 /-!
