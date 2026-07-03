@@ -330,6 +330,142 @@ theorem chainWalkGuardedPacked_eq (data : ByteArray) (prev : Array Nat)
   · rw [chainWalkPacked_eq, chainWalkFast_eq]
   · rfl
 
+/-! ## USize-native packed chain walk (Wave 7 P1b)
+
+`chainWalkPackedU` runs `chainWalkPacked`'s per-position bookkeeping — fuel,
+the best-length/best-position accumulator, and the `scan_end` prefilter's
+index arithmetic — on unboxed `USize`, with the chain link `cand` left on the
+`Nat` ring. `chainWalkPackedU_eq` is the lockstep equality: identical control
+flow, every `USize` operation the faithful image of its `Nat` twin
+(`toUSize_toNat_of_lt` round-trips, `uget_eq_getElem` for the prefilter reads),
+so it holds whenever the buffer is `USize`-addressable and the accumulators
+round-trip (the wrapper's runtime guard). -/
+
+/-- The packed `USize` walk computes exactly the same `Nat` result as
+    `chainWalkPacked`: same branch tree, each `USize` add/compare the image of
+    the `Nat` one under the round-trip identities. -/
+theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (posU maxLenU cutoffU : USize) (hposU : posU.toNat = pos) (hmaxU : maxLenU.toNat = maxLen)
+    (hcutU : cutoffU.toNat = min niceLen maxLen)
+    (cand fuel bestLen bestPos : Nat)
+    (hfuel : fuel < USize.size) (hbl : bestLen < USize.size) (hbp : bestPos < USize.size) :
+    chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz posU maxLenU cutoffU
+        hposU hmaxU hcutU cand fuel.toUSize bestLen.toUSize bestPos.toUSize =
+      chainWalkPacked data prev windowSize pos maxLen niceLen hpm hps cand fuel bestLen bestPos := by
+  induction fuel generalizing cand bestLen bestPos hbl hbp with
+  | zero =>
+    rw [chainWalkPackedU, chainWalkPacked]
+    have h0 : ((0 : Nat).toUSize) = 0 := by
+      apply USize.toNat_inj.mp; rw [toUSize_toNat_of_lt (by omega), USize.toNat_zero]
+    rw [if_pos h0, if_pos rfl, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
+  | succ k ih =>
+    rw [chainWalkPackedU, chainWalkPacked]
+    have hfk : (k + 1 : Nat).toUSize.toNat = k + 1 := toUSize_toNat_of_lt hfuel
+    have hfne : ¬ ((k + 1 : Nat).toUSize = 0) := fun h => by
+      rw [h, USize.toNat_zero] at hfk; omega
+    have h1le : (1 : USize) ≤ (k + 1 : Nat).toUSize := by
+      rw [USize.le_iff_toNat_le, USize.toNat_one, hfk]; omega
+    have hsub : (k + 1 : Nat).toUSize - 1 = (k : Nat).toUSize := by
+      apply USize.toNat_inj.mp
+      rw [USize.toNat_sub_of_le _ _ h1le, USize.toNat_one, hfk, toUSize_toNat_of_lt (show k < USize.size by omega)]
+      omega
+    rw [if_neg hfne, if_neg (by omega : ¬ (k + 1 = 0))]
+    by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+    · rw [dif_pos hc, dif_pos hc]
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      have hcand : cand + maxLen ≤ data.size := by omega
+      have hcandlt : cand < USize.size := by omega
+      have hcU : cand.toUSize.toNat = cand := toUSize_toNat_of_lt hcandlt
+      have hblU : bestLen.toUSize.toNat = bestLen := toUSize_toNat_of_lt hbl
+      have hbpU : bestPos.toUSize.toNat = bestPos := toUSize_toNat_of_lt hbp
+      simp only []
+      -- The prefilter condition `bestLen < maxLen` is shared (USize compare = Nat compare).
+      have hcond : (bestLen.toUSize < maxLenU) = (bestLen < maxLen) := by
+        rw [eq_iff_iff, USize.lt_iff_toNat_lt, hblU, hmaxU]
+      -- The cutoff comparison, shared for any `n < USize.size`.
+      have hcut : ∀ n : Nat, n < USize.size → (n.toUSize ≥ cutoffU) = (n ≥ min niceLen maxLen) := by
+        intro n hn
+        rw [eq_iff_iff, ge_iff_le, ge_iff_le, USize.le_iff_toNat_le, hcutU, toUSize_toNat_of_lt hn]
+      -- The shared `countMatch` continuation (reached when the prefilter does not skip).
+      have hstep :
+          (let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
+           let blU := if ml.toUSize > bestLen.toUSize then ml.toUSize else bestLen.toUSize
+           let bpU := if ml.toUSize > bestLen.toUSize then cand.toUSize else bestPos.toUSize
+           if blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
+           else chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz posU maxLenU cutoffU
+             hposU hmaxU hcutU
+             (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
+             ((k + 1 : Nat).toUSize - 1) blU bpU) =
+          (let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
+           let bl := if ml > bestLen then ml else bestLen
+           let bp := if ml > bestLen then cand else bestPos
+           if bl ≥ min niceLen maxLen then bp * 512 + bl
+           else chainWalkPacked data prev windowSize pos maxLen niceLen hpm hps
+             (prev[cand &&& 0x7FFF]'(by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega))
+             k bl bp) := by
+        have hml_le : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ maxLen :=
+          (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+        have hmllt : lz77Greedy.countMatch data cand pos maxLen hcand hpm < USize.size := by omega
+        have hmlU : (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize.toNat
+            = lz77Greedy.countMatch data cand pos maxLen hcand hpm := toUSize_toNat_of_lt hmllt
+        have hmlcond : ((lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize > bestLen.toUSize)
+            = (lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen) := by
+          rw [eq_iff_iff, gt_iff_lt, gt_iff_lt, USize.lt_iff_toNat_lt, hblU, hmlU]
+        simp only [hmlcond]
+        by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+        · simp only [hml, ↓reduceIte, hcut _ hmllt]
+          by_cases hge : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ min niceLen maxLen
+          · simp only [hge, ↓reduceIte, hmlU, hcU]
+          · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hmllt hcandlt
+        · simp only [hml, ↓reduceIte, hcut _ hbl]
+          by_cases hge : bestLen ≥ min niceLen maxLen
+          · simp only [hge, ↓reduceIte, hblU, hbpU]
+          · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hbl hbp
+      -- Reduce the shared `skip` prefilter Bool on both sides.
+      by_cases hlt : bestLen < maxLen
+      · simp only [dif_pos (show bestLen.toUSize < maxLenU by rw [hcond]; exact hlt), dif_pos hlt,
+          uget_eq_getElem]
+        have e1 : (cand.toUSize + bestLen.toUSize).toNat = cand + bestLen := by
+          rw [USize.toNat_add, hcU, hblU]; apply Nat.mod_eq_of_lt; omega
+        have e2 : (posU + bestLen.toUSize).toNat = pos + bestLen := by
+          rw [USize.toNat_add, hposU, hblU]; apply Nat.mod_eq_of_lt; omega
+        simp only [e1, e2]
+        by_cases hbyte : data[cand + bestLen]'(by omega) = data[pos + bestLen]'(by omega)
+        · simp only [hbyte, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]; exact hstep
+        · simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, hcut _ hbl]
+          by_cases hge : bestLen ≥ min niceLen maxLen
+          · simp only [hge, ↓reduceIte, hblU, hbpU]
+          · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hbl hbp
+      · simp only [dif_neg (show ¬ (bestLen.toUSize < maxLenU) by rw [hcond]; exact hlt), dif_neg hlt,
+          Bool.false_eq_true, ↓reduceIte]
+        exact hstep
+    · rw [dif_neg hc, dif_neg hc, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
+
+/-- The runtime-guarded `USize` walk equals the runtime-guarded `Nat` walk
+    (`chainWalkGuardedPacked`) unconditionally: when the addressability +
+    accumulator-faithfulness check passes it is `chainWalkPackedU_eq`, and every
+    other branch is literally `chainWalkGuardedPacked`'s branch. Callers can
+    therefore substitute the `USize` walk with no change to any downstream
+    contract — its result decodes with the existing `chainWalkGuardedPacked_mod`
+    / `_div` lemmas after rewriting through this equation. -/
+theorem chainWalkGuardedPackedU_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) :
+    chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos =
+      chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos := by
+  unfold chainWalkGuardedPackedU chainWalkGuardedPacked
+  split
+  · split
+    · rename_i _ hg
+      rw [chainWalkPackedU_eq]
+      · rw [← hg.2.1]; exact USize.toNat_lt_two_pow_numBits _
+      · rw [← hg.2.2.1]; exact USize.toNat_lt_two_pow_numBits _
+      · rw [← hg.2.2.2]; exact USize.toNat_lt_two_pow_numBits _
+    · rfl
+  · rfl
+
 /-- From a zero-initialised best length, the reference walk's best length
     never exceeds `maxLen` (specialisation of `chainWalk_spec`). -/
 theorem chainWalk_fst_le (data : ByteArray) (prev : Array Nat)
