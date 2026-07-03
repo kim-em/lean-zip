@@ -54,6 +54,71 @@ LEAN_EXPORT uint64_t lean_zip_uget_u64le(b_lean_obj_arg a, size_t off) {
 }
 
 /*
+ * lean_zip_uset_u64le : ByteArray → USize → UInt64 → ByteArray
+ *   (a owned, off an unboxed size_t, v an unboxed uint64_t)
+ *
+ * Store the 8 bytes of `v` little-endian at byte offset `off`. The Lean
+ * reference body is the chain of eight `a.set` writes (see `usetUInt64LE` in
+ * `Zip/Native/Wide.lean`), and this C must agree with it. As with the loads,
+ * the store is written out byte-by-byte so it is little-endian by construction
+ * and free of unaligned-access UB; the optimizer folds it to a single wide
+ * store. The Lean side carries the in-bounds proof (`off + 8 ≤ a.size`), so C
+ * does no bounds check. `a` is owned: when the caller holds the only
+ * reference the store is done in place (the hot-loop case); otherwise the
+ * array is copied first, exactly like `lean_byte_array_uset`.
+ */
+LEAN_EXPORT lean_obj_res lean_zip_uset_u64le(lean_obj_arg a, size_t off, uint64_t v) {
+    lean_obj_res r;
+    if (lean_is_exclusive(a)) r = a;
+    else r = lean_copy_byte_array(a);
+    uint8_t *p = lean_sarray_cptr(r) + off;
+    p[0] = (uint8_t)(v);
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+    p[4] = (uint8_t)(v >> 32);
+    p[5] = (uint8_t)(v >> 40);
+    p[6] = (uint8_t)(v >> 48);
+    p[7] = (uint8_t)(v >> 56);
+    return r;
+}
+
+/*
+ * lean_zip_push_u64le : ByteArray → UInt64 → USize → ByteArray
+ *   (a owned, v an unboxed uint64_t, k an unboxed size_t, k ≤ 8)
+ *
+ * Append the low `k` bytes of `v`, LSB-first — the wide-store form of the
+ * BitWriter's per-byte flush loop. The Lean reference body is `k` iterated
+ * `a.push v.toUInt8` / `v >>> 8` steps (see `pushUInt64LE` in
+ * `Zip/Native/Wide.lean`), and this C must agree with it. Hot path (exclusive
+ * array with ≥ 8 spare bytes of capacity): one unconditional 8-byte store at
+ * the end — bytes past `size + k` land in capacity slack, which is not part
+ * of the value — then bump the size by `k`. Cold path (shared, or capacity
+ * tight): fall back to the byte-wise pushes of the model, which handle
+ * copy-on-write and growth. The Lean side carries the `k ≤ 8` proof.
+ */
+LEAN_EXPORT lean_obj_res lean_zip_push_u64le(lean_obj_arg a, uint64_t v, size_t k) {
+    size_t sz = lean_sarray_size(a);
+    if (lean_is_exclusive(a) && sz + 8 <= lean_sarray_capacity(a)) {
+        uint8_t *p = lean_sarray_cptr(a) + sz;
+        p[0] = (uint8_t)(v);
+        p[1] = (uint8_t)(v >> 8);
+        p[2] = (uint8_t)(v >> 16);
+        p[3] = (uint8_t)(v >> 24);
+        p[4] = (uint8_t)(v >> 32);
+        p[5] = (uint8_t)(v >> 40);
+        p[6] = (uint8_t)(v >> 48);
+        p[7] = (uint8_t)(v >> 56);
+        lean_sarray_set_size(a, sz + k);
+        return a;
+    }
+    for (size_t i = 0; i < k; i++) {
+        a = lean_byte_array_push(a, (uint8_t)(v >> (8 * i)));
+    }
+    return a;
+}
+
+/*
  * lean_zip_ctz64 : UInt64 → UInt64  (count trailing zero bits)
  *
  * Used by the match-extension loop to locate the first mismatching byte from the

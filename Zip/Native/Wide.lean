@@ -64,6 +64,50 @@ def ugetUInt64LE (a : @& ByteArray) (off : USize)
   ((a[off.toNat + 6]'(by omega)).toUInt64 <<< 48) |||
   ((a[off.toNat + 7]'(by omega)).toUInt64 <<< 56)
 
+/-- `set` preserves size (missing from core for `ByteArray`; used for the
+    chained in-bounds proofs of `usetUInt64LE`'s reference body). -/
+protected theorem size_set (a : ByteArray) (i : Nat) (v : UInt8) (h : i < a.size) :
+    (a.set i v h).size = a.size := by
+  simp only [← ByteArray.size_data, ByteArray.data_set, Array.size_set]
+
+/-- Store the little-endian `UInt64` `v` at byte offset `off`. The reference
+    body — the chain of eight `a.set` writes assembling the store byte by
+    byte — is the trusted specification of the `@[extern]`; the C
+    (`lean_zip_uset_u64le`) performs it as one wide store, in place when the
+    array is exclusive. Writer analog of `ugetUInt64LE` (issue #2631); the
+    caller's in-bounds proof means the C does no bounds check. -/
+@[extern "lean_zip_uset_u64le"]
+def usetUInt64LE (a : ByteArray) (off : USize) (v : UInt64)
+    (h : off.toNat + 8 ≤ a.size := by get_elem_tactic) : ByteArray :=
+  ((((((((a.set off.toNat v.toUInt8 (by omega)).set
+    (off.toNat + 1) (v >>> 8).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 2) (v >>> 16).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 3) (v >>> 24).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 4) (v >>> 32).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 5) (v >>> 40).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 6) (v >>> 48).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 7) (v >>> 56).toUInt8 (by simp only [ByteArray.size_set]; omega))
+
+/-- Reference model for `pushUInt64LE`: push the low `k` bytes of `v`,
+    LSB-first. This is exactly the shape of the BitWriter's byte-flush loop
+    (`BitWriter.flushBytes`), so wiring the wide store into the writer is a
+    definitional step. -/
+def pushLEBytes (a : ByteArray) (v : UInt64) : Nat → ByteArray
+  | 0 => a
+  | k + 1 => pushLEBytes (a.push v.toUInt8) (v >>> 8) k
+
+/-- Append the low `k` bytes (`k ≤ 8`) of `v`, LSB-first — the wide-store form
+    of the BitWriter's per-byte flush loop. The reference body `pushLEBytes`
+    is the trusted specification of the `@[extern]`; the C
+    (`lean_zip_push_u64le`) appends them as one unconditional 8-byte store
+    into capacity slack plus a size bump of `k` when the array is exclusive
+    with room, falling back to the model's byte pushes otherwise. The `k ≤ 8`
+    proof is what makes the single 8-byte store cover every appended byte. -/
+@[extern "lean_zip_push_u64le"]
+def pushUInt64LE (a : ByteArray) (v : UInt64) (k : USize)
+    (h : k.toNat ≤ 8) : ByteArray :=
+  pushLEBytes a v k.toNat
+
 end ByteArray
 
 /-- Count trailing zero bits of a `UInt64` (`__builtin_ctzll`, with the
