@@ -185,12 +185,9 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
             exact inflate_pickSmaller _ _ data maxOutputSize
               (inflate_deflateRawBase data level _ hsize)
               (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
-          · split
-            · -- level 8: withObs vs the sized fixed-cadence partition
-              exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hwithObs _ rfl)
-                (hsplit _)
-            · -- levels 6–7 (and 9/10 above the optimal-size gate)
-              exact hwithObs _ rfl
+          · -- levels 6–8 (and 9/10 above the optimal-size gate): one obs-split
+            -- candidate per tier, so `hwithObs` covers all three
+            exact hwithObs _ rfl
       · exact inflate_deflateRawBase data level _ hsize
 
 /-- Padding decomposition for the compressed-block dispatch. -/
@@ -322,14 +319,8 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                 bits = contentBits ++ padding ∧ padding.length < 8)
               _ _ (deflateRawBase_pad data level)
               (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
-          · split
-            · -- level 8: withObs vs the sized fixed-cadence partition
-              exact emitSmallerBy_bytesToBits
-                (P := fun bits => ∃ (contentBits padding : List Bool),
-                  bits = contentBits ++ padding ∧ padding.length < 8)
-                _ _ _ _ (hwithObs _ rfl) (hsplit _)
-            · -- levels 6–7 (and 9/10 above the optimal-size gate)
-              exact hwithObs _ rfl
+          · -- levels 6–8 (and 9/10 above the optimal-size gate)
+            exact hwithObs _ rfl
       · exact deflateRawBase_pad data level
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
@@ -538,15 +529,8 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                   remaining.length < 8)
               _ _ (deflateRawBase_goR_pad data level)
               (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
-          · split
-            · -- level 8: withObs vs the sized fixed-cadence partition
-              exact emitSmallerBy_bytesToBits
-                (P := fun bits => ∃ remaining,
-                  Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-                    remaining.length < 8)
-                _ _ _ _ (hwithObs _ rfl) (hsplit _)
-            · -- levels 6–7 (and 9/10 above the optimal-size gate)
-              exact hwithObs _ rfl
+          · -- levels 6–8 (and 9/10 above the optimal-size gate)
+            exact hwithObs _ rfl
       · exact deflateRawBase_goR_pad data level
 
 end Zip.Native.Deflate

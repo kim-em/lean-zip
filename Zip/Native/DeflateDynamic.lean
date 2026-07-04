@@ -1747,47 +1747,30 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     else
       -- Levels 6–8 (and level 9/10 above the memory gate): base vs cross-block
       -- shared-window split at the observation-divergence boundaries (#2737),
-      -- **size-arbitrated** (#2753). Every candidate is *prepared* — sized to its
-      -- flushed byte count with its per-block trees captured (`deflateRawBasePPrep`
-      -- for the base, `deflateDynamicBlocksSharedAtSizedP` for each cut list) — and
-      -- only the winner is emitted, reusing the trees the sizing pass already
-      -- built, instead of emitting every candidate and discarding all but the
-      -- smallest via `pickSmaller`. `emitSmallerBy` selects by the same ⌈bits/8⌉
-      -- byte counts the emitted blocks flush (pinned by the `SizeHelpers`
-      -- conformance tests), so the winner and its bytes are identical to the
-      -- retired two/three-emit dispatch. The tree capture is what makes this a net
+      -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
+      -- their flushed byte count with per-block trees captured
+      -- (`deflateRawBasePPrep` for the base, `deflateDynamicBlocksSharedAtSizedP`
+      -- for the cut list) — and only the winner is emitted, reusing the trees the
+      -- sizing pass already built, instead of emitting both and discarding the
+      -- larger via `pickSmaller`. The winner and its bytes are identical to the
+      -- retired emit-both dispatch. The tree capture is what makes this a net
       -- win: sizing a dynamic block otherwise costs a full frequency + Huffman
-      -- pass, so without reuse "size all + emit winner" would not beat "emit all"
-      -- (measured — Silesia L6-L7 +5-12% with reuse). No cuts ⇒ the split would be
-      -- a single dynamic block the base already sizes, so skip it entirely (every
-      -- input under ~2·splitMinBlockBytes takes this path).
+      -- pass, so without reuse "size both + emit winner" would not beat "emit
+      -- both" (measured — Silesia L6-L7 +5-12% with reuse). No cuts ⇒ the split
+      -- would be a single dynamic block the base already sizes, so skip it
+      -- entirely (every input under ~2·splitMinBlockBytes takes this path).
       let basePrep := deflateRawBasePPrep data ptokens
       let cuts := chooseSplitsHeuristicP ptokens
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block
-      -- trees are dropped now rather than held live through the L8 sizing below.
-      -- The winner's emit thunk stays unforced until the final selection.
+      -- trees are dropped now. The winner's emit thunk stays unforced until then.
       let withObs : Nat × (Unit → ByteArray) :=
         if cuts.isEmpty then basePrep
         else
           let obsPrep := deflateDynamicBlocksSharedAtSizedP data ptokens cuts
           if basePrep.1 < obsPrep.1 then basePrep else obsPrep
-      if 8 ≤ level then
-        -- Max-ratio split tier: also arbitrate the fixed-cadence partition. The
-        -- old L8 arbitration picked between the heuristic and cadence partitions
-        -- by exact bit sizing; deciding by the sized ⌈bits/8⌉ of the two split
-        -- candidates plus the base is that same quantity — never worse than the
-        -- retired sizing pass on any input, now at *one* emit instead of three.
-        -- Measured (Silesia): the divergence cuts alone lose only on sao
-        -- (+0.6pp, a statistically uniform star catalog the cadence handles
-        -- better); this candidate closes exactly that hole. L4–L7 skip it: they
-        -- had no split tier before, so there is nothing to not-regress, and the
-        -- divergence cuts already capture the mid-band win.
-        let fixedPrep := deflateDynamicBlocksSharedAtSizedP data ptokens
-          (fixedCadenceCuts sharedTokChunk ptokens.size)
-        emitSmallerBy withObs.1 withObs.2 fixedPrep.1 fixedPrep.2
-      else withObs.2 ()
+      withObs.2 ()
   else deflateRawBase data level
 
 end Zip.Native.Deflate
