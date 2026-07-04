@@ -224,7 +224,15 @@ target bytearray_wide_ffi.o pkg : FilePath := do
   let srcJob ← bytearray_wide_ffi.c.fetch
   let oFile := pkg.buildDir / "c" / "bytearray_wide_ffi.o"
   let weakArgs := #["-I", (← getLeanIncludeDir).toString]
-  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  -- -O2 is essential here: these are single-load/store hot-loop primitives
+  -- whose lean.h helpers (lean_sarray_cptr, lean_is_exclusive, ...) only
+  -- disappear under optimization; without it each "wide" op is a pile of
+  -- outlined helper calls and loses to the runtime's own -O2 push/get.
+  -- -DNDEBUG matches how the release Lean runtime itself is built: the
+  -- lean.h asserts are debug-only checks, and these externs' bounds are
+  -- carried by Lean-side proofs (+ the ZipTest/Wide conformance sweeps).
+  let hardArgs := #["-O2", "-DNDEBUG"] ++
+    if Platform.isWindows then #[] else #["-fPIC"]
   buildO oFile srcJob weakArgs hardArgs "cc"
 
 extern_lib libbytearray_wide_ffi pkg := do
@@ -305,6 +313,9 @@ lean_exe «bench-report» where
 
 lean_exe «treefree-bench» where
   root := `ZipTreeFreeBench
+
+lean_exe «wide-store-bench» where
+  root := `ZipWideStoreBench
 
 lean_exe «treefree-decode-bench» where
   root := `ZipTreeFreeDecodeBench

@@ -1,3 +1,5 @@
+import Zip.Native.Wide
+
 /-!
   LSB-first bit packer for DEFLATE streams.
 
@@ -64,6 +66,46 @@ def dropBytes (acc : UInt64) : Nat → UInt64
   | 0 => acc
   | k + 1 => dropBytes (acc >>> 8) k
 
+/-- A `Nat` `≤ 8` survives the `toUSize` round-trip on every platform —
+    discharges `pushUInt64LE`'s `k ≤ 8` side condition in `flushBytesWide`
+    and its correctness proof. -/
+private theorem toUSize_toNat_of_le_8 {k : Nat} (h : k ≤ 8) : k.toUSize.toNat = k := by
+  rw [Nat.toUSize_eq]
+  exact USize.toNat_ofNat_of_lt' (Nat.lt_of_le_of_lt h (by cases USize.size_eq <;> omega))
+
+/-- `flushBytes` through the wide store: one `pushUInt64LE` call (an 8-byte
+    store into capacity slack plus a size bump, `c/bytearray_wide_ffi.c`)
+    replaces the `k`-iteration per-byte push loop. The writers always take
+    the wide branch — `k = total / 8 ≤ (7 + 25) / 8 = 4` — but the guard
+    keeps the function total on all inputs, falling back to the push loop.
+    Kernel-measured 1.4× over the push loop on a synthetic L1-like field
+    trace (`lake exe wide-store-bench`, issue #2631 step 0). -/
+@[inline] def flushBytesWide (data : ByteArray) (acc : UInt64) (k : Nat) : ByteArray :=
+  if h : k ≤ 8 then
+    data.pushUInt64LE acc k.toUSize (by rw [toUSize_toNat_of_le_8 h]; exact h)
+  else
+    flushBytes data acc k
+
+/-- The wide-store reference model unrolls to exactly the per-byte push
+    loop (they are the same recursion). -/
+theorem pushLEBytes_eq_flushBytes (data : ByteArray) (acc : UInt64) (k : Nat) :
+    ByteArray.pushLEBytes data acc k = flushBytes data acc k := by
+  induction k generalizing data acc with
+  | zero => rfl
+  | succ k ih => rw [ByteArray.pushLEBytes, flushBytes, ih]
+
+/-- `flushBytesWide` is `flushBytes`: the wide branch is the model's push
+    loop by `pushLEBytes_eq_flushBytes`, the fallback is definitional. -/
+theorem flushBytesWide_eq (data : ByteArray) (acc : UInt64) (k : Nat) :
+    flushBytesWide data acc k = flushBytes data acc k := by
+  unfold flushBytesWide
+  split
+  next h =>
+    rw [ByteArray.pushUInt64LE, pushLEBytes_eq_flushBytes]
+    congr 1
+    exact toUSize_toNat_of_le_8 h
+  next => rfl
+
 /-- `flushAcc` is the split pair `flushBytes`/`dropBytes`: the byte pushes
     and the leftover accumulator commute past each other. -/
 theorem flushAcc_eq (data : ByteArray) (acc : UInt64) (total : Nat) :
@@ -94,7 +136,7 @@ def writeBits (bw : BitWriter) (n : Nat) (val : UInt32) : BitWriter :=
   let masked : UInt64 := val.toUInt64 % (1 <<< n.toUInt64)
   let acc : UInt64 := bw.bitBuf.toUInt64 ||| (masked <<< bw.bitCount.toUInt64)
   let total := bw.bitCount.toNat + n
-  ⟨flushBytes bw.data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
+  ⟨flushBytesWide bw.data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
     (total % 8).toUInt8⟩
 
 /-- `writeBits` is `flushAcc` of the merged accumulator — the pre-#2739
@@ -103,8 +145,8 @@ theorem writeBits_def (bw : BitWriter) (n : Nat) (val : UInt32) :
     bw.writeBits n val =
       flushAcc bw.data
         (bw.bitBuf.toUInt64 ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64))
-        (bw.bitCount.toNat + n) :=
-  (flushAcc_eq ..).symm
+        (bw.bitCount.toNat + n) := by
+  rw [writeBits, flushBytesWide_eq, flushAcc_eq]
 
 /-- Reverse all 16 bits of `x` (`bit i ↦ bit (15-i)`) with a branchless
     swap network — no per-bit loop. -/
@@ -126,7 +168,7 @@ def writeHuffCode (bw : BitWriter) (code : UInt16) (len : UInt8) : BitWriter :=
   let rev : UInt64 := (reverse16 code).toUInt64 >>> (16 - len.toUInt64)
   let acc : UInt64 := bw.bitBuf.toUInt64 ||| (rev <<< bw.bitCount.toUInt64)
   let total := bw.bitCount.toNat + len.toNat
-  ⟨flushBytes bw.data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
+  ⟨flushBytesWide bw.data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
     (total % 8).toUInt8⟩
 
 /-- `writeHuffCode` is `flushAcc` of the merged accumulator — the pre-#2739
@@ -136,8 +178,8 @@ theorem writeHuffCode_def (bw : BitWriter) (code : UInt16) (len : UInt8) :
       flushAcc bw.data
         (bw.bitBuf.toUInt64 |||
           (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)) <<< bw.bitCount.toUInt64))
-        (bw.bitCount.toNat + len.toNat) :=
-  (flushAcc_eq ..).symm
+        (bw.bitCount.toNat + len.toNat) := by
+  rw [writeHuffCode, flushBytesWide_eq, flushAcc_eq]
 
 /-- Flush any partial byte (pad with zeros). Returns the final ByteArray. -/
 def flush (bw : BitWriter) : ByteArray :=
