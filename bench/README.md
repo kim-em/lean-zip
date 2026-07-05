@@ -20,6 +20,19 @@ the external-language comparators (see below), then [`plot.py`](plot.py) (writes
 the SVGs). Ratios are deterministic; throughput is a **median-of-5 snapshot of
 the machine recorded in the JSON `meta`** — commit the JSON and SVGs together.
 
+> **Benchmark machine: chungus2 (since 2026-07-05).** The canonical machine moved
+> from `chungus` to `chungus2`. The two are indistinguishable on throughput —
+> within ~0.3% across every version-stable comparator, and byte-identical on ratio
+> — so historical numbers stay directly comparable. `go` and `js` each run on
+> their **newest** release (`nix-shell -p go` → go 1.26.3; `nodejs_latest` → node
+> v26, ~+22% JS compress over the old default v24), so those two curves track the
+> compiler version rather than the machine; js in particular carries large V8
+> run-to-run variance and is indicative only. Full analysis:
+> [`results/cross-machine-chungus-to-chungus2.md`](results/cross-machine-chungus-to-chungus2.md);
+> the last `chungus` snapshot is preserved under
+> [`results/archive/`](results/archive/) and the comparison is reproducible via
+> [`cross_machine.py`](cross_machine.py).
+
 ## Compressors compared
 
 The honest comparison group for a pure-Lean codec is other **language-native**

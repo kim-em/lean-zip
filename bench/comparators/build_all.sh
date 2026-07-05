@@ -14,8 +14,11 @@ echo "[go] building (pure-Go compress/flate)…"
 ( cd go && nix-shell -p go --run "go build -o bench-go main.go" ) \
   && echo "[go] ok" || echo "[go] FAILED — skipping"
 
+# `nodejs_latest` (not the older default `nodejs`) so JS runs on the newest V8 —
+# each language deserves its best current release. On a 2026-07 channel this is
+# node v26, ~+22% JS compress over v24. `go` likewise takes `-p go` (newest).
 echo "[js] installing fflate (pure-JS)…"
-( cd js && nix-shell -p nodejs --run "npm install --no-audit --no-fund --silent" ) \
+( cd js && nix-shell -p nodejs_latest --run "npm install --no-audit --no-fund --silent" ) \
   && echo "[js] ok" || echo "[js] FAILED — skipping"
 
 # Zig 0.14.1 specifically: the 0.15 stdlib `flate.Compress` encoder is an
