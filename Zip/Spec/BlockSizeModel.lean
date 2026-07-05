@@ -55,17 +55,34 @@ theorem bitLength_writeHuffCode (bw : BitWriter) (code : UInt16) (len : UInt8)
   rw [← toBits_length, writeHuffCode_toBits bw code len hwf hlen, List.length_append,
     Huffman.Spec.natToBits_length, toBits_length]
 
+/-- `flushBytes` pushes exactly `k` bytes. -/
+theorem flushBytes_size (data : ByteArray) (acc : UInt64) (k : Nat) :
+    (flushBytes data acc k).size = data.size + k := by
+  induction k generalizing data acc with
+  | zero => simp only [flushBytes, Nat.add_zero]
+  | succ k ih => rw [flushBytes, ih, ByteArray.size_push]; omega
+
 /-- The flushed byte size of a (well-formed) writer is `⌈bitLength/8⌉`. `flush`
-    pushes one final partial byte iff `bitCount > 0`; since `bitCount < 8`, that
-    is exactly the ceiling division of the total bit count. -/
+    drains the `bitCount / 8` whole pending bytes (`flushBytes`), then pushes one
+    final partial byte iff `bitCount % 8 > 0` — exactly the ceiling division of
+    the total bit count. -/
 theorem flush_size (bw : BitWriter) (hwf : bw.wf) :
     bw.flush.size = (bw.bitLength + 7) / 8 := by
   obtain ⟨hbc_lt, _⟩ := hwf
   unfold flush bitLength
-  by_cases hbc0 : bw.bitCount.toNat = 0
-  · have hcond : ¬(bw.bitCount > 0) := by show ¬(0 < bw.bitCount.toNat); omega
-    rw [if_neg hcond, hbc0]; omega
-  · have hcond : bw.bitCount > 0 := by show 0 < bw.bitCount.toNat; omega
-    rw [if_pos hcond, ByteArray.size_push]; omega
+  rw [flushAcc_eq]
+  dsimp only
+  have hb8 : ((bw.bitCount.toNat % 8).toUInt8).toNat = bw.bitCount.toNat % 8 := by
+    simp only [Nat.toUInt8, UInt8.toNat_ofNat']; rw [show (2 : Nat) ^ 8 = 256 from rfl]; omega
+  have hz : (0 : UInt8).toNat = 0 := rfl
+  have hfb : (flushBytes bw.data bw.bitBuf (bw.bitCount.toNat / 8)).size
+      = bw.data.size + bw.bitCount.toNat / 8 := flushBytes_size _ _ _
+  by_cases hbc0 : bw.bitCount.toNat % 8 = 0
+  · have hcond : ¬((bw.bitCount.toNat % 8).toUInt8 > 0) := by
+      rw [gt_iff_lt, UInt8.lt_iff_toNat_lt, hb8, hz]; omega
+    rw [if_neg hcond, hfb]; omega
+  · have hcond : (bw.bitCount.toNat % 8).toUInt8 > 0 := by
+      rw [gt_iff_lt, UInt8.lt_iff_toNat_lt, hb8, hz]; omega
+    rw [if_pos hcond, ByteArray.size_push, hfb]; omega
 
 end Zip.Native.BitWriter
