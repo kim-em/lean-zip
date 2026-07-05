@@ -242,37 +242,29 @@ private theorem chainWalkAllGuarded_snd_size (data : ByteArray) (prev : Array Na
   · exact chainWalkAllFast_snd_size ..
   · exact chainWalkAll_snd_size ..
 
-/-- 3-byte chain hash for the L9 candidate cache. The optimal parser maximises
-    *ratio*, so it must see every candidate — including length-3 matches. The
-    L1-L8 matchers switched to a 4-byte hash for speed (#2620), which drops
-    positions that share only a 3-byte prefix; on binary that measurably hurt the
-    L9 parse (x-ray +7.4%, ooffice +3.5% ratio). So the cache keeps the original
-    3-byte hash. Heuristic — opaque to correctness (the cache never enters a proof). -/
-@[inline] def hash3opt (data : ByteArray) (pos hashSize : Nat) (h : pos + 2 < data.size) : Nat :=
-  let a := (data[pos]'(by omega)).toUInt32
-  let b := (data[pos + 1]'(by omega)).toUInt32
-  let c := (data[pos + 2]'(by omega)).toUInt32
-  ((a ^^^ (b <<< 5) ^^^ (c <<< 10)).toNat % hashSize)
-
 /-- Hash-insert positions `[base + j, base + stop)` into the chains without
     searching or caching them — libdeflate's `bt_matchfinder_skip_byte`, used
     for the interior of a long match. Later positions can still find matches
     reaching back into the skipped span (the chain stays complete), but the
-    span itself costs no chain walk. Stops early at the first position too
-    close to the end to hash (positions only advance, so all later ones are
-    too). Heuristic — only mutates the chain state, never the cache. -/
-def insertChainRange (data : ByteArray) (hashTable prev : Array Nat)
-    (base j stop : Nat) : Array Nat × Array Nat :=
+    span itself costs no chain walk. Both tables are updated: the hash4-keyed
+    chain (`hashTable`/`prev`) and the hash3 singleton (`h3tab`) — mirroring
+    the dual-table scheme of the search path (#2742). Stops early at the first
+    position too close to the end to hash (positions only advance, so all
+    later ones are too). Heuristic — only mutates the finder state, never the
+    cache. -/
+def insertChainRange (data : ByteArray) (hashTable prev h3tab : Array Nat)
+    (base j stop : Nat) : Array Nat × Array Nat × Array Nat :=
   if j < stop then
     let pos := base + j
     if hlt : pos + 2 < data.size then
-      let h := hash3opt data pos 65536 hlt
+      let h := lz77Greedy.hash3 data pos 65536 hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      insertChainRange data hashTable prev base (j + 1) stop
-    else (hashTable, prev)
-  else (hashTable, prev)
+      let h3tab := guardedSet h3tab (hash3Single data pos hlt) pos
+      insertChainRange data hashTable prev h3tab base (j + 1) stop
+    else (hashTable, prev, h3tab)
+  else (hashTable, prev, h3tab)
 termination_by stop - j
 decreasing_by omega
 
@@ -284,7 +276,21 @@ decreasing_by omega
     `hashTable`/`prev` are the same global chain state `lz77Chain` uses
     (sentinel `data.size`), threaded across regions so distances legally
     reach up to 32 KiB into prior regions. Returns the filled cache and the
-    updated chain state.
+    updated finder state.
+
+    Dual hash4 + hash3 finder (#2742, libdeflate `hc_matchfinder.h`): the
+    chains are keyed on the **4-byte** hash (`lz77Greedy.hash3`), so every
+    chain candidate can extend to length ≥ 4 — plain hash4 chains alone cost
+    ratio here (x-ray +7.4%, ooffice +3.5%, the #2620 note) because the
+    ratio-maximising DP must also see length-3 candidates. Those come from the
+    `h3tab` **singleton** (most recent position per 15-bit 3-byte-hash
+    bucket): `hash3Probe` verifies its candidate and, on a hit, it is
+    recorded as slot 0 with length exactly 3 and seeds the walk's `bestLen`,
+    so the chain then records only strictly longer candidates — the frontier
+    stays strictly increasing with the length-3 point restored. On a miss the
+    slot-0 write is `lens[slot] := 0` (a no-op: each position's slot block is
+    untouched before its own search, and a zero length terminates the block,
+    so the paired garbage distance is never read).
 
     `depth`/`slots`/`niceSkip` are passed as parameters (callers supply
     `optChainDepth`/`optCacheSlots`/`optNiceSkip`): literal constants in the
@@ -300,19 +306,29 @@ decreasing_by omega
     cost (the DP sees the long match at its start and takes it; interior
     positions with no cached candidate fall back to a literal). -/
 def buildCache (data : ByteArray) (hashTable : Array Nat) (prev : Array Nat)
-    (depth slots niceSkip base r j : Nat)
-    (lens dists : Array Nat) : Array Nat × Array Nat × Array Nat × Array Nat :=
+    (h3tab : Array Nat) (depth slots niceSkip base r j : Nat)
+    (lens dists : Array Nat) :
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat :=
   if hj : j < r then
     let pos := base + j
     if hlt : pos + 2 < data.size then
-      let h := hash3opt data pos 65536 hlt
+      let h := lz77Greedy.hash3 data pos 65536 hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
+      let h3 := hash3Single data pos hlt
+      let cand3 := headProbeGuarded h3tab h3
+      let h3tab := guardedSet h3tab h3 pos
+      let seed := hash3Probe data 32768 pos cand3 hlt
+      let bl0 := seed % 512
+      let bp0 := seed / 512
+      let lens := lens.set! (slots * j) bl0
+      let dists := dists.set! (slots * j) (pos - bp0)
+      let k0 := if bl0 = 0 then 0 else 1
       let maxLen := min 258 (data.size - pos)
       have hpm : pos + maxLen ≤ data.size := by omega
       let cache := chainWalkAllGuarded data prev pos maxLen hpm head depth
-        0 0 (slots * j) lens dists
+        bl0 k0 (slots * j) lens dists
       -- `cache.2.2` is the longest match the walk found at `pos` (it threads the
       -- running best out), so the skip decision costs nothing beyond the walk.
       let best := cache.2.2
@@ -321,13 +337,13 @@ def buildCache (data : ByteArray) (hashTable : Array Nat) (prev : Array Nat)
         -- then resume the search at `j + best`. The interior insert is clamped
         -- to the region end (`min (j + best) r`) so no next-region position is
         -- inserted twice; if `j + best ≥ r` the resumed call returns at once.
-        let hp := insertChainRange data hashTable prev base (j + 1) (min (j + best) r)
-        buildCache data hp.1 hp.2 depth slots niceSkip base r (j + best) cache.1 cache.2.1
+        let hp := insertChainRange data hashTable prev h3tab base (j + 1) (min (j + best) r)
+        buildCache data hp.1 hp.2.1 hp.2.2 depth slots niceSkip base r (j + best) cache.1 cache.2.1
       else
-        buildCache data hashTable prev depth slots niceSkip base r (j + 1) cache.1 cache.2.1
+        buildCache data hashTable prev h3tab depth slots niceSkip base r (j + 1) cache.1 cache.2.1
     else
-      buildCache data hashTable prev depth slots niceSkip base r (j + 1) lens dists
-  else (lens, dists, hashTable, prev)
+      buildCache data hashTable prev h3tab depth slots niceSkip base r (j + 1) lens dists
+  else (lens, dists, hashTable, prev, h3tab)
 termination_by r - j
 decreasing_by
   -- The `j + 1` calls close by plain omega. The skip call recurses at
@@ -342,17 +358,17 @@ decreasing_by
     (size-preserving), so the returned `lens`/`dists` keep their input sizes.
     This is the chain that lets `fillRegion`/`scanCands` read the cache slots
     with proven bounds. -/
-private theorem buildCache_fst_size (data : ByteArray) (hashTable prev : Array Nat)
+private theorem buildCache_fst_size (data : ByteArray) (hashTable prev h3tab : Array Nat)
     (depth slots niceSkip base r j : Nat) (lens dists : Array Nat) :
-    (buildCache data hashTable prev depth slots niceSkip base r j lens dists).1.size = lens.size := by
-  fun_induction buildCache data hashTable prev depth slots niceSkip base r j lens dists <;>
+    (buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists).1.size = lens.size := by
+  fun_induction buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists <;>
     simp_all (config := { zetaDelta := true }) [chainWalkAllGuarded_fst_size]
 
-private theorem buildCache_snd_fst_size (data : ByteArray) (hashTable prev : Array Nat)
+private theorem buildCache_snd_fst_size (data : ByteArray) (hashTable prev h3tab : Array Nat)
     (depth slots niceSkip base r j : Nat) (lens dists : Array Nat) :
-    (buildCache data hashTable prev depth slots niceSkip base r j lens dists).2.1.size =
+    (buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists).2.1.size =
       dists.size := by
-  fun_induction buildCache data hashTable prev depth slots niceSkip base r j lens dists <;>
+  fun_induction buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists <;>
     simp_all (config := { zetaDelta := true }) [chainWalkAllGuarded_snd_size]
 
 /-! ## Cost model
@@ -674,11 +690,11 @@ decreasing_by all_goals omega
     arrays. -/
 def fillRegionRounds (data : ByteArray) (depth slots niceSkip base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
-    (chLen chDist : Array Nat)
+    (h3tab : Array Nat) (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
-    Array Nat × Array Nat × Array Nat × Array Nat :=
-  let cache := buildCache data hashTable prev
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat :=
+  let cache := buildCache data hashTable prev h3tab
     depth slots niceSkip base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
   let cacheLens := cache.1
   let cacheDists := cache.2.1
@@ -686,18 +702,19 @@ def fillRegionRounds (data : ByteArray) (depth slots niceSkip base r : Nat)
   -- size, so the DP's cache-slot reads (in `scanCands`) are provably in range.
   have hcl : slots * r ≤ cacheLens.size := by
     have : cacheLens.size = slots * r := by
-      show (buildCache data hashTable prev depth slots niceSkip base r 0
+      show (buildCache data hashTable prev h3tab depth slots niceSkip base r 0
         (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)).1.size = slots * r
       rw [buildCache_fst_size, Array.size_replicate]
     omega
   have hcd : slots * r ≤ cacheDists.size := by
     have : cacheDists.size = slots * r := by
-      show (buildCache data hashTable prev depth slots niceSkip base r 0
+      show (buildCache data hashTable prev h3tab depth slots niceSkip base r 0
         (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)).2.1.size = slots * r
       rw [buildCache_snd_fst_size, Array.size_replicate]
     omega
   let hashTable := cache.2.2.1
-  let prev := cache.2.2.2
+  let prev := cache.2.2.2.1
+  let h3tab := cache.2.2.2.2
   -- round 1: static cost model
   let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
   have hcost1 : r + 259 ≤ cost.size := by
@@ -721,27 +738,27 @@ def fillRegionRounds (data : ByteArray) (depth slots niceSkip base r : Nat)
     rw [seedTailCosts_size, Array.size_replicate]; omega
   let res2 := fillRegion data base r slots cacheLens cacheDists
     fitted.1 fitted.2.1 fitted.2.2 r cost2 res1.1 res1.2 hr hflit hcost2 (Nat.le_refl r) hcl hcd
-  (hashTable, prev, res2.1, res2.2)
+  (hashTable, prev, h3tab, res2.1, res2.2)
 
 /-- `fillRegionRounds` only `set!`s the choice arrays, so it preserves their
     sizes (both DP rounds go through `fillRegion`). -/
 private theorem fillRegionRounds_chLen_size (data : ByteArray) (depth slots niceSkip base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
-    (chLen chDist : Array Nat)
+    (h3tab : Array Nat) (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
-    (fillRegionRounds data depth slots niceSkip base r slit slen sdist hashTable prev chLen chDist
-      hr hslit hchL hchD).2.2.1.size = chLen.size := by
+    (fillRegionRounds data depth slots niceSkip base r slit slen sdist hashTable prev h3tab chLen chDist
+      hr hslit hchL hchD).2.2.2.1.size = chLen.size := by
   unfold fillRegionRounds
   simp only [fillRegion_fst_size]
 
 private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots niceSkip base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
-    (chLen chDist : Array Nat)
+    (h3tab : Array Nat) (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) :
-    (fillRegionRounds data depth slots niceSkip base r slit slen sdist hashTable prev chLen chDist
-      hr hslit hchL hchD).2.2.2.size = chDist.size := by
+    (fillRegionRounds data depth slots niceSkip base r slit slen sdist hashTable prev h3tab chLen chDist
+      hr hslit hchL hchD).2.2.2.2.size = chDist.size := by
   unfold fillRegionRounds
   simp only [fillRegion_snd_size]
 
@@ -759,7 +776,8 @@ private theorem fillRegionRounds_chDist_size (data : ByteArray) (depth slots nic
     parameter is a footgun (too little fuel silently yields a partial fill), so
     only `computeChoices` (which passes `data.size`) may call it. -/
 private def computeChoicesLoop (data : ByteArray) (depth slots niceSkip regionSize : Nat)
-    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat) (base : Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
+    (h3tab : Array Nat) (base : Nat)
     (chLen chDist : Array Nat) (hslit : 256 ≤ slit.size)
     (hchL : data.size ≤ chLen.size) (hchD : data.size ≤ chDist.size) (fuel : Nat) :
     Array Nat × Array Nat :=
@@ -770,15 +788,15 @@ private def computeChoicesLoop (data : ByteArray) (depth slots niceSkip regionSi
       let r := min regionSize (data.size - base)
       have hr : base + r ≤ data.size := by omega
       let result := fillRegionRounds data depth slots niceSkip base r
-        slit slen sdist hashTable prev chLen chDist hr hslit hchL hchD
-      have hchL' : data.size ≤ result.2.2.1.size := Nat.le_trans hchL
+        slit slen sdist hashTable prev h3tab chLen chDist hr hslit hchL hchD
+      have hchL' : data.size ≤ result.2.2.2.1.size := Nat.le_trans hchL
         (Nat.le_of_eq (fillRegionRounds_chLen_size data depth slots niceSkip base r slit slen sdist
-          hashTable prev chLen chDist hr hslit hchL hchD).symm)
-      have hchD' : data.size ≤ result.2.2.2.size := Nat.le_trans hchD
+          hashTable prev h3tab chLen chDist hr hslit hchL hchD).symm)
+      have hchD' : data.size ≤ result.2.2.2.2.size := Nat.le_trans hchD
         (Nat.le_of_eq (fillRegionRounds_chDist_size data depth slots niceSkip base r slit slen sdist
-          hashTable prev chLen chDist hr hslit hchL hchD).symm)
+          hashTable prev h3tab chLen chDist hr hslit hchL hchD).symm)
       computeChoicesLoop data depth slots niceSkip regionSize slit slen sdist result.1 result.2.1
-        (base + r) result.2.2.1 result.2.2.2 hslit hchL' hchD' fuel
+        result.2.2.1 (base + r) result.2.2.2.1 result.2.2.2.2 hslit hchL' hchD' fuel
     else (chLen, chDist)
 
 /-- Compute the global DP choice arrays for the whole input: per region,
@@ -789,6 +807,7 @@ def computeChoices (data : ByteArray) : Array Nat × Array Nat :=
   let st := staticCostTables
   computeChoicesLoop data optChainDepth optCacheSlots optNiceSkip optRegionSize st.1 st.2.1 st.2.2
     (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
+    (Array.replicate 32768 data.size)
     0 (Array.replicate data.size 1) (Array.replicate data.size 0)
     (by have h : st.1.size = 256 := staticCostTables_fst_size; omega)
     (by simp) (by simp) data.size
@@ -941,29 +960,31 @@ decreasing_by omega
     threaded chain state and choice arrays. -/
 def fillRegionFastRound (data : ByteArray) (depth slots niceSkip base r : Nat)
     (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
-    (chLen chDist : Array Nat)
+    (h3tab : Array Nat) (chLen chDist : Array Nat)
     (hr : base + r ≤ data.size) (hslit : 256 ≤ slit.size) :
-    Array Nat × Array Nat × Array Nat × Array Nat :=
-  let cache := buildCache data hashTable prev depth slots niceSkip base r 0
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat :=
+  let cache := buildCache data hashTable prev h3tab depth slots niceSkip base r 0
     (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
   let cacheLens := cache.1
   let cacheDists := cache.2.1
   let hashTable := cache.2.2.1
-  let prev := cache.2.2.2
+  let prev := cache.2.2.2.1
+  let h3tab := cache.2.2.2.2
   let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
   have hcost : r + 259 ≤ cost.size := by
     show r + 259 ≤ (seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0).size
     rw [seedTailCosts_size, Array.size_replicate]; omega
   let res := fillRegionFast data base r slots cacheLens cacheDists
     slit slen sdist r cost chLen chDist hr hslit hcost (Nat.le_refl r)
-  (hashTable, prev, res.1, res.2)
+  (hashTable, prev, h3tab, res.1, res.2)
 
 /-- Region driver for `computeChoicesFast` (fast twin of `computeChoicesLoop`).
     No `chLen`/`chDist` size hypotheses are threaded: the single-round fill
     never reads them back (no region-token collection), so only their `set!`s
     matter. Fuel = `data.size` bounds the region count as in the exact loop. -/
 private def computeChoicesFastLoop (data : ByteArray) (depth slots niceSkip regionSize : Nat)
-    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat) (base : Nat)
+    (slit slen sdist : Array Nat) (hashTable : Array Nat) (prev : Array Nat)
+    (h3tab : Array Nat) (base : Nat)
     (chLen chDist : Array Nat) (hslit : 256 ≤ slit.size) (fuel : Nat) :
     Array Nat × Array Nat :=
   match fuel with
@@ -973,9 +994,9 @@ private def computeChoicesFastLoop (data : ByteArray) (depth slots niceSkip regi
       let r := min regionSize (data.size - base)
       have hr : base + r ≤ data.size := by omega
       let result := fillRegionFastRound data depth slots niceSkip base r
-        slit slen sdist hashTable prev chLen chDist hr hslit
+        slit slen sdist hashTable prev h3tab chLen chDist hr hslit
       computeChoicesFastLoop data depth slots niceSkip regionSize slit slen sdist result.1 result.2.1
-        (base + r) result.2.2.1 result.2.2.2 hslit fuel
+        result.2.2.1 (base + r) result.2.2.2.1 result.2.2.2.2 hslit fuel
     else (chLen, chDist)
 
 /-- L9-fast choice arrays: like `computeChoices` but the cheaper single-round,
@@ -986,6 +1007,7 @@ def computeChoicesFast (data : ByteArray) : Array Nat × Array Nat :=
   computeChoicesFastLoop data fastChainDepth optCacheSlots fastNiceSkip optRegionSize
     st.1 st.2.1 st.2.2
     (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
+    (Array.replicate 32768 data.size)
     0 (Array.replicate data.size 1) (Array.replicate data.size 0)
     (by have h : st.1.size = 256 := staticCostTables_fst_size; omega)
     data.size

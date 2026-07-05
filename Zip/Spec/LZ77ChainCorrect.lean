@@ -47,6 +47,54 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
         · exact ih (prev[cand &&& 0x7FFF]!) _ _ hb
     · exact hb
 
+/-! ## Hash3-singleton probe (#2742)
+
+The chain walk is seeded with `hash3Probe`'s decoded result (`% 512` /
+`/ 512` of the packed seed) instead of `(0, 0)`. The probe *verifies* its
+candidate (window guard + three byte compares) before seeding, so the seed
+satisfies exactly the invariant `chainWalk_spec` carries — the singleton
+table's contents never enter the proof. -/
+
+/-- The hash3-singleton probe's decoded seed is a real in-window match (or
+    empty): exactly the initial-accumulator hypothesis `chainWalk_spec` takes
+    at `bestLen := seed % 512`, `bestPos := seed / 512`. -/
+theorem hash3Probe_spec (data : ByteArray) (windowSize pos cand3 : Nat)
+    (hlt : pos + 2 < data.size) (maxLen : Nat) (hml : 3 ≤ maxLen)
+    (hpm : pos + maxLen ≤ data.size) :
+    hash3Probe data windowSize pos cand3 hlt % 512 = 0 ∨
+      (hash3Probe data windowSize pos cand3 hlt / 512 < pos ∧
+        pos - hash3Probe data windowSize pos cand3 hlt / 512 ≤ windowSize ∧
+        hash3Probe data windowSize pos cand3 hlt / 512 + maxLen ≤ data.size ∧
+        (∀ i, i < hash3Probe data windowSize pos cand3 hlt % 512 →
+          data[pos + i]! = data[hash3Probe data windowSize pos cand3 hlt / 512 + i]!) ∧
+        hash3Probe data windowSize pos cand3 hlt % 512 ≤ maxLen) := by
+  unfold hash3Probe
+  split
+  · rename_i hc
+    split
+    · rename_i hbytes
+      simp only [Bool.and_eq_true, beq_iff_eq] at hbytes
+      have hm : (cand3 * 512 + 3) % 512 = 3 := by omega
+      have hd : (cand3 * 512 + 3) / 512 = cand3 := by omega
+      rw [hm, hd]
+      refine Or.inr ⟨hc.1, hc.2, by omega, ?_, by omega⟩
+      intro i hi
+      have h3i : i = 0 ∨ i = 1 ∨ i = 2 := by omega
+      obtain rfl | rfl | rfl := h3i
+      · rw [getElem!_pos data (pos + 0) (by omega), getElem!_pos data (cand3 + 0) (by omega)]
+        simpa using hbytes.1.1.symm
+      · rw [getElem!_pos data (pos + 1) (by omega), getElem!_pos data (cand3 + 1) (by omega)]
+        exact hbytes.1.2.symm
+      · rw [getElem!_pos data (pos + 2) (by omega), getElem!_pos data (cand3 + 2) (by omega)]
+        exact hbytes.2.symm
+    · exact Or.inl rfl
+  · exact Or.inl rfl
+
+/-- Any packed value decodes to a best length `≤ 511` — discharges
+    `chainWalkGuardedPacked_mod`/`_div`'s side condition at the seeded call
+    sites (the probe seed is decoded with the same `% 512`). -/
+theorem mod512_le (x : Nat) : x % 512 ≤ 511 := by omega
+
 /-! ## Guarded per-position head insertion (Wave 3 Step 0.2, Wave 5 de-boxing)
 
 The mainLoops perform their per-position chain-head insertion (and, in the
@@ -92,9 +140,10 @@ theorem guardedSet_eq {α : Type} (a : Array α) (i : Nat) (v : α) :
     `lz77Greedy.mainLoop_valid`; the reference case uses `chainWalk_spec` (which
     holds for *any* `prev` array) in place of the inline single-probe match. -/
 theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) :
+    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat) (pos insertCap : Nat)
+    (hw : windowSize > 0) :
     ValidDecomp data pos
-      (lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev pos insertCap) := by
+      (lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev h3tab pos insertCap) := by
   unfold lz77Chain.mainLoop
   split
   · rename_i hlt
@@ -103,7 +152,11 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
     have hspec := chainWalk_spec data
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
-      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
+      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega))
     split
     · rename_i hge
       split
@@ -114,11 +167,11 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
           · intro i hi
             rw [Nat.sub_sub_self (Nat.le_of_lt hQ.1)]
             exact hQ.2.2.2.1 i hi
-          · exact lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ _ hw
+          · exact lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw
       · exact .literal (by omega) (getElem!_pos data pos (by omega))
-          (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ _ hw)
+          (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
     · exact .literal (by omega) (getElem!_pos data pos (by omega))
-        (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ _ hw)
+        (lz77Chain_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 decreasing_by all_goals omega
@@ -130,7 +183,7 @@ theorem lz77Chain_valid (data : ByteArray) (maxChain windowSize insertCap niceLe
   simp only [lz77Chain]
   split
   · simp only; exact trailing_valid data 0
-  · simp only; exact lz77Chain_mainLoop_valid data windowSize 65536 maxChain niceLen _ _ 0 insertCap hw
+  · simp only; exact lz77Chain_mainLoop_valid data windowSize 65536 maxChain niceLen _ _ _ 0 insertCap hw
 
 /-- Resolving the LZ77 tokens produced by `lz77Chain` recovers the original data. -/
 theorem lz77Chain_resolves (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat)
@@ -149,8 +202,9 @@ private def Enc (t : LZ77Token) : Prop :=
   | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768
 
 theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev pos insertCap, Enc t := by
+    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat) (pos insertCap : Nat)
+    (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    ∀ t ∈ lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev h3tab pos insertCap, Enc t := by
   unfold lz77Chain.mainLoop
   split
   · rename_i hlt
@@ -159,7 +213,11 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
     have hspec := chainWalk_spec data
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
-      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
+      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega))
     split
     · rename_i hge
       split
@@ -169,15 +227,15 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
         · intro t ht
           cases ht with
           | head => exact ⟨hge, by omega, by omega, by omega⟩
-          | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ _ hw hws t h
+          | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
       · intro t ht
         cases ht with
         | head => trivial
-        | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ _ hw hws t h
+        | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
     · intro t ht
       cases ht with
       | head => trivial
-      | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ _ hw hws t h
+      | tail _ h => exact lz77Chain_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
   · intro t ht
     -- `trailing` emits only literals
     exact trailing_encodable data pos t ht
@@ -196,7 +254,7 @@ theorem lz77Chain_encodable (data : ByteArray) (maxChain windowSize insertCap ni
   · intro t ht
     exact trailing_encodable data 0 t ht
   · intro t ht
-    exact lz77Chain_mainLoop_encodable data windowSize 65536 maxChain niceLen _ _ 0 insertCap hw hws t ht
+    exact lz77Chain_mainLoop_encodable data windowSize 65536 maxChain niceLen _ _ _ 0 insertCap hw hws t ht
 
 /-! ## Proven-bounds matcher equivalences (Wave 2d)
 
@@ -466,34 +524,58 @@ theorem chainWalkGuardedPackedU_eq (data : ByteArray) (prev : Array Nat)
     · rfl
   · rfl
 
-/-- From a zero-initialised best length, the reference walk's best length
-    never exceeds `maxLen` (specialisation of `chainWalk_spec`). -/
+/-- The reference walk's best length never exceeds `max bestLen maxLen`:
+    every update records a `countMatch` result (`≤ maxLen`), and otherwise the
+    seed is kept. Seed-general form (#2742) — the hash3 probe starts the walk
+    at `bestLen = 3`. -/
 theorem chainWalk_fst_le (data : ByteArray) (prev : Array Nat)
-    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat) :
-    (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).1 ≤ maxLen := by
-  obtain h0 | hQ := chainWalk_spec data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 (Or.inl rfl)
-  · omega
-  · exact hQ.2.2.2.2
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) :
+    (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).1 ≤
+      max bestLen maxLen := by
+  induction fuel generalizing cand bestLen bestPos with
+  | zero => rw [lz77Chain.chainWalk]; simp only [↓reduceIte]; omega
+  | succ k ih =>
+    rw [lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0))]
+    split
+    · rename_i hc
+      have hcand : cand + maxLen ≤ data.size := by omega
+      have hcm := (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+      by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+      · simp only [hml, ↓reduceIte]
+        split
+        · dsimp only; omega
+        · have h := ih (prev[cand &&& 0x7FFF]!)
+            (lz77Greedy.countMatch data cand pos maxLen hcand hpm) cand
+          simp only [Nat.add_sub_cancel] at *
+          omega
+      · simp only [hml, ↓reduceIte]
+        split
+        · dsimp only; omega
+        · have h := ih (prev[cand &&& 0x7FFF]!) bestLen bestPos
+          simp only [Nat.add_sub_cancel] at *
+          omega
+    · dsimp only; omega
 
-/-- Decode the packed walk's best length: with `maxLen < 512` the low bits are
-    exactly the reference walk's `bestLen`. -/
+/-- Decode the packed walk's best length: with `maxLen < 512` and a seed
+    `< 512` the low bits are exactly the reference walk's `bestLen`. -/
 theorem chainWalkGuardedPacked_mod (data : ByteArray) (prev : Array Nat)
-    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat)
-    (hml : maxLen ≤ 511) :
-    chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 % 512 =
-      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).1 := by
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) (hml : maxLen ≤ 511) (hbl : bestLen ≤ 511) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos % 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).1 := by
   rw [chainWalkGuardedPacked_eq]
-  have h := chainWalk_fst_le data prev windowSize pos maxLen niceLen hpm cand fuel
+  have h := chainWalk_fst_le data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos
   omega
 
 /-- Decode the packed walk's best position (the high bits). -/
 theorem chainWalkGuardedPacked_div (data : ByteArray) (prev : Array Nat)
-    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel : Nat)
-    (hml : maxLen ≤ 511) :
-    chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 / 512 =
-      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).2 := by
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) (hml : maxLen ≤ 511) (hbl : bestLen ≤ 511) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos / 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).2 := by
   rw [chainWalkGuardedPacked_eq]
-  have h := chainWalk_fst_le data prev windowSize pos maxLen niceLen hpm cand fuel
+  have h := chainWalk_fst_le data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos
   omega
 
 /-- Every matcher call site clamps `maxLen` to `min 258 _`; this discharges
@@ -594,23 +676,23 @@ theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
     The `chainWalk`/`updateHashes` helpers are shared, so the only difference is
     push vs. cons at each emission. -/
 private theorem mainLoop_eq_chain (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos acc =
-    acc ++ (lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev pos insertCap).toArray := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab pos acc =
+    acc ++ (lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev h3tab pos insertCap).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
   | _ n ih =>
     unfold lz77ChainIter.mainLoop lz77Chain.mainLoop
     simp only [chainWalkGuardedPacked_mod, chainWalkGuardedPacked_div, min258_le_511,
-      updateHashesGuarded_eq]
+      mod512_le, updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split
       · split
-        · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+        · rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
-        · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+        · rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
-      · rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+      · rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
           ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
       exact trailing_eq data pos acc

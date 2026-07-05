@@ -25,9 +25,10 @@ set_option backward.split false in
     reference cases use `chainWalk_spec` (at `pos`, and again at `pos+1` for the
     lookahead) exactly as `lz77Chain_mainLoop_valid` does for the single match. -/
 theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen : Nat) (hw : windowSize > 0) :
+    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
+    (pos insertCap goodMatch niceLen : Nat) (hw : windowSize > 0) :
     ValidDecomp data pos
-      (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch niceLen) := by
+      (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev h3tab pos insertCap goodMatch niceLen) := by
   unfold lz77ChainLazy.mainLoop
   split
   · rename_i hlt
@@ -36,7 +37,11 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
     have hspec := chainWalk_spec data
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
-      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
+      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega))
     split
     · rename_i hge
       split
@@ -61,19 +66,19 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
                   · exact .literal (by omega) (getElem!_pos data pos (by omega))
                       (lazyRef_at_pos data (pos + 1) _ _ hQ2.1 (by omega) hle2
                         (fun i hi => hQ2.2.2.2.1 i hi)
-                        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw))
+                        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw))
                 · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-                    (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
+                    (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
               · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-                  (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
+                  (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
             · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-                (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
+                (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
           · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-              (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
+              (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
       · exact .literal (by omega) (getElem!_pos data pos (by omega))
-          (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
+          (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
     · exact .literal (by omega) (getElem!_pos data pos (by omega))
-        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ hw)
+        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 decreasing_by all_goals omega
@@ -85,7 +90,7 @@ theorem lz77ChainLazy_valid (data : ByteArray) (maxChain windowSize insertCap go
   simp only [lz77ChainLazy]
   split
   · simp only; exact trailing_valid data 0
-  · simp only; exact lz77ChainLazy_mainLoop_valid data windowSize 65536 maxChain _ _ 0 insertCap goodMatch niceLen hw
+  · simp only; exact lz77ChainLazy_mainLoop_valid data windowSize 65536 maxChain _ _ _ 0 insertCap goodMatch niceLen hw
 
 /-- Resolving the LZ77 tokens produced by `lz77ChainLazy` recovers the original data. -/
 theorem lz77ChainLazy_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen : Nat)
@@ -104,8 +109,9 @@ private def Enc (t : LZ77Token) : Prop :=
 
 set_option backward.split false in
 theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch niceLen, Enc t := by
+    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
+    (pos insertCap goodMatch niceLen : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    ∀ t ∈ lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev h3tab pos insertCap goodMatch niceLen, Enc t := by
   unfold lz77ChainLazy.mainLoop
   split
   · rename_i hlt
@@ -114,7 +120,11 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
     have hspec := chainWalk_spec data
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
-      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
+      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega))
     split
     · rename_i hge
       split
@@ -142,31 +152,31 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
                     | tail _ h =>
                       cases h with
                       | head => exact ⟨by omega, by omega, by omega, by omega⟩
-                      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+                      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
                 · intro t ht
                   cases ht with
                   | head => exact ⟨hge, by omega, by omega, by omega⟩
-                  | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+                  | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
               · intro t ht
                 cases ht with
                 | head => exact ⟨hge, by omega, by omega, by omega⟩
-                | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+                | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
             · intro t ht
               cases ht with
               | head => exact ⟨hge, by omega, by omega, by omega⟩
-              | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+              | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
           · intro t ht
             cases ht with
             | head => exact ⟨hge, by omega, by omega, by omega⟩
-            | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+            | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
       · intro t ht
         cases ht with
         | head => trivial
-        | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+        | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
     · intro t ht
       cases ht with
       | head => trivial
-      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ hw hws t h
+      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
   · intro t ht
     exact trailing_encodable data pos t ht
 termination_by data.size - pos
@@ -184,7 +194,7 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
   · intro t ht
     exact trailing_encodable data 0 t ht
   · intro t ht
-    exact lz77ChainLazy_mainLoop_encodable data windowSize 65536 maxChain _ _ 0 insertCap goodMatch niceLen hw hws t ht
+    exact lz77ChainLazy_mainLoop_encodable data windowSize 65536 maxChain _ _ _ 0 insertCap goodMatch niceLen hw hws t ht
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 
@@ -192,14 +202,14 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
     one — identical branch structure, push vs. cons at each emission (two pushes in
     the lookahead arm). -/
 private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev pos acc =
-    acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch niceLen).toArray := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab pos acc =
+    acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev h3tab pos insertCap goodMatch niceLen).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
   | _ n ih =>
     unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
     simp only [chainWalkGuardedPacked_mod, chainWalkGuardedPacked_div, min258_le_511,
-      updateHashesGuarded_eq]
+      mod512_le, Nat.zero_le, updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       -- Branch tree: hge / hle / h3lt / gate (matchLen < goodMatch) / (matchLen2 > matchLen) / hle2
@@ -215,27 +225,27 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
               · -- matchLen2 > matchLen
                 split
                 · -- hle2 : lookahead emits literal + reference(matchLen2), two pushes
-                  rw [ih _ (by omega) _ _ _ _ rfl,
+                  rw [ih _ (by omega) _ _ _ _ _ rfl,
                     Array.push_eq_append, Array.push_eq_append,
                     Array.append_assoc, Array.append_assoc,
                     ← List.toArray_cons, ← List.toArray_cons]
                 · -- ¬hle2 : reference(matchLen) at pos
-                  rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+                  rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
                     ← Array.append_assoc, Array.push_eq_append]
               · -- matchLen2 ≤ matchLen : reference(matchLen) at pos
-                rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+                rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
                   ← Array.append_assoc, Array.push_eq_append]
             · -- matchLen ≥ goodMatch (gated) : reference(matchLen) at pos
-              rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+              rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
                 ← Array.append_assoc, Array.push_eq_append]
           · -- ¬h3lt : reference(matchLen) at pos (near end)
-            rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+            rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
               ← Array.append_assoc, Array.push_eq_append]
         · -- ¬hle : literal
-          rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+          rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
       · -- ¬hge : literal
-        rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+        rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
           ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
       exact trailing_eq data pos acc
