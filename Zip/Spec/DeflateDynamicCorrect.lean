@@ -486,8 +486,8 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).1
         (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).2 = _
     unfold deflateDynamicBlockCore emitDynBlock
-    cases hz : data.size == 0 <;>
-      simp only [hz, Bool.false_eq_true, ↓reduceIte] <;> rfl
+    cases data.size == 0 <;>
+      simp only [Bool.false_eq_true, ↓reduceIte] <;> rfl
   rw [heq, flush_toBits_aligned _ hwf, htoBits]
 
 /-- `deflateDynamic` (greedy LZ77 + dynamic Huffman) produces a bytestream whose
