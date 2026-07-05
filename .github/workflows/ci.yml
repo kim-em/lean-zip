@@ -74,8 +74,8 @@ jobs:
           path: |
             .lake
             bench/.lake
-          key: bench-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean', 'c/**', 'bench/lean-toolchain', 'bench/lake-manifest.json', 'bench/lakefile.lean', 'bench/**/*.lean', 'bench/c/**', 'bench/rust/**') }}
-          restore-keys: bench-
+          key: bench-v2-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean', 'c/**', 'bench/lean-toolchain', 'bench/lake-manifest.json', 'bench/lakefile.lean', 'bench/**/*.lean', 'bench/c/**', 'bench/rust/**') }}
+          restore-keys: bench-v2-
 
       - name: Clean stale Lake cache on fallback restore
         if: steps.cache.outputs.cache-hit != 'true'
