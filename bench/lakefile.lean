@@ -335,6 +335,10 @@ lean_exe «mid-sweep» where
   root := `ZipMidSweep
 
 @[default_target]
+lean_exe «huff-bench» where
+  root := `ZipHuffBench
+
+@[default_target]
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate
 
