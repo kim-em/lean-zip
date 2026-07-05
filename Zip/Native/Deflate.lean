@@ -834,12 +834,42 @@ table contents never enter a correctness proof. -/
 /-- 15-bit multiplicative hash of the 3 bytes at `pos` (libdeflate's `hash3`):
     the singleton-table bucket index. Always `< 32768` (a `UInt32 >>> 17` has
     15 bits), so the `guardedSet`/`headProbeGuarded` bounds checks on the
-    32768-entry table never fail. -/
+    32768-entry table never fail. The word load mirrors `lz77Greedy.hash3`'s
+    exactly (same wide-load/fallback split), so after inlining the two loads
+    at one position are common-subexpression candidates — libdeflate computes
+    both hashes from one `load_u32` for the same reason; the `&&& 0xFFFFFF`
+    mask makes the bucket independent of which load path ran (byte 3 never
+    enters), which the singleton's hit rate relies on. -/
 @[inline] def hash3Single (data : ByteArray) (pos : Nat) (h : pos + 2 < data.size) : Nat :=
-  let a := (data[pos]'(by omega)).toUInt32
-  let b := (data[pos + 1]'(by omega)).toUInt32
-  let c := (data[pos + 2]'(by omega)).toUInt32
-  (((a ||| (b <<< 8) ||| (c <<< 16)) * 2654435761) >>> 17).toNat
+  let word :=
+    if h4 : pos + 4 ≤ data.size then
+      if hsz : data.size.toUSize.toNat = data.size then
+        ByteArray.ugetUInt32LE data pos.toUSize (by
+          have hds : data.size < USize.size := by
+            rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+          rw [toUSize_toNat_of_lt (show pos < USize.size by omega)]; omega)
+      else
+        let a := (data[pos]'(by omega)).toUInt32
+        let b := (data[pos + 1]'(by omega)).toUInt32
+        let c := (data[pos + 2]'(by omega)).toUInt32
+        let d := (data[pos + 3]'(by omega)).toUInt32
+        a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    else
+      let a := (data[pos]'(by omega)).toUInt32
+      let b := (data[pos + 1]'(by omega)).toUInt32
+      let c := (data[pos + 2]'(by omega)).toUInt32
+      a ||| (b <<< 8) ||| (c <<< 16)
+  ((((word &&& 0xFFFFFF) * 2654435761)) >>> 17).toNat
+
+/-- Reject length-3 seeds farther than this (zlib `deflate.c` `TOO_FAR`): a
+    3-byte match at a large distance costs more bits (long distance code) than
+    the three literals it replaces, so the greedy/lazy matchers only accept
+    the hash3 candidate within this radius — measured on Canterbury+Silesia,
+    the unguarded singleton *worsens* the fast-level geomean ratio by
+    0.2–0.5%. The L9/L10 cache build deliberately does **not** apply this cap:
+    its DP prices every candidate with a real cost model, so far length-3
+    candidates are simply never chosen when they don't pay. -/
+def tooFar3 : Nat := 4096
 
 /-- Probe result of the hash3 singleton: the chain-walk seed, packed as the
     single small `Nat` `bestPos * 512 + bestLen` (the `chainWalkGuardedPacked`
@@ -975,7 +1005,7 @@ where
       let h3 := hash3Single data pos hlt
       let cand3 := headProbeGuarded h3tab h3
       let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data windowSize pos cand3 hlt
+      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let m := chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
@@ -1304,7 +1334,7 @@ where
       let h3 := hash3Single data pos hlt
       let cand3 := headProbeGuarded h3tab h3
       let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data windowSize pos cand3 hlt
+      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
@@ -1372,7 +1402,7 @@ where
       let h3 := hash3Single data pos hlt
       let cand3 := headProbeGuarded h3tab h3
       let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data windowSize pos cand3 hlt
+      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let m := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
@@ -1477,7 +1507,7 @@ where
       let h3 := hash3Single data pos hlt
       let cand3 := headProbeGuarded h3tab h3
       let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data windowSize pos cand3 hlt
+      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
@@ -1588,7 +1618,7 @@ where
       let h3 := hash3Single data pos hlt
       let cand3 := headProbeGuarded h3tab h3
       let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data windowSize pos cand3 hlt
+      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
@@ -1640,7 +1670,7 @@ where
       let h3 := hash3Single data pos hlt
       let cand3 := headProbeGuarded h3tab h3
       let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data windowSize pos cand3 hlt
+      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
       let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)

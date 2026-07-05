@@ -58,16 +58,16 @@ table's contents never enter the proof. -/
 /-- The hash3-singleton probe's decoded seed is a real in-window match (or
     empty): exactly the initial-accumulator hypothesis `chainWalk_spec` takes
     at `bestLen := seed % 512`, `bestPos := seed / 512`. -/
-theorem hash3Probe_spec (data : ByteArray) (windowSize pos cand3 : Nat)
+theorem hash3Probe_spec (data : ByteArray) (probeWin windowSize pos cand3 : Nat)
     (hlt : pos + 2 < data.size) (maxLen : Nat) (hml : 3 ≤ maxLen)
-    (hpm : pos + maxLen ≤ data.size) :
-    hash3Probe data windowSize pos cand3 hlt % 512 = 0 ∨
-      (hash3Probe data windowSize pos cand3 hlt / 512 < pos ∧
-        pos - hash3Probe data windowSize pos cand3 hlt / 512 ≤ windowSize ∧
-        hash3Probe data windowSize pos cand3 hlt / 512 + maxLen ≤ data.size ∧
-        (∀ i, i < hash3Probe data windowSize pos cand3 hlt % 512 →
-          data[pos + i]! = data[hash3Probe data windowSize pos cand3 hlt / 512 + i]!) ∧
-        hash3Probe data windowSize pos cand3 hlt % 512 ≤ maxLen) := by
+    (hpm : pos + maxLen ≤ data.size) (hpw : probeWin ≤ windowSize) :
+    hash3Probe data probeWin pos cand3 hlt % 512 = 0 ∨
+      (hash3Probe data probeWin pos cand3 hlt / 512 < pos ∧
+        pos - hash3Probe data probeWin pos cand3 hlt / 512 ≤ windowSize ∧
+        hash3Probe data probeWin pos cand3 hlt / 512 + maxLen ≤ data.size ∧
+        (∀ i, i < hash3Probe data probeWin pos cand3 hlt % 512 →
+          data[pos + i]! = data[hash3Probe data probeWin pos cand3 hlt / 512 + i]!) ∧
+        hash3Probe data probeWin pos cand3 hlt % 512 ≤ maxLen) := by
   unfold hash3Probe
   split
   · rename_i hc
@@ -77,7 +77,7 @@ theorem hash3Probe_spec (data : ByteArray) (windowSize pos cand3 : Nat)
       have hm : (cand3 * 512 + 3) % 512 = 3 := by omega
       have hd : (cand3 * 512 + 3) / 512 = cand3 := by omega
       rw [hm, hd]
-      refine Or.inr ⟨hc.1, hc.2, by omega, ?_, by omega⟩
+      refine Or.inr ⟨hc.1, by omega, by omega, ?_, by omega⟩
       intro i hi
       have h3i : i = 0 ∨ i = 1 ∨ i = 2 := by omega
       obtain rfl | rfl | rfl := h3i
@@ -153,10 +153,11 @@ theorem lz77Chain_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChai
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
-      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
-        (min 258 (data.size - pos)) (by omega) (by omega))
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data (min windowSize tooFar3) windowSize pos
+        (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega) (Nat.min_le_left _ _))
     split
     · rename_i hge
       split
@@ -214,10 +215,11 @@ theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize max
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
-      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
-        (min 258 (data.size - pos)) (by omega) (by omega))
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data (min windowSize tooFar3) windowSize pos
+        (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega) (Nat.min_le_left _ _))
     split
     · rename_i hge
       split

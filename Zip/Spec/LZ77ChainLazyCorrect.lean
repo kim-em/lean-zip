@@ -38,10 +38,11 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
-      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
-        (min 258 (data.size - pos)) (by omega) (by omega))
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data (min windowSize tooFar3) windowSize pos
+        (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega) (Nat.min_le_left _ _))
     split
     · rename_i hge
       split
@@ -121,10 +122,11 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
       hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
-      (hash3Probe data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
-      (hash3Probe_spec data windowSize pos (h3tab[hash3Single data pos hlt]!) hlt
-        (min 258 (data.size - pos)) (by omega) (by omega))
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt % 512)
+      (hash3Probe data (min windowSize tooFar3) pos (h3tab[hash3Single data pos hlt]!) hlt / 512)
+      (hash3Probe_spec data (min windowSize tooFar3) windowSize pos
+        (h3tab[hash3Single data pos hlt]!) hlt
+        (min 258 (data.size - pos)) (by omega) (by omega) (Nat.min_le_left _ _))
     split
     · rename_i hge
       split
