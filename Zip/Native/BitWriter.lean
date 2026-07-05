@@ -5,20 +5,32 @@ import Zip.Native.Wide
 
   DEFLATE (RFC 1951) packs bits LSB-first within each byte.
   This module provides a stateful writer that accumulates bits
-  into a partial byte, flushing complete bytes to a ByteArray.
+  into a wide pending buffer, flushing complete bytes to a ByteArray.
 
   Fields are packed in bulk: a whole `writeBits`/`writeHuffCode` field is
-  merged into a wide (`UInt64`) accumulator in one shift/OR, then whole bytes
-  are flushed in a short inner loop (`flushAcc`). This is byte-identical to a
-  bit-by-bit packer but avoids one loop iteration and one `ByteArray.push` per
-  bit — the dominant cost when emitting millions of literals.
+  merged into the 64-bit pending accumulator (`bitBuf`) in one shift/OR. Rather
+  than flush every completed byte immediately (one `pushUInt64LE` FFI store per
+  field — the dominant emit cost once the per-bit loop was removed, #2631), the
+  writer **holds up to 31 pending bits** and flushes whole bytes only when the
+  pending count reaches `flushThreshold` (32). One store then drains 4–7 bytes
+  at once, cutting the FFI store count on a literal-heavy stream ~4× (measured
+  ~+22-29% on the dynamic emit walk, ~+7-8% on full L1 — #2734). This is
+  byte-identical to flushing every field: `toBits` (hence `bitLength` and the
+  final `flush` output) depends only on the total bit sequence, not on when
+  whole bytes are drained to `data`.
 -/
 namespace Zip.Native
 
+/-- Pending-bit count at or above which whole bytes are drained to `data`.
+    Below it, bits stay in the `bitBuf` accumulator (batched). At most one field
+    (`≤ 25` bits) is added before the check, and the pre-check count is `< 32`,
+    so the accumulator never exceeds `31 + 25 = 56 < 64` bits. -/
+def flushThreshold : Nat := 32
+
 structure BitWriter where
   data : ByteArray
-  bitBuf : UInt8    -- partial byte being assembled
-  bitCount : UInt8  -- bits used in bitBuf (0-7)
+  bitBuf : UInt64   -- pending bits, LSB-first (0 ≤ bitCount valid low bits)
+  bitCount : UInt8  -- number of valid pending bits in bitBuf (0-31)
 
 namespace BitWriter
 
@@ -46,7 +58,7 @@ def flushAcc (data : ByteArray) (acc : UInt64) : Nat → BitWriter
     if total ≥ 8 then
       flushAcc (data.push acc.toUInt8) (acc >>> 8) (total - 8)
     else
-      ⟨data, acc.toUInt8, total.toUInt8⟩
+      ⟨data, acc, total.toUInt8⟩
   termination_by total => total
 
 /-- The byte-pushing half of `flushAcc`: push the low `k` whole bytes of
@@ -76,7 +88,8 @@ private theorem toUSize_toNat_of_le_8 {k : Nat} (h : k ≤ 8) : k.toUSize.toNat 
 /-- `flushBytes` through the wide store: one `pushUInt64LE` call (an 8-byte
     store into capacity slack plus a size bump, `c/bytearray_wide_ffi.c`)
     replaces the `k`-iteration per-byte push loop. The writers always take
-    the wide branch — `k = total / 8 ≤ (7 + 25) / 8 = 4` — but the guard
+    the wide branch — under batching the pending count is `< flushThreshold = 32`
+    before a field, so `k = total / 8 ≤ (31 + 25) / 8 = 7 ≤ 8` — but the guard
     keeps the function total on all inputs, falling back to the push loop.
     Kernel-measured 1.4× over the push loop on a synthetic L1-like field
     trace (`lake exe wide-store-bench`, issue #2631 step 0). -/
@@ -110,7 +123,7 @@ theorem flushBytesWide_eq (data : ByteArray) (acc : UInt64) (k : Nat) :
     and the leftover accumulator commute past each other. -/
 theorem flushAcc_eq (data : ByteArray) (acc : UInt64) (total : Nat) :
     flushAcc data acc total =
-      ⟨flushBytes data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
+      ⟨flushBytes data acc (total / 8), dropBytes acc (total / 8),
         (total % 8).toUInt8⟩ := by
   induction total using Nat.strongRecOn generalizing data acc with
   | _ total ih =>
@@ -125,6 +138,16 @@ theorem flushAcc_eq (data : ByteArray) (acc : UInt64) (total : Nat) :
       have hm : total % 8 = total := by omega
       rw [h8, hm, flushBytes, dropBytes]
 
+/-- Batched flush: drain whole bytes only when the pending count reaches
+    `flushThreshold`, else keep every bit in the accumulator. Reference form of
+    the flush cadence the production `writeBits`/`writeHuffCode` use (they call
+    `flushBytesWide`/`dropBytes` directly for ctor reuse; equal by
+    `writeBits_def`/`writeHuffCode_def`). Byte-identical to `flushAcc` in output
+    bits — only the split between `data` and the pending accumulator differs. -/
+def flushBatched (data : ByteArray) (acc : UInt64) (total : Nat) : BitWriter :=
+  if total ≥ flushThreshold then flushAcc data acc total
+  else ⟨data, acc, total.toUInt8⟩
+
 /-- Write `n` bits (n ≤ 25) from `val`, LSB first.
     Fixed-width fields in DEFLATE are packed LSB-first.
 
@@ -134,19 +157,24 @@ theorem flushAcc_eq (data : ByteArray) (acc : UInt64) (total : Nat) :
     flush loop) so ctor reuse updates `bw` in place — see `flushAcc`. -/
 def writeBits (bw : BitWriter) (n : Nat) (val : UInt32) : BitWriter :=
   let masked : UInt64 := val.toUInt64 % (1 <<< n.toUInt64)
-  let acc : UInt64 := bw.bitBuf.toUInt64 ||| (masked <<< bw.bitCount.toUInt64)
+  let acc : UInt64 := bw.bitBuf ||| (masked <<< bw.bitCount.toUInt64)
   let total := bw.bitCount.toNat + n
-  ⟨flushBytesWide bw.data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
-    (total % 8).toUInt8⟩
+  if total ≥ flushThreshold then
+    ⟨flushBytesWide bw.data acc (total / 8), dropBytes acc (total / 8), (total % 8).toUInt8⟩
+  else
+    ⟨bw.data, acc, total.toUInt8⟩
 
-/-- `writeBits` is `flushAcc` of the merged accumulator — the pre-#2739
-    defining equation, for the spec proofs. -/
+/-- `writeBits` is `flushBatched` of the merged accumulator — the defining
+    equation the spec proofs unfold to. -/
 theorem writeBits_def (bw : BitWriter) (n : Nat) (val : UInt32) :
     bw.writeBits n val =
-      flushAcc bw.data
-        (bw.bitBuf.toUInt64 ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64))
+      flushBatched bw.data
+        (bw.bitBuf ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64))
         (bw.bitCount.toNat + n) := by
-  rw [writeBits, flushBytesWide_eq, flushAcc_eq]
+  rw [writeBits, flushBatched]
+  split
+  · rw [flushBytesWide_eq, flushAcc_eq]
+  · rfl
 
 /-- Reverse all 16 bits of `x` (`bit i ↦ bit (15-i)`) with a branchless
     swap network — no per-bit loop. -/
@@ -166,25 +194,33 @@ def reverse16 (x : UInt16) : UInt16 :=
     yield `0` correctly, since `>>> 16` clears a 16-bit value.) -/
 def writeHuffCode (bw : BitWriter) (code : UInt16) (len : UInt8) : BitWriter :=
   let rev : UInt64 := (reverse16 code).toUInt64 >>> (16 - len.toUInt64)
-  let acc : UInt64 := bw.bitBuf.toUInt64 ||| (rev <<< bw.bitCount.toUInt64)
+  let acc : UInt64 := bw.bitBuf ||| (rev <<< bw.bitCount.toUInt64)
   let total := bw.bitCount.toNat + len.toNat
-  ⟨flushBytesWide bw.data acc (total / 8), (dropBytes acc (total / 8)).toUInt8,
-    (total % 8).toUInt8⟩
+  if total ≥ flushThreshold then
+    ⟨flushBytesWide bw.data acc (total / 8), dropBytes acc (total / 8), (total % 8).toUInt8⟩
+  else
+    ⟨bw.data, acc, total.toUInt8⟩
 
-/-- `writeHuffCode` is `flushAcc` of the merged accumulator — the pre-#2739
-    defining equation, for the spec proofs. -/
+/-- `writeHuffCode` is `flushBatched` of the merged accumulator — the defining
+    equation the spec proofs unfold to. -/
 theorem writeHuffCode_def (bw : BitWriter) (code : UInt16) (len : UInt8) :
     bw.writeHuffCode code len =
-      flushAcc bw.data
-        (bw.bitBuf.toUInt64 |||
+      flushBatched bw.data
+        (bw.bitBuf |||
           (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)) <<< bw.bitCount.toUInt64))
         (bw.bitCount.toNat + len.toNat) := by
-  rw [writeHuffCode, flushBytesWide_eq, flushAcc_eq]
+  rw [writeHuffCode, flushBatched]
+  split
+  · rw [flushBytesWide_eq, flushAcc_eq]
+  · rfl
 
-/-- Flush any partial byte (pad with zeros). Returns the final ByteArray. -/
+/-- Flush all pending bits, padding the final partial byte with zeros. Drains
+    every whole pending byte (`bitCount` may hold up to 31 bits under batching),
+    then the final partial byte. Returns the final ByteArray. -/
 def flush (bw : BitWriter) : ByteArray :=
-  if bw.bitCount > 0 then bw.data.push bw.bitBuf
-  else bw.data
+  let r := flushAcc bw.data bw.bitBuf bw.bitCount.toNat
+  if r.bitCount > 0 then r.data.push r.bitBuf.toUInt8
+  else r.data
 
 end BitWriter
 end Zip.Native

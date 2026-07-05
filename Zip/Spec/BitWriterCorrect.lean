@@ -16,12 +16,16 @@ def toBits (bw : BitWriter) : List Bool :=
   bw.data.data.toList.flatMap Deflate.Spec.bytesToBits.byteToBits ++
   (List.range bw.bitCount.toNat).map (fun i => bw.bitBuf.toNat.testBit i)
 
-/-- Well-formedness: bitCount < 8, no stale bits above bitCount. -/
+/-- Well-formedness: at most `flushThreshold` (32) pending bits under batching,
+    with no stale bits above `bitCount`. -/
 def wf (bw : BitWriter) : Prop :=
-  bw.bitCount.toNat < 8 ∧ bw.bitBuf.toNat < 2 ^ bw.bitCount.toNat
+  bw.bitCount.toNat < 32 ∧ bw.bitBuf.toNat < 2 ^ bw.bitCount.toNat
 
 theorem empty_wf : empty.wf := by
-  constructor <;> simp only [empty, UInt8.toNat_zero, Nat.zero_lt_succ, Nat.pow_zero, Nat.lt_add_one]
+  refine ⟨?_, ?_⟩
+  · show (0 : UInt8).toNat < 32; simp only [UInt8.toNat_zero]; omega
+  · show (0 : UInt64).toNat < 2 ^ (0 : UInt8).toNat
+    simp only [UInt64.toNat_zero, UInt8.toNat_zero, Nat.pow_zero]; omega
 
 theorem empty_toBits : empty.toBits = [] := by
   simp only [toBits, empty, ByteArray.data_empty, Array.toList_empty, List.flatMap_nil,
@@ -182,20 +186,37 @@ private theorem flushAcc_spec (data : ByteArray) (acc : UInt64) (total : Nat)
       have htu : total.toUInt8.toNat = total := by
         simp only [Nat.toUInt8, UInt8.toNat_ofNat']
         rw [show (2 : Nat) ^ 8 = 256 from rfl]; omega
-      have hau : acc.toUInt8.toNat = acc.toNat := by
-        rw [UInt64.toNat_toUInt8]
-        exact Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hacc
-          (Nat.pow_le_pow_right (by omega) (by omega)))
       refine ⟨?_, ?_, ?_⟩
       · simp only [toBits, htu]
-        congr 1
-        apply List.map_congr_left
-        intro i _
-        rw [hau]
-      · show total.toUInt8.toNat < 8
-        rw [htu]; exact htot
-      · show acc.toUInt8.toNat < 2 ^ total.toUInt8.toNat
-        rw [hau, htu]; exact hacc
+      · show total.toUInt8.toNat < 32
+        rw [htu]; omega
+      · show acc.toNat < 2 ^ total.toUInt8.toNat
+        rw [htu]; exact hacc
+
+/-- The batched flush lists the same bits as `flushAcc` (`data`-bits then the
+    `total` accumulator bits) and stays well-formed, whether it drained whole
+    bytes (`≥ flushThreshold`, via `flushAcc_spec`) or kept them pending
+    (`< flushThreshold`, so `bitCount = total < 32`). -/
+private theorem flushBatched_spec (data : ByteArray) (acc : UInt64) (total : Nat)
+    (hacc : acc.toNat < 2 ^ total) :
+    (flushBatched data acc total).toBits =
+      data.data.toList.flatMap Deflate.Spec.bytesToBits.byteToBits ++
+      (List.range total).map (fun i => acc.toNat.testBit i) ∧
+    (flushBatched data acc total).wf := by
+  unfold flushBatched
+  split
+  · exact flushAcc_spec data acc total hacc
+  · rename_i hlt
+    have htlt : total < 32 := by simp only [flushThreshold, ge_iff_le, Nat.not_le] at hlt; omega
+    have htu : total.toUInt8.toNat = total := by
+      simp only [Nat.toUInt8, UInt8.toNat_ofNat']
+      rw [show (2 : Nat) ^ 8 = 256 from rfl]; omega
+    refine ⟨?_, ?_, ?_⟩
+    · simp only [toBits, htu]
+    · show total.toUInt8.toNat < 32
+      rw [htu]; exact htlt
+    · show acc.toNat < 2 ^ total.toUInt8.toNat
+      rw [htu]; exact hacc
 
 /-! ## writeBits correspondence -/
 
@@ -223,9 +244,9 @@ private theorem writeBits_spec (bw : BitWriter) (n : Nat) (val : UInt32)
   have hmlt : val.toNat % 2 ^ n < 2 ^ n := Nat.mod_lt _ (Nat.two_pow_pos _)
   -- the accumulator as a Nat
   have hacc_nat :
-      (bw.bitBuf.toUInt64 ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64)).toNat
+      (bw.bitBuf ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64)).toNat
       = bw.bitBuf.toNat ||| ((val.toNat % 2 ^ n) <<< bw.bitCount.toNat) := by
-    rw [UInt64.toNat_or, UInt8.toNat_toUInt64, UInt64.toNat_shiftLeft, hmask, hbc64]
+    rw [UInt64.toNat_or, UInt64.toNat_shiftLeft, hmask, hbc64]
     congr 1
     apply Nat.mod_eq_of_lt
     rw [Nat.shiftLeft_eq]
@@ -235,11 +256,11 @@ private theorem writeBits_spec (bw : BitWriter) (n : Nat) (val : UInt32)
       _ = 2 ^ (n + bw.bitCount.toNat) := (Nat.pow_add 2 n _).symm
       _ ≤ 2 ^ 64 := Nat.pow_le_pow_right (by omega) (by omega)
   have haccbound :
-      (bw.bitBuf.toUInt64 ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64)).toNat
+      (bw.bitBuf ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64)).toNat
       < 2 ^ (bw.bitCount.toNat + n) := by
     rw [hacc_nat]
     exact or_shiftLeft_lt bw.bitBuf.toNat (val.toNat % 2 ^ n) bw.bitCount.toNat n hbuf hmlt
-  obtain ⟨hb, hw⟩ := flushAcc_spec bw.data _ (bw.bitCount.toNat + n) haccbound
+  obtain ⟨hb, hw⟩ := flushBatched_spec bw.data _ (bw.bitCount.toNat + n) haccbound
   refine ⟨?_, ?_⟩
   · -- toBits
     rw [writeBits_def]
@@ -335,11 +356,11 @@ private theorem writeHuffCode_spec (bw : BitWriter) (code : UInt16) (len : UInt8
     simp only [UInt8.toNat_toUInt64]; omega
   -- the accumulator as a Nat
   have hacc_nat :
-      (bw.bitBuf.toUInt64 |||
+      (bw.bitBuf |||
         (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)) <<< bw.bitCount.toUInt64)).toNat
       = bw.bitBuf.toNat |||
         (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)).toNat <<< bw.bitCount.toNat) := by
-    rw [UInt64.toNat_or, UInt8.toNat_toUInt64, UInt64.toNat_shiftLeft, hbc64]
+    rw [UInt64.toNat_or, UInt64.toNat_shiftLeft, hbc64]
     congr 1
     apply Nat.mod_eq_of_lt
     rw [Nat.shiftLeft_eq]
@@ -349,12 +370,12 @@ private theorem writeHuffCode_spec (bw : BitWriter) (code : UInt16) (len : UInt8
       _ = 2 ^ (len.toNat + bw.bitCount.toNat) := (Nat.pow_add 2 _ _).symm
       _ ≤ 2 ^ 64 := Nat.pow_le_pow_right (by omega) (by omega)
   have haccbound :
-      (bw.bitBuf.toUInt64 |||
+      (bw.bitBuf |||
         (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)) <<< bw.bitCount.toUInt64)).toNat
       < 2 ^ (bw.bitCount.toNat + len.toNat) := by
     rw [hacc_nat]
     exact or_shiftLeft_lt bw.bitBuf.toNat _ bw.bitCount.toNat len.toNat hbuf hrev_lt
-  obtain ⟨hb, hw⟩ := flushAcc_spec bw.data _ (bw.bitCount.toNat + len.toNat) haccbound
+  obtain ⟨hb, hw⟩ := flushBatched_spec bw.data _ (bw.bitCount.toNat + len.toNat) haccbound
   refine ⟨?_, ?_⟩
   · rw [writeHuffCode_def]
     rw [hb, hacc_nat]
@@ -394,23 +415,58 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
     Deflate.Spec.bytesToBits bw.flush =
     bw.toBits ++ List.replicate ((8 - bw.bitCount.toNat % 8) % 8) false := by
   obtain ⟨hbc_lt, hbuf_lt⟩ := hwf
+  -- `flush` first drains all whole pending bytes via `flushAcc` (which preserves
+  -- the bit sequence), leaving `< 8` pending, then pushes the final partial byte.
+  obtain ⟨hr_bits, _, hr_buf⟩ := flushAcc_spec bw.data bw.bitBuf bw.bitCount.toNat hbuf_lt
+  -- `flushAcc` preserves the bit sequence (defeq unfolds `bw.toBits`).
+  have hAtoB : (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).toBits = bw.toBits := hr_bits
+  have hr_bc8 : (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat
+      = bw.bitCount.toNat % 8 := by
+    rw [flushAcc_eq]
+    show ((bw.bitCount.toNat % 8).toUInt8).toNat = bw.bitCount.toNat % 8
+    simp only [Nat.toUInt8, UInt8.toNat_ofNat']
+    rw [show (2 : Nat) ^ 8 = 256 from rfl]; omega
+  have hbuf8 : (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitBuf.toUInt8.toNat
+      = (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitBuf.toNat := by
+    rw [UInt64.toNat_toUInt8]
+    exact Nat.mod_eq_of_lt (Nat.lt_of_lt_of_le hr_buf
+      (by rw [hr_bc8]; exact Nat.pow_le_pow_right (by omega) (by omega)))
   unfold flush
-  by_cases hbc0 : bw.bitCount.toNat = 0
-  · -- bitCount = 0: no flush needed
-    have hcond : ¬(bw.bitCount > 0) := by show ¬(0 < bw.bitCount.toNat); omega
+  by_cases hbc0 : bw.bitCount.toNat % 8 = 0
+  · -- no residual partial byte
+    have hcond : ¬((flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount > 0) := by
+      show ¬(0 < (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat)
+      rw [hr_bc8]; omega
     rw [if_neg hcond]
-    simp only [hbc0, toBits, Deflate.Spec.bytesToBits, List.range_zero, List.map_nil,
-      List.append_nil, Nat.zero_mod, Nat.sub_zero, Nat.mod_self, List.replicate_zero]
-  · -- bitCount > 0: flush pushes bitBuf
-    have hcond : bw.bitCount > 0 := by show 0 < bw.bitCount.toNat; omega
+    have hrtb : Deflate.Spec.bytesToBits (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).data
+        = (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).toBits := by
+      simp only [toBits, hr_bc8, hbc0, List.range_zero, List.map_nil, List.append_nil,
+        Deflate.Spec.bytesToBits]
+    rw [hrtb, hAtoB, hbc0]
+    simp only [Nat.sub_zero, Nat.mod_self, List.replicate_zero, List.append_nil]
+  · -- push the final partial byte
+    have hcond : (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount > 0 := by
+      show 0 < (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat
+      rw [hr_bc8]; omega
     rw [if_pos hcond]
     simp only [Deflate.Spec.bytesToBits]
-    rw [flatMap_byteToBits_push]
-    simp only [toBits, List.append_assoc]
+    rw [flatMap_byteToBits_push,
+      byteToBits_split _ (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat
+        (by rw [hr_bc8]; omega) (by rw [hbuf8]; exact hr_buf)]
+    rw [← List.append_assoc]
+    have hmap : (List.range (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat).map
+          (fun i => (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitBuf.toUInt8.toNat.testBit i)
+        = (List.range (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat).map
+          (fun i => (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitBuf.toNat.testBit i) := by
+      apply List.map_congr_left; intro i _; rw [hbuf8]
+    rw [hmap,
+      show (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).data.data.toList.flatMap
+            Deflate.Spec.bytesToBits.byteToBits ++
+          (List.range (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat).map
+            (fun i => (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitBuf.toNat.testBit i)
+          = (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).toBits from rfl,
+      hAtoB]
     congr 1
-    rw [byteToBits_split bw.bitBuf bw.bitCount.toNat (by omega) hbuf_lt]
-    congr 1
-    rw [Nat.mod_eq_of_lt hbc_lt,
-        Nat.mod_eq_of_lt (show 8 - bw.bitCount.toNat < 8 from by omega)]
+    rw [hr_bc8, Nat.mod_eq_of_lt (show 8 - bw.bitCount.toNat % 8 < 8 from by omega)]
 
 end Zip.Native.BitWriter

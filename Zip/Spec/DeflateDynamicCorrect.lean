@@ -424,7 +424,6 @@ theorem flush_toBits_aligned (bw : BitWriter) (hwf : bw.wf) :
       | nil => rfl
       | cons _ _ ih => simp only [List.map_cons, List.sum_cons, List.length_cons, ih]; omega
     rw [hsum]
-  have hbc : bw.bitCount.toNat < 8 := hwf.1
   congr 2
   omega
 
