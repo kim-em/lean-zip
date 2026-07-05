@@ -1,5 +1,7 @@
 import Zip
 import ZipTest.Helpers
+import Bench.MinizOxide
+import Bench.Libdeflate
 
 /-! Deterministic **cross-engine interop** fuzz for the encoder: does our
 raw-DEFLATE output actually interoperate with the rest of the ecosystem,

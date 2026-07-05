@@ -13,8 +13,9 @@
 # v4.30.0-rc2). Sibling of `scripts/fuzz-inflate.sh`: same shape,
 # different surface.
 #
-# Builds and invokes the `fuzz_handle_read` lake executable
-# (root: `ZipFuzzHandleRead.lean`), which drives every
+# Builds and invokes the `fuzz_handle_read` lake executable from
+# the dev-only bench sub-package (root:
+# `bench/ZipFuzzHandleRead.lean`), which drives every
 # `Handle.read` / `Stream.read` archive-parser entry point with
 # pseudo-random inputs for a configurable time budget. Exit code 0
 # on clean completion; any uncaught exception, panic, or
@@ -83,10 +84,10 @@ if [[ -n "${SECONDS_ARG}" ]]; then
   export LEAN_ZIP_FUZZ_HANDLE_READ_SECONDS="${SECONDS_ARG}"
 fi
 
-echo "[fuzz-handle-read] lake build fuzz_handle_read"
-lake build fuzz_handle_read
+echo "[fuzz-handle-read] lake -d bench build fuzz_handle_read"
+lake -d bench build fuzz_handle_read
 
-FUZZ_BIN=".lake/build/bin/fuzz_handle_read"
+FUZZ_BIN="bench/.lake/build/bin/fuzz_handle_read"
 if [[ ! -x "${FUZZ_BIN}" ]]; then
   echo "error: ${FUZZ_BIN} not found after lake build" >&2
   exit 2

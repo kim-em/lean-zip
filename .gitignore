@@ -1,6 +1,7 @@
 /build
 /lake-packages
 /.lake
+/bench/.lake
 /.direnv
 /sessions
 /worktrees

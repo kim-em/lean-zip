@@ -14,7 +14,7 @@ level. The graphs are regenerated from committed data by a single command.
 bench/run.sh        # build + run the matrix, build + run the comparators, render the SVGs
 ```
 
-That runs [`lake exe bench-report`](../ZipBenchReport.lean) (writes
+That runs [`lake -d bench exe bench-report`](ZipBenchReport.lean) (writes
 [`results/latest.json`](results/latest.json) and dumps the exact payloads), then
 the external-language comparators (see below), then [`plot.py`](plot.py) (writes
 the SVGs). Ratios are deterministic; throughput is a **median-of-5 snapshot of
@@ -57,7 +57,7 @@ generated once and overlaid on the ratio graphs by [`plot.py`](plot.py):
 ```
 # One-time only — do NOT run on every regeneration (very slow). Re-run solely
 # if the corpora themselves change:
-lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json
+lake -d bench env bench/.lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json
 ```
 
 Its `ratio`/`out_size` are deterministic (the meaningful signal); its single-rep
@@ -204,7 +204,7 @@ Pipeline (wired into `bench/run.sh` step 3b):
 
 ```
 # 1. dump libdeflate streams for Silesia + time the in-process decoders + memcpy
-lake env .lake/build/bin/bench-report --decode-density \
+lake -d bench env bench/.lake/build/bin/bench-report --decode-density \
   bench/results/decode_density.json bench/payloads-deflate
 # 2. time the external decoders (Go / JS / Zig / OCaml) on the same streams
 python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_density.json

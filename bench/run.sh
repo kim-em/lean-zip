@@ -41,8 +41,8 @@ in_project_shell() {
 if [ "${1:-}" = "--native-only" ]; then
   [ -f "$OUT" ] || { echo "no existing $OUT to splice into — run a full bench/run.sh first" >&2; exit 1; }
   TMP="$(mktemp --suffix=.json)"
-  in_project_shell "lake build bench-report \
-    && $PIN lake env .lake/build/bin/bench-report --native-only $TMP ${2:-}"
+  in_project_shell "lake -d bench build bench-report \
+    && $PIN lake -d bench env bench/.lake/build/bin/bench-report --native-only $TMP ${2:-}"
   in_project_shell "python3 bench/merge_native.py $OUT $TMP $OUT \
     && python bench/plot.py $OUT bench/graphs"
   rm -f "$TMP"
@@ -66,9 +66,9 @@ fi
 #    corpus files only (pattern "<corpus>/<file>", e.g. "canterbury/alice29.txt");
 #    --dump-payloads writes the corpus bytes under bench/payloads/<corpus>/ for the
 #    external comparators.
-in_project_shell "lake build bench-report \
-  && $PIN lake env .lake/build/bin/bench-report $OUT \
-  && lake env .lake/build/bin/bench-report --dump-payloads bench/payloads"
+in_project_shell "lake -d bench build bench-report \
+  && $PIN lake -d bench env bench/.lake/build/bin/bench-report $OUT \
+  && lake -d bench env bench/.lake/build/bin/bench-report --dump-payloads bench/payloads"
 
 # 3. External-language comparators: build (own toolchains) then run + merge.
 #    node + python3 must be on PATH for the JS comparator and the driver. The
@@ -86,7 +86,7 @@ nix-shell -p nodejs python3 --run \
 #    sibling decode_density.json that plot.py renders as
 #    <corpus>_decode_density.svg.
 DD="bench/results/decode_density.json"
-in_project_shell "$PIN lake env .lake/build/bin/bench-report --decode-density $DD bench/payloads-deflate"
+in_project_shell "$PIN lake -d bench env bench/.lake/build/bin/bench-report --decode-density $DD bench/payloads-deflate"
 nix-shell -p nodejs python3 --run \
   "$PIN python3 bench/decode_density.py bench/payloads-deflate $DD"
 

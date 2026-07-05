@@ -1,5 +1,7 @@
 import Zip
 import Zip.Native.InflateBuf
+import Bench.MinizOxide
+import Bench.Libdeflate
 /-! Benchmark driver for hyperfine.
 
 Usage:

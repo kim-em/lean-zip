@@ -4,7 +4,7 @@
 #
 # Advisory only: always exits 0. Prints a warning at PR-review time if
 # the resolved `miniz_oxide` / `adler2` versions in
-# rust/miniz_oxide_shim/Cargo.lock have drifted from the snapshot
+# bench/rust/miniz_oxide_shim/Cargo.lock have drifted from the snapshot
 # audited in SECURITY_INVENTORY.md § "miniz_oxide via Rust" (the
 # *"`Cargo.lock` is tracked and treated as security-critical"* bullet
 # under *Current local guardrails*).
@@ -14,7 +14,7 @@
 # versions are acceptable, and update the *Snapshot as of …* line in
 # SECURITY_INVENTORY.md to match (or roll back the lockfile change)."
 #
-# Run before opening a PR that touches `rust/miniz_oxide_shim/`.
+# Run before opening a PR that touches `bench/rust/miniz_oxide_shim/`.
 #
 # This is a trip wire, not a fence. It is not wired into CI — the goal
 # is to make accidental Cargo.lock churn visible in a `git diff`, not
@@ -38,7 +38,7 @@
 
 set -u
 
-LOCK="rust/miniz_oxide_shim/Cargo.lock"
+LOCK="bench/rust/miniz_oxide_shim/Cargo.lock"
 INVENTORY="SECURITY_INVENTORY.md"
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
