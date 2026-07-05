@@ -1391,7 +1391,10 @@ where
               have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
               -- No hash3 probe for the lookahead walk: a deferral needs
               -- `matchLen2 > matchLen ≥ 3`, so a length-3 seed can never
-              -- change the decision — it would be a pure waste.
+              -- change the decision — it would be a pure waste. (Exact only
+              -- for `niceLen ≥ 4`: a `niceLen ≤ 3` cutoff could early-stop a
+              -- seeded walk differently. Every production ladder value is
+              -- ≥ 10, and the walk is heuristic either way.)
               let m2 :=
                 lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 maxChain 0 0
               let matchLen2 := m2.1
