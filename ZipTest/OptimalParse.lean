@@ -16,8 +16,9 @@ open Zip.Native.Deflate
 
 /-- Build the whole-input candidate cache (single region). -/
 private def cacheFor (data : ByteArray) : Array Nat × Array Nat :=
-  let (lens, dists, _, _) := buildCache data
+  let (lens, dists, _, _, _) := buildCache data
     (Array.replicate 65536 data.size) (Array.replicate (min chainWinSize data.size) data.size)
+    (Array.replicate 32768 data.size)
     optChainDepth optCacheSlots optNiceSkip 0 data.size 0
     (Array.replicate (optCacheSlots * data.size) 0)
     (Array.replicate (optCacheSlots * data.size) 0)
