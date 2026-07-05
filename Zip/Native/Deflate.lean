@@ -817,101 +817,6 @@ theorem winMask_lt (n : Nat) : (n &&& 0x7FFF) < chainWinSize := by
   have := @Nat.and_le_right n 0x7FFF
   unfold chainWinSize; omega
 
-/-! ## Hash3 singleton table (#2742, libdeflate `hc_matchfinder.h`)
-
-The chain matchers key their `prev` chains on a **4-byte** hash
-(`lz77Greedy.hash3` reads a full `UInt32` word, #2620), so every chain
-candidate can extend to length ≥ 4 — but matches of length exactly 3 stopped
-being findable. libdeflate's fix is a second, chain-less table split by role:
-`hash3Single` hashes only 3 bytes into a 15-bit **singleton** table holding
-the most recent position per bucket. It is probed once per position
-(`hash3Probe`) to seed the chain walk with a verified length-3 candidate, so
-the walk keeps hash4 chain quality while length-3 matches stay reachable.
-The table is pure heuristic state: the probe re-verifies the three bytes and
-the window before seeding, and emission re-verifies everything again, so the
-table contents never enter a correctness proof. -/
-
-/-- 15-bit multiplicative hash of the 3 bytes at `pos` (libdeflate's `hash3`):
-    the singleton-table bucket index. Always `< 32768` (a `UInt32 >>> 17` has
-    15 bits), so the `guardedSet`/`headProbeGuarded` bounds checks on the
-    32768-entry table never fail. The word load mirrors `lz77Greedy.hash3`'s
-    exactly (same wide-load/fallback split), so after inlining the two loads
-    at one position are common-subexpression candidates — libdeflate computes
-    both hashes from one `load_u32` for the same reason; the `&&& 0xFFFFFF`
-    mask makes the bucket independent of which load path ran (byte 3 never
-    enters), which the singleton's hit rate relies on. -/
-@[inline] def hash3Single (data : ByteArray) (pos : Nat) (h : pos + 2 < data.size) : Nat :=
-  let word :=
-    if h4 : pos + 4 ≤ data.size then
-      if hsz : data.size.toUSize.toNat = data.size then
-        ByteArray.ugetUInt32LE data pos.toUSize (by
-          have hds : data.size < USize.size := by
-            rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
-          rw [toUSize_toNat_of_lt (show pos < USize.size by omega)]; omega)
-      else
-        let a := (data[pos]'(by omega)).toUInt32
-        let b := (data[pos + 1]'(by omega)).toUInt32
-        let c := (data[pos + 2]'(by omega)).toUInt32
-        let d := (data[pos + 3]'(by omega)).toUInt32
-        a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
-    else
-      let a := (data[pos]'(by omega)).toUInt32
-      let b := (data[pos + 1]'(by omega)).toUInt32
-      let c := (data[pos + 2]'(by omega)).toUInt32
-      a ||| (b <<< 8) ||| (c <<< 16)
-  ((((word &&& 0xFFFFFF) * 2654435761)) >>> 17).toNat
-
-/-- Reject length-3 seeds farther than this (zlib `deflate.c` `TOO_FAR`): a
-    3-byte match at a large distance costs more bits (long distance code) than
-    the three literals it replaces, so the greedy/lazy matchers only accept
-    the hash3 candidate within this radius — measured on Canterbury+Silesia,
-    the unguarded singleton *worsens* the fast-level geomean ratio by
-    0.2–0.5%. The L9/L10 cache build deliberately does **not** apply this cap:
-    its DP prices every candidate with a real cost model, so far length-3
-    candidates are simply never chosen when they don't pay. -/
-def tooFar3 : Nat := 4096
-
-/-- Probe result of the hash3 singleton: the chain-walk seed, packed as the
-    single small `Nat` `bestPos * 512 + bestLen` (the `chainWalkGuardedPacked`
-    encoding; call sites decode with `% 512` / `/ 512`). Returns
-    `cand3 * 512 + 3` when `cand3` is a live in-window position whose three
-    bytes equal those at `pos` (a *verified* length-3 match — sentinel or stale
-    entries fail the `cand3 < pos` guard, collisions fail the byte compare);
-    otherwise `0`, the empty seed. The chain walk then only records candidates
-    that beat the seed, so a length-3 match survives exactly when nothing
-    longer is found — libdeflate's "consult hash3 only while `best_len < 4`"
-    in seed form. Packed rather than a `Nat × Nat` on purpose: `Prod`
-    projections of this call inside the well-founded `mainLoop` bodies send
-    the kernel into deep recursion (same class of WF-elaboration blowup the
-    `buildCache` docstring records for literal constants). -/
-@[inline] def hash3Probe (data : ByteArray) (windowSize pos cand3 : Nat)
-    (hlt : pos + 2 < data.size) : Nat :=
-  if hc : cand3 < pos ∧ pos - cand3 ≤ windowSize then
-    if data[cand3]'(by omega) == data[pos]'(by omega) &&
-       data[cand3 + 1]'(by omega) == data[pos + 1]'(by omega) &&
-       data[cand3 + 2]'(by omega) == data[pos + 2]'(by omega) then
-      cand3 * 512 + 3
-    else 0
-  else 0
-
-/-- Insert the interior positions of an accepted match into the hash3
-    singleton (mirror of `updateHashes`'s chain insertion, same `insertCap`
-    policy): each hashable interior position simply overwrites its bucket —
-    no chain to link. Stops at the first position too close to the end to
-    hash (positions only advance, so all later ones are too). Shared verbatim
-    by the recursive and iterative matchers, so the lockstep equivalence
-    proofs need no bridging lemma; the table is heuristic state only. -/
-def updateHash3 (data : ByteArray) (h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
-    Array Nat :=
-  if j < matchLen ∧ j ≤ insertCap then
-    if h : pos + j + 2 < data.size then
-      updateHash3 data (guardedSet h3tab (hash3Single data (pos + j) h) (pos + j))
-        pos (j + 1) matchLen insertCap
-    else h3tab
-  else h3tab
-termination_by matchLen - j
-decreasing_by all_goals omega
-
 /-- Greedy LZ77 with bounded-depth hash chains: at each position, walk the
     `prev` chain from the bucket head up to `maxChain` candidates and keep the
     longest in-window match. This finds far longer matches than the single-probe
@@ -936,12 +841,7 @@ decreasing_by all_goals omega
     revisit the current bucket head or form a short cycle — harmless, because
     the walk is fuel-bounded and `countMatch` + the window guard re-verify every
     emitted match. Reuses `lz77Greedy`'s `hash3`/`countMatch`/`trailing` helpers
-    (and their proofs).
-
-    Dual hash4 + hash3 finder (#2742): the chains are keyed on the 4-byte hash
-    (`lz77Greedy.hash3` reads a full word, #2620), which drops length-3
-    matches; the `h3tab` singleton (`hash3Single`/`hash3Probe` above) restores
-    them by seeding each walk with a verified length-3 candidate. -/
+    (and their proofs). -/
 def lz77Chain (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (niceLen : Nat := 258) :
     Array LZ77Token :=
@@ -950,8 +850,7 @@ def lz77Chain (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
   else
     let hashSize := 65536
     (mainLoop data windowSize hashSize maxChain niceLen
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 insertCap).toArray
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 insertCap).toArray
 where
   /-- Walk the `prev` chain up to `fuel` steps from `cand`, keeping the longest
       in-window match `(bestLen, bestPos)`. Stops at the first out-of-window or
@@ -995,35 +894,29 @@ where
   termination_by matchLen - j
   decreasing_by all_goals omega
   mainLoop (data : ByteArray) (windowSize hashSize maxChain niceLen : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
-      (pos insertCap : Nat) : List LZ77Token :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let h3 := hash3Single data pos hlt
-      let cand3 := headProbeGuarded h3tab h3
-      let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let m := chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let m := chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
       let matchLen := m.1
       let matchPos := m.2
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
           have : data.size - (pos + matchLen) < data.size - pos := by omega
           let (hashTable, prev) := updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-          let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
           .reference matchLen (pos - matchPos) ::
-            mainLoop data windowSize hashSize maxChain niceLen hashTable prev h3tab (pos + matchLen) insertCap
+            mainLoop data windowSize hashSize maxChain niceLen hashTable prev (pos + matchLen) insertCap
         else
           .literal (data[pos]'(by omega)) ::
-            mainLoop data windowSize hashSize maxChain niceLen hashTable prev h3tab (pos + 1) insertCap
+            mainLoop data windowSize hashSize maxChain niceLen hashTable prev (pos + 1) insertCap
       else
         .literal (data[pos]'(by omega)) ::
-          mainLoop data windowSize hashSize maxChain niceLen hashTable prev h3tab (pos + 1) insertCap
+          mainLoop data windowSize hashSize maxChain niceLen hashTable prev (pos + 1) insertCap
     else
       lz77Greedy.trailing data pos
   termination_by data.size - pos
@@ -1319,25 +1212,19 @@ def lz77ChainIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap niceLen
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 #[]
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 #[]
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
-      (pos : Nat) (acc : Array LZ77Token) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let h3 := hash3Single data pos hlt
-      let cand3 := headProbeGuarded h3tab h3
-      let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let r := chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let r := chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
       let matchLen := r % 512
       let matchPos := r / 512
       if hge : matchLen ≥ 3 then
@@ -1345,14 +1232,13 @@ where
           have : data.size - (pos + matchLen) < data.size - pos := by omega
           let (hashTable, prev) :=
             updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-          let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab (pos + matchLen)
+          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + matchLen)
             (acc.push (.reference matchLen (pos - matchPos)))
         else
-          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab (pos + 1)
+          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
             (acc.push (.literal (data[pos]'(by omega))))
       else
-        mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab (pos + 1)
+        mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
           (acc.push (.literal (data[pos]'(by omega))))
     else
       lz77GreedyIter.trailing data pos acc
@@ -1388,24 +1274,18 @@ def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768
   else
     let hashSize := 65536
     (mainLoop data windowSize hashSize maxChain
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 insertCap goodMatch niceLen).toArray
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 insertCap goodMatch niceLen).toArray
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
-      (pos insertCap goodMatch niceLen : Nat) : List LZ77Token :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let h3 := hash3Single data pos hlt
-      let cand3 := headProbeGuarded h3tab h3
-      let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let m := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let m := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
       let matchLen := m.1
       let matchPos := m.2
       if hge : matchLen ≥ 3 then
@@ -1419,12 +1299,6 @@ where
               let head2 := headProbeGuarded hashTable h2
               let maxLen2 := min 258 (data.size - (pos + 1))
               have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
-              -- No hash3 probe for the lookahead walk: a deferral needs
-              -- `matchLen2 > matchLen ≥ 3`, so a length-3 seed can never
-              -- change the decision — it would be a pure waste. (Exact only
-              -- for `niceLen ≥ 4`: a `niceLen ≤ 3` cutoff could early-stop a
-              -- seeded walk differently. Every production ladder value is
-              -- ≥ 10, and the walk is heuristic either way.)
               let m2 :=
                 lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 maxChain 0 0
               let matchLen2 := m2.1
@@ -1435,45 +1309,41 @@ where
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
-                  let h3tab := updateHash3 data h3tab pos 1 (matchLen2 + 1) insertCap
                   .literal (data[pos]'(by omega)) ::
                     .reference matchLen2 (pos + 1 - matchPos2) ::
-                    mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + 1 + matchLen2) insertCap goodMatch niceLen
+                    mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1 + matchLen2) insertCap goodMatch niceLen
                 else
                   -- matchLen2 spills past data: keep match at pos
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-                  let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
                   .reference matchLen (pos - matchPos) ::
-                    mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen
+                    mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen
               else
                 -- No better match at pos+1: keep match at pos
                 have : data.size - (pos + matchLen) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-                let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
                 .reference matchLen (pos - matchPos) ::
-                  mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen
+                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen
             else
               -- Gated: long first match, skip the lookahead; still insert interior hashes.
               have : data.size - (pos + matchLen) < data.size - pos := by omega
               let (hashTable, prev) :=
                 lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-              let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
               .reference matchLen (pos - matchPos) ::
-                mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen
+                mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen
           else
             -- Near end of data: keep match at pos
             have : data.size - (pos + matchLen) < data.size - pos := by omega
             .reference matchLen (pos - matchPos) ::
-              mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen
+              mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen
         else
           .literal (data[pos]'(by omega)) ::
-            mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + 1) insertCap goodMatch niceLen
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap goodMatch niceLen
       else
         .literal (data[pos]'(by omega)) ::
-          mainLoop data windowSize hashSize maxChain hashTable prev h3tab (pos + 1) insertCap goodMatch niceLen
+          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap goodMatch niceLen
     else
       lz77Greedy.trailing data pos
   termination_by data.size - pos
@@ -1492,25 +1362,19 @@ def lz77ChainLazyIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 #[]
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 #[]
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
-      (pos : Nat) (acc : Array LZ77Token) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let h3 := hash3Single data pos hlt
-      let cand3 := headProbeGuarded h3tab h3
-      let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let r := chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let r := chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
       let matchLen := r % 512
       let matchPos := r / 512
       if hge : matchLen ≥ 3 then
@@ -1532,41 +1396,37 @@ where
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
-                  let h3tab := updateHash3 data h3tab pos 1 (matchLen2 + 1) insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + 1 + matchLen2)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + 1 + matchLen2)
                     (acc.push (.literal (data[pos]'(by omega))) |>.push
                       (.reference matchLen2 (pos + 1 - matchPos2)))
                 else
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                  let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
                     (acc.push (.reference matchLen (pos - matchPos)))
               else
                 have : data.size - (pos + matchLen) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
                   (acc.push (.reference matchLen (pos - matchPos)))
             else
               -- Gated: long first match, skip the lookahead; still insert interior hashes.
               have : data.size - (pos + matchLen) < data.size - pos := by omega
               let (hashTable, prev) :=
                 updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-              let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
                 (acc.push (.reference matchLen (pos - matchPos)))
           else
             have : data.size - (pos + matchLen) < data.size - pos := by omega
-            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
               (acc.push (.reference matchLen (pos - matchPos)))
         else
-          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + 1)
+          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + 1)
             (acc.push (.literal (data[pos]'(by omega))))
       else
-        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + 1)
+        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + 1)
           (acc.push (.literal (data[pos]'(by omega))))
     else
       lz77GreedyIter.trailing data pos acc
@@ -1602,26 +1462,20 @@ def lz77ChainIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3276
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap niceLen
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
       (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
-      (pos : Nat) (acc : Array UInt32) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let h3 := hash3Single data pos hlt
-      let cand3 := headProbeGuarded h3tab h3
-      let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
       let matchLen := r % 512
       let matchPos := r / 512
       if hge : matchLen ≥ 3 then
@@ -1629,14 +1483,13 @@ where
           have : data.size - (pos + matchLen) < data.size - pos := by omega
           let (hashTable, prev) :=
             updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-          let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab (pos + matchLen)
+          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + matchLen)
             (acc.push (packTok (.reference matchLen (pos - matchPos))))
         else
-          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab (pos + 1)
+          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
             (acc.push (packTok (.literal (data[pos]'(by omega)))))
       else
-        mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab (pos + 1)
+        mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
           (acc.push (packTok (.literal (data[pos]'(by omega)))))
     else
       trailingP data pos acc
@@ -1654,26 +1507,20 @@ def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
       (Array.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat)
-      (pos : Nat) (acc : Array UInt32) :
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
       let hashTable := guardedSet hashTable h pos
       let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let h3 := hash3Single data pos hlt
-      let cand3 := headProbeGuarded h3tab h3
-      let h3tab := guardedSet h3tab h3 pos
-      let seed := hash3Probe data (min windowSize tooFar3) pos cand3 hlt
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
       let matchLen := r % 512
       let matchPos := r / 512
       if hge : matchLen ≥ 3 then
@@ -1698,23 +1545,20 @@ where
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
-                  let h3tab := updateHash3 data h3tab pos 1 (matchLen2 + 1) insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + 1 + matchLen2)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + 1 + matchLen2)
                     (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
                       (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
                 else
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                  let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
                     (acc.push (packTok (.reference matchLen (pos - matchPos))))
               else
                 have : data.size - (pos + matchLen) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
                   (acc.push (packTok (.reference matchLen (pos - matchPos))))
             else
               -- Gated: first match already long; skip the lookahead, but still insert
@@ -1722,18 +1566,17 @@ where
               have : data.size - (pos + matchLen) < data.size - pos := by omega
               let (hashTable, prev) :=
                 updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-              let h3tab := updateHash3 data h3tab pos 1 matchLen insertCap
-              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
                 (acc.push (packTok (.reference matchLen (pos - matchPos))))
           else
             have : data.size - (pos + matchLen) < data.size - pos := by omega
-            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + matchLen)
+            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + matchLen)
               (acc.push (packTok (.reference matchLen (pos - matchPos))))
         else
-          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + 1)
+          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + 1)
             (acc.push (packTok (.literal (data[pos]'(by omega)))))
       else
-        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab (pos + 1)
+        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev (pos + 1)
           (acc.push (packTok (.literal (data[pos]'(by omega)))))
     else
       trailingP data pos acc

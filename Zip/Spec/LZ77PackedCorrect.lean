@@ -48,12 +48,12 @@ private theorem trailingP_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Tok
 /-- The packed greedy `mainLoop` is the packed image of the boxed one:
     identical control flow and chain state, `packTok` at each push. -/
 private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab pos
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
         (acc.map packTok) =
-      (lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev h3tab pos
+      (lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
         acc).map packTok := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainIterP.mainLoop lz77ChainIter.mainLoop
     simp only [chainWalkGuardedPackedU_eq]
@@ -61,9 +61,9 @@ private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain in
     · simp only [hlt, ↓reduceDIte]
       split
       · split
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
+        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
     · simp only [hlt, ↓reduceDIte]
       exact trailingP_eq data pos acc
 
@@ -75,18 +75,18 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap nice
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ _ 0 #[]
+      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0 #[]
 
 /-- The packed lazy `mainLoop` is the packed image of the boxed one. The gate
     (`matchLen < goodMatch`) is applied identically in both, so the branch tree
     stays in lockstep — one extra split versus the ungated proof. -/
 private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab pos
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev pos
         (acc.map packTok) =
-      (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev h3tab pos
+      (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev pos
         acc).map packTok := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
     unfold lz77ChainLazyIterP.mainLoop lz77ChainLazyIter.mainLoop
     simp only [chainWalkGuardedPackedU_eq]
@@ -100,14 +100,14 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
             · split
               · split
                 · -- deferral arm: literal + reference, two pushes
-                  rw [← Array.map_push, ← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-                · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-              · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
+                  rw [← Array.map_push, ← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+                · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+              · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
             · -- gated: reference(matchLen)
-              rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-          · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
+              rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+          · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
     · simp only [hlt, ↓reduceDIte]
       exact trailingP_eq data pos acc
 
@@ -120,7 +120,7 @@ theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap 
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen _ _ _ 0 #[]
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen _ _ 0 #[]
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 
