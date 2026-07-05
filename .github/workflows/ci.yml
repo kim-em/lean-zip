@@ -48,14 +48,17 @@ jobs:
   bench:
     # Dev-only bench/ sub-package: the Track D comparators and the
     # bench/sweep/fuzz executables. This is the only job that needs a Rust
-    # toolchain (for the miniz_oxide shim); libdeflate is auto-detected, and
-    # zopfli falls back to a stub when its headers are absent.
+    # toolchain (for the miniz_oxide shim). The libdeflate and zopfli C-library
+    # comparators are left disabled here (their headers are not installed) so
+    # they compile as stubs — their enabled link paths depend on nix-supplied
+    # `-L`/rpath flags and are exercised by `bench/run.sh` in the project
+    # nix-shell, not on the bare Ubuntu runner.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev pkg-config cargo libdeflate-dev
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev pkg-config cargo
 
       - name: Install elan
         run: |
