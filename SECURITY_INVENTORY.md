@@ -100,8 +100,8 @@ known gaps that sit outside the formally verified codec core.
       place
 - Recent wins:
   - ✅ in-repo deterministic `Handle.read` regression harness
-    ([`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean)
-    / [`ZipFuzzHandleRead.lean`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
+    ([`bench/BenchTests/FuzzHandleRead.lean`](/home/kim/lean-zip/bench/BenchTests/FuzzHandleRead.lean)
+    / [`bench/ZipFuzzHandleRead.lean`](/home/kim/lean-zip/bench/ZipFuzzHandleRead.lean)
     / [`scripts/fuzz-handle-read.sh`](/home/kim/lean-zip/scripts/fuzz-handle-read.sh))
     — *Executed by PR #2385* (no findings under v4.30.0-rc2;
     replaces the blog-post AFL harness as the forward-looking
@@ -111,7 +111,7 @@ known gaps that sit outside the formally verified codec core.
     `Gzip.decompressStream / decompressFile`, and
     `RawDeflate.decompressStream` with deterministic xorshift-seeded
     pathological inputs at sizes {0, 1, 16, 512, 8192, 65536, 131072}
-    and chunk sizes {1, 7, 31, 127, 65535, 65536, 65537}. `lake exe
+    and chunk sizes {1, 7, 31, 127, 65535, 65536, 65537}. `lake -d bench
     test` runs a 100-iteration fixed-seed smoke check; the
     `fuzz_handle_read` lake executable takes a wall-clock budget
     (default 30 s, override via CLI arg or
@@ -131,16 +131,16 @@ known gaps that sit outside the formally verified codec core.
   - **Design fidelity vs. issue #2380 / fallback path #2381.** The
     merged PR satisfies all four enumerated deliverables from the
     closing issue:
-    (1) [`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean)
+    (1) [`bench/BenchTests/FuzzHandleRead.lean`](/home/kim/lean-zip/bench/BenchTests/FuzzHandleRead.lean)
     is the deterministic xorshift-seeded driver mirroring
-    [`ZipTest/FuzzInflate.lean`](/home/kim/lean-zip/ZipTest/FuzzInflate.lean)'s
+    [`bench/BenchTests/FuzzInflate.lean`](/home/kim/lean-zip/bench/BenchTests/FuzzInflate.lean)'s
     shape (same inlined 64-bit xorshift PRNG, same wall-clock budget
     helper signatures, same `tryRead` filter that propagates every
     `IO.Error` variant other than `.userError`);
-    (2) [`ZipFuzzHandleRead.lean`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
+    (2) [`bench/ZipFuzzHandleRead.lean`](/home/kim/lean-zip/bench/ZipFuzzHandleRead.lean)
     + [`scripts/fuzz-handle-read.sh`](/home/kim/lean-zip/scripts/fuzz-handle-read.sh)
     are the sibling top-level driver and wrapper script analogous to
-    [`ZipFuzzInflate.lean`](/home/kim/lean-zip/ZipFuzzInflate.lean)
+    [`bench/ZipFuzzInflate.lean`](/home/kim/lean-zip/bench/ZipFuzzInflate.lean)
     + [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh);
     (3) the four pathological-input families from #2380 deliverable 3
     (read-size-vs-buffer-length mismatches, zero-length reads,
@@ -191,28 +191,28 @@ known gaps that sit outside the formally verified codec core.
     *Local guard inventory* below for the same reason.
   - **Determinism + reproducibility.** The 64-bit xorshift PRNG
     (`xorshift64`, lines 79–84 of
-    [`ZipTest/FuzzHandleRead.lean`](/home/kim/lean-zip/ZipTest/FuzzHandleRead.lean))
+    [`bench/BenchTests/FuzzHandleRead.lean`](/home/kim/lean-zip/bench/BenchTests/FuzzHandleRead.lean))
     is inlined with no external randomness dependency, and every
     PRNG-consuming helper threads the state explicitly; a fixed
     `(seed, iterations)` pair therefore produces the same exact
     inputs on every run. The size grid `#[0, 1, 16, 512, 8192,
     65536, 131072]` (line 60–61) and chunk-size grid `#[1, 7, 31,
     127, 65535, 65536, 65537]` (line 66–67) match the *Recent
-    wins* description above byte-for-byte. The `lake exe test`
+    wins* description above byte-for-byte. The `lake -d bench test`
     smoke run is a 100-iteration `runFuzz` invocation at fixed
     seed `0xdeadc0de` (line 362 — `tests` has no PRNG-time entropy
     source, so a flake from non-deterministic seeding is impossible);
-    re-running `lake exe test` on the post-merge tree
+    re-running `lake -d bench test` on the post-merge tree
     re-confirmed `FuzzHandleRead tests (seed=0xdeadc0de) ... 100
     iterations completed` followed by `All tests passed!` with no
     diagnostics.
   - **Wall-clock-budget mode.** The standalone
-    [`fuzz_handle_read`](/home/kim/lean-zip/ZipFuzzHandleRead.lean)
+    [`fuzz_handle_read`](/home/kim/lean-zip/bench/ZipFuzzHandleRead.lean)
     lake executable accepts a wall-clock budget via either
     positional CLI arg or `LEAN_ZIP_FUZZ_HANDLE_READ_SECONDS`
     environment variable (default 30 s). The precedence — CLI
     first, then env, then default — matches the sibling
-    [`fuzz_inflate`](/home/kim/lean-zip/ZipFuzzInflate.lean) recipe
+    [`fuzz_inflate`](/home/kim/lean-zip/bench/ZipFuzzInflate.lean) recipe
     line-for-line (`getEnvNatOr "LEAN_ZIP_FUZZ_HANDLE_READ_SECONDS"
     30` mirrors `getEnvNatOr "LEAN_ZIP_FUZZ_SECONDS" 30`). A 5 s
     smoke invocation (`bash scripts/fuzz-handle-read.sh 5`) on the
@@ -220,7 +220,7 @@ known gaps that sit outside the formally verified codec core.
     output `[fuzz-handle-read] OK`. The seed defaults to
     `0xc0ffeec0ffeec0ff` (overridable via
     `LEAN_ZIP_FUZZ_HANDLE_READ_SEED`), distinct from the
-    `lake exe test` smoke seed `0xdeadc0de` so the budgeted run
+    `lake -d bench test` smoke seed `0xdeadc0de` so the budgeted run
     explores a different deterministic input series than the CI
     smoke set.
   - **Inventory cross-link integrity.** The *Recent wins* bullet
@@ -237,7 +237,7 @@ known gaps that sit outside the formally verified codec core.
     none of which is the PR #2385 entry). No follow-up cross-link
     bookkeeping issue is required.
   - **Findings statement.** No new findings under v4.30.0-rc2.
-    Re-confirmed by (a) the 100-iteration `lake exe test` smoke
+    Re-confirmed by (a) the 100-iteration `lake -d bench test` smoke
     run (clean), and (b) the 5 s `scripts/fuzz-handle-read.sh 5`
     run on the worker host (4 940 iterations, exit 0). The harness
     rejects exactly one `IO.Error` variant — `.userError` — as the
@@ -263,19 +263,19 @@ known gaps that sit outside the formally verified codec core.
     rebuilds `c/zlib_ffi.c` under `-fsanitize=address,undefined` and
     runs the test suite so FFI-level memory and UB errors surface as
     runtime traps; the April 2026 tree is ASan + UBSan clean.
-  - [`ZipTest/FuzzInflate.lean`](/home/kim/lean-zip/ZipTest/FuzzInflate.lean)
+  - [`bench/BenchTests/FuzzInflate.lean`](/home/kim/lean-zip/bench/BenchTests/FuzzInflate.lean)
     + [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh)
     land a deterministic xorshift-seeded fuzz driver that feeds every
     whole-buffer FFI decoder (`Zlib.decompress`, `Gzip.decompress`,
     `RawDeflate.decompress`) and the streaming `Gzip.InflateState`
     path with pseudo-random inputs at sizes {0, 1, 16, 512, 8192,
-    65536} and chunk sizes {1, 7, 31, 127}. `lake exe test` runs a
+    65536} and chunk sizes {1, 7, 31, 127}. `lake -d bench test` runs a
     100-iteration fixed-seed smoke check (≈ 10 ms); the `fuzz_inflate`
     lake executable takes a wall-clock budget (default 30 s, override
     via CLI arg or `LEAN_ZIP_FUZZ_SECONDS`). For sanitizer coverage,
     reuse the `ZLIB_CFLAGS / ZLIB_LDFLAGS / LD_PRELOAD` recipe from
     `scripts/sanitize-ffi.sh` — the fuzz driver is linked into
-    `.lake/build/bin/fuzz_inflate` which inherits the same sanitizer
+    `bench/.lake/build/bin/fuzz_inflate` which inherits the same sanitizer
     runtime when built under those flags. Any `IO.userError` is the
     handled case; an uncaught panic, segfault, or ASan/UBSan trap
     terminates with non-zero status.
@@ -328,14 +328,14 @@ Summary — what this pattern catches and what it does not:
 ### miniz_oxide via Rust
 
 - Components:
-  [c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c),
-  [rust/miniz_oxide_shim/](/home/kim/lean-zip/rust/miniz_oxide_shim/),
-  [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean)
+  [bench/c/miniz_oxide_ffi.c](/home/kim/lean-zip/bench/c/miniz_oxide_ffi.c),
+  [bench/rust/miniz_oxide_shim/](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/),
+  [bench/Bench/MinizOxide.lean](/home/kim/lean-zip/bench/Bench/MinizOxide.lean)
 - Status: `guarded-locally`
 - Why trusted: an opt-in pure-Rust DEFLATE implementation
   (`miniz_oxide` v0.8) exposed through a `staticlib` Cargo crate
-  (`rust/miniz_oxide_shim/`) and a thin C-ABI shim
-  (`c/miniz_oxide_ffi.c`). Used by the Track D bench harness as a
+  (`bench/rust/miniz_oxide_shim/`) and a thin C-ABI shim
+  (`bench/c/miniz_oxide_ffi.c`). Used by the Track D bench harness as a
   runtime/ratio comparator alongside zlib, libdeflate, and zopfli (see
   [BENCH.md](/home/kim/lean-zip/BENCH.md) for the toolchain matrix).
   `lake build` auto-detects `cargo` on `PATH` and links
@@ -345,17 +345,17 @@ Summary — what this pattern catches and what it does not:
   `MinizOxide.decompress` Lean APIs run miniz_oxide on whole-buffer
   inputs and would process attacker-controlled bytes if a downstream
   caller wired them into a non-bench codepath. The only callers today
-  are [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean) (the
+  are [bench/ZipBench.lean](/home/kim/lean-zip/bench/ZipBench.lean) (the
   `compress-miniz` / `inflate-miniz` operations) and the smoke tests
   in
-  [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean);
+  [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean);
   the module is **not** part of the verified DEFLATE pipeline.
 - Current local guardrails:
   - opt-in by default: build skipped when `cargo` is absent or
     `MINIZ_OXIDE_DISABLE=1` is set; the C shim falls back to an
     `IO.userError` containing `"miniz_oxide: not built with Rust
     support"`, which the smoke tests in
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)
     treat as a clean skip
   - `MinizOxide.decompress` carries a `maxDecompressedSize` cap
     (default 1 GiB; pass `0` to opt into bomb-unsafe unlimited mode);
@@ -369,15 +369,15 @@ Summary — what this pattern catches and what it does not:
     Rust-allocated buffer through libc `free`, avoiding any
     Rust-allocator vs. libc-allocator mismatch
   - the Lean side copies the shim's output into a fresh
-    `lean_alloc_sarray` buffer in `c/miniz_oxide_ffi.c` and then calls
+    `lean_alloc_sarray` buffer in `bench/c/miniz_oxide_ffi.c` and then calls
     `lean_miniz_oxide_free`, so the Rust-allocated buffer is released
     on every successful return
   - **`Cargo.lock` is tracked and treated as security-critical.**
-    [`rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.lock)
+    [`bench/rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/Cargo.lock)
     pins the resolved versions of `miniz_oxide` and its transitive
     dependencies (`adler2`) along with their registry checksums. The
     caret-range declaration in
-    [`rust/miniz_oxide_shim/Cargo.toml`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.toml)
+    [`bench/rust/miniz_oxide_shim/Cargo.toml`](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/Cargo.toml)
     is intentionally narrowed by the lockfile to a specific
     build-reproducible set.
     Snapshot as of 2026-04-29: `miniz_oxide` 0.8.9, `adler2` 2.0.1.
@@ -388,13 +388,13 @@ Summary — what this pattern catches and what it does not:
     (modelled on
     [`scripts/check-c-allocations.sh`](/home/kim/lean-zip/scripts/check-c-allocations.sh)),
     intended to be run before opening a PR that touches
-    `rust/miniz_oxide_shim/`.
+    `bench/rust/miniz_oxide_shim/`.
   - **Sanitizer recipe scaffolded but not yet executed.**
     [`scripts/sanitize-rust-ffi.sh`](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
-    documents the intended ASan recipe for `c/miniz_oxide_ffi.c` +
+    documents the intended ASan recipe for `bench/c/miniz_oxide_ffi.c` +
     `libminiz_oxide_shim.a`: nightly Rust +
     `RUSTFLAGS="-Zsanitizer=address"` +
-    `cargo +nightly build --release` of `rust/miniz_oxide_shim`,
+    `cargo +nightly build --release` of `bench/rust/miniz_oxide_shim`,
     linked into a small Lean driver that exercises the
     `MinizOxide.compress` / `MinizOxide.decompress` smoke-test
     inputs. The body is currently TODO; the script's environment
@@ -409,7 +409,7 @@ Summary — what this pattern catches and what it does not:
     and
     [`scripts/fuzz-inflate.sh`](/home/kim/lean-zip/scripts/fuzz-inflate.sh)
     recipes target `c/zlib_ffi.c` and the FFI inflate decoders only;
-    they do not exercise `c/miniz_oxide_ffi.c` or the
+    they do not exercise `bench/c/miniz_oxide_ffi.c` or the
     `libminiz_oxide_shim.a` static library. A sibling recipe is
     needed before `MinizOxide.compress` / `MinizOxide.decompress`
     leave bench-only scope. Scaffolded as
@@ -425,7 +425,7 @@ Summary — what this pattern catches and what it does not:
 - Recent wins:
   - **`Cargo.lock` is now treated as a security-critical artefact** in
     PR #2382 — the
-    [`rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.lock)
+    [`bench/rust/miniz_oxide_shim/Cargo.lock`](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/Cargo.lock)
     snapshot (`miniz_oxide` 0.8.9, `adler2` 2.0.1) is recorded under
     *Current local guardrails* above, and a new advisory drift
     detector
@@ -442,29 +442,29 @@ Summary — what this pattern catches and what it does not:
     tests assert levels 9, 10, and 255 produce byte-identical
     compressed output, confirming the clamp is observable end-to-end.
   - Track D Phase 0c initial wiring — PR #2356
-    (`Zip/MinizOxide.lean`, `c/miniz_oxide_ffi.c`,
-    `rust/miniz_oxide_shim/` static-lib Cargo crate, `BENCH.md`
+    (`bench/Bench/MinizOxide.lean`, `bench/c/miniz_oxide_ffi.c`,
+    `bench/rust/miniz_oxide_shim/` static-lib Cargo crate, `BENCH.md`
     comparator-toolchain matrix, smoke tests with disabled-toolchain
     skip path)
 - Paired review of PR #2356 (Track D Phase 0c initial wiring):
   - **Design fidelity.** The merged PR satisfies every enumerated
     deliverable from the closing human-oversight directive #2349:
-    (1) the `rust/miniz_oxide_shim/` `staticlib` Cargo crate with C-ABI
+    (1) the `bench/rust/miniz_oxide_shim/` `staticlib` Cargo crate with C-ABI
     surface (`lean_miniz_oxide_compress` / `lean_miniz_oxide_decompress`
     / `lean_miniz_oxide_free` at
-    [rust/miniz_oxide_shim/src/lib.rs](/home/kim/lean-zip/rust/miniz_oxide_shim/src/lib.rs));
+    [bench/rust/miniz_oxide_shim/src/lib.rs](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/src/lib.rs));
     (2) the thin C shim
-    [c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c);
+    [bench/c/miniz_oxide_ffi.c](/home/kim/lean-zip/bench/c/miniz_oxide_ffi.c);
     (3) the Lean module
-    [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean)
+    [bench/Bench/MinizOxide.lean](/home/kim/lean-zip/bench/Bench/MinizOxide.lean)
     paralleling [Zip/RawDeflate.lean](/home/kim/lean-zip/Zip/RawDeflate.lean);
     (4) `lakefile.lean` cargo-detection + `MINIZ_OXIDE_DISABLE` /
     `MINIZ_OXIDE_LDFLAGS` knobs (paralleling `ZLIB_LDFLAGS`);
     (5) [shell.nix](/home/kim/lean-zip/shell.nix) adds `pkgs.cargo` /
     `pkgs.rustc`; (6) `compress-miniz` / `inflate-miniz` operations in
-    [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean); (7) smoke tests
+    [bench/ZipBench.lean](/home/kim/lean-zip/bench/ZipBench.lean); (7) smoke tests
     in
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)
     covering miniz↔miniz, miniz→zlib, zlib→miniz, level-0 stored,
     empty input, and the `maxDecompressedSize` cap; (8) a comparator
     toolchain matrix in [BENCH.md](/home/kim/lean-zip/BENCH.md).
@@ -475,7 +475,7 @@ Summary — what this pattern catches and what it does not:
     matching `lean_miniz_oxide_free` reconstructs `Box::from_raw` on
     `slice::from_raw_parts_mut(ptr, len)` so the buffer is released
     through the Rust global allocator — never through libc `free`. On
-    the Lean side, [c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c)
+    the Lean side, [bench/c/miniz_oxide_ffi.c](/home/kim/lean-zip/bench/c/miniz_oxide_ffi.c)
     copies the Rust-allocated bytes into a fresh `lean_alloc_sarray`
     buffer with a guarded `if (out_len > 0) memcpy(...)` (so the empty
     case is well-defined) and then immediately calls
@@ -486,7 +486,7 @@ Summary — what this pattern catches and what it does not:
     would leak. Round-trip is symmetric and exact.
   - **`panic = "abort"` invariant.** The Cargo `[profile.release]`
     block at
-    [rust/miniz_oxide_shim/Cargo.toml](/home/kim/lean-zip/rust/miniz_oxide_shim/Cargo.toml)
+    [bench/rust/miniz_oxide_shim/Cargo.toml](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/Cargo.toml)
     declares `panic = "abort"` (alongside `lto = "thin"`,
     `codegen-units = 1`, `opt-level = 3`). With abort-on-panic the
     Rust runtime cannot unwind across the C ABI boundary; every
@@ -506,17 +506,17 @@ Summary — what this pattern catches and what it does not:
     step omits. When `HAVE_MINIZ_OXIDE` is absent, both `*_ffi`
     entry points return `mk_io_error(MINIZ_DISABLED_MSG)` with the
     exact substring `"miniz_oxide: not built with Rust support"`.
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)'s
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)'s
     `withMiniz` helper matches that substring and emits a noisy skip
     line so CI on minimal toolchains (no cargo) keeps passing —
     confirmed locally on the cargo-enabled toolchain by the
-    `MinizOxide tests: OK` line in `lake exe test` output (full build
+    `MinizOxide tests: OK` line in `lake -d bench test` output (full build
     + test passes at the post-merge tree at `8ec9f44`).
   - **Bench-only scope.** A `MinizOxide\.(compress|decompress)` grep
     across the tree returns call sites only in
-    [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean) and
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean).
-    [Zip.lean](/home/kim/lean-zip/Zip.lean) does `import Zip.MinizOxide`
+    [bench/ZipBench.lean](/home/kim/lean-zip/bench/ZipBench.lean) and
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean).
+    [Zip.lean](/home/kim/lean-zip/Zip.lean) does `import Bench.MinizOxide`
     so the namespace is on the public surface, but no other `Zip/`
     source consumes either function — `MinizOxide.compress` /
     `MinizOxide.decompress` remain off the verified DEFLATE pipeline.
@@ -560,16 +560,16 @@ Summary — what this pattern catches and what it does not:
     `lean_miniz_oxide_free` allocator-mismatch avoidance;
     `lean_alloc_sarray` copy-and-free on every successful return) and
     the *Why trusted* paragraph correctly identifies all four trust-
-    boundary layers (Rust toolchain → `rust/miniz_oxide_shim/`
-    `staticlib` Cargo crate → `c/miniz_oxide_ffi.c` C-ABI shim →
-    `Zip/MinizOxide.lean` Lean wrappers). The bench-only scope claim
+    boundary layers (Rust toolchain → `bench/rust/miniz_oxide_shim/`
+    `staticlib` Cargo crate → `bench/c/miniz_oxide_ffi.c` C-ABI shim →
+    `bench/Bench/MinizOxide.lean` Lean wrappers). The bench-only scope claim
     is faithful: a fresh `MinizOxide\.(compress|decompress)` grep
     across the tree returns code call sites only in
-    [ZipBench.lean](/home/kim/lean-zip/ZipBench.lean) (the
+    [bench/ZipBench.lean](/home/kim/lean-zip/bench/ZipBench.lean) (the
     `compress-miniz` / `inflate-miniz` operations) and
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)
     (the smoke-test driver). [Zip.lean](/home/kim/lean-zip/Zip.lean)
-    does `import Zip.MinizOxide` so the namespace is on the public
+    does `import Bench.MinizOxide` so the namespace is on the public
     surface, but no other `Zip/` source consumes either function —
     the *"not part of the verified DEFLATE pipeline"* assertion in
     the *Why trusted* paragraph is observably true and matches the
@@ -668,7 +668,7 @@ Summary — what this pattern catches and what it does not:
     advisory-only `exit 0` semantics matching
     [scripts/check-c-allocations.sh](/home/kim/lean-zip/scripts/check-c-allocations.sh);
     (3) the script's docstring documents the recipe
-    *"Run before opening a PR that touches `rust/miniz_oxide_shim/`"*
+    *"Run before opening a PR that touches `bench/rust/miniz_oxide_shim/`"*
     (issue #2376 deliverable 3 explicitly accepts a header recipe in
     place of a top-level dispatcher), and the script is intentionally
     not wired into `scripts/check-inventory-links.sh` — keeping
@@ -716,7 +716,7 @@ Summary — what this pattern catches and what it does not:
     toolchain); both annotated as a *"trip wire, not a fence"* /
     *"not wired into CI"* in the docstring. Divergence: the new
     script defends two filesystem inputs
-    (`rust/miniz_oxide_shim/Cargo.lock` and `SECURITY_INVENTORY.md`)
+    (`bench/rust/miniz_oxide_shim/Cargo.lock` and `SECURITY_INVENTORY.md`)
     rather than one (`c/zlib_ffi.c`), so it has two
     `[ ! -f "$X" ]` guards instead of one; this is intentional and
     follows from the artefact shape (drift detector compares two
@@ -758,20 +758,20 @@ Summary — what this pattern catches and what it does not:
     `compress` is rewritten as a thin wrapper that clamps `level`
     via `if level > 9 then 9 else level` before delegating to a
     `private opaque compressUnsafe` extern at
-    [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean);
+    [bench/Bench/MinizOxide.lean](/home/kim/lean-zip/bench/Bench/MinizOxide.lean);
     (2) three smoke tests at levels 9, 10, and 255 in
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)
     asserting byte-identical compressed output (the issue asked for
     2–3, the PR landed exactly 3); (3) the inventory bullet flip from
     *Missing work* to *Recent wins* citing PR #2378; (4) the
     docstring on the public `compress` rewritten to accurately
     describe the clamp ("values above 9 are clamped to 9 before
     forwarding to the Rust shim"). The merged tree touches only
-    `Zip/MinizOxide.lean`, `ZipTest/MinizOxide.lean`, and
+    `bench/Bench/MinizOxide.lean`, `bench/BenchTests/MinizOxide.lean`, and
     `SECURITY_INVENTORY.md` — the C shim
-    ([c/miniz_oxide_ffi.c](/home/kim/lean-zip/c/miniz_oxide_ffi.c))
+    ([bench/c/miniz_oxide_ffi.c](/home/kim/lean-zip/bench/c/miniz_oxide_ffi.c))
     and the Rust crate
-    ([rust/miniz_oxide_shim/](/home/kim/lean-zip/rust/miniz_oxide_shim/))
+    ([bench/rust/miniz_oxide_shim/](/home/kim/lean-zip/bench/rust/miniz_oxide_shim/))
     are untouched, so the clamp is purely a Lean-layer wrapper and
     the FFI symbol `lean_miniz_oxide_compress_ffi` is preserved.
   - **`compressUnsafe` / `compress` split design.** The extern is
@@ -794,13 +794,13 @@ Summary — what this pattern catches and what it does not:
     path explicitly out of the public contract.
   - **Smoke-test observability.** (a) The three new assertions sit
     inside the existing `withMiniz "compress(big)"` skip-guard at
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)
     so the `MINIZ_OXIDE_DISABLE=1` / missing-cargo path keeps
     skipping cleanly via the `"miniz_oxide: not built with Rust
     support"` substring match. (b) The payload is `prng = mkPrngData
     4096`, the deterministic xorshift32 PRNG payload (default seed
     `2463534242`) used throughout
-    [ZipTest/MinizOxide.lean](/home/kim/lean-zip/ZipTest/MinizOxide.lean)
+    [bench/BenchTests/MinizOxide.lean](/home/kim/lean-zip/bench/BenchTests/MinizOxide.lean)
     and sibling bench-comparison tests; a future reviewer can
     reproduce the expected byte sequence purely from
     [ZipTest/Helpers.lean](/home/kim/lean-zip/ZipTest/Helpers.lean)
@@ -847,7 +847,7 @@ Summary — what this pattern catches and what it does not:
   - **Pattern reusability.** The `private opaque …Unsafe` extern +
     thin `def` clamp wrapper is the **first instance in this
     codebase** — a `grep -r "private opaque" Zip/` returns only
-    [Zip/MinizOxide.lean](/home/kim/lean-zip/Zip/MinizOxide.lean),
+    [bench/Bench/MinizOxide.lean](/home/kim/lean-zip/bench/Bench/MinizOxide.lean),
     and `grep -r "Unsafe\|private opaque" .claude/skills/` returns
     nothing. The pattern is documented only in the docstring on
     `compressUnsafe` itself ("Use `compress` instead — it clamps
@@ -876,7 +876,7 @@ Summary — what this pattern catches and what it does not:
     [scripts/sanitize-rust-ffi.sh](/home/kim/lean-zip/scripts/sanitize-rust-ffi.sh)
     is a 156-line POSIX-shell script paralleling
     [scripts/sanitize-ffi.sh](/home/kim/lean-zip/scripts/sanitize-ffi.sh)
-    in shape — header comment block describing scope (`c/miniz_oxide_ffi.c` +
+    in shape — header comment block describing scope (`bench/c/miniz_oxide_ffi.c` +
     `libminiz_oxide_shim.a` only; explicitly not `c/zlib_ffi.c` and not
     the Lean runtime), `usage()` block describing the intended
     nightly-Rust + `RUSTFLAGS="-Zsanitizer=address"` recipe, an
@@ -1035,7 +1035,7 @@ Summary — what this pattern catches and what it does not:
   - **Parser-guard behaviour.** Reproduced the four manual smoke
     tests the author documented in commit e39bf1c against the
     post-merge tree at `652a14d`:
-    (a) clean tree → *"`rust/miniz_oxide_shim/Cargo.lock` matches
+    (a) clean tree → *"`bench/rust/miniz_oxide_shim/Cargo.lock` matches
     snapshot (miniz_oxide 0.8.9, adler2 2.0.1)"* + exit 0 — pass;
     (b) extra-whitespace edit (snapshot line set to
     ``` `miniz_oxide`  0.8.9, `adler2` 2.0.1 ``` with two spaces

@@ -1,4 +1,4 @@
-import ZipTest.FuzzHandleRead
+import BenchTests.FuzzHandleRead
 
 /-! Lake executable driver for the `Handle.read` / `Stream.read`
 fuzz harness.

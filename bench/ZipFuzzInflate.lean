@@ -1,4 +1,4 @@
-import ZipTest.FuzzInflate
+import BenchTests.FuzzInflate
 
 /-! Lake executable driver for the inflate fuzz harness.
 

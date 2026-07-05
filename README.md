@@ -255,12 +255,12 @@ single `bench/run.sh`. For ad-hoc measurements there is also a driver for use
 with [hyperfine](https://github.com/sharkdp/hyperfine):
 
 ```bash
-lake build bench
-hyperfine 'lake exe bench inflate 1048576 prng 6'
+lake -d bench build bench
+hyperfine 'lake -d bench exe bench inflate 1048576 prng 6'
 ```
 
 Operations: `inflate`, `deflate`, `gzip`, `zlib`, `crc32`, `adler32`, and their
-FFI counterparts. See `lake exe bench` for the full list.
+FFI counterparts. See `lake -d bench exe bench` for the full list.
 
 ## Known limitations
 

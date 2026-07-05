@@ -2,8 +2,9 @@
 #
 # fuzz-inflate.sh -- wall-clock budgeted randomized inflate fuzz run.
 #
-# Builds and invokes the `fuzz_inflate` lake executable (root:
-# `ZipFuzzInflate.lean`), which drives every whole-buffer and
+# Builds and invokes the `fuzz_inflate` lake executable from the
+# dev-only bench sub-package (root: `bench/ZipFuzzInflate.lean`),
+# which drives every whole-buffer and
 # streaming inflate entry point with pseudo-random inputs for a
 # configurable time budget. Exit code 0 on clean completion; any
 # uncaught exception, panic, or sanitizer trap terminates with
@@ -74,10 +75,10 @@ if [[ -n "${SECONDS_ARG}" ]]; then
   export LEAN_ZIP_FUZZ_SECONDS="${SECONDS_ARG}"
 fi
 
-echo "[fuzz-inflate] lake build fuzz_inflate"
-lake build fuzz_inflate
+echo "[fuzz-inflate] lake -d bench build fuzz_inflate"
+lake -d bench build fuzz_inflate
 
-FUZZ_BIN=".lake/build/bin/fuzz_inflate"
+FUZZ_BIN="bench/.lake/build/bin/fuzz_inflate"
 if [[ ! -x "${FUZZ_BIN}" ]]; then
   echo "error: ${FUZZ_BIN} not found after lake build" >&2
   exit 2

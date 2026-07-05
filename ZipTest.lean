@@ -2,9 +2,6 @@ import ZipTest.BenchHelpers
 import ZipTest.Zlib
 import ZipTest.Gzip
 import ZipTest.RawDeflate
-import ZipTest.MinizOxide
-import ZipTest.Libdeflate
-import ZipTest.Zopfli
 import ZipTest.Checksum
 import ZipTest.Binary
 import ZipTest.Wide
@@ -23,9 +20,6 @@ import ZipTest.NativeScale
 import ZipTest.NativeDeflate
 import ZipTest.NativeCompressBench
 import ZipTest.Benchmark
-import ZipTest.FuzzInflate
-import ZipTest.FuzzCompress
-import ZipTest.FuzzHandleRead
 import ZipTest.BoundedReadTest
 import ZipTest.InflateTable
 import ZipTest.OptimalParse
@@ -38,9 +32,6 @@ def main : IO Unit := do
   ZipTest.Zlib.tests
   ZipTest.Gzip.tests
   ZipTest.RawDeflate.tests
-  ZipTest.MinizOxide.tests
-  ZipTest.Libdeflate.tests
-  ZipTest.Zopfli.tests
   ZipTest.Checksum.tests
   ZipTest.Binary.tests
   ZipTest.Wide.tests
@@ -64,8 +55,5 @@ def main : IO Unit := do
   ZipTest.SizeHelpers.tests
   ZipTest.NativeCompressBench.tests
   ZipTest.Benchmark.tests
-  ZipTest.FuzzInflate.tests
-  ZipTest.FuzzCompress.tests
-  ZipTest.FuzzHandleRead.tests
   ZipTest.BoundedRead.tests
   IO.println "\nAll tests passed!"

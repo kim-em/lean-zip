@@ -1,4 +1,5 @@
 import ZipTest.Helpers
+import Bench.MinizOxide
 
 /-! Smoke tests for the Track D Phase 0c miniz_oxide comparator.
 
