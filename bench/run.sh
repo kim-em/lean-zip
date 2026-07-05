@@ -75,7 +75,7 @@ in_project_shell "lake -d bench build bench-report \
 #    driver is pinned, so every comparator child inherits the single-core
 #    affinity and their rows are measured like the native ones.
 bash bench/comparators/build_all.sh
-nix-shell -p nodejs python3 --run \
+nix-shell -p nodejs_latest python3 --run \
   "$PIN python3 bench/comparators/run_external.py bench/payloads $OUT"
 
 # 3b. Decode-density experiment (the decompression analogue of the compress
@@ -87,7 +87,7 @@ nix-shell -p nodejs python3 --run \
 #    <corpus>_decode_density.svg.
 DD="bench/results/decode_density.json"
 in_project_shell "$PIN lake -d bench env bench/.lake/build/bin/bench-report --decode-density $DD bench/payloads-deflate"
-nix-shell -p nodejs python3 --run \
+nix-shell -p nodejs_latest python3 --run \
   "$PIN python3 bench/decode_density.py bench/payloads-deflate $DD"
 
 # 4. Render (project shell: python + matplotlib). plot.py auto-detects the
