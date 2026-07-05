@@ -817,6 +817,75 @@ theorem winMask_lt (n : Nat) : (n &&& 0x7FFF) < chainWinSize := by
   have := @Nat.and_le_right n 0x7FFF
   unfold chainWinSize; omega
 
+/-! ## Hash3 singleton table (#2742, libdeflate `hc_matchfinder.h`)
+
+The L9/L10 candidate-cache build (`buildCache` in `DeflateParse.lean`) keys
+its chains on the **4-byte** hash (`lz77Greedy.hash3`), so every chain
+candidate can extend to length ≥ 4 — but the ratio-maximising DP must also
+see length-3 candidates (plain hash4 chains cost x-ray +7.4% /
+ooffice +3.5% at L9, the #2620 note). Those come from a chain-less
+**singleton** table split by role: `hash3Single` hashes only 3 bytes into a
+15-bit table holding the most recent position per bucket, and `hash3Probe`
+verifies that candidate before use. Pure heuristic state — the probe
+re-verifies the bytes and the window, the cache is opaque to correctness,
+and emission re-verifies everything again.
+
+The L1–L8 chain matchers deliberately do **not** probe the singleton: the
+measured trade there (#2742) was −15–20% matcher speed at L1–L5 (−6% at
+L6–L8) for at best −0.17% geomean ratio even with a zlib-style `TOO_FAR`
+cap on the seed distance — inside the adjacent levels' mixing curve, so the
+per-position singleton touch does not pay outside the cache build, whose
+walk is orders of magnitude deeper per position. -/
+
+/-- 15-bit multiplicative hash of the 3 bytes at `pos` (libdeflate's `hash3`):
+    the singleton-table bucket index. Always `< 32768` (a `UInt32 >>> 17` has
+    15 bits), so the `guardedSet`/`headProbeGuarded` bounds checks on the
+    32768-entry table never fail. The word load mirrors `lz77Greedy.hash3`'s
+    (same wide-load/fallback split) so the two per-position loads in
+    `buildCache` are common-subexpression candidates; the `&&& 0xFFFFFF` mask
+    makes the bucket independent of which load path ran (byte 3 never
+    enters), which the singleton's hit rate relies on. -/
+@[inline] def hash3Single (data : ByteArray) (pos : Nat) (h : pos + 2 < data.size) : Nat :=
+  let word :=
+    if h4 : pos + 4 ≤ data.size then
+      if hsz : data.size.toUSize.toNat = data.size then
+        ByteArray.ugetUInt32LE data pos.toUSize (by
+          have hds : data.size < USize.size := by
+            rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+          rw [toUSize_toNat_of_lt (show pos < USize.size by omega)]; omega)
+      else
+        let a := (data[pos]'(by omega)).toUInt32
+        let b := (data[pos + 1]'(by omega)).toUInt32
+        let c := (data[pos + 2]'(by omega)).toUInt32
+        let d := (data[pos + 3]'(by omega)).toUInt32
+        a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+    else
+      let a := (data[pos]'(by omega)).toUInt32
+      let b := (data[pos + 1]'(by omega)).toUInt32
+      let c := (data[pos + 2]'(by omega)).toUInt32
+      a ||| (b <<< 8) ||| (c <<< 16)
+  ((((word &&& 0xFFFFFF) * 2654435761)) >>> 17).toNat
+
+/-- Probe result of the hash3 singleton, packed as the single small `Nat`
+    `bestPos * 512 + bestLen` (the `chainWalkGuardedPacked` encoding; the
+    caller decodes with `% 512` / `/ 512`). Returns `cand3 * 512 + 3` when
+    `cand3` is a live in-window position whose three bytes equal those at
+    `pos` (a *verified* length-3 match — sentinel or stale entries fail the
+    `cand3 < pos` guard, collisions fail the byte compare); otherwise `0`,
+    the empty seed. Packed rather than a `Nat × Nat` on purpose: `Prod`
+    projections of this call inside a well-founded loop body (`buildCache`)
+    send the kernel into deep recursion (the same class of WF-elaboration
+    blowup the `buildCache` docstring records for literal constants). -/
+@[inline] def hash3Probe (data : ByteArray) (windowSize pos cand3 : Nat)
+    (hlt : pos + 2 < data.size) : Nat :=
+  if hc : cand3 < pos ∧ pos - cand3 ≤ windowSize then
+    if data[cand3]'(by omega) == data[pos]'(by omega) &&
+       data[cand3 + 1]'(by omega) == data[pos + 1]'(by omega) &&
+       data[cand3 + 2]'(by omega) == data[pos + 2]'(by omega) then
+      cand3 * 512 + 3
+    else 0
+  else 0
+
 /-- Greedy LZ77 with bounded-depth hash chains: at each position, walk the
     `prev` chain from the bucket head up to `maxChain` candidates and keep the
     longest in-window match. This finds far longer matches than the single-probe
