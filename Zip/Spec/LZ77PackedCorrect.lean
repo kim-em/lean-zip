@@ -1,5 +1,6 @@
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
+import Zip.Spec.LZ77MergedCorrect
 import Zip.Spec.EmitPackedCorrect
 import Zip.Native.DeflateDynamic
 
@@ -159,7 +160,8 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     lzMatchP data level = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
   split
-  · exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
+  · rw [lz77ChainLazyIterPMerged_eq]
+    exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
   · exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
@@ -169,7 +171,8 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
   split
-  · exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
+  · rw [lz77ChainLazyIterPMerged_eq]
+    exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
       (by omega) (by omega)
   · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
       (by omega) (by omega)

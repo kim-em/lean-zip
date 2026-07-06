@@ -1694,6 +1694,127 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-! ## SPIKE (#2767 salvage): merged-array lazy matcher (single `Array Nat`)
+
+The chain state is held in ONE `Array Nat` of size `prevSize + hashSize`, with
+the `prev` ring at offset `[0, prevSize)` and the hash table at
+`[prevSize, prevSize + hashSize)`. Because `prev` sits at offset 0, the
+34%-hot chain walk (`chainWalkGuardedPackedU`) reads `c[cand &&& 0x7FFF]`
+**unchanged** — the combined array is passed straight in where `prev` was. Only
+the once-per-position hash-table accesses take a `+ prevSize` offset.
+
+The payoff: the interior-hash walk (`updateHashesMerged`) threads and returns a
+**single** array — no `(hashTable, prev)` Prod is ever allocated, unpacked, or
+freed — while the main loop stays one self-tail-recursive function (a `goto`
+loop: no stack growth, arrays stay linear ⇒ in-place `set`). Measurement scaffold
+only: `partial` + sorried bounds (production indices are genuinely in range ⇒
+byte-identical). -/
+/-- Merged-array interior-hash insertion: the twin of `updateHashesGuarded`'s
+    walk on the single combined array. Reads the bucket head at `prevSize + hsh`
+    and writes both the hash bucket (`prevSize + hsh`) and the `prev` slot
+    (`(pos+j) &&& 0x7FFF`, offset 0) into the same array `c`, so it threads and
+    returns **one** `Array Nat` — no `(hashTable, prev)` pair. Uses the
+    runtime-guarded `headProbeGuarded`/`guardedSet` (bounds dead in practice), so
+    no bounds hypotheses thread through the loop. -/
+def updateHashesMerged (data : ByteArray) (hashSize prevSize : Nat)
+    (c : Array Nat) (pos j matchLen insertCap : Nat) : Array Nat :=
+  if j < matchLen ∧ j ≤ insertCap then
+    if h : pos + j + 2 < data.size then
+      let hsh := lz77Greedy.hash3 data (pos + j) hashSize h
+      let head := headProbeGuarded c (prevSize + hsh)
+      updateHashesMerged data hashSize prevSize
+        (guardedSet (guardedSet c (prevSize + hsh) (pos + j)) ((pos + j) &&& 0x7FFF) head)
+        pos (j + 1) matchLen insertCap
+    else
+      updateHashesMerged data hashSize prevSize c pos (j + 1) matchLen insertCap
+  else c
+termination_by matchLen - j
+decreasing_by all_goals omega
+
+/-- Merged-array twin of `lz77ChainLazyIterP.mainLoop`: identical control flow,
+    but the chain state is the single combined array `c` (prev ring at offset 0,
+    hash table at offset `prevSize`). The per-position insertion goes through
+    `updateHashesMerged` (returns one array), so no Prod is allocated. -/
+def lz77LazyMergedLoop (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
+    (c : Array Nat) (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+  if hlt : pos + 2 < data.size then
+    let h := lz77Greedy.hash3 data pos hashSize hlt
+    let head := headProbeGuarded c (prevSize + h)
+    let c := guardedSet c (prevSize + h) pos
+    let c := guardedSet c (pos &&& 0x7FFF) head
+    let maxLen := min 258 (data.size - pos)
+    have hmaxLenP : pos + maxLen ≤ data.size := by omega
+    let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
+    let matchLen := r % 512
+    let matchPos := r / 512
+    if hge : matchLen ≥ 3 then
+      if hle : pos + matchLen ≤ data.size then
+        if h3lt : pos + 3 < data.size then
+          if matchLen < goodMatch then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := headProbeGuarded c (prevSize + h2)
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let r2 :=
+              chainWalkGuardedPackedU data c windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
+            let matchLen2 := r2 % 512
+            let matchPos2 := r2 / 512
+            if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let c := updateHashesMerged data hashSize prevSize c pos 1 (matchLen2 + 1) insertCap
+                lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + 1 + matchLen2)
+                  (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
+                    (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let c := updateHashesMerged data hashSize prevSize c pos 1 matchLen insertCap
+                lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+                  (acc.push (packTok (.reference matchLen (pos - matchPos))))
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let c := updateHashesMerged data hashSize prevSize c pos 1 matchLen insertCap
+              lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+                (acc.push (packTok (.reference matchLen (pos - matchPos))))
+          else
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let c := updateHashesMerged data hashSize prevSize c pos 1 matchLen insertCap
+            lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+              (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+            (acc.push (packTok (.reference matchLen (pos - matchPos))))
+      else
+        have : data.size - (pos + 1) < data.size - pos := by omega
+        lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      have : data.size - (pos + 1) < data.size - pos := by omega
+      lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth c (pos + 1)
+        (acc.push (packTok (.literal (data[pos]'(by omega)))))
+  else
+    trailingP data pos acc
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
+    `prevSize + hashSize` array and runs `lz77LazyMergedLoop`. Proven equal to
+    `lz77ChainLazyIterP` (`lz77ChainLazyIterPMerged_eq`). -/
+def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
+    (lazyDepth : Nat := maxChain) :
+    Array UInt32 :=
+  if data.size < 3 then
+    trailingP data 0 #[]
+  else
+    let hashSize := 65536
+    let prevSize := min chainWinSize data.size
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth
+      (.replicate (prevSize + hashSize) data.size) 0
+      (Array.emptyWithCapacity data.size)
+
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
   if h : i < tokens.size then
