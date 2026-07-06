@@ -62,6 +62,17 @@ where the tax is; that issue's win must come from wide stores.
    one array (no pair exists anywhere), but that refactors `chainWalkPacked`
    indexing + the whole LZ77Chain proof column for a bounded ~3–5% prize.
 
+   **Follow-up (#2767, also measured-negative):** the *other* way to delete the
+   pair — fuse the insert into the main loop so the two arrays thread as separate
+   args (a mutually-recursive `loopP`/`insertP`) — is far worse: −24…−47% on
+   dickens and a **stack overflow** on mozilla. Splitting the single
+   self-tail-recursive loop into two functions (a) loses whole-function FBIP
+   linearity (the tables reach the insert loop shared ⇒ copy-on-write, insert
+   self-time 9.3%→28.5%) and (b) is not tail-call-optimized across the mutual
+   boundary ⇒ per-position stack growth. Details:
+   `progress/lazy-fuse-walk-insert-2767.md`. Both known pair-removals lose; the
+   Prod stays.
+
 3. **Not fixed here, attributed**: the L8 boxed-lookup churn (`findTableCode`)
    wants the split path moved onto packed words (stage D) — the sizing 2/3
    overlaps #2737's sizing-pass retirement; the emit 1/3 survives #2737 and
