@@ -18,9 +18,14 @@ open Zip.Native.Deflate
 
 namespace ZipTest.SizeHelpers
 
-/-- Old level-≥5 behaviour: emit stored, fixed, and dynamic, keep the smallest. -/
+/-- Old level-≥5 behaviour: emit stored, fixed, and dynamic, keep the smallest.
+    Uses the *same* token pass `deflateRaw 6` uses (`lzMatch data 6`, the chain
+    lazy matcher) so this pins the size-then-emit dispatch, not the matcher — the
+    two must agree only because the cost models equal the emitted sizes. (These
+    small samples stay under the split threshold, so `deflateRaw 6` emits a single
+    base block, matching this single-block reference.) -/
 private def deflateRawReference (data : ByteArray) : ByteArray :=
-  let tokens := lz77LazyIter data
+  let tokens := lzMatch data 6
   pickSmaller (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data)
     (pickSmaller (deflateFixedBlock data tokens) (deflateDynamicBlock data tokens))
 
@@ -62,7 +67,10 @@ private def samples : List (String × ByteArray) :=
 def tests : IO Unit := do
   IO.println "  SizeHelpers (size-then-emit conformance) tests..."
   for (name, data) in samples do
-    let tokens := lz77LazyIter data
+    -- The level-6 token stream `deflateRaw 6` actually uses, so the whole helper
+    -- exercises the shipped matcher (cost models are matcher-agnostic — they must
+    -- equal the emitted size for whichever tokens they are handed).
+    let tokens := lzMatch data 6
     let (lf, df) := tokenFreqs tokens
     -- 1a. fixed cost model == emitted fixed block size
     let fixedSize := fixedBlockBytes lf df

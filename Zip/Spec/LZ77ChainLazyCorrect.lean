@@ -54,7 +54,9 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
                   lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!
                 lazyDepth 0 0 (Or.inl rfl)
               split
-              · split
+              · rename_i hacc
+                have hlt2 := lazyAcceptCost_lt hacc
+                split
                 · rename_i hle2
                   obtain h0' | hQ2 := hspec2
                   · omega
@@ -132,7 +134,9 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
                   lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!
                 lazyDepth 0 0 (Or.inl rfl)
               split
-              · split
+              · rename_i hacc
+                have hlt2 := lazyAcceptCost_lt hacc
+                split
                 · rename_i hle2
                   obtain h0' | ⟨hQ2a, hQ2b, _, _, hQ2e⟩ := hspec2
                   · omega
