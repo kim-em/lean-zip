@@ -15,10 +15,11 @@ position). Two shapes were tried:
    **measured negative** — −24…−47 % on dickens and a **stack overflow** on
    mozilla. Retired.
 2. **Merge `hashTable` + `prev` into one `Array Nat`** (the "cleaner kill" the
-   rc-allocator-tax doc flagged): **measured positive** — **+3–5 % dickens,
-   +2 % mozilla**, byte-identical, no stack overflow. This is the shipped
-   direction (proof column in `Zip/Spec/LZ77MergedCorrect.lean`, one lockstep
-   lemma WIP as of this entry).
+   rc-allocator-tax doc flagged): **measured positive** — geomean **+2.2 %**
+   across all 12 Silesia files (every one positive; dickens +3.7 %),
+   byte-identical, no stack overflow. Shipped: `lzMatchP` dispatches to the
+   merged matcher at levels 4+, proven equal to `lz77ChainLazyIterP` with **no
+   `sorry`** (`Zip/Spec/LZ77MergedCorrect.lean`).
 
 ## Profile (mozilla, mixed L4–L8, `perf record`, self-time)
 
@@ -82,25 +83,22 @@ two bracketing runs). The dashboard *overlay* (single-pass Silesia, cross-sessio
 reads ~1.00x because a ~2-3 % delta is below its ±30 % noise floor — the sandwich
 is the trustworthy signal for a delta this size (per `perf-pr-graphs`).
 
-**Critical: the win needs proven-bounds `set` in the insert loop.** The first
-cut used the runtime-guarded `guardedSet`/`headProbeGuarded` (a bounds branch per
-insert step, chosen for proof-simplicity). That **regresses insert-dense files**
-(xml −1.4…−2.9 %) — the per-step branch outweighs the per-position Prod saving.
-Switching the inner loop to proven-bounds `set` (no branch, as `updateHashesFastU`
-does) makes the win **uniform**:
+**The win needs proven-bounds `set` in the insert loop.** The first cut used the
+runtime-guarded `guardedSet`/`headProbeGuarded` (a bounds branch per insert step)
+which **regressed insert-dense files** (xml −1.4…−2.9 %) — the per-step branch
+outweighed the per-position Prod saving. The shipped version runs
+`updateHashesMergedFast` (proven-bounds `set`, no per-step branch, reached once
+per matched position through the guarded dispatch `updateHashesMergedGuarded`),
+which makes the win **uniform**. Self-controlled sandwich, all 12 Silesia at L6,
+**every file positive** (geomean +2.2 %):
 
-| file (proven-bounds) | L4 | L6 | L8 | | guardedSet L6 |
-|---|---|---|---|---|---|
-| **dickens** (text) | +5.5% | +4.6% | +3.4% | | +3.3% |
-| **xml** (dense text) | +1.6% | +1.9% | +1.3% | | **−2.2%** |
-| **webster** (text) | ~+2% | ~+1% | +3% | | +0.7% |
-| **mozilla** (binary) | +2.1% | +0.5% | +1.0% | | +0.5% |
-| **sao** (binary) | +2.4% | +1.7% | +3.4% | | +1.7% |
+    dickens +3.7%  ooffice +3.0%  mozilla +2.8%  mr +2.7%   x-ray +2.6%
+    osdb +2.5%     webster +2.5%  samba +2.4%    reymont +1.8%  sao +1.8%
+    xml +1.0%      nci +0.1%
 
-So the shipping version **must** thread the bounds hypotheses (like
-`updateHashesFastU`'s `hhs`/`hht`/`hpv`) rather than use `guardedSet`. Geomean
-across text+binary is ~+2 % with proven bounds; dickens (high match density) the
-biggest at +3.4…+5.5 %.
+The final wired build (`Guarded→Fast` dispatch) re-measured dickens +2.7…+5.4 %,
+xml +1.8…+1.9 % (no regression), mozilla +1.4…+2.3 % at L4/L6/L8. Byte-identical
+output everywhere.
 
 ## Correctness (`Zip/Spec/LZ77MergedCorrect.lean`)
 
@@ -109,29 +107,15 @@ invariant **`c = prev ++ hashTable`**, so the whole packed-token column
 (`lz77ChainLazyIterP_eq`, `lzMatchP_map`, roundtrip) is reused through one
 rewrite; `lzMatchP` dispatches to the merged matcher at levels 4+.
 
-Proven and compiling: the 4 `Array` append helpers, `chainWalk_append` (the walk
-reads only `[0, prevSize)` where `c` and `prev` agree), its lift
-`chainWalkGuardedPackedU_append`, `updateHashesMerged_append` (insertion on
-`prev ++ hashTable` = the append of the pair `lz77Chain.updateHashes` returns),
-the `updateHashes` size-preservation lemmas, and the entry theorem
-`lz77ChainLazyIterPMerged_eq` (reduced to the loop lemma).
-
-**WIP — two items before this ships:**
-1. `mergedLoop_eq` — the lockstep induction assembling the above through the
-   branch tree — is a documented `sorry` as of this entry (the main-chain-walk
-   alignment is proven-working; the remaining branch assembly + lazy-walk
-   alignment is mechanical, per the inline strategy comment).
-2. Switch `updateHashesMerged`'s inner loop from `guardedSet`/`headProbeGuarded`
-   to proven-bounds `set`/`getElem` (thread `0 < hashSize`,
-   `prevSize + hashSize ≤ c.size`, `min chainWinSize data.size ≤ prevSize` — the
-   loop-carried invariant, established once at the entry from the `replicate`
-   size, preserved by `guardedSet`). This is what makes the win uniform
-   (removes the xml regression); the committed code currently uses `guardedSet`,
-   so it matches the existing proof but is *not* the shipping perf shape. The
-   append proof changes only `set!`↔`set` (equal in-bounds).
-
-Until both land, the `lzMatchP` swap rests on a `sorry` and carries the xml
-regression; do not merge as a shipping perf PR.
+**Complete — no `sorry`.** The full column: the 4 `Array` append helpers,
+`set_eq_set!`, `chainWalk_append` (the walk reads only `[0, prevSize)` where `c`
+and `prev` agree), its lift `chainWalkGuardedPackedU_append`,
+`updateHashesMerged_append` (insertion on `prev ++ hashTable` = the append of the
+pair `lz77Chain.updateHashes` returns), `updateHashesMergedFast_eq` /
+`updateHashesMergedGuarded_eq` (the proven-bounds fast walk = the reference walk),
+the `updateHashes` size-preservation lemmas, `mergedLoop_eq` (the lockstep), and
+the entry theorem `lz77ChainLazyIterPMerged_eq`. `lzMatchP`'s swap is verified end
+to end (`lzMatchP_eq`/`lzMatchP_map` rewrite through it); `lake exe test` green.
 
 ## Also measured
 
