@@ -1,6 +1,7 @@
 import Zip.Native.Deflate
 import Zip.Spec.EmitTokensCorrect
 import Zip.Spec.HuffmanEncode
+import Zip.Native.HuffmanEncode
 
 /-!
   Token-stream frequency analysis and dynamic-Huffman code-length selection,
@@ -258,8 +259,8 @@ def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
     block emitter (`deflateDynamicBlock`) and the size-then-emit dispatch so both
     select identical trees from a single computation. -/
 def dynamicCodeLengths (litFreqs distFreqs : Array Nat) : List Nat × List Nat :=
-  let litLens := Huffman.Spec.computeCodeLengths (freqsToPairs litFreqs) 286 15
-  let distLens := Huffman.Spec.computeCodeLengths (freqsToPairs distFreqs) 30 15
+  let litLens := (Huffman.Spec.computeCodeLengthsN (freqsToPairs litFreqs) 286 15).toList
+  let distLens := (Huffman.Spec.computeCodeLengthsN (freqsToPairs distFreqs) 30 15).toList
   let distLens := if distLens.all (· == 0) then distLens.set 0 1 else distLens
   (litLens, distLens)
 
@@ -268,10 +269,13 @@ def dynamicCodeLengths (litFreqs distFreqs : Array Nat) : List Nat × List Nat :
 theorem dynamicCodeLengths_length (litFreqs distFreqs : Array Nat) :
     (dynamicCodeLengths litFreqs distFreqs).1.length = 286 ∧
     (dynamicCodeLengths litFreqs distFreqs).2.length = 30 := by
-  refine ⟨Huffman.Spec.computeCodeLengths_length _ 286 15, ?_⟩
-  show List.length (if _ then _ else _) = 30
-  split
-  · rw [List.length_set]; exact Huffman.Spec.computeCodeLengths_length _ 30 15
-  · exact Huffman.Spec.computeCodeLengths_length _ 30 15
+  refine ⟨?_, ?_⟩
+  · show ((Huffman.Spec.computeCodeLengthsN _ 286 15).toList).length = 286
+    rw [Array.length_toList]; exact Huffman.Spec.computeCodeLengthsN_size _ 286 15
+  · show List.length (if _ then _ else _) = 30
+    split
+    · rw [List.length_set, Array.length_toList]
+      exact Huffman.Spec.computeCodeLengthsN_size _ 30 15
+    · rw [Array.length_toList]; exact Huffman.Spec.computeCodeLengthsN_size _ 30 15
 
 end Zip.Native.Deflate

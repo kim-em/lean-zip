@@ -63,22 +63,30 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
   let distFreqs := (tokenFreqs tokens).2
   let litFreqPairs := freqsToPairs litFreqs
   let distFreqPairs := freqsToPairs distFreqs
-  let litLens := Huffman.Spec.computeCodeLengths litFreqPairs 286 15
-  let distLens₀ := Huffman.Spec.computeCodeLengths distFreqPairs 30 15
+  -- `litLens`/`distLens` are defined through the array twin `computeCodeLengthsN`
+  -- exactly as `dynamicCodeLengths` does, so they are *definitionally* `(dynLens
+  -- tokens).1`/`.2`; `computeCodeLengthsN_toList` bridges to the spec
+  -- `computeCodeLengths` for the property lemmas below.
+  let litLens := (Huffman.Spec.computeCodeLengthsN litFreqPairs 286 15).toList
+  let distLens₀ := (Huffman.Spec.computeCodeLengthsN distFreqPairs 30 15).toList
   let distLens := if distLens₀.all (fun x => x == 0) then distLens₀.set 0 1 else distLens₀
+  have hlit_bridge : litLens = Huffman.Spec.computeCodeLengths litFreqPairs 286 15 :=
+    Huffman.Spec.computeCodeLengthsN_toList litFreqPairs 286 15
+  have hdist₀_bridge : distLens₀ = Huffman.Spec.computeCodeLengths distFreqPairs 30 15 :=
+    Huffman.Spec.computeCodeLengthsN_toList distFreqPairs 30 15
   -- Properties of computeCodeLengths
-  have hlit_len : litLens.length = 286 :=
-    Huffman.Spec.computeCodeLengths_length litFreqPairs 286 15
-  have hdist₀_len : distLens₀.length = 30 :=
-    Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
-  have hlit_valid : Huffman.Spec.ValidLengths litLens 15 :=
-    Huffman.Spec.computeCodeLengths_valid litFreqPairs 286 15 (by omega) (by omega)
-  have hlit_bound : ∀ x ∈ litLens, x ≤ 15 :=
-    Huffman.Spec.computeCodeLengths_bounded litFreqPairs 286 15 (by omega)
-  have hdist₀_valid : Huffman.Spec.ValidLengths distLens₀ 15 :=
-    Huffman.Spec.computeCodeLengths_valid distFreqPairs 30 15 (by omega) (by omega)
-  have hdist₀_bound : ∀ x ∈ distLens₀, x ≤ 15 :=
-    Huffman.Spec.computeCodeLengths_bounded distFreqPairs 30 15 (by omega)
+  have hlit_len : litLens.length = 286 := by
+    rw [hlit_bridge]; exact Huffman.Spec.computeCodeLengths_length litFreqPairs 286 15
+  have hdist₀_len : distLens₀.length = 30 := by
+    rw [hdist₀_bridge]; exact Huffman.Spec.computeCodeLengths_length distFreqPairs 30 15
+  have hlit_valid : Huffman.Spec.ValidLengths litLens 15 := by
+    rw [hlit_bridge]; exact Huffman.Spec.computeCodeLengths_valid litFreqPairs 286 15 (by omega) (by omega)
+  have hlit_bound : ∀ x ∈ litLens, x ≤ 15 := by
+    rw [hlit_bridge]; exact Huffman.Spec.computeCodeLengths_bounded litFreqPairs 286 15 (by omega)
+  have hdist₀_valid : Huffman.Spec.ValidLengths distLens₀ 15 := by
+    rw [hdist₀_bridge]; exact Huffman.Spec.computeCodeLengths_valid distFreqPairs 30 15 (by omega) (by omega)
+  have hdist₀_bound : ∀ x ∈ distLens₀, x ≤ 15 := by
+    rw [hdist₀_bridge]; exact Huffman.Spec.computeCodeLengths_bounded distFreqPairs 30 15 (by omega)
   -- distLens properties (with the fixup)
   have hdist_len : distLens.length = 30 := by
     simp only [distLens]; split
@@ -193,9 +201,11 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
         simp only [Deflate.Spec.encodeLitLen]
         have hb_lt : b.toNat < litLens.length := by rw [hlit_len]; have := UInt8.toNat_lt b; omega
         have hfreq := Deflate.tokenFreqs_literal_pos tokens b ht_mem
-        have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-          (by omega) b.toNat (by have := UInt8.toNat_lt b; omega)
-          (Deflate.freqPairs_witness litFreqs b.toNat (by have := UInt8.toNat_lt b; omega) hfreq)
+        have hlen_nz : litLens[b.toNat]! ≠ 0 := by
+          rw [hlit_bridge]
+          exact Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
+            (by omega) b.toNat (by have := UInt8.toNat_lt b; omega)
+            (Deflate.freqPairs_witness litFreqs b.toNat (by have := UInt8.toNat_lt b; omega) hfreq)
         have hlen_le := getElem!_le_of_forall_mem_le litLens b.toNat 15 hb_lt hlit_bound
         exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 b.toNat hb_lt hlen_nz hlen_le
       | reference len dist =>
@@ -215,9 +225,11 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
           have hsym : 257 + idx < litLens.length := by rw [hlit_len]; omega
           have hfreq := Deflate.tokenFreqs_lengthCode_pos tokens len dist idx extraN
             extraV.toUInt32 ht_mem hflc_native
-          have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-            (by omega) (257 + idx) (by omega)
-            (Deflate.freqPairs_witness litFreqs (257 + idx) (by omega) hfreq)
+          have hlen_nz : litLens[257 + idx]! ≠ 0 := by
+            rw [hlit_bridge]
+            exact Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
+              (by omega) (257 + idx) (by omega)
+              (Deflate.freqPairs_witness litFreqs (257 + idx) (by omega) hfreq)
           have hlen_le' := getElem!_le_of_forall_mem_le litLens (257 + idx) 15 hsym hlit_bound
           have hlit_enc := Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 (257 + idx)
             hsym hlen_nz hlen_le'
@@ -240,9 +252,11 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
                 -- There's a reference, so distFreqs has a positive entry
                 have hdfreq := Deflate.tokenFreqs_distCode_pos tokens len dist dCode dExtraN
                   dExtraV.toUInt32 ht_mem hfdc_native
-                have hdlen_nz := Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
-                  (by omega) dCode (by omega)
-                  (Deflate.freqPairs_witness distFreqs dCode (by omega) hdfreq)
+                have hdlen_nz : distLens₀[dCode]! ≠ 0 := by
+                  rw [hdist₀_bridge]
+                  exact Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
+                    (by omega) dCode (by omega)
+                    (Deflate.freqPairs_witness distFreqs dCode (by omega) hdfreq)
                 -- If all were zero, distLens₀[dCode]! would be 0, contradiction
                 intro hall
                 have hdc_lt : dCode < distLens₀.length := by omega
@@ -260,7 +274,7 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
               have hdfreq := Deflate.tokenFreqs_distCode_pos tokens len dist dCode dExtraN
                 dExtraV.toUInt32 ht_mem hfdc_native
               have hdlen_nz : distLens[dCode]! ≠ 0 := by
-                rw [hdl_eq]
+                rw [hdl_eq, hdist₀_bridge]
                 exact Huffman.Spec.computeCodeLengths_nonzero distFreqPairs 30 15
                   (by omega) dCode (by omega)
                   (Deflate.freqPairs_witness distFreqs dCode (by omega) hdfreq)
@@ -281,9 +295,11 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
       simp only [Deflate.Spec.encodeLitLen]
       have hsym : 256 < litLens.length := by rw [hlit_len]; omega
       have hfreq := Deflate.tokenFreqs_eob_pos tokens
-      have hlen_nz := Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
-        (by omega) 256 (by omega)
-        (Deflate.freqPairs_witness litFreqs 256 (by omega) hfreq)
+      have hlen_nz : litLens[256]! ≠ 0 := by
+        rw [hlit_bridge]
+        exact Huffman.Spec.computeCodeLengths_nonzero litFreqPairs 286 15
+          (by omega) 256 (by omega)
+          (Deflate.freqPairs_witness litFreqs 256 (by omega) hfreq)
       have hlen_le := getElem!_le_of_forall_mem_le litLens 256 15 hsym hlit_bound
       exact Deflate.Spec.encodeSymbol_fixed_isSome litLens 15 256 hsym hlen_nz hlen_le
   -- Extract the actual values
@@ -406,6 +422,9 @@ theorem emitDynBlock_spec (bw : BitWriter) (hbw : bw.wf)
         have hwf_blk :
             (emitDynBlock bw data tokens litLens distLens hlit_len hdist_len isFinal).wf := by
           rw [hdef]; exact hwf_eob
+        -- `litLens`/`distLens` are *definitionally* `(dynLens tokens).1`/`.2`
+        -- (both go through `computeCodeLengthsN`), so the witnesses match by `rfl`
+        -- and `htoBits`/`hwf_blk` already speak about the goal's writer.
         exact ⟨litLens, distLens, headerBits, symBits, rfl, rfl,
           hlit_valid, hdist_valid, by omega, by omega, by omega, by omega,
           hlit_bound, hdist_bound, henc_trees, henc_syms, htoBits, hwf_blk⟩
@@ -467,8 +486,8 @@ theorem deflateDynamicBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
         (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).1
         (dynamicCodeLengths_length (tokenFreqs tokens).1 (tokenFreqs tokens).2).2 = _
     unfold deflateDynamicBlockCore emitDynBlock
-    cases hz : data.size == 0 <;>
-      simp only [hz, Bool.false_eq_true, ↓reduceIte] <;> rfl
+    cases data.size == 0 <;>
+      simp only [Bool.false_eq_true, ↓reduceIte] <;> rfl
   rw [heq, flush_toBits_aligned _ hwf, htoBits]
 
 /-- `deflateDynamic` (greedy LZ77 + dynamic Huffman) produces a bytestream whose
