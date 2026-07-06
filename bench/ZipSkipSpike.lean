@@ -65,7 +65,56 @@ def timeMain (paths : List String) : IO Unit := do
       IO.println s!"rep {rep} {cfg.label}: {mbps} MB/s (out {sink})"
       (← IO.getStdout).flush
 
+/-- Faithful copy of `deflateRaw`'s level-6 path (base vs observation-divergence
+    split, size-arbitrated) with an explicit `skipShift` so the only variable in
+    an A/B is skip-ahead on vs off. Mirrors `DeflateDynamic.deflateRaw` levels 6-8. -/
+def prodL6 (data : ByteArray) (skipShift : Nat) : Nat :=
+  let ptokens := lz77ChainLazyIterP data (chainDepth 6) 32768 (insertCap 6) (goodMatch 6) (niceLen 6) (lazyDepth 6) skipShift
+  let basePrep := deflateRawBasePPrep data ptokens
+  let cuts := chooseSplitsHeuristicP ptokens data.size
+  let withObs : Nat × (Unit → ByteArray) :=
+    if cuts.isEmpty then basePrep
+    else
+      let obsPrep := deflateDynamicBlocksSharedAtSizedP data ptokens cuts
+      if basePrep.1 < obsPrep.1 then basePrep else obsPrep
+  (withObs.2 ()).size
+
+/-- Just the matcher (`lzMatchP`-equivalent for L6) at a given `skipShift` — the
+    83-84% of `deflateRaw` where 100% of the skip-ahead effect lives. -/
+def matcherL6 (data : ByteArray) (skipShift : Nat) : Nat :=
+  (lz77ChainLazyIterP data (chainDepth 6) 32768 (insertCap 6) (goodMatch 6) (niceLen 6) (lazyDepth 6) skipShift).size
+
+/-- Controlled same-binary A/B: for each file, time skip-ahead OFF (63) vs the
+    shipped shift (7) for both the matcher alone and the full L6 `deflateRaw` path,
+    interleaved per rep (so drift cancels). The ONLY variable is `skipShift`. -/
+def abMain (paths : List String) (shift : Nat) (reps : Nat) : IO Unit := do
+  let mut files : List (String × ByteArray) := []
+  for path in paths do
+    files := files ++ [((path.splitOn "/").getLastD path, ← IO.FS.readBinFile path)]
+  IO.println s!"same-binary A/B: skip OFF (shift 63) vs ON (shift {shift}); {reps} reps interleaved"
+  let time (f : ByteArray → Nat) (d : ByteArray) : IO Float := do
+    let t0 ← IO.monoNanosNow
+    let mut s := 0
+    for _ in [0:1] do s := s + f d
+    let t1 ← IO.monoNanosNow
+    return ((t1 - t0).toFloat / 1.0e6) + (s.toFloat * 0.0)
+  for (name, d) in files do
+    let mut mOff := #[]; let mut mOn := #[]; let mut pOff := #[]; let mut pOn := #[]
+    for _ in [0:reps] do
+      -- interleave off/on each rep so slow drift cancels
+      mOff := mOff.push (← time (matcherL6 · 63) d)
+      mOn  := mOn.push  (← time (matcherL6 · shift) d)
+      pOff := pOff.push (← time (prodL6 · 63) d)
+      pOn  := pOn.push  (← time (prodL6 · shift) d)
+    let med (a : Array Float) : Float := (a.qsort (· < ·))[a.size / 2]!
+    let mo := med mOff; let mn := med mOn; let po := med pOff; let pn := med pOn
+    IO.println s!"{name}: matcher off={mo}ms on={mn}ms → {(mo/mn - 1.0)*100.0}% | prodL6 off={po}ms on={pn}ms → {(po/pn - 1.0)*100.0}%"
+    (← IO.getStdout).flush
+
 def main (args : List String) : IO Unit := do
+  if args.head? == some "--ab" then
+    abMain (args.tail.drop 1) ((args.tail.head?.bind (·.toNat?)).getD 7) 7
+    return
   if args.head? == some "--time" then
     timeMain args.tail
     return
