@@ -138,6 +138,3 @@ lean_lib ZipTest where
 @[default_target]
 lean_exe test where
   root := `ZipTest
-
-lean_exe perfspike where
-  root := `PerfSpike

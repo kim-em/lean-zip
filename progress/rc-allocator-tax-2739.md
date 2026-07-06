@@ -62,16 +62,19 @@ where the tax is; that issue's win must come from wide stores.
    one array (no pair exists anywhere), but that refactors `chainWalkPacked`
    indexing + the whole LZ77Chain proof column for a bounded ~3–5% prize.
 
-   **Follow-up (#2767, also measured-negative):** the *other* way to delete the
-   pair — fuse the insert into the main loop so the two arrays thread as separate
-   args (a mutually-recursive `loopP`/`insertP`) — is far worse: −24…−47% on
-   dickens and a **stack overflow** on mozilla. Splitting the single
-   self-tail-recursive loop into two functions (a) loses whole-function FBIP
-   linearity (the tables reach the insert loop shared ⇒ copy-on-write, insert
-   self-time 9.3%→28.5%) and (b) is not tail-call-optimized across the mutual
-   boundary ⇒ per-position stack growth. Details:
-   `progress/lazy-fuse-walk-insert-2767.md`. Both known pair-removals lose; the
-   Prod stays.
+   **Follow-up (#2767):** two shapes were tried. The *fusion* shape — thread the
+   two arrays as separate args through a mutually-recursive `loopP`/`insertP` — is
+   far worse: −24…−47% dickens and a **stack overflow** on mozilla (loses
+   whole-function FBIP linearity *and* is not TCO'd across the mutual boundary).
+   But the *merge* shape flagged above **works**: holding the state in one
+   `Array Nat` laid out `prev ++ hashTable` (prev at offset 0, so the hot chain
+   walk indexing is unchanged) makes the insert walk return a single array — no
+   Prod — while the loop stays one self-tail-recursive `goto`. Measured **+3–5%
+   dickens / +2% mozilla**, byte-identical; the C confirms 0 `lean_alloc_ctor` in
+   the insert walk. So the "bounded ~3–5% prize" is real and the refactor is
+   contained (a `c = prev ++ hashTable` invariant transfer, `LZ77MergedCorrect`),
+   not the "whole LZ77Chain proof column" originally feared. Details:
+   `progress/lazy-fuse-walk-insert-2767.md`.
 
 3. **Not fixed here, attributed**: the L8 boxed-lookup churn (`findTableCode`)
    wants the split path moved onto packed words (stage D) — the sizing 2/3
