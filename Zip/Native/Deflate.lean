@@ -1314,19 +1314,51 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- libdeflate's cost-based lazy accept rule (`deflate_compress.c`, the first
+    lookahead step). The lazy matcher prefers the `pos+1` match `(len2, dist2)`
+    over the `pos` match `(len1, dist1)` when it is strictly longer **and** the
+    length gain pays for the extra offset bits: `4·Δlen + bsr(dist1) − bsr(dist2)
+    > 2`, where `bsr x = ⌊log2 x⌋` counts a distance's offset bits (written with
+    additions on both sides so the `Nat` subtractions never truncate).
+
+    This replaces the older conservative rule `len2 > len1 ∧ dist2 ≤ dist1`
+    (accept a longer match only when it is *no farther*), which rejected every
+    longer-but-farther match outright. The cost rule instead admits a farther
+    match once its length gain outweighs the ⌈log2⌉ offset-bit cost — exactly the
+    longer-but-farther deferrals a Huffman-distance model rewards. Measured
+    (#2765, `lazy2-sweep`) at −0.4 %…−0.9 % Silesia/Canterbury ratio across
+    *every* lazy level (4–9) and every file type — text (xml −2.0 %, dickens
+    −0.8 %) and binary (osdb −1.6 %, mozilla −0.3 %, sao −0.2 %) alike, with no
+    regression anywhere — at negligible cost (one `Nat.log2` per deferral, no
+    extra chain walk). A two-position (`pos+2`) lookahead was measured alongside
+    and rejected: it added ≤0.06 % for a second chain walk per position and a new
+    proof branch.
+
+    Purely a choice among valid matches — every emitted reference is re-verified
+    at emission (`chainWalk_spec` holds for any chain state and any deferral
+    predicate), so the rule never enters the correctness proof; the matcher
+    contracts hold for any accept predicate. -/
+@[inline] def lazyAcceptCost (len1 dist1 len2 dist2 : Nat) : Bool :=
+  decide (len1 < len2) && decide (4 * (len2 - len1) + dist1.log2 > 2 + dist2.log2)
+
+/-- Accepting the lookahead match implies it is strictly longer — the correctness
+    proofs use this to rule out the "no match at `pos+1`" case. -/
+theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
+    (h : lazyAcceptCost len1 dist1 len2 dist2 = true) : len1 < len2 := by
+  simp only [lazyAcceptCost, Bool.and_eq_true, decide_eq_true_eq] at h
+  exact h.1
+
 /-- Lazy (one-byte-lookahead, zlib `deflate_slow`-style) variant of `lz77Chain`.
     At each position it finds the best chain match `M` at `pos`; before emitting it
     runs a *second* `chainWalk` at `pos+1` for `M'`. It defers — emits a literal at
-    `pos` and takes `M'` (advancing to `pos+1+len M'`) — only when `M'` is **both
-    longer and no farther** than `M` (`len M' > len M ∧ dist M' ≤ dist M`); otherwise
-    it emits `M` (advancing to `pos+len M`). The distance guard is the key to the
-    ratio win: a length-only deferral takes longer-but-farther matches whose extra
-    distance bits cost more than they save, which *regresses* large text badly
-    (measured: plrabn12/lcet10 up to +22%); guarding on distance keeps only the
-    beneficial deferrals (Canterbury levels 4–9: −5.2% vs greedy). It is not a
-    global optimum — `lcet10` at the shallow levels 4–5 still loses ~19% to a
-    Huffman-distribution effect no *local* deferral rule captures (that needs the
-    cost-model parse of #2526 part 2).
+    `pos` and takes `M'` (advancing to `pos+1+len M'`) — when `lazyAcceptCost`
+    (libdeflate's cost rule: `M'` strictly longer and its length gain pays for the
+    extra offset bits) holds; otherwise it emits `M` (advancing to `pos+len M`).
+    The accept rule is the ratio lever — see `lazyAcceptCost` for the measured
+    win and why the older "longer and no farther" guard was replaced. It is not a
+    global optimum — the shallow levels still lose to a Huffman-distribution
+    effect no *local* deferral rule captures (that needs the cost-model parse of
+    #2526 part 2).
 
     The lookahead walk at `pos+1` runs at `lazyDepth` chain steps, a separate knob
     from the `pos` walk's `maxChain`. It defaults to `maxChain` (full-depth probe,
@@ -1367,7 +1399,7 @@ where
       let matchPos := m.2
       if hge : matchLen ≥ 3 then
         if hle : pos + matchLen ≤ data.size then
-          -- Lazy: probe pos+1 for a longer, no-farther match (distance-guarded deferral)
+          -- Lazy: probe pos+1 for a cost-accepted deferral (`lazyAcceptCost`)
           if h3lt : pos + 3 < data.size then
             -- Lazy gate (zlib `good_match`): probe pos+1 only when the first match is
             -- short. `goodMatch = 259` (> 258) restores the ungated lazy matcher.
@@ -1380,9 +1412,9 @@ where
                 lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
               let matchLen2 := m2.1
               let matchPos2 := m2.2
-              if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
                 if hle2 : pos + 1 + matchLen2 ≤ data.size then
-                  -- Longer & no-farther match at pos+1: emit literal at pos + reference at pos+1
+                  -- Cost-accepted match at pos+1: emit literal at pos + reference at pos+1
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
@@ -1469,7 +1501,7 @@ where
                 chainWalkGuardedPacked data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
               let matchLen2 := r2 % 512
               let matchPos2 := r2 / 512
-              if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
                 if hle2 : pos + 1 + matchLen2 ≤ data.size then
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
@@ -1619,7 +1651,7 @@ where
                 chainWalkGuardedPackedU data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
               let matchLen2 := r2 % 512
               let matchPos2 := r2 / 512
-              if matchLen2 > matchLen ∧ pos + 1 - matchPos2 ≤ pos - matchPos then
+              if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
                 if hle2 : pos + 1 + matchLen2 ≤ data.size then
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
