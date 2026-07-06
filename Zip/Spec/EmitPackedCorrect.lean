@@ -115,8 +115,20 @@ theorem emitTokensP_eq (bw : BitWriter) (ws : Array UInt32) (i : Nat) :
     by_cases hi : i < ws.size
     · simp only [Array.size_map, hi, ↓reduceDIte, Array.getElem_map, unpackTok]
       by_cases hc : ws[i] &&& ((1 : UInt32) <<< 31) = 0
-      · simp only [hc, ↓reduceIte]
-        exact ih _ (by omega) _ _ rfl
+      · -- literal at i: peek the next token for the batched literal-pair path
+        by_cases h2 : i + 1 < ws.size
+        · by_cases hc2 : ws[i + 1] &&& ((1 : UInt32) <<< 31) = 0
+          · -- two consecutive literals → one `writeHuffCode2`, advance by two
+            simp only [hc, ↓reduceIte, h2, ↓reduceDIte, hc2]
+            rw [BitWriter.writeHuffCode2_eq]
+            conv => rhs; unfold emitTokens
+            simp only [Array.size_map, h2, ↓reduceDIte, Array.getElem_map, unpackTok, hc2,
+              ↓reduceIte]
+            exact ih _ (by omega) _ _ rfl
+          · simp only [hc, ↓reduceIte, h2, ↓reduceDIte, hc2]
+            exact ih _ (by omega) _ _ rfl
+        · simp only [hc, ↓reduceIte, h2, ↓reduceDIte]
+          exact ih _ (by omega) _ _ rfl
       · simp only [hc, ↓reduceIte]
         split
         · rename_i idx en ev hflc
@@ -230,8 +242,20 @@ theorem emitTokensWithCodesP_eq (bw : BitWriter) (ws : Array UInt32)
     by_cases hi : i < ws.size
     · simp only [Array.size_map, hi, ↓reduceDIte, Array.getElem_map, unpackTok]
       by_cases hc : ws[i] &&& ((1 : UInt32) <<< 31) = 0
-      · simp only [hc, ↓reduceIte]
-        exact ih _ (by omega) _ _ rfl
+      · -- literal at i: peek the next token for the batched literal-pair path
+        by_cases h2 : i + 1 < ws.size
+        · by_cases hc2 : ws[i + 1] &&& ((1 : UInt32) <<< 31) = 0
+          · -- two consecutive literals → one `writeHuffCode2`, advance by two
+            simp only [hc, ↓reduceIte, h2, ↓reduceDIte, hc2]
+            rw [BitWriter.writeHuffCode2_eq]
+            conv => rhs; unfold emitTokensWithCodes
+            simp only [Array.size_map, h2, ↓reduceDIte, Array.getElem_map, unpackTok, hc2,
+              ↓reduceIte]
+            exact ih _ (by omega) _ _ rfl
+          · simp only [hc, ↓reduceIte, h2, ↓reduceDIte, hc2]
+            exact ih _ (by omega) _ _ rfl
+        · simp only [hc, ↓reduceIte, h2, ↓reduceDIte]
+          exact ih _ (by omega) _ _ rfl
       · simp only [hc, ↓reduceIte]
         split
         · rename_i idx en ev hflc

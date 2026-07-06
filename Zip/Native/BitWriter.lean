@@ -214,6 +214,96 @@ theorem writeHuffCode_def (bw : BitWriter) (code : UInt16) (len : UInt8) :
   · rw [flushBytesWide_eq, flushAcc_eq]
   · rfl
 
+/-- Write two Huffman codes in one merged accumulator operation — a single
+    shift/OR field and a single flush check for a pair of literals, the way
+    libdeflate writes its flush groups.
+
+    When the first code would not trigger an intermediate flush (`bitCount +
+    len1 < flushThreshold`, the common case right after a flush leaves few
+    pending bits), both reversed codes are merged into one 64-bit accumulator:
+    `code1` shifted above the pending bits, `code2` shifted above that, then the
+    combined field is flushed once. The guard's `else` branch (rare: `bitCount +
+    len1 ≥ 32`) falls back to the two sequential `writeHuffCode` calls.
+
+    `writeHuffCode2_eq` proves the result **byte-identical to the two sequential
+    `writeHuffCode` calls for every input** — no length precondition, because
+    the merge and the sequential second write use the same (modular) `UInt64`
+    shift/OR arithmetic: under the guard the first field never flushes, so
+    merging the second above it lands the exact same bits with the exact same
+    single flush the sequential pair would perform on its second call.
+
+    That the merged field does not lose bits off the top of the 64-bit
+    accumulator (i.e. that the output is well-formed DEFLATE, not merely equal to
+    the sequential writer) is a **caller invariant**: DEFLATE literal/length
+    Huffman codes have `len ≤ 15`, so with the guard `bitCount + len1 < 32` the
+    top bit position `bitCount + len1 + len2 < 47` sits well inside 64. This is
+    the same `len ≤ 15` invariant the emit specs already carry
+    (`ValidLengths … 15`); it is not needed for `writeHuffCode2_eq`. -/
+def writeHuffCode2 (bw : BitWriter) (code1 : UInt16) (len1 : UInt8)
+    (code2 : UInt16) (len2 : UInt8) : BitWriter :=
+  if bw.bitCount.toNat + len1.toNat < flushThreshold then
+    let rev1 : UInt64 := (reverse16 code1).toUInt64 >>> (16 - len1.toUInt64)
+    let rev2 : UInt64 := (reverse16 code2).toUInt64 >>> (16 - len2.toUInt64)
+    let acc : UInt64 :=
+      bw.bitBuf ||| (rev1 <<< bw.bitCount.toUInt64)
+        ||| (rev2 <<< (bw.bitCount.toUInt64 + len1.toUInt64))
+    let total := bw.bitCount.toNat + len1.toNat + len2.toNat
+    if total ≥ flushThreshold then
+      ⟨flushBytesWide bw.data acc (total / 8), dropBytes acc (total / 8), (total % 8).toUInt8⟩
+    else
+      ⟨bw.data, acc, total.toUInt8⟩
+  else
+    (bw.writeHuffCode code1 len1).writeHuffCode code2 len2
+
+/-- The explicit ctor-reuse flush form (`flushBytesWide`/`dropBytes`) the
+    production writers construct equals the `flushBatched` reference form —
+    exactly the bridge inside `writeBits_def`/`writeHuffCode_def`, factored out
+    so `writeHuffCode2_eq` can rewrite the batched fast path. -/
+private theorem flushExplicit_eq_flushBatched (data : ByteArray) (acc : UInt64) (total : Nat) :
+    (if total ≥ flushThreshold then
+      (⟨flushBytesWide data acc (total / 8), dropBytes acc (total / 8),
+        (total % 8).toUInt8⟩ : BitWriter)
+     else ⟨data, acc, total.toUInt8⟩) = flushBatched data acc total := by
+  unfold flushBatched
+  split
+  · rw [flushBytesWide_eq, flushAcc_eq]
+  · rfl
+
+/-- `writeHuffCode2` is byte-identical to the two sequential `writeHuffCode`
+    calls it batches, as a `BitWriter` value (not merely at the `toBits` level).
+    Under the guard the first field does not flush, so its merged accumulator is
+    exactly the pending state the second `writeHuffCode` reads; OR is
+    associative, so shifting `code2` above `code1` lands the same bits, and the
+    single flush check on `bitCount + len1 + len2` is the one the sequential
+    pair performs on its second call. -/
+theorem writeHuffCode2_eq (bw : BitWriter) (code1 : UInt16) (len1 : UInt8)
+    (code2 : UInt16) (len2 : UInt8) :
+    bw.writeHuffCode2 code1 len1 code2 len2 =
+      (bw.writeHuffCode code1 len1).writeHuffCode code2 len2 := by
+  unfold writeHuffCode2
+  split
+  · rename_i hg
+    have hg' : bw.bitCount.toNat + len1.toNat < 256 := by
+      simp only [flushThreshold] at hg; omega
+    -- The first field does not flush: it yields this explicit cell.
+    have hX : bw.writeHuffCode code1 len1 =
+        ⟨bw.data, bw.bitBuf ||| ((reverse16 code1).toUInt64 >>> (16 - len1.toUInt64))
+          <<< bw.bitCount.toUInt64, (bw.bitCount.toNat + len1.toNat).toUInt8⟩ := by
+      rw [writeHuffCode_def, flushBatched, if_neg (Nat.not_le.mpr hg)]
+    -- The pending count after the first field, as Nat and as the shift amount.
+    have htt1 : ((bw.bitCount.toNat + len1.toNat).toUInt8).toNat
+        = bw.bitCount.toNat + len1.toNat := by
+      simp only [Nat.toUInt8, UInt8.toNat_ofNat']
+      rw [show (2 : Nat) ^ 8 = 256 from rfl]; omega
+    have hshift : ((bw.bitCount.toNat + len1.toNat).toUInt8).toUInt64
+        = bw.bitCount.toUInt64 + len1.toUInt64 := by
+      apply UInt64.toNat_inj.mp
+      rw [UInt8.toNat_toUInt64, htt1, UInt64.toNat_add, UInt8.toNat_toUInt64,
+        UInt8.toNat_toUInt64, Nat.mod_eq_of_lt (by omega)]
+    -- Both sides collapse to the same `flushBatched`.
+    rw [flushExplicit_eq_flushBatched, writeHuffCode_def, hX, htt1, hshift, Nat.add_assoc]
+  · rfl
+
 /-- Flush all pending bits, padding the final partial byte with zeros. Drains
     every whole pending byte (`bitCount` may hold up to 31 bits under batching),
     then the final partial byte. Returns the final ByteArray. -/

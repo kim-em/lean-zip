@@ -94,7 +94,13 @@ proves the loop equal to `emitTokensWithCodes` over the boxed view. -/
     distance Huffman codes. Literals (tag bit clear) read the byte field
     directly; references go through `emitRefWithCodesP`. Equal to
     `emitTokensWithCodes` over the boxed view for every word array
-    (`emitTokensWithCodesP_eq`). -/
+    (`emitTokensWithCodesP_eq`).
+
+    When two consecutive tokens are literals, they are batched into a single
+    `writeHuffCode2` (one merged shift/OR field, one flush check) instead of two
+    `writeHuffCode` calls — the literal-emission fast path (#2764). This is
+    byte-identical to the sequential emit (`writeHuffCode2_eq`), so the equality
+    to the boxed emitter still holds; the batched branch advances by two. -/
 def emitTokensWithCodesP (bw : BitWriter) (tokens : Array UInt32)
     (litCodes distCodes : Array (UInt16 × UInt8))
     (hlit : litCodes.size ≥ 286) (hdist : distCodes.size ≥ 30)
@@ -104,13 +110,27 @@ def emitTokensWithCodesP (bw : BitWriter) (tokens : Array UInt32)
     if w &&& ((1 : UInt32) <<< 31) = 0 then
       have : w.toUInt8.toNat < litCodes.size := by
         have := UInt8.toNat_lt w.toUInt8; omega
-      let (code, len) := litCodes[w.toUInt8.toNat]
-      emitTokensWithCodesP (bw.writeHuffCode code len) tokens litCodes distCodes hlit hdist (i + 1)
+      let (code1, len1) := litCodes[w.toUInt8.toNat]
+      if h2 : i + 1 < tokens.size then
+        let w2 := tokens[i + 1]
+        if w2 &&& ((1 : UInt32) <<< 31) = 0 then
+          have : w2.toUInt8.toNat < litCodes.size := by
+            have := UInt8.toNat_lt w2.toUInt8; omega
+          let (code2, len2) := litCodes[w2.toUInt8.toNat]
+          emitTokensWithCodesP (bw.writeHuffCode2 code1 len1 code2 len2) tokens litCodes distCodes
+            hlit hdist (i + 2)
+        else
+          emitTokensWithCodesP (bw.writeHuffCode code1 len1) tokens litCodes distCodes
+            hlit hdist (i + 1)
+      else
+        emitTokensWithCodesP (bw.writeHuffCode code1 len1) tokens litCodes distCodes
+          hlit hdist (i + 1)
     else
       emitTokensWithCodesP (emitRefWithCodesP bw litCodes distCodes w) tokens litCodes distCodes
         hlit hdist (i + 1)
   else bw
 termination_by tokens.size - i
+decreasing_by all_goals omega
 
 
 /-- Write the dynamic Huffman tree header via BitWriter.

@@ -1731,19 +1731,35 @@ time. Do not inline `emitRefFixedP` back into `emitTokensP`.
 /-- Packed-token form of `emitTokens`: emit the packed `UInt32` stream as
     fixed Huffman codes. Literals (tag bit clear) read the byte field
     directly; references go through `emitRefFixedP`. Equal to `emitTokens`
-    over the boxed view for every word array (`emitTokensP_eq`). -/
+    over the boxed view for every word array (`emitTokensP_eq`).
+
+    Two consecutive literals are batched into a single `writeHuffCode2` (one
+    merged shift/OR field, one flush check) instead of two `writeHuffCode` calls
+    — the literal-emission fast path (#2764). Byte-identical to the sequential
+    emit (`writeHuffCode2_eq`); the batched branch advances by two. -/
 def emitTokensP (bw : BitWriter) (tokens : Array UInt32) (i : Nat) : BitWriter :=
   if h : i < tokens.size then
     let w := tokens[i]
     if w &&& ((1 : UInt32) <<< 31) = 0 then
       have : w.toUInt8.toNat < fixedLitCodes.size := by
         have := UInt8.toNat_lt w.toUInt8; rw [Deflate.fixedLitCodes_size]; omega
-      let (code, len) := fixedLitCodes[w.toUInt8.toNat]
-      emitTokensP (bw.writeHuffCode code len) tokens (i + 1)
+      let (code1, len1) := fixedLitCodes[w.toUInt8.toNat]
+      if h2 : i + 1 < tokens.size then
+        let w2 := tokens[i + 1]
+        if w2 &&& ((1 : UInt32) <<< 31) = 0 then
+          have : w2.toUInt8.toNat < fixedLitCodes.size := by
+            have := UInt8.toNat_lt w2.toUInt8; rw [Deflate.fixedLitCodes_size]; omega
+          let (code2, len2) := fixedLitCodes[w2.toUInt8.toNat]
+          emitTokensP (bw.writeHuffCode2 code1 len1 code2 len2) tokens (i + 2)
+        else
+          emitTokensP (bw.writeHuffCode code1 len1) tokens (i + 1)
+      else
+        emitTokensP (bw.writeHuffCode code1 len1) tokens (i + 1)
     else
       emitTokensP (emitRefFixedP bw w) tokens (i + 1)
   else bw
 termination_by tokens.size - i
+decreasing_by all_goals omega
 
 /-- Write a fixed Huffman DEFLATE block from LZ77 tokens. -/
 def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
