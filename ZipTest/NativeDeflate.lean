@@ -406,6 +406,34 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       throw (IO.userError s!"lz77ChainLazyIterP vs lz77ChainLazyIter (lazyDepth=32) mismatch on {name}: \
         {packedShallow.size} vs {iterShallow.size} tokens")
 
+  -- Incompressible-stretch skip-ahead (#2766): after a run of misses the matcher
+  -- advances by a growing stride. The three twins must stay in lockstep at every
+  -- `skipShift`, and every stride still emits a valid, roundtrippable stream. The
+  -- shapes include prng (incompressible → skip-ahead actually triggers) and edge
+  -- cases; `skipShift = 63` reproduces the pre-skip (disabled) output exactly.
+  for (name, data) in [("empty", ByteArray.empty), ("single", singleByte),
+                        ("hello", helloBytes), ("big", big),
+                        ("cyclic4K", mkCyclicData 4096), ("prng8K", mkPrngData 8192),
+                        ("text4K", mkTextData 4096)] do
+    -- Disabled skip-ahead (shift 63) equals the default matcher argument, byte-identical.
+    let disabled := Zip.Native.Deflate.lz77ChainLazyIter data 64 32768 1000000000 259 258 32 63
+    unless disabled == Zip.Native.Deflate.lz77ChainLazyIter data 64 32768 1000000000 259 258 32 do
+      throw (IO.userError s!"skipShift=63 not identity to default on {name}")
+    for shift in [4, 6, 7, 63] do
+      let iter := Zip.Native.Deflate.lz77ChainLazyIter data 64 32768 1000000000 259 258 32 shift
+      let rec' := Zip.Native.Deflate.lz77ChainLazy data 64 32768 1000000000 259 258 32 shift
+      unless iter == rec' do
+        throw (IO.userError s!"lz77ChainLazyIter vs lz77ChainLazy (skipShift={shift}) mismatch on {name}")
+      let packed := Zip.Native.Deflate.lz77ChainLazyIterP data 64 32768 1000000000 259 258 32 shift
+      unless packed == iter.map Zip.Native.Deflate.packTok do
+        throw (IO.userError s!"lz77ChainLazyIterP vs lz77ChainLazyIter (skipShift={shift}) mismatch on {name}")
+      -- End-to-end: emit the skip-ahead tokens as a fixed block and inflate back.
+      let raw := Zip.Native.Deflate.deflateFixedBlock data iter
+      match Zip.Native.Inflate.inflate raw with
+      | .ok result => unless result == data do
+          throw (IO.userError s!"skip-ahead(shift={shift})→native inflate mismatch on {name}")
+      | .error e => throw (IO.userError s!"skip-ahead(shift={shift})→native inflate failed on {name}: {e}")
+
   -- deflateRaw at every lazy level (4–9) → native inflate AND FFI decompress, on
   -- varied shapes incl. edge cases. Exercises the lazy path end to end.
   let lazyShapes : List (String × ByteArray) :=

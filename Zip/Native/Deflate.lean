@@ -1348,6 +1348,47 @@ theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
   simp only [lazyAcceptCost, Bool.and_eq_true, decide_eq_true_eq] at h
   exact h.1
 
+/-! ## Incompressible-stretch skip-ahead literal runs (Wave 8, #2766)
+
+The lazy matcher's skip-ahead (LZ4/zstd-style) advances `pos` by a growing
+`stride` after a run of positions with no match, emitting every skipped byte as
+a literal. `litRun`/`pushLits`/`pushLitsP` are the three representations of "emit
+the literals for `data[pos .. stop)`": a `List` prepend (`litRun`, for the
+recursive reference matcher), and two `Array`-accumulator pushes (`pushLits` for
+boxed tokens, `pushLitsP` for packed `UInt32`). They advance one byte at a time
+and terminate on `stop - pos`, so `stop = pos + 1` (the disabled `skipShift`) is
+exactly the single-literal step the matchers took before this knob existed.
+`pushLits_eq`/`pushLitsP_eq` (in `LZ77ChainLazyCorrect`/`LZ77PackedCorrect`)
+relate the push forms back to `litRun` so the twin equalities carry through. -/
+
+/-- The literals `data[pos], …, data[stop-1]` as a `List` (empty once `pos`
+    reaches `stop` or the buffer end). The prepend form used by the recursive
+    lazy matcher's skip-ahead miss branch. -/
+def litRun (data : ByteArray) (pos stop : Nat) : List LZ77Token :=
+  if h : pos < stop ∧ pos < data.size then
+    .literal (data[pos]'h.2) :: litRun data (pos + 1) stop
+  else []
+termination_by stop - pos
+
+/-- `litRun` pushed onto a boxed-token accumulator (`Array LZ77Token`). Equal to
+    `acc ++ (litRun data pos stop).toArray` (`pushLits_eq`). -/
+def pushLits (acc : Array LZ77Token) (data : ByteArray) (pos stop : Nat) :
+    Array LZ77Token :=
+  if h : pos < stop ∧ pos < data.size then
+    pushLits (acc.push (.literal (data[pos]'h.2))) data (pos + 1) stop
+  else acc
+termination_by stop - pos
+
+/-- `litRun` pushed onto a packed-token accumulator (`Array UInt32`). Each push is
+    `packTok` of the token `pushLits` pushes, so
+    `pushLitsP (acc.map packTok) = (pushLits acc).map packTok` (`pushLitsP_eq`). -/
+def pushLitsP (acc : Array UInt32) (data : ByteArray) (pos stop : Nat) :
+    Array UInt32 :=
+  if h : pos < stop ∧ pos < data.size then
+    pushLitsP (acc.push (packTok (.literal (data[pos]'h.2)))) data (pos + 1) stop
+  else acc
+termination_by stop - pos
+
 /-- Lazy (one-byte-lookahead, zlib `deflate_slow`-style) variant of `lz77Chain`.
     At each position it finds the best chain match `M` at `pos`; before emitting it
     runs a *second* `chainWalk` at `pos+1` for `M'`. It defers — emits a literal at
@@ -1373,20 +1414,32 @@ theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
     before the lookahead walk (you cannot match a position against itself; matches
     zlib, and is correctness-irrelevant). Reuses `lz77Chain`'s `chainWalk`/
     `updateHashes` and `lz77Greedy.trailing`. Equal-quality contracts proven in
-    `LZ77ChainLazyCorrect`. -/
+    `LZ77ChainLazyCorrect`.
+
+    Skip-ahead (LZ4/zstd-style, #2766): a `missStreak` counter tracks consecutive
+    searched positions with no match. On a miss the loop advances by
+    `stride = 1 + (missStreak >>> skipShift)` instead of one byte, emitting the
+    skipped bytes as literals (`litRun`) without inserting them into the chains,
+    and resets `missStreak` to 0 on every match. `skipShift = 63` (the default)
+    makes `missStreak >>> 63 = missStreak / 2^63 = 0` for every reachable streak
+    (a miss run is bounded by `data.size < 2^63` for any real `ByteArray`), so
+    `stride` stays 1 and the output is the pre-skip output. The stride is a pure
+    heuristic — skipped positions are re-findable at the next searched position and
+    every emitted reference is re-verified at emission — so it never enters the
+    correctness proof (the contracts hold for *any* `skipShift`). -/
 def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
-    (lazyDepth : Nat := maxChain) :
+    (lazyDepth : Nat := maxChain) (skipShift : Nat := 63) :
     Array LZ77Token :=
   if data.size < 3 then
     (lz77Greedy.trailing data 0).toArray
   else
     let hashSize := 65536
     (mainLoop data windowSize hashSize maxChain
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 insertCap goodMatch niceLen lazyDepth).toArray
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 insertCap goodMatch niceLen lazyDepth skipShift 0).toArray
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen lazyDepth : Nat) : List LZ77Token :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen lazyDepth skipShift missStreak : Nat) : List LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
@@ -1420,43 +1473,55 @@ where
                     lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
                   .literal (data[pos]'(by omega)) ::
                     .reference matchLen2 (pos + 1 - matchPos2) ::
-                    mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1 + matchLen2) insertCap goodMatch niceLen lazyDepth
+                    mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1 + matchLen2) insertCap goodMatch niceLen lazyDepth skipShift 0
                 else
                   -- matchLen2 spills past data: keep match at pos
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
                   .reference matchLen (pos - matchPos) ::
-                    mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth
+                    mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth skipShift 0
               else
                 -- No better match at pos+1: keep match at pos
                 have : data.size - (pos + matchLen) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
                 .reference matchLen (pos - matchPos) ::
-                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth
+                  mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth skipShift 0
             else
               -- Gated: long first match, skip the lookahead; still insert interior hashes.
               have : data.size - (pos + matchLen) < data.size - pos := by omega
               let (hashTable, prev) :=
                 lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
               .reference matchLen (pos - matchPos) ::
-                mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth
+                mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth skipShift 0
           else
             -- Near end of data: keep match at pos
             have : data.size - (pos + matchLen) < data.size - pos := by omega
             .reference matchLen (pos - matchPos) ::
-              mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth
+              mainLoop data windowSize hashSize maxChain hashTable prev (pos + matchLen) insertCap goodMatch niceLen lazyDepth skipShift 0
         else
+          -- matchLen ≥ 3 but spills past data (unreachable: chainWalk caps at
+          -- maxLen ≤ data.size - pos, so pos + matchLen ≤ data.size always). This
+          -- defensive branch emits one literal and advances one byte; it is neither
+          -- a match (no reference) nor a searched miss (no stride), so it leaves the
+          -- streak as-is rather than resetting or growing it.
           .literal (data[pos]'(by omega)) ::
-            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap goodMatch niceLen lazyDepth
+            mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap goodMatch niceLen lazyDepth skipShift missStreak
       else
-        .literal (data[pos]'(by omega)) ::
-          mainLoop data windowSize hashSize maxChain hashTable prev (pos + 1) insertCap goodMatch niceLen lazyDepth
+        -- No match at `pos` (the incompressible-stretch case): skip ahead by
+        -- `stride`, emitting the skipped bytes as literals, and grow the streak.
+        let stride := 1 + (missStreak >>> skipShift)
+        let stop := min data.size (pos + stride)
+        litRun data pos stop ++
+          mainLoop data windowSize hashSize maxChain hashTable prev stop insertCap goodMatch niceLen lazyDepth skipShift (missStreak + 1)
     else
       lz77Greedy.trailing data pos
   termination_by data.size - pos
-  decreasing_by all_goals omega
+  decreasing_by
+    all_goals first
+      | omega
+      | (generalize missStreak >>> skipShift = t; omega)
 
 /-- Iterative (tail-recursive, `Array`-accumulating) version of `lz77ChainLazy`.
     Same output, no stack overflow on large inputs. Reuses `lz77Chain`'s
@@ -1465,17 +1530,17 @@ where
     `lz77ChainLazy` in `LZ77ChainLazyCorrect`. -/
 def lz77ChainLazyIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
-    (lazyDepth : Nat := maxChain) :
+    (lazyDepth : Nat := maxChain) (skipShift : Nat := 63) :
     Array LZ77Token :=
   if data.size < 3 then
     lz77GreedyIter.trailing data 0 #[]
   else
     let hashSize := 65536
-    mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 #[]
+    mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 0 #[]
 where
-  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift : Nat)
+      (hashTable : Array Nat) (prev : Array Nat) (pos missStreak : Nat) (acc : Array LZ77Token) :
       Array LZ77Token :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
@@ -1506,42 +1571,50 @@ where
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + 1 + matchLen2)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + 1 + matchLen2) 0
                     (acc.push (.literal (data[pos]'(by omega))) |>.push
                       (.reference matchLen2 (pos + 1 - matchPos2)))
                 else
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
                     (acc.push (.reference matchLen (pos - matchPos)))
               else
                 have : data.size - (pos + matchLen) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
                   (acc.push (.reference matchLen (pos - matchPos)))
             else
               -- Gated: long first match, skip the lookahead; still insert interior hashes.
               have : data.size - (pos + matchLen) < data.size - pos := by omega
               let (hashTable, prev) :=
                 updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
                 (acc.push (.reference matchLen (pos - matchPos)))
           else
             have : data.size - (pos + matchLen) < data.size - pos := by omega
-            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
               (acc.push (.reference matchLen (pos - matchPos)))
         else
-          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + 1)
+          -- matchLen ≥ 3 but spills past data (unreachable: chainWalk caps at maxLen).
+          -- Defensive: one literal, neither match nor searched miss, so streak untouched.
+          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + 1) missStreak
             (acc.push (.literal (data[pos]'(by omega))))
       else
-        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + 1)
-          (acc.push (.literal (data[pos]'(by omega))))
+        -- No match at `pos`: skip-ahead by `stride`, emitting skipped bytes as literals.
+        let stride := 1 + (missStreak >>> skipShift)
+        let stop := min data.size (pos + stride)
+        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev stop (missStreak + 1)
+          (pushLits acc data pos stop)
     else
       lz77GreedyIter.trailing data pos acc
   termination_by data.size - pos
-  decreasing_by all_goals omega
+  decreasing_by
+    all_goals first
+      | omega
+      | (generalize missStreak >>> skipShift = t; omega)
 
 /-! ## Packed-token matcher twins (Wave 3b stage A)
 
@@ -1611,18 +1684,18 @@ where
     Equal to `(lz77ChainLazyIter ..).map packTok` (`lz77ChainLazyIterP_eq`). -/
 def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
-    (lazyDepth : Nat := maxChain) :
+    (lazyDepth : Nat := maxChain) (skipShift : Nat := 63) :
     Array UInt32 :=
   if data.size < 3 then
     trailingP data 0 #[]
   else
     let hashSize := 65536
-    mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth
-      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
+    mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift
+      (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 0
       (Array.emptyWithCapacity data.size)
 where
-  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
+  mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift : Nat)
+      (hashTable : Array Nat) (prev : Array Nat) (pos missStreak : Nat) (acc : Array UInt32) :
       Array UInt32 :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
@@ -1656,20 +1729,20 @@ where
                   have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + 1 + matchLen2)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + 1 + matchLen2) 0
                     (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
                       (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
                 else
                   have : data.size - (pos + matchLen) < data.size - pos := by omega
                   let (hashTable, prev) :=
                     updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+                  mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
                     (acc.push (packTok (.reference matchLen (pos - matchPos))))
               else
                 have : data.size - (pos + matchLen) < data.size - pos := by omega
                 let (hashTable, prev) :=
                   updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+                mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
                   (acc.push (packTok (.reference matchLen (pos - matchPos))))
             else
               -- Gated: first match already long; skip the lookahead, but still insert
@@ -1677,22 +1750,30 @@ where
               have : data.size - (pos + matchLen) < data.size - pos := by omega
               let (hashTable, prev) :=
                 updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+              mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
                 (acc.push (packTok (.reference matchLen (pos - matchPos))))
           else
             have : data.size - (pos + matchLen) < data.size - pos := by omega
-            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + matchLen)
+            mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + matchLen) 0
               (acc.push (packTok (.reference matchLen (pos - matchPos))))
         else
-          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + 1)
+          -- matchLen ≥ 3 but spills past data (unreachable: chainWalk caps at maxLen).
+          -- Defensive: one literal, neither match nor searched miss, so streak untouched.
+          mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev (pos + 1) missStreak
             (acc.push (packTok (.literal (data[pos]'(by omega)))))
       else
-        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev (pos + 1)
-          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+        -- No match at `pos`: skip-ahead by `stride`, emitting skipped bytes as literals.
+        let stride := 1 + (missStreak >>> skipShift)
+        let stop := min data.size (pos + stride)
+        mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth skipShift hashTable prev stop (missStreak + 1)
+          (pushLitsP acc data pos stop)
     else
       trailingP data pos acc
   termination_by data.size - pos
-  decreasing_by all_goals omega
+  decreasing_by
+    all_goals first
+      | omega
+      | (generalize missStreak >>> skipShift = t; omega)
 
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
