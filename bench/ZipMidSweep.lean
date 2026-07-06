@@ -85,7 +85,7 @@ def runConfig (cfg : TimedConfig) (data : ByteArray) : Nat :=
   let base := deflateRawBaseP data ptoks
   if cfg.mode == 0 then base.size
   else
-    let cuts := chooseSplitsHeuristicP ptoks
+    let cuts := chooseSplitsHeuristicP ptoks data.size
     let obs := if cuts.isEmpty then base
       else pickSmaller base (deflateDynamicBlocksSharedAtP data ptoks cuts)
     if cfg.mode == 1 then obs.size
@@ -126,7 +126,7 @@ def main (args : List String) : IO Unit := do
         let cadSize := if cad.isEmpty then base
           else min base (deflateDynamicBlocksSharedAtP data ptoks cad).size
         for (minB, chk) in splitVariants do
-          let cuts := chooseSplitsHeuristicP ptoks minB splitSoftMaxBlockBytes chk
+          let cuts := chooseSplitsHeuristicP ptoks data.size minB splitSoftMaxBlockBytes chk
           let obs := if cuts.isEmpty then base
             else min base (deflateDynamicBlocksSharedAtP data ptoks cuts).size
           let obsCad := min obs cadSize

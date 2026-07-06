@@ -154,11 +154,11 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     exact inflate_deflateDynamicBlocksSharedAt data _ level _ hsize
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
   have hwithObs : ∀ p : Nat × (Unit → ByteArray),
-      p = (if (chooseSplitsHeuristicP (lzMatchP data level)).isEmpty then
+      p = (if (chooseSplitsHeuristicP (lzMatchP data level) data.size).isEmpty then
             deflateRawBasePPrep data (lzMatchP data level)
           else
             let obsPrep := deflateDynamicBlocksSharedAtSizedP data (lzMatchP data level)
-              (chooseSplitsHeuristicP (lzMatchP data level))
+              (chooseSplitsHeuristicP (lzMatchP data level) data.size)
             if (deflateRawBasePPrep data (lzMatchP data level)).1 < obsPrep.1 then
               deflateRawBasePPrep data (lzMatchP data level) else obsPrep) →
       Zip.Native.Inflate.inflateReference (p.2 ()) maxOutputSize = .ok data := by
@@ -282,11 +282,11 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     exact deflateDynamicBlocksSharedAt_pad data _ level
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
   have hwithObs : ∀ p : Nat × (Unit → ByteArray),
-      p = (if (chooseSplitsHeuristicP (lzMatchP data level)).isEmpty then
+      p = (if (chooseSplitsHeuristicP (lzMatchP data level) data.size).isEmpty then
             deflateRawBasePPrep data (lzMatchP data level)
           else
             let obsPrep := deflateDynamicBlocksSharedAtSizedP data (lzMatchP data level)
-              (chooseSplitsHeuristicP (lzMatchP data level))
+              (chooseSplitsHeuristicP (lzMatchP data level) data.size)
             if (deflateRawBasePPrep data (lzMatchP data level)).1 < obsPrep.1 then
               deflateRawBasePPrep data (lzMatchP data level) else obsPrep) →
       ∃ (contentBits padding : List Bool),
@@ -489,11 +489,11 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     exact deflateDynamicBlocksSharedAt_goR_pad data _ level
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
   have hwithObs : ∀ p : Nat × (Unit → ByteArray),
-      p = (if (chooseSplitsHeuristicP (lzMatchP data level)).isEmpty then
+      p = (if (chooseSplitsHeuristicP (lzMatchP data level) data.size).isEmpty then
             deflateRawBasePPrep data (lzMatchP data level)
           else
             let obsPrep := deflateDynamicBlocksSharedAtSizedP data (lzMatchP data level)
-              (chooseSplitsHeuristicP (lzMatchP data level))
+              (chooseSplitsHeuristicP (lzMatchP data level) data.size)
             if (deflateRawBasePPrep data (lzMatchP data level)).1 < obsPrep.1 then
               deflateRawBasePPrep data (lzMatchP data level) else obsPrep) →
       ∃ remaining,

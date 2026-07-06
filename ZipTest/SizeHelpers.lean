@@ -179,7 +179,7 @@ def tests : IO Unit := do
       -- diverse cut lists (the tree-reuse emit must match the recompute emit)
       if data.size > 0 then
         let cutsLists : List (String × List Nat) :=
-          [ ("heuristic", chooseSplitsHeuristicP ptokens),
+          [ ("heuristic", chooseSplitsHeuristicP ptokens data.size),
             ("fixed", fixedCadenceCuts sharedTokChunk ptokens.size),
             ("empty", []),
             ("nonmonotone", [5, 3, 7]),
@@ -197,7 +197,7 @@ def tests : IO Unit := do
       -- 7c. the size-arbitrated dispatch is byte-identical to the old
       -- emit-every-candidate one (`pickSmaller` over emitted blocks).
       let base := deflateRawBaseP data ptokens
-      let cuts := chooseSplitsHeuristicP ptokens
+      let cuts := chooseSplitsHeuristicP ptokens data.size
       let withObs := if cuts.isEmpty then base
         else pickSmaller base (deflateDynamicBlocksSharedAtP data ptokens cuts)
       let refOut := if 8 ≤ level then

@@ -500,7 +500,7 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   -- both inflate implementations across the mid-band (4–5 single-block,
   -- 6–8 split).
   unless (Zip.Native.Deflate.chooseSplitsHeuristicP
-      (Zip.Native.Deflate.lzMatchP hetero 6)).length ≥ 1 do
+      (Zip.Native.Deflate.lzMatchP hetero 6) hetero.size).length ≥ 1 do
     throw (IO.userError "chooseSplitsHeuristicP found no cuts on heterogeneous input")
   for level in [4, 5, 6, 7, 8] do
     let out := Zip.Native.Deflate.deflateRaw hetero level.toUInt8
