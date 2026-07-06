@@ -143,11 +143,11 @@ private theorem updateHashesMerged_append (data : ByteArray) (hashSize prevSize 
 /-! ## The lockstep loop equality -/
 
 private theorem mergedLoop_eq (data : ByteArray)
-    (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
     (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32)
-    (hhs : 0 < hashSize) (hht : hashTable.size = hashSize)
-    (hpv : min chainWinSize data.size ≤ prev.size) (hps : prev.size = min chainWinSize data.size) :
-    lz77LazyMergedLoop data windowSize hashSize prev.size maxChain insertCap goodMatch niceLen lazyDepth
+    (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
+    (hpv : min chainWinSize data.size ≤ prev.size) :
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth
         (prev ++ hashTable) pos acc =
       lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth
         hashTable prev pos acc := by
@@ -157,6 +157,15 @@ private theorem mergedLoop_eq (data : ByteArray)
 theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) :
     lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen lazyDepth =
       lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth := by
-  sorry
+  unfold lz77ChainLazyIterPMerged lz77ChainLazyIterP
+  split
+  · rfl
+  · dsimp only
+    rw [← Array.replicate_append_replicate]
+    exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
+      goodMatch niceLen lazyDepth (Array.replicate 65536 data.size)
+      (Array.replicate (min chainWinSize data.size) data.size) 0 _
+      (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
+      (Nat.le_of_eq (by rw [Array.size_replicate]))
 
 end Zip.Native.Deflate
