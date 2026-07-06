@@ -1133,6 +1133,71 @@ boxed reference via `deflateDynamicBlocksSharedAtP_eq`
   if w &&& ((1 : UInt32) <<< 31) = 0 then 1
   else ((w >>> 16) &&& 0x7FFF).toNat
 
+/-- The per-token core of `chooseSplitsHeuristicP`, threaded as a tail-recursive
+    loop over explicit scalar state so the hot accumulators compile to register
+    arithmetic instead of `Array Nat` `set!`/`getD` (#2762). The ten observation
+    counters live in the `n0..n9` (recent window) and `o0..o9` (block-so-far)
+    locals; `newTot`/`oldTot`/`blockBytes` are the window/block totals, and
+    `remaining` is the running byte suffix `totalBytes − doneBytes` (decremented
+    per token) that gates cuts against the min-block floor without a second
+    pass. The full ten-counter arrays are materialized only at a divergence
+    check (every `checkTokens` tokens, once the floors clear), where the shared
+    boxed `splitEndBlockCheck` reads them. -/
+def chooseSplitsHeuristicP.go (toks : Array UInt32)
+    (minBlockBytes softMaxBlockBytes checkTokens : Nat) (i : Nat)
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
+    (blockBytes remaining : Nat) (cuts : Array Nat) : Array Nat :=
+  if h : i < toks.size then
+    let t := toks[i]
+    let c := splitTokenClassP t
+    let tb := splitTokenBytesP t
+    let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
+      match c with
+      | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
+      | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
+      | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
+      | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
+      | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
+      | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
+      | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
+      | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
+      | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
+      | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+    let newTot := newTot + 1
+    let blockBytes := blockBytes + tb
+    let remaining := remaining - tb
+    if blockBytes ≥ minBlockBytes && remaining ≥ minBlockBytes then
+      let cut :=
+        blockBytes ≥ softMaxBlockBytes ||
+        (newTot ≥ checkTokens && oldTot > 0 &&
+          splitEndBlockCheck #[o0, o1, o2, o3, o4, o5, o6, o7, o8, o9] oldTot
+            #[n0, n1, n2, n3, n4, n5, n6, n7, n8, n9] newTot blockBytes)
+      if cut then
+        chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          0 0 0 0 0 0 0 0 0 0 0
+          0 0 0 0 0 0 0 0 0 0 0
+          0 remaining (cuts.push (i + 1))
+      else if newTot ≥ checkTokens then
+        chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          (o0 + n0) (o1 + n1) (o2 + n2) (o3 + n3) (o4 + n4) (o5 + n5) (o6 + n6) (o7 + n7)
+          (o8 + n8) (o9 + n9) (oldTot + newTot)
+          0 0 0 0 0 0 0 0 0 0 0
+          blockBytes remaining cuts
+      else
+        chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+          n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+          blockBytes remaining cuts
+    else
+      chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+        o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+        n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+        blockBytes remaining cuts
+  else cuts
+termination_by toks.size - i
+decreasing_by all_goals omega
+
 /-- Packed twin of `chooseSplitsHeuristic`: entropy-divergence cut points
     computed directly from the packed token stream — same constants, same
     per-token floors/ceiling, same window-merge cadence, with
@@ -1141,47 +1206,23 @@ boxed reference via `deflateDynamicBlocksSharedAtP_eq`
     obligations; `ZipTest/PackedTokens.lean` pins it to the boxed heuristic
     over the `unpackTok` view. The block floor/ceiling and check cadence are
     defaulted parameters so the `mid-sweep` tuning tool can grid them without
-    touching the dispatch (which always calls with the tuned defaults). -/
-def chooseSplitsHeuristicP (toks : Array UInt32)
+    touching the dispatch (which always calls with the tuned defaults).
+
+    `totalBytes` is the whole-stream output byte count `Σ splitTokenBytesP t`.
+    The boxed reference computes it with a leading pass over `toks`; the packed
+    dispatch passes `data.size` instead (the token stream decodes to `data`, so
+    the two agree — pinned by the `chooseSplitsHeuristic` conformance test),
+    fusing that pass away (#2762). The main walk then tracks the running byte
+    suffix in `remaining` (start `totalBytes`, minus each token's bytes) rather
+    than a `doneBytes` prefix, and computes `splitTokenBytesP` once per token. -/
+def chooseSplitsHeuristicP (toks : Array UInt32) (totalBytes : Nat)
     (minBlockBytes : Nat := splitMinBlockBytes)
     (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
-    (checkTokens : Nat := splitCheckTokens) : List Nat := Id.run do
-  let mut totalBytes := 0
-  for t in toks do
-    totalBytes := totalBytes + splitTokenBytesP t
-  let mut old : Array Nat := Array.replicate splitNumClasses 0
-  let mut oldTot := 0
-  let mut new : Array Nat := Array.replicate splitNumClasses 0
-  let mut newTot := 0
-  let mut blockBytes := 0
-  let mut doneBytes := 0
-  let mut cuts : Array Nat := #[]
-  for h : i in [0:toks.size] do
-    let t := toks[i]
-    let c := splitTokenClassP t
-    new := new.set! c (new.getD c 0 + 1)
-    newTot := newTot + 1
-    blockBytes := blockBytes + splitTokenBytesP t
-    doneBytes := doneBytes + splitTokenBytesP t
-    if blockBytes ≥ minBlockBytes && totalBytes - doneBytes ≥ minBlockBytes then
-      let cut :=
-        blockBytes ≥ softMaxBlockBytes ||
-        (newTot ≥ checkTokens && oldTot > 0 &&
-          splitEndBlockCheck old oldTot new newTot blockBytes)
-      if cut then
-        cuts := cuts.push (i + 1)
-        old := Array.replicate splitNumClasses 0
-        oldTot := 0
-        new := Array.replicate splitNumClasses 0
-        newTot := 0
-        blockBytes := 0
-      else if newTot ≥ checkTokens then
-        for j in [0:splitNumClasses] do
-          old := old.set! j (old.getD j 0 + new.getD j 0)
-        oldTot := oldTot + newTot
-        new := Array.replicate splitNumClasses 0
-        newTot := 0
-  return cuts.toList
+    (checkTokens : Nat := splitCheckTokens) : List Nat :=
+  (chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens 0
+    0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0
+    0 totalBytes #[]).toList
 
 /-- Packed twin of `emitDynBlock`: one dynamic Huffman block from a packed
     token group onto a running writer, with `emitTokensWithCodesP` in place of
@@ -1760,7 +1801,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- would be a single dynamic block the base already sizes, so skip it
       -- entirely (every input under ~2·splitMinBlockBytes takes this path).
       let basePrep := deflateRawBasePPrep data ptokens
-      let cuts := chooseSplitsHeuristicP ptokens
+      let cuts := chooseSplitsHeuristicP ptokens data.size
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block

@@ -87,7 +87,7 @@ private def checkSplitP (label : String) (data : ByteArray) : IO Unit := do
   for level in [(4 : UInt8), 6, 8] do
     let ptoks := lzMatchP data level
     let toks := ptoks.map unpackTok
-    let cutsP := chooseSplitsHeuristicP ptoks
+    let cutsP := chooseSplitsHeuristicP ptoks data.size
     let cutsB := chooseSplitsHeuristic toks
     unless cutsP == cutsB do
       throw (IO.userError
@@ -136,7 +136,7 @@ def tests : IO Unit := do
   -- conformance check then covers a real multi-block partition, not just
   -- the clamping edge cases).
   let hetero := mkTextData 65536 ++ mkPrngData 65536 ++ mkCyclicData 65536
-  unless (chooseSplitsHeuristicP (lzMatchP hetero 6)).length ≥ 1 do
+  unless (chooseSplitsHeuristicP (lzMatchP hetero 6) hetero.size).length ≥ 1 do
     throw (IO.userError "chooseSplitsHeuristicP found no cuts on heterogeneous input")
   checkSplitP "hetero192k" hetero
   checkSplitP "alice29" alice
