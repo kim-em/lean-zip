@@ -657,14 +657,31 @@ def niceLen (level : UInt8) : Nat :=
   else if level ≤ 7 then 130
   else 258
 
+/-- Lazy lookahead probe depth (libdeflate `deflate_compress.c`): the second
+    `chainWalk` at `pos+1` runs at *half* the `pos` walk's `chainDepth`, not full
+    depth. Since the `goodMatch` gate is disabled at L5+ (`goodMatch = 259`), every
+    matched position otherwise pays two full-depth chain walks; libdeflate probes
+    its first lookahead at half depth (and its second at quarter) and still holds
+    better ratios than us, so the deferral quality a half-depth probe gives up is
+    slack. The probe still runs — it is shallower, not skipped — so the ratio cost
+    stays in the noise while the second walk's cycles roughly halve.
+
+    Only levels ≥ 4 (the lazy `deflate_slow` tier) consult this; the greedy
+    matcher (1–3) has no lookahead. Depth is a pure heuristic — the chain is
+    re-verified at emission (`chainWalk_spec` holds for any fuel) — so any value
+    keeps the encoder contracts. -/
+def lazyDepth (level : UInt8) : Nat :=
+  chainDepth level / 2
+
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
     greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
     lazy variant, which improves ratio at equal window/chain depth. Both share the
     same `(chainDepth, insertCap, niceLen)` ladder and satisfy the same encoder
     contracts (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the
-    choice is transparent to the roundtrip proof. -/
+    choice is transparent to the roundtrip proof. The lazy tier probes its `pos+1`
+    lookahead at `lazyDepth` (half-depth), a heuristic knob invisible to the proof. -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level)
+  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -673,7 +690,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
-  if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level)
+  if 4 ≤ level then lz77ChainLazyIterP data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
   else lz77ChainIterP data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression

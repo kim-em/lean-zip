@@ -393,6 +393,18 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     unless iterTokens == recTokens do
       throw (IO.userError s!"lz77ChainLazyIter vs lz77ChainLazy mismatch on {name}: \
         {iterTokens.size} vs {recTokens.size} tokens")
+    -- Reduced lookahead probe depth (#2763 half-depth lazy probe): the three
+    -- twins must stay in lockstep at any `lazyDepth`, not just the default.
+    -- Exercise a non-default depth (32) that actually changes deferral choices.
+    let iterShallow := Zip.Native.Deflate.lz77ChainLazyIter data 64 32768 1000000000 259 258 32
+    let recShallow := Zip.Native.Deflate.lz77ChainLazy data 64 32768 1000000000 259 258 32
+    unless iterShallow == recShallow do
+      throw (IO.userError s!"lz77ChainLazyIter vs lz77ChainLazy (lazyDepth=32) mismatch on {name}: \
+        {iterShallow.size} vs {recShallow.size} tokens")
+    let packedShallow := Zip.Native.Deflate.lz77ChainLazyIterP data 64 32768 1000000000 259 258 32
+    unless packedShallow == iterShallow.map Zip.Native.Deflate.packTok do
+      throw (IO.userError s!"lz77ChainLazyIterP vs lz77ChainLazyIter (lazyDepth=32) mismatch on {name}: \
+        {packedShallow.size} vs {iterShallow.size} tokens")
 
   -- deflateRaw at every lazy level (4–9) → native inflate AND FFI decompress, on
   -- varied shapes incl. edge cases. Exercises the lazy path end to end.

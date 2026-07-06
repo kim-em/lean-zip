@@ -81,7 +81,9 @@ def timedConfigs : List TimedConfig := [
 /-- Compress `data` under one candidate config, returning the emitted size
     (consumed so the work is not dead-code-eliminated). -/
 def runConfig (cfg : TimedConfig) (data : ByteArray) : Nat :=
-  let ptoks := lz77ChainLazyIterP data cfg.chain 32768 1000000000 cfg.gm cfg.nl
+  -- Half-depth lazy lookahead probe (#2763): the `pos+1` walk runs at `chain / 2`,
+  -- matching production `DeflateDynamic.lazyDepth`, so timings model the shipped path.
+  let ptoks := lz77ChainLazyIterP data cfg.chain 32768 1000000000 cfg.gm cfg.nl (cfg.chain / 2)
   let base := deflateRawBaseP data ptoks
   if cfg.mode == 0 then base.size
   else
@@ -120,7 +122,7 @@ def main (args : List String) : IO Unit := do
     let name := (path.splitOn "/").getLastD path
     for chain in chainGrid do
       for gm in gmGrid do
-        let ptoks := lz77ChainLazyIterP data chain 32768 1000000000 gm
+        let ptoks := lz77ChainLazyIterP data chain 32768 1000000000 gm 258 (chain / 2)
         let base := (deflateRawBaseP data ptoks).size
         let cad := fixedCadenceCuts sharedTokChunk ptoks.size
         let cadSize := if cad.isEmpty then base

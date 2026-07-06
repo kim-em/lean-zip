@@ -80,11 +80,11 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap nice
 /-- The packed lazy `mainLoop` is the packed image of the boxed one. The gate
     (`matchLen < goodMatch`) is applied identically in both, so the branch tree
     stays in lockstep — one extra split versus the ungated proof. -/
-private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen : Nat)
+private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
     (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev pos
+    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev pos
         (acc.map packTok) =
-      (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen hashTable prev pos
+      (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev pos
         acc).map packTok := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
   | _ n ih =>
@@ -113,14 +113,14 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
 
 /-- `lz77ChainLazyIterP` produces exactly the `packTok` image of
     `lz77ChainLazyIter`. -/
-theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen : Nat) :
-    lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen =
-      (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen).map packTok := by
+theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) :
+    lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth =
+      (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth).map packTok := by
   unfold lz77ChainLazyIterP lz77ChainLazyIter
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen _ _ 0 #[]
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth _ _ 0 #[]
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 
@@ -140,15 +140,15 @@ theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap nic
   rw [hcongr, Array.map_id]
 
 /-- The boxed view of the packed lazy matcher is the boxed lazy matcher. -/
-theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen : Nat)
+theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen).map unpackTok =
-      lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen := by
-  have henc := lz77ChainLazyIter_encodable data maxChain windowSize insertCap goodMatch niceLen hw hws
+    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth).map unpackTok =
+      lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth := by
+  have henc := lz77ChainLazyIter_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth hw hws
   rw [lz77ChainLazyIterP_eq, Array.map_map]
   have hcongr : Array.map (unpackTok ∘ packTok)
-        (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen) =
-      Array.map id (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen) :=
+        (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth) =
+      Array.map id (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth) :=
     Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa only [Array.mem_toList_iff] using ht))
   rw [hcongr, Array.map_id]
 
@@ -159,7 +159,7 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     lzMatchP data level = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
   split
-  · exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level)
+  · exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
   · exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
@@ -169,7 +169,7 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
   split
-  · exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level)
+  · exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level)
       (by omega) (by omega)
   · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
       (by omega) (by omega)
