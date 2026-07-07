@@ -176,17 +176,28 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     · exact inflate_deflateStoredPure data _ (by omega)
     · split
       · split
-        · -- level 9: L9-fast (#2638)
-          exact inflate_pickSmaller _ _ data maxOutputSize
-            (inflate_deflateRawBase data level _ hsize)
-            (inflate_deflateDynamicBlocksOptimalFast data sharedTokChunk _ hsize)
-        · split
-          · -- level ≥ 10: exact-DP crown
+        · -- level 9 (L9-fast, #2638)
+          split
+          · -- ≤ gate: the standard L9-fast parse
             exact inflate_pickSmaller _ _ data maxOutputSize
               (inflate_deflateRawBase data level _ hsize)
-              (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
-          · -- levels 6–8 (and 9/10 above the optimal-size gate): one obs-split
-            -- candidate per tier, so `hwithObs` covers all three
+              (inflate_deflateDynamicBlocksOptimalFast data sharedTokChunk _ hsize)
+          · -- above gate: the windowed L9-fast parse (#2787)
+            exact inflate_pickSmaller _ _ data maxOutputSize
+              (inflate_deflateRawBase data level _ hsize)
+              (inflate_deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk _ hsize)
+        · split
+          · -- level ≥ 10: exact-DP crown
+            split
+            · -- ≤ gate: the standard exact parse
+              exact inflate_pickSmaller _ _ data maxOutputSize
+                (inflate_deflateRawBase data level _ hsize)
+                (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
+            · -- above gate: the windowed exact parse (#2787)
+              exact inflate_pickSmaller _ _ data maxOutputSize
+                (inflate_deflateRawBase data level _ hsize)
+                (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
+          · -- levels 6–8: obs-split candidate, `hwithObs`
             exact hwithObs _ rfl
       · exact inflate_deflateRawBase data level _ hsize
 
@@ -306,20 +317,34 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     · exact hstored
     · split
       · split
-        · -- level 9: L9-fast (#2638)
-          exact pickSmaller_bytesToBits
-            (P := fun bits => ∃ (contentBits padding : List Bool),
-              bits = contentBits ++ padding ∧ padding.length < 8)
-            _ _ (deflateRawBase_pad data level)
-            (deflateDynamicBlocksOptimalFast_pad data sharedTokChunk)
-        · split
-          · -- level ≥ 10: exact-DP crown
+        · -- level 9 (L9-fast, #2638)
+          split
+          · exact pickSmaller_bytesToBits
+              (P := fun bits => ∃ (contentBits padding : List Bool),
+                bits = contentBits ++ padding ∧ padding.length < 8)
+              _ _ (deflateRawBase_pad data level)
+              (deflateDynamicBlocksOptimalFast_pad data sharedTokChunk)
+          · -- above gate: windowed L9-fast (#2787)
             exact pickSmaller_bytesToBits
               (P := fun bits => ∃ (contentBits padding : List Bool),
                 bits = contentBits ++ padding ∧ padding.length < 8)
               _ _ (deflateRawBase_pad data level)
-              (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
-          · -- levels 6–8 (and 9/10 above the optimal-size gate)
+              (deflateDynamicBlocksOptimalWindowedFast_pad data sharedTokChunk)
+        · split
+          · -- level ≥ 10: exact-DP crown
+            split
+            · exact pickSmaller_bytesToBits
+                (P := fun bits => ∃ (contentBits padding : List Bool),
+                  bits = contentBits ++ padding ∧ padding.length < 8)
+                _ _ (deflateRawBase_pad data level)
+                (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
+            · -- above gate: windowed exact (#2787)
+              exact pickSmaller_bytesToBits
+                (P := fun bits => ∃ (contentBits padding : List Bool),
+                  bits = contentBits ++ padding ∧ padding.length < 8)
+                _ _ (deflateRawBase_pad data level)
+                (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
+          · -- levels 6–8
             exact hwithObs _ rfl
       · exact deflateRawBase_pad data level
 
@@ -514,22 +539,38 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     · exact hstored
     · split
       · split
-        · -- level 9: L9-fast (#2638)
-          exact pickSmaller_bytesToBits
-            (P := fun bits => ∃ remaining,
-              Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-                remaining.length < 8)
-            _ _ (deflateRawBase_goR_pad data level)
-            (deflateDynamicBlocksOptimalFast_goR_pad data sharedTokChunk)
-        · split
-          · -- level ≥ 10: exact-DP crown
+        · -- level 9 (L9-fast, #2638)
+          split
+          · exact pickSmaller_bytesToBits
+              (P := fun bits => ∃ remaining,
+                Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                  remaining.length < 8)
+              _ _ (deflateRawBase_goR_pad data level)
+              (deflateDynamicBlocksOptimalFast_goR_pad data sharedTokChunk)
+          · -- above gate: windowed L9-fast (#2787)
             exact pickSmaller_bytesToBits
               (P := fun bits => ∃ remaining,
                 Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
                   remaining.length < 8)
               _ _ (deflateRawBase_goR_pad data level)
-              (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
-          · -- levels 6–8 (and 9/10 above the optimal-size gate)
+              (deflateDynamicBlocksOptimalWindowedFast_goR_pad data sharedTokChunk)
+        · split
+          · -- level ≥ 10: exact-DP crown
+            split
+            · exact pickSmaller_bytesToBits
+                (P := fun bits => ∃ remaining,
+                  Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                    remaining.length < 8)
+                _ _ (deflateRawBase_goR_pad data level)
+                (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
+            · -- above gate: windowed exact (#2787)
+              exact pickSmaller_bytesToBits
+                (P := fun bits => ∃ remaining,
+                  Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                    remaining.length < 8)
+                _ _ (deflateRawBase_goR_pad data level)
+                (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
+          · -- levels 6–8
             exact hwithObs _ rfl
       · exact deflateRawBase_goR_pad data level
 

@@ -70,7 +70,8 @@ private def resolveTokens (label : String) (tokens : Array LZ77Token) :
     each token stream resolves back to the data, and a dynamic Huffman block
     built from it inflates back to the data (native verified decoder). -/
 private def checkParse (label : String) (data : ByteArray) : IO Unit := do
-  for (pname, toks) in [("exact", lz77OptimalIter data), ("fast", lz77OptimalFastIter data)] do
+  for (pname, toks) in [("exact", lz77OptimalIter data), ("fast", lz77OptimalFastIter data),
+      ("wexact", lz77OptimalWindowedIter data), ("wfast", lz77OptimalWindowedFastIter data)] do
     let back ← resolveTokens s!"{label}-{pname}" toks
     unless back == data do
       throw (IO.userError s!"{label}-{pname}: token resolution mismatch ({back.size} vs {data.size})")
@@ -80,6 +81,13 @@ private def checkParse (label : String) (data : ByteArray) : IO Unit := do
       unless r == data do
         throw (IO.userError s!"{label}-{pname}: dynamic block roundtrip mismatch")
     | .error e => throw (IO.userError s!"{label}-{pname}: inflate failed: {e}")
+  -- Windowed parsers (#2787) cap live choice storage to one region but thread the
+  -- hash-chain state across regions, so they must produce byte-identical tokens
+  -- to the global parsers (only the ratio-neutral memory shape changes).
+  unless lz77OptimalWindowedIter data == lz77OptimalIter data do
+    throw (IO.userError s!"{label}: windowed exact tokens differ from global")
+  unless lz77OptimalWindowedFastIter data == lz77OptimalFastIter data do
+    throw (IO.userError s!"{label}: windowed L9-fast tokens differ from global")
 
 def tests : IO Unit := do
   IO.println "  OptimalParse tests..."
@@ -203,8 +211,10 @@ def tests : IO Unit := do
   let prng := mkPrngData 65536
   unless (deflateRaw prng 9).size ≤ prng.size + 600 do
     throw (IO.userError "deflateRaw-9: incompressible input expanded past stored bound")
-  -- Inputs above the memory gate skip the optimal candidate but roundtrip
-  -- (both level 9 and level 10 fall through to the split path there).
+  -- Inputs above the memory gate now run the *windowed* optimal candidate
+  -- (#2787): region-capped choice storage, byte-identical tokens, so the crown
+  -- survives past 64 MiB instead of collapsing to the split ratio. Verify both
+  -- tiers roundtrip through the whole `deflateRaw` dispatch above the gate.
   let big := mkConstantData (optimalMaxSize + 1)
   for lvl in [(9 : UInt8), 10] do
     match Zip.Native.Inflate.inflate (deflateRaw big lvl) (big.size + 1) with
