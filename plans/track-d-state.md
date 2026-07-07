@@ -101,6 +101,49 @@ remaining costs are structural (per-token allocation, RC traffic, the
 ByteArray byte loop), i.e. Wave 3b (packed token stream) and Wave 5 (fused
 phases) are the live levers.
 
+**#2779 verdict (2026-07-07): packed `ByteArray` uint32 chain tables —
+measured negative, and this time the *packing* (not the element type) is what
+was tested.** Wave-3a (above) tested `Array UInt32` and was correctly dismissed
+as still-boxed 8-byte slots. #2779 went further: it backed the merged chain
+state with a raw `ByteArray` of genuinely-unboxed little-endian uint32 slots
+(4 bytes/slot vs the `Array Nat`'s 8), read/written by
+`ByteArray.ugetUInt32LE` / a new `usetUInt32LE`. A bench-only A/B (two matchers
+byte-for-byte identical except chain storage, both mirroring
+`lz77ChainLazyIterPMerged`, with a token-for-token gate against production
+`lzMatchP`) measured **packed 7–19% slower on every corpus member and level**
+(AMD EPYC 9455, taskset-pinned; `packed/arr` speedup):
+
+| file (type)        | L6   | L7   | L8   |
+|--------------------|------|------|------|
+| alice29 152K text  | 0.81 | 0.85 | 0.84 |
+| lcet10 427K text   | 0.86 | 0.88 | 0.88 |
+| x-ray 8.5M binary  | 0.91 | 0.93 | 0.91 |
+| mozilla 51M binary | 0.84 | —    | 0.82 |
+
+`perf stat` (single-side `matcher-arr`/`matcher-packed`, x-ray L8) pins the
+mechanism and **confirms the packing hypothesis was right about the cache and
+wrong about the bottleneck**: packed does win the axis it targets —
+**5× fewer LLC cache-misses** (11.7M → 2.4M; mozilla L8 3.3×, 43.0M → 12.9M)
+and fewer L1-dcache misses — but the walk is **instruction-bound, not
+memory-bound**, because the merged table (98304 slots = 768 KB as `Array Nat`,
+384 KB packed) already fits this machine's **1 MiB private L2**, so there is no
+residency to reclaim. Packing instead pays **+26–28% instructions** (the slot
+offset shift, the `USize` round-trips, the byte (dis)assembly of the un-inlined
+wide load/store) at **equal branch-misses** (42.3M vs 43.3M — the size guard is
+perfectly predicted, so it is *not* the confound), and those extra instructions
+dominate. This settles the *packing* question for this hardware/toolchain — the
+cache win packing delivers only pays where the table overflows L2, i.e. the
+issue's assumed **256 KiB-L2** machine, which the bench EPYC is not. Branch
+`perf/2779-packed-chain-spike` (commit `b895430c`) preserved unmerged: the full
+harness (`Bench.PackedChain`, the `matcher-ab` / `matcher-arr` / `matcher-packed`
+bench ops, and `usetUInt32LE` + its C) is reusable to re-measure on a small-L2
+chip or an oversized-table stress test. Reproduce:
+`lake -d bench exe bench matcher-ab 0 @bench/corpora/silesia/x-ray 8` and
+`perf stat -e instructions,cache-misses -- .lake/build/bin/bench matcher-packed 0 @bench/corpora/silesia/x-ray 8`.
+Conclusion: chain-state *representation* tuning (element type, Wave-3a; packing,
+#2779) is now exhausted on this hardware — the matcher's remaining costs stay
+structural (instruction count, per-token allocation, RC traffic).
+
 **W5.P1 comparative component profile (2026-06-12, perf, alice29, per-compressor
 windows, normalized to compressor-attributable samples; nix/Lean startup noise
 excluded; miniz attribution degraded — inline monolith):**
