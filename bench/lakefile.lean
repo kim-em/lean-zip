@@ -339,6 +339,10 @@ lean_exe «lazy2-sweep» where
   root := `ZipLazy2Sweep
 
 @[default_target]
+lean_exe «l68-sweep» where
+  root := `ZipL68Sweep
+
+@[default_target]
 lean_exe «huff-bench» where
   root := `ZipHuffBench
 

@@ -566,12 +566,29 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     (Silesia grid over chain × `goodMatch` × split, then interleaved pinned
     timing): L4 = 64 (with the lazy gate, the old L5 point), L5 = 128 (gate
     off — `goodMatch` buys more ratio per cycle than deepening the chain, so
-    L5 = (128, gate off) dominates the old L7 = (256, gate off)). **L6's depth
-    drops back to 64 on purpose**: the split tier starts there, and at equal
-    cycles the observation-divergence split + a shallow chain beats a deep
-    chain without the split — the block-split, not the chain, is L6's budget.
-    L7/L8 deepen the chain again within the split tier (256/512); past that
-    the chain saturates.
+    L5 = (128, gate off) dominates the old L7 = (256, gate off)). L6 shares
+    L5's depth 128 and adds the observation-divergence split on top: the split
+    is L6's whole budget increment over L5. L7/L8 deepen the chain again within
+    the split tier (256/512); past that the chain saturates.
+
+    **L6 previously dropped to 64** on the theory that a shallow chain plus the
+    split, at equal cycles, would beat a deep chain — but the #2785 re-grid
+    (`l68-sweep`, dickens + mozilla + Canterbury, after the native-Huffman #2769,
+    cost-based-lazy-accept #2776, half-depth-probe #2774 and fused-split #2762
+    landings shifted the balance) refuted that: chain 128 + split beats chain 64
+    + split on **every** file measured, and at chain 64 the split no longer
+    compensated on text — L6 (the default level) compressed *worse than L5* on
+    dickens (+0.19%), plrabn12 (+0.04%) and ptt5, a ladder-monotonicity defect.
+    Raising L6 to 128 restores L6 ≤ L5 output everywhere and gains ~0.15% ratio
+    on the dickens+mozilla pair, for ~7% L6 throughput (pinned, interleaved); L6
+    stays clearly faster than L7 (chain 256), so the ladder ordering holds. The
+    same re-grid re-confirmed `niceLen` L8 = 258 (a cutoff earns no speed — it
+    does not fire on these workloads — and only ever costs ratio), `goodMatch`
+    L5+ = 259 (an L8 gate buys +15% speed but +0.40% ratio, a bad trade at a
+    ratio tier), and the global block-split floors (`minBlockBytes` 5000 gains
+    ~0.12% binary ratio but costs ~2.5% speed on all of L6-L8, against the
+    speed-ward direction of the recent landings). See `progress/` for the full
+    tables.
 
     Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
     `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
@@ -591,8 +608,7 @@ def chainDepth (level : UInt8) : Nat :=
   else if level ≤ 2 then 16
   else if level ≤ 3 then 32
   else if level ≤ 4 then 64
-  else if level ≤ 5 then 128
-  else if level ≤ 6 then 64
+  else if level ≤ 6 then 128
   else if level ≤ 7 then 256
   else if level ≤ 8 then 512
   else 1024
@@ -621,7 +637,9 @@ def insertCap (level : UInt8) : Nat :=
     Only L4 keeps the gate (#2737 `mid-sweep`): disabling it gains ~16bp of
     Silesia geomean ratio at *any* chain depth — more ratio per cycle than
     deepening the chain — so every level from 5 up spends its first budget
-    increment here. -/
+    increment here. The #2785 re-grid (`l68-sweep`) re-confirmed the gate stays
+    off at the top: turning it on at L8 buys +15% throughput but costs +0.40%
+    ratio (dickens + mozilla), a bad trade at a ratio tier. -/
 def goodMatch (level : UInt8) : Nat :=
   if level ≤ 4 then 8
   else 259
@@ -643,7 +661,11 @@ def goodMatch (level : UInt8) : Nat :=
     gains ~3% speed for +10bp — a poor trade; nl130/258 return ≤1bp for the
     speed given up); L7's chain-256 walk earns `130`; L8 (the max split tier)
     disables the cutoff — nl130 times within 1% but emits more bytes, and L8's
-    cadence guard promises old-L8 ratio parity. `258` (the max match length,
+    cadence guard promises old-L8 ratio parity. The #2785 re-grid (`l68-sweep`)
+    re-confirmed L8 = 258: nl130/nl180 time within noise of nl258 (the cutoff
+    does not fire on dickens/mozilla) while nl130 costs up to +0.5% ratio on
+    image-like data (ptt5) — no speed to earn, only ratio to lose. `258` (the
+    max match length,
     ≥ every `maxLen`) disables the cutoff: the walk then stops only on the
     full-match / fuel condition, exactly as before this knob existed. The
     cutoff never enters correctness — the chain is a heuristic re-verified at
