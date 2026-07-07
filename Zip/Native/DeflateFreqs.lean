@@ -247,6 +247,23 @@ theorem tokenFreqsP_eq (ws : Array UInt32) :
   unfold tokenFreqsP tokenFreqs
   exact tokenFreqsP_go_eq ws _ _ _ _ 0
 
+/-- Element-wise merge of two `tokenFreqsP` histograms, correcting the
+    double-counted end-of-block symbol (lit/len index 256). `tokenFreqsP`
+    pre-counts EOB with value 1 in *every* block, so the element-wise sum of two
+    per-block histograms counts EOB twice; subtract one. This is the cheap
+    (~316-entry) combiner that lets the whole-stream frequencies be derived from
+    the per-block frequencies the split-sizing pass already computes
+    (`tokenFreqsP_append`), instead of a second whole-stream `tokenFreqsP` walk.
+
+    Correct only for `tokenFreqsP` outputs: both operands must have the histogram
+    shapes (286 lit/len, 30 distance) and pre-count EOB with value ≥ 1. On other
+    inputs `zipWith` silently truncates to the shorter array and the index-256
+    `Nat` subtraction saturates. Every call site feeds `tokenFreqsP` outputs, and
+    `tokenFreqsP_append` establishes the exact equality relied on. -/
+def mergeEOBFreqsP (a b : Array Nat × Array Nat) : Array Nat × Array Nat :=
+  let lit := Array.zipWith (· + ·) a.1 b.1
+  (lit.set! 256 (lit[256]! - 1), Array.zipWith (· + ·) a.2 b.2)
+
 /-- Build the `(symbol, freq)` pair list for a frequency array. -/
 def freqsToPairs (freqs : Array Nat) : List (Nat × Nat) :=
   (List.range freqs.size).pmap

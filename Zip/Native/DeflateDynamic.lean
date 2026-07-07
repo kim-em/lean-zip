@@ -1341,6 +1341,32 @@ decreasing_by
   simp only [Nat.not_le] at h
   omega
 
+/-- Fused twin of `sharedPartitionSizedP` (#2772): one pass over the clamped
+    partition yields the same `(bits, per-block trees)` **and** the whole-stream
+    frequencies, accumulated as the EOB-corrected element-wise sum of the per-block
+    `tokenFreqsP` (`mergeEOBFreqsP`) — the *same* histogram `sizedTrees` already
+    consumes, so no extra frequency walk. Component 1 is proved equal to
+    `sharedPartitionSizedP` (`sharedPartitionSizedFreqsP_fst`) and component 2 to
+    `tokenFreqsP (toks.extract pos toks.size)` (`sharedPartitionSizedFreqsP_snd`),
+    so the base candidate can reuse these frequencies instead of re-walking the
+    whole stream (`tokenFreqsP` is 4.7% L6 dickens / 3.0% mozilla of compress). -/
+def sharedPartitionSizedFreqsP (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
+    (Nat × List SizedTrees) × (Array Nat × Array Nat) :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqsP (toks.extract pos j)
+  let t := sizedTrees f.1 f.2
+  let blockBits := 3 + (writeDynamicHeader BitWriter.empty t.val.1 t.val.2).bitLength
+    + symbolBitCount f.1 f.2 t.val.1.toArray t.val.2.toArray
+  if j ≥ toks.size then ((blockBits, [t]), f)
+  else
+    let rest := sharedPartitionSizedFreqsP toks cuts.tail j
+    ((blockBits + rest.1.1, t :: rest.1.2), mergeEOBFreqsP f rest.2)
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
 /-- Tree-taking twin of `emitSharedBlocksAtP`: same clamped cut points, but each
     block's `(litLens, distLens)` come from the `trees` list (in lockstep with
     `cuts`) instead of being recomputed from the group via `tokenFreqsP` +
@@ -1377,6 +1403,27 @@ def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : Array UInt32)
     let sp := sharedPartitionSizedP toks cuts 0
     ((sp.1 + 7) / 8,
       fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.2 0 BitWriter.empty).flush)
+
+/-- The obs-split candidate prep **paired with** the whole-stream frequencies,
+    both from one fused sizing pass (`sharedPartitionSizedFreqsP`, #2772).
+    Component 1 is proved equal to `deflateDynamicBlocksSharedAtSizedP`
+    (`deflateObsSplitSizedFreqsP_fst`), so the split candidate's roundtrip and
+    byte-size conformance transfer unchanged; component 2 is `tokenFreqsP toks`
+    (`deflateObsSplitSizedFreqsP_snd`), the whole-stream histogram the base
+    candidate needs — derived here by folding the per-block frequencies the
+    sizing pass already built, instead of a second whole-stream `tokenFreqsP`
+    walk. `deflateRaw` (levels 6–8, cuts non-empty) forces this once and feeds
+    component 2 to `deflateRawBasePPrepF`. -/
+def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : Array UInt32)
+    (cuts : List Nat) : (Nat × (Unit → ByteArray)) × (Array Nat × Array Nat) :=
+  if data.size == 0 then
+    let out := deflateDynamicBlocksSharedAtP data toks cuts
+    ((out.size, fun _ => out), tokenFreqsP toks)
+  else
+    let sp := sharedPartitionSizedFreqsP toks cuts 0
+    (((sp.1.1 + 7) / 8,
+      fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.1.2 0 BitWriter.empty).flush),
+     sp.2)
 
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
     hash-chain matcher with the level's search depth (`chainDepth`) and interior
@@ -1472,6 +1519,37 @@ def deflateRawBasePPrep (data : ByteArray) (ptokens : Array UInt32) : Nat × (Un
 /-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
 theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : Array UInt32) :
     (deflateRawBasePPrep data ptokens).2 () = deflateRawBaseP data ptokens := rfl
+
+/-- `deflateRawBasePPrep` with the whole-stream frequencies supplied as a
+    parameter instead of recomputed via `tokenFreqsP ptokens` (#2772). When the
+    levels-6–8 split has cuts, `deflateRaw` passes the frequencies the split-sizing
+    pass already summed (`deflateObsSplitSizedFreqsP`'s component 2, provably
+    `tokenFreqsP ptokens`), so the base candidate skips the second whole-stream
+    frequency walk. At `f = tokenFreqsP ptokens` this is definitionally
+    `deflateRawBasePPrep` (`deflateRawBasePPrepF_tokenFreqsP`), keeping the emit
+    theorem clean. Only the frequency-derived sizing/tree work uses `f`; the emit
+    branches consume `ptokens` directly, exactly as `deflateRawBasePPrep`. -/
+def deflateRawBasePPrepF (data : ByteArray) (ptokens : Array UInt32)
+    (f : Array Nat × Array Nat) : Nat × (Unit → ByteArray) :=
+  let lens := dynamicCodeLengths f.1 f.2
+  let plan := dynHeaderCodes lens.1 lens.2
+  have hcl : plan.clCodes.size ≥ 19 :=
+    Nat.le_of_eq (dynHeaderCodes_clCodes_size lens.1 lens.2).symm
+  let fixedBytes := fixedBlockBytes f.1 f.2
+  let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
+  let storedBytes := storedBlockBytes data
+  ((if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then storedBytes
+    else if fixedBytes < dynBytes then fixedBytes else dynBytes),
+   fun _ =>
+    if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
+    else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+    else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2)
+
+/-- `deflateRawBasePPrepF` at the whole-stream frequencies is `deflateRawBasePPrep`. -/
+theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32) :
+    deflateRawBasePPrepF data ptokens (tokenFreqsP ptokens) = deflateRawBasePPrep data ptokens :=
+  rfl
 
 /-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
     (definitional wrapper, `deflateRawBaseP_def`). Equal to the boxed
@@ -1851,17 +1929,23 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- both" (measured — Silesia L6-L7 +5-12% with reuse). No cuts ⇒ the split
       -- would be a single dynamic block the base already sizes, so skip it
       -- entirely (every input under ~2·splitMinBlockBytes takes this path).
-      let basePrep := deflateRawBasePPrep data ptokens
+      --
+      -- When there are cuts, the split-sizing pass already computes `tokenFreqsP`
+      -- per block; `deflateObsSplitSizedFreqsP` folds those into the whole-stream
+      -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
+      -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
+      -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
       let cuts := chooseSplitsHeuristicP ptokens data.size
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block
       -- trees are dropped now. The winner's emit thunk stays unforced until then.
       let withObs : Nat × (Unit → ByteArray) :=
-        if cuts.isEmpty then basePrep
+        if cuts.isEmpty then deflateRawBasePPrep data ptokens
         else
-          let obsPrep := deflateDynamicBlocksSharedAtSizedP data ptokens cuts
-          if basePrep.1 < obsPrep.1 then basePrep else obsPrep
+          let obsFreqs := deflateObsSplitSizedFreqsP data ptokens cuts
+          let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
+          if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
       withObs.2 ()
   else deflateRawBase data level
 
