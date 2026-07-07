@@ -231,4 +231,200 @@ theorem lz77OptimalFastIter_empty (data : ByteArray) (hzero : data.size = 0) :
     lz77OptimalFastIter data = #[] := by
   rw [lz77OptimalFastIter_eq_lz77OptimalFast]; exact lz77OptimalFast_empty data hzero
 
+/-! ## Windowed parser contracts (#2787)
+
+The windowed emitter (`windowedEmit`) re-verifies every match exactly as
+`optimalEmit` does — the same emission guard plus a fresh `countMatch` — so its
+validity and encodability proofs are the same argument, extended by the one new
+(non-emitting) *refill* branch, which the induction hypothesis discharges
+directly. The region-fill closure `fill`'s output is never inspected: as with
+the rest of the DP, the windowed parse is opaque to correctness. -/
+
+/-- `windowedEmit` produces a valid decomposition from `pos`, for an arbitrary
+    region-fill closure and window state: identical to `optimalEmit_valid` on the
+    emit branches, with the refill branch handled by the recursion. -/
+theorem windowedEmit_valid (data : ByteArray) (fill : WindowFill) (regionSize base : Nat)
+    (cLen cDist ht prev h3tab : Array Nat) (r pos : Nat) (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) :
+    ValidDecomp data pos
+      (windowedEmit data fill regionSize base cLen cDist ht prev h3tab r pos hrs hr1) := by
+  unfold windowedEmit
+  split
+  · rename_i hpos
+    split
+    · rename_i hpr
+      dsimp only
+      have hlit : ValidDecomp data pos (.literal (data[pos]'hpos) ::
+          windowedEmit data fill regionSize base cLen cDist ht prev h3tab r (pos + 1) hrs hr1) :=
+        .literal hpos (getElem!_pos data pos hpos)
+          (windowedEmit_valid data fill regionSize base cLen cDist ht prev h3tab r (pos + 1) hrs hr1)
+      split
+      · rename_i hg
+        split
+        · rename_i hml
+          refine ValidDecomp.reference hg.1 hg.2.2.2.1 hg.2.2.2.2.1 hg.2.2.1 ?_ ?_
+          · intro i hi
+            have hcm := lz77Greedy.countMatch_matches data (pos - cDist[pos - base]!) pos
+              cLen[pos - base]! (by omega) hg.2.2.1
+            exact (hcm.1 i (by omega)).symm
+          · exact windowedEmit_valid data fill regionSize base cLen cDist ht prev h3tab r
+              (pos + cLen[pos - base]!) hrs hr1
+        · exact hlit
+      · exact hlit
+    · rename_i hpr
+      dsimp only
+      exact windowedEmit_valid data fill regionSize (base + r) _ _ _ _ _
+        (min regionSize (data.size - (base + r))) pos hrs (by omega)
+  · exact .done (by omega)
+termination_by 2 * (data.size - pos) + (data.size - base)
+decreasing_by all_goals omega
+
+/-- Every token `windowedEmit` emits satisfies the encoder bounds. -/
+theorem windowedEmit_encodable (data : ByteArray) (fill : WindowFill) (regionSize base : Nat)
+    (cLen cDist ht prev h3tab : Array Nat) (r pos : Nat) (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) :
+    ∀ t ∈ windowedEmit data fill regionSize base cLen cDist ht prev h3tab r pos hrs hr1,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold windowedEmit
+  split
+  · rename_i hpos
+    split
+    · rename_i hpr
+      dsimp only
+      split
+      · rename_i hg
+        split
+        · exact List.forall_mem_cons.2 ⟨⟨hg.1, hg.2.1, hg.2.2.2.1, hg.2.2.2.2.2⟩,
+            windowedEmit_encodable data fill regionSize base cLen cDist ht prev h3tab r _ hrs hr1⟩
+        · exact List.forall_mem_cons.2 ⟨trivial,
+            windowedEmit_encodable data fill regionSize base cLen cDist ht prev h3tab r _ hrs hr1⟩
+      · exact List.forall_mem_cons.2 ⟨trivial,
+          windowedEmit_encodable data fill regionSize base cLen cDist ht prev h3tab r _ hrs hr1⟩
+    · rename_i hpr
+      dsimp only
+      exact windowedEmit_encodable data fill regionSize (base + r) _ _ _ _ _
+        (min regionSize (data.size - (base + r))) pos hrs (by omega)
+  · intro t ht; cases ht
+termination_by 2 * (data.size - pos) + (data.size - base)
+decreasing_by all_goals omega
+
+/-- The iterative windowed emitter is the accumulator form of the recursive one. -/
+theorem windowedEmitIter_eq (data : ByteArray) (fill : WindowFill) (regionSize base : Nat)
+    (cLen cDist ht prev h3tab : Array Nat) (r pos : Nat) (acc : Array LZ77Token)
+    (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) :
+    windowedEmitIter data fill regionSize base cLen cDist ht prev h3tab r pos acc hrs hr1 =
+      acc ++ (windowedEmit data fill regionSize base cLen cDist ht prev h3tab r pos hrs hr1).toArray := by
+  unfold windowedEmitIter windowedEmit
+  split
+  · rename_i hpos
+    split
+    · rename_i hpr
+      dsimp only
+      split
+      · rename_i hg
+        split
+        · rw [windowedEmitIter_eq data fill regionSize base cLen cDist ht prev h3tab r _ _ hrs hr1,
+            List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+        · rw [windowedEmitIter_eq data fill regionSize base cLen cDist ht prev h3tab r _ _ hrs hr1,
+            List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+      · rw [windowedEmitIter_eq data fill regionSize base cLen cDist ht prev h3tab r _ _ hrs hr1,
+          List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+    · rename_i hpr
+      dsimp only
+      rw [windowedEmitIter_eq data fill regionSize (base + r) _ _ _ _ _
+        (min regionSize (data.size - (base + r))) pos acc hrs (by omega)]
+  · simp
+termination_by 2 * (data.size - pos) + (data.size - base)
+decreasing_by all_goals omega
+
+/-! ### Contracts for the two windowed entry points
+
+`lz77OptimalWindowedIter` and `lz77OptimalWindowedFastIter` differ only in the
+`fill` closure passed to `lz77OptimalWindowedWith`; every contract is proved once
+against the shared driver and specializes to both. -/
+
+/-- The shared windowed driver produces a valid decomposition of the whole
+    input, for any region-fill closure. -/
+theorem lz77OptimalWindowedWith_valid (data : ByteArray) (fill : WindowFill) :
+    ValidDecomp data 0 (lz77OptimalWindowedWith data fill).toList := by
+  unfold lz77OptimalWindowedWith
+  split
+  · rename_i hz
+    simp only [Array.toList_empty]
+    exact .done (by omega)
+  · rename_i hz
+    dsimp only
+    rw [windowedEmitIter_eq]
+    simp only [Array.empty_append, List.toList_toArray]
+    exact windowedEmit_valid data fill optRegionSize 0 _ _ _ _ _ _ 0 _ _
+
+/-- Resolving the windowed driver's tokens recovers the data. -/
+theorem lz77OptimalWindowedWith_resolves (data : ByteArray) (fill : WindowFill) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalWindowedWith data fill)) [] =
+      some data.data.toList :=
+  validDecomp_resolves data _ (lz77OptimalWindowedWith_valid data fill)
+
+/-- Every token the windowed driver emits satisfies the encoder bounds. -/
+theorem lz77OptimalWindowedWith_encodable (data : ByteArray) (fill : WindowFill) :
+    ∀ t ∈ (lz77OptimalWindowedWith data fill).toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
+  unfold lz77OptimalWindowedWith
+  split
+  · rename_i hz
+    simp only [Array.toList_empty]
+    intro t ht; cases ht
+  · rename_i hz
+    dsimp only
+    rw [windowedEmitIter_eq]
+    simp only [Array.empty_append, List.toList_toArray]
+    exact windowedEmit_encodable data fill optRegionSize 0 _ _ _ _ _ _ 0 _ _
+
+/-- The windowed driver emits no tokens on empty input. -/
+theorem lz77OptimalWindowedWith_empty (data : ByteArray) (fill : WindowFill)
+    (hzero : data.size = 0) : lz77OptimalWindowedWith data fill = #[] := by
+  unfold lz77OptimalWindowedWith
+  simp only [hzero, ↓reduceDIte]
+
+theorem lz77OptimalWindowedIter_valid (data : ByteArray) :
+    ValidDecomp data 0 (lz77OptimalWindowedIter data).toList :=
+  lz77OptimalWindowedWith_valid data _
+
+theorem lz77OptimalWindowedIter_resolves (data : ByteArray) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalWindowedIter data)) [] =
+      some data.data.toList :=
+  lz77OptimalWindowedWith_resolves data _
+
+theorem lz77OptimalWindowedIter_encodable (data : ByteArray) :
+    ∀ t ∈ (lz77OptimalWindowedIter data).toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 :=
+  lz77OptimalWindowedWith_encodable data _
+
+theorem lz77OptimalWindowedIter_empty (data : ByteArray) (hzero : data.size = 0) :
+    lz77OptimalWindowedIter data = #[] :=
+  lz77OptimalWindowedWith_empty data _ hzero
+
+theorem lz77OptimalWindowedFastIter_valid (data : ByteArray) :
+    ValidDecomp data 0 (lz77OptimalWindowedFastIter data).toList :=
+  lz77OptimalWindowedWith_valid data _
+
+theorem lz77OptimalWindowedFastIter_resolves (data : ByteArray) :
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77OptimalWindowedFastIter data)) [] =
+      some data.data.toList :=
+  lz77OptimalWindowedWith_resolves data _
+
+theorem lz77OptimalWindowedFastIter_encodable (data : ByteArray) :
+    ∀ t ∈ (lz77OptimalWindowedFastIter data).toList,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 :=
+  lz77OptimalWindowedWith_encodable data _
+
+theorem lz77OptimalWindowedFastIter_empty (data : ByteArray) (hzero : data.size = 0) :
+    lz77OptimalWindowedFastIter data = #[] :=
+  lz77OptimalWindowedWith_empty data _ hzero
+
 end Zip.Native.Deflate

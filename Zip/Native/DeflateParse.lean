@@ -1025,4 +1025,257 @@ def lz77OptimalFastIter (data : ByteArray) : Array LZ77Token :=
   let (chLen, chDist) := computeChoicesFast data
   optimalEmitIter data chLen chDist 0 #[]
 
+/-! ## Windowed parse (#2787): bounded live DP state past the 64 MiB gate
+
+`computeChoices`/`computeChoicesFast` allocate two `data.size`-sized `Array Nat`
+choice arrays (the exact-DP peak's dominant cost — ≈2/3 of the resident set at
+64 MiB, so ≈16 B of the ≈27 B/byte marginal, which is what forces the
+`optimalMaxSize` gate). This windowed twin caps that live state to **one region**
+at a time: it fills a region's choices into *region-local* buffers (relative
+index), emits that region's tokens immediately, and discards the buffers before
+the next region. The hash-chain finder state (`hashTable`/`prev`/`h3tab`, itself
+already bounded to the 32 KiB window) is threaded across regions exactly as
+`computeChoicesLoop` threads it, so cross-region matches survive and the choices
+— hence the token stream — are those of the global parse. Only the choice
+storage is bounded; the token array itself is still materialized (inherent to
+`emitSharedBlocks`), so the residual marginal is the ≈10 B/byte token stream.
+
+Everything here is heuristic — opaque to correctness, like the rest of this file.
+The region-local fills use panic-checked (`[..]!`) data/cost reads (they never
+fire: every access is in range by construction), which keeps the fills free of
+proof obligations so they compose as a plain `fillFn` the shared emitter calls. -/
+
+set_option maxRecDepth 4096 in
+/-- Relative-index twin of `fillRegion`: identical backward DP, but the chosen
+    length/distance are recorded at the *region-local* index `idx` (into a
+    region-sized buffer) rather than the absolute position `base + idx`, and the
+    data/cost reads are panic-checked (heuristic). The cache-slot reads stay
+    proven in range (`hcl`/`hcd`/`hir`), exactly as in `fillRegion`. -/
+def fillRegionWin (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost : Array Nat)
+    (i : Nat) (cost chLen chDist : Array Nat) (hir : i ≤ r)
+    (hcl : slots * r ≤ cacheLens.size) (hcd : slots * r ≤ cacheDists.size) :
+    Array Nat × Array Nat :=
+  if h0 : i = 0 then (chLen, chDist)
+  else
+    let idx := i - 1
+    let pos := base + idx
+    let byte := data[pos]!
+    let lit := litCost[byte.toNat]! + cost[idx + 1]!
+    have hidx : idx + 1 ≤ r := by omega
+    have hm := Nat.mul_le_mul (Nat.le_refl slots) hidx
+    have heq : slots * (idx + 1) = slots * idx + slots := Nat.mul_succ slots idx
+    let (bc, bl, bd) := scanCands cacheLens cacheDists lenCost distCost cost
+      (slots * idx) idx slots 0 0 lit 1 0 (by omega) (by omega)
+    let chLen := chLen.set! idx bl
+    let chDist := chDist.set! idx bd
+    fillRegionWin data base r slots cacheLens cacheDists litCost lenCost distCost
+      idx (cost.set! idx bc) chLen chDist (by omega) hcl hcd
+termination_by i
+decreasing_by omega
+
+/-- Relative-index twin of `fillRegionFast` (bounds-free `scanCandsFast`, no
+    cache-size hypotheses): records the choice at region-local index `idx`. -/
+def fillRegionFastWin (data : ByteArray) (base r slots : Nat)
+    (cacheLens cacheDists litCost lenCost distCost : Array Nat)
+    (i : Nat) (cost chLen chDist : Array Nat) (hir : i ≤ r) :
+    Array Nat × Array Nat :=
+  if h0 : i = 0 then (chLen, chDist)
+  else
+    let idx := i - 1
+    let pos := base + idx
+    let byte := data[pos]!
+    let lit := litCost[byte.toNat]! + cost[idx + 1]!
+    let (bc, bl, bd) := scanCandsFast cacheLens cacheDists lenCost distCost cost
+      (slots * idx) idx slots 0 lit 1 0
+    let chLen := chLen.set! idx bl
+    let chDist := chDist.set! idx bd
+    fillRegionFastWin data base r slots cacheLens cacheDists litCost lenCost distCost
+      idx (cost.set! idx bc) chLen chDist (by omega)
+termination_by i
+decreasing_by omega
+
+/-- Relative-index twin of `collectRegionTokens` (round-2 refit input): walks the
+    region-local choice buffers `[0, r)`, reading the data at the absolute
+    position `base + pos` so the fitted literal frequencies match the global
+    parse. Panic-checked (heuristic). -/
+def collectRegionTokensWin (data : ByteArray) (base : Nat) (chLen chDist : Array Nat)
+    (r pos : Nat) (acc : Array LZ77Token) : Array LZ77Token :=
+  if h : pos < r ∧ base + pos < data.size then
+    let len := chLen[pos]!
+    if 3 ≤ len then
+      collectRegionTokensWin data base chLen chDist r (pos + len)
+        (acc.push (.reference len (chDist[pos]!)))
+    else
+      collectRegionTokensWin data base chLen chDist r (pos + 1)
+        (acc.push (.literal (data[base + pos]'(by omega))))
+  else acc
+termination_by r - pos
+decreasing_by all_goals omega
+
+/-- Region-local twin of `fillRegionRounds` (exact two-round DP): returns the
+    threaded chain state and the region-sized choice buffers. Total — no `hr`/
+    `hslit` obligations (the internal reads are panic-checked), so it composes as
+    a plain `fillFn` for `windowedEmit`. -/
+def fillRegionRoundsWin (data : ByteArray) (depth slots niceSkip base r : Nat)
+    (slit slen sdist : Array Nat) (hashTable prev h3tab : Array Nat) :
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat :=
+  let cache := buildCache data hashTable prev h3tab
+    depth slots niceSkip base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
+  let cacheLens := cache.1
+  let cacheDists := cache.2.1
+  have hcl : slots * r ≤ cacheLens.size := by
+    have : cacheLens.size = slots * r := by
+      show (buildCache data hashTable prev h3tab depth slots niceSkip base r 0
+        (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)).1.size = slots * r
+      rw [buildCache_fst_size, Array.size_replicate]
+    omega
+  have hcd : slots * r ≤ cacheDists.size := by
+    have : cacheDists.size = slots * r := by
+      show (buildCache data hashTable prev h3tab depth slots niceSkip base r 0
+        (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)).2.1.size = slots * r
+      rw [buildCache_snd_fst_size, Array.size_replicate]
+    omega
+  let hashTable := cache.2.2.1
+  let prev := cache.2.2.2.1
+  let h3tab := cache.2.2.2.2
+  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
+  let res1 := fillRegionWin data base r slots cacheLens cacheDists
+    slit slen sdist r cost (Array.replicate r 1) (Array.replicate r 0) (Nat.le_refl r) hcl hcd
+  let toks := collectRegionTokensWin data base res1.1 res1.2 r 0 #[]
+  let fitted := fittedCostTables toks
+  let cost2 := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits fitted.1) 0
+  let res2 := fillRegionWin data base r slots cacheLens cacheDists
+    fitted.1 fitted.2.1 fitted.2.2 r cost2 res1.1 res1.2 (Nat.le_refl r) hcl hcd
+  (hashTable, prev, h3tab, res2.1, res2.2)
+
+/-- Region-local twin of `fillRegionFastRound` (single-round L9-fast DP). -/
+def fillRegionFastRoundWin (data : ByteArray) (depth slots niceSkip base r : Nat)
+    (slit slen sdist : Array Nat) (hashTable prev h3tab : Array Nat) :
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat :=
+  let cache := buildCache data hashTable prev h3tab
+    depth slots niceSkip base r 0 (Array.replicate (slots * r) 0) (Array.replicate (slots * r) 0)
+  let cacheLens := cache.1
+  let cacheDists := cache.2.1
+  let hashTable := cache.2.2.1
+  let prev := cache.2.2.2.1
+  let h3tab := cache.2.2.2.2
+  let cost := seedTailCosts (Array.replicate (r + 259) 0) r (avgLitBits slit) 0
+  let res := fillRegionFastWin data base r slots cacheLens cacheDists
+    slit slen sdist r cost (Array.replicate r 1) (Array.replicate r 0) (Nat.le_refl r)
+  (hashTable, prev, h3tab, res.1, res.2)
+
+/-- The region-fill closure the windowed emitter calls to (re)fill each window:
+    `fill base r hashTable prev h3tab` returns the updated finder state and the
+    region-local choice buffers for `[base, base + r)`. `fillRegionRoundsWin`
+    (exact) and `fillRegionFastRoundWin` (L9-fast) are the two instances. -/
+abbrev WindowFill : Type :=
+  Nat → Nat → Array Nat → Array Nat → Array Nat →
+    Array Nat × Array Nat × Array Nat × Array Nat × Array Nat
+
+/-- Interleaved windowed emitter (list-cons version, the proofs' subject). Emits
+    `data[pos ..]` re-verifying every match exactly as `optimalEmit`, but reading
+    the choice at the *region-local* index `pos - base` from the current window's
+    buffers `cLen`/`cDist`; when `pos` runs off the window (`pos ≥ base + r`) it
+    refills the next window `[base + r, ..)` via `fill` (threading the finder
+    state) and continues. `fill`'s output is never inspected by the correctness
+    proofs — validity comes solely from the re-verification, as for `optimalEmit`. -/
+def windowedEmit (data : ByteArray) (fill : WindowFill) (regionSize : Nat)
+    (base : Nat) (cLen cDist : Array Nat) (hashTable prev h3tab : Array Nat)
+    (r pos : Nat) (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) : List LZ77Token :=
+  if hpos : pos < data.size then
+    if hpr : pos < base + r then
+      let len := cLen[pos - base]!
+      let dist := cDist[pos - base]!
+      if hg : 3 ≤ len ∧ len ≤ 258 ∧ pos + len ≤ data.size ∧
+          1 ≤ dist ∧ dist ≤ pos ∧ dist ≤ 32768 then
+        have h1 : (pos - dist) + len ≤ data.size := by omega
+        if hml : lz77Greedy.countMatch data (pos - dist) pos len h1 hg.2.2.1 = len then
+          .reference len dist :: windowedEmit data fill regionSize base cLen cDist
+            hashTable prev h3tab r (pos + len) hrs hr1
+        else
+          .literal (data[pos]'hpos) :: windowedEmit data fill regionSize base cLen cDist
+            hashTable prev h3tab r (pos + 1) hrs hr1
+      else
+        .literal (data[pos]'hpos) :: windowedEmit data fill regionSize base cLen cDist
+          hashTable prev h3tab r (pos + 1) hrs hr1
+    else
+      let base' := base + r
+      let r' := min regionSize (data.size - base')
+      have hr1' : 1 ≤ r' := by omega
+      let res := fill base' r' hashTable prev h3tab
+      windowedEmit data fill regionSize base' res.2.2.2.1 res.2.2.2.2
+        res.1 res.2.1 res.2.2.1 r' pos hrs hr1'
+  else []
+termination_by 2 * (data.size - pos) + (data.size - base)
+decreasing_by all_goals omega
+
+/-- Iterative (`Array`-accumulating) twin of `windowedEmit`; the runtime entry
+    point (proven equal to `windowedEmit` in `LZ77OptimalCorrect`). -/
+def windowedEmitIter (data : ByteArray) (fill : WindowFill) (regionSize : Nat)
+    (base : Nat) (cLen cDist : Array Nat) (hashTable prev h3tab : Array Nat)
+    (r pos : Nat) (acc : Array LZ77Token) (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) :
+    Array LZ77Token :=
+  if hpos : pos < data.size then
+    if hpr : pos < base + r then
+      let len := cLen[pos - base]!
+      let dist := cDist[pos - base]!
+      if hg : 3 ≤ len ∧ len ≤ 258 ∧ pos + len ≤ data.size ∧
+          1 ≤ dist ∧ dist ≤ pos ∧ dist ≤ 32768 then
+        have h1 : (pos - dist) + len ≤ data.size := by omega
+        if hml : lz77Greedy.countMatch data (pos - dist) pos len h1 hg.2.2.1 = len then
+          windowedEmitIter data fill regionSize base cLen cDist hashTable prev h3tab
+            r (pos + len) (acc.push (.reference len dist)) hrs hr1
+        else
+          windowedEmitIter data fill regionSize base cLen cDist hashTable prev h3tab
+            r (pos + 1) (acc.push (.literal (data[pos]'hpos))) hrs hr1
+      else
+        windowedEmitIter data fill regionSize base cLen cDist hashTable prev h3tab
+          r (pos + 1) (acc.push (.literal (data[pos]'hpos))) hrs hr1
+    else
+      let base' := base + r
+      let r' := min regionSize (data.size - base')
+      have hr1' : 1 ≤ r' := by omega
+      let res := fill base' r' hashTable prev h3tab
+      windowedEmitIter data fill regionSize base' res.2.2.2.1 res.2.2.2.2
+        res.1 res.2.1 res.2.2.1 r' pos acc hrs hr1'
+  else acc
+termination_by 2 * (data.size - pos) + (data.size - base)
+decreasing_by all_goals omega
+
+/-- Shared driver for both windowed parsers: set up the first window and run the
+    interleaved emitter with the given region-fill closure. -/
+def lz77OptimalWindowedWith (data : ByteArray) (fill : WindowFill) : Array LZ77Token :=
+  if h : data.size = 0 then #[]
+  else
+    let r0 := min optRegionSize data.size
+    have hr0 : 1 ≤ r0 := by
+      have h2 : 1 ≤ optRegionSize := by decide
+      omega
+    let ht0 := Array.replicate 65536 data.size
+    let prev0 := Array.replicate (min chainWinSize data.size) data.size
+    let h3tab0 := Array.replicate 32768 data.size
+    let init := fill 0 r0 ht0 prev0 h3tab0
+    windowedEmitIter data fill optRegionSize 0 init.2.2.2.1 init.2.2.2.2
+      init.1 init.2.1 init.2.2.1 r0 0 #[] (by decide) hr0
+
+/-- Windowed exact-DP parse (#2787): bit-for-bit the tokens of `lz77OptimalIter`,
+    but with the choice storage capped to one region. Deployed at level ≥ 10
+    above the memory gate. -/
+def lz77OptimalWindowedIter (data : ByteArray) : Array LZ77Token :=
+  let st := staticCostTables
+  lz77OptimalWindowedWith data
+    (fun base r ht prev h3 =>
+      fillRegionRoundsWin data optChainDepth optCacheSlots optNiceSkip base r
+        st.1 st.2.1 st.2.2 ht prev h3)
+
+/-- Windowed L9-fast parse (#2787): the region-capped twin of
+    `lz77OptimalFastIter`. Deployed at level 9 above the memory gate. -/
+def lz77OptimalWindowedFastIter (data : ByteArray) : Array LZ77Token :=
+  let st := staticCostTables
+  lz77OptimalWindowedWith data
+    (fun base r ht prev h3 =>
+      fillRegionFastRoundWin data fastChainDepth optCacheSlots fastNiceSkip base r
+        st.1 st.2.1 st.2.2 ht prev h3)
+
 end Zip.Native.Deflate
