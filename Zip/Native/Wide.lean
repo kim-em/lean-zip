@@ -92,6 +92,23 @@ def usetUInt64LE (a : ByteArray) (off : USize) (v : UInt64)
     (off.toNat + 6) (v >>> 48).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
     (off.toNat + 7) (v >>> 56).toUInt8 (by simp only [ByteArray.size_set]; omega))
 
+/-- Store the little-endian `UInt32` `v` at byte offset `off`. The reference
+    body — the chain of four `a.set` writes assembling the store byte by byte —
+    is the trusted specification of the `@[extern]`; the C
+    (`lean_zip_uset_u32le`) performs it as one wide store, in place when the
+    array is exclusive. Writer analog of `ugetUInt32LE` (issue #2779): it is the
+    store primitive for a packed `ByteArray` uint32 chain table, where each slot
+    holds a little-endian absolute position and `set` writes 4 unboxed bytes
+    rather than a tagged word. The caller's in-bounds proof means the C does no
+    bounds check. -/
+@[extern "lean_zip_uset_u32le"]
+def usetUInt32LE (a : ByteArray) (off : USize) (v : UInt32)
+    (h : off.toNat + 4 ≤ a.size := by get_elem_tactic) : ByteArray :=
+  (((a.set off.toNat v.toUInt8 (by omega)).set
+    (off.toNat + 1) (v >>> 8).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 2) (v >>> 16).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 3) (v >>> 24).toUInt8 (by simp only [ByteArray.size_set]; omega)
+
 /-- Reference model for `pushUInt64LE`: push the low `k` bytes of `v`,
     LSB-first. This is exactly the shape of the BitWriter's byte-flush loop
     (`BitWriter.flushBytes`), so wiring the wide store into the writer is a

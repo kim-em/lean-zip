@@ -2,6 +2,7 @@ import Zip
 import Zip.Native.InflateBuf
 import Bench.MinizOxide
 import Bench.Libdeflate
+import Bench.PackedChain
 /-! Benchmark driver for hyperfine.
 
 Usage:
@@ -236,6 +237,107 @@ where
       let out := Zip.Native.Deflate.deflateRaw data level.toUInt8
       let ratio : Float := 100.0 * out.size.toFloat / data.size.toFloat
       IO.println s!"size={data.size} lvl={level}: out={out.size} ratio={ratio.toString.take 5}%"
+    -- Issue #2779 spike: packed `ByteArray` uint32 chain tables vs merged
+    -- `Array Nat`, isolating the storage layout. Interleaves the two matchers at
+    -- single-run granularity (order alternates by round parity to cancel drift),
+    -- reports each side's matcher MB/s and the ratio, and additionally times the
+    -- production `lzMatchP` for absolute context. Level must be ≥ 4 (the lazy
+    -- `deflate_slow` tier these matchers mirror). Use a real corpus file
+    -- (`@path`) — synthetic `text` is degenerate for chain-walk measurement.
+    | "matcher-ab" =>
+      let lvl := level.toUInt8
+      if level < 4 then
+        throw (IO.userError "matcher-ab needs level ≥ 4 (lazy merged tier)")
+      let mc := Zip.Native.Deflate.chainDepth lvl
+      let ic := Zip.Native.Deflate.insertCap lvl
+      let gm := Zip.Native.Deflate.goodMatch lvl
+      let nl := Zip.Native.Deflate.niceLen lvl
+      let ld := Zip.Native.Deflate.lazyDepth lvl
+      let runArr := fun d => Bench.PackedChain.arrMergedMatcher d mc 32768 ic gm nl ld
+      let runBA  := fun d => Bench.PackedChain.packedMergedMatcher d mc 32768 ic gm nl ld
+      -- Correctness gate: the two twins and the production matcher must agree
+      -- token-for-token, else the timing compares different work.
+      let a0 := runArr data
+      let b0 := runBA data
+      let p0 := Zip.Native.Deflate.lzMatchP data lvl
+      if a0 != b0 then
+        throw (IO.userError s!"MISMATCH arr vs packed: arr={a0.size} packed={b0.size} toks")
+      if a0 != p0 then
+        throw (IO.userError s!"MISMATCH arr vs production lzMatchP: arr={a0.size} prod={p0.size} toks")
+      -- Distinct perturbed inputs defeat loop-invariant hoisting / CSE. Scale the
+      -- rep budget down for large corpus members so a 50 MB file still finishes.
+      let big := data.size > 4000000
+      let nin := if big then 3 else 8
+      let mut inputs : Array ByteArray := #[]
+      for i in [0:nin] do
+        let d := if data.size == 0 then data else
+          (data.extract 0 data.size).set! (i % data.size) (data[i % data.size]!.toNat.toUInt8 ^^^ 1)
+        inputs := inputs.push d
+      let sink (acc : UInt64) (x : Array UInt32) : IO UInt64 :=
+        pure (acc + x.size.toUInt64 + (if x.size > 0 then x[0]!.toUInt64 else 0))
+      -- warm
+      let mut w : UInt64 := 0
+      for _ in [0:2] do for c in inputs do w ← sink w (runArr c); w ← sink w (runBA c)
+      if w == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      let rounds := if big then 6 else 20
+      let mut arrTot : Nat := 0
+      let mut baTot : Nat := 0
+      let mut acc : UInt64 := 0
+      for round in [0:rounds] do
+        for c in inputs do
+          if round % 2 == 0 then
+            let a ← IO.monoNanosNow
+            acc ← sink acc (runArr c)
+            let b ← IO.monoNanosNow
+            acc ← sink acc (runBA c)
+            let e ← IO.monoNanosNow
+            arrTot := arrTot + (b - a); baTot := baTot + (e - b)
+          else
+            let a ← IO.monoNanosNow
+            acc ← sink acc (runBA c)
+            let b ← IO.monoNanosNow
+            acc ← sink acc (runArr c)
+            let e ← IO.monoNanosNow
+            baTot := baTot + (b - a); arrTot := arrTot + (e - b)
+      -- Production reference (steady-state mean, not interleaved).
+      let mut prodTot : Nat := 0
+      for _ in [0:rounds] do
+        for c in inputs do
+          let a ← IO.monoNanosNow
+          acc ← sink acc (Zip.Native.Deflate.lzMatchP c lvl)
+          let b ← IO.monoNanosNow
+          prodTot := prodTot + (b - a)
+      if acc == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      let n := (rounds * nin).toFloat
+      let mbps (tot : Nat) : Float := (data.size.toFloat * n) / (tot.toFloat / 1.0e9) / 1.0e6
+      IO.println s!"size={data.size} {pattern} lvl={level} (mc={mc} nl={nl} ld={ld}): toks={a0.size}"
+      IO.println s!"  arrNat  = {mbps arrTot |>.toString.take 7} MB/s"
+      IO.println s!"  packed  = {mbps baTot |>.toString.take 7} MB/s  (packed/arr speedup={(arrTot.toFloat/baTot.toFloat).toString.take 5}x)"
+      IO.println s!"  prodP   = {mbps prodTot |>.toString.take 7} MB/s  (production lzMatchP, USize-accum)"
+    -- Single-side variants of `matcher-ab` for `perf stat` isolation (issue
+    -- #2779): each runs ONLY one storage layout in a warm loop, so wrapping the
+    -- process in `perf stat` attributes cycles/instructions/cache-misses to that
+    -- one matcher. `runs` scales down for large files. Level ≥ 4.
+    | "matcher-arr" | "matcher-packed" =>
+      let lvl := level.toUInt8
+      if level < 4 then
+        throw (IO.userError "matcher-arr/packed needs level ≥ 4")
+      let mc := Zip.Native.Deflate.chainDepth lvl
+      let ic := Zip.Native.Deflate.insertCap lvl
+      let gm := Zip.Native.Deflate.goodMatch lvl
+      let nl := Zip.Native.Deflate.niceLen lvl
+      let ld := Zip.Native.Deflate.lazyDepth lvl
+      let run := fun d =>
+        if op == "matcher-packed" then Bench.PackedChain.packedMergedMatcher d mc 32768 ic gm nl ld
+        else Bench.PackedChain.arrMergedMatcher d mc 32768 ic gm nl ld
+      let big := data.size > 4000000
+      let runs := if big then 8 else 60
+      let sink (acc : UInt64) (x : Array UInt32) : IO UInt64 :=
+        pure (acc + x.size.toUInt64 + (if x.size > 0 then x[0]!.toUInt64 else 0))
+      let mut acc : UInt64 := 0
+      for _ in [0:runs] do acc ← sink acc (run data)
+      if acc == 0xFFFFFFFFFFFFFFFF then IO.println "x"
+      IO.println s!"{op} size={data.size} lvl={level} runs={runs} acc={acc}"
     -- P0 diagnostic: separate the one-time dense-table CAF build (paid on the
     -- first distance lookup of the process) from steady-state per-call cost.
     -- Builds `nin` distinct inputs (perturb one byte) to defeat CSE/memoisation,

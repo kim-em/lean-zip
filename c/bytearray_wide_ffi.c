@@ -84,6 +84,32 @@ LEAN_EXPORT lean_obj_res lean_zip_uset_u64le(lean_obj_arg a, size_t off, uint64_
 }
 
 /*
+ * lean_zip_uset_u32le : ByteArray → USize → UInt32 → ByteArray
+ *   (a owned, off an unboxed size_t, v an unboxed uint32_t)
+ *
+ * Store the 4 bytes of `v` little-endian at byte offset `off`. The Lean
+ * reference body is the chain of four `a.set` writes (see `usetUInt32LE` in
+ * `Zip/Native/Wide.lean`), and this C must agree with it. As with the loads,
+ * the store is written out byte-by-byte so it is little-endian by construction
+ * and free of unaligned-access UB; the optimizer folds it to a single wide
+ * store. The Lean side carries the in-bounds proof (`off + 4 ≤ a.size`), so C
+ * does no bounds check. `a` is owned: when the caller holds the only
+ * reference the store is done in place (the hot-loop case); otherwise the
+ * array is copied first, exactly like `lean_byte_array_uset`.
+ */
+LEAN_EXPORT lean_obj_res lean_zip_uset_u32le(lean_obj_arg a, size_t off, uint32_t v) {
+    lean_obj_res r;
+    if (lean_is_exclusive(a)) r = a;
+    else r = lean_copy_byte_array(a);
+    uint8_t *p = lean_sarray_cptr(r) + off;
+    p[0] = (uint8_t)(v);
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+    return r;
+}
+
+/*
  * lean_zip_push_u64le : ByteArray → UInt64 → USize → ByteArray
  *   (a owned, v an unboxed uint64_t, k an unboxed size_t, k ≤ 8)
  *
