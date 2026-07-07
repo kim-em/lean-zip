@@ -208,9 +208,35 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
             ax.plot(cx, cy, color=colour, linewidth=style["linewidth"],
                     alpha=style["alpha"], zorder=style["zorder"])
         # Mark the level sweep direction on the subject's curve only (avoid clutter).
+        # When several levels land on the same plotted point (e.g. an above-64 MiB
+        # input where L9's optimal parse is gated off, so L9 and L10 emit
+        # byte-identical output and stack), label the endpoint with EVERY level
+        # there — "L9=L10", never a lone "L10" with an invisible twin beneath it.
+        # Coincidence keys on the ratio being identical (dx < 1e-6: ratios are
+        # deterministic, so identical-output twins share a ratio exactly, while
+        # distinct-on-plot levels differ by ≥~3e-4 at the report's 4-dp rounding),
+        # with a loose speed window (dy < 5e-2) to absorb single-rep timing noise.
+        # On a healthy sweep no two levels share a ratio, so this stays inert.
         if key == "native" and len(pts) > 1:
+            def _stacked_levels(idx):
+                out = []
+                for j in range(len(pts)):
+                    dx = abs(xs[j] - xs[idx]) / xs[idx]
+                    dy = abs(math.log(ys[j]) - math.log(ys[idx]))
+                    if dx < 1e-6 and dy < 5e-2:      # same plotted marker
+                        out.append(pts[j][0])
+                return sorted(set(out))
+            labelled = set()
             for idx in (0, -1):
-                ax.annotate(f"L{pts[idx][0]}", (xs[idx], ys[idx]),
+                stacked = _stacked_levels(idx)
+                if tuple(stacked) in labelled:       # both endpoints in one stack
+                    continue
+                labelled.add(tuple(stacked))
+                if len(stacked) > 1:
+                    print(f"  note: {label} levels {stacked} share one marker on "
+                          f"{corpus}'s Pareto — labelled together",
+                          file=sys.stderr)
+                ax.annotate("=".join(f"L{lv}" for lv in stacked), (xs[idx], ys[idx]),
                             textcoords="offset points", xytext=(5, 5),
                             fontsize=7, color=colour, fontweight="bold")
         plotted = True
