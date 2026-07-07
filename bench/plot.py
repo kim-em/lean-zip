@@ -113,20 +113,34 @@ def _provenance(meta):
             "throughput = median snapshot; ratio is deterministic")
 
 
-def _level_points(results, corpus, key, speed_metric):
-    """[(level, geomean ratio, geomean speed)] for one compressor over the corpus
-    files — the points of its speed-vs-ratio curve."""
+def _level_points(results, corpus, key, speed_metric, ratio_mode="geomean"):
+    """[(level, ratio, geomean speed)] for one compressor over the corpus files —
+    the points of its speed-vs-ratio curve.
+
+    ``ratio_mode`` selects how the per-file ratios are aggregated into the x-value:
+    - "geomean": geometric mean of the per-file ratios (equal weight per file).
+    - "pooled":  sum(compressed) / sum(uncompressed) over the corpus — the true
+      corpus-wide ratio, byte-weighted so large files count proportionally.
+    Speed is the geomean over files — in "pooled" mode over the *same* sized
+    files the ratio pools, so a point never mixes a corpus-wide ratio with a
+    differently-covered speed."""
+    if ratio_mode not in ("geomean", "pooled"):
+        raise ValueError(f"ratio_mode must be 'geomean' or 'pooled', got {ratio_mode!r}")
     pats = corpus_patterns(results, corpus)
     levels = sorted({r["level"] for p in pats for r in rows_for(results, key, p)})
     pts = []
     for lvl in levels:
-        ratios = [rows_for(results, key, p, level=lvl)[0]["ratio"]
-                  for p in pats if rows_for(results, key, p, level=lvl)
-                  and rows_for(results, key, p, level=lvl)[0].get("ratio") is not None]
-        speeds = [rows_for(results, key, p, level=lvl)[0][speed_metric]
-                  for p in pats if rows_for(results, key, p, level=lvl)
-                  and rows_for(results, key, p, level=lvl)[0].get(speed_metric) is not None]
-        gr, gs = geomean(ratios), geomean(speeds)
+        rows = [rows_for(results, key, p, level=lvl)[0]
+                for p in pats if rows_for(results, key, p, level=lvl)]
+        if ratio_mode == "pooled":
+            sized = [r for r in rows if r.get("out_size") is not None and r.get("size")]
+            den = sum(r["size"] for r in sized)
+            gr = (sum(r["out_size"] for r in sized) / den) if den else None
+            speed_rows = sized                      # coverage-match ratio and speed
+        else:
+            gr = geomean([r["ratio"] for r in rows if r.get("ratio") is not None])
+            speed_rows = rows
+        gs = geomean([r[speed_metric] for r in speed_rows if r.get(speed_metric) is not None])
         if gr and gs:
             pts.append((lvl, gr, gs))
     return pts
@@ -160,7 +174,8 @@ def _mix_curve(x0, y0, x1, y1, n=48):
     return xs, ys
 
 
-def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outfile):
+def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outfile,
+                   ratio_mode="geomean"):
     """Headline view: speed vs ratio. x = compression ratio (smaller = better,
     left), y = speed (MB/s, log). Each compressor is markers at its measured
     levels joined by the *mixing frontier* — the operating points reachable by
@@ -176,7 +191,7 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
     fig, ax = plt.subplots(figsize=(9, 6.5))
     plotted = False
     for key, label, colour, marker in present_compressors(results):
-        pts = _level_points(results, corpus, key, speed_metric)
+        pts = _level_points(results, corpus, key, speed_metric, ratio_mode)
         if not pts:
             continue
         style = series_style(key, colour)
@@ -202,14 +217,20 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
     if not plotted:
         plt.close(fig)
         return
+    pooled = ratio_mode == "pooled"
+    xlab = ("compression ratio   (Σ compressed / Σ original  —  ← smaller is better)"
+            if pooled else
+            "compression ratio   (compressed / original  —  ← smaller is better)")
+    ratio_agg = ("corpus-pooled ratio, geomean speed" if pooled
+                 else f"geomean over {len(pats)} files")
     ax.set_yscale("log")
-    ax.set_xlabel("compression ratio   (compressed / original  —  ← smaller is better)")
+    ax.set_xlabel(xlab)
     ax.set_ylabel(speed_label + "   (MB/s, log)")
     ax.grid(True, which="both", linewidth=0.4, alpha=0.6)
     ax.legend(fontsize=8, ncol=2, loc="best")
     ax.text(0.015, 0.985, "↖ fast & small = best", transform=ax.transAxes,
             fontsize=10, va="top", color="#2a8a3a", fontweight="bold")
-    fig.suptitle(f"{title}  ({corpus} — geomean over {len(pats)} files)",
+    fig.suptitle(f"{title}  ({corpus} — {ratio_agg})",
                  fontsize=13, fontweight="bold")
     fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
     fig.tight_layout(rect=(0, 0.03, 1, 0.97))
@@ -494,6 +515,8 @@ def main():
         # speed doesn't trade off against the compression ratio, so there is no
         # frontier to read on a decode scatter — decode throughput lives in the
         # summary table's `decompress MB/s` column instead.
+        # `ratio_mode="pooled"` is available (x = corpus-wide Σcompressed/Σoriginal,
+        # byte-weighted) but not rendered by default — pass it explicitly to opt in.
         pareto_scatter(results, meta, corpus, "compress_mbps", "compression speed",
                        "Compression speed vs ratio",
                        graphs_dir / f"{corpus}_compress_pareto.svg")
