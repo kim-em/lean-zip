@@ -1837,8 +1837,8 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         pickSmaller (deflateRawBaseP data ptokens)
           (deflateDynamicBlocksOptimalWindowed data sharedTokChunk)
     else
-      -- Levels 6–8 (and level 9/10 above the memory gate): base vs cross-block
-      -- shared-window split at the observation-divergence boundaries (#2737),
+      -- Levels 6–8: base vs cross-block shared-window split at the
+      -- observation-divergence boundaries (#2737),
       -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
       -- their flushed byte count with per-block trees captured
       -- (`deflateRawBasePPrep` for the base, `deflateDynamicBlocksSharedAtSizedP`
