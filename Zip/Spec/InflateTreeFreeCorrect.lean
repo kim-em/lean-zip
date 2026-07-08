@@ -1154,6 +1154,933 @@ def subIndex (maxBits : Nat) (buf : UInt64) : Nat :=
 def subSlot (ld : LongDecode) (maxBits : Nat) (buf : UInt64) : UInt32 :=
   ld.subs[(ld.rootSub[subPrefix buf]!.toNat - 1) + subIndex maxBits buf]!
 
+/-! ## Arithmetic bridges for the subtable indices
+
+`subPrefix`/`subIndex` are the low `fastBits` and next `maxBits - fastBits` bits of
+the buffer; below they are re-expressed as `Nat` `mod`/`div` so the fill algebra
+matches the `bitReverse` slot progression `buildSubLoop` writes. -/
+
+/-- `subPrefix` is the low-`fastBits` bits of the buffer as a `Nat`. -/
+theorem subPrefix_eq_mod (buf : UInt64) :
+    subPrefix buf = buf.toNat % 2 ^ fastBits := by
+  rw [subPrefix, UInt64.toNat_and, show (0x7FF : UInt64).toNat = 2 ^ fastBits - 1 from rfl,
+      Nat.and_two_pow_sub_one_eq_mod]
+
+/-- `subPrefix buf < 2^fastBits`. -/
+theorem subPrefix_lt (buf : UInt64) : subPrefix buf < 2 ^ fastBits := by
+  rw [subPrefix_eq_mod]; exact Nat.mod_lt _ (Nat.two_pow_pos _)
+
+/-- `subIndex` is the `maxBits - fastBits` bits above the `fastBits` window. -/
+theorem subIndex_eq (maxBits : Nat) (hmb15 : maxBits ≤ 15) (buf : UInt64) :
+    subIndex maxBits buf = (buf.toNat / 2 ^ fastBits) % 2 ^ (maxBits - fastBits) := by
+  have htoNat : ∀ n : Nat, n.toUInt64.toNat = n % 2 ^ 64 := fun _ => rfl
+  have hsh : ((fastBits : Nat).toUInt64).toNat % 64 = fastBits := by
+    rw [htoNat]; rfl
+  have hmask : ((2 ^ (maxBits - fastBits) - 1 : Nat).toUInt64).toNat
+      = 2 ^ (maxBits - fastBits) - 1 := by
+    rw [htoNat]
+    apply Nat.mod_eq_of_lt
+    have hle : maxBits - fastBits ≤ 4 := by simp only [fastBits]; omega
+    calc 2 ^ (maxBits - fastBits) - 1 < 2 ^ (maxBits - fastBits) :=
+          Nat.sub_lt (Nat.two_pow_pos _) (by decide)
+      _ ≤ 2 ^ 4 := Nat.pow_le_pow_right (by decide) hle
+      _ < 2 ^ 64 := by decide
+  rw [subIndex, UInt64.toNat_and, hmask, UInt64.toNat_shiftRight, hsh,
+      Nat.shiftRight_eq_div_pow, Nat.and_two_pow_sub_one_eq_mod]
+
+/-- `subIndex maxBits buf < 2^(maxBits - fastBits)`. -/
+theorem subIndex_lt (maxBits : Nat) (hmb15 : maxBits ≤ 15) (buf : UInt64) :
+    subIndex maxBits buf < 2 ^ (maxBits - fastBits) := by
+  rw [subIndex_eq maxBits hmb15]; exact Nat.mod_lt _ (Nat.two_pow_pos _)
+
+/-! ## Block counting: the number of long codes bounds `nextBlock`
+
+`buildSubLoop` allocates one subtable block per distinct `fastBits`-prefix of the
+long codes; each such block is triggered by a distinct long symbol, so the number
+of allocated blocks (`nextBlock`) never exceeds `countLongCodes`, the size divisor
+of the flat `subs` array. `Lcount` counts long symbols processed so far. -/
+
+/-- A finite `∑_{len ≤ j ≤ maxBits} f j`. -/
+def rangeSum (f : Nat → Nat) (maxBits len : Nat) : Nat :=
+  if len > maxBits then 0 else f len + rangeSum f maxBits (len + 1)
+  termination_by maxBits + 1 - len
+
+/-- One-step unfolding of `rangeSum` (targeted, to avoid `rw` rewriting the inner
+    recursive occurrence). -/
+theorem rangeSum_unfold (f : Nat → Nat) (maxBits lo : Nat) :
+    rangeSum f maxBits lo = if lo > maxBits then 0 else f lo + rangeSum f maxBits (lo + 1) := by
+  rw [rangeSum]
+
+/-- Pointwise-equal summands give equal `rangeSum`. -/
+theorem rangeSum_congr (f g : Nat → Nat) (maxBits lo : Nat)
+    (h : ∀ j, lo ≤ j → j ≤ maxBits → f j = g j) :
+    rangeSum f maxBits lo = rangeSum g maxBits lo := by
+  rw [rangeSum_unfold f maxBits lo, rangeSum_unfold g maxBits lo]
+  by_cases hlt : lo > maxBits
+  · rw [if_pos hlt, if_pos hlt]
+  · rw [if_neg hlt, if_neg hlt, h lo (Nat.le_refl _) (by omega),
+        rangeSum_congr f g maxBits (lo + 1) (fun j hj hjm => h j (by omega) hjm)]
+  termination_by maxBits + 1 - lo
+
+/-- `rangeSum` of a sum is the sum of `rangeSum`s. -/
+theorem rangeSum_add (f g : Nat → Nat) (maxBits lo : Nat) :
+    rangeSum (fun j => f j + g j) maxBits lo
+      = rangeSum f maxBits lo + rangeSum g maxBits lo := by
+  rw [rangeSum_unfold (fun j => f j + g j) maxBits lo, rangeSum_unfold f maxBits lo,
+      rangeSum_unfold g maxBits lo]
+  by_cases hlt : lo > maxBits
+  · rw [if_pos hlt, if_pos hlt, if_pos hlt]
+  · rw [if_neg hlt, if_neg hlt, if_neg hlt, rangeSum_add f g maxBits (lo + 1)]
+    omega
+  termination_by maxBits + 1 - lo
+
+/-- `∑_{lo ≤ j ≤ maxBits} [x = j] = [lo ≤ x ≤ maxBits]`. -/
+theorem rangeSum_indicator (x maxBits lo : Nat) :
+    rangeSum (fun j => if x = j then 1 else 0) maxBits lo
+      = (if lo ≤ x ∧ x ≤ maxBits then 1 else 0) := by
+  rw [rangeSum_unfold]
+  by_cases hlt : lo > maxBits
+  · rw [if_pos hlt, if_neg (by omega)]
+  · rw [if_neg hlt, rangeSum_indicator x maxBits (lo + 1)]
+    by_cases hx : x = lo
+    · subst hx; rw [if_pos rfl, if_neg (by omega), if_pos (by omega)]
+    · rw [if_neg hx]
+      by_cases hmem : lo ≤ x ∧ x ≤ maxBits
+      · rw [if_pos (by omega), if_pos (by omega)]
+      · rw [if_neg (by omega), if_neg (by omega)]
+  termination_by maxBits + 1 - lo
+
+/-- `rangeSum` of the constant `0` is `0`. -/
+theorem rangeSum_zero (maxBits lo : Nat) : rangeSum (fun _ => 0) maxBits lo = 0 := by
+  rw [rangeSum_unfold]
+  by_cases h : lo > maxBits
+  · rw [if_pos h]
+  · rw [if_neg h, rangeSum_zero maxBits (lo + 1), Nat.add_zero]
+  termination_by maxBits + 1 - lo
+
+/-- `countLongCodes.go` accumulates `acc + ∑_{len ≤ j ≤ maxBits} count[j]`. -/
+theorem countLongCodes_go_eq (count : Array Nat) (maxBits len acc : Nat) :
+    countLongCodes.go count maxBits len acc = acc + rangeSum (fun j => count[j]!) maxBits len := by
+  rw [countLongCodes.go, rangeSum_unfold]
+  by_cases hlt : len > maxBits
+  · rw [if_pos hlt, if_pos hlt, Nat.add_zero]
+  · rw [if_neg hlt, if_neg hlt, countLongCodes_go_eq count maxBits (len + 1) _]
+    omega
+  termination_by maxBits + 1 - len
+
+/-- `countLongCodes` is `∑_{fastBits < j ≤ maxBits} count[j]`. -/
+theorem countLongCodes_eq (count : Array Nat) (maxBits : Nat) :
+    countLongCodes count maxBits = rangeSum (fun j => count[j]!) maxBits (fastBits + 1) := by
+  rw [countLongCodes, countLongCodes_go_eq, Nat.zero_add]
+
+/-- Number of long symbols (`fastBits < len ≤ maxBits`) among indices `< start`. -/
+def Lcount (lengths : Array UInt8) (maxBits : Nat) : Nat → Nat
+  | 0 => 0
+  | start + 1 => Lcount lengths maxBits start
+      + (if fastBits < lengths[start]!.toNat ∧ lengths[start]!.toNat ≤ maxBits then 1 else 0)
+
+/-- `Lcount` is monotone in the processed prefix length. -/
+theorem Lcount_mono (lengths : Array UInt8) (maxBits : Nat) {a b : Nat} (hab : a ≤ b) :
+    Lcount lengths maxBits a ≤ Lcount lengths maxBits b := by
+  induction b with
+  | zero => have : a = 0 := Nat.le_zero.mp hab; subst this; exact Nat.le_refl _
+  | succ k ih =>
+    by_cases hk : a ≤ k
+    · exact Nat.le_trans (ih hk) (by rw [Lcount]; omega)
+    · have : a = k + 1 := by omega
+      subst this; exact Nat.le_refl _
+
+/-- `Lcount` over all symbols is the number of long codes: the per-length buckets
+    (`numEarlier … size`, i.e. `count[len]`) summed over the long lengths. -/
+theorem Lcount_eq_rangeSum (lengths : Array UInt8) (maxBits : Nat) (start : Nat) :
+    Lcount lengths maxBits start
+      = rangeSum (fun j => numEarlier (lengths.toList.map UInt8.toNat) j start) maxBits (fastBits + 1) := by
+  induction start with
+  | zero =>
+    rw [Lcount]
+    rw [rangeSum_congr _ (fun _ => 0) maxBits (fastBits + 1) (fun j _ _ => by simp [numEarlier])]
+    exact (rangeSum_zero maxBits (fastBits + 1)).symm
+  | succ n ih =>
+    rw [Lcount, ih]
+    by_cases hn : n < lengths.size
+    · rw [show (fun j => numEarlier (lengths.toList.map UInt8.toNat) j (n + 1))
+            = (fun j => numEarlier (lengths.toList.map UInt8.toNat) j n
+                + (if lengths[n]!.toNat = j then 1 else 0)) from
+          funext (fun j => numEarlier_succ_arr lengths j n hn)]
+      rw [rangeSum_add, rangeSum_indicator]
+      simp only [Nat.lt_iff_add_one_le]
+    · -- n ≥ size: `lengths[n]!` is not a long length, and `numEarlier` is stable at `n+1`.
+      have hnl : lengths.size ≤ n := by omega
+      have hlen_eq : (lengths.toList.map UInt8.toNat).length = lengths.size := by
+        rw [List.length_map, Array.length_toList]
+      have hstable : rangeSum (fun j => numEarlier (lengths.toList.map UInt8.toNat) j (n + 1)) maxBits (fastBits + 1)
+          = rangeSum (fun j => numEarlier (lengths.toList.map UInt8.toNat) j n) maxBits (fastBits + 1) := by
+        apply rangeSum_congr
+        intro j _ _
+        unfold numEarlier
+        rw [List.take_of_length_le (by omega), List.take_of_length_le (by omega)]
+      have h0 : lengths[n]! = (0 : UInt8) := getElem!_neg lengths n (by omega)
+      rw [h0]
+      simp only [UInt8.toNat_ofNat, hstable]
+      rw [if_neg (by simp only [fastBits]; omega), Nat.add_zero]
+
+/-- The number of blocks bound: `Lcount` never exceeds `countLongCodes`. -/
+theorem Lcount_le_countLongCodes (lengths : Array UInt8) (maxBits start : Nat)
+    (hstart : start ≤ lengths.size) :
+    Lcount lengths maxBits start
+      ≤ countLongCodes (countLengthsFast lengths maxBits) maxBits := by
+  refine Nat.le_trans (Lcount_mono lengths maxBits hstart) ?_
+  rw [Lcount_eq_rangeSum, countLongCodes_eq]
+  apply Nat.le_of_eq
+  apply rangeSum_congr
+  intro j hj hjm
+  exact (numEarlier_size_eq lengths maxBits j (by omega) hjm).symm
+
+/-- `Lcount` counts a subset of the indices `< n`, so is bounded by `n`. -/
+theorem Lcount_le_self (lengths : Array UInt8) (maxBits n : Nat) :
+    Lcount lengths maxBits n ≤ n := by
+  induction n with
+  | zero => simp [Lcount]
+  | succ k ih => rw [Lcount]; split <;> omega
+
+/-- `Lcount` over all symbols is exactly `countLongCodes`. -/
+theorem Lcount_size_eq (lengths : Array UInt8) (maxBits : Nat) :
+    Lcount lengths maxBits lengths.size
+      = countLongCodes (countLengthsFast lengths maxBits) maxBits := by
+  rw [Lcount_eq_rangeSum, countLongCodes_eq]
+  apply rangeSum_congr
+  intro j hj hjm
+  exact (numEarlier_size_eq lengths maxBits j (by omega) hjm).symm
+
+/-- `countLongCodes` (the `subs` block count) is at most the number of symbols. -/
+theorem countLongCodes_le_size (lengths : Array UInt8) (maxBits : Nat) :
+    countLongCodes (countLengthsFast lengths maxBits) maxBits ≤ lengths.size := by
+  rw [← Lcount_size_eq]; exact Lcount_le_self lengths maxBits lengths.size
+
+/-- **At most one long symbol matches `buf`.** Two matching codewords are `cwOf`
+    prefixes of one another, so prefix-freeness forces the symbols equal. -/
+theorem match_unique (lengths : Array UInt8) (maxBits : Nat)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits) (buf : UInt64)
+    (k1 k2 : Nat)
+    (hcf1 : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k1
+        = some (cwOf buf.toNat lengths[k1]!.toNat))
+    (hcf2 : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k2
+        = some (cwOf buf.toNat lengths[k2]!.toNat)) : k1 = k2 := by
+  refine Decidable.by_contra (fun hne => ?_)
+  rcases Nat.le_total lengths[k1]!.toNat lengths[k2]!.toNat with hle | hle
+  · exact Huffman.Spec.canonical_prefix_free (lengths.toList.map UInt8.toNat) maxBits hv
+      k1 k2 _ _ hcf1 hcf2 hne (cwOf_prefix buf.toNat _ _ hle)
+  · exact Huffman.Spec.canonical_prefix_free (lengths.toList.map UInt8.toNat) maxBits hv
+      k2 k1 _ _ hcf2 hcf1 (Ne.symm hne) (cwOf_prefix buf.toNat _ _ hle)
+
+/-! ## The codeword ↔ subtable-index decomposition
+
+A length-`len` long codeword `rev = bitReverse c len 0` matches `buf` iff `buf`'s
+low `len` bits equal `rev`; that splits into: the `fastBits`-prefix agrees
+(`subPrefix buf = rev % 2^fastBits`, selecting the block) and the next
+`len - fastBits` bits agree (`subIndex … % 2^(len-fastBits) = rev / 2^fastBits`,
+selecting the slot within the block). -/
+
+/-- Decompose the length-`len` match on `buf` into a `subPrefix`/`subIndex`
+    agreement, mirroring the block/slot split `buildSubLoop` fills along. -/
+theorem match_decomp (maxBits len : Nat) (hmb15 : maxBits ≤ 15)
+    (hfl : fastBits < len) (hlm : len ≤ maxBits) (buf : UInt64) (rev : Nat)
+    (hrev : rev < 2 ^ len) :
+    buf.toNat % 2 ^ len = rev ↔
+      (subPrefix buf = rev % 2 ^ fastBits ∧
+        subIndex maxBits buf % 2 ^ (len - fastBits) = rev / 2 ^ fastBits) := by
+  have hAB : 2 ^ fastBits * 2 ^ (len - fastBits) = 2 ^ len := by
+    rw [← Nat.pow_add, Nat.add_sub_cancel' (Nat.le_of_lt hfl)]
+  have hdvd1 : (2 : Nat) ^ fastBits ∣ 2 ^ len := Nat.pow_dvd_pow 2 (Nat.le_of_lt hfl)
+  have hdvd2 : (2 : Nat) ^ (len - fastBits) ∣ 2 ^ (maxBits - fastBits) :=
+    Nat.pow_dvd_pow 2 (by omega)
+  -- rewrite subIndex's inner mod to the `(buf / 2^fastBits) % 2^(len-fastBits)` form
+  have hsubIdxMod : subIndex maxBits buf % 2 ^ (len - fastBits)
+      = (buf.toNat / 2 ^ fastBits) % 2 ^ (len - fastBits) := by
+    rw [subIndex_eq maxBits hmb15, Nat.mod_mod_of_dvd _ hdvd2]
+  constructor
+  · intro h
+    refine ⟨?_, ?_⟩
+    · rw [subPrefix_eq_mod, ← Nat.mod_mod_of_dvd buf.toNat hdvd1, h]
+    · rw [hsubIdxMod, ← Nat.mod_mul_right_div_self buf.toNat (2 ^ fastBits) (2 ^ (len - fastBits)),
+          hAB, h]
+  · rintro ⟨h1, h2⟩
+    rw [subPrefix_eq_mod] at h1
+    rw [hsubIdxMod] at h2
+    rw [← hAB, Nat.mod_mul, h1, h2, Nat.add_comm, Nat.div_add_mod]
+
+/-! ## The `buildSubLoop` fill invariant
+
+The single loop lemma below characterizes the final `rootSub`/`subs` at a fixed
+`buf`: a processed long symbol matching `buf` records its packed entry at the
+lookup slot (`fill`), and a non-sentinel slot is always a real match (`sent`,
+contrapositive). The nine threaded hypotheses are the loop invariant — NC on
+`nextCode`, the block-count bound, and the block-allocation / freshness /
+slot-provenance facts. -/
+
+/-- **`buildSubLoop` fill/sentinel invariant.** For a fixed `buf`, the loop's
+    result pair `(R, S)` records exactly the long codewords matching `buf`:
+    every processed long symbol whose canonical codeword is `cwOf buf L` writes
+    its packed entry into the lookup slot, and a non-sentinel slot is such a match.
+    Proved by well-founded induction threading the NC / block-count / allocation /
+    freshness / slot invariants. -/
+theorem buildSubLoop_spec
+    (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size) (buf : UInt64)
+    (nextCode rootSub subs : Array UInt32) (start nextBlock : Nat)
+    (hstart_le : start ≤ lengths.size)
+    (hncsz : nextCode.size = maxBits + 1)
+    (hrootsz : rootSub.size = 2 ^ fastBits)
+    (hsubsz : subs.size
+      = 2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits)
+    (hnc : ∀ b, 1 ≤ b → b ≤ maxBits →
+      nextCode[b]!.toNat
+        = (Huffman.Spec.nextCodes
+            (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits)[b]!
+          + numEarlier (lengths.toList.map UInt8.toNat) b start)
+    (hblock : nextBlock ≤ Lcount lengths maxBits start)
+    (hE : ∀ q, q < 2 ^ fastBits → rootSub[q]! ≠ 0 →
+      ∃ b, b < nextBlock ∧ rootSub[q]!.toNat = b * 2 ^ (maxBits - fastBits) + 1)
+    (hINJ : ∀ q1 q2, q1 < 2 ^ fastBits → q2 < 2 ^ fastBits →
+      rootSub[q1]! ≠ 0 → rootSub[q2]! ≠ 0 → rootSub[q1]!.toNat = rootSub[q2]!.toNat → q1 = q2)
+    (hF : ∀ i, nextBlock * 2 ^ (maxBits - fastBits) ≤ i → i < subs.size → subs[i]! = packEntry 0 0)
+    (hG : ∀ k, k < start → fastBits < lengths[k]!.toNat → lengths[k]!.toNat ≤ maxBits →
+      Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+          = some (cwOf buf.toNat lengths[k]!.toNat) →
+      rootSub[subPrefix buf]! ≠ 0 ∧
+        subs[(rootSub[subPrefix buf]!.toNat - 1) + subIndex maxBits buf]!
+          = packEntry k.toUInt16 lengths[k]!)
+    (hH : (¬ ∃ k, k < start ∧ fastBits < lengths[k]!.toNat ∧ lengths[k]!.toNat ≤ maxBits ∧
+        Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+          = some (cwOf buf.toNat lengths[k]!.toNat)) →
+      rootSub[subPrefix buf]! ≠ 0 →
+        subs[(rootSub[subPrefix buf]!.toNat - 1) + subIndex maxBits buf]! = packEntry 0 0) :
+    ∀ R S : Array UInt32,
+      buildSubLoop lengths nextCode maxBits start rootSub subs nextBlock = (R, S) →
+      (∀ k, k < lengths.size → fastBits < lengths[k]!.toNat → lengths[k]!.toNat ≤ maxBits →
+        Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+            = some (cwOf buf.toNat lengths[k]!.toNat) →
+        R[subPrefix buf]! ≠ 0 ∧
+          S[(R[subPrefix buf]!.toNat - 1) + subIndex maxBits buf]!
+            = packEntry k.toUInt16 lengths[k]!) ∧
+      ((¬ ∃ k, k < lengths.size ∧ fastBits < lengths[k]!.toNat ∧ lengths[k]!.toNat ≤ maxBits ∧
+          Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+            = some (cwOf buf.toNat lengths[k]!.toNat)) →
+        R[subPrefix buf]! ≠ 0 →
+          S[(R[subPrefix buf]!.toNat - 1) + subIndex maxBits buf]! = packEntry 0 0) := by
+  intro R S hRS
+  rw [buildSubLoop] at hRS
+  by_cases hstart : start < lengths.size
+  · rw [dif_pos hstart] at hRS
+    have hls_len : start < (lengths.toList.map UInt8.toNat).length := by
+      rw [List.length_map, Array.length_toList]; exact hstart
+    have hls_start : (lengths.toList.map UInt8.toNat)[start]'hls_len = lengths[start].toNat := by
+      simp only [List.getElem_map, Array.getElem_toList]
+    have hget! : lengths[start]! = lengths[start] := getElem!_pos lengths start hstart
+    have hlen_le : lengths[start].toNat ≤ maxBits := by
+      rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
+    by_cases hlen : 0 < lengths[start].toNat ∧ lengths[start].toNat < nextCode.size
+    · rw [dif_pos hlen] at hRS
+      have hc! : (nextCode[lengths[start].toNat]'hlen.2) = nextCode[lengths[start].toNat]! :=
+        (getElem!_pos nextCode _ hlen.2).symm
+      -- NC invariant threads through the `nextCode` increment
+      have hnc' : ∀ b, 1 ≤ b → b ≤ maxBits →
+          (nextCode.set! lengths[start].toNat (nextCode[lengths[start].toNat]! + 1))[b]!.toNat
+            = (Huffman.Spec.nextCodes
+                (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits)[b]!
+              + numEarlier (lengths.toList.map UInt8.toNat) b (start + 1) := fun b hb1 hb15 =>
+        Deflate.Correctness.nc_invariant_step lengths nextCode start
+          (lengths.toList.map UInt8.toNat) maxBits _ rfl _ rfl hv (by omega)
+          (Nat.le_of_eq hncsz.symm) hstart hls_len hls_start hlen_le hlen.1 hnc b hb1 hb15
+      have hncsz' : (nextCode.set! lengths[start].toNat
+          (nextCode[lengths[start].toNat]! + 1)).size = maxBits + 1 := by
+        rw [Array.size_set!]; exact hncsz
+      by_cases hfast : fastBits < lengths[start].toNat
+      · rw [if_pos hfast] at hRS
+        simp only [hc!] at hRS
+        -- abbreviations used below (written inline in terms):
+        --   L := lengths[start].toNat, cval := nextCode[L]!.toNat,
+        --   rev := bitReverse cval L 0, pl := rev % 2^fastBits, sB := rev / 2^fastBits.
+        have hL_lt256 : lengths[start].toNat < 256 := by omega
+        have hrev_lt : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+            < 2 ^ lengths[start].toNat := bitReverse_lt _ _
+        have hpl_lt : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+            % 2 ^ fastBits < 2 ^ fastBits := Nat.mod_lt _ (Nat.two_pow_pos _)
+        have hlong_start : fastBits < lengths[start]!.toNat ∧ lengths[start]!.toNat ≤ maxBits := by
+          rw [hget!]; exact ⟨hfast, hlen_le⟩
+        -- canonical codeword of `start`
+        have hcf_start : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits start
+            = some (Huffman.Spec.natToBits (nextCode[lengths[start].toNat]!).toNat
+                lengths[start].toNat) := by
+          rw [codeFor_placed lengths maxBits start hstart (by rw [hget!]; exact hlen.1)
+                (by rw [hget!]; exact hlen_le), hget!,
+              ← hnc lengths[start].toNat hlen.1 hlen_le]
+        -- match characterization: `start` matches `buf` iff its low bits equal `rev`
+        have hmatch_iff : (Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits start
+              = some (cwOf buf.toNat lengths[start].toNat)) ↔
+            buf.toNat % 2 ^ lengths[start].toNat
+              = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 := by
+          rw [hcf_start, Option.some.injEq, eq_comm]
+          exact cwOf_eq_iff_mod buf.toNat _ _
+        -- when `start` matches, its prefix is `subPrefix buf`
+        have hpl_of_match : buf.toNat % 2 ^ lengths[start].toNat
+              = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 →
+            subPrefix buf
+              = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                % 2 ^ fastBits :=
+          fun hm => ((match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _ hrev_lt).mp hm).1
+        -- `start` is a long symbol, so `Lcount` grows and `nextBlock` has room
+        have hstart_long_L : Lcount lengths maxBits (start + 1) = Lcount lengths maxBits start + 1 := by
+          rw [Lcount, if_pos (by rw [hget!]; exact ⟨hfast, hlen_le⟩)]
+        have hnb_lt_num : nextBlock < countLongCodes (countLengthsFast lengths maxBits) maxBits := by
+          have h1 : Lcount lengths maxBits (start + 1) ≤ countLongCodes (countLengthsFast lengths maxBits) maxBits :=
+            Lcount_le_countLongCodes lengths maxBits (start + 1) (by omega)
+          omega
+        -- key power identity and the `2^m`-block containment of a codeword's fill
+        have hpow_split : 2 ^ (lengths[start].toNat - fastBits) * 2 ^ (maxBits - lengths[start].toNat)
+            = 2 ^ (maxBits - fastBits) := by
+          rw [← Nat.pow_add]; congr 1; omega
+        have hslot_bound : ∀ j, j < 2 ^ (maxBits - lengths[start].toNat) →
+            bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 / 2 ^ fastBits
+              + j * 2 ^ (lengths[start].toNat - fastBits) < 2 ^ (maxBits - fastBits) := by
+          intro j hj
+          have hsB : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+              / 2 ^ fastBits < 2 ^ (lengths[start].toNat - fastBits) :=
+            Nat.div_lt_of_lt_mul (by rw [← Nat.pow_add,
+              Nat.add_sub_cancel' (Nat.le_of_lt hfast)]; exact hrev_lt)
+          calc bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 / 2 ^ fastBits
+                + j * 2 ^ (lengths[start].toNat - fastBits)
+              < 2 ^ (lengths[start].toNat - fastBits) + j * 2 ^ (lengths[start].toNat - fastBits) := by omega
+            _ = (j + 1) * 2 ^ (lengths[start].toNat - fastBits) := by rw [Nat.succ_mul]; omega
+            _ ≤ 2 ^ (maxBits - lengths[start].toNat) * 2 ^ (lengths[start].toNat - fastBits) :=
+                Nat.mul_le_mul_right _ (by omega)
+            _ = 2 ^ (maxBits - fastBits) := by rw [Nat.mul_comm]; exact hpow_split
+        -- `nextBlock * 2^m + 1` fits in `UInt32`
+        have hbound32 : nextBlock * 2 ^ (maxBits - fastBits) + 1 < 2 ^ 32 := by
+          have h2m : 2 ^ (maxBits - fastBits) ≤ 16 := by
+            calc 2 ^ (maxBits - fastBits) ≤ 2 ^ 4 :=
+                  Nat.pow_le_pow_right (by decide) (by simp only [fastBits]; omega)
+              _ = 16 := by decide
+          have hnb : nextBlock ≤ 65536 := by
+            have h1 := Nat.le_trans (Nat.le_of_lt hnb_lt_num) (countLongCodes_le_size lengths maxBits)
+            have h2 : (UInt16.size : Nat) = 65536 := rfl
+            omega
+          have := Nat.mul_le_mul hnb h2m
+          omega
+        -- `nextBlock * 2^m` (the fresh block base) is a valid `UInt32`-roundtripped value
+        have hoff_toNat : ((nextBlock * 2 ^ (maxBits - fastBits) + 1 : Nat).toUInt32).toNat
+            = nextBlock * 2 ^ (maxBits - fastBits) + 1 := by
+          rw [show ∀ n : Nat, n.toUInt32.toNat = n % 2 ^ 32 from fun _ => rfl,
+              Nat.mod_eq_of_lt hbound32]
+        by_cases hseen : (rootSub[bitReverse (nextCode[lengths[start].toNat]!).toNat
+            lengths[start].toNat 0 % 2 ^ fastBits]! == 0) = true
+        · -- allocation: `start`'s prefix `pl` gets a fresh block `nextBlock`
+          simp only [if_pos hseen] at hRS
+          have hseen0 : rootSub[bitReverse (nextCode[lengths[start].toNat]!).toNat
+              lengths[start].toNat 0 % 2 ^ fastBits]! = 0 := by
+            simpa only [beq_iff_eq] using hseen
+          refine buildSubLoop_spec lengths maxBits hmb15 hv hbound buf _ _ _ (start + 1)
+            (nextBlock + 1) (by omega) hncsz' (by rw [Array.size_set!]; exact hrootsz)
+            (by rw [fillSlots_size]; exact hsubsz) hnc' (by rw [hstart_long_L]; omega) ?_ ?_ ?_ ?_ ?_
+            R S hRS
+          · -- hE': the new entry is `nextBlock * 2^m + 1`, all others as before
+            intro q hq hqne
+            by_cases hqpl : q = bitReverse (nextCode[lengths[start].toNat]!).toNat
+                lengths[start].toNat 0 % 2 ^ fastBits
+            · subst hqpl
+              rw [Array.getElem!_set!_self _ _ _ (by rw [hrootsz]; exact hpl_lt)]
+              exact ⟨nextBlock, by omega, by rw [hoff_toNat]⟩
+            · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hqpl)] at hqne ⊢
+              obtain ⟨b, hb, hbeq⟩ := hE q hq hqne
+              exact ⟨b, by omega, hbeq⟩
+          · -- hINJ': the fresh entry `nextBlock * 2^m + 1` differs from all earlier blocks
+            intro q1 q2 hq1 hq2 hne1 hne2 heq
+            by_cases hq1pl : q1 = bitReverse (nextCode[lengths[start].toNat]!).toNat
+                lengths[start].toNat 0 % 2 ^ fastBits <;>
+              by_cases hq2pl : q2 = bitReverse (nextCode[lengths[start].toNat]!).toNat
+                lengths[start].toNat 0 % 2 ^ fastBits
+            · rw [hq1pl, hq2pl]
+            · exfalso
+              rw [hq1pl, Array.getElem!_set!_self _ _ _ (by rw [hrootsz]; exact hpl_lt), hoff_toNat,
+                  Array.getElem!_set!_ne _ _ _ _ (Ne.symm hq2pl)] at heq
+              rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hq2pl)] at hne2
+              obtain ⟨b2, hb2, hbeq2⟩ := hE q2 hq2 hne2
+              rw [hbeq2] at heq
+              have hmul : nextBlock * 2 ^ (maxBits - fastBits) = b2 * 2 ^ (maxBits - fastBits) := by omega
+              have : nextBlock = b2 := Nat.eq_of_mul_eq_mul_right (Nat.two_pow_pos _) hmul
+              omega
+            · exfalso
+              rw [hq2pl, Array.getElem!_set!_self _ _ _ (by rw [hrootsz]; exact hpl_lt), hoff_toNat,
+                  Array.getElem!_set!_ne _ _ _ _ (Ne.symm hq1pl)] at heq
+              rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hq1pl)] at hne1
+              obtain ⟨b1, hb1, hbeq1⟩ := hE q1 hq1 hne1
+              rw [hbeq1] at heq
+              have hmul : b1 * 2 ^ (maxBits - fastBits) = nextBlock * 2 ^ (maxBits - fastBits) := by omega
+              have : b1 = nextBlock := Nat.eq_of_mul_eq_mul_right (Nat.two_pow_pos _) hmul
+              omega
+            · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hq1pl)] at hne1 heq
+              rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hq2pl)] at hne2 heq
+              exact hINJ q1 q2 hq1 hq2 hne1 hne2 heq
+          · -- hF': the fill stays within the new block, tail beyond `(nextBlock+1)*2^m` untouched
+            intro i hi hisz
+            rw [fillSlots_size] at hisz
+            have hexp : (nextBlock + 1) * 2 ^ (maxBits - fastBits)
+                = nextBlock * 2 ^ (maxBits - fastBits) + 2 ^ (maxBits - fastBits) := by
+              rw [Nat.succ_mul]
+            rw [fillSlots_getElem_ne subs _ _ _ i _ (fun j hj => by
+              have := hslot_bound j hj; omega)]
+            exact hF i (by omega) hisz
+          · -- hG': a matching processed symbol records its packed entry
+            intro k hk hlong hkm hcf
+            rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hk) with hlt | heq
+            · -- k < start: matches at a prefix already allocated (≠ the fresh one)
+              obtain ⟨hrootpf_ne, hslot_old⟩ := hG k hlt hlong hkm hcf
+              have hpl_ne_pf : bitReverse (nextCode[lengths[start].toNat]!).toNat
+                  lengths[start].toNat 0 % 2 ^ fastBits ≠ subPrefix buf := fun h => hrootpf_ne (h ▸ hseen0)
+              obtain ⟨bpf, hbpf, hbpfeq⟩ := hE (subPrefix buf) (subPrefix_lt buf) hrootpf_ne
+              refine ⟨by rw [Array.getElem!_set!_ne _ _ _ _ hpl_ne_pf]; exact hrootpf_ne, ?_⟩
+              rw [Array.getElem!_set!_ne _ _ _ _ hpl_ne_pf,
+                  fillSlots_getElem_ne subs _ _ _ _ _ (fun j hj => by
+                    have hT := subIndex_lt maxBits hmb15 buf
+                    have hmul : (bpf + 1) * 2 ^ (maxBits - fastBits)
+                        ≤ nextBlock * 2 ^ (maxBits - fastBits) :=
+                      Nat.mul_le_mul_right _ (by omega)
+                    rw [Nat.succ_mul] at hmul
+                    have hkey : bpf * 2 ^ (maxBits - fastBits) + subIndex maxBits buf
+                        < nextBlock * 2 ^ (maxBits - fastBits) :=
+                      Nat.lt_of_lt_of_le (Nat.add_lt_add_left hT (bpf * 2 ^ (maxBits - fastBits))) hmul
+                    rw [hbpfeq, Nat.add_sub_cancel]
+                    exact Nat.ne_of_lt (Nat.lt_of_lt_of_le hkey
+                      (Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _))))]
+              exact hslot_old
+            · -- k = start: the fill places `start`'s entry at the lookup slot
+              subst k
+              rw [hget!] at hcf
+              have hmatch : buf.toNat % 2 ^ lengths[start].toNat
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 :=
+                hmatch_iff.mp hcf
+              have hpf_eq_pl : subPrefix buf
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    % 2 ^ fastBits := hpl_of_match hmatch
+              have hThi : subIndex maxBits buf % 2 ^ (lengths[start].toNat - fastBits)
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    / 2 ^ fastBits :=
+                ((match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _ hrev_lt).mp
+                  hmatch).2
+              have hrootpf_val : (rootSub.set! (bitReverse (nextCode[lengths[start].toNat]!).toNat
+                    lengths[start].toNat 0 % 2 ^ fastBits)
+                    ((nextBlock * 2 ^ (maxBits - fastBits) + 1).toUInt32))[subPrefix buf]!.toNat
+                  = nextBlock * 2 ^ (maxBits - fastBits) + 1 := by
+                rw [hpf_eq_pl, Array.getElem!_set!_self _ _ _ (by rw [hrootsz]; exact hpl_lt), hoff_toNat]
+              have hne0 : (rootSub.set! (bitReverse (nextCode[lengths[start].toNat]!).toNat
+                    lengths[start].toNat 0 % 2 ^ fastBits)
+                    ((nextBlock * 2 ^ (maxBits - fastBits) + 1).toUInt32))[subPrefix buf]! ≠ 0 := by
+                intro h0
+                rw [h0, show ((0 : UInt32)).toNat = 0 from rfl] at hrootpf_val
+                omega
+              refine ⟨hne0, ?_⟩
+              rw [hrootpf_val]
+              have hj0_lt : subIndex maxBits buf / 2 ^ (lengths[start].toNat - fastBits)
+                  < 2 ^ (maxBits - lengths[start].toNat) :=
+                Nat.div_lt_of_lt_mul (by rw [hpow_split]; exact subIndex_lt maxBits hmb15 buf)
+              have hidx_eq : nextBlock * 2 ^ (maxBits - fastBits) + 1 - 1 + subIndex maxBits buf
+                  = nextBlock * 2 ^ (maxBits - fastBits)
+                      + bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                        / 2 ^ fastBits
+                    + subIndex maxBits buf / 2 ^ (lengths[start].toNat - fastBits)
+                      * 2 ^ (lengths[start].toNat - fastBits) := by
+                have hdm := Nat.div_add_mod (subIndex maxBits buf) (2 ^ (lengths[start].toNat - fastBits))
+                rw [hThi, Nat.mul_comm] at hdm; omega
+              rw [hidx_eq,
+                  fillSlots_getElem_eq subs _ _ _ _ _ (Nat.two_pow_pos _) hj0_lt (by
+                    rw [← hidx_eq, Nat.add_sub_cancel, hsubsz,
+                        Nat.mul_comm (2 ^ (maxBits - fastBits))]
+                    have hT := subIndex_lt maxBits hmb15 buf
+                    have hmul : (nextBlock + 1) * 2 ^ (maxBits - fastBits)
+                        ≤ countLongCodes (countLengthsFast lengths maxBits) maxBits
+                          * 2 ^ (maxBits - fastBits) := Nat.mul_le_mul_right _ (by omega)
+                    rw [Nat.succ_mul] at hmul
+                    exact Nat.lt_of_lt_of_le
+                      (Nat.add_lt_add_left hT (nextBlock * 2 ^ (maxBits - fastBits))) hmul)]
+              rw [hget!]
+          · -- hH': no processed match ⇒ the lookup slot is the sentinel
+            intro hno hne
+            by_cases hpf_pl : subPrefix buf = bitReverse (nextCode[lengths[start].toNat]!).toNat
+                lengths[start].toNat 0 % 2 ^ fastBits
+            · -- pf = pl: the fresh block, `start` itself does not match, slot stays fresh
+              have hstart_nomatch : ¬ buf.toNat % 2 ^ lengths[start].toNat
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 := by
+                intro hm
+                exact hno ⟨start, Nat.lt_succ_self start, hlong_start.1, hlong_start.2,
+                  by rw [hget!]; exact hmatch_iff.mpr hm⟩
+              have hval : (rootSub.set! (bitReverse (nextCode[lengths[start].toNat]!).toNat
+                    lengths[start].toNat 0 % 2 ^ fastBits)
+                    ((nextBlock * 2 ^ (maxBits - fastBits) + 1).toUInt32))[subPrefix buf]!.toNat
+                  = nextBlock * 2 ^ (maxBits - fastBits) + 1 := by
+                rw [hpf_pl, Array.getElem!_set!_self _ _ _ (by rw [hrootsz]; exact hpl_lt), hoff_toNat]
+              rw [hval, Nat.add_sub_cancel,
+                  fillSlots_getElem_ne subs _ _ _ _ _ (fun j hj => by
+                    intro heq
+                    apply hstart_nomatch
+                    have hsB : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                        / 2 ^ fastBits < 2 ^ (lengths[start].toNat - fastBits) :=
+                      Nat.div_lt_of_lt_mul (by rw [← Nat.pow_add,
+                        Nat.add_sub_cancel' (Nat.le_of_lt hfast)]; exact hrev_lt)
+                    have hTmod : subIndex maxBits buf % 2 ^ (lengths[start].toNat - fastBits)
+                        = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                          / 2 ^ fastBits := by
+                      have : subIndex maxBits buf
+                          = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                            / 2 ^ fastBits + j * 2 ^ (lengths[start].toNat - fastBits) := by omega
+                      rw [this, Nat.add_mul_mod_self_right, Nat.mod_eq_of_lt hsB]
+                    exact (match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _
+                      hrev_lt).mpr ⟨hpf_pl, hTmod⟩)]
+              refine hF _ (Nat.le_add_right _ _) ?_
+              rw [hsubsz, Nat.mul_comm (2 ^ (maxBits - fastBits))]
+              have hT := subIndex_lt maxBits hmb15 buf
+              have hmul : (nextBlock + 1) * 2 ^ (maxBits - fastBits)
+                  ≤ countLongCodes (countLengthsFast lengths maxBits) maxBits * 2 ^ (maxBits - fastBits) :=
+                Nat.mul_le_mul_right _ (by omega)
+              rw [Nat.succ_mul] at hmul
+              exact Nat.lt_of_lt_of_le
+                (Nat.add_lt_add_left hT (nextBlock * 2 ^ (maxBits - fastBits))) hmul
+            · -- pf ≠ pl: the fill (fresh block) leaves `pf`'s slot; carry the old sentinel
+              have hpl_ne_pf : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                  % 2 ^ fastBits ≠ subPrefix buf := fun h => hpf_pl h.symm
+              rw [Array.getElem!_set!_ne _ _ _ _ hpl_ne_pf] at hne
+              obtain ⟨bpf, hbpf, hbpfeq⟩ := hE (subPrefix buf) (subPrefix_lt buf) hne
+              rw [Array.getElem!_set!_ne _ _ _ _ hpl_ne_pf,
+                  fillSlots_getElem_ne subs _ _ _ _ _ (fun j hj => by
+                    have hT := subIndex_lt maxBits hmb15 buf
+                    have hmul : (bpf + 1) * 2 ^ (maxBits - fastBits)
+                        ≤ nextBlock * 2 ^ (maxBits - fastBits) := Nat.mul_le_mul_right _ (by omega)
+                    rw [Nat.succ_mul] at hmul
+                    have hkey : bpf * 2 ^ (maxBits - fastBits) + subIndex maxBits buf
+                        < nextBlock * 2 ^ (maxBits - fastBits) :=
+                      Nat.lt_of_lt_of_le (Nat.add_lt_add_left hT (bpf * 2 ^ (maxBits - fastBits))) hmul
+                    rw [hbpfeq, Nat.add_sub_cancel]
+                    exact Nat.ne_of_lt (Nat.lt_of_lt_of_le hkey
+                      (Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _))))]
+              exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
+        · -- existing block: `start`'s prefix already owns a block (`nextBlock`/`rootSub` unchanged)
+          simp only [if_neg hseen] at hRS
+          clear hoff_toNat hbound32
+          have hseen_ne : rootSub[bitReverse (nextCode[lengths[start].toNat]!).toNat
+              lengths[start].toNat 0 % 2 ^ fastBits]! ≠ 0 := by simpa only [beq_iff_eq] using hseen
+          obtain ⟨bpl, hbpl, hbpleq⟩ :=
+            hE (bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+              % 2 ^ fastBits) hpl_lt hseen_ne
+          refine buildSubLoop_spec lengths maxBits hmb15 hv hbound buf _ rootSub _ (start + 1)
+            nextBlock (by omega) hncsz' hrootsz (by rw [fillSlots_size]; exact hsubsz) hnc'
+            (by rw [hstart_long_L]; omega) hE hINJ ?_ ?_ ?_ R S hRS
+          · -- hF': the fill stays inside `pl`'s (existing) block, tail beyond `nextBlock*2^m` untouched
+            intro i hi hisz
+            rw [fillSlots_size] at hisz
+            rw [fillSlots_getElem_ne subs _ _ _ _ _ (fun j hj => by
+              have hsb := hslot_bound j hj
+              have hmul : (bpl + 1) * 2 ^ (maxBits - fastBits) ≤ nextBlock * 2 ^ (maxBits - fastBits) :=
+                Nat.mul_le_mul_right _ (by omega)
+              rw [Nat.succ_mul] at hmul
+              rw [hbpleq, Nat.add_sub_cancel]
+              refine Nat.ne_of_gt (Nat.lt_of_lt_of_le (Nat.lt_of_lt_of_le ?_ hmul) hi)
+              rw [Nat.add_assoc]; exact Nat.add_lt_add_left hsb _)]
+            exact hF i hi hisz
+          · -- hG': a matching processed symbol records its packed entry
+            intro k hk hlong hkm hcf
+            rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hk) with hlt | heq
+            · -- k < start: unique match; the fill leaves `pf`'s slot
+              obtain ⟨hrootpf_ne, hslot_old⟩ := hG k hlt hlong hkm hcf
+              obtain ⟨bpf, hbpf, hbpfeq⟩ := hE (subPrefix buf) (subPrefix_lt buf) hrootpf_ne
+              refine ⟨hrootpf_ne, ?_⟩
+              rw [fillSlots_getElem_ne subs _ _ _ _ _ (fun j hj => by
+                intro heq
+                have hT := subIndex_lt maxBits hmb15 buf
+                have hsb := hslot_bound j hj
+                have hsB : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    / 2 ^ fastBits < 2 ^ (lengths[start].toNat - fastBits) :=
+                  Nat.div_lt_of_lt_mul (by rw [← Nat.pow_add,
+                    Nat.add_sub_cancel' (Nat.le_of_lt hfast)]; exact hrev_lt)
+                rw [hbpfeq, hbpleq, Nat.add_sub_cancel, Nat.add_sub_cancel] at heq
+                have hbb : bpf = bpl := by
+                  rcases Nat.lt_trichotomy bpf bpl with h | h | h
+                  · exfalso
+                    have hle := Nat.mul_le_mul_right (2 ^ (maxBits - fastBits)) h
+                    rw [Nat.succ_mul] at hle
+                    have h1 : bpl * 2 ^ (maxBits - fastBits)
+                        ≤ bpf * 2 ^ (maxBits - fastBits) + subIndex maxBits buf := by rw [heq]; exact Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _)
+                    omega
+                  · exact h
+                  · exfalso
+                    have hle := Nat.mul_le_mul_right (2 ^ (maxBits - fastBits)) h
+                    rw [Nat.succ_mul] at hle
+                    have h1 : bpf * 2 ^ (maxBits - fastBits) + subIndex maxBits buf
+                        < bpf * 2 ^ (maxBits - fastBits) := by
+                      rw [heq]; exact Nat.lt_of_lt_of_le (by omega) hle
+                    omega
+                subst hbb
+                have hpf_pl : subPrefix buf = bitReverse (nextCode[lengths[start].toNat]!).toNat
+                    lengths[start].toNat 0 % 2 ^ fastBits :=
+                  hINJ (subPrefix buf) _ (subPrefix_lt buf) hpl_lt hrootpf_ne hseen_ne
+                    (by rw [hbpfeq, hbpleq])
+                have hsub : subIndex maxBits buf
+                    = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                      / 2 ^ fastBits + j * 2 ^ (lengths[start].toNat - fastBits) := by omega
+                have hTmod : subIndex maxBits buf % 2 ^ (lengths[start].toNat - fastBits)
+                    = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                      / 2 ^ fastBits := by
+                  rw [hsub, Nat.add_mul_mod_self_right, Nat.mod_eq_of_lt hsB]
+                have hstart_match : buf.toNat % 2 ^ lengths[start].toNat
+                    = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 :=
+                  (match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _ hrev_lt).mpr
+                    ⟨hpf_pl, hTmod⟩
+                have hstart_cf : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits start
+                    = some (cwOf buf.toNat lengths[start]!.toNat) := by
+                  rw [hget!]; exact hmatch_iff.mpr hstart_match
+                exact absurd (match_unique lengths maxBits hv buf start k hstart_cf hcf) (by omega))]
+              exact hslot_old
+            · -- k = start: the fill places `start`'s entry at the lookup slot
+              subst k
+              rw [hget!] at hcf
+              have hmatch : buf.toNat % 2 ^ lengths[start].toNat
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 :=
+                hmatch_iff.mp hcf
+              have hpf_eq_pl : subPrefix buf
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    % 2 ^ fastBits := hpl_of_match hmatch
+              have hThi : subIndex maxBits buf % 2 ^ (lengths[start].toNat - fastBits)
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    / 2 ^ fastBits :=
+                ((match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _ hrev_lt).mp
+                  hmatch).2
+              have hrootpf_val : rootSub[subPrefix buf]!.toNat = bpl * 2 ^ (maxBits - fastBits) + 1 := by
+                rw [hpf_eq_pl, hbpleq]
+              have hne0 : rootSub[subPrefix buf]! ≠ 0 := by
+                intro h0
+                rw [h0, show ((0 : UInt32)).toNat = 0 from rfl] at hrootpf_val
+                omega
+              refine ⟨hne0, ?_⟩
+              rw [hpf_eq_pl, hbpleq]
+              simp only [Nat.add_sub_cancel]
+              have hj0_lt : subIndex maxBits buf / 2 ^ (lengths[start].toNat - fastBits)
+                  < 2 ^ (maxBits - lengths[start].toNat) :=
+                Nat.div_lt_of_lt_mul (by rw [hpow_split]; exact subIndex_lt maxBits hmb15 buf)
+              have hidx_eq : bpl * 2 ^ (maxBits - fastBits) + subIndex maxBits buf
+                  = bpl * 2 ^ (maxBits - fastBits)
+                      + bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                        / 2 ^ fastBits
+                    + subIndex maxBits buf / 2 ^ (lengths[start].toNat - fastBits)
+                      * 2 ^ (lengths[start].toNat - fastBits) := by
+                have hdm := Nat.div_add_mod (subIndex maxBits buf) (2 ^ (lengths[start].toNat - fastBits))
+                rw [hThi, Nat.mul_comm] at hdm; omega
+              rw [hidx_eq,
+                  fillSlots_getElem_eq subs _ _ _ _ _ (Nat.two_pow_pos _) hj0_lt (by
+                    rw [← hidx_eq, hsubsz, Nat.mul_comm (2 ^ (maxBits - fastBits))]
+                    have hT := subIndex_lt maxBits hmb15 buf
+                    have hmul : (bpl + 1) * 2 ^ (maxBits - fastBits)
+                        ≤ countLongCodes (countLengthsFast lengths maxBits) maxBits
+                          * 2 ^ (maxBits - fastBits) := Nat.mul_le_mul_right _ (by omega)
+                    rw [Nat.succ_mul] at hmul
+                    exact Nat.lt_of_lt_of_le
+                      (Nat.add_lt_add_left hT (bpl * 2 ^ (maxBits - fastBits))) hmul)]
+              rw [hget!]
+          · -- hH': no processed match ⇒ the lookup slot is the sentinel
+            intro hno hne
+            obtain ⟨bpf, hbpf, hbpfeq⟩ := hE (subPrefix buf) (subPrefix_lt buf) hne
+            rw [fillSlots_getElem_ne subs _ _ _ _ _ (fun j hj => by
+              intro heq
+              have hT := subIndex_lt maxBits hmb15 buf
+              have hsb := hslot_bound j hj
+              have hsB : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                  / 2 ^ fastBits < 2 ^ (lengths[start].toNat - fastBits) :=
+                Nat.div_lt_of_lt_mul (by rw [← Nat.pow_add,
+                  Nat.add_sub_cancel' (Nat.le_of_lt hfast)]; exact hrev_lt)
+              rw [hbpfeq, hbpleq, Nat.add_sub_cancel, Nat.add_sub_cancel] at heq
+              have hbb : bpf = bpl := by
+                rcases Nat.lt_trichotomy bpf bpl with h | h | h
+                · exfalso
+                  have hle := Nat.mul_le_mul_right (2 ^ (maxBits - fastBits)) h
+                  rw [Nat.succ_mul] at hle
+                  have h1 : bpl * 2 ^ (maxBits - fastBits)
+                      ≤ bpf * 2 ^ (maxBits - fastBits) + subIndex maxBits buf := by rw [heq]; exact Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _)
+                  omega
+                · exact h
+                · exfalso
+                  have hle := Nat.mul_le_mul_right (2 ^ (maxBits - fastBits)) h
+                  rw [Nat.succ_mul] at hle
+                  have h1 : bpf * 2 ^ (maxBits - fastBits) + subIndex maxBits buf
+                      < bpf * 2 ^ (maxBits - fastBits) := by
+                    rw [heq]; exact Nat.lt_of_lt_of_le (by omega) hle
+                  omega
+              subst hbb
+              have hpf_pl : subPrefix buf = bitReverse (nextCode[lengths[start].toNat]!).toNat
+                  lengths[start].toNat 0 % 2 ^ fastBits :=
+                hINJ (subPrefix buf) _ (subPrefix_lt buf) hpl_lt hne hseen_ne (by rw [hbpfeq, hbpleq])
+              have hsub : subIndex maxBits buf
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    / 2 ^ fastBits + j * 2 ^ (lengths[start].toNat - fastBits) := by omega
+              have hTmod : subIndex maxBits buf % 2 ^ (lengths[start].toNat - fastBits)
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
+                    / 2 ^ fastBits := by
+                rw [hsub, Nat.add_mul_mod_self_right, Nat.mod_eq_of_lt hsB]
+              have hstart_match : buf.toNat % 2 ^ lengths[start].toNat
+                  = bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0 :=
+                (match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _ hrev_lt).mpr
+                  ⟨hpf_pl, hTmod⟩
+              exact hno ⟨start, Nat.lt_succ_self start, hlong_start.1, hlong_start.2,
+                by rw [hget!]; exact hmatch_iff.mpr hstart_match⟩)]
+            exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
+      · rw [if_neg hfast] at hRS
+        simp only [hc!] at hRS
+        -- short positive length: `nextCode` advances, no fill
+        refine buildSubLoop_spec lengths maxBits hmb15 hv hbound buf _ rootSub subs (start + 1)
+          nextBlock (by omega) hncsz' hrootsz hsubsz hnc' ?_ hE hINJ hF ?_ ?_ R S hRS
+        · -- block bound: `start` is not long (`len ≤ fastBits`)
+          rw [Lcount, if_neg (by rw [hget!]; omega)]; exact hblock
+        · -- hG': the new symbol is not long, so no new match
+          intro k hk hlong hkm hcf
+          rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hk) with hlt | heq
+          · exact hG k hlt hlong hkm hcf
+          · subst heq; rw [hget!] at hlong; omega
+        · -- hH': fewer symbols processed, so the no-match premise is weaker
+          intro hno hne
+          exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
+    · rw [dif_neg hlen] at hRS
+      -- length 0 (or over-bound, impossible under validity): skip, nothing changes
+      have hlen0 : lengths[start].toNat = 0 := by
+        rcases Nat.eq_zero_or_pos lengths[start].toNat with h | h
+        · exact h
+        · exact absurd ⟨h, by rw [hncsz]; omega⟩ hlen
+      have hls_val : (lengths.toList.map UInt8.toNat)[start]'hls_len = 0 := by
+        rw [hls_start]; exact hlen0
+      have hnc' : ∀ b, 1 ≤ b → b ≤ maxBits →
+          nextCode[b]!.toNat
+            = (Huffman.Spec.nextCodes
+                (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits)[b]!
+              + numEarlier (lengths.toList.map UInt8.toNat) b (start + 1) := fun b hb1 hb15 =>
+        Deflate.Correctness.nc_invariant_skip nextCode start (lengths.toList.map UInt8.toNat)
+          maxBits _ hls_len hls_val hnc b hb1 hb15
+      refine buildSubLoop_spec lengths maxBits hmb15 hv hbound buf nextCode rootSub subs (start + 1)
+        nextBlock (by omega) hncsz hrootsz hsubsz hnc' ?_ hE hINJ hF ?_ ?_ R S hRS
+      · rw [Lcount, if_neg (by rw [hget!, hlen0]; simp only [fastBits]; omega)]; exact hblock
+      · intro k hk hlong hkm hcf
+        rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hk) with hlt | heq
+        · exact hG k hlt hlong hkm hcf
+        · subst heq; rw [hget!, hlen0] at hlong; simp only [fastBits] at hlong; omega
+      · intro hno hne
+        exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
+  · rw [dif_neg hstart] at hRS
+    -- base case: the loop is finished, result is the current arrays
+    rw [Prod.mk.injEq] at hRS
+    obtain ⟨hRe, hSe⟩ := hRS
+    subst hRe; subst hSe
+    have hsize : lengths.size ≤ start := by omega
+    -- long symbols only exist below `lengths.size`
+    have hlong_lt : ∀ k, fastBits < lengths[k]!.toNat → k < lengths.size := by
+      intro k hlong
+      rcases Nat.lt_or_ge k lengths.size with hk | hk
+      · exact hk
+      · exfalso
+        have hz : lengths[k]! = 0 := getElem!_neg lengths k (by omega)
+        rw [hz] at hlong; simp only [UInt8.toNat_ofNat, fastBits] at hlong; omega
+    refine ⟨?_, ?_⟩
+    · intro k _ hlong hkm hcf
+      exact hG k (Nat.lt_of_lt_of_le (hlong_lt k hlong) hsize) hlong hkm hcf
+    · intro hno hne
+      exact hH (fun ⟨k, _, hlong, hkm, hcf⟩ =>
+        hno ⟨k, hlong_lt k hlong, hlong, hkm, hcf⟩) hne
+  termination_by lengths.size - start
+  decreasing_by all_goals omega
+
+/-- `nextCodesFast` on the fast histogram is the spec `nextCodes` mapped to
+    `UInt32` (local copy of the `hnext` step in `buildTableCanonicalFast_eq`). -/
+theorem nextCodesFast_eq (lengths : Array UInt8) (maxBits : Nat) :
+    nextCodesFast (countLengthsFast lengths maxBits) maxBits
+      = (Huffman.Spec.nextCodes
+          (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits).map
+          (·.toUInt32) := by
+  have hinit : (Array.replicate (maxBits + 1) (0 : UInt32))
+      = (Array.replicate (maxBits + 1) (0 : Nat)).map (·.toUInt32) := by
+    rw [Array.map_replicate]; rfl
+  rw [countLengthsFast_eq, nextCodesFast, Huffman.Spec.nextCodes, hinit]
+  exact nextCodesFast_go_eq _ maxBits (maxBits + 1) 1 0 (Array.replicate (maxBits + 1) 0)
+    (by omega)
+
+/-- The `start = 0` instantiation of `buildSubLoop_spec` over `buildLongDecode`'s
+    subtables: the initial invariants are all vacuous or immediate. -/
+theorem buildLongDecode_sub_spec (lengths : Array UInt8) (maxBits : Nat)
+    (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size) (buf : UInt64) :
+    (∀ k, k < lengths.size → fastBits < lengths[k]!.toNat → lengths[k]!.toNat ≤ maxBits →
+      Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+          = some (cwOf buf.toNat lengths[k]!.toNat) →
+      (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! ≠ 0 ∧
+        subSlot (buildLongDecode lengths maxBits) maxBits buf = packEntry k.toUInt16 lengths[k]!) ∧
+    ((¬ ∃ k, k < lengths.size ∧ fastBits < lengths[k]!.toNat ∧ lengths[k]!.toNat ≤ maxBits ∧
+        Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+          = some (cwOf buf.toNat lengths[k]!.toNat)) →
+      (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! ≠ 0 →
+        subSlot (buildLongDecode lengths maxBits) maxBits buf = packEntry 0 0) := by
+  -- initial invariants (all vacuous or immediate) applied to `buildSubLoop … 0 …`
+  have hncsz : (nextCodesFast (countLengthsFast lengths maxBits) maxBits).size = maxBits + 1 := by
+    rw [nextCodesFast_eq, Array.size_map, Huffman.Spec.nextCodes_size]
+  have hrootsz : (Array.replicate (2 ^ fastBits) (0 : UInt32)).size = 2 ^ fastBits :=
+    Array.size_replicate
+  have hsubsz : (Array.replicate
+        (2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits)
+        (packEntry 0 0)).size
+      = 2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits :=
+    Array.size_replicate
+  have hnc0 : ∀ b, 1 ≤ b → b ≤ maxBits →
+      (nextCodesFast (countLengthsFast lengths maxBits) maxBits)[b]!.toNat
+        = (Huffman.Spec.nextCodes
+            (Huffman.Spec.countLengths (lengths.toList.map UInt8.toNat) maxBits) maxBits)[b]!
+          + numEarlier (lengths.toList.map UInt8.toNat) b 0 := by
+    intro b hb1 hbm
+    rw [nextCodesFast_eq, show numEarlier (lengths.toList.map UInt8.toNat) b 0 = 0 from by
+      simp [numEarlier], Nat.add_zero]
+    exact canon_initial_nc_invariant lengths maxBits (by omega) hv b hb1 hbm
+  have hzero_root : ∀ q, q < 2 ^ fastBits → (Array.replicate (2 ^ fastBits) (0 : UInt32))[q]! = 0 := by
+    intro q hq
+    rw [getElem!_pos _ q (by rw [Array.size_replicate]; exact hq), Array.getElem_replicate]
+  have hzero_subs : ∀ i, i < (Array.replicate
+        (2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits)
+        (packEntry 0 0)).size →
+      (Array.replicate
+        (2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits)
+        (packEntry 0 0))[i]! = packEntry 0 0 := by
+    intro i hi
+    rw [getElem!_pos _ i hi, Array.getElem_replicate]
+  have hpair : buildSubLoop lengths (nextCodesFast (countLengthsFast lengths maxBits) maxBits)
+        maxBits 0 (Array.replicate (2 ^ fastBits) 0)
+        (Array.replicate
+          (2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits)
+          (packEntry 0 0)) 0
+      = ((buildLongDecode lengths maxBits).rootSub, (buildLongDecode lengths maxBits).subs) := rfl
+  have hspec := buildSubLoop_spec lengths maxBits hmb15 hv hbound buf
+    (nextCodesFast (countLengthsFast lengths maxBits) maxBits)
+    (Array.replicate (2 ^ fastBits) 0)
+    (Array.replicate
+      (2 ^ (maxBits - fastBits) * countLongCodes (countLengthsFast lengths maxBits) maxBits)
+      (packEntry 0 0)) 0 0
+    (Nat.zero_le _) hncsz hrootsz hsubsz hnc0 (Nat.zero_le _)
+    (fun q hq hne => absurd (hzero_root q hq) hne)
+    (fun q1 q2 hq1 _ hne1 _ _ => absurd (hzero_root q1 hq1) hne1)
+    (fun i _ hi => hzero_subs i hi)
+    (fun k hk _ _ _ => absurd hk (by omega))
+    (fun _ hne => absurd (hzero_root (subPrefix buf) (subPrefix_lt buf)) hne)
+    _ _ hpair
+  obtain ⟨hfill, hsent⟩ := hspec
+  constructor
+  · intro k hk hlong hkm hcf
+    obtain ⟨hne, hslot⟩ := hfill k hk hlong hkm hcf
+    rw [subSlot]
+    exact ⟨hne, hslot⟩
+  · intro hno hne
+    rw [subSlot]
+    exact hsent hno hne
+
 /-- **Subtable fill, completeness (`buildSubLoop` invariant, `←`).** If symbol `s`
     of length `L` (`fastBits < L ≤ maxBits`) has canonical codeword `cwOf buf L`,
     its `fastBits`-bit prefix owns a subtable block (`rootSub ≠ 0`) and the slot the
@@ -1167,7 +2094,16 @@ theorem subFill_complete (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBit
         = some (cwOf buf.toNat L)) :
     (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! ≠ 0 ∧
       subSlot (buildLongDecode lengths maxBits) maxBits buf = packEntry s.toUInt16 L.toUInt8 := by
-  sorry
+  obtain ⟨hfill, _⟩ := buildLongDecode_sub_spec lengths maxBits hmb15 hv hbound buf
+  have hcf' : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+      = some (cwOf buf.toNat lengths[s]!.toNat) := by rw [hlen_s]; exact hcf
+  obtain ⟨hne, hslot⟩ := hfill s hs (by rw [hlen_s]; exact hL) (by rw [hlen_s]; exact hLm) hcf'
+  refine ⟨hne, ?_⟩
+  have hlenU : lengths[s]! = L.toUInt8 := by
+    have hLtoNat : (L.toUInt8).toNat = L :=
+      UInt8.toNat_ofNat_of_lt (Nat.lt_of_le_of_lt (show L ≤ 15 by omega) (by decide))
+    exact UInt8.toNat_inj.mp (by rw [hLtoNat]; exact hlen_s)
+  rw [hslot, hlenU]
 
 /-- **Subtable fill, soundness (`buildSubLoop` invariant, `→`).** A non-sentinel
     sub-slot at the lookup index holds `packEntry s L` for a real symbol `s` of a
@@ -1182,7 +2118,14 @@ theorem subFill_sound (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits �
         = some (cwOf buf.toNat lengths[s]!.toNat) ∧
       subSlot (buildLongDecode lengths maxBits) maxBits buf
         = packEntry s.toUInt16 lengths[s]! := by
-  sorry
+  obtain ⟨hfill, hsent⟩ := buildLongDecode_sub_spec lengths maxBits hmb15 hv hbound buf
+  by_cases hex : ∃ k, k < lengths.size ∧ fastBits < lengths[k]!.toNat ∧ lengths[k]!.toNat ≤ maxBits ∧
+      Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits k
+        = some (cwOf buf.toNat lengths[k]!.toNat)
+  · obtain ⟨k, hk, hlong, hkm, hcf⟩ := hex
+    obtain ⟨_, hslot⟩ := hfill k hk hlong hkm hcf
+    exact ⟨k, hk, hlong, hkm, hcf, hslot⟩
+  · exact absurd (by rw [hsent hex hroot, unpackLen_packEntry]; rfl) hlen0
 
 /-- `subLookup` never increases the bit count (it only consumes `len ≤ cnt` bits). -/
 theorem subLookup_cnt_le (ld : LongDecode) (maxBits : Nat) (buf : UInt64) (cnt : Nat)
