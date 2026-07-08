@@ -1918,7 +1918,7 @@ theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray
     have hsz' : br.data.size < USize.size := by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
     have hcsz : (cnt0 - br.bitOff) < USize.size :=
       Nat.lt_of_le_of_lt hbc2.cntLe (Nat.lt_of_lt_of_le (by decide) USize.le_size)
-    rw [goTreeFreeU_eq (fromLengthsTree litLengths 15).buildTable
+    rw [goTreeFreeUWide_eq (fromLengthsTree litLengths 15).buildTable
           (fromLengthsTree distLengths 15).buildTable br.data
           (buildLongDecodeWithCount litLengths (countLengthsFast litLengths 15) 15)
           (buildLongDecodeWithCount distLengths (countLengthsFast distLengths 15) 15) 15 maxOut hsz'

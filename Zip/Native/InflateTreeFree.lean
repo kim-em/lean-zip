@@ -471,7 +471,7 @@ def decodeHuffmanFastBufTables (br : BitReader) (output : ByteArray)
   let (out, pos', bitBuf', cnt') ←
     if hsz : br.data.size.toUSize.toNat = br.data.size then
       Except.map (fun x => (x.1, x.2.1.toNat, x.2.2.1, x.2.2.2.toNat))
-        (goTreeFreeU litTable distTable litLD distLD 15 br.data maxOut
+        (goTreeFreeUWide litTable distTable litLD distLD 15 br.data maxOut
           pos.toUSize bitBuf cnt.toUSize (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _)
           hlp output)
     else
