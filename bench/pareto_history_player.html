@@ -1,0 +1,480 @@
+<title>silesia Pareto — history</title>
+<style>
+  :root {
+    --bg: #f6f6f3;
+    --surface: #fdfdfc;
+    --ink: #22262b;
+    --ink2: #626a75;
+    --ink3: #99a1ab;
+    --line: #e4e4de;
+    --grid: #d9d9d3;
+    --accent: #d62728;
+    --good: #2a8a3a;
+    --chip-bg: #eeeee9;
+    --track: #e0e0da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131518;
+      --surface: #1b1e23;
+      --ink: #e7e9ec;
+      --ink2: #9aa2ad;
+      --ink3: #6b7480;
+      --line: #2c3138;
+      --grid: #2f353d;
+      --accent: #ef5350;
+      --good: #57b96a;
+      --chip-bg: #262b31;
+      --track: #31373f;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f6f3; --surface: #fdfdfc; --ink: #22262b; --ink2: #626a75;
+    --ink3: #99a1ab; --line: #e4e4de; --grid: #d9d9d3; --accent: #d62728;
+    --good: #2a8a3a; --chip-bg: #eeeee9; --track: #e0e0da;
+  }
+  :root[data-theme="dark"] {
+    --bg: #131518; --surface: #1b1e23; --ink: #e7e9ec; --ink2: #9aa2ad;
+    --ink3: #6b7480; --line: #2c3138; --grid: #2f353d; --accent: #ef5350;
+    --good: #57b96a; --chip-bg: #262b31; --track: #31373f;
+  }
+  html { background: var(--bg); }
+  body {
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink);
+    margin: 0;
+    padding: 28px 20px 48px;
+    line-height: 1.45;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  main { max-width: 1020px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  header .eyebrow {
+    font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--ink2); font-weight: 600;
+  }
+  header h1 { font-size: 24px; margin: 2px 0 4px; text-wrap: balance; }
+  header p { margin: 0; color: var(--ink2); max-width: 68ch; font-size: 14px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px 16px;
+  }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 4px 16px;
+    padding: 2px 4px 10px; font-size: 12.5px; color: var(--ink2);
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .item.native { color: var(--ink); font-weight: 650; }
+  .chart-wrap { position: relative; }
+  svg text { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  #tooltip {
+    position: absolute; pointer-events: none; display: none;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 9px; font-size: 12px; box-shadow: 0 3px 10px rgba(0,0,0,.14);
+    white-space: nowrap; z-index: 5;
+  }
+  #tooltip .who { font-weight: 650; }
+  #tooltip .val { color: var(--ink2); }
+
+  .controls {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-top: 14px; margin-top: 8px; border-top: 1px solid var(--line);
+  }
+  button {
+    font: inherit; color: var(--ink); background: var(--chip-bg);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 5px 11px; cursor: pointer;
+  }
+  button:hover { border-color: var(--ink3); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 78px; font-weight: 650; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+  input[type="range"] { flex: 1; min-width: 180px; accent-color: var(--accent); }
+  select {
+    font: inherit; color: var(--ink); background: var(--chip-bg);
+    border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px;
+  }
+  .readout {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-top: 10px; font-size: 13.5px;
+  }
+  .readout .frameno { color: var(--ink2); }
+  .readout .sha { font-weight: 650; }
+  .readout .subject { color: var(--ink); flex-basis: 100%; min-height: 1.4em; }
+  .foot { font-size: 12.5px; color: var(--ink2); max-width: 88ch; }
+  .foot p { margin: 4px 0; }
+  kbd {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    background: var(--chip-bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 5px;
+  }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">lean-zip bench</div>
+    <h1>Compression speed vs ratio — the history</h1>
+    <p>The <b><span id="hdr-corpus"></span></b> compress Pareto with the reference
+    curves fixed at the latest run, and the native lean-zip curve replayed through
+    every dashboard refresh (<span id="hdr-span"></span>, <span id="hdr-n"></span>
+    frames). Top-left is ideal.</p>
+  </header>
+
+  <div class="card">
+    <div class="legend" id="legend"></div>
+    <div class="chart-wrap">
+      <svg id="chart" viewBox="0 0 940 600" role="img"
+           aria-label="Animated scatter: compression speed versus ratio on silesia"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <div class="controls">
+      <button class="primary" id="play">Play</button>
+      <button id="stepb" title="Previous frame (←)">◀</button>
+      <button id="stepf" title="Next frame (→)">▶</button>
+      <input type="range" id="scrub" min="0" value="0" step="1"
+             aria-label="Scrub through history">
+      <select id="speed" aria-label="Playback speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+      <button id="trails" aria-pressed="true" title="Show the path each level has traced">Trails</button>
+    </div>
+    <div class="readout mono">
+      <span class="frameno" id="frameno"></span>
+      <span class="sha" id="sha"></span>
+      <span id="date"></span>
+      <span class="subject" id="subject"></span>
+    </div>
+  </div>
+
+  <div class="foot">
+    <p><b>Reading it:</b> each marker is a compression level; x = geomean
+    compressed/original over the <span id="foot-nfiles"></span> corpus files
+    (smaller is better), y = geomean compress MB/s (log). Connectors are the
+    achievable mixing frontier between adjacent levels, not straight segments.
+    Native endpoints are tagged with their level; trails show the path each
+    level has traced so far.</p>
+    <p><b>Provenance:</b> native curve replayed from the git history of
+    <span class="mono">bench/results/latest.json</span>; reference curves from the
+    current data @ <span class="mono" id="foot-refcommit"></span>
+    (<span id="foot-refdate"></span>, <span id="foot-machine"></span>). zopfli is
+    the frozen ratio ceiling (single-rep speed, indicative only). Throughput is a
+    median snapshot; ratios are deterministic.</p>
+    <p><kbd>space</kbd> play/pause &nbsp; <kbd>←</kbd><kbd>→</kbd> step &nbsp;
+    <kbd>home</kbd>/<kbd>end</kbd> jump</p>
+  </div>
+</main>
+
+<script>
+const DATA = /*__DATA__*/null;
+
+const REFS = DATA.references;
+const FRAMES = DATA.frames;
+const N = FRAMES.length;
+const META = DATA.meta || {};
+for (const [id, v] of [["hdr-corpus", META.corpus],
+                       ["hdr-span", `${META.first_date} → ${META.last_date}`],
+                       ["hdr-n", N],
+                       ["foot-nfiles", META.nfiles],
+                       ["foot-refcommit", META.ref_commit],
+                       ["foot-refdate", META.ref_date],
+                       ["foot-machine", (META.machine || "?").replace("Linux ", "").replace(" x86_64", "")]])
+  document.getElementById(id).textContent = v ?? "?";
+const NATIVE = { colour: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#d62728" };
+
+// ---------- scales ----------
+const W = 940, H = 600, ML = 62, MR = 14, MT = 10, MB = 62;
+const X0 = 0.295, X1 = 0.44;            // ratio, linear
+const Y0 = 0.4, Y1 = 340;               // MB/s, log
+const sx = r => ML + (r - X0) / (X1 - X0) * (W - ML - MR);
+const sy = v => H - MB - (Math.log10(v) - Math.log10(Y0)) /
+                (Math.log10(Y1) - Math.log10(Y0)) * (H - MT - MB);
+
+// ---------- svg helpers ----------
+const SVG = "http://www.w3.org/2000/svg";
+const chart = document.getElementById("chart");
+function el(name, attrs, parent) {
+  const e = document.createElementNS(SVG, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent || chart).appendChild(e);
+  return e;
+}
+
+// matplotlib-style marker outlines, centred on (x, y), half-size s
+function markerPath(kind, x, y, s) {
+  const P = pts => "M" + pts.map(p => p.join(",")).join("L") + "Z";
+  switch (kind) {
+    case "s": return P([[x-s,y-s],[x+s,y-s],[x+s,y+s],[x-s,y+s]]);
+    case "^": return P([[x,y-s],[x+s,y+s],[x-s,y+s]]);
+    case "v": return P([[x,y+s],[x+s,y-s],[x-s,y-s]]);
+    case "D": return P([[x,y-s],[x+s,y],[x,y+s],[x-s,y]]);
+    case "P": { const a = s*0.42;
+      return P([[x-a,y-s],[x+a,y-s],[x+a,y-a],[x+s,y-a],[x+s,y+a],[x+a,y+a],
+                [x+a,y+s],[x-a,y+s],[x-a,y+a],[x-s,y+a],[x-s,y-a],[x-a,y-a]]); }
+    case "X": { const a = s*0.42, q = [];
+      const plus = [[-a,-s],[a,-s],[a,-a],[s,-a],[s,a],[a,a],[a,s],[-a,s],[-a,a],[-s,a],[-s,-a],[-a,-a]];
+      const c = Math.SQRT1_2;
+      for (const [px,py] of plus) q.push([x + (px-py)*c, y + (px+py)*c]);
+      return P(q); }
+    case "*": { const q = [];
+      for (let i = 0; i < 12; i++) {
+        const rr = i % 2 ? s*0.45 : s, t = -Math.PI/2 + i*Math.PI/6;
+        q.push([x + rr*Math.cos(t), y + rr*Math.sin(t)]);
+      } return P(q); }
+    case "h": { const q = [];
+      for (let i = 0; i < 6; i++) {
+        const t = -Math.PI/2 + i*Math.PI/3;
+        q.push([x + s*Math.cos(t), y + s*Math.sin(t)]);
+      } return P(q); }
+    default: return null; // "o" drawn as <circle>
+  }
+}
+function drawMarker(kind, x, y, s, attrs, parent) {
+  const base = kind === "o"
+    ? el("circle", { cx: x, cy: y, r: s, ...attrs }, parent)
+    : el("path", { d: markerPath(kind, x, y, s), ...attrs }, parent);
+  return base;
+}
+
+// the achievable frontier between two level points: ratio linear in f,
+// 1/throughput linear in f (same as plot.py _mix_curve)
+function mixPath(x0, y0, x1, y1, n = 32) {
+  const p = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const r = (1 - f) * x0 + f * x1;
+    const v = 1 / ((1 - f) / y0 + f / y1);
+    p.push((i ? "L" : "M") + sx(r).toFixed(2) + "," + sy(v).toFixed(2));
+  }
+  return p.join("");
+}
+
+// ---------- static layers ----------
+const gGrid = el("g", {});
+const gRefs = el("g", {});
+const gTrails = el("g", {});
+const gNative = el("g", {});
+const gLabels = el("g", {});
+
+// grid + axes
+const yticks = [0.5, 1, 2, 5, 10, 20, 50, 100, 200];
+for (const v of yticks) {
+  el("line", { x1: ML, x2: W - MR, y1: sy(v), y2: sy(v),
+               stroke: "var(--grid)", "stroke-width": 0.7 }, gGrid);
+  el("text", { x: ML - 8, y: sy(v) + 3.5, "text-anchor": "end",
+               "font-size": 11, fill: "var(--ink2)" }, gGrid).textContent =
+    v < 1 ? v.toFixed(1) : v;
+}
+for (let r = 0.30; r <= X1 + 1e-9; r += 0.02) {
+  el("line", { x1: sx(r), x2: sx(r), y1: MT, y2: H - MB,
+               stroke: "var(--grid)", "stroke-width": 0.7 }, gGrid);
+  el("text", { x: sx(r), y: H - MB + 18, "text-anchor": "middle",
+               "font-size": 11, fill: "var(--ink2)" }, gGrid).textContent = r.toFixed(2);
+}
+el("rect", { x: ML, y: MT, width: W - ML - MR, height: H - MT - MB,
+             fill: "none", stroke: "var(--line)" }, gGrid);
+el("text", { x: (ML + W - MR) / 2, y: H - 22, "text-anchor": "middle",
+             "font-size": 12.5, fill: "var(--ink)" }, gGrid).textContent =
+  "compression ratio   (compressed / original  —  ← smaller is better)";
+const ylab = el("text", { x: 0, y: 0, "text-anchor": "middle", "font-size": 12.5,
+  fill: "var(--ink)", transform: `translate(16 ${(MT + H - MB) / 2}) rotate(-90)` }, gGrid);
+ylab.textContent = "compression speed   (MB/s, log)";
+const best = el("text", { x: ML + 10, y: MT + 20, "font-size": 13, fill: "var(--good)",
+                          "font-weight": "bold" }, gGrid);
+best.textContent = "↖ fast & small = best";
+
+// fixed reference curves
+for (const ref of REFS) {
+  const pts = ref.points;
+  for (let i = 0; i + 1 < pts.length; i++)
+    el("path", { d: mixPath(pts[i][1], pts[i][2], pts[i+1][1], pts[i+1][2]),
+                 fill: "none", stroke: ref.colour, "stroke-width": 1.3,
+                 opacity: 0.85 }, gRefs);
+  for (const [lvl, r, v] of pts)
+    drawMarker(ref.marker, sx(r), sy(v), 4.4,
+      { fill: "none", stroke: ref.colour, "stroke-width": 1.4, opacity: 0.95,
+        "data-tip": `${ref.label} L${lvl}|ratio ${r.toFixed(4)} · ${fmt(v)} MB/s` }, gRefs);
+}
+
+// legend
+const legend = document.getElementById("legend");
+function legendItem(label, colour, marker, isNative) {
+  const item = document.createElement("span");
+  item.className = "item" + (isNative ? " native" : "");
+  const s = document.createElementNS(SVG, "svg");
+  s.setAttribute("width", 15); s.setAttribute("height", 15);
+  s.setAttribute("viewBox", "0 0 15 15");
+  const attrs = isNative
+    ? { fill: colour, stroke: colour, "stroke-width": 1.4 }
+    : { fill: "none", stroke: colour, "stroke-width": 1.4 };
+  const kind = marker;
+  const d = markerPath(kind, 7.5, 7.5, 5);
+  const m = document.createElementNS(SVG, kind === "o" ? "circle" : "path");
+  if (kind === "o") { m.setAttribute("cx", 7.5); m.setAttribute("cy", 7.5); m.setAttribute("r", 4.5); }
+  else m.setAttribute("d", d);
+  for (const k in attrs) m.setAttribute(k, attrs[k]);
+  s.appendChild(m);
+  item.appendChild(s);
+  item.appendChild(document.createTextNode(label));
+  legend.appendChild(item);
+}
+legendItem("lean-zip (native)", "var(--accent)", "o", true);
+for (const ref of REFS) legendItem(ref.label, ref.colour, ref.marker, false);
+
+function fmt(v) { return v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2); }
+
+// ---------- native frame interpolation ----------
+function pointsAt(t) {
+  // t float in [0, N-1] → [{lvl, r, v, a}] with per-level tween + fades
+  const i = Math.min(Math.floor(t), N - 1), f = t - i;
+  const a = new Map(FRAMES[i].points.map(p => [p[0], p]));
+  const b = new Map(FRAMES[Math.min(i + 1, N - 1)].points.map(p => [p[0], p]));
+  const lvls = [...new Set([...a.keys(), ...b.keys()])].sort((x, y) => x - y);
+  const out = [];
+  for (const lvl of lvls) {
+    const pa = a.get(lvl), pb = b.get(lvl);
+    if (pa && pb) {
+      out.push({ lvl, a: 1,
+        r: (1 - f) * pa[1] + f * pb[1],
+        v: Math.exp((1 - f) * Math.log(pa[2]) + f * Math.log(pb[2])) });
+    } else if (pa) out.push({ lvl, r: pa[1], v: pa[2], a: 1 - f });
+    else out.push({ lvl, r: pb[1], v: pb[2], a: f });
+  }
+  return out;
+}
+
+function renderNative(t) {
+  const pts = pointsAt(t);
+  gNative.innerHTML = ""; gLabels.innerHTML = "";
+  const vis = pts.filter(p => p.a > 0.02);
+  for (let i = 0; i + 1 < vis.length; i++) {
+    const p = vis[i], q = vis[i + 1];
+    el("path", { d: mixPath(p.r, p.v, q.r, q.v), fill: "none",
+                 stroke: "var(--accent)", "stroke-width": 2.2,
+                 opacity: Math.min(p.a, q.a) }, gNative);
+  }
+  for (const p of vis) {
+    el("circle", { cx: sx(p.r), cy: sy(p.v), r: 4.8, fill: "var(--accent)",
+                   opacity: p.a,
+                   "data-tip": `lean-zip (native) L${p.lvl}|ratio ${p.r.toFixed(4)} · ${fmt(p.v)} MB/s` }, gNative);
+  }
+  if (vis.length) {                        // endpoint level tags, as in plot.py
+    for (const p of [vis[0], vis[vis.length - 1]]) {
+      const txt = el("text", { x: sx(p.r) + 7, y: sy(p.v) - 7, "font-size": 11,
+        "font-weight": "bold", fill: "var(--accent)", opacity: p.a }, gLabels);
+      txt.textContent = "L" + p.lvl;
+    }
+  }
+}
+
+// faint per-level history up to frame k
+let trailsOn = true;
+function renderTrails(t) {
+  gTrails.innerHTML = "";
+  if (!trailsOn) return;
+  const upto = Math.floor(t);
+  const byLevel = new Map();
+  for (let i = 0; i <= upto; i++)
+    for (const [lvl, r, v] of FRAMES[i].points) {
+      if (!byLevel.has(lvl)) byLevel.set(lvl, []);
+      byLevel.get(lvl).push([sx(r), sy(v)]);
+    }
+  for (const p of pointsAt(t)) {           // extend to the tweened position
+    if (byLevel.has(p.lvl) && p.a === 1) byLevel.get(p.lvl).push([sx(p.r), sy(p.v)]);
+  }
+  for (const [, q] of byLevel) {
+    if (q.length < 2) continue;
+    el("path", { d: "M" + q.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join("L"),
+                 fill: "none", stroke: "var(--accent)", "stroke-width": 1,
+                 opacity: 0.16 }, gTrails);
+  }
+}
+
+// ---------- readout ----------
+const $ = id => document.getElementById(id);
+function renderReadout(t) {
+  const i = Math.round(t);
+  const fr = FRAMES[i];
+  $("frameno").textContent = `frame ${i + 1}/${N}`;
+  $("sha").textContent = fr.commit;
+  $("date").textContent = fr.commit_date.slice(0, 10);
+  $("subject").textContent = fr.subject;
+}
+
+// ---------- playback ----------
+let pos = 0, playing = false, raf = null, last = null;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const BASE_MS = 650;                       // per frame at 1×
+const scrub = $("scrub");
+scrub.max = (N - 1) * 100;
+
+function render() {
+  renderTrails(pos);
+  renderNative(pos);
+  renderReadout(pos);
+  scrub.value = Math.round(pos * 100);
+}
+function tick(now) {
+  if (!playing) return;
+  if (last == null) last = now;
+  const speed = parseFloat($("speed").value);
+  const step = (now - last) / (BASE_MS / speed);
+  last = now;
+  pos = reduced ? Math.min(pos + Math.max(1, Math.round(step)), N - 1)
+                : Math.min(pos + step, N - 1);
+  render();
+  if (pos >= N - 1) setPlaying(false);
+  else raf = requestAnimationFrame(tick);
+}
+function setPlaying(p) {
+  playing = p;
+  $("play").textContent = p ? "Pause" : "Play";
+  if (p) {
+    if (pos >= N - 1) pos = 0;             // replay from the start
+    last = null;
+    raf = requestAnimationFrame(tick);
+  } else if (raf) cancelAnimationFrame(raf);
+}
+$("play").addEventListener("click", () => setPlaying(!playing));
+$("stepb").addEventListener("click", () => { setPlaying(false); pos = Math.max(0, Math.round(pos) - 1); render(); });
+$("stepf").addEventListener("click", () => { setPlaying(false); pos = Math.min(N - 1, Math.round(pos) + 1); render(); });
+scrub.addEventListener("input", () => { setPlaying(false); pos = scrub.value / 100; render(); });
+$("trails").addEventListener("click", e => {
+  trailsOn = !trailsOn;
+  e.currentTarget.setAttribute("aria-pressed", trailsOn);
+  render();
+});
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+  else if (e.key === "ArrowLeft") { setPlaying(false); pos = Math.max(0, Math.round(pos) - 1); render(); }
+  else if (e.key === "ArrowRight") { setPlaying(false); pos = Math.min(N - 1, Math.round(pos) + 1); render(); }
+  else if (e.key === "Home") { setPlaying(false); pos = 0; render(); }
+  else if (e.key === "End") { setPlaying(false); pos = N - 1; render(); }
+});
+
+// ---------- tooltip ----------
+const tip = $("tooltip");
+chart.addEventListener("pointermove", e => {
+  const t = e.target.getAttribute && e.target.getAttribute("data-tip");
+  if (!t) { tip.style.display = "none"; return; }
+  const [who, val] = t.split("|");
+  tip.innerHTML = `<span class="who"></span><br><span class="val"></span>`;
+  tip.querySelector(".who").textContent = who;
+  tip.querySelector(".val").textContent = val;
+  const box = chart.parentElement.getBoundingClientRect();
+  tip.style.display = "block";
+  tip.style.left = (e.clientX - box.left + 14) + "px";
+  tip.style.top = (e.clientY - box.top - 10) + "px";
+});
+chart.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+
+// deep-link: #f<n> opens at frame n (1-based)
+const m = location.hash.match(/^#f(\d+)$/);
+if (m) pos = Math.min(N - 1, Math.max(0, parseInt(m[1], 10) - 1));
+render();
+</script>
