@@ -99,7 +99,16 @@ target copy_within_ffi.o pkg : FilePath := do
   let srcJob ← copy_within_ffi.c.fetch
   let oFile := pkg.buildDir / "c" / "copy_within_ffi.o"
   let weakArgs := #["-I", (← getLeanIncludeDir).toString]
-  let hardArgs := if Platform.isWindows then #[] else #["-fPIC"]
+  -- -O2/-DNDEBUG for the same reason as bytearray_wide_ffi: this is a hot LZ77
+  -- match-copy primitive (the non-overlapping back-reference path in
+  -- Inflate.copyLoop). On some toolchains the lean.h static-inline helpers
+  -- (lean_sarray_cptr, lean_is_exclusive, ...) stay outlined at -O0; on others
+  -- (e.g. gcc 15.2) they inline anyway and only the debug-only lean.h asserts
+  -- remain. Either way -O2/-DNDEBUG matches the release runtime and this
+  -- primitive's two siblings. Its bounds are carried by copyWithin's Lean-side
+  -- reference body (+ the roundtrip conformance sweeps).
+  let hardArgs := #["-O2", "-DNDEBUG"] ++
+    if Platform.isWindows then #[] else #["-fPIC"]
   buildO oFile srcJob weakArgs hardArgs "cc"
 
 extern_lib libcopy_within_ffi pkg := do
