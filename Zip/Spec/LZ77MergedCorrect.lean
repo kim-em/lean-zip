@@ -203,8 +203,103 @@ private theorem updateHashesMergedFast_eq (data : ByteArray) (hashSize prevSize 
         exact ih _ (by omega) _ _ hph rfl
     · rw [if_neg hcond, if_neg hcond]
 
-/-- The guarded merged walk equals the reference merged walk (fast branch via
-    `updateHashesMergedFast_eq`; the fallback branch is definitionally it). -/
+/-! ## The de-boxed `USize` insertion walk -/
+
+/-- `lz77Greedy.hash3` congruence in the position (the bounds proof transports). -/
+private theorem hash3_congr (data : ByteArray) (hashSize : Nat) {p q : Nat} (e : p = q)
+    (hp : p + 2 < data.size) (hq : q + 2 < data.size) :
+    lz77Greedy.hash3 data p hashSize hp = lz77Greedy.hash3 data q hashSize hq := by
+  subst e; rfl
+
+/-- `hash3U` computes exactly `hash3`'s bucket whenever the buffer is
+    `USize`-addressable: the hoisted witness makes `hash3`'s per-call
+    addressability check always take the wide-load branch (whose reference body
+    `hash3U` shares), and the `USize` mod is the faithful image of the `Nat`
+    mod. -/
+private theorem hash3U_toNat (data : ByteArray) (p hashSize : Nat) (pU hashSizeU : USize)
+    (hpU : pU.toNat = p) (hhsU : hashSizeU.toNat = hashSize)
+    (hsz : data.size < USize.size) (h : p + 2 < data.size) :
+    (hash3U data p pU hashSizeU hpU h).toNat = lz77Greedy.hash3 data p hashSize h := by
+  have hplt : p < USize.size := by omega
+  have hpUe : pU = p.toUSize := by
+    apply USize.toNat_inj.mp; rw [hpU, toUSize_toNat_of_lt hplt]
+  subst hpUe
+  unfold hash3U lz77Greedy.hash3
+  have tail : ∀ w : UInt32,
+      (((w * 2654435761) >>> 16).toUSize % hashSizeU).toNat
+        = ((w * 2654435761) >>> 16).toNat % hashSize := by
+    intro w; rw [USize.toNat_mod, UInt32.toNat_toUSize, hhsU]
+  by_cases h4 : p + 4 ≤ data.size
+  · rw [dif_pos h4, dif_pos h4, dif_pos (toUSize_toNat_of_lt hsz)]
+    exact tail _
+  · rw [dif_neg h4, dif_neg h4]
+    exact tail _
+
+/-- The de-boxed `USize` merged walk equals the reference merged walk: identical
+    control flow (each `USize` compare the faithful image of its `Nat` twin
+    through the `toNat` identities), the hash via `hash3U_toNat`, and the
+    `uget`/`uset` accesses collapsing to `[]!`/`set!` in bounds. -/
+private theorem updateHashesMergedFastU_eq (data : ByteArray) (hashSize prevSize : Nat)
+    (c : Array Nat) (pos j matchLen insertCap : Nat)
+    (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size)
+    (posU prevSizeU hashSizeU rem2U capU jU matchLenU : USize)
+    (hposU : posU.toNat = pos) (hpsU : prevSizeU.toNat = prevSize)
+    (hhsU : hashSizeU.toNat = hashSize) (hrem2U : rem2U.toNat = data.size - pos - 2)
+    (hcapU : capU.toNat = insertCap) (hjU : jU.toNat = j) (hmlU : matchLenU.toNat = matchLen) :
+    updateHashesMergedFastU data hashSize prevSize pos c hhs hph hpv hsz hphlt
+        posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU =
+      updateHashesMerged data hashSize prevSize c pos j matchLen insertCap := by
+  induction hn : matchLen - j using Nat.strongRecOn generalizing j c jU hph hjU with
+  | _ n ih =>
+    rw [updateHashesMergedFastU, updateHashesMerged]
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hcond : (jU < matchLenU ∧ jU ≤ capU) ↔ (j < matchLen ∧ j ≤ insertCap) := by
+      rw [USize.lt_iff_toNat_lt, USize.le_iff_toNat_le, hjU, hmlU, hcapU]
+    by_cases hc : j < matchLen ∧ j ≤ insertCap
+    · rw [if_pos (hcond.mpr hc), if_pos hc]
+      have hmllt := USize.toNat_lt_two_pow_numBits matchLenU
+      have hj1 : (jU + 1).toNat = j + 1 := by
+        rw [USize.toNat_add, USize.toNat_one, hjU]
+        exact Nat.mod_eq_of_lt (by omega)
+      have hdata : (jU < rem2U) ↔ (pos + j + 2 < data.size) := by
+        rw [USize.lt_iff_toNat_lt, hjU, hrem2U]; omega
+      by_cases hd : pos + j + 2 < data.size
+      · rw [dif_pos (hdata.mpr hd), dif_pos hd]
+        have e1 : (posU + jU).toNat = pos + j := by
+          rw [USize.toNat_add, hposU, hjU]; exact Nat.mod_eq_of_lt (by omega)
+        have hb3 : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
+        -- The bucket index: `USize` add over `hash3U` = the `Nat` index over `hash3`.
+        have eidx : ∀ (hx : (posU + jU).toNat + 2 < data.size),
+            (prevSizeU + hash3U data ((posU + jU).toNat) (posU + jU) hashSizeU rfl hx).toNat
+              = prevSize + lz77Greedy.hash3 data (pos + j) hashSize hd := by
+          intro hx
+          rw [USize.toNat_add, hpsU, hash3U_toNat data _ hashSize _ _ rfl hhsU hsz hx,
+            hash3_congr data hashSize e1 hx hd]
+          exact Nat.mod_eq_of_lt (by omega)
+        -- The chain mask: `USize` and = the `Nat` and.
+        have emask : ((posU + jU) &&& 0x7FFF).toNat = (pos + j) &&& 0x7FFF := by
+          rw [USize.toNat_and,
+            USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size), e1]
+        -- Collapse `uget`/`uset` to `[]!`/`set!`, then align the indices.
+        have eget : ∀ (a : Array Nat) (i : Nat) (h : i < a.size), a[i]'h = a[i]! :=
+          fun a i h => (getElem!_pos a i h).symm
+        -- Two stages: `eidx` must consume the composite bucket index before `e1`
+        -- can rewrite the `(posU + jU).toNat` inside `hash3U`'s arguments.
+        simp only [Array.uget, Array.uset, set_eq_set!, eget, headProbeGuarded_eq,
+          guardedSet_eq, eidx, emask]
+        simp only [e1]
+        exact ih _ (by omega) _ _
+          (by rw [Array.size_set!, Array.size_set!]; exact hph) _ hj1 rfl
+      · rw [dif_neg (fun hx => hd (hdata.mp hx)), dif_neg hd]
+        exact ih _ (by omega) _ _ hph _ hj1 rfl
+    · rw [if_neg (fun hx => hc (hcond.mp hx)), if_neg hc]
+
+/-- The guarded merged walk equals the reference merged walk (the de-boxed
+    `USize` branch via `updateHashesMergedFastU_eq`, the proven-bounds `Nat`
+    branch via `updateHashesMergedFast_eq`; the fallback branch is definitionally
+    it). -/
 private theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSize : Nat)
     (c : Array Nat) (pos j matchLen insertCap : Nat) :
     updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap =
@@ -212,7 +307,19 @@ private theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSi
   unfold updateHashesMergedGuarded
   split
   · rename_i hg
-    exact updateHashesMergedFast_eq data hashSize prevSize c pos j matchLen insertCap hg.1 hg.2.1 hg.2.2
+    split
+    · rename_i hu
+      have hsz : data.size < USize.size := by
+        rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+      have hphlt : prevSize + hashSize < USize.size := by
+        rw [← hu.2.1]; exact USize.toNat_lt_two_pow_numBits _
+      exact updateHashesMergedFastU_eq data hashSize prevSize c pos j matchLen insertCap
+        hg.1 hg.2.1 hg.2.2 hsz hphlt pos.toUSize prevSize.toUSize hashSize.toUSize
+        (data.size - pos - 2).toUSize insertCap.toUSize j.toUSize matchLen.toUSize
+        hu.2.2.1 (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+        (toUSize_toNat_of_lt (by omega)) hu.2.2.2.2.2 hu.2.2.2.1 hu.2.2.2.2.1
+    · exact updateHashesMergedFast_eq data hashSize prevSize c pos j matchLen insertCap
+        hg.1 hg.2.1 hg.2.2
   · rfl
 
 /-! ## The lockstep loop equality -/

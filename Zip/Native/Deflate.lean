@@ -1765,16 +1765,133 @@ def updateHashesMergedFast (data : ByteArray) (hashSize prevSize : Nat)
 termination_by matchLen - j
 decreasing_by all_goals omega
 
+/-- `lz77Greedy.hash3` with the per-call `USize` bookkeeping hoisted: the caller
+    supplies the already-converted `USize` position `pU` and the buffer
+    addressability witness `hsz` once, so the hot insertion loop pays neither the
+    `data.size.toUSize.toNat = data.size` round-trip check nor the `pos.toUSize`
+    conversion per call, and the final bucket reduction runs as one unboxed
+    `USize` mod instead of a boxed `Nat` mod. Same wide-load / 3-byte-tail
+    fallback structure as `hash3`, so `hash3U_toNat` (in `LZ77MergedCorrect`)
+    shows the value is exactly `hash3`'s whenever the buffer is
+    `USize`-addressable. -/
+@[inline] def hash3U (data : ByteArray) (p : Nat) (pU hashSizeU : USize)
+    (hpU : pU.toNat = p) (h : p + 2 < data.size) : USize :=
+  let word :=
+    if h4 : p + 4 ≤ data.size then
+      ByteArray.ugetUInt32LE data pU (by rw [hpU]; omega)
+    else
+      let a := (data[p]'(by omega)).toUInt32
+      let b := (data[p + 1]'(by omega)).toUInt32
+      let c := (data[p + 2]'(by omega)).toUInt32
+      a ||| (b <<< 8) ||| (c <<< 16)
+  ((word * 2654435761) >>> 16).toUSize % hashSizeU
+
+/-- The `USize` bucket index is in range: `hash3U` ends in `% hashSizeU`, whose
+    `toNat` is the `Nat` mod by `hashSize`. Discharges the write bounds inside
+    `updateHashesMergedFastU`. -/
+theorem hash3U_toNat_lt (data : ByteArray) (p hashSize : Nat) (pU hashSizeU : USize)
+    (hpU : pU.toNat = p) (h : p + 2 < data.size)
+    (hhsU : hashSizeU.toNat = hashSize) (hhs : 0 < hashSize) :
+    (hash3U data p pU hashSizeU hpU h).toNat < hashSize := by
+  unfold hash3U
+  simp only [USize.toNat_mod, hhsU]
+  exact Nat.mod_lt _ hhs
+
+/-- USize-native de-boxed twin of `updateHashesMergedFast` (the interior-hash
+    insertion loop, 13–25% of L4–L8 compress time): the per-insertion index
+    bookkeeping — the loop counter `jU`, the data-bound test, the bucket index
+    `prevSizeU + hshU`, and the chain mask `pjU &&& 0x7FFF` — runs on unboxed
+    `USize` instead of tagged `Nat`, with the two hot writes and the head read as
+    `Array.uset`/`Array.uget` (no per-step bounds branch, no `Nat` untag on the
+    index). The data-bound test is one `USize` compare against the hoisted
+    remaining-bytes bound `rem2U` (`= data.size - pos - 2`, computed once by the
+    guarded wrapper), and the per-step hash goes through `hash3U`, which skips
+    `hash3`'s per-call addressability round-trip. The stored position value stays
+    `Nat` (the array is a `Nat` ring), produced by one `USize.toNat` per
+    insertion. Proven equal to `updateHashesMerged`
+    (`updateHashesMergedFastU_eq` in `LZ77MergedCorrect`). -/
+def updateHashesMergedFastU (data : ByteArray) (hashSize prevSize pos : Nat)
+    (c : Array Nat)
+    (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size)
+    (posU prevSizeU hashSizeU rem2U capU : USize)
+    (hposU : posU.toNat = pos) (hpsU : prevSizeU.toNat = prevSize)
+    (hhsU : hashSizeU.toNat = hashSize)
+    (hrem2U : rem2U.toNat = data.size - pos - 2)
+    (jU matchLenU : USize) : Array Nat :=
+  if jU < matchLenU ∧ jU ≤ capU then
+    if hd : jU < rem2U then
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      have hjlt : jU.toNat < data.size - pos - 2 := by
+        rw [← hrem2U]; exact USize.lt_iff_toNat_lt.mp hd
+      have hpjU : (posU + jU).toNat = pos + jU.toNat := by
+        rw [USize.toNat_add, hposU]; exact Nat.mod_eq_of_lt (by omega)
+      have hp2 : (posU + jU).toNat + 2 < data.size := by omega
+      let hshU := hash3U data ((posU + jU).toNat) (posU + jU) hashSizeU rfl hp2
+      have hshlt : hshU.toNat < hashSize :=
+        hash3U_toNat_lt data ((posU + jU).toNat) hashSize (posU + jU) hashSizeU rfl hp2 hhsU hhs
+      have hidx : (prevSizeU + hshU).toNat = prevSize + hshU.toNat := by
+        rw [USize.toNat_add, hpsU]; exact Nat.mod_eq_of_lt (by omega)
+      have hb : (prevSizeU + hshU).toNat < c.size := by rw [hidx]; omega
+      let head := c.uget (prevSizeU + hshU) hb
+      have hmaskb : ((posU + jU) &&& 0x7FFF).toNat < c.size := by
+        rw [USize.toNat_and,
+          USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+        show ((posU + jU).toNat &&& 0x7FFF) < c.size
+        have h1 := winMask_lt ((posU + jU).toNat)
+        have h2 := Nat.and_le_left (n := (posU + jU).toNat) (m := 0x7FFF)
+        simp only [chainWinSize] at h1 hpv
+        omega
+      updateHashesMergedFastU data hashSize prevSize pos
+        ((c.uset (prevSizeU + hshU) ((posU + jU).toNat) hb).uset ((posU + jU) &&& 0x7FFF) head
+          (by rw [Array.size_uset]; exact hmaskb))
+        hhs (by rw [Array.size_uset, Array.size_uset]; exact hph) hpv hsz hphlt
+        posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U (jU + 1) matchLenU
+    else
+      updateHashesMergedFastU data hashSize prevSize pos c hhs hph hpv hsz hphlt
+        posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U (jU + 1) matchLenU
+  else c
+termination_by matchLenU.toNat - jU.toNat
+decreasing_by
+  all_goals
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hc : jU < matchLenU ∧ jU ≤ capU := by assumption
+    have hlt : jU.toNat < matchLenU.toNat := USize.lt_iff_toNat_lt.mp hc.1
+    have hml := USize.toNat_lt_two_pow_numBits matchLenU
+    have hj1 : (jU + 1).toNat = jU.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]; exact Nat.mod_eq_of_lt (by omega)
+    omega
+
 /-- One runtime `0 < hashSize ∧ prevSize + hashSize ≤ c.size ∧ min chainWinSize
     data.size ≤ prevSize` check guards the whole merged insertion loop, unlocking
-    the proven-bounds walk (`updateHashesMergedFast`); the fallback is the
-    runtime-guarded `updateHashesMerged` (dead in practice — the production
+    the proven-bounds walk; a second `USize`-faithfulness check (one
+    `data.size.toUSize.toNat = data.size` round-trip witnessing addressability,
+    plus round-trips for the small loop arguments — never failing in production:
+    `data.size` fits a `size_t`, `matchLen ≤ 259`, `insertCap` is the fixed knob)
+    then unlocks the de-boxed `USize` walk (`updateHashesMergedFastU`). The
+    fallbacks are the proven-bounds `Nat` walk (`updateHashesMergedFast`) and the
+    runtime-guarded `updateHashesMerged` (both dead in practice — the production
     combined array is a fixed `prevSize + hashSize`-entry `replicate`). Proven
     equal to `updateHashesMerged` (`updateHashesMergedGuarded_eq`). -/
 @[inline] def updateHashesMergedGuarded (data : ByteArray) (hashSize prevSize : Nat)
     (c : Array Nat) (pos j matchLen insertCap : Nat) : Array Nat :=
   if hg : 0 < hashSize ∧ prevSize + hashSize ≤ c.size ∧ min chainWinSize data.size ≤ prevSize then
-    updateHashesMergedFast data hashSize prevSize c pos j matchLen insertCap hg.1 hg.2.1 hg.2.2
+    if hu : data.size.toUSize.toNat = data.size ∧
+        (prevSize + hashSize).toUSize.toNat = prevSize + hashSize ∧
+        pos.toUSize.toNat = pos ∧ j.toUSize.toNat = j ∧
+        matchLen.toUSize.toNat = matchLen ∧ insertCap.toUSize.toNat = insertCap then
+      have hsz : data.size < USize.size := by
+        rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+      have hphlt : prevSize + hashSize < USize.size := by
+        rw [← hu.2.1]; exact USize.toNat_lt_two_pow_numBits _
+      updateHashesMergedFastU data hashSize prevSize pos c hg.1 hg.2.1 hg.2.2 hsz hphlt
+        pos.toUSize prevSize.toUSize hashSize.toUSize (data.size - pos - 2).toUSize
+        insertCap.toUSize hu.2.2.1 (toUSize_toNat_of_lt (by omega))
+        (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+        j.toUSize matchLen.toUSize
+    else
+      updateHashesMergedFast data hashSize prevSize c pos j matchLen insertCap hg.1 hg.2.1 hg.2.2
   else
     updateHashesMerged data hashSize prevSize c pos j matchLen insertCap
 
