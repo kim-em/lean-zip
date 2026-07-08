@@ -1,4 +1,5 @@
 import Zip.Native.Inflate
+import Zip.Native.Wide
 
 /-!
 # Tree-free canonical decode — the production DEFLATE decoder
@@ -282,6 +283,144 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
                 cnt4.toUSize hsz hlp out
   termination_by (data.size - pos.toNat) * 9 + cnt.toNat
   decreasing_by
+    · obtain ⟨hc, hp⟩ := hrc
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have hpn : pos.toNat < data.size := by
+        have h := USize.lt_iff_toNat_lt.mp hp; rwa [toUSize_toNat_of_lt hsz] at h
+      have hcn : cnt.toNat ≤ 56 := by
+        have h := USize.le_iff_toNat_le.mp hc
+        rwa [USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)] at h
+      have hpa : (pos + 1).toNat = pos.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+        have : pos.toNat + 1 < USize.size := by omega
+        exact USize.size_eq_two_pow ▸ this
+      have h8 : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hca : (cnt + 8).toNat = cnt.toNat + 8 := by
+        rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
+      rw [hpa, hca]; omega
+    · obtain ⟨hne, hle, _⟩ := hlit
+      have hne' : (HuffTree.unpackLen e).toNat ≠ 0 := (uint8_ne_zero_iff_toNat _).mp hne
+      have hlen : ((HuffTree.unpackLen e).toUSize).toNat = (HuffTree.unpackLen e).toNat :=
+        UInt8.toNat_toUSize _
+      have hsub : (cnt - (HuffTree.unpackLen e).toUSize).toNat
+          = cnt.toNat - (HuffTree.unpackLen e).toNat := by
+        rw [USize.toNat_sub_of_le _ _ hle, hlen]
+      have hlecnt : (HuffTree.unpackLen e).toNat ≤ cnt.toNat :=
+        hlen ▸ USize.le_iff_toNat_le.mp hle
+      rw [hsub]; omega
+    · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
+      have hb : cnt'.toUSize.toNat = cnt' := toUSize_toNat_of_lt (by omega)
+      rw [hb]; omega
+    · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
+      have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
+      rw [hb]; omega
+
+set_option maxRecDepth 4096 in
+/-- **Wide-refill twin of `goTreeFreeU`.** Identical loop, except the leading
+    per-byte refill is preceded by a wide branch: when eight bytes remain
+    (`pos ≤ data.size.toUSize - 8`) it loads the whole `ugetUInt64LE` word, clears
+    the top `8 - k` bytes (`<<< s >>> s`, `s = 64 - 8k`, `k = (56 - cnt)/8 + 1`) and
+    ORs it in at bit `cnt` — the same `(pos, bitBuf, cnt)` the byte loop reaches in
+    `k` iterations (`refill_eq_wide`). Near the buffer end it falls back to the byte
+    loop. Proven equal to `goTreeFree` (`goTreeFreeUWide_eq`), so it drops into the
+    production decode with the whole correctness chain transferring untouched. -/
+def goTreeFreeUWide (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
+    (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
+    (pos : USize) (bitBuf : UInt64) (cnt : USize)
+    (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) (output : ByteArray) :
+    Except String (ByteArray × USize × UInt64 × USize) := do
+  if hrcw : cnt ≤ 56 ∧ (8 : USize) ≤ data.size.toUSize ∧ pos ≤ data.size.toUSize - 8 then
+    goTreeFreeUWide litTable distTable litLD distLD maxBits data maxOut
+      (pos + ((56 - cnt) / 8 + 1))
+      (bitBuf ||| (((data.ugetUInt64LE pos
+          ((refillGuardWide_usize data pos cnt hsz).mp hrcw).2)
+          <<< (64 - 8 * ((56 - cnt) / 8 + 1)).toUInt64
+          >>> (64 - 8 * ((56 - cnt) / 8 + 1)).toUInt64) <<< cnt.toUInt64))
+      (cnt + 8 * ((56 - cnt) / 8 + 1)) hsz hlp output
+  else
+  if hrc : cnt ≤ 56 ∧ pos < data.size.toUSize then
+    goTreeFreeUWide litTable distTable litLD distLD maxBits data maxOut
+      (pos + 1)
+      (bitBuf ||| ((data.uget pos (by
+          have h := USize.lt_iff_toNat_lt.mp hrc.2
+          rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
+      (cnt + 8) hsz hlp output
+  else
+  let e := litTable.entryAtU (bitBuf &&& 0x7FF).toUSize
+    (by rw [hlp]; exact HuffTree.and_0x7FF_toUSize_toNat_lt bitBuf)
+  if hlit : HuffTree.unpackLen e ≠ 0
+      ∧ (HuffTree.unpackLen e).toUSize ≤ cnt
+      ∧ HuffTree.unpackSym e < 256 then
+    if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+    else
+      goTreeFreeUWide litTable distTable litLD distLD maxBits data maxOut pos
+        (bitBuf >>> (HuffTree.unpackLen e).toUInt64)
+        (cnt - (HuffTree.unpackLen e).toUSize)
+        hsz hlp
+        (output.push (HuffTree.unpackSym e).toUInt8)
+  else
+  let cnt0 := cnt.toNat
+  match decodeSymCanon litLD litTable maxBits bitBuf cnt.toNat with
+  | .error e => .error e
+  | .ok (sym, bitBuf, cnt', _used) =>
+    if sym < 256 then
+      if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
+      else if hnp : cnt0 ≤ cnt' then throw "Inflate: no progress in Huffman decode"
+      else
+        goTreeFreeUWide litTable distTable litLD distLD maxBits data maxOut pos bitBuf
+          cnt'.toUSize hsz hlp (output.push sym.toUInt8)
+    else if sym == 256 then .ok (output, pos, bitBuf, cnt'.toUSize)
+    else
+      let idx := sym.toNat - 257
+      if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+      else
+        let base := Inflate.lengthBase[idx]
+        let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
+        let (extraBits, bitBuf, cnt'') ← takeBits bitBuf cnt' extra.toNat
+        let length := base.toNat + extraBits
+        match decodeSymCanon distLD distTable maxBits bitBuf cnt'' with
+        | .error e => .error e
+        | .ok (distSym, bitBuf, cnt3, _dused) =>
+          let dIdx := distSym.toNat
+          if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+          else
+            let dBase := Inflate.distBase[dIdx]
+            let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
+            let (dExtraBits, bitBuf, cnt4) ← takeBits bitBuf cnt3 dExtra.toNat
+            let distance := dBase.toNat + dExtraBits
+            if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
+            else if hds : distance > output.size then
+              throw s!"Inflate: distance {distance} exceeds output size {output.size}"
+            else if output.size + length > maxOut then throw "Inflate: output exceeds maximum size"
+            else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
+            else
+              let out := Inflate.copyLoop output (output.size - distance) distance 0 length
+                (by omega) (by omega)
+              goTreeFreeUWide litTable distTable litLD distLD maxBits data maxOut pos bitBuf
+                cnt4.toUSize hsz hlp out
+  termination_by (data.size - pos.toNat) * 9 + cnt.toNat
+  decreasing_by
+    · -- wide refill: pos advances by k ≥ 1, cnt by 8k, so measure drops by k
+      have hg := (refillGuardWide_usize data pos cnt hsz).mp hrcw
+      have hcn : cnt.toNat ≤ 56 := hg.1
+      have hpn : pos.toNat + 8 ≤ data.size := hg.2
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have hsz2 : data.size < 2 ^ System.Platform.numBits := USize.size_eq_two_pow ▸ hsz
+      have h8u : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hk : ((56 - cnt) / 8 + 1 : USize).toNat = (56 - cnt.toNat) / 8 + 1 :=
+        wideK_toNat cnt hcn
+      have h8k : (8 * ((56 - cnt) / 8 + 1) : USize).toNat = 8 * ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_mul, hk, h8u]; apply Nat.mod_eq_of_lt; omega
+      have hposk : (pos + ((56 - cnt) / 8 + 1)).toNat = pos.toNat + ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_add, hk]; apply Nat.mod_eq_of_lt; omega
+      have hcntk : (cnt + 8 * ((56 - cnt) / 8 + 1)).toNat = cnt.toNat + 8 * ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_add, h8k]; apply Nat.mod_eq_of_lt; omega
+      rw [hposk, hcntk]; omega
     · obtain ⟨hc, hp⟩ := hrc
       have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
         USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size

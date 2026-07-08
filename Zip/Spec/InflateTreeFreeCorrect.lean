@@ -2,6 +2,7 @@ import Zip.Spec.InflateCanonical
 import Zip.Spec.InflateBufCorrect
 import Zip.Spec.DynamicTreesCorrect
 import Zip.Native.InflateTreeFree
+import Zip.Spec.RefillWide
 
 /-!
 # Tree-free canonical decode: correctness
@@ -1627,6 +1628,206 @@ theorem goTreeFreeU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteA
       intro hpos
       have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
       rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+      cases hex : takeBits bb c
+          (Inflate.lengthExtra[sym.toNat - 257]'(by
+            simp only [Inflate.lengthExtra_size]
+            simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hhc; omega)).toNat with
+      | error e => rfl
+      | ok pe =>
+          obtain ⟨eb, bb2, c2⟩ := pe
+          simp only [bind, Except.bind]
+          cases hdd : decodeSymCanon distLD distTable maxBits bb2 c2 with
+          | error e => rfl
+          | ok pd =>
+              obtain ⟨distSym, bb3, c3, dused⟩ := pd
+              simp only []
+              split
+              · rfl
+              · rename_i hdi
+                cases hex2 : takeBits bb3 c3
+                    (Inflate.distExtra[distSym.toNat]'(by
+                      simp only [Inflate.distExtra_size]
+                      simp only [Inflate.distBase_size, ge_iff_le, Nat.not_le] at hdi; omega)).toNat with
+                | error e => rfl
+                | ok pd2 =>
+                    obtain ⟨deb, bb4, c4⟩ := pd2
+                    simp only [bind, Except.bind]
+                    have hc4le : c4 ≤ cnt.toNat := by
+                      have h1 := takeBits_le bb c _ hex
+                      have h2 := HuffTree.decodeSymCanon_cnt_le distLD distTable maxBits bb2 c2 hdd
+                      have h3 := takeBits_le bb3 c3 _ hex2
+                      have h0 := HuffTree.decodeSymCanon_cnt_le litLD litTable maxBits bitBuf cnt.toNat hde
+                      omega
+                    have hc4rt : c4.toUSize.toNat = c4 :=
+                      toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hc4le cnt.toNat_lt_two_pow_numBits)
+                    repeat' (first | rfl | split)
+                    all_goals exact (ih eb distSym hdi deb bb4 c4 (by assumption) (by assumption)
+                      (by assumption) hpos).trans (by rw [hc4rt])
+
+/-- **`goTreeFree` absorbs a refill** (tree-free mirror of `goFused_absorb_refill`):
+    `goTreeFree` begins each iteration by refilling, so running it from
+    `(pos, bitBuf, cnt)` equals running it from `refill data pos bitBuf cnt` — the
+    leading refill recursion *is* `refill`. Bridge from `refill_eq_wide` to
+    `goTreeFree`. -/
+theorem goTreeFree_absorb_refill (litTable distTable : HuffTree.DecodeTable)
+    (litLD distLD : HuffTree.LongDecode) (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
+    (output : ByteArray) (pos : Nat) (bitBuf : UInt64) (cnt : Nat) :
+    goTreeFree litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt output
+    = goTreeFree litTable distTable litLD distLD maxBits data maxOut
+        (refill data pos bitBuf cnt).1 (refill data pos bitBuf cnt).2.1
+        (refill data pos bitBuf cnt).2.2 output := by
+  rw [refill]
+  split
+  · rename_i hrc
+    rw [goTreeFree, dif_pos hrc, ← getElem!_pos data pos hrc.2]
+    exact goTreeFree_absorb_refill litTable distTable litLD distLD maxBits data maxOut output
+      (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8)
+  · rfl
+termination_by data.size - pos
+decreasing_by simp_wf; omega
+
+set_option maxHeartbeats 1000000 in
+theorem goTreeFreeUWide_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litLD distLD : HuffTree.LongDecode) (maxBits : Nat) (maxOut : Nat)
+    (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) :
+    ∀ (pos : USize) (bitBuf : UInt64) (cnt : USize) (output : ByteArray),
+    pos.toNat ≤ data.size →
+    Except.map (fun x => (x.1, x.2.1.toNat, x.2.2.1, x.2.2.2.toNat))
+        (goTreeFreeUWide litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt hsz hlp output)
+      = goTreeFree litTable distTable litLD distLD maxBits data maxOut pos.toNat bitBuf cnt.toNat output := by
+  intro pos bitBuf cnt output
+  induction pos, bitBuf, cnt, output using goTreeFreeUWide.induct
+    (litTable := litTable) (litLD := litLD)
+    (maxBits := maxBits) (data := data) (maxOut := maxOut) (hsz := hsz) (hlp := hlp) with
+  | case1 pos bitBuf cnt output hrcw ih =>
+      intro hpos
+      have hg := (refillGuardWide_usize data pos cnt hsz).mp hrcw
+      have hcn : cnt.toNat ≤ 56 := hg.1
+      have hpn : pos.toNat + 8 ≤ data.size := hg.2
+      have hpltU : pos.toNat < USize.size := Nat.lt_of_le_of_lt hpos hsz
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have hsz2 : data.size < 2 ^ System.Platform.numBits := USize.size_eq_two_pow ▸ hsz
+      have h8u : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have h64u : (64 : USize).toNat = 64 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hkval : ((56 - cnt) / 8 + 1 : USize).toNat = (56 - cnt.toNat) / 8 + 1 := wideK_toNat cnt hcn
+      have h8k : (8 * ((56 - cnt) / 8 + 1) : USize).toNat = 8 * ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_mul, hkval, h8u]; apply Nat.mod_eq_of_lt; omega
+      have hposk : (pos + ((56 - cnt) / 8 + 1)).toNat = pos.toNat + ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_add, hkval]; apply Nat.mod_eq_of_lt; omega
+      have hcntk : (cnt + 8 * ((56 - cnt) / 8 + 1)).toNat = cnt.toNat + 8 * ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_add, h8k]; apply Nat.mod_eq_of_lt; omega
+      have hshiftN : (64 - 8 * ((56 - cnt) / 8 + 1) : USize).toNat
+          = 64 - 8 * ((56 - cnt.toNat) / 8 + 1) := by
+        rw [USize.toNat_sub_of_le _ _ (by rw [USize.le_iff_toNat_le, h8k, h64u]; omega), h64u, h8k]
+      have hshift : (64 - 8 * ((56 - cnt) / 8 + 1) : USize).toUInt64
+          = (64 - 8 * ((56 - cnt.toNat) / 8 + 1) : Nat).toUInt64 := by
+        rw [usize_toUInt64_toNat, hshiftN]
+      have hue : data.ugetUInt64LE pos hpn
+          = data.ugetUInt64LE (pos.toNat).toUSize (by rw [toUSize_toNat_of_lt hpltU]; exact hpn) :=
+        ugetUInt64LE_congr data pos (pos.toNat).toUSize hpn _ (toUSize_toNat_of_lt hpltU).symm
+      rw [goTreeFreeUWide, dif_pos hrcw, ih (by rw [hposk]; omega),
+          goTreeFree_absorb_refill litTable distTable litLD distLD maxBits data maxOut output
+            pos.toNat bitBuf cnt.toNat,
+          refill_eq_wide data pos.toNat bitBuf cnt.toNat hcn hpn hpltU,
+          hposk, hcntk, hue, hshift, usize_toUInt64_toNat cnt]
+  | case2 pos bitBuf cnt output hnw hrc ih =>
+      intro hpos
+      have hgN := (refillGuard_usize data pos cnt hsz).mp hrc
+      have hpn : pos.toNat < data.size := hgN.2
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have h8 : (8 : USize).toNat = 8 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have e1 : (pos + 1).toNat = pos.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+        exact USize.size_eq_two_pow ▸ (show pos.toNat + 1 < USize.size by omega)
+      have e2 : (cnt + 8).toNat = cnt.toNat + 8 := by
+        rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
+      rw [goTreeFreeUWide, dif_neg hnw, dif_pos hrc, goTreeFree, dif_pos hgN,
+          ih (by rw [e1]; omega), e1, e2,
+          uget_eq_getElem! data pos hpn, usize_toUInt64_toNat]
+  | case3 pos bitBuf cnt output hnw hrc ent hlit hmax =>
+      intro hpos
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_pos hlit, if_pos hmax,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_pos ((litGuardU_usize litTable bitBuf cnt _).mp hlit), if_pos hmax]
+      rfl
+  | case4 pos bitBuf cnt output hnw hrc ent hlit hmax ih =>
+      intro hpos
+      obtain ⟨hl0, hl1, hl2⟩ := hlit
+      have hle : litTable.lenAt (bitBuf &&& 0x7FF).toNat = HuffTree.unpackLen ent := by
+        rw [litTable.lenAt_eq_unpackLen_entryAt]; congr 1
+        exact (litTable.entryAtU_window_eq bitBuf _).symm
+      have hse : litTable.symAt (bitBuf &&& 0x7FF).toNat = HuffTree.unpackSym ent := by
+        rw [litTable.symAt_eq_unpackSym_entryAt]; congr 1
+        exact (litTable.entryAtU_window_eq bitBuf _).symm
+      have hsub : (cnt - (HuffTree.unpackLen ent).toUSize).toNat
+          = cnt.toNat - (HuffTree.unpackLen ent).toNat := by
+        rw [USize.toNat_sub_of_le _ _ hl1, UInt8.toNat_toUSize]
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_pos ((litGuardU_usize litTable bitBuf cnt _).mp ⟨hl0, hl1, hl2⟩), if_neg hmax,
+          ih hpos, hsub, hle, hse, uint8_toUInt64_toNat]
+  | case5 pos bitBuf cnt output hnw hrc ent hlit e hde =>
+      intro hpos
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, Except.map]
+  | case6 pos bitBuf cnt output hnw hrc ent hlit sym bb c used hde hsym hmax =>
+      intro hpos
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, if_pos hsym, if_pos hmax]
+      rfl
+  | case7 pos bitBuf cnt output hnw hrc ent hlit cnt0 sym bb c used hde hsym hmax hnp =>
+      intro hpos
+      have hnp' : cnt.toNat ≤ c := hnp
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_pos hnp']
+      rfl
+  | case8 pos bitBuf cnt output hnw hrc ent hlit cnt0 sym bb c used hde hsym hmax hnp ih =>
+      intro hpos
+      have hnp' : ¬ cnt.toNat ≤ c := hnp
+      have hcle : c ≤ cnt.toNat := HuffTree.decodeSymCanon_cnt_le litLD litTable maxBits bitBuf cnt.toNat hde
+      have hcrt : c.toUSize.toNat = c :=
+        toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, if_pos hsym, if_neg hmax, dif_neg hnp']
+      rw [ih hpos, hcrt]
+  | case9 pos bitBuf cnt output hnw hrc ent hlit sym bb c used hde hsym heob =>
+      intro hpos
+      have hcle : c ≤ cnt.toNat := HuffTree.decodeSymCanon_cnt_le litLD litTable maxBits bitBuf cnt.toNat hde
+      have hcrt : c.toUSize.toNat = c :=
+        toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, if_neg hsym, if_pos heob, Except.map, hcrt]
+  | case10 pos bitBuf cnt output hnw hrc ent hlit sym bb c used hde hsym hneob idx hidx =>
+      intro hpos
+      have hidxc : sym.toNat - 257 ≥ Inflate.lengthBase.size := hidx
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
+          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, if_neg hsym, if_neg hneob, dif_pos hidxc]
+      rfl
+  | case11 pos bitBuf cnt output hnw hrc ent hlit cnt0 sym bb c used hde hsym hneob idx hh base ih =>
+      intro hpos
+      have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
+      rw [goTreeFreeUWide, dif_neg hnw, dif_neg hrc, dif_neg hlit,
           goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
           dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
       simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]

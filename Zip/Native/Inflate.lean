@@ -1020,6 +1020,50 @@ theorem refillGuard_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size 
   rw [USize.le_iff_toNat_le, USize.lt_iff_toNat_lt, toUSize_toNat_of_lt hsz,
       USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
 
+/-- The wide refill guard read in `USize` (`cnt ≤ 56` and eight bytes remain).
+    The bound is written as `pos ≤ data.size.toUSize - 8` (subtraction, guarded by
+    `8 ≤ data.size.toUSize`) rather than `pos + 8 ≤ …` so it never wraps near the
+    top of the address space, and matches the `Nat` guard `pos.toNat + 8 ≤
+    data.size` once the buffer is `USize`-addressable. -/
+theorem refillGuardWide_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size < USize.size) :
+    (cnt ≤ (56 : USize) ∧ (8 : USize) ≤ data.size.toUSize ∧ pos ≤ data.size.toUSize - 8)
+      ↔ (cnt.toNat ≤ 56 ∧ pos.toNat + 8 ≤ data.size) := by
+  have h56 : (56 : USize).toNat = 56 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h8 : (8 : USize).toNat = 8 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hsize : data.size.toUSize.toNat = data.size := toUSize_toNat_of_lt hsz
+  rw [USize.le_iff_toNat_le, USize.le_iff_toNat_le, USize.le_iff_toNat_le, h56, h8, hsize]
+  constructor
+  · rintro ⟨hc, h8le, hp⟩
+    rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by rw [h8, hsize]; omega)),
+        h8, hsize] at hp
+    exact ⟨hc, by omega⟩
+  · rintro ⟨hc, hp⟩
+    refine ⟨hc, by omega, ?_⟩
+    rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by rw [h8, hsize]; omega)),
+        h8, hsize]
+    omega
+
+/-- The wide refill loads `k = (56 - cnt)/8 + 1` whole bytes; its `USize`
+    computation round-trips to the `Nat` value under `cnt ≤ 56`. -/
+theorem wideK_toNat (cnt : USize) (hcnt : cnt.toNat ≤ 56) :
+    ((56 - cnt) / 8 + 1 : USize).toNat = (56 - cnt.toNat) / 8 + 1 := by
+  have h56 : (56 : USize).toNat = 56 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h8 : (8 : USize).toNat = 8 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h1 : (1 : USize).toNat = 1 := USize.toNat_one
+  have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+    USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+  have hsub : (56 - cnt).toNat = 56 - cnt.toNat := by
+    rw [USize.toNat_sub_of_le, h56]; rw [USize.le_iff_toNat_le, h56]; omega
+  have hdiv : ((56 - cnt) / 8).toNat = (56 - cnt.toNat) / 8 := by
+    rw [USize.toNat_div, hsub, h8]
+  rw [USize.toNat_add, hdiv, h1]
+  apply Nat.mod_eq_of_lt
+  omega
+
 /-- The inline-literal guard reads the packed entry **once** (`entryAt`) and tests
     `len`/`sym` in their native `UInt8`/`UInt16` widths; this matches the boxed
     reference's `lenAt`/`symAt` `Nat` guard (the length field round-trips since it is

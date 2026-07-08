@@ -104,6 +104,13 @@ theorem chainOR_eq_recomb (data : ByteArray) (pos cnt k : Nat)
                UInt64.or_zero] at hcU ⊢ <;>
     bv_decide
 
+/-- `ugetUInt64LE` depends only on the offset's `toNat`, so equal `toNat`s (e.g. a
+    `USize`/`Nat`-round-trip of the same offset) give the same word. -/
+theorem ugetUInt64LE_congr (data : ByteArray) (o1 o2 : USize)
+    (h1 : o1.toNat + 8 ≤ data.size) (h2 : o2.toNat + 8 ≤ data.size) (he : o1.toNat = o2.toNat) :
+    data.ugetUInt64LE o1 h1 = data.ugetUInt64LE o2 h2 := by
+  simp only [ByteArray.ugetUInt64LE, he]
+
 /-- **`ugetUInt64LE` is the eight-byte little-endian recombination.** Its trusted
     reference body, with the `USize` offset's `toNat` round-trip discharged and
     the bounds-checked `getElem` reads normalised to `getElem!`. -/
