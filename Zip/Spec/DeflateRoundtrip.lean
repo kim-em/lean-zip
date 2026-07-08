@@ -2,6 +2,7 @@ import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77PackedCorrect
+import Zip.Spec.DeflateBaseFreqsReuse
 import Zip.Spec.DeflateBlockSplit
 
 /-!
@@ -157,16 +158,17 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
       p = (if (chooseSplitsHeuristicP (lzMatchP data level) data.size).isEmpty then
             deflateRawBasePPrep data (lzMatchP data level)
           else
-            let obsPrep := deflateDynamicBlocksSharedAtSizedP data (lzMatchP data level)
+            let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data level)
               (chooseSplitsHeuristicP (lzMatchP data level) data.size)
-            if (deflateRawBasePPrep data (lzMatchP data level)).1 < obsPrep.1 then
-              deflateRawBasePPrep data (lzMatchP data level) else obsPrep) →
+            let basePrep := deflateRawBasePPrepF data (lzMatchP data level) obsFreqs.2
+            if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       Zip.Native.Inflate.inflateReference (p.2 ()) maxOutputSize = .ok data := by
     intro p hp; subst hp
+    dsimp only []
+    rw [deflateRawBasePPrepF_obsFreqs, deflateObsSplitSizedFreqsP_fst]
     split
     · exact hbase
-    · dsimp only []
-      split
+    · split
       · exact hbase
       · exact hsplit _
   split
@@ -296,17 +298,18 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       p = (if (chooseSplitsHeuristicP (lzMatchP data level) data.size).isEmpty then
             deflateRawBasePPrep data (lzMatchP data level)
           else
-            let obsPrep := deflateDynamicBlocksSharedAtSizedP data (lzMatchP data level)
+            let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data level)
               (chooseSplitsHeuristicP (lzMatchP data level) data.size)
-            if (deflateRawBasePPrep data (lzMatchP data level)).1 < obsPrep.1 then
-              deflateRawBasePPrep data (lzMatchP data level) else obsPrep) →
+            let basePrep := deflateRawBasePPrepF data (lzMatchP data level) obsFreqs.2
+            if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       ∃ (contentBits padding : List Bool),
         Deflate.Spec.bytesToBits (p.2 ()) = contentBits ++ padding ∧ padding.length < 8 := by
     intro p hp; subst hp
+    dsimp only []
+    rw [deflateRawBasePPrepF_obsFreqs, deflateObsSplitSizedFreqsP_fst]
     split
     · exact hbase
-    · dsimp only []
-      split
+    · split
       · exact hbase
       · exact hsplit _
   split
@@ -517,18 +520,19 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
       p = (if (chooseSplitsHeuristicP (lzMatchP data level) data.size).isEmpty then
             deflateRawBasePPrep data (lzMatchP data level)
           else
-            let obsPrep := deflateDynamicBlocksSharedAtSizedP data (lzMatchP data level)
+            let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data level)
               (chooseSplitsHeuristicP (lzMatchP data level) data.size)
-            if (deflateRawBasePPrep data (lzMatchP data level)).1 < obsPrep.1 then
-              deflateRawBasePPrep data (lzMatchP data level) else obsPrep) →
+            let basePrep := deflateRawBasePPrepF data (lzMatchP data level) obsFreqs.2
+            if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       ∃ remaining,
         Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits (p.2 ())) []
           = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
     intro p hp; subst hp
+    dsimp only []
+    rw [deflateRawBasePPrepF_obsFreqs, deflateObsSplitSizedFreqsP_fst]
     split
     · exact hbase
-    · dsimp only []
-      split
+    · split
       · exact hbase
       · exact hsplit _
   split
