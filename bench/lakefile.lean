@@ -342,6 +342,12 @@ lean_exe «lazy2-sweep» where
 lean_exe «huff-bench» where
   root := `ZipHuffBench
 
+-- Single-decoder inflate profiling driver: `decode` mode runs native inflate
+-- alone, so a `perf record` of that process attributes cleanly (see bench/README.md).
+@[default_target]
+lean_exe «inflate-profile» where
+  root := `ZipInflateProfile
+
 @[default_target]
 lean_exe fuzz_inflate where
   root := `ZipFuzzInflate

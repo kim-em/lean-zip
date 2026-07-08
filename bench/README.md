@@ -230,6 +230,57 @@ median-of-5 / `itersFor` methodology as the Lean side. The streams under
 `bench/payloads-deflate/` are gitignored; `decode_density.json` is committed
 alongside `latest.json`.
 
+### Profiling the decoder
+
+`--decode-density` sweeps *all five* decoders over all of Silesia, so a `perf`
+of that process is a blur of native + zlib + miniz + libdeflate + memcpy. To
+attribute cost to native inflate alone, use the single-decoder driver
+[`inflate-profile`](ZipInflateProfile.lean) — its `decode` mode's steady-state
+loop calls **only** `Zip.Native.Inflate.inflate` over one payload, so no other
+decoder shows up in the profile (the binary links libdeflate for `compress` mode,
+but that code never runs in a `decode` pass):
+
+```
+# 1. dump one libdeflate raw-DEFLATE payload (levels 1–12; note the origSize it prints)
+lake -d bench build inflate-profile
+lake -d bench env bench/.lake/build/bin/inflate-profile \
+  compress bench/corpora/silesia/dickens /tmp/dickens.deflate 6
+# → "origSize for decode = 10192446" (the decompressed length = the sizeHint)
+
+# 2a. sample the hot loops (call graph). Pick reps so the run is a few seconds.
+#     Lean/C is compiled without frame pointers, so use DWARF unwinding for
+#     accurate call graphs (`-g` / --call-graph fp gives broken stacks here).
+lake -d bench env perf record --call-graph dwarf -- \
+  bench/.lake/build/bin/inflate-profile decode /tmp/dickens.deflate 10192446 2000
+perf report                    # interactive; the hot loop is inflateLoopTreeFree
+# annotate a symbol (perf shows mangled names — grep the binary for the real string:
+#   nm bench/.lake/build/bin/inflate-profile | grep inflateLoopTreeFree)
+lake -d bench env perf annotate -- lp_lean_x2dzip_Zip_Native_Inflate_inflateLoopTreeFree
+
+# 2b. hardware counters (IPC, branch + cache behaviour) over the same run
+lake -d bench env perf stat -e cycles,instructions,branches,branch-misses,\
+cache-references,cache-misses -- \
+  bench/.lake/build/bin/inflate-profile decode /tmp/dickens.deflate 10192446 2000
+```
+
+The driver re-invokes inflate fresh every rep (never binding the result once and
+reusing it) and consumes each result through a `noinline` sink, so no decode is
+hoisted or dropped — wall-clock scales linearly with `reps`, as it must for
+`perf` to accumulate samples in the real hot loops.
+
+**Same-worktree A/B rule (from
+[#2630](https://github.com/kim-em/lean-zip/issues/2630) — this bites).** When
+comparing a decode change against its baseline, build **both** commits in the
+**same** worktree and profile the two saved binaries. A baseline built in a
+*separate* worktree is not code-layout-comparable: the two embed different
+absolute paths and can link objects into a different layout, shifting i-cache
+alignment of the hot loops and producing a uniform ~5–15% offset across the
+board — a pure artifact that survives interleaving and masquerades as a real
+delta. `git checkout <parent>`, `lake -d bench build inflate-profile`, copy the
+binary aside; `git checkout` back, rebuild, copy aside; then A/B the two saved
+binaries. Untouched code paths must overlay to within ~1%; a uniform offset is
+the worktree, not your change.
+
 ## What the current snapshot shows
 
 > On real data (Canterbury, level 6, geomean over 11 files) native is the
