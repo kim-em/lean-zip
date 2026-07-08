@@ -70,6 +70,20 @@ Blocked issues are excluded from `list-unclaimed` and `queue-depth`.
 **Plan files**: `plans/<UUID-prefix>.md`
 **Progress files**: `progress/<UTC-timestamp>_<UUID-prefix>.md`
 
+**If `coordination` is not on PATH** (sessions launched outside `pod`, e.g. a
+`wt` issue worktree): do not search for the script — it lives in the pod
+orchestration checkout, not this repo. Fall back to `gh` directly: claim =
+`gh issue edit N --add-assignee @me` (verify with `gh issue view N`), create
+PR = `gh pr create` with `Closes #N` in the body + `gh pr merge --auto
+--squash`, comment/close via `gh issue comment` / `gh issue close`. Label
+bookkeeping (`claimed`/`has-pr`) can be skipped; assignment is the claim
+signal.
+
+**Lake gotcha:** if `lake` fails with `compiled configuration is invalid; run
+with '-R' to reconfigure`, rerun the same command as `lake -R <cmd>` (the `-R`
+belongs to lake, not nix-shell). Happens when the cached lakefile
+configuration is stale (toolchain or environment change).
+
 ## Step 1: Claim a Work Item
 
 ```
