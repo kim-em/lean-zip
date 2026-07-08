@@ -103,11 +103,14 @@ def _levels(f):
 
 def drop_spikes(frames):
     """Drop stale-refresh spikes: a frame that jumps away from its
-    predecessor yet matches an older frame's deterministic ratios."""
+    predecessor, matches an older frame's deterministic ratios, AND is
+    transient — the next frame lands back near the predecessor. A genuine
+    regression that *persists* fails the transience test and is kept."""
     kept = []
     for i, f in enumerate(frames):
         if kept and i < len(frames) - 1 and _dratio(kept[-1], f) > SPIKE_JUMP \
-                and any(_dratio(g, f) < SPIKE_MATCH for g in kept[:-1]):
+                and any(_dratio(g, f) < SPIKE_MATCH for g in kept[:-1]) \
+                and _dratio(kept[-1], frames[i + 1]) < 0.5 * _dratio(kept[-1], f):
             print(f"spike: drop {f['commit']} ({f['subject'][:60]})",
                   file=sys.stderr)
             continue
@@ -118,6 +121,8 @@ def drop_spikes(frames):
 def drop_noise(frames):
     """Drop frames that move only within throughput noise vs the last
     kept frame; first/last frames and level-set changes always stay."""
+    if len(frames) <= 1:
+        return frames
     out = [frames[0]]
     for f in frames[1:-1]:
         if _levels(f) != _levels(out[-1]) or _dratio(out[-1], f) > RATIO_EPS \
@@ -181,6 +186,9 @@ def extract(corpus):
     print(f"{raw} raw frames -> {len(frames)} kept", file=sys.stderr)
 
     nfiles = len(plot.corpus_patterns(results_now, corpus))
+    if nfiles == 0:
+        sys.exit(f"corpus {corpus!r} has history but no rows in the current "
+                 "latest.json — nothing to anchor the reference curves to")
     m = now.get("meta", {})
     meta = dict(corpus=corpus, nfiles=nfiles,
                 first_date=frames[0]["commit_date"][:10],
@@ -279,8 +287,17 @@ def build_svg(references, frames, meta, outfile):
     first_seen = {lvl: next(i for i in range(N) if pos[lvl][i]) for lvl in levels}
 
     def held(lvl):
+        """Per-frame positions with gaps forward-filled: before first
+        appearance hold the first point; through a mid-history gap hold the
+        last visible point (opacity animates separately, so a hidden marker
+        must not teleport back to its first position)."""
         fs = first_seen[lvl]
-        return [pos[lvl][max(i, fs)] or pos[lvl][fs] for i in range(N)]
+        out, last = [], pos[lvl][fs]
+        for i in range(N):
+            if i >= fs and pos[lvl][i]:
+                last = pos[lvl][i]
+            out.append(last)
+        return out
 
     out = []
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SVG_W} {SVG_H}" '
@@ -331,10 +348,12 @@ def build_svg(references, frames, meta, outfile):
             out.append(f'{shape} fill="none" stroke="{ref["colour"]}" '
                        f'stroke-width="1.4" opacity="0.95"/>')
 
-    # trails: full per-level path, revealed by animated stroke-dashoffset
+    # trails: full per-level path, revealed by animated stroke-dashoffset.
+    # The path visits only the frames where the level is present, so a level
+    # that disappears mid-history simply contributes no vertex there.
     for lvl in levels:
-        fs = first_seen[lvl]
-        pts = [(sx(r), sy(v)) for (r, v) in (pos[lvl][i] for i in range(fs, N))]
+        samples = [(i, pos[lvl][i]) for i in range(N) if pos[lvl][i]]
+        pts = [(sx(r), sy(v)) for _, (r, v) in samples]
         if len(pts) < 2:
             continue
         d = "M" + "L".join(f"{x:.1f},{y:.1f}" for x, y in pts)
@@ -344,7 +363,12 @@ def build_svg(references, frames, meta, outfile):
         total = seg[-1]
         if total <= 0:
             continue
-        reveal = [0.0] * fs + [seg[i - fs] for i in range(fs, N)]
+        # revealed arc length at frame i = up to the last sample at or before i
+        reveal, k = [], 0
+        for i in range(N):
+            while k + 1 < len(samples) and samples[k + 1][0] <= i:
+                k += 1
+            reveal.append(seg[k] if samples[0][0] <= i else 0.0)
         out.append(f'<path d="{d}" fill="none" stroke="{NATIVE_COLOUR}" '
                    f'stroke-width="0.9" opacity="0.15" '
                    f'stroke-dasharray="{total:.1f} {total:.1f}" '
@@ -367,8 +391,9 @@ def build_svg(references, frames, meta, outfile):
         connector(a, b,
                   lambda i, a=a, b=b: pos[a][i] is not None and pos[b][i] is not None)
     # sparse frames (e.g. an early L1/L6/L9-only sweep) additionally get bridge
-    # connectors between present-but-nonadjacent levels, alive only while the
-    # levels in between are missing
+    # connectors between present-but-nonadjacent levels, alive only while EVERY
+    # level in between is missing (if any intermediate is present, the ordinary
+    # adjacent connectors through it carry the frontier instead)
     bridged = set()
     for i in range(N):
         present = [l for l in levels if pos[l][i] is not None]
@@ -377,7 +402,7 @@ def build_svg(references, frames, meta, outfile):
                 bridged.add((a, b))
                 connector(a, b, lambda i, a=a, b=b: (
                     pos[a][i] is not None and pos[b][i] is not None
-                    and any(pos[m][i] is None
+                    and all(pos[m][i] is None
                             for m in levels[levels.index(a)+1:levels.index(b)])))
 
     # native markers
@@ -425,6 +450,9 @@ def build_svg(references, frames, meta, outfile):
                      f"{i+1:2d}/{N} — {subj}")
         s0 = starts[i] / T
         s1 = starts[i + 1] / T if i + 1 < N else None
+        if N == 1:                      # single frame: static ticker, no animation
+            out.append(f'<text x="{SVG_ML}" y="46">{txt}</text>')
+            continue
         if i == 0:
             vals, keys = "1;0", f"0;{s1:.5f}"
         elif s1 is None:

@@ -68,14 +68,14 @@ Comparing at matched compression ratios, the Lean implementation:
 - **beats** the pure-OCaml [`decompress`](https://github.com/mirage/decompress)
   library outright: 2–4× faster at any ratio it can reach, and it reaches
   ratios OCaml's encoder can't;
-- has **caught JS's [`fflate`](https://github.com/101arrowz/fflate)**: the two
-  are within a few percent of each other level for level, and native pulls
-  ahead — and keeps compressing further — at fflate's densest settings;
-- runs **within 10–20% of Rust's miniz_oxide and C's zlib around their default
+- has **caught JS's [`fflate`](https://github.com/101arrowz/fflate)**: at any
+  ratio fflate reaches, native is within a few percent of its speed, pulling
+  ahead — and compressing further — at fflate's densest settings;
+- runs **within ~20% of Rust's miniz_oxide and C's zlib around their default
   levels**, widening to ~1.4–1.7× at their fast and dense extremes; the
   optimal-parse levels 9/10 reach ratios that zlib, miniz_oxide, Go, Zig, and
   fflate cannot produce at any setting;
-- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 4–11×, as
+- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 
 This codec started out far slower than everything else on the chart — the
