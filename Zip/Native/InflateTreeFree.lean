@@ -137,9 +137,10 @@ where
 @[inline] def decodeSymCanon (ld : LongDecode) (table : DecodeTable) (maxBits : Nat)
     (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
   let idx := (bitBuf &&& 0x7FF).toNat
-  let len := (table.lenAt idx).toNat
+  let e := table.entryAt idx
+  let len := (unpackLen e).toNat
   if len == 0 || len > cnt then walkCanonical ld maxBits bitBuf cnt
-  else .ok (table.symAt idx, bitBuf >>> len.toUInt64, cnt - len, len)
+  else .ok (unpackSym e, bitBuf >>> len.toUInt64, cnt - len, len)
 
 end HuffTree
 
@@ -226,16 +227,17 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
           rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
       (cnt + 8) hsz output
   else
-  if hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
-      ∧ ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize ≤ cnt
-      ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256 then
+  let e := litTable.entryAt (bitBuf &&& 0x7FF).toNat
+  if hlit : HuffTree.unpackLen e ≠ 0
+      ∧ (HuffTree.unpackLen e).toUSize ≤ cnt
+      ∧ HuffTree.unpackSym e < 256 then
     if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos
-        (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
-        (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize)
+        (bitBuf >>> (HuffTree.unpackLen e).toUInt64)
+        (cnt - (HuffTree.unpackLen e).toUSize)
         hsz
-        (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8)
+        (output.push (HuffTree.unpackSym e).toUInt8)
   else
   let cnt0 := cnt.toNat
   match decodeSymCanon litLD litTable maxBits bitBuf cnt.toNat with
@@ -296,13 +298,13 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
         rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
       rw [hpa, hca]; omega
     · obtain ⟨hne, hle, _⟩ := hlit
-      have hlen : ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize.toNat
-          = (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat :=
-        toUSize_toNat_of_lt (UInt8.toNat_lt_usizeSize _)
-      have hsub : (cnt - ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUSize).toNat
-          = cnt.toNat - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat := by
+      have hne' : (HuffTree.unpackLen e).toNat ≠ 0 := (uint8_ne_zero_iff_toNat _).mp hne
+      have hlen : ((HuffTree.unpackLen e).toUSize).toNat = (HuffTree.unpackLen e).toNat :=
+        UInt8.toNat_toUSize _
+      have hsub : (cnt - (HuffTree.unpackLen e).toUSize).toNat
+          = cnt.toNat - (HuffTree.unpackLen e).toNat := by
         rw [USize.toNat_sub_of_le _ _ hle, hlen]
-      have hlecnt : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt.toNat :=
+      have hlecnt : (HuffTree.unpackLen e).toNat ≤ cnt.toNat :=
         hlen ▸ USize.le_iff_toNat_le.mp hle
       rw [hsub]; omega
     · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
