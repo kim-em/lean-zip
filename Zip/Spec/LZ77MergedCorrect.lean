@@ -322,6 +322,57 @@ private theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSi
         hg.1 hg.2.1 hg.2.2
   · rfl
 
+/-! ## Seeded lookahead probe: byte-identity bridge -/
+
+/-- A lookahead match no longer than the current one is never cost-accepted:
+    `lazyAcceptCost` requires `len1 < len2`. -/
+private theorem lazyAcceptCost_of_le {l1 d1 l2 d2 : Nat} (h : l2 ≤ l1) :
+    lazyAcceptCost l1 d1 l2 d2 = false := by
+  unfold lazyAcceptCost
+  rw [decide_eq_false (show ¬ l1 < l2 by omega), Bool.false_and]
+
+/-- The seeded lookahead probe produces the same lazy decision as the unseeded
+    one, and — whenever that decision is *accept* — the same probe result.
+    `.1`: the cost decision is identical for the seeded and unseeded probe. `.2`:
+    the seeded probe either equals the unseeded one outright, or its decision is
+    *reject* (so the branch it selects never depends on the probe value). Together
+    these make seeding the `pos+1` walk with the `pos` match length
+    byte-identical. The seed is `matchLen` below the walk's cutoff and `0` at or
+    above it; both cases collapse via `chainWalkGuardedPackedU_seed`. -/
+private theorem seeded_probe_bridge (data : ByteArray) (prev : Array Nat)
+    (windowSize pos1 maxLen niceLen : Nat) (hpm : pos1 + maxLen ≤ data.size)
+    (hml511 : maxLen ≤ 511) (cand fuel : Nat) (len1 dist1 base : Nat) :
+    (lazyAcceptCost len1 dist1
+        (chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel
+          (if len1 < min niceLen maxLen then len1 else 0) 0 % 512)
+        (base - chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel
+          (if len1 < min niceLen maxLen then len1 else 0) 0 / 512)
+      = lazyAcceptCost len1 dist1
+        (chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 % 512)
+        (base - chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 / 512))
+    ∧ (chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel
+          (if len1 < min niceLen maxLen then len1 else 0) 0
+        = chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0
+       ∨ lazyAcceptCost len1 dist1
+           (chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel
+             (if len1 < min niceLen maxLen then len1 else 0) 0 % 512)
+           (base - chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel
+             (if len1 < min niceLen maxLen then len1 else 0) 0 / 512) = false) := by
+  by_cases hc1 : len1 < min niceLen maxLen
+  · rw [if_pos hc1]
+    obtain ⟨hEq, hLe⟩ := chainWalkGuardedPackedU_seed data prev windowSize pos1 maxLen niceLen hpm hml511 len1 hc1 cand fuel
+    by_cases hgt : len1 < chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 % 512
+    · rw [hEq hgt]; exact ⟨rfl, Or.inl rfl⟩
+    · rw [hLe (Nat.le_of_not_lt hgt)]
+      have hfL : lazyAcceptCost len1 dist1 (len1 % 512) (base - len1 / 512) = false :=
+        lazyAcceptCost_of_le (Nat.mod_le len1 512)
+      have hfR : lazyAcceptCost len1 dist1
+          (chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 % 512)
+          (base - chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 / 512) = false :=
+        lazyAcceptCost_of_le (Nat.le_of_not_lt hgt)
+      exact ⟨by rw [hfL, hfR], Or.inr hfL⟩
+  · rw [if_neg hc1]; exact ⟨rfl, Or.inl rfl⟩
+
 /-! ## The lockstep loop equality -/
 
 private theorem mergedLoop_eq (data : ByteArray)
@@ -368,26 +419,45 @@ private theorem mergedLoop_eq (data : ByteArray)
               (lz77Greedy.hash3 data (pos + 1) hashSize (by omega)) hps' hh2]
             rw [chainWalkGuardedPackedU_append data p' t' windowSize (pos + 1)
               (min 258 (data.size - (pos + 1))) niceLen (by omega) hpv'
-              (t'[lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!) lazyDepth 0 0]
+              (t'[lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!) lazyDepth]
             split
-            · split
-              · split
-                · rw [updateHashesMergedGuarded_eq,
-                    updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
-                    updateHashesGuarded_eq]
-                  exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
-                    (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
-                · rw [updateHashesMergedGuarded_eq,
-                    updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
-                    updateHashesGuarded_eq]
-                  exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
-                    (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
-              · rw [updateHashesMergedGuarded_eq,
+            · -- goodMatch-T: bridge the *seeded* `pos+1` probe to the unseeded one.
+              -- The seeding lemma makes the lazy decision (and, on accept, the probe
+              -- result itself) identical, so the branch tree stays in lockstep.
+              have hbr := seeded_probe_bridge data p' windowSize (pos + 1)
+                (min 258 (data.size - (pos + 1))) niceLen (by omega) (by omega)
+                (t'[lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!) lazyDepth
+                (chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
+                  (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 % 512)
+                (pos - chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
+                  (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 / 512)
+                (pos + 1)
+              rw [hbr.1]
+              split
+              · -- accept
+                rename_i hacc
+                rcases hbr.2 with heq | hfalse
+                · rw [heq]
+                  split
+                  · rw [updateHashesMergedGuarded_eq,
+                      updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
+                      updateHashesGuarded_eq]
+                    exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+                      (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
+                  · rw [updateHashesMergedGuarded_eq,
+                      updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
+                      updateHashesGuarded_eq]
+                    exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+                      (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
+                · rw [← hbr.1, hfalse] at hacc; simp at hacc
+              · -- reject: the emitted token uses only the `pos` match, not the probe.
+                rw [updateHashesMergedGuarded_eq,
                   updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                   updateHashesGuarded_eq]
                 exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
                   (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
-            · rw [updateHashesMergedGuarded_eq,
+            · -- goodMatch-F (gated): no probe.
+              rw [updateHashesMergedGuarded_eq,
                 updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                 updateHashesGuarded_eq]
               exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')

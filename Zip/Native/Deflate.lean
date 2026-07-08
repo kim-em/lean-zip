@@ -1920,8 +1920,18 @@ def lz77LazyMergedLoop (data : ByteArray)
             let head2 := headProbeGuarded c (prevSize + h2)
             let maxLen2 := min 258 (data.size - (pos + 1))
             have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            -- Seed the lookahead walk with the current match length (zlib
+            -- `deflate_slow`'s `prev_length` trick): a candidate shorter than the
+            -- `pos` match cannot improve on it, so pre-loading `matchLen` as the
+            -- probe's best length lets `scan_end` skip those candidates' full
+            -- compares. The seed is only applied below the walk's own cutoff
+            -- (`min niceLen maxLen2`); at or above it a seeded walk would early-stop
+            -- immediately and diverge, so those (rare, long-match) probes stay
+            -- unseeded. Proven byte-identical via `chainWalkGuardedPackedU_seed`.
+            let cutoff2 := min niceLen maxLen2
+            let seed := if matchLen < cutoff2 then matchLen else 0
             let r2 :=
-              chainWalkGuardedPackedU data c windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
+              chainWalkGuardedPackedU data c windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth seed 0
             let matchLen2 := r2 % 512
             let matchPos2 := r2 / 512
             if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then

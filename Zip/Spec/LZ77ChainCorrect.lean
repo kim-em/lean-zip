@@ -47,6 +47,99 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
         · exact ih (prev[cand &&& 0x7FFF]!) _ _ hb
     · exact hb
 
+/-! ## Seeding the chain walk's best length (zlib `prev_length` probe seed)
+
+The lazy lookahead probe at `pos+1` starts its chain walk with the current
+`pos`-match length pre-loaded as the best length instead of `0` (zlib's
+`deflate_slow` passes `prev_length`), so a candidate shorter than the current
+match is never extended. `chainWalk_seed` proves this is *output-neutral* when the
+seed is below the walk's own early-stop cutoff (`min niceLen maxLen`): the seeded
+walk either agrees with the unseeded one exactly (when the unseeded walk finds a
+strictly longer match) or returns the seed unchanged (when it does not — in which
+case the unseeded walk's best is `≤` the seed, so the downstream lazy-accept test
+rejects it either way). Proven on the reference pair walk; the packed/`USize`
+twins inherit it through `chainWalkGuardedPacked_eq`. -/
+
+/-- The chain walk's best length only grows: the returned length is at least the
+    seed it started from. -/
+theorem chainWalk_fst_mono (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) :
+    bestLen ≤ (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).1 := by
+  induction fuel generalizing cand bestLen bestPos with
+  | zero => rw [lz77Chain.chainWalk]; simp only [↓reduceIte, Nat.le_refl]
+  | succ k ih =>
+    rw [lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0))]
+    by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+    · have hcand : cand + maxLen ≤ data.size := by omega
+      simp only [dif_pos hc, Nat.add_sub_cancel]
+      by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+      · simp only [hml, ↓reduceIte]
+        split
+        · omega
+        · exact Nat.le_trans (Nat.le_of_lt hml) (ih (prev[cand &&& 0x7FFF]!) _ _)
+      · simp only [hml, ↓reduceIte]
+        split
+        · exact Nat.le_refl _
+        · exact ih (prev[cand &&& 0x7FFF]!) _ _
+    · simp only [dif_neg hc]
+      exact Nat.le_refl _
+
+/-- Seeding the best length with `m` (below the walk's own cutoff) is
+    output-neutral: from a seed `(m, s)` the walk either equals the walk from a
+    smaller seed `(b, p)` with `b ≤ m` (whenever that walk finds a match strictly
+    longer than `m`) or returns `(m, s)` unchanged (whenever it does not — then the
+    smaller-seed walk's best length is `≤ m`). Generalised over both accumulators
+    for the fuel induction. -/
+theorem chainWalk_seed (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (m : Nat) (hm : m < min niceLen maxLen) (cand fuel b p s : Nat) (hbm : b ≤ m) :
+    (m < (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel b p).1 →
+        lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel m s =
+          lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel b p) ∧
+      ((lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel b p).1 ≤ m →
+        lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel m s = (m, s)) := by
+  induction fuel generalizing cand b p s hbm with
+  | zero =>
+    rw [lz77Chain.chainWalk, lz77Chain.chainWalk]
+    simp only [↓reduceIte]
+    exact ⟨fun h => absurd h (Nat.not_lt.mpr hbm), fun _ => trivial⟩
+  | succ k ih =>
+    rw [lz77Chain.chainWalk, lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0)),
+      if_neg (by omega : ¬ (k + 1 = 0))]
+    by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+    · have hcand : cand + maxLen ≤ data.size := by omega
+      simp only [dif_pos hc, Nat.add_sub_cancel]
+      by_cases hmlm : lz77Greedy.countMatch data cand pos maxLen hcand hpm > m
+      · -- `ml > m ≥ b`: both sides update to `(ml, cand)`, then run in lockstep.
+        have hmlb : lz77Greedy.countMatch data cand pos maxLen hcand hpm > b := by omega
+        simp only [hmlm, hmlb, ↓reduceIte]
+        by_cases hstop : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ min niceLen maxLen
+        · simp only [hstop, ↓reduceIte]
+          exact ⟨fun _ => trivial, fun h => absurd h (by omega)⟩
+        · simp only [hstop, ↓reduceIte]
+          -- Both recurse from `(ml, cand)`: literally the same call.
+          refine ⟨fun _ => trivial, fun h => ?_⟩
+          exfalso
+          have hmono := chainWalk_fst_mono data prev windowSize pos maxLen niceLen hpm
+            (prev[cand &&& 0x7FFF]!) k (lz77Greedy.countMatch data cand pos maxLen hcand hpm) cand
+          omega
+      · -- `ml ≤ m`: the seeded side never updates (stays `(m, s)`) and does not
+        -- early-stop (`m < cutoff`); the unseeded side keeps `b' ≤ m`; recurse.
+        have hSeed : ¬ (m ≥ min niceLen maxLen) := by omega
+        simp only [hmlm, ↓reduceIte, hSeed]
+        by_cases hmlb : lz77Greedy.countMatch data cand pos maxLen hcand hpm > b
+        · simp only [hmlb, ↓reduceIte]
+          have hstopU : ¬ (lz77Greedy.countMatch data cand pos maxLen hcand hpm ≥ min niceLen maxLen) := by omega
+          simp only [hstopU, ↓reduceIte]
+          exact ih (prev[cand &&& 0x7FFF]!) _ cand s (by omega)
+        · simp only [hmlb, ↓reduceIte]
+          have hstopU : ¬ (b ≥ min niceLen maxLen) := by omega
+          simp only [hstopU, ↓reduceIte]
+          exact ih (prev[cand &&& 0x7FFF]!) b p s hbm
+    · rw [dif_neg hc, dif_neg hc]
+      exact ⟨fun h => absurd h (Nat.not_lt.mpr hbm), fun _ => rfl⟩
+
 /-! ## Guarded per-position head insertion (Wave 3 Step 0.2, Wave 5 de-boxing)
 
 The mainLoops perform their per-position chain-head insertion (and, in the
@@ -499,6 +592,31 @@ theorem chainWalkGuardedPacked_div (data : ByteArray) (prev : Array Nat)
 /-- Every matcher call site clamps `maxLen` to `min 258 _`; this discharges
     the `maxLen ≤ 511` side condition when `simp` applies the decode lemmas. -/
 theorem min258_le_511 (x : Nat) : min 258 x ≤ 511 := by omega
+
+/-- Seeding lemma transported to the packed `USize` walk the matcher calls
+    (`chainWalkGuardedPackedU`): for a seed `m` below the walk's cutoff, the
+    `m`-seeded walk equals the `0`-seeded one when the latter's best length
+    exceeds `m`, and returns the raw value `m` (best position `0`) otherwise.
+    Proven by decoding both packed results back to `lz77Chain.chainWalk` pairs
+    (`chainWalkGuardedPacked_eq`) and applying `chainWalk_seed`. -/
+theorem chainWalkGuardedPackedU_seed (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (hml511 : maxLen ≤ 511) (m : Nat) (hm : m < min niceLen maxLen) (cand fuel : Nat) :
+    (m < chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 % 512 →
+        chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel m 0 =
+          chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel 0 0) ∧
+      (chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 % 512 ≤ m →
+        chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel m 0 = m) := by
+  simp only [chainWalkGuardedPackedU_eq, chainWalkGuardedPacked_eq]
+  have hU1 : (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).1 ≤ maxLen :=
+    chainWalk_fst_le data prev windowSize pos maxLen niceLen hpm cand fuel
+  obtain ⟨hEq, hLe⟩ := chainWalk_seed data prev windowSize pos maxLen niceLen hpm m hm cand fuel 0 0 0 (Nat.zero_le m)
+  have hmod : ((lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).2 * 512 +
+      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).1) % 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel 0 0).1 := by omega
+  refine ⟨fun h => ?_, fun h => ?_⟩
+  · rw [hmod] at h; rw [hEq h]
+  · rw [hmod] at h; rw [hLe h]; simp
 
 /-- The proven-bounds hash-insertion loop computes the same arrays as the
     panic-checked reference: the bodies differ only in how `hashTable[hsh]` is
