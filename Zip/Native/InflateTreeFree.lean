@@ -6,9 +6,11 @@ import Zip.Native.Inflate
 This file defines the **production** decoders `Inflate.inflate` / `inflateRaw`: a
 DEFLATE Huffman decode that builds **no** Huffman tree. The fast ≤11-bit codes go
 through the canonical 11-bit table (`buildTableCanonicalFast`), and the rare >11-bit
-codes go through a canonical bit-by-bit decode keyed off the per-length
-`count` / `firstCode` / sorted-symbol arrays — never a tree walk. This skips the
-`fromLengths`/`insertLoop` build entirely (the ~7% decode win).
+codes go through libdeflate-style **subtables** (`subLookup`: two masked loads, no
+per-bit boxed accumulation) — never a tree walk, never a boxed scan. This skips the
+`fromLengths`/`insertLoop` build entirely (the ~7% decode win). The boxed per-bit
+`walkCanonical` survives only as the proof-side reference `subLookup` is verified
+against (`subLookup_ok_iff_walkCanonical`).
 
 The decode loops are well-founded (`termination_by`, mirroring the verified
 `goFusedP`/`goFusedPU`/`inflateLoop`); the canonical structures and their
