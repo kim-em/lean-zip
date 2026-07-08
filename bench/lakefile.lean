@@ -212,8 +212,18 @@ def linkFlags : IO (Array String) := do
                  "-Wl,--allow-shlib-undefined"]
   return args
 
+/-- LTO link flags mirroring the parent lakefile's `ltoLinkFlags` (issue
+    #2806, keep in sync with `../lakefile.lean`): on Linux the parent
+    library's objects are LLVM bitcode, so the bench executables' links run
+    the same LTO codegen at `-O3` — the bench binaries measure exactly what
+    the shipped library's consumers link. `LEAN_ZIP_LTO=0` opts out. -/
+def ltoLinkFlags : IO (Array String) := do
+  if Platform.isWindows || Platform.isOSX then return #[]
+  if (← IO.getEnv "LEAN_ZIP_LTO") == some "0" then return #[]
+  return #["-flto", "-fno-semantic-interposition", "-O3"]
+
 package «lean-zip-bench» where
-  moreLinkArgs := run_io linkFlags
+  moreLinkArgs := run_io do return (← linkFlags) ++ (← ltoLinkFlags)
 
 require «lean-zip» from ".."
 

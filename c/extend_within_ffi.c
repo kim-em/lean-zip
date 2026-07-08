@@ -37,7 +37,11 @@
 
 #include <lean/lean.h>
 #include <stdint.h>
-#include <string.h>
+
+/* No <string.h>: the toolchain clang compiles this file with -nostdinc
+ * (freestanding headers only, so the object can join the library's LTO
+ * bitcode; see lakefile `ltoFlags`). The __builtin_mem* forms lower to the
+ * same libc calls the Lean runtime already links. */
 
 /* Internal Lean runtime helper: grow `a` to capacity `>= min_cap`, in place
  * when `a` is exclusive. Exported (non-static) from the runtime but not
@@ -73,7 +77,7 @@ LEAN_EXPORT lean_object *lean_zip_byte_array_extend_within(
         size_t cap = lean_sarray_capacity(r);
         if (cap < newsz) cap = newsz;
         lean_object *c = lean_alloc_sarray(1, oldsz, cap);
-        memcpy(lean_sarray_cptr(c), lean_sarray_cptr(r), oldsz);
+        __builtin_memcpy(lean_sarray_cptr(c), lean_sarray_cptr(r), oldsz);
         lean_dec(r);
         r = c;
     }
@@ -82,7 +86,7 @@ LEAN_EXPORT lean_object *lean_zip_byte_array_extend_within(
     uint8_t *p   = lean_sarray_cptr(r);
     uint8_t *dst = p + oldsz;
     if (period == 1) {                                  /* RLE broadcast */
-        memset(dst, p[src_off], len);
+        __builtin_memset(dst, p[src_off], len);
         return r;
     }
     /* Copy the window once (source [src_off, src_off+period) ends at or before
@@ -91,12 +95,12 @@ LEAN_EXPORT lean_object *lean_zip_byte_array_extend_within(
      * `fillDouble` returns the window and `.extract 0 len` keeps only `len`
      * bytes, so nothing past `dst[len)` is written. */
     size_t first = period < len ? period : len;
-    memcpy(dst, p + src_off, first);
+    __builtin_memcpy(dst, p + src_off, first);
     size_t filled = first;
     while (filled < len) {
         size_t chunk = filled;
         if (chunk > len - filled) chunk = len - filled;
-        memcpy(dst + filled, dst, chunk);   /* dest starts filled>=chunk past src */
+        __builtin_memcpy(dst + filled, dst, chunk);   /* dest starts filled>=chunk past src */
         filled += chunk;
     }
     return r;
