@@ -40,8 +40,8 @@
 
 /* No <string.h>: the toolchain clang compiles this file with -nostdinc
  * (freestanding headers only, so the object can join the library's LTO
- * bitcode; see lakefile `ltoFlags`). The __builtin_mem* forms lower to the
- * same libc calls the Lean runtime already links. */
+ * bitcode; see lakefile `ltoFlags`). The __builtin_mem* forms have the
+ * same C semantics and need no header prototype. */
 
 /* Internal Lean runtime helper: grow `a` to capacity `>= min_cap`, in place
  * when `a` is exclusive. Exported (non-static) from the runtime but not
