@@ -39,15 +39,34 @@ def runnable(cmd):
     return Path(head).exists() if "/" in head else shutil.which(head) is not None
 
 
+# libdeflate levels dumped by ZipBenchReport.decodeDensityLevels (keep in sync).
+KNOWN_LEVELS = {1, 3, 6, 9, 12}
+
+
 def discover_streams(streams_dir):
-    """Yield (path, corpus, pattern, level) for every dumped libdeflate stream
-    `<corpus>/<file>_L<level>.deflate`."""
+    """Yield (path, corpus, pattern, level) for every recognized fixed-encoder
+    stream. libdeflate streams are `<corpus>/<file>_L<level>.deflate` with level in
+    KNOWN_LEVELS; the zopfli stream is `<corpus>/<file>_zopfli.deflate` and carries
+    the level-less sentinel level 0. Anything else under the cache (stale or
+    hand-dropped files) is skipped with a warning rather than crashing or leaking
+    external-only rows that would unbalance the ranking geomean."""
     sdir = Path(streams_dir)
     items = []
     for sub in sorted(p for p in sdir.iterdir() if p.is_dir()):
         for stream in sorted(sub.glob("*.deflate")):
-            file, _, lvl = stream.stem.rpartition("_L")
-            items.append((stream, sub.name, f"{sub.name}/{file}", int(lvl)))
+            stem = stream.stem
+            if stem.endswith("_zopfli"):
+                file, level = stem[: -len("_zopfli")], 0
+            elif "_L" in stem:
+                file, _, lvl = stem.rpartition("_L")
+                if not lvl.isdigit() or int(lvl) not in KNOWN_LEVELS:
+                    print(f"  skip unrecognized stream {sub.name}/{stream.name}", file=sys.stderr)
+                    continue
+                level = int(lvl)
+            else:
+                print(f"  skip unrecognized stream {sub.name}/{stream.name}", file=sys.stderr)
+                continue
+            items.append((stream, sub.name, f"{sub.name}/{file}", level))
     return items
 
 
