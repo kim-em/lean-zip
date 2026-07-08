@@ -1695,7 +1695,7 @@ theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray
     · have hs := hbc1.span; rw [hpe] at hs; omega
   have hbc2 : BufCorr br.data br.bitPos pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) :=
     consume_corr hbc1 hboff (by omega)
-  unfold decodeHuffmanFastBufTreeFree decodeHuffmanFastBuf
+  unfold decodeHuffmanFastBufTreeFree decodeHuffmanFastBufTables decodeHuffmanFastBuf
   rw [hrf]
   dsimp only []
   rw [htlit, htdist,
@@ -1743,6 +1743,17 @@ private theorem bindOk {α β : Type} {e : Except String α} {f : α → Except 
   cases e with
   | error e => simp [bind, Except.bind] at he
   | ok a => exact ⟨a, rfl, by simpa only [bind, Except.bind] using he⟩
+
+/-- The constant-table fixed-Huffman decode is the per-block build specialised to
+    the fixed code lengths: `decodeHuffmanFastBufFixed` runs
+    `decodeHuffmanFastBufTables` over the compile-time fixed tables, which are by
+    definition the tables `decodeHuffmanFastBufTreeFree` builds from
+    `fixedLitLengths`/`fixedDistLengths`. Definitionally equal, so every fixed-block
+    correctness step goes through `decodeHuffmanFastBufTreeFree_ok_iff` unchanged. -/
+theorem decodeHuffmanFastBufFixed_eq (br : BitReader) (output : ByteArray) (maxOut : Nat) :
+    decodeHuffmanFastBufFixed br output maxOut
+      = InflateBuf.decodeHuffmanFastBufTreeFree br output fixedLitLengths fixedDistLengths maxOut :=
+  rfl
 
 /-- A single `readBit` yields a value `< 2` (it is `(…) &&& 1`). -/
 theorem readBit_lt {br br' : BitReader} {bit : UInt32} (h : br.readBit = .ok (bit, br')) :
@@ -1962,7 +1973,7 @@ theorem inflateLoopTreeFree_of_inflateLoop (data : ByteArray)
           (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut = .ok (output', br') := by
         rw [← decodeHuffmanFast_eq br₂ output _ _ maxOut hldep hddep hbo₂ hwf₂]; exact hblock
       obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv _ _ br₂ br' output output' maxOut hhf' hp₂ hl₂
-      rw [htf]; dsimp only [bind, Except.bind]
+      rw [decodeHuffmanFastBufFixed_eq, htf]; dsimp only [bind, Except.bind]
       exact tailfwd output' br' hp' hl' (by rw [hd']; exact hdata₂) htail
     · -- dynamic Huffman block
       obtain ⟨pdt, hdt, h⟩ := bindOk h; obtain ⟨lt, dt, br₃⟩ := pdt; simp only [] at h
@@ -2071,6 +2082,7 @@ theorem inflateLoop_of_inflateLoopTreeFree (data : ByteArray)
       exact tailbwd output' br' hp' hl' (by rw [hd']; exact hdata₂) htail
     · -- fixed Huffman block
       obtain ⟨pb, hblock, htail⟩ := bindOk h; obtain ⟨output', br'⟩ := pb
+      rw [decodeHuffmanFastBufFixed_eq] at hblock
       have hbuf := (decodeHuffmanFastBufTreeFree_ok_iff br₂ output fixedLitLengths fixedDistLengths
         hflv hflb hfdv hfdb maxOut hbo₂ hwf₂ (output', br')).mp hblock
       have hfast : Inflate.decodeHuffmanFast br₂ output (HuffTree.fromLengthsTree fixedLitLengths 15)
