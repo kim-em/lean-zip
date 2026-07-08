@@ -570,8 +570,12 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     drops back to 64 on purpose**: the split tier starts there, and at equal
     cycles the observation-divergence split + a shallow chain beats a deep
     chain without the split — the block-split, not the chain, is L6's budget.
-    L7/L8 deepen the chain again within the split tier (256/512); past that
-    the chain saturates.
+    **L7 also sits at 64 since the post-singleton re-grid** (the hash3
+    singleton, gate-sweep over chain × gate × probe depth): with length-3
+    coverage paying the ratio bill, (chain 64, gate off, probe /2) lands at
+    0.3196 weighted-Silesia ratio — beyond what the old chain-256 L7 reached —
+    so the deep-chain point fell inside the new frontier and L7 adopts the old
+    L6 config wholesale. L8 keeps 512; past that the chain saturates.
 
     Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
     `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
@@ -592,8 +596,7 @@ def chainDepth (level : UInt8) : Nat :=
   else if level ≤ 3 then 32
   else if level ≤ 4 then 64
   else if level ≤ 5 then 128
-  else if level ≤ 6 then 64
-  else if level ≤ 7 then 256
+  else if level ≤ 7 then 64
   else if level ≤ 8 then 512
   else 1024
 
@@ -618,12 +621,16 @@ def insertCap (level : UInt8) : Nat :=
     long first match is rarely improved by deferral. Lower → more gating (faster,
     slightly worse ratio). `259 > 258` disables gating.
 
-    Only L4 keeps the gate (#2737 `mid-sweep`): disabling it gains ~16bp of
+    Only L4 keeps the full gate (#2737 `mid-sweep`): disabling it gains ~16bp of
     Silesia geomean ratio at *any* chain depth — more ratio per cycle than
     deepening the chain — so every level from 5 up spends its first budget
-    increment here. -/
+    increment here. **Exception: L6 gates at 64 since the hash3-singleton
+    re-grid** — with the singleton paying the ratio bill, (gate 64, ld/8)
+    buys +8% weighted speed for +0.09pp, the point that strictly dominates
+    miniz_oxide L6; L7 keeps the gate off and the old L6 ratio point. -/
 def goodMatch (level : UInt8) : Nat :=
   if level ≤ 4 then 8
+  else if level == 6 then 64
   else 259
 
 /-- Per-level `niceLen` cutoff (libdeflate `nice_match_length`, `deflate_compress.c`):
@@ -639,9 +646,11 @@ def goodMatch (level : UInt8) : Nat :=
     with the lazy gate on, every `niceLen` value times identically (the gate
     already skips the probes the cutoff would save) and lower cutoffs only
     cost ratio (nl30 +11bp, nl65 +3.5bp corpus-total), so the early-out is a
-    pure loss there. L5/L6 (gate off) sit at the measured knee `65` (nl30
+    pure loss there. L5–L7 sit at the measured knee `65` (nl30
     gains ~3% speed for +10bp — a poor trade; nl130/258 return ≤1bp for the
-    speed given up); L7's chain-256 walk earns `130`; L8 (the max split tier)
+    speed given up; since the post-singleton re-grid L7 runs the old L6
+    config, chain 64, so the old chain-256 `130` knee no longer applies);
+    L8 (the max split tier)
     disables the cutoff — nl130 times within 1% but emits more bytes, and L8's
     cadence guard promises old-L8 ratio parity. `258` (the max match length,
     ≥ every `maxLen`) disables the cutoff: the walk then stops only on the
@@ -653,8 +662,7 @@ def niceLen (level : UInt8) : Nat :=
   else if level ≤ 2 then 10
   else if level ≤ 3 then 14
   else if level ≤ 4 then 258
-  else if level ≤ 6 then 65
-  else if level ≤ 7 then 130
+  else if level ≤ 7 then 65
   else 258
 
 /-- Lazy lookahead probe depth (libdeflate `deflate_compress.c`): the second
@@ -666,12 +674,18 @@ def niceLen (level : UInt8) : Nat :=
     slack. The probe still runs — it is shallower, not skipped — so the ratio cost
     stays in the noise while the second walk's cycles roughly halve.
 
+    **L6 probes at `/8` since the post-singleton re-grid**: paired with the
+    `goodMatch = 64` gate it buys +8% weighted-Silesia speed for +0.09pp on a
+    tier where the hash3 singleton already banked −0.28pp — the resulting
+    (0.3205, ~36.5 MB/s) point strictly dominates miniz_oxide L6. L7 (the old
+    L6 config) stays at `/2`.
+
     Only levels ≥ 4 (the lazy `deflate_slow` tier) consult this; the greedy
     matcher (1–3) has no lookahead. Depth is a pure heuristic — the chain is
     re-verified at emission (`chainWalk_spec` holds for any fuel) — so any value
     keeps the encoder contracts. -/
 def lazyDepth (level : UInt8) : Nat :=
-  chainDepth level / 2
+  if level == 6 then chainDepth level / 8 else chainDepth level / 2
 
 /-- Enable the hash3 length-3 singleton at the split tier (levels 6–8). Our
     lazy matcher walks hash4-keyed chains only, so length-3 matches are invisible
@@ -1810,8 +1824,10 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
       * **L5** — single-block, chain 128, gate off: 29.7 @ 0.3304 (dominates
         the old L7 = single-block chain 256: gate-off buys more ratio per
         cycle than chain depth).
-      * **L6** — split, chain 64, gate off: 20.1 @ 0.3245.
-      * **L7** — split, chain 256, gate off: 17.1 @ 0.3232.
+      * **L6** — split, chain 64, gate off: 20.1 @ 0.3245. (Since the
+        post-singleton re-grid: gate 64, probe /8 — 0.3205 @ ~36.5 weighted.)
+      * **L7** — split, chain 256, gate off: 17.1 @ 0.3232. (Since the
+        post-singleton re-grid: the old L6 config — 0.3196 @ ~33.7 weighted.)
       * **L8** — split + emitted fixed-cadence candidate, chain 512: 11.4 @
         0.3228 — the old L8's exact geomean ratio, ~20% faster.
 
