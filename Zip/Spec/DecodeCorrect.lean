@@ -569,8 +569,8 @@ private theorem append_self_getElem! (seed : ByteArray) (j : Nat)
 /-- `fillDouble` always produces at least `length` bytes (it doubles until it
     reaches `length`, given a non-empty seed). -/
 private theorem fillDouble_size_ge (seed : ByteArray) (length : Nat) :
-    0 < seed.size → length ≤ (Zip.Native.Inflate.fillDouble seed length).size := by
-  fun_induction Zip.Native.Inflate.fillDouble seed length with
+    0 < seed.size → length ≤ (ByteArray.fillDouble seed length).size := by
+  fun_induction ByteArray.fillDouble seed length with
   | case1 seed hbase =>
     intro hs
     rcases hbase with h | h
@@ -584,10 +584,10 @@ private theorem fillDouble_size_ge (seed : ByteArray) (length : Nat) :
     `seed[i % seed.size]`. The doubling preserves the period because
     `seed.size` divides the running size at every step. -/
 private theorem fillDouble_get (seed : ByteArray) (length : Nat) :
-    ∀ i, i < (Zip.Native.Inflate.fillDouble seed length).size →
-      (Zip.Native.Inflate.fillDouble seed length).data.toList[i]! =
+    ∀ i, i < (ByteArray.fillDouble seed length).size →
+      (ByteArray.fillDouble seed length).data.toList[i]! =
         seed.data.toList[i % seed.size]! := by
-  fun_induction Zip.Native.Inflate.fillDouble seed length with
+  fun_induction ByteArray.fillDouble seed length with
   | case1 seed hbase =>
     intro i hi
     rw [Nat.mod_eq_of_lt hi]
@@ -631,17 +631,19 @@ theorem copyLoop_eq_ofFn
     rw [hfg]
   · -- else: split the nested `if k = 0`
     split
-    · -- overlapping (k = 0, length > distance): `fillDouble` periodic extension
+    · -- overlapping (k = 0, length > distance): `extendWithin`, whose reference
+      -- body is the `fillDouble` periodic extension
+      rw [ByteArray.extendWithin]
       have hseed_size :
           (output.extract (output.size - distance) (output.size - distance + distance)).size
             = distance := by
         rw [ByteArray.size_extract]; omega
-      have hge : length ≤ (Zip.Native.Inflate.fillDouble
+      have hge : length ≤ (ByteArray.fillDouble
           (output.extract (output.size - distance) (output.size - distance + distance)) length).size :=
         fillDouble_size_ge _ _ (by rw [hseed_size]; exact hd_pos)
       rw [ByteArray.data_append, Array.toList_append]
       congr 1
-      have hext := extract_data_toList_ofFn (Zip.Native.Inflate.fillDouble
+      have hext := extract_data_toList_ofFn (ByteArray.fillDouble
         (output.extract (output.size - distance) (output.size - distance + distance)) length)
         0 length (by omega)
       simp only [Nat.zero_add] at hext

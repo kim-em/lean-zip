@@ -56,9 +56,10 @@ def zlibLinkFlags : IO (Array String) := do
   return libPaths ++ #["-lz"]
 
 /-! The shipped package is the verified library plus its genuinely
-    load-bearing FFI: zlib (`libzlib_ffi`) and the two project-local
-    stopgaps `libcopy_within_ffi` (lean#14158) and `libbytearray_wide_ffi`
-    (lean#14053). The Track D benchmarking and comparator apparatus —
+    load-bearing FFI: zlib (`libzlib_ffi`) and the project-local primitives
+    `libcopy_within_ffi` (lean#14158), `libextend_within_ffi` (overlapping-match
+    copy), and `libbytearray_wide_ffi` (lean#14053). The Track D benchmarking
+    and comparator apparatus —
     the miniz_oxide / libdeflate / zopfli shims and the bench/sweep/fuzz
     executables — lives in the dev-only `bench/` sub-package, so a
     downstream `require lean-zip` never pulls in the Rust/libdeflate/zopfli
@@ -104,6 +105,28 @@ target copy_within_ffi.o pkg : FilePath := do
 extern_lib libcopy_within_ffi pkg := do
   let ffiO ← copy_within_ffi.o.fetch
   let name := nameToStaticLib "copy_within_ffi"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
+-- ByteArray.extendWithin primitive (allocation-free overlapping-match copy);
+-- no external library, always compiled.
+input_file extend_within_ffi.c where
+  path := "c" / "extend_within_ffi.c"
+  text := true
+
+target extend_within_ffi.o pkg : FilePath := do
+  let srcJob ← extend_within_ffi.c.fetch
+  let oFile := pkg.buildDir / "c" / "extend_within_ffi.o"
+  let weakArgs := #["-I", (← getLeanIncludeDir).toString]
+  -- -O2/-DNDEBUG for the same reason as bytearray_wide_ffi: this is a hot fill
+  -- loop whose lean.h helpers only inline away under optimization, and its
+  -- bounds are carried by the Lean-side reference body (+ conformance sweeps).
+  let hardArgs := #["-O2", "-DNDEBUG"] ++
+    if Platform.isWindows then #[] else #["-fPIC"]
+  buildO oFile srcJob weakArgs hardArgs "cc"
+
+extern_lib libextend_within_ffi pkg := do
+  let ffiO ← extend_within_ffi.o.fetch
+  let name := nameToStaticLib "extend_within_ffi"
   buildStaticLib (pkg.staticLibDir / name) #[ffiO]
 
 -- Word-sized little-endian ByteArray readers (project-local stopgap for

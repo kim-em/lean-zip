@@ -16,8 +16,8 @@
   `extract` is total and clamps its upper bound to `a.size`, so this is the
   **non-overlapping** path only (`srcOff + len ≤ a.size`); the C clamps `len` to
   match, so source and destination never overlap and the body stays a faithful
-  model. The overlapping / RLE case (`len > distance`) stays in pure Lean
-  (`fillDouble`) and does not use this primitive.
+  model. The overlapping / RLE case (`len > distance`) is handled by the sibling
+  primitive `ByteArray.extendWithin` (Zip/Native/ExtendWithin.lean).
 
   This is a project-local stopgap for the upstream Lean-core primitive proposed
   in lean#14158 (`feat: add ByteArray.copyWithin`); the owner has approved it as
