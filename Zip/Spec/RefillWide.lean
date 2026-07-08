@@ -15,9 +15,11 @@ at bit `cnt`.
 
 The masked wide step is **state-equal** to the byte loop: `refill_eq_wide` shows
 `refill` itself produces exactly that `(pos, bitBuf, cnt)`. It is the single fact
-the wide-refill production loops (`goTreeFreeUWide`, `goFusedPUWide`) are proven
-equal through — their equivalence proofs reuse the existing `*_absorb_refill`
-machinery untouched.
+the wide-refill production loop `goTreeFreeUWide` is proven equal through — its
+equivalence proof reuses the existing `goTreeFree_absorb_refill` machinery
+untouched. (The reference/spec decoder `goFusedPU`, used only by
+`inflateRawReference`, deliberately stays byte-refill: it is not the production
+path, so widening it would add complexity to the spec anchor for no runtime win.)
 -/
 
 namespace Zip.Native.InflateBuf
@@ -85,7 +87,7 @@ set_option maxHeartbeats 2000000 in
     little-endian word at `pos`, cleared above bit `8k` (by `<<< s >>> s`,
     `s = 64 - 8k`) and shifted to bit `cnt`. `cnt + 8k ≤ 64` keeps every shift
     below 64 (no wraparound). Proved per `k ∈ {1,…,8}` by `bv_decide`. -/
-theorem chainOR_eq_recomb (data : ByteArray) (pos cnt k : Nat)
+private theorem chainOR_eq_recomb (data : ByteArray) (pos cnt k : Nat)
     (hk1 : 1 ≤ k) (hk8 : k ≤ 8) (hck : cnt + 8 * k ≤ 64) :
     chainOR data pos cnt k
       = (((data[pos]!.toUInt64 ||| data[pos+1]!.toUInt64 <<< 8 ||| data[pos+2]!.toUInt64 <<< 16
