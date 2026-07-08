@@ -47,6 +47,67 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
         · exact ih (prev[cand &&& 0x7FFF]!) _ _ hb
     · exact hb
 
+/-- The hash3-singleton probe's decoded seed is a real in-window match (or
+    empty): exactly the initial-accumulator hypothesis `chainWalk_spec` takes at
+    `bestLen := seed % 512`, `bestPos := seed / 512`. `probeWin ≤ windowSize`
+    (the TOO_FAR cap) so an in-`probeWin` candidate is a fortiori in-`windowSize`;
+    the two byte compares plus the `cand3 < pos` guard establish the length-3
+    prefix match. The `h3tab` contents are opaque — only `cand3`'s bytes and the
+    window matter, both re-verified here. -/
+theorem hash3Probe_spec (data : ByteArray) (probeWin windowSize pos cand3 : Nat)
+    (hlt : pos + 2 < data.size) (maxLen : Nat) (hml : 3 ≤ maxLen)
+    (hpm : pos + maxLen ≤ data.size) (hpw : probeWin ≤ windowSize) :
+    hash3Probe data probeWin pos cand3 hlt % 512 = 0 ∨
+      (hash3Probe data probeWin pos cand3 hlt / 512 < pos ∧
+        pos - hash3Probe data probeWin pos cand3 hlt / 512 ≤ windowSize ∧
+        hash3Probe data probeWin pos cand3 hlt / 512 + maxLen ≤ data.size ∧
+        (∀ i, i < hash3Probe data probeWin pos cand3 hlt % 512 →
+          data[pos + i]! = data[hash3Probe data probeWin pos cand3 hlt / 512 + i]!) ∧
+        hash3Probe data probeWin pos cand3 hlt % 512 ≤ maxLen) := by
+  unfold hash3Probe
+  split
+  · rename_i hc
+    split
+    · rename_i hbytes
+      simp only [Bool.and_eq_true, beq_iff_eq] at hbytes
+      have hm : (cand3 * 512 + 3) % 512 = 3 := by omega
+      have hd : (cand3 * 512 + 3) / 512 = cand3 := by omega
+      rw [hm, hd]
+      refine Or.inr ⟨hc.1, by omega, by omega, ?_, by omega⟩
+      intro i hi
+      have h3i : i = 0 ∨ i = 1 ∨ i = 2 := by omega
+      obtain rfl | rfl | rfl := h3i
+      · rw [getElem!_pos data (pos + 0) (by omega), getElem!_pos data (cand3 + 0) (by omega)]
+        simpa using hbytes.1.1.symm
+      · rw [getElem!_pos data (pos + 1) (by omega), getElem!_pos data (cand3 + 1) (by omega)]
+        exact hbytes.1.2.symm
+      · rw [getElem!_pos data (pos + 2) (by omega), getElem!_pos data (cand3 + 2) (by omega)]
+        exact hbytes.2.symm
+    · exact Or.inl rfl
+  · exact Or.inl rfl
+
+/-- The gated split-tier seed `h3Seed` is a real in-window match (or empty): the
+    `useH3 := false` seed is `0` (empty), and the `useH3 := true` seed is the
+    hash3 probe result, covered by `hash3Probe_spec` under the TOO_FAR cap
+    `min windowSize tooFar3 ≤ windowSize`. This is the sole hypothesis the seeded
+    chain walk needs to return-and-emit the length-3 candidate as a valid
+    reference (`chainWalk_spec` at `bestLen := seed % 512`). -/
+theorem h3Seed_spec (useH3 : Bool) (data : ByteArray) (h3tab : Array Nat)
+    (windowSize pos : Nat) (hlt : pos + 2 < data.size) (maxLen : Nat) (hml : 3 ≤ maxLen)
+    (hpm : pos + maxLen ≤ data.size) :
+    h3Seed useH3 data h3tab windowSize pos hlt % 512 = 0 ∨
+      (h3Seed useH3 data h3tab windowSize pos hlt / 512 < pos ∧
+        pos - h3Seed useH3 data h3tab windowSize pos hlt / 512 ≤ windowSize ∧
+        h3Seed useH3 data h3tab windowSize pos hlt / 512 + maxLen ≤ data.size ∧
+        (∀ i, i < h3Seed useH3 data h3tab windowSize pos hlt % 512 →
+          data[pos + i]! = data[h3Seed useH3 data h3tab windowSize pos hlt / 512 + i]!) ∧
+        h3Seed useH3 data h3tab windowSize pos hlt % 512 ≤ maxLen) := by
+  unfold h3Seed
+  split
+  · exact hash3Probe_spec data (min windowSize tooFar3) windowSize pos
+      (headProbeGuarded h3tab (hash3Single data pos hlt)) hlt maxLen hml hpm (Nat.min_le_left _ _)
+  · exact Or.inl rfl
+
 /-! ## Seeding the chain walk's best length (zlib `prev_length` probe seed)
 
 The lazy lookahead probe at `pos+1` starts its chain walk with the current
@@ -592,6 +653,56 @@ theorem chainWalkGuardedPacked_div (data : ByteArray) (prev : Array Nat)
 /-- Every matcher call site clamps `maxLen` to `min 258 _`; this discharges
     the `maxLen ≤ 511` side condition when `simp` applies the decode lemmas. -/
 theorem min258_le_511 (x : Nat) : min 258 x ≤ 511 := by omega
+
+/-- Seed-general form of `chainWalk_fst_le`: the walk result never exceeds
+    `maxLen` provided the *initial* best length does (candidate matches are
+    `countMatch`-bounded by `maxLen`, and a seed already `≤ maxLen` cannot push
+    it over). Needed so the split tier's non-zero hash3 seed still decodes with
+    the mod/div lemmas below. -/
+theorem chainWalk_fst_le' (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) (hbl : bestLen ≤ maxLen) :
+    (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).1 ≤ maxLen := by
+  induction fuel generalizing cand bestLen bestPos hbl with
+  | zero => rw [lz77Chain.chainWalk]; exact hbl
+  | succ k ih =>
+    rw [lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0))]
+    split
+    · rename_i hc
+      have hcand : cand + maxLen ≤ data.size := by omega
+      have hcm := (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+      by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
+      · simp only [hml, ↓reduceIte]
+        split
+        · exact hcm
+        · exact ih _ _ _ hcm
+      · simp only [hml, ↓reduceIte]
+        split
+        · exact hbl
+        · exact ih _ _ _ hbl
+    · exact hbl
+
+/-- Seed-general `chainWalkGuardedPacked_mod`: decode the low bits for *any*
+    initial best length `≤ maxLen` (not just the `0 0` seed). -/
+theorem chainWalkGuardedPacked_mod' (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen bestPos : Nat)
+    (hml : maxLen ≤ 511) (hbl : bestLen ≤ maxLen) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos % 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).1 := by
+  rw [chainWalkGuardedPacked_eq]
+  have h := chainWalk_fst_le' data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos hbl
+  omega
+
+/-- Seed-general `chainWalkGuardedPacked_div`: decode the high bits for *any*
+    initial best length `≤ maxLen`. -/
+theorem chainWalkGuardedPacked_div' (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size) (cand fuel bestLen bestPos : Nat)
+    (hml : maxLen ≤ 511) (hbl : bestLen ≤ maxLen) :
+    chainWalkGuardedPacked data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos / 512 =
+      (lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos).2 := by
+  rw [chainWalkGuardedPacked_eq]
+  have h := chainWalk_fst_le' data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos hbl
+  omega
 
 /-- Seeding lemma transported to the packed `USize` walk the matcher calls
     (`chainWalkGuardedPackedU`): for a seed `m` below the walk's cutoff, the

@@ -24,10 +24,10 @@ set_option backward.split false in
 /-- `lz77ChainLazy.mainLoop` produces a valid decomposition from `pos`. The
     reference cases use `chainWalk_spec` (at `pos`, and again at `pos+1` for the
     lookahead) exactly as `lz77Chain_mainLoop_valid` does for the single match. -/
-theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen lazyDepth : Nat) (hw : windowSize > 0) :
+theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos insertCap goodMatch niceLen lazyDepth : Nat) (hw : windowSize > 0) :
     ValidDecomp data pos
-      (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch niceLen lazyDepth) := by
+      (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab pos insertCap goodMatch niceLen lazyDepth) := by
   unfold lz77ChainLazy.mainLoop
   split
   · rename_i hlt
@@ -36,7 +36,10 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
     have hspec := chainWalk_spec data
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
-      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
+      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
+      (h3Seed useH3 data h3tab windowSize pos hlt % 512)
+      (h3Seed useH3 data h3tab windowSize pos hlt / 512)
+      (h3Seed_spec useH3 data h3tab windowSize pos hlt (min 258 (data.size - pos)) (by omega) (by omega))
     split
     · rename_i hge
       split
@@ -63,38 +66,38 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
                   · exact .literal (by omega) (getElem!_pos data pos (by omega))
                       (lazyRef_at_pos data (pos + 1) _ _ hQ2.1 (by omega) hle2
                         (fun i hi => hQ2.2.2.2.1 i hi)
-                        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw))
+                        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw))
                 · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-                    (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
+                    (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
               · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-                  (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
+                  (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
             · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-                (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
+                (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
           · exact lazyRef_at_pos data pos _ _ hQ.1 hge hle (fun i hi => hQ.2.2.2.1 i hi)
-              (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
+              (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
       · exact .literal (by omega) (getElem!_pos data pos (by omega))
-          (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
+          (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
     · exact .literal (by omega) (getElem!_pos data pos (by omega))
-        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ hw)
+        (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
   · exact trailing_valid data pos
 termination_by data.size - pos
 decreasing_by all_goals omega
 
 /-- `lz77ChainLazy` produces a valid decomposition of the input data. -/
-theorem lz77ChainLazy_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
+theorem lz77ChainLazy_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hw : windowSize > 0) :
-    ValidDecomp data 0 (lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth).toList := by
+    ValidDecomp data 0 (lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).toList := by
   simp only [lz77ChainLazy]
   split
   · simp only; exact trailing_valid data 0
-  · simp only; exact lz77ChainLazy_mainLoop_valid data windowSize 65536 maxChain _ _ 0 insertCap goodMatch niceLen lazyDepth hw
+  · simp only; exact lz77ChainLazy_mainLoop_valid data windowSize 65536 maxChain useH3 _ _ _ 0 insertCap goodMatch niceLen lazyDepth hw
 
 /-- Resolving the LZ77 tokens produced by `lz77ChainLazy` recovers the original data. -/
-theorem lz77ChainLazy_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
+theorem lz77ChainLazy_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hw : windowSize > 0) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth)) [] =
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3)) [] =
       some data.data.toList :=
-  validDecomp_resolves data _ (lz77ChainLazy_valid data maxChain windowSize insertCap goodMatch niceLen lazyDepth hw)
+  validDecomp_resolves data _ (lz77ChainLazy_valid data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 hw)
 
 /-! ## Encodability -/
 
@@ -105,9 +108,9 @@ private def Enc (t : LZ77Token) : Prop :=
   | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768
 
 set_option backward.split false in
-theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos insertCap goodMatch niceLen lazyDepth : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch niceLen lazyDepth, Enc t := by
+theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos insertCap goodMatch niceLen lazyDepth : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
+    ∀ t ∈ lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab pos insertCap goodMatch niceLen lazyDepth, Enc t := by
   unfold lz77ChainLazy.mainLoop
   split
   · rename_i hlt
@@ -116,7 +119,10 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
     have hspec := chainWalk_spec data
       (prev.set! (pos &&& 0x7FFF) hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)
       windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
-      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain 0 0 (Or.inl rfl)
+      hashTable[lz77Greedy.hash3 data pos hashSize hlt]! maxChain
+      (h3Seed useH3 data h3tab windowSize pos hlt % 512)
+      (h3Seed useH3 data h3tab windowSize pos hlt / 512)
+      (h3Seed_spec useH3 data h3tab windowSize pos hlt (min 258 (data.size - pos)) (by omega) (by omega))
     split
     · rename_i hge
       split
@@ -146,40 +152,40 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
                     | tail _ h =>
                       cases h with
                       | head => exact ⟨by omega, by omega, by omega, by omega⟩
-                      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+                      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
                 · intro t ht
                   cases ht with
                   | head => exact ⟨hge, by omega, by omega, by omega⟩
-                  | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+                  | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
               · intro t ht
                 cases ht with
                 | head => exact ⟨hge, by omega, by omega, by omega⟩
-                | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+                | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
             · intro t ht
               cases ht with
               | head => exact ⟨hge, by omega, by omega, by omega⟩
-              | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+              | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
           · intro t ht
             cases ht with
             | head => exact ⟨hge, by omega, by omega, by omega⟩
-            | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+            | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
       · intro t ht
         cases ht with
         | head => trivial
-        | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+        | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
     · intro t ht
       cases ht with
       | head => trivial
-      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+      | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
   · intro t ht
     exact trailing_encodable data pos t ht
 termination_by data.size - pos
 decreasing_by all_goals omega
 
 /-- Every token `lz77ChainLazy` emits satisfies the encoder bounds. -/
-theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
+theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ (lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth).toList,
+    ∀ t ∈ (lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
@@ -188,24 +194,42 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
   · intro t ht
     exact trailing_encodable data 0 t ht
   · intro t ht
-    exact lz77ChainLazy_mainLoop_encodable data windowSize 65536 maxChain _ _ 0 insertCap goodMatch niceLen lazyDepth hw hws t ht
+    exact lz77ChainLazy_mainLoop_encodable data windowSize 65536 maxChain useH3 _ _ _ 0 insertCap goodMatch niceLen lazyDepth hw hws t ht
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 
+set_option maxRecDepth 4000 in
+set_option maxHeartbeats 1000000 in
 /-- The iterative lazy chain `mainLoop` is the accumulator form of the recursive
     one — identical branch structure, push vs. cons at each emission (two pushes in
     the lookahead arm). -/
-private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth hashTable prev pos acc =
-    acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain hashTable prev pos insertCap goodMatch niceLen lazyDepth).toArray := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
+    lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth useH3 hashTable prev h3tab pos acc =
+    acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab pos insertCap goodMatch niceLen lazyDepth).toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
   | _ n ih =>
     unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
-    simp only [chainWalkGuardedPacked_mod, chainWalkGuardedPacked_div, min258_le_511,
-      updateHashesGuarded_eq]
     by_cases hlt : pos + 2 < data.size
-    · simp only [hlt, ↓reduceDIte]
+    · -- Reduce the outer `pos+2 < data.size` dite with `zeta := false`, so the
+      -- `let r := chainWalk … seed …` binding is NOT inlined yet — otherwise the
+      -- large opaque `h3Seed`/`hash3Single` terms get duplicated across the whole
+      -- branch tree (via `matchLen`/`matchPos`) and blow up. Abstract those two
+      -- opaque terms to variables first, then the (now cheap) zeta-simp aligns
+      -- the two sides' walk decode through `chainWalkGuardedPacked_mod`/`_div`.
+      simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
+      -- The seed's decoded length is `≤ maxLen` (`h3Seed_spec`); keep that fact
+      -- through the abstraction so the seed-general decode lemmas apply.
+      have hbnd : h3Seed useH3 data h3tab windowSize pos hlt % 512 ≤ min 258 (data.size - pos) := by
+        rcases h3Seed_spec useH3 data h3tab windowSize pos hlt (min 258 (data.size - pos))
+          (by omega) (by omega) with hz | hq
+        · omega
+        · exact hq.2.2.2.2
+      generalize hsd : h3Seed useH3 data h3tab windowSize pos hlt = sd
+      rw [hsd] at hbnd
+      generalize hash3Single data pos hlt = hsg
+      simp only [chainWalkGuardedPacked_mod', chainWalkGuardedPacked_div', min258_le_511,
+        hbnd, Nat.zero_le, updateHashesGuarded_eq]
       -- Branch tree: hge / hle / h3lt / gate (matchLen < goodMatch) / (matchLen2 > matchLen) / hle2
       split
       · -- hge : matchLen ≥ 3
@@ -219,63 +243,63 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
               · -- matchLen2 > matchLen
                 split
                 · -- hle2 : lookahead emits literal + reference(matchLen2), two pushes
-                  rw [ih _ (by omega) _ _ _ _ rfl,
+                  rw [ih _ (by omega) _ _ _ _ _ rfl,
                     Array.push_eq_append, Array.push_eq_append,
                     Array.append_assoc, Array.append_assoc,
                     ← List.toArray_cons, ← List.toArray_cons]
                 · -- ¬hle2 : reference(matchLen) at pos
-                  rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+                  rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
                     ← Array.append_assoc, Array.push_eq_append]
               · -- matchLen2 ≤ matchLen : reference(matchLen) at pos
-                rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+                rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
                   ← Array.append_assoc, Array.push_eq_append]
             · -- matchLen ≥ goodMatch (gated) : reference(matchLen) at pos
-              rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+              rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
                 ← Array.append_assoc, Array.push_eq_append]
           · -- ¬h3lt : reference(matchLen) at pos (near end)
-            rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+            rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
               ← Array.append_assoc, Array.push_eq_append]
         · -- ¬hle : literal
-          rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+          rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
       · -- ¬hge : literal
-        rw [ih _ (by omega) _ _ _ _ rfl, List.toArray_cons,
+        rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
           ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
       exact trailing_eq data pos acc
 
 /-- `lz77ChainLazyIter` produces exactly the same tokens as `lz77ChainLazy`. -/
-theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) :
-    lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth =
-      lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth := by
+theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :
+    lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 =
+      lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 := by
   unfold lz77ChainLazyIter lz77ChainLazy
   split
   · rw [trailing_eq]; simp only [List.append_toArray, List.nil_append]
   · rw [mainLoop_eq_chainLazy]; simp only [List.append_toArray, List.nil_append]
 
-theorem lz77ChainLazyIter_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
+theorem lz77ChainLazyIter_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hw : windowSize > 0) :
-    ValidDecomp data 0 (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth).toList := by
-  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_valid data maxChain windowSize insertCap goodMatch niceLen lazyDepth hw
+    ValidDecomp data 0 (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).toList := by
+  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_valid data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 hw
 
-theorem lz77ChainLazyIter_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
+theorem lz77ChainLazyIter_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hw : windowSize > 0) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth)) [] =
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3)) [] =
       some data.data.toList := by
-  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_resolves data maxChain windowSize insertCap goodMatch niceLen lazyDepth hw
+  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_resolves data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 hw
 
-theorem lz77ChainLazyIter_encodable (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
+theorem lz77ChainLazyIter_encodable (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth).toList,
+    ∀ t ∈ (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   rw [lz77ChainLazyIter_eq_lz77ChainLazy]
-  exact lz77ChainLazy_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth hw hws
+  exact lz77ChainLazy_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 hw hws
 
 /-- The lazy chain matcher emits no tokens on empty input. -/
-theorem lz77ChainLazyIter_empty (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat)
-    (hzero : data.size = 0) : lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth = #[] := by
+theorem lz77ChainLazyIter_empty (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (hzero : data.size = 0) : lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 = #[] := by
   rw [lz77ChainLazyIter_eq_lz77ChainLazy]
   simp only [lz77ChainLazy, show data.size < 3 from by omega, ↓reduceIte]
   have htrail : lz77Greedy.trailing data 0 = [] := by

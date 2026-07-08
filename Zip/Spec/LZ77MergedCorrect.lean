@@ -375,16 +375,17 @@ private theorem seeded_probe_bridge (data : ByteArray) (prev : Array Nat)
 
 /-! ## The lockstep loop equality -/
 
+set_option maxHeartbeats 1000000 in
 private theorem mergedLoop_eq (data : ByteArray)
-    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (hashTable prev h3tab : Array Nat) (pos : Nat) (acc : Array UInt32)
     (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
     (hpv : min chainWinSize data.size ≤ prev.size) :
-    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth
-        (prev ++ hashTable) pos acc =
-      lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth
-        hashTable prev pos acc := by
-  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev hht hps hpv with
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        (prev ++ hashTable) h3tab pos acc =
+      lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        hashTable prev h3tab pos acc := by
+  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab hht hps hpv with
   | _ n ih =>
     unfold lz77LazyMergedLoop lz77ChainLazyIterP.mainLoop
     by_cases hlt : pos + 2 < data.size
@@ -395,7 +396,13 @@ private theorem mergedLoop_eq (data : ByteArray)
         have h1 := winMask_lt pos
         have h2 := Nat.and_le_left (n := pos) (m := 0x7FFF)
         simp only [chainWinSize] at h1 hpv; omega
-      simp only [hlt, ↓reduceDIte, headProbeGuarded_eq, guardedSet_eq,
+      -- Reduce the outer dite with `zeta := false`, then abstract the opaque
+      -- hash3 seed (identical on both sides — it reads the separate `h3tab`) so
+      -- the append/head-insert simp below does not duplicate it across branches.
+      simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
+      generalize hsd : h3Seed useH3 data h3tab windowSize pos hlt = sd
+      generalize hash3Single data pos hlt = hsg
+      simp only [headProbeGuarded_eq, guardedSet_eq,
         getElem!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) hps hh,
         set!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) pos hps hh,
         set!_append_left prev (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)
@@ -406,7 +413,12 @@ private theorem mergedLoop_eq (data : ByteArray)
       have hps' : p'.size = prevSize := by rw [← hp'eq, Array.size_set!]; exact hps
       have hpv' : min chainWinSize data.size ≤ p'.size := by rw [← hp'eq, Array.size_set!]; exact hpv
       rw [chainWalkGuardedPackedU_append data p' t' windowSize pos (min 258 (data.size - pos))
-        niceLen (by omega) hpv' (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0]
+        niceLen (by omega) hpv' (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain (sd % 512) (sd / 512)]
+      -- Abstract the (now identical on both sides) main walk result so `split`'s
+      -- normalisation does not carry its many `matchLen`/`matchPos`/interior-insert
+      -- copies (which the split-tier `updateHash3` range multiplied).
+      generalize chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
+        (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain (sd % 512) (sd / 512) = rmain
       split
       · split
         · split
@@ -427,10 +439,8 @@ private theorem mergedLoop_eq (data : ByteArray)
               have hbr := seeded_probe_bridge data p' windowSize (pos + 1)
                 (min 258 (data.size - (pos + 1))) niceLen (by omega) (by omega)
                 (t'[lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!) lazyDepth
-                (chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
-                  (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 % 512)
-                (pos - chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
-                  (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 / 512)
+                (rmain % 512)
+                (pos - rmain / 512)
                 (pos + 1)
               rw [hbr.1]
               split
@@ -442,43 +452,43 @@ private theorem mergedLoop_eq (data : ByteArray)
                   · rw [updateHashesMergedGuarded_eq,
                       updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                       updateHashesGuarded_eq]
-                    exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+                    exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
                       (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
                   · rw [updateHashesMergedGuarded_eq,
                       updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                       updateHashesGuarded_eq]
-                    exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+                    exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
                       (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
                 · rw [← hbr.1, hfalse] at hacc; simp at hacc
               · -- reject: the emitted token uses only the `pos` match, not the probe.
                 rw [updateHashesMergedGuarded_eq,
                   updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                   updateHashesGuarded_eq]
-                exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+                exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
                   (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
             · -- goodMatch-F (gated): no probe.
               rw [updateHashesMergedGuarded_eq,
                 updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                 updateHashesGuarded_eq]
-              exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+              exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
                 (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
-          · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
-        · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
-      · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
+          · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
+        · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
+      · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
     · simp only [hlt, ↓reduceDIte]
 
 /-- The merged-array lazy matcher equals the two-array packed lazy matcher. -/
-theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) :
-    lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen lazyDepth =
-      lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth := by
+theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :
+    lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 =
+      lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 := by
   unfold lz77ChainLazyIterPMerged lz77ChainLazyIterP
   split
   · rfl
   · dsimp only
     rw [← Array.replicate_append_replicate]
     exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
-      goodMatch niceLen lazyDepth (Array.replicate 65536 data.size)
-      (Array.replicate (min chainWinSize data.size) data.size) 0 _
+      goodMatch niceLen lazyDepth useH3 (Array.replicate 65536 data.size)
+      (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
       (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
       (Nat.le_of_eq (by rw [Array.size_replicate]))
 
