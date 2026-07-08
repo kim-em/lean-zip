@@ -217,7 +217,8 @@ set_option maxRecDepth 4096 in
 def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
     (pos : USize) (bitBuf : UInt64) (cnt : USize)
-    (hsz : data.size < USize.size) (output : ByteArray) :
+    (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) (output : ByteArray) :
     Except String (ByteArray × USize × UInt64 × USize) := do
   if hrc : cnt ≤ 56 ∧ pos < data.size.toUSize then
     goTreeFreeU litTable distTable litLD distLD maxBits data maxOut
@@ -225,9 +226,10 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       (bitBuf ||| ((data.uget pos (by
           have h := USize.lt_iff_toNat_lt.mp hrc.2
           rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
-      (cnt + 8) hsz output
+      (cnt + 8) hsz hlp output
   else
-  let e := litTable.entryAt (bitBuf &&& 0x7FF).toNat
+  let e := litTable.entryAtU (bitBuf &&& 0x7FF).toUSize
+    (by rw [hlp]; exact HuffTree.and_0x7FF_toUSize_toNat_lt bitBuf)
   if hlit : HuffTree.unpackLen e ≠ 0
       ∧ (HuffTree.unpackLen e).toUSize ≤ cnt
       ∧ HuffTree.unpackSym e < 256 then
@@ -236,7 +238,7 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos
         (bitBuf >>> (HuffTree.unpackLen e).toUInt64)
         (cnt - (HuffTree.unpackLen e).toUSize)
-        hsz
+        hsz hlp
         (output.push (HuffTree.unpackSym e).toUInt8)
   else
   let cnt0 := cnt.toNat
@@ -248,7 +250,7 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       else if hnp : cnt0 ≤ cnt' then throw "Inflate: no progress in Huffman decode"
       else
         goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
-          cnt'.toUSize hsz (output.push sym.toUInt8)
+          cnt'.toUSize hsz hlp (output.push sym.toUInt8)
     else if sym == 256 then .ok (output, pos, bitBuf, cnt'.toUSize)
     else
       let idx := sym.toNat - 257
@@ -277,7 +279,7 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
               let out := Inflate.copyLoop output (output.size - distance) distance 0 length
                 (by omega) (by omega)
               goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
-                cnt4.toUSize hsz out
+                cnt4.toUSize hsz hlp out
   termination_by (data.size - pos.toNat) * 9 + cnt.toNat
   decreasing_by
     · obtain ⟨hc, hp⟩ := hrc
@@ -321,7 +323,8 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     `decodeHuffmanFastBufTreeFree` so the fixed-Huffman path can pass the
     compile-time-constant fixed tables instead of rebuilding them every block. -/
 def decodeHuffmanFastBufTables (br : BitReader) (output : ByteArray)
-    (litTable distTable : DecodeTable) (litLD distLD : LongDecode) (maxOut : Nat) :
+    (litTable distTable : DecodeTable) (litLD distLD : LongDecode) (maxOut : Nat)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) :
     Except String (ByteArray × BitReader) := do
   let (pos, bitBuf, cnt) := refill br.data br.pos 0 0
   let bitBuf := bitBuf >>> br.bitOff.toUInt64
@@ -330,7 +333,8 @@ def decodeHuffmanFastBufTables (br : BitReader) (output : ByteArray)
     if hsz : br.data.size.toUSize.toNat = br.data.size then
       Except.map (fun x => (x.1, x.2.1.toNat, x.2.2.1, x.2.2.2.toNat))
         (goTreeFreeU litTable distTable litLD distLD 15 br.data maxOut
-          pos.toUSize bitBuf cnt.toUSize (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _) output)
+          pos.toUSize bitBuf cnt.toUSize (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _)
+          hlp output)
     else
       goTreeFree litTable distTable litLD distLD 15 br.data maxOut pos bitBuf cnt output
   let _ := bitBuf'
@@ -350,6 +354,7 @@ def decodeHuffmanFastBufTreeFree (br : BitReader) (output : ByteArray)
   let litLD := HuffTree.buildLongDecodeWithCount litLengths litCount 15
   let distLD := HuffTree.buildLongDecodeWithCount distLengths distCount 15
   decodeHuffmanFastBufTables br output litTable distTable litLD distLD maxOut
+    (HuffTree.buildTableCanonicalFastWithCount_size litLengths litCount 15)
 
 end InflateBuf
 
@@ -396,6 +401,7 @@ def decodeHuffmanFastBufFixed (br : BitReader) (output : ByteArray) (maxOut : Na
     Except String (ByteArray × BitReader) :=
   InflateBuf.decodeHuffmanFastBufTables br output fixedLitTable fixedDistTable
     fixedLitLD fixedDistLD maxOut
+    (HuffTree.buildTableCanonicalFastWithCount_size fixedLitLengths fixedLitCount 15)
 
 /-- Like `decodeDynamicTrees`, but returns only the code-length vectors — it never
     builds the lit/dist Huffman trees (the whole point of the tree-free path). The
