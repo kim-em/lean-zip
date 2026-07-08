@@ -1,4 +1,5 @@
 import Zip
+import Zip.Native.InflateFast  -- #2799 spike (quarantined: not re-exported by `Zip`)
 import Bench.Libdeflate
 
 /-!
@@ -55,6 +56,53 @@ def runDecode (payloadPath : String) (origSize reps : Nat) : IO Unit := do
       | .error e => throw (IO.userError s!"inflate failed: {e}")
     IO.eprintln s!"done ({reps} reps, checksum={checksum})"
 
+/-- `decode-fast` mode (issue #2799 spike): like `decode`, but the steady-state
+    loop calls the write-once-cursor `Inflate.inflateFast` instead of the
+    production `Inflate.inflate`. A/B the two saved... no — A/B the two MODES of
+    the *same* binary (`decode` vs `decode-fast`), which is even more
+    code-layout-comparable than the two-worktree rule requires. The one-time
+    sanity check asserts `inflateFast` output equals `inflate` output, so a
+    correctness divergence aborts before any timing. -/
+def runDecodeFast (payloadPath : String) (origSize reps : Nat) : IO Unit := do
+  let payload ← IO.FS.readBinFile payloadPath
+  let refOut ← match Zip.Native.Inflate.inflate payload (sizeHint := origSize) with
+    | .error e => throw (IO.userError s!"reference inflate failed on {payloadPath}: {e}")
+    | .ok b => pure b
+  match Zip.Native.Inflate.inflateFast payload (sizeHint := origSize) with
+  | .error e => throw (IO.userError s!"inflateFast failed on {payloadPath}: {e}")
+  | .ok first =>
+    unless first == refOut do
+      throw (IO.userError s!"inflateFast output MISMATCH: {first.size} B vs reference {refOut.size} B")
+    IO.eprintln s!"inflate-profile decode-fast: {payload.size} → {first.size} bytes \
+                   (== reference), sizeHint={origSize}, reps={reps}"
+    let mut checksum := 0
+    for _ in [:reps] do
+      match Zip.Native.Inflate.inflateFast payload (sizeHint := origSize) with
+      | .ok b => checksum := checksum + (← sink b.size)
+      | .error e => throw (IO.userError s!"inflateFast failed: {e}")
+    IO.eprintln s!"done ({reps} reps, checksum={checksum})"
+
+/-- `decode-fast-u` mode: like `decode-fast` but the branch-free `uset` fastloop
+    (`Inflate.inflateFastU`). Asserts output equals the reference once, then loops. -/
+def runDecodeFastU (payloadPath : String) (origSize reps : Nat) : IO Unit := do
+  let payload ← IO.FS.readBinFile payloadPath
+  let refOut ← match Zip.Native.Inflate.inflate payload (sizeHint := origSize) with
+    | .error e => throw (IO.userError s!"reference inflate failed on {payloadPath}: {e}")
+    | .ok b => pure b
+  match Zip.Native.Inflate.inflateFastU payload (sizeHint := origSize) with
+  | .error e => throw (IO.userError s!"inflateFastU failed on {payloadPath}: {e}")
+  | .ok first =>
+    unless first == refOut do
+      throw (IO.userError s!"inflateFastU output MISMATCH: {first.size} B vs reference {refOut.size} B")
+    IO.eprintln s!"inflate-profile decode-fast-u: {payload.size} → {first.size} bytes \
+                   (== reference), sizeHint={origSize}, reps={reps}"
+    let mut checksum := 0
+    for _ in [:reps] do
+      match Zip.Native.Inflate.inflateFastU payload (sizeHint := origSize) with
+      | .ok b => checksum := checksum + (← sink b.size)
+      | .error e => throw (IO.userError s!"inflateFastU failed: {e}")
+    IO.eprintln s!"done ({reps} reps, checksum={checksum})"
+
 /-- `compress` mode: dump one libdeflate raw-DEFLATE payload for later profiling. -/
 def runCompress (inPath outPath : String) (level : UInt8) : IO Unit := do
   let data ← IO.FS.readBinFile inPath
@@ -65,8 +113,9 @@ def runCompress (inPath outPath : String) (level : UInt8) : IO Unit := do
 
 def usage : String :=
   "usage:\n" ++
-  "  inflate-profile compress <file> <out> <level>        dump a libdeflate payload once\n" ++
-  "  inflate-profile decode <payload> <origSize> <reps>   profile native inflate only"
+  "  inflate-profile compress <file> <out> <level>          dump a libdeflate payload once\n" ++
+  "  inflate-profile decode <payload> <origSize> <reps>     profile native inflate only\n" ++
+  "  inflate-profile decode-fast <payload> <origSize> <reps> profile the #2799 write-once-cursor spike"
 
 def main (args : List String) : IO Unit := do
   match args with
@@ -77,4 +126,12 @@ def main (args : List String) : IO Unit := do
     let some origSize := sizeStr.toNat? | throw (IO.userError s!"bad origSize: {sizeStr}")
     let some reps := repsStr.toNat? | throw (IO.userError s!"bad reps: {repsStr}")
     runDecode payloadPath origSize reps
+  | ["decode-fast", payloadPath, sizeStr, repsStr] =>
+    let some origSize := sizeStr.toNat? | throw (IO.userError s!"bad origSize: {sizeStr}")
+    let some reps := repsStr.toNat? | throw (IO.userError s!"bad reps: {repsStr}")
+    runDecodeFast payloadPath origSize reps
+  | ["decode-fast-u", payloadPath, sizeStr, repsStr] =>
+    let some origSize := sizeStr.toNat? | throw (IO.userError s!"bad origSize: {sizeStr}")
+    let some reps := repsStr.toNat? | throw (IO.userError s!"bad reps: {repsStr}")
+    runDecodeFastU payloadPath origSize reps
   | _ => IO.eprintln usage; throw (IO.userError "bad arguments")

@@ -253,6 +253,64 @@ and #2795 needs no re-run after #2811 lands unless a post-#2811 profile shows
 `lean_byte_array_push` becoming a materially larger self-time share of the
 rebalanced decode.
 
+**#2799 verdict (2026-07-08): fastloop / write-once cursor decode — measured
+real but modest (~half the pre-registration), and the expensive branch-free
+variant barely beats the cheap one.** The follow-up probe to #2795 (which killed
+the *store-call*-removal motivation and demanded #2799 rest on what it
+*additionally* removes: the per-literal size-bump/guard bookkeeping and bounds
+discipline). Two spikes in a quarantined `Zip/Native/InflateFast.lean` (NOT on
+any production path; `Inflate.inflate` unchanged), exact-size path only
+(`sizeHint` = true decompressed length, pre-extended once via
+`ByteArray.presize`; back-references written in place at the cursor via a new
+`ByteArray.copyWithinAt` FFI primitive):
+
+- **`goCur` (set! cursor):** `goTreeFreeU` with `output.push` → `set!` at an
+  `outPos` cursor; input side byte-identical, isolating the output-write cost.
+- **`goCurU` (uset fastloop — the actual #2799 shape):** a per-symbol margin
+  guard `outPos + 299 ≤ output.size` gating a branch-free body with proven-bounds
+  `uset` literals (real omega proof from the margin, **no `sorry`**) and no
+  per-literal max-size check; the <299-byte tail delegates to `goCur`.
+
+Same-**binary** A/B (three modes `decode`/`decode-fast`/`decode-fast-u` in one
+`inflate-profile` — strictly more layout-comparable than the two-worktree rule),
+Python-zlib level-6 raw-DEFLATE payloads (libdeflate FFI unavailable this env),
+`perf stat` cycles (3 trials) + best-of-5 wall-clock cross-check, this machine:
+
+| file | mix | Δ cyc set! | Δ cyc uset | Δ wall uset |
+|---|---|---|---|---|
+| dickens (10.2M text) | literal-heavy | −4.2% | **−6.0%** | −6.4% |
+| x-ray (8.5M image) | literal-heavy | −3.3% | −3.6% | −3.5% |
+| nci (33.6M chem) | match-heavy | −0.5% | −0.9% | −2.7% |
+| **geomean** | | **−2.7%** | **−3.5%** | −4.2% |
+
+**Instructions did NOT drop** — flat-to-slightly-up and layout-sensitive across
+builds (the untouched `decode` baseline was bit-identical across rebuilds while
+`goCur` in the edited module shifted ±4%), so the win is **microarchitectural**
+(no realloc/regrow churn on the growing push buffer, no RC on its header), not an
+instruction-count reduction: the cursor index arithmetic replaces `push`'s
+internal bookkeeping ~1:1. **Stated per the probe's decision rule:** the
+architecture is real and correct (byte-identical output on all corpora + block
+types + RLE, guarded by `ZipTest/InflateFast.lean`), the shape matches the
+estimate (literal-heavy > match-heavy), but the magnitude is ~half to two-thirds
+of #2799's pre-registered 7–10% geomean. **Two decision-relevant facts:** (1) the
+branch-free `uset` + 299-margin machinery — the heaviest proof surface in the
+repo (write-once cursor equivalence through the exact-size buffer + the margin
+invariant) — separates from the far-simpler `set!` cursor by only ~0.8% cycles,
+**inside the ±4% layout/codegen sensitivity** the instruction counts showed, so
+`uset` is **not proven materially better** than `set!`; (2) the `set!` cursor
+alone captures ~two-thirds of the win at a fraction of the proof cost.
+**Consequence:** do not pay for the full `uset`+margin equivalence proof on this
+evidence; if #2799 is pursued, the `set!` cursor is the better win/proof ratio
+and the branch-free refinement is not justified by a delta within noise. **Caveat
+(blocks revival):** streams are Python-zlib level-6 (libdeflate FFI unavailable
+this env), and #2799's pre-registration is on libdeflate's denser, fewer-literal
+streams where the literal-write component is likely smaller — the magnitude is
+not established; **a libdeflate-stream rerun is required before any
+production/proof revival.** The reproducible probe (both spikes, FFI primitives,
+conformance test, `decode-fast{,-u}` modes) is landed by this PR, quarantined
+(not re-exported by `Zip`); `Inflate.inflate` is untouched and #2799's full
+production-integration scope stays open.
+
 **W5.P1 comparative component profile (2026-06-12, perf, alice29, per-compressor
 windows, normalized to compressor-attributable samples; nix/Lean startup noise
 excluded; miniz attribution degraded — inline monolith):**
