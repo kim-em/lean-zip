@@ -68,6 +68,7 @@ theorem kraftSumFast_go_eq (count : Array Nat) (maxBits b acc : Nat) :
   if h : b ≤ maxBits then
     rw [dif_pos h, kraftSumFast_go_eq count maxBits (b + 1) _,
         Huffman.Spec.kraftSumFrom_unfold count maxBits b h]
+    simp only [Nat.shiftLeft_eq, Nat.one_mul]
     omega
   else
     rw [dif_neg h, Huffman.Spec.kraftSumFrom_gt count maxBits b (by omega), Nat.add_zero]
@@ -104,6 +105,7 @@ theorem fromLengths_eq_validate (lengths : Array UInt8) (maxBits : Nat) :
     fromLengths lengths maxBits
       = (validateLengths lengths maxBits).map (fun _ => fromLengthsTree lengths maxBits) := by
   unfold fromLengths validateLengths
+  simp only [Nat.shiftLeft_eq, Nat.one_mul]
   by_cases h1 : lengths.any (fun l => l.toNat > maxBits) = true
   · rw [if_pos h1, if_pos h1]; rfl
   · rw [if_neg h1, if_neg h1, validate_kraft_eq lengths maxBits h1]
