@@ -270,6 +270,51 @@ theorem DecodeTable.symAt_eq_unpackSym_entryAt (t : DecodeTable) (idx : Nat) :
   unfold DecodeTable.symAt DecodeTable.entryAt
   split <;> rfl
 
+/-- `entryAt` with the bounds proof supplied by the caller: an unchecked `uget` on
+    a `USize` index, so the hot loop pays **no** per-symbol bounds check and no
+    `USize→Nat` index round-trip. The `2^fastBits`-slot invariant on `packed`
+    (`buildTableCanonicalFastWithCount_size`) plus `bitBuf &&& 0x7FF < 2^fastBits`
+    discharge the proof once at the call site. Equal to `entryAt` in bounds
+    (`entryAtU_eq_entryAt`), so every decode proof still transfers. -/
+@[inline] def DecodeTable.entryAtU (t : DecodeTable) (i : USize)
+    (h : i.toNat < t.packed.size) : UInt32 :=
+  t.packed.uget i h
+
+theorem DecodeTable.entryAtU_eq_entryAt (t : DecodeTable) (i : USize)
+    (h : i.toNat < t.packed.size) : t.entryAtU i h = t.entryAt i.toNat := by
+  unfold DecodeTable.entryAtU DecodeTable.entryAt
+  rw [dif_pos h]; rfl
+
+/-- The `fastBits`-bit window index, taken as a `USize`, indexes the `2^fastBits`
+    packed slots. `bitBuf &&& 0x7FF ≤ 0x7FF = 2^fastBits − 1`, and the `USize`
+    round-trip can only shrink it (`mod`), so the bound survives. -/
+theorem and_0x7FF_toUSize_toNat_lt (bitBuf : UInt64) :
+    ((bitBuf &&& 0x7FF).toUSize).toNat < 2 ^ fastBits := by
+  have hlt : (bitBuf &&& 0x7FF).toNat < 2 ^ fastBits := by
+    simp only [fastBits]
+    rw [UInt64.toNat_and]
+    exact Nat.lt_of_le_of_lt Nat.and_le_right (by decide)
+  exact Nat.lt_of_le_of_lt (by rw [UInt64.toNat_toUSize]; exact Nat.mod_le _ _) hlt
+
+/-- The `USize` window index round-trips to its `Nat` value: `bitBuf &&& 0x7FF` is
+    far below `USize.size`. -/
+theorem and_0x7FF_toUSize_toNat_eq (bitBuf : UInt64) :
+    ((bitBuf &&& 0x7FF).toUSize).toNat = (bitBuf &&& 0x7FF).toNat := by
+  rw [UInt64.toNat_toUSize, ← USize.size_eq_two_pow]
+  refine Nat.mod_eq_of_lt ?_
+  have h1 : (bitBuf &&& 0x7FF).toNat ≤ 2047 := by
+    rw [UInt64.toNat_and]; exact Nat.le_trans Nat.and_le_right (by decide)
+  have h2 : (2047 : Nat) < USize.size := Nat.lt_of_lt_of_le (by decide) USize.le_size
+  omega
+
+/-- Reading the `fastBits`-bit window slot by `uget` on the `USize` index equals the
+    guarded `entryAt` read on the `Nat` index — the bridge that carries the tree-free
+    loop's `uget` optimization back to the boxed reference's `entryAt`/`lenAt`. -/
+@[simp] theorem DecodeTable.entryAtU_window_eq (t : DecodeTable) (bitBuf : UInt64)
+    (h : ((bitBuf &&& 0x7FF).toUSize).toNat < t.packed.size) :
+    t.entryAtU (bitBuf &&& 0x7FF).toUSize h = t.entryAt (bitBuf &&& 0x7FF).toNat := by
+  rw [entryAtU_eq_entryAt, and_0x7FF_toUSize_toNat_eq]
+
 /-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds
     `packEntry sym codeLen` for the `(sym, codeLen)` reached by walking `tree` on
     the bits of `i`, stored in a single packed scalar array so each per-symbol read
@@ -278,6 +323,11 @@ theorem DecodeTable.symAt_eq_unpackSym_entryAt (t : DecodeTable) (idx : Nat) :
 def buildTable (tree : HuffTree) : DecodeTable where
   packed := Array.ofFn (n := 2 ^ fastBits) (fun i : Fin (2 ^ fastBits) =>
     packEntry (tableEntry tree i.val).1 (tableEntry tree i.val).2)
+
+/-- The tree-built decode table has exactly `2^fastBits` slots (`Array.ofFn`). -/
+@[simp] theorem buildTable_size (tree : HuffTree) :
+    (buildTable tree).packed.size = 2 ^ fastBits := by
+  simp only [buildTable, Array.size_ofFn]
 
 /-! ## Canonical O(n) table construction (libdeflate `build_decode_table`)
 
@@ -326,7 +376,7 @@ termination_by count
     `0 < count → base + (count-1)·stride < packed.size` states the last slot the
     fill touches is in range; it is preserved by the recursion because the last
     slot never moves as `base` advances by `stride` and `count` shrinks. Equal to
-    `fillSlots` (`HuffTree.fillSlotsU_eq` in `Zip.Spec.InflateCanonical`), so
+    `fillSlots` (`HuffTree.fillSlotsU_eq`, below), so
     `buildCanonicalLoop` can call it behind a single per-codeword bounds guard
     instead of paying a bounds check on every one of a codeword's `2^(fastBits-len)`
     slot writes. -/
@@ -373,6 +423,55 @@ def buildCanonicalLoop (lengths : Array UInt8) (nextCode : Array UInt32)
     else
       buildCanonicalLoop lengths nextCode (start + 1) packed
   else packed
+termination_by lengths.size - start
+
+/-- `fillSlots` preserves the array size. -/
+@[simp] theorem fillSlots_size (packed : Array UInt32) (base stride count : Nat)
+    (entry : UInt32) :
+    (fillSlots packed base stride count entry).size = packed.size := by
+  induction count generalizing packed base with
+  | zero => simp [fillSlots]
+  | succ n ih =>
+    rw [fillSlots]
+    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
+    rw [ih (packed.set! base entry) (base + stride)]
+    simp
+
+/-- A proof-carrying `Array.set` in bounds is the checked `set!`. -/
+private theorem set_eq_set! {α : Type _} {a : Array α} {i : Nat} {v : α} (h : i < a.size) :
+    a.set i v h = a.set! i v := by
+  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dif_pos h]
+
+/-- The unchecked fill `fillSlotsU` equals the checked `fillSlots`: each
+    proof-carrying `Array.set` in bounds is the corresponding `set!`. -/
+theorem fillSlotsU_eq (packed : Array UInt32) (base stride count : Nat) (entry : UInt32)
+    (hb : 0 < count → base + (count - 1) * stride < packed.size) :
+    fillSlotsU packed base stride count entry hb = fillSlots packed base stride count entry := by
+  rw [fillSlotsU, fillSlots]
+  by_cases hc : count = 0
+  · rw [dif_pos hc, if_pos hc]
+  · rw [dif_neg hc, if_neg hc]
+    simp only [set_eq_set!]
+    exact fillSlotsU_eq (packed.set! base entry) (base + stride) stride (count - 1) entry _
+termination_by count
+
+/-- `buildCanonicalLoop` preserves the array size: every fill (`fillSlots` /
+    `fillSlotsU`) is size-preserving and the recursion only threads `packed`. -/
+theorem buildCanonicalLoop_size (lengths : Array UInt8) (nextCode : Array UInt32)
+    (start : Nat) (packed : Array UInt32) :
+    (buildCanonicalLoop lengths nextCode start packed).size = packed.size := by
+  unfold buildCanonicalLoop
+  split
+  · dsimp only []
+    split
+    · split
+      · rw [buildCanonicalLoop_size]
+        split
+        · rw [fillSlotsU_eq, fillSlots_size]
+        · rw [fillSlots_size]
+      · rw [buildCanonicalLoop_size]
+    · rw [buildCanonicalLoop_size]
+  · rfl
 termination_by lengths.size - start
 
 /-- Build the `2^fastBits`-entry decode table directly from the code lengths,
@@ -486,6 +585,14 @@ def buildTableCanonicalFastWithCount (lengths : Array UInt8) (count : Array Nat)
   packed :=
     let nextCode := nextCodesFast count maxBits
     buildCanonicalLoop lengths nextCode 0 (Array.replicate (2 ^ fastBits) (packEntry 0 0))
+
+/-- The canonical fast table has exactly `2^fastBits` packed slots — the initial
+    `Array.replicate (2^fastBits)` that `buildCanonicalLoop` size-preserves. This is
+    the invariant the tree-free loop's `uget` indexing needs (`goTreeFreeU`'s `hlp`). -/
+@[simp] theorem buildTableCanonicalFastWithCount_size (lengths : Array UInt8)
+    (count : Array Nat) (maxBits : Nat) :
+    (buildTableCanonicalFastWithCount lengths count maxBits).packed.size = 2 ^ fastBits := by
+  simp only [buildTableCanonicalFastWithCount, buildCanonicalLoop_size, Array.size_replicate]
 
 /-- Bits remaining in the reader from its current `(pos, bitOff)`. -/
 def bitsAvail (br : BitReader) : Nat :=
@@ -928,6 +1035,21 @@ theorem litGuard_usize (table : HuffTree.DecodeTable) (bitBuf : UInt64) (cnt : U
   refine and_congr ?_ (and_congr ?_ Iff.rfl)
   · rw [Ne, Ne, ← UInt8.toNat_inj]; rfl
   · rw [USize.le_iff_toNat_le, UInt8.toNat_toUSize]
+
+/-- `litGuard_usize` for the `uget` read: the `entryAtU` slot on the `USize` window
+    index is the same word as `entryAt` on the `Nat` index (`entryAtU_window_eq`), so
+    the packed-`uget` guard matches the boxed reference's `lenAt`/`symAt` `Nat`
+    guard. -/
+theorem litGuardU_usize (table : HuffTree.DecodeTable) (bitBuf : UInt64) (cnt : USize)
+    (h : ((bitBuf &&& 0x7FF).toUSize).toNat < table.packed.size) :
+    (HuffTree.unpackLen (table.entryAtU (bitBuf &&& 0x7FF).toUSize h) ≠ 0
+        ∧ (HuffTree.unpackLen (table.entryAtU (bitBuf &&& 0x7FF).toUSize h)).toUSize ≤ cnt
+        ∧ HuffTree.unpackSym (table.entryAtU (bitBuf &&& 0x7FF).toUSize h) < 256)
+      ↔ ((table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
+        ∧ (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt.toNat
+        ∧ table.symAt (bitBuf &&& 0x7FF).toNat < 256) := by
+  simp only [HuffTree.DecodeTable.entryAtU_window_eq]
+  exact litGuard_usize table bitBuf cnt
 
 /-- Load whole bytes into the high end of `bitBuf` until it holds > 56 bits or
     the input is exhausted. Preserves the consumed bit position `pos*8 - cnt`. -/

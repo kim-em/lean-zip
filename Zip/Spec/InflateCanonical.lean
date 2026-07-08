@@ -25,8 +25,10 @@ The foundation lemmas here, bottom-up:
 1. `bitReverse` arithmetic — the bit-reversed codeword indexes the fast table.
 2. `cwOf`/`bitReverse` bridge (`cwOf_eq_iff_mod`) — slot `idx` lies on a
    codeword's path iff `idx % 2^len` is the bit-reversed code.
-3. `fillSlots` — what the slot-fill writes (`fillSlots_getElem_eq`) and
-   preserves (`fillSlots_getElem_ne`, `fillSlots_size`).
+3. `fillSlots` — what the slot-fill writes (`fillSlots_getElem_eq`) and which
+   slots it leaves unchanged (`fillSlots_getElem_ne`). Size preservation
+   (`fillSlots_size` / `buildCanonicalLoop_size`) lives in `Zip.Native.Inflate`,
+   where the tree-free decoder's `uget` bound needs it.
 -/
 
 namespace Zip.Native.HuffTree
@@ -152,37 +154,6 @@ theorem cwOf_eq_iff_mod (idx c len : Nat) :
     exact (cwOf_mod idx len).symm.trans hbr
 
 /-! ## `fillSlots` -/
-
-/-- `fillSlots` preserves the array size. -/
-@[simp] theorem fillSlots_size (packed : Array UInt32) (base stride count : Nat)
-    (entry : UInt32) :
-    (fillSlots packed base stride count entry).size = packed.size := by
-  induction count generalizing packed base with
-  | zero => simp [fillSlots]
-  | succ n ih =>
-    rw [fillSlots]
-    simp only [Nat.succ_ne_zero, ↓reduceIte, Nat.add_sub_cancel]
-    rw [ih (packed.set! base entry) (base + stride)]
-    simp
-
-/-- A proof-carrying `Array.set` in bounds is the checked `set!`. -/
-private theorem set_eq_set! {α : Type _} {a : Array α} {i : Nat} {v : α} (h : i < a.size) :
-    a.set i v h = a.set! i v := by
-  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dif_pos h]
-
-/-- The unchecked fill `fillSlotsU` (used on the decode path behind a single
-    per-codeword bounds guard) equals the checked `fillSlots`: each proof-carrying
-    `Array.set` in bounds is the corresponding `set!`. -/
-theorem fillSlotsU_eq (packed : Array UInt32) (base stride count : Nat) (entry : UInt32)
-    (hb : 0 < count → base + (count - 1) * stride < packed.size) :
-    fillSlotsU packed base stride count entry hb = fillSlots packed base stride count entry := by
-  rw [fillSlotsU, fillSlots]
-  by_cases hc : count = 0
-  · rw [dif_pos hc, if_pos hc]
-  · rw [dif_neg hc, if_neg hc]
-    simp only [set_eq_set!]
-    exact fillSlotsU_eq (packed.set! base entry) (base + stride) stride (count - 1) entry _
-termination_by count
 
 /-- A slot not on the fill's arithmetic progression `{base + j·stride : j < count}`
     keeps its old value. -/
@@ -446,27 +417,6 @@ theorem fillSlots_nomatch (packed : Array UInt32) (base len count idx : Nat) (en
   intro j _ heq
   apply hmod
   rw [heq, Nat.add_mul_mod_self_right, Nat.mod_eq_of_lt hbase]
-
-/-! ## `buildCanonicalLoop` preserves the table size -/
-
-/-- The canonical fill loop never changes the table length (every write is an
-    in-bounds `fillSlots`/`set!`). -/
-theorem buildCanonicalLoop_size (lengths : Array UInt8) (nextCode : Array UInt32)
-    (start : Nat) (packed : Array UInt32) :
-    (buildCanonicalLoop lengths nextCode start packed).size = packed.size := by
-  unfold buildCanonicalLoop
-  split
-  · dsimp only []
-    split
-    · split
-      · rw [buildCanonicalLoop_size]
-        split
-        · rw [fillSlotsU_eq, fillSlots_size]
-        · rw [fillSlots_size]
-      · rw [buildCanonicalLoop_size]
-    · rw [buildCanonicalLoop_size]
-  · rfl
-termination_by lengths.size - start
 
 /-! ## Tree-side slot characterization -/
 
