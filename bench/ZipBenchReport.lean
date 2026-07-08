@@ -435,6 +435,18 @@ compression ratio (the x-axis). -/
 
 def decodeDensityLevels : List Nat := [1, 3, 6, 9, 12]
 
+/-- Fixed-encoder streams for the decode-density experiment: libdeflate at each
+    level in `decodeDensityLevels`, plus a single zopfli stream (the densest
+    realistic raw DEFLATE). Each entry is `(fileTag, levelField, encode)` where
+    `fileTag` names the on-disk stream (`<file>_<fileTag>.deflate`), `levelField`
+    is recorded in the emitted Row (`0` = zopfli, a level-less sentinel), and
+    `encode` produces the raw stream on a cache miss. Constructing the list does
+    not run any encoder — the `IO` actions stay unforced until a stream is
+    genuinely missing from the cache. -/
+def decodeDensityEncodings (data : ByteArray) : List (String × Nat × IO ByteArray) :=
+  decodeDensityLevels.map (fun l => (s!"L{l}", l, Libdeflate.compress data l.toUInt8))
+    ++ [("zopfli", 0, Zopfli.compress data 0)]
+
 /-- A memcpy of `data.size` bytes (a fresh full-range copy): the decode-speed
     ceiling — no decoder can emit output faster than memory bandwidth. -/
 @[noinline] def memcpyBytes (data : ByteArray) : IO Nat :=
@@ -447,17 +459,45 @@ def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
   for (corpus, files) in corpora do
     if corpus == "silesia" then
       IO.FS.createDirAll (System.FilePath.mk streamsDir / corpus)
-      IO.eprintln s!"  silesia: {files.length} files × levels {decodeDensityLevels}"
+      IO.eprintln s!"  silesia: {files.length} files × (libdeflate {decodeDensityLevels} + zopfli), streams cached under {streamsDir}"
       for (pat, data) in files do
         let size := data.size
         let file := pat.drop (corpus.length + 1)
-        for level in decodeDensityLevels do
-          -- Fixed encoder: libdeflate raw DEFLATE. All decoders see these bytes.
-          let stream ← Libdeflate.compress data level.toUInt8
+        for (tag, level, enc) in decodeDensityEncodings data do
+          -- Semi-permanent stream cache: reuse a dumped stream, but only if it
+          -- still decodes to the exact current payload — a stale, truncated, or
+          -- wrong-corpus file is treated as missing and re-encoded (zopfli
+          -- especially is far too slow to recompress every run). On a genuine
+          -- miss, encode once and persist. Only the optional zopfli encoder may be
+          -- absent, in which case that one stream is skipped; a libdeflate encode
+          -- failure or a cache-write failure is fatal, not silently swallowed.
+          let streamPath := System.FilePath.mk streamsDir / corpus / s!"{file}_{tag}.deflate"
+          let cached? ← do
+            if ← streamPath.pathExists then
+              let bytes ← IO.FS.readBinFile streamPath
+              let valid ← try (do let dec ← RawDeflate.decompress bytes; pure (dec == data))
+                          catch _ => pure false
+              if valid then pure (some bytes)
+              else
+                IO.eprintln s!"\n  stale cache {file} {tag}: re-encoding"
+                pure none
+            else pure none
+          let stream? ← match cached? with
+            | some bytes => pure (some bytes)
+            | none =>
+              let encoded? ←
+                try pure (some (← enc))
+                catch e =>
+                  if tag == "zopfli" then
+                    IO.eprintln s!"\n  skip {file} zopfli (encoder unavailable): {toString e}"
+                    pure none
+                  else throw e
+              match encoded? with
+              | none => pure none
+              | some s => IO.FS.writeBinFile streamPath s; pure (some s)
+          let some stream := stream? | continue
           let outSize := stream.size
           let ratio := round4 (outSize.toFloat / (max size 1).toFloat)
-          IO.FS.writeBinFile
-            (System.FilePath.mk streamsDir / corpus / s!"{file}_L{level}.deflate") stream
           let mkRow (name : String) (d : Option Float) : Row :=
             { compressor := name, pattern := pat, size := size, level := level,
               outSize := outSize, ratio := ratio, compressMBps := none, decompressMBps := d }
@@ -484,7 +524,7 @@ def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
     s!"    \"machine\": \"{machine}\",\n" ++
     s!"    \"git_commit\": \"{commit}\",\n" ++
     s!"    \"toolchain\": \"{toolchain}\",\n" ++
-    "    \"experiment\": \"decode-density: fixed libdeflate input, ratio = libdeflate compression ratio, " ++
+    "    \"experiment\": \"decode-density: fixed encoder (libdeflate levels + zopfli, level 0 = zopfli), ratio = encoder compression ratio, " ++
     "decompress_mbps = each decoder on identical streams; compressor field holds the decoder name\"\n" ++
     "  },\n" ++
     "  \"results\": [\n" ++ body ++ "\n  ]\n}\n"

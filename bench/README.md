@@ -119,10 +119,11 @@ the lower-right. Two complements give precise numbers and per-file detail:
   codecs as level-curves (replaces the whole per-level bar set).
 - `<corpus>_decode_density.svg` + `<corpus>_decode_ranking.svg` — the
   **decompression analogue** (see *Decoding* below): every decoder timed on
-  byte-identical libdeflate streams. The density chart is a per-file scatter
-  (x = that file's libdeflate ratio, y = decode MB/s); the ranking chart is the
-  precise lollipop ordering. Both carry the `memcpy` bandwidth ceiling. Not a
-  Pareto — input density is exogenous to the decoder, so the highest band wins.
+  byte-identical fixed-encoder streams. The density chart is a per-file scatter at
+  L6 (x = that file's libdeflate ratio, y = decode MB/s); the ranking chart is the
+  precise lollipop ordering, geomean over all encode levels (L1/3/6/9/12) and
+  zopfli. Both carry the `memcpy` bandwidth ceiling. Not a Pareto — input density
+  is exogenous to the decoder, so the highest band wins.
 - `<corpus>_summary.svg` — colour-graded geomean table (ratio / compress /
   decompress per codec, level 6), sorted by speed.
 - `<corpus>_ratio_heatmap.svg` / `_compress_heatmap.svg` — per file, relative to
@@ -204,19 +205,26 @@ memory-bandwidth ceiling on emitting the output bytes. This is the rigorous way 
 isolate a decoder: an own-encoder scatter (the lzbench / Squash convention)
 confounds decoder speed with each encoder's ratio.
 
-Two views, both at a representative encode level (libdeflate L6):
+Two views over the fixed-encoder streams — libdeflate at levels 1/3/6/9/12 plus a
+zopfli stream per file (the densest realistic raw DEFLATE):
 
-- **`<corpus>_decode_density.svg`** — per-file scatter: x = each file's
-  compression ratio (wide, from ~0.27 text to ~0.9 incompressible like `sao` /
-  `x-ray`), y = decode MB/s. Shows content-dependence — literal-heavy
-  incompressible data decodes differently than match-heavy text.
+- **`<corpus>_decode_density.svg`** — per-file scatter at a single representative
+  level (libdeflate L6): x = each file's compression ratio (wide, from ~0.27 text
+  to ~0.9 incompressible like `sao` / `x-ray`), y = decode MB/s. Shows
+  content-dependence — literal-heavy incompressible data decodes differently than
+  match-heavy text.
 - **`<corpus>_decode_ranking.svg`** — lollipop of geomean decode MB/s per decoder,
-  with the memcpy ceiling showing the headroom.
+  one number each, the geomean taken over **every** stream (all five libdeflate
+  levels and zopfli, each file) so the ranking spans the full input-density range
+  rather than one encode level. The memcpy ceiling shows the headroom.
 
 Pipeline (wired into `bench/run.sh` step 3b):
 
 ```
-# 1. dump libdeflate streams for Silesia + time the in-process decoders + memcpy
+# 1. dump the fixed-encoder streams for Silesia (libdeflate L1/3/6/9/12 + zopfli)
+#    + time the in-process decoders + memcpy. Streams are cached under the dir
+#    below and reused across runs — a stream is (re)encoded only when missing, so
+#    the slow zopfli pass is paid once.
 lake -d bench env bench/.lake/build/bin/bench-report --decode-density \
   bench/results/decode_density.json bench/payloads-deflate
 # 2. time the external decoders (Go / JS / Zig / OCaml) on the same streams
@@ -227,7 +235,8 @@ python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_dens
 Each comparator gains a `decode <stream.deflate>` mode (alongside its existing
 `<payload> <level>` roundtrip mode) so it decodes a provided stream with the same
 median-of-5 / `itersFor` methodology as the Lean side. The streams under
-`bench/payloads-deflate/` are gitignored; `decode_density.json` is committed
+`bench/payloads-deflate/` are gitignored and act as a semi-permanent cache
+(regenerated only when a stream is missing); `decode_density.json` is committed
 alongside `latest.json`.
 
 ### Profiling the decoder

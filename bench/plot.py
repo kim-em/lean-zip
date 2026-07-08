@@ -464,18 +464,35 @@ def decode_density_plot(results, meta, corpus, outfile, level=DECODE_LEVEL):
     print(f"wrote {outfile}")
 
 
-def decode_ranking_plot(results, meta, corpus, outfile, level=DECODE_LEVEL):
-    """Decode throughput ranking (lollipop) on identical libdeflate L{level}
-    streams, geomean over the corpus files, log x. native is the subject; memcpy is
-    the bandwidth ceiling (its distance shows the headroom)."""
+def decode_ranking_plot(results, meta, corpus, outfile):
+    """Decode throughput ranking (lollipop), one number per decoder: the geomean
+    of its decompress MB/s over the fixed-encoder streams — all libdeflate levels
+    plus zopfli, each file — so the ranking spans the full input density range
+    rather than a single encode level. The geomean is taken over the (pattern,
+    level) cells present for **every** ranked decoder (and memcpy), so a comparator
+    that failed on a subset of streams cannot bias the order against decoders timed
+    on the full set. log x. native is the subject; memcpy is the bandwidth ceiling
+    (its distance shows the headroom)."""
     pref = corpus + "/"
     colour_of = {k: c for (k, _l, c, _m) in COMPRESSORS}
     label_of = {k: l for (k, l, _c, _m) in COMPRESSORS}
 
+    # decoder -> {(pattern, level): mbps}, only timed cells.
+    rows_by = {}
+    for r in results:
+        if r["pattern"].startswith(pref) and r.get("decompress_mbps"):
+            rows_by.setdefault(r["compressor"], {})[(r["pattern"], r["level"])] = r["decompress_mbps"]
+    ranked = _decoders_present(results, pref)
+    cell_sets = [set(rows_by[k]) for k in ranked + ["memcpy"] if k in rows_by]
+    common = set.intersection(*cell_sets) if cell_sets else set()
+    for k in ranked + ["memcpy"]:
+        extra = len(rows_by.get(k, {})) - len(common)
+        if extra:
+            print(f"  note: {label_of.get(k, k)} has {extra} cell(s) outside the shared "
+                  f"set; ranking over {len(common)} cells common to all decoders", file=sys.stderr)
+
     def gm_at(key):
-        return geomean([r["decompress_mbps"] for r in results
-                        if r["compressor"] == key and r["level"] == level
-                        and r["pattern"].startswith(pref) and r.get("decompress_mbps")])
+        return geomean([v for c, v in rows_by.get(key, {}).items() if c in common])
 
     vals = [(k, gm_at(k)) for k in _decoders_present(results, pref)]
     vals = [(k, v) for k, v in vals if v]
@@ -502,9 +519,9 @@ def decode_ranking_plot(results, meta, corpus, outfile, level=DECODE_LEVEL):
         ax.text(ceiling, len(vals) - 0.4, f"memcpy ≈ {ceiling/1000:.0f} GB/s ",
                 rotation=90, ha="right", va="top", fontsize=8, color="#777777")
         ax.set_xlim(xmin, ceiling * 1.4)
-    ax.set_xlabel("decompression throughput   (MB/s, log)  —  geomean over files")
+    ax.set_xlabel("decompression throughput   (MB/s, log)  —  geomean over files × encode levels")
     ax.grid(True, axis="x", which="both", linewidth=0.4, alpha=0.5)
-    fig.suptitle(f"Decode throughput ranking  ({corpus} — identical libdeflate L{level} streams)",
+    fig.suptitle(f"Decode throughput ranking  ({corpus} — libdeflate L1/3/6/9/12 + zopfli streams)",
                  fontsize=12, fontweight="bold")
     fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
     fig.tight_layout(rect=(0, 0.03, 1, 0.96))
