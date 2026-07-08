@@ -312,19 +312,15 @@ def goTreeFreeU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
       rw [hb]; omega
 
-/-- Tree-free wide-buffer block decode: builds the fast tables canonically and
-    the long-code tables, then runs the tree-free loop (no Huffman tree). Runs the
-    unboxed `goTreeFreeU` when the input is addressable, else the boxed
-    `goTreeFree` — mirroring `goFusedPDispatch`. -/
-def decodeHuffmanFastBufTreeFree (br : BitReader) (output : ByteArray)
-    (litLengths distLengths : Array UInt8) (maxOut : Nat) :
+/-- Tree-free wide-buffer block decode from prebuilt tables: runs the tree-free
+    loop (no Huffman tree) over the already-constructed fast/long decode tables.
+    Runs the unboxed `goTreeFreeU` when the input is addressable, else the boxed
+    `goTreeFree` — mirroring `goFusedPDispatch`. Factored out of
+    `decodeHuffmanFastBufTreeFree` so the fixed-Huffman path can pass the
+    compile-time-constant fixed tables instead of rebuilding them every block. -/
+def decodeHuffmanFastBufTables (br : BitReader) (output : ByteArray)
+    (litTable distTable : DecodeTable) (litLD distLD : LongDecode) (maxOut : Nat) :
     Except String (ByteArray × BitReader) := do
-  let litCount := HuffTree.countLengthsFast litLengths 15
-  let distCount := HuffTree.countLengthsFast distLengths 15
-  let litTable := HuffTree.buildTableCanonicalFastWithCount litLengths litCount 15
-  let distTable := HuffTree.buildTableCanonicalFastWithCount distLengths distCount 15
-  let litLD := HuffTree.buildLongDecodeWithCount litLengths litCount 15
-  let distLD := HuffTree.buildLongDecodeWithCount distLengths distCount 15
   let (pos, bitBuf, cnt) := refill br.data br.pos 0 0
   let bitBuf := bitBuf >>> br.bitOff.toUInt64
   let cnt := cnt - br.bitOff
@@ -339,9 +335,65 @@ def decodeHuffmanFastBufTreeFree (br : BitReader) (output : ByteArray)
   let endbit := pos' * 8 - cnt'
   .ok (out, { data := br.data, pos := endbit / 8, bitOff := endbit % 8 })
 
+/-- Tree-free wide-buffer block decode: builds the fast tables canonically and
+    the long-code tables, then runs the tree-free loop (no Huffman tree) via
+    `decodeHuffmanFastBufTables`. -/
+def decodeHuffmanFastBufTreeFree (br : BitReader) (output : ByteArray)
+    (litLengths distLengths : Array UInt8) (maxOut : Nat) :
+    Except String (ByteArray × BitReader) :=
+  let litCount := HuffTree.countLengthsFast litLengths 15
+  let distCount := HuffTree.countLengthsFast distLengths 15
+  let litTable := HuffTree.buildTableCanonicalFastWithCount litLengths litCount 15
+  let distTable := HuffTree.buildTableCanonicalFastWithCount distLengths distCount 15
+  let litLD := HuffTree.buildLongDecodeWithCount litLengths litCount 15
+  let distLD := HuffTree.buildLongDecodeWithCount distLengths distCount 15
+  decodeHuffmanFastBufTables br output litTable distTable litLD distLD maxOut
+
 end InflateBuf
 
 namespace Inflate
+
+open Zip.Native.HuffTree (DecodeTable LongDecode)
+
+/-! ### Fixed-Huffman decode tables as compile-time constants
+
+RFC 1951 §3.2.6 fixes the lit/length and distance code lengths, so their canonical
+decode tables and long-code tables are the same for *every* fixed block. As nullary
+`def`s these are closed terms: the Lean runtime computes each exactly once (via a
+`lean_once_cell_t`) and caches it, so the fixed-Huffman decode path never rebuilds a
+table. `decodeHuffmanFastBufFixed` runs `decodeHuffmanFastBufTables` over these
+constants, and is proven equal to the per-block build
+(`Zip.Spec.InflateTreeFreeCorrect.decodeHuffmanFastBufFixed_eq`). -/
+
+/-- Per-length histogram for `fixedLitLengths` (shared by the fixed lit table and
+    long-decode table). -/
+def fixedLitCount : Array Nat := HuffTree.countLengthsFast fixedLitLengths 15
+
+/-- Per-length histogram for `fixedDistLengths`. -/
+def fixedDistCount : Array Nat := HuffTree.countLengthsFast fixedDistLengths 15
+
+/-- The fixed lit/length canonical fast decode table (RFC 1951 §3.2.6), built once. -/
+def fixedLitTable : DecodeTable :=
+  HuffTree.buildTableCanonicalFastWithCount fixedLitLengths fixedLitCount 15
+
+/-- The fixed distance canonical fast decode table (RFC 1951 §3.2.6), built once. -/
+def fixedDistTable : DecodeTable :=
+  HuffTree.buildTableCanonicalFastWithCount fixedDistLengths fixedDistCount 15
+
+/-- The fixed lit/length long-code decode table, built once. -/
+def fixedLitLD : LongDecode := HuffTree.buildLongDecodeWithCount fixedLitLengths fixedLitCount 15
+
+/-- The fixed distance long-code decode table, built once. -/
+def fixedDistLD : LongDecode := HuffTree.buildLongDecodeWithCount fixedDistLengths fixedDistCount 15
+
+/-- Fixed-Huffman block decode over the compile-time-constant fixed tables — no
+    per-block table build. Equal to
+    `decodeHuffmanFastBufTreeFree br output fixedLitLengths fixedDistLengths maxOut`
+    (`decodeHuffmanFastBufFixed_eq`). -/
+def decodeHuffmanFastBufFixed (br : BitReader) (output : ByteArray) (maxOut : Nat) :
+    Except String (ByteArray × BitReader) :=
+  InflateBuf.decodeHuffmanFastBufTables br output fixedLitTable fixedDistTable
+    fixedLitLD fixedDistLD maxOut
 
 /-- Like `decodeDynamicTrees`, but returns only the code-length vectors — it never
     builds the lit/dist Huffman trees (the whole point of the tree-free path). The
@@ -383,7 +435,7 @@ def inflateLoopTreeFree (br : BitReader) (output : ByteArray) (maxOut dataSize :
   let (btype, br₂) ← br₁.readBits 2
   let (output', br') ← match btype with
     | 0 => Inflate.decodeStored br₂ output maxOut
-    | 1 => InflateBuf.decodeHuffmanFastBufTreeFree br₂ output fixedLitLengths fixedDistLengths maxOut
+    | 1 => decodeHuffmanFastBufFixed br₂ output maxOut
     | 2 => do
       let (litLens, distLens, br₃) ← decodeDynamicLengthsOnly br₂
       InflateBuf.decodeHuffmanFastBufTreeFree br₃ output litLens distLens maxOut

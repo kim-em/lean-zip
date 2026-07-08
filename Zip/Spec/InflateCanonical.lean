@@ -165,6 +165,25 @@ theorem cwOf_eq_iff_mod (idx c len : Nat) :
     rw [ih (packed.set! base entry) (base + stride)]
     simp
 
+/-- A proof-carrying `Array.set` in bounds is the checked `set!`. -/
+private theorem set_eq_set! {α : Type _} {a : Array α} {i : Nat} {v : α} (h : i < a.size) :
+    a.set i v h = a.set! i v := by
+  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dif_pos h]
+
+/-- The unchecked fill `fillSlotsU` (used on the decode path behind a single
+    per-codeword bounds guard) equals the checked `fillSlots`: each proof-carrying
+    `Array.set` in bounds is the corresponding `set!`. -/
+theorem fillSlotsU_eq (packed : Array UInt32) (base stride count : Nat) (entry : UInt32)
+    (hb : 0 < count → base + (count - 1) * stride < packed.size) :
+    fillSlotsU packed base stride count entry hb = fillSlots packed base stride count entry := by
+  rw [fillSlotsU, fillSlots]
+  by_cases hc : count = 0
+  · rw [dif_pos hc, if_pos hc]
+  · rw [dif_neg hc, if_neg hc]
+    simp only [set_eq_set!]
+    exact fillSlotsU_eq (packed.set! base entry) (base + stride) stride (count - 1) entry _
+termination_by count
+
 /-- A slot not on the fill's arithmetic progression `{base + j·stride : j < count}`
     keeps its old value. -/
 theorem fillSlots_getElem_ne (packed : Array UInt32) (base stride count idx : Nat)
@@ -440,7 +459,10 @@ theorem buildCanonicalLoop_size (lengths : Array UInt8) (nextCode : Array UInt32
   · dsimp only []
     split
     · split
-      · rw [buildCanonicalLoop_size, fillSlots_size]
+      · rw [buildCanonicalLoop_size]
+        split
+        · rw [fillSlotsU_eq, fillSlots_size]
+        · rw [fillSlots_size]
       · rw [buildCanonicalLoop_size]
     · rw [buildCanonicalLoop_size]
   · rfl
@@ -564,7 +586,7 @@ theorem buildCanonicalLoop_spec
       split
       · -- len ≤ fastBits: fill this code's slots
         rename_i hfast
-        simp only [hc!]
+        simp only [hc!, Nat.shiftLeft_eq, Nat.one_mul, fillSlotsU_eq, dite_eq_ite, ite_self]
         refine buildCanonicalLoop_spec lengths _ (start + 1) _ lsList hlsList maxBits hmb
           blCount hblCount ncSpec hncSpec hv hncSize' (by rw [fillSlots_size]; exact hpsize)
           idx hidx hnc' ?_ ?_

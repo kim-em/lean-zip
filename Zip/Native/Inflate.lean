@@ -292,6 +292,31 @@ def fillSlots (packed : Array UInt32) (base stride count : Nat) (entry : UInt32)
   else fillSlots (packed.set! base entry) (base + stride) stride (count - 1) entry
 termination_by count
 
+/-- Unchecked variant of `fillSlots`: writes each slot with the proof-carrying
+    `Array.set` (compiles to an unchecked store, no per-slot bounds branch) rather
+    than the checked `set!`. The precondition
+    `0 < count → base + (count-1)·stride < packed.size` states the last slot the
+    fill touches is in range; it is preserved by the recursion because the last
+    slot never moves as `base` advances by `stride` and `count` shrinks. Equal to
+    `fillSlots` (`HuffTree.fillSlotsU_eq` in `Zip.Spec.InflateCanonical`), so
+    `buildCanonicalLoop` can call it behind a single per-codeword bounds guard
+    instead of paying a bounds check on every one of a codeword's `2^(fastBits-len)`
+    slot writes. -/
+def fillSlotsU (packed : Array UInt32) (base stride count : Nat) (entry : UInt32)
+    (hb : 0 < count → base + (count - 1) * stride < packed.size) : Array UInt32 :=
+  if h : count = 0 then packed
+  else
+    have hbase : base < packed.size :=
+      Nat.lt_of_le_of_lt (Nat.le_add_right _ _) (hb (Nat.pos_of_ne_zero h))
+    fillSlotsU (packed.set base entry hbase) (base + stride) stride (count - 1) entry (by
+      intro _
+      rw [Array.size_set]
+      have hlt := hb (by omega)
+      have hmul : (count - 1 - 1) * stride = (count - 1) * stride - stride := Nat.sub_one_mul _ _
+      have hge : stride ≤ (count - 1) * stride := Nat.le_mul_of_pos_left stride (by omega)
+      omega)
+termination_by count
+
 /-- The canonical table-fill loop: for each symbol from `start`, look up its
     canonical code `c = nextCode[len]` (advancing `nextCode[len]`, exactly as
     `HuffTree.insertLoop` does), and — for codes that fit the `fastBits` window —
@@ -307,8 +332,13 @@ def buildCanonicalLoop (lengths : Array UInt8) (nextCode : Array UInt32)
       let nextCode' := nextCode.set! len.toNat (c + 1)
       if len.toNat ≤ fastBits then
         let base := bitReverse c.toNat len.toNat 0
-        let packed' := fillSlots packed base (2 ^ len.toNat)
-          (2 ^ (fastBits - len.toNat)) (packEntry start.toUInt16 len)
+        let stride := 1 <<< len.toNat
+        let count := 1 <<< (fastBits - len.toNat)
+        let entry := packEntry start.toUInt16 len
+        let packed' :=
+          if hb : base + (count - 1) * stride < packed.size then
+            fillSlotsU packed base stride count entry (fun _ => hb)
+          else fillSlots packed base stride count entry
         buildCanonicalLoop lengths nextCode' (start + 1) packed'
       else
         buildCanonicalLoop lengths nextCode' (start + 1) packed
@@ -369,7 +399,7 @@ def kraftSumFast (count : Array Nat) (maxBits : Nat) : Nat :=
 where
   go (count : Array Nat) (maxBits b acc : Nat) : Nat :=
     if h : b ≤ maxBits then
-      go count maxBits (b + 1) (acc + count[b]! * 2 ^ (maxBits - b))
+      go count maxBits (b + 1) (acc + count[b]! * (1 <<< (maxBits - b)))
     else acc
   termination_by maxBits + 1 - b
 
@@ -388,7 +418,7 @@ def validateLengths (lengths : Array UInt8) (maxBits : Nat := 15) :
     Except String Unit :=
   if lengths.any (fun l => l.toNat > maxBits) then
     .error "Inflate: code length exceeds maximum"
-  else if kraftSumFast (countLengthsFast lengths maxBits) maxBits > 2 ^ maxBits then
+  else if kraftSumFast (countLengthsFast lengths maxBits) maxBits > 1 <<< maxBits then
     .error "Inflate: oversubscribed Huffman code"
   else
     .ok ()
