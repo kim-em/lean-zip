@@ -5,6 +5,7 @@ import ZipTest.RawDeflate
 import ZipTest.Checksum
 import ZipTest.Binary
 import ZipTest.Wide
+import ZipTest.ExtendWithin
 import ZipTest.Tar
 import ZipTest.Archive
 import ZipTest.ZipFixtures
@@ -35,6 +36,7 @@ def main : IO Unit := do
   ZipTest.Checksum.tests
   ZipTest.Binary.tests
   ZipTest.Wide.tests
+  ZipTest.ExtendWithin.tests
   ZipTest.Tar.tests
   ZipTest.Archive.tests
   ZipTest.ZipFixtures.tests
