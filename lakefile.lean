@@ -62,14 +62,24 @@ def zlibLinkFlags : IO (Array String) := do
     into the hot matcher/decoder loops instead of leaving per-iteration
     cross-object calls — a measured +2–5% end-to-end compress win with
     byte-identical output (LTO is codegen-only). For the bitcode to merge,
-    every object must come from the same LLVM: the Lean-emitted C already
-    compiles with the toolchain clang, and the FFI targets below use
-    `buildLeanO` (same compiler) instead of the system `cc`.
-    `-fno-semantic-interposition` keeps `-fPIC` codegen from pessimizing
-    cross-object references. Linux-only: macOS links with the system ld64,
-    whose libLTO need not accept the toolchain clang's bitcode, and Windows
-    is untested. Set `LEAN_ZIP_LTO=0` to opt out (e.g. to link the static
-    libs with a non-LTO-aware toolchain). -/
+    every object must come from the same compiler: the Lean-emitted C
+    already compiles with the toolchain's C compiler, and the FFI targets
+    below use `buildLeanO` (that same compiler — bundled clang, or
+    `LEAN_CC` if set, which must then itself support LTO) instead of the
+    system `cc`. `-fno-semantic-interposition` keeps `-fPIC` codegen from
+    pessimizing cross-object references. Linux-only: macOS links with the
+    system ld64, whose libLTO need not accept the toolchain clang's
+    bitcode, and Windows is untested.
+
+    Downstream `require lean-zip` consumers need no flags of their own:
+    Lake archives the bitcode with the toolchain `llvm-ar`, and the
+    toolchain lld consumes bitcode archive members natively (verified with
+    a flag-free downstream package — its executable gets the same
+    inlining). Set `LEAN_ZIP_LTO=0` to opt out (e.g. when linking the
+    static libs outside Lake with a non-LTO-aware linker, or with a custom
+    `LEAN_AR` that cannot index bitcode). Lake caches `run_io` config:
+    after toggling the env var, reconfigure with `lake -R build` (or
+    remove `.lake`). -/
 def ltoFlags : IO (Array String) := do
   if Platform.isWindows || Platform.isOSX then return #[]
   if (← IO.getEnv "LEAN_ZIP_LTO") == some "0" then return #[]
