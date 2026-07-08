@@ -43,9 +43,11 @@ namespace HuffTree
     `2^(maxBits - fastBits)`-entry subtable block inside the flat `subs` array;
     each `subs` entry is a `packEntry sym fullLen` (or the sentinel `0`). A long
     codeword is resolved with one masked load into `rootSub` and one into `subs`
-    — no per-bit boxed accumulation. `subLookup` is proven to agree with
-    `walkCanonical` on every input (`subLookup_ok_iff_walkCanonical`), so the
-    subtable is a verified drop-in for the boxed fallback. -/
+    — no per-bit boxed accumulation. In the context `subLookup` is actually called
+    (the root table missed, so any codeword present is longer than `fastBits`), it is
+    proven to agree with `walkCanonical` (`subLookup_ok_iff_walkCanonical`), so the
+    subtable is a verified drop-in for the boxed fallback. (As standalone functions the
+    two differ: `walkCanonical` also resolves short codes, which never reach this path.) -/
 structure LongDecode where
   count : Array Nat
   firstCode : Array Nat
@@ -219,8 +221,9 @@ where
     reads the packed `(sym, fullLen)` — no per-bit boxed accumulation. A zero
     `rootSub` entry (no long code with this prefix) or a sentinel-`0` sub-slot (this
     residual is not a real codeword) is the "invalid code" error; too few buffered
-    bits for the resolved length is the "unexpected end of input" error. Proven to
-    return exactly what the boxed `walkCanonical` returns on every input
+    bits for the resolved length is the "unexpected end of input" error. In the
+    fallback context it is called from (root table missed → any codeword is long),
+    proven to return exactly what the boxed `walkCanonical` returns
     (`subLookup_ok_iff_walkCanonical`). -/
 @[inline] def subLookup (ld : LongDecode) (maxBits : Nat) (bitBuf : UInt64) (cnt : Nat) :
     Except String (UInt16 × UInt64 × Nat × Nat) :=
