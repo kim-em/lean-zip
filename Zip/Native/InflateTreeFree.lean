@@ -357,7 +357,10 @@ def goTreeFreeUB (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
   if hlit : HuffTree.unpackLen e ≠ 0
       ∧ (HuffTree.unpackLen e).toUSize ≤ cnt
       ∧ HuffTree.unpackSym e < 256 then
-    if output.size + litCnt.toNat ≥ maxOut then throw "Inflate: output exceeds maximum size"
+    -- CEILING PROBE (measurement-only, NOT semantics-preserving): the original
+    -- cheap guard, off by ≤ 7 bytes at the output limit. Isolates the pure
+    -- effect of removing the per-literal push call from the guard arithmetic.
+    if output.size ≥ maxOut then throw "Inflate: output exceeds maximum size"
     else
       let litAcc := litAcc ||| ((HuffTree.unpackSym e).toUInt64 <<< (8 * litCnt.toUInt64))
       if hfull : litCnt = 7 then
