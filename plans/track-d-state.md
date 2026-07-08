@@ -176,6 +176,83 @@ Conclusion: chain-state *representation* tuning (element type, Wave-3a; packing,
 #2779) is now exhausted on this hardware — the matcher's remaining costs stay
 structural (instruction count, per-token allocation, RC traffic).
 
+**#2795 verdict (2026-07-08): batched literal emission via `pushUInt64LE` —
+measured negative; the per-literal push call is not on the decode critical
+path.** This was the deciding probe set up by #2795's framing after
+#2793/#2808 (−5% instructions moved wall-clock only 1–2%, so the decode is
+latency-bound on the loop-carried bitBuf→mask→table-load→shift recurrence):
+batch up to eight consecutive literals into a `UInt64` accumulator + `USize`
+count threaded through the production tree-free loop (`goTreeFreeUB`,
+replacing `goTreeFreeU`'s inline-literal `output.push`), flushing as **one**
+proven-reference `ByteArray.pushUInt64LE` call on batch-full and before any
+branch that observes `output` — removing the out-of-line
+`lean_byte_array_push` call (exclusivity + capacity + store + size bump) from
+the per-literal path. Same-worktree A/B per bench/README (`inflate-profile
+decode`, level-6 libdeflate payloads, `sizeHint` set, medians of 5 interleaved
+rounds — 8 for the shared baseline — AMD EPYC 9455; baseline = `41b1b857`, the
+merged #2808), in **two** variants: the landable exact-guard form (the
+output-limit guard reads the conceptual size `output.size + litCnt`) and a
+measurement-only **ceiling** form that keeps the baseline's cheap
+`output.size ≥ maxOut` guard (fires up to 7 bytes late; isolates the pure
+effect of removing the call from the guard arithmetic). Both regress on both
+axes (Δ vs baseline, exact / ceiling):
+
+| file | Δ instructions | Δ cycles |
+|---|---|---|
+| x-ray (8.5M gray image) | +6.2% / +3.9% | +4.6% / +2.2% |
+| ooffice (6.2M binary) | +5.5% / +3.1% | +5.4% / +3.4% |
+| sao (7.3M star catalog) | +6.6% / +1.0% | +5.1% / +2.4% |
+| alice29 (152K text) | +6.0% / +5.0% | +4.7% / +2.3% |
+| plrabn12 (482K text) | +6.2% / +5.3% | +4.4% / +2.2% |
+
+(Instruction counts are deterministic to ~0.01%; cycles are noisier, but the
+best-of-rounds cycle comparison is also positive on every file for both
+variants — exact +3.4–5.1%, ceiling +1.8–3.3% — so the regression is not a
+median artifact.) **Stated plainly, per the probe's decision rule: cycles do
+not drop more than instructions — median cycles do not drop at all, on any
+file, in either variant; both axes rise together.** Mechanism: `lean_byte_array_push`'s exclusive fast path is only
+~6–8 instructions *including* call overhead (1.96% whole-program self time on
+x-ray — the issue's "~4%" evidence predates #2804/#2805/#2808 shifting the
+mix), and its latency is fully hidden in the recurrence's shadow, so there was
+no serialization to reclaim. The batch bookkeeping — per-literal accumulator
+OR + two shifts, count increment + batch-full compare, one `pushUInt64LE` call
+per eight literals **plus one per slow-path entry even with an empty batch
+(i.e. per match)**, and in the exact form the boxed-Nat conceptual-size guard
+(`lean_usize_to_nat` + `lean_nat_add` + `lean_nat_dec_le` per literal) — costs
+more than the call it removes: the ceiling A/B on x-ray (+58.5M
+instructions/rep over ~8M literals) nets ~+7 instructions per literal.
+A leaner batcher was considered rather than measured — carry the shift (or a
+write pointer) instead of the count, skip empty flushes before matches,
+precompute the remaining output room per batch instead of per-literal Nat
+arithmetic — but those shavings target known spike overhead the ceiling
+variant already largely excludes, and the ceiling still regresses median
+cycles on every file: there is no evidence that simple literal batching is a
+lever here, and a substantially different output-write design should be
+measured as its own probe rather than as a third variant of this one.
+Consequence for the output-write story: per-literal *store-call*
+removal is not a lever — the batched-store motivation for the heavier
+structural rewrites (#2798/#2799) is dead, and any case for the
+fastloop/slowloop split or the write-once `uset` cursor must rest on what
+those *additionally* remove (the per-literal size-bump/guard bookkeeping, the
+bounds discipline) and needs its own probe before committing. Branch
+`perf/2795-batched-literal-spike` preserved unmerged: commit `604cc1a9` is the
+exact-guard spike (equivalence theorem `goTreeFreeUB_eq` stated and `sorry`'d,
+benchmark-first), commit `45b355c6` the ceiling probe; reproduce by building
+`inflate-profile` at each commit per bench/README § *Profiling the decoder*.
+Incidental discovery while attributing the loss (filed as #2811): the
+`copy_within_ffi.o` lakefile target is compiled without `-O2 -DNDEBUG` —
+unlike its `extend_within`/`bytearray_wide` siblings — so the match-copy
+primitive runs un-inlined `lean.h` helpers *with asserts enabled*; on x-ray
+decode that un-optimized TU (`lean_to_sarray` 9.1%, `lean_is_sarray` 6.4%,
+`lean_zip_byte_array_copy_within` 7.5%, plus helpers) is roughly a third of
+whole-program self time, inflating the denominator of every recent decode
+percentage. Fixing it is a likely across-the-board decode win and re-baselines
+future A/Bs. It does not change this verdict's sign — the added batching cost
+is absolute, per-literal, and inside the loop TU, which is compiled optimized —
+and #2795 needs no re-run after #2811 lands unless a post-#2811 profile shows
+`lean_byte_array_push` becoming a materially larger self-time share of the
+rebalanced decode.
+
 **W5.P1 comparative component profile (2026-06-12, perf, alice29, per-compressor
 windows, normalized to compressor-attributable samples; nix/Lean startup noise
 excluded; miniz attribution degraded — inline monolith):**
