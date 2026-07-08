@@ -127,13 +127,33 @@ wrong about the bottleneck**: packed does win the axis it targets —
 and fewer L1-dcache misses — but the walk is **instruction-bound, not
 memory-bound**, because the merged table (98304 slots = 768 KB as `Array Nat`,
 384 KB packed) already fits this machine's **1 MiB private L2**, so there is no
-residency to reclaim. Packing instead pays **+26–28% instructions** (the slot
-offset shift, the `USize` round-trips, the byte (dis)assembly of the un-inlined
-wide load/store) at **equal branch-misses** (42.3M vs 43.3M — the size guard is
-perfectly predicted, so it is *not* the confound), and those extra instructions
-dominate. This settles the *packing* question for this hardware/toolchain — the
-cache win packing delivers only pays where the table overflows L2, i.e. the
-issue's assumed **256 KiB-L2** machine, which the bench EPYC is not. Branch
+residency to reclaim. Packing instead pays **+26–28% instructions**, and
+`perf annotate` pins the mechanism exactly. `Array Nat` stores each slot as a
+`lean_object*`, and a small `Nat` (< 2⁶³) is an *immediate* tagged in that word
+as `(n<<1)|1` — the runtime's native representation, the same one the matcher's
+`Nat` arithmetic already runs on. So the arr chain read is one inlined load
+(`mov 0x18(%rax,%r15,8),%rbx`) yielding a ready-to-use tagged `Nat`, zero
+conversions. The packed read cannot inline (an `@[extern]` is opaque to Lean's
+codegen, so it emits `call lean_zip_uget_u32le` — a real 3.67%-of-total symbol,
+invisible in arr) and then must *tag* the raw uint32 into a `Nat`
+(`mov %eax,%eax; lea 0x1(,%rax,2),%r14`); every write untags the reverse way.
+Counting tag ops (`lea …,2` / `test $0x1`) in the two loop bodies: arr 36 vs
+packed 63. So the packed slot holds a *foreign* representation and each access
+crosses the FFI boundary plus a `Nat`↔uint32 conversion — that, not the wide
+store (which the C folds to a single `mov %edx,0x18(%rdi,%rsi,1)`) nor the size
+guard (**equal branch-misses**, 42.3M vs 43.3M, perfectly predicted — *not* the
+confound), is where the instructions go. The lesson: `Array Nat` is not a
+wasteful 8-byte layout to be shrunk, it is the *only* chain-table layout with
+conversion-free, inlinable access; any denser physical layout (element type,
+Wave-3a; packing, #2779) trades that for a smaller footprint, a win only where
+the footprint actually misses cache. This settles the *packing* question for
+this hardware/toolchain — the cache win packing delivers only pays where the
+table overflows L2, i.e. the issue's assumed **256 KiB-L2** machine, which the
+bench EPYC is not. A revival would need *both* the whole ring-index/`cand`
+arithmetic moved to `USize` (production `chainWalkPackedU` moved only the
+accumulators, keeping `cand : Nat` — so the tag tax stays) *and* an inlinable
+wide `ByteArray` read (core lean#14053's `ugetUInt32` as a known primitive),
+so the packed read becomes a bare load with no call and no tag. Branch
 `perf/2779-packed-chain-spike` (commit `b895430c`) preserved unmerged: the full
 harness (`Bench.PackedChain`, the `matcher-ab` / `matcher-arr` / `matcher-packed`
 bench ops, and `usetUInt32LE` + its C) is reusable to re-measure on a small-L2
