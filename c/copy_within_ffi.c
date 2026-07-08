@@ -29,7 +29,11 @@
 
 #include <lean/lean.h>
 #include <stdint.h>
-#include <string.h>
+
+/* No <string.h>: the toolchain clang compiles this file with -nostdinc
+ * (freestanding headers only, so the object can join the library's LTO
+ * bitcode; see lakefile `ltoFlags`). The __builtin_mem* forms have the
+ * same C semantics and need no header prototype. */
 
 /* Internal Lean runtime helper: grow `a` to capacity `>= min_cap`, in place
  * when `a` is exclusive. Exported (non-static) from the runtime but not
@@ -55,13 +59,13 @@ LEAN_EXPORT lean_object *lean_zip_byte_array_copy_within(
         size_t cap = lean_sarray_capacity(r);
         if (cap < newsz) cap = newsz;
         lean_object *c = lean_alloc_sarray(1, oldsz, cap);
-        memcpy(lean_sarray_cptr(c), lean_sarray_cptr(r), oldsz);
+        __builtin_memcpy(lean_sarray_cptr(c), lean_sarray_cptr(r), oldsz);
         lean_dec(r);
         r = c;
     }
     lean_sarray_set_size(r, newsz);
 
     uint8_t *p = lean_sarray_cptr(r);
-    memcpy(p + oldsz, p + src_off, len);   /* src_off + len <= oldsz: disjoint */
+    __builtin_memcpy(p + oldsz, p + src_off, len);   /* src_off + len <= oldsz: disjoint */
     return r;
 }
