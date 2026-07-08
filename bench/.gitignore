@@ -28,3 +28,11 @@ comparators/ocaml/bench-ocaml
 comparators/ocaml/_build/
 comparators/js/node_modules/
 comparators/js/package-lock.json
+
+# Optional pareto-history outputs (bench/pareto_history.py --video / --html).
+# Only the animated SVG (graphs/*_compress_pareto_history.svg, embedded by
+# README.md) is tracked; the video renders and the interactive player are
+# regenerable report artifacts.
+graphs/*_compress_pareto_history.mp4
+graphs/*_compress_pareto_history.gif
+graphs/*_compress_pareto_history.html

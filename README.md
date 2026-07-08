@@ -32,7 +32,7 @@ the C library directly, plus pure-Lean tar and ZIP archives. Jump to
 
 Here is the interesting part.
 
-![Silesia compression: speed vs ratio](bench/graphs/silesia_compress_pareto.svg)
+![Silesia compression: speed vs ratio, animated through the project's git history](bench/graphs/silesia_compress_pareto_history.svg)
 
 *[Silesia](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) corpus.
 x = compression ratio (← smaller is better), y = throughput
@@ -40,14 +40,18 @@ x = compression ratio (← smaller is better), y = throughput
 frontier* — the ratio/speed points reachable by blending two adjacent levels —
 so up-and-to-the-left wins and a comparison at a matched ratio is honest (a
 straight segment on this log axis would overstate the achievable speed; see
-[`bench/README.md`](bench/README.md)). The full dashboard (decode benchmarks,
-per-file heatmaps, and methodology) is in [`bench/`](bench/README.md).*
+[`bench/README.md`](bench/README.md)). The reference curves are fixed at the
+current dashboard; the red curve is the pure-Lean codec **replaying every
+dashboard refresh in the project's git history**, one commit per frame, with a
+faint trail per level. The full dashboard (decode benchmarks, per-file
+heatmaps, and methodology) is in [`bench/`](bench/README.md), including a
+[static version of this chart](bench/graphs/silesia_compress_pareto.svg).*
 
 Once correctness is a *theorem*, you can ambitiously and aggressively optimize.
-Rewrite the hot loop, hand-roll the Huffman table walk,
-add a block-splitting heuristic, swap a clean fold for a word-at-a-time byte
-reader, and the obligation `inflate (deflate x) = x` either still holds or the
-build goes red. An optimization *cannot* quietly trade away correctness, because
+Add lazy matching, bolt on a cost-model optimal parse, split blocks where the
+symbol statistics drift, unbox the matcher's chain state into flat arrays, swap
+a clean fold for a word-at-a-time comparator, and the obligation
+`inflate (deflate x) = x` either still holds or the build goes red. An optimization *cannot* quietly trade away correctness, because
 correctness here isn't a test suite that samples some inputs; it's a statement
 about **all** inputs that the kernel insists on.
 
@@ -58,20 +62,24 @@ in its own git worktree, opens a pull request, and that PR cannot merge unless
 the round-trip proof still goes through. The proof is the ratchet.
 
 And it works. In the graph above, we see the performance of the pure-Lean codec (`native`).
-Note that the y-axies is a log scale, so a vertical gap is a *multiplicative* speed factor.
+Note that the y-axis is a log scale, so a vertical gap is a *multiplicative* speed factor.
 Comparing at matched compression ratios, the Lean implementation:
 
 - **beats** the pure-OCaml [`decompress`](https://github.com/mirage/decompress)
-  library outright: 2–3× faster at any given ratio, and it reaches ratios
-  OCaml's encoder can't;
-- runs **within ~2× of Rust's miniz_oxide and C's zlib at its faster levels**,
-  widening to ~4× at the denser settings those codecs reach by default. The
-  high-compression end (levels 8–9) is where native is weakest and the current
-  optimization frontier sits;
-- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by the most, as
+  library outright: 2–4× faster at any ratio it can reach, and it reaches
+  ratios OCaml's encoder can't;
+- has **caught JS's [`fflate`](https://github.com/101arrowz/fflate)**: at any
+  ratio fflate reaches, native is within a few percent of its speed, pulling
+  ahead — and compressing further — at fflate's densest settings;
+- runs **within ~20% of Rust's miniz_oxide and C's zlib around their default
+  levels**, widening to ~1.4–1.7× at their fast and dense extremes; the
+  optimal-parse levels 9/10 reach ratios that zlib, miniz_oxide, Go, Zig, and
+  fflate cannot produce at any setting;
+- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 
-This codec started out far slower than everything else on the chart. The gap
+This codec started out far slower than everything else on the chart — the
+animation above replays the climb, one dashboard refresh at a time. The gap
 closed not through one clever human insight but through a long series of small,
 individually-verified steps. That is the bet behind
 Gwern's ["Lean software scaling laws"](https://gwern.net/lean-scaling):

@@ -44,7 +44,8 @@ if [ "${1:-}" = "--native-only" ]; then
   in_project_shell "lake -d bench build bench-report \
     && $PIN lake -d bench env bench/.lake/build/bin/bench-report --native-only $TMP ${2:-}"
   in_project_shell "python3 bench/merge_native.py $OUT $TMP $OUT \
-    && python bench/plot.py $OUT bench/graphs"
+    && python bench/plot.py $OUT bench/graphs \
+    && python bench/pareto_history.py"
   rm -f "$TMP"
   echo "Native-only dashboard refresh done:"
   echo "  data   → $OUT (native rows refreshed; reference rows reused)"
@@ -91,8 +92,12 @@ nix-shell -p nodejs_latest python3 --run \
   "$PIN python3 bench/decode_density.py bench/payloads-deflate $DD"
 
 # 4. Render (project shell: python + matplotlib). plot.py auto-detects the
-#    sibling decode_density.json and emits the decode-density chart too.
-in_project_shell "python bench/plot.py $OUT bench/graphs"
+#    sibling decode_density.json and emits the decode-density chart too;
+#    pareto_history.py replays the git history of latest.json into the
+#    animated Pareto (the just-refreshed uncommitted data becomes its final
+#    frame — see bench/pareto_history.py).
+in_project_shell "python bench/plot.py $OUT bench/graphs \
+  && python bench/pareto_history.py"
 
 echo "Track D dashboard regenerated:"
 echo "  data   → $OUT  (+ decode_density.json)"

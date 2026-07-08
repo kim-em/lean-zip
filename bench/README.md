@@ -117,6 +117,16 @@ the lower-right. Two complements give precise numbers and per-file detail:
 
 - `<corpus>_compress_pareto.svg` — **headline**: compression speed vs ratio,
   codecs as level-curves (replaces the whole per-level bar set).
+- `<corpus>_compress_pareto_history.svg` — the headline chart **animated
+  through git history** (`bench/pareto_history.py`, run automatically by
+  `run.sh`): the reference curves stay fixed at the current data while the
+  native curve replays every committed dashboard refresh, one faint trail per
+  level. Self-playing SMIL, so it animates inside a README `<img>`. Frames
+  that only jitter within throughput noise are dropped, as are stale-branch
+  refreshes whose deterministic ratios revert to an already-seen state (see
+  the script docstring). `--video` additionally renders an mp4 + GIF (needs
+  ffmpeg on PATH), and `--html` an interactive player with a scrubber and
+  per-frame commit info; both land in `graphs/` untracked.
 - `<corpus>_decode_density.svg` + `<corpus>_decode_ranking.svg` — the
   **decompression analogue** (see *Decoding* below): every decoder timed on
   byte-identical fixed-encoder streams. The density chart is a per-file scatter at
@@ -186,6 +196,7 @@ is not the pass/fail test for an incremental within-native gain.)
 ### Silesia corpus (12 large files, native levels 1–10; libdeflate 1–12)
 
 ![silesia compression speed vs ratio](graphs/silesia_compress_pareto.svg)
+![silesia compression speed vs ratio, animated through git history](graphs/silesia_compress_pareto_history.svg)
 ![silesia decode throughput vs input density](graphs/silesia_decode_density.svg)
 ![silesia decode throughput ranking](graphs/silesia_decode_ranking.svg)
 ![silesia summary table](graphs/silesia_summary.svg)
