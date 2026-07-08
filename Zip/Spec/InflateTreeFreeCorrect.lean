@@ -1663,12 +1663,32 @@ theorem goTreeFreeU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteA
                     all_goals exact (ih eb distSym hdi deb bb4 c4 (by assumption) (by assumption)
                       (by assumption) hpos).trans (by rw [hc4rt])
 
+/-- **The literal-batching loop is the per-literal loop over the flushed output**
+    (#2795): with `litCnt` literals pending in `litAcc` (low bytes, LSB-first —
+    the invariant `hacc` says the bits at and above `8·litCnt` are zero),
+    `goTreeFreeUB` computes exactly `goTreeFreeU` started from the output with
+    those literals appended. The flush extern enters through its proven
+    reference body `ByteArray.pushLEBytes`. At the `decodeHuffmanFastBufTables`
+    call site the batch is empty, so the two loops agree on the nose. -/
+theorem goTreeFreeUB_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArray)
+    (litLD distLD : HuffTree.LongDecode) (maxBits maxOut : Nat)
+    (hsz : data.size < USize.size) :
+    ∀ (pos : USize) (bitBuf : UInt64) (cnt : USize) (litAcc : UInt64) (litCnt : USize)
+      (hlc : litCnt.toNat ≤ 7) (output : ByteArray),
+    litAcc.toNat < 2 ^ (8 * litCnt.toNat) →
+    goTreeFreeUB litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt hsz
+        litAcc litCnt hlc output
+      = goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt hsz
+          (ByteArray.pushLEBytes output litAcc litCnt.toNat) := by
+  sorry
+
 /-- **Tree-free wide-buffer block decode = verified wide-buffer block decode** (on
     success). With the proof-only trees `fromLengthsTree`, `decodeHuffmanFastBufTreeFree`
     accepts exactly the inputs `decodeHuffmanFastBuf` does, with the same output:
     the tables coincide (`buildTableCanonicalFast_eq_buildTable`), the addressability
-    dispatch collapses to the boxed loop on both sides (`goTreeFreeU_eq`,
-    `goFusedPDispatch_eq`), and the loops agree (`goTreeFree_ok_iff_goFusedP`). -/
+    dispatch collapses to the boxed loop on both sides (`goTreeFreeUB_eq`,
+    `goTreeFreeU_eq`, `goFusedPDispatch_eq`), and the loops agree
+    (`goTreeFree_ok_iff_goFusedP`). -/
 theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray)
     (litLengths distLengths : Array UInt8)
     (hlv : Huffman.Spec.ValidLengths (litLengths.toList.map UInt8.toNat) 15)
@@ -1714,7 +1734,15 @@ theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray
     have hsz' : br.data.size < USize.size := by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
     have hcsz : (cnt0 - br.bitOff) < USize.size :=
       Nat.lt_of_le_of_lt hbc2.cntLe (Nat.lt_of_lt_of_le (by decide) USize.le_size)
-    rw [goTreeFreeU_eq (fromLengthsTree litLengths 15).buildTable
+    rw [goTreeFreeUB_eq (fromLengthsTree litLengths 15).buildTable
+          (fromLengthsTree distLengths 15).buildTable br.data
+          (buildLongDecodeWithCount litLengths (countLengthsFast litLengths 15) 15)
+          (buildLongDecodeWithCount distLengths (countLengthsFast distLengths 15) 15) 15 maxOut hsz'
+          pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize 0 0
+          (by simp) output (by simp),
+        show ByteArray.pushLEBytes output 0 (0 : USize).toNat = output by
+          rw [USize.toNat_zero, ByteArray.pushLEBytes],
+        goTreeFreeU_eq (fromLengthsTree litLengths 15).buildTable
           (fromLengthsTree distLengths 15).buildTable br.data
           (buildLongDecodeWithCount litLengths (countLengthsFast litLengths 15) 15)
           (buildLongDecodeWithCount distLengths (countLengthsFast distLengths 15) 15) 15 maxOut hsz'
