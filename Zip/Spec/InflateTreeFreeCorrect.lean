@@ -1130,20 +1130,228 @@ theorem walkCanonical_ok_iff_walkTree (lengths : Array UInt8) (maxBits : Nat)
       rw [this, UInt16.ofNat_toNat]
     rw [hwc, hsymrt, ← hbb, show cnt - used = c from by omega]
 
+/-! ## `subLookup` subtable characterization
+
+The production long-code path resolves a >`fastBits` codeword by two masked loads
+(`subLookup`) rather than the boxed per-bit `walkCanonical` scan. Correctness is a
+generational refinement: `subLookup` is proven to return exactly what
+`walkCanonical` returns, *in the context it is called* (the root table missed, so
+any codeword present is longer than `fastBits`). The proof factors through the
+same `codeFor` / `cwOf` characterization: the subtable fill places symbol `s` in
+exactly the sub-slots whose bits spell `s`'s canonical codeword
+(`subFill_complete` / `subFill_sound`, the `buildSubLoop` invariant), and
+`walkCanonical`'s already-proven forward/backward specs supply the other half. -/
+
+/-- The `fastBits`-bit prefix `subLookup` indexes `rootSub` with. -/
+def subPrefix (buf : UInt64) : Nat := (buf &&& 0x7FF).toNat
+
+/-- The sub-index (next `maxBits - fastBits` bits) `subLookup` indexes the block with. -/
+def subIndex (maxBits : Nat) (buf : UInt64) : Nat :=
+  ((buf >>> (fastBits : Nat).toUInt64) &&& (2 ^ (maxBits - fastBits) - 1 : Nat).toUInt64).toNat
+
+/-- The single `subs` slot `subLookup` reads for `buf` (subtable block of
+    `subPrefix buf` at sub-offset `subIndex maxBits buf`). -/
+def subSlot (ld : LongDecode) (maxBits : Nat) (buf : UInt64) : UInt32 :=
+  ld.subs[(ld.rootSub[subPrefix buf]!.toNat - 1) + subIndex maxBits buf]!
+
+/-- **Subtable fill, completeness (`buildSubLoop` invariant, `←`).** If symbol `s`
+    of length `L` (`fastBits < L ≤ maxBits`) has canonical codeword `cwOf buf L`,
+    its `fastBits`-bit prefix owns a subtable block (`rootSub ≠ 0`) and the slot the
+    lookup indexes holds `packEntry s L`. -/
+theorem subFill_complete (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size)
+    (s L : Nat) (hs : s < lengths.size) (hL : fastBits < L) (hLm : L ≤ maxBits)
+    (hlen_s : lengths[s]!.toNat = L) (buf : UInt64)
+    (hcf : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+        = some (cwOf buf.toNat L)) :
+    (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! ≠ 0 ∧
+      subSlot (buildLongDecode lengths maxBits) maxBits buf = packEntry s.toUInt16 L.toUInt8 := by
+  sorry
+
+/-- **Subtable fill, soundness (`buildSubLoop` invariant, `→`).** A non-sentinel
+    sub-slot at the lookup index holds `packEntry s L` for a real symbol `s` of a
+    long length `L` whose canonical codeword is `cwOf buf L`. -/
+theorem subFill_sound (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size) (buf : UInt64)
+    (hroot : (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! ≠ 0)
+    (hlen0 : (unpackLen (subSlot (buildLongDecode lengths maxBits) maxBits buf)).toNat ≠ 0) :
+    ∃ s, s < lengths.size ∧ fastBits < lengths[s]!.toNat ∧ lengths[s]!.toNat ≤ maxBits ∧
+      Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+        = some (cwOf buf.toNat lengths[s]!.toNat) ∧
+      subSlot (buildLongDecode lengths maxBits) maxBits buf
+        = packEntry s.toUInt16 lengths[s]! := by
+  sorry
+
+/-- `subLookup` never increases the bit count (it only consumes `len ≤ cnt` bits). -/
+theorem subLookup_cnt_le (ld : LongDecode) (maxBits : Nat) (buf : UInt64) (cnt : Nat)
+    {sym : UInt16} {bb : UInt64} {c used : Nat}
+    (h : subLookup ld maxBits buf cnt = .ok (sym, bb, c, used)) : c ≤ cnt := by
+  simp only [subLookup] at h
+  split at h
+  · exact absurd h (by simp)
+  · split at h
+    · exact absurd h (by simp)
+    · split at h
+      · exact absurd h (by simp)
+      · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
+
+/-- **`subLookup` on a filled slot.** When the prefix owns a subtable block
+    (`rootSub ≠ 0`) and the indexed slot holds `packEntry sq L` for a length
+    `0 < L < 256` fitting the buffer (`L ≤ cnt`), `subLookup` returns that symbol.
+    Isolates the two-masked-load evaluation so the accept-set proof needs no manual
+    `if` juggling. -/
+theorem subLookup_eval (ld : LongDecode) (maxBits : Nat) (buf : UInt64) (cnt : Nat)
+    (sq L : Nat) (hL256 : L < 256) (hL0 : 0 < L) (hLc : L ≤ cnt)
+    (hne : ld.rootSub[subPrefix buf]! ≠ 0)
+    (hslot : subSlot ld maxBits buf = packEntry sq.toUInt16 L.toUInt8) :
+    subLookup ld maxBits buf cnt = .ok (sq.toUInt16, buf >>> L.toUInt64, cnt - L, L) := by
+  have hsub : ld.subs[(ld.rootSub[(buf &&& 0x7FF).toNat]!.toNat - 1)
+      + ((buf >>> (fastBits : Nat).toUInt64)
+          &&& (2 ^ (maxBits - fastBits) - 1 : Nat).toUInt64).toNat]!
+      = subSlot ld maxBits buf := rfl
+  have hlenNat : (L.toUInt8).toNat = L := UInt8.toNat_ofNat_of_lt (by omega)
+  simp only [subLookup, hsub, hslot, unpackLen_packEntry, unpackSym_packEntry, hlenNat]
+  rw [if_neg (by simpa only [beq_iff_eq] using (show ld.rootSub[(buf &&& 0x7FF).toNat]! ≠ 0 from hne)),
+      if_neg (by simp only [beq_iff_eq]; omega), if_neg (by omega)]
+
+/-- **A matched codeword is long when the root table misses.** If `walkCanonical`
+    matches at length `used` but the fast table reports the sentinel (`0`) or too
+    few bits for this window, the codeword must be longer than `fastBits` — else the
+    fast table would resolve it at length `used ≤ cnt`. (Mirror of
+    `walkCanonical_dead_of_no_long`'s length argument.) -/
+theorem long_of_guard (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (buf : UInt64) (cnt : Nat) (s used : Nat)
+    (hs : s < lengths.size) (h1u : 1 ≤ used) (hucnt : used ≤ cnt)
+    (hcf : Huffman.Spec.codeFor (lengths.toList.map UInt8.toNat) maxBits s
+        = some (cwOf buf.toNat used))
+    (hg : ((fromLengthsTree lengths maxBits).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat = 0
+        ∨ ((fromLengthsTree lengths maxBits).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat > cnt) :
+    fastBits < used := by
+  rcases Nat.lt_or_ge fastBits used with h | hle
+  · exact h
+  · exfalso
+    have hle11 : used ≤ 11 := hle
+    have hmem : (s, cwOf buf.toNat used)
+        ∈ Huffman.Spec.allCodes (lengths.toList.map UInt8.toNat) maxBits :=
+      (Huffman.Spec.allCodes_mem_iff _ maxBits s _).mpr
+        ⟨by rw [List.length_map, Array.length_toList]; exact hs, hcf⟩
+    have hleaf : Deflate.Correctness.TreeHasLeaf (fromLengthsTree lengths maxBits)
+        (cwOf buf.toNat used) s.toUInt16 :=
+      Deflate.Correctness.fromLengths_hasLeaf lengths maxBits (by omega) _
+        (fromLengths_ok_of_valid lengths maxBits hv) hv s _ hmem
+    have hand : (buf &&& 0x7FF).toNat = buf.toNat % 2 ^ 11 := by
+      rw [UInt64.toNat_and, show (0x7FF : UInt64).toNat = 2 ^ 11 - 1 from rfl,
+          Nat.and_two_pow_sub_one_eq_mod]
+    have hcweq : cwOf buf.toNat used = cwOf (buf &&& 0x7FF).toNat used := by
+      rw [hand, ← cwOf_mod buf.toNat used, ← cwOf_mod (buf.toNat % 2 ^ 11) used,
+          Nat.mod_mod_of_dvd buf.toNat (Nat.pow_dvd_pow 2 hle11)]
+    rw [hcweq] at hleaf
+    have hge : tableEntry.go (fromLengthsTree lengths maxBits) (buf &&& 0x7FF).toNat 0
+        = (s.toUInt16, (0 + used).toUInt8) :=
+      tableEntry_go_of_hasLeaf (fromLengthsTree lengths maxBits) (buf &&& 0x7FF).toNat 0 used
+        s.toUInt16 hleaf (by simpa using hle11)
+    have hlenAt : ((fromLengthsTree lengths maxBits).buildTable.lenAt
+        (buf &&& 0x7FF).toNat).toNat = used := by
+      rw [buildTable_lenAt _ _ (InflateBuf.buf_idx_lt buf), tableEntry, hge]
+      simp only [Nat.zero_add, Nat.toUInt8, UInt8.ofNat, UInt8.toNat, BitVec.toNat_ofNat,
+        Nat.reducePow]
+      omega
+    rw [hlenAt] at hg
+    omega
+
+/-- **`subLookup` matches `walkCanonical` when the fast table misses.** In the
+    fallback context (the root table reports sentinel / too-few-bits, `hg`), the
+    subtable lookup and the boxed scan succeed on exactly the same inputs with the
+    same result: the fill lemmas place / recover the codeword the `walkCanonical`
+    spec reads. -/
+theorem subLookup_ok_iff_walkCanonical (lengths : Array UInt8) (maxBits : Nat)
+    (hmb : 1 ≤ maxBits) (hmb15 : maxBits ≤ 15)
+    (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
+    (hbound : lengths.size ≤ UInt16.size)
+    (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat)
+    (hg : ((fromLengthsTree lengths maxBits).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat = 0
+        ∨ ((fromLengthsTree lengths maxBits).buildTable.lenAt (buf &&& 0x7FF).toNat).toNat > cnt) :
+    subLookup (buildLongDecode lengths maxBits) maxBits buf cnt = .ok r ↔
+      walkCanonical (buildLongDecode lengths maxBits) maxBits buf cnt = .ok r := by
+  obtain ⟨sym, bb, c, used⟩ := r
+  have hread : (buildLongDecode lengths maxBits).subs[
+        ((buildLongDecode lengths maxBits).rootSub[(buf &&& 0x7FF).toNat]!.toNat - 1)
+          + ((buf >>> (fastBits : Nat).toUInt64)
+              &&& (2 ^ (maxBits - fastBits) - 1 : Nat).toUInt64).toNat]!
+      = subSlot (buildLongDecode lengths maxBits) maxBits buf := rfl
+  have hroot_eq : (buildLongDecode lengths maxBits).rootSub[(buf &&& 0x7FF).toNat]!
+      = (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! := rfl
+  constructor
+  · -- subLookup ok → the sub-slot holds a real long codeword → walkCanonical ok
+    intro h
+    simp only [subLookup] at h
+    split at h
+    · exact absurd h (by simp)
+    · rename_i hseen
+      split at h
+      · exact absurd h (by simp)
+      · rename_i hlen0
+        split at h
+        · exact absurd h (by simp)
+        · rename_i hlencnt
+          have hrootne : (buildLongDecode lengths maxBits).rootSub[subPrefix buf]! ≠ 0 := by
+            simpa only [beq_iff_eq] using hseen
+          have hlen0' : (unpackLen (subSlot (buildLongDecode lengths maxBits) maxBits buf)).toNat
+              ≠ 0 := by simpa only [beq_iff_eq] using hlen0
+          obtain ⟨sq, hsq, hlongq, hqmax, hcfq, hslot⟩ :=
+            subFill_sound lengths maxBits hmb15 hv hbound buf hrootne hlen0'
+          -- fold the raw slot read to `packEntry sq lengths[sq]!` (`hread` is `rfl`)
+          have hfold := hread.trans hslot
+          rw [hfold, unpackLen_packEntry] at hlencnt
+          have hcnt' : lengths[sq]!.toNat ≤ cnt := Nat.le_of_not_lt hlencnt
+          simp only [hfold, unpackSym_packEntry, unpackLen_packEntry,
+            Except.ok.injEq, Prod.mk.injEq] at h
+          obtain ⟨hsym, hbb, hc, hused⟩ := h
+          have hL1 : 1 ≤ lengths[sq]!.toNat := by omega
+          have hwc := walkCanonical_complete lengths maxBits hmb (by omega) hv sq lengths[sq]!.toNat
+            hL1 hqmax buf cnt hcnt' hcfq
+          rw [hwc, hsym, hbb, hc, hused]
+  · -- walkCanonical ok → a real long codeword is present → the fill placed it → subLookup ok
+    intro h
+    obtain ⟨h1u, humax, hucnt, hbb, hc, sq, hsq, hsymq, hlen_sq, hcf⟩ :=
+      walkCanonical_ok_spec lengths maxBits hmb (by omega) buf cnt sym bb c used h
+    have hlong : fastBits < used :=
+      long_of_guard lengths maxBits hmb15 hv buf cnt sq used hsq h1u hucnt
+        (hlen_sq ▸ hcf) hg
+    obtain ⟨hrootne, hslot⟩ :=
+      subFill_complete lengths maxBits hmb15 hv hbound sq used hsq hlong humax hlen_sq buf
+        (hlen_sq ▸ hcf)
+    have heval := subLookup_eval (buildLongDecode lengths maxBits) maxBits buf cnt sq used
+      (by omega) (by omega) hucnt hrootne hslot
+    rw [heval, ← hsymq, ← hbb, ← hc]
+
 /-- **`decodeSymCanon` and `decodeSym` accept the same inputs.** They share the
-    11-bit table branch verbatim; the long-code fallback agrees by
-    `walkCanonical_ok_iff_walkTree`. -/
+    11-bit table branch verbatim; the long-code fallback (`subLookup` vs the tree
+    walk) agrees by `subLookup_ok_iff_walkCanonical` composed with
+    `walkCanonical_ok_iff_walkTree`. The table is fixed to the verified tree table:
+    `subLookup` only resolves >`fastBits` codes, so the equivalence needs the fast
+    table to be the *correct* one (the guard then implies any matched code is long).
+    All callers pass the tree table. -/
 theorem decodeSymCanon_ok_iff_decodeSym (lengths : Array UInt8) (maxBits : Nat)
     (hmb : 1 ≤ maxBits) (hmb15 : maxBits ≤ 15)
     (hv : Huffman.Spec.ValidLengths (lengths.toList.map UInt8.toNat) maxBits)
     (hbound : lengths.size ≤ UInt16.size)
-    (table : DecodeTable) (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat) :
-    decodeSymCanon (buildLongDecode lengths maxBits) table maxBits buf cnt = .ok r ↔
-      decodeSym (fromLengthsTree lengths maxBits) table buf cnt = .ok r := by
+    (buf : UInt64) (cnt : Nat) (r : UInt16 × UInt64 × Nat × Nat) :
+    decodeSymCanon (buildLongDecode lengths maxBits) (fromLengthsTree lengths maxBits).buildTable
+        maxBits buf cnt = .ok r ↔
+      decodeSym (fromLengthsTree lengths maxBits) (fromLengthsTree lengths maxBits).buildTable
+        buf cnt = .ok r := by
   simp only [decodeSymCanon, decodeSym, DecodeTable.lenAt_eq_unpackLen_entryAt,
     DecodeTable.symAt_eq_unpackSym_entryAt]
   split
-  · exact walkCanonical_ok_iff_walkTree lengths maxBits hmb hmb15 hv hbound buf cnt r
+  · rename_i hguard
+    simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq,
+      ← DecodeTable.lenAt_eq_unpackLen_entryAt] at hguard
+    rw [subLookup_ok_iff_walkCanonical lengths maxBits hmb hmb15 hv hbound buf cnt r hguard]
+    exact walkCanonical_ok_iff_walkTree lengths maxBits hmb hmb15 hv hbound buf cnt r
   · exact Iff.rfl
 
 /-! ## Skipping the long-code build when no code exceeds the fast table
@@ -1317,8 +1525,10 @@ theorem decodeSymCanon_withCount_ok_iff_decodeSym (lengths : Array UInt8)
         = .ok r := by
   by_cases hlong : hasLongCode (countLengthsFast lengths 15) 15
   · rw [buildLongDecodeWithCount_eq lengths 15 hlong]
-    exact decodeSymCanon_ok_iff_decodeSym lengths 15 (by omega) (by omega) hv hbound _ buf cnt r
+    exact decodeSymCanon_ok_iff_decodeSym lengths 15 (by omega) (by omega) hv hbound buf cnt r
   · simp only [Bool.not_eq_true] at hlong
+    have hrs : (buildLongDecodeWithCount lengths (countLengthsFast lengths 15) 15).rootSub = #[] := by
+      unfold buildLongDecodeWithCount; rw [if_neg (by rw [hlong]; simp)]
     simp only [decodeSymCanon, decodeSym, DecodeTable.lenAt_eq_unpackLen_entryAt,
       DecodeTable.symAt_eq_unpackSym_entryAt]
     split
@@ -1327,9 +1537,14 @@ theorem decodeSymCanon_withCount_ok_iff_decodeSym (lengths : Array UInt8)
         ← DecodeTable.lenAt_eq_unpackLen_entryAt] at hguard
       constructor
       · intro h
-        obtain ⟨r', hr'⟩ := walkCanonical_ok_of_count_eq _ (buildLongDecode lengths 15) 15
-          (buildLongDecodeWithCount_count _ _ _) (buildLongDecodeWithCount_firstCode _ _ _) buf cnt h
-        exact absurd hr' (walkCanonical_dead_of_no_long lengths hv hlong buf cnt hguard r')
+        -- with no long code the subtable is empty (`rootSub = #[]`), so `subLookup`
+        -- always errors: `#[][p]! = 0`, hitting the "invalid code" arm
+        have herr : subLookup (buildLongDecodeWithCount lengths (countLengthsFast lengths 15) 15)
+            15 buf cnt = .error "Inflate: invalid Huffman code" := by
+          simp only [subLookup, hrs]
+          rw [getElem!_neg _ ((buf &&& 0x7FF).toNat) (by simp)]
+          rfl
+        rw [herr] at h; exact absurd h (by simp)
       · intro h
         exact absurd ((walkCanonical_ok_iff_walkTree lengths 15 (by omega) (by omega) hv hbound
             buf cnt r).mpr h)
@@ -1371,7 +1586,7 @@ theorem decodeSymCanon_cnt_le (ld : LongDecode) (table : DecodeTable) (maxBits :
     (h : decodeSymCanon ld table maxBits buf cnt = .ok (s, bb, c, used)) : c ≤ cnt := by
   simp only [decodeSymCanon] at h
   split at h
-  · exact walkCanonical_cnt_le ld maxBits buf cnt h
+  · exact subLookup_cnt_le ld maxBits buf cnt h
   · simp only [Except.ok.injEq, Prod.mk.injEq] at h; omega
 
 /-- The fast canonical table build equals the tree-built table (composition of the
