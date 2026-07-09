@@ -258,7 +258,7 @@ theorem emitDynBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
     emitDynBlockP bw data ws litLens distLens hlit hdist isFinal =
       emitDynBlock bw data (ws.map unpackTok) litLens distLens hlit hdist isFinal := by
   unfold emitDynBlockP emitDynBlock
-  simp only [emitTokensWithCodesP_eq]
+  simp only [emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
 
 /-- The packed shared-window block emitter is the boxed one over the
     `unpackTok` view: the trees agree by `tokenFreqsP_eq`, the emit by
