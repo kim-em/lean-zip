@@ -138,17 +138,64 @@ theorem copyLoop_size (output : ByteArray) (length distance : Nat)
     bisimulation: at a write, the recursive reference's final size bounds the
     post-write size, which bounds the fixed cursor buffer's size. -/
 theorem goTreeFree_size_mono (litTable distTable : HuffTree.DecodeTable)
-    (litLD distLD : HuffTree.LongDecode) (maxBits : Nat) (data : ByteArray) (maxOut : Nat) :
-    ∀ (pos : Nat) (bitBuf : UInt64) (cnt : Nat) (output rf : ByteArray) (p : Nat) (b : UInt64) (c : Nat),
-    InflateBuf.goTreeFree litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt output
-      = .ok (rf, p, b, c) → output.size ≤ rf.size := by
-  -- Roadmap: `induction … using InflateBuf.goTreeFree.induct`, mirroring the 10
-  -- cases of `goTreeFreeU_eq`. Refill / EOB / error cases keep or return the
-  -- same `output`; the literal case grows by `push` (`ByteArray.size_push`); the
-  -- match case grows by `copyLoop` (`copyLoop_size`, derivable from
-  -- `copyLoop_eq_ofFn`). Each recursive case chains `output.size ≤ output'.size`
-  -- with the IH `output'.size ≤ rf.size`.
-  sorry
+    (litLD distLD : HuffTree.LongDecode) (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
+    (pos : Nat) (bitBuf : UInt64) (cnt : Nat) (output rf : ByteArray) (p : Nat) (b : UInt64) (c : Nat)
+    (h : InflateBuf.goTreeFree litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt output
+      = .ok (rf, p, b, c)) : output.size ≤ rf.size := by
+  rw [InflateBuf.goTreeFree] at h
+  split at h
+  · -- refill: output unchanged
+    exact goTreeFree_size_mono _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h
+  · split at h
+    · -- literal fast path
+      split at h
+      · exact absurd h (by simp)                    -- output.size ≥ maxOut
+      · have ih := goTreeFree_size_mono _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h
+        simp only [ByteArray.size_push] at ih; omega
+    · -- long-code path
+      split at h
+      · exact absurd h (by simp)                    -- decodeSymCanon error
+      · simp only at h
+        split at h
+        · -- long literal
+          split at h
+          · exact absurd h (by simp)                -- output.size ≥ maxOut
+          · split at h
+            · exact absurd h (by simp)               -- no-progress
+            · have ih := goTreeFree_size_mono _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h
+              simp only [ByteArray.size_push] at ih; omega
+        · split at h
+          · -- EOB: rf = output
+            simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, _⟩ := h; exact Nat.le_refl _
+          · -- back-reference (match)
+            split at h
+            · exact absurd h (by simp)               -- invalid length code
+            · (try simp only [bind, Except.bind] at h)
+              split at h
+              · exact absurd h (by simp)             -- takeBits (length extra) error
+              · split at h
+                · exact absurd h (by simp)           -- distance decodeSymCanon error
+                · split at h
+                  · exact absurd h (by simp)         -- invalid distance code
+                  · (try simp only [bind, Except.bind] at h)
+                    split at h
+                    · exact absurd h (by simp)       -- takeBits (dist extra) error
+                    · split at h
+                      · exact absurd h (by simp)     -- distance = 0
+                      · split at h
+                        · exact absurd h (by simp)   -- distance > output.size
+                        · split at h
+                          · exact absurd h (by simp) -- output.size + length > maxOut
+                          · split at h
+                            · exact absurd h (by simp) -- no-progress
+                            · -- copyLoop then recurse
+                              rename_i hz hds _ _
+                              have ih := goTreeFree_size_mono _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ h
+                              rw [copyLoop_size output _ _ (by omega) (by omega)] at ih
+                              omega
+  termination_by (data.size - pos) * 9 + cnt
+  decreasing_by all_goals omega
 
 /-! ### `copyWithinAt` cursor write vs `copyLoop` (back-reference)
 
