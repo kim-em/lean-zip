@@ -26,16 +26,37 @@ Both need a **big-enough buffer** (`buf.size ≥ final reference size`), which i
 carried through the induction and discharged at each step by the reference's
 monotone output growth (`goTreeFree_size_mono`).
 
-Status: **work in progress** (issue #2799). The `set!` literal write lemma is
-proved. The back-reference write lemma, the reference monotonicity lemma, the
-bisimulation `goCur_eq`, and the lift to `inflateFast = inflate` are stated with
-their proof roadmaps and `sorry`'d — this is intermediate multi-session proof
-work, not on any production path (`Inflate.inflate` is unchanged).
+Status: **work in progress** (issue #2799). Both write bridges
+(`set!_extract_eq_push`, `copyWithinAt_extract_eq_copyLoop`) and the reference
+monotonicity lemma (`goTreeFree_size_mono`) are proved, with all their
+supporting `copyWithinAtGo` content lemmas and `getElem!` infrastructure. The
+remaining `sorry` is the top-level target `inflateFast_eq`, which needs the
+`goCur` bisimulation (a 10-case induction threading the output invariant and
+applying the two write bridges at the write steps) and the block-loop lift. This
+file is standalone — not imported by `Zip` — so `Inflate.inflate` and CI stay
+`sorry`-free.
 -/
 
 namespace Zip.Native
 
 open ByteArray (copyWithinAt copyWithinAtGo presize)
+
+/-! ### `getElem!` helpers for list append / `ofFn` -/
+
+theorem List.getElem!_append_left' {α} [Inhabited α] {l1 l2 : List α} {i : Nat}
+    (h : i < l1.length) : (l1 ++ l2)[i]! = l1[i]! := by
+  rw [getElem!_pos _ i (by simp only [List.length_append]; omega),
+    List.getElem_append_left h, getElem!_pos l1 i h]
+
+theorem List.getElem!_append_right' {α} [Inhabited α] {l1 l2 : List α} {i : Nat}
+    (h : l1.length ≤ i) (h2 : i < l1.length + l2.length) :
+    (l1 ++ l2)[i]! = l2[i - l1.length]! := by
+  rw [getElem!_pos _ i (by simp only [List.length_append]; omega),
+    List.getElem_append_right h, getElem!_pos l2 (i - l1.length) (by omega)]
+
+theorem List.getElem!_ofFn' {α} [Inhabited α] {n : Nat} {f : Fin n → α} {i : Nat} (h : i < n) :
+    (List.ofFn f)[i]! = f ⟨i, h⟩ := by
+  rw [getElem!_pos _ i (by simp only [List.length_ofFn]; exact h), List.getElem_ofFn]
 
 /-! ### Array-level write lemmas (the mathematical core) -/
 
@@ -241,12 +262,67 @@ reference); positions `outPos + k` (`k < len`) are the periodic window byte
 `a[outPos - distance + k % distance]` on both sides — `copyWithinAtGo`'s content
 theorem (the `_getElem!` companion to `_lt`, an induction reading only the fixed
 window) versus the `List.ofFn` tail of `copyLoop_eq_ofFn`. -/
+/-- `getElem!` extensionality for `ByteArray` (from the proof-carrying `ext_getElem`). -/
+theorem ByteArray.ext_getElem! {a b : ByteArray} (h₀ : a.size = b.size)
+    (h : ∀ i, i < a.size → a[i]! = b[i]!) : a = b := by
+  apply ByteArray.ext_getElem h₀
+  intro i hi hi'
+  have := h i hi
+  rwa [getElem!_pos a i hi, getElem!_pos b i hi'] at this
+
+/-- `getElem!` of an extract prefix. -/
+theorem ByteArray.getElem!_extract (x : ByteArray) (start stop i : Nat)
+    (h : start + i < min stop x.size) : (x.extract start stop)[i]! = x[start + i]! := by
+  have hsz : i < (x.extract start stop).size := by rw [ByteArray.size_extract]; omega
+  rw [getElem!_pos _ i hsz, getElem!_pos x (start + i) (by omega), ByteArray.getElem_extract]
+
+/-- `ByteArray` `getElem!` is the underlying array's list `getElem!`. -/
+theorem ByteArray.getElem!_eq_data_toList (x : ByteArray) (i : Nat) :
+    x[i]! = x.data.toList[i]! := by
+  rw [← ByteArray.get!_eq_getElem!]
+  simp only [ByteArray.get!]
+  by_cases hi : i < x.data.size
+  · rw [getElem!_pos x.data i hi, getElem!_pos x.data.toList i (by simpa using hi),
+      Array.getElem_toList]
+  · rw [getElem!_neg x.data i hi, getElem!_neg x.data.toList i (by simpa using hi)]
+
 theorem copyWithinAt_extract_eq_copyLoop (a : ByteArray) (outPos distance len : Nat)
     (hd : 0 < distance) (hdle : distance ≤ outPos) (hlen : outPos + len ≤ a.size) :
     (a.copyWithinAt outPos distance len).extract 0 (outPos + len)
-      = Inflate.copyLoop (a.extract 0 outPos) (outPos - distance) distance 0 len hd
+      = Inflate.copyLoop (a.extract 0 outPos) ((a.extract 0 outPos).size - distance) distance 0 len hd
           (by rw [ByteArray.size_extract]; omega) := by
-  sorry
+  have hexP : (a.extract 0 outPos).size = outPos := by rw [ByteArray.size_extract]; omega
+  rw [ByteArray.copyWithinAt,
+    if_neg (show ¬(distance = 0 ∨ distance > outPos ∨ outPos + len > a.size) from by omega)]
+  have hcl := Deflate.Correctness.copyLoop_eq_ofFn (a.extract 0 outPos) len distance hd
+    (by rw [hexP]; exact hdle)
+  apply ByteArray.ext_getElem!
+  · rw [ByteArray.size_extract, copyWithinAtGo_size,
+      copyLoop_size (a.extract 0 outPos) len distance hd (by rw [hexP]; exact hdle), hexP]
+    omega
+  · intro i hi
+    rw [ByteArray.size_extract, copyWithinAtGo_size] at hi
+    have hilt : i < outPos + len := by omega
+    rw [ByteArray.getElem!_extract _ 0 (outPos + len) i (by rw [copyWithinAtGo_size]; omega),
+      Nat.zero_add, ByteArray.getElem!_eq_data_toList (Inflate.copyLoop _ _ _ _ _ _ _), hcl]
+    have hPlen : (a.extract 0 outPos).data.toList.length = outPos := by
+      rw [Array.length_toList]; exact hexP
+    rcases Nat.lt_or_ge i outPos with hio | hio
+    · -- preserved prefix on both sides
+      rw [copyWithinAtGo_getElem!_lt _ outPos distance 0 len i (by omega),
+        List.getElem!_append_left' (by rw [hPlen]; exact hio),
+        ← ByteArray.getElem!_eq_data_toList, ByteArray.getElem!_extract _ 0 outPos i (by omega),
+        Nat.zero_add]
+    · -- written window byte on both sides
+      rw [copyWithinAtGo_getElem!_written a outPos distance 0 len i hd hdle hlen (by omega) hilt,
+        List.getElem!_append_right' (by rw [hPlen]; exact hio)
+          (by rw [hPlen, List.length_ofFn]; omega),
+        hPlen, List.getElem!_ofFn' (show i - outPos < len by omega)]
+      simp only [Fin.val_mk]
+      rw [← ByteArray.getElem!_eq_data_toList,
+        ByteArray.getElem!_extract _ 0 outPos _
+          (by rw [Nat.lt_min]; have h1 := hexP; have := Nat.mod_lt (i - outPos) hd; omega),
+        Nat.zero_add, hexP]
 
 /-! ### Bisimulation and lift
 
