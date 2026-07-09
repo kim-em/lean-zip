@@ -580,12 +580,140 @@ theorem goCur_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Huf
                       (by rw [copyWithinAt_size]; exact hbuf) rf rp rb rc href
                       (by rw [copyWithinAt_size]; exact hroom)
 
-/-- **Huffman-block bridge.** One Huffman block decoded at a cursor
-    (`decodeHuffmanCurTables`, through `goCur`) re-represents the reference block
-    decode (`decodeHuffmanFastBufTables`, through `goTreeFreeU`): same refill,
-    same `BitReader` bookkeeping, and — by `goCur_eq` — the same produced bytes,
-    a prefix of the cursor buffer. Requires the addressability of `br.data` (so
-    both take the wide-buffer branch) and the loop's `BitReader` invariant. -/
+/-! ### Stored-block bridge -/
+
+/-- `getElem!` of a `ByteArray` append, split at the boundary. -/
+private theorem getElem!_ba_append (a b : ByteArray) (j : Nat) :
+    (a ++ b)[j]! = if j < a.size then a[j]! else b[j - a.size]! := by
+  by_cases hj : j < a.size
+  · rw [getElem!_pos (a ++ b) j (by rw [ByteArray.size_append]; omega),
+      getElem!_pos a j hj, ByteArray.getElem_append_left hj, if_pos hj]
+  · rw [if_neg hj]
+    by_cases hj2 : j - a.size < b.size
+    · rw [getElem!_pos (a ++ b) j (by rw [ByteArray.size_append]; omega),
+        getElem!_pos b (j - a.size) hj2, ByteArray.getElem_append_right (by omega)]
+    · rw [getElem!_neg (a ++ b) j (by rw [ByteArray.size_append]; omega),
+        getElem!_neg b (j - a.size) hj2]
+
+/-- `storedCopyLoop` preserves the buffer size (`set!` never grows). -/
+@[simp] theorem storedCopyLoop_size (bytes : ByteArray) (outPos len : Nat) :
+    ∀ (buf : ByteArray) (start : Nat),
+    (InflateBuf.storedCopyLoop buf bytes outPos start len).size = buf.size := by
+  intro buf start
+  induction buf, start using InflateBuf.storedCopyLoop.induct (bytes := bytes)
+    (outPos := outPos) (len := len) with
+  | case1 buf start hlt ih => rw [InflateBuf.storedCopyLoop, if_pos hlt, ih, ByteArray.size_set!]
+  | case2 buf start hge => rw [InflateBuf.storedCopyLoop, if_neg hge]
+
+/-- **Content of the stored copy loop.** Slot `j` holds the copied byte
+    `bytes[j - outPos]` inside the written window `[outPos+start, outPos+len)`,
+    and the original buffer byte outside it. -/
+theorem storedCopyLoop_getElem! (bytes : ByteArray) (outPos len : Nat) :
+    ∀ (buf : ByteArray) (start j : Nat),
+    (InflateBuf.storedCopyLoop buf bytes outPos start len)[j]!
+      = if outPos + start ≤ j ∧ j < outPos + len ∧ j < buf.size then
+          bytes[j - outPos]! else buf[j]! := by
+  intro buf start j
+  induction buf, start using InflateBuf.storedCopyLoop.induct (bytes := bytes)
+    (outPos := outPos) (len := len) with
+  | case1 buf start hlt ih =>
+    rw [InflateBuf.storedCopyLoop, if_pos hlt, ih, ByteArray.getElem!_set!, ByteArray.size_set!]
+    split
+    · rename_i h; rw [if_pos ⟨by omega, h.2.1, h.2.2⟩]
+    · rename_i h
+      split
+      · rename_i h2
+        rw [if_pos ⟨by omega, by omega, by omega⟩, ByteArray.get!_eq_getElem!]
+        congr 1; omega
+      · rename_i h2
+        rw [if_neg (fun hc => ?_)]
+        rcases Nat.lt_or_ge (outPos + start) j with hgt | hle
+        · exact h ⟨by omega, hc.2.1, hc.2.2⟩
+        · exact h2 ⟨by omega, by omega⟩
+  | case2 buf start hge =>
+    rw [InflateBuf.storedCopyLoop, if_neg hge,
+      if_neg (fun h => by have := h.1; have := h.2.1; omega)]
+
+/-- **The stored-block write bridge.** Placing `bytes` at the cursor via
+    `storedCopyLoop`, then extracting `[0, outPos+len)`, equals the reference's
+    `buf.extract 0 outPos ++ bytes`. -/
+theorem storedCopyLoop_extract (buf bytes : ByteArray) (outPos len : Nat)
+    (hb : bytes.size = len) (hle : outPos + len ≤ buf.size) :
+    (InflateBuf.storedCopyLoop buf bytes outPos 0 len).extract 0 (outPos + len)
+      = buf.extract 0 outPos ++ bytes := by
+  apply ByteArray.ext_getElem!
+  · rw [ByteArray.size_extract, storedCopyLoop_size, ByteArray.size_append,
+      ByteArray.size_extract]; omega
+  · intro i hi
+    rw [ByteArray.size_extract, storedCopyLoop_size] at hi
+    rw [ByteArray.getElem!_extract _ 0 _ i (by rw [storedCopyLoop_size]; omega), Nat.zero_add,
+      storedCopyLoop_getElem!, getElem!_ba_append, ByteArray.size_extract]
+    by_cases hlt : i < outPos
+    · rw [if_neg (fun h => by have := h.1; omega), if_pos (by omega),
+        ByteArray.getElem!_extract _ 0 _ i (by omega), Nat.zero_add]
+    · rw [if_pos ⟨by omega, by omega, by omega⟩, if_neg (by omega)]
+      congr 1
+      omega
+
+/-- **Stored-block bridge.** A stored block placed at the cursor
+    (`decodeStoredCur`) re-represents the reference stored block (`decodeStored`,
+    which appends): the reads and `BitReader` bookkeeping are identical; the
+    maximum-size guard aligns because `(buf.extract 0 outPos).size = outPos`; and
+    the placed bytes are the reference bytes as a prefix (`storedCopyLoop_extract`). -/
+theorem decodeStoredCur_eq (br : ZipCommon.BitReader) (buf : ByteArray) (outPos : Nat)
+    (maxOut : Nat) (hout : outPos ≤ buf.size)
+    (rf : ByteArray) (rbr : ZipCommon.BitReader)
+    (href : Inflate.decodeStored br (buf.extract 0 outPos) maxOut = .ok (rf, rbr))
+    (hroom : rf.size ≤ buf.size) :
+    ∃ cf, InflateBuf.decodeStoredCur br buf outPos maxOut = .ok (cf, rf.size, rbr)
+          ∧ cf.extract 0 rf.size = rf := by
+  have hos : (buf.extract 0 outPos).size = outPos := by rw [ByteArray.size_extract]; omega
+  rw [Inflate.decodeStored] at href
+  rw [InflateBuf.decodeStoredCur]
+  cases h1 : br.readUInt16LE with
+  | error e => simp [h1, bind, Except.bind] at href
+  | ok r1 =>
+    obtain ⟨len, br1⟩ := r1
+    cases h2 : br1.readUInt16LE with
+    | error e => simp [h1, h2, bind, Except.bind] at href
+    | ok r2 =>
+      obtain ⟨nlen, br2⟩ := r2
+      simp only [h1, h2, bind, Except.bind, pure, Except.pure, hos] at href ⊢
+      cases h3 : br2.readBytes len.toNat with
+      | error e =>
+        rw [h3] at href
+        simp only [bind, Except.bind] at href
+        split at href
+        · exact absurd href (by simp)
+        · split at href
+          · exact absurd href (by simp)
+          · exact absurd href (by simp)
+      | ok r3 =>
+        obtain ⟨bytes, br3⟩ := r3
+        have hbsz : bytes.size = len.toNat := by
+          rw [ZipCommon.BitReader.readBytes] at h3
+          split at h3
+          · exact absurd h3 (by simp)
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h3
+            obtain ⟨rfl, _⟩ := h3
+            rw [ByteArray.size_extract]; omega
+        rw [h3] at href
+        simp only [bind, Except.bind] at href
+        split at href
+        · exact absurd href (by simp)
+        · rename_i hc1
+          split at href
+          · exact absurd href (by simp)
+          · rename_i hc2
+            simp only [Except.ok.injEq, Prod.mk.injEq] at href
+            obtain ⟨rfl, rfl⟩ := href
+            have hrfsz : (buf.extract 0 outPos ++ bytes).size = outPos + len.toNat := by
+              rw [ByteArray.size_append, hos, hbsz]
+            simp only [hc1, hc2, h3, bind, Except.bind, ↓reduceIte] at ⊢
+            refine ⟨InflateBuf.storedCopyLoop buf bytes outPos 0 len.toNat, ?_, ?_⟩
+            · rw [if_neg (by decide : ¬(false = true)), hrfsz]
+            · rw [hrfsz, storedCopyLoop_extract buf bytes outPos len.toNat hbsz (by omega)]
+
 theorem decodeHuffmanCurTables_eq (br : ZipCommon.BitReader) (buf : ByteArray) (outPos : Nat)
     (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode) (maxOut : Nat)
     (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits)
@@ -641,7 +769,7 @@ theorem decodeHuffmanCurTables_eq (br : ZipCommon.BitReader) (buf : ByteArray) (
     obtain ⟨cf, hcf, hext⟩ := hgc
     refine ⟨cf, ?_, hext⟩
     rw [hcf]
-    simp only [Except.map, bind, Except.bind, Except.ok.injEq, Prod.mk.injEq,
+    simp only [bind, Except.bind, Except.ok.injEq, Prod.mk.injEq,
       InflateBuf.toUSize_toNat_of_lt hrfsz, and_self]
 
 /-- **Target (issue #2799): the write-once cursor decoder agrees with the verified
