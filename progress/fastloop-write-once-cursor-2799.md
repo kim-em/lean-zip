@@ -96,36 +96,40 @@ the cursor loop threads a fixed buffer + `outPos` (logical content =
 bridged by write-vs-append lemmas, with a big-enough-buffer hypothesis
 discharged per step by the reference's monotone growth.
 
-**Verified (7 lemmas, no `sorry`):**
-- `arr_setIfInBounds_extract_eq_push` — the pure `Array` core of the literal write.
-- `ByteArray.size_set!`, `ByteArray.getElem!_set!` — `set!` size + read-back.
+**Verified — both write bridges + monotonicity + all supporting lemmas (no `sorry`):**
 - `set!_extract_eq_push` — **the literal write bridge**: cursor `set!` then
-  extract equals extract then `push`. Complete.
-- `copyWithinAtGo_size`, `copyWithinAtGo_getElem!_lt` — the in-place back-reference
-  copy preserves size and every position below the cursor (its content lemmas).
-- `copyLoop_size` — the reference back-reference grows by exactly `length`.
+  extract equals extract then `push` (via the pure-`Array`
+  `arr_setIfInBounds_extract_eq_push`, `ByteArray.size_set!` / `getElem!_set!`).
+- `copyWithinAt_extract_eq_copyLoop` — **the back-reference write bridge**: cursor
+  `copyWithinAt` then extract equals `copyLoop` on the logical prefix. Assembled
+  from the `copyWithinAtGo` content lemmas (`_size`, `_getElem!_lt` preservation
+  below the cursor, `_getElem!_written` the periodic window content) plus
+  `copyLoop_eq_ofFn`, via `getElem!` extensionality and list-`getElem!` helpers.
+- `goTreeFree_size_mono` — **reference output monotonicity** (10-case
+  WF-recursion proof over the reference loop): refill/EOB keep the output, the
+  two literal branches grow by `push`, the match branch by `copyLoop`. Discharges
+  the per-step buffer-room obligation.
+- Infrastructure: `ByteArray.get!_eq_getElem!`, `getElem!_extract`,
+  `getElem!_eq_data_toList`, `ext_getElem!`, `copyLoop_size`, and list
+  `getElem!` append/`ofFn` helpers.
 
-**Staged with proof roadmaps (`sorry`, WIP — file is standalone, NOT imported
-into `Zip`, so production and CI are untouched and carry no `sorry`):**
-- `goTreeFree_size_mono` — reference output monotonicity (10-case `.induct`).
-- `copyWithinAt_extract_eq_copyLoop` — the back-reference write bridge (assembles
-  from the two `copyWithinAtGo` content lemmas + `copyLoop_eq_ofFn`).
+**Remaining (`sorry`, WIP — file is standalone, NOT imported into `Zip`, so
+production and CI carry no `sorry`):**
 - `inflateFast_eq` — the target: `Inflate.inflate data = .ok out →
-  Inflate.inflateFast data out.size = .ok out`, via the `goCur` bisimulation and
-  the block-loop lift.
-
-The remaining work (the 10-case `goCur` bisimulation, `goCurU` reduction to
-`goCur`, and the block-loop lift) is the genuinely multi-session core; the
-foundational write lemmas above are its hardest reusable pieces and are done.
+  Inflate.inflateFast data out.size = .ok out`. This is the last piece: the
+  `goCur` bisimulation (a 10-case induction threading the output invariant
+  `outPos = refOutput.size` and applying the two write bridges at the write
+  steps, with room discharged by `goTreeFree_size_mono`), the `goCurU` reduction
+  to `goCur`, and the block-loop lift. All the hard supporting lemmas are done;
+  this is the assembly.
 
 ## Quality metrics
 
-- sorry count (`grep -rc sorry Zip/`): 3 new, all in the standalone WIP
-  `Zip/Spec/InflateFastCorrect.lean` (`goTreeFree_size_mono`,
-  `copyWithinAt_extract_eq_copyLoop`, `inflateFast_eq`), each carrying a proof
-  roadmap. The spikes themselves (`Zip/Native/InflateFast.lean`) carry **no
-  `sorry`** (total via `set!`/`copyWithinAt` and real `uset` proofs). The file is
-  not imported by `Zip`, so the production decoder and CI are `sorry`-free.
+- sorry count (`grep -rc sorry Zip/`): 1 real `sorry`, in the standalone WIP
+  `Zip/Spec/InflateFastCorrect.lean` (`inflateFast_eq`), carrying a proof
+  roadmap. Everything it depends on is proved. The spikes themselves
+  (`Zip/Native/InflateFast.lean`) carry **no `sorry`**. The file is not imported
+  by `Zip`, so the production decoder and CI are `sorry`-free.
 - `lake build` + `lake exe test`: green.
 
 ## What remains
