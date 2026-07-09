@@ -127,6 +127,13 @@ theorem copyWithinAtGo_size (a : ByteArray) (destOff distance k len : Nat) :
   termination_by len - k
   decreasing_by rename_i hk; omega
 
+/-- `copyWithinAt` preserves size. -/
+theorem copyWithinAt_size (a : ByteArray) (destOff distance len : Nat) :
+    (a.copyWithinAt destOff distance len).size = a.size := by
+  rw [ByteArray.copyWithinAt]; split
+  · rfl
+  · exact copyWithinAtGo_size a destOff distance 0 len
+
 /-- Content preservation below the cursor: `copyWithinAtGo` starting at counter
     `k` only writes positions `≥ destOff + k`, so positions `< destOff + k`
     (in particular the whole `[0, destOff)` window) are unchanged. -/
@@ -355,6 +362,7 @@ only gates; the tail is literally `goCur`). Lifting through `decodeStoredCur` /
 
 open InflateBuf (goCur goTreeFreeU)
 
+set_option maxRecDepth 8192 in
 /-- **The core bisimulation.** With the cursor logical content
     `buf.extract 0 outPos = refOutput`, a room bound `rf.size ≤ buf.size`, and the
     reference succeeding, `goCur` returns the same `(rp, rb, rc)` and a buffer
@@ -465,7 +473,79 @@ theorem goCur_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Huf
           · -- back-reference (match)
             rename_i heob
             rw [if_neg heob] at href
-            sorry
+            by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
+            · rw [dif_pos hidx] at href; exact absurd href (by simp)
+            · rw [dif_neg hidx] at href ⊢
+              simp only [bind, Except.bind] at href ⊢
+              cases htb : InflateBuf.takeBits bb c'
+                  (Inflate.lengthExtra[sym.toNat - 257]'(by
+                    simp only [Inflate.lengthExtra_size]
+                    simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hidx; omega)).toNat with
+              | error e => rw [htb] at href; exact absurd href (by simp)
+              | ok pe =>
+                obtain ⟨eb, bb2, c2⟩ := pe
+                rw [htb] at href
+                simp only [] at href ⊢
+                cases hde2 : HuffTree.decodeSymCanon distLD distTable maxBits bb2 c2 with
+                | error e => rw [hde2] at href; exact absurd href (by simp)
+                | ok pd =>
+                  obtain ⟨dsym, bb3, c3, dused⟩ := pd
+                  rw [hde2] at href
+                  simp only [] at href ⊢
+                  by_cases hdidx : dsym.toNat ≥ Inflate.distBase.size
+                  · rw [dif_pos hdidx] at href; exact absurd href (by simp)
+                  · rw [dif_neg hdidx] at href ⊢
+                    try simp only [bind, Except.bind] at href ⊢
+                    cases htb2 : InflateBuf.takeBits bb3 c3
+                        (Inflate.distExtra[dsym.toNat]'(by
+                          simp only [Inflate.distExtra_size]
+                          simp only [Inflate.distBase_size, ge_iff_le, Nat.not_le] at hdidx; omega)).toNat with
+                    | error e => rw [htb2] at href; exact absurd href (by simp)
+                    | ok pd2 =>
+                      obtain ⟨deb, bb4, c4⟩ := pd2
+                      rw [htb2] at href
+                      simp only [] at href ⊢
+                      by_cases hz : Inflate.distBase[dsym.toNat].toNat + deb = 0
+                      · rw [dif_pos hz] at href; exact absurd href (by simp)
+                      · rw [dif_neg hz] at href ⊢
+                        by_cases hds : Inflate.distBase[dsym.toNat].toNat + deb > outPos.toNat
+                        · rw [dif_pos (by rw [hos]; exact hds)] at href; exact absurd href (by simp)
+                        · rw [dif_neg (by rw [hos]; exact hds)] at href
+                          by_cases hmax :
+                              outPos.toNat + (Inflate.lengthBase[sym.toNat - 257].toNat + eb) > maxOut
+                          · rw [if_pos (by rw [hos]; exact hmax)] at href; exact absurd href (by simp)
+                          · rw [if_neg (by rw [hos]; exact hmax)] at href
+                            by_cases hnp : cnt.toNat ≤ c4
+                            · rw [dif_pos hnp] at href; exact absurd href (by simp)
+                            · rw [dif_neg hds, if_neg hmax, dif_neg hnp]
+                              rw [dif_neg hnp] at href
+                              -- distance / length bounds
+                              have hd0 : 0 < Inflate.distBase[dsym.toNat].toNat + deb := by omega
+                              have hdle : Inflate.distBase[dsym.toNat].toNat + deb ≤ outPos.toNat := by omega
+                              have hmono := goTreeFreeU_size_mono _ _ _ _ _ _ _ hsz hlp _ _ _ _
+                                rf rp rb rc hpos href
+                              rw [copyLoop_size (buf.extract 0 outPos.toNat) _ _ hd0 (by rw [hos]; exact hdle),
+                                hos] at hmono
+                              have hlen : outPos.toNat + (Inflate.lengthBase[sym.toNat - 257].toNat + eb)
+                                  ≤ buf.size := by omega
+                              have hlenlt : Inflate.lengthBase[sym.toNat - 257].toNat + eb < USize.size := by
+                                omega
+                              have hadv : (outPos + (Inflate.lengthBase[sym.toNat - 257].toNat + eb).toUSize).toNat
+                                  = outPos.toNat + (Inflate.lengthBase[sym.toNat - 257].toNat + eb) := by
+                                rw [USize.toNat_add, InflateBuf.toUSize_toNat_of_lt hlenlt]
+                                apply Nat.mod_eq_of_lt
+                                have : outPos.toNat + (Inflate.lengthBase[sym.toNat - 257].toNat + eb)
+                                    < USize.size := by omega
+                                exact USize.size_eq_two_pow ▸ this
+                              rw [← copyWithinAt_extract_eq_copyLoop buf outPos.toNat _ _ hd0 hdle hlen,
+                                ← hadv] at href
+                              exact goCur_eq _ _ _ _ _ _ _ _ _ _ _ _
+                                (buf.copyWithinAt outPos.toNat _ _)
+                                (outPos + (Inflate.lengthBase[sym.toNat - 257].toNat + eb).toUSize)
+                                rf rp rb rc hpos
+                                (by rw [copyWithinAt_size, hadv]; omega)
+                                (by rw [copyWithinAt_size]; exact hbuf) href
+                                (by rw [copyWithinAt_size]; exact hroom)
   termination_by (data.size - pos.toNat) * 9 + cnt.toNat
   decreasing_by all_goals sorry
 
