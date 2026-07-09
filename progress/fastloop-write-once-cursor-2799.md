@@ -108,15 +108,30 @@ IH rebased by `hue` where a literal write is involved. The two write bridges
 (`set!_extract_eq_push`, `copyWithinAt_extract_eq_copyLoop`) and per-step room
 from `goTreeFreeU_size_mono` close each write case.
 
-Remaining: `inflateFast_eq` (the block-loop lift). The path is now clear and
-tractable — `Inflate.inflate = inflateLoopTreeFree` (`inflateRaw_eq_loop`,
+The block-loop lift (`inflateFast_eq`) is underway on the foundation of
+`goCur_eq`. `Inflate.inflate = inflateLoopTreeFree` (`inflateRaw_eq_loop`,
 `rfl`), and `inflateLoopCur` mirrors `inflateLoopTreeFree` block-for-block
 (same `btype` dispatch, `decodeDynamicLengthsOnly`, `bfinal`/progress guards),
-differing only in the output representation. So the lift is a loop bisimulation
-(`inflateLoopCur.induct`) that applies `goCur_eq` for each Huffman block
-(through a `decodeHuffmanCurTables ↔ decodeHuffmanFastBufTables` bridge) and a
-`decodeStoredCur ↔ decodeStored` bridge for stored blocks, instantiated with
-the presized buffer and the exact-size contract.
+differing only in the output representation.
+
+- **Done — the Huffman-block bridge** `decodeHuffmanCurTables_eq`: one Huffman
+  block decoded at a cursor (`decodeHuffmanCurTables`, through `goCur`)
+  re-represents the reference block decode (`decodeHuffmanFastBufTables`,
+  through `goTreeFreeU`). Same entry refill and `BitReader` bookkeeping —
+  established through the `BufCorr` invariant (`refill_corr` / `consume_corr`,
+  giving the `pos ≤ size` bound `goCur_eq` needs) — and by `goCur_eq` the same
+  produced bytes, a prefix of the cursor buffer. Covers `btype ∈ {1, 2}`.
+- **Remaining** for `inflateFast_eq`:
+  1. A `decodeStoredCur ↔ decodeStored` bridge (`btype = 0`). `decodeStoredCur`
+     currently writes via a `for i in [:len]` loop whose opaque `forIn` cannot
+     be unfolded in proofs, so this first wants a refactor of that loop to
+     well-founded recursion, then the standard size/preservation/content
+     three-theorem pattern.
+  2. The loop bisimulation `inflateLoopCur.induct` against `inflateLoopTreeFree`,
+     applying the two block bridges and threading the cursor invariant
+     `refOut = buf.extract 0 outPos` with room from monotone growth.
+  3. Instantiation with the presized buffer + exact-size contract, chaining
+     `inflate = inflateRaw = inflateLoopTreeFree`.
 
 ## Proof progress (`Zip/Spec/InflateFastCorrect.lean`)
 
