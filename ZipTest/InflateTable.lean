@@ -176,14 +176,15 @@ def subtableTests : IO Unit := do
     match HuffTree.fromLengths lengths 15 with
     | .error _ => pure ()  -- skip invalid length sets
     | .ok tree =>
-      let table := tree.buildTable
-      let ld := HuffTree.buildLongDecode lengths 15
+      -- the production build: root fast table augmented in place with inline
+      -- subtable offsets, plus the flat `subs`
+      let tf := HuffTree.buildTreeFreeWithCount lengths (HuffTree.countLengthsFast lengths 15) 15
       for _ in [:4000] do
         s := xorshift64 s
         let buf := s
         for cnt in cnts do
-          let a := (HuffTree.decodeSymCanon ld table 15 buf cnt).toOption
-          let b := (Zip.Native.InflateBuf.decodeSym tree table buf cnt).toOption
+          let a := (HuffTree.decodeSymCanon tf.2 tf.1 15 buf cnt).toOption
+          let b := (Zip.Native.InflateBuf.decodeSym tree tf.1 buf cnt).toOption
           unless a == b do
             throw (IO.userError
               s!"[{label}] decodeSymCanon (subtable) ≠ tree decodeSym at buf={buf} cnt={cnt}")

@@ -38,24 +38,25 @@ namespace HuffTree
     first canonical code of that length, `firstIndex[len]` the offset into
     `symbols` (symbols sorted by `(length, symbol)`).
 
-    The last two fields are the libdeflate-style **subtable** representation the
-    production `subLookup` reads (built by `buildSubLoop`): `rootSub`, indexed by
-    the low `fastBits` bits of the buffer, gives `off + 1` (biased so `0` means
-    "no long code with this prefix") where `off` is the start of this prefix's
-    `2^(maxBits - fastBits)`-entry subtable block inside the flat `subs` array;
-    each `subs` entry is a `packEntry sym fullLen` (or the sentinel `0`). A long
-    codeword is resolved with one masked load into `rootSub` and one into `subs`
-    — no per-bit boxed accumulation. In the context `subLookup` is actually called
-    (the root table missed, so any codeword present is longer than `fastBits`), it is
-    proven to agree with `walkCanonical` (`subLookup_ok_iff_walkCanonical`), so the
-    subtable is a verified drop-in for the boxed fallback. (As standalone functions the
-    two differ: `walkCanonical` also resolves short codes, which never reach this path.) -/
+    The last field is the flat `subs` array of the libdeflate-style **subtables**
+    the production `subLookup` reads. There is **no** separate root map: a long
+    prefix's subtable-block offset is stored *inline* in the root fast table's
+    sentinel slot — `packEntry (off + 1) 0` (the length stays `0`, so the fast path
+    still misses and falls through; the biased `off + 1` rides in the symbol field,
+    `0` meaning "no long code with this prefix"). So a long codeword is resolved by
+    reading the root table entry `subLookup` was handed anyway (its symbol field
+    gives the block offset) and one masked load into `subs` — no per-bit boxed
+    accumulation, and no second `2^fastBits` array built per block. In the context
+    `subLookup` is actually called (the root table missed, so any codeword present is
+    longer than `fastBits`), it is proven to agree with `walkCanonical`
+    (`subLookup_ok_iff_walkCanonical`), so the subtable is a verified drop-in for the
+    boxed fallback. (As standalone functions the two differ: `walkCanonical` also
+    resolves short codes, which never reach this path.) -/
 structure LongDecode where
   count : Array Nat
   firstCode : Array Nat
   firstIndex : Array Nat
   symbols : Array UInt16
-  rootSub : Array UInt32
   subs : Array UInt32
 
 /-- `firstIndex[len]` = number of positive-length symbols of length `< len`
@@ -98,18 +99,24 @@ where
     else go count maxBits (len + 1) (acc + count[len]!)
   termination_by maxBits + 1 - len
 
-/-- The libdeflate-style subtable fill (mirrors `buildCanonicalLoop`'s `nextCode`
-    threading, but for codes *longer* than `fastBits`). For each symbol from
-    `start`, look up its canonical code `c = nextCode[len]` (advancing
+/-- The libdeflate-style **inline** subtable fill (mirrors `buildCanonicalLoop`'s
+    `nextCode` threading, but for codes *longer* than `fastBits`). For each symbol
+    from `start`, look up its canonical code `c = nextCode[len]` (advancing
     `nextCode[len]`), and — for `fastBits < len ≤ maxBits` — resolve which subtable
-    block its `fastBits`-bit prefix owns (allocating a fresh
-    `2^(maxBits - fastBits)`-entry block via the discovery-order counter `nextBlock`
-    the first time a prefix appears, recorded biased-by-one in `rootSub`), then fill
-    the `2^(maxBits - len)` sub-slots the code owns (`fillSlots`, stride
-    `2^(len - fastBits)`, starting at the code's residual bits). Codes `≤ fastBits`
-    (handled by the root table) and `len = 0` are skipped. -/
+    block its `fastBits`-bit prefix owns, then fill the `2^(maxBits - len)` sub-slots
+    the code owns in `subs` (`fillSlots`, stride `2^(len - fastBits)`, from the code's
+    residual bits).
+
+    The block offset is stored **inline in the root fast table `root`**: a long
+    prefix's slot is a fast-table sentinel (`packEntry 0 0`, length `0`); the first
+    time the prefix appears we overwrite it with `packEntry (off + 1) 0` (length
+    still `0`, so the fast path keeps missing; the biased `off + 1` block offset
+    rides in the symbol field), allocating a fresh `2^(maxBits - fastBits)`-entry
+    block via the discovery-order counter `nextBlock`. On a repeat sighting the slot
+    already holds `off + 1` (its symbol field is non-zero), so we reuse it — no
+    second `2^fastBits` array. Codes `≤ fastBits` and `len = 0` are skipped. -/
 def buildSubLoop (lengths : Array UInt8) (nextCode : Array UInt32) (maxBits start : Nat)
-    (rootSub subs : Array UInt32) (nextBlock : Nat) : Array UInt32 × Array UInt32 :=
+    (root subs : Array UInt32) (nextBlock : Nat) : Array UInt32 × Array UInt32 :=
   if h : start < lengths.size then
     let len := lengths[start]
     if hlen : 0 < len.toNat ∧ len.toNat < nextCode.size then
@@ -119,53 +126,53 @@ def buildSubLoop (lengths : Array UInt8) (nextCode : Array UInt32) (maxBits star
         let rev := bitReverse c.toNat len.toNat 0
         let p := rev % (2 ^ fastBits)
         let subBase := rev / (2 ^ fastBits)
-        let seen := rootSub[p]!
-        let off := if seen == 0 then nextBlock * (2 ^ (maxBits - fastBits)) else seen.toNat - 1
-        let rootSub' := if seen == 0 then rootSub.set! p (off + 1).toUInt32 else rootSub
-        let nextBlock' := if seen == 0 then nextBlock + 1 else nextBlock
+        let seenSym := (unpackSym root[p]!).toNat
+        let off := if seenSym == 0 then nextBlock * (2 ^ (maxBits - fastBits)) else seenSym - 1
+        let root' := if seenSym == 0 then root.set! p (packEntry (off + 1).toUInt16 0) else root
+        let nextBlock' := if seenSym == 0 then nextBlock + 1 else nextBlock
         let stride := 2 ^ (len.toNat - fastBits)
         let cnt := 2 ^ (maxBits - len.toNat)
         let entry := packEntry start.toUInt16 len
         let subs' := fillSlots subs (off + subBase) stride cnt entry
-        buildSubLoop lengths nextCode' maxBits (start + 1) rootSub' subs' nextBlock'
+        buildSubLoop lengths nextCode' maxBits (start + 1) root' subs' nextBlock'
       else
-        buildSubLoop lengths nextCode' maxBits (start + 1) rootSub subs nextBlock
+        buildSubLoop lengths nextCode' maxBits (start + 1) root subs nextBlock
     else
-      buildSubLoop lengths nextCode maxBits (start + 1) rootSub subs nextBlock
-  else (rootSub, subs)
+      buildSubLoop lengths nextCode maxBits (start + 1) root subs nextBlock
+  else (root, subs)
 termination_by lengths.size - start
 
-/-- Build the compacted subtables (`rootSub`, `subs`) from the code lengths, sharing
-    the precomputed histogram. Zero-initialised `rootSub` (size `2^fastBits`) and
-    `subs` (size `2^(maxBits - fastBits) · countLongCodes`), filled by
-    `buildSubLoop` over the canonical `nextCode` array. -/
-def buildSubTables (lengths : Array UInt8) (count : Array Nat) (maxBits : Nat) :
-    Array UInt32 × Array UInt32 :=
+/-- Augment a prebuilt root fast table with inline subtable-block offsets and build
+    the flat `subs` array, sharing the precomputed histogram. `root` (the fast
+    table's packed array, size `2^fastBits`) is written in place — offsets ride in
+    the sentinel slots of long prefixes; `subs` is fresh (size
+    `2^(maxBits - fastBits) · countLongCodes`). No new `2^fastBits` array. -/
+def augmentSubTables (root : Array UInt32) (lengths : Array UInt8) (count : Array Nat)
+    (maxBits : Nat) : Array UInt32 × Array UInt32 :=
   let nextCode := nextCodesFast count maxBits
   let numLong := countLongCodes count maxBits
-  buildSubLoop lengths nextCode maxBits 0
-    (Array.replicate (2 ^ fastBits) 0)
+  buildSubLoop lengths nextCode maxBits 0 root
     (Array.replicate (2 ^ (maxBits - fastBits) * numLong) (packEntry 0 0)) 0
 
-/-- Build the canonical long-code tables from code lengths in O(n + maxBits).
-    `firstCode` is the canonical first-code-per-length recurrence (RFC 1951
-    §3.2.2), exactly `Huffman.Spec.nextCodes`; `firstIndex`/`symbols` are the
-    prefix-sum and counting-sort over the code lengths; `rootSub`/`subs` are the
-    libdeflate-style subtables (`buildSubTables`). -/
+/-- The canonical long-code **reference** structure (read only by the proof-side
+    `walkCanonical`): `firstCode` is the canonical first-code-per-length recurrence
+    (RFC 1951 §3.2.2), exactly `Huffman.Spec.nextCodes`; `firstIndex`/`symbols` are
+    the prefix-sum and counting-sort over the code lengths. `subs` is left empty here
+    — the production `subs`/inline offsets are built by `buildTreeFreeWithCount`
+    (which also augments the fast table); `walkCanonical` never reads `subs`. -/
 def buildLongDecode (lengths : Array UInt8) (maxBits : Nat) : LongDecode :=
   let count := countLengthsFast lengths maxBits
   let firstCode := Huffman.Spec.nextCodes count maxBits
   let firstIndex := buildFirstIndex count maxBits
   let total := firstIndex[maxBits]! + count[maxBits]!
   let symbols := buildSymbols lengths maxBits total firstIndex
-  let (rootSub, subs) := buildSubTables lengths count maxBits
-  { count, firstCode, firstIndex, symbols, rootSub, subs }
+  { count, firstCode, firstIndex, symbols, subs := #[] }
 
-/-- Does any codeword exceed the `fastBits`-wide fast table — i.e. can the
-    `walkCanonical` long-code fallback ever fire productively? `count[len] > 0` for
-    some `fastBits < len ≤ maxBits`. When this is `false`, every codeword resolves
-    in the fast table, so the long-code counting sort (`buildSymbols`, allocating a
-    `total`-element array) is dead work. One pass over the small `count` array. -/
+/-- Does any codeword exceed the `fastBits`-wide fast table — i.e. can the long-code
+    subtable path ever fire? `count[len] > 0` for some `fastBits < len ≤ maxBits`.
+    When this is `false`, every codeword resolves in the fast table, so the long-code
+    counting sort (`buildSymbols`) and the subtable build are dead work and are
+    skipped. One pass over the small `count` array. -/
 def hasLongCode (count : Array Nat) (maxBits : Nat) : Bool :=
   go count maxBits (fastBits + 1)
 where
@@ -175,24 +182,57 @@ where
     else go count maxBits (len + 1)
   termination_by maxBits + 1 - len
 
-/-- `buildLongDecode` sharing a precomputed length histogram, and skipping the
-    `buildSymbols` counting sort entirely when no codeword exceeds the fast table
-    (`hasLongCode count maxBits = false`). In that case `walkCanonical` is never
-    productive — every codeword resolves in the fast `fastBits`-bit table — so the
-    `total`-element `symbols` allocation is dead work and we leave it empty. When a
-    long code does exist this matches `buildLongDecode` exactly
-    (`buildLongDecodeWithCount_eq`). -/
-def buildLongDecodeWithCount (lengths : Array UInt8) (count : Array Nat) (maxBits : Nat) :
-    LongDecode :=
-  let firstCode := Huffman.Spec.nextCodes count maxBits
-  let firstIndex := buildFirstIndex count maxBits
+/-- Build the fast root table *and* the tree-free long-code structures in one shot,
+    sharing the histogram. The fast table (`buildTableCanonicalFastWithCount`) is
+    augmented in place with inline subtable offsets (`augmentSubTables`); the returned
+    `LongDecode` carries the reference fields plus the flat `subs`. When no codeword
+    exceeds `fastBits` (`hasLongCode` false) the fast table is returned untouched and
+    `subs`/`symbols` are empty (the subtable path is dead). Returns the augmented
+    table and the long-code structure together so the decode loop and the fallback
+    share one build. -/
+def buildTreeFreeWithCount (lengths : Array UInt8) (count : Array Nat) (maxBits : Nat) :
+    DecodeTable × LongDecode :=
+  let table := buildTableCanonicalFastWithCount lengths count maxBits
   if hasLongCode count maxBits then
-    let total := firstIndex[maxBits]! + count[maxBits]!
-    let symbols := buildSymbols lengths maxBits total firstIndex
-    let (rootSub, subs) := buildSubTables lengths count maxBits
-    { count, firstCode, firstIndex, symbols, rootSub, subs }
+    let (root, subs) := augmentSubTables table.packed lengths count maxBits
+    -- only `subs` (and the inline offsets in `root`) feed the runtime `subLookup`;
+    -- the `firstCode`/`firstIndex`/`symbols` reference fields are dead here (they
+    -- belong to the proof-side `walkCanonical`), so leave them empty to avoid the
+    -- counting-sort / prefix-sum work per block.
+    ({ packed := root },
+      { count, firstCode := #[], firstIndex := #[], symbols := #[], subs })
   else
-    { count, firstCode, firstIndex, symbols := #[], rootSub := #[], subs := #[] }
+    (table, { count, firstCode := #[], firstIndex := #[], symbols := #[], subs := #[] })
+
+/-- `buildSubLoop` preserves the size of the root table it augments (every write is
+    an in-place `set!`). -/
+theorem buildSubLoop_size (lengths : Array UInt8) (nextCode : Array UInt32)
+    (maxBits start : Nat) (root subs : Array UInt32) (nextBlock : Nat) :
+    (buildSubLoop lengths nextCode maxBits start root subs nextBlock).1.size = root.size := by
+  unfold buildSubLoop
+  split
+  · dsimp only []
+    split
+    · split
+      · rw [buildSubLoop_size]; split
+        · rw [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds]
+        · rfl
+      · rw [buildSubLoop_size]
+    · rw [buildSubLoop_size]
+  · rfl
+termination_by lengths.size - start
+
+/-- The `buildTreeFreeWithCount` root table is the `2^fastBits`-entry fast table
+    (augmented in place, so size-preserving). -/
+theorem buildTreeFreeWithCount_size (lengths : Array UInt8) (count : Array Nat)
+    (maxBits : Nat) :
+    (buildTreeFreeWithCount lengths count maxBits).1.packed.size = 2 ^ fastBits := by
+  unfold buildTreeFreeWithCount
+  split
+  · show (augmentSubTables _ lengths count maxBits).1.size = _
+    unfold augmentSubTables
+    rw [buildSubLoop_size, buildTableCanonicalFastWithCount_size]
+  · exact buildTableCanonicalFastWithCount_size lengths count maxBits
 
 /-- Canonical bit-by-bit long-code decode: read bits MSB-first, accumulate the
     code value, and return the symbol once the code lands in some length's
@@ -217,41 +257,46 @@ where
   termination_by maxBits + 1 - len
   decreasing_by omega
 
-/-- libdeflate-style subtable long-code resolve: **one** masked load into `rootSub`
-    (indexed by the low `fastBits` bits) selects the prefix's subtable block, and a
-    second masked load into `subs` (indexed by the next `maxBits - fastBits` bits)
-    reads the packed `(sym, fullLen)` — no per-bit boxed accumulation. A zero
-    `rootSub` entry (no long code with this prefix) or a sentinel-`0` sub-slot (this
-    residual is not a real codeword) is the "invalid code" error; too few buffered
-    bits for the resolved length is the "unexpected end of input" error. In the
-    fallback context it is called from (root table missed → any codeword is long),
-    proven to return exactly what the boxed `walkCanonical` returns
+/-- libdeflate-style inline-subtable long-code resolve. The root fast table entry at
+    the `fastBits`-bit prefix (which `decodeSymCanon` already read to miss the fast
+    path) carries the prefix's subtable-block offset in its symbol field
+    (`packEntry (off + 1) 0`); one masked load into `subs` (indexed by the next
+    `maxBits - fastBits` bits) then reads the packed `(sym, fullLen)` — no per-bit
+    boxed accumulation, no second `2^fastBits` array. A real short code with too few
+    buffered bits (`unpackLen ≠ 0`, the `len > cnt` fast-path miss) or a genuine
+    no-code prefix (symbol field `0`) or a sentinel-`0` sub-slot is the "invalid
+    code" error; too few bits for the resolved length is "unexpected end of input".
+    In the fallback context it is called from (root table missed → any codeword is
+    long), proven to return exactly what the boxed `walkCanonical` returns
     (`subLookup_ok_iff_walkCanonical`). -/
-@[inline] def subLookup (ld : LongDecode) (maxBits : Nat) (bitBuf : UInt64) (cnt : Nat) :
-    Except String (UInt16 × UInt64 × Nat × Nat) :=
+@[inline] def subLookup (ld : LongDecode) (table : DecodeTable) (maxBits : Nat)
+    (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
   let p := (bitBuf &&& 0x7FF).toNat
-  let seen := ld.rootSub[p]!
-  if seen == 0 then .error "Inflate: invalid Huffman code"
+  let rootE := table.entryAt p
+  if unpackLen rootE ≠ 0 then .error "Inflate: invalid Huffman code"
   else
-    let off := seen.toNat - 1
-    let subIdx := ((bitBuf >>> (fastBits : Nat).toUInt64)
-      &&& (2 ^ (maxBits - fastBits) - 1 : Nat).toUInt64).toNat
-    let e := ld.subs[off + subIdx]!
-    let len := (unpackLen e).toNat
-    if len == 0 then .error "Inflate: invalid Huffman code"
-    else if len > cnt then .error "BitReader: unexpected end of input"
-    else .ok (unpackSym e, bitBuf >>> len.toUInt64, cnt - len, len)
+    let off1 := (unpackSym rootE).toNat
+    if off1 == 0 then .error "Inflate: invalid Huffman code"
+    else
+      let off := off1 - 1
+      let subIdx := ((bitBuf >>> (fastBits : Nat).toUInt64)
+        &&& (2 ^ (maxBits - fastBits) - 1 : Nat).toUInt64).toNat
+      let e := ld.subs[off + subIdx]!
+      let len := (unpackLen e).toNat
+      if len == 0 then .error "Inflate: invalid Huffman code"
+      else if len > cnt then .error "BitReader: unexpected end of input"
+      else .ok (unpackSym e, bitBuf >>> len.toUInt64, cnt - len, len)
 
 /-- `decodeSym` with the tree-free long-code fallback: the ≤`fastBits` root table
-    hit as before, the >`fastBits` codes resolved by the boxing-free `subLookup`
-    subtable lookup (retiring the boxed per-bit `walkCanonical`, which survives only
-    as the proof-side reference `subLookup` is verified against). -/
+    hit as before, the >`fastBits` codes resolved by the boxing-free inline-subtable
+    `subLookup` (retiring the boxed per-bit `walkCanonical`, which survives only as
+    the proof-side reference `subLookup` is verified against). -/
 @[inline] def decodeSymCanon (ld : LongDecode) (table : DecodeTable) (maxBits : Nat)
     (bitBuf : UInt64) (cnt : Nat) : Except String (UInt16 × UInt64 × Nat × Nat) :=
   let idx := (bitBuf &&& 0x7FF).toNat
   let e := table.entryAt idx
   let len := (unpackLen e).toNat
-  if len == 0 || len > cnt then subLookup ld maxBits bitBuf cnt
+  if len == 0 || len > cnt then subLookup ld table maxBits bitBuf cnt
   else .ok (unpackSym e, bitBuf >>> len.toUInt64, cnt - len, len)
 
 end HuffTree
@@ -461,12 +506,10 @@ def decodeHuffmanFastBufTreeFree (br : BitReader) (output : ByteArray)
     Except String (ByteArray × BitReader) :=
   let litCount := HuffTree.countLengthsFast litLengths 15
   let distCount := HuffTree.countLengthsFast distLengths 15
-  let litTable := HuffTree.buildTableCanonicalFastWithCount litLengths litCount 15
-  let distTable := HuffTree.buildTableCanonicalFastWithCount distLengths distCount 15
-  let litLD := HuffTree.buildLongDecodeWithCount litLengths litCount 15
-  let distLD := HuffTree.buildLongDecodeWithCount distLengths distCount 15
-  decodeHuffmanFastBufTables br output litTable distTable litLD distLD maxOut
-    (HuffTree.buildTableCanonicalFastWithCount_size litLengths litCount 15)
+  let litTF := HuffTree.buildTreeFreeWithCount litLengths litCount 15
+  let distTF := HuffTree.buildTreeFreeWithCount distLengths distCount 15
+  decodeHuffmanFastBufTables br output litTF.1 distTF.1 litTF.2 distTF.2 maxOut
+    (HuffTree.buildTreeFreeWithCount_size litLengths litCount 15)
 
 end InflateBuf
 
@@ -491,19 +534,15 @@ def fixedLitCount : Array Nat := HuffTree.countLengthsFast fixedLitLengths 15
 /-- Per-length histogram for `fixedDistLengths`. -/
 def fixedDistCount : Array Nat := HuffTree.countLengthsFast fixedDistLengths 15
 
-/-- The fixed lit/length canonical fast decode table (RFC 1951 §3.2.6), built once. -/
-def fixedLitTable : DecodeTable :=
-  HuffTree.buildTableCanonicalFastWithCount fixedLitLengths fixedLitCount 15
+/-- The fixed lit/length fast table + long-code structure (RFC 1951 §3.2.6), built
+    once. Fixed lit codes are ≤ 9 bits, so `hasLongCode` is false: the table is the
+    plain fast table and `subs` is empty (the subtable path is dead). -/
+def fixedLitTF : DecodeTable × LongDecode :=
+  HuffTree.buildTreeFreeWithCount fixedLitLengths fixedLitCount 15
 
-/-- The fixed distance canonical fast decode table (RFC 1951 §3.2.6), built once. -/
-def fixedDistTable : DecodeTable :=
-  HuffTree.buildTableCanonicalFastWithCount fixedDistLengths fixedDistCount 15
-
-/-- The fixed lit/length long-code decode table, built once. -/
-def fixedLitLD : LongDecode := HuffTree.buildLongDecodeWithCount fixedLitLengths fixedLitCount 15
-
-/-- The fixed distance long-code decode table, built once. -/
-def fixedDistLD : LongDecode := HuffTree.buildLongDecodeWithCount fixedDistLengths fixedDistCount 15
+/-- The fixed distance fast table + long-code structure (RFC 1951 §3.2.6), built once. -/
+def fixedDistTF : DecodeTable × LongDecode :=
+  HuffTree.buildTreeFreeWithCount fixedDistLengths fixedDistCount 15
 
 /-- Fixed-Huffman block decode over the compile-time-constant fixed tables — no
     per-block table build. Equal to
@@ -511,9 +550,9 @@ def fixedDistLD : LongDecode := HuffTree.buildLongDecodeWithCount fixedDistLengt
     (`decodeHuffmanFastBufFixed_eq`). -/
 def decodeHuffmanFastBufFixed (br : BitReader) (output : ByteArray) (maxOut : Nat) :
     Except String (ByteArray × BitReader) :=
-  InflateBuf.decodeHuffmanFastBufTables br output fixedLitTable fixedDistTable
-    fixedLitLD fixedDistLD maxOut
-    (HuffTree.buildTableCanonicalFastWithCount_size fixedLitLengths fixedLitCount 15)
+  InflateBuf.decodeHuffmanFastBufTables br output fixedLitTF.1 fixedDistTF.1
+    fixedLitTF.2 fixedDistTF.2 maxOut
+    (HuffTree.buildTreeFreeWithCount_size fixedLitLengths fixedLitCount 15)
 
 /-- Like `decodeDynamicTrees`, but returns only the code-length vectors — it never
     builds the lit/dist Huffman trees (the whole point of the tree-free path). The
