@@ -122,6 +122,39 @@ theorem copyWithinAtGo_getElem!_lt (a : ByteArray) (destOff distance k len i : N
   termination_by len - k
   decreasing_by rename_i hk; omega
 
+/-- `ByteArray.get!` is `getElem!`. -/
+theorem ByteArray.get!_eq_getElem! (a : ByteArray) (i : Nat) : a.get! i = a[i]! := by
+  simp only [ByteArray.get!]
+  by_cases hi : i < a.size
+  · rw [getElem!_pos a i hi, getElem!_pos a.data i (by simpa only [ByteArray.size_data] using hi)]
+    rfl
+  · rw [getElem!_neg a i hi, getElem!_neg a.data i (by simpa only [ByteArray.size_data] using hi)]
+
+/-- Written content of the cursor copy: for a position `destOff + j` in the
+    write range (`k ≤ j < len`), the byte is the periodic window value
+    `a[destOff - distance + (j % distance)]`. Every read stays in the fixed
+    window `[destOff - distance, destOff)`, so the `set!`s never disturb it. -/
+theorem copyWithinAtGo_getElem!_written (a : ByteArray) (destOff distance k len i : Nat)
+    (hd : 0 < distance) (hdle : distance ≤ destOff) (hsz : destOff + len ≤ a.size)
+    (hik : destOff + k ≤ i) (hil : i < destOff + len) :
+    (copyWithinAtGo a destOff distance k len)[i]!
+      = a[destOff - distance + ((i - destOff) % distance)]! := by
+  rw [copyWithinAtGo, if_pos (show k < len by omega)]
+  by_cases hik' : i = destOff + k
+  · -- the position written at this step
+    subst hik'
+    rw [copyWithinAtGo_getElem!_lt _ destOff distance (k + 1) len (destOff + k) (by omega),
+      ByteArray.getElem!_set!, if_pos ⟨rfl, by omega⟩, ByteArray.get!_eq_getElem!,
+      show destOff + k - destOff = k from by omega]
+  · -- a later position; recurse, and the write index is untouched by this set!
+    have hidx : destOff - distance + (i - destOff) % distance < destOff := by
+      have := Nat.mod_lt (i - destOff) hd; omega
+    rw [copyWithinAtGo_getElem!_written (a.set! (destOff + k) _) destOff distance (k + 1) len i
+        hd hdle (by rw [ByteArray.size_set!]; exact hsz) (by omega) hil,
+      ByteArray.getElem!_set!, if_neg (by rintro ⟨h1, -⟩; omega)]
+  termination_by len - k
+  decreasing_by omega
+
 /-- `copyLoop` (the reference back-reference append) grows the buffer by exactly
     `length`, derived from the `copyLoop_eq_ofFn` content characterisation. -/
 theorem copyLoop_size (output : ByteArray) (length distance : Nat)
