@@ -259,19 +259,27 @@ theorem emitTokensWithCodesP_eq (bw : BitWriter) (ws : Array UInt32)
 
 /-! ## The packed-table emitter equals the pair-table one (#2827) -/
 
-/-- `packCodeEntry` keeps the code in the low 16 bits. -/
-private theorem packCodeEntry_code (e : UInt16 × UInt8) :
-    (packCodeEntry e).toUInt16 = e.1 := by
-  obtain ⟨c, l⟩ := e
-  unfold packCodeEntry
-  bv_decide
-
 /-- `packCodeEntry` keeps the bit length in bits 16–23. -/
 private theorem packCodeEntry_len (e : UInt16 × UInt8) :
     (packCodeEntry e >>> 16).toUInt8 = e.2 := by
   obtain ⟨c, l⟩ := e
   unfold packCodeEntry
+  generalize BitWriter.reverse16 c = r
   bv_decide
+
+/-- Writing a packed entry through `writeRevCode` is `writeHuffCode` of the
+    original pair: the packed code field is exactly the precomputed
+    LSB-first reversal `writeRevCode` expects. -/
+private theorem packCodeEntry_write (bw : BitWriter) (e : UInt16 × UInt8) :
+    bw.writeRevCode (packCodeEntry e).toUInt16 ((packCodeEntry e) >>> 16).toUInt8 =
+      bw.writeHuffCode e.1 e.2 := by
+  obtain ⟨c, l⟩ := e
+  have hcode : (packCodeEntry (c, l)).toUInt16 =
+      ((BitWriter.reverse16 c).toUInt64 >>> (16 - l.toUInt64)).toUInt16 := by
+    unfold packCodeEntry
+    generalize BitWriter.reverse16 c = r
+    bv_decide
+  rw [packCodeEntry_len, hcode, BitWriter.writeRevCode_eq]
 
 /-- The packed-table reference emit is the pair-table one over `packCodeTab`:
     identical branch structure, each table read recovered by
@@ -281,8 +289,7 @@ private theorem emitRefWithCodesPT_eq (bw : BitWriter)
     emitRefWithCodesPT bw (packCodeTab litCodes) (packCodeTab distCodes) w =
       emitRefWithCodesP bw litCodes distCodes w := by
   unfold emitRefWithCodesPT emitRefWithCodesP
-  simp only [packCodeTab, Array.size_map, Array.getElem_map,
-    packCodeEntry_code, packCodeEntry_len]
+  simp only [packCodeTab, Array.size_map, Array.getElem_map, packCodeEntry_write]
   rfl
 
 /-- The packed-table emit loop is the pair-table one over `packCodeTab`, for
@@ -301,8 +308,7 @@ theorem emitTokensWithCodesPT_eq (bw : BitWriter) (ws : Array UInt32)
     by_cases hi : i < ws.size
     · simp only [hi, ↓reduceDIte]
       by_cases hc : ws[i] &&& ((1 : UInt32) <<< 31) = 0
-      · simp only [hc, ↓reduceIte, packCodeTab, Array.getElem_map,
-          packCodeEntry_code, packCodeEntry_len]
+      · simp only [hc, ↓reduceIte, packCodeTab, Array.getElem_map, packCodeEntry_write]
         exact ih _ (by omega) _ _ rfl
       · simp only [hc, ↓reduceIte, emitRefWithCodesPT_eq]
         exact ih _ (by omega) _ _ rfl

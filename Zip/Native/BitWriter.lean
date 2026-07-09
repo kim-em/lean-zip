@@ -47,13 +47,13 @@ def bitLength (bw : BitWriter) : Nat := bw.data.size * 8 + bw.bitCount.toNat
     low bits, LSB-first. Pushes `total / 8` bytes to `data`; the remaining
     `total % 8` bits become the new partial byte.
 
-    Reference form only: the production writers use the split
-    `flushBytes`/`dropBytes` loops (equal by `flushAcc_eq`, which the
-    `writeBits_def`/`writeHuffCode_def` equations build on) so the `BitWriter`
-    cell is constructed in the caller, where the ctor-reuse optimization can
-    recycle the input writer instead of allocating a fresh cell per field
-    (measured at ~59%/~19% of `mi_malloc_small` calls on L1/L8 compress,
-    #2739). -/
+    Reference form only: the production writers use the split scalar
+    `flushBytesWideU`/`dropBytesU` forms (equal by `flushAcc_eq` via
+    `flushBatchedU_eq`, which the `writeBits_def`/`writeHuffCode_def`
+    equations build on) so the `BitWriter` cell is constructed in the caller,
+    where the ctor-reuse optimization can recycle the input writer instead of
+    allocating a fresh cell per field (measured at ~59%/~19% of
+    `mi_malloc_small` calls on L1/L8 compress, #2739). -/
 def flushAcc (data : ByteArray) (acc : UInt64) : Nat → BitWriter
   | total =>
     if total ≥ 8 then
@@ -93,7 +93,9 @@ private theorem toUSize_toNat_of_le_8 {k : Nat} (h : k ≤ 8) : k.toUSize.toNat 
     before a field, so `k = total / 8 ≤ (31 + 25) / 8 = 7 ≤ 8` — but the guard
     keeps the function total on all inputs, falling back to the push loop.
     Kernel-measured 1.4× over the push loop on a synthetic L1-like field
-    trace (`lake exe wide-store-bench`, issue #2631 step 0). -/
+    trace (`lake exe wide-store-bench`, issue #2631 step 0). `Nat`-count
+    reference form; the production writers use the `UInt32`-count
+    `flushBytesWideU`. -/
 @[inline] def flushBytesWide (data : ByteArray) (acc : UInt64) (k : Nat) : ByteArray :=
   if h : k ≤ 8 then
     data.pushUInt64LE acc k.toUSize (by rw [toUSize_toNat_of_le_8 h]; exact h)
@@ -373,6 +375,34 @@ theorem writeHuffCode_def (bw : BitWriter) (code : UInt16) (len : UInt8) :
   have hb := UInt8.toNat_lt bw.bitCount
   have hl := UInt8.toNat_lt len
   omega
+
+/-- Write a Huffman code whose bits are already in LSB-first packing order:
+    `rev` must be `reverse16 code >>> (16 - len)` (low `len` bits), which the
+    packed code tables precompute once per block (`packCodeEntry`). Skips the
+    per-symbol `reverse16` call and down-shift of `writeHuffCode`; equal to it
+    by `writeRevCode_eq`. -/
+def writeRevCode (bw : BitWriter) (rev : UInt16) (len : UInt8) : BitWriter :=
+  let acc : UInt64 := bw.bitBuf ||| (rev.toUInt64 <<< bw.bitCount.toUInt64)
+  -- `flushBatchedU bw.data acc totalU`, hand-inlined so the result cell is a
+  -- literal ctor in each branch and reuse recycles `bw` on both paths.
+  let totalU : UInt32 := bw.bitCount.toUInt32 + len.toUInt32
+  if totalU ≥ 32 then
+    ⟨flushBytesWideU bw.data acc (totalU >>> 3), dropBytesU acc (totalU >>> 3),
+      (totalU &&& 7).toUInt8⟩
+  else
+    ⟨bw.data, acc, totalU.toUInt8⟩
+
+/-- `writeRevCode` on the precomputed reversal is `writeHuffCode`: the
+    down-shifted reversal has at most 16 live bits, so the `UInt16` round-trip
+    through the packed table is lossless. -/
+theorem writeRevCode_eq (bw : BitWriter) (code : UInt16) (len : UInt8) :
+    bw.writeRevCode ((reverse16 code).toUInt64 >>> (16 - len.toUInt64)).toUInt16 len =
+      bw.writeHuffCode code len := by
+  unfold writeRevCode writeHuffCode
+  rw [show (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)).toUInt16).toUInt64 =
+      (reverse16 code).toUInt64 >>> (16 - len.toUInt64) from by
+    generalize reverse16 code = r
+    bv_decide]
 
 /-- Flush all pending bits, padding the final partial byte with zeros. Drains
     every whole pending byte (`bitCount` may hold up to 31 bits under batching),

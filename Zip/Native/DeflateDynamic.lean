@@ -115,19 +115,26 @@ termination_by tokens.size - i
 /-! ## Packed Huffman-code tables (#2827)
 
 `litCodes`/`distCodes` are `Array (UInt16 × UInt8)`: every per-token code
-lookup fetches a boxed `Prod` cell and chases it with two `lean_ctor_get`s —
-the second-largest per-token cost in the emit profile after the writer calls.
-Packing each entry into one `UInt32` (code in bits 0–15, bit length in bits
-16–23) turns the lookup into a single tagged-scalar array read plus two
-register ops. `emitTokensWithCodesPT` is the packed-table twin of
-`emitTokensWithCodesP` (equal by `emitTokensWithCodesPT_eq`,
-`Zip/Spec/EmitPackedCorrect.lean`); the block emitters pack the tables once
-per block (`packCodeTab`, ≤ 316 entries) before the token walk. -/
+lookup fetches a boxed `Prod` cell and chases it with two `lean_ctor_get`s,
+and every `writeHuffCode` re-reverses the code's bits (`reverse16`, an
+out-of-line call) and down-shifts them — per symbol, for values that are
+table constants. Packing each entry into one `UInt32` holding the
+**pre-reversed** code (`reverse16 code >>> (16 - len)`, bits 0–15) and the
+bit length (bits 16–23) turns the lookup into a single tagged-scalar array
+read plus two register ops, and lets the walk write through the leaner
+`BitWriter.writeRevCode` (no per-symbol reversal). `emitTokensWithCodesPT`
+is the packed-table twin of `emitTokensWithCodesP` (equal by
+`emitTokensWithCodesPT_eq`, `Zip/Spec/EmitPackedCorrect.lean`); the block
+emitters pack the tables once per block (`packCodeTab`, ≤ 316 entries)
+before the token walk. -/
 
 /-- Pack one canonical-code entry `(code, bitLength)` into a `UInt32`:
-    code in bits 0–15, bit length in bits 16–23. -/
+    the LSB-first packing-order reversal `reverse16 code >>> (16 - len)` in
+    bits 0–15 (always < 2¹⁶, so the `UInt16` round-trip is lossless), and the
+    bit length in bits 16–23. -/
 @[inline] def packCodeEntry (e : UInt16 × UInt8) : UInt32 :=
-  e.1.toUInt32 ||| (e.2.toUInt32 <<< 16)
+  ((BitWriter.reverse16 e.1).toUInt64 >>> (16 - e.2.toUInt64)).toUInt16.toUInt32 |||
+    (e.2.toUInt32 <<< 16)
 
 /-- Pack a canonical-code table for the emit loop (one `UInt32` per entry). -/
 def packCodeTab (t : Array (UInt16 × UInt8)) : Array UInt32 :=
@@ -138,7 +145,8 @@ def packCodeTab (t : Array (UInt16 × UInt8)) : Array UInt32 :=
 
 /-- Packed-table twin of `emitRefWithCodesP`: identical branch structure,
     with each `(code, len)` pair read replaced by one packed-word read
-    (`e.toUInt16` / `(e >>> 16).toUInt8`). Equal to `emitRefWithCodesP` over
+    (`e.toUInt16` / `(e >>> 16).toUInt8`) written through `writeRevCode`
+    (the table code is pre-reversed). Equal to `emitRefWithCodesP` over
     `packCodeTab` (`emitRefWithCodesPT_eq`). -/
 @[inline] def emitRefWithCodesPT (bw : BitWriter)
     (litT distT : Array UInt32) (w : UInt32) : BitWriter :=
@@ -146,13 +154,13 @@ def packCodeTab (t : Array (UInt16 × UInt8)) : Array UInt32 :=
   let idx := codeIdx lw
   if hlitlt : idx + 257 < litT.size then
     let e := litT[idx + 257]
-    let bw := bw.writeHuffCode e.toUInt16 (e >>> 16).toUInt8
+    let bw := bw.writeRevCode e.toUInt16 (e >>> 16).toUInt8
     let bw := bw.writeBits (codeExtra lw) (codeVal lw)
     let dw := distCodeWord ((w &&& 0xFFFF).toNat)
     let dIdx := codeIdx dw
     if hdistlt : dIdx < distT.size then
       let de := distT[dIdx]
-      let bw := bw.writeHuffCode de.toUInt16 (de >>> 16).toUInt8
+      let bw := bw.writeRevCode de.toUInt16 (de >>> 16).toUInt8
       bw.writeBits (codeExtra dw) (codeVal dw)
     else bw
   else bw
@@ -171,7 +179,7 @@ def emitTokensWithCodesPT (bw : BitWriter) (tokens : Array UInt32)
       have : w.toUInt8.toNat < litT.size := by
         have := UInt8.toNat_lt w.toUInt8; omega
       let e := litT[w.toUInt8.toNat]
-      emitTokensWithCodesPT (bw.writeHuffCode e.toUInt16 (e >>> 16).toUInt8) tokens litT distT
+      emitTokensWithCodesPT (bw.writeRevCode e.toUInt16 (e >>> 16).toUInt8) tokens litT distT
         hlit hdist (i + 1)
     else
       emitTokensWithCodesPT (emitRefWithCodesPT bw litT distT w) tokens litT distT
