@@ -86,19 +86,53 @@ this benchmark-first probe has now cleared the bar for. The `set!` cursor
 remains a valid cheaper-to-prove fallback if the `uset` proof proves
 intractable, at ~0.8pp less throughput.
 
+## Proof progress (`Zip/Spec/InflateFastCorrect.lean`)
+
+With the win confirmed, the equivalence proof is started. The bisimulation
+approach: the reference threads a growing `output` (`.size` = logical length);
+the cursor loop threads a fixed buffer + `outPos` (logical content =
+`buf.extract 0 outPos`). Both make identical control decisions because
+`outPos = refOutput.size`, so every guard aligns; the two write steps are
+bridged by write-vs-append lemmas, with a big-enough-buffer hypothesis
+discharged per step by the reference's monotone growth.
+
+**Verified (7 lemmas, no `sorry`):**
+- `arr_setIfInBounds_extract_eq_push` — the pure `Array` core of the literal write.
+- `ByteArray.size_set!`, `ByteArray.getElem!_set!` — `set!` size + read-back.
+- `set!_extract_eq_push` — **the literal write bridge**: cursor `set!` then
+  extract equals extract then `push`. Complete.
+- `copyWithinAtGo_size`, `copyWithinAtGo_getElem!_lt` — the in-place back-reference
+  copy preserves size and every position below the cursor (its content lemmas).
+- `copyLoop_size` — the reference back-reference grows by exactly `length`.
+
+**Staged with proof roadmaps (`sorry`, WIP — file is standalone, NOT imported
+into `Zip`, so production and CI are untouched and carry no `sorry`):**
+- `goTreeFree_size_mono` — reference output monotonicity (10-case `.induct`).
+- `copyWithinAt_extract_eq_copyLoop` — the back-reference write bridge (assembles
+  from the two `copyWithinAtGo` content lemmas + `copyLoop_eq_ofFn`).
+- `inflateFast_eq` — the target: `Inflate.inflate data = .ok out →
+  Inflate.inflateFast data out.size = .ok out`, via the `goCur` bisimulation and
+  the block-loop lift.
+
+The remaining work (the 10-case `goCur` bisimulation, `goCurU` reduction to
+`goCur`, and the block-loop lift) is the genuinely multi-session core; the
+foundational write lemmas above are its hardest reusable pieces and are done.
+
 ## Quality metrics
 
-- sorry count (`grep -rc sorry Zip/`): unchanged from master — the spikes carry
-  **no `sorry`** (they are total via `set!`/`copyWithinAt` and real `uset`
-  proofs); they are simply not *proven equivalent* to the reference (no
-  `Zip.Spec` obligation), guarded instead by the runtime conformance test.
+- sorry count (`grep -rc sorry Zip/`): 3 new, all in the standalone WIP
+  `Zip/Spec/InflateFastCorrect.lean` (`goTreeFree_size_mono`,
+  `copyWithinAt_extract_eq_copyLoop`, `inflateFast_eq`), each carrying a proof
+  roadmap. The spikes themselves (`Zip/Native/InflateFast.lean`) carry **no
+  `sorry`** (total via `set!`/`copyWithinAt` and real `uset` proofs). The file is
+  not imported by `Zip`, so the production decoder and CI are `sorry`-free.
 - `lake build` + `lake exe test`: green.
 
 ## What remains
 
 The tracking issue #2799's full scope (a proven, production-integrated cursor
-decoder) is untouched and stays open for Kim's call. The reproducible probe
-lives on this branch: `inflate-profile decode-fast` / `decode-fast-u` re-run the
-exact A/B, `ZipTest/InflateFast.lean` guards correctness, and the FFI primitives
-(`presize`, `copyWithinAt`) are the reusable substrate for whichever variant is
-eventually proven.
+decoder) stays open. The reproducible probe lives on this branch:
+`inflate-profile decode-fast` / `decode-fast-u` re-run the exact A/B,
+`ZipTest/InflateFast.lean` guards correctness, and `Zip/Spec/InflateFastCorrect.lean`
+holds the verified foundational lemmas + the roadmap for the bisimulation and
+the lift to `inflateFast = inflate`.
