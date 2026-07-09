@@ -1,3 +1,4 @@
+import Std.Tactic.BVDecide
 import Zip.Native.Wide
 
 /-!
@@ -141,28 +142,173 @@ theorem flushAcc_eq (data : ByteArray) (acc : UInt64) (total : Nat) :
 /-- Batched flush: drain whole bytes only when the pending count reaches
     `flushThreshold`, else keep every bit in the accumulator. Reference form of
     the flush cadence the production `writeBits`/`writeHuffCode` use (they call
-    `flushBytesWide`/`dropBytes` directly for ctor reuse; equal by
-    `writeBits_def`/`writeHuffCode_def`). Byte-identical to `flushAcc` in output
-    bits — only the split between `data` and the pending accumulator differs. -/
+    the scalar `flushBatchedU`, equal by `flushBatchedU_eq`; the ctor is built
+    in the writer after inlining, so ctor reuse still recycles the input cell).
+    Byte-identical to `flushAcc` in output bits — only the split between `data`
+    and the pending accumulator differs. -/
 def flushBatched (data : ByteArray) (acc : UInt64) (total : Nat) : BitWriter :=
   if total ≥ flushThreshold then flushAcc data acc total
   else ⟨data, acc, total.toUInt8⟩
+
+/-! ### Scalar-arithmetic flush kernel (#2827)
+
+The writers run once per DEFLATE field — the hottest call sites in compress
+(11–17% of L1 between `writeHuffCode`/`writeBits` self time). The reference
+forms above do the per-field bookkeeping in `Nat` (`total`, `total / 8`,
+`total % 8`, the `dropBytes` recursion), which the compiler emits as tagged
+`lean_nat_*` calls plus an out-of-line `dropBytes` loop on every flush. The
+`*U` forms below do the same arithmetic in `UInt32`/`UInt64` registers —
+`total` fits `UInt32` exactly (`bitCount, len < 256`, so `total < 512`),
+`/ 8` is `>>> 3`, `% 8` is `&&& 7`, and `dropBytes` collapses to one shift
+(`dropBytesU_eq`). Each is proven equal to its reference form, so
+`writeBits_def`/`writeHuffCode_def` (the equations all spec proofs anchor on)
+keep their exact statements. -/
+
+/-- `dropBytes` as a single shift: `k` byte-shifts of a 64-bit accumulator is
+    `>>> 8k` for `k < 8` and `0` once every byte has been shifted out
+    (`dropBytesU_eq`). Deliberately *not* `@[inline]`: inlining its branch
+    into the writers' flush arm makes the ctor-reuse pass pick the flush-arm
+    join as the sole reuse site, demoting the hot no-flush arm to
+    free-then-alloc (measured −13% on dickens L1). As an out-call (like the
+    old `dropBytes`) both writer arms keep in-place reuse. -/
+def dropBytesU (acc : UInt64) (k : UInt32) : UInt64 :=
+  if k < 8 then acc >>> (k.toUInt64 <<< 3) else 0
+
+/-- `dropBytes` shifts by whole bytes: below 8 iterations it is one `>>> 8k`. -/
+private theorem dropBytes_of_lt_8 (acc : UInt64) (k : Nat) (h : k < 8) :
+    dropBytes acc k = acc >>> (8 * k).toUInt64 := by
+  match k, h with
+  | 0, _ | 1, _ | 2, _ | 3, _ | 4, _ | 5, _ | 6, _ | 7, _ =>
+    apply UInt64.toNat_inj.mp
+    simp only [dropBytes, UInt64.toNat_shiftRight, Nat.reduceMul, Nat.toUInt64_eq,
+      UInt64.toNat_ofNat', UInt64.reduceToNat, Nat.reduceMod, Nat.shiftRight_eq_div_pow,
+      Nat.reducePow, Nat.div_div_eq_div_mul]
+    all_goals omega
+  | n + 8, h => omega
+
+/-- After eight byte-shifts nothing of a 64-bit accumulator remains. -/
+private theorem dropBytes_eight (acc : UInt64) : dropBytes acc 8 = 0 := by
+  simp only [dropBytes]
+  bv_decide
+
+/-- `dropBytes` splits over addition of iteration counts. -/
+private theorem dropBytes_add (acc : UInt64) (a b : Nat) :
+    dropBytes acc (a + b) = dropBytes (dropBytes acc a) b := by
+  induction a generalizing acc with
+  | zero => rw [Nat.zero_add]; rfl
+  | succ a ih =>
+    rw [Nat.add_right_comm]
+    show dropBytes (acc >>> 8) (a + b) = dropBytes (dropBytes (acc >>> 8) a) b
+    exact ih (acc >>> 8)
+
+/-- Shifting nothing yields nothing, for any iteration count. -/
+private theorem dropBytes_zero (k : Nat) : dropBytes 0 k = 0 := by
+  induction k with
+  | zero => rfl
+  | succ k ih => rw [dropBytes]; simpa using ih
+
+/-- The scalar `dropBytesU` is `dropBytes` at the `Nat` view of `k`. -/
+theorem dropBytesU_eq (acc : UInt64) (k : UInt32) :
+    dropBytesU acc k = dropBytes acc k.toNat := by
+  unfold dropBytesU
+  split
+  next h =>
+    have hk : k.toNat < 8 := by
+      have := UInt32.lt_iff_toNat_lt.mp h
+      simpa using this
+    rw [dropBytes_of_lt_8 acc k.toNat hk]
+    congr 1
+    apply UInt64.toNat_inj.mp
+    rw [UInt64.toNat_shiftLeft, UInt32.toNat_toUInt64, Nat.toUInt64_eq, UInt64.toNat_ofNat']
+    have h3 : (3 : UInt64).toNat = 3 := rfl
+    rw [h3, Nat.mod_eq_of_lt (by omega : (3:Nat) < 64), Nat.shiftLeft_eq]
+    omega
+  next h =>
+    have hk : 8 ≤ k.toNat :=
+      Nat.le_of_not_lt fun hh => h (UInt32.lt_iff_toNat_lt.mpr (by simpa using hh))
+    rw [(by omega : k.toNat = 8 + (k.toNat - 8)), dropBytes_add, dropBytes_eight,
+      dropBytes_zero]
+
+/-- `flushBytesWide` with a `UInt32` byte count: the `k ≤ 8` guard is a
+    register compare and the `USize` cast is free (`flushBytesWideU_eq`). -/
+@[inline] def flushBytesWideU (data : ByteArray) (acc : UInt64) (k : UInt32) : ByteArray :=
+  if h : k ≤ 8 then
+    data.pushUInt64LE acc k.toUSize (by
+      simpa using UInt32.le_iff_toNat_le.mp h)
+  else
+    flushBytes data acc k.toNat
+
+/-- The scalar `flushBytesWideU` is `flushBytes` at the `Nat` view of `k`. -/
+theorem flushBytesWideU_eq (data : ByteArray) (acc : UInt64) (k : UInt32) :
+    flushBytesWideU data acc k = flushBytes data acc k.toNat := by
+  unfold flushBytesWideU
+  split
+  next h =>
+    rw [ByteArray.pushUInt64LE, pushLEBytes_eq_flushBytes]
+    simp
+  next => rfl
+
+/-- `flushBatched` in scalar arithmetic: the pending total in `UInt32`
+    (exact — both summands are below 256), `/ 8` as `>>> 3`, `% 8` as
+    `&&& 7`, `dropBytes` as one shift. Equal to `flushBatched` at the `Nat`
+    view of `total` (`flushBatchedU_eq`); `@[inline]` so the result cell is
+    constructed in the calling writer, where ctor reuse recycles the input
+    `BitWriter` cell (#2739). -/
+@[inline] def flushBatchedU (data : ByteArray) (acc : UInt64) (totalU : UInt32) : BitWriter :=
+  if totalU ≥ 32 then
+    ⟨flushBytesWideU data acc (totalU >>> 3), dropBytesU acc (totalU >>> 3),
+      (totalU &&& 7).toUInt8⟩
+  else
+    ⟨data, acc, totalU.toUInt8⟩
+
+/-- The scalar `flushBatchedU` is `flushBatched` at the `Nat` view of the
+    pending total. -/
+theorem flushBatchedU_eq (data : ByteArray) (acc : UInt64) (totalU : UInt32) :
+    flushBatchedU data acc totalU = flushBatched data acc totalU.toNat := by
+  unfold flushBatchedU flushBatched
+  have hshift : (totalU >>> 3).toNat = totalU.toNat / 8 := by
+    rw [UInt32.toNat_shiftRight]
+    have h3 : (3 : UInt32).toNat = 3 := rfl
+    rw [h3, Nat.mod_eq_of_lt (by omega : (3:Nat) < 32), Nat.shiftRight_eq_div_pow]
+  by_cases h : (32 : UInt32) ≤ totalU
+  · have hn : flushThreshold ≤ totalU.toNat := by
+      have := UInt32.le_iff_toNat_le.mp h
+      simpa [flushThreshold] using this
+    rw [if_pos h, if_pos hn, flushAcc_eq, flushBytesWideU_eq, dropBytesU_eq, hshift]
+    congr 1
+    apply UInt8.toNat_inj.mp
+    rw [UInt32.toNat_toUInt8, UInt32.toNat_and]
+    have h7 : (7 : UInt32).toNat = 7 := rfl
+    have hand : totalU.toNat &&& 7 = totalU.toNat % 8 := by
+      simpa using Nat.and_two_pow_sub_one_eq_mod totalU.toNat 3
+    rw [h7, hand, Nat.toUInt8_eq, UInt8.toNat_ofNat']
+  · have hn : ¬ flushThreshold ≤ totalU.toNat := fun hh =>
+      h (UInt32.le_iff_toNat_le.mpr (by simpa [flushThreshold] using hh))
+    rw [if_neg h, if_neg hn]
+    congr 1
 
 /-- Write `n` bits (n ≤ 25) from `val`, LSB first.
     Fixed-width fields in DEFLATE are packed LSB-first.
 
     The low `n` bits of `val` are masked, shifted above the `bitCount`
     bits already in `bitBuf`, OR-ed into a 64-bit accumulator, then whole
-    bytes are flushed. The result cell is constructed here (not in the
-    flush loop) so ctor reuse updates `bw` in place — see `flushAcc`. -/
+    bytes are flushed via the scalar `flushBatchedU` (the `n ≤ 25` guard
+    keeps the `UInt32` total exact; larger `n` — never produced by DEFLATE
+    fields — takes the `Nat` reference path). -/
 def writeBits (bw : BitWriter) (n : Nat) (val : UInt32) : BitWriter :=
   let masked : UInt64 := val.toUInt64 % (1 <<< n.toUInt64)
   let acc : UInt64 := bw.bitBuf ||| (masked <<< bw.bitCount.toUInt64)
-  let total := bw.bitCount.toNat + n
-  if total ≥ flushThreshold then
-    ⟨flushBytesWide bw.data acc (total / 8), dropBytes acc (total / 8), (total % 8).toUInt8⟩
+  if n ≤ 25 then
+    -- `flushBatchedU bw.data acc totalU`, hand-inlined so the result cell is a
+    -- literal ctor in each branch and reuse recycles `bw` on both paths.
+    let totalU : UInt32 := bw.bitCount.toUInt32 + n.toUInt32
+    if totalU ≥ 32 then
+      ⟨flushBytesWideU bw.data acc (totalU >>> 3), dropBytesU acc (totalU >>> 3),
+        (totalU &&& 7).toUInt8⟩
+    else
+      ⟨bw.data, acc, totalU.toUInt8⟩
   else
-    ⟨bw.data, acc, total.toUInt8⟩
+    flushBatched bw.data acc (bw.bitCount.toNat + n)
 
 /-- `writeBits` is `flushBatched` of the merged accumulator — the defining
     equation the spec proofs unfold to. -/
@@ -171,10 +317,15 @@ theorem writeBits_def (bw : BitWriter) (n : Nat) (val : UInt32) :
       flushBatched bw.data
         (bw.bitBuf ||| ((val.toUInt64 % (1 <<< n.toUInt64)) <<< bw.bitCount.toUInt64))
         (bw.bitCount.toNat + n) := by
-  rw [writeBits, flushBatched]
+  rw [writeBits]
   split
-  · rw [flushBytesWide_eq, flushAcc_eq]
-  · rfl
+  next h =>
+    refine (flushBatchedU_eq bw.data _ (bw.bitCount.toUInt32 + n.toUInt32)).trans ?_
+    congr 1
+    rw [UInt32.toNat_add, UInt8.toNat_toUInt32, Nat.toUInt32_eq, UInt32.toNat_ofNat']
+    have hb := UInt8.toNat_lt bw.bitCount
+    omega
+  next => rfl
 
 /-- Reverse all 16 bits of `x` (`bit i ↦ bit (15-i)`) with a branchless
     swap network — no per-bit loop. -/
@@ -191,15 +342,21 @@ def reverse16 (x : UInt16) : UInt16 :=
     The reversal is done in one shot: reverse all 16 bits, then shift the
     reversed code down by `16 - len` so its low `len` bits hold the code in
     packing order. (Widening to `UInt64` before the down-shift makes `len = 0`
-    yield `0` correctly, since `>>> 16` clears a 16-bit value.) -/
+    yield `0` correctly, since `>>> 16` clears a 16-bit value.)
+
+    The flush bookkeeping runs through the scalar `flushBatchedU` — the
+    `UInt32` total is exact for every input (`bitCount, len < 256`). -/
 def writeHuffCode (bw : BitWriter) (code : UInt16) (len : UInt8) : BitWriter :=
   let rev : UInt64 := (reverse16 code).toUInt64 >>> (16 - len.toUInt64)
   let acc : UInt64 := bw.bitBuf ||| (rev <<< bw.bitCount.toUInt64)
-  let total := bw.bitCount.toNat + len.toNat
-  if total ≥ flushThreshold then
-    ⟨flushBytesWide bw.data acc (total / 8), dropBytes acc (total / 8), (total % 8).toUInt8⟩
+  -- `flushBatchedU bw.data acc totalU`, hand-inlined so the result cell is a
+  -- literal ctor in each branch and reuse recycles `bw` on both paths.
+  let totalU : UInt32 := bw.bitCount.toUInt32 + len.toUInt32
+  if totalU ≥ 32 then
+    ⟨flushBytesWideU bw.data acc (totalU >>> 3), dropBytesU acc (totalU >>> 3),
+      (totalU &&& 7).toUInt8⟩
   else
-    ⟨bw.data, acc, total.toUInt8⟩
+    ⟨bw.data, acc, totalU.toUInt8⟩
 
 /-- `writeHuffCode` is `flushBatched` of the merged accumulator — the defining
     equation the spec proofs unfold to. -/
@@ -209,10 +366,13 @@ theorem writeHuffCode_def (bw : BitWriter) (code : UInt16) (len : UInt8) :
         (bw.bitBuf |||
           (((reverse16 code).toUInt64 >>> (16 - len.toUInt64)) <<< bw.bitCount.toUInt64))
         (bw.bitCount.toNat + len.toNat) := by
-  rw [writeHuffCode, flushBatched]
-  split
-  · rw [flushBytesWide_eq, flushAcc_eq]
-  · rfl
+  rw [writeHuffCode]
+  refine (flushBatchedU_eq bw.data _ (bw.bitCount.toUInt32 + len.toUInt32)).trans ?_
+  congr 1
+  rw [UInt32.toNat_add, UInt8.toNat_toUInt32, UInt8.toNat_toUInt32]
+  have hb := UInt8.toNat_lt bw.bitCount
+  have hl := UInt8.toNat_lt len
+  omega
 
 /-- Flush all pending bits, padding the final partial byte with zeros. Drains
     every whole pending byte (`bitCount` may hold up to 31 bits under batching),
