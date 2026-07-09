@@ -312,6 +312,17 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
       rw [hb]; omega
 
+/-- Write `bytes[i]` at `output[outPos + i]` for `i ∈ [start, len)` via `set!`,
+    by well-founded recursion. A `for i in [:len]` loop would compile to an opaque
+    `forIn` that cannot be unfolded in proofs; this WF form lets the stored-block
+    placement be characterised (`storedCopyLoop_extract` in the spec). -/
+def storedCopyLoop (output bytes : ByteArray) (outPos start len : Nat) : ByteArray :=
+  if start < len then
+    storedCopyLoop (output.set! (outPos + start) (bytes.get! start)) bytes outPos (start + 1) len
+  else output
+termination_by len - start
+decreasing_by omega
+
 /-- Stored block at a cursor: bounds-check then `set!` the raw bytes at `outPos`
     (mirrors `Inflate.decodeStored`, which appends). Only the exact-size path, so
     the writes always land in bounds. -/
@@ -324,12 +335,7 @@ def decodeStoredCur (br : BitReader) (output : ByteArray) (outPos : Nat)
   if outPos + len.toNat > maxOut then
     throw "Inflate: output exceeds maximum size"
   let (bytes, br) ← br.readBytes len.toNat
-  let out := Id.run do
-    let mut o := output
-    for i in [:len.toNat] do
-      o := o.set! (outPos + i) (bytes.get! i)
-    pure o
-  return (out, outPos + len.toNat, br)
+  return (storedCopyLoop output bytes outPos 0 len.toNat, outPos + len.toNat, br)
 
 /-- Tree-free wide-buffer block decode at a cursor through `goCur` (the `set!`
     cursor). Direct call — no higher-order dispatch — so codegen matches the
