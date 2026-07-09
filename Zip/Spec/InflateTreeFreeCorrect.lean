@@ -3372,7 +3372,69 @@ theorem decodeHuffmanFastBufTreeFree_ok_iff (br : BitReader) (output : ByteArray
     decodeHuffmanFastBufTreeFree br output litLengths distLengths maxOut = .ok r ↔
       decodeHuffmanFastBuf br output (fromLengthsTree litLengths 15)
         (fromLengthsTree distLengths 15) maxOut = .ok r := by
-  sorry
+  -- buffer invariant after the entry refill: gives the dispatch bounds
+  have hbpe : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  have hposle : br.pos ≤ br.data.size := by omega
+  have hbc0 : BufCorr br.data (br.pos * 8) br.pos 0 0 :=
+    ⟨by omega, hposle, by omega, by simp, fun j hj => absurd hj (Nat.not_lt_zero j)⟩
+  rcases hrf : refill br.data br.pos 0 0 with ⟨pos0, bitBuf0, cnt0⟩
+  obtain ⟨hbc1, hr1⟩ := refill_corr hbc0 hrf
+  have hboff : br.bitOff ≤ cnt0 := by
+    rcases hr1 with h56 | hpe
+    · omega
+    · have hs := hbc1.span; rw [hpe] at hs; omega
+  have hbc2 : BufCorr br.data br.bitPos pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) :=
+    consume_corr hbc1 hboff (by omega)
+  -- `goFusedP` reads the tables only through the fast path, where the augmented
+  -- runtime tables agree with the tree-built tables (offsets ride in sentinel slots only)
+  have hcongr : ∀ (p : Nat) (bb : UInt64) (c : Nat) (out : ByteArray),
+      goFusedP (buildTreeFreeWithCount litLengths (countLengthsFast litLengths 15) 15).1
+          (buildTreeFreeWithCount distLengths (countLengthsFast distLengths 15) 15).1
+          br.data (fromLengthsTree litLengths 15) (fromLengthsTree distLengths 15) maxOut p bb c out
+        = goFusedP (fromLengthsTree litLengths 15).buildTable (fromLengthsTree distLengths 15).buildTable
+          br.data (fromLengthsTree litLengths 15) (fromLengthsTree distLengths 15) maxOut p bb c out := by
+    intro p bb c out
+    exact goFusedP_table_congr _ _ (fromLengthsTree litLengths 15).buildTable
+      (fromLengthsTree distLengths 15).buildTable br.data _ _ maxOut
+      (fun q hq => treeFree_lenAt_eq litLengths 15 (by omega) hlv hlb q hq)
+      (fun q hq hne => treeFree_symAt_eq litLengths 15 (by omega) hlv hlb q hq
+        (by rw [← treeFree_lenAt_eq litLengths 15 (by omega) hlv hlb q hq]; exact hne))
+      (fun q hq => treeFree_lenAt_eq distLengths 15 (by omega) hdv hdb q hq)
+      (fun q hq hne => treeFree_symAt_eq distLengths 15 (by omega) hdv hdb q hq
+        (by rw [← treeFree_lenAt_eq distLengths 15 (by omega) hdv hdb q hq]; exact hne))
+      p bb c out
+  unfold decodeHuffmanFastBufTreeFree decodeHuffmanFastBufTables decodeHuffmanFastBuf
+  rw [hrf]
+  dsimp only []
+  rw [goFusedPDispatch_eq (fromLengthsTree litLengths 15).buildTable
+        (fromLengthsTree distLengths 15).buildTable br.data (fromLengthsTree litLengths 15)
+        (fromLengthsTree distLengths 15) maxOut pos0 (bitBuf0 >>> br.bitOff.toUInt64)
+        (cnt0 - br.bitOff) output hbc2.posLe hbc2.cntLe]
+  split
+  · rename_i hsz
+    have hsz' : br.data.size < USize.size := by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+    have hcsz : (cnt0 - br.bitOff) < USize.size :=
+      Nat.lt_of_le_of_lt hbc2.cntLe (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    rw [goTreeFreeU_eq (buildTreeFreeWithCount litLengths (countLengthsFast litLengths 15) 15).1
+          (buildTreeFreeWithCount distLengths (countLengthsFast distLengths 15) 15).1 br.data
+          (buildTreeFreeWithCount litLengths (countLengthsFast litLengths 15) 15).2
+          (buildTreeFreeWithCount distLengths (countLengthsFast distLengths 15) 15).2 15 maxOut hsz'
+          (HuffTree.buildTreeFreeWithCount_size litLengths (countLengthsFast litLengths 15) 15)
+          pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize output
+          (by rw [toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hbc2.posLe hsz')]; exact hbc2.posLe),
+        toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hbc2.posLe hsz'), toUSize_toNat_of_lt hcsz]
+    exact bind_ok_iff (fun x =>
+      (goTreeFree_ok_iff_goFusedP _ _ litLengths distLengths _ _
+        (decodeSymCanon_treeFree_ok_iff litLengths hlv hlb)
+        (decodeSymCanon_treeFree_ok_iff distLengths hdv hdb) br.data maxOut
+        pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) output x).trans
+      (by rw [hcongr])) _ r
+  · exact bind_ok_iff (fun x =>
+      (goTreeFree_ok_iff_goFusedP _ _ litLengths distLengths _ _
+        (decodeSymCanon_treeFree_ok_iff litLengths hlv hlb)
+        (decodeSymCanon_treeFree_ok_iff distLengths hdv hdb) br.data maxOut
+        pos0 (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff) output x).trans
+      (by rw [hcongr])) _ r
 end Zip.Native.InflateBuf
 
 namespace Zip.Native.Inflate
