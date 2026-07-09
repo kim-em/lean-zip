@@ -1,17 +1,19 @@
 import Zip.Spec.LZ77ChainCorrect
 
 /-!
-# Correctness of the merged-array lazy matcher (#2767)
+# Correctness of the merged-array matchers (#2767, greedy port)
 
-`lz77ChainLazyIterPMerged` holds the chain state (`hashTable`, `prev`) in a
+`lz77ChainLazyIterPMerged` (lazy tier, levels 4–8) and `lz77ChainIterPMerged`
+(greedy tier, levels 1–3) hold the chain state (`hashTable`, `prev`) in a
 single combined `Array Nat`, laid out as `prev ++ hashTable` — the `prev` ring
 at offset `[0, prevSize)`, the hash table at `[prevSize, prevSize + hashSize)`.
 This deletes the per-matched-position `(hashTable, prev)` Prod that
 `updateHashesFastU` returns (measured +3–5% compress on the lazy tier).
 
-The whole file is the equality transfer `lz77ChainLazyIterPMerged =
-lz77ChainLazyIterP`, so the packed-token correctness column (`lz77ChainLazyIterP_eq`,
-`lzMatchP_map`, the roundtrip proofs) is reused verbatim through this one rewrite.
+The whole file is the pair of equality transfers `lz77ChainLazyIterPMerged =
+lz77ChainLazyIterP` and `lz77ChainIterPMerged = lz77ChainIterP`, so the
+packed-token correctness column (`lz77ChainLazyIterP_eq`, `lz77ChainIterP_eq`,
+`lzMatchP_map`, the roundtrip proofs) is reused verbatim through these rewrites.
 
 The proof carries the invariant `c = prev ++ hashTable` through a lockstep
 induction that mirrors `lz77ChainLazyIterP.mainLoop`. Two per-step facts make it
@@ -600,6 +602,70 @@ private theorem mergedLoop_eq (data : ByteArray)
         · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
       · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
     · simp only [hlt, ↓reduceDIte]
+
+/-- Greedy-tier lockstep equality (the twin of `mergedLoop_eq` minus the lazy
+    branch and the hash3 seed): `lz77GreedyMergedLoop` on `prev ++ hashTable`
+    is `lz77ChainIterP.mainLoop` on the separate arrays. -/
+private theorem greedyMergedLoop_eq (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
+    (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
+    (hpv : min chainWinSize data.size ≤ prev.size) :
+    lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen
+        (prev ++ hashTable) pos acc =
+      lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen
+        hashTable prev pos acc := by
+  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev hht hps hpv with
+  | _ n ih =>
+    unfold lz77GreedyMergedLoop lz77ChainIterP.mainLoop
+    by_cases hlt : pos + 2 < data.size
+    · have hh : lz77Greedy.hash3 data pos hashSize hlt < hashTable.size := by
+        have : lz77Greedy.hash3 data pos hashSize hlt < hashSize := Nat.mod_lt _ hhs
+        omega
+      have hmask0 : (pos &&& 0x7FFF) < prev.size := by
+        have h1 := winMask_lt pos
+        have h2 := Nat.and_le_left (n := pos) (m := 0x7FFF)
+        simp only [chainWinSize] at h1 hpv; omega
+      simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
+      simp only [headProbeGuarded_eq, guardedSet_eq,
+        getElem!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) hps hh,
+        set!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) pos hps hh,
+        set!_append_left prev (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)
+          (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) hmask0]
+      generalize ht'eq : hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos = t'
+      generalize hp'eq : prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) = p'
+      have hht' : t'.size = hashSize := by rw [← ht'eq, Array.size_set!]; exact hht
+      have hps' : p'.size = prevSize := by rw [← hp'eq, Array.size_set!]; exact hps
+      have hpv' : min chainWinSize data.size ≤ p'.size := by rw [← hp'eq, Array.size_set!]; exact hpv
+      rw [chainWalkGuardedPackedU_append data p' t' windowSize pos (min 258 (data.size - pos))
+        niceLen (by omega) hpv' (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0]
+      generalize chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
+        (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 = rmain
+      split
+      · split
+        · rw [updateHashesMergedGuarded_eq,
+            updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
+            updateHashesGuarded_eq]
+          exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+            (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
+        · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
+      · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
+    · simp only [hlt, ↓reduceDIte]
+
+/-- The merged-array greedy matcher equals the two-array packed greedy matcher. -/
+theorem lz77ChainIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat) :
+    lz77ChainIterPMerged data maxChain windowSize insertCap niceLen =
+      lz77ChainIterP data maxChain windowSize insertCap niceLen := by
+  unfold lz77ChainIterPMerged lz77ChainIterP
+  split
+  · rfl
+  · dsimp only
+    rw [← Array.replicate_append_replicate]
+    exact greedyMergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
+      niceLen (Array.replicate 65536 data.size)
+      (Array.replicate (min chainWinSize data.size) data.size) 0 _
+      (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
+      (Nat.le_of_eq (by rw [Array.size_replicate]))
 
 /-- The merged-array lazy matcher equals the two-array packed lazy matcher. -/
 theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :

@@ -716,7 +716,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
   if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
-  else lz77ChainIterP data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression
 
