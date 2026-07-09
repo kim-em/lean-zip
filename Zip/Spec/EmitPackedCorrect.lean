@@ -257,6 +257,57 @@ theorem emitTokensWithCodesP_eq (bw : BitWriter) (ws : Array UInt32)
           exact ih _ (by omega) _ _ rfl
     · simp only [Array.size_map, hi, ↓reduceDIte]
 
+/-! ## The packed-table emitter equals the pair-table one (#2827) -/
+
+/-- `packCodeEntry` keeps the code in the low 16 bits. -/
+private theorem packCodeEntry_code (e : UInt16 × UInt8) :
+    (packCodeEntry e).toUInt16 = e.1 := by
+  obtain ⟨c, l⟩ := e
+  unfold packCodeEntry
+  bv_decide
+
+/-- `packCodeEntry` keeps the bit length in bits 16–23. -/
+private theorem packCodeEntry_len (e : UInt16 × UInt8) :
+    (packCodeEntry e >>> 16).toUInt8 = e.2 := by
+  obtain ⟨c, l⟩ := e
+  unfold packCodeEntry
+  bv_decide
+
+/-- The packed-table reference emit is the pair-table one over `packCodeTab`:
+    identical branch structure, each table read recovered by
+    `packCodeEntry_code`/`packCodeEntry_len`. -/
+private theorem emitRefWithCodesPT_eq (bw : BitWriter)
+    (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32) :
+    emitRefWithCodesPT bw (packCodeTab litCodes) (packCodeTab distCodes) w =
+      emitRefWithCodesP bw litCodes distCodes w := by
+  unfold emitRefWithCodesPT emitRefWithCodesP
+  simp only [packCodeTab, Array.size_map, Array.getElem_map,
+    packCodeEntry_code, packCodeEntry_len]
+  rfl
+
+/-- The packed-table emit loop is the pair-table one over `packCodeTab`, for
+    every word array — the lockstep induction of `emitTokensWithCodesP_eq`
+    with the table reads bridged per arm. -/
+theorem emitTokensWithCodesPT_eq (bw : BitWriter) (ws : Array UInt32)
+    (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlitT : (packCodeTab litCodes).size ≥ 286)
+    (hdistT : (packCodeTab distCodes).size ≥ 30) (i : Nat) :
+    emitTokensWithCodesPT bw ws (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT i =
+      emitTokensWithCodesP bw ws litCodes distCodes
+        (by simpa using hlitT) (by simpa using hdistT) i := by
+  induction h : ws.size - i using Nat.strongRecOn generalizing bw i with
+  | _ n ih =>
+    unfold emitTokensWithCodesPT emitTokensWithCodesP
+    by_cases hi : i < ws.size
+    · simp only [hi, ↓reduceDIte]
+      by_cases hc : ws[i] &&& ((1 : UInt32) <<< 31) = 0
+      · simp only [hc, ↓reduceIte, packCodeTab, Array.getElem_map,
+          packCodeEntry_code, packCodeEntry_len]
+        exact ih _ (by omega) _ _ rfl
+      · simp only [hc, ↓reduceIte, emitRefWithCodesPT_eq]
+        exact ih _ (by omega) _ _ rfl
+    · simp only [hi, ↓reduceDIte]
+
 /-! ## The packed single-block cores equal the boxed ones -/
 
 /-- The packed fixed-block core is the boxed one over the `unpackTok` view:
@@ -275,6 +326,6 @@ theorem deflateDynamicBlockCoreP_eq (data : ByteArray) (ptoks : Array UInt32)
     deflateDynamicBlockCoreP data ptoks litLens distLens hlit hdist =
       deflateDynamicBlockCore data (ptoks.map unpackTok) litLens distLens hlit hdist := by
   unfold deflateDynamicBlockCoreP deflateDynamicBlockCore
-  simp only [emitTokensWithCodesP_eq]
+  simp only [emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
 
 end Zip.Native.Deflate

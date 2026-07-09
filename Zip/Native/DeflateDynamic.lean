@@ -112,6 +112,73 @@ def emitTokensWithCodesP (bw : BitWriter) (tokens : Array UInt32)
   else bw
 termination_by tokens.size - i
 
+/-! ## Packed Huffman-code tables (#2827)
+
+`litCodes`/`distCodes` are `Array (UInt16 × UInt8)`: every per-token code
+lookup fetches a boxed `Prod` cell and chases it with two `lean_ctor_get`s —
+the second-largest per-token cost in the emit profile after the writer calls.
+Packing each entry into one `UInt32` (code in bits 0–15, bit length in bits
+16–23) turns the lookup into a single tagged-scalar array read plus two
+register ops. `emitTokensWithCodesPT` is the packed-table twin of
+`emitTokensWithCodesP` (equal by `emitTokensWithCodesPT_eq`,
+`Zip/Spec/EmitPackedCorrect.lean`); the block emitters pack the tables once
+per block (`packCodeTab`, ≤ 316 entries) before the token walk. -/
+
+/-- Pack one canonical-code entry `(code, bitLength)` into a `UInt32`:
+    code in bits 0–15, bit length in bits 16–23. -/
+@[inline] def packCodeEntry (e : UInt16 × UInt8) : UInt32 :=
+  e.1.toUInt32 ||| (e.2.toUInt32 <<< 16)
+
+/-- Pack a canonical-code table for the emit loop (one `UInt32` per entry). -/
+def packCodeTab (t : Array (UInt16 × UInt8)) : Array UInt32 :=
+  t.map packCodeEntry
+
+@[simp] theorem packCodeTab_size (t : Array (UInt16 × UInt8)) :
+    (packCodeTab t).size = t.size := Array.size_map ..
+
+/-- Packed-table twin of `emitRefWithCodesP`: identical branch structure,
+    with each `(code, len)` pair read replaced by one packed-word read
+    (`e.toUInt16` / `(e >>> 16).toUInt8`). Equal to `emitRefWithCodesP` over
+    `packCodeTab` (`emitRefWithCodesPT_eq`). -/
+@[inline] def emitRefWithCodesPT (bw : BitWriter)
+    (litT distT : Array UInt32) (w : UInt32) : BitWriter :=
+  let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+  let idx := codeIdx lw
+  if hlitlt : idx + 257 < litT.size then
+    let e := litT[idx + 257]
+    let bw := bw.writeHuffCode e.toUInt16 (e >>> 16).toUInt8
+    let bw := bw.writeBits (codeExtra lw) (codeVal lw)
+    let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+    let dIdx := codeIdx dw
+    if hdistlt : dIdx < distT.size then
+      let de := distT[dIdx]
+      let bw := bw.writeHuffCode de.toUInt16 (de >>> 16).toUInt8
+      bw.writeBits (codeExtra dw) (codeVal dw)
+    else bw
+  else bw
+
+/-- Packed-table twin of `emitTokensWithCodesP` (same size hypotheses, now on
+    the packed tables): walk the packed token stream reading Huffman codes
+    from `packCodeTab`-packed `UInt32` tables. Equal to `emitTokensWithCodesP`
+    for every word array (`emitTokensWithCodesPT_eq`). -/
+def emitTokensWithCodesPT (bw : BitWriter) (tokens : Array UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens[i]
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have : w.toUInt8.toNat < litT.size := by
+        have := UInt8.toNat_lt w.toUInt8; omega
+      let e := litT[w.toUInt8.toNat]
+      emitTokensWithCodesPT (bw.writeHuffCode e.toUInt16 (e >>> 16).toUInt8) tokens litT distT
+        hlit hdist (i + 1)
+    else
+      emitTokensWithCodesPT (emitRefWithCodesPT bw litT distT w) tokens litT distT
+        hlit hdist (i + 1)
+  else bw
+termination_by tokens.size - i
+
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
@@ -356,7 +423,12 @@ def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
     let bw := bw.writeHuffCode code len
     bw.flush
   else
-    let bw := emitTokensWithCodesP bw tokens litCodes distCodes hlit_size hdist_size 0
+    have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
+      rw [packCodeTab_size]; exact hlit_size
+    have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
+      rw [packCodeTab_size]; exact hdist_size
+    let bw := emitTokensWithCodesPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
+      hlitT_size hdistT_size 0
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -394,7 +466,12 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
     let bw := bw.writeHuffCode code len
     bw.flush
   else
-    let bw := emitTokensWithCodesP bw tokens litCodes distCodes hlit_size hdist_size 0
+    have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
+      rw [packCodeTab_size]; exact hlit_size
+    have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
+      rw [packCodeTab_size]; exact hdist_size
+    let bw := emitTokensWithCodesPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
+      hlitT_size hdistT_size 0
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -1288,8 +1365,13 @@ def emitDynBlockP (bw : BitWriter) (data : ByteArray) (ptoks : Array UInt32)
   have h256 : 256 < litCodes.size := by
     show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
     rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
+    rw [packCodeTab_size]; exact hlit_size
+  have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
+    rw [packCodeTab_size]; exact hdist_size
   let bw := if data.size == 0 then bw
-            else emitTokensWithCodesP bw ptoks litCodes distCodes hlit_size hdist_size 0
+            else emitTokensWithCodesPT bw ptoks (packCodeTab litCodes) (packCodeTab distCodes)
+              hlitT_size hdistT_size 0
   let (code, len) := litCodes[256]'h256
   bw.writeHuffCode code len
 
