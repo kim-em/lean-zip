@@ -37,24 +37,34 @@ open Zip.Native
     prove each `inflate` result dead and drop it. -/
 @[noinline] def sink (n : Nat) : IO Nat := pure n
 
-/-- `decode` mode: run native inflate `reps` times over one payload, nothing else. -/
+/-- Report absolute throughput from a timed loop. MB/s is over the *decompressed*
+    bytes (`origSize`), the meaningful decode-rate denominator. -/
+def reportMBps (label : String) (origSize reps ns checksum : Nat) : IO Unit := do
+  let mbps := if ns == 0 then 0.0
+    else (Float.ofNat (origSize * reps) * 1000.0) / Float.ofNat ns
+  IO.eprintln s!"{label}: {reps} reps, {origSize * reps} B decompressed in \
+                 {Float.ofNat ns / 1.0e6} ms → {mbps} MB/s (checksum={checksum})"
+
+/-- `decode` mode: time native inflate `reps` times over one payload. The decode
+    is inlined directly in the loop body (not behind an IO closure), so the pure
+    `inflate payload` is re-run every iteration rather than hoisted out; each
+    result size flows through the `noinline` `sink`, keeping it live. -/
 def runDecode (payloadPath : String) (origSize reps : Nat) : IO Unit := do
   let payload ← IO.FS.readBinFile payloadPath
-  -- Sanity-check once (outside any timed region) that the stream decodes, and
-  -- report the decompressed size so a caller can confirm origSize is right.
+  -- Sanity-check once (outside the timed region) that the stream decodes.
   match Zip.Native.Inflate.inflate payload (sizeHint := origSize) with
   | .error e => throw (IO.userError s!"inflate failed on {payloadPath}: {e}")
   | .ok first =>
     IO.eprintln s!"inflate-profile decode: {payload.size} → {first.size} bytes, \
                    sizeHint={origSize}, reps={reps}"
     let mut checksum := 0
-    -- Strict eval re-runs `inflate` each iteration (no let-bound reuse); the
-    -- running checksum through `sink` keeps every result live.
+    let t0 ← IO.monoNanosNow
     for _ in [:reps] do
       match Zip.Native.Inflate.inflate payload (sizeHint := origSize) with
       | .ok b => checksum := checksum + (← sink b.size)
       | .error e => throw (IO.userError s!"inflate failed: {e}")
-    IO.eprintln s!"done ({reps} reps, checksum={checksum})"
+    let t1 ← IO.monoNanosNow
+    reportMBps "decode" origSize reps (t1 - t0) checksum
 
 /-- `decode-fast` mode (issue #2799 spike): like `decode`, but the steady-state
     loop calls the write-once-cursor `Inflate.inflateFast` instead of the
@@ -76,11 +86,13 @@ def runDecodeFast (payloadPath : String) (origSize reps : Nat) : IO Unit := do
     IO.eprintln s!"inflate-profile decode-fast: {payload.size} → {first.size} bytes \
                    (== reference), sizeHint={origSize}, reps={reps}"
     let mut checksum := 0
+    let t0 ← IO.monoNanosNow
     for _ in [:reps] do
       match Zip.Native.Inflate.inflateFast payload (sizeHint := origSize) with
       | .ok b => checksum := checksum + (← sink b.size)
       | .error e => throw (IO.userError s!"inflateFast failed: {e}")
-    IO.eprintln s!"done ({reps} reps, checksum={checksum})"
+    let t1 ← IO.monoNanosNow
+    reportMBps "decode-fast" origSize reps (t1 - t0) checksum
 
 /-- `decode-fast-u` mode: like `decode-fast` but the branch-free `uset` fastloop
     (`Inflate.inflateFastU`). Asserts output equals the reference once, then loops. -/
@@ -97,11 +109,28 @@ def runDecodeFastU (payloadPath : String) (origSize reps : Nat) : IO Unit := do
     IO.eprintln s!"inflate-profile decode-fast-u: {payload.size} → {first.size} bytes \
                    (== reference), sizeHint={origSize}, reps={reps}"
     let mut checksum := 0
+    let t0 ← IO.monoNanosNow
     for _ in [:reps] do
       match Zip.Native.Inflate.inflateFastU payload (sizeHint := origSize) with
       | .ok b => checksum := checksum + (← sink b.size)
       | .error e => throw (IO.userError s!"inflateFastU failed: {e}")
-    IO.eprintln s!"done ({reps} reps, checksum={checksum})"
+    let t1 ← IO.monoNanosNow
+    reportMBps "decode-fast-u" origSize reps (t1 - t0) checksum
+
+/-- `decode-ld` mode: time libdeflate's own decompressor over the same payload,
+    as the absolute "speed bar" in the same harness. -/
+def runDecodeLd (payloadPath : String) (origSize reps : Nat) : IO Unit := do
+  let payload ← IO.FS.readBinFile payloadPath
+  let first ← Libdeflate.decompress payload origSize.toUInt64
+  IO.eprintln s!"inflate-profile decode-ld: {payload.size} → {first.size} bytes, \
+                 sizeHint={origSize}, reps={reps}"
+  let mut checksum := 0
+  let t0 ← IO.monoNanosNow
+  for _ in [:reps] do
+    let b ← Libdeflate.decompress payload origSize.toUInt64
+    checksum := checksum + (← sink b.size)
+  let t1 ← IO.monoNanosNow
+  reportMBps "decode-ld" origSize reps (t1 - t0) checksum
 
 /-- `compress` mode: dump one libdeflate raw-DEFLATE payload for later profiling. -/
 def runCompress (inPath outPath : String) (level : UInt8) : IO Unit := do
@@ -134,4 +163,8 @@ def main (args : List String) : IO Unit := do
     let some origSize := sizeStr.toNat? | throw (IO.userError s!"bad origSize: {sizeStr}")
     let some reps := repsStr.toNat? | throw (IO.userError s!"bad reps: {repsStr}")
     runDecodeFastU payloadPath origSize reps
+  | ["decode-ld", payloadPath, sizeStr, repsStr] =>
+    let some origSize := sizeStr.toNat? | throw (IO.userError s!"bad origSize: {sizeStr}")
+    let some reps := repsStr.toNat? | throw (IO.userError s!"bad reps: {repsStr}")
+    runDecodeLd payloadPath origSize reps
   | _ => IO.eprintln usage; throw (IO.userError "bad arguments")

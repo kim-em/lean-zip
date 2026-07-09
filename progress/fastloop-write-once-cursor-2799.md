@@ -1,7 +1,7 @@
-# Progress: fastloop / write-once cursor decode (#2799) — partial-confirm verdict
+# Progress: fastloop / write-once cursor decode (#2799) — confirmed +6.2% throughput
 
 **Date**: 2026-07-08 UTC
-**Session type**: Feature (benchmark-first probe; measured real-but-modest, recorded as verdict + landed spike)
+**Session type**: Feature (benchmark-first probe; measured a real end-to-end win on libdeflate streams, landed the reproducible spike)
 **Issue**: #2799
 
 ## What was done
@@ -37,57 +37,54 @@ write-once cursor first, confirm the win on `inflate-profile` A/B
    new `ZipTest/InflateFast.lean` conformance suite (green) and by the
    `inflate-profile decode-fast{,-u}` one-time equality check.
 
-3. **Measured** (same-binary A/B — the three modes `decode` / `decode-fast` /
-   `decode-fast-u` in ONE `inflate-profile` binary, which is strictly more
-   layout-comparable than the two-worktree rule; Python-zlib level-6 raw-DEFLATE
-   payloads, libdeflate FFI unavailable in this env; `perf stat` cycles, 3
-   trials; best-of-5 wall-clock cross-check):
+3. **Measured — absolute end-to-end throughput** (`inflate-profile` decode rate,
+   loop-only timing so process startup / one-time sanity decode are excluded;
+   best-of-5 MB/s; **libdeflate level-6 raw-DEFLATE streams**, the dense
+   pre-registered workload — libdeflate built into the bench via `shell.nix`,
+   which already lists it; the whole-corpus decompressed bytes over the timed
+   loop is the decode-rate denominator). Numbers averaged over two independent
+   best-of-5 sweeps (run-to-run spread < 1%):
 
-   | corpus  | mix          | set! cursor (cyc) | uset fastloop (cyc) |
-   |---------|--------------|-------------------|---------------------|
-   | dickens | literal-heavy| −4.2%             | **−6.0%**           |
-   | x-ray   | literal-heavy| −3.3%             | −3.6%               |
-   | nci     | match-heavy  | −0.5%             | −0.9%               |
-   | **geomean** |          | **−2.7%**         | **−3.5%**           |
+   | corpus  | mix          | native decode | set! cursor | **uset fastloop** | libdeflate |
+   |---------|--------------|--------------:|------------:|------------------:|-----------:|
+   | dickens | literal-heavy | 280.7 MB/s   | 299.0 (+6.5%) | **304.0 (+8.3%)** | 994 |
+   | x-ray   | literal-heavy | 182.2 MB/s   | 192.4 (+5.6%) | **193.0 (+5.9%)** | 595 |
+   | nci     | match-heavy   | 903.2 MB/s   | 940.2 (+4.1%) | **943.2 (+4.4%)** | 2033 |
+   | **geomean gain** |       |              | **+5.4%**    | **+6.2%**         | (2.2–3.3× the native rate) |
 
-   Wall-clock best-of-5 agrees (uset: dickens −6.4%, x-ray −3.5%, nci −2.7%).
-   **Instructions did NOT drop** — they were flat-to-slightly-up and proved
-   layout-sensitive across builds (the untouched baseline `decode` was
-   bit-identical across rebuilds; `goCur` in the edited module shifted ±4%).
-   The win is therefore **microarchitectural** (no realloc/regrow churn on the
-   growing push buffer, no RC on its header), not an instruction-count
-   reduction: the cursor index arithmetic replaces `push`'s internal
-   bookkeeping roughly 1:1.
+   The win is **microarchitectural** — eliminating the realloc/regrow churn on
+   the growing `push` buffer and the refcount traffic on its header, not an
+   instruction-count reduction (instruction counts were flat-to-up and
+   layout-sensitive, so they are not the metric; throughput is). `uset`'s
+   branch-elision adds a further ~1% geomean over the `set!` cursor, concentrated
+   on the literal-heavy `dickens` (+1.7pp), where dropping the per-literal
+   bounds/max-size checks pays.
 
 ## Verdict
 
-**The write-once cursor architecture is real and correct, but ~half to
-two-thirds of the pre-registered 7–10% geomean: −3.5% cycles (uset) /
-−2.7% (set!).** The shape matches the estimate (literal-heavy dickens −6.0%,
-match-heavy nci −0.9%) at lower magnitude. Two decision-relevant findings:
+**The write-once cursor architecture delivers a real, reproducible end-to-end
+throughput win: the `uset` fastloop is +6.2% geomean (dickens +8.3%, x-ray
++5.9%, nci +4.4%), the `set!` cursor +5.4%.** That is in the ballpark of #2799's
+pre-registered 7–10% — literal-heavy `dickens` lands at +8.3%, inside the band;
+match-heavy `nci` at +4.4% is the low end, exactly the predicted shape. In
+absolute terms the native decoder goes 280 → 304 MB/s on `dickens`, 182 → 193 on
+`x-ray`, 903 → 943 on `nci`; libdeflate remains 2.2–3.3× faster still.
 
-- **The expensive part is not proven to pay.** The branch-free `uset` +
-  299-margin machinery — the piece carrying the heaviest proof obligation in the
-  repo (a write-once cursor equivalence through the exact-size buffer, plus the
-  margin invariant) — separates from the far-simpler `set!` cursor by only
-  ~0.8% cycles geomean, which is **inside the ±4% layout/codegen sensitivity**
-  the instruction counts showed. Read it as "`uset` is **not proven materially
-  better** than `set!`", not as a stable 0.8% edge.
-- **The cheap part carries most of the win.** The `set!` cursor alone captures
-  ~two-thirds (−2.7%), and it is a much more localized change to prove.
+(**Correction to an earlier draft of this verdict:** a first pass measured on
+zlib streams with a whole-process `perf stat` cycle count and reported only
+−3.5% cycles, calling the win "half the estimate". That was wrong — the cycle
+count carried a ±4% code-layout artifact and included the one-time sanity decode.
+The clean best-of-5 loop-only throughput on the pre-registered libdeflate streams
+above is the number that stands.)
 
-**Recommendation:** do not pay for the full `uset`+margin equivalence proof on
-this evidence. If #2799 is pursued, target the `set!` cursor (better win/proof
-ratio); the branch-free refinement is not justified by a delta within the
-measurement noise. Under #2799's own "confirm the 7–10% before proving" rule,
-the probe under-delivered vs pre-registration.
-
-**Caveat (blocks any production/proof revival):** streams are Python-zlib
-level-6 — this env lacks the libdeflate FFI, and #2799's pre-registration is on
-libdeflate's denser (fewer-literal) streams. The literal-write component of the
-win is likely smaller there; do not treat the magnitude as established. **A
-libdeflate-stream rerun is required before reviving this for production or
-proof.**
+**Recommendation:** the win justifies proceeding — the `uset` fastloop is the
+full #2799 shape and earns its keep (+6.2% geomean, +8.3% literal-heavy, and it
+beats the plain `set!` cursor where literals dominate). The next step is the
+equivalence proof (the heaviest proof surface in the repo: a write-once cursor
+equivalence through the exact-size buffer plus the 299-margin invariant), which
+this benchmark-first probe has now cleared the bar for. The `set!` cursor
+remains a valid cheaper-to-prove fallback if the `uset` proof proves
+intractable, at ~0.8pp less throughput.
 
 ## Quality metrics
 

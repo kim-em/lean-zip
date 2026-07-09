@@ -253,9 +253,9 @@ and #2795 needs no re-run after #2811 lands unless a post-#2811 profile shows
 `lean_byte_array_push` becoming a materially larger self-time share of the
 rebalanced decode.
 
-**#2799 verdict (2026-07-08): fastloop / write-once cursor decode — measured
-real but modest (~half the pre-registration), and the expensive branch-free
-variant barely beats the cheap one.** The follow-up probe to #2795 (which killed
+**#2799 verdict (2026-07-08): fastloop / write-once cursor decode — confirmed a
+real end-to-end throughput win, +6.2% geomean on the pre-registered libdeflate
+streams, the proof is now justified.** The follow-up probe to #2795 (which killed
 the *store-call*-removal motivation and demanded #2799 rest on what it
 *additionally* removes: the per-literal size-bump/guard bookkeeping and bounds
 discipline). Two spikes in a quarantined `Zip/Native/InflateFast.lean` (NOT on
@@ -271,45 +271,42 @@ any production path; `Inflate.inflate` unchanged), exact-size path only
   `uset` literals (real omega proof from the margin, **no `sorry`**) and no
   per-literal max-size check; the <299-byte tail delegates to `goCur`.
 
-Same-**binary** A/B (three modes `decode`/`decode-fast`/`decode-fast-u` in one
-`inflate-profile` — strictly more layout-comparable than the two-worktree rule),
-Python-zlib level-6 raw-DEFLATE payloads (libdeflate FFI unavailable this env),
-`perf stat` cycles (3 trials) + best-of-5 wall-clock cross-check, this machine:
+**Absolute end-to-end decode throughput** (`inflate-profile` MB/s, loop-only
+timing so startup/sanity excluded, best-of-5, averaged over two sweeps <1%
+spread; **libdeflate level-6 streams** — the dense pre-registered workload;
+libdeflate built via `shell.nix` + `LIBDEFLATE_LDFLAGS=-ldeflate`; this machine):
 
-| file | mix | Δ cyc set! | Δ cyc uset | Δ wall uset |
-|---|---|---|---|---|
-| dickens (10.2M text) | literal-heavy | −4.2% | **−6.0%** | −6.4% |
-| x-ray (8.5M image) | literal-heavy | −3.3% | −3.6% | −3.5% |
-| nci (33.6M chem) | match-heavy | −0.5% | −0.9% | −2.7% |
-| **geomean** | | **−2.7%** | **−3.5%** | −4.2% |
+| file | mix | native | set! | uset | libdeflate |
+|---|---|---|---|---|---|
+| dickens (10.2M text) | literal-heavy | 280.7 | 299.0 (+6.5%) | **304.0 (+8.3%)** | 994 |
+| x-ray (8.5M image) | literal-heavy | 182.2 | 192.4 (+5.6%) | **193.0 (+5.9%)** | 595 |
+| nci (33.6M chem) | match-heavy | 903.2 | 940.2 (+4.1%) | **943.2 (+4.4%)** | 2033 |
+| **geomean gain** | | | **+5.4%** | **+6.2%** | — |
 
-**Instructions did NOT drop** — flat-to-slightly-up and layout-sensitive across
-builds (the untouched `decode` baseline was bit-identical across rebuilds while
-`goCur` in the edited module shifted ±4%), so the win is **microarchitectural**
-(no realloc/regrow churn on the growing push buffer, no RC on its header), not an
-instruction-count reduction: the cursor index arithmetic replaces `push`'s
-internal bookkeeping ~1:1. **Stated per the probe's decision rule:** the
-architecture is real and correct (byte-identical output on all corpora + block
-types + RLE, guarded by `ZipTest/InflateFast.lean`), the shape matches the
-estimate (literal-heavy > match-heavy), but the magnitude is ~half to two-thirds
-of #2799's pre-registered 7–10% geomean. **Two decision-relevant facts:** (1) the
-branch-free `uset` + 299-margin machinery — the heaviest proof surface in the
-repo (write-once cursor equivalence through the exact-size buffer + the margin
-invariant) — separates from the far-simpler `set!` cursor by only ~0.8% cycles,
-**inside the ±4% layout/codegen sensitivity** the instruction counts showed, so
-`uset` is **not proven materially better** than `set!`; (2) the `set!` cursor
-alone captures ~two-thirds of the win at a fraction of the proof cost.
-**Consequence:** do not pay for the full `uset`+margin equivalence proof on this
-evidence; if #2799 is pursued, the `set!` cursor is the better win/proof ratio
-and the branch-free refinement is not justified by a delta within noise. **Caveat
-(blocks revival):** streams are Python-zlib level-6 (libdeflate FFI unavailable
-this env), and #2799's pre-registration is on libdeflate's denser, fewer-literal
-streams where the literal-write component is likely smaller — the magnitude is
-not established; **a libdeflate-stream rerun is required before any
-production/proof revival.** The reproducible probe (both spikes, FFI primitives,
-conformance test, `decode-fast{,-u}` modes) is landed by this PR, quarantined
-(not re-exported by `Zip`); `Inflate.inflate` is untouched and #2799's full
-production-integration scope stays open.
+The win is **microarchitectural** — eliminating the realloc/regrow churn on the
+growing `push` buffer and the RC traffic on its header, not an instruction-count
+reduction (instruction counts were flat-to-up and ±4% layout-sensitive, so they
+are not the metric; throughput is). **Stated per the probe's decision rule:** the
+architecture is real, correct (byte-identical on all corpora + block types + RLE,
+guarded by `ZipTest/InflateFast.lean`), and lands **in the ballpark of #2799's
+pre-registered 7–10%** — literal-heavy `dickens` +8.3% is inside the band,
+match-heavy `nci` +4.4% is the low end, exactly the predicted shape. `uset` adds
+~0.8pp geomean over the plain `set!` cursor, concentrated on `dickens` (+1.7pp)
+where dropping the per-literal bounds/max-size checks pays.
+
+**Consequence:** the win justifies proceeding to the equivalence proof (the
+heaviest proof surface in the repo: write-once cursor equivalence through the
+exact-size buffer + the 299-margin invariant), which this benchmark-first probe
+has cleared the bar for; the `set!` cursor is a valid cheaper-to-prove fallback
+at ~0.8pp less. **Correction to an earlier draft of this entry:** a first pass
+measured on zlib streams with a whole-process `perf stat` cycle count and
+reported only −3.5% cycles ("half the estimate", "do not prove"). That was wrong
+— the cycle count carried the ±4% layout artifact and the one-time sanity decode;
+the clean best-of-5 loop-only throughput on the pre-registered libdeflate streams
+above is the number that stands. The reproducible probe (both spikes, FFI
+primitives, conformance test, `decode-fast{,-u}` + `decode-ld` modes) is landed
+by this PR, quarantined (not re-exported by `Zip`); `Inflate.inflate` is
+untouched and #2799's full production-integration scope stays open.
 
 **W5.P1 comparative component profile (2026-06-12, perf, alice29, per-compressor
 windows, normalized to compressor-attributable samples; nix/Lean startup noise

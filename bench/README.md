@@ -303,14 +303,19 @@ the worktree, not your change.
 
 **Write-once cursor spike (#2799).** `inflate-profile` also has two spike modes,
 `decode-fast` (the `set!` cursor `Inflate.inflateFast`) and `decode-fast-u` (the
-branch-free `uset` fastloop `Inflate.inflateFastU`), with the same
+branch-free `uset` fastloop `Inflate.inflateFastU`), plus `decode-ld` (libdeflate's
+own decompressor as the absolute speed bar), all with the same
 `<payload> <origSize> <reps>` arguments. They exercise the write-once cursor
 decode from `Zip/Native/InflateFast.lean` (exact-size path — `origSize` must be
 the true decompressed length), and each asserts its output equals the reference
-`Inflate.inflate` once before the timed loop. Because all three modes live in one
-binary, an A/B across `decode` / `decode-fast` / `decode-fast-u` is strictly more
-layout-comparable than the two-worktree rule above — no separate builds. The
-#2799 verdict from this A/B is recorded in `plans/track-d-state.md`.
+`Inflate.inflate` once before the timed loop. Every mode now prints absolute
+throughput (MB/s over the decompressed bytes, only the loop timed), so a
+best-of-5 sweep gives end-to-end decode rates directly. Because all modes live in
+one binary, an A/B across `decode` / `decode-fast` / `decode-fast-u` is strictly
+more layout-comparable than the two-worktree rule above — no separate builds.
+Build with libdeflate enabled (`nix-shell` already lists it) for `compress` /
+`decode-ld`: `LIBDEFLATE_LDFLAGS=-ldeflate lake -R -d bench build inflate-profile`.
+The #2799 verdict from this A/B is recorded in `plans/track-d-state.md`.
 
 ## What the current snapshot shows
 
