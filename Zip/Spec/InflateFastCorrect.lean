@@ -360,7 +360,7 @@ the two write steps are bridged by `set!_extract_eq_push` /
 only gates; the tail is literally `goCur`). Lifting through `decodeStoredCur` /
 `decodeHuffmanCurTables` / `inflateLoopCur` yields the exact-size target below. -/
 
-open InflateBuf (goCur goTreeFreeU)
+open InflateBuf (goCur goTreeFreeU refill refill_corr consume_corr BufCorr)
 
 -- Force generation of the functional-induction principle for `goCur` so the
 -- `induction … using goCur.induct` below can resolve it.
@@ -579,6 +579,70 @@ theorem goCur_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Huf
                       (by rw [copyWithinAt_size, hadv]; omega)
                       (by rw [copyWithinAt_size]; exact hbuf) rf rp rb rc href
                       (by rw [copyWithinAt_size]; exact hroom)
+
+/-- **Huffman-block bridge.** One Huffman block decoded at a cursor
+    (`decodeHuffmanCurTables`, through `goCur`) re-represents the reference block
+    decode (`decodeHuffmanFastBufTables`, through `goTreeFreeU`): same refill,
+    same `BitReader` bookkeeping, and — by `goCur_eq` — the same produced bytes,
+    a prefix of the cursor buffer. Requires the addressability of `br.data` (so
+    both take the wide-buffer branch) and the loop's `BitReader` invariant. -/
+theorem decodeHuffmanCurTables_eq (br : ZipCommon.BitReader) (buf : ByteArray) (outPos : Nat)
+    (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode) (maxOut : Nat)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits)
+    (hds : br.data.size < USize.size) (hwf : br.bitOff < 8) (hbp : br.bitPos ≤ br.data.size * 8)
+    (hout : outPos ≤ buf.size) (hbuf : buf.size < USize.size)
+    (rf : ByteArray) (rbr : ZipCommon.BitReader)
+    (href : InflateBuf.decodeHuffmanFastBufTables br (buf.extract 0 outPos)
+              litTable distTable litLD distLD maxOut hlp = .ok (rf, rbr))
+    (hroom : rf.size ≤ buf.size) :
+    ∃ cf, InflateBuf.decodeHuffmanCurTables br buf outPos
+            litTable distTable litLD distLD maxOut hlp = .ok (cf, rf.size, rbr)
+          ∧ cf.extract 0 rf.size = rf := by
+  have hos : (buf.extract 0 outPos).size = outPos := by rw [ByteArray.size_extract]; omega
+  have houtsz : outPos < USize.size := Nat.lt_of_le_of_lt hout hbuf
+  have hsz : br.data.size.toUSize.toNat = br.data.size := InflateBuf.toUSize_toNat_of_lt hds
+  -- Buffer invariant after the entry refill, giving the `pos ≤ size` bound `goCur_eq` needs.
+  have hbpe : br.bitPos = br.pos * 8 + br.bitOff := rfl
+  have hposle : br.pos ≤ br.data.size := by omega
+  have hbc0 : BufCorr br.data (br.pos * 8) br.pos 0 0 :=
+    ⟨by omega, hposle, by omega, by simp, fun j hj => absurd hj (Nat.not_lt_zero j)⟩
+  rcases hrf : refill br.data br.pos 0 0 with ⟨pos0, bitBuf0, cnt0⟩
+  obtain ⟨hbc1, hr1⟩ := refill_corr hbc0 hrf
+  have hboff : br.bitOff ≤ cnt0 := by
+    rcases hr1 with h56 | hpe
+    · omega
+    · have hs := hbc1.span; rw [hpe] at hs; omega
+  have hbc2 := consume_corr hbc1 hboff (by omega)
+  have hpos0le : pos0 ≤ br.data.size := hbc2.posLe
+  have hpos0sz : pos0 < USize.size := Nat.lt_of_le_of_lt hpos0le hds
+  have hrfsz : rf.size < USize.size := Nat.lt_of_le_of_lt hroom hbuf
+  -- Unfold both decoders through the shared refill and the wide-buffer branch.
+  rw [InflateBuf.decodeHuffmanFastBufTables, hrf] at href
+  rw [InflateBuf.decodeHuffmanCurTables, hrf]
+  simp only [hsz, ↓reduceDIte] at href ⊢
+  -- The reference's `Except.map` of `goTreeFreeU`: it must be `.ok`.
+  cases hgtf : goTreeFreeU litTable distTable litLD distLD 15 br.data maxOut
+      pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize
+      (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _) hlp (buf.extract 0 outPos) with
+  | error e =>
+    rw [hgtf] at href; simp only [Except.map, bind, Except.bind, reduceCtorEq] at href
+  | ok res =>
+    obtain ⟨o, p, b, c⟩ := res
+    rw [hgtf] at href
+    simp only [Except.map, bind, Except.bind, Except.ok.injEq, Prod.mk.injEq] at href
+    obtain ⟨rfl, rfl⟩ := href
+    -- Apply the cursor bisimulation to this block's tree-free decode.
+    have hgc := goCur_eq litTable distTable litLD distLD 15 br.data maxOut hds hlp
+      pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize buf outPos.toUSize
+      (by rw [InflateBuf.toUSize_toNat_of_lt hpos0sz]; exact hpos0le)
+      (by rw [InflateBuf.toUSize_toNat_of_lt houtsz]; exact hout) hbuf
+      o p b c
+      (by rw [InflateBuf.toUSize_toNat_of_lt houtsz]; exact hgtf) hroom
+    obtain ⟨cf, hcf, hext⟩ := hgc
+    refine ⟨cf, ?_, hext⟩
+    rw [hcf]
+    simp only [Except.map, bind, Except.bind, Except.ok.injEq, Prod.mk.injEq,
+      InflateBuf.toUSize_toNat_of_lt hrfsz, and_self]
 
 /-- **Target (issue #2799): the write-once cursor decoder agrees with the verified
     decoder on the exact-size path.** Proof staged: `goCur_eq` bisimulation, the
