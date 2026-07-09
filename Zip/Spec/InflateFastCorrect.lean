@@ -26,15 +26,22 @@ Both need a **big-enough buffer** (`buf.size ≥ final reference size`), which i
 carried through the induction and discharged at each step by the reference's
 monotone output growth (`goTreeFree_size_mono`).
 
-Status: **work in progress** (issue #2799). Both write bridges
-(`set!_extract_eq_push`, `copyWithinAt_extract_eq_copyLoop`) and the reference
-monotonicity lemma (`goTreeFree_size_mono`) are proved, with all their
-supporting `copyWithinAtGo` content lemmas and `getElem!` infrastructure. The
-remaining `sorry` is the top-level target `inflateFast_eq`, which needs the
-`goCur` bisimulation (a 10-case induction threading the output invariant and
-applying the two write bridges at the write steps) and the block-loop lift. This
-file is standalone — not imported by `Zip` — so `Inflate.inflate` and CI stay
-`sorry`-free.
+Status: **work in progress** (issue #2799). Proved, `sorry`-free:
+* the write bridges `set!_extract_eq_push` / `copyWithinAt_extract_eq_copyLoop`
+  and reference monotonicity `goTreeFree_size_mono`, with all supporting
+  `copyWithinAtGo` content lemmas and `getElem!` infrastructure;
+* the **core bisimulation `goCur_eq`** — the write-once cursor decode agrees
+  with `goTreeFreeU` — a 10-case functional induction over `goCur.induct`;
+* both **block bridges**: `decodeHuffmanCurTables_eq` (Huffman blocks, via
+  `goCur_eq`) and `decodeStoredCur_eq` (stored blocks, via the `storedCopyLoop`
+  content lemmas).
+
+The single remaining `sorry` is the top-level `inflateFast_eq`, which now needs
+only the block-loop lift: a bisimulation of `inflateLoopCur` against
+`inflateLoopTreeFree` (`= Inflate.inflate` by `inflateRaw_eq_loop`) applying the
+two block bridges, then instantiation with the presized buffer + exact-size
+contract. This file is standalone — not imported by `Zip` — so `Inflate.inflate`
+and CI stay `sorry`-free.
 -/
 
 namespace Zip.Native
